@@ -192,7 +192,7 @@ func TestSettleTaskExternalIDRequiresExternalIDPredicate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("release: %v", err)
 	}
-	if !released {
+	if released == nil {
 		t.Fatal("release should report the identity was held")
 	}
 
@@ -228,12 +228,18 @@ func TestReleaseTaskExternalID(t *testing.T) {
 		t.Fatalf("settle: %v", err)
 	}
 
-	ok, err := repo.ReleaseTaskExternalID(ctx, "ws-release", "ext-1")
+	released, err := repo.ReleaseTaskExternalID(ctx, "ws-release", "ext-1")
 	if err != nil {
 		t.Fatalf("release: %v", err)
 	}
-	if !ok {
+	if released == nil {
 		t.Fatal("release should report the identity was held")
+	}
+	if released.ID != task.ID {
+		t.Fatalf("released.ID = %s, want %s", released.ID, task.ID)
+	}
+	if !released.UpdatedAt.After(task.UpdatedAt) {
+		t.Fatalf("released.UpdatedAt = %v, want after original create time %v — release must bump updated_at like any other task mutation", released.UpdatedAt, task.UpdatedAt)
 	}
 
 	reloaded, err := repo.GetTask(ctx, task.ID)
@@ -255,8 +261,8 @@ func TestReleaseTaskExternalID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second release: %v", err)
 	}
-	if again {
-		t.Fatal("releasing an identity nothing holds should report false")
+	if again != nil {
+		t.Fatal("releasing an identity nothing holds should report nil, not a task")
 	}
 }
 

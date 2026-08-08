@@ -137,9 +137,10 @@ type TaskRepository interface {
 	// whether a row was updated.
 	SettleTaskExternalID(ctx context.Context, taskID, externalID string, settledAt time.Time) (bool, error)
 	// ReleaseTaskExternalID clears external_id and external_id_settled_at on
-	// the task holding (workspaceID, externalID), without deleting the task.
-	// Returns whether a task held the identity.
-	ReleaseTaskExternalID(ctx context.Context, workspaceID, externalID string) (bool, error)
+	// the task holding (workspaceID, externalID), without deleting the task,
+	// and bumps updated_at. Returns the task as it exists immediately after
+	// the update, or nil if no task held the identity.
+	ReleaseTaskExternalID(ctx context.Context, workspaceID, externalID string) (*models.Task, error)
 }
 
 // TaskStatusSummaryRepository stores the bounded task-level projection used by

@@ -135,17 +135,19 @@ func (r *idempotentCreateTaskRepo) SettleTaskExternalID(_ context.Context, taskI
 	return true, nil
 }
 
-func (r *idempotentCreateTaskRepo) ReleaseTaskExternalID(_ context.Context, workspaceID, externalID string) (bool, error) {
+func (r *idempotentCreateTaskRepo) ReleaseTaskExternalID(_ context.Context, workspaceID, externalID string) (*models.Task, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, task := range r.tasks {
 		if task.WorkspaceID == workspaceID && task.ExternalID == externalID {
 			task.ExternalID = ""
 			task.ExternalIDSettledAt = nil
-			return true, nil
+			task.UpdatedAt = time.Now().UTC()
+			copied := *task
+			return &copied, nil
 		}
 	}
-	return false, nil
+	return nil, nil
 }
 
 func (r *idempotentCreateTaskRepo) GetWorkflow(_ context.Context, id string) (*models.Workflow, error) {

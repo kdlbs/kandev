@@ -93,17 +93,48 @@ func (r *Repository) SettleTaskExternalID(ctx context.Context, taskID, externalI
 
 // ReleaseTaskExternalID clears external_id and external_id_settled_at on the
 // task holding (workspaceID, externalID), without deleting or otherwise
-// modifying the task. Returns whether a task held the identity.
-func (r *Repository) ReleaseTaskExternalID(ctx context.Context, workspaceID, externalID string) (bool, error) {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE tasks
-		   SET external_id = NULL, external_id_settled_at = NULL
-		 WHERE workspace_id = ?
-		   AND external_id = ?
-	`), workspaceID, externalID)
+// modifying the task, and bumps updated_at like any other task mutation
+// (apps/backend/AGENTS.md, "Task lifecycle events" — a mutation must be
+// visible to the caller so it can publish task.updated). Returns the task as
+// it exists immediately after the update, or nil if no task held the
+// identity. Runs in a transaction: the identity-scoped SELECT and the
+// id-scoped UPDATE must observe the same row, or a concurrent release/reuse
+// between them could silently update a different task than the one just
+// identified.
+func (r *Repository) ReleaseTaskExternalID(ctx context.Context, workspaceID, externalID string) (*models.Task, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	rows, err := result.RowsAffected()
-	return rows > 0, err
+	defer func() { _ = tx.Rollback() }()
+
+	var taskID string
+	err = tx.QueryRowContext(ctx, r.db.Rebind(
+		`SELECT id FROM tasks WHERE workspace_id = ? AND external_id = ?`),
+		workspaceID, externalID).Scan(&taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks
+		   SET external_id = NULL, external_id_settled_at = NULL, updated_at = ?
+		 WHERE id = ?
+	`), time.Now().UTC(), taskID); err != nil {
+		return nil, err
+	}
+
+	row := tx.QueryRowContext(ctx, r.db.Rebind(
+		`SELECT `+taskSelectColumns("t")+` FROM tasks t WHERE t.id = ?`), taskID)
+	task, err := r.scanSingleTask(row)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return task, nil
 }

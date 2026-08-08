@@ -86,7 +86,12 @@ func (s *Service) GetTaskByExternalID(ctx context.Context, workspaceID, rawExter
 	if err != nil {
 		return nil, err
 	}
-	return s.tasks.GetTaskByExternalID(ctx, workspaceID, externalID)
+	task, err := s.tasks.GetTaskByExternalID(ctx, workspaceID, externalID)
+	if err != nil {
+		return nil, err
+	}
+	s.hydrateTaskRelations(ctx, task)
+	return task, nil
 }
 
 // ReleaseTaskExternalID is the REST release route's service-level
@@ -94,7 +99,10 @@ func (s *Service) GetTaskByExternalID(ctx context.Context, workspaceID, rawExter
 // deleting the task holding it (docs/specs/tasks/external-id-idempotency/spec.md,
 // "The one unsafe thing a caller can do" — this is for a human who has
 // determined the task is abandoned, not an automated retry loop). Returns
-// whether a task held the identity.
+// whether a task held the identity. Publishes task.updated on success, like
+// every other task mutation (apps/backend/AGENTS.md, "Task lifecycle
+// events") — external_id is part of the task DTO and lifecycle-event
+// contract, so a WS-connected client would otherwise keep a stale copy.
 func (s *Service) ReleaseTaskExternalID(ctx context.Context, workspaceID, rawExternalID string) (bool, error) {
 	if err := s.authorizeWorkspaceID(ctx, workspaceID); err != nil {
 		return false, err
@@ -103,7 +111,15 @@ func (s *Service) ReleaseTaskExternalID(ctx context.Context, workspaceID, rawExt
 	if err != nil {
 		return false, err
 	}
-	return s.tasks.ReleaseTaskExternalID(ctx, workspaceID, externalID)
+	task, err := s.tasks.ReleaseTaskExternalID(ctx, workspaceID, externalID)
+	if err != nil {
+		return false, err
+	}
+	if task == nil {
+		return false, nil
+	}
+	s.PublishTaskUpdated(ctx, task)
+	return true, nil
 }
 
 // SettleExternalID performs the create sequence's step 7 (settlement) for a
@@ -140,5 +156,6 @@ func (s *Service) SettleExternalID(ctx context.Context, taskID, externalID strin
 	if err != nil {
 		return false, nil, err
 	}
+	s.hydrateTaskRelations(ctx, survivor)
 	return false, survivor, nil
 }

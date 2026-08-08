@@ -310,6 +310,7 @@ func (s *Service) findTaskByExternalIDIfPresent(ctx context.Context, workspaceID
 	task, lookupErr := s.tasks.GetTaskByExternalID(ctx, workspaceID, externalID)
 	switch {
 	case lookupErr == nil:
+		s.hydrateTaskRelations(ctx, task)
 		return true, CreateTaskResult{Task: task, Outcome: foundOutcomeFor(task)}, nil
 	case !errors.Is(lookupErr, taskrepo.ErrTaskNotFound):
 		return true, CreateTaskResult{}, lookupErr
@@ -340,6 +341,7 @@ func (s *Service) recoverFoundTaskAfterInsertFailure(ctx context.Context, worksp
 	if lookupErr != nil {
 		return CreateTaskResult{}, false
 	}
+	s.hydrateTaskRelations(ctx, found)
 	return CreateTaskResult{Task: found, Outcome: foundOutcomeFor(found)}, true
 }
 
@@ -1334,17 +1336,25 @@ func (s *Service) GetTask(ctx context.Context, id string) (*models.Task, error) 
 	if err != nil {
 		return nil, err
 	}
+	s.hydrateTaskRelations(ctx, task)
+	return task, nil
+}
 
-	// Load task repositories
-	repos, err := s.taskRepos.ListTaskRepositories(ctx, id)
+// hydrateTaskRelations populates the relations every task read is expected
+// to carry — repositories and workspace folders — that a raw
+// repository-layer task struct does not include. Callers that bypass GetTask
+// (the create sequence's step-3 lookup, GetTaskByExternalID, and the
+// settlement zero-row survivor re-read) must call this explicitly, or a
+// retry/lookup silently returns a task missing fields a fresh GetTask would
+// have populated.
+func (s *Service) hydrateTaskRelations(ctx context.Context, task *models.Task) {
+	repos, err := s.taskRepos.ListTaskRepositories(ctx, task.ID)
 	if err != nil {
 		s.logger.Error("failed to list task repositories", zap.Error(err))
 	} else {
 		task.Repositories = repos
 	}
 	s.hydrateTaskWorkspaceFolders(ctx, task)
-
-	return task, nil
 }
 
 // UpdateTask updates an existing task and publishes a task.updated event

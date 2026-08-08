@@ -478,9 +478,9 @@ func (r *phase4TaskRepo) SettleTaskExternalID(context.Context, string, string, t
 	r.panicNotUsed("SettleTaskExternalID")
 	return false, nil
 }
-func (r *phase4TaskRepo) ReleaseTaskExternalID(context.Context, string, string) (bool, error) {
+func (r *phase4TaskRepo) ReleaseTaskExternalID(context.Context, string, string) (*models.Task, error) {
 	r.panicNotUsed("ReleaseTaskExternalID")
-	return false, nil
+	return nil, nil
 }
 
 func TestWorkspacePolicy_MetadataBlock(t *testing.T) {
