@@ -122,6 +122,9 @@ const (
 	// MetaKeyAgentTitleOwnerSessionID records the one session that atomically
 	// claimed the first-turn title handoff for a pending task.
 	MetaKeyAgentTitleOwnerSessionID = "agent_title_owner_session_id"
+	// MetaKeyPortForwardingEnabled controls whether a task exposes its
+	// session port-forwarding controls in the task UI.
+	MetaKeyPortForwardingEnabled = "port_forwarding_enabled"
 )
 
 // IsAgentTitlePending reports whether task metadata contains the durable
@@ -315,10 +318,13 @@ const SessionMetaKeyPendingStepCompletion = "pending_step_completion_signal"
 const SessionMetaKeyLastAgentError = "last_agent_error"
 
 // LastAgentError is persisted under TaskSession.Metadata[SessionMetaKeyLastAgentError].
+// RemediationURL is only ever set from an adapter-validated provider
+// diagnostic; it is never reconstructed from the error message.
 type LastAgentError struct {
 	Message          string     `json:"message"`
 	OccurredAt       time.Time  `json:"occurred_at"`
 	AgentExecutionID string     `json:"agent_execution_id,omitempty"`
+	RemediationURL   string     `json:"remediation_url,omitempty"`
 	DismissedAt      *time.Time `json:"dismissed_at,omitempty"`
 }
 

@@ -112,6 +112,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-02-explicit-user-cancel-completion | [Explicit User Cancellation May Complete a Workflow Step](2026-08-02-explicit-user-cancel-completion.md) | accepted | workflow | 2026-08-02 |
 | 2026-08-02-single-owner-agent-task-titles | [Assign Agent Task Titles to One Session](2026-08-02-single-owner-agent-task-titles.md) | accepted | backend, frontend, protocol, workflow | 2026-08-02 |
 | 2026-08-02-agent-terminal-diagnostics-over-stderr | [Capture Agent Terminal Diagnostics From Managed Stderr](2026-08-02-agent-terminal-diagnostics-over-stderr.md) | accepted | backend, frontend, protocol, security | 2026-08-02 |
+| 2026-08-07-allowlisted-provider-action-links | [Allowlisted Provider Action Links](2026-08-07-allowlisted-provider-action-links.md) | accepted | backend, frontend, protocol, security | 2026-08-07 |
 | 2026-08-02-class-aware-git-subprocess-admission | [Class-Aware Git Subprocess Admission](2026-08-02-class-aware-git-subprocess-admission.md) | accepted | backend, agentctl, observability | 2026-08-02 |
 | 2026-08-02-isolate-replaceable-session-stream-traffic | [Isolate Replaceable Session Stream Traffic](2026-08-02-isolate-replaceable-session-stream-traffic.md) | accepted | backend, frontend, protocol | 2026-08-02 |
 | 2026-08-03-backend-owned-cancellation-progress | [Keep Cancellation Progress Backend Owned](2026-08-03-backend-owned-cancellation-progress.md) | accepted | backend, frontend, protocol | 2026-08-03 |
@@ -127,4 +128,5 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-05-server-owned-quick-terminal-descriptors | [Server-Owned Quick Terminal Descriptors](2026-08-05-server-owned-quick-terminal-descriptors.md) | accepted | backend, frontend, protocol, security | 2026-08-05 |
 | 2026-08-05-nested-submodules-as-repository-scopes | [Model Nested Submodules as Repository Scopes](2026-08-05-nested-submodules-as-repository-scopes.md) | accepted | backend, frontend, protocol | 2026-08-05 |
 | 2026-08-05-homebrew-remote-helper-audit | [Preserve Remote Helpers in Homebrew Installs](2026-08-05-homebrew-remote-helper-audit.md) | accepted | infra, workflow | 2026-08-05 |
+| 2026-08-07-model-aware-provider-capability-resolution | [Model-aware provider capability resolution](2026-08-07-model-aware-provider-capability-resolution.md) | accepted | backend, frontend, protocol | 2026-08-07 |
 | 2026-08-07-claude-allowlist-label-bridge | [Use the Claude Allowlist as a Trusted Preview Gate](2026-08-07-claude-allowlist-label-bridge.md) | accepted | infra, workflow, security | 2026-08-07 |

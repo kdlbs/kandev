@@ -196,7 +196,35 @@ func (b *TaskEventBroadcaster) logSessionStateMetadata(action, sessionID string,
 	b.logger.Debug("received session.state_changed with metadata",
 		zap.String("action", action),
 		zap.String("session_id", sessionID),
-		zap.Any("metadata", metadata))
+		// RemediationURL is deliberately excluded from the wholesale metadata
+		// echo (ADR-2026-08-07-allowlisted-provider-action-links): the link is
+		// a user-visible destination, not a log field.
+		zap.Any("metadata", redactRemediationURL(metadata)))
+}
+
+// redactRemediationURL returns a copy of the metadata with the
+// last_agent_error.remediation_url key removed, so the debug echo never
+// mutates the event payload that is broadcast to clients.
+func redactRemediationURL(metadata interface{}) interface{} {
+	m, ok := metadata.(map[string]interface{})
+	if !ok {
+		return metadata
+	}
+	lastErr, ok := m["last_agent_error"].(map[string]interface{})
+	if !ok {
+		return metadata
+	}
+	copyLastErr := make(map[string]interface{}, len(lastErr))
+	for key, value := range lastErr {
+		copyLastErr[key] = value
+	}
+	delete(copyLastErr, "remediation_url")
+	copyMetadata := make(map[string]interface{}, len(m))
+	for key, value := range m {
+		copyMetadata[key] = value
+	}
+	copyMetadata["last_agent_error"] = copyLastErr
+	return copyMetadata
 }
 
 func (b *TaskEventBroadcaster) routeBroadcast(

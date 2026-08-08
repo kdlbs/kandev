@@ -13,7 +13,7 @@ func runInstalled(ctx context.Context, opts Options) int {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 2
 	}
-	ports, err := pickPorts(backendPort)
+	ports, err := pickPorts(backendPort, backendPortSource(opts))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1

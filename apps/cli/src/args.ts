@@ -1,5 +1,7 @@
 export type Command = "run" | "dev" | "start";
 
+export type BackendPortSource = "--port" | "KANDEV_BACKEND_PORT" | "KANDEV_PORT";
+
 export type CliOptions = {
   command: Command;
   runtimeVersion?: string;
@@ -111,6 +113,7 @@ function parsePort(raw: string, flag: string): number {
 
 export type ResolvedPorts = {
   backendPort?: number;
+  backendPortSource?: BackendPortSource;
   webPort?: number;
 };
 
@@ -119,9 +122,27 @@ export function resolvePorts(options: CliOptions, env: NodeJS.ProcessEnv): Resol
   if (options.webPort !== undefined && options.command !== "dev") {
     throw new ParseError("--web-internal-port only applies to dev mode");
   }
+
+  let backendPort: number | undefined;
+  let backendPortSource: BackendPortSource | undefined;
+  if (options.backendPort !== undefined) {
+    backendPort = options.backendPort;
+    backendPortSource = "--port";
+  } else {
+    backendPort = envPort(env, "KANDEV_BACKEND_PORT");
+    if (backendPort !== undefined) {
+      backendPortSource = "KANDEV_BACKEND_PORT";
+    } else {
+      backendPort = envPort(env, "KANDEV_PORT");
+      if (backendPort !== undefined) {
+        backendPortSource = "KANDEV_PORT";
+      }
+    }
+  }
+
   return {
-    backendPort:
-      options.backendPort ?? envPort(env, "KANDEV_BACKEND_PORT") ?? envPort(env, "KANDEV_PORT"),
+    backendPort,
+    ...(backendPortSource ? { backendPortSource } : {}),
     webPort:
       options.command === "dev" ? (options.webPort ?? envPort(env, "KANDEV_WEB_PORT")) : undefined,
   };

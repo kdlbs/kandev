@@ -79,6 +79,10 @@ func (c *NoopClient) ListPipelines(context.Context, string, string) ([]Pipeline,
 	return nil, ErrNoClient
 }
 
+func (c *NoopClient) ListPipelineJobs(context.Context, string, int64) ([]PipelineJob, error) {
+	return nil, ErrNoClient
+}
+
 func (c *NoopClient) GetMRFeedback(context.Context, string, int) (*MRFeedback, error) {
 	return nil, ErrNoClient
 }

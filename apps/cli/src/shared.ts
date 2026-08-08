@@ -6,10 +6,12 @@
  */
 
 import type { ChildProcess } from "node:child_process";
+import crypto from "node:crypto";
+import type { BackendPortSource } from "./args";
 import os from "node:os";
 
 import { DEFAULT_AGENTCTL_PORT, DEFAULT_BACKEND_PORT, DEFAULT_WEB_PORT } from "./constants";
-import { pickAvailablePort } from "./ports";
+import { assertPortAvailable, pickAvailablePortExcluding } from "./ports";
 import { createProcessSupervisor } from "./process";
 
 export type PortConfig = {
@@ -19,17 +21,41 @@ export type PortConfig = {
   backendUrl: string;
 };
 
+export type PortSelection = {
+  backendPort?: number;
+  backendPortSource?: BackendPortSource;
+  webPort?: number;
+};
+
 /**
  * Picks available ports for all services, using provided values or finding free ports.
  *
- * @param backendPort - Optional preferred backend port
- * @param webPort - Optional preferred web port
+ * @param options - Optional preferred service ports and backend-port source
+ * @param options.backendPort - Optional preferred backend port
+ * @param options.webPort - Optional preferred web port
  * @returns Resolved ports for all services
  */
-export async function pickPorts(backendPort?: number, webPort?: number): Promise<PortConfig> {
-  const resolvedBackendPort = backendPort ?? (await pickAvailablePort(DEFAULT_BACKEND_PORT));
-  const resolvedWebPort = webPort ?? (await pickAvailablePort(DEFAULT_WEB_PORT));
-  const agentctlPort = await pickAvailablePort(DEFAULT_AGENTCTL_PORT);
+export async function pickPorts({
+  backendPort,
+  backendPortSource,
+  webPort,
+}: PortSelection = {}): Promise<PortConfig> {
+  if (backendPort !== undefined) {
+    await assertPortAvailable(backendPort, backendPortSource);
+  }
+  const selectedPorts = new Set<number>();
+  const resolvedBackendPort =
+    backendPort ?? (await pickAvailablePortExcluding(DEFAULT_BACKEND_PORT, selectedPorts));
+  selectedPorts.add(resolvedBackendPort);
+
+  const resolvedWebPort =
+    webPort ?? (await pickAvailablePortExcluding(DEFAULT_WEB_PORT, selectedPorts));
+  if (selectedPorts.has(resolvedWebPort)) {
+    throw new Error(`Web port ${resolvedWebPort} conflicts with another selected service port`);
+  }
+  selectedPorts.add(resolvedWebPort);
+
+  const agentctlPort = await pickAvailablePortExcluding(DEFAULT_AGENTCTL_PORT, selectedPorts);
 
   return {
     backendPort: resolvedBackendPort,
@@ -39,9 +65,18 @@ export async function pickPorts(backendPort?: number, webPort?: number): Promise
   };
 }
 
-export async function pickBackendPorts(backendPort?: number): Promise<PortConfig> {
-  const resolvedBackendPort = backendPort ?? (await pickAvailablePort(DEFAULT_BACKEND_PORT));
-  const agentctlPort = await pickAvailablePort(DEFAULT_AGENTCTL_PORT);
+export async function pickBackendPorts({
+  backendPort,
+  backendPortSource,
+}: Pick<PortSelection, "backendPort" | "backendPortSource"> = {}): Promise<PortConfig> {
+  if (backendPort !== undefined) {
+    await assertPortAvailable(backendPort, backendPortSource);
+  }
+  const selectedPorts = new Set<number>();
+  const resolvedBackendPort =
+    backendPort ?? (await pickAvailablePortExcluding(DEFAULT_BACKEND_PORT, selectedPorts));
+  selectedPorts.add(resolvedBackendPort);
+  const agentctlPort = await pickAvailablePortExcluding(DEFAULT_AGENTCTL_PORT, selectedPorts);
 
   return {
     backendPort: resolvedBackendPort,
@@ -60,6 +95,8 @@ export type BackendEnvOptions = {
   webProxy?: boolean;
   /** Additional environment variables to merge */
   extra?: Record<string, string>;
+  /** Health token owned by the launcher for this backend process */
+  healthToken?: string;
 };
 
 /**
@@ -69,7 +106,14 @@ export type BackendEnvOptions = {
  * @returns Environment object for the backend process
  */
 export function buildBackendEnv(options: BackendEnvOptions): NodeJS.ProcessEnv {
-  const { ports, logLevel, consoleLogLevel = "warn", webProxy = true, extra } = options;
+  const {
+    ports,
+    logLevel,
+    consoleLogLevel = "warn",
+    webProxy = true,
+    extra,
+    healthToken,
+  } = options;
   if (webProxy && ports.webPort === undefined) {
     throw new Error("webProxy requires a web port");
   }
@@ -81,6 +125,7 @@ export function buildBackendEnv(options: BackendEnvOptions): NodeJS.ProcessEnv {
     ...(logLevel ? { KANDEV_LOG_LEVEL: logLevel } : {}),
     KANDEV_CONSOLE_LOG_LEVEL: consoleLogLevel,
     ...extra,
+    KANDEV_DESKTOP_HEALTH_TOKEN: healthToken ?? crypto.randomBytes(32).toString("hex"),
   };
   if (!webProxy) {
     delete env.KANDEV_WEB_INTERNAL_URL;

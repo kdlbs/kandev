@@ -50,6 +50,7 @@ Product-wide capabilities that are not tied to a single feature area.
 | [git-subprocess-admission](platform/git-subprocess-admission.md) | building |
 | [bounded-task-status-delivery](platform/bounded-task-status-delivery.md) | approved |
 | [diagnostic-logging](platform/diagnostic-logging.md) | approved |
+| [health-endpoint-version](health-endpoint-version/spec.md) | building |
 
 ## tasks/ — task & workflow model
 
@@ -100,6 +101,7 @@ Roles, governance gates, and granular permissions that apply across human users 
 |---|---|
 | [runtime-updates](agents/runtime-updates.md) | approved |
 | [profile-disable](agents/profile-disable.md) | draft |
+| [dynamic-provider-options](agents/dynamic-provider-options.md) | shipped |
 | [roles](agents/roles.md) | shipped |
 | [governance](agents/governance.md) | shipped |
 | [granular-permissions](agents/granular-permissions.md) | draft |
@@ -151,6 +153,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [empty-turn-notice](ui/empty-turn-notice.md) | shipped |
 | [acp-shell-command-output](ui/acp-shell-command-output.md) | shipped |
 | [acp-model-configuration-summary](ui/acp-model-configuration-summary.md) | shipped |
+| [context-window-unmeasured-state](ui/context-window-unmeasured-state.md) | building |
 | [review-file-status](ui/review-file-status.md) | building |
 | [submodule-review](ui/submodule-review.md) | shipped |
 | [review-markdown-preview](ui/review-markdown-preview.md) | draft |
@@ -177,6 +180,8 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [mobile-task-navigation](ui/mobile-task-navigation.md) | shipped |
 | [adaptive-kanban](ui/adaptive-kanban.md) | shipped |
 | [task-layout-profiles](ui/task-layout-profiles.md) | draft |
+| [port-forwarding-discovery](ui/port-forwarding-discovery.md) | building |
+| [port-proxy-browser-panel](port-proxy-browser-panel/spec.md) | shipped |
 | [task-surface-refresh](ui/task-surface-refresh.md) | draft |
 | [walkthrough-navigation-layout](walkthrough-navigation-layout/spec.md) | shipped |
 | [walkthrough-feedback-controls](walkthrough-feedback-controls/spec.md) | shipped |
@@ -224,6 +229,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [homebrew-core](homebrew-core/spec.md) | building |
 | [native-kandev-cli](native-kandev-cli/spec.md) | draft |
 | [desktop-tauri-app](desktop-tauri-app/spec.md) | shipped |
+| [port-collision-safety](port-collision-safety/spec.md) | building |
 | [lsp-file-intelligence](lsp-file-intelligence/spec.md) | building |
 | [public-share-links](public-share-links/spec.md) | draft |
 | [ssh-executor](ssh-executor/spec.md) | draft |

@@ -40,7 +40,7 @@ jobs:
 
     steps:
       - name: Checkout PR head
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 1
 
@@ -89,7 +89,7 @@ jobs:
 
     steps:
       - name: Add automatic fork approval labels
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const labels = ['safe-to-review', 'safe-to-test'];
@@ -125,7 +125,7 @@ jobs:
 
     steps:
       - name: Checkout PR head
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           # pull_request_target defaults to the base ref; explicitly check out
           # the PR head through the base repository's pull ref. Keeping origin

@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/pkg/agent"
 )
 
 func (c *Controller) ListDiscovery(ctx context.Context) (*dto.ListDiscoveryResponse, error) {
@@ -199,16 +200,15 @@ func buildLoginCommandDTO(ag agents.Agent) *dto.LoginCommandDTO {
 }
 
 // buildModelConfigFromHostUtility reads cached ACP probe data for the agent
-// type and produces a ModelConfigDTO with models, modes, and status. Agents
-// not in the probe cache (e.g. the mock agent used in E2E tests, which
-// doesn't speak ACP through its binary) fall back to `SupportsDynamicModels:
-// false` with an empty model list — callers render the profile's stored
-// model as a plain string rather than offering a dropdown.
+// type and produces a ModelConfigDTO with models, modes, and status. The
+// capability cache can be empty while the asynchronous host-utility probe
+// is still starting, so the dynamic-support flag comes from the registered
+// agent capability rather than from cache presence.
 func (c *Controller) buildModelConfigFromHostUtility(agentID string) dto.ModelConfigDTO {
 	// Always initialize slices so JSON marshals as [] not null — the
 	// frontend uses .some()/.find() on these without null checks.
 	cfg := dto.ModelConfigDTO{
-		SupportsDynamicModels: false,
+		SupportsDynamicModels: c.agentSupportsDynamicModelConfig(agentID),
 		AvailableModels:       []dto.ModelEntryDTO{},
 		AvailableModes:        []dto.ModeEntryDTO{},
 	}
@@ -252,6 +252,25 @@ func (c *Controller) buildModelConfigFromHostUtility(agentID string) dto.ModelCo
 		})
 	}
 	return cfg
+}
+
+func (c *Controller) agentSupportsDynamicModelConfig(agentID string) bool {
+	if c.agentRegistry == nil {
+		return false
+	}
+	ag, ok := c.agentRegistry.Get(agentID)
+	if !ok {
+		return false
+	}
+	ia, ok := ag.(agents.InferenceAgent)
+	if !ok {
+		return false
+	}
+	if cfg := ia.InferenceConfig(); cfg == nil || !cfg.Supported {
+		return false
+	}
+	runtime := ag.Runtime()
+	return runtime != nil && runtime.Protocol == agent.ProtocolACP
 }
 
 func configOptionDTOs(options []hostutility.ConfigOption) []dto.ConfigOptionDTO {

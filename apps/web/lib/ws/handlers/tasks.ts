@@ -101,6 +101,7 @@ function mergeTaskUpdate(
     merged.primarySessionPendingAction = existing.primarySessionPendingAction;
   }
   preservePrimaryExecutorFields(existing, merged, payload);
+  if (!hasPayloadField(payload, "metadata")) merged.metadata = existing.metadata;
   if (
     !hasPayloadField(payload, "task_pending_action") &&
     nextTask.taskPendingAction === undefined

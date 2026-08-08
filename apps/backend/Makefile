@@ -287,6 +287,10 @@ test:
 test-windows:
 	@echo "Running Windows-sensitive packages..."
 	$(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/...
+	@echo "Running Windows port-collision tests..."
+	$(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/common/netutil -run TestIsAddrInUse
+	$(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/agentctl/server/instance -run TestAllocatePortAndListenerRetriesAddressInUse
+	$(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/gateway/websocket -run TestResolveAndBindReportsOccupiedPort
 
 ## Verify run/dev/start-debug expand to the right per-shell command line across
 ## native Windows (cmd), Git Bash/MSYS, and Unix — the Make-target dispatch the

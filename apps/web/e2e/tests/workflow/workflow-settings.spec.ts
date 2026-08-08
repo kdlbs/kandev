@@ -81,17 +81,37 @@ test.describe("Workflow settings", () => {
     seedData,
     prCapture,
   }) => {
+    // The host-utility probe runs asynchronously during backend startup. Wait
+    // for the deterministic mock provider used by this spec instead of
+    // selecting whichever provider happens to be first in the response.
+    await expect
+      .poll(
+        async () => {
+          const available = await testPage.request.get(
+            `${backend.baseUrl}/api/v1/agents/available`,
+          );
+          if (!available.ok()) return false;
+          const payload = (await available.json()) as {
+            agents?: Array<{
+              name: string;
+              model_config?: { config_options?: Array<{ id: string }> };
+            }>;
+          };
+          const mock = payload.agents?.find((item) => item.name === "mock-agent");
+          return Boolean(
+            mock?.model_config?.config_options?.some((option) => option.id === "effort"),
+          );
+        },
+        { timeout: 20_000, intervals: [250, 500, 1_000] },
+      )
+      .toBe(true);
+
     const available = await testPage.request.get(`${backend.baseUrl}/api/v1/agents/available`);
     expect(available.ok()).toBe(true);
     const availablePayload = (await available.json()) as {
-      agents?: Array<{
-        name: string;
-        model_config?: { config_options?: Array<{ id: string }> };
-      }>;
+      agents?: Array<{ name: string }>;
     };
-    const agent = availablePayload.agents?.find((item) =>
-      item.model_config?.config_options?.some((option) => option.id === "effort"),
-    );
+    const agent = availablePayload.agents?.find((item) => item.name === "mock-agent");
     expect(agent).toBeDefined();
 
     const workflow = await apiClient.createWorkflow(
@@ -124,7 +144,7 @@ test.describe("Workflow settings", () => {
     await settings.click();
     await testPage.getByText("Mock Smart", { exact: true }).click();
     await testPage.getByTestId("config-option-trigger-effort").click();
-    await testPage.getByRole("button", { name: "High", exact: true }).click();
+    await testPage.getByRole("button", { name: "Max", exact: true }).click();
     await testPage.keyboard.press("Escape");
     await prCapture.screenshot("desktop-original-session-editor", {
       caption: "Workflow step editor with a conditional original-session model and effort rule.",
@@ -141,7 +161,7 @@ test.describe("Workflow settings", () => {
               agent_name: agent!.name,
               operation: "set",
               model: "mock-smart",
-              config_options: { effort: "high" },
+              config_options: { effort: "max" },
             },
           ],
         },

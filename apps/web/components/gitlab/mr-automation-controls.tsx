@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { IconChevronDown, IconInfoCircle } from "@tabler/icons-react";
+import { IconChevronDown, IconEdit, IconInfoCircle } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import { Label } from "@kandev/ui/label";
@@ -12,7 +12,34 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useToast } from "@/components/toast-provider";
 import { useTaskMRAutomationOptions } from "@/hooks/domains/gitlab/use-task-mr-automation";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import type { TaskMRAutomationOptions, TaskMRAutomationPatch } from "@/lib/types/gitlab";
+import { autoFixRoundForState, findMRAutomationStateForMR } from "@/lib/gitlab/mr-automation";
+import type {
+  TaskMR,
+  TaskMRAutomationOptions,
+  TaskMRAutomationPatch,
+  TaskMRLifecycleState,
+} from "@/lib/types/gitlab";
+import { MRAutoFixPromptDialog } from "./mr-auto-fix-prompt-dialog";
+
+/** Shared compact-row height: taller touch target on mobile/coarse pointers. */
+function compactRowMinHeight(isMobile: boolean, isFinePointer: boolean): string {
+  return isMobile || !isFinePointer ? "min-h-11" : "min-h-7";
+}
+
+/** True when any of the three #2125 lifecycle-notification switches is on. */
+function hasLifecycleSwitchEnabled(options: TaskMRAutomationOptions | null): boolean {
+  return Boolean(
+    options?.prompt_on_review_requested || options?.prompt_on_merged || options?.prompt_on_closed,
+  );
+}
+
+/** Resolves the round-help state for a single MR, when one is known. */
+function resolveAutomationState(
+  mr: TaskMR | undefined,
+  states: TaskMRLifecycleState[] | undefined,
+): TaskMRLifecycleState | undefined {
+  return mr ? findMRAutomationStateForMR(states, mr) : undefined;
+}
 
 /**
  * Dual-mode help affordance: a tap popover on coarse pointers, a hover
@@ -84,7 +111,7 @@ function MRAutomationRow({
   describedBy?: string;
 }) {
   const { isFinePointer, isMobile } = useResponsiveBreakpoint();
-  const minHeight = isMobile || !isFinePointer ? "min-h-11" : "min-h-7";
+  const minHeight = compactRowMinHeight(isMobile, isFinePointer);
 
   return (
     <div className={`flex items-center justify-between gap-3 px-1 ${minHeight}`}>
@@ -124,7 +151,7 @@ function MRAutomationErrorRow({ error }: { error: string }) {
 function MRAutomationLoadErrorBanner({ error, onRetry }: { error: string; onRetry: () => void }) {
   const { isFinePointer, isMobile } = useResponsiveBreakpoint();
   const { t } = useTranslation();
-  const minHeight = isMobile || !isFinePointer ? "min-h-11" : "min-h-7";
+  const minHeight = compactRowMinHeight(isMobile, isFinePointer);
   return (
     <div
       role="alert"
@@ -142,6 +169,210 @@ function MRAutomationLoadErrorBanner({ error, onRetry }: { error: string; onRetr
         {t("gitlab:mrAutomationRetry")}
       </Button>
     </div>
+  );
+}
+
+function MRAutoFixRoundHelpButton({
+  state,
+  maxRounds,
+}: {
+  state: TaskMRLifecycleState | undefined;
+  maxRounds: number | null | undefined;
+}) {
+  const { t } = useTranslation();
+  const round = autoFixRoundForState(state, maxRounds);
+  return (
+    <MRAutomationHelpButton
+      testId="mr-auto-fix-round-help"
+      ariaLabel={t("gitlab:mrAutomationExplainAutoFixRounds")}
+    >
+      <span data-testid="mr-auto-fix-round-explanation">
+        {t("gitlab:mrAutoFixRoundExplanation", { current: round.current, max: round.max })}
+      </span>
+    </MRAutomationHelpButton>
+  );
+}
+
+function MRAutoMergeHelpButton() {
+  const { t } = useTranslation();
+  return (
+    <MRAutomationHelpButton
+      testId="mr-auto-merge-help"
+      ariaLabel={t("gitlab:mrAutomationExplainAutoMerge")}
+    >
+      <span data-testid="mr-auto-merge-explanation">{t("gitlab:mrAutoMergeReadyExplanation")}</span>
+    </MRAutomationHelpButton>
+  );
+}
+
+function MRAutomationHeader({
+  disabled,
+  onEditPrompt,
+}: {
+  disabled: boolean;
+  onEditPrompt: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex items-center justify-between gap-2 px-1">
+      <div className="text-xs font-medium text-foreground">{t("gitlab:mrAutomation")}</div>
+      <div className="flex items-center gap-1">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 cursor-help text-muted-foreground hover:text-foreground"
+              aria-label={t("gitlab:mrAutomationExplainOptions")}
+            >
+              <IconInfoCircle className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top" align="end" className="max-w-[280px] text-xs leading-relaxed">
+            {t("gitlab:mrAutomationWatchesLinkedMergeRequest")}
+          </TooltipContent>
+        </Tooltip>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6 cursor-pointer text-muted-foreground hover:text-foreground"
+          aria-label={t("gitlab:mrAutomationEditAutoFixPromptForThis")}
+          disabled={disabled}
+          onClick={onEditPrompt}
+        >
+          <IconEdit className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function MRAutomationOptionRows({
+  taskId,
+  options,
+  disabled,
+  patchOption,
+  automationState,
+}: {
+  taskId: string;
+  options: TaskMRAutomationOptions | null;
+  disabled: boolean;
+  patchOption: (patch: TaskMRAutomationPatch) => void;
+  automationState: TaskMRLifecycleState | undefined;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <MRAutomationRow
+        id={`task-mr-auto-fix-${taskId}`}
+        label={t("gitlab:mrAutoFixCiAndAddressComments")}
+        checked={Boolean(options?.auto_fix_enabled)}
+        disabled={disabled}
+        onCheckedChange={(checked) => patchOption({ auto_fix_enabled: checked })}
+        help={
+          options?.auto_fix_enabled ? (
+            <MRAutoFixRoundHelpButton
+              state={automationState}
+              maxRounds={options.auto_fix_max_rounds}
+            />
+          ) : null
+        }
+      />
+      <MRAutomationRow
+        id={`task-mr-auto-merge-${taskId}`}
+        label={t("gitlab:mrAutoMergeWhenReady")}
+        checked={Boolean(options?.auto_merge_enabled)}
+        disabled={disabled}
+        onCheckedChange={(checked) => patchOption({ auto_merge_enabled: checked })}
+        help={options?.auto_merge_enabled ? <MRAutoMergeHelpButton /> : null}
+      />
+    </>
+  );
+}
+
+/**
+ * Encapsulates the auto-fix prompt editor's local state and save/reset
+ * handlers, split out of MRAutomationControls to keep that component under
+ * the file's size/complexity limits.
+ */
+function useMRAutoFixPromptEditor(
+  options: TaskMRAutomationOptions | null,
+  update: (patch: TaskMRAutomationPatch) => Promise<unknown>,
+  resetPrompt: () => Promise<unknown>,
+) {
+  const { t } = useTranslation();
+  const { toast } = useToast();
+  const [promptOpen, setPromptOpen] = useState(false);
+  const [promptDraft, setPromptDraft] = useState("");
+
+  const reportError = useCallback(
+    (description: string) => {
+      toast({ description, variant: "error" });
+    },
+    [toast],
+  );
+
+  const openPromptEditor = useCallback(() => {
+    // A trimmed-empty override is "no override" as far as the backend's
+    // effective-prompt resolution is concerned, so the editor must open on
+    // the effective prompt rather than on unusable whitespace. Clearing via
+    // the UI already round-trips as null, but a whitespace-only override
+    // submitted through HTTP PATCH or MCP persists verbatim — `??` alone
+    // would then open an all-whitespace textarea with Save disabled.
+    const override = options?.auto_fix_prompt_override?.trim()
+      ? options.auto_fix_prompt_override
+      : null;
+    setPromptDraft(override ?? options?.effective_auto_fix_prompt ?? "");
+    setPromptOpen(true);
+  }, [options]);
+
+  const savePrompt = useCallback(() => {
+    const value = promptDraft.trim();
+    if (!value) return;
+    Promise.resolve(update({ auto_fix_prompt_override: value }))
+      .then(() => setPromptOpen(false))
+      .catch(() => reportError(t("gitlab:mrAutomationAutoFixPromptSaveFailed")));
+  }, [promptDraft, reportError, t, update]);
+
+  const useDefaultPrompt = useCallback(() => {
+    Promise.resolve(resetPrompt())
+      .then(() => setPromptOpen(false))
+      .catch(() => reportError(t("gitlab:mrAutomationAutoFixPromptResetFailed")));
+  }, [reportError, resetPrompt, t]);
+
+  return {
+    promptOpen,
+    promptDraft,
+    setPromptDraft,
+    openPromptEditor,
+    savePrompt,
+    useDefaultPrompt,
+    closePromptEditor: () => setPromptOpen(false),
+  };
+}
+
+/**
+ * Wraps `update` with the standard "toast on failure" handling shared by
+ * every switch row. Split out of MRAutomationControls to keep that
+ * component under the file's complexity limit.
+ */
+function useMRAutomationPatch(update: (patch: TaskMRAutomationPatch) => Promise<unknown>) {
+  const { t } = useTranslation();
+  const { toast } = useToast();
+  return useCallback(
+    (patch: TaskMRAutomationPatch) => {
+      update(patch).catch((err) => {
+        toast({
+          title: t("gitlab:mrAutomationUpdateFailedTitle"),
+          description:
+            err instanceof Error ? err.message : t("gitlab:mrAutomationUpdateFailedDescription"),
+          variant: "error",
+        });
+      });
+    },
+    [t, toast, update],
   );
 }
 
@@ -238,38 +469,37 @@ function MRAgentPromptRows({
 }
 
 /**
- * Collapsible "Review follow-up" group of three compact switch rows. Renders
- * inside the GitLab MR topbar dropdown, below the per-MR items. Auto-expands
- * when any switch is already on so a previously configured task doesn't hide
- * its active switches. Mirrors ReviewFollowUpSection (GitHub), AC29.
+ * MR automation controls: an "Automation" section (auto-fix CI + auto-merge)
+ * above a collapsible "Review follow-up" group of three compact switch rows.
+ * Renders inside the GitLab MR topbar dropdown, below the per-MR items.
+ * Auto-expands "Review follow-up" when any of its switches is already on so
+ * a previously configured task doesn't hide its active switches. Mirrors
+ * PRCIAutomationControls + ReviewFollowUpSection (GitHub), AC1, AC29.
+ *
+ * `mr` is optional and only used to look up the per-MR auto-fix round state
+ * for the round-help button's count — when omitted (e.g. a task with
+ * multiple linked MRs and no single one to attribute rounds to), the
+ * round-help button still renders but reads 0 of max; the switches
+ * themselves remain task-scoped either way.
  */
-export function MRAutomationControls({ taskId }: { taskId: string }) {
-  const { options, loading, saving, error, update, refresh } = useTaskMRAutomationOptions(taskId);
+export function MRAutomationControls({ taskId, mr }: { taskId: string; mr?: TaskMR }) {
+  const { options, loading, saving, error, update, refresh, resetPrompt } =
+    useTaskMRAutomationOptions(taskId);
   const { isFinePointer, isMobile } = useResponsiveBreakpoint();
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const { toast } = useToast();
-  const lifecycleEnabled = Boolean(
-    options?.prompt_on_review_requested || options?.prompt_on_merged || options?.prompt_on_closed,
-  );
-  const minHeight = isMobile || !isFinePointer ? "min-h-11" : "min-h-7";
+  const promptEditor = useMRAutoFixPromptEditor(options, update, resetPrompt);
+  const patchOption = useMRAutomationPatch(update);
+  const lifecycleEnabled = hasLifecycleSwitchEnabled(options);
+  const minHeight = compactRowMinHeight(isMobile, isFinePointer);
+  const automationState = resolveAutomationState(mr, options?.mr_states);
 
   useEffect(() => {
     if (lifecycleEnabled) setOpen(true);
   }, [lifecycleEnabled]);
 
-  const patchOption = (patch: TaskMRAutomationPatch) => {
-    update(patch).catch((err) => {
-      toast({
-        title: t("gitlab:mrAutomationUpdateFailedTitle"),
-        description:
-          err instanceof Error ? err.message : t("gitlab:mrAutomationUpdateFailedDescription"),
-        variant: "error",
-      });
-    });
-  };
-
   const loadFailed = Boolean(error) && !options;
+  const disabled = saving || loading || !options;
 
   return (
     <div data-testid="mr-automation-controls">
@@ -283,6 +513,14 @@ export function MRAutomationControls({ taskId }: { taskId: string }) {
           }}
         />
       ) : null}
+      <MRAutomationHeader disabled={!options} onEditPrompt={promptEditor.openPromptEditor} />
+      <MRAutomationOptionRows
+        taskId={taskId}
+        options={options}
+        disabled={disabled}
+        patchOption={patchOption}
+        automationState={automationState}
+      />
       <Collapsible open={open} onOpenChange={setOpen}>
         <CollapsibleTrigger asChild>
           <Button
@@ -307,12 +545,21 @@ export function MRAutomationControls({ taskId }: { taskId: string }) {
           <MRAgentPromptRows
             taskId={taskId}
             options={options}
-            disabled={saving || loading || !options}
+            disabled={disabled}
             patchOption={patchOption}
           />
           {error && options ? <MRAutomationErrorRow error={error} /> : null}
         </CollapsibleContent>
       </Collapsible>
+      <MRAutoFixPromptDialog
+        open={promptEditor.promptOpen}
+        prompt={promptEditor.promptDraft}
+        saving={saving}
+        onPromptChange={promptEditor.setPromptDraft}
+        onClose={promptEditor.closePromptEditor}
+        onSave={promptEditor.savePrompt}
+        onReset={promptEditor.useDefaultPrompt}
+      />
     </div>
   );
 }

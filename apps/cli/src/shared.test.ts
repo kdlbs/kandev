@@ -1,8 +1,11 @@
 import os from "node:os";
+import net from "node:net";
 import { PassThrough } from "node:stream";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { DEFAULT_AGENTCTL_PORT, DEFAULT_WEB_PORT } from "./constants";
+import { __testing as portsTesting } from "./ports";
 import {
   buildBackendEnv,
   buildWebEnv,
@@ -10,6 +13,8 @@ import {
   listHostNetworkAddresses,
   logStartupInfo,
   networkUrlsForPort,
+  pickPorts,
+  pickBackendPorts,
   resolveBackendLogLevels,
   type PortConfig,
 } from "./shared";
@@ -87,6 +92,21 @@ describe("buildBackendEnv", () => {
     expect(env.KANDEV_WEB_INTERNAL_URL).toBeUndefined();
   });
 
+  it("generates a fresh backend health token for each launch environment", () => {
+    const first = buildBackendEnv({ ports }).KANDEV_DESKTOP_HEALTH_TOKEN;
+    const second = buildBackendEnv({ ports }).KANDEV_DESKTOP_HEALTH_TOKEN;
+
+    expect(first).toMatch(/^[0-9a-f]{64}$/);
+    expect(second).toMatch(/^[0-9a-f]{64}$/);
+    expect(second).not.toBe(first);
+  });
+
+  it("uses a caller-provided backend health token", () => {
+    const env = buildBackendEnv({ ports, healthToken: "launch-owned-token" });
+
+    expect(env.KANDEV_DESKTOP_HEALTH_TOKEN).toBe("launch-owned-token");
+  });
+
   it("uses independent file and console thresholds", () => {
     expect(resolveBackendLogLevels({ env: {} })).toEqual({ file: "info", console: "warn" });
     expect(resolveBackendLogLevels({ debug: true, env: {} })).toEqual({
@@ -120,6 +140,57 @@ describe("buildBackendEnv", () => {
     stream.write("world");
     expect(forwarded).toBe("helloworld");
     expect(capture.read()).toBe("world");
+  });
+});
+
+describe("explicit backend port selection", () => {
+  it("rejects an occupied port before selecting the other services", async () => {
+    const server = net.createServer();
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      server.close();
+      throw new Error("test server did not expose a port");
+    }
+
+    try {
+      await expect(
+        pickBackendPorts({ backendPort: address.port, backendPortSource: "KANDEV_PORT" }),
+      ).rejects.toThrow(`Backend port ${address.port} from KANDEV_PORT is already in use`);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("does not reuse an explicit backend port for the automatic web port", async (ctx) => {
+    if (!(await portsTesting.isPortAvailable(DEFAULT_WEB_PORT))) {
+      ctx.skip();
+      return;
+    }
+
+    const resolved = await pickPorts({
+      backendPort: DEFAULT_WEB_PORT,
+      backendPortSource: "--port",
+    });
+
+    expect(resolved.webPort).not.toBe(DEFAULT_WEB_PORT);
+  });
+
+  it("does not reuse an explicit backend port for the automatic agentctl port", async (ctx) => {
+    if (!(await portsTesting.isPortAvailable(DEFAULT_AGENTCTL_PORT))) {
+      ctx.skip();
+      return;
+    }
+
+    const resolved = await pickBackendPorts({
+      backendPort: DEFAULT_AGENTCTL_PORT,
+      backendPortSource: "--port",
+    });
+
+    expect(resolved.agentctlPort).not.toBe(DEFAULT_AGENTCTL_PORT);
   });
 });
 

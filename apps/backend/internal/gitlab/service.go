@@ -113,7 +113,28 @@ type Service struct {
 	repositoryLookup     RepositoryLookup
 	dependencyValidator  WatchDependencyValidator
 	taskAuthorizer       TaskAuthorizer
+	promptResolver       PromptResolver
 	logger               *logger.Logger
+}
+
+// PromptResolver resolves editable prompt content by name. Mirrors
+// github.PromptResolver — used to resolve the effective MR auto-fix
+// prompt (default template, editable via Settings, or a per-task override).
+type PromptResolver interface {
+	ResolvePromptContent(ctx context.Context, name, fallback string) string
+}
+
+// SetPromptResolver wires the editable prompt service into GitLab automation.
+func (s *Service) SetPromptResolver(resolver PromptResolver) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.promptResolver = resolver
+}
+
+func (s *Service) getPromptResolver() PromptResolver {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.promptResolver
 }
 
 // SetEventBus wires the event bus for publishing review/issue/feedback events.
@@ -627,29 +648,32 @@ func (s *Service) syncTaskMRWithClient(
 	now := time.Now().UTC()
 	mr := status.MR
 	row := &TaskMR{
-		TaskID:            taskID,
-		RepositoryID:      repositoryID,
-		Host:              host,
-		ProjectPath:       projectPath,
-		MRIID:             mr.IID,
-		MRURL:             mr.WebURL,
-		MRTitle:           mr.Title,
-		HeadBranch:        mr.HeadBranch,
-		BaseBranch:        mr.BaseBranch,
-		AuthorUsername:    mr.AuthorUsername,
-		State:             mr.State,
-		ApprovalState:     status.ApprovalState,
-		PipelineState:     status.PipelineState,
-		MergeStatus:       status.MergeStatus,
-		Draft:             mr.Draft,
-		ApprovalCount:     status.ApprovalCount,
-		RequiredApprovals: status.RequiredApprovals,
-		PipelineJobsTotal: status.PipelineJobsTotal,
-		PipelineJobsPass:  status.PipelineJobsPassing,
-		CreatedAt:         mr.CreatedAt,
-		MergedAt:          mr.MergedAt,
-		ClosedAt:          mr.ClosedAt,
-		LastSyncedAt:      &now,
+		TaskID:              taskID,
+		RepositoryID:        repositoryID,
+		Host:                host,
+		ProjectPath:         projectPath,
+		MRIID:               mr.IID,
+		MRURL:               mr.WebURL,
+		MRTitle:             mr.Title,
+		HeadBranch:          mr.HeadBranch,
+		BaseBranch:          mr.BaseBranch,
+		AuthorUsername:      mr.AuthorUsername,
+		State:               mr.State,
+		ApprovalState:       status.ApprovalState,
+		PipelineState:       status.PipelineState,
+		MergeStatus:         status.MergeStatus,
+		Draft:               mr.Draft,
+		ApprovalCount:       status.ApprovalCount,
+		RequiredApprovals:   status.RequiredApprovals,
+		PipelineJobsTotal:   status.PipelineJobsTotal,
+		PipelineJobsPass:    status.PipelineJobsPassing,
+		DetailedMergeStatus: status.DetailedMergeStatus,
+		ReviewerCount:       status.ReviewerCount,
+		UnapprovedReviewers: status.UnapprovedReviewers,
+		CreatedAt:           mr.CreatedAt,
+		MergedAt:            mr.MergedAt,
+		ClosedAt:            mr.ClosedAt,
+		LastSyncedAt:        &now,
 	}
 	if err := store.UpsertTaskMR(ctx, row); err != nil {
 		return nil, fmt.Errorf("upsert task MR: %w", err)

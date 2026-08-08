@@ -17,6 +17,16 @@ import type { useWorkflowMutationGuard } from "./workflow-mutation-guard";
 
 const TEMP_WORKFLOW_PREFIX = "temp-workflow-";
 
+function workflowSaveInvalidReason(
+  workflowName: string,
+  modelConfigResolutionPending: boolean,
+  translate: (key: string) => string,
+): string | undefined {
+  if (!workflowName.trim()) return translate("workflows:workflowNameIsRequired");
+  if (modelConfigResolutionPending) return translate("agents:resolvingModelOptions");
+  return undefined;
+}
+
 type WorkflowSavedParams = {
   clientWorkflow: Workflow;
   submittedWorkflow: Workflow;
@@ -38,6 +48,7 @@ type WorkflowDraftContributorArgs = {
   onWorkflowSaved: (params: WorkflowSavedParams) => void;
   onDiscardWorkflow: () => void;
   onDeleteWorkflow: () => Promise<unknown>;
+  isSessionConfigResolutionPending?: boolean;
 };
 
 function useWorkflowDraftPersistence(args: WorkflowDraftContributorArgs) {
@@ -91,7 +102,14 @@ function useWorkflowDraftPersistence(args: WorkflowDraftContributorArgs) {
 }
 
 export function useWorkflowDraftContributor(args: WorkflowDraftContributorArgs) {
-  const { workflow, workflowSteps, savedWorkflowSteps, mutationGuard, toast } = args;
+  const {
+    workflow,
+    workflowSteps,
+    savedWorkflowSteps,
+    mutationGuard,
+    toast,
+    isSessionConfigResolutionPending = false,
+  } = args;
   const persistence = useWorkflowDraftPersistence(args);
   const removingDraftRef = useRef(false);
   const [isRemovingDraft, setIsRemovingDraft] = useState(false);
@@ -102,8 +120,8 @@ export function useWorkflowDraftContributor(args: WorkflowDraftContributorArgs) 
     order: 100,
     revision: persistence.revision,
     isDirty: args.isWorkflowDirty || stepsDirty,
-    canSave: workflow.name.trim().length > 0,
-    invalidReason: workflow.name.trim() ? undefined : t("workflows:workflowNameIsRequired"),
+    canSave: workflow.name.trim().length > 0 && !isSessionConfigResolutionPending,
+    invalidReason: workflowSaveInvalidReason(workflow.name, isSessionConfigResolutionPending, t),
     save: async (submittedRevision) => {
       if (!workflow.id.startsWith(TEMP_WORKFLOW_PREFIX)) {
         await persistence.persistSubmittedDraft(submittedRevision);

@@ -14,9 +14,8 @@ func (p *Projector) clearPendingLocked(state *projectionState, sessionID string)
 	}
 	state.pendingObserved = true
 	_, existed := state.pending[sessionID]
-	if existed {
-		delete(state.pending, sessionID)
-	}
+	delete(state.pending, sessionID)
+	delete(state.pendingRequests, sessionID)
 	previousTaskPending := state.taskPending
 	recomputeTaskPending(state)
 	return existed || previousTaskPending != state.taskPending

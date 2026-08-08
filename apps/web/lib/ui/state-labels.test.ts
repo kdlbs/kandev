@@ -1,6 +1,11 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect } from "vitest";
 import { formatTaskStateLabel, formatTaskSessionStateLabel } from "./state-labels";
+import { i18n } from "@/lib/i18n";
 import type { TaskState, TaskSessionState } from "@/lib/types/http";
+
+afterEach(async () => {
+  await i18n.changeLanguage("en");
+});
 
 describe("formatTaskStateLabel", () => {
   it("maps known task states to human labels", () => {
@@ -24,6 +29,18 @@ describe("formatTaskStateLabel", () => {
   it("falls back to the raw value for unknown states", () => {
     expect(formatTaskStateLabel("UNKNOWN_FUTURE" as TaskState)).toBe("UNKNOWN_FUTURE");
   });
+
+  it("resolves at call time, so a locale switch changes the label", async () => {
+    await i18n.changeLanguage("pseudo");
+    const label = formatTaskStateLabel("IN_PROGRESS");
+    expect(label).not.toBe("In progress");
+    expect(label).toMatch(/[^\p{ASCII}]/u);
+  });
+
+  it("leaves an unmapped wire value untranslated under any locale", async () => {
+    await i18n.changeLanguage("pseudo");
+    expect(formatTaskStateLabel("UNKNOWN_FUTURE" as TaskState)).toBe("UNKNOWN_FUTURE");
+  });
 });
 
 describe("formatTaskSessionStateLabel", () => {
@@ -35,6 +52,7 @@ describe("formatTaskSessionStateLabel", () => {
     expect(formatTaskSessionStateLabel("FAILED")).toBe("Failed");
     expect(formatTaskSessionStateLabel("CANCELLED")).toBe("Cancelled");
     expect(formatTaskSessionStateLabel("CREATED")).toBe("Created");
+    expect(formatTaskSessionStateLabel("IDLE")).toBe("Idle");
   });
 
   it("returns empty string for null/undefined", () => {
@@ -43,6 +61,18 @@ describe("formatTaskSessionStateLabel", () => {
   });
 
   it("falls back to the raw value for unknown states", () => {
+    expect(formatTaskSessionStateLabel("UNKNOWN" as TaskSessionState)).toBe("UNKNOWN");
+  });
+
+  it("resolves at call time, so a locale switch changes the label", async () => {
+    await i18n.changeLanguage("pseudo");
+    const label = formatTaskSessionStateLabel("RUNNING");
+    expect(label).not.toBe("Running");
+    expect(label).toMatch(/[^\p{ASCII}]/u);
+  });
+
+  it("leaves an unmapped wire value untranslated under any locale", async () => {
+    await i18n.changeLanguage("pseudo");
     expect(formatTaskSessionStateLabel("UNKNOWN" as TaskSessionState)).toBe("UNKNOWN");
   });
 });

@@ -35,11 +35,9 @@ func (s *Service) SetGitLabCredentialResolver(resolver executor.GitLabCredential
 	s.executor.SetGitLabCredentialResolver(resolver)
 }
 
-// SetGitLabMRAutomationService wires the GitLab MR lifecycle notification
-// surface into the orchestrator. Mirrors SetGitHubService's role for the
-// narrower taskPRAgentAutomationService interface — GitLab has no
-// auto-fix/auto-merge automation, so there is no larger GitLabService
-// interface for this to be carved out of.
+// SetGitLabMRAutomationService wires the GitLab MR automation surface
+// (lifecycle notifications, auto-fix CI, auto-merge) into the orchestrator.
+// Mirrors SetGitHubService's role for taskPRAgentAutomationService.
 func (s *Service) SetGitLabMRAutomationService(svc taskMRAgentAutomationService) {
 	s.gitlabMRAutomation = svc
 }

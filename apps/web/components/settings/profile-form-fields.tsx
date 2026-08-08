@@ -1,48 +1,64 @@
 "use client";
 
+import { useEffect, useId } from "react";
 import { useTranslation } from "react-i18next";
-import type { TFunction } from "i18next";
-
-import { useId } from "react";
-import { IconAlertCircle, IconAlertTriangle, IconRefresh } from "@tabler/icons-react";
+import { IconAlertTriangle } from "@tabler/icons-react";
 import { NoAuthPanel, ProbingPanel } from "@/components/settings/profile-status-panels";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Skeleton } from "@kandev/ui/skeleton";
 import { Switch } from "@kandev/ui/switch";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { useAgentCapabilities } from "@/hooks/domains/settings/use-dynamic-models";
+import { useProfileModelCapabilities } from "@/hooks/domains/settings/use-profile-model-capabilities";
 import {
   PERMISSION_APPLY_AGENTCTL_AUTO_APPROVE,
   PERMISSION_KEYS,
   readPermissionValue,
+  type PermissionKey,
 } from "@/lib/agent-permissions";
 import { CLIFlagsField } from "@/components/settings/cli-flags-field";
 import { CommandPrefixField } from "@/components/settings/command-prefix-field";
+import { ModelConfigResolutionStatus } from "@/components/settings/model-config-resolution-status";
+import {
+  CapabilityStatusMessage,
+  RefreshCapabilitiesButton,
+} from "@/components/settings/profile-capability-status";
 import {
   CommandsButton,
   findActiveMode,
   profileModeIsDirty,
   profileModelIsDirty,
 } from "@/components/settings/profile-capability-helpers";
+import { modelConfigOptions } from "@/components/settings/profile-model-config";
+import {
+  ModelFallbackSection,
+  ModelPicker,
+  ModePicker,
+} from "@/components/settings/profile-model-fields";
 import type {
+  CLIFlag,
   CommandEntry,
   ModelConfig,
+  ConfigOptionEntry,
   ModeEntry,
   ModelEntry,
   PermissionSetting,
   PassthroughConfig,
 } from "@/lib/types/http";
 
-export type { ProfileFormData } from "./profile-model-fields";
-import {
-  ModelFallbackSection,
-  ModelPicker,
-  ModePicker,
-  modelConfigOptions,
-  type ProfileFormData,
-} from "./profile-model-fields";
+export type ProfileFormData = {
+  name: string;
+  model: string;
+  /** Optional single fallback model applied when `model` is unavailable. */
+  fallback_model?: string;
+  /** Legacy automatic-fallback opt-in; hides the fallback_model field. */
+  auto_fallback?: boolean;
+  mode: string;
+  config_options?: Record<string, string>;
+  cli_passthrough: boolean;
+  cli_flags: CLIFlag[];
+  command_prefix?: string;
+} & Record<PermissionKey, boolean>;
 
 export type ProfileFormFieldsProps = {
   profile: ProfileFormData;
@@ -57,6 +73,7 @@ export type ProfileFormFieldsProps = {
   variant?: "default" | "compact";
   hideNameField?: boolean;
   lockPassthrough?: boolean;
+  onModelConfigResolutionPendingChange?: (pending: boolean) => void;
   /**
    * When true, the custom-flag list + Add form on CLIFlagsField is
    * hidden. Curated predefined toggles still render. Used by the
@@ -237,80 +254,6 @@ function PermissionToggles({
   );
 }
 
-// The probe `status` values are the wire enum; only the messages are copy, so
-// they travel as catalog keys and resolve at render.
-const CAPABILITY_STATUS_KEYS: Record<string, string> = {
-  probing: "agents:capabilityProbing",
-  auth_required: "agents:capabilityAuthRequired",
-  not_installed: "agents:capabilityNotInstalled",
-  failed: "agents:capabilityProbeFailed",
-};
-
-function capabilityStatusMessage(t: TFunction, status: ModelConfig["status"]): string | null {
-  const key = status ? CAPABILITY_STATUS_KEYS[status] : undefined;
-  return key ? t(key) : null;
-}
-
-function CapabilityStatusMessage({ status }: { status: ModelConfig["status"] }) {
-  const { t } = useTranslation();
-  const msg = capabilityStatusMessage(t, status);
-  if (!msg) return null;
-  return (
-    <p
-      data-testid="profile-capability-status"
-      data-status={status}
-      className="text-xs text-muted-foreground"
-    >
-      {msg}
-    </p>
-  );
-}
-
-function RefreshCapabilitiesButton({
-  onRefresh,
-  isLoading,
-  error,
-}: {
-  onRefresh: () => Promise<void>;
-  isLoading: boolean;
-  error: string | null;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div className="flex items-center gap-2">
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={onRefresh}
-            disabled={isLoading}
-            className="cursor-pointer"
-            data-testid="profile-refresh-capabilities"
-          >
-            <IconRefresh className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>
-          <p>{t("agents:refreshCapabilitiesTooltip")}</p>
-        </TooltipContent>
-      </Tooltip>
-      {error && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <div className="flex items-center">
-              <IconAlertCircle className="h-4 w-4 text-amber-500" />
-            </div>
-          </TooltipTrigger>
-          <TooltipContent>
-            <p className="max-w-xs">{t("agents:failedToRefresh", { error })}</p>
-          </TooltipContent>
-        </Tooltip>
-      )}
-    </div>
-  );
-}
-
 type CapabilitiesRowProps = {
   profile: ProfileFormData;
   models: ModelEntry[];
@@ -325,74 +268,50 @@ type CapabilitiesRowProps = {
   onRefresh: () => Promise<void>;
   error: string | null;
   modelConfig: ModelConfig;
+  resolvedConfigOptions?: ConfigOptionEntry[];
+  configStatus: ModelConfig["status"];
+  configError: string | null;
+  configIsLoading: boolean;
+  onRetryConfig: () => Promise<void>;
   agentName: string;
   baselineProfile?: ProfileFormData;
 };
 
-function CapabilitiesRow({
-  profile,
-  models,
-  modes,
-  status,
-  isLoading,
-  onRefresh,
-  error,
-  modelConfig,
-  agentName,
-  ...props
-}: CapabilitiesRowProps) {
+function CapabilitiesRow(props: CapabilitiesRowProps) {
   const { t } = useTranslation();
-  const labelCls = props.isCompact ? "text-xs text-muted-foreground" : undefined;
   const gapCls = props.isCompact ? "space-y-1.5" : "space-y-2";
 
-  if (isLoading && models.length === 0) {
+  if (props.isLoading && props.models.length === 0) {
     return (
       <div className={gapCls}>
-        <Label className={labelCls}>{t("agents:startModel")}</Label>
+        <Label className={props.isCompact ? "text-xs text-muted-foreground" : undefined}>
+          {t("agents:startModel")}
+        </Label>
         <Skeleton className="h-7 w-full" />
       </div>
     );
   }
 
-  if (status === "probing") {
+  if (props.status === "probing") {
     return <ProbingPanel />;
   }
-  if (status === "auth_required" || status === "not_installed") {
+  if (props.status === "auth_required" || props.status === "not_installed") {
     return (
       <NoAuthPanel
-        agentName={agentName}
-        status={status}
-        isLoading={isLoading}
-        onRefresh={onRefresh}
-        error={error}
-        rawError={modelConfig.error ?? null}
+        agentName={props.agentName}
+        status={props.status}
+        isLoading={props.isLoading}
+        onRefresh={props.onRefresh}
+        error={props.error}
+        rawError={props.modelConfig.error ?? null}
       />
     );
   }
 
-  return (
-    <CapabilitiesFields
-      {...props}
-      profile={profile}
-      models={models}
-      modes={modes}
-      status={status}
-      modelConfig={modelConfig}
-      isLoading={isLoading}
-      onRefresh={onRefresh}
-      error={error}
-      agentName={agentName}
-      labelCls={labelCls}
-      gapCls={gapCls}
-    />
-  );
+  return <CapabilitiesRowContent {...props} />;
 }
 
-// CapabilitiesFields renders the model/mode row, the no-silent-model-fallback
-// section, and the capability status for a probed agent. Split from
-// CapabilitiesRow (which owns the loading/auth early returns) to stay under
-// the function line budget.
-function CapabilitiesFields({
+function CapabilitiesRowContent({
   profile,
   models,
   modes,
@@ -401,17 +320,27 @@ function CapabilitiesFields({
   currentModeId,
   status,
   onChange,
+  isCompact,
   isLoading,
   onRefresh,
   error,
   modelConfig,
+  resolvedConfigOptions,
+  configStatus,
+  configError,
+  configIsLoading,
+  onRetryConfig,
   baselineProfile,
-  labelCls,
-  gapCls,
-}: CapabilitiesRowProps & { labelCls?: string; gapCls: string }) {
+}: CapabilitiesRowProps) {
   const { t } = useTranslation();
-  const configOptions = modelConfigOptions(modelConfig);
+  const hasModes = modes.length > 0;
+  const configOptions = modelConfigOptions(
+    resolvedConfigOptions ? { ...modelConfig, config_options: resolvedConfigOptions } : modelConfig,
+  );
   const activeMode = findActiveMode(modes, profile.mode, currentModeId);
+  const labelCls = isCompact ? "text-xs text-muted-foreground" : undefined;
+  const gapCls = isCompact ? "space-y-1.5" : "space-y-2";
+
   return (
     <div className={gapCls}>
       <div className="flex items-end gap-2">
@@ -430,8 +359,14 @@ function CapabilitiesFields({
             ariaLabel={t("settings:startModelAria")}
             goneModelLabel={t("settings:startModelUnavailable")}
           />
+          <ModelConfigResolutionStatus
+            status={configStatus}
+            error={configError}
+            isLoading={configIsLoading}
+            onRetry={onRetryConfig}
+          />
         </div>
-        {modes.length > 0 && (
+        {hasModes && (
           <div
             data-testid="profile-mode-field"
             className={`flex-1 min-w-0 ${gapCls}`}
@@ -460,7 +395,7 @@ function CapabilitiesFields({
         baselineProfile={baselineProfile}
         labelCls={labelCls}
         gapCls={gapCls}
-        alignSelectorWithStart={modes.length > 0}
+        alignSelectorWithStart={hasModes}
         onChange={onChange}
       />
       {commands.length > 0 && <CommandsButton commands={commands} />}
@@ -518,9 +453,23 @@ export function ProfileFormFields({
   hideNameField = false,
   lockPassthrough = false,
   hideCustomCLIFlags = false,
+  onModelConfigResolutionPendingChange,
 }: ProfileFormFieldsProps) {
   const isCompact = variant === "compact";
-  const caps = useAgentCapabilities(agentName, modelConfig);
+  const {
+    capabilities: caps,
+    configOptions: resolvedConfigOptions,
+    configStatus,
+    configError,
+    configIsLoading,
+    isConfigResolutionPending,
+    refreshModelConfig,
+    refresh,
+  } = useProfileModelCapabilities(agentName, profile, modelConfig, onChange);
+
+  useEffect(() => {
+    onModelConfigResolutionPendingChange?.(isConfigResolutionPending);
+  }, [isConfigResolutionPending, onModelConfigResolutionPendingChange]);
 
   return (
     <div className={isCompact ? "space-y-3" : "space-y-4"}>
@@ -546,9 +495,14 @@ export function ProfileFormFields({
         onChange={onChange}
         isCompact={isCompact}
         isLoading={caps.isLoading}
-        onRefresh={caps.refresh}
+        onRefresh={refresh}
         error={caps.error}
         modelConfig={modelConfig}
+        resolvedConfigOptions={resolvedConfigOptions}
+        configStatus={configStatus}
+        configError={configError}
+        configIsLoading={configIsLoading}
+        onRetryConfig={refreshModelConfig}
         baselineProfile={baselineProfile}
       />
 

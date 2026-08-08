@@ -60,6 +60,18 @@ type ProbeRequest struct {
 	// AgentID is the agent to probe (e.g., "claude-acp", "codex-acp").
 	AgentID string `json:"agent_id" binding:"required"`
 
+	// Model optionally asks the probe to apply a model after session/new and
+	// return the provider's resulting configuration options.
+	Model string `json:"model,omitempty"`
+
+	// Mode optionally selects a session mode before the probe returns its
+	// resolved configuration options.
+	Mode string `json:"mode,omitempty"`
+
+	// ConfigOptions optionally applies additional select values before the
+	// probe returns its resolved configuration options.
+	ConfigOptions map[string]string `json:"config_options,omitempty"`
+
 	// Refresh asks agent-specific discovery fallbacks to invalidate their own
 	// model caches. ACP session discovery itself always starts a fresh process.
 	Refresh bool `json:"refresh,omitempty"`
@@ -102,7 +114,7 @@ type ProbeResponse struct {
 	CurrentModeID string `json:"current_mode_id,omitempty"`
 
 	// ConfigOptions are select-style session options advertised by session/new.
-	ConfigOptions []ProbeConfigOption `json:"config_options,omitempty"`
+	ConfigOptions []ProbeConfigOption `json:"config_options"`
 
 	// Commands are the slash commands the agent advertises via the
 	// `available_commands_update` session notification (drained briefly

@@ -17,6 +17,7 @@ import {
 } from "./session-mobile-top-bar-git-controls";
 import { TaskTopBarPluginActions } from "@/components/task/task-top-bar-plugin-actions";
 import { MRTopbarButton } from "@/components/gitlab/mr-topbar-button";
+import { PortForwardButton } from "@/components/task/port-forward-dialog";
 import { linkToTaskOverview } from "@/lib/links";
 import { useTranslation } from "react-i18next";
 
@@ -241,6 +242,7 @@ function MobileTopBarActions({
   return (
     <div className="flex items-center gap-1" data-testid="mobile-topbar-actions">
       <MRTopbarButton compact mobile />
+      {!isArchived && <PortForwardButton sessionId={sessionId} />}
       {!isArchived && (
         <TaskTopBarPluginActions
           sessionId={sessionId ?? null}

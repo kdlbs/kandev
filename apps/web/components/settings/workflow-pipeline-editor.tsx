@@ -44,6 +44,7 @@ type WorkflowPipelineEditorProps = {
   onRemoveStep: (stepId: string) => void;
   onReorderSteps: (steps: WorkflowStep[]) => void;
   readOnly?: boolean;
+  onSessionConfigResolutionPendingChange?: (pending: boolean) => void;
 };
 
 // --- Helpers ---
@@ -278,6 +279,7 @@ export function WorkflowPipelineEditor({
   onRemoveStep,
   onReorderSteps,
   readOnly = false,
+  onSessionConfigResolutionPendingChange,
 }: WorkflowPipelineEditorProps) {
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [prevStepCount, setPrevStepCount] = useState(steps.length);
@@ -364,6 +366,7 @@ export function WorkflowPipelineEditor({
           onUpdate={(updates) => onUpdateStep(selectedStep.id, updates)}
           onRemove={() => handleRemoveStep(selectedStep.id)}
           readOnly={readOnly}
+          onSessionConfigResolutionPendingChange={onSessionConfigResolutionPendingChange}
         />
       )}
     </div>

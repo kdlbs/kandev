@@ -51,6 +51,7 @@
   "delete": "删除",
   "deleteWatchConfirm": "删除此监控？",
   "description": "描述",
+  "descriptionFallback": "（无描述）",
   "disable": "禁用",
   "disabled": "已禁用",
   "discussion": "讨论",

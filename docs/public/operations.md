@@ -67,10 +67,10 @@ curl -fsS http://127.0.0.1:38429/health
 After startup it returns HTTP 200 with:
 
 ```json
-{"status":"ok","service":"kandev","mode":"websocket+http"}
+{"status":"ok","service":"kandev","mode":"websocket+http","version":"1.2.3"}
 ```
 
-It returns HTTP 503 with `status: "starting"` until routes, the agent registry, and the listener are ready. The supplied Kubernetes probes use this endpoint.
+It returns HTTP 503 with `status: "starting"` (plus the same `version`) until routes, the agent registry, and the listener are ready. The supplied Kubernetes probes use this endpoint. `/health` is unauthenticated even when auth is enabled, so it's also the credential-free way for monitoring to read the running version — no need to authenticate to **System > About** just to check what build is deployed.
 
 For application diagnostics, open **Settings > System > Status** or request:
 

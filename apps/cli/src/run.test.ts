@@ -5,7 +5,12 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getBinaryName } from "./platform";
-import { attachRingBuffer, cleanOldReleases, findCachedRelease } from "./run";
+import {
+  attachRingBuffer,
+  buildReleaseLaunchOptions,
+  cleanOldReleases,
+  findCachedRelease,
+} from "./run";
 
 // Mock CACHE_DIR to use a temp directory.
 const mockCacheDir = { value: "" };
@@ -219,5 +224,25 @@ describe("attachRingBuffer", () => {
   it("returns empty string when stream is null", () => {
     const read = attachRingBuffer(null);
     expect(read()).toBe("");
+  });
+});
+
+describe("buildReleaseLaunchOptions", () => {
+  it("preserves the explicit backend port source for release launches", () => {
+    expect(
+      buildReleaseLaunchOptions({
+        runtimeVersion: "v1.2.3",
+        backendPort: 18080,
+        backendPortSource: "KANDEV_BACKEND_PORT",
+        verbose: true,
+        debug: true,
+      }),
+    ).toEqual({
+      runtimeVersion: "v1.2.3",
+      backendPort: 18080,
+      backendPortSource: "KANDEV_BACKEND_PORT",
+      verbose: true,
+      debug: true,
+    });
   });
 });

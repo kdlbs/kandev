@@ -60,7 +60,7 @@ type Controller struct {
 	automationDeps  AutomationDependencyChecker
 	mcpService      *mcpconfig.Service
 	modelCache      *modelfetcher.Cache
-	hostUtility     *hostutility.Manager
+	hostUtility     hostUtilityProvider
 	jobStore        *JobStore
 	updateJobStore  *AgentUpdateJobStore
 	runtimeUpdater  RuntimeUpdater
@@ -183,6 +183,16 @@ type SessionChecker interface {
 
 type RoutingTierDependencyChecker interface {
 	ListRoutingTierReferencesByAgentProfile(ctx context.Context, profileID string) ([]RoutingTierReference, error)
+}
+
+type hostUtilityProvider interface {
+	Get(agentType string) (hostutility.AgentCapabilities, bool)
+	Refresh(ctx context.Context, agentType string) (hostutility.AgentCapabilities, error)
+	ResolveModelConfig(
+		ctx context.Context,
+		agentType string,
+		req hostutility.ModelConfigResolutionRequest,
+	) (hostutility.ModelConfigResolution, error)
 }
 
 func NewController(repo store.Repository, discoveryRegistry *discovery.Registry, agentRegistry *registry.Registry, sessionChecker SessionChecker, log *logger.Logger,

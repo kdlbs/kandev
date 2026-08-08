@@ -239,6 +239,7 @@ type WorkflowCardBodyProps = {
     handleReorderWorkflowSteps: (steps: WorkflowStep[]) => Promise<void>;
   };
   readOnly: boolean;
+  onSessionConfigResolutionPendingChange: (pending: boolean) => void;
 };
 
 function WorkflowNameField({
@@ -289,6 +290,7 @@ function WorkflowCardBody({
   isImproveWorkspace,
   stepActions,
   readOnly,
+  onSessionConfigResolutionPendingChange,
 }: WorkflowCardBodyProps) {
   const { t } = useTranslation();
   const healthyProfiles = useHealthyAgentProfiles(workflow.agent_profile_id);
@@ -360,6 +362,7 @@ function WorkflowCardBody({
             onRemoveStep={stepActions.handleRemoveWorkflowStep}
             onReorderSteps={stepActions.handleReorderWorkflowSteps}
             readOnly={mutationPending || readOnly}
+            onSessionConfigResolutionPendingChange={onSessionConfigResolutionPendingChange}
           />
         )}
       </div>
@@ -453,6 +456,7 @@ function useWorkflowCardState(props: WorkflowCardProps) {
   } = useWorkflowSteps(workflow.id, initialWorkflowSteps, toast);
   const isNewWorkflow = workflow.id.startsWith(TEMP_WORKFLOW_PREFIX);
   const mutationGuard = useWorkflowMutationGuard(workflowSteps);
+  const [sessionConfigResolutionPending, setSessionConfigResolutionPending] = useState(false);
   const stepActions = useWorkflowStepActions({
     workflow,
     isNewWorkflow,
@@ -479,6 +483,7 @@ function useWorkflowCardState(props: WorkflowCardProps) {
     onWorkflowSaved: props.onWorkflowSaved,
     onDiscardWorkflow: props.onDiscardWorkflow,
     onDeleteWorkflow: props.onDeleteWorkflow,
+    isSessionConfigResolutionPending: sessionConfigResolutionPending,
   });
   const wfDeleteHandlers = useWorkflowDeleteHandlers({
     workflow,
@@ -516,6 +521,8 @@ function useWorkflowCardState(props: WorkflowCardProps) {
     stepDeleteHandlers,
     stepsForStepMigration,
     ...workflowDraft,
+    sessionConfigResolutionPending,
+    setSessionConfigResolutionPending,
   };
 }
 
@@ -544,6 +551,7 @@ export function WorkflowCard(props: WorkflowCardProps) {
             isImproveWorkspace={props.isImproveWorkspace}
             stepActions={s.stepActions}
             readOnly={s.readOnly}
+            onSessionConfigResolutionPendingChange={s.setSessionConfigResolutionPending}
           />
           <WorkflowCardHeaderActions
             workflowId={workflow.id}

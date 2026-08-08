@@ -2,22 +2,20 @@ package websocket
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/netutil"
 )
 
 // TunnelInfo describes an active tunnel binding.
@@ -139,7 +137,7 @@ func (m *TunnelManager) resolveAndBind(cacheKey, sessionID string, tunnelPort in
 	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", tunnelPort))
 	if err != nil {
 		cleanup()
-		if isAddrInUse(err) {
+		if netutil.IsAddrInUse(err) {
 			return nil, "", nil, fmt.Errorf("port %d is already in use, choose a different port", tunnelPort)
 		}
 		return nil, "", nil, fmt.Errorf("failed to bind tunnel port %d: %w", tunnelPort, err)
@@ -253,17 +251,6 @@ func (m *TunnelManager) Shutdown() {
 	if len(entries) > 0 {
 		m.logger.Info("shutdown all tunnels", zap.Int("count", len(entries)))
 	}
-}
-
-func isAddrInUse(err error) bool {
-	var opErr *net.OpError
-	if errors.As(err, &opErr) {
-		var sysErr *os.SyscallError
-		if errors.As(opErr.Err, &sysErr) {
-			return errors.Is(sysErr.Err, syscall.EADDRINUSE)
-		}
-	}
-	return false
 }
 
 func (m *TunnelManager) removeTunnel(cacheKey string) {
