@@ -359,6 +359,18 @@ func TestClassifyCreateTaskErrorMapsOverlongTitleToValidation(t *testing.T) {
 	}
 }
 
+// TestClassifyCreateTaskErrorMapsInvalidExternalIDToValidation pins that a
+// malformed external_id (control character, or over the byte limit) is
+// classified as a validation error, not an internal error. Without this
+// case, handleCreateTask's error path (code != ws.ErrorCodeInternalError
+// gates whether the real message is shown) replaces the actual validation
+// reason with a generic "Failed to create task" message.
+func TestClassifyCreateTaskErrorMapsInvalidExternalIDToValidation(t *testing.T) {
+	if got := classifyCreateTaskError(service.ErrExternalIDInvalid); got != ws.ErrorCodeValidation {
+		t.Fatalf("expected ErrorCodeValidation, got %q", got)
+	}
+}
+
 func TestHandleCreateTask_RejectsOverlongTitle(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	ctx := context.Background()
