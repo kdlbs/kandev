@@ -221,6 +221,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 
 | Spec | Status |
 |---|---|
+| [mock-agent-slow-duration](mock-agent-slow-duration/spec.md) | building |
 | [session-subscription-recovery](session-subscription-recovery/spec.md) | draft |
 | [npm-nightly-channel](npm-nightly-channel/spec.md) | shipped |
 | [agent-resume-runtime-recovery](agent-resume-runtime-recovery/spec.md) | shipped |
