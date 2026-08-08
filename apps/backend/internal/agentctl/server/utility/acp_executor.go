@@ -1,6 +1,7 @@
 package utility
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -83,6 +84,11 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 	cmd.Env = sanitizeEnvForAgent(req.InferenceConfig)
 	configureACPCommand(cmd, e.logger)
 
+	// Same reasoning as the probe: without this the child's own account of why
+	// it died is discarded.
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return &PromptResponse{Success: false, Error: fmt.Sprintf("stdin pipe: %v", err)}, nil
@@ -112,6 +118,10 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 	}
 	response, err := e.executeACPSession(ctx, stdin, stdout, workDir, req.AgentID, req.Prompt, model, modelConfigOptions, req.Mode, mcpServers)
 	if err != nil {
+		e.logger.Error("ACP inference failed",
+			zap.String("agent_id", req.AgentID),
+			zap.Error(err),
+			zap.String("stderr", stderrTail(&stderr)))
 		return &PromptResponse{
 			Success:    false,
 			Error:      err.Error(),
@@ -188,7 +198,7 @@ func (e *ACPInferenceExecutor) executeACPSession(
 		},
 	})
 	if err != nil {
-		return "", fmt.Errorf("ACP initialize failed: %w", err)
+		return "", describeACPFailure(ctx, "initialize", err)
 	}
 
 	// Create new session. ACP requires McpServers to be a non-nil slice;
@@ -201,7 +211,7 @@ func (e *ACPInferenceExecutor) executeACPSession(
 		McpServers: mcpServers,
 	})
 	if err != nil {
-		return "", fmt.Errorf("ACP session/new failed: %w", err)
+		return "", describeACPFailure(ctx, "session/new", err)
 	}
 
 	sessionID := sessionResp.SessionId
@@ -371,6 +381,14 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	cmd.Env = sanitizeEnvForAgent(req.InferenceConfig)
 	configureACPCommand(cmd, e.logger)
 
+	// Keep the child's stderr. A probe that dies before answering otherwise
+	// reports only "peer disconnected before response", and the reason the
+	// process gave — an npx resolution failure, a missing runtime, a panic —
+	// goes to the void, leaving the UI's "check agent logs" pointing at logs
+	// that never carried it.
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return &ProbeResponse{Success: false, Error: fmt.Sprintf("stdin pipe: %v", err)}, nil
@@ -391,6 +409,14 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 
 	resp, err := e.probeACPSession(ctx, stdin, stdout, workDir, req.AgentID)
 	if err != nil {
+		// The tail goes to the log rather than into the response: handlers
+		// deliberately keep subprocess diagnostics and tmp paths out of client
+		// payloads. An empty tail is itself a result — the child produced no
+		// diagnostics, rather than producing some we failed to record.
+		e.logger.Error("ACP probe failed",
+			zap.String("agent_id", req.AgentID),
+			zap.Error(err),
+			zap.String("stderr", stderrTail(&stderr)))
 		return &ProbeResponse{
 			Success:    false,
 			Error:      err.Error(),
@@ -567,7 +593,7 @@ func (e *ACPInferenceExecutor) probeACPSession(
 		},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("ACP initialize failed: %w", err)
+		return nil, describeACPFailure(ctx, "initialize", err)
 	}
 
 	sessionResp, err := conn.NewSession(ctx, acp.NewSessionRequest{
@@ -575,7 +601,7 @@ func (e *ACPInferenceExecutor) probeACPSession(
 		McpServers: []acp.McpServer{},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("ACP session/new failed: %w", err)
+		return nil, describeACPFailure(ctx, "session/new", err)
 	}
 
 	// Wait up to 1s for the available_commands_update notification. Agents
@@ -852,6 +878,41 @@ var allowedProbeCommands = map[string]string{
 // the given command. Returns the empty string if the command is not allowed.
 func resolveProbeCommand(name string) string {
 	return allowedProbeCommands[filepath.Base(name)]
+}
+
+// stderrTailLimit bounds how much of a spawned agent's stderr reaches the log:
+// enough for an npm failure or the head of a panic, small enough that a chatty
+// agent cannot flood it.
+const stderrTailLimit = 4 << 10
+
+// stderrTail returns the trailing stderrTailLimit bytes of buf, trimmed. The
+// tail rather than the head, because what a dying process printed last is what
+// explains it.
+func stderrTail(buf *bytes.Buffer) string {
+	out := buf.Bytes()
+	if len(out) > stderrTailLimit {
+		out = out[len(out)-stderrTailLimit:]
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// describeACPFailure names an expired or cancelled context as the cause instead
+// of reporting whatever the SDK saw on the wire.
+//
+// When the deadline fires, cleanup kills the child's process group; the ACP
+// client then hits EOF on stdout and returns "peer disconnected before
+// response". That makes a plain timeout indistinguishable from an agent that
+// crashed — two failures calling for opposite responses, one of which is to
+// wait longer and the other to go read the agent's own output.
+func describeACPFailure(ctx context.Context, phase string, err error) error {
+	switch {
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+		return fmt.Errorf("ACP %s timed out: %w", phase, ctx.Err())
+	case errors.Is(ctx.Err(), context.Canceled):
+		return fmt.Errorf("ACP %s cancelled: %w", phase, ctx.Err())
+	default:
+		return fmt.Errorf("ACP %s failed: %w", phase, err)
+	}
 }
 
 // sanitizeEnvForAgent returns a child-process environment with agent-declared

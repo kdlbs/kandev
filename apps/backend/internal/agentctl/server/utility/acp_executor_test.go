@@ -1,7 +1,10 @@
 package utility
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"maps"
 	"path/filepath"
 	"slices"
@@ -12,6 +15,53 @@ import (
 )
 
 func ptr[T any](v T) *T { return &v }
+
+// A probe that outlives its deadline is killed by cleanup, so the ACP client
+// reports the dead pipe rather than the deadline. Reporting that verbatim sends
+// readers after a crashed agent that never crashed.
+func TestDescribeACPFailureNamesTheContextCause(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := describeACPFailure(ctx, "initialize", errors.New("peer disconnected before response"))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want it to wrap context.Canceled", err)
+	}
+	if strings.Contains(err.Error(), "peer disconnected") {
+		t.Fatalf("err = %q, want the context cause instead of the wire symptom", err)
+	}
+}
+
+func TestDescribeACPFailureKeepsGenuineErrors(t *testing.T) {
+	t.Parallel()
+
+	inner := errors.New("peer disconnected before response")
+	err := describeACPFailure(context.Background(), "initialize", inner)
+	if !errors.Is(err, inner) {
+		t.Fatalf("err = %v, want the original failure preserved", err)
+	}
+	if strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("err = %q, must not claim a timeout while the context is live", err)
+	}
+}
+
+func TestStderrTailKeepsTheEnd(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	buf.WriteString(strings.Repeat("a", stderrTailLimit))
+	buf.WriteString("\nnpm error code ECONNREFUSED")
+
+	tail := stderrTail(&buf)
+	if len(tail) > stderrTailLimit {
+		t.Fatalf("tail is %d bytes, want at most %d", len(tail), stderrTailLimit)
+	}
+	if !strings.HasSuffix(tail, "npm error code ECONNREFUSED") {
+		t.Fatalf("tail = %q, want the final line kept", tail)
+	}
+}
 
 func TestProbeConfigOptions_PreservesDescriptions(t *testing.T) {
 	t.Parallel()
