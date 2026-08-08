@@ -283,7 +283,11 @@ func (h *Handlers) handleReorderWorkflowSteps(ctx context.Context, msg *ws.Messa
 const workflowStepEventSource = "mcp-handlers"
 
 // workflowStepEvents returns the shared workflow-step publisher for this
-// surface. It is built per call so a late-wired event bus is still picked up.
+// surface. Unlike the REST handlers, this Handlers value is assembled field by
+// field — NewHandlers plus the Set* wiring, and tests build it as a struct
+// literal — so eventBus is not final at construction. Building the publisher
+// at publish time reads whatever bus is actually wired; the allocation is
+// negligible next to the bus dispatch.
 func (h *Handlers) workflowStepEvents() *stepevents.Publisher {
 	return stepevents.NewPublisher(h.eventBus, workflowStepEventSource, h.logger)
 }

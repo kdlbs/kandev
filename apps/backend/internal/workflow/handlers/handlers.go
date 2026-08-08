@@ -21,19 +21,25 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
+// stepEventSource labels workflow-step events published by this surface.
+const stepEventSource = "workflow-handlers"
+
 // Handlers manages workflow HTTP and WebSocket handlers
 type Handlers struct {
 	controller *controller.Controller
 	eventBus   bus.EventBus
+	stepEvents *stepevents.Publisher
 	logger     *logger.Logger
 }
 
 // NewHandlers creates new workflow handlers
 func NewHandlers(ctrl *controller.Controller, eventBus bus.EventBus, log *logger.Logger) *Handlers {
+	scoped := log.WithFields(zap.String("component", "workflow-handlers"))
 	return &Handlers{
 		controller: ctrl,
 		eventBus:   eventBus,
-		logger:     log.WithFields(zap.String("component", "workflow-handlers")),
+		stepEvents: stepevents.NewPublisher(eventBus, stepEventSource, scoped),
+		logger:     scoped,
 	}
 }
 
@@ -240,21 +246,12 @@ func (h *Handlers) httpDeleteStep(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-// stepEventSource labels workflow-step events published by this surface.
-const stepEventSource = "workflow-handlers"
-
-// stepEvents returns the shared workflow-step publisher for this surface. It is
-// built per call so a late-wired event bus is still picked up.
-func (h *Handlers) stepEvents() *stepevents.Publisher {
-	return stepevents.NewPublisher(h.eventBus, stepEventSource, h.logger)
-}
-
 func (h *Handlers) publishWorkflowStepEvent(ctx context.Context, eventType string, step *models.WorkflowStep) {
-	h.stepEvents().Publish(ctx, eventType, step)
+	h.stepEvents.Publish(ctx, eventType, step)
 }
 
 func (h *Handlers) publishWorkflowStepEvents(ctx context.Context, eventType string, steps []*models.WorkflowStep) {
-	h.stepEvents().PublishAll(ctx, eventType, steps)
+	h.stepEvents.PublishAll(ctx, eventType, steps)
 }
 
 type httpReorderStepsRequest struct {

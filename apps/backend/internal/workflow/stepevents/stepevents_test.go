@@ -115,11 +115,15 @@ func TestPayloadCoversEveryModelField(t *testing.T) {
 	got := payload(fullStep())
 	stepType := reflect.TypeOf(models.WorkflowStep{})
 
+	exported := 0
 	for i := range stepType.NumField() {
 		field := stepType.Field(i)
+		// Only exported fields reach the wire, so unexported ones (a cached
+		// value, a mutex) must not count toward the expected key total.
 		if !field.IsExported() {
 			continue
 		}
+		exported++
 		key := strings.Split(field.Tag.Get("json"), ",")[0]
 		if key == "" || key == "-" {
 			t.Fatalf("field %s has no usable json tag", field.Name)
@@ -128,9 +132,9 @@ func TestPayloadCoversEveryModelField(t *testing.T) {
 			t.Errorf("payload is missing %q (models.WorkflowStep.%s)", key, field.Name)
 		}
 	}
-	if len(got) != stepType.NumField() {
-		t.Errorf("payload has %d keys, model has %d fields — payload carries a key with no model field",
-			len(got), stepType.NumField())
+	if len(got) != exported {
+		t.Errorf("payload has %d keys, model has %d exported fields — payload carries a key with no model field",
+			len(got), exported)
 	}
 }
 
