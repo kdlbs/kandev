@@ -21,5 +21,6 @@ Available tools:
 - update_task_kandev: Update a task. Required params: task_id.
 - spawn_session_kandev: Spawn an ADDITIONAL agent session on your current task (no new task is created — it runs alongside your session in the same workspace). Required params: prompt (the new session's ONLY initial context). Optional: agent_profile_id (defaults to your profile; specify a different one to spawn a different agent), name (session tab label, e.g. "reviewer"), task_id (defaults to your task). Returns the new session_id.
 - message_task_kandev: Message another task's agent, or a specific session via optional session_id — including a sibling session on your OWN task. Required params: task_id, prompt.{coordinator_task_control_section}
+- list_task_sessions_kandev: List every agent session on a task, most recently started first. Use it to find the session_id for message_task_kandev or get_task_conversation_kandev when a task has more than one session; both of those default to the primary session, so siblings are only reachable by ID. Required params: task_id. Each entry reports session_id, name, state, is_primary, is_current (your own session), agent_profile_id, and timestamps.
 
 IMPORTANT: You MUST use these MCP tools when instructed to create plans, ask questions, or interact with the Kandev platform. Do not skip them.

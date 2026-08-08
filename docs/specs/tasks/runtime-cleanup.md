@@ -1,6 +1,7 @@
 ---
 status: draft
 created: 2026-06-22
+updated: 2026-08-08
 owner: cfl
 ---
 
@@ -49,6 +50,13 @@ worktrees, or executor rows behind and the machine slowly runs out of memory.
   window before reporting shutdown complete.
 - Backend startup reconciles stale runtime rows for archived/deleted/missing task
   state and attempts safe cleanup instead of treating the rows as live sessions.
+- Startup reconciliation classifies each stop result and row liveness before it
+  chooses cleanup or preservation. Already-absent, confirmed-dead local runtimes
+  are removed idempotently without repeated warnings. Alive, unknown, remote, or
+  generically failed rows remain preserved.
+- Expected fail-closed preservation is reported as a bounded structured startup
+  summary with counts and safe classification fields. Unexpected generic stop
+  failures retain individual warning records.
 - Cleanup is idempotent: repeating archive/delete cleanup, startup reconciliation,
   or explicit session stop does not fail because the process, task, session, or
   worktree was already removed.
@@ -231,6 +239,13 @@ The durable cleanup job wraps that resource lifecycle:
 - If startup reconciliation finds rows for archived tasks, deleted tasks, missing
   sessions, or terminal sessions with no live runtime, it removes only rows that
   are positively confirmed safe to remove.
+- If startup reconciliation receives a typed runtime-not-found result for a local
+  row with no persisted process liveness handle, it classifies liveness as
+  Unknown and preserves the row. It summarizes that expected fail-closed outcome
+  instead of emitting one ambiguous warning per legacy row.
+- Startup diagnostics identify the runtime, session state, liveness class,
+  presence of a local PID, stop-error class, disposition, and aggregate count.
+  They never include resume tokens, credentials, or provider payloads.
 - If cleanup intent or its resource snapshot cannot be persisted, the lifecycle
   mutation fails before destructive cleanup begins; Kandev does not rely on an
   unrecorded background goroutine.
@@ -246,6 +261,9 @@ The durable cleanup job wraps that resource lifecycle:
   attempted for every runtime row owned by the task.
 - Startup reconciliation is allowed to recover from a previous backend crash by
   reattempting cleanup for stale runtime rows.
+- A typed-not-found, confirmed-dead local row removed during one startup does not
+  reappear or produce the same cleanup warning on the next startup. Rows with
+  Unknown liveness remain durable until Kandev can prove safe removal.
 - Pending and retryable task cleanup jobs survive restart and resume independently
   of whether optional scheduled storage maintenance is enabled.
 - Terminal failed task cleanup jobs survive restart for diagnosis but do not
@@ -275,6 +293,18 @@ The durable cleanup job wraps that resource lifecycle:
 - **GIVEN** the backend restarts with an `executors_running` row for an archived
   task, **WHEN** startup reconciliation runs, **THEN** it attempts cleanup for the
   row instead of treating the archived task as active.
+- **GIVEN** a missing, terminal, or failed session whose local runtime is already
+  absent and whose persisted PID is confirmed dead, **WHEN** startup
+  reconciliation receives a typed not-found result, **THEN** it safely removes or
+  repairs the row without an individual warning, and a second reconciliation has
+  no stale row to process.
+- **GIVEN** a typed not-found result for an alive local row, a local row without a
+  liveness handle, or a remote row, **WHEN** startup reconciliation runs, **THEN**
+  it preserves the row and includes the safe disposition in a bounded startup
+  summary.
+- **GIVEN** a stop fails with a generic error, **WHEN** startup reconciliation
+  runs, **THEN** it preserves the row and emits an individual structured warning
+  rather than reclassifying the runtime as absent.
 - **GIVEN** an `executors_running` row whose task session is missing and whose
   local liveness handle refers to a dead host process, **WHEN** startup
   reconciliation stops it and the stop reports the execution is not found, **THEN**
@@ -353,3 +383,7 @@ The durable cleanup job wraps that resource lifecycle:
 - New user-facing archive/delete controls.
 - Changing the task/session state model beyond the cleanup guarantees described
   here.
+
+## Implementation plan
+
+[Backend failure containment](../../plans/backend-failure-containment/plan.md)

@@ -546,36 +546,7 @@ func (a *Adapter) clearCodexSubagentCorrelationsLocked(sessionID string) {
 }
 
 func cloneSubagentPayload(payload *streams.NormalizedPayload) *streams.NormalizedPayload {
-	if payload == nil || payload.SubagentTask() == nil {
-		return payload
-	}
-	src := payload.SubagentTask()
-	clone := streams.NewSubagentTask(src.Description, src.Prompt, src.SubagentType)
-	dst := clone.SubagentTask()
-	dst.Status = src.Status
-	dst.AgentID = src.AgentID
-	dst.Model = src.Model
-	dst.ChildSessionID = src.ChildSessionID
-	dst.DurationMs = src.DurationMs
-	dst.TotalTokens = src.TotalTokens
-	if src.ToolUseCount != nil {
-		count := *src.ToolUseCount
-		dst.ToolUseCount = &count
-	}
-	dst.ResultText = src.ResultText
-	dst.IsAsync = src.IsAsync
-	dst.OutputFile = src.OutputFile
-	dst.CanReadOutputFile = src.CanReadOutputFile
-	dst.SetIsAuggie(src.IsAuggie())
-	if background := payload.BackgroundWork(); background != nil {
-		clone.SetBackgroundWorkIdentity(
-			background.Kind,
-			background.WorkID,
-			background.Detached,
-			background.Ended,
-		)
-	}
-	return clone
+	return payload.Snapshot()
 }
 
 func mergeCodexSubagentPayload(current, candidate *streams.NormalizedPayload) {

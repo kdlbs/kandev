@@ -10,6 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/costs"
@@ -107,10 +108,11 @@ type TaskStatusChangedData struct {
 // taskless lifecycle events; the field is reserved for PR 2 of
 // office-heartbeat-rework.
 type AgentLifecycleData struct {
-	TaskID       string `json:"task_id"`
-	AgentID      string `json:"agent_id"`
-	SessionID    string `json:"session_id"`
-	ErrorMessage string `json:"error_message"`
+	TaskID        string                 `json:"task_id"`
+	AgentID       string                 `json:"agent_id"`
+	SessionID     string                 `json:"session_id"`
+	ErrorMessage  string                 `json:"error_message"`
+	ProviderError *streams.ProviderError `json:"provider_error,omitempty"`
 }
 
 type PromptUsageData struct {
@@ -454,7 +456,7 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 		"session_id":    data.SessionID,
 		"error_message": data.ErrorMessage,
 	})
-	if s.tryPostStartFallback(ctx, run, data.ErrorMessage) {
+	if s.tryPostStartFallback(ctx, run, data.ErrorMessage, data.ProviderError) {
 		return nil
 	}
 	// Office failure path (v1): every agent error is terminal. The
@@ -469,6 +471,7 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 // dispatcher requeued the run; the caller should NOT escalate.
 func (s *Service) tryPostStartFallback(
 	ctx context.Context, run *models.Run, errorMessage string,
+	providerError *streams.ProviderError,
 ) bool {
 	rd := s.routingDispatcher
 	if rd == nil {
@@ -483,7 +486,7 @@ func (s *Service) tryPostStartFallback(
 			zap.String("run_id", run.ID), zap.Error(err))
 		return false
 	}
-	handled, err := rd.HandlePostStartFailure(ctx, run, agent, errorMessage)
+	handled, err := rd.HandlePostStartFailure(ctx, run, agent, errorMessage, providerError)
 	if err != nil {
 		s.logger.Warn("post-start fallback failed",
 			zap.String("run_id", run.ID), zap.Error(err))

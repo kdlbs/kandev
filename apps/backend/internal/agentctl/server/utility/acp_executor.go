@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -1161,8 +1162,28 @@ var allowedProbeCommands = map[string]string{
 
 // resolveProbeCommand validates and returns a hard-coded executable name for
 // the given command. Returns the empty string if the command is not allowed.
+//
+// An agent launched from an absolute path arrives here carrying the executable
+// suffix Windows requires — "mock-agent.exe" — which never matches the bare
+// allow-list key, so its probe is refused before it can spawn.
+//
+// Only ".exe" is trimmed, and only on Windows. That is the suffix the Go build
+// emits, so it is the only one an allow-listed binary can arrive with; trimming
+// whatever filepath.Ext returns would instead let "mock-agent.cmd" or
+// "mock-agent.txt" reach an allow-listed entry. Unix executables carry no such
+// convention at all, and trimming there would let "opencode.sh" pass as
+// "opencode".
 func resolveProbeCommand(name string) string {
-	return allowedProbeCommands[filepath.Base(name)]
+	base := filepath.Base(name)
+	if resolved, ok := allowedProbeCommands[base]; ok {
+		return resolved
+	}
+	if runtime.GOOS == "windows" {
+		if ext := filepath.Ext(base); strings.EqualFold(ext, ".exe") {
+			return allowedProbeCommands[strings.TrimSuffix(base, ext)]
+		}
+	}
+	return ""
 }
 
 // stderrTailLimit bounds how much of a spawned agent's stderr reaches the log:

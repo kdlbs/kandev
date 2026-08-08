@@ -6,9 +6,11 @@ import (
 )
 
 const (
-	codexAgentID                 = "codex-acp"
-	codexCollaborationSpawnAgent = "spawnAgent"
-	codexSubagentStarted         = "started"
+	codexAgentID                   = "codex-acp"
+	codexCollaborationSpawnAgent   = "spawnAgent"
+	codexSubagentStarted           = "started"
+	codexSystemErrorType           = "systemError"
+	codexModelCapacityErrorMessage = "Selected model is at capacity. Please try a different model."
 )
 
 type codexSubagentSignal uint8
@@ -25,6 +27,32 @@ const (
 // "started" activity are creation signals.
 func newCodexACPDialect() acpDialect {
 	return acpDialect{subagentFrame: parseCodexSubagentFrame}
+}
+
+// codexSystemErrorMeta reports the explicit thread-status marker emitted by
+// codex-acp when a prompt failed at the provider boundary. The marker is
+// implementation metadata, so keep its shape local to the Codex dialect and
+// never expose the raw metadata to routing or the UI.
+func codexSystemErrorMeta(meta map[string]any) bool {
+	status, ok := nestedMap(meta, "threadStatus")
+	if !ok {
+		codex, codexOK := nestedMap(meta, "codex")
+		if !codexOK {
+			return false
+		}
+		status, ok = nestedMap(codex, "threadStatus")
+	}
+	if !ok {
+		return false
+	}
+	typeValue, _ := status["type"].(string)
+	return typeValue == codexSystemErrorType
+}
+
+func codexModelCapacityMessage(text string) bool {
+	normalized := strings.ToLower(strings.Join(strings.Fields(text), " "))
+	return strings.Contains(normalized, "selected model is at capacity") ||
+		strings.Contains(normalized, "model is at capacity")
 }
 
 func parseCodexSubagentFrame(meta map[string]any, _ string, rawInput any) (subagentFrame, bool) {

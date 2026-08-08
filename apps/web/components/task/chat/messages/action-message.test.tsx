@@ -39,14 +39,14 @@ function retryMessage(overrides: Partial<Message> = {}): Message {
     session_id: toSessionId("sess-1"),
     task_id: toTaskId("task-1"),
     author_type: "system",
-    content: "Provider overloaded — retrying in 5s (attempt 1/3)",
+    content: "Provider overloaded — retrying in 5s (attempt 1/5)",
     type: "status",
     created_at: "2026-05-30T00:00:00Z",
     metadata: {
       variant: "warning",
       retrying: true,
       attempt: 1,
-      max_attempts: 3,
+      max_attempts: 5,
       retry_in_seconds: 5,
       session_id: "sess-1",
       task_id: "task-1",
@@ -65,6 +65,19 @@ function retryMessage(overrides: Partial<Message> = {}): Message {
     },
     ...overrides,
   } as Message;
+}
+
+function transientRetryMetadata(attempt: number, retryInSeconds: number) {
+  return {
+    variant: "warning",
+    retrying: true,
+    attempt,
+    max_attempts: 5,
+    retry_in_seconds: retryInSeconds,
+    session_id: "sess-1",
+    task_id: "task-1",
+    actions: [],
+  };
 }
 
 function recoveryMessage(withParams = false): Message {
@@ -141,9 +154,42 @@ function renderAction(
 describe("ActionMessage — transient retry (warning variant)", () => {
   it("renders the retrying copy in amber, not red", () => {
     renderAction(retryMessage(), "WAITING_FOR_INPUT");
-    const text = screen.getByText(/retrying in 5s \(attempt 1\/3\)/i);
-    expect(text.className).toContain("text-amber-600");
-    expect(text.className).not.toContain("text-red-600");
+    const text = screen.getByLabelText("Retry countdown");
+    expect(text.textContent).toMatch(/retrying in 0:0[45]/i);
+    expect(text.parentElement?.className).toContain("text-amber-600");
+    expect(text.parentElement?.className).not.toContain("text-red-600");
+  });
+
+  it("renders a localized countdown from the persisted retry deadline", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-08T12:00:00.000Z"));
+    try {
+      renderAction(
+        retryMessage({
+          content: "Provider error",
+          metadata: {
+            variant: "warning",
+            retrying: true,
+            attempt: 1,
+            max_attempts: 5,
+            retry_at: "2026-08-08T12:01:05.000Z",
+            failure_code: "model_capacity",
+            provider_name: "Codex",
+            model_id: "gpt-5",
+            session_id: "sess-1",
+            task_id: "task-1",
+            actions: [],
+          },
+        }),
+        "WAITING_FOR_INPUT",
+      );
+      expect(screen.getByTestId("transient-retry-card")).toBeTruthy();
+      expect(screen.getByText(/retrying in 1:05/i)).toBeTruthy();
+      expect(screen.getByText(/Codex · gpt-5/i)).toBeTruthy();
+      expect(screen.getByText(/attempt 1 of 5/i)).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("Cancel fires a session.recover ws_request with action cancel_retry", async () => {
@@ -198,6 +244,27 @@ describe("ActionMessage — transient retry (warning variant)", () => {
 
     expect(screen.getByTestId(RESUME_TEST_ID)).toBeTruthy();
     expect(screen.getByText(RECOVERY_MESSAGE)).toBeTruthy();
+  });
+});
+
+describe("ActionMessage — retry schedule updates", () => {
+  it("resets the fallback countdown when a later retry schedule arrives", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-08T12:00:00.000Z"));
+    try {
+      const { rerender } = renderAction(
+        retryMessage({ metadata: transientRetryMetadata(1, 5) }),
+        "WAITING_FOR_INPUT",
+      );
+      expect(screen.getByText(/retrying in 0:05/i)).toBeTruthy();
+      rerender(
+        <ActionMessage comment={retryMessage({ metadata: transientRetryMetadata(2, 10) })} />,
+      );
+      expect(screen.getByText(/retrying in 0:10/i)).toBeTruthy();
+      expect(screen.getByText(/attempt 2 of 5/i)).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

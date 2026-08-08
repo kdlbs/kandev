@@ -165,12 +165,14 @@ export type StatusMetadata = {
   message?: string;
   variant?: "default" | "warning" | "error";
   cancelled?: boolean;
-  // Transient provider-error (529 Overloaded) retry state. Present on the
-  // yellow "retrying" status message the orchestrator emits during backoff.
+  // Transient provider-error retry state. Present on the yellow "retrying"
+  // status message the orchestrator emits during backoff.
   retrying?: boolean;
   attempt?: number;
   max_attempts?: number;
   retry_in_seconds?: number;
+  retry_at?: string;
+  failure_code?: string;
   // Running-only action notices are hidden once the session settles. They use
   // compact neutral presentation instead of the normal recovery/error card.
   action_visibility?: "running";

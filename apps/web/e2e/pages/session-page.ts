@@ -615,9 +615,9 @@ export class SessionPage {
     return this.page.getByTestId("recovery-cancel-retry-button");
   }
 
-  /** The yellow "Provider overloaded — retrying…" status card text. */
+  /** The yellow provider-error retry status card. */
   transientRetryCard(): Locator {
-    return this.chat.getByText(/Provider overloaded — retrying/i);
+    return this.activeChat().getByTestId("transient-retry-card");
   }
 
   /** Context reset divider shown in chat after resetting agent context. */

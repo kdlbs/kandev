@@ -24,7 +24,6 @@ import (
 
 	"go.uber.org/zap"
 
-	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -1739,6 +1738,7 @@ func (s *Service) reconcileSessionsOnStartup(ctx context.Context) {
 
 	s.logger.Info("reconciling sessions on startup (lazy recovery)", zap.Int("count", len(runningExecutors)))
 
+	report := newStartupCleanupReport()
 	var remoteRecords []executor.RemoteStatusPollRequest
 	for _, running := range runningExecutors {
 		if models.IsRemoteExecutorType(models.ExecutorType(running.Runtime)) {
@@ -1750,8 +1750,9 @@ func (s *Service) reconcileSessionsOnStartup(ctx context.Context) {
 				Metadata:         running.Metadata,
 			})
 		}
-		s.reconcileOneSessionOnStartup(ctx, running)
+		s.reconcileOneSessionOnStartup(ctx, running, report)
 	}
+	report.flush(s.logger)
 
 	// Pre-poll remote executor status so task lists show accurate state
 	if len(remoteRecords) > 0 && s.agentManager != nil {
@@ -1760,7 +1761,7 @@ func (s *Service) reconcileSessionsOnStartup(ctx context.Context) {
 }
 
 // reconcileOneSessionOnStartup adjusts DB state for a single session without launching agents.
-func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *models.ExecutorRunning) {
+func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *models.ExecutorRunning, report *startupCleanupReport) {
 	sessionID := running.SessionID
 	if sessionID == "" {
 		return
@@ -1769,7 +1770,7 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		if isTaskSessionNotFound(err) {
-			s.handleMissingSessionOnStartup(ctx, running)
+			s.handleMissingSessionOnStartup(ctx, running, report)
 			return
 		}
 		s.logger.Warn("failed to load session for reconciliation; preserving executor record",
@@ -1781,7 +1782,7 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 	previousState := session.State
 
 	// Handle terminal and never-started states (reuse existing cleanup logic)
-	if skip := s.handleTerminalSessionOnStartup(ctx, session, running, previousState); skip {
+	if skip := s.handleTerminalSessionOnStartup(ctx, session, running, previousState, report); skip {
 		return
 	}
 	if previousState == models.TaskSessionStateCreated {
@@ -1819,6 +1820,15 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 		return
 	}
 
+	s.reconcileActiveSessionOnStartup(ctx, running, sessionID, previousState)
+}
+
+func (s *Service) reconcileActiveSessionOnStartup(
+	ctx context.Context,
+	running *models.ExecutorRunning,
+	sessionID string,
+	previousState models.TaskSessionState,
+) {
 	// Active states: STARTING, RUNNING, WAITING_FOR_INPUT
 	// Set session to WAITING_FOR_INPUT (idle, ready for lazy resume when user opens it)
 	if previousState != models.TaskSessionStateWaitingForInput {
@@ -1892,13 +1902,19 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 		zap.Bool("has_worktree", running.WorktreePath != ""))
 }
 
-func (s *Service) handleMissingSessionOnStartup(ctx context.Context, running *models.ExecutorRunning) {
+func (s *Service) handleMissingSessionOnStartup(ctx context.Context, running *models.ExecutorRunning, report *startupCleanupReport) {
 	sessionID := running.SessionID
 	executionID := strings.TrimSpace(running.AgentExecutionID)
 	if executionID == "" || s.agentManager == nil {
-		s.logger.Warn("executor record has no session and no stoppable runtime handle; preserving record",
-			zap.String("session_id", sessionID),
-			zap.String("task_id", running.TaskID))
+		decision := startupCleanupDecision{
+			disposition:    startupCleanupDispositionPreserved,
+			liveness:       processLivenessClass(s.rowLiveness(running)),
+			stopErrorClass: "missing_stop_handle",
+			expected:       true,
+		}
+		report.recordExpected(running, decision)
+		s.logger.Debug("executor record has no stoppable runtime handle; preserving record",
+			startupCleanupFields(running, decision)...)
 		return
 	}
 	if err := s.agentManager.StopAgentWithReason(ctx, executionID, "startup missing session cleanup", true); err != nil {
@@ -1908,18 +1924,20 @@ func (s *Service) handleMissingSessionOnStartup(ctx context.Context, running *mo
 		// invariant, so the orphan row does not survive restarts forever. Any
 		// other error (alive/unknown/remote row, or a non-not-found failure) is
 		// preserved and left for a later attempt.
-		if !stopReportsRuntimeAbsent(err) || s.rowLiveness(running) != models.ProcessLivenessDead {
-			s.logger.Warn("failed to stop missing-session runtime; preserving executor record",
-				zap.String("session_id", sessionID),
-				zap.String("task_id", running.TaskID),
-				zap.String("execution_id", executionID),
-				zap.Error(err))
+		decision := classifyStartupCleanup(err, s.rowLiveness(running))
+		if !decision.proceed {
+			if decision.expected {
+				report.recordExpected(running, decision)
+				s.logger.Debug("failed to stop missing-session runtime; preserving executor record",
+					startupCleanupFields(running, decision)...)
+			} else {
+				s.logger.Warn("failed to stop missing-session runtime; preserving executor record",
+					startupCleanupFields(running, decision)...)
+			}
 			return
 		}
 		s.logger.Info("missing-session runtime already gone (confirmed dead); pruning executor record",
-			zap.String("session_id", sessionID),
-			zap.String("task_id", running.TaskID),
-			zap.String("execution_id", executionID))
+			startupCleanupFields(running, decision)...)
 		s.pruneOrRepairExecutorRow(ctx, running, models.TaskSessionStateCancelled)
 		return
 	}
@@ -1929,17 +1947,6 @@ func (s *Service) handleMissingSessionOnStartup(ctx context.Context, running *mo
 			zap.String("task_id", running.TaskID),
 			zap.Error(err))
 	}
-}
-
-// stopReportsRuntimeAbsent reports whether a stop error means the runtime is
-// already gone (a typed not-found sentinel), as opposed to a transient failure.
-// Only a typed sentinel counts — a generic store/lookup error must never be
-// reinterpreted as an absent runtime. The runtime seam (lifecycleAdapter)
-// normalizes the backend lifecycle not-found sentinel to runtimeapi.ErrNotFound,
-// so reconciliation depends only on the public runtime and executor sentinels.
-func stopReportsRuntimeAbsent(err error) bool {
-	return errors.Is(err, runtimeapi.ErrNotFound) ||
-		errors.Is(err, executor.ErrExecutionNotFound)
 }
 
 func (s *Service) abandonOpenTurnsOnStartup(ctx context.Context, sessionID, reason string) {
@@ -1961,7 +1968,7 @@ func isTaskSessionNotFound(err error) bool {
 
 // handleTerminalSessionOnStartup processes sessions in terminal states during startup.
 // Returns true if the session should be skipped (no further processing needed).
-func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *models.TaskSession, running *models.ExecutorRunning, previousState models.TaskSessionState) bool {
+func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *models.TaskSession, running *models.ExecutorRunning, previousState models.TaskSessionState, report *startupCleanupReport) bool {
 	sessionID := session.ID
 	switch previousState {
 	case models.TaskSessionStateCompleted, models.TaskSessionStateCancelled:
@@ -1970,7 +1977,7 @@ func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *m
 			zap.String("task_id", session.TaskID),
 			zap.String("state", string(previousState)))
 		s.abandonOpenTurnsOnStartup(ctx, sessionID, "terminal session cleanup")
-		if !s.stopRuntimeForStartupCleanup(ctx, running, "startup terminal session cleanup") {
+		if !s.stopRuntimeForStartupCleanup(ctx, running, "startup terminal session cleanup", report) {
 			return true
 		}
 		// Resume-safety invariant: prune the row only if it is not still resumable
@@ -1980,14 +1987,14 @@ func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *m
 		s.pruneOrRepairExecutorRow(ctx, running, previousState)
 		return true
 	case models.TaskSessionStateFailed:
-		s.handleFailedSessionOnStartup(ctx, session, running)
+		s.handleFailedSessionOnStartup(ctx, session, running, report)
 		return true
 	}
 	return false
 }
 
 // handleFailedSessionOnStartup handles a failed session during startup recovery.
-func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *models.TaskSession, running *models.ExecutorRunning) {
+func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *models.TaskSession, running *models.ExecutorRunning, report *startupCleanupReport) {
 	sessionID := session.ID
 	s.abandonOpenTurnsOnStartup(ctx, sessionID, "failed session cleanup")
 	// If session failed, ensure task is in REVIEW state (not stuck IN_PROGRESS)
@@ -2015,7 +2022,7 @@ func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *mod
 		s.logger.Info("stopping failed session runtime before cleaning up executor record",
 			zap.String("session_id", sessionID),
 			zap.String("task_id", session.TaskID))
-		if !s.stopRuntimeForStartupCleanup(ctx, running, "startup failed session cleanup") {
+		if !s.stopRuntimeForStartupCleanup(ctx, running, "startup failed session cleanup", report) {
 			return
 		}
 		// Prune only subject to the resume-safety invariant (a lingering
@@ -2031,30 +2038,50 @@ func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *mod
 // leaking stale rows: a not-found stop for a confirmed-dead LOCAL runtime means
 // the runtime is already gone and cleanup proceeds; any other error
 // (alive/unknown/remote row, or a non-not-found failure) preserves the row for a
-// later attempt. A row with no stoppable handle is already stoppable-complete.
-func (s *Service) stopRuntimeForStartupCleanup(ctx context.Context, running *models.ExecutorRunning, reason string) bool {
+// later attempt. A row with no stoppable handle proceeds only when its local
+// process liveness is confirmed dead; alive and Unknown rows remain durable.
+func (s *Service) stopRuntimeForStartupCleanup(ctx context.Context, running *models.ExecutorRunning, reason string, report *startupCleanupReport) bool {
 	executionID := strings.TrimSpace(running.AgentExecutionID)
 	if executionID == "" || s.agentManager == nil {
+		liveness := s.rowLiveness(running)
+		decision := startupCleanupDecision{
+			disposition:    startupCleanupDispositionPreserved,
+			liveness:       processLivenessClass(liveness),
+			stopErrorClass: "missing_stop_handle",
+			expected:       true,
+		}
+		if liveness == models.ProcessLivenessDead {
+			decision.disposition = startupCleanupDispositionAlreadyAbsent
+			decision.proceed = true
+			decision.expected = false
+		}
+		if !decision.proceed {
+			report.recordExpected(running, decision)
+			s.logger.Debug("session runtime has no stoppable handle; preserving executor record",
+				append(startupCleanupFields(running, decision), zap.String("reason", reason))...)
+			return false
+		}
+		s.logger.Info("session runtime is confirmed dead without a stop handle; proceeding to prune/repair",
+			append(startupCleanupFields(running, decision), zap.String("reason", reason))...)
 		return true
 	}
 	err := s.agentManager.StopAgentWithReason(ctx, executionID, reason, true)
 	if err == nil {
 		return true
 	}
-	if !stopReportsRuntimeAbsent(err) || s.rowLiveness(running) != models.ProcessLivenessDead {
-		s.logger.Warn("failed to stop session runtime during startup cleanup; preserving executor record",
-			zap.String("session_id", running.SessionID),
-			zap.String("task_id", running.TaskID),
-			zap.String("execution_id", executionID),
-			zap.String("reason", reason),
-			zap.Error(err))
+	decision := classifyStartupCleanup(err, s.rowLiveness(running))
+	if !decision.proceed {
+		fields := append(startupCleanupFields(running, decision), zap.String("reason", reason))
+		if decision.expected {
+			report.recordExpected(running, decision)
+			s.logger.Debug("failed to stop session runtime during startup cleanup; preserving executor record", fields...)
+		} else {
+			s.logger.Warn("failed to stop session runtime during startup cleanup; preserving executor record", fields...)
+		}
 		return false
 	}
 	s.logger.Info("session runtime already gone (confirmed dead) during startup cleanup; proceeding to prune/repair",
-		zap.String("session_id", running.SessionID),
-		zap.String("task_id", running.TaskID),
-		zap.String("execution_id", executionID),
-		zap.String("reason", reason))
+		append(startupCleanupFields(running, decision), zap.String("reason", reason))...)
 	return true
 }
 

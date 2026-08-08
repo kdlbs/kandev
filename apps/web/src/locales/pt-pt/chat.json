@@ -120,5 +120,18 @@
   "unknownError": "Erro desconhecido",
   "useWorkspaceDefault": "Usar a pré-definição da área de trabalho...",
   "useWorkspaceDefaultOption": "Usar a pré-definição da área de trabalho",
-  "openProviderPage": "Abrir a página do fornecedor"
+  "openProviderPage": "Abrir a página do fornecedor",
+  "transientRetryReasonModelCapacity": "Modelo sem capacidade disponível",
+  "transientRetryReasonNetworkUnavailable": "Rede indisponível",
+  "transientRetryReasonProviderOverloaded": "Fornecedor sobrecarregado",
+  "transientRetryReasonProviderUnavailable": "Fornecedor temporariamente indisponível",
+  "transientRetryReasonRateLimited": "Limite de pedidos atingido",
+  "transientRetryReasonGeneric": "Erro do fornecedor",
+  "transientRetryIn": "A repetir em {{countdown}}",
+  "transientRetryNow": "A repetir agora…",
+  "transientRetryCountdownLabel": "Contagem decrescente da repetição",
+  "transientRetryAttempt": "Tentativa {{attempt}} de {{maxAttempts}}",
+  "transientRetryProviderModel": "{{provider}} · {{model}}",
+  "transientRetryProvider": "Fornecedor: {{provider}}",
+  "transientRetryModel": "Modelo: {{model}}"
 }

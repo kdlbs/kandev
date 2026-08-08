@@ -119,6 +119,21 @@ func TestSpritesStopInstancePreservesSandboxOnSessionStop(t *testing.T) {
 	}
 }
 
+func TestShouldRunExecutorCleanupIncludesCascadeTerminalReasons(t *testing.T) {
+	for _, reason := range []string{
+		StopReasonCascadeArchive,
+		StopReasonCascadeDelete,
+		StopReasonTaskTreeArchived,
+		StopReasonTaskTreeDeleted,
+	} {
+		t.Run(reason, func(t *testing.T) {
+			if !shouldRunExecutorCleanup(reason) {
+				t.Fatalf("shouldRunExecutorCleanup(%q) = false, want true", reason)
+			}
+		})
+	}
+}
+
 // TestSpritesStopThenResumeReconnects proves the end-to-end integration of
 // the resume-fast path: a preserving StopInstance leaves enough state on the
 // instance metadata for the next launch to (a) decide it's a reconnect and

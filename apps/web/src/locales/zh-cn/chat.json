@@ -119,5 +119,18 @@
   "unknownError": "未知错误",
   "useWorkspaceDefault": "使用工作区默认值…",
   "useWorkspaceDefaultOption": "使用工作区默认值",
-  "openProviderPage": "打开服务商页面"
+  "openProviderPage": "打开服务商页面",
+  "transientRetryReasonModelCapacity": "模型暂时没有可用容量",
+  "transientRetryReasonNetworkUnavailable": "网络不可用",
+  "transientRetryReasonProviderOverloaded": "服务商过载",
+  "transientRetryReasonProviderUnavailable": "服务商暂时不可用",
+  "transientRetryReasonRateLimited": "请求受限",
+  "transientRetryReasonGeneric": "服务商错误",
+  "transientRetryIn": "将在 {{countdown}} 后重试",
+  "transientRetryNow": "正在重试…",
+  "transientRetryCountdownLabel": "重试倒计时",
+  "transientRetryAttempt": "第 {{attempt}} 次，共 {{maxAttempts}} 次",
+  "transientRetryProviderModel": "{{provider}} · {{model}}",
+  "transientRetryProvider": "服务商：{{provider}}",
+  "transientRetryModel": "模型：{{model}}"
 }

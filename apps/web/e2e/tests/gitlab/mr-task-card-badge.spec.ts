@@ -74,9 +74,24 @@ async function ensureGitLabConfigured(apiClient: ApiClient, seedData: SeedData):
   });
 }
 
+/**
+ * Seeds a board card with NO agent, deliberately.
+ *
+ * `createTaskWithAgent` auto-starts a session on the start step (the Kanban
+ * template's `on_enter: auto_start_agent`), and that same step carries
+ * `on_turn_complete: move_to_step review` — so the card leaves the start
+ * column the instant the mock agent's turn ends. Every assertion here was
+ * therefore racing that transition: on a loaded CI runner the agent won and
+ * the card was already in Review, and when it moved mid-assertion the badge
+ * detached from under `.hover()` and the test burned its full timeout.
+ *
+ * The badge is a pure function of the task's linked MRs, so an agent turn
+ * adds nothing to these ACs. Without one, no turn ever completes and the
+ * card stays put.
+ */
 async function seedBoardTask(apiClient: ApiClient, seedData: SeedData, title: string) {
-  return apiClient.createTaskWithAgent(seedData.workspaceId, title, seedData.agentProfileId, {
-    description: "/e2e:simple-message",
+  return apiClient.createTask(seedData.workspaceId, title, {
+    description: "MR badge fixture task",
     workflow_id: seedData.workflowId,
     workflow_step_id: seedData.startStepId,
     repository_ids: [seedData.repositoryId],
@@ -98,9 +113,10 @@ test.describe("GitLab MR badge on the Kanban card", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
-    await expect(kanban.taskCardInColumn("Single MR badge task", seedData.startStepId)).toBeVisible(
-      { timeout: 45_000 },
-    );
+    // Located by task id rather than by (title, column): which column a card
+    // sits in is irrelevant to the badge, and coupling to it makes the
+    // assertion race any workflow transition (see seedBoardTask).
+    await expect(kanban.taskCard(task.id)).toBeVisible({ timeout: 45_000 });
 
     const icon = kanban.board.getByTestId(`mr-task-icon-${task.id}`);
     await expect(icon).toBeVisible({ timeout: 15_000 });
@@ -118,9 +134,7 @@ test.describe("GitLab MR badge on the Kanban card", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
-    await expect(kanban.taskCardInColumn("No MR badge task", seedData.startStepId)).toBeVisible({
-      timeout: 45_000,
-    });
+    await expect(kanban.taskCard(task.id)).toBeVisible({ timeout: 45_000 });
 
     await expect(kanban.board.getByTestId(`mr-task-icon-${task.id}`)).toHaveCount(0);
   });
@@ -159,9 +173,7 @@ test.describe("GitLab MR badge on the Kanban card", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
-    await expect(kanban.taskCardInColumn("Multi MR badge task", seedData.startStepId)).toBeVisible({
-      timeout: 45_000,
-    });
+    await expect(kanban.taskCard(task.id)).toBeVisible({ timeout: 45_000 });
 
     const icon = kanban.board.getByTestId(`mr-task-icon-${task.id}`);
     await expect(icon).toBeVisible({ timeout: 15_000 });
@@ -200,11 +212,9 @@ test.describe("GitLab MR badge on the Kanban card", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
-    await expect(kanban.taskCardInColumn("PR and MR badge task", seedData.startStepId)).toBeVisible(
-      { timeout: 45_000 },
-    );
+    const card = kanban.taskCard(task.id);
+    await expect(card).toBeVisible({ timeout: 45_000 });
 
-    const card = kanban.taskCardInColumn("PR and MR badge task", seedData.startStepId);
     const prIcon = card.getByTestId(`pr-task-icon-${task.id}`);
     const mrIcon = card.getByTestId(`mr-task-icon-${task.id}`);
     await expect(prIcon).toBeVisible({ timeout: 15_000 });
