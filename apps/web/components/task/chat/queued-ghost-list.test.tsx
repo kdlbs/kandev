@@ -91,6 +91,7 @@ function baseState(entries: QueuedMessage[]) {
     editEntry: vi.fn(async () => {}),
     removeEntry: vi.fn(async () => {}),
     mergeEntry: vi.fn(async () => {}),
+    reorderEntries: vi.fn(async () => {}),
     sendEntryNow: vi.fn(async () => {}),
     sendAllNow: vi.fn(async () => {}),
     cancellationPending: false,
@@ -123,6 +124,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
 });
 
 describe("QueueAffordance", () => {
@@ -526,3 +528,142 @@ describe("QueueAffordance merge wiring — dispatch", () => {
     expect(screen.queryAllByTestId(MERGE_BUTTON_ID)).toHaveLength(0);
   });
 });
+
+describe("QueueAffordance reorder", () => {
+  const GRAB_HANDLE_ID = "queue-grab-handle";
+
+  it("renders a localized grab handle on every row", () => {
+    const state = queueState([
+      entry({ id: "q-1", content: "first" }),
+      entry({ id: "q-2", content: "second" }),
+    ]);
+    useQueueMock.mockReturnValue(state);
+    renderQueue(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+    fireEvent.click(screen.getByTestId(CHIP_ID));
+
+    const handles = screen.getAllByTestId(GRAB_HANDLE_ID);
+    expect(handles).toHaveLength(2);
+    for (const handle of handles) {
+      expect(handle.getAttribute("aria-label")).toBe("Reorder queued message");
+      expect(handle.getAttribute("aria-roledescription")).toBe("sortable");
+      expect((handle as HTMLButtonElement).disabled).toBe(false);
+    }
+  });
+
+  it("hides the handle by default on a fine pointer and reveals it on hover", () => {
+    useQueueMock.mockReturnValue(queueState([entry()]));
+    renderQueue(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+    fireEvent.click(screen.getByTestId(CHIP_ID));
+
+    const handle = screen.getByTestId(GRAB_HANDLE_ID);
+    // Visibility is CSS-driven (hover reveal + coarse-pointer override); the
+    // classes encode the spec: hidden until hover on fine pointers, always
+    // visible on touch.
+    expect(handle.className).toContain("opacity-0");
+    expect(handle.className).toContain("group-hover:opacity-100");
+    expect(handle.className).toContain("[@media(pointer:coarse)]:opacity-100");
+  });
+
+  it("disables every handle while a queue mutation or cancellation is pending", () => {
+    const state = queueState([entry()], { isLoading: true, cancellationPending: true });
+    useQueueMock.mockReturnValue(state);
+    renderQueue(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+    fireEvent.click(screen.getByTestId(CHIP_ID));
+
+    const handle = screen.getByTestId(GRAB_HANDLE_ID) as HTMLButtonElement;
+    expect(handle.disabled).toBe(true);
+  });
+
+  it("removes the handle while the row is being edited", () => {
+    const state = queueState([entry({ queued_by: QUEUED_BY_USER })]);
+    useQueueMock.mockReturnValue(state);
+    renderQueue(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+    fireEvent.click(screen.getByTestId(CHIP_ID));
+
+    fireEvent.click(screen.getByTestId(EDIT_BUTTON_ID));
+    expect(screen.queryByTestId(GRAB_HANDLE_ID)).toBeNull();
+  });
+
+  it("drags the last row onto the first and calls reorderEntries with the new order", async () => {
+    const state = queueState([
+      entry({ id: "q-1", content: "first" }),
+      entry({ id: "q-2", content: "second" }),
+      entry({ id: "q-3", content: "third" }),
+    ]);
+    state.reorderEntries = vi.fn(async () => {});
+    useQueueMock.mockReturnValue(state);
+    renderQueue(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+    fireEvent.click(screen.getByTestId(CHIP_ID));
+
+    const handles = screen.getAllByTestId(GRAB_HANDLE_ID);
+    simulateReorderDrag(handles[2], handles.length, 10);
+
+    await waitFor(() => expect(state.reorderEntries).toHaveBeenCalledWith(["q-3", "q-1", "q-2"]));
+  });
+});
+
+/**
+ * Drives a dnd-kit PointerSensor drag in happy-dom: mocks per-row droppable
+ * rects for collision detection, patches isPrimary (happy-dom omits the
+ * primary-pointer computation), and dispatches down / move / move / up.
+ * The first move only activates the drag (distance constraint); the second
+ * dispatches DragMove so collision detection resolves the target.
+ */
+function simulateReorderDrag(handle: HTMLElement, rowCount: number, targetClientY: number) {
+  const original = HTMLElement.prototype.getBoundingClientRect;
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    const inner = this.querySelector?.('[data-testid="queue-entry"]') as HTMLElement | null;
+    const rows = screen.queryAllByTestId("queue-entry");
+    const index = inner ? rows.indexOf(inner) : -1;
+    if (index >= 0) {
+      const top = index * 40;
+      return {
+        x: 0,
+        y: top,
+        top,
+        bottom: top + 36,
+        left: 0,
+        right: 400,
+        width: 400,
+        height: 36,
+      } as DOMRect;
+    }
+    return original.call(this);
+  });
+
+  // isPrimary is an own property created by the PointerEvent constructor
+  // (prototype patching is shadowed), so a capture-phase listener rewrites it
+  // before React's root handler runs.
+  const patchPrimary = (e: Event) => {
+    Object.defineProperty(e, "isPrimary", { configurable: true, value: true });
+  };
+  document.addEventListener("pointerdown", patchPrimary, true);
+  fireEvent.pointerDown(handle, {
+    pointerId: 0,
+    pointerType: "mouse",
+    button: 0,
+    clientX: 10,
+    clientY: (rowCount - 1) * 40 + 10,
+  });
+  document.removeEventListener("pointerdown", patchPrimary, true);
+  fireEvent.pointerMove(document.body, {
+    pointerId: 0,
+    pointerType: "mouse",
+    clientX: 10,
+    clientY: targetClientY,
+  });
+  fireEvent.pointerMove(document.body, {
+    pointerId: 0,
+    pointerType: "mouse",
+    clientX: 10,
+    clientY: targetClientY + 2,
+  });
+  fireEvent.pointerUp(document.body, {
+    pointerId: 0,
+    pointerType: "mouse",
+    clientX: 10,
+    clientY: targetClientY + 2,
+  });
+}

@@ -120,6 +120,7 @@ const (
 	ActionMessageQueueSendNow       = "message.queue.send_now"       // Interrupt and replace the active turn with an exact queue selection
 	ActionMessageQueueRemove        = "message.queue.remove"         // Delete a single entry by id
 	ActionMessageQueueMerge         = "message.queue.merge"          // Fold an entry into the entry above it
+	ActionMessageQueueReorder       = "message.queue.reorder"        // Rewrite the visible pending order for a session
 	ActionMessageQueueStatusChanged = "message.queue.status_changed" // Notification: queue status changed
 
 	// Workflow template/step actions
