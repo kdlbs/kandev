@@ -20,9 +20,7 @@ type PromptRequest struct {
 
 	// Profile-owned launch policy. These values are resolved by the backend
 	// at call start and are never accepted from an external client.
-	CLIFlags               []string `json:"cli_flags,omitempty"`
-	CommandPrefix          []string `json:"command_prefix,omitempty"`
-	AutoApprovePermissions *bool    `json:"auto_approve_permissions,omitempty"`
+	AutoApprovePermissions *bool `json:"auto_approve_permissions,omitempty"`
 
 	// InferenceConfig is the agent's inference configuration.
 	// This is passed from the backend which has access to the agent registry.

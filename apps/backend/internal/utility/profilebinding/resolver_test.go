@@ -85,3 +85,18 @@ func TestResolverRejectsWorkspaceCliAndDeletedProfiles(t *testing.T) {
 		t.Fatalf("MatchLegacy() error = %v, want no eligible match", err)
 	}
 }
+
+func TestResolverResolveReturnsRequestedEligibleProfile(t *testing.T) {
+	profiles := &fakeProfiles{byID: map[string]*models.AgentProfile{
+		"profile-1": {ID: "profile-1", AgentID: "codex-acp", Model: "gpt-5", Enabled: true},
+	}}
+	resolver := New(profiles, func(string) bool { return true })
+
+	got, err := resolver.Resolve(context.Background(), "profile-1")
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if got.ID != "profile-1" || got.AgentID != "codex-acp" {
+		t.Fatalf("Resolve() = %#v, want requested eligible profile", got)
+	}
+}

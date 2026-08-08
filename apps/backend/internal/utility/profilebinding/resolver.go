@@ -39,11 +39,17 @@ func New(profiles profileRepository, isInference func(agentID string) bool) *Res
 
 func (r *Resolver) Resolve(ctx context.Context, id string) (*models.AgentProfile, error) {
 	profile, err := r.profiles.GetAgentProfileIncludingDeleted(ctx, id)
-	if err != nil || profile == nil {
+	if err != nil {
+		return nil, err
+	}
+	if profile == nil {
 		return nil, ErrProfileNotFound
 	}
 	agent, err := r.profiles.GetAgent(ctx, profile.AgentID)
-	if err != nil || agent == nil || !eligible(profile, r.isInference, agent.Name) {
+	if err != nil {
+		return nil, err
+	}
+	if agent == nil || !eligible(profile, r.isInference, agent.Name) {
 		return nil, ErrProfileIneligible
 	}
 	resolved := *profile
