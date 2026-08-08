@@ -232,12 +232,13 @@ func TestCreateTaskAcceptsConsistentWorkflowAndExplicitStep(t *testing.T) {
 		"step-1": {ID: "step-1", WorkflowID: "wf-1", Name: "Step"},
 	}})
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID:    "ws-1",
 		WorkflowID:     "wf-1",
 		WorkflowStepID: "step-1",
 		Title:          "consistent task",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -254,11 +255,12 @@ func TestCreateTaskAcceptsEphemeralTaskWithoutWorkflow(t *testing.T) {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		Title:       "quick chat",
 		IsEphemeral: true,
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}

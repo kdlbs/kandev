@@ -417,7 +417,7 @@ func (ts *OrchestratorTestServer) CreateTestTask(t *testing.T, agentProfileID st
 	})
 	require.NoError(t, err)
 
-	task, err := ts.TaskSvc.CreateTask(context.Background(), &taskservice.CreateTaskRequest{
+	taskResult, err := ts.TaskSvc.CreateTask(context.Background(), &taskservice.CreateTaskRequest{
 		WorkspaceID:    workspace.ID,
 		WorkflowID:     wf.ID,
 		WorkflowStepID: workflowStepID,
@@ -431,6 +431,7 @@ func (ts *OrchestratorTestServer) CreateTestTask(t *testing.T, agentProfileID st
 			},
 		},
 	})
+	task := taskResult.Task
 	require.NoError(t, err)
 
 	return task.ID

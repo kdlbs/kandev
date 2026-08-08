@@ -426,5 +426,13 @@ func taskPriorityMigrationStatements() []string {
 		`CREATE INDEX IF NOT EXISTS idx_tasks_workspace_archived ON tasks(workspace_id, archived_at)`,
 		// idx_tasks_assignee was removed in ADR 0005 Wave F when the
 		// per-task assignee moved to workflow_step_participants.
+		//
+		// uniq_tasks_external_id enforces task create-idempotency
+		// (docs/specs/tasks/external-id-idempotency). DROP TABLE tasks above
+		// silently drops every index on the old table, this one included —
+		// unlike a plain ALTER TABLE ADD COLUMN, recreating the table means
+		// every index must be explicitly relisted here or it is gone from
+		// any install that still needs this historical rebuild.
+		`CREATE UNIQUE INDEX IF NOT EXISTS uniq_tasks_external_id ON tasks(workspace_id, external_id) WHERE external_id IS NOT NULL`,
 	}
 }

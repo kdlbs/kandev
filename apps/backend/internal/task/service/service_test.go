@@ -452,7 +452,8 @@ func TestService_CreateTask(t *testing.T) {
 		},
 	}
 
-	task, err := svc.CreateTask(ctx, req)
+	taskResult, err := svc.CreateTask(ctx, req)
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("failed to create task: %v", err)
 	}
@@ -507,7 +508,7 @@ func TestService_CreateTaskProbesDefaultBranchForExplicitRepositoryOutsideDiscov
 	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: workflowID, WorkspaceID: workspaceID, Name: "Workflow"}); err != nil {
 		t.Fatalf("CreateWorkflow: %v", err)
 	}
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID:    workspaceID,
 		WorkflowID:     workflowID,
 		WorkflowStepID: "step-1",
@@ -516,6 +517,7 @@ func TestService_CreateTaskProbesDefaultBranchForExplicitRepositoryOutsideDiscov
 			LocalPath: repoPath, BaseBranch: "feature/current", Name: "explicit-repo",
 		}},
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -605,7 +607,8 @@ func TestService_CreateTask_DefaultsPriorityWhenEmpty(t *testing.T) {
 		Title:          "Onboarding-style task with no priority",
 		// Priority intentionally omitted — caller didn't set it.
 	}
-	task, err := svc.CreateTask(ctx, req)
+	taskResult, err := svc.CreateTask(ctx, req)
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask with empty priority should succeed, got %v", err)
 	}
@@ -694,7 +697,8 @@ func TestService_CreateTask_AcceptsMultipleDistinctRepositories(t *testing.T) {
 			{RepositoryID: "repo-back", BaseBranch: "main"},
 		},
 	}
-	task, err := svc.CreateTask(ctx, req)
+	taskResult, err := svc.CreateTask(ctx, req)
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -767,7 +771,7 @@ func TestService_CreateTask_RewritesTaskWorktreeRepositoryIDToProviderRepository
 		DefaultBranch: "main",
 	})
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID:    workspaceID,
 		WorkflowID:     workflowID,
 		WorkflowStepID: "step-1",
@@ -776,6 +780,7 @@ func TestService_CreateTask_RewritesTaskWorktreeRepositoryIDToProviderRepository
 			{RepositoryID: badRepoID, BaseBranch: prHeadBranch},
 		},
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -839,7 +844,7 @@ func TestService_CreateTask_RewritesTaskWorktreeRepositoryIDToSafeLocalRepositor
 		DefaultBranch: "main",
 	})
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID:    workspaceID,
 		WorkflowID:     workflowID,
 		WorkflowStepID: "step-1",
@@ -848,6 +853,7 @@ func TestService_CreateTask_RewritesTaskWorktreeRepositoryIDToSafeLocalRepositor
 			{RepositoryID: badRepoID, BaseBranch: prHeadBranch},
 		},
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -907,7 +913,7 @@ func TestService_CreateTask_RewritesTaskWorktreeLocalPathToSafeLocalRepository(t
 		DefaultBranch: "main",
 	})
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID:    workspaceID,
 		WorkflowID:     workflowID,
 		WorkflowStepID: "step-1",
@@ -916,6 +922,7 @@ func TestService_CreateTask_RewritesTaskWorktreeLocalPathToSafeLocalRepository(t
 			{LocalPath: taskPath, BaseBranch: prHeadBranch},
 		},
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -992,7 +999,7 @@ func TestService_CreateTask_CreatesProviderRepositoryForTaskWorktreeRepositoryID
 		DefaultBranch: "main",
 	})
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID:    workspaceID,
 		WorkflowID:     workflowID,
 		WorkflowStepID: "step-1",
@@ -1001,6 +1008,7 @@ func TestService_CreateTask_CreatesProviderRepositoryForTaskWorktreeRepositoryID
 			{RepositoryID: badRepoID, BaseBranch: "feature/pr-head"},
 		},
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -1097,7 +1105,7 @@ func TestService_CreateTask_GitHubURLIgnoresTaskWorktreeProviderMatch(t *testing
 		DefaultBranch: "main",
 	})
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID:    workspaceID,
 		WorkflowID:     workflowID,
 		WorkflowStepID: "step-1",
@@ -1106,6 +1114,7 @@ func TestService_CreateTask_GitHubURLIgnoresTaskWorktreeProviderMatch(t *testing
 			{GitHubURL: "https://github.com/kdlbs/kandev/pull/1567"},
 		},
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}

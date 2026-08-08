@@ -829,7 +829,12 @@ IMPORTANT:
 - Top-level tasks need a repository via repository_url, repository_id, or local_path
 - 'prompt' is the sub-agent's initial prompt — be specific and detailed
 - start_agent defaults to true and is what you want in nearly every case — the new task auto-launches an agent that immediately works on the prompt. Pass start_agent=false ONLY for an explicit placeholder (e.g. queuing work the user will start later, or creating a tracking task with no immediate work), and still pass agent_profile_id unless it can be inherited. When in doubt, leave it true.
-- Kanban subtasks cannot have their own subtasks (max nesting depth is 1). To break work down further, create a sibling under the same parent. (Office task trees are exempt.)`
+- Kanban subtasks cannot have their own subtasks (max nesting depth is 1). To break work down further, create a sibling under the same parent. (Office task trees are exempt.)
+
+IDEMPOTENCY (external_id):
+- Passing external_id makes this call create-if-absent, not a lookup: it creates the task when nothing holds that identity yet, and it DOES create something the first time you call it. Do not call it just to check whether an identity exists.
+- deduplicated:true in the result means a task already held that identity and nothing new was created — do not report having created a task in that case.
+- deduplicated:true together with creation_complete:false means another create claimed the identity and had not finished when observed; it may still be running. Proceed with the returned task_id or escalate to a human — never release the identity and create again, which can produce a duplicate task and a duplicate agent.`
 	parentDesc := "Parent task ID for subtasks. Use 'self' to create a subtask of your current task (RECOMMENDED for plan phases, delegated work). Omit only for unrelated top-level tasks."
 	agentProfileDesc := "Agent profile ID to use. On a workflow step, the step's launch profile (its pinned profile, or the workflow default when unpinned) outranks it; otherwise an explicit agent_profile_id wins. When both are absent, current_task inherits the current/source or parent profile before workflow/workspace defaults; workspace_default skips those task profiles, then uses workflow profiles before the target workspace default. start_agent=false still needs a resolvable profile for later manual start."
 
@@ -844,7 +849,12 @@ IMPORTANT:
 - Every created task must have a resolvable agent profile. start_agent=false still records the profile for a later manual start.
 - 'prompt' is the agent's initial prompt — be specific and detailed
 - start_agent defaults to true and is what you want in nearly every case — the new task auto-launches an agent that immediately works on the prompt. Pass start_agent=false ONLY for an explicit placeholder (e.g. queuing work the user will start later), and still pass agent_profile_id unless a default exists. When in doubt, leave it true.
-- Use parent_id only when delegating to a known existing task by its ID`
+- Use parent_id only when delegating to a known existing task by its ID
+
+IDEMPOTENCY (external_id):
+- Passing external_id makes this call create-if-absent, not a lookup: it creates the task when nothing holds that identity yet, and it DOES create something the first time you call it. Do not call it just to check whether an identity exists.
+- deduplicated:true in the result means a task already held that identity and nothing new was created — do not report having created a task in that case.
+- deduplicated:true together with creation_complete:false means another create claimed the identity and had not finished when observed; it may still be running. Proceed with the returned task_id or escalate to a human — never release the identity and create again, which can produce a duplicate task and a duplicate agent.`
 		parentDesc = "Optional parent task ID. Omit for top-level tasks; provide an existing task ID only to create a subtask of that task."
 		agentProfileDesc = "Agent profile ID to use. On a workflow step, the step's launch profile (its pinned profile, or the workflow default when unpinned) outranks it; otherwise an explicit agent_profile_id wins. When both are absent, current_task inherits a parent profile before workflow/workspace defaults; workspace_default skips the parent profile, then uses workflow profiles before the target workspace default. External mode has no current/source task. start_agent=false still needs a resolvable profile for later manual start."
 	}
@@ -866,6 +876,7 @@ IMPORTANT:
 			mcp.WithString("local_path", mcp.Description("Local repository folder path (e.g. '/Users/me/projects/myrepo'). Will create/find the repository automatically. Preferred for local worktree flow. For subtasks: supply only when the subtask should target a different repo than the parent.")),
 			mcp.WithString("repository_url", mcp.Description("Repository URL, GitHub pull request URL, or GitLab merge request URL (for example 'https://github.com/owner/repo'). A contribution URL attaches the task to that existing contribution and prepares its source branch. For subtasks: supply only when the subtask should target a different repo than the parent.")),
 			mcp.WithString("base_branch", mcp.Description("Base branch for the repository (e.g. 'main'). Optional. Defaults: same-repo subtasks inherit the parent's base_branch; cross-repo subtasks and top-level tasks fall back to the repository's default_branch (visible via list_repositories_kandev).")),
+			mcp.WithString("external_id", mcp.Description("A stable identifier from your own system (issue key, webhook delivery ID, a UUID you generated). Creating a task twice with the same external_id in the same workspace returns the first task instead of making a duplicate — use it when a retry or restart could re-run this call. Replay the same arguments you sent the first time. This creates the task when nothing holds the identity yet — it is not a lookup.")),
 		),
 		s.wrapHandler("create_task_kandev", s.createTaskHandler()),
 	)

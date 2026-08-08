@@ -751,6 +751,9 @@ type httpCreateTaskRequest struct {
 	WorkspacePath     string                    `json:"workspace_path,omitempty"`
 	BlockedBy         []string                  `json:"blocked_by,omitempty"`
 	ProjectID         string                    `json:"project_id,omitempty"`
+	// ExternalID is a caller-supplied identity used for create-idempotency
+	// (docs/specs/tasks/external-id-idempotency/spec.md).
+	ExternalID string `json:"external_id,omitempty"`
 	// Office task-handoffs phase 5 — workspace policy. Optional; same
 	// shape as the MCP create_task_kandev fields.
 	WorkspaceMode         string `json:"workspace_mode,omitempty"`
@@ -763,6 +766,15 @@ type createTaskResponse struct {
 	dto.TaskDTO
 	TaskSessionID    string `json:"session_id,omitempty"`
 	AgentExecutionID string `json:"agent_execution_id,omitempty"`
+	// Deduplicated and CreationComplete are required booleans (not
+	// presence-only markers) on every create-idempotency outcome, per
+	// docs/specs/tasks/external-id-idempotency/spec.md. Deduplicated is true
+	// for both Found outcomes. CreationComplete is false only for
+	// Found-unsettled — every other outcome (including CreatedIdentityLost)
+	// carries true, because the field means only "this task's required
+	// synchronous setup finished", not "an agent is running".
+	Deduplicated     bool `json:"deduplicated"`
+	CreationComplete bool `json:"creation_complete"`
 }
 
 const (
@@ -887,7 +899,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		}
 	}
 
-	task, err := h.service.CreateTask(c.Request.Context(), &service.CreateTaskRequest{
+	result, err := h.service.CreateTask(c.Request.Context(), &service.CreateTaskRequest{
 		WorkspaceID:    body.WorkspaceID,
 		WorkflowID:     body.WorkflowID,
 		WorkflowStepID: body.WorkflowStepID,
@@ -905,11 +917,24 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		WorkspacePath:  body.WorkspacePath,
 		BlockedBy:      body.BlockedBy,
 		ProjectID:      body.ProjectID,
+		ExternalID:     body.ExternalID,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not created")
 		return
 	}
+	// Both Found outcomes have no side effects: skip every post-create step
+	// below (attachment claim, workspace-policy attach, fresh-branch commit,
+	// session prepare/start, last-used recording, PR association) and return
+	// the existing task as-is. This is the data-loss guard's REST twin — the
+	// steps below assume a task this request just created, and running them
+	// against someone else's task would misapply attachments/policy meant for
+	// the retry payload to a task that never asked for them.
+	if result.Outcome != service.CreateTaskOutcomeCreated {
+		c.JSON(http.StatusOK, foundCreateTaskResponse(result))
+		return
+	}
+	task := result.Task
 	if err := h.service.ClaimMessageAttachments(c.Request.Context(), task.ID, "", body.Attachments); err != nil {
 		rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 10*time.Second)
 		defer cancel()
@@ -948,8 +973,33 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	if !h.commitFreshBranch(c, task.ID, task.Title, body.WorkspaceID, body.Repositories, repos) {
 		return
 	}
+
+	// Settlement (create-sequence step 7): after the required synchronous
+	// work above, before any asynchronous dispatch below. Settling here —
+	// ahead of session prepare/start rather than splitting that helper into
+	// prepare/dispatch halves and settling between them — satisfies the same
+	// ordering constraint more directly: no dispatch of any kind (sync
+	// prepare or async start) has happened yet at this point.
+	settled, survivor, settleErr := h.service.SettleExternalID(c.Request.Context(), task.ID, task.ExternalID)
+	if settleErr != nil {
+		handleNotFound(c, h.logger, settleErr, "task not created")
+		return
+	}
+	if !settled {
+		// CreatedIdentityLost: another actor released the identity while this
+		// create was running. The task survives holding no external_id; per
+		// the spec, no asynchronous work (session start, PR association) is
+		// dispatched for it.
+		c.JSON(http.StatusOK, createTaskResponse{
+			TaskDTO:          dto.FromTask(survivor),
+			Deduplicated:     false,
+			CreationComplete: true,
+		})
+		return
+	}
+
 	taskDTO := dto.FromTask(task)
-	response := createTaskResponse{TaskDTO: taskDTO}
+	response := createTaskResponse{TaskDTO: taskDTO, Deduplicated: false, CreationComplete: true}
 	// Use the backend-resolved workflow step ID (from the created task) instead of the request's
 	resolvedStepID := taskDTO.WorkflowStepID
 	h.handlePostCreateTaskSession(c, &response, taskDTO.ID, taskDTO.Description, body, resolvedStepID, task.QueuedForStepID == "")
@@ -959,6 +1009,61 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	h.associatePRFromRepoInputs(taskDTO.ID, response.TaskSessionID, body.Repositories)
 
 	c.JSON(http.StatusOK, response)
+}
+
+// foundCreateTaskResponse builds the response for either Found outcome: the
+// existing task, deduplicated true, and creation_complete reflecting whether
+// that task's own create had finished settling.
+func foundCreateTaskResponse(result service.CreateTaskResult) createTaskResponse {
+	return createTaskResponse{
+		TaskDTO:          dto.FromTask(result.Task),
+		Deduplicated:     true,
+		CreationComplete: result.Outcome == service.CreateTaskOutcomeFoundSettled,
+	}
+}
+
+// lookupTaskResponse is the by-external-id GET route's body: the task DTO
+// plus creation_complete. Unlike createTaskResponse, it carries no
+// deduplicated field — that flag is meaningful only relative to a create
+// this request performed, and a lookup never creates anything.
+type lookupTaskResponse struct {
+	dto.TaskDTO
+	CreationComplete bool `json:"creation_complete"`
+}
+
+// httpGetTaskByExternalID is the REST lookup route
+// (docs/specs/tasks/external-id-idempotency/spec.md, "REST — lookup"): a
+// side-effect-free way to ask what holds an identity without risking a
+// create. Returns the task whether settled or not, including archived tasks.
+func (h *TaskHandlers) httpGetTaskByExternalID(c *gin.Context) {
+	task, err := h.service.GetTaskByExternalID(c.Request.Context(), c.Param("id"), c.Query("external_id"))
+	if err != nil {
+		handleNotFound(c, h.logger, err, "task not found")
+		return
+	}
+	c.JSON(http.StatusOK, lookupTaskResponse{
+		TaskDTO:          dto.FromTask(task),
+		CreationComplete: task.ExternalIDSettledAt != nil,
+	})
+}
+
+// httpReleaseTaskExternalID is the REST release route
+// (docs/specs/tasks/external-id-idempotency/spec.md, "REST — release"): an
+// operator action for an identity a human has determined is abandoned. Frees
+// the identity without deleting or otherwise modifying the task. MUST NOT be
+// called automatically in response to creation_complete:false — see "The one
+// unsafe thing a caller can do".
+func (h *TaskHandlers) httpReleaseTaskExternalID(c *gin.Context) {
+	released, err := h.service.ReleaseTaskExternalID(c.Request.Context(), c.Param("id"), c.Query("external_id"))
+	if err != nil {
+		handleNotFound(c, h.logger, err, "task not found")
+		return
+	}
+	if !released {
+		c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 func (h *TaskHandlers) recordTaskCreateLastUsed(ctx context.Context, body httpCreateTaskRequest, repos []dto.TaskRepositoryInput) {
@@ -1765,7 +1870,7 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 		return
 	}
 
-	task, err := h.service.CreateTask(ctx, &service.CreateTaskRequest{
+	result, err := h.service.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID:  workspaceID,
 		Title:        params.title,
 		Description:  body.Prompt,
@@ -1778,6 +1883,7 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create quick chat"})
 		return
 	}
+	task := result.Task
 
 	// Eager-init: launch the agent process up-front so ACP `initialize` + `session/new`
 	// fire and the agent emits available_commands/modes/models. This populates the
@@ -1920,7 +2026,7 @@ func (h *TaskHandlers) httpStartConfigChat(c *gin.Context) {
 		return
 	}
 
-	task, err := h.service.CreateTask(ctx, &service.CreateTaskRequest{
+	result, err := h.service.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: workspaceID,
 		Title:       "Config Chat",
 		Description: body.Prompt,
@@ -1932,6 +2038,7 @@ func (h *TaskHandlers) httpStartConfigChat(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create config chat"})
 		return
 	}
+	task := result.Task
 
 	resp, err := h.orchestrator.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
 		TaskID:         task.ID,

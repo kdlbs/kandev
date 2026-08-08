@@ -193,6 +193,10 @@ type TaskDTO struct {
 	ProjectID              string `json:"project_id,omitempty"`
 	Labels                 string `json:"labels,omitempty"`
 	Identifier             string `json:"identifier,omitempty"`
+	// ExternalID is a caller-supplied identity used for task create-
+	// idempotency (docs/specs/tasks/external-id-idempotency/spec.md). Omitted
+	// when the task holds none.
+	ExternalID string `json:"external_id,omitempty"`
 	// IsFromOffice is the authoritative "this task is owned by office"
 	// flag. Computed by the task repo at read time as
 	// (project_id != '' OR workflow_id == workspace.office_workflow_id).
@@ -770,6 +774,7 @@ func FromTaskWithSessionInfo(
 		ProjectID:              task.ProjectID,
 		Labels:                 task.Labels,
 		Identifier:             task.Identifier,
+		ExternalID:             task.ExternalID,
 		IsFromOffice:           task.IsFromOffice,
 	}
 }

@@ -60,6 +60,11 @@ type CreateTaskRequest struct {
 	ParentID       string                 `json:"parent_id,omitempty"`
 	WorkspacePath  string                 `json:"workspace_path,omitempty"` // Optional host folder for repo-less tasks
 
+	// ExternalID is a caller-supplied identity used for create-idempotency
+	// (docs/specs/tasks/external-id-idempotency/spec.md). Accepted on REST
+	// and MCP; empty means no idempotency key.
+	ExternalID string `json:"external_id,omitempty"`
+
 	// Office extensions
 	AssigneeAgentProfileID string   `json:"assignee_agent_profile_id,omitempty"`
 	Origin                 string   `json:"origin,omitempty"`

@@ -574,6 +574,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		BaseBranch             string               `json:"base_branch"`               // top-level fallback applied to every resolved repo only when no per-repo entries are supplied; explicit per-repo BaseBranch is authoritative when Repositories is set
 		BlockedBy              []string             `json:"blocked_by"`                // task IDs that must complete before this task
 		AssigneeAgentProfileID string               `json:"assignee_agent_profile_id"` // agent instance to assign the task to
+		ExternalID             string               `json:"external_id"`               // caller-supplied create-idempotency key
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -689,7 +690,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		}
 	}
 
-	task, err := h.taskSvc.CreateTask(ctx, &service.CreateTaskRequest{
+	result, err := h.taskSvc.CreateTask(ctx, &service.CreateTaskRequest{
 		ParentID:               req.ParentID,
 		WorkspaceID:            req.WorkspaceID,
 		WorkflowID:             req.WorkflowID,
@@ -701,6 +702,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		AssigneeAgentProfileID: req.AssigneeAgentProfileID,
 		Metadata:               metadata,
 		DeferredLaunch:         deferredLaunch,
+		ExternalID:             req.ExternalID,
 	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))
@@ -711,6 +713,24 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		}
 		return ws.NewError(msg.ID, msg.Action, code, message, nil)
 	}
+
+	// The MCP skip is a data-loss guard, not just an optimization: the steps
+	// below resolve remote contributions from the REQUEST (resolveMCPRemote
+	// Contributions above) but index them against the RETURNED task's
+	// repositories, and every rollback path on a mismatch calls DeleteTask.
+	// A retry landing on a Found outcome — the existing task, whose
+	// repository list need not match this retry's payload — would then
+	// misindex, roll back, and delete the task the caller was trying to
+	// recover. Both Found outcomes have no side effects, so skip everything
+	// below and return the existing task as-is.
+	if result.Outcome != service.CreateTaskOutcomeCreated {
+		return ws.NewResponse(msg.ID, msg.Action, mcpCreateTaskResult{
+			TaskDTO:          dto.FromTask(result.Task),
+			Deduplicated:     true,
+			CreationComplete: result.Outcome == service.CreateTaskOutcomeFoundSettled,
+		})
+	}
+	task := result.Task
 
 	for index, resolution := range contributions {
 		if resolution == nil {
@@ -746,12 +766,48 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		}
 	}
 
+	// Settlement (create-sequence step 7): after policy attach, before
+	// auto-start dispatch.
+	settled, survivor, settleErr := h.taskSvc.SettleExternalID(ctx, task.ID, task.ExternalID)
+	if settleErr != nil {
+		if errors.Is(settleErr, taskrepo.ErrTaskNotFound) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task not found", nil)
+		}
+		h.logger.Error("failed to settle external_id", zap.String("task_id", task.ID), zap.Error(settleErr))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to create task", nil)
+	}
+	if !settled {
+		// CreatedIdentityLost: another actor released the identity while
+		// this create was running. The task survives holding no
+		// external_id; per the spec, no asynchronous work (auto-start) is
+		// dispatched for it.
+		return ws.NewResponse(msg.ID, msg.Action, mcpCreateTaskResult{
+			TaskDTO:          dto.FromTask(survivor),
+			Deduplicated:     false,
+			CreationComplete: true,
+		})
+	}
+
 	// Auto-start agent session asynchronously only if requested and admitted.
 	if startAgent && task.QueuedForStepID == "" && h.sessionLauncher != nil {
 		h.launchAutoStartTask(ctx, task, launchConfig)
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
+	return ws.NewResponse(msg.ID, msg.Action, mcpCreateTaskResult{
+		TaskDTO:          dto.FromTask(task),
+		Deduplicated:     false,
+		CreationComplete: true,
+	})
+}
+
+// mcpCreateTaskResult is create_task_kandev's tool-result shape: the task
+// DTO plus deduplicated/creation_complete, per
+// docs/specs/tasks/external-id-idempotency/spec.md, "MCP" — required
+// booleans, not presence-only markers, mirroring the REST create response.
+type mcpCreateTaskResult struct {
+	dto.TaskDTO
+	Deduplicated     bool `json:"deduplicated"`
+	CreationComplete bool `json:"creation_complete"`
 }
 
 func classifyCreateTaskError(err error) string {
