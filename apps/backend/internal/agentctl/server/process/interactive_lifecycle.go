@@ -3,6 +3,7 @@ package process
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"regexp"
@@ -14,6 +15,24 @@ import (
 	"github.com/kandev/kandev/internal/common/ptyexec"
 	"go.uber.org/zap"
 )
+
+// Fallback terminal dimensions used when a caller supplies none, or supplies a
+// value a PTY cannot represent.
+const (
+	defaultPTYCols = 120
+	defaultPTYRows = 40
+)
+
+// ptyDimension narrows a terminal dimension to the uint16 that pty.Winsize and
+// ptyexec.PtyHandle.Resize take. Out-of-range values fall back to the default
+// rather than silently wrapping: InteractiveStartRequest.DefaultCols/DefaultRows
+// are plain ints off the wire, so nothing upstream bounds them.
+func ptyDimension(v, fallback int) uint16 {
+	if v <= 0 || v > math.MaxUint16 {
+		return uint16(fallback)
+	}
+	return uint16(v)
+}
 
 // interactiveProcess represents a running interactive PTY process.
 type interactiveProcess struct {
@@ -187,10 +206,10 @@ func (r *InteractiveRunner) immediateStartProcess(req InteractiveStartRequest, p
 	}
 
 	if cols <= 0 {
-		cols = 120
+		cols = defaultPTYCols
 	}
 	if rows <= 0 {
-		rows = 40
+		rows = defaultPTYRows
 	}
 	var startErr error
 	proc.startOnce.Do(func() {
@@ -232,11 +251,7 @@ func (r *InteractiveRunner) startProcess(proc *interactiveProcess, cols, rows in
 
 	// Start process in PTY with exact dimensions from frontend
 	// Unix: creack/pty, Windows: ConPTY
-	//
-	// Dimensions narrow to uint16 here because that is what pty.Winsize and
-	// PtyHandle.Resize take. Every caller is already within range: the resize
-	// path widens from uint16, and DefaultCols/DefaultRows are clamped above.
-	ptmx, err := ptyexec.Start(cmd, uint16(cols), uint16(rows)) //nolint:gosec // G115: bounded above, see comment
+	ptmx, err := ptyexec.Start(cmd, ptyDimension(cols, defaultPTYCols), ptyDimension(rows, defaultPTYRows))
 	if err != nil {
 		return fmt.Errorf("failed to start pty: %w", err)
 	}
@@ -560,11 +575,7 @@ func (r *InteractiveRunner) wait(proc *interactiveProcess) {
 	// subsequent WriteStdin returns "process not found" which is logged.
 	defer proc.firstIdleOnce.Do(func() { close(proc.firstIdleCh) })
 
-	proc.mu.Lock()
-	ptyHandle := proc.ptmx
-	proc.mu.Unlock()
-
-	exitCode, signalName, err := waitPtyProcess(proc.cmd, ptyHandle)
+	exitCode, signalName, err := waitPtyProcess(proc.cmd)
 	status := types.ProcessStatusExited
 	if err != nil {
 		status = types.ProcessStatusFailed

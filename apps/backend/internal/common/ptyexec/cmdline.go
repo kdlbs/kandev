@@ -124,6 +124,21 @@ func buildCmdLine(args []string) string {
 // system cannot find the file specified" — even though `where.exe` and
 // `exec.LookPath` both find them. This is the same family of issue handled in
 // apps/cli/src/web.ts for Node's spawn().
+//
+// KNOWN LIMITATION (pre-existing, tracked separately): when the cmd.exe /c
+// wrapper is used, arguments get two parsing passes — cmd.exe's, then
+// CommandLineToArgvW's — and escapeArg only satisfies the second. This is the
+// BatBadBut class (CVE-2024-24576); Go's os/exec has its own mitigation, which
+// does not apply here because ConPTY calls CreateProcessW directly.
+//
+// The trigger is specifically an embedded double quote, not metacharacters as
+// such: cmd.exe honors quoting, so `&` / `|` / `(` / `)` inside a quoted
+// argument are already inert (a task description like `fix the bug & add tests`
+// is safe). But CommandLineToArgvW's `\"` escape means nothing to cmd.exe, so a
+// quote inside an argument closes the quoted run early and anything after it is
+// read as shell syntax. Fixing this needs cmd.exe-aware escaping (caret escapes
+// plus `""` doubling) — do NOT "fix" it by rejecting metacharacters, which
+// would break ordinary prose prompts while leaving the actual hole open.
 func resolveConPtyCmdLine(cmd *exec.Cmd) string {
 	args := cmd.Args
 	switch {

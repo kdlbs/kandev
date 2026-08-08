@@ -20,12 +20,15 @@ func TestWindowsPTY_DoubleCloseSafe(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	if err := pty.Close(); err != nil {
-		t.Fatalf("first Close: %v", err)
+	firstErr := pty.Close()
+	if firstErr != nil {
+		t.Fatalf("first Close: %v", firstErr)
 	}
-	// Second Close must not panic, must not double-free, and must return the
-	// same memoized error value as the first call.
-	if err := pty.Close(); err != nil {
-		t.Fatalf("second Close returned error: %v (expected nil from sync.Once)", err)
+	// The second Close must not panic and must not double-free. Assert on the
+	// memoized value rather than just nil-ness: sync.Once means the second call
+	// has to report whatever the first one did, so comparing the two is what
+	// actually distinguishes "gated" from "ran twice and happened to succeed".
+	if secondErr := pty.Close(); secondErr != firstErr {
+		t.Errorf("second Close returned %v, want memoized %v", secondErr, firstErr)
 	}
 }
