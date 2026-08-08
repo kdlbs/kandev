@@ -162,13 +162,14 @@ type WorkflowStepGetter interface {
 	GetWorkflowMeta(ctx context.Context, workflowID string) (WorkflowMeta, error)
 }
 
-// AgentFamilyResolver maps a hand-written agent family reference onto a
-// canonical agent ID and reports how many distinct agents it named. Exactly one
-// match resolves; zero means the reference names no known agent; more than one
-// means the reference is ambiguous and must not be guessed. Implemented by
-// registry.Registry.
+// AgentFamilyResolver maps a hand-written agent family reference onto the
+// canonical IDs of every agent that answers to it. Exactly one candidate
+// resolves the reference; none means it names no known agent; more than one
+// means it is ambiguous and must not be guessed. The candidates themselves —
+// not just how many there are — decide whether an ambiguous reference concerns
+// a particular session at all. Implemented by registry.Registry.
 type AgentFamilyResolver interface {
-	ResolveFamilyID(name string) (string, int)
+	ResolveFamilyIDs(name string) []string
 }
 
 // PromptReferenceExpander resolves "@name" saved-prompt references embedded in

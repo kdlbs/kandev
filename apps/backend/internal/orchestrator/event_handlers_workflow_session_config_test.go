@@ -481,6 +481,85 @@ func TestProcessOnEnterConfigureSessionAmbiguousAgentFamilyWarns(t *testing.T) {
 	}
 }
 
+// An ambiguous reference names several agents. If none of them is the session's
+// family it cannot govern this step at all, so it is the same deliberate no-op as
+// any other rule for a different agent — and it must not take the session's own
+// rule down with it. Refusing the whole action here would hand a user who
+// installed one colliding custom agent exactly the defect this card exists to
+// kill: a per-step model that silently stops applying, for every agent at once.
+func TestProcessOnEnterConfigureSessionUnrelatedAmbiguousRuleStillApplies(t *testing.T) {
+	ctx := context.Background()
+	repo, svc, agent, messages, session := seedConfigureSessionTest(
+		t, "task-unrelated", "session-unrelated", "codex-acp")
+
+	shadowed := registry.NewRegistry(testLogger())
+	shadowed.LoadDefaults()
+	// "Claude" now names both claude-acp and this agent — and neither is codex-acp.
+	if err := shadowed.RegisterCustomTUIAgent("aaa-claude", "Claude", "claude-tui", "", "", nil); err != nil {
+		t.Fatalf("register custom agent: %v", err)
+	}
+	svc.agentFamilyResolver = shadowed
+
+	svc.processOnEnter(ctx, "task-unrelated", session, multiRuleConfigureSessionStep("step-unrelated",
+		configureSessionRule{agentName: "Codex", model: "gpt-5.6-luna"},
+		configureSessionRule{agentName: "Claude", model: "opus[1m]"},
+	), "")
+
+	if len(agent.setSessionModelCalls) != 1 || agent.setSessionModelCalls[0].ModelID != "gpt-5.6-luna" {
+		t.Fatalf("model calls = %#v, want one gpt-5.6-luna switch", agent.setSessionModelCalls)
+	}
+	// The ambiguity is real but belongs to a step this session never runs under;
+	// telling the user about it here would be noise on an applied rule.
+	if warnings := messages.workflowSessionConfigWarnings(); len(warnings) != 0 {
+		t.Fatalf("unrelated ambiguity warned the user: %#v", warnings)
+	}
+	updated, err := repo.GetTaskSession(ctx, "session-unrelated")
+	if err != nil {
+		t.Fatalf("reload session: %v", err)
+	}
+	overrides, ok := models.LoadSessionRuntimeConfigOverrides(updated.Metadata)
+	if !ok || overrides.Model != "gpt-5.6-luna" {
+		t.Fatalf("runtime overrides = %#v, want model gpt-5.6-luna", overrides)
+	}
+}
+
+// The inverse boundary of the test above: an ambiguity that DOES name this
+// session's family still refuses, and is not outvoted by an exact rule elsewhere
+// in the same action. Both rules claim this session and only one of them says
+// which agent it means, so array order would decide the model.
+func TestProcessOnEnterConfigureSessionRelevantAmbiguityRefusesDespiteExactRule(t *testing.T) {
+	ctx := context.Background()
+	repo, svc, agent, messages, session := seedConfigureSessionTest(
+		t, "task-relevant", "session-relevant", "claude-acp")
+
+	shadowed := registry.NewRegistry(testLogger())
+	shadowed.LoadDefaults()
+	if err := shadowed.RegisterCustomTUIAgent("aaa-claude", "Claude", "claude-tui", "", "", nil); err != nil {
+		t.Fatalf("register custom agent: %v", err)
+	}
+	svc.agentFamilyResolver = shadowed
+
+	svc.processOnEnter(ctx, "task-relevant", session, multiRuleConfigureSessionStep("step-relevant",
+		configureSessionRule{agentName: "claude-acp", model: "sonnet"},
+		configureSessionRule{agentName: "Claude", model: "opus[1m]"},
+	), "")
+
+	if len(agent.setSessionModelCalls) != 0 {
+		t.Fatalf("relevant ambiguity applied a model: %#v", agent.setSessionModelCalls)
+	}
+	warnings := messages.workflowSessionConfigWarnings()
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "more than one") {
+		t.Fatalf("warnings = %#v, want one ambiguity warning", warnings)
+	}
+	updated, err := repo.GetTaskSession(ctx, "session-relevant")
+	if err != nil {
+		t.Fatalf("reload session: %v", err)
+	}
+	if overrides, ok := models.LoadSessionRuntimeConfigOverrides(updated.Metadata); ok && overrides.Model != "" {
+		t.Fatalf("relevant ambiguity persisted a runtime override: %#v", overrides)
+	}
+}
+
 // ParseConfigureSessionRules rejects duplicates by the raw agent_name only, so
 // two textually different rules can name one family once references resolve.
 // Array order deciding which model a step runs on is not a contract anyone

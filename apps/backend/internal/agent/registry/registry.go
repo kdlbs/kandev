@@ -224,9 +224,10 @@ func (r *Registry) Exists(id string) bool {
 	return exists
 }
 
-// ResolveFamilyID maps a human-written agent family reference onto a canonical
-// agent ID and reports how many distinct agents the reference named. Callers
-// must treat any count other than 1 as unresolved.
+// ResolveFamilyIDs maps a human-written agent family reference onto the canonical
+// IDs of every registered agent that answers to it, sorted. Empty means the
+// reference names no known agent; one entry resolves it; more than one means the
+// reference is ambiguous.
 //
 // Workflow definitions are hand-authored and reasonably say "Claude" where the
 // runtime stores "claude-acp", so the display name and the agent name are
@@ -234,23 +235,23 @@ func (r *Registry) Exists(id string) bool {
 // Aliases are NOT unique: a custom TUI agent picks its own slug and display name
 // and shares this namespace with the built-ins, so "Claude" can name both the
 // built-in and a user's own agent. Guessing between them silently mis-routes a
-// workflow rule, so an ambiguous reference is reported (count > 1) rather than
-// resolved, and a count of 0 still distinguishes a typo from a deliberate
-// non-match.
+// workflow rule, so the whole candidate set is returned rather than one arbitrary
+// winner — which candidates those are decides whether an ambiguous reference is
+// relevant to a given caller at all, and only the caller knows that.
 //
 // An exact canonical ID is unambiguous by construction — IDs are the registry's
-// keys — and resolves even when another agent claims it as an alias.
-func (r *Registry) ResolveFamilyID(name string) (string, int) {
+// keys — and resolves alone even when another agent claims it as an alias.
+func (r *Registry) ResolveFamilyIDs(name string) []string {
 	trimmed := strings.TrimSpace(name)
 	if trimmed == "" {
-		return "", 0
+		return nil
 	}
 
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	if ag, exists := r.agents[trimmed]; exists {
-		return ag.ID(), 1
+		return []string{ag.ID()}
 	}
 	matches := make([]string, 0, 1)
 	for _, ag := range r.agents {
@@ -258,10 +259,12 @@ func (r *Registry) ResolveFamilyID(name string) (string, int) {
 			matches = append(matches, ag.ID())
 		}
 	}
-	if len(matches) != 1 {
-		return "", len(matches)
+	if len(matches) == 0 {
+		return nil
 	}
-	return matches[0], 1
+	// Map iteration order is random; callers compare and report these.
+	slices.Sort(matches)
+	return matches
 }
 
 // agentAnswersToFamily reports whether any of an agent's identifiers is the

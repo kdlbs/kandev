@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -175,27 +176,33 @@ type configureSessionRuleSelection struct {
 // name the same family. Both refuse to apply anything and say why, because
 // picking one silently is indistinguishable from the defect this resolution
 // exists to fix.
+//
+// Both refusals are scoped to rules that could actually govern this session. A
+// step configuring several agents carries rules this session will never match,
+// and a mistake in one of those is not a reason to drop the rule that does
+// match — that would turn one colliding agent name into per-step model
+// selection silently failing for every agent at once.
 func (s *Service) selectConfigureSessionRule(
 	rules []wfmodels.ConfigureSessionRule,
 	agentName string,
 ) configureSessionRuleSelection {
-	sessionFamily, sessionMatch := s.resolveAgentFamily(agentName)
-	if sessionMatch == agentFamilyAmbiguous {
+	sessionFamily, sessionAmbiguous := s.resolveSessionAgentFamily(agentName)
+	if sessionAmbiguous {
 		return configureSessionRuleSelection{warning: ambiguousAgentFamilyWarning(agentName)}
 	}
 
 	matched := make([]*wfmodels.ConfigureSessionRule, 0, 1)
 	anyKnownFamily := false
 	for index := range rules {
-		ruleFamily, ruleMatch := s.resolveAgentFamily(rules[index].AgentName)
-		if ruleMatch == agentFamilyAmbiguous {
-			return configureSessionRuleSelection{warning: ambiguousAgentFamilyWarning(rules[index].AgentName)}
-		}
-		if ruleMatch == agentFamilyResolved {
+		switch s.classifyRuleAgentFamily(rules[index].AgentName, sessionFamily) {
+		case ruleGovernsSession:
 			anyKnownFamily = true
-		}
-		if ruleFamily == sessionFamily {
 			matched = append(matched, &rules[index])
+		case ruleAmbiguousForSession:
+			return configureSessionRuleSelection{warning: ambiguousAgentFamilyWarning(rules[index].AgentName)}
+		case ruleNamesOtherAgents:
+			anyKnownFamily = true
+		case ruleNamesNothingKnown:
 		}
 	}
 
@@ -211,17 +218,23 @@ func (s *Service) selectConfigureSessionRule(
 	}
 }
 
-// agentFamilyMatch reports how an agent family reference resolved.
-type agentFamilyMatch int
+// ruleAgentFamilyVerdict is how one rule's agent reference relates to the agent
+// family of the session being configured.
+type ruleAgentFamilyVerdict int
 
 const (
-	// agentFamilyUnknown: the reference names no agent the registry knows.
-	agentFamilyUnknown agentFamilyMatch = iota
-	// agentFamilyResolved: the reference names exactly one agent, or no resolver
-	// is wired and the reference is therefore compared verbatim.
-	agentFamilyResolved
-	// agentFamilyAmbiguous: more than one installed agent answers to it.
-	agentFamilyAmbiguous
+	// ruleNamesNothingKnown: the reference names no agent the registry knows and
+	// is not the session's family verbatim either.
+	ruleNamesNothingKnown ruleAgentFamilyVerdict = iota
+	// ruleGovernsSession: the reference names this session's family.
+	ruleGovernsSession
+	// ruleNamesOtherAgents: the reference names one or more known agents, none of
+	// them this session's family. A deliberate no-op for this step.
+	ruleNamesOtherAgents
+	// ruleAmbiguousForSession: the reference names several agents and this
+	// session's family is one of them, so which agent the author meant decides
+	// this session's model and cannot be guessed.
+	ruleAmbiguousForSession
 )
 
 const noKnownAgentFamilyWarning = "This step's session settings were not applied because its " +
@@ -237,25 +250,63 @@ func conflictingRulesWarning(count int, family string) string {
 		"target the same agent (%s). Keep one rule per agent.", count, family)
 }
 
-// resolveAgentFamily maps an agent family reference onto its canonical ID and
-// reports how it resolved. Without a resolver wired, or for a name the registry
-// does not know, the trimmed input is returned so matching degrades to the exact
-// comparison this used to perform — an unrecognized name must still be able to
-// match an equally unrecognized session family.
-func (s *Service) resolveAgentFamily(name string) (string, agentFamilyMatch) {
+// resolveSessionAgentFamily maps the session's stored agent family onto its
+// canonical ID, reporting whether the stored value is itself ambiguous. Sessions
+// store the canonical ID, so this is normally an exact hit; without a resolver
+// wired, or for a value the registry does not know, the trimmed input is
+// returned so rule matching degrades to the exact comparison this used to
+// perform.
+func (s *Service) resolveSessionAgentFamily(name string) (string, bool) {
 	trimmed := strings.TrimSpace(name)
 	if s.agentFamilyResolver == nil {
-		return trimmed, agentFamilyResolved
+		return trimmed, false
 	}
-	resolved, matches := s.agentFamilyResolver.ResolveFamilyID(trimmed)
-	switch {
-	case matches == 1:
-		return resolved, agentFamilyResolved
-	case matches > 1:
-		return trimmed, agentFamilyAmbiguous
+	switch candidates := s.agentFamilyResolver.ResolveFamilyIDs(trimmed); len(candidates) {
+	case 0:
+		return trimmed, false
+	case 1:
+		return candidates[0], false
 	default:
-		return trimmed, agentFamilyUnknown
+		return trimmed, true
 	}
+}
+
+// classifyRuleAgentFamily reports how one rule's agent reference relates to the
+// session's already-canonical family. An unrecognized reference falls back to an
+// exact comparison, so it can still match an equally unrecognized session family
+// the way it did before resolution existed.
+func (s *Service) classifyRuleAgentFamily(ruleAgentName, sessionFamily string) ruleAgentFamilyVerdict {
+	trimmed := strings.TrimSpace(ruleAgentName)
+	if s.agentFamilyResolver == nil {
+		// Nothing is knowable about an agent family without a resolver, so a
+		// reference that does not match verbatim is treated as naming some other
+		// agent rather than reported to the user as a workflow typo.
+		return verbatimRuleVerdict(trimmed, sessionFamily)
+	}
+	candidates := s.agentFamilyResolver.ResolveFamilyIDs(trimmed)
+	switch {
+	case len(candidates) == 0:
+		if trimmed == sessionFamily {
+			return ruleGovernsSession
+		}
+		return ruleNamesNothingKnown
+	case len(candidates) == 1:
+		if candidates[0] == sessionFamily {
+			return ruleGovernsSession
+		}
+		return ruleNamesOtherAgents
+	case slices.Contains(candidates, sessionFamily):
+		return ruleAmbiguousForSession
+	default:
+		return ruleNamesOtherAgents
+	}
+}
+
+func verbatimRuleVerdict(trimmed, sessionFamily string) ruleAgentFamilyVerdict {
+	if trimmed == sessionFamily {
+		return ruleGovernsSession
+	}
+	return ruleNamesOtherAgents
 }
 
 func (s *Service) persistWorkflowSessionConfigBeforeStart(
