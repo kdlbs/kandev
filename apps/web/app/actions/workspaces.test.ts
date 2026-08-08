@@ -14,6 +14,7 @@ import {
 
 const REVIEW_STEP_NAME = "Review";
 const STEP_COLOR = "bg-blue-500";
+const WORKSPACE_NAME = "My Workspace";
 
 describe("exportAllWorkflowsAction", () => {
   beforeEach(() => {
@@ -65,16 +66,36 @@ describe("deleteWorkspaceAction", () => {
     vi.restoreAllMocks();
   });
 
-  it("sends the workspace name as confirm_name in the DELETE body", async () => {
-    await deleteWorkspaceAction("ws-1", "My Workspace");
-
+  const deleteCall = () => {
     const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    return fetchMock.mock.calls[0];
+  };
 
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("http://backend.test/api/v1/office/workspaces/ws-1");
+  it("sends the workspace name as confirm_name in the DELETE body", async () => {
+    await deleteWorkspaceAction("ws-1", WORKSPACE_NAME, true);
+
+    const [, init] = deleteCall();
     expect(init.method).toBe("DELETE");
-    expect(JSON.parse(init.body as string)).toEqual({ confirm_name: "My Workspace" });
+    expect(JSON.parse(init.body as string)).toEqual({ confirm_name: WORKSPACE_NAME });
+  });
+
+  it("uses the office route when the office feature is enabled", async () => {
+    await deleteWorkspaceAction("ws-1", WORKSPACE_NAME, true);
+
+    expect(deleteCall()[0]).toBe("http://backend.test/api/v1/office/workspaces/ws-1");
+  });
+
+  // The `/api/v1/office` router group is not mounted when `features.office` is
+  // off, so the office route 404s there. Deletion has to go to the generic
+  // endpoint, which owns the same cascade and confirm-name guard.
+  it("uses the generic route when the office feature is disabled", async () => {
+    await deleteWorkspaceAction("ws-1", WORKSPACE_NAME, false);
+
+    const [url, init] = deleteCall();
+    expect(url).toBe("http://backend.test/api/v1/workspaces/ws-1");
+    expect(init.method).toBe("DELETE");
+    expect(JSON.parse(init.body as string)).toEqual({ confirm_name: WORKSPACE_NAME });
   });
 });
 
