@@ -248,7 +248,7 @@ The `Recreate` strategy stops active local agents. SQLite migrations run on star
 
 This release includes a one-time task-worktree ownership schema cutover (see [Operations](operations.md)). The cutover rewrites the worktree ownership tables in one transaction and drops legacy schema. It requires:
 
-- A verified pre-upgrade database backup (SQLite's automatic pre-upgrade snapshot, or your PostgreSQL `pg_dump`).
+- A verified pre-upgrade database backup. For SQLite, create and verify a manual snapshot **before** starting the upgrade — the automatic pre-migration snapshot is taken during startup of the new binary and cannot be verified beforehand. For PostgreSQL, use `pg_dump` (the cutover does not invoke it).
 - All writers stopped during the cutover — with PostgreSQL, do not run a mixed-version fleet across the upgrade; the cutover takes a database advisory lock and fails closed if it cannot serialize.
 - One successful schema initializer: keep the deployment at a single replica during startup, and check `kubectl rollout status` before scaling out.
 

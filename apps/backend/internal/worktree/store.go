@@ -284,8 +284,11 @@ func (s *SQLiteStore) GetWorktreesByTaskID(ctx context.Context, taskID string) (
 		INNER JOIN task_environments te ON ter.task_environment_id = te.id
 		LEFT JOIN task_sessions s ON s.task_environment_id = ter.task_environment_id
 		LEFT JOIN repositories r ON ter.repository_id = r.id
-		WHERE te.task_id = ? ORDER BY ter.created_at DESC
-	`), taskID)
+		WHERE te.task_id = ?
+		  AND ter.deleted_at IS NULL
+		  AND ter.status <> ?
+		ORDER BY ter.created_at DESC
+	`), taskID, StatusDeleted)
 	if err != nil {
 		return nil, err
 	}
@@ -303,7 +306,9 @@ func (s *SQLiteStore) GetWorktreesByRepositoryID(ctx context.Context, repoID str
 		LEFT JOIN task_sessions s ON s.task_environment_id = ter.task_environment_id
 		LEFT JOIN repositories r ON ter.repository_id = r.id
 		WHERE ter.repository_id = ?
-	`), repoID)
+		  AND ter.deleted_at IS NULL
+		  AND ter.status <> ?
+	`), repoID, StatusDeleted)
 	if err != nil {
 		return nil, err
 	}

@@ -211,7 +211,7 @@ pg_dump --host "$PGHOST" --port "${PGPORT:-5432}" \
 
 Some releases perform a one-time schema cutover that rewrites ownership tables and drops legacy schema (for example the task-worktree ownership normalization). Before such an upgrade:
 
-1. Take and **verify** a PostgreSQL backup with the pattern above, or confirm SQLite's automatic pre-upgrade snapshot exists.
+1. Take and **verify** a backup. For PostgreSQL use the pattern above. For SQLite, create a manual snapshot from **Settings > System > Backups** (or `sqlite3` `VACUUM INTO`) and verify it: the automatic pre-migration snapshot is taken during startup of the new binary, so it cannot be verified before the upgrade starts.
 2. Stop all backend writers during the cutover. Do not run a mixed-version fleet across the upgrade; the migration takes a database advisory lock and aborts on lock timeout without changing the schema or data.
 3. Let exactly one schema initializer run and reach a healthy state before starting additional instances.
 
