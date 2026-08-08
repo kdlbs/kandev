@@ -2597,10 +2597,11 @@ func (s *Service) filterSharedWorktreesForTaskCleanup(
 			filtered = append(filtered, wt)
 			continue
 		}
-		if err := guard.ReleaseWorktreeReference(ctx, wt); err != nil {
-			errs = append(errs, fmt.Errorf("release shared worktree reference %s: %w", wt.ID, err))
-			continue
-		}
+		// A worktree borrowed by another task is protected by the single
+		// environment-repository row it shares. There is no per-session
+		// reference to release: marking the row deleted would destroy the
+		// borrower's workspace. The environment ownership transfer handled
+		// earlier in the flow re-homes the row to the borrower.
 		s.logger.Info("preserving worktree still referenced by another active task",
 			zap.String("task_id", taskID),
 			zap.String("worktree_id", wt.ID),

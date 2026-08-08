@@ -2698,8 +2698,9 @@ func TestService_CleanupDestructiveTaskResourcesPreservesSharedWorktree(t *testi
 	if got := cleanup.cleanedIDs(); len(got) != 0 {
 		t.Fatalf("physically cleaned worktrees = %v, want none", got)
 	}
-	if got := cleanup.releasedIDs(); len(got) != 1 || got[0] != wt.ID {
-		t.Fatalf("released worktrees = %v, want [%s]", got, wt.ID)
+	// The single environment-repository row is shared; nothing is released.
+	if got := cleanup.releasedIDs(); len(got) != 0 {
+		t.Fatalf("released worktrees = %v, want none (shared row is preserved)", got)
 	}
 	if got := cleanup.excludedSessions; len(got) != 1 || got[0] != session.ID {
 		t.Fatalf("excluded sessions = %v, want [%s]", got, session.ID)

@@ -38,14 +38,14 @@ func NewSQLiteStore(writer, reader *sqlx.DB) (*SQLiteStore, error) {
 // from that session's launch snapshot.
 const worktreeSelectCols = `
 	ter.worktree_id,
-	s.id AS session_id,
+	COALESCE(s.id, '') AS session_id,
 	te.task_id,
 	ter.repository_id,
 	r.local_path,
 	ter.worktree_path,
 	ter.worktree_branch,
 	COALESCE(ter.branch_slug, ''),
-	s.base_branch,
+	COALESCE(s.base_branch, ''),
 	ter.status,
 	ter.created_at,
 	ter.updated_at,
@@ -236,7 +236,7 @@ func (s *SQLiteStore) GetWorktreeByID(ctx context.Context, id string) (*Worktree
 		SELECT `+worktreeSelectCols+`
 		FROM task_environment_repos ter
 		INNER JOIN task_environments te ON ter.task_environment_id = te.id
-		INNER JOIN task_sessions s ON s.task_environment_id = ter.task_environment_id
+		LEFT JOIN task_sessions s ON s.task_environment_id = ter.task_environment_id
 		LEFT JOIN repositories r ON ter.repository_id = r.id
 		WHERE ter.worktree_id = ?
 		LIMIT 1
@@ -267,7 +267,7 @@ func (s *SQLiteStore) GetWorktreeByTaskID(ctx context.Context, taskID string) (*
 		SELECT `+worktreeSelectCols+`
 		FROM task_environment_repos ter
 		INNER JOIN task_environments te ON ter.task_environment_id = te.id
-		INNER JOIN task_sessions s ON s.task_environment_id = ter.task_environment_id
+		LEFT JOIN task_sessions s ON s.task_environment_id = ter.task_environment_id
 		LEFT JOIN repositories r ON ter.repository_id = r.id
 		WHERE te.task_id = ? AND ter.status = ?
 		  AND ter.deleted_at IS NULL
@@ -282,7 +282,7 @@ func (s *SQLiteStore) GetWorktreesByTaskID(ctx context.Context, taskID string) (
 		SELECT `+worktreeSelectCols+`
 		FROM task_environment_repos ter
 		INNER JOIN task_environments te ON ter.task_environment_id = te.id
-		INNER JOIN task_sessions s ON s.task_environment_id = ter.task_environment_id
+		LEFT JOIN task_sessions s ON s.task_environment_id = ter.task_environment_id
 		LEFT JOIN repositories r ON ter.repository_id = r.id
 		WHERE te.task_id = ? ORDER BY ter.created_at DESC
 	`), taskID)
@@ -300,7 +300,7 @@ func (s *SQLiteStore) GetWorktreesByRepositoryID(ctx context.Context, repoID str
 		SELECT `+worktreeSelectCols+`
 		FROM task_environment_repos ter
 		INNER JOIN task_environments te ON ter.task_environment_id = te.id
-		INNER JOIN task_sessions s ON s.task_environment_id = ter.task_environment_id
+		LEFT JOIN task_sessions s ON s.task_environment_id = ter.task_environment_id
 		LEFT JOIN repositories r ON ter.repository_id = r.id
 		WHERE ter.repository_id = ?
 	`), repoID)
@@ -368,7 +368,7 @@ func (s *SQLiteStore) ListActiveWorktrees(ctx context.Context) ([]*Worktree, err
 		SELECT `+worktreeSelectCols+`
 		FROM task_environment_repos ter
 		INNER JOIN task_environments te ON ter.task_environment_id = te.id
-		INNER JOIN task_sessions s ON s.task_environment_id = ter.task_environment_id
+		LEFT JOIN task_sessions s ON s.task_environment_id = ter.task_environment_id
 		LEFT JOIN repositories r ON ter.repository_id = r.id
 		WHERE ter.status = ? AND ter.deleted_at IS NULL
 	`), StatusActive)
@@ -409,10 +409,12 @@ func (s *SQLiteStore) ListActiveWorktreePaths(ctx context.Context) ([]string, er
 	return paths, rows.Err()
 }
 
-// CountActiveWorktreeReferences counts non-deleted session associations for
-// the environment that owns the worktree, excluding associations owned by the
-// caller. A terminal session still protects its task workspace until that
-// task's own cleanup releases the association.
+// CountActiveWorktreeReferences counts non-deleted session associations from
+// OTHER tasks for the environment that owns the worktree. The worktree is
+// task-owned: sessions of the owning task (which share the environment) never
+// count against cleanup, while a borrower task's session protects the
+// workspace until ownership transfers. A terminal session still protects its
+// task workspace until that task's own cleanup releases the association.
 func (s *SQLiteStore) CountActiveWorktreeReferences(
 	ctx context.Context,
 	worktreeID string,
@@ -423,9 +425,12 @@ func (s *SQLiteStore) CountActiveWorktreeReferences(
 		FROM task_sessions s
 		INNER JOIN task_environment_repos ter
 			ON ter.task_environment_id = s.task_environment_id
+		INNER JOIN task_environments te
+			ON te.id = ter.task_environment_id
 		WHERE ter.worktree_id = ?
 		  AND ter.status <> ?
 		  AND ter.deleted_at IS NULL
+		  AND te.task_id != s.task_id
 	`
 	args := []interface{}{
 		worktreeID,
@@ -444,9 +449,13 @@ func (s *SQLiteStore) CountActiveWorktreeReferences(
 	return count, err
 }
 
-// scanWorktrees is a helper to scan multiple worktree rows.
+// scanWorktrees is a helper to scan multiple worktree rows. Task-keyed and
+// repository-keyed queries LEFT JOIN sessions (a worktree belongs to the task
+// environment, and a task may have zero or many sessions), so rows are
+// deduplicated by worktree identity.
 func (s *SQLiteStore) scanWorktrees(rows *sql.Rows) ([]*Worktree, error) {
 	var result []*Worktree
+	seen := make(map[string]bool)
 	for rows.Next() {
 		wt := &Worktree{}
 		var mergedAt, deletedAt sql.NullTime
@@ -486,6 +495,10 @@ func (s *SQLiteStore) scanWorktrees(rows *sql.Rows) ([]*Worktree, error) {
 			wt.DeletedAt = &deletedAt.Time
 		}
 
+		if seen[wt.ID] {
+			continue
+		}
+		seen[wt.ID] = true
 		result = append(result, wt)
 	}
 	return result, rows.Err()
