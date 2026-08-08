@@ -9,6 +9,7 @@ import "@xterm/xterm/css/xterm.css";
 import { PanelLoadingState } from "@/components/panel-loading-state";
 import { useAppStore } from "@/components/state-provider";
 import { useSession } from "@/hooks/domains/session/use-session";
+import type { TaskSessionState } from "@/app/office/tasks/[id]/types";
 import { getBackendConfig } from "@/lib/config";
 import { useTerminalLinkHandler } from "@/hooks/use-terminal-link-handler";
 import { buildTerminalFontFamily } from "@/lib/terminal/terminal-font";
@@ -134,15 +135,43 @@ export function computeCanConnect(
   mode: "agent" | "shell",
   connectionID: string | null | undefined,
   sessionId: string | null | undefined,
+  sessionState?: TaskSessionState | null,
 ): boolean {
   if (!connectionID) return false;
   if (mode === "agent") return Boolean(sessionId);
-  return true;
+  // The env handler refuses a shell whose session has ended, and refuses it
+  // identically on every attempt. Connecting anyway only restarts the retry
+  // timer, so stop before opening the socket at all.
+  return !isSessionEnded(sessionState);
+}
+
+const SESSION_TERMINAL_STATES = new Set<TaskSessionState>(["COMPLETED", "FAILED", "CANCELLED"]);
+
+export function isSessionEnded(state: TaskSessionState | null | undefined): boolean {
+  return state != null && SESSION_TERMINAL_STATES.has(state);
+}
+
+/**
+ * What the pane should render. Exported so every state can be asserted without
+ * mounting xterm.
+ *
+ * This is a named function rather than two inline conditions because the
+ * loading overlay is opaque and full-bleed: any state that leaves
+ * `isConnected` false while the terminal will never connect renders a
+ * "connecting…" spinner that is actively false. Deciding it in one place makes
+ * "ended outranks connecting" something a test can pin down.
+ */
+export function computeTerminalPaneState(
+  mode: "agent" | "shell",
+  sessionState: TaskSessionState | null | undefined,
+  isConnected: boolean,
+): "connected" | "connecting" | "ended" {
+  if (mode === "shell" && isSessionEnded(sessionState)) return "ended";
+  return isConnected ? "connected" : "connecting";
 }
 
 // eslint-disable-next-line max-lines-per-function -- wires many hooks + refs; each block is already its own hook
 export function PassthroughTerminal(props: PassthroughTerminalProps) {
-  const { t } = useTranslation();
   const {
     mode,
     label,
@@ -167,7 +196,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
   const { session } = useSession(sessionId);
   const taskId = session?.task_id ?? null;
   const connectionID = mode === "agent" ? sessionId : environmentId;
-  const canConnect = computeCanConnect(mode, connectionID, sessionId);
+  const canConnect = computeCanConnect(mode, connectionID, sessionId, session?.state);
   const wsBaseUrl = useWsBaseUrl();
 
   const [isTerminalReady, setIsTerminalReady] = useState(false);
@@ -180,6 +209,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
   // overlay resets on target switches without needing a separate setState effect.
   const [connectedTargetId, setConnectedTargetId] = useState<string | null>(null);
   const isConnected = connectionID != null && connectedTargetId === connectionID;
+  const paneState = computeTerminalPaneState(mode, session?.state, isConnected);
   const onConnected = useCallback(() => {
     setConnectedTargetId(connectionID ?? null);
     if (autoFocus) refs.xtermRef.current?.textarea?.focus({ preventScroll: true });
@@ -278,14 +308,40 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
         <div ref={terminalRef} data-testid="terminal-xterm-host" className="h-full w-full" />
       </div>
       <TerminalSearchBar search={search} />
-      {!isConnected && (
-        <PanelLoadingState
-          testId="passthrough-loading"
-          className="absolute inset-0 bg-background"
-          label={mode === "agent" ? t("task:preparingWorkspace") : t("task:connectingTerminal")}
-        />
-      )}
+      <TerminalPaneOverlay paneState={paneState} mode={mode} />
     </div>
+  );
+}
+
+/**
+ * Covers the pane while it is not usable. Both branches are opaque and
+ * full-bleed, so which one renders is the only thing the user ever sees here.
+ */
+function TerminalPaneOverlay({
+  paneState,
+  mode,
+}: {
+  paneState: ReturnType<typeof computeTerminalPaneState>;
+  mode: "agent" | "shell";
+}) {
+  const { t } = useTranslation();
+  if (paneState === "connected") return null;
+  if (paneState === "ended") {
+    return (
+      <div
+        data-testid="passthrough-session-ended"
+        className="absolute inset-0 bg-background flex items-center justify-center p-4 text-center text-xs text-muted-foreground"
+      >
+        {t("task:terminalSessionEnded")}
+      </div>
+    );
+  }
+  return (
+    <PanelLoadingState
+      testId="passthrough-loading"
+      className="absolute inset-0 bg-background"
+      label={mode === "agent" ? t("task:preparingWorkspace") : t("task:connectingTerminal")}
+    />
   );
 }
 

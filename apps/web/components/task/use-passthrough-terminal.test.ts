@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildTerminalWsUrl } from "./use-passthrough-terminal";
-import { computeCanConnect } from "./passthrough-terminal";
+import { computeCanConnect, computeTerminalPaneState } from "./passthrough-terminal";
+import type { TaskSessionState } from "@/app/office/tasks/[id]/types";
 import { reconnectDelayMs, startReconnectLoop } from "./ws-reconnect";
 import type { Terminal } from "@xterm/xterm";
 
@@ -128,5 +129,59 @@ describe("startReconnectLoop", () => {
     expect(connectWebSocket).toHaveBeenCalledTimes(2);
     expect(terminal.reset).toHaveBeenCalledTimes(2);
     stop();
+  });
+});
+
+// The env handler refuses a shell on an ended session, identically every time.
+// Opening the socket anyway only restarts the 5s retry timer.
+describe("computeCanConnect on ended sessions", () => {
+  const ENDED: TaskSessionState[] = ["COMPLETED", "FAILED", "CANCELLED"];
+  const LIVE: TaskSessionState[] = ["CREATED", "STARTING", "RUNNING", "IDLE", "WAITING_FOR_INPUT"];
+
+  it.each(ENDED)("refuses a shell terminal on a %s session", (state) => {
+    expect(computeCanConnect("shell", "env-1", "session-1", state)).toBe(false);
+  });
+
+  it.each(LIVE)("still connects a shell terminal on a %s session", (state) => {
+    expect(computeCanConnect("shell", "env-1", "session-1", state)).toBe(true);
+  });
+
+  it("connects when the session state is not known yet", () => {
+    expect(computeCanConnect("shell", "env-1", "session-1", null)).toBe(true);
+  });
+
+  // Agent terminals resolve readiness server-side and must keep waiting.
+  it.each(ENDED)("leaves agent terminals alone on a %s session", (state) => {
+    expect(computeCanConnect("agent", "session-1", "session-1", state)).toBe(true);
+  });
+});
+
+// The loading overlay is opaque and full-bleed. A dead terminal that leaves
+// isConnected false therefore renders a "Connecting terminal…" spinner that is
+// actively false, and hides anything written into the pane behind it. "Ended"
+// has to outrank "connecting", or the user is told the opposite of the truth.
+describe("computeTerminalPaneState", () => {
+  it("reports ended instead of connecting when the session is over", () => {
+    expect(computeTerminalPaneState("shell", "FAILED", false)).toBe("ended");
+  });
+
+  it("still reports ended when a socket happens to be open", () => {
+    expect(computeTerminalPaneState("shell", "CANCELLED", true)).toBe("ended");
+  });
+
+  it("reports connecting only while a live session is not yet attached", () => {
+    expect(computeTerminalPaneState("shell", "RUNNING", false)).toBe("connecting");
+    expect(computeTerminalPaneState("shell", "RUNNING", true)).toBe("connected");
+  });
+
+  it("never reports ended for agent terminals", () => {
+    expect(computeTerminalPaneState("agent", "FAILED", false)).toBe("connecting");
+  });
+
+  // Before the session lands, state is null. Treating that as ended would put
+  // a permanent "session has ended" over a terminal that is merely starting.
+  it("treats an unknown session state as live", () => {
+    expect(computeTerminalPaneState("shell", null, false)).toBe("connecting");
+    expect(computeTerminalPaneState("shell", undefined, true)).toBe("connected");
   });
 });
