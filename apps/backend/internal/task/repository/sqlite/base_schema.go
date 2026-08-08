@@ -31,9 +31,7 @@ func (r *Repository) initSchema() error {
 		r.ensureDefaultExecutorsAndEnvironments,
 		r.runMigrations,
 		r.hideBuiltinWorkflows,
-		r.backfillTaskEnvironments,
-		r.backfillTaskEnvironmentRepos,
-		r.healTaskEnvironmentWorkspacePaths,
+		r.normalizeTaskWorktreeOwnership,
 		r.healDuplicateTaskEnvironments,
 		r.ensureTaskEnvironmentTaskUniqueIndex,
 		r.healSessionTaskEnvironmentIDs,
@@ -666,9 +664,12 @@ func (r *Repository) initMessageTurnSchema() error {
 	return err
 }
 
-// sessionWorktreeSchemaDDL groups task_sessions, task_environments,
-// task_environment_repos, and task_session_worktrees DDL so the owning
-// function stays within the funlen limit.
+// sessionWorktreeSchemaDDL groups task_sessions, task_environments, and
+// task_environment_repos DDL so the owning function stays within the funlen
+// limit. task_environment_repos is the only physical-worktree record; the
+// legacy task_session_worktrees table and the flat worktree columns on
+// task_environments were removed by the one-time cutover migration
+// (normalizeTaskWorktreeOwnership).
 const sessionWorktreeSchemaDDL = `
 	CREATE TABLE IF NOT EXISTS task_sessions (
 		id TEXT PRIMARY KEY,
@@ -710,16 +711,11 @@ const sessionWorktreeSchemaDDL = `
 	CREATE TABLE IF NOT EXISTS task_environments (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,
-		repository_id TEXT DEFAULT '',
 		executor_type TEXT NOT NULL DEFAULT '',
 		executor_id TEXT DEFAULT '',
 		executor_profile_id TEXT DEFAULT '',
-		agent_execution_id TEXT DEFAULT '',
 		control_port INTEGER DEFAULT 0,
 		status TEXT NOT NULL DEFAULT 'creating',
-		worktree_id TEXT DEFAULT '',
-		worktree_path TEXT DEFAULT '',
-		worktree_branch TEXT DEFAULT '',
 		workspace_path TEXT DEFAULT '',
 		container_id TEXT DEFAULT '',
 		sandbox_id TEXT DEFAULT '',
@@ -742,37 +738,17 @@ const sessionWorktreeSchemaDDL = `
 		worktree_branch TEXT DEFAULT '',
 		position INTEGER DEFAULT 0,
 		error_message TEXT DEFAULT '',
+		status TEXT NOT NULL DEFAULT 'active',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
+		merged_at TIMESTAMP,
+		deleted_at TIMESTAMP,
 		FOREIGN KEY (task_environment_id) REFERENCES task_environments(id) ON DELETE CASCADE,
 		UNIQUE(task_environment_id, repository_id, branch_slug)
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_task_environment_repos_env_id ON task_environment_repos(task_environment_id);
 	CREATE INDEX IF NOT EXISTS idx_task_environment_repos_repository_id ON task_environment_repos(repository_id);
-
-	CREATE TABLE IF NOT EXISTS task_session_worktrees (
-		id TEXT PRIMARY KEY,
-		session_id TEXT NOT NULL,
-		worktree_id TEXT NOT NULL,
-		repository_id TEXT NOT NULL,
-		branch_slug TEXT NOT NULL DEFAULT '',
-		position INTEGER DEFAULT 0,
-		worktree_path TEXT DEFAULT '',
-		worktree_branch TEXT DEFAULT '',
-		status TEXT NOT NULL DEFAULT 'active',
-		created_at TIMESTAMP NOT NULL,
-		updated_at TIMESTAMP NOT NULL,
-		merged_at TIMESTAMP,
-		deleted_at TIMESTAMP,
-		FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE,
-		UNIQUE(session_id, worktree_id)
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_task_session_worktrees_session_id ON task_session_worktrees(session_id);
-	CREATE INDEX IF NOT EXISTS idx_task_session_worktrees_worktree_id ON task_session_worktrees(worktree_id);
-	CREATE INDEX IF NOT EXISTS idx_task_session_worktrees_repository_id ON task_session_worktrees(repository_id);
-	CREATE INDEX IF NOT EXISTS idx_task_session_worktrees_status ON task_session_worktrees(status);
 `
 
 func (r *Repository) initSessionWorktreeSchema() error {

@@ -2749,7 +2749,6 @@ func (s *Service) taskOwnsSessionWorktree(
 }
 
 func cleanupEligibleWorktrees(worktrees []*worktree.Worktree, env *models.TaskEnvironment, preserveExecutorRows map[string]struct{}) []*worktree.Worktree {
-	worktrees = excludeEnvironmentWorktree(worktrees, env)
 	if len(preserveExecutorRows) == 0 || len(worktrees) == 0 {
 		return worktrees
 	}
@@ -2798,20 +2797,6 @@ func (s *Service) cleanupTaskEnvironment(
 		}
 	}
 	return nil
-}
-
-func excludeEnvironmentWorktree(worktrees []*worktree.Worktree, env *models.TaskEnvironment) []*worktree.Worktree {
-	if env == nil || env.WorktreeID == "" || len(worktrees) == 0 {
-		return worktrees
-	}
-	filtered := worktrees[:0]
-	for _, wt := range worktrees {
-		if wt == nil || wt.ID == env.WorktreeID {
-			continue
-		}
-		filtered = append(filtered, wt)
-	}
-	return filtered
 }
 
 // ListTasks returns all tasks for a workflow

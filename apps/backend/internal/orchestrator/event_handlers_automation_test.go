@@ -354,11 +354,21 @@ func TestHandleAutomationTurnComplete_FinalizesWithoutReapingTheWorktree(t *test
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedAutomationRunSession(t, repo, "t-keep", "s-keep", "exec-keep")
-	require.NoError(t, repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
-		SessionID:    "s-keep",
-		WorktreeID:   "wt-keep",
-		RepositoryID: "repo-1",
-		WorktreePath: "/tmp/kandev/t-keep",
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-keep", TaskID: "t-keep", ExecutorType: "worktree",
+		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "s-keep")
+	require.NoError(t, err)
+	session.TaskEnvironmentID = "env-keep"
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	require.NoError(t, repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		TaskEnvironmentID: "env-keep",
+		RepositoryID:      "repo-1",
+		WorktreeID:        "wt-keep",
+		WorktreePath:      "/tmp/kandev/t-keep",
 	}))
 
 	mgr := &mockAgentManager{}
@@ -366,7 +376,7 @@ func TestHandleAutomationTurnComplete_FinalizesWithoutReapingTheWorktree(t *test
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), mgr)
 	svc.SetAutomationService(autoSvc)
 
-	session, err := repo.GetTaskSession(ctx, "s-keep")
+	session, err = repo.GetTaskSession(ctx, "s-keep")
 	require.NoError(t, err)
 	handled := svc.handleAutomationTurnComplete(ctx, "t-keep", "s-keep", session, "end_turn", false, "")
 	require.True(t, handled)
@@ -602,7 +612,7 @@ func (f *fakeWorktreeReaper) releaseRow(worktreeID string) {
 		return
 	}
 	_, _ = f.db.Exec(
-		`UPDATE task_session_worktrees SET status = ?, deleted_at = ? WHERE worktree_id = ?`,
+		`UPDATE task_environment_repos SET status = ?, deleted_at = ? WHERE worktree_id = ?`,
 		worktree.StatusDeleted, time.Now().UTC(), worktreeID,
 	)
 }
@@ -685,10 +695,19 @@ func (f *automationRetentionFixture) seedSessionWorktree(t *testing.T, taskID st
 		sessionID, taskID, now, now)
 	require.NoError(t, err)
 	_, err = f.db.Exec(
-		`INSERT INTO task_session_worktrees
-			(id, session_id, worktree_id, repository_id, worktree_path, status, created_at, updated_at)
+		`INSERT INTO task_environments (id, task_id, executor_type, status, workspace_path, created_at, updated_at)
+		 VALUES (?, ?, 'worktree', 'ready', ?, ?, ?)`,
+		"env-"+taskID, taskID, f.workspacePath(taskID), now, now)
+	require.NoError(t, err)
+	_, err = f.db.Exec(
+		`UPDATE task_sessions SET task_environment_id = ? WHERE id = ?`,
+		"env-"+taskID, sessionID)
+	require.NoError(t, err)
+	_, err = f.db.Exec(
+		`INSERT INTO task_environment_repos
+			(id, task_environment_id, worktree_id, repository_id, worktree_path, status, created_at, updated_at)
 		 VALUES (?, ?, ?, 'repo-1', ?, 'active', ?, ?)`,
-		taskID+"-tsw", sessionID, "wt-"+taskID, f.workspacePath(taskID), now, now)
+		taskID+"-ter", "env-"+taskID, "wt-"+taskID, f.workspacePath(taskID), now, now)
 	require.NoError(t, err)
 }
 

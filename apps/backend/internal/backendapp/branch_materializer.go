@@ -77,7 +77,7 @@ func newBranchMaterializer(repo branchMaterializerRepo, mgr *worktree.Manager, l
 }
 
 // MaterializeBranch creates the worktree dir + persists the
-// task_session_worktrees row for the just-inserted task_repositories row.
+// task_environment_repos row for the just-inserted task_repositories row.
 // Designed to be idempotent: the worktree manager's reuse path catches a
 // rerun for the same (session, repo, branch_slug) triple and returns the
 // existing worktree.

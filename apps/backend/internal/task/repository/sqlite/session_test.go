@@ -57,6 +57,11 @@ func TestTaskSessionWorkspacePathUsesCurrentEnvironmentRoot(t *testing.T) {
 		ExecutorType:  string(models.ExecutorTypeWorktree),
 		Status:        models.TaskEnvironmentStatusReady,
 		WorkspacePath: "/task-root/kandev",
+		Repos: []*models.TaskEnvironmentRepo{{
+			RepositoryID: "repo-root",
+			WorktreeID:   "worktree-primary",
+			WorktreePath: "/task-root/kandev",
+		}},
 	}); err != nil {
 		t.Fatalf("CreateTaskEnvironment: %v", err)
 	}
@@ -68,16 +73,6 @@ func TestTaskSessionWorkspacePathUsesCurrentEnvironmentRoot(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateTaskSession: %v", err)
 	}
-	if err := repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
-		ID:           "session-worktree-root",
-		SessionID:    sessionID,
-		WorktreeID:   "worktree-primary",
-		WorktreePath: "/task-root/kandev",
-		Position:     0,
-	}); err != nil {
-		t.Fatalf("CreateTaskSessionWorktree: %v", err)
-	}
-
 	env, err := repo.GetTaskEnvironment(ctx, envID)
 	if err != nil {
 		t.Fatalf("GetTaskEnvironment: %v", err)
@@ -709,44 +704,46 @@ func TestListTaskSessionWorktreesFiltersInactiveRows(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
 	seedForMsgTest(t, repo, "task-worktrees", "session-worktrees", "turn-worktrees")
-	worktrees := []*models.TaskSessionWorktree{
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-worktrees", TaskID: "task-worktrees", ExecutorType: "worktree",
+		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	if _, err := repo.db.Exec(repo.db.Rebind(
+		`UPDATE task_sessions SET task_environment_id = ? WHERE id = ?`),
+		"env-worktrees", "session-worktrees"); err != nil {
+		t.Fatalf("link session to env: %v", err)
+	}
+	worktrees := []*models.TaskEnvironmentRepo{
 		{
-			ID:           "wt-active",
-			SessionID:    "session-worktrees",
-			WorktreeID:   "worktree-active",
-			RepositoryID: "repo-1",
-			BranchSlug:   "main",
+			ID: "wt-active", TaskEnvironmentID: "env-worktrees",
+			WorktreeID: "worktree-active", RepositoryID: "repo-1", BranchSlug: "main",
 		},
 		{
-			ID:           "wt-status-deleted",
-			SessionID:    "session-worktrees",
-			WorktreeID:   "worktree-status-deleted",
-			RepositoryID: "repo-1",
-			BranchSlug:   "deleted-status",
+			ID: "wt-status-deleted", TaskEnvironmentID: "env-worktrees",
+			WorktreeID: "worktree-status-deleted", RepositoryID: "repo-1", BranchSlug: "deleted-status",
 		},
 		{
-			ID:           "wt-timestamp-deleted",
-			SessionID:    "session-worktrees",
-			WorktreeID:   "worktree-timestamp-deleted",
-			RepositoryID: "repo-1",
-			BranchSlug:   "deleted-at",
+			ID: "wt-timestamp-deleted", TaskEnvironmentID: "env-worktrees",
+			WorktreeID: "worktree-timestamp-deleted", RepositoryID: "repo-1", BranchSlug: "deleted-at",
 		},
 	}
 	for _, wt := range worktrees {
-		if err := repo.CreateTaskSessionWorktree(ctx, wt); err != nil {
-			t.Fatalf("CreateTaskSessionWorktree(%s): %v", wt.ID, err)
+		if err := repo.CreateTaskEnvironmentRepo(ctx, wt); err != nil {
+			t.Fatalf("CreateTaskEnvironmentRepo(%s): %v", wt.ID, err)
 		}
 	}
 	now := time.Now().UTC()
 	if _, err := repo.db.Exec(repo.db.Rebind(`
-		UPDATE task_session_worktrees
+		UPDATE task_environment_repos
 		SET status = 'deleted', updated_at = ?
 		WHERE id = ?
 	`), now, "wt-status-deleted"); err != nil {
 		t.Fatalf("mark status deleted: %v", err)
 	}
 	if _, err := repo.db.Exec(repo.db.Rebind(`
-		UPDATE task_session_worktrees
+		UPDATE task_environment_repos
 		SET deleted_at = ?, updated_at = ?
 		WHERE id = ?
 	`), now, now, "wt-timestamp-deleted"); err != nil {
@@ -774,26 +771,27 @@ func TestUpdateTaskSessionWorktreeBranchByRepositoryScopesUpdate(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
 	seedForMsgTest(t, repo, "task-worktrees", "session-worktrees", "turn-worktrees")
+	linkSessionToEnvForTest(t, repo, "session-worktrees", "env-worktrees")
 
-	worktrees := []*models.TaskSessionWorktree{
+	worktrees := []*models.TaskEnvironmentRepo{
 		{
-			ID:             "wt-repo-1",
-			SessionID:      "session-worktrees",
-			WorktreeID:     "worktree-repo-1",
-			RepositoryID:   "repo-1",
-			WorktreeBranch: "feature/old-one",
+			ID:                "wt-repo-1",
+			TaskEnvironmentID: "env-worktrees",
+			WorktreeID:        "worktree-repo-1",
+			RepositoryID:      "repo-1",
+			WorktreeBranch:    "feature/old-one",
 		},
 		{
-			ID:             "wt-repo-2",
-			SessionID:      "session-worktrees",
-			WorktreeID:     "worktree-repo-2",
-			RepositoryID:   "repo-2",
-			WorktreeBranch: "feature/old-two",
+			ID:                "wt-repo-2",
+			TaskEnvironmentID: "env-worktrees",
+			WorktreeID:        "worktree-repo-2",
+			RepositoryID:      "repo-2",
+			WorktreeBranch:    "feature/old-two",
 		},
 	}
 	for _, wt := range worktrees {
-		if err := repo.CreateTaskSessionWorktree(ctx, wt); err != nil {
-			t.Fatalf("CreateTaskSessionWorktree(%s): %v", wt.ID, err)
+		if err := repo.CreateTaskEnvironmentRepo(ctx, wt); err != nil {
+			t.Fatalf("CreateTaskEnvironmentRepo(%s): %v", wt.ID, err)
 		}
 	}
 
@@ -821,11 +819,22 @@ func TestUpdateTaskSessionWorktreeBranchByWorktreeScopesRepeatedRepository(t *te
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
 	seedForMsgTest(t, repo, "task-repeated-repo", "session-repeated-repo", "turn-repeated-repo")
-	for _, wt := range []*models.TaskSessionWorktree{
-		{ID: "wt-repeated-one", SessionID: "session-repeated-repo", WorktreeID: "worktree-repeated-one", RepositoryID: "repo-repeated", WorktreeBranch: "feature/one", Position: 0},
-		{ID: "wt-repeated-two", SessionID: "session-repeated-repo", WorktreeID: "worktree-repeated-two", RepositoryID: "repo-repeated", WorktreeBranch: "feature/two", Position: 1},
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-repeated-repo", TaskID: "task-repeated-repo", ExecutorType: "worktree",
+		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	if _, err := repo.db.Exec(repo.db.Rebind(
+		`UPDATE task_sessions SET task_environment_id = ? WHERE id = ?`),
+		"env-repeated-repo", "session-repeated-repo"); err != nil {
+		t.Fatalf("link session to env: %v", err)
+	}
+	for _, wt := range []*models.TaskEnvironmentRepo{
+		{ID: "wt-repeated-one", TaskEnvironmentID: "env-repeated-repo", WorktreeID: "worktree-repeated-one", RepositoryID: "repo-repeated", BranchSlug: "one", WorktreeBranch: "feature/one", Position: 0},
+		{ID: "wt-repeated-two", TaskEnvironmentID: "env-repeated-repo", WorktreeID: "worktree-repeated-two", RepositoryID: "repo-repeated", BranchSlug: "two", WorktreeBranch: "feature/two", Position: 1},
 	} {
-		require.NoError(t, repo.CreateTaskSessionWorktree(ctx, wt))
+		require.NoError(t, repo.CreateTaskEnvironmentRepo(ctx, wt))
 	}
 	require.NoError(t, repo.UpdateTaskSessionWorktreeBranchByWorktree(ctx, "session-repeated-repo", "worktree-repeated-two", "feature/two-renamed"))
 	worktrees, err := repo.ListTaskSessionWorktrees(ctx, "session-repeated-repo")
@@ -836,6 +845,24 @@ func TestUpdateTaskSessionWorktreeBranchByWorktreeScopesRepeatedRepository(t *te
 
 // TestGetLastAgentMessage_NoMessages verifies that a session with no messages
 // returns an empty string and sql.ErrNoRows.
+// linkSessionToEnvForTest creates the environment row a worktree test
+// references and points the session at it.
+func linkSessionToEnvForTest(t *testing.T, repo *Repository, sessionID, envID string) {
+	t.Helper()
+	ctx := context.Background()
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: envID, TaskID: "task-worktrees", ExecutorType: "worktree",
+		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	if _, err := repo.db.Exec(repo.db.Rebind(
+		`UPDATE task_sessions SET task_environment_id = ? WHERE id = ?`),
+		envID, sessionID); err != nil {
+		t.Fatalf("link session to env: %v", err)
+	}
+}
+
 func TestGetLastAgentMessage_NoMessages(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

@@ -105,7 +105,7 @@ func TestFromTaskSession_IncludesAllWorktrees(t *testing.T) {
 		ID:            "session-1",
 		TaskID:        "task-1",
 		WorkspacePath: "/task-root",
-		Worktrees: []*models.TaskSessionWorktree{
+		Worktrees: []*models.TaskEnvironmentRepo{
 			{ID: "assoc-1", WorktreeID: "wt-1", RepositoryID: "repo-a", WorktreePath: "/x/a"},
 			{ID: "assoc-2", WorktreeID: "wt-2", RepositoryID: "repo-b", WorktreePath: "/x/b"},
 		},

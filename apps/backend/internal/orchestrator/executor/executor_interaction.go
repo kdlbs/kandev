@@ -555,7 +555,10 @@ func workspaceFromTaskEnvironment(env *models.TaskEnvironment) string {
 	if workDir := strings.TrimSpace(env.WorkspacePath); workDir != "" {
 		return workDir
 	}
-	return strings.TrimSpace(env.WorktreePath)
+	if len(env.Repos) > 0 && env.Repos[0] != nil {
+		return strings.TrimSpace(env.Repos[0].WorktreePath)
+	}
+	return ""
 }
 
 // SwitchModel switches the model for a running session. It first attempts an

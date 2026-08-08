@@ -260,7 +260,7 @@ type TaskSessionDTO struct {
 	// Worktrees lists all session worktrees (one per repo on multi-repo tasks);
 	// the flattened Worktree* fields above carry only the first for
 	// backward compatibility.
-	Worktrees            []*models.TaskSessionWorktree `json:"worktrees,omitempty"`
+	Worktrees            []*models.TaskEnvironmentRepo `json:"worktrees,omitempty"`
 	State                models.TaskSessionState       `json:"state"`
 	ErrorMessage         string                        `json:"error_message,omitempty"`
 	Metadata             map[string]interface{}        `json:"metadata,omitempty"`
@@ -332,7 +332,7 @@ type TaskSessionSummaryDTO struct {
 	// Worktrees lists all session worktrees (one per repo on multi-repo tasks);
 	// the flattened Worktree* fields above carry only the first for
 	// backward compatibility.
-	Worktrees         []*models.TaskSessionWorktree `json:"worktrees,omitempty"`
+	Worktrees         []*models.TaskEnvironmentRepo `json:"worktrees,omitempty"`
 	State             models.TaskSessionState       `json:"state"`
 	ErrorMessage      string                        `json:"error_message,omitempty"`
 	Metadata          map[string]interface{}        `json:"metadata,omitempty"`
