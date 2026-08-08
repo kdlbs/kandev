@@ -706,14 +706,11 @@ func (p *Projector) applyPendingMessageLocked(state *projectionState, eventType 
 		return false
 	}
 	state.pendingObserved = true
-	// A terminal status means the prompt is no longer awaiting the user, whatever
-	// the message type. Resolutions land as a message.updated on the request row
-	// itself (approved/rejected/expired for permissions, answered/rejected/
-	// cancelled/expired for clarifications), so gating the clear on "not a
-	// request message" left the task-list affordance armed after the user had
-	// already answered. Only the empty and "pending" statuses keep it armed —
-	// that covers a detached-but-answerable clarification, which stays pending.
-	if eventType == events.MessageDeleted || (status != "" && status != statusPending) {
+	// Resolutions land as a message.updated on the request row itself
+	// (approved/rejected/expired for permissions, answered/rejected/cancelled/
+	// expired for clarifications). Only the empty and "pending" statuses keep
+	// that request armed — a detached-but-answerable clarification stays pending.
+	if isPendingMessage && (eventType == events.MessageDeleted || (status != "" && status != statusPending)) {
 		return p.clearPendingLocked(state, sessionID)
 	}
 	action := pendingPermission

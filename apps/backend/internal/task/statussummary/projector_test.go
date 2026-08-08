@@ -736,6 +736,42 @@ func TestProjectorClearsPendingWhenRequestMessageResolves(t *testing.T) {
 	}
 }
 
+func TestProjectorKeepsPendingWhenUnrelatedMessageResolves(t *testing.T) {
+	_, store, eventBus, _, _ := newProjectorTest(t)
+	const taskID = "task-pending-unrelated"
+	const sessionID = "session-pending-unrelated"
+
+	publishSessionState(t, eventBus, taskID, sessionID, nil)
+	publishProjectorEvent(t, eventBus, events.PermissionRequestReceived, events.BuildPermissionRequestSubject(sessionID), map[string]interface{}{
+		"task_id":    taskID,
+		"session_id": sessionID,
+	})
+
+	publishProjectorEvent(t, eventBus, events.MessageUpdated, events.MessageUpdated, map[string]interface{}{
+		"task_id":    taskID,
+		"session_id": sessionID,
+		"type":       "tool_execute",
+		"metadata":   map[string]interface{}{"status": "completed", "pending_id": "tool-1"},
+	})
+
+	got := store.summary(taskID)
+	if got == nil || got.PendingAction != "permission" {
+		t.Fatalf("pending action after unrelated resolution = %+v, want permission", got)
+	}
+
+	publishProjectorEvent(t, eventBus, events.MessageUpdated, events.MessageUpdated, map[string]interface{}{
+		"task_id":    taskID,
+		"session_id": sessionID,
+		"type":       "permission_request",
+		"metadata":   map[string]interface{}{"status": "approved", "pending_id": "permission-1"},
+	})
+
+	got = store.summary(taskID)
+	if got == nil || got.PendingAction != "" {
+		t.Fatalf("pending action after request resolution = %+v, want empty", got)
+	}
+}
+
 // A detached-but-still-answerable clarification keeps status=pending, so the
 // task-list affordance must survive that update.
 func TestProjectorKeepsPendingWhenRequestStaysAnswerable(t *testing.T) {
