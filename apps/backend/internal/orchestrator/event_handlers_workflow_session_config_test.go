@@ -258,6 +258,86 @@ func TestProcessOnEnterConfigureSessionKnownOtherAgentStaysSilent(t *testing.T) 
 	}
 }
 
+// The launch path is the one the reported defect was observed on: a CREATED
+// session has no prompt-ready ACP process, so the rule is persisted as a runtime
+// override for lifecycle initialization to consume rather than applied live.
+// Family resolution has to happen on that path too.
+func TestApplyWorkflowSessionConfigBeforeLaunchMatchesAgentDisplayName(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-launch-display", "session-launch-display", "step-launch-display")
+	if err := repo.SetSessionMetadataKey(ctx, "session-launch-display", models.SessionMetaKeyOrigin, models.SessionOriginTaskInitial); err != nil {
+		t.Fatalf("mark original session: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "session-launch-display")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.AgentProfileSnapshot = map[string]interface{}{"agent_name": "claude-acp"}
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session snapshot: %v", err)
+	}
+
+	agent := &mockAgentManager{isAgentReadyFn: func(context.Context, string) bool { return false }}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agent)
+	step := configureSessionStep("step-launch-display", "Claude", "set", "opus[1m]", nil)
+
+	svc.applyWorkflowSessionConfigBeforeLaunch(ctx, "task-launch-display", session, step)
+
+	updated, err := repo.GetTaskSession(ctx, "session-launch-display")
+	if err != nil {
+		t.Fatalf("reload session: %v", err)
+	}
+	overrides, ok := models.LoadSessionRuntimeConfigOverrides(updated.Metadata)
+	if !ok || overrides.Model != "opus[1m]" {
+		t.Fatalf("runtime overrides = %#v, want launch model opus[1m]", overrides)
+	}
+}
+
+// Without a resolver wired, matching must degrade to the exact comparison this
+// used to perform rather than guessing. This is also the pre-fix behaviour, so
+// it pins what the registry actually buys: the same inputs that now match are
+// the ones that silently did nothing before.
+func TestProcessOnEnterConfigureSessionWithoutResolverRequiresExactAgentName(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-config-noresolver", "session-config-noresolver", "step-config-noresolver")
+	if err := repo.SetSessionMetadataKey(ctx, "session-config-noresolver", models.SessionMetaKeyOrigin, models.SessionOriginTaskInitial); err != nil {
+		t.Fatalf("mark original session: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "session-config-noresolver")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.AgentProfileSnapshot = map[string]interface{}{"agent_name": "claude-acp"}
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session snapshot: %v", err)
+	}
+
+	agent := &mockAgentManager{isAgentRunning: true, setSessionModelSupported: true, setSessionConfigSupported: true}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agent)
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+	svc.agentFamilyResolver = nil
+
+	svc.processOnEnter(ctx, "task-config-noresolver", session,
+		configureSessionStep("step-config-noresolver", "Claude", "set", "opus[1m]", nil), "")
+	if len(agent.setSessionModelCalls) != 0 {
+		t.Fatalf("display name matched without a resolver: %#v", agent.setSessionModelCalls)
+	}
+	// Nothing is knowable about an agent family without a resolver, so an
+	// unmatched rule must not be reported to the user as a workflow typo.
+	if warnings := messages.workflowSessionConfigWarnings(); len(warnings) != 0 {
+		t.Fatalf("warned without a resolver to judge with: %#v", warnings)
+	}
+
+	svc.processOnEnter(ctx, "task-config-noresolver", session,
+		configureSessionStep("step-config-noresolver", "claude-acp", "set", "opus[1m]", nil), "")
+	if len(agent.setSessionModelCalls) != 1 || agent.setSessionModelCalls[0].ModelID != "opus[1m]" {
+		t.Fatalf("exact agent name did not match without a resolver: %#v", agent.setSessionModelCalls)
+	}
+}
+
 // workflowSessionConfigWarnings returns the user-visible warnings raised by
 // configure_session handling, identified by the marker warnWorkflowSessionConfig
 // stamps on their metadata.
