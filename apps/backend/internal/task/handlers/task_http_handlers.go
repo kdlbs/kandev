@@ -982,6 +982,9 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	// prepare or async start) has happened yet at this point.
 	settled, survivor, settleErr := h.service.SettleExternalID(c.Request.Context(), task.ID, task.ExternalID)
 	if settleErr != nil {
+		if !isNotFound(settleErr) {
+			h.logger.Error("failed to settle external_id", zap.String("task_id", task.ID), zap.Error(settleErr))
+		}
 		handleNotFound(c, h.logger, settleErr, "task not created")
 		return
 	}
