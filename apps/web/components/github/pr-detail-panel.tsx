@@ -111,64 +111,14 @@ function useAddPRFeedbackAsContext(sessionId: string, prNumber: number) {
   return { addAsContext };
 }
 
-// Sync live feedback data back to the store so topbar/other consumers stay up to date.
-// Use primitive deps to avoid re-render loops from object reference changes.
-// Guard: never regress the store to a less-terminal state (e.g. merged → open)
-// because the feedback fetch may return stale data from before a backend poll update.
-function useSyncLivePRState(taskPR: TaskPR, feedback: PRFeedback | null) {
-  const setTaskPR = useAppStore((s) => s.setTaskPR);
-  const prState = taskPR.state;
-  const prMergedAt = taskPR.merged_at ?? null;
-  const prClosedAt = taskPR.closed_at ?? null;
-  const prAdditions = taskPR.additions;
-  const prDeletions = taskPR.deletions;
-  const prMergeableState = taskPR.mergeable_state;
-  const prTaskId = taskPR.task_id;
-  useEffect(() => {
-    if (!feedback) return;
-    const livePR = feedback.pr;
-    // State priority: merged > closed > open. Never regress to a less-terminal state.
-    const stateRank = (s: string) => {
-      if (s === "merged") return 2;
-      if (s === "closed") return 1;
-      return 0;
-    };
-    const effectiveState = stateRank(livePR.state) >= stateRank(prState) ? livePR.state : prState;
-    const effectiveMergedAt = effectiveState === prState ? prMergedAt : (livePR.merged_at ?? null);
-    const effectiveClosedAt = effectiveState === prState ? prClosedAt : (livePR.closed_at ?? null);
-    // Live mergeable_state is authoritative when present; otherwise keep the stored value.
-    const effectiveMergeableState = livePR.mergeable_state ?? prMergeableState;
-    if (
-      effectiveState !== prState ||
-      effectiveMergedAt !== prMergedAt ||
-      effectiveClosedAt !== prClosedAt ||
-      livePR.additions !== prAdditions ||
-      livePR.deletions !== prDeletions ||
-      effectiveMergeableState !== prMergeableState
-    ) {
-      setTaskPR(prTaskId, {
-        ...taskPR,
-        state: effectiveState as TaskPR["state"],
-        additions: livePR.additions,
-        deletions: livePR.deletions,
-        merged_at: effectiveMergedAt,
-        closed_at: effectiveClosedAt,
-        mergeable_state: effectiveMergeableState,
-      });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    feedback,
-    prState,
-    prMergedAt,
-    prClosedAt,
-    prAdditions,
-    prDeletions,
-    prMergeableState,
-    prTaskId,
-    setTaskPR,
-  ]);
-}
+// The panel used to patch state / merged_at / closed_at / additions / deletions /
+// mergeable_state from the feedback response straight into the Zustand taskPRs
+// row (useSyncLivePRState). That write never reached github_task_prs, so opening
+// this panel turned its own tab purple while the kanban card and boot payload
+// kept reading state=open, and a reload snapped it back. The backend now writes
+// the same live PR through SyncTaskPR during the feedback fetch and publishes
+// github.task_pr.updated, which lib/ws/handlers/github.ts applies to the store —
+// one writer, and it survives a reload. Do not reintroduce a client-side patch.
 
 type PRPanelMetrics = {
   reviewCount: number;
@@ -358,8 +308,6 @@ export function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; session
     refresh,
     toast,
   });
-
-  useSyncLivePRState(taskPR, feedback);
 
   const metrics = derivePanelMetrics(taskPR, feedback);
 

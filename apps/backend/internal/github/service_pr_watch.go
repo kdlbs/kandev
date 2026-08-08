@@ -700,7 +700,25 @@ type taskPRSyncState struct {
 	checksTotal, checksPassing                  int
 	unresolved, reviewCount, pendingReviewCount int
 	requiredReviews                             *int
-	baseBranch, mergeableState                  string
+	baseBranch, mergeableState, state           string
+	mergedAt, closedAt                          *time.Time
+}
+
+// resolveTerminalMergeState keeps a row that already reached "merged" there.
+// GitHub cannot un-merge a PR, so a live read reporting anything else for a
+// merged row is stale — an eventually-consistent REST reply, or a fetch that
+// started before a concurrent writer observed the merge. Without this, two
+// writers racing the same PR could flip its badge back to green.
+//
+// Only "merged" is guarded. The PR detail panel used to apply a full
+// merged > closed > open rank client-side; that is deliberately not ported,
+// because closed -> open is a real transition (a PR can be reopened on GitHub)
+// and ranking it as a regression would pin every reopened PR closed forever.
+func resolveTerminalMergeState(tp *TaskPR, pr *PR) (string, *time.Time, *time.Time) {
+	if tp.State == prStateMerged && pr.State != prStateMerged {
+		return tp.State, tp.MergedAt, tp.ClosedAt
+	}
+	return pr.State, pr.MergedAt, pr.ClosedAt
 }
 
 func (s *Service) prepareTaskPRSyncState(ctx context.Context, tp *TaskPR, status *PRStatus) taskPRSyncState {
@@ -755,10 +773,12 @@ func (s *Service) prepareTaskPRSyncState(ctx context.Context, tp *TaskPR, status
 	if status.PR.Draft {
 		nextMergeableState = "draft"
 	}
+	nextState, nextMergedAt, nextClosedAt := resolveTerminalMergeState(tp, status.PR)
 	return taskPRSyncState{
 		checksTotal: nextChecksTotal, checksPassing: nextChecksPassing,
 		unresolved: nextUnresolved, reviewCount: nextReviewCount, pendingReviewCount: nextPendingReviewCount,
 		requiredReviews: nextRequiredReviews, baseBranch: nextBaseBranch, mergeableState: nextMergeableState,
+		state: nextState, mergedAt: nextMergedAt, closedAt: nextClosedAt,
 	}
 }
 
@@ -780,7 +800,7 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	}
 	next := s.prepareTaskPRSyncState(ctx, tp, status)
 
-	changed := tp.State != status.PR.State ||
+	changed := tp.State != next.state ||
 		tp.PRTitle != status.PR.Title ||
 		tp.Additions != status.PR.Additions ||
 		tp.Deletions != status.PR.Deletions ||
@@ -794,15 +814,15 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 		tp.ChecksPassing != next.checksPassing ||
 		tp.UnresolvedReviewThreads != next.unresolved ||
 		tp.BaseBranch != next.baseBranch ||
-		!timeEqual(tp.MergedAt, status.PR.MergedAt) ||
-		!timeEqual(tp.ClosedAt, status.PR.ClosedAt)
+		!timeEqual(tp.MergedAt, next.mergedAt) ||
+		!timeEqual(tp.ClosedAt, next.closedAt)
 
-	tp.State = status.PR.State
+	tp.State = next.state
 	tp.PRTitle = status.PR.Title
 	tp.Additions = status.PR.Additions
 	tp.Deletions = status.PR.Deletions
-	tp.MergedAt = status.PR.MergedAt
-	tp.ClosedAt = status.PR.ClosedAt
+	tp.MergedAt = next.mergedAt
+	tp.ClosedAt = next.closedAt
 	tp.ReviewState = status.ReviewState
 	tp.ChecksState = status.ChecksState
 	tp.MergeableState = next.mergeableState
