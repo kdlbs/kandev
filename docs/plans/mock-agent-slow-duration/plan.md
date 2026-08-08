@@ -28,6 +28,8 @@ changing the ACP command advertisement or any frontend code.
     values.
   - Route `emitSlowResponse` through this parser with a five-second default and
     preserve the existing background-command behavior.
+  - Preserve the existing `/background 12` behavior already covered by the
+    parser table; the new behavior is limited to the `/slow` caller.
 
 ## Tests
 
@@ -37,7 +39,8 @@ changing the ACP command advertisement or any frontend code.
   **File:** `apps/backend/cmd/mock-agent/background_test.go` (rename or
   generalize the existing parser test as needed).
   **How:** Table-driven unit test; the `/slow 60` case must fail before the
-  parser change because it currently resolves to five seconds.
+  parser change because it currently resolves to the supplied eight-second
+  default rather than 60 seconds.
 - **What:** The `/slow` handler uses the resolved duration in its simulated
   response path.
   **File:** `apps/backend/cmd/mock-agent/slow_test.go` (new) or the nearest
@@ -55,6 +58,9 @@ agent's backend fixture behavior.
 - `cd apps/backend && go test -run '^TestSlowResponseBareNumberUsesSeconds$' -count=1 ./cmd/mock-agent` failed before the production change with the expected five-second marker, then passed after the change.
 - `cd apps/backend && go test -run 'Test(ParseCommandDuration|Slow)' ./cmd/mock-agent` — passed (`12 passed`).
 - `cd apps/backend && go test ./cmd/mock-agent` — passed (`193 passed`).
+- `make -C apps/backend build-mock-agent` — passed; the host mock-agent binary
+  was rebuilt. The containers E2E project was not run, so the Linux binary was
+  not required.
 - `gofmt -w cmd/mock-agent/handler.go cmd/mock-agent/background_test.go cmd/mock-agent/slow_test.go` — passed.
 - `git diff --check` — passed.
 

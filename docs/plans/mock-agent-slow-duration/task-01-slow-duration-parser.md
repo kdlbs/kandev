@@ -71,4 +71,8 @@ unrelated mock-agent commands.
 - Package: `cd apps/backend && go test ./cmd/mock-agent` — passed (`193 passed`).
 - Formatting: `gofmt -w cmd/mock-agent/handler.go cmd/mock-agent/background_test.go cmd/mock-agent/slow_test.go` — passed.
 - Diff hygiene: `git diff --check` — passed.
-- No E2E or mock-agent binary rebuild was required because the change has no UI or E2E fixture-surface change.
+- `make -C apps/backend build-mock-agent` — passed; the host mock-agent binary
+  was rebuilt. The containers E2E project was not run, so the Linux binary was
+  not required.
+- Review follow-up: the handler-path test uses `/slow 50ms` to keep the suite
+  fast while the parser table covers `/slow 60`.

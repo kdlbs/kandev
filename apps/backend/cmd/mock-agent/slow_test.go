@@ -4,9 +4,9 @@ import "testing"
 
 func TestSlowResponseBareNumberUsesSeconds(t *testing.T) {
 	e, updates := newTestEmitter()
-	emitSlowResponse(e, "/slow 1", "mock-fast")
+	emitSlowResponse(e, "/slow 50ms", "mock-fast")
 
-	const want = "Running slow response (1s total)..."
+	const want = "Running slow response (50ms total)..."
 	for _, update := range updates.getUpdates() {
 		if getTextContent(update) == want {
 			return
