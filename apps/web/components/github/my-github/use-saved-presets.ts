@@ -7,15 +7,14 @@ import {
   updateGitHubWorkspaceSettings,
 } from "@/lib/api/domains/github-api";
 import { createQueuedUserSettingsSync } from "@/lib/user-settings-sync";
+import {
+  readSavedPresets,
+  setSavedPresetDefault,
+  type SavedPreset,
+  type SavedPresetKind,
+} from "./saved-preset-model";
 
-export type SavedPreset = {
-  id: string;
-  kind: "pr" | "issue";
-  label: string;
-  customQuery: string;
-  repoFilter: string;
-  createdAt: string;
-};
+export type { SavedPreset } from "./saved-preset-model";
 
 const listeners = new Set<() => void>();
 let snapshot: SavedPreset[] = [];
@@ -41,28 +40,6 @@ function publish(next: SavedPreset[]) {
   snapshot = next;
   snapshotVersion += 1;
   for (const l of listeners) l();
-}
-
-function readServerPresets(value: unknown): SavedPreset[] | null {
-  if (!Array.isArray(value)) return null;
-  return value.flatMap((candidate): SavedPreset[] => {
-    if (typeof candidate !== "object" || candidate === null) return [];
-    const preset = candidate as Record<string, unknown>;
-    const kind = preset.kind;
-    if (
-      typeof preset.id !== "string" ||
-      (kind !== "pr" && kind !== "issue") ||
-      typeof preset.label !== "string"
-    ) {
-      return [];
-    }
-    return [
-      {
-        ...(preset as SavedPreset),
-        repoFilter: typeof preset.repoFilter === "string" ? preset.repoFilter : "",
-      },
-    ];
-  });
 }
 
 const syncServer = createQueuedUserSettingsSync<SavedPreset[]>((next) => ({
@@ -96,7 +73,7 @@ function useUserSavedPresetsSync(enabled: boolean) {
     const initialVersion = snapshotVersion;
     fetchUserSettings({ cache: "no-store" })
       .then((response) => {
-        const serverPresets = readServerPresets(response.settings.github_saved_presets);
+        const serverPresets = readSavedPresets(response.settings.github_saved_presets);
         if (cancelled || !serverPresets || snapshotVersion !== initialVersion) return;
         publish(serverPresets);
       })
@@ -121,7 +98,7 @@ function useWorkspaceSavedPresets(workspaceId: string | null) {
     fetchGitHubWorkspaceSettings(workspaceId)
       .then((settings) => {
         if (cancelled || seq !== writeSeq.current) return;
-        const serverPresets = readServerPresets(settings.saved_presets) ?? [];
+        const serverPresets = readSavedPresets(settings.saved_presets) ?? [];
         setWorkspacePresets(serverPresets);
       })
       .catch(() => {
@@ -142,43 +119,83 @@ export function useSavedPresets(workspaceId: string | null = null) {
   const presets = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   const { workspacePresets, setWorkspacePresets } = useWorkspaceSavedPresets(workspaceId);
   useUserSavedPresetsSync(!workspaceId);
-  const activePresets = workspaceId ? (workspacePresets ?? []) : presets;
+  const activePresets = workspaceId ? (workspacePresets ?? emptySnapshot) : presets;
+  const activePresetsRef = useRef(activePresets);
+  const mutationQueueRef = useRef<Promise<void>>(Promise.resolve());
+  activePresetsRef.current = activePresets;
+
+  const applyLocal = useCallback(
+    (next: SavedPreset[]) => {
+      activePresetsRef.current = next;
+      if (workspaceId) {
+        setWorkspacePresets(next);
+      } else {
+        publish(next);
+      }
+    },
+    [workspaceId, setWorkspacePresets],
+  );
+
+  const persist = useCallback(
+    (next: SavedPreset[]) => {
+      if (workspaceId) return syncWorkspaceSavedPresets(workspaceId, next);
+      return syncServer(next);
+    },
+    [workspaceId],
+  );
+
+  const queueMutation = useCallback((mutation: () => Promise<void>) => {
+    const queued = mutationQueueRef.current.catch(() => undefined).then(mutation);
+    mutationQueueRef.current = queued;
+    return queued;
+  }, []);
 
   const save = useCallback(
-    (input: Omit<SavedPreset, "id" | "createdAt">) => {
+    (input: Omit<SavedPreset, "id" | "createdAt" | "isDefault">) => {
       if (workspaceId && workspacePresets === undefined) return null;
       const preset: SavedPreset = {
         ...input,
         id: `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
         createdAt: new Date().toISOString(),
+        isDefault: false,
       };
-      const next = [...activePresets, preset];
-      if (workspaceId) {
-        setWorkspacePresets(next);
-        void syncWorkspaceSavedPresets(workspaceId, next).catch(() => {});
-        return preset;
-      }
-      publish(next);
-      void syncServer(next);
+      const append = (current: SavedPreset[]) =>
+        current.some((saved) => saved.id === preset.id) ? current : [...current, preset];
+      applyLocal(append(activePresetsRef.current));
+      void queueMutation(async () => {
+        await persist(append(activePresetsRef.current));
+      }).catch(() => {});
       return preset;
     },
-    [activePresets, workspaceId, workspacePresets, setWorkspacePresets],
+    [applyLocal, persist, queueMutation, workspaceId, workspacePresets],
   );
 
   const remove = useCallback(
     (id: string) => {
       if (workspaceId && workspacePresets === undefined) return;
-      const next = activePresets.filter((p) => p.id !== id);
-      if (workspaceId) {
-        setWorkspacePresets(next);
-        void syncWorkspaceSavedPresets(workspaceId, next).catch(() => {});
-        return;
-      }
-      publish(next);
-      void syncServer(next);
+      const discard = (current: SavedPreset[]) => current.filter((preset) => preset.id !== id);
+      applyLocal(discard(activePresetsRef.current));
+      void queueMutation(async () => {
+        await persist(discard(activePresetsRef.current));
+      }).catch(() => {});
     },
-    [activePresets, workspaceId, workspacePresets, setWorkspacePresets],
+    [applyLocal, persist, queueMutation, workspaceId, workspacePresets],
   );
 
-  return { presets: activePresets, save, remove };
+  const setDefault = useCallback(
+    async (kind: SavedPresetKind, id: string | null) => {
+      if (workspaceId && workspacePresets === undefined) {
+        throw new Error("Saved queries are not loaded");
+      }
+      await queueMutation(async () => {
+        const next = setSavedPresetDefault(activePresetsRef.current, kind, id);
+        if (next === activePresetsRef.current) return;
+        await persist(next);
+        applyLocal(setSavedPresetDefault(activePresetsRef.current, kind, id));
+      });
+    },
+    [applyLocal, persist, queueMutation, workspaceId, workspacePresets],
+  );
+
+  return { presets: activePresets, save, remove, setDefault };
 }

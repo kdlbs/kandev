@@ -11,6 +11,7 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
+import { SavedQueryDefaultButton } from "./saved-query-default-button";
 
 /**
  * Shared, domain-agnostic scope bar for the integration dashboards (/github,
@@ -39,6 +40,7 @@ export type ScopeSavedPreset<K extends string> = {
   id: string;
   kind: K;
   label: string;
+  isDefault?: boolean;
 };
 
 const PILL_BASE =
@@ -110,6 +112,8 @@ function SavedMenu<K extends string>({
   onDeleteSaved,
   canSaveCurrent,
   onSaveCurrent,
+  onToggleSavedDefault,
+  defaultMutationPending,
 }: {
   testId: string;
   selected: ScopeSelection<K>;
@@ -118,6 +122,8 @@ function SavedMenu<K extends string>({
   onDeleteSaved: (id: string) => void;
   canSaveCurrent: boolean;
   onSaveCurrent: () => void;
+  onToggleSavedDefault?: (id: string) => void;
+  defaultMutationPending: boolean;
 }) {
   const { t } = useTranslation();
   const activeSaved = selected.source === "saved";
@@ -149,11 +155,22 @@ function SavedMenu<K extends string>({
             >
               <IconBookmark className="h-3.5 w-3.5 shrink-0" />
               <span className="flex-1 truncate">{s.label}</span>
+              {onToggleSavedDefault && (
+                <SavedQueryDefaultButton
+                  label={s.label}
+                  isDefault={s.isDefault === true}
+                  disabled={defaultMutationPending}
+                  size="desktop"
+                  testId={`saved-query-default-${s.id}`}
+                  onToggle={() => onToggleSavedDefault(s.id)}
+                />
+              )}
               <button
                 type="button"
-                // Stop the pointerdown so Radix doesn't treat the delete click
-                // as a select of the (about-to-be-deleted) saved query.
+                // Stop both pointer phases so Radix doesn't synthesize a row
+                // select for the (about-to-be-deleted) saved query.
                 onPointerDown={(e) => e.stopPropagation()}
+                onPointerUp={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
                   onDeleteSaved(s.id);
@@ -192,6 +209,8 @@ export type IntegrationScopeBarProps<K extends string> = {
   onDeleteSaved: (id: string) => void;
   canSaveCurrent: boolean;
   onSaveCurrent: () => void;
+  onToggleSavedDefault?: (id: string) => void;
+  defaultMutationPending?: boolean;
 };
 
 export function IntegrationScopeBar<K extends string>({
@@ -206,6 +225,8 @@ export function IntegrationScopeBar<K extends string>({
   onDeleteSaved,
   canSaveCurrent,
   onSaveCurrent,
+  onToggleSavedDefault,
+  defaultMutationPending = false,
 }: IntegrationScopeBarProps<K>) {
   const presets = presetsByKind(selected.kind);
   const saved = savedPresets.filter((p) => p.kind === selected.kind);
@@ -245,6 +266,8 @@ export function IntegrationScopeBar<K extends string>({
           onDeleteSaved={onDeleteSaved}
           canSaveCurrent={canSaveCurrent}
           onSaveCurrent={onSaveCurrent}
+          onToggleSavedDefault={onToggleSavedDefault}
+          defaultMutationPending={defaultMutationPending}
         />
       </div>
     </div>

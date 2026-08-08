@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { PR_PRESETS, ISSUE_PRESETS, type PresetOption, type PresetGroup } from "./search-bar";
 import type { SavedPreset } from "./use-saved-presets";
 import { useTranslation } from "react-i18next";
+import { SavedQueryDefaultButton } from "@/components/integrations/saved-query-default-button";
 
 export type SidebarSelection = {
   kind: "pr" | "issue";
@@ -20,6 +21,8 @@ type PresetsSidebarProps = {
   onDeleteSaved: (id: string) => void;
   canSaveCurrent: boolean;
   onSaveCurrent: () => void;
+  onToggleSavedDefault: (preset: SavedPreset) => void;
+  defaultMutationPending: boolean;
   prPresets?: PresetOption[];
   issuePresets?: PresetOption[];
 };
@@ -40,7 +43,7 @@ function KindToggle({
           type="button"
           onClick={() => onChange(value)}
           className={cn(
-            "px-2 py-1 rounded cursor-pointer transition-colors",
+            "min-h-11 px-2 py-1 rounded cursor-pointer transition-colors",
             kind === value
               ? "bg-muted font-medium text-foreground"
               : "text-muted-foreground hover:text-foreground",
@@ -74,27 +77,22 @@ function PresetItem({
   onClick: () => void;
   trailing?: React.ReactNode;
 }) {
-  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      onClick();
-    }
-  };
   return (
     <div
-      role="button"
-      tabIndex={0}
-      aria-pressed={active}
       className={cn(
-        "group/item mx-1 flex items-center gap-2 rounded-md px-2 py-1.5 text-sm cursor-pointer transition-colors",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "group/item mx-1 flex min-w-0 items-center rounded-md text-sm transition-colors",
         active ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:bg-muted/50",
       )}
-      onClick={onClick}
-      onKeyDown={onKeyDown}
     >
-      <Icon className="h-4 w-4 shrink-0" />
-      <span className="truncate flex-1">{label}</span>
+      <button
+        type="button"
+        aria-pressed={active}
+        onClick={onClick}
+        className="flex min-h-11 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <Icon className="h-4 w-4 shrink-0" />
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+      </button>
       {trailing}
     </div>
   );
@@ -140,6 +138,8 @@ function SavedSection({
   kind,
   canSaveCurrent,
   onSaveCurrent,
+  onToggleSavedDefault,
+  defaultMutationPending,
 }: {
   saved: SavedPreset[];
   selected: SidebarSelection;
@@ -148,6 +148,8 @@ function SavedSection({
   kind: "pr" | "issue";
   canSaveCurrent: boolean;
   onSaveCurrent: () => void;
+  onToggleSavedDefault: (preset: SavedPreset) => void;
+  defaultMutationPending: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -166,17 +168,25 @@ function SavedSection({
           active={selected.source === "saved" && selected.id === s.id}
           onClick={() => onSelect({ kind, source: "saved", id: s.id })}
           trailing={
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(s.id);
-              }}
-              className="opacity-0 group-hover/item:opacity-100 transition-opacity text-muted-foreground hover:text-foreground cursor-pointer"
-              title={t("github:deleteSavedQuery")}
-            >
-              <IconX className="h-3.5 w-3.5" />
-            </button>
+            <div className="flex shrink-0 items-center">
+              <SavedQueryDefaultButton
+                label={s.label}
+                isDefault={s.isDefault}
+                disabled={defaultMutationPending}
+                size="mobile"
+                testId={`github-saved-query-default-${s.id}`}
+                onToggle={() => void onToggleSavedDefault(s)}
+              />
+              <button
+                type="button"
+                onClick={() => onDelete(s.id)}
+                className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                title={t("integrations:deleteSavedQueryNamed", { label: s.label })}
+                aria-label={t("integrations:deleteSavedQueryNamed", { label: s.label })}
+              >
+                <IconX className="h-4 w-4" />
+              </button>
+            </div>
           }
         />
       ))}
@@ -185,7 +195,7 @@ function SavedSection({
         onClick={onSaveCurrent}
         disabled={!canSaveCurrent}
         className={cn(
-          "mx-1 mt-1 flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors",
+          "mx-1 mt-1 flex min-h-11 items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors",
           canSaveCurrent
             ? "text-muted-foreground hover:bg-muted/50 hover:text-foreground cursor-pointer"
             : "text-muted-foreground/50 cursor-not-allowed",
@@ -206,6 +216,8 @@ export function PresetsSidebar({
   onDeleteSaved,
   canSaveCurrent,
   onSaveCurrent,
+  onToggleSavedDefault,
+  defaultMutationPending,
   prPresets = PR_PRESETS,
   issuePresets = ISSUE_PRESETS,
 }: PresetsSidebarProps) {
@@ -216,7 +228,7 @@ export function PresetsSidebar({
     onSelect({ kind, source: "preset", id: fallback });
   };
   return (
-    <nav className="flex flex-col py-3">
+    <nav className="flex w-full min-w-0 flex-col overflow-x-hidden py-3">
       <KindToggle kind={selected.kind} onChange={onKindChange} />
       <PresetGroupList
         presets={presets}
@@ -240,6 +252,8 @@ export function PresetsSidebar({
         kind={selected.kind}
         canSaveCurrent={canSaveCurrent}
         onSaveCurrent={onSaveCurrent}
+        onToggleSavedDefault={onToggleSavedDefault}
+        defaultMutationPending={defaultMutationPending}
       />
     </nav>
   );
