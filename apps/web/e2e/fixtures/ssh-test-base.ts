@@ -1,4 +1,5 @@
 import { expect, type Page, test as base } from "@playwright/test";
+import { execFileSync } from "node:child_process";
 import {
   execInContainer,
   startSSHServer,
@@ -9,6 +10,7 @@ import path from "node:path";
 import { backendFixture, type BackendContext } from "./backend";
 import { hasSSHContainerSupport, buildE2ESSHImage, SSH_E2E_IMAGE_TAG } from "./ssh-image";
 import { ApiClient } from "../helpers/api-client";
+import { makeGitEnv } from "../helpers/git-helper";
 import { startHTTPGitFixture } from "../helpers/http-git-server";
 import type { WorkflowStep } from "../../lib/types/http";
 
@@ -183,6 +185,13 @@ async function seedSSHWorkspace(
   // The HTTP server is disposable and the SSH target rewrites the canonical
   // provider URL to its Docker-bridge endpoint without changing Git origin.
   const gitFixture = await startHTTPGitFixture(backend.tmpDir, "e2e-ssh");
+  const localRepoDir = path.join(backend.tmpDir, "repos", "e2e-ssh-repo");
+  const localGitEnv = makeGitEnv(backend.tmpDir);
+  execFileSync(
+    "git",
+    ["clone", path.join(backend.tmpDir, "fixture", "e2e-ssh.git"), localRepoDir],
+    { env: localGitEnv },
+  );
   const rewriteKey = gitFixture.gitConfigEnvVars.find(
     ({ key }) => key === "GIT_CONFIG_KEY_0",
   )?.value;
