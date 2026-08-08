@@ -221,7 +221,8 @@ if [ -n "$repository_url" ]; then
     git -C "$workspace" remote add origin "$repository_url"
   fi
 
-  exclude_file=$(git -C "$workspace" rev-parse --git-path info/exclude)
+  git_dir=$(git -C "$workspace" rev-parse --absolute-git-dir)
+  exclude_file="$git_dir/info/exclude"
   mkdir -p "$(dirname "$exclude_file")"
   touch "$exclude_file"
   grep -Fqx '/.kandev/' "$exclude_file" || printf '%s\n' '/.kandev/' >>"$exclude_file"

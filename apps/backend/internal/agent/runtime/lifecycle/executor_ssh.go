@@ -44,6 +44,7 @@ type sshSessionState struct {
 	agentctlClient *agentctl.Client
 	pid            int
 	remoteDir      string
+	remoteTaskDir  string
 	authToken      string
 	reusingProcess bool
 	metadata       map[string]interface{}
@@ -249,15 +250,16 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 
 	r.mu.Lock()
 	r.sessions[req.InstanceID] = &sshSessionState{
-		target:     target,
-		client:     client,
-		forwarder:  fwd,
-		pid:        pid,
-		remoteDir:  sessionDir,
-		authToken:  authToken,
-		metadata:   cloneSSHMetadata(req.Metadata),
-		prepareEnv: sshRemoteContributionEnv(req, agentctlBin),
-		platform:   platform,
+		target:        target,
+		client:        client,
+		forwarder:     fwd,
+		pid:           pid,
+		remoteDir:     sessionDir,
+		remoteTaskDir: taskDir,
+		authToken:     authToken,
+		metadata:      cloneSSHMetadata(req.Metadata),
+		prepareEnv:    sshRemoteContributionEnv(req, agentctlBin),
+		platform:      platform,
 	}
 	r.mu.Unlock()
 	released = true // ownership transferred to session state; released on StopInstance
@@ -528,7 +530,7 @@ func (r *SSHExecutor) StopInstance(ctx context.Context, instance *ExecutorInstan
 	}
 	if shouldRunExecutorCleanup(instance.StopReason) && state.client != nil && r.cleanupScript != nil {
 		metadata := mergeSSHMetadata(state.metadata, instance.Metadata)
-		if err := r.cleanupScript(ctx, state.client, getMetadataString(metadata, MetadataKeySSHRemoteTaskDir), metadata, state.prepareEnv, state.platform, instance.InstanceID, instance.StopReason); err != nil {
+		if err := r.cleanupScript(ctx, state.client, state.remoteTaskDir, metadata, state.prepareEnv, state.platform, instance.InstanceID, instance.StopReason); err != nil {
 			r.logger.Warn("failed to run SSH cleanup script", zap.String("instance_id", instance.InstanceID), zap.Error(err))
 		}
 	}
@@ -659,6 +661,7 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 		agentctlClient: instanceClient,
 		pid:            pid,
 		remoteDir:      sessionDir,
+		remoteTaskDir:  taskDir,
 		authToken:      req.AuthToken,
 		reusingProcess: reusingProcess,
 		metadata:       cloneSSHMetadata(req.Metadata),

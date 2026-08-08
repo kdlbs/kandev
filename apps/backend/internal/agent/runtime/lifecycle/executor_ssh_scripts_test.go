@@ -85,6 +85,7 @@ func TestSSHDefaultPrepareScriptExecutesCheckoutAndSetup(t *testing.T) {
 		t.Fatalf("resolvePrepareScript() error = %v", err)
 	}
 	cmd := exec.Command("bash", "-e", "-c", script)
+	cmd.Dir = root
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("SSH prepare script failed: %v\n%s\nscript:\n%s", err, output, script)
@@ -102,9 +103,13 @@ func TestSSHDefaultPrepareScriptExecutesCheckoutAndSetup(t *testing.T) {
 	if got := strings.TrimSpace(string(runIn(t, workspace, "cat", "setup-marker"))); got != "setup" {
 		t.Fatalf("setup marker = %q, want setup", got)
 	}
+	if got := strings.TrimSpace(string(runIn(t, workspace, "cat", filepath.Join(".git", "info", "exclude")))); !strings.Contains(got, "/.kandev/") {
+		t.Fatalf("git exclude = %q, want /.kandev/", got)
+	}
 
 	runIn(t, workspace, "sh", "-c", "printf local > local.txt")
 	reuseCmd := exec.Command("bash", "-e", "-c", script)
+	reuseCmd.Dir = root
 	if output, err := reuseCmd.CombinedOutput(); err != nil {
 		t.Fatalf("reused SSH prepare script failed: %v\n%s", err, output)
 	}
@@ -209,6 +214,7 @@ func TestSSHStopInstanceRunsTerminalCleanupBeforeControllerTeardown(t *testing.T
 			executor := NewSSHExecutor(nil, nil, nil, logger.Default())
 			var cleanupCalls, stopCalls, closeCalls int
 			var cleanupTaskDir, cleanupReason string
+			var order []string
 			executor.cleanupScript = func(
 				_ context.Context,
 				_ *ssh.Client,
@@ -220,23 +226,27 @@ func TestSSHStopInstanceRunsTerminalCleanupBeforeControllerTeardown(t *testing.T
 				reason string,
 			) error {
 				cleanupCalls++
+				order = append(order, "cleanup")
 				cleanupTaskDir = taskDir
 				cleanupReason = reason
 				return tc.cleanupErr
 			}
 			executor.stopRemote = func(context.Context, *ssh.Client, string, int) error {
 				stopCalls++
+				order = append(order, "stop")
 				return nil
 			}
 			executor.closeClient = func(*ssh.Client) error {
 				closeCalls++
+				order = append(order, "close")
 				return nil
 			}
 			executor.sessions["instance-1"] = &sshSessionState{
-				client:     &ssh.Client{},
-				remoteDir:  "/remote/session",
-				metadata:   map[string]interface{}{MetadataKeySSHRemoteTaskDir: "/remote/task"},
-				prepareEnv: map[string]string{"GITHUB_TOKEN": "secret"},
+				client:        &ssh.Client{},
+				remoteDir:     "/remote/session",
+				remoteTaskDir: "/remote/task",
+				metadata:      map[string]interface{}{MetadataKeySSHRemoteTaskDir: "/wrong/metadata/task"},
+				prepareEnv:    map[string]string{"GITHUB_TOKEN": "secret"},
 			}
 
 			err := executor.StopInstance(context.Background(), &ExecutorInstance{
@@ -265,6 +275,11 @@ func TestSSHStopInstanceRunsTerminalCleanupBeforeControllerTeardown(t *testing.T
 			}
 			if tc.wantCleanupError && cleanupCalls != 1 {
 				t.Fatalf("cleanup error path calls = %d, want 1", cleanupCalls)
+			}
+			if tc.wantCleanup {
+				if len(order) < 3 || order[0] != "cleanup" {
+					t.Fatalf("teardown order = %v, want cleanup before stop/close", order)
+				}
 			}
 		})
 	}

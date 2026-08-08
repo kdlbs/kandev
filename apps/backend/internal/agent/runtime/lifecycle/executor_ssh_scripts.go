@@ -180,27 +180,59 @@ func redactSSHScriptOutput(output string, env map[string]string) string {
 	return lastLines(strings.TrimSpace(output), sshPrepareOutputMaxLines)
 }
 
+func sshCommandFailureDetail(stdout, stderr string, err error) string {
+	detail := strings.TrimSpace(stdout + "\n" + stderr)
+	if err != nil {
+		if detail != "" {
+			detail += "\n"
+		}
+		detail += err.Error()
+	}
+	return detail
+}
+
+func normalizeSSHRemotePath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	trimmed := strings.TrimRight(path, "/")
+	if trimmed == "" {
+		return "/"
+	}
+	return trimmed
+}
+
 func (r *SSHExecutor) verifyPrimaryCheckout(ctx context.Context, client *ssh.Client, taskDir string, req *ExecutorCreateRequest, platform SSHRemotePlatform) error {
 	targetURL := getMetadataString(req.Metadata, "repository_clone_url")
 	if targetURL == "" {
 		return nil
 	}
 	shell := sshShellForRemote(req.Metadata, platform)
-	root, _, err := runSSHCommand(ctx, client, WrapLoginShell(shell, "git -C "+shellQuote(taskDir)+" rev-parse --show-toplevel"))
-	if err != nil || strings.TrimSpace(root) != taskDir {
-		r.report(req.OnProgress, "Verifying primary checkout", PrepareStepFailed, "")
+	canonicalTaskDir, taskDirStderr, taskDirErr := runSSHCommand(ctx, client, WrapLoginShell(shell, "cd "+shellQuote(taskDir)+" && pwd -P"))
+	if taskDirErr != nil {
+		r.report(req.OnProgress, "Verifying primary checkout", PrepareStepFailed, sshCommandFailureDetail(canonicalTaskDir, taskDirStderr, taskDirErr))
 		return fmt.Errorf("ssh: primary repository checkout is missing")
 	}
-	origin, _, err := runSSHCommand(ctx, client, WrapLoginShell(shell, "git -C "+shellQuote(taskDir)+" config --get remote.origin.url"))
-	if err != nil || strings.TrimSpace(origin) != targetURL {
-		r.report(req.OnProgress, "Verifying primary checkout", PrepareStepFailed, "")
+	root, rootStderr, rootErr := runSSHCommand(ctx, client, WrapLoginShell(shell, "git -C "+shellQuote(taskDir)+" rev-parse --show-toplevel"))
+	if rootErr != nil || normalizeSSHRemotePath(root) != normalizeSSHRemotePath(canonicalTaskDir) {
+		detail := sshCommandFailureDetail(root, rootStderr, rootErr)
+		if rootErr == nil {
+			detail = fmt.Sprintf("checkout root %q does not match task directory %q", strings.TrimSpace(root), strings.TrimSpace(canonicalTaskDir))
+		}
+		r.report(req.OnProgress, "Verifying primary checkout", PrepareStepFailed, detail)
+		return fmt.Errorf("ssh: primary repository checkout is missing")
+	}
+	origin, originStderr, originErr := runSSHCommand(ctx, client, WrapLoginShell(shell, "git -C "+shellQuote(taskDir)+" config --get remote.origin.url"))
+	if originErr != nil || strings.TrimSpace(origin) != targetURL {
+		r.report(req.OnProgress, "Verifying primary checkout", PrepareStepFailed, sshCommandFailureDetail(origin, originStderr, originErr))
 		return fmt.Errorf("ssh: primary repository origin does not match configured repository")
 	}
-	if _, _, err := runSSHCommand(ctx, client, WrapLoginShell(shell, "git -C "+shellQuote(taskDir)+" rev-parse --verify HEAD")); err != nil {
-		r.report(req.OnProgress, "Verifying primary checkout", PrepareStepFailed, "")
+	if head, headStderr, headErr := runSSHCommand(ctx, client, WrapLoginShell(shell, "git -C "+shellQuote(taskDir)+" rev-parse --verify HEAD")); headErr != nil {
+		r.report(req.OnProgress, "Verifying primary checkout", PrepareStepFailed, sshCommandFailureDetail(head, headStderr, headErr))
 		return fmt.Errorf("ssh: primary repository has no checkout")
 	}
-	r.report(req.OnProgress, "Verifying primary checkout", PrepareStepCompleted, taskDir)
+	r.report(req.OnProgress, "Verifying primary checkout", PrepareStepCompleted, strings.TrimSpace(canonicalTaskDir))
 	return nil
 }
 

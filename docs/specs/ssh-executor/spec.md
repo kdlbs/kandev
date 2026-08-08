@@ -1,5 +1,5 @@
 ---
-status: building
+status: implemented
 created: 2026-05-16
 owner: tbd
 ---

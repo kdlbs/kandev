@@ -96,7 +96,7 @@ export const sshTest = backendFixture.extend<
         seed = await seedSSHWorkspace(apiClient, backend, sshTarget);
         await use({ ...seed, sshTarget });
       } finally {
-        await seed?.sshGitFixtureCleanup();
+        await seed?.sshGitFixtureCleanup().catch(() => undefined);
         stopSSHServer(sshTarget);
       }
     },
@@ -245,7 +245,7 @@ async function seedSSHWorkspace(
       sshGitFixtureCleanup,
     };
   } catch (error) {
-    await sshGitFixtureCleanup();
+    await sshGitFixtureCleanup().catch(() => undefined);
     throw error;
   }
 }
