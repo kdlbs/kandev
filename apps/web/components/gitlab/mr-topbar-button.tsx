@@ -242,6 +242,16 @@ function useMRDesktopReviewOpener(mobile: boolean) {
   const addMRPanel = useDockviewStore((state) => state.addMRPanel);
   const dockviewReady = useDockviewStore((state) => state.api !== null);
   const isRestoringLayout = useDockviewStore((state) => state.isRestoringLayout);
+  // Not restoring right now is necessary but NOT sufficient. Navigating
+  // straight to /t/:id runs dockview's `onReady` while the session→env mapping
+  // is still hydrating, so it builds a throwaway DEFAULT layout with a null env
+  // (see tryRestoreLayout) and `isRestoringLayout` is false the whole time.
+  // `switchEnvLayout` only replaces that layout wholesale via `api.fromJSON`
+  // once the env arrives, discarding any panel added in the gap — the user
+  // clicks the MR button during session load and nothing ever opens. The env
+  // being adopted is what marks the layout as actually settled.
+  const envAdopted = useDockviewStore((state) => state.currentLayoutEnvId !== null);
+  const layoutSettled = envAdopted && !isRestoringLayout;
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const setMobileSessionReview = useAppStore((state) => state.setMobileSessionReview);
   const [pendingDesktopMR, setPendingDesktopMR] = useState<TaskMR | null>(null);
@@ -249,19 +259,25 @@ function useMRDesktopReviewOpener(mobile: boolean) {
   useEffect(() => {
     if (!dockviewReady || isRestoringLayout || !pendingDesktopMR) return;
     openDesktopMRReview(addMRPanel, pendingDesktopMR);
-    setPendingDesktopMR(null);
-  }, [addMRPanel, dockviewReady, isRestoringLayout, pendingDesktopMR]);
+    // Hold the intent until the env layout has settled so a restore landing
+    // after this add re-opens the panel. Clearing it on the first settle keeps
+    // a later user-initiated layout change (preset switch, maximize) from
+    // resurrecting a panel the user has since closed.
+    if (layoutSettled) setPendingDesktopMR(null);
+  }, [addMRPanel, dockviewReady, isRestoringLayout, layoutSettled, pendingDesktopMR]);
 
   return (mr: TaskMR) => {
     if (mobile) {
       if (activeSessionId) openMobileMRReview(setMobileSessionReview, activeSessionId, mr);
       return;
     }
-    if (!dockviewReady || isRestoringLayout) {
-      setPendingDesktopMR(mr);
-    } else {
-      openDesktopMRReview(addMRPanel, mr);
-    }
+    // Open straight away when we can, so the panel appears on click rather
+    // than after the session finishes loading — but never into a layout that
+    // is being replaced right now. Keeping the intent pending while the layout
+    // is unsettled is what makes it survive the env-switch restore; the effect
+    // above re-applies and then clears it.
+    if (dockviewReady && !isRestoringLayout) openDesktopMRReview(addMRPanel, mr);
+    if (!layoutSettled) setPendingDesktopMR(mr);
   };
 }
 
