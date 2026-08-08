@@ -49,6 +49,14 @@ func isExternalIDUniqueViolation(err error) bool {
 // including archived and unsettled tasks, or ErrTaskNotFound if none does.
 // Read-only; used both by the REST lookup route and by the create sequence's
 // step-3 lookup and its post-miss re-read paths.
+//
+// Queries r.ro (the read-only pool). If a Postgres read replica is ever
+// wired here, the recovery re-read in recoverFoundTaskAfterInsertFailure
+// must route through the writer (or a session-consistent replica handle) to
+// avoid a replication-lag miss surfacing the original pre-insert error
+// instead of the Found outcome the TOCTOU backstop relies on. Not an issue
+// today: no read-replica DSN is wired anywhere in this codebase, so r.ro and
+// r.db always resolve to the same connection.
 func (r *Repository) GetTaskByExternalID(ctx context.Context, workspaceID, externalID string) (*models.Task, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(
 		`SELECT `+taskSelectColumns("t")+` FROM tasks t WHERE t.workspace_id = ? AND t.external_id = ?`),

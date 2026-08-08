@@ -169,7 +169,7 @@ Task tools use normal client discovery. When `step_complete_kandev` is required 
 
 A caller that cannot tell whether an earlier `create_task_kandev` call (or `POST /api/v1/tasks`) actually landed — a crash before recording the response, a webhook redelivery — can pass an `external_id` and retry safely instead of guessing. `external_id` is an opaque, caller-chosen string, case-sensitive and byte-exact, unique per workspace: two workspaces can each hold their own task for the same value, but a second create for a value already held in the same workspace never makes a second task there. It is validated and trimmed like other free-text fields; a value that is empty after trimming is treated as if the field were omitted.
 
-The response — from both the MCP tool result and the REST response body — adds two fields whenever the request carried a non-empty `external_id`:
+Every create response — from both the MCP tool result and the REST response body — always carries two additional fields, whether or not the request included an `external_id`:
 
 - `deduplicated`: `true` when the returned task already existed for that identity, `false` when this call created it.
 - `creation_complete`: `false` only when the returned task is an existing one whose own create is still in flight (an unfinished duplicate of what this same call would have done). Every other outcome reports `true`.
