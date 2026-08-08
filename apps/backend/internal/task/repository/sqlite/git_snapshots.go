@@ -288,7 +288,18 @@ func (r *Repository) GetFirstGitSnapshot(ctx context.Context, sessionID string) 
 // created_at DESC carries an explicit `id` tiebreaker: SQLite (and any other
 // dialect this repository also runs against) gives no ordering guarantee
 // among rows with an identical created_at, so an unbroken tie would make the
-// result nondeterministic (REVIEW-ROUND: 3).
+// result nondeterministic (REVIEW-ROUND: 3). `id` is a random UUIDv4 (see
+// CreateGitSnapshot/UpsertLatestLiveGitSnapshot), not a monotonic column, so
+// this tiebreak guarantees a stable, repeatable order on a tie — the same
+// pair of rows always sorts the same way — NOT that the genuinely newer row
+// wins the tie. A true recency-correct tiebreak would need a dialect-specific
+// rowid/sequence column, which this repository's SQLite+Postgres portability
+// rule (apps/backend/CLAUDE.md) rules out; the same tradeoff is already made,
+// and documented, for the id-based tiebreak in
+// UpdateTaskSessionLastReadMessageID (session.go). In practice this is a
+// negligible gap: created_at is never truncated before persisting, and
+// consecutive inserts land tens of microseconds apart even under load, so an
+// exact tie is very unlikely (REVIEW-ROUND: 4).
 // If limit > 0, only that many snapshots are returned.
 // Returns an empty slice if no snapshots are found.
 func (r *Repository) GetGitSnapshotsBySession(ctx context.Context, sessionID string, limit int) ([]*models.GitSnapshot, error) {

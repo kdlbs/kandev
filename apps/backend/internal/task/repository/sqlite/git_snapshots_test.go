@@ -155,6 +155,71 @@ func TestGetGitSnapshotsBySession_OrdersByRecencyRegardlessOfTriggeredBy_Inverse
 	}
 }
 
+// TestGetGitSnapshotsBySession_TiebreaksIdenticalTimestampsStably closes the
+// round-4 test-rigor gap: the two recency tests above deliberately separate
+// their rows by a full minute, so neither exercises the `, id DESC`
+// secondary key added by REVIEW-ROUND: 3's fix — mutation-proven in
+// docs/specs/session-delete-resource-cleanup REVIEW-ROUND: 4 (dropping `, id
+// DESC`, or flipping it to `id ASC`, both left the whole suite green).
+//
+// `id` is a random UUIDv4 (see CreateGitSnapshot), not a monotonic column, so
+// this test does NOT assert that the tiebreak picks the "newer" row on an
+// exact tie — that guarantee is not available without a dialect-specific
+// rowid/sequence column this repository's SQLite+Postgres portability rule
+// rules out (the same tradeoff already made, and documented, for
+// UpdateTaskSessionLastReadMessageID's id-based tiebreak in session.go).
+// What the query DOES guarantee, and what this test pins, is that a tie
+// resolves deterministically: the same pair of rows returns in the same
+// order on every call, and that order matches `id DESC` exactly (proving the
+// tiebreak clause is genuinely wired in, not merely present but inert).
+func TestGetGitSnapshotsBySession_TiebreaksIdenticalTimestampsStably(t *testing.T) {
+	repo := newRepoForHealTests(t)
+	ctx := context.Background()
+	const taskID = "task-snapshot-tie"
+	const sessionID = "session-snapshot-tie"
+	seedGitSnapshotSession(t, repo, taskID, sessionID)
+
+	tieAt := time.Now().UTC()
+	// Explicit IDs, chosen so lexicographic order is unambiguous and known
+	// in advance: "id-b" > "id-a", so `id DESC` must return id-b first.
+	if err := repo.CreateGitSnapshot(ctx, &models.GitSnapshot{
+		ID: "id-a-tiebreak", SessionID: sessionID, SnapshotType: models.SnapshotTypeStatusUpdate,
+		Branch: "feature/tie", Ahead: 1, TriggeredBy: "agent_completed",
+		CreatedAt: tieAt,
+	}); err != nil {
+		t.Fatalf("create first tied snapshot: %v", err)
+	}
+	if err := repo.CreateGitSnapshot(ctx, &models.GitSnapshot{
+		ID: "id-b-tiebreak", SessionID: sessionID, SnapshotType: models.SnapshotTypeStatusUpdate,
+		Branch: "feature/tie", Ahead: 2, TriggeredBy: TriggeredByLiveMonitor,
+		CreatedAt: tieAt,
+	}); err != nil {
+		t.Fatalf("create second tied snapshot: %v", err)
+	}
+
+	var firstOrder []string
+	for call := 0; call < 5; call++ {
+		snapshots, err := repo.GetGitSnapshotsBySession(ctx, sessionID, 5)
+		if err != nil {
+			t.Fatalf("GetGitSnapshotsBySession (call %d): %v", call, err)
+		}
+		if len(snapshots) != 2 {
+			t.Fatalf("snapshot count (call %d) = %d, want 2", call, len(snapshots))
+		}
+		order := []string{snapshots[0].ID, snapshots[1].ID}
+		if call == 0 {
+			firstOrder = order
+			if order[0] != "id-b-tiebreak" || order[1] != "id-a-tiebreak" {
+				t.Fatalf("tie order = %v, want [id-b-tiebreak, id-a-tiebreak] (id DESC)", order)
+			}
+			continue
+		}
+		if order[0] != firstOrder[0] || order[1] != firstOrder[1] {
+			t.Fatalf("tie order changed across calls: call 0 = %v, call %d = %v — tiebreak is not stable", firstOrder, call, order)
+		}
+	}
+}
+
 // TestGetGitSnapshotsBySession_ExcludesArchiveTypeRows guards the
 // session-delete pre-delete-warning defect documented in
 // docs/specs/session-delete-resource-cleanup REVIEW-ROUND: 3: this method's
