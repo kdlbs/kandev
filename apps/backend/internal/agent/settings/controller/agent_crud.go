@@ -64,8 +64,8 @@ func (c *Controller) ListAgents(ctx context.Context) (*dto.ListAgentsResponse, e
 // already right the moment the agents arrive, scan or no scan.
 //
 // Agents the registry does not know (a removed CLI, a custom row) keep their
-// store order after the ranked ones: a stable sort with an unranked key of
-// len(registry) leaves their relative order untouched.
+// store order after the ranked ones: the comparator groups them last and the
+// stable sort leaves their relative order untouched.
 func (c *Controller) sortAgentsByDisplayOrder(payload []dto.AgentDTO) {
 	if c.agentRegistry == nil {
 		return
@@ -75,15 +75,19 @@ func (c *Controller) sortAgentsByDisplayOrder(payload []dto.AgentDTO) {
 	for _, ag := range known {
 		rank[ag.ID()] = ag.DisplayOrder()
 	}
-	unranked := len(known)
-	orderOf := func(name string) int {
-		if order, ok := rank[name]; ok {
-			return order
-		}
-		return unranked
-	}
 	slices.SortStableFunc(payload, func(a, b dto.AgentDTO) int {
-		return cmp.Compare(orderOf(a.Name), orderOf(b.Name))
+		aOrder, aKnown := rank[a.Name]
+		bOrder, bKnown := rank[b.Name]
+		if aKnown != bKnown {
+			if aKnown {
+				return -1
+			}
+			return 1
+		}
+		if !aKnown {
+			return 0
+		}
+		return cmp.Compare(aOrder, bOrder)
 	})
 }
 

@@ -37,7 +37,9 @@ const NAV_LABELS: Array<[key: string, english: string]> = [
   ["common:executors", "Executors"],
   ["common:agents", "Agents"],
   ["common:settings", "Settings"],
-  ["sidebar:account", "Account"],
+  // No `sidebar:account`: the restructure folded those rows into the
+  // "Access Control" section, pinned above as `settings:accessControl`. The key
+  // and its label are gone, so pinning them here pinned nothing.
   ["sidebar:profileAndPassword", "Profile & Password"],
   ["sidebar:apiTokens", "API Tokens"],
 ];

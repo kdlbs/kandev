@@ -521,9 +521,6 @@ export function WorkspaceRepositoriesClient({
   isImproveWorkspace = false,
 }: WorkspaceRepositoriesClientProps) {
   const { t } = useTranslation();
-  const pageDescription = isImproveWorkspace
-    ? t("workspaces:repositoriesReadOnlyImprove")
-    : t("workspaces:manageRepositoriesConnected");
   const state = useWorkspaceRepositoriesPage(workspace, repositories);
   const {
     router,
@@ -565,7 +562,11 @@ export function WorkspaceRepositoriesClient({
         divided
         icon={<IconGitBranch className="h-5 w-5" />}
         title={t("workspaces:repositories")}
-        description={t("workspaces:repositoriesInThisWorkspace")}
+        description={
+          isImproveWorkspace
+            ? t("workspaces:repositoriesReadOnlyImprove")
+            : t("workspaces:repositoriesInThisWorkspace")
+        }
         action={
           isImproveWorkspace ? undefined : (
             <Button size="sm" className="cursor-pointer" onClick={openDialog}>
