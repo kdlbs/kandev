@@ -375,15 +375,34 @@ func makeTaskCreateLastUsedJSONSetArgs(patch models.TaskCreateLastUsed) []any {
 	sort.Strings(workflowIDs)
 	for _, workspaceID := range workflowIDs {
 		workflowID := patch.WorkflowIDsByWorkspace[workspaceID]
-		if workspaceID == "" || workflowID == "" {
+		if !isSafeTaskCreateWorkspacePathKey(workspaceID) || workflowID == "" {
 			continue
 		}
+		// Workspace IDs are generated UUIDs. SQLite JSON1 does not support
+		// PostgreSQL-style parameterized path segments, so reject punctuation
+		// rather than interpolating a key that could change the JSON path.
 		args = append(args,
 			"$.task_create_last_used.workflow_ids_by_workspace."+workspaceID,
 			workflowID,
 		)
 	}
 	return args
+}
+
+func isSafeTaskCreateWorkspacePathKey(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, char := range value {
+		if (char >= 'a' && char <= 'z') ||
+			(char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') ||
+			char == '-' || char == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func buildPostgresTaskCreateLastUsedUpdate(patch models.TaskCreateLastUsed) (string, []any) {

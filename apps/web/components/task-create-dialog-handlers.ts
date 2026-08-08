@@ -174,19 +174,7 @@ function compactTaskCreateLastUsedState(state: Partial<TaskCreateLastUsedState>)
 
 export function syncTaskCreateLastUsed(patch: TaskCreateLastUsedPatch) {
   const mapped = compactTaskCreateLastUsedState(mapTaskCreateLastUsedPatch(patch));
-  const workflowIdsByWorkspace = mapped.workflowIdsByWorkspace;
-  lastQueuedLastUsed = {
-    ...lastQueuedLastUsed,
-    ...mapped,
-    ...(workflowIdsByWorkspace
-      ? {
-          workflowIdsByWorkspace: {
-            ...(lastQueuedLastUsed.workflowIdsByWorkspace ?? {}),
-            ...workflowIdsByWorkspace,
-          },
-        }
-      : {}),
-  };
+  lastQueuedLastUsed = mergeTaskCreateLastUsedState(lastQueuedLastUsed, mapped);
   lastUsedDebug("overlay-updated", { patch, queued: lastQueuedLastUsed });
 }
 
@@ -211,11 +199,24 @@ export function queueTaskCreateLastUsedFromPayload(
     executor_profile_id: payload.executor_profile_id,
   });
   if (previousWorkflowIdsByWorkspace) {
-    lastQueuedLastUsed.workflowIdsByWorkspace = {
-      ...previousWorkflowIdsByWorkspace,
-      ...(lastQueuedLastUsed.workflowIdsByWorkspace ?? {}),
+    lastQueuedLastUsed = mergeTaskCreateLastUsedState(lastQueuedLastUsed, {
+      workflowIdsByWorkspace: previousWorkflowIdsByWorkspace,
+    });
+  }
+}
+
+function mergeTaskCreateLastUsedState(
+  previous: Partial<TaskCreateLastUsedState>,
+  patch: Partial<TaskCreateLastUsedState>,
+): Partial<TaskCreateLastUsedState> {
+  const merged = { ...previous, ...patch };
+  if (patch.workflowIdsByWorkspace) {
+    merged.workflowIdsByWorkspace = {
+      ...(previous.workflowIdsByWorkspace ?? {}),
+      ...patch.workflowIdsByWorkspace,
     };
   }
+  return merged;
 }
 
 function taskCreateLastUsedPayloadBranch(

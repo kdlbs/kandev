@@ -876,6 +876,24 @@ func TestBuildPostgresTaskCreateLastUsedUpdatePatchesWorkflowHistoryEntries(t *t
 	}
 }
 
+func TestMakeTaskCreateLastUsedJSONSetArgsRejectsUnsafeWorkspacePathKeys(t *testing.T) {
+	args := makeTaskCreateLastUsedJSONSetArgs(models.TaskCreateLastUsed{
+		WorkflowIDsByWorkspace: map[string]string{
+			"workspace-safe":     "workflow-safe",
+			"workspace.with.dot": "workflow-dot",
+			"workspace[bracket]": "workflow-bracket",
+		},
+	})
+
+	if len(args) != 2 {
+		t.Fatalf("expected only the safe workspace entry, got %#v", args)
+	}
+	if args[0] != "$.task_create_last_used.workflow_ids_by_workspace.workspace-safe" ||
+		args[1] != "workflow-safe" {
+		t.Fatalf("unexpected safe workspace args: %#v", args)
+	}
+}
+
 func TestBuildPostgresTaskCreateLastUsedUpdateClearsBranchOnRepositoryChange(t *testing.T) {
 	query, args := buildPostgresTaskCreateLastUsedUpdate(models.TaskCreateLastUsed{
 		RepositoryID: "repo-after",

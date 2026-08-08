@@ -178,19 +178,25 @@ test.describe("Task creation", () => {
     apiClient,
     seedData,
   }) => {
-    const devWorkflow = await apiClient.createWorkflow(seedData.workspaceId, "Dev", "simple");
-    const devSteps = await apiClient.listWorkflowSteps(devWorkflow.id);
-    const devStartStep = devSteps.steps.find((step) => step.is_start_step) ?? devSteps.steps[0];
-    if (!devStartStep) throw new Error("Dev workflow has no start step");
-    const workspaceB = await apiClient.createWorkspace("Workflow Memory B");
-    const supportWorkflow = await apiClient.createWorkflow(workspaceB.id, "Support", "simple");
-    const otherWorkflow = await apiClient.createWorkflow(workspaceB.id, "Other", "simple");
-    const supportSteps = await apiClient.listWorkflowSteps(supportWorkflow.id);
-    const supportStartStep =
-      supportSteps.steps.find((step) => step.is_start_step) ?? supportSteps.steps[0];
-    if (!supportStartStep) throw new Error("Support workflow has no start step");
+    let devWorkflowId = "";
+    let workspaceBId = "";
 
     try {
+      const devWorkflow = await apiClient.createWorkflow(seedData.workspaceId, "Dev", "simple");
+      devWorkflowId = devWorkflow.id;
+      const devSteps = await apiClient.listWorkflowSteps(devWorkflow.id);
+      const devStartStep = devSteps.steps.find((step) => step.is_start_step) ?? devSteps.steps[0];
+      if (!devStartStep) throw new Error("Dev workflow has no start step");
+
+      const workspaceB = await apiClient.createWorkspace("Workflow Memory B");
+      workspaceBId = workspaceB.id;
+      const supportWorkflow = await apiClient.createWorkflow(workspaceB.id, "Support", "simple");
+      const otherWorkflow = await apiClient.createWorkflow(workspaceB.id, "Other", "simple");
+      const supportSteps = await apiClient.listWorkflowSteps(supportWorkflow.id);
+      const supportStartStep =
+        supportSteps.steps.find((step) => step.is_start_step) ?? supportSteps.steps[0];
+      if (!supportStartStep) throw new Error("Support workflow has no start step");
+
       await apiClient.createTask(seedData.workspaceId, "Remembered Dev task", {
         workflow_id: devWorkflow.id,
         workflow_step_id: devStartStep.id,
@@ -257,8 +263,9 @@ test.describe("Task creation", () => {
       await expect(dialog).toBeVisible();
       await expect(dialog.getByTestId("workflow-selector-trigger")).toContainText("Dev");
     } finally {
-      await apiClient.deleteWorkflow(devWorkflow.id).catch(() => {});
-      await apiClient.deleteWorkspace(workspaceB.id, "Workflow Memory B").catch(() => {});
+      if (devWorkflowId) await apiClient.deleteWorkflow(devWorkflowId).catch(() => {});
+      if (workspaceBId)
+        await apiClient.deleteWorkspace(workspaceBId, "Workflow Memory B").catch(() => {});
       await apiClient.saveUserSettings({
         workspace_id: seedData.workspaceId,
         workflow_filter_id: seedData.workflowId,

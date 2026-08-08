@@ -128,14 +128,7 @@ const WORKFLOW_RESOLUTION_CASES = [
 
 describe("resolveEffectiveTaskCreateWorkflowId", () => {
   it.each(WORKFLOW_RESOLUTION_CASES)("$name", ({ args, expected }) => {
-    const resolver = (
-      taskCreateDefaults as typeof taskCreateDefaults & {
-        resolveEffectiveTaskCreateWorkflowId?: (input: typeof args) => string | null;
-      }
-    ).resolveEffectiveTaskCreateWorkflowId;
-
-    expect(resolver).toBeTypeOf("function");
-    expect(resolver?.(args)).toBe(expected);
+    expect(taskCreateDefaults.resolveEffectiveTaskCreateWorkflowId(args)).toBe(expected);
   });
 });
 
