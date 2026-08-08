@@ -125,6 +125,17 @@ export interface LinearSearchResult {
 }
 
 /**
+ * One repository binding of a Linear issue watch: the repo the agent works in
+ * plus the base branch its per-task worktree is cut from ("" = the repo's
+ * default branch). A watch binds zero or more; the first entry is the task's
+ * primary repository.
+ */
+export interface LinearWatchRepositoryBinding {
+  repositoryId: string;
+  baseBranch: string;
+}
+
+/**
  * A workspace-scoped Linear poller. The backend re-evaluates the structured
  * filter on `pollIntervalSeconds` cadence and creates a Kandev task in the
  * configured workflow step for each newly-matching issue.
@@ -135,9 +146,16 @@ export interface LinearIssueWatch {
   workflowId: string;
   workflowStepId: string;
   /**
-   * Optional repository binding. Empty string = unbound: watcher-created tasks
-   * launch in a blank scratch checkout (historical behaviour). When set, tasks
-   * launch in an isolated worktree of this repository cut from `baseBranch`.
+   * Repository bindings. Empty = unbound: watcher-created tasks launch in a
+   * blank scratch checkout (historical behaviour). When set, tasks launch in
+   * one isolated worktree per bound repository cut from that repo's
+   * `baseBranch`; the first entry is the primary repository.
+   */
+  repositories?: LinearWatchRepositoryBinding[];
+  /**
+   * Legacy singular binding, still emitted by the backend (mirrors the first
+   * `repositories` entry). Kept for read-compat with older clients; prefer
+   * `repositories`.
    */
   repositoryId: string;
   /** Branch the per-task worktree is cut from; empty = the repo's default. */
@@ -166,10 +184,12 @@ export interface CreateLinearIssueWatchInput {
   workspaceId: string;
   workflowId: string;
   workflowStepId: string;
-  /** Optional repository binding; empty/omitted = unbound (repo-less task). */
-  repositoryId?: string;
-  /** Base branch for the worktree; empty defaults to the repo's default branch. */
-  baseBranch?: string;
+  /**
+   * Repository bindings; empty/omitted = unbound (repo-less task). Each entry
+   * carries the base branch its per-task worktree is cut from ("" = the repo's
+   * default branch).
+   */
+  repositories?: LinearWatchRepositoryBinding[];
   filter: LinearSearchFilter;
   agentProfileId?: string;
   executorProfileId?: string;
@@ -186,8 +206,8 @@ export interface CreateLinearIssueWatchInput {
 export interface UpdateLinearIssueWatchInput {
   workflowId?: string;
   workflowStepId?: string;
-  repositoryId?: string;
-  baseBranch?: string;
+  /** Repository bindings; omitted = unchanged, [] = clear, non-empty = replace. */
+  repositories?: LinearWatchRepositoryBinding[];
   filter?: LinearSearchFilter;
   agentProfileId?: string;
   executorProfileId?: string;

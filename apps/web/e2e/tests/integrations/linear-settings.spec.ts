@@ -1,7 +1,12 @@
 import { test, expect } from "../../fixtures/test-base";
+import type { Locator } from "@playwright/test";
+import { execSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import { LinearSettingsPage } from "../../pages/linear-settings-page";
 import { assertWatcherAgentProfileResetsToStepDefault } from "./watcher-profile-default-flow";
 import { assertWatcherDispatchOrderPersists } from "./watcher-dispatch-order-flow";
+import { makeGitEnv } from "../../helpers/git-helper";
 
 test.describe("Linear settings", () => {
   test("empty workspace shows form with disabled save/test until secret is filled", async ({
@@ -236,5 +241,159 @@ test.describe("Linear settings", () => {
     apiClient,
   }) => {
     await assertWatcherDispatchOrderPersists(testPage, apiClient);
+  });
+
+  test("watcher dialog selects and persists multiple repositories", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    await apiClient.mockLinearReset();
+    await apiClient.mockLinearSetTeams([{ id: "team-1", key: "ENG", name: "Engineering" }]);
+    await apiClient.setLinearConfig({ secret: "lin_api_xxx" });
+    await apiClient.waitForIntegrationAuthHealthy("linear");
+
+    // The fixture seeds one workspace repository ("E2E Repo"); add a second so
+    // the picker has two options. The backend requires registered local repos
+    // to exist and be valid git repositories (canonicalRepositoryLocalPath
+    // stats + git-validates the path), so create a real one under the
+    // backend's tmp dir (also inside discoveryRoots, so branch listing works).
+    const secondRepoDir = path.join(backend.tmpDir, "repos", "e2e-repo-b");
+    fs.rmSync(secondRepoDir, { recursive: true, force: true });
+    fs.mkdirSync(secondRepoDir, { recursive: true });
+    const gitEnv = makeGitEnv(backend.tmpDir);
+    execSync("git init -b main", { cwd: secondRepoDir, env: gitEnv });
+    fs.writeFileSync(path.join(secondRepoDir, "README.md"), "second repo\n");
+    execSync("git add README.md", { cwd: secondRepoDir, env: gitEnv });
+    execSync('git commit -m "init"', { cwd: secondRepoDir, env: gitEnv });
+    const secondRepo = await apiClient.createRepository(
+      seedData.workspaceId,
+      secondRepoDir,
+      "main",
+      { name: "E2E Repo B" },
+    );
+    const firstRepoId = seedData.repositoryId;
+
+    const settings = new LinearSettingsPage(testPage);
+    await settings.goto();
+
+    await testPage.getByRole("button", { name: /new watcher/i }).click();
+    const dialog = testPage.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+
+    // Scopes a Radix Select trigger by its field label (same shape as the
+    // dispatch-order flow helper).
+    const comboboxByLabel = (root: Locator, label: string) =>
+      root.getByText(label, { exact: true }).locator("xpath=..").getByRole("combobox");
+    const pick = async (label: string, option: string | RegExp) => {
+      await comboboxByLabel(dialog, label).click();
+      await testPage.getByRole("listbox").getByRole("option", { name: option }).click();
+    };
+
+    // Minimum fields to enable Save: workspace, non-empty filter (team),
+    // workflow, and workflow step. Prompt is pre-filled.
+    await pick("Workspace", "E2E Workspace");
+    await pick("Team", /ENG/);
+    await pick("Workflow", "E2E Workflow");
+    await comboboxByLabel(dialog, "Workflow Step").click();
+    await testPage.getByRole("listbox").getByRole("option").first().click();
+
+    // Add both repositories via the add control, and pin a branch on the first.
+    await dialog.getByTestId("add-repository-trigger").click();
+    await testPage
+      .getByRole("listbox")
+      .getByRole("option", { name: "E2E Repo", exact: true })
+      .click();
+    await dialog.getByTestId("add-repository-trigger").click();
+    await testPage
+      .getByRole("listbox")
+      .getByRole("option", { name: "E2E Repo B", exact: true })
+      .click();
+    await dialog.getByTestId(`branch-trigger-${firstRepoId}`).click();
+    await testPage.getByRole("listbox").getByRole("option", { name: "main" }).click();
+
+    const createButton = dialog.getByRole("button", { name: "Create" });
+    await expect(createButton).toBeEnabled();
+    await createButton.click();
+    await expect(dialog).toBeHidden();
+
+    // The stored watch carries both bindings in the added order; the second
+    // repo's empty branch was resolved to its default ("main") at save.
+    const res = await apiClient.rawRequest(
+      "GET",
+      `/api/v1/linear/watches/issue?workspace_id=${encodeURIComponent(seedData.workspaceId)}`,
+    );
+    const { watches } = (await res.json()) as {
+      watches: Array<{
+        id: string;
+        repositories?: Array<{ repositoryId: string; baseBranch: string }>;
+      }>;
+    };
+    const saved = watches[watches.length - 1];
+    expect(saved.repositories).toEqual([
+      { repositoryId: firstRepoId, baseBranch: "main" },
+      { repositoryId: secondRepo.id, baseBranch: "main" },
+    ]);
+
+    // Reopen the saved watcher: both rows render with the saved branches.
+    await testPage.getByText("team:ENG").first().click();
+    const editDialog = testPage.getByRole("dialog");
+    await expect(editDialog.getByText("Edit Linear Watcher")).toBeVisible();
+    await expect(editDialog.getByText("E2E Repo", { exact: true })).toBeVisible();
+    await expect(editDialog.getByText("E2E Repo B", { exact: true })).toBeVisible();
+    await expect(editDialog.getByTestId(`branch-trigger-${firstRepoId}`)).toContainText("main");
+    // The second repo's branch was resolved to its default at save; it must
+    // render even though its branch fetch returns nothing (no repo on disk).
+    await expect(editDialog.getByTestId(`branch-trigger-${secondRepo.id}`)).toContainText("main");
+  });
+
+  test("watcher saved without touching the repository picker stays unbound", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.mockLinearReset();
+    await apiClient.mockLinearSetTeams([{ id: "team-1", key: "ENG", name: "Engineering" }]);
+    await apiClient.setLinearConfig({ secret: "lin_api_xxx" });
+    await apiClient.waitForIntegrationAuthHealthy("linear");
+
+    const settings = new LinearSettingsPage(testPage);
+    await settings.goto();
+
+    await testPage.getByRole("button", { name: /new watcher/i }).click();
+    const dialog = testPage.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+
+    const comboboxByLabel = (root: Locator, label: string) =>
+      root.getByText(label, { exact: true }).locator("xpath=..").getByRole("combobox");
+    const pick = async (label: string, option: string | RegExp) => {
+      await comboboxByLabel(dialog, label).click();
+      await testPage.getByRole("listbox").getByRole("option", { name: option }).click();
+    };
+
+    await pick("Workspace", "E2E Workspace");
+    await pick("Team", /ENG/);
+    await pick("Workflow", "E2E Workflow");
+    await comboboxByLabel(dialog, "Workflow Step").click();
+    await testPage.getByRole("listbox").getByRole("option").first().click();
+
+    await dialog.getByRole("button", { name: "Create" }).click();
+    await expect(dialog).toBeHidden();
+
+    // The stored watch must carry no repository binding — the historical
+    // repo-less behaviour (unbound tasks are pinned at the source layer).
+    const res = await apiClient.rawRequest(
+      "GET",
+      `/api/v1/linear/watches/issue?workspace_id=${encodeURIComponent(seedData.workspaceId)}`,
+    );
+    const { watches } = (await res.json()) as {
+      watches: Array<{
+        id: string;
+        repositories?: Array<{ repositoryId: string; baseBranch: string }>;
+      }>;
+    };
+    const saved = watches[watches.length - 1];
+    expect(saved.repositories).toBeUndefined();
   });
 });

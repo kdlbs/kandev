@@ -80,11 +80,13 @@ func (s *LinearWatcherSource) BuildTaskRequest(evt any) (*IssueTaskRequest, erro
 	}
 	// Only a bound watch carries Repositories. An unbound watch leaves the slice
 	// nil so the launch path falls to the historical blank-scratch behaviour.
-	if e.RepositoryID != "" {
-		req.Repositories = []IssueTaskRepository{{
-			RepositoryID: e.RepositoryID,
-			BaseBranch:   e.BaseBranch,
-		}}
+	// Order is preserved; the first entry is the task's primary repository.
+	if len(e.Repositories) > 0 {
+		repos := make([]IssueTaskRepository, 0, len(e.Repositories))
+		for _, r := range e.Repositories {
+			repos = append(repos, IssueTaskRepository{RepositoryID: r.RepositoryID, BaseBranch: r.BaseBranch})
+		}
+		req.Repositories = repos
 	}
 	return req, nil
 }

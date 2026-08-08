@@ -64,6 +64,10 @@ const createTablesSQL = `
 		-- isolated worktree of this repo cut from base_branch.
 		repository_id TEXT NOT NULL DEFAULT '',
 		base_branch TEXT NOT NULL DEFAULT '',
+		-- Multi-repository binding, a JSON array of {repositoryId, baseBranch}.
+		-- '' = unbound. The repository_id / base_branch columns above mirror the
+		-- first entry for downgrade compatibility and as a read fallback.
+		repositories_json TEXT NOT NULL DEFAULT '',
 		filter_json TEXT NOT NULL DEFAULT '{}',
 		agent_profile_id TEXT NOT NULL DEFAULT '',
 		executor_profile_id TEXT NOT NULL DEFAULT '',
@@ -122,6 +126,9 @@ func (s *Store) initSchema() error {
 		return err
 	}
 	if err := s.addIssueWatchRepositoryColumns(); err != nil {
+		return err
+	}
+	if err := s.addIssueWatchRepositoriesJSONColumn(); err != nil {
 		return err
 	}
 	return nil
@@ -183,6 +190,34 @@ func (s *Store) addIssueWatchRepositoryColumns() error {
 		if _, err := s.db.Exec(`ALTER TABLE linear_issue_watches ADD COLUMN base_branch TEXT NOT NULL DEFAULT ''`); err != nil {
 			return fmt.Errorf("add base_branch column: %w", err)
 		}
+	}
+	return nil
+}
+
+// addIssueWatchRepositoriesJSONColumn brings older databases up to the current
+// schema by appending repositories_json to linear_issue_watches when missing,
+// then backfilling it from the legacy repository_id / base_branch columns so a
+// pre-upgrade bound watch reads back as a one-entry binding. Idempotent — the
+// column lookup guards the ALTER, and the backfill skips rows that already
+// carry JSON (written by a newer binary) or have no binding.
+func (s *Store) addIssueWatchRepositoriesJSONColumn() error {
+	cols, err := s.tableColumns("linear_issue_watches")
+	if err != nil {
+		return err
+	}
+	if len(cols) == 0 {
+		return nil
+	}
+	if _, ok := cols["repositories_json"]; !ok {
+		if _, err := s.db.Exec(`ALTER TABLE linear_issue_watches ADD COLUMN repositories_json TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add repositories_json column: %w", err)
+		}
+	}
+	if _, err := s.db.Exec(`
+		UPDATE linear_issue_watches
+		   SET repositories_json = json_array(json_object('repositoryId', repository_id, 'baseBranch', base_branch))
+		 WHERE repository_id != '' AND repositories_json = ''`); err != nil {
+		return fmt.Errorf("backfill repositories_json: %w", err)
 	}
 	return nil
 }
