@@ -434,3 +434,71 @@ func TestCreateTaskWithExternalIDAdmissionRejectionSurfacesWithoutWinner(t *test
 		t.Fatalf("tasks holding ext-no-winner = %d, want 0 — the rejected create must not have persisted anything", count)
 	}
 }
+
+// raceInjectingTaskRepo wraps the real repository and, on the first call to
+// GetWorkspaceTaskPrefix, runs an arbitrary side effect before failing that
+// call. assignIdentifier (called from prepareTaskForCreation, only for
+// office-shaped requests) is the sole caller of GetWorkspaceTaskPrefix once a
+// request already carries an explicit WorkflowID, so this lets a test
+// synchronously simulate "a concurrent creator committed the winning task in
+// the window between this request's step-3 lookup and its
+// prepareTaskForCreation-stage failure" without real goroutines.
+type raceInjectingTaskRepo struct {
+	*sqliterepo.Repository
+	inject func()
+	once   sync.Once
+}
+
+func (r *raceInjectingTaskRepo) GetWorkspaceTaskPrefix(ctx context.Context, workspaceID string) (string, string, error) {
+	r.once.Do(r.inject)
+	return "", "", errors.New("injected failure: identifier prefix lookup failed")
+}
+
+// TestCreateTaskWithExternalIDPrepareFailureAfterStepThreeMissRecovers pins
+// the spec's general "any pre-insert failure — capacity, admission, or
+// otherwise — MUST trigger a re-read" requirement for failures inside
+// prepareTaskForCreation specifically (step 4 validation and step 5's
+// assignIdentifier), not just createTaskWithCapacity's admission/unique-
+// violation failures. Without the recovery re-read on this branch, a
+// concurrent winner that committed after this request's step-3 miss but
+// before its own prepare-stage failure would be invisible, and this request
+// would surface a raw error instead of the winner's task.
+func TestCreateTaskWithExternalIDPrepareFailureAfterStepThreeMissRecovers(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	wfID := seedWorkspaceAndWorkflowForCreate(t, ctx, repo, "ws-prepare-fail")
+
+	const winnerID = "winner-task"
+	svc.tasks = &raceInjectingTaskRepo{
+		Repository: repo,
+		inject: func() {
+			if err := repo.CreateTask(ctx, &models.Task{
+				ID: winnerID, WorkspaceID: "ws-prepare-fail", WorkflowID: wfID,
+				Title: "Winner", ExternalID: "ext-prepare-fail",
+			}); err != nil {
+				t.Fatalf("seed concurrent winner: %v", err)
+			}
+			mustSettle(t, ctx, repo, winnerID, "ext-prepare-fail")
+		},
+	}
+
+	result, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-prepare-fail",
+		WorkflowID:  wfID,
+		Title:       "Loser",
+		Origin:      models.TaskOriginAgentCreated,
+		ExternalID:  "ext-prepare-fail",
+	})
+	if err != nil {
+		t.Fatalf("expected the recovery re-read to return the concurrent winner as a Found outcome, got error instead: %v", err)
+	}
+	if result.Outcome != CreateTaskOutcomeFoundSettled {
+		t.Fatalf("outcome = %v, want FoundSettled", result.Outcome)
+	}
+	if result.Task.ID != winnerID {
+		t.Fatalf("task id = %s, want the concurrent winner %s", result.Task.ID, winnerID)
+	}
+	if count := countTasksHoldingExternalID(t, ctx, repo, "ws-prepare-fail", "ext-prepare-fail"); count != 1 {
+		t.Fatalf("tasks holding ext-prepare-fail = %d, want exactly 1 (no orphan or duplicate from the losing request)", count)
+	}
+}
