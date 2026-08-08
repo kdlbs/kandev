@@ -2,9 +2,12 @@ package orchestrator
 
 import (
 	"context"
+	"strings"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
@@ -377,4 +380,154 @@ func configureSessionStep(id, agentName, operation, model string, options map[st
 		Type:   wfmodels.OnEnterConfigureSession,
 		Config: config,
 	}}}}
+}
+
+// configureSessionRule is one (agent_name, model) pair for a multi-rule step.
+type configureSessionRule struct {
+	agentName string
+	model     string
+}
+
+// multiRuleConfigureSessionStep builds a step whose configure_session action
+// carries several "set" rules, in the given order.
+func multiRuleConfigureSessionStep(id string, rules ...configureSessionRule) *wfmodels.WorkflowStep {
+	raw := make([]interface{}, 0, len(rules))
+	for _, rule := range rules {
+		raw = append(raw, map[string]interface{}{
+			"agent_name": rule.agentName,
+			"operation":  "set",
+			"model":      rule.model,
+		})
+	}
+	return &wfmodels.WorkflowStep{ID: id, Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{
+		Type:   wfmodels.OnEnterConfigureSession,
+		Config: map[string]interface{}{"rules": raw},
+	}}}}
+}
+
+// seedConfigureSessionTest prepares an original, non-passthrough session whose
+// stored agent family is agentName, plus a service wired to a live agent and a
+// message creator so warnings are observable.
+func seedConfigureSessionTest(
+	t *testing.T,
+	taskID, sessionID, agentName string,
+) (*sqliterepo.Repository, *Service, *mockAgentManager, *mockMessageCreator, *models.TaskSession) {
+	t.Helper()
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, taskID, sessionID, "step-"+sessionID)
+	if err := repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyOrigin, models.SessionOriginTaskInitial); err != nil {
+		t.Fatalf("mark original session: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.AgentProfileSnapshot = map[string]interface{}{"agent_name": agentName}
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session snapshot: %v", err)
+	}
+
+	agent := &mockAgentManager{isAgentRunning: true, setSessionModelSupported: true, setSessionConfigSupported: true}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agent)
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+	return repo, svc, agent, messages, session
+}
+
+// A custom TUI agent picks its own slug and display name and shares the
+// built-ins' namespace, so "Claude" can name two different installed agents.
+// Resolving one of them silently re-points the rule at an agent the workflow
+// author never named — the same silent mis-application this card exists to kill.
+func TestProcessOnEnterConfigureSessionAmbiguousAgentFamilyWarns(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		slug        string
+		displayName string
+	}{
+		{name: "custom slug shadows builtin display name", slug: "claude", displayName: "My Claude"},
+		{name: "custom display name collides", slug: "aaa-claude", displayName: "Claude"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo, svc, agent, messages, session := seedConfigureSessionTest(
+				t, "task-ambiguous", "session-ambiguous", "claude-acp")
+
+			shadowed := registry.NewRegistry(testLogger())
+			shadowed.LoadDefaults()
+			if err := shadowed.RegisterCustomTUIAgent(tc.slug, tc.displayName, "claude-tui", "", "", nil); err != nil {
+				t.Fatalf("register custom agent: %v", err)
+			}
+			svc.agentFamilyResolver = shadowed
+
+			svc.processOnEnter(ctx, "task-ambiguous", session,
+				configureSessionStep("step-ambiguous", "Claude", "set", "opus[1m]", nil), "")
+
+			if len(agent.setSessionModelCalls) != 0 {
+				t.Fatalf("ambiguous family was applied to an agent: %#v", agent.setSessionModelCalls)
+			}
+			warnings := messages.workflowSessionConfigWarnings()
+			if len(warnings) != 1 || !strings.Contains(warnings[0], "more than one") {
+				t.Fatalf("warnings = %#v, want one ambiguity warning", warnings)
+			}
+			updated, err := repo.GetTaskSession(ctx, "session-ambiguous")
+			if err != nil {
+				t.Fatalf("reload session: %v", err)
+			}
+			if overrides, ok := models.LoadSessionRuntimeConfigOverrides(updated.Metadata); ok && overrides.Model != "" {
+				t.Fatalf("ambiguous family persisted a runtime override: %#v", overrides)
+			}
+		})
+	}
+}
+
+// ParseConfigureSessionRules rejects duplicates by the raw agent_name only, so
+// two textually different rules can name one family once references resolve.
+// Array order deciding which model a step runs on is not a contract anyone
+// wrote down, so neither is applied.
+func TestProcessOnEnterConfigureSessionConflictingRulesWarn(t *testing.T) {
+	ctx := context.Background()
+	repo, svc, agent, messages, session := seedConfigureSessionTest(
+		t, "task-conflict", "session-conflict", "claude-acp")
+
+	svc.processOnEnter(ctx, "task-conflict", session, multiRuleConfigureSessionStep("step-conflict",
+		configureSessionRule{agentName: "Claude", model: "opus[1m]"},
+		configureSessionRule{agentName: "claude-acp", model: "sonnet"},
+	), "")
+
+	if len(agent.setSessionModelCalls) != 0 {
+		t.Fatalf("conflicting rules applied a model: %#v", agent.setSessionModelCalls)
+	}
+	warnings := messages.workflowSessionConfigWarnings()
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "same agent") {
+		t.Fatalf("warnings = %#v, want one conflicting-rules warning", warnings)
+	}
+	updated, err := repo.GetTaskSession(ctx, "session-conflict")
+	if err != nil {
+		t.Fatalf("reload session: %v", err)
+	}
+	if overrides, ok := models.LoadSessionRuntimeConfigOverrides(updated.Metadata); ok && overrides.Model != "" {
+		t.Fatalf("conflicting rules persisted a runtime override: %#v", overrides)
+	}
+}
+
+// The conflict check must not fire on the normal shape it most resembles: one
+// rule per family, several families, exactly one of them the session's.
+func TestProcessOnEnterConfigureSessionDistinctFamiliesStillApply(t *testing.T) {
+	ctx := context.Background()
+	_, svc, agent, messages, session := seedConfigureSessionTest(
+		t, "task-distinct", "session-distinct", "claude-acp")
+
+	svc.processOnEnter(ctx, "task-distinct", session, multiRuleConfigureSessionStep("step-distinct",
+		configureSessionRule{agentName: "Codex", model: "gpt-5.6-luna"},
+		configureSessionRule{agentName: "Claude", model: "opus[1m]"},
+		configureSessionRule{agentName: "Gemini", model: "gemini-pro"},
+	), "")
+
+	if len(agent.setSessionModelCalls) != 1 || agent.setSessionModelCalls[0].ModelID != "opus[1m]" {
+		t.Fatalf("model calls = %#v, want one opus[1m] switch", agent.setSessionModelCalls)
+	}
+	if warnings := messages.workflowSessionConfigWarnings(); len(warnings) != 0 {
+		t.Fatalf("one-rule-per-family warned the user: %#v", warnings)
+	}
 }

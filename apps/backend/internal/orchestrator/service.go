@@ -163,10 +163,12 @@ type WorkflowStepGetter interface {
 }
 
 // AgentFamilyResolver maps a hand-written agent family reference onto a
-// canonical agent ID, reporting false when it names no known agent. Implemented
-// by registry.Registry.
+// canonical agent ID and reports how many distinct agents it named. Exactly one
+// match resolves; zero means the reference names no known agent; more than one
+// means the reference is ambiguous and must not be guessed. Implemented by
+// registry.Registry.
 type AgentFamilyResolver interface {
-	ResolveFamilyID(name string) (string, bool)
+	ResolveFamilyID(name string) (string, int)
 }
 
 // PromptReferenceExpander resolves "@name" saved-prompt references embedded in
@@ -1168,7 +1170,8 @@ func (s *Service) SetWorkflowStepGetter(getter WorkflowStepGetter) {
 // written in configure_session rules onto canonical agent IDs.
 //
 // If not set: a rule matches only when its agent_name is byte-identical to the
-// session's stored agent family.
+// session's stored agent family, and no rule can be reported as a typo or as
+// ambiguous because nothing is knowable about an agent family without it.
 func (s *Service) SetAgentFamilyResolver(resolver AgentFamilyResolver) {
 	s.agentFamilyResolver = resolver
 }

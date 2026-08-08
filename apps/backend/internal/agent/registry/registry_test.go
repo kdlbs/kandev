@@ -339,26 +339,29 @@ func TestResolveFamilyID(t *testing.T) {
 	reg.LoadDefaults()
 
 	cases := []struct {
-		name  string
-		input string
-		want  string
-		ok    bool
+		name    string
+		input   string
+		want    string
+		matches int
 	}{
-		{name: "canonical id", input: "claude-acp", want: "claude-acp", ok: true},
-		{name: "display name", input: "Claude", want: "claude-acp", ok: true},
-		{name: "display name lowercased", input: "claude", want: "claude-acp", ok: true},
-		{name: "agent name", input: "Claude ACP Agent", want: "claude-acp", ok: true},
-		{name: "surrounding whitespace", input: "  Claude  ", want: "claude-acp", ok: true},
-		{name: "mixed case id", input: "Claude-ACP", want: "claude-acp", ok: true},
-		{name: "other family display name", input: "Codex", want: "codex-acp", ok: true},
-		{name: "unknown family", input: "grok-9000", want: "", ok: false},
-		{name: "empty", input: "   ", want: "", ok: false},
+		{name: "canonical id", input: "claude-acp", want: "claude-acp", matches: 1},
+		{name: "display name", input: "Claude", want: "claude-acp", matches: 1},
+		{name: "display name lowercased", input: "claude", want: "claude-acp", matches: 1},
+		{name: "agent name", input: "Claude ACP Agent", want: "claude-acp", matches: 1},
+		{name: "surrounding whitespace", input: "  Claude  ", want: "claude-acp", matches: 1},
+		{name: "mixed case id", input: "Claude-ACP", want: "claude-acp", matches: 1},
+		{name: "other family display name", input: "Codex", want: "codex-acp", matches: 1},
+		// "gemini" is both the ID and the display name of one agent; naming the
+		// same agent twice is not ambiguity.
+		{name: "id and display name on one agent", input: "gemini", want: "gemini", matches: 1},
+		{name: "unknown family", input: "grok-9000", want: "", matches: 0},
+		{name: "empty", input: "   ", want: "", matches: 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, ok := reg.ResolveFamilyID(tc.input)
-			if ok != tc.ok || got != tc.want {
-				t.Fatalf("ResolveFamilyID(%q) = (%q, %v), want (%q, %v)", tc.input, got, ok, tc.want, tc.ok)
+			got, matches := reg.ResolveFamilyID(tc.input)
+			if matches != tc.matches || got != tc.want {
+				t.Fatalf("ResolveFamilyID(%q) = (%q, %d), want (%q, %d)", tc.input, got, matches, tc.want, tc.matches)
 			}
 		})
 	}
@@ -375,8 +378,51 @@ func TestResolveFamilyIDPrefersCanonicalID(t *testing.T) {
 		t.Fatalf("register real: %v", err)
 	}
 
-	got, ok := reg.ResolveFamilyID("shadow")
-	if !ok || got != "shadow" {
-		t.Fatalf("ResolveFamilyID(\"shadow\") = (%q, %v), want (\"shadow\", true)", got, ok)
+	got, matches := reg.ResolveFamilyID("shadow")
+	if matches != 1 || got != "shadow" {
+		t.Fatalf("ResolveFamilyID(\"shadow\") = (%q, %d), want (\"shadow\", 1)", got, matches)
+	}
+}
+
+// Custom TUI agents share the built-ins' namespace and the user picks the slug
+// and the display name, so an alias can name two different agents. Resolving one
+// of them silently re-points a workflow rule at an agent its author never named
+// — the exact failure this resolver exists to prevent — so ambiguity must be
+// reported instead of guessed.
+func TestResolveFamilyIDRefusesAmbiguousAlias(t *testing.T) {
+	cases := []struct {
+		name        string
+		slug        string
+		displayName string
+	}{
+		// The custom agent's ID collides with the built-in's display name.
+		{name: "custom slug shadows builtin display name", slug: "claude", displayName: "My Claude"},
+		// Both agents answer to the display name "Claude"; the custom agent's ID
+		// sorts before "claude-acp", so any ordered scan would pick it.
+		{name: "custom display name collides", slug: "aaa-claude", displayName: "Claude"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reg := NewRegistry(newTestLogger())
+			reg.LoadDefaults()
+			if err := reg.RegisterCustomTUIAgent(tc.slug, tc.displayName, "claude-tui", "", "", nil); err != nil {
+				t.Fatalf("register custom agent: %v", err)
+			}
+
+			got, matches := reg.ResolveFamilyID("Claude")
+			if matches < 2 || got != "" {
+				t.Fatalf("ResolveFamilyID(%q) = (%q, %d), want no resolution and matches >= 2",
+					"Claude", got, matches)
+			}
+
+			// The collision must not cost the exact canonical IDs their meaning:
+			// naming either agent outright still resolves to that agent.
+			if id, exact := reg.ResolveFamilyID("claude-acp"); exact != 1 || id != "claude-acp" {
+				t.Fatalf("ResolveFamilyID(\"claude-acp\") = (%q, %d), want (\"claude-acp\", 1)", id, exact)
+			}
+			if id, exact := reg.ResolveFamilyID(tc.slug); exact != 1 || id != tc.slug {
+				t.Fatalf("ResolveFamilyID(%q) = (%q, %d), want (%q, 1)", tc.slug, id, exact, tc.slug)
+			}
+		})
 	}
 }

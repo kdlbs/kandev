@@ -70,7 +70,10 @@ Conditional rules are stored inside the existing `workflow_steps.events` JSON as
 
 Constraints:
 
-- `agent_name` is non-empty and unique within the action. It is resolved against the agent registry before a rule is selected, so a canonical agent ID (`claude-acp`), a display name (`Claude`), or an agent name (`Claude ACP Agent`) all select the same family, case-insensitively. A rule naming no known agent raises a session warning instead of being dropped silently; a rule naming a known but different family stays a silent no-op.
+- `agent_name` is non-empty and textually unique within the action. It is resolved against the agent registry before a rule is selected, so a canonical agent ID (`claude-acp`), a display name (`Claude`), or an agent name (`Claude ACP Agent`) all select the same family, case-insensitively.
+- Resolution is refused rather than guessed when a reference does not name exactly one installed agent. Custom TUI agents choose their own slug and display name and share the built-ins' namespace, so a reference can name two agents at once; a canonical agent ID is unambiguous by construction and always resolves.
+- Because uniqueness is validated on the written `agent_name` but selection happens after resolution, two textually different rules can name one family. That is detected when the step runs, not when the workflow is saved. Applying either would make array order decide the step's model, so neither is applied.
+- Exactly one of these outcomes is silent: a rule naming a known but different agent, which is a deliberate no-op. Naming no known agent, naming an ambiguous one, and two rules resolving to the session's family each apply nothing and raise a session warning saying which — a session setting that goes missing without explanation is the failure mode this resolution exists to remove.
 - `operation` is `set`, `keep`, or `restore_original`.
 - A `set` rule contains a non-empty `model` or at least one non-empty `config_options` entry.
 - `keep` and `restore_original` rules do not contain `model` or `config_options`.

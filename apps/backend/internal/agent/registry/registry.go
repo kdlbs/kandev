@@ -225,43 +225,54 @@ func (r *Registry) Exists(id string) bool {
 }
 
 // ResolveFamilyID maps a human-written agent family reference onto a canonical
-// agent ID. Workflow definitions are hand-authored and reasonably say "Claude"
-// where the runtime stores "claude-acp", so an exact ID match is tried first and
-// the display name and agent name are accepted as aliases. Matching is
-// case-insensitive and ignores surrounding whitespace; an unknown reference
-// returns false so callers can tell a typo from a deliberate non-match.
-func (r *Registry) ResolveFamilyID(name string) (string, bool) {
+// agent ID and reports how many distinct agents the reference named. Callers
+// must treat any count other than 1 as unresolved.
+//
+// Workflow definitions are hand-authored and reasonably say "Claude" where the
+// runtime stores "claude-acp", so the display name and the agent name are
+// accepted as aliases, case-insensitively and ignoring surrounding whitespace.
+// Aliases are NOT unique: a custom TUI agent picks its own slug and display name
+// and shares this namespace with the built-ins, so "Claude" can name both the
+// built-in and a user's own agent. Guessing between them silently mis-routes a
+// workflow rule, so an ambiguous reference is reported (count > 1) rather than
+// resolved, and a count of 0 still distinguishes a typo from a deliberate
+// non-match.
+//
+// An exact canonical ID is unambiguous by construction — IDs are the registry's
+// keys — and resolves even when another agent claims it as an alias.
+func (r *Registry) ResolveFamilyID(name string) (string, int) {
 	trimmed := strings.TrimSpace(name)
 	if trimmed == "" {
-		return "", false
+		return "", 0
 	}
 
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	if ag, exists := r.agents[trimmed]; exists {
-		return ag.ID(), true
+		return ag.ID(), 1
 	}
-	// Sort by ID so an alias claimed by more than one agent resolves the same
-	// way on every call regardless of map iteration order.
-	ids := make([]string, 0, len(r.agents))
-	for id := range r.agents {
-		ids = append(ids, id)
-	}
-	slices.Sort(ids)
-	for _, alias := range []func(agents.Agent) string{
-		agents.Agent.ID,
-		agents.Agent.DisplayName,
-		agents.Agent.Name,
-	} {
-		for _, id := range ids {
-			ag := r.agents[id]
-			if strings.EqualFold(strings.TrimSpace(alias(ag)), trimmed) {
-				return ag.ID(), true
-			}
+	matches := make([]string, 0, 1)
+	for _, ag := range r.agents {
+		if agentAnswersToFamily(ag, trimmed) {
+			matches = append(matches, ag.ID())
 		}
 	}
-	return "", false
+	if len(matches) != 1 {
+		return "", len(matches)
+	}
+	return matches[0], 1
+}
+
+// agentAnswersToFamily reports whether any of an agent's identifiers is the
+// given family reference, ignoring case and surrounding whitespace.
+func agentAnswersToFamily(ag agents.Agent, reference string) bool {
+	for _, alias := range []string{ag.ID(), ag.DisplayName(), ag.Name()} {
+		if strings.EqualFold(strings.TrimSpace(alias), reference) {
+			return true
+		}
+	}
+	return false
 }
 
 // Register adds a new agent
