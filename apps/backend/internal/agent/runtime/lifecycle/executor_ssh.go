@@ -625,6 +625,11 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 	if err != nil {
 		return fmt.Errorf("ssh resume: connect: %w", err)
 	}
+	agentctlBin, err := expandRemoteHome(ctx, client, sshRemoteAgentctlPath)
+	if err != nil {
+		_ = client.Close()
+		return fmt.Errorf("ssh resume: resolve agentctl path: %w", err)
+	}
 
 	// SSH liveness is judged on the REMOTE host: MetadataKeySSHRemoteAgentctlPID
 	// (mirrored into executors_running.pid) is a pid on the remote box, so it is
@@ -665,7 +670,7 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 		authToken:      req.AuthToken,
 		reusingProcess: reusingProcess,
 		metadata:       cloneSSHMetadata(req.Metadata),
-		prepareEnv:     sshRemoteAgentEnv(req),
+		prepareEnv:     sshRemoteContributionEnv(req, agentctlBin),
 	}
 	r.mu.Unlock()
 
