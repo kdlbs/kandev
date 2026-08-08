@@ -57,9 +57,12 @@ func backupProductionDb(dbPath, homeDir string, now time.Time) (string, error) {
 	defer func() { _ = src.Close() }()
 
 	backupDir := filepath.Join(homeDir, ".kandev", "data", "backups")
-	if err := os.MkdirAll(backupDir, 0o755); err != nil {
+	if err := os.MkdirAll(backupDir, 0o700); err != nil {
 		return "", fmt.Errorf("create backup directory: %w", err)
 	}
+	// Harden in case a wider-masked directory already exists; snapshot names
+	// are user-local and must not be world-readable.
+	_ = os.Chmod(backupDir, 0o700)
 
 	name := backupPrefix + backupTimestamp(now) + backupSuffix
 	dest := filepath.Join(backupDir, name)

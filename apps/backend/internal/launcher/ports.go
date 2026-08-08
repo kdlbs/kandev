@@ -85,22 +85,18 @@ func envPort(name string) (int, error) {
 }
 
 // pickPorts resolves the start/run port pair (backend + agentctl). The web
-// port selection is dev-only: the picker runs for shared collision handling,
-// then the web port is dropped so start/run never emit KANDEV_WEB_INTERNAL_URL.
+// port selection is dev-only: with wantWeb=false it is skipped entirely, so a
+// busy web port can never fail (or slow down) a release launch.
 func pickPorts(backendPort int, source string) (portConfig, error) {
-	cfg, err := pickDevPorts(backendPort, source, 0, "")
-	if err != nil {
-		return portConfig{}, err
-	}
-	cfg.WebPort = 0
-	return cfg, nil
+	return pickDevPorts(backendPort, source, 0, "", false)
 }
 
 // pickDevPorts resolves the backend, web, and agentctl ports. Explicitly
 // requested ports must be bindable or the launch fails hard naming the port
 // and its source (flag vs. env); omitted ports fall back to the preferred
-// value, then a random free port. The three ports are guaranteed distinct.
-func pickDevPorts(backendPort int, backendSource string, webPort int, webSource string) (portConfig, error) {
+// value, then a random free port. The ports are guaranteed distinct. Web
+// selection only runs when wantWeb is set (dev mode).
+func pickDevPorts(backendPort int, backendSource string, webPort int, webSource string, wantWeb bool) (portConfig, error) {
 	used := map[int]bool{}
 	backend := backendPort
 	if backend == 0 {
@@ -118,24 +114,28 @@ func pickDevPorts(backendPort int, backendSource string, webPort int, webSource 
 	}
 	used[backend] = true
 
-	web := webPort
-	switch {
-	case web == 0:
-		p, err := pickAvailablePortExcept(defaultWebPort, used)
-		if err != nil {
-			return portConfig{}, err
+	web := 0
+	if wantWeb {
+		switch {
+		case webPort == 0:
+			p, err := pickAvailablePortExcept(defaultWebPort, used)
+			if err != nil {
+				return portConfig{}, err
+			}
+			web = p
+		case used[webPort]:
+			return portConfig{}, fmt.Errorf("web port %d conflicts with the backend port", webPort)
+		case !canBind(webPort):
+			sourceSuffix := ""
+			if webSource != "" {
+				sourceSuffix = fmt.Sprintf(" from %s", webSource)
+			}
+			return portConfig{}, fmt.Errorf("web port %d%s is already in use", webPort, sourceSuffix)
+		default:
+			web = webPort
 		}
-		web = p
-	case used[web]:
-		return portConfig{}, fmt.Errorf("web port %d conflicts with the backend port", web)
-	case !canBind(web):
-		sourceSuffix := ""
-		if webSource != "" {
-			sourceSuffix = fmt.Sprintf(" from %s", webSource)
-		}
-		return portConfig{}, fmt.Errorf("web port %d%s is already in use", web, sourceSuffix)
+		used[web] = true
 	}
-	used[web] = true
 
 	agentctl, err := pickAvailablePortExcept(defaultAgentctlPort, used)
 	if err != nil {

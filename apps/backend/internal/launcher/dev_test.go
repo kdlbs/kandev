@@ -285,6 +285,63 @@ func TestRunDevShutsDownTreeOnBackendHealthFailure(t *testing.T) {
 	}
 }
 
+func TestRunDevShutsDownTreeWhenWebChildExits(t *testing.T) {
+	repo := makeRepoTree(t)
+	t.Chdir(repo)
+	t.Setenv("KANDEV_TASK_ID", "")
+	t.Setenv("KANDEV_DATABASE_PATH", "")
+	t.Setenv("KANDEV_HOME_DIR", "")
+
+	oldLaunchBackend := launchBackendFn
+	oldWaitForHealth := waitForHealthFn
+	oldWaitForURL := waitForURLFn
+	oldOpenBrowser := openBrowserFn
+	oldStartProcess := startProcessFn
+	oldAttachSignals := attachSignalsFn
+	oldStatusOutput := launcherStatusOutput
+	t.Cleanup(func() {
+		launchBackendFn = oldLaunchBackend
+		waitForHealthFn = oldWaitForHealth
+		waitForURLFn = oldWaitForURL
+		openBrowserFn = oldOpenBrowser
+		startProcessFn = oldStartProcess
+		attachSignalsFn = oldAttachSignals
+		launcherStatusOutput = oldStatusOutput
+	})
+
+	var output strings.Builder
+	launcherStatusOutput = &output
+
+	attachSignalsFn = func(_ *processSupervisor) {}
+	// The backend stays alive; only the web child exits. waitForAppExit must
+	// select the web child and take the launcher down with its exit code.
+	launchBackendFn = func(_ backendLaunchConfig) (*restartableBackend, func(), error) {
+		return &restartableBackend{exitCh: make(chan int, 1)}, func() {}, nil
+	}
+	waitForHealthFn = func(_ context.Context, _ string, _ childState, _ time.Duration, _ string, _ func()) error {
+		return nil
+	}
+	waitForURLFn = func(_ context.Context, _ string, _ childState, _ time.Duration) error {
+		return nil
+	}
+	openBrowserFn = func(_ string) {}
+	webDone := make(chan struct{})
+	startProcessFn = func(_ string, _ []string, _ string, _ []string, _ bool, label string, _ *processSupervisor) (*managedProcess, func(), error) {
+		return &managedProcess{label: label, exited: true, exitCode: 7, done: webDone}, func() {}, nil
+	}
+	// The web child has already exited: a pre-closed done channel is the
+	// signal waitForAppExit selects on.
+	close(webDone)
+
+	code := runDev(context.Background(), Options{Command: CommandDev, Headless: true})
+	if code != 7 {
+		t.Fatalf("runDev() = %d, want the web child's exit code 7", code)
+	}
+	if !strings.Contains(output.String(), "reason=web exit") {
+		t.Fatalf("supervisor not shut down for the web child exit:\n%s", output.String())
+	}
+}
+
 func TestRunDevFailsWhenRepoRootNotFound(t *testing.T) {
 	t.Chdir(t.TempDir())
 

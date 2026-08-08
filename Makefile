@@ -189,6 +189,7 @@ endif
 
 .PHONY: dev
 dev: doctor
+	# POSIX-only (cp/exec): on Windows run from Git Bash/MSYS, like `make start`.
 	@echo "Building backend and remote agentctl helpers..."
 	@$(MAKE) -C $(BACKEND_DIR) build build-agentctl-remote
 	@cp $(BACKEND_DIR)/bin/kandev$(EXE) $(BACKEND_DIR)/bin/kandev-launcher$(EXE)

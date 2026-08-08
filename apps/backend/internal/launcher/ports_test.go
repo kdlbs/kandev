@@ -91,7 +91,7 @@ func TestResolveWebPortPrecedence(t *testing.T) {
 }
 
 func TestPickDevPortsDefaultsToDistinctPreferredPorts(t *testing.T) {
-	cfg, err := pickDevPorts(0, "", 0, "")
+	cfg, err := pickDevPorts(0, "", 0, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestPickDevPortsRejectsOccupiedExplicitWebPort(t *testing.T) {
 	t.Cleanup(func() { _ = ln.Close() })
 
 	port := ln.Addr().(*net.TCPAddr).Port
-	_, err = pickDevPorts(0, "", port, "--web-internal-port")
+	_, err = pickDevPorts(0, "", port, "--web-internal-port", true)
 	if err == nil {
 		t.Fatalf("pickDevPorts succeeded while the requested web port was occupied")
 	}
@@ -131,7 +131,7 @@ func TestPickDevPortsRejectsOccupiedExplicitWebPort(t *testing.T) {
 }
 
 func TestPickDevPortsBackendAndWebStayDistinct(t *testing.T) {
-	cfg, err := pickDevPorts(0, "", 0, "")
+	cfg, err := pickDevPorts(0, "", 0, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestPickDevPortsRejectsWebPortDuplicatingBackendPort(t *testing.T) {
 	port := ln.Addr().(*net.TCPAddr).Port
 	_ = ln.Close()
 
-	cfg, err := pickDevPorts(port, "--port", port, "--web-internal-port")
+	cfg, err := pickDevPorts(port, "--port", port, "--web-internal-port", true)
 	if err == nil {
 		t.Fatalf("pickDevPorts accepted duplicate backend/web port: %+v", cfg)
 	}
@@ -171,5 +171,27 @@ func TestPickPortsWithoutWebPortMatchesStartSemantics(t *testing.T) {
 	}
 	if cfg.WebPort != 0 {
 		t.Fatalf("pickPorts set WebPort = %d, want 0 for start/run", cfg.WebPort)
+	}
+}
+
+func TestPickPortsIgnoresOccupiedWebPort(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	webPort := ln.Addr().(*net.TCPAddr).Port
+
+	// start/run never use a web port, so an occupied one must not influence
+	// port selection (pickDevPorts with wantWeb=false skips the probe).
+	cfg, err := pickPorts(0, "")
+	if err != nil {
+		t.Fatalf("pickPorts failed with an occupied web port: %v", err)
+	}
+	if cfg.WebPort != 0 {
+		t.Fatalf("pickPorts set WebPort = %d, want 0", cfg.WebPort)
+	}
+	if cfg.BackendPort == webPort || cfg.AgentctlPort == webPort {
+		t.Fatalf("pickPorts collided with the occupied web port %d: %+v", webPort, cfg)
 	}
 }
