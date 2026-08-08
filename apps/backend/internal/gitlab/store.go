@@ -88,6 +88,10 @@ const createTablesSQL = `
 		required_approvals INTEGER DEFAULT 0,
 		pipeline_jobs_total INTEGER DEFAULT 0,
 		pipeline_jobs_pass INTEGER DEFAULT 0,
+		detailed_merge_status TEXT NOT NULL DEFAULT '',
+		reviewer_count INTEGER NOT NULL DEFAULT 0,
+		unapproved_reviewers INTEGER NOT NULL DEFAULT 0,
+		unresolved_discussions INTEGER NOT NULL DEFAULT 0,
 		created_at DATETIME NOT NULL,
 		merged_at DATETIME,
 		closed_at DATETIME,
@@ -216,16 +220,39 @@ func (s *Store) createTables() error {
 	if err := s.createMRAutomationTables(); err != nil {
 		return err
 	}
+	if err := s.migrateMRAutomationAutomationColumns(); err != nil {
+		return err
+	}
 	if err := s.migrateConfigRevision(); err != nil {
 		return err
 	}
 	if err := s.migrateWatchColumns(); err != nil {
 		return err
 	}
+	if err := s.migrateTaskMRAutomationFields(); err != nil {
+		return err
+	}
 	if err := s.migrateMRWatchUniqueKey(); err != nil {
 		return err
 	}
 	return s.ensureMRWatchIndexes()
+}
+
+// migrateTaskMRAutomationFields adds the reviewer/merge-readiness columns
+// (detailed_merge_status, reviewer_count, unapproved_reviewers,
+// unresolved_discussions) that back the "awaiting review" summary label
+// and the auto-merge readiness gate. Idempotent: gitlab_task_mrs already
+// exists in every dev/CI database created since #2125 merged, so these
+// columns are added via ALTER TABLE rather than only listed in the CREATE
+// TABLE above (which is a no-op on an existing table).
+func (s *Store) migrateTaskMRAutomationFields() error {
+	columns := []struct{ name, ddl string }{
+		{"detailed_merge_status", "TEXT NOT NULL DEFAULT ''"},
+		{"reviewer_count", "INTEGER NOT NULL DEFAULT 0"},
+		{"unapproved_reviewers", "INTEGER NOT NULL DEFAULT 0"},
+		{"unresolved_discussions", "INTEGER NOT NULL DEFAULT 0"},
+	}
+	return addMissingColumns(s, "gitlab_task_mrs", columns)
 }
 
 // ensureMRWatchIndexes re-creates gitlab_mr_watches' indexes after
@@ -449,6 +476,7 @@ const taskMRSelectCols = `id, task_id, repository_id, host, project_path, mr_iid
 	mr_url, mr_title, head_branch, base_branch, author_username, state,
 	approval_state, pipeline_state, merge_status, draft, approval_count,
 	required_approvals, pipeline_jobs_total, pipeline_jobs_pass,
+	detailed_merge_status, reviewer_count, unapproved_reviewers, unresolved_discussions,
 	created_at, merged_at, closed_at, last_synced_at, updated_at`
 
 // taskMRSelectColsQualified is the same projection prefixed with `gtm.`,
@@ -459,7 +487,9 @@ const taskMRSelectColsQualified = `gtm.id, gtm.task_id, gtm.repository_id,
 	gtm.head_branch, gtm.base_branch, gtm.author_username, gtm.state,
 	gtm.approval_state, gtm.pipeline_state, gtm.merge_status, gtm.draft,
 	gtm.approval_count, gtm.required_approvals, gtm.pipeline_jobs_total,
-	gtm.pipeline_jobs_pass, gtm.created_at, gtm.merged_at, gtm.closed_at,
+	gtm.pipeline_jobs_pass, gtm.detailed_merge_status, gtm.reviewer_count,
+	gtm.unapproved_reviewers, gtm.unresolved_discussions,
+	gtm.created_at, gtm.merged_at, gtm.closed_at,
 	gtm.last_synced_at, gtm.updated_at`
 
 // UpsertTaskMR creates or updates a task↔MR association keyed by
@@ -480,12 +510,14 @@ func (s *Store) UpsertTaskMR(ctx context.Context, tm *TaskMR) error {
 			head_branch, base_branch, author_username, state, approval_state, pipeline_state,
 			merge_status, draft, approval_count, required_approvals,
 			pipeline_jobs_total, pipeline_jobs_pass,
+			detailed_merge_status, reviewer_count, unapproved_reviewers, unresolved_discussions,
 			created_at, merged_at, closed_at, last_synced_at, updated_at
 		) VALUES (
 			:id, :task_id, :repository_id, :host, :project_path, :mr_iid, :mr_url, :mr_title,
 			:head_branch, :base_branch, :author_username, :state, :approval_state, :pipeline_state,
 			:merge_status, :draft, :approval_count, :required_approvals,
 			:pipeline_jobs_total, :pipeline_jobs_pass,
+			:detailed_merge_status, :reviewer_count, :unapproved_reviewers, :unresolved_discussions,
 			:created_at, :merged_at, :closed_at, :last_synced_at, :updated_at
 		)
 		ON CONFLICT(task_id, repository_id, project_path, mr_iid) DO UPDATE SET
@@ -498,6 +530,15 @@ func (s *Store) UpsertTaskMR(ctx context.Context, tm *TaskMR) error {
 			required_approvals = excluded.required_approvals,
 			pipeline_jobs_total = excluded.pipeline_jobs_total,
 			pipeline_jobs_pass = excluded.pipeline_jobs_pass,
+			detailed_merge_status = excluded.detailed_merge_status,
+			reviewer_count = excluded.reviewer_count,
+			unapproved_reviewers = excluded.unapproved_reviewers,
+			-- unresolved_discussions is deliberately NOT updated here. It is
+			-- only ever 0 on the incoming row (GetMRStatus never fetches
+			-- discussions — see MRStatus's type doc), so overwriting it on
+			-- every lifecycle sync would clobber the value the auto-fix
+			-- evaluation pass sets via UpdateTaskMRUnresolvedDiscussions for
+			-- automation-subscribed MRs.
 			merged_at = excluded.merged_at, closed_at = excluded.closed_at,
 			last_synced_at = excluded.last_synced_at, updated_at = excluded.updated_at
 		RETURNING id, created_at, updated_at`, tm)
@@ -512,6 +553,18 @@ func (s *Store) UpsertTaskMR(ctx context.Context, tm *TaskMR) error {
 		return errors.New("upsert task MR returned no row")
 	}
 	return rows.Scan(&tm.ID, &tm.CreatedAt, &tm.UpdatedAt)
+}
+
+// UpdateTaskMRUnresolvedDiscussions sets the unresolved-discussion count for
+// a single task-MR row. Deliberately narrow (single column, by primary key)
+// rather than folded into UpsertTaskMR's ON CONFLICT clause — see the
+// comment there for why the general lifecycle sync must never touch this
+// column.
+func (s *Store) UpdateTaskMRUnresolvedDiscussions(ctx context.Context, id string, count int) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE gitlab_task_mrs SET unresolved_discussions = ?, updated_at = ? WHERE id = ?`,
+		count, time.Now().UTC(), id)
+	return err
 }
 
 // GetTaskMR returns one task-MR association keyed by

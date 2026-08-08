@@ -520,6 +520,11 @@ func (sm *SessionManager) applyRuntimeSessionLayers(
 				zap.String("execution_id", execution.ID), zap.String("model", runtimeModel), zap.Error(err))
 		} else {
 			finalConfigID = modelConfigIDFromState(execution.GetModelState())
+			// Logged like the profile layer above: without this line a trace
+			// shows only the profile write, and a runtime layer that never ran
+			// is indistinguishable from one that ran and was overwritten.
+			sm.logger.Info("set runtime model on ACP session",
+				zap.String("execution_id", execution.ID), zap.String("model", runtimeModel))
 		}
 	}
 	if runtimeMode != "" && runtimeMode != profileMode {

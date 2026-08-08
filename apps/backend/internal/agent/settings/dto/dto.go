@@ -338,6 +338,24 @@ type DynamicModelsResponse struct {
 	Error          *string           `json:"error"`
 }
 
+// ResolveAgentModelConfigRequest selects the provider context to resolve.
+type ResolveAgentModelConfigRequest struct {
+	Model         string            `json:"model"`
+	Mode          string            `json:"mode,omitempty"`
+	ConfigOptions map[string]string `json:"config_options,omitempty"`
+	Refresh       bool              `json:"refresh,omitempty"`
+}
+
+// AgentModelConfigResponse is the complete provider option snapshot for one
+// selected model.
+type AgentModelConfigResponse struct {
+	AgentName     string            `json:"agent_name"`
+	Model         string            `json:"model"`
+	Status        string            `json:"status"`
+	ConfigOptions []ConfigOptionDTO `json:"config_options"`
+	Error         *string           `json:"error"`
+}
+
 // ModeEntryDTO is a single ACP session mode advertised by an agent.
 type ModeEntryDTO struct {
 	ID          string         `json:"id"`

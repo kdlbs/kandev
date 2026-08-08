@@ -1,7 +1,7 @@
 ---
 status: building
 created: 2026-05-04
-updated: 2026-08-01
+updated: 2026-08-05
 owner: tbd
 ---
 
@@ -104,6 +104,35 @@ workflows are not usable end to end.
 - Settings can copy a connection to another workspace. Copying overwrites the
   target connection after confirmation but never copies automation watches or
   task-to-MR associations.
+- Each linked MR's topbar control shows an "Automation" group with two
+  switches — `Auto-fix CI and address comments` and `Auto-merge when ready` —
+  above a collapsible `Review follow-up` group holding the three lifecycle
+  notification switches (`Your review is requested`, `MR merged`, `MR closed
+  without merging`) introduced for MR lifecycle notifications. All five
+  switches are task-level and apply to every linked MR; auto-fix and auto-merge
+  additionally track per-MR round/attempt state. See "Automation (lifecycle,
+  auto-fix, auto-merge)" below.
+- `Auto-fix CI and address comments` sends or queues an agent prompt when a
+  linked MR's pipeline has a new or changed failing job, or a new or changed
+  unresolved discussion note, capped at 10 accepted rounds per task/MR.
+  `Auto-merge when ready` merges a linked MR only when it is open, not a
+  draft, its pipeline succeeded, it has zero unresolved discussions, and
+  GitLab's own merge-readiness verdict agrees.
+- For a single linked MR on desktop (fine-pointer), hovering the topbar
+  button opens a preview popover with everything: header actions (open the
+  MR detail panel, open in GitLab, unlink), a pass-rate bar and pipeline
+  stage groups, an approval row, an unresolved-discussions row, the
+  Automation controls, a compact merge action when the MR is fully ready,
+  and "Link another merge request" — mirroring GitHub's PR hover popover.
+  Clicking the button opens the MR detail panel directly (no intermediate
+  dropdown), also mirroring GitHub's single-PR topbar button. A task with
+  2+ linked MRs, and touch/coarse-pointer surfaces regardless of MR count,
+  keep the click-only dropdown (per-MR review/open/unlink rows, the
+  Automation group, and "Link another merge request") with no hover popover.
+- The Kanban card shows a merge-request badge (`IconGitMerge`, coloured by
+  state/pipeline/approval) next to the existing pull-request badge when the
+  task has at least one linked MR. Multiple linked MRs collapse into one badge
+  showing a count and the most attention-worthy open MR's colour.
 
 ## Data model
 
@@ -150,6 +179,25 @@ into the secret store.
   notable transitions.
 - GitLab notification subscription state is owned by GitLab. Kandev reads it
   live and does not duplicate it in SQLite.
+- `gitlab_task_mr_options` is a per-task row: `task_id` (PK), the three
+  lifecycle booleans (`prompt_on_review_requested`, `prompt_on_merged`,
+  `prompt_on_closed`), `review_reviewer_username`, `auto_fix_enabled`,
+  `auto_merge_enabled`, `auto_fix_prompt_override` (nullable; empty/`NULL`
+  means use the built-in `mr-auto-fix` prompt), and timestamps. One row covers
+  every MR linked to the task.
+- `gitlab_task_mr_state` is a per-`(task_id, repository_id, project_path,
+  mr_iid)` row carrying lifecycle dedupe fields (from MR lifecycle
+  notifications) plus `last_fix_signature`, `last_fix_checkpoint_json`,
+  `last_fix_enqueued_at`, `last_fix_session_id`, `auto_fix_round_count`,
+  `auto_fix_exhausted_at`, `last_merge_signature`, and
+  `last_merge_attempt_at`.
+- `gitlab_task_mrs` additionally persists `detailed_merge_status`,
+  `reviewer_count`, and `unapproved_reviewers` from every lifecycle sync, and
+  `unresolved_discussions` from the automation evaluation pass only (kept out
+  of the lifecycle sync's `UPDATE` so a plain poll never resets it to zero for
+  an MR that is not automation-subscribed).
+- `custom_prompts` includes a built-in `mr-auto-fix` row (`id =
+  "builtin-mr-auto-fix"`), seeded the same way as GitHub's `ci-auto-fix`.
 
 ## API surface
 
@@ -208,6 +256,41 @@ validated against any supplied value.
 - `PUT /mrs/labels?workspace_id=<id>` accepts `{project, iid, labels}` and
   `PUT /mrs/assignees?workspace_id=<id>` accepts
   `{project, iid, assignee_ids}`.
+
+### MR automation (lifecycle, auto-fix, auto-merge)
+
+- `GET /tasks/:taskID/mr-automation` returns the task's `TaskMRAutomationOptions`:
+  the three lifecycle booleans, `review_reviewer_username`, `auto_fix_enabled`,
+  `auto_merge_enabled`, `auto_fix_prompt_override` (`null` when unset),
+  `auto_fix_max_rounds` (`10`), `effective_auto_fix_prompt`,
+  `using_default_prompt`, `updated_at`, and `mr_states` (one
+  `TaskMRLifecycleState` per linked MR, carrying both the lifecycle dedupe
+  fields and the auto-fix/auto-merge checkpoint fields).
+- `PATCH /tasks/:taskID/mr-automation` accepts a partial body with any of the
+  same fields (excluding `auto_fix_max_rounds`, `effective_auto_fix_prompt`,
+  `using_default_prompt`, `updated_at`, and `mr_states`, which are
+  server-computed). An unknown field returns `400 unknown MR automation
+  field`; `auto_fix_enabled`/`auto_merge_enabled`/the three lifecycle booleans
+  reject an explicit `null` (they are switches, not clearable values);
+  `auto_fix_prompt_override: null` or `""` restores the built-in `mr-auto-fix`
+  prompt.
+- Current-task MCP exposes `get_task_mr_automation_kandev` and
+  `update_task_mr_automation_kandev` with the same shape, scoped to the
+  connected task.
+- Auto-fix readiness requires the MR to be open, not draft, and its latest
+  pipeline settled (not `running`/`pending`); it fires on a new or changed
+  failing job, or a new/changed unresolved discussion note versus the stored
+  checkpoint, and stops entirely once the MR is `merged`, `closed`, or
+  `locked`.
+- Auto-merge readiness is GitLab's `detailed_merge_status == "mergeable"`
+  (15.6+), falling back to `merge_status == "can_be_merged"` on older hosts,
+  **plus** Kandev's own gates: open, not draft, pipeline `success`, and zero
+  unresolved discussions. An auto-fix dispatch in the same evaluation pass
+  blocks that pass's auto-merge attempt.
+- Merge attempts route through the workspace client resolved with the linked
+  MR row's own stored `Host` as the expected host; a host mismatch fails
+  closed (`ErrWorkspaceHostMismatch`) rather than merging through a
+  differently-configured connection.
 
 ### Automation watches
 
@@ -382,6 +465,33 @@ protocol action name for compatibility.
   actions are available without leaving Kandev.
 - **GIVEN** an eligible project member, **WHEN** the user selects them as a
   reviewer, **THEN** GitLab and the refreshed MR panel both show that reviewer.
+- **GIVEN** a linked MR with auto-fix enabled, an open state, a settled
+  failing pipeline, and a promptable session, **WHEN** automation evaluates
+  the MR, **THEN** it sends or queues exactly one `@mr-auto-fix` prompt and
+  `auto_fix_round_count` increments by one; an unchanged snapshot on the next
+  evaluation dispatches nothing.
+- **GIVEN** a linked MR with auto-merge enabled and every readiness gate
+  satisfied, **WHEN** automation evaluates the MR, **THEN** Kandev merges it
+  exactly once, routed through the workspace client resolved with the linked
+  row's own host; a host mismatch never merges.
+- **GIVEN** a linked MR reaches `merged`, `closed`, or `locked`, **WHEN**
+  auto-fix is still enabled, **THEN** no further auto-fix prompt is
+  dispatched for that MR.
+- **GIVEN** a task with exactly one linked MR on desktop, **WHEN** the user
+  hovers the topbar button past the open delay, **THEN** a preview popover
+  shows the pass-rate bar, approval row, unresolved-discussions row,
+  Automation controls, a merge action when ready, and link/open/unlink
+  actions, all without a click.
+- **GIVEN** a task with exactly one linked MR on desktop, **WHEN** the user
+  clicks the topbar button, **THEN** the MR detail panel opens directly (no
+  dropdown) and any open hover popover closes.
+- **GIVEN** a task with two or more linked MRs, or any touch/coarse-pointer
+  viewport regardless of MR count, **WHEN** the user interacts with the
+  topbar button, **THEN** no hover popover is ever rendered and
+  clicking/tapping opens the existing per-MR dropdown.
+- **GIVEN** a task with two linked MRs, one merged and one open with a failing
+  pipeline, **WHEN** the Kanban card renders its MR badge, **THEN** the badge
+  shows a count of two and the open MR's (red) colour, not the merged MR's.
 - **GIVEN** an MR or issue the user does not subscribe to, **WHEN** they enable
   notifications, **THEN** GitLab reports it subscribed and no Kandev watch or
   task is created.
@@ -421,3 +531,10 @@ protocol action name for compatibility.
 - OAuth-based Kandev sign-in, GitLab Duo, repository migration between hosts,
   and Bitbucket parity.
 - Multiple named GitLab connections inside one Kandev workspace.
+- A multi-MR aggregate hover preview (the popover only covers the single-MR
+  topbar case; a task with 2+ linked MRs keeps the existing click-only
+  dropdown).
+- GitLab's per-reviewer `requested_changes` states as a three-way review
+  label; "awaiting review" is approvals-count-based only (version/tier
+  dependent otherwise).
+- Per-job CI log tailing in the auto-fix prompt.

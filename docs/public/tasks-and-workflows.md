@@ -315,6 +315,12 @@ data later becomes unavailable. The editor uses the same model and ACP option
 picker as the chat input, so provider-specific models and options are selected
 from the agent's advertised capabilities.
 
+The model and option list is resolved for the selected model. Providers can
+therefore expose different options for different models, and the list can
+change after a model selection. Kandev removes saved option values only after
+a successful provider response; if discovery fails, the current draft remains
+available and can be retried.
+
 Each rule can **Set** a model and any selected options, **Keep** the settings
 already active, or **Restore original** to reapply the immutable model and
 option values captured when the original session finished initializing, after

@@ -175,6 +175,13 @@ func provideOrchestrator(
 		orchestratorSvc.SetWorkflowStepGetter(&orchestratorWorkflowStepGetterAdapter{svc: workflowSvc})
 	}
 
+	// Wire agent family resolution so configure_session rules can name an agent
+	// the way a workflow author writes it ("Claude") and still match the
+	// canonical ID a session stores ("claude-acp").
+	if agentRegistry != nil {
+		orchestratorSvc.SetAgentFamilyResolver(agentRegistry)
+	}
+
 	// Wire "@name" saved-prompt reference expansion into workflow-step prompt
 	// building.
 	if promptSvc != nil {

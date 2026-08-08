@@ -97,6 +97,7 @@ type projectionState struct {
 	queuedCount      int
 	sessions         map[string]sessionObservation
 	pending          map[string]string
+	pendingRequests  map[string]pendingRequestIdentity
 	taskPending      string
 	pendingObserved  bool
 	activityObserved bool
@@ -120,6 +121,11 @@ type sessionObservation struct {
 	isPrimary           bool
 	foregroundActivity  string
 	activeSubagentCount int
+}
+
+type pendingRequestIdentity struct {
+	messageType string
+	pendingID   string
 }
 
 type pullRequestObservation struct {
@@ -332,11 +338,22 @@ func (p *Projector) applySourceEventLocked(state *projectionState, eventType str
 
 func applyPermissionEventLocked(state *projectionState, data map[string]interface{}) bool {
 	sessionID := stringField(data, "session_id")
-	if sessionID == "" || state.pending[sessionID] == pendingPermission {
+	if sessionID == "" {
+		return false
+	}
+	identity := pendingRequestIdentity{
+		messageType: "permission_request",
+		pendingID:   stringField(data, "pending_id"),
+	}
+	if state.pending[sessionID] == pendingPermission {
+		if _, exists := state.pendingRequests[sessionID]; !exists {
+			state.pendingRequests[sessionID] = identity
+		}
 		return false
 	}
 	state.pendingObserved = true
 	state.pending[sessionID] = pendingPermission
+	state.pendingRequests[sessionID] = identity
 	return true
 }
 
@@ -436,6 +453,7 @@ func applyTaskPendingUpdateLocked(state *projectionState, data map[string]interf
 		value := stringFromNullable(pending)
 		if len(state.pending) > 0 {
 			state.pending = make(map[string]string)
+			state.pendingRequests = make(map[string]pendingRequestIdentity)
 			changed = true
 		}
 		if state.taskPending != value {
@@ -452,16 +470,16 @@ func applyTaskPendingUpdateLocked(state *projectionState, data map[string]interf
 
 func updateSessionPendingLocked(state *projectionState, sessionID, action string) bool {
 	if action == "" {
-		if _, exists := state.pending[sessionID]; exists {
-			delete(state.pending, sessionID)
-			return true
-		}
-		return false
+		_, existed := state.pending[sessionID]
+		delete(state.pending, sessionID)
+		delete(state.pendingRequests, sessionID)
+		return existed
 	}
 	if state.pending[sessionID] == action {
 		return false
 	}
 	state.pending[sessionID] = action
+	delete(state.pendingRequests, sessionID)
 	return true
 }
 
@@ -469,6 +487,7 @@ func newProjectionState() *projectionState {
 	return &projectionState{
 		sessions:           make(map[string]sessionObservation),
 		pending:            make(map[string]string),
+		pendingRequests:    make(map[string]pendingRequestIdentity),
 		errors:             make(map[string]*ActiveErrorSummary),
 		clearedErrorStamps: make(map[string]string),
 		git:                make(map[string]GitSummary),
@@ -699,6 +718,10 @@ func (p *Projector) applyPendingMessageLocked(state *projectionState, eventType 
 	messageType := strings.ToLower(stringField(data, "type"))
 	metadata, _ := data["metadata"].(map[string]interface{})
 	status := strings.ToLower(stringField(metadata, "status"))
+	requestIdentity := pendingRequestIdentity{
+		messageType: messageType,
+		pendingID:   stringField(metadata, "pending_id"),
+	}
 	action := pendingActionForMessage(messageType, boolValue(data["requests_input"]))
 	if action == "" {
 		return false
@@ -707,17 +730,22 @@ func (p *Projector) applyPendingMessageLocked(state *projectionState, eventType 
 	// A terminal status on the request row means the prompt is no longer awaiting
 	// the user. Resolutions land as a message.updated on that row (approved/
 	// rejected/expired for permissions, answered/rejected/cancelled/expired for
-	// clarifications), so gating the clear on "not a request message" left the
-	// task-list affordance armed after the user had already answered. Only the
-	// empty and "pending" statuses keep it armed — that covers a
-	// detached-but-answerable clarification, which stays pending.
+	// clarifications). Only the request that armed the affordance may clear it;
+	// a detached-but-answerable clarification stays pending.
 	if eventType == events.MessageDeleted || (status != "" && status != statusPending) {
-		return p.clearPendingLocked(state, sessionID)
+		if state.pendingRequests[sessionID] == requestIdentity {
+			return p.clearPendingLocked(state, sessionID)
+		}
+		return false
 	}
 	if state.pending[sessionID] == action {
+		if _, exists := state.pendingRequests[sessionID]; !exists {
+			state.pendingRequests[sessionID] = requestIdentity
+		}
 		return false
 	}
 	state.pending[sessionID] = action
+	state.pendingRequests[sessionID] = requestIdentity
 	return true
 }
 

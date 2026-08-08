@@ -29,6 +29,11 @@ function taskMRAutomationOptions(
 ): TaskMRAutomationOptions {
   return {
     task_id: "task-1",
+    auto_fix_enabled: false,
+    auto_merge_enabled: false,
+    auto_fix_max_rounds: 10,
+    effective_auto_fix_prompt: "",
+    using_default_prompt: true,
     prompt_on_review_requested: false,
     prompt_on_merged: true,
     prompt_on_closed: false,

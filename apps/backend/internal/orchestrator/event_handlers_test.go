@@ -15,6 +15,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -796,13 +797,19 @@ func createTestServiceWithAgent(repo *sqliterepo.Repository, stepGetter *mockSte
 	if mock, ok := agentMgr.(*mockAgentManager); ok && mock.repoForExecutionLookup == nil {
 		mock.repoForExecutionLookup = repo
 	}
+	// The real registry, not a stub: configure_session rule matching has to
+	// resolve the agent family names people actually write in workflows
+	// ("Claude") onto the IDs sessions actually store ("claude-acp").
+	agentRegistry := registry.NewRegistry(log)
+	agentRegistry.LoadDefaults()
 	svc := &Service{
-		logger:             log,
-		repo:               repo,
-		workflowStepGetter: stepGetter,
-		taskRepo:           taskRepo,
-		agentManager:       agentMgr,
-		messageQueue:       messagequeue.NewServiceMemory(log),
+		logger:              log,
+		repo:                repo,
+		workflowStepGetter:  stepGetter,
+		taskRepo:            taskRepo,
+		agentManager:        agentMgr,
+		messageQueue:        messagequeue.NewServiceMemory(log),
+		agentFamilyResolver: agentRegistry,
 	}
 	repo.SetTaskQueuePurger(func(ctx context.Context, taskID string) {
 		_, _ = svc.messageQueue.PurgeTask(ctx, taskID)

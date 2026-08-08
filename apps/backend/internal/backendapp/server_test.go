@@ -46,7 +46,7 @@ func TestHealthHandlerEchoesConfiguredToken(t *testing.T) {
 	t.Cleanup(func() { ready.Store(false) })
 
 	router := gin.New()
-	router.GET("/health", healthHandler())
+	router.GET("/health", healthHandler(routeParams{}))
 	response := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/health", nil)
 	router.ServeHTTP(response, request)

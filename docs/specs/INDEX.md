@@ -50,6 +50,7 @@ Product-wide capabilities that are not tied to a single feature area.
 | [git-subprocess-admission](platform/git-subprocess-admission.md) | building |
 | [bounded-task-status-delivery](platform/bounded-task-status-delivery.md) | approved |
 | [diagnostic-logging](platform/diagnostic-logging.md) | approved |
+| [health-endpoint-version](health-endpoint-version/spec.md) | building |
 
 ## tasks/ — task & workflow model
 
@@ -100,6 +101,7 @@ Roles, governance gates, and granular permissions that apply across human users 
 |---|---|
 | [runtime-updates](agents/runtime-updates.md) | approved |
 | [profile-disable](agents/profile-disable.md) | draft |
+| [dynamic-provider-options](agents/dynamic-provider-options.md) | shipped |
 | [roles](agents/roles.md) | shipped |
 | [governance](agents/governance.md) | shipped |
 | [granular-permissions](agents/granular-permissions.md) | draft |

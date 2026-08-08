@@ -162,6 +162,16 @@ type WorkflowStepGetter interface {
 	GetWorkflowMeta(ctx context.Context, workflowID string) (WorkflowMeta, error)
 }
 
+// AgentFamilyResolver maps a hand-written agent family reference onto the
+// canonical IDs of every agent that answers to it. Exactly one candidate
+// resolves the reference; none means it names no known agent; more than one
+// means it is ambiguous and must not be guessed. The candidates themselves —
+// not just how many there are — decide whether an ambiguous reference concerns
+// a particular session at all. Implemented by registry.Registry.
+type AgentFamilyResolver interface {
+	ResolveFamilyIDs(name string) []string
+}
+
 // PromptReferenceExpander resolves "@name" saved-prompt references embedded in
 // an effective prompt and returns both the expanded prompt and the exact
 // server-generated block content. Implemented by promptservice.Service.
@@ -361,6 +371,11 @@ type Service struct {
 
 	// Workflow step getter for prompt building
 	workflowStepGetter WorkflowStepGetter
+
+	// Resolves the agent family names written in configure_session rules onto
+	// canonical agent IDs. Nil-safe: when unset, rule matching falls back to an
+	// exact string comparison.
+	agentFamilyResolver AgentFamilyResolver
 
 	// Prompt reference expander for resolving "@name" saved-prompt
 	// references in the effective workflow-step prompt. Nil-safe: when
@@ -1150,6 +1165,16 @@ func (s *Service) WorkflowStepRequiresCompletionSignal(ctx context.Context, step
 func (s *Service) SetWorkflowStepGetter(getter WorkflowStepGetter) {
 	s.workflowStepGetter = getter
 	s.initWorkflowEngine()
+}
+
+// SetAgentFamilyResolver sets the collaborator that maps the agent family names
+// written in configure_session rules onto canonical agent IDs.
+//
+// If not set: a rule matches only when its agent_name is byte-identical to the
+// session's stored agent family, and no rule can be reported as a typo or as
+// ambiguous because nothing is knowable about an agent family without it.
+func (s *Service) SetAgentFamilyResolver(resolver AgentFamilyResolver) {
+	s.agentFamilyResolver = resolver
 }
 
 // SetPromptReferenceExpander sets the collaborator used to resolve "@name"

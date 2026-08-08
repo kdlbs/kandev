@@ -56,6 +56,31 @@ type mockGitLabMRAutomationService struct {
 	// path, since the goroutine's completion speed is not something a test
 	// can otherwise wait on deterministically.
 	checkpointCalls chan struct{}
+
+	// Auto-fix / auto-merge (this task).
+	snapshot    *gitlab.MRAutomationSnapshot
+	snapshotErr error
+
+	mergedMR   *gitlab.MR
+	mergeErr   error
+	mergeCalls atomic.Int32
+
+	fixAttempts   []gitlab.TaskMRFixAttempt
+	fixAttemptErr error
+
+	refreshedCheckpoints []refreshedMRFixCheckpoint
+	refreshErr           error
+
+	exhaustedCalls []string
+	exhaustedErr   error
+
+	mergeAttempts   []gitlab.TaskMRMergeAttempt
+	mergeAttemptErr error
+}
+
+type refreshedMRFixCheckpoint struct {
+	signature      string
+	checkpointJSON string
 }
 
 func (m *mockGitLabMRAutomationService) GetTaskMRAutomationResponse(ctx context.Context, _ string) (*gitlab.TaskMRAutomationResponse, error) {
@@ -182,6 +207,65 @@ func (m *mockGitLabMRAutomationService) ListTaskMRsByTask(context.Context, strin
 		return nil, m.taskMRsErr
 	}
 	return m.taskMRs, nil
+}
+
+func (m *mockGitLabMRAutomationService) GetMRAutomationSnapshot(context.Context, string, string, string, int) (*gitlab.MRAutomationSnapshot, error) {
+	if m.snapshotErr != nil {
+		return nil, m.snapshotErr
+	}
+	return m.snapshot, nil
+}
+
+func (m *mockGitLabMRAutomationService) MergeMRForAutomation(context.Context, string, string, string, int) (*gitlab.MR, error) {
+	m.mergeCalls.Add(1)
+	if m.mergeErr != nil {
+		return nil, m.mergeErr
+	}
+	return m.mergedMR, nil
+}
+
+func (m *mockGitLabMRAutomationService) RecordTaskMRFixAttempt(_ context.Context, attempt gitlab.TaskMRFixAttempt) error {
+	if m.fixAttemptErr != nil {
+		return m.fixAttemptErr
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.fixAttempts = append(m.fixAttempts, attempt)
+	return nil
+}
+
+func (m *mockGitLabMRAutomationService) RefreshTaskMRFixCheckpoint(_ context.Context, _, _, _ string, _ int, signature, checkpointJSON string) error {
+	if m.refreshErr != nil {
+		return m.refreshErr
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.refreshedCheckpoints = append(m.refreshedCheckpoints, refreshedMRFixCheckpoint{signature: signature, checkpointJSON: checkpointJSON})
+	return nil
+}
+
+func (m *mockGitLabMRAutomationService) MarkTaskMRAutoFixExhausted(_ context.Context, taskID, _, _ string, _ int, _ string) error {
+	if m.exhaustedErr != nil {
+		return m.exhaustedErr
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.exhaustedCalls = append(m.exhaustedCalls, taskID)
+	return nil
+}
+
+func (m *mockGitLabMRAutomationService) RecordTaskMRMergeAttempt(_ context.Context, attempt gitlab.TaskMRMergeAttempt) error {
+	if m.mergeAttemptErr != nil {
+		return m.mergeAttemptErr
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.mergeAttempts = append(m.mergeAttempts, attempt)
+	return nil
+}
+
+func (m *mockGitLabMRAutomationService) ClearTaskMRAutomationError(context.Context, string, string, string, int) error {
+	return nil
 }
 
 // --- AC10-AC16, AC35: pure decision function ---

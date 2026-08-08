@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -133,11 +134,21 @@ func (s *Service) resolveWorkflowSessionConfigTarget(
 			"This step's session settings were not applied because the original agent family is unknown.")
 		return sessionConfigurationTarget{}, false
 	}
-	rule := matchingConfigureSessionRule(rules, agentName)
-	if rule == nil || rule.Operation == wfmodels.ConfigureSessionKeep {
+	selection := s.selectConfigureSessionRule(rules, agentName)
+	if selection.rule == nil {
+		// A rule for a real but different agent is a deliberate no-op and stays
+		// silent. Every other way of not applying a rule is a workflow-authoring
+		// problem, and dropping those silently is what let per-step model
+		// selection fail unnoticed.
+		if selection.warning != "" {
+			s.warnWorkflowSessionConfig(ctx, taskID, session.ID, step.ID, selection.warning)
+		}
 		return sessionConfigurationTarget{}, false
 	}
-	target, ok := sessionConfigurationTargetForRule(session, *rule)
+	if selection.rule.Operation == wfmodels.ConfigureSessionKeep {
+		return sessionConfigurationTarget{}, false
+	}
+	target, ok := sessionConfigurationTargetForRule(session, *selection.rule)
 	if !ok {
 		s.warnWorkflowSessionConfig(ctx, taskID, session.ID, step.ID,
 			"This step requested restoring the original session settings, but no immutable original configuration is available.")
@@ -146,13 +157,156 @@ func (s *Service) resolveWorkflowSessionConfigTarget(
 	return target, true
 }
 
-func matchingConfigureSessionRule(rules []wfmodels.ConfigureSessionRule, agentName string) *wfmodels.ConfigureSessionRule {
+// configureSessionRuleSelection is the outcome of choosing the rule that governs
+// a session's agent family. A nil rule with an empty warning is the one silent
+// outcome: the step deliberately configures some other agent.
+type configureSessionRuleSelection struct {
+	rule    *wfmodels.ConfigureSessionRule
+	warning string
+}
+
+// selectConfigureSessionRule returns the single rule governing the session's
+// agent family. Workflow rules are hand-authored and name families the way a
+// person writes them ("Claude") while sessions store the canonical agent ID
+// ("claude-acp"), so both sides are resolved before comparison.
+//
+// Resolution makes two authoring mistakes reachable that a raw string comparison
+// could not express, and neither may be guessed at: a reference that names more
+// than one installed agent, and two textually different rules that turn out to
+// name the same family. Both refuse to apply anything and say why, because
+// picking one silently is indistinguishable from the defect this resolution
+// exists to fix.
+//
+// Both refusals are scoped to rules that could actually govern this session. A
+// step configuring several agents carries rules this session will never match,
+// and a mistake in one of those is not a reason to drop the rule that does
+// match — that would turn one colliding agent name into per-step model
+// selection silently failing for every agent at once.
+func (s *Service) selectConfigureSessionRule(
+	rules []wfmodels.ConfigureSessionRule,
+	agentName string,
+) configureSessionRuleSelection {
+	sessionFamily, sessionAmbiguous := s.resolveSessionAgentFamily(agentName)
+	if sessionAmbiguous {
+		return configureSessionRuleSelection{warning: ambiguousAgentFamilyWarning(agentName)}
+	}
+
+	matched := make([]*wfmodels.ConfigureSessionRule, 0, 1)
+	anyKnownFamily := false
 	for index := range rules {
-		if rules[index].AgentName == agentName {
-			return &rules[index]
+		switch s.classifyRuleAgentFamily(rules[index].AgentName, sessionFamily) {
+		case ruleGovernsSession:
+			anyKnownFamily = true
+			matched = append(matched, &rules[index])
+		case ruleAmbiguousForSession:
+			return configureSessionRuleSelection{warning: ambiguousAgentFamilyWarning(rules[index].AgentName)}
+		case ruleNamesOtherAgents:
+			anyKnownFamily = true
+		case ruleNamesNothingKnown:
 		}
 	}
-	return nil
+
+	switch {
+	case len(matched) > 1:
+		return configureSessionRuleSelection{warning: conflictingRulesWarning(len(matched), sessionFamily)}
+	case len(matched) == 1:
+		return configureSessionRuleSelection{rule: matched[0]}
+	case !anyKnownFamily:
+		return configureSessionRuleSelection{warning: noKnownAgentFamilyWarning}
+	default:
+		return configureSessionRuleSelection{}
+	}
+}
+
+// ruleAgentFamilyVerdict is how one rule's agent reference relates to the agent
+// family of the session being configured.
+type ruleAgentFamilyVerdict int
+
+const (
+	// ruleNamesNothingKnown: the reference names no agent the registry knows and
+	// is not the session's family verbatim either.
+	ruleNamesNothingKnown ruleAgentFamilyVerdict = iota
+	// ruleGovernsSession: the reference names this session's family.
+	ruleGovernsSession
+	// ruleNamesOtherAgents: the reference names one or more known agents, none of
+	// them this session's family. A deliberate no-op for this step.
+	ruleNamesOtherAgents
+	// ruleAmbiguousForSession: the reference names several agents and this
+	// session's family is one of them, so which agent the author meant decides
+	// this session's model and cannot be guessed.
+	ruleAmbiguousForSession
+)
+
+const noKnownAgentFamilyWarning = "This step's session settings were not applied because its " +
+	"configure_session rules name no known agent."
+
+func ambiguousAgentFamilyWarning(name string) string {
+	return fmt.Sprintf("This step's session settings were not applied because %q matches more than one "+
+		"agent installed here. Name the agent by its exact ID in the workflow rule.", name)
+}
+
+func conflictingRulesWarning(count int, family string) string {
+	return fmt.Sprintf("This step's session settings were not applied because %d configure_session rules "+
+		"target the same agent (%s). Keep one rule per agent.", count, family)
+}
+
+// resolveSessionAgentFamily maps the session's stored agent family onto its
+// canonical ID, reporting whether the stored value is itself ambiguous. Sessions
+// store the canonical ID, so this is normally an exact hit; without a resolver
+// wired, or for a value the registry does not know, the trimmed input is
+// returned so rule matching degrades to the exact comparison this used to
+// perform.
+func (s *Service) resolveSessionAgentFamily(name string) (string, bool) {
+	trimmed := strings.TrimSpace(name)
+	if s.agentFamilyResolver == nil {
+		return trimmed, false
+	}
+	switch candidates := s.agentFamilyResolver.ResolveFamilyIDs(trimmed); len(candidates) {
+	case 0:
+		return trimmed, false
+	case 1:
+		return candidates[0], false
+	default:
+		return trimmed, true
+	}
+}
+
+// classifyRuleAgentFamily reports how one rule's agent reference relates to the
+// session's already-canonical family. An unrecognized reference falls back to an
+// exact comparison, so it can still match an equally unrecognized session family
+// the way it did before resolution existed.
+func (s *Service) classifyRuleAgentFamily(ruleAgentName, sessionFamily string) ruleAgentFamilyVerdict {
+	trimmed := strings.TrimSpace(ruleAgentName)
+	if s.agentFamilyResolver == nil {
+		// Nothing is knowable about an agent family without a resolver, so a
+		// reference that does not match verbatim is treated as naming some other
+		// agent rather than reported to the user as a workflow typo.
+		return verbatimRuleVerdict(trimmed, sessionFamily)
+	}
+	candidates := s.agentFamilyResolver.ResolveFamilyIDs(trimmed)
+	switch {
+	case len(candidates) == 0:
+		if trimmed == sessionFamily {
+			return ruleGovernsSession
+		}
+		return ruleNamesNothingKnown
+	case len(candidates) == 1:
+		if candidates[0] == sessionFamily {
+			return ruleGovernsSession
+		}
+		return ruleNamesOtherAgents
+	case slices.Contains(candidates, sessionFamily):
+		return ruleAmbiguousForSession
+	default:
+		return ruleNamesOtherAgents
+	}
+}
+
+func verbatimRuleVerdict(trimmed, sessionFamily string) ruleAgentFamilyVerdict {
+	if trimmed == sessionFamily {
+		return ruleGovernsSession
+	}
+	return ruleNamesOtherAgents
 }
 
 func (s *Service) persistWorkflowSessionConfigBeforeStart(
