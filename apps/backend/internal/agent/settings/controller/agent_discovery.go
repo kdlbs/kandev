@@ -475,9 +475,13 @@ func resolveDefaultModel(agentConfig agents.Agent, _ string) (string, bool, erro
 		return "passthrough", true, nil
 	}
 	// Mock agent is not probed (not an InferenceAgent) but needs a concrete
-	// model for E2E tests that exercise the ModelSelector UI.
+	// model for E2E tests that exercise the ModelSelector UI. It must be one
+	// of the models the mock agent actually advertises (mock-fast /
+	// mock-smart): the no-silent-model-fallback policy fails session start
+	// explicitly when the profile model is absent from the advertised list,
+	// and "mock-default" is not advertised.
 	if agentConfig.ID() == "mock-agent" {
-		return "mock-default", false, nil
+		return "mock-fast", false, nil
 	}
 	return "", false, nil
 }

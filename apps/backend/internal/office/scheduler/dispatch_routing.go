@@ -71,6 +71,15 @@ func (ss *SchedulerService) DispatchWithRouting(
 		}
 		return false, true, nil
 	}
+	// One-shot post-start fallback: when the profile configured an explicit
+	// fallback model and the run failed mid-session, the next dispatch
+	// launches ONLY the fallback model on the same provider. The override
+	// is consumed before the launch, so a second failure escalates to the
+	// terminal failure path instead of retrying again (or falling through
+	// to the candidate list — no implicit model fallback).
+	if run.FallbackModelOverride != nil && *run.FallbackModelOverride != "" {
+		return ss.dispatchForcedFallback(ctx, run, agent, launch)
+	}
 	excluded := excludedFromAttempts(prior, run.RouteCycleBaselineSeq)
 	res, err := ss.resolver.Resolve(ctx, agent.WorkspaceID, *agent,
 		routing.ResolveOptions{
@@ -98,6 +107,67 @@ func (ss *SchedulerService) DispatchWithRouting(
 		return true, false, nil
 	}
 	return false, true, nil
+}
+
+// forcedFallbackCandidate reconstructs the single candidate a one-shot
+// fallback-model retry should launch: the run's resolved provider and
+// execution profile, with the fallback model substituted. Returns nil when
+// the run has no resolved route to reuse.
+func forcedFallbackCandidate(run *models.Run) *routing.Candidate {
+	if run == nil || run.ResolvedProviderID == nil || run.ResolvedExecutionProfileID == nil ||
+		run.FallbackModelOverride == nil || *run.FallbackModelOverride == "" {
+		return nil
+	}
+	tier := ""
+	if run.RequestedTier != nil {
+		tier = *run.RequestedTier
+	}
+	return &routing.Candidate{
+		ExecutionProfileID: *run.ResolvedExecutionProfileID,
+		ProviderID:         routing.ProviderID(*run.ResolvedProviderID),
+		Model:              *run.FallbackModelOverride,
+		Tier:               routing.Tier(tier),
+	}
+}
+
+// dispatchForcedFallback launches the one-shot fallback-model retry for a
+// run carrying a FallbackModelOverride. The override is cleared before the
+// launch (consume-once): a launch failure is terminal — the run escalates
+// to the caller's failure path with an actionable message, never re-queued
+// into the candidate list.
+func (ss *SchedulerService) dispatchForcedFallback(
+	ctx context.Context, run *models.Run, agent *models.AgentInstance,
+	launch LaunchContext,
+) (bool, bool, error) {
+	forced := forcedFallbackCandidate(run)
+	if forced == nil {
+		return false, false, fmt.Errorf(
+			"dispatch: fallback override present without resolved route for run %s", run.ID)
+	}
+	// Only consume the override once the candidate is known to be valid —
+	// clearing it before the nil check would leave the run without an
+	// override, unqueued, and unfailed.
+	if err := ss.repo.ClearRunFallbackModelOverride(ctx, run.ID); err != nil {
+		return false, false, err
+	}
+	seq, err := ss.recordAttemptStart(ctx, run, *forced, forced.Tier)
+	if err != nil {
+		return false, false, err
+	}
+	if err := ss.launchCandidate(ctx, run.ID, agent.ID, *forced, launch); err != nil {
+		classified := classifyLaunchError(string(forced.ProviderID), err)
+		now := time.Now().UTC()
+		_ = ss.finishAttempt(ctx, run.ID, seq, RouteAttemptOutcomeFailedOther, classified, now)
+		if routingerr.IsAvailabilityCode(classified.Code) {
+			return false, false, fmt.Errorf(
+				"dispatch: fallback model %q failed for run %s: %w", forced.Model, run.ID,
+				fmt.Errorf("%s: %w", routingerr.ModelUnavailableMessage(forced.Model), err))
+		}
+		return false, false, fmt.Errorf(
+			"dispatch: fallback model %q failed for run %s: %w", forced.Model, run.ID, err)
+	}
+	launched, _, err := ss.handleLaunchSuccess(ctx, run, agent, *forced)
+	return launched, false, err
 }
 
 // excludedFromAttempts returns the providers that have already failed

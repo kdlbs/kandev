@@ -201,6 +201,7 @@ func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, even
 		SupportsPromptQueueing:  event.SupportsPromptQueueing,
 		AuthMethods:             event.AuthMethods,
 		CurrentModelID:          event.CurrentModelID,
+		FallbackModel:           event.FallbackModel,
 		SessionModels:           event.SessionModels,
 		ConfigOptions:           event.ConfigOptions,
 		ConfigBaselineCandidate: event.ConfigBaselineCandidate,

@@ -84,6 +84,8 @@ func (r *Repository) migrateProviderRouting() {
 
 	r.migrate.Apply("runs.resolved_execution_profile_id",
 		`ALTER TABLE runs ADD COLUMN resolved_execution_profile_id TEXT`)
+	r.migrate.Apply("runs.fallback_model",
+		`ALTER TABLE runs ADD COLUMN fallback_model TEXT`)
 	r.migrate.Apply("office_run_route_attempts.execution_profile_id",
 		`ALTER TABLE office_run_route_attempts ADD COLUMN execution_profile_id TEXT NOT NULL DEFAULT ''`)
 

@@ -324,18 +324,20 @@ func (sm *SessionManager) InitializeAndPrompt(
 	attachments []MessageAttachment,
 	mcpServers []agentctltypes.McpServer,
 	markReady func(executionID string) error,
-	profileModel string,
+	startModelPolicy StartModelPolicy,
 	profileMode string,
 	profileConfigOptions map[string]string,
 ) error {
 	// Preserve the legacy call contract for direct callers: its supplied
-	// configuration is the final runtime layer. The lifecycle manager uses the
-	// layered entry point below so profile settings can be snapshotted first.
+	// configuration rides the profile layer (no separate runtime override).
+	// The lifecycle manager uses the layered entry point so profile settings
+	// can be snapshotted first.
 	return sm.InitializeAndPromptWithLayers(
 		ctx, execution, agentConfig, taskDescription, attachments, mcpServers,
 		markReady,
+		startModelPolicy.Model, profileMode, profileConfigOptions,
 		"", "", nil,
-		profileModel, profileMode, profileConfigOptions,
+		startModelPolicy,
 	)
 }
 
@@ -356,6 +358,7 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	runtimeModel string,
 	runtimeMode string,
 	runtimeConfigOptions map[string]string,
+	startModelPolicy StartModelPolicy,
 ) error {
 	ctx, result, err := sm.initializeACPConnection(ctx, execution, agentConfig, mcpServers)
 	if err != nil {
@@ -365,6 +368,40 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	execution.ACPSessionID = result.SessionID
 	execution.sessionInitialized = true
 	providerDefaultConfig := execution.GetModelState()
+
+	// No-silent-model-fallback: decide the effective model up front under the
+	// profile's policy (a gone model fails the launch explicitly unless a
+	// fallback model or the legacy auto-fallback toggle is configured), then
+	// hand the decided model to the layers so it is applied exactly once.
+	// Previously SetModel failures were best-effort — the session continued
+	// on the provider default, which is the implicit switch this feature
+	// eliminates.
+	effectiveModel := profileModel
+	if runtimeModel != "" {
+		effectiveModel = runtimeModel
+	}
+	if startModelPolicy.Model != "" && execution.agentctl != nil {
+		startModelPolicy.Model = effectiveModel
+		appliedModel, usingFallback, policyErr := applyStartModelPolicy(
+			ctx, sm.logger, execution.agentctl,
+			execution.GetModelState(), startModelPolicy,
+		)
+		if policyErr != nil {
+			sm.logger.Error("start model unavailable, failing session start",
+				zap.String("execution_id", execution.ID),
+				zap.Error(policyErr))
+			return policyErr
+		}
+		if usingFallback {
+			sm.publishModelFallbackEvent(execution, result.SessionID, appliedModel)
+			effectiveModel = appliedModel
+		}
+	}
+	// The layers apply the policy-decided model; the runtime override is
+	// neutralized because the decision already accounted for it.
+	profileModel = effectiveModel
+	runtimeModel = ""
+
 	finalConfigID, profileModelApplied, profileModeApplied, profileConfigOptionsApplied := sm.applyProfileSessionLayers(
 		ctx, execution, result.SessionID, profileModel, profileMode, profileConfigOptions,
 	)
@@ -579,6 +616,24 @@ func (sm *SessionManager) publishSettledConfigOptions(
 		ConfigOptions:           live.ConfigOptions,
 		ConfigBaselineCandidate: baselineCandidate.ConfigOptions,
 		Data:                    map[string]any{"config_options_settled": true},
+	})
+}
+
+// publishModelFallbackEvent broadcasts an explicit "using fallback model"
+// signal so the UI can surface why the session is not on the configured
+// start model. The event carries the fallback model id in Data.
+func (sm *SessionManager) publishModelFallbackEvent(
+	execution *AgentExecution,
+	acpSessionID string,
+	fallbackModel string,
+) {
+	if sm.eventPublisher == nil || fallbackModel == "" {
+		return
+	}
+	sm.eventPublisher.PublishAgentStreamEvent(execution, agentctl.AgentEvent{
+		Type:          streams.EventTypeSessionModelFallback,
+		SessionID:     acpSessionID,
+		FallbackModel: fallbackModel,
 	})
 }
 

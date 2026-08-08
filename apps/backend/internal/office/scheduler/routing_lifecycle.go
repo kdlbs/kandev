@@ -43,6 +43,29 @@ func (ss *SchedulerService) HandlePostStartFailure(
 	if !classified.FallbackAllowed {
 		return false, nil
 	}
+	// No-silent-model-fallback gate. Three profile modes:
+	//   - strict (no toggle, no fallback): escalate — the run fails
+	//     explicitly with an actionable message (caller's HandleAgentFailure
+	//     path). The run is NOT re-dispatched to another model/provider.
+	//   - fallback-model: re-dispatch ONCE with the explicit fallback model
+	//     on the same provider (runs.fallback_model override).
+	//   - auto-fallback toggle: legacy behavior (next candidate).
+	if !agent.AutoFallback && agent.FallbackModel == "" {
+		ss.logger.Info("post-start failure not eligible for fallback (strict mode), escalating",
+			zap.String("run_id", run.ID),
+			zap.String("error_code", string(classified.Code)))
+		return false, nil
+	}
+	// The in-flight attempt is already on the profile's fallback model (the
+	// one-shot override was consumed by dispatchForcedFallback). A failure on
+	// the fallback itself must escalate to the terminal failure path — never
+	// re-dispatch the same fallback model a second time.
+	if !agent.AutoFallback && candidate.Model == agent.FallbackModel {
+		ss.logger.Info("post-start failure on the fallback model itself, escalating",
+			zap.String("run_id", run.ID),
+			zap.String("fallback_model", agent.FallbackModel))
+		return false, nil
+	}
 	if err := ss.applyPostStartFallback(ctx, run, agent, candidate, classified); err != nil {
 		return false, err
 	}
@@ -73,7 +96,10 @@ func (ss *SchedulerService) inflightCandidate(
 }
 
 // applyPostStartFallback updates the attempt + health rows and re-queues
-// the run. The next dispatch picks the next candidate via the resolver's
+// the run. When the profile configured an explicit fallback model, the
+// requeue carries a one-shot fallback_model override so the next dispatch
+// launches only that model on the same provider; otherwise (auto-fallback
+// toggle) the next dispatch picks the next candidate via the resolver's
 // ExcludeProviders option.
 func (ss *SchedulerService) applyPostStartFallback(
 	ctx context.Context, run *models.Run,
@@ -88,6 +114,11 @@ func (ss *SchedulerService) applyPostStartFallback(
 	if err := ss.finishAttempt(ctx, run.ID, run.CurrentRouteAttemptSeq,
 		RouteAttemptOutcomeFailedProviderUnavail, classified, now); err != nil {
 		return err
+	}
+	if !agent.AutoFallback && agent.FallbackModel != "" {
+		if err := ss.repo.SetRunFallbackModelOverride(ctx, run.ID, agent.FallbackModel); err != nil {
+			return err
+		}
 	}
 	return ss.RequeueForNextCandidate(ctx, run.ID)
 }

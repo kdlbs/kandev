@@ -285,7 +285,7 @@ func TestInitializeAndPrompt_StreamBeforeInitialize(t *testing.T) {
 
 	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
 		return nil
-	}, "", "", nil)
+	}, StartModelPolicy{}, "", nil)
 	if err != nil {
 		t.Fatalf("InitializeAndPrompt failed: %v", err)
 	}
@@ -366,7 +366,7 @@ func TestInitializeAndPrompt_AppliesProfileConfigOptions(t *testing.T) {
 	defer cancel()
 	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
 		return nil
-	}, "sonnet", "plan", map[string]string{
+	}, StartModelPolicy{Model: "sonnet"}, "plan", map[string]string{
 		"effort": "high",
 		"model":  "ignored",
 		"mode":   "ignored",
@@ -811,7 +811,7 @@ func TestInitializeAndPrompt_StreamTimeout(t *testing.T) {
 
 	err = sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
 		return nil
-	}, "", "", nil)
+	}, StartModelPolicy{}, "", nil)
 
 	// Should fail because stream couldn't connect and Initialize fails
 	if err == nil {
@@ -866,7 +866,7 @@ func TestInitializeAndPrompt_WithTaskDescription(t *testing.T) {
 
 	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "Build a feature", nil, nil, func(executionID string) error {
 		return nil
-	}, "", "", nil)
+	}, StartModelPolicy{}, "", nil)
 	if err != nil {
 		t.Fatalf("InitializeAndPrompt failed: %v", err)
 	}
@@ -934,7 +934,7 @@ func TestInitializeAndPrompt_NoStreamManager(t *testing.T) {
 	// But it should NOT panic due to nil streamManager.
 	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
 		return nil
-	}, "", "", nil)
+	}, StartModelPolicy{}, "", nil)
 
 	// Expect error because Initialize call over WS will fail (stream not connected)
 	if err == nil {

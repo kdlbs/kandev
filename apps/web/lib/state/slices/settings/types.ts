@@ -53,6 +53,12 @@ export type AgentProfileOption = {
   agent_id: string;
   agent_name: string;
   cli_passthrough: boolean;
+  /** Configured start model (ACP model ID). Empty = agent default. */
+  model?: string;
+  /** Optional explicit fallback model; ignored when auto_fallback is on. */
+  fallback_model?: string;
+  /** Legacy automatic-fallback opt-in. */
+  auto_fallback?: boolean;
   /**
    * False hides the profile from task/session creation pickers. Existing
    * sessions keep their labels and the profile stays editable in settings.
@@ -77,6 +83,9 @@ export function toAgentProfileOption(
   agent: Pick<Agent, "id" | "name" | "capability_status" | "capability_error">,
   profile: Pick<AgentProfile, "id" | "agentDisplayName" | "name"> & {
     cliPassthrough?: boolean;
+    model?: string;
+    fallbackModel?: string;
+    autoFallback?: boolean;
     enabled?: boolean;
   },
 ): AgentProfileOption {
@@ -86,6 +95,9 @@ export function toAgentProfileOption(
     agent_id: agent.id,
     agent_name: agent.name,
     cli_passthrough: profile.cliPassthrough ?? false,
+    model: profile.model ?? undefined,
+    fallback_model: profile.fallbackModel ?? undefined,
+    auto_fallback: profile.autoFallback ?? undefined,
     enabled: profile.enabled ?? true,
     capability_status: agent.capability_status,
     capability_error: agent.capability_error,

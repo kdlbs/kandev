@@ -1,7 +1,9 @@
 "use client";
 
 import { useMemo } from "react";
-import { IconGitBranch, IconTerminal2 } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
+import { IconAlertTriangle, IconGitBranch, IconTerminal2 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import type {
@@ -11,15 +13,15 @@ import type {
   Executor,
   ExecutorProfile,
 } from "@/lib/types/http";
+import type { AvailableAgent } from "@/lib/types/http-agents";
 import type { AgentProfileOption } from "@/lib/state/slices";
+import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
 import { formatUserHomePath, truncateRepoPath } from "@/lib/utils";
 import { getExecutorIcon } from "@/lib/executor-icons";
 import { AgentLogo } from "@/components/agent-logo";
 import { getCapabilityWarning } from "@/lib/capability-warning";
 import { buildBranchKeywords } from "./task-create-dialog-pill";
-import { useTranslation } from "react-i18next";
-import { t } from "@/lib/i18n";
 
 type OptionItem = {
   value: string;
@@ -120,8 +122,16 @@ export function useBranchOptions(branchOptionsRaw: Branch[]) {
   }, [branchOptionsRaw]);
 }
 
+// advertisedModelIDs returns the currently advertised model IDs for an agent
+// from the host-utility probe cache (empty when the probe has not landed).
+function advertisedModelIDs(availableAgents: AvailableAgent[], agentName: string): string[] {
+  const agent = availableAgents.find((a) => a.name === agentName);
+  return agent?.model_config?.available_models?.map((m) => m.id) ?? [];
+}
+
 export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): OptionItem[] {
   const { t } = useTranslation();
+  const { items: availableAgents } = useAvailableAgents();
   return useMemo(() => {
     // Disabled profiles stay in the store (existing sessions keep their
     // labels) but are never offered as a choice for new work.
@@ -132,9 +142,45 @@ export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): Opt
       const profileLabel = parts[1] ?? "";
       const isPassthrough = profile.cli_passthrough === true;
       const warning = getCapabilityWarning(profile.capability_status, profile.capability_error);
+      // No-silent-model-fallback: a profile whose start model is no longer
+      // advertised ("gone") is blocked from selection unless it opted into
+      // an explicit fallback model (shown as a warning) or the legacy
+      // auto-fallback toggle.
+      //
+      // The advertised list is the host-utility probe cache. While it has
+      // not loaded yet (empty list) gone-ness is unknown and deliberately
+      // NOT assumed: nothing is blocked and no warning is shown. The backend
+      // rejects the launch if the model is genuinely unavailable, so this
+      // startup window is cosmetic. A fallback model that is itself gone
+      // does not make the profile selectable — it would promise a switch
+      // SetModel cannot apply, so the profile is blocked like strict mode.
+      const advertised = advertisedModelIDs(availableAgents, profile.agent_name);
+      const startModelGone = Boolean(
+        profile.model && advertised.length > 0 && !advertised.includes(profile.model),
+      );
+      const fallbackGone = Boolean(
+        profile.fallback_model &&
+        advertised.length > 0 &&
+        !advertised.includes(profile.fallback_model),
+      );
+      const autoFallbackOn = profile.auto_fallback === true;
+      const fallbackUsable = Boolean(profile.fallback_model) && !fallbackGone;
+      const blocked = startModelGone && !autoFallbackOn && !fallbackUsable;
+      const fallbackWarning = startModelGone && !autoFallbackOn && fallbackUsable;
+      const disabledReason = blocked
+        ? t("settings:profileStartModelUnavailable", { model: profile.model })
+        : undefined;
+      const fallbackNote = fallbackWarning
+        ? t("settings:profileFallbackWillBeUsed", {
+            model: profile.model,
+            fallback: profile.fallback_model,
+          })
+        : undefined;
       return {
         value: profile.id,
         label: profile.label,
+        disabled: blocked || undefined,
+        disabledReason,
         renderLabel: () => (
           <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
             <span className="flex shrink-0 items-center gap-1.5">
@@ -142,6 +188,12 @@ export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): Opt
               <span>{agentLabel}</span>
               {warning && (
                 <warning.Icon className={`size-3.5 ${warning.color}`} title={warning.title} />
+              )}
+              {fallbackNote && (
+                <IconAlertTriangle
+                  className="size-3.5 shrink-0 text-amber-500"
+                  title={fallbackNote}
+                />
               )}
             </span>
             <span className="flex shrink-0 items-center gap-1.5">
@@ -161,7 +213,7 @@ export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): Opt
         ),
       };
     });
-  }, [agentProfiles]);
+  }, [agentProfiles, availableAgents, t]);
 }
 
 export function useExecutorOptions(executors: Executor[]): OptionItem[] {

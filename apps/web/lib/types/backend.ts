@@ -598,6 +598,16 @@ export type BackendMessageMap = OfficeBackendMessageMap &
       AgentCapabilitiesPayload
     >;
     "session.models_updated": BackendMessage<"session.models_updated", SessionModelsPayload>;
+    "session.model_fallback": BackendMessage<
+      "session.model_fallback",
+      {
+        task_id: string;
+        session_id: string;
+        agent_id: string;
+        fallback_model: string;
+        timestamp: string;
+      }
+    >;
     "session.mcp_status_updated": BackendMessage<
       "session.mcp_status_updated",
       SessionMCPStatusPayload

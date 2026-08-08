@@ -17,6 +17,15 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 )
 
+// Advertised model ids. mock-slow is a delay tier (see delayRange) that E2E
+// fixtures select for slow responses; it must be advertised for the
+// no-silent-model-fallback strict policy to accept it.
+const (
+	modelFast  = "mock-fast"
+	modelSmart = "mock-smart"
+	modelSlow  = "mock-slow"
+)
+
 // logOutput is the writer for log messages (stderr). Tests can override this.
 var logOutput io.Writer = os.Stderr
 
@@ -199,8 +208,13 @@ func mockSessionConfigOptionsForModel(model string) []acp.SessionConfigOption {
 			Id:           "model",
 			Name:         "Model",
 			Options: acp.SessionConfigSelectOptions{Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
-				{Value: "mock-fast", Name: "Mock Fast", Description: ptr("Fast mock model for testing")},
-				{Value: "mock-smart", Name: "Mock Smart", Description: ptr("Smart mock model for testing")},
+				{Value: modelFast, Name: "Mock Fast", Description: ptr("Fast mock model for testing")},
+				{Value: modelSmart, Name: "Mock Smart", Description: ptr("Smart mock model for testing")},
+				// E2E fixtures use "mock-slow" for the slow-response delay tier.
+				// It must be advertised so the no-silent-model-fallback strict
+				// policy (which fails session start when the profile model is
+				// absent from the advertised list) does not reject it.
+				{Value: modelSlow, Name: "Mock Slow", Description: ptr("Slow mock model for testing")},
 			}},
 			Type: "select",
 		}},

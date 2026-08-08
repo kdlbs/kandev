@@ -158,6 +158,44 @@ func (m *Manager) resolveProfileSessionConfig(ctx context.Context, profileID str
 	return info.Model, info.Mode, info.ConfigOptions
 }
 
+// resolveProfileSessionConfigAndPolicy resolves the ACP session config and
+// the no-silent-model-fallback policy from a single ResolveProfile call.
+// Session start needs both, so a shared lookup avoids two DB reads of the
+// same profile per session.
+func (m *Manager) resolveProfileSessionConfigAndPolicy(ctx context.Context, profileID string) (string, string, map[string]string, StartModelPolicy) {
+	if profileID == "" || m.profileResolver == nil {
+		return "", "", nil, StartModelPolicy{}
+	}
+	info, err := m.profileResolver.ResolveProfile(ctx, profileID)
+	if err != nil || info == nil {
+		return "", "", nil, StartModelPolicy{}
+	}
+	return info.Model, info.Mode, info.ConfigOptions, StartModelPolicy{
+		Model:         info.Model,
+		FallbackModel: info.FallbackModel,
+		AutoFallback:  info.AutoFallback,
+	}
+}
+
+// resolveStartModelPolicy resolves the profile's no-silent-model-fallback
+// policy (start model + optional fallback + legacy toggle). Returns a zero
+// policy when the profile cannot be resolved, which the policy helper treats
+// as "no start model configured".
+func (m *Manager) resolveStartModelPolicy(ctx context.Context, profileID string) StartModelPolicy {
+	if profileID == "" || m.profileResolver == nil {
+		return StartModelPolicy{}
+	}
+	info, err := m.profileResolver.ResolveProfile(ctx, profileID)
+	if err != nil || info == nil {
+		return StartModelPolicy{}
+	}
+	return StartModelPolicy{
+		Model:         info.Model,
+		FallbackModel: info.FallbackModel,
+		AutoFallback:  info.AutoFallback,
+	}
+}
+
 // initializeACPSession delegates to SessionManager for full ACP session initialization and prompting.
 // We pass MarkBootReady (not MarkReady) for the no-prompt branches: dispatchInitialPrompt only
 // invokes the callback when there's no taskDescription/attachments to send, which is a *boot*
@@ -168,12 +206,18 @@ func (m *Manager) resolveProfileSessionConfig(ctx context.Context, profileID str
 // profile defaults. This preserves user-selected model and reasoning-effort
 // values across process recovery.
 func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent, taskDescription string, attachments []MessageAttachment, mcpServers []agentctltypes.McpServer) error {
-	profileModel, profileMode, profileConfigOptions := m.resolveProfileSessionConfig(ctx, execution.AgentProfileID)
+	profileModel, profileMode, profileConfigOptions, policy := m.resolveProfileSessionConfigAndPolicy(ctx, execution.AgentProfileID)
 	runtimeModel, runtimeMode, runtimeConfigOptions := m.sessionRuntimeOverrides(ctx, execution)
+	// The effective runtime model (user-selected, persisted session state)
+	// takes precedence over the profile's start model for the session; the
+	// policy still carries the profile's fallback settings so a gone
+	// effective model is handled the same way (InitializeAndPromptWithLayers
+	// resolves the effective model and applies the policy).
 	return m.sessionManager.InitializeAndPromptWithLayers(
 		ctx, execution, agentConfig, taskDescription, attachments, mcpServers, m.MarkBootReady,
 		profileModel, profileMode, profileConfigOptions,
 		runtimeModel, runtimeMode, runtimeConfigOptions,
+		policy,
 	)
 }
 

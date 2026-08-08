@@ -50,6 +50,42 @@ func (r *Repository) SetRunResolvedRoute(
 	return nil
 }
 
+// SetRunFallbackModelOverride records the one-shot fallback-model override
+// for a run. The next dispatch launches ONLY this model on the run's
+// resolved provider, then clears the override (see
+// dispatchForcedFallback in the scheduler).
+func (r *Repository) SetRunFallbackModelOverride(
+	ctx context.Context, runID, model string,
+) error {
+	if model == "" {
+		return fmt.Errorf("run_routing: empty fallback model override")
+	}
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE runs
+		SET fallback_model = ?
+		WHERE id = ?
+	`), model, runID)
+	if err != nil {
+		return fmt.Errorf("run_routing: set fallback model override: %w", err)
+	}
+	return nil
+}
+
+// ClearRunFallbackModelOverride consumes the one-shot fallback-model
+// override so a subsequent failure escalates to the terminal failure path
+// instead of retrying the fallback again.
+func (r *Repository) ClearRunFallbackModelOverride(ctx context.Context, runID string) error {
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE runs
+		SET fallback_model = NULL
+		WHERE id = ?
+	`), runID)
+	if err != nil {
+		return fmt.Errorf("run_routing: clear fallback model override: %w", err)
+	}
+	return nil
+}
+
 // IncrementRouteAttemptSeq atomically bumps the run's
 // current_route_attempt_seq and returns the new value. Used to monotonically
 // number RouteAttempt rows even across post-start fallbacks.

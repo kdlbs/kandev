@@ -76,6 +76,8 @@ func (r *StoreProfileResolver) ResolveProfile(ctx context.Context, profileID str
 		AgentName:                  agent.Name,
 		Model:                      model,
 		Mode:                       profile.Mode,
+		FallbackModel:              profile.FallbackModel,
+		AutoFallback:               profile.AutoFallback,
 		ConfigOptions:              profile.ConfigOptions,
 		AutoApprove:                profile.AutoApprove,
 		DangerouslySkipPermissions: profile.DangerouslySkipPermissions,
