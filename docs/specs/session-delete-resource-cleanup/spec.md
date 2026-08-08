@@ -953,3 +953,80 @@ snapshot isolation is unchanged and correct.
 The round-1/2/3 "should-fix, not blocking" residual list is unchanged and
 still accurate — this round's diff touched only the snapshot query and its
 tests, so nothing on that list was disturbed.
+
+## REVIEW-ROUND: 5
+
+Fresh-context review wave (2026-08-08) ran code-reviewer, security-reviewer,
+and test-supervisor (ksdd subagents) plus a cross-vendor Codex CLI review over
+the two commits that were supposed to close round 4 (`bb76b43f9`,
+`fb6f4e05b`) — a doc-comment correction and one new regression test on
+`GetGitSnapshotsBySession`'s `id DESC` tiebreak, plus a docs-only spec update.
+No production query logic changed this round. **Verdict: no production-bug
+residual. Signaling completion.** All four legs converged on APPROVE/PASS.
+
+### Convergence
+
+- **code-reviewer: APPROVE.** Confirmed the query text at HEAD is
+  byte-identical to what round-4 quoted — only the doc comment changed.
+  Verified the doc comment's factual claims (`id` is `uuid.New().String()` at
+  every insert site, `id TEXT PRIMARY KEY` with no sequence in the schema) and
+  its cross-reference to `UpdateTaskSessionLastReadMessageID`'s identical
+  tradeoff in `session.go`. Re-confirmed round-1/3's lock-ordering and
+  archive-row-exclusion fixes and round-1's ambiguous-error resolution are
+  still intact at HEAD (unmodified this round). One MEDIUM test-rigor
+  observation: `TestGetGitSnapshotsBySession_TiebreaksIdenticalTimestampsStably`'s
+  seed happens to align insertion order with `id` lexical order, so in
+  principle the "drop `, id DESC`" mutant could pass for an incidental reason
+  (index/rowid-order preservation) rather than because the test genuinely
+  exercises `id DESC`. Settled empirically below, not left as a live gap.
+- **security-reviewer: APPROVE, no findings.** Diff confirmed auth/write-path
+  clean (comment + read-only test + docs only). Re-verified auth-first
+  ordering in `DeleteSession` (`task_operations.go:2726-2729`) is untouched
+  and still runs before any state read/mutation. New test uses an isolated
+  per-test SQLite DB (`t.TempDir()`-backed); literal test IDs are never
+  parsed as UUIDs downstream. No secrets/PII in the new test data or comment.
+- **test-supervisor: PASS.** Actually executed both mutants test-supervisor
+  round-4 said should be caught, against the real production query: dropping
+  `, id DESC` entirely, and flipping it to `id ASC`. Both fail the new test
+  (verbatim `go test` output recorded). This directly settles code-reviewer's
+  theoretical concern above — empirically, dropping the tiebreak returns
+  insertion order (`[id-a, id-b]`), not the coincidentally-matching
+  `[id-b, id-a]` code-reviewer worried an incidental mechanism might produce,
+  so the test's exact-order assertion at call 0 is genuinely load-bearing.
+  Also verified the two seeded rows produce a real `created_at` tie in the
+  stored column (not merely a same-second one), confirmed the test is not
+  flaky (`-race -count=20`), and confirmed the docstring's claims are honest
+  (does not claim "newer row wins," only stable/repeatable order matching
+  `id DESC`). Full package green at HEAD; changed-file lint clean.
+- **Codex (cross-vendor): PASS, no [P1] findings.** Independently reproduced
+  the SQLite query plan and confirmed both stated mutants fail the new test.
+  Confirmed no production behavior change. Two [P2] advisories, both
+  cosmetic: this file said "commit pending" for an already-landed commit
+  (fixed by this entry existing), and the doc comment's claim that
+  SQLite/Postgres portability "rules out" a monotonic column is slightly
+  overstated versus "would require disproportionate schema/dialect work" —
+  noted, not blocking, since it doesn't affect the corrected ordering
+  contract's correctness.
+
+### Residual (test-rigor and cosmetic only, not blocking)
+
+- test-supervisor should-fix: the new test's 5-repeated-call loop carries no
+  mutation-killing power on its own (a stable-but-wrong order would also pass
+  it) — the exact-order assertion at call 0 is what's load-bearing; a future
+  edit that trims the "redundant"-looking exact check while keeping the loop
+  would silently reopen the round-4 gap. Suggest an inline comment marking it.
+- `getGitSnapshotByOrder`/`GetFirstGitSnapshot` (`git_snapshots.go:126-134`)
+  still carries the untiebroken pattern, deliberately deferred per round 4 —
+  the deferral lives only in this spec, not at the code site, so a future
+  fresh-context reviewer will re-find it as new. A one-line comment there
+  would end the cycle.
+- Codex's [P2] doc-comment wording nit above.
+- Line-number drift in this file's own citations (e.g. round-4's reference to
+  `git_snapshots.go:300` is now `:311` after the comment expansion) —
+  cosmetic, and why findings in this round anchor on symbol names.
+- The round-1/2/3 should-fix residual list (mixed shared+exclusive
+  multi-worktree test against real reference counting, both Invariant
+  scenarios untested end-to-end, etc.) is unchanged — this round's diff did
+  not touch any of that surface.
+
+None of the above is a production defect. Routing to Create PR.
