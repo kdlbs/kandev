@@ -18,9 +18,13 @@ MAKE := make
 ifeq ($(OS),Windows_NT)
   RM = cmd /c del /s /q
   RMDIR = cmd /c rmdir /s /q
+  # Go emits a `.exe` for GOOS=windows regardless of the calling shell, so
+  # native cmd/PowerShell AND Git Bash both need it (mirrors apps/backend/Makefile).
+  EXE = .exe
 else
   RM = rm -f
   RMDIR = rm -rf
+  EXE =
 endif
 
 # stderr redirect for $(shell ...) probes. Keyed on $(OS)$(MSYSTEM) rather than
@@ -185,14 +189,10 @@ endif
 
 .PHONY: dev
 dev: doctor
-	@echo "Building remote agentctl helpers..."
-	@$(MAKE) -C $(BACKEND_DIR) build-agentctl-remote
-ifeq ($(OS),Windows_NT)
-	@echo "Building winjob (Ctrl-C-safe wrapper for Windows)..."
-	@$(MAKE) -C $(BACKEND_DIR) build-winjob
-endif
-	@echo "Launching via CLI (auto ports)..."
-	@cd $(APPS_DIR) && $(PNPM) -C cli dev -- dev $(DEV_FLAGS)
+	@echo "Building backend and remote agentctl helpers..."
+	@$(MAKE) -C $(BACKEND_DIR) build build-agentctl-remote
+	@cp $(BACKEND_DIR)/bin/kandev$(EXE) $(BACKEND_DIR)/bin/kandev-launcher$(EXE)
+	@exec $(BACKEND_DIR)/bin/kandev-launcher$(EXE) dev $(DEV_FLAGS)
 
 .PHONY: dev-prod-db
 dev-prod-db: export KANDEV_DATABASE_PATH := $(HOME)/.kandev/data/kandev.db
@@ -647,7 +647,9 @@ typecheck-web:
 .PHONY: typecheck
 typecheck:
 	@printf "$(CYAN)Type-checking all apps...$(RESET)\n"
-	@cd $(APPS_DIR) && $(PNPM) -r exec tsc -p tsconfig.json --noEmit
+	# apps/cli has no tsconfig (publish-only shim), so the workspace must be
+	# listed explicitly — add new TypeScript packages here.
+	@cd $(APPS_DIR) && $(PNPM) -r --filter @kandev/web --filter @kandev/desktop --filter @kandev/theme --filter @kandev/types --filter @kandev/ui exec tsc -p tsconfig.json --noEmit
 
 #
 # Cleanup

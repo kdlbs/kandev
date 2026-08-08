@@ -11,6 +11,7 @@ import (
 
 type portConfig struct {
 	BackendPort  int
+	WebPort      int
 	AgentctlPort int
 	BackendURL   string
 }
@@ -19,6 +20,8 @@ const (
 	backendPortFlag      = "--port"
 	backendPortEnv       = "KANDEV_BACKEND_PORT"
 	legacyBackendPortEnv = "KANDEV_PORT"
+	webPortFlag          = "--web-internal-port"
+	webPortEnv           = "KANDEV_WEB_PORT"
 )
 
 func resolvePorts(opts Options) (int, error) {
@@ -37,6 +40,15 @@ func resolvePorts(opts Options) (int, error) {
 	return backend, nil
 }
 
+// resolveWebPort resolves the dev-mode web port: the --web-internal-port flag
+// beats KANDEV_WEB_PORT, and 0 means "unset".
+func resolveWebPort(opts Options) (int, error) {
+	if opts.WebPort != 0 {
+		return opts.WebPort, nil
+	}
+	return envPort(webPortEnv)
+}
+
 func backendPortSource(opts Options) string {
 	if opts.BackendPort != 0 {
 		return backendPortFlag
@@ -46,6 +58,16 @@ func backendPortSource(opts Options) string {
 	}
 	if _, ok := os.LookupEnv(legacyBackendPortEnv); ok {
 		return legacyBackendPortEnv
+	}
+	return ""
+}
+
+func webPortSource(opts Options) string {
+	if opts.WebPort != 0 {
+		return webPortFlag
+	}
+	if _, ok := os.LookupEnv(webPortEnv); ok {
+		return webPortEnv
 	}
 	return ""
 }
@@ -62,7 +84,23 @@ func envPort(name string) (int, error) {
 	return n, nil
 }
 
+// pickPorts resolves the start/run port pair (backend + agentctl). The web
+// port selection is dev-only: the picker runs for shared collision handling,
+// then the web port is dropped so start/run never emit KANDEV_WEB_INTERNAL_URL.
 func pickPorts(backendPort int, source string) (portConfig, error) {
+	cfg, err := pickDevPorts(backendPort, source, 0, "")
+	if err != nil {
+		return portConfig{}, err
+	}
+	cfg.WebPort = 0
+	return cfg, nil
+}
+
+// pickDevPorts resolves the backend, web, and agentctl ports. Explicitly
+// requested ports must be bindable or the launch fails hard naming the port
+// and its source (flag vs. env); omitted ports fall back to the preferred
+// value, then a random free port. The three ports are guaranteed distinct.
+func pickDevPorts(backendPort int, backendSource string, webPort int, webSource string) (portConfig, error) {
 	used := map[int]bool{}
 	backend := backendPort
 	if backend == 0 {
@@ -73,18 +111,39 @@ func pickPorts(backendPort int, source string) (portConfig, error) {
 		backend = p
 	} else if !canBind(backend) {
 		sourceSuffix := ""
-		if source != "" {
-			sourceSuffix = fmt.Sprintf(" from %s", source)
+		if backendSource != "" {
+			sourceSuffix = fmt.Sprintf(" from %s", backendSource)
 		}
 		return portConfig{}, fmt.Errorf("backend port %d%s is already in use", backend, sourceSuffix)
 	}
 	used[backend] = true
+
+	web := webPort
+	switch {
+	case web == 0:
+		p, err := pickAvailablePortExcept(defaultWebPort, used)
+		if err != nil {
+			return portConfig{}, err
+		}
+		web = p
+	case used[web]:
+		return portConfig{}, fmt.Errorf("web port %d conflicts with the backend port", web)
+	case !canBind(web):
+		sourceSuffix := ""
+		if webSource != "" {
+			sourceSuffix = fmt.Sprintf(" from %s", webSource)
+		}
+		return portConfig{}, fmt.Errorf("web port %d%s is already in use", web, sourceSuffix)
+	}
+	used[web] = true
+
 	agentctl, err := pickAvailablePortExcept(defaultAgentctlPort, used)
 	if err != nil {
 		return portConfig{}, err
 	}
 	return portConfig{
 		BackendPort:  backend,
+		WebPort:      web,
 		AgentctlPort: agentctl,
 		BackendURL:   fmt.Sprintf("http://localhost:%d", backend),
 	}, nil

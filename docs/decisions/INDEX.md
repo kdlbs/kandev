@@ -129,3 +129,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-05-nested-submodules-as-repository-scopes | [Model Nested Submodules as Repository Scopes](2026-08-05-nested-submodules-as-repository-scopes.md) | accepted | backend, frontend, protocol | 2026-08-05 |
 | 2026-08-05-homebrew-remote-helper-audit | [Preserve Remote Helpers in Homebrew Installs](2026-08-05-homebrew-remote-helper-audit.md) | accepted | infra, workflow | 2026-08-05 |
 | 2026-08-07-claude-allowlist-label-bridge | [Use the Claude Allowlist as a Trusted Preview Gate](2026-08-07-claude-allowlist-label-bridge.md) | accepted | infra, workflow, security | 2026-08-07 |
+| 2026-08-08-go-launcher-owns-all-launch-modes | [The Go Launcher Owns Every Entrypoint; apps/cli Is a Publish-Only Shim](2026-08-08-go-launcher-owns-all-launch-modes.md) | accepted | backend, cli, infra | 2026-08-08 |
