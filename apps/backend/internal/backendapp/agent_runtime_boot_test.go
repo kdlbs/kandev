@@ -31,6 +31,7 @@ func TestBootInitialStateHydratesAgentRuntimeAvailability(t *testing.T) {
 
 func TestBootInitialStateDoesNotExposeRuntimeToUnauthenticatedVisitors(t *testing.T) {
 	availability := client.NewAvailability(nil, testLogger(t))
+	availability.MarkAvailable()
 	availability.MarkUnavailable()
 	request := httptest.NewRequest("GET", "/", nil)
 

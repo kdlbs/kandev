@@ -28,7 +28,7 @@ func TestHandlerRegisterRoutesUsesExistingWorkspaceWildcardName(t *testing.T) {
 	router.GET("/api/v1/workspaces/:id", func(c *gin.Context) { c.Status(http.StatusNoContent) })
 	handler := NewHandler(fakeSearcher{search: func(_ context.Context, request SearchRequest) (*apiv1.MentionSearchResponse, error) {
 		return &apiv1.MentionSearchResponse{Query: request.Query}, nil
-	}})
+	}}, nil)
 
 	var recovered any
 	func() {
@@ -59,7 +59,7 @@ func TestHandlerSearch_ReturnsNormalizedResponse(t *testing.T) {
 				Results: []apiv1.EntityReference{},
 			}},
 		}, nil
-	}}).RegisterRoutes(router)
+	}}, nil).RegisterRoutes(router)
 
 	request := httptest.NewRequest(http.MethodGet,
 		"/api/v1/workspaces/workspace-1/mentions/search?q=auth&limit=99", nil)
@@ -84,7 +84,7 @@ func TestHandlerSearch_RejectsInvalidLimitWithoutSearching(t *testing.T) {
 	NewHandler(fakeSearcher{search: func(_ context.Context, _ SearchRequest) (*apiv1.MentionSearchResponse, error) {
 		t.Fatal("search called for invalid limit")
 		return nil, nil
-	}}).RegisterRoutes(router)
+	}}, nil).RegisterRoutes(router)
 
 	request := httptest.NewRequest(http.MethodGet,
 		"/api/v1/workspaces/workspace-1/mentions/search?q=auth&limit=not-a-number", nil)
@@ -113,7 +113,7 @@ func TestHandlerSearch_MapsSafeErrorsWithoutLeaking(t *testing.T) {
 			router := gin.New()
 			NewHandler(fakeSearcher{search: func(_ context.Context, _ SearchRequest) (*apiv1.MentionSearchResponse, error) {
 				return nil, test.err
-			}}).RegisterRoutes(router)
+			}}, nil).RegisterRoutes(router)
 
 			request := httptest.NewRequest(http.MethodGet,
 				"/api/v1/workspaces/workspace-1/mentions/search?q=auth", nil)

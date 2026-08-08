@@ -6,24 +6,13 @@ import (
 	"os"
 	"os/exec"
 	"reflect"
+	"runtime"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
 )
-
-func TestLauncherExitHelper(t *testing.T) {
-	codeText := os.Getenv("KANDEV_LAUNCHER_EXIT_CODE")
-	if codeText == "" {
-		return
-	}
-	code, err := strconv.Atoi(codeText)
-	if err != nil {
-		os.Exit(2)
-	}
-	os.Exit(code)
-}
 
 func TestLauncherConfigSupportsUnexpectedExitCallback(t *testing.T) {
 	field, ok := reflect.TypeOf(Config{}).FieldByName("OnUnexpectedExit")
@@ -54,8 +43,7 @@ func TestLauncherUnexpectedExitCallbackSkipsIntentionalStop(t *testing.T) {
 
 func startLauncherMonitorTest(t *testing.T, exitCode int, stopping bool) bool {
 	t.Helper()
-	cmd := exec.Command(os.Args[0], "-test.run=^TestLauncherExitHelper$")
-	cmd.Env = append(os.Environ(), fmt.Sprintf("KANDEV_LAUNCHER_EXIT_CODE=%d", exitCode))
+	cmd := launcherExitCommand(exitCode)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	if err := cmd.Start(); err != nil {
@@ -85,6 +73,14 @@ func startLauncherMonitorTest(t *testing.T, exitCode int, stopping bool) bool {
 	default:
 		return false
 	}
+}
+
+func launcherExitCommand(exitCode int) *exec.Cmd {
+	code := strconv.Itoa(exitCode)
+	if runtime.GOOS == "windows" {
+		return exec.Command("cmd.exe", "/c", "exit", code)
+	}
+	return exec.Command("sh", "-c", "exit "+code)
 }
 
 func newUnexpectedExitTestLogger(t *testing.T) *logger.Logger {

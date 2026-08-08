@@ -27,11 +27,7 @@ type Handler struct {
 	log      *logger.Logger
 }
 
-func NewHandler(searcher Searcher, logs ...*logger.Logger) *Handler {
-	var log *logger.Logger
-	if len(logs) > 0 {
-		log = logs[0]
-	}
+func NewHandler(searcher Searcher, log *logger.Logger) *Handler {
 	return &Handler{searcher: searcher, log: log}
 }
 
@@ -90,7 +86,7 @@ func (h *Handler) writeSearchError(c *gin.Context, err error) {
 }
 
 func (h *Handler) logUnexpectedFailure(c *gin.Context, err error) {
-	if h == nil || h.log == nil {
+	if h.log == nil {
 		return
 	}
 	stage, class := SearchFailureMetadata(err)
