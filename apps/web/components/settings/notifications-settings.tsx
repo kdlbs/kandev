@@ -216,7 +216,7 @@ function ExternalProvidersSection({
     <SettingsTarget targetId={GENERAL_SETTINGS_TARGETS.notificationProviders} className="space-y-4">
       <div>
         <div className="text-sm font-medium">{t("settings:externalProviders")}</div>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-xs text-muted-foreground" data-testid="external-providers-description">
           {t("settings:externalProvidersDescription")}
         </p>
       </div>

@@ -86,7 +86,10 @@ describe("NotificationsSettings", () => {
     expect(body).not.toBeNull();
     const oversized = [...body!.querySelectorAll("[class]")]
       .map((element) => element.getAttribute("class") ?? "")
-      .filter((className) => /(?:^|\s)text-(?:base|lg|\d?xl)(?:\s|$)/.test(className));
+      // Lookahead, not `(?:\s|$)`: Tailwind's line-height modifier makes the
+      // next character `/` (the Card base is literally `text-xs/relaxed`), so a
+      // consuming boundary would let `text-xl/relaxed` through.
+      .filter((className) => /(?:^|\s)text-(?:base|lg|\d?xl)(?=[\s/]|$)/.test(className));
     expect(oversized).toEqual([]);
   });
 });

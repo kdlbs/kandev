@@ -1,18 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
-import type { ApiClient } from "../../helpers/api-client";
-
-const TURN_FINISHED = "session.turn_finished";
-const CLARIFICATION_REQUESTED = "session.clarification_requested";
-const PROVIDER_NAMES = ["Desktop", "Team channel"];
-
-async function seedProvider(apiClient: ApiClient, name: string): Promise<void> {
-  const response = await apiClient.rawRequest("POST", "/api/v1/notification-providers", {
-    name,
-    type: "local",
-    events: [TURN_FINISHED, CLARIFICATION_REQUESTED],
-  });
-  expect(response.ok).toBe(true);
-}
+import { seedNotificationProviders } from "./notifications-type-scale-helpers";
 
 test.describe("Notifications settings type scale", () => {
   test("renders the card body on the shared settings scale", async ({
@@ -20,16 +7,14 @@ test.describe("Notifications settings type scale", () => {
     apiClient,
     prCapture,
   }) => {
-    for (const name of PROVIDER_NAMES) await seedProvider(apiClient, name);
+    await seedNotificationProviders(apiClient);
 
     await testPage.setViewportSize({ width: 1280, height: 1100 });
     await testPage.goto("/settings/general/notifications");
 
     const table = testPage.getByTestId("notification-events-desktop-table");
     await expect(table).toBeVisible();
-    const description = testPage.getByText(
-      "Configure external providers for remote notifications.",
-    );
+    const description = testPage.getByTestId("external-providers-description");
     await expect(description).toBeVisible();
 
     // Capture before asserting so a run against the pre-fix code still produces
