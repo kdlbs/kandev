@@ -95,6 +95,14 @@ func TestBackupProductionDbCreatesStampedSnapshot(t *testing.T) {
 	if !info.ModTime().Equal(stamp) {
 		t.Fatalf("backup mtime = %v, want %v", info.ModTime(), stamp)
 	}
+	backupDir := filepath.Dir(created)
+	dirInfo, err := os.Stat(backupDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := dirInfo.Mode().Perm(); got != 0o700 {
+		t.Fatalf("backup dir mode = %#o, want 0700", got)
+	}
 }
 
 func TestBackupProductionDbPrunesToFiveNewest(t *testing.T) {

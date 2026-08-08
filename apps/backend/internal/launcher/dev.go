@@ -82,11 +82,11 @@ func runDev(ctx context.Context, opts Options) int {
 
 	if opts.Headless {
 		fmt.Printf("[kandev] ready (headless) at %s\n", cfg.ports.BackendURL)
-		return waitForAppExit(supervisor, backend)
+		return waitForAppExit(supervisor, backend, webProc)
 	}
 	fmt.Println("[kandev] open: " + cfg.ports.BackendURL)
 	openBrowserFn(cfg.ports.BackendURL)
-	return waitForAppExit(supervisor, backend)
+	return waitForAppExit(supervisor, backend, webProc)
 }
 
 type devLaunchConfig struct {
@@ -122,7 +122,7 @@ func devLaunchConfigFor(opts Options) (devLaunchConfig, int) {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return devLaunchConfig{}, 2
 	}
-	ports, err := pickDevPorts(backendPort, backendPortSource(opts), webPort, webPortSource(opts))
+	ports, err := pickDevPorts(backendPort, backendPortSource(opts), webPort, webPortSource(opts), true)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return devLaunchConfig{}, 1

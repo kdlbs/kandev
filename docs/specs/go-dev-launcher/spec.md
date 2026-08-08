@@ -128,9 +128,11 @@ dev: doctor
 	@exec $(BACKEND_DIR)/bin/kandev-launcher dev $(DEV_FLAGS)
 ```
 
-`build-winjob` leaves the dev path: the Go launcher's process-group handling replaces it.
-`cmd/winjob` itself stays in the tree for any other consumer, but nothing in `make dev`
-builds or references it.
+`build-winjob` leaves the dev path: the Go launcher's process-group handling replaces it,
+and the root `dev` target no longer invokes the winjob build step. `cmd/winjob` itself
+stays in the tree for any other consumer. (Note: `make dev` still builds winjob
+transitively, because the root target depends on the backend's `build` aggregate, which
+has always included `build-winjob` — the removal is of the *step*, not the dependency.)
 
 ### `apps/cli` shrinks to the published shim
 
