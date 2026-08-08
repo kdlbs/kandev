@@ -49,6 +49,7 @@ export function useSessionConfigModelOptions(
     configStatus: resolvedModelConfig.status,
     configError: resolvedModelConfig.error,
     configIsLoading: resolvedModelConfig.isLoading,
+    isConfigResolutionPending: resolvedModelConfig.isResolutionPending,
     refreshConfig: resolvedModelConfig.refresh,
     isConfigResolvedForRequest: resolvedModelConfig.isResolvedForRequest,
     resolvedConfigOptions: resolvedModelConfig.configOptions,

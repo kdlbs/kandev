@@ -357,6 +357,38 @@ func TestProbeACPSessionWithContextAppliesModeBeforeModelAndOptions(t *testing.T
 	t.Fatalf("config options = %#v, want reasoning_effort", resp.ConfigOptions)
 }
 
+func TestProbeACPSessionWithContextRequiresSnapshotAfterFinalConfigMutation(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	t.Cleanup(func() {
+		_ = c2aR.Close()
+		_ = c2aW.Close()
+		_ = a2cR.Close()
+		_ = a2cW.Close()
+	})
+
+	fake := &probeTwoConfigAgent{probeCaptureAgent: &probeCaptureAgent{}}
+	acp.NewAgentSideConnection(fake, a2cW, c2aR)
+
+	e := NewACPInferenceExecutor(zap.NewNop())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := e.probeACPSessionWithContext(
+		ctx,
+		c2aW,
+		a2cR,
+		t.TempDir(),
+		"opencode-acp",
+		"model-with-options",
+		"",
+		map[string]string{"first": "one", "second": "two"},
+	)
+	if err == nil || !strings.Contains(err.Error(), "model config selection returned no configuration options") {
+		t.Fatalf("error = %v, want missing final configuration snapshot", err)
+	}
+}
+
 func TestFilterRequestedConfigOptionsUsesResolvedSnapshot(t *testing.T) {
 	category := acp.SessionConfigOptionCategoryThoughtLevel
 	got := filterRequestedConfigOptions(
@@ -432,6 +464,10 @@ type probeNotificationConfigAgent struct {
 }
 
 type probeRequestedConfigAgent struct {
+	*probeCaptureAgent
+}
+
+type probeTwoConfigAgent struct {
 	*probeCaptureAgent
 }
 
@@ -522,6 +558,30 @@ func (*probeRequestedConfigAgent) NewSession(context.Context, acp.NewSessionRequ
 	}, nil
 }
 
+func (*probeTwoConfigAgent) NewSession(context.Context, acp.NewSessionRequest) (acp.NewSessionResponse, error) {
+	return acp.NewSessionResponse{
+		SessionId:     acp.SessionId("probe-session"),
+		ConfigOptions: probeTwoConfigOptions("default-model"),
+	}, nil
+}
+
+func (*probeTwoConfigAgent) SetSessionConfigOption(
+	_ context.Context,
+	request acp.SetSessionConfigOptionRequest,
+) (acp.SetSessionConfigOptionResponse, error) {
+	if request.ValueId.ConfigId == "model" {
+		return acp.SetSessionConfigOptionResponse{
+			ConfigOptions: probeTwoConfigOptions(string(request.ValueId.Value)),
+		}, nil
+	}
+	if request.ValueId.ConfigId == "first" {
+		return acp.SetSessionConfigOptionResponse{
+			ConfigOptions: probeTwoConfigOptions("first-applied"),
+		}, nil
+	}
+	return acp.SetSessionConfigOptionResponse{}, nil
+}
+
 func (*probeRequestedConfigAgent) SetSessionConfigOption(
 	_ context.Context,
 	request acp.SetSessionConfigOptionRequest,
@@ -583,6 +643,42 @@ func probeModelConfigOptions(model string) []acp.SessionConfigOption {
 				Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
 					{Name: "High", Value: "high"},
 				},
+			},
+		}},
+	}
+}
+
+func probeTwoConfigOptions(model string) []acp.SessionConfigOption {
+	modelCategory := acp.SessionConfigOptionCategoryModel
+	optionCategory := acp.SessionConfigOptionCategoryThoughtLevel
+	return []acp.SessionConfigOption{
+		{Select: &acp.SessionConfigOptionSelect{
+			Id:           "model",
+			Category:     &modelCategory,
+			Type:         "select",
+			CurrentValue: acp.SessionConfigValueId(model),
+			Options: acp.SessionConfigSelectOptions{
+				Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
+					{Name: model, Value: acp.SessionConfigValueId(model)},
+				},
+			},
+		}},
+		{Select: &acp.SessionConfigOptionSelect{
+			Id:           "first",
+			Category:     &optionCategory,
+			Type:         "select",
+			CurrentValue: "one",
+			Options: acp.SessionConfigSelectOptions{
+				Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{{Name: "One", Value: "one"}},
+			},
+		}},
+		{Select: &acp.SessionConfigOptionSelect{
+			Id:           "second",
+			Category:     &optionCategory,
+			Type:         "select",
+			CurrentValue: "two",
+			Options: acp.SessionConfigSelectOptions{
+				Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{{Name: "Two", Value: "two"}},
 			},
 		}},
 	}

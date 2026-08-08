@@ -713,7 +713,7 @@ func (h *Handlers) httpGetAgentModels(c *gin.Context) {
 
 	resp, err := h.controller.FetchDynamicModels(c.Request.Context(), agentName, refresh)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, controller.ErrAgentNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "agent not found"})
 			return
 		}
@@ -742,7 +742,7 @@ func (h *Handlers) httpResolveAgentModelConfig(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "model is required"})
 			return
 		}
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, controller.ErrAgentNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "agent not found"})
 			return
 		}

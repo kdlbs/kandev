@@ -1,6 +1,6 @@
 "use client";
 
-import { useId } from "react";
+import { useEffect, useId } from "react";
 import { useTranslation } from "react-i18next";
 import { IconAlertTriangle } from "@tabler/icons-react";
 import { NoAuthPanel, ProbingPanel } from "@/components/settings/profile-status-panels";
@@ -71,6 +71,7 @@ export type ProfileFormFieldsProps = {
   variant?: "default" | "compact";
   hideNameField?: boolean;
   lockPassthrough?: boolean;
+  onModelConfigResolutionPendingChange?: (pending: boolean) => void;
   /**
    * When true, the custom-flag list + Add form on CLIFlagsField is
    * hidden. Curated predefined toggles still render. Used by the
@@ -505,6 +506,7 @@ export function ProfileFormFields({
   hideNameField = false,
   lockPassthrough = false,
   hideCustomCLIFlags = false,
+  onModelConfigResolutionPendingChange,
 }: ProfileFormFieldsProps) {
   const isCompact = variant === "compact";
   const {
@@ -513,9 +515,14 @@ export function ProfileFormFields({
     configStatus,
     configError,
     configIsLoading,
+    isConfigResolutionPending,
     refreshModelConfig,
     refresh,
   } = useProfileModelCapabilities(agentName, profile, modelConfig, onChange);
+
+  useEffect(() => {
+    onModelConfigResolutionPendingChange?.(isConfigResolutionPending);
+  }, [isConfigResolutionPending, onModelConfigResolutionPendingChange]);
 
   return (
     <div className={isCompact ? "space-y-3" : "space-y-4"}>

@@ -223,8 +223,12 @@ Wave 5 (depends on the settings behavior):
 
 - [x] [task-05-e2e-docs](task-05-e2e-docs.md)
 
-The dependency chain is intentional. The production implementation should not
-start until the user explicitly requests implementation of this package.
+The dependency chain is complete. The implementation uses a model-only request
+from the current settings consumers, while the backend keeps the optional mode
+and option context available for providers that need it later. Save
+contributors remain blocked until a selected model has an authoritative
+resolution and any stale draft options have been reconciled. Failed discovery
+keeps the draft readable and exposes a localized retry action.
 
 ## Verification
 
@@ -237,7 +241,7 @@ cd apps/backend && go test ./internal/agentctl/server/utility ./internal/agentct
 Targeted frontend checks:
 
 ```bash
-cd apps && pnpm --filter @kandev/web exec vitest run hooks/domains/settings/use-dynamic-models.test.ts components/settings/profile-form-fields.test.tsx components/settings/workflow-session-config-editor.test.tsx components/model-config-selector.test.tsx --reporter=dot
+cd apps && pnpm --filter @kandev/web exec vitest run hooks/domains/settings/use-dynamic-models.test.ts components/settings/profile-form-fields.test.tsx components/settings/workflow-session-config-editor.test.tsx components/settings/use-workflow-draft-contributor.test.ts components/settings/model-config-resolution-status.test.tsx components/settings/profile-model-config.test.ts components/model-config-selector.test.tsx --reporter=dot
 cd apps/web && pnpm run typecheck
 cd apps/web && pnpm run i18n:check
 cd apps/web && pnpm run i18n:ratchet
@@ -246,8 +250,8 @@ cd apps/web && pnpm run i18n:ratchet
 Managed desktop and mobile E2E checks:
 
 ```bash
-cd apps/web && pnpm e2e:run --project chromium tests/settings/agent-profile-acp.spec.ts tests/workflow/workflow-settings.spec.ts
-cd apps/web && pnpm e2e:run --project mobile-chrome tests/workflow/mobile-workflow-settings.spec.ts
+cd apps/web && pnpm e2e:run --host --project chromium tests/settings/agent-profile-acp.spec.ts tests/workflow/workflow-settings.spec.ts
+cd apps/web && pnpm e2e:run --host --project mobile-chrome tests/workflow/mobile-workflow-settings.spec.ts
 ```
 
 Public docs checks when the public page changes:
@@ -259,16 +263,20 @@ node scripts/validate-public-docs.mjs
 
 Verification Results:
 
-- Backend build passed; focused backend packages: 470 tests passed.
-- Frontend focused unit tests: 30 tests passed across 6 files; typecheck,
-  ESLint, i18n checks, and i18n ratchet passed.
-- Managed E2E passed: 19 desktop tests and 5 mobile tests across profile and
-  workflow settings.
-- Public documentation tests and validation passed.
+- Backend build passed; focused backend packages: 307 tests passed across five
+  packages.
+- Frontend focused unit tests: 42 tests passed across the seven listed files;
+  typecheck, ESLint, i18n checks, and i18n ratchet passed.
+- Managed E2E passed: 19 Chromium desktop tests and 3 mobile Chromium tests
+  across profile and workflow settings. The tests also cover startup capability
+  revalidation, so provider registration order and probe timing are not test
+  assumptions.
+- Public documentation checks were not required because this change updates
+  the implementation plan and workflow spec, not `docs/public/**`.
 
 ## Review follow-up
 
-The initial implementation is blocked on the following review work:
+The implementation completed the following review work:
 
 - [x] Make the current settings resolver model-only. Do not send editable
   option values or mode as context from the profile and workflow consumers.
@@ -283,6 +291,13 @@ The initial implementation is blocked on the following review work:
   wrapper, mock-agent, and missing probe/host-utility test cleanup.
 - [x] Remove E2E force-click workarounds after the selector no longer remounts
   for each option edit, then rerun desktop and mobile E2E.
+- [x] Block profile and workflow saves during model-option reconciliation,
+  require a snapshot after the final ACP option mutation, isolate forced
+  refresh generations, use typed missing-agent errors, and keep zero-baseline
+  resolution status visible.
+- [x] Mark ACP inference agents as dynamic before their first cache snapshot,
+  poll pending capability probes with a bounded retry, and make settings E2E
+  fixtures independent of provider registration order.
 
 ## Risks and open questions
 

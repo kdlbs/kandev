@@ -34,30 +34,24 @@ export function useProfileModelCapabilities(
     }
   }, [profile.model]);
 
+  const shouldReconcile =
+    Boolean(onChange) &&
+    hasUserSelectedModel.current &&
+    resolvedModelConfig.status === "ok" &&
+    resolvedModelConfig.isResolvedForRequest;
+  const nextConfigOptions = shouldReconcile
+    ? reconcileConfigOptionValues(profile.config_options, resolvedModelConfig.configOptions)
+    : (profile.config_options ?? {});
+  const needsReconciliation =
+    shouldReconcile &&
+    JSON.stringify(nextConfigOptions) !== JSON.stringify(profile.config_options ?? {});
+
   useEffect(() => {
-    if (
-      !onChange ||
-      !hasUserSelectedModel.current ||
-      resolvedModelConfig.status !== "ok" ||
-      !resolvedModelConfig.isResolvedForRequest
-    ) {
-      return;
-    }
-    const nextConfigOptions = reconcileConfigOptionValues(
-      profile.config_options,
-      resolvedModelConfig.configOptions,
-    );
-    if (JSON.stringify(nextConfigOptions) === JSON.stringify(profile.config_options ?? {})) {
+    if (!onChange || !shouldReconcile || !needsReconciliation) {
       return;
     }
     onChange({ config_options: nextConfigOptions });
-  }, [
-    onChange,
-    profile.config_options,
-    resolvedModelConfig.configOptions,
-    resolvedModelConfig.isResolvedForRequest,
-    resolvedModelConfig.status,
-  ]);
+  }, [needsReconciliation, onChange, profile.config_options, nextConfigOptions, shouldReconcile]);
 
   const refresh = useCallback(async () => {
     await Promise.all([capabilities.refresh(), resolvedModelConfig.refresh()]);
@@ -69,6 +63,7 @@ export function useProfileModelCapabilities(
     configStatus: resolvedModelConfig.status,
     configError: resolvedModelConfig.error,
     configIsLoading: resolvedModelConfig.isLoading,
+    isConfigResolutionPending: resolvedModelConfig.isResolutionPending || needsReconciliation,
     refreshModelConfig: resolvedModelConfig.refresh,
     refresh,
   };

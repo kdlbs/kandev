@@ -219,6 +219,99 @@ func TestResolveModelConfigDeduplicatesConcurrentProbes(t *testing.T) {
 	require.Equal(t, int32(1), probeCalls.Load())
 }
 
+func TestResolveModelConfigRefreshStartsNewGenerationAndWinsOverOlderProbe(t *testing.T) {
+	log := newTestLogger(t)
+	reg := registry.NewRegistry(log)
+	const agentType = "refresh-generation-acp"
+	require.NoError(t, reg.Register(&installedInferenceAgent{id: agentType}))
+
+	firstStarted := make(chan struct{})
+	secondStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	releaseSecond := make(chan struct{})
+	var probeCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/health":
+			w.WriteHeader(http.StatusOK)
+		case "/api/v1/inference/probe":
+			call := probeCalls.Add(1)
+			switch call {
+			case 1:
+				close(firstStarted)
+				<-releaseFirst
+			case 2:
+				close(secondStarted)
+				<-releaseSecond
+			}
+			w.Header().Set("Content-Type", "application/json")
+			require.NoError(t, json.NewEncoder(w).Encode(agentctlutil.ProbeResponse{
+				Success: true,
+				ConfigOptions: []agentctlutil.ProbeConfigOption{{
+					ID:           "generation",
+					CurrentValue: fmt.Sprint(call),
+				}},
+			}))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	host, port := serverHostPort(t, server)
+
+	mgr := NewManager(reg, host, port, nil, log)
+	mgr.instances[agentType] = &instance{
+		agentType: agentType,
+		workDir:   t.TempDir(),
+		client:    agentctl.NewClient(host, port, log),
+	}
+
+	request := ModelConfigResolutionRequest{Model: "refresh-model"}
+	firstResult := make(chan ModelConfigResolution, 1)
+	firstError := make(chan error, 1)
+	go func() {
+		resolved, err := mgr.ResolveModelConfig(context.Background(), agentType, request)
+		firstResult <- resolved
+		firstError <- err
+	}()
+	<-firstStarted
+
+	refreshResult := make(chan ModelConfigResolution, 1)
+	refreshError := make(chan error, 1)
+	go func() {
+		resolved, err := mgr.ResolveModelConfig(context.Background(), agentType, ModelConfigResolutionRequest{
+			Model:   request.Model,
+			Refresh: true,
+		})
+		refreshResult <- resolved
+		refreshError <- err
+	}()
+
+	select {
+	case <-secondStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("refresh joined the older in-flight probe")
+	}
+	close(releaseSecond)
+	select {
+	case err := <-refreshError:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("refresh probe did not finish")
+	}
+	refreshed := <-refreshResult
+	require.Equal(t, "2", refreshed.ConfigOptions[0].CurrentValue)
+
+	close(releaseFirst)
+	require.NoError(t, <-firstError)
+	<-firstResult
+
+	cached, err := mgr.ResolveModelConfig(context.Background(), agentType, request)
+	require.NoError(t, err)
+	require.Equal(t, "2", cached.ConfigOptions[0].CurrentValue)
+	require.Equal(t, int32(2), probeCalls.Load())
+}
+
 func TestResolveModelConfigDoesNotCacheFailures(t *testing.T) {
 	log := newTestLogger(t)
 	reg := registry.NewRegistry(log)

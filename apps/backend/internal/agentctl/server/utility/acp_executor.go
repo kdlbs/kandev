@@ -279,8 +279,25 @@ func applySessionConfigOptions(
 	sessionID string,
 	options map[string]string,
 ) ([]acp.SessionConfigOption, error) {
+	configOptions, _, err := applySessionConfigOptionsWithBoundary(
+		ctx, conn, sessionID, options, nil,
+	)
+	return configOptions, err
+}
+
+// applySessionConfigOptionsWithBoundary applies a batch of option mutations
+// and returns the notification version captured immediately before the final
+// mutation. A snapshot from an earlier mutation is not authoritative for the
+// batch, so probe callers use that boundary when they wait for a notification.
+func applySessionConfigOptionsWithBoundary(
+	ctx context.Context,
+	conn sessionmodel.SDKConn,
+	sessionID string,
+	options map[string]string,
+	state *acpProbeNotificationState,
+) ([]acp.SessionConfigOption, int, error) {
 	if len(options) == 0 {
-		return nil, nil
+		return nil, 0, nil
 	}
 	keys := make([]string, 0, len(options))
 	for key := range options {
@@ -289,6 +306,10 @@ func applySessionConfigOptions(
 	sort.Strings(keys)
 	var configOptions []acp.SessionConfigOption
 	for _, key := range keys {
+		previousVersion := 0
+		if state != nil {
+			previousVersion = state.currentConfigUpdateVersion()
+		}
 		response, err := conn.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{
 			ValueId: &acp.SetSessionConfigOptionValueId{
 				SessionId: acp.SessionId(sessionID),
@@ -297,11 +318,14 @@ func applySessionConfigOptions(
 			},
 		})
 		if err != nil {
-			return nil, fmt.Errorf("set %q: %w", key, err)
+			return nil, 0, fmt.Errorf("set %q: %w", key, err)
 		}
 		configOptions = response.ConfigOptions
+		if key == keys[len(keys)-1] {
+			return configOptions, previousVersion, nil
+		}
 	}
-	return configOptions, nil
+	return configOptions, 0, nil
 }
 
 func filterRequestedConfigOptions(
@@ -740,8 +764,9 @@ func applyProbeConfigOptions(
 	if len(requested) == 0 {
 		return nil, nil
 	}
-	previousVersion := state.currentConfigUpdateVersion()
-	returnedConfigOptions, err := applySessionConfigOptions(ctx, conn, string(sessionID), requested)
+	returnedConfigOptions, previousVersion, err := applySessionConfigOptionsWithBoundary(
+		ctx, conn, string(sessionID), requested, state,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("ACP model config selection failed: %w", err)
 	}
@@ -753,7 +778,7 @@ func applyProbeConfigOptions(
 		return nil, err
 	}
 	if !received {
-		return nil, nil
+		return nil, fmt.Errorf("ACP model config selection returned no configuration options")
 	}
 	return updated, nil
 }

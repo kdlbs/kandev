@@ -21,7 +21,10 @@ test.describe("Agent profile — ACP-first", () => {
     test.setTimeout(60_000);
 
     const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
+    // Provider registration order is not a stable contract. The mock agent is
+    // the fixture that advertises deterministic ACP modes, so select it by id
+    // instead of relying on the first row returned by the API.
+    const agent = agents.find((item) => item.name === "mock-agent") ?? agents[0];
     const profileId = agent.profiles[0].id;
 
     await testPage.goto(`/settings/agents/${agent.name}/profiles/${profileId}`);
@@ -211,7 +214,7 @@ test.describe("Agent profile — ACP-first", () => {
 
     // 1. Get mock agent and create a profile with mode "plan-mock"
     const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
+    const agent = agents.find((item) => item.name === "mock-agent") ?? agents[0];
     const profile = await apiClient.createAgentProfile(agent.id, "Mode Test Profile", {
       model: "mock-fast",
       mode: "plan-mock",

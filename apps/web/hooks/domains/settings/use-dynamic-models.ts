@@ -39,6 +39,7 @@ type UseResolvedModelConfigState = {
   configOptions: ConfigOptionEntry[];
   status: CapabilityStatus | undefined;
   isResolvedForRequest: boolean;
+  isResolutionPending: boolean;
   isLoading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -50,6 +51,8 @@ type CachedModelConfigResolution = {
 };
 
 const MODEL_CONFIG_RESOLUTION_TTL_MS = 5 * 60 * 1000;
+const CAPABILITY_PENDING_POLL_DELAY_MS = 250;
+const CAPABILITY_PENDING_MAX_ATTEMPTS = 240;
 const modelConfigResolutionCache = new Map<string, CachedModelConfigResolution>();
 const modelConfigResolutionInflight = new Map<string, Promise<AgentModelConfigResponse>>();
 let modelConfigResolutionGeneration = 0;
@@ -71,6 +74,12 @@ export function invalidateModelConfigResolutionCache(agentName?: string): void {
       modelConfigResolutionInflight.delete(key);
     }
   }
+}
+
+export function __resetModelConfigResolutionCache(): void {
+  modelConfigResolutionGeneration += 1;
+  modelConfigResolutionCache.clear();
+  modelConfigResolutionInflight.clear();
 }
 
 function modelConfigResolutionKeyAgent(key: string): string | undefined {
@@ -157,6 +166,48 @@ async function fetchResolvedModelConfig(
   return promise.then(cloneModelConfigResponse);
 }
 
+function isCapabilityProbePending(status: CapabilityStatus): boolean {
+  return status === "not_configured" || status === "probing";
+}
+
+async function fetchCapabilitiesUntilSettled(
+  agentName: string,
+  forceRefresh: boolean,
+): Promise<DynamicModelsResponse> {
+  for (let attempt = 0; ; attempt += 1) {
+    const response = await fetchDynamicModels(agentName, { refresh: forceRefresh });
+    if (forceRefresh || !isCapabilityProbePending(response.status)) {
+      return response;
+    }
+    if (attempt >= CAPABILITY_PENDING_MAX_ATTEMPTS) {
+      return response;
+    }
+    await new Promise((resolve) => setTimeout(resolve, CAPABILITY_PENDING_POLL_DELAY_MS));
+  }
+}
+
+type ModelConfigResolutionResult =
+  | { kind: "response"; response: AgentModelConfigResponse }
+  | { kind: "error"; error: string };
+
+async function resolveModelConfig(
+  agentName: string,
+  request: ResolveAgentModelConfigRequest,
+  forceRefresh: boolean,
+): Promise<ModelConfigResolutionResult> {
+  try {
+    return {
+      kind: "response",
+      response: await fetchResolvedModelConfig(agentName, request, forceRefresh),
+    };
+  } catch (err) {
+    return {
+      kind: "error",
+      error: err instanceof Error ? err.message : t("agents:failedToFetchCapabilities"),
+    };
+  }
+}
+
 /**
  * useAgentCapabilities fetches the full ACP probe cache for an agent
  * (models, modes, current defaults) and keeps it in sync. Refresh triggers
@@ -181,27 +232,28 @@ export function useAgentCapabilities(
   const hasManualRefresh = manualRefreshAgentName === agentName;
   const [isLoading, setIsLoading] = useState(supportsDynamicModels && !!agentName);
   const [error, setError] = useState<string | null>(null);
+  const capabilityRequestSequence = useRef(0);
 
   const fetchCaps = useCallback(
     async (forceRefresh: boolean) => {
       if (!agentName || !supportsDynamicModels) {
         return;
       }
+      const sequence = ++capabilityRequestSequence.current;
       setIsLoading(true);
       if (forceRefresh) {
         invalidateModelConfigResolutionCache(agentName);
       }
       setError(null);
       try {
-        const response: DynamicModelsResponse = await fetchDynamicModels(agentName, {
-          refresh: forceRefresh,
-        });
+        const response = await fetchCapabilitiesUntilSettled(agentName, forceRefresh);
+        if (sequence !== capabilityRequestSequence.current) return;
         setStatus(response.status);
         setError(response.error ?? null);
         if (forceRefresh) {
           setManualRefreshAgentName(agentName);
         }
-        if (response.status !== "failed") {
+        if (response.status === "ok") {
           setModels(response.models ?? []);
           setModes(response.modes ?? []);
           setCommands(response.commands ?? []);
@@ -209,9 +261,12 @@ export function useAgentCapabilities(
           setCurrentModeId(response.current_mode_id);
         }
       } catch (err) {
+        if (sequence !== capabilityRequestSequence.current) return;
         setError(err instanceof Error ? err.message : t("agents:failedToFetchCapabilities"));
       } finally {
-        setIsLoading(false);
+        if (sequence === capabilityRequestSequence.current) {
+          setIsLoading(false);
+        }
       }
     },
     [agentName, supportsDynamicModels],
@@ -227,6 +282,9 @@ export function useAgentCapabilities(
     if (supportsDynamicModels && agentName) {
       void fetchCaps(false);
     }
+    return () => {
+      capabilityRequestSequence.current += 1;
+    };
   }, [agentName, supportsDynamicModels, fetchCaps]);
 
   const refresh = useCallback(() => fetchCaps(true), [fetchCaps]);
@@ -279,6 +337,7 @@ export function useResolvedModelConfig(
   );
   const [status, setStatus] = useState<CapabilityStatus>();
   const [resolvedRequestKey, setResolvedRequestKey] = useState<string>();
+  const [settledRequestKey, setSettledRequestKey] = useState<string>();
   const [isLoading, setIsLoading] = useState(Boolean(enabled && agentName && request));
   const [error, setError] = useState<string | null>(null);
   const requestSequence = useRef(0);
@@ -290,19 +349,27 @@ export function useResolvedModelConfig(
         setResolvedOptions(stableInitialConfigOptions);
         setStatus(undefined);
         setResolvedRequestKey(undefined);
+        setSettledRequestKey(undefined);
         setError(null);
         setIsLoading(false);
         return;
       }
 
       setResolvedRequestKey(undefined);
+      setSettledRequestKey(undefined);
       setResolvedOptions(stableInitialConfigOptions);
       setStatus(forceRefresh ? "probing" : undefined);
       setError(null);
       setIsLoading(true);
-      try {
-        const response = await fetchResolvedModelConfig(agentName, request, forceRefresh);
-        if (sequence !== requestSequence.current) return;
+      const result = await resolveModelConfig(agentName, request, forceRefresh);
+      if (sequence !== requestSequence.current) return;
+      if (result.kind === "error") {
+        setStatus("failed");
+        setError(result.error);
+        setResolvedOptions(stableInitialConfigOptions);
+        if (requestKey) setSettledRequestKey(requestKey);
+      } else {
+        const response = result.response;
         setStatus(response.status);
         setError(response.error ?? null);
         setResolvedOptions(
@@ -311,16 +378,9 @@ export function useResolvedModelConfig(
         if (response.status === "ok" && requestKey) {
           setResolvedRequestKey(requestKey);
         }
-      } catch (err) {
-        if (sequence !== requestSequence.current) return;
-        setStatus("failed");
-        setError(err instanceof Error ? err.message : t("agents:failedToFetchCapabilities"));
-        setResolvedOptions(stableInitialConfigOptions);
-      } finally {
-        if (sequence === requestSequence.current) {
-          setIsLoading(false);
-        }
+        if (requestKey) setSettledRequestKey(requestKey);
       }
+      setIsLoading(false);
     },
     [agentName, enabled, request, requestKey, stableInitialConfigOptions],
   );
@@ -338,6 +398,9 @@ export function useResolvedModelConfig(
     configOptions: resolvedOptions,
     status,
     isResolvedForRequest: requestKey !== undefined && resolvedRequestKey === requestKey,
+    isResolutionPending: Boolean(
+      enabled && agentName && requestKey && (isLoading || settledRequestKey !== requestKey),
+    ),
     isLoading,
     error,
     refresh,

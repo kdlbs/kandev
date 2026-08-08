@@ -1,7 +1,10 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import { SettingsSaveProvider, useSettingsSaveContributor } from "./settings-save-provider";
+import { resolveAgentModelConfig } from "@/lib/api/domains/settings-api";
+import { __resetModelConfigResolutionCache } from "@/hooks/domains/settings/use-dynamic-models";
 import { ProfileFormFields, type ProfileFormData } from "./profile-form-fields";
 import type { ModelConfig } from "@/lib/types/http";
 
@@ -117,7 +120,9 @@ describe("ProfileFormFields command prefix visibility", () => {
 
     expect(screen.queryByTestId("command-prefix-input")).toBeNull();
   });
+});
 
+describe("ProfileFormFields model options", () => {
   it("loads model-specific options in the profile model selector", async () => {
     const dynamicModelConfig: ModelConfig = {
       default_model: "model-a",
@@ -209,5 +214,74 @@ describe("ProfileFormFields command prefix visibility", () => {
     fireEvent.click(await screen.findByText("Model B"));
 
     await waitFor(() => expect(onChange).toHaveBeenCalledWith({ config_options: {} }));
+  });
+});
+
+describe("ProfileFormFields save coordination", () => {
+  it("blocks the coordinated profile save while model options are resolving", async () => {
+    __resetModelConfigResolutionCache();
+    let resolveResponse: ((value: unknown) => void) | undefined;
+    const response = new Promise((resolve) => {
+      resolveResponse = resolve;
+    });
+    vi.mocked(resolveAgentModelConfig).mockReturnValueOnce(response as never);
+    const save = vi.fn();
+    const dynamicModelConfig: ModelConfig = {
+      default_model: "model-a",
+      current_model_id: "model-a",
+      available_models: [{ id: "model-a", name: "Model A" }],
+      config_options: [],
+      supports_dynamic_models: true,
+    };
+
+    function SaveHarness() {
+      const [pending, setPending] = useState(false);
+      useSettingsSaveContributor({
+        id: "profile:model-config",
+        revision: 1,
+        isDirty: true,
+        canSave: !pending,
+        invalidReason: pending ? "Loading model options" : undefined,
+        save,
+        discard: vi.fn(),
+      });
+      return (
+        <ProfileFormFields
+          profile={formData({ model: "model-a" })}
+          onChange={vi.fn()}
+          modelConfig={dynamicModelConfig}
+          permissionSettings={{}}
+          passthroughConfig={null}
+          agentName="mock-agent"
+          onModelConfigResolutionPendingChange={setPending}
+        />
+      );
+    }
+
+    render(
+      <SettingsSaveProvider>
+        <TooltipProvider>
+          <SaveHarness />
+        </TooltipProvider>
+      </SettingsSaveProvider>,
+    );
+
+    const saveButton = await screen.findByRole("button", { name: "Save changes" });
+    await waitFor(() => expect(saveButton.hasAttribute("disabled")).toBe(true));
+    fireEvent.click(saveButton);
+    expect(save).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveResponse?.({
+        agent_name: "mock-agent",
+        model: "model-a",
+        status: "ok",
+        config_options: [],
+        error: null,
+      });
+    });
+    await waitFor(() => expect(saveButton.hasAttribute("disabled")).toBe(false));
+    fireEvent.click(saveButton);
+    await waitFor(() => expect(save).toHaveBeenCalledOnce());
   });
 });

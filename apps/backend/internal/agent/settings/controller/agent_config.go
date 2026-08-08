@@ -331,7 +331,7 @@ func (c *Controller) ResolveAgentModelConfig(
 	req dto.ResolveAgentModelConfigRequest,
 ) (*dto.AgentModelConfigResponse, error) {
 	if _, ok := c.agentRegistry.Get(agentName); !ok {
-		return nil, fmt.Errorf("agent %q not found", agentName)
+		return nil, fmt.Errorf("%w: %s", ErrAgentNotFound, agentName)
 	}
 	if strings.TrimSpace(req.Model) == "" {
 		return nil, ErrModelRequired

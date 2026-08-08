@@ -46,12 +46,14 @@ type Manager struct {
 	cache        *cache
 	modelCache   *modelConfigCache
 
-	mu          sync.RWMutex
-	instances   map[string]*instance // keyed by agent type
-	createGroup singleflight.Group
-	modelGroup  singleflight.Group
-	startCancel context.CancelFunc
-	stopped     bool
+	mu                sync.RWMutex
+	instances         map[string]*instance // keyed by agent type
+	createGroup       singleflight.Group
+	modelGroup        singleflight.Group
+	modelGenerationMu sync.Mutex
+	modelGenerations  map[string]uint64
+	startCancel       context.CancelFunc
+	stopped           bool
 }
 
 // instance is a single warm agentctl instance bound to an agent type.
@@ -71,14 +73,15 @@ func NewManager(
 	log *logger.Logger,
 ) *Manager {
 	return &Manager{
-		registry:      reg,
-		controlHost:   controlHost,
-		controlPort:   controlPort,
-		controlClient: controlClient,
-		log:           log.WithFields(zap.String("component", "host-utility")),
-		cache:         newCache(),
-		modelCache:    newModelConfigCache(),
-		instances:     make(map[string]*instance),
+		registry:         reg,
+		controlHost:      controlHost,
+		controlPort:      controlPort,
+		controlClient:    controlClient,
+		log:              log.WithFields(zap.String("component", "host-utility")),
+		cache:            newCache(),
+		modelCache:       newModelConfigCache(),
+		instances:        make(map[string]*instance),
+		modelGenerations: make(map[string]uint64),
 	}
 }
 

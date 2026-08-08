@@ -172,6 +172,27 @@ describe("useAgentCapabilities", () => {
 
     await waitFor(() => expect(result.current.error).toBe("probe timed out"));
   });
+
+  it("polls a pending bootstrap until the capability snapshot is ready", async () => {
+    fetchDynamicModelsMock
+      .mockResolvedValueOnce(response("not_configured"))
+      .mockResolvedValueOnce(response("probing"))
+      .mockResolvedValueOnce({
+        ...response("ok"),
+        modes: [{ id: "plan", name: "Plan" }],
+      });
+
+    const { result } = renderHook(() => useAgentCapabilities("grok-acp", initialConfig));
+
+    await waitFor(
+      () => {
+        expect(result.current.modes).toEqual([{ id: "plan", name: "Plan" }]);
+        expect(result.current.isLoading).toBe(false);
+      },
+      { timeout: 2_000 },
+    );
+    expect(fetchDynamicModelsMock).toHaveBeenCalledTimes(3);
+  });
 });
 
 describe("useResolvedModelConfig", () => {
@@ -313,8 +334,9 @@ describe("useResolvedModelConfig cache invalidation", () => {
         initialConfigOptions: firstOptions,
       }),
     );
-    await waitFor(() => expect(resolveAgentModelConfigMock).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(secondResolution.result.current.configOptions).toEqual(secondOptions),
+    );
     expect(firstResolution.result.current.configOptions).toEqual(firstOptions);
-    expect(secondResolution.result.current.configOptions).toEqual(secondOptions);
   });
 });
