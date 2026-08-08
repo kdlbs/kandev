@@ -135,20 +135,46 @@ export function computeCanConnect(
   mode: "agent" | "shell",
   connectionID: string | null | undefined,
   sessionId: string | null | undefined,
-  sessionState?: TaskSessionState | null,
+  environmentEnded = false,
 ): boolean {
   if (!connectionID) return false;
   if (mode === "agent") return Boolean(sessionId);
-  // The env handler refuses a shell whose session has ended, and refuses it
+  // The env handler refuses a shell for a dead environment, and refuses it
   // identically on every attempt. Connecting anyway only restarts the retry
   // timer, so stop before opening the socket at all.
-  return !isSessionEnded(sessionState);
+  return !environmentEnded;
 }
 
 const SESSION_TERMINAL_STATES = new Set<TaskSessionState>(["COMPLETED", "FAILED", "CANCELLED"]);
 
 export function isSessionEnded(state: TaskSessionState | null | undefined): boolean {
   return state != null && SESSION_TERMINAL_STATES.has(state);
+}
+
+/**
+ * Whether every session sharing this environment has ended.
+ *
+ * Shell terminals are environment-scoped, but the session handle this component
+ * holds is not a proxy for one: `useEnvironmentSessionId` deliberately caches
+ * the first session seen for an environment, so once session A ends and session
+ * B reuses that environment, the handle still resolves to A. Gating on A's
+ * state alone would refuse a shell on a live environment — worse than the loop
+ * this exists to stop.
+ *
+ * So refuse only on positive knowledge: sessions for this environment are
+ * known, and every one of them is terminal. Anything unknown connects.
+ */
+export function isEnvironmentEnded(
+  environmentId: string | null | undefined,
+  sessionStateById: Record<string, TaskSessionState | undefined>,
+  environmentIdBySessionId: Record<string, string>,
+): boolean {
+  if (!environmentId) return false;
+  const sessionIds = Object.keys(environmentIdBySessionId).filter(
+    (id) => environmentIdBySessionId[id] === environmentId,
+  );
+  if (sessionIds.length === 0) return false;
+  return sessionIds.every((id) => isSessionEnded(sessionStateById[id]));
 }
 
 /**
@@ -163,11 +189,22 @@ export function isSessionEnded(state: TaskSessionState | null | undefined): bool
  */
 export function computeTerminalPaneState(
   mode: "agent" | "shell",
-  sessionState: TaskSessionState | null | undefined,
+  environmentEnded: boolean,
   isConnected: boolean,
 ): "connected" | "connecting" | "ended" {
-  if (mode === "shell" && isSessionEnded(sessionState)) return "ended";
+  if (mode === "shell" && environmentEnded) return "ended";
   return isConnected ? "connected" : "connecting";
+}
+
+/** Reads the two store slices `isEnvironmentEnded` needs. */
+function useEnvironmentEnded(environmentId: string | null | undefined): boolean {
+  return useAppStore((state) =>
+    isEnvironmentEnded(
+      environmentId,
+      Object.fromEntries(Object.entries(state.taskSessions.items).map(([id, s]) => [id, s?.state])),
+      state.environmentIdBySessionId,
+    ),
+  );
 }
 
 // eslint-disable-next-line max-lines-per-function -- wires many hooks + refs; each block is already its own hook
@@ -196,7 +233,8 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
   const { session } = useSession(sessionId);
   const taskId = session?.task_id ?? null;
   const connectionID = mode === "agent" ? sessionId : environmentId;
-  const canConnect = computeCanConnect(mode, connectionID, sessionId, session?.state);
+  const environmentEnded = useEnvironmentEnded(environmentId);
+  const canConnect = computeCanConnect(mode, connectionID, sessionId, environmentEnded);
   const wsBaseUrl = useWsBaseUrl();
 
   const [isTerminalReady, setIsTerminalReady] = useState(false);
@@ -209,7 +247,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
   // overlay resets on target switches without needing a separate setState effect.
   const [connectedTargetId, setConnectedTargetId] = useState<string | null>(null);
   const isConnected = connectionID != null && connectedTargetId === connectionID;
-  const paneState = computeTerminalPaneState(mode, session?.state, isConnected);
+  const paneState = computeTerminalPaneState(mode, environmentEnded, isConnected);
   const onConnected = useCallback(() => {
     setConnectedTargetId(connectionID ?? null);
     if (autoFocus) refs.xtermRef.current?.textarea?.focus({ preventScroll: true });
