@@ -5,6 +5,8 @@ package process
 import (
 	"os"
 	"os/exec"
+
+	"github.com/kandev/kandev/internal/common/ptyexec"
 )
 
 // terminateProcess kills the process on Windows.
@@ -16,7 +18,7 @@ func terminateProcess(p *os.Process) error {
 // waitPtyProcess waits for the PTY process to exit and returns exit info.
 // On Windows, uses cmd.Process.Wait() since the process may have been started
 // via ConPTY rather than cmd.Start().
-func waitPtyProcess(cmd *exec.Cmd, _ PtyHandle) (exitCode int, signalName string, err error) {
+func waitPtyProcess(cmd *exec.Cmd, _ ptyexec.PtyHandle) (exitCode int, signalName string, err error) {
 	state, err := cmd.Process.Wait()
 	if err != nil {
 		return 1, "", err

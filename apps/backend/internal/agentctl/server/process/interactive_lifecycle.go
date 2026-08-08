@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/ptyexec"
 	"go.uber.org/zap"
 )
 
@@ -18,7 +19,7 @@ import (
 type interactiveProcess struct {
 	info   InteractiveProcessInfo
 	cmd    *exec.Cmd
-	ptmx   PtyHandle // PTY handle (Unix: creack/pty, Windows: ConPTY)
+	ptmx   ptyexec.PtyHandle // PTY handle (Unix: creack/pty, Windows: ConPTY)
 	buffer *ringBuffer
 
 	// Turn detection
@@ -231,7 +232,11 @@ func (r *InteractiveRunner) startProcess(proc *interactiveProcess, cols, rows in
 
 	// Start process in PTY with exact dimensions from frontend
 	// Unix: creack/pty, Windows: ConPTY
-	ptmx, err := startPTYWithSize(cmd, cols, rows)
+	//
+	// Dimensions narrow to uint16 here because that is what pty.Winsize and
+	// PtyHandle.Resize take. Every caller is already within range: the resize
+	// path widens from uint16, and DefaultCols/DefaultRows are clamped above.
+	ptmx, err := ptyexec.Start(cmd, uint16(cols), uint16(rows)) //nolint:gosec // G115: bounded above, see comment
 	if err != nil {
 		return fmt.Errorf("failed to start pty: %w", err)
 	}

@@ -1,6 +1,6 @@
 //go:build !windows
 
-package loginpty
+package ptyexec
 
 import (
 	"os"
@@ -22,9 +22,9 @@ func (p *unixPTY) Resize(cols, rows uint16) error {
 	return pty.Setsize(p.f, &pty.Winsize{Cols: cols, Rows: rows})
 }
 
-// startPTYWithSize starts cmd under a Unix PTY with the given dimensions.
+// Start starts cmd under a Unix PTY with the given dimensions.
 // pty.StartWithSize calls cmd.Start() internally, so cmd.Process is set on return.
-func startPTYWithSize(cmd *exec.Cmd, cols, rows uint16) (ptyHandle, error) {
+func Start(cmd *exec.Cmd, cols, rows uint16) (PtyHandle, error) {
 	f, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: cols, Rows: rows})
 	if err != nil {
 		return nil, err
