@@ -33,6 +33,24 @@ func TestDescribeACPFailureNamesTheContextCause(t *testing.T) {
 	}
 }
 
+// The deadline is the case the change exists for: the probe timeout kills the
+// child, the SDK reports the dead pipe, and the timeout has to win over it.
+func TestDescribeACPFailureNamesTheDeadline(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 0)
+	defer cancel()
+	<-ctx.Done()
+
+	err := describeACPFailure(ctx, "initialize", errors.New("peer disconnected before response"))
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want it to wrap context.DeadlineExceeded", err)
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("err = %q, want it to say the phase timed out", err)
+	}
+}
+
 func TestDescribeACPFailureKeepsGenuineErrors(t *testing.T) {
 	t.Parallel()
 
@@ -63,6 +81,24 @@ func TestStderrBufferTailKeepsTheEnd(t *testing.T) {
 	}
 	if !strings.HasSuffix(tail, "npm error code ECONNREFUSED") {
 		t.Fatalf("tail = %q, want the final line kept", tail)
+	}
+}
+
+// Retention is bounded on write, not on read, so a chatty child cannot hold
+// everything it ever printed in memory until something asks for the tail.
+func TestStderrBufferBoundsRetentionOnWrite(t *testing.T) {
+	t.Parallel()
+
+	var buf stderrBuffer
+	chunk := []byte(strings.Repeat("b", 1024))
+	for range 64 {
+		if n, err := buf.Write(chunk); err != nil || n != len(chunk) {
+			t.Fatalf("Write = (%d, %v), want (%d, nil)", n, err, len(chunk))
+		}
+	}
+
+	if got := buf.buf.Len(); got > stderrTailLimit {
+		t.Fatalf("retained %d bytes after 64 KiB of writes, want at most %d", got, stderrTailLimit)
 	}
 }
 

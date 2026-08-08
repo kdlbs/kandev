@@ -898,22 +898,33 @@ type stderrBuffer struct {
 	buf bytes.Buffer
 }
 
+// Write keeps only the trailing stderrTailLimit bytes, so an agent that chatters
+// for the length of a probe cannot grow this without bound. Trimming on read
+// instead would still have retained every byte the child ever wrote. The full
+// length of p is reported as written: a short count means failure to io.Writer,
+// and discarding an old prefix is not a failure to record the new bytes.
 func (b *stderrBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.buf.Write(p)
+	written := len(p)
+	if len(p) > stderrTailLimit {
+		p = p[len(p)-stderrTailLimit:]
+	}
+	b.buf.Write(p)
+	if excess := b.buf.Len() - stderrTailLimit; excess > 0 {
+		b.buf.Next(excess)
+	}
+	return written, nil
 }
 
-// tail returns the trailing stderrTailLimit bytes, trimmed. The tail rather than
-// the head, because what a dying process printed last is what explains it.
+// tail returns what was retained, trimmed — the end of the output rather than
+// the beginning, because what a dying process printed last is what explains it.
+// It is a best-effort snapshot: the child may still be writing while its process
+// group is torn down, so the tail can be short or empty.
 func (b *stderrBuffer) tail() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	out := b.buf.Bytes()
-	if len(out) > stderrTailLimit {
-		out = out[len(out)-stderrTailLimit:]
-	}
-	return strings.TrimSpace(string(out))
+	return strings.TrimSpace(b.buf.String())
 }
 
 // describeACPFailure names an expired or cancelled context as the cause instead
