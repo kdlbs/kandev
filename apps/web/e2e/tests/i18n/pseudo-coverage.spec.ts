@@ -27,7 +27,7 @@ import { test, expect } from "../../fixtures/test-base";
  * the env guard is gone: it now runs unconditionally in the `chromium` project
  * alongside every other spec.
  *
- *   pnpm e2e -- e2e/tests/i18n/pseudo-coverage.spec.ts
+ *   pnpm e2e:raw -- e2e/tests/i18n/pseudo-coverage.spec.ts
  *
  * WHAT IT GUARANTEES: on each screen in `SCREENS`, every rendered text node and
  * every value of a `COPY_ATTRIBUTES` attribute that the detector below can see

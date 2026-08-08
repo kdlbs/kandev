@@ -548,10 +548,10 @@ test-scripts:
 .PHONY: test-e2e
 test-e2e: build-backend build-web-e2e build-e2e-plugin-package
 	@printf "$(CYAN)Running E2E tests (headless, parallel, managed runner)...$(RESET)\n"
-	@cd $(WEB_DIR) && for project in routing auth chromium mobile-chrome containers; do \
+	@cd $(WEB_DIR) && status=0; for project in routing auth chromium mobile-chrome containers; do \
 		printf "$(CYAN)-- project: $$project --$(RESET)\n"; \
-		e2e/scripts/run-e2e.sh --host --no-build --no-strict --shards 1 --project "$$project" || exit 1; \
-	done
+		e2e/scripts/run-e2e.sh --host --no-build --no-strict --shards 1 --project "$$project" || status=1; \
+	done; exit $$status
 
 .PHONY: test-e2e-headed
 test-e2e-headed: build-backend build-web-e2e build-e2e-plugin-package

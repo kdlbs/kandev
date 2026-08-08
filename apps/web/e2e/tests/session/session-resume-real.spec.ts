@@ -12,7 +12,7 @@ import { test } from "../../fixtures/test-base";
  * - Backend NOT running with KANDEV_MOCK_AGENT=only
  *
  * Run:
- *   KANDEV_E2E_REAL_AGENTS=1 pnpm --filter @kandev/web e2e -- tests/session-resume-real.spec.ts
+ *   KANDEV_E2E_REAL_AGENTS=1 pnpm --filter @kandev/web e2e:raw -- tests/session-resume-real.spec.ts
  */
 
 const realAgentsEnabled = process.env.KANDEV_E2E_REAL_AGENTS === "1";
