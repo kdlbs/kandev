@@ -208,6 +208,39 @@ func TestHTTPCreateTask_FoundSettledSkipsPostCreateWork(t *testing.T) {
 	assert.Equal(t, 1, count, "no duplicate task should exist")
 }
 
+// TestHTTPCreateTask_FoundOutcomeIgnoresNonexistentRepositoryInRetry pins
+// the spec's documented answer to "what happens when a Found-outcome retry
+// names a repository that no longer exists": convertCreateTaskRepositories
+// (the handler-level pre-service conversion) only checks that an
+// identifying field is present, never that the repository actually exists —
+// existence validation lives in Service.createTaskRepositories, which a
+// Found outcome's early return never reaches. So the retry payload's
+// repositories are never even looked at; the existing task is returned as
+// normal, not a validation failure.
+func TestHTTPCreateTask_FoundOutcomeIgnoresNonexistentRepositoryInRetry(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := newIdempotentCreateTaskRepo()
+	h := newIdempotencyTestHandlers(t, repo)
+
+	first := doCreateTask(h, `{"workspace_id":"ws-1","workflow_id":"wf-1","workflow_step_id":"step-1","title":"Original","external_id":"ext-1"}`)
+	require.Equal(t, http.StatusOK, first.Code, "body: %s", first.Body.String())
+	var firstResp map[string]interface{}
+	require.NoError(t, json.Unmarshal(first.Body.Bytes(), &firstResp))
+	firstID := firstResp["id"].(string)
+
+	_, err := repo.SettleTaskExternalID(context.Background(), firstID, "ext-1", time.Now().UTC())
+	require.NoError(t, err)
+
+	retry := doCreateTask(h, `{"workspace_id":"ws-1","workflow_id":"wf-1","workflow_step_id":"step-1","title":"Retry","external_id":"ext-1","repositories":[{"repository_id":"repo-does-not-exist"}]}`)
+	require.Equal(t, http.StatusOK, retry.Code, "body: %s", retry.Body.String())
+
+	var retryResp map[string]interface{}
+	require.NoError(t, json.Unmarshal(retry.Body.Bytes(), &retryResp))
+	assert.Equal(t, firstID, retryResp["id"])
+	assert.Equal(t, true, retryResp["deduplicated"])
+	assert.Equal(t, true, retryResp["creation_complete"])
+}
+
 // TestHTTPCreateTask_FoundUnsettledReportsIncomplete covers the diagnostic
 // tuple: deduplicated:true + creation_complete:false for an in-flight
 // unsettled create.

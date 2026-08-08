@@ -91,3 +91,38 @@ func TestCreateTaskWithExternalIDAuthorizationPrecedesValidation(t *testing.T) {
 		t.Fatal("must not surface the validation error to an unauthorized caller")
 	}
 }
+
+// TestLookupAndReleaseExternalIDDenyUnauthorizedWorkspace covers the
+// permissions scenario for the two new by-external-id routes directly: a
+// caller who does not own the workspace gets ErrWorkspaceNotFound from both
+// GetTaskByExternalID (the REST lookup route) and ReleaseTaskExternalID (the
+// REST release route) — neither leaks whether the identity exists.
+func TestLookupAndReleaseExternalIDDenyUnauthorizedWorkspace(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	wfID := seedOwnedWorkspaceForCreate(t, ctx, repo, "ws-owned-a3", "user-a")
+
+	settled, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-owned-a3", WorkflowID: wfID, Title: "Settled", ExternalID: "ext-1",
+	})
+	if err != nil {
+		t.Fatalf("seed settled task: %v", err)
+	}
+	mustSettle(t, ctx, repo, settled.Task.ID, "ext-1")
+
+	if _, err := svc.GetTaskByExternalID(ctxAs("user-b"), "ws-owned-a3", "ext-1"); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+		t.Fatalf("GetTaskByExternalID err = %v, want ErrWorkspaceNotFound", err)
+	}
+	if _, err := svc.ReleaseTaskExternalID(ctxAs("user-b"), "ws-owned-a3", "ext-1"); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+		t.Fatalf("ReleaseTaskExternalID err = %v, want ErrWorkspaceNotFound", err)
+	}
+
+	// The identity must survive the denied release attempt untouched.
+	survivor, err := svc.GetTaskByExternalID(ctx, "ws-owned-a3", "ext-1")
+	if err != nil {
+		t.Fatalf("owner lookup after denied release: %v", err)
+	}
+	if survivor.ID != settled.Task.ID {
+		t.Fatalf("survivor id = %s, want %s", survivor.ID, settled.Task.ID)
+	}
+}

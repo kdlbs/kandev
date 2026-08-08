@@ -159,4 +159,11 @@ func TestHandleCreateTask_FoundUnsettledSkipsAutoStart(t *testing.T) {
 	require.Equal(t, inflight.ID, result["id"])
 	require.Equal(t, true, result["deduplicated"])
 	require.Equal(t, false, result["creation_complete"])
+
+	// The response tuple alone doesn't prove nothing was launched — query the
+	// real database directly for the downstream effect start_agent:true would
+	// have produced had the guard been missing.
+	sessions, err := repo.ListTaskSessions(ctx, inflight.ID)
+	require.NoError(t, err)
+	require.Empty(t, sessions, "no session row should exist for an unsettled task even with start_agent:true")
 }

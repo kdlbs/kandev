@@ -5,6 +5,71 @@ import (
 	"testing"
 )
 
+// TestReleasingAnUnsettledTaskAndRecreatingProducesTwoTasks pins the
+// documented unsafe path (spec "The one unsafe thing a caller can do" /
+// "Unsettled outcome" scenarios): releasing the identity held by a task
+// whose create is still in flight, then creating again, produces two task
+// rows for what was meant to be one entity. Kandev does not repair this —
+// the guard against it is never automating a release in response to
+// creation_complete:false, not detection after the fact. This test exists
+// to pin the consequence, not to fix it.
+func TestReleasingAnUnsettledTaskAndRecreatingProducesTwoTasks(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	wfID := seedWorkspaceAndWorkflowForCreate(t, ctx, repo, "ws-unsafe-release")
+
+	// Simulates a create whose required synchronous work has not finished:
+	// the task exists and holds the identity, but is not yet settled.
+	inFlight, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-unsafe-release", WorkflowID: wfID, Title: "In flight", ExternalID: "ext-1",
+	})
+	if err != nil {
+		t.Fatalf("create in-flight task: %v", err)
+	}
+	if inFlight.Task.ExternalIDSettledAt != nil {
+		t.Fatal("expected the seeded task to be unsettled")
+	}
+
+	// A second caller, misusing the release route against its documented
+	// warning, frees the identity while the first create is still running.
+	released, err := svc.ReleaseTaskExternalID(ctx, "ws-unsafe-release", "ext-1")
+	if err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	if !released {
+		t.Fatal("release should report the identity was held")
+	}
+
+	// The identity is now free, so a new create for it succeeds — producing
+	// a second task for what was meant to be one entity.
+	recreated, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-unsafe-release", WorkflowID: wfID, Title: "Recreated", ExternalID: "ext-1",
+	})
+	if err != nil {
+		t.Fatalf("create after unsafe release: %v", err)
+	}
+	if recreated.Outcome != CreateTaskOutcomeCreated {
+		t.Fatalf("outcome = %v, want Created", recreated.Outcome)
+	}
+	if recreated.Task.ID == inFlight.Task.ID {
+		t.Fatal("expected a genuinely new task, distinct from the in-flight one")
+	}
+
+	// Both tasks now exist: the orphaned original (still present, holding no
+	// identity) and the new one (holding ext-1). This is the unsafe
+	// consequence the spec documents and warns against automating.
+	orphan, err := repo.GetTask(ctx, inFlight.Task.ID)
+	if err != nil {
+		t.Fatalf("orphaned task must still exist: %v", err)
+	}
+	if orphan.ExternalID != "" {
+		t.Fatalf("orphan.ExternalID = %q, want empty (released)", orphan.ExternalID)
+	}
+	if _, err := repo.GetTask(ctx, recreated.Task.ID); err != nil {
+		t.Fatalf("recreated task must exist: %v", err)
+	}
+}
+
 // TestCreateTaskWithExternalIDReturnsArchivedTaskUnchanged covers the
 // lifecycle scenario: an archived task still holds its identity, and a
 // retry against it returns the same (still-archived) task rather than

@@ -85,6 +85,39 @@ func TestCreateTaskDuplicateExternalIDConflict(t *testing.T) {
 	}
 }
 
+// TestCreateTaskPrimaryKeyCollisionIsNotClassifiedAsExternalIDConflict covers
+// the spec's uniqueness/concurrency edge case: a task-row insert that
+// collides on the tasks primary key (an explicit duplicate ID), rather than
+// on uniq_tasks_external_id, must surface as a plain error — never
+// misclassified as ErrExternalIDConflict, which would make CreateTask's
+// re-read backstop wrongly treat an unrelated ID collision as "someone else
+// already holds this identity" and fabricate a Found outcome.
+func TestCreateTaskPrimaryKeyCollisionIsNotClassifiedAsExternalIDConflict(t *testing.T) {
+	repo, _ := newTaskExternalIDTestRepo(t)
+	ctx := context.Background()
+	seedWorkspaceForExternalID(t, repo, "ws-pk-collision")
+
+	first := &models.Task{ID: "dup-id", WorkspaceID: "ws-pk-collision", Title: "First", ExternalID: "ext-1"}
+	if err := repo.CreateTask(ctx, first); err != nil {
+		t.Fatalf("create first task: %v", err)
+	}
+
+	second := &models.Task{ID: "dup-id", WorkspaceID: "ws-pk-collision", Title: "Second", ExternalID: "ext-2"}
+	err := repo.CreateTask(ctx, second)
+	if err == nil {
+		t.Fatal("expected an error for a duplicate primary key")
+	}
+	if errors.Is(err, ErrExternalIDConflict) {
+		t.Fatalf("err = %v, want a plain error — a primary-key collision is unrelated to uniq_tasks_external_id", err)
+	}
+
+	// The second task's own identity (ext-2) must not have been claimed by
+	// anything else — it's simply absent, since the insert never committed.
+	if _, lookupErr := repo.GetTaskByExternalID(ctx, "ws-pk-collision", "ext-2"); !errors.Is(lookupErr, ErrTaskNotFound) {
+		t.Fatalf("GetTaskByExternalID(ext-2) err = %v, want ErrTaskNotFound", lookupErr)
+	}
+}
+
 // TestCreateTaskSameExternalIDDifferentWorkspaces confirms uniqueness is
 // scoped per workspace, not global.
 func TestCreateTaskSameExternalIDDifferentWorkspaces(t *testing.T) {
