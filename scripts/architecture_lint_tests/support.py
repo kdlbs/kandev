@@ -18,6 +18,9 @@ from architecture_lint.rules import RULES  # noqa: E402
 RUNTIME_RULE = "ARCH-RUNTIME-IMPORT"
 TASK_OFFICE_RULE = "ARCH-TASK-OFFICE-IMPORT"
 ROOT_STATE_RULE = "ARCH-FRONTEND-ROOT-STATE-CAST"
+FRONTEND_STATE_UI_RULE = "ARCH-FRONTEND-STATE-UI-IMPORT"
+RUN_SCHEDULER_OWNER_RULE = "ARCH-RUN-SCHEDULER-OWNER"
+RUNS_OFFICE_RULE = "ARCH-RUNS-OFFICE-IMPORT"
 RUNTIME_IMPORT = "github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 OFFICE_IMPORT = "github.com/kandev/kandev/internal/office/models"
 RULE_FILES = {rule.id: rule.baseline_path.name for rule in RULES}
@@ -59,6 +62,9 @@ class ArchitectureFixture(unittest.TestCase):
         runtime: list[dict[str, object]] | None = None,
         task_office: list[dict[str, object]] | None = None,
         root_state: list[dict[str, object]] | None = None,
+        frontend_state_ui: list[dict[str, object]] | None = None,
+        run_scheduler_owner: list[dict[str, object]] | None = None,
+        runs_office: list[dict[str, object]] | None = None,
     ) -> None:
         entries = {rule.id: [] for rule in RULES}
         entries.update(
@@ -66,6 +72,9 @@ class ArchitectureFixture(unittest.TestCase):
                 RUNTIME_RULE: runtime or [],
                 TASK_OFFICE_RULE: task_office or [],
                 ROOT_STATE_RULE: root_state or [],
+                FRONTEND_STATE_UI_RULE: frontend_state_ui or [],
+                RUN_SCHEDULER_OWNER_RULE: run_scheduler_owner or [],
+                RUNS_OFFICE_RULE: runs_office or [],
             }
         )
         for rule in RULES:

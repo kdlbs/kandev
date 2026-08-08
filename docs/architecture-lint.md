@@ -13,6 +13,9 @@ the GitHub Actions workflow only invokes those repository-owned entry points.
 | `ARCH-RUNTIME-IMPORT` | Production Go outside `internal/agent/runtime/` must not add direct imports of `runtime/lifecycle` or `runtime/agentctl`. | Depend on `internal/agent/runtime` or an explicitly approved low-level adapter. |
 | `ARCH-TASK-OFFICE-IMPORT` | Production Go under `internal/task/` must not add imports of `internal/office`. | The shared task model owns task concepts; Office consumes or adapts them. |
 | `ARCH-FRONTEND-ROOT-STATE-CAST` | `apps/web/lib/state/store.ts` must not add `as any` or `as unknown as` escapes. | Derive typed domain state, actions, and defaults. |
+| `ARCH-RUN-SCHEDULER-OWNER` | Only the backend composition root under `apps/backend/internal/backendapp/` may import `internal/runs/scheduler`. | Construct the one backend-wide scheduler in `internal/backendapp`; other packages consume runs services or interfaces. |
+| `ARCH-RUNS-OFFICE-IMPORT` | Production Go under `internal/runs/` must not add imports of `internal/office` or its subpackages. | Office adapters may depend on generic runs; generic runs must not depend on Office implementations. |
+| `ARCH-FRONTEND-STATE-UI-IMPORT` | Production files under `apps/web/lib/state/` must not import `apps/web/components/` or `apps/web/app/`. | Components and routes consume state; state remains below UI/app layers and shared values belong in dependency-neutral modules. |
 
 Each rule owns its exact grandfathered finding set under `config/architecture-lint/`. A current
 finding absent from that rule's baseline fails. When cleanup removes a finding, the now-stale entry

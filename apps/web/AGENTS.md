@@ -40,6 +40,11 @@ Go Boot Payload -> Hydrate Store -> Components Read Store -> Hooks Subscribe
 
 **Never fetch data directly in components.**
 
+**State dependency direction:** Production modules under `apps/web/lib/state/` are below the UI
+and route layers. Components and app routes may consume state, but state must not import from
+`apps/web/components/` or `apps/web/app/`, including type-only, re-export, and dynamic imports.
+Place shared values needed by both layers in a dependency-neutral module.
+
 ## Store Structure (Domain Slices)
 
 ```text

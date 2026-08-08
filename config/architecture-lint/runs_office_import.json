@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "rule": "ARCH-RUNS-OFFICE-IMPORT",
+  "entries": [
+    {
+      "import": "github.com/kandev/kandev/internal/office/models",
+      "path": "apps/backend/internal/runs/repository/sqlite/run_events.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/office/models",
+      "path": "apps/backend/internal/runs/repository/sqlite/runs.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/office/models",
+      "path": "apps/backend/internal/runs/service/service.go"
+    }
+  ]
+}
