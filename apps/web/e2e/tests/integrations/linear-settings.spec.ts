@@ -48,12 +48,13 @@ test.describe("Linear settings", () => {
   test("workspace-scoped route scopes the saved credentials form", async ({
     testPage,
     apiClient,
+    seedData,
   }) => {
     const other = await apiClient.createWorkspace("Linear Secondary Workspace");
     await apiClient.mockLinearSetTeams([{ id: "team-1", key: "ENG", name: "Engineering" }]);
 
     const settings = new LinearSettingsPage(testPage);
-    await settings.goto();
+    await settings.gotoWorkspace(seedData.workspaceId);
 
     await settings.secretInput.fill("lin_api_default");
     await settings.saveButton.click();

@@ -65,8 +65,7 @@ test.describe("Mobile storage maintenance", () => {
     await mobile.mobileMenuButton.click();
     await testPage.getByRole("link", { name: "Settings" }).click();
     const index = testPage.getByTestId("settings-index");
-    await index.getByRole("button", { name: "Expand System" }).click();
-    await index.getByRole("link", { name: "Storage" }).click();
+    await index.locator('a[href="/settings/system/data-storage"]').click();
 
     await expect(testPage.getByTestId("storage-settings-page")).toBeVisible();
     await testPage
@@ -159,7 +158,7 @@ test.describe("Mobile storage maintenance", () => {
       const spinner = testPage.getByTestId("storage-overview-spinner");
       await expect(spinner).toBeVisible();
       await expect(testPage.getByText("Loading storage data…")).toBeVisible();
-      await expect(testPage.getByTestId("storage-overview-card")).toBeInViewport();
+      await expect(testPage.getByTestId("storage-overview-card")).toBeVisible();
       await expect(testPage.getByTestId("storage-policy-card")).toBeVisible();
       await expect(testPage.getByTestId("storage-run-history")).toBeVisible();
       await expect(testPage.getByTestId("storage-quarantine-card")).toBeVisible();

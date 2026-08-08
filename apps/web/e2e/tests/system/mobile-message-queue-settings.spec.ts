@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { expectElementsNotToIntersect } from "../../helpers/layout-assertions";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 
 test("mobile navigation reaches the Message Queue section with touch-safe shared settings layout", async ({
@@ -41,8 +42,5 @@ test("mobile navigation reaches the Message Queue section with touch-safe shared
   await input.fill(current === "23" ? "24" : "23");
   const saveBar = testPage.getByTestId("settings-floating-save");
   await expect(saveBar).toBeVisible();
-  const [inputAfterEdit, saveBox] = await Promise.all([input.boundingBox(), saveBar.boundingBox()]);
-  expect(inputAfterEdit).not.toBeNull();
-  expect(saveBox).not.toBeNull();
-  expect(inputAfterEdit!.y + inputAfterEdit!.height).toBeLessThan(saveBox!.y);
+  await expectElementsNotToIntersect(input, saveBar);
 });

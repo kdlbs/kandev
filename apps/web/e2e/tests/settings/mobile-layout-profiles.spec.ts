@@ -28,7 +28,7 @@ test.describe("Mobile layout profiles", () => {
     // before the user ever chose anything. See layout-editor-toolbar.tsx
     // AddPanelAction for the fix (deferred, click-driven open state).
     const layouts = new LayoutSettingsPage(testPage);
-    await layouts.openFromMobileMenu();
+    await layouts.openFromSettingsIndex();
     const trigger = testPage.getByTestId("layout-editor-add-panel").getByRole("button", {
       name: "Add panel",
     });

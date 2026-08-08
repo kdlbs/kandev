@@ -14,11 +14,8 @@ test.describe("Mobile settings navigation", () => {
     const takeover = testPage.getByTestId("app-sidebar-settings-mode");
 
     await expect(takeover).toBeHidden();
-
-    await testPage.getByTestId("settings-mobile-menu-button").click();
-    await expect(
-      testPage.getByTestId("settings-mobile-menu").locator('a[href="/settings/integrations"]'),
-    ).toBeVisible();
+    await expect(testPage.getByTestId("settings-mobile-menu-button")).toHaveCount(0);
+    await expect(testPage.getByTestId("settings-mobile-menu")).toHaveCount(0);
   });
 
   test("shows the workspace breadcrumb and orders secrets after automations", async ({

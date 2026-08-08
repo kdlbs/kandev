@@ -21,8 +21,8 @@ export class LayoutSettingsPage {
     await this.page.goto("/settings");
     const index = this.page.getByTestId("settings-index");
     await expect(index).toBeVisible();
-    await index.getByRole("link", { name: "Layouts", exact: true }).click();
-    await expect(this.page).toHaveURL(/\/settings\/general\/layouts$/);
+    await index.getByRole("link", { name: /^Layouts\b/ }).click();
+    await expect(this.page).toHaveURL(/\/settings\/preferences\/layouts$/);
     await expect(this.root).toBeVisible();
   }
 
