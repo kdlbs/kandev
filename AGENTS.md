@@ -89,11 +89,11 @@ This is enforced, not just requested. Two ratchets, both of which only tighten:
   hardcoded string in a file you added, or on a line you changed, regardless of
   directory. Untouched lines are never judged, so you are never asked to migrate
   code you did not write.
-- **Migrated paths, whole file** — `i18next/no-literal-string` is a lint error for
+- **Listed paths, whole file** — `i18next/no-literal-string` is a lint error for
   the paths in `i18nGuardFiles` (`apps/web/eslint.i18n.options.mjs`). The
-  migration of existing strings proceeds **one directory per PR**: when you
-  migrate one, append it to that list in the same PR. Never remove an entry to
-  make a build pass — a check rejects that.
+  migration of existing strings is **complete**, and the list covers every area it
+  touched; append a path that renders user-facing copy in the same PR that adds
+  it. Never remove an entry to make a build pass — a check rejects that.
 
 Three rules that cause silent, hard-to-find bugs when broken: never translate a
 string compared with `===` (type-to-confirm tokens become impossible to type);
