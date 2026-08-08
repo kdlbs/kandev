@@ -40,6 +40,7 @@ export type TaskCreateLastUsedApi = {
   branch?: string;
   agent_profile_id?: string;
   executor_profile_id?: string;
+  workflow_ids_by_workspace?: Record<string, string>;
 };
 
 export type AppStatusBarOrderApi = {

@@ -18,7 +18,7 @@ import {
 import { computePassthroughProfile } from "@/components/task-create-dialog-helpers";
 import {
   computeDialogDefaultStepId,
-  computeSingleWorkflowFallbackId,
+  resolveEffectiveTaskCreateWorkflowId,
 } from "@/components/task-create-dialog-defaults";
 import { useRemoteAuthSpecs } from "@/hooks/domains/settings/use-remote-auth-specs";
 import { isAgentConfiguredOnExecutor } from "@/lib/agent-executor-compat";
@@ -54,6 +54,40 @@ function pickExecutorDisabledReason(
     return (profile) => getMultiRepoExecutorDisabledReason(profile.executor_type);
   }
   return undefined;
+}
+
+function resolveDialogWorkflowSelection({
+  workspaceId,
+  workflowId,
+  selectedWorkflowId,
+  lockedWorkflow,
+  lastUsedWorkflowIdsByWorkspace,
+  userSettingsLoaded,
+  workflows,
+}: Pick<
+  DialogComputedArgs,
+  | "workspaceId"
+  | "workflowId"
+  | "lockedWorkflow"
+  | "lastUsedWorkflowIdsByWorkspace"
+  | "userSettingsLoaded"
+  | "workflows"
+> & { selectedWorkflowId: string | null }) {
+  const effectiveWorkflowId = resolveEffectiveTaskCreateWorkflowId({
+    workspaceId,
+    lockedWorkflowId: lockedWorkflow ? workflowId : null,
+    manualWorkflowId: selectedWorkflowId,
+    lastUsedWorkflowId:
+      userSettingsLoaded === false
+        ? null
+        : (lastUsedWorkflowIdsByWorkspace[workspaceId ?? ""] ?? null),
+    contextWorkflowId: lockedWorkflow ? null : workflowId,
+    workflows,
+  });
+  const workflowAgentProfileId = effectiveWorkflowId
+    ? (workflows.find((workflow) => workflow.id === effectiveWorkflowId)?.agent_profile_id ?? "")
+    : "";
+  return { effectiveWorkflowId, workflowAgentProfileId };
 }
 
 /**
@@ -160,20 +194,19 @@ export function useDialogComputed({
   repositories,
   workflows,
   snapshots,
+  lockedWorkflow,
+  lastUsedWorkflowIdsByWorkspace,
+  userSettingsLoaded,
 }: DialogComputedArgs): DialogComputedValues {
-  const singleWorkflowId = computeSingleWorkflowFallbackId(
-    fs.selectedWorkflowId,
+  const { effectiveWorkflowId, workflowAgentProfileId } = resolveDialogWorkflowSelection({
+    selectedWorkflowId: fs.selectedWorkflowId,
+    workspaceId,
     workflowId,
+    lockedWorkflow,
+    lastUsedWorkflowIdsByWorkspace,
+    userSettingsLoaded,
     workflows,
-  );
-  const effectiveWorkflowId = fs.selectedWorkflowId ?? workflowId ?? singleWorkflowId;
-  // Compute workflow agent lock directly from data — avoids effect timing issues.
-  const workflowAgentProfileId = (() => {
-    const wfId = effectiveWorkflowId;
-    if (!wfId) return "";
-    const wf = workflows.find((w) => w.id === wfId);
-    return wf?.agent_profile_id ?? "";
-  })();
+  });
   const workflowAgentLocked = Boolean(workflowAgentProfileId);
   // fs.agentProfileId lags behind the workflow override on dialog re-open
   // (effect deps don't change), so fall back to the synchronous value.

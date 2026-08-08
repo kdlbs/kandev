@@ -2,7 +2,6 @@
 
 import { IconX } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
-import { GridSpinner } from "@/components/grid-spinner";
 
 type SessionTabCloseActionProps = {
   sessionId: string | undefined;
@@ -37,7 +36,11 @@ export function SessionTabCloseAction({
       }}
     >
       {isDeleting ? (
-        <GridSpinner className="h-3 w-3" />
+        <span
+          className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground"
+          role="status"
+          aria-label={t("common:loadingIndicatorLabel")}
+        />
       ) : (
         <IconX className="h-3 w-3" aria-hidden="true" />
       )}

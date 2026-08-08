@@ -147,7 +147,9 @@ describe("buildCoreFields", () => {
     const result = buildCoreFields(settings);
     expect(result.terminalFontFamily).toBeNull();
   });
+});
 
+describe("buildCoreFields task-create last-used mapping", () => {
   it("does not mark an empty task-create last-used object as synced", () => {
     const settings = {
       task_create_last_used: {},
@@ -159,6 +161,7 @@ describe("buildCoreFields", () => {
       branch: null,
       agentProfileId: null,
       executorProfileId: null,
+      workflowIdsByWorkspace: {},
       synced: false,
     });
   });
@@ -173,6 +176,29 @@ describe("buildCoreFields", () => {
     const result = buildCoreFields(settings);
     expect(result.taskCreateLastUsed).toMatchObject({
       repositoryId: "repo-1",
+      synced: true,
+    });
+  });
+
+  it("maps workspace-scoped workflow history and marks it as synced", () => {
+    const result = buildCoreFields({
+      task_create_last_used: {
+        workflow_ids_by_workspace: {
+          "workspace-1": "workflow-1",
+          "workspace-2": "workflow-2",
+        },
+      },
+    });
+
+    expect(result.taskCreateLastUsed).toEqual({
+      repositoryId: null,
+      branch: null,
+      agentProfileId: null,
+      executorProfileId: null,
+      workflowIdsByWorkspace: {
+        "workspace-1": "workflow-1",
+        "workspace-2": "workflow-2",
+      },
       synced: true,
     });
   });

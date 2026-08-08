@@ -241,22 +241,23 @@ function MRDropdownList({
 function useMRDesktopReviewOpener(mobile: boolean) {
   const addMRPanel = useDockviewStore((state) => state.addMRPanel);
   const dockviewReady = useDockviewStore((state) => state.api !== null);
+  const isRestoringLayout = useDockviewStore((state) => state.isRestoringLayout);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const setMobileSessionReview = useAppStore((state) => state.setMobileSessionReview);
   const [pendingDesktopMR, setPendingDesktopMR] = useState<TaskMR | null>(null);
 
   useEffect(() => {
-    if (!dockviewReady || !pendingDesktopMR) return;
+    if (!dockviewReady || isRestoringLayout || !pendingDesktopMR) return;
     openDesktopMRReview(addMRPanel, pendingDesktopMR);
     setPendingDesktopMR(null);
-  }, [addMRPanel, dockviewReady, pendingDesktopMR]);
+  }, [addMRPanel, dockviewReady, isRestoringLayout, pendingDesktopMR]);
 
   return (mr: TaskMR) => {
     if (mobile) {
       if (activeSessionId) openMobileMRReview(setMobileSessionReview, activeSessionId, mr);
       return;
     }
-    if (!dockviewReady) {
+    if (!dockviewReady || isRestoringLayout) {
       setPendingDesktopMR(mr);
     } else {
       openDesktopMRReview(addMRPanel, mr);

@@ -10,12 +10,21 @@ const POPOVER_STUB_TESTID = "mr-ci-popover-stub";
 
 const gitlabMocks = vi.hoisted(() => ({ mrs: [] as TaskMR[] }));
 const touchMocks = vi.hoisted(() => ({ usesTouchDrawer: false }));
-const dockviewMocks = vi.hoisted(() => ({ addMRPanel: vi.fn() }));
+const dockviewMocks = vi.hoisted(() => ({ addMRPanel: vi.fn(), isRestoringLayout: false }));
 
 vi.mock("@/lib/state/dockview-store", () => ({
   useDockviewStore: (
-    selector: (state: { addMRPanel: typeof dockviewMocks.addMRPanel; api: object }) => unknown,
-  ) => selector({ addMRPanel: dockviewMocks.addMRPanel, api: {} }),
+    selector: (state: {
+      addMRPanel: typeof dockviewMocks.addMRPanel;
+      api: object;
+      isRestoringLayout: boolean;
+    }) => unknown,
+  ) =>
+    selector({
+      addMRPanel: dockviewMocks.addMRPanel,
+      api: {},
+      isRestoringLayout: dockviewMocks.isRestoringLayout,
+    }),
 }));
 
 vi.mock("@/components/state-provider", () => ({
@@ -89,6 +98,7 @@ describe("MRTopbarButton hover preview", () => {
     vi.useFakeTimers();
     touchMocks.usesTouchDrawer = false;
     dockviewMocks.addMRPanel.mockClear();
+    dockviewMocks.isRestoringLayout = false;
   });
 
   afterEach(() => {
@@ -138,6 +148,24 @@ describe("MRTopbarButton hover preview", () => {
     // the hover popover closing.
     expect(dockviewMocks.addMRPanel).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId(POPOVER_STUB_TESTID)).toBeNull();
+  });
+
+  it("keeps a direct click pending until the Dockview layout has settled", () => {
+    dockviewMocks.isRestoringLayout = true;
+    gitlabMocks.mrs = [singleMR()];
+    const view = render(createElement(MRTopbarButton));
+    const trigger = screen.getByTestId(TRIGGER_TESTID);
+
+    act(() => {
+      fireEvent.click(trigger);
+    });
+    expect(dockviewMocks.addMRPanel).not.toHaveBeenCalled();
+
+    dockviewMocks.isRestoringLayout = false;
+    act(() => {
+      view.rerender(createElement(MRTopbarButton, { compact: true }));
+    });
+    expect(dockviewMocks.addMRPanel).toHaveBeenCalledTimes(1);
   });
 
   it("AC26: on touch, no hover popover is ever rendered and the dropdown still opens on click", () => {

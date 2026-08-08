@@ -87,6 +87,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [runtime-state-publication-order](tasks/runtime-state-publication-order.md) | shipped |
 | [agent-generated-titles](tasks/agent-generated-titles.md) | approved |
 | [task-create-executor-default](tasks/task-create-executor-default.md) | approved |
+| [task-create-workflow-memory](tasks/task-create-workflow-memory.md) | approved |
 | [prompt-attachments](tasks/prompt-attachments.md) | draft |
 | [sidebar-task-edit](tasks/sidebar-task-edit.md) | approved |
 | [explicit-completion-signal](workflow/explicit-completion-signal/spec.md) | shipped |

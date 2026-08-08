@@ -125,6 +125,7 @@ export type StoreSelections = {
   userSettingsLoaded?: boolean;
   lastUsedAgentProfileId?: string | null;
   lastUsedExecutorProfileId?: string | null;
+  effectiveWorkflowId?: string | null;
 };
 
 export type DialogComputedValues = {
@@ -172,7 +173,15 @@ export type DialogComputedArgs = {
   workspaces: Workspace[];
   executors: Executor[];
   repositories: Repository[];
-  workflows: Array<{ id: string; agent_profile_id?: string }>;
+  workflows: Array<{
+    id: string;
+    workspaceId?: string;
+    agent_profile_id?: string;
+    hidden?: boolean;
+  }>;
+  lockedWorkflow: boolean;
+  lastUsedWorkflowIdsByWorkspace: Record<string, string>;
+  userSettingsLoaded?: boolean;
   snapshots: Record<string, WorkflowSnapshotData>;
 };
 

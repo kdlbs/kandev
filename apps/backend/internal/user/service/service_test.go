@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -1098,7 +1099,7 @@ func TestUpdateUserSettingsCombinesSettingsAndTaskCreatePatch(t *testing.T) {
 	if repo.updateCalls != 0 {
 		t.Fatalf("expected task-create patch to be folded into settings write, got %d separate update calls", repo.updateCalls)
 	}
-	if repo.preservingPatch == nil || *repo.preservingPatch != patch {
+	if repo.preservingPatch == nil || !reflect.DeepEqual(*repo.preservingPatch, patch) {
 		t.Fatalf("expected preserving write patch %+v, got %+v", patch, repo.preservingPatch)
 	}
 	if len(eventBus.publishedEvents) != 1 {
@@ -1300,7 +1301,7 @@ func TestClearDefaultEditorIDPreservesTaskCreateLastUsed(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected event data map, got %T", eventBus.publishedEvents[0].Data)
 	}
-	if data["task_create_last_used"] != updatedSettings.TaskCreateLastUsed {
+	if !reflect.DeepEqual(data["task_create_last_used"], updatedSettings.TaskCreateLastUsed) {
 		t.Fatalf("expected event to include preserved task-create state %+v, got %+v", updatedSettings.TaskCreateLastUsed, data["task_create_last_used"])
 	}
 }
@@ -1358,7 +1359,7 @@ func TestRecordTaskCreateLastUsed(t *testing.T) {
 		if repo.updateUserID != store.DefaultUserID {
 			t.Fatalf("expected update user id %q, got %q", store.DefaultUserID, repo.updateUserID)
 		}
-		if repo.updatePatch != patch {
+		if !reflect.DeepEqual(repo.updatePatch, patch) {
 			t.Fatalf("expected patch %+v, got %+v", patch, repo.updatePatch)
 		}
 		if len(eventBus.publishedEvents) != 1 {
@@ -1375,8 +1376,33 @@ func TestRecordTaskCreateLastUsed(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected event data map, got %T", published.Data)
 		}
-		if data["task_create_last_used"] != updatedSettings.TaskCreateLastUsed {
+		if !reflect.DeepEqual(data["task_create_last_used"], updatedSettings.TaskCreateLastUsed) {
 			t.Fatalf("expected event task-create state %+v, got %+v", updatedSettings.TaskCreateLastUsed, data["task_create_last_used"])
+		}
+	})
+
+	t.Run("workflow-only patch updates repo and publishes settings event", func(t *testing.T) {
+		patch := models.TaskCreateLastUsed{
+			WorkflowIDsByWorkspace: map[string]string{"workspace-1": "workflow-1"},
+		}
+		updatedSettings := &models.UserSettings{
+			UserID: store.DefaultUserID,
+			TaskCreateLastUsed: models.TaskCreateLastUsed{
+				WorkflowIDsByWorkspace: map[string]string{"workspace-1": "workflow-1"},
+			},
+		}
+		repo := &recordingUserRepository{updateSettings: updatedSettings}
+		eventBus := &recordingEventBus{}
+		svc := newTestService(repo, eventBus)
+
+		if err := svc.RecordTaskCreateLastUsed(context.Background(), patch); err != nil {
+			t.Fatalf("RecordTaskCreateLastUsed: %v", err)
+		}
+		if repo.updateCalls != 1 || !reflect.DeepEqual(repo.updatePatch, patch) {
+			t.Fatalf("expected workflow-only patch to update repo once: calls=%d patch=%+v", repo.updateCalls, repo.updatePatch)
+		}
+		if len(eventBus.publishedEvents) != 1 {
+			t.Fatalf("expected one settings event, got %d", len(eventBus.publishedEvents))
 		}
 	})
 
