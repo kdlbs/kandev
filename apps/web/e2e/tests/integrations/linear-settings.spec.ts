@@ -1,8 +1,12 @@
 import { test, expect } from "../../fixtures/test-base";
 import type { Locator } from "@playwright/test";
+import { execSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import { LinearSettingsPage } from "../../pages/linear-settings-page";
 import { assertWatcherAgentProfileResetsToStepDefault } from "./watcher-profile-default-flow";
 import { assertWatcherDispatchOrderPersists } from "./watcher-dispatch-order-flow";
+import { makeGitEnv } from "../../helpers/git-helper";
 
 test.describe("Linear settings", () => {
   test("empty workspace shows form with disabled save/test until secret is filled", async ({
@@ -243,6 +247,7 @@ test.describe("Linear settings", () => {
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
     await apiClient.mockLinearReset();
     await apiClient.mockLinearSetTeams([{ id: "team-1", key: "ENG", name: "Engineering" }]);
@@ -250,12 +255,21 @@ test.describe("Linear settings", () => {
     await apiClient.waitForIntegrationAuthHealthy("linear");
 
     // The fixture seeds one workspace repository ("E2E Repo"); add a second so
-    // the picker has two options. The path need not exist on disk — repository
-    // registration is DB-level, and the branch fetch for this repo returns
-    // nothing (its default branch is filled server-side on save).
+    // the picker has two options. The backend requires registered local repos
+    // to exist and be valid git repositories (canonicalRepositoryLocalPath
+    // stats + git-validates the path), so create a real one under the
+    // backend's tmp dir (also inside discoveryRoots, so branch listing works).
+    const secondRepoDir = path.join(backend.tmpDir, "repos", "e2e-repo-b");
+    fs.rmSync(secondRepoDir, { recursive: true, force: true });
+    fs.mkdirSync(secondRepoDir, { recursive: true });
+    const gitEnv = makeGitEnv(backend.tmpDir);
+    execSync("git init -b main", { cwd: secondRepoDir, env: gitEnv });
+    fs.writeFileSync(path.join(secondRepoDir, "README.md"), "second repo\n");
+    execSync("git add README.md", { cwd: secondRepoDir, env: gitEnv });
+    execSync('git commit -m "init"', { cwd: secondRepoDir, env: gitEnv });
     const secondRepo = await apiClient.createRepository(
       seedData.workspaceId,
-      `${seedData.repositoryPath}-multi`,
+      secondRepoDir,
       "main",
       { name: "E2E Repo B" },
     );

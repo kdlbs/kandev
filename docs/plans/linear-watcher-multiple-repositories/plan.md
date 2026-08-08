@@ -143,7 +143,7 @@ Extend `apps/web/e2e/tests/integrations/linear-settings.spec.ts` (mock Linear pr
 
 - **Scenario:** seed two repositories in the workspace (`apiClient.createRepository`), open New Watcher, add both via the repo dropdown, set a branch on one, save; assert the watch persists via `apiClient.rawRequest("GET", "/api/v1/linear/watches/issue?workspace_id=…")` → `repositories` has 2 entries in order.
 - **Scenario (invariant):** create a watch without touching the repository picker; assert the stored watch **omits** `repositories` (the unbound GET contract — the key is absent, never an empty array) and a triggered issue still creates a repo-less task (assert via the created task's repository association, mirroring the existing watcher trigger helpers in this spec file's sibling flows).
-- **Scenario:** reopen the dialog for the saved watch; both repo rows render with the saved branches — including a repo whose branch fetch returns nothing (no repo on disk), which must still display its resolved default branch.
+- **Scenario:** reopen the dialog for the saved watch; both repo rows render with the saved branches (the second repo is a real git repo registered through the API, since the backend now requires local repos to exist).
 - Keep it to one spec file; run with `KANDEV_E2E_MOCK=true` (e2e fixture already sets `KANDEV_MOCK_LINEAR`).
 
 ## Rollout
