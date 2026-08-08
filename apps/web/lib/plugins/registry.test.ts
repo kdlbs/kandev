@@ -262,6 +262,28 @@ describe("pluginRegistry — task panels and task menu actions", () => {
     expect(pluginRegistry.getTaskMenuActions()).toHaveLength(1);
   });
 
+  it("registers a 'primary' group task menu action separately from 'edit'", () => {
+    const scoped = pluginRegistry.forPlugin("plugin-a");
+    const editRun = vi.fn();
+    const primaryRun = vi.fn();
+
+    scoped.registerTaskMenuAction({ id: "enhance", label: "Enhance", group: "edit", run: editRun });
+    scoped.registerTaskMenuAction({
+      id: "quick-tag",
+      label: "Tag",
+      group: "primary",
+      run: primaryRun,
+    });
+
+    expect(pluginRegistry.getTaskMenuActions("edit")).toEqual([
+      { pluginId: "plugin-a", id: "enhance", label: "Enhance", group: "edit", run: editRun },
+    ]);
+    expect(pluginRegistry.getTaskMenuActions("primary")).toEqual([
+      { pluginId: "plugin-a", id: "quick-tag", label: "Tag", group: "primary", run: primaryRun },
+    ]);
+    expect(pluginRegistry.getTaskMenuActions()).toHaveLength(2);
+  });
+
   it("bulk-revokes task panels and task menu actions on unregisterPlugin", () => {
     const scopedA = pluginRegistry.forPlugin("plugin-a");
     const scopedB = pluginRegistry.forPlugin("plugin-b");
@@ -284,6 +306,69 @@ describe("pluginRegistry — task panels and task menu actions", () => {
       { pluginId: "plugin-b", id: "notes", title: "Notes", icon: undefined, Component: Notes },
     ]);
     expect(pluginRegistry.getTaskMenuActions()).toEqual([]);
+  });
+});
+
+describe("pluginRegistry — task filters", () => {
+  afterEach(() => {
+    cleanup("plugin-a", "plugin-b");
+  });
+
+  it("registers a task filter and returns it with its owning pluginId", () => {
+    const scoped = pluginRegistry.forPlugin("plugin-a");
+    const getOptions = () => [{ value: "bug", label: "Bug" }];
+    const matches = () => true;
+
+    scoped.registerTaskFilter({ id: "tags", label: "Tags", getOptions, matches });
+
+    expect(pluginRegistry.getTaskFilters()).toEqual([
+      { pluginId: "plugin-a", id: "tags", label: "Tags", getOptions, matches },
+    ]);
+  });
+
+  it("returns task filters from multiple plugins in registration order", () => {
+    const scopedA = pluginRegistry.forPlugin("plugin-a");
+    const scopedB = pluginRegistry.forPlugin("plugin-b");
+
+    scopedA.registerTaskFilter({
+      id: "tags",
+      label: "Tags",
+      getOptions: () => [],
+      matches: () => true,
+    });
+    scopedB.registerTaskFilter({
+      id: "priority",
+      label: "Priority",
+      getOptions: () => [],
+      matches: () => true,
+    });
+
+    expect(pluginRegistry.getTaskFilters().map((filter) => filter.id)).toEqual([
+      "tags",
+      "priority",
+    ]);
+  });
+
+  it("bulk-revokes task filters on unregisterPlugin", () => {
+    const scopedA = pluginRegistry.forPlugin("plugin-a");
+    const scopedB = pluginRegistry.forPlugin("plugin-b");
+
+    scopedA.registerTaskFilter({
+      id: "tags",
+      label: "Tags",
+      getOptions: () => [],
+      matches: () => true,
+    });
+    scopedB.registerTaskFilter({
+      id: "priority",
+      label: "Priority",
+      getOptions: () => [],
+      matches: () => true,
+    });
+
+    pluginRegistry.unregisterPlugin("plugin-a");
+
+    expect(pluginRegistry.getTaskFilters().map((filter) => filter.id)).toEqual(["priority"]);
   });
 });
 

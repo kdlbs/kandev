@@ -66,4 +66,21 @@ describe("locale-aware Intl wrappers", () => {
     );
     await activateLocale("en");
   });
+
+  it("passes pt-pt to number and date formatters", async () => {
+    await activateLocale("pt-pt");
+    const dateOptions: Intl.DateTimeFormatOptions = {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      timeZone: "UTC",
+    };
+    const date = "2026-07-27T00:00:00Z";
+
+    expect(formatNumber(1234.5)).toBe(new Intl.NumberFormat("pt-pt").format(1234.5));
+    expect(formatDate(date, dateOptions)).toBe(
+      new Intl.DateTimeFormat("pt-pt", dateOptions).format(new Date(date)),
+    );
+    await activateLocale("en");
+  });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 
 const mocks = vi.hoisted(() => ({
@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   setActiveTask: vi.fn(),
   setActiveSession: vi.fn(),
   openQuickChat: vi.fn(),
+  setImproveDialogOpen: vi.fn(),
+  openQuickTerminal: vi.fn(),
   dialogTaskSessionId: null as string | null,
   dialogWillNavigate: false,
 }));
@@ -20,14 +22,21 @@ function renderItem(collapsed: boolean) {
 }
 
 const state = {
-  workspaces: { activeId: "ws-1" as string | null },
+  workspaces: {
+    activeId: "ws-1" as string | null,
+    items: [{ id: "ws-1", name: "Default Workspace" }],
+  },
+  appSidebar: { improveDialogOpen: false },
   kanban: {
     workflowId: "wf-1" as string | null,
     steps: [{ id: "s1", title: "Todo" }],
   },
   setActiveTask: mocks.setActiveTask,
   setActiveSession: mocks.setActiveSession,
+  setImproveDialogOpen: mocks.setImproveDialogOpen,
 };
+const QUICK_TERMINAL_TEST_ID = "sidebar-quick-terminal-shortcut";
+const QUICK_CHAT_TEST_ID = "sidebar-quick-chat-shortcut";
 let officeEnabled = false;
 let pathname = "/";
 
@@ -36,6 +45,9 @@ vi.mock("@/components/state-provider", () => ({
 }));
 vi.mock("@/hooks/use-quick-chat-launcher", () => ({
   useQuickChatLauncher: () => mocks.openQuickChat,
+}));
+vi.mock("@/hooks/use-quick-terminal-launcher", () => ({
+  useQuickTerminalLauncher: () => mocks.openQuickTerminal,
 }));
 vi.mock("@/hooks/domains/features/use-feature", () => ({
   useFeature: () => officeEnabled,
@@ -80,14 +92,26 @@ import { requestNewTaskCreation } from "@/lib/desktop/new-task-request";
 const OFFICE_DIALOG_TESTID = "office-new-task-dialog";
 const REGULAR_DIALOG_TESTID = "regular-task-create-dialog";
 
+function setImproveWorkspaceActive() {
+  state.workspaces.activeId = "ws-improve";
+  state.workspaces.items = [
+    { id: "ws-1", name: "Default Workspace" },
+    { id: "ws-improve", name: "Improve Kandev" },
+  ];
+}
+
 function resetTestState() {
   state.workspaces.activeId = "ws-1";
+  state.workspaces.items = [{ id: "ws-1", name: "Default Workspace" }];
+  state.appSidebar.improveDialogOpen = false;
   state.kanban.workflowId = "wf-1";
   state.kanban.steps = [{ id: "s1", title: "Todo" }];
   mocks.routerPush.mockClear();
   mocks.setActiveTask.mockClear();
   mocks.setActiveSession.mockClear();
   mocks.openQuickChat.mockClear();
+  mocks.setImproveDialogOpen.mockClear();
+  mocks.openQuickTerminal.mockClear();
   mocks.dialogTaskSessionId = null;
   mocks.dialogWillNavigate = false;
   officeEnabled = false;
@@ -146,24 +170,88 @@ describe("AppSidebarNewTaskItem dialog routing", () => {
     expect(screen.queryByTestId(REGULAR_DIALOG_TESTID)).toBeNull();
     expect(screen.queryByTestId(OFFICE_DIALOG_TESTID)).toBeNull();
   });
+
+  it("opens the shared Improve Kandev dialog inside the dedicated Improve Kandev workspace", () => {
+    setImproveWorkspaceActive();
+    renderItem(false);
+    // The item does not mount a dialog itself in the improve workspace — the
+    // footer-hosted Improve Kandev dialog opens via the shared store flag.
+    expect(screen.queryByTestId(REGULAR_DIALOG_TESTID)).toBeNull();
+
+    screen.getByTestId("create-task-button").click();
+
+    expect(mocks.setImproveDialogOpen).toHaveBeenCalledWith(true);
+  });
+
+  it("routes the shared New Task request to the Improve Kandev dialog in the improve workspace", () => {
+    setImproveWorkspaceActive();
+    renderItem(false);
+
+    act(() => requestNewTaskCreation());
+
+    expect(mocks.setImproveDialogOpen).toHaveBeenCalledWith(true);
+    expect(mocks.setImproveDialogOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the regular dialog in a non-improve workspace", () => {
+    renderItem(false);
+    expect(screen.getByTestId(REGULAR_DIALOG_TESTID)).toBeTruthy();
+    expect(mocks.setImproveDialogOpen).not.toHaveBeenCalled();
+  });
 });
 
 describe("AppSidebarNewTaskItem row actions", () => {
+  it("opens quick terminal from the action immediately left of Quick Chat", () => {
+    renderItem(false);
+
+    const terminal = screen.getByTestId(QUICK_TERMINAL_TEST_ID);
+    const quickChat = screen.getByTestId(QUICK_CHAT_TEST_ID);
+    expect(terminal.nextElementSibling).toBe(quickChat);
+
+    terminal.click();
+    expect(mocks.openQuickTerminal).toHaveBeenCalledOnce();
+  });
+
+  it("does not show the terminal tooltip when focus returns after closing", async () => {
+    renderItem(false);
+
+    const terminal = screen.getByTestId(QUICK_TERMINAL_TEST_ID);
+    fireEvent.pointerEnter(terminal);
+    expect(await screen.findByRole("tooltip")).toBeTruthy();
+    fireEvent.focus(terminal);
+
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  it("shows the terminal tooltip on pointer hover", async () => {
+    renderItem(false);
+
+    const terminal = screen.getByTestId(QUICK_TERMINAL_TEST_ID);
+    fireEvent.pointerEnter(terminal);
+
+    expect((await screen.findByRole("tooltip")).textContent).toBe("Quick terminal");
+
+    fireEvent.pointerLeave(terminal);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
   it("opens quick chat from the trailing action beside New Task", () => {
     renderItem(false);
-    screen.getByTestId("sidebar-quick-chat-shortcut").click();
+    screen.getByTestId(QUICK_CHAT_TEST_ID).click();
     expect(mocks.openQuickChat).toHaveBeenCalledOnce();
   });
 
   it("hides the quick chat shortcut when the rail is collapsed", () => {
     renderItem(true);
-    expect(screen.queryByTestId("sidebar-quick-chat-shortcut")).toBeNull();
+    expect(screen.queryByTestId(QUICK_CHAT_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(QUICK_TERMINAL_TEST_ID)).toBeNull();
   });
 
   it("hides the quick chat shortcut when there is no active workspace", () => {
     state.workspaces.activeId = null;
     renderItem(false);
-    expect(screen.queryByTestId("sidebar-quick-chat-shortcut")).toBeNull();
+    expect(screen.queryByTestId(QUICK_CHAT_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(QUICK_TERMINAL_TEST_ID)).toBeNull();
   });
 });
 

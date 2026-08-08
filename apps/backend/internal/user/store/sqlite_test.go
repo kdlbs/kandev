@@ -368,6 +368,52 @@ func TestTranscriptNavigationSettingsRoundTripThroughMarshalAndScan(t *testing.T
 	}
 }
 
+func TestScanUserSettingsTodoListPanelDefault(t *testing.T) {
+	settings, err := scanUserSettings(settingsScanner{raw: "{}"}, DefaultUserID)
+	if err != nil {
+		t.Fatalf("scan defaults: %v", err)
+	}
+	if settings.ShowTodoListPanel {
+		t.Fatal("ShowTodoListPanel = true, want false (default)")
+	}
+
+	settings, err = scanUserSettings(
+		settingsScanner{raw: `{"show_todo_list_panel":true}`},
+		DefaultUserID,
+	)
+	if err != nil {
+		t.Fatalf("scan stored preference: %v", err)
+	}
+	if !settings.ShowTodoListPanel {
+		t.Fatal("ShowTodoListPanel = false, want true (stored)")
+	}
+
+	settings, err = scanUserSettings(
+		settingsScanner{raw: `{"show_todo_list_panel":false}`},
+		DefaultUserID,
+	)
+	if err != nil {
+		t.Fatalf("scan explicit false: %v", err)
+	}
+	if settings.ShowTodoListPanel {
+		t.Fatal("ShowTodoListPanel = true, want false (explicit)")
+	}
+}
+
+func TestTodoListPanelSettingRoundTripThroughMarshalAndScan(t *testing.T) {
+	raw, err := marshalUserSettingsPayload(&models.UserSettings{ShowTodoListPanel: true})
+	if err != nil {
+		t.Fatalf("marshal settings: %v", err)
+	}
+	settings, err := scanUserSettings(settingsScanner{raw: string(raw)}, DefaultUserID)
+	if err != nil {
+		t.Fatalf("scan settings: %v", err)
+	}
+	if !settings.ShowTodoListPanel {
+		t.Fatal("ShowTodoListPanel = false, want true (round-tripped)")
+	}
+}
+
 func TestMarshalUserSettingsPersistsDisabledArchiveConfirmation(t *testing.T) {
 	raw, err := marshalUserSettingsPayload(&models.UserSettings{ConfirmTaskArchive: false})
 	if err != nil {

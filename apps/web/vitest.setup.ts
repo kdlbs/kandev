@@ -1,6 +1,6 @@
 import type { Window as HappyDOMWindow } from "happy-dom";
 
-import { initI18nForTests } from "./lib/i18n";
+import { initI18nForTests, loadAllLocalesForTests } from "./lib/i18n";
 
 /**
  * i18n test bootstrap.
@@ -13,8 +13,16 @@ import { initI18nForTests } from "./lib/i18n";
  *
  * The real `en` catalog is loaded, so assertions on English copy pass exactly as
  * they did before the migration.
+ *
+ * Only `en` is bundled in the browser; the rest are lazy chunks. Suites drive
+ * the shared instance with a bare `i18n.changeLanguage("pseudo")` and assert on
+ * the next line, so the non-English catalogs are awaited here — top-level await
+ * in a setup file runs before any suite. That keeps unit tests in the
+ * "everything in memory" world they were written for without putting the other
+ * locales back into the bundle.
  */
 initI18nForTests();
+await loadAllLocalesForTests();
 
 function createLocalStorageMock(): Storage {
   const store = new Map<string, string>();

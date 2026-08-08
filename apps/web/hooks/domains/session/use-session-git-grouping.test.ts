@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { groupPathsByRepoName } from "./use-session-git";
+import { groupPathsByRepoName, repositoryScopesForMutation } from "./use-session-git";
 
 describe("groupPathsByRepoName", () => {
   it("splits paths by repository_name, preserving insertion order per bucket", () => {
@@ -27,5 +27,29 @@ describe("groupPathsByRepoName", () => {
     const out = groupPathsByRepoName(["a.ts", "b.ts"], lookup);
     expect(out.size).toBe(1);
     expect(out.get("only")).toEqual(["a.ts", "b.ts"]);
+  });
+});
+
+describe("repositoryScopesForMutation", () => {
+  it("excludes a file-only root when only named scopes have trackers", () => {
+    expect(
+      repositoryScopesForMutation(
+        [{ repository_name: undefined }, { repository_name: "vendor" }],
+        ["vendor"],
+      ),
+    ).toEqual(["vendor"]);
+  });
+
+  it("keeps an available root and adds available ancestors", () => {
+    expect(
+      repositoryScopesForMutation(
+        [{ repository_name: "vendor/inner" }],
+        ["", "vendor", "vendor/inner"],
+      ),
+    ).toEqual(["vendor/inner", "vendor", ""]);
+  });
+
+  it("preserves the legacy root fallback without per-repo status", () => {
+    expect(repositoryScopesForMutation([{ repository_name: undefined }], [])).toEqual([""]);
   });
 });

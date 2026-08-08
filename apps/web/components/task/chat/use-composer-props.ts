@@ -21,6 +21,7 @@ type ComposerPropsArgs = {
   onClarificationResolved: () => void;
   hideSessionsDropdown?: boolean;
   minimalToolbar?: boolean;
+  hideAgentControls?: boolean;
   hidePlanMode?: boolean;
 };
 
@@ -45,9 +46,11 @@ export function useComposerProps(args: ComposerPropsArgs) {
     onClarificationResolved,
     hideSessionsDropdown,
     minimalToolbar,
+    hideAgentControls,
     hidePlanMode,
   } = args;
   const { resolvedSessionId, taskId, isAgentBusy, needsRecovery, planModeEnabled } = panelState;
+  const supportsSteering = panelState.supportsSteering;
   const hasContextComments =
     panelState.planComments.length > 0 ||
     panelState.pendingPRFeedback.length > 0 ||
@@ -67,6 +70,7 @@ export function useComposerProps(args: ComposerPropsArgs) {
     mcpAttachmentHistory: panelState.mcpAttachmentHistory,
     onPlanModeChange: panelState.handlePlanModeChange,
     isAgentBusy,
+    supportsSteering,
     isStarting: panelState.isStarting,
     isPreparingEnvironment: panelState.isPreparingEnvironment,
     isMoving,
@@ -93,6 +97,7 @@ export function useComposerProps(args: ComposerPropsArgs) {
     onImplementPlan: implementPlanHandler,
     hideSessionsDropdown,
     minimalToolbar,
+    hideAgentControls,
     hidePlanMode,
   };
 }

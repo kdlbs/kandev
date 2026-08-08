@@ -117,6 +117,7 @@ const (
 	ActionMessageQueueUpdate        = "message.queue.update"
 	ActionMessageQueueAppend        = "message.queue.append"
 	ActionMessageQueueDrain         = "message.queue.drain"          // Dispatch one queued entry now when the session is promptable
+	ActionMessageQueueSendNow       = "message.queue.send_now"       // Interrupt and replace the active turn with an exact queue selection
 	ActionMessageQueueRemove        = "message.queue.remove"         // Delete a single entry by id
 	ActionMessageQueueMerge         = "message.queue.merge"          // Fold an entry into the entry above it
 	ActionMessageQueueStatusChanged = "message.queue.status_changed" // Notification: queue status changed
@@ -613,6 +614,9 @@ const (
 	ActionAutomationDisable             = "automation.disable"
 	ActionAutomationTrigger             = "automation.trigger"
 	ActionAutomationRunsList            = "automation.runs.list"
+	ActionAutomationRunsListWorkspace   = "automation.runs.list_workspace"
+	ActionAutomationSummaries           = "automation.summaries"
+	ActionAutomationSummary             = "automation.summary"
 	ActionAutomationTriggerAdd          = "automation.trigger.add"
 	ActionAutomationTriggerUpdate       = "automation.trigger.update"
 	ActionAutomationTriggerDelete       = "automation.trigger.delete"

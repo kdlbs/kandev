@@ -4,6 +4,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // shellUnquote runs `printf %s <arg>` through /bin/sh so the test can prove that
@@ -66,6 +68,16 @@ func TestRepositoryProvider_UsesRepositorySetupScriptKey(t *testing.T) {
 	vars := provider()
 	if got := vars["repository.setup_script"]; got != "npm ci" {
 		t.Fatalf("repository.setup_script = %q, want %q", got, "npm ci")
+	}
+}
+
+func TestRemoteContributionSetupScriptRejectsInvalidBinding(t *testing.T) {
+	script, err := RemoteContributionSetupScript(&models.RemoteContribution{})
+	if err == nil {
+		t.Fatal("RemoteContributionSetupScript() accepted an invalid binding")
+	}
+	if script != "" {
+		t.Fatalf("script = %q, want empty script on validation error", script)
 	}
 }
 

@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import { useTree, type VisibleRow } from "@/hooks/use-tree";
 import type { FileTreeNode } from "./export-types";
 import { getDescendantFilePaths } from "./export-utils";
+import { useTranslation } from "react-i18next";
 
 interface ExportFileTreeProps {
   tree: FileTreeNode[];
@@ -48,6 +49,7 @@ export function ExportFileTree({
   previewPath,
   onPreviewPathChange,
 }: ExportFileTreeProps) {
+  const { t } = useTranslation();
   const [search, setSearch] = useState("");
 
   const { visibleRows, toggle } = useTree<FileTreeNode>({
@@ -77,7 +79,7 @@ export function ExportFileTree({
         <div className="relative">
           <IconSearch className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
-            placeholder="Search files..."
+            placeholder={t("office:searchFiles")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-8 h-8 text-sm"

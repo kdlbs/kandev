@@ -18,15 +18,19 @@ import type {
 } from "@/lib/types/azure-devops";
 import type { Repository, Task, Workflow, WorkflowStep } from "@/lib/types/http";
 import { truncateRemoteTaskTitle } from "@/lib/task-title";
+import { t } from "@/lib/i18n";
 
 export type AzureDevOpsLaunchPayload =
   | { kind: "work-item"; item: AzureDevOpsWorkItem; action?: AzureDevOpsActionPreset }
   | { kind: "pull-request"; pullRequest: AzureDevOpsPullRequest; action?: AzureDevOpsActionPreset };
 
 function plainText(value: string | undefined): string {
-  if (!value) return "(no description)";
+  // Resolved per call, not at module load, so the fallback follows the active
+  // locale. `launchText` runs inside the launcher's `useMemo`, i.e. at render.
+  const fallback = t("azuredevops:descriptionFallback");
+  if (!value) return fallback;
   const document = new DOMParser().parseFromString(value, "text/html");
-  return document.body.textContent?.trim() || "(no description)";
+  return document.body.textContent?.trim() || fallback;
 }
 
 function launchText(payload: AzureDevOpsLaunchPayload) {

@@ -12,6 +12,7 @@ type Fixture = Record<string, string>;
 interface SweepResult {
   status: number | null;
   stdout: string;
+  stderr: string;
   /** Findings under "English plural concatenation" — defects. */
   plurals: string[];
   /** Findings under "literal(s) to review by eye" — judgement calls. */
@@ -29,7 +30,18 @@ function parseSections(stdout: string): Pick<SweepResult, "plurals" | "eyeReview
   };
 }
 
-function sweep(fixture: Fixture): SweepResult {
+function run(...args: string[]): SweepResult {
+  const result = spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8" });
+  return {
+    status: result.status,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    ...parseSections(result.stdout),
+  };
+}
+
+/** Materialise a fixture tree and hand its root to `use`, cleaning up afterwards. */
+function withFixture<T>(fixture: Fixture, use: (root: string) => T): T {
   const root = mkdtempSync(path.join(tmpdir(), "kandev-i18n-sweep-"));
   try {
     for (const [file, source] of Object.entries(fixture)) {
@@ -37,11 +49,14 @@ function sweep(fixture: Fixture): SweepResult {
       mkdirSync(path.dirname(full), { recursive: true });
       writeFileSync(full, source);
     }
-    const result = spawnSync(process.execPath, [SCRIPT, root], { encoding: "utf8" });
-    return { status: result.status, stdout: result.stdout, ...parseSections(result.stdout) };
+    return use(root);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+}
+
+function sweep(fixture: Fixture): SweepResult {
+  return withFixture(fixture, (root) => run(root));
 }
 
 describe("English plural concatenation", () => {
@@ -205,9 +220,72 @@ describe("eye-review filtering", () => {
   });
 });
 
+/**
+ * The regression this suite exists for. The sweep used to walk directories only,
+ * so a file argument hit ENOTDIR inside the walk, was swallowed, and produced the
+ * boilerplate footer with no findings and exit 0 — a clean bill of health for
+ * input it never opened. Briefs had instructed exactly that form
+ * (`pnpm run i18n:sweep <file> <file> …`), so real batches were signed off on a
+ * scan of nothing.
+ */
+describe("path arguments", () => {
+  const DEFECT = 'export const s = (n: number) => `${n} file${n === 1 ? "" : "s"}`;';
+  const LOOSE = "loose.tsx";
+  const SUBDIR = "nested";
+  const TREE: Fixture = { [LOOSE]: DEFECT, [`${SUBDIR}/counter.ts`]: DEFECT };
+
+  it("reports the findings in a file named directly", () => {
+    const result = withFixture(TREE, (root) => run(path.join(root, LOOSE)));
+
+    expect(result.status).toBe(0);
+    expect(result.plurals).toHaveLength(1);
+    expect(result.plurals[0]).toContain(`${LOOSE}:1`);
+  });
+
+  it("reports the union of file and directory arguments", () => {
+    const result = withFixture(TREE, (root) =>
+      run(path.join(root, SUBDIR), path.join(root, LOOSE)),
+    );
+
+    expect(result.plurals).toHaveLength(2);
+    expect(result.plurals.join("\n")).toContain("counter.ts:1");
+    expect(result.plurals.join("\n")).toContain(`${LOOSE}:1`);
+  });
+
+  it("counts a file reached through two arguments once", () => {
+    const result = withFixture(TREE, (root) => run(root, path.join(root, LOOSE)));
+
+    expect(result.plurals).toHaveLength(2);
+  });
+
+  it("exits non-zero on a path that does not exist rather than reporting clean", () => {
+    const result = run("does/not/exist");
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("does/not/exist");
+    expect(result.stdout).not.toContain("0 English plural concatenation(s)");
+  });
+
+  /**
+   * `0 findings` alongside `scanned 0 files` is self-evidently a non-result;
+   * `0 findings` alone is indistinguishable from a pass. Printing the count is
+   * the cheap structural guard against the whole failure class.
+   */
+  it("prints how many files were scanned, and from how many arguments", () => {
+    const result = withFixture(TREE, (root) =>
+      run(path.join(root, SUBDIR), path.join(root, LOOSE)),
+    );
+
+    expect(result.stdout).toContain("scanned 2 file(s) from 2 argument(s)");
+  });
+});
+
 describe("report shape", () => {
+  /** A file with nothing to find, so the report is only its own boilerplate. */
+  const CLEAN: Fixture = { "clean.ts": "export const n = 1;" };
+
   it("always prints both sections and exits 0, even with nothing to report", () => {
-    const result = sweep({ "clean.ts": "export const n = 1;" });
+    const result = sweep(CLEAN);
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("0 English plural concatenation(s)");
@@ -223,7 +301,7 @@ describe("report shape", () => {
   });
 
   it("notes the prompt-builder exclusion in the eye-review section", () => {
-    const result = sweep({ "clean.ts": "export const n = 1;" });
+    const result = sweep(CLEAN);
 
     expect(result.stdout).toContain("agent-facing");
   });
@@ -251,16 +329,22 @@ describe("report shape", () => {
   });
 
   it("keeps the plural section bare when it has no findings", () => {
-    const result = sweep({ "clean.ts": "export const n = 1;" });
+    const result = sweep(CLEAN);
 
     const pluralSection = result.stdout.slice(0, result.stdout.indexOf("to review by eye"));
     expect(pluralSection).not.toContain("agent-facing");
   });
 
-  it("exits non-zero when given no directory", () => {
-    const result = spawnSync(process.execPath, [SCRIPT], { encoding: "utf8" });
+  it("exits non-zero when given no path", () => {
+    const result = run();
 
     expect(result.status).toBe(2);
     expect(result.stderr).toContain("Usage:");
+  });
+
+  it("notes that copy from a plain helper is invisible to it", () => {
+    const result = sweep(CLEAN);
+
+    expect(result.stdout).toContain("plain helper");
   });
 });

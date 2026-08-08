@@ -78,35 +78,45 @@ func stripCommandEcho(command, workDir, stdout string, commitExactMatch bool) st
 	if rest, ok := strings.CutPrefix(stdout, "$ "+command); ok {
 		return finishCommandEchoStrip(rest, stdout, commitExactMatch)
 	}
-	return stripCommandEchoWithWorkDir(command, workDir, stdout, commitExactMatch)
+	return stripCommandEchoMultiline(command, workDir, stdout, commitExactMatch)
 }
 
-// stripCommandEchoWithWorkDir is stripCommandEcho's fallback for providers
-// that resolve a relative file-path argument in the command to an absolute
-// (workDir-joined) one before actually invoking the real terminal, while the
-// tool call's reported "command" field - the same text the chat header
-// renders - keeps the original relative form. The captured echo then no
-// longer matches literally. Retry against exactly as many leading echoed
-// lines as the command itself spans - a command can carry an embedded
-// newline (e.g. a multi-line script or commit message passed as a single
-// tool-call argument), and a real terminal echoes that verbatim across
-// multiple lines, not just the first - with the workDir prefix collapsed
-// back out, so real output later in stdout (which may legitimately contain
-// workDir-prefixed paths of its own) is never touched.
-func stripCommandEchoWithWorkDir(command, workDir, stdout string, commitExactMatch bool) string {
-	if workDir == "" {
-		return stdout
-	}
+// stripCommandEchoMultiline is stripCommandEcho's fallback for echoed lines
+// that don't match the command byte-for-byte on the first try. It compares
+// exactly as many leading echoed lines as the command itself spans - a
+// command can carry an embedded newline (e.g. a multi-line script or commit
+// message passed as a single tool-call argument), and a real terminal
+// echoes that verbatim across multiple lines, not just the first - after
+// two independent normalizations that a real terminal's echo can apply
+// without the tool call's reported "command" field (the same text the chat
+// header renders) changing to match:
+//
+//  1. CRLF line endings: cutLines collapses "\r\n" back to "\n" in the
+//     echoed chunk. A command's embedded newlines are always plain "\n" (the
+//     literal bytes of the reported argument), but a real terminal echoes
+//     canonical-mode input with "\r\n" - so a multi-line command with no
+//     workDir at all (the common case) would otherwise never match past its
+//     first embedded newline, leaking the entire echo verbatim.
+//  2. A resolved relative-to-absolute path: some providers resolve a
+//     relative file-path argument to a workDir-joined absolute one before
+//     actually invoking the real terminal. Only applied when workDir is
+//     known, and scoped to the compared chunk, so real output later in
+//     stdout (which may legitimately contain workDir-prefixed paths of its
+//     own) is never touched.
+func stripCommandEchoMultiline(command, workDir, stdout string, commitExactMatch bool) string {
 	echoLines := strings.Count(command, "\n") + 1
 	chunk, remainder, hasMore := cutLines(stdout, echoLines)
-	// workDir's trailing slashes are collapsed to exactly one first: a
-	// provider can report cwd already "/"-terminated (e.g. "/repo/"), and
-	// the root directory "/" is inherently "/"-terminated. Appending "/"
-	// unconditionally would search for a doubled separator ("/repo//" or
-	// "//") that the actually-joined path never contains, silently
-	// declining to strip a real echo.
-	workDirPrefix := strings.TrimRight(workDir, "/") + "/"
-	if strings.ReplaceAll(chunk, workDirPrefix, "") != "$ "+command {
+	if workDir != "" {
+		// workDir's trailing slashes are collapsed to exactly one first: a
+		// provider can report cwd already "/"-terminated (e.g. "/repo/"), and
+		// the root directory "/" is inherently "/"-terminated. Appending "/"
+		// unconditionally would search for a doubled separator ("/repo//" or
+		// "//") that the actually-joined path never contains, silently
+		// declining to strip a real echo.
+		workDirPrefix := strings.TrimRight(workDir, "/") + "/"
+		chunk = strings.ReplaceAll(chunk, workDirPrefix, "")
+	}
+	if chunk != "$ "+command {
 		return stdout
 	}
 	if !hasMore {

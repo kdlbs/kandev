@@ -28,10 +28,12 @@ export async function waitForHealth(
   baseUrl: string,
   proc: { exitCode: number | null },
   timeoutMs: number,
+  expectedToken = "",
   onFailure?: () => void,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   const healthUrl = `${baseUrl}/health`;
+  let sawForeignProcessResponse = false;
   while (Date.now() < deadline) {
     if (proc.exitCode !== null) {
       onFailure?.();
@@ -39,7 +41,10 @@ export async function waitForHealth(
     }
     try {
       const res = await fetch(healthUrl);
-      if (res.ok) {
+      if (res.ok && expectedToken !== "" && !matchesHealthToken(res, expectedToken)) {
+        sawForeignProcessResponse = true;
+      }
+      if (res.ok && matchesHealthToken(res, expectedToken)) {
         return;
       }
     } catch {
@@ -48,11 +53,30 @@ export async function waitForHealth(
     await delay(300);
   }
   onFailure?.();
+  if (sawForeignProcessResponse) {
+    throw new Error(
+      `Backend port ${healthPort(baseUrl)} answered a health check from a different process ` +
+        `(missing/mismatched launcher token). Another Kandev instance may already own it, ` +
+        `or the runtime bundle predates v0.66.0.`,
+    );
+  }
   throw new Error(
     `Backend healthcheck timed out after ${timeoutMs}ms at ${healthUrl}. ` +
       `If your machine is slow on first run (antivirus scan, cold disk), ` +
       `set KANDEV_HEALTH_TIMEOUT_MS=120000 and retry.`,
   );
+}
+
+function healthPort(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).port || baseUrl;
+  } catch {
+    return baseUrl;
+  }
+}
+
+function matchesHealthToken(res: Response, expectedToken: string): boolean {
+  return expectedToken === "" || res.headers.get("X-Kandev-Desktop-Health-Token") === expectedToken;
 }
 
 export async function waitForUrlReady(

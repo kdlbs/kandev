@@ -2228,7 +2228,7 @@ These are push notifications from the server to subscribed clients. They have `t
     "workspace_id": "workspace-uuid",
     "name": "kandev",
     "source_type": "local",
-    "local_path": "/Users/cfl/Projects/kandev",
+    "local_path": "/home/user/Projects/kandev",
     "provider": "",
     "default_branch": "main",
     "updated_at": "2026-01-10T12:40:00Z"

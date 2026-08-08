@@ -68,12 +68,12 @@ function buildMobileNavItems({
   return [
     {
       panel: "chat",
-      label: "Chat",
+      label: t("task:chat"),
       icon: <IconMessage className="h-5 w-5" />,
     },
     {
       panel: "plan",
-      label: "Plan",
+      label: t("task:plan"),
       icon: <IconListCheck className="h-5 w-5" />,
       badge: planBadge ? (
         <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-amber-500" />
@@ -81,7 +81,7 @@ function buildMobileNavItems({
     },
     {
       panel: "changes",
-      label: "Changes",
+      label: t("task:changes"),
       icon: <IconGitBranch className="h-5 w-5" />,
       badge:
         changesBadge > 0 ? (
@@ -95,21 +95,21 @@ function buildMobileNavItems({
     },
     {
       panel: "files",
-      label: "Files",
+      label: t("task:files"),
       icon: <IconFolder className="h-5 w-5" />,
     },
     ...(hasReview
       ? [
           {
             panel: "review" as const,
-            label: "Review",
+            label: t("task:review"),
             icon: <IconGitMerge className="h-5 w-5" />,
           },
         ]
       : []),
     {
       panel: "terminal",
-      label: "Terminal",
+      label: t("task:terminal"),
       icon: <IconTerminal2 className="h-5 w-5" />,
     },
     ...(hasMobilePluginPanels()
@@ -125,7 +125,7 @@ function buildMobileNavItems({
     ...(showStatus
       ? [
           {
-            label: "Status",
+            label: t("task:status"),
             icon: <IconActivity className="h-5 w-5" />,
             onClick: onOpenStatus,
             ...(connectionIssueSeverity !== "none" && { connectionIssueSeverity }),

@@ -86,7 +86,7 @@ test.describe("Mobile unread divider", () => {
     await expect(session.activeChat().getByTestId("unread-divider")).toHaveCount(0);
 
     await session.sendMessageViaButton("prompt while actively reading");
-    await session.waitForChatIdle({ timeout: 60_000, attemptTimeout: 60_000 });
+    await session.waitForChatIdle({ timeout: 60_000 });
     await expect(session.activeChat().getByTestId("unread-divider")).toHaveCount(0);
   });
 });

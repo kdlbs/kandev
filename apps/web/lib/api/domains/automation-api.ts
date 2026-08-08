@@ -2,6 +2,7 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import type {
   Automation,
   AutomationRun,
+  AutomationSummary,
   CreateAutomationRequest,
   CreateAutomationResponse,
   RevealWebhookSecretResponse,
@@ -10,6 +11,7 @@ import type {
   UpdateTriggerRequest,
   AutomationTrigger,
   TriggerTypeInfo,
+  WorkspaceAutomationRun,
 } from "@/lib/types/automation";
 
 const WS_UNAVAILABLE = "WebSocket client not available";
@@ -63,8 +65,19 @@ export async function disableAutomation(id: string): Promise<Automation> {
   return requireClient().request<Automation>("automation.disable", { id });
 }
 
-export async function triggerAutomation(id: string): Promise<{ triggered: boolean }> {
-  return requireClient().request<{ triggered: boolean }>("automation.trigger", { id });
+/**
+ * Fire an automation by hand. A request can succeed without anything running —
+ * the concurrency cap turns a trigger away while an earlier run is still in
+ * flight — so callers must read `skipped` rather than assume a fire.
+ */
+export type TriggerAutomationResult = {
+  triggered: boolean;
+  skipped?: boolean;
+  reason?: string;
+};
+
+export async function triggerAutomation(id: string): Promise<TriggerAutomationResult> {
+  return requireClient().request<TriggerAutomationResult>("automation.trigger", { id });
 }
 
 export async function listAutomationRuns(
@@ -75,6 +88,52 @@ export async function listAutomationRuns(
     automation_id: automationId,
     ...(limit ? { limit } : {}),
   });
+}
+
+/**
+ * Every automation's runs in one feed, newest first. Unlike the per-automation
+ * log this one is envelope-shaped (`{runs}`) — tolerate a missing list so a
+ * workspace that has never fired anything renders the empty state instead of
+ * throwing.
+ */
+export async function listWorkspaceAutomationRuns(
+  workspaceId: string,
+  limit?: number,
+): Promise<WorkspaceAutomationRun[]> {
+  const response = await requireClient().request<{ runs: WorkspaceAutomationRun[] }>(
+    "automation.runs.list_workspace",
+    { workspace_id: workspaceId, ...(limit ? { limit } : {}) },
+  );
+  return response?.runs ?? [];
+}
+
+/**
+ * One health summary per automation in the workspace that has ever run.
+ * Envelope-shaped for the same reason the feed is; an automation with no row
+ * has never run, which the caller reads as "no runs yet".
+ */
+export async function listAutomationSummaries(workspaceId: string): Promise<AutomationSummary[]> {
+  const response = await requireClient().request<{ summaries: AutomationSummary[] }>(
+    "automation.summaries",
+    { workspace_id: workspaceId },
+  );
+  return response?.summaries ?? [];
+}
+
+/**
+ * One automation's summary, or null when it has never run. The detail page
+ * reads this rather than counting open runs in its own history window: that
+ * window is capped, so an open run older than it would leave the page claiming
+ * nothing is in flight.
+ */
+export async function getAutomationSummary(
+  automationId: string,
+): Promise<AutomationSummary | null> {
+  const response = await requireClient().request<{ summary: AutomationSummary | null }>(
+    "automation.summary",
+    { automation_id: automationId },
+  );
+  return response?.summary ?? null;
 }
 
 export async function addTrigger(req: AddTriggerRequest): Promise<AutomationTrigger> {

@@ -45,7 +45,11 @@ type ChangedFile struct {
 // Key returns the composite <repository>\x00<path> identity, matching
 // `reviewFileKey` in apps/web/components/review/types.ts.
 func (f ChangedFile) Key() string {
-	if f.RepositoryName == "" {
+	// A finding from a legacy single-repository task has neither repository
+	// identity field and keeps the historical bare-path key. An explicit empty
+	// repository name with an ID is the real workspace-root scope in a
+	// multi-repository task and must remain distinct from that legacy key.
+	if f.RepositoryName == "" && f.RepositoryID == "" {
 		return f.Path
 	}
 	return f.RepositoryName + fileKeySep + f.Path

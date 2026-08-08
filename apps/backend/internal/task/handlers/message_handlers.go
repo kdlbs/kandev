@@ -37,6 +37,14 @@ type OrchestratorService interface {
 	// and persisted provider identity. Background therefore means this exact
 	// session is eligible for the experimental direct-admission path.
 	ForegroundActivity(sessionID string) v1.ForegroundActivity
+	// SteerEligible reports whether a send to this generating RUNNING session
+	// would be delivered as a mid-turn steer rather than blocked/queued. Already
+	// gated by the mid-turn-steering runtime flag and the agent's negotiated
+	// capability, so a false is the conservative default.
+	SteerEligible(sessionID string, state models.TaskSessionState) bool
+	// SteerTask delivers a prompt into a still-generating turn. It returns a typed
+	// steer sentinel when the message must be queued/blocked instead.
+	SteerTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error)
 }
 
 type taskTitleSessionClaimer interface {
@@ -379,8 +387,16 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		}
 		req.TaskSessionID = sessionResp.Session.ID
 	}
-	if wsErr := h.errorForBlockedMessageSession(msg, sessionResp.Session.ID, sessionResp.Session.State); wsErr != nil {
-		return wsErr, nil
+	// A generating RUNNING session is normally blocked here. When mid-turn
+	// steering is enabled and this session's agent advertised the capability,
+	// deliver the message into the running turn instead of blocking. Flag-off or
+	// an unadvertised agent leaves this false, so behavior is unchanged.
+	steer := h.orchestrator != nil &&
+		h.orchestrator.SteerEligible(sessionResp.Session.ID, sessionResp.Session.State)
+	if !steer {
+		if wsErr := h.errorForBlockedMessageSession(msg, sessionResp.Session.ID, sessionResp.Session.State); wsErr != nil {
+			return wsErr, nil
+		}
 	}
 	isCreatedSession := sessionResp.Session.State == models.TaskSessionStateCreated
 	startCreatedSession := isCreatedSession || wasCreatedSession
@@ -468,7 +484,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// This runs async so the WS request can respond immediately.
 	// Use context.WithoutCancel so the prompt continues even if the WebSocket client disconnects.
 	if h.orchestrator != nil {
-		h.dispatchPromptAsync(ctx, req, sessionResp.Session.AgentProfileID, startCreatedSession)
+		h.dispatchPromptAsync(ctx, req, sessionResp.Session.AgentProfileID, startCreatedSession, steer)
 	}
 
 	return response, nil
@@ -596,6 +612,18 @@ func (h *MessageHandlers) checkSessionStateForMessage(ctx context.Context, msg *
 	sessionDTO := dto.FromTaskSession(session)
 	dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
 	resp := &dto.GetTaskSessionResponse{Session: sessionDTO}
+	// A steer-eligible generating RUNNING session must pass this first guard:
+	// otherwise the busy error is returned here, before the steer branch in
+	// wsAddMessage is ever reached, and the message is rejected instead of
+	// delivered into the running turn. The steer branch there re-checks
+	// eligibility (after on_turn_start) and remains the authoritative decision;
+	// this only widens the first gate for the sessions steering targets. Every
+	// other blocked state is unchanged.
+	if h.orchestrator != nil &&
+		sessionDTO.State == models.TaskSessionStateRunning &&
+		h.orchestrator.SteerEligible(sessionID, sessionDTO.State) {
+		return resp, nil
+	}
 	if wsErr := h.errorForBlockedMessageSession(msg, sessionID, sessionDTO.State); wsErr != nil {
 		if sessionDTO.State == models.TaskSessionStateRunning {
 			h.logBlockedRunningSession(sessionID, sessionDTO.State)
@@ -636,7 +664,7 @@ func (h *MessageHandlers) ensureTaskInProgress(ctx context.Context, taskID strin
 // background goroutine. The caller (wsAddMessage) is responsible for running
 // on_turn_start synchronously BEFORE wrapping the prompt, so this function
 // only handles the agent-facing dispatch.
-func (h *MessageHandlers) dispatchPromptAsync(ctx context.Context, req wsAddMessageRequest, agentProfileID string, isCreatedSession bool) {
+func (h *MessageHandlers) dispatchPromptAsync(ctx context.Context, req wsAddMessageRequest, agentProfileID string, isCreatedSession, steer bool) {
 	taskID := req.TaskID
 	sessionID := req.TaskSessionID
 	content := req.Content
@@ -645,11 +673,57 @@ func (h *MessageHandlers) dispatchPromptAsync(ctx context.Context, req wsAddMess
 	attachments := req.Attachments
 	go func() {
 		promptCtx := context.WithoutCancel(ctx)
+		if steer {
+			h.forwardMessageAsSteer(promptCtx, taskID, sessionID, content, model, planMode, attachments)
+			return
+		}
 		h.forwardMessageAsPrompt(
 			promptCtx, taskID, sessionID, agentProfileID,
 			content, model, planMode, attachments, req.EntityReferences, isCreatedSession,
 		)
 	}()
+}
+
+// forwardMessageAsSteer delivers a message into a still-generating turn.
+// SteerTask returns nil whether it dispatched the steer or enqueued it behind
+// pending work (both are success — order is preserved either way).
+//
+// ErrSteerNotEligible is returned by SteerTask's eligibility check *before* any
+// dispatch, so nothing was sent: the session's turn ended between the handler's
+// check and here, and the ordinary prompt path is correct (the session is now
+// promptable). Falling back there cannot double-deliver.
+//
+// Any other error is a genuine dispatch failure, and it is NOT safe to re-send:
+// the agentctl request can be written to the agent and then have its
+// acknowledgement fail (a stream disconnect or context cancellation after the
+// write, see agentctl client sendStreamRequest), so the steer may already be in
+// flight. Re-running it as an ordinary prompt would deliver the operator's
+// message twice. Surface the error instead — exactly as the ordinary prompt path
+// does for its own dispatch failures — unless the agent itself reported it.
+func (h *MessageHandlers) forwardMessageAsSteer(
+	ctx context.Context,
+	taskID, sessionID, content, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+) {
+	_, err := h.orchestrator.SteerTask(ctx, taskID, sessionID, content, model, planMode, attachments)
+	if err == nil {
+		return
+	}
+	if errors.Is(err, orchestrator.ErrSteerNotEligible) {
+		h.logger.Debug("steer no longer eligible; using ordinary prompt path",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		// agentProfileID/references/startCreated are irrelevant: a steer only
+		// targets a RUNNING session, never a CREATED one, so this takes the
+		// ordinary prompt branch (PromptTask + resume + error handling).
+		h.forwardMessageAsPrompt(ctx, taskID, sessionID, "", content, model, planMode, attachments, nil, false)
+		return
+	}
+	if !isAgentReportedError(err) {
+		h.createPromptErrorMessage(ctx, taskID, sessionID, err)
+	}
 }
 
 // forwardMessageAsPrompt sends a user message to the agent as a prompt.

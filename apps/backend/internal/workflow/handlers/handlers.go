@@ -191,7 +191,7 @@ func (h *Handlers) httpUpdateStep(c *gin.Context) {
 }
 
 func (h *Handlers) writeStepMutationError(c *gin.Context, err error) {
-	if errors.Is(err, service.ErrWorkflowReadOnly) {
+	if errors.Is(err, service.ErrWorkflowReadOnly) || errors.Is(err, service.ErrWorkflowWorkspaceReadOnly) {
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
 	}

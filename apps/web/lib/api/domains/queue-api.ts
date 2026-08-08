@@ -38,6 +38,34 @@ export class MergeReferenceOverflowError extends Error {
   }
 }
 
+export type QueueSendNowErrorCode =
+  | "queue_empty"
+  | "queue_changed"
+  | "send_now_conflict"
+  | "turn_changed"
+  | "send_now_attachment_overflow"
+  | "send_now_reference_overflow";
+
+const QUEUE_SEND_NOW_ERROR_CODES: ReadonlySet<QueueSendNowErrorCode> = new Set([
+  "queue_empty",
+  "queue_changed",
+  "send_now_conflict",
+  "turn_changed",
+  "send_now_attachment_overflow",
+  "send_now_reference_overflow",
+]);
+
+/** Error returned when Send Now cannot safely claim its click-time selection. */
+export class QueueSendNowError extends Error {
+  readonly code: QueueSendNowErrorCode;
+
+  constructor(code: QueueSendNowErrorCode, message?: string) {
+    super(message ?? "Queued messages could not be sent now.");
+    this.name = "QueueSendNowError";
+    this.code = code;
+  }
+}
+
 type WSError = {
   code?: string;
   message?: string;
@@ -58,21 +86,31 @@ function asWSError(err: unknown): WSError | undefined {
   return undefined;
 }
 
+function knownQueueError(wsErr: WSError): Error | undefined {
+  switch (wsErr.code) {
+    case "queue_full": {
+      const size = typeof wsErr.details?.queue_size === "number" ? wsErr.details.queue_size : 0;
+      const max = typeof wsErr.details?.max === "number" ? wsErr.details.max : 0;
+      return new QueueFullError(size, max);
+    }
+    case "entry_not_found":
+      return new QueueEntryNotFoundError();
+    case "merge_reference_overflow":
+      return new MergeReferenceOverflowError();
+    default:
+      if (wsErr.code && QUEUE_SEND_NOW_ERROR_CODES.has(wsErr.code as QueueSendNowErrorCode)) {
+        return new QueueSendNowError(wsErr.code as QueueSendNowErrorCode, wsErr.message);
+      }
+      return undefined;
+  }
+}
+
 export function rethrowQueueError(err: unknown): never {
   const wsErr = asWSError(err);
-  if (wsErr?.code === "queue_full") {
-    const size = typeof wsErr.details?.queue_size === "number" ? wsErr.details.queue_size : 0;
-    const max = typeof wsErr.details?.max === "number" ? wsErr.details.max : 0;
-    throw new QueueFullError(size, max);
-  }
-  if (wsErr?.code === "entry_not_found") {
-    throw new QueueEntryNotFoundError();
-  }
-  if (wsErr?.code === "merge_reference_overflow") {
-    throw new MergeReferenceOverflowError();
-  }
-  if (wsErr?.message) {
-    throw new Error(wsErr.message);
+  if (wsErr) {
+    const known = knownQueueError(wsErr);
+    if (known) throw known;
+    if (wsErr.message) throw new Error(wsErr.message);
   }
   throw err instanceof Error ? err : new Error(String(err));
 }
@@ -126,6 +164,31 @@ export async function drainQueuedMessage(sessionId: string): Promise<{ drained: 
     throw new Error(WS_CLIENT_UNAVAILABLE);
   }
   return client.request<{ drained: boolean }>("message.queue.drain", { session_id: sessionId });
+}
+
+export type SendQueuedNowParams = {
+  session_id: string;
+  scope: "entry" | "all";
+  entry_id?: string;
+};
+
+/** Interrupt the active turn and replace it with an exact queue selection. */
+export async function sendQueuedNow(
+  params: SendQueuedNowParams,
+): Promise<{ session_id: string; dispatched: boolean; sent_count: number }> {
+  const client = getWebSocketClient();
+  if (!client) {
+    throw new Error(WS_CLIENT_UNAVAILABLE);
+  }
+  try {
+    return await client.request<{
+      session_id: string;
+      dispatched: boolean;
+      sent_count: number;
+    }>("message.queue.send_now", params);
+  } catch (err) {
+    rethrowQueueError(err);
+  }
 }
 
 /** Fetch the full queue snapshot (entries + capacity). */

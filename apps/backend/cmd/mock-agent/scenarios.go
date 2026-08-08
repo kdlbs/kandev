@@ -44,6 +44,44 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"markdown-table":          scenarioMarkdownTable,
 	"empty-turn":              scenarioEmptyTurn,
 	"push-current-branch":     scenarioPushCurrentBranch,
+	"steer-fold-setup":        scenarioSteerFoldSetup,
+	"steer-defer-setup":       scenarioSteerDeferSetup,
+}
+
+// steerSetupHoldMillis is how long steer-fold-setup and steer-defer-setup
+// keep their prompt open after any setup output, so the session reads
+// "generating" (steer-eligible) for long enough that an e2e test can reliably
+// deliver a mid-turn steer against it. Cancellation (turn end, session
+// cleanup) interrupts the hold immediately via waitForDelay's ctx.Done case.
+const steerSetupHoldMillis = 30_000
+
+// scenarioSteerFoldSetup holds the foreground turn open without ever emitting
+// text of its own, so a mid-turn steer delivered while it runs can only be
+// answered by the steer's own successor turn. This reproduces the "folded"
+// outcome from the mid-turn steering spec's outcome taxonomy
+// (docs/specs/platform/mid-turn-steering.md): the predecessor settles without
+// having produced an answer, and the operator sees a single, combined reply.
+func scenarioSteerFoldSetup(e *emitter) {
+	waitForDelay(e.ctx, steerSetupHoldMillis)
+}
+
+// scenarioSteerDeferSetup answers its own prompt immediately, then continues
+// to hold the turn open silently. A mid-turn steer delivered during the hold
+// still reaches the agent as a concurrent prompt, but runs as a genuinely
+// separate turn with its own answer -- the "deferred" outcome from the
+// outcome taxonomy. The transcript therefore shows two independent answers in
+// submission order, matching an installation whose agent CLI never folds.
+func scenarioSteerDeferSetup(e *emitter) {
+	e.text("Predecessor turn's own answer, delivered before any steer arrives.")
+	// A tool-call boundary flushes the buffered text above into its own
+	// message row (cmd/mock-agent/AGENTS.md: "flushMessageBuffer only fires
+	// on a tool-call/turn boundary"). Without it the answer stays buffered
+	// server-side for as long as this turn holds open below, so an operator
+	// (or an e2e assertion) would see nothing until the turn eventually ends.
+	flushID := nextToolID()
+	e.startTool(flushID, "Acknowledge predecessor answer", acp.ToolKindOther, map[string]any{})
+	e.completeTool(flushID, map[string]any{"result": "ok"})
+	waitForDelay(e.ctx, steerSetupHoldMillis)
 }
 
 // scenarioEmptyTurn emits no content and no tool calls, so the turn ends

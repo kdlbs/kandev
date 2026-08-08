@@ -19,6 +19,8 @@ export default function globalSetup() {
     throw new Error(`Vite web build not found: ${spaIndex}\nRun "make build-web" first.`);
   }
 
+  assertPseudoCatalogBundled();
+
   // tests/plugins/plugins.spec.ts installs this package through the real
   // upload UI. Like the binaries above, this only checks existence — not
   // freshness — so rebuild after touching cmd/plugin-fixture (see
@@ -27,6 +29,68 @@ export default function globalSetup() {
   if (!fs.existsSync(pluginPackage)) {
     throw new Error(
       `E2E fixture plugin package not found: ${pluginPackage}\nRun "make -C apps/backend e2e-plugin-package" first.`,
+    );
+  }
+}
+
+/**
+ * Fail fast when the coverage oracle is asked to run against a bundle that has
+ * no pseudo catalog.
+ *
+ * A production `vite build` deliberately drops it (see lib/i18n/bundling.ts).
+ * Run tests/i18n/pseudo-coverage.spec.ts against such a bundle and every screen
+ * falls back to `en` — so all ten tests fail with a wall of findings that reads
+ * exactly like a mass externalization regression, when the real cause is that
+ * the artifact was built with `make build-web` instead of `make build-web-e2e`.
+ * Only checked under KANDEV_I18N_COVERAGE=1; nothing else needs the catalog.
+ *
+ * The markers are read from the catalogs themselves rather than hardcoded, so
+ * this cannot drift as `pnpm run i18n:pseudo` regenerates them — and the whole
+ * SOURCE directory is scanned rather than one named file, so adding, renaming or
+ * splitting a namespace cannot quietly turn the check into a no-op. Every path
+ * out of here either throws or has actually compared markers against `dist/`: a
+ * guard that can only ever pass is worth less than no guard, because it also
+ * reports clean.
+ */
+function assertPseudoCatalogBundled() {
+  if (process.env.KANDEV_I18N_COVERAGE !== "1") return;
+
+  const catalogDir = path.join(WEB_DIR, "src", "locales", "pseudo");
+  const catalogs = fs.existsSync(catalogDir)
+    ? fs.readdirSync(catalogDir).filter((name) => name.endsWith(".json"))
+    : [];
+  const markers = catalogs
+    .flatMap((name) =>
+      Object.values(
+        JSON.parse(fs.readFileSync(path.join(catalogDir, name), "utf8")) as Record<string, unknown>,
+      ),
+    )
+    .filter((value): value is string => typeof value === "string" && value.length >= 20)
+    .slice(0, 50);
+
+  if (markers.length === 0) {
+    throw new Error(
+      `KANDEV_I18N_COVERAGE=1 but no usable pseudo source catalog was found in ${catalogDir}.\n` +
+        'The coverage oracle cannot mean anything without it — run "pnpm run i18n:pseudo" ' +
+        "to regenerate it. See docs/i18n.md.",
+    );
+  }
+
+  const assets = path.join(WEB_DIR, "dist", "assets");
+  const bundled = fs
+    .readdirSync(assets)
+    .filter((name) => name.endsWith(".js"))
+    .some((name) => {
+      const source = fs.readFileSync(path.join(assets, name), "utf8");
+      return markers.some((marker) => source.includes(marker));
+    });
+
+  if (!bundled) {
+    throw new Error(
+      "KANDEV_I18N_COVERAGE=1 but dist/ contains no pseudo catalog, so the coverage " +
+        "oracle would report every screen as un-externalized.\n" +
+        'Rebuild the SPA with the QA locale: "make build-web-e2e" ' +
+        '(or "pnpm --filter @kandev/web build:e2e"). See docs/i18n.md.',
     );
   }
 }

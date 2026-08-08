@@ -504,6 +504,7 @@ func (s *Service) CreateWorkflow(ctx context.Context, req *CreateWorkflowRequest
 		WorkspaceID:        req.WorkspaceID,
 		Name:               req.Name,
 		Description:        req.Description,
+		Prompt:             req.Prompt,
 		WorkflowTemplateID: req.WorkflowTemplateID,
 		Hidden:             req.Hidden,
 	}
@@ -552,6 +553,9 @@ func (s *Service) UpdateWorkflow(ctx context.Context, id string, req *UpdateWork
 	}
 	if req.Description != nil {
 		workflow.Description = *req.Description
+	}
+	if req.Prompt != nil {
+		workflow.Prompt = *req.Prompt
 	}
 	if req.AgentProfileID != nil {
 		workflow.AgentProfileID = strings.TrimSpace(*req.AgentProfileID)

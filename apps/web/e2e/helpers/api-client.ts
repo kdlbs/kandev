@@ -817,6 +817,7 @@ export class ApiClient {
   async updateWorkspace(
     workspaceId: string,
     updates: {
+      name?: string;
       default_executor_id?: string;
       default_agent_profile_id?: string;
       default_config_agent_profile_id?: string;
@@ -902,6 +903,7 @@ export class ApiClient {
       mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
       tasks_list_show_details?: boolean;
       show_transcript_auto_scroll_control?: boolean;
+      show_todo_list_panel?: boolean;
       agent_generated_task_titles?: boolean;
       [key: string]: unknown;
     };
@@ -931,6 +933,8 @@ export class ApiClient {
     default_utility_agent_id?: string;
     default_utility_model?: string;
     sidebar_views?: unknown[];
+    sidebar_active_view_id?: string;
+    sidebar_draft?: unknown;
     saved_layouts?: unknown[];
     lsp_auto_start_languages?: string[];
     lsp_auto_install_languages?: string[];
@@ -955,7 +959,7 @@ export class ApiClient {
 
   async updateWorkflow(
     workflowId: string,
-    updates: { name?: string; description?: string; agent_profile_id?: string },
+    updates: { name?: string; description?: string; prompt?: string; agent_profile_id?: string },
   ): Promise<Workflow> {
     return this.request("PATCH", `/api/v1/workflows/${workflowId}`, updates);
   }
@@ -1737,6 +1741,22 @@ export class ApiClient {
     });
   }
 
+  // mockGitLabAddRepoFiles seeds repository content (as opposed to
+  // mockGitLabAddFiles, which seeds files changed on a merge request) — used
+  // by workflow sync e2e specs to seed the directory the sync reads.
+  async mockGitLabAddRepoFiles(
+    workspaceId: string,
+    project: string,
+    ref: string,
+    files: Array<{ path: string; content: string }>,
+  ): Promise<void> {
+    await this.request(
+      "POST",
+      this.gitLabWorkspacePath("/api/v1/gitlab/mock/repo-files", workspaceId),
+      { project, ref, files },
+    );
+  }
+
   async mockGitLabAddCommits(
     workspaceId: string,
     project: string,
@@ -2161,6 +2181,11 @@ export class ApiClient {
       content,
       attachments,
     });
+  }
+
+  /** Removes every pending queued message for a session (message.queue.cancel). */
+  async clearQueue(sessionId: string): Promise<void> {
+    await this.wsRequest("message.queue.cancel", { session_id: sessionId });
   }
 
   // --- Integration config seeding (real API, not mock) ---
@@ -2839,12 +2864,29 @@ export class ApiClient {
     name: string;
     workflowId?: string;
     workflowStepId?: string;
+    /**
+     * The automation's standing instruction. The run view only renders the
+     * instruction card when there is one, so specs asserting on where that
+     * card lives have to seed it.
+     */
+    prompt?: string;
+    /**
+     * Backdate the row's `execution_mode` to `task` after creation, which is
+     * what an install predating the withdrawal of execution modes carries on
+     * disk. The API ignores `execution_mode` on input by design, so this is
+     * the only way to stand up the state the board-move migration notice
+     * exists to explain; the `legacy_board_card` flag the UI reads is then
+     * derived by the same production SQL a real upgraded install goes through.
+     */
+    legacyBoardCard?: boolean;
   }): Promise<{ id: string; workspace_id: string; name: string }> {
     return this.request("POST", "/api/v1/e2e/automations", {
       workspace_id: opts.workspaceId,
       name: opts.name,
       workflow_id: opts.workflowId ?? "",
       workflow_step_id: opts.workflowStepId ?? "",
+      prompt: opts.prompt ?? "",
+      legacy_board_card: opts.legacyBoardCard ?? false,
     });
   }
 
@@ -2852,6 +2894,16 @@ export class ApiClient {
    * Seed an automation run row via the E2E HTTP endpoint.
    * Only works when KANDEV_MOCK_AGENT is active.
    */
+  /**
+   * Stamps a seeded task with an origin. Production tags automation runs
+   * `automation_run` inside the firing path; a task created through the
+   * ordinary task API has no origin and therefore still shows on the kanban
+   * and in task lists, which is exactly what the origin is supposed to prevent.
+   */
+  async setTaskOrigin(taskId: string, origin: string): Promise<void> {
+    await this.request("PATCH", `/api/v1/e2e/tasks/${taskId}/origin`, { origin });
+  }
+
   async seedAutomationRun(
     automationId: string,
     status = "skipped",

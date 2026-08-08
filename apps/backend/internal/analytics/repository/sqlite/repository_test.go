@@ -60,6 +60,7 @@ func createTestDB(t *testing.T) *sqlx.DB {
 		title TEXT NOT NULL,
 		state TEXT DEFAULT 'TODO',
 		is_ephemeral INTEGER NOT NULL DEFAULT 0,
+		origin TEXT NOT NULL DEFAULT '',
 		metadata TEXT DEFAULT '{}',
 		archived_at TIMESTAMP,
 		created_at TIMESTAMP NOT NULL,
@@ -795,5 +796,42 @@ func TestGetRepositoryStats_ExcludesEphemeralTasks(t *testing.T) {
 	}
 	if results[0].SessionCount != 1 {
 		t.Errorf("expected 1 session (ephemeral excluded), got %d", results[0].SessionCount)
+	}
+}
+
+// Automation runs are agent output, not workspace throughput. They used to fall
+// out of these aggregates for free because they were ephemeral; now that they
+// are ordinary tasks tagged by origin, the exclusion has to be explicit or a
+// daily automation quietly inflates a workspace's task count by 365 a year.
+func TestGetGlobalStats_ExcludesAutomationRuns(t *testing.T) {
+	dbConn := createTestDB(t)
+	repo, err := NewWithDB(dbConn, dbConn)
+	if err != nil {
+		t.Fatalf("NewWithDB failed: %v", err)
+	}
+
+	ctx := context.Background()
+	nowStr := time.Now().UTC().Format(time.RFC3339)
+
+	execOrFatal(t, dbConn, `INSERT INTO workspaces (id, name, created_at, updated_at) VALUES ('ws-1', 'Test', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO boards (id, workspace_id, name, created_at, updated_at) VALUES ('board-1', 'ws-1', 'Board', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO workflow_steps (id, workflow_id, name, position, created_at, updated_at) VALUES ('step-todo', 'board-1', 'To Do', 0, ?, ?)`, nowStr, nowStr)
+
+	// A human task and an automation run, both non-ephemeral now.
+	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, origin, created_at, updated_at) VALUES ('task-human', 'ws-1', 'board-1', 'step-todo', 'Human', 0, '', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, origin, created_at, updated_at) VALUES ('task-automation', 'ws-1', 'board-1', 'step-todo', 'Nightly drift', 0, 'automation_run', ?, ?)`, nowStr, nowStr)
+
+	execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, state, started_at, updated_at) VALUES ('sess-human', 'task-human', 'agent-1', 'COMPLETED', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, state, started_at, updated_at) VALUES ('sess-automation', 'task-automation', 'agent-1', 'COMPLETED', ?, ?)`, nowStr, nowStr)
+
+	stats, err := repo.GetGlobalStats(ctx, "ws-1", nil)
+	if err != nil {
+		t.Fatalf("GetGlobalStats failed: %v", err)
+	}
+	if stats.TotalTasks != 1 {
+		t.Errorf("expected 1 task (automation run excluded), got %d", stats.TotalTasks)
+	}
+	if stats.TotalSessions != 1 {
+		t.Errorf("expected 1 session (automation run excluded), got %d", stats.TotalSessions)
 	}
 }

@@ -120,7 +120,6 @@ export function AutomationsTable({
         <TableHeader>
           <TableRow className="hover:bg-transparent focus-within:bg-transparent">
             <TableHead>{t("automations:columnName")}</TableHead>
-            <TableHead>{t("automations:columnMode")}</TableHead>
             <TableHead>{t("automations:columnTriggers")}</TableHead>
             <TableHead>{t("automations:columnEnabled")}</TableHead>
             <TableHead>{t("automations:columnLastTriggered")}</TableHead>
@@ -131,7 +130,7 @@ export function AutomationsTable({
           {automations.length === 0 ? (
             <TableRow>
               <TableCell
-                colSpan={6}
+                colSpan={5}
                 className="text-center text-muted-foreground py-8"
                 data-testid="automations-empty"
               >
@@ -151,13 +150,6 @@ export function AutomationsTable({
                 }
               >
                 <TableCell className="font-medium">{a.name}</TableCell>
-                <TableCell>
-                  <Badge variant="outline" className="text-[10px]">
-                    {a.execution_mode === "run"
-                      ? t("automations:executionModeRunShort")
-                      : t("automations:executionModeTaskShort")}
-                  </Badge>
-                </TableCell>
                 <TableCell>
                   <TriggerBadges triggers={a.triggers} />
                 </TableCell>

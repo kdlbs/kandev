@@ -1,5 +1,5 @@
 ---
-status: draft
+status: building
 created: 2026-05-14
 owner: tbd
 ---
@@ -16,24 +16,41 @@ Kandev is currently installable via `brew install kdlbs/kandev/kandev` from the 
 
 ## What
 
-- Author a homebrew-core-compliant `Formula/kandev.rb` that **builds entirely from source** — native Go `kandev` launcher/backend binary (cgo + sqlite via `mattn/go-sqlite3`), agentctl helper binaries, and the Vite web bundle embedded into the Go binary.
-- Source comes from the GitHub-generated tag archive (`https://github.com/kdlbs/kandev/archive/refs/tags/vX.Y.Z.tar.gz`); per-release sha256 is captured at submission/bump time.
-- Build deps: `go => :build`, `pnpm => :build`. Runtime dep: none for Node; `uses_from_macos "sqlite"` (cgo sqlite3 link) ships with macOS and is only installed via Homebrew on Linux.
-- Install layout: `libexec/bin` plus a single `bin/kandev` wrapper produced by `write_env_script`, setting `KANDEV_BUNDLE_DIR=<libexec>` and `KANDEV_VERSION=<version>`. The native launcher uses these values to find helper binaries and log the installed release version.
-- `livecheck do; url :stable; regex(/^v?(\d+(?:\.\d+)+)$/i); end` — Git strategy (the default for `url :stable`) checks tags directly and avoids the GitHub API rate limit.
-- Test block: spawns `libexec/bin/kandev` with an isolated `KANDEV_HOME_DIR` and random `KANDEV_SERVER_PORT`, polls `/api/v1/system/health` until the response contains `"healthy"` (60s timeout), then shuts the backend down. Also asserts the formula `version` appears in `bin/kandev --version`.
-- Tap (`kdlbs/homebrew-kandev`) and its update script (`scripts/release/update-homebrew-tap.sh`) stay untouched — it remains the binary-install fast path; the homebrew-core formula is a parallel, source-built distribution.
+- Add a package-manager build contract that produces the native runtime bundle from an already-installed source checkout. It builds the Vite SPA, syncs it into the Go embed input, compiles the host `kandev` and `agentctl` binaries, and cross-compiles the four Linux/macOS remote `agentctl` helpers.
+- Keep package-manager dependency installation outside that contract. Homebrew declares Go, Node 24, and pnpm as build dependencies and Git as a runtime facility.
+- Compile only the host `kandev` binary with cgo and the `fts5` tag. `mattn/go-sqlite3` supplies the SQLite amalgamation, so the formula does not declare an external SQLite dependency unless build or linkage evidence requires it.
+- Merge and publish the source-build contract in a Stable Kandev release before authoring the Core formula. Core must consume the immutable GitHub tag archive for that release, never a branch or unreleased commit.
+- Install the bundle under `libexec/bin` and expose one `bin/kandev` wrapper produced by `write_env_script`. The wrapper sets `KANDEV_BUNDLE_DIR=<libexec>` and `KANDEV_VERSION=<version>`.
+- Use stable numeric tags for `livecheck`; prerelease and Nightly npm versions are not Homebrew channels.
+- Keep `kdlbs/homebrew-kandev` as the upstream binary fast path alongside Homebrew Core's source-built bottles. The shared release-bundle validator must run before those binary archives are published, and the generated tap formula must smoke-test its version, readiness endpoint, and embedded SPA.
+- Preserve all four remote `agentctl` helpers in custom-tap installations. The tap must use an exact-path Homebrew mismatched-binary audit allowlist rather than pruning helpers, so Docker and SSH targets can differ from the Homebrew host. Decision: [ADR-2026-08-05-homebrew-remote-helper-audit](../../decisions/2026-08-05-homebrew-remote-helper-audit.md).
+
+The runtime bundle contains exactly:
+
+- host `kandev`;
+- host `agentctl`;
+- `agentctl-linux-amd64`;
+- `agentctl-linux-arm64`;
+- `agentctl-darwin-arm64`;
+- `agentctl-darwin-amd64`.
+
+The Darwin arm64 helper must carry a Mach-O code signature so Apple Silicon can execute it.
 
 ## Scenarios
 
-- **GIVEN** the homebrew-core PR is merged, **WHEN** a macOS user runs `brew install kandev`, **THEN** Homebrew downloads the source tarball, builds the Vite web assets, syncs them into the Go embed directory, compiles the Go binaries, installs them under `Cellar/kandev/X.Y.Z/{bin,libexec}`, and `kandev --help` prints "kandev launcher".
+- **GIVEN** the source-build contract is merged, **WHEN** a Stable release is published, **THEN** its immutable tag archive contains the contract used by the Homebrew formula.
+- **GIVEN** the homebrew-core PR is merged, **WHEN** a user runs `brew install kandev`, **THEN** Homebrew builds the Vite assets and native runtime bundle from source, installs it under `Cellar/kandev/X.Y.Z/{bin,libexec}`, and `kandev --version` prints `X.Y.Z` without Node being present at runtime.
+- **GIVEN** the installed formula starts with an isolated home directory and loopback port, **WHEN** `brew test kandev` polls `GET /health`, **THEN** readiness returns `{"status":"ok"}` and `/` serves the embedded page containing `<title>Kandev</title>`.
 - **GIVEN** a new kandev release `vX.Y.Z` is tagged, **WHEN** Homebrew's auto-bump worker runs, **THEN** `livecheck` resolves the new tag from GitHub Releases and a bump PR is opened against the formula.
 - **GIVEN** a maintainer reviews the PR, **WHEN** they run `brew install --build-from-source kandev` locally, **THEN** the build completes without network or sandbox failures and `brew test kandev` passes.
+- **GIVEN** a Stable release updates `kdlbs/homebrew-kandev`, **WHEN** its platform archive is built and the tap formula is tested, **THEN** the archive contains the complete executable runtime and the installed launcher serves both `/health` and the embedded Kandev page.
+- **GIVEN** a tap archive contains remote helpers for CPU architectures other than the Homebrew host, **WHEN** Homebrew audits the installed formula on macOS or Linux, **THEN** only the four declared remote-helper paths are exempted and the complete runtime remains installed.
 
 ## Out of scope
 
 - Migrating users from `kdlbs/homebrew-kandev` to homebrew-core (both can coexist; users opt in by switching tap reference).
 - Linuxbrew bottle parity beyond what homebrew-core's CI provides by default.
 - Vendoring JS dependencies via `resource` blocks — falls back here only if maintainers reject network-during-install.
-- Changes to `.github/workflows/release.yml` or `scripts/release/update-homebrew-tap.sh`.
+- Changing the custom tap's direct-push publication or deploy-key authentication model.
+- Advertising untapped `brew install kandev` before the Core formula merges.
 - Notability lobbying — submission goes in as-is; maintainers decide.

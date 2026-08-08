@@ -63,59 +63,18 @@ func (m *Manager) RescanRepositoriesWithSourceRoots(ctx context.Context, newWork
 		return err
 	}
 
-	proposedRoots := roots != nil
 	if roots == nil {
 		roots = m.currentWorkspaceSourceRoots()
 	} else {
 		roots = canonicalWorkspaceSourceRoots(roots)
 	}
-
-	// Snapshot existing trackers while rescanMu serializes the graph mutation.
-	// cfg.WorkDir and roots are committed only with the resulting graph below.
-	m.repoTrackersMu.RLock()
-	workDir := candidate
-	existingTrackers := len(m.repoTrackers)
-	trackers := append([]*WorkspaceTracker{m.workspaceTracker}, m.repoTrackers...)
-	m.repoTrackersMu.RUnlock()
-	for _, tracker := range trackers {
-		if tracker != nil {
-			tracker.SetAllowedSourceRoots(roots)
-		}
-	}
-
-	children := scanRepositorySubdirs(workDir, roots)
-	subs := m.snapshotSubscribers()
-
-	m.logger.Info("workspace rescan started",
-		zap.String("work_dir", workDir),
-		zap.Int("children_found", len(children)),
-		zap.Int("existing_repo_trackers", existingTrackers),
-		zap.Int("subscribers", len(subs)))
-
-	if candidate == "" {
-		m.commitRescanWorkspaceState(workDir, roots)
-		return nil
-	}
-	// A promoted root must always replace the old single-repo file tracker,
-	// even when it contains just one git repository plus plain linked folders.
-	if len(children) < 2 && !scopeChanged && newWorkDir != "" {
-		// Nothing to do: a non-multi-repo workspace stays on its single
-		// tracker. The legacy preferGitRepoChildIfRootIsBare fallback
-		// covers single-repo construct-time setup.
-		m.commitRescanWorkspaceState(workDir, roots)
-		return nil
-	}
-
-	if existingTrackers == 0 && scopeChanged {
-		m.transitionToMultiRepoMode(ctx, workDir, children, roots, subs)
-		return nil
-	}
-	if proposedRoots {
-		m.reconcileRepoTrackers(ctx, workDir, children, roots, subs)
-		return nil
-	}
-	m.appendNewRepoTrackers(ctx, workDir, children, roots, subs)
-	return nil
+	// A remote workspace may launch with a plain task root and no repository,
+	// then receive its first repository after launch. Preserve that root as the
+	// file-tree scope when it is rescanned; otherwise NewWorkspaceTracker's
+	// single-repo compatibility fallback would replace it with the new child
+	// and hide files that remain at the task root.
+	forceBareRoot := scopeChanged || m.hasBareMultiRepoTrackerGraph() || m.hasBareTaskRootTracker(candidate)
+	return m.reconcileWorkspaceTrackerGraph(ctx, candidate, roots, forceBareRoot)
 }
 
 // rescanCandidateWorkDir resolves and validates a proposed tracking root
@@ -179,10 +138,7 @@ func (m *Manager) ReconcileRepositories(ctx context.Context) error {
 	}
 
 	roots := m.currentWorkspaceSourceRoots()
-	children := scanRepositorySubdirs(workDir, roots)
-	subs := m.snapshotSubscribers()
-	m.reconcileRepoTrackers(ctx, workDir, children, roots, subs)
-	return nil
+	return m.reconcileWorkspaceTrackerGraph(ctx, workDir, roots, true)
 }
 
 // RebindWorkspace replaces the complete workspace tracker graph after the
@@ -220,46 +176,7 @@ func (m *Manager) RebindWorkspaceWithSourceRoots(ctx context.Context, workDir st
 	} else {
 		roots = canonicalWorkspaceSourceRoots(roots)
 	}
-	subs := m.snapshotSubscribers()
-	children := scanRepositorySubdirs(resolved, roots)
-	bare := m.newTrackerForRepo(resolved, "")
-	bare.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), ""))
-	bare.SetAllowedSourceRoots(roots)
-	bare.Start(ctx)
-	for _, sub := range subs {
-		bare.AttachWorkspaceStreamSubscriber(sub)
-	}
-	repos := make([]*WorkspaceTracker, 0, len(children))
-	for _, child := range children {
-		tracker := m.newTrackerForRepo(child.path, child.name)
-		tracker.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), child.name))
-		tracker.SetAllowedSourceRoots(roots)
-		tracker.Start(ctx)
-		for _, sub := range subs {
-			tracker.AttachWorkspaceStreamSubscriber(sub)
-		}
-		repos = append(repos, tracker)
-	}
-
-	m.repoTrackersMu.Lock()
-	oldBare, oldRepos := m.workspaceTracker, m.repoTrackers
-	m.cfg.WorkDir, m.workspaceTracker, m.repoTrackers, m.workspaceSourceRoots = resolved, bare, repos, append([]string(nil), roots...)
-	m.applyWorkspacePollModeLocked(append([]*WorkspaceTracker{bare}, repos...)...)
-	m.cfg.WorkspaceSourceRoots = append([]string(nil), roots...)
-	m.repoTrackersMu.Unlock()
-	if oldBare != nil {
-		for _, sub := range subs {
-			oldBare.DetachWorkspaceStreamSubscriber(sub)
-		}
-		oldBare.Stop()
-	}
-	for _, tracker := range oldRepos {
-		for _, sub := range subs {
-			tracker.DetachWorkspaceStreamSubscriber(sub)
-		}
-		tracker.Stop()
-	}
-	return nil
+	return m.replaceWorkspaceTrackerGraph(ctx, resolved, roots)
 }
 
 // transitionToMultiRepoMode replaces the single-repo workspaceTracker with a

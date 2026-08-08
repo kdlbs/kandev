@@ -173,26 +173,16 @@ export class SessionPage {
   /**
    * Wait for the chat to be idle (input placeholder visible, agent not busy).
    *
-   * On mobile-chrome (and occasionally desktop), there's a WS subscribe race:
-   * a fresh task auto-starts its agent, the mock agent completes in <1s, and
-   * the session_state transition (RUNNING -> AWAITING_INPUT) can fan out
-   * before the client's WS subscription registers server-side. The client
-   * then sits with `isAgentBusy=true` forever and the idle placeholder
-   * never renders. SSR picks up the right state on the next page load, so
-   * one targeted reload-and-retry is enough to recover.
+   * A fresh task can still miss the first persisted session-state transition
+   * while the page hydrates under CI load. Re-drive SSR hydration periodically
+   * so a stale busy state does not consume the whole idle wait budget.
    *
    * After a backend restart, auto-resume can briefly surface the recovery
    * prompt ("Environment setup failed"); click through it when visible.
-   *
-   * This is the same race the office agent-run-live spec rides out with
-   * `expect.poll`-based re-seeding.
    */
-  async waitForChatIdle(
-    opts: { timeout?: number; attemptTimeout?: number; requireEditable?: boolean } = {},
-  ) {
+  async waitForChatIdle(opts: { timeout?: number; requireEditable?: boolean } = {}) {
     const softTotalTimeout = opts.timeout ?? 45_000;
-    const attemptTimeout =
-      opts.attemptTimeout ?? Math.min(15_000, Math.max(5_000, Math.floor(softTotalTimeout / 3)));
+    const attemptTimeout = Math.min(15_000, Math.max(5_000, Math.floor(softTotalTimeout / 3)));
     const pollSlice = 1_500;
     const idle = this.anyIdleInput();
     const editor = this.activeChat().locator(".tiptap.ProseMirror:visible").first();
@@ -215,10 +205,6 @@ export class SessionPage {
 
       const now = Date.now();
       const remaining = Math.max(1, softTotalTimeout - (now - start));
-      // Re-drive SSR hydration once per attemptTimeout slice (not just once):
-      // under CI shard load a single reload isn't always enough for the
-      // idle-input state to hydrate. Only reload while enough budget remains
-      // for the reloaded page to settle.
       if (now - lastReloadAt >= attemptTimeout && remaining > pollSlice) {
         lastReloadAt = now;
         await this.page.reload();
@@ -228,9 +214,15 @@ export class SessionPage {
         continue;
       }
 
-      await idle
-        .waitFor({ state: "visible", timeout: Math.min(pollSlice, remaining) })
-        .catch(() => undefined);
+      const timeout = Math.min(pollSlice, remaining);
+      if (opts.requireEditable) {
+        await expect
+          .poll(isReady, { timeout })
+          .toBe(true)
+          .catch(() => undefined);
+      } else {
+        await idle.waitFor({ state: "visible", timeout }).catch(() => undefined);
+      }
     }
 
     // Final bounded check: still throws on a genuinely stuck session, but gives
@@ -781,6 +773,11 @@ export class SessionPage {
     return this.prTopbarPopover().getByTestId("pr-popover-updated-at");
   }
 
+  /** Footer spinner + "Updating…", shown while a refresh is in flight. */
+  prPopoverUpdating(): Locator {
+    return this.prTopbarPopover().getByTestId("pr-popover-updating");
+  }
+
   /** Empty-state row when the PR has no checks yet. */
   prChecksEmpty(): Locator {
     return this.prTopbarPopover().getByTestId("pr-checks-empty");
@@ -1014,6 +1011,7 @@ export class SessionPage {
    */
   async sendMessage(text: string) {
     const editor = await this.composerReady();
+    await this.waitForDirectInput();
     await editor.click();
     await editor.fill(text);
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
@@ -1026,6 +1024,7 @@ export class SessionPage {
    */
   async sendMessageViaButton(text: string) {
     const editor = await this.composerReady();
+    await this.waitForDirectInput();
     await editor.click();
     await editor.fill(text);
     const isTouch = await this.page.evaluate(() => window.matchMedia("(pointer: coarse)").matches);
@@ -1034,6 +1033,24 @@ export class SessionPage {
       return;
     }
     await this.clickSubmitWhenReady();
+  }
+
+  /**
+   * Wait until the composer is in direct-input mode — the idle placeholder
+   * ("Continue working on the task...") visible, not the queue affordance
+   * ("Queue instructions to the agent...").
+   *
+   * The submit button stays enabled while the session is busy (the queue
+   * affordance lets you type-and-queue), and `composerReady()` only checks
+   * editability, so a send right after a turn completes can race the store's
+   * RUNNING→WAITING_FOR_INPUT transition and silently queue the message
+   * instead of delivering it. Gating the send on the idle placeholder makes
+   * sends to an idle session deterministic: typing only starts once the store
+   * session state is genuinely promptable. Must run on an empty editor — the
+   * placeholder decoration is only rendered while the editor has no content.
+   */
+  async waitForDirectInput(timeout = 15_000) {
+    await expect(this.anyIdleInput()).toBeVisible({ timeout });
   }
 
   /** The composer's send/submit button (scoped to the active chat panel). */
@@ -1091,27 +1108,11 @@ export class SessionPage {
     return editor;
   }
 
-  /**
-   * Wait for the agent reply containing `text` at the given 0-based match
-   * `index` to be visible after a follow-up prompt. On first timeout, reload
-   * once so SSR re-fetches the persisted turn, then re-assert.
-   *
-   * This rides out the same WS-subscribe race `waitForChatIdle` handles, but
-   * for the reply message itself: a mid-session prompt's response event can be
-   * dropped when the client's WS subscription loses the race with the agent's
-   * reply (common after repeated restart/resume cycles). The reply is persisted
-   * server-side, so a single reload recovers it.
-   */
+  /** Wait for the agent reply containing `text` at the given 0-based match `index`. */
   async expectChatResponseVisible(text: string, index = 0, opts: { timeout?: number } = {}) {
     const timeout = opts.timeout ?? 30_000;
-    const target = () => this.chat.getByText(text, { exact: false }).nth(index);
-    try {
-      await expect(target()).toBeVisible({ timeout });
-    } catch {
-      await this.page.reload();
-      await this.waitForLoad();
-      await expect(target()).toBeVisible({ timeout });
-    }
+    const target = () => this.activeChat().getByText(text, { exact: false }).nth(index);
+    await expect(target()).toBeVisible({ timeout });
   }
 
   /** Toggle plan mode on/off by clicking the plan mode toggle button in the toolbar.

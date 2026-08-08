@@ -322,6 +322,43 @@ func TestConfigureGitHubCredentialBrokerIssuesOneLeasePerRepository(t *testing.T
 	}
 }
 
+func TestIssueGitHubContributionCredentialScopeIgnoresGitLabBinding(t *testing.T) {
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	info := &repoInfo{
+		RepositoryID: "repo-1",
+		Repository: &models.Repository{
+			Provider:      "gitlab",
+			ProviderOwner: "acme",
+			ProviderName:  "widget",
+		},
+		RemoteContribution: &models.RemoteContribution{
+			Version:      models.RemoteContributionVersion,
+			Provider:     models.RemoteContributionProviderGitLab,
+			Kind:         models.RemoteContributionKindMergeRequest,
+			CanonicalURL: "https://gitlab.com/acme/widget/-/merge_requests/7",
+			Number:       7,
+			State:        models.RemoteContributionStateOpen,
+			BaseBranch:   "main",
+			HeadBranch:   "feature/remote",
+			HeadSHA:      strings.Repeat("a", 40),
+			SourceRepository: models.RemoteContributionRepository{
+				Host:      "gitlab.com",
+				Path:      "contributor/widget",
+				RemoteURL: "https://gitlab.com/contributor/widget.git",
+			},
+			CollaborationAllowed: true,
+		},
+	}
+
+	scope, err := exec.issueGitHubContributionCredentialScope(context.Background(), &LaunchAgentRequest{}, info)
+	if err != nil {
+		t.Fatalf("issueGitHubContributionCredentialScope() error = %v", err)
+	}
+	if scope != nil {
+		t.Fatalf("scope = %#v, want nil for GitLab binding", scope)
+	}
+}
+
 func TestConfigureGitHubCredentialBrokerPreservesExplicitProfileToken(t *testing.T) {
 	issuer := &fakeGitHubCredentialLeaseIssuer{lease: GitHubCredentialLease{Token: "opaque-lease"}}
 	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())

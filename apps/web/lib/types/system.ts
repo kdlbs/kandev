@@ -188,7 +188,11 @@ export interface SystemMetricsSettingsResponse {
 
 export interface MessageQueueSettingsValue {
   max_per_session: number;
+  merge_enabled: boolean;
 }
+
+/** Partial PATCH payload: omitted fields are left unchanged server-side. */
+export type MessageQueueSettingsPatch = Partial<MessageQueueSettingsValue>;
 
 export type MessageQueueSettingsSource = "default" | "setting" | "environment";
 

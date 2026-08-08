@@ -68,6 +68,14 @@ features:
     dev:  "false"
     e2e:  "false"
 
+  # High-risk mid-turn steering experiment: deliver a prompt into a turn that is
+  # still generating. Off in every profile; e2e specs that need it set the env
+  # var per-spec so the default stays honest.
+  KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
 # ── Mock providers ────────────────────────────────────────────────
 # Swap real third-party services for in-memory fakes. Production
 # leaves all of these unset (real APIs). Dev opts into the mock agent

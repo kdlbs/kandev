@@ -28,6 +28,7 @@ export const REUSABLE_PANEL_IDS = [
   "plan",
   "browser",
   "vscode",
+  "todos",
 ] as const;
 export type ReusablePanelId = (typeof REUSABLE_PANEL_IDS)[number];
 
@@ -42,6 +43,7 @@ export const KNOWN_PANEL_IDS = new Set([
   "files",
   "pr-detail",
   "mr-detail",
+  "todos",
 ]);
 
 /** Components whose panels are structural and should survive filterEphemeral,
@@ -83,6 +85,7 @@ export const PANEL_REGISTRY: Record<string, Omit<LayoutPanel, "id">> = {
   },
   "pr-detail": { component: "pr-detail", title: "PR Details" },
   "mr-detail": { component: "mr-detail", title: "Merge Request" },
+  todos: { component: "todos", title: "Todos" },
 };
 
 /** Create a LayoutPanel from the registry by ID. */

@@ -167,6 +167,7 @@ func TestPromptTask_ClaudeExperimentAdmitsRecognizedBackgroundWork(t *testing.T)
 			)
 			seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
 			setSessionAgentNameForTest(t, svc, sessionID, "claude-acp")
+			advertisePromptQueueingForTest(t, svc, sessionID)
 			session, err := repo.GetTaskSession(context.Background(), sessionID)
 			if err != nil {
 				t.Fatalf("load session: %v", err)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -39,11 +40,19 @@ import (
 // mockStepGetter implements WorkflowStepGetter for testing.
 type mockStepGetter struct {
 	steps                  map[string]*wfmodels.WorkflowStep // stepID -> step
-	workflowAgentProfileID string                            // returned by GetWorkflowAgentProfileID
+	workflowAgentProfileID string                            // returned by GetWorkflowMeta
+	workflowPrompts        map[string]string                 // workflowID -> prompt
+	workflowMetaCalls      int                               // GetWorkflowMeta invocations
+	workflowMetaErr        error                             // optional error from GetWorkflowMeta
+	workflowMetaDelay      time.Duration                     // optional sleep before returning meta
+	workflowMetaMu         sync.Mutex                        // guards workflowMetaCalls for concurrent tests
 }
 
 func newMockStepGetter() *mockStepGetter {
-	return &mockStepGetter{steps: make(map[string]*wfmodels.WorkflowStep)}
+	return &mockStepGetter{
+		steps:           make(map[string]*wfmodels.WorkflowStep),
+		workflowPrompts: make(map[string]string),
+	}
 }
 
 func (m *mockStepGetter) GetStep(_ context.Context, stepID string) (*wfmodels.WorkflowStep, error) {
@@ -77,11 +86,31 @@ func (m *mockStepGetter) GetPreviousStepByPosition(_ context.Context, workflowID
 	return best, nil
 }
 
-func (m *mockStepGetter) GetWorkflowAgentProfileID(_ context.Context, workflowID string) (string, error) {
-	if m.workflowAgentProfileID != "" {
-		return m.workflowAgentProfileID, nil
+func (m *mockStepGetter) GetWorkflowMeta(_ context.Context, workflowID string) (WorkflowMeta, error) {
+	m.workflowMetaMu.Lock()
+	m.workflowMetaCalls++
+	delay := m.workflowMetaDelay
+	m.workflowMetaMu.Unlock()
+	if delay > 0 {
+		time.Sleep(delay)
 	}
-	return "", nil
+	if m.workflowMetaErr != nil {
+		return WorkflowMeta{}, m.workflowMetaErr
+	}
+	prompt := ""
+	if m.workflowPrompts != nil {
+		prompt = m.workflowPrompts[workflowID]
+	}
+	return WorkflowMeta{
+		AgentProfileID: m.workflowAgentProfileID,
+		Prompt:         prompt,
+	}, nil
+}
+
+func (m *mockStepGetter) metaCalls() int {
+	m.workflowMetaMu.Lock()
+	defer m.workflowMetaMu.Unlock()
+	return m.workflowMetaCalls
 }
 
 // mockTaskRepo implements scheduler.TaskRepository for testing.
@@ -248,6 +277,12 @@ type mockAgentManager struct {
 	// the execution ID so callers can filter by the agent that received it.
 	capturedPrompts     []string
 	capturedPromptCalls []promptCall
+	// Steer tracking. capturedSteerCalls records every SteerAgentWithDispatchCallback
+	// invocation; steerErr, when set, is returned instead of dispatching. Having
+	// this method also makes the mock satisfy the executor's optional
+	// steerAgentWithDispatchCallback capability.
+	capturedSteerCalls []promptCall
+	steerErr           error
 	// Optional: closed once on the first PromptAgent call so tests can wait
 	// deterministically without polling. Tests opt in by initializing the channel.
 	promptDone chan struct{}
@@ -417,6 +452,29 @@ func (m *mockAgentManager) PromptAgentWithDispatchCallback(ctx context.Context, 
 	}
 	return result, err
 }
+
+func (m *mockAgentManager) SteerAgentWithDispatchCallback(_ context.Context, executionID string, prompt string, _ []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*executor.PromptResult, error) {
+	m.mu.Lock()
+	m.capturedSteerCalls = append(m.capturedSteerCalls, promptCall{ExecutionID: executionID, Prompt: prompt, DispatchOnly: dispatchOnly})
+	steerErr := m.steerErr
+	m.mu.Unlock()
+	if steerErr != nil {
+		return nil, steerErr
+	}
+	if onDispatched != nil {
+		onDispatched()
+	}
+	return &executor.PromptResult{StopReason: "dispatched"}, nil
+}
+
+func (m *mockAgentManager) getCapturedSteerCalls() []promptCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]promptCall(nil), m.capturedSteerCalls...)
+}
+
+// CancelAgent keeps its named sessionID parameter: the body below forwards it
+// to cancelAgentFunc, so the topic's `_ string` would not compile here.
 func (m *mockAgentManager) CancelAgent(ctx context.Context, sessionID string) error {
 	m.cancelAgentCalls.Add(1)
 	if m.cancelAgentEntered != nil {
@@ -2346,6 +2404,74 @@ func TestClearResumeToken(t *testing.T) {
 
 func TestHandleRecoverableFailure(t *testing.T) {
 	ctx := context.Background()
+
+	t.Run("persists validated remediation URL in last agent error metadata", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		taskRepo := newMockTaskRepo()
+		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+		svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+		const wantURL = "https://opencode.ai/workspace/wrk_01KQM7K5CYT715264YKKFB17ZY/go"
+
+		svc.handleRecoverableFailure(ctx, watcher.AgentEventData{
+			TaskID:           "t1",
+			SessionID:        "s1",
+			AgentExecutionID: "exec-1",
+			ErrorMessage:     "usage limit reached",
+			ProviderError: &streams.ProviderError{
+				Source:         streams.ProviderErrorSourceOpenCodeStderr,
+				Message:        "usage limit reached",
+				RemediationURL: wantURL,
+				OccurredAt:     time.Date(2026, 8, 2, 15, 15, 44, 0, time.UTC),
+			},
+		})
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("failed to get session: %v", err)
+		}
+		lastErr, ok := models.LoadLastAgentError(session.Metadata)
+		if !ok {
+			t.Fatalf("expected last agent error metadata, got %#v", session.Metadata)
+		}
+		if lastErr.RemediationURL != wantURL {
+			t.Fatalf("remediation URL = %q, want %q", lastErr.RemediationURL, wantURL)
+		}
+		// The plain error_message contract stays URL-free.
+		if strings.Contains(session.ErrorMessage, "https://") ||
+			strings.Contains(session.ErrorMessage, "wrk_") {
+			t.Fatalf("error_message contains private URL or identifier: %q", session.ErrorMessage)
+		}
+	})
+
+	t.Run("omits remediation URL when the diagnostic carries none", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		taskRepo := newMockTaskRepo()
+		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+		svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+		svc.handleRecoverableFailure(ctx, watcher.AgentEventData{
+			TaskID:           "t1",
+			SessionID:        "s1",
+			AgentExecutionID: "exec-1",
+			ErrorMessage:     "provider failed",
+		})
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("failed to get session: %v", err)
+		}
+		lastErr, ok := models.LoadLastAgentError(session.Metadata)
+		if !ok {
+			t.Fatalf("expected last agent error metadata, got %#v", session.Metadata)
+		}
+		if lastErr.RemediationURL != "" {
+			t.Fatalf("remediation URL = %q, want empty", lastErr.RemediationURL)
+		}
+	})
 
 	t.Run("sets session to WAITING_FOR_INPUT with error message", func(t *testing.T) {
 		repo := setupTestRepo(t)

@@ -763,14 +763,14 @@ func (s *Service) resolveStepAgentProfile(ctx context.Context, step *wfmodels.Wo
 		return step.AgentProfileID
 	}
 	if s.workflowStepGetter != nil && step.WorkflowID != "" {
-		wfProfileID, err := s.workflowStepGetter.GetWorkflowAgentProfileID(ctx, step.WorkflowID)
+		meta, err := s.getWorkflowMeta(ctx, step.WorkflowID)
 		if err != nil {
 			s.logger.Warn("failed to resolve workflow agent profile, falling back to task defaults",
 				zap.String("workflow_id", step.WorkflowID),
 				zap.String("step_id", step.ID),
 				zap.Error(err))
-		} else if wfProfileID != "" {
-			return wfProfileID
+		} else if meta.AgentProfileID != "" {
+			return meta.AgentProfileID
 		}
 	}
 	return ""
@@ -1077,6 +1077,9 @@ func (s *Service) maybySwitchSessionForProfile(
 
 // processOnEnter processes the on_enter events for a step after transitioning to it.
 func (s *Service) processOnEnter(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, taskDescription string) {
+	// One GetWorkflowMeta read shared by profile resolution and prompt build.
+	ctx = withWorkflowMetaCache(ctx)
+
 	// Switch session if this step requires a different agent profile.
 	var ok bool
 	prevSessionID := session.ID
@@ -1453,12 +1456,13 @@ func (s *Service) drainQueuedMessageForPromptableSession(ctx context.Context, se
 // public drainQueuedMessageForPromptableSession instead when the guard is
 // not already held.
 //
-// Backs off without taking anything when isQueuedDispatchInFlight reports
-// a different dispatch already handed off for this session — see the
-// Service.dispatchingQueued field doc comment for the double-dispatch
-// window this closes.
+// Backs off without taking anything when any queued dispatch is still settling
+// for this session. This covers a different dispatch already handed off,
+// or an admitted-but-not-yet-dispatched steer. Send Now uses the phase-specific
+// helpers to supersede only a pending automatic FIFO reservation.
 func (s *Service) drainQueuedMessageForPromptableSessionLocked(ctx context.Context, sessionID string) bool {
-	if s.messageQueue == nil || s.isCancelInFlight(sessionID) || s.isQueuedDispatchInFlight(sessionID) {
+	if s.messageQueue == nil || s.isCancelInFlight(sessionID) ||
+		s.isQueuedDispatchInFlight(sessionID) || s.isSteerInFlight(sessionID) {
 		return false
 	}
 	queuedMsg, ok := s.messageQueue.ReserveQueued(ctx, sessionID)
@@ -1481,13 +1485,11 @@ func (s *Service) dispatchTakenQueuedMessage(ctx context.Context, sessionID stri
 			zap.String("queue_id", queuedMsg.ID))
 		return false
 	}
-	// Reserve entryID as sessionID's "dispatch in flight" token *before*
-	// handing off to the async goroutine — see the Service.dispatchingQueued
-	// field doc comment for why session.State alone isn't a reliable busy
-	// signal until executeQueuedMessage's own promptTask call reaches its
-	// guarded claim step, several DB round-trips later.
-	s.markQueuedDispatchInFlight(sessionID, queuedMsg.ID)
-	go s.executeQueuedMessage(sessionID, queuedMsg)
+	// Reserve entryID before handing off to the async goroutine. The worker
+	// transitions this reservation to accepted under the same guard used by
+	// Send Now before it performs any visible prompt side effects.
+	reservation := s.markQueuedDispatchInFlightWithSourceLocked(sessionID, queuedMsg.ID, queuedMsg)
+	go s.executeQueuedMessageWithReservation(sessionID, queuedMsg, reservation)
 	return true
 }
 

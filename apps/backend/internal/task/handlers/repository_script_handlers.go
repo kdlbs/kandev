@@ -131,6 +131,30 @@ func (h *RepositoryHandlers) wsListRepositoryScripts(ctx context.Context, msg *w
 	return ws.NewResponse(msg.ID, msg.Action, scriptsToListResponse(scripts))
 }
 
+// wsRejectReadOnlyRepository returns a conflict WS error when the repository
+// lives in the dedicated Improve Kandev workspace, whose repositories (and
+// their scripts) are read-only. Lookup errors surface as not-found.
+func (h *RepositoryHandlers) wsRejectReadOnlyRepository(ctx context.Context, msg *ws.Message, repositoryID string) (*ws.Message, bool) {
+	repository, err := h.service.GetRepository(ctx, repositoryID)
+	if err != nil {
+		errMsg, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Repository not found", nil)
+		return errMsg, true
+	}
+	return h.wsRejectReadOnlyWorkspace(ctx, msg, repository.WorkspaceID)
+}
+
+// wsRejectReadOnlyScript returns a conflict WS error when the script's
+// repository lives in the dedicated Improve Kandev workspace. Lookup errors
+// surface as not-found.
+func (h *RepositoryHandlers) wsRejectReadOnlyScript(ctx context.Context, msg *ws.Message, scriptID string) (*ws.Message, bool) {
+	script, err := h.service.GetRepositoryScript(ctx, scriptID)
+	if err != nil {
+		errMsg, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Repository script not found", nil)
+		return errMsg, true
+	}
+	return h.wsRejectReadOnlyRepository(ctx, msg, script.RepositoryID)
+}
+
 type wsCreateRepositoryScriptRequest struct {
 	RepositoryID string `json:"repository_id"`
 	Name         string `json:"name"`
@@ -145,6 +169,9 @@ func (h *RepositoryHandlers) wsCreateRepositoryScript(ctx context.Context, msg *
 	}
 	if req.RepositoryID == "" || req.Name == "" || req.Command == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "repository_id, name, and command are required", nil)
+	}
+	if errMsg, blocked := h.wsRejectReadOnlyRepository(ctx, msg, req.RepositoryID); blocked {
+		return errMsg, nil
 	}
 	script, err := h.service.CreateRepositoryScript(ctx, &service.CreateRepositoryScriptRequest{
 		RepositoryID: req.RepositoryID,
@@ -193,6 +220,9 @@ func (h *RepositoryHandlers) wsUpdateRepositoryScript(ctx context.Context, msg *
 	if req.ID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
 	}
+	if errMsg, blocked := h.wsRejectReadOnlyScript(ctx, msg, req.ID); blocked {
+		return errMsg, nil
+	}
 	script, err := h.service.UpdateRepositoryScript(ctx, req.ID, &service.UpdateRepositoryScriptRequest{
 		Name:     req.Name,
 		Command:  req.Command,
@@ -216,6 +246,9 @@ func (h *RepositoryHandlers) wsDeleteRepositoryScript(ctx context.Context, msg *
 	}
 	if req.ID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
+	}
+	if errMsg, blocked := h.wsRejectReadOnlyScript(ctx, msg, req.ID); blocked {
+		return errMsg, nil
 	}
 	if err := h.service.DeleteRepositoryScript(ctx, req.ID); err != nil {
 		h.logger.Error("failed to delete repository script", zap.Error(err))

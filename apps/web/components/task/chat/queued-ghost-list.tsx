@@ -2,17 +2,21 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { IconLayoutList, IconPlayerPlay, IconTrash, IconX } from "@tabler/icons-react";
+import { IconLayoutList } from "@tabler/icons-react";
 import { toast } from "@/lib/toast/sonner";
 import { useTranslation } from "react-i18next";
-import { Button } from "@kandev/ui";
 import { Collapsible, CollapsibleContent } from "@kandev/ui/collapsible";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { stripSystemTags } from "@/lib/utils/system-tags";
-import { MergeReferenceOverflowError, QueueEntryNotFoundError } from "@/lib/api/domains/queue-api";
+import {
+  MergeReferenceOverflowError,
+  QueueEntryNotFoundError,
+  QueueSendNowError,
+} from "@/lib/api/domains/queue-api";
 import { useQueue } from "@/hooks/domains/session/use-queue";
 import { canMergeWithAbove, QueuedGhostMessage } from "./queued-ghost-message";
+import { QueuePanelHeader } from "./queued-ghost-panel-header";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 import type { EntityReference } from "@/lib/types/entity-reference";
 
@@ -83,7 +87,51 @@ type QueuePanelHandlerArgs = {
   ) => Promise<void>;
   removeEntry: (entryId: string) => Promise<void>;
   mergeEntry: (entryId: string) => Promise<void>;
+  sendEntryNow: (entryId: string) => Promise<void>;
+  sendAllNow: () => Promise<void>;
 };
+
+function useSendNowPanelHandlers(
+  sendEntryNow: (entryId: string) => Promise<void>,
+  sendAllNow: () => Promise<void>,
+) {
+  const { t } = useTranslation();
+  const sendNowErrorMessage = useCallback(
+    (err: unknown) => {
+      if (err instanceof QueueEntryNotFoundError) return t("chat:sendNowEntryAlreadySent");
+      if (err instanceof QueueSendNowError) {
+        const messages: Record<string, string> = {
+          queue_empty: "chat:sendNowQueueEmpty",
+          queue_changed: "chat:sendNowQueueChanged",
+          send_now_conflict: "chat:sendNowConflict",
+          turn_changed: "chat:sendNowTurnChanged",
+          send_now_attachment_overflow: "chat:sendNowAttachmentOverflow",
+          send_now_reference_overflow: "chat:sendNowReferenceOverflow",
+        };
+        const key = messages[err.code];
+        if (key) return t(key);
+      }
+      return t("chat:failedToSendQueuedMessageNow");
+    },
+    [t],
+  );
+  const handleSendEntryNow = useCallback(
+    (entryId: string) => {
+      sendEntryNow(entryId).catch((err) => {
+        console.error("Failed to send queued message now:", err);
+        toast.error(sendNowErrorMessage(err));
+      });
+    },
+    [sendEntryNow, sendNowErrorMessage],
+  );
+  const handleSendAllNow = useCallback(() => {
+    sendAllNow().catch((err) => {
+      console.error("Failed to send queued messages now:", err);
+      toast.error(sendNowErrorMessage(err));
+    });
+  }, [sendAllNow, sendNowErrorMessage]);
+  return { handleSendEntryNow, handleSendAllNow };
+}
 
 function useQueuePanelHandlers({
   clearAll,
@@ -91,6 +139,8 @@ function useQueuePanelHandlers({
   editEntry,
   removeEntry,
   mergeEntry,
+  sendEntryNow,
+  sendAllNow,
 }: QueuePanelHandlerArgs) {
   // Tracks merge requests still in flight so a rapid second click on the same
   // row cannot fire a second request for an entry that is already gone — the
@@ -98,6 +148,10 @@ function useQueuePanelHandlers({
   // a spurious "not found" error.
   const pendingMerges = useRef(new Set<string>());
   const { t } = useTranslation();
+  const { handleSendEntryNow, handleSendAllNow } = useSendNowPanelHandlers(
+    sendEntryNow,
+    sendAllNow,
+  );
   const handleSave = useCallback(
     async (entryId: string, content: string, entityReferences: EntityReference[]) => {
       await editEntry(entryId, content, undefined, entityReferences);
@@ -151,7 +205,103 @@ function useQueuePanelHandlers({
     });
   }, [drainNext, t]);
 
-  return { handleSave, handleRemove, handleMerge, handleClear, handleDrain };
+  return {
+    handleSave,
+    handleRemove,
+    handleMerge,
+    handleClear,
+    handleDrain,
+    handleSendEntryNow,
+    handleSendAllNow,
+  };
+}
+
+type QueuePanelDisclosureProps = {
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+  entries: QueuedMessage[];
+  count: number;
+  max: number;
+  isFull: boolean;
+  canDrain: boolean;
+  isLoading: boolean;
+  cancellationPending: boolean;
+  mergeEnabled: boolean;
+  onClose: () => void;
+  onClear: () => void;
+  onDrain: () => void;
+  onSendNow: () => void;
+  onSave: (entryId: string, content: string, refs: EntityReference[]) => Promise<void>;
+  onRemove: (entryId: string) => Promise<void>;
+  onMerge: (entryId: string) => Promise<void>;
+  onSendEntryNow: (entryId: string) => void;
+};
+
+/** Wraps QueuePanel in the collapsible open/close animation shell. */
+function QueuePanelDisclosure({
+  isOpen,
+  onOpenChange,
+  entries,
+  count,
+  max,
+  isFull,
+  canDrain,
+  isLoading,
+  cancellationPending,
+  mergeEnabled,
+  onClose,
+  onClear,
+  onDrain,
+  onSendNow,
+  onSave,
+  onRemove,
+  onMerge,
+  onSendEntryNow,
+}: QueuePanelDisclosureProps) {
+  return (
+    <Collapsible open={isOpen} onOpenChange={onOpenChange}>
+      <CollapsibleContent
+        className={cn(
+          "overflow-hidden",
+          "data-[state=open]:animate-queue-open data-[state=closed]:animate-queue-close",
+        )}
+      >
+        <QueuePanel
+          entries={entries}
+          count={count}
+          max={max}
+          isFull={isFull}
+          canDrain={canDrain}
+          isLoading={isLoading}
+          cancellationPending={cancellationPending}
+          mergeEnabled={mergeEnabled}
+          onClose={onClose}
+          onClear={onClear}
+          onDrain={onDrain}
+          onSendNow={onSendNow}
+          onSave={onSave}
+          onRemove={onRemove}
+          onMerge={onMerge}
+          onSendEntryNow={onSendEntryNow}
+        />
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function useQueuePanelOpenState(sessionId: string | null, entryCount: number) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [lastSession, setLastSession] = useState(sessionId);
+  const [lastEntryCount, setLastEntryCount] = useState(entryCount);
+  if (sessionId !== lastSession) {
+    setLastSession(sessionId);
+    setIsOpen(false);
+  }
+  if (entryCount !== lastEntryCount) {
+    setLastEntryCount(entryCount);
+    if (entryCount === 0) setIsOpen(false);
+  }
+  return [isOpen, setIsOpen] as const;
 }
 
 /**
@@ -173,39 +323,40 @@ export function QueueAffordance({
     count,
     max,
     isFull,
+    mergeEnabled,
     isLoading,
     clearAll,
     drainNext,
     editEntry,
     removeEntry,
     mergeEntry,
+    sendEntryNow,
+    sendAllNow,
+    cancellationPending,
   } = useQueue(sessionId);
-  const [isOpen, setIsOpen] = useState(false);
-  const { handleSave, handleRemove, handleMerge, handleClear, handleDrain } = useQueuePanelHandlers(
-    {
-      clearAll,
-      drainNext,
-      editEntry,
-      removeEntry,
-      mergeEntry,
-    },
-  );
+  const entryCount = entries.length;
+  const [isOpen, setIsOpen] = useQueuePanelOpenState(sessionId, entryCount);
+  const {
+    handleSave,
+    handleRemove,
+    handleMerge,
+    handleClear,
+    handleDrain,
+    handleSendEntryNow,
+    handleSendAllNow,
+  } = useQueuePanelHandlers({
+    clearAll,
+    drainNext,
+    editEntry,
+    removeEntry,
+    mergeEntry,
+    sendEntryNow,
+    sendAllNow,
+  });
 
   // Reset disclosure on session switch or full drain using render-phase state
   // adjustment (React docs: "Adjusting some state when a prop changes"). This
   // avoids the cascading-render anti-pattern of doing it inside useEffect.
-  const entryCount = entries.length;
-  const [lastSession, setLastSession] = useState(sessionId);
-  const [lastEntryCount, setLastEntryCount] = useState(entryCount);
-  if (sessionId !== lastSession) {
-    setLastSession(sessionId);
-    setIsOpen(false);
-  }
-  if (entryCount !== lastEntryCount) {
-    setLastEntryCount(entryCount);
-    if (entryCount === 0) setIsOpen(false);
-  }
-
   const close = useCallback(() => setIsOpen(false), []);
   useEscToClose(isOpen, close);
 
@@ -233,29 +384,26 @@ export function QueueAffordance({
   return (
     <>
       {renderStatusBar?.(chipNode)}
-      <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-        <CollapsibleContent
-          className={cn(
-            "overflow-hidden",
-            "data-[state=open]:animate-queue-open data-[state=closed]:animate-queue-close",
-          )}
-        >
-          <QueuePanel
-            entries={entries}
-            count={count}
-            max={max}
-            isFull={isFull}
-            canDrain={canDrain}
-            isLoading={isLoading}
-            onClose={close}
-            onClear={handleClear}
-            onDrain={handleDrain}
-            onSave={handleSave}
-            onRemove={handleRemove}
-            onMerge={handleMerge}
-          />
-        </CollapsibleContent>
-      </Collapsible>
+      <QueuePanelDisclosure
+        isOpen={isOpen}
+        onOpenChange={setIsOpen}
+        entries={entries}
+        count={count}
+        max={max}
+        isFull={isFull}
+        canDrain={canDrain}
+        isLoading={isLoading}
+        cancellationPending={cancellationPending}
+        mergeEnabled={mergeEnabled}
+        onClose={close}
+        onClear={handleClear}
+        onDrain={handleDrain}
+        onSendNow={handleSendAllNow}
+        onSave={handleSave}
+        onRemove={handleRemove}
+        onMerge={handleMerge}
+        onSendEntryNow={handleSendEntryNow}
+      />
       {!renderStatusBar && chipNode && (
         <div className="flex items-center px-1 pb-1 animate-in fade-in-0 slide-in-from-bottom-1 duration-150 motion-reduce:animate-none">
           {chipNode}
@@ -324,14 +472,20 @@ type QueuePanelProps = {
   isFull: boolean;
   canDrain: boolean;
   isLoading: boolean;
+  cancellationPending: boolean;
+  mergeEnabled: boolean;
   onClose: () => void;
   onClear: () => void;
   onDrain: () => void;
+  onSendNow: () => void;
   onSave: (entryId: string, content: string, entityReferences: EntityReference[]) => Promise<void>;
   onRemove: (entryId: string) => Promise<void>;
   onMerge: (entryId: string) => Promise<void>;
+  onSendEntryNow: (entryId: string) => void;
 };
 
+/** Renders the expanded queue list: header controls plus one QueuedGhostMessage
+ * row per pending entry, gating each row's merge control on `mergeEnabled`. */
 function QueuePanel({
   entries,
   count,
@@ -339,12 +493,16 @@ function QueuePanel({
   isFull,
   canDrain,
   isLoading,
+  cancellationPending,
+  mergeEnabled,
   onClose,
   onClear,
   onDrain,
+  onSendNow,
   onSave,
   onRemove,
   onMerge,
+  onSendEntryNow,
 }: QueuePanelProps) {
   const { t } = useTranslation();
   return (
@@ -365,8 +523,10 @@ function QueuePanel({
         isFull={isFull}
         canDrain={canDrain}
         isLoading={isLoading}
+        cancellationPending={cancellationPending}
         onClear={onClear}
         onDrain={onDrain}
+        onSendNow={onSendNow}
         onClose={onClose}
       />
       <div
@@ -380,85 +540,14 @@ function QueuePanel({
             index={index}
             canEdit={canUserEditEntry(entry)}
             canRemove
-            canMerge={canMergeWithAbove(entry, entries[index - 1])}
+            canMerge={mergeEnabled && canMergeWithAbove(entry, entries[index - 1])}
             onSave={(content, entityReferences) => onSave(entry.id, content, entityReferences)}
             onRemove={() => onRemove(entry.id)}
             onMerge={() => onMerge(entry.id)}
+            onSendNow={() => onSendEntryNow(entry.id)}
+            sendNowDisabled={isLoading || cancellationPending}
           />
         ))}
-      </div>
-    </div>
-  );
-}
-
-type QueuePanelHeaderProps = {
-  count: number;
-  max: number;
-  isFull: boolean;
-  canDrain: boolean;
-  isLoading: boolean;
-  onClear: () => void;
-  onDrain: () => void;
-  onClose: () => void;
-};
-
-function QueuePanelHeader({
-  count,
-  max,
-  isFull,
-  canDrain,
-  isLoading,
-  onClear,
-  onDrain,
-  onClose,
-}: QueuePanelHeaderProps) {
-  const { t } = useTranslation();
-  const capacityText =
-    max > 0
-      ? t(isFull ? "chat:queueCapacityFull" : "chat:queueCapacity", { count, max })
-      : t("chat:queueCount", { count });
-  return (
-    <div className="flex shrink-0 items-center justify-between gap-3 py-1">
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <IconLayoutList className="h-3.5 w-3.5" />
-        <span className="uppercase tracking-wide">{t("chat:queued")}</span>
-        <span className={cn(isFull && "text-amber-600 dark:text-amber-400")}>{capacityText}</span>
-      </div>
-      <div className="flex items-center gap-1">
-        {canDrain && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:px-3"
-            onClick={onDrain}
-            disabled={isLoading}
-            title={t("chat:runNextQueuedMessage")}
-            data-testid="queue-drain-next"
-          >
-            <IconPlayerPlay className="mr-1 h-3 w-3" />
-            {t("chat:runNext")}
-          </Button>
-        )}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 px-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:px-3"
-          onClick={onClear}
-          title={t("chat:clearAllQueuedMessages")}
-          data-testid="queue-clear-all"
-        >
-          <IconTrash className="mr-1 h-3 w-3" />
-          {t("chat:clearAll")}
-        </Button>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label={t("chat:collapseQueuedMessages")}
-          data-testid="queue-close"
-          className="inline-flex h-6 w-6 items-center justify-center text-muted-foreground hover:text-foreground cursor-pointer rounded p-1 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
-        >
-          <IconX className="h-3.5 w-3.5" />
-        </button>
       </div>
     </div>
   );

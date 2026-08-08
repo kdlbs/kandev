@@ -98,10 +98,13 @@ export function useTaskPR(taskId: string | null) {
   // call from the previous task can race that reset.
   const requestRef = useRef(0);
 
-  const refresh = useCallback(() => {
-    if (!taskId) return;
+  // Resolves when the sync settles (or immediately when it can't be sent), so
+  // callers can show an "updating" affordance for exactly as long as the
+  // summary is actually stale. Never rejects — failures are absorbed below.
+  const refresh = useCallback((): Promise<void> => {
+    if (!taskId) return Promise.resolve();
     const client = getWebSocketClient();
-    if (!client) return;
+    if (!client) return Promise.resolve();
 
     // Backend returns `{prs: TaskPR[], permanent?: boolean}` — multi-repo
     // tasks have one row per repo. We push each into the store so the
@@ -112,7 +115,7 @@ export function useTaskPR(taskId: string | null) {
     // exhaust the retry counter so the 5s interval below clears itself.
     const requestId = ++requestRef.current;
     const requestedTaskId = taskId;
-    client
+    return client
       .request<SyncResponse>("github.task_pr.sync", { task_id: requestedTaskId })
       .then((result) => {
         // Drop responses that aren't the latest in-flight request for
@@ -226,7 +229,7 @@ export function useTaskPR(taskId: string | null) {
   } as {
     pr: TaskPR | null;
     prs: TaskPR[];
-    refresh: () => void;
+    refresh: () => Promise<void>;
     unlink: (associationId: string) => Promise<void>;
     loaded: boolean;
   };

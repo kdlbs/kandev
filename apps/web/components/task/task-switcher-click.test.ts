@@ -89,6 +89,22 @@ describe("dispatchSidebarRowClick", () => {
     expect(h.onSelectTask).toHaveBeenCalledWith("t1");
   });
 
+  it("navigates on cmd-click when the toggle handler is absent (mobile switcher)", () => {
+    const h = { onSelectTask: vi.fn() };
+    const e = fakeEvent({ metaKey: true });
+    dispatchSidebarRowClick(e, "t1", false, h);
+    expect(e.preventDefault).not.toHaveBeenCalled();
+    expect(h.onSelectTask).toHaveBeenCalledWith("t1");
+  });
+
+  it("navigates on shift-click when the range handler is absent", () => {
+    const h = { onSelectTask: vi.fn() };
+    const e = fakeEvent({ shiftKey: true });
+    dispatchSidebarRowClick(e, "t1", false, h);
+    expect(e.preventDefault).not.toHaveBeenCalled();
+    expect(h.onSelectTask).toHaveBeenCalledWith("t1");
+  });
+
   it("always navigates archived rows without entering selection mode", () => {
     const h = handlers();
     const e = fakeEvent({ metaKey: true, shiftKey: true });

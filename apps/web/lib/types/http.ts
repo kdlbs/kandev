@@ -200,6 +200,8 @@ export type Workflow = {
   workspace_id: WorkspaceId;
   name: string;
   description?: string | null;
+  /** Optional workflow-level agent instructions prepended at every step entry. */
+  prompt?: string;
   workflow_template_id?: string | null;
   agent_profile_id?: AgentProfileId;
   sort_order?: number;
@@ -339,6 +341,9 @@ export type Task = ActiveSubagentCountFields & {
   primary_session_state?: TaskSessionState | null;
   primary_session_pending_action?: TaskPendingAction | null;
   task_pending_action?: TaskPendingAction | null;
+  /** True when the task's session was mid-turn when the backend died and has
+   *  not been resumed since (startup reconciliation marker). */
+  interrupted?: boolean;
   /**
    * Task-level MOST-ACTIVE-WINS activity across sessions. "generating" wins,
    * then "background"; null/absent means none is known. The count is the
@@ -449,6 +454,13 @@ export type TaskSession = ActiveSubagentCountFields & {
   cancellation_revision?: number;
   /** Fine-grained busy substate; background may outlive the foreground turn (ADR-0049). */
   foreground_activity?: ForegroundActivity | null;
+  /**
+   * True when a send right now would be delivered into the still-generating turn
+   * (mid-turn steering) rather than blocked/queued. Live, derived from the
+   * connected agent's negotiated capability plus the runtime flag; never
+   * persisted. The composer uses it to promise delivery, not folding.
+   */
+  supports_steering?: boolean;
   /** Compact pending-input projection used when this session's messages are unloaded. */
   pending_action?: TaskPendingAction | null;
   error_message?: string;
@@ -753,6 +765,7 @@ export type WorkflowExportData = {
 export type WorkflowPortable = {
   name: string;
   description?: string;
+  prompt?: string;
   steps: StepPortable[];
 };
 

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kandev/kandev/internal/githubauth"
 )
@@ -69,6 +70,34 @@ func newGitHubCredentialBrokerClient(
 	return &githubCredentialBrokerClient{endpoint: endpoint, request: request, http: httpClient}, nil
 }
 
+// maxBrokerErrorBodyBytes caps the broker error body appended to a resolve
+// failure. Broker error bodies are code/message JSON and carry no credential
+// (success bodies, which do carry the token, are never passed through this
+// path), but the cap and control-char stripping stay regardless.
+const maxBrokerErrorBodyBytes = 512
+
+// formatBrokerErrorBody reads a bounded, sanitized broker error body suitable
+// for appending to an error message, e.g. ": {\"error\":\"...\"}" — or "" when
+// the body is empty after sanitizing.
+func formatBrokerErrorBody(body io.Reader) string {
+	raw, _ := io.ReadAll(io.LimitReader(body, maxBrokerErrorBodyBytes))
+	for !utf8.Valid(raw) && len(raw) > 0 {
+		raw = raw[:len(raw)-1]
+	}
+	var sanitized strings.Builder
+	for _, r := range string(raw) {
+		if r < 0x20 {
+			continue
+		}
+		sanitized.WriteRune(r)
+	}
+	trimmed := strings.TrimSpace(sanitized.String())
+	if trimmed == "" {
+		return ""
+	}
+	return ": " + trimmed
+}
+
 func (c *githubCredentialBrokerClient) resolve(ctx context.Context) (*githubBrokerCredential, error) {
 	body, err := json.Marshal(c.request)
 	if err != nil {
@@ -85,8 +114,8 @@ func (c *githubCredentialBrokerClient) resolve(ctx context.Context) (*githubBrok
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
-		return nil, fmt.Errorf("resolve GitHub credential: broker returned HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("resolve GitHub credential: broker returned HTTP %d%s",
+			resp.StatusCode, formatBrokerErrorBody(resp.Body))
 	}
 	var credential githubBrokerCredential
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&credential); err != nil {

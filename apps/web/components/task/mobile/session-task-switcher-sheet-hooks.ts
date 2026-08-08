@@ -9,6 +9,7 @@ import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
 import { useWorkspaceSidebarTasks } from "@/hooks/domains/kanban/use-workspace-sidebar-tasks";
 import { useTaskActions, useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useTaskDetachDialog } from "@/hooks/use-detach-task";
+import { useNestTaskByDrag } from "@/hooks/use-nest-task";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
 import { workspaceModeFromMetadata } from "@/lib/kanban/map-task";
 import {
@@ -24,6 +25,7 @@ import { repositorySlug } from "@/lib/repository-slug";
 import { statusSummaryActiveErrorPreview } from "@/lib/task-status-summary";
 import { resolvePreferredSessionId } from "../task-select-helpers";
 import { mapSnapshotToKanban, sortByUpdatedAtDesc } from "./session-task-switcher-sheet-helpers";
+import { useTranslation } from "react-i18next";
 
 type SheetItemCtx = {
   repositoryPathsById: Map<string, string | undefined>;
@@ -111,10 +113,9 @@ export function toSheetItem(
     workspaceMode: task.workspaceMode,
     state: task.state as TaskState | undefined,
     ...status,
-    // Task-level most-active-wins busy aggregate from the task record — the same
-    // authoritative value the desktop sidebar (toSidebarItem) and board read, so the
-    // mobile task-switcher row shows background-running and agrees with the board for
-    // multi-session tasks instead of missing it.
+    // Same interruption marker the desktop sidebar reads — the mobile
+    // task-switcher row shares TaskItem rendering.
+    interrupted: task.interrupted,
     description: task.description,
     workflowId: task._workflowId,
     workflowName: ctx.workflowNameById.get(task._workflowId),
@@ -124,6 +125,9 @@ export function toSheetItem(
     isRemoteExecutor: task.isRemoteExecutor,
     remoteExecutorType: task.primaryExecutorType ?? undefined,
     remoteExecutorName: task.primaryExecutorName ?? undefined,
+    // Queued prompt count badge — same status summary source as the desktop
+    // sidebar mapper (buildSidebarItem) so both surfaces agree.
+    queuedCount: task.statusSummary?.queued_prompt_count,
   };
 }
 
@@ -466,6 +470,7 @@ function useSheetDeleteActions(
   store: ReturnType<typeof useAppStoreApi>,
   removeTaskFromBoard: ReturnType<typeof useTaskRemoval>["removeTaskFromBoard"],
 ) {
+  const { t } = useTranslation();
   const { deleteTaskById } = useTaskActions();
   const [deletingTask, setDeletingTask] = useState<{
     id: string;
@@ -480,11 +485,11 @@ function useSheetDeleteActions(
       const task = findSheetTask(state, taskId);
       setDeletingTask({
         id: taskId,
-        title: task?.title ?? "this task",
+        title: task?.title ?? t("task:thisTask"),
         executorType: task?.primaryExecutorType,
       });
     },
-    [store],
+    [store, t],
   );
 
   const handleDeleteConfirm = useCallback(
@@ -521,7 +526,16 @@ function useSheetDeleteActions(
   };
 }
 
+/**
+ * Re-parent via drag: runs the same composite nest operation the context menu
+ * uses, resolving the workflow from the snapshot keys.
+ */
+function useSheetNestTask() {
+  return useNestTaskByDrag();
+}
+
 export function useSheetActions(workspaceId: string | null, onOpenChange: (open: boolean) => void) {
+  const { t } = useTranslation();
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const store = useAppStoreApi();
@@ -529,6 +543,7 @@ export function useSheetActions(workspaceId: string | null, onOpenChange: (open:
   const { removeTaskFromBoard, loadTaskSessionsForTask } = useTaskRemoval({ store });
   const deleteActions = useSheetDeleteActions(store, removeTaskFromBoard);
   const detachActions = useTaskDetachDialog(store);
+  const handleNestTask = useSheetNestTask();
 
   const handleSelectTask = useCallback(
     (taskId: string) => {
@@ -577,11 +592,11 @@ export function useSheetActions(workspaceId: string | null, onOpenChange: (open:
       const task = findSheetTask(state, taskId);
       setArchivingTask({
         id: taskId,
-        title: task?.title ?? "this task",
+        title: task?.title ?? t("task:thisTask"),
         executorType: task?.primaryExecutorType,
       });
     },
-    [store],
+    [store, t],
   );
 
   const handleArchiveConfirm = useCallback(
@@ -614,6 +629,7 @@ export function useSheetActions(workspaceId: string | null, onOpenChange: (open:
     handleArchiveTask,
     handleWorkspaceChange,
     handleTaskCreated,
+    handleNestTask,
     archivingTask,
     setArchivingTask,
     isArchiving,

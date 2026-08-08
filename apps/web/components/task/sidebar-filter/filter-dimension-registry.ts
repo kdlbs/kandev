@@ -1,28 +1,32 @@
+import { t } from "@/lib/i18n";
 import type { FilterDimension, FilterOp } from "@/lib/state/slices/ui/sidebar-view-types";
 
 export type DimensionValueKind = "boolean" | "enum" | "text";
 
+// `labelKey` / `placeholderKey` hold catalog keys rather than copy: this table
+// is module scope, so a resolved `t()` here would freeze at the boot locale.
+// The `value` fields are persisted filter values and stay in English.
 export type DimensionMeta = {
   dimension: FilterDimension;
-  label: string;
+  labelKey: string;
   valueKind: DimensionValueKind;
   ops: FilterOp[];
-  enumOptions?: Array<{ value: string; label: string }>;
-  placeholder?: string;
+  enumOptions?: Array<{ value: string; labelKey: string }>;
+  placeholderKey?: string;
   defaultOp: FilterOp;
   defaultValue: string | string[] | boolean;
 };
 
 const STATE_OPTIONS = [
-  { value: "review", label: "Review" },
-  { value: "in_progress", label: "In progress" },
-  { value: "backlog", label: "Backlog" },
+  { value: "review", labelKey: "task:filterStateReview" },
+  { value: "in_progress", labelKey: "task:filterStateInProgress" },
+  { value: "backlog", labelKey: "task:filterStateBacklog" },
 ];
 
 export const DIMENSION_METAS: DimensionMeta[] = [
   {
     dimension: "archived",
-    label: "Archived",
+    labelKey: "task:filterDimensionArchived",
     valueKind: "boolean",
     ops: ["is", "is_not"],
     defaultOp: "is",
@@ -30,7 +34,7 @@ export const DIMENSION_METAS: DimensionMeta[] = [
   },
   {
     dimension: "isPRReview",
-    label: "PR review",
+    labelKey: "task:filterDimensionPrReview",
     valueKind: "boolean",
     ops: ["is", "is_not"],
     defaultOp: "is",
@@ -38,7 +42,7 @@ export const DIMENSION_METAS: DimensionMeta[] = [
   },
   {
     dimension: "isIssueWatch",
-    label: "Issue watch",
+    labelKey: "task:filterDimensionIssueWatch",
     valueKind: "boolean",
     ops: ["is", "is_not"],
     defaultOp: "is",
@@ -46,7 +50,7 @@ export const DIMENSION_METAS: DimensionMeta[] = [
   },
   {
     dimension: "hasDiff",
-    label: "Has diff",
+    labelKey: "task:filterDimensionHasDiff",
     valueKind: "boolean",
     ops: ["is", "is_not"],
     defaultOp: "is",
@@ -54,7 +58,7 @@ export const DIMENSION_METAS: DimensionMeta[] = [
   },
   {
     dimension: "hasPR",
-    label: "Has PR",
+    labelKey: "task:filterDimensionHasPr",
     valueKind: "boolean",
     ops: ["is", "is_not"],
     defaultOp: "is",
@@ -62,7 +66,7 @@ export const DIMENSION_METAS: DimensionMeta[] = [
   },
   {
     dimension: "state",
-    label: "State",
+    labelKey: "task:filterDimensionState",
     valueKind: "enum",
     ops: ["in", "not_in", "is", "is_not"],
     enumOptions: STATE_OPTIONS,
@@ -71,7 +75,7 @@ export const DIMENSION_METAS: DimensionMeta[] = [
   },
   {
     dimension: "workflow",
-    label: "Workflow",
+    labelKey: "task:filterDimensionWorkflow",
     valueKind: "enum",
     ops: ["is", "is_not", "in", "not_in"],
     defaultOp: "is",
@@ -79,7 +83,7 @@ export const DIMENSION_METAS: DimensionMeta[] = [
   },
   {
     dimension: "workflowStep",
-    label: "Workflow step",
+    labelKey: "task:filterDimensionWorkflowStep",
     valueKind: "enum",
     ops: ["is", "is_not", "in", "not_in"],
     defaultOp: "is",
@@ -87,7 +91,7 @@ export const DIMENSION_METAS: DimensionMeta[] = [
   },
   {
     dimension: "executorType",
-    label: "Executor type",
+    labelKey: "task:filterDimensionExecutorType",
     valueKind: "enum",
     ops: ["is", "is_not", "in", "not_in"],
     defaultOp: "is",
@@ -95,7 +99,7 @@ export const DIMENSION_METAS: DimensionMeta[] = [
   },
   {
     dimension: "repository",
-    label: "Repository",
+    labelKey: "task:filterDimensionRepository",
     valueKind: "enum",
     ops: ["is", "is_not", "in", "not_in"],
     defaultOp: "is",
@@ -103,10 +107,10 @@ export const DIMENSION_METAS: DimensionMeta[] = [
   },
   {
     dimension: "titleMatch",
-    label: "Title",
+    labelKey: "task:filterDimensionTitle",
     valueKind: "text",
     ops: ["matches", "not_matches"],
-    placeholder: "Substring...",
+    placeholderKey: "task:filterTitlePlaceholder",
     defaultOp: "matches",
     defaultValue: "",
   },
@@ -118,19 +122,27 @@ export function getDimensionMeta(dim: FilterDimension): DimensionMeta {
   return meta;
 }
 
-export const OP_LABELS: Record<FilterOp, string> = {
-  is: "is",
-  is_not: "is not",
-  in: "in",
-  not_in: "not in",
-  matches: "contains",
-  not_matches: "does not contain",
+const OP_LABEL_KEYS: Record<FilterOp, string> = {
+  is: "task:filterOpIs",
+  is_not: "task:filterOpIsNot",
+  in: "task:filterOpIn",
+  not_in: "task:filterOpNotIn",
+  matches: "task:filterOpContains",
+  not_matches: "task:filterOpDoesNotContain",
 };
 
+// Module-level `t` is fine here: these run from render, not at import.
 export function getOpLabel(op: FilterOp, valueKind: DimensionValueKind): string {
   if (valueKind === "boolean") {
-    if (op === "is") return "Show";
-    if (op === "is_not") return "Hide";
+    if (op === "is") return t("task:filterOpShow");
+    if (op === "is_not") return t("task:filterOpHide");
   }
-  return OP_LABELS[op];
+  return t(OP_LABEL_KEYS[op]);
+}
+
+/** Resolves a dimension's fixed enum options to displayable labels. */
+export function getDimensionEnumOptions(
+  meta: DimensionMeta,
+): Array<{ value: string; label: string }> | undefined {
+  return meta.enumOptions?.map((o) => ({ value: o.value, label: t(o.labelKey) }));
 }

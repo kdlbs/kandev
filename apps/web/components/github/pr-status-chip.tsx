@@ -68,14 +68,14 @@ type TriggerRef = { current: HTMLButtonElement | null };
 type SingleChipProps = {
   pr: TaskPR;
   automation: AutomationFlags;
-  refreshTaskPR: () => void;
+  refreshTaskPR: () => void | Promise<void>;
   triggerRef?: TriggerRef;
 };
 type MultiChipProps = {
   prs: TaskPR[];
   statusPrs?: TaskPR[];
   automation: AutomationFlags;
-  refreshTaskPR: () => void;
+  refreshTaskPR: () => void | Promise<void>;
   onRemovePR?: (pr: TaskPR) => Promise<void>;
   triggerRef?: TriggerRef;
 };

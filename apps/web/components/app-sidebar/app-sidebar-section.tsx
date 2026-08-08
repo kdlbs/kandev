@@ -15,6 +15,11 @@ type AppSidebarSectionProps = {
   children: React.ReactNode;
   /** Optional control rendered between the label and the collapse chevron. */
   headerAction?: React.ReactNode;
+  /** Rendered beside the label only while the accordion is shut. A section that
+   *  starts folded still has to say how much it is hiding, or it reads as empty
+   *  and nobody opens it. Muted by the header, so callers pass content, not
+   *  colour. */
+  collapsedSummary?: React.ReactNode;
   /** By default header actions render only while the section accordion is open.
    *  "always" keeps them visible while the accordion is closed, but has no
    *  effect when the sidebar itself is in collapsed/rail mode. */
@@ -30,6 +35,7 @@ type SectionHeaderProps = {
   expanded: boolean;
   headerAction?: React.ReactNode;
   headerActionVisibility: "expanded" | "always";
+  collapsedSummary?: React.ReactNode;
   onToggle: () => void;
 };
 
@@ -38,6 +44,7 @@ function SectionHeader({
   expanded,
   headerAction,
   headerActionVisibility,
+  collapsedSummary,
   onToggle,
 }: SectionHeaderProps) {
   const showHeaderAction = !!headerAction && (expanded || headerActionVisibility === "always");
@@ -47,10 +54,18 @@ function SectionHeader({
       <button
         type="button"
         onClick={onToggle}
-        className="flex min-w-0 flex-1 items-center text-left cursor-pointer text-foreground/70 hover:text-foreground transition-colors"
+        className="flex min-w-0 flex-1 items-center gap-1.5 text-left cursor-pointer text-foreground/70 hover:text-foreground transition-colors"
         aria-expanded={expanded}
       >
         <span className="text-[11px] font-semibold uppercase tracking-wider truncate">{label}</span>
+        {!expanded && collapsedSummary != null && (
+          <span
+            className="shrink-0 text-[11px] font-normal tabular-nums text-muted-foreground/70"
+            data-testid="sidebar-section-collapsed-summary"
+          >
+            {collapsedSummary}
+          </span>
+        )}
       </button>
       {showHeaderAction && <div className="shrink-0 mr-1 flex items-center">{headerAction}</div>}
       <button
@@ -76,6 +91,7 @@ export function AppSidebarSection({
   children,
   headerAction,
   headerActionVisibility = "expanded",
+  collapsedSummary,
   grow,
   defaultExpanded = false,
 }: AppSidebarSectionProps) {
@@ -127,6 +143,7 @@ export function AppSidebarSection({
             expanded={expanded}
             headerAction={headerAction}
             headerActionVisibility={headerActionVisibility}
+            collapsedSummary={collapsedSummary}
             onToggle={handleToggle}
           />
         )}
@@ -151,6 +168,7 @@ export function AppSidebarSection({
         expanded={expanded}
         headerAction={headerAction}
         headerActionVisibility={headerActionVisibility}
+        collapsedSummary={collapsedSummary}
         onToggle={handleToggle}
       />
       <CollapsibleContent className="sidebar-section-content">

@@ -170,3 +170,59 @@ func preserveEnv(t *testing.T, name string) {
 		_ = os.Unsetenv(name)
 	})
 }
+
+func TestOptionsFromConfigParsesClaudeMidTurnSteeringEnv(t *testing.T) {
+	preserveEnv(t, "KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING")
+	t.Setenv("KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING", "TRUE")
+
+	opts := OptionsFromConfig(&config.Config{})
+
+	if !opts.EnvValues["KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING"] {
+		t.Fatal("KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING TRUE parsed false, want true")
+	}
+}
+
+func TestValuesFromConfigIncludesClaudeMidTurnSteering(t *testing.T) {
+	cfg := &config.Config{}
+	field := reflect.ValueOf(&cfg.Features).Elem().FieldByName("ClaudeMidTurnSteering")
+	if !field.IsValid() {
+		t.Fatal("FeaturesConfig.ClaudeMidTurnSteering field missing")
+	}
+	field.SetBool(true)
+
+	values := ValuesFromConfig(cfg)
+
+	if !values["features.claudeMidTurnSteering"] {
+		t.Fatal("ValuesFromConfig did not surface features.claudeMidTurnSteering = true")
+	}
+}
+
+func TestApplyStatesToConfigSetsClaudeMidTurnSteering(t *testing.T) {
+	cfg := &config.Config{}
+	ApplyStatesToConfig(cfg, []RuntimeFlagState{{
+		Key:            "features.claudeMidTurnSteering",
+		EffectiveValue: true,
+	}})
+
+	field := reflect.ValueOf(&cfg.Features).Elem().FieldByName("ClaudeMidTurnSteering")
+	if !field.IsValid() || !field.Bool() {
+		t.Fatal("ApplyStatesToConfig did not set Features.ClaudeMidTurnSteering = true")
+	}
+}
+
+// TestClaudeMidTurnSteeringIsIndependentOfBackgroundHandoff pins that the two
+// experiments are separately killable: enabling one must not enable the other.
+func TestClaudeMidTurnSteeringIsIndependentOfBackgroundHandoff(t *testing.T) {
+	cfg := &config.Config{}
+	ApplyStatesToConfig(cfg, []RuntimeFlagState{{
+		Key:            "features.claudeMidTurnSteering",
+		EffectiveValue: true,
+	}})
+
+	if !cfg.Features.ClaudeMidTurnSteering {
+		t.Fatal("mid-turn steering did not become enabled")
+	}
+	if cfg.Features.ClaudeBackgroundPromptHandoff {
+		t.Fatal("enabling mid-turn steering also enabled the background prompt handoff experiment")
+	}
+}

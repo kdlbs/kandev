@@ -14,7 +14,6 @@ import (
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
-	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
 	analyticsservice "github.com/kandev/kandev/internal/analytics/service"
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/azuredevops"
@@ -32,7 +31,6 @@ import (
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/sentry"
-	"github.com/kandev/kandev/internal/slack"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -112,6 +110,8 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 
 	// Wire workflow provider to workflow service for export/import
 	workflowSvc.SetWorkflowProvider(&workflowProviderAdapter{svc: taskSvc})
+	// Wire workspace provider for the read-only guard (Improve Kandev workspace)
+	workflowSvc.SetWorkspaceProvider(&workflowProviderAdapter{svc: taskSvc})
 
 	// Wire agent profile resolver/matcher for workflow export/import
 	workflowSvc.SetAgentProfileFuncs(
@@ -139,10 +139,14 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	jiraSvc := initJiraService(dbPool, eventBus, repos.Secrets, log)
 	linearSvc := initLinearService(dbPool, eventBus, repos.Secrets, log)
 	sentrySvc := initSentryService(dbPool, eventBus, repos.Secrets, log)
-	slackSvc := initSlackService(dbPool, repos.Secrets, log)
-	workflowSyncSvc := initWorkflowSyncService(dbPool, githubSvc, workflowSvc, taskSvc, log)
+	workflowSyncSvc := initWorkflowSyncService(dbPool, githubSvc, gitlabSvc, workflowSvc, taskSvc, log)
 	pluginsSvc := initPluginsService(cfg, dbPool, eventBus, repos.Secrets, log)
 	if pluginsSvc != nil {
+		// The ldflags-injected build version, so Install can enforce a
+		// package's manifest.min_kandev_version. This is the only production
+		// caller; without it the check stays a no-op. An un-stamped local
+		// build passes "dev", which the service treats as "don't enforce".
+		pluginsSvc.SetKandevVersion(version)
 		pluginsSvc.SetDataSources(taskSvc, taskSvc, workflowSvc, agentSettingsController, analyticsservice.New(repos.Analytics), taskSvc, pluginsTaskWriterAdapter{svc: taskSvc})
 	}
 	shareHTTP := initShareHandlers(dbPool, repos.Task, githubSvc, log, version)
@@ -173,6 +177,15 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		automationComponents.Service.SetTaskDeleter(&automationTaskDeleterAdapter{svc: taskSvc})
 		// Per-user workspace scoping for the automation HTTP/WS surface.
 		automationComponents.Service.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
+		// A UI filter is not an authorization boundary: reject a workflow owned
+		// by another workspace even when a request names it directly.
+		automationComponents.Service.SetWorkflowLocator(&automationWorkflowLocatorAdapter{svc: taskSvc})
+		// Profile deletion disables the automations bound to a profile before
+		// the row goes, but nothing ever checked that the binding pointed at a
+		// real profile in the first place — so a create or rebind naming an id
+		// that never existed produced the same orphan without any delete
+		// involved.
+		automationComponents.Service.SetAgentProfileLookup(&automationAgentProfileLookupAdapter{store: repos.AgentSettings})
 	}
 
 	services := &Services{
@@ -188,7 +201,6 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		Jira:         jiraSvc,
 		Linear:       linearSvc,
 		Sentry:       sentrySvc,
-		Slack:        slackSvc,
 		WorkflowSync: workflowSyncSvc,
 		Share:        shareHTTP,
 		Automation:   automationComponents,
@@ -596,19 +608,33 @@ func initAzureDevOpsService(
 	return svc
 }
 
-// initWorkflowSyncService wires the GitHub workflow-sync service. Failures
-// are non-fatal; the service is nil when GitHub is unavailable.
-func initWorkflowSyncService(dbPool *db.Pool, githubSvc *github.Service, workflowSvc *workflowservice.Service, taskSvc *taskservice.Service, log *logger.Logger) *workflowsync.Service {
-	if githubSvc == nil {
-		log.Warn("workflow sync disabled: GitHub service unavailable")
+// initWorkflowSyncService wires the workflow-sync service. Either integration
+// may be nil; a workspace configured for the unavailable one gets an
+// actionable failure at sync time rather than the service failing to boot.
+// Failures are non-fatal; the service is nil only if the store itself fails.
+func initWorkflowSyncService(
+	dbPool *db.Pool, githubSvc *github.Service, gitlabSvc *gitlab.Service,
+	workflowSvc *workflowservice.Service, taskSvc *taskservice.Service, log *logger.Logger,
+) *workflowsync.Service {
+	if githubSvc == nil && gitlabSvc == nil {
+		log.Warn("workflow sync disabled: no GitHub or GitLab service available")
 		return nil
 	}
 	workflowSvc.SetSyncWorkflowOps(taskSvc)
-	svc, _, err := workflowsync.Provide(dbPool.Writer(), dbPool.Reader(), githubSvc, workflowSvc, log)
+	var githubClients workflowsync.GitHubClientProvider
+	if githubSvc != nil {
+		githubClients = githubSvc
+	}
+	var gitlabClients workflowsync.GitLabClientProvider
+	if gitlabSvc != nil {
+		gitlabClients = gitlabSvc
+	}
+	svc, _, err := workflowsync.Provide(dbPool.Writer(), dbPool.Reader(), githubClients, gitlabClients, workflowSvc, log)
 	if err != nil {
 		log.Warn("workflow sync service initialization failed (non-fatal)", zap.Error(err))
 		return nil
 	}
+	svc.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
 	return svc
 }
 
@@ -651,16 +677,11 @@ func initShareHandlers(
 	return h
 }
 
-// initSlackService wires up the Slack integration. Failures are non-fatal.
-// The agent runner is wired post-construction by main.go once hostutility +
-// utility services exist.
-func initSlackService(dbPool *db.Pool, secretsStore secrets.SecretStore, log *logger.Logger) *slack.Service {
-	svc, _, err := slack.Provide(dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), log)
-	if err != nil {
-		log.Warn("Slack service initialization failed (non-fatal)", zap.Error(err))
-	}
-	return svc
-}
+// portsBackendDefault is the default backend HTTP port. We don't import
+// internal/common/ports here to avoid pulling its transitive deps into
+// services.go's import graph; the value is a fallback for when
+// cfg.Server.Port is left at zero (which shouldn't happen in practice).
+const portsBackendDefault = 38429
 
 // initPluginsService wires up the plugin system's core Service
 // (registration registry, config, plugin_state store). Failures are
@@ -680,54 +701,11 @@ func initPluginsService(cfg *config.Config, dbPool *db.Pool, eventBus bus.EventB
 	return svc
 }
 
-// buildKandevMCPURL is the URL passed to the Slack triage agent for the
-// Kandev MCP server. The MCP server is mounted on the same port as the rest
-// of the backend's HTTP API; this just centralises the path so it stays in
-// sync with internal/mcp/server's mount point ("/mcp").
-func buildKandevMCPURL(port int) string {
-	if port == 0 {
-		port = portsBackendDefault
-	}
-	return fmt.Sprintf("http://localhost:%d/mcp", port)
-}
-
-// portsBackendDefault is the default backend HTTP port. We don't import
-// internal/common/ports here to avoid pulling its transitive deps into
-// services.go's import graph; the value is duplicated only as a fallback for
-// when cfg.Server.Port is left at zero (which shouldn't happen in practice).
-const portsBackendDefault = 38429
-
-// slackHostUtilityAdapter adapts *hostutility.Manager to slack.HostUtilityRunner.
-// The slack package can't import hostutility without a transitive cycle (it
-// would need to import agentctl + lifecycle), so we shim through the agentctl
-// utility DTO here in the cmd package where both are already imported.
-type slackHostUtilityAdapter struct {
-	mgr *hostutility.Manager
-}
-
-func (a slackHostUtilityAdapter) ExecutePromptWithMCP(
-	ctx context.Context,
-	agentType, model, mode, prompt string,
-	mcpServers []agentctlutil.MCPServerDTO,
-) (slack.HostPromptResult, error) {
-	res, err := a.mgr.ExecutePromptWithMCP(ctx, agentType, model, mode, prompt, mcpServers)
-	if err != nil {
-		return slack.HostPromptResult{}, err
-	}
-	return slack.HostPromptResult{
-		Response:       res.Response,
-		Model:          res.Model,
-		PromptTokens:   res.PromptTokens,
-		ResponseTokens: res.ResponseTokens,
-		DurationMs:     res.DurationMs,
-	}, nil
-}
-
 // pluginsHostUtilityAdapter adapts *hostutility.Manager to the plugins
 // package's utilityRunner interface (Host.InvokeUtilityAgent, ADR 0048),
 // returning just the response text. Lives here for the same cycle-avoidance
-// reason as slackHostUtilityAdapter — internal/plugins must not import the
-// agent runtime.
+// reason as the review adapter — internal/plugins must not import the agent
+// runtime.
 type pluginsHostUtilityAdapter struct {
 	mgr *hostutility.Manager
 }
@@ -840,6 +818,11 @@ func (a *workflowProviderAdapter) GetWorkflow(ctx context.Context, id string) (*
 	return a.svc.GetWorkflow(ctx, id)
 }
 
+// GetWorkspace implements workflowservice.WorkspaceProvider.
+func (a *workflowProviderAdapter) GetWorkspace(ctx context.Context, id string) (*taskmodels.Workspace, error) {
+	return a.svc.GetWorkspace(ctx, id)
+}
+
 // CreateWorkflow implements workflowservice.WorkflowProvider.
 func (a *workflowProviderAdapter) CreateWorkflow(ctx context.Context, workspaceID, name, description string) (*taskmodels.Workflow, error) {
 	return a.svc.CreateWorkflow(ctx, &taskservice.CreateWorkflowRequest{
@@ -851,9 +834,11 @@ func (a *workflowProviderAdapter) CreateWorkflow(ctx context.Context, workspaceI
 
 // UpdateWorkflow implements workflowservice.WorkflowProvider.
 func (a *workflowProviderAdapter) UpdateWorkflow(ctx context.Context, workflow *taskmodels.Workflow) error {
+	prompt := workflow.Prompt
 	_, err := a.svc.UpdateWorkflow(ctx, workflow.ID, &taskservice.UpdateWorkflowRequest{
 		Name:           &workflow.Name,
 		Description:    &workflow.Description,
+		Prompt:         &prompt,
 		AgentProfileID: &workflow.AgentProfileID,
 	})
 	return err

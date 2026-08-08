@@ -8,17 +8,23 @@ import { useProviderHealth } from "@/hooks/domains/office/use-provider-health";
 import { useWorkspaceRouting } from "@/hooks/domains/office/use-workspace-routing";
 import type { ProviderHealth, ProviderHealthState } from "@/lib/state/slices/office/types";
 import { providerLabel } from "../../workspace/routing/components/provider-order-editor";
+import { useTranslation } from "react-i18next";
 
+// `labelKey`, not `label`: this table is module scope, so a `t()` here would
+// resolve once at import and freeze at the boot locale. The row resolves it at
+// render. The record keys are the wire `ProviderHealthState` values and stay
+// untranslated.
 const STATE_PILL: Record<
   ProviderHealthState,
-  { label: string; variant: "default" | "secondary" | "destructive" | "outline" }
+  { labelKey: string; variant: "default" | "secondary" | "destructive" | "outline" }
 > = {
-  healthy: { label: "Healthy", variant: "secondary" },
-  degraded: { label: "Degraded", variant: "destructive" },
-  user_action_required: { label: "Needs action", variant: "destructive" },
+  healthy: { labelKey: "office:healthy", variant: "secondary" },
+  degraded: { labelKey: "office:degraded", variant: "destructive" },
+  user_action_required: { labelKey: "office:needsAction", variant: "destructive" },
 };
 
 export function ProviderHealthCard() {
+  const { t } = useTranslation();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const workspace = useWorkspaceRouting(workspaceId);
   const { health } = useProviderHealth(workspaceId);
@@ -34,18 +40,18 @@ export function ProviderHealthCard() {
   return (
     <Card>
       <div className="p-4 border-b border-border flex items-center justify-between">
-        <h2 className="text-sm font-semibold">Provider Health</h2>
+        <h2 className="text-sm font-semibold">{t("office:providerHealth")}</h2>
         <Link
           href="/office/workspace/routing"
           className="text-xs underline-offset-4 hover:underline cursor-pointer text-muted-foreground"
         >
-          Manage
+          {t("office:manage")}
         </Link>
       </div>
       <div className="divide-y divide-border">
         {rows.length === 0 ? (
           <div className="px-4 py-6 text-center text-sm text-muted-foreground">
-            No providers configured.
+            {t("office:noProvidersConfigured")}
           </div>
         ) : (
           rows.map((h) => <ProviderHealthRow key={h.provider_id} h={h} />)
@@ -56,6 +62,7 @@ export function ProviderHealthCard() {
 }
 
 function ProviderHealthRow({ h }: { h: ProviderHealth }) {
+  const { t } = useTranslation();
   const pill = STATE_PILL[h.state];
   return (
     <Link
@@ -64,7 +71,7 @@ function ProviderHealthRow({ h }: { h: ProviderHealth }) {
     >
       <span className="text-sm flex-1">{providerLabel(h.provider_id)}</span>
       <Badge variant={pill.variant} className="text-xs">
-        {pill.label}
+        {t(pill.labelKey)}
       </Badge>
       {h.error_code && (
         <span className="text-[10px] font-mono text-muted-foreground">{h.error_code}</span>

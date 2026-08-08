@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { listQuickChatSessions } from "@/lib/api/domains/workspace-api";
+import { listQuickTerminalTabs, toQuickTerminalTab } from "@/lib/api/domains/quick-terminal-api";
 import { getStoredQuickChatNames } from "@/lib/local-storage";
 import { toQuickChatSessions } from "@/lib/quick-chat/map-sessions";
 import { migrateStoredQuickChatNames } from "@/lib/quick-chat/rename";
@@ -19,6 +20,7 @@ import { migrateStoredQuickChatNames } from "@/lib/quick-chat/rename";
 export function useQuickChatResync(workspaceId: string | null): void {
   const connectionStatus = useAppStore((state) => state.connection.status);
   const syncQuickChatSessions = useAppStore((state) => state.syncQuickChatSessions);
+  const syncQuickTerminalTabs = useAppStore((state) => state.syncQuickTerminalTabs);
   const setTaskSession = useAppStore((state) => state.setTaskSession);
   // Resync once per connection, not on every unrelated status re-render.
   const lastSyncedConnection = useRef<string | null>(null);
@@ -32,8 +34,8 @@ export function useQuickChatResync(workspaceId: string | null): void {
     lastSyncedConnection.current = workspaceId;
 
     let cancelled = false;
-    listQuickChatSessions(workspaceId)
-      .then((response) => {
+    Promise.all([listQuickChatSessions(workspaceId), listQuickTerminalTabs(workspaceId)])
+      .then(([response, terminalResponse]) => {
         if (cancelled) return;
         const sessions = toQuickChatSessions(response.sessions);
         // Store the session rows before the tabs. A tab without its row cannot
@@ -43,6 +45,7 @@ export function useQuickChatResync(workspaceId: string | null): void {
           setTaskSession(taskSession);
         }
         syncQuickChatSessions(workspaceId, sessions);
+        syncQuickTerminalTabs(workspaceId, terminalResponse.tabs.map(toQuickTerminalTab));
         // Renames made before names were stored server-side live only in this
         // browser; push them up once so they reach the user's other devices.
         void migrateStoredQuickChatNames(sessions, getStoredQuickChatNames());
@@ -55,5 +58,5 @@ export function useQuickChatResync(workspaceId: string | null): void {
     return () => {
       cancelled = true;
     };
-  }, [connectionStatus, workspaceId, setTaskSession, syncQuickChatSessions]);
+  }, [connectionStatus, workspaceId, setTaskSession, syncQuickChatSessions, syncQuickTerminalTabs]);
 }

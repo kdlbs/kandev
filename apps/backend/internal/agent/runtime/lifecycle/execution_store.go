@@ -149,6 +149,28 @@ func (s *ExecutionStore) OwnsPromptGeneration(sessionID, executionID string, gen
 	return exists && generation != 0 && execution.promptGeneration == generation
 }
 
+// ActivePromptGeneration returns the generation of the prompt that is dispatched
+// and still in flight for executionID, or 0 if there is none. A steer reuses this
+// exact generation so the folded completion is attributed to the predecessor's
+// still-open waiter rather than discarded as a mismatch. It deliberately returns
+// 0 for a generation that is only admitted (not yet dispatched — its buffers are
+// mid-reset) or already completed, so a steer never overtakes an about-to-start
+// turn or attaches to a finished one; those cases fall back to an ordinary prompt.
+func (s *ExecutionStore) ActivePromptGeneration(executionID string) uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	execution, exists := s.executions[executionID]
+	if !exists {
+		return 0
+	}
+	gen := execution.promptGeneration
+	if gen == 0 || execution.dispatchedPromptGeneration != gen || execution.promptCompletionGeneration == gen {
+		return 0
+	}
+	return gen
+}
+
 // GetByTaskEnvironmentID returns any execution associated with a task environment ID.
 func (s *ExecutionStore) GetByTaskEnvironmentID(taskEnvironmentID string) (*AgentExecution, bool) {
 	s.mu.RLock()
@@ -220,10 +242,32 @@ func (s *ExecutionStore) BeginPrompt(executionID string) (uint64, error) {
 func beginExecutionPrompt(execution *AgentExecution) uint64 {
 	execution.promptGeneration++
 	execution.promptCompletionGeneration = 0
+	// The new generation is not dispatched until its triggerPrompt succeeds; a
+	// steer must not reuse it until then (its buffers are still being reset).
+	execution.dispatchedPromptGeneration = 0
 	execution.ProviderError = nil
 	execution.Status = v1.AgentStatusRunning
 	execution.resetActiveTool()
 	return execution.promptGeneration
+}
+
+// MarkPromptDispatched records that generation reached agentctl and is in
+// flight. Ignored if a newer generation has since begun or this one already
+// completed, so a steer can only ever reuse a live dispatched turn.
+func (s *ExecutionStore) MarkPromptDispatched(executionID string, generation uint64) {
+	if generation == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	execution, exists := s.executions[executionID]
+	if !exists {
+		return
+	}
+	if execution.promptGeneration != generation || execution.promptCompletionGeneration == generation {
+		return
+	}
+	execution.dispatchedPromptGeneration = generation
 }
 
 // UpdateError updates the error message of an agent execution and sets its status to failed.

@@ -2,10 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { SessionTabCloseAction } from "./session-tab-close-action";
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
-}));
-
 afterEach(() => cleanup());
 
 describe("SessionTabCloseAction", () => {
@@ -13,7 +9,7 @@ describe("SessionTabCloseAction", () => {
     const onClose = vi.fn();
     render(<SessionTabCloseAction sessionId="s1" isDeleting={false} onClose={onClose} />);
 
-    const button = screen.getByRole("button", { name: "common:deleteSession" });
+    const button = screen.getByRole("button", { name: "Delete session" });
     expect((button as HTMLButtonElement).disabled).toBe(false);
     expect(button.getAttribute("aria-busy")).toBe("false");
     expect(screen.queryByRole("status")).toBeNull();
@@ -27,7 +23,7 @@ describe("SessionTabCloseAction", () => {
     const onClose = vi.fn();
     render(<SessionTabCloseAction sessionId="s1" isDeleting onClose={onClose} />);
 
-    const button = screen.getByRole("button", { name: "common:deleteSession" });
+    const button = screen.getByRole("button", { name: "Delete session" });
     expect((button as HTMLButtonElement).disabled).toBe(true);
     expect(button.getAttribute("aria-busy")).toBe("true");
     expect(screen.getByRole("status")).toBeTruthy();

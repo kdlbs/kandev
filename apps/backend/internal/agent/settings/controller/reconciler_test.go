@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agent/usage"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
@@ -729,5 +730,52 @@ func TestSyncAgentFromDiscovery_SeedsFreshAgent(t *testing.T) {
 	}
 	if len(st.created) != 1 {
 		t.Fatalf("expected fresh agent to be seeded, got %d created", len(st.created))
+	}
+}
+
+func TestProfileReconciler_MigratesCursorVariantModel(t *testing.T) {
+	st := newFakeStore()
+	ag := &mockInferenceAgent{id: acpcompat.CursorAgentID, displayName: "Cursor", enabled: true}
+	dbAgent := &models.Agent{Name: acpcompat.CursorAgentID}
+	if err := st.CreateAgent(context.Background(), dbAgent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	profile := &models.AgentProfile{
+		AgentID: dbAgent.ID,
+		Name:    "Grok",
+		Model:   "grok-4.5[effort=high,fast=true]",
+		ConfigOptions: map[string]string{
+			"effort": "low",
+		},
+	}
+	if err := st.CreateAgentProfile(context.Background(), profile); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+	st.updated = nil
+
+	caps := &fakeCapReader{caps: map[string]hostutility.AgentCapabilities{
+		acpcompat.CursorAgentID: {
+			AgentType:      acpcompat.CursorAgentID,
+			Status:         hostutility.StatusOK,
+			Models:         []hostutility.Model{{ID: "grok-4.5"}},
+			CurrentModelID: "grok-4.5",
+		},
+	}}
+	r := newReconciler(t, st, caps, ag)
+	if err := r.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if profile.Model != "grok-4.5" {
+		t.Fatalf("profile model = %q, want bare Cursor model", profile.Model)
+	}
+	if got := profile.ConfigOptions["effort"]; got != "low" {
+		t.Errorf("profile effort = %q, want existing profile value low", got)
+	}
+	if got := profile.ConfigOptions["fast"]; got != "true" {
+		t.Errorf("profile fast = %q, want migrated value true", got)
+	}
+	if len(st.updated) == 0 {
+		t.Fatal("expected migrated profile to be persisted")
 	}
 }

@@ -89,6 +89,10 @@ var (
 	// sender tasks differ, the caller does not own the rows, or the target is a
 	// reserved in-flight lifecycle entry.
 	ErrNoMergeTarget = errors.New("no mergeable message above")
+	// ErrMergeDisabled is returned when a merge is attempted while queued
+	// message merging is disabled (see Service.SetMergeEnabled). The setting
+	// is admin-controlled and enabled by default.
+	ErrMergeDisabled = errors.New("queued message merging is disabled")
 	// ErrTaskInactive means a lifecycle prompt could not be accepted because
 	// its task was deleted or archived before the queue transaction claimed it.
 	ErrTaskInactive = errors.New("queue task is inactive")
@@ -187,6 +191,9 @@ type QueueStatus struct {
 	Entries []QueuedMessage `json:"entries"`
 	Count   int             `json:"count"`
 	Max     int             `json:"max"`
+	// MergeEnabled mirrors Service.MergeEnabled so clients can hide the
+	// "Merge with above" affordance without a separate settings fetch.
+	MergeEnabled bool `json:"merge_enabled"`
 }
 
 // PendingMove represents a workflow step move requested by an agent (via

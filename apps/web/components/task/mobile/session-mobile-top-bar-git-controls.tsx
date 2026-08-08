@@ -54,6 +54,10 @@ import {
   MobilePRBranchSummary,
   PRSubmitButton,
 } from "./session-mobile-top-bar-dialog-parts";
+import { useTranslation } from "react-i18next";
+
+// A Git branch name, not copy: shown when the task has no recorded base branch.
+const DEFAULT_BASE_BRANCH = "main";
 
 export function computeUncommittedStats(files: Record<string, FileInfo> | undefined) {
   let additions = 0;
@@ -70,6 +74,7 @@ export function computeUncommittedStats(files: Record<string, FileInfo> | undefi
 type GitOperationRunner = () => Promise<{ success: boolean; output: string; error?: string }>;
 
 function useGitToast() {
+  const { t } = useTranslation();
   const { toast } = useToast();
 
   return useCallback(
@@ -78,26 +83,27 @@ function useGitToast() {
         const result = await operation();
         if (result.success) {
           toast({
-            title: `${operationName} successful`,
-            description: result.output.slice(0, 200) || `${operationName} completed successfully`,
+            title: t("task:successful", { operationName }),
+            description:
+              result.output.slice(0, 200) || t("task:completedSuccessfully", { operationName }),
             variant: "success",
           });
         } else {
           toast({
-            title: `${operationName} failed`,
-            description: result.error || "An error occurred",
+            title: t("task:failed2", { operationName }),
+            description: result.error || t("task:anErrorOccurred"),
             variant: "error",
           });
         }
       } catch (error) {
         toast({
-          title: `${operationName} failed`,
-          description: error instanceof Error ? error.message : "An unexpected error occurred",
+          title: t("task:failed2", { operationName }),
+          description: error instanceof Error ? error.message : t("task:anUnexpectedErrorOccurred"),
           variant: "error",
         });
       }
     },
-    [toast],
+    [toast, t],
   );
 }
 
@@ -154,6 +160,7 @@ export function CommitDialog({
   isGitLoading: boolean;
   onCommit: (message: string, stageAll: boolean) => void;
 }) {
+  const { t } = useTranslation();
   const form = useCommitDialogForm(onOpenChange, onCommit);
 
   return (
@@ -162,7 +169,7 @@ export function CommitDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <IconGitCommit className="h-5 w-5 text-amber-500" />
-            Commit Changes
+            {t("task:commitChanges")}
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
@@ -175,19 +182,19 @@ export function CommitDialog({
           </div>
           <Input
             data-testid="commit-title-input"
-            placeholder="Enter commit message..."
+            placeholder={t("task:enterCommitMessage")}
             value={form.commitMessage}
             onChange={(e) => form.setCommitMessage(e.target.value)}
             autoFocus
           />
           <div className="space-y-2">
             <Label htmlFor="commit-body-mobile" className="text-sm">
-              Description
+              {t("task:description2")}
             </Label>
             <Textarea
               id="commit-body-mobile"
               data-testid="commit-body-input"
-              placeholder="Add details about this change..."
+              placeholder={t("task:addDetailsAboutThisChange")}
               value={form.commitBody}
               onChange={(e) => form.setCommitBody(e.target.value)}
               rows={3}
@@ -204,14 +211,14 @@ export function CommitDialog({
               htmlFor="stage-all-mobile"
               className="text-sm text-muted-foreground cursor-pointer"
             >
-              Stage all changes before committing
+              {t("task:stageAllChangesBeforeCommitting")}
             </Label>
           </div>
         </div>
         <DialogFooter>
           <DialogClose asChild>
             <Button type="button" variant="outline">
-              Cancel
+              {t("common:cancel")}
             </Button>
           </DialogClose>
           <Button
@@ -222,12 +229,12 @@ export function CommitDialog({
             {isGitLoading ? (
               <>
                 <IconLoader2 className="h-4 w-4 animate-spin mr-2" />
-                Committing...
+                {t("task:committingEllipsis")}
               </>
             ) : (
               <>
                 <IconCheck className="h-4 w-4 mr-2" />
-                Commit
+                {t("task:commit")}
               </>
             )}
           </Button>
@@ -260,6 +267,7 @@ export function PRDialog({
   onCreatePR,
   branchPushed,
 }: PRDialogProps) {
+  const { t } = useTranslation();
   const [prTitle, setPrTitle] = useState("");
   const [prBody, setPrBody] = useState("");
   const [prDraft, setPrDraft] = useState(true);
@@ -279,7 +287,7 @@ export function PRDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <IconGitPullRequest className="h-5 w-5 text-cyan-500" />
-            Create {terminology.longName}
+            {t("task:createChangeRequestLong", { longName: terminology.longName })}
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
@@ -291,13 +299,13 @@ export function PRDialog({
           />
           <div className="space-y-2">
             <Label htmlFor="pr-title-mobile" className="text-sm">
-              Title
+              {t("common:title")}
             </Label>
             <input
               id="pr-title-mobile"
               type="text"
-              aria-label={`${terminology.longName} title`}
-              placeholder={`${terminology.longName} title...`}
+              aria-label={t("task:title2", { longName: terminology.longName })}
+              placeholder={t("task:title3", { longName: terminology.longName })}
               value={prTitle}
               onChange={(e) => setPrTitle(e.target.value)}
               className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -306,11 +314,11 @@ export function PRDialog({
           </div>
           <div className="space-y-2">
             <Label htmlFor="pr-body-mobile" className="text-sm">
-              Description
+              {t("task:description2")}
             </Label>
             <Textarea
               id="pr-body-mobile"
-              placeholder="Describe your changes..."
+              placeholder={t("task:describeYourChanges")}
               value={prBody}
               onChange={(e) => setPrBody(e.target.value)}
               rows={4}
@@ -324,14 +332,14 @@ export function PRDialog({
               onCheckedChange={(checked) => setPrDraft(checked === true)}
             />
             <Label htmlFor="pr-draft-mobile" className="text-sm cursor-pointer">
-              Create as draft
+              {t("task:createAsDraft")}
             </Label>
           </div>
         </div>
         <DialogFooter>
           <DialogClose asChild>
             <Button type="button" variant="outline">
-              Cancel
+              {t("common:cancel")}
             </Button>
           </DialogClose>
           <PRSubmitButton
@@ -362,6 +370,73 @@ export type GitActionsDropdownProps = {
   onMerge: () => void;
 };
 
+function PushSubmenu({
+  disabled,
+  onPush,
+}: {
+  disabled: boolean;
+  onPush: (force: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger className="cursor-pointer gap-3" disabled={disabled}>
+        <IconCloudUpload className="h-4 w-4 text-green-500" />
+        <span className="flex-1">{t("task:push")}</span>
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent>
+        <DropdownMenuItem
+          className="cursor-pointer gap-3"
+          onClick={() => onPush(false)}
+          disabled={disabled}
+        >
+          <IconCloudUpload className="h-4 w-4 text-green-500" />
+          <span>{t("task:push")}</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className="cursor-pointer gap-3"
+          onClick={() => onPush(true)}
+          disabled={disabled}
+        >
+          <IconAlertTriangle className="h-4 w-4 text-orange-500" />
+          <span>{t("task:forcePush")}</span>
+        </DropdownMenuItem>
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
+  );
+}
+
+function RebaseMergeItems({
+  disabled,
+  baseBranch,
+  onRebase,
+  onMerge,
+}: {
+  disabled: boolean;
+  baseBranch: string | undefined;
+  onRebase: () => void;
+  onMerge: () => void;
+}) {
+  const { t } = useTranslation();
+  // `main` is the default branch name, not copy — it travels through as an
+  // interpolated value so it is never translated.
+  const branch = baseBranch || DEFAULT_BASE_BRANCH;
+  return (
+    <>
+      <DropdownMenuItem className="cursor-pointer gap-3" onClick={onRebase} disabled={disabled}>
+        <IconGitCherryPick className="h-4 w-4 text-orange-500" />
+        <span className="flex-1">{t("task:rebase")}</span>
+        <span className="text-xs text-muted-foreground">{t("task:ontoBranch", { branch })}</span>
+      </DropdownMenuItem>
+      <DropdownMenuItem className="cursor-pointer gap-3" onClick={onMerge} disabled={disabled}>
+        <IconGitMerge className="h-4 w-4 text-purple-500" />
+        <span className="flex-1">{t("task:merge")}</span>
+        <span className="text-xs text-muted-foreground">{t("task:fromBranch", { branch })}</span>
+      </DropdownMenuItem>
+    </>
+  );
+}
+
 export function GitActionsDropdown({
   sessionId,
   isGitLoading,
@@ -374,6 +449,7 @@ export function GitActionsDropdown({
   onRebase,
   onMerge,
 }: GitActionsDropdownProps) {
+  const { t } = useTranslation();
   const disabled = isGitLoading || !sessionId;
   const terminology = useChangeRequestTerminology(sessionId);
   return (
@@ -383,7 +459,7 @@ export function GitActionsDropdown({
           size="icon-sm"
           variant="ghost"
           className="h-11 w-11 cursor-pointer"
-          aria-label="Git actions"
+          aria-label={t("task:gitActions")}
           data-testid="mobile-git-actions"
         >
           {isGitLoading ? (
@@ -400,7 +476,7 @@ export function GitActionsDropdown({
           disabled={disabled}
         >
           <IconGitCommit className={`h-4 w-4 ${uncommittedCount > 0 ? "text-amber-500" : ""}`} />
-          <span className="flex-1">Commit</span>
+          <span className="flex-1">{t("task:commit")}</span>
           {uncommittedCount > 0 && (
             <span className="rounded-full bg-amber-500/20 px-1.5 py-0.5 text-xs font-medium text-amber-600">
               {uncommittedCount}
@@ -409,51 +485,41 @@ export function GitActionsDropdown({
         </DropdownMenuItem>
         <DropdownMenuItem className="cursor-pointer gap-3" onClick={onPRClick} disabled={disabled}>
           <IconGitPullRequest className="h-4 w-4 text-cyan-500" />
-          <span className="flex-1">Create {terminology.shortName}</span>
+          <span className="flex-1">
+            {t("task:createChangeRequest", { shortName: terminology.shortName })}
+          </span>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem className="cursor-pointer gap-3" onClick={onPull} disabled={disabled}>
           <IconCloudDownload className="h-4 w-4 text-blue-500" />
-          <span className="flex-1">Pull</span>
+          <span className="flex-1">{t("task:pull")}</span>
         </DropdownMenuItem>
-        <DropdownMenuSub>
-          <DropdownMenuSubTrigger className="cursor-pointer gap-3" disabled={disabled}>
-            <IconCloudUpload className="h-4 w-4 text-green-500" />
-            <span className="flex-1">Push</span>
-          </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent>
-            <DropdownMenuItem
-              className="cursor-pointer gap-3"
-              onClick={() => onPush(false)}
-              disabled={disabled}
-            >
-              <IconCloudUpload className="h-4 w-4 text-green-500" />
-              <span>Push</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className="cursor-pointer gap-3"
-              onClick={() => onPush(true)}
-              disabled={disabled}
-            >
-              <IconAlertTriangle className="h-4 w-4 text-orange-500" />
-              <span>Force Push</span>
-            </DropdownMenuItem>
-          </DropdownMenuSubContent>
-        </DropdownMenuSub>
+        <PushSubmenu disabled={disabled} onPush={onPush} />
         <DropdownMenuSeparator />
-        <DropdownMenuItem className="cursor-pointer gap-3" onClick={onRebase} disabled={disabled}>
-          <IconGitCherryPick className="h-4 w-4 text-orange-500" />
-          <span className="flex-1">Rebase</span>
-          <span className="text-xs text-muted-foreground">onto {baseBranch || "main"}</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem className="cursor-pointer gap-3" onClick={onMerge} disabled={disabled}>
-          <IconGitMerge className="h-4 w-4 text-purple-500" />
-          <span className="flex-1">Merge</span>
-          <span className="text-xs text-muted-foreground">from {baseBranch || "main"}</span>
-        </DropdownMenuItem>
+        <RebaseMergeItems
+          disabled={disabled}
+          baseBranch={baseBranch}
+          onRebase={onRebase}
+          onMerge={onMerge}
+        />
       </DropdownMenuContent>
     </DropdownMenu>
   );
+}
+
+/** The success toast for a created change request. Extracted to keep
+ *  `useMobileGitActions` under the function-length cap. */
+function createPrSuccessToast(
+  longName: string,
+  prUrl: string | undefined,
+  draft: boolean,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+) {
+  return {
+    title: draft ? t("task:draftCreated", { longName }) : t("task:created2", { longName }),
+    description: prUrl || t("task:createdSuccessfully", { longName }),
+    variant: "success" as const,
+  };
 }
 
 export function useMobileGitActions(
@@ -463,6 +529,7 @@ export function useMobileGitActions(
   setPrDialogOpen: (v: boolean) => void,
   setPrBranchPushed: (v: boolean) => void,
 ) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const setPendingPrUrlForTask = useAppStore((state) => state.setPendingPrUrlForTask);
@@ -475,29 +542,33 @@ export function useMobileGitActions(
   const { commit } = useSessionGit(sessionId ?? null);
   const handleGitOperation = useGitToast();
 
+  // Hoisted out of the two callbacks below so both share one expression.
+  const remoteTarget = baseBranch?.replace(/^origin\//, "") || DEFAULT_BASE_BRANCH;
+
   const handlePull = useCallback(
-    () => handleGitOperation(() => pull(), "Pull"),
-    [handleGitOperation, pull],
+    () => handleGitOperation(() => pull(), t("task:pull")),
+    [handleGitOperation, pull, t],
   );
   const handlePush = useCallback(
-    (force = false) => handleGitOperation(() => push({ force }), force ? "Force Push" : "Push"),
-    [handleGitOperation, push],
+    (force = false) =>
+      handleGitOperation(() => push({ force }), force ? t("task:forcePush") : t("task:push")),
+    [handleGitOperation, push, t],
   );
-  const handleRebase = useCallback(() => {
-    const target = baseBranch?.replace(/^origin\//, "") || "main";
-    return handleGitOperation(() => rebase(target), "Rebase");
-  }, [handleGitOperation, rebase, baseBranch]);
-  const handleMerge = useCallback(() => {
-    const target = baseBranch?.replace(/^origin\//, "") || "main";
-    return handleGitOperation(() => merge(target), "Merge");
-  }, [handleGitOperation, merge, baseBranch]);
+  const handleRebase = useCallback(
+    () => handleGitOperation(() => rebase(remoteTarget), t("task:rebase")),
+    [handleGitOperation, rebase, remoteTarget, t],
+  );
+  const handleMerge = useCallback(
+    () => handleGitOperation(() => merge(remoteTarget), t("task:merge")),
+    [handleGitOperation, merge, remoteTarget, t],
+  );
 
   const handleCommit = useCallback(
     async (message: string, stageAll: boolean) => {
       setCommitDialogOpen(false);
-      await handleGitOperation(() => commit(message, stageAll), "Commit");
+      await handleGitOperation(() => commit(message, stageAll), t("task:commit"));
     },
-    [handleGitOperation, commit, setCommitDialogOpen],
+    [handleGitOperation, commit, setCommitDialogOpen, t],
   );
 
   const handleCreatePR = useCallback(
@@ -507,11 +578,7 @@ export function useMobileGitActions(
         const result = await createPR(title, body, baseBranch, draft);
         if (result.success) {
           const terms = resolveChangeRequestTerminology(result.provider, defaultTerminology);
-          toast({
-            title: draft ? `Draft ${terms.longName} created` : `${terms.longName} created`,
-            description: result.pr_url || `${terms.longName} created successfully`,
-            variant: "success",
-          });
+          toast(createPrSuccessToast(terms.longName, result.pr_url, draft, t));
           if (result.pr_url) {
             if (activeTaskId) {
               setPendingPrUrlForTask(activeTaskId, "", result.pr_url);
@@ -530,8 +597,8 @@ export function useMobileGitActions(
         setPrBranchPushed(false);
       } catch (e) {
         toast({
-          title: `Create ${defaultTerminology.shortName} failed`,
-          description: e instanceof Error ? e.message : "An error occurred",
+          title: t("task:createFailed", { shortName: defaultTerminology.shortName }),
+          description: e instanceof Error ? e.message : t("task:anErrorOccurred"),
           variant: "error",
         });
       }
@@ -545,6 +612,7 @@ export function useMobileGitActions(
       defaultTerminology,
       activeTaskId,
       setPendingPrUrlForTask,
+      t,
     ],
   );
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -67,7 +68,16 @@ func (c *Client) sendStreamRequest(ctx context.Context, action string, payload i
 	}
 
 	c.streamWriteMu.Lock()
+	// Honor a caller deadline for the write itself, not just the response wait:
+	// a stalled conn.WriteMessage (full send buffer to a half-open peer) would
+	// otherwise block uninterruptibly and, for a steer, pin the lifecycle lock the
+	// caller holds across this RPC. streamWriteMu serializes writers, so setting
+	// and clearing the shared deadline here cannot race a concurrent write.
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetWriteDeadline(deadline)
+	}
 	writeErr := conn.WriteMessage(websocket.TextMessage, data)
+	_ = conn.SetWriteDeadline(time.Time{}) // clear so later writers are unbounded
 	c.streamWriteMu.Unlock()
 	if writeErr != nil {
 		tracing.TraceWSResponse(span, "", writeErr)

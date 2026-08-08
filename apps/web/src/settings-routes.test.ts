@@ -8,6 +8,7 @@ import ExecutorCreatePage from "@/app/settings/executor/new/page";
 import ProfileEditPage from "@/app/settings/executors/[profileId]/page";
 import CreateProfilePage from "@/app/settings/executors/new/[type]/page";
 import SSHExecutorPage from "@/app/settings/executors/ssh/[executorId]/page";
+import IntegrationsGitHubPage from "@/app/settings/integrations/github/page";
 import IntegrationsGitLabPage from "@/app/settings/integrations/gitlab/page";
 import PluginDetailPage from "@/app/settings/plugins/[pluginId]/page";
 import AutomationEditorPage from "@/app/settings/workspace/[id]/automations/[automationId]/page";
@@ -178,6 +179,13 @@ describe("renderSettingsRoute", () => {
   it("passes the route workspace id to the GitLab integration page", () => {
     expect(gitLabRouteWorkspaceId("/settings/workspace/ws-2/integrations/gitlab")).toBe("ws-2");
     expect(gitLabRouteWorkspaceId("/settings/workspace/ws%202/integrations/gitlab")).toBe("ws 2");
+  });
+
+  it("routes GitHub settings through the integration page wrapper", () => {
+    const route = renderSettingsRoute("/settings/integrations/github");
+
+    expect(isValidElement(route)).toBe(true);
+    expect((route as ReactElement).type).toBe(IntegrationsGitHubPage);
   });
 
   it.each([

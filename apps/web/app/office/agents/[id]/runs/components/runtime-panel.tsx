@@ -1,12 +1,14 @@
 "use client";
 
 import type { RunRuntimeDetail } from "@/lib/api/domains/office-extended-api";
+import { useTranslation } from "react-i18next";
 
 type Props = {
   runtime: RunRuntimeDetail;
 };
 
 export function RuntimePanel({ runtime }: Props) {
+  const { t } = useTranslation();
   const capabilityKeys = enabledCapabilityKeys(runtime.capabilities);
   const hasSnapshot = Object.keys(runtime.input_snapshot ?? {}).length > 0;
   const hasRuntime =
@@ -16,14 +18,16 @@ export function RuntimePanel({ runtime }: Props) {
   return (
     <div className="rounded-lg border border-border p-4 space-y-3" data-testid="runtime-panel">
       <div>
-        <h2 className="text-sm font-semibold">Runtime</h2>
+        <h2 className="text-sm font-semibold">{t("office:runtime")}</h2>
         {runtime.session_id && (
           <p className="text-xs text-muted-foreground font-mono mt-1">{runtime.session_id}</p>
         )}
       </div>
       {capabilityKeys.length > 0 && (
         <div className="space-y-2">
-          <div className="text-xs text-muted-foreground uppercase tracking-wider">Capabilities</div>
+          <div className="text-xs text-muted-foreground uppercase tracking-wider">
+            {t("office:capabilities")}
+          </div>
           <div className="flex flex-wrap gap-1.5" data-testid="runtime-capabilities">
             {capabilityKeys.map((key) => (
               <span
@@ -38,7 +42,9 @@ export function RuntimePanel({ runtime }: Props) {
       )}
       {runtime.skills.length > 0 && (
         <div className="space-y-2">
-          <div className="text-xs text-muted-foreground uppercase tracking-wider">Skills</div>
+          <div className="text-xs text-muted-foreground uppercase tracking-wider">
+            {t("office:skills")}
+          </div>
           <div className="space-y-1" data-testid="runtime-skills">
             {runtime.skills.map((skill) => (
               <div key={skill.skill_id} className="text-xs font-mono break-all">

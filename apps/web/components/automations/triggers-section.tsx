@@ -56,7 +56,13 @@ export function TriggersSection({
 
   const handleScheduleChange = (config: Record<string, unknown>) => {
     if (scheduleTrigger) {
-      onUpdateTrigger(scheduleTrigger.id, config);
+      // Merge rather than replace. onUpdateTrigger swaps the config object
+      // wholesale (see updateDraft), so emitting a partial config here silently
+      // drops sibling keys — a preset click that sends only `cron_expression`
+      // would discard a `timezone` set elsewhere, moving the schedule to UTC
+      // with nothing on screen to show it. A key is still removable by sending
+      // it as undefined: it survives the spread and JSON.stringify omits it.
+      onUpdateTrigger(scheduleTrigger.id, { ...scheduleTrigger.config, ...config });
     } else {
       onAddTrigger("scheduled", config);
     }

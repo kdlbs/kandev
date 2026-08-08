@@ -193,6 +193,16 @@ describe("git-status WS handler — stale-while-revalidate", () => {
     expect(invalidateCumulativeDiffCacheMock).toHaveBeenCalledTimes(1);
   });
 
+  it("stores the status-level submodule marker", () => {
+    const handler = gitStatusHandler(store);
+    const event = statusUpdateEvent(STATUS_TIME_1);
+    event.status.is_submodule = true;
+
+    handler(gitEvent(event));
+
+    expect(store.getState().gitStatus.byEnvironmentId[SESSION].is_submodule).toBe(true);
+  });
+
   it("invalidates cumulative diff when status diff content changes", () => {
     const handler = gitStatusHandler(store);
 

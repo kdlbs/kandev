@@ -137,12 +137,16 @@ export type QueuedMessage = {
 export type QueueMeta = {
   count: number;
   max: number;
+  /** Mirrors the server's message queue merge_enabled setting; hides the
+   * "Merge with above" affordance without a separate settings fetch. */
+  mergeEnabled: boolean;
 };
 
 export type QueueStatus = {
   entries: QueuedMessage[];
   count: number;
   max: number;
+  merge_enabled: boolean;
 };
 
 export type QueueState = {

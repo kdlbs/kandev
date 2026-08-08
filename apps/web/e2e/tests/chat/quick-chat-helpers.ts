@@ -28,7 +28,8 @@ export async function openQuickChatSetup(page: Page, navigateHome = true): Promi
   // If a stale session tab is showing, click "+" to start a fresh setup form.
   const setup = dialog.getByTestId("quick-chat-setup");
   if (!(await setup.isVisible({ timeout: 1_000 }).catch(() => false))) {
-    await dialog.getByLabel("Start new chat").click();
+    await dialog.getByTestId("quick-chat-add-menu-trigger").click();
+    await page.getByTestId("quick-chat-new-agent").click();
   }
   await expect(setup).toBeVisible({ timeout: 5_000 });
   return dialog;
@@ -36,19 +37,22 @@ export async function openQuickChatSetup(page: Page, navigateHome = true): Promi
 
 export async function selectAgentIfNeeded(dialog: Locator, page: Page) {
   const selector = dialog.getByTestId("agent-profile-selector");
-  if (
-    await selector
-      .getByText("Select agent", { exact: false })
-      .isVisible()
-      .catch(() => false)
-  ) {
+  await expect(selector).toBeVisible({ timeout: 10_000 });
+  await expect(async () => {
+    const text = await selector.innerText();
+    if (!text.includes("Select agent")) return;
+
     await selector.click();
-    await page.getByRole("option").first().click();
-  }
+    const option = page.getByRole("option").first();
+    await expect(option).toBeVisible({ timeout: 2_000 });
+    await option.click();
+    await expect(selector).not.toContainText("Select agent", { timeout: 2_000 });
+  }).toPass({ timeout: 10_000, intervals: [250, 500, 1_000] });
 }
 
 export async function startQuickChatFromSetup(dialog: Locator, page: Page) {
   await selectAgentIfNeeded(dialog, page);
+  await expect(dialog.getByTestId("quick-chat-start")).toBeEnabled({ timeout: 10_000 });
   await dialog.getByTestId("quick-chat-start").click();
 
   // Wait for chat input to appear AND become editable. Eager init means the

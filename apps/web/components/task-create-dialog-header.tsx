@@ -1,6 +1,7 @@
 "use client";
 
 import { DialogTitle } from "@kandev/ui/dialog";
+import { useTranslation } from "react-i18next";
 
 export type DialogHeaderContentProps = {
   isCreateMode: boolean;
@@ -21,8 +22,13 @@ export function DialogHeaderContent({
   sessionRepoName,
   initialTitle,
 }: DialogHeaderContentProps) {
+  const { t } = useTranslation();
   if (isCreateMode || isEditMode) {
-    return <DialogTitle className="sr-only">{isEditMode ? "Edit task" : "New task"}</DialogTitle>;
+    return (
+      <DialogTitle className="sr-only">
+        {isEditMode ? t("common:editTask") : t("task:newTask")}
+      </DialogTitle>
+    );
   }
   return (
     <DialogTitle asChild>
@@ -33,9 +39,9 @@ export function DialogHeaderContent({
             <span className="text-muted-foreground mx-0.5">/</span>
           </>
         )}
-        <span className="truncate">{initialTitle || "Task"}</span>
+        <span className="truncate">{initialTitle || t("task:task")}</span>
         <span className="text-muted-foreground mx-0.5">/</span>
-        <span className="text-muted-foreground whitespace-nowrap">new session</span>
+        <span className="text-muted-foreground whitespace-nowrap">{t("task:newSession2")}</span>
       </div>
     </DialogTitle>
   );

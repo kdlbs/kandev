@@ -1,7 +1,8 @@
 "use client";
 
 import { Button } from "@kandev/ui/button";
-import { IconMenu2, IconMessageCircle, IconSearch } from "@tabler/icons-react";
+import { IconMenu2, IconMessageCircle, IconSearch, IconTerminal2 } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
 import { PageTopbar } from "@/components/page-topbar";
 import { TopbarMetrics } from "@/components/system-metrics/topbar-metrics";
@@ -12,9 +13,9 @@ import { useAppStore } from "@/components/state-provider";
 import { useAppStatusDrawer } from "@/components/app-status-bar/app-status-surface-provider";
 import { useConnectionIssueCopy } from "@/components/app-status-bar/connection-status-item";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
+import { useQuickTerminalLauncher } from "@/hooks/use-quick-terminal-launcher";
 import { workspaceHomeHref } from "@/components/app-sidebar/app-sidebar-workspace-navigation";
 import { cn } from "@/lib/utils";
-import { useTranslation } from "react-i18next";
 
 type KanbanHeaderMobileProps = {
   workspaceId?: string;
@@ -50,6 +51,7 @@ function MobileHeaderActions({
   onSearchChange,
   isSearchOpen,
   handleOpenQuickChat,
+  handleOpenQuickTerminal,
   toggleSearch,
   setMenuOpen,
 }: {
@@ -59,6 +61,7 @@ function MobileHeaderActions({
   onSearchChange?: (query: string) => void;
   isSearchOpen: boolean;
   handleOpenQuickChat: () => void;
+  handleOpenQuickTerminal: () => void;
   toggleSearch: () => void;
   setMenuOpen: (open: boolean) => void;
 }) {
@@ -78,9 +81,21 @@ function MobileHeaderActions({
         <Button
           variant="outline"
           size="icon-lg"
+          onClick={handleOpenQuickTerminal}
+          className="!size-11 cursor-pointer"
+          aria-label={t("sidebar:quickTerminal")}
+          data-testid="mobile-quick-terminal-button"
+        >
+          <IconTerminal2 className="h-4 w-4" />
+        </Button>
+      )}
+      {workspaceId && (
+        <Button
+          variant="outline"
+          size="icon-lg"
           onClick={handleOpenQuickChat}
-          className="cursor-pointer"
-          aria-label={t("common:commandQuickChat")}
+          className="!size-11 cursor-pointer"
+          aria-label={t("sidebar:quickChat")}
           data-testid="mobile-quick-chat-button"
         >
           <IconMessageCircle className="h-4 w-4" />
@@ -148,6 +163,7 @@ export function KanbanHeaderMobile({
   const isSearchOpen = useAppStore((state) => state.mobileKanban.isSearchOpen);
   const setSearchOpen = useAppStore((state) => state.setMobileKanbanSearchOpen);
   const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
+  const handleOpenQuickTerminal = useQuickTerminalLauncher(workspaceId);
   const isHome = title === "Home";
 
   const toggleSearch = () => {
@@ -186,6 +202,7 @@ export function KanbanHeaderMobile({
             onSearchChange={onSearchChange}
             isSearchOpen={isSearchOpen}
             handleOpenQuickChat={handleOpenQuickChat}
+            handleOpenQuickTerminal={handleOpenQuickTerminal}
             toggleSearch={toggleSearch}
             setMenuOpen={setMenuOpen}
           />

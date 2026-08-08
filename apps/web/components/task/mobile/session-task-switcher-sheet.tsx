@@ -7,7 +7,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@kandev/ui/drawer";
 import { Button } from "@kandev/ui/button";
 import { TaskSwitcher } from "../task-switcher";
-import type { TaskSwitcherItem } from "../task-switcher";
+import type { TaskSwitcherItem, TaskSwitcherProps } from "../task-switcher";
 import { SidebarFilterBar } from "../sidebar-filter/sidebar-filter-bar";
 import type { StepDef } from "../task-switcher-context-menu";
 import type { TaskMoveWorkflow } from "../task-move-context-menu";
@@ -60,32 +60,7 @@ function useSidebarGroupToggle(viewId: string) {
   );
 }
 
-// eslint-disable-next-line max-lines-per-function -- assembles the shared task tree with the mobile drawer's view state.
-export function MobileTaskList({
-  tasks,
-  workflows,
-  stepsByWorkflowId,
-  activeTaskId,
-  selectedTaskId,
-  onSelectTask,
-  onEditTask,
-  onRenameTask,
-  onCreateSubtask,
-  onArchiveTask,
-  onDeleteTask,
-  onDetachTask,
-  onLinkPullRequest,
-  onLinkIssue,
-  onLinkMergeRequest,
-  onLinkJiraTicket,
-  onLinkLinearIssue,
-  onLinkSentryIssue,
-  deletingTaskId,
-  isLoading,
-  loadError,
-  onRetryLoad,
-  retryLabel,
-}: {
+type MobileTaskListProps = {
   tasks: TaskSwitcherItem[];
   workflows: TaskMoveWorkflow[];
   stepsByWorkflowId: Record<string, StepDef[]>;
@@ -98,6 +73,7 @@ export function MobileTaskList({
   onArchiveTask: (taskId: string) => void;
   onDeleteTask: (taskId: string) => Promise<void> | void;
   onDetachTask: (taskId: string) => Promise<void> | void;
+  onNestTask?: (taskId: string, parentTaskId: string) => void;
   onLinkPullRequest?: (taskId: string, taskTitle?: string) => void;
   onLinkIssue?: (taskId: string, taskTitle?: string) => void;
   onLinkMergeRequest?: (taskId: string, taskTitle?: string) => void;
@@ -109,7 +85,69 @@ export function MobileTaskList({
   loadError?: string | null;
   onRetryLoad?: () => void;
   retryLabel?: string;
-}) {
+};
+
+/**
+ * Assembles the TaskSwitcher props for the mobile task list, mirroring the
+ * desktop `buildTaskSwitcherProps` so the prop-forwarding surface stays a
+ * thin mapping layer.
+ */
+function buildMobileTaskSwitcherProps(
+  props: MobileTaskListProps,
+  helpers: {
+    grouped: TaskSwitcherProps["grouped"];
+    collapsedGroupKeys: string[];
+    onToggleGroup: (groupKey: string) => void;
+    collapsedSubtaskParentIds: string[];
+    onToggleSubtasks: (parentTaskId: string) => void;
+    onTogglePin: (taskId: string) => void;
+    onReorderGroup: (groupTaskIds: string[]) => void;
+    onReorderSubtasks: (parentTaskId: string, orderedSubtaskIds: string[]) => void;
+    pinnedTaskIds: string[];
+  },
+): TaskSwitcherProps {
+  return {
+    grouped: helpers.grouped,
+    workflows: props.workflows,
+    stepsByWorkflowId: props.stepsByWorkflowId,
+    activeTaskId: props.activeTaskId,
+    selectedTaskId: props.selectedTaskId,
+    collapsedGroupKeys: helpers.collapsedGroupKeys,
+    onToggleGroup: helpers.onToggleGroup,
+    collapsedSubtaskParentIds: helpers.collapsedSubtaskParentIds,
+    onToggleSubtasks: helpers.onToggleSubtasks,
+    onSelectTask: props.onSelectTask,
+    onEditTask: props.onEditTask,
+    onRenameTask: props.onRenameTask,
+    onCreateSubtask: props.onCreateSubtask,
+    onArchiveTask: props.onArchiveTask,
+    onDeleteTask: props.onDeleteTask,
+    onDetachTask: props.onDetachTask,
+    onNestTask: props.onNestTask,
+    onLinkPullRequest: props.onLinkPullRequest,
+    onLinkIssue: props.onLinkIssue,
+    onLinkMergeRequest: props.onLinkMergeRequest,
+    onLinkJiraTicket: props.onLinkJiraTicket,
+    onLinkLinearIssue: props.onLinkLinearIssue,
+    onLinkSentryIssue: props.onLinkSentryIssue,
+    onTogglePin: helpers.onTogglePin,
+    onReorderGroup: helpers.onReorderGroup,
+    onReorderSubtasks: helpers.onReorderSubtasks,
+    pinnedTaskIds: helpers.pinnedTaskIds,
+    deletingTaskId: props.deletingTaskId,
+    isLoading: props.isLoading,
+    loadError: props.loadError,
+    onRetryLoad: props.onRetryLoad,
+    retryLabel: props.retryLabel,
+    totalTaskCount: props.tasks.length,
+  };
+}
+
+/**
+ * The mobile task tree surface: renders the shared TaskSwitcher with the
+ * mobile drawer's view state (grouping, ordering, collapse, reorder, nest).
+ */
+export function MobileTaskList(props: MobileTaskListProps) {
   const view = useEffectiveSidebarView();
   const {
     pinnedTaskIds,
@@ -126,49 +164,25 @@ export function MobileTaskList({
   const { i18n } = useTranslation();
   const grouped = useMemo(
     () =>
-      applyView(tasks, view, {
+      applyView(props.tasks, view, {
         pinnedTaskIds,
         orderedTaskIds,
         subtaskOrderByParentId,
       }),
-    [tasks, view, pinnedTaskIds, orderedTaskIds, subtaskOrderByParentId, i18n.language],
+    [props.tasks, view, pinnedTaskIds, orderedTaskIds, subtaskOrderByParentId, i18n.language],
   );
-  return (
-    <TaskSwitcher
-      grouped={grouped}
-      workflows={workflows}
-      stepsByWorkflowId={stepsByWorkflowId}
-      activeTaskId={activeTaskId}
-      selectedTaskId={selectedTaskId}
-      collapsedGroupKeys={view.collapsedGroups}
-      onToggleGroup={handleToggleGroup}
-      collapsedSubtaskParentIds={collapsedSubtaskParents}
-      onToggleSubtasks={toggleSubtaskCollapsed}
-      onSelectTask={onSelectTask}
-      onEditTask={onEditTask}
-      onRenameTask={onRenameTask}
-      onCreateSubtask={onCreateSubtask}
-      onArchiveTask={onArchiveTask}
-      onDeleteTask={onDeleteTask}
-      onDetachTask={onDetachTask}
-      onLinkPullRequest={onLinkPullRequest}
-      onLinkIssue={onLinkIssue}
-      onLinkMergeRequest={onLinkMergeRequest}
-      onLinkJiraTicket={onLinkJiraTicket}
-      onLinkLinearIssue={onLinkLinearIssue}
-      onLinkSentryIssue={onLinkSentryIssue}
-      onTogglePin={togglePinnedTask}
-      onReorderGroup={handleReorderGroup}
-      onReorderSubtasks={handleReorderSubtasks}
-      pinnedTaskIds={pinnedTaskIds}
-      deletingTaskId={deletingTaskId}
-      isLoading={isLoading}
-      loadError={loadError}
-      onRetryLoad={onRetryLoad}
-      retryLabel={retryLabel}
-      totalTaskCount={tasks.length}
-    />
-  );
+  const switcherProps = buildMobileTaskSwitcherProps(props, {
+    grouped,
+    collapsedGroupKeys: view.collapsedGroups,
+    onToggleGroup: handleToggleGroup,
+    collapsedSubtaskParentIds: collapsedSubtaskParents,
+    onToggleSubtasks: toggleSubtaskCollapsed,
+    onTogglePin: togglePinnedTask,
+    onReorderGroup: handleReorderGroup,
+    onReorderSubtasks: handleReorderSubtasks,
+    pinnedTaskIds,
+  });
+  return <TaskSwitcher {...switcherProps} />;
 }
 
 function TaskSwitcherSurfaceHeader({
@@ -186,13 +200,14 @@ function TaskSwitcherSurfaceHeader({
   onNewTask: () => void;
   presentation: "sheet" | "drawer";
 }) {
+  const { t } = useTranslation();
   const content = (
     <>
       <div className="flex items-center justify-between">
         {presentation === "drawer" ? (
-          <DrawerTitle className="text-base">Tasks</DrawerTitle>
+          <DrawerTitle className="text-base">{t("task:tasks")}</DrawerTitle>
         ) : (
-          <SheetTitle className="text-base">Tasks</SheetTitle>
+          <SheetTitle className="text-base">{t("task:tasks")}</SheetTitle>
         )}
         <div className="flex items-center gap-2">
           {workspaceId && (
@@ -204,7 +219,7 @@ function TaskSwitcherSurfaceHeader({
               data-testid="mobile-sheet-quick-chat"
             >
               <IconMessageCircle className="h-4 w-4" />
-              Chat
+              {t("task:chat")}
             </Button>
           )}
           <Button
@@ -214,7 +229,7 @@ function TaskSwitcherSurfaceHeader({
             onClick={onNewTask}
           >
             <IconPlus className="h-4 w-4" />
-            New
+            {t("task:new")}
           </Button>
         </div>
       </div>
@@ -333,6 +348,7 @@ function TaskSwitcherSurfaceContent({
           onArchiveTask={surfaceAction(presentation, onOpenChange, actions.handleArchiveTask)}
           onDeleteTask={surfaceAction(presentation, onOpenChange, actions.handleDeleteTask)}
           onDetachTask={surfaceAction(presentation, onOpenChange, actions.handleDetachTask)}
+          onNestTask={actions.handleNestTask}
           onLinkPullRequest={surfaceAction(
             presentation,
             onOpenChange,

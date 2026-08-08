@@ -259,6 +259,36 @@ func TestServiceInstall_AllowsPackageAtOrBelowRunningKandevVersion(t *testing.T)
 	}
 }
 
+// TestServiceInstall_NoEnforcementOnDevBuild pins the dev-build escape
+// hatch. An un-stamped local build reports the "dev" sentinel, and a
+// developer running from source must still be able to install any package —
+// exactly as before this check was wired up in production.
+//
+// The escape hatch has to be explicit rather than left to
+// manifest.CompareVersions, because "dev" is not a version and that function
+// falls back to a plain strings.Compare when a segment won't parse. Which
+// side wins then is an accident of the alphabet: "dev" happens to sort above
+// a bare "999.0.0", but below anything starting past 'd' — and
+// min_kandev_version is a free-form manifest string, so a "v"-prefixed value
+// like "v1.0.0" is a spelling an author can (and does) write. Without the
+// sentinel skip that spelling locks every dev build out of the plugin.
+func TestServiceInstall_NoEnforcementOnDevBuild(t *testing.T) {
+	for _, minVersion := range []string{"999.0.0", "v1.0.0"} {
+		t.Run(minVersion, func(t *testing.T) {
+			svc, _, _ := newTestService(t)
+			svc.SetKandevVersion(DevKandevVersion)
+
+			rec, err := svc.Install(context.Background(), minKandevVersionPackage(t, "kandev-plugin-slack", "1.0.0", minVersion))
+			if err != nil {
+				t.Fatalf("Install() unexpected error on a dev build (min_kandev_version %q): %v", minVersion, err)
+			}
+			if rec.Status != StatusActive {
+				t.Fatalf("Install() Status = %q, want %q", rec.Status, StatusActive)
+			}
+		})
+	}
+}
+
 // TestServiceInstall_NoEnforcementWithoutKandevVersionWired pins the
 // no-op default: a Service that never called SetKandevVersion (e.g. every
 // other test in this file, and any caller that hasn't wired it yet) must

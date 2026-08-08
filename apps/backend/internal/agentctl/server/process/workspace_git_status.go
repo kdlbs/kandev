@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -36,10 +37,19 @@ func (wt *WorkspaceTracker) updateGitStatus(ctx context.Context) bool {
 func (wt *WorkspaceTracker) updateGitStatusClass(ctx context.Context, class subproc.GitWorkClass) bool {
 	status, err := wt.getGitStatusClass(ctx, class)
 	if err != nil {
-		wt.logger.Warn("updateGitStatus: getGitStatus failed", zap.Error(err))
+		// A cancellation is the expected outcome when the tracker is being
+		// torn down (Stop cancels cancelCtx, which kills the in-flight git
+		// command) or when the poll's admission slot is revoked. That is not a
+		// failure worth a warning — it mirrors handleGitPollFailure, which also
+		// downgrades cancellation-class errors to Debug to keep shutdown quiet.
+		if wt.isGitStatusCancellation(err) {
+			wt.logger.Debug("updateGitStatus: getGitStatus canceled", zap.Error(err))
+		} else {
+			wt.logger.Warn("updateGitStatus: getGitStatus failed", zap.Error(err))
+		}
 		return false
 	}
-	if ctx.Err() != nil || wt.cancelCtx.Err() != nil {
+	if ctx.Err() != nil || (wt.cancelCtx != nil && wt.cancelCtx.Err() != nil) {
 		return false
 	}
 
@@ -50,6 +60,17 @@ func (wt *WorkspaceTracker) updateGitStatusClass(ctx context.Context, class subp
 	// Notify workspace stream subscribers
 	wt.notifyWorkspaceStreamGitStatus(status)
 	return true
+}
+
+// isGitStatusCancellation reports whether a getGitStatus error is a benign
+// cancellation rather than a real git failure: the passed context or the
+// tracker's own shutdown context was canceled, or the background admission slot
+// was revoked. These are all expected during teardown and don't warrant a warn.
+func (wt *WorkspaceTracker) isGitStatusCancellation(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, subproc.ErrAdmissionCanceled) {
+		return true
+	}
+	return wt.cancelCtx != nil && wt.cancelCtx.Err() != nil
 }
 
 // tryUpdateGitStatus attempts a non-blocking git status update. If another
@@ -202,6 +223,7 @@ func (wt *WorkspaceTracker) computeGitStatus(ctx context.Context) (types.GitStat
 	update := types.GitStatusUpdate{
 		Timestamp:      time.Now(),
 		RepositoryName: wt.repositoryName,
+		IsSubmodule:    wt.IsSubmodule(),
 		Modified:       []string{},
 		Added:          []string{},
 		Deleted:        []string{},
@@ -322,6 +344,16 @@ func (wt *WorkspaceTracker) getGitBranchInfo(ctx context.Context, update *types.
 // baseBranch is treated as user-controlled and re-sanitised here so static
 // analysis sees the regex barrier inline with the `git` invocation.
 func (wt *WorkspaceTracker) computeBaseCommit(ctx context.Context, baseBranch string) string {
+	if wt.IsSubmodule() {
+		if !sha1HexPattern.MatchString(baseBranch) {
+			return ""
+		}
+		out, err := wt.runGitOutput(ctx, "rev-parse", "--verify", baseBranch+"^{commit}")
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(out))
+	}
 	// Same inline regex barrier as resolveStoredRef so CodeQL's
 	// taint-tracker sees it co-located with the `git` subprocess call.
 	rest, hasOriginPrefix := strings.CutPrefix(baseBranch, "origin/")
@@ -552,6 +584,15 @@ func (r baseBranchResolution) log(wt *WorkspaceTracker) {
 // outcome is assertable in tests rather than only observable through logs.
 func (wt *WorkspaceTracker) resolveBaseBranchWithReason(ctx context.Context) baseBranchResolution {
 	stored := wt.BaseBranch()
+	if wt.IsSubmodule() {
+		anchor := wt.ComparisonAnchor()
+		if anchor != "" {
+			if ref := wt.resolveStoredRef(ctx, anchor); ref != "" {
+				return baseBranchResolution{ref: ref, stored: anchor, reason: baseBranchStored}
+			}
+		}
+		return baseBranchResolution{stored: anchor, reason: baseBranchUnresolved}
+	}
 	if stored != "" {
 		if ref := wt.resolveStoredRef(ctx, stored); ref != "" {
 			return baseBranchResolution{ref: ref, stored: stored, reason: baseBranchStored}
@@ -574,6 +615,9 @@ func (wt *WorkspaceTracker) resolveBaseBranchWithReason(ctx context.Context) bas
 // aheadBehindFallbackCandidates list — local main/master are excluded
 // because they can show stale, in-progress work for divergence counts.
 func (wt *WorkspaceTracker) resolveAheadBehindRef(ctx context.Context) string {
+	if wt.IsSubmodule() {
+		return wt.resolveBaseBranch(ctx)
+	}
 	if stored := wt.BaseBranch(); stored != "" {
 		if ref := wt.resolveStoredRef(ctx, stored); ref != "" {
 			return ref

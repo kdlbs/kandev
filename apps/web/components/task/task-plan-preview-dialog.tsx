@@ -15,6 +15,8 @@ import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import type { TaskPlanRevision } from "@/lib/types/http";
 import { formatPreciseTime } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 const PlanReadOnlyMarkdown = dynamic(
   () =>
@@ -53,6 +55,7 @@ export function PlanRevisionPreviewDialog({
   onCompareWithCurrent,
   isCurrent,
 }: Props): ReactNode {
+  const { t } = useTranslation();
   const open = revision !== null;
   return (
     <Dialog
@@ -67,10 +70,10 @@ export function PlanRevisionPreviewDialog({
       >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <span>Version {revision?.revision_number}</span>
+            <span>{t("task:versionNumber", { version: revision?.revision_number })}</span>
             {isCurrent && (
               <Badge variant="secondary" className="h-4 text-[10px] px-1.5">
-                current
+                {t("task:current")}
               </Badge>
             )}
           </DialogTitle>
@@ -80,7 +83,7 @@ export function PlanRevisionPreviewDialog({
             <span>{revision ? formatPreciseTime(revision.updated_at) : ""}</span>
             {revision?.revert_of_revision_id && (
               <span className="flex items-center gap-1 text-muted-foreground">
-                <IconRestore className="h-3 w-3" /> restored from earlier version
+                <IconRestore className="h-3 w-3" /> {t("task:restoredFromEarlierVersion")}
               </span>
             )}
           </DialogDescription>
@@ -95,7 +98,7 @@ export function PlanRevisionPreviewDialog({
             className="cursor-pointer"
             data-testid="plan-revision-preview-close"
           >
-            Close
+            {t("task:close")}
           </Button>
           {!isCurrent && revision && (
             <>
@@ -106,7 +109,7 @@ export function PlanRevisionPreviewDialog({
                   className="cursor-pointer"
                   data-testid="plan-revision-preview-compare-with-previous"
                 >
-                  Compare with previous
+                  {t("task:compareWithPrevious")}
                 </Button>
               )}
               <Button
@@ -115,14 +118,14 @@ export function PlanRevisionPreviewDialog({
                 className="cursor-pointer"
                 data-testid="plan-revision-preview-compare-with-current"
               >
-                Compare with current
+                {t("task:compareWithCurrent")}
               </Button>
               <Button
                 onClick={onRestore}
                 className="cursor-pointer"
                 data-testid="plan-revision-preview-restore"
               >
-                Restore this version
+                {t("task:restoreThisVersion")}
               </Button>
             </>
           )}
@@ -151,7 +154,7 @@ function PreviewBody({
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to load revision");
+          setError(err instanceof Error ? err.message : t("task:failedToLoadRevision"));
         }
       });
     return () => {
@@ -170,6 +173,7 @@ function PreviewBody({
 }
 
 function PreviewBodyInner({ content, error }: { content: string | null; error: string | null }) {
+  const { t } = useTranslation();
   if (error) {
     return <div className="text-destructive text-xs">{error}</div>;
   }
@@ -177,12 +181,12 @@ function PreviewBodyInner({ content, error }: { content: string | null; error: s
     return (
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
-        Loading…
+        {t("task:loading2")}
       </div>
     );
   }
   if (content.trim() === "") {
-    return <div className="text-xs text-muted-foreground italic">(empty plan)</div>;
+    return <div className="text-xs text-muted-foreground italic">{t("task:emptyPlan")}</div>;
   }
   return <PlanReadOnlyMarkdown content={content} />;
 }

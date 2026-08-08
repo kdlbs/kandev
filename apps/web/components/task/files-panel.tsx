@@ -15,6 +15,7 @@ import {
   getAddSourcesDisabledReason,
   hasActiveTaskSourceWork as getHasActiveTaskSourceWork,
 } from "./add-workspace-sources/add-workspace-sources-availability";
+import { useTranslation } from "react-i18next";
 
 type FilesPanelProps = {
   onOpenFile: (file: OpenFileTab) => void;
@@ -52,9 +53,10 @@ function TaskSourceDialog({
 }
 
 function NoTaskSelected() {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
-      No task selected
+      {t("task:noTaskSelected")}
     </div>
   );
 }
@@ -99,6 +101,7 @@ function useFilesPanelSourceDialog(activeSessionId: string | null) {
 }
 
 const FilesPanel = memo(function FilesPanel({ onOpenFile }: FilesPanelProps) {
+  const { t } = useTranslation();
   // Use environment-stable sessionId so the file browser doesn't re-fetch
   // when switching between sessions in the same environment.
   const activeSessionId = useEnvironmentSessionId();
@@ -130,7 +133,7 @@ const FilesPanel = memo(function FilesPanel({ onOpenFile }: FilesPanelProps) {
   const hasRepository = Boolean(activeTask?.repositoryId ?? activeTask?.repositories?.length);
   const resolvedAddSourcesDisabledReason = hasRepository
     ? addSourcesDisabledReason
-    : "This task needs a repository before sources can be added.";
+    : t("task:taskNeedsRepositoryForSources");
   const { createFile, deleteFile, renameFile, downloadFile } = useFileOperations(
     activeSessionId ?? null,
   );

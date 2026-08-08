@@ -47,6 +47,26 @@ func TestApplySessionModel_UsesConfigOptionWhenSessionAdvertisesModelOption(t *t
 	}
 }
 
+func TestApplySessionConfigOptions_SortsAndAppliesValues(t *testing.T) {
+	t.Parallel()
+
+	conn := &fakeModelConn{}
+	err := applySessionConfigOptions(context.Background(), conn, "sess-1", map[string]string{
+		"fast":   "true",
+		"effort": "high",
+	})
+	if err != nil {
+		t.Fatalf("applySessionConfigOptions() error = %v", err)
+	}
+	wantCalls := []string{
+		"config:effort:high",
+		"config:fast:true",
+	}
+	if !reflect.DeepEqual(conn.calls, wantCalls) {
+		t.Fatalf("calls = %#v, want %#v", conn.calls, wantCalls)
+	}
+}
+
 // TestApplySessionModel_FallsBackToLegacySetModel pins that when the session
 // advertises no model-shaped config option, the dispatcher falls through to
 // the pre-v0.13.5 session/set_model RPC restored by the kdlbs acp-go-sdk

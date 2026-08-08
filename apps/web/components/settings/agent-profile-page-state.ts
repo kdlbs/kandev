@@ -179,6 +179,7 @@ export function useProfileDelete(
         activeSessions: result.activeSessions,
         watchers: result.watchers,
         routingTiers: result.routingTiers,
+        automations: result.automations,
       });
     } else {
       toast({
@@ -199,6 +200,7 @@ export function useProfileDelete(
         activeSessions: result.activeSessions,
         watchers: result.watchers,
         routingTiers: result.routingTiers,
+        automations: result.automations,
       });
     } else if (result.status === "error") {
       toast({

@@ -40,28 +40,25 @@ See [Tasks and workflows](tasks-and-workflows.md) for event configuration and de
 Open **Settings > Workspaces > _Workspace_ > Automations** (`/settings/workspace/{workspaceId}/automations`) and select **New Automation**. The top-level `/settings/automations` route redirects to, or asks you to select, a workspace.
 
 1. Enter a required name and optional description.
-2. Choose **Task** or **Run** execution mode.
-3. Select an agent profile and a non-local executor profile. Passthrough agent profiles are not offered.
-4. For Task mode, select a workflow and starting step.
-5. Select a registered repository, a discovered local repository, or **None**. A discovered repository is registered in the workspace when the automation is saved.
-6. Enter a prompt and optional task-title template.
-7. Keep the default maximum concurrency of 1 unless parallel work is safe.
-8. Choose a schedule and optional GitHub condition, or switch to webhook mode.
-9. Save, trigger a small test, then inspect **Runs** before widening credentials or scope.
+2. Select an agent profile and a non-local executor profile. Passthrough agent profiles are not offered.
+3. Optionally select a workflow and starting step. Both are optional: no automation run is placed on a board, so none needs a starting column.
+4. Select a registered repository, a discovered local repository, or **None**. A discovered repository is registered in the workspace when the automation is saved.
+5. Enter a prompt and optional task-title template.
+6. Keep the default maximum concurrency of 1 unless parallel work is safe.
+7. Choose a schedule and optional GitHub condition, or switch to webhook mode.
+8. Save, use **Run now** on the automation's page, then read what it said before widening credentials or scope.
 
 The form can save an empty agent, executor, or repository selection, but launch still needs a usable agent/executor and a repository. For scheduled, webhook, and manual work, an empty repository falls back to the workspace's first repository. If the workspace has none, the run fails with `no repository available — add a repository to the workspace`. A GitHub pull-request run instead checks out that PR's head branch and uses its base branch.
 
-### Task mode
+### What a firing produces
 
-Task is the default. It creates a visible kanban task in the chosen workflow step. The task starts automatically only when that step has an enabled `auto_start_agent` action on entry; otherwise it waits for a person to start it or move it through the workflow.
+Every automation produces the same thing: an ordinary, persistent task tagged `origin = automation_run`. That origin — not `is_ephemeral` — is what keeps it off the kanban and out of task lists, which means the task keeps its worktree and stays repliable. Worktrees are retained for the ten most recent finished runs of each automation and reclaimed beyond that, so an older run stays readable but can no longer be answered. The trigger is the start signal, so the agent starts immediately rather than waiting for a workflow step's `auto_start_agent` action.
 
-Use Task mode for work that needs discussion, permission responses, review, or approval before merge/release. The task remains available like other tracked work.
+A finished run parks in `WAITING_FOR_INPUT` rather than `COMPLETED`, so you can reply to it and the agent continues in the same session and worktree. A run is a thread, not a receipt.
 
-### Run mode
+There is no execution-mode choice. Earlier versions asked for **Task** or **Run** up front; the column was retained so existing rows need no migration, but it is no longer read, is accepted and ignored on the wire, and is omitted from responses. Automations created before the change behave like every other one, and cards already on a board are left alone — they are ordinary tasks now and can be archived by hand.
 
-Run creates an ephemeral task hidden from the kanban, starts it immediately, and exposes the result through automation run history. After the turn finishes, Kandev reaps an associated Worktree executor's worktree/branch when a worktree manager and runtime worktree ID are present. Docker, Sprites, and SSH runs do not have that Worktree cleanup record and follow their own runtime lifecycle. Workflow and step selections do not apply to this mode.
-
-Run mode cannot wait for a permission response. Kandev rejects the request and marks the run failed. Use only a profile whose intended, constrained actions can complete without a prompt. Prefer Task mode when human approval is required.
+A run cannot wait for a permission response. Kandev rejects the request and marks the run failed. Use only a profile whose intended, constrained actions can complete without a prompt.
 
 ## Trigger behavior
 
@@ -128,7 +125,9 @@ Webhook delivery has no event deduplication or filter-expression evaluator. Make
 
 ### Manual trigger
 
-The play action in the automations table fires a run with trigger type `manual` and no deduplication. Use it on an enabled automation to test repository/profile resolution and inspect the resulting history. The UI currently leaves **Play** enabled for a disabled automation: the HTTP request reports that it triggered, but the orchestrator silently discards the event and creates no run-history row. Re-enable the automation before testing.
+**Run now** on an automation's page — and the play action in the settings table — fires a run with trigger type `manual` and no deduplication. Use it to test repository/profile resolution and read what comes back.
+
+A trigger can succeed and still run nothing. A disabled automation, an already-fired dedup key, or a concurrency cap that is already reached all report **skipped with the reason** rather than claiming a fire. A cap skip writes a run row so the history explains itself; a disabled automation does not, since nothing was ever going to run.
 
 ## Prompt and title placeholders
 
@@ -140,11 +139,19 @@ Webhook runs support `{{webhook.body}}` and `{{webhook.<path>}}`. Dot segments t
 
 Trigger payloads are untrusted input. Do not let a PR body or webhook field silently choose credentials, repositories, shell commands, or a production target.
 
+## Read what an automation has been doing
+
+**Automations** in the sidebar lists the workspace's automations with a health dot; picking one opens it. **`/automations`** is the agenda across all of them — what fires next, and the recent runs of every automation in one feed. **`/automations/<id>`** is one automation's conversation: it opens on the newest run's transcript, pins the standing instruction above it, and carries a reply box. Runs sit in a rail beside it, grouped Running / Completed, as a switcher between instances. Configuration is behind **Details** in that rail, because an automation is configured once and read continuously.
+
+`/runs` still resolves to the same places, so older links keep working.
+
 ## Concurrency, history, and cleanup
 
-Maximum concurrent runs defaults to 1 and cannot be less than 1. A run counts as active while its status is `task_created`. When the cap is reached, Kandev records a `skipped` run and advances the schedule's evaluation time rather than retrying every 30 seconds.
+Maximum concurrent runs defaults to 1 and cannot be less than 1. A run counts as active while its status is `task_created` **and** its task is neither deleted, archived, nor explicitly cancelled — the same definition the UI uses when it says an automation will not fire because a run is still open, so the reason shown and the cap causing it cannot disagree. When the cap is reached, Kandev records a `skipped` run and advances the schedule's evaluation time rather than retrying every 30 seconds.
 
-Run history shows the latest 50 entries by default and can report `triggered`, `task_created`, `succeeded`, `failed`, `skipped`, or `cancelled`. A missing or archived pending task is reconciled as cancelled. Task-mode entries link to their kanban task; Run-mode entries remain in history only.
+Run history can report `triggered`, `task_created`, `succeeded`, `failed`, `skipped`, `archived`, or `cancelled`. The last two are derived at read time, not stored: a `task_created` run whose task was deleted or whose primary session was cancelled reads as `cancelled`, and one whose task was archived reads as `archived`. That derivation is defined once and shared by every view, so two surfaces cannot disagree about the same run.
+
+A run that produced a task opens its conversation. A run that never produced one — a skipped firing — is listed but inert; there is nothing to read.
 
 Deleting one run also deletes its associated task. **Delete all runs** deletes all associated tasks and history for that automation and is irreversible.
 
@@ -158,7 +165,7 @@ Task tools use normal client discovery. When `step_complete_kandev` is required 
 
 `create_task_kandev` advertises `prompt` for instructions delivered to a newly started agent. Older callers may still send `description` when `prompt` is absent, but sending both is an error; the compatibility name is intentionally omitted from the advertised schema.
 
-Task mode currently registers these tool groups:
+A task session currently registers these tool groups:
 
 | Group                               | Available operations                                                                                                                                                                                                                                               |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -361,7 +368,7 @@ which runs inside the agentctl session boundary.
 - **Scheduled run happened as well as a PR run:** clear the schedule expression. The two stored triggers fire independently.
 - **No GitHub PR runs:** connect GitHub and select explicit repositories; **All repos** currently evaluates none.
 - **Run fails before a task starts:** select valid non-passthrough agent and non-local executor profiles, and add/select a repository.
-- **Run fails on permission:** Run mode cannot answer prompts. Use Task mode or a safely constrained profile that does not require one.
+- **Run fails on permission:** an automation run cannot answer prompts. Use a safely constrained profile that does not require one, or reply to the run afterward and let the agent continue.
 - **Webhook rejected or data is incomplete:** check the exact automation ID, `X-Webhook-Secret` header, and enabled automation/trigger. Bodies over 1 MiB are not rejected; the suffix is silently discarded, so inspect the retained trigger data.
 - **Missing template data:** inspect run trigger data and the dot path; unresolved placeholders are intentionally removed.
 - **Task MCP tool missing:** confirm this is a Kandev task session, the agent supports the injection strategy, and the operation belongs to task rather than external mode.

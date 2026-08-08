@@ -122,9 +122,9 @@ type Service struct {
 
 	// kandevVersion is the currently running kandev build version, used to
 	// enforce a package's manifest.min_kandev_version at Install (see
-	// SetKandevVersion / checkMinKandevVersion). Empty (the default) means
-	// no enforcement — no caller currently wires this in production; see
-	// SetKandevVersion's doc comment.
+	// SetKandevVersion / checkMinKandevVersion). Empty (the default, e.g. in
+	// tests that construct a Service directly) or the "dev" sentinel means no
+	// enforcement; backendapp wires the real ldflags-injected version.
 	kandevVersion string
 
 	httpClient *http.Client
@@ -346,13 +346,19 @@ func (s *Service) authLoginBridge() AuthLoginBridge {
 // SetKandevVersion wires the currently running kandev build version,
 // enabling Install to enforce a package's manifest.min_kandev_version
 // (checkMinKandevVersion): a package requiring a newer kandev is rejected
-// rather than installed and left to fail confusingly at spawn time. Not
-// currently called by Provide — the running build version needs to be
-// threaded down from internal/backendapp's ldflags-injected Version, which
-// is outside this package; until a caller wires it, min_kandev_version
-// remains parsed and stored but unenforced (the pre-existing behavior).
+// rather than installed and left to fail confusingly at spawn time.
+// Called once during startup wiring from internal/backendapp, which owns the
+// ldflags-injected Version. Passing DevKandevVersion (an un-stamped local
+// build) leaves the check a no-op — see checkMinKandevVersion.
 func (s *Service) SetKandevVersion(v string) {
 	s.kandevVersion = v
+}
+
+// KandevVersion returns the running build version wired via
+// SetKandevVersion, or "" when startup wiring never supplied one (in which
+// case min_kandev_version is not enforced).
+func (s *Service) KandevVersion() string {
+	return s.kandevVersion
 }
 
 // SetRuntime wires the runtime.Manager Provide constructed.
@@ -785,14 +791,21 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 	return installed, activateErr
 }
 
+// DevKandevVersion is the version string an un-stamped local build carries
+// (cmd/kandev's `Version` default, mirrored by internal/system/updates'
+// devVersion). It sorts meaninglessly against real semver, and a developer
+// running from source must still be able to install a package that declares
+// a min_kandev_version, so it disables the check entirely.
+const DevKandevVersion = "dev"
+
 // checkMinKandevVersion rejects a package whose manifest declares a
 // min_kandev_version newer than the currently running kandev build
 // (manifest.CompareVersions). A no-op (nil error) when either side is
-// unset: minVersion == "" (the manifest doesn't declare one, the common
-// case today) or s.kandevVersion == "" (no running version wired via
-// SetKandevVersion).
+// unset or unusable: minVersion == "" (the manifest doesn't declare one,
+// the common case today), s.kandevVersion == "" (no running version wired
+// via SetKandevVersion), or s.kandevVersion == DevKandevVersion.
 func (s *Service) checkMinKandevVersion(minVersion string) error {
-	if minVersion == "" || s.kandevVersion == "" {
+	if minVersion == "" || s.kandevVersion == "" || s.kandevVersion == DevKandevVersion {
 		return nil
 	}
 	if manifest.CompareVersions(s.kandevVersion, minVersion) < 0 {

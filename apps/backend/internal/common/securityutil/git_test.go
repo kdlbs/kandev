@@ -27,8 +27,18 @@ func TestIsValidBaseBranchRef(t *testing.T) {
 	}
 }
 
-func TestIsKnownSafeGitFlagAllowsPushDryRun(t *testing.T) {
-	if !IsKnownSafeGitFlag("--dry-run") {
-		t.Fatal("--dry-run must be allowed for non-mutating push preflight")
+func TestIsKnownSafeGitFlagAllowsRequiredGitOperationFlags(t *testing.T) {
+	for _, flag := range []string{"--dry-run", "--first-parent", "--is-ancestor"} {
+		if !IsKnownSafeGitFlag(flag) {
+			t.Fatalf("%s must be allowed for the git operations that use it", flag)
+		}
+	}
+}
+
+func TestIsKnownSafeGitFlagRejectsPushOptionPrefixes(t *testing.T) {
+	for _, flag := range []string{"--push", "--push-option=notify"} {
+		if IsKnownSafeGitFlag(flag) {
+			t.Fatalf("IsKnownSafeGitFlag(%q) = true, want false", flag)
+		}
 	}
 }

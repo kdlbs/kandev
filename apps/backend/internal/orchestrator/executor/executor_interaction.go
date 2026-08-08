@@ -260,14 +260,57 @@ func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt 
 // PromptWithDispatchCallback invokes onDispatched after agentctl accepts the
 // prompt but before waiting for the turn to complete.
 func (e *Executor) PromptWithDispatchCallback(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func(), preloadedSession ...*models.TaskSession) (*PromptResult, error) {
-	return e.prompt(ctx, taskID, sessionID, prompt, attachments, dispatchOnly, onDispatched, preloadedSession...)
+	return e.prompt(ctx, taskID, sessionID, prompt, attachments, dispatchOnly, onDispatched, false, preloadedSession...)
+}
+
+// SteerWithDispatchCallback delivers a steer into a still-generating turn. It
+// always uses the dispatch-callback path: steering is a dispatch-and-continue
+// action, so the caller keeps admission serialized until agentctl accepts it.
+func (e *Executor) SteerWithDispatchCallback(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func(), preloadedSession ...*models.TaskSession) (*PromptResult, error) {
+	return e.prompt(ctx, taskID, sessionID, prompt, attachments, dispatchOnly, onDispatched, true, preloadedSession...)
 }
 
 type promptAgentWithDispatchCallback interface {
 	PromptAgentWithDispatchCallback(context.Context, string, string, []v1.MessageAttachment, bool, func()) (*PromptResult, error)
 }
 
-func (e *Executor) prompt(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func(), preloadedSession ...*models.TaskSession) (*PromptResult, error) {
+// steerAgentWithDispatchCallback is the optional capability an agent manager
+// implements to accept steers. It is a separate interface (like
+// promptAgentWithDispatchCallback) so the core agentManager interface and its
+// test mocks need no change when steering is unused.
+type steerAgentWithDispatchCallback interface {
+	SteerAgentWithDispatchCallback(context.Context, string, string, []v1.MessageAttachment, bool, func()) (*PromptResult, error)
+}
+
+// dispatchToAgent selects the agent-manager call for a prompt, a dispatch-callback
+// prompt, or a steer. Extracted from prompt() to keep that function under the
+// cyclomatic limit.
+func (e *Executor) dispatchToAgent(
+	ctx context.Context,
+	executionID, prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	onDispatched func(),
+	steer bool,
+) (*PromptResult, error) {
+	if steer {
+		steerer, ok := e.agentManager.(steerAgentWithDispatchCallback)
+		if !ok {
+			return nil, ErrPromptDispatchCallbackUnsupported
+		}
+		return steerer.SteerAgentWithDispatchCallback(ctx, executionID, prompt, attachments, dispatchOnly, onDispatched)
+	}
+	if onDispatched != nil {
+		notifier, ok := e.agentManager.(promptAgentWithDispatchCallback)
+		if !ok {
+			return nil, ErrPromptDispatchCallbackUnsupported
+		}
+		return notifier.PromptAgentWithDispatchCallback(ctx, executionID, prompt, attachments, dispatchOnly, onDispatched)
+	}
+	return e.agentManager.PromptAgent(ctx, executionID, prompt, attachments, dispatchOnly)
+}
+
+func (e *Executor) prompt(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func(), steer bool, preloadedSession ...*models.TaskSession) (*PromptResult, error) {
 	var session *models.TaskSession
 	if len(preloadedSession) > 0 && preloadedSession[0] != nil {
 		session = preloadedSession[0]
@@ -308,16 +351,7 @@ func (e *Executor) prompt(ctx context.Context, taskID, sessionID string, prompt 
 		return result, err
 	}
 
-	var result *PromptResult
-	if onDispatched != nil {
-		notifier, ok := e.agentManager.(promptAgentWithDispatchCallback)
-		if !ok {
-			return nil, ErrPromptDispatchCallbackUnsupported
-		}
-		result, err = notifier.PromptAgentWithDispatchCallback(ctx, executionID, prompt, attachments, dispatchOnly, onDispatched)
-	} else {
-		result, err = e.agentManager.PromptAgent(ctx, executionID, prompt, attachments, dispatchOnly)
-	}
+	result, err := e.dispatchToAgent(ctx, executionID, prompt, attachments, dispatchOnly, onDispatched, steer)
 	if err != nil {
 		if errors.Is(err, lifecycle.ErrExecutionNotFound) {
 			return nil, ErrExecutionNotFound

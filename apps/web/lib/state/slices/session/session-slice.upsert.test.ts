@@ -366,16 +366,34 @@ describe("queue actions", () => {
       makeEntry({ id: "e2", content: "second" }),
     ];
 
-    store.getState().setQueueEntries(SESSION_ID, entries, { count: 2, max: 10 });
+    store
+      .getState()
+      .setQueueEntries(SESSION_ID, entries, { count: 2, max: 10, mergeEnabled: true });
 
     expect(store.getState().queue.bySessionId[SESSION_ID]).toEqual(entries);
-    expect(store.getState().queue.metaBySessionId[SESSION_ID]).toEqual({ count: 2, max: 10 });
+    expect(store.getState().queue.metaBySessionId[SESSION_ID]).toEqual({
+      count: 2,
+      max: 10,
+      mergeEnabled: true,
+    });
+  });
+
+  it("retains a disabled merge state", () => {
+    const store = makeStore();
+    store.getState().setQueueEntries(SESSION_ID, [makeEntry()], {
+      count: 1,
+      max: 10,
+      mergeEnabled: false,
+    });
+    expect(store.getState().queue.metaBySessionId[SESSION_ID]?.mergeEnabled).toBe(false);
   });
 
   it("removeQueueEntry drops a single entry by id and refreshes meta.count", () => {
     const store = makeStore();
     const entries = [makeEntry({ id: "e1" }), makeEntry({ id: "e2" }), makeEntry({ id: "e3" })];
-    store.getState().setQueueEntries(SESSION_ID, entries, { count: 3, max: 10 });
+    store
+      .getState()
+      .setQueueEntries(SESSION_ID, entries, { count: 3, max: 10, mergeEnabled: true });
 
     store.getState().removeQueueEntry(SESSION_ID, "e2");
 
@@ -392,7 +410,9 @@ describe("queue actions", () => {
 
   it("clearQueueStatus removes both entries and meta", () => {
     const store = makeStore();
-    store.getState().setQueueEntries(SESSION_ID, [makeEntry()], { count: 1, max: 10 });
+    store
+      .getState()
+      .setQueueEntries(SESSION_ID, [makeEntry()], { count: 1, max: 10, mergeEnabled: true });
 
     store.getState().clearQueueStatus(SESSION_ID);
 

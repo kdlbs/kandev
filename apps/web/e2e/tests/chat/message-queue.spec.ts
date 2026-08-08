@@ -34,8 +34,8 @@ async function openQuickChatWithAgent(page: Page): Promise<Locator> {
 
   const setup = dialog.getByTestId("quick-chat-setup");
   if (!(await setup.isVisible({ timeout: 1_000 }).catch(() => false))) {
-    await dialog.getByLabel("Start new chat").click();
-    await page.getByRole("menu", { name: "New chat" }).getByText("Quick chat").click();
+    await dialog.getByTestId("quick-chat-add-menu-trigger").click();
+    await page.getByTestId("quick-chat-new-agent").click();
   }
   await expect(setup).toBeVisible({ timeout: 5_000 });
 
@@ -198,6 +198,19 @@ async function seedTaskAndWaitForIdle(
   return session;
 }
 
+async function queueMessagesWhileBusy(
+  page: Page,
+  editor: Locator,
+  messages: string[],
+): Promise<void> {
+  const submit = page.getByTestId("submit-message-button");
+  for (const message of messages) {
+    await typeWhileBusy(page, editor, message);
+    await expect(submit).toBeVisible({ timeout: 5_000 });
+    await submit.click();
+  }
+}
+
 test.describe("Task session queue", () => {
   test.describe.configure({ retries: 1 });
 
@@ -257,6 +270,104 @@ test.describe("Task session queue", () => {
 
     // Wait for the queued message to auto-execute and agent to become idle.
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+  });
+
+  test("row Send Now replaces the active turn and preserves neighboring entries", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const session = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Queue Send Now row test",
+    );
+    await session.sendMessage("/slow 30s");
+    await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
+    const taskID = new URL(testPage.url()).pathname.split("/").pop();
+    if (!taskID) throw new Error("task URL did not contain a task ID");
+    const workflowStepBefore = (await apiClient.getTask(taskID)).workflow_step_id;
+    await testPage.waitForTimeout(500);
+
+    const editor = testPage.locator(".tiptap.ProseMirror").first();
+    await queueMessagesWhileBusy(testPage, editor, [
+      "send first now",
+      "/slow 10s second now",
+      "send third now",
+    ]);
+
+    await openQueuePanel(testPage);
+    const panel = testPage.getByTestId("queued-ghost-list");
+    await expect(panel.getByTestId("queue-entry-text")).toHaveCount(3);
+    const target = panel.getByTestId("queue-entry").filter({ hasText: "second now" });
+    await expect(target).toBeVisible();
+    await target.hover();
+    const sendNow = target.getByTestId("queue-entry-send-now");
+    await expect(sendNow).toBeVisible({ timeout: 10_000 });
+    await expect(sendNow).toBeEnabled({ timeout: 10_000 });
+    await sendNow.click();
+
+    const transcript = session.chat.locator(".chat-message-list:visible");
+    await expect(transcript.getByText("/slow 10s second now", { exact: true })).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(panel.getByTestId("queue-entry-text")).toHaveCount(2, { timeout: 10_000 });
+    await expect(panel.getByTestId("queue-entry-text").nth(0)).toContainText("send first now");
+    await expect(panel.getByTestId("queue-entry-text").nth(1)).toContainText("send third now");
+    await expect(session.chat).not.toContainText("Turn cancelled by user");
+    await expect
+      .poll(async () => (await apiClient.getTask(taskID)).workflow_step_id, { timeout: 10_000 })
+      .toBe(workflowStepBefore);
+  });
+
+  test("header Send Now replaces the turn with the visible queue in FIFO order", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const session = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Queue Send Now bulk test",
+    );
+    await session.sendMessage("/slow 30s");
+    await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
+    await testPage.waitForTimeout(500);
+
+    const editor = testPage.locator(".tiptap.ProseMirror").first();
+    await queueMessagesWhileBusy(testPage, editor, ["bulk first", "bulk second", "bulk third"]);
+    await openQueuePanel(testPage);
+    const panel = testPage.getByTestId("queued-ghost-list");
+    await expect(panel.getByTestId("queue-entry-text")).toHaveCount(3);
+
+    await panel.getByTestId("queue-send-now").click();
+    await expect(panel).not.toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByTestId("queue-chip")).not.toBeVisible({ timeout: 15_000 });
+
+    const transcript = session.chat.locator(".chat-message-list:visible");
+    await expect(transcript).toContainText("bulk first", { timeout: 20_000 });
+    await expect(transcript).toContainText("bulk second");
+    await expect(transcript).toContainText("bulk third");
+    const aggregateUserBubble = transcript
+      .getByTestId("user-message-bubble")
+      .filter({ hasText: "bulk first" });
+    await expect(aggregateUserBubble).toHaveCount(1);
+    await expect(aggregateUserBubble).toContainText("bulk second");
+    await expect(aggregateUserBubble).toContainText("bulk third");
+    const transcriptText = await transcript.innerText();
+    expect(transcriptText.indexOf("bulk first")).toBeLessThan(
+      transcriptText.indexOf("bulk second"),
+    );
+    expect(transcriptText.indexOf("bulk second")).toBeLessThan(
+      transcriptText.indexOf("bulk third"),
+    );
+    await session.waitForChatIdle({ timeout: 45_000 });
   });
 
   test("queue editor textarea scrolls when content is long", async ({

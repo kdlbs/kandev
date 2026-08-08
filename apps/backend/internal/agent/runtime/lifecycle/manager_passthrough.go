@@ -218,13 +218,23 @@ func (m *Manager) resolvePassthroughAgent(ctx context.Context, execution *AgentE
 }
 
 // promptForPassthroughCommand returns the prompt that should be passed to
-// BuildPassthroughCommand. When the agent uses idle-based auto-inject and has
-// no PromptFlag, the prompt would otherwise be appended as a positional arg
-// (putting TUIs like Claude into non-interactive `-p` mode and exiting before
-// auto-inject fires). In that case we return "" so the prompt is delivered via
-// PTY stdin in autoInjectInitialPrompt.
+// BuildPassthroughCommand.
+//
+// When the agent has a PromptFlag, the prompt rides that flag and is returned
+// here. When it does not, the prompt is suppressed: BuildPassthroughCommand
+// would otherwise append it as a positional argument, which interactive TUIs
+// (claude, codex, fuelclaude, …) ignore or misinterpret — e.g. `zsh -ic
+// "fuelclaude --model opus" "<prompt>"` drops the prompt as an unreferenced
+// positional and the agent starts at an empty prompt. In the no-flag case the
+// prompt is delivered instead via PTY stdin in autoInjectInitialPrompt.
+//
+// AutoInjectPrompt alone no longer gates suppression: a custom TUI agent with
+// neither a PromptFlag nor AutoInjectPrompt (the default for agents built from
+// a tui_config) would otherwise have no delivery path at all, so suppression is
+// keyed on the absence of a PromptFlag, which is the actual "can't carry the
+// prompt on the CLI" condition.
 func promptForPassthroughCommand(pt agents.PassthroughConfig, taskDescription string) string {
-	if pt.AutoInjectPrompt && pt.PromptFlag.IsEmpty() {
+	if pt.PromptFlag.IsEmpty() {
 		return ""
 	}
 	return taskDescription
@@ -972,6 +982,10 @@ func (m *Manager) ResumePassthroughSession(ctx context.Context, sessionID string
 	}
 
 	execution.PassthroughStartedAt = time.Now()
+	// Must precede PassthroughProcessID: handlePassthroughStatus reads
+	// passthroughLaunchUsedResume synchronously once the process ID is visible
+	// (the ID is what routes a status update to this execution), so the flag has
+	// to be set before the process can exit and publish a status.
 	execution.passthroughLaunchUsedResume = useResume
 	execution.PassthroughProcessID = processInfo.ID
 
@@ -1097,15 +1111,22 @@ func (m *Manager) handlePassthroughStatus(status *agentctltypes.ProcessStatusUpd
 			// goroutine doesn't race the next launch's writes to those fields.
 			startedAt := execution.PassthroughStartedAt
 			usedResume := execution.passthroughLaunchUsedResume
-			// Detect fast-fail synchronously so we can flip the resume-failed
-			// flag before the next WS reconnect arrives. The goroutine below
-			// would otherwise miss this race: when the PTY exits the WS bridge
-			// closes too, and by the time the goroutine runs (after a 100ms
-			// cleanup delay) HasActiveWebSocketBySession returns false and it
-			// bails without setting any flags. Scoped to fast-fail+usedResume
-			// so a healthy resumed session that exits cleanly or crashes long
-			// after launch keeps its resume intent for auto-restart.
-			if usedResume && passthroughExitIsFastFail(startedAt, status) {
+			// Flip the resume-failed flag synchronously so we beat the next WS
+			// reconnect. The goroutine below would otherwise miss this race:
+			// when the PTY exits the WS bridge closes too, and by the time the
+			// goroutine runs (after a 100ms cleanup delay)
+			// HasActiveWebSocketBySession returns false and it bails without
+			// setting any flags.
+			//
+			// Any non-zero exit of a resume launch counts, not just a fast one:
+			// a real CLI takes seconds to boot before it can report "No
+			// conversation found to continue", which lands outside the
+			// fast-fail window and previously left the flag unset — so every
+			// restart re-attached the same broken resume flag and the session
+			// looped forever (issue #2330). A clean (zero) exit still keeps the
+			// resume intent, so a healthy resumed session that the user quits
+			// is auto-restarted as a resume.
+			if usedResume && passthroughExitCode(status) != 0 {
 				execution.passthroughResumeFailed = true
 				execution.isResumedSession = false
 				execution.passthroughLaunchUsedResume = false
@@ -1167,10 +1188,7 @@ func (m *Manager) handlePassthroughExit(execution *AgentExecution, status *agent
 		return
 	}
 
-	exitCode := 0
-	if status.ExitCode != nil {
-		exitCode = *status.ExitCode
-	}
+	exitCode := passthroughExitCode(status)
 
 	// Use the exit timestamp from the status event (set when the child
 	// actually exited), not time.Now() — the cleanupDelay sleep and goroutine
@@ -1192,9 +1210,8 @@ func (m *Manager) handlePassthroughExit(execution *AgentExecution, status *agent
 		// fresh command (no resume flag) before giving up.
 		if usedResume {
 			// Resume-failed flags have already been flipped synchronously in
-			// handlePassthroughStatus (see passthroughExitIsFastFail) so any
-			// concurrent WS reconnect that races this goroutine sees the new
-			// values immediately.
+			// handlePassthroughStatus so any concurrent WS reconnect that
+			// races this goroutine sees the new values immediately.
 			m.attemptResumeFallback(execution, interactiveRunner, sessionID, exitCode, uptime)
 			return
 		}
@@ -1377,20 +1394,13 @@ func (m *Manager) notifyFastFailExit(runner *process.InteractiveRunner, sessionI
 	}
 }
 
-// passthroughExitIsFastFail wraps isFastFailExit for the synchronous
-// status-callback path that doesn't yet have the unpacked exit code or
-// timestamp. Same window/semantics as the goroutine path.
-func passthroughExitIsFastFail(startedAt time.Time, status *agentctltypes.ProcessStatusUpdate) bool {
-	const fastFailWindow = 2 * time.Second
-	exitCode := 0
-	if status.ExitCode != nil {
-		exitCode = *status.ExitCode
+// passthroughExitCode unpacks the exit code from a process status update,
+// treating an absent code as a clean exit.
+func passthroughExitCode(status *agentctltypes.ProcessStatusUpdate) int {
+	if status.ExitCode == nil {
+		return 0
 	}
-	exitedAt := status.Timestamp
-	if exitedAt.IsZero() {
-		exitedAt = time.Now()
-	}
-	return isFastFailExit(startedAt, exitedAt, exitCode, fastFailWindow)
+	return *status.ExitCode
 }
 
 // isFastFailExit reports whether a passthrough process exit looks like a
@@ -1415,10 +1425,10 @@ type passthroughRunner interface {
 	WriteStdin(processID string, data string) error
 }
 
-// autoInjectInitialPrompt writes the task description to the PTY stdin once
-// the agent is idle (ready for input). Opt-in per agent via PassthroughConfig.
-// Called from startPassthroughSession and attemptResumeFallback only — never
-// from ResumePassthroughSession (would duplicate the prompt in agent history).
+// autoInjectInitialPrompt writes the task description to PTY stdin once a
+// passthrough agent without a PromptFlag is idle (ready for input). Called from
+// startPassthroughSession and attemptResumeFallback only — never from
+// ResumePassthroughSession (would duplicate the prompt in agent history).
 func (m *Manager) autoInjectInitialPrompt(execution *AgentExecution, pt agents.PassthroughConfig) {
 	runner := m.GetInteractiveRunner()
 	if runner == nil {
@@ -1430,15 +1440,19 @@ func (m *Manager) autoInjectInitialPrompt(execution *AgentExecution, pt agents.P
 // autoInjectInitialPromptWith is the testable inner of autoInjectInitialPrompt,
 // taking a runner seam so unit tests can avoid spawning a real PTY.
 func (m *Manager) autoInjectInitialPromptWith(runner passthroughRunner, execution *AgentExecution, pt agents.PassthroughConfig) {
-	if !pt.AutoInjectPrompt {
-		return
-	}
 	if !pt.PromptFlag.IsEmpty() {
-		// The agent already received the prompt as a CLI flag.
+		// The agent already received the prompt as a CLI flag — no stdin
+		// delivery. This mirrors promptForPassthroughCommand, which only
+		// passes the prompt to BuildPassthroughCommand when a PromptFlag
+		// exists; the two no-flag cases (built-in AutoInjectPrompt agents
+		// and custom TUI agents) both land here for stdin delivery.
 		return
 	}
 	description := getTaskDescriptionFromMetadata(execution)
 	if description == "" {
+		// Nothing to inject (e.g. a non-LLM TUI tool with no task
+		// description). Generic passthrough tools launched without a task
+		// take this exit and never receive spurious stdin.
 		return
 	}
 	processID := execution.PassthroughProcessID

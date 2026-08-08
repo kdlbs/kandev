@@ -141,6 +141,7 @@ function TaskRowItem({
       state={task.state}
       sessionState={task.sessionState}
       foregroundActivity={task.foregroundActivity}
+      interrupted={task.interrupted}
       isArchived={task.isArchived}
       isSelected={isSelected}
       diffStats={task.diffStats}
@@ -154,6 +155,7 @@ function TaskRowItem({
       updatedAt={task.updatedAt}
       repositories={task.repositories}
       prInfo={task.prInfo}
+      queuedCount={task.queuedCount}
       issueInfo={task.issueInfo}
       agentErrorMessage={task.agentErrorMessage}
       isSubTask={isSubTask}

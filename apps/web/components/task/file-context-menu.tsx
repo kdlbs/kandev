@@ -22,7 +22,7 @@ import {
 } from "@kandev/ui/context-menu";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/toast-provider";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import type { FileTreeNode } from "@/lib/types/backend";
 import type { FileInfo } from "@/lib/state/store";
 import {
@@ -39,6 +39,29 @@ import {
 
 type GitFileStatus = FileInfo["status"] | undefined;
 
+/** Folder-delete copy. Split out so the two `<Trans>` bodies do not become a
+ * nested ternary inside the dialog. */
+function DeleteFolderDescription({ name, fileCount }: { name: string; fileCount: number }) {
+  if (fileCount > 0) {
+    return (
+      <Trans
+        i18nKey="task:deleteFolderWithFilesConfirm"
+        count={fileCount}
+        values={{ name, count: fileCount }}
+      >
+        This will permanently delete <span className="font-semibold">{name}</span> and{" "}
+        <span className="font-semibold">{fileCount}</span> files inside it. This action cannot be
+        undone.
+      </Trans>
+    );
+  }
+  return (
+    <Trans i18nKey="task:deleteFolderConfirm" values={{ name }}>
+      This will permanently delete <span className="font-semibold">{name}</span>. This action cannot
+      be undone.
+    </Trans>
+  );
+}
 function deleteNodeOptimistically(
   tree: FileTreeNode | null,
   setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>,
@@ -81,33 +104,26 @@ function DeleteConfirmDialog({
   fileCount: number;
   onConfirm: () => void;
 }) {
-  const title = isBulk ? `Delete ${selectedCount} items?` : "Delete folder?";
+  const { t } = useTranslation();
+  const title = isBulk
+    ? t("task:deleteItemsTitle", { count: selectedCount })
+    : t("task:deleteFolderTitle");
   return (
     <AlertDialogContent>
       <AlertDialogHeader>
         <AlertDialogTitle>{title}</AlertDialogTitle>
         <AlertDialogDescription>
           {isBulk ? (
-            `This will permanently delete ${selectedCount} selected items. This action cannot be undone.`
+            t("task:thisWillPermanentlyDeleteSelectedItems", { selectedCount })
           ) : (
-            <>
-              This will permanently delete <span className="font-semibold">{node.name}</span>
-              {fileCount > 0 && (
-                <>
-                  {" "}
-                  and <span className="font-semibold">{fileCount}</span>{" "}
-                  {fileCount === 1 ? "file" : "files"} inside it
-                </>
-              )}
-              . This action cannot be undone.
-            </>
+            <DeleteFolderDescription name={node.name} fileCount={fileCount} />
           )}
         </AlertDialogDescription>
       </AlertDialogHeader>
       <AlertDialogFooter>
-        <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+        <AlertDialogCancel className="cursor-pointer">{t("common:cancel")}</AlertDialogCancel>
         <AlertDialogAction onClick={onConfirm} variant="destructive" className="cursor-pointer">
-          Delete
+          {t("task:delete")}
         </AlertDialogAction>
       </AlertDialogFooter>
     </AlertDialogContent>
@@ -135,7 +151,10 @@ function FileContextMenuItems({
   onStartRename,
   onDelete,
 }: FileContextMenuItemsProps) {
-  const deleteLabel = isBulk ? `Delete ${selectedCount} items` : "Delete";
+  const { t } = useTranslation();
+  const deleteLabel = isBulk
+    ? t("task:deleteItemsLabel", { count: selectedCount })
+    : t("task:delete");
   const showRename = !!onRenameFile && !isBulk;
   const download = !node.is_dir && !isBulk ? onDownloadFile : undefined;
   return (
@@ -150,14 +169,14 @@ function FileContextMenuItems({
       {showRename && (
         <ContextMenuItem onSelect={onStartRename}>
           <IconPencil className="h-3.5 w-3.5" />
-          Rename
+          {t("task:rename")}
         </ContextMenuItem>
       )}
       {download && (showRename || onDeleteFile) && <ContextMenuSeparator />}
       {download && (
         <ContextMenuItem onSelect={() => void download(node.path)}>
           <IconDownload className="h-3.5 w-3.5" />
-          Download
+          {t("task:download")}
         </ContextMenuItem>
       )}
     </>
@@ -390,6 +409,7 @@ export function useFileRename(
   setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>,
   onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>,
 ) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(node.name);
@@ -412,8 +432,8 @@ export function useFileRename(
     }
     if (newName.includes("/") || newName.includes("\\")) {
       toast({
-        title: "Invalid name",
-        description: "File names cannot contain path separators",
+        title: t("task:invalidName"),
+        description: t("task:fileNamesCannotContainPathSeparators"),
         variant: "error",
       });
       handleCancelRename();
@@ -427,8 +447,8 @@ export function useFileRename(
     setIsRenaming(false);
     if (tree && treeContainsPath(tree, newPath)) {
       toast({
-        title: "Failed to rename item",
-        description: `Target already exists: ${newPath}`,
+        title: t("task:failedToRenameItem"),
+        description: t("task:targetAlreadyExists", { newPath }),
         variant: "error",
       });
       handleCancelRename();

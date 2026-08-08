@@ -81,6 +81,23 @@ Chat, plan, changes, files, terminal, editor/diff, preview, commit, and pull-req
 - a restored dock layout and a narrow mobile route;
 - absent optional providers or executor capabilities.
 
+## Localize user-facing copy
+
+Every new user-facing string must go through i18next — `t("namespace:key")` or `<Trans>` — never an inline literal. That covers visible copy, `placeholder`, `aria-label`, `title`, `alt`, toasts, validation and empty-state text, and dialog copy. Externalization of the existing UI is complete, so a hardcoded literal is now a regression rather than unfinished migration.
+
+Catalogs live in `apps/web/src/locales/<locale>/<namespace>.json`. English is the source locale and the only hand-authored catalog; it is bundled into the entry chunk, while each other locale is a lazily fetched chunk loaded before that locale activates. Shipped locales are English, European Portuguese, and Simplified Chinese, plus a generated `pseudo` catalog that only development and E2E builds contain. A missing key falls back to English at runtime.
+
+Three mistakes cause silent bugs: never translate a string compared with `===`, never call `t()` at module scope, and never pass an English plural ending as a value — use `count` with `_one`/`_other` keys.
+
+```bash
+pnpm run i18n:check     # gate: plurals, module-scope t(), Trans indices
+pnpm run i18n:ratchet   # gate: no new hardcoded literals in changed lines
+pnpm run i18n:parity    # advisory report: per-locale missing and extra keys
+pnpm run i18n:sweep <path>  # advisory report: copy the jsx-only lint rule cannot see
+```
+
+The first two run in pre-commit and CI. The last two are reports that always exit zero and are wired into neither, because real-locale translation is maintained out of band and must not fail an English-only change. A clean lint does not prove a file is done: the rule only inspects JSX literals and skips anything assigned to a SCREAMING_CASE identifier, so review config tables by eye and use the pseudo-locale (**Settings > General > Appearance** in development builds) as the completeness check. Shared `@kandev/ui` primitives cannot import the app's i18n runtime, so their accessibility labels are localized at the call site. Full guide: [`docs/i18n.md`](../i18n.md).
+
 ## Security, accessibility, and responsiveness
 
 Frontend checks improve the experience; they are not authorization. The backend must enforce identity, workspace/task scope, and destructive operations. Treat provider text, repository content, Markdown/HTML, URLs, and agent output as untrusted. Keep raw HTML rendering paired with the existing sanitizer and never interpolate shell commands or credentials in the browser.

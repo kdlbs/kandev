@@ -1,5 +1,6 @@
 import { IconCheck } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
+import { useTranslation } from "react-i18next";
 
 type ExecutionStage = {
   id: string;
@@ -26,11 +27,13 @@ type ExecutionState = {
   status: "pending" | "approved" | "rejected";
 };
 
-const STAGE_LABELS: Record<ExecutionStage["type"], string> = {
-  work: "Implement",
-  review: "Review",
-  approval: "Approval",
-  ship: "Ship",
+// Catalog keys, not copy: this table is module scope, so a resolved `t()` here
+// would freeze at the boot locale.
+const STAGE_LABEL_KEYS: Record<ExecutionStage["type"], string> = {
+  work: "task:stageImplement",
+  review: "task:stageReview",
+  approval: "task:stageApproval",
+  ship: "task:stageShip",
 };
 
 type StagePillProps = {
@@ -86,6 +89,7 @@ function parseState(raw: string): ExecutionState | null {
 }
 
 export function StageProgressBar({ executionPolicy, executionState }: StageProgressBarProps) {
+  const { t } = useTranslation();
   if (!executionPolicy) return null;
 
   const policy = parsePolicy(executionPolicy);
@@ -102,7 +106,10 @@ export function StageProgressBar({ executionPolicy, executionState }: StageProgr
         else if (index === currentIndex) pillState = "current";
         return (
           <div key={stage.id} className="flex items-center gap-1">
-            <StagePill label={STAGE_LABELS[stage.type] ?? stage.type} state={pillState} />
+            <StagePill
+              label={STAGE_LABEL_KEYS[stage.type] ? t(STAGE_LABEL_KEYS[stage.type]) : stage.type}
+              state={pillState}
+            />
             {index < policy.stages.length - 1 && (
               <span className="text-muted-foreground text-xs select-none">→</span>
             )}

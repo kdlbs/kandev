@@ -58,9 +58,26 @@ func NewPATClient(host, token string) *PATClient {
 	}
 	host = strings.TrimRight(host, "/")
 	return &PATClient{
-		host:       host,
-		token:      token,
-		httpClient: &http.Client{Timeout: requestTimeout},
+		host:  host,
+		token: token,
+		httpClient: &http.Client{
+			Timeout: requestTimeout,
+			// net/http only strips the standard sensitive headers
+			// (Authorization, Cookie, ...) when a redirect leaves the
+			// original host; a custom PRIVATE-TOKEN header would be forwarded
+			// to the redirect target unchanged. Reject any redirect that
+			// leaves the configured origin so the credential can never be
+			// delivered to an untrusted host.
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				if len(via) == 0 {
+					return nil
+				}
+				if !strings.EqualFold(req.URL.Host, via[0].URL.Host) {
+					return fmt.Errorf("refusing cross-host redirect to %s", req.URL.Host)
+				}
+				return nil
+			},
+		},
 	}
 }
 
@@ -122,7 +139,14 @@ func (c *PATClient) GetAuthenticatedUser(ctx context.Context) (string, error) {
 // url.PathEscape leaves "/" alone, so do the substitution manually before
 // URL-escaping the rest.
 func projectRef(projectPath string) string {
-	return strings.ReplaceAll(url.PathEscape(projectPath), "/", "%2F")
+	return encodeSegment(projectPath)
+}
+
+// encodeSegment percent-encodes a value so it survives as one URL path
+// segment. GitLab's :id and :file_path both need this: an unencoded slash
+// routes to a different resource and 404s.
+func encodeSegment(value string) string {
+	return strings.ReplaceAll(url.PathEscape(value), "/", "%2F")
 }
 
 // groupRef returns the URL-encoded group path used as :id in /groups/:id/...

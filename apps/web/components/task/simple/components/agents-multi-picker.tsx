@@ -9,6 +9,8 @@ import { formatRelativeTime } from "@/lib/utils";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
 import type { Task, TaskDecision } from "@/app/office/tasks/[id]/types";
 import { MultiSelectPopover, type MultiSelectItem } from "./multi-select-popover";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type AgentItem = MultiSelectItem & { icon: string; name: string };
 
@@ -56,8 +58,9 @@ const DECISION_ICON_COMPONENT: Record<AgentDecisionStatus, typeof IconCheck> = {
 };
 
 function decisionTooltip(decision: TaskDecision | undefined): string {
-  if (!decision) return "No decision yet";
-  const verb = decision.decision === "approved" ? "Approved" : "Requested changes";
+  if (!decision) return t("task:noDecisionYet");
+  const verb =
+    decision.decision === "approved" ? t("task:approvedVerb") : t("task:requestedChangesVerb");
   const when = formatRelativeTime(decision.createdAt);
   const note = decision.comment ? ` — ${decision.comment}` : "";
   return `${verb} ${when}${note}`;
@@ -113,6 +116,7 @@ export function AgentsMultiPicker({
   apiRemove,
   decisionsByAgent,
 }: AgentsMultiPickerProps) {
+  const { t } = useTranslation();
   const agents = useAppStore((s) => s.office.agentProfiles);
   const mutate = useOptimisticTaskMutation();
   const items = useMemo(() => buildAgentItems(agents), [agents]);
@@ -160,7 +164,7 @@ export function AgentsMultiPicker({
             remove();
           }
         }}
-        aria-label={`Remove ${item.name}`}
+        aria-label={t("task:remove2", { name: item.name })}
       >
         <IconX className="h-2.5 w-2.5" />
       </span>
@@ -183,8 +187,8 @@ export function AgentsMultiPicker({
       renderChip={renderChip}
       renderItem={renderItem}
       addLabel={addLabel}
-      searchPlaceholder="Search agents..."
-      emptyMessage="No agents found."
+      searchPlaceholder={t("task:searchAgents")}
+      emptyMessage={t("task:noAgentsFound")}
       testId={testId}
     />
   );
