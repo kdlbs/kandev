@@ -570,7 +570,7 @@ func CollectAgentEnvWithError(additional map[string]string) ([]string, error) {
 		return nil, fmt.Errorf("compose indexed Git config: %w", err)
 	}
 	if envMap[githubauth.CredentialBrokerURLEnv] != "" {
-		prependPathEntry(envMap, envMap[githubauth.CredentialCLIShimDirEnv])
+		prependPathEntry(envMap, envMap[githubauth.CredentialCLIShimDirEnv], runtime.GOOS == "windows")
 		configureGitHubCLIStartupEnv(envMap)
 	}
 
@@ -659,11 +659,11 @@ func isBashEnvNameByte(value byte, first bool) bool {
 	return letter || value == '_' || !first && value >= '0' && value <= '9'
 }
 
-func prependPathEntry(env map[string]string, entry string) {
+func prependPathEntry(env map[string]string, entry string, caseInsensitive bool) {
 	if entry == "" {
 		return
 	}
-	key := searchPathKey(env, runtime.GOOS == "windows")
+	key := searchPathKey(env, caseInsensitive)
 	cleanEntry := filepath.Clean(entry)
 	parts := filepath.SplitList(env[key])
 	filtered := make([]string, 0, len(parts)+1)

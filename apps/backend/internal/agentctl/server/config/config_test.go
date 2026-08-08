@@ -60,7 +60,7 @@ func TestPrependPathEntryExtendsTheKeyItFound(t *testing.T) {
 		"PATH": strings.Join([]string{"/node/bin", "/usr/bin"}, string(os.PathListSeparator)),
 	}
 
-	prependPathEntry(env, "/kandev/shims")
+	prependPathEntry(env, "/kandev/shims", false)
 
 	want := strings.Join([]string{"/kandev/shims", "/node/bin", "/usr/bin"}, string(os.PathListSeparator))
 	if env["PATH"] != want {
@@ -68,6 +68,25 @@ func TestPrependPathEntryExtendsTheKeyItFound(t *testing.T) {
 	}
 	if len(env) != 1 {
 		t.Fatalf("prependPathEntry left %d variables, want the one it extended: %v", len(env), env)
+	}
+}
+
+// The regression itself: an environment carrying only the Windows-style "Path"
+// must have that entry extended, not shadowed by a freshly created "PATH"
+// holding the shim directory alone.
+func TestPrependPathEntryExtendsInheritedWindowsPathKey(t *testing.T) {
+	env := map[string]string{
+		"Path": strings.Join([]string{"/node/bin", "/usr/bin"}, string(os.PathListSeparator)),
+	}
+
+	prependPathEntry(env, "/kandev/shims", true)
+
+	if _, duplicated := env["PATH"]; duplicated {
+		t.Fatalf("prependPathEntry added a second search-path variable: %v", env)
+	}
+	want := strings.Join([]string{"/kandev/shims", "/node/bin", "/usr/bin"}, string(os.PathListSeparator))
+	if env["Path"] != want {
+		t.Fatalf("Path = %q, want %q", env["Path"], want)
 	}
 }
 
