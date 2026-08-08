@@ -61,12 +61,24 @@ thing a caller can do*.
      finished at observation time. It may still be running.
 - Both **Found** outcomes SHALL have **no side effects**: no new task row, no
   new agent session, no agent launch, no repository attachment, no attachment
-  claim, no workspace-policy write, no branch creation, no `task.created` event,
-  **and no consumption of a workspace task-identifier sequence number**.
+  claim, no workspace-policy write, no branch creation, and no `task.created`
+  event.
+  - **One bounded exception, and only on the concurrent-loser path.** When a
+    Found outcome is resolved by the step-3 lookup — which is every ordinary
+    retry — nothing whatsoever is consumed. When it is instead resolved by the
+    unique-index backstop, the loser may already have allocated an office
+    task-identifier sequence number before reaching the insert, and that number
+    is not returned to the pool. This is the single permitted side effect; see
+    *Failure modes*. It leaves a gap in the office identifier sequence, which is
+    not required to be contiguous, and no other durable change.
 - The system SHALL NOT delete, repair, resume, or reclaim an unsettled task, and
   SHALL NOT expire one. There is no duration after which behavior changes.
-- A caller SHALL have a side-effect-free way to ask what holds an identity
-  without risking a create.
+- **REST** callers SHALL have a side-effect-free way to ask what holds an
+  identity without risking a create: the lookup route. **MCP callers do not get
+  one in this iteration.** What MCP gets is an idempotent *create-if-absent*
+  operation — safe to repeat, but it creates a task when no holder exists, so it
+  is not a probe. This asymmetry is deliberate and is stated rather than papered
+  over; see *The probe, and what MCP has instead*.
 - Callers SHALL be able to release an external ID from a task, freeing it for
   reuse without deleting the task. This is an operator action, not a recovery
   step — see *The one unsafe thing a caller can do*.
@@ -266,6 +278,22 @@ requirement:
 Step 5's unique-violation path remains as the **TOCTOU backstop** for the narrow
 race between the step-3 lookup and the insert. It is not the primary mechanism.
 
+**The backstop is not reachable from every failure, and that gap must be closed
+explicitly.** WIP admission runs *before* the insert and can return a capacity
+error without ever attempting it. So a request that missed at step 3, then lost
+the race, can surface a capacity failure instead of the Found outcome the
+contract promises.
+
+Therefore: **after a step-3 miss, any pre-insert failure — capacity, admission,
+or otherwise — MUST trigger a re-read by `(workspace_id, external_id)` before
+that failure is returned.** If a task now holds the identity, the request
+returns the Found outcome instead of the failure. Only if the re-read still
+finds nothing does the original error surface.
+
+This is narrow but load-bearing: without it, "a retry always returns the
+existing task" is false precisely when the destination step is at its WIP limit,
+which is exactly when a task is most likely to already exist there.
+
 ### Settlement (normative)
 
 Settlement is a single conditional UPDATE. The predicate MUST include
@@ -288,11 +316,16 @@ and stamp a settlement onto a task that no longer holds any identity.
 
 - **One row** — settlement succeeded. Proceed to asynchronous dispatch.
 - **Zero rows** — the task was deleted or its identity released while this
-  create was running. The implementation MUST re-read current state, MUST NOT
-  dispatch asynchronous work, and MUST NOT return a `Created` /
-  `creation_complete: true` response claiming an identity it no longer holds.
-  Return the task as it now stands, with `external_id` absent if it was
-  released, or the appropriate not-found error if it was deleted.
+  create was running. The implementation MUST re-read current state and MUST NOT
+  dispatch asynchronous work. It then splits by what it finds:
+  - **The task exists but no longer holds the identity** (it was released) →
+    return outcome `CreatedIdentityLost`: `200`, `deduplicated: false`,
+    `creation_complete: false`, and `external_id` absent from the body.
+  - **The task no longer exists** (it was deleted) → return the surface's
+    existing not-found error. There is no task to describe.
+
+  It MUST NOT report `Created` / `creation_complete: true`, which would claim an
+  identity the task no longer holds.
 
 Zero rows is a legitimate outcome of a benign race, not an error to log and
 ignore.
@@ -339,9 +372,27 @@ outcome signal. It SHALL return:
 ```
 CreateTaskResult {
   Task     *models.Task
-  Outcome  enum { Created, FoundSettled, FoundUnsettled }
+  Outcome  enum { Created, FoundSettled, FoundUnsettled, CreatedIdentityLost }
 }
 ```
+
+`CreatedIdentityLost` is the fourth outcome, and it exists solely to represent
+the settlement zero-row race: this request created the task, but by the time
+settlement ran the identity had been released by another actor, so the task
+survives holding no external ID. Without it the contract has a reachable state
+with no representation — the handler would have to either fabricate
+`Created` / `creation_complete: true` for an identity the task no longer holds,
+or invent an undocumented response. See *Settlement*.
+
+It is deliberately distinct from `FoundUnsettled`: that one means *someone
+else's* create is unfinished, while this one means *this* create finished but
+lost its identity. Callers act differently — the first says "wait or escalate",
+the second says "your task exists, but the identity you asked for is now free
+and someone may claim it".
+
+If the task was **deleted** rather than released during that window, there is no
+task to return and the request surfaces the appropriate not-found error; that is
+an error path, not this outcome.
 
 Callers MUST skip their post-create work on both `Found*` outcomes:
 
@@ -398,32 +449,44 @@ narrow thing — that the create's required synchronous setup finished — and a
 broader name invites callers to read it as "the task is done" or "the agent is
 running". Every schema and tool description MUST carry that narrow meaning.
 
-| Outcome | Status | `deduplicated` | `creation_complete` |
-|---|---|---|---|
-| Created | `200` | `false` | `true` |
-| Found, settled | `200` | `true` | `true` |
-| Found, unsettled | `200` | `true` | `false` |
-| `external_id` fails validation | `400` | — | — |
-| Caller not authorized for `workspace_id` | `404` `{"error": "task not created"}` | — | — |
+| Outcome | Status | `deduplicated` | `creation_complete` | `external_id` in body |
+|---|---|---|---|---|
+| Created | `200` | `false` | `true` | present |
+| Found, settled | `200` | `true` | `true` | present |
+| Found, unsettled | `200` | `true` | `false` | present |
+| Created, identity lost | `200` | `false` | `false` | **absent** |
+| `external_id` fails validation | `400` | — | — | — |
+| Caller not authorized for `workspace_id` | `404` `{"error": "task not created"}` | — | — | — |
 
-All three success outcomes are `200` with the task body. There is no `409` and
+`Created, identity lost` is distinguishable from `Found, unsettled` by
+`deduplicated`: `false` means this request created the task. It is
+distinguishable from `Created` by the absent `external_id`, which is the literal
+truth — the task no longer holds one. A caller seeing it has a valid task ID and
+should treat the external identity as unclaimed.
+
+All four success outcomes are `200` with the task body. There is no `409` and
 no `410`: an unsettled task is a fact to report, not a conflict to raise, and a
 freed identity is indistinguishable from one never used. Keeping fresh creates
 at `200` also avoids a breaking change for existing clients.
 
-### The side-effect-free probe
+### The probe, and what MCP has instead
 
-A caller can safely ask what holds an identity in two ways, and the SHALL in
-*What* is satisfied by either:
+**REST callers get a true probe:** the lookup route below. It reads and returns;
+it never creates.
 
-1. **The REST lookup route** below.
-2. **A create carrying the external ID.** Because both Found outcomes have no
-   side effects, issuing the create *is* a safe probe for any caller that would
-   accept the task if it did not exist.
+**MCP callers do not.** A create carrying an external ID is *idempotent* — safe
+to repeat, no duplicates, no side effects when a holder exists — but it is not
+side-effect-free, because when no holder exists it creates a task. Calling that
+a probe would be wrong, and an MCP agent told it was one could use it to "check"
+an identity and be surprised to find it had made something.
 
-MCP callers rely on (2); no MCP lookup tool is added in this iteration. This is
-sufficient because an MCP caller reaching for an identity is, by construction,
-willing to create the task if it is absent.
+The MCP tool description MUST therefore say plainly: this creates the task if
+nothing holds the identity yet.
+
+No MCP lookup tool is added in this iteration because no in-scope MCP flow needs
+to ask without being willing to create — an agent reaching for an identity is
+reaching for the task. If a flow appears that genuinely needs to ask first, add
+a read-only tool then; it is a small, additive change.
 
 ### REST — lookup
 
@@ -615,11 +678,32 @@ create-time condition into unrelated surfaces.
 - **GIVEN** an office workspace `W` whose `task_sequence` is `N`, and a settled
   task holding `(W, ext-1)`, **WHEN** a client POSTs a create with
   `external_id: ext-1` and office-task parameters, **THEN** the existing task is
-  returned and `W.task_sequence` is **still `N`** — no identifier was allocated.
+  returned and `W.task_sequence` is **still `N`** — the step-3 lookup resolved
+  it before any allocation.
+- **GIVEN** an office workspace `W` whose `task_sequence` is `N` and **no** task
+  holding `(W, ext-4)`, **WHEN** two office creates with `external_id: ext-4`
+  race such that both miss the step-3 lookup, **THEN** exactly one task is
+  created, the loser returns a Found outcome, and `W.task_sequence` may be
+  `N+2` — the loser's allocated identifier is not reclaimed. This is the single
+  permitted side effect of a Found outcome, and the sequence is not required to
+  be contiguous.
 - **GIVEN** a workflow step at its WIP limit, and a settled task holding
   `(W, ext-1)` on that step, **WHEN** a client POSTs a create with
   `external_id: ext-1` targeting that step, **THEN** the existing task is
-  returned with `deduplicated: true` — **not** a WIP-capacity error.
+  returned with `deduplicated: true` — **not** a WIP-capacity error. The step-3
+  lookup resolves it before admission is consulted.
+- **GIVEN** a workflow step at its WIP limit and **no** task yet holding
+  `(W, ext-2)`, **WHEN** two creates with `external_id: ext-2` targeting that
+  step race such that both miss the step-3 lookup and the loser is rejected by
+  WIP admission **before** reaching the insert, **THEN** the loser re-reads by
+  `(workspace_id, external_id)`, finds the winner's task, and returns it as a
+  Found outcome — **not** the capacity error. This is the admission-preemption
+  guard; without it the contract's "a retry always returns the existing task"
+  promise fails exactly when the step is saturated.
+- **GIVEN** the same saturated step and **no** task holding `(W, ext-3)`,
+  **WHEN** a single create with `external_id: ext-3` is rejected by WIP
+  admission and the re-read still finds nothing, **THEN** the original capacity
+  error surfaces unchanged — the guard must not swallow genuine failures.
 - **GIVEN** a settled task holding `(W, ext-1)`, **WHEN** a client POSTs a create
   with `external_id: ext-1` and a `repositories` entry naming a repository that
   no longer exists, **THEN** the outcome depends on where that validation lives:
@@ -657,12 +741,17 @@ create-time condition into unrelated surfaces.
 - **GIVEN** a create for `ext-1` whose identity is **released** by another actor
   after the row commit but before settlement, **WHEN** settlement runs, **THEN**
   it affects **zero** rows — the `external_id` predicate no longer matches — no
-  asynchronous work is dispatched, and the response does not claim
-  `creation_complete: true` for an identity the task no longer holds.
+  asynchronous work is dispatched, and the response is `200` with
+  `deduplicated: false`, `creation_complete: false`, and **no** `external_id`
+  field, i.e. outcome `CreatedIdentityLost`.
+- **GIVEN** the same released-before-settlement race, **WHEN** the caller
+  inspects the response, **THEN** it can distinguish this from
+  `Found, unsettled` by `deduplicated: false`, and from `Created` by the absent
+  `external_id`.
 - **GIVEN** a create for `ext-1` whose **task is deleted** by another actor
   before settlement, **WHEN** settlement runs, **THEN** it affects zero rows, no
-  asynchronous work is dispatched, and the response is the appropriate not-found
-  error rather than a fabricated success.
+  asynchronous work is dispatched, and the response is the surface's existing
+  not-found error rather than a fabricated success.
 - **GIVEN** any settlement that affects zero rows, **WHEN** the handler
   continues, **THEN** no agent is launched and no PR association is started.
 
@@ -843,7 +932,9 @@ enable. Each is additive.
 - **Any timeout or expiry on an unsettled task.**
 - **A tombstone for deleted identities.** See *Idempotency is scoped to the
   task's lifetime*.
-- **An MCP lookup tool.** MCP callers probe via a side-effect-free create.
+- **An MCP lookup tool.** MCP gets an idempotent create-if-absent, not a probe;
+  no in-scope MCP flow needs to ask without being willing to create. Adding a
+  read-only tool later is small and additive.
 - **Changing an external ID in place.** Write-once; re-key via release + create.
 - **System-generated external IDs.**
 - **Idempotency for anything other than task creation.** `spawn_session_kandev`
