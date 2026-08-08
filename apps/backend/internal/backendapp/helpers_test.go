@@ -57,10 +57,11 @@ func TestRegisterTaskRoutesWiresProductionWorkspaceRestorer(t *testing.T) {
 	if err != nil || len(steps) == 0 {
 		t.Fatalf("ListStepsByWorkflow: steps=%d err=%v", len(steps), err)
 	}
-	task, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	taskResult, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID: workspaces[0].ID, WorkflowID: workflows[0].ID,
 		WorkflowStepID: steps[0].ID, Title: "Production unarchive wiring",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -460,12 +461,13 @@ func TestBootInitialStateHomeIncludesKanbanFirstPaintState(t *testing.T) {
 	if len(steps) == 0 {
 		t.Fatal("expected seeded default workflow step")
 	}
-	task, err := taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	taskResult, err := taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID:    workspaces[0].ID,
 		WorkflowID:     workflows[0].ID,
 		WorkflowStepID: steps[0].ID,
 		Title:          "Boot home task",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -736,13 +738,14 @@ func TestBootRouteDataTaskDetailIncludesTaskPageData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListStepsByWorkflow: %v", err)
 	}
-	task, err := taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	taskResult, err := taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID:    workspaces[0].ID,
 		WorkflowID:     workflows[0].ID,
 		WorkflowStepID: steps[0].ID,
 		Title:          "Boot detail task",
 		Description:    "Should be present before React mounts",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -813,12 +816,13 @@ func TestBootPayloadMissingTaskFallsBackToHomeKanbanState(t *testing.T) {
 	if err != nil || len(steps) == 0 {
 		t.Fatalf("ListStepsByWorkflow: count=%d err=%v", len(steps), err)
 	}
-	task, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	taskResult, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID:    workspaces[0].ID,
 		WorkflowID:     workflows[0].ID,
 		WorkflowStepID: steps[0].ID,
 		Title:          "Visible sibling task",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -916,12 +920,13 @@ func TestBootPayloadValidTaskKeepsRouteSpecificState(t *testing.T) {
 	if err != nil || len(steps) == 0 {
 		t.Fatalf("ListStepsByWorkflow: count=%d err=%v", len(steps), err)
 	}
-	task, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	taskResult, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID:    workspaces[0].ID,
 		WorkflowID:     workflows[0].ID,
 		WorkflowStepID: steps[0].ID,
 		Title:          "Valid detail task",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -960,11 +965,12 @@ func TestBootTaskDetailMessagesProjectShellOutput(t *testing.T) {
 	if err != nil || len(workspaces) == 0 {
 		t.Fatalf("ListWorkspaces: %v", err)
 	}
-	task, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	taskResult, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID: workspaces[0].ID,
 		Title:       "Shell output projection",
 		IsEphemeral: true,
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -1029,10 +1035,11 @@ func TestBootRouteDataTaskDetailIncludesPersistedSessionModels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListStepsByWorkflow: %v", err)
 	}
-	task, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	taskResult, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID: workspaces[0].ID, WorkflowID: workflows[0].ID,
 		WorkflowStepID: steps[0].ID, Title: "Hydrated model selector",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -1117,10 +1124,11 @@ func TestBootRouteDataTaskDetailIncludesPersistedTurns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListStepsByWorkflow: %v", err)
 	}
-	task, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	taskResult, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID: workspaces[0].ID, WorkflowID: workflows[0].ID,
 		WorkflowStepID: steps[0].ID, Title: "Hydrated turn snapshot",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -1202,13 +1210,14 @@ func TestBootRouteDataTasksIncludesFirstPageRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListStepsByWorkflow: %v", err)
 	}
-	created, err := taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	createdResult, err := taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID:    workspaces[0].ID,
 		WorkflowID:     workflows[0].ID,
 		WorkflowStepID: steps[0].ID,
 		Title:          "Tasks table row",
 		Description:    "Visible on first paint",
 	})
+	created := createdResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}

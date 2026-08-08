@@ -364,11 +364,12 @@ func TestLookupSession_NoPrimarySession_ReturnsNilNil(t *testing.T) {
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
 	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
 	// Task created without an agent → no primary session row.
-	task, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-1",
 		Title:       "Sessionless task",
 	})
+	task := taskResult.Task
 	require.NoError(t, err)
 
 	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
@@ -525,11 +526,12 @@ func TestHandleArchiveTask_AlreadyArchived_IsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
 	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
-	task, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-1",
 		Title:       "Archive me",
 	})
+	task := taskResult.Task
 	require.NoError(t, err)
 
 	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}

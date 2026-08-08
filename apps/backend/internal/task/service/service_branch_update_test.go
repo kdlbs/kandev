@@ -67,10 +67,11 @@ func TestUpdateRepositoryBaseBranch_ResetsSessionBases(t *testing.T) {
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
 	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "frontend", DefaultBranch: "main"})
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "Sessions",
 		Repositories: []TaskRepositoryInput{{RepositoryID: "repo-1", BaseBranch: "main", CheckoutBranch: "feature/x"}},
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -117,7 +118,7 @@ func TestUpdateRepositoryBaseBranch_PersistsAndPushes(t *testing.T) {
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
 	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "frontend", DefaultBranch: "main"})
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID:    "ws-1",
 		WorkflowID:     "wf-1",
 		WorkflowStepID: "step-1",
@@ -126,6 +127,7 @@ func TestUpdateRepositoryBaseBranch_PersistsAndPushes(t *testing.T) {
 			{RepositoryID: "repo-1", BaseBranch: "main", CheckoutBranch: "feature/a"},
 		},
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -194,7 +196,7 @@ func TestUpdateRepositoryBaseBranch_NoChangeSkipsWork(t *testing.T) {
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
 	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "frontend", DefaultBranch: "main"})
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID:    "ws-1",
 		WorkflowID:     "wf-1",
 		WorkflowStepID: "step-1",
@@ -203,6 +205,7 @@ func TestUpdateRepositoryBaseBranch_NoChangeSkipsWork(t *testing.T) {
 			{RepositoryID: "repo-1", BaseBranch: "main", CheckoutBranch: "feature/a"},
 		},
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -242,10 +245,11 @@ func TestUpdateRepositoryBaseBranch_RejectsUnsafeRefs(t *testing.T) {
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
 	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "frontend", DefaultBranch: "main"})
 
-	task, _ := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, _ := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "T",
 		Repositories: []TaskRepositoryInput{{RepositoryID: "repo-1", BaseBranch: "main"}},
 	})
+	task := taskResult.Task
 	rows, _ := repo.ListTaskRepositories(ctx, task.ID)
 
 	for _, bad := range []string{"-upload-pack=evil", "main;rm -rf", "branch with space", "/leading-slash"} {
@@ -273,7 +277,7 @@ func TestUpdateRepositoryBaseBranch_NotFound(t *testing.T) {
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
 	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "frontend", DefaultBranch: "main"})
 
-	task, _ := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, _ := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID:    "ws-1",
 		WorkflowID:     "wf-1",
 		WorkflowStepID: "step-1",
@@ -282,6 +286,7 @@ func TestUpdateRepositoryBaseBranch_NotFound(t *testing.T) {
 			{RepositoryID: "repo-1", BaseBranch: "main"},
 		},
 	})
+	task := taskResult.Task
 	rows, _ := repo.ListTaskRepositories(ctx, task.ID)
 
 	t.Run("unknown row id", func(t *testing.T) {
@@ -326,7 +331,7 @@ func TestUpdateRepositoryBaseBranch_PartialHydrationIsNotPushed(t *testing.T) {
 	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "frontend", DefaultBranch: "main"})
 	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-2", WorkspaceID: "ws-1", Name: "backend", DefaultBranch: "main"})
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID:    "ws-1",
 		WorkflowID:     "wf-1",
 		WorkflowStepID: "step-1",
@@ -336,6 +341,7 @@ func TestUpdateRepositoryBaseBranch_PartialHydrationIsNotPushed(t *testing.T) {
 			{RepositoryID: "repo-2", BaseBranch: "main", CheckoutBranch: "feature/b"},
 		},
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -395,7 +401,7 @@ func TestUpdateRepositoryBaseBranch_MultiBranchKeysPerWorktree(t *testing.T) {
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
 	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "frontend", DefaultBranch: "main"})
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID:    "ws-1",
 		WorkflowID:     "wf-1",
 		WorkflowStepID: "step-1",
@@ -405,6 +411,7 @@ func TestUpdateRepositoryBaseBranch_MultiBranchKeysPerWorktree(t *testing.T) {
 			{RepositoryID: "repo-1", BaseBranch: "main", CheckoutBranch: "feature/b"},
 		},
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -467,13 +474,14 @@ func TestCollectTaskBaseBranches_SanitizesRepositoryName(t *testing.T) {
 	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "my repo", DefaultBranch: "main"})
 	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-2", WorkspaceID: "ws-1", Name: "backend", DefaultBranch: "main"})
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "Unsanitised name",
 		Repositories: []TaskRepositoryInput{
 			{RepositoryID: "repo-1", BaseBranch: "main", CheckoutBranch: "feature/a"},
 			{RepositoryID: "repo-2", BaseBranch: "develop", CheckoutBranch: "feature/b"},
 		},
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}

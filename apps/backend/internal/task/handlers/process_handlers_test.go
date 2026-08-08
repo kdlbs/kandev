@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -150,6 +151,15 @@ func (m *mockRepository) IncrementTaskSequence(_ context.Context, _ string) (int
 }
 func (m *mockRepository) GetWorkspaceTaskPrefix(_ context.Context, _ string) (string, string, error) {
 	return "KAN", "", nil
+}
+func (m *mockRepository) GetTaskByExternalID(_ context.Context, _, _ string) (*models.Task, error) {
+	return nil, taskrepo.ErrTaskNotFound
+}
+func (m *mockRepository) SettleTaskExternalID(_ context.Context, _, _ string, _ time.Time) (bool, error) {
+	return false, nil
+}
+func (m *mockRepository) ReleaseTaskExternalID(_ context.Context, _, _ string) (bool, error) {
+	return false, nil
 }
 func (m *mockRepository) CreateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error {
 	return nil

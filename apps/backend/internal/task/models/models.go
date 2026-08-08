@@ -603,6 +603,16 @@ type Task struct {
 	Labels                 string `json:"labels,omitempty"`     // JSON array string, default "[]"
 	Identifier             string `json:"identifier,omitempty"` // e.g. "KAN-42"
 
+	// ExternalID is a caller-supplied identity used for create-idempotency
+	// (docs/specs/tasks/external-id-idempotency/spec.md). Empty when the task
+	// holds none. Unique per (workspace_id, external_id) when non-empty.
+	ExternalID string `json:"external_id,omitempty"`
+	// ExternalIDSettledAt is non-nil once the create that claimed ExternalID
+	// finished its required synchronous work. Nil means unsettled — the
+	// claiming create may still be in progress. Both fields are cleared
+	// together on release.
+	ExternalIDSettledAt *time.Time `json:"external_id_settled_at,omitempty"`
+
 	// IsFromOffice is a read-time projection set by the task repo's SELECT
 	// (see isFromOfficeProjection in repository/sqlite/task.go). True when
 	// the task is owned by office: either it has a non-empty ProjectID, or
