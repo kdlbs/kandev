@@ -11,6 +11,8 @@ func DefaultPrepareScript(executorType string) string {
 		return defaultDockerPrepareScript
 	case "sprites":
 		return defaultSpritesPrepareScript
+	case "ssh":
+		return defaultSSHPrepareScript
 	default:
 		return ""
 	}
@@ -181,4 +183,67 @@ echo "Starting agent controller..."
 {{kandev.agentctl.install}}
 {{kandev.agentctl.start}}
 echo "Prepare complete."
+`
+
+//nolint:dupword // repeated shell `fi` tokens close distinct control-flow blocks.
+const defaultSSHPrepareScript = `#!/bin/bash
+# Prepare an SSH task workspace on the remote host.
+# The script runs before the per-session agentctl instance starts.
+
+set -euo pipefail
+
+workspace={{workspace.path}}
+repository_url={{repository.clone_url}}
+repository_branch={{repository.branch}}
+
+# ---- Configure git/gh authentication ----
+{{github.auth_setup}}
+
+# ---- Git identity ----
+{{git.identity_setup}}
+
+mkdir -p "$workspace"
+
+# ---- Materialize or reuse the primary repository ----
+# The task directory already contains .kandev session files, so initialize the
+# repository in place rather than using git clone into a non-empty directory.
+if [ -n "$repository_url" ]; then
+  if git -C "$workspace" rev-parse --git-dir >/dev/null 2>&1; then
+    configured_url=$(git -C "$workspace" config --get remote.origin.url 2>/dev/null || true)
+    if [ -z "$configured_url" ]; then
+      git -C "$workspace" remote add origin "$repository_url"
+    elif [ "$configured_url" != "$repository_url" ]; then
+      echo 'kandev: target origin identity conflict' >&2
+      exit 1
+    fi
+  else
+    git init -q "$workspace"
+    git -C "$workspace" remote add origin "$repository_url"
+  fi
+
+  git_dir=$(git -C "$workspace" rev-parse --absolute-git-dir)
+  exclude_file="$git_dir/info/exclude"
+  mkdir -p "$(dirname "$exclude_file")"
+  touch "$exclude_file"
+  grep -Fqx '/.kandev/' "$exclude_file" || printf '%s\n' '/.kandev/' >>"$exclude_file"
+
+  if [ -z "$repository_branch" ]; then
+    echo 'kandev: target repository has no base branch' >&2
+    exit 1
+  fi
+  if ! git -C "$workspace" fetch --no-tags origin "+refs/heads/$repository_branch:refs/remotes/origin/$repository_branch" >/dev/null 2>&1; then
+    echo 'kandev: target base branch is unavailable' >&2
+    exit 1
+  fi
+  # A reused checkout keeps its current branch, local commits, and untracked
+  # files. Only an empty repository needs its initial branch created.
+  if ! git -C "$workspace" rev-parse --verify HEAD >/dev/null 2>&1; then
+    git -C "$workspace" checkout -b "$repository_branch" "origin/$repository_branch"
+  fi
+fi
+
+cd "$workspace"
+
+# ---- Repository setup (if configured) ----
+{{repository.setup_script}}
 `
