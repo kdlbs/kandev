@@ -161,6 +161,24 @@ describe("MRTopbarButton desktop review opener — layout settling", () => {
     expect(dockviewMocks.addMRPanel.mock.calls.length).toBe(callsAfterClick);
   });
 
+  it("retains the intent when a stale env id makes the layout look settled mid-remount", () => {
+    // `setApi(null)` does not reset `currentLayoutEnvId`, so navigating between
+    // tasks leaves the previous env id in place while the new dockview mounts.
+    // "Settled" must not be trusted on its own — without the dockviewReady
+    // check the click would be dropped and no later API init could open it.
+    dockviewMocks.set({ api: null, currentLayoutEnvId: "stale-env", isRestoringLayout: false });
+    render(createElement(MRTopbarButton));
+    act(() => {
+      fireEvent.click(screen.getByTestId(TRIGGER_TESTID));
+    });
+    expect(dockviewMocks.addMRPanel).not.toHaveBeenCalled();
+
+    act(() => {
+      dockviewMocks.set({ api: {}, currentLayoutEnvId: "env-1" });
+    });
+    expect(dockviewMocks.addMRPanel).toHaveBeenCalled();
+  });
+
   it("defers the open until dockview exists when clicked before onReady", () => {
     dockviewMocks.set({ api: null });
     render(createElement(MRTopbarButton));

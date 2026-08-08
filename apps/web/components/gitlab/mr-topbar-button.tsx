@@ -257,14 +257,14 @@ function useMRDesktopReviewOpener(mobile: boolean) {
   const [pendingDesktopMR, setPendingDesktopMR] = useState<TaskMR | null>(null);
 
   useEffect(() => {
-    if (!dockviewReady || isRestoringLayout || !pendingDesktopMR) return;
+    if (!dockviewReady || !layoutSettled || !pendingDesktopMR) return;
+    // Only re-apply once the layout has actually settled: at that point no
+    // switchEnvLayout restore can land afterwards and discard this add. The
+    // intent is cleared here so a later user-initiated layout change (preset
+    // switch, maximize) cannot resurrect a panel the user has since closed.
     openDesktopMRReview(addMRPanel, pendingDesktopMR);
-    // Hold the intent until the env layout has settled so a restore landing
-    // after this add re-opens the panel. Clearing it on the first settle keeps
-    // a later user-initiated layout change (preset switch, maximize) from
-    // resurrecting a panel the user has since closed.
-    if (layoutSettled) setPendingDesktopMR(null);
-  }, [addMRPanel, dockviewReady, isRestoringLayout, layoutSettled, pendingDesktopMR]);
+    setPendingDesktopMR(null);
+  }, [addMRPanel, dockviewReady, layoutSettled, pendingDesktopMR]);
 
   return (mr: TaskMR) => {
     if (mobile) {
@@ -273,11 +273,12 @@ function useMRDesktopReviewOpener(mobile: boolean) {
     }
     // Open straight away when we can, so the panel appears on click rather
     // than after the session finishes loading — but never into a layout that
-    // is being replaced right now. Keeping the intent pending while the layout
-    // is unsettled is what makes it survive the env-switch restore; the effect
-    // above re-applies and then clears it.
+    // is being replaced right now. Retain the intent until dockview exists AND
+    // the env layout has settled: `currentLayoutEnvId` outlives `setApi(null)`,
+    // so a stale env id can leave `layoutSettled` true while dockview is still
+    // remounting, and dropping the intent there would lose the click entirely.
     if (dockviewReady && !isRestoringLayout) openDesktopMRReview(addMRPanel, mr);
-    if (!layoutSettled) setPendingDesktopMR(mr);
+    if (!dockviewReady || !layoutSettled) setPendingDesktopMR(mr);
   };
 }
 
