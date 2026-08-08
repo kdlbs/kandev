@@ -378,10 +378,6 @@ test.describe("Session tab management — primary session persistence", () => {
     await expect(session.contextMenuItem("Set as Primary")).toBeVisible({ timeout: 5_000 });
     await session.contextMenuItem("Set as Primary").click();
 
-    await expect(
-      testPage.getByTestId("toast-message").filter({ hasText: "Set primary" }),
-    ).toHaveCount(0);
-
     await expect
       .poll(
         async () => {
@@ -391,6 +387,10 @@ test.describe("Session tab management — primary session persistence", () => {
         { timeout: 10_000, message: "Waiting for primary set in backend" },
       )
       .toBe(true);
+
+    await expect(
+      testPage.getByTestId("toast-message").filter({ hasText: "Set primary" }),
+    ).toHaveCount(0);
 
     await expect(starInTab(session, session2Id)).toBeVisible({ timeout: 5_000 });
     await expect(starInTab(session, session1Id)).not.toBeVisible({ timeout: 5_000 });
