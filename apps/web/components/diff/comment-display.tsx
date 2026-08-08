@@ -94,7 +94,7 @@ export function CommentDisplay({
   onEdit,
   onRun,
   showCode = false,
-  compact = false,
+  compact = false, delete 
 }: CommentDisplayProps) {
   const { t } = useTranslation();
   const lineRange = formatLineRange(comment.startLine, comment.endLine);
