@@ -47,3 +47,20 @@ func TestDiskPercentReturnsWhenContextCancelsWhileStatfsBlocks(t *testing.T) {
 		t.Fatal("diskPercent did not return after context cancellation")
 	}
 }
+
+func TestDiskUsageReturnsCapacityFields(t *testing.T) {
+	original := statfs
+	statfs = func(_ string, stat *syscall.Statfs_t) error {
+		*stat = syscall.Statfs_t{Blocks: 1000, Bsize: 1, Bavail: 250}
+		return nil
+	}
+	t.Cleanup(func() { statfs = original })
+
+	capacity, err := DiskUsage(context.Background(), "/data")
+	if err != nil {
+		t.Fatalf("DiskUsage: %v", err)
+	}
+	if capacity.TotalBytes != 1000 || capacity.AvailableBytes != 250 || capacity.UsedBytes != 750 || capacity.UsedPercent != 75 {
+		t.Fatalf("capacity = %#v, want total=1000 available=250 used=750 percent=75", capacity)
+	}
+}

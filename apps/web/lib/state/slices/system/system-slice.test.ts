@@ -137,6 +137,7 @@ describe("system storage slice", () => {
     expect(store.getState().system.storage).toEqual({
       policy,
       overview,
+      disk: null,
       runs: [],
       quarantine: [],
     });

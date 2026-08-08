@@ -30,6 +30,11 @@ type ResourceSettings struct {
 	Enabled bool `json:"enabled"`
 }
 
+type WorkspaceSettings struct {
+	Enabled                  bool `json:"enabled"`
+	DependencyCleanupEnabled bool `json:"dependency_cleanup_enabled"`
+}
+
 type GoCacheSettings struct {
 	Enabled     bool   `json:"enabled"`
 	MaxBytes    int64  `json:"max_bytes"`
@@ -46,15 +51,15 @@ type DockerSettings struct {
 }
 
 type StorageMaintenanceSettings struct {
-	Enabled                  bool             `json:"enabled"`
-	CheckIntervalHours       int              `json:"check_interval_hours"`
-	IdleForMinutes           int              `json:"idle_for_minutes"`
-	OrphanGraceHours         int              `json:"orphan_grace_hours"`
-	QuarantineRetentionHours int              `json:"quarantine_retention_hours"`
-	Workspaces               ResourceSettings `json:"workspaces"`
-	KandevContainers         ResourceSettings `json:"kandev_containers"`
-	GoCache                  GoCacheSettings  `json:"go_cache"`
-	Docker                   DockerSettings   `json:"docker"`
+	Enabled                  bool              `json:"enabled"`
+	CheckIntervalHours       int               `json:"check_interval_hours"`
+	IdleForMinutes           int               `json:"idle_for_minutes"`
+	OrphanGraceHours         int               `json:"orphan_grace_hours"`
+	QuarantineRetentionHours int               `json:"quarantine_retention_hours"`
+	Workspaces               WorkspaceSettings `json:"workspaces"`
+	KandevContainers         ResourceSettings  `json:"kandev_containers"`
+	GoCache                  GoCacheSettings   `json:"go_cache"`
+	Docker                   DockerSettings    `json:"docker"`
 }
 
 func DefaultSettings() StorageMaintenanceSettings {
@@ -63,7 +68,7 @@ func DefaultSettings() StorageMaintenanceSettings {
 		IdleForMinutes:           10,
 		OrphanGraceHours:         168,
 		QuarantineRetentionHours: 168,
-		Workspaces:               ResourceSettings{Enabled: true},
+		Workspaces:               WorkspaceSettings{Enabled: true},
 		KandevContainers:         ResourceSettings{Enabled: true},
 		GoCache: GoCacheSettings{
 			MaxBytes: 16106127360,

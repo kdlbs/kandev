@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   purge: vi.fn(),
   fetchJob: vi.fn(),
   fetchOverview: vi.fn(),
+  fetchDisk: vi.fn(),
   fetchPolicy: vi.fn(),
   fetchQuarantine: vi.fn(),
   fetchRuns: vi.fn(),
@@ -36,6 +37,7 @@ vi.mock("@/lib/api/domains/system-api", () => ({
   purgeStorageQuarantine: mocks.purge,
   fetchSystemJob: mocks.fetchJob,
   fetchStorageOverview: mocks.fetchOverview,
+  fetchStorageDisk: mocks.fetchDisk,
   fetchStoragePolicy: mocks.fetchPolicy,
   fetchStorageQuarantine: mocks.fetchQuarantine,
   fetchStorageRuns: mocks.fetchRuns,
@@ -93,6 +95,15 @@ const overview: StorageOverviewResponse = {
   last_run: null,
 };
 
+const disk = {
+  path: "/data",
+  total_bytes: 100,
+  used_bytes: 80,
+  available_bytes: 20,
+  used_percent: 80,
+  available: true,
+};
+
 const cleanupJobId = "cleanup-job";
 const cleanupJob = {
   id: cleanupJobId,
@@ -120,6 +131,7 @@ function wrapper({ children }: { children: ReactNode }) {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.fetchOverview.mockResolvedValue(overview);
+  mocks.fetchDisk.mockResolvedValue(disk);
   mocks.fetchPolicy.mockResolvedValue({
     settings: overview.settings,
     capabilities: overview.capabilities,
@@ -146,6 +158,7 @@ describe("useStorageMaintenance", () => {
       runs: false,
       quarantine: false,
       overview: true,
+      disk: false,
     });
     expect(result.current.overview).toBeNull();
 
@@ -162,6 +175,7 @@ describe("useStorageMaintenance", () => {
     await waitFor(() => expect(result.current.overview).toEqual(overview));
     expect(mocks.fetchRuns).toHaveBeenCalledWith(20);
     expect(mocks.fetchQuarantine).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchDisk).toHaveBeenCalledTimes(1);
     expect(result.current.pendingAction).toBeNull();
   });
 

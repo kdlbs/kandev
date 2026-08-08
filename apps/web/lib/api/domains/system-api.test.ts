@@ -35,6 +35,7 @@ import {
   analyzeStorage,
   deleteStorageQuarantine,
   fetchStorageOverview,
+  fetchStorageDisk,
   fetchStoragePolicy,
   fetchStorageQuarantine,
   fetchStorageRuns,
@@ -427,6 +428,25 @@ describe("storage maintenance", () => {
     expect((await fetchStorageRuns())[0]?.id).toBe("run-1");
     expect(lastCall().url).toBe(`${BASE}/storage/runs?limit=20`);
     expect((await fetchStorageQuarantine())[0]?.id).toBe("entry-1");
+  });
+
+  it("loads disk capacity independently without caching", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        path: "/data",
+        total_bytes: 1000,
+        used_bytes: 800,
+        available_bytes: 200,
+        used_percent: 80,
+        available: true,
+      }),
+    );
+
+    const response = await fetchStorageDisk();
+
+    expect(lastCall().url).toBe(`${BASE}/storage/disk`);
+    expect(lastCall().init?.cache).toBe("no-store");
+    expect(response.used_percent).toBe(80);
   });
 
   it("saves dedicated Docker acknowledgement with its confirmation", async () => {

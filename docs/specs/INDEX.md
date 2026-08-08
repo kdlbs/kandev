@@ -207,6 +207,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 |---|---|
 | [system-page](system-page/spec.md) | draft |
 | [storage-maintenance](system-page/storage-maintenance.md) | building |
+| [storage-overview-parallel-scan](system-page/storage-overview-parallel-scan.md) | shipped |
 | [feature-toggles](feature-toggles/spec.md) | draft |
 
 ---
