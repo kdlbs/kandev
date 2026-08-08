@@ -2,8 +2,12 @@ package github
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 )
 
 // seedUnwatchedTaskPR inserts a linked TaskPR row that no watch points at,
@@ -157,11 +161,18 @@ func TestRefreshStaleWorkspaceWatches_HealsUnwatchedRow(t *testing.T) {
 		t.Fatalf("CreatePRWatch: %v", err)
 	}
 
+	// Subscribe before triggering: the published event is the observable side
+	// effect of the row being written, so it's a deterministic join.
+	updated := subscribeTaskPRUpdated(t, svc)
+
 	// ListWorkspaceTaskPRs derives this stale set from last_synced_at and then
 	// hands it to the background goroutine; the join it uses needs the real
 	// tasks schema, so drive the goroutine directly.
 	svc.refreshStaleWorkspaceWatches(testWorkspaceID, map[string]struct{}{"task-1": {}})
-	waitForWorkspaceRefresh(t, svc, testWorkspaceID)
+	awaitTaskPRUpdated(t, updated)
+	// Drain the goroutine before the in-memory DB closes. Stop() cancels
+	// stopCtx, so it has to come after the write we just observed.
+	svc.Stop()
 
 	got, err := store.GetTaskPRByRepoAndNumber(ctx, "task-1", "repo-1", 1293)
 	if err != nil {
@@ -169,6 +180,100 @@ func TestRefreshStaleWorkspaceWatches_HealsUnwatchedRow(t *testing.T) {
 	}
 	if got == nil || got.State != prStateMerged {
 		t.Fatalf("expected background refresh to reach %q for the unwatched PR, got %+v", prStateMerged, got)
+	}
+}
+
+// TestUnwatchedReconcile_FallsBackPerPRWhenBatchFails covers the branch a
+// GraphQL-capable client takes when the batch query itself fails (auth blip,
+// network error): graphQLExecutorFor succeeds, runBatchedPRQuery does not, and
+// the per-PR GetPR path has to carry the reconcile.
+func TestUnwatchedReconcile_FallsBackPerPRWhenBatchFails(t *testing.T) {
+	_, svc, gh, store := setupBatchedPollerTest(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", false)
+	seedUnwatchedTaskPR(t, store, "task-1", 1293, "feature/first")
+
+	// GraphQL-capable client whose batch query fails outright.
+	gh.prErr = errors.New("graphql unavailable")
+	now := time.Now().UTC()
+	mergedAt := now.Add(-10 * time.Minute)
+	gh.AddPR(&PR{
+		Number: 1293, Title: "Left behind", State: prStateMerged,
+		HTMLURL:    "https://github.com/owner/repo/pull/1293",
+		HeadBranch: "feature/first", BaseBranch: "main",
+		RepoOwner: "owner", RepoName: "repo",
+		CreatedAt: now.Add(-3 * time.Hour), UpdatedAt: mergedAt, MergedAt: &mergedAt,
+	})
+
+	if _, err := svc.TriggerPRSyncAll(ctx, "task-1"); err != nil {
+		t.Fatalf("TriggerPRSyncAll: %v", err)
+	}
+	if len(gh.prQueries) == 0 {
+		t.Fatal("expected the batched query to be attempted before the fallback")
+	}
+
+	got, err := store.GetTaskPRByRepoAndNumber(ctx, "task-1", "repo-1", 1293)
+	if err != nil || got == nil {
+		t.Fatalf("GetTaskPRByRepoAndNumber: err=%v row=%v", err, got)
+	}
+	if got.State != prStateMerged || got.MergedAt == nil {
+		t.Fatalf("per-PR fallback did not reconcile: state=%q merged_at=%v", got.State, got.MergedAt)
+	}
+}
+
+// TestUnwatchedReconcile_CoalescesConcurrentFetches locks the singleflight on
+// the unwatched batched fetch. The on-demand sync, the workspace background
+// refresh, and a second browser tab can all want the same ref set at once;
+// without coalescing each issues its own GraphQL call against the same gh
+// throttle.
+func TestUnwatchedReconcile_CoalescesConcurrentFetches(t *testing.T) {
+	_, svc, gh, store := setupBatchedPollerTest(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", false)
+	seedUnwatchedTaskPR(t, store, "task-1", 1293, "feature/first")
+
+	// Two canned responses so a second (unwanted) call fails the count
+	// assertion rather than starving on missing data.
+	gh.prResponses = []string{
+		batchedMergedPRResponse("feature/first", "2026-01-02T00:00:00Z"),
+		batchedMergedPRResponse("feature/first", "2026-01-02T00:00:00Z"),
+	}
+	started := make(chan struct{}, 4)
+	release := make(chan struct{})
+	gh.onExecute = func() {
+		started <- struct{}{}
+		<-release
+	}
+
+	done := make(chan struct{}, 2)
+	go func() { _, _ = svc.TriggerPRSyncAll(ctx, "task-1"); done <- struct{}{} }()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first reconcile never entered ExecuteGraphQL")
+	}
+
+	// Second caller must join the in-flight fetch rather than start its own.
+	go func() { _, _ = svc.TriggerPRSyncAll(ctx, "task-1"); done <- struct{}{} }()
+	select {
+	case <-started:
+		t.Fatal("second reconcile issued its own GraphQL call — singleflight broken")
+	case <-time.After(100 * time.Millisecond):
+		// Bounded negative assertion, per apps/backend/AGENTS.md.
+	}
+
+	close(release)
+	for i := 0; i < 2; i++ {
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("reconcile goroutines did not finish")
+		}
+	}
+
+	got, err := store.GetTaskPRByRepoAndNumber(ctx, "task-1", "repo-1", 1293)
+	if err != nil || got == nil || got.State != prStateMerged {
+		t.Fatalf("expected the shared flight to reconcile the row: err=%v row=%+v", err, got)
 	}
 }
 
@@ -187,18 +292,40 @@ func batchedMergedPRResponse(headBranch, mergedAt string) string {
 	}}}}`
 }
 
-// waitForWorkspaceRefresh blocks until the background refresh goroutine for
-// the workspace has cleared its singleflight key.
-func waitForWorkspaceRefresh(t *testing.T, svc *Service, workspaceID string) {
+// subscribeTaskPRUpdated returns a channel fed by github.task_pr.updated
+// events. Channel synchronization rather than a polling sleep: the background
+// refresh does no subprocess work, so its write is observable through the
+// event it publishes (see apps/backend/AGENTS.md, "Joining production
+// goroutines in tests").
+func subscribeTaskPRUpdated(t *testing.T, svc *Service) <-chan *TaskPR {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, busy := svc.inflightWorkspaceRefreshes.Load(workspaceID); !busy {
-			return
+	seen := make(chan *TaskPR, 4)
+	sub, err := svc.eventBus.Subscribe(events.GitHubTaskPRUpdated, func(_ context.Context, e *bus.Event) error {
+		tp, _ := e.Data.(*TaskPR)
+		select {
+		case seen <- tp:
+		default: // buffered channel full: the join only needs the first event
 		}
-		time.Sleep(5 * time.Millisecond)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("subscribe to %s: %v", events.GitHubTaskPRUpdated, err)
 	}
-	t.Fatalf("background refresh for %s never completed", workspaceID)
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+	return seen
+}
+
+// awaitTaskPRUpdated blocks until the reconcile publishes, failing fast rather
+// than letting a missing event stall the package's test timeout.
+func awaitTaskPRUpdated(t *testing.T, updated <-chan *TaskPR) *TaskPR {
+	t.Helper()
+	select {
+	case tp := <-updated:
+		return tp
+	case <-time.After(5 * time.Second):
+		t.Fatal("no github.task_pr.updated event published — reconcile never wrote the row")
+		return nil
+	}
 }
 
 // TestTriggerPRSyncAll_UnwatchedReconcilePreservesAggregates locks the scope

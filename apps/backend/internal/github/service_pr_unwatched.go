@@ -3,6 +3,8 @@ package github
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/events"
@@ -165,17 +167,59 @@ func (s *Service) fetchUnwatchedTaskPRs(
 		return nil
 	}
 	if exec, execErr := graphQLExecutorFor(resolved.Client); execErr == nil {
-		// Snapshot the negative-cache generation BEFORE the fetch so a
-		// concurrent eviction wins; see Service.markRepoAsMissing.
-		repoErrGen := s.repoErrorGenSnapshot()
-		out, err := runBatchedPRQuery(ctx, exec, refs)
-		out, err = s.absorbMissingReposErr(out, err, resolved.CacheScope, repoErrGen)
+		out, err := s.batchedUnwatchedFetch(ctx, exec, resolved.CacheScope, refs)
 		if err == nil {
 			return prsFromStatuses(out)
 		}
 		s.logger.Debug("batched unwatched task PR query failed; falling back per PR", zap.Error(err))
 	}
 	return s.fetchUnwatchedTaskPRsPerPR(ctx, resolved, refs)
+}
+
+// batchedUnwatchedFetch runs the batched query under the same service-level
+// singleflight the watch path uses (see fetchBatchedWatchStatuses). Without it
+// the on-demand sync, the workspace background refresh, and a second tab all
+// issue their own identical GraphQL call — the storm that singleflight exists
+// to damp. Keyed on the sorted ref set so equivalent callers share one flight,
+// and scoped by credential so two workspaces never share a result.
+//
+// The upstream fetch detaches from the leader's cancellation via
+// derivedFetchContext so one caller disconnecting mid-flight doesn't cascade
+// context.Canceled to its co-waiters, while keeping the leader's deadline.
+func (s *Service) batchedUnwatchedFetch(
+	ctx context.Context, exec GraphQLExecutor, cacheScope string, refs []graphQLPRRef,
+) (map[string]*PRStatus, error) {
+	key := scopedCacheKey(cacheScope, "unwatched:"+batchedRefsKey(refs))
+	fetchCtx, cancelFetch := derivedFetchContext(ctx)
+	defer cancelFetch()
+	v, err, _ := s.syncGroup.Do(key, func() (interface{}, error) {
+		// Snapshot the negative-cache generation BEFORE the fetch so a
+		// concurrent eviction wins; see Service.markRepoAsMissing.
+		repoErrGen := s.repoErrorGenSnapshot()
+		out, queryErr := runBatchedPRQuery(fetchCtx, exec, refs)
+		return s.absorbMissingReposErr(out, queryErr, cacheScope, repoErrGen)
+	})
+	if err != nil {
+		return nil, err
+	}
+	if v == nil {
+		return nil, nil
+	}
+	return v.(map[string]*PRStatus), nil
+}
+
+// batchedRefsKey renders a deterministic key for a numbered-ref set. Sorting
+// keeps caller ordering from splitting equivalent flights, and lowercasing
+// matches repoErrorCacheKey. Mirrors batchedFetchSingleflightKey, which builds
+// the same shape from watches.
+func batchedRefsKey(refs []graphQLPRRef) string {
+	parts := make([]string, 0, len(refs))
+	for _, r := range refs {
+		parts = append(parts, fmt.Sprintf("%s/%s#%d",
+			strings.ToLower(r.Owner), strings.ToLower(r.Repo), r.Number))
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, "|")
 }
 
 func prsFromStatuses(statuses map[string]*PRStatus) map[string]*PR {
