@@ -8,6 +8,7 @@ import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
+import type { InstallResult } from "@/lib/api/domains/plugins-api";
 import type { PluginRecord, SyncResult } from "@/lib/types/plugins";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }));
@@ -95,6 +96,8 @@ const PLUGIN_ID = "acme-tools";
 const NEW_PLUGIN_ID = "new-plugin";
 const SYNC_BUTTON_TESTID = "plugins-sync-button";
 const INSTALL_TRIGGER_TESTID = "install-plugin-trigger";
+const INSTALL_URL_INPUT_TESTID = "install-plugin-url-input";
+const INSTALL_URL_SUBMIT_TESTID = "install-plugin-url-submit";
 const NEW_PLUGIN_URL = "https://example.test/new-plugin-1.0.0.tar.gz";
 const UPLOAD_FILENAME = "new-plugin-1.0.0.tar.gz";
 
@@ -252,15 +255,41 @@ describe("PluginsSettingsPage", () => {
 });
 
 describe("PluginsSettingsPage install dialog", () => {
+  it("shows a spinner while a URL install is pending", async () => {
+    let resolveInstall!: (result: InstallResult) => void;
+    const pendingInstall = new Promise<InstallResult>((resolve) => {
+      resolveInstall = resolve;
+    });
+    installPluginFromUrlSpy.mockReturnValueOnce(pendingInstall);
+    setStoreState([]);
+
+    render(<PluginsSettingsPage />);
+    fireEvent.click(screen.getByTestId(INSTALL_TRIGGER_TESTID));
+    fireEvent.change(screen.getByTestId(INSTALL_URL_INPUT_TESTID), {
+      target: { value: NEW_PLUGIN_URL },
+    });
+    fireEvent.click(screen.getByTestId(INSTALL_URL_SUBMIT_TESTID));
+
+    await vi.waitFor(() => expect(installPluginFromUrlSpy).toHaveBeenCalledWith(NEW_PLUGIN_URL));
+    const submit = screen.getByTestId(INSTALL_URL_SUBMIT_TESTID);
+    expect((submit as HTMLButtonElement).disabled).toBe(true);
+    expect(submit.getAttribute("aria-busy")).toBe("true");
+    expect(submit.querySelector(".animate-spin")).not.toBeNull();
+    expect(submit.textContent).toMatch(/installing/i);
+
+    resolveInstall({ plugin: installedPlugin() });
+    await vi.waitFor(() => expect(screen.queryByTestId("install-plugin-dialog")).toBeNull());
+  });
+
   it("installs a plugin from a URL: calls the API, loads the bundle, and updates the store", async () => {
     setStoreState([]);
 
     render(<PluginsSettingsPage />);
     fireEvent.click(screen.getByTestId(INSTALL_TRIGGER_TESTID));
-    fireEvent.change(screen.getByTestId("install-plugin-url-input"), {
+    fireEvent.change(screen.getByTestId(INSTALL_URL_INPUT_TESTID), {
       target: { value: NEW_PLUGIN_URL },
     });
-    fireEvent.click(screen.getByTestId("install-plugin-url-submit"));
+    fireEvent.click(screen.getByTestId(INSTALL_URL_SUBMIT_TESTID));
 
     await vi.waitFor(() => expect(installPluginFromUrlSpy).toHaveBeenCalledWith(NEW_PLUGIN_URL));
     const upsertPlugin = storeState.upsertPlugin as ReturnType<typeof vi.fn>;
@@ -340,10 +369,10 @@ describe("PluginsSettingsPage install dialog state reset", () => {
 
     render(<PluginsSettingsPage />);
     fireEvent.click(screen.getByTestId(INSTALL_TRIGGER_TESTID));
-    fireEvent.change(screen.getByTestId("install-plugin-url-input"), {
+    fireEvent.change(screen.getByTestId(INSTALL_URL_INPUT_TESTID), {
       target: { value: NEW_PLUGIN_URL },
     });
-    fireEvent.click(screen.getByTestId("install-plugin-url-submit"));
+    fireEvent.click(screen.getByTestId(INSTALL_URL_SUBMIT_TESTID));
 
     await vi.waitFor(() =>
       expect(toast.warning).toHaveBeenCalledWith(
@@ -365,10 +394,10 @@ describe("PluginsSettingsPage install dialog state reset", () => {
 
     render(<PluginsSettingsPage />);
     fireEvent.click(screen.getByTestId(INSTALL_TRIGGER_TESTID));
-    fireEvent.change(screen.getByTestId("install-plugin-url-input"), {
+    fireEvent.change(screen.getByTestId(INSTALL_URL_INPUT_TESTID), {
       target: { value: "https://example.test/bad.tar.gz" },
     });
-    fireEvent.click(screen.getByTestId("install-plugin-url-submit"));
+    fireEvent.click(screen.getByTestId(INSTALL_URL_SUBMIT_TESTID));
 
     await vi.waitFor(() =>
       expect(screen.getByTestId("install-plugin-error").textContent).toMatch(/bad checksum/),
