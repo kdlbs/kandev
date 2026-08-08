@@ -39,8 +39,9 @@ task_review_runs
   session_id        string     nullable; session whose workspace supplied the diff
   trigger           enum       manual | workflow_step | agent
   workflow_step_id  string     nullable; set when trigger = workflow_step
-  agent_id          string     inference agent CLI id (e.g. "claude-acp"); "" when trigger = agent
-  model             string     model id used; "" when trigger = agent
+  agent_profile_id  string     effective profile used for execution; "" when trigger = agent
+  agent_id          string     resolved inference agent CLI snapshot; "" when trigger = agent
+  model             string     resolved model snapshot; "" when trigger = agent
   status            enum       pending | running | completed | failed | cancelled
   error_message     string     "" unless status = failed
   summary           string     optional agent-authored one-paragraph summary
@@ -96,7 +97,7 @@ Deleting a task deletes its runs and findings. Deleting a repository attachment 
 | `task.review.finding.update` | `{finding_id, status}` | `{finding: TaskReviewFinding}` |
 | `task.review.clear` | `{task_id}` | `{success: true}` |
 
-`task.review.run` rejects with `review_agent_unavailable` when no inference-capable agent and model can be resolved, and with `review_no_changes` when the task has no changed files. A second `task.review.run` for a task that already has a `pending` or `running` run returns that run unchanged instead of starting a second pass.
+`task.review.run` rejects with `review_agent_unavailable` when no effective agent profile can be resolved, and with `review_no_changes` when the task has no changed files. A second `task.review.run` for a task that already has a `pending` or `running` run returns that run unchanged instead of starting a second pass.
 
 ### WebSocket events (server → client)
 
