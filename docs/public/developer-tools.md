@@ -68,11 +68,11 @@ The built-in actions are:
 - `enhance-prompt`
 - `summarize-session`
 
-Set a global **Default utility agent model** by choosing an inference-capable agent and one of its models. Each built-in action can inherit that pair or override it, and its prompt template is editable. Kandev probes the agent for its live model list; refresh or retry when model discovery fails.
+Set a global **Default utility agent profile** by choosing an enabled, global, ACP inference profile. Each built-in action can inherit that profile or select another profile, and its prompt template is editable. The profile owns the agent, model, mode, launch flags, environment, and permission policy.
 
-You can also create a custom utility. Name, prompt, agent, and model are required; description is optional. Prompt fields offer autocomplete for supported `{{...}}` template variables. A per-action override must specify a usable agent/model pair; otherwise resolution falls back to the global pair. Buttons that depend on a utility are disabled or return an error when no valid model is available.
+You can also create a custom utility. Name, prompt, and profile are required; description is optional. Prompt fields offer autocomplete for supported `{{...}}` template variables. A stale, disabled, deleted, workspace-scoped, passthrough-only, or unconfigured profile fails closed. Repair the binding in Settings before running the utility again.
 
-Utility calls run as ephemeral processes on the Kandev backend host. Kandev records the resolved prompt, response, selected model, token counts when provided, duration, status, and error. The prompt can include repository, diff, task, or conversation context, so its content goes to the selected model provider. Apply the same credential, retention, and data-classification rules as a normal agent session.
+Utility calls run as ephemeral processes on the Kandev backend host. Kandev resolves one profile snapshot at call start, records its profile ID with the call, and applies its permissions without asking for interactive approval. If the profile does not auto-approve a permission request, the call is rejected promptly. Profile edits affect the next call; an in-flight call keeps its snapshot.
 
 ### Configuration Chat
 

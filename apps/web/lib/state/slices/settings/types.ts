@@ -53,6 +53,7 @@ export type AgentProfileOption = {
   agent_id: string;
   agent_name: string;
   cli_passthrough: boolean;
+  workspace_id?: string;
   /**
    * False hides the profile from task/session creation pickers. Existing
    * sessions keep their labels and the profile stays editable in settings.
@@ -75,7 +76,7 @@ export function isSelectableAgentProfile(profile: Pick<AgentProfileOption, "enab
 /** Single source of truth for mapping an API Agent+Profile to a store AgentProfileOption. */
 export function toAgentProfileOption(
   agent: Pick<Agent, "id" | "name" | "capability_status" | "capability_error">,
-  profile: Pick<AgentProfile, "id" | "agentDisplayName" | "name"> & {
+  profile: Pick<AgentProfile, "id" | "agentDisplayName" | "name" | "workspaceId"> & {
     cliPassthrough?: boolean;
     enabled?: boolean;
   },
@@ -86,6 +87,7 @@ export function toAgentProfileOption(
     agent_id: agent.id,
     agent_name: agent.name,
     cli_passthrough: profile.cliPassthrough ?? false,
+    workspace_id: profile.workspaceId,
     enabled: profile.enabled ?? true,
     capability_status: agent.capability_status,
     capability_error: agent.capability_error,

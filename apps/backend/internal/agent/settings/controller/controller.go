@@ -58,6 +58,7 @@ type Controller struct {
 	watcherDeps     WatcherDependencyChecker
 	routingTierDeps RoutingTierDependencyChecker
 	automationDeps  AutomationDependencyChecker
+	utilityDeps     UtilityDependencyChecker
 	mcpService      *mcpconfig.Service
 	modelCache      *modelfetcher.Cache
 	hostUtility     hostUtilityProvider
@@ -97,6 +98,12 @@ func (c *Controller) SetAutomationDependencyChecker(a AutomationDependencyChecke
 	c.automationDeps = a
 }
 
+// SetUtilityDependencyChecker wires utility-agent binding lookups used by
+// disable and delete confirmation flows.
+func (c *Controller) SetUtilityDependencyChecker(u UtilityDependencyChecker) {
+	c.utilityDeps = u
+}
+
 // ErrProfileInUseDetail is returned when a profile cannot be deleted because
 // active sessions or external integration watchers reference it. The UI uses
 // the breakdown to render a "this will also disable N watchers — continue?"
@@ -106,12 +113,22 @@ type ErrProfileInUseDetail struct {
 	Watchers       []WatcherReference
 	RoutingTiers   []RoutingTierReference
 	Automations    []AutomationReference
+	UtilityAgents  []UtilityAgentReference
 }
 
 func (e *ErrProfileInUseDetail) Error() string {
 	return fmt.Sprintf(
-		"agent profile is used by %d active session(s), %d watcher(s), %d routing tier(s), and %d automation(s)",
-		len(e.ActiveSessions), len(e.Watchers), len(e.RoutingTiers), len(e.Automations))
+		"agent profile is used by %d active session(s), %d watcher(s), %d routing tier(s), %d automation(s), and %d utility agent(s)",
+		len(e.ActiveSessions), len(e.Watchers), len(e.RoutingTiers), len(e.Automations), len(e.UtilityAgents))
+}
+
+type UtilityAgentReference struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type UtilityDependencyChecker interface {
+	ListUtilityAgentsByAgentProfile(context.Context, string) ([]UtilityAgentReference, error)
 }
 
 // WatcherReference points at one issue/PR watcher row that uses the profile
