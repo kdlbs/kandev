@@ -164,7 +164,7 @@ func (c *Client) warmFromDisk(ctx context.Context) {
 		}
 		// File missing on first boot — schedule a refresh; lookup
 		// returns miss this turn.
-		go c.refreshSafe(ctx)
+		c.startBackgroundRefresh(ctx)
 		return
 	}
 	buf, err := os.ReadFile(c.cachePath)
@@ -178,7 +178,7 @@ func (c *Client) warmFromDisk(ctx context.Context) {
 	c.loadedAt = stat.ModTime()
 	c.mu.Unlock()
 	if time.Since(stat.ModTime()) >= c.ttl {
-		go c.refreshSafe(ctx)
+		c.startBackgroundRefresh(context.WithoutCancel(ctx))
 	}
 }
 
@@ -230,31 +230,45 @@ func (c *Client) maybeRefresh(ctx context.Context) {
 	stale := c.loadedAt.IsZero() || time.Since(c.loadedAt) >= c.ttl
 	c.mu.RUnlock()
 	if stale {
-		go c.refreshSafe(ctx)
+		c.startBackgroundRefresh(context.WithoutCancel(ctx))
 	}
 }
 
-// refreshSafe wraps Refresh in a panic guard + warning log; safe to
-// run from a goroutine.
-func (c *Client) refreshSafe(ctx context.Context) {
-	defer func() {
-		if r := recover(); r != nil {
-			c.logger.Warn("models.dev refresh panicked", zap.Any("recover", r))
+// startBackgroundRefresh registers the refresh synchronously so every stale
+// lookup joins the same in-flight singleflight call before returning. The
+// result is still observed asynchronously, so stale lookups remain nonblocking.
+// Callers choose whether the refresh should inherit or detach from their context.
+func (c *Client) startBackgroundRefresh(ctx context.Context) {
+	result := c.refreshResult(ctx)
+	go func() {
+		if err := (<-result).Err; err != nil {
+			c.logger.Warn("models.dev refresh failed", zap.Error(err))
 		}
 	}()
-	if err := c.Refresh(ctx); err != nil {
-		c.logger.Warn("models.dev refresh failed", zap.Error(err))
-	}
 }
 
 // Refresh pulls the latest dataset from models.dev and atomically
 // swaps the cache file. Network or write errors leave the existing
 // file (and in-memory index) untouched.
 func (c *Client) Refresh(ctx context.Context) error {
-	_, err, _ := c.refreshGroup.Do("modelsdev-refresh", func() (interface{}, error) {
-		return nil, c.refreshPhysical(ctx)
+	result := c.refreshResult(ctx)
+	return (<-result).Err
+}
+
+func (c *Client) refreshResult(ctx context.Context) <-chan singleflight.Result {
+	return c.refreshGroup.DoChan("modelsdev-refresh", func() (interface{}, error) {
+		return c.refreshPhysicalSafely(ctx)
 	})
-	return err
+}
+
+func (c *Client) refreshPhysicalSafely(ctx context.Context) (value interface{}, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			c.logger.Warn("models.dev refresh panicked", zap.Any("recover", recovered))
+			err = fmt.Errorf("models.dev refresh panicked")
+		}
+	}()
+	return nil, c.refreshPhysical(ctx)
 }
 
 func (c *Client) refreshPhysical(ctx context.Context) error {

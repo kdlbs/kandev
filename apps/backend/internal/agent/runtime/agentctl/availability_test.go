@@ -3,7 +3,9 @@ package client
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -87,5 +89,74 @@ func TestAvailabilitySnapshotReadsAreSafeDuringTransition(t *testing.T) {
 	snapshot, ok := availability.Snapshot()
 	if !ok || snapshot.Status != AvailabilityStatusUnavailable {
 		t.Fatalf("final snapshot = %+v, published=%v", snapshot, ok)
+	}
+}
+
+func TestAvailabilityPublishesTransitionsInCommitOrder(t *testing.T) {
+	eventBus := bus.NewMemoryEventBus(newTestLogger())
+	t.Cleanup(eventBus.Close)
+	var published []AvailabilitySnapshot
+	var publishedMu sync.Mutex
+	firstPublishStarted := make(chan struct{})
+	releaseFirstPublish := make(chan struct{})
+	var publishCalls atomic.Int32
+	_, err := eventBus.Subscribe(events.AgentRuntimeAvailabilityChanged, func(_ context.Context, event *bus.Event) error {
+		if event.Data == nil {
+			return nil
+		}
+		if publishCalls.Add(1) == 1 {
+			close(firstPublishStarted)
+			<-releaseFirstPublish
+		}
+		snapshot, ok := event.Data.(AvailabilitySnapshot)
+		if !ok {
+			t.Fatalf("availability event data = %T, want AvailabilitySnapshot", event.Data)
+		}
+		publishedMu.Lock()
+		published = append(published, snapshot)
+		publishedMu.Unlock()
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("subscribe availability events: %v", err)
+	}
+
+	availability := NewAvailability(eventBus, newTestLogger())
+	availableDone := make(chan struct{})
+	go func() {
+		availability.MarkAvailable()
+		close(availableDone)
+	}()
+	<-firstPublishStarted
+
+	unavailableDone := make(chan struct{})
+	go func() {
+		availability.MarkUnavailable()
+		close(unavailableDone)
+	}()
+
+	select {
+	case <-unavailableDone:
+		t.Fatal("unavailable transition completed before available publication was released")
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	close(releaseFirstPublish)
+	select {
+	case <-availableDone:
+	case <-time.After(time.Second):
+		t.Fatal("available transition did not complete")
+	}
+	select {
+	case <-unavailableDone:
+	case <-time.After(time.Second):
+		t.Fatal("unavailable transition did not complete")
+	}
+
+	publishedMu.Lock()
+	defer publishedMu.Unlock()
+	if len(published) != 2 || published[0].Status != AvailabilityStatusAvailable ||
+		published[1].Status != AvailabilityStatusUnavailable {
+		t.Fatalf("published availability transitions = %+v, want available then unavailable", published)
 	}
 }

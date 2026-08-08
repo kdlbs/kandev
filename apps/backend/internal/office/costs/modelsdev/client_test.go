@@ -240,23 +240,20 @@ func TestClient_FirstBootMissesGracefully(t *testing.T) {
 }
 
 type requestGate struct {
-	server        *httptest.Server
-	started       chan struct{}
-	requestEvents chan struct{}
-	release       chan struct{}
-	requests      atomic.Int32
+	server   *httptest.Server
+	started  chan struct{}
+	release  chan struct{}
+	requests atomic.Int32
 }
 
 func newRequestGate(t *testing.T, body string) *requestGate {
 	t.Helper()
 	gate := &requestGate{
-		started:       make(chan struct{}),
-		requestEvents: make(chan struct{}, 128),
-		release:       make(chan struct{}),
+		started: make(chan struct{}),
+		release: make(chan struct{}),
 	}
 	gate.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		count := gate.requests.Add(1)
-		gate.requestEvents <- struct{}{}
 		if count == 1 {
 			close(gate.started)
 		}
@@ -277,29 +274,6 @@ func (g *requestGate) waitForFirstRequest(t *testing.T) {
 	case <-g.started:
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for the first models.dev request")
-	}
-}
-
-func (g *requestGate) waitForQuiet(t *testing.T) int32 {
-	t.Helper()
-	timer := time.NewTimer(100 * time.Millisecond)
-	defer timer.Stop()
-	for {
-		select {
-		case <-g.requestEvents:
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
-			timer.Reset(100 * time.Millisecond)
-		case <-timer.C:
-			return g.requests.Load()
-		case <-time.After(time.Second):
-			t.Fatal("timed out waiting for models.dev requests to settle")
-			return g.requests.Load()
-		}
 	}
 }
 
@@ -371,9 +345,67 @@ func TestClient_ConcurrentLookupsShareOneBackgroundFetch(t *testing.T) {
 	close(start)
 	wg.Wait()
 	gate.waitForFirstRequest(t)
+	if got := gate.requests.Load(); got != 1 {
+		t.Fatalf("background models.dev request count before release = %d, want 1", got)
+	}
+	refreshDone := make(chan error, 1)
+	go func() { refreshDone <- c.Refresh(context.Background()) }()
 	close(gate.release)
-	if got := gate.waitForQuiet(t); got != 1 {
+	select {
+	case err := <-refreshDone:
+		if err != nil {
+			t.Fatalf("joined background Refresh: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("joined background Refresh did not complete")
+	}
+	if got := gate.requests.Load(); got != 1 {
 		t.Fatalf("background models.dev request count = %d, want 1", got)
+	}
+}
+
+func TestClient_CanceledStaleLookupDoesNotCancelJoinedRefresh(t *testing.T) {
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "models-dev.json")
+	if err := os.WriteFile(cachePath, []byte(sampleDataset), 0o644); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(cachePath, old, old); err != nil {
+		t.Fatalf("age cache: %v", err)
+	}
+	gate := newRequestGate(t, sampleDataset)
+	c := modelsdev.New(modelsdev.Config{
+		CachePath:  cachePath,
+		URL:        gate.server.URL,
+		TTL:        time.Millisecond,
+		HTTPClient: gate.server.Client(),
+	}, logger.Default())
+
+	lookupCtx, cancelLookup := context.WithCancel(context.Background())
+	_, _ = c.LookupForModel(lookupCtx, "gpt-5.3-codex-spark")
+	gate.waitForFirstRequest(t)
+	cancelLookup()
+
+	refreshDone := make(chan error, 1)
+	go func() { refreshDone <- c.Refresh(context.Background()) }()
+	select {
+	case err := <-refreshDone:
+		t.Fatalf("joined refresh returned before the shared request completed: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	close(gate.release)
+	select {
+	case err := <-refreshDone:
+		if err != nil {
+			t.Fatalf("joined Refresh: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("joined Refresh did not complete")
+	}
+	if got := gate.requests.Load(); got != 1 {
+		t.Fatalf("models.dev request count after canceled lookup = %d, want 1", got)
 	}
 }
 

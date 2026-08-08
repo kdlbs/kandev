@@ -1,10 +1,7 @@
 import type { Page } from "@playwright/test";
+import type { AgentRuntimeAvailability } from "@/lib/types/agent-runtime";
 
-export type AgentRuntimeAvailabilitySnapshot = {
-  status: "available" | "unavailable";
-  reason?: "agentctl_exited";
-  occurred_at?: string;
-};
+export type AgentRuntimeAvailabilitySnapshot = AgentRuntimeAvailability;
 
 type E2EStoreWindow = Window & {
   __KANDEV_E2E_STORE__?: {

@@ -3,6 +3,7 @@ package websocket
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 
@@ -50,6 +51,30 @@ func TestAgentRuntimeNotificationsBroadcastAndReplaySanitizedState(t *testing.T)
 	if replayPayload["status"] != "unavailable" || replayPayload["reason"] != "agentctl_exited" {
 		t.Fatalf("replay payload = %#v", replayPayload)
 	}
+}
+
+func TestSystemEventBroadcasterCloseIsIdempotent(t *testing.T) {
+	log := testLoggerForUserNotifications(t)
+	eventBus := bus.NewMemoryEventBus(log)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	hub := newTestHub(t)
+	broadcaster := RegisterSystemNotifications(ctx, eventBus, hub, log)
+
+	var wg sync.WaitGroup
+	for index := 0; index < 16; index++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			broadcaster.Close()
+		}()
+	}
+	wg.Wait()
+
+	if len(broadcaster.subscriptions) != 0 {
+		t.Fatalf("subscriptions after concurrent Close = %d, want 0", len(broadcaster.subscriptions))
+	}
+	eventBus.Close()
 }
 
 func readNotification(t *testing.T, client *Client) ws.Message {

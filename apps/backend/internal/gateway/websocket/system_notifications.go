@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"context"
+	"sync"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
@@ -18,6 +19,7 @@ type SystemEventBroadcaster struct {
 	hub           *Hub
 	subscriptions []bus.Subscription
 	logger        *logger.Logger
+	closeOnce     sync.Once
 }
 
 // RegisterSystemNotifications wires the system event broadcaster onto the
@@ -83,12 +85,14 @@ func RegisterAgentRuntimeNotifications(
 
 // Close unsubscribes from all event-bus subscriptions.
 func (b *SystemEventBroadcaster) Close() {
-	for _, sub := range b.subscriptions {
-		if sub != nil && sub.IsValid() {
-			_ = sub.Unsubscribe()
+	b.closeOnce.Do(func() {
+		for _, sub := range b.subscriptions {
+			if sub != nil && sub.IsValid() {
+				_ = sub.Unsubscribe()
+			}
 		}
-	}
-	b.subscriptions = nil
+		b.subscriptions = nil
+	})
 }
 
 func (b *SystemEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action string) {

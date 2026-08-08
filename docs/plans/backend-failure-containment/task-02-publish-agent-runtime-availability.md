@@ -102,5 +102,5 @@ WebSocket delivery. Focused verification passed:
 
 ```text
 go test ./internal/agent/runtime/agentctl/... ./internal/backendapp ./internal/gateway/websocket
-561 passed in 4 packages
+562 passed in 4 packages
 ```

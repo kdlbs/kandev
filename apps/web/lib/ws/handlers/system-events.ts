@@ -1,5 +1,6 @@
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
+import { SYSTEM_AGENT_RUNTIME_STATUS_CHANGED } from "@/lib/types/backend";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import { handleBrowserLogCapture } from "@/lib/logger/capture";
 
@@ -14,7 +15,7 @@ export function registerSystemEventsHandlers(store: StoreApi<AppState>): WsHandl
     "system.metrics.updated": (message) => {
       store.getState().setSystemMetricsSnapshot(message.payload);
     },
-    "system.agent_runtime.status_changed": (message) => {
+    [SYSTEM_AGENT_RUNTIME_STATUS_CHANGED]: (message) => {
       store.getState().setAgentRuntime(message.payload);
     },
     "system.logs.capture_requested": (message) => {

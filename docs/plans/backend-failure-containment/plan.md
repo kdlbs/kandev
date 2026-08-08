@@ -210,7 +210,7 @@ explicitly authorizes planned implementation sessions.
 ## Validation commands
 
 - `cd apps/backend && go test -race ./internal/agentctl/types/streams ./internal/agentctl/server/adapter/transport/acp`
-- `cd apps/backend && go test ./internal/agent/runtime/agentctl/... ./internal/backendapp ./internal/gateway/websocket`
+- `cd apps/backend && go test -race ./internal/agent/runtime/agentctl/... ./internal/backendapp ./internal/gateway/websocket`
 - `cd apps/backend && go test -race ./internal/office/costs/modelsdev`
 - `cd apps/backend && go test -race -run 'TestReconcileSessionsOnStartup|TestStopReportsRuntimeAbsent|TestRowProcessLiveness' ./internal/orchestrator ./internal/agent/runtime/lifecycle ./internal/backendapp`
 - `cd apps/backend && go test -race ./internal/mentions ./internal/backendapp`
@@ -227,7 +227,7 @@ Run `pnpm install --frozen-lockfile` from `apps/` first if this worktree has no
 ## Integrated verification results
 
 All targeted backend race suites passed: ACP (803 tests), agent runtime and
-backend composition (561 tests), models.dev (50 tests), startup cleanup (42
+backend composition (562 tests), models.dev (51 tests), startup cleanup (42
 tests), and mentions/backend composition (430 tests). The complete narrow
 `golangci-lint` command reported no issues.
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createAppStore } from "@/lib/state/store";
+import { SYSTEM_AGENT_RUNTIME_STATUS_CHANGED } from "@/lib/types/backend";
 import type { AgentRuntimeAvailability } from "@/lib/types/agent-runtime";
 import { registerSystemEventsHandlers } from "./system-events";
 
@@ -24,9 +25,9 @@ describe("registerSystemEventsHandlers", () => {
     });
     const handlers = registerSystemEventsHandlers(store);
 
-    handlers["system.agent_runtime.status_changed"]?.({
+    handlers[SYSTEM_AGENT_RUNTIME_STATUS_CHANGED]?.({
       type: "notification",
-      action: "system.agent_runtime.status_changed",
+      action: SYSTEM_AGENT_RUNTIME_STATUS_CHANGED,
       payload: available,
     });
 

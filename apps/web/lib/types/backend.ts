@@ -2,6 +2,8 @@ import type { QueuedMessage } from "@/lib/state/slices/session/types";
 import type { TaskPlanEventPayload, TaskPlanRevisionEventPayload } from "./task-plan-events";
 import type { CaptureRequest } from "@/lib/logger/capture";
 
+export const SYSTEM_AGENT_RUNTIME_STATUS_CHANGED = "system.agent_runtime.status_changed" as const;
+
 export type BackendMessageType = keyof BackendMessageMap;
 
 export type { BackendMessage } from "./backend-message";
@@ -534,8 +536,8 @@ export type BackendMessageMap = OfficeBackendMessageMap &
     "session.git.event": BackendMessage<"session.git.event", GitEventPayload>;
     "system.job.update": BackendMessage<"system.job.update", import("./system").SystemJob>;
     "system.metrics.updated": BackendMessage<"system.metrics.updated", SystemMetricsSnapshot>;
-    "system.agent_runtime.status_changed": BackendMessage<
-      "system.agent_runtime.status_changed",
+    [SYSTEM_AGENT_RUNTIME_STATUS_CHANGED]: BackendMessage<
+      typeof SYSTEM_AGENT_RUNTIME_STATUS_CHANGED,
       AgentRuntimeAvailability
     >;
     "system.logs.capture_requested": BackendMessage<

@@ -139,7 +139,13 @@ describe("AppStatusSurfaceProvider", () => {
 
   it("keeps the runtime alert visible when the app-status-bar feature is disabled", () => {
     featureState.appStatusBar = false;
-    renderSurface({ agentRuntime: { status: "unavailable", reason: "agentctl_exited" } });
+    renderSurface({
+      agentRuntime: {
+        status: "unavailable",
+        reason: "agentctl_exited",
+        occurred_at: "2026-08-08T14:22:52Z",
+      },
+    });
 
     expect(screen.getByRole("alert")).toBeTruthy();
     expect(screen.queryByTestId(STATUS_BAR_TEST_ID)).toBeNull();

@@ -91,5 +91,5 @@ Focused race verification passed:
 
 ```text
 go test -race ./internal/office/costs/modelsdev
-50 passed in 1 package
+51 passed in 1 package
 ```

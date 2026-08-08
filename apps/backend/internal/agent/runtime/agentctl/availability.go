@@ -32,6 +32,7 @@ type AvailabilitySnapshot struct {
 // state for the lifetime of the backend process.
 type Availability struct {
 	mu        sync.RWMutex
+	publishMu sync.Mutex
 	eventBus  bus.EventBus
 	logger    *logger.Logger
 	snapshot  AvailabilitySnapshot
@@ -61,6 +62,9 @@ func (a *Availability) Snapshot() (AvailabilitySnapshot, bool) {
 
 // MarkAvailable publishes the first healthy-and-authenticated state.
 func (a *Availability) MarkAvailable() {
+	a.publishMu.Lock()
+	defer a.publishMu.Unlock()
+
 	a.mu.Lock()
 	if a.published {
 		a.mu.Unlock()
@@ -77,6 +81,9 @@ func (a *Availability) MarkAvailable() {
 // MarkUnavailable records an unexpected agentctl exit. The transition is
 // intentionally fail-closed and cannot be reversed until the backend restarts.
 func (a *Availability) MarkUnavailable() {
+	a.publishMu.Lock()
+	defer a.publishMu.Unlock()
+
 	a.mu.Lock()
 	if !a.published || a.snapshot.Status == AvailabilityStatusUnavailable {
 		a.mu.Unlock()
