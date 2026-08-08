@@ -2824,6 +2824,37 @@ func TestService_UpdateWorkflow(t *testing.T) {
 		t.Errorf("expected name 'Updated', got %s", updated.Name)
 	}
 }
+
+func TestService_UpdateWorkflow_PublishesPromptOnWorkflowEvent(t *testing.T) {
+	// Cross-tab WS sync (use-workflow-settings.ts) relies on workflow.updated
+	// carrying the current prompt, the same way it already carries
+	// description and agent_profile_id.
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	workflow := &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Original"}
+	_ = repo.CreateWorkflow(ctx, workflow)
+
+	newPrompt := "Updated prompt"
+	req := &UpdateWorkflowRequest{Prompt: &newPrompt}
+
+	if _, err := svc.UpdateWorkflow(ctx, "wf-123", req); err != nil {
+		t.Fatalf("failed to update workflow: %v", err)
+	}
+
+	if len(eventBus.publishedEvents) == 0 {
+		t.Fatal("expected a workflow.updated event to be published")
+	}
+	last := eventBus.publishedEvents[len(eventBus.publishedEvents)-1]
+	data, ok := last.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected event data to be a map, got %T", last.Data)
+	}
+	if data["prompt"] != newPrompt {
+		t.Errorf("expected published prompt %q, got %v", newPrompt, data["prompt"])
+	}
+}
 func TestService_DeleteWorkflow(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
