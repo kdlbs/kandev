@@ -34,9 +34,14 @@ func DiskUsage(ctx context.Context, path string) (DiskCapacity, error) {
 	if err != nil {
 		return DiskCapacity{}, fmt.Errorf("convert path %q: %w", path, err)
 	}
+	release, err := acquireDiskUsageCall(ctx)
+	if err != nil {
+		return DiskCapacity{}, err
+	}
 
 	result := make(chan diskQueryResult, 1)
 	go func() {
+		defer release()
 		var freeToCaller, totalBytes, totalFree uint64
 		callErr := getDiskFreeSpaceEx(dir, &freeToCaller, &totalBytes, &totalFree)
 		result <- diskQueryResult{totalBytes: totalBytes, freeBytes: freeToCaller, err: callErr}

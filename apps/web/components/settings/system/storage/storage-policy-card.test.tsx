@@ -10,7 +10,7 @@ const settings: StorageMaintenanceSettings = {
   idle_for_minutes: 10,
   orphan_grace_hours: 168,
   quarantine_retention_hours: 168,
-  workspaces: { enabled: true },
+  workspaces: { enabled: true, dependency_cleanup_enabled: false },
   kandev_containers: { enabled: true },
   go_cache: { enabled: false, max_bytes: 16106127360, adopted_path: "" },
   docker: {
@@ -48,6 +48,7 @@ function renderCard(
   onChange = vi.fn(),
   currentSettings: StorageMaintenanceSettings = settings,
   savedSettings: StorageMaintenanceSettings = settings,
+  onCleanDependencies?: () => void,
 ) {
   render(
     <TooltipProvider>
@@ -58,6 +59,7 @@ function renderCard(
         pending={pending}
         onChange={onChange}
         onAdopt={vi.fn()}
+        onCleanDependencies={onCleanDependencies}
       />
     </TooltipProvider>,
   );
@@ -268,6 +270,41 @@ describe("StoragePolicyCard", () => {
   });
 });
 
+describe("StoragePolicyCard dependency action", () => {
+  it("runs dependency cleanup only when the saved opt-in is enabled", () => {
+    const onCleanDependencies = vi.fn();
+    const enabledSettings = {
+      ...settings,
+      workspaces: { enabled: true, dependency_cleanup_enabled: true },
+    };
+    renderCard(false, vi.fn(), enabledSettings, enabledSettings, onCleanDependencies);
+
+    const button = screen.getByTestId("storage-clean-workspace-dependencies") as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    fireEvent.click(button);
+    expect(onCleanDependencies).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables dependency cleanup while opt-in changes are unsaved or pending", () => {
+    const onCleanDependencies = vi.fn();
+    const enabledSettings = {
+      ...settings,
+      workspaces: { enabled: true, dependency_cleanup_enabled: true },
+    };
+    renderCard(false, vi.fn(), enabledSettings, settings, onCleanDependencies);
+    expect(
+      (screen.getByTestId("storage-clean-workspace-dependencies") as HTMLButtonElement).disabled,
+    ).toBe(true);
+
+    cleanup();
+    renderCard(true, vi.fn(), enabledSettings, enabledSettings, onCleanDependencies);
+    expect(
+      (screen.getByTestId("storage-clean-workspace-dependencies") as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(onCleanDependencies).not.toHaveBeenCalled();
+  });
+});
+
 describe("StoragePolicyCard interactions", () => {
   it("disables policy controls while an action is pending", () => {
     renderCard(true);
@@ -306,7 +343,7 @@ describe("StoragePolicyCard interactions", () => {
     renderCard(false, vi.fn(), {
       ...settings,
       enabled: false,
-      workspaces: { enabled: false },
+      workspaces: { ...settings.workspaces, enabled: false },
       go_cache: { ...settings.go_cache, enabled: false },
       docker: {
         ...settings.docker,

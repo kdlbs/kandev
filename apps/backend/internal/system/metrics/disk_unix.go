@@ -27,11 +27,16 @@ func diskPercent(ctx context.Context, path string) (float64, error) {
 }
 
 func DiskUsage(ctx context.Context, path string) (DiskCapacity, error) {
+	release, err := acquireDiskUsageCall(ctx)
+	if err != nil {
+		return DiskCapacity{}, err
+	}
 	result := make(chan diskStatfsResult, 1)
 	go func() {
+		defer release()
 		var stat syscall.Statfs_t
-		err := statfs(path, &stat)
-		result <- diskStatfsResult{stat: stat, err: err}
+		callErr := statfs(path, &stat)
+		result <- diskStatfsResult{stat: stat, err: callErr}
 	}()
 
 	timer := time.NewTimer(diskStatfsTimeout)

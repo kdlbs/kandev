@@ -115,7 +115,7 @@ function WorkspaceSection({
   const dependencyCleanupDirty = settingIsDirty(
     settings,
     savedSettings,
-    (value) => value.workspaces.dependency_cleanup_enabled === true,
+    (value) => value.workspaces.dependency_cleanup_enabled,
   );
   return (
     <PolicySection

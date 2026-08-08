@@ -21,8 +21,9 @@ spec: "../../specs/system-page/storage-overview-parallel-scan.md"
   busy-resource response, Run anyway path, cancellation, retry, and history persistence.
 - The provider never follows symlinks, crosses the task workspace root, deletes ambiguous directory
   names, or mutates active/borrowed/restored workspaces. It revalidates before each deletion.
-- Results report directories visited/pruned, reclaimed bytes, skips, and warnings, and retries are
-  idempotent.
+- Results report successfully pruned directories, reclaimed bytes, skips, and warnings, and retries
+  are idempotent. The directory count is the number of directories actually removed; skipped paths
+  are represented in warnings.
 - A workspace can be restored after pruning with source and recovery metadata intact, with a clear
   indication that dependencies may need to be installed again.
 - The Workspaces policy card visibly lists every allowlisted directory Kandev checks before the
@@ -36,7 +37,7 @@ cd apps/backend && go test -race ./internal/system/storage ./internal/system/sto
 cd apps && pnpm --filter @kandev/web test -- --run components/settings/system/storage/storage-policy-card.test.tsx components/settings/system/storage/storage-maintenance-settings.test.tsx
 ```
 
-Add filesystem fixtures for every allowlist class and negative fixtures for `vendor`, `target`,
+Add filesystem fixtures for every allowlist entry and negative fixtures for `vendor`, `target`,
 `.cache`, `.git`, symlinked directories, escaped paths, active workspaces, and incomplete inventory.
 Use channels/barriers for state-change races rather than sleep-based tests.
 

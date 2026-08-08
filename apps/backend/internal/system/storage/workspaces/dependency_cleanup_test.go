@@ -42,30 +42,33 @@ func TestCleanupDependenciesOnlyRemovesAllowlistedDirectoriesFromArchivedAndDele
 	if err != nil {
 		t.Fatalf("CleanupDependencies: %v", err)
 	}
-	if result.Directories != 8 {
-		t.Fatalf("directories = %d, want 8; result=%#v", result.Directories, result)
+	wantDirectories := (len(DependencyDirectoryAllowlist()) + 1) * 2
+	if result.Directories != wantDirectories {
+		t.Fatalf("directories = %d, want %d; result=%#v", result.Directories, wantDirectories, result)
 	}
 	if result.Workspaces != 2 {
 		t.Fatalf("workspaces = %d, want 2; result=%#v", result.Workspaces, result)
 	}
-	if result.ReclaimedBytes != 8*4 {
-		t.Fatalf("reclaimed bytes = %d, want %d", result.ReclaimedBytes, 8*4)
+	if result.ReclaimedBytes != int64(wantDirectories*4) {
+		t.Fatalf("reclaimed bytes = %d, want %d", result.ReclaimedBytes, wantDirectories*4)
 	}
 
 	for _, root := range []string{archived, deleted} {
-		assertDependencyRemoved(t, root, "node_modules")
+		for _, relative := range DependencyDirectoryAllowlist() {
+			assertDependencyRemoved(t, root, filepath.FromSlash(relative))
+		}
 		assertDependencyRemoved(t, root, filepath.Join("src", "node_modules"))
-		assertDependencyRemoved(t, root, filepath.Join(".yarn", "cache"))
-		assertDependencyRemoved(t, root, filepath.Join(".yarn", "unplugged"))
 		assertDependencyKept(t, root, filepath.Join("vendor", "node_modules"))
+		assertDependencyKept(t, root, filepath.Join("target", "node_modules"))
 		assertDependencyKept(t, root, filepath.Join("build", "node_modules"))
 		assertDependencyKept(t, root, filepath.Join(".cache", "node_modules"))
 		assertDependencyKept(t, root, filepath.Join(".git", "node_modules"))
 		assertDependencyKept(t, root, "source.txt")
 	}
 	for _, root := range []string{active} {
-		assertDependencyKept(t, root, "node_modules")
-		assertDependencyKept(t, root, filepath.Join(".yarn", "cache"))
+		for _, relative := range DependencyDirectoryAllowlist() {
+			assertDependencyKept(t, root, filepath.FromSlash(relative))
+		}
 	}
 }
 
@@ -225,10 +228,13 @@ func createDependencyWorkspace(t *testing.T, tasksRoot, relative, taskID string)
 
 func writeDependencyFixture(t *testing.T, root string) {
 	t.Helper()
+	for _, relative := range DependencyDirectoryAllowlist() {
+		writeDependencyDirectory(t, filepath.Join(root, filepath.FromSlash(relative)), "keep")
+	}
 	for _, relative := range []string{
-		"node_modules", filepath.Join("src", "node_modules"), filepath.Join(".yarn", "cache"),
-		filepath.Join(".yarn", "unplugged"), filepath.Join("vendor", "node_modules"),
-		filepath.Join("build", "node_modules"), filepath.Join(".cache", "node_modules"),
+		filepath.Join("src", "node_modules"), filepath.Join("vendor", "node_modules"),
+		filepath.Join("target", "node_modules"), filepath.Join("build", "node_modules"),
+		filepath.Join("dist", "node_modules"), filepath.Join(".cache", "node_modules"),
 		filepath.Join(".git", "node_modules"),
 	} {
 		writeDependencyDirectory(t, filepath.Join(root, relative), "keep")

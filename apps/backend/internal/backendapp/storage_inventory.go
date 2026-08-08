@@ -53,14 +53,7 @@ func (i *storageInventory) LoadWorkspaceInventory(ctx context.Context) (workspac
 	if err != nil {
 		return workspaces.Inventory{}, err
 	}
-	inventory.KnownTaskIDs = make(map[string]struct{}, len(tasks))
-	inventory.ArchivedTaskIDs = make(map[string]struct{})
-	for _, task := range tasks {
-		inventory.KnownTaskIDs[task.ID] = struct{}{}
-		if task.ArchivedAt != nil {
-			inventory.ArchivedTaskIDs[task.ID] = struct{}{}
-		}
-	}
+	inventory.KnownTaskIDs, inventory.ArchivedTaskIDs = taskEligibilitySets(tasks)
 	return inventory, nil
 }
 
@@ -112,6 +105,18 @@ func (i *storageInventory) taskWorkspaceStates(ctx context.Context) ([]taskWorks
 		return nil, err
 	}
 	return rows, nil
+}
+
+func taskEligibilitySets(tasks []taskWorkspaceState) (map[string]struct{}, map[string]struct{}) {
+	known := make(map[string]struct{}, len(tasks))
+	archived := make(map[string]struct{})
+	for _, task := range tasks {
+		known[task.ID] = struct{}{}
+		if task.ArchivedAt != nil {
+			archived[task.ID] = struct{}{}
+		}
+	}
+	return known, archived
 }
 
 type containerInventory struct{ reader *sqlx.DB }

@@ -5,6 +5,7 @@ import { StorageActionButton } from "./storage-action-button";
 import { StorageSettingHelp } from "./storage-setting-help";
 import { SettingRow } from "./storage-policy-fields";
 
+// Keep this display snapshot in sync with backend DependencyDirectoryAllowlist.
 const DEPENDENCY_DIRECTORIES = [
   "node_modules",
   "bower_components",
@@ -36,8 +37,8 @@ export function StorageWorkspaceDependencySettings({
   onCleanDependencies,
 }: Props) {
   const { t } = useTranslation();
-  const dependenciesEnabled = settings.workspaces.dependency_cleanup_enabled === true;
-  const savedDependenciesEnabled = savedSettings.workspaces.dependency_cleanup_enabled === true;
+  const dependenciesEnabled = settings.workspaces.dependency_cleanup_enabled;
+  const savedDependenciesEnabled = savedSettings.workspaces.dependency_cleanup_enabled;
   const dependencyCleanupDirty = dependenciesEnabled !== savedDependenciesEnabled;
   let dependencyActionDisabledReason: string | undefined;
   if (pending) {
@@ -54,7 +55,7 @@ export function StorageWorkspaceDependencySettings({
         help={t("system:storageWorkspaceDependenciesHelp")}
         control={
           <Switch
-            checked={settings.workspaces.dependency_cleanup_enabled === true}
+            checked={settings.workspaces.dependency_cleanup_enabled}
             disabled={pending || !settings.workspaces.enabled}
             onCheckedChange={(dependency_cleanup_enabled) =>
               onChange({

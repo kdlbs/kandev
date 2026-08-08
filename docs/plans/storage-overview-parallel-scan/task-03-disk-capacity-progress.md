@@ -27,7 +27,7 @@ spec: "../../specs/system-page/storage-overview-parallel-scan.md"
 ```bash
 cd apps/backend && go test -race ./internal/system/metrics ./internal/system/storage ./internal/backendapp
 cd apps/web && pnpm run typecheck
-cd apps/web && pnpm test -- --run components/settings/system/storage/storage-overview-card.test.tsx
+cd apps/web && pnpm test -- --run components/settings/system/storage/storage-disk-capacity-card.test.tsx
 ```
 
 The implementation must reuse or factor the existing cross-platform disk-free-space semantics in

@@ -76,9 +76,11 @@ overview cache behavior, progressive page loading, and activity-coordinator idle
 
 ## Observability and rollout
 
-- Use the existing backend request-duration logs to capture a comparable cold overview before and
-  after implementation. The cache must be cold for both measurements and the host dataset/settings
-  must be held constant.
+- When a compatible post-change runtime is available, use the existing backend request-duration
+  logs to capture a comparable cold overview before and after implementation. The cache must be
+  cold for both measurements and the host dataset/settings must be held constant. If the running
+  runtime predates the capacity route, record the baseline and deterministic/managed E2E evidence
+  instead of claiming a comparable post-change timing.
 - Capture disk-capacity response timing separately to confirm it is available before the cold
   overview completes.
 - Record the measured result in the implementation task handoff. If workspace traversal remains

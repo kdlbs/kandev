@@ -57,7 +57,7 @@ const settings: StorageMaintenanceSettings = {
   idle_for_minutes: 10,
   orphan_grace_hours: 168,
   quarantine_retention_hours: 168,
-  workspaces: { enabled: true },
+  workspaces: { enabled: true, dependency_cleanup_enabled: false },
   kandev_containers: { enabled: true },
   go_cache: { enabled: false, max_bytes: 16106127360, adopted_path: "" },
   docker: {
@@ -262,6 +262,20 @@ describe("useStorageMaintenance", () => {
 
     expect(result.current.cleanupJob).toBeUndefined();
     expect(result.current.error).toBe("storage maintenance is busy");
+  });
+});
+
+describe("useStorageMaintenance disk isolation", () => {
+  it("keeps the other sections usable when the disk request fails", async () => {
+    mocks.fetchDisk.mockRejectedValueOnce(new Error("disk unavailable"));
+    const { result } = renderHook(() => useStorageMaintenance(), { wrapper });
+
+    await waitFor(() => expect(result.current.sectionErrors.disk).toBe("disk unavailable"));
+    expect(result.current.policy?.settings).toEqual(settings);
+    expect(result.current.overview).toEqual(overview);
+    expect(result.current.runs).toEqual([]);
+    expect(result.current.quarantine).toEqual([]);
+    expect(result.current.loading.disk).toBe(false);
   });
 });
 

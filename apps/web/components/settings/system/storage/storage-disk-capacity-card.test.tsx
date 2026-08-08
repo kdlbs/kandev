@@ -28,14 +28,14 @@ describe("StorageDiskCapacityCard", () => {
     expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("80");
   });
 
-  it("uses critical styling when the filesystem is at least 90% full", () => {
+  it("uses critical styling at exactly 90% full", () => {
     render(
       <StorageDiskCapacityCard
         disk={{
           ...disk,
-          used_percent: 95,
-          used_bytes: 95 * 1024 ** 3,
-          available_bytes: 5 * 1024 ** 3,
+          used_percent: 90,
+          used_bytes: 90 * 1024 ** 3,
+          available_bytes: 10 * 1024 ** 3,
         }}
       />,
     );
@@ -43,6 +43,13 @@ describe("StorageDiskCapacityCard", () => {
     expect(screen.getByTestId("storage-disk-capacity-card").getAttribute("data-severity")).toBe(
       "critical",
     );
+  });
+
+  it("clamps invalid percentages before rendering the progress bar", () => {
+    render(<StorageDiskCapacityCard disk={{ ...disk, used_percent: 120 }} />);
+
+    expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("100");
+    expect(screen.getByTestId("storage-disk-used-percent").textContent).toContain("100%");
   });
 
   it("renders an unavailable state without inventing capacity", () => {

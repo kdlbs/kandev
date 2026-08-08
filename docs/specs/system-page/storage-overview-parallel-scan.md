@@ -141,9 +141,12 @@ outcome, not an overview-scan failure.
 - A deterministic backend test proves all four independent measurements have started before any
   blocking measurement is released; the test must not rely on a timing race.
 - The same test proves the returned summary and per-source errors match the serial implementation.
-- A cold live overview measurement is captured after implementation using the existing request
-  timing logs. The result should be bounded by the slowest provider plus join overhead, rather than
-  the sum of provider durations, on the same host and dataset.
+- When a compatible post-change backend is available, a cold live overview measurement is captured
+  after implementation using the existing request timing logs. The result should be bounded by the
+  slowest provider plus join overhead, rather than the sum of provider durations, on the same host
+  and dataset. If the only running backend predates the capacity route, the baseline timing plus the
+  deterministic fan-out barrier and held-overview managed E2E are the accepted non-mutating evidence
+  until a compatible runtime is available.
 - Existing cache tests still prove that warm reads, forced Analyze refreshes, coalesced misses, and
   failed refreshes behave exactly as before.
 - Existing desktop and mobile Storage maintenance flows continue to show fast sections while an

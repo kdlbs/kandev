@@ -21,3 +21,13 @@ func TestDiskCapacityFromBytesReturnsExactFields(t *testing.T) {
 		t.Fatalf("capacity = %#v, want total=1000 available=250 used=750 percent=75", capacity)
 	}
 }
+
+func TestDiskCapacityFromBytesRejectsZeroTotal(t *testing.T) {
+	capacity, err := diskCapacityFromBytes(0, 0)
+	if err == nil {
+		t.Fatal("diskCapacityFromBytes error = nil, want zero-total error")
+	}
+	if capacity != (DiskCapacity{}) {
+		t.Fatalf("capacity = %#v, want zero value", capacity)
+	}
+}

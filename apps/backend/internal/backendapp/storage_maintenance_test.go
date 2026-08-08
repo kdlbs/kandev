@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -162,6 +163,16 @@ func TestStorageOverviewStartsIndependentMeasurementsTogether(t *testing.T) {
 	dockerClient := &blockingOverviewDockerClient{
 		started: make(chan struct{}), release: make(chan struct{}),
 	}
+	var releaseOnce sync.Once
+	releaseMeasurements := func() {
+		releaseOnce.Do(func() {
+			close(workspaceRelease)
+			close(goCacheRelease)
+			close(quarantine.release)
+			close(dockerClient.release)
+		})
+	}
+	t.Cleanup(releaseMeasurements)
 	docker := dockerstore.NewProvider(dockerClient, overviewContainerInventory{}, settings)
 	overview := &storageOverview{
 		settings: settings, quarantine: quarantine,
@@ -216,10 +227,7 @@ func TestStorageOverviewStartsIndependentMeasurementsTogether(t *testing.T) {
 			t.Fatalf("%s measurement did not start before the barrier was released", measurement.name)
 		}
 	}
-	close(workspaceRelease)
-	close(goCacheRelease)
-	close(quarantine.release)
-	close(dockerClient.release)
+	releaseMeasurements()
 
 	select {
 	case result := <-resultCh:

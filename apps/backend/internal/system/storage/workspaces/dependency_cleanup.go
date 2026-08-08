@@ -119,11 +119,21 @@ func (p *Provider) cleanupDependencyWorkspace(
 			fmt.Sprintf("inspect workspace dependencies %s: %v", root.path, err))
 		return result, nil
 	}
+	inventory, err := p.loadInventory(ctx)
+	if err != nil {
+		return result, err
+	}
+	protected, err := buildProtectedSet(tasksRoot, inventory)
+	if err != nil {
+		return result, err
+	}
 	for _, target := range targets {
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
-		size, warning, err := p.cleanupDependencyTarget(ctx, tasksRoot, trashTasks, root, target)
+		size, warning, err := p.cleanupDependencyTarget(
+			ctx, tasksRoot, trashTasks, root, target, inventory, protected,
+		)
 		if err != nil {
 			if isDependencyCleanupContextError(err) {
 				return result, err
@@ -149,8 +159,12 @@ func (p *Provider) cleanupDependencyTarget(
 	tasksRoot, trashTasks string,
 	root candidate,
 	target string,
+	inventory Inventory,
+	protected map[string]struct{},
 ) (int64, string, error) {
-	valid, warning, err := p.revalidateDependencyTarget(ctx, tasksRoot, trashTasks, root, target)
+	valid, warning, err := revalidateDependencyTarget(
+		ctx, tasksRoot, trashTasks, root, target, inventory, protected,
+	)
 	if err != nil || !valid {
 		return 0, warning, err
 	}
@@ -161,7 +175,7 @@ func (p *Provider) cleanupDependencyTarget(
 		}
 		return 0, "", fmt.Errorf("measure dependency directory %s: %w", target, err)
 	}
-	if err := os.RemoveAll(target); err != nil {
+	if err := removeDependencyDirectory(ctx, root.path, target); err != nil {
 		return 0, "", fmt.Errorf("remove dependency directory %s: %w", target, err)
 	}
 	return size, "", nil
@@ -256,11 +270,13 @@ func isDependencyTarget(relative, name string) bool {
 	return parent == ".yarn" && (name == "cache" || name == "unplugged")
 }
 
-func (p *Provider) revalidateDependencyTarget(
+func revalidateDependencyTarget(
 	ctx context.Context,
 	tasksRoot, trashTasks string,
 	root candidate,
 	target string,
+	inventory Inventory,
+	protected map[string]struct{},
 ) (bool, string, error) {
 	if err := ctx.Err(); err != nil {
 		return false, "", err
@@ -280,15 +296,7 @@ func (p *Provider) revalidateDependencyTarget(
 	if owner == nil {
 		return false, fmt.Sprintf("skip workspace whose ownership changed: %s", root.path), nil
 	}
-	inventory, err := p.loadInventory(ctx)
-	if err != nil {
-		return false, "", err
-	}
-	protected, err := buildProtectedSet(tasksRoot, inventory)
-	if err != nil {
-		return false, "", err
-	}
-	if _, protected := protected[root.path]; protected || !dependencyEligible(*owner, inventory) {
+	if _, isProtected := protected[root.path]; isProtected || !dependencyEligible(*owner, inventory) {
 		return false, fmt.Sprintf("skip protected or active workspace: %s", root.path), nil
 	}
 	return true, "", nil

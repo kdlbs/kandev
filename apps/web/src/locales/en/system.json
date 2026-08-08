@@ -425,7 +425,7 @@
   "storageWorkspacesTitle": "Workspaces and containers",
   "storageWorkspaceDependencies": "Remove dependencies from archived or deleted workspaces",
   "storageWorkspaceDependenciesDescription": "Opt in to remove dependency folders while keeping the workspace source and recovery metadata.",
-  "storageWorkspaceDependenciesHelp": "When enabled and saved, Kandev recursively checks only the listed folders inside protected Kandev task workspaces that are archived or deleted. It skips missing folders, symlinks, active or protected workspaces, and ambiguous folders such as vendor, target, build, dist, .cache, and .git. Restoring a trimmed workspace may require reinstalling dependencies.",
+  "storageWorkspaceDependenciesHelp": "When enabled and saved, Kandev recursively checks only the listed folders inside unprotected Kandev task workspaces that are archived or deleted. It skips missing folders, symlinks, active or protected workspaces, and ambiguous folders such as vendor, target, build, dist, .cache, and .git. Restoring a trimmed workspace may require reinstalling dependencies.",
   "storageDependencyFoldersTitle": "Folders Kandev will check",
   "storageDependencyFoldersDescription": "These exact directory names are the complete cleanup allowlist.",
   "storageDependencyFoldersHelp": "Kandev searches recursively for these directory names. Missing folders are skipped. Kandev never targets the excluded ambiguous names, follows symlinks, or accepts custom paths. Only archived or deleted, unprotected Kandev workspaces are eligible, and dependencies may need to be reinstalled after restore.",

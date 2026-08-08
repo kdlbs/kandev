@@ -262,7 +262,7 @@ export interface StorageResourceSettings {
 }
 
 export interface StorageWorkspaceSettings extends StorageResourceSettings {
-  dependency_cleanup_enabled?: boolean;
+  dependency_cleanup_enabled: boolean;
 }
 
 export interface StorageGoCacheSettings {

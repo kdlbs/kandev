@@ -17,8 +17,10 @@ spec: "../../specs/system-page/storage-overview-parallel-scan.md"
   mobile Storage flow has no horizontal overflow.
 - Cache, handler, operations, scheduler, activity-coordinator, disk-capacity, and workspace
   dependency tests pass after the changes.
-- A comparable cold overview request is timed on the same host/settings as the baseline, and the
-  independent disk request is timed separately. Both results are recorded with the handoff.
+- When a compatible post-change backend is available, a comparable cold overview request is timed
+  on the same host/settings as the baseline and the independent disk request is timed separately.
+  If the running backend predates the disk route, the baseline, deterministic fan-out barrier, and
+  held-overview managed E2E are recorded as the accepted non-mutating evidence instead.
 - The Aug 5 `skipped_busy` behavior remains explainable by active `execution_preparing` and
   `execution_running` leases; no cleanup is run while those resources are active.
 
@@ -52,9 +54,9 @@ Tasks 01, 03, and 04.
 
 ## Output contract
 
-Return exact commands and results, cold/warm timing evidence, mobile artifacts if a test fails,
-idle-gate confirmation, and remaining optimization risks. Mark this task done only after Task 01 is
-implemented and the regression evidence is complete.
+Return exact commands and results, available cold/warm timing evidence, mobile artifacts if a test
+fails, idle-gate confirmation, and remaining optimization risks. Mark this task done only after
+Task 01 is implemented and the regression evidence is complete.
 
 ## Result
 
