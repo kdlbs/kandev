@@ -151,6 +151,15 @@ func (m *mockRepository) IncrementTaskSequence(_ context.Context, _ string) (int
 func (m *mockRepository) GetWorkspaceTaskPrefix(_ context.Context, _ string) (string, string, error) {
 	return "KAN", "", nil
 }
+func (m *mockRepository) GetTaskByExternalID(_ context.Context, _, _ string) (*models.Task, error) {
+	return nil, nil
+}
+func (m *mockRepository) SettleTaskExternalID(_ context.Context, _, _ string, _ time.Time) (bool, error) {
+	return false, nil
+}
+func (m *mockRepository) ReleaseTaskExternalID(_ context.Context, _, _ string) (bool, error) {
+	return false, nil
+}
 func (m *mockRepository) CreateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error {
 	return nil
 }

@@ -470,6 +470,18 @@ func (r *phase4TaskRepo) GetWorkspaceTaskPrefix(context.Context, string) (string
 	r.panicNotUsed("GetWorkspaceTaskPrefix")
 	return "", "", nil
 }
+func (r *phase4TaskRepo) GetTaskByExternalID(context.Context, string, string) (*models.Task, error) {
+	r.panicNotUsed("GetTaskByExternalID")
+	return nil, nil
+}
+func (r *phase4TaskRepo) SettleTaskExternalID(context.Context, string, string, time.Time) (bool, error) {
+	r.panicNotUsed("SettleTaskExternalID")
+	return false, nil
+}
+func (r *phase4TaskRepo) ReleaseTaskExternalID(context.Context, string, string) (bool, error) {
+	r.panicNotUsed("ReleaseTaskExternalID")
+	return false, nil
+}
 
 func TestWorkspacePolicy_MetadataBlock(t *testing.T) {
 	pol := WorkspacePolicy{

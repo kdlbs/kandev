@@ -72,6 +72,8 @@ var taskScanColumns = []taskScanColumn{
 	{name: "project_id"},
 	{name: "labels"},
 	{name: "identifier"},
+	{name: "external_id"},
+	{name: "external_id_settled_at"},
 	{name: "is_from_office", selectExpr: func(alias string) string {
 		return isFromOfficeProjection(alias) + ` AS is_from_office`
 	}},
@@ -318,11 +320,18 @@ func (r *Repository) insertTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 	if err != nil {
 		metadata = []byte("{}")
 	}
+	var externalID interface{}
+	if task.ExternalID != "" {
+		externalID = task.ExternalID
+	}
 	_, err = tx.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO tasks (id, workspace_id, workflow_id, workflow_step_id, title, description, state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, created_at, updated_at, origin, project_id, labels, identifier)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), task.ID, task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), dialect.BoolToInt(task.IsEphemeral), task.ParentID, task.CreatedAt, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier)
+		INSERT INTO tasks (id, workspace_id, workflow_id, workflow_step_id, title, description, state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, created_at, updated_at, origin, project_id, labels, identifier, external_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), task.ID, task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), dialect.BoolToInt(task.IsEphemeral), task.ParentID, task.CreatedAt, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, externalID)
 	if err != nil {
+		if isExternalIDUniqueViolation(err) {
+			return fmt.Errorf("%w: %w", ErrExternalIDConflict, err)
+		}
 		return err
 	}
 	if task.AssigneeAgentProfileID != "" && task.WorkflowStepID != "" {
@@ -1478,6 +1487,8 @@ func (r *Repository) scanSingleTask(row *sql.Row) (*models.Task, error) {
 	var archivedAt sql.NullTime
 	var queuedAt sql.NullTime
 	var identifier sql.NullString
+	var externalID sql.NullString
+	var externalIDSettledAt sql.NullTime
 	err := row.Scan(
 		&task.ID, &task.WorkspaceID, &task.WorkflowID, &task.WorkflowStepID,
 		&task.Title, &task.Description, &task.State, &task.Priority, &task.Position,
@@ -1485,7 +1496,7 @@ func (r *Repository) scanSingleTask(row *sql.Row) (*models.Task, error) {
 		&metadata, &task.IsEphemeral, &task.ParentID, &archivedAt, &task.ArchivedByCascadeID,
 		&task.CreatedAt, &task.UpdatedAt,
 		&task.AssigneeAgentProfileID, &task.Origin, &task.ProjectID,
-		&task.Labels, &identifier, &task.IsFromOffice,
+		&task.Labels, &identifier, &externalID, &externalIDSettledAt, &task.IsFromOffice,
 	)
 	if err != nil {
 		return nil, err
@@ -1498,6 +1509,12 @@ func (r *Repository) scanSingleTask(row *sql.Row) (*models.Task, error) {
 	}
 	if identifier.Valid {
 		task.Identifier = identifier.String
+	}
+	if externalID.Valid {
+		task.ExternalID = externalID.String
+	}
+	if externalIDSettledAt.Valid {
+		task.ExternalIDSettledAt = &externalIDSettledAt.Time
 	}
 	_ = json.Unmarshal([]byte(metadata), &task.Metadata)
 	return task, nil
@@ -1512,6 +1529,8 @@ func (r *Repository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 		var archivedAt sql.NullTime
 		var queuedAt sql.NullTime
 		var identifier sql.NullString
+		var externalID sql.NullString
+		var externalIDSettledAt sql.NullTime
 		err := rows.Scan(
 			&task.ID, &task.WorkspaceID, &task.WorkflowID, &task.WorkflowStepID,
 			&task.Title, &task.Description, &task.State, &task.Priority, &task.Position,
@@ -1519,7 +1538,7 @@ func (r *Repository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 			&metadata, &task.IsEphemeral, &task.ParentID, &archivedAt, &task.ArchivedByCascadeID,
 			&task.CreatedAt, &task.UpdatedAt,
 			&task.AssigneeAgentProfileID, &task.Origin, &task.ProjectID,
-			&task.Labels, &identifier, &task.IsFromOffice,
+			&task.Labels, &identifier, &externalID, &externalIDSettledAt, &task.IsFromOffice,
 		)
 		if err != nil {
 			return nil, err
@@ -1532,6 +1551,12 @@ func (r *Repository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 		}
 		if identifier.Valid {
 			task.Identifier = identifier.String
+		}
+		if externalID.Valid {
+			task.ExternalID = externalID.String
+		}
+		if externalIDSettledAt.Valid {
+			task.ExternalIDSettledAt = &externalIDSettledAt.Time
 		}
 		_ = json.Unmarshal([]byte(metadata), &task.Metadata)
 		result = append(result, task)
