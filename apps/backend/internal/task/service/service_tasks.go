@@ -200,6 +200,9 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (Creat
 
 	task, err := s.prepareTaskForCreation(ctx, req, externalID)
 	if err != nil {
+		if found, ok := s.recoverFoundTaskAfterInsertFailure(ctx, req.WorkspaceID, externalID); ok {
+			return found, nil
+		}
 		return CreateTaskResult{}, err
 	}
 
@@ -317,9 +320,13 @@ func (s *Service) findTaskByExternalIDIfPresent(ctx context.Context, workspaceID
 
 // recoverFoundTaskAfterInsertFailure is the TOCTOU backstop for step 3, and
 // the admission-preemption guard: after a step-3 miss, ANY pre-insert
-// failure (a unique-index loss on uniq_tasks_external_id, or WIP/capacity
-// admission rejecting the insert outright) must re-read by external_id
-// before the original error surfaces. A hit means another caller won the
+// failure — a unique-index loss on uniq_tasks_external_id, WIP/capacity
+// admission rejecting the insert outright, or a step-4/5 failure inside
+// prepareTaskForCreation (validation, workflow resolution, or identifier
+// allocation) — must re-read by external_id before the original error
+// surfaces. This is the spec's "any pre-insert failure — capacity,
+// admission, or otherwise" wording taken literally: it is not scoped to
+// admission/capacity failures alone. A hit means another caller won the
 // race; ok=true tells the caller to return it as Found rather than a
 // failure. ok=false (no external_id, or the re-read also finds nothing)
 // means the original error must surface — this also covers a bare task-id
