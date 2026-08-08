@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import {
+  agentProfileId,
   workflowId as toWorkflowId,
   workspaceId as toWorkspaceId,
   type Workflow,
@@ -11,6 +12,8 @@ type StoreWorkflow = {
   workspaceId: string;
   name: string;
   description?: string | null;
+  prompt?: string;
+  agent_profile_id?: string;
   hidden?: boolean;
   style?: "kanban" | "office" | "custom";
 };
@@ -42,6 +45,24 @@ const NAME_A1 = "Workflow A1";
 const NAME_B1 = "Workflow B1";
 const STORE_A1: StoreWorkflow = { id: "wf-a1", workspaceId: "ws-a", name: NAME_A1 };
 const STORE_B1: StoreWorkflow = { id: "wf-b1", workspaceId: "ws-b", name: NAME_B1 };
+
+const OLD_DESCRIPTION = "Old description";
+const NEW_DESCRIPTION = "New description";
+const OLD_PROMPT = "Old prompt";
+const NEW_PROMPT = "New prompt";
+const UNSAVED_LOCAL_DRAFT = "Unsaved local draft";
+
+// Shared by the cross-tab field-sync tests below: renders the hook with a
+// rerender-able store snapshot so a test can simulate a WS-driven store update.
+function renderWithStoreItem(initial: Workflow[], store: StoreWorkflow) {
+  return renderHook(
+    ({ storeItems }: { storeItems: StoreWorkflow[] }) => {
+      setStore(storeItems);
+      return useWorkflowSettings(initial, "ws-b");
+    },
+    { initialProps: { storeItems: [store] } },
+  );
+}
 
 beforeEach(() => {
   setStore([]);
@@ -193,6 +214,108 @@ describe("useWorkflowSettings", () => {
       );
     });
     expect(result.current.isWorkflowDirty(result.current.workflowItems[0])).toBe(false);
+  });
+});
+
+describe("useWorkflowSettings — cross-tab field sync", () => {
+  it("syncs a description update from the store within the current workspace", () => {
+    const initial = [{ ...wf("wf-b1", "ws-b", NAME_B1), description: OLD_DESCRIPTION }];
+    const store: StoreWorkflow = { ...STORE_B1, description: OLD_DESCRIPTION };
+    const { result, rerender } = renderWithStoreItem(initial, store);
+
+    act(() => {
+      rerender({ storeItems: [{ ...store, description: NEW_DESCRIPTION }] });
+    });
+
+    expect(result.current.workflowItems[0].description).toBe(NEW_DESCRIPTION);
+    expect(result.current.savedWorkflowItems[0].description).toBe(NEW_DESCRIPTION);
+  });
+
+  it("does not overwrite a dirty description when the store refreshes, but still moves the dirty-flag baseline", () => {
+    const initial = [{ ...wf("wf-b1", "ws-b", NAME_B1), description: OLD_DESCRIPTION }];
+    const store: StoreWorkflow = { ...STORE_B1, description: OLD_DESCRIPTION };
+    const { result, rerender } = renderWithStoreItem(initial, store);
+
+    act(() => {
+      result.current.setWorkflowItems((items) =>
+        items.map((item) => ({ ...item, description: UNSAVED_LOCAL_DRAFT })),
+      );
+    });
+    act(() => {
+      rerender({ storeItems: [{ ...store, description: NEW_DESCRIPTION }] });
+    });
+
+    expect(result.current.workflowItems[0].description).toBe(UNSAVED_LOCAL_DRAFT);
+    expect(result.current.savedWorkflowItems[0].description).toBe(NEW_DESCRIPTION);
+    expect(result.current.isWorkflowDirty(result.current.workflowItems[0])).toBe(true);
+  });
+
+  it("syncs a prompt update from the store within the current workspace", () => {
+    const initial = [{ ...wf("wf-b1", "ws-b", NAME_B1), prompt: OLD_PROMPT }];
+    const store: StoreWorkflow = { ...STORE_B1, prompt: OLD_PROMPT };
+    const { result, rerender } = renderWithStoreItem(initial, store);
+
+    act(() => {
+      rerender({ storeItems: [{ ...store, prompt: NEW_PROMPT }] });
+    });
+
+    expect(result.current.workflowItems[0].prompt).toBe(NEW_PROMPT);
+    expect(result.current.savedWorkflowItems[0].prompt).toBe(NEW_PROMPT);
+  });
+
+  it("does not overwrite a dirty prompt when the store refreshes, but still moves the dirty-flag baseline", () => {
+    const initial = [{ ...wf("wf-b1", "ws-b", NAME_B1), prompt: OLD_PROMPT }];
+    const store: StoreWorkflow = { ...STORE_B1, prompt: OLD_PROMPT };
+    const { result, rerender } = renderWithStoreItem(initial, store);
+
+    act(() => {
+      result.current.setWorkflowItems((items) =>
+        items.map((item) => ({ ...item, prompt: UNSAVED_LOCAL_DRAFT })),
+      );
+    });
+    act(() => {
+      rerender({ storeItems: [{ ...store, prompt: NEW_PROMPT }] });
+    });
+
+    expect(result.current.workflowItems[0].prompt).toBe(UNSAVED_LOCAL_DRAFT);
+    expect(result.current.savedWorkflowItems[0].prompt).toBe(NEW_PROMPT);
+    expect(result.current.isWorkflowDirty(result.current.workflowItems[0])).toBe(true);
+  });
+
+  it("syncs an agent_profile_id update from the store within the current workspace", () => {
+    const initial = [
+      { ...wf("wf-b1", "ws-b", NAME_B1), agent_profile_id: agentProfileId("agent-old") },
+    ];
+    const store: StoreWorkflow = { ...STORE_B1, agent_profile_id: "agent-old" };
+    const { result, rerender } = renderWithStoreItem(initial, store);
+
+    act(() => {
+      rerender({ storeItems: [{ ...store, agent_profile_id: "agent-new" }] });
+    });
+
+    expect(result.current.workflowItems[0].agent_profile_id).toBe(agentProfileId("agent-new"));
+    expect(result.current.savedWorkflowItems[0].agent_profile_id).toBe(agentProfileId("agent-new"));
+  });
+
+  it("does not overwrite a dirty agent_profile_id when the store refreshes, but still moves the dirty-flag baseline", () => {
+    const initial = [
+      { ...wf("wf-b1", "ws-b", NAME_B1), agent_profile_id: agentProfileId("agent-old") },
+    ];
+    const store: StoreWorkflow = { ...STORE_B1, agent_profile_id: "agent-old" };
+    const { result, rerender } = renderWithStoreItem(initial, store);
+
+    act(() => {
+      result.current.setWorkflowItems((items) =>
+        items.map((item) => ({ ...item, agent_profile_id: agentProfileId("agent-draft") })),
+      );
+    });
+    act(() => {
+      rerender({ storeItems: [{ ...store, agent_profile_id: "agent-new" }] });
+    });
+
+    expect(result.current.workflowItems[0].agent_profile_id).toBe(agentProfileId("agent-draft"));
+    expect(result.current.savedWorkflowItems[0].agent_profile_id).toBe(agentProfileId("agent-new"));
+    expect(result.current.isWorkflowDirty(result.current.workflowItems[0])).toBe(true);
   });
 });
 
