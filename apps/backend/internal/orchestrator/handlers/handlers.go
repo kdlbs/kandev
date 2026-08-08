@@ -196,7 +196,7 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 	if req.SessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
-	// Cancel an in-progress transient (529 Overloaded) retry loop and surface
+	// Cancel an in-progress transient provider retry loop and surface
 	// the manual recovery banner. Distinct from resume/fresh_start: it does not
 	// relaunch the agent, it stops the backoff timer.
 	if req.Action == "cancel_retry" {

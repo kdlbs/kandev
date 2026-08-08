@@ -5,6 +5,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/service"
 )
@@ -40,6 +41,7 @@ func (c *captureDispatcher) DispatchWithRouting(
 
 func (c *captureDispatcher) HandlePostStartFailure(
 	_ context.Context, _ *models.Run, _ *models.AgentInstance, _ string,
+	_ *streams.ProviderError,
 ) (bool, error) {
 	return false, nil
 }

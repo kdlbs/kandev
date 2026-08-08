@@ -72,12 +72,24 @@ const overloadedRuleID = "anthropic.overloaded.529.v1"
 // can't bridge into a false positive.
 var overloadedRe = regexp.MustCompile(`(?i)\b529\b[^\n]*overloaded|overloaded[^\n]*\b529\b|\boverloaded_error\b`)
 
-// IsTransientProviderError reports whether the error message carries the
-// transient provider-overload (529 Overloaded) signature. Exposed for callers
-// outside the classify path (e.g. the orchestrator's retry-with-backoff) that
-// need to branch on transience without re-running full Classify.
+// IsTransientProviderError reports whether a provider error is eligible for a
+// short same-provider retry. It is intentionally backed by Classify so new
+// provider-neutral fingerprints (capacity and network failures) become
+// available to callers outside the adapter without another allow-list.
 func IsTransientProviderError(message string) bool {
-	return message != "" && overloadedRe.MatchString(message)
+	if message == "" {
+		return false
+	}
+	e := Classify(Input{Phase: PhasePromptSend, Stderr: message})
+	if e == nil || !e.AutoRetryable || e.UserAction {
+		return false
+	}
+	switch e.Code {
+	case CodeProviderOverloaded, CodeModelCapacity, CodeNetworkUnavailable, CodeProviderUnavailable:
+		return true
+	default:
+		return false
+	}
 }
 
 // thinkingBlocksImmutableRe matches the Anthropic "thinking blocks cannot be

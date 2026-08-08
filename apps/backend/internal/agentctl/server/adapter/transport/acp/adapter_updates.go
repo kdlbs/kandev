@@ -172,6 +172,12 @@ func (a *Adapter) handleACPUpdate(
 	var event, leadingEvent *AgentEvent
 	if !suppressed {
 		event = a.convertNotification(n)
+		if event != nil && a.observeCodexProviderEvidence(promptGeneration, event) {
+			// Once the explicit Codex system-error marker has been observed,
+			// suppress the provider's explanatory assistant chunk. The adapter
+			// emits one normalized error after the prompt barrier instead.
+			event = nil
+		}
 		if n.Update.UsageUpdate != nil {
 			lifecycleEvent := usageLifecycleEvent(
 				sessionID,
@@ -226,6 +232,24 @@ func (a *Adapter) handleACPUpdate(
 			shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, supplemental)
 		}
 	}
+}
+
+func (a *Adapter) observeCodexProviderEvidence(promptGeneration uint64, event *AgentEvent) bool {
+	if a.agentID != codexAgentID || event == nil || promptGeneration == 0 {
+		return false
+	}
+	turn := a.currentPromptTurn()
+	if turn == nil || turn.promptGeneration != promptGeneration {
+		return false
+	}
+	systemError := event.Type == streams.EventTypeSessionInfo && codexSystemErrorMeta(event.SessionMeta)
+	capacity := event.Type == streams.EventTypeMessageChunk && codexModelCapacityMessage(event.Text)
+	if !systemError && !capacity {
+		return false
+	}
+	wasSystemError := turn.hasCodexSystemError()
+	turn.observeCodexEvidence(systemError, capacity)
+	return capacity && (systemError || wasSystemError)
 }
 
 // emitDialectContextWindow derives and enqueues an agent-specific context

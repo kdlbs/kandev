@@ -96,6 +96,34 @@ func TestCreateRecoveryStatusMessage_ResumeCorrupted(t *testing.T) {
 	}
 }
 
+func TestCreateRecoveryStatusMessage_TransientExhaustionUsesSafeReason(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t-capacity", "s-capacity", "step1")
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	mc := &mockMessageCreator{}
+	svc.messageCreator = mc
+
+	svc.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
+		TaskID:       "t-capacity",
+		SessionID:    "s-capacity",
+		AgentID:      "codex-acp",
+		ErrorMessage: "Selected model is at capacity. Please try a different model.",
+	})
+
+	if len(mc.sessionMessages) != 1 {
+		t.Fatalf("expected 1 session message, got %d", len(mc.sessionMessages))
+	}
+	content := mc.sessionMessages[0].content
+	if !strings.Contains(content, "model remained at capacity") {
+		t.Fatalf("content = %q, want provider-neutral capacity reason", content)
+	}
+	if strings.Contains(content, "Please try a different model") {
+		t.Fatalf("content copied raw provider evidence: %q", content)
+	}
+}
+
 func TestCreateRecoveryStatusMessage_OpenCodeQuotaCarriesSafeMetadata(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

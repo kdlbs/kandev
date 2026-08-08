@@ -13,6 +13,7 @@ import (
 
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	officemodels "github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
@@ -161,6 +162,195 @@ func makeAgent() *officemodels.AgentInstance {
 		Name:        "Coordinator",
 		WorkspaceID: testWorkspaceID,
 		Settings:    "{}",
+	}
+}
+
+func seedInFlightRoute(t *testing.T, repo *officesqlite.Repository, runID string) *officemodels.Run {
+	t.Helper()
+	run := seedRun(t, repo, `{"task_id":"`+runID+`"}`)
+	seq, err := repo.IncrementRouteAttemptSeq(context.Background(), run.ID)
+	if err != nil {
+		t.Fatalf("increment route seq: %v", err)
+	}
+	if err := repo.AppendRouteAttempt(context.Background(), &officemodels.RouteAttempt{
+		RunID:              run.ID,
+		Seq:                seq,
+		ExecutionProfileID: "claude-acp-profile",
+		ProviderID:         "claude-acp",
+		Model:              "claude-acp-bal",
+		Tier:               string(routing.TierBalanced),
+		Outcome:            officemodels.RouteAttemptOutcomeLaunched,
+		StartedAt:          time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("append attempt: %v", err)
+	}
+	if err := repo.SetRunResolvedRoute(context.Background(), run.ID,
+		"claude-acp-profile", "claude-acp", "claude-acp-bal"); err != nil {
+		t.Fatalf("set resolved route: %v", err)
+	}
+	run.CurrentRouteAttemptSeq = seq
+	providerID := "claude-acp"
+	run.ResolvedProviderID = &providerID
+	return run
+}
+
+func TestHandlePostStartFailure_SchedulesShortSameRouteRetry(t *testing.T) {
+	repo := newTestRepoSched(t)
+	seedRoutingConfig(t, repo, []routing.ProviderID{"claude-acp", "codex-acp"})
+	starter := newFakeTaskStarter()
+	ss := buildScheduler(t, repo, starter)
+	run := seedInFlightRoute(t, repo, "t-short-retry")
+
+	handled, err := ss.HandlePostStartFailure(context.Background(), run, makeAgent(),
+		"Selected model is at capacity. Please try a different model.", nil)
+	if err != nil || !handled {
+		t.Fatalf("handled=%v err=%v, want handled short retry", handled, err)
+	}
+
+	gotRun, err := repo.GetRunByID(context.Background(), run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if gotRun.RoutingBlockedStatus == nil || string(*gotRun.RoutingBlockedStatus) != routing.StatusWaitingForCapacity {
+		t.Fatalf("routing block = %v, want waiting_for_provider_capacity", gotRun.RoutingBlockedStatus)
+	}
+	if gotRun.ScheduledRetryAt == nil || !gotRun.ScheduledRetryAt.After(time.Now().UTC()) {
+		t.Fatalf("scheduled retry = %v, want future short retry", gotRun.ScheduledRetryAt)
+	}
+	attempts, err := repo.ListRouteAttempts(context.Background(), run.ID)
+	if err != nil || len(attempts) != 1 {
+		t.Fatalf("attempts = %v err=%v, want one updated attempt", attempts, err)
+	}
+	if attempts[0].Outcome != officemodels.RouteAttemptOutcomeRetryScheduled {
+		t.Fatalf("attempt outcome = %q, want retry_scheduled", attempts[0].Outcome)
+	}
+	health, err := repo.GetProviderHealth(context.Background(), testWorkspaceID, "claude-acp", officesqlite.HealthScopeModel, "claude-acp-bal")
+	if err != nil || health == nil {
+		t.Fatalf("health = %+v err=%v, want short-retry model row", health, err)
+	}
+	if health.State != officesqlite.HealthStateShortRetry {
+		t.Fatalf("health state = %q, want short_retry", health.State)
+	}
+}
+
+func TestHandlePostStartFailure_UsesValidatedResetDeadline(t *testing.T) {
+	repo := newTestRepoSched(t)
+	seedRoutingConfig(t, repo, []routing.ProviderID{"claude-acp", "codex-acp"})
+	ss := buildScheduler(t, repo, newFakeTaskStarter())
+	run := seedInFlightRoute(t, repo, "t-reset-hint")
+	now := time.Now().UTC()
+	resetAt := now.Add(17 * time.Second)
+
+	handled, err := ss.HandlePostStartFailure(context.Background(), run, makeAgent(),
+		"rate limit exceeded", &streams.ProviderError{
+			Source:     streams.ProviderErrorSourceCodexACP,
+			ProviderID: "claude-acp",
+			Message:    "rate limit exceeded",
+			OccurredAt: now,
+			ResetAt:    &resetAt,
+		})
+	if err != nil || !handled {
+		t.Fatalf("handled=%v err=%v, want handled short retry", handled, err)
+	}
+	gotRun, err := repo.GetRunByID(context.Background(), run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if gotRun.ScheduledRetryAt == nil {
+		t.Fatal("scheduled retry is nil")
+	}
+	delay := gotRun.ScheduledRetryAt.Sub(now)
+	if delay < 15*time.Second || delay > 20*time.Second {
+		t.Fatalf("scheduled delay = %v, want approximately provider reset delay", delay)
+	}
+}
+
+func TestHandlePostStartFailure_FallsBackAfterShortRetryBudget(t *testing.T) {
+	repo := newTestRepoSched(t)
+	seedRoutingConfig(t, repo, []routing.ProviderID{"claude-acp", "codex-acp"})
+	ss := buildScheduler(t, repo, newFakeTaskStarter())
+	run := seedInFlightRoute(t, repo, "t-short-budget")
+
+	for attempt := 1; attempt <= 3; attempt++ {
+		if attempt > 1 {
+			seq, err := repo.IncrementRouteAttemptSeq(context.Background(), run.ID)
+			if err != nil {
+				t.Fatalf("increment route seq: %v", err)
+			}
+			if err := repo.AppendRouteAttempt(context.Background(), &officemodels.RouteAttempt{
+				RunID:              run.ID,
+				Seq:                seq,
+				ExecutionProfileID: "claude-acp-profile",
+				ProviderID:         "claude-acp",
+				Model:              "claude-acp-bal",
+				Tier:               string(routing.TierBalanced),
+				Outcome:            officemodels.RouteAttemptOutcomeLaunched,
+				StartedAt:          time.Now().UTC(),
+			}); err != nil {
+				t.Fatalf("append retry attempt: %v", err)
+			}
+			run.CurrentRouteAttemptSeq = seq
+		}
+		handled, err := ss.HandlePostStartFailure(context.Background(), run, makeAgent(),
+			"Selected model is at capacity", nil)
+		if err != nil || !handled {
+			t.Fatalf("attempt %d: handled=%v err=%v, want handled retry", attempt, handled, err)
+		}
+	}
+
+	seq, err := repo.IncrementRouteAttemptSeq(context.Background(), run.ID)
+	if err != nil {
+		t.Fatalf("increment final route seq: %v", err)
+	}
+	if err := repo.AppendRouteAttempt(context.Background(), &officemodels.RouteAttempt{
+		RunID:              run.ID,
+		Seq:                seq,
+		ExecutionProfileID: "claude-acp-profile",
+		ProviderID:         "claude-acp",
+		Model:              "claude-acp-bal",
+		Tier:               string(routing.TierBalanced),
+		Outcome:            officemodels.RouteAttemptOutcomeLaunched,
+		StartedAt:          time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("append final retry attempt: %v", err)
+	}
+	run.CurrentRouteAttemptSeq = seq
+
+	handled, err := ss.HandlePostStartFailure(context.Background(), run, makeAgent(),
+		"Selected model is at capacity", nil)
+	if err != nil || !handled {
+		t.Fatalf("budget exhaustion: handled=%v err=%v, want handled fallback", handled, err)
+	}
+	attempts, err := repo.ListRouteAttempts(context.Background(), run.ID)
+	if err != nil || len(attempts) != 4 {
+		t.Fatalf("attempts = %v err=%v, want four route attempts", attempts, err)
+	}
+	if attempts[3].Outcome != officemodels.RouteAttemptOutcomeFailedProviderUnavail {
+		t.Fatalf("final attempt outcome = %q, want failed_provider_unavailable", attempts[3].Outcome)
+	}
+}
+
+func TestLiftParkedRunsPreservesShortRetryCycle(t *testing.T) {
+	repo := newTestRepoSched(t)
+	seedRoutingConfig(t, repo, []routing.ProviderID{"claude-acp", "codex-acp"})
+	ss := buildScheduler(t, repo, newFakeTaskStarter())
+	run := seedInFlightRoute(t, repo, "t-lift-short")
+
+	handled, err := ss.HandlePostStartFailure(context.Background(), run, makeAgent(),
+		"Selected model is at capacity", nil)
+	if err != nil || !handled {
+		t.Fatalf("handled=%v err=%v, want handled short retry", handled, err)
+	}
+	lifted, err := ss.LiftParkedRuns(context.Background(), time.Now().UTC().Add(time.Minute))
+	if err != nil || lifted != 1 {
+		t.Fatalf("lifted=%d err=%v, want one lifted run", lifted, err)
+	}
+	fresh, err := repo.GetRunByID(context.Background(), run.ID)
+	if err != nil {
+		t.Fatalf("get lifted run: %v", err)
+	}
+	if fresh.RouteCycleBaselineSeq != 0 {
+		t.Fatalf("baseline = %d, want short retry cycle preserved", fresh.RouteCycleBaselineSeq)
 	}
 }
 
