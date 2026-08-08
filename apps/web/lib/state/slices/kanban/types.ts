@@ -101,6 +101,7 @@ export type KanbanState = {
     queuedAt?: string;
     isPRReview?: boolean;
     isIssueWatch?: boolean;
+    metadata?: Record<string, unknown> | null;
     isArchived?: boolean;
     issueUrl?: string;
     issueNumber?: number;

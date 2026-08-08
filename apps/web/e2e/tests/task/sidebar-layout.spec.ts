@@ -128,9 +128,12 @@ test.describe("Sidebar layout — repo groups", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    // In a single-repo workspace, no "Unassigned" group should appear
+    // In a single-repo workspace, no "Unassigned" group should appear.
+    // Keyed on `data-group-key`, the identity, not `data-group-label` — the
+    // label is catalog-backed now, so a label selector would silently stop
+    // matching under any non-English locale.
     const unassignedGroup = session.sidebar.locator(
-      "[data-testid='sidebar-group-header'][data-group-label='Unassigned']",
+      "[data-testid='sidebar-group-header'][data-group-key='__unassigned__']",
     );
     await expect(unassignedGroup).not.toBeVisible({ timeout: 5_000 });
 

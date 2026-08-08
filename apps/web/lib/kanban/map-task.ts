@@ -165,6 +165,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     queuedForStepId: source.queued_for_step_id,
     queuedAt: source.queued_at,
     statusSummary: source.status_summary,
+    metadata: source.metadata,
     isArchived: source.archived_at != null,
     isPRReview: isPRReviewFromMetadata(source.metadata),
     isIssueWatch: isIssueWatchFromMetadata(source.metadata),

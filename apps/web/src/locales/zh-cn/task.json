@@ -807,6 +807,7 @@
   "openFile": "打开文件",
   "openImage": "打开 {{alt}}",
   "openInAdvancedView": "在高级视图中打开",
+  "openInBrowserPanel": "在浏览器面板中打开",
   "openInBrowserTab": "在浏览器标签页中打开",
   "openInEditorNamed": "在 {{name}} 中打开",
   "openInNewTab": "在新标签页中打开",

@@ -59,6 +59,18 @@ describe("snapshotToState", () => {
     expect(state.kanban?.tasks[0]?.primarySessionPendingAction).toBeUndefined();
   });
 
+  it("hydrates task metadata into the initial kanban state", () => {
+    const snapshot = snapshotWithPendingAction(undefined);
+    snapshot.tasks[0].metadata = {
+      port_forwarding_enabled: true,
+      unrelated: "preserve",
+    };
+
+    const state = snapshotToState(snapshot);
+
+    expect(state.kanban?.tasks[0]?.metadata).toEqual(snapshot.tasks[0].metadata);
+  });
+
   it.each([
     [0, 0],
     [3, 3],

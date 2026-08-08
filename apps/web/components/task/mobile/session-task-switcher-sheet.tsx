@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState, memo } from "react";
 import { useTranslation } from "react-i18next";
-import { IconMessageCircle, IconPlus } from "@tabler/icons-react";
+import { IconCheck, IconMessageCircle, IconNetwork, IconPlus } from "@tabler/icons-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@kandev/ui/drawer";
 import { Button } from "@kandev/ui/button";
@@ -30,6 +30,7 @@ import { useSheetData, useSheetActions } from "./session-task-switcher-sheet-hoo
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { useMobileTaskRename } from "./use-mobile-task-rename";
 import { SidebarTaskEditDialog, useSidebarTaskEdit } from "../task-session-sidebar-edit";
+import { usePortForwardingVisibility } from "../port-forwarding-visibility-provider";
 
 type SessionTaskSwitcherSheetProps = {
   open: boolean;
@@ -331,6 +332,12 @@ function TaskSwitcherSurfaceContent({
         onQuickChat={onQuickChat}
         onNewTask={onNewTask}
       />
+      {data.activeTaskId && (
+        <PortForwardingTaskAction
+          onClose={() => onOpenChange(false)}
+          activeTaskId={data.activeTaskId}
+        />
+      )}
       <div className="shrink-0">
         <SidebarFilterBar />
       </div>
@@ -387,6 +394,37 @@ function TaskSwitcherSurfaceContent({
         />
       </div>
     </>
+  );
+}
+
+function PortForwardingTaskAction({
+  activeTaskId,
+  onClose,
+}: {
+  activeTaskId: string;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  const { enabled, canToggle, isUpdating, togglePortForwarding } = usePortForwardingVisibility();
+
+  return (
+    <div className="shrink-0 border-b border-border px-2 py-1">
+      <Button
+        variant="ghost"
+        className="min-h-11 w-full justify-start gap-3 px-3 text-sm"
+        data-testid="mobile-port-forwarding-toggle"
+        aria-pressed={enabled}
+        disabled={!canToggle || isUpdating || !activeTaskId}
+        onClick={() => {
+          onClose();
+          void togglePortForwarding({ openDialogOnEnable: true });
+        }}
+      >
+        <IconNetwork className="h-4 w-4 shrink-0" />
+        <span className="min-w-0 flex-1 text-left">{t("task:portForwarding")}</span>
+        {enabled && <IconCheck className="h-4 w-4 shrink-0" />}
+      </Button>
+    </div>
   );
 }
 

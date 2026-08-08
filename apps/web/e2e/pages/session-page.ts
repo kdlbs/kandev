@@ -39,6 +39,15 @@ export class SessionPage {
   get portForwardButton() {
     return this.page.getByTestId("port-forward-button");
   }
+  get portForwardingMenuItem() {
+    return this.page.getByTestId("port-forwarding-menu-item");
+  }
+  get mobileSessionMenu() {
+    return this.page.getByTestId("mobile-session-menu");
+  }
+  get mobilePortForwardingToggle() {
+    return this.page.getByTestId("mobile-port-forwarding-toggle");
+  }
   get portForwardDialog() {
     return this.page.getByTestId("port-forward-dialog");
   }
@@ -53,6 +62,45 @@ export class SessionPage {
   }
   portForwardRow(port: number) {
     return this.page.getByTestId(`port-forward-row-${port}`);
+  }
+  portForwardTunnelToggle(port: number) {
+    return this.portForwardRow(port).getByRole("button").first();
+  }
+  portForwardTunnelStart(port: number) {
+    return this.portForwardRow(port).getByRole("button", { name: "Start", exact: true });
+  }
+  portForwardOpenBrowser(port: number) {
+    return this.portForwardRow(port).getByTestId(`port-forward-open-browser-${port}`);
+  }
+  get browserPanel() {
+    return this.page.locator('[data-testid="browser-panel"]:visible').first();
+  }
+  get browserAddressInput() {
+    return this.browserPanel.locator("input").first();
+  }
+
+  async togglePortForwardingPreference(): Promise<void> {
+    await this.addPanelButton().click();
+    await expect(this.portForwardingMenuItem).toBeVisible();
+    const enabling = (await this.portForwardingMenuItem.getAttribute("aria-checked")) !== "true";
+    await this.portForwardingMenuItem.click({ force: true });
+    if (enabling) {
+      await this.portForwardDialog
+        .waitFor({ state: "visible", timeout: 5_000 })
+        .catch(() => undefined);
+    }
+    if (await this.portForwardDialog.isVisible()) {
+      await this.portForwardDialog.getByRole("button", { name: "Close" }).click();
+    }
+    await this.page.keyboard.press("Escape");
+    await expect(this.portForwardingMenuItem).toBeHidden();
+    await expect(this.portForwardDialog).toBeHidden();
+  }
+
+  async enablePortForwarding(): Promise<void> {
+    if (await this.portForwardButton.isVisible()) return;
+    await this.togglePortForwardingPreference();
+    await expect(this.portForwardButton).toBeVisible();
   }
 
   // Chat status bar locators
@@ -1321,6 +1369,12 @@ export class SessionPage {
   /** "+" button in the dockview header to open the add-panel dropdown. */
   addPanelButton(): Locator {
     return this.page.getByTestId("dockview-add-panel-btn").first();
+  }
+
+  /** Open a blank built-in Browser panel from the dockview + menu. */
+  async addBrowserPanel(): Promise<void> {
+    await this.addPanelButton().click();
+    await this.page.getByRole("menuitem", { name: "Browser", exact: true }).click();
   }
 
   /** "New Session" menu item in the dockview + dropdown. */

@@ -14,11 +14,18 @@ const (
 	mrLifecycleEventClosed          = "closed"
 )
 
-// TaskMRAutomationOptions stores task-level MR lifecycle notification
-// preferences. Parallel to github.TaskCIOptions, scoped to the three
-// lifecycle switches only — GitLab has no auto-fix/auto-merge automation.
+// TaskMRAutoFixMaxRounds is the server-enforced MR auto-fix loop guard.
+// Mirrors github.TaskCIAutoFixMaxRounds.
+const TaskMRAutoFixMaxRounds = 10
+
+// TaskMRAutomationOptions stores task-level MR automation preferences:
+// the three lifecycle notification switches from #2125, plus auto-fix CI
+// and auto-merge (this task). Parallel to github.TaskCIOptions.
 type TaskMRAutomationOptions struct {
 	TaskID                  string    `json:"task_id" db:"task_id"`
+	AutoFixEnabled          bool      `json:"auto_fix_enabled" db:"auto_fix_enabled"`
+	AutoMergeEnabled        bool      `json:"auto_merge_enabled" db:"auto_merge_enabled"`
+	AutoFixPromptOverride   *string   `json:"auto_fix_prompt_override,omitempty" db:"auto_fix_prompt_override"`
 	PromptOnReviewRequested bool      `json:"prompt_on_review_requested" db:"prompt_on_review_requested"`
 	PromptOnMerged          bool      `json:"prompt_on_merged" db:"prompt_on_merged"`
 	PromptOnClosed          bool      `json:"prompt_on_closed" db:"prompt_on_closed"`
@@ -31,6 +38,9 @@ type TaskMRAutomationOptions struct {
 // ReviewReviewerUsername is intentionally absent — it is server-resolved from
 // the workspace's authenticated GitLab user, never client-supplied.
 type TaskMRAutomationPatch struct {
+	AutoFixEnabled          *bool
+	AutoMergeEnabled        *bool
+	AutoFixPromptOverride   *string
 	PromptOnReviewRequested *bool
 	PromptOnMerged          *bool
 	PromptOnClosed          *bool
@@ -38,13 +48,20 @@ type TaskMRAutomationPatch struct {
 
 // HasAny reports whether the patch contains at least one requested field change.
 func (p TaskMRAutomationPatch) HasAny() bool {
-	return p.PromptOnReviewRequested != nil || p.PromptOnMerged != nil || p.PromptOnClosed != nil
+	return p.AutoFixEnabled != nil || p.AutoMergeEnabled != nil || p.AutoFixPromptOverride != nil ||
+		p.PromptOnReviewRequested != nil || p.PromptOnMerged != nil || p.PromptOnClosed != nil
 }
 
 // TaskMRAutomationResponse is the HTTP/MCP shape for task MR automation
 // options, including the per-MR lifecycle checkpoints for observability.
 type TaskMRAutomationResponse struct {
 	TaskID                  string                  `json:"task_id"`
+	AutoFixEnabled          bool                    `json:"auto_fix_enabled"`
+	AutoMergeEnabled        bool                    `json:"auto_merge_enabled"`
+	AutoFixPromptOverride   *string                 `json:"auto_fix_prompt_override"`
+	AutoFixMaxRounds        int                     `json:"auto_fix_max_rounds"`
+	EffectiveAutoFixPrompt  string                  `json:"effective_auto_fix_prompt"`
+	UsingDefaultPrompt      bool                    `json:"using_default_prompt"`
 	PromptOnReviewRequested bool                    `json:"prompt_on_review_requested"`
 	PromptOnMerged          bool                    `json:"prompt_on_merged"`
 	PromptOnClosed          bool                    `json:"prompt_on_closed"`
@@ -102,10 +119,20 @@ type TaskMRLifecycleState struct {
 	// and is owned exclusively by the poller. The two are intentionally
 	// separate columns: a successful sync must not erase an unresolved
 	// delivery error, and vice versa.
-	LastError     *string   `json:"last_error,omitempty" db:"last_error"`
-	LastSyncError *string   `json:"last_sync_error,omitempty" db:"last_sync_error"`
-	CreatedAt     time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at" db:"updated_at"`
+	LastError     *string `json:"last_error,omitempty" db:"last_error"`
+	LastSyncError *string `json:"last_sync_error,omitempty" db:"last_sync_error"`
+	// The following back auto-fix CI and auto-merge (this task), mirroring
+	// github.TaskCIPRAutomationState's equivalent columns.
+	LastFixSignature      string     `json:"last_fix_signature" db:"last_fix_signature"`
+	LastFixCheckpointJSON string     `json:"last_fix_checkpoint_json" db:"last_fix_checkpoint_json"`
+	LastFixEnqueuedAt     *time.Time `json:"last_fix_enqueued_at,omitempty" db:"last_fix_enqueued_at"`
+	LastFixSessionID      *string    `json:"last_fix_session_id,omitempty" db:"last_fix_session_id"`
+	AutoFixRoundCount     int        `json:"auto_fix_round_count" db:"auto_fix_round_count"`
+	AutoFixExhaustedAt    *time.Time `json:"auto_fix_exhausted_at,omitempty" db:"auto_fix_exhausted_at"`
+	LastMergeSignature    string     `json:"last_merge_signature" db:"last_merge_signature"`
+	LastMergeAttemptAt    *time.Time `json:"last_merge_attempt_at,omitempty" db:"last_merge_attempt_at"`
+	CreatedAt             time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt             time.Time  `json:"updated_at" db:"updated_at"`
 }
 
 // TaskMRLifecyclePrompt records an accepted lifecycle prompt checkpoint.
@@ -119,4 +146,29 @@ type TaskMRLifecyclePrompt struct {
 	PromptedAt      time.Time
 	ReviewRequested bool
 	ObservedState   string
+}
+
+// TaskMRFixAttempt records an auto-fix prompt attempt for a task MR.
+// Mirrors github.TaskCIFixAttempt.
+type TaskMRFixAttempt struct {
+	TaskID         string
+	RepositoryID   string
+	ProjectPath    string
+	MRIID          int
+	Signature      string
+	CheckpointJSON string
+	SessionID      string
+	EnqueuedAt     time.Time
+	IncrementRound bool
+}
+
+// TaskMRMergeAttempt records an auto-merge attempt for a task MR. Mirrors
+// github.TaskCIMergeAttempt.
+type TaskMRMergeAttempt struct {
+	TaskID       string
+	RepositoryID string
+	ProjectPath  string
+	MRIID        int
+	Signature    string
+	AttemptedAt  time.Time
 }

@@ -722,26 +722,21 @@ func (p *Projector) applyPendingMessageLocked(state *projectionState, eventType 
 		messageType: messageType,
 		pendingID:   stringField(metadata, "pending_id"),
 	}
-	isPendingMessage := boolValue(data["requests_input"]) ||
-		messageType == "clarification_request" || messageType == "permission_request"
-	isTrackedMessage := isPendingMessage || stringField(metadata, "pending_id") != "" || status != ""
-	if !isTrackedMessage {
+	action := pendingActionForMessage(messageType, boolValue(data["requests_input"]))
+	if action == "" {
 		return false
 	}
 	state.pendingObserved = true
-	// Resolutions land as a message.updated on the request row itself
-	// (approved/rejected/expired for permissions, answered/rejected/cancelled/
-	// expired for clarifications). Only the request that armed the affordance
-	// may clear it; a detached-but-answerable clarification stays pending.
-	if isPendingMessage && (eventType == events.MessageDeleted || (status != "" && status != statusPending)) {
+	// A terminal status on the request row means the prompt is no longer awaiting
+	// the user. Resolutions land as a message.updated on that row (approved/
+	// rejected/expired for permissions, answered/rejected/cancelled/expired for
+	// clarifications). Only the request that armed the affordance may clear it;
+	// a detached-but-answerable clarification stays pending.
+	if eventType == events.MessageDeleted || (status != "" && status != statusPending) {
 		if state.pendingRequests[sessionID] == requestIdentity {
 			return p.clearPendingLocked(state, sessionID)
 		}
 		return false
-	}
-	action := pendingPermission
-	if messageType == "clarification_request" || boolValue(data["requests_input"]) {
-		action = pendingClarification
 	}
 	if state.pending[sessionID] == action {
 		if _, exists := state.pendingRequests[sessionID]; !exists {
@@ -752,6 +747,32 @@ func (p *Projector) applyPendingMessageLocked(state *projectionState, eventType 
 	state.pending[sessionID] = action
 	state.pendingRequests[sessionID] = requestIdentity
 	return true
+}
+
+// pendingActionForMessage maps a message to the task-row affordance it drives,
+// or "" when the message asks the user for nothing. A message that asks for
+// nothing is not evidence about the pending state in either direction, so the
+// caller ignores it rather than letting it arm or clear the affordance.
+//
+// The distinction matters because a status of "pending" is not exclusive to
+// prompts: every announced tool call is persisted with the raw ACP tool status,
+// which starts at "pending" and only becomes in_progress/complete on the first
+// tool_update. Treating those rows as prompts made the amber "waiting on you"
+// icon flash onto the task row for every tool call the agent made (and stick
+// whenever a turn ended before its last tool_update landed), while their
+// terminal updates tore down a genuinely pending prompt — a background tool
+// completing would clear the icon while the foreground turn was still blocked.
+// The exact request types are matched before the generic requests_input flag, so
+// a permission row that ever starts carrying the flag stays a permission rather
+// than silently degrading to a clarification.
+func pendingActionForMessage(messageType string, requestsInput bool) string {
+	if messageType == messageTypePermissionRequest {
+		return pendingPermission
+	}
+	if messageType == messageTypeClarificationRequest || requestsInput {
+		return pendingClarification
+	}
+	return ""
 }
 
 func (p *Projector) applyGitEventLocked(state *projectionState, data map[string]interface{}) bool {

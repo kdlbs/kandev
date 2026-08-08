@@ -431,6 +431,40 @@ func (c *PATClient) ListPipelines(ctx context.Context, projectPath, ref string) 
 	return pipelines, nil
 }
 
+func (c *PATClient) ListPipelineJobs(ctx context.Context, projectPath string, pipelineID int64) ([]PipelineJob, error) {
+	endpoint := fmt.Sprintf("/projects/%s/pipelines/%d/jobs?per_page=%d", projectRef(projectPath), pipelineID, maxPageSize)
+	var raw []rawPipelineJob
+	for endpoint != "" {
+		var page []rawPipelineJob
+		nextLink, err := c.getPaginated(ctx, endpoint, &page)
+		if err != nil {
+			return nil, fmt.Errorf("list pipeline jobs: %w", err)
+		}
+		raw = append(raw, page...)
+		endpoint = nextLink
+	}
+	jobs := make([]PipelineJob, len(raw))
+	for i := range raw {
+		jobs[i] = convertRawPipelineJob(&raw[i])
+	}
+	return jobs, nil
+}
+
+// populatePipelineJobCounts fetches the given pipeline's jobs and fills in
+// its JobsTotal/JobsPassing from them. GitLab's pipeline list/get endpoints
+// never carry job counts (unlike GitHub's check-runs summary), so this is
+// the only way to populate them.
+func (c *PATClient) populatePipelineJobCounts(ctx context.Context, projectPath string, pipeline *Pipeline) error {
+	jobs, err := c.ListPipelineJobs(ctx, projectPath, pipeline.ID)
+	if err != nil {
+		return err
+	}
+	total, passing, _ := summarizePipelineJobs(jobs)
+	pipeline.JobsTotal = total
+	pipeline.JobsPassing = passing
+	return nil
+}
+
 func (c *PATClient) GetMRFeedback(ctx context.Context, projectPath string, iid int) (*MRFeedback, error) {
 	mr, err := c.GetMR(ctx, projectPath, iid)
 	if err != nil {
@@ -450,6 +484,16 @@ func (c *PATClient) GetMRFeedback(ctx context.Context, projectPath string, iid i
 		if err != nil {
 			return nil, err
 		}
+	}
+	if len(pipelines) > 0 {
+		jobs, err := c.ListPipelineJobs(ctx, projectPath, pipelines[0].ID)
+		if err != nil {
+			return nil, err
+		}
+		total, passing, _ := summarizePipelineJobs(jobs)
+		pipelines[0].JobsTotal = total
+		pipelines[0].JobsPassing = passing
+		pipelines[0].Jobs = jobs
 	}
 	return &MRFeedback{
 		MR:          mr,
@@ -476,6 +520,11 @@ func (c *PATClient) GetMRStatus(ctx context.Context, projectPath string, iid int
 			return nil, err
 		}
 	}
+	if len(pipelines) > 0 {
+		if err := c.populatePipelineJobCounts(ctx, projectPath, &pipelines[0]); err != nil {
+			return nil, err
+		}
+	}
 	pipelineState, jobsTotal, jobsPassing := summarizePipelines(pipelines)
 	approvalState := summarizeApprovals(len(approvals), required)
 	return &MRStatus{
@@ -487,6 +536,9 @@ func (c *PATClient) GetMRStatus(ctx context.Context, projectPath string, iid int
 		RequiredApprovals:   required,
 		PipelineJobsTotal:   jobsTotal,
 		PipelineJobsPassing: jobsPassing,
+		DetailedMergeStatus: mr.DetailedMergeStatus,
+		ReviewerCount:       len(mr.Reviewers),
+		UnapprovedReviewers: countUnapprovedReviewers(mr.Reviewers, approvals),
 	}, nil
 }
 

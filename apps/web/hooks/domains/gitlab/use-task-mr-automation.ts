@@ -253,5 +253,14 @@ export function useTaskMRAutomationOptions(taskId: string | null) {
     });
   }, [error, loading, options, refresh, taskId]);
 
-  return { options, loading, saving, error, refresh, update };
+  // Clears the per-task auto-fix prompt override, restoring the default
+  // (editable) template — an explicit empty string, not undefined, since
+  // the backend treats undefined as "field not sent" and empty string as
+  // "restore default" (AC5).
+  const resetPrompt = useCallback(
+    async (): Promise<TaskMRAutomationOptions | null> => update({ auto_fix_prompt_override: "" }),
+    [update],
+  );
+
+  return { options, loading, saving, error, refresh, update, resetPrompt };
 }

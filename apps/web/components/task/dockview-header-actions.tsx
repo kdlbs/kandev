@@ -37,6 +37,7 @@ import { NewTaskDropdown } from "./new-task-dropdown";
 import { useActiveSessionDevScript } from "./repository-scripts-menu";
 import { GroupSplitCloseActionsView, useDockviewGroupWidth } from "./dockview-group-actions";
 import { useTranslation } from "react-i18next";
+import { useOptionalPortForwardingVisibility } from "./port-forwarding-visibility-provider";
 
 const HEADER_ACTION_BUTTON_CLASS =
   "h-6 w-6 p-0 cursor-pointer text-muted-foreground hover:bg-muted/70 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring";
@@ -74,6 +75,7 @@ function useLeftHeaderState(
   });
   const { prs } = useTaskPR(taskId);
   const mrs = useTaskMRs(taskId);
+  const portForwarding = useOptionalPortForwardingVisibility();
   const hasChanges = Boolean(
     containerApi.getPanel("changes") ?? containerApi.getPanel("diff-files"),
   );
@@ -88,6 +90,7 @@ function useLeftHeaderState(
     mrs,
     hasChanges,
     hasFiles,
+    portForwarding,
   };
 }
 

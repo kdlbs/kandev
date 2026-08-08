@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -1320,6 +1321,33 @@ type httpUpdateTaskRequest struct {
 	Metadata     map[string]interface{}    `json:"metadata,omitempty"`
 	// ParentID nests the task under another task. "" clears the parent.
 	ParentID *string `json:"parent_id,omitempty"`
+}
+
+type httpUpdateTaskPortForwardingRequest struct {
+	Enabled *bool `json:"enabled"`
+}
+
+func (h *TaskHandlers) httpUpdateTaskPortForwarding(c *gin.Context) {
+	var body httpUpdateTaskPortForwardingRequest
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil || body.Enabled == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "enabled must be a boolean"})
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "enabled must be a boolean"})
+		return
+	}
+
+	task, err := h.service.UpdateTaskMetadata(c.Request.Context(), c.Param("id"), map[string]interface{}{
+		models.MetaKeyPortForwardingEnabled: *body.Enabled,
+	})
+	if err != nil {
+		handleNotFound(c, h.logger, err, "task not updated")
+		return
+	}
+	c.JSON(http.StatusOK, dto.FromTask(task))
 }
 
 func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {

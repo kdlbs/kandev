@@ -50,6 +50,7 @@ Product-wide capabilities that are not tied to a single feature area.
 | [git-subprocess-admission](platform/git-subprocess-admission.md) | building |
 | [bounded-task-status-delivery](platform/bounded-task-status-delivery.md) | approved |
 | [diagnostic-logging](platform/diagnostic-logging.md) | approved |
+| [health-endpoint-version](health-endpoint-version/spec.md) | building |
 
 ## tasks/ — task & workflow model
 
@@ -178,6 +179,8 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [mobile-task-navigation](ui/mobile-task-navigation.md) | shipped |
 | [adaptive-kanban](ui/adaptive-kanban.md) | shipped |
 | [task-layout-profiles](ui/task-layout-profiles.md) | draft |
+| [port-forwarding-discovery](ui/port-forwarding-discovery.md) | building |
+| [port-proxy-browser-panel](port-proxy-browser-panel/spec.md) | shipped |
 | [task-surface-refresh](ui/task-surface-refresh.md) | draft |
 | [walkthrough-navigation-layout](walkthrough-navigation-layout/spec.md) | shipped |
 | [walkthrough-feedback-controls](walkthrough-feedback-controls/spec.md) | shipped |
