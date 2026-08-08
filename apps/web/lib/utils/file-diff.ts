@@ -52,27 +52,6 @@ export async function calculateHash(content: string): Promise<string> {
 }
 
 /**
- * Calculate diff stats (additions and deletions)
- * @param diff - Unified diff string
- * @returns Object with additions and deletions count
- */
-export function calculateDiffStats(diff: string): { additions: number; deletions: number } {
-  const lines = diff.split("\n");
-  let additions = 0;
-  let deletions = 0;
-
-  for (const line of lines) {
-    if (line.startsWith("+") && !line.startsWith("+++")) {
-      additions++;
-    } else if (line.startsWith("-") && !line.startsWith("---")) {
-      deletions++;
-    }
-  }
-
-  return { additions, deletions };
-}
-
-/**
  * Format diff stats for display
  * @param additions - Number of additions
  * @param deletions - Number of deletions

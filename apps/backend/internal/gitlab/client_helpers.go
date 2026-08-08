@@ -4,6 +4,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/unidiff"
 )
 
 // rawMR is the JSON shape of a GitLab merge request as returned by the
@@ -557,22 +559,17 @@ func appendFilter(values url.Values, filter string) {
 	}
 }
 
-// countDiffLines returns (additions, deletions) by counting lines starting
-// with "+" or "-" (excluding the diff header lines that start with
-// "+++"/"---"). Best-effort; matches the GitLab UI's own counting.
+// countDiffLines returns (additions, deletions) for one file's patch from the
+// MR /changes payload. GitLab's REST API carries no per-file line counts, so the
+// patch body has to be counted here.
+//
+// It counts only lines inside a `@@` hunk. The previous "+++"/"---" prefix test
+// was content-blind: GitLab returns `--- a/<path>` / `+++ b/<path>` headers ahead
+// of the first hunk, but so does a removed SQL comment (`-- x` arrives as
+// `--- x`) or an added C increment (`++n;` arrives as `+++n;`), and those were
+// dropped from the totals.
 func countDiffLines(diff string) (int, int) {
-	additions, deletions := 0, 0
-	for _, line := range strings.Split(diff, "\n") {
-		switch {
-		case strings.HasPrefix(line, "+++"), strings.HasPrefix(line, "---"):
-			continue
-		case strings.HasPrefix(line, "+"):
-			additions++
-		case strings.HasPrefix(line, "-"):
-			deletions++
-		}
-	}
-	return additions, deletions
+	return unidiff.CountLines(diff)
 }
 
 func diffStatus(newFile, deletedFile, renamedFile bool) string {
