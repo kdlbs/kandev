@@ -239,8 +239,13 @@ func (r *Registry) Exists(id string) bool {
 // winner — which candidates those are decides whether an ambiguous reference is
 // relevant to a given caller at all, and only the caller knows that.
 //
-// An exact canonical ID is unambiguous by construction — IDs are the registry's
-// keys — and resolves alone even when another agent claims it as an alias.
+// A canonical ID written exactly, byte for byte, is unambiguous by construction —
+// IDs are the registry's keys — and resolves alone even when another agent claims
+// it as an alias. That precedence is case-SENSITIVE, unlike the alias scan below
+// it: "claude-acp" takes the map lookup, while "Claude-ACP" falls through to the
+// scan and can therefore come back ambiguous if some other agent answers to that
+// spelling too. Writing the ID as the registry spells it is what buys the
+// guarantee; anything else is an alias and is treated like one.
 func (r *Registry) ResolveFamilyIDs(name string) []string {
 	trimmed := strings.TrimSpace(name)
 	if trimmed == "" {

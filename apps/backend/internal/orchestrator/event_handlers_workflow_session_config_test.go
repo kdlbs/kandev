@@ -527,36 +527,104 @@ func TestProcessOnEnterConfigureSessionUnrelatedAmbiguousRuleStillApplies(t *tes
 // session's family still refuses, and is not outvoted by an exact rule elsewhere
 // in the same action. Both rules claim this session and only one of them says
 // which agent it means, so array order would decide the model.
+// Both orderings are exercised because the ambiguity verdict returns from inside
+// the classification loop. Whichever rule the loop reaches first decides where
+// the refusal comes from, so a single ordering would leave the other one free to
+// change under a refactor — accumulating matches before checking for ambiguity,
+// say — with nothing failing. Array order must not decide the outcome.
 func TestProcessOnEnterConfigureSessionRelevantAmbiguityRefusesDespiteExactRule(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		rules []configureSessionRule
+	}{
+		{
+			name: "exact rule first",
+			rules: []configureSessionRule{
+				{agentName: "claude-acp", model: "sonnet"},
+				{agentName: "Claude", model: "opus[1m]"},
+			},
+		},
+		{
+			// The ambiguous rule is classified first and returns immediately,
+			// before the exact rule is ever looked at.
+			name: "ambiguous rule first",
+			rules: []configureSessionRule{
+				{agentName: "Claude", model: "opus[1m]"},
+				{agentName: "claude-acp", model: "sonnet"},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo, svc, agent, messages, session := seedConfigureSessionTest(
+				t, "task-relevant", "session-relevant", "claude-acp")
+
+			shadowed := registry.NewRegistry(testLogger())
+			shadowed.LoadDefaults()
+			if err := shadowed.RegisterCustomTUIAgent("aaa-claude", "Claude", "claude-tui", "", "", nil); err != nil {
+				t.Fatalf("register custom agent: %v", err)
+			}
+			svc.agentFamilyResolver = shadowed
+
+			svc.processOnEnter(ctx, "task-relevant", session,
+				multiRuleConfigureSessionStep("step-relevant", tc.rules...), "")
+
+			if len(agent.setSessionModelCalls) != 0 {
+				t.Fatalf("relevant ambiguity applied a model: %#v", agent.setSessionModelCalls)
+			}
+			warnings := messages.workflowSessionConfigWarnings()
+			if len(warnings) != 1 || !strings.Contains(warnings[0], "more than one") {
+				t.Fatalf("warnings = %#v, want one ambiguity warning", warnings)
+			}
+			updated, err := repo.GetTaskSession(ctx, "session-relevant")
+			if err != nil {
+				t.Fatalf("reload session: %v", err)
+			}
+			if overrides, ok := models.LoadSessionRuntimeConfigOverrides(updated.Metadata); ok && overrides.Model != "" {
+				t.Fatalf("relevant ambiguity persisted a runtime override: %#v", overrides)
+			}
+		})
+	}
+}
+
+// The session side of the same refusal. Sessions are expected to store a
+// canonical agent ID, which resolves alone through the registry's exact-key path
+// and can never come back ambiguous — so this branch only fires if that
+// convention is broken by an import, a migration, or a hand-edited row. When it
+// does, nothing about which agent the session runs is knowable, so no rule may be
+// applied and the user is told why rather than silently getting the profile's
+// model at every step.
+func TestProcessOnEnterConfigureSessionAmbiguousSessionFamilyRefuses(t *testing.T) {
 	ctx := context.Background()
+	// Stored as the alias "Claude" rather than the canonical "claude-acp".
 	repo, svc, agent, messages, session := seedConfigureSessionTest(
-		t, "task-relevant", "session-relevant", "claude-acp")
+		t, "task-session-ambiguous", "session-session-ambiguous", "Claude")
 
 	shadowed := registry.NewRegistry(testLogger())
 	shadowed.LoadDefaults()
+	// "Claude" now answers for both claude-acp and this agent.
 	if err := shadowed.RegisterCustomTUIAgent("aaa-claude", "Claude", "claude-tui", "", "", nil); err != nil {
 		t.Fatalf("register custom agent: %v", err)
 	}
 	svc.agentFamilyResolver = shadowed
 
-	svc.processOnEnter(ctx, "task-relevant", session, multiRuleConfigureSessionStep("step-relevant",
-		configureSessionRule{agentName: "claude-acp", model: "sonnet"},
-		configureSessionRule{agentName: "Claude", model: "opus[1m]"},
-	), "")
+	// The rule names one agent unambiguously; the session is the ambiguous side.
+	svc.processOnEnter(ctx, "task-session-ambiguous", session,
+		configureSessionStep("step-session-ambiguous", "claude-acp", "set", "opus[1m]", nil), "")
 
 	if len(agent.setSessionModelCalls) != 0 {
-		t.Fatalf("relevant ambiguity applied a model: %#v", agent.setSessionModelCalls)
+		t.Fatalf("ambiguous session family applied a model: %#v", agent.setSessionModelCalls)
 	}
 	warnings := messages.workflowSessionConfigWarnings()
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "more than one") {
 		t.Fatalf("warnings = %#v, want one ambiguity warning", warnings)
 	}
-	updated, err := repo.GetTaskSession(ctx, "session-relevant")
+	updated, err := repo.GetTaskSession(ctx, "session-session-ambiguous")
 	if err != nil {
 		t.Fatalf("reload session: %v", err)
 	}
 	if overrides, ok := models.LoadSessionRuntimeConfigOverrides(updated.Metadata); ok && overrides.Model != "" {
-		t.Fatalf("relevant ambiguity persisted a runtime override: %#v", overrides)
+		t.Fatalf("ambiguous session family persisted a runtime override: %#v", overrides)
 	}
 }
 
