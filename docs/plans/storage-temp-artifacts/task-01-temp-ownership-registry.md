@@ -66,8 +66,8 @@ after the focused backend tests pass.
 
 - Added the replay-safe `storage_temp_artifacts` SQLite table and lifecycle store methods.
 - Added the exact-root registry and owner-only `.kandev-temp-artifact.json` marker contract,
-  including heartbeat, close, restart reconciliation, symlink/containment checks, and protected
-  liveness handling.
+  including heartbeat, close, restart reconciliation with per-run identities, symlink/containment
+  checks, and protected liveness handling.
 - Improve Kandev bundle roots and host-utility parent roots now register with the service registry;
   the old broad stale-bundle sweep was removed while inherited temp environment behavior remains
   unchanged.

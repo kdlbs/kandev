@@ -112,6 +112,12 @@ function temporaryArtifactsResource(
   const stale = summary.stale_count ?? 0;
   const active = summary.active_count ?? 0;
   const protectedCount = summary.protected_count ?? 0;
+  const staleBytes =
+    summary.stale_bytes === undefined
+      ? undefined
+      : t("system:storageTemporaryArtifactsStaleBytes", {
+          value: formatGigabytes(summary.stale_bytes),
+        });
   return {
     id: TEMPORARY_ARTIFACTS_RESOURCE_ID,
     label: t("system:storageTemporaryArtifacts"),
@@ -119,7 +125,14 @@ function temporaryArtifactsResource(
       summary.total_bytes === undefined
         ? t(STORAGE_UNAVAILABLE_VALUE_KEY)
         : formatGigabytes(summary.total_bytes),
-    detail: `${t("system:storageTemporaryArtifactsStaleCount", { count: stale })} · ${t("system:storageTemporaryArtifactsActiveCount", { count: active })} · ${t("system:storageTemporaryArtifactsProtectedCount", { count: protectedCount })}`,
+    detail: [
+      t("system:storageTemporaryArtifactsStaleCount", { count: stale }),
+      staleBytes,
+      t("system:storageTemporaryArtifactsActiveCount", { count: active }),
+      t("system:storageTemporaryArtifactsProtectedCount", { count: protectedCount }),
+    ]
+      .filter(Boolean)
+      .join(" · "),
     warning: warnings || undefined,
   };
 }

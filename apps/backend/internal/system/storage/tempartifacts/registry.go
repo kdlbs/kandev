@@ -18,7 +18,10 @@ import (
 	"github.com/kandev/kandev/internal/system/storage"
 )
 
-const MarkerName = ".kandev-temp-artifact.json"
+const (
+	MarkerName               = ".kandev-temp-artifact.json"
+	registryRunIDMetadataKey = "_kandev_registry_run_id"
+)
 
 type Store interface {
 	CreateTemporaryArtifact(context.Context, *storage.TemporaryArtifact) error
@@ -32,6 +35,7 @@ type Config struct {
 	Store    Store
 	TempRoot string
 	OwnerPID int64
+	RunID    string
 	Now      func() time.Time
 	NewID    func() string
 	NewToken func() string
@@ -41,6 +45,7 @@ type Registry struct {
 	store    Store
 	tempRoot string
 	ownerPID int64
+	runID    string
 	now      func() time.Time
 	newID    func() string
 	newToken func() string
@@ -78,13 +83,17 @@ func NewRegistry(config Config) *Registry {
 	if newToken == nil {
 		newToken = uuid.NewString
 	}
+	runID := config.RunID
+	if runID == "" {
+		runID = uuid.NewString()
+	}
 	ownerPID := config.OwnerPID
 	if ownerPID <= 0 {
 		ownerPID = int64(os.Getpid())
 	}
 	return &Registry{
 		store: config.Store, tempRoot: filepath.Clean(tempRoot), ownerPID: ownerPID,
-		now: now, newID: newID, newToken: newToken,
+		runID: runID, now: now, newID: newID, newToken: newToken,
 	}
 }
 
@@ -156,7 +165,7 @@ func (r *Registry) RegisterExisting(
 	artifact := &storage.TemporaryArtifact{
 		ID: id, Kind: kind, Path: path, MarkerToken: token,
 		State: storage.TemporaryArtifactStateActive, OwnerPID: r.ownerPID,
-		CreatedAt: now, LastHeartbeatAt: &now, Metadata: metadata,
+		CreatedAt: now, LastHeartbeatAt: &now, Metadata: metadataWithRunID(metadata, r.runID),
 	}
 	if err := r.store.CreateTemporaryArtifact(ctx, artifact); err != nil {
 		_ = os.Remove(filepath.Join(path, MarkerName))
@@ -172,27 +181,82 @@ func (r *Registry) List(ctx context.Context) ([]storage.TemporaryArtifact, error
 	return r.store.ListTemporaryArtifacts(ctx)
 }
 
+func (r *Registry) Get(ctx context.Context, id string) (storage.TemporaryArtifact, error) {
+	if r.store == nil {
+		return storage.TemporaryArtifact{}, errors.New("temporary artifact store is required")
+	}
+	return r.store.GetTemporaryArtifact(ctx, id)
+}
+
 func (r *Registry) Reconcile(ctx context.Context) error {
 	artifacts, err := r.List(ctx)
 	if err != nil {
 		return err
 	}
 	for _, artifact := range artifacts {
-		if artifact.State != storage.TemporaryArtifactStateActive || artifact.OwnerPID == r.ownerPID {
+		if artifact.State != storage.TemporaryArtifactStateActive {
+			continue
+		}
+		if artifact.OwnerPID == r.ownerPID && metadataRunID(artifact.Metadata) == r.runID {
+			continue
+		}
+		if artifact.OwnerPID == r.ownerPID {
+			if err := r.MarkAbandoned(ctx, artifact.ID, "owner process run is no longer active"); err != nil {
+				return fmt.Errorf("reconcile temporary artifact %s: %w", artifact.ID, err)
+			}
 			continue
 		}
 		alive, known := processAlive(artifact.OwnerPID)
 		if !known || alive {
 			continue
 		}
-		if err := r.store.TransitionTemporaryArtifact(
-			ctx, artifact.ID, storage.TemporaryArtifactStateAbandoned,
-			"owner process is no longer running", r.now(),
-		); err != nil {
+		if err := r.MarkAbandoned(ctx, artifact.ID, "owner process is no longer running"); err != nil {
 			return fmt.Errorf("reconcile temporary artifact %s: %w", artifact.ID, err)
 		}
 	}
 	return nil
+}
+
+func (r *Registry) MarkAbandoned(ctx context.Context, id, reason string) error {
+	return r.transition(ctx, id, storage.TemporaryArtifactStateAbandoned, reason)
+}
+
+func (r *Registry) MarkClosed(ctx context.Context, id string) error {
+	return r.transition(ctx, id, storage.TemporaryArtifactStateClosed, "")
+}
+
+func (r *Registry) MarkFailed(ctx context.Context, id, reason string) error {
+	return r.transition(ctx, id, storage.TemporaryArtifactStateFailed, reason)
+}
+
+func (r *Registry) MarkQuarantined(ctx context.Context, id string) error {
+	return r.transition(ctx, id, storage.TemporaryArtifactStateQuarantined, "")
+}
+
+func (r *Registry) MarkDeleted(ctx context.Context, id string) error {
+	return r.transition(ctx, id, storage.TemporaryArtifactStateDeleted, "")
+}
+
+func (r *Registry) transition(
+	ctx context.Context,
+	id string,
+	next storage.TemporaryArtifactState,
+	lastError string,
+) error {
+	return r.transitionAt(ctx, id, next, lastError, r.now())
+}
+
+func (r *Registry) transitionAt(
+	ctx context.Context,
+	id string,
+	next storage.TemporaryArtifactState,
+	lastError string,
+	at time.Time,
+) error {
+	if r.store == nil {
+		return errors.New("temporary artifact store is required")
+	}
+	return r.store.TransitionTemporaryArtifact(ctx, id, next, lastError, at.UTC())
 }
 
 func (r *Registry) Validate(artifact storage.TemporaryArtifact) error {
@@ -248,7 +312,11 @@ func (r *Registry) TempRoot() string { return r.tempRoot }
 
 func (l *Lease) Path() string { return l.artifact.Path }
 
-func (l *Lease) Artifact() storage.TemporaryArtifact { return l.artifact }
+func (l *Lease) Artifact() storage.TemporaryArtifact {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.artifact
+}
 
 func (l *Lease) Heartbeat(ctx context.Context) error {
 	l.mu.Lock()
@@ -270,14 +338,14 @@ func (l *Lease) Close(ctx context.Context) error {
 	if l.artifact.State != storage.TemporaryArtifactStateActive {
 		return nil
 	}
-	if err := l.registry.store.TransitionTemporaryArtifact(
-		ctx, l.artifact.ID, storage.TemporaryArtifactStateClosed, "", l.registry.now(),
+	at := l.registry.now().UTC()
+	if err := l.registry.transitionAt(
+		ctx, l.artifact.ID, storage.TemporaryArtifactStateClosed, "", at,
 	); err != nil {
 		return err
 	}
-	now := l.registry.now().UTC()
 	l.artifact.State = storage.TemporaryArtifactStateClosed
-	l.artifact.ClosedAt = &now
+	l.artifact.ClosedAt = &at
 	return nil
 }
 
@@ -293,13 +361,38 @@ func (l *Lease) Remove(ctx context.Context) error {
 	if err := os.RemoveAll(l.artifact.Path); err != nil {
 		return fmt.Errorf("remove temporary artifact: %w", err)
 	}
-	if err := l.registry.store.TransitionTemporaryArtifact(
-		ctx, l.artifact.ID, storage.TemporaryArtifactStateDeleted, "", l.registry.now(),
-	); err != nil {
+	if err := l.registry.MarkDeleted(ctx, l.artifact.ID); err != nil {
 		return err
 	}
 	l.artifact.State = storage.TemporaryArtifactStateDeleted
 	return nil
+}
+
+func metadataWithRunID(metadata json.RawMessage, runID string) json.RawMessage {
+	fields := make(map[string]json.RawMessage)
+	trimmed := strings.TrimSpace(string(metadata))
+	if trimmed != "" && trimmed != "null" {
+		if err := json.Unmarshal(metadata, &fields); err != nil || fields == nil {
+			encoded, _ := json.Marshal(string(metadata))
+			fields = map[string]json.RawMessage{"_kandev_metadata": encoded}
+		}
+	}
+	encodedRunID, _ := json.Marshal(runID)
+	fields[registryRunIDMetadataKey] = encodedRunID
+	encoded, _ := json.Marshal(fields)
+	return encoded
+}
+
+func metadataRunID(metadata json.RawMessage) string {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(metadata, &fields); err != nil || fields == nil {
+		return ""
+	}
+	var runID string
+	if err := json.Unmarshal(fields[registryRunIDMetadataKey], &runID); err != nil {
+		return ""
+	}
+	return runID
 }
 
 func writeMarker(path string, marker markerData) error {

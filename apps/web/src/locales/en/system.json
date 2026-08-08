@@ -411,6 +411,7 @@
   "storageTemporaryArtifactsProtectedCount_other": "{{count}} protected",
   "storageTemporaryArtifactsStaleCount_one": "{{count}} stale eligible",
   "storageTemporaryArtifactsStaleCount_other": "{{count}} stale eligible",
+  "storageTemporaryArtifactsStaleBytes": "{{value}} eligible",
   "storageTemporaryArtifactsUnavailable": "Temporary artifact ownership could not be measured",
   "storageTitle": "Storage",
   "storageToastAnalysisStarted": "Storage analysis started",

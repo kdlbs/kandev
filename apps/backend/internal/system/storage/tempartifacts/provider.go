@@ -180,9 +180,7 @@ func (p *Provider) reconcileMoved(
 		}
 	}
 	if artifact.State != storage.TemporaryArtifactStateQuarantined {
-		if err := p.registry.store.TransitionTemporaryArtifact(
-			ctx, artifact.ID, storage.TemporaryArtifactStateQuarantined, "", p.now(),
-		); err != nil {
+		if err := p.registry.MarkQuarantined(ctx, artifact.ID); err != nil {
 			return fmt.Errorf("reconcile temporary artifact lifecycle %s: %w", entry.ID, err)
 		}
 	}
@@ -211,9 +209,7 @@ func (p *Provider) reconcileUnmoved(
 		return fmt.Errorf("release temporary artifact quarantine %s: %w", entry.ID, err)
 	}
 	if released && artifact.State == storage.TemporaryArtifactStateFailed {
-		if err := p.registry.store.TransitionTemporaryArtifact(
-			ctx, artifact.ID, storage.TemporaryArtifactStateClosed, "", p.now(),
-		); err != nil {
+		if err := p.registry.MarkClosed(ctx, artifact.ID); err != nil {
 			return fmt.Errorf("restore temporary artifact lifecycle %s: %w", entry.ID, err)
 		}
 	}
@@ -337,9 +333,7 @@ func (p *Provider) releaseRetryableFailures(ctx context.Context) error {
 		if releaseErr != nil || !released {
 			continue
 		}
-		if err := p.registry.store.TransitionTemporaryArtifact(
-			ctx, artifact.ID, storage.TemporaryArtifactStateClosed, "", p.now(),
-		); err != nil {
+		if err := p.registry.MarkClosed(ctx, artifact.ID); err != nil {
 			return fmt.Errorf("release temporary artifact %s: %w", artifact.ID, err)
 		}
 	}
@@ -383,12 +377,10 @@ func (p *Provider) quarantine(
 	}
 	if err := os.Rename(artifact.Path, quarantinePath); err != nil {
 		_, _ = p.store.TransitionQuarantineEntry(ctx, entry.ID, storage.QuarantineStateFailed, err.Error())
-		_ = p.registry.store.TransitionTemporaryArtifact(ctx, artifact.ID, storage.TemporaryArtifactStateFailed, err.Error(), now)
+		_ = p.registry.MarkFailed(ctx, artifact.ID, err.Error())
 		return fmt.Errorf("quarantine temporary artifact: %w", err)
 	}
-	if err := p.registry.store.TransitionTemporaryArtifact(
-		ctx, artifact.ID, storage.TemporaryArtifactStateQuarantined, "", now,
-	); err != nil {
+	if err := p.registry.MarkQuarantined(ctx, artifact.ID); err != nil {
 		_, _ = p.store.TransitionQuarantineEntry(ctx, entry.ID, storage.QuarantineStateFailed, err.Error())
 		return fmt.Errorf("persist temporary artifact quarantine: %w", err)
 	}
@@ -411,15 +403,14 @@ func (p *Provider) Restore(ctx context.Context, id string) (storage.QuarantineEn
 	if err := os.Rename(entry.QuarantinePath, artifact.Path); err != nil {
 		return entry, fmt.Errorf("restore temporary artifact: %w", err)
 	}
+	if err := p.registry.MarkClosed(ctx, artifact.ID); err != nil {
+		_ = os.Rename(artifact.Path, entry.QuarantinePath)
+		return entry, fmt.Errorf("persist temporary artifact lifecycle restore: %w", err)
+	}
 	restored, err := p.store.TransitionQuarantineEntry(ctx, id, storage.QuarantineStateRestored, "")
 	if err != nil {
 		_ = os.Rename(artifact.Path, entry.QuarantinePath)
 		return entry, fmt.Errorf("persist temporary artifact restore: %w", err)
-	}
-	if err := p.registry.store.TransitionTemporaryArtifact(
-		ctx, artifact.ID, storage.TemporaryArtifactStateClosed, "", p.now(),
-	); err != nil {
-		return restored, fmt.Errorf("persist temporary artifact lifecycle restore: %w", err)
 	}
 	return restored, nil
 }
@@ -463,9 +454,7 @@ func (p *Provider) permanentDelete(
 	if err != nil {
 		return entry, fmt.Errorf("persist temporary artifact deletion: %w", err)
 	}
-	if err := p.registry.store.TransitionTemporaryArtifact(
-		ctx, artifact.ID, storage.TemporaryArtifactStateDeleted, "", p.now(),
-	); err != nil {
+	if err := p.registry.MarkDeleted(ctx, artifact.ID); err != nil {
 		return deleted, fmt.Errorf("persist temporary artifact lifecycle deletion: %w", err)
 	}
 	return deleted, nil
@@ -492,7 +481,7 @@ func (p *Provider) loadQuarantineArtifact(
 	if artifactIDErr != nil {
 		return entry, storage.TemporaryArtifact{}, artifactIDErr
 	}
-	artifact, err := p.registry.store.GetTemporaryArtifact(ctx, artifactID)
+	artifact, err := p.registry.Get(ctx, artifactID)
 	if err != nil {
 		return entry, storage.TemporaryArtifact{}, err
 	}

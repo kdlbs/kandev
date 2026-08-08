@@ -95,6 +95,66 @@ func TestRegistryRejectsUnsafeOwnedArtifactPaths(t *testing.T) {
 	}
 }
 
+func TestRegistryReconcilesPreviousRunsAndDeadOwners(t *testing.T) {
+	root := t.TempDir()
+	store := newFakeArtifactStore()
+	oldRegistry := NewRegistry(Config{
+		Store: store, TempRoot: root, OwnerPID: 4242, RunID: "old-run",
+		NewID: func() string { return "old-artifact" }, NewToken: func() string { return "old-token" },
+	})
+	oldLease, err := oldRegistry.Create(context.Background(), storage.TemporaryArtifactKindImproveBundle, nil)
+	if err != nil {
+		t.Fatalf("create old-run artifact: %v", err)
+	}
+
+	registry := NewRegistry(Config{
+		Store: store, TempRoot: root, OwnerPID: 4242, RunID: "current-run",
+		NewID: func() string { return "current-artifact" }, NewToken: func() string { return "current-token" },
+	})
+	currentLease, err := registry.Create(context.Background(), storage.TemporaryArtifactKindHostUtility, nil)
+	if err != nil {
+		t.Fatalf("create current-run artifact: %v", err)
+	}
+	deadPID := int64(os.Getpid()) + 1_000_000
+	alive, known := processAlive(deadPID)
+	canCheckDead := known && !alive
+	if canCheckDead {
+		store.artifacts[filepath.Join(root, "kandev-host-utility-dead")] = storage.TemporaryArtifact{
+			ID: "dead-artifact", Kind: storage.TemporaryArtifactKindHostUtility,
+			Path: filepath.Join(root, "kandev-host-utility-dead"), MarkerToken: "dead-token",
+			State: storage.TemporaryArtifactStateActive, OwnerPID: deadPID,
+			CreatedAt: time.Now().UTC(), Metadata: nil,
+		}
+	}
+
+	if err := registry.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	oldArtifact, err := store.GetTemporaryArtifact(context.Background(), oldLease.Artifact().ID)
+	if err != nil {
+		t.Fatalf("get old-run artifact: %v", err)
+	}
+	if oldArtifact.State != storage.TemporaryArtifactStateAbandoned {
+		t.Fatalf("old-run artifact state = %q, want abandoned", oldArtifact.State)
+	}
+	currentArtifact, err := store.GetTemporaryArtifact(context.Background(), currentLease.Artifact().ID)
+	if err != nil {
+		t.Fatalf("get current-run artifact: %v", err)
+	}
+	if currentArtifact.State != storage.TemporaryArtifactStateActive {
+		t.Fatalf("current-run artifact state = %q, want active", currentArtifact.State)
+	}
+	if canCheckDead {
+		deadArtifact, err := store.GetTemporaryArtifact(context.Background(), "dead-artifact")
+		if err != nil {
+			t.Fatalf("get dead-owner artifact: %v", err)
+		}
+		if deadArtifact.State != storage.TemporaryArtifactStateAbandoned {
+			t.Fatalf("dead-owner artifact state = %q, want abandoned", deadArtifact.State)
+		}
+	}
+}
+
 type fakeArtifactStore struct {
 	artifacts map[string]storage.TemporaryArtifact
 }
@@ -151,13 +211,46 @@ func (s *fakeArtifactStore) TransitionTemporaryArtifact(
 		if artifact.ID != id {
 			continue
 		}
+		if !validFakeTemporaryArtifactTransition(artifact.State, next) {
+			return storage.ErrInvalidTransition
+		}
+		at = at.UTC()
 		artifact.State = next
 		artifact.LastError = lastError
-		if next == storage.TemporaryArtifactStateClosed {
+		if next != storage.TemporaryArtifactStateFailed {
+			artifact.LastError = ""
+		}
+		switch next {
+		case storage.TemporaryArtifactStateClosed:
 			artifact.ClosedAt = &at
+		case storage.TemporaryArtifactStateQuarantined:
+			artifact.QuarantinedAt = &at
+		case storage.TemporaryArtifactStateDeleted:
+			artifact.DeletedAt = &at
 		}
 		s.artifacts[path] = artifact
 		return nil
 	}
 	return storage.ErrNotFound
+}
+
+func validFakeTemporaryArtifactTransition(
+	current, next storage.TemporaryArtifactState,
+) bool {
+	switch current {
+	case storage.TemporaryArtifactStateActive:
+		return next == storage.TemporaryArtifactStateClosed || next == storage.TemporaryArtifactStateAbandoned ||
+			next == storage.TemporaryArtifactStateFailed || next == storage.TemporaryArtifactStateDeleted
+	case storage.TemporaryArtifactStateClosed, storage.TemporaryArtifactStateAbandoned:
+		return next == storage.TemporaryArtifactStateQuarantined || next == storage.TemporaryArtifactStateFailed ||
+			next == storage.TemporaryArtifactStateDeleted
+	case storage.TemporaryArtifactStateFailed:
+		return next == storage.TemporaryArtifactStateClosed || next == storage.TemporaryArtifactStateQuarantined ||
+			next == storage.TemporaryArtifactStateDeleted
+	case storage.TemporaryArtifactStateQuarantined:
+		return next == storage.TemporaryArtifactStateClosed || next == storage.TemporaryArtifactStateDeleted ||
+			next == storage.TemporaryArtifactStateFailed
+	default:
+		return false
+	}
 }

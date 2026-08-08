@@ -194,6 +194,9 @@ describe("StorageOverviewCard temporary artifacts", () => {
     );
 
     fireEvent.click(screen.getByTestId("storage-resource-temporary-artifacts-trigger"));
+    expect(screen.getByTestId("storage-resource-temporary-artifacts").textContent).toContain(
+      "<0.01 GB eligible",
+    );
     const cleanButton = screen.getByTestId("storage-temporary-artifacts-clean");
     expect((cleanButton as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(cleanButton);

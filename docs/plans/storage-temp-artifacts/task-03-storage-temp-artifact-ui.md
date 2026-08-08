@@ -26,10 +26,11 @@ second settings surface or a scheduled policy toggle.
 ## Verification
 
 ```bash
-cd apps && pnpm install --frozen-lockfile
-cd apps/web && pnpm run typecheck
-cd apps && pnpm --filter @kandev/web test -- storage-overview-card storage-confirmation-dialogs use-storage-maintenance system-api
-cd apps && pnpm --filter @kandev/web lint
+cd apps
+pnpm install --frozen-lockfile
+pnpm --filter @kandev/web run typecheck
+pnpm --filter @kandev/web test -- storage-overview-card storage-confirmation-dialogs use-storage-maintenance system-api
+pnpm --filter @kandev/web lint
 ```
 
 ## Files likely touched

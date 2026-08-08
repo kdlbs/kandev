@@ -49,6 +49,10 @@ test.describe("Mobile storage maintenance", () => {
       caption: "Mobile storage keeps stale artifact cleanup in a reachable confirmation",
     });
     await testPage.getByTestId("storage-temporary-artifacts-confirm").tap();
+    await expect(testPage.getByTestId("storage-run-now")).toHaveAttribute(
+      "data-job-state",
+      "succeeded",
+    );
     await expect
       .poll(() =>
         testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),

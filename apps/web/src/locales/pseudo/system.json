@@ -411,6 +411,7 @@
   "storageTemporaryArtifactsProtectedCount_other": "{{count}} ƥŕōţēćţēď",
   "storageTemporaryArtifactsStaleCount_one": "{{count}} śţàĺē ēĺĩĝĩƀĺē",
   "storageTemporaryArtifactsStaleCount_other": "{{count}} śţàĺē ēĺĩĝĩƀĺē",
+  "storageTemporaryArtifactsStaleBytes": "{{value}} ēĺĩĝĩƀĺē",
   "storageTemporaryArtifactsUnavailable": "Ţēḿƥōŕàŕŷ àŕţĩƒàćţ ōŵńēŕśĥĩƥ ćōũĺď ńōţ ƀē ḿēàśũŕēď",
   "storageTitle": "Śţōŕàĝē",
   "storageToastAnalysisStarted": "Śţōŕàĝē àńàĺŷśĩś śţàŕţēď",

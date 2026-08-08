@@ -411,6 +411,7 @@
   "storageTemporaryArtifactsProtectedCount_other": "{{count}} 个受保护",
   "storageTemporaryArtifactsStaleCount_one": "{{count}} 个过期可清理",
   "storageTemporaryArtifactsStaleCount_other": "{{count}} 个过期可清理",
+  "storageTemporaryArtifactsStaleBytes": "{{value}} 可清理",
   "storageTemporaryArtifactsUnavailable": "无法测量临时文件的所有权",
   "storageTitle": "存储",
   "storageToastAnalysisStarted": "已开始存储分析",

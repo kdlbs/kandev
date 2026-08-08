@@ -90,6 +90,40 @@ func TestProviderCountsOnlyRegisteredStaleArtifactsAndCleansExplicitly(t *testin
 	}
 }
 
+func TestProviderProtectsRecentlyClosedArtifact(t *testing.T) {
+	root := t.TempDir()
+	home := t.TempDir()
+	now := time.Date(2026, time.August, 8, 12, 0, 0, 0, time.UTC)
+	artifacts := newFakeArtifactStore()
+	registry := NewRegistry(Config{
+		Store: artifacts, TempRoot: root, OwnerPID: 1234, RunID: "test-run",
+		Now:   func() time.Time { return now },
+		NewID: func() string { return "artifact-1" }, NewToken: func() string { return "token-1" },
+	})
+	lease, err := registry.Create(context.Background(), storage.TemporaryArtifactKindImproveBundle, nil)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(lease.Path(), "bundle.zip"), []byte("bundle"), 0o600); err != nil {
+		t.Fatalf("write bundle: %v", err)
+	}
+	if err := lease.Close(context.Background()); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	provider := NewProvider(ProviderConfig{
+		Registry: registry, Store: newFakeQuarantineStore(), HomeDir: home,
+		Now: func() time.Time { return now },
+	})
+
+	analysis, err := provider.Analyze(context.Background())
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if analysis.ProtectedCount != 1 || analysis.ProtectedBytes == 0 || analysis.StaleCount != 0 {
+		t.Fatalf("analysis = %#v, want recently closed artifact protected", analysis)
+	}
+}
+
 func TestProviderReconcilesRenameBeforeLifecycleUpdate(t *testing.T) {
 	root := t.TempDir()
 	home := t.TempDir()
@@ -153,11 +187,10 @@ func TestProviderReleasesInterruptedRenameIntentWhenOriginalRemains(t *testing.T
 	root := t.TempDir()
 	home := t.TempDir()
 	now := time.Date(2026, time.August, 8, 12, 0, 0, 0, time.UTC)
-	clock := now
 	artifacts := newFakeArtifactStore()
 	registry := NewRegistry(Config{
 		Store: artifacts, TempRoot: root, OwnerPID: 1234,
-		Now:   func() time.Time { return clock },
+		Now:   func() time.Time { return now },
 		NewID: func() string { return "artifact-1" }, NewToken: func() string { return "token-1" },
 	})
 	lease, err := registry.Create(context.Background(), storage.TemporaryArtifactKindImproveBundle, nil)
@@ -290,8 +323,34 @@ func (s *fakeQuarantineStore) TransitionQuarantineEntry(
 	if !ok {
 		return storage.QuarantineEntry{}, storage.ErrNotFound
 	}
+	if !validFakeQuarantineTransition(entry.State, next) {
+		return storage.QuarantineEntry{}, storage.ErrInvalidTransition
+	}
 	entry.State = next
 	entry.LastError = lastError
+	if next != storage.QuarantineStateFailed {
+		entry.LastError = ""
+	}
+	completion := time.Now().UTC()
+	switch next {
+	case storage.QuarantineStateRestored:
+		entry.RestoredAt = &completion
+	case storage.QuarantineStateDeleted:
+		entry.DeletedAt = &completion
+	}
 	s.entries[id] = entry
 	return entry, nil
+}
+
+func validFakeQuarantineTransition(current, next storage.QuarantineState) bool {
+	switch current {
+	case storage.QuarantineStateQuarantined:
+		return next == storage.QuarantineStateRestored || next == storage.QuarantineStateDeleted ||
+			next == storage.QuarantineStateFailed
+	case storage.QuarantineStateFailed:
+		return next == storage.QuarantineStateQuarantined || next == storage.QuarantineStateRestored ||
+			next == storage.QuarantineStateDeleted
+	default:
+		return false
+	}
 }

@@ -411,6 +411,7 @@
   "storageTemporaryArtifactsProtectedCount_other": "{{count}} protegidos",
   "storageTemporaryArtifactsStaleCount_one": "{{count}} antigo elegível",
   "storageTemporaryArtifactsStaleCount_other": "{{count}} antigos elegíveis",
+  "storageTemporaryArtifactsStaleBytes": "{{value}} elegíveis",
   "storageTemporaryArtifactsUnavailable": "Não foi possível medir a propriedade dos artefactos temporários",
   "storageTitle": "Armazenamento",
   "storageToastAnalysisStarted": "Análise do armazenamento iniciada",

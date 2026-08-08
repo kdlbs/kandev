@@ -63,9 +63,8 @@ func createBundleDirWithRegistry(
 	if err != nil {
 		return "", err
 	}
-	metadata, _ := json.Marshal(map[string]string{"owner": owner})
 	lease, err := registry.RegisterExisting(
-		ctx, storage.TemporaryArtifactKindImproveBundle, dir, metadata,
+		ctx, storage.TemporaryArtifactKindImproveBundle, dir, nil,
 	)
 	if err != nil {
 		_ = os.RemoveAll(dir)

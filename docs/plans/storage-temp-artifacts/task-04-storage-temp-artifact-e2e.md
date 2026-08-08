@@ -27,9 +27,10 @@ by Task 02's real SQLite/provider tests.
 ## Verification
 
 ```bash
-cd apps && pnpm install --frozen-lockfile
-cd apps/web && pnpm e2e:run tests/system/storage-maintenance.spec.ts
-cd apps/web && pnpm e2e:run tests/system/mobile-storage-maintenance.spec.ts -- --project=mobile-chrome
+cd apps
+pnpm install --frozen-lockfile
+pnpm --filter @kandev/web e2e:run tests/system/storage-maintenance.spec.ts
+pnpm --filter @kandev/web e2e:run tests/system/mobile-storage-maintenance.spec.ts -- --project=mobile-chrome
 ```
 
 ## Files likely touched

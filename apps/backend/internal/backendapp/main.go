@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -801,21 +802,27 @@ func startGatewayAndServe(
 		return false
 	}
 	hostUtilityMgr.SetTemporaryArtifactRegistry(storageComposition.tempArtifacts)
+	hostUtilityCtx, hostUtilityCancel := context.WithCancel(ctx)
+	var hostUtilityWG sync.WaitGroup
+	hostUtilityWG.Add(1)
 	go func() {
-		if err := hostUtilityMgr.Start(ctx); err != nil {
+		defer hostUtilityWG.Done()
+		if err := hostUtilityMgr.Start(hostUtilityCtx); err != nil {
 			log.Warn("host utility manager bootstrap error", zap.Error(err))
 		}
 		// Reconcile profiles against fresh probe results — seeds defaults for
 		// newly probed agents, heals stale profile models/modes, cleans up
 		// orphans referencing removed agents.
-		if err := profileReconciler.Run(ctx); err != nil {
+		if err := profileReconciler.Run(hostUtilityCtx); err != nil {
 			log.Warn("profile reconciler error", zap.Error(err))
 		}
 	}()
 	addCleanup(func() error {
+		hostUtilityCancel()
 		stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		hostUtilityMgr.Stop(stopCtx)
+		hostUtilityWG.Wait()
 		return nil
 	})
 	systemSvc.Storage = storageComposition.handler

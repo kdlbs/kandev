@@ -201,6 +201,11 @@ func TestStoreTemporaryArtifactLifecycleSurvivesRecreation(t *testing.T) {
 	); err != nil {
 		t.Fatalf("close temporary artifact: %v", err)
 	}
+	if err := store.TransitionTemporaryArtifact(
+		ctx, artifact.ID, TemporaryArtifactStateActive, "", closedAt,
+	); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("closed-to-active transition error = %v, want %v", err, ErrInvalidTransition)
+	}
 
 	store = newStorageStore(t, pool)
 	got, err := store.GetTemporaryArtifact(ctx, artifact.ID)

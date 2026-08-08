@@ -16,7 +16,7 @@ consume the disk until an operator edits the host or runs broad commands such as
 `docker system prune -a`. Operators need an in-app, ownership-aware way to understand and
 reclaim that space without maintaining cron or systemd configuration outside Kandev.
 
-The service also creates a small number of longer-lived temporary roots for diagnostics and host
+The service also creates some longer-lived temporary roots for diagnostics and host
 utilities. Operators need a way to reclaim abandoned roots created by this installation, but shared
 temporary directories also contain unrelated caches, preview/CI data, developer harnesses, and other
 Kandev installations. Cleanup must therefore prove ownership instead of treating a `/tmp` name or
@@ -237,7 +237,8 @@ Decision: [ADR-2026-08-08-owned-temp-artifact-cleanup](../../decisions/2026-08-0
 
 - A backend service component creates a temporary artifact through the storage registry. The
   registry persists an exact absolute path, an allowlisted artifact kind, an opaque artifact ID,
-  lifecycle timestamps, owner lease/heartbeat state, and metadata in `storage_temp_artifacts`.
+  lifecycle timestamps, owner lease/heartbeat state, a per-service-run identity, and metadata in
+  `storage_temp_artifacts`.
 - The registry writes an owner-only `.kandev-temp-artifact.json` marker atomically inside the root.
   Analysis and cleanup require the marker's artifact ID and kind to match the durable record,
   validate the root with `Lstat`, reject symlink/path replacement, and never follow nested symlink
@@ -247,9 +248,10 @@ Decision: [ADR-2026-08-08-owned-temp-artifact-cleanup](../../decisions/2026-08-0
   `dev-isolated` harness roots, CI/PR checkouts, package-manager and compiler caches, generic `tmp.*`
   paths, and artifacts from another Kandev installation remain unregistered.
 - Normal producer shutdown closes and removes its artifact. After restart, a missing owner lease or
-  heartbeat can classify a registered root as abandoned, but it remains protected until the fixed
-  24-hour stale interval. Uncertain liveness, unreadable rows/markers, and missing paths are skipped
-  and reported rather than treated as ownership.
+  heartbeat, including a same-PID row from an earlier service run, can classify a registered root
+  as abandoned, but it remains protected until the fixed 24-hour stale interval. Uncertain
+  liveness, unreadable rows/markers, and missing paths are skipped and reported rather than treated
+  as ownership.
 - Explicit cleanup atomically renames an eligible root on the same filesystem into
   `<KANDEV_HOME_DIR>/trash/temporary-artifacts/` and records a `temporary_artifact` quarantine entry.
   A cross-device rename has no copy/delete fallback. Restore is allowed while the original path is
@@ -383,7 +385,7 @@ closed_at           timestamp  nullable
 quarantined_at      timestamp  nullable
 deleted_at          timestamp  nullable
 last_error          string     default ""
-metadata            json       producer-specific lifecycle details
+metadata            json       producer details plus the registry run identity
 ```
 
 The row is the current installation's ownership record; the marker is a second path-level check.
@@ -567,7 +569,7 @@ quarantined -> restored|deleted|failed
 failed      -> quarantined|deleted
 ```
 
-The `active` and `abandoned` states are never eligible before the fixed 24-hour stale interval.
+The `active`, `closed`, and `abandoned` states are never eligible before the fixed 24-hour stale interval.
 State transitions require the matching durable row and marker; an uncertain transition leaves the
 root in place.
 
