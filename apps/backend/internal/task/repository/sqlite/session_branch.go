@@ -20,7 +20,7 @@ func (r *Repository) ListSessionsWithBranches(ctx context.Context) ([]models.Ses
 		  AND ter.worktree_branch != ''
 		  AND ter.deleted_at IS NULL
 		  AND ter.status = 'active'
-		GROUP BY ts.id
+		GROUP BY ts.id, ts.task_id, t.workspace_id, ter.worktree_branch
 		ORDER BY ts.started_at DESC
 	`)
 	if err != nil {

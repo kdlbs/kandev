@@ -154,13 +154,12 @@ func (r *Repository) normalizeTaskWorktreeOwnership() error {
 // cutoverAcquireLocks serializes the cutover for the active database engine:
 // PostgreSQL takes a migration advisory lock plus exclusive locks on every
 // affected ownership table (aborting on lock timeout); SQLite relies on the
-// transaction becoming the writer lock and disables FK enforcement around
-// the table swaps.
+// transaction becoming the writer lock. FK enforcement stays ON — the swap
+// drops task_environment_repos before task_environments, so no DROP violates
+// a foreign key (PRAGMA foreign_keys would be a no-op inside the transaction
+// anyway).
 func (r *Repository) cutoverAcquireLocks(tx *sqlx.Tx) error {
 	if !dialect.IsPostgres(r.db.DriverName()) {
-		if _, err := tx.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
-			return fmt.Errorf("cutover: disable foreign keys: %w", err)
-		}
 		return nil
 	}
 	if _, err := tx.Exec(`SET LOCAL lock_timeout = '30s'`); err != nil {

@@ -260,3 +260,38 @@ func TestCreateWorktree_RejectedByTaskCleanupBarrier(t *testing.T) {
 		t.Fatalf("pre-existing worktree dir must survive compensation: %v", statErr)
 	}
 }
+
+// TestRemoveByID_NeverDeletesBorrowedWorktree locks in the borrow protection:
+// GetWorktreeByID returns an arbitrary session of the owning environment, and
+// removeWorktree must not exclude it when counting references — otherwise a
+// borrower's workspace could be physically deleted.
+func TestRemoveByID_NeverDeletesBorrowedWorktree(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	ctx := context.Background()
+	seedReferenceCleanupSession(t, store, "task-owner", "session-owner", models.TaskSessionStateRunning)
+	seedReferenceCleanupSession(t, store, "task-borrower", "session-borrower", models.TaskSessionStateRunning)
+	if err := store.linkSessionToEnvironment(ctx, "session-borrower", "env-owner"); err != nil {
+		t.Fatalf("link borrower session: %v", err)
+	}
+
+	wt := createReferenceCleanupWorktree(t, mgr, "task-owner", "session-owner")
+
+	// Prove the loaded record can carry the borrower's session: with the
+	// LEFT JOIN the session column is arbitrary, so force the exact shape
+	// the blocker described.
+	loaded, err := store.GetWorktreeByID(ctx, wt.ID)
+	if err != nil {
+		t.Fatalf("GetWorktreeByID: %v", err)
+	}
+	loaded.SessionID = "session-borrower"
+
+	if err := mgr.RemoveByID(ctx, loaded.ID, true); err != nil {
+		t.Fatalf("RemoveByID: %v", err)
+	}
+
+	// The borrowed worktree must survive both physically and as an active row.
+	if _, err := os.Stat(wt.Path); err != nil {
+		t.Fatalf("borrowed worktree path must be preserved: %v", err)
+	}
+	assertWorktreeReferenceStatus(t, store, wt.ID, StatusActive)
+}

@@ -180,7 +180,12 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 		repoLock.Unlock()
 		m.releaseRepoLock(wt.RepositoryPath)
 	}()
-	activeReferences, err := m.CountActiveWorktreeReferences(ctx, wt.ID, []string{wt.SessionID})
+	// CountActiveWorktreeReferences already counts only sessions of OTHER
+	// tasks referencing the owning environment. No exclusions are passed:
+	// the worktree record returned by GetWorktreeByID carries an arbitrary
+	// session of that environment, and excluding it could hide a borrower
+	// and authorize deletion of a workspace another task still holds.
+	activeReferences, err := m.CountActiveWorktreeReferences(ctx, wt.ID, nil)
 	if err != nil {
 		return fmt.Errorf("count active references for worktree %s: %w", wt.ID, err)
 	}
