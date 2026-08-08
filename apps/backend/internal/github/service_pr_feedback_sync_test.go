@@ -64,6 +64,12 @@ func addMergedFeedbackPR(mockClient *MockClient, number int, mergedAt time.Time)
 // detail panel turned that tab purple while github_task_prs still said
 // state=open — every other surface disagreed, and a reload snapped it back.
 // Confirmed on a live instance for kdlbs/kandev#2408.
+//
+// This covers the stale-row direction (stored open, live merged). The inverse
+// — stored merged, live read stale at open — is covered one layer down by
+// TestSyncTaskPR_DoesNotRegressAMergedRow, deliberately: persistPRFeedbackState
+// has no state logic of its own, it hands every row to the real SyncTaskPR, so
+// asserting the guard at its own seam is where a break would actually surface.
 func TestGetPRFeedbackForWorkspace_PersistsMergedStateOverStaleRow(t *testing.T) {
 	_, svc, mockClient, store := setupPollerTest(t)
 	ctx := context.Background()
@@ -199,6 +205,23 @@ func TestGetPRFeedbackForWorkspace_CachedResponseDoesNotRewriteRow(t *testing.T)
 	}
 	if !timeEqual(after.LastSyncedAt, writtenAt) {
 		t.Errorf("cached feedback rewrote the row: last_synced_at %v -> %v", writtenAt, after.LastSyncedAt)
+	}
+	// ...and must not republish either, or the WS handler applying the event
+	// re-renders the panel that triggered it. MemoryEventBus delivers to
+	// subscribers synchronously (see MemoryEventBus.Publish), so any event the
+	// call above caused is already in the channel — a non-blocking read is
+	// exact here, with no sleep to go flaky under load.
+	//
+	// last_synced_at above is the assertion that actually catches a persist
+	// moved outside the fetch closure; this one is defence in depth. A
+	// redundant sync writes the row but re-derives identical field values, so
+	// SyncTaskPR's `changed` guard already suppresses the event — this pins
+	// that no-WS-traffic-on-a-cache-hit property against a future change that
+	// relaxes that guard.
+	select {
+	case extra := <-updated:
+		t.Errorf("cached feedback republished github.task_pr.updated: %+v", extra)
+	default:
 	}
 }
 
