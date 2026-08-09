@@ -1,7 +1,14 @@
 import type { DockviewApi, SerializedDockview } from "dockview-react";
 import type { LayoutState, LayoutColumn, LayoutGroup, LayoutPanel, LayoutNode } from "./types";
 import { computeColumnWidths, computeGroupHeights } from "./sizing";
-import { SIDEBAR_LOCK, KNOWN_PANEL_IDS, STRUCTURAL_COMPONENTS } from "./constants";
+import {
+  SIDEBAR_LOCK,
+  KNOWN_PANEL_IDS,
+  STRUCTURAL_COMPONENTS,
+  TERMINAL_DEFAULT_ID,
+  canonicalPanelTitle,
+  panelTitle,
+} from "./constants";
 
 // Dockview serialized grid node types (internal format)
 type SerializedLeafNode = {
@@ -137,7 +144,11 @@ function serializePanels(state: LayoutState): Record<
         panels[panel.id] = {
           id: panel.id,
           contentComponent: panel.component,
-          title: panel.title,
+          // Canonical English for a registry panel, so the locale that happened
+          // to build this layout is never written into the stored JSON. The tab
+          // the user sees is resolved from `titleKey` on the way back in — see
+          // `normalizePanel` and PANEL_REGISTRY.
+          title: canonicalPanelTitle(panel.id) ?? panel.title,
           ...(panel.tabComponent ? { tabComponent: panel.tabComponent } : {}),
           ...(panel.params ? { params: panel.params } : {}),
         };
@@ -184,7 +195,7 @@ function panelFromDockviewPanel(panel: any): LayoutPanel {
   return {
     id: panel.id,
     component: panel.view?.contentComponent ?? panel.id,
-    title: panel.title ?? panel.id,
+    title: panelTitle(panel.id, panel.title ?? panel.id),
     ...(panel.view?.tabComponent ? { tabComponent: panel.view.tabComponent } : {}),
     ...(panel.params ? { params: panel.params as Record<string, unknown> } : {}),
   };
@@ -331,7 +342,7 @@ function normalizePanel(
       // terminals (shell-<uuid>) — preserve id + params so the live PTY
       // and store record match on restore. Coerce presentation in case
       // the saved layout predates the custom tab + plain title.
-      return { ...p, tabComponent: "terminalTab", title: "Terminal" };
+      return { ...p, tabComponent: "terminalTab", title: panelTitle(TERMINAL_DEFAULT_ID) };
     }
     // Legacy ephemeral terminal id (e.g. `terminal-saved-1` from older
     // layouts) — mint a fresh id so it reconnects to a new PTY.
@@ -341,11 +352,13 @@ function normalizePanel(
       id,
       params: { terminalId: id },
       tabComponent: "terminalTab",
-      title: "Terminal",
+      title: panelTitle(TERMINAL_DEFAULT_ID),
     };
   }
 
-  if (KNOWN_PANEL_IDS.has(p.id)) return p;
+  // Known panels get their title re-resolved so a layout saved under another
+  // locale (or before this split existed) renders in the active one.
+  if (KNOWN_PANEL_IDS.has(p.id)) return { ...p, title: panelTitle(p.id, p.title) };
 
   if (p.component === "browser") {
     const url = (p.params?.url as string) ?? "";

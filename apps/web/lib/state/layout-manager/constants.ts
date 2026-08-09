@@ -1,3 +1,4 @@
+import { t } from "@/lib/i18n";
 import type { LayoutPanel } from "./types";
 
 // Layout sizing constants (single source of truth).
@@ -64,13 +65,48 @@ export const STRUCTURAL_COMPONENTS = new Set([
   "plugin-panel",
 ]);
 
-/** Default panel configurations for known panels. */
-export const PANEL_REGISTRY: Record<string, Omit<LayoutPanel, "id">> = {
-  chat: { component: "chat", title: "Agent", tabComponent: "permanentTab" },
-  plan: { component: "plan", title: "Plan", tabComponent: "planTab" },
-  changes: { component: "changes", title: "Changes", tabComponent: "changesTab" },
-  files: { component: "files", title: "Files" },
-  browser: { component: "browser", title: "Browser", params: { url: "" } },
+/**
+ * Default panel configurations for known panels.
+ *
+ * `title` and `titleKey` are deliberately two different things:
+ *
+ *   - `title` is the CANONICAL, always-English value. `toSerializedDockview`
+ *     writes it into the stored layout JSON, so it has to be locale-independent
+ *     — otherwise the locale a layout happened to be saved in is frozen into it
+ *     and survives every later switch.
+ *   - `titleKey` is what the user reads. `panelTitle()` resolves it whenever a
+ *     panel is built or a saved layout is restored, so the tab always shows the
+ *     ACTIVE locale regardless of which one wrote the layout.
+ *
+ * This is the key/persisted-value split docs/i18n.md prescribes for a display
+ * string that is also stored. Before it, two of these titles were translated at
+ * creation (`t("task:browser")`, `t("common:todos")`) and the rest were not, so
+ * the tab bar was half-translated AND persisted whichever locale created it.
+ *
+ * `vscode` has no `titleKey` on purpose: "VS Code" is a product name, and
+ * `panelTitle()` falls back to `title` when a key is absent.
+ */
+export const PANEL_REGISTRY: Record<string, Omit<LayoutPanel, "id"> & { titleKey?: string }> = {
+  chat: {
+    component: "chat",
+    title: "Agent",
+    titleKey: "task:panelAgent",
+    tabComponent: "permanentTab",
+  },
+  plan: { component: "plan", title: "Plan", titleKey: "task:panelPlan", tabComponent: "planTab" },
+  changes: {
+    component: "changes",
+    title: "Changes",
+    titleKey: "task:panelChanges",
+    tabComponent: "changesTab",
+  },
+  files: { component: "files", title: "Files", titleKey: "task:panelFiles" },
+  browser: {
+    component: "browser",
+    title: "Browser",
+    titleKey: "task:browser",
+    params: { url: "" },
+  },
   vscode: { component: "vscode", title: "VS Code" },
   [TERMINAL_DEFAULT_ID]: {
     component: "terminal",
@@ -81,18 +117,42 @@ export const PANEL_REGISTRY: Record<string, Omit<LayoutPanel, "id">> = {
     // session-page mount so the badge logic has a seq to display.
     tabComponent: "terminalTab",
     title: "Terminal",
+    titleKey: "task:panelTerminal",
     params: { terminalId: "shell-default" },
   },
-  "pr-detail": { component: "pr-detail", title: "PR Details" },
-  "mr-detail": { component: "mr-detail", title: "Merge Request" },
-  todos: { component: "todos", title: "Todos" },
+  "pr-detail": { component: "pr-detail", title: "PR Details", titleKey: "task:panelPrDetails" },
+  "mr-detail": {
+    component: "mr-detail",
+    title: "Merge Request",
+    titleKey: "task:panelMergeRequest",
+  },
+  todos: { component: "todos", title: "Todos", titleKey: "common:todos" },
 };
+
+/**
+ * The display title for a registry panel, in the active locale.
+ *
+ * Resolved at call time, never at module load — the registry stores the key.
+ * Unknown ids (file diffs, plugin panels, per-session chat tabs) carry their own
+ * title and are returned unchanged.
+ */
+export function panelTitle(id: string, fallback?: string): string {
+  const config = PANEL_REGISTRY[id];
+  if (!config) return fallback ?? id;
+  return config.titleKey ? t(config.titleKey) : config.title;
+}
+
+/** The canonical English title stored in a saved layout, if `id` is known. */
+export function canonicalPanelTitle(id: string): string | undefined {
+  return PANEL_REGISTRY[id]?.title;
+}
 
 /** Create a LayoutPanel from the registry by ID. */
 export function panel(id: string): LayoutPanel {
   const config = PANEL_REGISTRY[id];
   if (!config) throw new Error(`Unknown panel: ${id}`);
-  return { id, ...config };
+  const { titleKey: _titleKey, ...rest } = config;
+  return { id, ...rest, title: panelTitle(id) };
 }
 
 /** Generate panel config for a session tab. */

@@ -195,34 +195,18 @@ const SCREENS: Screen[] = [
     // run between `cc6eb4dd5` and this commit. Re-check these against
     // `BUILT_IN_LAYOUT_PROFILES` whenever a built-in name or description moves.
     //
-    // Both groups are display strings that are also PERSISTED, so translating
-    // them in place would write locale-dependent values into a user's saved
-    // layouts and leave them there after a locale switch:
-    //   - Built-in profile names/descriptions (lib/layout/layout-profiles.ts).
-    //     `upsertBuiltInLayoutOverride` copies `builtIn.name` into the saved
-    //     record the first time a built-in is customized.
-    //   - Dockview panel titles (lib/state/layout-manager/constants.ts), which
-    //     `toSerializedDockview` writes into the stored layout JSON. That path
-    //     is already in `EXCLUDED` in scripts/externalize-strings.mjs.
-    // Localizing either needs a key/persisted-value split in those modules.
-    allow: [
-      "Default",
-      "Plan Mode",
-      "Preview Mode",
-      "VS Code",
-      "Agent with Files, Changes, and Terminal",
-      "Agent and Plan side by side",
-      "Agent and Browser side by side",
-      "Agent and VS Code side by side",
-      "Agent",
-      "Plan",
-      "Changes",
-      "Files",
-      "Browser",
-      "Terminal",
-      "PR Details",
-      "Merge Request",
-    ],
+    // Both groups WERE display strings that are also persisted, and both have
+    // had the key/persisted-value split this note used to ask for:
+    //   - Built-in profile names/descriptions (lib/layout/layout-profiles.ts)
+    //     carry `nameKey`/`descriptionKey`; `name` stays canonical English
+    //     because `upsertBuiltInLayoutOverride` copies it into the saved record.
+    //   - Dockview panel titles (lib/state/layout-manager/constants.ts) carry
+    //     `titleKey`; `toSerializedDockview` writes the canonical English
+    //     `title` into the stored layout JSON, and `normalizePanel` re-resolves
+    //     the display title on restore. `panel-titles.test.ts` covers both
+    //     directions.
+    // Only the two product names are still expected to render as English.
+    allow: ["VS Code", "Agent and VS Code side by side"],
   },
   {
     name: "settings — keyboard shortcuts",

@@ -1864,4 +1864,19 @@ export const i18nGuardFiles = [
   "hooks/use-file-save-delete.ts",
   "hooks/use-utility-agent-generator.ts",
   "lib/tasks/unarchive-feedback.ts",
+  // Dockview panel titles. These are display copy that is ALSO persisted —
+  // `toSerializedDockview` writes the title into the stored layout JSON — so
+  // they now carry a `titleKey` beside a canonical English `title`, the split
+  // the note on the layouts screen in `e2e/tests/i18n/pseudo-coverage.spec.ts`
+  // said they needed. `constants.ts` deliberately still holds English `title:`
+  // values; they are storage, not copy, and `panel-titles.test.ts` asserts the
+  // two stay apart.
+  "lib/state/dockview-panel-actions.ts",
+  "lib/state/layout-manager/constants.ts",
+  "lib/state/layout-manager/serializer.ts",
+  // Built-in layout profile names and descriptions, the other half of the same
+  // problem: `upsertBuiltInLayoutOverride` copies `name` into a saved override,
+  // so `name`/`description` stay canonical English and the settings list renders
+  // `nameKey`/`descriptionKey`.
+  "lib/layout/layout-profiles.ts",
 ];
