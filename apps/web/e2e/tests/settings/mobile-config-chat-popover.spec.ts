@@ -40,6 +40,8 @@ test.describe("Mobile config chat popover", () => {
       expect(resetBox!.height).toBeGreaterThanOrEqual(44);
       expect(saveBox!.y).toBeGreaterThanOrEqual(0);
       expect(saveBox!.y + saveBox!.height).toBeLessThanOrEqual(chatBox!.y);
+      expect(surfaceBox!.y).toBeGreaterThanOrEqual(-1);
+      expect(surfaceBox!.y + surfaceBox!.height).toBeLessThanOrEqual(chatBox!.y);
       expect(saveBox!.x + saveBox!.width).toBeLessThanOrEqual(390);
       expect(surfaceBox!.x).toBeGreaterThanOrEqual(0);
       expect(surfaceBox!.x + surfaceBox!.width).toBeLessThanOrEqual(390);

@@ -20,21 +20,24 @@ import type { NavigationIntent } from "@/lib/routing/navigation-guard";
 import { cn } from "@/lib/utils";
 
 export type SettingsSaveStatus = "dirty" | "saving" | "saved" | "error";
+export type SettingsSaveErrorKind = "save" | "reset";
 
 type SettingsFloatingSaveProps = {
   status: SettingsSaveStatus;
+  errorKind?: SettingsSaveErrorKind | null;
   dirtyContributorIds?: string;
   invalidReason?: string;
   navigationIntent: NavigationIntent | null;
   isDiscarding: boolean;
   onSave: () => Promise<boolean>;
-  onReset: () => Promise<void> | void;
+  onReset: () => Promise<unknown> | void;
   onDiscardAndLeave: () => Promise<void> | void;
   onContinueEditing: () => void;
 };
 
 export function SettingsFloatingSave({
   status,
+  errorKind,
   dirtyContributorIds,
   invalidReason,
   navigationIntent,
@@ -50,6 +53,7 @@ export function SettingsFloatingSave({
   const isInvalid = Boolean(invalidReason);
   const isBusy = isSaving || isDiscarding;
   const { label: labelKey, accessible: accessibleKey } = saveButtonKeys(status);
+  const errorMessage = errorMessageKeys(errorKind);
   const accessibleLabel = t(accessibleKey);
   const configChatFloatingActionsHost = useConfigChatFloatingActionsHost();
   const isHostedByConfigChat = configChatFloatingActionsHost !== null;
@@ -58,7 +62,7 @@ export function SettingsFloatingSave({
       className={cn(
         "pointer-events-none z-40 flex w-full justify-center",
         !isHostedByConfigChat &&
-          "fixed inset-x-0 bottom-[calc(5.25rem_+_env(safe-area-inset-bottom)_+_var(--app-status-bar-height))] flex justify-center px-[calc(1rem_+_env(safe-area-inset-left))]",
+          "fixed inset-x-0 bottom-[calc(5.25rem_+_env(safe-area-inset-bottom)_+_var(--app-status-bar-height))] px-[calc(1rem_+_env(safe-area-inset-left))]",
       )}
       data-testid="settings-floating-save"
       data-dirty-contributors={dirtyContributorIds}
@@ -71,9 +75,9 @@ export function SettingsFloatingSave({
         <div className="min-w-0 flex-1 space-y-0.5 px-1 sm:max-w-80">
           {status === "error" ? (
             <span className="flex items-center gap-1 text-xs text-destructive" role="status">
-              <Trans i18nKey="settings:couldnTSave">
+              <Trans i18nKey={errorMessage.labelKey}>
                 <IconAlertCircle className="size-4" />
-                {t("settings:couldnTSave2")}
+                {t(errorMessage.fallbackKey)}
               </Trans>
             </span>
           ) : (
@@ -217,4 +221,14 @@ function saveButtonKeys(status: SettingsSaveStatus): { label: string; accessible
   if (status === "saved") return { label: "settings:saved", accessible: "settings:saved" };
   if (status === "error") return { label: "settings:retrySave", accessible: "settings:retrySave" };
   return { label: "settings:saveChanges", accessible: "settings:saveChanges" };
+}
+
+function errorMessageKeys(errorKind: SettingsSaveErrorKind | null | undefined): {
+  labelKey: string;
+  fallbackKey: string;
+} {
+  if (errorKind === "reset") {
+    return { labelKey: "settings:couldnTReset", fallbackKey: "settings:couldnTReset2" };
+  }
+  return { labelKey: "settings:couldnTSave", fallbackKey: "settings:couldnTSave2" };
 }

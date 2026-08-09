@@ -85,6 +85,8 @@
   "continueEditing": "继续编辑",
   "couldnTSave": "<0></0> 无法保存",
   "couldnTSave2": "无法保存",
+  "couldnTReset": "<0></0> 无法重置",
+  "couldnTReset2": "无法重置",
   "cpu": "CPU %",
   "cpuTemp": "CPU 温度",
   "createANewEditableLayoutBased": "基于“默认”新建可编辑布局。",

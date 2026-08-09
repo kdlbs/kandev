@@ -75,6 +75,7 @@ test.describe("Configuration Chat", () => {
       const configChatPopover = testPage.getByTestId("config-chat-popover");
       await expect(configChatPopover).toBeVisible();
       await expectElementAbove(saveButton, configChatPopover);
+      await expectElementAbove(surface, configChatPopover);
       const [surfaceBox, popoverBox] = await Promise.all([
         surface.boundingBox(),
         configChatPopover.boundingBox(),

@@ -19,6 +19,7 @@ type Deferred = {
 const SAVE_CHANGES_LABEL = "Save changes";
 const RESET_LABEL = "Reset";
 const COULDNT_SAVE_LABEL = "Couldn't save";
+const COULDNT_RESET_LABEL = "Couldn't reset";
 const APPEARANCE_ID = "appearance";
 const FLOATING_SAVE_TEST_ID = "settings-floating-save";
 const APPEARANCE_PATH = "/settings/general/appearance";
@@ -217,7 +218,8 @@ describe("SettingsFloatingSave", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: RESET_LABEL }));
 
-    expect(await screen.findByText(COULDNT_SAVE_LABEL)).toBeTruthy();
+    expect(await screen.findByText(COULDNT_RESET_LABEL)).toBeTruthy();
+    expect(screen.queryByText(COULDNT_SAVE_LABEL)).toBeNull();
     expect(screen.getByTestId(FLOATING_SAVE_TEST_ID)).toBeTruthy();
     expect((screen.getByRole("button", { name: RESET_LABEL }) as HTMLButtonElement).disabled).toBe(
       false,

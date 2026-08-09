@@ -85,6 +85,8 @@
   "continueEditing": "Continue editing",
   "couldnTSave": "<0></0> Couldn't save",
   "couldnTSave2": "Couldn't save",
+  "couldnTReset": "<0></0> Couldn't reset",
+  "couldnTReset2": "Couldn't reset",
   "cpu": "CPU %",
   "cpuTemp": "CPU temp",
   "createANewEditableLayoutBased": "Create a new editable layout based on Default.",

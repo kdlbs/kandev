@@ -13,7 +13,11 @@ import {
 } from "react";
 
 import { setNavigationBlocker, type NavigationIntent } from "@/lib/routing/navigation-guard";
-import { SettingsFloatingSave, type SettingsSaveStatus } from "./settings-floating-save";
+import {
+  SettingsFloatingSave,
+  type SettingsSaveErrorKind,
+  type SettingsSaveStatus,
+} from "./settings-floating-save";
 
 export type SettingsSaveRevision = string | number;
 
@@ -60,7 +64,7 @@ const SettingsDirtyScopeContext = createContext<DirtyScopeRegistry | null>(null)
 
 export function SettingsSaveProvider({ children }: { children: ReactNode }) {
   const { contributors, registry, dirtyContributors, refreshRegistry } = useContributorRegistry();
-  const { status, saveAll, clearSavedStatus, markError } = useSaveCoordinator(
+  const { status, errorKind, saveAll, clearSavedStatus, markError } = useSaveCoordinator(
     contributors,
     refreshRegistry,
   );
@@ -101,17 +105,13 @@ export function SettingsSaveProvider({ children }: { children: ReactNode }) {
       refreshRegistry();
       return true;
     } catch {
-      markError();
+      markError("reset");
       return false;
     } finally {
       discardingRef.current = false;
       setIsDiscarding(false);
     }
   }, [contributors, markError, refreshRegistry]);
-
-  const resetDrafts = useCallback(async () => {
-    await discardDirtyContributors();
-  }, [discardDirtyContributors]);
 
   const discardAndLeave = useCallback(async () => {
     if (!(await discardDirtyContributors())) return;
@@ -153,12 +153,13 @@ export function SettingsSaveProvider({ children }: { children: ReactNode }) {
       {(hasDirty || status === "saved") && (
         <SettingsFloatingSave
           status={displayStatus}
+          errorKind={errorKind}
           dirtyContributorIds={dirtyContributors.map(({ contributor }) => contributor.id).join(",")}
           invalidReason={invalidReason}
           navigationIntent={pendingNavigation}
           isDiscarding={isDiscarding}
           onSave={handleSave}
-          onReset={resetDrafts}
+          onReset={discardDirtyContributors}
           onDiscardAndLeave={discardAndLeave}
           onContinueEditing={continueEditing}
         />
@@ -240,8 +241,15 @@ function useSaveCoordinator(
 ) {
   const savingRef = useRef(false);
   const [status, setStatus] = useState<SettingsSaveStatus>("dirty");
-  const clearSavedStatus = useCallback(() => setStatus("dirty"), []);
-  const markError = useCallback(() => setStatus("error"), []);
+  const [errorKind, setErrorKind] = useState<SettingsSaveErrorKind | null>(null);
+  const clearSavedStatus = useCallback(() => {
+    setErrorKind(null);
+    setStatus("dirty");
+  }, []);
+  const markError = useCallback((kind: SettingsSaveErrorKind) => {
+    setErrorKind(kind);
+    setStatus("error");
+  }, []);
   const saveAll = useCallback(async (): Promise<SaveResult> => {
     if (savingRef.current) return { canLeave: false, failedIds: new Set() };
     const submitted = snapshotDirtyContributors(contributors);
@@ -250,6 +258,7 @@ function useSaveCoordinator(
     }
 
     savingRef.current = true;
+    setErrorKind(null);
     setStatus("saving");
     const failedIds = new Set<string>();
     let hasNewerChanges = false;
@@ -267,12 +276,14 @@ function useSaveCoordinator(
     }
 
     savingRef.current = false;
-    setStatus(saveCompletionStatus(failedIds, hasNewerChanges));
+    const completionStatus = saveCompletionStatus(failedIds, hasNewerChanges);
+    setErrorKind(completionStatus === "error" ? "save" : null);
+    setStatus(completionStatus);
     refreshRegistry();
     return { canLeave: failedIds.size === 0 && !hasNewerChanges, failedIds };
   }, [contributors, refreshRegistry]);
 
-  return { status, saveAll, clearSavedStatus, markError };
+  return { status, errorKind, saveAll, clearSavedStatus, markError };
 }
 
 function saveCompletionStatus(

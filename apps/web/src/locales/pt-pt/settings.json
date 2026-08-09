@@ -85,6 +85,8 @@
   "continueEditing": "Continuar a editar",
   "couldnTSave": "<0></0> Não foi possível guardar",
   "couldnTSave2": "Não foi possível guardar",
+  "couldnTReset": "<0></0> Não foi possível repor",
+  "couldnTReset2": "Não foi possível repor",
   "cpu": "CPU %",
   "cpuTemp": "Temp. da CPU",
   "createANewEditableLayoutBased": "Criar um novo esquema editável com base no Pré-definido.",
