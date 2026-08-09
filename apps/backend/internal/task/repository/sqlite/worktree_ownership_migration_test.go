@@ -569,6 +569,68 @@ func TestCutover_CanonicalRepoWinsOverStaleFlatMetadata(t *testing.T) {
 	}
 }
 
+// TestCutover_PrefersCanonicalMetadataForResumableSession proves that stale
+// session metadata cannot override a canonical row for the same worktree.
+func TestCutover_PrefersCanonicalMetadataForResumableSession(t *testing.T) {
+	db := openLegacyDB(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	seed := legacySeed{envID: "env-resumable", taskID: "task-resumable", repoID: "repo-resumable", sessionID: "sess-resumable"}
+	seedLegacyTask(t, db, seed, now)
+	if _, err := db.Exec(db.Rebind(`UPDATE task_sessions SET state = 'WAITING_FOR_INPUT' WHERE id = ?`), seed.sessionID); err != nil {
+		t.Fatalf("set session state: %v", err)
+	}
+	seedLegacyFlatEnv(t, db, seed, "wt-resumable", "/tasks/resumable/repo", "feature/current", now)
+	seedLegacyEnvRepo(t, db, "env-repo-resumable", seed.envID, seed.repoID, "wt-resumable", "/tasks/resumable/repo", "feature/current", now)
+	seedLegacySessionWorktree(t, db, seed.sessionID, "wt-resumable", seed.repoID, "", "/tasks/resumable/repo", "feature/stale-session", "active", now)
+
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("cutover: %v", err)
+	}
+	env, err := repo.GetTaskEnvironment(context.Background(), seed.envID)
+	if err != nil {
+		t.Fatalf("get task environment: %v", err)
+	}
+	session, err := repo.GetTaskSession(context.Background(), seed.sessionID)
+	if err != nil {
+		t.Fatalf("get task session: %v", err)
+	}
+	if len(env.Repos) != 1 || env.Repos[0].WorktreeBranch != "feature/current" ||
+		session.State != "WAITING_FOR_INPUT" {
+		t.Fatalf("normalized environment = %+v, session state = %q", env.Repos, session.State)
+	}
+}
+
+// TestCutover_PrefersFlatMetadataForSameWorktree proves that the surviving
+// flat environment beats stale session metadata when no canonical row exists.
+func TestCutover_PrefersFlatMetadataForSameWorktree(t *testing.T) {
+	for _, state := range []string{"WAITING_FOR_INPUT", "CANCELLED"} {
+		t.Run(state, func(t *testing.T) {
+			db := openLegacyDB(t)
+			now := time.Now().UTC().Truncate(time.Second)
+			seed := legacySeed{envID: "env-flat", taskID: "task-flat", repoID: "repo-flat", sessionID: "sess-flat"}
+			seedLegacyTask(t, db, seed, now)
+			if _, err := db.Exec(db.Rebind(`UPDATE task_sessions SET state = ? WHERE id = ?`), state, seed.sessionID); err != nil {
+				t.Fatalf("set session state: %v", err)
+			}
+			seedLegacyFlatEnv(t, db, seed, "wt-flat", "/tasks/flat/repo", "feature/current", now)
+			seedLegacySessionWorktree(t, db, seed.sessionID, "wt-flat", seed.repoID, "", "/tasks/flat/repo", "feature/stale-session", "active", now)
+
+			repo, err := NewWithDB(db, db, nil)
+			if err != nil {
+				t.Fatalf("cutover: %v", err)
+			}
+			env, err := repo.GetTaskEnvironment(context.Background(), seed.envID)
+			if err != nil {
+				t.Fatalf("get task environment: %v", err)
+			}
+			if len(env.Repos) != 1 || env.Repos[0].WorktreeBranch != "feature/current" {
+				t.Fatalf("normalized environment = %+v", env.Repos)
+			}
+		})
+	}
+}
+
 // TestCutover_IgnoresDeletedHistoricalSessionConflict proves that a deleted
 // session reference cannot override an existing task-owned repository row.
 func TestCutover_IgnoresDeletedHistoricalSessionConflict(t *testing.T) {

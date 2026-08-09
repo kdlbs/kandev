@@ -268,7 +268,7 @@ func (r *Repository) validateCutover(c *worktreeCutover, tx *sqlx.Tx) error {
 	// Every session that referenced a worktree must resolve to an
 	// environment that owns that worktree.
 	for _, wt := range c.sessionWts {
-		if c.isSupersededHistoricalWorktree(wt) {
+		if c.isSupersededSessionWorktree(wt) {
 			continue
 		}
 		envID := c.sessionEnvIDs[wt.sessionID]
@@ -333,7 +333,7 @@ func (c *worktreeCutover) legacyWorktreeInventory() map[string]bool {
 		}
 	}
 	for _, wt := range c.sessionWts {
-		if wt.worktreeID == "" || c.isSupersededHistoricalWorktree(wt) {
+		if wt.worktreeID == "" || c.isSupersededSessionWorktree(wt) {
 			continue
 		}
 		inventory[worktreeInventoryKey(wt.worktreeID, wt.worktreePath, wt.worktreeBranch)] = true
