@@ -60,16 +60,17 @@ type worktreeDestroyCall struct {
 }
 
 type stubDestroyer struct {
-	containerCalls       []string
-	sandboxCalls         []string
-	worktreeCalls        []string
-	worktreeCallDetails  []worktreeDestroyCall
-	cancelAfterContainer context.CancelFunc
-	pushCalls            int
-	containerErr         error
-	sandboxErr           error
-	worktreeErr          error
-	pushErr              error
+	containerCalls           []string
+	sandboxCalls             []string
+	worktreeCalls            []string
+	worktreeCallDetails      []worktreeDestroyCall
+	cancelAfterContainer     context.CancelFunc
+	cancelAfterFirstWorktree context.CancelFunc
+	pushCalls                int
+	containerErr             error
+	sandboxErr               error
+	worktreeErr              error
+	pushErr                  error
 }
 
 func (s *stubDestroyer) DestroyContainer(_ context.Context, id string) error {
@@ -88,6 +89,9 @@ func (s *stubDestroyer) DestroyWorktreeAt(_ context.Context, id, worktreePath, r
 	s.worktreeCallDetails = append(s.worktreeCallDetails, worktreeDestroyCall{
 		worktreeID: id, worktreePath: worktreePath, repositoryID: repositoryID, excludeSessionIDs: excludeSessionIDs,
 	})
+	if s.cancelAfterFirstWorktree != nil && len(s.worktreeCalls) == 1 {
+		s.cancelAfterFirstWorktree()
+	}
 	return s.worktreeErr
 }
 func (s *stubDestroyer) PushEnvironmentBranch(context.Context, *models.TaskEnvironment) error {
@@ -209,6 +213,27 @@ func TestTeardownEnvironmentResources_CancellationStopsBeforeNextResource(t *tes
 	if len(destroyer.sandboxCalls) != 0 || len(destroyer.worktreeCalls) != 0 {
 		t.Fatalf("resources destroyed after cancellation: sandboxes=%v worktrees=%v",
 			destroyer.sandboxCalls, destroyer.worktreeCalls)
+	}
+}
+
+func TestTeardownEnvironmentResources_MultiRepoCancellationStopsBeforeNextWorktree(t *testing.T) {
+	svc := newResetTestService(t, &stubEnvRepo{})
+	ctx, cancel := context.WithCancel(context.Background())
+	destroyer := &stubDestroyer{cancelAfterFirstWorktree: cancel}
+	svc.SetEnvironmentDestroyer(destroyer)
+
+	err := svc.teardownEnvironmentResources(ctx, &models.TaskEnvironment{
+		Repos: []*models.TaskEnvironmentRepo{
+			{RepositoryID: "repo-a", WorktreeID: "wt-first"},
+			{RepositoryID: "repo-b", WorktreeID: "wt-second"},
+		},
+	}, nil)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("teardown error = %v, want context cancellation", err)
+	}
+	if len(destroyer.worktreeCalls) != 1 || destroyer.worktreeCalls[0] != "wt-first" {
+		t.Fatalf("expected exactly the first worktree destroyed before cancellation, got %v", destroyer.worktreeCalls)
 	}
 }
 
