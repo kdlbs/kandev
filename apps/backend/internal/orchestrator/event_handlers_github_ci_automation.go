@@ -429,7 +429,7 @@ func (s *Service) dispatchCIAutomationPromptForPR(ctx context.Context, session *
 		if !allowNewRound {
 			return ciAutomationDispatchResult{}, errCIAutoFixRoundCapReached
 		}
-		if !s.recordCIAutomationUserMessage(ctx, session.TaskID, session.ID, chatPrompt) {
+		if !s.recordCIAutomationUserMessage(ctx, session.TaskID, session.ID, pr, chatPrompt, signature) {
 			return ciAutomationDispatchResult{}, fmt.Errorf("failed to record CI automation user message")
 		}
 		if _, err := s.PromptTask(ctx, session.TaskID, session.ID, chatPrompt, "", false, nil, true); err != nil {
@@ -474,7 +474,7 @@ func (s *Service) queueOrReplaceCIAutomationPromptForPR(ctx context.Context, ses
 	return ciAutomationDispatchResult{kind: ciAutomationDispatchQueuedInsert}, nil
 }
 
-func (s *Service) recordCIAutomationUserMessage(ctx context.Context, taskID, sessionID, prompt string) bool {
+func (s *Service) recordCIAutomationUserMessage(ctx context.Context, taskID, sessionID string, pr *github.TaskPR, prompt, signature string) bool {
 	if s.messageCreator == nil || prompt == "" {
 		return false
 	}
@@ -483,7 +483,7 @@ func (s *Service) recordCIAutomationUserMessage(ctx context.Context, taskID, ses
 		s.startTurnForSession(ctx, sessionID)
 		turnID = s.getActiveTurnID(sessionID)
 	}
-	meta := ciAutomationMessageMetadata()
+	meta := ciAutomationMessageMetadataForPR(pr, signature)
 	if err := s.messageCreator.CreateUserMessage(ctx, taskID, prompt, sessionID, turnID, meta); err != nil {
 		s.logger.Error("failed to create CI automation user message",
 			zap.String("task_id", taskID),

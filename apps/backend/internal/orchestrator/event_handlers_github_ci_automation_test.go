@@ -1923,6 +1923,69 @@ func TestHandleTaskPRCIAutomationAutoMergeRunsAfterAutoFixExhaustion(t *testing.
 	}
 }
 
+// runEmptyDeltaInFlightFixTest drives handleTaskPRCIAutomationWithRefresh with
+// an empty feedback delta (no failing checks, no comments) against a prior
+// fix attempt recorded with the same signature, varying how long ago that fix
+// was enqueued. It returns the resulting merge call count so callers can
+// assert the in-flight-fix merge block (ciAutomationFixBlockWindow) is
+// honored or has expired.
+func runEmptyDeltaInFlightFixTest(t *testing.T, lastFixEnqueuedAt time.Time) int {
+	t.Helper()
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	now := time.Now().UTC()
+	pr := &github.TaskPR{
+		TaskID:         "task-1",
+		RepositoryID:   "repo-1",
+		Owner:          "acme",
+		Repo:           "widget",
+		PRNumber:       42,
+		State:          "open",
+		ChecksState:    "success",
+		ReviewState:    "approved",
+		MergeableState: "clean",
+		LastSyncedAt:   &now,
+	}
+	_, emptySignature := encodeCIAutomationCheckpoint(ciAutomationCheckpoint{})
+	ghSvc := &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID:           "task-1",
+			AutoFixEnabled:   true,
+			AutoMergeEnabled: true,
+		},
+		ciPRState: &github.TaskCIPRAutomationState{
+			TaskID:            "task-1",
+			RepositoryID:      "repo-1",
+			PRNumber:          42,
+			LastFixSignature:  emptySignature,
+			LastFixEnqueuedAt: &lastFixEnqueuedAt,
+		},
+		prFeedback: &github.PRFeedback{},
+	}
+	svc.SetGitHubService(ghSvc)
+
+	if err := svc.handleTaskPRCIAutomationWithRefresh(ctx, pr, false); err != nil {
+		t.Fatalf("handle empty-delta CI automation: %v", err)
+	}
+	return ghSvc.mergeCalls
+}
+
+func TestHandleTaskPRCIAutoFixEmptyDeltaBlocksMergeWithinFixBlockWindow(t *testing.T) {
+	lastFixEnqueuedAt := time.Now().UTC()
+	if mergeCalls := runEmptyDeltaInFlightFixTest(t, lastFixEnqueuedAt); mergeCalls != 0 {
+		t.Fatalf("expected in-flight fix (enqueued %s ago) to block auto-merge, got %d merge calls", time.Since(lastFixEnqueuedAt), mergeCalls)
+	}
+}
+
+func TestHandleTaskPRCIAutoFixEmptyDeltaAllowsMergeAfterFixBlockWindow(t *testing.T) {
+	lastFixEnqueuedAt := time.Now().UTC().Add(-2 * ciAutomationFixBlockWindow)
+	if mergeCalls := runEmptyDeltaInFlightFixTest(t, lastFixEnqueuedAt); mergeCalls != 1 {
+		t.Fatalf("expected fix enqueued outside the block window to allow auto-merge, got %d merge calls", mergeCalls)
+	}
+}
+
 func TestDispatchCIAutomationPromptForPRIdleRoundCapUsesDedicatedError(t *testing.T) {
 	ctx := context.Background()
 	svc := &Service{}
@@ -2346,8 +2409,15 @@ func TestDispatchCIAutomationPromptForPRRecordsUserMessageBeforeDirectPrompt(t *
 	if len(agentMgr.capturedPromptCalls) != 1 || !agentMgr.capturedPromptCalls[0].DispatchOnly {
 		t.Fatalf("expected CI automation direct prompt to dispatch only, got %+v", agentMgr.capturedPromptCalls)
 	}
-	if messageCreator.userMessages[0].metadata["origin"] != ciAutomationOrigin {
-		t.Fatalf("expected CI automation user message metadata, got %+v", messageCreator.userMessages[0].metadata)
+	gotMeta := messageCreator.userMessages[0].metadata
+	if gotMeta["origin"] != ciAutomationOrigin {
+		t.Fatalf("expected CI automation user message metadata, got %+v", gotMeta)
+	}
+	wantMeta := ciAutomationMessageMetadataForPR(pr, "signature")
+	for key, wantVal := range wantMeta {
+		if gotVal := gotMeta[key]; gotVal != wantVal {
+			t.Fatalf("expected metadata[%q] = %v, got %v (full metadata: %+v)", key, wantVal, gotVal, gotMeta)
+		}
 	}
 }
 
