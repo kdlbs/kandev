@@ -1,21 +1,26 @@
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import { TaskStateActions } from "./task-state-actions";
 
 afterEach(cleanup);
 
 const ICON_CHECK = ".tabler-icon-check";
 const ICON_LOADER2 = ".tabler-icon-loader-2";
+const BG_TESTID = '[data-testid="task-state-background-running"]';
 
 describe("TaskStateActions — open-task header status icon", () => {
-  it("shows the background spinner (IconLoader) for a background-running task, not the done check", () => {
+  it("shows the background-running affordance for a background-running task, not the done check", () => {
     // the open-task header status icon reflects the
-    // task-level aggregate — background-running (IconLoader), never a done check
-    // for a task still doing background work, even when the coarse state is done.
+    // task-level aggregate — background-running (shared BackgroundWorkTaskIcon), never
+    // a done check for a task still doing background work, even when the coarse state
+    // is done.
     const { container } = render(
-      <TaskStateActions state="COMPLETED" foregroundActivity="background" />,
+      <TooltipProvider>
+        <TaskStateActions state="COMPLETED" foregroundActivity="background" />
+      </TooltipProvider>,
     );
-    expect(container.querySelector(".tabler-icon-loader")).not.toBeNull();
+    expect(container.querySelector(BG_TESTID)).not.toBeNull();
     expect(container.querySelector(ICON_CHECK)).toBeNull();
     // Distinct by SHAPE from the generating spinner (IconLoader2), not hue alone.
     expect(container.querySelector(ICON_LOADER2)).toBeNull();

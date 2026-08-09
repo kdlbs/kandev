@@ -9,29 +9,82 @@ import { KanbanPage } from "../../pages/kanban-page";
  * render `data-testid="task-state-background-running"` rather than the plain
  * WAITING_FOR_INPUT question-mark icon.
  *
- * Backend plumbing is not exercised here — the projection is injected via the
- * __KANDEV_E2E_STORE__ bridge so the test stays deterministic and fast.
+ * Backend plumbing is not exercised here — deterministically driving a real
+ * detached background process through the launch recogniser and liveness
+ * probe is out of scope for this fixture. Instead each surface is fed the
+ * `parked_on_background_work` projection at the point it actually reads it:
+ * the board reads `state.kanbanMulti.snapshots[workflowId].tasks`
+ * (components/kanban-board.tsx), so the board test mutates that store slice
+ * via the `__KANDEV_E2E_STORE__` bridge. The `/tasks` list has no live store
+ * subscription at all — `app/tasks/tasks-page-client.tsx` holds its own
+ * `useState` seeded from the `GET /api/v1/workspaces/:id/tasks` response — so
+ * the list-row test intercepts that response instead.
  */
 type E2EStoreWindow = Window & {
   __KANDEV_E2E_STORE__?: {
-    getState: () => { kanban: { tasks: Array<Record<string, unknown>> } };
+    getState: () => {
+      kanbanMulti: { snapshots: Record<string, { tasks: Array<Record<string, unknown>> }> };
+    };
     setState: (
-      updater: (state: { kanban: { tasks: Array<Record<string, unknown>> } }) => void,
+      updater: (state: {
+        kanbanMulti: { snapshots: Record<string, { tasks: Array<Record<string, unknown>> }> };
+      }) => void,
     ) => void;
   };
 };
 
-async function injectParkedTask(page: import("@playwright/test").Page, taskId: string) {
-  await page.evaluate((tid) => {
-    const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
-    if (!store) throw new Error("E2E store bridge missing");
-    store.setState((state) => {
-      const task = state.kanban.tasks.find((t) => t.id === tid);
-      if (!task) throw new Error(`Task ${tid} not found in kanban store`);
-      task.state = "WAITING_FOR_INPUT";
-      task.parkedOnBackgroundWork = true;
+async function injectParkedBoardTask(
+  page: import("@playwright/test").Page,
+  workflowId: string,
+  taskId: string,
+) {
+  await page.evaluate(
+    ({ workflowId, taskId }) => {
+      const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
+      if (!store) throw new Error("E2E store bridge missing");
+      store.setState((state) => {
+        const snapshot = state.kanbanMulti.snapshots[workflowId];
+        if (!snapshot) throw new Error(`No kanbanMulti snapshot for workflow ${workflowId}`);
+        const task = snapshot.tasks.find((t) => t.id === taskId);
+        if (!task) throw new Error(`Task ${taskId} not found in kanbanMulti snapshot`);
+        task.state = "WAITING_FOR_INPUT";
+        task.parkedOnBackgroundWork = true;
+      });
+    },
+    { workflowId, taskId },
+  );
+}
+
+/**
+ * Intercept the tasks-list fetch and mark `taskId` as parked in the response
+ * body. Must be registered before navigation: `app/tasks/tasks-page-client.tsx`
+ * fetches this endpoint on mount with no Vite-side SSR to bypass, so Playwright
+ * observes it on first load like any other client fetch.
+ */
+async function interceptParkedTaskListResponse(
+  page: import("@playwright/test").Page,
+  taskId: string,
+) {
+  await page.route("**/api/v1/workspaces/*/tasks*", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    const response = await route.fetch();
+    const body = (await response.json()) as {
+      tasks: Array<Record<string, unknown>>;
+      total: number;
+    };
+    await route.fulfill({
+      response,
+      json: {
+        ...body,
+        tasks: body.tasks.map((task) =>
+          task.id === taskId ? { ...task, parked_on_background_work: true } : task,
+        ),
+      },
     });
-  }, taskId);
+  });
 }
 
 test.describe("Parked-session affordance", () => {
@@ -51,7 +104,7 @@ test.describe("Parked-session affordance", () => {
     const card = kanban.taskCard(task.id);
     await expect(card).toBeVisible({ timeout: 10_000 });
 
-    await injectParkedTask(testPage, task.id);
+    await injectParkedBoardTask(testPage, seedData.workflowId, task.id);
 
     // The board card must show the violet background-running spinner (AC-58),
     // not the question-mark icon.
@@ -69,11 +122,10 @@ test.describe("Parked-session affordance", () => {
       workflow_step_id: seedData.startStepId,
     });
 
-    // Navigate to task list
+    await interceptParkedTaskListResponse(testPage, task.id);
+
     await testPage.goto("/tasks");
     await testPage.waitForSelector('[data-testid="tasks-list-row-title"]', { timeout: 15_000 });
-
-    await injectParkedTask(testPage, task.id);
 
     // Find the row and check for the parked icon (AC-73a).
     const row = testPage.locator(`[data-testid="tasks-list-row-title"]`, {

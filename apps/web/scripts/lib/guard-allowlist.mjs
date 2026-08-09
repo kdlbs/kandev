@@ -81,9 +81,25 @@ function expandBraces(pattern) {
   return alts.split(",").flatMap((alt) => expandBraces(prefix + alt + suffix));
 }
 
+// Parse a glob `[...]` character class starting at `startIdx` (the `[`).
+// Returns {regex, nextIdx}. Glob `[]]` means "match ]" and `[[]` means "match [".
+function parseGlobCharClass(pattern, startIdx) {
+  // A ] immediately after [ (or after [^) is a class member, not the closer.
+  let j = startIdx + 1;
+  if (pattern[j] === "^") j++;
+  if (pattern[j] === "]") j++;
+  const end = pattern.indexOf("]", j);
+  if (end === -1) return { regex: "\\[", nextIdx: startIdx + 1 };
+  const cls = pattern.slice(startIdx + 1, end);
+  let regex;
+  if (cls === "]") regex = "\\]";
+  else if (cls === "[") regex = "\\[";
+  else regex = "[" + cls + "]";
+  return { regex, nextIdx: end + 1 };
+}
+
 // Translate a simple glob pattern (no brace expressions) into a RegExp.
 // Handles: ** (any path depth), * (one segment), ? (one char), [...] (classes).
-// Glob `[]]` means "match ]" and `[[]` means "match [" — both are bracket escapes.
 function globPatternToRegex(pattern) {
   let r = "";
   let i = 0;
@@ -100,21 +116,9 @@ function globPatternToRegex(pattern) {
       r += "[^/]";
       i++;
     } else if (c === "[") {
-      // A ] immediately after [ (or after [^) is a class member, not the closer.
-      let j = i + 1;
-      if (pattern[j] === "^") j++;
-      if (pattern[j] === "]") j++;
-      const end = pattern.indexOf("]", j);
-      if (end === -1) {
-        r += "\\[";
-        i++;
-      } else {
-        const cls = pattern.slice(i + 1, end);
-        if (cls === "]") r += "\\]";
-        else if (cls === "[") r += "\\[";
-        else r += "[" + cls + "]";
-        i = end + 1;
-      }
+      const { regex, nextIdx } = parseGlobCharClass(pattern, i);
+      r += regex;
+      i = nextIdx;
     } else if (".+^${}()|\\".includes(c)) {
       r += "\\" + c;
       i++;

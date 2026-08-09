@@ -1,5 +1,6 @@
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
 import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
@@ -13,6 +14,7 @@ afterEach(() => {
 const STEPS: WorkflowStep[] = [{ id: "step-1", title: "In Progress", color: "#888" }];
 const ICON_CHECK = ".tabler-icon-check";
 const ICON_LOADER2 = ".tabler-icon-loader-2";
+const BG_TESTID = '[data-testid="task-state-background-running"]';
 
 function makeTask(foregroundActivity?: ForegroundActivity | null): Task {
   return {
@@ -27,23 +29,26 @@ function makeTask(foregroundActivity?: ForegroundActivity | null): Task {
 function renderSwimlane(foregroundActivity?: ForegroundActivity | null) {
   return render(
     <StateProvider>
-      <SwimlaneGraphContent
-        workflowId="wf-1"
-        steps={STEPS}
-        tasks={[makeTask(foregroundActivity)]}
-        onPreviewTask={() => undefined}
-      />
+      <TooltipProvider>
+        <SwimlaneGraphContent
+          workflowId="wf-1"
+          steps={STEPS}
+          tasks={[makeTask(foregroundActivity)]}
+          onPreviewTask={() => undefined}
+        />
+      </TooltipProvider>
     </StateProvider>,
   );
 }
 
 describe("SwimlaneGraphContent — task-level background-running affordance", () => {
-  it("shows the background spinner (IconLoader) for a background-running task chip, not the done check", () => {
+  it("shows the background-running affordance for a background-running task chip, not the done check", () => {
     const { container } = renderSwimlane("background");
     // the swimlane task chip reflects the task-level
-    // aggregate — background-running (IconLoader), never a done check for a task
-    // still doing background work, even when the coarse state is COMPLETED.
-    expect(container.querySelector(".tabler-icon-loader")).not.toBeNull();
+    // aggregate — background-running (shared BackgroundWorkTaskIcon), never a done
+    // check for a task still doing background work, even when the coarse state is
+    // COMPLETED.
+    expect(container.querySelector(BG_TESTID)).not.toBeNull();
     expect(container.querySelector(ICON_CHECK)).toBeNull();
     expect(container.querySelector(ICON_LOADER2)).toBeNull();
   });
