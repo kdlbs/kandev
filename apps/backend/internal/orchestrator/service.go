@@ -605,6 +605,14 @@ type Service struct {
 	// cmd/kandev via SetBackgroundProbe after the lifecycle manager is constructed.
 	backgroundProbe backgroundProbePort
 
+	// parkedStatesMu guards parkedStates. Lock order: parkedStatesMu before
+	// any per-session mutex; never hold a session mutex while acquiring this.
+	parkedStatesMu sync.RWMutex
+	// parkedStates holds the per-session recogniser tracking state used by the
+	// parked-on-background-work projection. Keyed by Kandev session ID.
+	// Entries are created on first use and deleted on execution retirement.
+	parkedStates map[string]*sessionParkedState
+
 	// foregroundActivity tracks, per session, whether the open turn is actively
 	// generating in the foreground or only waiting on a spawned background task
 	// (subagent / run-in-background shell). Keyed sessionID -> *turnActivity;

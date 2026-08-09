@@ -161,7 +161,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		s.handleAgentLogEvent(ctx, payload)
 
 	case streams.EventTypeTurnStarted:
-		// Turn-marker increment implemented in task-05 (recogniser + attestation).
+		s.getOrCreateParkedState(sessionID).turnMarker++
 	}
 }
 
@@ -365,6 +365,17 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 		payload.ExecutionID,
 		ownership,
 	)
+
+	// Recogniser: mark observed_detached when a Kind==shell background launch is
+	// seen. Kind filter is required — stampSubagentBackgroundWork also marks
+	// Detached=true with Kind=subagent (for both Claude and mock-agent), so an
+	// unfiltered predicate would set observed_detached on every subagent spawn and
+	// break AC-37's second GIVEN in dev/e2e profiles.
+	if n := payload.Data.Normalized; n != nil &&
+		n.IsDetachedBackgroundLaunch() &&
+		backgroundWorkKind(n) == streams.BackgroundWorkKindShell {
+		s.getOrCreateParkedState(payload.SessionID).observedDetached = true
+	}
 
 	// A top-level spawned background task (subagent / run-in-background shell)
 	// holds the turn open while the foreground goes idle. A tool_call that

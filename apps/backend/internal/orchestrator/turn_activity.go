@@ -798,6 +798,12 @@ func (s *Service) retireExecutionActivityAndPublish(
 	if changed {
 		s.publishForegroundActivitySnapshot(ctx, taskID, sessionID, publication)
 	}
+	if publication.retired {
+		// The last execution for this session's activity record retired; the
+		// session is done with this run. Delete the parked state so the next
+		// execution starts with a fresh observed_detached=false.
+		s.deleteParkedState(sessionID)
+	}
 }
 
 // clearTurnActivity drops all tracked activity for a session. Foreground turn
@@ -819,6 +825,7 @@ func (s *Service) clearTurnActivity(sessionID string) {
 		ta.mu.Unlock()
 	}
 	s.foregroundActivityMu.Unlock()
+	s.deleteParkedState(sessionID)
 }
 
 // isForegroundTurnGenerating reports whether the session's foreground agent turn
