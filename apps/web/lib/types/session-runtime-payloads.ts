@@ -118,10 +118,3 @@ export type SessionTodosPayload = {
   }>;
   timestamp: string;
 };
-
-export type TaskSessionParkedChangedPayload = {
-  session_id: string;
-  parked_on_background_work: boolean;
-  parked_epoch?: number;
-  parked_revision?: number;
-};

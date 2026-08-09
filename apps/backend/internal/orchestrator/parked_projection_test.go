@@ -6,7 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
 var errParkedTestProbe = errors.New("simulated probe transport error")
@@ -53,10 +55,25 @@ func TestComputeParked_AllCombinations(t *testing.T) {
 	}
 }
 
+// parkedTestSeedSession creates the workspace/workflow/task/session chain a
+// TaskSession row's foreign keys require (via the existing seedSession
+// helper) and sets the session to the given state, so
+// currentSessionState's fresh read (F1's fix) finds the expected live
+// state. Takes the concrete repo (not svc.repo, which is narrowed to
+// sessionExecutorStore and does not expose CreateTaskSession).
+func parkedTestSeedSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID string, state models.TaskSessionState) {
+	t.Helper()
+	seedSession(t, repo, taskID, sessionID, "")
+	if err := repo.UpdateTaskSessionState(context.Background(), sessionID, state, ""); err != nil {
+		t.Fatalf("failed to set seeded task session state: %v", err)
+	}
+}
+
 // TestOnSessionParkedHook_LiveProbeSetsParked verifies that onSessionParkedHook
 // with a live probe result transitions to parked=true and increments revision.
 func TestOnSessionParkedHook_LiveProbeSetsParked(t *testing.T) {
-	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	// Set a non-zero interval so the sampler goroutine can start without panicking.
 	// The goroutine is stopped via deleteParkedState in t.Cleanup.
 	svc.config.BackgroundSampleInterval = 10 * time.Millisecond
@@ -66,6 +83,7 @@ func TestOnSessionParkedHook_LiveProbeSetsParked(t *testing.T) {
 	const taskID, sessionID = "task-hook", "session-hook"
 	// Seed observedDetached=true so computeParked can return true.
 	svc.getOrCreateParkedState(sessionID).observedDetached = true
+	parkedTestSeedSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
 
 	svc.onSessionParkedHook(context.Background(), taskID, sessionID)
 
@@ -234,6 +252,113 @@ func TestSampleAndPublishParked_DiscardsStaleSample(t *testing.T) {
 	}
 }
 
+// TestOnSessionParkedHook_DoesNotParkWhenSessionLeftWaitingDuringProbe is the
+// regression guard for Review round 2's F1: the settle hook must not compute
+// `parked` against a state literal frozen at hook-entry. The turn boundary
+// does not move here (turnMarker/observedDetached are unchanged, so D2's
+// revalidation alone would let this sample through) — only the session's own
+// state changed while the probe was in flight. The fresh read inside the
+// write's critical section must catch it.
+func TestOnSessionParkedHook_DoesNotParkWhenSessionLeftWaitingDuringProbe(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	const taskID, sessionID = "task-left-waiting", "session-left-waiting"
+	svc.getOrCreateParkedState(sessionID).observedDetached = true
+	// The session has already left WAITING_FOR_INPUT by the time the probe
+	// (below) returns — simulating an admitted prompt racing the probe's own
+	// round trip.
+	parkedTestSeedSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+
+	probe := &fakeProbe{result: probeResultLive}
+	svc.SetBackgroundProbe(probe)
+
+	svc.onSessionParkedHook(context.Background(), taskID, sessionID)
+
+	ps := svc.parkedStateFor(sessionID)
+	if ps.parked {
+		t.Fatal("expected parked=false: the session left WAITING_FOR_INPUT before the write, so a live sample must not park it")
+	}
+}
+
+// TestSampleAndPublishParked_DoesNotReparkWhenSessionLeftWaitingDuringProbe
+// is the periodic-sampler counterpart: a session already parked, whose
+// in-memory row has not yet been touched by unparkOnStateLeave, must not be
+// re-affirmed as parked by a probe sample that completes after the session's
+// state has already moved on in the repository.
+func TestSampleAndPublishParked_DoesNotReparkWhenSessionLeftWaitingDuringProbe(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	const taskID, sessionID = "task-left-waiting2", "session-left-waiting2"
+	ps := svc.getOrCreateParkedState(sessionID)
+	ps.observedDetached = true
+	ps.parked = true
+	// unparkOnStateLeave has not run yet in-memory, but the session's real
+	// state has already moved on.
+	parkedTestSeedSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+
+	probe := &fakeProbe{result: probeResultLive}
+	svc.SetBackgroundProbe(probe)
+
+	keepRunning := svc.sampleAndPublishParked(context.Background(), taskID, sessionID)
+	if keepRunning {
+		t.Fatal("expected keepRunning=false: the session is no longer WAITING_FOR_INPUT")
+	}
+	ps2 := svc.parkedStateFor(sessionID)
+	if ps2.parked {
+		t.Fatal("expected parked=false: a live sample must not re-park a session that already left WAITING_FOR_INPUT")
+	}
+}
+
+// evictAndReviveDuringProbe is a test double for backgroundProbePort that
+// simulates Review round 2's F2: the session's parkedState row is evicted
+// (execution end) and then revived by a fresh attestation for a NEW
+// execution, all while the original probe call is in flight. turnMarker
+// restarts at 0 on both eviction and revival per spec, so it alone cannot
+// tell the two executions apart — this exercises the anti-ABA generation
+// guard instead.
+type evictAndReviveDuringProbe struct {
+	svc       *Service
+	taskID    string
+	sessionID string
+	result    string
+	calls     int
+}
+
+func (p *evictAndReviveDuringProbe) ProbeBackgroundWorkloads(_ context.Context, _ string) (string, error) {
+	p.calls++
+	p.svc.evictParkedState(context.Background(), p.taskID, p.sessionID, false)
+	p.svc.markObservedDetached(p.sessionID)
+	return p.result, nil
+}
+
+// TestSampleAndPublishParked_DiscardsSampleAcrossEvictionAndRevival is the
+// regression guard for F2: a stale sample from execution A must not be
+// applied to execution B's freshly revived row just because
+// (observedDetached, turnMarker) happen to read the same values again.
+func TestSampleAndPublishParked_DiscardsSampleAcrossEvictionAndRevival(t *testing.T) {
+	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	const taskID, sessionID = "task-aba", "session-aba"
+	ps := svc.getOrCreateParkedState(sessionID)
+	ps.observedDetached = true
+	ps.parked = true
+
+	probe := &evictAndReviveDuringProbe{svc: svc, taskID: taskID, sessionID: sessionID, result: probeResultLive}
+	svc.SetBackgroundProbe(probe)
+
+	keepRunning := svc.sampleAndPublishParked(context.Background(), taskID, sessionID)
+	if !keepRunning {
+		t.Fatal("expected keepRunning=true: a discarded sample must not stop the sampler on its own")
+	}
+
+	ps2 := svc.parkedStateFor(sessionID)
+	if ps2.lastSample != "" {
+		t.Fatalf("expected lastSample untouched by execution A's stale sample, got %q", ps2.lastSample)
+	}
+	if ps2.generation != 1 {
+		t.Fatalf("expected generation=1 after one eviction, got %d", ps2.generation)
+	}
+}
+
 // TestRunProbe_ErrorResolvesToUnknown verifies AC-46: a non-nil error
 // resolves to "unknown" regardless of the value returned beside it.
 func TestRunProbe_ErrorResolvesToUnknown(t *testing.T) {
@@ -345,6 +470,9 @@ func TestEvictParkedState_UnparksThenReduces(t *testing.T) {
 	if ps2.observedDetached || ps2.turnMarker != 0 || ps2.lastSample != "" {
 		t.Fatalf("expected a reduced row (observedDetached=false, turnMarker=0, lastSample=\"\"), got %+v", ps2)
 	}
+	if ps2.generation != 1 {
+		t.Fatalf("expected generation bumped to 1 by eviction (F2's anti-ABA guard), got %d", ps2.generation)
+	}
 }
 
 // TestEvictParkedState_RemovesRowWhenRemoveTrue verifies AC-85's "dropped for
@@ -442,10 +570,18 @@ func TestTaskParkedProjectionSnapshot_MultiSessionOR(t *testing.T) {
 	}
 }
 
-// TestSampleAndPublishParked_StopsWhenNotParked verifies that sampleAndPublishParked
-// returns false (stop sampling) when the probe returns settled.
+// TestSampleAndPublishParked_StopsWhenNotParked verifies AC-62's live→settled
+// transition: sampleAndPublishParked returns false (stop sampling), flips
+// ps.parked, bumps the revision, publishes the un-park on
+// session.activity_changed (Review round 2, F3 — the spec's named carrier,
+// not a dedicated event) carrying the un-parked triple, and flips the
+// task-level OR because this is the task's only parked session.
 func TestSampleAndPublishParked_StopsWhenNotParked(t *testing.T) {
 	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	recorded := &recordingEventBus{}
+	svc.eventBus = recorded
+	svc.parkedEpoch = 42
+
 	probe := &fakeProbe{result: probeResultSettled}
 	svc.SetBackgroundProbe(probe)
 
@@ -453,10 +589,51 @@ func TestSampleAndPublishParked_StopsWhenNotParked(t *testing.T) {
 	ps := svc.getOrCreateParkedState(sessionID)
 	ps.observedDetached = true
 	ps.parked = true // pretend was parked
+	ps.revision = 1
+	// Register this session as the task's only parked member, mirroring what
+	// onSessionParkedHook would already have done when it first parked.
+	svc.updateTaskParkedState(context.Background(), taskID, sessionID, true)
 
 	keepRunning := svc.sampleAndPublishParked(context.Background(), taskID, sessionID)
 	if keepRunning {
 		t.Fatal("expected keepRunning=false when probe returns settled")
+	}
+
+	ps2 := svc.parkedStateFor(sessionID)
+	if ps2.parked {
+		t.Fatal("expected parked=false after a settled probe")
+	}
+	if ps2.revision != 2 {
+		t.Fatalf("expected revision incremented to 2, got %d", ps2.revision)
+	}
+
+	var found bool
+	for _, e := range recorded.events {
+		if e.subject != events.TaskSessionActivityChanged {
+			continue
+		}
+		data, ok := e.event.Data.(map[string]interface{})
+		if !ok || data["session_id"] != sessionID {
+			continue
+		}
+		found = true
+		if parked, _ := data["parked_on_background_work"].(bool); parked {
+			t.Fatal("expected parked_on_background_work=false on the published frame")
+		}
+		if rev, _ := data["parked_revision"].(uint64); rev != 2 {
+			t.Fatalf("expected parked_revision=2 on the published frame, got %v", data["parked_revision"])
+		}
+		if epoch, _ := data["parked_epoch"].(int64); epoch != 42 {
+			t.Fatalf("expected parked_epoch=42 on the published frame, got %v", data["parked_epoch"])
+		}
+	}
+	if !found {
+		t.Fatal("expected a session.activity_changed publish carrying the un-park for this session")
+	}
+
+	taskParked, _ := svc.TaskParkedProjectionSnapshot(taskID)
+	if taskParked {
+		t.Fatal("expected task-level parked_on_background_work=false: this was the task's only parked session")
 	}
 }
 

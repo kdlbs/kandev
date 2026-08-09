@@ -4,8 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/kandev/kandev/internal/events"
-	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
 )
@@ -25,17 +23,20 @@ func (ps *sessionParkedState) computeParked(sessionState models.TaskSessionState
 }
 
 // probeRevalidationSnapshot captures the values D2's revalidation rule
-// compares against at probe completion.
+// compares against at probe completion. generation is the anti-ABA guard
+// documented on sessionParkedState — it is not part of the spec's Data
+// model and travels on no carrier.
 type probeRevalidationSnapshot struct {
 	observedDetached bool
 	turnMarker       uint64
+	generation       uint64
 }
 
 // captureProbeSnapshot returns the session's current (observedDetached,
-// turnMarker) pair, and ok=false when the session has no parkedState row or
-// is not currently attested. AC-40a: a probe is issued only when the
-// settling turn actually attested a detached launch, so the common turn end
-// pays nothing.
+// turnMarker, generation) triple, and ok=false when the session has no
+// parkedState row or is not currently attested. AC-40a: a probe is issued
+// only when the settling turn actually attested a detached launch, so the
+// common turn end pays nothing.
 func (s *Service) captureProbeSnapshot(sessionID string) (probeRevalidationSnapshot, bool) {
 	s.parkedStatesMu.RLock()
 	defer s.parkedStatesMu.RUnlock()
@@ -43,20 +44,24 @@ func (s *Service) captureProbeSnapshot(sessionID string) (probeRevalidationSnaps
 	if ps == nil || !ps.observedDetached {
 		return probeRevalidationSnapshot{}, false
 	}
-	return probeRevalidationSnapshot{observedDetached: true, turnMarker: ps.turnMarker}, true
+	return probeRevalidationSnapshot{observedDetached: true, turnMarker: ps.turnMarker, generation: ps.generation}, true
 }
 
-// probeSnapshotStillValid implements D2's "a sample must be revalidated
-// before it is applied" rule: a completed sample is applied only if
-// observed_detached is still true and turn_marker still equals the value
-// captured at issue. A turn_started arriving mid-probe invalidates the
-// question the sample answered; the caller discards the result rather than
-// applying it to the wrong turn.
-func (s *Service) probeSnapshotStillValid(sessionID string, snap probeRevalidationSnapshot) bool {
-	s.parkedStatesMu.RLock()
-	defer s.parkedStatesMu.RUnlock()
-	ps := s.parkedStates[sessionID]
-	return ps != nil && ps.observedDetached == snap.observedDetached && ps.turnMarker == snap.turnMarker
+// currentSessionState reads the session's live TaskSessionState immediately
+// before a parked write is applied, rather than trusting the state at
+// hook-entry time. The settle hook that fires onSessionParkedHook only
+// guarantees WAITING_FOR_INPUT at the instant it fires — the probe's own
+// round trip (up to KANDEV_PARKED_PROBE_BUDGET) can outlast that window, and
+// a session that leaves WAITING_FOR_INPUT while the probe is in flight must
+// not be re-parked by a write that still assumes the state it had at entry.
+// A lookup failure returns the zero value, which computeParked never treats
+// as WAITING_FOR_INPUT — the cheap, non-parking direction.
+func (s *Service) currentSessionState(ctx context.Context, sessionID string) models.TaskSessionState {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return ""
+	}
+	return session.State
 }
 
 // onSessionParkedHook fires synchronously after a session transitions to
@@ -73,19 +78,22 @@ func (s *Service) onSessionParkedHook(ctx context.Context, taskID, sessionID str
 		return
 	}
 	sample := s.runProbe(ctx, sessionID)
-	if !s.probeSnapshotStillValid(sessionID, snap) {
-		return
-	}
+	sessionState := s.currentSessionState(ctx, sessionID)
 
 	s.parkedStatesMu.Lock()
 	ps := s.parkedStates[sessionID]
-	if ps == nil {
+	if ps == nil || ps.observedDetached != snap.observedDetached || ps.turnMarker != snap.turnMarker || ps.generation != snap.generation {
+		// D2 revalidation, applied in the SAME critical section as the write
+		// below rather than as a separate, unlocked check beforehand — a
+		// concurrent turn_started (or an eviction) cannot slip a state change
+		// into the gap between validating and applying. Discarding writes
+		// nothing: no transition, no revision move.
 		s.parkedStatesMu.Unlock()
 		return
 	}
 	ps.lastSample = sample
 	oldParked := ps.parked
-	newParked := ps.computeParked(models.TaskSessionStateWaitingForInput)
+	newParked := ps.computeParked(sessionState)
 	var startSampler bool
 	var samplerCtx context.Context
 	if newParked != oldParked {
@@ -99,11 +107,10 @@ func (s *Service) onSessionParkedHook(ctx context.Context, taskID, sessionID str
 	} else {
 		ps.stopSampler()
 	}
-	revision := ps.revision
 	s.parkedStatesMu.Unlock()
 
 	if newParked != oldParked {
-		s.publishParkedChanged(taskID, sessionID, newParked, s.parkedEpoch, revision)
+		s.publishParkedChanged(ctx, taskID, sessionID)
 		s.updateTaskParkedState(ctx, taskID, sessionID, newParked)
 	}
 
@@ -155,22 +162,21 @@ func (s *Service) sampleAndPublishParked(ctx context.Context, taskID, sessionID 
 		return false
 	}
 	sample := s.runProbe(ctx, sessionID)
-	if !s.probeSnapshotStillValid(sessionID, snap) {
-		// Discarded per D2: a turn boundary moved while this sample was in
-		// flight. Nothing is written; the loop's next tick re-issues against
-		// whatever the new turn's state actually is.
-		return true
-	}
+	sessionState := s.currentSessionState(ctx, sessionID)
 
 	s.parkedStatesMu.Lock()
 	ps := s.parkedStates[sessionID]
-	if ps == nil {
+	if ps == nil || ps.observedDetached != snap.observedDetached || ps.turnMarker != snap.turnMarker || ps.generation != snap.generation {
+		// Discarded per D2, revalidated in the same critical section as the
+		// write below (see onSessionParkedHook). Nothing is written; the
+		// loop's next tick re-issues against whatever the new turn's state
+		// actually is.
 		s.parkedStatesMu.Unlock()
-		return false
+		return true
 	}
 	ps.lastSample = sample
 	oldParked := ps.parked
-	newParked := ps.computeParked(models.TaskSessionStateWaitingForInput)
+	newParked := ps.computeParked(sessionState)
 	if newParked != oldParked {
 		ps.parked = newParked
 		ps.revision++
@@ -178,11 +184,10 @@ func (s *Service) sampleAndPublishParked(ctx context.Context, taskID, sessionID 
 	if !newParked {
 		ps.stopSampler()
 	}
-	revision := ps.revision
 	s.parkedStatesMu.Unlock()
 
 	if newParked != oldParked {
-		s.publishParkedChanged(taskID, sessionID, newParked, s.parkedEpoch, revision)
+		s.publishParkedChanged(ctx, taskID, sessionID)
 		s.updateTaskParkedState(ctx, taskID, sessionID, newParked)
 	}
 
@@ -203,16 +208,14 @@ func (s *Service) unparkOnStateLeave(ctx context.Context, taskID, sessionID stri
 	}
 	ps.stopSampler()
 	wasParked := ps.parked
-	var revision uint64
 	if wasParked {
 		ps.parked = false
 		ps.revision++
-		revision = ps.revision
 	}
 	s.parkedStatesMu.Unlock()
 
 	if wasParked {
-		s.publishParkedChanged(taskID, sessionID, false, s.parkedEpoch, revision)
+		s.publishParkedChanged(ctx, taskID, sessionID)
 		s.updateTaskParkedState(ctx, taskID, sessionID, false)
 	}
 }
@@ -239,23 +242,29 @@ func (s *Service) evictParkedState(ctx context.Context, taskID, sessionID string
 		return
 	}
 	wasParked := ps.parked
-	var revision uint64
 	if wasParked {
 		ps.parked = false
 		ps.revision++
-		revision = ps.revision
 	}
 	ps.stopSampler()
 	ps.observedDetached = false
 	ps.turnMarker = 0
 	ps.lastSample = ""
+	// F2 (Review round 2): bump the anti-ABA generation on every eviction of
+	// an existing row, not just the parked ones. turnMarker restarts at 0
+	// here and again on revival (spec: Data model → Entry lifecycle), so a
+	// stale in-flight sample captured before this eviction could otherwise
+	// pass revalidation against a later, unrelated execution's freshly
+	// revived row that happens to read the same (observedDetached=true,
+	// turnMarker=0) pair. generation, never reset, breaks that tie.
+	ps.generation++
 	if remove {
 		delete(s.parkedStates, sessionID)
 	}
 	s.parkedStatesMu.Unlock()
 
 	if wasParked {
-		s.publishParkedChanged(taskID, sessionID, false, s.parkedEpoch, revision)
+		s.publishParkedChanged(ctx, taskID, sessionID)
 		s.updateTaskParkedState(ctx, taskID, sessionID, false)
 	}
 }
@@ -287,28 +296,24 @@ func (s *Service) runParkingSampler(ctx context.Context, taskID, sessionID strin
 	}
 }
 
-// publishParkedChanged sends a TaskSessionParkedChanged event on the bus.
-func (s *Service) publishParkedChanged(taskID, sessionID string, parked bool, epoch int64, revision uint64) {
+// publishParkedChanged re-publishes session.activity_changed so a parked
+// transition rides on the spec's named carrier (Review round 2, F3: the API
+// surface section and AC-62/68/78/85 all name session.activity_changed, not
+// a dedicated event). The caller has already written the new
+// parked/revision under parkedStatesMu and released it before calling this;
+// publishForegroundActivityNow re-derives the parked triple itself via
+// ParkedProjectionSnapshot, so it reads back exactly what was just written.
+// foreground_activity and active_subagent_count are re-derived fresh too, so
+// the frame is complete regardless of what triggered it.
+func (s *Service) publishParkedChanged(ctx context.Context, taskID, sessionID string) {
 	if s.eventBus == nil || sessionID == "" {
 		return
 	}
-	payload := map[string]interface{}{
-		"task_id":                   taskID,
-		"session_id":                sessionID,
-		"parked_on_background_work": parked,
-		"parked_epoch":              epoch,
-		"parked_revision":           revision,
-	}
-	ev := bus.NewEvent(events.TaskSessionParkedChanged, "orchestrator", payload)
-	if err := s.eventBus.Publish(context.Background(), events.TaskSessionParkedChanged, ev); err != nil {
-		if s.logger != nil {
-			s.logger.Warn("failed to publish parked state",
-				zap.String("session_id", sessionID),
-				zap.Bool("parked", parked),
-				zap.Uint64("revision", revision),
-				zap.Error(err))
-		}
-	}
+	s.publishForegroundActivityNow(
+		ctx, taskID, sessionID,
+		string(s.ForegroundActivity(sessionID)),
+		s.ActiveSubagentCount(sessionID),
+	)
 }
 
 // updateTaskParkedState updates the task-level OR and publishes a task update

@@ -211,7 +211,6 @@ const (
 	ActionSessionStateChanged         = "session.state_changed"
 	ActionSessionActivityChanged      = "session.activity_changed"
 	ActionSessionCancellationChanged  = "session.cancellation_changed"
-	ActionSessionParkedChanged        = "session.parked_changed"
 	ActionTaskStatusSummaryUpdated    = "task.status_summary.updated"
 	ActionSessionAgentctlStarting     = "session.agentctl_starting"
 	ActionSessionAgentctlReady        = "session.agentctl_ready"

@@ -9,9 +9,7 @@ import type {
   SessionMCPStatusPayload,
   SessionPromptUsagePayload,
   SessionTodosPayload,
-  TaskSessionParkedChangedPayload,
 } from "./session-runtime-payloads";
-export type { TaskSessionParkedChangedPayload } from "./session-runtime-payloads";
 
 export type MessageAddedPayload = {
   task_id: string;
@@ -72,6 +70,11 @@ export type TaskSessionStateChangedPayload = {
   supports_steering?: boolean;
 };
 
+/**
+ * Payload for `session.activity_changed` — the fine-grained busy signal
+ * (see ADR-0049). Fires when foreground ownership or detached background
+ * liveness changes, including after the foreground turn settles.
+ */
 export type TaskSessionActivityChangedPayload = {
   task_id: string;
   session_id: string;
@@ -79,6 +82,12 @@ export type TaskSessionActivityChangedPayload = {
   active_subagent_count: number;
   /** True when a send right now would steer the running turn; see http.ts. */
   supports_steering?: boolean;
+  /** Runtime parked-on-background-work projection for this session. */
+  parked_on_background_work?: boolean;
+  /** Process-start epoch (Unix ns) — consumer discards snapshots from a prior backend run. */
+  parked_epoch?: number;
+  /** Monotonic revision; consumer discards snapshots with lower revision. */
+  parked_revision?: number;
 };
 
 export type TaskSessionCancellationChangedPayload = {
@@ -203,10 +212,6 @@ export type SessionBackendMessageMap = {
   "session.cancellation_changed": BackendMessage<
     "session.cancellation_changed",
     TaskSessionCancellationChangedPayload
-  >;
-  "session.parked_changed": BackendMessage<
-    "session.parked_changed",
-    TaskSessionParkedChangedPayload
   >;
   "session.clarification_requested": BackendMessage<
     "session.clarification_requested",

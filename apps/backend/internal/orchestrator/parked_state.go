@@ -27,6 +27,16 @@ type sessionParkedState struct {
 	revision         uint64
 	lastSample       string             // "live" | "settled" | "unknown" | ""
 	samplerCancel    context.CancelFunc // non-nil when a sampler goroutine is running
+	// generation is a Go-internal anti-ABA counter, not part of the spec's
+	// wire-visible Data model and never serialized on any carrier. The spec
+	// requires turnMarker to restart at 0 on both eviction (reduced) and
+	// revival (a fresh attestation on a reduced row), so turnMarker alone
+	// cannot distinguish a stale in-flight sample from a since-evicted
+	// execution from a freshly revived row that happens to read the same
+	// (observedDetached, turnMarker) pair. generation increments once per
+	// eviction of an existing row and is compared alongside turnMarker at
+	// probe-revalidation time to close that gap.
+	generation uint64
 }
 
 // taskParkedState holds the task-level OR of all session parked states.

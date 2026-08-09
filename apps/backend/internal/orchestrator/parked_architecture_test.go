@@ -267,11 +267,13 @@ func TestParkedFeatureNeverReferencesTheHandoffFlag(t *testing.T) {
 // clause: a parked session's projection is computed identically with the
 // flag forced on and forced off, for the same inputs.
 func TestComputeParked_IdenticalWithFlagForcedOnOrOff(t *testing.T) {
-	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	probe := &fakeProbe{result: probeResultLive}
 	svc.SetBackgroundProbe(probe)
 
 	const taskID, sessionID = "task-ac35", "session-ac35"
+	parkedTestSeedSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
 
 	for _, flag := range []bool{true, false} {
 		svc.config.ClaudeBackgroundPromptHandoff = flag

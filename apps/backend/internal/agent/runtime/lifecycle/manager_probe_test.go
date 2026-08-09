@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
@@ -95,6 +96,61 @@ func TestProbeBackgroundWorkloads_NilClient(t *testing.T) {
 	}
 	if result != "unknown" {
 		t.Fatalf("result = %q, want unknown", result)
+	}
+}
+
+// TestProbeBackgroundWorkloads_DeniedSessionAccessResolvesToUnknown verifies
+// F4 (Review round 2): ProbeBackgroundWorkloads resolves the execution via a
+// bare *BySessionID lookup, which per apps/backend/CLAUDE.md's documented
+// convention must call CheckSessionAccess itself since it skips the
+// GetOrEnsure* chokepoint. A denial must resolve to "unknown" — matching
+// every other failure path (AC-46) — and, mirroring
+// TestExecutionAccessChecksGateBeforeCache's "before cache" pattern, the
+// guard must run BEFORE the execution-store lookup so a cached execution for
+// a session the caller does not own is never reached.
+func TestProbeBackgroundWorkloads_DeniedSessionAccessResolvesToUnknown(t *testing.T) {
+	denied := errors.New("denied")
+	mgr := &Manager{logger: newTestLogger(), executionStore: NewExecutionStore()}
+	if err := mgr.executionStore.Add(&AgentExecution{
+		ID: "ex-5", SessionID: "sess-5", ACPSessionID: "acp-5",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mgr.SetSessionAccessChecker(func(_ context.Context, sessionID string) error {
+		if sessionID == "sess-5" {
+			return denied
+		}
+		return nil
+	})
+
+	result, err := mgr.ProbeBackgroundWorkloads(context.Background(), "sess-5")
+	if err != nil {
+		t.Fatalf("expected nil error (denial maps to unknown, not surfaced), got %v", err)
+	}
+	if result != "unknown" {
+		t.Fatalf("result = %q, want unknown", result)
+	}
+}
+
+// TestProbeBackgroundWorkloads_AllowedSessionAccessProceeds verifies the
+// guard's positive path: a checker that allows the session does not block
+// the probe from reaching its normal unknown-mapping logic (here: no
+// agentctl client attached yet).
+func TestProbeBackgroundWorkloads_AllowedSessionAccessProceeds(t *testing.T) {
+	mgr := &Manager{logger: newTestLogger(), executionStore: NewExecutionStore()}
+	if err := mgr.executionStore.Add(&AgentExecution{
+		ID: "ex-6", SessionID: "sess-6", ACPSessionID: "acp-6",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mgr.SetSessionAccessChecker(func(context.Context, string) error { return nil })
+
+	result, err := mgr.ProbeBackgroundWorkloads(context.Background(), "sess-6")
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if result != "unknown" {
+		t.Fatalf("result = %q, want unknown (no agentctl client attached)", result)
 	}
 }
 

@@ -32,6 +32,17 @@ func (m *Manager) ProbeBackgroundWorkloads(ctx context.Context, kandevSessionID 
 	if ctx.Err() != nil {
 		return sshStatusUnknown, nil
 	}
+	// F4 (Review round 2): this resolves the execution via a bare
+	// *BySessionID lookup, which per apps/backend/CLAUDE.md's documented
+	// convention skips the GetOrEnsure* chokepoint where the lifecycle
+	// access check normally runs — so it must call CheckSessionAccess
+	// itself. The spec's own Permissions section requires the same guard
+	// RespondToPermission uses. A denial maps to "unknown" like every other
+	// failure path (AC-46) rather than surfacing an auth error to a probe
+	// caller.
+	if err := m.CheckSessionAccess(ctx, kandevSessionID); err != nil {
+		return sshStatusUnknown, nil
+	}
 	execution, exists := m.executionStore.GetBySessionID(kandevSessionID)
 	if !exists || execution == nil {
 		return sshStatusUnknown, nil

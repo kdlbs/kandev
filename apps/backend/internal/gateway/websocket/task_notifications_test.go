@@ -108,7 +108,12 @@ func TestTaskEventBroadcaster_NoDuplicateSubscriptions(t *testing.T) {
 	//
 	// Update this number when adding or removing event subscriptions in
 	// RegisterTaskNotifications — it is intentionally exact.
-	const wantSubscriptions = 65
+	//
+	// Review round 2, F3: TaskSessionParkedChanged was removed — the parked
+	// triple now rides on the existing TaskSessionActivityChanged carrier
+	// instead of a dedicated event, per the frozen spec's API surface
+	// section.
+	const wantSubscriptions = 64
 	if got := len(b.subscriptions); got != wantSubscriptions {
 		t.Errorf("RegisterTaskNotifications created %d subscriptions, want %d — "+
 			"did an event get subscribed twice?", got, wantSubscriptions)

@@ -71,9 +71,6 @@ const (
 	// TaskSessionCancellationChanged fires when a cancellation request starts
 	// or the last overlapping request finishes for a session.
 	TaskSessionCancellationChanged = "task_session.cancellation_changed"
-	// TaskSessionParkedChanged fires when a session's parked-on-background-work
-	// projection transitions (false→true or true→false).
-	TaskSessionParkedChanged = "task_session.parked_changed"
 	// TaskSessionErrorChanged is emitted when a recoverable agent error is
 	// created, replaced, or dismissed. It is a bounded status source; the
 	// error message itself is projected into the task summary rather than

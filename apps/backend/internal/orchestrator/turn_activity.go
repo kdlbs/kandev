@@ -1299,12 +1299,21 @@ func (s *Service) publishForegroundActivityNow(
 	if s.eventBus == nil || taskID == "" || sessionID == "" {
 		return
 	}
+	// The parked-on-background-work triple rides on this carrier per the
+	// spec's API surface section (Review round 2, F3) — every
+	// session.activity_changed publish carries it, whatever triggered the
+	// publish, so a client re-deriving state from any activity_changed frame
+	// sees a consistent picture rather than depending on a dedicated event.
+	parked, parkedEpoch, parkedRevision := s.ParkedProjectionSnapshot(sessionID)
 	eventData := map[string]interface{}{
-		metaKeyTaskID:           taskID,
-		metaKeySessionID:        sessionID,
-		"foreground_activity":   s.publicForegroundActivityValue(ctx, sessionID, value),
-		"active_subagent_count": activeSubagentCount,
-		"supports_steering":     s.steerEligibleForSession(ctx, sessionID),
+		metaKeyTaskID:               taskID,
+		metaKeySessionID:            sessionID,
+		"foreground_activity":       s.publicForegroundActivityValue(ctx, sessionID, value),
+		"active_subagent_count":     activeSubagentCount,
+		"supports_steering":         s.steerEligibleForSession(ctx, sessionID),
+		"parked_on_background_work": parked,
+		"parked_epoch":              parkedEpoch,
+		"parked_revision":           parkedRevision,
 	}
 	if err := s.eventBus.Publish(ctx, events.TaskSessionActivityChanged,
 		bus.NewEvent(events.TaskSessionActivityChanged, "task-session", eventData)); err != nil {

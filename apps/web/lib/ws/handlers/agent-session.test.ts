@@ -1341,6 +1341,110 @@ describe("session.activity_changed handler — fine-grained busy signal", () => 
   });
 });
 
+// Review round 2, F3: the parked-on-background-work triple now rides on
+// session.activity_changed (the spec's named carrier) instead of the
+// dedicated session.parked_changed event this branch previously invented.
+describe("session.activity_changed handler — parked-on-background-work triple", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("forwards the parked triple carried on an activity_changed frame", () => {
+    const upsert = vi.fn();
+    const store = makeStore({
+      taskSessions: {
+        items: { "s-1": { id: "s-1", task_id: "t-1", state: "WAITING_FOR_INPUT" } },
+      },
+      upsertTaskSessionFromEvent: upsert,
+    });
+    const handler = registerTaskSessionHandlers(store)[ACTIVITY_EVENT] as (
+      msg: ReturnType<typeof makeActivityMessage>,
+    ) => void;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: ACTIVITY_EVENT,
+      payload: {
+        task_id: "t-1",
+        session_id: "s-1",
+        foreground_activity: null,
+        active_subagent_count: 0,
+        parked_on_background_work: true,
+        parked_epoch: 12345,
+        parked_revision: 1,
+      },
+    } as ReturnType<typeof makeActivityMessage>);
+
+    expect(upsert.mock.calls[0][1]).toMatchObject({
+      parked_on_background_work: true,
+      parked_epoch: 12345,
+      parked_revision: 1,
+    });
+  });
+
+  function makeAlreadyParkedStore() {
+    const upsert = vi.fn();
+    const store = makeStore({
+      taskSessions: {
+        items: {
+          "s-1": {
+            id: "s-1",
+            task_id: "t-1",
+            state: "WAITING_FOR_INPUT",
+            parked_on_background_work: true,
+            parked_epoch: 999,
+            parked_revision: 3,
+          },
+        },
+      },
+      upsertTaskSessionFromEvent: upsert,
+    });
+    const handler = registerTaskSessionHandlers(store)[ACTIVITY_EVENT] as (
+      msg: ReturnType<typeof makeActivityMessage>,
+    ) => void;
+    return { upsert, handler };
+  }
+
+  it("leaves the parked triple untouched when an activity_changed frame omits it", () => {
+    const { upsert, handler } = makeAlreadyParkedStore();
+
+    // A foreground_activity-only publish (e.g. a subagent count change) that
+    // never touched the parked projection must not reset it.
+    handler(makeActivityMessage({ task_id: "t-1", session_id: "s-1", foreground_activity: null }));
+
+    expect(upsert.mock.calls[0][1]).toMatchObject({
+      parked_on_background_work: true,
+      parked_epoch: 999,
+      parked_revision: 3,
+    });
+  });
+
+  it("applies an explicit un-park (false) rather than treating it as omitted", () => {
+    const { upsert, handler } = makeAlreadyParkedStore();
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: ACTIVITY_EVENT,
+      payload: {
+        task_id: "t-1",
+        session_id: "s-1",
+        foreground_activity: null,
+        active_subagent_count: 0,
+        parked_on_background_work: false,
+        parked_epoch: 999,
+        parked_revision: 4,
+      },
+    } as ReturnType<typeof makeActivityMessage>);
+
+    expect(upsert.mock.calls[0][1]).toMatchObject({
+      parked_on_background_work: false,
+      parked_revision: 4,
+    });
+  });
+});
+
 describe("session.state_changed carries and resets the busy substate", () => {
   beforeEach(() => {
     vi.clearAllMocks();

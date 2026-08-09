@@ -37,7 +37,6 @@ import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 import type { TaskMRAutomationOptions } from "@/lib/types/gitlab";
 import type { SystemMetricsSnapshot } from "./system";
 import type { AgentRuntimeAvailability } from "./agent-runtime";
-export type { TaskSessionParkedChangedPayload } from "./session-runtime-payloads";
 import type {
   ExecutorPayload,
   ExecutorProfilePayload,
@@ -242,12 +241,6 @@ export type StepPayload = {
 export type WorkflowStepEventPayload = {
   step: StepPayload;
 };
-
-/**
- * Payload for `session.activity_changed` — the fine-grained busy signal
- * (see ADR-0049). Fires when foreground ownership or detached background
- * liveness changes, including after the foreground turn settles.
- */
 
 export type OfficeInboxItemNotificationPayload = {
   task_id?: string;
