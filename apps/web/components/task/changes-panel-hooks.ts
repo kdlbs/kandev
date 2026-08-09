@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { t } from "@/lib/i18n";
 import type { useToast } from "@/components/toast-provider";
 import type { SessionGit, PerRepoOperationResult } from "@/hooks/domains/session/use-session-git";
 
@@ -43,35 +44,52 @@ function describePerRepo(
 ): { title: string; description: string; variant: "success" | "error" } {
   const succeeded = perRepo.filter((r) => r.success);
   const failed = perRepo.filter((r) => !r.success);
-  const succeededNames = succeeded.map((r) => r.repository_name).join(", ");
-  const failedSummary = failed
-    .map((r) => `${r.repository_name}: ${r.error || "unknown error"}`)
+  const repos = succeeded.map((r) => r.repository_name).join(", ");
+  const summary = failed
+    .map((r) =>
+      t("common:gitOperationRepoFailure", {
+        repo: r.repository_name,
+        error: r.error || t("common:unknownError"),
+      }),
+    )
     .join("; ");
   if (failed.length === 0) {
     return {
-      title: `${operationName} successful`,
-      description: `${operationName} succeeded in ${succeeded.length} repos: ${succeededNames}`,
+      title: t("common:gitOperationSucceeded", { operation: operationName }),
+      description: t("common:gitOperationSucceededInRepos", {
+        count: succeeded.length,
+        operation: operationName,
+        repos,
+      }),
       variant: "success",
     };
   }
   if (succeeded.length === 0) {
     return {
-      title: `${operationName} failed`,
-      description: `Failed in ${failed.length} repos — ${failedSummary}`,
+      title: t("common:gitOperationFailed", { operation: operationName }),
+      description: t("common:gitOperationFailedInRepos", { count: failed.length, summary }),
       variant: "error",
     };
   }
   // Partial success: surface as error so the user notices, but include the
   // succeeded list in the description so they don't retry the whole op.
   return {
-    title: `${operationName} partially succeeded`,
-    description: `${operationName} succeeded in ${succeeded.length} of ${perRepo.length} repos (${succeededNames}); failed in ${failedSummary}`,
+    title: t("common:gitOperationPartiallySucceeded", { operation: operationName }),
+    description: t("common:gitOperationPartialDescription", {
+      count: perRepo.length,
+      operation: operationName,
+      succeeded: succeeded.length,
+      repos,
+      summary,
+    }),
     variant: "error",
   };
 }
 
-function labelWithRepo(label: string, repo: string | undefined): string {
-  return repo ? `${label} (${repo})` : label;
+/** Resolve an operation name, scoped to one repo in a multi-repo task. */
+function labelWithRepo(operationKey: string, repo: string | undefined): string {
+  const operation = t(operationKey);
+  return repo ? t("common:gitOperationScoped", { operation, repo }) : operation;
 }
 
 export function useChangesGitHandlers(
@@ -92,15 +110,18 @@ export function useChangesGitHandlers(
           return;
         }
         const variant = result.success ? "success" : "error";
-        const title = result.success ? `${operationName} successful` : `${operationName} failed`;
+        const title = result.success
+          ? t("common:gitOperationSucceeded", { operation: operationName })
+          : t("common:gitOperationFailed", { operation: operationName });
         const description = result.success
-          ? result.output.slice(0, 200) || `${operationName} completed`
-          : result.error || "An error occurred";
+          ? result.output.slice(0, 200) ||
+            t("common:gitOperationCompleted", { operation: operationName })
+          : result.error || t("common:anErrorOccurred");
         toast({ title, description, variant });
       } catch (e) {
         toast({
-          title: `${operationName} failed`,
-          description: e instanceof Error ? e.message : "An unexpected error occurred",
+          title: t("common:gitOperationFailed", { operation: operationName }),
+          description: e instanceof Error ? e.message : t("common:anUnexpectedErrorOccurred"),
           variant: "error",
         });
       }
@@ -110,27 +131,36 @@ export function useChangesGitHandlers(
 
   const handlePull = useCallback(
     (repo?: string) => {
-      handleGitOperation(() => gitOps.pull(false, repo), labelWithRepo("Pull", repo));
+      handleGitOperation(() => gitOps.pull(false, repo), labelWithRepo("common:gitOpPull", repo));
     },
     [handleGitOperation, gitOps],
   );
   const handleRebase = useCallback(
     (repo?: string) => {
       const targetBranch = baseBranch?.replace(/^origin\//, "") || "main";
-      handleGitOperation(() => gitOps.rebase(targetBranch, repo), labelWithRepo("Rebase", repo));
+      handleGitOperation(
+        () => gitOps.rebase(targetBranch, repo),
+        labelWithRepo("common:gitOpRebase", repo),
+      );
     },
     [handleGitOperation, gitOps, baseBranch],
   );
   const handleMerge = useCallback(
     (repo?: string) => {
       const targetBranch = baseBranch?.replace(/^origin\//, "") || "main";
-      handleGitOperation(() => gitOps.merge(targetBranch, repo), labelWithRepo("Merge", repo));
+      handleGitOperation(
+        () => gitOps.merge(targetBranch, repo),
+        labelWithRepo("common:gitOpMerge", repo),
+      );
     },
     [handleGitOperation, gitOps, baseBranch],
   );
   const handlePush = useCallback(
     (repo?: string) => {
-      handleGitOperation(() => gitOps.push(undefined, repo), labelWithRepo("Push", repo));
+      handleGitOperation(
+        () => gitOps.push(undefined, repo),
+        labelWithRepo("common:gitOpPush", repo),
+      );
     },
     [handleGitOperation, gitOps],
   );
@@ -138,14 +168,14 @@ export function useChangesGitHandlers(
     (repo?: string) => {
       handleGitOperation(
         () => gitOps.push({ force: true }, repo),
-        labelWithRepo("Force push", repo),
+        labelWithRepo("common:gitOpForcePush", repo),
       );
     },
     [handleGitOperation, gitOps],
   );
   const handleRevertCommit = useCallback(
     (sha: string, repo?: string) => {
-      handleGitOperation(() => gitOps.revertCommit(sha, repo), "Revert commit");
+      handleGitOperation(() => gitOps.revertCommit(sha, repo), t("common:gitOpRevertCommit"));
     },
     [handleGitOperation, gitOps],
   );
@@ -192,14 +222,14 @@ function useChangesDiscardAmendHandlers(
       const result = await gitOps.discard(paths, repoToDiscard);
       if (!result.success)
         toast({
-          title: "Failed to discard changes",
-          description: result.error || "An unknown error occurred",
+          title: t("task:failedToDiscardChanges"),
+          description: result.error || t("common:anUnknownErrorOccurred"),
           variant: "error",
         });
     } catch (error) {
       toast({
-        title: "Failed to discard changes",
-        description: error instanceof Error ? error.message : "An unknown error occurred",
+        title: t("task:failedToDiscardChanges"),
+        description: error instanceof Error ? error.message : t("common:anUnknownErrorOccurred"),
         variant: "error",
       });
     } finally {
@@ -229,7 +259,7 @@ function useChangesDiscardAmendHandlers(
     setAmendDialogOpen(false);
     await handleGitOperation(
       () => gitOps.commit(amendMessage.trim(), false, true, amendRepo),
-      "Amend commit",
+      t("common:gitOpAmendCommit"),
     );
     setAmendMessage("");
     setAmendRepo(undefined);
@@ -270,7 +300,8 @@ function useChangesResetHandlers(gitOps: GitOps, handleGitOperation: GitOperatio
     async (mode: "soft" | "hard") => {
       if (!resetCommitSha) return;
       setResetDialogOpen(false);
-      const operationName = mode === "hard" ? "Hard reset" : "Soft reset";
+      const operationName =
+        mode === "hard" ? t("common:gitOpHardReset") : t("common:gitOpSoftReset");
       await handleGitOperation(() => gitOps.reset(resetCommitSha, mode, resetRepo), operationName);
       setResetCommitSha(null);
       setResetRepo(undefined);

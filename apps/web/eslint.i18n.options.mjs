@@ -1837,4 +1837,31 @@ export const i18nGuardFiles = [
   // and the palette all passed it a deliberately English label. It interpolates
   // catalog messages now, so those three no longer have to.
   "hooks/use-git-with-feedback.ts",
+  // Toast and feedback copy. None of it is JSX — it is `title:`/`description:`
+  // object properties and `toast.error("…")` arguments — so `mode: "jsx-only"`
+  // never inspected any of these files and they read as clean for the whole
+  // migration. Listing them records that they are done; only the pseudo-locale
+  // can prove they stay that way.
+  //
+  // `changes-panel-hooks.ts` carried the multi-repo half of the same
+  // concatenated-English problem as `use-git-with-feedback.ts`
+  // (`${operationName} partially succeeded`), including two per-repo counts that
+  // now use `count` with `_one`/`_other` instead of a bare "repos".
+  //
+  // `unarchive-feedback.ts` inflected its own sentence
+  // (`${plural ? "Branches" : "Branch"} … no longer ${plural ? "exist" : "exists"}`),
+  // which is the inline-plural shape docs/i18n.md rules out; the plural rule
+  // lives in the catalog now. `check-inline-plurals.mjs` does not see this
+  // form — it is two independent ternaries, not a `+ "s"`.
+  "app/tasks/tasks-page-client.tsx",
+  "components/azure-devops/azure-devops-task-launcher.tsx",
+  "components/github/use-pr-scoped-review-request.ts",
+  "components/task/changes-panel-hooks.ts",
+  "components/task/task-center-panel-restoration.ts",
+  "components/task/use-tunnel-actions.ts",
+  "hooks/domains/comments/use-markdown-preview-comments.ts",
+  "hooks/domains/session/use-task-environment.ts",
+  "hooks/use-file-save-delete.ts",
+  "hooks/use-utility-agent-generator.ts",
+  "lib/tasks/unarchive-feedback.ts",
 ];

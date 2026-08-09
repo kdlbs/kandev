@@ -16,6 +16,10 @@ import { MobileSearchBar } from "@/components/kanban/mobile-search-bar";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import type { Task, Workspace, Workflow, Repository } from "@/lib/types/http";
 import { useToast } from "@/components/toast-provider";
+// Module-level `t`: every use below is inside a callback or a plain helper
+// (`errorDescription`), so it resolves at invocation rather than at import —
+// the case `apps/web/CLAUDE.md` sanctions. None of it renders as JSX.
+import { t } from "@/lib/i18n";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { useDebounce } from "@/hooks/use-debounce";
@@ -131,7 +135,7 @@ function useTaskOperations({
         if (!shouldCommit()) return;
         if (!silent) {
           toast({
-            title: "Failed to load tasks",
+            title: t("tasks:failedToLoadTasks"),
             description: errorDescription(err),
             variant: "error",
           });
@@ -164,7 +168,7 @@ function useTaskOperations({
 }
 
 function errorDescription(err: unknown): string {
-  return err instanceof Error ? err.message : "Unknown error";
+  return err instanceof Error ? err.message : t("tasks:unknownError");
 }
 
 function useTaskMutations(fetchTasks: () => void) {
@@ -175,11 +179,14 @@ function useTaskMutations(fetchTasks: () => void) {
     async (taskId: string, opts?: { cascade?: boolean }) => {
       try {
         await archiveTask(taskId, opts);
-        toast({ title: "Task archived", description: "The task has been archived successfully." });
+        toast({
+          title: t("tasks:taskArchived"),
+          description: t("tasks:taskArchivedDescription"),
+        });
         fetchTasks();
       } catch (err) {
         toast({
-          title: "Failed to archive task",
+          title: t("tasks:failedToArchiveTask"),
           description: errorDescription(err),
           variant: "error",
         });
@@ -196,7 +203,7 @@ function useTaskMutations(fetchTasks: () => void) {
         fetchTasks();
       } catch (err) {
         toast({
-          title: "Failed to unarchive task",
+          title: t("tasks:failedToUnarchiveTask"),
           description: errorDescription(err),
           variant: "error",
         });
@@ -213,7 +220,7 @@ function useTaskMutations(fetchTasks: () => void) {
         fetchTasks();
       } catch (err) {
         toast({
-          title: "Failed to delete task",
+          title: t("tasks:failedToDeleteTask"),
           description: errorDescription(err),
           variant: "error",
         });
