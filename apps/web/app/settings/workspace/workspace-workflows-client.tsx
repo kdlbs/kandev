@@ -161,12 +161,12 @@ function useWorkflowImportExport(
   };
 }
 
-function hasNewerWorkflowMetadata(current: Workflow, savedFrom: Workflow) {
+export function hasNewerWorkflowMetadata(current: Workflow, savedFrom: Workflow) {
   return (
     current.name !== savedFrom.name ||
-    current.description !== savedFrom.description ||
+    (current.description ?? "") !== (savedFrom.description ?? "") ||
     (current.prompt ?? "") !== (savedFrom.prompt ?? "") ||
-    current.agent_profile_id !== savedFrom.agent_profile_id
+    (current.agent_profile_id ?? "") !== (savedFrom.agent_profile_id ?? "")
   );
 }
 

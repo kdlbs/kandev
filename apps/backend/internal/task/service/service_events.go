@@ -769,6 +769,7 @@ func (s *Service) publishWorkflowEvent(ctx context.Context, eventType string, wo
 		"workspace_id":     workflow.WorkspaceID,
 		"name":             workflow.Name,
 		"description":      workflow.Description,
+		"prompt":           workflow.Prompt,
 		"agent_profile_id": workflow.AgentProfileID,
 		"hidden":           workflow.Hidden,
 		"source":           workflow.Source,

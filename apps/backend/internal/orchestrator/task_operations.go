@@ -2439,11 +2439,14 @@ func (s *Service) populateEnvironmentWorkspaceInfo(ctx context.Context, session 
 	if session.TaskEnvironmentID != "" && env.ID != session.TaskEnvironmentID {
 		return
 	}
-	if resp.WorktreePath == nil && env.WorktreePath != "" {
-		resp.WorktreePath = &env.WorktreePath
+	if len(env.Repos) == 0 {
+		return
 	}
-	if resp.WorktreeBranch == nil && env.WorktreeBranch != "" {
-		resp.WorktreeBranch = &env.WorktreeBranch
+	if resp.WorktreePath == nil && env.Repos[0].WorktreePath != "" {
+		resp.WorktreePath = &env.Repos[0].WorktreePath
+	}
+	if resp.WorktreeBranch == nil && env.Repos[0].WorktreeBranch != "" {
+		resp.WorktreeBranch = &env.Repos[0].WorktreeBranch
 	}
 }
 

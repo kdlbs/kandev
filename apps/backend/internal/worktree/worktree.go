@@ -38,12 +38,17 @@ type Worktree struct {
 	// Multiple worktrees can exist for the same task (one per agent session).
 	TaskID string `json:"task_id"`
 
+	// TaskEnvironmentID is the task environment that owns this worktree.
+	// Physical worktree records live on task_environment_repos; sessions
+	// reference the environment through task_sessions.task_environment_id.
+	TaskEnvironmentID string `json:"task_environment_id,omitempty"`
+
 	// RepositoryID is the ID of the repository this worktree belongs to.
 	RepositoryID string `json:"repository_id"`
 
 	// BranchSlug, when set, disambiguates two worktrees that share a
 	// (SessionID, RepositoryID) pair on different branches. Stored on
-	// task_session_worktrees so reuse lookups can scope by branch and not
+	// task_environment_repos so reuse lookups can scope by branch and not
 	// collapse multi-branch tasks down to a single worktree.
 	BranchSlug string `json:"branch_slug,omitempty"`
 
@@ -127,6 +132,12 @@ type CreateRequest struct {
 	// SessionID is the task session identifier (required for persistence).
 	SessionID string
 
+	// TaskEnvironmentID, when known, is the environment that owns the
+	// worktree. The store falls back to resolving it from SessionID. During
+	// initial launch materialization the environment does not exist yet and
+	// persistence is deferred to the executor's environment transaction.
+	TaskEnvironmentID string
+
 	// TaskTitle is the human-readable task title (optional).
 	// If provided, it will be used to generate semantic worktree/branch names.
 	// The title is sanitized and truncated to 20 characters.
@@ -206,7 +217,7 @@ type CreateRequest struct {
 	BranchSlug string
 
 	// BranchIdentitySlug, when non-empty, is the stable branch key used for
-	// reuse lookup, cache keys, and persisted task_session_worktrees rows. It
+	// reuse lookup, cache keys, and persisted task_environment_repos rows. It
 	// may differ from BranchSlug when the primary branch keeps the flat path.
 	BranchIdentitySlug string
 

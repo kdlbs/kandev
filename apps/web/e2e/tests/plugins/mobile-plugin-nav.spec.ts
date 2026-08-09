@@ -13,6 +13,7 @@ import path from "node:path";
 import type { Browser, BrowserContext, Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import { PrAssetCapture } from "../../helpers/pr-asset-capture";
+import { holdPluginInstallResponse } from "../../helpers/plugin-install";
 
 const PLUGIN_ID = "kandev-plugin-e2e";
 const NAV_ITEM_ID = "e2e-hello";
@@ -55,6 +56,37 @@ async function openDesktopClient(
 test.describe("Mobile plugin navigation", () => {
   test.afterEach(async ({ apiClient }) => {
     await apiClient.rawRequest("DELETE", `/api/plugins/${PLUGIN_ID}`).catch(() => undefined);
+  });
+
+  test("shows an install spinner while an upload install is pending on a phone", async ({
+    testPage,
+  }) => {
+    test.setTimeout(120_000);
+
+    await testPage.goto("/settings/plugins");
+    await testPage.getByTestId("install-plugin-trigger").click();
+    const heldInstall = await holdPluginInstallResponse(testPage);
+    try {
+      await testPage.getByTestId("install-plugin-tab-upload").tap();
+      await testPage.getByTestId("install-plugin-file-input").setInputFiles(PACKAGE_PATH);
+      await testPage.getByTestId("install-plugin-upload-submit").tap();
+      await heldInstall.requestSeen;
+
+      const installButton = testPage.getByTestId("install-plugin-upload-submit");
+      await expect(installButton).toBeDisabled();
+      await expect(installButton).toHaveAttribute("aria-busy", "true");
+      await expect(installButton.locator(".animate-spin")).toBeVisible();
+      await expect(installButton).toHaveText(/Installing/);
+    } finally {
+      heldInstall.release();
+      if (heldInstall.requestStarted()) await heldInstall.responseSettled;
+      await testPage.unroute("**/api/plugins/install");
+    }
+
+    const installButton = testPage.getByTestId("install-plugin-upload-submit");
+    await expect(installButton).toBeEnabled();
+    await expect(installButton).toHaveText("Install");
+    await expect(testPage.getByTestId("install-plugin-error")).toContainText("install failed");
   });
 
   test("opens a plugin page from the phone menu sheet", async ({

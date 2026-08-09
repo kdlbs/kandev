@@ -716,7 +716,7 @@ type workspaceRepositoryProjection struct {
 	repoName       string
 }
 
-func (s *Service) populateWorkspaceRepositorySpecs(ctx context.Context, taskID string, sessionWorktrees []*models.TaskSessionWorktree, info *lifecycle.WorkspaceInfo) error {
+func (s *Service) populateWorkspaceRepositorySpecs(ctx context.Context, taskID string, sessionWorktrees []*models.TaskEnvironmentRepo, info *lifecycle.WorkspaceInfo) error {
 	if taskID == "" || s.taskRepos == nil || s.repoEntities == nil {
 		return nil
 	}
@@ -725,7 +725,7 @@ func (s *Service) populateWorkspaceRepositorySpecs(ctx context.Context, taskID s
 	} else if task != nil {
 		info.WorkspaceID = task.WorkspaceID
 	}
-	worktreesByIdentity := make(map[workspaceWorktreeKey]*models.TaskSessionWorktree, len(sessionWorktrees))
+	worktreesByIdentity := make(map[workspaceWorktreeKey]*models.TaskEnvironmentRepo, len(sessionWorktrees))
 	for _, worktree := range sessionWorktrees {
 		if worktree != nil && worktree.RepositoryID != "" {
 			worktreesByIdentity[workspaceWorktreeKey{repositoryID: worktree.RepositoryID, branchSlug: worktree.BranchSlug}] = worktree

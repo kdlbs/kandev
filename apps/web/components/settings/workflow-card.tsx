@@ -30,6 +30,7 @@ import { useWorkflowMutationGuard } from "./workflow-mutation-guard";
 import { WorkflowCycleGuardDialog } from "./workflow-cycle-diagnostic";
 import { useWorkflowDraftContributor } from "./use-workflow-draft-contributor";
 import { WorkflowPromptSection } from "./workflow-prompt-section";
+import { WorkflowDescriptionField } from "./workflow-description-field";
 
 const TEMP_WORKFLOW_PREFIX = "temp-workflow-";
 
@@ -342,6 +343,12 @@ function WorkflowCardBody({
           </Select>
         </div>
       </div>
+      <WorkflowDescriptionField
+        workflow={workflow}
+        savedWorkflow={savedWorkflow}
+        readOnly={readOnly}
+        onUpdate={(description) => onUpdateWorkflow({ description })}
+      />
       <WorkflowPromptSection
         workflow={workflow}
         savedWorkflow={savedWorkflow}

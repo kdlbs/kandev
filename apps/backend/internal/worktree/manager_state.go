@@ -2,6 +2,7 @@ package worktree
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,18 +16,19 @@ import (
 func (m *Manager) buildWorktreeRecord(worktreeID string, req CreateRequest, worktreePath, branchName string) *Worktree {
 	now := time.Now()
 	return &Worktree{
-		ID:             worktreeID,
-		SessionID:      req.SessionID,
-		TaskID:         req.TaskID,
-		RepositoryID:   req.RepositoryID,
-		BranchSlug:     requestBranchIdentitySlug(req),
-		RepositoryPath: req.RepositoryPath,
-		Path:           worktreePath,
-		Branch:         branchName,
-		BaseBranch:     req.BaseBranch,
-		Status:         StatusActive,
-		CreatedAt:      now,
-		UpdatedAt:      now,
+		ID:                worktreeID,
+		SessionID:         req.SessionID,
+		TaskID:            req.TaskID,
+		TaskEnvironmentID: req.TaskEnvironmentID,
+		RepositoryID:      req.RepositoryID,
+		BranchSlug:        requestBranchIdentitySlug(req),
+		RepositoryPath:    req.RepositoryPath,
+		Path:              worktreePath,
+		Branch:            branchName,
+		BaseBranch:        req.BaseBranch,
+		Status:            StatusActive,
+		CreatedAt:         now,
+		UpdatedAt:         now,
 	}
 }
 
@@ -51,8 +53,16 @@ func (m *Manager) persistAndCacheWorktree(ctx context.Context, wt *Worktree, req
 	return nil
 }
 
-// persistWorktree writes the worktree to persistent storage, logging a warning when
-// session_id is missing and cleaning up the git worktree directory on failure.
+// persistWorktree writes the worktree to persistent storage, logging a warning
+// when session_id or a resolvable task environment is missing and cleaning up
+// the git worktree directory on failure.
+//
+// Initial materialization runs before the executor persists the task
+// environment, so the store cannot resolve an environment yet — that launch's
+// persistence happens atomically in persistTaskEnvironment, and a worktree
+// that cannot be recorded there is compensated. Resume, recreate, and
+// mid-session materialization paths always have an environment and persist
+// here.
 func (m *Manager) persistWorktree(ctx context.Context, wt *Worktree, req CreateRequest, worktreePath string) error {
 	if req.SessionID == "" {
 		m.logger.Warn("skipping worktree persistence: missing session_id",
@@ -61,6 +71,13 @@ func (m *Manager) persistWorktree(ctx context.Context, wt *Worktree, req CreateR
 		return nil
 	}
 	if err := m.store.CreateWorktree(ctx, wt); err != nil {
+		if errors.Is(err, ErrEnvironmentNotResolved) {
+			m.logger.Warn("skipping worktree persistence: session has no task environment yet",
+				zap.String("task_id", req.TaskID),
+				zap.String("session_id", req.SessionID),
+				zap.String("worktree_id", wt.ID))
+			return nil
+		}
 		// Cleanup git worktree on store failure
 		if cleanupErr := m.removeWorktreeDir(ctx, worktreePath, req.RepositoryPath); cleanupErr != nil {
 			m.logger.Warn("failed to cleanup worktree after persist failure", zap.Error(cleanupErr))

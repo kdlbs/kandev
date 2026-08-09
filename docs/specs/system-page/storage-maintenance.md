@@ -155,7 +155,7 @@ Retention override:
 
 ### Unarchive compatibility
 
-- Storage cleanup preserves historical `task_session_worktrees` rows and branch metadata for
+- Storage cleanup preserves historical task-environment repository rows and branch metadata for
   archived tasks. A historical row is recovery metadata, not proof that its old on-disk path is
   active.
 - When an archived task is unarchived while its workspace is quarantined and the quarantine entry

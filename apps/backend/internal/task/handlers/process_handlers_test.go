@@ -359,14 +359,11 @@ func (m *mockRepository) DeleteEphemeralTasksByAgentProfile(ctx context.Context,
 func (m *mockRepository) DeleteTaskSession(ctx context.Context, id string) error {
 	return nil
 }
-func (m *mockRepository) CreateTaskSessionWorktree(ctx context.Context, sessionWorktree *models.TaskSessionWorktree) error {
-	return nil
-}
-func (m *mockRepository) ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error) {
+func (m *mockRepository) ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskEnvironmentRepo, error) {
 	return nil, nil
 }
-func (m *mockRepository) ListWorktreesBySessionIDs(_ context.Context, _ []string) (map[string][]*models.TaskSessionWorktree, error) {
-	return make(map[string][]*models.TaskSessionWorktree), nil
+func (m *mockRepository) ListWorktreesBySessionIDs(_ context.Context, _ []string) (map[string][]*models.TaskEnvironmentRepo, error) {
+	return make(map[string][]*models.TaskEnvironmentRepo), nil
 }
 func (m *mockRepository) DeleteTaskSessionWorktree(ctx context.Context, id string) error {
 	return nil

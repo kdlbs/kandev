@@ -67,7 +67,7 @@ function FavoriteButton({ isFavorite, onToggle }: { isFavorite: boolean; onToggl
       onClick={onToggle}
       aria-pressed={isFavorite}
       className={cn(
-        "flex min-h-11 min-w-11 items-center justify-center sm:min-h-0 sm:min-w-0 sm:h-5 sm:w-5 sm:p-1",
+        ACTION_BUTTON_SIZE,
         ACTION_BUTTON_HOVER,
         ACTION_BUTTON_TRANSITION,
         "cursor-pointer",
@@ -78,7 +78,7 @@ function FavoriteButton({ isFavorite, onToggle }: { isFavorite: boolean; onToggl
         isFavorite ? t("task:removeMessageFromFavorites") : t("task:markMessageAsFavorite")
       }
     >
-      <IconStar className={cn("h-5 w-5", isFavorite && "fill-yellow-500")} />
+      <IconStar className={cn("h-full w-full", isFavorite && "fill-yellow-500")} />
     </button>
   );
 }

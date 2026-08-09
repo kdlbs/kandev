@@ -152,6 +152,28 @@ describe("workflow.updated handler — hidden flag reconciles activeId", () => {
     expect(store.getState().workflows.activeId).toBe("wf-1");
     expect(store.getState().workflows.items[0]?.name).toBe("New Name");
   });
+
+  it("propagates description and prompt from the payload", () => {
+    const store = makeStore(
+      [{ id: "wf-1", workspaceId: "ws-1", name: "Workflow", hidden: false }],
+      "wf-1",
+    );
+    const handlers = registerWorkflowsHandlers(store);
+
+    handlers["workflow.updated"]?.(
+      updatedMessage({
+        id: "wf-1",
+        workspace_id: "ws-1",
+        name: "Workflow",
+        description: "Updated from another tab",
+        prompt: "Updated prompt",
+      }),
+    );
+
+    const item = store.getState().workflows.items[0];
+    expect(item?.description).toBe("Updated from another tab");
+    expect(item?.prompt).toBe("Updated prompt");
+  });
 });
 
 describe("workflow step handlers", () => {

@@ -190,6 +190,9 @@ func TestQueueHandlersDenyUnauthorizedSessionActions(t *testing.T) {
 		{name: "merge", action: ws.ActionMessageQueueMerge, call: (*QueueHandlers).wsMergeIntoAbove, body: func(id string) map[string]interface{} {
 			return map[string]interface{}{"session_id": "s", "entry_id": id}
 		}},
+		{name: "reorder", action: ws.ActionMessageQueueReorder, call: (*QueueHandlers).wsReorder, body: func(id string) map[string]interface{} {
+			return map[string]interface{}{"session_id": "s", "ordered_ids": []string{id, "q-other"}}
+		}},
 	}
 
 	for _, tc := range tests {

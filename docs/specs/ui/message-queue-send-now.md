@@ -238,7 +238,9 @@ releases every durable reservation before publishing queue status.
 
 ## Out of Scope
 
-- Reordering queued messages before sending.
+- Reordering queued messages before sending; that capability is governed by
+  [Reorder Queued Messages](message-queue-reorder.md), and bulk Send Now
+  dispatches in the current (reordered) FIFO order.
 - Choosing a different model or plan mode for the bulk turn.
 - Sending an arbitrary user-selected subset other than one entry or all visible
   pending entries.

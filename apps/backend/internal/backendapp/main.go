@@ -1844,6 +1844,7 @@ func buildHTTPServer(
 		repoCloner:                    repoCloner,
 		version:                       Version,
 		webInternalURL:                cfg.Server.WebInternalURL,
+		webTitlePrefix:                cfg.Server.WebTitlePrefix,
 		devMode:                       cfg.Debug.DevMode || cfg.Debug.PprofEnabled,
 		httpPort:                      resolvedHTTPPort(cfg),
 		features:                      cfg.Features,

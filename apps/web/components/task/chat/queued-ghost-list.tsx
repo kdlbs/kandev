@@ -1,8 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { IconLayoutList } from "@tabler/icons-react";
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
 import { toast } from "@/lib/toast/sonner";
 import { useTranslation } from "react-i18next";
 import { Collapsible, CollapsibleContent } from "@kandev/ui/collapsible";
@@ -12,6 +28,7 @@ import { stripSystemTags } from "@/lib/utils/system-tags";
 import {
   MergeReferenceOverflowError,
   QueueEntryNotFoundError,
+  QueueReorderError,
   QueueSendNowError,
 } from "@/lib/api/domains/queue-api";
 import { useQueue } from "@/hooks/domains/session/use-queue";
@@ -87,6 +104,7 @@ type QueuePanelHandlerArgs = {
   ) => Promise<void>;
   removeEntry: (entryId: string) => Promise<void>;
   mergeEntry: (entryId: string) => Promise<void>;
+  reorderEntries: (orderedIds: string[]) => Promise<void>;
   sendEntryNow: (entryId: string) => Promise<void>;
   sendAllNow: () => Promise<void>;
 };
@@ -139,6 +157,7 @@ function useQueuePanelHandlers({
   editEntry,
   removeEntry,
   mergeEntry,
+  reorderEntries,
   sendEntryNow,
   sendAllNow,
 }: QueuePanelHandlerArgs) {
@@ -204,6 +223,20 @@ function useQueuePanelHandlers({
       toast.error(t("chat:failedToRunQueuedMessage"));
     });
   }, [drainNext, t]);
+  const handleReorder = useCallback(
+    async (orderedIds: string[]) => {
+      try {
+        await reorderEntries(orderedIds);
+      } catch (err) {
+        // A queue_changed race already refetched and reconciled to the
+        // authoritative order, so it is a successful UI outcome — no toast.
+        if (err instanceof QueueReorderError) return;
+        console.error("Failed to reorder queued entries:", err);
+        toast.error(t("chat:failedToReorderQueuedMessages"));
+      }
+    },
+    [reorderEntries, t],
+  );
 
   return {
     handleSave,
@@ -211,6 +244,7 @@ function useQueuePanelHandlers({
     handleMerge,
     handleClear,
     handleDrain,
+    handleReorder,
     handleSendEntryNow,
     handleSendAllNow,
   };
@@ -234,6 +268,7 @@ type QueuePanelDisclosureProps = {
   onSave: (entryId: string, content: string, refs: EntityReference[]) => Promise<void>;
   onRemove: (entryId: string) => Promise<void>;
   onMerge: (entryId: string) => Promise<void>;
+  onReorder: (orderedIds: string[]) => void;
   onSendEntryNow: (entryId: string) => void;
 };
 
@@ -256,6 +291,7 @@ function QueuePanelDisclosure({
   onSave,
   onRemove,
   onMerge,
+  onReorder,
   onSendEntryNow,
 }: QueuePanelDisclosureProps) {
   return (
@@ -282,6 +318,7 @@ function QueuePanelDisclosure({
           onSave={onSave}
           onRemove={onRemove}
           onMerge={onMerge}
+          onReorder={onReorder}
           onSendEntryNow={onSendEntryNow}
         />
       </CollapsibleContent>
@@ -330,6 +367,7 @@ export function QueueAffordance({
     editEntry,
     removeEntry,
     mergeEntry,
+    reorderEntries,
     sendEntryNow,
     sendAllNow,
     cancellationPending,
@@ -342,6 +380,7 @@ export function QueueAffordance({
     handleMerge,
     handleClear,
     handleDrain,
+    handleReorder,
     handleSendEntryNow,
     handleSendAllNow,
   } = useQueuePanelHandlers({
@@ -350,6 +389,7 @@ export function QueueAffordance({
     editEntry,
     removeEntry,
     mergeEntry,
+    reorderEntries,
     sendEntryNow,
     sendAllNow,
   });
@@ -402,6 +442,7 @@ export function QueueAffordance({
         onSave={handleSave}
         onRemove={handleRemove}
         onMerge={handleMerge}
+        onReorder={handleReorder}
         onSendEntryNow={handleSendEntryNow}
       />
       {!renderStatusBar && chipNode && (
@@ -481,11 +522,58 @@ type QueuePanelProps = {
   onSave: (entryId: string, content: string, entityReferences: EntityReference[]) => Promise<void>;
   onRemove: (entryId: string) => Promise<void>;
   onMerge: (entryId: string) => Promise<void>;
+  onReorder: (orderedIds: string[]) => void;
   onSendEntryNow: (entryId: string) => void;
 };
 
 /** Renders the expanded queue list: header controls plus one QueuedGhostMessage
  * row per pending entry, gating each row's merge control on `mergeEnabled`. */
+type QueueReorderArgs = {
+  entries: QueuedMessage[];
+  canReorder: boolean;
+  onReorder: (orderedIds: string[]) => void;
+};
+
+/** Sortable-list state for the queue panel: sensors, the id list, and the
+ * drag lifecycle handlers that translate a drop into the new ordered ids. */
+function useQueueReorder({ entries, canReorder, onReorder }: QueueReorderArgs) {
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const ids = useMemo(() => entries.map((entry) => entry.id), [entries]);
+
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    setActiveId(String(event.active.id));
+  }, []);
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      setActiveId(null);
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+      const oldIndex = entries.findIndex((entry) => entry.id === active.id);
+      const newIndex = entries.findIndex((entry) => entry.id === over.id);
+      if (oldIndex === -1 || newIndex === -1) return;
+      onReorder(arrayMove(ids, oldIndex, newIndex));
+    },
+    [entries, ids, onReorder],
+  );
+
+  const handleDragCancel = useCallback(() => setActiveId(null), []);
+
+  return {
+    ids,
+    sensors,
+    activeId,
+    canReorder,
+    handleDragStart,
+    handleDragEnd,
+    handleDragCancel,
+  };
+}
+
 function QueuePanel({
   entries,
   count,
@@ -502,9 +590,20 @@ function QueuePanel({
   onSave,
   onRemove,
   onMerge,
+  onReorder,
   onSendEntryNow,
 }: QueuePanelProps) {
   const { t } = useTranslation();
+  // Reordering is disabled while a queue mutation or backend cancellation is
+  // in flight, matching the Send Now gate; the server stays authoritative, so
+  // the optimistic order is reconciled by the refetch after the drop.
+  const { ids, sensors, activeId, canReorder, handleDragStart, handleDragEnd, handleDragCancel } =
+    useQueueReorder({
+      entries,
+      canReorder: !isLoading && !cancellationPending,
+      onReorder,
+    });
+
   return (
     <div
       id="queue-panel"
@@ -533,21 +632,34 @@ function QueuePanel({
         data-testid="queue-scroll-region"
         className="min-h-0 flex-1 space-y-1.5 overflow-y-auto overscroll-contain pr-1"
       >
-        {entries.map((entry, index) => (
-          <QueuedGhostMessage
-            key={entry.id}
-            entry={entry}
-            index={index}
-            canEdit={canUserEditEntry(entry)}
-            canRemove
-            canMerge={mergeEnabled && canMergeWithAbove(entry, entries[index - 1])}
-            onSave={(content, entityReferences) => onSave(entry.id, content, entityReferences)}
-            onRemove={() => onRemove(entry.id)}
-            onMerge={() => onMerge(entry.id)}
-            onSendNow={() => onSendEntryNow(entry.id)}
-            sendNowDisabled={isLoading || cancellationPending}
-          />
-        ))}
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+          onDragCancel={handleDragCancel}
+        >
+          <SortableContext items={ids} strategy={verticalListSortingStrategy}>
+            {entries.map((entry, index) => (
+              <QueuedGhostMessage
+                key={entry.id}
+                entry={entry}
+                index={index}
+                canEdit={canUserEditEntry(entry)}
+                canRemove
+                canMerge={mergeEnabled && canMergeWithAbove(entry, entries[index - 1])}
+                canDrag={canReorder}
+                showDragHandle={entries.length > 1}
+                isDragging={activeId === entry.id}
+                onSave={(content, entityReferences) => onSave(entry.id, content, entityReferences)}
+                onRemove={() => onRemove(entry.id)}
+                onMerge={() => onMerge(entry.id)}
+                onSendNow={() => onSendEntryNow(entry.id)}
+                sendNowDisabled={isLoading || cancellationPending}
+              />
+            ))}
+          </SortableContext>
+        </DndContext>
       </div>
     </div>
   );

@@ -40,6 +40,7 @@ function useWorkflowsFetchEffect(
           workspaceId: workflow.workspace_id,
           name: workflow.name,
           description: workflow.description,
+          prompt: workflow.prompt,
           sortOrder: workflow.sort_order ?? 0,
           agent_profile_id: workflow.agent_profile_id,
           hidden: workflow.hidden,

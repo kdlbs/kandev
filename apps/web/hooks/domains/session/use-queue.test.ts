@@ -6,9 +6,11 @@ import type { EntityReference } from "@/lib/types/entity-reference";
 const queueApiMock = vi.hoisted(() => {
   class QueueEntryNotFoundError extends Error {}
   class QueueSendNowError extends Error {}
+  class QueueReorderError extends Error {}
   return {
     QueueEntryNotFoundError,
     QueueSendNowError,
+    QueueReorderError,
     queueMessage: vi.fn(),
     clearQueue: vi.fn(),
     drainQueuedMessage: vi.fn(),
@@ -16,6 +18,7 @@ const queueApiMock = vi.hoisted(() => {
     updateQueuedMessage: vi.fn(),
     removeQueuedEntry: vi.fn(),
     mergeQueuedEntry: vi.fn(),
+    reorderQueuedEntries: vi.fn(),
     sendQueuedNow: vi.fn(),
   };
 });
@@ -495,5 +498,96 @@ describe("useQueue removeEntry", () => {
       count: 1,
       max: 10,
     });
+  });
+});
+
+describe("useQueue reorderEntries", () => {
+  beforeEach(() => {
+    resetMockState();
+    setDocumentVisibility("visible");
+    queueApiMock.reorderQueuedEntries.mockReset();
+    queueApiMock.getQueueStatus.mockResolvedValue({ entries: [], count: 0, max: 10 });
+  });
+
+  it("optimistically reorders the store and refetches the authoritative queue", async () => {
+    const first = entry({ id: "q-1", content: "first" });
+    const second = entry({ id: "q-2", content: "second" });
+    // The test harness's setQueueEntries is a no-op spy, so seed the store
+    // directly: the hook's optimistic reorder reads the current entries.
+    mockState.queue.bySessionId[SESSION_ID] = [first, second];
+    mockState.queue.metaBySessionId[SESSION_ID] = { count: 2, max: 10 };
+    queueApiMock.getQueueStatus.mockResolvedValue({
+      entries: [first, second],
+      count: 2,
+      max: 10,
+    });
+    queueApiMock.reorderQueuedEntries.mockResolvedValue({
+      session_id: SESSION_ID,
+      reordered: 2,
+    });
+
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    queueApiMock.getQueueStatus.mockClear();
+
+    await act(async () => {
+      await result.current.reorderEntries([second.id, first.id]);
+    });
+
+    expect(queueApiMock.reorderQueuedEntries).toHaveBeenCalledWith({
+      session_id: SESSION_ID,
+      ordered_ids: [second.id, first.id],
+    });
+    expect(mockState.setQueueEntries).toHaveBeenCalledWith(SESSION_ID, [second, first], {
+      count: 2,
+      max: 10,
+      mergeEnabled: true,
+    });
+    expect(queueApiMock.getQueueStatus).toHaveBeenCalledWith(SESSION_ID);
+  });
+
+  it("refetches and rethrows when the reorder fails", async () => {
+    const first = entry({ id: "q-1", content: "first" });
+    const second = entry({ id: "q-2", content: "second" });
+    queueApiMock.getQueueStatus.mockResolvedValue({
+      entries: [first, second],
+      count: 2,
+      max: 10,
+    });
+    queueApiMock.reorderQueuedEntries.mockRejectedValueOnce(new Error("reorder failed"));
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    queueApiMock.getQueueStatus.mockClear();
+    queueApiMock.getQueueStatus.mockResolvedValueOnce({
+      entries: [first, second],
+      count: 2,
+      max: 10,
+    });
+
+    await act(async () => {
+      await expect(result.current.reorderEntries([second.id, first.id])).rejects.toThrow(
+        "reorder failed",
+      );
+    });
+
+    expect(queueApiMock.getQueueStatus).toHaveBeenCalledWith(SESSION_ID);
+  });
+
+  it("refetches and rethrows a QueueReorderError so the panel can swallow it", async () => {
+    const first = entry({ id: "q-1", content: "first" });
+    queueApiMock.getQueueStatus.mockResolvedValue({ entries: [first], count: 1, max: 10 });
+    queueApiMock.reorderQueuedEntries.mockRejectedValueOnce(new queueApiMock.QueueReorderError());
+
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    queueApiMock.getQueueStatus.mockClear();
+
+    await act(async () => {
+      await expect(result.current.reorderEntries([first.id])).rejects.toThrow(
+        queueApiMock.QueueReorderError,
+      );
+    });
+
+    expect(queueApiMock.getQueueStatus).toHaveBeenCalledWith(SESSION_ID);
   });
 });

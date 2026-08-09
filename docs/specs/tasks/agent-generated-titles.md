@@ -88,8 +88,8 @@ No database column or schema migration is required.
 
 Existing `task_repositories.checkout_branch` values are the durable signal that a repository was
 opened on an explicit branch and must be preserved. Successful generated-branch renames update the
-repository-scoped `task_session_worktrees` row and the corresponding task-environment and running
-executor branch snapshots used by restart and resume. The task workspace directory is not renamed.
+repository-scoped task-environment row and the corresponding running-executor branch snapshots used
+by restart and resume. The task workspace directory is not renamed.
 
 ## API surface
 

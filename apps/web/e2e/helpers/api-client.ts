@@ -2063,6 +2063,13 @@ export class ApiClient {
     worktree_path?: string;
     workspace_path?: string;
     status: string;
+    repos?: Array<{
+      repository_id?: string;
+      worktree_id?: string;
+      worktree_path?: string;
+      worktree_branch?: string;
+      status?: string;
+    }>;
   } | null> {
     const res = await this.rawRequest("GET", `/api/v1/tasks/${taskId}/environment`);
     if (res.status === 404) return null;

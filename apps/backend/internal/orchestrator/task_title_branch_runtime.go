@@ -32,7 +32,7 @@ type titleBranchPrimaryRuntime interface {
 type titleBranchStore interface {
 	ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error)
 	GetRepository(ctx context.Context, id string) (*models.Repository, error)
-	ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error)
+	ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskEnvironmentRepo, error)
 	ListTaskEnvironmentRepos(ctx context.Context, envID string) ([]*models.TaskEnvironmentRepo, error)
 	UpdateTaskEnvironmentRepo(ctx context.Context, repo *models.TaskEnvironmentRepo) error
 	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
@@ -47,13 +47,14 @@ type titleBranchWorktreeSnapshotStore interface {
 }
 
 type titleBranchWorktreeLister interface {
-	ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error)
+	ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskEnvironmentRepo, error)
 }
 
 type titleBranchBinding struct {
+	sessionID       string
 	taskRepository  *models.TaskRepository
 	repository      *models.Repository
-	worktree        *models.TaskSessionWorktree
+	worktree        *models.TaskEnvironmentRepo
 	environmentRepo *models.TaskEnvironmentRepo
 	plan            worktree.BranchIdentityPlan
 }
@@ -119,14 +120,14 @@ func (s *Service) RenameGeneratedBranchesForTaskTitle(
 	}
 
 	executorType := s.titleBranchExecutorType(ctx, session, env)
-	bindings, err := s.buildTitleBranchBindings(ctx, store, taskRepositories, worktrees, envRepos)
+	bindings, err := s.buildTitleBranchBindings(ctx, store, sessionID, taskRepositories, worktrees, envRepos)
 	if err != nil {
 		return result, err
 	}
 	return s.renameTitleBranches(ctx, task, title, executorType, env, worktrees, bindings), nil
 }
 
-func missingTitleBranchRepositoryResult(worktrees []*models.TaskSessionWorktree) TitleBranchRenameResult {
+func missingTitleBranchRepositoryResult(worktrees []*models.TaskEnvironmentRepo) TitleBranchRenameResult {
 	var result TitleBranchRenameResult
 	for _, worktree := range worktrees {
 		if worktree == nil {
@@ -148,7 +149,7 @@ func (s *Service) renameTitleBranches(
 	title string,
 	executorType models.ExecutorType,
 	env *models.TaskEnvironment,
-	worktrees []*models.TaskSessionWorktree,
+	worktrees []*models.TaskEnvironmentRepo,
 	bindings []titleBranchBinding,
 ) TitleBranchRenameResult {
 	var result TitleBranchRenameResult
@@ -211,8 +212,9 @@ func (s *Service) titleBranchExecutorType(ctx context.Context, session *models.T
 func (s *Service) buildTitleBranchBindings(
 	ctx context.Context,
 	store titleBranchStore,
+	sessionID string,
 	taskRepositories []*models.TaskRepository,
-	worktrees []*models.TaskSessionWorktree,
+	worktrees []*models.TaskEnvironmentRepo,
 	envRepos map[string][]*models.TaskEnvironmentRepo,
 ) ([]titleBranchBinding, error) {
 	inputs := make([]worktree.BranchIdentityInput, 0, len(taskRepositories))
@@ -229,6 +231,7 @@ func (s *Service) buildTitleBranchBindings(
 			return nil, fmt.Errorf("repository %q is unavailable", taskRepository.RepositoryID)
 		}
 		bindings = append(bindings, titleBranchBinding{
+			sessionID:      sessionID,
 			taskRepository: taskRepository,
 			repository:     repository,
 		})
@@ -251,8 +254,8 @@ func (s *Service) buildTitleBranchBindings(
 	return bindings, nil
 }
 
-func titleBranchWorktree(worktrees []*models.TaskSessionWorktree, repositoryID, branchSlug string) *models.TaskSessionWorktree {
-	var fallback *models.TaskSessionWorktree
+func titleBranchWorktree(worktrees []*models.TaskEnvironmentRepo, repositoryID, branchSlug string) *models.TaskEnvironmentRepo {
+	var fallback *models.TaskEnvironmentRepo
 	for _, sessionWorktree := range worktrees {
 		if sessionWorktree == nil || sessionWorktree.RepositoryID != repositoryID {
 			continue
@@ -380,7 +383,7 @@ func (s *Service) performTitleBranchRename(
 		return newName, nil
 	}
 	repoPath := titleBranchAgentctlRepoPath(env, binding, multiRepo)
-	operation, err := s.renameTitleBranchRuntime(ctx, binding.worktree.SessionID, newName, repoPath, primary)
+	operation, err := s.renameTitleBranchRuntime(ctx, binding.sessionID, newName, repoPath, primary)
 	if err != nil {
 		return "", err
 	}
@@ -416,9 +419,6 @@ func titleBranchCurrentBranch(binding titleBranchBinding, env *models.TaskEnviro
 	}
 	if binding.environmentRepo != nil && binding.environmentRepo.WorktreeBranch != "" {
 		return binding.environmentRepo.WorktreeBranch
-	}
-	if env != nil && env.WorktreeBranch != "" {
-		return env.WorktreeBranch
 	}
 	return ""
 }
@@ -464,39 +464,7 @@ func (s *Service) persistTitleBranchSnapshots(
 	branch string,
 	multiRepo bool,
 ) error {
-	if err := s.persistTitleBranchSessionWorktreeSnapshot(ctx, binding, branch, multiRepo); err != nil {
-		return err
-	}
-	if err := s.persistTitleBranchEnvironmentRepoSnapshot(ctx, binding, branch); err != nil {
-		return err
-	}
-	return s.persistTitleBranchLegacyEnvironmentSnapshot(ctx, env, binding, branch, multiRepo)
-}
-
-func (s *Service) persistTitleBranchSessionWorktreeSnapshot(ctx context.Context, binding titleBranchBinding, branch string, multiRepo bool) error {
-	if binding.worktree == nil {
-		return nil
-	}
-	binding.worktree.WorktreeBranch = branch
-	if exact, ok := s.repo.(titleBranchWorktreeSnapshotStore); ok && binding.worktree.WorktreeID != "" {
-		if err := exact.UpdateTaskSessionWorktreeBranchByWorktree(ctx, binding.worktree.SessionID, binding.worktree.WorktreeID, branch); err != nil {
-			return fmt.Errorf("failed to persist session worktree branch: %w", err)
-		}
-		return nil
-	}
-	if scoped, ok := s.repo.(titleBranchScopedSnapshotStore); ok {
-		if err := scoped.UpdateTaskSessionWorktreeBranchByRepository(ctx, binding.worktree.SessionID, binding.worktree.RepositoryID, branch); err != nil {
-			return fmt.Errorf("failed to persist session worktree branch: %w", err)
-		}
-		return nil
-	}
-	if !multiRepo {
-		if err := s.repo.UpdateTaskSessionWorktreeBranch(ctx, binding.worktree.SessionID, branch); err != nil {
-			return fmt.Errorf("failed to persist session worktree branch: %w", err)
-		}
-		return nil
-	}
-	return fmt.Errorf("repository-scoped session worktree snapshot capability is unavailable")
+	return s.persistTitleBranchEnvironmentRepoSnapshot(ctx, binding, branch)
 }
 
 func (s *Service) persistTitleBranchEnvironmentRepoSnapshot(ctx context.Context, binding titleBranchBinding, branch string) error {
@@ -514,42 +482,15 @@ func (s *Service) persistTitleBranchEnvironmentRepoSnapshot(ctx context.Context,
 	return nil
 }
 
-func (s *Service) persistTitleBranchLegacyEnvironmentSnapshot(
-	ctx context.Context,
-	env *models.TaskEnvironment,
-	binding titleBranchBinding,
-	branch string,
-	multiRepo bool,
-) error {
-	if env == nil || binding.taskRepository == nil || !titleBranchIsPrimaryEnvironment(env, binding, multiRepo) || env.WorktreeBranch == branch {
-		return nil
-	}
-	env.WorktreeBranch = branch
-	store, ok := s.repo.(titleBranchStore)
-	if !ok {
-		return nil
-	}
-	if err := store.UpdateTaskEnvironment(ctx, env); err != nil {
-		return fmt.Errorf("failed to persist environment branch: %w", err)
-	}
-	return nil
-}
-
 func titleBranchIsPrimaryEnvironment(env *models.TaskEnvironment, binding titleBranchBinding, multiRepo bool) bool {
 	if !multiRepo {
 		return true
 	}
-	if env == nil {
+	if binding.worktree == nil {
 		return binding.taskRepository != nil && binding.taskRepository.Position == 0
 	}
-	if env.WorktreeID != "" && binding.worktree != nil && env.WorktreeID == binding.worktree.WorktreeID {
-		return true
-	}
-	if env.WorktreeID != "" {
-		return false
-	}
-	if env.RepositoryID != "" && binding.taskRepository != nil && env.RepositoryID == binding.taskRepository.RepositoryID {
-		return binding.plan.PathSlug == ""
+	if binding.plan.PathSlug == "" && binding.taskRepository != nil {
+		return binding.worktree.RepositoryID == binding.taskRepository.RepositoryID
 	}
 	return binding.taskRepository != nil && binding.taskRepository.Position == 0
 }
@@ -557,11 +498,6 @@ func titleBranchIsPrimaryEnvironment(env *models.TaskEnvironment, binding titleB
 func titleBranchGeneratedSnapshot(binding titleBranchBinding, env *models.TaskEnvironment) (string, bool) {
 	if binding.environmentRepo != nil && binding.environmentRepo.WorktreeBranch != "" {
 		return binding.environmentRepo.WorktreeBranch, true
-	}
-	if env != nil && binding.taskRepository != nil && titleBranchIsPrimaryEnvironment(env, binding, true) {
-		if env.WorktreeBranch != "" {
-			return env.WorktreeBranch, true
-		}
 	}
 	return "", false
 }

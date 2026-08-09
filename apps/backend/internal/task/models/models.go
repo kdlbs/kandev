@@ -1006,21 +1006,6 @@ const (
 	TaskSessionStateCancelled TaskSessionState = "CANCELLED"
 )
 
-// TaskSessionWorktree represents the association between a task session and a worktree
-type TaskSessionWorktree struct {
-	ID           string    `json:"id"`
-	SessionID    string    `json:"session_id"`
-	WorktreeID   string    `json:"worktree_id"`
-	RepositoryID string    `json:"repository_id"`
-	BranchSlug   string    `json:"branch_slug,omitempty"`
-	Position     int       `json:"position"`
-	CreatedAt    time.Time `json:"created_at"`
-
-	// Worktree details stored on this association
-	WorktreePath   string `json:"worktree_path,omitempty"`
-	WorktreeBranch string `json:"worktree_branch,omitempty"`
-}
-
 // SessionBranchInfo is a lightweight projection of a session with its worktree branch.
 // Used by the PR watch reconciler to find sessions that may need PR watches.
 type SessionBranchInfo struct {
@@ -1043,11 +1028,11 @@ type TaskSession struct {
 	ExecutorID           string                 `json:"executor_id"`
 	ExecutorProfileID    string                 `json:"executor_profile_id"`
 	EnvironmentID        string                 `json:"environment_id"`
-	RepositoryID         string                 `json:"repository_id"`       // Primary repository (for backward compatibility)
-	BaseBranch           string                 `json:"base_branch"`         // Primary base branch (for backward compatibility)
-	BaseCommitSHA        string                 `json:"base_commit_sha"`     // Git commit SHA at session start (for cumulative diff)
-	WorkspacePath        string                 `json:"workspace_path"`      // Effective task workspace root; legacy repo-less sessions may use the picked host folder
-	Worktrees            []*TaskSessionWorktree `json:"worktrees,omitempty"` // Associated worktrees
+	RepositoryID         string                 `json:"repository_id"`   // Primary repository (for backward compatibility)
+	BaseBranch           string                 `json:"base_branch"`     // Primary base branch (for backward compatibility)
+	BaseCommitSHA        string                 `json:"base_commit_sha"` // Git commit SHA at session start (for cumulative diff)
+	WorkspacePath        string                 `json:"workspace_path"`  // Effective task workspace root; legacy repo-less sessions may use the picked host folder
+	Worktrees            []*TaskEnvironmentRepo `json:"-"`               // Environment repository rows for this session's workspace
 	AgentProfileSnapshot map[string]interface{} `json:"agent_profile_snapshot,omitempty"`
 	ExecutorSnapshot     map[string]interface{} `json:"executor_snapshot,omitempty"`
 	EnvironmentSnapshot  map[string]interface{} `json:"environment_snapshot,omitempty"`
@@ -1090,15 +1075,12 @@ func (s *TaskSession) ToAPI() map[string]interface{} {
 		"repository_id":       s.RepositoryID,
 		"base_branch":         s.BaseBranch,
 		"base_commit_sha":     s.BaseCommitSHA,
-		"worktrees":           s.Worktrees,
 		"state":               string(s.State),
 		"started_at":          s.StartedAt,
 		"updated_at":          s.UpdatedAt,
 	}
-	// For backward compatibility, populate worktree_path and worktree_branch from first worktree
-	if len(s.Worktrees) > 0 {
-		result["worktree_path"] = s.Worktrees[0].WorktreePath
-		result["worktree_branch"] = s.Worktrees[0].WorktreeBranch
+	if worktrees := s.WorktreesAPI(); len(worktrees) > 0 {
+		result["worktrees"] = worktrees
 	}
 	if s.Name != "" {
 		result["name"] = s.Name
@@ -1139,6 +1121,60 @@ func (s *TaskSession) ToAPI() map[string]interface{} {
 		result["last_read_message_id"] = s.LastReadMessageID
 	}
 	return result
+}
+
+// WorktreesAPI maps the session's environment repository rows to the legacy
+// session-worktree API shape. The wire contract is stable: the frontend reads
+// id, worktree_id, repository_id, branch_slug, position, worktree_path, and
+// worktree_branch from each entry, and worktree_path/worktree_branch are
+// mirrored onto the session for backward compatibility.
+func (s *TaskSession) WorktreesAPI() []map[string]interface{} {
+	if len(s.Worktrees) == 0 {
+		return nil
+	}
+	out := make([]map[string]interface{}, 0, len(s.Worktrees))
+	for _, repo := range s.Worktrees {
+		if repo == nil {
+			continue
+		}
+		entry := map[string]interface{}{
+			"id":            repo.ID,
+			"session_id":    s.ID,
+			"worktree_id":   repo.WorktreeID,
+			"repository_id": repo.RepositoryID,
+			"position":      repo.Position,
+			"created_at":    repo.CreatedAt,
+		}
+		if repo.BranchSlug != "" {
+			entry["branch_slug"] = repo.BranchSlug
+		}
+		if repo.WorktreePath != "" {
+			entry["worktree_path"] = repo.WorktreePath
+		}
+		if repo.WorktreeBranch != "" {
+			entry["worktree_branch"] = repo.WorktreeBranch
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+// WorktreePath returns the workspace path of the session's first repository
+// row, used for backward-compatible projections.
+func (s *TaskSession) WorktreePath() string {
+	if len(s.Worktrees) > 0 && s.Worktrees[0] != nil {
+		return s.Worktrees[0].WorktreePath
+	}
+	return ""
+}
+
+// WorktreeBranch returns the branch of the session's first repository row,
+// used for backward-compatible projections.
+func (s *TaskSession) WorktreeBranch() string {
+	if len(s.Worktrees) > 0 && s.Worktrees[0] != nil {
+		return s.Worktrees[0].WorktreeBranch
+	}
+	return ""
 }
 
 // Repository represents a workspace repository
@@ -1384,7 +1420,6 @@ const (
 type TaskEnvironment struct {
 	ID                string `json:"id"`
 	TaskID            string `json:"task_id"`
-	RepositoryID      string `json:"repository_id"` // Deprecated: use Repos. Kept for dual-write/backwards compat.
 	ExecutorType      string `json:"executor_type"`
 	ExecutorID        string `json:"executor_id"`
 	ExecutorProfileID string `json:"executor_profile_id"`
@@ -1394,16 +1429,12 @@ type TaskEnvironment struct {
 	ControlPort int                   `json:"control_port"` // agentctl control port
 	Status      TaskEnvironmentStatus `json:"status"`
 
-	// Type-specific fields. The single worktree fields below are legacy: with
-	// multi-repo tasks, the per-repo worktrees live on Repos. WorkspacePath
-	// continues to point at the agent workspace root (the task root when
+	// WorkspacePath points at the agent workspace root (the task root when
 	// TaskDirName is set, otherwise the single repo's worktree path).
-	WorktreeID     string `json:"worktree_id,omitempty"`     // Deprecated: use Repos[i].WorktreeID
-	WorktreePath   string `json:"worktree_path,omitempty"`   // Deprecated: use Repos[i].WorktreePath
-	WorktreeBranch string `json:"worktree_branch,omitempty"` // Deprecated: use Repos[i].WorktreeBranch
-	WorkspacePath  string `json:"workspace_path,omitempty"`
-	ContainerID    string `json:"container_id,omitempty"`
-	SandboxID      string `json:"sandbox_id,omitempty"`
+	// Physical worktree identity lives on Repos, never on the environment row.
+	WorkspacePath string `json:"workspace_path,omitempty"`
+	ContainerID   string `json:"container_id,omitempty"`
+	SandboxID     string `json:"sandbox_id,omitempty"`
 
 	// TaskDirName is the semantic directory name for the task (e.g. "fix-bug_ab12").
 	// Set when the task uses the multi-repo task-directory layout
@@ -1411,8 +1442,8 @@ type TaskEnvironment struct {
 	TaskDirName string `json:"task_dir_name,omitempty"`
 
 	// Repos contains one entry per repository associated with this environment.
-	// Populated by repository getters. Empty for environments created before the
-	// multi-repo backfill ran with no legacy repository_id.
+	// Each row is the single source of physical-worktree truth for that
+	// repository slot. Populated by repository getters.
 	Repos []*TaskEnvironmentRepo `json:"repos,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`
@@ -1431,19 +1462,24 @@ func (te *TaskEnvironment) RepoFor(repositoryID string) *TaskEnvironmentRepo {
 
 // TaskEnvironmentRepo represents the per-repository state of a task environment.
 // One row per repository associated with the task: each carries its own worktree
-// reference and any per-repo preparation error.
+// reference and any per-repo preparation error. The row is the single source of
+// physical-worktree truth — identity, path, branch, status, and lifecycle
+// timestamps.
 type TaskEnvironmentRepo struct {
-	ID                string    `json:"id"`
-	TaskEnvironmentID string    `json:"task_environment_id"`
-	RepositoryID      string    `json:"repository_id"`
-	BranchSlug        string    `json:"branch_slug,omitempty"`
-	WorktreeID        string    `json:"worktree_id,omitempty"`
-	WorktreePath      string    `json:"worktree_path,omitempty"`
-	WorktreeBranch    string    `json:"worktree_branch,omitempty"`
-	Position          int       `json:"position"`
-	ErrorMessage      string    `json:"error_message,omitempty"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	ID                string     `json:"id"`
+	TaskEnvironmentID string     `json:"task_environment_id"`
+	RepositoryID      string     `json:"repository_id"`
+	BranchSlug        string     `json:"branch_slug,omitempty"`
+	WorktreeID        string     `json:"worktree_id,omitempty"`
+	WorktreePath      string     `json:"worktree_path,omitempty"`
+	WorktreeBranch    string     `json:"worktree_branch,omitempty"`
+	Position          int        `json:"position"`
+	ErrorMessage      string     `json:"error_message,omitempty"`
+	Status            string     `json:"status,omitempty"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
+	MergedAt          *time.Time `json:"merged_at,omitempty"`
+	DeletedAt         *time.Time `json:"deleted_at,omitempty"`
 }
 
 // ToAPI converts internal TaskEnvironment to API map.
@@ -1451,7 +1487,6 @@ func (te *TaskEnvironment) ToAPI() map[string]interface{} {
 	result := map[string]interface{}{
 		"id":                  te.ID,
 		"task_id":             te.TaskID,
-		"repository_id":       te.RepositoryID,
 		"executor_type":       te.ExecutorType,
 		"executor_id":         te.ExecutorID,
 		"executor_profile_id": te.ExecutorProfileID,
@@ -1463,15 +1498,6 @@ func (te *TaskEnvironment) ToAPI() map[string]interface{} {
 	// agent_execution_id is no longer carried on TaskEnvironment — see executors_running.
 	if te.ControlPort != 0 {
 		result["control_port"] = te.ControlPort
-	}
-	if te.WorktreeID != "" {
-		result["worktree_id"] = te.WorktreeID
-	}
-	if te.WorktreePath != "" {
-		result["worktree_path"] = te.WorktreePath
-	}
-	if te.WorktreeBranch != "" {
-		result["worktree_branch"] = te.WorktreeBranch
 	}
 	if te.ContainerID != "" {
 		result["container_id"] = te.ContainerID
