@@ -16,6 +16,7 @@ import { setNavigationBlocker, type NavigationIntent } from "@/lib/routing/navig
 import {
   SettingsFloatingSave,
   type SettingsSaveErrorKind,
+  type SettingsSavePlacement,
   type SettingsSaveStatus,
 } from "./settings-floating-save";
 
@@ -62,7 +63,13 @@ type SaveResult = {
 const SettingsSaveRegistryContext = createContext<Registry | null>(null);
 const SettingsDirtyScopeContext = createContext<DirtyScopeRegistry | null>(null);
 
-export function SettingsSaveProvider({ children }: { children: ReactNode }) {
+export function SettingsSaveProvider({
+  children,
+  placement = "viewport",
+}: {
+  children: ReactNode;
+  placement?: SettingsSavePlacement;
+}) {
   const { contributors, registry, dirtyContributors, refreshRegistry } = useContributorRegistry();
   const { status, errorKind, saveAll, clearSavedStatus, markError } = useSaveCoordinator(
     contributors,
@@ -137,15 +144,7 @@ export function SettingsSaveProvider({ children }: { children: ReactNode }) {
     });
   }, [hasDirty]);
 
-  useEffect(() => {
-    if (!hasDirty) return;
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [hasDirty]);
+  useSettingsBeforeUnloadGuard(hasDirty);
 
   return (
     <SettingsSaveRegistryContext.Provider value={registry}>
@@ -153,6 +152,7 @@ export function SettingsSaveProvider({ children }: { children: ReactNode }) {
       {(hasDirty || status === "saved") && (
         <SettingsFloatingSave
           status={displayStatus}
+          placement={placement}
           errorKind={errorKind}
           dirtyContributorIds={dirtyContributors.map(({ contributor }) => contributor.id).join(",")}
           invalidReason={invalidReason}
@@ -166,6 +166,18 @@ export function SettingsSaveProvider({ children }: { children: ReactNode }) {
       )}
     </SettingsSaveRegistryContext.Provider>
   );
+}
+
+function useSettingsBeforeUnloadGuard(enabled: boolean) {
+  useEffect(() => {
+    if (!enabled) return;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [enabled]);
 }
 
 export function SettingsSaveDirtyScope({

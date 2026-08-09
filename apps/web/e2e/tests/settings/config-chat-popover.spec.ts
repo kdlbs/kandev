@@ -66,7 +66,29 @@ test.describe("Configuration Chat", () => {
       const floatingSave = testPage.getByTestId("settings-floating-save");
       const saveButton = floatingSave.getByRole("button", { name: "Save changes" });
       const surface = floatingSave.getByTestId("settings-floating-save-surface");
+      const contentArea = testPage.getByTestId("settings-scroll-container");
       const configChatButton = testPage.getByRole("button", { name: "Configuration Chat" });
+      const [closedSurfaceBox, contentBox] = await Promise.all([
+        surface.boundingBox(),
+        contentArea.boundingBox(),
+      ]);
+      expect(closedSurfaceBox).not.toBeNull();
+      expect(contentBox).not.toBeNull();
+      expect(closedSurfaceBox!.height).toBeLessThanOrEqual(48);
+      expect(
+        Math.abs(
+          closedSurfaceBox!.x +
+            closedSurfaceBox!.width / 2 -
+            (contentBox!.x + contentBox!.width / 2),
+        ),
+      ).toBeLessThanOrEqual(2);
+      expect(
+        Math.abs(
+          closedSurfaceBox!.y +
+            closedSurfaceBox!.height -
+            (contentBox!.y + contentBox!.height - 20),
+        ),
+      ).toBeLessThanOrEqual(2);
       await expect(saveButton).toHaveClass(/bg-success/);
       await expect(floatingSave).not.toHaveClass(/bg-success/);
       await expectElementsNotToIntersect(saveButton, configChatButton);
@@ -82,7 +104,7 @@ test.describe("Configuration Chat", () => {
       ]);
       expect(surfaceBox).not.toBeNull();
       expect(popoverBox).not.toBeNull();
-      expect(surfaceBox!.height).toBeLessThanOrEqual(72);
+      expect(surfaceBox!.height).toBeLessThanOrEqual(48);
       expect(
         Math.abs(surfaceBox!.x + surfaceBox!.width / 2 - (popoverBox!.x + popoverBox!.width / 2)),
       ).toBeLessThanOrEqual(2);

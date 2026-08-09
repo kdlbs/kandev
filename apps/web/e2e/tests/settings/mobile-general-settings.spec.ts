@@ -139,6 +139,7 @@ test.describe("Mobile general settings", () => {
       const saveButton = floating.getByRole("button", { name: "Save changes" });
       const resetButton = floating.getByRole("button", { name: "Reset" });
       const surface = floating.getByTestId("settings-floating-save-surface");
+      const contentArea = testPage.getByTestId("settings-scroll-container");
       await expect(saveButton).toBeVisible();
       await expect(resetButton).toBeVisible();
       await expect(layout).toHaveAttribute("data-settings-dirty", "true");
@@ -150,13 +151,20 @@ test.describe("Mobile general settings", () => {
       const surfaceBox = await surface.boundingBox();
       expect(saveBox).not.toBeNull();
       expect(surfaceBox).not.toBeNull();
-      expect(surfaceBox!.height).toBeLessThanOrEqual(72);
+      const contentBox = await contentArea.boundingBox();
+      expect(contentBox).not.toBeNull();
+      expect(surfaceBox!.height).toBeLessThanOrEqual(52);
       expect(saveBox!.height).toBeGreaterThanOrEqual(44);
       expect(saveBox!.x + saveBox!.width).toBeLessThanOrEqual(390 - 16 + 1);
       expect(saveBox!.y + saveBox!.height).toBeLessThanOrEqual(844 - 16 + 1);
       expect(surfaceBox!.x).toBeGreaterThanOrEqual(0);
       expect(surfaceBox!.x + surfaceBox!.width).toBeLessThanOrEqual(390);
-      expect(Math.abs(surfaceBox!.x + surfaceBox!.width / 2 - 195)).toBeLessThanOrEqual(2);
+      expect(
+        Math.abs(surfaceBox!.x + surfaceBox!.width / 2 - (contentBox!.x + contentBox!.width / 2)),
+      ).toBeLessThanOrEqual(2);
+      expect(
+        Math.abs(surfaceBox!.y + surfaceBox!.height - (contentBox!.y + contentBox!.height - 80)),
+      ).toBeLessThanOrEqual(2);
       const resetBox = await resetButton.boundingBox();
       expect(resetBox).not.toBeNull();
       expect(resetBox!.height).toBeGreaterThanOrEqual(44);

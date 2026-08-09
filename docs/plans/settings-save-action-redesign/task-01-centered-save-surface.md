@@ -23,9 +23,11 @@ save coordinator; this task changes the presentation and adds no API calls.
 2. Reset invokes all dirty contributor discard callbacks in stable order, makes
    no persistence request, hides the surface after successful reset, and keeps
    the surface dirty/error state when reset fails or is already in flight.
-3. The standalone surface is safe-area aware and the Configuration Chat-hosted
-   surface is centered above the open popover without changing navigation guard,
-   partial-save, retry, or revision-safe behavior.
+3. The standalone surface is centered in the settings content pane with a
+   roughly 20px desktop bottom inset, remains safe-area aware, and lifts above
+   the phone Configuration Chat FAB; the hosted surface is centered above the
+   open popover without changing navigation guard, partial-save, retry, or
+   revision-safe behavior.
 
 ## Verification
 
@@ -76,8 +78,9 @@ lint results, `git diff --check`, any blockers or risks, and synchronized Task
 - Replaced the right-anchored green rectangle with a centered neutral card,
   localized Unsaved changes/Reset copy, a secondary Reset action, and the
   existing green Save changes primary action.
-- Centered the portaled surface in the Configuration Chat host and increased
-  settings scroll clearance so the fixed card does not cover the final control.
+- Centered the portaled surface in the Configuration Chat host, anchored the
+  standalone surface to the settings content pane, and reserved shell space
+  for the Configuration Chat FAB rather than the old oversized save card.
 - `pnpm --filter @kandev/web test -- --run components/settings/settings-save-provider.test.tsx` — 16 passed.
 - `pnpm run typecheck` — passed.
 - `pnpm run lint` — passed.

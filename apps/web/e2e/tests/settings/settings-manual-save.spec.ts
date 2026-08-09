@@ -126,13 +126,17 @@ test.describe("Settings manual save", () => {
       );
 
       const surface = floatingSave.getByTestId("settings-floating-save-surface");
-      const viewport = testPage.viewportSize();
+      const contentArea = testPage.getByTestId("settings-scroll-container");
       const surfaceBox = await surface.boundingBox();
-      expect(viewport).not.toBeNull();
+      const contentBox = await contentArea.boundingBox();
       expect(surfaceBox).not.toBeNull();
-      expect(surfaceBox!.height).toBeLessThanOrEqual(72);
+      expect(contentBox).not.toBeNull();
+      expect(surfaceBox!.height).toBeLessThanOrEqual(48);
       expect(
-        Math.abs(surfaceBox!.x + surfaceBox!.width / 2 - viewport!.width / 2),
+        Math.abs(surfaceBox!.x + surfaceBox!.width / 2 - (contentBox!.x + contentBox!.width / 2)),
+      ).toBeLessThanOrEqual(2);
+      expect(
+        Math.abs(surfaceBox!.y + surfaceBox!.height - (contentBox!.y + contentBox!.height - 20)),
       ).toBeLessThanOrEqual(2);
       await expect(floatingSave).not.toHaveClass(/bg-success/);
       await expect(floatingSave.getByRole("button", { name: "Save changes" })).toHaveClass(

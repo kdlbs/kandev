@@ -14,8 +14,9 @@ single-row save surface inspired by the supplied reference. The coordinator
 remains the owner of draft persistence and navigation protection; the change
 adds a shared local Reset action and changes only the presentation and
 responsive placement.
-The surface is centered in the viewport when Configuration Chat is closed and
-uses the existing chat action host above the popover when it is open.
+The surface is centered in the settings content pane when Configuration Chat
+is closed and uses the existing chat action host above the popover when it is
+open.
 
 No backend, API, schema, or persistence changes are required.
 
@@ -49,10 +50,14 @@ persistence boundary.
 - Remove the oversized right-anchored green rectangle. Keep success-green
   emphasis on the primary action and use the existing status icon/copy for
   saving, saved, invalid, and error states.
-- Center the standalone surface with viewport-safe horizontal insets and the
-  existing status-bar/safe-area bottom offset. Keep the surface keyboard
-  accessible, preserve `data-testid="settings-floating-save"`, and retain the
-  navigation dialog as a separate modal flow.
+- Center the standalone surface against the settings content pane, with a
+  roughly 20px desktop bottom inset plus safe-area clearance. On phones, lift
+  the surface above the Configuration Chat FAB while preserving the same
+  centered composition. Keep the surface keyboard accessible, preserve
+  `data-testid="settings-floating-save"`, and retain the navigation dialog as a
+  separate modal flow.
+- Keep the desktop surface near 40px tall by using compact controls and minimal
+  outer padding; retain 44px control hitboxes on phone widths.
 - Keep the mobile composition intentional: the surface uses an intrinsic-width
   single-row card on phone widths, keeps the message flexible without
   horizontal overflow, and keeps every primary/secondary control at least 44px
@@ -77,20 +82,22 @@ persistence boundary.
 
 ### Mobile parity contract
 
-- Desktop outcome: a dirty settings route exposes one centered, viewport-
-  reachable save surface; Save persists all dirty contributors and Reset restores
-  their baselines.
-- Mobile entry point: the same fixed surface remains visible at the lower center
-  of a 390px viewport, with a full-width inset composition and no hover-only
-  interaction.
+- Desktop outcome: a dirty settings route exposes one centered, content-pane-
+  reachable save surface; Save persists all dirty contributors and Reset
+  restores their baselines.
+- Mobile entry point: the same bottom-inset surface remains visible at the lower
+  center of a 390px viewport, with an intrinsic-width composition and no
+  hover-only interaction.
 - Nearest shipped exemplars: `apps/web/components/kanban/mobile-fab.tsx` for
   safe-area-aware fixed action geometry and 44px touch ergonomics, and
   `apps/web/components/config-chat/config-chat-panel.tsx` for the existing
   chat-hosted collision escape hatch. These contribute geometry/placement only;
   settings state and actions remain shared in the coordinator.
 - Scroll owner: `settings-scroll-container` remains the single vertical scroll
-  owner. The fixed surface clears the status bar and safe-area inset, and the
-  final editable control remains above it after scrolling.
+  owner. The content shell reserves the reduced space needed for the
+  Configuration Chat FAB and phone save clearance, while the absolute save
+  surface uses the settings main content pane and a roughly 20px desktop bottom
+  inset.
 
 ---
 
@@ -119,12 +126,12 @@ persistence boundary.
 ## E2E Tests
 
 - **Scenario:** GIVEN a dirty desktop settings route, WHEN the action appears,
-  THEN the surface is centered, uses a restrained neutral container, exposes
-  Reset and Save changes, and Reset returns the form to its baseline without an
-  API write.
+  THEN the surface is centered in the settings content pane, uses a restrained
+  neutral container near 40px tall, exposes Reset and Save changes, and Reset
+  returns the form to its baseline without an API write.
   **File:** `apps/web/e2e/tests/settings/settings-manual-save.spec.ts`.
 - **Scenario:** GIVEN a dirty 390px settings route, WHEN the user scrolls to the
-  final field, THEN the centered surface stays within the viewport, controls
+  final field, THEN the centered bottom-inset surface stays within the viewport, controls
   have touch-sized hitboxes, the last field is not covered, and document
   horizontal overflow remains zero.
   **File:** `apps/web/e2e/tests/settings/mobile-general-settings.spec.ts`.

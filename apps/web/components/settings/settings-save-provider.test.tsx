@@ -118,7 +118,7 @@ afterEach(() => {
 });
 
 describe("SettingsSaveProvider", () => {
-  it("offsets the standalone save action above the app status bar", async () => {
+  it("keeps the generic standalone save action above the app status bar", async () => {
     render(
       <SettingsSaveProvider>
         <DraftContributor id={APPEARANCE_ID} onSave={vi.fn()} />

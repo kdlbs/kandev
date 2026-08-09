@@ -16,9 +16,9 @@ Keep tests focused on user outcomes and retain each test's existing API cleanup.
 
 ## Acceptance
 
-1. Desktop coverage proves the surface is centered, exposes Reset and Save
-   changes, Reset leaves the persisted setting unchanged, and Save still
-   persists it.
+1. Desktop coverage proves the surface is centered in the settings content pane,
+   uses compact geometry, exposes Reset and Save changes, Reset leaves the
+   persisted setting unchanged, and Save still persists it.
 2. Mobile coverage proves the 390px surface fits within safe-area-aware bounds,
    has touch-sized controls, keeps the last editable control reachable, and
    creates no document-level horizontal overflow.

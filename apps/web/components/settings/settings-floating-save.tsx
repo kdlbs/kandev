@@ -21,9 +21,18 @@ import { cn } from "@/lib/utils";
 
 export type SettingsSaveStatus = "dirty" | "saving" | "saved" | "error";
 export type SettingsSaveErrorKind = "save" | "reset";
+export type SettingsSavePlacement = "content" | "viewport";
+
+function standalonePositioningClass(placement: SettingsSavePlacement): string {
+  if (placement === "content") {
+    return "absolute inset-x-0 bottom-[calc(5rem_+_env(safe-area-inset-bottom))] pl-[calc(1rem_+_env(safe-area-inset-left))] pr-[calc(1rem_+_env(safe-area-inset-right))] md:bottom-[calc(1.25rem_+_env(safe-area-inset-bottom))]";
+  }
+  return "fixed inset-x-0 bottom-[calc(5.25rem_+_env(safe-area-inset-bottom)_+_var(--app-status-bar-height))] pl-[calc(1rem_+_env(safe-area-inset-left))] pr-[calc(1rem_+_env(safe-area-inset-right))]";
+}
 
 type SettingsFloatingSaveProps = {
   status: SettingsSaveStatus;
+  placement?: SettingsSavePlacement;
   errorKind?: SettingsSaveErrorKind | null;
   dirtyContributorIds?: string;
   invalidReason?: string;
@@ -37,6 +46,7 @@ type SettingsFloatingSaveProps = {
 
 export function SettingsFloatingSave({
   status,
+  placement = "viewport",
   errorKind,
   dirtyContributorIds,
   invalidReason,
@@ -57,19 +67,19 @@ export function SettingsFloatingSave({
   const accessibleLabel = t(accessibleKey);
   const configChatFloatingActionsHost = useConfigChatFloatingActionsHost();
   const isHostedByConfigChat = configChatFloatingActionsHost !== null;
+  const positioningClass = standalonePositioningClass(placement);
   const saveAction = (
     <div
       className={cn(
         "pointer-events-none z-40 flex w-full justify-center",
-        !isHostedByConfigChat &&
-          "fixed inset-x-0 bottom-[calc(5.25rem_+_env(safe-area-inset-bottom)_+_var(--app-status-bar-height))] pl-[calc(1rem_+_env(safe-area-inset-left))] pr-[calc(1rem_+_env(safe-area-inset-right))]",
+        !isHostedByConfigChat && positioningClass,
       )}
       data-testid="settings-floating-save"
       data-dirty-contributors={dirtyContributorIds}
       data-status={status}
     >
       <div
-        className="pointer-events-auto flex w-fit max-w-full items-center gap-2 rounded-xl border border-border/80 bg-card/95 p-2 shadow-lg backdrop-blur-sm"
+        className="pointer-events-auto flex w-fit max-w-full items-center gap-1 rounded-lg border border-border/80 bg-card/95 shadow-md backdrop-blur-sm"
         data-testid="settings-floating-save-surface"
       >
         <div className="min-w-0 max-w-52 flex-1 space-y-0.5 px-1">
@@ -95,7 +105,7 @@ export function SettingsFloatingSave({
           <Button
             type="button"
             variant="outline"
-            className="min-h-[45px] shrink-0 cursor-pointer px-3 text-sm"
+            className="h-[45px] min-h-[45px] shrink-0 cursor-pointer px-3 text-sm md:h-10 md:min-h-10"
             disabled={isBusy || isSaved}
             onClick={() => void onReset()}
           >
@@ -104,7 +114,7 @@ export function SettingsFloatingSave({
           <Button
             type="button"
             size="default"
-            className="min-h-[45px] shrink-0 cursor-pointer bg-success px-3 text-sm text-success-foreground hover:bg-success/85 focus-visible:border-success focus-visible:ring-success/35"
+            className="h-[45px] min-h-[45px] shrink-0 cursor-pointer bg-success px-3 text-sm text-success-foreground hover:bg-success/85 focus-visible:border-success focus-visible:ring-success/35 md:h-10 md:min-h-10"
             disabled={isBusy || isSaved || isInvalid}
             aria-label={accessibleLabel}
             onClick={() => void onSave()}

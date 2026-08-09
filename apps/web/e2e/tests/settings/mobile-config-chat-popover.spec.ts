@@ -34,7 +34,7 @@ test.describe("Mobile config chat popover", () => {
       expect(saveBox).not.toBeNull();
       expect(chatBox).not.toBeNull();
       expect(surfaceBox).not.toBeNull();
-      expect(surfaceBox!.height).toBeLessThanOrEqual(72);
+      expect(surfaceBox!.height).toBeLessThanOrEqual(52);
       expect(saveBox!.height).toBeGreaterThanOrEqual(44);
       const resetBox = await resetButton.boundingBox();
       expect(resetBox).not.toBeNull();
