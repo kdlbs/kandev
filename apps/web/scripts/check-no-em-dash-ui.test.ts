@@ -35,6 +35,18 @@ describe("check-no-em-dash-ui", () => {
     expect(containsEmDash(String.raw`visible \u2014 copy`)).toBe(true);
   });
 
+  it("ignores regex literals while stripping comments", () => {
+    const source = [
+      "const pattern = /``` " + EM_DASH + "/;",
+      `// ignored ${EM_DASH}`,
+      `const copy = "visible ${EM_DASH}";`,
+    ].join("\n");
+
+    expect(findSourceViolations(source, "/repo/apps/web/components/example.tsx", "/repo")).toEqual([
+      { kind: "source", file: "apps/web/components/example.tsx", line: 3 },
+    ]);
+  });
+
   it("scans locale values, rendered source, and changelog copy", () => {
     const repoRoot = mkdtempSync(path.join(os.tmpdir(), "kandev-em-dash-"));
     temporaryDirectories.push(repoRoot);

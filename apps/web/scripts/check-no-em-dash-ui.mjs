@@ -21,6 +21,24 @@ const CODE_STATE = "code";
 const LINE_COMMENT_STATE = "line-comment";
 const BLOCK_COMMENT_STATE = "block-comment";
 const STRING_STATE = "string";
+const REGEX_START_CHARACTERS = new Set("=([{,:;!?&|+-*%^~<>".split(""));
+const REGEX_KEYWORDS = new Set([
+  "await",
+  "case",
+  "delete",
+  "do",
+  "else",
+  "in",
+  "instanceof",
+  "new",
+  "of",
+  "return",
+  "throw",
+  "typeof",
+  "void",
+  "while",
+  "yield",
+]);
 
 export function containsEmDash(value) {
   return value.includes(EM_DASH) || /\\u2014/i.test(value);
@@ -58,6 +76,59 @@ function consumeString(source, index, quote, escaped) {
   };
 }
 
+function previousToken(source, index) {
+  let cursor = index - 1;
+  while (cursor >= 0 && /\s/.test(source[cursor])) cursor -= 1;
+  const end = cursor;
+  while (cursor >= 0 && /[\w$]/.test(source[cursor])) cursor -= 1;
+  return source.slice(cursor + 1, end + 1);
+}
+
+function canStartRegex(source, index) {
+  if (source[index - 1] === "<") return false;
+  let cursor = index - 1;
+  while (cursor >= 0 && /\s/.test(source[cursor])) cursor -= 1;
+  if (cursor < 0) return true;
+  if (REGEX_START_CHARACTERS.has(source[cursor])) return true;
+  return REGEX_KEYWORDS.has(previousToken(source, index));
+}
+
+function consumeRegex(source, index) {
+  let inCharacterClass = false;
+  let escaped = false;
+
+  for (let cursor = index + 1; cursor < source.length; cursor += 1) {
+    const character = source[cursor];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (character === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (character === "[") {
+      inCharacterClass = true;
+      continue;
+    }
+    if (character === "]") {
+      inCharacterClass = false;
+      continue;
+    }
+    if (character !== "/" || inCharacterClass) continue;
+
+    let end = cursor + 1;
+    while (/[a-z]/i.test(source[end] ?? "")) end += 1;
+    return {
+      output: source.slice(index, end).replace(/[^\n]/g, " "),
+      nextIndex: end,
+      nextState: CODE_STATE,
+    };
+  }
+
+  return { output: source[index], nextIndex: index + 1, nextState: CODE_STATE };
+}
+
 function consumeCode(source, index) {
   const character = source[index];
   const next = source[index + 1];
@@ -67,6 +138,7 @@ function consumeCode(source, index) {
   if (character === "/" && next === "*") {
     return { output: "  ", nextIndex: index + 2, nextState: BLOCK_COMMENT_STATE };
   }
+  if (character === "/" && canStartRegex(source, index)) return consumeRegex(source, index);
   if (["'", '"', "`"].includes(character)) {
     return {
       output: character,
