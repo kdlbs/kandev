@@ -266,10 +266,11 @@ the user's monitoring limit, continue checking after resolutions until automated
 review jobs are terminal; otherwise report the exact pending check names.
 
 If the user explicitly requested a persistent Kandev plan update and the task
-has an external Kandev plan, update it after fixup with the remediation commit,
-final exact-head check counts, resolved-thread state, and mergeability. Without
-that authorization, report the plan update as pending and do not invoke Kandev
-task or session APIs. Batch plan/task synchronization into the final documentation
+has an external Kandev plan, call `get_task_plan_kandev` before fixup and
+`update_task_plan_kandev` after fixup with the remediation commit, final
+exact-head check counts, resolved-thread state, and mergeability. Without that
+authorization, report the plan update as pending and do not invoke Kandev task
+or session APIs. Batch plan/task synchronization into the final documentation
 commit. For tracked `docs/plans/**` artifacts, keep prose head-agnostic and record
 remediation scope/local verification before that commit; a later metadata commit
 creates a new head and requires a fresh PR-state check. Mark prior current-head

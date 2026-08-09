@@ -86,6 +86,7 @@ state; and stale callbacks must not mutate the replacement.
 1. Identify the single behavior to implement or bug to reproduce
 2. Write the **smallest test** that asserts the expected behavior — one assertion, clear name
 3. Run the test and confirm it **fails with the expected assertion error** (not a compile/import error)
+   For a brand-new Go package, create the package directory and minimal test package first, then run the focused package test so RED fails on behavior rather than package-selection or import errors.
 4. If it passes immediately, the test is not testing new behavior — revise it.
    Exception: a reviewer-requested test that documents behavior already present
    on the current head is valid test-only contract coverage. Label it as such,
