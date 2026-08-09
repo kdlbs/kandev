@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -22,23 +23,29 @@ import (
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
-// recordingOrchestrator is a non-nil OrchestratorStarter that records whether
-// it was ever invoked. newIdempotencyTestHandlers otherwise leaves
-// h.orchestrator nil, under which handlePostCreateTaskSession no-ops on its
-// own nil check regardless of whether the caller should have reached it at
-// all — which cannot distinguish "correctly skipped for a Found/
-// CreatedIdentityLost outcome" from "incorrectly attempted, but swallowed by
-// the nil guard". Wiring this in makes a missing no-side-effects guard
-// observable: if handlePostCreateTaskSession is reached, LaunchSession fires
-// for real and launched flips true.
+// recordingOrchestrator is a non-nil OrchestratorStarter that records
+// whether it was ever invoked, and by which intent. newIdempotencyTestHandlers
+// otherwise leaves h.orchestrator nil, under which session preparation
+// no-ops on its own nil check regardless of whether the caller should have
+// reached it at all — which cannot distinguish "correctly skipped" from
+// "incorrectly attempted, but swallowed by the nil guard". Wiring this in
+// makes a missing no-side-effects guard observable: if a session-prepare or
+// -dispatch path is reached, LaunchSession fires for real and launched
+// flips true. intents distinguishes step 6 (IntentPrepare, synchronous —
+// expected to run even for a CreatedIdentityLost outcome, since it runs
+// before settlement discovers that outcome) from step 8
+// (IntentStartCreated, asynchronous dispatch — must never run for any
+// Found or CreatedIdentityLost outcome).
 type recordingOrchestrator struct {
 	mu       sync.Mutex
 	launched bool
+	intents  []orchestrator.SessionIntent
 }
 
-func (o *recordingOrchestrator) LaunchSession(context.Context, *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error) {
+func (o *recordingOrchestrator) LaunchSession(_ context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error) {
 	o.mu.Lock()
 	o.launched = true
+	o.intents = append(o.intents, req.Intent)
 	o.mu.Unlock()
 	return &orchestrator.LaunchSessionResponse{Success: true, SessionID: "should-not-have-launched"}, nil
 }
@@ -54,6 +61,21 @@ func (o *recordingOrchestrator) wasLaunched() bool {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	return o.launched
+}
+
+// wasAsyncDispatched reports whether the asynchronous start intent
+// (create-sequence step 8) ever fired — the guarantee that actually matters
+// for "no side effects on a found/lost outcome", independent of whether
+// synchronous prepare (step 6) ran.
+func (o *recordingOrchestrator) wasAsyncDispatched() bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	for _, intent := range o.intents {
+		if intent == orchestrator.IntentStartCreated {
+			return true
+		}
+	}
+	return false
 }
 
 // idempotentCreateTaskRepo is a minimal in-memory TaskRepository fake that
@@ -344,8 +366,16 @@ func TestHTTPCreateTask_InvalidExternalIDReturns400(t *testing.T) {
 
 // TestHTTPCreateTask_CreatedIdentityLostOmitsExternalID covers the fourth
 // outcome: settlement affecting zero rows because the identity was released
-// mid-create. The task survives, no external_id in the body, no session
-// dispatched.
+// mid-create. The task survives, no external_id in the body, no
+// asynchronous work dispatched.
+//
+// Synchronous session prepare (create-sequence step 6) DOES run here, and
+// must: it happens before settlement (step 7) discovers the CreatedIdentityLost
+// outcome, per the settlement-ordering fix (docs/specs/tasks/external-id-idempotency/spec.md,
+// "Settlement call site (normative, per surface)"). Only the asynchronous
+// start dispatch (step 8) is guaranteed to never fire — that is the actual
+// "no side effects" guarantee the spec makes for this outcome ("no
+// asynchronous work (session start, PR association) is dispatched for it").
 func TestHTTPCreateTask_CreatedIdentityLostOmitsExternalID(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := newIdempotentCreateTaskRepo()
@@ -357,9 +387,6 @@ func TestHTTPCreateTask_CreatedIdentityLostOmitsExternalID(t *testing.T) {
 	repo.forceNextSettle0 = true
 	repo.mu.Unlock()
 
-	// See recordingOrchestrator's doc comment: a nil h.orchestrator can't
-	// distinguish "correctly skipped" from "incorrectly attempted, but
-	// swallowed by handlePostCreateTaskSession's own nil check".
 	orch := &recordingOrchestrator{}
 	h.orchestrator = orch
 
@@ -378,8 +405,8 @@ func TestHTTPCreateTask_CreatedIdentityLostOmitsExternalID(t *testing.T) {
 	assert.False(t, hasExternalID, "external_id must be absent from a CreatedIdentityLost response")
 	assert.Equal(t, false, resp["deduplicated"])
 	assert.Equal(t, true, resp["creation_complete"])
-	assert.Nil(t, resp["session_id"], "no session should be dispatched when the identity was lost")
-	assert.False(t, orch.wasLaunched(), "the orchestrator must never be reached once settlement reports CreatedIdentityLost")
+	assert.Nil(t, resp["session_id"], "no session should be reported in a CreatedIdentityLost response, even though one may have been prepared")
+	assert.False(t, orch.wasAsyncDispatched(), "the asynchronous start intent must never fire once settlement reports CreatedIdentityLost")
 }
 
 func doGetTaskByExternalID(h *TaskHandlers, workspaceID, externalID string) *httptest.ResponseRecorder {
@@ -479,4 +506,126 @@ func TestHTTPReleaseTaskExternalID_NotFound(t *testing.T) {
 
 	rec := doReleaseTaskByExternalID(h, "ws-1", "ext-nope")
 	assert.Equal(t, http.StatusNotFound, rec.Code, "body: %s", rec.Body.String())
+}
+
+// orderRecordingOrchestrator records whether the task was already settled
+// (external_id_settled_at set) at the moment synchronous session prepare
+// (orchestrator.IntentPrepare) was invoked — a direct, observable proof of
+// create-sequence ordering (docs/specs/tasks/external-id-idempotency/spec.md,
+// "Settlement call site (normative, per surface)"): settlement (step 7) must
+// never precede synchronous session prepare (part of step 6). Only the
+// asynchronous dispatch (step 8, the actual agent-start goroutine) may run
+// after settlement.
+type orderRecordingOrchestrator struct {
+	repo              *idempotentCreateTaskRepo
+	externalID        string
+	mu                sync.Mutex
+	prepareCalled     bool
+	prepareSawSettled bool
+}
+
+func (o *orderRecordingOrchestrator) LaunchSession(_ context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error) {
+	if req.Intent == orchestrator.IntentPrepare {
+		o.mu.Lock()
+		o.prepareCalled = true
+		o.repo.mu.Lock()
+		for _, tk := range o.repo.tasks {
+			if tk.ExternalID == o.externalID {
+				o.prepareSawSettled = tk.ExternalIDSettledAt != nil
+				break
+			}
+		}
+		o.repo.mu.Unlock()
+		o.mu.Unlock()
+	}
+	return &orchestrator.LaunchSessionResponse{Success: true, SessionID: "sess-order-check"}, nil
+}
+
+func (o *orderRecordingOrchestrator) EnsureSession(context.Context, string, ...orchestrator.EnsureSessionOptions) (*orchestrator.EnsureSessionResponse, error) {
+	return &orchestrator.EnsureSessionResponse{Success: true, SessionID: "sess-order-check"}, nil
+}
+
+// TestHTTPCreateTask_SettlesAfterSynchronousSessionPrepareNotBefore is the
+// human-review finding (carlosflorencio, PR #2440): settlement previously ran
+// before handlePostCreateTaskSession was even called, not between its
+// synchronous prepare and asynchronous dispatch halves as the spec requires.
+// A crash in the gap between settle succeeding and prepare running would
+// leave a task reporting creation_complete:true with no session ever
+// prepared, and a retry would never attempt session-prep again since Found
+// outcomes skip all post-create work by design.
+func TestHTTPCreateTask_SettlesAfterSynchronousSessionPrepareNotBefore(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := newIdempotentCreateTaskRepo()
+	h := newIdempotencyTestHandlers(t, repo)
+	orch := &orderRecordingOrchestrator{repo: repo, externalID: "ext-order"}
+	h.orchestrator = orch
+
+	rec := doCreateTask(h, `{"workspace_id":"ws-1","workflow_id":"wf-1","workflow_step_id":"step-1","title":"Task","external_id":"ext-order","start_agent":true,"agent_profile_id":"agent-1"}`)
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+
+	orch.mu.Lock()
+	prepareCalled, prepareSawSettled := orch.prepareCalled, orch.prepareSawSettled
+	orch.mu.Unlock()
+	require.True(t, prepareCalled, "synchronous session prepare must run for a start_agent create")
+	assert.False(t, prepareSawSettled, "settlement must not have run before synchronous session prepare was invoked — settlement must sit between prepare and async dispatch, not before prepare")
+}
+
+// failingPrepareOrchestrator fails every LaunchSession call. Used to prove
+// that a genuine prepare *failure* (as opposed to a process crash) does not
+// block settlement — the create-sequence's session-prepare step is allowed
+// to fail gracefully, matching the existing behavior for a create with no
+// start_agent/prepare_session at all. Only a crash before prepare returns
+// leaves the row unsettled; a returned error does not.
+type failingPrepareOrchestrator struct {
+	mu       sync.Mutex
+	launched bool
+}
+
+func (o *failingPrepareOrchestrator) LaunchSession(context.Context, *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error) {
+	o.mu.Lock()
+	o.launched = true
+	o.mu.Unlock()
+	return nil, errPrepareFailed
+}
+
+func (o *failingPrepareOrchestrator) EnsureSession(context.Context, string, ...orchestrator.EnsureSessionOptions) (*orchestrator.EnsureSessionResponse, error) {
+	return nil, errPrepareFailed
+}
+
+var errPrepareFailed = errors.New("session prepare failed")
+
+// TestHTTPCreateTask_SessionPrepareFailureStillSettles covers the
+// intentionally narrow scope of the settlement-ordering fix: session
+// prepare running *before* settlement means prepare is allowed to observe
+// (and fail against) an unsettled row, but a graceful prepare failure must
+// not block settlement — only a crash before prepare returns does, and that
+// is covered by TestHTTPCreateTask_SettlesAfterSynchronousSessionPrepareNotBefore
+// observing the row's state at the moment of the call. This test pins the
+// other half: the create still succeeds and settles even though its agent
+// session never got prepared, exactly like a plain create with no
+// start_agent at all.
+func TestHTTPCreateTask_SessionPrepareFailureStillSettles(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := newIdempotentCreateTaskRepo()
+	h := newIdempotencyTestHandlers(t, repo)
+	orch := &failingPrepareOrchestrator{}
+	h.orchestrator = orch
+
+	rec := doCreateTask(h, `{"workspace_id":"ws-1","workflow_id":"wf-1","workflow_step_id":"step-1","title":"Task","external_id":"ext-prep-fail","start_agent":true,"agent_profile_id":"agent-1"}`)
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+
+	var resp map[string]interface{}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, true, resp["creation_complete"], "a graceful session-prepare failure must not prevent settlement")
+	assert.Nil(t, resp["session_id"], "no session_id should be reported when prepare failed")
+
+	repo.mu.Lock()
+	stored, ok := repo.tasks[resp["id"].(string)]
+	repo.mu.Unlock()
+	require.True(t, ok)
+	assert.NotNil(t, stored.ExternalIDSettledAt, "settlement must still run after a graceful (non-crash) prepare failure")
+
+	orch.mu.Lock()
+	defer orch.mu.Unlock()
+	assert.True(t, orch.launched, "prepare must have actually been attempted")
 }

@@ -974,12 +974,21 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		return
 	}
 
-	// Settlement (create-sequence step 7): after the required synchronous
-	// work above, before any asynchronous dispatch below. Settling here —
-	// ahead of session prepare/start rather than splitting that helper into
-	// prepare/dispatch halves and settling between them — satisfies the same
-	// ordering constraint more directly: no dispatch of any kind (sync
-	// prepare or async start) has happened yet at this point.
+	taskDTO := dto.FromTask(task)
+	response := createTaskResponse{TaskDTO: taskDTO, Deduplicated: false, CreationComplete: true}
+	// Use the backend-resolved workflow step ID (from the created task) instead of the request's
+	resolvedStepID := taskDTO.WorkflowStepID
+
+	// Synchronous session preparation (create-sequence step 6, "required
+	// synchronous post-create work") runs before settlement, not after — see
+	// prepareTaskSession's doc comment for why. dispatch is nil unless a
+	// start_agent create genuinely prepared a session; it is only ever acted
+	// on below once settlement has succeeded.
+	dispatch := h.prepareTaskSession(c, &response, taskDTO.ID, body, resolvedStepID, task.QueuedForStepID == "")
+
+	// Settlement (create-sequence step 7): after all required synchronous
+	// work above — including session prepare — and before any asynchronous
+	// dispatch below.
 	settled, survivor, settleErr := h.service.SettleExternalID(c.Request.Context(), task.ID, task.ExternalID)
 	if settleErr != nil {
 		if !isNotFound(settleErr) {
@@ -992,7 +1001,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		// CreatedIdentityLost: another actor released the identity while this
 		// create was running. The task survives holding no external_id; per
 		// the spec, no asynchronous work (session start, PR association) is
-		// dispatched for it.
+		// dispatched for it. Any session prepared above is not launched.
 		c.JSON(http.StatusOK, createTaskResponse{
 			TaskDTO:          dto.FromTask(survivor),
 			Deduplicated:     false,
@@ -1001,11 +1010,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		return
 	}
 
-	taskDTO := dto.FromTask(task)
-	response := createTaskResponse{TaskDTO: taskDTO, Deduplicated: false, CreationComplete: true}
-	// Use the backend-resolved workflow step ID (from the created task) instead of the request's
-	resolvedStepID := taskDTO.WorkflowStepID
-	h.handlePostCreateTaskSession(c, &response, taskDTO.ID, taskDTO.Description, body, resolvedStepID, task.QueuedForStepID == "")
+	h.dispatchTaskSession(taskDTO.ID, taskDTO.Description, body, dispatch)
 	h.recordTaskCreateLastUsed(c.Request.Context(), body, repos)
 
 	// Associate PR with task if any repository input contains a PR URL
@@ -1316,27 +1321,50 @@ func (h *TaskHandlers) associatePRFromRepoInputs(taskID, sessionID string, repos
 	}
 }
 
-// handlePostCreateTaskSession prepares or starts an agent session after a task is created,
-// depending on the PrepareSession and StartAgent flags in the request body.
-func (h *TaskHandlers) handlePostCreateTaskSession(
+// startAgentDispatch carries what dispatchTaskSession needs to launch the
+// deferred agent start (create-sequence step 8) after settlement has
+// succeeded. A nil *startAgentDispatch means there is nothing to dispatch —
+// prepare-only, start_agent not requested, or prepare itself failed.
+type startAgentDispatch struct {
+	sessionID string
+}
+
+// prepareTaskSession runs the create sequence's synchronous session-setup
+// step (part of step 6, "required synchronous post-create work") — it MUST
+// run, and be allowed to fail, before settlement (step 7). Only the
+// resulting agent launch is asynchronous dispatch (step 8), which must run
+// after settlement (docs/specs/tasks/external-id-idempotency/spec.md,
+// "Settlement call site (normative, per surface)": "the helper must expose
+// preparation and dispatch separately so settlement can sit between them").
+// A prior shape settled before calling this at all, which satisfied "no
+// dispatch precedes settlement" too narrowly — a crash between settling and
+// preparing would report creation_complete:true for a task whose session
+// never got created, and a retry would never attempt session-prep again
+// since Found outcomes skip all post-create work by design. Reordering fixes
+// that: any failure or crash during prepare now leaves the row unsettled, so
+// a retry correctly reports FoundUnsettled instead.
+//
+// A prepare failure (as opposed to a crash) is not itself fatal to task
+// creation — matching the existing behavior for a request with no
+// start_agent/prepare_session at all — so it is logged and the caller
+// proceeds to settle normally; only a genuine crash before this call returns
+// leaves the row unsettled.
+func (h *TaskHandlers) prepareTaskSession(
 	c *gin.Context,
 	response *createTaskResponse,
-	taskID, description string,
+	taskID string,
 	body httpCreateTaskRequest,
 	resolvedStepID string,
 	canLaunch bool,
-) {
-	if !canLaunch {
-		return
-	}
-	if h.orchestrator == nil || body.AgentProfileID == "" {
-		return
+) *startAgentDispatch {
+	if !canLaunch || h.orchestrator == nil || body.AgentProfileID == "" {
+		return nil
 	}
 	if body.PrepareSession && !body.StartAgent {
 		// Prepare-only: no follow-up start is coming, so DeferredStart is
 		// intentionally omitted — a passthrough profile should be eagerly
 		// upgraded to a full launch here so the terminal has a PTY to attach to.
-		// (Contrast startAgentForNewTask below, which sets DeferredStart=true.)
+		// (Contrast the start_agent branch below, which sets DeferredStart=true.)
 		resp, err := h.orchestrator.LaunchSession(c.Request.Context(), &orchestrator.LaunchSessionRequest{
 			TaskID:            taskID,
 			Intent:            orchestrator.IntentPrepare,
@@ -1351,24 +1379,25 @@ func (h *TaskHandlers) handlePostCreateTaskSession(
 		} else {
 			response.TaskSessionID = resp.SessionID
 		}
-	} else if body.StartAgent {
-		h.startAgentForNewTask(c.Request.Context(), response, taskID, description, body, resolvedStepID)
+		return nil
 	}
+	if !body.StartAgent {
+		return nil
+	}
+	return h.prepareStartAgentSession(c.Request.Context(), response, taskID, body, resolvedStepID)
 }
 
-// startAgentForNewTask prepares a session and launches the agent asynchronously for a
-// newly created task when start_agent is requested. It populates response.TaskSessionID
-// on success.
-func (h *TaskHandlers) startAgentForNewTask(
+// prepareStartAgentSession runs the synchronous half of a start_agent create:
+// creates the session entry so the caller can return a session ID
+// immediately, without launching the workspace (the deferred async start
+// below handles that, avoiding a 30-60s block on remote executors).
+func (h *TaskHandlers) prepareStartAgentSession(
 	ctx context.Context,
 	response *createTaskResponse,
-	taskID, description string,
+	taskID string,
 	body httpCreateTaskRequest,
 	resolvedStepID string,
-) {
-	// Create session entry synchronously so we can return the session ID immediately.
-	// Skip workspace launch — the start intent will handle it in the background goroutine.
-	// This prevents blocking for 30-60s on remote executors (sprites, remote_docker).
+) *startAgentDispatch {
 	prepResp, err := h.orchestrator.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
 		TaskID:            taskID,
 		Intent:            orchestrator.IntentPrepare,
@@ -1376,14 +1405,15 @@ func (h *TaskHandlers) startAgentForNewTask(
 		ExecutorID:        body.ExecutorID,
 		ExecutorProfileID: body.ExecutorProfileID,
 		WorkflowStepID:    resolvedStepID,
-		// The async IntentStartCreated below carries the prompt. Mark this as a
-		// deferred start so a passthrough profile is not eagerly launched here
-		// with an empty prompt (which would pre-empt that prompt-bearing start).
+		// The async IntentStartCreated dispatch below carries the prompt. Mark
+		// this as a deferred start so a passthrough profile is not eagerly
+		// launched here with an empty prompt (which would pre-empt that
+		// prompt-bearing start).
 		DeferredStart: true,
 	})
 	if err != nil {
 		h.logger.Error("failed to prepare session for task", zap.Error(err), zap.String("task_id", taskID))
-		return
+		return nil
 	}
 	sessionID := prepResp.SessionID
 	response.TaskSessionID = sessionID
@@ -1395,7 +1425,17 @@ func (h *TaskHandlers) startAgentForNewTask(
 	} else {
 		response.State = updatedTask.State
 	}
+	return &startAgentDispatch{sessionID: sessionID}
+}
 
+// dispatchTaskSession launches the agent asynchronously (create-sequence
+// step 8). Callers MUST only invoke this after settlement has succeeded —
+// dispatch is nil whenever there was nothing prepared to dispatch.
+func (h *TaskHandlers) dispatchTaskSession(taskID, description string, body httpCreateTaskRequest, dispatch *startAgentDispatch) {
+	if dispatch == nil {
+		return
+	}
+	sessionID := dispatch.sessionID
 	// Launch agent asynchronously so the HTTP request can return immediately.
 	// The frontend will receive WebSocket updates when the agent actually starts.
 	go func() {
