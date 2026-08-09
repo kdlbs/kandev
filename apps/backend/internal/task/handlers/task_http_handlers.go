@@ -873,7 +873,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": policyErr.Error()})
 		return
 	}
-	metadata := mergeWorkspaceMetadata(body.Metadata, wsPolicy.MetadataBlock())
+	metadata := wsPolicy.MergeMetadataBlock(body.Metadata)
 	var deferredLaunch map[string]interface{}
 	if body.StartAgent || body.PrepareSession {
 		intent := "prepare"
