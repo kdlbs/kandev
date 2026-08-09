@@ -65,14 +65,25 @@ test.describe("Configuration Chat", () => {
 
       const floatingSave = testPage.getByTestId("settings-floating-save");
       const saveButton = floatingSave.getByRole("button", { name: "Save changes" });
+      const surface = floatingSave.getByTestId("settings-floating-save-surface");
       const configChatButton = testPage.getByRole("button", { name: "Configuration Chat" });
       await expect(saveButton).toHaveClass(/bg-success/);
+      await expect(floatingSave).not.toHaveClass(/bg-success/);
       await expectElementsNotToIntersect(saveButton, configChatButton);
 
       await configChatButton.click();
       const configChatPopover = testPage.getByTestId("config-chat-popover");
       await expect(configChatPopover).toBeVisible();
       await expectElementAbove(saveButton, configChatPopover);
+      const [surfaceBox, popoverBox] = await Promise.all([
+        surface.boundingBox(),
+        configChatPopover.boundingBox(),
+      ]);
+      expect(surfaceBox).not.toBeNull();
+      expect(popoverBox).not.toBeNull();
+      expect(
+        Math.abs(surfaceBox!.x + surfaceBox!.width / 2 - (popoverBox!.x + popoverBox!.width / 2)),
+      ).toBeLessThanOrEqual(2);
     } finally {
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
         changes_panel_layout: initialLayout,

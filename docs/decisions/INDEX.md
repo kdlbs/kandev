@@ -53,7 +53,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-07-15-office-agent-execution-profile-routing | [Separate Office identity from routed execution profiles](2026-07-15-office-agent-execution-profile-routing.md) | proposed | backend, frontend | 2026-07-15 |
 | 0044 | [ACP agent compatibility dialects](0044-acp-agent-compatibility-dialects.md)                                                        | accepted   | backend, protocol           | 2026-07-16 |
 | 0045 | [Install-wide storage maintenance uses typed ownership providers and quarantine](0045-install-wide-storage-maintenance.md)          | accepted (amended 2026-07-22) | backend, frontend, infra | 2026-07-14 |
-| 0046 | [Settings route save coordinator](0046-settings-route-save-coordinator.md)                                                          | accepted   | frontend                    | 2026-07-14 |
+| 0046 | [Settings route save coordinator](0046-settings-route-save-coordinator.md)                                                          | accepted (amended 2026-08-09) | frontend                    | 2026-07-14 |
 | 0047 | [Plugins read conversation content via a capability-gated Host RPC](0047-plugin-host-conversation-reads.md)                          | accepted   | backend, protocol           | 2026-07-21 |
 | 0048 | [Plugins invoke a settings-selectable utility agent](0048-plugin-host-utility-agent-invoke.md)                                       | accepted   | backend, frontend, protocol | 2026-07-21 |
 | 0049 | [Fine-grained foreground-idle busy signal](0049-fine-grained-foreground-idle-busy-signal.md)                                      | superseded by 2026-07-28-coarse-running-busy-signal | backend, frontend, protocol | 2026-07-11 |

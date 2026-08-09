@@ -28,6 +28,7 @@ type SettingsFloatingSaveProps = {
   navigationIntent: NavigationIntent | null;
   isDiscarding: boolean;
   onSave: () => Promise<boolean>;
+  onReset: () => Promise<void> | void;
   onDiscardAndLeave: () => Promise<void> | void;
   onContinueEditing: () => void;
 };
@@ -39,6 +40,7 @@ export function SettingsFloatingSave({
   navigationIntent,
   isDiscarding,
   onSave,
+  onReset,
   onDiscardAndLeave,
   onContinueEditing,
 }: SettingsFloatingSaveProps) {
@@ -54,38 +56,59 @@ export function SettingsFloatingSave({
   const saveAction = (
     <div
       className={cn(
-        "pointer-events-none z-40 max-w-[calc(100vw_-_2rem_-_env(safe-area-inset-left)_-_env(safe-area-inset-right))]",
+        "pointer-events-none z-40 flex w-full justify-center",
         !isHostedByConfigChat &&
-          "fixed right-[calc(1rem_+_env(safe-area-inset-right))] bottom-[calc(5.25rem_+_env(safe-area-inset-bottom)_+_var(--app-status-bar-height))]",
+          "fixed inset-x-0 bottom-[calc(5.25rem_+_env(safe-area-inset-bottom)_+_var(--app-status-bar-height))] flex justify-center px-[calc(1rem_+_env(safe-area-inset-left))]",
       )}
       data-testid="settings-floating-save"
       data-dirty-contributors={dirtyContributorIds}
+      data-status={status}
     >
-      <div className="pointer-events-auto flex min-h-11 max-w-full flex-col items-stretch gap-2 rounded-md border bg-background p-2 shadow-lg sm:flex-row sm:items-center">
-        {status === "error" && (
-          <span className="flex items-center gap-1 text-xs text-destructive" role="status">
-            <Trans i18nKey="settings:couldnTSave">
-              <IconAlertCircle className="size-4" />
-              {t("settings:couldnTSave2")}
-            </Trans>
-          </span>
-        )}
-        {invalidReason && (
-          <span className="max-w-64 text-xs text-destructive" role="status">
-            {invalidReason}
-          </span>
-        )}
-        <Button
-          type="button"
-          size="lg"
-          className="min-h-12 cursor-pointer bg-success text-success-foreground hover:bg-success/85 focus-visible:border-success focus-visible:ring-success/35"
-          disabled={isBusy || isSaved || isInvalid}
-          aria-label={accessibleLabel}
-          onClick={() => void onSave()}
-        >
-          <SaveButtonIcon status={status} />
-          {t(labelKey)}
-        </Button>
+      <div
+        className="pointer-events-auto flex w-full max-w-full flex-col items-stretch gap-2 rounded-2xl border border-border/80 bg-card/95 p-2.5 shadow-xl backdrop-blur-sm sm:flex-row sm:items-center sm:gap-3 sm:p-3 md:w-fit"
+        data-testid="settings-floating-save-surface"
+      >
+        <div className="min-w-0 flex-1 space-y-0.5 px-1 sm:max-w-80">
+          {status === "error" ? (
+            <span className="flex items-center gap-1 text-xs text-destructive" role="status">
+              <Trans i18nKey="settings:couldnTSave">
+                <IconAlertCircle className="size-4" />
+                {t("settings:couldnTSave2")}
+              </Trans>
+            </span>
+          ) : (
+            <span className="text-sm font-medium text-foreground">
+              {isSaved ? t("settings:saved") : t("common:unsavedChanges")}
+            </span>
+          )}
+          {invalidReason && (
+            <span className="block max-w-64 text-xs text-destructive" role="status">
+              {invalidReason}
+            </span>
+          )}
+        </div>
+        <div className="flex w-full shrink-0 gap-2 sm:w-auto">
+          <Button
+            type="button"
+            variant="outline"
+            className="min-h-12 flex-1 cursor-pointer sm:flex-none"
+            disabled={isBusy || isSaved}
+            onClick={() => void onReset()}
+          >
+            {t("settings:reset")}
+          </Button>
+          <Button
+            type="button"
+            size="default"
+            className="min-h-12 flex-1 cursor-pointer bg-success text-success-foreground hover:bg-success/85 focus-visible:border-success focus-visible:ring-success/35 sm:flex-none"
+            disabled={isBusy || isSaved || isInvalid}
+            aria-label={accessibleLabel}
+            onClick={() => void onSave()}
+          >
+            <SaveButtonIcon status={status} />
+            {t(labelKey)}
+          </Button>
+        </div>
       </div>
     </div>
   );

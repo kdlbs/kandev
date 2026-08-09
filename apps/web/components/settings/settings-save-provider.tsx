@@ -90,26 +90,36 @@ export function SettingsSaveProvider({ children }: { children: ReactNode }) {
     return true;
   }, [saveAll]);
 
-  const discardAndLeave = useCallback(async () => {
-    if (discardingRef.current) return;
+  const discardDirtyContributors = useCallback(async (): Promise<boolean> => {
+    if (discardingRef.current) return false;
     discardingRef.current = true;
     setIsDiscarding(true);
     try {
       for (const { contributor } of getDirtyContributors(contributors)) {
         await contributor.discard();
       }
+      refreshRegistry();
+      return true;
     } catch {
       markError();
-      return;
+      return false;
     } finally {
       discardingRef.current = false;
       setIsDiscarding(false);
     }
+  }, [contributors, markError, refreshRegistry]);
+
+  const resetDrafts = useCallback(async () => {
+    await discardDirtyContributors();
+  }, [discardDirtyContributors]);
+
+  const discardAndLeave = useCallback(async () => {
+    if (!(await discardDirtyContributors())) return;
     const intent = pendingNavigationRef.current;
     pendingNavigationRef.current = null;
     setPendingNavigation(null);
     intent?.proceed();
-  }, [contributors, markError]);
+  }, [discardDirtyContributors]);
 
   const continueEditing = useCallback(() => {
     const intent = pendingNavigationRef.current;
@@ -148,6 +158,7 @@ export function SettingsSaveProvider({ children }: { children: ReactNode }) {
           navigationIntent={pendingNavigation}
           isDiscarding={isDiscarding}
           onSave={handleSave}
+          onReset={resetDrafts}
           onDiscardAndLeave={discardAndLeave}
           onContinueEditing={continueEditing}
         />

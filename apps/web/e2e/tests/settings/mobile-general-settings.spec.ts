@@ -43,21 +43,20 @@ test.describe("Mobile general settings", () => {
       await toggle.click();
       await expect(toggle).toHaveAttribute("data-settings-dirty", "true");
       const controlRow = card.getByTestId("sleep-inhibition-control-row");
-      const controlRowBox = await controlRow.boundingBox();
-      expect(controlRowBox).not.toBeNull();
-      expect(controlRowBox!.height).toBeGreaterThanOrEqual(44);
+      const initialControlRowBox = await controlRow.boundingBox();
+      expect(initialControlRowBox).not.toBeNull();
+      expect(initialControlRowBox!.height).toBeGreaterThanOrEqual(44);
 
       const floatingSave = testPage.getByTestId("settings-floating-save");
       await expect(floatingSave).toBeVisible();
       await card.scrollIntoViewIfNeeded();
-      const cardContent = card.locator('[data-slot="card-content"]');
-      const [cardContentBox, saveBox] = await Promise.all([
-        cardContent.boundingBox(),
+      const [controlRowBox, saveBox] = await Promise.all([
+        controlRow.boundingBox(),
         floatingSave.boundingBox(),
       ]);
-      expect(cardContentBox).not.toBeNull();
+      expect(controlRowBox).not.toBeNull();
       expect(saveBox).not.toBeNull();
-      expect(cardContentBox!.y + cardContentBox!.height).toBeLessThanOrEqual(saveBox!.y + 2);
+      expect(controlRowBox!.y + controlRowBox!.height).toBeLessThanOrEqual(saveBox!.y + 2);
       expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBe(
         await testPage.evaluate(() => document.documentElement.clientWidth),
       );
@@ -138,17 +137,28 @@ test.describe("Mobile general settings", () => {
 
       const floating = testPage.getByTestId("settings-floating-save");
       const saveButton = floating.getByRole("button", { name: "Save changes" });
+      const resetButton = floating.getByRole("button", { name: "Reset" });
+      const surface = floating.getByTestId("settings-floating-save-surface");
       await expect(saveButton).toBeVisible();
+      await expect(resetButton).toBeVisible();
       await expect(layout).toHaveAttribute("data-settings-dirty", "true");
       await expect(testPage.getByTestId("changes-panel-layout-card")).toHaveAttribute(
         "data-settings-dirty",
         "true",
       );
       const saveBox = await saveButton.boundingBox();
+      const surfaceBox = await surface.boundingBox();
       expect(saveBox).not.toBeNull();
+      expect(surfaceBox).not.toBeNull();
       expect(saveBox!.height).toBeGreaterThanOrEqual(44);
       expect(saveBox!.x + saveBox!.width).toBeLessThanOrEqual(390 - 16 + 1);
       expect(saveBox!.y + saveBox!.height).toBeLessThanOrEqual(844 - 16 + 1);
+      expect(surfaceBox!.x).toBeGreaterThanOrEqual(0);
+      expect(surfaceBox!.x + surfaceBox!.width).toBeLessThanOrEqual(390);
+      expect(Math.abs(surfaceBox!.x + surfaceBox!.width / 2 - 195)).toBeLessThanOrEqual(2);
+      const resetBox = await resetButton.boundingBox();
+      expect(resetBox).not.toBeNull();
+      expect(resetBox!.height).toBeGreaterThanOrEqual(44);
 
       const lastControl = testPage.locator("#metrics-disk-path");
       await lastControl.scrollIntoViewIfNeeded();
@@ -159,7 +169,7 @@ test.describe("Mobile general settings", () => {
         await testPage.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
       ).toBe(false);
 
-      await saveButton.click();
+      await saveButton.tap();
       await expect(floating).not.toBeVisible({ timeout: 15_000 });
       await expect(layout).toHaveAttribute("data-settings-dirty", "false");
       await expect(testPage.getByTestId("changes-panel-layout-card")).toHaveAttribute(

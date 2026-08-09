@@ -125,6 +125,34 @@ test.describe("Settings manual save", () => {
         initial.settings.changes_panel_layout,
       );
 
+      const surface = floatingSave.getByTestId("settings-floating-save-surface");
+      const viewport = testPage.viewportSize();
+      const surfaceBox = await surface.boundingBox();
+      expect(viewport).not.toBeNull();
+      expect(surfaceBox).not.toBeNull();
+      expect(
+        Math.abs(surfaceBox!.x + surfaceBox!.width / 2 - viewport!.width / 2),
+      ).toBeLessThanOrEqual(2);
+      await expect(floatingSave).not.toHaveClass(/bg-success/);
+      await expect(floatingSave.getByRole("button", { name: "Save changes" })).toHaveClass(
+        /bg-success/,
+      );
+
+      await floatingSave.getByRole("button", { name: "Reset" }).click();
+      await expect(floatingSave).not.toBeVisible();
+      await expect(testPage.getByTestId("changes-panel-layout-card")).toHaveAttribute(
+        "data-settings-dirty",
+        "false",
+      );
+      expect((await apiClient.getUserSettings()).settings.changes_panel_layout).toBe(
+        initial.settings.changes_panel_layout,
+      );
+
+      await layout.click();
+      await testPage
+        .getByRole("option", { name: nextLayout === "tree" ? "Tree" : "Flat list" })
+        .click();
+
       await testPage.getByRole("link", { name: "Terminal", exact: true }).first().click();
       const navigationDialog = testPage.getByRole("alertdialog", {
         name: "Save changes before leaving?",
