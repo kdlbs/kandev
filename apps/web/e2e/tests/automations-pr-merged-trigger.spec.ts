@@ -489,14 +489,16 @@ test.describe("automations — Pull request merged trigger", () => {
       enabled: true,
     });
 
-    const { run_task_id } = await apiClient.firePRMerged({
+    // Start the fire concurrently with the delete so the target is gone
+    // before the agent's archive call fires.
+    const firePromise = apiClient.firePRMerged({
       taskId: target.id,
       automationId: automation.id,
       owner: "acme",
       repo: "api",
     });
-    // Delete the target while the agent is in the 500 ms delay
     await apiClient.deleteTask(target.id);
+    const { run_task_id } = await firePromise;
 
     // Run must still complete cleanly — MCP error on a deleted task must not crash the turn
     await testPage.goto(`/t/${run_task_id}`);

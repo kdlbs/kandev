@@ -177,10 +177,15 @@ function globWalkSegments(segs, cwd, prefix, fsImpl) {
   const [seg, ...rest] = segs;
 
   if (seg === "**") {
-    // Match zero dirs: apply remaining segments from current prefix.
-    const here = rest.length ? globWalkSegments(rest, cwd, prefix, fsImpl) : [];
-    // Match one or more dirs: descend into each immediate subdirectory and repeat.
-    const subdirs = globListDirs(`${cwd}/${prefix || "."}`, fsImpl);
+    const dir = `${cwd}/${prefix || "."}`;
+    // When ** is non-terminal: match remaining segments at this level.
+    // When ** is terminal: yield all entries at this level (dirs are filtered
+    // to files-only later by filesForEntry's isFile check).
+    const here = rest.length
+      ? globWalkSegments(rest, cwd, prefix, fsImpl)
+      : globListEntries(dir, fsImpl).map((f) => (prefix ? `${prefix}/${f}` : f));
+    // Descend into each immediate subdirectory and repeat for all levels.
+    const subdirs = globListDirs(dir, fsImpl);
     const deeper = subdirs.flatMap((d) => {
       const newPrefix = prefix ? `${prefix}/${d}` : d;
       return globWalkSegments(segs, cwd, newPrefix, fsImpl);

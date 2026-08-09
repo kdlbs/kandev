@@ -23,8 +23,8 @@ export function GitHubPRMergedConfig({ config, workspaceId, onUpdate }: GitHubPR
     setBranches(configBranches);
   }, [configBranches]);
 
-  const handleBranchesBlur = () => {
-    const parsed = branches
+  const commitBranches = (raw: string) => {
+    const parsed = raw
       .split(",")
       .map((b) => b.trim())
       .filter(Boolean);
@@ -52,8 +52,10 @@ export function GitHubPRMergedConfig({ config, workspaceId, onUpdate }: GitHubPR
         {/* Example branch names — data the user types verbatim, not copy. */}
         <Input
           value={branches}
-          onChange={(e) => setBranches(e.target.value)}
-          onBlur={handleBranchesBlur}
+          onChange={(e) => {
+            setBranches(e.target.value);
+            commitBranches(e.target.value);
+          }}
           // eslint-disable-next-line i18next/no-literal-string -- example branch names, see above
           placeholder="main, release/*"
         />
