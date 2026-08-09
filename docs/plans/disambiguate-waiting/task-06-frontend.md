@@ -2,7 +2,7 @@
 task: 06
 title: "Frontend — icon promotion, resolvers, six producers, discard rule"
 wave: 1
-status: todo
+status: done
 depends_on: [03]
 spec_acs: AC-23, AC-34, AC-52, AC-58, AC-59, AC-73a, AC-83, AC-84
 ---

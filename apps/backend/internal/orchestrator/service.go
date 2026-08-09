@@ -613,6 +613,15 @@ type Service struct {
 	// Entries are created on first use and deleted on execution retirement.
 	parkedStates map[string]*sessionParkedState
 
+	// parkedEpoch is the backend process start time in Unix nanoseconds.
+	// Used by clients as restart-survivable discard signal (AC-77).
+	parkedEpoch int64
+
+	// taskParkedStatesMu guards taskParkedStates.
+	taskParkedStatesMu sync.Mutex
+	// taskParkedStates holds the task-level OR of all session parked states.
+	taskParkedStates map[string]*taskParkedState
+
 	// foregroundActivity tracks, per session, whether the open turn is actively
 	// generating in the foreground or only waiting on a spawned background task
 	// (subagent / run-in-background shell). Keyed sessionID -> *turnActivity;
@@ -836,6 +845,7 @@ func NewService(
 		gitSnapshotCache:             newGitSnapshotCache(),
 		sendNowCtx:                   sendNowCtx,
 		sendNowCancel:                sendNowCancel,
+		parkedEpoch:                  time.Now().UnixNano(),
 	}
 	exec.SetOnContextWindowReset(s.clearContextWindowForReset)
 

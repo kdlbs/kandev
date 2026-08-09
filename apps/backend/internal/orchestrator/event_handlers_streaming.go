@@ -162,6 +162,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 
 	case streams.EventTypeTurnStarted:
 		s.getOrCreateParkedState(sessionID).turnMarker++
+		s.resetParkedSampler(sessionID)
 	}
 }
 
@@ -871,6 +872,10 @@ func (s *Service) updateTaskSessionStateWithHook(
 			zap.String("old_state", string(oldState)),
 			zap.String("new_state", string(nextState)))
 		s.publishTaskSessionStateChanged(ctx, taskID, sessionID, oldState, nextState, errorMessage, authoritativeUpdatedAt, session)
+	}
+
+	if nextState == models.TaskSessionStateWaitingForInput {
+		s.onSessionParkedHook(ctx, taskID, sessionID)
 	}
 
 	s.republishTaskActivityOnSettle(ctx, taskID, oldState, nextState)

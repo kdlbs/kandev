@@ -2,7 +2,7 @@
 task: 05
 title: "Recogniser + attestation (observed_detached, turn_marker)"
 wave: 1
-status: todo
+status: done
 depends_on: [01]
 spec_acs: AC-69, AC-69a, AC-37 (second GIVEN), AC-41b (turn_marker)
 ---

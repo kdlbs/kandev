@@ -2,7 +2,7 @@
 task: 03
 title: "Parked DTO/wire/TS fields, hardcoded false/0"
 wave: 0
-status: todo
+status: done
 spec_acs: AC-36, AC-37, AC-27, AC-77, AC-83, AC-84
 ---
 

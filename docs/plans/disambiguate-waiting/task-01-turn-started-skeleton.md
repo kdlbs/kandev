@@ -2,7 +2,7 @@
 task: 01
 title: "turn_started stream event skeleton"
 wave: 0
-status: todo
+status: done
 spec_acs: AC-41a, AC-41b, AC-79a
 ---
 

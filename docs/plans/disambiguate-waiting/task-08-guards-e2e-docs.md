@@ -2,7 +2,7 @@
 task: 08
 title: "Guards, E2E, contract amendment docs"
 wave: 3
-status: todo
+status: done
 depends_on: [03, 06, 07]
 spec_acs: AC-35, AC-76, AC-77, AC-78, AC-79a, AC-82
 ---

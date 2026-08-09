@@ -132,6 +132,7 @@ func provideOrchestrator(
 	// them the one task kind nothing else ever cleans up; the orchestrator needs
 	// the manager to enforce the per-automation retention window.
 	orchestratorSvc.SetWorktreeManager(lifecycleMgr.WorktreeManager())
+	orchestratorSvc.SetBackgroundProbe(lifecycleMgr)
 
 	msgCreator := &messageCreatorAdapter{svc: taskSvc, logger: log}
 	orchestratorSvc.SetMessageCreator(msgCreator)

@@ -12,6 +12,7 @@ import {
 } from "@/lib/types/http";
 import type { QueueStatusChangedPayload } from "@/lib/types/backend";
 import { syncKanbanPrimarySessionState } from "@/lib/ws/handlers/agent-session-kanban-sync";
+import { applyParkedChanged } from "@/lib/ws/handlers/agent-session-projection";
 import { parseContextWindowEntry } from "@/lib/state/slices/session-runtime/context-window";
 
 const debug = createDebugLogger("session:state");
@@ -752,6 +753,7 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       handleForegroundActivityMessage(store, message.payload),
     "session.cancellation_changed": (message) =>
       handleCancellationPendingMessage(store, message.payload),
+    "session.parked_changed": (message) => applyParkedChanged(store, message.payload),
     "session.agentctl_starting": (message) => {
       const payload = message.payload;
       if (!payload?.session_id) return;

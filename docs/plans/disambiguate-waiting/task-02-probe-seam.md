@@ -2,7 +2,7 @@
 task: 02
 title: "Probe seam — BackgroundProbe port, agentctl stub, client, manager"
 wave: 0
-status: todo
+status: done
 spec_acs: AC-45, AC-62, AC-68, AC-73, AC-81
 ---
 

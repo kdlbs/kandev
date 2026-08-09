@@ -2,7 +2,7 @@
 task: 07
 title: "Backend projection — parkedState, sampling loop, publish rules"
 wave: 2
-status: todo
+status: done
 depends_on: [02, 04, 05]
 spec_acs: AC-21, AC-22, AC-24, AC-25, AC-26, AC-27, AC-28, AC-29, AC-30, AC-36, AC-37,
           AC-38, AC-39, AC-40, AC-40b, AC-41, AC-62, AC-63, AC-64, AC-68, AC-73, AC-74,
