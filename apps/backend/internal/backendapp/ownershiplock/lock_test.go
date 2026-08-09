@@ -10,7 +10,16 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"go.uber.org/goleak"
 )
+
+func TestMain(m *testing.M) {
+	if os.Getenv("KANDEV_OWNERSHIP_LOCK_HELPER") == "1" {
+		os.Exit(m.Run())
+	}
+	goleak.VerifyTestMain(m)
+}
 
 func TestOwnershipLockRejectsSecondProcessAndReleasesAfterNormalExit(t *testing.T) {
 	home := t.TempDir()
@@ -121,7 +130,9 @@ func TestOwnershipLockHelper(t *testing.T) {
 	defer func() { _ = owner.Close() }()
 	_, _ = fmt.Fprintln(os.Stdout, "ready")
 	if os.Getenv("KANDEV_OWNERSHIP_MODE") == "hold" {
-		select {}
+		timer := time.NewTimer(5 * time.Minute)
+		defer timer.Stop()
+		<-timer.C
 	}
 }
 
@@ -165,7 +176,9 @@ func startLockHelper(t *testing.T, home, mode string) *lockHelper {
 func readHelperLine(t *testing.T, helper *lockHelper) string {
 	t.Helper()
 	lines := make(chan string, 1)
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		scanner := bufio.NewScanner(helper.stdout)
 		if scanner.Scan() {
 			lines <- scanner.Text()
@@ -173,10 +186,15 @@ func readHelperLine(t *testing.T, helper *lockHelper) string {
 		}
 		lines <- ""
 	}()
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
 	select {
 	case line := <-lines:
+		<-done
 		return line
-	case <-time.After(5 * time.Second):
+	case <-timer.C:
+		_ = helper.stdout.Close()
+		<-done
 		t.Fatal("timed out waiting for lock helper")
 		return ""
 	}
@@ -198,7 +216,7 @@ func TestOwnershipLockConflictErrorIncludesTarget(t *testing.T) {
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("second Acquire error = %v, want ErrConflict", err)
 	}
-	if !strings.Contains(err.Error(), home) {
-		t.Fatalf("conflict error = %q, want home path", err)
+	if !strings.Contains(err.Error(), targets[0].ResourcePath) {
+		t.Fatalf("conflict error = %q, want canonical home path %q", err, targets[0].ResourcePath)
 	}
 }

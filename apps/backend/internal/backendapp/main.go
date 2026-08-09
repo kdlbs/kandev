@@ -212,12 +212,7 @@ func Run(args []string, build BuildInfo) int {
 	// Acquire runtime-state ownership before any shared-state initialization.
 	// The lock remains held through logger and service cleanup, so a second
 	// backend cannot reconcile or migrate the live home before its bind fails.
-	targets, err := ownershiplock.Targets(cfg.ResolvedHomeDir(), cfg.Database.Driver, cfg.Database.Path)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to resolve backend runtime-state ownership: %v\n", err)
-		return 1
-	}
-	owner, err := ownershiplock.Acquire(targets)
+	owner, err := acquireRuntimeStateOwnership(cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr,
 			"Failed to acquire backend runtime-state ownership: %v; use a separate KANDEV_HOME_DIR for an intentional second instance\n",
@@ -272,6 +267,14 @@ func Run(args []string, build BuildInfo) int {
 		return 1
 	}
 	return 0
+}
+
+func acquireRuntimeStateOwnership(cfg *config.Config) (*ownershiplock.Owner, error) {
+	targets, err := ownershiplock.Targets(cfg.ResolvedHomeDir(), cfg.Database.Driver, cfg.Database.Path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve backend runtime-state ownership: %w", err)
+	}
+	return ownershiplock.Acquire(targets)
 }
 
 func setBuildInfo(build BuildInfo) {

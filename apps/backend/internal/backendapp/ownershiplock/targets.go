@@ -42,7 +42,12 @@ func Targets(homeDir, databaseDriver, databasePath string) ([]Target, error) {
 		ResourcePath: home,
 		LockPath:     filepath.Join(home, ".kandev-backend.lock"),
 	}}
-	if !strings.EqualFold(databaseDriver, "sqlite") || strings.TrimSpace(databasePath) == "" {
+	if !strings.EqualFold(databaseDriver, "sqlite") {
+		return targets, nil
+	}
+	if strings.TrimSpace(databasePath) == "" {
+		// Empty path uses the in-home SQLite database, already covered by the
+		// home lock.
 		return targets, nil
 	}
 
@@ -77,17 +82,26 @@ func canonicalPath(path string) (string, error) {
 		return "", err
 	}
 
-	// The resource itself may not exist yet, but an existing symlinked parent
-	// still needs to resolve to the same lock identity as its real path.
-	parent := filepath.Dir(abs)
-	resolvedParent, err := filepath.EvalSymlinks(parent)
-	if err == nil {
-		return filepath.Join(filepath.Clean(resolvedParent), filepath.Base(abs)), nil
+	// The resource itself may not exist yet, but every existing ancestor still
+	// needs to resolve to the same lock identity as its real path. This also
+	// normalizes Windows short-name aliases when a database directory is new.
+	for parent := filepath.Dir(abs); ; parent = filepath.Dir(parent) {
+		resolvedParent, err := filepath.EvalSymlinks(parent)
+		if err == nil {
+			relative, relErr := filepath.Rel(parent, abs)
+			if relErr != nil {
+				return "", relErr
+			}
+			return filepath.Clean(filepath.Join(resolvedParent, relative)), nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+		next := filepath.Dir(parent)
+		if next == parent {
+			return abs, nil
+		}
 	}
-	if !errors.Is(err, os.ErrNotExist) {
-		return "", err
-	}
-	return abs, nil
 }
 
 func pathWithin(base, candidate string) bool {

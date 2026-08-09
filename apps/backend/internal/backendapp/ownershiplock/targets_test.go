@@ -1,12 +1,15 @@
 package ownershiplock
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
 
 func TestTargetsDefaultSQLiteUsesHomeOwnershipOnly(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "home", ".", "nested", "..")
+	root := evalTempDir(t)
+	separator := string(filepath.Separator)
+	home := root + separator + "home" + separator + "." + separator + "nested" + separator + ".."
 
 	targets, err := Targets(home, "sqlite", "")
 	if err != nil {
@@ -18,15 +21,20 @@ func TestTargetsDefaultSQLiteUsesHomeOwnershipOnly(t *testing.T) {
 	if targets[0].Kind != TargetHome {
 		t.Fatalf("target kind = %q, want %q", targets[0].Kind, TargetHome)
 	}
-	if targets[0].ResourcePath != filepath.Clean(filepath.Join(filepath.Dir(home), "home")) {
+	if targets[0].ResourcePath != filepath.Join(root, "home") {
 		t.Fatalf("resource path = %q, want canonical home", targets[0].ResourcePath)
 	}
 }
 
 func TestTargetsExternalSQLiteAddsCanonicalDatabaseTarget(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "home")
-	databaseDir := filepath.Join(t.TempDir(), "database")
-	databasePath := filepath.Join(databaseDir, "..", "database", "kandev.db")
+	root := evalTempDir(t)
+	home := filepath.Join(root, "home")
+	databaseDir := filepath.Join(root, "database")
+	if err := os.MkdirAll(databaseDir, 0o700); err != nil {
+		t.Fatalf("create database dir: %v", err)
+	}
+	separator := string(filepath.Separator)
+	databasePath := databaseDir + separator + ".." + separator + "database" + separator + "kandev.db"
 
 	targets, err := Targets(home, "sqlite", databasePath)
 	if err != nil {
@@ -48,8 +56,9 @@ func TestTargetsExternalSQLiteAddsCanonicalDatabaseTarget(t *testing.T) {
 }
 
 func TestTargetsDoesNotDuplicateDatabaseInsideHome(t *testing.T) {
-	home := t.TempDir()
-	databasePath := filepath.Join(home, "data", "..", "data", "kandev.db")
+	home := evalTempDir(t)
+	separator := string(filepath.Separator)
+	databasePath := home + separator + "data" + separator + ".." + separator + "data" + separator + "kandev.db"
 
 	targets, err := Targets(filepath.Join(home, "."), "sqlite", databasePath)
 	if err != nil {
@@ -68,4 +77,13 @@ func TestTargetsPostgresLocksOnlyHome(t *testing.T) {
 	if len(targets) != 1 || targets[0].Kind != TargetHome {
 		t.Fatalf("targets = %#v, want only home target", targets)
 	}
+}
+
+func evalTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve temp dir: %v", err)
+	}
+	return dir
 }

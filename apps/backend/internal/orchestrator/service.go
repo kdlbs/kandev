@@ -1819,7 +1819,7 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 		return
 	}
 
-	s.reconcileActiveSessionOnStartup(ctx, running, sessionID, previousState)
+	s.reconcileActiveSessionOnStartup(ctx, running, sessionID, previousState, session)
 }
 
 func (s *Service) reconcileActiveSessionOnStartup(
@@ -1827,11 +1827,12 @@ func (s *Service) reconcileActiveSessionOnStartup(
 	running *models.ExecutorRunning,
 	sessionID string,
 	previousState models.TaskSessionState,
+	session *models.TaskSession,
 ) {
 	// Active states: STARTING, RUNNING, WAITING_FOR_INPUT
 	// Set session to WAITING_FOR_INPUT (idle, ready for lazy resume when user opens it)
 	if previousState != models.TaskSessionStateWaitingForInput {
-		updated, changed := s.updateTaskSessionStateWithHook(
+		s.updateTaskSessionStateWithHook(
 			ctx,
 			running.TaskID,
 			sessionID,
@@ -1839,12 +1840,8 @@ func (s *Service) reconcileActiveSessionOnStartup(
 			"",
 			false,
 			nil,
+			session,
 		)
-		if updated == nil && !changed {
-			s.logger.Warn("failed to set session to WAITING_FOR_INPUT on startup",
-				zap.String("session_id", sessionID),
-			)
-		}
 	}
 	s.abandonOpenTurnsOnStartup(ctx, sessionID, "active session reconciled to waiting")
 
