@@ -123,6 +123,17 @@ func (r *idempotentCreateTaskRepo) GetTask(_ context.Context, id string) (*model
 	return &copied, nil
 }
 
+func (r *idempotentCreateTaskRepo) UpdateTask(_ context.Context, task *models.Task) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.tasks[task.ID]; !ok {
+		return taskrepo.ErrTaskNotFound
+	}
+	stored := *task
+	r.tasks[task.ID] = &stored
+	return nil
+}
+
 func (r *idempotentCreateTaskRepo) GetTaskByExternalID(_ context.Context, workspaceID, externalID string) (*models.Task, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -628,4 +639,43 @@ func TestHTTPCreateTask_SessionPrepareFailureStillSettles(t *testing.T) {
 	orch.mu.Lock()
 	defer orch.mu.Unlock()
 	assert.True(t, orch.launched, "prepare must have actually been attempted")
+}
+
+// TestHTTPUpdateTask_IgnoresExternalIDField pins the spec's Lifecycle
+// requirement that "No API changes an external ID on an existing task;
+// PATCH /tasks/:id ... do[es] not accept the field." httpUpdateTaskRequest
+// has no ExternalID field at all, so a PATCH body carrying one is silently
+// dropped by JSON unmarshaling — this test proves that holds end to end,
+// not just by inspecting the struct.
+func TestHTTPUpdateTask_IgnoresExternalIDField(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := newIdempotentCreateTaskRepo()
+	h := newIdempotencyTestHandlers(t, repo)
+
+	created := doCreateTask(h, `{"workspace_id":"ws-1","workflow_id":"wf-1","workflow_step_id":"step-1","title":"Task","external_id":"ext-1"}`)
+	require.Equal(t, http.StatusOK, created.Code, "body: %s", created.Body.String())
+	var createResp map[string]interface{}
+	require.NoError(t, json.Unmarshal(created.Body.Bytes(), &createResp))
+	taskID := createResp["id"].(string)
+	require.Equal(t, "ext-1", createResp["external_id"])
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Params = gin.Params{{Key: "id", Value: taskID}}
+	c.Request = httptest.NewRequest(http.MethodPatch, "/tasks/"+taskID,
+		strings.NewReader(`{"title":"Renamed","external_id":"ext-should-be-ignored"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.httpUpdateTask(c)
+
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+	var updateResp map[string]interface{}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &updateResp))
+	assert.Equal(t, "Renamed", updateResp["title"], "the title field the request actually supports must still apply")
+	assert.Equal(t, "ext-1", updateResp["external_id"], "external_id in a PATCH body must be silently ignored, not applied")
+
+	repo.mu.Lock()
+	stored := repo.tasks[taskID]
+	repo.mu.Unlock()
+	require.NotNil(t, stored)
+	assert.Equal(t, "ext-1", stored.ExternalID, "the stored task's identity must be unchanged by the PATCH")
 }

@@ -4,12 +4,27 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
+
+// assertSessionLauncherNotCalled waits a bounded window for launchAutoStartTask's
+// goroutine to have fired LaunchSession, then fails if it did. auto-start
+// dispatch is asynchronous (handlers.go's launchAutoStartTask spawns a
+// goroutine), so simply checking immediately after handleCreateTask returns
+// would race a real bug rather than catch it.
+func assertSessionLauncherNotCalled(t *testing.T, launcher *mockSessionLauncher) {
+	t.Helper()
+	select {
+	case <-launcher.called:
+		t.Fatal("LaunchSession must not be called for a Found outcome, even with start_agent:true")
+	case <-time.After(200 * time.Millisecond):
+	}
+}
 
 // TestHandleCreateTask_ExternalIDGoldenPath covers the golden path: a create
 // carrying a fresh external_id reports deduplicated:false, creation_complete
@@ -121,6 +136,12 @@ func TestHandleCreateTask_FoundSettledIsDataLossGuarded(t *testing.T) {
 // TestHandleCreateTask_FoundUnsettledSkipsAutoStart covers the diagnostic
 // tuple for an in-flight create: deduplicated:true + creation_complete:false,
 // and confirms no session is auto-started for it even when start_agent:true.
+//
+// A nil sessionLauncher (as used elsewhere in this file) would make an
+// auto-start assertion vacuous: launchAutoStartTask no-ops on a nil launcher
+// regardless of whether the Found-outcome guard even ran. Wiring a real
+// mockSessionLauncher makes "no session was launched" an actual proof rather
+// than an artifact of the test harness.
 func TestHandleCreateTask_FoundUnsettledSkipsAutoStart(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	ctx := context.Background()
@@ -128,7 +149,8 @@ func TestHandleCreateTask_FoundUnsettledSkipsAutoStart(t *testing.T) {
 	require.NoError(t, err)
 	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
 	require.NoError(t, err)
-	h := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
+	launcher := newMockSessionLauncher()
+	h := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, launcher, nil, testLogger(t))
 
 	// Seed a task holding ext-1 directly, unsettled, representing a create
 	// whose required synchronous work has not finished yet.
@@ -160,10 +182,76 @@ func TestHandleCreateTask_FoundUnsettledSkipsAutoStart(t *testing.T) {
 	require.Equal(t, true, result["deduplicated"])
 	require.Equal(t, false, result["creation_complete"])
 
+	assertSessionLauncherNotCalled(t, launcher)
+
 	// The response tuple alone doesn't prove nothing was launched — query the
 	// real database directly for the downstream effect start_agent:true would
 	// have produced had the guard been missing.
 	sessions, err := repo.ListTaskSessions(ctx, inflight.ID)
 	require.NoError(t, err)
 	require.Empty(t, sessions, "no session row should exist for an unsettled task even with start_agent:true")
+}
+
+// TestHandleCreateTask_FoundSettledSkipsAutoStart is the settled-outcome
+// twin of TestHandleCreateTask_FoundUnsettledSkipsAutoStart: the spec's very
+// first MCP scenario is a retry against a SETTLED task with start_agent:true,
+// and requires that no new session gets started. The Found-outcome guard in
+// handleCreateTask (handlers.go) is a single check that covers both settled
+// and unsettled sub-cases identically, but until now only the unsettled
+// sub-case had a dedicated auto-start assertion.
+func TestHandleCreateTask_FoundSettledSkipsAutoStart(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+	require.NoError(t, err)
+	launcher := newMockSessionLauncher()
+	h := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, launcher, nil, testLogger(t))
+
+	first, err := h.handleCreateTask(ctx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"workspace_id":     workspaces[0].ID,
+		"workflow_id":      workflows[0].ID,
+		"title":            "Original",
+		"description":      "Do the thing",
+		"agent_profile_id": "profile-1",
+		"start_agent":      false,
+		"external_id":      "ext-1",
+	}))
+	require.NoError(t, err)
+	if first.Type == ws.MessageTypeError {
+		t.Fatalf("first create returned error: %s", string(first.Payload))
+	}
+	var firstResult map[string]interface{}
+	require.NoError(t, json.Unmarshal(first.Payload, &firstResult))
+	firstID := firstResult["id"].(string)
+	require.Equal(t, true, firstResult["creation_complete"], "the seeding create must have settled")
+
+	assertSessionLauncherNotCalled(t, launcher) // sanity: the seeding create itself didn't launch
+
+	retry, err := h.handleCreateTask(ctx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"workspace_id":     workspaces[0].ID,
+		"workflow_id":      workflows[0].ID,
+		"title":            "Task",
+		"description":      "Do the thing",
+		"agent_profile_id": "profile-1",
+		"start_agent":      true,
+		"external_id":      "ext-1",
+	}))
+	require.NoError(t, err)
+	if retry.Type == ws.MessageTypeError {
+		t.Fatalf("retry returned error: %s", string(retry.Payload))
+	}
+
+	var result map[string]interface{}
+	require.NoError(t, json.Unmarshal(retry.Payload, &result))
+	require.Equal(t, firstID, result["id"])
+	require.Equal(t, true, result["deduplicated"])
+	require.Equal(t, true, result["creation_complete"])
+
+	assertSessionLauncherNotCalled(t, launcher)
+
+	sessions, err := repo.ListTaskSessions(ctx, firstID)
+	require.NoError(t, err)
+	require.Empty(t, sessions, "a settled Found outcome must not start a new session even with start_agent:true")
 }
