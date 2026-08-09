@@ -148,9 +148,14 @@ export function TriggerCard({
         </button>
         <Tooltip>
           <TooltipTrigger asChild>
-            <IconInfoCircle className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <IconInfoCircle
+              className="h-3.5 w-3.5 text-muted-foreground shrink-0"
+              data-testid="trigger-info-icon"
+            />
           </TooltipTrigger>
-          <TooltipContent>{t(TRIGGER_INFO_KEYS[trigger.type])}</TooltipContent>
+          <TooltipContent data-testid="trigger-info-tooltip">
+            {t(TRIGGER_INFO_KEYS[trigger.type])}
+          </TooltipContent>
         </Tooltip>
         <Button
           variant="ghost"
