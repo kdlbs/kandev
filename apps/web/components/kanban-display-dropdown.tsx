@@ -19,7 +19,7 @@ import {
 import type { Repository } from "@/lib/types/http";
 import type { WorkflowsState } from "@/lib/state/slices";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
-import { useMemo, type ComponentProps } from "react";
+import { useMemo, useRef, type ComponentProps } from "react";
 import { useTranslation } from "react-i18next";
 import { getRepositoryPlaceholderKey } from "@/lib/kanban/repository-placeholder";
 
@@ -284,11 +284,13 @@ export function KanbanDisplayDropdown({
   } = useKanbanDisplaySettings();
 
   const repositoryValue = allRepositoriesSelected ? "all" : (selectedRepositoryId ?? "all");
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
+          ref={triggerRef}
           variant="outline"
           size={triggerSize}
           data-testid="display-button"
@@ -297,7 +299,13 @@ export function KanbanDisplayDropdown({
           <IconAdjustmentsHorizontal className="h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-[280px] p-3">
+      <DropdownMenuContent
+        align="end"
+        className="w-[280px] p-3"
+        onPointerDownOutside={(e) => {
+          if (triggerRef.current?.contains(e.target as Node)) e.preventDefault();
+        }}
+      >
         <div className="space-y-3">
           <WorkflowSection
             activeWorkflowId={activeWorkflowId}

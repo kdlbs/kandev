@@ -12,10 +12,14 @@ vi.mock("@/hooks/use-kanban-display-settings", () => ({
     selectedRepositoryId: null,
     enablePreviewOnClick: false,
     tasksListShowDetails: false,
+    eligibleWorkflows: [],
+    snapshots: {},
+    hiddenWorkflowStepIds: {},
     onWorkflowChange: vi.fn(),
     onRepositoryChange: vi.fn(),
     onTogglePreviewOnClick: vi.fn(),
     onToggleTasksListShowDetails: vi.fn(),
+    onToggleStepVisibility: vi.fn(),
   }),
 }));
 

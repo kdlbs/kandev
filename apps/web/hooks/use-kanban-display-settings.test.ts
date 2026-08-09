@@ -25,6 +25,7 @@ vi.mock("@/components/state-provider", () => ({
     selector({
       workspaces: { items: [], activeId: mocks.activeWorkspaceId },
       workflows: { items: mocks.workflows, activeId: mocks.activeWorkflowId },
+      kanbanMulti: { snapshots: {} },
       setActiveWorkspace: mocks.setActiveWorkspace,
       setActiveWorkflow: mocks.setActiveWorkflow,
       userSettings: { enablePreviewOnClick: false },
