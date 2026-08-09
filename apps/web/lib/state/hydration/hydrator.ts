@@ -6,6 +6,7 @@ import {
   reconcileQuickTerminalTabs,
 } from "@/lib/state/slices/ui/quick-chat-sync";
 import { deepMerge, mergeSessionMap, mergeLoadingState } from "./merge-strategies";
+import { resolveParkedTriple, type ParkedTriple } from "@/lib/kanban/parked-projection";
 
 /**
  * Hydration options for controlling merge behavior
@@ -27,7 +28,37 @@ function mergeWithLoading(draft: any, source: any | undefined): void {
   mergeLoadingState(draft, source);
 }
 
-/** Merge kanban tasks by ID, keeping the version with the newer updatedAt timestamp. */
+type KanbanTaskLike = {
+  id: string;
+  updatedAt?: string;
+  parkedOnBackgroundWork?: boolean;
+  parkedEpoch?: number;
+  parkedRevision?: number;
+};
+
+function taskParkedTriple(task: KanbanTaskLike): ParkedTriple {
+  return {
+    parked: task.parkedOnBackgroundWork,
+    epoch: task.parkedEpoch,
+    revision: task.parkedRevision,
+  };
+}
+
+function applyParkedTriple(task: KanbanTaskLike, triple: ParkedTriple): void {
+  task.parkedOnBackgroundWork = triple.parked;
+  task.parkedEpoch = triple.epoch;
+  task.parkedRevision = triple.revision;
+}
+
+/**
+ * Merge kanban tasks by ID, keeping the version with the newer updatedAt
+ * timestamp — except for the parked triple, which is never persisted (D1) so
+ * it never touches `updatedAt`. Whichever task object wins the timestamp
+ * comparison still gets its parked triple resolved separately via D1's
+ * (epoch, revision) discard rule (AC-39, AC-49), so a REST snapshot that
+ * resolves after a fresher WS task.updated cannot regress a live parked
+ * value just because its own `updatedAt` happens to be newer.
+ */
 function mergeKanbanTasks(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   draft: Draft<any>,
@@ -35,21 +66,25 @@ function mergeKanbanTasks(
   source: any[] | undefined,
 ): void {
   if (!source || source.length === 0) return;
-  const draftTasks = draft.tasks as Array<{ id: string; updatedAt?: string }>;
+  const draftTasks = draft.tasks as KanbanTaskLike[];
   const existingById = new Map(draftTasks.map((t) => [t.id, t]));
 
   for (const incoming of source) {
     const existing = existingById.get(incoming.id);
     if (!existing) {
       draftTasks.push(incoming);
-    } else {
-      const existingTime = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
-      const incomingTime = incoming.updatedAt ? new Date(incoming.updatedAt).getTime() : 0;
-      if (incomingTime >= existingTime) {
-        const idx = draftTasks.findIndex((t) => t.id === incoming.id);
-        if (idx >= 0) draftTasks[idx] = incoming;
-      }
+      continue;
     }
+    const resolvedParked = resolveParkedTriple(
+      taskParkedTriple(existing),
+      taskParkedTriple(incoming),
+    );
+    const existingTime = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
+    const incomingTime = incoming.updatedAt ? new Date(incoming.updatedAt).getTime() : 0;
+    const idx = draftTasks.findIndex((t) => t.id === incoming.id);
+    if (idx < 0) continue;
+    if (incomingTime >= existingTime) draftTasks[idx] = incoming;
+    applyParkedTriple(draftTasks[idx], resolvedParked);
   }
 }
 

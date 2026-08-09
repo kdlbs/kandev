@@ -8,6 +8,7 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { isCurrentWorkspaceContext } from "@/lib/state/workspace-context";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
+import { resolveParkedTriple } from "@/lib/kanban/parked-projection";
 
 type KanbanTask = KanbanState["tasks"][number];
 type Workflow = { id: string; name: string };
@@ -69,6 +70,26 @@ async function fetchAndWriteSnapshot(
           // Autopilot is immutable after creation. Keep the cached value when
           // an older or partial snapshot does not include the field.
           mapped.autopilot = mapped.autopilot ?? existing.autopilot;
+          // D1's (parked_epoch, revision) discard rule (AC-39, AC-49): this
+          // REST response may have been in flight when a fresher
+          // task.updated already applied a newer parked triple, so it must
+          // not be taken verbatim — same protection as the WS chokepoints
+          // (preserveParkedFields, mergeParkedProjection).
+          const resolved = resolveParkedTriple(
+            {
+              parked: existing.parkedOnBackgroundWork,
+              epoch: existing.parkedEpoch,
+              revision: existing.parkedRevision,
+            },
+            {
+              parked: mapped.parkedOnBackgroundWork,
+              epoch: mapped.parkedEpoch,
+              revision: mapped.parkedRevision,
+            },
+          );
+          mapped.parkedOnBackgroundWork = resolved.parked;
+          mapped.parkedEpoch = resolved.epoch;
+          mapped.parkedRevision = resolved.revision;
         }
         return mapped;
       })
