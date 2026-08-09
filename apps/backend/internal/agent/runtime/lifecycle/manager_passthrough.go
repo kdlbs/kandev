@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -589,6 +590,8 @@ func setPassthroughMCPFiles(execution *AgentExecution, files []string) {
 
 // getPassthroughMCPEnv reads the recorded MCP env map, tolerating both
 // map[string]string and map[string]interface{} (JSON-decoded after a restart).
+// Like getPassthroughMCPFiles it returns a copy, so a caller that mutates the
+// result cannot reach the stored map behind metadataMu's back.
 func getPassthroughMCPEnv(execution *AgentExecution) map[string]string {
 	if execution == nil {
 		return nil
@@ -596,7 +599,9 @@ func getPassthroughMCPEnv(execution *AgentExecution) map[string]string {
 	value, _ := execution.metadataValue(metadataKeyPassthroughMCPEnv)
 	switch v := value.(type) {
 	case map[string]string:
-		return v
+		out := make(map[string]string, len(v))
+		maps.Copy(out, v)
+		return out
 	case map[string]interface{}:
 		out := make(map[string]string, len(v))
 		for key, item := range v {

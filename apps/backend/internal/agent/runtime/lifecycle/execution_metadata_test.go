@@ -86,6 +86,43 @@ func TestRemoveExecutionRacesMetadataWrites(t *testing.T) {
 	}
 }
 
+// TestExecutionMetadataReadersReturnCopies covers the helpers that hand a
+// container out of the lock. Each must return a copy, or a caller mutating the
+// result reaches the stored map without holding metadataMu.
+func TestExecutionMetadataReadersReturnCopies(t *testing.T) {
+	execution := &AgentExecution{ID: "exec-1"}
+	setPassthroughMCPEnv(execution, map[string]string{"KANDEV_MCP": "1"})
+	setPassthroughMCPFiles(execution, []string{"a.json"})
+
+	env := getPassthroughMCPEnv(execution)
+	env["KANDEV_MCP"] = "tampered"
+	env["EXTRA"] = "leaked"
+	if got := getPassthroughMCPEnv(execution); got["KANDEV_MCP"] != "1" || len(got) != 1 {
+		t.Fatalf("mutating the returned env leaked into the execution: %v", got)
+	}
+
+	files := getPassthroughMCPFiles(execution)
+	files[0] = "tampered.json"
+	if got := getPassthroughMCPFiles(execution); got[0] != "a.json" {
+		t.Fatalf("mutating the returned file list leaked into the execution: %v", got)
+	}
+
+	// The same rule applies to the test seeding helper: it copies rather than
+	// adopting the caller's map.
+	seed := map[string]interface{}{"name": "kandev"}
+	seeded := &AgentExecution{ID: "exec-2"}
+	seeded.SetMetadataForTesting(seed)
+	seed["name"] = "tampered"
+	if got := seeded.metadataString("name"); got != "kandev" {
+		t.Fatalf("SetMetadataForTesting adopted the caller's map: name = %q", got)
+	}
+
+	seeded.SetMetadataForTesting(nil)
+	if got := seeded.MetadataSnapshot(); got != nil {
+		t.Fatalf("SetMetadataForTesting(nil) = %v, want nil metadata", got)
+	}
+}
+
 func TestExecutionMetadataAccessors(t *testing.T) {
 	execution := &AgentExecution{ID: "exec-1"}
 
