@@ -90,7 +90,118 @@ function isFile(fsImpl, fullPath) {
  * `isFile`: `globSync` returns directories too (`components/automations/*`
  * matches `.../trigger-configs`), so it is not only the literal case.
  */
+function globExpand(entry, cwd, fsImpl) {
+  if (typeof fsImpl.globSync === "function") {
+    return fsImpl.globSync(entry, { cwd });
+  }
+  // Node < 22 fallback: expand brace expressions then walk the path.
+  const brace = entry.match(/\{([^}]+)\}/);
+  if (brace) {
+    return brace[1]
+      .split(",")
+      .flatMap((alt) => globExpand(entry.replace(brace[0], alt.trim()), cwd, fsImpl));
+  }
+  return globWalkSegments(entry.split("/"), cwd, "", fsImpl);
+}
+
+function globListEntries(dir, fsImpl) {
+  try {
+    return fsImpl.readdirSync(dir);
+  } catch {
+    return [];
+  }
+}
+
+function globListDirs(dir, fsImpl) {
+  try {
+    return fsImpl
+      .readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name);
+  } catch {
+    return [];
+  }
+}
+
+const GLOB_SEG_METACHAR = /[*?[\]]/;
+
+// Convert a single path segment glob pattern to a RegExp.
+// Handles *, ?, and [...] character classes. Other chars are escaped.
+function globSegToRegex(seg) {
+  let re = "^";
+  let i = 0;
+  while (i < seg.length) {
+    if (seg[i] === "*") {
+      re += "[^/]*";
+      i++;
+    } else if (seg[i] === "?") {
+      re += "[^/]";
+      i++;
+    } else if (seg[i] === "[") {
+      // Find the matching ']' — in glob, a ] right after [ (or [^) is literal.
+      let j = i + 1;
+      const negated = j < seg.length && seg[j] === "^";
+      if (negated) j++;
+      const leadBracket = j < seg.length && seg[j] === "]"; // glob: ] as first char is literal
+      if (leadBracket) j++;
+      while (j < seg.length && seg[j] !== "]") j++;
+      if (j < seg.length) {
+        // Build the JS regex character class. A ] that was the first char in
+        // the glob class (leadBracket) must be escaped as \] in JS regex, since
+        // JS closes the class on the first unescaped ] it sees.
+        const contentStart = i + 1 + (negated ? 1 : 0) + (leadBracket ? 1 : 0);
+        const innerRaw = seg.slice(contentStart, j);
+        const inner = (leadBracket ? "\\]" : "") + innerRaw;
+        re += "[" + (negated ? "^" : "") + inner + "]";
+        i = j + 1;
+      } else {
+        re += "\\[";
+        i++;
+      }
+    } else {
+      re += seg[i].replace(/[.+?^${}()|\\]/g, "\\$&");
+      i++;
+    }
+  }
+  return new RegExp(re + "$");
+}
+
+function globWalkSegments(segs, cwd, prefix, fsImpl) {
+  if (segs.length === 0) return [];
+  const [seg, ...rest] = segs;
+
+  if (seg === "**") {
+    // Match zero dirs: apply remaining segments from current prefix.
+    const here = rest.length ? globWalkSegments(rest, cwd, prefix, fsImpl) : [];
+    // Match one or more dirs: descend into each immediate subdirectory and repeat.
+    const subdirs = globListDirs(`${cwd}/${prefix || "."}`, fsImpl);
+    const deeper = subdirs.flatMap((d) => {
+      const newPrefix = prefix ? `${prefix}/${d}` : d;
+      return globWalkSegments(segs, cwd, newPrefix, fsImpl);
+    });
+    return [...here, ...deeper];
+  }
+
+  if (!GLOB_SEG_METACHAR.test(seg)) {
+    // Literal path segment.
+    const newPrefix = prefix ? `${prefix}/${seg}` : seg;
+    if (rest.length === 0) return [newPrefix];
+    return globWalkSegments(rest, cwd, newPrefix, fsImpl);
+  }
+
+  // Segment with glob metacharacters: list the directory and filter by pattern.
+  const dir = prefix ? `${cwd}/${prefix}` : cwd;
+  const re = globSegToRegex(seg);
+  return globListEntries(dir, fsImpl)
+    .filter((name) => re.test(name))
+    .flatMap((name) => {
+      const newPrefix = prefix ? `${prefix}/${name}` : name;
+      if (rest.length === 0) return [newPrefix];
+      return globWalkSegments(rest, cwd, newPrefix, fsImpl);
+    });
+}
+
 export function filesForEntry(entry, { cwd, fsImpl }) {
-  const candidates = GLOB_METACHARACTERS.test(entry) ? fsImpl.globSync(entry, { cwd }) : [entry];
+  const candidates = GLOB_METACHARACTERS.test(entry) ? globExpand(entry, cwd, fsImpl) : [entry];
   return candidates.filter((candidate) => isFile(fsImpl, `${cwd}/${candidate}`));
 }

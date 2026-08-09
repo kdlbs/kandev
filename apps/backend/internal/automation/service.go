@@ -107,6 +107,11 @@ type Service struct {
 	// = validation skipped (not yet wired at startup, or an isolated test).
 	repoLookup RepositoryLookup
 
+	// taskOriginLookup resolves a task's workspace and whether it is an
+	// automation run, used by the merged-PR subscriber's state machine.
+	// Nil = not wired; the github_pr_merged trigger type then never fires.
+	taskOriginLookup TaskOriginLookup
+
 	// agentProfileLookup validates agent_profile_id on create/update. Nil =
 	// validation skipped, like workflowLocator above and unlike repoLookup —
 	// see validateAgentProfileID for why this one does not fail closed.
@@ -216,6 +221,18 @@ func (s *Service) validateAgentProfileID(ctx context.Context, profileID string) 
 // identity (internal callers).
 func (s *Service) SetWorkspaceAuthorizer(fn func(ctx context.Context, workspaceID string) error) {
 	s.authorizeWorkspace = fn
+}
+
+// SetTaskOriginLookup wires the task workspace/origin resolver used by the
+// github_pr_merged trigger subscriber. Must be called before Start, following
+// the SetWorkflowLocator precedent.
+func (s *Service) SetTaskOriginLookup(l TaskOriginLookup) {
+	s.taskOriginLookup = l
+}
+
+// TaskOriginLookup returns the wired lookup (may be nil).
+func (s *Service) TaskOriginLookup() TaskOriginLookup {
+	return s.taskOriginLookup
 }
 
 // SetRepositoryLookup wires the repository ownership validator for
@@ -788,12 +805,18 @@ func (s *Service) maybeSkipForConcurrencyCap(ctx context.Context, a *Automation,
 		return "", nil
 	}
 	reason := fmt.Sprintf("max_concurrent_runs=%d reached", a.MaxConcurrentRuns)
+	// github_pr_merged cap-skip rows must NOT consume the dedup key so that a
+	// later event for the same PR can retry. Write an empty key for this type.
+	skipDedupKey := dedupKey
+	if triggerType == TriggerTypeGitHubPRMerged {
+		skipDedupKey = ""
+	}
 	skipRun := &AutomationRun{
 		AutomationID: automationID,
 		TriggerID:    triggerID,
 		TriggerType:  triggerType,
 		Status:       RunStatusSkipped,
-		DedupKey:     dedupKey,
+		DedupKey:     skipDedupKey,
 		TriggerData:  triggerData,
 		ErrorMessage: reason,
 	}

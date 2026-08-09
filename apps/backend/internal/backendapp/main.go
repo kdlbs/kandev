@@ -536,6 +536,19 @@ func startAgentInfrastructure(
 		})
 	}
 
+	// Wire automation service into orchestrator for trigger-based task creation.
+	// Automation must start before the GitHub poller so the
+	// GitHubPRMergedSubscriber is listening before the first poller event fires.
+	// The Automation subsystem is independent of the Office feature flag — it
+	// has its own cron scheduler, GitHub poller, and webhook handler, and
+	// creates tasks via the task service directly.
+	if services.Automation != nil {
+		orchestratorSvc.SetAutomationService(services.Automation.Service)
+		services.Automation.Start(ctx)
+		addCleanup(func() error { services.Automation.Stop(); return nil })
+		log.Info("Automation scheduler and evaluator started")
+	}
+
 	// Wire GitHub service into orchestrator for PR auto-detection on push
 	if services.GitHub != nil {
 		orchestratorSvc.SetGitHubService(services.GitHub)
@@ -633,17 +646,6 @@ func startAgentInfrastructure(
 	// background loops.
 	if services.Plugins != nil {
 		startPluginsSubsystems(ctx, services.Plugins, eventBus, log, addCleanup)
-	}
-
-	// Wire automation service into orchestrator for trigger-based task creation.
-	// The Automation subsystem is independent of the Office feature flag — it
-	// has its own cron scheduler, GitHub poller, and webhook handler, and
-	// creates tasks via the task service directly.
-	if services.Automation != nil {
-		orchestratorSvc.SetAutomationService(services.Automation.Service)
-		services.Automation.Start(ctx)
-		addCleanup(func() error { services.Automation.Stop(); return nil })
-		log.Info("Automation scheduler and evaluator started")
 	}
 
 	return startGatewayAndServe(ctx, cfg, log, eventBus, agentRuntimeAvailability, dbPool, repos, services,

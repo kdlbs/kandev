@@ -421,12 +421,19 @@ func (s *Service) recordFailedRun(ctx context.Context, evt *automation.Automatio
 	if s.automationService == nil {
 		return
 	}
+	// github_pr_merged pre-task-failure rows must NOT consume the dedup key so
+	// that a later event for the same PR can retry. All recordFailedRun call
+	// sites are pre-task-creation, so blanking is always correct for this type.
+	failDedupKey := evt.DedupKey
+	if evt.TriggerType == automation.TriggerTypeGitHubPRMerged {
+		failDedupKey = ""
+	}
 	run := &automation.AutomationRun{
 		AutomationID: evt.AutomationID,
 		TriggerID:    evt.TriggerID,
 		TriggerType:  evt.TriggerType,
 		Status:       automation.RunStatusFailed,
-		DedupKey:     evt.DedupKey,
+		DedupKey:     failDedupKey,
 		TriggerData:  evt.TriggerData,
 		ErrorMessage: errMsg,
 	}

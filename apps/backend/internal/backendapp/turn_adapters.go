@@ -190,6 +190,23 @@ func (a *automationTaskDeleterAdapter) DeleteTask(ctx context.Context, taskID st
 	return err
 }
 
+// automationTaskOriginLookupAdapter satisfies automation.TaskOriginLookup.
+// It resolves a task's workspace and whether it was created by an automation
+// run so the github_pr_merged subscriber can skip automation-spawned tasks
+// (loop-guard) and scope workspace matching without importing the task service
+// into the automation package.
+type automationTaskOriginLookupAdapter struct {
+	svc *taskservice.Service
+}
+
+func (a *automationTaskOriginLookupAdapter) TaskWorkspaceAndAutomationOrigin(ctx context.Context, taskID string) (string, bool, bool) {
+	task, err := a.svc.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		return "", false, false
+	}
+	return task.WorkspaceID, task.Origin == models.TaskOriginAutomationRun, true
+}
+
 // repositoryLookupAdapter satisfies the linear/jira/sentry RepositoryLookup
 // interface over the task service. It is the validation seam for a watcher's
 // optional repository binding. The task service's GetRepository filters

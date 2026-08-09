@@ -17,6 +17,7 @@ import {
 import type { AutomationTrigger, TriggerType } from "@/lib/types/automation";
 import { ScheduledConfig } from "./trigger-configs/scheduled-config";
 import { GitHubPRConfig } from "./trigger-configs/github-pr-config";
+import { GitHubPRMergedConfig } from "./trigger-configs/github-pr-merged-config";
 import { GitHubPushConfig } from "./trigger-configs/github-push-config";
 import { GitHubCIConfig } from "./trigger-configs/github-ci-config";
 import { WebhookConfig } from "./trigger-configs/webhook-config";
@@ -35,16 +36,20 @@ type TriggerCardProps = {
 const TRIGGER_ICON: Record<TriggerType, typeof IconClock> = {
   scheduled: IconClock,
   github_pr: IconBrandGithub,
+  github_pr_merged: IconBrandGithub,
   github_push: IconBrandGithub,
   github_ci: IconBrandGithub,
   webhook: IconWebhook,
 };
 
+const GITHUB_COLOR = "text-purple-400";
+
 const TRIGGER_COLOR: Record<TriggerType, string> = {
   scheduled: "text-blue-400",
-  github_pr: "text-purple-400",
-  github_push: "text-purple-400",
-  github_ci: "text-purple-400",
+  github_pr: GITHUB_COLOR,
+  github_pr_merged: GITHUB_COLOR,
+  github_push: GITHUB_COLOR,
+  github_ci: GITHUB_COLOR,
   webhook: "text-orange-400",
 };
 
@@ -61,6 +66,7 @@ const CRON_PRESET_KEYS: Record<string, string> = {
 
 // Keyed by the persisted TriggerType.
 const SIMPLE_SUMMARY_KEYS: Partial<Record<TriggerType, string>> = {
+  github_pr_merged: "automations:summaryPrMerged",
   github_push: "automations:summaryPushToBranch",
   github_ci: "automations:summaryCiCompleted",
   webhook: "automations:summaryWebhook",
@@ -69,6 +75,7 @@ const SIMPLE_SUMMARY_KEYS: Partial<Record<TriggerType, string>> = {
 const TRIGGER_INFO_KEYS: Record<TriggerType, string> = {
   scheduled: "automations:triggerInfoScheduled",
   github_pr: "automations:triggerInfoGithubPr",
+  github_pr_merged: "automations:triggerInfoGithubPrMerged",
   github_push: "automations:triggerInfoNotImplemented",
   github_ci: "automations:triggerInfoNotImplemented",
   webhook: "automations:triggerInfoWebhook",
@@ -199,6 +206,14 @@ function TriggerConfigForm({
       return <ScheduledConfig config={trigger.config} onUpdate={onUpdate} />;
     case "github_pr":
       return <GitHubPRConfig config={trigger.config} onUpdate={onUpdate} />;
+    case "github_pr_merged":
+      return (
+        <GitHubPRMergedConfig
+          config={trigger.config}
+          workspaceId={workspaceId}
+          onUpdate={onUpdate}
+        />
+      );
     case "github_push":
       return <GitHubPushConfig config={trigger.config} onUpdate={onUpdate} />;
     case "github_ci":
