@@ -1,7 +1,7 @@
 ---
 status: draft
 created: 2026-06-22
-updated: 2026-08-08
+updated: 2026-08-09
 owner: cfl
 ---
 
@@ -33,6 +33,15 @@ worktrees, or executor rows behind and the machine slowly runs out of memory.
 - Worktree and task-environment cleanup is ownership-aware. A task cleanup may
   destroy only resources owned by that task's `TaskEnvironment`; borrowed or
   inherited worktrees remain owned by the source task.
+- Worktree teardown covers every repository recorded on the `TaskEnvironment`:
+  the legacy singular worktree fields and every `task_environment_repos` row,
+  for multi-repo tasks. Teardown resolves each worktree by its durable
+  `TaskEnvironment`/`TaskEnvironmentRepo` path and repository, not by
+  `worktree_id` alone — an ID-only lookup depends on the session-scoped
+  `task_session_worktrees` row, which cascades away with the owning session
+  and does not come back once every session on the task is gone. This applies
+  equally to the primary repository: once its session-scoped row is gone, an
+  ID-only lookup fails for it exactly as it does for any other repository.
 - A `TaskEnvironment` referenced by another active task session is shared for the
   duration of that session. Cleanup can stop the current task's runtime rows, but
   must defer destructive worktree/container/sandbox teardown until no other
@@ -182,6 +191,22 @@ The barrier is reserved before resource inventory is captured. Session creation
 and physical worktree persistence serialize against the task row and refuse new
 ownership while archive/delete preparation is active. The barrier transaction
 never holds filesystem, target-path, or repository Git locks.
+
+### `task_environments` / `task_environment_repos`
+
+`task_environments` and `task_environment_repos` cascade only from `tasks`, not
+from `task_sessions`, so they are the durable worktree handles for cleanup: they
+outlive every session on the task, including the task's last session. Each row
+carries its own `worktree_path` (plus, for `task_environment_repos`, its own
+`repository_id`) in addition to `worktree_id`. This is the resolution path
+cleanup must use once `task_session_worktrees` — the session-scoped table that
+otherwise resolves a `worktree_id` to its on-disk path — has cascaded away with
+the deleted session. A `worktree_id`-only lookup cannot distinguish "this
+worktree was already destroyed" from "this worktree's session-scoped path
+record is gone but the directory is still on disk"; resolving by the
+environment's own path/repository handles removes that ambiguity for every
+repository the environment owns, including the one recorded on the legacy
+singular `worktree_id`/`worktree_path`/`worktree_branch` fields.
 
 ## API Surface
 
@@ -365,6 +390,12 @@ The durable cleanup job wraps that resource lifecycle:
   **WHEN** the lifecycle barrier is reserved, **THEN** no resource created after
   the barrier can be omitted from the cleanup inventory or survive as an
   untracked directory.
+- **GIVEN** a multi-repo task whose `TaskEnvironment` has a
+  `task_environment_repos` row per repository, **WHEN** the task's only
+  session is deleted (cascading away every `task_session_worktrees` row) and
+  the task is later archived or deleted, **THEN** every repository's worktree
+  directory is removed from disk, including the repository recorded on the
+  legacy singular `worktree_id` field.
 
 - **GIVEN** a task has a `WAITING_FOR_INPUT` session and an
   `executors_running` row, **WHEN** the task is archived, **THEN** the runtime is

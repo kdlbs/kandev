@@ -19,7 +19,14 @@ import (
 type EnvironmentDestroyer interface {
 	DestroyContainer(ctx context.Context, containerID string) error
 	DestroySandbox(ctx context.Context, sandboxID, executionID string) error
-	DestroyWorktree(ctx context.Context, worktreeID string) error
+	// DestroyWorktreeAt destroys a worktree using its durable path/repository
+	// handles in addition to its ID. An ID-only lookup depends on the
+	// session-scoped task_session_worktrees row, which cascades away with
+	// the owning session — after that, no worktree that session used to own
+	// (including the environment's own primary worktree) can resolve a path
+	// by ID alone. worktreePath/repositoryID are the durable TaskEnvironment
+	// / TaskEnvironmentRepo fields, which cascade only from the task.
+	DestroyWorktreeAt(ctx context.Context, worktreeID, worktreePath, repositoryID string) error
 	// PushEnvironmentBranch best-effort pushes the current branch of the environment's
 	// workspace to its upstream. Returns an error if the push fails; callers can decide
 	// whether to abort the reset on failure.
@@ -336,8 +343,7 @@ func (s *Service) teardownEnvironmentResources(ctx context.Context, env *models.
 	if cause := context.Cause(ctx); cause != nil {
 		return cause
 	}
-	worktreeIDs := environmentWorktreeIDs(env)
-	if env.ContainerID == "" && env.SandboxID == "" && len(worktreeIDs) == 0 {
+	if env.ContainerID == "" && env.SandboxID == "" && env.WorktreeID == "" && len(env.Repos) == 0 {
 		return nil
 	}
 	if s.envDestroyer == nil {
@@ -367,15 +373,8 @@ func (s *Service) teardownEnvironmentResources(ctx context.Context, env *models.
 			errs = append(errs, fmt.Errorf("destroy sandbox %s: %w", env.SandboxID, err))
 		}
 	}
-	for _, worktreeID := range worktreeIDs {
-		if err := contextError(); err != nil {
-			return err
-		}
-		if err := s.envDestroyer.DestroyWorktree(ctx, worktreeID); err != nil {
-			if !errors.Is(err, worktree.ErrWorktreeNotFound) {
-				errs = append(errs, fmt.Errorf("destroy worktree %s: %w", worktreeID, err))
-			}
-		}
+	if err := s.teardownEnvironmentWorktrees(ctx, env, contextError, &errs); err != nil {
+		return err
 	}
 	if err := contextError(); err != nil {
 		return err
@@ -383,17 +382,51 @@ func (s *Service) teardownEnvironmentResources(ctx context.Context, env *models.
 	return errors.Join(errs...)
 }
 
-// environmentWorktreeIDs returns the physical worktree identities recorded on
-// the environment's repository rows.
-func environmentWorktreeIDs(env *models.TaskEnvironment) []string {
-	if env == nil {
+// teardownEnvironmentWorktrees destroys every repo's worktree recorded on
+// env: the legacy singular WorktreeID plus every Repos[] entry, de-duped so a
+// row that mirrors the legacy field (single-repo environments predating the
+// multi-repo backfill, or a multi-repo environment whose first repo matches)
+// is only destroyed once. Resolves by path/repository, not ID alone: once the
+// owning session is deleted, task_session_worktrees — the only table that
+// stores a worktree's on-disk path for an ID-only lookup — cascades away, so
+// every repo, including the primary via the legacy field, needs its durable
+// TaskEnvironment/TaskEnvironmentRepo path to resolve.
+func (s *Service) teardownEnvironmentWorktrees(
+	ctx context.Context,
+	env *models.TaskEnvironment,
+	contextError func() error,
+	errs *[]error,
+) error {
+	destroyed := make(map[string]struct{}, len(env.Repos)+1)
+	destroyOne := func(worktreeID, worktreePath, repositoryID string) error {
+		if worktreeID == "" {
+			return nil
+		}
+		if _, ok := destroyed[worktreeID]; ok {
+			return nil
+		}
+		destroyed[worktreeID] = struct{}{}
+		if err := contextError(); err != nil {
+			return err
+		}
+		if err := s.envDestroyer.DestroyWorktreeAt(ctx, worktreeID, worktreePath, repositoryID); err != nil {
+			if !errors.Is(err, worktree.ErrWorktreeNotFound) {
+				*errs = append(*errs, fmt.Errorf("destroy worktree %s: %w", worktreeID, err))
+			}
+		}
 		return nil
 	}
-	var ids []string
+
+	if err := destroyOne(env.WorktreeID, env.WorktreePath, env.RepositoryID); err != nil {
+		return err
+	}
 	for _, repo := range env.Repos {
-		if repo != nil && repo.WorktreeID != "" {
-			ids = append(ids, repo.WorktreeID)
+		if repo == nil {
+			continue
+		}
+		if err := destroyOne(repo.WorktreeID, repo.WorktreePath, repo.RepositoryID); err != nil {
+			return err
 		}
 	}
-	return ids
+	return nil
 }

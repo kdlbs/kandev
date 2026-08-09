@@ -171,6 +171,72 @@ func (m *Manager) RemoveByID(ctx context.Context, worktreeID string, removeBranc
 	return m.removeWorktree(ctx, wt, removeBranch)
 }
 
+// RemoveAt removes a worktree using its durable path/repository handles when
+// the worktree_id can no longer be resolved through task_session_worktrees —
+// for example, after the owning session has been deleted and its rows
+// cascaded away, which leaves GetByID unable to find a path for any
+// worktree_id that session used to own. When the row still resolves, this
+// delegates to the same tracked-row path RemoveByID uses, so the
+// shared/borrowed-worktree reference-count guard (CountActiveWorktreeReferences)
+// is never bypassed; the path-only fallback only runs once nothing can
+// reference the ID anymore. Never deletes the branch.
+func (m *Manager) RemoveAt(ctx context.Context, worktreeID, worktreePath, repositoryID string) error {
+	wt, err := m.GetByID(ctx, worktreeID)
+	if err == nil {
+		return m.removeWorktree(ctx, wt, false)
+	}
+	if !errors.Is(err, ErrWorktreeNotFound) {
+		return err
+	}
+	if worktreePath == "" {
+		return ErrWorktreeNotFound
+	}
+
+	activeReferences, err := m.CountActiveWorktreeReferences(ctx, worktreeID, nil)
+	if err != nil {
+		return fmt.Errorf("count active references for worktree %s: %w", worktreeID, err)
+	}
+	if activeReferences > 0 {
+		m.logger.Info("preserved worktree still referenced despite missing primary row",
+			zap.String("worktree_id", worktreeID))
+		return nil
+	}
+
+	repoPath := m.resolveRepositoryPath(ctx, repositoryID)
+	repoLock := m.getRepoLock(repoPath)
+	repoLock.Lock()
+	defer func() {
+		repoLock.Unlock()
+		m.releaseRepoLock(repoPath)
+	}()
+
+	if err := m.removeWorktreeDir(ctx, worktreePath, repoPath); err != nil {
+		return fmt.Errorf("remove worktree directory %s: %w", worktreePath, err)
+	}
+	return nil
+}
+
+// resolveRepositoryPath resolves a repository's main checkout path for
+// RemoveAt's path-only fallback. Returns "" when unresolvable —
+// removeWorktreeDir still removes the worktree directory directly via
+// forceRemoveDir in that case; it just can't run `git worktree remove`/
+// `prune` from the main repository first.
+func (m *Manager) resolveRepositoryPath(ctx context.Context, repositoryID string) string {
+	if m.repoProvider == nil || repositoryID == "" {
+		return ""
+	}
+	repo, err := m.repoProvider.GetRepository(ctx, repositoryID)
+	if err != nil {
+		m.logger.Warn("failed to resolve repository path for path-based worktree removal",
+			zap.String("repository_id", repositoryID), zap.Error(err))
+		return ""
+	}
+	if repo == nil {
+		return ""
+	}
+	return repo.LocalPath
+}
+
 // removeWorktree performs the actual removal of a worktree.
 func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch bool) error {
 	// Get repository lock

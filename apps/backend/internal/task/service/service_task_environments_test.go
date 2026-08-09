@@ -75,7 +75,7 @@ func (s *stubDestroyer) DestroySandbox(_ context.Context, id, _ string) error {
 	s.sandboxCalls = append(s.sandboxCalls, id)
 	return s.sandboxErr
 }
-func (s *stubDestroyer) DestroyWorktree(_ context.Context, id string) error {
+func (s *stubDestroyer) DestroyWorktreeAt(_ context.Context, id, _ string, _ string) error {
 	s.worktreeCalls = append(s.worktreeCalls, id)
 	return s.worktreeErr
 }
@@ -213,6 +213,56 @@ func TestTeardownEnvironmentResources_GenericWorktreeFailureRemainsError(t *test
 
 	if !errors.Is(err, worktreeErr) {
 		t.Fatalf("teardown error = %v, want %v", err, worktreeErr)
+	}
+}
+
+func TestTeardownEnvironmentResources_MultiRepoDestroysEveryRepoWorktree(t *testing.T) {
+	svc := newResetTestService(t, &stubEnvRepo{})
+	destroyer := &stubDestroyer{}
+	svc.SetEnvironmentDestroyer(destroyer)
+
+	err := svc.teardownEnvironmentResources(context.Background(), &models.TaskEnvironment{
+		WorktreeID: "wt-primary",
+		Repos: []*models.TaskEnvironmentRepo{
+			{RepositoryID: "repo-a", WorktreeID: "wt-primary"}, // mirrors legacy field — must not double-destroy
+			{RepositoryID: "repo-b", WorktreeID: "wt-secondary"},
+			{RepositoryID: "repo-c", WorktreeID: "wt-tertiary"},
+		},
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{"wt-primary", "wt-secondary", "wt-tertiary"}
+	if len(destroyer.worktreeCalls) != len(want) {
+		t.Fatalf("worktree destroy calls = %v, want %v", destroyer.worktreeCalls, want)
+	}
+	for i, id := range want {
+		if destroyer.worktreeCalls[i] != id {
+			t.Errorf("worktree destroy call[%d] = %q, want %q", i, destroyer.worktreeCalls[i], id)
+		}
+	}
+}
+
+func TestTeardownEnvironmentResources_ReposOnlyEnvironmentIsNotShortCircuited(t *testing.T) {
+	svc := newResetTestService(t, &stubEnvRepo{})
+	destroyer := &stubDestroyer{}
+	svc.SetEnvironmentDestroyer(destroyer)
+
+	// No legacy WorktreeID, no container/sandbox — only Repos[] populated.
+	// The early-return guard must not skip teardown for this shape.
+	err := svc.teardownEnvironmentResources(context.Background(), &models.TaskEnvironment{
+		Repos: []*models.TaskEnvironmentRepo{
+			{RepositoryID: "repo-a", WorktreeID: "wt-a"},
+			{RepositoryID: "repo-b", WorktreeID: "wt-b"},
+		},
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(destroyer.worktreeCalls) != 2 {
+		t.Fatalf("worktree destroy calls = %v, want 2", destroyer.worktreeCalls)
 	}
 }
 
