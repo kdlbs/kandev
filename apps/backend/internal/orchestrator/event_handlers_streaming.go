@@ -125,6 +125,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	case "session_models":
 		s.handleSessionModelsEvent(ctx, payload)
 
+	case "session_model_fallback":
+		s.handleSessionModelFallbackEvent(ctx, payload)
+
 	case streams.EventTypeMCPAttachment:
 		s.handleSessionMCPAttachmentEvent(ctx, payload)
 
@@ -2505,6 +2508,37 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 	)
 	subject := events.BuildSessionModelsSubject(sessionID)
 	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionModelsUpdated, "orchestrator", eventPayload))
+}
+
+// handleSessionModelFallbackEvent broadcasts session_model_fallback events to
+// the WebSocket so the UI can surface why the session is not on the
+// configured start model (the profile's fallback was applied because the
+// start model is unavailable).
+func (s *Service) handleSessionModelFallbackEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	sessionID := payload.SessionID
+	// The fallback event fires during session init, before the execution's
+	// task-session id is always linked. Resolve it from the task when the
+	// payload carries no session id so the note is not dropped.
+	if sessionID == "" && payload.TaskID != "" && s.repo != nil {
+		if sess, err := s.repo.GetActiveTaskSessionByTaskID(ctx, payload.TaskID); err == nil && sess != nil {
+			sessionID = sess.ID
+		}
+	}
+	if sessionID == "" || s.eventBus == nil || payload.Data == nil {
+		return
+	}
+	eventPayload := lifecycle.SessionModelFallbackEventPayload{
+		TaskID:        payload.TaskID,
+		SessionID:     sessionID,
+		AgentID:       payload.AgentID,
+		FallbackModel: payload.Data.FallbackModel,
+		Timestamp:     time.Now().UTC().Format(time.RFC3339),
+	}
+	s.logger.Info("publishing session_model_fallback event to WS",
+		zap.String("session_id", sessionID),
+		zap.String("fallback_model", eventPayload.FallbackModel))
+	subject := events.BuildSessionModelFallbackSubject(sessionID)
+	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionModelFallbackUpdated, "orchestrator", eventPayload))
 }
 
 func workflowSessionConfigFailures(raw any) []string {

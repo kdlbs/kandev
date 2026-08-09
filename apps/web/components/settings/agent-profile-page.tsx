@@ -191,6 +191,8 @@ function ProfileSettingsCard({
           profile={{
             name: draft.name,
             model: draft.model,
+            fallback_model: draft.fallbackModel ?? "",
+            auto_fallback: draft.autoFallback ?? false,
             mode: draft.mode ?? "",
             config_options: draft.configOptions ?? {},
             auto_approve: permissionValues.auto_approve,
@@ -202,6 +204,8 @@ function ProfileSettingsCard({
           baselineProfile={{
             name: savedProfile.name,
             model: savedProfile.model,
+            fallback_model: savedProfile.fallbackModel ?? "",
+            auto_fallback: savedProfile.autoFallback ?? false,
             mode: savedProfile.mode ?? "",
             config_options: savedProfile.configOptions ?? {},
             auto_approve: savedPermissionValues.auto_approve,

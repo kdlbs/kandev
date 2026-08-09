@@ -21,6 +21,8 @@ type CreateProfileRequest struct {
 	AgentID        string
 	Name           string
 	Model          string
+	FallbackModel  string
+	AutoFallback   bool
 	Mode           string
 	ConfigOptions  map[string]string
 	AllowIndexing  bool
@@ -73,6 +75,8 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		Name:             req.Name,
 		AgentDisplayName: displayName,
 		Model:            req.Model,
+		FallbackModel:    strings.TrimSpace(req.FallbackModel),
+		AutoFallback:     req.AutoFallback,
 		Mode:             req.Mode,
 		ConfigOptions:    profileconfig.SanitizeConfigOptions(req.ConfigOptions),
 		AllowIndexing:    req.AllowIndexing,
@@ -134,6 +138,8 @@ type UpdateProfileRequest struct {
 	ID             string
 	Name           *string
 	Model          *string
+	FallbackModel  *string
+	AutoFallback   *bool
 	Mode           *string
 	ConfigOptions  *map[string]string
 	AllowIndexing  *bool
@@ -153,7 +159,8 @@ type UpdateProfileRequest struct {
 }
 
 func enabledOnlyUpdate(req UpdateProfileRequest) bool {
-	return req.Enabled != nil && req.Name == nil && req.Model == nil && req.Mode == nil &&
+	return req.Enabled != nil && req.Name == nil && req.Model == nil &&
+		req.FallbackModel == nil && req.AutoFallback == nil && req.Mode == nil &&
 		req.ConfigOptions == nil && req.AllowIndexing == nil && req.AutoApprove == nil &&
 		req.CLIPassthrough == nil && req.CLIFlags == nil && req.EnvVars == nil &&
 		req.CommandPrefix == nil
@@ -174,6 +181,12 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 				profile.Name = newName
 			}
 		}
+	}
+	if req.FallbackModel != nil {
+		profile.FallbackModel = strings.TrimSpace(*req.FallbackModel)
+	}
+	if req.AutoFallback != nil {
+		profile.AutoFallback = *req.AutoFallback
 	}
 	if req.Mode != nil {
 		profile.Mode = *req.Mode
@@ -573,6 +586,8 @@ func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 		Name:             profile.Name,
 		AgentDisplayName: profile.AgentDisplayName,
 		Model:            profile.Model,
+		FallbackModel:    profile.FallbackModel,
+		AutoFallback:     profile.AutoFallback,
 		Mode:             profile.Mode,
 		ConfigOptions:    profileconfig.SanitizeConfigOptions(profile.ConfigOptions),
 		AllowIndexing:    profile.AllowIndexing,

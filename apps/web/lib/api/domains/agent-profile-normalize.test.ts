@@ -7,45 +7,50 @@ const SAMPLE_ID = "p1";
 const SAMPLE_PREFIX = "greywall --";
 const WORKSPACE_ID = "workspace-1";
 
+const snakeCaseWirePayload = {
+  id: SAMPLE_ID,
+  agent_id: "claude",
+  name: "default",
+  agent_display_name: "Claude Code",
+  model: "claude-sonnet-4-5",
+  mode: "acp",
+  allow_indexing: true,
+  auto_approve: false,
+  cli_flags: [{ flag: "--verbose", description: "v", enabled: true }],
+  env_vars: [sampleEnvVar],
+  cli_passthrough: false,
+  enabled: false,
+  workspace_id: WORKSPACE_ID,
+  user_modified: true,
+  created_at: "2026-01-01T00:00:00Z",
+  updated_at: "2026-01-02T00:00:00Z",
+};
+
+const expectedCamelCaseProfile = {
+  id: SAMPLE_ID,
+  name: "default",
+  agentId: "claude",
+  agentDisplayName: "Claude Code",
+  model: "claude-sonnet-4-5",
+  fallbackModel: "",
+  autoFallback: false,
+  mode: "acp",
+  allowIndexing: true,
+  autoApprove: false,
+  cliFlags: [{ flag: "--verbose", description: "v", enabled: true }],
+  envVars: [sampleEnvVar],
+  cliPassthrough: false,
+  enabled: false,
+  workspaceId: WORKSPACE_ID,
+  userModified: true,
+  createdAt: "2026-01-01T00:00:00Z",
+  updatedAt: "2026-01-02T00:00:00Z",
+};
+
 describe("normalizeAgentProfile", () => {
   it("converts snake_case wire payload to canonical camelCase", () => {
-    const wire = {
-      id: SAMPLE_ID,
-      agent_id: "claude",
-      name: "default",
-      agent_display_name: "Claude Code",
-      model: "claude-sonnet-4-5",
-      mode: "acp",
-      allow_indexing: true,
-      auto_approve: false,
-      cli_flags: [{ flag: "--verbose", description: "v", enabled: true }],
-      env_vars: [sampleEnvVar],
-      cli_passthrough: false,
-      enabled: false,
-      workspace_id: WORKSPACE_ID,
-      user_modified: true,
-      created_at: "2026-01-01T00:00:00Z",
-      updated_at: "2026-01-02T00:00:00Z",
-    };
-    const result = normalizeAgentProfile(wire);
-    expect(result).toEqual({
-      id: SAMPLE_ID,
-      name: "default",
-      agentId: "claude",
-      agentDisplayName: "Claude Code",
-      model: "claude-sonnet-4-5",
-      mode: "acp",
-      allowIndexing: true,
-      autoApprove: false,
-      cliFlags: [{ flag: "--verbose", description: "v", enabled: true }],
-      envVars: [sampleEnvVar],
-      cliPassthrough: false,
-      enabled: false,
-      workspaceId: WORKSPACE_ID,
-      userModified: true,
-      createdAt: "2026-01-01T00:00:00Z",
-      updatedAt: "2026-01-02T00:00:00Z",
-    });
+    const result = normalizeAgentProfile(snakeCaseWirePayload);
+    expect(result).toEqual(expectedCamelCaseProfile);
   });
 
   it("falls back to safe defaults for missing fields", () => {
@@ -114,6 +119,23 @@ describe("normalizeAgentProfile", () => {
     });
     expect(objectResult.commandPrefix).toBeUndefined();
   });
+
+  it("maps fallback_model/auto_fallback from the wire shape", () => {
+    const result = normalizeAgentProfile({
+      id: SAMPLE_ID,
+      name: "default",
+      fallback_model: "gpt-5",
+      auto_fallback: true,
+    });
+    expect(result.fallbackModel).toBe("gpt-5");
+    expect(result.autoFallback).toBe(true);
+  });
+
+  it("defaults fallbackModel to empty and autoFallback to false when absent", () => {
+    const result = normalizeAgentProfile({ id: SAMPLE_ID, name: "default" });
+    expect(result.fallbackModel).toBe("");
+    expect(result.autoFallback).toBe(false);
+  });
 });
 
 describe("toAgentProfilePayload", () => {
@@ -149,6 +171,21 @@ describe("toAgentProfilePayload", () => {
       commandPrefix: SAMPLE_PREFIX,
     });
     expect(payload).toEqual({ id: SAMPLE_ID, name: "default", command_prefix: SAMPLE_PREFIX });
+  });
+
+  it("maps fallbackModel/autoFallback to fallback_model/auto_fallback", () => {
+    const payload = toAgentProfilePayload({
+      id: toAgentProfileId(SAMPLE_ID),
+      name: "default",
+      fallbackModel: "gpt-5",
+      autoFallback: true,
+    });
+    expect(payload).toEqual({
+      id: SAMPLE_ID,
+      name: "default",
+      fallback_model: "gpt-5",
+      auto_fallback: true,
+    });
   });
 
   it("maps enabled and omits it when undefined", () => {

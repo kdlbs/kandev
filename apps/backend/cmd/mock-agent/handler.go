@@ -178,9 +178,9 @@ func emitBulk(e *emitter, count int) {
 // delayRange returns min/max delay in milliseconds based on model name.
 func delayRange(model string) (int, int) {
 	switch model {
-	case "mock-fast":
+	case modelFast:
 		return 10, 50
-	case "mock-slow":
+	case modelSlow:
 		return 500, 3000
 	default:
 		return 100, 500

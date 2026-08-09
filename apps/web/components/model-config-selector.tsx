@@ -24,6 +24,10 @@ export type ModelSelectorOption = {
   name: string;
   description?: string;
   usageMultiplier?: string;
+  /** When true the model is unavailable ("gone") — rendered greyed out and
+   * not selectable, with `disabledReason` shown in a tooltip. */
+  disabled?: boolean;
+  disabledReason?: string;
 };
 
 export type DynamicConfigOption = {
@@ -43,6 +47,8 @@ export type SelectConfigOption = DynamicConfigOption & {
 type TriggerLabelOptions = {
   summary: "changed";
   configBaseline?: Record<string, string>;
+  /** Appended to the trigger's model label (e.g. "(fallback)"). */
+  currentModelSuffix?: string;
 };
 
 type TriggerDetail = {
@@ -114,9 +120,9 @@ export function triggerLabel(
   options?: TriggerLabelOptions,
 ): string {
   const modelConfig = configOptions.find(isModelConfigOption);
-  const modelValue = modelConfig
-    ? currentOptionName(modelConfig)
-    : displayModelName(modelOptions, currentModel);
+  const modelValue =
+    (modelConfig ? currentOptionName(modelConfig) : displayModelName(modelOptions, currentModel)) +
+    (options?.currentModelSuffix ?? "");
   const baseline = options?.configBaseline;
   const extras = configOptions
     .filter((option) => !isModelConfigOption(option))
@@ -183,12 +189,13 @@ function ModelRow({
   selected: boolean;
   onSelect: (value: string) => void;
 }) {
-  return (
+  const item = (
     <CommandItem
       value={model.id}
       keywords={[model.name, model.description ?? "", model.id]}
-      onSelect={() => onSelect(model.id)}
-      className="relative pr-7"
+      onSelect={() => !model.disabled && onSelect(model.id)}
+      disabled={model.disabled}
+      className={cn("relative pr-7", model.disabled && "opacity-40 cursor-not-allowed")}
     >
       <div className="flex min-w-0 flex-1 items-center">
         <div className="min-w-0 flex-1">
@@ -208,6 +215,28 @@ function ModelRow({
       />
     </CommandItem>
   );
+  // cmdk's CommandItem swallows pointer events with no native tooltip slot;
+  // wrap disabled items in a Tooltip trigger so the gone-reason shows. The
+  // CommandItem is disabled (unfocusable), so the wrapper itself must be
+  // focusable and carry an accessible name for keyboard users to reach the
+  // reason.
+  if (model.disabled && model.disabledReason) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            tabIndex={0}
+            aria-label={`${model.name}: ${model.disabledReason}`}
+            className="rounded outline-none focus-visible:ring-2 focus-visible:ring-ring/35"
+          >
+            {item}
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="right">{model.disabledReason}</TooltipContent>
+      </Tooltip>
+    );
+  }
+  return item;
 }
 
 function ConfigOptionTrigger({
@@ -423,11 +452,16 @@ export type ModelConfigSelectorProps = {
   triggerClassName?: string;
   triggerSummary?: "all" | "changed";
   configBaseline?: Record<string, string>;
+  /** Optional suffix appended to the trigger's model label (e.g. "(fallback)"). */
+  currentModelSuffix?: string;
+
+  /** Optional title tooltip on the trigger (e.g. explains a live-only note). */
+  triggerTitle?: string;
 };
 
 type ModelConfigSelectorTriggerProps = Pick<
   ModelConfigSelectorProps,
-  "ariaLabel" | "disabled" | "placeholder" | "triggerClassName" | "variant"
+  "ariaLabel" | "disabled" | "placeholder" | "triggerClassName" | "triggerTitle" | "variant"
 > & {
   label: string;
   details?: TriggerDetail[];
@@ -440,6 +474,7 @@ function ModelConfigSelectorTrigger({
   label,
   placeholder,
   triggerClassName,
+  triggerTitle,
   variant,
 }: ModelConfigSelectorTriggerProps) {
   const compact = variant === "compact";
@@ -455,6 +490,7 @@ function ModelConfigSelectorTrigger({
         className={cn(baseClassName, triggerClassName)}
         aria-label={ariaLabel}
         disabled={disabled}
+        title={triggerTitle}
       >
         <span className="truncate">{label || placeholder}</span>
         <IconChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />
@@ -482,9 +518,10 @@ function ModelConfigSelectorTrigger({
 function triggerLabelOptions(
   triggerSummary: "all" | "changed",
   configBaseline: Record<string, string> | undefined,
+  currentModelSuffix?: string,
 ): TriggerLabelOptions | undefined {
   if (triggerSummary !== "changed") return undefined;
-  return { summary: "changed", configBaseline };
+  return { summary: "changed", configBaseline, currentModelSuffix };
 }
 
 export const ModelConfigSelector = memo(function ModelConfigSelector({
@@ -501,7 +538,9 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
   triggerClassName: customTriggerClassName,
   triggerSummary = "all",
   configBaseline,
+  currentModelSuffix,
 }: ModelConfigSelectorProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [activeConfigId, setActiveConfigId] = useState<string | null>(null);
   const selectConfigOptions = usableConfigOptions(configOptions);
@@ -514,12 +553,16 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
     currentModel,
     modelConfig,
     configOptions,
-    triggerLabelOptions(triggerSummary, configBaseline),
+    triggerLabelOptions(triggerSummary, configBaseline, currentModelSuffix),
   );
   const details =
     triggerSummary === "changed"
       ? triggerDetails(modelOptions, currentModel, modelConfig, extraConfigOptions)
       : undefined;
+  // The (fallback) marker is a live WS signal, not replayed on reload. When
+  // it is active, explain on the trigger that the note is transient so users
+  // are not surprised when the marker disappears after a refresh.
+  const triggerTitle = currentModelSuffix ? t("settings:fallbackNoteLive") : undefined;
 
   const hasExtraConfigOptions = extraConfigOptions.length > 0;
   const onModelSelect = (value: string) => {
@@ -546,6 +589,7 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
         label={label}
         placeholder={placeholder}
         triggerClassName={customTriggerClassName}
+        triggerTitle={triggerTitle}
         variant={variant}
       />
       <PopoverContent

@@ -192,6 +192,11 @@ type AgentStreamEventData struct {
 	// runtime/workflow overrides are applied.
 	OriginalConfigCandidate []streams.ConfigOption `json:"original_config_candidate,omitempty"`
 
+	// Session model fallback (from "session_model_fallback" event): the
+	// fallback model the session started on because the configured start
+	// model was unavailable.
+	FallbackModel string `json:"fallback_model,omitempty"`
+
 	// Session info (from "session_info" event)
 	SessionTitle     string         `json:"session_title,omitempty"`
 	SessionUpdatedAt string         `json:"session_updated_at,omitempty"`
@@ -535,6 +540,24 @@ type SessionModelsEventPayload struct {
 	// compare the current ConfigOptions without duplicating provider metadata.
 	ConfigBaseline map[string]string `json:"config_baseline,omitempty"`
 	Timestamp      string            `json:"timestamp"`
+}
+
+// SessionModelFallbackEventPayload is the payload for session fallback-model
+// events: the session started on the profile's fallback model because the
+// configured start model was unavailable.
+type SessionModelFallbackEventPayload struct {
+	TaskID        string `json:"task_id"`
+	SessionID     string `json:"session_id"`
+	AgentID       string `json:"agent_id"`
+	FallbackModel string `json:"fallback_model"`
+	Timestamp     string `json:"timestamp"`
+}
+
+// GetSessionID returns the session ID for this event (used by event routing).
+// Without it the gateway's extractSessionID cannot route the notification to
+// the session's subscribers.
+func (p SessionModelFallbackEventPayload) GetSessionID() string {
+	return p.SessionID
 }
 
 // SessionModelsSnapshot is the persisted provider-derived state needed to

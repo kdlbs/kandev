@@ -308,6 +308,8 @@ type createAgentRequest struct {
 type createAgentProfileRequest struct {
 	Name          string                 `json:"name"`
 	Model         string                 `json:"model"`
+	FallbackModel string                 `json:"fallback_model,omitempty"`
+	AutoFallback  bool                   `json:"auto_fallback"`
 	Mode          string                 `json:"mode,omitempty"`
 	CLIFlags      []dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
 	EnvVars       []dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
@@ -333,6 +335,8 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 		profiles = append(profiles, controller.CreateAgentProfileRequest{
 			Name:          profile.Name,
 			Model:         profile.Model,
+			FallbackModel: profile.FallbackModel,
+			AutoFallback:  profile.AutoFallback,
 			Mode:          profile.Mode,
 			CLIFlags:      profile.CLIFlags,
 			EnvVars:       profile.EnvVars,
@@ -494,6 +498,8 @@ func (h *Handlers) httpUpdateProfileMcpConfig(c *gin.Context) {
 type createProfileRequest struct {
 	Name           string                 `json:"name"`
 	Model          string                 `json:"model"`
+	FallbackModel  string                 `json:"fallback_model,omitempty"`
+	AutoFallback   bool                   `json:"auto_fallback"`
 	Mode           string                 `json:"mode,omitempty"`
 	ConfigOptions  map[string]string      `json:"config_options,omitempty"`
 	AllowIndexing  bool                   `json:"allow_indexing"`
@@ -518,6 +524,8 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 		AgentID:        c.Param("id"),
 		Name:           body.Name,
 		Model:          body.Model,
+		FallbackModel:  body.FallbackModel,
+		AutoFallback:   body.AutoFallback,
 		Mode:           body.Mode,
 		ConfigOptions:  body.ConfigOptions,
 		AllowIndexing:  body.AllowIndexing,
@@ -548,6 +556,8 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 type updateProfileRequest struct {
 	Name           *string                 `json:"name,omitempty"`
 	Model          *string                 `json:"model,omitempty"`
+	FallbackModel  *string                 `json:"fallback_model,omitempty"`
+	AutoFallback   *bool                   `json:"auto_fallback,omitempty"`
 	Mode           *string                 `json:"mode,omitempty"`
 	ConfigOptions  *map[string]string      `json:"config_options,omitempty"`
 	AllowIndexing  *bool                   `json:"allow_indexing,omitempty"`
@@ -573,6 +583,8 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 		ID:             c.Param("id"),
 		Name:           body.Name,
 		Model:          body.Model,
+		FallbackModel:  body.FallbackModel,
+		AutoFallback:   body.AutoFallback,
 		Mode:           body.Mode,
 		ConfigOptions:  body.ConfigOptions,
 		AllowIndexing:  body.AllowIndexing,
