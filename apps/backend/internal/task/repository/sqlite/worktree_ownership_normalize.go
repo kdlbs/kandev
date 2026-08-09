@@ -471,13 +471,14 @@ func (c *worktreeCutover) isSupersededSessionWorktree(wt legacySessionWorktree) 
 		return superseded
 	}
 
+	session, hasSession := c.sessions[wt.sessionID]
 	superseded := false
-	if isLegacyDeletedWorktree(wt) {
+	switch {
+	case isLegacyDeletedWorktree(wt):
 		superseded = true
-	} else if session, ok := c.sessions[wt.sessionID]; ok &&
-		c.authoritativeWorktreeIDs[authoritativeWorktreeKey(session.taskID, wt.worktreeID)] {
+	case hasSession && c.authoritativeWorktreeIDs[authoritativeWorktreeKey(session.taskID, wt.worktreeID)]:
 		superseded = true
-	} else if session, ok := c.sessions[wt.sessionID]; ok && isLegacyHistoricalSession(session.state) {
+	case hasSession && isLegacyHistoricalSession(session.state):
 		for _, row := range c.envRepos {
 			env, ok := c.envs[row.envID]
 			if !ok || env.taskID != session.taskID || row.worktreeID == "" {

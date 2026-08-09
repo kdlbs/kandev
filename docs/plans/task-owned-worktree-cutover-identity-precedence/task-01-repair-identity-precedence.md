@@ -94,3 +94,11 @@ and synchronized task/plan status.
   the developer SQLite driver lacked FTS5. The tagged rerun passed.
 - Removed the temporary copied databases and throwaway reproduction test. No
   filesystem, Git worktree, or live user database was mutated.
+- PR fixup added explicit `RUNNING` coverage for flat-environment precedence
+  and replaced duplicate session-map lookups with one lookup before the
+  supersession decision.
+- The first focused fixup test could not write the sandboxed default Go cache;
+  `GOCACHE=/tmp/kandev-go-cache go test
+  ./internal/task/repository/sqlite -run
+  'TestCutover_(PrefersCanonicalMetadataForResumableSession|PrefersFlatMetadataForSameWorktree|ConflictingWorktreesFailClosed)'
+  -count=1` passed.

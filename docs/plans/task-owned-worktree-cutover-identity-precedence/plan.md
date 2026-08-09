@@ -117,3 +117,15 @@ fixtures share the same persistence boundary.
 - Additional public recovery documentation; the current operations and
   Kubernetes pages already describe snapshot-based rollback and forbid manual
   row deletion.
+
+## PR Fixup Results
+
+- Resolved the invalid request to remove the repair spec amendment: the spec is
+  `draft`, and the repository `/fix` workflow requires the affected behavioral
+  spec to be amended before implementation.
+- Added explicit `RUNNING` coverage to the flat-environment precedence fixture
+  and simplified the classifier to perform one session lookup.
+- `GOCACHE=/tmp/kandev-go-cache go test
+  ./internal/task/repository/sqlite -run
+  'TestCutover_(PrefersCanonicalMetadataForResumableSession|PrefersFlatMetadataForSameWorktree|ConflictingWorktreesFailClosed)'
+  -count=1` - passed.

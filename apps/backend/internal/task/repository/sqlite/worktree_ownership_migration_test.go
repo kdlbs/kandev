@@ -604,7 +604,7 @@ func TestCutover_PrefersCanonicalMetadataForResumableSession(t *testing.T) {
 // TestCutover_PrefersFlatMetadataForSameWorktree proves that the surviving
 // flat environment beats stale session metadata when no canonical row exists.
 func TestCutover_PrefersFlatMetadataForSameWorktree(t *testing.T) {
-	for _, state := range []string{"WAITING_FOR_INPUT", "CANCELLED"} {
+	for _, state := range []string{"RUNNING", "WAITING_FOR_INPUT", "CANCELLED"} {
 		t.Run(state, func(t *testing.T) {
 			db := openLegacyDB(t)
 			now := time.Now().UTC().Truncate(time.Second)
