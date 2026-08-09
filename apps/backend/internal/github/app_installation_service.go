@@ -140,7 +140,7 @@ func (s *AppInstallationService) Complete(
 	if err != nil {
 		return AppInstallationResult{}, err
 	}
-	installation, user, err := s.verifyInstallationCallback(ctx, callback, flow)
+	installation, user, err := s.verifyInstallationCallback(ctx, callback)
 	if err != nil {
 		return AppInstallationResult{}, err
 	}
@@ -158,14 +158,13 @@ func (s *AppInstallationService) Complete(
 func (s *AppInstallationService) verifyInstallationCallback(
 	ctx context.Context,
 	callback AppInstallationCallback,
-	flow *AuthFlow,
 ) (AppInstallation, GitHubOAuthUser, error) {
-	if callback.InstallationID <= 0 || callback.Code == "" ||
-		(callback.SetupAction != "install" && callback.SetupAction != "update") {
+	if callback.InstallationID <= 0 || callback.Code == "" {
 		return AppInstallation{}, GitHubOAuthUser{}, ErrInstallationAssociationUnverified
 	}
 
-	tokens, err := s.oauth.ExchangeUserCode(ctx, callback.Code, flow.PKCEVerifier, s.config.CallbackURL)
+	// GitHub starts OAuth-on-install without a caller-supplied PKCE challenge.
+	tokens, err := s.oauth.ExchangeUserCode(ctx, callback.Code, "", s.config.CallbackURL)
 	if err != nil || tokens.AccessToken == "" {
 		return AppInstallation{}, GitHubOAuthUser{}, fmt.Errorf(
 			"exchange GitHub App authorizer code: %w", associationError(err),

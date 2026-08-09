@@ -110,7 +110,7 @@ func TestAppInstallationStartBuildsStateBoundInstallURL(t *testing.T) {
 	}
 }
 
-func TestAppInstallationCompleteAcceptsOAuthDuringInstallCallbackShape(t *testing.T) {
+func TestAppInstallationCompleteAcceptsAutomaticOAuthInstallCallback(t *testing.T) {
 	flowStore := &oauthFlowMemoryStore{}
 	flows := NewOAuthFlowManager(flowStore)
 	flows.random = strings.NewReader(strings.Repeat("e", oauthRandomBytes))
@@ -136,13 +136,16 @@ func TestAppInstallationCompleteAcceptsOAuthDuringInstallCallbackShape(t *testin
 	}
 
 	result, err := service.Complete(context.Background(), AppInstallationCallback{
-		State: started.State, Code: "oauth-code", SetupAction: "install", InstallationID: 42,
+		State: started.State, Code: "oauth-code", InstallationID: 42,
 	})
 	if err != nil {
 		t.Fatalf("Complete() error = %v", err)
 	}
 	if result.AuthorizingUser.Login != "octocat" || result.Installation.AccountLogin != "acme" {
 		t.Fatalf("Complete() = %+v", result)
+	}
+	if oauth.exchangeCode != "oauth-code" || oauth.verifier != "" {
+		t.Fatalf("OAuth exchange code = %q, verifier = %q", oauth.exchangeCode, oauth.verifier)
 	}
 	if store.connection.Source != ConnectionSourceGitHubAppInstallation ||
 		store.connection.CredentialGeneration != 4 || store.connection.InstallationID == nil ||
