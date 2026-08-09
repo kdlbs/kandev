@@ -93,9 +93,9 @@ help:
 	@echo "Development Commands:"
 	@echo "  bootstrap        Install mise tools, workspace deps, and git hooks"
 	@echo "  bootstrap-e2e    Bootstrap plus Playwright browser/system deps"
-	@echo "  dev              Run backend + web via local CLI (auto ports)"
+	@echo "  dev              Run backend + web via the native Go launcher (auto ports)"
 	@echo "  dev PORT=38430 WEB_PORT=37430   PORT beats KANDEV_BACKEND_PORT/KANDEV_PORT, WEB_PORT beats KANDEV_WEB_PORT"
-	@echo "  dev DEV_ARGS='--verbose'        Pass extra flags through to the dev CLI"
+	@echo "  dev DEV_ARGS='--verbose'        Pass extra flags through to the native launcher"
 	@echo "  dev-prod-db      Run dev mode against the production db at ~/.kandev"
 	@echo "  dev-backend      Run backend in development mode (port 38429)"
 	@echo "  dev-web          Run web app in development mode (port 37429)"
@@ -194,8 +194,8 @@ endif
 .PHONY: dev
 dev: doctor
 	# POSIX-only (cp/exec): on Windows run from Git Bash/MSYS, like `make start`.
-	@echo "Building backend and remote agentctl helpers..."
-	@$(MAKE) -C $(BACKEND_DIR) build-runtime build-agentctl-remote
+	@echo "Building dev launcher..."
+	@$(MAKE) -C $(BACKEND_DIR) build-kandev
 	@cp $(BACKEND_DIR)/bin/kandev$(EXE) $(BACKEND_DIR)/bin/kandev-launcher$(EXE)
 	@echo "Launching via native Go launcher$(if $(DEV_FLAGS_DISPLAY), ($(DEV_FLAGS_DISPLAY)), (auto ports))..."
 	@exec $(BACKEND_DIR)/bin/kandev-launcher$(EXE) dev $(DEV_FLAGS)

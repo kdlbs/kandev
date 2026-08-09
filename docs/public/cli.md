@@ -200,7 +200,7 @@ Development hot reload is also checkout-only:
 make dev
 ```
 
-`make dev` builds the remote `agentctl` helpers and invokes the repository's native Go launcher. The `kandev dev` syntax above belongs to that source launcher; installing the npm or Homebrew release does not install it as a second runtime mode.
+`make dev` builds the launcher plus the host `agentctl` and, on hosts other than Linux/amd64, one Linux/amd64 helper. It then invokes the repository's native Go launcher. The `kandev dev` syntax above belongs to that source launcher; installing the npm or Homebrew release does not install it as a second runtime mode.
 
 ### OS service commands
 

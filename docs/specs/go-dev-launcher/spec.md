@@ -123,22 +123,22 @@ second shipped binary.
 
 ```makefile
 dev: doctor
-	@$(MAKE) -C $(BACKEND_DIR) build-runtime build-agentctl-remote
+	@$(MAKE) -C $(BACKEND_DIR) build-kandev
 	@cp bin/kandev → bin/kandev-launcher
 	@exec $(BACKEND_DIR)/bin/kandev-launcher dev $(DEV_FLAGS)
 ```
 
-`build-runtime` (not the full `build` aggregate) is enough for the copy: it produces
-`bin/kandev`, `bin/agentctl`, and the remote helpers. The supervised child's
-`make -C apps/backend dev` still runs its own `dev: build`, which is where mock-agent,
-acpdbg, and winjob get built — building them twice (root + child) would add a full
-duplicate build to every `make dev` launch.
+`build-kandev` is the only root prebuild: the copied supervisor binary does not need
+agentctl helpers before it starts the supervised child. The child's `make -C apps/backend
+dev` runs `dev: build-dev`, which builds the native agentctl and, on hosts other than
+Linux/amd64, one `linux/amd64` helper, plus mock-agent, acpdbg, and winjob. Full
+four-platform helper builds remain under `build-runtime` for release and service bundles.
 
 `build-winjob` leaves the dev path: the Go launcher's process-group handling replaces it,
 and the root `dev` target no longer invokes the winjob build step. `cmd/winjob` itself
-stays in the tree for any other consumer. (Note: `make dev` still builds winjob
-transitively, because the root target depends on the backend's `build` aggregate, which
-has always included `build-winjob` — the removal is of the *step*, not the dependency.)
+stays in the tree for any other consumer. The lean `dev: build-dev` target still builds
+winjob once because the backend's Windows process handling remains part of the local
+development binary set.
 
 ### `apps/cli` shrinks to the published shim
 

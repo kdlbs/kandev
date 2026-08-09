@@ -10,14 +10,14 @@ spec: "../../specs/go-dev-launcher/spec.md"
 
 # Task 06: Makefile cutover to the Go dev launcher
 
-Point `make dev` at the native launcher and drop the Node and winjob steps.
+Point `make dev` at the native launcher and drop the Node and root winjob steps.
 
 ## Acceptance
 
-- `make dev` builds the backend and the remote agentctl helpers, copies
-  `apps/backend/bin/kandev` to a distinct launcher path, and `exec`s that copy with
-  `dev` plus the existing `DEV_FLAGS`. It no longer invokes `pnpm`, `tsx`, or
-  `build-winjob`.
+- `make dev` prebuilds only `apps/backend/bin/kandev`, copies it to a distinct launcher
+  path, and `exec`s that copy with `dev` plus the existing `DEV_FLAGS`. The supervised
+  backend `dev` target builds the native agentctl and, on hosts other than Linux/amd64,
+  one Linux/amd64 helper. It no longer invokes `pnpm` or `tsx` directly.
 - `make dev PORT=… WEB_PORT=…` still forwards `--port` / `--web-internal-port`
   unchanged, and `make dev-prod-db` still exports `KANDEV_DATABASE_PATH` and delegates
   to `make dev`.
@@ -40,7 +40,7 @@ banner shows the `.kandev-dev` DB path, and Ctrl-C leaves nothing behind
 ## Files
 
 - `Makefile` — the `dev` target (currently lines 187-195) and `clean`
-- `apps/backend/Makefile` — the `build-winjob` doc comment
+- `apps/backend/Makefile` — the lean dev build targets and `build-winjob` doc comment
 - `.gitignore` — the copied launcher binary
 
 ## Inputs

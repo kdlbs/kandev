@@ -128,12 +128,27 @@ COMMIT := $(shell git rev-parse --short HEAD $(NULL_REDIR) || echo unknown)
 
 LDFLAGS += -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
 
+# Development only needs the native agentctl plus the linux/amd64 helper when
+# the control plane is not linux/amd64. A same-platform Linux/amd64 remote can
+# use the native helper through AgentctlResolver's dev fallback.
+DEV_HOST_GOOS := $(shell $(GO) env GOHOSTOS $(NULL_REDIR))
+DEV_HOST_GOARCH := $(shell $(GO) env GOHOSTARCH $(NULL_REDIR))
+ifeq ($(DEV_HOST_GOOS),linux)
+ifeq ($(DEV_HOST_GOARCH),amd64)
+  DEV_AGENTCTL_TARGETS := build-agentctl
+else
+  DEV_AGENTCTL_TARGETS := build-agentctl build-agentctl-linux
+endif
+else
+  DEV_AGENTCTL_TARGETS := build-agentctl build-agentctl-linux
+endif
+
 # Force the application module's Go version; go run otherwise selects the
 # analyzer module's minimum toolchain before go/packages loads this module.
 DEADCODE_VERSION ?= v0.48.0
 DEADCODE_GO_TOOLCHAIN ?= go1.26.0
 
-.PHONY: all build build-runtime build-all build-agentctl build-agentctl-remote build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg acpdbg build-mock-agent build-mock-agent-linux build-preview build-winjob e2e-plugin-package clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint deadcode fmt vet check-make-shells help
+.PHONY: all build build-dev build-runtime build-kandev build-all build-agentctl build-agentctl-dev build-agentctl-remote build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg acpdbg build-mock-agent build-mock-agent-linux build-preview build-winjob e2e-plugin-package clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint deadcode fmt vet check-make-shells help
 
 ## Default target
 all: build
@@ -174,10 +189,20 @@ build-acpdbg:
 ## Build the complete development binary set.
 build: build-runtime build-mock-agent build-acpdbg build-winjob
 
+## Build the lean development binary set. Unlike `build`, this does not build
+## every cross-platform remote helper; dev needs the host helper and, for a
+## host other than Linux/amd64, one linux/amd64 helper.
+build-dev: build-kandev build-agentctl-dev build-mock-agent build-acpdbg build-winjob
+
 ## Build only the binaries shipped in a runtime bundle. Always includes remote
 ## agentctl helpers because SSH/Docker/Sprites executors upload or bind-mount
 ## platform-specific sidecars into remote environments.
-build-runtime: build-agentctl build-agentctl-remote
+build-runtime: build-agentctl build-agentctl-remote build-kandev
+
+## Build the native kandev binary used both by runtime bundles and by the
+## copied make-dev launcher. Keep this separate from build-runtime so the
+## launcher prebuild does not pull in agentctl helpers it does not use yet.
+build-kandev:
 	@echo "Building $(BINARY_NAME)..."
 	-@$(MKDIR) $(BUILD_DIR)
 	$(CGO_PREFIX) $(GO) build $(GOFLAGS) -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)$(EXE) ./cmd/kandev
@@ -192,6 +217,9 @@ build-agentctl:
 	@echo "Building agentctl..."
 	-@$(MKDIR) $(BUILD_DIR)
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl$(EXE) ./cmd/agentctl
+
+## Build only the agentctl helpers needed by the development profile.
+build-agentctl-dev: $(DEV_AGENTCTL_TARGETS)
 
 ## Build all remote agentctl helpers used by SSH/Docker/Sprites executors.
 build-agentctl-remote: build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64
@@ -266,7 +294,7 @@ run: build
 	$(RUN_BIN) __backend
 
 ## Run in development mode (with pprof enabled)
-dev: build
+dev: build-dev
 	@echo "Running $(BINARY_NAME) in development mode..."
 	@$(DEV_ENV) $(EXEC) $(RUN_BIN) __backend
 
