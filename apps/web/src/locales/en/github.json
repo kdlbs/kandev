@@ -468,7 +468,7 @@
   "selectWorkflow": "Select workflow",
   "selectWorkspace": "Select workspace",
   "selectedRepositories": "Selected repositories",
-  "setTheseExactUrlsCreateAClientSecret": "Set these exact URLs, create a client secret and webhook secret, and download a private key. This one-time setup expires {{expiresAt}}.",
+  "setTheseExactUrlsCreateAClientSecret": "Add the two user authorization callback URLs in the order shown, set the remaining exact values, create a client secret and webhook secret, and download a private key. This one-time setup expires {{expiresAt}}.",
   "showGithubApiLimits": "Show GitHub API limits",
   "showLess": "Show less",
   "showMore": "Show more",

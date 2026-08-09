@@ -199,9 +199,11 @@ copyable settings for that pending import. It is short-lived and single-use.
 1. Start **Add existing App** from the workspace GitHub connection flow. Enter its owner, label,
    visibility, and the public Kandev origin.
 2. Open the App under the owning user's or organization's **Settings > Developer settings > GitHub
-   Apps**, then apply every URL, permission, and event shown by Kandev. Set the App homepage to the
-   public Kandev origin, use JSON webhook delivery with SSL verification, request user
-   authorization during installation, and keep expiring user tokens enabled.
+   Apps**, then apply every URL, permission, and event shown by Kandev. Add the workspace
+   installation callback as the first user authorization callback and the personal identity
+   callback as the second. Set the App homepage to the public Kandev origin, use JSON webhook
+   delivery with SSL verification, request user authorization during installation, leave the setup
+   URL empty, and keep expiring user tokens enabled.
 3. Return before the preparation expires and provide the App ID, OAuth client ID and secret, App
    slug, webhook secret, and an RSA private key generated for that App. Treat every secret field as
    a root credential and never put it in workspace environment variables or executor profiles.
@@ -220,7 +222,7 @@ templates are useful when checking a proxy or GitHub setting:
 | Purpose | URL path |
 |---|---|
 | Manifest creation callback | `/api/v1/github/app/registrations/{registrationId}/manifest/callback` |
-| Workspace installation setup | `/api/v1/github/app/registrations/{registrationId}/install/callback` |
+| Workspace installation OAuth callback | `/api/v1/github/app/registrations/{registrationId}/install/callback` |
 | Personal identity OAuth callback | `/api/v1/github/app/registrations/{registrationId}/personal/callback` |
 | Signed webhook delivery | `/api/v1/github/app/registrations/{registrationId}/webhook` |
 

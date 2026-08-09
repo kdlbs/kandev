@@ -102,7 +102,7 @@ type DeploymentAppManifest struct {
 	HookAttributes        DeploymentAppManifestHook `json:"hook_attributes"`
 	RedirectURL           string                    `json:"redirect_url"`
 	CallbackURLs          []string                  `json:"callback_urls"`
-	SetupURL              string                    `json:"setup_url"`
+	SetupURL              string                    `json:"setup_url,omitempty"`
 	Public                bool                      `json:"public"`
 	DefaultPermissions    map[string]string         `json:"default_permissions"`
 	DefaultEvents         []string                  `json:"default_events"`
@@ -143,10 +143,14 @@ func BuildAppRegistrationManifest(
 	}
 	baseURL := strings.TrimRight(submission.Manifest.URL, "/") +
 		"/api/v1/github/app/registrations/" + registrationID.String()
+	installCallbackURL := baseURL + "/install/callback"
 	submission.Manifest.HookAttributes.URL = baseURL + "/webhook"
 	submission.Manifest.RedirectURL = baseURL + "/manifest/callback"
-	submission.Manifest.CallbackURLs = []string{baseURL + "/personal/callback"}
-	submission.Manifest.SetupURL = baseURL + "/install/callback"
+	submission.Manifest.CallbackURLs = []string{
+		installCallbackURL,
+		baseURL + "/personal/callback",
+	}
+	submission.Manifest.SetupURL = ""
 	submission.Manifest.Public = public
 	return submission, nil
 }
@@ -218,10 +222,12 @@ func BuildDeploymentAppManifest(
 			HookAttributes: DeploymentAppManifestHook{
 				URL: baseURL + "/api/v1/github/app/webhook", Active: true,
 			},
-			RedirectURL:  baseURL + "/api/v1/github/app/registration/callback",
-			CallbackURLs: []string{baseURL + "/api/v1/github/personal-connection/callback"},
-			SetupURL:     baseURL + "/api/v1/github/app/install/callback",
-			Public:       false,
+			RedirectURL: baseURL + "/api/v1/github/app/registration/callback",
+			CallbackURLs: []string{
+				baseURL + "/api/v1/github/app/install/callback",
+				baseURL + "/api/v1/github/personal-connection/callback",
+			},
+			Public: false,
 			DefaultPermissions: map[string]string{
 				"actions": "read", "administration": "read", "checks": "read",
 				"contents": "write", "issues": "write", "members": "read",
