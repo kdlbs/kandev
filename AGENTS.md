@@ -59,7 +59,7 @@ Architecture notes and per-area conventions live alongside the code they describ
 
 Commits to `main` **must** follow [Conventional Commits](https://www.conventionalcommits.org/) (`type: description`). PRs are squash-merged - the PR title becomes the commit, validated by CI. Changelog is auto-generated from these via git-cliff (`cliff.toml`). See `.agents/skills/commit/SKILL.md` for allowed types and examples.
 
-The commitlint hook caps the header at **100 characters** (`type(scope): description`). The pre-commit prettier hook also reformats staged TS/TSX files - if it does, the commit fails. Re-stage the reformatted files and create a new commit (don't `--amend`).
+The commitlint hook caps the header at **100 characters** (`type(scope): description`). The pre-commit prettier hook reformats staged TS/TSX files, and the `gofmt (backend)` hook can reformat staged Go files; if either hook changes files, the commit fails. Re-stage the reformatted files and create a new commit (don't `--amend`). Before committing, use `git diff --cached --name-only | grep '\.go$' | xargs gofmt -l`; run `gofmt -w` and re-add any files it reports.
 
 ### Release & Versioning
 
