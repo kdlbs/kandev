@@ -46,6 +46,8 @@ make dev PORT=38430 WEB_PORT=37430
 KANDEV_HOME_DIR="$PWD/.kandev-dev" KANDEV_DEBUG_DEV_MODE=true make dev-backend
 ```
 
+One backend owns a Kandev home at a time. Raw backend commands use the normal home by default, so a second backend with that home stops before it changes shared state. For an intentional second backend, use a separate `KANDEV_HOME_DIR`, database, and port.
+
 Use `make build` for a production build. Use `make start` for a production-shaped local start; it installs dependencies, builds and synchronizes the embedded web application, then launches Kandev and writes `<resolved-home>/logs/backend-logs.log`.
 
 ## Find the owner

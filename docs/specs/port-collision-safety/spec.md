@@ -1,9 +1,10 @@
 ---
 status: building
 created: 2026-08-07
+updated: 2026-08-09
 ---
 
-# Port collision safety and launcher readiness
+# Port collision and backend ownership safety
 
 ## Why
 
@@ -16,6 +17,10 @@ wrong SQLite database and make the failure look like a successful startup.
 On Windows, the agentctl instance allocator has a separate failure: the operating system reports
 WSAEADDRINUSE (10048), which does not match the synthetic Go syscall.EADDRINUSE value used by the
 current retry check. The allocator therefore stops instead of trying the next port.
+
+A direct backend command can bypass launcher checks. A second backend can then open the same
+Kandev home before its HTTP bind fails. This sequence can migrate the live database and reconcile
+active sessions while the first backend still owns them.
 
 This repair covers GitHub issues
 [#2370](https://github.com/kdlbs/kandev/issues/2370),
@@ -70,6 +75,33 @@ Go syscall value and x/sys/windows.WSAEADDRINUSE on Windows.
 - Non-address-in-use bind errors still release the candidate and fail immediately.
 - String matching on the English error text is not part of the contract.
 
+### Exclusive runtime-state ownership
+
+Every backend process must acquire exclusive ownership before it initializes the backend logger or
+opens a persistent store. The ownership boundary covers these targets:
+
+- The canonical Kandev home, because it owns logs, secrets, worktrees, supervisor files, and the
+  default SQLite database.
+- A custom SQLite database outside that home, because separate homes can still reference the same
+  database file.
+
+The backend holds each operating-system advisory lock until all backend cleanup is complete. A
+crash releases the lock. The lock file can remain after exit because file existence does not prove
+ownership.
+
+If another process holds a required lock, startup exits non-zero. It names the conflicting home or
+database path and tells the operator to use a separate `KANDEV_HOME_DIR` for an intentional second
+instance. The rejected process must not initialize file logging, create a database backup, apply a
+migration, reconcile a session, launch agentctl, or start an HTTP server.
+
+The backend fails closed when it cannot create, open, or acquire a required lock. Launcher port
+preflight and health-token ownership remain useful readiness checks, but they are not persistent
+state ownership checks.
+
+Intentional local instances need separate Kandev homes and separate SQLite databases. A backend
+that uses Postgres still locks its local Kandev home. Active-active Postgres deployment behavior is
+not part of this contract.
+
 ## Scenarios
 
 ### Issue #2370: explicit port collisions
@@ -102,6 +134,19 @@ Go syscall value and x/sys/windows.WSAEADDRINUSE on Windows.
 3. Given a tunnel port is occupied on Windows, when a tunnel is requested, then the caller gets
    the existing clear “port is already in use” error.
 
+### Concurrent backend startup
+
+1. Given one backend owns a Kandev home, when another backend uses the same home, then the second
+   process exits before any persistent backend initialization.
+2. Given two homes reference the same external SQLite database, when both backends start, then
+   only one process opens or changes that database.
+3. Given a backend process stops or crashes, when its successor starts with the same home, then the
+   successor acquires ownership without manual lock-file removal.
+4. Given a live backend uses the default home, when a developer runs a direct backend target
+   against that home, then the direct command fails without changing task or session state.
+5. Given two distinct homes, databases, and ports, when two local backends start, then both can run
+   as independent instances.
+
 ## Out of scope
 
 - Changing default ports, fallback ranges, or automatic-port selection policy.
@@ -113,11 +158,16 @@ Go syscall value and x/sys/windows.WSAEADDRINUSE on Windows.
 - Renaming KANDEV_DESKTOP_HEALTH_TOKEN to a neutral variable; that would be a separate contract
   migration.
 - Changing service-install handling of KANDEV_SERVER_PORT, which is a separate installer issue.
-- UI changes, database migrations, or new public authentication semantics.
+- Database-schema changes or new public authentication semantics.
+- Automatic home selection for direct backend commands.
+- Active-active backend support for one Postgres database or one event namespace.
+- New UI diagnostics for ownership or task-summary fields.
 
 ## Contract notes
 
 The existing desktop health-token contract in
 docs/specs/desktop-tauri-app/spec.md is the authority for the environment variable and response
-header. This repair extends its use to CLI/native launcher ownership checks without changing the
-backend route contract, so a new architecture decision record is not required.
+header. Backend runtime-state ownership follows
+[ADR-2026-08-09-exclusive-runtime-state-ownership](../../decisions/2026-08-09-exclusive-runtime-state-ownership.md).
+The repair plan is
+[Backend runtime-state ownership](../../plans/backend-runtime-state-ownership/plan.md).

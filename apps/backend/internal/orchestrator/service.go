@@ -1831,10 +1831,19 @@ func (s *Service) reconcileActiveSessionOnStartup(
 	// Active states: STARTING, RUNNING, WAITING_FOR_INPUT
 	// Set session to WAITING_FOR_INPUT (idle, ready for lazy resume when user opens it)
 	if previousState != models.TaskSessionStateWaitingForInput {
-		if err := s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""); err != nil {
+		updated, changed := s.updateTaskSessionStateWithHook(
+			ctx,
+			running.TaskID,
+			sessionID,
+			models.TaskSessionStateWaitingForInput,
+			"",
+			false,
+			nil,
+		)
+		if updated == nil && !changed {
 			s.logger.Warn("failed to set session to WAITING_FOR_INPUT on startup",
 				zap.String("session_id", sessionID),
-				zap.Error(err))
+			)
 		}
 	}
 	s.abandonOpenTurnsOnStartup(ctx, sessionID, "active session reconciled to waiting")

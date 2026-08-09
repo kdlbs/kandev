@@ -25,6 +25,7 @@ import (
 	"go.uber.org/zap"
 
 	// Common packages
+	"github.com/kandev/kandev/internal/backendapp/ownershiplock"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 
@@ -208,7 +209,28 @@ func Run(args []string, build BuildInfo) int {
 		cfg.Logging.Level = parsedFlags.LogLevel
 	}
 
-	// 2. Initialize logger
+	// Acquire runtime-state ownership before any shared-state initialization.
+	// The lock remains held through logger and service cleanup, so a second
+	// backend cannot reconcile or migrate the live home before its bind fails.
+	targets, err := ownershiplock.Targets(cfg.ResolvedHomeDir(), cfg.Database.Driver, cfg.Database.Path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to resolve backend runtime-state ownership: %v\n", err)
+		return 1
+	}
+	owner, err := ownershiplock.Acquire(targets)
+	if err != nil {
+		fmt.Fprintf(os.Stderr,
+			"Failed to acquire backend runtime-state ownership: %v; use a separate KANDEV_HOME_DIR for an intentional second instance\n",
+			err)
+		return 1
+	}
+	defer func() {
+		if closeErr := owner.Close(); closeErr != nil {
+			fmt.Fprintf(os.Stderr, "Failed to release backend runtime-state ownership: %v\n", closeErr)
+		}
+	}()
+
+	// Initialize logger only after runtime-state ownership is secured.
 	log, err := logger.NewBackendLogger(logger.BackendLoggingConfig{
 		HomeDir:      cfg.ResolvedHomeDir(),
 		Level:        cfg.Logging.Level,

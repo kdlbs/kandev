@@ -1,5 +1,6 @@
 ---
 status: complete
+updated: 2026-08-09
 created: 2026-08-02
 owner: kandev
 ---
@@ -134,6 +135,9 @@ no effect beyond the icon.
   metadata contains `interrupted_at`, the task DTO reports `interrupted: true`,
   and the sidebar row, board card, graph node, rich list row, and mobile
   switcher row show the red alert icon.
+- **GIVEN** that task also has a stored `generating` task summary, **WHEN** reconciliation changes
+  the primary session to `WAITING_FOR_INPUT`, **THEN** the summary clears `generating` and the red
+  alert icon is not hidden by a stale running spinner.
 - **GIVEN** a task whose session was `WAITING_FOR_INPUT` when the backend
   died, **WHEN** reconciliation runs, **THEN** the task is not marked and shows
   no red icon.
@@ -167,3 +171,5 @@ no effect beyond the icon.
   the marker hooks into.
 - [Sidebar Task Completion Icons](../ui/sidebar-task-completion-icons.md) —
   the shared task-row icon precedence this feature extends.
+- [Backend Runtime-State Ownership](../../plans/backend-runtime-state-ownership/plan.md) —
+  startup publication that clears stale generating activity.
