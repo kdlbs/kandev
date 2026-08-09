@@ -234,6 +234,12 @@ Some releases perform a one-time schema cutover that rewrites ownership tables a
 2. Stop all backend writers during the cutover. Do not run a mixed-version fleet across the upgrade; the migration takes a database advisory lock and aborts on lock timeout without changing the schema or data.
 3. Let exactly one schema initializer run and reach a healthy state before starting additional instances.
 
+If the new binary reports a worktree-ownership conflict and exits, stop the
+rollout. The cutover is transactional, so the legacy database remains
+authoritative. Do not delete ownership rows by hand. Start a compatible
+pre-cutover binary to restore service, or deploy the migration hotfix and retry
+the upgrade against the unchanged database.
+
 The normalized schema is intentionally incompatible with older binaries. To downgrade, stop all instances and restore the pre-upgrade backup — never start an older binary against a post-cutover database. SQLite restores from its automatic pre-migration snapshot; PostgreSQL restores your verified `pg_dump` backup.
 
 Switching `database.driver` does not migrate data. PostgreSQL and shared NATS remove two single-process data constraints, but they do not make Kandev horizontally scalable: WebSocket subscriptions, execution lifecycle/control state, and task workspaces remain process- or filesystem-local. The current product and supplied deployment validate one backend replica only; do not add replicas based on the database and event bus alone.
