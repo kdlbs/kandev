@@ -172,4 +172,38 @@ describe("auto-title creation helpers", () => {
     expect(payload).toMatchObject({ auto_title: true });
     expect(payload).not.toHaveProperty("title");
   });
+
+  it("includes autopilot only when the create form opts in", () => {
+    const payload = buildCreateTaskPayload({
+      workspaceId: "ws-1",
+      effectiveWorkflowId: "wf-1",
+      trimmedTitle: "Autonomous task",
+      trimmedDescription: "Run the migration",
+      repositoriesPayload: [],
+      agentProfileId: "agent-1",
+      executorId: "executor-1",
+      executorProfileId: "profile-1",
+      withAgent: true,
+      autopilot: true,
+    });
+
+    expect(payload.autopilot).toBe(true);
+  });
+
+  it("keeps autopilot off when the create form does not opt in", () => {
+    const payload = buildCreateTaskPayload({
+      workspaceId: "ws-1",
+      effectiveWorkflowId: "wf-1",
+      trimmedTitle: "Manual task",
+      trimmedDescription: "Run the migration",
+      repositoriesPayload: [],
+      agentProfileId: "agent-1",
+      executorId: "executor-1",
+      executorProfileId: "profile-1",
+      withAgent: true,
+      autopilot: false,
+    });
+
+    expect(payload.autopilot).toBeUndefined();
+  });
 });

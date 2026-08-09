@@ -36,6 +36,8 @@ import (
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/task/share"
 	userservice "github.com/kandev/kandev/internal/user/service"
+	utilitymodels "github.com/kandev/kandev/internal/utility/models"
+	"github.com/kandev/kandev/internal/utility/profilebinding"
 	utilityservice "github.com/kandev/kandev/internal/utility/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
@@ -61,6 +63,10 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	editorSvc := editorservice.NewService(repos.Editor, repos.Task, userSvc)
 	promptSvc := promptservice.NewService(repos.Prompts)
 	utilitySvc := utilityservice.NewService(repos.Utility)
+	utilitySvc.SetProfileResolver(profilebinding.New(repos.AgentSettings, func(agentID string) bool {
+		_, ok := agentRegistry.GetInferenceAgent(agentID)
+		return ok
+	}))
 	workflowSvc := workflowservice.NewService(repos.Workflow, log)
 	taskSvc := taskservice.NewService(
 		taskservice.Repos{
@@ -711,8 +717,8 @@ type pluginsHostUtilityAdapter struct {
 	mgr *hostutility.Manager
 }
 
-func (a pluginsHostUtilityAdapter) ExecutePrompt(ctx context.Context, agentType, model, mode, prompt string) (string, error) {
-	res, err := a.mgr.ExecutePrompt(ctx, agentType, model, mode, prompt)
+func (a pluginsHostUtilityAdapter) ExecuteProfilePrompt(ctx context.Context, profileID, prompt string) (string, error) {
+	res, err := a.mgr.ExecuteProfilePrompt(ctx, profileID, prompt)
 	if err != nil {
 		return "", err
 	}
@@ -720,7 +726,8 @@ func (a pluginsHostUtilityAdapter) ExecutePrompt(ctx context.Context, agentType,
 }
 
 type pluginsUtilityAgentAdapter struct {
-	svc *utilityservice.Service
+	svc     *utilityservice.Service
+	userSvc *userservice.Service
 }
 
 func (a pluginsUtilityAgentAdapter) GetAgentByID(ctx context.Context, id string) (*plugins.UtilityAgent, error) {
@@ -731,7 +738,14 @@ func (a pluginsUtilityAgentAdapter) GetAgentByID(ctx context.Context, id string)
 		}
 		return nil, err
 	}
-	return &plugins.UtilityAgent{Name: agent.Name, AgentID: agent.AgentID, Model: agent.Model, Enabled: agent.Enabled}, nil
+	profileID := agent.AgentProfileID
+	if profileID == "" && agent.ProfileBindingState == utilitymodels.ProfileBindingInherit && a.userSvc != nil {
+		profileID, err = a.userSvc.GetDefaultUtilityAgentProfileID(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &plugins.UtilityAgent{Name: agent.Name, AgentID: agent.AgentID, Model: agent.Model, AgentProfileID: profileID, ProfileBindingState: agent.ProfileBindingState, Enabled: agent.Enabled}, nil
 }
 
 // pluginsTaskWriterAdapter adapts the task service to the plugins package's

@@ -53,15 +53,16 @@ func (s *stubEnvRepo) DeleteTaskEnvironment(context.Context, string) error {
 func (s *stubEnvRepo) DeleteTaskEnvironmentsByTask(context.Context, string) error { return nil }
 
 type stubDestroyer struct {
-	containerCalls       []string
-	sandboxCalls         []string
-	worktreeCalls        []string
-	cancelAfterContainer context.CancelFunc
-	pushCalls            int
-	containerErr         error
-	sandboxErr           error
-	worktreeErr          error
-	pushErr              error
+	containerCalls           []string
+	sandboxCalls             []string
+	worktreeCalls            []string
+	cancelAfterContainer     context.CancelFunc
+	cancelAfterFirstWorktree context.CancelFunc
+	pushCalls                int
+	containerErr             error
+	sandboxErr               error
+	worktreeErr              error
+	pushErr                  error
 }
 
 func (s *stubDestroyer) DestroyContainer(_ context.Context, id string) error {
@@ -77,6 +78,9 @@ func (s *stubDestroyer) DestroySandbox(_ context.Context, id, _ string) error {
 }
 func (s *stubDestroyer) DestroyWorktree(_ context.Context, id string) error {
 	s.worktreeCalls = append(s.worktreeCalls, id)
+	if s.cancelAfterFirstWorktree != nil && len(s.worktreeCalls) == 1 {
+		s.cancelAfterFirstWorktree()
+	}
 	return s.worktreeErr
 }
 func (s *stubDestroyer) PushEnvironmentBranch(context.Context, *models.TaskEnvironment) error {
@@ -199,6 +203,74 @@ func TestTeardownEnvironmentResources_CancellationStopsBeforeNextResource(t *tes
 	if len(destroyer.sandboxCalls) != 0 || len(destroyer.worktreeCalls) != 0 {
 		t.Fatalf("resources destroyed after cancellation: sandboxes=%v worktrees=%v",
 			destroyer.sandboxCalls, destroyer.worktreeCalls)
+	}
+}
+
+func TestTeardownEnvironmentResources_MultiRepoCancellationStopsBeforeNextWorktree(t *testing.T) {
+	svc := newResetTestService(t, &stubEnvRepo{})
+	ctx, cancel := context.WithCancel(context.Background())
+	destroyer := &stubDestroyer{cancelAfterFirstWorktree: cancel}
+	svc.SetEnvironmentDestroyer(destroyer)
+
+	err := svc.teardownEnvironmentResources(ctx, &models.TaskEnvironment{
+		Repos: []*models.TaskEnvironmentRepo{
+			{RepositoryID: "repo-a", WorktreeID: "wt-first"},
+			{RepositoryID: "repo-b", WorktreeID: "wt-second"},
+		},
+	})
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("teardown error = %v, want context cancellation", err)
+	}
+	if len(destroyer.worktreeCalls) != 1 || destroyer.worktreeCalls[0] != "wt-first" {
+		t.Fatalf("expected only the first worktree destroyed before cancellation, got %v", destroyer.worktreeCalls)
+	}
+}
+
+func TestTeardownEnvironmentResources_MultiRepoDestroysEveryWorktree(t *testing.T) {
+	svc := newResetTestService(t, &stubEnvRepo{})
+	destroyer := &stubDestroyer{}
+	svc.SetEnvironmentDestroyer(destroyer)
+
+	err := svc.teardownEnvironmentResources(context.Background(), &models.TaskEnvironment{
+		Repos: []*models.TaskEnvironmentRepo{
+			{RepositoryID: "repo-a", WorktreeID: "wt-primary"},
+			{RepositoryID: "repo-b", WorktreeID: "wt-secondary"},
+			{RepositoryID: "repo-c", WorktreeID: "wt-tertiary"},
+		},
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{"wt-primary", "wt-secondary", "wt-tertiary"}
+	if len(destroyer.worktreeCalls) != len(want) {
+		t.Fatalf("worktree destroy calls = %v, want %v", destroyer.worktreeCalls, want)
+	}
+	for i, id := range want {
+		if destroyer.worktreeCalls[i] != id {
+			t.Errorf("worktree destroy call[%d] = %q, want %q", i, destroyer.worktreeCalls[i], id)
+		}
+	}
+}
+
+func TestTeardownEnvironmentResources_ReposOnlyEnvironmentIsNotEmpty(t *testing.T) {
+	svc := newResetTestService(t, &stubEnvRepo{})
+	destroyer := &stubDestroyer{}
+	svc.SetEnvironmentDestroyer(destroyer)
+
+	err := svc.teardownEnvironmentResources(context.Background(), &models.TaskEnvironment{
+		Repos: []*models.TaskEnvironmentRepo{
+			{RepositoryID: "repo-a", WorktreeID: "wt-a"},
+			{RepositoryID: "repo-b", WorktreeID: "wt-b"},
+		},
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(destroyer.worktreeCalls) != 2 {
+		t.Fatalf("worktree destroy calls = %v, want 2", destroyer.worktreeCalls)
 	}
 }
 

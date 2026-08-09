@@ -206,6 +206,7 @@ func buildLifecycleLaunchRequest(
 		PreviousExecutionID:           req.PreviousExecutionID,
 		McpMode:                       req.McpMode,
 		McpProviders:                  req.McpProviders,
+		McpProfile:                    req.McpProfile,
 		IsEphemeral:                   req.IsEphemeral,
 		IsPassthrough:                 req.IsPassthrough,
 		SetupScript:                   req.SetupScript,

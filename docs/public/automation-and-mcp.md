@@ -165,6 +165,48 @@ Task tools use normal client discovery. When `step_complete_kandev` is required 
 
 `create_task_kandev` advertises `prompt` for instructions delivered to a newly started agent. Older callers may still send `description` when `prompt` is absent, but sending both is an error; the compatibility name is intentionally omitted from the advertised schema.
 
+### Autopilot tasks and MCP profiles
+
+Task creation accepts one optional boolean:
+
+```go
+mcp.WithBoolean(
+    "autopilot",
+    mcp.Description(
+        "Start this task in autopilot mode. Default: false. The value is fixed at creation and is not inherited by subtasks. The agent does not ask the user directly; it asks its direct parent only for critical decisions.",
+    ),
+),
+```
+
+The value defaults to `false`. It is fixed when the task is created and is not
+copied to a subtask. The task record is the source of truth after creation; a
+later task update cannot switch the prompt or MCP tools between normal and
+autopilot behavior.
+
+The top-level task dialog does not expose this option. The subtask dialog has a
+compact Autopilot switch with help text, but the value remains fixed after the
+subtask is created.
+
+Kandev builds the task MCP server from a backend-owned profile. The base
+surfaces are `kanban-task`, `office-task`, `configuration`, and `external`.
+Optional capability groups, such as task titles, provider automation, user
+questions, and parent questions, are added or removed from that base profile.
+This keeps tool discovery small and makes a context change atomic.
+
+For a Kanban task, normal sessions receive `ask_user_question_kandev`.
+An autopilot child receives `ask_parent_question_kandev` instead. An autopilot
+root receives neither question tool. Kandev never registers both question
+tools for one task session. Office sessions use their smaller skill/CLI
+surface and do not receive Kanban task-creation tools.
+
+An autopilot child should ask its parent only when a decision blocks useful
+progress. `ask_parent_question_kandev` returns a `question_id` immediately;
+the child turn then ends. The parent receives a durable question message and
+answers with `message_task_kandev` using the child task ID and
+`reply_to_question_id`. The child stays in the waiting-for-input state until
+the correlated answer arrives, so the sidebar shows the normal question
+indicator during the wait.
+
 ### Create idempotency with `external_id`
 
 A caller that cannot tell whether an earlier `create_task_kandev` call (or `POST /api/v1/tasks`) actually landed — a crash before recording the response, a webhook redelivery — can pass an `external_id` and retry safely instead of guessing. `external_id` is an opaque, caller-chosen string, case-sensitive and byte-exact, unique per workspace: two workspaces can each hold their own task for the same value, but a second create for a value already held in the same workspace never makes a second task there. It is validated and trimmed like other free-text fields; a value that is empty after trimming is treated as if the field were omitted.

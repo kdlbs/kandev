@@ -163,6 +163,12 @@ func (r *sqliteRepository) initSchema() error {
 	// columns, so an ADD COLUMN that ran before it would be lost.
 	r.migrate.Apply("agent_profiles.command_prefix", `ALTER TABLE agent_profiles ADD COLUMN command_prefix TEXT NOT NULL DEFAULT ''`)
 
+	// No-silent-model-fallback: added after the table-recreation migration
+	// above for the same reason as command_prefix — a legacy DB that
+	// recreates agent_profiles would otherwise lose columns added before it.
+	r.migrate.Apply("agent_profiles.fallback_model", `ALTER TABLE agent_profiles ADD COLUMN fallback_model TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("agent_profiles.auto_fallback", `ALTER TABLE agent_profiles ADD COLUMN auto_fallback INTEGER NOT NULL DEFAULT 0`)
+
 	return nil
 }
 
@@ -511,7 +517,7 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 			max_concurrent_sessions, cooldown_sec, skip_idle_runs,
 			consecutive_failures, failure_threshold,
 			executor_preference, budget_monthly_cents, settings, permissions,
-			command_prefix
+			command_prefix, fallback_model, auto_fallback
 		) VALUES (
 			?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?,
@@ -522,7 +528,7 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 			?, ?, ?,
 			?, ?,
 			?, ?, ?, ?,
-			?
+			?, ?, ?
 		)
 	`),
 		profile.ID, profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model,
@@ -537,6 +543,8 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 		profile.ConsecutiveFailures, enrich.failureThreshold,
 		enrich.executorPreference, profile.BudgetMonthlyCents, enrich.settings, enrich.permissions,
 		profile.CommandPrefix,
+		profile.FallbackModel,
+		dialect.BoolToInt(profile.AutoFallback),
 	)
 	return err
 }
@@ -768,7 +776,7 @@ func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *mode
 			consecutive_failures = ?, failure_threshold = ?,
 			executor_preference = ?,
 			budget_monthly_cents = ?, settings = ?, permissions = ?,
-			command_prefix = ?
+			command_prefix = ?, fallback_model = ?, auto_fallback = ?
 		WHERE id = ? AND deleted_at IS NULL
 	`), profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model,
 		nullableString(profile.Mode), nullableString(profile.MigratedFrom),
@@ -783,6 +791,8 @@ func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *mode
 		enrich.executorPreference,
 		profile.BudgetMonthlyCents, enrich.settings, enrich.permissions,
 		profile.CommandPrefix,
+		profile.FallbackModel,
+		dialect.BoolToInt(profile.AutoFallback),
 		profile.ID)
 	if err != nil {
 		return err
@@ -852,7 +862,8 @@ const agentProfileSelectColumns = `
 		COALESCE(failure_threshold, 3), COALESCE(executor_preference, ''),
 		COALESCE(budget_monthly_cents, 0),
 		COALESCE(settings, '{}'), COALESCE(permissions, '{}'),
-		COALESCE(command_prefix, '')
+		COALESCE(command_prefix, ''),
+		COALESCE(fallback_model, ''), COALESCE(auto_fallback, 0)
 	FROM agent_profiles`
 
 func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*models.AgentProfile, error) {
@@ -1025,6 +1036,7 @@ func scanAgentProfile(scanner interface {
 	var role, status string
 	var skipIdleRuns int
 	var failureThreshold int
+	var autoFallback int
 	if err := scanner.Scan(
 		&profile.ID,
 		&profile.AgentID,
@@ -1065,6 +1077,8 @@ func scanAgentProfile(scanner interface {
 		&profile.Settings,
 		&profile.Permissions,
 		&profile.CommandPrefix,
+		&profile.FallbackModel,
+		&autoFallback,
 	); err != nil {
 		return nil, err
 	}
@@ -1081,6 +1095,7 @@ func scanAgentProfile(scanner interface {
 	profile.Enabled = enabled == 1
 	profile.UserModified = userModified == 1
 	profile.SkipIdleRuns = skipIdleRuns == 1
+	profile.AutoFallback = autoFallback == 1
 	profile.Role = models.AgentRole(role)
 	profile.Status = models.AgentStatus(status)
 	profile.ConfigOptions = configOptionsFromSettings(profile.Settings)

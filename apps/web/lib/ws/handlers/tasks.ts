@@ -23,7 +23,6 @@ import {
   type KanbanTask,
   type TaskEventPayload,
 } from "@/lib/ws/handlers/task-archive-cache";
-
 const lifecycleDebug = createDebugLogger("task-lifecycle:ws");
 
 function hasPayloadField(payload: TaskEventPayload, field: keyof TaskEventPayload): boolean {
@@ -35,6 +34,7 @@ function preservePrimaryExecutorFields(
   merged: KanbanTask,
   payload: TaskEventPayload,
 ): void {
+  if (!hasPayloadField(payload, "autopilot")) merged.autopilot = existing.autopilot;
   const primarySessionCleared =
     hasPayloadField(payload, "primary_session_id") && payload.primary_session_id === null;
   if (primarySessionCleared) return;

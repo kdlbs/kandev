@@ -9,16 +9,18 @@ import (
 
 // UtilityAgentDTO represents a utility agent for API responses.
 type UtilityAgentDTO struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Prompt      string `json:"prompt"`
-	AgentID     string `json:"agent_id"`
-	Model       string `json:"model"`
-	Builtin     bool   `json:"builtin"`
-	Enabled     bool   `json:"enabled"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	ID                  string `json:"id"`
+	Name                string `json:"name"`
+	Description         string `json:"description"`
+	Prompt              string `json:"prompt"`
+	AgentID             string `json:"agent_id"`
+	Model               string `json:"model"`
+	AgentProfileID      string `json:"agent_profile_id"`
+	ProfileBindingState string `json:"profile_binding_state"`
+	Builtin             bool   `json:"builtin"`
+	Enabled             bool   `json:"enabled"`
+	CreatedAt           string `json:"created_at"`
+	UpdatedAt           string `json:"updated_at"`
 }
 
 // UtilityAgentsResponse is the response for listing utility agents.
@@ -28,21 +30,25 @@ type UtilityAgentsResponse struct {
 
 // CreateUtilityAgentRequest is the request for creating a utility agent.
 type CreateUtilityAgentRequest struct {
-	Name        string `json:"name" binding:"required"`
-	Description string `json:"description"`
-	Prompt      string `json:"prompt" binding:"required"`
-	AgentID     string `json:"agent_id" binding:"required"`
-	Model       string `json:"model" binding:"required"`
+	Name                string `json:"name" binding:"required"`
+	Description         string `json:"description"`
+	Prompt              string `json:"prompt" binding:"required"`
+	AgentID             string `json:"agent_id,omitempty"` // legacy migration input
+	Model               string `json:"model,omitempty"`    // legacy migration input
+	AgentProfileID      string `json:"agent_profile_id"`
+	ProfileBindingState string `json:"profile_binding_state,omitempty"`
 }
 
 // UpdateUtilityAgentRequest is the request for updating a utility agent.
 type UpdateUtilityAgentRequest struct {
-	Name        *string `json:"name,omitempty"`
-	Description *string `json:"description,omitempty"`
-	Prompt      *string `json:"prompt,omitempty"`
-	AgentID     *string `json:"agent_id,omitempty"`
-	Model       *string `json:"model,omitempty"`
-	Enabled     *bool   `json:"enabled,omitempty"`
+	Name                *string `json:"name,omitempty"`
+	Description         *string `json:"description,omitempty"`
+	Prompt              *string `json:"prompt,omitempty"`
+	AgentID             *string `json:"agent_id,omitempty"` // legacy migration input
+	Model               *string `json:"model,omitempty"`    // legacy migration input
+	AgentProfileID      *string `json:"agent_profile_id,omitempty"`
+	ProfileBindingState *string `json:"profile_binding_state,omitempty"`
+	Enabled             *bool   `json:"enabled,omitempty"`
 }
 
 // UtilityAgentCallDTO represents a call for API responses.
@@ -53,6 +59,7 @@ type UtilityAgentCallDTO struct {
 	ResolvedPrompt string  `json:"resolved_prompt"`
 	Response       string  `json:"response"`
 	Model          string  `json:"model"`
+	AgentProfileID string  `json:"agent_profile_id"`
 	PromptTokens   int     `json:"prompt_tokens"`
 	ResponseTokens int     `json:"response_tokens"`
 	DurationMs     int     `json:"duration_ms"`
@@ -75,16 +82,18 @@ type TemplateVariablesResponse struct {
 // FromUtilityAgent converts a model to a DTO.
 func FromUtilityAgent(agent *models.UtilityAgent) UtilityAgentDTO {
 	return UtilityAgentDTO{
-		ID:          agent.ID,
-		Name:        agent.Name,
-		Description: agent.Description,
-		Prompt:      agent.Prompt,
-		AgentID:     agent.AgentID,
-		Model:       agent.Model,
-		Builtin:     agent.Builtin,
-		Enabled:     agent.Enabled,
-		CreatedAt:   agent.CreatedAt.UTC().Format(time.RFC3339),
-		UpdatedAt:   agent.UpdatedAt.UTC().Format(time.RFC3339),
+		ID:                  agent.ID,
+		Name:                agent.Name,
+		Description:         agent.Description,
+		Prompt:              agent.Prompt,
+		AgentID:             agent.AgentID,
+		Model:               agent.Model,
+		AgentProfileID:      agent.AgentProfileID,
+		ProfileBindingState: agent.ProfileBindingState,
+		Builtin:             agent.Builtin,
+		Enabled:             agent.Enabled,
+		CreatedAt:           agent.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:           agent.UpdatedAt.UTC().Format(time.RFC3339),
 	}
 }
 
@@ -97,6 +106,7 @@ func FromUtilityAgentCall(call *models.UtilityAgentCall) UtilityAgentCallDTO {
 		ResolvedPrompt: call.ResolvedPrompt,
 		Response:       call.Response,
 		Model:          call.Model,
+		AgentProfileID: call.AgentProfileID,
 		PromptTokens:   call.PromptTokens,
 		ResponseTokens: call.ResponseTokens,
 		DurationMs:     call.DurationMs,

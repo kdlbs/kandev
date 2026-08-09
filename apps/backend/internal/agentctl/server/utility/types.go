@@ -18,6 +18,10 @@ type PromptRequest struct {
 	// If empty, no session/set_mode call is made and the agent default is used.
 	Mode string `json:"mode,omitempty"`
 
+	// Profile-owned launch policy. These values are resolved by the backend
+	// at call start and are never accepted from an external client.
+	AutoApprovePermissions *bool `json:"auto_approve_permissions,omitempty"`
+
 	// InferenceConfig is the agent's inference configuration.
 	// This is passed from the backend which has access to the agent registry.
 	InferenceConfig *InferenceConfigDTO `json:"inference_config,omitempty"`
@@ -196,7 +200,9 @@ type InferenceConfigDTO struct {
 	Env map[string]string `json:"env,omitempty"`
 	// StripEnv lists environment variables to strip from the inference
 	// subprocess environment entirely (not just set to empty).
-	StripEnv []string `json:"strip_env,omitempty"`
+	StripEnv      []string `json:"strip_env,omitempty"`
+	CLIFlags      []string `json:"cli_flags,omitempty"`
+	CommandPrefix []string `json:"command_prefix,omitempty"`
 }
 
 // PromptResponse is the response from executing a utility prompt.

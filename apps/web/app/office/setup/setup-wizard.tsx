@@ -255,28 +255,30 @@ export function SetupWizard({
     );
   }
   return (
-    <div className="fixed inset-0 z-50 bg-background flex items-center justify-center">
-      <div className="relative w-full max-w-2xl mx-auto px-6">
-        <CloseButton href={closeHref} />
-        <StepIndicator current={step} total={SETUP_WIZARD_STEP_COUNT} />
-        <div className="mt-8">
-          <WizardStepContent
+    <div className="fixed inset-0 z-50 bg-background overflow-y-auto">
+      <div className="flex min-h-full items-center justify-center px-6 py-8">
+        <div className="relative w-full max-w-2xl mx-auto">
+          <CloseButton href={closeHref} />
+          <StepIndicator current={step} total={SETUP_WIZARD_STEP_COUNT} />
+          <div className="mt-8">
+            <WizardStepContent
+              step={step}
+              data={data}
+              agentProfiles={profileOptions}
+              patch={patch}
+              onAgentProfilesChange={setProfileOptions}
+            />
+          </div>
+          <WizardFooter
             step={step}
-            data={data}
-            agentProfiles={profileOptions}
-            patch={patch}
-            onAgentProfilesChange={setProfileOptions}
+            canAdvance={canAdvance}
+            submitting={submitting}
+            onBack={() => setStep((s) => s - 1)}
+            onNext={() => setStep((s) => s + 1)}
+            onSkip={skipInitialTask}
+            onSubmit={handleSubmit}
           />
         </div>
-        <WizardFooter
-          step={step}
-          canAdvance={canAdvance}
-          submitting={submitting}
-          onBack={() => setStep((s) => s - 1)}
-          onNext={() => setStep((s) => s + 1)}
-          onSkip={skipInitialTask}
-          onSubmit={handleSubmit}
-        />
       </div>
     </div>
   );

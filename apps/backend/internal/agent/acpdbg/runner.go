@@ -60,7 +60,11 @@ type Runner struct {
 	oobMu     sync.Mutex
 	oobBuf    []Frame
 	oobClosed bool
-	oobWake   chan struct{}
+	// shutdownStarted is guarded by oobMu so signalShutdown and pushOOB have
+	// one ordering point. This prevents a frame from being appended after
+	// shutdown has completed its handoff to the read loop.
+	shutdownStarted bool
+	oobWake         chan struct{}
 	// responses[id] is closed by the read loop when a response with that
 	// id is recorded; the mu-protected map stores the frame itself.
 	mu         sync.Mutex
@@ -196,7 +200,12 @@ func (r *Runner) watchContext(ctx context.Context) {
 }
 
 func (r *Runner) signalShutdown() {
-	r.shutdownOnce.Do(func() { close(r.shutdownCh) })
+	r.shutdownOnce.Do(func() {
+		close(r.shutdownCh)
+		r.oobMu.Lock()
+		r.shutdownStarted = true
+		r.oobMu.Unlock()
+	})
 }
 
 // Path returns the JSONL file path the runner is writing to.
@@ -271,7 +280,7 @@ func (r *Runner) DrainOOBUntil(ctx context.Context, handler func(Frame) bool) er
 // replay burst.
 func (r *Runner) pushOOB(frame Frame) {
 	r.oobMu.Lock()
-	if r.oobClosed {
+	if r.oobClosed || r.shutdownStarted {
 		r.oobMu.Unlock()
 		return
 	}

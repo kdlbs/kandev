@@ -19,6 +19,7 @@ import { toAgentProfilePatch } from "@/app/settings/agents/[agentId]/agent-save-
 import {
   AgentProfileDeleteConfirmDialog,
   AgentProfileDeleteConflictDialog,
+  AgentProfileDisableConflictDialog,
   type AgentProfileDeleteConflict,
 } from "@/components/settings/agent-profile-delete-dialog";
 import {
@@ -48,6 +49,7 @@ import type {
   PermissionSetting,
   PassthroughConfig,
 } from "@/lib/types/http";
+import type { UtilityAgentReference } from "@/lib/types/agent-profile-errors";
 import { useAppStore } from "@/components/state-provider";
 import { AgentLogo } from "@/components/agent-logo";
 import { ProfileMcpConfigCard } from "@/app/settings/agents/[agentId]/profile-mcp-config-card";
@@ -189,6 +191,8 @@ function ProfileSettingsCard({
           profile={{
             name: draft.name,
             model: draft.model,
+            fallback_model: draft.fallbackModel ?? "",
+            auto_fallback: draft.autoFallback ?? false,
             mode: draft.mode ?? "",
             config_options: draft.configOptions ?? {},
             auto_approve: permissionValues.auto_approve,
@@ -200,6 +204,8 @@ function ProfileSettingsCard({
           baselineProfile={{
             name: savedProfile.name,
             model: savedProfile.model,
+            fallback_model: savedProfile.fallbackModel ?? "",
+            auto_fallback: savedProfile.autoFallback ?? false,
             mode: savedProfile.mode ?? "",
             config_options: savedProfile.configOptions ?? {},
             auto_approve: savedPermissionValues.auto_approve,
@@ -342,6 +348,7 @@ function ProfileEditorBody({
   );
 }
 
+// eslint-disable-next-line max-lines-per-function
 function ProfileEditor({
   agent,
   profile,
@@ -358,6 +365,7 @@ function ProfileEditor({
   const { items: secrets } = useSecrets();
   const { draft, setDraft, savedProfile, setSavedProfile, setSaveStatus, isDirty } =
     useProfileEditorState(profile, permissionSettings);
+  const [utilityConflict, setUtilityConflict] = useState<UtilityAgentReference[]>([]);
   const updateDraft = useCallback(
     (patch: Partial<AgentProfile>) => {
       setDraft((current) => {
@@ -382,6 +390,7 @@ function ProfileEditor({
     settingsAgents,
     syncAgentsToStore,
     toast,
+    onUtilityConflict: setUtilityConflict,
   });
   useSettingsSaveContributor({
     id: `agent-profile:${draft.id}`,
@@ -389,7 +398,7 @@ function ProfileEditor({
     isDirty,
     canSave: Boolean(draft.name.trim()) && !modelConfigResolutionPending,
     invalidReason: profileSaveInvalidReason(draft.name, modelConfigResolutionPending, t),
-    save: handleSave,
+    save: () => handleSave(),
     discard: () => setDraft(savedProfile),
   });
   const deleteState = useProfileDelete(agent, draft, settingsAgents, syncAgentsToStore, toast);
@@ -428,6 +437,15 @@ function ProfileEditor({
       />
 
       <DeleteProfileCard onDelete={deleteState.requestDelete} />
+
+      <AgentProfileDisableConflictDialog
+        agents={utilityConflict}
+        onCancel={() => setUtilityConflict([])}
+        onConfirm={async () => {
+          setUtilityConflict([]);
+          await handleSave(true);
+        }}
+      />
 
       <ProfileDeleteDialogs
         showDeleteConfirm={deleteState.showDeleteConfirm}

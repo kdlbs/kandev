@@ -37,6 +37,17 @@ test.describe("hide disabled integrations from left panel navigation", () => {
     const githubNavLink = testPage.getByRole("link", { name: "GitHub" });
     await expect(githubNavLink).toBeVisible({ timeout: 10_000 });
 
+    // The Settings left panel's per-workspace Integrations tree is also part
+    // of left-panel navigation: with "hide disabled" off (default) the
+    // disabled-but-configured GitHub entry must stay listed there too.
+    const { workspaces } = await apiClient.listWorkspaces();
+    const workspaceId = workspaces[0].id;
+    await testPage.goto(`/settings/workspace/${workspaceId}/integrations`);
+    const settingsTree = testPage.getByTestId("app-sidebar-settings-mode");
+    await expect(settingsTree.getByRole("link", { name: /GitHub/ })).toBeVisible({
+      timeout: 10_000,
+    });
+
     // Turn "hide disabled" on.
     await testPage.goto("/settings/integrations");
     await expect(testPage.locator("#github-enabled")).toHaveAttribute("aria-checked", "false");
@@ -53,6 +64,13 @@ test.describe("hide disabled integrations from left panel navigation", () => {
 
     await testPage.goto("/tasks");
     await expect(testPage.getByRole("link", { name: "GitHub" })).not.toBeVisible();
+
+    // The Settings left-panel Integrations tree hides it as well.
+    await testPage.goto(`/settings/workspace/${workspaceId}/integrations`);
+    await expect(settingsTree.getByRole("link", { name: /GitHub/ })).not.toBeVisible();
+    await expect(settingsTree.getByRole("link", { name: /Azure DevOps/ })).toBeVisible({
+      timeout: 10_000,
+    });
 
     // Re-enabling GitHub reveals it again even with "hide disabled" still on.
     await testPage.goto("/settings/integrations");

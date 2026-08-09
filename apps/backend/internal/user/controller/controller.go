@@ -87,6 +87,7 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		AzureDevOpsBrowsePreferences:    req.AzureDevOpsBrowsePreferences.ServiceValue(),
 		DefaultUtilityAgentID:           req.DefaultUtilityAgentID,
 		DefaultUtilityModel:             req.DefaultUtilityModel,
+		DefaultUtilityAgentProfileID:    req.DefaultUtilityAgentProfileID,
 		KeyboardShortcuts:               req.KeyboardShortcuts,
 		TerminalLinkBehavior:            req.TerminalLinkBehavior,
 		TerminalFontFamily:              req.TerminalFontFamily,

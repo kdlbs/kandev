@@ -79,6 +79,44 @@ message_task_kandev(
 
 There is no persistent channel or shared socket between tasks. Each `message_task_kandev` call is discrete. The conversation thread is implicit — both tasks can recover context by reading back the relevant messages (see [Reading the thread](#reading-the-thread) below).
 
+## Autopilot parent questions
+
+An autopilot child does not call `ask_user_question_kandev`. If it reaches a
+critical decision, it calls `ask_parent_question_kandev`:
+
+```json
+{
+  "questions": [
+    {"id": "database", "prompt": "Which database should I use?", "options": ["SQLite", "Postgres"]}
+  ],
+  "context": "The migration needs a database choice before implementation."
+}
+```
+
+The tool creates a durable pending question for the direct parent and returns
+without waiting. The child must end its turn after the call. The question
+message contains a `question_id`, the child task ID, and the question data.
+Only that direct parent may answer it. A parent sends the answer to the child
+with `message_task_kandev`:
+
+```json
+{
+  "task_id": "<child task UUID>",
+  "prompt": "Use Postgres. Keep the migration reversible.",
+  "reply_to_question_id": "<question_id from the child message>"
+}
+```
+
+The answer is correlated by `reply_to_question_id` and is idempotent. A repeat
+answer, an answer from another task, or an answer after reparenting is rejected
+or reported as already answered; it never starts a second child turn. The
+child leaves the waiting state only after the accepted correlated answer is
+delivered. The existing primary question icon shows this wait in the sidebar.
+
+An autopilot root has no parent, so its task MCP profile contains no question
+tool. It must continue without asking the operator. A normal task keeps the
+operator-facing `ask_user_question_kandev` flow.
+
 ## Reading the thread
 
 `get_task_conversation_kandev(task_id)` returns the message history for any task you know the ID of. Use it to:

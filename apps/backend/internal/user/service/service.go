@@ -78,6 +78,7 @@ type UpdateUserSettingsRequest struct {
 	AzureDevOpsBrowsePreferences    **json.RawMessage
 	DefaultUtilityAgentID           *string
 	DefaultUtilityModel             *string
+	DefaultUtilityAgentProfileID    *string
 	KeyboardShortcuts               *map[string]interface{}
 	TerminalLinkBehavior            *string
 	TerminalFontFamily              *string
@@ -133,6 +134,15 @@ func (s *Service) GetDefaultUtilitySettings(ctx context.Context) (agentID, model
 		return "", "", err
 	}
 	return settings.DefaultUtilityAgentID, settings.DefaultUtilityModel, nil
+}
+
+// GetDefaultUtilityAgentProfileID returns the profile used by new built-in utility actions.
+func (s *Service) GetDefaultUtilityAgentProfileID(ctx context.Context) (string, error) {
+	settings, err := s.repo.GetUserSettings(ctx, s.defaultUser)
+	if err != nil {
+		return "", err
+	}
+	return settings.DefaultUtilityAgentProfileID, nil
 }
 
 func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSettingsRequest) (*models.UserSettings, error) {
@@ -326,6 +336,9 @@ func applyUtilityPreferences(settings *models.UserSettings, req *UpdateUserSetti
 	}
 	if req.DefaultUtilityModel != nil {
 		settings.DefaultUtilityModel = strings.TrimSpace(*req.DefaultUtilityModel)
+	}
+	if req.DefaultUtilityAgentProfileID != nil {
+		settings.DefaultUtilityAgentProfileID = strings.TrimSpace(*req.DefaultUtilityAgentProfileID)
 	}
 }
 
@@ -737,6 +750,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"azure_devops_browse_preferences":     settings.AzureDevOpsBrowsePreferences,
 		"default_utility_agent_id":            settings.DefaultUtilityAgentID,
 		"default_utility_model":               settings.DefaultUtilityModel,
+		"default_utility_agent_profile_id":    settings.DefaultUtilityAgentProfileID,
 		"keyboard_shortcuts":                  settings.KeyboardShortcuts,
 		"terminal_link_behavior":              settings.TerminalLinkBehavior,
 		"terminal_font_family":                settings.TerminalFontFamily,

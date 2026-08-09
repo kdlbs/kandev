@@ -166,6 +166,7 @@ export type BuildCreatePayloadArgs = {
   attachments?: MessageAttachment[];
   parentId?: string;
   workspacePath?: string;
+  autopilot?: boolean;
 };
 
 export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTaskParams {
@@ -185,6 +186,7 @@ export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTask
     attachments: args.attachments,
     parent_id: args.parentId || undefined,
     workspace_path: args.workspacePath || undefined,
+    autopilot: args.autopilot || undefined,
   };
 }
 

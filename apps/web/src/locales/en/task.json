@@ -1463,5 +1463,10 @@
   "yourBranchesLabel": "Your branches:",
   "yourChangedFilesWillAppearHere": "Your changed files will appear here",
   "yourCodeLivesInLabel": "Your code lives in:",
-  "yourReviewIsRequestedOnThis": "Your review is requested on this task."
+  "yourReviewIsRequestedOnThis": "Your review is requested on this task.",
+  "autopilot": "Autopilot",
+  "autopilotDescription": "The agent works independently and asks the parent task only when a critical decision blocks progress. It then waits for the answer before continuing.",
+  "autopilotInfoLabel": "More information about autopilot",
+  "autopilotSidebarDescription": "Autopilot task",
+  "autopilotChatDescription": "Autopilot is enabled. The agent asks its parent only for critical decisions."
 }

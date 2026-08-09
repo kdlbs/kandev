@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/ports"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.opentelemetry.io/otel/trace"
@@ -689,6 +690,7 @@ type LaunchRequest struct {
 	PreviousExecutionID string            // Previous execution ID for runtime reconnect
 	McpMode             string            // MCP tool mode: "task" (default), "config", or "office"
 	McpProviders        []string          // Normalized provider capabilities attached to the task
+	McpProfile          *mcpprofile.Context
 
 	// Environment preparation
 	SetupScript string // Setup script to run before agent starts
@@ -791,13 +793,19 @@ type CredentialsManager interface {
 
 // AgentProfileInfo contains resolved profile information
 type AgentProfileInfo struct {
-	ProfileID           string
-	ProfileName         string
-	AgentID             string
-	AgentName           string // e.g., "auggie", "claude", "codex"
-	Model               string // applied through ACP model selection at session start
-	Mode                string // applied via ACP session/set_mode at session start (empty = use agent default)
-	ConfigOptions       map[string]string
+	ProfileID     string
+	ProfileName   string
+	AgentID       string
+	AgentName     string // e.g., "auggie", "claude", "codex"
+	Model         string // applied through ACP model selection at session start
+	Mode          string // applied via ACP session/set_mode at session start (empty = use agent default)
+	ConfigOptions map[string]string
+	// FallbackModel is the optional single ACP model ID to switch to when
+	// Model is unavailable. Ignored when AutoFallback is enabled.
+	FallbackModel string
+	// AutoFallback opts the profile into the legacy automatic-fallback
+	// behavior (session-start best-effort).
+	AutoFallback        bool
 	AllowIndexing       bool // Deprecated: legacy, kept so existing call sites compile; launch path reads CLIFlags.
 	CLIPassthrough      bool
 	NativeSessionResume bool // Agent supports ACP session/load for resume

@@ -268,3 +268,111 @@ describe("ModelConfigSelector provider descriptions", () => {
     expect(screen.queryByRole("tooltip")).toBeNull();
   });
 });
+
+describe("ModelConfigSelector fallback suffix", () => {
+  it("appends the suffix to the trigger label when provided", () => {
+    render(
+      <TooltipProvider>
+        <ModelConfigSelector
+          modelOptions={[{ id: "gpt-5", name: "GPT-5" }]}
+          currentModel="gpt-5"
+          onModelChange={() => {}}
+          currentModelSuffix=" (fallback)"
+          triggerSummary="changed"
+        />
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByRole("button", { name: modelSettingsButtonName }).textContent).toContain(
+      "GPT-5 (fallback)",
+    );
+  });
+
+  it("renders a config-option model with the suffix on the trigger", () => {
+    render(
+      <TooltipProvider>
+        <ModelConfigSelector
+          modelOptions={[{ id: "gpt-5", name: "GPT-5" }]}
+          currentModel="gpt-5"
+          onModelChange={() => {}}
+          currentModelSuffix=" (fallback)"
+          triggerSummary="changed"
+          configOptions={[
+            {
+              type: "select",
+              id: "model",
+              name: "Model",
+              currentValue: "gpt-5",
+              category: "model",
+              options: [{ value: "gpt-5", name: "GPT-5" }],
+            },
+          ]}
+        />
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByRole("button", { name: modelSettingsButtonName }).textContent).toContain(
+      "GPT-5 (fallback)",
+    );
+  });
+});
+
+describe("ModelConfigSelector disabled (gone) models", () => {
+  it("renders a disabled model greyed out with its reason and blocks selection", () => {
+    const onModelChange = vi.fn();
+
+    render(
+      <TooltipProvider>
+        <ModelConfigSelector
+          modelOptions={[
+            { id: "claude-sonnet", name: "Claude Sonnet" },
+            {
+              id: "claude-gone",
+              name: "Claude Gone",
+              disabled: true,
+              disabledReason: "no longer available",
+            },
+          ]}
+          currentModel="claude-gone"
+          onModelChange={onModelChange}
+        />
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: modelSettingsButtonName }));
+
+    const disabledItem = screen.getByRole("option", { name: /claude gone/i });
+    expect(disabledItem.className).toContain("opacity-40");
+    expect(disabledItem.getAttribute("aria-disabled")).toBe("true");
+
+    fireEvent.click(disabledItem);
+    expect(onModelChange).not.toHaveBeenCalled();
+  });
+
+  it("keeps the disabled (gone) model as the current value display", () => {
+    const onModelChange = vi.fn();
+    render(
+      <TooltipProvider>
+        <ModelConfigSelector
+          modelOptions={[
+            {
+              id: "claude-gone",
+              name: "Claude Gone",
+              disabled: true,
+              disabledReason: "no longer available",
+            },
+            { id: "gpt-5", name: "GPT-5" },
+          ]}
+          currentModel="claude-gone"
+          onModelChange={onModelChange}
+        />
+      </TooltipProvider>,
+    );
+
+    // The trigger still shows the configured (gone) model name so the user
+    // sees what was configured.
+    expect(screen.getByRole("button", { name: modelSettingsButtonName }).textContent).toContain(
+      "Claude Gone",
+    );
+  });
+});

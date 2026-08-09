@@ -31,6 +31,7 @@ export type TaskLike = {
   workflow_step_id?: string;
   title?: string;
   description?: string | null;
+  autopilot?: boolean;
   position?: number;
   state?: TaskState;
   repositories?: Array<{
@@ -139,6 +140,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     workflowStepId: source.workflow_step_id ?? "",
     title: source.title ?? "",
     description: source.description ?? undefined,
+    autopilot: source.autopilot,
     position: source.position ?? 0,
     state: source.state,
     repositoryId: pickRepositoryId(source),

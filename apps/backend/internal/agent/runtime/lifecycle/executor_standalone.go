@@ -109,6 +109,7 @@ func buildStandaloneCreateInstanceRequest(
 		AssumeMcpHttp:        assumeMcpHttp,
 		McpMode:              req.McpMode,
 		McpProviders:         req.McpProviders,
+		McpProfile:           req.McpProfile,
 		RequiresProcessKill:  requiresProcessKill,
 		StripEnv:             stripEnv,
 		BaseBranches:         getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
