@@ -225,7 +225,11 @@ describe("KanbanDisplayDropdown — Steps section", () => {
     expect(screen.getByText("Workflow B")).not.toBeNull();
   });
 
-  it("excludes a workflow whose snapshot has zero steps", () => {
+  it("still renders a group for an eligible workflow whose snapshot has zero steps", () => {
+    // Spec's Steps-section scope is "one group per workflow with a loaded
+    // snapshot" — a workflow with literally zero steps is not carved out, so
+    // it still gets a group (with no checkboxes inside) rather than being
+    // silently dropped from the filter surface.
     useKanbanDisplaySettingsMock.mockReturnValue({
       ...defaultMockSettings(),
       eligibleWorkflows: [STEPS_WF_A, STEPS_WF_B],
@@ -238,20 +242,23 @@ describe("KanbanDisplayDropdown — Steps section", () => {
     openDropdown();
 
     expect(screen.getByTestId(`steps-filter-group-${STEPS_WF_A_ID}`)).not.toBeNull();
-    expect(screen.queryByTestId(`steps-filter-group-${STEPS_WF_B_ID}`)).toBeNull();
+    const groupB = screen.getByTestId(`steps-filter-group-${STEPS_WF_B_ID}`);
+    expect(groupB).not.toBeNull();
+    expect(groupB.querySelectorAll('[data-testid^="steps-filter-step-"]')).toHaveLength(0);
   });
 
-  it("renders nothing when no eligible workflow has any steps", () => {
+  it("renders nothing when there are no eligible workflows at all", () => {
     useKanbanDisplaySettingsMock.mockReturnValue({
       ...defaultMockSettings(),
-      eligibleWorkflows: [STEPS_WF_A],
-      snapshots: { [STEPS_WF_A_ID]: { steps: [] } },
+      eligibleWorkflows: [],
+      snapshots: {},
     });
     render(<KanbanDisplayDropdown />);
     openDropdown();
 
-    // StepsSection returns null entirely (not just its groups) when no
-    // eligible workflow has any steps.
+    // StepsSection returns null entirely only when there is no eligible
+    // workflow group to show at all — a workflow with zero steps still gets
+    // an (empty) group, per the test above.
     expect(screen.queryByText("kanban:steps")).toBeNull();
     expect(screen.queryByTestId(/steps-filter-group-/)).toBeNull();
   });

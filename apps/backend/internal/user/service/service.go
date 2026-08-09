@@ -286,6 +286,16 @@ func applyWorkspaceAndTaskListPreferences(settings *models.UserSettings, req *Up
 const (
 	maxKanbanHiddenStepWorkflows      = 200
 	maxKanbanHiddenStepIDsPerWorkflow = 200
+	// maxKanbanHiddenStepIDsTotalBytes matches maxUserPreferenceBlobBytes, the
+	// sibling cap for other free-form settings blobs. The count caps above
+	// bound shape (how many entries), not size (how long each string is); an
+	// attacker who stays under both count limits could otherwise still submit
+	// a handful of multi-megabyte ids. This bounds total content regardless
+	// of shape, and — unlike an HTTP-only body-size guard — it runs inside
+	// validateKanbanHiddenStepIDs, which both the REST and WebSocket update
+	// paths call, so it isn't bypassable by whichever transport skips a
+	// transport-level guard.
+	maxKanbanHiddenStepIDsTotalBytes = maxUserPreferenceBlobBytes
 )
 
 // validateKanbanHiddenStepIDs bounds the per-workflow hidden-step-id map so a
@@ -295,6 +305,7 @@ func validateKanbanHiddenStepIDs(hidden map[string][]string) error {
 	if len(hidden) > maxKanbanHiddenStepWorkflows {
 		return fmt.Errorf("kanban_hidden_step_ids: max %d workflows allowed", maxKanbanHiddenStepWorkflows)
 	}
+	totalBytes := 0
 	for workflowID, ids := range hidden {
 		if len(ids) > maxKanbanHiddenStepIDsPerWorkflow {
 			return fmt.Errorf(
@@ -302,6 +313,13 @@ func validateKanbanHiddenStepIDs(hidden map[string][]string) error {
 				workflowID,
 				maxKanbanHiddenStepIDsPerWorkflow,
 			)
+		}
+		totalBytes += len(workflowID)
+		for _, id := range ids {
+			totalBytes += len(id)
+		}
+		if totalBytes > maxKanbanHiddenStepIDsTotalBytes {
+			return fmt.Errorf("kanban_hidden_step_ids: max %d bytes allowed", maxKanbanHiddenStepIDsTotalBytes)
 		}
 	}
 	return nil

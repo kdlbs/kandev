@@ -756,7 +756,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		SystemMetricsDisplay            models.SystemMetricsDisplaySettings `json:"system_metrics_display"`
 		AppStatusBarOrder               models.AppStatusBarOrder            `json:"app_status_bar_order"`
 		VoiceMode                       *storedVoiceMode                    `json:"voice_mode"`
-		KanbanHiddenStepIDs             map[string][]string                 `json:"kanban_hidden_step_ids"`
+		KanbanHiddenStepIDs             json.RawMessage                     `json:"kanban_hidden_step_ids"`
 	}
 	if err := json.Unmarshal([]byte(settingsRaw), &payload); err != nil {
 		return nil, err
@@ -878,8 +878,27 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	} else {
 		settings.ChangesPanelLayout = defaultChangesPanelLayout
 	}
-	settings.KanbanHiddenStepIDs = payload.KanbanHiddenStepIDs
+	settings.KanbanHiddenStepIDs = decodeKanbanHiddenStepIDs(payload.KanbanHiddenStepIDs)
 	return settings, nil
+}
+
+// decodeKanbanHiddenStepIDs parses the persisted per-workflow hidden-step-id
+// map, defaulting to an empty map on a missing or malformed value instead of
+// failing the whole settings read. Unlike most structured settings fields,
+// this one is decoded as json.RawMessage in the payload struct specifically
+// so a corrupt value here can't block every other setting from loading — the
+// spec requires this field to fall back to "nothing hidden" on corruption,
+// not to take the rest of the user's settings down with it.
+func decodeKanbanHiddenStepIDs(raw json.RawMessage) map[string][]string {
+	if len(raw) == 0 {
+		return map[string][]string{}
+	}
+	var decoded map[string][]string
+	_ = json.Unmarshal(raw, &decoded) // MUTATION: ignore the error, don't fall back
+	if decoded == nil {
+		return map[string][]string{}
+	}
+	return decoded
 }
 
 func normalizeSidebarTaskPrefs(prefs models.SidebarTaskPrefs) models.SidebarTaskPrefs {

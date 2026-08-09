@@ -160,18 +160,18 @@ function StepsSection({
   onToggleStepVisibility: (workflowId: string, stepId: string) => void;
 }) {
   const { t } = useTranslation();
-  const workflowsWithSteps = eligibleWorkflows.filter(
-    (wf) => (snapshots[wf.id]?.steps.length ?? 0) > 0,
-  );
-  if (workflowsWithSteps.length === 0) return null;
-  const showWorkflowLabels = workflowsWithSteps.length > 1;
+  // Spec: one group per eligible workflow (a loaded snapshot), full stop — a
+  // workflow with zero steps still gets a (steps-less) group rather than
+  // being dropped, so it isn't silently absent from the filter surface.
+  if (eligibleWorkflows.length === 0) return null;
+  const showWorkflowLabels = eligibleWorkflows.length > 1;
   return (
     <>
       <DropdownMenuSeparator />
       <div className="space-y-1.5">
         <DropdownMenuLabel className="px-0 text-foreground">{t("kanban:steps")}</DropdownMenuLabel>
         <p className="text-xs text-muted-foreground">{t("kanban:stepsSectionDescription")}</p>
-        {workflowsWithSteps.map((wf) => {
+        {eligibleWorkflows.map((wf) => {
           const steps = [...(snapshots[wf.id]?.steps ?? [])].sort(
             (a, b) => a.position - b.position || a.id.localeCompare(b.id),
           );

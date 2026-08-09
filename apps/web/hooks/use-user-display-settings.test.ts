@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { UserSettingsState } from "@/lib/state/slices/settings/types";
-import { isSettingsUnchanged, normalizeHiddenStepIds } from "./use-user-display-settings";
+import {
+  buildSettingsUpdatePayload,
+  isSettingsUnchanged,
+  normalizeHiddenStepIds,
+} from "./use-user-display-settings";
 
 function settings(tasksListShowDetails: boolean): UserSettingsState {
   return {
@@ -66,5 +70,24 @@ describe("normalizeHiddenStepIds", () => {
 
   it("returns an empty object for an empty input", () => {
     expect(normalizeHiddenStepIds({})).toEqual({});
+  });
+});
+
+describe("buildSettingsUpdatePayload", () => {
+  // Guards the literal wire key: a silent rename here would break persistence
+  // with zero test failures anywhere else, since the E2E persistence spec
+  // drives the real UI and would only catch it after a full round trip.
+  it("sends hidden step ids under the kanban_hidden_step_ids wire key", () => {
+    const normalized = settingsWithHidden({ "wf-1": ["step-a", "step-b"] });
+    expect(buildSettingsUpdatePayload(normalized)).toMatchObject({
+      kanban_hidden_step_ids: { "wf-1": ["step-a", "step-b"] },
+    });
+  });
+
+  it("sends an empty hidden-step map as-is", () => {
+    const normalized = settingsWithHidden({});
+    expect(buildSettingsUpdatePayload(normalized)).toMatchObject({
+      kanban_hidden_step_ids: {},
+    });
   });
 });

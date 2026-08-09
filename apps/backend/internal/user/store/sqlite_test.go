@@ -720,6 +720,24 @@ func TestSQLiteRepositoryKanbanHiddenStepIDsDefaultAndRoundTrip(t *testing.T) {
 	}
 }
 
+func TestScanUserSettingsKanbanHiddenStepIDsCorruptFallsBackToEmpty(t *testing.T) {
+	settings, err := scanUserSettings(
+		settingsScanner{raw: `{"kanban_hidden_step_ids":"not-an-object","workspace_id":"ws-1"}`},
+		DefaultUserID,
+	)
+	if err != nil {
+		t.Fatalf("scan settings with corrupt kanban_hidden_step_ids: %v", err)
+	}
+	if len(settings.KanbanHiddenStepIDs) != 0 {
+		t.Fatalf("KanbanHiddenStepIDs = %#v, want empty on corrupt value", settings.KanbanHiddenStepIDs)
+	}
+	// Corruption in this one field must not take the rest of the settings
+	// blob down with it.
+	if settings.WorkspaceID != "ws-1" {
+		t.Fatalf("WorkspaceID = %q, want %q (sibling fields must still load)", settings.WorkspaceID, "ws-1")
+	}
+}
+
 func TestSQLiteRepositoryUpdateTaskCreateLastUsedPatchesNonEmptyFields(t *testing.T) {
 	conn, err := sqlx.Open("sqlite3", ":memory:")
 	if err != nil {

@@ -84,6 +84,17 @@ export function isSettingsUnchanged(
   );
 }
 
+export function buildSettingsUpdatePayload(normalized: DisplaySettings): Record<string, unknown> {
+  return {
+    workspace_id: normalized.workspaceId ?? "",
+    workflow_filter_id: normalized.workflowId ?? "",
+    repository_ids: normalized.repositoryIds,
+    enable_preview_on_click: normalized.enablePreviewOnClick,
+    tasks_list_show_details: normalized.tasksListShowDetails,
+    kanban_hidden_step_ids: normalized.hiddenWorkflowStepIds,
+  };
+}
+
 function persistSettingsPayload(payload: Record<string, unknown>) {
   const client = getWebSocketClient();
   if (!client) {
@@ -160,15 +171,7 @@ export function useUserDisplaySettings({
       const normalized = buildNormalizedSettings(next, current);
       if (isSettingsUnchanged(normalized, current)) return;
       setUserSettings(normalized);
-      const payload = {
-        workspace_id: normalized.workspaceId ?? "",
-        workflow_filter_id: normalized.workflowId ?? "",
-        repository_ids: normalized.repositoryIds,
-        enable_preview_on_click: normalized.enablePreviewOnClick,
-        tasks_list_show_details: normalized.tasksListShowDetails,
-        kanban_hidden_step_ids: normalized.hiddenWorkflowStepIds,
-      };
-      persistSettingsPayload(payload);
+      persistSettingsPayload(buildSettingsUpdatePayload(normalized));
     },
     [setUserSettings, userSettingsRef],
   );

@@ -900,6 +900,31 @@ func TestApplyWorkspaceAndTaskListPreferencesKanbanHiddenStepIDs(t *testing.T) {
 			},
 			wantErr: fmt.Sprintf("kanban_hidden_step_ids[wf-1]: max %d step ids allowed", maxKanbanHiddenStepIDsPerWorkflow),
 		},
+		{
+			name: "a handful of very long ids under the total byte budget is accepted",
+			req: &UpdateUserSettingsRequest{
+				KanbanHiddenStepIDs: ptr(map[string][]string{"wf-1": {strings.Repeat("a", 1024)}}),
+			},
+		},
+		{
+			name: "ids within count limits but exceeding the total byte budget returns error",
+			req: &UpdateUserSettingsRequest{
+				// 200 ids (at the count cap) x 400 bytes each = 80,000 bytes,
+				// comfortably over maxKanbanHiddenStepIDsTotalBytes (64KB) —
+				// this is the exact shape the count-only caps used to miss:
+				// a few oversized strings smuggled past a per-entry count check.
+				KanbanHiddenStepIDs: ptr(map[string][]string{
+					"wf-1": func() []string {
+						ids := make([]string, maxKanbanHiddenStepIDsPerWorkflow)
+						for i := range ids {
+							ids[i] = strings.Repeat("a", 400)
+						}
+						return ids
+					}(),
+				}),
+			},
+			wantErr: fmt.Sprintf("kanban_hidden_step_ids: max %d bytes allowed", maxKanbanHiddenStepIDsTotalBytes),
+		},
 	}
 
 	for _, tt := range tests {
