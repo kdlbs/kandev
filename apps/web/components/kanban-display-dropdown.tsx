@@ -170,6 +170,7 @@ function StepsSection({
       <DropdownMenuSeparator />
       <div className="space-y-1.5">
         <DropdownMenuLabel className="px-0 text-foreground">{t("kanban:steps")}</DropdownMenuLabel>
+        <p className="text-xs text-muted-foreground">{t("kanban:stepsSectionDescription")}</p>
         {workflowsWithSteps.map((wf) => {
           const steps = [...(snapshots[wf.id]?.steps ?? [])].sort(
             (a, b) => a.position - b.position || a.id.localeCompare(b.id),

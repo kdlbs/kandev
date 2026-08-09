@@ -81,6 +81,7 @@
   "sort": "Sort",
   "step": "Step",
   "steps": "Steps",
+  "stepsSectionDescription": "Uncheck a step to hide its column and tasks on this board. It stays available as a move destination and target everywhere else.",
   "subtaskOf": "Subtask of",
   "taskList": "Task list",
   "tasksOverWipLimit": "{{label}} tasks, over WIP limit",

@@ -275,7 +275,34 @@ func applyWorkspaceAndTaskListPreferences(settings *models.UserSettings, req *Up
 		settings.EnablePreviewOnClick = *req.EnablePreviewOnClick
 	}
 	if req.KanbanHiddenStepIDs != nil {
+		if err := validateKanbanHiddenStepIDs(*req.KanbanHiddenStepIDs); err != nil {
+			return err
+		}
 		settings.KanbanHiddenStepIDs = *req.KanbanHiddenStepIDs
+	}
+	return nil
+}
+
+const (
+	maxKanbanHiddenStepWorkflows      = 200
+	maxKanbanHiddenStepIDsPerWorkflow = 200
+)
+
+// validateKanbanHiddenStepIDs bounds the per-workflow hidden-step-id map so a
+// single settings write cannot grow the users.settings JSON blob unboundedly
+// on the shared single-writer SQLite connection.
+func validateKanbanHiddenStepIDs(hidden map[string][]string) error {
+	if len(hidden) > maxKanbanHiddenStepWorkflows {
+		return fmt.Errorf("kanban_hidden_step_ids: max %d workflows allowed", maxKanbanHiddenStepWorkflows)
+	}
+	for workflowID, ids := range hidden {
+		if len(ids) > maxKanbanHiddenStepIDsPerWorkflow {
+			return fmt.Errorf(
+				"kanban_hidden_step_ids[%s]: max %d step ids allowed",
+				workflowID,
+				maxKanbanHiddenStepIDsPerWorkflow,
+			)
+		}
 	}
 	return nil
 }

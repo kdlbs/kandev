@@ -1,9 +1,17 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { KanbanDisplayDropdown } from "./kanban-display-dropdown";
 
+const { useKanbanDisplaySettingsMock } = vi.hoisted(() => ({
+  useKanbanDisplaySettingsMock: vi.fn(),
+}));
+
 vi.mock("@/hooks/use-kanban-display-settings", () => ({
-  useKanbanDisplaySettings: () => ({
+  useKanbanDisplaySettings: useKanbanDisplaySettingsMock,
+}));
+
+function defaultMockSettings() {
+  return {
     workflows: [],
     activeWorkflowId: null,
     repositories: [],
@@ -20,8 +28,12 @@ vi.mock("@/hooks/use-kanban-display-settings", () => ({
     onTogglePreviewOnClick: vi.fn(),
     onToggleTasksListShowDetails: vi.fn(),
     onToggleStepVisibility: vi.fn(),
-  }),
-}));
+  };
+}
+
+beforeEach(() => {
+  useKanbanDisplaySettingsMock.mockReturnValue(defaultMockSettings());
+});
 
 afterEach(cleanup);
 
@@ -153,5 +165,153 @@ describe("KanbanDisplayDropdown — plugin task filter identities", () => {
     rerender(<KanbanDisplayDropdown {...props} />);
 
     expect(getOptions).toHaveBeenCalledTimes(1);
+  });
+});
+
+const STEPS_WF_A_ID = "wf-a";
+const STEPS_WF_B_ID = "wf-b";
+const STEPS_WF_A = { id: STEPS_WF_A_ID, name: "Workflow A" };
+const STEPS_WF_B = { id: STEPS_WF_B_ID, name: "Workflow B" };
+
+describe("KanbanDisplayDropdown — Steps section", () => {
+  it("lists a workflow's steps in position order, tiebreaking by id", () => {
+    useKanbanDisplaySettingsMock.mockReturnValue({
+      ...defaultMockSettings(),
+      eligibleWorkflows: [STEPS_WF_A],
+      snapshots: {
+        [STEPS_WF_A_ID]: {
+          steps: [
+            { id: "step-z", title: "Z step", position: 1 },
+            { id: "step-a", title: "A step", position: 0 },
+            { id: "step-b-tie", title: "B tie", position: 1 },
+          ],
+        },
+      },
+    });
+    render(<KanbanDisplayDropdown />);
+    openDropdown();
+
+    const group = screen.getByTestId(`steps-filter-group-${STEPS_WF_A_ID}`);
+    const labels = Array.from(group.querySelectorAll("span.text-sm")).map((el) => el.textContent);
+    // position 0 first; the two position-1 steps tiebreak ascending by id
+    // ("step-b-tie" < "step-z" lexicographically).
+    expect(labels).toEqual(["A step", "B tie", "Z step"]);
+  });
+
+  it("shows workflow name labels only when more than one workflow group has steps", () => {
+    useKanbanDisplaySettingsMock.mockReturnValue({
+      ...defaultMockSettings(),
+      eligibleWorkflows: [STEPS_WF_A],
+      snapshots: {
+        [STEPS_WF_A_ID]: { steps: [{ id: "step-1", title: "Step 1", position: 0 }] },
+      },
+    });
+    const { unmount } = render(<KanbanDisplayDropdown />);
+    openDropdown();
+    expect(screen.queryByText("Workflow A")).toBeNull();
+    unmount();
+
+    useKanbanDisplaySettingsMock.mockReturnValue({
+      ...defaultMockSettings(),
+      eligibleWorkflows: [STEPS_WF_A, STEPS_WF_B],
+      snapshots: {
+        [STEPS_WF_A_ID]: { steps: [{ id: "step-1", title: "Step 1", position: 0 }] },
+        [STEPS_WF_B_ID]: { steps: [{ id: "step-2", title: "Step 2", position: 0 }] },
+      },
+    });
+    render(<KanbanDisplayDropdown />);
+    openDropdown();
+    expect(screen.getByText("Workflow A")).not.toBeNull();
+    expect(screen.getByText("Workflow B")).not.toBeNull();
+  });
+
+  it("excludes a workflow whose snapshot has zero steps", () => {
+    useKanbanDisplaySettingsMock.mockReturnValue({
+      ...defaultMockSettings(),
+      eligibleWorkflows: [STEPS_WF_A, STEPS_WF_B],
+      snapshots: {
+        [STEPS_WF_A_ID]: { steps: [{ id: "step-1", title: "Step 1", position: 0 }] },
+        [STEPS_WF_B_ID]: { steps: [] },
+      },
+    });
+    render(<KanbanDisplayDropdown />);
+    openDropdown();
+
+    expect(screen.getByTestId(`steps-filter-group-${STEPS_WF_A_ID}`)).not.toBeNull();
+    expect(screen.queryByTestId(`steps-filter-group-${STEPS_WF_B_ID}`)).toBeNull();
+  });
+
+  it("renders nothing when no eligible workflow has any steps", () => {
+    useKanbanDisplaySettingsMock.mockReturnValue({
+      ...defaultMockSettings(),
+      eligibleWorkflows: [STEPS_WF_A],
+      snapshots: { [STEPS_WF_A_ID]: { steps: [] } },
+    });
+    render(<KanbanDisplayDropdown />);
+    openDropdown();
+
+    // StepsSection returns null entirely (not just its groups) when no
+    // eligible workflow has any steps.
+    expect(screen.queryByText("kanban:steps")).toBeNull();
+    expect(screen.queryByTestId(/steps-filter-group-/)).toBeNull();
+  });
+});
+
+describe("KanbanDisplayDropdown — Steps section checkbox interaction", () => {
+  it("reflects checked/unchecked state from hiddenWorkflowStepIds", () => {
+    useKanbanDisplaySettingsMock.mockReturnValue({
+      ...defaultMockSettings(),
+      eligibleWorkflows: [STEPS_WF_A],
+      snapshots: {
+        [STEPS_WF_A_ID]: {
+          steps: [
+            { id: "step-shown", title: "Shown", position: 0 },
+            { id: "step-hidden", title: "Hidden", position: 1 },
+          ],
+        },
+      },
+      hiddenWorkflowStepIds: { [STEPS_WF_A_ID]: ["step-hidden"] },
+    });
+    render(<KanbanDisplayDropdown />);
+    openDropdown();
+
+    expect(screen.getByTestId("steps-filter-step-step-shown").getAttribute("data-state")).toBe(
+      "checked",
+    );
+    expect(screen.getByTestId("steps-filter-step-step-hidden").getAttribute("data-state")).toBe(
+      "unchecked",
+    );
+  });
+
+  it("calls onToggleStepVisibility with the workflow and step id on click", () => {
+    const onToggleStepVisibility = vi.fn();
+    useKanbanDisplaySettingsMock.mockReturnValue({
+      ...defaultMockSettings(),
+      eligibleWorkflows: [STEPS_WF_A],
+      snapshots: {
+        [STEPS_WF_A_ID]: { steps: [{ id: "step-1", title: "Step 1", position: 0 }] },
+      },
+      onToggleStepVisibility,
+    });
+    render(<KanbanDisplayDropdown />);
+    openDropdown();
+
+    fireEvent.click(screen.getByTestId("steps-filter-step-step-1"));
+
+    expect(onToggleStepVisibility).toHaveBeenCalledWith(STEPS_WF_A_ID, "step-1");
+  });
+
+  it("does not render the Steps section on the tasks page", () => {
+    useKanbanDisplaySettingsMock.mockReturnValue({
+      ...defaultMockSettings(),
+      eligibleWorkflows: [STEPS_WF_A],
+      snapshots: {
+        [STEPS_WF_A_ID]: { steps: [{ id: "step-1", title: "Step 1", position: 0 }] },
+      },
+    });
+    render(<KanbanDisplayDropdown currentPage="tasks" />);
+    openDropdown();
+
+    expect(screen.queryByTestId(`steps-filter-group-${STEPS_WF_A_ID}`)).toBeNull();
   });
 });

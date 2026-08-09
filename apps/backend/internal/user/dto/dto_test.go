@@ -23,6 +23,43 @@ func TestFromUserSettingsMapsAzureDevOpsBrowsePreferences(t *testing.T) {
 	}
 }
 
+func TestUpdateUserSettingsRequestExposesKanbanHiddenStepIDs(t *testing.T) {
+	field, ok := reflect.TypeFor[UpdateUserSettingsRequest]().FieldByName("KanbanHiddenStepIDs")
+	if !ok || field.Tag.Get("json") != "kanban_hidden_step_ids,omitempty" {
+		t.Fatalf("KanbanHiddenStepIDs patch field = %+v, want JSON kanban_hidden_step_ids field", field)
+	}
+}
+
+func TestFromUserSettingsMapsKanbanHiddenStepIDs(t *testing.T) {
+	hidden := map[string][]string{"wf-1": {"step-a", "step-b"}}
+	settings := FromUserSettings(&models.UserSettings{KanbanHiddenStepIDs: hidden})
+	if !reflect.DeepEqual(settings.KanbanHiddenStepIDs, hidden) {
+		t.Fatalf("KanbanHiddenStepIDs = %#v, want %#v", settings.KanbanHiddenStepIDs, hidden)
+	}
+}
+
+func TestKanbanHiddenStepIDsRequestDecode(t *testing.T) {
+	t.Run("omitted value stays nil", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{}`), &req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.KanbanHiddenStepIDs != nil {
+			t.Fatalf("KanbanHiddenStepIDs = %#v, want nil", req.KanbanHiddenStepIDs)
+		}
+	})
+
+	t.Run("explicit empty map is retained, not treated as omitted", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{"kanban_hidden_step_ids":{}}`), &req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.KanbanHiddenStepIDs == nil || len(*req.KanbanHiddenStepIDs) != 0 {
+			t.Fatalf("KanbanHiddenStepIDs = %#v, want non-nil empty map", req.KanbanHiddenStepIDs)
+		}
+	})
+}
+
 func TestTasksListShowDetailsDTO(t *testing.T) {
 	if !FromUserSettings(&models.UserSettings{TasksListShowDetails: true}).TasksListShowDetails {
 		t.Fatal("TasksListShowDetails = false, want true")

@@ -215,7 +215,7 @@ type SnapEntry = {
   steps: { id: string; title: string; color?: string | null }[];
 };
 
-function useMultiSelectDerived(
+export function useMultiSelectDerived(
   selectedIds: Set<string>,
   snapshots: Record<string, SnapEntry>,
   activeSteps: { id: string; title: string; color?: string | null }[],

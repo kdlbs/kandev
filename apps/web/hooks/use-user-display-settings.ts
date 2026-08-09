@@ -29,7 +29,7 @@ type CommitPayload = {
   hiddenWorkflowStepIds?: Record<string, string[]>;
 };
 
-function normalizeHiddenStepIds(raw: Record<string, string[]>): Record<string, string[]> {
+export function normalizeHiddenStepIds(raw: Record<string, string[]>): Record<string, string[]> {
   const result: Record<string, string[]> = {};
   for (const [workflowId, ids] of Object.entries(raw)) {
     const sorted = Array.from(new Set(ids)).sort();
@@ -46,8 +46,8 @@ function hiddenStepIdsEqual(a: Record<string, string[]>, b: Record<string, strin
   if (aKeys.length !== bKeys.length) return false;
   return aKeys.every((key, i) => {
     if (key !== bKeys[i]) return false;
-    const aIds = a[key];
-    const bIds = b[key];
+    const aIds = [...a[key]].sort();
+    const bIds = [...b[key]].sort();
     return aIds.length === bIds.length && aIds.every((id, j) => id === bIds[j]);
   });
 }

@@ -686,6 +686,40 @@ func TestSQLiteRepositoryAppStatusBarOrderDefaultAndRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepositoryKanbanHiddenStepIDsDefaultAndRoundTrip(t *testing.T) {
+	conn, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	conn.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = conn.Close() })
+	repo, err := newSQLiteRepositoryWithDB(conn, conn)
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+
+	ctx := context.Background()
+	settings, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get defaults: %v", err)
+	}
+	if len(settings.KanbanHiddenStepIDs) != 0 {
+		t.Fatalf("default KanbanHiddenStepIDs = %#v, want empty", settings.KanbanHiddenStepIDs)
+	}
+	settings.KanbanHiddenStepIDs = map[string][]string{
+		"wf-1": {"step-a", "step-b"},
+		"wf-2": {"step-c"},
+	}
+	upsertUserSettingsForTest(t, repo, ctx, settings)
+	got, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get settings: %v", err)
+	}
+	if !reflect.DeepEqual(got.KanbanHiddenStepIDs, settings.KanbanHiddenStepIDs) {
+		t.Fatalf("KanbanHiddenStepIDs = %#v, want %#v", got.KanbanHiddenStepIDs, settings.KanbanHiddenStepIDs)
+	}
+}
+
 func TestSQLiteRepositoryUpdateTaskCreateLastUsedPatchesNonEmptyFields(t *testing.T) {
 	conn, err := sqlx.Open("sqlite3", ":memory:")
 	if err != nil {
