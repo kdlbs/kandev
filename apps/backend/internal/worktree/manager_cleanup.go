@@ -169,7 +169,7 @@ func (m *Manager) RemoveByID(ctx context.Context, worktreeID string, removeBranc
 	if err != nil {
 		return err
 	}
-	return m.removeWorktree(ctx, wt, removeBranch)
+	return m.removeWorktree(ctx, wt, removeBranch, []string{wt.SessionID})
 }
 
 // RemoveAt removes a worktree using its durable path/repository handles when
@@ -180,11 +180,22 @@ func (m *Manager) RemoveByID(ctx context.Context, worktreeID string, removeBranc
 // delegates to the same tracked-row path RemoveByID uses, so the
 // shared/borrowed-worktree reference-count guard (CountActiveWorktreeReferences)
 // is never bypassed; the path-only fallback only runs once nothing can
-// reference the ID anymore. Never deletes the branch.
-func (m *Manager) RemoveAt(ctx context.Context, worktreeID, worktreePath, repositoryID string) error {
+// reference the ID anymore. excludeSessionIDs are the caller's own task's
+// session IDs (see teardownEnvironmentResources): a worktree can be shared by
+// several sessions of the SAME task (a task's sessions reuse one
+// TaskEnvironment worktree across relaunches), and only ONE of those
+// session-scoped rows is ever visible to GetByID at a time. Excluding just
+// that one row's session (RemoveByID's contract) would see the sibling
+// session's row as an active "foreign" reference and merely release-and-
+// preserve, forever, since env teardown only calls RemoveAt once per
+// worktree_id — unlike the batch cleanup path, which converges by processing
+// one row per session. Excluding the whole task's session set up front lets
+// this single call reach the same outcome the batch path's multi-row
+// convergence produces. Never deletes the branch.
+func (m *Manager) RemoveAt(ctx context.Context, worktreeID, worktreePath, repositoryID string, excludeSessionIDs []string) error {
 	wt, err := m.GetByID(ctx, worktreeID)
 	if err == nil {
-		return m.removeWorktree(ctx, wt, false)
+		return m.removeWorktree(ctx, wt, false, withSessionID(excludeSessionIDs, wt.SessionID))
 	}
 	if !errors.Is(err, ErrWorktreeNotFound) {
 		return err
@@ -209,7 +220,7 @@ func (m *Manager) RemoveAt(ctx context.Context, worktreeID, worktreePath, reposi
 		m.releaseRepoLock(repoPath)
 	}()
 
-	activeReferences, err := m.CountActiveWorktreeReferences(ctx, worktreeID, nil)
+	activeReferences, err := m.CountActiveWorktreeReferences(ctx, worktreeID, excludeSessionIDs)
 	if err != nil {
 		return fmt.Errorf("count active references for worktree %s: %w", worktreeID, err)
 	}
@@ -236,10 +247,12 @@ func (m *Manager) RemoveAt(ctx context.Context, worktreeID, worktreePath, reposi
 	// stale or wrong path can never take a main checkout or a task root
 	// (and its sibling worktrees) with it. A missing path is treated as
 	// already removed, matching removeWorktreeDir's existing idempotency.
+	pathExists := true
 	if _, statErr := os.Stat(worktreePath); statErr != nil {
 		if !os.IsNotExist(statErr) {
 			return fmt.Errorf("stat worktree path %s: %w", worktreePath, statErr)
 		}
+		pathExists = false
 	} else if !m.IsValid(worktreePath) {
 		m.logger.Error("refusing to remove a path that is not a linked git worktree",
 			zap.String("worktree_id", worktreeID),
@@ -247,10 +260,35 @@ func (m *Manager) RemoveAt(ctx context.Context, worktreeID, worktreePath, reposi
 		return fmt.Errorf("worktree path %s is not a linked git worktree; refusing to remove it", worktreePath)
 	}
 
+	if pathExists {
+		// Execute cleanup script BEFORE removing the directory, mirroring
+		// removeWorktree's ordering — otherwise a repository's configured
+		// CleanupScript (e.g. `docker compose down`) silently stops running
+		// for every worktree that reaches this fallback instead of the
+		// tracked-row path. No live task_session_worktrees row exists for
+		// this worktree_id (that's why we're in the fallback), so the
+		// request carries no session/task context; the script itself is
+		// keyed off the repository, not the caller's session.
+		m.runWorktreeCleanupScript(ctx, &Worktree{ID: worktreeID, RepositoryID: repositoryID, Path: worktreePath})
+	}
+
 	if err := m.removeWorktreeDir(ctx, worktreePath, repoPath); err != nil {
 		return fmt.Errorf("remove worktree directory %s: %w", worktreePath, err)
 	}
 	return nil
+}
+
+// withSessionID returns excludeSessionIDs guaranteed to contain sessionID, so
+// the specific row RemoveAt resolved via GetByID is always excluded from its
+// own active-reference count even if the caller's task-wide list were
+// somehow incomplete.
+func withSessionID(excludeSessionIDs []string, sessionID string) []string {
+	for _, id := range excludeSessionIDs {
+		if id == sessionID {
+			return excludeSessionIDs
+		}
+	}
+	return append(append([]string{}, excludeSessionIDs...), sessionID)
 }
 
 // resolveRepositoryPath resolves a repository's main checkout path for
@@ -285,8 +323,12 @@ func (m *Manager) resolveRepositoryPath(ctx context.Context, repositoryID string
 	return repo.LocalPath, true, nil
 }
 
-// removeWorktree performs the actual removal of a worktree.
-func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch bool) error {
+// removeWorktree performs the actual removal of a worktree. excludeSessionIDs
+// are the sessions whose reference to wt must not count as "still active" —
+// normally just wt.SessionID itself, but RemoveAt passes its caller's whole
+// task's session set so a worktree shared across several of that task's own
+// sessions doesn't get stuck in "release-and-preserve" forever.
+func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch bool, excludeSessionIDs []string) error {
 	// Get repository lock
 	repoLock := m.getRepoLock(wt.RepositoryPath)
 	repoLock.Lock()
@@ -294,12 +336,7 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 		repoLock.Unlock()
 		m.releaseRepoLock(wt.RepositoryPath)
 	}()
-	// CountActiveWorktreeReferences already counts only sessions of OTHER
-	// tasks referencing the owning environment. No exclusions are passed:
-	// the worktree record returned by GetWorktreeByID carries an arbitrary
-	// session of that environment, and excluding it could hide a borrower
-	// and authorize deletion of a workspace another task still holds.
-	activeReferences, err := m.CountActiveWorktreeReferences(ctx, wt.ID, nil)
+	activeReferences, err := m.CountActiveWorktreeReferences(ctx, wt.ID, excludeSessionIDs)
 	if err != nil {
 		return fmt.Errorf("count active references for worktree %s: %w", wt.ID, err)
 	}
@@ -526,7 +563,7 @@ func (m *Manager) CleanupWorktrees(ctx context.Context, worktrees []*Worktree) e
 		if wt == nil {
 			continue
 		}
-		if err := m.removeWorktree(ctx, wt, true); err != nil {
+		if err := m.removeWorktree(ctx, wt, true, []string{wt.SessionID}); err != nil {
 			m.logger.Warn("failed to remove worktree on task deletion",
 				zap.String("task_id", wt.TaskID),
 				zap.String("worktree_id", wt.ID),

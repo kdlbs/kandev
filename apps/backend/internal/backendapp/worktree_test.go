@@ -190,7 +190,7 @@ func TestEnvironmentDestroyerAdapter_DestroyWorktreeAtForwardsArgumentsInOrder(t
 	}
 
 	adapter := &environmentDestroyerAdapter{worktrees: mgr}
-	if err := adapter.DestroyWorktreeAt(ctx, wt.ID, wt.Path, wt.RepositoryID); err != nil {
+	if err := adapter.DestroyWorktreeAt(ctx, wt.ID, wt.Path, wt.RepositoryID, nil); err != nil {
 		t.Fatalf("DestroyWorktreeAt: %v", err)
 	}
 	if _, statErr := os.Stat(wt.Path); !os.IsNotExist(statErr) {

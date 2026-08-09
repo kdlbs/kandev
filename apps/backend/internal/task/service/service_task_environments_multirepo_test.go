@@ -29,8 +29,10 @@ func (d *realWorktreeDestroyer) DestroyContainer(context.Context, string) error 
 func (d *realWorktreeDestroyer) DestroySandbox(context.Context, string, string) error {
 	return nil
 }
-func (d *realWorktreeDestroyer) DestroyWorktreeAt(ctx context.Context, worktreeID, worktreePath, repositoryID string) error {
-	return d.mgr.RemoveAt(ctx, worktreeID, worktreePath, repositoryID)
+func (d *realWorktreeDestroyer) DestroyWorktreeAt(
+	ctx context.Context, worktreeID, worktreePath, repositoryID string, excludeSessionIDs []string,
+) error {
+	return d.mgr.RemoveAt(ctx, worktreeID, worktreePath, repositoryID, excludeSessionIDs)
 }
 func (d *realWorktreeDestroyer) PushEnvironmentBranch(context.Context, *models.TaskEnvironment) error {
 	return nil
@@ -194,7 +196,7 @@ func TestTeardownEnvironmentResources_MultiRepoRemovesEveryWorktreeFromDisk(t *t
 		t.Fatalf("delete session: %v", err)
 	}
 
-	if err := svc.teardownEnvironmentResources(ctx, env); err != nil {
+	if err := svc.teardownEnvironmentResources(ctx, env, []string{"session-multi"}); err != nil {
 		t.Fatalf("teardownEnvironmentResources: %v", err)
 	}
 

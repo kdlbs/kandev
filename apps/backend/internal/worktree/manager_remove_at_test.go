@@ -109,7 +109,7 @@ func TestRemoveAt_PathFallbackRemovesDirectoryAfterSessionCascade(t *testing.T) 
 		t.Fatal("expected GetByID to fail once the session-scoped row has cascaded away")
 	}
 
-	if err := mgr.RemoveAt(ctx, wt.ID, wt.Path, wt.RepositoryID); err != nil {
+	if err := mgr.RemoveAt(ctx, wt.ID, wt.Path, wt.RepositoryID, nil); err != nil {
 		t.Fatalf("RemoveAt: %v", err)
 	}
 
@@ -138,7 +138,7 @@ func TestRemoveAt_PreservesSharedActiveReference(t *testing.T) {
 		t.Fatalf("create borrower worktree reference: %v", err)
 	}
 
-	if err := mgr.RemoveAt(ctx, wt.ID, wt.Path, wt.RepositoryID); err != nil {
+	if err := mgr.RemoveAt(ctx, wt.ID, wt.Path, wt.RepositoryID, nil); err != nil {
 		t.Fatalf("RemoveAt: %v", err)
 	}
 
@@ -167,7 +167,7 @@ func TestRemoveAt_PathFallbackPrunesSourceRepositoryRegistration(t *testing.T) {
 		t.Fatalf("delete session: %v", err)
 	}
 
-	if err := mgr.RemoveAt(ctx, wt.ID, wt.Path, wt.RepositoryID); err != nil {
+	if err := mgr.RemoveAt(ctx, wt.ID, wt.Path, wt.RepositoryID, nil); err != nil {
 		t.Fatalf("RemoveAt: %v", err)
 	}
 
@@ -196,7 +196,7 @@ func TestRemoveAt_PropagatesTransientRepositoryLookupFailure(t *testing.T) {
 		t.Fatalf("delete session: %v", err)
 	}
 
-	err := mgr.RemoveAt(ctx, wt.ID, wt.Path, wt.RepositoryID)
+	err := mgr.RemoveAt(ctx, wt.ID, wt.Path, wt.RepositoryID, nil)
 	if !errors.Is(err, lookupErr) {
 		t.Fatalf("RemoveAt() error = %v, want it to wrap %v so the caller retries instead of silently degrading", err, lookupErr)
 	}
@@ -231,7 +231,7 @@ func TestRemoveAt_PathFallbackUnresolvableRepositoryNeverTouchesAmbientDirectory
 
 	// No repository provider wired: repositoryID cannot resolve, exactly the
 	// "genuinely unresolvable" case removeWorktreeDir must not run git for.
-	if err := mgr.RemoveAt(ctx, wt.ID, wt.Path, "repo-that-does-not-exist"); err != nil {
+	if err := mgr.RemoveAt(ctx, wt.ID, wt.Path, "repo-that-does-not-exist", nil); err != nil {
 		t.Fatalf("RemoveAt: %v", err)
 	}
 
@@ -242,6 +242,162 @@ func TestRemoveAt_PathFallbackUnresolvableRepositoryNeverTouchesAmbientDirectory
 	if !strings.Contains(out, danglingWorktreePath) {
 		t.Fatalf("decoy repository's unrelated dangling worktree registration was pruned by RemoveAt "+
 			"(git ran against the wrong repository — an empty exec.Cmd.Dir resolves to the process's cwd):\n%s", out)
+	}
+}
+
+// TestRemoveAt_TrackedRow_SameTaskSiblingSessionNoLongerBlocksRemoval is the
+// regression test for Review round 3 Finding 1: a task's sessions reuse one
+// TaskEnvironment worktree across relaunches, so two sessions on the SAME
+// task can each hold their own task_session_worktrees row for the identical
+// worktree_id. teardownEnvironmentResources calls RemoveAt exactly ONCE per
+// worktree_id (unlike the batch cleanup path, which processes one row per
+// session and converges). Before this fix, RemoveAt only excluded the ONE
+// session GetByID happened to return, so it saw the sibling session's row as
+// an active "foreign" reference, released its own row, and returned without
+// ever removing the directory — permanently, since env teardown never
+// retries. Passing the whole task's session set must let this single call
+// reach the same "no external references, safe to remove" outcome the batch
+// path's multi-row convergence produces.
+func TestRemoveAt_TrackedRow_SameTaskSiblingSessionNoLongerBlocksRemoval(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	ctx := context.Background()
+	seedReferenceCleanupSession(t, store, "task-owner", "session-a", "completed")
+	seedReferenceCleanupSessionOnExistingTask(t, store, "task-owner", "session-b", "completed")
+
+	wt := createReferenceCleanupWorktree(t, mgr, "task-owner", "session-a")
+	sibling := *wt
+	sibling.SessionID = "session-b"
+	if err := store.CreateWorktree(ctx, &sibling); err != nil {
+		t.Fatalf("create sibling session worktree reference: %v", err)
+	}
+
+	if err := mgr.RemoveAt(ctx, wt.ID, wt.Path, wt.RepositoryID, []string{"session-a", "session-b"}); err != nil {
+		t.Fatalf("RemoveAt: %v", err)
+	}
+
+	if _, err := os.Stat(wt.Path); !os.IsNotExist(err) {
+		t.Fatalf("worktree directory shared only within the task should be removed, stat error = %v", err)
+	}
+}
+
+// TestRemoveAt_TrackedRow_ForeignTaskReferenceStillBlocksRemoval guards the
+// other side of the same fix: excluding the caller's own task sessions must
+// not also swallow a genuinely foreign (different task) active reference.
+// Mirrors TestRemoveAt_PreservesSharedActiveReference but drives the
+// excludeSessionIDs parameter explicitly, the way teardownEnvironmentResources
+// now does, instead of relying on the nil/single-session default.
+func TestRemoveAt_TrackedRow_ForeignTaskReferenceStillBlocksRemoval(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	ctx := context.Background()
+	seedReferenceCleanupSession(t, store, "task-owner", "session-owner", "running")
+	seedReferenceCleanupSession(t, store, "task-borrower", "session-borrower", "running")
+
+	wt := createReferenceCleanupWorktree(t, mgr, "task-owner", "session-owner")
+	borrowed := *wt
+	borrowed.TaskID = "task-borrower"
+	borrowed.SessionID = "session-borrower"
+	if err := store.CreateWorktree(ctx, &borrowed); err != nil {
+		t.Fatalf("create borrower worktree reference: %v", err)
+	}
+
+	if err := mgr.RemoveAt(ctx, wt.ID, wt.Path, wt.RepositoryID, []string{"session-owner"}); err != nil {
+		t.Fatalf("RemoveAt: %v", err)
+	}
+
+	if _, err := os.Stat(wt.Path); err != nil {
+		t.Fatalf("worktree still referenced by a different task should be preserved: %v", err)
+	}
+	assertWorktreeReferenceStatus(t, store, wt.ID, "session-owner", StatusDeleted)
+	assertWorktreeReferenceStatus(t, store, wt.ID, "session-borrower", StatusActive)
+}
+
+// cleanupScriptTrackingHandler is a ScriptMessageHandler that records every
+// cleanup script invocation so tests can assert it ran with the expected
+// repository/working-dir, without a real shell.
+type cleanupScriptTrackingHandler struct {
+	cleanupCalls []ScriptExecutionRequest
+}
+
+func (h *cleanupScriptTrackingHandler) ExecuteSetupScript(context.Context, ScriptExecutionRequest) error {
+	return nil
+}
+
+func (h *cleanupScriptTrackingHandler) ExecuteCleanupScript(_ context.Context, req ScriptExecutionRequest) error {
+	h.cleanupCalls = append(h.cleanupCalls, req)
+	return nil
+}
+
+// TestRemoveAt_PathFallbackRunsRepositoryCleanupScript is the regression test
+// for Review round 3 Finding 2: on task delete, the task row (and its
+// sessions) are gone by the time the durable cleanup job runs, so RemoveAt's
+// path-only fallback is the normal path for every worktree, not just an edge
+// case. Before this fix, that fallback removed the directory directly and
+// never ran the repository's configured CleanupScript (e.g. `docker compose
+// down`), unlike the tracked-row path (removeWorktree) and the batch
+// CleanupWorktrees path, both of which always ran it first.
+func TestRemoveAt_PathFallbackRunsRepositoryCleanupScript(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	ctx := context.Background()
+	seedReferenceCleanupSession(t, store, "task-owner", "session-owner", "completed")
+	wt := createReferenceCleanupWorktree(t, mgr, "task-owner", "session-owner")
+
+	handler := &cleanupScriptTrackingHandler{}
+	mgr.SetScriptMessageHandler(handler)
+	mgr.SetRepositoryProvider(&stubRepositoryProvider{
+		repos: map[string]*Repository{
+			wt.RepositoryID: {ID: wt.RepositoryID, LocalPath: wt.RepositoryPath, CleanupScript: "echo cleanup"},
+		},
+	})
+
+	if _, err := store.db.ExecContext(ctx, `DELETE FROM task_sessions WHERE id = ?`, "session-owner"); err != nil {
+		t.Fatalf("delete session: %v", err)
+	}
+
+	if err := mgr.RemoveAt(ctx, wt.ID, wt.Path, wt.RepositoryID, nil); err != nil {
+		t.Fatalf("RemoveAt: %v", err)
+	}
+
+	if _, err := os.Stat(wt.Path); !os.IsNotExist(err) {
+		t.Fatalf("worktree directory should be removed, stat error = %v", err)
+	}
+	if len(handler.cleanupCalls) != 1 {
+		t.Fatalf("cleanup script calls = %d, want 1", len(handler.cleanupCalls))
+	}
+	got := handler.cleanupCalls[0]
+	if got.RepositoryID != wt.RepositoryID || got.WorkingDir != wt.Path {
+		t.Fatalf("cleanup script call = %+v, want RepositoryID=%q WorkingDir=%q", got, wt.RepositoryID, wt.Path)
+	}
+}
+
+// TestRemoveAt_PathFallbackSkipsCleanupScriptWhenDirectoryAlreadyGone guards
+// idempotency: a retried cleanup job must not re-run a repository's cleanup
+// script against a directory that no longer exists.
+func TestRemoveAt_PathFallbackSkipsCleanupScriptWhenDirectoryAlreadyGone(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	ctx := context.Background()
+	seedReferenceCleanupSession(t, store, "task-owner", "session-owner", "completed")
+	wt := createReferenceCleanupWorktree(t, mgr, "task-owner", "session-owner")
+
+	handler := &cleanupScriptTrackingHandler{}
+	mgr.SetScriptMessageHandler(handler)
+	mgr.SetRepositoryProvider(&stubRepositoryProvider{
+		repos: map[string]*Repository{
+			wt.RepositoryID: {ID: wt.RepositoryID, LocalPath: wt.RepositoryPath, CleanupScript: "echo cleanup"},
+		},
+	})
+
+	if _, err := store.db.ExecContext(ctx, `DELETE FROM task_sessions WHERE id = ?`, "session-owner"); err != nil {
+		t.Fatalf("delete session: %v", err)
+	}
+	if err := os.RemoveAll(wt.Path); err != nil {
+		t.Fatalf("remove worktree directory ahead of RemoveAt: %v", err)
+	}
+
+	if err := mgr.RemoveAt(ctx, wt.ID, wt.Path, wt.RepositoryID, nil); err != nil {
+		t.Fatalf("RemoveAt on an already-removed path should be idempotent, got: %v", err)
+	}
+	if len(handler.cleanupCalls) != 0 {
+		t.Fatalf("cleanup script calls = %d, want 0 for an already-removed directory", len(handler.cleanupCalls))
 	}
 }
 
@@ -278,7 +434,7 @@ func TestRemoveAt_PathFallbackRefusesNonWorktreeDirectory(t *testing.T) {
 		t.Fatalf("seed marker file: %v", err)
 	}
 
-	if err := mgr.RemoveAt(ctx, wt.ID, notAWorktree, wt.RepositoryID); err == nil {
+	if err := mgr.RemoveAt(ctx, wt.ID, notAWorktree, wt.RepositoryID, nil); err == nil {
 		t.Fatal("RemoveAt should refuse to remove a path that is not a linked git worktree")
 	}
 	if _, statErr := os.Stat(marker); statErr != nil {
@@ -301,7 +457,7 @@ func TestRemoveAt_PathFallbackRefusesMainRepositoryCheckout(t *testing.T) {
 		t.Fatalf("delete session: %v", err)
 	}
 
-	if err := mgr.RemoveAt(ctx, wt.ID, wt.RepositoryPath, wt.RepositoryID); err == nil {
+	if err := mgr.RemoveAt(ctx, wt.ID, wt.RepositoryPath, wt.RepositoryID, nil); err == nil {
 		t.Fatal("RemoveAt should refuse to remove a main repository checkout")
 	}
 	if _, statErr := os.Stat(filepath.Join(wt.RepositoryPath, ".git")); statErr != nil {
@@ -326,7 +482,7 @@ func TestRemoveAt_PathFallbackTreatsAlreadyRemovedDirectoryAsSuccess(t *testing.
 		t.Fatalf("remove worktree directory ahead of RemoveAt: %v", err)
 	}
 
-	if err := mgr.RemoveAt(ctx, wt.ID, wt.Path, wt.RepositoryID); err != nil {
+	if err := mgr.RemoveAt(ctx, wt.ID, wt.Path, wt.RepositoryID, nil); err != nil {
 		t.Fatalf("RemoveAt on an already-removed path should be idempotent, got: %v", err)
 	}
 }

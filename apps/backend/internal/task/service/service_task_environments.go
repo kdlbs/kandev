@@ -26,7 +26,12 @@ type EnvironmentDestroyer interface {
 	// (including the environment's own primary worktree) can resolve a path
 	// by ID alone. worktreePath/repositoryID are the durable TaskEnvironment
 	// / TaskEnvironmentRepo fields, which cascade only from the task.
-	DestroyWorktreeAt(ctx context.Context, worktreeID, worktreePath, repositoryID string) error
+	// excludeSessionIDs are the caller's task's own session IDs: a task's
+	// sessions can share one worktree (relaunches reuse the TaskEnvironment),
+	// so excluding only the single session an ID-only lookup happens to find
+	// would see a sibling session's row as a foreign active reference and
+	// never actually destroy the worktree.
+	DestroyWorktreeAt(ctx context.Context, worktreeID, worktreePath, repositoryID string, excludeSessionIDs []string) error
 	// PushEnvironmentBranch best-effort pushes the current branch of the environment's
 	// workspace to its upstream. Returns an error if the push fails; callers can decide
 	// whether to abort the reset on failure.
@@ -320,7 +325,20 @@ func (s *Service) ResetTaskEnvironment(ctx context.Context, taskID string, opts 
 		}
 	}
 
-	if err := s.teardownEnvironmentResources(ctx, env); err != nil {
+	// A worktree can be shared by several of this task's own sessions (a
+	// relaunch reuses the TaskEnvironment's existing worktree) — exclude all
+	// of them so a sibling session's still-active reference doesn't stop
+	// reset from actually destroying the worktree it's meant to discard.
+	var excludeSessionIDs []string
+	if s.sessions != nil {
+		sessions, err := s.sessions.ListTaskSessions(ctx, taskID)
+		if err != nil {
+			return fmt.Errorf("list task sessions before reset: %w", err)
+		}
+		excludeSessionIDs = taskSessionIDs(sessions)
+	}
+
+	if err := s.teardownEnvironmentResources(ctx, env, excludeSessionIDs); err != nil {
 		return err
 	}
 
@@ -338,8 +356,9 @@ func (s *Service) ResetTaskEnvironment(ctx context.Context, taskID string, opts 
 // attempted even when an earlier one fails, and all failures are joined into a
 // single error so a stuck container can't permanently orphan the worktree.
 // On any non-idempotent error, the caller should preserve the row so the user
-// can retry.
-func (s *Service) teardownEnvironmentResources(ctx context.Context, env *models.TaskEnvironment) error {
+// can retry. excludeSessionIDs are the caller's task's own session IDs — see
+// teardownEnvironmentWorktrees.
+func (s *Service) teardownEnvironmentResources(ctx context.Context, env *models.TaskEnvironment, excludeSessionIDs []string) error {
 	if cause := context.Cause(ctx); cause != nil {
 		return cause
 	}
@@ -357,12 +376,33 @@ func (s *Service) teardownEnvironmentResources(ctx context.Context, env *models.
 		}
 		return nil
 	}
+	if err := s.teardownContainerAndSandbox(ctx, env, contextError, &errs); err != nil {
+		return err
+	}
+	if err := s.teardownEnvironmentWorktrees(ctx, env, excludeSessionIDs, contextError, &errs); err != nil {
+		return err
+	}
+	if err := contextError(); err != nil {
+		return err
+	}
+	return errors.Join(errs...)
+}
+
+// teardownContainerAndSandbox destroys env's container and sandbox, if
+// recorded. Split out of teardownEnvironmentResources to keep that
+// function's cyclomatic complexity within the repo's Go lint limit.
+func (s *Service) teardownContainerAndSandbox(
+	ctx context.Context,
+	env *models.TaskEnvironment,
+	contextError func() error,
+	errs *[]error,
+) error {
 	if env.ContainerID != "" {
 		if err := contextError(); err != nil {
 			return err
 		}
 		if err := s.envDestroyer.DestroyContainer(ctx, env.ContainerID); err != nil {
-			errs = append(errs, fmt.Errorf("destroy container %s: %w", env.ContainerID, err))
+			*errs = append(*errs, fmt.Errorf("destroy container %s: %w", env.ContainerID, err))
 		}
 	}
 	if env.SandboxID != "" {
@@ -370,16 +410,10 @@ func (s *Service) teardownEnvironmentResources(ctx context.Context, env *models.
 			return err
 		}
 		if err := s.envDestroyer.DestroySandbox(ctx, env.SandboxID, ""); err != nil {
-			errs = append(errs, fmt.Errorf("destroy sandbox %s: %w", env.SandboxID, err))
+			*errs = append(*errs, fmt.Errorf("destroy sandbox %s: %w", env.SandboxID, err))
 		}
 	}
-	if err := s.teardownEnvironmentWorktrees(ctx, env, contextError, &errs); err != nil {
-		return err
-	}
-	if err := contextError(); err != nil {
-		return err
-	}
-	return errors.Join(errs...)
+	return nil
 }
 
 // teardownEnvironmentWorktrees destroys every repo's worktree recorded on
@@ -398,10 +432,15 @@ func (s *Service) teardownEnvironmentResources(ctx context.Context, env *models.
 // task_session_worktrees — the only table that stores a worktree's on-disk
 // path for an ID-only lookup — cascades away, so every repo, including the
 // primary, needs its durable TaskEnvironment/TaskEnvironmentRepo path to
-// resolve.
+// resolve. excludeSessionIDs is the caller's task's own session set,
+// forwarded to DestroyWorktreeAt so a worktree shared across that task's own
+// sessions (a relaunch reuses the environment's existing worktree) is
+// recognized as having no OUTSIDE reference and is actually destroyed,
+// instead of a single arbitrary sibling session row blocking it forever.
 func (s *Service) teardownEnvironmentWorktrees(
 	ctx context.Context,
 	env *models.TaskEnvironment,
+	excludeSessionIDs []string,
 	contextError func() error,
 	errs *[]error,
 ) error {
@@ -411,7 +450,7 @@ func (s *Service) teardownEnvironmentWorktrees(
 			return err
 		}
 		h := handles[worktreeID]
-		if err := s.envDestroyer.DestroyWorktreeAt(ctx, h.worktreeID, h.worktreePath, h.repositoryID); err != nil {
+		if err := s.envDestroyer.DestroyWorktreeAt(ctx, h.worktreeID, h.worktreePath, h.repositoryID, excludeSessionIDs); err != nil {
 			if !errors.Is(err, worktree.ErrWorktreeNotFound) {
 				*errs = append(*errs, fmt.Errorf("destroy worktree %s: %w", h.worktreeID, err))
 			}

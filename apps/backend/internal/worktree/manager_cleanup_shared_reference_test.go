@@ -190,6 +190,27 @@ func (s *SQLiteStore) linkSessionToEnvironment(ctx context.Context, sessionID, e
 	return err
 }
 
+// seedReferenceCleanupSessionOnExistingTask inserts an additional session on
+// a task seedReferenceCleanupSession already created, without re-inserting
+// the task row (which would violate its primary key) — for tests where one
+// task has more than one session.
+func seedReferenceCleanupSessionOnExistingTask(
+	t *testing.T,
+	store *SQLiteStore,
+	taskID string,
+	sessionID string,
+	state models.TaskSessionState,
+) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := store.db.ExecContext(ctx, `
+		INSERT INTO task_sessions (id, task_id, state, started_at, updated_at)
+		VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`, sessionID, taskID, state); err != nil {
+		t.Fatalf("create session %s: %v", sessionID, err)
+	}
+}
+
 func createReferenceCleanupWorktree(t *testing.T, mgr *Manager, taskID, sessionID string) *Worktree {
 	t.Helper()
 	wt, err := mgr.Create(context.Background(), CreateRequest{

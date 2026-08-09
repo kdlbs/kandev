@@ -2538,7 +2538,7 @@ func (s *Service) cleanupDestructiveTaskResources(
 		return append(errs, cause)
 	}
 	if len(preserveExecutorRows) == 0 && !skipOwnedEnvironment {
-		errs = append(errs, s.cleanupTaskEnvironment(ctx, taskID, envCleanup)...)
+		errs = append(errs, s.cleanupTaskEnvironment(ctx, taskID, sessions, envCleanup)...)
 		if cause := context.Cause(ctx); cause != nil {
 			return append(errs, cause)
 		}
@@ -2769,6 +2769,7 @@ func cleanupEligibleWorktrees(worktrees []*worktree.Worktree, env *models.TaskEn
 func (s *Service) cleanupTaskEnvironment(
 	ctx context.Context,
 	taskID string,
+	sessions []*models.TaskSession,
 	cleanup taskEnvironmentCleanup,
 ) []error {
 	if cleanup.env == nil {
@@ -2777,7 +2778,7 @@ func (s *Service) cleanupTaskEnvironment(
 	if cause := context.Cause(ctx); cause != nil {
 		return []error{cause}
 	}
-	if err := s.teardownEnvironmentResources(ctx, cleanup.env); err != nil {
+	if err := s.teardownEnvironmentResources(ctx, cleanup.env, taskSessionIDs(sessions)); err != nil {
 		s.logger.Warn("failed to teardown task environment during task cleanup",
 			zap.String("task_id", taskID),
 			zap.String("env_id", cleanup.env.ID),
