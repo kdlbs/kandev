@@ -33,8 +33,7 @@ import (
 // CI log — either passed here on a maintainer's Darwin machine, or skipped
 // there on ubuntu-latest/windows-latest — never silently absent.
 func TestWalkProcessTree_DarwinStartTimeSource(t *testing.T) {
-	parentPID, cleanup := spawnSleepChild(t)
-	defer cleanup()
+	parentPID := spawnSleepChild(t)
 
 	childStart, err := darwinChildStartTime(parentPID)
 	if err != nil {

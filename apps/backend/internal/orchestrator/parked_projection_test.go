@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,15 +14,18 @@ import (
 
 var errParkedTestProbe = errors.New("simulated probe transport error")
 
-// fakeProbe is a test double for backgroundProbePort.
+// fakeProbe is a test double for backgroundProbePort. calls is atomic
+// because onSessionParkedHook can start the sampler goroutine (via
+// runParkingSampler) before returning, and that goroutine calls
+// ProbeBackgroundWorkloads concurrently with the test goroutine reading calls.
 type fakeProbe struct {
 	result string
 	err    error
-	calls  int
+	calls  atomic.Int64
 }
 
 func (f *fakeProbe) ProbeBackgroundWorkloads(_ context.Context, _ string) (string, error) {
-	f.calls++
+	f.calls.Add(1)
 	return f.result, f.err
 }
 
@@ -87,8 +91,15 @@ func TestOnSessionParkedHook_LiveProbeSetsParked(t *testing.T) {
 
 	svc.onSessionParkedHook(context.Background(), taskID, sessionID)
 
-	if probe.calls != 1 {
-		t.Fatalf("expected 1 probe call, got %d", probe.calls)
+	// Stop the sampler goroutine to avoid a goroutine leak detected by
+	// goleak. Registered immediately after the resource-creating call and
+	// before any fatal assertion, so a failed assertion below still drains
+	// the sampler instead of leaving it running and reporting a second,
+	// misleading goleak failure.
+	t.Cleanup(func() { svc.evictParkedState(context.Background(), taskID, sessionID, true) })
+
+	if got := probe.calls.Load(); got != 1 {
+		t.Fatalf("expected 1 probe call, got %d", got)
 	}
 	ps := svc.parkedStateFor(sessionID)
 	if ps == nil {
@@ -100,8 +111,6 @@ func TestOnSessionParkedHook_LiveProbeSetsParked(t *testing.T) {
 	if ps.revision != 1 {
 		t.Fatalf("expected revision=1, got %d", ps.revision)
 	}
-	// Stop the sampler goroutine to avoid goroutine leak detected by goleak.
-	t.Cleanup(func() { svc.evictParkedState(context.Background(), taskID, sessionID, true) })
 }
 
 // TestOnSessionParkedHook_SettledProbeNoChange verifies that a settled probe result
@@ -169,15 +178,15 @@ func TestOnSessionParkedHook_NoProbeWhenNotAttested(t *testing.T) {
 	const taskID, sessionID = "task-noattest", "session-noattest"
 	// No row at all — the common case (AC-40a).
 	svc.onSessionParkedHook(context.Background(), taskID, sessionID)
-	if probe.calls != 0 {
-		t.Fatalf("expected 0 probe calls for a session with no parkedState row, got %d", probe.calls)
+	if got := probe.calls.Load(); got != 0 {
+		t.Fatalf("expected 0 probe calls for a session with no parkedState row, got %d", got)
 	}
 
 	// A row exists but was never attested (observedDetached=false).
 	svc.getOrCreateParkedState(sessionID)
 	svc.onSessionParkedHook(context.Background(), taskID, sessionID)
-	if probe.calls != 0 {
-		t.Fatalf("expected 0 probe calls for an unattested session, got %d", probe.calls)
+	if got := probe.calls.Load(); got != 0 {
+		t.Fatalf("expected 0 probe calls for an unattested session, got %d", got)
 	}
 }
 

@@ -236,3 +236,49 @@ describe("the live allowlist", () => {
     expect(unmatchedEntries(i18nGuardFiles, live)).toEqual([]);
   });
 });
+
+/**
+ * `legacyGlobSync`'s hand-rolled glob-to-RegExp translator, exercised via
+ * `filesForEntry` with an `fsImpl` that has no `globSync` — the same fallback
+ * `fs.globSync` (Node 22+) takes on an older runtime. Testing on this repo's
+ * own Node version would silently exercise the native path instead and never
+ * touch this code at all.
+ */
+describe("filesForEntry — legacy glob fallback (pre-Node-22 fs.globSync)", () => {
+  let root: string;
+  /** readdirSync/statSync from real fs; globSync deliberately absent to force the fallback. */
+  const legacyFsImpl = { readdirSync: nodeFs.readdirSync, statSync: nodeFs.statSync };
+  const resolve = (entry: string) => filesForEntry(entry, { cwd: root, fsImpl: legacyFsImpl });
+
+  beforeAll(() => {
+    root = mkdtempSync(path.join(tmpdir(), "kandev-guard-allowlist-legacy-"));
+    for (const file of ["barfoo.ts", "a/foo.ts", "a/xb.ts", "a/b.ts", "excl/a.ts", "excl/x.ts"]) {
+      const full = path.join(root, file);
+      mkdirSync(path.dirname(full), { recursive: true });
+      writeFileSync(full, "");
+    }
+  });
+
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+  it("does not let a leading ** cross a path-segment boundary", () => {
+    // Must match "a/foo.ts" but not "barfoo.ts" — "**/foo.ts" means "foo.ts"
+    // at the root or under any number of complete directories, never a
+    // filename that merely ends with the same characters.
+    expect(resolve("**/foo.ts")).toEqual(["a/foo.ts"]);
+  });
+
+  it("does not let a mid-pattern ** cross a path-segment boundary", () => {
+    // "a/**/b.ts" must match "a/b.ts" (zero segments) but not "a/xb.ts".
+    expect(resolve("a/**/b.ts")).toEqual(["a/b.ts"]);
+  });
+
+  it("still treats a trailing/standalone ** as unanchored", () => {
+    expect(resolve("a/**")).toEqual(expect.arrayContaining(["a/foo.ts", "a/xb.ts", "a/b.ts"]));
+  });
+
+  it("supports ! as a character-class negation marker like ^", () => {
+    expect(resolve("excl/[!x].ts")).toEqual(["excl/a.ts"]);
+    expect(resolve("excl/[^x].ts")).toEqual(["excl/a.ts"]);
+  });
+});

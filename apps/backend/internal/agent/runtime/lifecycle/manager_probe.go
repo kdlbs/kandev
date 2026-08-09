@@ -4,6 +4,12 @@ import (
 	"context"
 )
 
+// probeResultUnknown is BackgroundProbe's own "unknown" sentinel. Deliberately
+// not sshStatusUnknown (executor_ssh.go): that constant belongs to the SSH
+// status domain, and a future change to its value must not silently change
+// BackgroundProbe's parked-state semantics.
+const probeResultUnknown = "unknown"
+
 // BackgroundProbe is the injectable port for querying whether background
 // processes spawned by a session are still alive. The argument is the Kandev
 // task-session id; the production implementation (Manager) translates it to
@@ -27,10 +33,10 @@ func (m *Manager) ProbeBackgroundWorkloads(ctx context.Context, kandevSessionID 
 	// caller context already done on entry, both resolve to unknown with
 	// nothing put on the wire — checked before any lookup.
 	if kandevSessionID == "" {
-		return sshStatusUnknown, nil
+		return probeResultUnknown, nil
 	}
 	if ctx.Err() != nil {
-		return sshStatusUnknown, nil
+		return probeResultUnknown, nil
 	}
 	// F4 (Review round 2): this resolves the execution via a bare
 	// *BySessionID lookup, which per apps/backend/CLAUDE.md's documented
@@ -41,22 +47,22 @@ func (m *Manager) ProbeBackgroundWorkloads(ctx context.Context, kandevSessionID 
 	// failure path (AC-46) rather than surfacing an auth error to a probe
 	// caller.
 	if err := m.CheckSessionAccess(ctx, kandevSessionID); err != nil {
-		return sshStatusUnknown, nil
+		return probeResultUnknown, nil
 	}
 	execution, exists := m.executionStore.GetBySessionID(kandevSessionID)
 	if !exists || execution == nil {
-		return sshStatusUnknown, nil
+		return probeResultUnknown, nil
 	}
 	if execution.ACPSessionID == "" {
-		return sshStatusUnknown, nil
+		return probeResultUnknown, nil
 	}
 	client := execution.GetAgentCtlClient()
 	if client == nil {
-		return sshStatusUnknown, nil
+		return probeResultUnknown, nil
 	}
 	result, err := client.ProbeBackgroundWorkloads(ctx, execution.ACPSessionID)
 	if err != nil {
-		return sshStatusUnknown, nil
+		return probeResultUnknown, nil
 	}
 	return result, nil
 }

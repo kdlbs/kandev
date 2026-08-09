@@ -23,6 +23,51 @@ const linuxClockTicksPerSecond = 100
 // (D5/AC-80's "source resolution").
 var linuxProcStatResolution = time.Second / linuxClockTicksPerSecond
 
+// procEntry is one /proc/<pid>/stat snapshot, resolved to a wall-clock start
+// time against a single boot-time anchor so every entry in one walk is
+// internally comparable.
+type procEntry struct {
+	ppid      int
+	startTime time.Time
+	zombie    bool
+}
+
+// linuxCollectProcs snapshots every currently-visible /proc/<pid> entry into
+// a (ppid, wall-clock start time, zombie) map, resolved against bootTime.
+// Returns ok=false on a hard read failure or context cancellation; entries
+// this process can no longer read (raced exit, permission) are skipped
+// rather than failing the whole snapshot.
+func linuxCollectProcs(ctx context.Context, bootTime time.Time) (map[int]procEntry, bool) {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil, false
+	}
+
+	procs := make(map[int]procEntry, len(entries))
+	for _, e := range entries {
+		if ctx.Err() != nil {
+			return nil, false
+		}
+		if !e.IsDir() {
+			continue
+		}
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil {
+			continue
+		}
+		stat, err := linuxReadStat(pid)
+		if err != nil {
+			continue
+		}
+		procs[pid] = procEntry{
+			ppid:      stat.ppid,
+			startTime: bootTime.Add(time.Duration(stat.startTicks) * time.Second / linuxClockTicksPerSecond),
+			zombie:    stat.state == "Z",
+		}
+	}
+	return procs, true
+}
+
 // walkProcessTree walks all non-zombie descendants of rootPID and reports
 // whether any was born at or after turnRefTime, truncated down to tick
 // resolution before an inclusive comparison (D5, AC-80). Start times are
@@ -47,38 +92,9 @@ func walkProcessTree(ctx context.Context, rootPID int, turnRefTime time.Time) st
 		return probeResultUnknown
 	}
 
-	type procEntry struct {
-		ppid      int
-		startTime time.Time
-		zombie    bool
-	}
-
-	entries, err := os.ReadDir("/proc")
-	if err != nil {
+	procs, ok := linuxCollectProcs(ctx, bootTime)
+	if !ok {
 		return probeResultUnknown
-	}
-
-	procs := make(map[int]procEntry, len(entries))
-	for _, e := range entries {
-		if ctx.Err() != nil {
-			return probeResultUnknown
-		}
-		if !e.IsDir() {
-			continue
-		}
-		pid, err := strconv.Atoi(e.Name())
-		if err != nil {
-			continue
-		}
-		stat, err := linuxReadStat(pid)
-		if err != nil {
-			continue
-		}
-		procs[pid] = procEntry{
-			ppid:      stat.ppid,
-			startTime: bootTime.Add(time.Duration(stat.startTicks) * time.Second / linuxClockTicksPerSecond),
-			zombie:    stat.state == "Z",
-		}
 	}
 
 	// Build parent→children map.
@@ -91,6 +107,10 @@ func walkProcessTree(ctx context.Context, rootPID int, turnRefTime time.Time) st
 	// inclusive comparison, so a process born in the same tick counts as
 	// in-turn — the error always falls toward "live".
 	threshold := turnRefTime.Truncate(linuxProcStatResolution)
+	// visited guards against a ppid cycle in the snapshot (e.g. a pid recycled
+	// mid-enumeration into its own descendant's slot) sending the walk into an
+	// unbounded loop instead of terminating on its own.
+	visited := map[int]bool{rootPID: true}
 	queue := append([]int(nil), children[rootPID]...)
 	for len(queue) > 0 {
 		if ctx.Err() != nil {
@@ -98,6 +118,10 @@ func walkProcessTree(ctx context.Context, rootPID int, turnRefTime time.Time) st
 		}
 		cur := queue[0]
 		queue = queue[1:]
+		if visited[cur] {
+			continue
+		}
+		visited[cur] = true
 
 		info, ok := procs[cur]
 		if !ok {
@@ -157,7 +181,7 @@ func linuxReadStat(pid int) (linuxProcStat, error) {
 		return linuxProcStat{}, errors.New("malformed /proc/stat: no closing paren")
 	}
 	// Fields after comm, 1-indexed in the man page as fields 3+: [0]=state
-	// [1]=ppid [2..17]=... [18]=starttime (field 22 overall = index 19 here).
+	// [1]=ppid [2..18]=... [19]=starttime (field 22 overall = index 19 here).
 	fields := strings.Fields(s[lastParen+1:])
 	const starttimeIndex = 19 // field 22 - 3 (state is field 3, index 0 here)
 	if len(fields) <= starttimeIndex {

@@ -30,8 +30,7 @@ import (
 // start time, which is already microsecond-quantized) — a fixed offset
 // could occasionally cross into the next tick and flake.
 func TestWalkProcessTree_LinuxStartTimeSource(t *testing.T) {
-	parentPID, cleanup := spawnSleepChild(t)
-	defer cleanup()
+	parentPID := spawnSleepChild(t)
 
 	childStart, ok := linuxChildStartTime(parentPID)
 	require.True(t, ok, "expected to find the spawned descendant under /proc")

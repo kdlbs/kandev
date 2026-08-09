@@ -84,13 +84,17 @@ function expandBraces(pattern) {
 // Parse a glob `[...]` character class starting at `startIdx` (the `[`).
 // Returns {regex, nextIdx}. Glob `[]]` means "match ]" and `[[]` means "match [".
 function parseGlobCharClass(pattern, startIdx) {
-  // A ] immediately after [ (or after [^) is a class member, not the closer.
+  // A ] immediately after [ (or after [^ / [!) is a class member, not the
+  // closer. Glob negates a class with either ^ or !; both translate to the
+  // regex class negation marker ^.
   let j = startIdx + 1;
-  if (pattern[j] === "^") j++;
+  const negated = pattern[j] === "^" || pattern[j] === "!";
+  if (negated) j++;
   if (pattern[j] === "]") j++;
   const end = pattern.indexOf("]", j);
   if (end === -1) return { regex: "\\[", nextIdx: startIdx + 1 };
-  const cls = pattern.slice(startIdx + 1, end);
+  const body = pattern.slice(startIdx + 1, end);
+  const cls = negated ? "^" + body.slice(1) : body;
   let regex;
   if (cls === "]") regex = "\\]";
   else if (cls === "[") regex = "\\[";
@@ -106,9 +110,16 @@ function globPatternToRegex(pattern) {
   while (i < pattern.length) {
     const c = pattern[i];
     if (c === "*" && pattern[i + 1] === "*") {
-      r += ".*";
       i += 2;
-      if (pattern[i] === "/") i++;
+      if (pattern[i] === "/") {
+        // `**/` matches zero or more complete path segments — anchored to
+        // segment boundaries, unlike a bare `.*` which also matches mid-token
+        // (e.g. "**/foo.ts" must not match "barfoo.ts").
+        r += "(?:[^/]+/)*";
+        i++;
+      } else {
+        r += ".*";
+      }
     } else if (c === "*") {
       r += "[^/]*";
       i++;

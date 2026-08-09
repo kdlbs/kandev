@@ -5,6 +5,7 @@ package process
 import (
 	"context"
 	"os/exec"
+	"syscall"
 	"testing"
 	"time"
 
@@ -12,28 +13,33 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// spawnSleepChild starts a parent shell process that in turn spawns a child
-// sleep process. Returns the parent PID and a cleanup function.
-func spawnSleepChild(t *testing.T) (parentPID int, cleanup func()) {
+// spawnSleepChild starts a parent shell process that in turn spawns a
+// backgrounded child sleep process, and returns the parent PID. The shell
+// and its background child run in their own process group (Setpgid) so
+// t.Cleanup can kill the whole group: killing only the shell (as an earlier
+// version of this helper did) leaves the backgrounded "sleep 300" orphaned
+// and running for up to five minutes per test.
+func spawnSleepChild(t *testing.T) (parentPID int) {
 	t.Helper()
 	// The shell spawns "sleep 300" as a background child, then waits for it.
 	// This makes the shell process the root and sleep the descendant.
 	cmd := exec.Command("/bin/sh", "-c", "sleep 300 & wait")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	require.NoError(t, cmd.Start(), "start parent shell")
+	t.Cleanup(func() {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		_ = cmd.Wait()
+	})
 	// Give the child a moment to appear in the process table.
 	time.Sleep(80 * time.Millisecond)
-	return cmd.Process.Pid, func() {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-	}
+	return cmd.Process.Pid
 }
 
 // TestWalkProcessTree_Live verifies AC-70: a descendant born after the turn
 // reference time causes the probe to return "live".
 func TestWalkProcessTree_Live(t *testing.T) {
 	turnRef := time.Now().Add(-500 * time.Millisecond) // turn started slightly before shell spawned
-	parentPID, cleanup := spawnSleepChild(t)
-	defer cleanup()
+	parentPID := spawnSleepChild(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -45,8 +51,7 @@ func TestWalkProcessTree_Live(t *testing.T) {
 // TestWalkProcessTree_PreExisting verifies AC-70a: a descendant born before
 // the turn reference time is not counted and the probe returns "settled".
 func TestWalkProcessTree_PreExisting(t *testing.T) {
-	parentPID, cleanup := spawnSleepChild(t)
-	defer cleanup()
+	parentPID := spawnSleepChild(t)
 
 	// Turn reference time is 10 seconds in the future, so the sleep child
 	// (born now) is older than turnRef - 2s and does not qualify as "live".

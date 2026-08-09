@@ -68,6 +68,10 @@ func walkProcessTree(ctx context.Context, rootPID int, turnRefTime time.Time) st
 	// inclusive comparison, so a process born in the same microsecond tick
 	// counts as in-turn — the error always falls toward "live".
 	threshold := turnRefTime.Truncate(darwinStartTimeResolution)
+	// visited guards against a ppid cycle in the snapshot (e.g. a pid recycled
+	// mid-enumeration into its own descendant's slot) sending the walk into an
+	// unbounded loop instead of terminating on its own.
+	visited := map[int]bool{rootPID: true}
 	queue := append([]int(nil), children[rootPID]...)
 	for len(queue) > 0 {
 		if ctx.Err() != nil {
@@ -75,6 +79,10 @@ func walkProcessTree(ctx context.Context, rootPID int, turnRefTime time.Time) st
 		}
 		cur := queue[0]
 		queue = queue[1:]
+		if visited[cur] {
+			continue
+		}
+		visited[cur] = true
 
 		info, ok := procs[cur]
 		if !ok {
