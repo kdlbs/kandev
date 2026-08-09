@@ -40,7 +40,7 @@
   "cliFlagsEnabledCount_other": "{{enabled}} of {{count}} enabled",
   "command": "Command",
   "commandPrefix": "Command prefix",
-  "commandPrefixHelp": "Tokens prepended to the agent launch command, so it runs under a sandbox launcher (e.g. <0>{{example}}</0>). The value is shell-tokenised. Leave empty to run the agent directly. Applies to ACP sessions only — it has no effect when the profile uses TUI passthrough.",
+  "commandPrefixHelp": "Tokens prepended to the agent launch command, so it runs under a sandbox launcher (e.g. <0>{{example}}</0>). The value is shell-tokenised. Leave empty to run the agent directly. Applies to ACP sessions only; it has no effect when the profile uses TUI passthrough.",
   "commandPreview": "Command Preview",
   "commandPreviewHelp": "The CLI command that will be executed based on the current settings.",
   "commandRequired": "Command is required",

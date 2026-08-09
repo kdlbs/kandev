@@ -57,7 +57,7 @@ function describePerRepo(
   if (succeeded.length === 0) {
     return {
       title: `${operationName} failed`,
-      description: `Failed in ${failed.length} repos — ${failedSummary}`,
+      description: `Failed in ${failed.length} repos - ${failedSummary}`,
       variant: "error",
     };
   }

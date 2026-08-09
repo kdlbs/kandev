@@ -115,7 +115,7 @@ function NameDisplay({
   return (
     <>
       <span className="font-medium" data-testid="sidebar-filter-active-view-name">
-        {activeView?.name ?? "—"}
+        {activeView?.name ?? "-"}
       </span>
       {hasDraft && (
         <span

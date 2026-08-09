@@ -107,6 +107,11 @@ it **skips anything assigned to a SCREAMING_CASE identifier** — so a
 those by eye. The pseudo-locale (Settings → General → Appearance, dev/e2e builds)
 is the completeness check. Full guide: [`docs/i18n.md`](docs/i18n.md).
 
+UI punctuation is plain and intentional: do not use the Unicode em dash (U+2014)
+in user-facing copy or locale values. Use a period, colon, comma, semicolon, or
+parentheses instead. This applies to English, pseudo, and translated catalogs,
+rendered fallback strings, and changelog copy. `pnpm run i18n:check` enforces it.
+
 ### Knowledge
 - **Public docs:** Website-ready user documentation lives in `docs/public/**`. Use `/docs-maintainer` when a change affects CLI commands, config keys, install/deploy flows, workflows, executors, public APIs, screenshots, or user-facing terminology.
 - **Specs:** Feature specs live in `docs/specs/<slug>/spec.md` — the durable "what & why" of a feature, written before coding. Use `/spec` to write or update a spec. See `docs/specs/INDEX.md`.

@@ -50,7 +50,7 @@ export function MarketplaceEntryRow({ entry, busy, onInstall }: MarketplaceEntry
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <span className="inline-flex items-center gap-1">
           <IconStar className="h-3.5 w-3.5" />
-          {entry.stars === null ? "—" : formatNumber(entry.stars)}
+          {entry.stars === null ? "-" : formatNumber(entry.stars)}
         </span>
         {/* The name, description, author and categories all come from the
             catalog's index.json — third-party data, not our copy. */}

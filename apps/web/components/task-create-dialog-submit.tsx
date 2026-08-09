@@ -158,7 +158,7 @@ export function useTaskSubmitHandlers({
     if (!duplicate) return false;
     toast({
       title: DUPLICATE_REPO_TITLE,
-      description: `${duplicate} is added more than once — remove the duplicate row.`,
+      description: `${duplicate} is added more than once - remove the duplicate row.`,
       variant: "error",
     });
     return true;

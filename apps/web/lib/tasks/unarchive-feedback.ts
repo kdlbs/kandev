@@ -17,7 +17,7 @@ export function unarchiveToastPayload(result: UnarchiveTaskResponse): UnarchiveT
     const plural = missing.length > 1;
     return {
       title: "Task unarchived",
-      description: `${plural ? "Branches" : "Branch"} ${branches} no longer ${plural ? "exist" : "exists"} locally or on the remote — the next session starts fresh from the base branch.`,
+      description: `${plural ? "Branches" : "Branch"} ${branches} no longer ${plural ? "exist" : "exists"} locally or on the remote - the next session starts fresh from the base branch.`,
     };
   }
   return {

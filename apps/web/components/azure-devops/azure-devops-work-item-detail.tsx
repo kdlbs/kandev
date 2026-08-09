@@ -324,7 +324,7 @@ function DetailBody({
             {planningFields.map((field) => (
               <div key={field.referenceName} className="rounded-md bg-muted/40 p-3 text-sm">
                 <div className="text-xs text-muted-foreground">{field.label}</div>
-                <div>{field.value || "—"}</div>
+                <div>{field.value || "-"}</div>
               </div>
             ))}
           </div>

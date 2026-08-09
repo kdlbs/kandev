@@ -139,7 +139,7 @@ function TaskTableRow({ row }: { row: RowState }) {
           {formatStatus(task.status)}
         </span>
       </TableCell>
-      <TableCell className="text-xs capitalize">{task.priority || "—"}</TableCell>
+      <TableCell className="text-xs capitalize">{task.priority || "-"}</TableCell>
     </TableRow>
   );
 }

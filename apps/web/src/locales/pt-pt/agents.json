@@ -40,7 +40,7 @@
   "cliFlagsEnabledCount_other": "{{enabled}} de {{count}} ativadas",
   "command": "Comando",
   "commandPrefix": "Prefixo do comando",
-  "commandPrefixHelp": "Elementos acrescentados no início do comando de arranque do agente, para que este seja executado sob um lançador de sandbox (ex.: <0>{{example}}</0>). O valor é dividido como na shell. Deixe vazio para executar o agente diretamente. Aplica-se apenas a sessões ACP — não tem efeito quando o perfil usa passagem direta TUI.",
+  "commandPrefixHelp": "Elementos acrescentados no início do comando de arranque do agente, para que este seja executado sob um lançador de sandbox (ex.: <0>{{example}}</0>). O valor é dividido como na shell. Deixe vazio para executar o agente diretamente. Aplica-se apenas a sessões ACP; não tem efeito quando o perfil usa passagem direta TUI.",
   "commandPreview": "Pré-visualização do comando",
   "commandPreviewHelp": "O comando de CLI que será executado com base nas definições atuais.",
   "commandRequired": "O comando é obrigatório",

@@ -38,7 +38,7 @@ function statusBadgeClass(status: string): string {
  * so a generic transformer is enough.
  */
 function formatReason(reason: string): string {
-  if (!reason) return "—";
+  if (!reason) return "-";
   const text = reason.replaceAll("_", " ");
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
