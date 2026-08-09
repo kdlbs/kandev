@@ -134,6 +134,23 @@ test.describe("GitHub workspace settings", () => {
     const footer = dialog.getByTestId("github-connection-footer");
     const fixedSaveButton = footer.getByRole("button", { name: "Save changes" });
     await expect(fixedSaveButton).toBeVisible();
+    await expect
+      .poll(
+        async () => {
+          const [currentScrollBox, currentFadeBox] = await Promise.all([
+            scrollBody.boundingBox(),
+            scrollFade.boundingBox(),
+          ]);
+          if (!currentScrollBox || !currentFadeBox) return Number.POSITIVE_INFINITY;
+          return Math.abs(
+            currentFadeBox.y +
+              currentFadeBox.height -
+              (currentScrollBox.y + currentScrollBox.height),
+          );
+        },
+        { timeout: 10_000 },
+      )
+      .toBeLessThanOrEqual(2);
     const [scrollBox, fadeBox, footerBox, initialSaveBox] = await Promise.all([
       scrollBody.boundingBox(),
       scrollFade.boundingBox(),

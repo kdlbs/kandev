@@ -1098,7 +1098,7 @@ export class SessionPage {
    * placeholder decoration is only rendered while the editor has no content.
    */
   async waitForDirectInput(timeout = 15_000) {
-    await expect(this.anyIdleInput()).toBeVisible({ timeout });
+    await this.waitForChatIdle({ timeout, requireEditable: true });
   }
 
   /** The composer's send/submit button (scoped to the active chat panel). */
