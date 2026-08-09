@@ -1824,4 +1824,17 @@ export const i18nGuardFiles = [
   // chips, routing cards and activity rows all resolve through, so the same
   // vocabulary cannot drift apart across surfaces.
   "app/office/**/*.{ts,tsx}",
+  // The command palette's two un-migrated producers. `global-commands.tsx` was
+  // already listed and already resolved everything through the catalog, so ⌘K
+  // rendered a translated Navigation group above English Git/Panels rows; these
+  // two are what made the same list half-English. Their labels are `label:`
+  // object properties rather than JSX, which is why the guard reported them
+  // clean the whole time — see the note on `mode: "jsx-only"` above.
+  "components/homepage-commands.tsx",
+  "components/session-commands.tsx",
+  // `use-git-with-feedback.ts` composed its own English around the operation
+  // name ("Push failed"), which is why `vcs-split-button.tsx`, `vcs-dialogs.tsx`
+  // and the palette all passed it a deliberately English label. It interpolates
+  // catalog messages now, so those three no longer have to.
+  "hooks/use-git-with-feedback.ts",
 ];
