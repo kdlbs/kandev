@@ -89,12 +89,14 @@ If `git ls-files -u` shows entries, a previous merge or rebase was left incomple
    git rebase --continue
    ```
 
-   Use the normal hooks and capture the full receipt. A current-base merge may
-   stage many incoming files, making status look like hundreds of changes; do
-   not reset or broadly unstage them. Resolve only `UU` paths, then inspect
-   `git diff --stat origin/<baseRefName>` and `git diff --name-only origin/<baseRefName>`
-   before committing, and fix any incoming harness-file violation minimally
-   rather than bypassing hooks.
+   Use the normal hooks and capture the full receipt. If `git commit --no-edit`
+   fails, fix the reported semantic or hook error and retry the commit; never
+   bypass it with `--no-verify`. A current-base merge may stage many incoming
+   files, making status look like hundreds of changes; do not reset or broadly
+   unstage them. Resolve only `UU` paths, then inspect `git diff --stat
+   origin/<baseRefName>` and `git diff --name-only origin/<baseRefName>` before
+   committing, and fix any incoming harness-file violation minimally rather
+   than bypassing hooks.
 
 If Git reports an `index.lock`, inspect the exact path and active Git processes
 first (`git rev-parse --git-path index.lock` and a process listing). Never delete
@@ -123,19 +125,20 @@ git ls-remote origin refs/heads/<branch>
 ```
 
 If the second SHA differs from the first, stop and review the intervening remote
-changes before pushing; do not overwrite them. After a merge-based fixup whose
-remote SHA is unchanged, use a normal push:
-
-```bash
-git push origin HEAD:refs/heads/<branch>
-```
-
-After a successful rebase, use an exact force lease:
+changes before pushing; do not overwrite them. When the captured SHA is
+unchanged, prefer the explicit lease for both conflict merges and rebases:
 
 ```bash
 git push \
   --force-with-lease=refs/heads/<branch>:<expected-remote-sha> \
   origin HEAD:refs/heads/<branch>
+```
+
+An unchanged merge-based fixup is also a fast-forward, so a normal push is
+safe when an explicit lease is unavailable:
+
+```bash
+git push origin HEAD:refs/heads/<branch>
 ```
 
 An intervening fetch can update the remote-tracking ref consulted by generic
