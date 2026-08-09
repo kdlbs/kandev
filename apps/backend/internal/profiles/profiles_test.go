@@ -52,8 +52,8 @@ func TestApplyProfile_DefaultsToProd(t *testing.T) {
 			"false",
 		)
 	}
-	if v := os.Getenv("KANDEV_WEB_TITLE_PREFIX"); v != "" {
-		t.Errorf("KANDEV_WEB_TITLE_PREFIX = %q in prod; want empty", v)
+	if _, ok := os.LookupEnv("KANDEV_WEB_TITLE_PREFIX"); ok {
+		t.Errorf("KANDEV_WEB_TITLE_PREFIX is set in prod; want it unset")
 	}
 }
 
@@ -94,6 +94,20 @@ func TestApplyProfile_DevUsesDevelopmentDefaults(t *testing.T) {
 	}
 }
 
+func TestApplyProfile_ExplicitTitlePrefixWinsInDev(t *testing.T) {
+	clearProfileSelectors(t)
+	clearProfilesYAMLVars(t)
+	t.Setenv("KANDEV_DEBUG_DEV_MODE", "true")
+	t.Setenv("KANDEV_WEB_TITLE_PREFIX", "Custom")
+
+	if _, _, err := ApplyProfile(); err != nil {
+		t.Fatalf("ApplyProfile: %v", err)
+	}
+	if v := os.Getenv("KANDEV_WEB_TITLE_PREFIX"); v != "Custom" {
+		t.Errorf("ApplyProfile overwrote explicit title prefix: got %q; want %q", v, "Custom")
+	}
+}
+
 // TestApplyProfile_E2EWinsOverDev checks the documented detection
 // precedence: when both selectors are set (e2e harness on a developer
 // laptop), e2e takes priority because e2e fixtures are stricter (mock
@@ -124,8 +138,8 @@ func TestApplyProfile_E2EWinsOverDev(t *testing.T) {
 			"false",
 		)
 	}
-	if v := os.Getenv("KANDEV_WEB_TITLE_PREFIX"); v != "" {
-		t.Errorf("KANDEV_WEB_TITLE_PREFIX = %q in e2e; want empty", v)
+	if _, ok := os.LookupEnv("KANDEV_WEB_TITLE_PREFIX"); ok {
+		t.Errorf("KANDEV_WEB_TITLE_PREFIX is set in e2e; want it unset")
 	}
 }
 
@@ -239,6 +253,7 @@ func TestProfilesYAML_ContainsRequiredSections(t *testing.T) {
 		"KANDEV_FEATURES_OFFICE:",
 		"KANDEV_FEATURES_APP_STATUS_BAR:",
 		"KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF:",
+		"KANDEV_WEB_TITLE_PREFIX:",
 	} {
 		if !strings.Contains(yaml, section) {
 			t.Errorf("embedded profiles.yaml missing section/key %q; embed broken or file truncated", section)
