@@ -83,8 +83,27 @@ function mergeKanbanTasks(
     const incomingTime = incoming.updatedAt ? new Date(incoming.updatedAt).getTime() : 0;
     const idx = draftTasks.findIndex((t) => t.id === incoming.id);
     if (idx < 0) continue;
-    if (incomingTime >= existingTime) draftTasks[idx] = incoming;
-    applyParkedTriple(draftTasks[idx], resolvedParked);
+    if (incomingTime >= existingTime) {
+      // Build one combined object and assign it once — never assign `incoming`
+      // itself and then mutate the draft slot afterward. Immer does not
+      // re-wrap a value assigned within the current producer, so a later
+      // `draftTasks[idx] = incoming` followed by a mutation of `draftTasks[idx]`
+      // would mutate the caller's own `incoming` reference in place. Some
+      // callers (use-all-workflow-snapshots.ts's fetchAndWriteSnapshot) share
+      // that exact reference with other store state (kanbanMulti.snapshots)
+      // that this function has no business touching.
+      draftTasks[idx] = {
+        ...incoming,
+        parkedOnBackgroundWork: resolvedParked.parked,
+        parkedEpoch: resolvedParked.epoch,
+        parkedRevision: resolvedParked.revision,
+      };
+    } else {
+      // draftTasks[idx] here is still draft.kanban's own base-derived proxy
+      // (not reassigned this call), so mutating it through the existing
+      // Immer draft remains safe copy-on-write.
+      applyParkedTriple(draftTasks[idx], resolvedParked);
+    }
   }
 }
 
