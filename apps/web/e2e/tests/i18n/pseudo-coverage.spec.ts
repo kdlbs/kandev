@@ -282,6 +282,23 @@ const SCREENS: Screen[] = [
   // `test-base` state and belongs with whoever owns that fixture — not an
   // allowlist entry and not a renamed screen, either of which would keep the
   // false claim alive in a new form.
+  // NOT YET: "kanban board" (`/`, anchor `[data-testid=kanban-board]`). Probed
+  // under pseudo against this fixture. The board's own chrome is clean, and the
+  // one real finding it surfaced — the built-in sidebar view's "All tasks",
+  // which `sidebar-view-builtins.ts` persists as a user-editable name — is fixed
+  // and now resolves through `sidebar:viewAllTasks`.
+  //
+  // What is left is entirely the fixture's own records: the workflow name
+  // ("E2E Workflow") and its four step names ("Backlog", "In Progress",
+  // "Review", "Done"). Those are user data on exactly the footing as the
+  // workspace and executor-profile names described above, so this entry needs
+  // the same change — `findUnlocalizedText` learning to skip user data — and not
+  // an `allow` list of fixture values, which would fix this fixture and leave
+  // every developer instance red under different workflow names.
+  //
+  // `/tasks` was probed with it and cannot be added for a different reason:
+  // `[data-testid=tasks-list]` never renders in this fixture, so there is no
+  // anchor that proves the route mounted. It needs a seeded task list first.
   {
     name: "office — inbox",
     url: "/office/inbox",

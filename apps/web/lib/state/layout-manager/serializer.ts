@@ -10,6 +10,9 @@ import {
   panelTitle,
 } from "./constants";
 
+/** Canonical English, because `normalizePanel` produces a stored LayoutState. */
+const TERMINAL_CANONICAL_TITLE = canonicalPanelTitle(TERMINAL_DEFAULT_ID) ?? "Terminal";
+
 // Dockview serialized grid node types (internal format)
 type SerializedLeafNode = {
   type: "leaf";
@@ -144,11 +147,12 @@ function serializePanels(state: LayoutState): Record<
         panels[panel.id] = {
           id: panel.id,
           contentComponent: panel.component,
-          // Canonical English for a registry panel, so the locale that happened
-          // to build this layout is never written into the stored JSON. The tab
-          // the user sees is resolved from `titleKey` on the way back in — see
-          // `normalizePanel` and PANEL_REGISTRY.
-          title: canonicalPanelTitle(panel.id) ?? panel.title,
+          // RENDER direction: this feeds `api.fromJSON`, so the tab the user
+          // reads is resolved here, in the active locale. `LayoutState` itself
+          // keeps the canonical English title — see `panelFromDockviewPanel`,
+          // which canonicalizes again on capture so a translated title can
+          // never reach storage.
+          title: panelTitle(panel.id, panel.title),
           ...(panel.tabComponent ? { tabComponent: panel.tabComponent } : {}),
           ...(panel.params ? { params: panel.params } : {}),
         };
@@ -195,7 +199,9 @@ function panelFromDockviewPanel(panel: any): LayoutPanel {
   return {
     id: panel.id,
     component: panel.view?.contentComponent ?? panel.id,
-    title: panelTitle(panel.id, panel.title ?? panel.id),
+    // CAPTURE direction: dockview holds the localized title, and this result is
+    // what gets persisted, so a registry panel goes back to canonical English.
+    title: canonicalPanelTitle(panel.id) ?? panel.title ?? panel.id,
     ...(panel.view?.tabComponent ? { tabComponent: panel.view.tabComponent } : {}),
     ...(panel.params ? { params: panel.params as Record<string, unknown> } : {}),
   };
@@ -342,7 +348,7 @@ function normalizePanel(
       // terminals (shell-<uuid>) — preserve id + params so the live PTY
       // and store record match on restore. Coerce presentation in case
       // the saved layout predates the custom tab + plain title.
-      return { ...p, tabComponent: "terminalTab", title: panelTitle(TERMINAL_DEFAULT_ID) };
+      return { ...p, tabComponent: "terminalTab", title: TERMINAL_CANONICAL_TITLE };
     }
     // Legacy ephemeral terminal id (e.g. `terminal-saved-1` from older
     // layouts) — mint a fresh id so it reconnects to a new PTY.
@@ -352,13 +358,14 @@ function normalizePanel(
       id,
       params: { terminalId: id },
       tabComponent: "terminalTab",
-      title: panelTitle(TERMINAL_DEFAULT_ID),
+      title: TERMINAL_CANONICAL_TITLE,
     };
   }
 
-  // Known panels get their title re-resolved so a layout saved under another
-  // locale (or before this split existed) renders in the active one.
-  if (KNOWN_PANEL_IDS.has(p.id)) return { ...p, title: panelTitle(p.id, p.title) };
+  // A layout saved before this split (or by an older build) can carry a
+  // translated title; normalise it back to canonical English so the render
+  // direction is the only place a locale is applied.
+  if (KNOWN_PANEL_IDS.has(p.id)) return { ...p, title: canonicalPanelTitle(p.id) ?? p.title };
 
   if (p.component === "browser") {
     const url = (p.params?.url as string) ?? "";

@@ -24,6 +24,20 @@ export type BuiltInLayoutProfileDescriptor = {
   descriptionKey?: string;
 };
 
+/**
+ * Display name for a built-in profile, in the active locale.
+ *
+ * `descriptor.name` is the canonical English value `upsertBuiltInLayoutOverride`
+ * persists; every surface that shows the name to a user goes through here so the
+ * two cannot drift.
+ */
+export function builtInLayoutProfileName(
+  descriptor: Pick<BuiltInLayoutProfileDescriptor, "name" | "nameKey">,
+  translate: (key: string) => string,
+): string {
+  return descriptor.nameKey ? translate(descriptor.nameKey) : descriptor.name;
+}
+
 export type BuiltInLayoutProfile = BuiltInLayoutProfileDescriptor & {
   layout: LayoutState;
 };

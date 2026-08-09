@@ -1903,4 +1903,10 @@ export const i18nGuardFiles = [
   "lib/recent-tasks.ts",
   "lib/state/slices/comments/format.ts",
   "lib/utils/file-diff.ts",
+  // The built-in sidebar view's name, the third persisted-and-displayed string
+  // in this change. `SidebarView.name` is user-editable and synced, so the
+  // built-in keeps a canonical English `name` and every surface resolves
+  // `sidebarViewName()` instead. Found by the pseudo oracle, not by lint: it is
+  // a `.ts` constant, which `mode: "jsx-only"` never inspects.
+  "lib/state/slices/ui/sidebar-view-builtins.ts",
 ];

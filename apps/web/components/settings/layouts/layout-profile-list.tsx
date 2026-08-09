@@ -6,6 +6,7 @@ import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import {
+  builtInLayoutProfileName,
   BUILT_IN_LAYOUT_PROFILES,
   getBuiltInLayoutOverride,
   getBuiltInLayoutOverrideSourceId,
@@ -109,9 +110,7 @@ function BuiltInProfileList({
           >
             <span className="flex min-w-0 flex-1 flex-col gap-1">
               <span className="flex min-w-0 flex-wrap items-center justify-between gap-1">
-                <span className="text-sm font-medium">
-                  {profile.nameKey ? t(profile.nameKey) : profile.name}
-                </span>
+                <span className="text-sm font-medium">{builtInLayoutProfileName(profile, t)}</span>
                 <span className="flex flex-wrap justify-end gap-1">
                   <Badge variant="outline">{t("settings:builtIn")}</Badge>
                   {override && <Badge variant="secondary">{t("settings:customized")}</Badge>}

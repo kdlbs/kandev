@@ -135,6 +135,11 @@ export const PANEL_REGISTRY: Record<string, Omit<LayoutPanel, "id"> & { titleKey
  * Resolved at call time, never at module load — the registry stores the key.
  * Unknown ids (file diffs, plugin panels, per-session chat tabs) carry their own
  * title and are returned unchanged.
+ *
+ * This is the RENDER direction only. `LayoutState` — what gets saved — always
+ * holds the canonical English title, so the localized form exists solely inside
+ * dockview. `toSerializedDockview` localizes on the way in and
+ * `panelFromDockviewPanel` canonicalizes on the way back out.
  */
 export function panelTitle(id: string, fallback?: string): string {
   const config = PANEL_REGISTRY[id];
@@ -147,12 +152,17 @@ export function canonicalPanelTitle(id: string): string | undefined {
   return PANEL_REGISTRY[id]?.title;
 }
 
-/** Create a LayoutPanel from the registry by ID. */
+/**
+ * Create a LayoutPanel from the registry by ID.
+ *
+ * The title is canonical English: a `LayoutPanel` is the shape that gets
+ * persisted, and `toSerializedDockview` localizes it when it reaches dockview.
+ */
 export function panel(id: string): LayoutPanel {
   const config = PANEL_REGISTRY[id];
   if (!config) throw new Error(`Unknown panel: ${id}`);
   const { titleKey: _titleKey, ...rest } = config;
-  return { id, ...rest, title: panelTitle(id) };
+  return { id, ...rest };
 }
 
 /** Generate panel config for a session tab. */

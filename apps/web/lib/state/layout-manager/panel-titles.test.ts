@@ -51,24 +51,39 @@ describe("panelTitle", () => {
   });
 });
 
-describe("layout persistence", () => {
-  it("stores canonical English even when the UI is in another locale", async () => {
+describe("layout round trip", () => {
+  const titlesOf = (state: LayoutState) => {
+    const serialized = toSerializedDockview(state, 1000, 800, new Map());
+    return (serialized as unknown as { panels: Record<string, { title: string }> }).panels;
+  };
+
+  it("localizes on the way into dockview", async () => {
+    // `toSerializedDockview` feeds `api.fromJSON`, so this is what the tab bar
+    // and the layout editor's preview render — it must follow the locale. The
+    // first version of this split had the two directions the wrong way round,
+    // which the pseudo-coverage oracle caught as English tab titles on the
+    // layouts screen while every unit test passed.
     await i18n.changeLanguage("pseudo");
+    const stored = titlesOf(layoutWith(["chat", "changes", "browser"]));
 
-    const serialized = toSerializedDockview(
-      layoutWith(["chat", "changes", "browser"]),
-      1000,
-      800,
-      new Map(),
-    );
-    const stored = (serialized as unknown as { panels: Record<string, { title: string }> }).panels;
+    for (const title of ["chat", "changes", "browser"].map((id) => stored[id].title)) {
+      expect(title).toMatch(/[^\x20-\x7E]/);
+    }
+  });
 
-    // The tab the user is looking at right now is pseudo-accented...
-    expect(panelTitle("browser")).not.toBe("Browser");
-    // ...but what lands in the saved layout is not.
-    expect(stored["chat"].title).toBe("Agent");
-    expect(stored["changes"].title).toBe("Changes");
-    expect(stored["browser"].title).toBe("Browser");
+  it("keeps a stored LayoutState in canonical English", () => {
+    // `panel()` builds the shape that gets persisted, so it must NOT localize —
+    // otherwise the locale that created a layout is frozen into it.
+    const built = layoutWith(["chat", "changes", "browser"]).columns[0].groups[0].panels;
+    expect(built.map((p) => p.title)).toEqual(["Agent", "Changes", "Browser"]);
+  });
+
+  it("builds the same canonical LayoutState in any locale", async () => {
+    const english = layoutWith(["chat", "changes", "browser"]);
+    await i18n.changeLanguage("pseudo");
+    const pseudo = layoutWith(["chat", "changes", "browser"]);
+
+    expect(pseudo).toEqual(english);
   });
 
   it("keeps the canonical title for every registry panel", () => {
