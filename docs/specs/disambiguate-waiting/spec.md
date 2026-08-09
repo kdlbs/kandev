@@ -99,11 +99,17 @@ Two things follow, and both are contract:
   (`Service.ForegroundActivity`) is gated.
 
 The protocol will not supply the missing signal either. `StopReason` is a closed
-five-member enum — `end_turn`, `max_tokens`, `max_turn_requests`, `refusal`, `cancelled`
-(`types_gen.go:6631-6637`) — with no member meaning "turn over, work continues, I will come
-back". Sweeping the vendored schema at version `1.20.0` for the terms that would express
-one returns **zero occurrences in both tiers** (`background`, `async`, `detach`, `parked`,
-`long_running`).
+five-member enum — `end_turn`, `max_tokens`, `max_turn_requests`, `refusal`, `cancelled` — with
+no member meaning "turn over, work continues, I will come back". Sweeping the vendored schema at
+version `1.20.0` for the terms that would express one returns **zero occurrences in both tiers**
+(`background`, `async`, `detach`, `parked`, `long_running`).
+
+*(Citation corrected 2026-08-09. An earlier revision cited `types_gen.go:6631-6637` as though it
+were an in-tree file. **There is no `types_gen.go` anywhere in this repository** — the type comes
+from the external ACP Go SDK module, so the line reference is not resolvable from a checkout and
+a reader following it finds nothing. The claim itself is unchanged and independently checkable:
+`acp.StopReasonEndTurn` and its siblings are referenced in-tree from `cmd/mock-agent/main.go:288`
+and `.../transport/acp/prompt_handoff_test.go:55`, and the enum is closed at the SDK.)*
 
 `_meta.claudeCode.toolResponse.status: "async_launched"`
 (`internal/agentctl/types/streams/tool_payload.go:296-302`) appears nowhere in the bridge's
@@ -119,10 +125,13 @@ behaviour in this spec may depend on it.**
   (`types/streams/background_work.go:17-22`) and shells are stamped with `workID: ""`.
   **The attestation carries no PID**, so it cannot name the process it attests to. This is
   why the probe below is defined as a time-scoped predicate rather than a lookup.
-- Every agent is launched with `Setpgid: true` and `proc.pgid = cmd.Process.Pid`
+- Every agent is launched with `Setpgid: true` (`internal/agentctl/server/process/procattr_unix.go`
+  and `procattr_linux.go`) and the runner records `proc.pgid = cmd.Process.Pid`
   (`internal/agentctl/server/process/runner.go:388`), so the agent process is a process
   **group leader**. §L measures what that group actually contains, and the answer
-  invalidates the obvious design.
+  invalidates the obvious design. *(Citation corrected 2026-08-09: an earlier revision
+  attributed both halves to `runner.go:388`, which sets only the recorded pgid. The claim was
+  right and §L measured it directly; the citation named the wrong file for `Setpgid`.)*
 - The backend's own PID handle is *not* usable. `Manager.resolveLocalPID`
   (`internal/agent/runtime/lifecycle/persistence.go:150`) returns the standalone agentctl
   control-server PID and **returns 0 for every non-standalone runtime**; `RowProcessLiveness`
@@ -422,6 +431,14 @@ the agent self-resumes while the tree is still warm, so `observed_detached` is t
 session leaves `WAITING_FOR_INPUT` (AC-53). A two-term formula would leave the card spinning
 while the session is actively `RUNNING`, forever. AC-68 observes this.
 
+**There is deliberately no field for sample validity either, and that is a decision.** D2 requires
+a completed sample to be revalidated against the session's state before it is applied. That check
+reads only values already in this table plus the `turn_started` boundary D3 defines, so it needs a
+**snapshot taken at sample start**, not a new stored field: the sampler captures
+(`observed_detached`, session state, turn marker) when it issues the probe and compares them when
+the probe returns. Storing a redundant copy would create a second thing that can disagree with the
+three terms, which is exactly the defect the removed `sampling` field below illustrates.
+
 **There is deliberately no `sampling` field.** An earlier revision carried one, documented as
 "true exactly while parked". That invariant is false: at `KANDEV_PARKED_PROBE_INTERVAL = 0` a
 session can be parked from the synchronous first sample with no loop running, so
@@ -456,6 +473,20 @@ So instead:
   the OR.
 - The boolean and the counter are read in **one critical section** across all of the task's
   sessions, so they cannot come from different instants.
+- **Two sessions of one task transitioning concurrently are serialized by a per-task lock —
+  SPECIFIED 2026-08-09.** The reader-side critical section above was stated from the first
+  revision; the **writer** side was not, and without it two sessions of the same task flipping
+  at once can interleave a recompute with an increment and publish two `task.updated` frames
+  whose `parked_revision` values do not reflect the order the booleans actually changed — the
+  same unorderable-carrier defect the `max()` rule was rejected for. So: **recomputing the OR,
+  comparing it with the previous value, incrementing `parked_revision`, and enqueuing
+  `task.updated` all happen under one per-task lock**, held across all four steps and released
+  before the event-bus send. Session transitions on *different* tasks never contend. The lock
+  ordering is **session state first, then task**: a session's own transition (its boolean,
+  its `revision`, its `session.activity_changed`) is completed and its session-level lock
+  released before the per-task lock is taken, so no path holds both in the opposite order.
+  AC-78's "no `task.updated` is published" is the observable consequence for the non-flipping
+  case; AC-49's strict increase is the consequence for the flipping one.
 - A consumer discards a task-level update whose `(parked_epoch, parked_revision)` is lower
   than one it has already applied **for that task**, compared as an ordered pair (see
   *Revision epoch* below). Task revisions and session revisions are compared only against
@@ -487,6 +518,40 @@ The mechanism is an **epoch**:
   session and task the payload contains. This is belt-and-braces: the epoch alone is sufficient,
   and is what covers a client that reconnects the WebSocket **without** re-fetching boot.
 
+**"Discard" is FIELD-SCOPED, not frame-scoped — SPECIFIED 2026-08-09.** An earlier revision said
+a consumer "discards the update", which is ambiguous and dangerous in one direction: the same
+carriers transport unrelated state, so rejecting a whole `session.state_changed` or `task.updated`
+frame because its parked triple is stale would drop a legitimate session-state or title change
+and produce a *worse* bug than the one the revision guard exists to prevent.
+
+> A stale pair causes the consumer to **keep its existing `parked_on_background_work`,
+> `revision` and `parked_epoch`** and to **apply every other field of the frame normally**. Only
+> the three parked fields are held back. Conversely, a frame carrying no parked fields at all
+> leaves the three untouched — it is not read as `false`, which is what reconciles this rule with
+> D9's "absent ≡ `false`" (that default applies to a *first* observation of an entity, never to a
+> partial update of one already held).
+
+**This is not a new pattern.** `mergeCancellationProjection`
+(`apps/web/lib/state/slices/session/session-slice.ts:105-132`) already does exactly this for the
+`cancellation_pending` / `cancellation_revision` pair: it returns a
+`Pick<TaskSession, "cancellation_pending" | "cancellation_revision">` — two fields, merged by
+revision, while the surrounding merge applies the rest of the session. The parked triple follows
+it verbatim, with the epoch added to the comparison.
+
+**The consumer chokepoint is named**, so the comparison is written once rather than per handler:
+
+| Scope | Chokepoint | Carriers it covers |
+|---|---|---|
+| Session | the session-slice merge helper alongside `mergeCancellationProjection` (`session-slice.ts`) | `session.state_changed`, `session.activity_changed`, session REST/boot records |
+| Task | the equivalent merge helper on the task slice | `task.updated`, task REST/boot records |
+
+Every WS handler that upserts a session or task — including
+`agent-session.ts` (which registers `"session.activity_changed"` at `:751`) — routes through
+those helpers rather than comparing revisions inline. The **boot reset** (AC-77) is applied by
+the same session and task slices when they ingest a boot payload; it is a store-level concern,
+not a per-handler one, which is what makes it cover the reconnect-without-boot path the epoch
+alone must handle.
+
 AC-77 observes the reset end to end. Choosing process start time rather than a persisted
 counter is deliberate: it needs no storage, it is monotonic across restarts on any sane clock,
 and a backend that restarts twice within one nanosecond is not a case this feature owes an
@@ -511,6 +576,24 @@ Additive fields, on:
 
 `foreground_activity` and `active_subagent_count` keep their current meaning and their current
 gate. No existing field changes shape or value.
+
+**The frontend property names, per `Task` shape — NAMED 2026-08-09.** §M measured that Kandev
+carries **two** different `Task` types and that they disagree on casing; it warned a builder
+"must not assume one" but never said what the new field is called on either, leaving AC-58 and
+AC-73a resting on a guess. Both are now fixed, and the rule is *follow each shape's existing
+convention rather than impose one*:
+
+| Shape | Declared in | Existing precedent | New fields |
+|---|---|---|---|
+| Wire/DTO `Task`, `TaskSession` | `apps/web/lib/types/backend.ts`, `lib/types/http.ts` | `foreground_activity` (`backend.ts:106`, `:289`, `:307`), `cancellation_pending` (`:292`) | `parked_on_background_work`, `parked_revision` (task) / `revision` (session), `parked_epoch` — **snake_case, unchanged from the wire** |
+| Board/card `Task` | `apps/web/components/kanban-card.tsx:40-65` | `foregroundActivity` (`:65`) | `parkedOnBackgroundWork` — **camelCase**; this shape carries no revision fields and gains none |
+
+Consequences that are contract, because each is a place the two shapes meet:
+`rich-task-list-row.tsx:38` reads the **snake_case** shape and passes
+`task.parked_on_background_work`; `kanban-card-content.tsx` reads the **camelCase** shape and
+passes `task.parkedOnBackgroundWork`. The revision triple is consumed by the **store slices**
+(*Revision epoch*), never by a card component, which is why the board shape needs no revision
+field and must not grow one.
 
 **What actually fires when the value changes.** "Published only on change" is a *necessary*
 condition, not a trigger, and a parked transition has no natural one: an un-park at the
@@ -644,7 +727,7 @@ The three graph/action affordances stay on the `false` default; see *Out of scop
 via `canRequestInput && foregroundActivity === "background"` (`:308`), and per §H that value
 never appears in a shipped profile. Left alone, a parked session would render the ordinary
 `WAITING_FOR_INPUT` question mark in the switcher and the requirement would be quietly unmet.
-It gains a `parkedOnBackgroundWork` parameter, defaulting to `false`, and resolves:
+It gains a `parkedOnBackgroundWork` input, defaulting to `false`, and resolves:
 
 1. `canRequestInput && hasPendingPermission` → `PENDING_PERMISSION_ICON` (`:304`)
 2. `canRequestInput && hasPendingClarification` → `SESSION_STATE_ICONS.WAITING_FOR_INPUT` (`:305`)
@@ -657,6 +740,31 @@ branches so a real question always outranks parked. Three call sites pass it —
 `sessions-dropdown.tsx:475`, `session-reopen-menu.tsx:204`,
 `mobile/mobile-sessions-section.tsx:132` — and any that does not keeps today's behaviour via
 the `false` default (AC-52).
+
+**The signature becomes an options object, and this is contract rather than taste.**
+`getSessionStateIcon` (`state-icons.tsx:313-319`) already takes **five positional parameters**
+(`state`, `className`, `foregroundActivity`, `hasPendingClarification`, `hasPendingPermission`).
+`apps/web/AGENTS.md` caps parameters at **≤5** and `apps/web/eslint.config.mjs:42` sets
+`max-params: ["warn", 5]`, so a sixth positional argument is over the documented limit. An
+earlier revision said only that the function "gains a parameter", which left the builder to
+choose between breaking a stated limit and performing an unauthorised refactor.
+
+> The two option-shaped inputs move into a trailing options object:
+> `getSessionStateIcon(state, className, foregroundActivity, options)`, where `options` is
+> `{ hasPendingClarification?, hasPendingPermission?, parkedOnBackgroundWork? }`, each
+> defaulting to `false`. This lands at four parameters, mirrors the shape
+> `getTaskStateIcon(state, className, options)` already uses (`state-icons.tsx:283-287` taking
+> `TaskStateIconOptions`), and leaves room for the next flag without another signature change.
+> `getSessionStateIconConfig` follows the same shape.
+
+**AC-52's baseline is therefore re-expressed, not invalidated**, and this is the one place this
+spec knowingly rewrites an existing test. The existing session-icon matrix in
+`state-icons.test.tsx` calls the function **positionally** (e.g. `:335`, `:341`, `:349`, `:357`),
+so those call sites are mechanically rewritten to the options shape. What AC-52 pins is the
+**resolved icon for every row of that matrix**, which must be byte-identical before and after;
+the call syntax is not part of the assertion. A row whose icon changes is a regression
+regardless of how the arguments were passed. Rewriting the calls without changing a single
+expected icon is exactly the evidence AC-52 asks for.
 
 ### Turn-boundary stream event (agentctl → backend)
 
@@ -768,26 +876,70 @@ Detached-launch attestation is **per agent, behind a named seam**. This replaces
 contract, which excluded multi-vendor attestation outright; the exclusion is withdrawn by human
 decision on 2026-08-09 and the staged shape below is contract.
 
+**WHICH PROCESS OWNS THE REGISTRY — ADDED 2026-08-09, and it is not the obvious one.** An
+earlier revision defined the seam without saying where it lives or how its key is obtained.
+Both answers are forced by evidence, and the obvious reading of "the backend keys a registry by
+agent ID" is **prohibited** by a shipped ADR.
+
+> **The registry lives in agentctl. The backend never keys anything by vendor.**
+
+- **agentctl side — the recogniser.** The registry sits at the point that already dispatches on
+  vendor: `stampBackgroundShellWork` (`.../transport/acp/normalize.go:304-307`), called from
+  `normalize.go:131` and `:243`. Its key is the **agentctl-internal agent id** the normalizer
+  already holds as `n.agentID` — for Claude, the package constant
+  `claudeAgentID = "claude-acp"` (`normalize.go:47`). The Claude recogniser's body is today's
+  condition, unchanged: `payload.ShellExec() != nil && payload.ShellExec().Background`
+  (`normalize.go:305`). A recogniser's only effect is to call
+  `payload.SetBackgroundWorkIdentity(BackgroundWorkKindShell, "", /*detached=*/true, false)`.
+- **The wire — a typed, vendor-neutral attestation.** The stamp travels as
+  `BackgroundWorkPayload` on the normalized payload, and **it survives the process boundary**:
+  `NormalizedPayload` has custom marshalling and `background_work` is carried in **both**
+  directions (`tool_payload.go:101` and `:117` for `MarshalJSON`, `:138` and `:158` for
+  `UnmarshalJSON`). This was verified rather than assumed, because the struct's fields are
+  unexported and a reader would reasonably expect them to be dropped. Had they been, the feature
+  would have been dead in exactly the Docker/SSH deployments the *Timing* section targets.
+- **Backend side — no vendor knowledge at all.** On the single ordered consumer the backend
+  reads the existing vendor-neutral predicate
+  **`NormalizedPayload.IsDetachedBackgroundLaunch()`** (`types/streams/background_work.go:62-64`,
+  which is `IsActiveBackgroundWork() && backgroundWork.Detached`) and sets `observed_detached`.
+  It does **not** look at any agent name, agent id, or profile.
+
+**Why the backend must not key on agent identity.** `AgentStreamEventPayload.AgentID` is
+documented *"Historical: execution.ID. Prefer ExecutionID"*
+(`internal/agent/runtime/lifecycle/event_types.go:225`) — it is an execution id, not an
+agent-type slug, so a registry keyed on it would never match and AC-37 would pass **vacuously**
+while AC-21 failed. The available alternative, `session.AgentProfileSnapshot["agent_name"]`
+(`workflow_session_config.go:214-219`), is a **central agent-name whitelist**, and
+**ADR-0049 rejects exactly that**: *"an agent identity does not prove the installed provider
+version advertises what Kandev expects"* (`turn_activity.go:1154-1157`). The same repository
+convention is stated in `internal/agentctl/AGENTS.md` — prompt handoff and steering gate on a
+negotiated advertisement, *"never on `agentID`"*. Putting the registry in agentctl keeps the
+backend on the right side of that decision, because agentctl is the one process that legitimately
+knows which vendor's wire format it is parsing.
+
 ```
-BackgroundLaunchRecognizer
-  AgentID() string
+BackgroundLaunchRecognizer            (registered in agentctl)
+  AgentID() string                    // matched against the normalizer's n.agentID
   RecognizesDetachedLaunch(payload *streams.NormalizedPayload) bool
 ```
 
 - Recognisers are held in a **registry keyed by agent ID**, exposing a public registration
-  function. At ship time exactly **one** is registered: Claude, whose implementation is today's
-  condition — `payload.ShellExec() != nil && payload.ShellExec().Background`
-  (`transport/acp/normalize.go:305`).
-- An agent with **no registered recogniser** produces no attestation. It is never probed
-  (AC-54, AC-40a) and never parked (AC-37). This is the guarantee that keeps every other ACP
-  agent in the registry behaving exactly as it does today, and it must survive any future
-  registration.
-- **Adding a vendor is registering a recogniser and nothing else.** It MUST NOT require
-  changing the probe, the parked projection, or any icon call site. AC-69 asserts this by
-  registering a second recogniser **through the public registration API, from test code only**.
+  function. At ship time exactly **one** is registered: Claude, as above.
+- An agent with **no registered recogniser** produces no attestation: nothing stamps
+  `Detached=true`, so `IsDetachedBackgroundLaunch()` stays false on the backend, and the session
+  is never probed (AC-54, AC-40a) and never parked (AC-37). This holds **by construction**
+  rather than by a backend-side check, and it must survive any future registration.
+- **Adding a vendor is registering a recogniser in agentctl and nothing else.** It MUST NOT
+  require changing the probe, the parked projection, the backend consumer, or any icon call site.
+  AC-69 asserts this by registering a second recogniser **through the public registration API,
+  from test code only**.
 - The registration function MUST be reachable from a test package without importing anything
   under the probe, projection, or rendering paths. That reachability is what makes AC-69
   mechanically checkable rather than a claim about a diff.
+- **Registration is process-start and single-valued** (D7): at most one recogniser per agent id;
+  a duplicate registration for the same id is a programming error, not a runtime merge; a nil
+  recogniser or an empty `AgentID()` is rejected at registration; a recogniser that panics is
+  treated as "did not recognise".
 - The seam is the natural home for a future PID-carrying attestation. §I records that
   `BackgroundWorkPayload` carries no PID today; if a vendor can supply one, it enters here and
   narrows the probe from a time-scoped predicate to an exact lookup **without** changing the
@@ -795,7 +947,8 @@ BackgroundLaunchRecognizer
 
 Why this is a small change and not a rewrite: per §L the probe is already entirely
 provider-agnostic — it walks a process tree that exists for every executor and every agent —
-and the Claude-specific part is one predicate over one payload.
+and the Claude-specific part is one predicate over one payload, at a call site that already
+exists and already dispatches on exactly this key.
 
 ### Background-workload liveness probe (agentctl)
 
@@ -822,6 +975,23 @@ membership is always non-empty; and a backgrounded shell is placed in its own pr
 the CLI, so membership excludes the very process the probe exists to find. An implementation
 that samples the group passes neither AC-70 nor AC-71.
 
+**Where the walk is rooted — NAMED 2026-08-09.** The predicate above says the walk starts at
+"the agent process", which is not something the probe's caller holds. The ACP adapter knows the
+session; the **PID** belongs to the process manager, which is what launches the agent and
+records `proc.pgid = cmd.Process.Pid` (`server/process/runner.go:388`). Without a named
+accessor a builder has only the agent's process **group** in easy reach — which is precisely the
+wrong thing, and the failure AC-70 and AC-71 exist to catch, so leaving it silent points at the
+one answer the spec forbids.
+
+> The probe resolves its root through a **named accessor on agentctl's process manager**,
+> `AgentPID(sessionID) (pid int, ok bool)`, returning the pid of the agent process that
+> manager launched for that session. `ok == false` — no such session, or the process has already
+> been reaped — yields **`unknown`**, never `settled`, matching the *Failure modes* row for an
+> exited agent process.
+
+The accessor returns a **pid only**. It deliberately does not return a process group, so the
+forbidden predicate is not reachable through this seam at all.
+
 **Turn start is recorded by agentctl, in agentctl's own clock.** agentctl stamps the current
 turn's start at `beginPromptTurn` (`adapter_prompt.go:140`) — the same instant that emits
 `turn_started`, after the prompt gate and after the pinned-session drop check, and therefore on
@@ -841,6 +1011,26 @@ difference breaks the predicate's own stated failure direction:
 | Linux | `/proc/<pid>/stat` — field 4 `ppid`, field 22 `starttime` (clock ticks since boot, resolved against `/proc/uptime` or `sysconf(_SC_CLK_TCK)`) | ≥ 10 ms | `live` / `settled` |
 | Darwin/BSD | `sysctl KERN_PROC_ALL` → `kinfo_proc.kp_proc.p_starttime`, a `timeval` | 1 µs | `live` / `settled` |
 | Windows | Not implemented | — | always `unknown` |
+
+**Which of those rows CI actually enforces — STATED 2026-08-09.** The *Notes for
+implementation* require AC-70, AC-70a, AC-71, AC-72 and AC-80 to exercise a real process tree,
+and AC-80 names Linux **and** Darwin. Verified: `.github/workflows/backend-tests.yml` runs
+`ubuntu-latest` and `windows-latest` and has **no macOS runner**, so absent a decision the
+Darwin half — the `sysctl` path, which is the more fragile of the two and the one
+`ps -eo lstart` would silently substitute for — would ship enforced by nothing. Adding a macOS
+CI job is out of scope for this card. So the contract is:
+
+- **Linux** — the real-process-tree criteria are **CI-enforced** on the existing
+  `ubuntu-latest` backend job. This is the gate.
+- **Darwin** — the same criteria run as a **host-gated** test: skipped when `runtime.GOOS` is
+  not `darwin`, and therefore green-by-skip in CI and genuinely executed on a maintainer's
+  machine. The skip MUST be an explicit `t.Skip` naming the platform, never a silent pass, so
+  a reader of the CI log can tell the difference between "ran and passed" and "did not run".
+- **Windows** — always `unknown`; no process-tree test.
+
+AC-80 is restated below against this split so its Darwin half is a real, locatable obligation
+rather than an unenforceable sentence. The residual risk is named and accepted: a Darwin-only
+regression can reach `main` and is caught on first local run, not in CI.
 
 **`ps -eo lstart` MUST NOT be used as the Darwin source**, even though §L's exploratory
 measurement used `ps`. `lstart` renders a whole-second timestamp, while the recorded turn start
@@ -1105,8 +1295,76 @@ settle rather than up to one sampling interval later — the whole point being t
 looking at the board immediately after a turn ends sees the truth.
 
 The sample is taken **only** when `observed_detached` is true for the settling turn (D3), so the
-common turn end pays nothing (AC-40a). Concurrent samples for one session are serialized; a
-sample that completes carrying a revision older than the current one is discarded under D1.
+common turn end pays nothing (AC-40a).
+
+#### The settle seam — NAMED 2026-08-09, because "during turn-settle handling" is not one place
+
+An earlier revision said only "synchronously during turn-settle handling". Read from the tree:
+**`setSessionWaitingForInput` has 44 production call sites across six files** — 33 in
+`event_handlers_workflow.go`, 4 in `event_handlers_agent.go`, 3 in `task_operations.go`, 2 in
+`event_handlers_streaming.go`, and one each in `event_handlers_git.go` and
+`clarification_guard.go`. "Turn-settle handling" therefore names no single instant, and the two
+readings a builder would most plausibly pick both fail **silently**:
+
+- Sampling inside `handleCompleteStreamEvent` (`event_handlers_streaming.go:1836`) runs
+  **before** that handler's own state write at `:1961`, so term 3 of the three-term formula is
+  still false and **nothing ever parks**. At `KANDEV_PARKED_PROBE_INTERVAL = 0` (AC-74) there is
+  no later sample to correct it, so the feature is inert.
+- Sampling at the stream handler at all misses the **workflow** settle path entirely — and §J's
+  own observation is a Kandev **Verify** step, which settles through
+  `event_handlers_workflow.go`. The originating scenario would have been the uncovered one.
+
+> **The seam is `setSessionWaitingForInput`** (`event_handlers_streaming.go:1491`), and the hook
+> runs **at the end of it, after the state write**. All 44 call sites funnel through this one
+> function, so naming it covers the workflow, stream, agent, git, and task-operation paths at
+> once, and a future 45th call site inherits the behaviour instead of silently omitting it.
+
+Three properties of that placement are contract:
+
+1. **After the state write.** `updateTaskSessionState(..., TaskSessionStateWaitingForInput, ...)`
+   (`:1515`) has already committed, so term 3 is true when the projection is computed. A hook
+   placed before it reads the pre-settle state and can never park.
+2. **Once per settle transition, not per call.** The function early-returns when
+   `wasAlreadyWaiting` is true (`:1521-1523`); the hook sits **after** that return, so a repeat
+   call on an already-settled session takes no probe. This is what keeps AC-54's "zero probes"
+   true for a session that is merely sitting in `WAITING_FOR_INPUT`.
+3. **It fires on the fallback path too or not at all — never half.** The early error return at
+   `:1509-1515` (session lookup failed) still writes the state; because no session row could be
+   read, `observed_detached` cannot be evaluated for it, so that path takes **no** probe and the
+   session is not parked. `unknown`-equivalent, i.e. renders as today.
+
+#### A sample must be revalidated before it is applied
+
+D1's revision **increments only on a transition of `parked`**, so it cannot order two samples of
+the same session: a turn-N probe completing during turn N+1 carries the *same* revision whenever
+`parked` has not flipped in between, and the earlier "discard a sample carrying an older
+revision" rule could never fire. §J measures a twelve-minute parked window, so a sample
+outliving its turn is ordinary, not exotic.
+
+The rule is therefore stated positively, against state the spec already defines:
+
+> A completed sample is **applied only if, at the instant it completes, all three of the
+> following still hold as they did when the sample started**: the session is still
+> `WAITING_FOR_INPUT`; `observed_detached` is still true; and **no `turn_started` has been
+> received for that session since the sample began**. If any has changed, the result is
+> **discarded** — not recorded as `last_sample`, and not published. Discarding is not `unknown`:
+> nothing is written at all, so no transition occurs and no revision moves.
+
+The third clause is the load-bearing one and is why the boundary is defined once in D3: a new
+turn invalidates the *question* the sample was asked, not merely its answer. Concurrent samples
+for one session are serialized (D6); a second sample that starts after the first completes
+observes the first's applied result.
+
+#### The synchronous probe's second cost, stated so it is not discovered later
+
+The 250 ms budget bounds turn settlement (AC-40), and that is the cost the default was chosen
+against. It has a second, smaller effect worth naming: the call is issued while the backend is
+on its ordered agent-event path for that session, so an attested turn end can also delay that
+session's subsequent event processing — and a concurrent cancel — by up to the budget. This is
+**not** a deadlock: agentctl's read loop remains free to demux the response, which is what lets
+the call return at all. It is bounded by the same budget, it happens only on turns that actually
+attested a detached launch, and it is accepted. It is recorded here because a reader who meets
+it later would reasonably file it as a cancel-latency regression rather than a known cost.
 
 ### D3 — The turn boundary, defined once for both processes
 
@@ -1176,9 +1434,18 @@ parks. AC-79 observes it.
 
 ### D7 — The recogniser registry
 
+- **It lives in agentctl**, at the `stampBackgroundShellWork` dispatch point
+  (`.../transport/acp/normalize.go:304-307`), and is keyed by the agentctl-internal agent id the
+  normalizer already holds. The backend holds no registry and compares no agent identity — see
+  *API surface → The launch-recogniser seam* for why ADR-0049 forbids the alternative.
 - Keyed by agent ID; **at most one** recogniser per agent ID. Registering a second for the same ID
   is a programming error, not a runtime merge.
-- Lookup miss ⇒ no attestation, no probe, no parking. This is the default for every agent.
+- **Registration input validation:** a nil recogniser, or one whose `AgentID()` is empty or
+  whitespace, is rejected at registration rather than stored — an entry that can never match is a
+  silent no-op, which is the failure mode this seam is least able to detect.
+- Lookup miss ⇒ nothing is stamped ⇒ the backend's `IsDetachedBackgroundLaunch()` stays false ⇒
+  no attestation, no probe, no parking. This is the default for every agent, and it holds by
+  construction rather than by a backend-side check.
 - The registry is fixed at process start; recognisers are not added or removed at runtime, except
   that the registration function is reachable from test code so AC-69 can exercise the seam.
 - A recogniser that panics is treated as "did not recognise" — fail closed to today's behaviour.
@@ -1207,6 +1474,11 @@ would otherwise leave a card spinning while the session is actively `RUNNING`.
 | agent with no registered recogniser | never attested, never probed, never parked |
 | process start time exactly equal to the truncated turn start | counts as **in-turn** (inclusive comparison) |
 | agent process exited | `unknown`, never `settled` |
+| `AgentPID(sessionID)` returns `ok == false` | `unknown` — no walk is attempted |
+| a sample completing after its turn ended, or after the session left `WAITING_FOR_INPUT` | **discarded** — not recorded as `last_sample`, not published, no revision moves. Distinct from `unknown`, which *is* recorded |
+| recogniser registered with a nil value or an empty `AgentID()` | rejected at registration, never stored |
+| a session transition that does not flip its task's OR | `session.activity_changed` only; the task's `parked_revision` does not move and no `task.updated` is published |
+| a carrier that omits the parked fields for an entity already held | the three fields are left untouched, **not** reset to `false` |
 | notification behaviour | **unchanged in every case** — this spec never withholds, defers, or reorders one |
 
 ## Scenarios
@@ -1253,12 +1525,26 @@ would otherwise leave a card spinning while the session is actively `RUNNING`.
 - **AC-35** — **GIVEN** `features.claudeBackgroundPromptHandoff` is off in every profile, **WHEN** a
   session is parked and the operator submits a prompt, **THEN** the prompt follows exactly the
   admission path it follows today for that session state; **and** an architecture test asserts that
-  no package on the parked-projection, probe, or rendering path references the
-  `claudeBackgroundPromptHandoff` flag key or its accessor symbol. *(The second clause previously
-  read "the parked projection was produced without reading that flag", which asserts a property of
-  the diff and is not observable from a test process. Restated on 2026-08-09 as a named
-  architecture-test assertion. The claim is unchanged; only its form is. Spec Review round 5 should
-  judge this rather than assume it.)*
+  **none of the symbols this feature introduces** — the parked projection and its revision
+  accessors, the probe port and its production implementation, the sampling loop, the recogniser
+  registry, and the settle hook — references the `claudeBackgroundPromptHandoff` flag key, the
+  `Features.ClaudeBackgroundPromptHandoff` config field, or the
+  `claudeBackgroundPromptHandoffEnabled` / `claudeBackgroundPromptHandoffEnabledForSession`
+  accessors; **and** a parked session's projection is computed identically with the flag forced on
+  and forced off, for the same inputs.
+  *(Restated twice. It first read "the parked projection was produced without reading that flag",
+  which asserts a property of a diff. The 2026-08-09 restatement made it an architecture test but
+  scoped it to **packages**, which Spec Review round 1 showed is **false by construction**: the
+  projection must live in package `orchestrator` — D1 names `CancellationPendingSnapshot`
+  (`task_operations.go:4478`) as its structural precedent and the settle hook is
+  `setSessionWaitingForInput` (`event_handlers_streaming.go:1491`) — and that package legitimately
+  references the flag at `service.go:61` and `turn_activity.go:1194 / :1214 / :1328` for the
+  unrelated `ForegroundActivity` gate. At package granularity the assertion could never pass; a
+  builder would have silently reinterpreted it at symbol granularity and the test would have
+  proved nothing. Narrowed here to **symbol** granularity, which is what the requirement always
+  meant — "this feature's code does not read that flag" — plus a behavioural clause that holds
+  whatever the granularity. The contract is unchanged: the parked path is still independent of the
+  flag, and the flag still stays off.)*
 - **AC-36** — **GIVEN** a parked session, **WHEN** the backend restarts and the boot payload is
   built, **THEN** `parked_on_background_work` is `false`.
 - **AC-37** — **GIVEN** an ACP agent with **no registered launch recogniser**, **WHEN** it settles a
@@ -1311,11 +1597,18 @@ would otherwise leave a card spinning while the session is actively `RUNNING`.
   **THEN** the request travels as the WebSocket action `agent.background.probe` on the existing
   agent stream carrying `session_id`, the request carries **no timestamp**, and the response
   `result` is one of exactly `live`, `settled`, `unknown`.
-- **AC-46** — **GIVEN** each of these five conditions in turn — the agent stream is disconnected
-  (`ErrAgentStreamNotConnected`); the probe budget elapses; agentctl replies
+- **AC-46** — **GIVEN** each of these **seven** conditions in turn — the agent stream is
+  disconnected (`ErrAgentStreamNotConnected`); the probe budget elapses; agentctl replies
   `ErrorCodeUnknownAction`; the response body is unparseable; the response carries a `result`
-  outside the three literals — **WHEN** the backend resolves the probe, **THEN** in **every** case
-  the result is `unknown` and the session reports `parked_on_background_work: false`.
+  outside the three literals; **the port returns a non-nil error alongside a `live` value**;
+  **the port implementation panics** — **WHEN** the backend resolves the probe, **THEN** in
+  **every** case the result is `unknown`, the session reports `parked_on_background_work: false`,
+  and turn settlement completes normally. *(The last two were added 2026-08-09. The
+  error-beside-a-value case is the one the *Probe port* section calls out as the direction that
+  would otherwise park a session on a failed sample, and it had no criterion. The panic case is
+  asserted by the *Failure modes* table — "Probe errors **or panics** → treated as `unknown`" —
+  and likewise had none; a panic that escapes the probe would take down the settle path rather
+  than degrade to today's rendering.)*
 - **AC-49** — **GIVEN** a task with two sessions, where session S1 has recorded two transitions
   (revision `2`, currently `false`) and session S2 has recorded none (revision `0`, `false`),
   **WHEN** S2 transitions to parked, **THEN** the task's `parked_on_background_work` becomes `true`
@@ -1327,10 +1620,16 @@ would otherwise leave a card spinning while the session is actively `RUNNING`.
 - **AC-50** — **GIVEN** a task with no sessions, or whose sessions have recorded no transition,
   **WHEN** the task DTO is serialized, **THEN** `parked_on_background_work` is `false` and
   `parked_revision` is `0`.
-- **AC-51** — **GIVEN** a parked session, **WHEN** the session switcher
-  (`components/task/sessions-dropdown.tsx:475`) renders it, **THEN** the background icon is shown
+- **AC-51** — **GIVEN** a parked session, **WHEN** **each of the three `getSessionStateIcon` call
+  sites** renders it — `components/task/sessions-dropdown.tsx:475`,
+  `components/task/session-reopen-menu.tsx:204`, and
+  `components/task/mobile/mobile-sessions-section.tsx:132` — **THEN** the background icon is shown
   rather than the `WAITING_FOR_INPUT` question mark; and **GIVEN** the same session additionally
-  has a pending clarification, **THEN** the question mark wins.
+  has a pending clarification, **THEN** the question mark wins, on all three. *(Widened
+  2026-08-09 from `sessions-dropdown.tsx` alone. All three are named in the *Rendering contract* as
+  passing the new option, but only one had a positive criterion — AC-52 covers the other two solely
+  in the NOT-parked case, so a builder could have wired one surface, satisfied every criterion, and
+  left the session switcher inconsistent between desktop and mobile.)*
 - **AC-52** — **GIVEN** a session that is **not** parked, **WHEN** any of the three
   `getSessionStateIcon` call sites (`sessions-dropdown.tsx:475`, `session-reopen-menu.tsx:204`,
   `mobile/mobile-sessions-section.tsx:132`) renders it, **THEN** the icon is identical to today's
@@ -1359,32 +1658,50 @@ would otherwise leave a card spinning while the session is actively `RUNNING`.
   for **the matrix already enumerated in `apps/web/components/task/task-item.test.tsx`**. Two
   baselines because there are two resolvers. This covers the three call sites this feature
   deliberately does not update.
-- **AC-62** — **GIVEN** a parked session rendering the background affordance, **WHEN** the probe
-  transitions `live → settled`, **THEN** a `session.activity_changed` carrying
-  `parked_on_background_work: false`, a higher `revision` and the current `parked_epoch` is
-  published for that session, a `task.updated` is published for its task **because the task-level
-  OR also changed**, and the task row stops rendering
+- **AC-62** — **GIVEN** a parked session rendering the background affordance, **and it is the only
+  parked session on its task**, **WHEN** the probe transitions `live → settled`, **THEN** a
+  `session.activity_changed` carrying `parked_on_background_work: false`, a higher `revision` and
+  the current `parked_epoch` is published for that session, a `task.updated` is published for its
+  task **because the task-level OR also changed**, and the task row stops rendering
   `data-testid="task-state-background-running"`.
 - **AC-68** — **GIVEN** a parked session rendering the background affordance whose probe last
-  reported `live`, **WHEN** the agent resumes itself and the session enters `RUNNING` **with no
-  further sample being taken** (AC-53 stopped the loop), **THEN** `parked_on_background_work` is
-  `false`, a `session.activity_changed` carrying `false` and a higher `revision` is published, and
-  the task row stops rendering `data-testid="task-state-background-running"`. This is the
-  session-state term of the formula clearing it, because `last_sample` is still `live` and is never
-  re-read.
-- **AC-69** — **GIVEN** a **second** launch recogniser for a different agent ID, registered
-  **through the registry's public registration API from a test package**, and a session of that
-  agent that settles after its recogniser attests a detached launch with the probe reporting
-  `live`, **WHEN** the session and task DTOs are serialized and the task row renders, **THEN** the
-  session is parked and renders `data-testid="task-state-background-running"` exactly as a Claude
-  session does. The seam guarantee is asserted **by construction**: the test's only production-code
-  interaction is the registration call, and the test package imports nothing from the probe,
-  projection or rendering paths. *(The second clause previously read "the change required to
-  achieve this was the registration alone — no edit to the probe, the parked projection, the
-  notification state machine, or any icon call site", which asserts a property of the diff and is
-  not observable from a test process. Restated on 2026-08-09 as a construction constraint on the
-  test itself. The claim is unchanged; only its form is. Spec Review round 5 should judge this
-  rather than assume it.)*
+  reported `live`, **and it is the only parked session on its task**, **WHEN** the agent resumes
+  itself and the session enters `RUNNING` **with no further sample being taken** (AC-53 stopped the
+  loop), **THEN** `parked_on_background_work` is `false`, a `session.activity_changed` carrying
+  `false` and a higher `revision` is published, and the task row stops rendering
+  `data-testid="task-state-background-running"`. This is the session-state term of the formula
+  clearing it, because `last_sample` is still `live` and is never re-read.
+  *(The sole-parked-session clause was added to both GIVENs on 2026-08-09. Neither excluded a
+  second parked session on the same task, so their "the task row stops rendering" THEN
+  contradicted *Task-level projection* and AC-78, under which the task OR stays `true` and the row
+  keeps rendering. AC-62 partly self-qualified via its "because the task-level OR also changed"
+  clause; AC-68 did not qualify at all. The multi-session case is covered positively by AC-78 and
+  is unchanged.)*
+- **AC-69** — **GIVEN** a **second** launch recogniser for a different agent ID, registered in
+  **agentctl** through the registry's public registration API from a test package, **WHEN** that
+  agent emits a tool call its recogniser recognises, **THEN** the resulting
+  `streams.NormalizedPayload` reports `IsDetachedBackgroundLaunch() == true` and survives a
+  `MarshalJSON` → `UnmarshalJSON` round trip still reporting `true`; **and** the test package
+  imports nothing from the probe, the parked projection, or any rendering path — its only
+  production-code interaction is the registration call and the payload assertion. The
+  wire round trip is part of the criterion because the attestation must cross a process boundary
+  in the Docker and SSH executors.
+- **AC-69a** — **GIVEN** the backend's ordered consumer receives a normalized payload reporting
+  `IsDetachedBackgroundLaunch() == true` for a session, **WHEN** that session settles and the
+  probe reports `live`, **THEN** `parked_on_background_work` is `true` — **and the backend
+  performs no comparison against any agent name, agent ID, or agent profile field in doing so**,
+  which an architecture test asserts over the symbols introduced by this feature.
+  *(AC-69 has now been restated twice, and this round split it. It previously required "the
+  session and task DTOs are serialized **and the task row renders**" while simultaneously
+  forbidding the test package to import the projection or rendering paths — two clauses that
+  cannot both hold: observing the DTO requires the projection path, and no Go test package can
+  render a TSX row. Spec Review round 1 judged it unwritable as one test. The seam guarantee now
+  lives in AC-69, testable in one Go package with the import constraint intact and therefore
+  mechanically checkable; the vendor-neutrality of the backend, which is the other half of the
+  guarantee, is AC-69a. The rendering clause is **dropped, not lost** — AC-23, AC-58 and AC-73a
+  already assert that a parked session renders `data-testid="task-state-background-running"` on
+  all three surfaces, and none of them cares which recogniser produced the attestation. No
+  coverage is removed; the contract is unchanged.)*
 - **AC-70** — **GIVEN** a Claude ACP session that is idle with **no background workload running**,
   whose agent process group contains the bridge process, one or more CLI processes, and one or more
   stdio MCP server processes — the §L measurement, reproduced — **and every one of those
@@ -1443,11 +1760,19 @@ would otherwise leave a card spinning while the session is actively `RUNNING`.
   becomes `false`. The projection tracks the machine, not the operator.
 - **AC-76** — **GIVEN** any session that this spec parks, un-parks, or leaves unparked, **WHEN** its
   turn completes, **THEN** `session.turn_finished` is delivered within the same turn-completion
-  handling, with the same occurrence key, title, body and timestamp it carries today, and **no
-  notification is withheld, deferred, delayed, reordered or dropped by anything in this spec**.
-  Asserted across the parked, un-parked, `unknown`-probe and no-recogniser cases. This is the
-  criterion that makes this spec shippable independently of
+  handling; its occurrence key, title and body are **byte-identical to a fixture captured from the
+  pre-change code for the same inputs**; its timestamp is **produced by the same source and at the
+  same point in the handler** as before, asserted through the injected clock rather than by value;
+  and **no notification is withheld, deferred, delayed, reordered or dropped by anything in this
+  spec**. Asserted across the parked, un-parked, `unknown`-probe and no-recogniser cases, and the
+  parked case additionally asserts the delivery **count** is one, matching the others.
+  This is the criterion that makes this spec shippable independently of
   [`parked-notification-deferral`](../parked-notification-deferral/spec.md).
+  *(Restated 2026-08-09. It previously required "the same occurrence key, title, body and
+  timestamp it carries today" — but "today" has no referent inside a test process and a wall-clock
+  timestamp differs on every run, so the criterion could not be written as stated. Pinned here to a
+  captured fixture for the three stable fields and to the clock source for the one that is not. The
+  claim is unchanged: this spec alters nothing about the notification.)*
 - **AC-77** — **GIVEN** a consumer that has applied `(epoch E1, revision 7)` for a session, **WHEN**
   the backend restarts and publishes `(epoch E2, revision 0)` for that session with `E2 > E1`,
   **THEN** the consumer **applies** it and the affordance clears; and **GIVEN** the consumer applies
@@ -1465,11 +1790,18 @@ would otherwise leave a card spinning while the session is actively `RUNNING`.
   is the ordering the shared consumer (`event_handlers_streaming.go:24`) guarantees and the case a
   separate-queue implementation loses.
 - **AC-80** — **GIVEN** a descendant whose process start time falls in the same source-resolution
-  tick as the recorded turn start but strictly after it in nanoseconds, **WHEN** the probe is taken
-  on Linux and on Darwin, **THEN** both report `live`, because the turn start is truncated down to
-  the source's resolution before the inclusive comparison; and **GIVEN** an implementation that
-  reads Darwin start times from `ps -eo lstart`, **THEN** this criterion fails, which is the
-  intended guard against that source.
+  tick as the recorded turn start but strictly after it in nanoseconds, **WHEN** the probe is taken,
+  **THEN** it reports `live`, because the turn start is truncated down to the source's resolution
+  before the inclusive comparison; and **GIVEN** an implementation that reads Darwin start times
+  from `ps -eo lstart`, **THEN** this criterion fails, which is the intended guard against that
+  source. This criterion exists **twice**, once per platform, with the enforcement stated in
+  *Start-time source and resolution*: the **Linux** instance runs on the `ubuntu-latest` backend
+  job and is the CI gate; the **Darwin** instance is host-gated on `runtime.GOOS == "darwin"` and
+  MUST `t.Skip` with an explicit platform reason when it does not run, so a green CI log never
+  reads as Darwin coverage. An implementation that satisfies only the Linux instance has not
+  satisfied AC-80. *(The single "on Linux and on Darwin" phrasing was unenforceable: verified
+  2026-08-09, `.github/workflows/backend-tests.yml` has no macOS runner, so half the criterion was
+  guarded by nothing and would have read as passing.)*
 - **AC-81** — **GIVEN** `KANDEV_PARKED_PROBE_BUDGET` set to `0`, and separately to a negative
   duration, **WHEN** configuration is loaded, **THEN** in both cases the value is rejected, a
   warning is logged, and the effective budget is the `250ms` default — so no synchronous probe is
@@ -1477,6 +1809,35 @@ would otherwise leave a card spinning while the session is actively `RUNNING`.
 - **AC-82** — **GIVEN** a parked session, **WHEN** the app is rendered under the pseudo-locale,
   **THEN** the background affordance's accessible label and tooltip resolve through
   `task:backgroundWorkIsRunning` and no new translation key is introduced by this feature.
+
+## Delivery plan — which criteria each wave closes
+
+**ADDED 2026-08-09.** Two independent adversarial reviews judged this spec too large for one
+build round, and both were right: the requirement set spans a new stream event across four
+files, a new WS action, a cross-platform process-tree probe, a recogniser registry, a backend
+projection with two revision counters and a process epoch, new fields on six carriers, four
+render surfaces across two resolvers, and real-process-tree conformance. The scope itself is
+**not** reduced — every criterion below is still in this contract — but the spec now states the
+order and the closing set, so "done" is checkable per wave instead of only at the end.
+
+This section is contract in one narrow sense: **every acceptance criterion appears exactly once,
+and a wave is complete only when its criteria pass.** The wave *boundaries* are a
+recommendation; a builder who closes the same criteria in a different order has satisfied it.
+
+| Wave | Scope | Closes |
+|---|---|---|
+| **0 — seams, ships as a visible no-op** | `turn_started` end to end **including the lifecycle relay**; the `agent.background.probe` action, its agentctl stub returning `unknown`, the backend `Client` method and its exhaustive error→`unknown` mapping; the `BackgroundProbe` port; every DTO, wire and TS field hardcoded `false`/`0` | AC-36, AC-41a, AC-41b, AC-45, AC-46, AC-50 |
+| **1a — agentctl probe** (`internal/agentctl/**`) | descendant walk, start-time predicate, per-platform sources, `AgentPID` accessor | AC-27, AC-27a, AC-27b, AC-70, AC-70a, AC-71, AC-72, AC-80 |
+| **1b — recogniser + attestation** (`transport/acp/normalize.go`, `internal/orchestrator/**`) | the registry in agentctl, the Claude recogniser, `observed_detached` set on the ordered consumer and cleared on `turn_started` | AC-37, AC-41, AC-69, AC-69a, AC-79 |
+| **1c — frontend** (`apps/web/**`) | `BackgroundWorkTaskIcon` promotion, both task resolvers, both board early returns, the `/tasks` row, the session resolver, the store-slice discard rule and boot reset | AC-23, AC-34, AC-39, AC-49, AC-51, AC-52, AC-58, AC-59, AC-73a, AC-77, AC-82 |
+| **2 — backend projection**, single owner | the three-term formula, the settle hook, session and task revisions with their locks, the publish rules, the synchronous first sample and the sampling loop | AC-21, AC-22, AC-24, AC-25, AC-26, AC-38, AC-40, AC-40a, AC-49, AC-53, AC-54, AC-62, AC-68, AC-74, AC-75, AC-78, AC-81 |
+| **3 — guards, E2E, docs** | the AC-35 architecture test, the notification guard, the §J end-to-end sequence, and the amendment below | AC-35, AC-73, AC-76 |
+
+Waves **1a, 1b and 1c touch disjoint file sets** and can run concurrently once wave 0 lands.
+Wave 2 depends on 1b for the attestation and on the port from wave 0, but **not** on 1a — that
+is what the `BackgroundProbe` port buys, and it is why the port is contract rather than advice.
+AC-49 appears in both 1c and 2 because it has a backend half (the task counter advances) and a
+client half (the lower pair is discarded); neither half alone closes it.
 
 ## Contract amendment
 
@@ -1566,6 +1927,24 @@ Two questions earlier revisions carried are now closed by evidence rather than a
 - **Build the projection against `BackgroundProbe`, never against the agentctl `Client`.** The
   port is what lets the projection, the sampling loop and their tests exist before the real
   process-tree probe does, and it is what AC-62, AC-68 and AC-73 drive.
+- **The recogniser registry goes in agentctl, not the backend.** The backend reads one
+  vendor-neutral predicate, `NormalizedPayload.IsDetachedBackgroundLaunch()`
+  (`types/streams/background_work.go:62-64`). Do **not** key anything backend-side on
+  `payload.AgentID` (it is an execution id — `lifecycle/event_types.go:225`) or on
+  `session.AgentProfileSnapshot["agent_name"]` (a central agent-name whitelist, which **ADR-0049
+  rejects** — `turn_activity.go:1154-1157`). The attestation is proven to survive the process
+  boundary: `background_work` is carried in both `MarshalJSON` and `UnmarshalJSON`
+  (`tool_payload.go:101`, `:117`, `:138`, `:158`).
+- **The synchronous first sample hooks `setSessionWaitingForInput`**
+  (`event_handlers_streaming.go:1491`), at the end, after the state write and after the
+  `wasAlreadyWaiting` early return. All 44 production call sites funnel through it. Do **not**
+  hook `handleCompleteStreamEvent` — its own state write lands at `:1961`, so a probe placed
+  there reads the pre-settle state and nothing ever parks, and it does not own the workflow
+  settle path that §J's own observation actually took. D2 names the site and the two placements
+  it rejects.
+- **The probe roots its walk via `AgentPID(sessionID)` on agentctl's process manager**, never via
+  the process group. The accessor returns a pid only, precisely so the forbidden predicate is not
+  reachable through it.
 - The two durations are plain env-sourced config, **not** runtime feature toggles. Follow
   `getEnvDuration("KANDEV_ACP_IDLE_TIMEOUT", time.Hour)`
   (`internal/agentctl/server/config/config.go:285`) — but note the probe budget deviates from that
