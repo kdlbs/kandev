@@ -17,6 +17,25 @@ import (
 // the two drivers classify unique-violation errors completely differently
 // (typed pgconn.PgError vs. SQLite driver string-matching). Skips unless
 // KANDEV_TEST_POSTGRES_DSN is set.
+//
+// KNOWN CI FAILURE, pre-existing and out of scope for this feature: both
+// tests in this file call repo.CreateTask, which — via
+// prepareTaskForCreate's Priority default — always inserts a non-empty
+// Priority *string*. On a real Postgres install tasks.priority is still
+// INTEGER: migrateTaskPriorityToText (internal/office/repository/sqlite)
+// converts it to TEXT on SQLite only, and its detection query silently
+// no-ops on Postgres (sqlite_master doesn't exist there), so the migration
+// never runs. Any non-numeric Priority string then fails with
+// "invalid input syntax for type integer". Reproduced independently of
+// external_id and of this branch with a minimal repo.CreateTask call
+// against origin/main. Every other Postgres-gated test in this repo avoids
+// this by seeding tasks with raw SQL instead of repo.CreateTask; these two
+// can't do that without defeating what they test. Not fixed here — a real
+// fix is a Postgres priority-column migration, a different subsystem and a
+// schema change, out of scope for task external_id idempotency. The
+// "Backend Postgres" (postgres-boot) CI job is not part of this repo's
+// required merge gate (.github/workflows/backend-tests.yml: the `test`
+// aggregate job depends only on `static_checks` and `test_shards`).
 func TestPostgresExternalIDConcurrentInsertYieldsExactlyOneWinner(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 	repo, err := NewWithDB(db, db, nil)
