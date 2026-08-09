@@ -52,18 +52,10 @@ func (s *stubEnvRepo) DeleteTaskEnvironment(context.Context, string) error {
 }
 func (s *stubEnvRepo) DeleteTaskEnvironmentsByTask(context.Context, string) error { return nil }
 
-type worktreeDestroyCall struct {
-	worktreeID        string
-	worktreePath      string
-	repositoryID      string
-	excludeSessionIDs []string
-}
-
 type stubDestroyer struct {
 	containerCalls           []string
 	sandboxCalls             []string
 	worktreeCalls            []string
-	worktreeCallDetails      []worktreeDestroyCall
 	cancelAfterContainer     context.CancelFunc
 	cancelAfterFirstWorktree context.CancelFunc
 	pushCalls                int
@@ -84,11 +76,8 @@ func (s *stubDestroyer) DestroySandbox(_ context.Context, id, _ string) error {
 	s.sandboxCalls = append(s.sandboxCalls, id)
 	return s.sandboxErr
 }
-func (s *stubDestroyer) DestroyWorktreeAt(_ context.Context, id, worktreePath, repositoryID string, excludeSessionIDs []string) error {
+func (s *stubDestroyer) DestroyWorktree(_ context.Context, id string) error {
 	s.worktreeCalls = append(s.worktreeCalls, id)
-	s.worktreeCallDetails = append(s.worktreeCallDetails, worktreeDestroyCall{
-		worktreeID: id, worktreePath: worktreePath, repositoryID: repositoryID, excludeSessionIDs: excludeSessionIDs,
-	})
 	if s.cancelAfterFirstWorktree != nil && len(s.worktreeCalls) == 1 {
 		s.cancelAfterFirstWorktree()
 	}
@@ -206,7 +195,7 @@ func TestTeardownEnvironmentResources_CancellationStopsBeforeNextResource(t *tes
 	err := svc.teardownEnvironmentResources(ctx, &models.TaskEnvironment{
 		ContainerID: "container-1", SandboxID: "sandbox-1",
 		Repos: []*models.TaskEnvironmentRepo{{WorktreeID: "worktree-1"}},
-	}, nil)
+	})
 
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("teardown error = %v, want context cancellation", err)
@@ -228,31 +217,17 @@ func TestTeardownEnvironmentResources_MultiRepoCancellationStopsBeforeNextWorktr
 			{RepositoryID: "repo-a", WorktreeID: "wt-first"},
 			{RepositoryID: "repo-b", WorktreeID: "wt-second"},
 		},
-	}, nil)
+	})
 
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("teardown error = %v, want context cancellation", err)
 	}
 	if len(destroyer.worktreeCalls) != 1 || destroyer.worktreeCalls[0] != "wt-first" {
-		t.Fatalf("expected exactly the first worktree destroyed before cancellation, got %v", destroyer.worktreeCalls)
+		t.Fatalf("expected only the first worktree destroyed before cancellation, got %v", destroyer.worktreeCalls)
 	}
 }
 
-func TestTeardownEnvironmentResources_GenericWorktreeFailureRemainsError(t *testing.T) {
-	worktreeErr := errors.New("worktree backend unavailable")
-	svc := newResetTestService(t, &stubEnvRepo{})
-	svc.SetEnvironmentDestroyer(&stubDestroyer{worktreeErr: worktreeErr})
-
-	err := svc.teardownEnvironmentResources(context.Background(), &models.TaskEnvironment{
-		Repos: []*models.TaskEnvironmentRepo{{WorktreeID: "worktree-1"}},
-	}, nil)
-
-	if !errors.Is(err, worktreeErr) {
-		t.Fatalf("teardown error = %v, want %v", err, worktreeErr)
-	}
-}
-
-func TestTeardownEnvironmentResources_MultiRepoDestroysEveryRepoWorktree(t *testing.T) {
+func TestTeardownEnvironmentResources_MultiRepoDestroysEveryWorktree(t *testing.T) {
 	svc := newResetTestService(t, &stubEnvRepo{})
 	destroyer := &stubDestroyer{}
 	svc.SetEnvironmentDestroyer(destroyer)
@@ -263,7 +238,7 @@ func TestTeardownEnvironmentResources_MultiRepoDestroysEveryRepoWorktree(t *test
 			{RepositoryID: "repo-b", WorktreeID: "wt-secondary"},
 			{RepositoryID: "repo-c", WorktreeID: "wt-tertiary"},
 		},
-	}, nil)
+	})
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -279,19 +254,17 @@ func TestTeardownEnvironmentResources_MultiRepoDestroysEveryRepoWorktree(t *test
 	}
 }
 
-func TestTeardownEnvironmentResources_ReposOnlyEnvironmentIsNotShortCircuited(t *testing.T) {
+func TestTeardownEnvironmentResources_ReposOnlyEnvironmentIsNotEmpty(t *testing.T) {
 	svc := newResetTestService(t, &stubEnvRepo{})
 	destroyer := &stubDestroyer{}
 	svc.SetEnvironmentDestroyer(destroyer)
 
-	// No legacy WorktreeID, no container/sandbox — only Repos[] populated.
-	// The early-return guard must not skip teardown for this shape.
 	err := svc.teardownEnvironmentResources(context.Background(), &models.TaskEnvironment{
 		Repos: []*models.TaskEnvironmentRepo{
 			{RepositoryID: "repo-a", WorktreeID: "wt-a"},
 			{RepositoryID: "repo-b", WorktreeID: "wt-b"},
 		},
-	}, nil)
+	})
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -301,37 +274,17 @@ func TestTeardownEnvironmentResources_ReposOnlyEnvironmentIsNotShortCircuited(t 
 	}
 }
 
-// TestCleanupTaskEnvironment_ForwardsTaskSessionIDsToDestroyer is the
-// service-layer regression test for Review round 3 Finding 1's wiring half:
-// cleanupTaskEnvironment must forward every one of the task's session IDs
-// (not just an empty/partial set) down to DestroyWorktreeAt, so RemoveAt can
-// tell "referenced only by this task's own other sessions" apart from "still
-// referenced by a different task" — see
-// TestRemoveAt_TrackedRow_SameTaskSiblingSessionNoLongerBlocksRemoval in the
-// worktree package for the removal-logic half of the same fix.
-func TestCleanupTaskEnvironment_ForwardsTaskSessionIDsToDestroyer(t *testing.T) {
+func TestTeardownEnvironmentResources_GenericWorktreeFailureRemainsError(t *testing.T) {
+	worktreeErr := errors.New("worktree backend unavailable")
 	svc := newResetTestService(t, &stubEnvRepo{})
-	destroyer := &stubDestroyer{}
-	svc.SetEnvironmentDestroyer(destroyer)
+	svc.SetEnvironmentDestroyer(&stubDestroyer{worktreeErr: worktreeErr})
 
-	sessions := []*models.TaskSession{
-		{ID: "session-a", TaskID: "task-1"},
-		{ID: "session-b", TaskID: "task-1"},
-	}
-	errs := svc.cleanupTaskEnvironment(context.Background(), "task-1", sessions, taskEnvironmentCleanup{
-		env: &models.TaskEnvironment{ID: "environment-1", TaskID: "task-1", Repos: []*models.TaskEnvironmentRepo{{WorktreeID: "wt-1"}}}, deleteRow: false,
+	err := svc.teardownEnvironmentResources(context.Background(), &models.TaskEnvironment{
+		Repos: []*models.TaskEnvironmentRepo{{WorktreeID: "worktree-1"}},
 	})
 
-	if len(errs) != 0 {
-		t.Fatalf("unexpected cleanup errors: %v", errs)
-	}
-	if len(destroyer.worktreeCallDetails) != 1 {
-		t.Fatalf("worktree destroy calls = %+v, want 1", destroyer.worktreeCallDetails)
-	}
-	want := []string{"session-a", "session-b"}
-	got := destroyer.worktreeCallDetails[0].excludeSessionIDs
-	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Fatalf("excludeSessionIDs = %v, want %v", got, want)
+	if !errors.Is(err, worktreeErr) {
+		t.Fatalf("teardown error = %v, want %v", err, worktreeErr)
 	}
 }
 
@@ -341,7 +294,7 @@ func TestCleanupTaskEnvironment_CancellationPreservesEnvironmentRow(t *testing.T
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	errs := svc.cleanupTaskEnvironment(ctx, "task-1", nil, taskEnvironmentCleanup{
+	errs := svc.cleanupTaskEnvironment(ctx, "task-1", taskEnvironmentCleanup{
 		env: &models.TaskEnvironment{ID: "environment-1", TaskID: "task-1"}, deleteRow: true,
 	})
 

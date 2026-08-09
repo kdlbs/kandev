@@ -6,11 +6,9 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// Repository contains repository information needed for script execution and
-// path-based worktree removal.
+// Repository contains repository information needed for script execution.
 type Repository struct {
 	ID            string
-	LocalPath     string
 	SetupScript   string
 	CleanupScript string
 	CopyFiles     string
@@ -47,7 +45,6 @@ func (a *RepositoryAdapter) GetRepository(ctx context.Context, repositoryID stri
 
 	return &Repository{
 		ID:            repo.ID,
-		LocalPath:     repo.LocalPath,
 		SetupScript:   repo.SetupScript,
 		CleanupScript: repo.CleanupScript,
 		CopyFiles:     repo.CopyFiles,

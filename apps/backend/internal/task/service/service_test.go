@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -2705,59 +2704,6 @@ func TestService_CleanupDestructiveTaskResourcesPreservesSharedWorktree(t *testi
 	}
 	if got := cleanup.excludedSessions; len(got) != 1 || got[0] != session.ID {
 		t.Fatalf("excluded sessions = %v, want [%s]", got, session.ID)
-	}
-}
-
-// TestService_CleanupDestructiveTaskResourcesExcludesEveryEnvironmentTrackedWorktree
-// is the regression test for Review round 2 Finding 1: once
-// teardownEnvironmentResources started iterating env.Repos[] (not just the
-// legacy env.WorktreeID), excludeEnvironmentWorktree needed to exclude every
-// one of those IDs from the batch cleanup path too — otherwise a secondary
-// repo's worktree gets processed twice: once by env teardown (which
-// destroys the directory but never runs the repo's configured
-// CleanupScript), and again by CleanupWorktrees (which tries to run that
-// script against a directory env teardown already removed, and silently
-// fails). A worktree the environment does NOT track must still go through
-// the batch path unaffected, since that is the only path that honors
-// shared/borrowed-worktree reference counting.
-func TestService_CleanupDestructiveTaskResourcesExcludesEveryEnvironmentTrackedWorktree(t *testing.T) {
-	svc, _, _ := createTestService(t)
-	destroyer := &stubDestroyer{}
-	svc.SetEnvironmentDestroyer(destroyer)
-	cleanup := &recordingWorktreeCleanup{}
-	svc.SetWorktreeCleanup(cleanup)
-
-	session := &models.TaskSession{ID: "session-owner", TaskID: "task-multi", TaskEnvironmentID: "env-multi"}
-	env := &models.TaskEnvironment{
-		ID:     "env-multi",
-		TaskID: "task-multi",
-		Repos: []*models.TaskEnvironmentRepo{
-			{RepositoryID: "repo-a", WorktreeID: "wt-primary", WorktreePath: "/tasks/task-multi/repo-a"},
-			{RepositoryID: "repo-b", WorktreeID: "wt-secondary", WorktreePath: "/tasks/task-multi/repo-b"},
-		},
-	}
-	worktrees := []*worktree.Worktree{
-		{ID: "wt-primary", TaskID: "task-multi", SessionID: session.ID},
-		{ID: "wt-secondary", TaskID: "task-multi", SessionID: session.ID},
-		{ID: "wt-stray", TaskID: "task-multi", SessionID: session.ID},
-	}
-
-	errs := svc.cleanupDestructiveTaskResources(
-		context.Background(), "task-multi", []*models.TaskSession{session}, worktrees,
-		taskEnvironmentCleanup{env: env, deleteRow: true}, nil,
-	)
-
-	if len(errs) != 0 {
-		t.Fatalf("cleanup errors = %v, want none", errs)
-	}
-	wantDestroyed := []string{"wt-primary", "wt-secondary"}
-	if got := destroyer.worktreeCalls; !reflect.DeepEqual(got, wantDestroyed) {
-		t.Fatalf("env-teardown destroy calls = %v, want %v", got, wantDestroyed)
-	}
-	got := cleanup.cleanedIDs()
-	if len(got) != 1 || got[0] != "wt-stray" {
-		t.Fatalf("batch-cleaned worktrees = %v, want exactly [wt-stray] "+
-			"(env-tracked worktrees must not be double-processed by the batch path)", got)
 	}
 }
 

@@ -420,18 +420,12 @@ func (s *SQLiteStore) ListActiveWorktreePaths(ctx context.Context) ([]string, er
 // count against cleanup, while a borrower task's session protects the
 // workspace until ownership transfers. A terminal session still protects its
 // task workspace until that task's own cleanup releases the association.
-//
-// excludeSessionIDs is accepted for interface compatibility but intentionally
-// ignored: the te.task_id != s.task_id predicate already excludes every
-// same-task session, and excluding a foreign-task (borrower) session by ID
-// would silently permit destruction of their workspace.
 func (s *SQLiteStore) CountActiveWorktreeReferences(
 	ctx context.Context,
 	worktreeID string,
-	_ []string,
+	excludeSessionIDs []string,
 ) (int, error) {
-	var count int
-	err := s.ro.QueryRowContext(ctx, s.ro.Rebind(`
+	query := `
 		SELECT COUNT(*)
 		FROM task_sessions s
 		INNER JOIN task_environment_repos ter
@@ -442,7 +436,21 @@ func (s *SQLiteStore) CountActiveWorktreeReferences(
 		  AND ter.status <> ?
 		  AND ter.deleted_at IS NULL
 		  AND te.task_id != s.task_id
-	`), worktreeID, StatusDeleted).Scan(&count)
+	`
+	args := []interface{}{
+		worktreeID,
+		StatusDeleted,
+	}
+	if len(excludeSessionIDs) > 0 {
+		query += ` AND s.id NOT IN (?)`
+		args = append(args, excludeSessionIDs)
+	}
+	query, args, err := sqlx.In(query, args...)
+	if err != nil {
+		return 0, err
+	}
+	var count int
+	err = s.ro.QueryRowContext(ctx, s.ro.Rebind(query), args...).Scan(&count)
 	return count, err
 }
 

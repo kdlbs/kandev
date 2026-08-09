@@ -15,7 +15,6 @@ import (
 
 	"github.com/kandev/kandev/internal/system/storage"
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
-	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 func (m *Manager) PruneQuarantinedWorkspace(ctx context.Context, entry storage.QuarantineEntry) error {
@@ -169,153 +168,11 @@ func (m *Manager) RemoveByID(ctx context.Context, worktreeID string, removeBranc
 	if err != nil {
 		return err
 	}
-	return m.removeWorktree(ctx, wt, removeBranch, []string{wt.SessionID})
+	return m.removeWorktree(ctx, wt, removeBranch)
 }
 
-// RemoveAt removes a worktree using its durable path/repository handles when
-// the worktree_id can no longer be resolved through task_session_worktrees —
-// for example, after the owning session has been deleted and its rows
-// cascaded away, which leaves GetByID unable to find a path for any
-// worktree_id that session used to own. When the row still resolves, this
-// delegates to the same tracked-row path RemoveByID uses, so the
-// shared/borrowed-worktree reference-count guard (CountActiveWorktreeReferences)
-// is never bypassed; the path-only fallback only runs once nothing can
-// reference the ID anymore. excludeSessionIDs are the caller's own task's
-// session IDs (see teardownEnvironmentResources): a worktree can be shared by
-// several sessions of the SAME task (a task's sessions reuse one
-// TaskEnvironment worktree across relaunches), and only ONE of those
-// session-scoped rows is ever visible to GetByID at a time. Excluding just
-// that one row's session (RemoveByID's contract) would see the sibling
-// session's row as an active "foreign" reference and merely release-and-
-// preserve, forever, since env teardown only calls RemoveAt once per
-// worktree_id — unlike the batch cleanup path, which converges by processing
-// one row per session. Excluding the whole task's session set up front lets
-// this single call reach the same outcome the batch path's multi-row
-// convergence produces. Never deletes the branch.
-func (m *Manager) RemoveAt(ctx context.Context, worktreeID, worktreePath, repositoryID string, excludeSessionIDs []string) error {
-	wt, err := m.GetByID(ctx, worktreeID)
-	if err == nil {
-		return m.removeWorktree(ctx, wt, false, excludeSessionIDs)
-	}
-	if !errors.Is(err, ErrWorktreeNotFound) {
-		return err
-	}
-	if worktreePath == "" {
-		return ErrWorktreeNotFound
-	}
-
-	// Resolved before the lock (its result is the lock key), but every
-	// stateful check below — the reference count, then the removal itself —
-	// happens under it, mirroring removeWorktree's ordering so a reference
-	// can't be inserted between the count check and the removal.
-	repoPath, resolvable, err := m.resolveRepositoryPath(ctx, repositoryID)
-	if err != nil {
-		return fmt.Errorf("resolve repository path for worktree %s: %w", worktreeID, err)
-	}
-
-	repoLock := m.getRepoLock(repoPath)
-	repoLock.Lock()
-	defer func() {
-		repoLock.Unlock()
-		m.releaseRepoLock(repoPath)
-	}()
-
-	activeReferences, err := m.CountActiveWorktreeReferences(ctx, worktreeID, excludeSessionIDs)
-	if err != nil {
-		return fmt.Errorf("count active references for worktree %s: %w", worktreeID, err)
-	}
-	if activeReferences > 0 {
-		m.logger.Info("preserved worktree still referenced despite missing primary row",
-			zap.String("worktree_id", worktreeID))
-		return nil
-	}
-	if !resolvable {
-		m.logger.Warn("removing worktree without a resolvable source repository; "+
-			"its git worktree registration cannot be pruned and may remain stale",
-			zap.String("worktree_id", worktreeID),
-			zap.String("worktree_path", worktreePath),
-			zap.String("repository_id", repositoryID))
-	}
-
-	// worktreePath comes from TaskEnvironment/TaskEnvironmentRepo, not from
-	// the worktree manager's own records — for a multi-repo task it can
-	// legitimately be the task root rather than a repo's worktree directory
-	// (see env_preparer_worktree.go's "workspace path = task root" and
-	// executor_execute.go, which persist that root onto the legacy
-	// WorktreePath field alongside a non-empty WorktreeID). Refuse to
-	// os.RemoveAll a path that is not actually a linked git worktree, so a
-	// stale or wrong path can never take a main checkout or a task root
-	// (and its sibling worktrees) with it. A missing path is treated as
-	// already removed, matching removeWorktreeDir's existing idempotency.
-	pathExists := true
-	if _, statErr := os.Stat(worktreePath); statErr != nil {
-		if !os.IsNotExist(statErr) {
-			return fmt.Errorf("stat worktree path %s: %w", worktreePath, statErr)
-		}
-		pathExists = false
-	} else if !m.IsValid(worktreePath) {
-		m.logger.Error("refusing to remove a path that is not a linked git worktree",
-			zap.String("worktree_id", worktreeID),
-			zap.String("worktree_path", worktreePath))
-		return fmt.Errorf("worktree path %s is not a linked git worktree; refusing to remove it", worktreePath)
-	}
-
-	if pathExists {
-		// Execute cleanup script BEFORE removing the directory, mirroring
-		// removeWorktree's ordering — otherwise a repository's configured
-		// CleanupScript (e.g. `docker compose down`) silently stops running
-		// for every worktree that reaches this fallback instead of the
-		// tracked-row path. No live task_session_worktrees row exists for
-		// this worktree_id (that's why we're in the fallback), so the
-		// request carries no session/task context; the script itself is
-		// keyed off the repository, not the caller's session.
-		m.runWorktreeCleanupScript(ctx, &Worktree{ID: worktreeID, RepositoryID: repositoryID, Path: worktreePath})
-	}
-
-	if err := m.removeWorktreeDir(ctx, worktreePath, repoPath); err != nil {
-		return fmt.Errorf("remove worktree directory %s: %w", worktreePath, err)
-	}
-	return nil
-}
-
-// resolveRepositoryPath resolves a repository's main checkout path for
-// RemoveAt's path-only fallback. resolvable is false when the repository is
-// genuinely unresolvable — no provider wired, no repository_id recorded, or
-// the repository row itself no longer exists — which is a permanent
-// condition a retry cannot fix: removeWorktreeDir must then skip `git
-// worktree remove`/`prune` entirely rather than run them with an empty Dir.
-// exec.Cmd treats an empty Dir as the calling process's own working
-// directory, never the worktree's actual source repository, so running git
-// there would silently misregister/prune an unrelated repository while
-// still reporting success. Any other lookup failure (a transient DB error,
-// for example) is returned so the caller can retry instead of silently
-// degrading — unlike the package's other GetRepository call sites
-// (runWorktreeSetupScript, copyConfiguredFiles), which log and continue
-// because they're best-effort side operations; this one gates whether a
-// destructive removal is safe to report as done.
-func (m *Manager) resolveRepositoryPath(ctx context.Context, repositoryID string) (path string, resolvable bool, err error) {
-	if m.repoProvider == nil || repositoryID == "" {
-		return "", false, nil
-	}
-	repo, err := m.repoProvider.GetRepository(ctx, repositoryID)
-	if err != nil {
-		if errors.Is(err, repoerrors.ErrRepositoryNotFound) {
-			return "", false, nil
-		}
-		return "", false, fmt.Errorf("look up repository %s: %w", repositoryID, err)
-	}
-	if repo == nil || repo.LocalPath == "" {
-		return "", false, nil
-	}
-	return repo.LocalPath, true, nil
-}
-
-// removeWorktree performs the actual removal of a worktree. excludeSessionIDs
-// are the sessions whose reference to wt must not count as "still active" —
-// normally just wt.SessionID itself, but RemoveAt passes its caller's whole
-// task's session set so a worktree shared across several of that task's own
-// sessions doesn't get stuck in "release-and-preserve" forever.
-func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch bool, excludeSessionIDs []string) error {
+// removeWorktree performs the actual removal of a worktree.
+func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch bool) error {
 	// Get repository lock
 	repoLock := m.getRepoLock(wt.RepositoryPath)
 	repoLock.Lock()
@@ -323,7 +180,12 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 		repoLock.Unlock()
 		m.releaseRepoLock(wt.RepositoryPath)
 	}()
-	activeReferences, err := m.CountActiveWorktreeReferences(ctx, wt.ID, excludeSessionIDs)
+	// CountActiveWorktreeReferences already counts only sessions of OTHER
+	// tasks referencing the owning environment. No exclusions are passed:
+	// the worktree record returned by GetWorktreeByID carries an arbitrary
+	// session of that environment, and excluding it could hide a borrower
+	// and authorize deletion of a workspace another task still holds.
+	activeReferences, err := m.CountActiveWorktreeReferences(ctx, wt.ID, nil)
 	if err != nil {
 		return fmt.Errorf("count active references for worktree %s: %w", wt.ID, err)
 	}
@@ -550,7 +412,7 @@ func (m *Manager) CleanupWorktrees(ctx context.Context, worktrees []*Worktree) e
 		if wt == nil {
 			continue
 		}
-		if err := m.removeWorktree(ctx, wt, true, []string{wt.SessionID}); err != nil {
+		if err := m.removeWorktree(ctx, wt, true); err != nil {
 			m.logger.Warn("failed to remove worktree on task deletion",
 				zap.String("task_id", wt.TaskID),
 				zap.String("worktree_id", wt.ID),
@@ -590,20 +452,6 @@ func (m *Manager) OnTaskDeleted(ctx context.Context, taskID string) error {
 // layout (see issue #1266). The rmdir is a best-effort no-op if the parent
 // still has siblings or contains workspace-scoped content.
 func (m *Manager) removeWorktreeDir(ctx context.Context, worktreePath, repoPath string) error {
-	if repoPath == "" {
-		// No source repository to scope `git worktree remove`/`prune` to.
-		// exec.Cmd treats an empty Dir as this process's own working
-		// directory — never the worktree's actual source repo — so running
-		// git here would operate on an unrelated repository instead. Remove
-		// the directory directly; any stale registration left behind in the
-		// real source repo is the caller's (RemoveAt's) to log.
-		if err := m.forceRemoveDir(ctx, worktreePath); err != nil {
-			return err
-		}
-		m.tryRemoveEmptyTaskDir(worktreePath)
-		return nil
-	}
-
 	// First try git worktree remove
 	cmd := newGitCommand(ctx, "worktree", "remove", "--force", worktreePath)
 	cmd.Dir = repoPath

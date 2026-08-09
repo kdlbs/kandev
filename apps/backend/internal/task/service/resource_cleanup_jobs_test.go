@@ -1122,17 +1122,11 @@ func TestTaskResourceCleanupMissingResourcesSucceed(t *testing.T) {
 	}
 }
 
-// TestTaskResourceCleanupJobSnapshotRoundTripsMultiRepoWorktrees is the
-// regression test for Review round 2's test-rigor residual: the durable
-// cleanup job JSON round-trips the TaskEnvironment through
-// taskResourceCleanupSnapshot (see persistTaskResourceCleanup /
-// processTaskResourceCleanupJob), and every existing snapshot test uses an
-// environment with an empty Repos[]. A future change to the snapshot shape
-// (a custom marshaler, a slimmed snapshot struct, or a gather variant that
-// skips loading TaskEnvironmentRepo rows) could silently drop Repos[] and
-// regress the whole multi-repo worktree teardown fix without any test
-// noticing. This pins the round trip end-to-end: a job persisted with a
-// populated Repos[] must still destroy every repo's worktree when processed.
+// TestTaskResourceCleanupJobSnapshotRoundTripsMultiRepoWorktrees proves that
+// the durable cleanup job preserves every task-environment repository through
+// JSON snapshot encoding and processing. A future change to the snapshot
+// shape or inventory loading must not silently drop Repos[] and skip a
+// repository's worktree teardown.
 func TestTaskResourceCleanupJobSnapshotRoundTripsMultiRepoWorktrees(t *testing.T) {
 	taskSvc, repo := setupOfficeTest(t)
 	taskSvc.StopTaskResourceCleanupWorker()
