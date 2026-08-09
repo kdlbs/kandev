@@ -70,11 +70,12 @@ type AppInstallationResult struct {
 }
 
 type AppInstallationService struct {
-	config AppInstallationConfig
-	flows  *OAuthFlowManager
-	store  appInstallationStore
-	app    appInstallationVerifier
-	oauth  githubAppOAuth
+	config                        AppInstallationConfig
+	flows                         *OAuthFlowManager
+	store                         appInstallationStore
+	app                           appInstallationVerifier
+	oauth                         githubAppOAuth
+	installationAccessRetryDelays []time.Duration
 }
 
 func NewAppInstallationService(
@@ -84,7 +85,12 @@ func NewAppInstallationService(
 	app appInstallationVerifier,
 	oauth githubAppOAuth,
 ) *AppInstallationService {
-	return &AppInstallationService{config: config, flows: flows, store: store, app: app, oauth: oauth}
+	return &AppInstallationService{
+		config: config, flows: flows, store: store, app: app, oauth: oauth,
+		installationAccessRetryDelays: []time.Duration{
+			250 * time.Millisecond, 500 * time.Millisecond, time.Second, 2 * time.Second,
+		},
+	}
 }
 
 func (s *AppInstallationService) Start(
@@ -183,7 +189,7 @@ func (s *AppInstallationService) verifyInstallationCallback(
 			"verify GitHub App authorizing user: %w", associationError(err),
 		)
 	}
-	accessible, err := s.oauth.UserCanAccessInstallation(ctx, tokens.AccessToken, callback.InstallationID)
+	accessible, err := s.userCanAccessInstallation(ctx, tokens.AccessToken, callback.InstallationID)
 	if err != nil || !accessible {
 		return AppInstallation{}, GitHubOAuthUser{}, fmt.Errorf(
 			"verify GitHub App installation access: %w", associationError(err),
@@ -196,6 +202,26 @@ func (s *AppInstallationService) verifyInstallationCallback(
 		)
 	}
 	return installation, user, nil
+}
+
+func (s *AppInstallationService) userCanAccessInstallation(
+	ctx context.Context,
+	accessToken string,
+	installationID int64,
+) (bool, error) {
+	for attempt := 0; ; attempt++ {
+		accessible, err := s.oauth.UserCanAccessInstallation(ctx, accessToken, installationID)
+		if err != nil || accessible || attempt >= len(s.installationAccessRetryDelays) {
+			return accessible, err
+		}
+		timer := time.NewTimer(s.installationAccessRetryDelays[attempt])
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return false, ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
 
 func (s *AppInstallationService) newInstallationConnection(
