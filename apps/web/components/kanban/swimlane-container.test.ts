@@ -23,7 +23,7 @@ describe("filterTasks — plugin task filter predicate", () => {
 
   it("keeps every task when no predicate is supplied", () => {
     const snapshots = {
-      wf: { tasks: [makeTask({ id: "1" }), makeTask({ id: "2" })] },
+      wf: { tasks: [makeTask({ id: "1" }), makeTask({ id: "2" })], steps: [] },
     };
 
     const result = filterTasks(snapshots, "wf", NO_REPO_FILTER);
@@ -33,11 +33,13 @@ describe("filterTasks — plugin task filter predicate", () => {
 
   it("excludes tasks the predicate rejects", () => {
     const snapshots = {
-      wf: { tasks: [makeTask({ id: "1" }), makeTask({ id: "2" })] },
+      wf: { tasks: [makeTask({ id: "1" }), makeTask({ id: "2" })], steps: [] },
     };
     const matches = vi.fn((taskId: string) => taskId === "1");
 
-    const result = filterTasks(snapshots, "wf", NO_REPO_FILTER, undefined, matches);
+    const result = filterTasks(snapshots, "wf", NO_REPO_FILTER, {
+      matchesPluginTaskFilters: matches,
+    });
 
     expect(result.map((t) => t.id)).toEqual(["1"]);
     expect(matches).toHaveBeenCalledWith("1");
@@ -51,6 +53,7 @@ describe("filterTasks — plugin task filter predicate", () => {
           makeTask({ id: "1", title: "Fix bug", repositoryId: "repo-a" }),
           makeTask({ id: "2", title: "Fix bug", repositoryId: "repo-b" }),
         ],
+        steps: [],
       },
     };
     const repoFilter = mapSelectedRepositoryIds(
@@ -59,7 +62,10 @@ describe("filterTasks — plugin task filter predicate", () => {
     );
     const matches = (taskId: string) => taskId === "1";
 
-    const result = filterTasks(snapshots, "wf", repoFilter, "fix", matches);
+    const result = filterTasks(snapshots, "wf", repoFilter, {
+      searchQuery: "fix",
+      matchesPluginTaskFilters: matches,
+    });
 
     expect(result.map((t) => t.id)).toEqual(["1"]);
   });

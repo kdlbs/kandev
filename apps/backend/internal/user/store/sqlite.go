@@ -569,6 +569,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"system_metrics_display":              settings.SystemMetricsDisplay,
 		"app_status_bar_order":                normalizeAppStatusBarOrder(settings.AppStatusBarOrder),
 		"voice_mode":                          settings.VoiceMode,
+		"kanban_hidden_step_ids":              settings.KanbanHiddenStepIDs,
 	})
 }
 
@@ -755,6 +756,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		SystemMetricsDisplay            models.SystemMetricsDisplaySettings `json:"system_metrics_display"`
 		AppStatusBarOrder               models.AppStatusBarOrder            `json:"app_status_bar_order"`
 		VoiceMode                       *storedVoiceMode                    `json:"voice_mode"`
+		KanbanHiddenStepIDs             map[string][]string                 `json:"kanban_hidden_step_ids"`
 	}
 	if err := json.Unmarshal([]byte(settingsRaw), &payload); err != nil {
 		return nil, err
@@ -876,6 +878,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	} else {
 		settings.ChangesPanelLayout = defaultChangesPanelLayout
 	}
+	settings.KanbanHiddenStepIDs = payload.KanbanHiddenStepIDs
 	return settings, nil
 }
 

@@ -93,17 +93,30 @@ function renderEmptyState(emptyMessage: string) {
   );
 }
 
+type FilterTasksOptions = {
+  searchQuery?: string;
+  matchesPluginTaskFilters?: (taskId: string) => boolean;
+  hiddenStepIds?: Set<string>;
+};
+
 /** Exported for unit testing; not part of the module's public component API. */
 export function filterTasks(
-  snapshots: Record<string, { tasks: Task[] }>,
+  snapshots: Record<string, { tasks: Task[]; steps: { id: string }[] }>,
   workflowId: string,
   repoFilter: ReturnType<typeof mapSelectedRepositoryIds>,
-  searchQuery?: string,
-  matchesPluginTaskFilters?: (taskId: string) => boolean,
+  options?: FilterTasksOptions,
 ): Task[] {
   const snapshot = snapshots[workflowId];
   if (!snapshot) return [];
   let tasks = snapshot.tasks as Task[];
+  const { hiddenStepIds, searchQuery, matchesPluginTaskFilters } = options ?? {};
+  if (hiddenStepIds && hiddenStepIds.size > 0) {
+    const liveStepIds = new Set(snapshot.steps.map((s) => s.id));
+    const effectiveHidden = new Set([...hiddenStepIds].filter((id) => liveStepIds.has(id)));
+    if (effectiveHidden.size > 0) {
+      tasks = tasks.filter((t) => !effectiveHidden.has(t.workflowStepId));
+    }
+  }
   tasks = filterTasksByRepositories(tasks, repoFilter);
   if (searchQuery) {
     const q = searchQuery.toLowerCase();
@@ -189,7 +202,20 @@ function WorkflowItemContent({
   fillHeight,
   ...viewProps
 }: Omit<WorkflowItemProps, "isSortable"> & { dragHandleProps?: HTMLAttributes<HTMLDivElement> }) {
-  const steps = [...snapshot.steps].sort((a, b) => a.position - b.position);
+  const hiddenWorkflowStepIds = useAppStore((state) => state.userSettings.hiddenWorkflowStepIds);
+  const hiddenSet = useMemo(() => {
+    const ids = hiddenWorkflowStepIds[wf.id];
+    if (!ids || ids.length === 0) return new Set<string>();
+    const liveStepIds = new Set(snapshot.steps.map((s) => s.id));
+    return new Set(ids.filter((id) => liveStepIds.has(id)));
+  }, [hiddenWorkflowStepIds, wf.id, snapshot.steps]);
+  const steps = useMemo(
+    () =>
+      [...snapshot.steps]
+        .filter((step) => !hiddenSet.has(step.id))
+        .sort((a, b) => a.position - b.position),
+    [snapshot.steps, hiddenSet],
+  );
   const content = <ViewComponent workflowId={wf.id} steps={steps} tasks={tasks} {...viewProps} />;
 
   if (hideHeader) {
@@ -305,6 +331,7 @@ function useSwimlaneData(
   const isLoading = useAppStore((state) => state.kanbanMulti.isLoading);
   const workflows = useAppStore((state) => state.workflows.items);
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
+  const hiddenWorkflowStepIds = useAppStore((state) => state.userSettings.hiddenWorkflowStepIds);
 
   const repositories = useMemo(
     () => Object.values(repositoriesByWorkspace).flat() as Repository[],
@@ -324,9 +351,16 @@ function useSwimlaneData(
   );
 
   const getFilteredTasks = useCallback(
-    (wfId: string) =>
-      filterTasks(snapshots, wfId, repoFilter, searchQuery, matchesPluginTaskFilters),
-    [snapshots, repoFilter, searchQuery, matchesPluginTaskFilters],
+    (wfId: string) => {
+      const hidden = hiddenWorkflowStepIds[wfId];
+      const hiddenSet = hidden && hidden.length > 0 ? new Set(hidden) : undefined;
+      return filterTasks(snapshots, wfId, repoFilter, {
+        searchQuery,
+        matchesPluginTaskFilters,
+        hiddenStepIds: hiddenSet,
+      });
+    },
+    [snapshots, repoFilter, searchQuery, matchesPluginTaskFilters, hiddenWorkflowStepIds],
   );
 
   // The mobile board navigator is the only workflow switcher on the mobile

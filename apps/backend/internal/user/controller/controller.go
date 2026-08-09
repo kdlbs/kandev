@@ -96,6 +96,7 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		SystemMetricsDisplay:            systemMetricsDisplayPatch(req.SystemMetricsDisplay),
 		AppStatusBarOrder:               req.AppStatusBarOrder,
 		VoiceMode:                       req.VoiceMode,
+		KanbanHiddenStepIDs:             req.KanbanHiddenStepIDs,
 	})
 	if err != nil {
 		return dto.UserSettingsResponse{}, err

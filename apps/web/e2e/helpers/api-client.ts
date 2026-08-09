@@ -959,6 +959,7 @@ export class ApiClient {
     tasks_list_group?: string;
     task_create_last_used?: TaskCreateLastUsedApi;
     voice_mode?: VoiceModeSettings;
+    kanban_hidden_step_ids?: Record<string, string[]>;
   }): Promise<void> {
     await this.request("PATCH", "/api/v1/user/settings", settings);
   }

@@ -18,6 +18,7 @@ import {
 } from "@/lib/plugins/registry";
 import type { Repository } from "@/lib/types/http";
 import type { WorkflowsState } from "@/lib/state/slices";
+import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import { useMemo, type ComponentProps } from "react";
 import { useTranslation } from "react-i18next";
 import { getRepositoryPlaceholderKey } from "@/lib/kanban/repository-placeholder";
@@ -147,6 +148,56 @@ function PluginFilterSection({
   );
 }
 
+function StepsSection({
+  eligibleWorkflows,
+  snapshots,
+  hiddenWorkflowStepIds,
+  onToggleStepVisibility,
+}: {
+  eligibleWorkflows: Array<{ id: string; name: string }>;
+  snapshots: Record<string, WorkflowSnapshotData>;
+  hiddenWorkflowStepIds: Record<string, string[]>;
+  onToggleStepVisibility: (workflowId: string, stepId: string) => void;
+}) {
+  const { t } = useTranslation();
+  const workflowsWithSteps = eligibleWorkflows.filter(
+    (wf) => (snapshots[wf.id]?.steps.length ?? 0) > 0,
+  );
+  if (workflowsWithSteps.length === 0) return null;
+  const showWorkflowLabels = workflowsWithSteps.length > 1;
+  return (
+    <>
+      <DropdownMenuSeparator />
+      <div className="space-y-1.5">
+        <DropdownMenuLabel className="px-0 text-foreground">{t("kanban:steps")}</DropdownMenuLabel>
+        {workflowsWithSteps.map((wf) => {
+          const steps = [...(snapshots[wf.id]?.steps ?? [])].sort(
+            (a, b) => a.position - b.position || a.id.localeCompare(b.id),
+          );
+          const hidden = hiddenWorkflowStepIds[wf.id] ?? [];
+          return (
+            <div key={wf.id} className="space-y-1" data-testid={`steps-filter-group-${wf.id}`}>
+              {showWorkflowLabels && (
+                <p className="text-xs font-medium text-muted-foreground">{wf.name}</p>
+              )}
+              {steps.map((step) => (
+                <label key={step.id} className="flex items-center gap-2 cursor-pointer">
+                  <Checkbox
+                    data-testid={`steps-filter-step-${step.id}`}
+                    checked={!hidden.includes(step.id)}
+                    onCheckedChange={() => onToggleStepVisibility(wf.id, step.id)}
+                  />
+                  <span className="text-sm text-foreground">{step.title}</span>
+                </label>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
 function PreviewPanelSection({
   enablePreviewOnClick,
   onTogglePreviewOnClick,
@@ -222,10 +273,14 @@ export function KanbanDisplayDropdown({
     selectedRepositoryId,
     enablePreviewOnClick,
     tasksListShowDetails,
+    eligibleWorkflows,
+    snapshots,
+    hiddenWorkflowStepIds,
     onWorkflowChange,
     onRepositoryChange,
     onTogglePreviewOnClick,
     onToggleTasksListShowDetails,
+    onToggleStepVisibility,
   } = useKanbanDisplaySettings();
 
   const repositoryValue = allRepositoriesSelected ? "all" : (selectedRepositoryId ?? "all");
@@ -270,6 +325,14 @@ export function KanbanDisplayDropdown({
               </div>
             );
           })}
+          {currentPage === "kanban" && (
+            <StepsSection
+              eligibleWorkflows={eligibleWorkflows}
+              snapshots={snapshots}
+              hiddenWorkflowStepIds={hiddenWorkflowStepIds}
+              onToggleStepVisibility={onToggleStepVisibility}
+            />
+          )}
           <DropdownMenuSeparator />
           <PreviewPanelSection
             enablePreviewOnClick={enablePreviewOnClick}

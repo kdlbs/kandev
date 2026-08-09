@@ -80,6 +80,7 @@
   "showTaskDetails": "Show task details",
   "sort": "Sort",
   "step": "Step",
+  "steps": "Steps",
   "subtaskOf": "Subtask of",
   "taskList": "Task list",
   "tasksOverWipLimit": "{{label}} tasks, over WIP limit",

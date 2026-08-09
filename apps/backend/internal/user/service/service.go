@@ -87,6 +87,7 @@ type UpdateUserSettingsRequest struct {
 	SystemMetricsDisplay            *SystemMetricsDisplaySettingsPatch
 	AppStatusBarOrder               *models.AppStatusBarOrder
 	VoiceMode                       *models.VoiceModeSettings
+	KanbanHiddenStepIDs             *map[string][]string
 }
 
 type SystemMetricsDisplaySettingsPatch struct {
@@ -272,6 +273,9 @@ func applyWorkspaceAndTaskListPreferences(settings *models.UserSettings, req *Up
 	}
 	if req.EnablePreviewOnClick != nil {
 		settings.EnablePreviewOnClick = *req.EnablePreviewOnClick
+	}
+	if req.KanbanHiddenStepIDs != nil {
+		settings.KanbanHiddenStepIDs = *req.KanbanHiddenStepIDs
 	}
 	return nil
 }
@@ -759,6 +763,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"system_metrics_display":              settings.SystemMetricsDisplay,
 		"app_status_bar_order":                settings.AppStatusBarOrder,
 		"voice_mode":                          settings.VoiceMode,
+		"kanban_hidden_step_ids":              settings.KanbanHiddenStepIDs,
 		"updated_at":                          settings.UpdatedAt.Format(time.RFC3339),
 	}
 	if err := s.eventBus.Publish(ctx, events.UserSettingsUpdated, bus.NewEvent(events.UserSettingsUpdated, "user-service", data)); err != nil {
