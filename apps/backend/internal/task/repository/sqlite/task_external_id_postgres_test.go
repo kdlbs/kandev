@@ -3,12 +3,46 @@ package sqlite
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/testutil"
 )
+
+// TestPostgresTaskPriorityMigrationConvertsLegacyInteger verifies that a
+// PostgreSQL repository can create tasks after the legacy INTEGER priority
+// column is migrated to the string-valued task model. The migration runs from
+// the task repository itself, so tests that use NewWithDB do not depend on the
+// office repository being initialized first.
+func TestPostgresTaskPriorityMigrationConvertsLegacyInteger(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	if _, err := NewWithDB(db, db, nil); err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+
+	var dataType, defaultValue, nullable string
+	err := db.QueryRowContext(context.Background(), `
+		SELECT data_type, column_default, is_nullable
+		FROM information_schema.columns
+		WHERE table_schema = current_schema()
+		  AND table_name = 'tasks'
+		  AND column_name = 'priority'
+	`).Scan(&dataType, &defaultValue, &nullable)
+	if err != nil {
+		t.Fatalf("inspect tasks.priority: %v", err)
+	}
+	if dataType != "text" {
+		t.Fatalf("tasks.priority data type = %q, want text", dataType)
+	}
+	if defaultValue == "" || !strings.Contains(defaultValue, "medium") {
+		t.Fatalf("tasks.priority default = %q, want medium", defaultValue)
+	}
+	if nullable != "NO" {
+		t.Fatalf("tasks.priority nullable = %q, want NO", nullable)
+	}
+}
 
 // TestPostgresExternalIDConcurrentInsertYieldsExactlyOneWinner is the
 // PostgreSQL twin of the SQLite concurrency coverage
@@ -18,24 +52,8 @@ import (
 // (typed pgconn.PgError vs. SQLite driver string-matching). Skips unless
 // KANDEV_TEST_POSTGRES_DSN is set.
 //
-// KNOWN CI FAILURE, pre-existing and out of scope for this feature: both
-// tests in this file call repo.CreateTask, which — via
-// prepareTaskForCreate's Priority default — always inserts a non-empty
-// Priority *string*. On a real Postgres install tasks.priority is still
-// INTEGER: migrateTaskPriorityToText (internal/office/repository/sqlite)
-// converts it to TEXT on SQLite only, and its detection query silently
-// no-ops on Postgres (sqlite_master doesn't exist there), so the migration
-// never runs. Any non-numeric Priority string then fails with
-// "invalid input syntax for type integer". Reproduced independently of
-// external_id and of this branch with a minimal repo.CreateTask call
-// against origin/main. Every other Postgres-gated test in this repo avoids
-// this by seeding tasks with raw SQL instead of repo.CreateTask; these two
-// can't do that without defeating what they test. Not fixed here — a real
-// fix is a Postgres priority-column migration, a different subsystem and a
-// schema change, out of scope for task external_id idempotency. The
-// "Backend Postgres" (postgres-boot) CI job is not part of this repo's
-// required merge gate (.github/workflows/backend-tests.yml: the `test`
-// aggregate job depends only on `static_checks` and `test_shards`).
+// The task repository migrates the legacy PostgreSQL INTEGER priority column
+// to the string-valued task model before these tests create any rows.
 func TestPostgresExternalIDConcurrentInsertYieldsExactlyOneWinner(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 	repo, err := NewWithDB(db, db, nil)

@@ -44,6 +44,9 @@ func (r *Repository) migrateSessionsAddCostColumns() {
 
 // runMigrations applies idempotent ALTER TABLE migrations for schema evolution.
 func (r *Repository) runMigrations() error {
+	if err := r.migrateTaskPriorityToTextPostgres(); err != nil {
+		return err
+	}
 	if err := r.ensureTaskWorkspaceFoldersSchema(); err != nil {
 		return err
 	}
