@@ -58,7 +58,7 @@ Some common camelCase keys have explicit compatibility aliases. Use the document
 | `server.readTimeout` | `KANDEV_SERVER_READTIMEOUT` | `30` | HTTP read timeout in seconds. |
 | `server.writeTimeout` | `KANDEV_SERVER_WRITETIMEOUT` | `30` | HTTP write timeout in seconds. |
 | `server.webInternalUrl` | `KANDEV_WEB_INTERNAL_URL` | empty | Development reverse-proxy target for a separately running web app. Installed releases normally serve embedded assets. |
-| `server.webTitlePrefix` | `KANDEV_WEB_TITLE_PREFIX` | empty | Prefixes the browser tab title as `<prefix> Kandev` (for example `TEST` renders `TEST Kandev`), so several instances stay distinguishable in adjacent tabs. Empty keeps the plain `Kandev` title. |
+| `server.webTitlePrefix` | `KANDEV_WEB_TITLE_PREFIX` | empty | Prefixes the browser tab title as `<prefix> Kandev` (for example `TEST` renders `TEST Kandev`), so several instances stay distinguishable in adjacent tabs. `make dev` defaults to `Dev`; PR previews use `Preview`. An explicit value overrides these defaults. Empty keeps the plain `Kandev` title. |
 
 The default host exposes the server on every interface even though the CLI prints a `localhost` URL. The current local product path must not be treated as an authenticated multi-user perimeter. For remote access, bind to loopback and use a trusted authenticated tunnel/proxy, or isolate the network at the deployment layer.
 

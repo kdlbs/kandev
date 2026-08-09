@@ -52,6 +52,9 @@ func TestApplyProfile_DefaultsToProd(t *testing.T) {
 			"false",
 		)
 	}
+	if v := os.Getenv("KANDEV_WEB_TITLE_PREFIX"); v != "" {
+		t.Errorf("KANDEV_WEB_TITLE_PREFIX = %q in prod; want empty", v)
+	}
 }
 
 // TestApplyProfile_DevUsesDevelopmentDefaults verifies the mixed dev profile:
@@ -86,6 +89,9 @@ func TestApplyProfile_DevUsesDevelopmentDefaults(t *testing.T) {
 			"false",
 		)
 	}
+	if v := os.Getenv("KANDEV_WEB_TITLE_PREFIX"); v != "Dev" {
+		t.Errorf("KANDEV_WEB_TITLE_PREFIX = %q in dev; want %q", v, "Dev")
+	}
 }
 
 // TestApplyProfile_E2EWinsOverDev checks the documented detection
@@ -117,6 +123,9 @@ func TestApplyProfile_E2EWinsOverDev(t *testing.T) {
 			v,
 			"false",
 		)
+	}
+	if v := os.Getenv("KANDEV_WEB_TITLE_PREFIX"); v != "" {
+		t.Errorf("KANDEV_WEB_TITLE_PREFIX = %q in e2e; want empty", v)
 	}
 }
 
