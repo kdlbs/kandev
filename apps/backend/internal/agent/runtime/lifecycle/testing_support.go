@@ -13,3 +13,12 @@ func (m *Manager) ExecutionStoreForTesting() *ExecutionStore {
 func (ae *AgentExecution) SetAgentCtlClientForTesting(client *agentctl.Client) {
 	ae.agentctl = client
 }
+
+// SetMetadataForTesting seeds metadata on a synthetic execution built by a test
+// in a dependent package. The metadata map itself is unexported so that all
+// production access stays behind the metadataMu helpers.
+func (ae *AgentExecution) SetMetadataForTesting(metadata map[string]interface{}) {
+	ae.metadataMu.Lock()
+	defer ae.metadataMu.Unlock()
+	ae.metadata = metadata
+}

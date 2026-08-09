@@ -338,10 +338,7 @@ func (m *Manager) SetSessionModel(ctx context.Context, executionID, modelID stri
 
 	if execution.PassthroughProcessID != "" {
 		if err := m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
-			if exec.Metadata == nil {
-				exec.Metadata = make(map[string]interface{})
-			}
-			exec.Metadata[MetadataKeyModelOverride] = modelID
+			exec.setMetadataValue(MetadataKeyModelOverride, modelID)
 		}); err != nil {
 			return fmt.Errorf("failed to persist model override for execution %q: %w", executionID, err)
 		}
@@ -967,12 +964,7 @@ func (m *Manager) IsRemoteSession(ctx context.Context, sessionID string) bool {
 		if execution.RuntimeName == executor.NameSprites {
 			return true
 		}
-		if execution.Metadata != nil {
-			if isRemote, ok := execution.Metadata[MetadataKeyIsRemote].(bool); ok && isRemote {
-				return true
-			}
-		}
-		return false
+		return execution.metadataBool(MetadataKeyIsRemote)
 	}
 
 	// Fall back to database records (post-restart, execution not yet recreated).
@@ -1001,12 +993,7 @@ func (m *Manager) ShouldUseContainerShell(ctx context.Context, sessionID string)
 			execution.RuntimeName == executor.NameSprites {
 			return true
 		}
-		if execution.Metadata != nil {
-			if isRemote, ok := execution.Metadata[MetadataKeyIsRemote].(bool); ok && isRemote {
-				return true
-			}
-		}
-		return false
+		return execution.metadataBool(MetadataKeyIsRemote)
 	}
 
 	// Fall back to database records (post-restart, execution not yet recreated).
@@ -1605,7 +1592,7 @@ func (m *Manager) stopAgentViaBackend(ctx context.Context, executionID string, e
 		ContainerID:          execution.ContainerID,
 		StandaloneInstanceID: execution.standaloneInstanceID,
 		StandalonePort:       execution.standalonePort,
-		Metadata:             execution.Metadata,
+		Metadata:             execution.MetadataSnapshot(),
 		StopReason:           reason,
 		AgentStopFailed:      agentStopFailed,
 	}
@@ -1675,7 +1662,7 @@ func (m *Manager) buildFreshAgentCommand(ctx context.Context, execution *AgentEx
 		permissionValues["allow_indexing"] = profileInfo.AllowIndexing
 		permissionValues["dangerously_skip_permissions"] = profileInfo.DangerouslySkipPermissions
 	}
-	if override, ok := execution.Metadata[MetadataKeyModelOverride].(string); ok && override != "" {
+	if override := execution.metadataString(MetadataKeyModelOverride); override != "" {
 		model = override
 	}
 
