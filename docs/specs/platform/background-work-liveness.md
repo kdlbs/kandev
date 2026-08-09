@@ -23,7 +23,9 @@ lifecycle unless a deployment deliberately enables the Claude-only experiment.
 - Every `RUNNING` session is shown as generating. Background-work accounting
   does not select a separate operator-visible activity tier by default.
 - A settled session follows its coarse state and does not remain visually busy
-  solely because detached work is still registered.
+  solely because detached work is still registered. A session may remain visually
+  busy — showing the parked-on-background-work affordance — only when a positive
+  out-of-band liveness sample supports it, never on registration alone.
 - Session status surfaces do not infer that an agent needs an answer from the
   coarse `WAITING_FOR_INPUT` state alone. A clarification question or permission
   indicator requires the corresponding pending input record; an idle session
