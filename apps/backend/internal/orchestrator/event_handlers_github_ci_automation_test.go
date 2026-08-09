@@ -2959,6 +2959,86 @@ func waitForCIAutomationIdle(t *testing.T, svc *Service, key string, timeout tim
 	}
 }
 
+// TestHandleTaskPRCIAutoFixDirectDispatchPersistsWideMetadataEndToEnd drives the
+// real auto-fix flow (handleTaskPRCIAutomation, not dispatchCIAutomationPromptForPR
+// in isolation) against a WaitingForInput session so the direct-dispatch branch
+// runs. The isolated dispatch test hands the function its own pr and a literal
+// "signature", so it cannot detect a call site that threads the wrong value into
+// recordCIAutomationUserMessage. Here the expected values come from the flow
+// itself — the signature is whatever the handler actually recorded on the fix
+// attempt, and the PR fields come from the PR the handler was driven with.
+func TestHandleTaskPRCIAutoFixDirectDispatchPersistsWideMetadataEndToEnd(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateWaitingForInput)
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.agentManager = agentMgr
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	messageCreator := &mockMessageCreator{}
+	svc.messageCreator = messageCreator
+	seedExecutorRunning(t, repo, "session-1", "task-1", "exec-1")
+	session, err := repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.AgentExecutionID = "exec-1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session execution: %v", err)
+	}
+	now := time.Now().UTC()
+	pr := &github.TaskPR{
+		TaskID:       "task-1",
+		RepositoryID: "repo-1",
+		Owner:        "acme",
+		Repo:         "widget",
+		PRNumber:     42,
+		State:        "open",
+		ChecksState:  "success",
+		LastSyncedAt: &now,
+	}
+	ghSvc := &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID:                 "task-1",
+			AutoFixEnabled:         true,
+			EffectiveAutoFixPrompt: "Fix the PR\n\n{{pr.feedback}}",
+		},
+		prFeedback: &github.PRFeedback{
+			Comments: []github.PRComment{{ID: 99, Body: "plain PR comment should trigger auto-fix"}},
+		},
+	}
+	svc.SetGitHubService(ghSvc)
+
+	if err := svc.handleTaskPRCIAutomationWithRefresh(ctx, pr, false); err != nil {
+		t.Fatalf("handle auto-fix: %v", err)
+	}
+
+	if len(messageCreator.userMessages) != 1 {
+		t.Fatalf("expected one visible CI automation user message, got %d", len(messageCreator.userMessages))
+	}
+	if len(ghSvc.fixAttempts) != 1 {
+		t.Fatalf("expected one recorded fix attempt, got %d", len(ghSvc.fixAttempts))
+	}
+	gotMeta := messageCreator.userMessages[0].metadata
+	// The signature must be the one the flow computed and recorded, not a value
+	// the test supplied — this is what pins the call site's threading.
+	wantMeta := ciAutomationMessageMetadataForPR(pr, ghSvc.fixAttempts[0].Signature)
+	for key, wantVal := range wantMeta {
+		if gotVal := gotMeta[key]; gotVal != wantVal {
+			t.Fatalf("expected metadata[%q] = %v, got %v (full metadata: %+v)", key, wantVal, gotVal, gotMeta)
+		}
+	}
+	if gotMeta["origin"] != ciAutomationOrigin {
+		t.Fatalf("expected origin %q, got %v", ciAutomationOrigin, gotMeta["origin"])
+	}
+	if gotMeta["feedback_signature"] == "" || gotMeta["feedback_signature"] == nil {
+		t.Fatalf("expected a non-empty feedback signature, got %v", gotMeta["feedback_signature"])
+	}
+	if gotMeta["pr_number"] != 42 || gotMeta["owner"] != "acme" || gotMeta["repo"] != "widget" {
+		t.Fatalf("expected PR identity from the driven PR, got %+v", gotMeta)
+	}
+}
+
 func ptrString(value string) *string {
 	return &value
 }
