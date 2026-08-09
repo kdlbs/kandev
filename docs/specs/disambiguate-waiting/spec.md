@@ -346,6 +346,17 @@ that produces a turn boundary is load-bearing, and an earlier revision simply as
   (`.../transport/acp/adapter_session.go:132` and `:514`) and both are session create/resume,
   not prompt dispatch. So the boundary D3 requires has to be **published**, not observed. The
   *API surface → Turn-boundary stream event* section defines it.
+- **`sendPrompt` has THREE callers and one natural dispatch instant — READ 2026-08-09.** An
+  earlier draft of that section spoke of "the operator path and the synthetic path", which is
+  not the shape of the code. `sendPrompt` (`adapter_prompt.go:71`) is a funnel for `Prompt`
+  (`:31`), `PromptSteer` (`:60`) and `fireWakeup` (`:434`); steering is fully shipped, reached
+  via `manager_interaction.go:127` → `session.go:1330` → `agent.go:787`. Inside the funnel the
+  prompt passes the gate (`acquirePromptTurn`, `:99`), may be **dropped** without dispatching
+  (`:120`, a pinned wakeup whose session changed), and only then calls
+  `a.beginPromptTurn(sessionID)` (`:140`) immediately before `conn.Prompt`. `beginPromptTurn`
+  already bumps a per-session turn epoch (`adapter_async_complete.go:150-155`), so a turn marker
+  at that instant already exists and this feature stamps beside it rather than inventing a
+  second one. That is what makes the emission point specifiable rather than a builder's guess.
 
 The consequence is the opposite of what the review round hypothesised, and it is worse in the
 other direction: **agentctl's baseline can advance while the backend's `observed_detached` is
@@ -658,11 +669,49 @@ Without it D3 is unimplementable as written and a builder would have to invent t
 |---|---|
 | **Event type** | `turn_started` (a new `streams.EventTypeTurnStarted`) |
 | **Direction** | agentctl → backend, on the existing agent stream |
-| **Emitted** | on **every** `session/prompt` dispatch for the session, **including** the synthetic one a `ScheduleWakeup` self-resume issues (`.../transport/acp/adapter_prompt.go:388-403` via `sendPrompt` at `:71`) |
+| **Emitted** | at the single dispatch point defined below — **every** `session/prompt` that actually reaches the agent, including the synthetic one a `ScheduleWakeup` self-resume issues |
 | **Payload** | `session_id` only. **No timestamp** — the turn start stays in agentctl's own memory and clock (*Background-workload liveness probe*), and nothing about it crosses the process boundary |
 | **Consumed by** | `handleAgentStreamEvent` (`internal/orchestrator/event_handlers_streaming.go:24`), the single ordered consumer D3 requires |
 
-Three properties are contract:
+**The emission point is named exactly, because the three obvious placements are all wrong.**
+An earlier draft of this section said only "on every `session/prompt` dispatch" and enumerated
+two paths, which left a builder to choose the site. Read from the tree 2026-08-09:
+
+> The event is emitted **inside `sendPrompt`, at `a.beginPromptTurn(sessionID)`**
+> (`adapter_prompt.go:140`) — the instant after the prompt gate is acquired and after the
+> pinned-session drop check, immediately before `conn.Prompt`. agentctl stamps its recorded
+> turn start at that same call. `beginPromptTurn` already exists and already bumps a
+> per-session turn epoch (`adapter_async_complete.go:150-155`); this feature adds the stamp and
+> the emission beside it rather than introducing a second notion of "turn start".
+
+Each rejected placement fails in a named direction:
+
+- **At `sendPrompt` entry (`:71`) — wrong, and expensive.** A queued prompt blocks in
+  `acquirePromptTurn` (`:99`) while the *previous* turn is still running. Stamping there would
+  advance the baseline mid-previous-turn, so a workload launched by that turn would sort
+  *before* the baseline and the probe would answer `settled` — the expensive direction D5's
+  inclusive comparison exists to avoid.
+- **At the outer callers — wrong, and incomplete.** `sendPrompt` has **three** callers, not the
+  two an earlier draft enumerated: `Prompt` (`:31`, operator), `PromptSteer` (`:60`, mid-turn
+  steering), and `fireWakeup` (`:434`, synthetic wakeup). Placing the emission at the named two
+  silently omits steering, which is a fully shipped path
+  (`manager_interaction.go:127` → `session.go:1330` → `agent.go:787` → `PromptSteer`).
+- **Before the drop check (`:120`) — wrong.** A pinned wakeup whose session changed while it
+  queued returns `nil` without ever dispatching. It must emit **no** `turn_started`; nothing
+  reached the agent, so no turn began.
+
+**A steer emits `turn_started` like any other dispatch, and that is deliberate.** Per
+`PromptSteer`'s own contract, whether the agent folds a steer into the running turn or runs it
+as the next turn "is the agent's decision and is not advertised over the protocol, so both
+outcomes must be correct" (`adapter_prompt.go:41-52`). The protocol therefore cannot tell us
+which happened, so the uniform rule at the single funnel is the only implementable one. The
+cost is bounded and falls in the safe direction: a steer is delivered while the session is
+generating, so the session-state term is already false and no parked affordance is being
+cleared; the only effect is that a workload launched before the steer stops counting as
+in-turn, which can retire the affordance one turn early but can never invent one. A rule that
+tried to exempt steering would need a signal the protocol does not carry.
+
+Four further properties are contract:
 
 - **It is emitted at the same point agentctl stamps its own recorded turn start**, so the
   attestation-clearing boundary and the probe's baseline cannot drift apart. That is the whole
@@ -670,13 +719,17 @@ Three properties are contract:
 - **It is emitted on the human and the synthetic path alike.** `sendPrompt` distinguishes them
   via `humanPrompt := expectSession == ""` (`adapter_prompt.go:79`); this event does **not**.
   AC-41 asserts both halves.
+- **Repeats are idempotent.** Clearing `observed_detached` is a set-to-false, so two
+  `turn_started` events for one session leave the same state as one. An event for a session the
+  backend has no `parkedState` for is ignored, not an error, and creates no entry.
 - **A backend that never receives it degrades to today's behaviour**, not to a wrong answer:
   `observed_detached` stays set from the prior turn, the probe keeps comparing against an
   earlier baseline, and the bias is toward `live` — the cheap direction D3 already specifies
   for a continuation that produces no `session/prompt` at all.
 
 It carries no session content and rides the existing stream, so it grants no new access.
-AC-41a observes it.
+AC-41a observes the event and its three paths; AC-41b observes the emission point by pinning
+the two placements it excludes.
 
 ### Probe port (backend)
 
@@ -695,8 +748,16 @@ BackgroundProbe
   `Client` directly. The production implementation is `Client.ProbeBackgroundWorkloads`
   (*Probe transport*); a test implementation returns a scripted sequence of the three literals.
 - The port's contract is the probe's contract: exactly three result values, and **every** error
-  resolves to `unknown` (*Probe transport*, failure table). A test double that returns an error
-  and a non-`unknown` value at once is outside the contract.
+  resolves to `unknown` (*Probe transport*, failure table).
+- **A non-nil error resolves to `unknown` regardless of the value returned beside it**, and the
+  caller MUST check the error first. Saying only that such a pair is "outside the contract"
+  leaves the caller's behaviour undefined at exactly the point where getting it wrong parks a
+  session on a failed sample — the one direction this spec never takes. The caller therefore
+  never reads the value when the error is non-nil, and a result outside the three literals is
+  `unknown` even with a nil error.
+- The port is **not** responsible for the probe budget. The caller applies it as a
+  `context.WithTimeout` (D2); a port implementation neither imposes nor extends a deadline of
+  its own.
 - Because the projection depends only on the port, it is buildable and fully testable before
   the real process-tree probe exists — the substitution the plan relies on to run the backend
   and agentctl work in parallel.
@@ -762,9 +823,11 @@ the CLI, so membership excludes the very process the probe exists to find. An im
 that samples the group passes neither AC-70 nor AC-71.
 
 **Turn start is recorded by agentctl, in agentctl's own clock.** agentctl stamps the current
-turn's start when it dispatches `session/prompt` for that session — **including the synthetic
-`session/prompt` a `ScheduleWakeup` self-resume issues** (§N: `adapter_prompt.go:388-403` via
-`sendPrompt` at `:71`) — and clears it on session teardown. Both sides of the comparison are
+turn's start at `beginPromptTurn` (`adapter_prompt.go:140`) — the same instant that emits
+`turn_started`, after the prompt gate and after the pinned-session drop check, and therefore on
+all three of `sendPrompt`'s callers including the synthetic `ScheduleWakeup` one (*API surface →
+Turn-boundary stream event*, which names the site and the placements it rejects) — and clears it
+on session teardown. Both sides of the comparison are
 therefore read on the **same host and the same clock**, so no cross-process skew exists and no
 timestamp travels on the wire. If no turn start is recorded (agentctl restarted mid-turn), the
 result is `unknown`.
@@ -1055,8 +1118,11 @@ they do not.
 
 **So the feature has ONE turn boundary: agentctl's `session/prompt` dispatch.**
 
-- agentctl stamps its recorded turn start on **every** `session/prompt` dispatch for the session,
-  including the synthetic one a `ScheduleWakeup` self-resume issues (§N).
+- agentctl stamps its recorded turn start on **every** `session/prompt` dispatch that reaches the
+  agent, including the synthetic one a `ScheduleWakeup` self-resume issues (§N) and the mid-turn
+  steering one. The stamp and the event share one call site, `beginPromptTurn`
+  (`adapter_prompt.go:140`); *API surface → Turn-boundary stream event* names it and the three
+  placements it rejects. AC-41b pins it.
 - `observed_detached` MUST be cleared on **that same boundary** — i.e. on the `turn_started`
   event that dispatch emits (*API surface → Turn-boundary stream event*), not on the backend's
   own prompt-admission path (`startTurnForSession`, `service.go:1278`), which a synthetic prompt
@@ -1219,13 +1285,28 @@ would otherwise leave a card spinning while the session is actively `RUNNING`.
   on that dispatch too (D3, §N).
 - **AC-41a** — **GIVEN** a session, **WHEN** agentctl dispatches `session/prompt` for it, **THEN**
   a `turn_started` event carrying that `session_id` and **no timestamp** is emitted on the agent
-  stream, and it is emitted on **both** the operator-prompt path and the synthetic
-  `ScheduleWakeup` path (`adapter_prompt.go:388-403`), which `sendPrompt` otherwise distinguishes
-  via `humanPrompt` (`:79`); and **GIVEN** the backend receives it, **THEN** `observed_detached`
-  is cleared on the same ordered consumer that applies the attestation
-  (`event_handlers_streaming.go:24`). *(Added 2026-08-09 with the event itself. §N verifies no
-  pre-existing stream event marks a turn start, so D3's clearing rule had no carrier and this
-  criterion is what stops a builder inventing one.)*
+  stream; and it is emitted on **all three** of `sendPrompt`'s callers — the operator path
+  (`Prompt`, `adapter_prompt.go:31`), the mid-turn steering path (`PromptSteer`, `:60`) and the
+  synthetic `ScheduleWakeup` path (`fireWakeup`, `:434`) — which `sendPrompt` otherwise
+  distinguishes via `humanPrompt` (`:79`) and the `steer` argument; and **GIVEN** the backend
+  receives it, **THEN** `observed_detached` is cleared on the same ordered consumer that applies
+  the attestation (`event_handlers_streaming.go:24`), and a second `turn_started` for the same
+  session leaves the same state as the first. *(Added 2026-08-09 with the event itself. §N
+  verifies no pre-existing stream event marks a turn start, so D3's clearing rule had no carrier
+  and this criterion is what stops a builder inventing one. The three-caller clause was added
+  after reading the tree: an earlier draft named two paths and would have silently omitted
+  steering, which is a shipped path.)*
+- **AC-41b** — **GIVEN** a queued operator prompt that is blocked on the prompt gate
+  (`acquirePromptTurn`, `adapter_prompt.go:99`) while the previous turn is still running,
+  **WHEN** it is waiting, **THEN** no `turn_started` has been emitted for it and agentctl's
+  recorded turn start still holds the previous turn's value — so a workload launched by the
+  running turn still counts as in-turn and the probe reports `live`; and **THEN** both are
+  updated only once the prompt reaches `beginPromptTurn` (`:140`). And **GIVEN** a pinned
+  `ScheduleWakeup` prompt whose session changed while it queued, so it is dropped at `:120` and
+  returns without dispatching, **WHEN** the drop occurs, **THEN** **no** `turn_started` is
+  emitted and the recorded turn start is unchanged. Together these pin the emission point
+  between the gate and the dispatch; an implementation that emits at `sendPrompt` entry fails
+  the first half and one that emits at the outer callers fails the second.
 - **AC-45** — **GIVEN** the backend needs a liveness sample for a session, **WHEN** it takes one,
   **THEN** the request travels as the WebSocket action `agent.background.probe` on the existing
   agent stream carrying `session_id`, the request carries **no timestamp**, and the response
@@ -1469,9 +1550,12 @@ Two questions earlier revisions carried are now closed by evidence rather than a
   add an `/api/v1/acp` HTTP group; none exists.
 - **`turn_started` is a NEW stream event, not an existing one you can subscribe to.** §N
   verifies the current event set has no turn-start member and that `session_status` fires only
-  on session create/resume. Adding it touches both processes — the emission sits with agentctl's
-  `session/prompt` dispatch (beside where agentctl stamps its own recorded turn start, so the
-  two cannot drift), the consumption sits on `handleAgentStreamEvent`. Land it before either the
+  on session create/resume. Adding it touches both processes — the emission sits at
+  `beginPromptTurn` (`adapter_prompt.go:140`), inside `sendPrompt` and beside where agentctl
+  stamps its own recorded turn start so the two cannot drift, which also means it covers all
+  **three** `sendPrompt` callers (`Prompt` `:31`, `PromptSteer` `:60`, `fireWakeup` `:434`)
+  without touching any of them; the consumption sits on `handleAgentStreamEvent`. Do **not**
+  emit at `sendPrompt` entry or at the outer callers — AC-41b fails both. Land it before either the
   attestation work or the probe work starts; both depend on it and neither owns it. A new event
   type traverses four files, verified by tracing `EventTypeForegroundIdle`: the constant in
   `internal/agentctl/types/streams/agent.go`, the emission in
