@@ -123,10 +123,16 @@ second shipped binary.
 
 ```makefile
 dev: doctor
-	@$(MAKE) -C $(BACKEND_DIR) build build-agentctl-remote
+	@$(MAKE) -C $(BACKEND_DIR) build-runtime build-agentctl-remote
 	@cp bin/kandev → bin/kandev-launcher
 	@exec $(BACKEND_DIR)/bin/kandev-launcher dev $(DEV_FLAGS)
 ```
+
+`build-runtime` (not the full `build` aggregate) is enough for the copy: it produces
+`bin/kandev`, `bin/agentctl`, and the remote helpers. The supervised child's
+`make -C apps/backend dev` still runs its own `dev: build`, which is where mock-agent,
+acpdbg, and winjob get built — building them twice (root + child) would add a full
+duplicate build to every `make dev` launch.
 
 `build-winjob` leaves the dev path: the Go launcher's process-group handling replaces it,
 and the root `dev` target no longer invokes the winjob build step. `cmd/winjob` itself

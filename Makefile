@@ -195,7 +195,7 @@ endif
 dev: doctor
 	# POSIX-only (cp/exec): on Windows run from Git Bash/MSYS, like `make start`.
 	@echo "Building backend and remote agentctl helpers..."
-	@$(MAKE) -C $(BACKEND_DIR) build build-agentctl-remote
+	@$(MAKE) -C $(BACKEND_DIR) build-runtime build-agentctl-remote
 	@cp $(BACKEND_DIR)/bin/kandev$(EXE) $(BACKEND_DIR)/bin/kandev-launcher$(EXE)
 	@echo "Launching via native Go launcher$(if $(DEV_FLAGS_DISPLAY), ($(DEV_FLAGS_DISPLAY)), (auto ports))..."
 	@exec $(BACKEND_DIR)/bin/kandev-launcher$(EXE) dev $(DEV_FLAGS)
