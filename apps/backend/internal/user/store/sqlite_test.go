@@ -721,20 +721,49 @@ func TestSQLiteRepositoryKanbanHiddenStepIDsDefaultAndRoundTrip(t *testing.T) {
 }
 
 func TestScanUserSettingsKanbanHiddenStepIDsCorruptFallsBackToEmpty(t *testing.T) {
-	settings, err := scanUserSettings(
-		settingsScanner{raw: `{"kanban_hidden_step_ids":"not-an-object","workspace_id":"ws-1"}`},
-		DefaultUserID,
-	)
-	if err != nil {
-		t.Fatalf("scan settings with corrupt kanban_hidden_step_ids: %v", err)
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{
+			// A top-level shape mismatch: the whole field is a JSON string,
+			// not an object. json.Unmarshal never allocates the destination
+			// map in this case, so a `decoded == nil` check alone happens to
+			// catch it.
+			name: "top-level value is not an object",
+			raw:  `{"kanban_hidden_step_ids":"not-an-object","workspace_id":"ws-1"}`,
+		},
+		{
+			// A NESTED shape mismatch: the field is a valid object, but one
+			// of its per-workflow VALUES has the wrong type. Unlike the
+			// top-level case, json.Unmarshal still allocates and partially
+			// populates the map here (e.g. {"wf-1": nil}) while returning a
+			// non-nil error, so a decode path that ignores the error and
+			// only checks for a nil map would incorrectly return that
+			// partial/garbage map instead of falling back to {}. This is
+			// the exact shape a real corruption (e.g. an interrupted
+			// partial write) is more likely to produce than a top-level
+			// type swap.
+			name: "nested per-workflow value is not an array",
+			raw:  `{"kanban_hidden_step_ids":{"wf-1":"not-an-array"},"workspace_id":"ws-1"}`,
+		},
 	}
-	if len(settings.KanbanHiddenStepIDs) != 0 {
-		t.Fatalf("KanbanHiddenStepIDs = %#v, want empty on corrupt value", settings.KanbanHiddenStepIDs)
-	}
-	// Corruption in this one field must not take the rest of the settings
-	// blob down with it.
-	if settings.WorkspaceID != "ws-1" {
-		t.Fatalf("WorkspaceID = %q, want %q (sibling fields must still load)", settings.WorkspaceID, "ws-1")
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings, err := scanUserSettings(settingsScanner{raw: tt.raw}, DefaultUserID)
+			if err != nil {
+				t.Fatalf("scan settings with corrupt kanban_hidden_step_ids: %v", err)
+			}
+			if len(settings.KanbanHiddenStepIDs) != 0 {
+				t.Fatalf("KanbanHiddenStepIDs = %#v, want empty on corrupt value", settings.KanbanHiddenStepIDs)
+			}
+			// Corruption in this one field must not take the rest of the
+			// settings blob down with it.
+			if settings.WorkspaceID != "ws-1" {
+				t.Fatalf("WorkspaceID = %q, want %q (sibling fields must still load)", settings.WorkspaceID, "ws-1")
+			}
+		})
 	}
 }
 

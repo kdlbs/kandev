@@ -894,8 +894,7 @@ func decodeKanbanHiddenStepIDs(raw json.RawMessage) map[string][]string {
 		return map[string][]string{}
 	}
 	var decoded map[string][]string
-	_ = json.Unmarshal(raw, &decoded) // MUTATION: ignore the error, don't fall back
-	if decoded == nil {
+	if err := json.Unmarshal(raw, &decoded); err != nil || decoded == nil {
 		return map[string][]string{}
 	}
 	return decoded
