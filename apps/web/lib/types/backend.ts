@@ -37,6 +37,7 @@ import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 import type { TaskMRAutomationOptions } from "@/lib/types/gitlab";
 import type { SystemMetricsSnapshot } from "./system";
 import type { AgentRuntimeAvailability } from "./agent-runtime";
+export type { TaskSessionParkedChangedPayload } from "./session-runtime-payloads";
 import type {
   ExecutorPayload,
   ExecutorProfilePayload,

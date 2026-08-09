@@ -9,7 +9,9 @@ import type {
   SessionMCPStatusPayload,
   SessionPromptUsagePayload,
   SessionTodosPayload,
+  TaskSessionParkedChangedPayload,
 } from "./session-runtime-payloads";
+export type { TaskSessionParkedChangedPayload } from "./session-runtime-payloads";
 
 export type MessageAddedPayload = {
   task_id: string;
@@ -201,6 +203,10 @@ export type SessionBackendMessageMap = {
   "session.cancellation_changed": BackendMessage<
     "session.cancellation_changed",
     TaskSessionCancellationChangedPayload
+  >;
+  "session.parked_changed": BackendMessage<
+    "session.parked_changed",
+    TaskSessionParkedChangedPayload
   >;
   "session.clarification_requested": BackendMessage<
     "session.clarification_requested",

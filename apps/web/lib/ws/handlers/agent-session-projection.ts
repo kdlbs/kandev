@@ -1,12 +1,12 @@
 import type { StoreApi } from "zustand";
+import type { TaskSessionParkedChangedPayload } from "@/lib/types/backend";
 import type { AppState } from "@/lib/state/store";
 import { sessionId as toSessionId } from "@/lib/types/http";
 
 /** Apply the backend-owned parked-on-background-work projection to the addressed session. */
 export function applyParkedChanged(
   store: StoreApi<AppState>,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  payload: any,
+  payload: TaskSessionParkedChangedPayload,
 ): void {
   if (!payload?.session_id || typeof payload.parked_on_background_work !== "boolean") return;
   const sessionId = toSessionId(payload.session_id);
