@@ -125,6 +125,24 @@ function globListDirs(dir, fsImpl) {
 
 const GLOB_SEG_METACHAR = /[*?[\]]/;
 
+// Translate one glob [...] character class starting at seg[i] into regex
+// syntax. Returns { frag, next } where frag is the regex fragment and next is
+// the index after the closing ']'. Returns null when there is no closing ']'.
+function globCharClass(seg, i) {
+  let j = i + 1;
+  const negated = j < seg.length && seg[j] === "^";
+  if (negated) j++;
+  // In glob syntax, a ] immediately after [ (or [^) is treated as a literal.
+  const leadBracket = j < seg.length && seg[j] === "]";
+  if (leadBracket) j++;
+  while (j < seg.length && seg[j] !== "]") j++;
+  if (j >= seg.length) return null;
+  // A ] that was the first glob-class char must be escaped as \] in JS regex.
+  const contentStart = i + 1 + (negated ? 1 : 0) + (leadBracket ? 1 : 0);
+  const inner = (leadBracket ? "\\]" : "") + seg.slice(contentStart, j);
+  return { frag: "[" + (negated ? "^" : "") + inner + "]", next: j + 1 };
+}
+
 // Convert a single path segment glob pattern to a RegExp.
 // Handles *, ?, and [...] character classes. Other chars are escaped.
 function globSegToRegex(seg) {
@@ -138,22 +156,10 @@ function globSegToRegex(seg) {
       re += "[^/]";
       i++;
     } else if (seg[i] === "[") {
-      // Find the matching ']' — in glob, a ] right after [ (or [^) is literal.
-      let j = i + 1;
-      const negated = j < seg.length && seg[j] === "^";
-      if (negated) j++;
-      const leadBracket = j < seg.length && seg[j] === "]"; // glob: ] as first char is literal
-      if (leadBracket) j++;
-      while (j < seg.length && seg[j] !== "]") j++;
-      if (j < seg.length) {
-        // Build the JS regex character class. A ] that was the first char in
-        // the glob class (leadBracket) must be escaped as \] in JS regex, since
-        // JS closes the class on the first unescaped ] it sees.
-        const contentStart = i + 1 + (negated ? 1 : 0) + (leadBracket ? 1 : 0);
-        const innerRaw = seg.slice(contentStart, j);
-        const inner = (leadBracket ? "\\]" : "") + innerRaw;
-        re += "[" + (negated ? "^" : "") + inner + "]";
-        i = j + 1;
+      const cls = globCharClass(seg, i);
+      if (cls) {
+        re += cls.frag;
+        i = cls.next;
       } else {
         re += "\\[";
         i++;
