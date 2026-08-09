@@ -168,8 +168,9 @@ as the workspace installation.
 Kandev-created Apps request repository metadata read; contents read/write; pull requests read/write;
 issues read/write; checks, statuses, and Actions read; administration read; organization members
 read; and workflows write. The UI exposes this policy through a permissions button and dialog, not
-a row of chips. The App subscribes to `installation`, `installation_repositories`, and
-`github_app_authorization`.
+a row of chips. The App subscribes to the configurable `push` and `check_run` events. GitHub sends
+`installation`, `installation_repositories`, and `github_app_authorization` lifecycle events
+automatically, so they are handled but are not part of the requested event policy.
 
 An imported App must meet the same callback, setup URL, webhook, event, and permission requirements.
 Kandev validates the App identity and reports missing capabilities after installation. It does not

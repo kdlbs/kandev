@@ -253,14 +253,14 @@ func (s *AppRegistrationLifecycleService) StartManifest(
 	if err := s.store.CreateDeploymentAppRegistrationFlow(ctx, flow); err != nil {
 		return AppRegistrationManifestStart{}, fmt.Errorf("persist GitHub App manifest state: %w", err)
 	}
-	callback, err := url.Parse(submission.Manifest.RedirectURL)
+	registrationURL, err := url.Parse(submission.RegistrationURL)
 	if err != nil {
-		return AppRegistrationManifestStart{}, errors.New("build GitHub App manifest callback")
+		return AppRegistrationManifestStart{}, errors.New("build GitHub App registration URL")
 	}
-	query := callback.Query()
+	query := registrationURL.Query()
 	query.Set("state", state)
-	callback.RawQuery = query.Encode()
-	submission.Manifest.RedirectURL = callback.String()
+	registrationURL.RawQuery = query.Encode()
+	submission.RegistrationURL = registrationURL.String()
 	return AppRegistrationManifestStart{
 		RegistrationID: registrationID, WorkspaceID: request.WorkspaceID,
 		State: state, ExpiresAt: flow.ExpiresAt, Revision: submission.Revision,

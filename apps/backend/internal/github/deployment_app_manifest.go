@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	DeploymentAppManifestRevision = 1
+	DeploymentAppManifestRevision = 2
 	deploymentAppManifestFlowTTL  = time.Hour
 	deploymentAppNameMaxLength    = 34
 )
@@ -228,16 +228,9 @@ func BuildDeploymentAppManifest(
 				"metadata": "read", "pull_requests": "write", "statuses": "read",
 				"workflows": "write",
 			},
-			// push and check_run enable webhook-driven github_push/github_ci automation
-			// triggers. Deployment caveat: GitHub Apps only deliver events a user has
-			// explicitly subscribed to at installation time, so existing installations
-			// created before this manifest change must be re-accepted (reinstalled, or
-			// updated via the App's GitHub settings page) before push/check_run
-			// webhooks start arriving for them.
-			DefaultEvents: []string{
-				"installation", "installation_repositories", "github_app_authorization",
-				"push", "check_run",
-			},
+			// GitHub delivers App lifecycle events automatically. Only configurable
+			// webhook subscriptions belong in default_events.
+			DefaultEvents:         []string{"push", "check_run"},
 			RequestOAuthOnInstall: true,
 			SetupOnUpdate:         false,
 		},
