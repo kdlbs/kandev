@@ -3,10 +3,12 @@ package automation
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
@@ -132,6 +134,16 @@ func TestGitHubPRMergedSubscriberFiresHappyPath(t *testing.T) {
 		}
 		if num, ok := data["pr_number"].(float64); !ok || int(num) != 7 {
 			t.Errorf("data[pr_number] = %v, want 7", data["pr_number"])
+		}
+		// Security contract: exactly 6 keys, no prose fields.
+		// Spec lines 1320-1326: "no more and no fewer" and "what fails if someone widens the map."
+		if len(data) != 6 {
+			t.Errorf("trigger data has %d keys, want exactly 6: %v", len(data), data)
+		}
+		for _, forbidden := range []string{"pr_title", "body", "author_login", "head_branch"} {
+			if _, exists := data[forbidden]; exists {
+				t.Errorf("trigger data must not contain %q", forbidden)
+			}
 		}
 	default:
 		t.Fatal("expected AutomationTriggered event")
@@ -570,11 +582,16 @@ func TestGitHubPRMergedSubscriberStartIdempotent(t *testing.T) {
 }
 
 // TestGitHubPRMergedSubscriberStartWithNilLookup verifies that Start with no
-// lookup wired sets started=true (subsequent starts are no-ops) but no trigger
-// fires because the subscriber recorded the nil-lookup state.
+// lookup wired sets started=true (subsequent starts are no-ops), emits exactly
+// one warn log naming github_pr_merged, and does not subscribe to the bus.
+// Spec lines 1368-1371: "emits exactly one log line at warn naming github_pr_merged."
 func TestGitHubPRMergedSubscriberStartWithNilLookup(t *testing.T) {
 	svc := newPRMergedTestService(t)
-	log, _ := logger.NewFromZap(zap.NewNop())
+	core, obs := observer.New(zap.WarnLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("NewFromZap: %v", err)
+	}
 	// Do NOT set lookup.
 	sub := NewGitHubPRMergedSubscriber(svc, svc.eventBus, log)
 	t.Cleanup(sub.Stop)
@@ -586,6 +603,55 @@ func TestGitHubPRMergedSubscriberStartWithNilLookup(t *testing.T) {
 	}
 	if sub.sub != nil {
 		t.Fatal("sub should not have subscribed when lookup is nil")
+	}
+
+	entries := obs.All()
+	if len(entries) != 1 {
+		t.Fatalf("expected exactly 1 log entry on nil-lookup Start, got %d: %v", len(entries), entries)
+	}
+	if entries[0].Level != zap.WarnLevel {
+		t.Errorf("log entry level = %v, want Warn", entries[0].Level)
+	}
+	if !strings.Contains(entries[0].Message, string(TriggerTypeGitHubPRMerged)) {
+		t.Errorf("log message %q does not contain trigger type %q", entries[0].Message, TriggerTypeGitHubPRMerged)
+	}
+}
+
+// TestGitHubPRMergedSubscriberStartWiredLookupLogsInfo verifies that Start with
+// a wired lookup emits exactly one info log and no warn logs.
+// Spec lines 1372-1375: "emits a line at info ... no warn line. Both branches are asserted."
+func TestGitHubPRMergedSubscriberStartWiredLookupLogsInfo(t *testing.T) {
+	svc := newPRMergedTestService(t)
+	core, obs := observer.New(zap.DebugLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("NewFromZap: %v", err)
+	}
+	lookup := &fakeTaskOriginLookup{
+		results: map[string]fakeOriginResult{
+			"t_abc123": {workspaceID: "ws-1", ok: true},
+		},
+	}
+	svc.SetTaskOriginLookup(lookup)
+	sub := NewGitHubPRMergedSubscriber(svc, svc.eventBus, log)
+	t.Cleanup(sub.Stop)
+
+	sub.Start(context.Background())
+
+	var infoCount, warnCount int
+	for _, e := range obs.All() {
+		switch e.Level {
+		case zap.InfoLevel:
+			infoCount++
+		case zap.WarnLevel:
+			warnCount++
+		}
+	}
+	if infoCount == 0 {
+		t.Error("expected at least one Info log on wired-lookup Start, got none")
+	}
+	if warnCount != 0 {
+		t.Errorf("expected no Warn logs on wired-lookup Start, got %d", warnCount)
 	}
 }
 

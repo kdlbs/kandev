@@ -99,4 +99,29 @@ func TestTriggerRegistry_GuardTest(t *testing.T) {
 	if entry.DefaultPrompt != wantPrompt {
 		t.Errorf("DefaultPrompt mismatch.\ngot:  %q\nwant: %q", entry.DefaultPrompt, wantPrompt)
 	}
+
+	// 6. Placeholder count and type-specific key order.
+	// Spec lines 1330-1332: "six type-specific records match the key/description/example table,
+	// followed by the common placeholders."
+	wantTypeSpecific := []string{
+		"data.task_id",
+		"data.repo",
+		"data.pr_number",
+		"data.pr_url",
+		"data.base_branch",
+		"data.merged_at",
+	}
+	wantTotal := len(wantTypeSpecific) + len(commonPlaceholders)
+	if len(entry.Placeholders) != wantTotal {
+		t.Errorf("Placeholders: got %d, want %d", len(entry.Placeholders), wantTotal)
+	}
+	for i, wantKey := range wantTypeSpecific {
+		if i >= len(entry.Placeholders) {
+			t.Errorf("Placeholders[%d] missing, want key %q", i, wantKey)
+			continue
+		}
+		if entry.Placeholders[i].Key != wantKey {
+			t.Errorf("Placeholders[%d].Key = %q, want %q", i, entry.Placeholders[i].Key, wantKey)
+		}
+	}
 }
