@@ -36,7 +36,15 @@ type taskPublication struct {
 type taskActivitySnapshot struct {
 	activity            v1.ForegroundActivity
 	activeSubagentCount int
-	known               bool
+	// parked/parkedEpoch/parkedRevision are the task-level
+	// parked-on-background-work triple (MUST-FIX #1, Review round 3). Unlike
+	// activity/activeSubagentCount they have no "unknown" state: the read is an
+	// in-memory lock read via TaskParkedProvider with no failure mode, so they
+	// are always populated regardless of the `known` flag below.
+	parked         bool
+	parkedEpoch    int64
+	parkedRevision uint64
+	known          bool
 }
 
 // PublishTaskUpdated publishes a task.updated event for the given task.
@@ -496,6 +504,7 @@ func (s *Service) addTaskSessionEventFieldsWithActivity(ctx context.Context, tas
 	}
 
 	activity = s.addTaskForegroundActivityEventField(data, activity, sessions, sessionsErr)
+	s.addTaskParkedEventField(data, activity, taskID)
 
 	if sessionCountMap, err := s.GetSessionCountsForTasks(ctx, []string{taskID}); err == nil {
 		if count, ok := sessionCountMap[taskID]; ok {
@@ -551,6 +560,23 @@ func (s *Service) addTaskForegroundActivityEventField(data map[string]interface{
 		data["active_subagent_count"] = activity.activeSubagentCount
 	}
 	return activity
+}
+
+// addTaskParkedEventField stamps the task-level parked-on-background-work
+// triple onto the event payload (MUST-FIX #1, Review round 3). Unlike
+// foreground_activity it is always included, never omitted or gated on
+// `known`: TaskParkedProvider is an in-memory lock read with no failure mode,
+// so there is nothing to be unknown about. Always re-reads fresh here rather
+// than trusting activity's possibly-stale pre-computed value, mirroring
+// publishForegroundActivityNow's "re-derive at publish time" pattern for the
+// session-level carrier (Review round 2, F3) — and the freshly-read triple is
+// written back onto activity so the dedup baseline recorded afterward
+// (recordTaskActivitySnapshot) matches exactly what was published.
+func (s *Service) addTaskParkedEventField(data map[string]interface{}, activity *taskActivitySnapshot, taskID string) {
+	activity.parked, activity.parkedEpoch, activity.parkedRevision = s.currentTaskParked(taskID)
+	data["parked_on_background_work"] = activity.parked
+	data["parked_epoch"] = activity.parkedEpoch
+	data["parked_revision"] = activity.parkedRevision
 }
 
 func (s *Service) addPrimarySessionEventFields(ctx context.Context, taskID string, data map[string]interface{}, sessionInfo *models.TaskSession) {

@@ -550,7 +550,7 @@ func TestTaskParkedProjectionSnapshot_MultiSessionOR(t *testing.T) {
 	svc.updateTaskParkedState(context.Background(), taskID, "sess-a", false)
 	svc.updateTaskParkedState(context.Background(), taskID, "sess-b", true)
 
-	parked, revision := svc.TaskParkedProjectionSnapshot(taskID)
+	parked, _, revision := svc.TaskParkedProjectionSnapshot(taskID)
 	if !parked {
 		t.Fatal("expected task parked=true when any session is parked")
 	}
@@ -561,7 +561,7 @@ func TestTaskParkedProjectionSnapshot_MultiSessionOR(t *testing.T) {
 	// Now session B clears — both sessions not parked → OR = false.
 	svc.updateTaskParkedState(context.Background(), taskID, "sess-b", false)
 
-	parked, revision2 := svc.TaskParkedProjectionSnapshot(taskID)
+	parked, _, revision2 := svc.TaskParkedProjectionSnapshot(taskID)
 	if parked {
 		t.Fatal("expected task parked=false when all sessions not parked")
 	}
@@ -631,7 +631,7 @@ func TestSampleAndPublishParked_StopsWhenNotParked(t *testing.T) {
 		t.Fatal("expected a session.activity_changed publish carrying the un-park for this session")
 	}
 
-	taskParked, _ := svc.TaskParkedProjectionSnapshot(taskID)
+	taskParked, _, _ := svc.TaskParkedProjectionSnapshot(taskID)
 	if taskParked {
 		t.Fatal("expected task-level parked_on_background_work=false: this was the task's only parked session")
 	}

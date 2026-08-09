@@ -12,6 +12,12 @@ export type TaskEventPayload = TaskLike & {
   archived_at?: string | null;
 };
 
+/** True when `field` was present on the raw wire payload, distinguishing an
+ *  omitted field from one explicitly sent as `undefined`/`null`/`false`. */
+export function hasPayloadField(payload: TaskEventPayload, field: keyof TaskEventPayload): boolean {
+  return Object.prototype.hasOwnProperty.call(payload, field);
+}
+
 export function archivedTaskWorkspaceId(
   state: AppState,
   payload: TaskEventPayload,

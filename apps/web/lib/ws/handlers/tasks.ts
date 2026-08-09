@@ -18,16 +18,15 @@ import { syncQuickChatFromTaskEvent } from "@/lib/ws/handlers/quick-chat";
 import {
   archivedTaskWorkspaceId,
   findArchivedTaskInCache,
+  hasPayloadField,
   removeTaskFromActiveKanbans,
   removeTaskFromBothKanbans,
   type KanbanTask,
   type TaskEventPayload,
 } from "@/lib/ws/handlers/task-archive-cache";
-const lifecycleDebug = createDebugLogger("task-lifecycle:ws");
+import { preserveParkedFields } from "@/lib/ws/handlers/task-parked-merge";
 
-function hasPayloadField(payload: TaskEventPayload, field: keyof TaskEventPayload): boolean {
-  return Object.prototype.hasOwnProperty.call(payload, field);
-}
+const lifecycleDebug = createDebugLogger("task-lifecycle:ws");
 
 function preservePrimaryExecutorFields(
   existing: KanbanTask,
@@ -69,15 +68,6 @@ function preserveOmittedField<K extends keyof KanbanTask>(
     // parentTaskId), so the undefined value is the safe "not present" reading.
     merged[field.taskField] = existing?.[field.taskField] as KanbanTask[K];
   }
-}
-
-// Epoch-based discard: preserve cached parked fields when the event omits both; clear when
-// parked_revision advances without parked_on_background_work (new probe cycle, task not parked).
-function preserveParkedFields(src: KanbanTask, dst: KanbanTask, ev: TaskEventPayload): void {
-  if (hasPayloadField(ev, "parked_on_background_work")) return;
-  const revPresent = hasPayloadField(ev, "parked_revision");
-  dst.parkedOnBackgroundWork = revPresent ? false : (src.parkedOnBackgroundWork ?? false);
-  if (!revPresent) dst.parkedRevision = src.parkedRevision ?? 0;
 }
 
 function mergeTaskUpdate(

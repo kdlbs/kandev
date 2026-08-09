@@ -191,6 +191,90 @@ describe("cancellation revision ordering", () => {
   });
 });
 
+// MUST-FIX #2, Review round 3: D1's (parked_epoch, revision) ordered-pair
+// discard rule was previously unimplemented — pickParkedRevision et al only
+// handled field-omission, and mergeTaskSession applied whatever the incoming
+// payload carried unconditionally, with no analogue of the
+// mergeCancellationProjection comparison this block exercises for parked.
+describe("parked projection ordering (AC-39, D1)", () => {
+  it("discards a stale parked_revision arriving after a fresher one within the same epoch", () => {
+    const store = makeStore();
+
+    store.getState().upsertTaskSessionFromEvent(
+      TASK_ID,
+      makeSession({
+        parked_on_background_work: true,
+        parked_epoch: 100,
+        parked_revision: 7,
+      }),
+    );
+    // A delayed/reordered frame carrying a LOWER revision at the SAME epoch
+    // must not strand the card back at parked=false.
+    store.getState().upsertTaskSessionFromEvent(
+      TASK_ID,
+      makeSession({
+        parked_on_background_work: false,
+        parked_epoch: 100,
+        parked_revision: 6,
+      }),
+    );
+
+    const session = store.getState().taskSessions.items[SESSION_ID];
+    expect(session.parked_on_background_work).toBe(true);
+    expect(session.parked_epoch).toBe(100);
+    expect(session.parked_revision).toBe(7);
+  });
+
+  it("accepts a strictly higher epoch even carrying a lower revision (AC-77 restart reset)", () => {
+    const store = makeStore();
+
+    store.getState().upsertTaskSessionFromEvent(
+      TASK_ID,
+      makeSession({
+        parked_on_background_work: true,
+        parked_epoch: 100,
+        parked_revision: 7,
+      }),
+    );
+    // A backend restart resets revision to 0 under a strictly higher epoch —
+    // this must be ACCEPTED, not discarded as "stale".
+    store.getState().upsertTaskSessionFromEvent(
+      TASK_ID,
+      makeSession({
+        parked_on_background_work: false,
+        parked_epoch: 200,
+        parked_revision: 0,
+      }),
+    );
+
+    const session = store.getState().taskSessions.items[SESSION_ID];
+    expect(session.parked_on_background_work).toBe(false);
+    expect(session.parked_epoch).toBe(200);
+    expect(session.parked_revision).toBe(0);
+  });
+
+  it("accepts a higher revision within the same epoch", () => {
+    const store = makeStore();
+
+    store
+      .getState()
+      .upsertTaskSessionFromEvent(
+        TASK_ID,
+        makeSession({ parked_on_background_work: false, parked_epoch: 100, parked_revision: 1 }),
+      );
+    store
+      .getState()
+      .upsertTaskSessionFromEvent(
+        TASK_ID,
+        makeSession({ parked_on_background_work: true, parked_epoch: 100, parked_revision: 2 }),
+      );
+
+    const session = store.getState().taskSessions.items[SESSION_ID];
+    expect(session.parked_on_background_work).toBe(true);
+    expect(session.parked_revision).toBe(2);
+  });
+});
+
 describe("setTaskSessionsForTask preserves WS-seeded fields", () => {
   it("merges incoming sessions with existing rows so task_environment_id is not clobbered", () => {
     const store = makeStore();

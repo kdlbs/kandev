@@ -312,12 +312,19 @@ type Service struct {
 	// session (satisfied by the orchestrator). Used to compute the task-level
 	// MOST-ACTIVE-WINS activity aggregate carried on task.updated events. Optional.
 	foregroundActivity ForegroundActivityProvider
-	// taskActivityMu guards lastTaskActivity, the last task-level activity aggregate
-	// emitted per task. It bounds live-propagation task.updated emissions to an
-	// actual change of the aggregated three-state value.
-	taskActivityMu        sync.Mutex
-	lastTaskActivity      map[string]v1.ForegroundActivity
-	lastTaskSubagentCount map[string]int
+	// taskParked resolves the live task-level parked-on-background-work
+	// projection (satisfied by the orchestrator). Used to stamp the parked
+	// triple onto task.updated events and to trigger a publish on a
+	// parked-only OR flip. Optional; see TaskParkedProvider/currentTaskParked.
+	taskParked TaskParkedProvider
+	// taskActivityMu guards lastTaskActivity/lastTaskParked*, the last
+	// task-level snapshot emitted per task. It bounds live-propagation
+	// task.updated emissions to an actual change of the aggregated value.
+	taskActivityMu         sync.Mutex
+	lastTaskActivity       map[string]v1.ForegroundActivity
+	lastTaskSubagentCount  map[string]int
+	lastTaskParked         map[string]bool
+	lastTaskParkedRevision map[string]uint64
 	// taskPublicationMu guards the per-task FIFO dispatchers. It is held only
 	// while enqueueing/dequeueing; repository reads and synchronous EventBus
 	// delivery always happen after it is released.
@@ -376,30 +383,32 @@ func (s *Service) SetWorkspaceSecretDeleter(deleter WorkspaceSecretDeleter) {
 // NewService creates a new task service
 func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discoveryConfig RepositoryDiscoveryConfig) *Service {
 	return &Service{
-		workspaces:            repos.Workspaces,
-		tasks:                 repos.Tasks,
-		taskRepos:             repos.TaskRepos,
-		workspaceFolders:      repos.WorkspaceFolders,
-		workflows:             repos.Workflows,
-		messages:              repos.Messages,
-		attachments:           repos.Attachments,
-		turns:                 repos.Turns,
-		sessions:              repos.Sessions,
-		gitSnapshots:          repos.GitSnapshots,
-		repoEntities:          repos.RepoEntities,
-		repositoryCleanup:     repos.RepositoryCleanup,
-		executors:             repos.Executors,
-		environments:          repos.Environments,
-		taskEnvironments:      repos.TaskEnvironments,
-		reviews:               repos.Reviews,
-		resourceCleanups:      repos.ResourceCleanups,
-		statusSummaries:       repos.StatusSummaries,
-		eventBus:              eventBus,
-		logger:                log,
-		discoveryConfig:       discoveryConfig,
-		branchFetcher:         newBranchFetcher(log.Zap()),
-		lastTaskActivity:      make(map[string]v1.ForegroundActivity),
-		lastTaskSubagentCount: make(map[string]int),
+		workspaces:             repos.Workspaces,
+		tasks:                  repos.Tasks,
+		taskRepos:              repos.TaskRepos,
+		workspaceFolders:       repos.WorkspaceFolders,
+		workflows:              repos.Workflows,
+		messages:               repos.Messages,
+		attachments:            repos.Attachments,
+		turns:                  repos.Turns,
+		sessions:               repos.Sessions,
+		gitSnapshots:           repos.GitSnapshots,
+		repoEntities:           repos.RepoEntities,
+		repositoryCleanup:      repos.RepositoryCleanup,
+		executors:              repos.Executors,
+		environments:           repos.Environments,
+		taskEnvironments:       repos.TaskEnvironments,
+		reviews:                repos.Reviews,
+		resourceCleanups:       repos.ResourceCleanups,
+		statusSummaries:        repos.StatusSummaries,
+		eventBus:               eventBus,
+		logger:                 log,
+		discoveryConfig:        discoveryConfig,
+		branchFetcher:          newBranchFetcher(log.Zap()),
+		lastTaskActivity:       make(map[string]v1.ForegroundActivity),
+		lastTaskSubagentCount:  make(map[string]int),
+		lastTaskParked:         make(map[string]bool),
+		lastTaskParkedRevision: make(map[string]uint64),
 	}
 }
 

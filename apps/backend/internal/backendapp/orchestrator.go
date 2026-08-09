@@ -149,6 +149,11 @@ func provideOrchestrator(
 	// boot payload and task.updated events.
 	taskSvc.SetForegroundActivityProvider(orchestratorSvc)
 
+	// Let the task service read the live task-level parked-on-background-work
+	// projection so it can stamp the parked triple on task.updated events and
+	// trigger a publish on a parked-only OR flip (MUST-FIX #1, Review round 3).
+	taskSvc.SetTaskParkedProvider(orchestratorSvc)
+
 	// Let the task service stamp status_summary.queued_prompt_count on task
 	// list/snapshot payloads (initial-load backstop for the sidebar badge; the
 	// status-summary projector keeps the field live between loads).

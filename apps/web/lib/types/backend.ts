@@ -114,7 +114,9 @@ export type TaskEventPayload = {
   status_summary?: TaskStatusSummary | null;
   /** Runtime parked-on-background-work projection (OR of session parked states). */
   parked_on_background_work?: boolean;
-  /** Monotonic revision; consumer discards snapshots with lower revision. */
+  /** Process-global epoch (D1); a strictly higher epoch always wins the revision compare. */
+  parked_epoch?: number;
+  /** Monotonic revision; consumer discards snapshots with lower revision (same epoch only). */
   parked_revision?: number;
 };
 

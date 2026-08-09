@@ -36,6 +36,73 @@ type KanbanUpdateTask = {
   queuedAt?: string;
 };
 
+// kanban.update doesn't carry primarySessionId / primarySessionState / live
+// activity fields — those are set by task.updated WS events. Preserve
+// whatever the existing row already had.
+function buildKanbanTaskFromUpdate(
+  task: KanbanUpdateTask,
+  existing: KanbanTask | undefined,
+): KanbanTask {
+  const repoFields = mergeTaskRepositoryFields(existing, {
+    repositoryId: task.repository_id,
+    repositories: task.repositories,
+  });
+  return {
+    id: task.id,
+    workflowStepId: task.workflowStepId,
+    title: task.title,
+    description: task.description,
+    position: task.position ?? 0,
+    state: task.state,
+    ...repoFields,
+    primarySessionId: existing?.primarySessionId,
+    primarySessionState: existing?.primarySessionState,
+    primarySessionPendingAction: existing?.primarySessionPendingAction,
+    taskPendingAction: existing?.taskPendingAction,
+    interrupted: existing?.interrupted,
+    foregroundActivity: existing?.foregroundActivity,
+    parkedOnBackgroundWork: existing?.parkedOnBackgroundWork,
+    parkedEpoch: existing?.parkedEpoch,
+    parkedRevision: existing?.parkedRevision,
+    ...queueFields(task, existing),
+  };
+}
+
+// Fall back to the multi-snapshot's own value only when the main kanban
+// lookup returned `undefined` (task absent from kanban.tasks). An explicit
+// `null` means the primary was intentionally cleared and must NOT be
+// replaced by a stale snapshot value.
+function preserveIfUndefined<T>(value: T | undefined, fallback: T | undefined): T | undefined {
+  return value === undefined ? fallback : value;
+}
+
+function mergeMultiSnapshotTask(t: KanbanTask, fallback: KanbanTask | undefined): KanbanTask {
+  const repoFields = mergeTaskRepositoryFields(fallback, t);
+  return {
+    ...t,
+    ...repoFields,
+    primarySessionId: preserveIfUndefined(t.primarySessionId, fallback?.primarySessionId),
+    primarySessionState: preserveIfUndefined(t.primarySessionState, fallback?.primarySessionState),
+    primarySessionPendingAction: preserveIfUndefined(
+      t.primarySessionPendingAction,
+      fallback?.primarySessionPendingAction,
+    ),
+    taskPendingAction: preserveIfUndefined(t.taskPendingAction, fallback?.taskPendingAction),
+    foregroundActivity: preserveIfUndefined(t.foregroundActivity, fallback?.foregroundActivity),
+    interrupted: preserveIfUndefined(t.interrupted, fallback?.interrupted),
+    // AC-58a: follow the same omission-preserves-existing pattern as
+    // foregroundActivity above, not an unconditional overwrite — a task
+    // absent from state.kanban.tasks (different active board) must not wipe
+    // this multi-snapshot's own cached parked triple.
+    parkedOnBackgroundWork: preserveIfUndefined(
+      t.parkedOnBackgroundWork,
+      fallback?.parkedOnBackgroundWork,
+    ),
+    parkedEpoch: preserveIfUndefined(t.parkedEpoch, fallback?.parkedEpoch),
+    parkedRevision: preserveIfUndefined(t.parkedRevision, fallback?.parkedRevision),
+  };
+}
+
 export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "kanban.update": (message) => {
@@ -54,38 +121,15 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
       }));
 
       store.setState((state) => {
-        // kanban.update doesn't carry primarySessionId / primarySessionState —
-        // those are set by task.updated WS events. Build tasks inside setState
-        // so we can read existing values and preserve them.
+        // Build tasks inside setState so we can read existing values and
+        // preserve them (see buildKanbanTaskFromUpdate).
         const existingById = new Map(state.kanban.tasks.map((t) => [t.id, t]));
         const tasks: KanbanTask[] = message.payload.tasks
           // Filter out ephemeral tasks (e.g., quick chat)
           .filter((task: KanbanUpdateTask) => !task.is_ephemeral)
-          .map((task: KanbanUpdateTask) => {
-            const existing = existingById.get(task.id);
-            const repoFields = mergeTaskRepositoryFields(existing, {
-              repositoryId: task.repository_id,
-              repositories: task.repositories,
-            });
-            return {
-              id: task.id,
-              workflowStepId: task.workflowStepId,
-              title: task.title,
-              description: task.description,
-              position: task.position ?? 0,
-              state: task.state,
-              ...repoFields,
-              primarySessionId: existing?.primarySessionId,
-              primarySessionState: existing?.primarySessionState,
-              primarySessionPendingAction: existing?.primarySessionPendingAction,
-              taskPendingAction: existing?.taskPendingAction,
-              interrupted: existing?.interrupted,
-              foregroundActivity: existing?.foregroundActivity,
-              parkedOnBackgroundWork: existing?.parkedOnBackgroundWork,
-              parkedRevision: existing?.parkedRevision,
-              ...queueFields(task, existing),
-            };
-          });
+          .map((task: KanbanUpdateTask) =>
+            buildKanbanTaskFromUpdate(task, existingById.get(task.id)),
+          );
 
         const next = {
           ...state,
@@ -96,39 +140,9 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
         const snapshot = state.kanbanMulti.snapshots[workflowId];
         if (snapshot) {
           const existingMultiById = new Map(snapshot.tasks.map((t) => [t.id, t]));
-          const multiTasks = tasks.map((t) => {
-            const fallback = existingMultiById.get(t.id);
-            const repoFields = mergeTaskRepositoryFields(fallback, t);
-            // Fall back to the multi-snapshot's own value only when the main
-            // kanban lookup returned `undefined` (task absent from kanban.tasks).
-            // An explicit `null` means the primary was intentionally cleared
-            // and must NOT be replaced by a stale snapshot value.
-            return {
-              ...t,
-              ...repoFields,
-              primarySessionId:
-                t.primarySessionId === undefined ? fallback?.primarySessionId : t.primarySessionId,
-              primarySessionState:
-                t.primarySessionState === undefined
-                  ? fallback?.primarySessionState
-                  : t.primarySessionState,
-              primarySessionPendingAction:
-                t.primarySessionPendingAction === undefined
-                  ? fallback?.primarySessionPendingAction
-                  : t.primarySessionPendingAction,
-              taskPendingAction:
-                t.taskPendingAction === undefined
-                  ? fallback?.taskPendingAction
-                  : t.taskPendingAction,
-              foregroundActivity:
-                t.foregroundActivity === undefined
-                  ? fallback?.foregroundActivity
-                  : t.foregroundActivity,
-              interrupted: t.interrupted === undefined ? fallback?.interrupted : t.interrupted,
-              parkedOnBackgroundWork: t.parkedOnBackgroundWork,
-              parkedRevision: t.parkedRevision,
-            };
-          });
+          const multiTasks = tasks.map((t) =>
+            mergeMultiSnapshotTask(t, existingMultiById.get(t.id)),
+          );
           return {
             ...next,
             kanbanMulti: {

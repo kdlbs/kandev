@@ -370,15 +370,18 @@ func (s *Service) ParkedProjectionSnapshot(sessionID string) (bool, int64, uint6
 	return parked, s.parkedEpoch, revision
 }
 
-// TaskParkedProjectionSnapshot implements dto.TaskParkedProjectionProvider.
-func (s *Service) TaskParkedProjectionSnapshot(taskID string) (bool, uint64) {
+// TaskParkedProjectionSnapshot implements dto.TaskParkedProjectionProvider and
+// internal/task/service's TaskParkedProvider. epoch is s.parkedEpoch, the same
+// process-global epoch every session carrier already serializes (D1: identical
+// on every carrier and every session and task, never a second task-scoped value).
+func (s *Service) TaskParkedProjectionSnapshot(taskID string) (bool, int64, uint64) {
 	s.taskParkedStatesMu.Lock()
 	ts := s.taskParkedStates[taskID]
 	s.taskParkedStatesMu.Unlock()
 	if ts == nil {
-		return false, 0
+		return false, s.parkedEpoch, 0
 	}
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
-	return ts.parked, ts.revision
+	return ts.parked, s.parkedEpoch, ts.revision
 }

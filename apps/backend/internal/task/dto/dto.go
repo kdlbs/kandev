@@ -222,8 +222,14 @@ type TaskDTO struct {
 	// out-of-band probe. Runtime-only; never persisted. Task-level OR over all
 	// session parked states. Populated by EnrichTaskParked.
 	ParkedOnBackgroundWork bool `json:"parked_on_background_work"`
+	// ParkedEpoch is the same process-global backend-start-time epoch the session
+	// carrier uses (D1's "Revision epoch" section: identical on every carrier and
+	// every session and task). A change in epoch signals a backend restart;
+	// clients reset their parked revision cursor on epoch change (AC-77).
+	ParkedEpoch int64 `json:"parked_epoch"`
 	// ParkedRevision is the task's own monotonic counter for parked transitions,
-	// independent of any session revision. Clients use it to discard stale frames.
+	// independent of any session revision. Clients discard frames whose revision
+	// is lower than their current cursor (same-epoch frames only).
 	ParkedRevision uint64 `json:"parked_revision"`
 }
 

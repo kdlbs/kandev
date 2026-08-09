@@ -27,6 +27,25 @@ func (f *fakeActivityProvider) ActiveSubagentCount(sessionID string) int {
 	return f.counts[sessionID]
 }
 
+// fakeTaskParkedSnapshot is one task's fakeTaskParkedProvider entry.
+type fakeTaskParkedSnapshot struct {
+	parked   bool
+	epoch    int64
+	revision uint64
+}
+
+// fakeTaskParkedProvider resolves a per-task parked snapshot so the
+// task.updated publish trigger and payload can be exercised without a real
+// orchestrator. Mutate byID directly between assertions.
+type fakeTaskParkedProvider struct {
+	byID map[string]fakeTaskParkedSnapshot
+}
+
+func (f *fakeTaskParkedProvider) TaskParkedProjectionSnapshot(taskID string) (bool, int64, uint64) {
+	v := f.byID[taskID]
+	return v.parked, v.epoch, v.revision
+}
+
 // blockingActivityEventBus pauses a generating publication until the test
 // releases it.
 type blockingActivityEventBus struct {
@@ -210,6 +229,93 @@ func TestPublishTaskActivityIfChanged_EmitsOnCountOnlyChange(t *testing.T) {
 	svc.PublishTaskActivityIfChanged(ctx, "task-1")
 	if events := eventBus.GetPublishedEvents(); len(events) != 0 {
 		t.Fatalf("unchanged activity and count emitted %d events", len(events))
+	}
+}
+
+// TestPublishTaskActivityIfChanged_EmitsOnParkedOnlyChange is MUST-FIX #1 from
+// Review round 3: a task-level parked-on-background-work flip must reach
+// task.updated even when foreground_activity and active_subagent_count are
+// unchanged. Before the fix, PublishTaskActivityIfChanged's dedup compared
+// only those two fields and internal/task/service had no awareness of parked
+// state at all, so a parked-only OR flip was silently dropped (AC-62/78/85/49a).
+func TestPublishTaskActivityIfChanged_EmitsOnParkedOnlyChange(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+	createRunningSession(t, ctx, repo, "s1", "task-1", models.TaskSessionStateRunning)
+
+	svc.SetForegroundActivityProvider(&fakeActivityProvider{byID: map[string]v1.ForegroundActivity{
+		"s1": v1.ForegroundActivityBackground,
+	}})
+	parkedProvider := &fakeTaskParkedProvider{byID: map[string]fakeTaskParkedSnapshot{
+		"task-1": {parked: false, epoch: 42, revision: 0},
+	}}
+	svc.SetTaskParkedProvider(parkedProvider)
+
+	// Establish the baseline: activity=background, parked=false.
+	eventBus.ClearEvents()
+	svc.PublishTaskActivityIfChanged(ctx, "task-1")
+	if events := eventBus.GetPublishedEvents(); len(events) != 1 {
+		t.Fatalf("baseline publish: got %d events, want 1", len(events))
+	}
+
+	// Activity and count are UNCHANGED; only the task-level parked OR flips.
+	// This must still emit task.updated carrying the parked triple.
+	parkedProvider.byID["task-1"] = fakeTaskParkedSnapshot{parked: true, epoch: 42, revision: 1}
+	eventBus.ClearEvents()
+	svc.PublishTaskActivityIfChanged(ctx, "task-1")
+	events := eventBus.GetPublishedEvents()
+	if len(events) != 1 {
+		t.Fatalf("parked-only flip: got %d events, want 1 (this is MUST-FIX #1 — a parked-only OR flip must not be dropped)", len(events))
+	}
+	data, ok := events[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("event data is not a map: %#v", events[0].Data)
+	}
+	if got, _ := data["parked_on_background_work"].(bool); !got {
+		t.Fatalf("parked_on_background_work = %#v, want true", data["parked_on_background_work"])
+	}
+	if got, _ := data["parked_epoch"].(int64); got != 42 {
+		t.Fatalf("parked_epoch = %#v, want 42", data["parked_epoch"])
+	}
+	if got, _ := data["parked_revision"].(uint64); got != 1 {
+		t.Fatalf("parked_revision = %#v, want 1", data["parked_revision"])
+	}
+
+	// Idempotent: calling again with nothing changed does not re-emit.
+	eventBus.ClearEvents()
+	svc.PublishTaskActivityIfChanged(ctx, "task-1")
+	if events := eventBus.GetPublishedEvents(); len(events) != 0 {
+		t.Fatalf("no change must not re-emit, got %d events", len(events))
+	}
+}
+
+// TestTaskUpdated_AlwaysCarriesParkedTriple covers the general (non-activity-
+// triggered) publish path — e.g. PublishTaskUpdated, used for plain metadata
+// changes — which must still stamp the parked triple onto every task.updated
+// frame, mirroring the session-level session.activity_changed carrier's
+// "always include it" behavior (Review round 2, F3).
+func TestTaskUpdated_AlwaysCarriesParkedTriple(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+
+	svc.SetForegroundActivityProvider(&fakeActivityProvider{})
+	svc.SetTaskParkedProvider(&fakeTaskParkedProvider{byID: map[string]fakeTaskParkedSnapshot{
+		"task-1": {parked: true, epoch: 7, revision: 3},
+	}})
+
+	eventBus.ClearEvents()
+	svc.PublishTaskUpdated(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1"})
+	data := singlePublishedEventData(t, eventBus)
+	if got, _ := data["parked_on_background_work"].(bool); !got {
+		t.Fatalf("parked_on_background_work = %#v, want true", data["parked_on_background_work"])
+	}
+	if got, _ := data["parked_epoch"].(int64); got != 7 {
+		t.Fatalf("parked_epoch = %#v, want 7", data["parked_epoch"])
+	}
+	if got, _ := data["parked_revision"].(uint64); got != 3 {
+		t.Fatalf("parked_revision = %#v, want 3", data["parked_revision"])
 	}
 }
 

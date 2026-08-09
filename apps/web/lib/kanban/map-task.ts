@@ -56,6 +56,7 @@ export type TaskLike = {
   interrupted?: boolean;
   /** True when the task is WAITING_FOR_INPUT but background work is live. */
   parked_on_background_work?: boolean;
+  parked_epoch?: number;
   parked_revision?: number;
   foreground_activity?: ForegroundActivity | null;
   active_subagent_count?: number;
@@ -129,11 +130,15 @@ function pickWorkspaceFolders(source: TaskLike): KanbanTask["workspaceFolders"] 
   return source.workspace_folders?.map((folder) => ({ ...folder }));
 }
 
-function parkedFromSource(
+/** Resolve the parked-on-background-work triple from a wire payload, defaulting
+ *  absent fields per D9. Exported so other task-record producers (e.g.
+ *  lib/ssr/mapper.ts's snapshotToState) share this instead of re-deriving it. */
+export function parkedFromSource(
   source: TaskLike,
-): Pick<KanbanTask, "parkedOnBackgroundWork" | "parkedRevision"> {
+): Pick<KanbanTask, "parkedOnBackgroundWork" | "parkedEpoch" | "parkedRevision"> {
   return {
     parkedOnBackgroundWork: source.parked_on_background_work === true,
+    parkedEpoch: source.parked_epoch ?? 0,
     parkedRevision: source.parked_revision ?? 0,
   };
 }

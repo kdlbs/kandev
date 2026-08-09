@@ -87,7 +87,9 @@ export type KanbanState = {
     interrupted?: boolean;
     /** Runtime parked-on-background-work projection (OR over all sessions). */
     parkedOnBackgroundWork?: boolean;
-    /** Monotonic revision; consumer discards snapshots with lower revision. */
+    /** Process-global epoch (D1); a strictly higher epoch always wins the revision compare. */
+    parkedEpoch?: number;
+    /** Monotonic revision; consumer discards snapshots with lower revision (same epoch only). */
     parkedRevision?: number;
     /** Live subagents across this task's sessions; drives the board count chip. */
     activeSubagentCount?: number;
