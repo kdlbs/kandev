@@ -351,7 +351,7 @@ Tests are grouped by feature area in subdirectories under `tests/`. When creatin
 - **Merge related tests into the same file.** Tests covering the same feature (e.g., git commit body and pre-hooks) belong in one file with separate `test.describe` blocks. Don't create a new file for each narrow scenario.
 - **Import paths from subdirectories** use `../../` (e.g., `from "../../fixtures/test-base"`).
 - **Standalone root files** are allowed for truly cross-cutting tests that don't fit any group.
-- **Extract large shared helpers.** For large specs with shared setup or polling helpers, extract helpers into a sibling `*-helpers.ts` file once the spec approaches the repo file-size limit. Keep spec files focused on test scenarios; put reusable page polling, seeding, and Dockview cleanup helpers in the helper module.
+- **Extract shared helpers.** Extract helpers into a sibling `*-helpers.ts` file whenever they are used by multiple spec files, even when small; keep only scenario-specific setup in specs. Reusable page polling, seeding, and Dockview cleanup belong in the helper module.
 
 ## Test quality guidelines
 

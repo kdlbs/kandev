@@ -66,6 +66,32 @@ playwright-cli run-code "async page => {
 }"
 ```
 
+### Hold an upload request while asserting busy state
+
+For multipart or large-upload pending-state tests, match one exact endpoint and
+use a deterministic route handler. Resolve a `requestStarted` promise when the
+handler runs, assert the busy contract, then release a promise that lets the
+handler `route.fulfill` (or use `route.abort` for the failure path) and assert
+recovery. Do not hold `route.fetch()` across competing upload handlers; that can
+double-handle a route or corrupt gzip/body streams.
+
+```typescript
+let markStarted!: () => void;
+let release!: () => void;
+const requestStarted = new Promise<void>((resolve) => { markStarted = resolve; });
+const settle = new Promise<void>((resolve) => { release = resolve; });
+await page.route("**/api/uploads/exact-endpoint", async (route) => {
+  markStarted();
+  await settle;
+  await route.fulfill({ status: 200, json: { ok: true } });
+});
+await triggerUpload();
+await requestStarted;
+await expect(uploadButton).toHaveAttribute("aria-busy", "true");
+release();
+await expect(uploadButton).not.toHaveAttribute("aria-busy", "true");
+```
+
 ### Simulate Network Failures
 
 ```bash

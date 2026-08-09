@@ -293,7 +293,7 @@ plugin leaks a stale registration.
 
 ## Testing notes
 
-- jsdom drops `secure` cookies over `http`, so `document.cookie` reads back empty. To assert a cookie write in a Vitest unit test, intercept the setter with `Object.defineProperty(document, "cookie", { set: ... })` and restore it after.
+- jsdom drops `secure` cookies over `http`, so `document.cookie` reads back empty. To assert a cookie write in a Vitest unit test, intercept the setter with `Object.defineProperty(document, "cookie", { set: ... })` and restore it after. This setup does not provide jest-dom matchers such as `toBeDisabled`/`toBeEnabled`; assert native properties/attributes such as `HTMLButtonElement.disabled` and `aria-busy` unless the test setup is intentionally expanded.
 - jsdom synthetic mouse events do not reliably open Radix Tooltip. In component tests, use
   `TooltipProvider` and assert keyboard focus; cover pointer hover in Playwright with `locator.hover()`
   and a visible `role="tooltip"`, keeping regressions that jsdom cannot exercise.
