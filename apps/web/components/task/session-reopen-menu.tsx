@@ -201,13 +201,10 @@ function SessionReopenMenuItem({
         pending.permission,
       ) && (
         <span className="shrink-0">
-          {getSessionStateIcon(
-            session.state,
-            "h-3 w-3",
-            session.foreground_activity,
-            pending.clarification,
-            pending.permission,
-          )}
+          {getSessionStateIcon(session.state, "h-3 w-3", session.foreground_activity, {
+            hasPendingClarification: pending.clarification,
+            hasPendingPermission: pending.permission,
+          })}
         </span>
       )}
     </DropdownMenuItem>

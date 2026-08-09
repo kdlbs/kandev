@@ -65,6 +65,8 @@ export interface Task {
   foregroundActivity?: ForegroundActivity | null;
   /** True when the task's session was mid-turn when the backend died. */
   interrupted?: boolean;
+  /** True when the task is WAITING_FOR_INPUT but background work is live. */
+  parkedOnBackgroundWork?: boolean;
   /** Live subagents summed across this task's sessions; drives the count chip. */
   activeSubagentCount?: number;
   reviewStatus?: "pending" | "approved" | "changes_requested" | "rejected" | null;

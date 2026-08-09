@@ -71,6 +71,15 @@ function preserveOmittedField<K extends keyof KanbanTask>(
   }
 }
 
+// Epoch-based discard: preserve cached parked fields when the event omits both; clear when
+// parked_revision advances without parked_on_background_work (new probe cycle, task not parked).
+function preserveParkedFields(src: KanbanTask, dst: KanbanTask, ev: TaskEventPayload): void {
+  if (hasPayloadField(ev, "parked_on_background_work")) return;
+  const revPresent = hasPayloadField(ev, "parked_revision");
+  dst.parkedOnBackgroundWork = revPresent ? false : (src.parkedOnBackgroundWork ?? false);
+  if (!revPresent) dst.parkedRevision = src.parkedRevision ?? 0;
+}
+
 function mergeTaskUpdate(
   existing: KanbanTask | undefined,
   nextTask: KanbanTask,
@@ -88,49 +97,40 @@ function mergeTaskUpdate(
   if (!hasPayloadField(payload, "primary_session_id") && nextTask.primarySessionId === undefined) {
     merged.primarySessionId = existing.primarySessionId;
   }
-  if (
-    !hasPayloadField(payload, "primary_session_state") &&
-    nextTask.primarySessionState === undefined
-  ) {
-    merged.primarySessionState = existing.primarySessionState;
-  }
-  if (
-    !hasPayloadField(payload, "primary_session_pending_action") &&
-    nextTask.primarySessionPendingAction === undefined
-  ) {
-    merged.primarySessionPendingAction = existing.primarySessionPendingAction;
-  }
+  preserveOmittedField(existing, merged, payload, nextTask, {
+    payloadKey: "primary_session_state",
+    taskField: "primarySessionState",
+  });
+  preserveOmittedField(existing, merged, payload, nextTask, {
+    payloadKey: "primary_session_pending_action",
+    taskField: "primarySessionPendingAction",
+  });
   preservePrimaryExecutorFields(existing, merged, payload);
   if (!hasPayloadField(payload, "metadata")) merged.metadata = existing.metadata;
-  if (
-    !hasPayloadField(payload, "task_pending_action") &&
-    nextTask.taskPendingAction === undefined
-  ) {
-    merged.taskPendingAction = existing.taskPendingAction;
-  }
+  preserveOmittedField(existing, merged, payload, nextTask, {
+    payloadKey: "task_pending_action",
+    taskField: "taskPendingAction",
+  });
   // Preserve the task-level activity aggregate only when the event omits it
   // entirely (e.g. a lightweight kanban.update). A task.updated that carries an
   // explicit null clears a stale background-running reading, so it must win.
-  if (
-    !hasPayloadField(payload, "foreground_activity") &&
-    nextTask.foregroundActivity === undefined
-  ) {
-    merged.foregroundActivity = existing.foregroundActivity;
-  }
+  preserveOmittedField(existing, merged, payload, nextTask, {
+    payloadKey: "foreground_activity",
+    taskField: "foregroundActivity",
+  });
   preserveOmittedField(existing, merged, payload, nextTask, {
     payloadKey: "interrupted",
     taskField: "interrupted",
   });
-  if (
-    !hasPayloadField(payload, "active_subagent_count") &&
-    nextTask.activeSubagentCount === undefined
-  ) {
-    merged.activeSubagentCount = existing.activeSubagentCount;
-  }
+  preserveOmittedField(existing, merged, payload, nextTask, {
+    payloadKey: "active_subagent_count",
+    taskField: "activeSubagentCount",
+  });
   preserveOmittedField(existing, merged, payload, nextTask, {
     payloadKey: "status_summary",
     taskField: "statusSummary",
   });
+  preserveParkedFields(existing, merged, payload);
   return merged;
 }
 

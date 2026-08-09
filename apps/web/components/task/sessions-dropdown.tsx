@@ -472,13 +472,10 @@ function SessionRow({
         <Tooltip>
           <TooltipTrigger asChild>
             <div>
-              {getSessionStateIcon(
-                session.state,
-                "h-3.5 w-3.5",
-                session.foreground_activity,
-                pending.clarification,
-                pending.permission,
-              )}
+              {getSessionStateIcon(session.state, "h-3.5 w-3.5", session.foreground_activity, {
+                hasPendingClarification: pending.clarification,
+                hasPendingPermission: pending.permission,
+              })}
             </div>
           </TooltipTrigger>
           <TooltipContent side="left">

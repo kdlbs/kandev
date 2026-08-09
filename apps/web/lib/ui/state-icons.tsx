@@ -6,6 +6,7 @@ import {
   IconAlertTriangle,
   IconCheck,
   IconCircleCheck,
+  IconCircleDashed,
   IconCircleFilled,
   IconLoader,
   IconLoader2,
@@ -175,6 +176,35 @@ export function isTerminalInterruptedState(
 }
 
 /**
+ * Shared violet spinner affordance for a task whose session is parked on
+ * background work. Carries the accessible "Background work is running" label
+ * and tooltip, so sidebar rows present it consistently regardless of whether
+ * the task coarse state would otherwise show the WAITING_FOR_INPUT question
+ * mark or another icon.
+ */
+export function BackgroundWorkTaskIcon({ className }: { className?: string }) {
+  const { t } = useTranslation();
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          aria-label={t("task:backgroundWorkIsRunning")}
+          tabIndex={0}
+          className="flex shrink-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-1"
+        >
+          <IconCircleDashed
+            aria-hidden="true"
+            data-testid="task-state-background-running"
+            className={cn("shrink-0 animate-spin text-violet-500", className)}
+          />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="right">{t("task:backgroundWorkIsRunning")}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/**
  * Shared red alert affordance for a task whose session was mid-turn when the
  * backend died. Carries the accessible "Interrupted by restart" label and
  * tooltip, so every surface that renders the interrupted state (sidebar rows,
@@ -249,6 +279,8 @@ type TaskStateIconOptions = {
   hasPendingPermission?: boolean;
   /** True when the task's session was mid-turn when the backend died. */
   interrupted?: boolean;
+  /** True when the task is WAITING_FOR_INPUT but background work is live. */
+  parkedOnBackgroundWork?: boolean;
 };
 
 function getTaskStateIconConfig(state?: TaskState, options: TaskStateIconOptions = {}): IconConfig {
@@ -257,6 +289,7 @@ function getTaskStateIconConfig(state?: TaskState, options: TaskStateIconOptions
     foregroundActivity,
     hasPendingPermission = false,
     interrupted = false,
+    parkedOnBackgroundWork,
   } = options;
   if (shouldUsePermissionTaskIcon(hasPendingPermission)) {
     return PENDING_PERMISSION_ICON;
@@ -264,6 +297,10 @@ function getTaskStateIconConfig(state?: TaskState, options: TaskStateIconOptions
   if (hasPendingClarification) {
     return TASK_STATE_ICONS.WAITING_FOR_INPUT;
   }
+  // Parked: task is WAITING_FOR_INPUT but live background shell work is
+  // running. Show the background spinner rather than the question mark so the
+  // user knows the agent is still doing work.
+  if (parkedOnBackgroundWork) return TASK_BACKGROUND_ICON;
   // Explicit pending input wins first. Without it, the task-level
   // MOST-ACTIVE-WINS aggregate sits above the coarse task state, including a
   // stale WAITING_FOR_INPUT state.
@@ -299,29 +336,44 @@ function getSessionStateIconConfig(
   foregroundActivity?: ForegroundActivity | null,
   hasPendingClarification = false,
   hasPendingPermission = false,
+  parkedOnBackgroundWork = false,
 ): IconConfig {
   const canRequestInput = state === "RUNNING" || state === "WAITING_FOR_INPUT";
   if (canRequestInput && hasPendingPermission) return PENDING_PERMISSION_ICON;
   if (canRequestInput && hasPendingClarification) return SESSION_STATE_ICONS.WAITING_FOR_INPUT;
-  // Without pending input, background-running wins over the coarse foreground
-  // state so the session never reads as done while detached work remains live.
-  if (canRequestInput && foregroundActivity === "background") return SESSION_BACKGROUND_ICON;
+  // Parked or background-running: show the background spinner rather than the
+  // WAITING_FOR_INPUT question mark so the session never reads as idle while
+  // detached work remains live.
+  if (canRequestInput && (parkedOnBackgroundWork || foregroundActivity === "background")) {
+    return SESSION_BACKGROUND_ICON;
+  }
   if (!state) return DEFAULT_SESSION_ICON;
   return SESSION_STATE_ICONS[state] ?? DEFAULT_SESSION_ICON;
 }
+
+type SessionStateIconOptions = {
+  hasPendingClarification?: boolean;
+  hasPendingPermission?: boolean;
+  parkedOnBackgroundWork?: boolean;
+};
 
 export function getSessionStateIcon(
   state?: TaskSessionState,
   className?: string,
   foregroundActivity?: ForegroundActivity | null,
-  hasPendingClarification = false,
-  hasPendingPermission = false,
+  options: SessionStateIconOptions = {},
 ) {
+  const {
+    hasPendingClarification = false,
+    hasPendingPermission = false,
+    parkedOnBackgroundWork = false,
+  } = options;
   const config = getSessionStateIconConfig(
     state,
     foregroundActivity,
     hasPendingClarification,
     hasPendingPermission,
+    parkedOnBackgroundWork,
   );
   return <config.Icon className={cn("h-4 w-4", config.className, className)} />;
 }

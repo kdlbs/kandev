@@ -456,6 +456,64 @@ describe("TaskItem background-running lifecycle", () => {
   });
 });
 
+describe("TaskItem parked-on-background-work indicator (AC-23, AC-34)", () => {
+  // AC-23: when the task is WAITING_FOR_INPUT but background work is live, the
+  // sidebar row shows the violet background spinner instead of the question mark.
+  it("shows the violet spinner instead of the question mark when parked (AC-23)", () => {
+    renderTaskItem({
+      state: "WAITING_FOR_INPUT",
+      sessionState: "WAITING_FOR_INPUT",
+      foregroundActivity: null,
+      parkedOnBackgroundWork: true,
+    });
+
+    const icon = screen.getByTestId(BACKGROUND_ICON_TEST_ID);
+    expect(icon.classList.contains(VIOLET_SPINNER_CLASS)).toBe(true);
+    expect(icon.classList.contains(SPIN_CLASS)).toBe(true);
+    expect(screen.getByLabelText("Background work is running")).not.toBeNull();
+    expect(screen.queryByTestId(WAITING_FOR_INPUT_ICON_TEST_ID)).toBeNull();
+  });
+
+  // AC-34: parked also overrides the REVIEW check (background work is still live).
+  it("shows the violet spinner instead of the review check when parked on REVIEW (AC-34)", () => {
+    renderTaskItem({
+      state: "REVIEW",
+      sessionState: "COMPLETED",
+      foregroundActivity: null,
+      parkedOnBackgroundWork: true,
+    });
+
+    const icon = screen.getByTestId(BACKGROUND_ICON_TEST_ID);
+    expect(icon.classList.contains(VIOLET_SPINNER_CLASS)).toBe(true);
+    expect(screen.queryByTestId(TURN_FINISHED_ICON_TEST_ID)).toBeNull();
+  });
+
+  it("still shows the question mark when parkedOnBackgroundWork is false", () => {
+    renderTaskItem({
+      state: "WAITING_FOR_INPUT",
+      sessionState: "WAITING_FOR_INPUT",
+      foregroundActivity: null,
+      parkedOnBackgroundWork: false,
+    });
+
+    expect(screen.queryByTestId(WAITING_FOR_INPUT_ICON_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId(BACKGROUND_ICON_TEST_ID)).toBeNull();
+  });
+
+  it("lets pending clarification win over parked (needs-me always tops)", () => {
+    renderTaskItem({
+      state: "WAITING_FOR_INPUT",
+      sessionState: "WAITING_FOR_INPUT",
+      foregroundActivity: null,
+      parkedOnBackgroundWork: true,
+      hasPendingClarification: true,
+    });
+
+    expect(screen.queryByTestId(WAITING_FOR_INPUT_ICON_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId(BACKGROUND_ICON_TEST_ID)).toBeNull();
+  });
+});
+
 describe("TaskItem queued prompt count badge", () => {
   const QUEUED_BADGE_TEST_ID = "sidebar-task-queued-count";
 

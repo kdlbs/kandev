@@ -23,6 +23,7 @@ import { useTaskColor } from "@/hooks/use-task-color";
 import { TASK_COLOR_BAR_CLASS, type TaskColor } from "@/lib/task-colors";
 import type { ForegroundActivity, TaskState, TaskSessionState } from "@/lib/types/http";
 import {
+  BackgroundWorkTaskIcon,
   InterruptedTaskIcon,
   isTerminalInterruptedState,
   shouldUseQuestionTaskIcon,
@@ -76,6 +77,8 @@ type TaskItemProps = {
   hasPendingPermission?: boolean;
   /** True when the task's session was mid-turn when the backend died. */
   interrupted?: boolean;
+  /** True when the task is WAITING_FOR_INPUT but background work is live. */
+  parkedOnBackgroundWork?: boolean;
   parentTaskTitle?: string;
   isSubTask?: boolean;
   /** Whether the task is currently on the final ordered step of its workflow. */
@@ -164,47 +167,24 @@ function taskItemRowClick(
   return (e) => (onSelect ? onSelect(e) : onClick?.());
 }
 
-function BackgroundWorkTaskIcon() {
-  const { t } = useTranslation();
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          aria-label={t("task:backgroundWorkIsRunning")}
-          tabIndex={0}
-          className="mt-[1px] flex shrink-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-1"
-        >
-          <IconCircleDashed
-            aria-hidden="true"
-            data-testid="task-state-background-running"
-            className="h-3.5 w-3.5 shrink-0 animate-spin text-violet-500"
-          />
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="right">{t("task:backgroundWorkIsRunning")}</TooltipContent>
-    </Tooltip>
-  );
-}
-
 function TaskStateIcon({
   sessionState,
   state,
   foregroundActivity,
-  isInProgress,
   hasPendingClarification,
   hasPendingPermission,
   isOnLastWorkflowStep,
   interrupted,
+  parkedOnBackgroundWork,
 }: {
   sessionState?: TaskSessionState;
   state?: TaskState;
   foregroundActivity?: ForegroundActivity | null;
-  isInProgress: boolean;
   hasPendingClarification?: boolean;
   hasPendingPermission?: boolean;
   isOnLastWorkflowStep?: boolean;
-  /** True when the task's session was mid-turn when the backend died. */
   interrupted?: boolean;
+  parkedOnBackgroundWork?: boolean;
 }) {
   if (shouldUsePermissionTaskIcon(hasPendingPermission)) {
     return (
@@ -231,8 +211,11 @@ function TaskStateIcon({
       />
     );
   }
-  if (foregroundActivity === "background") {
-    return <BackgroundWorkTaskIcon />;
+  // Parked: WAITING_FOR_INPUT with live background work. Show the violet
+  // spinner rather than the question-mark so both the active-background and
+  // parked-background paths use the same tooltip affordance (AC-23, AC-34).
+  if (foregroundActivity === "background" || parkedOnBackgroundWork) {
+    return <BackgroundWorkTaskIcon className="h-3.5 w-3.5 mt-[1px]" />;
   }
   if (shouldUseQuestionTaskIcon(state)) {
     return (
@@ -251,9 +234,8 @@ function TaskStateIcon({
       />
     );
   }
-  // When the aggregate is unknown, a live turn safely falls back to the
-  // established generating spinner rather than a done affordance.
-  if (isInProgress) {
+  // When the aggregate is unknown, a live turn safely falls back to the established generating spinner.
+  if (computeIsInProgress(state, sessionState)) {
     return (
       <IconCircleDashed
         data-testid="task-state-running"
@@ -458,6 +440,7 @@ export const TaskItem = memo(function TaskItem({
   hasPendingClarification,
   hasPendingPermission,
   interrupted,
+  parkedOnBackgroundWork,
   isSubTask,
   depth,
   subtaskCount,
@@ -472,7 +455,6 @@ export const TaskItem = memo(function TaskItem({
   isOnLastWorkflowStep = false,
 }: TaskItemProps) {
   const effectiveMenuOpen = menuOpen || isDeleting === true;
-  const hasDiffStats = !!diffStats && (diffStats.additions > 0 || diffStats.deletions > 0);
   const taskColor = useTaskColor(taskId);
   const indent = computeRowIndent(resolveRowDepth(depth, isSubTask));
 
@@ -494,10 +476,10 @@ export const TaskItem = memo(function TaskItem({
         sessionState={sessionState}
         state={state}
         foregroundActivity={foregroundActivity}
-        isInProgress={computeIsInProgress(state, sessionState)}
         hasPendingClarification={hasPendingClarification}
         hasPendingPermission={hasPendingPermission}
         interrupted={interrupted}
+        parkedOnBackgroundWork={parkedOnBackgroundWork}
         isOnLastWorkflowStep={isOnLastWorkflowStep}
       />
       <TaskItemContent
@@ -517,7 +499,7 @@ export const TaskItem = memo(function TaskItem({
         issueInfo={issueInfo}
         agentErrorMessage={agentErrorMessage}
       />
-      {hasDiffStats ? (
+      {!!diffStats && (diffStats.additions > 0 || diffStats.deletions > 0) ? (
         <div className="mobile-task-actions-with-stats group/actions relative shrink-0 self-center flex items-center">
           <DiffStatsRight diffStats={diffStats!} menuOpen={effectiveMenuOpen} />
           <div className="mobile-task-actions-slot absolute inset-0 flex items-center justify-end">

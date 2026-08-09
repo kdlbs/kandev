@@ -81,6 +81,8 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
               taskPendingAction: existing?.taskPendingAction,
               interrupted: existing?.interrupted,
               foregroundActivity: existing?.foregroundActivity,
+              parkedOnBackgroundWork: existing?.parkedOnBackgroundWork,
+              parkedRevision: existing?.parkedRevision,
               ...queueFields(task, existing),
             };
           });
@@ -123,6 +125,8 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
                   ? fallback?.foregroundActivity
                   : t.foregroundActivity,
               interrupted: t.interrupted === undefined ? fallback?.interrupted : t.interrupted,
+              parkedOnBackgroundWork: t.parkedOnBackgroundWork,
+              parkedRevision: t.parkedRevision,
             };
           });
           return {

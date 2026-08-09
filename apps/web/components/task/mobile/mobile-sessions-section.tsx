@@ -129,13 +129,10 @@ function StateBadge({
       title={label}
       className="flex items-center gap-1 whitespace-nowrap text-[10px] font-medium leading-none text-muted-foreground shrink-0"
     >
-      {getSessionStateIcon(
-        state,
-        "h-3 w-3 shrink-0",
-        foregroundActivity,
-        pending.clarification,
-        pending.permission,
-      )}
+      {getSessionStateIcon(state, "h-3 w-3 shrink-0", foregroundActivity, {
+        hasPendingClarification: pending.clarification,
+        hasPendingPermission: pending.permission,
+      })}
       {label}
     </span>
   );

@@ -54,6 +54,9 @@ export type TaskLike = {
   task_pending_action?: TaskPendingAction | null;
   /** True when the task's session was mid-turn when the backend died. */
   interrupted?: boolean;
+  /** True when the task is WAITING_FOR_INPUT but background work is live. */
+  parked_on_background_work?: boolean;
+  parked_revision?: number;
   foreground_activity?: ForegroundActivity | null;
   active_subagent_count?: number;
   session_count?: number | null;
@@ -126,6 +129,15 @@ function pickWorkspaceFolders(source: TaskLike): KanbanTask["workspaceFolders"] 
   return source.workspace_folders?.map((folder) => ({ ...folder }));
 }
 
+function parkedFromSource(
+  source: TaskLike,
+): Pick<KanbanTask, "parkedOnBackgroundWork" | "parkedRevision"> {
+  return {
+    parkedOnBackgroundWork: source.parked_on_background_work === true,
+    parkedRevision: source.parked_revision ?? 0,
+  };
+}
+
 /**
  * Build a canonical {@link KanbanTask} from either an HTTP DTO or a WebSocket
  * payload. Both paths share this helper so a single publisher change can never
@@ -152,6 +164,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     taskPendingAction: pickPendingAction(source.task_pending_action),
     interrupted: source.interrupted,
     foregroundActivity: pickForegroundActivity(source.foreground_activity),
+    ...parkedFromSource(source),
     activeSubagentCount: source.active_subagent_count ?? undefined,
     sessionCount: source.session_count ?? undefined,
     reviewStatus: source.review_status ?? undefined,

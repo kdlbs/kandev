@@ -114,9 +114,10 @@ export function toSheetItem(
     workspaceMode: task.workspaceMode,
     state: task.state as TaskState | undefined,
     ...status,
-    // Same interruption marker the desktop sidebar reads — the mobile
-    // task-switcher row shares TaskItem rendering.
+    // Same interruption and parked markers the desktop sidebar reads — the
+    // mobile task-switcher row shares TaskItem rendering.
     interrupted: task.interrupted,
+    parkedOnBackgroundWork: task.parkedOnBackgroundWork ?? false,
     description: task.description,
     workflowId: task._workflowId,
     workflowName: ctx.workflowNameById.get(task._workflowId),

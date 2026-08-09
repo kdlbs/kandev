@@ -13,11 +13,14 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import {
+  BackgroundWorkTaskIcon,
   getSessionStateIcon,
   getTaskStateIcon,
   isTaskInFlight,
   shouldShowTaskRunningSpinner,
 } from "./state-icons";
+
+const ANIMATE_SPIN = "animate-spin";
 
 function iconType(node: ReactNode) {
   if (!isValidElement(node)) throw new Error("Expected React element");
@@ -278,7 +281,7 @@ describe("getSessionStateIcon — fine-grained busy tri-state", () => {
     // running affordance is deliberately left as it always was (static dot).
     const a = getSessionStateIcon("RUNNING", undefined, "generating");
     expect(iconType(a)).toBe(IconCircleFilled);
-    expect(iconClassName(a)).not.toContain("animate-spin");
+    expect(iconClassName(a)).not.toContain(ANIMATE_SPIN);
   });
 
   it("(a) defaults to the running dot when the substate is unknown", () => {
@@ -291,7 +294,7 @@ describe("getSessionStateIcon — fine-grained busy tri-state", () => {
     const b = getSessionStateIcon("WAITING_FOR_INPUT", undefined, "background");
     expect(iconType(b)).toBe(IconLoader2);
     expect(iconType(b)).not.toBe(IconCircleCheck);
-    expect(iconClassName(b)).toContain("animate-spin");
+    expect(iconClassName(b)).toContain(ANIMATE_SPIN);
   });
 
   it("(b) is visually distinct from (a) so the operator can tell them apart", () => {
@@ -332,45 +335,69 @@ describe("getSessionStateIcon — waiting-for-input variants", () => {
 
   it("uses the question icon for a pending clarification even while coarsely RUNNING", () => {
     // The agent stopped mid-turn to ask; the coarse state can still be RUNNING.
-    expect(iconType(getSessionStateIcon("RUNNING", undefined, null, true, false))).toBe(
-      IconMessageQuestion,
-    );
+    expect(
+      iconType(getSessionStateIcon("RUNNING", undefined, null, { hasPendingClarification: true })),
+    ).toBe(IconMessageQuestion);
   });
 
   it("uses the shield icon for a pending permission, taking precedence over clarification", () => {
-    expect(iconType(getSessionStateIcon("WAITING_FOR_INPUT", undefined, null, true, true))).toBe(
-      IconShieldQuestion,
-    );
+    expect(
+      iconType(
+        getSessionStateIcon("WAITING_FOR_INPUT", undefined, null, {
+          hasPendingClarification: true,
+          hasPendingPermission: true,
+        }),
+      ),
+    ).toBe(IconShieldQuestion);
   });
 
   it.each(["generating", "background"] as const)(
     "lets a pending clarification win over %s activity",
     (activity) => {
-      expect(iconType(getSessionStateIcon("RUNNING", undefined, activity, true, false))).toBe(
-        IconMessageQuestion,
-      );
+      expect(
+        iconType(
+          getSessionStateIcon("RUNNING", undefined, activity, { hasPendingClarification: true }),
+        ),
+      ).toBe(IconMessageQuestion);
     },
   );
 
   it("lets pending permission win over clarification and background activity", () => {
     expect(
-      iconType(getSessionStateIcon("WAITING_FOR_INPUT", undefined, "background", true, true)),
+      iconType(
+        getSessionStateIcon("WAITING_FOR_INPUT", undefined, "background", {
+          hasPendingClarification: true,
+          hasPendingPermission: true,
+        }),
+      ),
     ).toBe(IconShieldQuestion);
   });
 
   it("does not let stale pending input mask starting or terminal session states", () => {
-    expect(iconType(getSessionStateIcon("STARTING", undefined, "background", true, true))).toBe(
-      IconLoader2,
-    );
-    expect(iconType(getSessionStateIcon("COMPLETED", undefined, "generating", true, true))).toBe(
-      IconCircleCheck,
-    );
+    expect(
+      iconType(
+        getSessionStateIcon("STARTING", undefined, "background", {
+          hasPendingClarification: true,
+          hasPendingPermission: true,
+        }),
+      ),
+    ).toBe(IconLoader2);
+    expect(
+      iconType(
+        getSessionStateIcon("COMPLETED", undefined, "generating", {
+          hasPendingClarification: true,
+          hasPendingPermission: true,
+        }),
+      ),
+    ).toBe(IconCircleCheck);
   });
 
   it("distinguishes both waiting variants from done and from both running affordances by SHAPE", () => {
-    const clarification = iconType(getSessionStateIcon("WAITING_FOR_INPUT", undefined, null, true));
+    const clarification = iconType(
+      getSessionStateIcon("WAITING_FOR_INPUT", undefined, null, { hasPendingClarification: true }),
+    );
     const permission = iconType(
-      getSessionStateIcon("WAITING_FOR_INPUT", undefined, null, false, true),
+      getSessionStateIcon("WAITING_FOR_INPUT", undefined, null, { hasPendingPermission: true }),
     );
     const generating = iconType(getSessionStateIcon("RUNNING", undefined, "generating"));
     const background = iconType(getSessionStateIcon("RUNNING", undefined, "background"));
@@ -463,6 +490,100 @@ describe("shouldShowTaskRunningSpinner", () => {
     expect(shouldShowTaskRunningSpinner("TODO", "COMPLETED")).toBe(false);
     expect(shouldShowTaskRunningSpinner("TODO", "WAITING_FOR_INPUT")).toBe(false);
     expect(shouldShowTaskRunningSpinner("TODO", "IDLE")).toBe(false);
+  });
+});
+
+describe("getTaskStateIcon — parked-on-background-work (AC-52, AC-23, AC-34)", () => {
+  // AC-52: task-level icon overrides WAITING_FOR_INPUT when parked.
+  it("shows the background spinner (violet) instead of the question mark when parked (AC-52)", () => {
+    const icon = getTaskStateIcon("WAITING_FOR_INPUT", undefined, {
+      parkedOnBackgroundWork: true,
+    });
+    expect(iconType(icon)).toBe(IconLoader);
+    expect(iconType(icon)).not.toBe(IconMessageQuestion);
+    expect(iconClassName(icon)).toContain("text-violet-500");
+  });
+
+  // AC-23: parked overrides WAITING_FOR_INPUT even when that is the coarse state.
+  it("overrides the coarse WAITING_FOR_INPUT question mark on a REVIEW task when parked (AC-34)", () => {
+    const icon = getTaskStateIcon("REVIEW", undefined, { parkedOnBackgroundWork: true });
+    expect(iconType(icon)).toBe(IconLoader);
+    expect(iconType(icon)).not.toBe(IconCheck);
+  });
+
+  it("does not show the parked spinner when parkedOnBackgroundWork is false", () => {
+    const icon = getTaskStateIcon("WAITING_FOR_INPUT", undefined, {
+      parkedOnBackgroundWork: false,
+    });
+    expect(iconType(icon)).toBe(IconMessageQuestion);
+  });
+
+  it("lets pending clarification/permission win over parked (needs-me always tops)", () => {
+    expect(
+      iconType(
+        getTaskStateIcon("WAITING_FOR_INPUT", undefined, {
+          parkedOnBackgroundWork: true,
+          hasPendingClarification: true,
+        }),
+      ),
+    ).toBe(IconMessageQuestion);
+    expect(
+      iconType(
+        getTaskStateIcon("WAITING_FOR_INPUT", undefined, {
+          parkedOnBackgroundWork: true,
+          hasPendingPermission: true,
+        }),
+      ),
+    ).toBe(IconShieldQuestion);
+  });
+});
+
+describe("BackgroundWorkTaskIcon — tooltip affordance (AC-73a)", () => {
+  it("renders the spinning icon with the accessible label and tooltip", () => {
+    const { container } = render(
+      <TooltipProvider>
+        <BackgroundWorkTaskIcon />
+      </TooltipProvider>,
+    );
+    const icon = container.querySelector('[data-testid="task-state-background-running"]');
+    expect(icon).not.toBeNull();
+    expect(icon?.className).toContain(ANIMATE_SPIN);
+    expect(icon?.className).toContain("text-violet-500");
+    const trigger = container.querySelector('[aria-label="Background work is running"]');
+    expect(trigger).not.toBeNull();
+  });
+
+  it("applies a custom className to the icon element", () => {
+    const { container } = render(
+      <TooltipProvider>
+        <BackgroundWorkTaskIcon className="h-3.5 w-3.5 mt-[1px]" />
+      </TooltipProvider>,
+    );
+    const icon = container.querySelector('[data-testid="task-state-background-running"]');
+    expect(icon?.className).toContain("h-3.5");
+    expect(icon?.className).toContain("mt-[1px]");
+  });
+});
+
+describe("getSessionStateIcon — parked session (AC-59)", () => {
+  it("shows the background spinner when the session is parked on background work (AC-59)", () => {
+    const icon = getSessionStateIcon("WAITING_FOR_INPUT", undefined, null, {
+      parkedOnBackgroundWork: true,
+    });
+    expect(iconType(icon)).toBe(IconLoader2);
+    expect(iconType(icon)).not.toBe(IconMessageQuestion);
+    expect(iconClassName(icon)).toContain(ANIMATE_SPIN);
+  });
+
+  it("shows the background spinner for a RUNNING-then-parked session (AC-59)", () => {
+    const icon = getSessionStateIcon("RUNNING", undefined, null, { parkedOnBackgroundWork: true });
+    expect(iconType(icon)).toBe(IconLoader2);
+    expect(iconClassName(icon)).toContain(ANIMATE_SPIN);
+  });
+
+  it("still shows the question mark when not parked (AC-59 negative)", () => {
+    const icon = getSessionStateIcon("WAITING_FOR_INPUT", undefined, null, {});
+    expect(iconType(icon)).toBe(IconMessageQuestion);
   });
 });
 
