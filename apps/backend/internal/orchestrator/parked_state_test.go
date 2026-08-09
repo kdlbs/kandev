@@ -77,20 +77,43 @@ func TestParkedState_KindFilterSubagentDoesNotSetObservedDetached(t *testing.T) 
 }
 
 // TestParkedState_TurnMarkerIncrementsOnTurnStarted verifies that each
-// turn_started event increments turnMarker (AC-41b).
+// turn_started event increments turnMarker for an already-attested session
+// (AC-41a's duplicate clause), and that observedDetached is cleared by the
+// first one (D3).
 func TestParkedState_TurnMarkerIncrementsOnTurnStarted(t *testing.T) {
 	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
-	const sessionID = "session-turns"
+	const taskID, sessionID, executionID = "task-turns", "session-turns", "exec-turns"
+
+	// A row only exists after an attestation (Entry lifecycle: turn_started
+	// never creates one on its own — AC-41a's final clause).
+	dispatchToolCall(svc, taskID, sessionID, executionID, "tool-turns", shellToolCallPayload())
 
 	dispatchTurnStarted(svc, sessionID)
 	dispatchTurnStarted(svc, sessionID)
 
 	ps := svc.parkedStateFor(sessionID)
 	if ps == nil {
-		t.Fatal("expected parked state entry after turn_started, got nil")
+		t.Fatal("expected parked state entry after attestation, got nil")
 	}
 	if ps.turnMarker != 2 {
 		t.Fatalf("turnMarker = %d after 2 turn_started events, want 2", ps.turnMarker)
+	}
+	if ps.observedDetached {
+		t.Fatal("expected observedDetached=false: turn_started must clear it (D3)")
+	}
+}
+
+// TestParkedState_TurnStartedNoOpForUnknownSession verifies AC-41a's final
+// clause directly through the production event path: a turn_started for a
+// session that was never attested creates no parkedState row.
+func TestParkedState_TurnStartedNoOpForUnknownSession(t *testing.T) {
+	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	const sessionID = "session-turns-unknown"
+
+	dispatchTurnStarted(svc, sessionID)
+
+	if svc.parkedStateFor(sessionID) != nil {
+		t.Fatal("expected no parked state entry for a session that was never attested")
 	}
 }
 
@@ -108,7 +131,7 @@ func TestParkedState_ClearedOnSessionEviction(t *testing.T) {
 	}
 
 	// Force-clear via clearTurnActivity (session removal path).
-	svc.clearTurnActivity(sessionID)
+	svc.clearTurnActivity(context.Background(), taskID, sessionID)
 
 	if svc.parkedStateFor(sessionID) != nil {
 		t.Fatal("expected parked state deleted after clearTurnActivity, got non-nil")

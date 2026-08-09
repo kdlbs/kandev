@@ -198,7 +198,7 @@ func TestForegroundActivity_ExportedValue(t *testing.T) {
 
 	// clearTurnActivity models a turn-close / restart-adjacent reset back to safe.
 	svc.registerBackgroundTask(s, "t2")
-	svc.clearTurnActivity(s)
+	svc.clearTurnActivity(t.Context(), "", s)
 	if got := svc.ForegroundActivity(s); got != v1.ForegroundActivityGenerating {
 		t.Fatalf("after clearTurnActivity, got %q, want generating", got)
 	}
@@ -251,7 +251,7 @@ func TestTurnActivity_ForegroundBackgroundTransitions(t *testing.T) {
 
 	// Clearing turn activity resets to the default.
 	svc.registerBackgroundTask(s, "t4")
-	svc.clearTurnActivity(s)
+	svc.clearTurnActivity(t.Context(), "", s)
 	if !svc.isForegroundTurnGenerating(s) {
 		t.Fatal("clearTurnActivity must reset to the foreground-generating default")
 	}

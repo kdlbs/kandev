@@ -2251,6 +2251,10 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 	// its cache after the provider reset succeeds and must not receive stale data
 	// back through the final processOnEnter state event.
 	clearInMemoryContextWindow(session)
+	// Entry lifecycle (AC-85): an agent-context reset discards the turn the
+	// parked row described. Evict (reduce, not remove) rather than delete —
+	// the session continues to exist, and a still-parked row un-parks first.
+	s.evictParkedState(ctx, taskID, sessionID, false)
 	return true
 }
 

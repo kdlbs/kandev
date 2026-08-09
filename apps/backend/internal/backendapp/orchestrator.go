@@ -74,7 +74,7 @@ func provideOrchestrator(
 	taskRepoAdapter := &taskRepositoryAdapter{repo: taskRepo, svc: taskSvc}
 	agentManagerClient := newLifecycleAdapter(lifecycleMgr, agentRegistry, log)
 
-	serviceCfg := orchestrator.DefaultServiceConfig()
+	serviceCfg := orchestrator.DefaultServiceConfig(log)
 	serviceCfg.ClaudeBackgroundPromptHandoff =
 		cfg != nil && cfg.Features.ClaudeBackgroundPromptHandoff
 	serviceCfg.ClaudeMidTurnSteering =

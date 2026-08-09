@@ -68,18 +68,47 @@ func (s *Service) parkedStateFor(sessionID string) *sessionParkedState {
 	return s.parkedStates[sessionID]
 }
 
-// deleteParkedState removes the session's parked state entry on execution
-// retirement, so the next execution starts fresh.
-func (s *Service) deleteParkedState(sessionID string) {
-	if sessionID == "" {
-		return
-	}
+// markObservedDetached records that a registered recogniser attested a
+// detached shell launch during the current turn (D3, AC-69/AC-69a). Creates
+// the session's parkedState row if this is the first attestation ever seen
+// for it. The lookup-or-create and the field write happen inside one
+// critical section — never through getOrCreateParkedState followed by an
+// unlocked field write, which races the sampler goroutine's locked reads of
+// the same field.
+func (s *Service) markObservedDetached(sessionID string) {
 	s.parkedStatesMu.Lock()
 	defer s.parkedStatesMu.Unlock()
-	if ps, ok := s.parkedStates[sessionID]; ok {
-		ps.stopSampler()
+	if s.parkedStates == nil {
+		s.parkedStates = make(map[string]*sessionParkedState)
 	}
-	delete(s.parkedStates, sessionID)
+	ps, ok := s.parkedStates[sessionID]
+	if !ok {
+		ps = &sessionParkedState{sessionID: sessionID}
+		s.parkedStates[sessionID] = ps
+	}
+	ps.observedDetached = true
+}
+
+// clearObservedDetachedOnTurnStarted implements D3's turn-boundary rule: on
+// every turn_started for a session with an existing parkedState row, it
+// clears observedDetached (idempotent — a plain set-to-false) and increments
+// turnMarker (NOT idempotent — it moves on every event, duplicates included,
+// per D2/AC-41a's fourth clause) in the same critical section, and resets the
+// sampler's in-flight sample state since a new turn invalidates the question
+// any outstanding probe was asked. A turn_started for a session with no
+// parkedState row is a no-op: it creates no entry and increments no marker
+// (AC-41a's final clause).
+func (s *Service) clearObservedDetachedOnTurnStarted(sessionID string) {
+	s.parkedStatesMu.Lock()
+	defer s.parkedStatesMu.Unlock()
+	ps := s.parkedStates[sessionID]
+	if ps == nil {
+		return
+	}
+	ps.observedDetached = false
+	ps.turnMarker++
+	ps.stopSampler()
+	ps.lastSample = ""
 }
 
 // getOrCreateTaskParkedState returns the task's parked state, creating it if absent.

@@ -161,8 +161,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		s.handleAgentLogEvent(ctx, payload)
 
 	case streams.EventTypeTurnStarted:
-		s.getOrCreateParkedState(sessionID).turnMarker++
-		s.resetParkedSampler(sessionID)
+		s.clearObservedDetachedOnTurnStarted(sessionID)
 	}
 }
 
@@ -375,7 +374,7 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 	if n := payload.Data.Normalized; n != nil &&
 		n.IsDetachedBackgroundLaunch() &&
 		backgroundWorkKind(n) == streams.BackgroundWorkKindShell {
-		s.getOrCreateParkedState(payload.SessionID).observedDetached = true
+		s.markObservedDetached(payload.SessionID)
 	}
 
 	// A top-level spawned background task (subagent / run-in-background shell)
@@ -876,6 +875,11 @@ func (s *Service) updateTaskSessionStateWithHook(
 
 	if nextState == models.TaskSessionStateWaitingForInput {
 		s.onSessionParkedHook(ctx, taskID, sessionID)
+	} else if oldState == models.TaskSessionStateWaitingForInput {
+		// AC-53/AC-68: the session-state term of the formula just went
+		// false. Un-park immediately without taking a further sample —
+		// last_sample is not re-read for this transition.
+		s.unparkOnStateLeave(ctx, taskID, sessionID)
 	}
 
 	s.republishTaskActivityOnSettle(ctx, taskID, oldState, nextState)

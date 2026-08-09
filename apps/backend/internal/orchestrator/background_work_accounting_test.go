@@ -1310,8 +1310,8 @@ func TestClearTurnActivity_InvalidatesOutstandingTokensAndIsIdempotent(t *testin
 		t.Fatal("failed to create foreground claim")
 	}
 
-	svc.clearTurnActivity(sessionID)
-	svc.clearTurnActivity(sessionID)
+	svc.clearTurnActivity(t.Context(), "", sessionID)
+	svc.clearTurnActivity(t.Context(), "", sessionID)
 
 	if svc.releaseForegroundClaim(claim) {
 		t.Fatal("deleted activity record accepted a stale foreground claim")

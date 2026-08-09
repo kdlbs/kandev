@@ -49,7 +49,7 @@ func TestRegisterMCPAndDebugRoutesWiresCoordinatorTaskStopper(t *testing.T) {
 	eventBus := bus.NewMemoryEventBus(log)
 	taskRepoAdapter := &taskRepositoryAdapter{repo: harness.taskRepo, svc: harness.taskSvc}
 	orchestratorSvc := orchestrator.NewService(
-		orchestrator.DefaultServiceConfig(), eventBus, nil,
+		orchestrator.DefaultServiceConfig(log), eventBus, nil,
 		taskRepoAdapter, harness.taskRepo, nil, nil, nil, log,
 	)
 	lifecycleMgr := lifecycle.NewManager(

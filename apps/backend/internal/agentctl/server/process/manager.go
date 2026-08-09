@@ -216,8 +216,9 @@ type Manager struct {
 	mainReapPending  atomic.Bool
 	// lastPromptAt stores the unix-nanosecond timestamp of the most recent
 	// agent.prompt arrival. Zero means no prompt has been received yet.
-	// Written by RecordTurnStart (called from the WS prompt handler);
-	// read by ProbeProcessTree. Uses atomic to avoid holding mu.
+	// Written by RecordTurnStart (called from the ACP adapter's turn_started
+	// barrier callback); read by ProbeProcessTree. Uses atomic to avoid
+	// holding mu.
 	lastPromptAt atomic.Int64
 	// stopChClosed guards close(stopCh), which is the only part of teardown
 	// that is not naturally idempotent. It is reset wherever stopCh itself is
@@ -1216,6 +1217,7 @@ func (m *Manager) buildAdapterConfig() error {
 		AssumeMcpSse:        m.cfg.AssumeMcpSse,
 		AssumeMcpHttp:       m.cfg.AssumeMcpHttp,
 		RequiresProcessKill: m.cfg.RequiresProcessKill,
+		RecordTurnStart:     m.RecordTurnStart,
 	}
 
 	// Configure one-shot mode when a continue command is provided.
@@ -1767,7 +1769,11 @@ func (m *Manager) agentPID() int {
 }
 
 // RecordTurnStart stamps the time of the most recent agent.prompt arrival.
-// Called from the WebSocket prompt handler on the serialised WS goroutine.
+// Called from inside the ACP adapter's syncNotifQueueThen barrier callback —
+// the same ordered callback that emits turn_started — on the update worker,
+// guaranteed to precede conn.Prompt (D3, AC-41b). Never call this from
+// anywhere else: a stamp without its matching event is exactly the drift
+// that guarantee exists to prevent.
 func (m *Manager) RecordTurnStart(t time.Time) {
 	m.lastPromptAt.Store(t.UnixNano())
 }
@@ -1811,7 +1817,7 @@ func (m *Manager) ProbeProcessTree(ctx context.Context, acpSessionID string) str
 	if turnRef.IsZero() {
 		return probeResultUnknown
 	}
-	budget := parseProbeEnvBudget()
+	budget := parseProbeEnvBudget(m.logger)
 	probeCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	return walkProcessTree(probeCtx, pid, turnRef)

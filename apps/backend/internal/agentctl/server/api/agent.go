@@ -548,8 +548,13 @@ func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Messag
 
 	// Cancel any pending permissions so the agent isn't blocked waiting for
 	// the user to approve a previous tool call while processing the new prompt.
+	// The turn-start timestamp is NOT recorded here: D3/AC-41b require it to
+	// be stamped from inside the ACP adapter's syncNotifQueueThen barrier
+	// callback, the same one that emits turn_started, so the two can never
+	// drift apart. Recording it here would also miss the synthetic
+	// ScheduleWakeup path entirely, since fireWakeup never reaches this
+	// handler.
 	s.procMgr.CancelPendingPermissions()
-	s.procMgr.RecordTurnStart(time.Now())
 
 	// Start prompt processing asynchronously.
 	// Completion is signaled via the WebSocket complete event, not this response.

@@ -103,10 +103,12 @@ func TestWalkProcessTree_Unknown(t *testing.T) {
 	})
 }
 
-// TestParseProbeEnvBudget verifies that non-positive values are rejected (AC-81).
+// TestParseProbeEnvBudget verifies that non-positive values are rejected
+// (AC-81), reading the contracted KANDEV_PARKED_PROBE_BUDGET key with a
+// 250ms default.
 func TestParseProbeEnvBudget(t *testing.T) {
-	const envKey = "KANDEV_BACKGROUND_PROBE_BUDGET"
-	const defaultBudget = 5 * time.Second
+	const envKey = "KANDEV_PARKED_PROBE_BUDGET"
+	const defaultBudget = 250 * time.Millisecond
 
 	cases := []struct {
 		name string
@@ -123,7 +125,7 @@ func TestParseProbeEnvBudget(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv(envKey, tc.val)
-			got := parseProbeEnvBudget()
+			got := parseProbeEnvBudget(nil)
 			assert.Equal(t, tc.want, got)
 		})
 	}

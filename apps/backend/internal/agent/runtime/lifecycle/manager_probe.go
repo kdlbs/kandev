@@ -23,6 +23,15 @@ type BackgroundProbe interface {
 // "unknown" so the feature degrades gracefully — a missing or unroutable
 // session never causes a false-park.
 func (m *Manager) ProbeBackgroundWorkloads(ctx context.Context, kandevSessionID string) (string, error) {
+	// AC-46's ninth and tenth conditions: an empty Kandev session id, and a
+	// caller context already done on entry, both resolve to unknown with
+	// nothing put on the wire — checked before any lookup.
+	if kandevSessionID == "" {
+		return sshStatusUnknown, nil
+	}
+	if ctx.Err() != nil {
+		return sshStatusUnknown, nil
+	}
 	execution, exists := m.executionStore.GetBySessionID(kandevSessionID)
 	if !exists || execution == nil {
 		return sshStatusUnknown, nil

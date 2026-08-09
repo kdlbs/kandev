@@ -311,7 +311,7 @@ func NewOrchestratorTestServer(t *testing.T) *OrchestratorTestServer {
 	taskRepoAdapter := &taskRepositoryAdapter{repo: taskRepo, svc: taskSvc}
 
 	// Create orchestrator service
-	cfg := orchestrator.DefaultServiceConfig()
+	cfg := orchestrator.DefaultServiceConfig(log)
 	cfg.Scheduler.ProcessInterval = 50 * time.Millisecond // Faster for tests
 	orchestratorSvc := orchestrator.NewService(cfg, eventBus, agentManager, taskRepoAdapter, taskRepo, nil, nil, nil, log)
 

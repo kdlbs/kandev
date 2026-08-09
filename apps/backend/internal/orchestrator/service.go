@@ -71,6 +71,8 @@ type ServiceConfig struct {
 
 	// BackgroundSampleInterval is the ticker period for the parked-on-background-work
 	// sampling loop while a session is WAITING_FOR_INPUT with observed_detached set.
+	// Zero disables periodic sampling entirely (AC-74) — it is NOT "unset".
+	// Negative is rejected and falls back to the default (AC-81a).
 	BackgroundSampleInterval time.Duration
 }
 
@@ -82,39 +84,63 @@ type AttachmentReader interface {
 	OpenClaimed(ctx context.Context, id, taskID, sessionID string) (io.ReadCloser, string, string, int64, error)
 }
 
-// DefaultServiceConfig returns default configuration
-func DefaultServiceConfig() ServiceConfig {
+// DefaultServiceConfig returns default configuration. log may be nil (used by
+// tests); when non-nil it receives the AC-81/AC-81a warnings for a rejected
+// probe-budget or probe-interval env var.
+func DefaultServiceConfig(log *logger.Logger) ServiceConfig {
 	return ServiceConfig{
 		Scheduler:                scheduler.DefaultSchedulerConfig(),
 		QueueSize:                1000,
 		QueueGroup:               "orchestrator",
-		BackgroundProbeBudget:    parseBackgroundProbeBudget(),
-		BackgroundSampleInterval: parseEnvDuration("KANDEV_BACKGROUND_SAMPLE_INTERVAL", 30*time.Second),
+		BackgroundProbeBudget:    parseParkedProbeBudget(log),
+		BackgroundSampleInterval: parseParkedProbeInterval(log),
 	}
 }
 
-// parseBackgroundProbeBudget reads KANDEV_BACKGROUND_PROBE_BUDGET and rejects
-// non-positive values (AC-81), returning the default of 5s when the env var
-// is absent, invalid, or non-positive.
-func parseBackgroundProbeBudget() time.Duration {
-	const defaultBudget = 5 * time.Second
-	d := parseEnvDuration("KANDEV_BACKGROUND_PROBE_BUDGET", defaultBudget)
-	if d <= 0 {
-		return defaultBudget
+// parkedProbeBudgetDefault and parkedProbeIntervalDefault are the contracted
+// defaults (AC-81, AC-81a).
+const (
+	parkedProbeBudgetDefault   = 250 * time.Millisecond
+	parkedProbeIntervalDefault = 30 * time.Second
+)
+
+// parseParkedProbeBudget reads KANDEV_PARKED_PROBE_BUDGET and rejects
+// non-positive values (AC-81), logging a warning and returning the 250ms
+// default in that case.
+func parseParkedProbeBudget(log *logger.Logger) time.Duration {
+	const key = "KANDEV_PARKED_PROBE_BUDGET"
+	raw := os.Getenv(key)
+	if raw == "" {
+		return parkedProbeBudgetDefault
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		if log != nil {
+			log.Warn("invalid or non-positive probe budget, using default",
+				zap.String("env", key), zap.String("value", raw), zap.Duration("default", parkedProbeBudgetDefault))
+		}
+		return parkedProbeBudgetDefault
 	}
 	return d
 }
 
-// parseEnvDuration parses a duration env var, returning defaultValue when the
-// var is absent or unparseable. Accepts any value time.ParseDuration accepts.
-func parseEnvDuration(key string, defaultValue time.Duration) time.Duration {
-	v := os.Getenv(key)
-	if v == "" {
-		return defaultValue
+// parseParkedProbeInterval reads KANDEV_PARKED_PROBE_INTERVAL. Zero is
+// accepted as-is and disables periodic sampling (AC-74) — it is not treated
+// as "unset". A negative value is rejected, logs a warning, and falls back
+// to the 30s default (AC-81a).
+func parseParkedProbeInterval(log *logger.Logger) time.Duration {
+	const key = "KANDEV_PARKED_PROBE_INTERVAL"
+	raw := os.Getenv(key)
+	if raw == "" {
+		return parkedProbeIntervalDefault
 	}
-	d, err := time.ParseDuration(v)
-	if err != nil {
-		return defaultValue
+	d, err := time.ParseDuration(raw)
+	if err != nil || d < 0 {
+		if log != nil {
+			log.Warn("invalid or negative probe interval, using default",
+				zap.String("env", key), zap.String("value", raw), zap.Duration("default", parkedProbeIntervalDefault))
+		}
+		return parkedProbeIntervalDefault
 	}
 	return d
 }

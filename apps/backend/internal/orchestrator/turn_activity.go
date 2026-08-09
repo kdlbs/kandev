@@ -800,16 +800,19 @@ func (s *Service) retireExecutionActivityAndPublish(
 	}
 	if publication.retired {
 		// The last execution for this session's activity record retired; the
-		// session is done with this run. Delete the parked state so the next
-		// execution starts with a fresh observed_detached=false.
-		s.deleteParkedState(sessionID)
+		// session is done with this run. Evict (reduce, not remove) the
+		// parked state — AC-85 — so the next execution starts with a fresh
+		// observed_detached=false while a still-parked row un-parks first.
+		s.evictParkedState(ctx, taskID, sessionID, false)
 	}
 }
 
 // clearTurnActivity drops all tracked activity for a session. Foreground turn
 // completion deliberately does not call it because detached work may outlive
-// that turn; execution teardown and session removal do.
-func (s *Service) clearTurnActivity(sessionID string) {
+// that turn; execution teardown and session removal do. Session removal is
+// the only caller, so the parked state row is dropped outright (remove=true)
+// rather than reduced — nothing will ever read it again.
+func (s *Service) clearTurnActivity(ctx context.Context, taskID, sessionID string) {
 	if sessionID == "" {
 		return
 	}
@@ -825,7 +828,7 @@ func (s *Service) clearTurnActivity(sessionID string) {
 		ta.mu.Unlock()
 	}
 	s.foregroundActivityMu.Unlock()
-	s.deleteParkedState(sessionID)
+	s.evictParkedState(ctx, taskID, sessionID, true)
 }
 
 // isForegroundTurnGenerating reports whether the session's foreground agent turn

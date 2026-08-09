@@ -12,6 +12,7 @@ package adapter
 import (
 	"context"
 	"io"
+	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -292,6 +293,10 @@ type Config struct {
 	// (opencode acp). The process manager uses the adapter's return value to
 	// decide whether to kill the entire process group on shutdown.
 	RequiresProcessKill bool
+
+	// RecordTurnStart is forwarded verbatim to shared.Config.RecordTurnStart —
+	// see that field's doc comment for the ordering contract it must satisfy.
+	RecordTurnStart func(time.Time)
 }
 
 // ToSharedConfig converts this Config to the shared.Config used by transport adapters.
@@ -323,6 +328,7 @@ func (c *Config) ToSharedConfig() *shared.Config {
 		AssumeMcpSse:        c.AssumeMcpSse,
 		AssumeMcpHttp:       c.AssumeMcpHttp,
 		RequiresProcessKill: c.RequiresProcessKill,
+		RecordTurnStart:     c.RecordTurnStart,
 	}
 }
 

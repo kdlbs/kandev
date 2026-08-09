@@ -59,6 +59,15 @@ type Config struct {
 	// adapter's return value to decide whether to kill the entire process
 	// group on shutdown so MCP child processes don't leak.
 	RequiresProcessKill bool
+
+	// RecordTurnStart stamps the process manager's recorded turn-start time
+	// (process.Manager.RecordTurnStart). It MUST be called from inside the
+	// same ordered callback that emits the turn_started stream event — never
+	// from outside sendPrompt, and never on a code path a synthetic
+	// ScheduleWakeup dispatch can bypass — so the probe's baseline and the
+	// attestation-clearing boundary can never drift apart (D3, AC-41b). Nil
+	// when the caller doesn't wire background-work liveness tracking.
+	RecordTurnStart func(time.Time)
 }
 
 // GetPermissionTimeout returns the configured permission timeout or the default.

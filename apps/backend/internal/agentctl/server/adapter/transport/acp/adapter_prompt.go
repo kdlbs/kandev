@@ -142,11 +142,20 @@ func (a *Adapter) sendPrompt(
 
 	// Emit turn_started through the notifQueue FIFO so it lands on the
 	// ordered consumer before any tool-call attestations from the new turn.
-	// Both the emit AND any future turn-reference stamp go inside the callback
-	// so they are guaranteed to precede conn.Prompt (AC-41b, AC-79a).
-	// asyncTurnMu is NOT held here — beginPromptTurn has already released it,
-	// and the update worker needs it for maybeScheduleAsyncTurnComplete (AC-41b).
+	// Both the emit AND the turn-reference stamp happen inside this callback
+	// so they are guaranteed to precede conn.Prompt (AC-41b, AC-79a) and can
+	// never drift apart — a builder MUST NOT stamp RecordTurnStart from
+	// anywhere else, including a code path a synthetic ScheduleWakeup
+	// dispatch (fireWakeup) can bypass. asyncTurnMu is NOT held here —
+	// beginPromptTurn has already released it, and the update worker needs it
+	// for maybeScheduleAsyncTurnComplete (AC-41b). If the barrier returns
+	// false, or the worker skips the callback at shutdown, neither write
+	// happens — a stamp without its matching event is the one combination
+	// that lets the two sides drift.
 	a.syncNotifQueueThen(func() {
+		if a.cfg.RecordTurnStart != nil {
+			a.cfg.RecordTurnStart(time.Now())
+		}
 		a.sendUpdate(AgentEvent{
 			Type:             streams.EventTypeTurnStarted,
 			SessionID:        sessionID,

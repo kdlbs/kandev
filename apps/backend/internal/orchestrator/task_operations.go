@@ -2793,7 +2793,7 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 	// normally retires it after the final owner exits; deletion forcibly
 	// invalidates any trailing token so the removed session cannot be recreated
 	// through a stale activity pointer.
-	s.clearTurnActivity(sessionID)
+	s.clearTurnActivity(ctx, taskID, sessionID)
 
 	// Auto-promote another session if we deleted the primary
 	if wasPrimary {

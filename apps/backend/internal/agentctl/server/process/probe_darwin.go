@@ -9,9 +9,17 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// walkProcessTree walks all descendants of rootPID and reports whether any
-// process born at or after (turnRefTime - probeStartTimeSlack) is still alive.
-// Returns "live", "settled", or "unknown".
+// darwinZombieState is BSD's SZOMB process-state constant (sys/proc.h:
+// SIDL=1, SRUN=2, SSLEEP=3, SSTOP=4, SZOMB=5). Not exported by x/sys/unix.
+const darwinZombieState = 5
+
+// darwinStartTimeResolution is the microsecond resolution of kinfo_proc's
+// p_starttime timeval (spec: "Start-time source and resolution").
+const darwinStartTimeResolution = time.Microsecond
+
+// walkProcessTree walks all non-zombie descendants of rootPID and reports
+// whether any was born at or after turnRefTime, truncated down to
+// microsecond resolution before an inclusive comparison (D5, AC-80).
 func walkProcessTree(ctx context.Context, rootPID int, turnRefTime time.Time) string {
 	if rootPID <= 0 {
 		return probeResultUnknown
@@ -28,6 +36,7 @@ func walkProcessTree(ctx context.Context, rootPID int, turnRefTime time.Time) st
 	type procInfo struct {
 		ppid      int
 		startTime time.Time
+		zombie    bool
 	}
 
 	procs := make(map[int]procInfo, len(allProcs))
@@ -37,7 +46,11 @@ func walkProcessTree(ctx context.Context, rootPID int, turnRefTime time.Time) st
 		ppid := int(kp.Eproc.Ppid)
 		tv := kp.Proc.P_starttime
 		st := time.Unix(tv.Sec, int64(tv.Usec)*1000)
-		procs[pid] = procInfo{ppid: ppid, startTime: st}
+		procs[pid] = procInfo{
+			ppid:      ppid,
+			startTime: st,
+			zombie:    int(kp.Proc.P_stat) == darwinZombieState,
+		}
 	}
 
 	// Verify rootPID is alive.
@@ -51,8 +64,10 @@ func walkProcessTree(ctx context.Context, rootPID int, turnRefTime time.Time) st
 		children[info.ppid] = append(children[info.ppid], pid)
 	}
 
-	// BFS over descendants of rootPID.
-	threshold := turnRefTime.Add(-probeStartTimeSlack)
+	// D5/AC-80: truncate the turn start down to source resolution before an
+	// inclusive comparison, so a process born in the same microsecond tick
+	// counts as in-turn — the error always falls toward "live".
+	threshold := turnRefTime.Truncate(darwinStartTimeResolution)
 	queue := append([]int(nil), children[rootPID]...)
 	for len(queue) > 0 {
 		if ctx.Err() != nil {
@@ -65,7 +80,7 @@ func walkProcessTree(ctx context.Context, rootPID int, turnRefTime time.Time) st
 		if !ok {
 			continue
 		}
-		if !info.startTime.Before(threshold) {
+		if !info.zombie && !info.startTime.Before(threshold) {
 			return probeResultLive
 		}
 		queue = append(queue, children[cur]...)

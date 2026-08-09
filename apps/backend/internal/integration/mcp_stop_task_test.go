@@ -151,7 +151,7 @@ func TestMCPStopTask_DirectParentStopsLongRunningChild(t *testing.T) {
 		}}
 	})
 
-	cfg := orchestrator.DefaultServiceConfig()
+	cfg := orchestrator.DefaultServiceConfig(ts.Logger)
 	cfg.Scheduler.ProcessInterval = 50 * time.Millisecond
 	taskRepoAdapter := &taskRepositoryAdapter{repo: ts.TaskRepo, svc: ts.TaskSvc}
 	orchestratorSvc := orchestrator.NewService(

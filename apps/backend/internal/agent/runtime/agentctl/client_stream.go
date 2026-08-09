@@ -24,6 +24,12 @@ var ErrAgentStreamNotConnected = errors.New("agent stream not connected")
 // It creates a ws.Message with a UUID, registers a pending response channel,
 // writes the message to the stream, and blocks until a response arrives or context is cancelled.
 func (c *Client) sendStreamRequest(ctx context.Context, action string, payload interface{}) (*ws.Message, error) {
+	// A context already done on entry must not put a frame on the wire —
+	// checked before any lookup or marshal (AC-46's tenth condition).
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
 	c.mu.RLock()
 	conn := c.agentStreamConn
 	c.mu.RUnlock()
