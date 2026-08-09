@@ -60,6 +60,12 @@ export type TaskSessionStateChangedPayload = {
   cancellation_pending?: boolean;
   /** Process-local cancellation transition generation carried by state snapshots. */
   cancellation_revision?: number;
+  /** Runtime parked-on-background-work projection for this session. */
+  parked_on_background_work?: boolean;
+  /** Process-start epoch (Unix ns) — consumer discards snapshots from a prior backend run. */
+  parked_epoch?: number;
+  /** Monotonic revision; consumer discards snapshots with lower revision. */
+  parked_revision?: number;
   /** True when a send right now would steer the running turn; see http.ts. */
   supports_steering?: boolean;
 };

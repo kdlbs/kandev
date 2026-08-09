@@ -374,6 +374,10 @@ export type Task = ActiveSubagentCountFields & {
   // isFromOfficeProjection in the Go task repo for the canonical rule.
   is_from_office?: boolean;
   status_summary?: TaskStatusSummary | null;
+  /** Runtime parked-on-background-work projection (OR over all sessions). */
+  parked_on_background_work?: boolean;
+  /** Monotonic revision; consumer discards snapshots with lower revision. */
+  parked_revision?: number;
 };
 
 // Task origin values mirror models.TaskOrigin* constants in the Go backend.
@@ -454,6 +458,12 @@ export type TaskSession = ActiveSubagentCountFields & {
   cancellation_pending?: boolean;
   /** Process-local cancellation transition generation used to reject stale snapshots. */
   cancellation_revision?: number;
+  /** Runtime parked-on-background-work projection for this session. */
+  parked_on_background_work?: boolean;
+  /** Process-start epoch (Unix ns) — consumer discards snapshots from a prior backend run. */
+  parked_epoch?: number;
+  /** Monotonic revision; consumer discards snapshots with lower revision. */
+  parked_revision?: number;
   /** Fine-grained busy substate; background may outlive the foreground turn (ADR-0049). */
   foreground_activity?: ForegroundActivity | null;
   /**

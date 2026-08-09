@@ -760,6 +760,10 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 
 	case streams.EventTypeForegroundIdle:
 		m.handlePromptHandoffEvent(execution, event)
+
+	case streams.EventTypeTurnStarted:
+		// Relayed to the orchestrator for turn-marker accounting (parked attribution).
+		// ExecutionID is stamped by the relay infrastructure below; agentctl has none.
 	}
 
 	m.eventPublisher.PublishAgentStreamEvent(execution, event)

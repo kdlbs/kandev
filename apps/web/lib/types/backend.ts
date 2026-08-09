@@ -112,6 +112,10 @@ export type TaskEventPayload = {
   /** Deletion reason on task.deleted (e.g. "pr_approved_by_user"). Absent otherwise. */
   reason?: string;
   status_summary?: TaskStatusSummary | null;
+  /** Runtime parked-on-background-work projection (OR of session parked states). */
+  parked_on_background_work?: boolean;
+  /** Monotonic revision; consumer discards snapshots with lower revision. */
+  parked_revision?: number;
 };
 
 export type AgentUpdatePayload = {

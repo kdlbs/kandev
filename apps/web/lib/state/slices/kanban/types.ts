@@ -85,6 +85,10 @@ export type KanbanState = {
     foregroundActivity?: ForegroundActivity | null;
     /** True when the task's session was mid-turn when the backend died. */
     interrupted?: boolean;
+    /** Runtime parked-on-background-work projection (OR over all sessions). */
+    parkedOnBackgroundWork?: boolean;
+    /** Monotonic revision; consumer discards snapshots with lower revision. */
+    parkedRevision?: number;
     /** Live subagents across this task's sessions; drives the board count chip. */
     activeSubagentCount?: number;
     sessionCount?: number | null;

@@ -83,6 +83,13 @@ const (
 	// configuration delivery and observed use. It deliberately excludes raw
 	// protocol frames, tool payloads, credentials, and full endpoints.
 	EventTypeMCPAttachment = "mcp_attachment"
+
+	// EventTypeTurnStarted is emitted by the agentctl adapter immediately before
+	// sending session/prompt to the agent. It travels through the notifQueue FIFO
+	// so the orchestrator can increment its turn-marker before any tool-call
+	// attestations from the new turn arrive. Covers all three sendPrompt callers
+	// (Prompt, PromptSteer, fireWakeup); PromptGeneration may be 0 for wakeups.
+	EventTypeTurnStarted = "turn_started"
 )
 
 // AgentEventDataPromptHandoff marks a generation-bearing foreground-idle event

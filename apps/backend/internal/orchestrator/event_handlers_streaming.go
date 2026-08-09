@@ -159,6 +159,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 
 	case "log":
 		s.handleAgentLogEvent(ctx, payload)
+
+	case streams.EventTypeTurnStarted:
+		// Turn-marker increment implemented in task-05 (recogniser + attestation).
 	}
 }
 

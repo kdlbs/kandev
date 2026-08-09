@@ -140,6 +140,20 @@ func (a *Adapter) sendPrompt(
 	}
 	a.beginPromptTurn(sessionID)
 
+	// Emit turn_started through the notifQueue FIFO so it lands on the
+	// ordered consumer before any tool-call attestations from the new turn.
+	// Both the emit AND any future turn-reference stamp go inside the callback
+	// so they are guaranteed to precede conn.Prompt (AC-41b, AC-79a).
+	// asyncTurnMu is NOT held here — beginPromptTurn has already released it,
+	// and the update worker needs it for maybeScheduleAsyncTurnComplete (AC-41b).
+	a.syncNotifQueueThen(func() {
+		a.sendUpdate(AgentEvent{
+			Type:             streams.EventTypeTurnStarted,
+			SessionID:        sessionID,
+			PromptGeneration: promptGeneration,
+		})
+	})
+
 	contentBlocks := a.buildPromptContentBlocks(finalMessage, attachments)
 
 	// Start prompt span — notification spans become children via getPromptTraceCtx()

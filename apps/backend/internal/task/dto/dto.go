@@ -216,6 +216,15 @@ type TaskDTO struct {
 	// It is loaded in batches and is absent when no projection exists yet; the
 	// existing coarse fields above remain the compatibility fallback.
 	StatusSummary *statussummary.TaskStatusSummary `json:"status_summary,omitempty"`
+
+	// ParkedOnBackgroundWork is true when at least one of the task's sessions is
+	// parked: WAITING_FOR_INPUT with a live background process detected by the
+	// out-of-band probe. Runtime-only; never persisted. Task-level OR over all
+	// session parked states. Populated by EnrichTaskParked.
+	ParkedOnBackgroundWork bool `json:"parked_on_background_work"`
+	// ParkedRevision is the task's own monotonic counter for parked transitions,
+	// independent of any session revision. Clients use it to discard stale frames.
+	ParkedRevision uint64 `json:"parked_revision"`
 }
 
 type TaskRepositoryDTO struct {
@@ -296,6 +305,18 @@ type TaskSessionDTO struct {
 	// generation that produced CancellationPending. It is always serialized so
 	// clients can reject delayed snapshots from older generations.
 	CancellationRevision uint64 `json:"cancellation_revision"`
+	// ParkedOnBackgroundWork is true when the session is WAITING_FOR_INPUT and
+	// a live background process is detected by the out-of-band probe. Runtime-only;
+	// never persisted. Populated by EnrichParked.
+	ParkedOnBackgroundWork bool `json:"parked_on_background_work"`
+	// ParkedEpoch is the backend process start time in Unix nanoseconds. A change
+	// in epoch signals a backend restart; clients reset their parked revision
+	// cursor on epoch change rather than discarding the frame as stale (AC-77).
+	ParkedEpoch int64 `json:"parked_epoch"`
+	// ParkedRevision is the session's monotonic parked-transition counter.
+	// Clients discard frames whose revision is lower than their current cursor
+	// (same-epoch frames only; epoch change resets the cursor).
+	ParkedRevision uint64 `json:"parked_revision"`
 	// SupportsSteering is true when a send right now would be delivered into the
 	// still-generating turn (mid-turn steering) rather than blocked/queued.
 	// Derived live at serialization from the connected agent's negotiated
@@ -358,6 +379,12 @@ type TaskSessionSummaryDTO struct {
 	// CancellationRevision identifies the process-local cancellation transition
 	// generation represented by CancellationPending.
 	CancellationRevision uint64 `json:"cancellation_revision"`
+	// ParkedOnBackgroundWork mirrors TaskSessionDTO.ParkedOnBackgroundWork for list endpoints.
+	ParkedOnBackgroundWork bool `json:"parked_on_background_work"`
+	// ParkedEpoch mirrors TaskSessionDTO.ParkedEpoch.
+	ParkedEpoch int64 `json:"parked_epoch"`
+	// ParkedRevision mirrors TaskSessionDTO.ParkedRevision.
+	ParkedRevision uint64 `json:"parked_revision"`
 	// SupportsSteering mirrors TaskSessionDTO.SupportsSteering for list endpoints.
 	SupportsSteering bool `json:"supports_steering,omitempty"`
 	// PendingAction is the compact per-session projection used when the

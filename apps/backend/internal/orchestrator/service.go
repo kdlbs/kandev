@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -63,6 +64,14 @@ type ServiceConfig struct {
 	// turn for an agent that advertised prompt queueing. Independent of
 	// ClaudeBackgroundPromptHandoff, which covers the foreground-idle handoff.
 	ClaudeMidTurnSteering bool
+
+	// BackgroundProbeBudget is the per-call timeout for BackgroundProbe.Probe.
+	// Must be positive; zero and negative values are rejected (AC-81).
+	BackgroundProbeBudget time.Duration
+
+	// BackgroundSampleInterval is the ticker period for the parked-on-background-work
+	// sampling loop while a session is WAITING_FOR_INPUT with observed_detached set.
+	BackgroundSampleInterval time.Duration
 }
 
 // AttachmentReader is the narrow attachment-store seam needed when the
@@ -76,10 +85,38 @@ type AttachmentReader interface {
 // DefaultServiceConfig returns default configuration
 func DefaultServiceConfig() ServiceConfig {
 	return ServiceConfig{
-		Scheduler:  scheduler.DefaultSchedulerConfig(),
-		QueueSize:  1000,
-		QueueGroup: "orchestrator",
+		Scheduler:                scheduler.DefaultSchedulerConfig(),
+		QueueSize:                1000,
+		QueueGroup:               "orchestrator",
+		BackgroundProbeBudget:    parseBackgroundProbeBudget(),
+		BackgroundSampleInterval: parseEnvDuration("KANDEV_BACKGROUND_SAMPLE_INTERVAL", 30*time.Second),
 	}
+}
+
+// parseBackgroundProbeBudget reads KANDEV_BACKGROUND_PROBE_BUDGET and rejects
+// non-positive values (AC-81), returning the default of 5s when the env var
+// is absent, invalid, or non-positive.
+func parseBackgroundProbeBudget() time.Duration {
+	const defaultBudget = 5 * time.Second
+	d := parseEnvDuration("KANDEV_BACKGROUND_PROBE_BUDGET", defaultBudget)
+	if d <= 0 {
+		return defaultBudget
+	}
+	return d
+}
+
+// parseEnvDuration parses a duration env var, returning defaultValue when the
+// var is absent or unparseable. Accepts any value time.ParseDuration accepts.
+func parseEnvDuration(key string, defaultValue time.Duration) time.Duration {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultValue
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return defaultValue
+	}
+	return d
 }
 
 // MessageCreator is an interface for creating messages on tasks
@@ -562,6 +599,12 @@ type Service struct {
 	// and before it starts a deferred durable-lifecycle dispatch.
 	afterReadyLifecycleReservation func()
 
+	// backgroundProbe is the injectable port used by the parked-on-background-work
+	// projection to query whether background processes are still alive. Nil-safe:
+	// when unset the projection skips the probe and never parks. Wired from
+	// cmd/kandev via SetBackgroundProbe after the lifecycle manager is constructed.
+	backgroundProbe backgroundProbePort
+
 	// foregroundActivity tracks, per session, whether the open turn is actively
 	// generating in the foreground or only waiting on a spawned background task
 	// (subagent / run-in-background shell). Keyed sessionID -> *turnActivity;
@@ -965,6 +1008,15 @@ func (s *Service) SetTurnService(turnService TurnService) {
 // on those paths). Task service's own publishTaskEvent calls are unaffected.
 func (s *Service) SetTaskEventPublisher(publisher TaskEventPublisher) {
 	s.taskEvents = publisher
+}
+
+// SetBackgroundProbe wires the injectable port used by the parked-on-background-work
+// projection to determine whether background processes are still alive. The
+// production implementation is *lifecycle.Manager. Nil-safe: without it, the
+// projection never parks any session (safe default for tests and setups that
+// do not configure an agent runtime).
+func (s *Service) SetBackgroundProbe(probe backgroundProbePort) {
+	s.backgroundProbe = probe
 }
 
 // SetSessionAccessChecker installs the per-user workspace scoping check used by

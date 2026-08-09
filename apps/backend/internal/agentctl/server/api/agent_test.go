@@ -214,6 +214,7 @@ func TestHandleAgentStreamRequest_DispatchesCorrectActions(t *testing.T) {
 		"agent.cancel",
 		"agent.permissions.respond",
 		"agent.stderr",
+		"agent.background.probe",
 	}
 
 	for _, action := range actions {
