@@ -396,6 +396,7 @@ test.describe("automations — Pull request merged trigger", () => {
       workflowStepId: seedData.startStepId,
       prompt:
         'e2e:mcp:kandev:archive_task_kandev({"task_id":"{{data.task_id}}"})\ne2e:message("archived-done")',
+      agentProfileId: seedData.agentProfileId,
     });
     await apiClient.seedTrigger({
       automationId: automation.id,
@@ -439,6 +440,7 @@ test.describe("automations — Pull request merged trigger", () => {
       workflowStepId: seedData.startStepId,
       prompt:
         'e2e:mcp:kandev:archive_task_kandev({"task_id":"{{data.task_id}}"})\ne2e:message("already-archived-done")',
+      agentProfileId: seedData.agentProfileId,
     });
     await apiClient.seedTrigger({
       automationId: automation.id,
@@ -478,6 +480,7 @@ test.describe("automations — Pull request merged trigger", () => {
       // e2e:delay gives the test time to delete the target before the archive call
       prompt:
         'e2e:delay(500)\ne2e:mcp:kandev:archive_task_kandev({"task_id":"{{data.task_id}}"})\ne2e:message("deleted-done")',
+      agentProfileId: seedData.agentProfileId,
     });
     await apiClient.seedTrigger({
       automationId: automation.id,
@@ -517,6 +520,7 @@ test.describe("automations — Pull request merged trigger", () => {
       workflowId: seedData.workflowId,
       workflowStepId: seedData.startStepId,
       prompt: 'e2e:message("no-archive-done")',
+      agentProfileId: seedData.agentProfileId,
     });
     await apiClient.seedTrigger({
       automationId: automation.id,
@@ -553,6 +557,7 @@ test.describe("automations — Pull request merged trigger", () => {
       workflowId: seedData.workflowId,
       workflowStepId: seedData.startStepId,
       prompt: 'e2e:message("manual-done")',
+      agentProfileId: seedData.agentProfileId,
     });
     await apiClient.seedTrigger({
       automationId: automation.id,

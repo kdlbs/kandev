@@ -2878,6 +2878,20 @@ export class ApiClient {
      */
     prompt?: string;
     /**
+     * Agent profile to run the automation's spawned tasks under. Required for
+     * tests that need the automation to actually launch an agent — without it
+     * autoStartAutomationTask calls StartTask with an empty profile ID, the
+     * lifecycle layer fails to resolve the agent, and the run task sits idle.
+     * Typically seedData.agentProfileId.
+     */
+    agentProfileId?: string;
+    /**
+     * Executor profile for the automation's spawned tasks. Typically
+     * seedData.worktreeExecutorProfileId. Optional — omit for tests that only
+     * assert on automation UI/list state and do not need agent execution.
+     */
+    executorProfileId?: string;
+    /**
      * Backdate the row's `execution_mode` to `task` after creation, which is
      * what an install predating the withdrawal of execution modes carries on
      * disk. The API ignores `execution_mode` on input by design, so this is
@@ -2893,6 +2907,8 @@ export class ApiClient {
       workflow_id: opts.workflowId ?? "",
       workflow_step_id: opts.workflowStepId ?? "",
       prompt: opts.prompt ?? "",
+      agent_profile_id: opts.agentProfileId ?? "",
+      executor_profile_id: opts.executorProfileId ?? "",
       legacy_board_card: opts.legacyBoardCard ?? false,
     });
   }

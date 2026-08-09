@@ -349,6 +349,13 @@ type e2eCreateAutomationRequest struct {
 	// view only renders the instruction card when there is one, so a spec
 	// asserting on where that card lives has to seed it.
 	Prompt string `json:"prompt"`
+	// AgentProfileID and ExecutorProfileID mirror the fields a UI-created
+	// automation carries. Without them autoStartAutomationTask calls StartTask
+	// with empty profile IDs and the lifecycle layer fails to resolve the agent,
+	// so tests that need the automation to actually launch an agent must supply
+	// these (typically seedData.agentProfileId / seedData.worktreeExecutorProfileId).
+	AgentProfileID    string `json:"agent_profile_id"`
+	ExecutorProfileID string `json:"executor_profile_id"`
 	// LegacyBoardCard rewrites the row's execution_mode to 'task' after
 	// creation, reproducing on disk exactly what an install that predates the
 	// withdrawal of execution modes carries. There is no input path to this:
@@ -381,6 +388,8 @@ func handleE2ECreateAutomation(
 			WorkflowID:        body.WorkflowID,
 			WorkflowStepID:    body.WorkflowStepID,
 			Prompt:            body.Prompt,
+			AgentProfileID:    body.AgentProfileID,
+			ExecutorProfileID: body.ExecutorProfileID,
 			MaxConcurrentRuns: 10,
 		})
 		if err != nil {
