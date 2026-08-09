@@ -550,6 +550,7 @@ type routeParams struct {
 	repoCloner                    *repoclone.Cloner
 	version                       string
 	webInternalURL                string
+	webTitlePrefix                string
 	devMode                       bool
 	httpPort                      int
 	features                      config.FeaturesConfig
@@ -803,7 +804,7 @@ func webAppHandlerOptions(p routeParams) []webapp.HandlerOption {
 // webRuntimeConfig builds the SPA's runtime block. `req` supplies the active
 // locale (from the kandev_locale cookie) so the shell can set <html lang> and the
 // client can activate the right catalog before first paint.
-func webRuntimeConfig(debug bool, req *http.Request) webapp.RuntimeConfig {
+func webRuntimeConfig(debug bool, titlePrefix string, req *http.Request) webapp.RuntimeConfig {
 	return webapp.RuntimeConfig{
 		APIPrefix:                         "/api/v1",
 		WebSocketPath:                     "/ws",
@@ -814,6 +815,7 @@ func webRuntimeConfig(debug bool, req *http.Request) webapp.RuntimeConfig {
 		// this from its own build mode.
 		NonProduction: profiles.DetectEnvironment() != profiles.EnvProd,
 		Locale:        i18n.FromRequest(req),
+		TitlePrefix:   strings.TrimSpace(titlePrefix),
 	}
 }
 
@@ -825,7 +827,7 @@ func bootPayload(ctx context.Context, req *http.Request, p routeParams, route we
 	}
 	payload := webapp.NewBootPayload(
 		route,
-		webRuntimeConfig(p.devMode, req),
+		webRuntimeConfig(p.devMode, p.webTitlePrefix, req),
 		initialState,
 	)
 	payload.RouteData = routeData

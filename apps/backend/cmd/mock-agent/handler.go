@@ -322,7 +322,7 @@ const asyncSubagentAgentID = "agent_e2e_async_lifecycle"
 // The teardown variant intentionally omits step 5 so execution termination is
 // the only evidence available to reconcile the registration.
 func emitAsyncSubagentLifecycle(e *emitter, cmd string, emitCompletion bool) {
-	d := parseBackgroundDuration(cmd, 20*time.Second)
+	d := parseCommandDuration(cmd, 20*time.Second)
 	toolCallID := nextToolID()
 	e.launchAsyncSubagentTool(
 		toolCallID,
@@ -350,7 +350,7 @@ func emitAsyncSubagentLifecycle(e *emitter, cmd string, emitCompletion bool) {
 // It is intentionally different from /background, whose foreground prompt stays
 // open for the entire delay, so E2E can cover settled+background explicitly.
 func emitDetachedBackgroundWork(e *emitter, cmd string) {
-	d := parseBackgroundDuration(cmd, 8*time.Second)
+	d := parseCommandDuration(cmd, 8*time.Second)
 	e.text("Launching detached background work; this foreground turn is complete.")
 
 	taskToolID := nextToolID()
@@ -390,7 +390,7 @@ func emitSleep(e *emitter, cmd string) {
 // while the session still reads RUNNING. When the hold elapses the subagent
 // completes, the foreground resumes, and the turn ends (→ done).
 func emitBackgroundWork(e *emitter, cmd string) {
-	d := parseBackgroundDuration(cmd, 8*time.Second)
+	d := parseCommandDuration(cmd, 8*time.Second)
 
 	e.text("Kicking off background work; I'll keep going in the background.")
 
@@ -416,13 +416,11 @@ func emitBackgroundWork(e *emitter, cmd string) {
 	e.text("Background work complete.")
 }
 
-// parseBackgroundDuration reads the optional duration argument of a /background
-// command, returning def when it is absent or unparseable. A value carrying an
-// explicit unit is honored as-is (`1m`, `500ms`, `2h`); a bare number is treated
-// as seconds (`8` → 8s). The explicit-unit parse is tried FIRST: appending "s"
-// to a unit-bearing value like `1m` would otherwise parse as the valid-but-wrong
-// "1ms" (1 millisecond) and never reach the correct interpretation.
-func parseBackgroundDuration(cmd string, def time.Duration) time.Duration {
+// parseCommandDuration reads an optional command duration, returning def when
+// it is absent or unparseable. Explicit units are honored as-is; bare numbers
+// are treated as seconds. The explicit-unit parse is tried first so a value
+// like `1m` is not misread as the valid-but-wrong `1ms`.
+func parseCommandDuration(cmd string, def time.Duration) time.Duration {
 	parts := strings.Fields(cmd)
 	if len(parts) < 2 {
 		return def
@@ -456,13 +454,7 @@ func emitCrash(e *emitter, model string) {
 
 // emitSlowResponse generates a response with configurable total duration.
 func emitSlowResponse(e *emitter, prompt, model string) {
-	totalDuration := 5 * time.Second
-	parts := strings.Fields(prompt)
-	if len(parts) >= 2 {
-		if d, err := time.ParseDuration(parts[1]); err == nil && d > 0 {
-			totalDuration = d
-		}
-	}
+	totalDuration := parseCommandDuration(prompt, 5*time.Second)
 
 	steps := 5
 	stepDelay := totalDuration / time.Duration(steps)

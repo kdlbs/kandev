@@ -562,6 +562,19 @@ func (s *Service) PrepareTaskResourceCleanup(
 	operationID string,
 	deleteEnvironmentRow bool,
 ) error {
+	// Reserve the durable lifecycle barrier BEFORE capturing the inventory.
+	// Session and worktree creation serialize against the owning task row and
+	// reject new ownership while this prepared barrier is active, so the
+	// snapshot below cannot miss a resource admitted mid-preparation.
+	job, err := s.persistTaskResourceCleanup(ctx, taskID, trigger, operationID,
+		nil, nil, nil, taskEnvironmentCleanup{}, true)
+	if err != nil {
+		return err
+	}
+	if s.resourceCleanups == nil {
+		return nil
+	}
+	barrierOperationID := job.OperationID
 	sessions, err := s.sessions.ListTaskSessions(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("list task sessions for cleanup snapshot: %w", err)
@@ -578,10 +591,18 @@ func (s *Service) PrepareTaskResourceCleanup(
 	if err != nil {
 		return fmt.Errorf("lookup task environment for cleanup snapshot: %w", err)
 	}
-	_, err = s.persistTaskResourceCleanup(ctx, taskID, trigger, operationID,
-		sessions, worktrees, stopTargets,
-		taskEnvironmentCleanup{env: taskEnv, deleteRow: deleteEnvironmentRow}, true)
-	return err
+	snapshot := taskResourceCleanupSnapshot{
+		Sessions: sessions, Worktrees: worktrees,
+		StopTargets:           persistStopTargets(stopTargets),
+		TaskEnvironment:       taskEnv,
+		DeleteEnvironmentRow:  deleteEnvironmentRow,
+		LegacyWorktreeCleanup: s.hasLegacyWorktreeCleanup(),
+	}
+	encoded, err := json.Marshal(snapshot)
+	if err != nil {
+		return fmt.Errorf("encode task resource cleanup snapshot: %w", err)
+	}
+	return s.resourceCleanups.UpdateTaskResourceCleanupSnapshot(ctx, barrierOperationID, string(encoded))
 }
 
 func (s *Service) StartPreparedTaskResourceCleanup(ctx context.Context, operationID string) error {

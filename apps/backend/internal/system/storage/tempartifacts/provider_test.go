@@ -236,6 +236,56 @@ func TestProviderReleasesInterruptedRenameIntentWhenOriginalRemains(t *testing.T
 	}
 }
 
+func TestProviderRestoresQuarantinedLifecycleWhenOriginalRemains(t *testing.T) {
+	root := t.TempDir()
+	home := t.TempDir()
+	now := time.Date(2026, time.August, 8, 12, 0, 0, 0, time.UTC)
+	artifacts := newFakeArtifactStore()
+	registry := NewRegistry(Config{
+		Store: artifacts, TempRoot: root, OwnerPID: 1234,
+		Now:   func() time.Time { return now },
+		NewID: func() string { return "artifact-1" }, NewToken: func() string { return "token-1" },
+	})
+	lease, err := registry.Create(context.Background(), storage.TemporaryArtifactKindImproveBundle, nil)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := lease.Close(context.Background()); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	artifact := artifacts.artifacts[lease.Path()]
+	artifact.State = storage.TemporaryArtifactStateQuarantined
+	artifact.QuarantinedAt = &now
+	artifacts.artifacts[lease.Path()] = artifact
+
+	quarantineID := "quarantine-1"
+	quarantinePath := filepath.Join(home, "trash", "temporary-artifacts", quarantineID)
+	quarantine := newFakeQuarantineStore()
+	if err := quarantine.CreateQuarantineEntry(context.Background(), &storage.QuarantineEntry{
+		ID: quarantineID, ResourceType: storage.ResourceTypeTemporaryArtifact,
+		OriginalPath: artifact.Path, QuarantinePath: quarantinePath,
+		State: storage.QuarantineStateQuarantined, QuarantinedAt: now,
+		DeleteAfter: now.Add(7 * 24 * time.Hour), Metadata: json.RawMessage(`{"artifact_id":"artifact-1"}`),
+	}); err != nil {
+		t.Fatalf("CreateQuarantineEntry: %v", err)
+	}
+
+	provider := NewProvider(ProviderConfig{
+		Registry: registry, Store: quarantine, HomeDir: home,
+		Now: func() time.Time { return now },
+	})
+	if err := provider.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	reconciled, err := artifacts.GetTemporaryArtifact(context.Background(), artifact.ID)
+	if err != nil {
+		t.Fatalf("GetTemporaryArtifact: %v", err)
+	}
+	if reconciled.State != storage.TemporaryArtifactStateClosed {
+		t.Fatalf("artifact state = %q, want closed", reconciled.State)
+	}
+}
+
 func TestProviderCanRequarantineRestoredArtifact(t *testing.T) {
 	root := t.TempDir()
 	home := t.TempDir()

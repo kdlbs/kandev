@@ -156,10 +156,10 @@ func (a *environmentDestroyerAdapter) PushEnvironmentBranch(ctx context.Context,
 	// For host-side worktrees we can push directly. Container/sandbox workspaces
 	// would require an active agentctl client — not wired yet, surface a clear
 	// error so the user knows to push manually.
-	if env.WorktreePath == "" {
+	worktreePath, branch := firstEnvironmentWorktree(env)
+	if worktreePath == "" {
 		return fmt.Errorf("push-before-reset is not supported for this environment type; please push manually first")
 	}
-	branch := strings.TrimSpace(env.WorktreeBranch)
 	var args []string
 	if branch == "" {
 		args = []string{"push"}
@@ -168,12 +168,12 @@ func (a *environmentDestroyerAdapter) PushEnvironmentBranch(ctx context.Context,
 		// repos whose primary remote isn't called "origin" (e.g. fork
 		// workflows with "upstream"/"github"). Fall back to "origin" only
 		// when no upstream is set, matching the historical behaviour.
-		remote := detectBranchRemote(ctx, env.WorktreePath, branch)
+		remote := detectBranchRemote(ctx, worktreePath, branch)
 		args = []string{"push", remote, branch}
 	}
 	out, runErr, execCtxErr := subproc.RunGitCombinedAfterAcquire(ctx, subproc.GitInteractive, pushBranchTimeout, func(execCtx context.Context) *exec.Cmd {
 		cmd := subproc.NewGitCommand(execCtx, args...)
-		cmd.Dir = env.WorktreePath
+		cmd.Dir = worktreePath
 		// Disable interactive credential prompts — without this, a missing
 		// credential helper can hang waiting on stdin even with the timeout
 		// above (signal delivery is gated behind the prompt read).
@@ -182,7 +182,7 @@ func (a *environmentDestroyerAdapter) PushEnvironmentBranch(ctx context.Context,
 	})
 	if runErr != nil || execCtxErr != nil {
 		if errors.Is(execCtxErr, context.DeadlineExceeded) {
-			return fmt.Errorf("git push timed out after %s in %s (branch %q); push manually and retry", pushBranchTimeout, env.WorktreePath, branch)
+			return fmt.Errorf("git push timed out after %s in %s (branch %q); push manually and retry", pushBranchTimeout, worktreePath, branch)
 		}
 		if runErr == nil {
 			runErr = execCtxErr
@@ -190,6 +190,17 @@ func (a *environmentDestroyerAdapter) PushEnvironmentBranch(ctx context.Context,
 		return fmt.Errorf("git push failed: %s: %w", strings.TrimSpace(string(out)), runErr)
 	}
 	return nil
+}
+
+// firstEnvironmentWorktree returns the path and branch of the environment's
+// first repository row with a worktree path.
+func firstEnvironmentWorktree(env *models.TaskEnvironment) (string, string) {
+	for _, repo := range env.Repos {
+		if repo != nil && repo.WorktreePath != "" {
+			return repo.WorktreePath, repo.WorktreeBranch
+		}
+	}
+	return "", ""
 }
 
 // defaultGitRemote is the conventional default remote name. Used as the

@@ -208,7 +208,8 @@ func (p *Provider) reconcileUnmoved(
 	if err != nil {
 		return fmt.Errorf("release temporary artifact quarantine %s: %w", entry.ID, err)
 	}
-	if released && artifact.State == storage.TemporaryArtifactStateFailed {
+	if released && (artifact.State == storage.TemporaryArtifactStateFailed ||
+		artifact.State == storage.TemporaryArtifactStateQuarantined) {
 		if err := p.registry.MarkClosed(ctx, artifact.ID); err != nil {
 			return fmt.Errorf("restore temporary artifact lifecycle %s: %w", entry.ID, err)
 		}

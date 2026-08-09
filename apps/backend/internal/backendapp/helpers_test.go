@@ -316,15 +316,26 @@ func TestResolveRepositoryIDForSubpathMatchesSanitizedRepositoryName(t *testing.
 	}); err != nil {
 		t.Fatalf("CreateTaskRepository: %v", err)
 	}
-	if err := repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
-		ID:             "session-worktree-1",
-		SessionID:      "session-1",
-		WorktreeID:     "worktree-1",
-		RepositoryID:   "repo-1",
-		WorktreePath:   "/tmp/worktree",
-		WorktreeBranch: "feature/test",
-		BranchSlug:     "test",
-		Position:       0,
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-1", TaskID: "task-1", ExecutorType: "worktree",
+		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	if _, err := sqlxDB.Exec(sqlxDB.Rebind(
+		`UPDATE task_sessions SET task_environment_id = ? WHERE id = ?`),
+		"env-1", "session-1"); err != nil {
+		t.Fatalf("link session to env: %v", err)
+	}
+	if err := repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		ID:                "session-worktree-1",
+		TaskEnvironmentID: "env-1",
+		RepositoryID:      "repo-1",
+		WorktreeID:        "worktree-1",
+		WorktreePath:      "/tmp/worktree",
+		WorktreeBranch:    "feature/test",
+		BranchSlug:        "test",
+		Position:          0,
 	}); err != nil {
 		t.Fatalf("CreateTaskSessionWorktree: %v", err)
 	}
@@ -1339,6 +1350,33 @@ func TestBootPayloadIncludesDebugRuntimeWhenDevMode(t *testing.T) {
 	}
 	if !decoded.Runtime.Debug {
 		t.Fatal("runtime.debug = false, want true when backend devMode is enabled")
+	}
+}
+
+func TestBootPayloadCarriesConfiguredTitlePrefix(t *testing.T) {
+	t.Parallel()
+
+	payload := bootPayload(
+		context.Background(),
+		nil,
+		routeParams{webTitlePrefix: "TEST"},
+		webapp.ClassifyRoute("/"),
+	)
+	if got := payload.Runtime.TitlePrefix; got != "TEST" {
+		t.Fatalf("runtime.titlePrefix = %q, want %q", got, "TEST")
+	}
+}
+
+func TestBootPayloadOmitsUnsetTitlePrefix(t *testing.T) {
+	t.Parallel()
+
+	payload := bootPayload(context.Background(), nil, routeParams{}, webapp.ClassifyRoute("/"))
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("Marshal payload: %v", err)
+	}
+	if strings.Contains(string(raw), "titlePrefix") {
+		t.Fatalf("expected titlePrefix to be omitted, got: %s", raw)
 	}
 }
 

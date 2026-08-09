@@ -188,10 +188,10 @@ surface.
 
 ## Internationalization (i18n)
 
-**The migration is in progress, one directory per PR.** The runtime, the gates,
-and Settings → General → Appearance are done; most of the app still holds English
-literals. New user-facing copy must go through `t()` / `<Trans>` wherever you
-write it, even in a directory that has not been migrated yet.
+**Externalization is complete.** #2367 localized `app/office`, the last
+un-migrated area. A hardcoded user-facing literal is now a regression, not
+leftover migration work. New copy must go through `t()` / `<Trans>` wherever you
+write it.
 
 User-facing strings are localized with i18next + react-i18next, keyed as
 `namespace:key`. Add the English text to `src/locales/en/<namespace>.json`, then
@@ -222,13 +222,13 @@ at render, or make the value a component. `check-module-scope-t.mjs` enforces it
 
 `pnpm lint` fails on hardcoded UI strings (`i18next/no-literal-string` is an
 **error**), but **only on the `i18nGuardFiles` allowlist** in
-`eslint.i18n.options.mjs` — paths already migrated. That scoping is deliberate:
-a repo-wide error breaks every unrelated PR that adds a label, which is what made
-the first attempt at this migration unmergeable. **When you migrate a directory,
-append it to `i18nGuardFiles` in the same PR** — that is the step that stops it
-drifting back. Never delete an entry to make a build pass. Use
-`pnpm run lint:i18n <path>` to preview the guard on a path that is not on the
-list yet.
+`eslint.i18n.options.mjs`, which covers every area the migration touched. It
+stays an allowlist because a repo-wide error breaks every unrelated PR that adds
+a label — what made the first attempt unmergeable. **Append a path in the same PR
+that adds it or externalizes it** (`lib/sidebar` is one still off the list).
+Never delete an entry to make a build pass; `check-guard-allowlist.mjs` rejects
+that unless the file is gone. Use `pnpm run lint:i18n <path>` to preview the
+guard on a path not yet on the list.
 
 Separately, `pnpm run i18n:ratchet` (pre-commit + CI) guards **new code
 everywhere**, regardless of the allowlist: a file you added must be clean outright,

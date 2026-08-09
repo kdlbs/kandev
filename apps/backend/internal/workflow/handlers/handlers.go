@@ -17,22 +17,29 @@ import (
 	"github.com/kandev/kandev/internal/workflow/controller"
 	"github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/internal/workflow/service"
+	"github.com/kandev/kandev/internal/workflow/stepevents"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
+
+// stepEventSource labels workflow-step events published by this surface.
+const stepEventSource = "workflow-handlers"
 
 // Handlers manages workflow HTTP and WebSocket handlers
 type Handlers struct {
 	controller *controller.Controller
 	eventBus   bus.EventBus
+	stepEvents *stepevents.Publisher
 	logger     *logger.Logger
 }
 
 // NewHandlers creates new workflow handlers
 func NewHandlers(ctrl *controller.Controller, eventBus bus.EventBus, log *logger.Logger) *Handlers {
+	scoped := log.WithFields(zap.String("component", "workflow-handlers"))
 	return &Handlers{
 		controller: ctrl,
 		eventBus:   eventBus,
-		logger:     log.WithFields(zap.String("component", "workflow-handlers")),
+		stepEvents: stepevents.NewPublisher(eventBus, stepEventSource, scoped),
+		logger:     scoped,
 	}
 }
 
@@ -165,12 +172,15 @@ func (h *Handlers) httpCreateStep(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "workflow_id and name are required"})
 		return
 	}
-	resp, err := h.controller.CreateStep(c.Request.Context(), req)
+	ctx := c.Request.Context()
+	resp, err := h.controller.CreateStep(ctx, req)
 	if err != nil {
 		h.logger.Error("failed to create step", zap.Error(err))
 		h.writeStepMutationError(c, err)
 		return
 	}
+	h.publishWorkflowStepEvents(ctx, events.WorkflowStepUpdated, resp.DemotedStartSteps)
+	h.publishWorkflowStepEvent(ctx, events.WorkflowStepCreated, resp.Step)
 	c.JSON(http.StatusCreated, resp.Step)
 }
 
@@ -181,12 +191,15 @@ func (h *Handlers) httpUpdateStep(c *gin.Context) {
 		return
 	}
 	req.ID = c.Param("id")
-	resp, err := h.controller.UpdateStep(c.Request.Context(), req)
+	ctx := c.Request.Context()
+	resp, err := h.controller.UpdateStep(ctx, req)
 	if err != nil {
 		h.logger.Error("failed to update step", zap.Error(err))
 		h.writeStepMutationError(c, err)
 		return
 	}
+	h.publishWorkflowStepEvents(ctx, events.WorkflowStepUpdated, resp.DemotedStartSteps)
+	h.publishWorkflowStepEvent(ctx, events.WorkflowStepUpdated, resp.Step)
 	c.JSON(http.StatusOK, resp.Step)
 }
 
@@ -234,38 +247,11 @@ func (h *Handlers) httpDeleteStep(c *gin.Context) {
 }
 
 func (h *Handlers) publishWorkflowStepEvent(ctx context.Context, eventType string, step *models.WorkflowStep) {
-	if step == nil {
-		return
-	}
-	data := map[string]interface{}{
-		"step": map[string]interface{}{
-			"id":                            step.ID,
-			"workflow_id":                   step.WorkflowID,
-			"name":                          step.Name,
-			"position":                      step.Position,
-			"color":                         step.Color,
-			"prompt":                        step.Prompt,
-			"events":                        step.Events,
-			"show_in_command_panel":         step.ShowInCommandPanel,
-			"allow_manual_move":             step.AllowManualMove,
-			"is_start_step":                 step.IsStartStep,
-			"auto_archive_after_hours":      step.AutoArchiveAfterHours,
-			"wip_limit":                     step.WIPLimit,
-			"pull_from_step_id":             step.PullFromStepID,
-			"agent_profile_id":              step.AgentProfileID,
-			"stage_type":                    string(step.StageType),
-			"auto_advance_requires_signal":  step.AutoAdvanceRequiresSignal,
-			"cancel_triggers_turn_complete": step.CancelTriggersTurnComplete,
-			"created_at":                    step.CreatedAt,
-			"updated_at":                    step.UpdatedAt,
-		},
-	}
-	if err := h.eventBus.Publish(ctx, eventType, bus.NewEvent(eventType, "workflow-handlers", data)); err != nil {
-		h.logger.Error("failed to publish workflow step event",
-			zap.String("event_type", eventType),
-			zap.String("step_id", step.ID),
-			zap.Error(err))
-	}
+	h.stepEvents.Publish(ctx, eventType, step)
+}
+
+func (h *Handlers) publishWorkflowStepEvents(ctx context.Context, eventType string, steps []*models.WorkflowStep) {
+	h.stepEvents.PublishAll(ctx, eventType, steps)
 }
 
 type httpReorderStepsRequest struct {

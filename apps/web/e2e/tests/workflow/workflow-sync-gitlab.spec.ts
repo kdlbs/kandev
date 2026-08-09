@@ -3,10 +3,13 @@ import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 
 const GITLAB_PROJECT = "platform/kandev";
 
+const SYNCED_WORKFLOW_DESCRIPTION = "rev 1 (2026-08-08) — synced from GitLab";
+
 const VALID_WORKFLOW_YAML = `version: 1
 type: kandev_workflow
 workflows:
   - name: GitLab Synced Workflow
+    description: "${SYNCED_WORKFLOW_DESCRIPTION}"
     steps:
       - name: Open
         position: 0
@@ -114,6 +117,13 @@ test.describe("GitLab workflow sync", () => {
     await expect(card).toBeVisible();
     await expect(card.getByText("Open")).toBeVisible();
     await expect(card.getByText("Closed")).toBeVisible();
+
+    // Synced workflows are read-only: the description renders the synced
+    // value but must not be editable, or a later reconcile would just
+    // revert a user's in-UI edit.
+    const descriptionInput = card.getByLabel("Description", { exact: true });
+    await expect(descriptionInput).toHaveValue(SYNCED_WORKFLOW_DESCRIPTION);
+    await expect(descriptionInput).toBeDisabled();
   });
 
   test("requires a project path before Save is enabled", async ({ testPage, seedData }) => {

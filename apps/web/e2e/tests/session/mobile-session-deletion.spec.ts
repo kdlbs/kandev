@@ -69,6 +69,10 @@ test.describe("mobile: session deletion", () => {
 
     const dialog = testPage.getByRole("alertdialog");
     await expect(dialog).toBeVisible();
+    // The native mobile dialog states the conversation-deletion contract and
+    // explicitly says the task workspace and files are retained.
+    await expect(dialog).toContainText("permanently delete the conversation history");
+    await expect(dialog).toContainText("task workspace and its files are kept");
     await dialog.getByRole("button", { name: "Delete" }).tap();
 
     await expect(secondaryRow).not.toBeVisible({ timeout: 15_000 });

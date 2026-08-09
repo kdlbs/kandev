@@ -12,8 +12,10 @@ import {
   QueueSendNowError,
   QueueFullError,
   QueueEntryNotFoundError,
+  QueueReorderError,
   mergeQueuedEntry,
   queueMessage,
+  reorderQueuedEntries,
   rethrowQueueError,
   sendQueuedNow,
   updateQueuedMessage,
@@ -306,5 +308,43 @@ describe("sendQueuedNow", () => {
     await expect(sendQueuedNow({ session_id: "session-1", scope: "all" })).rejects.toBeInstanceOf(
       QueueSendNowError,
     );
+  });
+});
+
+describe("reorderQueuedEntries", () => {
+  it("sends the full ordered id list through message.queue.reorder", async () => {
+    const request = vi.fn().mockResolvedValue({ session_id: "session-1", reordered: 3 });
+    getWebSocketClientMock.mockReturnValue({ request });
+
+    await reorderQueuedEntries({
+      session_id: "session-1",
+      ordered_ids: ["q-c", "q-a", "q-b"],
+    });
+
+    expect(request).toHaveBeenCalledWith("message.queue.reorder", {
+      session_id: "session-1",
+      ordered_ids: ["q-c", "q-a", "q-b"],
+    });
+  });
+
+  it("maps a queue_changed rejection to QueueReorderError", async () => {
+    const request = vi.fn().mockRejectedValue({
+      code: "queue_changed",
+      message: "Queue changed before the reorder could be applied",
+    });
+    getWebSocketClientMock.mockReturnValue({ request });
+
+    await expect(
+      reorderQueuedEntries({ session_id: "session-1", ordered_ids: ["q-a"] }),
+    ).rejects.toBeInstanceOf(QueueReorderError);
+  });
+
+  it("falls through to the shared error mapping for other failures", async () => {
+    const request = vi.fn().mockRejectedValue({ code: "entry_not_found", message: "Gone" });
+    getWebSocketClientMock.mockReturnValue({ request });
+
+    await expect(
+      reorderQueuedEntries({ session_id: "session-1", ordered_ids: ["q-a"] }),
+    ).rejects.toBeInstanceOf(QueueEntryNotFoundError);
   });
 });

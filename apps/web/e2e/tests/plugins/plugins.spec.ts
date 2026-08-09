@@ -48,6 +48,7 @@ import type { Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
+import { holdPluginInstallResponse } from "../../helpers/plugin-install";
 
 const PLUGIN_ID = "kandev-plugin-e2e";
 const NAV_ITEM_ID = "e2e-hello";
@@ -131,6 +132,32 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
   // so the next iteration starts from a clean slate.
   test.afterEach(async ({ apiClient }) => {
     await uninstallViaApi(apiClient);
+  });
+
+  test("shows an install spinner while an upload install is pending", async ({ testPage }) => {
+    test.setTimeout(90_000);
+
+    await openInstallDialog(testPage);
+    const heldInstall = await holdPluginInstallResponse(testPage);
+    try {
+      await uploadPackage(testPage, PACKAGE_PATH);
+      await heldInstall.requestSeen;
+
+      const installButton = testPage.getByTestId("install-plugin-upload-submit");
+      await expect(installButton).toBeDisabled();
+      await expect(installButton).toHaveAttribute("aria-busy", "true");
+      await expect(installButton.locator(".animate-spin")).toBeVisible();
+      await expect(installButton).toHaveText(/Installing/);
+    } finally {
+      heldInstall.release();
+      if (heldInstall.requestStarted()) await heldInstall.responseSettled;
+      await testPage.unroute("**/api/plugins/install");
+    }
+
+    const installButton = testPage.getByTestId("install-plugin-upload-submit");
+    await expect(installButton).toBeEnabled();
+    await expect(installButton).toHaveText("Install");
+    await expect(testPage.getByTestId("install-plugin-error")).toContainText("install failed");
   });
 
   test("installs via upload, loads the UI, live-updates via WS+gRPC, and uninstalls", async ({

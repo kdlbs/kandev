@@ -106,6 +106,47 @@ test.describe("Mobile kanban view", () => {
     await expect(mobile.workflowItem(hiddenWorkflow.id)).toHaveCount(0);
   });
 
+  // Regression: the mobile board navigator is the only workflow switcher on
+  // the mobile kanban page (the display menu hides its workflow select there),
+  // so hidden workflows with tasks (e.g. Improve Kandev) must be reachable —
+  // otherwise their tasks are invisible on mobile.
+  test("exposes a hidden workflow with tasks in the mobile navigator", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const hiddenWorkflow = await apiClient.e2eCreateHiddenWorkflow(
+      seedData.workspaceId,
+      "Hidden tasks flow",
+    );
+    try {
+      const startStep = await apiClient.createWorkflowStep(hiddenWorkflow.id, "Backlog", 0, {
+        is_start_step: true,
+      });
+      await apiClient.createTask(seedData.workspaceId, "Hidden flow task", {
+        workflow_id: hiddenWorkflow.id,
+        workflow_step_id: startStep.id,
+      });
+      await apiClient.saveUserSettings({
+        workspace_id: seedData.workspaceId,
+        workflow_filter_id: "",
+      });
+
+      const mobile = new MobileKanbanPage(testPage);
+      await mobile.goto();
+
+      // The hidden workflow (which has tasks) is offered by the navigator...
+      await mobile.boardNavigator.click();
+      await expect(mobile.workflowItem(hiddenWorkflow.id)).toBeVisible();
+      // ...and selecting it renders its board with the task.
+      await mobile.workflowItem(hiddenWorkflow.id).click();
+      await expect(mobile.boardNavigator).toContainText("Hidden tasks flow");
+      await expect(mobile.taskCardByTitle("Hidden flow task")).toBeVisible();
+    } finally {
+      await apiClient.deleteWorkflow(hiddenWorkflow.id).catch(() => {});
+    }
+  });
+
   test("keeps the workflow navigator usable for a workflow without steps", async ({
     testPage,
     apiClient,

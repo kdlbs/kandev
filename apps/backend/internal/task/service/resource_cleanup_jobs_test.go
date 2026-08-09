@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agentruntime"
 	orchmodels "github.com/kandev/kandev/internal/office/models"
+
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
@@ -611,11 +612,23 @@ func TestArchiveCleanupPreservesHistoricalWorktreeBranchMetadata(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 	seedCleanupTaskAndSession(t, repo, "task-history", "session-history")
-	if err := repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
-		ID: "session-worktree-history", SessionID: "session-history", WorktreeID: "worktree-history",
-		RepositoryID: "repo-history", WorktreePath: "/tmp/history", WorktreeBranch: "feature/history",
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-history", TaskID: "task-history", ExecutorType: "worktree",
+		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{{
+			ID: "session-worktree-history", TaskEnvironmentID: "env-history", WorktreeID: "worktree-history",
+			RepositoryID: "repo-history", WorktreePath: "/tmp/history", WorktreeBranch: "feature/history",
+		}},
 	}); err != nil {
-		t.Fatalf("CreateTaskSessionWorktree: %v", err)
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "session-history")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.TaskEnvironmentID = "env-history"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("link session to env: %v", err)
 	}
 	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
 	if err := svc.ArchiveTask(ctx, "task-history"); err != nil {
@@ -729,11 +742,12 @@ func TestDeleteInheritedSubtaskPreservesChildMaterializedWorkspaceForParent(t *t
 	ctx := context.Background()
 	seedParentChildWorkspace(t, repo, "ws-shared-delete", "wf-shared-delete", "task-parent", "task-child")
 	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
-		ID:           "env-shared",
-		TaskID:       "task-child",
-		Status:       models.TaskEnvironmentStatusReady,
-		WorktreeID:   "worktree-shared",
-		WorktreePath: "/tmp/worktree-shared",
+		ID:     "env-shared",
+		TaskID: "task-child",
+		Status: models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{
+			{RepositoryID: "repo-shared", WorktreeID: "worktree-shared", WorktreePath: "/tmp/worktree-shared"},
+		},
 	}); err != nil {
 		t.Fatalf("create child-materialized environment: %v", err)
 	}
@@ -1054,9 +1068,11 @@ func TestTaskResourceCleanupMissingResourcesSucceed(t *testing.T) {
 		destroyer   *stubDestroyer
 	}{
 		{
-			name:        "worktree",
-			environment: &models.TaskEnvironment{ID: "env-gone-worktree", WorktreeID: "worktree-gone"},
-			destroyer:   &stubDestroyer{worktreeErr: fmt.Errorf("worktree cleanup: %w", worktree.ErrWorktreeNotFound)},
+			name: "worktree",
+			environment: &models.TaskEnvironment{ID: "env-gone-worktree", Repos: []*models.TaskEnvironmentRepo{
+				{WorktreeID: "worktree-gone"},
+			}},
+			destroyer: &stubDestroyer{worktreeErr: fmt.Errorf("worktree cleanup: %w", worktree.ErrWorktreeNotFound)},
 		},
 		{
 			name:        "task environment row",

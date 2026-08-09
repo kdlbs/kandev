@@ -443,65 +443,6 @@ func buildPrepareResultMetadata(result *lifecycle.EnvPrepareResult) map[string]i
 	return lifecycle.SerializePrepareResult(result)
 }
 
-func (e *Executor) persistWorktreeAssociation(ctx context.Context, taskID string, session *models.TaskSession, repositoryID string, resp *LaunchAgentResponse) {
-	// Multi-repo path: persist one TaskSessionWorktree row per per-repo worktree
-	// returned by the preparer. Each row carries its own RepositoryID so
-	// downstream lookups can scope by repo.
-	if len(resp.Worktrees) > 0 {
-		existingIDs := make(map[string]bool, len(session.Worktrees))
-		for _, wt := range session.Worktrees {
-			existingIDs[wt.WorktreeID] = true
-		}
-		for i, w := range resp.Worktrees {
-			if w.WorktreeID == "" || existingIDs[w.WorktreeID] {
-				continue
-			}
-			row := &models.TaskSessionWorktree{
-				SessionID:      session.ID,
-				WorktreeID:     w.WorktreeID,
-				RepositoryID:   w.RepositoryID,
-				BranchSlug:     w.BranchSlug,
-				Position:       i,
-				WorktreePath:   w.WorktreePath,
-				WorktreeBranch: w.WorktreeBranch,
-			}
-			if err := e.repo.CreateTaskSessionWorktree(ctx, row); err != nil {
-				e.logger.Error("failed to persist session worktree association",
-					zap.String("task_id", taskID),
-					zap.String("session_id", session.ID),
-					zap.String("worktree_id", w.WorktreeID),
-					zap.String("repository_id", w.RepositoryID),
-					zap.Error(err))
-			}
-		}
-		return
-	}
-
-	if resp.WorktreeID == "" {
-		return
-	}
-	for _, wt := range session.Worktrees {
-		if wt.WorktreeID == resp.WorktreeID {
-			return
-		}
-	}
-	sessionWorktree := &models.TaskSessionWorktree{
-		SessionID:      session.ID,
-		WorktreeID:     resp.WorktreeID,
-		RepositoryID:   repositoryID,
-		Position:       0,
-		WorktreePath:   resp.WorktreePath,
-		WorktreeBranch: resp.WorktreeBranch,
-	}
-	if err := e.repo.CreateTaskSessionWorktree(ctx, sessionWorktree); err != nil {
-		e.logger.Error("failed to persist session worktree association",
-			zap.String("task_id", taskID),
-			zap.String("session_id", session.ID),
-			zap.String("worktree_id", resp.WorktreeID),
-			zap.Error(err))
-	}
-}
-
 // ResumeSession restarts an existing task session using its stored worktree.
 // When startAgent is false, only the executor runtime is started (agent process is not launched).
 func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSession, startAgent bool) (*TaskExecution, error) {
@@ -542,7 +483,7 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 			return nil
 		}
 	}
-	req, repositoryID, execCfg, existingEnv, _, err := e.buildResumeRequestAtCredentialBoundary(
+	req, _, execCfg, existingEnv, _, err := e.buildResumeRequestAtCredentialBoundary(
 		ctx, task, session, startAgent, beforeCredentialLease,
 	)
 	if err != nil {
@@ -627,16 +568,6 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 			return nil, err
 		}
 	}
-	e.persistWorktreeAssociation(ctx, task.ID, session, repositoryID, resp)
-	// Refresh task_environments after a successful resume so the row reflects
-	// the new worktree, container, and ready status. Without this, sessions
-	// that failed on initial launch (empty task_dir_name / worktree_path,
-	// status=stopped) stay stuck on those stale values even though the resume
-	// just prepared a fresh worktree — the frontend keeps showing
-	// "Executor environment is unavailable (stopped)" and disables chat input.
-	// existingEnv is captured from buildResumeRequest above (resolveResumeTaskEnvironment
-	// already aborts on real DB errors); when nil, persistTaskEnvironment will
-	// re-fetch under the per-task lock and create a fresh row if needed.
 	e.persistTaskEnvironment(ctx, task.ID, session, existingEnv, req, resp, execCfg)
 
 	worktreePath := resp.WorktreePath

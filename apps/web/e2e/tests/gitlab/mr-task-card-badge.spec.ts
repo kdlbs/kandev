@@ -214,7 +214,6 @@ test.describe("GitLab MR badge on the Kanban card", () => {
     await kanban.goto();
     const card = kanban.taskCard(task.id);
     await expect(card).toBeVisible({ timeout: 45_000 });
-
     const prIcon = card.getByTestId(`pr-task-icon-${task.id}`);
     const mrIcon = card.getByTestId(`mr-task-icon-${task.id}`);
     await expect(prIcon).toBeVisible({ timeout: 15_000 });

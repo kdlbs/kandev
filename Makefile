@@ -53,13 +53,16 @@ SERVICE_BUNDLE_DIR ?= $(CURDIR)/dist/kandev
 SERVICE_LAUNCHER = $(SERVICE_BUNDLE_DIR)/bin/kandev
 SERVICE_VERSION ?= $(RUNTIME_VERSION)
 SERVICE_ENV = KANDEV_BUNDLE_DIR="$(SERVICE_BUNDLE_DIR)" KANDEV_VERSION="$(SERVICE_VERSION)"
-SERVICE_PORT_FLAG := $(if $(PORT),--port $(PORT),)
+PORT_FLAG := $(if $(PORT),--port $(PORT),)
 SERVICE_HOME_DIR_FLAG := $(if $(HOME_DIR),--home-dir "$(HOME_DIR)",)
 SERVICE_NO_BOOT_START_FLAG := $(if $(filter 1 true yes,$(NO_BOOT_START)),--no-boot-start,)
-SERVICE_INSTALL_FLAGS := $(SERVICE_PORT_FLAG) $(SERVICE_HOME_DIR_FLAG) $(SERVICE_NO_BOOT_START_FLAG)
-DEV_PORT_FLAG := $(if $(PORT),--port $(PORT),)
+SERVICE_INSTALL_FLAGS := $(PORT_FLAG) $(SERVICE_HOME_DIR_FLAG) $(SERVICE_NO_BOOT_START_FLAG)
 DEV_WEB_PORT_FLAG := $(if $(WEB_PORT),--web-internal-port $(WEB_PORT),)
-DEV_FLAGS := $(DEV_PORT_FLAG) $(DEV_WEB_PORT_FLAG) $(DEV_ARGS)
+DEV_FLAGS := $(PORT_FLAG) $(DEV_WEB_PORT_FLAG) $(DEV_ARGS)
+# $(if …) does not strip its condition, so an all-whitespace DEV_FLAGS reads as
+# true. Test and print this instead, and forward DEV_FLAGS itself — stripping
+# what reaches the CLI would collapse whitespace inside a quoted DEV_ARGS value.
+DEV_FLAGS_DISPLAY := $(strip $(DEV_FLAGS))
 DESKTOP_BUNDLES ?= dmg
 
 # Phase headers
@@ -87,7 +90,8 @@ help:
 	@echo "  bootstrap        Install mise tools, workspace deps, and git hooks"
 	@echo "  bootstrap-e2e    Bootstrap plus Playwright browser/system deps"
 	@echo "  dev              Run backend + web via local CLI (auto ports)"
-	@echo "  dev PORT=38430   Run dev on a fixed backend port (beats KANDEV_BACKEND_PORT)"
+	@echo "  dev PORT=38430 WEB_PORT=37430   PORT beats KANDEV_BACKEND_PORT/KANDEV_PORT, WEB_PORT beats KANDEV_WEB_PORT"
+	@echo "  dev DEV_ARGS='--verbose'        Pass extra flags through to the dev CLI"
 	@echo "  dev-prod-db      Run dev mode against the production db at ~/.kandev"
 	@echo "  dev-backend      Run backend in development mode (port 38429)"
 	@echo "  dev-web          Run web app in development mode (port 37429)"
@@ -191,7 +195,7 @@ ifeq ($(OS),Windows_NT)
 	@echo "Building winjob (Ctrl-C-safe wrapper for Windows)..."
 	@$(MAKE) -C $(BACKEND_DIR) build-winjob
 endif
-	@echo "Launching via CLI (auto ports)..."
+	@echo "Launching via CLI$(if $(DEV_FLAGS_DISPLAY), ($(DEV_FLAGS_DISPLAY)), (auto ports))..."
 	@cd $(APPS_DIR) && $(PNPM) -C cli dev -- dev $(DEV_FLAGS)
 
 .PHONY: dev-prod-db

@@ -26,6 +26,13 @@ export type BootRuntime = {
   nonProduction?: boolean;
   /** Active UI locale from the kandev_locale cookie; drives first-paint i18n. */
   locale?: string;
+  /**
+   * Operator-configured browser tab title prefix (KANDEV_WEB_TITLE_PREFIX), so
+   * several Kandev instances are distinguishable in adjacent tabs. The Go shell
+   * already rewrites `<title>`; this covers the /api/v1/app-state boot path,
+   * which never renders through the shell.
+   */
+  titlePrefix?: string;
 };
 
 export type BootRouteData = {
@@ -146,6 +153,7 @@ function readRuntime(value: Record<string, unknown>): BootRuntime {
     debug: value.debug === true ? true : undefined,
     nonProduction: value.nonProduction === true ? true : undefined,
     locale: readString(value.locale),
+    titlePrefix: readString(value.titlePrefix),
   };
 }
 

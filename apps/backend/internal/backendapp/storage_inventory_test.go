@@ -71,15 +71,15 @@ func TestWorkspaceInventoryOnlyProtectsActiveTaskWorktrees(t *testing.T) {
 		{taskID: "archived", path: "/tasks/archived_def/repo"},
 		{taskID: "deleted", path: "/tasks/deleted_ghi/repo"},
 	} {
-		sessionID := "session-" + item.taskID
 		if _, err := database.Exec(
-			"INSERT INTO task_sessions (id, task_id) VALUES (?, ?)", sessionID, item.taskID,
+			"INSERT INTO task_environments (id, task_id, status) VALUES (?, ?, 'ready')",
+			"env-"+item.taskID, item.taskID,
 		); err != nil {
-			t.Fatalf("insert task session for %q: %v", item.taskID, err)
+			t.Fatalf("insert task environment for %q: %v", item.taskID, err)
 		}
 		if _, err := database.Exec(
-			"INSERT INTO task_session_worktrees (id, session_id, status, worktree_path) VALUES (?, ?, 'active', ?)",
-			"worktree-"+item.taskID, sessionID, item.path,
+			"INSERT INTO task_environment_repos (id, task_environment_id, status, worktree_path) VALUES (?, ?, 'active', ?)",
+			"worktree-"+item.taskID, "env-"+item.taskID, item.path,
 		); err != nil {
 			t.Fatalf("insert task worktree for %q: %v", item.taskID, err)
 		}
@@ -273,9 +273,9 @@ func newContainerInventoryDatabase(t *testing.T) *sqlx.DB {
 			state TEXT NOT NULL DEFAULT 'CREATED',
 			task_environment_id TEXT NOT NULL DEFAULT ''
 		);
-		CREATE TABLE task_session_worktrees (
+		CREATE TABLE task_environment_repos (
 			id TEXT PRIMARY KEY,
-			session_id TEXT NOT NULL,
+			task_environment_id TEXT NOT NULL,
 			status TEXT NOT NULL,
 			worktree_path TEXT NOT NULL DEFAULT '',
 			deleted_at TIMESTAMP
