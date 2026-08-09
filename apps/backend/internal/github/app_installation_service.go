@@ -159,8 +159,15 @@ func (s *AppInstallationService) verifyInstallationCallback(
 	ctx context.Context,
 	callback AppInstallationCallback,
 ) (AppInstallation, GitHubOAuthUser, error) {
-	if callback.InstallationID <= 0 || callback.Code == "" {
-		return AppInstallation{}, GitHubOAuthUser{}, ErrInstallationAssociationUnverified
+	if callback.InstallationID <= 0 {
+		return AppInstallation{}, GitHubOAuthUser{}, fmt.Errorf(
+			"validate GitHub App installation ID: %w", ErrInstallationAssociationUnverified,
+		)
+	}
+	if callback.Code == "" {
+		return AppInstallation{}, GitHubOAuthUser{}, fmt.Errorf(
+			"validate GitHub App authorizer code: %w", ErrInstallationAssociationUnverified,
+		)
 	}
 
 	// GitHub starts OAuth-on-install without a caller-supplied PKCE challenge.
