@@ -42,6 +42,14 @@ func newMCPPlanTestHandlers(t *testing.T) *Handlers {
 		t.Fatalf("OpenSQLite: %v", err)
 	}
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+	// Registered before the Provide call so the handle still closes if Provide
+	// fails and the Fatalf below fires. Cleanups run LIFO, so this one runs
+	// after the repository cleanup registered underneath it.
+	t.Cleanup(func() {
+		if err := sqlxDB.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	})
 	repo, cleanup, err := repository.Provide(sqlxDB, sqlxDB, nil)
 	if err != nil {
 		t.Fatalf("repository.Provide: %v", err)
@@ -49,9 +57,6 @@ func newMCPPlanTestHandlers(t *testing.T) *Handlers {
 	t.Cleanup(func() {
 		if err := cleanup(); err != nil {
 			t.Errorf("cleanup repository: %v", err)
-		}
-		if err := sqlxDB.Close(); err != nil {
-			t.Errorf("close database: %v", err)
 		}
 	})
 
