@@ -255,6 +255,82 @@ func assertNoWorktreeRegistration(t *testing.T, repoPath, worktreePath string) {
 	}
 }
 
+// TestRemoveAt_PathFallbackRefusesNonWorktreeDirectory is the regression
+// test for Review round 2 Finding 2: TaskEnvironment.WorktreePath is not
+// always the worktree directory (see the mainline worktree-launch path,
+// which persists it as the TASK ROOT alongside a non-empty worktree_id —
+// env_preparer_worktree.go + executor_execute.go). RemoveAt's path-only
+// fallback must refuse to os.RemoveAll a path that is not actually a linked
+// git worktree, rather than trusting whatever path the caller supplies.
+func TestRemoveAt_PathFallbackRefusesNonWorktreeDirectory(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	ctx := context.Background()
+	seedReferenceCleanupSession(t, store, "task-owner", "session-owner", "completed")
+	wt := createReferenceCleanupWorktree(t, mgr, "task-owner", "session-owner")
+
+	if _, err := store.db.ExecContext(ctx, `DELETE FROM task_sessions WHERE id = ?`, "session-owner"); err != nil {
+		t.Fatalf("delete session: %v", err)
+	}
+
+	notAWorktree := t.TempDir()
+	marker := filepath.Join(notAWorktree, "important.txt")
+	if err := os.WriteFile(marker, []byte("do not delete"), 0o644); err != nil {
+		t.Fatalf("seed marker file: %v", err)
+	}
+
+	if err := mgr.RemoveAt(ctx, wt.ID, notAWorktree, wt.RepositoryID); err == nil {
+		t.Fatal("RemoveAt should refuse to remove a path that is not a linked git worktree")
+	}
+	if _, statErr := os.Stat(marker); statErr != nil {
+		t.Fatalf("non-worktree directory should be preserved, stat error = %v", statErr)
+	}
+}
+
+// TestRemoveAt_PathFallbackRefusesMainRepositoryCheckout is the sharpest
+// instance of the same defect: a main repository checkout (`.git` is a
+// directory, not the linked-worktree `gitdir:` file) must never be
+// os.RemoveAll'd by the fallback, even though it is exactly the shape
+// TaskEnvironment.WorktreePath takes for a multi-repo task root.
+func TestRemoveAt_PathFallbackRefusesMainRepositoryCheckout(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	ctx := context.Background()
+	seedReferenceCleanupSession(t, store, "task-owner", "session-owner", "completed")
+	wt := createReferenceCleanupWorktree(t, mgr, "task-owner", "session-owner")
+
+	if _, err := store.db.ExecContext(ctx, `DELETE FROM task_sessions WHERE id = ?`, "session-owner"); err != nil {
+		t.Fatalf("delete session: %v", err)
+	}
+
+	if err := mgr.RemoveAt(ctx, wt.ID, wt.RepositoryPath, wt.RepositoryID); err == nil {
+		t.Fatal("RemoveAt should refuse to remove a main repository checkout")
+	}
+	if _, statErr := os.Stat(filepath.Join(wt.RepositoryPath, ".git")); statErr != nil {
+		t.Fatalf("main repository checkout should be preserved, stat error = %v", statErr)
+	}
+}
+
+// TestRemoveAt_PathFallbackTreatsAlreadyRemovedDirectoryAsSuccess confirms
+// the validation guard does not regress idempotency: a worktree directory
+// that is already gone (e.g. a retried cleanup job) must still report
+// success, not get misclassified as "not a worktree".
+func TestRemoveAt_PathFallbackTreatsAlreadyRemovedDirectoryAsSuccess(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	ctx := context.Background()
+	seedReferenceCleanupSession(t, store, "task-owner", "session-owner", "completed")
+	wt := createReferenceCleanupWorktree(t, mgr, "task-owner", "session-owner")
+
+	if _, err := store.db.ExecContext(ctx, `DELETE FROM task_sessions WHERE id = ?`, "session-owner"); err != nil {
+		t.Fatalf("delete session: %v", err)
+	}
+	if err := os.RemoveAll(wt.Path); err != nil {
+		t.Fatalf("remove worktree directory ahead of RemoveAt: %v", err)
+	}
+
+	if err := mgr.RemoveAt(ctx, wt.ID, wt.Path, wt.RepositoryID); err != nil {
+		t.Fatalf("RemoveAt on an already-removed path should be idempotent, got: %v", err)
+	}
+}
+
 // newDecoyRepoWithDanglingWorktree creates a standalone git repo with a
 // worktree whose directory was removed without running `git worktree
 // remove`/`prune`, leaving a `prunable` registration — an observable marker

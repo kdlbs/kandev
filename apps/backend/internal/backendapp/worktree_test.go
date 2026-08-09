@@ -4,10 +4,17 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 
+	"github.com/jmoiron/sqlx"
+
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 func TestBootMessageAdapterResumedMessageDoesNotLeaveActiveTurn(t *testing.T) {
@@ -116,6 +123,78 @@ func TestDetectBranchRemote_NonGitDirFallsBackToOrigin(t *testing.T) {
 	// should fall back to the default remote rather than propagate the error.
 	if got := detectBranchRemote(context.Background(), t.TempDir(), "feature"); got != defaultGitRemote {
 		t.Errorf("got %q, want %s", got, defaultGitRemote)
+	}
+}
+
+// TestEnvironmentDestroyerAdapter_DestroyWorktreeAtForwardsArgumentsInOrder
+// is the regression test for Review round 2's test-rigor residual:
+// environmentDestroyerAdapter.DestroyWorktreeAt is a one-line delegation to
+// worktree.Manager.RemoveAt with no test of its own — a parameter-order
+// swap among the three string args would compile and pass the entire
+// suite. Calling it with the real (worktreeID, worktreePath, repositoryID)
+// order must actually remove the worktree directory; a swap (e.g.
+// worktreeID/worktreePath transposed) would pass a UUID where a filesystem
+// path is expected, silently no-op via the "already removed" branch, and
+// leave the directory on disk — which this test would catch via the
+// directory-removed assertion below.
+func TestEnvironmentDestroyerAdapter_DestroyWorktreeAtForwardsArgumentsInOrder(t *testing.T) {
+	ctx := context.Background()
+	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() { _ = sqlxDB.Close() })
+	taskRepo, cleanup, err := taskrepo.Provide(sqlxDB, sqlxDB, nil)
+	if err != nil {
+		t.Fatalf("task repository: %v", err)
+	}
+	t.Cleanup(func() { _ = cleanup() })
+	store, err := worktree.NewSQLiteStore(sqlxDB, sqlxDB)
+	if err != nil {
+		t.Fatalf("worktree store: %v", err)
+	}
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
+	mgr, err := worktree.NewManager(worktree.Config{
+		Enabled: true, TasksBasePath: t.TempDir(), BranchPrefix: "kandev/",
+	}, store, log)
+	if err != nil {
+		t.Fatalf("worktree.NewManager: %v", err)
+	}
+
+	if err := taskRepo.CreateWorkspace(ctx, &models.Workspace{ID: "workspace", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := taskRepo.CreateTask(ctx, &models.Task{
+		ID: "task-adapter", WorkspaceID: "workspace", Title: "Adapter", Priority: "medium",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := taskRepo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-adapter", TaskID: "task-adapter", State: models.TaskSessionStateCompleted,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	repoPath := t.TempDir()
+	mustGit(t, repoPath, "init", "--quiet", "-b", "main")
+	mustGit(t, repoPath, "commit", "--allow-empty", "-m", "init")
+
+	wt, err := mgr.Create(ctx, worktree.CreateRequest{
+		TaskID: "task-adapter", SessionID: "session-adapter", TaskTitle: "Adapter",
+		RepositoryID: "repo-adapter", RepositoryPath: repoPath,
+		BaseBranch: "main", TaskDirName: "task-adapter", RepoName: "repo-adapter",
+	})
+	if err != nil {
+		t.Fatalf("mgr.Create: %v", err)
+	}
+
+	adapter := &environmentDestroyerAdapter{worktrees: mgr}
+	if err := adapter.DestroyWorktreeAt(ctx, wt.ID, wt.Path, wt.RepositoryID); err != nil {
+		t.Fatalf("DestroyWorktreeAt: %v", err)
+	}
+	if _, statErr := os.Stat(wt.Path); !os.IsNotExist(statErr) {
+		t.Fatalf("worktree directory still on disk: %s (stat err = %v)", wt.Path, statErr)
 	}
 }
 

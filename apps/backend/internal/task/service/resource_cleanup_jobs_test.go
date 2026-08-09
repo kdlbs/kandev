@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -1118,6 +1119,60 @@ func TestTaskResourceCleanupMissingResourcesSucceed(t *testing.T) {
 				t.Fatalf("cleanup state = %q, want succeeded", got.State)
 			}
 		})
+	}
+}
+
+// TestTaskResourceCleanupJobSnapshotRoundTripsMultiRepoWorktrees is the
+// regression test for Review round 2's test-rigor residual: the durable
+// cleanup job JSON round-trips the TaskEnvironment through
+// taskResourceCleanupSnapshot (see persistTaskResourceCleanup /
+// processTaskResourceCleanupJob), and every existing snapshot test uses an
+// environment with an empty Repos[]. A future change to the snapshot shape
+// (a custom marshaler, a slimmed snapshot struct, or a gather variant that
+// skips loading TaskEnvironmentRepo rows) could silently drop Repos[] and
+// regress the whole multi-repo worktree teardown fix without any test
+// noticing. This pins the round trip end-to-end: a job persisted with a
+// populated Repos[] must still destroy every repo's worktree when processed.
+func TestTaskResourceCleanupJobSnapshotRoundTripsMultiRepoWorktrees(t *testing.T) {
+	taskSvc, repo := setupOfficeTest(t)
+	taskSvc.StopTaskResourceCleanupWorker()
+	destroyer := &stubDestroyer{}
+	taskSvc.SetEnvironmentDestroyer(destroyer)
+
+	env := &models.TaskEnvironment{
+		ID:         "env-multi-snapshot",
+		WorktreeID: "wt-primary",
+		Repos: []*models.TaskEnvironmentRepo{
+			{RepositoryID: "repo-a", WorktreeID: "wt-primary"},
+			{RepositoryID: "repo-b", WorktreeID: "wt-secondary"},
+		},
+	}
+	snapshot, err := json.Marshal(taskResourceCleanupSnapshot{
+		TaskEnvironment:      env,
+		DeleteEnvironmentRow: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := &models.TaskResourceCleanupJob{
+		ID:               "multi-repo-snapshot-roundtrip",
+		OperationID:      "cascade_delete:multi-repo-snapshot:roundtrip",
+		TaskID:           "deleted-multi-repo-task",
+		Trigger:          models.TaskResourceCleanupTriggerCascadeDelete,
+		State:            models.TaskResourceCleanupStatePending,
+		ResourceSnapshot: string(snapshot),
+	}
+	if err := repo.CreateTaskResourceCleanupJob(context.Background(), job); err != nil {
+		t.Fatalf("CreateTaskResourceCleanupJob: %v", err)
+	}
+
+	if err := taskSvc.processTaskResourceCleanupJob(context.Background(), job.ID); err != nil {
+		t.Fatalf("processTaskResourceCleanupJob: %v", err)
+	}
+
+	want := []string{"wt-primary", "wt-secondary"}
+	if got := destroyer.worktreeCalls; !reflect.DeepEqual(got, want) {
+		t.Fatalf("worktree destroy calls = %v, want %v (Repos[] did not survive the snapshot round trip)", got, want)
 	}
 }
 

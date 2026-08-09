@@ -2800,6 +2800,42 @@ func (s *Service) cleanupTaskEnvironment(
 	return nil
 }
 
+// excludeEnvironmentWorktree removes every worktree teardownEnvironmentResources
+// owns from the batch cleanup list — the legacy env.WorktreeID plus every
+// env.Repos[] entry, not just the legacy field. Without this, a multi-repo
+// environment's secondary worktrees survive the filter and get reprocessed
+// by the batch path (CleanupWorktrees) right after env teardown already
+// destroyed their directories: the batch path's cleanup-script execution
+// then runs against a directory that no longer exists and silently fails.
+// A worktree the environment does not track (e.g. a stray or shared/borrowed
+// row) is untouched here and still goes through the batch path, which is
+// the only path that honors shared-worktree reference counting.
+func excludeEnvironmentWorktree(worktrees []*worktree.Worktree, env *models.TaskEnvironment) []*worktree.Worktree {
+	if env == nil || len(worktrees) == 0 {
+		return worktrees
+	}
+	_, order := mergeEnvironmentWorktreeHandles(env)
+	if len(order) == 0 {
+		return worktrees
+	}
+	exclude := make(map[string]struct{}, len(order))
+	for _, id := range order {
+		exclude[id] = struct{}{}
+	}
+	filtered := worktrees[:0]
+	for _, wt := range worktrees {
+		if wt == nil {
+			continue
+		}
+		if _, skip := exclude[wt.ID]; skip {
+			continue
+		}
+		filtered = append(filtered, wt)
+	}
+	return filtered
+}
+
+
 // ListTasks returns all tasks for a workflow
 func (s *Service) ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error) {
 	if err := s.authorizeWorkflowID(ctx, workflowID); err != nil {

@@ -226,6 +226,27 @@ func (m *Manager) RemoveAt(ctx context.Context, worktreeID, worktreePath, reposi
 			zap.String("repository_id", repositoryID))
 	}
 
+	// worktreePath comes from TaskEnvironment/TaskEnvironmentRepo, not from
+	// the worktree manager's own records — for a multi-repo task it can
+	// legitimately be the task root rather than a repo's worktree directory
+	// (see env_preparer_worktree.go's "workspace path = task root" and
+	// executor_execute.go, which persist that root onto the legacy
+	// WorktreePath field alongside a non-empty WorktreeID). Refuse to
+	// os.RemoveAll a path that is not actually a linked git worktree, so a
+	// stale or wrong path can never take a main checkout or a task root
+	// (and its sibling worktrees) with it. A missing path is treated as
+	// already removed, matching removeWorktreeDir's existing idempotency.
+	if _, statErr := os.Stat(worktreePath); statErr != nil {
+		if !os.IsNotExist(statErr) {
+			return fmt.Errorf("stat worktree path %s: %w", worktreePath, statErr)
+		}
+	} else if !m.IsValid(worktreePath) {
+		m.logger.Error("refusing to remove a path that is not a linked git worktree",
+			zap.String("worktree_id", worktreeID),
+			zap.String("worktree_path", worktreePath))
+		return fmt.Errorf("worktree path %s is not a linked git worktree; refusing to remove it", worktreePath)
+	}
+
 	if err := m.removeWorktreeDir(ctx, worktreePath, repoPath); err != nil {
 		return fmt.Errorf("remove worktree directory %s: %w", worktreePath, err)
 	}

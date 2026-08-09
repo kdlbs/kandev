@@ -198,6 +198,11 @@ func TestTeardownEnvironmentResources_MultiRepoRemovesEveryWorktreeFromDisk(t *t
 		t.Fatalf("teardownEnvironmentResources: %v", err)
 	}
 
+	// The primary assertion below is a basic sanity check: env.WorktreePath
+	// (the legacy field) always resolves the primary regardless of Repos[]
+	// handling, so it passes even if the Repos[] iteration were reverted.
+	// secondary is the assertion that actually proves the Repos[] fix — its
+	// only durable handle is the Repos[] entry.
 	if _, statErr := os.Stat(primary.Path); !os.IsNotExist(statErr) {
 		t.Errorf("primary worktree directory still on disk: %s (stat err = %v)", primary.Path, statErr)
 	}
