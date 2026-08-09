@@ -308,7 +308,8 @@ a *different icon* from resolver A's `BackgroundWorkTaskIcon`, which is a violet
 "call sites that pass the option" list or the "call sites deliberately not updated" list. It
 also reads `task.foreground_activity` (snake_case) where the board reads
 `task.foregroundActivity` — two different `Task` shapes; a builder touching both must not
-assume one.
+assume one. *(There are in fact **three**, and the third is the one the sidebar consumes; this
+sentence is about these two surfaces only. §O is the complete map, added 2026-08-09.)*
 
 **The board has TWO early returns before the resolver, not one.**
 `renderTaskStatusIcon` (`kanban-card-content.tsx:263-291`):
@@ -334,6 +335,10 @@ task, and `:275` is the load-bearing one. AC-58 asserts this.
 Its three production call sites are `sessions-dropdown.tsx:475`,
 `session-reopen-menu.tsx:204`, `mobile/mobile-sessions-section.tsx:132`. Like the task
 resolver, it emits no `data-testid`; the switcher surfaces assert on the icon component.
+
+**§M maps the RESOLVERS. It does not map the DATA that reaches them — see §O**, which was added
+2026-08-09 for the same reason §M itself was: a revision named the consumer precisely and left the
+producer to be guessed.
 
 ### N. What a Claude self-resume actually does to the turn boundary — READ FROM THE TREE
 
@@ -391,6 +396,84 @@ naming a single turn boundary for the whole feature.
 This does not claim `ScheduleWakeup` is the *only* self-resume mechanism. D3 states what
 happens when a continuation produces no `session/prompt` at all, so both branches are
 covered.
+
+### O. The frontend DATA chain — DERIVED FROM THE TREE, 2026-08-09
+
+**This section exists for exactly the reason §M does, one layer down, and it is the third time
+this spec has been wrong about the frontend in the same shape.** §M mapped which *resolver* each
+surface uses. It did not map which *object* each resolver is handed, or who builds it. An earlier
+revision asserted that "Kandev carries **two** different `Task` types". **Measured false: there are
+three, they are fed by one store shape, and that store shape has four producers — of which the spec
+named three.** Every line below was read from the tree. A reviewer should re-derive all of it.
+
+**The three `Task`-ish shapes, and who consumes each:**
+
+| # | Shape | Declared in | Consumed by | Casing |
+|---|---|---|---|---|
+| 1 | Wire/DTO `Task`, `TaskSession` | `lib/types/backend.ts`, `lib/types/http.ts` | `rich-task-list-row.tsx:38`, the session surfaces | **snake_case** |
+| 2 | Board/card `Task` | `components/kanban-card.tsx:40-65` | `kanban-card-content.tsx` (resolver B) | **camelCase** |
+| 3 | **`TaskSwitcherItem`** | `components/task/task-switcher-types.ts:14` | `task-switcher-row.tsx:143` → `TaskItem` → `TaskStateIcon` (**resolver A**) | **camelCase** |
+
+Shape 3 was named in **no** revision of this spec, and it is the one AC-23's surface consumes.
+
+**Shapes 2 and 3 are both derived from ONE store shape**, `KanbanState["tasks"][number]`
+(`lib/state/slices/kanban/types.ts:84`, which already declares `foregroundActivity`). So the field
+has to reach that store shape first, and then be forwarded twice.
+
+**The store shape has FOUR producers, not three.** The first three are already named under
+*Data model → Revision epoch*; the fourth was not, and it is the one that runs first:
+
+| Producer | File | What it feeds | Named before? |
+|---|---|---|---|
+| `toKanbanTask` | `lib/kanban/map-task.ts:152` | REST + WS task records | yes |
+| `kanban.update` projection A | `lib/ws/handlers/kanban.ts:83` (`existing?.foregroundActivity`) | `state.kanban.tasks` | yes (AC-58a) |
+| `kanban.update` projection B | `lib/ws/handlers/kanban.ts:121-124` (`undefined ? fallback : t`) | `state.kanbanMulti.snapshots[…].tasks` | yes (AC-58a) |
+| **`snapshotToState`** | **`lib/ssr/mapper.ts:51`** (`foregroundActivity: task.foreground_activity ?? undefined`) | the **Go boot snapshot**, on first paint | **NO** |
+
+`snapshotToState` hand-builds `KanbanTask` field by field and imports only `pickPendingAction` and
+`workspaceModeFromMetadata` from `map-task.ts` — it does **not** route through `toKanbanTask`, so
+adding the field there does not reach it. Left alone, a parked task renders unparked on first paint
+on every surface and only lights up when the next `kanban.update` happens to arrive. AC-58a cannot
+catch this: its GIVEN is *"a subsequent `kanban.update` arrives"*.
+
+**`TaskSwitcherItem` has TWO producers, and both were unnamed.** Resolver A is reached from desktop
+*and* mobile:
+
+| Producer | File | Surface |
+|---|---|---|
+| `buildSidebarItem` | `components/task/task-session-sidebar-item.ts`, called at `task-session-sidebar.tsx:92` | desktop sidebar task list |
+| `toSheetItem` | `components/task/mobile/session-task-switcher-sheet-hooks.ts` | mobile task switcher, which renders the **same** `TaskSwitcher` (`session-task-switcher-sheet.tsx:9`) and therefore the same `TaskItem` |
+
+Both take `KanbanState["tasks"][number]`. Both already carry `interrupted` and `foregroundActivity`
+forward explicitly, and `toSheetItem`'s own comment says the mobile row "shares `TaskItem`
+rendering". So a builder who wires only `buildSidebarItem` ships a parked affordance that appears on
+desktop and not on mobile, from one component.
+
+**And there is a fourth carrier in play: `TaskStatusSummary`** (`lib/types/task-status-summary.ts`),
+which is *not* a `Task` shape but which both sidebar producers prefer over the task record:
+
+```
+foregroundActivity: hasSummary ? summary?.foreground_activity : task.foregroundActivity
+```
+
+— identical in `sidebarSessionStatus` and in `sheetStatus`. So for `foregroundActivity` the task
+record is a **fallback**, not the source, whenever a summary exists. That precedence is deliberate
+and documented in `sidebarSessionStatus`'s own comment (ADR-0049: the summary carries a fresher
+per-session view for the task in focus). **Whether the parked bit follows that precedence is a real
+decision with an inert-but-green failure on one side**, and it is made under *API surface → The
+frontend property names*, not left to the builder.
+
+Note for that decision: `TaskStatusSummary` already declares its **own** `revision: number`
+(`task-status-summary.ts:3`) with an unrelated meaning.
+
+### Why this was invisible to every criterion
+
+AC-23's home is `task-item.test.tsx` (*Notes for implementation* says so), which renders `TaskItem`
+with props passed directly. AC-58 likewise asserts the render *given* the prop. So the entire chain
+above — three shapes, six producers — is downstream of nothing any criterion looked at, and an
+implementation that wires the resolver and none of the producers passes AC-23, AC-34, AC-58, AC-58b,
+AC-59, AC-59a and AC-73a while every live surface stays dark. AC-58a was added in an earlier round
+for exactly this reason and covers **one** producer of **one** shape. AC-83 and AC-84 cover the rest.
 
 ## Requirements
 
@@ -468,10 +551,83 @@ when a row exists, so a long-running backend would accumulate one per session ev
 - **Created** when the ordered consumer first sets `observed_detached` for a session — i.e. on the
   first attested detached launch. Nothing else creates a row: not a `turn_started`, not a settle,
   not a read. A `turn_started` or a settle for a session with no row is a no-op.
+- **Revived**, rather than re-created, when an attested detached launch arrives for a session that
+  holds a **reduced** entry (see eviction, below): `observed_detached` is set, `parked` is `false`,
+  `turn_marker` restarts at `0` and `last_sample` at `unknown` — **but `revision` continues from the
+  retained value instead of restarting at `0`**. Restarting it would move the revision backward for
+  any consumer still holding the pre-eviction value, which is the defect the retention exists to
+  prevent. Nothing else revives a reduced entry: a `turn_started`, a settle, or a read against one is
+  a no-op, exactly as against no entry at all.
 - **Evicted** on the first of: the session reaching a terminal state (`COMPLETED`, `FAILED`,
   `CANCELLED`); the session being deleted; its execution ending; an agent-context reset for that
-  session; or backend shutdown. Eviction publishes nothing on its own — the projection has already
-  gone `false` through the session-state term by the time any of these is reached (D8).
+  session; or backend shutdown.
+- **EVICTION UN-PARKS FIRST — CORRECTED 2026-08-09, and the rule it replaces
+  was false.** The previous revision said *"Eviction publishes nothing on its own — the projection
+  has already gone `false` through the session-state term by the time any of these is reached
+  (D8)."* **That premise does not hold for two of the five causes.** A session's **execution can
+  end** — agentctl idle-reaped at `KANDEV_ACP_IDLE_TIMEOUT` (default `1h`), or crashed — while the
+  session is still sitting at `WAITING_FOR_INPUT`, which is the ordinary long-idle shape in Kandev
+  and precisely the twelve-minute-and-longer window §J measures. An **agent-context reset** likewise
+  writes `STARTING` and restores, without the session ever having left `WAITING_FOR_INPUT` as far as
+  a parked row is concerned. In both, no term-3 flip occurs, so under the old rule the row vanished
+  with `parked` still `true` and **no carrier ever said otherwise**:
+
+  > Because a rowless session serializes D9's defaults `(parked=false, revision 0, parked_epoch E)`,
+  > and the consumer's field-scoped rule discards a strictly lower `(epoch, revision)` pair, a client
+  > holding `(E, N≥1, true)` **rejects every later frame's parked triple and keeps showing the
+  > affordance** — inside one epoch, so only a backend restart clears it. That is the "card stuck"
+  > failure *Revision epoch* exists to make impossible, reached through an ordinary idle reap. The
+  > publish-failure rule's self-healing claim — "the revision only ever moves forward" — is false on
+  > this path, because eviction moves it **backward to `0`**.
+
+  So the rule is stated positively:
+
+  > **Before an entry is evicted, if its `parked` is currently `true`, the eviction performs the
+  > `true → false` transition exactly as any other cause does** — under the session-level lock, it
+  > flips `parked`, **increments `revision`**, and publishes `session.activity_changed` carrying
+  > `false`, the new `revision` and `parked_epoch`; then it takes the per-task lock and applies the
+  > `members` removal with the same recompute-compare-publish steps already specified under
+  > *Task-level projection*. Only then is the entry **reduced** — see the next bullet, which is what
+  > "eviction" leaves behind. If `parked` is already `false`, eviction publishes nothing, which is
+  > what the old sentence was right about.
+  >
+  > **The one exception is backend shutdown**, which publishes nothing in either case: there is no
+  > consumer left to inform, every client reconnects against a strictly higher `parked_epoch`, and
+  > AC-77 already covers that reset. A builder MUST NOT make shutdown eviction publish.
+
+  This also removes a race the old wording created with *Failure modes*: whichever of the failed
+  probe and the execution-end bookkeeping happens first, the affordance now clears exactly once,
+  through the sample term or through eviction, and the other becomes a no-op because `parked` is
+  already `false`. AC-85 observes it.
+- **EVICTION REDUCES THE ROW, IT DOES NOT DELETE THE REVISION — and this is what keeps the
+  publish-failure rule true.** *API surface → What happens when the publish itself fails* says a
+  dropped frame is corrected because "the next carrier for that entity re-serializes the current
+  triple and the consumer's `(parked_epoch, revision)` comparison accepts it, because the revision
+  only ever moves forward". **Deleting the row outright breaks that sentence**: a rowless session
+  serializes D9's `revision 0`, which moves the revision *backward*, so a single dropped eviction
+  frame would be uncorrectable for the life of the process — the same stuck affordance by a
+  different route. So:
+
+  > On eviction the entry is **reduced, not removed**: `parked`, `observed_detached`, `last_sample`
+  > and `turn_marker` are cleared, and **`revision` is retained** at its last published value. A
+  > reduced entry is inert — it creates nothing, is never sampled, never parks, and answers every
+  > read as `parked = false` — but a session carrier for it serializes `(false, retained_revision,
+  > parked_epoch)` rather than `(false, 0, …)`, so a consumer accepts it and the eviction publish
+  > becomes belt-and-braces rather than load-bearing.
+  >
+  > The reduced entry is dropped for good when the session is **deleted**, or at backend shutdown.
+  > Its cost is one session id and one `uint64` per session ever parked in one process lifetime,
+  > which is the same order as every other per-session runtime map here, and it is never persisted.
+
+  Two consequences fall out rather than needing their own rules. **Idempotency:** a second eviction
+  cause firing for the same session finds `parked` already `false` and publishes nothing, so
+  concurrent causes produce exactly one un-park. **A sample completing after eviction** is discarded
+  by D2's existing revalidation with no new clause, because `observed_detached` was cleared by the
+  reduction and therefore no longer matches the value captured at issue.
+
+  D9 tabulates all of this. Note that the retained revision does **not** change D9's
+  "`0` for a session with no recorded transition" — a session that never transitioned has nothing to
+  retain, and `0` remains correct for it.
 - A session that is attested but never settles keeps its row until one of the above fires. That is
   bounded by the session's own lifetime, which is the same bound every other per-session runtime
   map in the orchestrator carries.
@@ -567,6 +723,12 @@ the unorderable-carrier defect the `max()` rule was rejected for. Session transi
 - A session's entry is **removed from `members`** when its `parkedState` row is evicted
   (*Entry lifecycle*), under the same per-task lock and with the same recompute-compare-publish
   steps — so a task whose last parked session ends publishes the `true → false` flip exactly once.
+  **This runs at step 2 of the sequence above, after the session side has released its own lock**:
+  per *Entry lifecycle*, an eviction of a row whose `parked` is `true` performs the session-level
+  `true → false` transition first and only then applies this removal, so the lock order is exactly
+  the ordinary one and no new path holds both locks. *(Clarified 2026-08-09. This sentence was
+  already correct and is what showed the old "eviction publishes nothing" rule to be wrong — if the
+  projection were always already `false` at eviction, the flip it promises could never fire.)*
 - The boolean and the counter are read for serialization in **one critical section** under the
   same per-task lock, so they cannot come from different instants.
 - AC-78's "no `task.updated` is published" is the observable consequence for the non-flipping
@@ -656,6 +818,18 @@ Without this, AC-58 passes in a unit test that renders the card with a prop and 
 board that has since received a `kanban.update` — the same class of defect §M exists to prevent,
 one layer down. §M mapped the *resolvers*; this maps the *data*. AC-58a observes it.
 
+**THOSE THREE ARE NOT THE WHOLE PRODUCER SET — CORRECTED 2026-08-09.** The paragraph above names
+`map-task.ts` and the two `kanban.ts` projections, which is what an earlier revision believed to be
+exhaustive. §O measures a **fourth** producer of the same store shape, `snapshotToState`
+(`lib/ssr/mapper.ts:51`), which hand-builds `KanbanTask` from the **Go boot snapshot** and does not
+route through `toKanbanTask` — so the field must be added there too, beside its existing
+`foregroundActivity: task.foreground_activity ?? undefined` line. This is the producer that runs
+**first**, on page load, and AC-58a cannot observe it because AC-58a's GIVEN is a *subsequent*
+`kanban.update`. AC-84 observes it. Two further producers, `buildSidebarItem` and `toSheetItem`,
+build `TaskSwitcherItem` from that store shape for resolver A; they are specified under
+*API surface → The frontend property names* and observed by AC-83. The complete six-producer list is
+tabulated there.
+
 AC-77 observes the reset end to end. Choosing process start time rather than a persisted
 counter is deliberate: it needs no storage, it is monotonic across restarts on any sane clock,
 and a backend that restarts twice within one nanosecond is not a case this feature owes an
@@ -681,23 +855,84 @@ Additive fields, on:
 `foreground_activity` and `active_subagent_count` keep their current meaning and their current
 gate. No existing field changes shape or value.
 
-**The frontend property names, per `Task` shape — NAMED 2026-08-09.** §M measured that Kandev
-carries **two** different `Task` types and that they disagree on casing; it warned a builder
-"must not assume one" but never said what the new field is called on either, leaving AC-58 and
-AC-73a resting on a guess. Both are now fixed, and the rule is *follow each shape's existing
-convention rather than impose one*:
+**The frontend property names, per `Task` shape — NAMED 2026-08-09, and CORRECTED 2026-08-09 from
+two shapes to three.** An earlier revision said §M measured that Kandev carries "**two** different
+`Task` types". §O measures that there are **three**, and that the third is the one resolver A — the
+sidebar, AC-23's surface — actually consumes. The rule is unchanged: *follow each shape's existing
+convention rather than impose one*.
 
 | Shape | Declared in | Existing precedent | New fields |
 |---|---|---|---|
 | Wire/DTO `Task`, `TaskSession` | `apps/web/lib/types/backend.ts`, `lib/types/http.ts` | `foreground_activity` (`backend.ts:106`, `:289`, `:307`), `cancellation_pending` (`:292`) | `parked_on_background_work`, `parked_revision` (task) / `revision` (session), `parked_epoch` — **snake_case, unchanged from the wire** |
-| Board/card `Task` | `apps/web/components/kanban-card.tsx:40-65` | `foregroundActivity` (`:65`) | `parkedOnBackgroundWork` — **camelCase**; this shape carries no revision fields and gains none |
+| Board/card `Task` | `apps/web/components/kanban-card.tsx:40-65` | `foregroundActivity` (`:65`) | `parkedOnBackgroundWork` — **camelCase**; carries no revision fields and gains none |
+| **`TaskSwitcherItem`** | **`apps/web/components/task/task-switcher-types.ts:14`** | `foregroundActivity` (`:20`), `interrupted` (`:22`) | **`parkedOnBackgroundWork` — camelCase**; carries no revision fields and gains none |
+| **Store shape** `KanbanState["tasks"][number]` | **`apps/web/lib/state/slices/kanban/types.ts:84`** | `foregroundActivity` (`:84`) | **`parkedOnBackgroundWork` — camelCase**; this is the shape shapes 2 and 3 are both derived from, so it must carry the field or neither can |
 
-Consequences that are contract, because each is a place the two shapes meet:
+Consequences that are contract, because each is a place two shapes meet:
 `rich-task-list-row.tsx:38` reads the **snake_case** shape and passes
-`task.parked_on_background_work`; `kanban-card-content.tsx` reads the **camelCase** shape and
-passes `task.parkedOnBackgroundWork`. The revision triple is consumed by the **store slices**
-(*Revision epoch*), never by a card component, which is why the board shape needs no revision
-field and must not grow one.
+`task.parked_on_background_work`; `kanban-card-content.tsx` and `task-switcher-row.tsx:143` read
+**camelCase** shapes and pass `task.parkedOnBackgroundWork`. The revision triple is consumed by the
+**store slices** (*Revision epoch*), never by a card or row component, which is why neither camelCase
+shape needs a revision field and neither may grow one.
+
+**On all three camelCase shapes the field is OPTIONAL and `undefined` is equivalent to `false`**,
+exactly as `foregroundActivity` already is on each of them and exactly as D9's absent-≡-`false` rule
+states for the wire. So a producer that has not been updated yet, a boot snapshot from a backend
+that predates this feature, and a task the backend has never projected all render as today rather
+than as an error. No shape declares the field non-optional and no consumer coerces `undefined` to
+anything but `false`.
+
+**Every producer that must carry the field, named — because the field is dropped by omission at each
+one.** §O derives this; the list is contract, and AC-83 and AC-84 observe it.
+
+| # | Producer | File | Pattern to follow |
+|---|---|---|---|
+| 1 | `toKanbanTask` | `lib/kanban/map-task.ts` | beside `foregroundActivity: pickForegroundActivity(source.foreground_activity)` |
+| 2 | `kanban.update` projection A | `lib/ws/handlers/kanban.ts:83` | `existing?.foregroundActivity` |
+| 3 | `kanban.update` projection B | `lib/ws/handlers/kanban.ts:121-124` | `t.x === undefined ? fallback?.x : t.x` |
+| 4 | **`snapshotToState`** | **`lib/ssr/mapper.ts:51`** | beside `foregroundActivity: task.foreground_activity ?? undefined` |
+| 5 | **`buildSidebarItem` / `sidebarSessionStatus`** | **`components/task/task-session-sidebar-item.ts`** | beside `foregroundActivity`, but see the precedence rule below |
+| 6 | **`toSheetItem` / `sheetStatus`** | **`components/task/mobile/session-task-switcher-sheet-hooks.ts`** | same rule as 5 — mobile renders the same `TaskItem` |
+
+1–3 were already named; **4, 5 and 6 are added 2026-08-09** and are the close for the round-5
+finding. Producer 4 is the boot path, so omitting it means the affordance is absent on first paint
+and appears only when a later `kanban.update` arrives. Producers 5 and 6 are the only route to
+resolver A at all, so omitting them leaves AC-23 green in `task-item.test.tsx` and the live sidebar
+dark.
+
+**THE STATUS-SUMMARY PRECEDENCE — DECIDED HERE, because both sidebar producers make the task record
+a fallback rather than the source.** §O measures that `sidebarSessionStatus` and `sheetStatus` both
+resolve `foregroundActivity` as `hasSummary ? summary?.foreground_activity : task.foregroundActivity`,
+so a builder mirroring the neighbouring line would need `TaskStatusSummary` to carry the parked bit
+— and if it does not, the sidebar reads `undefined` for every task that *has* a summary, which is the
+common case for an open task. That is an inert-but-green failure, so the decision is stated rather
+than left to the neighbouring line:
+
+> **`parkedOnBackgroundWork` is read from the TASK RECORD unconditionally, on both producers 5 and
+> 6. It does NOT follow `foregroundActivity`'s summary-first precedence, and `TaskStatusSummary`
+> gains no parked field of any kind.** In `sidebarSessionStatus` and `sheetStatus` the line is
+> `parkedOnBackgroundWork: task.parkedOnBackgroundWork`, with **no `hasSummary` ternary**.
+
+Three reasons, each checkable:
+
+1. **`TaskStatusSummary` already declares its own `revision: number`**
+   (`lib/types/task-status-summary.ts:3`) with an unrelated meaning. The session carriers' parked
+   counter is also called `revision` (*API surface* table above), so putting the triple on the
+   summary either collides on that name or introduces a fourth revision namespace.
+2. **The summary is not one of the carriers the discard rule covers.** *Revision epoch* names exactly
+   two chokepoints, `mergeCancellationProjection` and `mergeTaskUpdate`, and the summary routes
+   through neither. A summary carrying a parked value could therefore overwrite a newer `task.updated`
+   with no `(parked_epoch, revision)` pair to order the two — the unorderable-carrier defect the
+   `max()` rule was rejected for, reintroduced on a different carrier.
+3. **There is nothing for the summary to refine.** The precedence exists because the summary carries
+   a fresher *per-session* view; `parked_on_background_work` at task level is already the OR across
+   the task's sessions by construction (*Data model → Task-level projection*), so a summary could
+   only ever restate it.
+
+The cost is named and accepted: the sidebar's parked bit and its `foregroundActivity` come from
+different sources and can therefore be from different instants. That is harmless in the only
+direction it can differ — both are advisory affordances on the same row, neither gates input, and
+the parked bit has its own revision guard on the store shape while `foregroundActivity` does not.
 
 **What actually fires when the value changes.** "Published only on change" is a *necessary*
 condition, not a trigger, and a parked transition has no natural one: an un-park at the
@@ -742,6 +977,13 @@ through a dropped frame rather than a reordered one.
 
 This is the cheap direction and it is the same one D9 takes elsewhere: a lost frame degrades to a
 stale spinner, never to a stuck notification, because this spec withholds none.
+
+**The whole argument rests on the revision never moving backward, which is why eviction REDUCES the
+`parkedState` entry rather than deleting it — ADDED 2026-08-09.** A deleted entry makes its session
+serialize D9's `revision 0`, and a consumer holding `(E, N)` then discards every later frame's
+parked triple for the rest of the epoch. That is the one uncorrectable case, and *Data model →
+Entry lifecycle* removes it by retaining `revision` on the reduced entry. AC-85's last clause
+observes it.
 
 ### Rendering contract
 
@@ -804,6 +1046,25 @@ if (parkedOnBackgroundWork) return <BackgroundWorkTaskIcon />;
 
 `TaskStateIcon`'s prop bag (`task-item.tsx:187-206`) gains `parkedOnBackgroundWork?: boolean`,
 **defaulting to `false`**, threaded from the call site at `:483`.
+
+**Where that prop COMES FROM is contract too, and it is four hops — ADDED 2026-08-09.** Naming the
+prop and its call site says what `TaskStateIcon` reads and nothing about what reaches `TaskItem`.
+Per §O the chain is:
+
+```
+KanbanState["tasks"][number].parkedOnBackgroundWork      <- producers 1-4 (API surface table)
+  -> buildSidebarItem / toSheetItem                      <- producers 5-6, task record, no ternary
+    -> TaskSwitcherItem.parkedOnBackgroundWork           <- new field on that shape
+      -> task-switcher-row.tsx:143  <TaskItem parkedOnBackgroundWork={task.parkedOnBackgroundWork}/>
+        -> TaskItemProps            <- new optional prop, defaulting to false
+          -> task-item.tsx:483      <TaskStateIcon parkedOnBackgroundWork={…}/>
+```
+
+Every hop drops the value by omission if it is missed, and **only the last two are visible to
+`task-item.test.tsx`**, which is AC-23's home and passes props directly. **The mobile task switcher
+is in scope**, not an exclusion: it renders the same `TaskSwitcher` and therefore the same
+`TaskItem` (§O), so wiring `buildSidebarItem` alone ships one component that lights up on desktop and
+not on mobile. AC-83 asserts hops 1–3 on both producers.
 
 Position is contract, and it is determined by the branches on either side rather than by an
 absolute index: **after** the `foreground_activity` branches, so the flagged experiment stays
@@ -1810,7 +2071,8 @@ and nothing else:
 |---|---|
 | the probe returns `settled` or `unknown` at a sample | term 2 |
 | the agent resumes itself, or the operator's prompt is admitted | term 3 |
-| the session is stopped, deleted, or its execution ends | term 3 |
+| the session is stopped or deleted, or reaches a terminal state | term 3 |
+| **its execution ends, or its agent context is reset** | **neither — the row is EVICTED, and eviction performs the `true → false` transition itself before removing the row** (*Data model → Entry lifecycle*). Listing this as "term 3" was wrong: an execution can end while the session is still `WAITING_FOR_INPUT`, so no term flips. Corrected 2026-08-09; AC-85 observes it |
 | a new turn starts (D3 clears the attestation) | term 1 |
 
 **A queued-but-unadmitted operator prompt does NOT clear the projection.** All three terms
@@ -1838,7 +2100,8 @@ reaches agentctl only through `lifecycle.Manager`, which applies the session-acc
 | Platform cannot enumerate descendants with start times (Windows) | `unknown`, always. Never `settled`, never `live`. |
 | agentctl holds no recorded turn start (restarted mid-turn) | `unknown`. |
 | The agent process has exited | `unknown`, not `settled` — Kandev has lost the ability to observe rather than observed completion. |
-| agentctl crashes, disconnects, or is version-skewed while a session is parked | The probe call fails → `unknown` → the session un-parks and the affordance clears. |
+| agentctl crashes, disconnects, or is version-skewed while a session is parked | The affordance clears exactly once, by whichever of two paths fires first, and the other is then a no-op because `parked` is already `false`. **(a)** A sample completes and the probe call fails → `unknown` → un-parked through term 2. **(b)** The session's execution ends first, so no further sample is taken (AC-53) → the row is evicted, and **eviction performs the `true → false` transition itself** (*Entry lifecycle*). *Clarified 2026-08-09: this row previously named only (a), while AC-53 stops sampling on execution end — so which one obtained was a race between two spec-stated behaviours, and under the old eviction rule branch (b) cleared nothing at all.* |
+| A session's execution ends, or its agent context is reset, while the session is still `WAITING_FOR_INPUT` and parked | The row is evicted, and eviction first publishes the `true → false` transition with a strictly higher `revision` (*Entry lifecycle*). The affordance clears. It is **not** left to the session-state term, which does not flip on either cause. |
 | Probe reports `live` but the workload is a leaked orphan | The affordance persists until the session leaves `WAITING_FOR_INPUT`. Accepted: it costs a stale spinner, not a stuck notification, because this spec withholds nothing. |
 | A long-lived process unrelated to the workload starts mid-turn (e.g. a lazily-connected stdio MCP server) | Counted as `live`. This is a **false "still busy"**, the cheap direction. Preferred over any command-name heuristic, which would be fragile and vendor-specific. §L measures that this is a real, common case, and **AC-70a observes it** rather than leaving it as prose. |
 | Detached launch observed but the agent has no registered recogniser | `observed_detached` is false; behaviour unchanged, and no probe is taken. |
@@ -2144,6 +2407,20 @@ and is not re-sampled, because AC-53 stops the loop when the session leaves `WAI
 AC-68 observes this directly — it is the case an earlier revision left uncovered, and the one that
 would otherwise leave a card spinning while the session is actively `RUNNING`.
 
+**A transition of a term is not the ONLY way the projection clears — ADDED 2026-08-09.** There is
+exactly one other, and it is not a fourth term: **eviction of the `parkedState` row**. Two of the
+five eviction causes — the session's **execution ending** and an **agent-context reset** — can fire
+while the session is still `WAITING_FOR_INPUT`, so no term flips and there is nothing for the
+three-term formula to observe. *Data model → Entry lifecycle* therefore makes eviction perform the
+`true → false` transition itself before removing the row, publishing with a strictly higher
+`revision` exactly as a term transition does. From a consumer's side the two are indistinguishable,
+which is the point: there is still exactly one way the affordance clears on the wire.
+
+This is stated here because D8 is where a builder looks for the exhaustive list, and the previous
+revision's list was exhaustive only over the *terms*. The distinction matters in one direction only
+— a rowless session serializes `revision 0`, which the discard rule rejects against any applied
+`N ≥ 1`, so an eviction that publishes nothing strands the client permanently inside the epoch.
+
 ### D9 — Defaults and boundary values
 
 | Field / input | Default / boundary behaviour |
@@ -2159,6 +2436,13 @@ would otherwise leave a card spinning while the session is actively `RUNNING`.
 | `turn_marker` | `uint64`, `0` for a session with no `turn_started` yet; increments on every `turn_started`; never persisted, never on a carrier, never compared across sessions |
 | `parkedState` row that does not exist | created only by the first attested detached launch; a `turn_started`, a settle, or a probe for a session with no row is a **no-op**, not an error and not a creation |
 | attested launch whose `Kind` is not `shell` | **not** an attestation — `observed_detached` stays false, no probe, never parked (covers today's `Kind=subagent` stamps, incl. `mock-agent`) |
+| **eviction of a `parkedState` entry whose `parked` is `true`** | the eviction performs the `true → false` transition **first** — flip, increment `revision`, publish `session.activity_changed` — then applies the `members` removal, then **reduces** the entry (`revision` retained). Never reduce or drop a `true` entry silently, and never discard its `revision`: an entry that lost its revision serializes `revision 0`, which the consumer discards against any applied `N ≥ 1`, stranding the affordance inside the epoch |
+| eviction of a `parkedState` row whose `parked` is already `false` | nothing is published; the row is simply removed |
+| **eviction caused by backend shutdown**, in either case | nothing is published — no consumer remains, and every client reconnects against a strictly higher `parked_epoch` (AC-77) |
+| **a second eviction cause firing for an already-evicted session** | a **no-op**, not an error: the reduced entry reads `parked = false`, so nothing flips and nothing publishes. Concurrent causes therefore produce exactly one un-park |
+| **a session carrier for a REDUCED entry** | serializes `(parked=false, revision = the retained value, parked_epoch)` — **not** `revision 0`, which would move the revision backward and make a dropped eviction frame uncorrectable |
+| a sample completing after its session's entry was **reduced** | **discarded** by D2's revalidation with no extra rule — the reduction cleared `observed_detached`, so it no longer matches the value captured at issue |
+| **an attested detached launch for a session holding a REDUCED entry** | the entry is **revived in place**: `observed_detached` set, `parked` `false`, `turn_marker` `0`, `last_sample` `unknown` — and **`revision` continues from the retained value, never restarting at `0`**. Only an attestation revives; a `turn_started`, a settle or a read against a reduced entry is a no-op |
 | task `members` entry for an evicted session | removed under the per-task lock, with the same recompute-compare-publish steps, so the task's `true → false` flip publishes exactly once |
 | event-bus publish failure | value and revision stand; no retry, no rollback; corrected by the next carrier for that entity |
 | `turn_started` with prompt generation `0` (every synthetic `ScheduleWakeup` dispatch) | **never rejected by the ownership filter** — it rejects only on a mismatch of two *present* values. Never synthesize a generation and never skip the emission. Still subject to the completed-execution gate, below |
@@ -2493,7 +2777,14 @@ would otherwise leave a card spinning while the session is actively `RUNNING`.
   is the **backend** that samples on the configured interval, agentctl holds no timer, and sampling
   for that session **stops** on the first of: a probe result other than `live`; the session leaving
   `WAITING_FOR_INPUT`; the session being stopped or deleted; **its execution ending**; an
-  agent-context reset for that session; or backend shutdown. *(The execution-end and
+  agent-context reset for that session; or backend shutdown.
+  **And GIVEN** the stop was caused by the execution ending or an agent-context reset **while the
+  session was still `WAITING_FOR_INPUT` and parked**, **THEN** stopping the loop does **not** strand
+  the affordance: the row's eviction publishes the `true → false` transition with a strictly higher
+  `revision` (AC-85), so "no further sample" never means "no further update". *(That clause was
+  added 2026-08-09. Without it this criterion and the *Failure modes* agentctl-crash row specified
+  different outcomes for the same condition — one said the affordance clears via a failed probe, the
+  other stopped the only thing that could take one.)* *(The execution-end and
   agent-context-reset conditions were added 2026-08-09: the *Timing* section's loop lifecycle
   listed execution end, and *Data model → Entry lifecycle* adds the reset, but this criterion
   enumerated neither — so a sampler leaking past either would have passed.)*
@@ -2749,6 +3040,61 @@ would otherwise leave a card spinning while the session is actively `RUNNING`.
 - **AC-82** — **GIVEN** a parked session, **WHEN** the app is rendered under the pseudo-locale,
   **THEN** the background affordance's accessible label and tooltip resolve through
   `task:backgroundWorkIsRunning` and no new translation key is introduced by this feature.
+- **AC-83** — **GIVEN** a store task record (`KanbanState["tasks"][number]`) carrying
+  `parkedOnBackgroundWork: true`, **and a `statusSummary` PRESENT on that same record** — a
+  `TaskStatusSummary`, which carries no parked field of any kind — **WHEN** `buildSidebarItem`
+  (`components/task/task-session-sidebar-item.ts`) and `toSheetItem`
+  (`components/task/mobile/session-task-switcher-sheet-hooks.ts`) each map it, **THEN** the
+  `TaskSwitcherItem` each returns has `parkedOnBackgroundWork: true`. The summary-present GIVEN is
+  the whole point: an implementation that mirrors the adjacent
+  `hasSummary ? summary?.foreground_activity : task.foregroundActivity` line yields `undefined` here
+  and fails, which is the decision recorded under *API surface → The frontend property names*.
+  **And GIVEN** that item, **WHEN** it renders through `task-switcher-row.tsx` → `TaskItem`,
+  **THEN** `data-testid="task-state-background-running"` is present. Asserted on **both** producers,
+  because the mobile task switcher renders the same `TaskSwitcher` and therefore the same `TaskItem`
+  (§O) — an implementation that wires only the desktop producer passes on desktop and fails on
+  mobile. *(Added 2026-08-09. AC-23 asserts the render given the prop and its home is
+  `task-item.test.tsx`, which passes props directly, so nothing observed that the prop is produced
+  at all. This is AC-58a's guarantee for resolver A, which had none.)*
+- **AC-84** — **GIVEN** a Go boot snapshot (`WorkflowSnapshot`) in which a task carries
+  `parked_on_background_work: true`, **WHEN** `snapshotToState` (`apps/web/lib/ssr/mapper.ts`) maps
+  it into `KanbanState.tasks` and the board card and the sidebar row render **before any
+  `kanban.update` has arrived**, **THEN** `data-testid="task-state-background-running"` is present
+  on both surfaces. An implementation that projects the field in `toKanbanTask` and the two
+  `kanban.ts` projections but not in `ssr/mapper.ts` **fails this criterion and passes AC-58a**,
+  whose GIVEN is a *subsequent* `kanban.update`. *(Added 2026-08-09. `snapshotToState` hand-builds
+  `KanbanTask` field by field and does not route through `toKanbanTask`, so it is a fourth,
+  independent producer — and it is the one that runs on first paint, which is exactly when an
+  operator looks at the board.)*
+- **AC-85** — **GIVEN** a parked session at `(parked_epoch E, revision N)` with `N ≥ 1`, **and it is
+  the only parked session on its task**, **and the session is still `WAITING_FOR_INPUT`** — so no
+  term of the formula flips — **WHEN** its **execution ends** (agentctl idle-reaped or crashed) and
+  the `parkedState` row is evicted, **THEN** a `session.activity_changed` carrying
+  `parked_on_background_work: false`, a **strictly higher** `revision` and the same `parked_epoch`
+  is published **before the entry is reduced**; a `task.updated` is published for its task because the
+  task-level OR also changed; and a consumer that had applied `(E, N)` **applies** this frame and
+  stops rendering `data-testid="task-state-background-running"`. **And GIVEN** the same setup but an
+  **agent-context reset** instead of an execution end, **THEN** the same holds. **And GIVEN** a row
+  whose `parked` is already `false`, **WHEN** it is evicted, **THEN** nothing is published. **And
+  GIVEN** eviction caused by **backend shutdown**, **THEN** nothing is published in either case.
+  An implementation that removes a `true` row without publishing fails, and fails in the way that
+  matters: a consumer holding `(E, N)` then discards the rowless `(E, 0)` on every later carrier and
+  keeps the affordance for the life of the backend process.
+  **And GIVEN** the same eviction but with its publish **dropped** (the event-bus enqueue fails, per
+  *API surface → What happens when the publish itself fails*), **WHEN** any later session carrier is
+  serialized for that session, **THEN** it carries `(false, N+1, E)` — the **retained** revision, not
+  `0` — and the consumer applies it, so the affordance still clears. An implementation that deletes
+  the entry outright instead of reducing it fails this clause, which is the one that makes the
+  publish-failure rule's "the revision only ever moves forward" true across an eviction. **And
+  GIVEN** a **second** eviction cause firing for the same session afterwards, **THEN** nothing
+  further is published.
+  *(Added 2026-08-09. The previous revision asserted eviction "publishes nothing on its own —
+  the projection has already gone `false` through the session-state term by the time any of these is
+  reached", which is false for exactly these two causes: an execution can end while the session sits
+  at `WAITING_FOR_INPUT`, which §J measures as an ordinary multi-minute window and which an
+  `KANDEV_ACP_IDLE_TIMEOUT` reap makes routine. It also contradicted *Task-level projection*, which
+  says the `members` removal "publishes the `true → false` flip exactly once" — a sentence that could
+  never fire if the value were always already `false`.)*
 
 ## Suggested delivery order — ADVISORY, NOT CONTRACT
 
@@ -2785,7 +3131,10 @@ The work splits roughly as follows. Treat it as a starting point and re-plan fre
   the `Kind == shell` filter, `observed_detached` and `turn_marker` on the ordered consumer);
   and the frontend (`apps/web/**` — the `BackgroundWorkTaskIcon` promotion with `className`, both
   task resolvers, both board early returns, the `/tasks` row, the session resolver and its tooltip,
-  the two `kanban.ts` projections, the merge-helper discard rule and the boot reset).
+  **all six producers** (`map-task.ts`, both `kanban.ts` projections, `ssr/mapper.ts`,
+  `buildSidebarItem`, `toSheetItem` — §O), the merge-helper discard rule and the boot reset).
+  Within the frontend set the producers are the half that is easy to skip, because every icon
+  criterion passes without them.
 - **Then the backend projection**, best kept to a single owner: the three-term formula, the settle
   hook on `updateTaskSessionStateWithHook`, session revisions and the task-owned `members` cache
   with its lock order, the publish rules and the publish-failure rule, the synchronous first
@@ -2995,6 +3344,30 @@ Two questions earlier revisions carried are now closed by evidence rather than a
   resolver's assertions (AC-52, AC-59 first half, AC-73a); `task-item.test.tsx` is the home for the
   private ladder's (AC-23, AC-34, AC-59 second half). It already defines
   `BACKGROUND_ICON_TEST_ID` at `task-item.test.tsx:11`.
+- **Wiring the resolvers is HALF the frontend job. The other half is the SIX producers.** §O is that
+  map and *API surface → The frontend property names* tabulates them: `map-task.ts`, **both**
+  `kanban.ts` projections, **`lib/ssr/mapper.ts`** (the Go boot snapshot — a fourth producer of the
+  same store shape that does **not** route through `toKanbanTask`), and **`buildSidebarItem`** plus
+  **`toSheetItem`**, which are the only route to resolver A and feed the desktop sidebar and the
+  mobile task switcher respectively. Every hop drops the value by omission. Because AC-23 and AC-58
+  assert the render *given* the prop, an implementation that wires the resolvers and none of the
+  producers passes every icon criterion with all four live surfaces dark — AC-83 and AC-84 exist
+  precisely to fail that build.
+- **In `buildSidebarItem` / `toSheetItem`, read the parked bit from the TASK RECORD with no
+  `hasSummary` ternary.** The adjacent `foregroundActivity` line is
+  `hasSummary ? summary?.foreground_activity : task.foregroundActivity`, and copying that shape is
+  the trap: `TaskStatusSummary` carries no parked field and gains none, so the mirrored line returns
+  `undefined` for every task that has a summary — the common case for an open task. The reasoning
+  (including that `TaskStatusSummary` already has its own unrelated `revision`) is under
+  *API surface → The frontend property names*; AC-83's GIVEN pins a summary as present so the wrong
+  copy fails.
+- **Evicting a `parkedState` row whose `parked` is `true` must PUBLISH the un-park before removing
+  the row** (*Data model → Entry lifecycle*, AC-85). Do not treat eviction as bookkeeping: an
+  execution can end — idle reap at `KANDEV_ACP_IDLE_TIMEOUT`, or a crash — while the session is
+  still `WAITING_FOR_INPUT`, so no term of the formula flips, and a rowless session then serializes
+  `revision 0`, which every consumer discards against the revision it already applied. The card
+  keeps the affordance until the backend restarts. Backend-shutdown eviction is the one case that
+  publishes nothing.
 - The board needs **both** early returns changed (`kanban-card-content.tsx:275` and `:282`), not
   just the spinner one. `:275` is the one a parked task hits.
 - AC-52 and AC-59 are *no-change* assertions over **named existing matrices**, not invented ones.
