@@ -51,7 +51,9 @@ export function UtilityAgentProfilePicker({
   );
   const selectedProfile = selectableProfiles.find((profile) => profile.id === value);
   const unavailableId = unavailableValue ?? value;
-  const hasUnavailableValue = Boolean(unavailableId && !selectedProfile);
+  const hasUnavailableValue = Boolean(
+    unavailableId && unavailableId !== fallback?.value && !selectedProfile,
+  );
 
   const options = useMemo<ComboboxOption[]>(() => {
     const result: ComboboxOption[] = [];
