@@ -62,17 +62,17 @@ export function SettingsFloatingSave({
       className={cn(
         "pointer-events-none z-40 flex w-full justify-center",
         !isHostedByConfigChat &&
-          "fixed inset-x-0 bottom-[calc(5.25rem_+_env(safe-area-inset-bottom)_+_var(--app-status-bar-height))] px-[calc(1rem_+_env(safe-area-inset-left))]",
+          "fixed inset-x-0 bottom-[calc(5.25rem_+_env(safe-area-inset-bottom)_+_var(--app-status-bar-height))] pl-[calc(1rem_+_env(safe-area-inset-left))] pr-[calc(1rem_+_env(safe-area-inset-right))]",
       )}
       data-testid="settings-floating-save"
       data-dirty-contributors={dirtyContributorIds}
       data-status={status}
     >
       <div
-        className="pointer-events-auto flex w-full max-w-full flex-col items-stretch gap-2 rounded-2xl border border-border/80 bg-card/95 p-2.5 shadow-xl backdrop-blur-sm sm:flex-row sm:items-center sm:gap-3 sm:p-3 md:w-fit"
+        className="pointer-events-auto flex w-fit max-w-full items-center gap-2 rounded-xl border border-border/80 bg-card/95 p-2 shadow-lg backdrop-blur-sm"
         data-testid="settings-floating-save-surface"
       >
-        <div className="min-w-0 flex-1 space-y-0.5 px-1 sm:max-w-80">
+        <div className="min-w-0 max-w-52 flex-1 space-y-0.5 px-1">
           {status === "error" ? (
             <span className="flex items-center gap-1 text-xs text-destructive" role="status">
               <Trans i18nKey={errorMessage.labelKey}>
@@ -91,11 +91,11 @@ export function SettingsFloatingSave({
             </span>
           )}
         </div>
-        <div className="flex w-full shrink-0 gap-2 sm:w-auto">
+        <div className="flex shrink-0 gap-2">
           <Button
             type="button"
             variant="outline"
-            className="min-h-12 flex-1 cursor-pointer sm:flex-none"
+            className="min-h-[45px] shrink-0 cursor-pointer px-3 text-sm"
             disabled={isBusy || isSaved}
             onClick={() => void onReset()}
           >
@@ -104,7 +104,7 @@ export function SettingsFloatingSave({
           <Button
             type="button"
             size="default"
-            className="min-h-12 flex-1 cursor-pointer bg-success text-success-foreground hover:bg-success/85 focus-visible:border-success focus-visible:ring-success/35 sm:flex-none"
+            className="min-h-[45px] shrink-0 cursor-pointer bg-success px-3 text-sm text-success-foreground hover:bg-success/85 focus-visible:border-success focus-visible:ring-success/35"
             disabled={isBusy || isSaved || isInvalid}
             aria-label={accessibleLabel}
             onClick={() => void onSave()}

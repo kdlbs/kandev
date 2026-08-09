@@ -150,6 +150,7 @@ test.describe("Mobile general settings", () => {
       const surfaceBox = await surface.boundingBox();
       expect(saveBox).not.toBeNull();
       expect(surfaceBox).not.toBeNull();
+      expect(surfaceBox!.height).toBeLessThanOrEqual(72);
       expect(saveBox!.height).toBeGreaterThanOrEqual(44);
       expect(saveBox!.x + saveBox!.width).toBeLessThanOrEqual(390 - 16 + 1);
       expect(saveBox!.y + saveBox!.height).toBeLessThanOrEqual(844 - 16 + 1);

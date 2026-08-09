@@ -130,6 +130,7 @@ test.describe("Settings manual save", () => {
       const surfaceBox = await surface.boundingBox();
       expect(viewport).not.toBeNull();
       expect(surfaceBox).not.toBeNull();
+      expect(surfaceBox!.height).toBeLessThanOrEqual(72);
       expect(
         Math.abs(surfaceBox!.x + surfaceBox!.width / 2 - viewport!.width / 2),
       ).toBeLessThanOrEqual(2);

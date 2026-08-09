@@ -10,9 +10,10 @@ status: complete
 ## Overview
 
 Refine the existing route-scoped settings save action into a compact, centered
-save surface inspired by the supplied reference. The coordinator remains the
-owner of draft persistence and navigation protection; the change adds a shared
-local Reset action and changes only the presentation and responsive placement.
+single-row save surface inspired by the supplied reference. The coordinator
+remains the owner of draft persistence and navigation protection; the change
+adds a shared local Reset action and changes only the presentation and
+responsive placement.
 The surface is centered in the viewport when Configuration Chat is closed and
 uses the existing chat action host above the popover when it is open.
 
@@ -36,7 +37,7 @@ persistence boundary.
 - Keep navigation's `Discard and leave` behavior unchanged, while allowing the
   save surface to invoke the same contributors without a pending navigation.
 - Disable Reset and Save while a reset or save is in flight. A reset failure
-  keeps the route dirty and reports the existing save error state.
+  keeps the route dirty and reports a dedicated localized reset error.
 - Preserve stable contributor order, partial-save behavior, revision safety,
   validation disabling, and the 1.5-second successful-save confirmation.
 
@@ -52,11 +53,11 @@ persistence boundary.
   existing status-bar/safe-area bottom offset. Keep the surface keyboard
   accessible, preserve `data-testid="settings-floating-save"`, and retain the
   navigation dialog as a separate modal flow.
-- Keep the mobile composition intentional: the surface uses a full-width inset
-  card on phone widths, wraps the message/actions without horizontal overflow,
-  and keeps every primary/secondary control at least 44px in its active
-  dimension. Reuse the settings scroll container's existing bottom padding and
-  adjust it only if rendered geometry demonstrates coverage.
+- Keep the mobile composition intentional: the surface uses an intrinsic-width
+  single-row card on phone widths, keeps the message flexible without
+  horizontal overflow, and keeps every primary/secondary control at least 44px
+  in its active dimension. Adjust the settings scroll container's bottom
+  padding to the compact surface height while preserving safe-area clearance.
 
 ### Configuration Chat collision handling
 
@@ -140,7 +141,8 @@ persistence boundary.
 ## Risks
 
 - The message plus two actions may become too wide in pseudo-locale or on a
-  narrow phone; wrapping and geometry assertions must cover both.
+  narrow phone; flexible message sizing and compact-surface geometry assertions
+  must cover both.
 - The Configuration Chat host is portaled into a positioned popover; changing
   its width/alignment can regress the existing above-popover collision contract.
 - Reset must not replace saved baselines or issue API calls, and must not clear a

@@ -82,6 +82,7 @@ test.describe("Configuration Chat", () => {
       ]);
       expect(surfaceBox).not.toBeNull();
       expect(popoverBox).not.toBeNull();
+      expect(surfaceBox!.height).toBeLessThanOrEqual(72);
       expect(
         Math.abs(surfaceBox!.x + surfaceBox!.width / 2 - (popoverBox!.x + popoverBox!.width / 2)),
       ).toBeLessThanOrEqual(2);
