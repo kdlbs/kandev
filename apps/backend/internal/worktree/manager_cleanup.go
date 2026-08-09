@@ -195,7 +195,7 @@ func (m *Manager) RemoveByID(ctx context.Context, worktreeID string, removeBranc
 func (m *Manager) RemoveAt(ctx context.Context, worktreeID, worktreePath, repositoryID string, excludeSessionIDs []string) error {
 	wt, err := m.GetByID(ctx, worktreeID)
 	if err == nil {
-		return m.removeWorktree(ctx, wt, false, withSessionID(excludeSessionIDs, wt.SessionID))
+		return m.removeWorktree(ctx, wt, false, excludeSessionIDs)
 	}
 	if !errors.Is(err, ErrWorktreeNotFound) {
 		return err
@@ -276,19 +276,6 @@ func (m *Manager) RemoveAt(ctx context.Context, worktreeID, worktreePath, reposi
 		return fmt.Errorf("remove worktree directory %s: %w", worktreePath, err)
 	}
 	return nil
-}
-
-// withSessionID returns excludeSessionIDs guaranteed to contain sessionID, so
-// the specific row RemoveAt resolved via GetByID is always excluded from its
-// own active-reference count even if the caller's task-wide list were
-// somehow incomplete.
-func withSessionID(excludeSessionIDs []string, sessionID string) []string {
-	for _, id := range excludeSessionIDs {
-		if id == sessionID {
-			return excludeSessionIDs
-		}
-	}
-	return append(append([]string{}, excludeSessionIDs...), sessionID)
 }
 
 // resolveRepositoryPath resolves a repository's main checkout path for

@@ -2546,6 +2546,9 @@ func (s *Service) cleanupDestructiveTaskResources(
 	originalWorktreeCount := len(worktrees)
 	worktrees = s.filterOwnedWorktreesForTaskCleanup(ctx, taskID, sessions, worktrees, envCleanup.env, skipOwnedEnvironment)
 	worktrees = cleanupEligibleWorktrees(worktrees, envCleanup.env, preserveExecutorRows)
+	if !skipOwnedEnvironment {
+		worktrees = excludeEnvironmentWorktree(worktrees, envCleanup.env)
+	}
 	var referenceErrs []error
 	worktrees, referenceErrs = s.filterSharedWorktreesForTaskCleanup(ctx, taskID, sessions, worktrees)
 	errs = append(errs, referenceErrs...)
@@ -2802,8 +2805,7 @@ func (s *Service) cleanupTaskEnvironment(
 }
 
 // excludeEnvironmentWorktree removes every worktree teardownEnvironmentResources
-// owns from the batch cleanup list — the legacy env.WorktreeID plus every
-// env.Repos[] entry, not just the legacy field. Without this, a multi-repo
+// owns from the batch cleanup list — every env.Repos[] entry. Without this, a multi-repo
 // environment's secondary worktrees survive the filter and get reprocessed
 // by the batch path (CleanupWorktrees) right after env teardown already
 // destroyed their directories: the batch path's cleanup-script execution
@@ -2835,7 +2837,6 @@ func excludeEnvironmentWorktree(worktrees []*worktree.Worktree, env *models.Task
 	}
 	return filtered
 }
-
 
 // ListTasks returns all tasks for a workflow
 func (s *Service) ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error) {

@@ -129,12 +129,10 @@ func runGitTestCmd(t *testing.T, repoPath string, args ...string) []byte {
 // the regression test for the multi-repo worktree disk leak: once a task's
 // last session is deleted (cascading away task_session_worktrees, the only
 // table that stores a worktree's on-disk path), teardownEnvironmentResources
-// must still remove every repo's worktree directory — including the
-// primary, whose legacy env.WorktreeID lookup fails identically to the
-// secondary repos once the session-scoped row is gone.
+// must still remove every repo's worktree directory using the durable
+// TaskEnvironmentRepo path/repository handles, not the session-scoped ID lookup.
 //
-// Persists real `repositories` rows (production shape: env.RepositoryID is
-// always set from the primary repo, see executor_execute.go) so RemoveAt's
+// Persists real `repositories` rows so RemoveAt's
 // path-only fallback can resolve each worktree's source repository. Without
 // that, resolveRepositoryPath can't scope `git worktree remove`/`prune` to
 // the correct repo, so os.Stat alone is not a sufficient assertion: the
@@ -185,11 +183,8 @@ func TestTeardownEnvironmentResources_MultiRepoRemovesEveryWorktreeFromDisk(t *t
 	}
 
 	env := &models.TaskEnvironment{
-		ID:           "env-multi",
-		TaskID:       "task-multi",
-		RepositoryID: "repo-a",
-		WorktreeID:   primary.ID,
-		WorktreePath: primary.Path,
+		ID:     "env-multi",
+		TaskID: "task-multi",
 		Repos: []*models.TaskEnvironmentRepo{
 			{RepositoryID: "repo-a", WorktreeID: primary.ID, WorktreePath: primary.Path},
 			{RepositoryID: "repo-b", WorktreeID: secondary.ID, WorktreePath: secondary.Path},
@@ -207,11 +202,8 @@ func TestTeardownEnvironmentResources_MultiRepoRemovesEveryWorktreeFromDisk(t *t
 		t.Fatalf("teardownEnvironmentResources: %v", err)
 	}
 
-	// The primary assertion below is a basic sanity check: env.WorktreePath
-	// (the legacy field) always resolves the primary regardless of Repos[]
-	// handling, so it passes even if the Repos[] iteration were reverted.
-	// secondary is the assertion that actually proves the Repos[] fix — its
-	// only durable handle is the Repos[] entry.
+	// Both assertions prove the fix: primary and secondary are each resolved only
+	// through their TaskEnvironmentRepo path/repository handles.
 	if _, statErr := os.Stat(primary.Path); !os.IsNotExist(statErr) {
 		t.Errorf("primary worktree directory still on disk: %s (stat err = %v)", primary.Path, statErr)
 	}

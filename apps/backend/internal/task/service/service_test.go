@@ -2729,10 +2729,8 @@ func TestService_CleanupDestructiveTaskResourcesExcludesEveryEnvironmentTrackedW
 
 	session := &models.TaskSession{ID: "session-owner", TaskID: "task-multi", TaskEnvironmentID: "env-multi"}
 	env := &models.TaskEnvironment{
-		ID:           "env-multi",
-		TaskID:       "task-multi",
-		WorktreeID:   "wt-primary",
-		WorktreePath: "/tasks/task-multi",
+		ID:     "env-multi",
+		TaskID: "task-multi",
 		Repos: []*models.TaskEnvironmentRepo{
 			{RepositoryID: "repo-a", WorktreeID: "wt-primary", WorktreePath: "/tasks/task-multi/repo-a"},
 			{RepositoryID: "repo-b", WorktreeID: "wt-secondary", WorktreePath: "/tasks/task-multi/repo-b"},

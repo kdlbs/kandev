@@ -1140,8 +1140,7 @@ func TestTaskResourceCleanupJobSnapshotRoundTripsMultiRepoWorktrees(t *testing.T
 	taskSvc.SetEnvironmentDestroyer(destroyer)
 
 	env := &models.TaskEnvironment{
-		ID:         "env-multi-snapshot",
-		WorktreeID: "wt-primary",
+		ID: "env-multi-snapshot",
 		Repos: []*models.TaskEnvironmentRepo{
 			{RepositoryID: "repo-a", WorktreeID: "wt-primary"},
 			{RepositoryID: "repo-b", WorktreeID: "wt-secondary"},

@@ -91,8 +91,7 @@ func TestManager_ResolveRepositoryPath(t *testing.T) {
 
 // TestRemoveAt_PathFallbackRemovesDirectoryAfterSessionCascade is the
 // worktree-package-level regression test for the multi-repo disk leak: once
-// the owning session is deleted, task_session_worktrees — the only table
-// that stores a worktree's on-disk path for an ID-only lookup — cascades
+// the owning task environment is deleted, task_environment_repos cascades
 // away, so GetByID can no longer resolve a path for that worktree_id.
 // RemoveAt must still remove the directory using the caller-supplied
 // path/repository handles.
@@ -102,11 +101,11 @@ func TestRemoveAt_PathFallbackRemovesDirectoryAfterSessionCascade(t *testing.T) 
 	seedReferenceCleanupSession(t, store, "task-owner", "session-owner", "completed")
 	wt := createReferenceCleanupWorktree(t, mgr, "task-owner", "session-owner")
 
-	if _, err := store.db.ExecContext(ctx, `DELETE FROM task_sessions WHERE id = ?`, "session-owner"); err != nil {
-		t.Fatalf("delete session: %v", err)
+	if _, err := store.db.ExecContext(ctx, `DELETE FROM task_environments WHERE id = ?`, "env-owner"); err != nil {
+		t.Fatalf("delete environment: %v", err)
 	}
 	if _, err := mgr.GetByID(ctx, wt.ID); err == nil {
-		t.Fatal("expected GetByID to fail once the session-scoped row has cascaded away")
+		t.Fatal("expected GetByID to fail once the environment row has cascaded away")
 	}
 
 	if err := mgr.RemoveAt(ctx, wt.ID, wt.Path, wt.RepositoryID, nil); err != nil {
@@ -131,11 +130,10 @@ func TestRemoveAt_PreservesSharedActiveReference(t *testing.T) {
 	seedReferenceCleanupSession(t, store, "task-borrower", "session-borrower", "running")
 
 	wt := createReferenceCleanupWorktree(t, mgr, "task-owner", "session-owner")
-	borrowed := *wt
-	borrowed.TaskID = "task-borrower"
-	borrowed.SessionID = "session-borrower"
-	if err := store.CreateWorktree(ctx, &borrowed); err != nil {
-		t.Fatalf("create borrower worktree reference: %v", err)
+	// Borrower links its session to the owner's environment, the correct model
+	// for a shared-worktree reference in task_environment_repos.
+	if err := store.linkSessionToEnvironment(ctx, "session-borrower", "env-owner"); err != nil {
+		t.Fatalf("link session-borrower to env-owner: %v", err)
 	}
 
 	if err := mgr.RemoveAt(ctx, wt.ID, wt.Path, wt.RepositoryID, nil); err != nil {
@@ -145,8 +143,10 @@ func TestRemoveAt_PreservesSharedActiveReference(t *testing.T) {
 	if _, err := os.Stat(wt.Path); err != nil {
 		t.Fatalf("shared worktree path should be preserved: %v", err)
 	}
-	assertWorktreeReferenceStatus(t, store, wt.ID, "session-owner", StatusDeleted)
-	assertWorktreeReferenceStatus(t, store, wt.ID, "session-borrower", StatusActive)
+	// In the environment-scoped model there is one task_environment_repos row
+	// shared by both sessions; the row remains active because the directory was
+	// preserved (RemoveAt returned without calling ReleaseWorktreeReference).
+	assertWorktreeReferenceStatus(t, store, wt.ID, StatusActive)
 }
 
 // TestRemoveAt_PathFallbackPrunesSourceRepositoryRegistration is the positive
@@ -163,8 +163,10 @@ func TestRemoveAt_PathFallbackPrunesSourceRepositoryRegistration(t *testing.T) {
 		repos: map[string]*Repository{wt.RepositoryID: {ID: wt.RepositoryID, LocalPath: wt.RepositoryPath}},
 	})
 
-	if _, err := store.db.ExecContext(ctx, `DELETE FROM task_sessions WHERE id = ?`, "session-owner"); err != nil {
-		t.Fatalf("delete session: %v", err)
+	// Deleting the environment cascades task_environment_repos, so GetByID
+	// fails and RemoveAt takes the path-only fallback with provider resolution.
+	if _, err := store.db.ExecContext(ctx, `DELETE FROM task_environments WHERE id = ?`, "env-owner"); err != nil {
+		t.Fatalf("delete environment: %v", err)
 	}
 
 	if err := mgr.RemoveAt(ctx, wt.ID, wt.Path, wt.RepositoryID, nil); err != nil {
@@ -192,8 +194,11 @@ func TestRemoveAt_PropagatesTransientRepositoryLookupFailure(t *testing.T) {
 	lookupErr := errors.New("db unavailable")
 	mgr.SetRepositoryProvider(&stubRepositoryProvider{err: lookupErr})
 
-	if _, err := store.db.ExecContext(ctx, `DELETE FROM task_sessions WHERE id = ?`, "session-owner"); err != nil {
-		t.Fatalf("delete session: %v", err)
+	// Deleting the environment cascades task_environment_repos, so GetByID
+	// fails and RemoveAt takes the path-only fallback — which calls
+	// resolveRepositoryPath and must propagate the transient lookup error.
+	if _, err := store.db.ExecContext(ctx, `DELETE FROM task_environments WHERE id = ?`, "env-owner"); err != nil {
+		t.Fatalf("delete environment: %v", err)
 	}
 
 	err := mgr.RemoveAt(ctx, wt.ID, wt.Path, wt.RepositoryID, nil)
@@ -265,6 +270,11 @@ func TestRemoveAt_TrackedRow_SameTaskSiblingSessionNoLongerBlocksRemoval(t *test
 	seedReferenceCleanupSessionOnExistingTask(t, store, "task-owner", "session-b", "completed")
 
 	wt := createReferenceCleanupWorktree(t, mgr, "task-owner", "session-a")
+	// session-b must reference the same environment so CreateWorktree can
+	// resolve its task_environment_id and upsert the shared env-repo row.
+	if err := store.linkSessionToEnvironment(ctx, "session-b", "env-owner"); err != nil {
+		t.Fatalf("link session-b to env-owner: %v", err)
+	}
 	sibling := *wt
 	sibling.SessionID = "session-b"
 	if err := store.CreateWorktree(ctx, &sibling); err != nil {
@@ -293,11 +303,10 @@ func TestRemoveAt_TrackedRow_ForeignTaskReferenceStillBlocksRemoval(t *testing.T
 	seedReferenceCleanupSession(t, store, "task-borrower", "session-borrower", "running")
 
 	wt := createReferenceCleanupWorktree(t, mgr, "task-owner", "session-owner")
-	borrowed := *wt
-	borrowed.TaskID = "task-borrower"
-	borrowed.SessionID = "session-borrower"
-	if err := store.CreateWorktree(ctx, &borrowed); err != nil {
-		t.Fatalf("create borrower worktree reference: %v", err)
+	// Borrower links its session to the owner's environment, the correct model
+	// for a shared-worktree reference in task_environment_repos.
+	if err := store.linkSessionToEnvironment(ctx, "session-borrower", "env-owner"); err != nil {
+		t.Fatalf("link session-borrower to env-owner: %v", err)
 	}
 
 	if err := mgr.RemoveAt(ctx, wt.ID, wt.Path, wt.RepositoryID, []string{"session-owner"}); err != nil {
@@ -307,8 +316,10 @@ func TestRemoveAt_TrackedRow_ForeignTaskReferenceStillBlocksRemoval(t *testing.T
 	if _, err := os.Stat(wt.Path); err != nil {
 		t.Fatalf("worktree still referenced by a different task should be preserved: %v", err)
 	}
-	assertWorktreeReferenceStatus(t, store, wt.ID, "session-owner", StatusDeleted)
-	assertWorktreeReferenceStatus(t, store, wt.ID, "session-borrower", StatusActive)
+	// In the environment-scoped model there is one task_environment_repos row
+	// shared by both sessions; the row remains active because the directory was
+	// preserved (RemoveAt returned without calling ReleaseWorktreeReference).
+	assertWorktreeReferenceStatus(t, store, wt.ID, StatusActive)
 }
 
 // cleanupScriptTrackingHandler is a ScriptMessageHandler that records every
@@ -386,8 +397,11 @@ func TestRemoveAt_PathFallbackSkipsCleanupScriptWhenDirectoryAlreadyGone(t *test
 		},
 	})
 
-	if _, err := store.db.ExecContext(ctx, `DELETE FROM task_sessions WHERE id = ?`, "session-owner"); err != nil {
-		t.Fatalf("delete session: %v", err)
+	// Deleting the environment cascades task_environment_repos, so GetByID
+	// fails and RemoveAt takes the path-only fallback — which checks pathExists
+	// before running the cleanup script.
+	if _, err := store.db.ExecContext(ctx, `DELETE FROM task_environments WHERE id = ?`, "env-owner"); err != nil {
+		t.Fatalf("delete environment: %v", err)
 	}
 	if err := os.RemoveAll(wt.Path); err != nil {
 		t.Fatalf("remove worktree directory ahead of RemoveAt: %v", err)
@@ -424,8 +438,10 @@ func TestRemoveAt_PathFallbackRefusesNonWorktreeDirectory(t *testing.T) {
 	seedReferenceCleanupSession(t, store, "task-owner", "session-owner", "completed")
 	wt := createReferenceCleanupWorktree(t, mgr, "task-owner", "session-owner")
 
-	if _, err := store.db.ExecContext(ctx, `DELETE FROM task_sessions WHERE id = ?`, "session-owner"); err != nil {
-		t.Fatalf("delete session: %v", err)
+	// Deleting the environment cascades task_environment_repos, so GetByID
+	// fails and RemoveAt takes the path-only fallback — which checks IsValid.
+	if _, err := store.db.ExecContext(ctx, `DELETE FROM task_environments WHERE id = ?`, "env-owner"); err != nil {
+		t.Fatalf("delete environment: %v", err)
 	}
 
 	notAWorktree := t.TempDir()
@@ -453,8 +469,10 @@ func TestRemoveAt_PathFallbackRefusesMainRepositoryCheckout(t *testing.T) {
 	seedReferenceCleanupSession(t, store, "task-owner", "session-owner", "completed")
 	wt := createReferenceCleanupWorktree(t, mgr, "task-owner", "session-owner")
 
-	if _, err := store.db.ExecContext(ctx, `DELETE FROM task_sessions WHERE id = ?`, "session-owner"); err != nil {
-		t.Fatalf("delete session: %v", err)
+	// Deleting the environment cascades task_environment_repos, so GetByID
+	// fails and RemoveAt takes the path-only fallback — which checks IsValid.
+	if _, err := store.db.ExecContext(ctx, `DELETE FROM task_environments WHERE id = ?`, "env-owner"); err != nil {
+		t.Fatalf("delete environment: %v", err)
 	}
 
 	if err := mgr.RemoveAt(ctx, wt.ID, wt.RepositoryPath, wt.RepositoryID, nil); err == nil {

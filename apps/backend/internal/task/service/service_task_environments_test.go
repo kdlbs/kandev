@@ -204,7 +204,8 @@ func TestTeardownEnvironmentResources_CancellationStopsBeforeNextResource(t *tes
 	svc.SetEnvironmentDestroyer(destroyer)
 
 	err := svc.teardownEnvironmentResources(ctx, &models.TaskEnvironment{
-		ContainerID: "container-1", SandboxID: "sandbox-1", WorktreeID: "worktree-1",
+		ContainerID: "container-1", SandboxID: "sandbox-1",
+		Repos: []*models.TaskEnvironmentRepo{{WorktreeID: "worktree-1"}},
 	}, nil)
 
 	if !errors.Is(err, context.Canceled) {
@@ -243,7 +244,7 @@ func TestTeardownEnvironmentResources_GenericWorktreeFailureRemainsError(t *test
 	svc.SetEnvironmentDestroyer(&stubDestroyer{worktreeErr: worktreeErr})
 
 	err := svc.teardownEnvironmentResources(context.Background(), &models.TaskEnvironment{
-		WorktreeID: "worktree-1",
+		Repos: []*models.TaskEnvironmentRepo{{WorktreeID: "worktree-1"}},
 	}, nil)
 
 	if !errors.Is(err, worktreeErr) {
@@ -257,9 +258,8 @@ func TestTeardownEnvironmentResources_MultiRepoDestroysEveryRepoWorktree(t *test
 	svc.SetEnvironmentDestroyer(destroyer)
 
 	err := svc.teardownEnvironmentResources(context.Background(), &models.TaskEnvironment{
-		WorktreeID: "wt-primary",
 		Repos: []*models.TaskEnvironmentRepo{
-			{RepositoryID: "repo-a", WorktreeID: "wt-primary"}, // mirrors legacy field — must not double-destroy
+			{RepositoryID: "repo-a", WorktreeID: "wt-primary"},
 			{RepositoryID: "repo-b", WorktreeID: "wt-secondary"},
 			{RepositoryID: "repo-c", WorktreeID: "wt-tertiary"},
 		},
@@ -301,41 +301,6 @@ func TestTeardownEnvironmentResources_ReposOnlyEnvironmentIsNotShortCircuited(t 
 	}
 }
 
-// TestTeardownEnvironmentResources_LegacyFieldsBackfillMissingRepoHandleFields
-// is the regression test for Review Finding 2: env.WorktreeID is always
-// worktrees[0].WorktreeID (env_preparer_worktree.go), so the legacy handle
-// always collides with the first Repos[] entry — but it predates the
-// multi-repo backfill and can carry an empty WorktreePath/RepositoryID even
-// when the matching Repos[] entry has both. If the legacy (incomplete)
-// handle is destroyed first and marks the ID "already handled" before the
-// complete Repos[] handle runs, the worktree is torn down with an
-// unresolvable repository_id even though a resolvable one was available.
-func TestTeardownEnvironmentResources_LegacyFieldsBackfillMissingRepoHandleFields(t *testing.T) {
-	svc := newResetTestService(t, &stubEnvRepo{})
-	destroyer := &stubDestroyer{}
-	svc.SetEnvironmentDestroyer(destroyer)
-
-	err := svc.teardownEnvironmentResources(context.Background(), &models.TaskEnvironment{
-		WorktreeID:   "wt-primary",
-		WorktreePath: "",
-		RepositoryID: "",
-		Repos: []*models.TaskEnvironmentRepo{
-			{RepositoryID: "repo-a", WorktreeID: "wt-primary", WorktreePath: "/worktrees/repo-a"},
-		},
-	}, nil)
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(destroyer.worktreeCallDetails) != 1 {
-		t.Fatalf("worktree destroy calls = %+v, want 1", destroyer.worktreeCallDetails)
-	}
-	got := destroyer.worktreeCallDetails[0]
-	if got.repositoryID != "repo-a" || got.worktreePath != "/worktrees/repo-a" {
-		t.Fatalf("destroy call = %+v, want repositoryID=repo-a worktreePath=/worktrees/repo-a", got)
-	}
-}
-
 // TestCleanupTaskEnvironment_ForwardsTaskSessionIDsToDestroyer is the
 // service-layer regression test for Review round 3 Finding 1's wiring half:
 // cleanupTaskEnvironment must forward every one of the task's session IDs
@@ -354,7 +319,7 @@ func TestCleanupTaskEnvironment_ForwardsTaskSessionIDsToDestroyer(t *testing.T) 
 		{ID: "session-b", TaskID: "task-1"},
 	}
 	errs := svc.cleanupTaskEnvironment(context.Background(), "task-1", sessions, taskEnvironmentCleanup{
-		env: &models.TaskEnvironment{ID: "environment-1", TaskID: "task-1", WorktreeID: "wt-1"}, deleteRow: false,
+		env: &models.TaskEnvironment{ID: "environment-1", TaskID: "task-1", Repos: []*models.TaskEnvironmentRepo{{WorktreeID: "wt-1"}}}, deleteRow: false,
 	})
 
 	if len(errs) != 0 {
