@@ -7,8 +7,8 @@ import {
   STRUCTURAL_COMPONENTS,
   TERMINAL_DEFAULT_ID,
   canonicalPanelTitle,
-  panelTitle,
 } from "./constants";
+import { panelTitle } from "./panel-title";
 
 /** Canonical English, because `normalizePanel` produces a stored LayoutState. */
 const TERMINAL_CANONICAL_TITLE = canonicalPanelTitle(TERMINAL_DEFAULT_ID) ?? "Terminal";

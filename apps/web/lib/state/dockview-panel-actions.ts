@@ -2,7 +2,8 @@ import type { DockviewApi, DockviewGroupPanel } from "dockview-react";
 import type { CommitDetailTarget } from "@/components/task/changes-diff-target";
 import { t } from "@/lib/i18n";
 import { focusOrAddPanel } from "./dockview-layout-builders";
-import { panelTitle, TERMINAL_DEFAULT_ID } from "./layout-manager/constants";
+import { TERMINAL_DEFAULT_ID } from "./layout-manager/constants";
+import { panelTitle } from "./layout-manager/panel-title";
 import {
   parsePluginPanelId,
   pluginPanelId,

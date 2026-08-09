@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import i18n from "i18next";
 
-import { canonicalPanelTitle, panel, panelTitle, PANEL_REGISTRY } from "./constants";
+import { canonicalPanelTitle, panel, PANEL_REGISTRY } from "./constants";
+import { panelTitle } from "./panel-title";
 import { toSerializedDockview } from "./serializer";
 import type { LayoutState } from "./types";
 
