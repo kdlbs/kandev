@@ -67,4 +67,29 @@ describe("NotificationsSettings", () => {
         "View installation instructions.",
     );
   });
+
+  // The page body renders inside a `SettingsCard`, whose `Card` base is
+  // `text-xs/relaxed`; sibling settings pages keep group headings at `text-sm`
+  // and descriptions/tables at `text-xs`. This body used to hard-code
+  // `text-base`/`text-sm` throughout, so the whole page read a size larger than
+  // its siblings. The `text-2xl` page title above the card is the shared
+  // `SettingsPageTemplate` heading and is deliberately out of scope. jsdom has
+  // no Tailwind, so assert on the utility classes rather than computed sizes.
+  it("keeps the card body within the settings type scale", () => {
+    const { container } = render(
+      <SettingsSaveProvider>
+        <NotificationsSettings />
+      </SettingsSaveProvider>,
+    );
+
+    const body = container.querySelector('[data-slot="card-content"]');
+    expect(body).not.toBeNull();
+    const oversized = [...body!.querySelectorAll("[class]")]
+      .map((element) => element.getAttribute("class") ?? "")
+      // Lookahead, not `(?:\s|$)`: Tailwind's line-height modifier makes the
+      // next character `/` (the Card base is literally `text-xs/relaxed`), so a
+      // consuming boundary would let `text-xl/relaxed` through.
+      .filter((className) => /(?:^|\s)text-(?:base|lg|\d?xl)(?=[\s/]|$)/.test(className));
+    expect(oversized).toEqual([]);
+  });
 });

@@ -33,10 +33,13 @@ func setupPollerTest(t *testing.T) (*Poller, *Service, *MockClient, *Store) {
 	sqlxDB := sqlx.NewDb(rawDB, "sqlite3")
 	t.Cleanup(func() { _ = sqlxDB.Close() })
 
-	// Minimal tasks schema: ListActivePRWatches only joins on id and filters by archived_at.
+	// Minimal tasks schema: ListActivePRWatches only joins on id and filters by
+	// archived_at; workspace_id is carried because the workspace-scoped task-PR
+	// lookups (ListTaskIDsByPRNumber, ListTaskPRsByPRNumber) join on it.
 	if _, err := sqlxDB.Exec(`
 		CREATE TABLE tasks (
 			id TEXT PRIMARY KEY,
+			workspace_id TEXT,
 			archived_at DATETIME
 		)`); err != nil {
 		t.Fatalf("create tasks table: %v", err)
@@ -66,7 +69,8 @@ func seedTask(t *testing.T, store *Store, taskID string, archived bool) {
 	if archived {
 		archivedAt = time.Now().UTC()
 	}
-	if _, err := store.db.Exec(`INSERT INTO tasks (id, archived_at) VALUES (?, ?)`, taskID, archivedAt); err != nil {
+	if _, err := store.db.Exec(`INSERT INTO tasks (id, workspace_id, archived_at) VALUES (?, ?, ?)`,
+		taskID, testWorkspaceID, archivedAt); err != nil {
 		t.Fatalf("seed task %s: %v", taskID, err)
 	}
 }

@@ -221,4 +221,5 @@ starts accepting work.
   is governed by [Send Queued Messages Now](message-queue-send-now.md).
 - Per-workspace, per-task, or per-session capacity overrides.
 - Automatically pruning old messages when a lower limit is saved.
-- Queue reordering or bulk selection beyond **Clear all**.
+- Bulk selection beyond **Clear all**. Reordering pending messages is a
+  separate capability governed by [Reorder Queued Messages](message-queue-reorder.md).

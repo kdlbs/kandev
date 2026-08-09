@@ -165,14 +165,16 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [sidebar-task-completion-icons](ui/sidebar-task-completion-icons.md) | shipped |
 | [sidebar-queued-prompt-count](ui/sidebar-queued-prompt-count.md) | shipped |
 | [session-tab-delete-feedback](ui/session-tab-delete-feedback.md) | shipped |
+| [message-favorite-star-mobile-size](ui/message-favorite-star-mobile-size.md) | shipped |
 | [slash-command-composer](ui/slash-command-composer.md) | shipped |
 | [subagent-observability](ui/subagent-observability.md) | building |
 | [entity-reference-composer](ui/entity-reference-composer.md) | draft |
 | [agent-launch-prompt-composer](ui/agent-launch-prompt-composer.md) | shipped |
 | [mermaid-rendering](ui/mermaid-rendering.md) | shipped |
-| [message-queue-management](ui/message-queue-management.md) | shipped |
-| [message-queue-merge](ui/message-queue-merge.md) | shipped |
-| [message-queue-send-now](ui/message-queue-send-now.md) | shipped |
+[message-queue-management](ui/message-queue-management.md) | shipped |
+[message-queue-merge](ui/message-queue-merge.md) | shipped |
+[message-queue-reorder](ui/message-queue-reorder.md) | building |
+[message-queue-send-now](ui/message-queue-send-now.md) | shipped |
 | [settings-manual-save](ui/settings-manual-save.md) | shipped |
 | [settings-discovery](ui/settings-discovery.md) | shipped |
 | [executor-settings-card-spacing](ui/executor-settings-card-spacing.md) | shipped |
@@ -221,6 +223,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 
 | Spec | Status |
 |---|---|
+| [mock-agent-slow-duration](mock-agent-slow-duration/spec.md) | shipped |
 | [session-subscription-recovery](session-subscription-recovery/spec.md) | draft |
 | [npm-nightly-channel](npm-nightly-channel/spec.md) | shipped |
 | [agent-resume-runtime-recovery](agent-resume-runtime-recovery/spec.md) | shipped |

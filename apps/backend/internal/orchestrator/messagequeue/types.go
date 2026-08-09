@@ -93,6 +93,11 @@ var (
 	// message merging is disabled (see Service.SetMergeEnabled). The setting
 	// is admin-controlled and enabled by default.
 	ErrMergeDisabled = errors.New("queued message merging is disabled")
+	// ErrQueueChanged is returned when a reorder's submitted id set does not
+	// match the session's current visible pending entries — an entry was
+	// drained, removed, merged, or newly queued since the client's snapshot.
+	// The reorder is rejected atomically with no partial position rewrite.
+	ErrQueueChanged = errors.New("queue changed during reorder")
 	// ErrTaskInactive means a lifecycle prompt could not be accepted because
 	// its task was deleted or archived before the queue transaction claimed it.
 	ErrTaskInactive = errors.New("queue task is inactive")

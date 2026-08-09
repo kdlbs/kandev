@@ -66,6 +66,19 @@ export class QueueSendNowError extends Error {
   }
 }
 
+/** Error thrown when a reorder's submitted id set no longer matches the
+ * visible pending queue (an entry was drained, removed, merged, or newly
+ * queued since the client's snapshot). The reorder was rejected atomically;
+ * callers refetch the authoritative queue. */
+export class QueueReorderError extends Error {
+  readonly code = "queue_changed" as const;
+
+  constructor(message?: string) {
+    super(message ?? "The queue changed before the reorder could be applied.");
+    this.name = "QueueReorderError";
+  }
+}
+
 type WSError = {
   code?: string;
   message?: string;
@@ -283,6 +296,32 @@ export async function mergeQueuedEntry(params: {
   try {
     return await client.request<{ entry_id: string }>("message.queue.merge", params);
   } catch (err) {
+    rethrowQueueError(err);
+  }
+}
+
+/** Rewrite the visible pending order of a session's queue. Throws
+ * QueueReorderError when the queue changed since the client's snapshot; the
+ * reorder was rejected atomically and the caller should refetch. */
+export async function reorderQueuedEntries(params: {
+  session_id: string;
+  ordered_ids: string[];
+}): Promise<{ session_id: string; reordered: number }> {
+  const client = getWebSocketClient();
+  if (!client) {
+    throw new Error(WS_CLIENT_UNAVAILABLE);
+  }
+  try {
+    return await client.request<{ session_id: string; reordered: number }>(
+      "message.queue.reorder",
+      params,
+    );
+  } catch (err) {
+    // The shared queue_changed mapping targets Send Now; reorder drift needs
+    // its own error class so callers reconcile silently instead of toasting.
+    if (asWSError(err)?.code === "queue_changed") {
+      throw new QueueReorderError();
+    }
     rethrowQueueError(err);
   }
 }

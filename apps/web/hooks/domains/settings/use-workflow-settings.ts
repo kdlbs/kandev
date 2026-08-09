@@ -2,7 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
-import { workflowId, workspaceId as toWorkspaceId, type Workflow } from "@/lib/types/http";
+import {
+  agentProfileId,
+  workflowId,
+  workspaceId as toWorkspaceId,
+  type Workflow,
+} from "@/lib/types/http";
 
 /**
  * Manages workflow list state for the settings page, synced with WS events
@@ -84,10 +89,9 @@ export function useWorkflowSettings(initialWorkflows: Workflow[], workspaceId?: 
       const updated = filtered.map((w) => {
         if (w.id.startsWith("temp-")) return w;
         const sw = scopedStoreWorkflows.find((s) => s.id === w.id);
+        if (!sw) return w;
         const saved = savedWorkflowItemsRef.current.find((item) => item.id === w.id);
-        const hasLocalNameDraft = saved && w.name !== saved.name;
-        if (sw && sw.name !== w.name && !hasLocalNameDraft) return { ...w, name: sw.name };
-        return w;
+        return mergeDisplayedWorkflowFromStore(w, saved, sw);
       });
 
       if (
@@ -105,9 +109,7 @@ export function useWorkflowSettings(initialWorkflows: Workflow[], workspaceId?: 
       const filtered = prev.filter((w) => !deletedIds.has(w.id));
       const updated = filtered.map((workflow) => {
         const server = scopedStoreWorkflows.find((item) => item.id === workflow.id);
-        return server && server.name !== workflow.name
-          ? { ...workflow, name: server.name }
-          : workflow;
+        return server ? mergeSavedWorkflowFromServer(workflow, server) : workflow;
       });
       if (
         toAdd.length === 0 &&
@@ -140,10 +142,97 @@ function workflowIsDirty(workflow: Workflow, savedWorkflows: Map<string, Workflo
   if (!saved) return true;
   return (
     workflow.name !== saved.name ||
-    workflow.description !== saved.description ||
+    (workflow.description ?? "") !== (saved.description ?? "") ||
     (workflow.prompt ?? "") !== (saved.prompt ?? "") ||
     (workflow.agent_profile_id ?? "") !== (saved.agent_profile_id ?? "")
   );
+}
+
+type EditableWorkflowField = "name" | "description" | "prompt" | "agent_profile_id";
+
+// Whether the displayed value for `field` has already diverged from the last-known-saved
+// baseline — i.e. the user has an uncommitted local edit that a store refresh must not clobber.
+// No baseline (a workflow not yet tracked in savedWorkflowItems) is treated as "no draft" so a
+// fresh store sync can still populate it, mirroring the pre-existing name-only behavior.
+// Normalizes absent values via `?? ""` the same way `workflowIsDirty` does — otherwise a field
+// that starts undefined, gets typed into, and is cleared back to "" reads as a phantom draft:
+// it blocks a legitimate store sync while the saved baseline still advances underneath it,
+// leaving the field falsely dirty and primed to clobber the remote value on the next Save.
+function hasLocalDraft(
+  displayed: Workflow,
+  saved: Workflow | undefined,
+  field: EditableWorkflowField,
+): boolean {
+  return saved != null && (displayed[field] ?? "") !== (saved[field] ?? "");
+}
+
+type StoreWorkflowItem = {
+  id: string;
+  workspaceId: string;
+  name: string;
+  description?: string | null;
+  prompt?: string;
+  agent_profile_id?: string;
+};
+
+// Pulls fresh values from the store into the displayed/editable draft, field by field, skipping
+// any field the user is mid-edit on so a cross-tab update never clobbers an uncommitted change.
+function mergeDisplayedWorkflowFromStore(
+  displayed: Workflow,
+  saved: Workflow | undefined,
+  server: StoreWorkflowItem,
+): Workflow {
+  const next = { ...displayed };
+  let changed = false;
+
+  if (!hasLocalDraft(displayed, saved, "name") && server.name !== displayed.name) {
+    next.name = server.name;
+    changed = true;
+  }
+  if (
+    !hasLocalDraft(displayed, saved, "description") &&
+    server.description !== displayed.description
+  ) {
+    next.description = server.description;
+    changed = true;
+  }
+  if (!hasLocalDraft(displayed, saved, "prompt") && server.prompt !== displayed.prompt) {
+    next.prompt = server.prompt;
+    changed = true;
+  }
+  const serverAgentProfileId =
+    server.agent_profile_id !== undefined ? agentProfileId(server.agent_profile_id) : undefined;
+  if (
+    !hasLocalDraft(displayed, saved, "agent_profile_id") &&
+    serverAgentProfileId !== displayed.agent_profile_id
+  ) {
+    next.agent_profile_id = serverAgentProfileId;
+    changed = true;
+  }
+
+  return changed ? next : displayed;
+}
+
+// The dirty-flag baseline always tracks the server's current value for every editable field —
+// unlike the displayed draft, it is never guarded by a local-draft check.
+function mergeSavedWorkflowFromServer(saved: Workflow, server: StoreWorkflowItem): Workflow {
+  const serverAgentProfileId =
+    server.agent_profile_id !== undefined ? agentProfileId(server.agent_profile_id) : undefined;
+  if (
+    server.name === saved.name &&
+    server.description === saved.description &&
+    server.prompt === saved.prompt &&
+    serverAgentProfileId === saved.agent_profile_id
+  ) {
+    return saved;
+  }
+  return {
+    ...saved,
+    name: server.name,
+    description: server.description,
+    prompt: server.prompt,
+    agent_profile_id: serverAgentProfileId,
+  };
 }
 
 function useScopedStoreWorkflows<
@@ -152,6 +241,8 @@ function useScopedStoreWorkflows<
     workspaceId: string;
     name: string;
     description?: string | null;
+    prompt?: string;
+    agent_profile_id?: string;
     hidden?: boolean;
     style?: string;
   },
@@ -166,17 +257,15 @@ function useScopedStoreWorkflows<
   }, [storeWorkflows, workspaceId]);
 }
 
-function storeItemToWorkflow(sw: {
-  id: string;
-  workspaceId: string;
-  name: string;
-  description?: string | null;
-}): Workflow {
+function storeItemToWorkflow(sw: StoreWorkflowItem): Workflow {
   return {
     id: workflowId(sw.id),
     workspace_id: toWorkspaceId(sw.workspaceId),
     name: sw.name,
     description: sw.description,
+    prompt: sw.prompt,
+    agent_profile_id:
+      sw.agent_profile_id !== undefined ? agentProfileId(sw.agent_profile_id) : undefined,
     created_at: "",
     updated_at: "",
   };

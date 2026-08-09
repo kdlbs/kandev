@@ -1283,6 +1283,7 @@
   "terminalNotAvailableThisTaskIs": "Ţēŕḿĩńàĺ ńōţ àvàĩĺàƀĺē — ţĥĩś ţàśķ ĩś àŕćĥĩvēď",
   "terminalNumbered": "ţēŕḿĩńàĺ #{{seq}}",
   "terminalPromptInputAreDisabledUntil": "Ţēŕḿĩńàĺ & ƥŕōḿƥţ ĩńƥũţ àŕē ďĩśàƀĺēď ũńţĩĺ ţĥē ńēxţ ŕũń śţàŕţś.",
+  "terminalSessionEnded": "Ţĥĩś śēśśĩōń ĥàś ēńďēď — ńō ţēŕḿĩńàĺ ĩś àvàĩĺàƀĺē ƒōŕ ĩţ.",
   "terminalUnavailableNoActiveSession": "Ţēŕḿĩńàĺ ũńàvàĩĺàƀĺē — ńō àćţĩvē śēśśĩōń.",
   "terminalWithSeq": "Ţēŕḿĩńàĺ {{seq}}",
   "terminals": "Ţēŕḿĩńàĺś",

@@ -29,6 +29,7 @@ type Workspace = WorkspaceState["items"][number];
 import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { SettingsTarget } from "@/components/settings/settings-target";
@@ -452,6 +453,9 @@ function useWorkspaceEditForm(workspace: Workspace) {
 
   const saveWorkspaceRequest = useRequest(updateWorkspaceAction);
   const deleteWorkspaceRequest = useRequest(deleteWorkspaceAction);
+  // Selects the delete route: the office endpoint only exists while the feature
+  // is on. See `deleteWorkspaceAction`.
+  const officeEnabled = useFeature("office");
 
   const activeExecutors = executors.filter((executor: Executor) => executor.status === "active");
   const isDirty =
@@ -476,7 +480,7 @@ function useWorkspaceEditForm(workspace: Workspace) {
   const handleDeleteWorkspace = async () => {
     if (deleteConfirmText !== currentWorkspace.name) return;
     try {
-      await deleteWorkspaceRequest.run(currentWorkspace.id, currentWorkspace.name);
+      await deleteWorkspaceRequest.run(currentWorkspace.id, currentWorkspace.name, officeEnabled);
       setWorkspaces(workspaces.filter((ws: Workspace) => ws.id !== currentWorkspace.id));
       runWithNavigationBlockerBypassed(() => router.push("/settings/workspace"));
     } catch (error) {

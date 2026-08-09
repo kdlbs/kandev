@@ -96,8 +96,15 @@ describe("MessageActions favorite toggle", () => {
 
     expect(onToggleFavorite).toHaveBeenCalledTimes(1);
 
-    expect(star.className).toMatch(/\bmin-h-11\b/);
-    expect(star.className).toMatch(/\bmin-w-11\b/);
+    // The favorite control must match the sibling action buttons' shared
+    // sizing on every viewport instead of the oversized mobile 44px target.
+    expect(star.className).toContain("h-5 w-5 p-1");
+    expect(star.className).not.toMatch(/\bmin-h-11\b/);
+    expect(star.className).not.toMatch(/\bmin-w-11\b/);
+
+    const icon = star.querySelector("svg");
+    expect(icon?.getAttribute("class")).toContain("h-full");
+    expect(icon?.getAttribute("class")).toContain("w-full");
   });
 
   it("shows a filled star and 'remove from favorites' label when isFavorite is true", () => {

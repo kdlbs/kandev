@@ -161,9 +161,7 @@ function MobileEventList({
                   key={provider.id}
                   className="flex min-h-11 items-center gap-3 rounded-md border border-muted px-3 py-2"
                 >
-                  <span className="min-w-0 flex-1 break-words text-sm font-medium">
-                    {provider.name}
-                  </span>
+                  <span className="min-w-0 flex-1 break-words font-medium">{provider.name}</span>
                   <TestProviderButton provider={provider} onTestProvider={onTestProvider} mobile />
                   <EventCheckbox
                     provider={provider}
@@ -197,7 +195,7 @@ function DesktopEventTable({
       className="hidden overflow-auto rounded-lg border border-muted md:block"
       data-testid="notification-events-desktop-table"
     >
-      <table className="min-w-full text-sm">
+      <table className="min-w-full text-xs">
         <thead className="bg-muted/40">
           <tr>
             <th className="px-4 py-3 text-left font-medium">{t("settings:notificationType")}</th>
@@ -246,7 +244,7 @@ export function NotificationEventsTable(props: Props) {
   const { t } = useTranslation();
   if (props.tableProviders.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground">{t("settings:noProvidersConfiguredYet")}</p>
+      <p className="text-xs text-muted-foreground">{t("settings:noProvidersConfiguredYet")}</p>
     );
   }
 

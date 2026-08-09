@@ -215,13 +215,13 @@ function ExternalProvidersSection({
   return (
     <SettingsTarget targetId={GENERAL_SETTINGS_TARGETS.notificationProviders} className="space-y-4">
       <div>
-        <div className="text-base font-medium">{t("settings:externalProviders")}</div>
-        <p className="text-sm text-muted-foreground">
+        <div className="text-sm font-medium">{t("settings:externalProviders")}</div>
+        <p className="text-xs text-muted-foreground" data-testid="external-providers-description">
           {t("settings:externalProvidersDescription")}
         </p>
       </div>
       {!appriseAvailable && (
-        <p className="text-sm text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           {/* The link is part of the sentence, so the whole notice is one
               message and the <2> tag addresses the anchor by child index. */}
           <Trans i18nKey="settings:appriseNotInstalled">
@@ -239,7 +239,7 @@ function ExternalProvidersSection({
         </p>
       )}
       {appriseProviders.length === 0 && (
-        <p className="text-sm text-muted-foreground">{t("settings:noAppriseProviders")}</p>
+        <p className="text-xs text-muted-foreground">{t("settings:noAppriseProviders")}</p>
       )}
       <AppriseProviderList
         providers={appriseProviders}
@@ -414,8 +414,8 @@ export function NotificationsSettings() {
       <Separator className="my-4" />
       <SettingsTarget targetId={GENERAL_SETTINGS_TARGETS.notificationEvents} className="space-y-4">
         <div>
-          <div className="text-base font-medium">{t("settings:notificationEvents")}</div>
-          <p className="text-sm text-muted-foreground">
+          <div className="text-sm font-medium">{t("settings:notificationEvents")}</div>
+          <p className="text-xs text-muted-foreground">
             {t("settings:notificationEventsDescription")}
           </p>
         </div>
@@ -469,7 +469,7 @@ function AppriseProviderForm({
       data-settings-dirty={formIsDirty}
       data-settings-dirty-level="container"
     >
-      <div className="text-base font-medium">{t("settings:appriseProvider")}</div>
+      <div className="text-sm font-medium">{t("settings:appriseProvider")}</div>
       <Input
         value={name}
         onChange={(event) => onNameChange(event.target.value)}
