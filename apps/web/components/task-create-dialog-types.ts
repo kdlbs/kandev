@@ -327,6 +327,9 @@ export type DialogFormState = {
   /** Optional host folder for repo-less tasks; empty means scratch workspace. */
   workspacePath: string;
   setWorkspacePath: (v: string) => void;
+  /** Create-mode opt-in. Autopilot is immutable after task creation. */
+  autopilot: boolean;
+  setAutopilot: (v: boolean) => void;
 };
 
 export type SubmitHandlersDeps = {
@@ -334,6 +337,8 @@ export type SubmitHandlersDeps = {
   isEditMode: boolean;
   /** Create-mode opt-in: derive a provisional title from the prompt. */
   autoTitle?: boolean;
+  /** Create-mode opt-in. The backend fixes this value at task creation. */
+  autopilot: boolean;
   isPassthroughProfile: boolean;
   taskName: string;
   workspaceId: string | null;

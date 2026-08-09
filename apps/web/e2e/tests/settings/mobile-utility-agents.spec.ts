@@ -8,26 +8,17 @@ import { test, expect } from "../../fixtures/test-base";
  * stacked. See PR #1654 review discussion.
  */
 test.describe("Mobile utility agents action rows", () => {
-  test("model select and edit button stay reachable on a narrow viewport", async ({ testPage }) => {
-    await testPage.route("**/api/v1/utility/inference-agents", (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          agents: [
-            {
-              id: "claude",
-              name: "claude",
-              display_name: "Claude",
-              status: "ok",
-              models: [
-                { id: "claude-fast", name: "Claude Fast", description: "", is_default: true },
-              ],
-            },
-          ],
-        }),
-      }),
-    );
+  test("profile select and edit button stay reachable on a narrow viewport", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { agents } = await apiClient.listAgents();
+    const profile = agents
+      .flatMap((agent) => agent.profiles ?? [])
+      .find((candidate) => candidate.id === seedData.agentProfileId);
+    if (!profile) throw new Error(`seed profile ${seedData.agentProfileId} was not found`);
+    const profileLabel = `${profile.agentDisplayName} • ${profile.name}`;
     await testPage.route("**/api/v1/utility/agents/builtin-commit-message", (route) =>
       route.fulfill({
         status: 200,
@@ -36,10 +27,13 @@ test.describe("Mobile utility agents action rows", () => {
           id: "builtin-commit-message",
           name: "commit-message",
           description: "Generate a commit message.",
+          prompt: "Generate a commit message.",
           builtin: true,
           enabled: true,
-          agent_id: "claude",
-          model: "claude-fast",
+          agent_id: "",
+          model: "",
+          agent_profile_id: seedData.agentProfileId,
+          profile_binding_state: "explicit",
         }),
       }),
     );
@@ -60,10 +54,13 @@ test.describe("Mobile utility agents action rows", () => {
               id: "builtin-commit-message",
               name: "commit-message",
               description: "Generate a commit message.",
+              prompt: "Generate a commit message.",
               builtin: true,
               enabled: true,
               agent_id: "",
               model: "",
+              agent_profile_id: seedData.agentProfileId,
+              profile_binding_state: "explicit",
             },
           ],
         }),
@@ -84,24 +81,31 @@ test.describe("Mobile utility agents action rows", () => {
     const isOverflowing = await card.evaluate((el) => el.scrollWidth > el.clientWidth + 1);
     expect(isOverflowing).toBe(false);
 
-    // The model selector must also stay a comfortably usable width — not
+    // The profile selector must also stay a comfortably usable width — not
     // just "not clipped" but not squeezed illegibly thin either. The row
     // stacks below `md`, so the select gets the card's full content width
     // to itself (minus the edit button), not a slice shared with the name
     // column.
     const row = testPage.getByTestId("utility-action-row-builtin-commit-message");
-    const select = row.getByRole("combobox");
+    const select = row.getByTestId("utility-profile-picker-action-builtin-commit-message");
     const selectBox = await select.boundingBox();
     expect(selectBox).not.toBeNull();
     expect(selectBox!.width).toBeGreaterThanOrEqual(150);
 
-    // The model selector and edit button must stay clickable, not clipped
+    // The profile selector and edit button must stay clickable, not clipped
     // outside the card.
-    await select.click();
-    await testPage.getByRole("option", { name: "Claude Fast", exact: true }).click();
-    await expect(select).toContainText("Claude Fast");
+    await expect(select).toContainText(profileLabel);
+    await select.tap();
+    const dropdown = testPage.getByTestId(
+      "utility-profile-picker-action-builtin-commit-message-dropdown",
+    );
+    await dropdown.getByPlaceholder("Search agent profiles...").fill(profile.agentDisplayName);
+    const option = dropdown.getByRole("option", { name: profileLabel, exact: true });
+    await expect(option.getByTestId("utility-profile-agent-icon")).toBeVisible();
+    await option.tap();
+    await expect(select).toContainText(profileLabel);
 
-    await row.getByRole("button").click();
+    await row.getByRole("button").last().click();
     await expect(testPage.getByRole("dialog")).toBeVisible();
     await expect(testPage.getByText("Edit Utility Agent")).toBeVisible();
   });

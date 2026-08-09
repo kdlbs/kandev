@@ -157,6 +157,19 @@ func seedLegacyFlatEnv(t *testing.T, db *sqlx.DB, seed legacySeed, worktreeID, p
 	}
 }
 
+func seedLegacyEnvRepo(t *testing.T, db *sqlx.DB, id, envID, repoID, worktreeID, path, branch string, startedAt time.Time) {
+	t.Helper()
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_environment_repos (
+			id, task_environment_id, repository_id, branch_slug,
+			worktree_id, worktree_path, worktree_branch, position,
+			error_message, created_at, updated_at
+		) VALUES (?, ?, ?, '', ?, ?, ?, 0, '', ?, ?)`),
+		id, envID, repoID, worktreeID, path, branch, startedAt, startedAt); err != nil {
+		t.Fatalf("seed env repo: %v", err)
+	}
+}
+
 func seedCleanupJob(t *testing.T, db *sqlx.DB, id, taskID, trigger, state string, startedAt time.Time) {
 	t.Helper()
 	if _, err := db.Exec(db.Rebind(`
@@ -457,7 +470,7 @@ func TestCutover_ConflictingWorktreesFailClosed(t *testing.T) {
 	for _, s := range []string{"sess-c1", "sess-c2"} {
 		if _, err := db.Exec(`
 			INSERT INTO task_sessions (id, task_id, state, started_at, updated_at)
-			VALUES (?, 'task-conflict', 'COMPLETED', ?, ?)`, s, now, now); err != nil {
+			VALUES (?, 'task-conflict', 'RUNNING', ?, ?)`, s, now, now); err != nil {
 			t.Fatalf("seed session: %v", err)
 		}
 	}
@@ -531,19 +544,109 @@ func TestCutover_RollbackAtEveryFailpoint(t *testing.T) {
 	}
 }
 
-// TestCutover_AmbiguousPathMismatchFailsClosed proves that two sources
-// disagreeing on a worktree's path abort the cutover with a diagnostic.
-func TestCutover_AmbiguousPathMismatchFailsClosed(t *testing.T) {
+// TestCutover_CanonicalRepoWinsOverStaleFlatMetadata proves that canonical
+// repository metadata wins when the deprecated flat environment fields drift.
+func TestCutover_CanonicalRepoWinsOverStaleFlatMetadata(t *testing.T) {
 	db := openLegacyDB(t)
 	now := time.Now().UTC().Truncate(time.Second)
 	seed := legacySeed{envID: "env-p", taskID: "task-p", repoID: "repo-p", sessionID: "sess-p"}
 	seedLegacyTask(t, db, seed, now)
 	seedLegacySessionWorktree(t, db, "sess-p", "wt-p", "repo-p", "", "/t/one", "feature/p", "active", now)
-	seedLegacyFlatEnv(t, db, seed, "wt-p", "/t/two", "feature/p", now)
+	seedLegacyFlatEnv(t, db, seed, "wt-p", "/t/two", "feature/stale", now)
+	seedLegacyEnvRepo(t, db, "env-repo-p", "env-p", "repo-p", "wt-p", "/t/one", "feature/p", now)
 
-	_, err := NewWithDB(db, db, nil)
-	if err == nil {
-		t.Fatal("expected cutover to fail on path mismatch")
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("cutover: %v", err)
+	}
+	env, err := repo.GetTaskEnvironment(context.Background(), "env-p")
+	if err != nil {
+		t.Fatalf("get task environment: %v", err)
+	}
+	if len(env.Repos) != 1 || env.Repos[0].WorktreePath != "/t/one" ||
+		env.Repos[0].WorktreeBranch != "feature/p" {
+		t.Fatalf("canonical repository metadata = %+v", env.Repos)
+	}
+}
+
+// TestCutover_IgnoresDeletedHistoricalSessionConflict proves that a deleted
+// session reference cannot override an existing task-owned repository row.
+func TestCutover_IgnoresDeletedHistoricalSessionConflict(t *testing.T) {
+	db := openLegacyDB(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	seed := legacySeed{envID: "env-history", taskID: "task-history", repoID: "repo-history", sessionID: "sess-history"}
+	seedLegacyTask(t, db, seed, now)
+	seedLegacyFlatEnv(t, db, seed, "wt-current", "/tasks/history/repo", "feature/current", now)
+	seedLegacyEnvRepo(t, db, "env-repo-history", "env-history", "repo-history", "wt-current", "/tasks/history/repo", "feature/current", now)
+	seedLegacySessionWorktree(t, db, "sess-history", "wt-deleted", "repo-history", "", "/tasks/history/old", "feature/old", "deleted", now)
+
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("cutover: %v", err)
+	}
+	env, err := repo.GetTaskEnvironment(context.Background(), "env-history")
+	if err != nil {
+		t.Fatalf("get task environment: %v", err)
+	}
+	if len(env.Repos) != 1 || env.Repos[0].WorktreeID != "wt-current" {
+		t.Fatalf("canonical repository row = %+v", env.Repos)
+	}
+}
+
+// TestCutover_IgnoresTerminalHistoricalSessionConflict proves that a
+// completed, failed, or cancelled session cannot override a canonical owner.
+func TestCutover_IgnoresTerminalHistoricalSessionConflict(t *testing.T) {
+	for _, state := range []string{"COMPLETED", "FAILED", "CANCELLED"} {
+		t.Run(state, func(t *testing.T) {
+			db := openLegacyDB(t)
+			now := time.Now().UTC().Truncate(time.Second)
+			seed := legacySeed{envID: "env-terminal", taskID: "task-terminal", repoID: "repo-terminal", sessionID: "sess-terminal"}
+			seedLegacyTask(t, db, seed, now)
+			if _, err := db.Exec(db.Rebind(`UPDATE task_sessions SET state = ? WHERE id = ?`), state, seed.sessionID); err != nil {
+				t.Fatalf("set session state: %v", err)
+			}
+			seedLegacyFlatEnv(t, db, seed, "wt-current", "/tasks/terminal/repo", "feature/current", now)
+			seedLegacyEnvRepo(t, db, "env-repo-terminal", "env-terminal", "repo-terminal", "wt-current", "/tasks/terminal/repo", "feature/current", now)
+			seedLegacySessionWorktree(t, db, seed.sessionID, "wt-old", "repo-terminal", "", "/tasks/terminal/old", "feature/current", "active", now)
+
+			repo, err := NewWithDB(db, db, nil)
+			if err != nil {
+				t.Fatalf("cutover: %v", err)
+			}
+			env, err := repo.GetTaskEnvironment(context.Background(), seed.envID)
+			if err != nil {
+				t.Fatalf("get task environment: %v", err)
+			}
+			if len(env.Repos) != 1 || env.Repos[0].WorktreeID != "wt-current" {
+				t.Fatalf("canonical repository row = %+v", env.Repos)
+			}
+		})
+	}
+}
+
+// TestCutover_PreservesCreatedSessionWorktreeWithoutCanonicalOwner proves
+// that an unexpected CREATED row is backfilled instead of silently dropped.
+func TestCutover_PreservesCreatedSessionWorktreeWithoutCanonicalOwner(t *testing.T) {
+	db := openLegacyDB(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	seed := legacySeed{envID: "env-created", taskID: "task-created", repoID: "repo-created", sessionID: "sess-created"}
+	seedLegacyTask(t, db, seed, now)
+	if _, err := db.Exec(db.Rebind(`UPDATE task_sessions SET state = 'CREATED' WHERE id = ?`), seed.sessionID); err != nil {
+		t.Fatalf("set session state: %v", err)
+	}
+	seedLegacyFlatEnv(t, db, seed, "wt-created", "/tasks/created/repo", "feature/created", now)
+	seedLegacySessionWorktree(t, db, seed.sessionID, "wt-created", "repo-created", "", "/tasks/created/repo", "feature/created", "active", now)
+
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("cutover: %v", err)
+	}
+	env, err := repo.GetTaskEnvironment(context.Background(), seed.envID)
+	if err != nil {
+		t.Fatalf("get task environment: %v", err)
+	}
+	if len(env.Repos) != 1 || env.Repos[0].WorktreeID != "wt-created" {
+		t.Fatalf("created session worktree = %+v", env.Repos)
 	}
 }
 

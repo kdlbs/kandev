@@ -81,11 +81,12 @@ func TestCreateTask_Office_WithProjectID(t *testing.T) {
 	ws, _ := repo.GetWorkspace(ctx, "ws-1")
 	orchWfID := ws.OfficeWorkflowID
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		Title:       "Office Task",
 		ProjectID:   "proj-1",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -114,12 +115,13 @@ func TestCreateTask_Office_AgentCreated(t *testing.T) {
 	svc, _ := setupOfficeTest(t)
 	ctx := context.Background()
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID:            "ws-1",
 		Title:                  "Agent Task",
 		Origin:                 models.TaskOriginAgentCreated,
 		AssigneeAgentProfileID: "agent-1",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -141,11 +143,12 @@ func TestCreateTask_Kanban_StillWorks(t *testing.T) {
 
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-kanban", WorkspaceID: "ws-1", Name: "Dev"})
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-kanban",
 		Title:       "Kanban Task",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -191,11 +194,12 @@ func TestIdentifier_SequentialPerWorkspace(t *testing.T) {
 	}
 
 	// ws-2 starts from 1
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-2",
 		Title:       "Task",
 		ProjectID:   "proj-2",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("create task ws-2: %v", err)
 	}
@@ -204,11 +208,12 @@ func TestIdentifier_SequentialPerWorkspace(t *testing.T) {
 	}
 
 	// ws-1 should be at KAN-4
-	task4, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	task4Result, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		Title:       "Task 4",
 		ProjectID:   "proj-1",
 	})
+	task4 := task4Result.Task
 	if err != nil {
 		t.Fatalf("create task 4 ws-1: %v", err)
 	}
@@ -221,11 +226,12 @@ func TestTaskTree_FlatListWithParentID(t *testing.T) {
 	svc, _ := setupOfficeTest(t)
 	ctx := context.Background()
 
-	parent, _ := svc.CreateTask(ctx, &CreateTaskRequest{
+	parentResult, _ := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		Title:       "Parent",
 		ProjectID:   "proj-1",
 	})
+	parent := parentResult.Task
 	_, _ = svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		Title:       "Child 1",
@@ -456,16 +462,18 @@ func TestGetBlocking_IncludesArchivedTasks(t *testing.T) {
 	svc.SetBlockerRepository(&mockBlockerRepo{})
 	ctx := context.Background()
 
-	blocker, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	blockerResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-1", Title: "Blocker", ProjectID: "proj-1",
 	})
+	blocker := blockerResult.Task
 	if err != nil {
 		t.Fatalf("create blocker: %v", err)
 	}
-	blocked, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	blockedResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-1", Title: "Blocked", ProjectID: "proj-1",
 		BlockedBy: []string{blocker.ID},
 	})
+	blocked := blockedResult.Task
 	if err != nil {
 		t.Fatalf("create blocked task: %v", err)
 	}
@@ -524,26 +532,29 @@ func TestCreateTask_WithBlockedBy(t *testing.T) {
 	ctx := context.Background()
 
 	// Create two blocker tasks first.
-	blocker1, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	blocker1Result, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-1", Title: "Blocker 1", ProjectID: "proj-1",
 	})
+	blocker1 := blocker1Result.Task
 	if err != nil {
 		t.Fatalf("create blocker1: %v", err)
 	}
-	blocker2, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	blocker2Result, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-1", Title: "Blocker 2", ProjectID: "proj-1",
 	})
+	blocker2 := blocker2Result.Task
 	if err != nil {
 		t.Fatalf("create blocker2: %v", err)
 	}
 
 	// Create a task blocked by both.
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		Title:       "Blocked Task",
 		ProjectID:   "proj-1",
 		BlockedBy:   []string{blocker1.ID, blocker2.ID},
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("create blocked task: %v", err)
 	}
@@ -562,12 +573,13 @@ func TestCreateTask_WithBlockedBy_Empty(t *testing.T) {
 	svc.SetBlockerRepository(&mockBlockerRepo{})
 	ctx := context.Background()
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		Title:       "No Blockers",
 		ProjectID:   "proj-1",
 		BlockedBy:   []string{},
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -628,7 +640,7 @@ func TestCreateTask_OfficeFields_Roundtrip(t *testing.T) {
 	svc, _ := setupOfficeTest(t)
 	ctx := context.Background()
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID:            "ws-1",
 		Title:                  "Full Office Task",
 		ProjectID:              "proj-1",
@@ -636,6 +648,7 @@ func TestCreateTask_OfficeFields_Roundtrip(t *testing.T) {
 		Origin:                 models.TaskOriginRoutine,
 		Labels:                 `["bug","urgent"]`,
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}

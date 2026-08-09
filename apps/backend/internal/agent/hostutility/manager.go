@@ -18,8 +18,11 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/system/storage"
+	"github.com/kandev/kandev/internal/system/storage/tempartifacts"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -35,16 +38,21 @@ import (
 //   - RefreshAgent: re-runs the probe against the existing instance.
 //   - Stop(ctx): deletes each instance from agentctl and removes the tmp parent.
 type Manager struct {
-	registry      *registry.Registry
-	controlHost   string
-	controlPort   int
-	controlClient *agentctlclient.ControlClient
-	authToken     string // per-launch auth token for instance clients
-	log           *logger.Logger
+	registry        *registry.Registry
+	controlHost     string
+	controlPort     int
+	controlClient   *agentctlclient.ControlClient
+	authToken       string // per-launch auth token for instance clients
+	log             *logger.Logger
+	profileResolver interface {
+		Resolve(context.Context, string) (*settingsmodels.AgentProfile, error)
+	}
 
-	parentTmpDir string
-	cache        *cache
-	modelCache   *modelConfigCache
+	parentTmpDir  string
+	tempArtifacts *tempartifacts.Registry
+	tempLease     *tempartifacts.Lease
+	cache         *cache
+	modelCache    *modelConfigCache
 
 	mu                sync.RWMutex
 	instances         map[string]*instance // keyed by agent type
@@ -54,6 +62,13 @@ type Manager struct {
 	modelGenerations  map[string]uint64
 	startCancel       context.CancelFunc
 	stopped           bool
+}
+
+// SetProfileResolver wires the profile eligibility and launch-policy reader.
+func (m *Manager) SetProfileResolver(resolver interface {
+	Resolve(context.Context, string) (*settingsmodels.AgentProfile, error)
+}) {
+	m.profileResolver = resolver
 }
 
 // instance is a single warm agentctl instance bound to an agent type.
@@ -90,6 +105,12 @@ func (m *Manager) SetAuthToken(token string) {
 	m.authToken = token
 }
 
+func (m *Manager) SetTemporaryArtifactRegistry(registry *tempartifacts.Registry) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.tempArtifacts = registry
+}
+
 // Start boots one warm instance per ACP-capable inference agent and runs an
 // initial probe against each in parallel. Individual agent failures are
 // captured in the cache but do not abort the other agents.
@@ -116,16 +137,32 @@ func (m *Manager) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("create host utility tmp dir: %w", err)
 	}
+	m.mu.RLock()
+	artifactRegistry := m.tempArtifacts
+	m.mu.RUnlock()
+	var tempLease *tempartifacts.Lease
+	if artifactRegistry != nil {
+		tempLease, err = artifactRegistry.RegisterExisting(
+			ctx, storage.TemporaryArtifactKindHostUtility, parent, nil,
+		)
+		if err != nil {
+			_ = os.RemoveAll(parent)
+			return fmt.Errorf("register host utility tmp dir: %w", err)
+		}
+	}
 	m.mu.Lock()
 	if m.stopped {
 		m.mu.Unlock()
-		if err := os.RemoveAll(parent); err != nil {
+		if tempLease != nil {
+			_ = tempLease.Remove(context.Background())
+		} else if err := os.RemoveAll(parent); err != nil {
 			m.log.Warn("failed to remove unused host utility parent tmp dir",
 				zap.String("path", parent), zap.Error(err))
 		}
 		return nil
 	}
 	m.parentTmpDir = parent
+	m.tempLease = tempLease
 	m.mu.Unlock()
 	m.log.Info("host utility parent tmp dir created", zap.String("path", parent))
 
@@ -166,6 +203,8 @@ func (m *Manager) Stop(ctx context.Context) {
 	m.instances = make(map[string]*instance)
 	parentTmpDir := m.parentTmpDir
 	m.parentTmpDir = ""
+	tempLease := m.tempLease
+	m.tempLease = nil
 	m.mu.Unlock()
 
 	if cancel != nil {
@@ -178,7 +217,11 @@ func (m *Manager) Stop(ctx context.Context) {
 		cancel()
 	}
 
-	if parentTmpDir != "" {
+	if tempLease != nil {
+		if err := tempLease.Remove(ctx); err != nil {
+			m.log.Warn("failed to remove host utility parent tmp dir", zap.String("path", parentTmpDir), zap.Error(err))
+		}
+	} else if parentTmpDir != "" {
 		if err := os.RemoveAll(parentTmpDir); err != nil {
 			m.log.Warn("failed to remove host utility parent tmp dir",
 				zap.String("path", parentTmpDir), zap.Error(err))

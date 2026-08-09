@@ -182,6 +182,14 @@ describe("toKanbanTask — HTTP DTO / WS payload parity", () => {
   });
 });
 
+describe("toKanbanTask — autopilot", () => {
+  it("preserves the immutable task creation mode for HTTP and websocket payloads", () => {
+    expect(toKanbanTask(httpDTO({ autopilot: true }))).toMatchObject({ autopilot: true });
+    expect(toKanbanTask(wsPayload({ autopilot: true }))).toMatchObject({ autopilot: true });
+    expect(toKanbanTask(httpDTO()).autopilot).toBeUndefined();
+  });
+});
+
 describe("toKanbanTask — state normalization", () => {
   it("maps the task-wide active subagent count for future status surfaces", () => {
     const mapped = toKanbanTask(

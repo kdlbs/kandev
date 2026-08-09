@@ -174,6 +174,17 @@ Host-wide Docker build-cache and unused-image cleanup remain disabled until you 
 owns a dedicated Docker daemon.
 Do not enable those rules on a daemon shared with unrelated workloads.
 
+The Storage page also reports **Kandev temporary artifacts** created by services that need a
+short-lived directory under the host temporary root. Each current artifact is registered in the
+Kandev database and carries an owner-only marker in its exact directory. Active artifacts and
+artifacts created within the last 24 hours are protected. **Clean stale artifacts** is a manual-only
+action: it moves eligible, registered artifacts into Kandev quarantine on the same filesystem so
+they can be restored during the configured retention period. It does not permanently delete them.
+The action does not inspect or claim arbitrary `/tmp` entries, shared caches, Node or Playwright
+caches, preview/CI/dev-harness directories, or temporary data belonging to another Kandev
+installation. A missing registry or failed measurement is shown as unavailable rather than as
+zero usage. The inherited `TMPDIR`, `TMP`, and `TEMP` behavior below is unchanged.
+
 Host-local agents inherit the Kandev service's `TMPDIR`, `TMP`, and `TEMP` values unchanged. If the
 service leaves them unset, agent tools use their normal operating-system defaults; if an operator
 sets them on the service, all host-local agents share those configured locations. This permits
@@ -233,6 +244,12 @@ Some releases perform a one-time schema cutover that rewrites ownership tables a
 1. Take and **verify** a backup. For PostgreSQL use the pattern above. For SQLite, create a manual snapshot from **Settings > System > Backups** (or `sqlite3` `VACUUM INTO`) and verify it: the automatic pre-migration snapshot is taken during startup of the new binary, so it cannot be verified before the upgrade starts.
 2. Stop all backend writers during the cutover. Do not run a mixed-version fleet across the upgrade; the migration takes a database advisory lock and aborts on lock timeout without changing the schema or data.
 3. Let exactly one schema initializer run and reach a healthy state before starting additional instances.
+
+If the new binary reports a worktree-ownership conflict and exits, stop the
+rollout. The cutover is transactional, so the legacy database remains
+authoritative. Do not delete ownership rows by hand. Start a compatible
+pre-cutover binary to restore service, or deploy the migration hotfix and retry
+the upgrade against the unchanged database.
 
 The normalized schema is intentionally incompatible with older binaries. To downgrade, stop all instances and restore the pre-upgrade backup — never start an older binary against a post-cutover database. SQLite restores from its automatic pre-migration snapshot; PostgreSQL restores your verified `pg_dump` backup.
 

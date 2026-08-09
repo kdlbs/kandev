@@ -58,7 +58,13 @@ type CreateTaskRequest struct {
 	PlanMode       bool                   `json:"plan_mode,omitempty"`
 	IsEphemeral    bool                   `json:"is_ephemeral,omitempty"` // Ephemeral tasks are hidden from kanban, used for quick chat
 	ParentID       string                 `json:"parent_id,omitempty"`
+	Autopilot      bool                   `json:"autopilot,omitempty"`
 	WorkspacePath  string                 `json:"workspace_path,omitempty"` // Optional host folder for repo-less tasks
+
+	// ExternalID is a caller-supplied identity used for create-idempotency
+	// (docs/specs/tasks/external-id-idempotency/spec.md). Accepted on REST
+	// and MCP; empty means no idempotency key.
+	ExternalID string `json:"external_id,omitempty"`
 
 	// Office extensions
 	AssigneeAgentProfileID string   `json:"assignee_agent_profile_id,omitempty"`

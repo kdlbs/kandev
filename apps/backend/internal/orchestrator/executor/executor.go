@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/integrations/cloneauth"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -346,15 +347,16 @@ type LaunchAgentRequest struct {
 	// every managed runtime value and can perform the final strict resolution.
 	EnvironmentDefinitions        []runtimeenv.Definition
 	EnvironmentResolutionRequired bool
-	ACPSessionID                  string            // ACP session ID to resume, if available
-	ModelOverride                 string            // If set, use this model instead of the profile's model
-	ExecutorType                  string            // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
-	ExecutorConfig                map[string]string // Executor config (docker_host, git_token, etc.)
-	PreviousExecutionID           string            // Previous execution ID for runtime reconnect
-	McpMode                       string            // MCP tool mode: "task" (default), "config", or "office"
-	McpProviders                  []string          // Normalized provider capabilities attached to the task
-	IsEphemeral                   bool              // Ephemeral task (quick chat) — enables fallback workspace creation
-	WorkspacePath                 string            // Optional host folder for repo-less tasks (overrides scratch fallback)
+	ACPSessionID                  string              // ACP session ID to resume, if available
+	ModelOverride                 string              // If set, use this model instead of the profile's model
+	ExecutorType                  string              // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
+	ExecutorConfig                map[string]string   // Executor config (docker_host, git_token, etc.)
+	PreviousExecutionID           string              // Previous execution ID for runtime reconnect
+	McpMode                       string              // MCP tool mode: "task" (default), "config", or "office"
+	McpProviders                  []string            // Normalized provider capabilities attached to the task
+	McpProfile                    *mcpprofile.Context // Backend-owned base surface and additive MCP capabilities
+	IsEphemeral                   bool                // Ephemeral task (quick chat) — enables fallback workspace creation
+	WorkspacePath                 string              // Optional host folder for repo-less tasks (overrides scratch fallback)
 
 	// IsPassthrough is the session's mode snapshot (TaskSession.IsPassthrough)
 	// at session-creation time. Forwarded to the lifecycle manager so
@@ -469,6 +471,7 @@ type LaunchOptions struct {
 	WorkflowStepID       string
 	StartAgent           bool
 	McpMode              string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, or McpModeOffice
+	McpProfile           *mcpprofile.Context
 	Attachments          []v1.MessageAttachment
 	Env                  map[string]string
 	// RouteOverride carries a provider-routing override resolved by the

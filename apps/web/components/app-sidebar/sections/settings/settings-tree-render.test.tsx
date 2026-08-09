@@ -40,6 +40,20 @@ const integrationAvailability = vi.hoisted(() => ({
   sentry: false,
 }));
 
+// Per-integration enable/disable state plus the "hide disabled integrations
+// from left panel navigation" setting, shared by the mocks below so each test
+// can flip them independently (same shape the settings-tree-render suite uses
+// for `integrationAvailability`).
+const integrationEnabled = vi.hoisted(() => ({
+  "azure-devops": true,
+  github: true,
+  gitlab: true,
+  jira: true,
+  linear: true,
+  sentry: true,
+}));
+const hideDisabled = vi.hoisted(() => ({ value: false }));
+
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: typeof state) => unknown) => selector(state),
 }));
@@ -68,6 +82,33 @@ vi.mock("@/hooks/domains/linear/use-linear-availability", () => ({
 }));
 vi.mock("@/hooks/domains/sentry/use-sentry-availability", () => ({
   useSentryAvailable: () => integrationAvailability.sentry,
+}));
+vi.mock("@/hooks/domains/azure-devops/use-azure-devops-enabled", () => ({
+  useAzureDevOpsEnabled: () => ({
+    enabled: integrationEnabled["azure-devops"],
+    setEnabled: vi.fn(),
+  }),
+}));
+vi.mock("@/hooks/domains/github/use-github-enabled", () => ({
+  useGitHubEnabled: () => ({ enabled: integrationEnabled.github, setEnabled: vi.fn() }),
+}));
+vi.mock("@/hooks/domains/gitlab/use-gitlab-enabled", () => ({
+  useGitLabEnabled: () => ({ enabled: integrationEnabled.gitlab, setEnabled: vi.fn() }),
+}));
+vi.mock("@/hooks/domains/jira/use-jira-enabled", () => ({
+  useJiraEnabled: () => ({ enabled: integrationEnabled.jira, setEnabled: vi.fn() }),
+}));
+vi.mock("@/hooks/domains/linear/use-linear-enabled", () => ({
+  useLinearEnabled: () => ({ enabled: integrationEnabled.linear, setEnabled: vi.fn() }),
+}));
+vi.mock("@/hooks/domains/sentry/use-sentry-enabled", () => ({
+  useSentryEnabled: () => ({ enabled: integrationEnabled.sentry, setEnabled: vi.fn() }),
+}));
+vi.mock("@/hooks/domains/integrations/use-hide-disabled-integrations-in-nav", () => ({
+  useHideDisabledIntegrationsInNav: () => ({
+    hideDisabled: hideDisabled.value,
+    setHideDisabled: vi.fn(),
+  }),
 }));
 vi.mock("@kandev/ui/collapsible", async () => {
   const React = await vi.importActual<typeof import("react")>("react");
@@ -242,6 +283,87 @@ describe("SettingsTree integration status", () => {
 
     expect(screen.getByRole("link", { name: "Azure DevOps Enabled" })).toBeTruthy();
     expect(screen.getByTestId("azure-devops-icon")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "GitHub" })).toBeTruthy();
+  });
+});
+
+describe("SettingsTree hide disabled integrations", () => {
+  beforeEach(() => {
+    state.workspaces.activeId = MAIN_WORKSPACE_ID;
+    state.workspaces.items = [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }];
+    integrationAvailability.azureDevOps = true;
+    integrationAvailability.github = false;
+    integrationAvailability.gitlab = false;
+    integrationAvailability.jira = false;
+    integrationAvailability.linear = false;
+    integrationAvailability.sentry = false;
+    integrationEnabled["azure-devops"] = true;
+    integrationEnabled.github = true;
+    integrationEnabled.gitlab = true;
+    integrationEnabled.jira = true;
+    integrationEnabled.linear = true;
+    integrationEnabled.sentry = true;
+    hideDisabled.value = false;
+  });
+
+  afterEach(() => {
+    cleanup();
+    // Restore the file-scoped mock state so later suites in this file never
+    // inherit the previous test's hideDisabled/enabled flags.
+    hideDisabled.value = false;
+    integrationEnabled["azure-devops"] = true;
+    integrationEnabled.github = true;
+    integrationEnabled.gitlab = true;
+    integrationEnabled.jira = true;
+    integrationEnabled.linear = true;
+    integrationEnabled.sentry = true;
+  });
+
+  it("keeps every integration listed when the hide-disabled setting is off (default), even disabled ones", () => {
+    integrationEnabled.github = false;
+
+    render(
+      <WorkspacesGroup pathname="/settings/workspace/ws-1/integrations/azure-devops" expanded />,
+    );
+
+    for (const name of [/(Azure DevOps)/, /GitHub/, /GitLab/, /Jira/, /Linear/, /Sentry/]) {
+      expect(screen.getByRole("link", { name })).toBeTruthy();
+    }
+  });
+
+  it("hides a disabled integration from the workspace integrations list when the setting is on", () => {
+    integrationEnabled.github = false;
+    hideDisabled.value = true;
+
+    render(
+      <WorkspacesGroup pathname="/settings/workspace/ws-1/integrations/azure-devops" expanded />,
+    );
+
+    expect(screen.queryByRole("link", { name: "GitHub" })).toBeNull();
+    expect(screen.getByRole("link", { name: /Azure DevOps/ })).toBeTruthy();
+  });
+
+  it("keeps every integration listed when the setting is on but none are disabled", () => {
+    hideDisabled.value = true;
+
+    render(
+      <WorkspacesGroup pathname="/settings/workspace/ws-1/integrations/azure-devops" expanded />,
+    );
+
+    for (const name of [/(Azure DevOps)/, /GitHub/, /GitLab/, /Jira/, /Linear/, /Sentry/]) {
+      expect(screen.getByRole("link", { name })).toBeTruthy();
+    }
+  });
+
+  it("keeps an enabled-but-unconfigured integration listed when the setting is on", () => {
+    // GitHub is enabled (toggle on) but has no credentials — only *disabled*
+    // integrations are hidden by the setting, so it must stay reachable.
+    hideDisabled.value = true;
+
+    render(
+      <WorkspacesGroup pathname="/settings/workspace/ws-1/integrations/azure-devops" expanded />,
+    );
+
     expect(screen.getByRole("link", { name: "GitHub" })).toBeTruthy();
   });
 });

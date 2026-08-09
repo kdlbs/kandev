@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/system/logbundle"
+	"github.com/kandev/kandev/internal/system/storage/tempartifacts"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
@@ -87,6 +88,7 @@ type Handler struct {
 	// resolveRemote resolves a local repo path's origin remote. Defaults to
 	// service.ResolveGitRemoteProvider; tests can substitute a fake.
 	resolveRemote remoteResolver
+	tempArtifacts *tempartifacts.Registry
 }
 
 type diagnosticBundleService interface {
@@ -116,6 +118,10 @@ func NewHandler(
 
 func (h *Handler) SetLogBundles(service diagnosticBundleService) {
 	h.logBundles = service
+}
+
+func (h *Handler) SetTemporaryArtifactRegistry(registry *tempartifacts.Registry) {
+	h.tempArtifacts = registry
 }
 
 // RegisterRoutes registers the bootstrap and diagnostic-bundle lease endpoints.
@@ -242,7 +248,7 @@ func (h *Handler) httpBootstrap(c *gin.Context) {
 		return
 	}
 
-	dir, err := createBundleDir(identity.UserID)
+	dir, err := h.createBundleDir(ctx, identity.UserID)
 	if err != nil {
 		h.log.Error("improve-kandev: bundle dir creation failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{errorKey: "failed to create bundle dir"})
@@ -263,6 +269,13 @@ func (h *Handler) httpBootstrap(c *gin.Context) {
 		ForkStatus:      access.forkStatus,
 		ForkMessage:     access.forkMessage,
 	})
+}
+
+func (h *Handler) createBundleDir(ctx context.Context, owner string) (string, error) {
+	if h.tempArtifacts == nil {
+		return createBundleDir(owner)
+	}
+	return createBundleDirWithRegistry(ctx, owner, h.tempArtifacts)
 }
 
 // ensureImproveWorkspace returns the dedicated Improve Kandev workspace.
@@ -614,7 +627,7 @@ func (h *Handler) httpLeaseBundle(c *gin.Context) {
 		c.JSON(status, gin.H{errorKey: "failed to lease diagnostic bundle"})
 		return
 	}
-	time.AfterFunc(staleBundleAge, func() { _ = os.Remove(path) })
+	time.AfterFunc(bundleLeaseAge, func() { _ = os.Remove(path) })
 	c.JSON(http.StatusOK, gin.H{
 		"path": path, "status": view.Status, "sources": view.Sources,
 	})

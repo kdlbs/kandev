@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/common/subproc"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/orchestrator/sessionstate"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/sysprompt"
@@ -51,6 +52,44 @@ func (e *Executor) resolveTaskSessionMCPMode(ctx context.Context, taskID string,
 		return McpModeTaskTitlePending, nil
 	}
 	return "", nil
+}
+
+func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID string, session *models.TaskSession, allowTitleTool bool) (mcpprofile.Context, error) {
+	if isConfigModeSession(session) {
+		capabilities := []mcpprofile.Capability{mcpprofile.CapabilityUserQuestion}
+		if session.IsPassthrough {
+			capabilities = nil
+		}
+		return mcpprofile.New(mcpprofile.SurfaceConfiguration, capabilities, nil), nil
+	}
+	task, err := e.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return mcpprofile.Context{}, fmt.Errorf("load task for MCP profile: %w", err)
+	}
+	if task == nil {
+		// A few lifecycle paths can prepare a request from a session snapshot
+		// before the task row is visible (and older executor fakes model that
+		// state). Keep the legacy kanban profile in that narrow case; production
+		// task launches resolve the persisted task above and therefore still get
+		// the exact office/autopilot capability set.
+		return mcpprofile.Legacy("", session != nil && session.IsPassthrough, nil), nil
+	}
+	surface := mcpprofile.SurfaceKanbanTask
+	if task.IsFromOffice {
+		surface = mcpprofile.SurfaceOfficeTask
+	}
+	capabilities := make([]mcpprofile.Capability, 0, 2)
+	if task.Autopilot {
+		if task.ParentID != "" && !session.IsPassthrough {
+			capabilities = append(capabilities, mcpprofile.CapabilityParentQuestion)
+		}
+	} else if !session.IsPassthrough {
+		capabilities = append(capabilities, mcpprofile.CapabilityUserQuestion)
+	}
+	if allowTitleTool && surface == mcpprofile.SurfaceKanbanTask && models.IsAgentTitleOwner(task.Metadata, session.ID) {
+		capabilities = append(capabilities, mcpprofile.CapabilityTaskTitle)
+	}
+	return mcpprofile.New(surface, capabilities, nil), nil
 }
 
 // isContainerizedExecutor returns true for executor types that run agents in
@@ -887,6 +926,13 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 			return nil, err
 		}
 	}
+	if opts.McpProfile == nil {
+		profileContext, profileErr := e.resolveTaskSessionMCPProfile(ctx, task.ID, session, opts.StartAgent)
+		if profileErr != nil {
+			return nil, profileErr
+		}
+		opts.McpProfile = &profileContext
+	}
 
 	running, _ := e.repo.GetExecutorRunningBySessionID(ctx, sessionID)
 	if running != nil && running.ExecutionProfileID != "" &&
@@ -985,6 +1031,11 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	// Apply McpMode from options (takes precedence over session metadata check in buildLaunchAgentRequest)
 	if opts.McpMode != "" {
 		req.McpMode = opts.McpMode
+	}
+	if opts.McpProfile != nil {
+		profileContext := *opts.McpProfile
+		profileContext.Providers = deriveMCPProviders(allRepos)
+		req.McpProfile = &profileContext
 	}
 
 	// Carry the prior ACP session id forward so the agent CLI resumes the

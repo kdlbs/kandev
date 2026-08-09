@@ -176,6 +176,7 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		AssumeMcpHttp:          req.AssumeMcpHttp,
 		McpMode:                req.McpMode,
 		McpProviders:           req.McpProviders,
+		McpProfile:             req.McpProfile,
 		RequiresProcessKill:    req.RequiresProcessKill,
 		StripEnv:               req.StripEnv,
 		BaseBranches:           req.BaseBranches,

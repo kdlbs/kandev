@@ -50,6 +50,7 @@ export type KanbanState = {
     workflowStepId: string;
     title: string;
     description?: string;
+    autopilot?: boolean;
     position: number;
     state?: TaskStatus;
     /** Primary repository id (lowest position). Kept for backwards compat. */

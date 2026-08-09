@@ -10,7 +10,7 @@ import { test, expect } from "../../fixtures/test-base";
  * interactions (open the page, inspect sections, open the create dialog).
  */
 test.describe("Utility Agents settings page", () => {
-  test("action model dropdown keeps wheel scrolling inside the menu", async ({ testPage }) => {
+  test("profile picker keeps wheel scrolling inside the menu", async ({ testPage }) => {
     const models = Array.from({ length: 36 }, (_, index) => ({
       id: `claude-model-${String(index + 1).padStart(2, "0")}`,
       name: `Claude Model ${String(index + 1).padStart(2, "0")}`,
@@ -72,7 +72,7 @@ test.describe("Utility Agents settings page", () => {
       testWindow.__utilitySelectWheelEvents = 0;
       document.addEventListener("wheel", (event) => {
         const target = event.target;
-        if (target instanceof Element && target.closest('[data-slot="select-content"]')) {
+        if (target instanceof Element && target.closest('[data-slot="popover-content"]')) {
           testWindow.__utilitySelectWheelEvents = (testWindow.__utilitySelectWheelEvents ?? 0) + 1;
         }
       });
@@ -81,9 +81,9 @@ test.describe("Utility Agents settings page", () => {
     const actionRow = testPage.getByTestId("utility-action-row-builtin-commit-message");
     const actionSelect = actionRow.getByRole("combobox");
     await actionSelect.click();
-    const selectContent = testPage.locator('[data-slot="select-content"]').first();
-    await expect(selectContent).toBeVisible();
-    await selectContent.evaluate((element) => {
+    const popoverContent = testPage.locator('[data-slot="popover-content"]').first();
+    await expect(popoverContent).toBeVisible();
+    await popoverContent.evaluate((element) => {
       const testWindow = window as Window & { __utilitySelectRawWheelEvents?: number };
       testWindow.__utilitySelectRawWheelEvents = 0;
       element.addEventListener("wheel", () => {
@@ -92,7 +92,7 @@ test.describe("Utility Agents settings page", () => {
       });
     });
 
-    await selectContent.dispatchEvent("wheel", {
+    await popoverContent.dispatchEvent("wheel", {
       bubbles: true,
       cancelable: true,
       deltaY: 900,
@@ -163,7 +163,9 @@ test.describe("Utility Agents settings page", () => {
       testPage.getByRole("heading", { name: "Utility Agents", exact: true }),
     ).toBeVisible({ timeout: 15_000 });
     await expect(
-      testPage.getByText("One-shot AI helpers for commits, PRs, and prompts."),
+      testPage.getByText(
+        "One-shot helpers run Kandev UI actions such as commit and PR text generation or prompt enhancement. They are separate from agents that work inside task sessions.",
+      ),
     ).toBeVisible();
 
     // Default-model section.
@@ -182,6 +184,113 @@ test.describe("Utility Agents settings page", () => {
     expect(pageErrors, `uncaught errors: ${pageErrors.map((e) => e.message).join("; ")}`).toEqual(
       [],
     );
+  });
+
+  test("explains utility actions and filters profile pickers with agent icons", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { agents } = await apiClient.listAgents();
+    const profile = agents
+      .flatMap((agent) => agent.profiles ?? [])
+      .find((candidate) => candidate.id === seedData.agentProfileId);
+    if (!profile) throw new Error(`seed profile ${seedData.agentProfileId} was not found`);
+    const profileLabel = `${profile.agentDisplayName} • ${profile.name}`;
+
+    await testPage.goto("/settings/utility-agents");
+    await expect(
+      testPage.getByRole("heading", { name: "Utility Agents", exact: true }),
+    ).toBeVisible({ timeout: 15_000 });
+
+    await expect(
+      testPage.getByText(
+        "One-shot helpers run Kandev UI actions such as commit and PR text generation or prompt enhancement. They are separate from agents that work inside task sessions.",
+      ),
+    ).toBeVisible();
+    await expect(
+      testPage.getByText(
+        "Override the profile for a specific Kandev UI action. These actions do not configure agents that run inside task sessions.",
+      ),
+    ).toBeVisible();
+
+    const cardOrder = await testPage.evaluate(() => {
+      const ids = [
+        "utility-default-model-card",
+        "config-chat-agent-card",
+        "utility-actions-card",
+        "utility-custom-agents-card",
+      ];
+      const cards = ids.map((id) => document.querySelector(`[data-testid="${id}"]`));
+      return cards.every(
+        (card, index) =>
+          card !== null &&
+          cards
+            .slice(index + 1)
+            .every(
+              (next) =>
+                next !== null &&
+                Boolean(card.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING),
+            ),
+      );
+    });
+    expect(cardOrder).toBe(true);
+
+    const picker = testPage.getByTestId("utility-profile-picker-default");
+    const configPicker = testPage.getByTestId("utility-profile-picker-config-chat");
+    await expect(picker).toHaveClass(/border-border/);
+    await expect(configPicker).toHaveClass(/border-border/);
+    await expect(
+      testPage.getByTestId("config-chat-agent-card").getByText("Agent profile", { exact: true }),
+    ).toBeVisible();
+    const [defaultPickerBox, configPickerBox] = await Promise.all([
+      picker.boundingBox(),
+      configPicker.boundingBox(),
+    ]);
+    expect(defaultPickerBox).not.toBeNull();
+    expect(configPickerBox).not.toBeNull();
+    expect(defaultPickerBox!.width).toBeCloseTo(configPickerBox!.width, 0);
+
+    const cardTypography = await testPage
+      .locator('[data-slot="card-title"] h3')
+      .evaluateAll((elements) =>
+        elements.map((element) => {
+          const style = getComputedStyle(element);
+          return {
+            fontFamily: style.fontFamily,
+            fontSize: style.fontSize,
+            lineHeight: style.lineHeight,
+          };
+        }),
+      );
+    expect(new Set(cardTypography.map((style) => JSON.stringify(style))).size).toBe(1);
+
+    await picker.click();
+    const listbox = testPage.getByRole("listbox");
+    await expect(listbox).toBeVisible();
+    await testPage.getByPlaceholder("Search agent profiles...").fill(profile.agentDisplayName);
+    const option = listbox.getByRole("option", { name: profileLabel, exact: true });
+    await expect(option).toBeVisible();
+    await expect(option.getByTestId("utility-profile-agent-icon")).toBeVisible();
+    await option.click();
+    await expect(picker).toContainText(profileLabel);
+    await testPage.keyboard.press("Escape");
+
+    await configPicker.click();
+    const configDropdown = testPage.getByTestId("utility-profile-picker-config-chat-dropdown");
+    const configListbox = configDropdown.getByRole("listbox");
+    await testPage
+      .getByTestId("utility-profile-picker-config-chat-dropdown")
+      .getByPlaceholder("Search agent profiles...")
+      .fill(profile.name);
+    await expect(
+      configListbox.getByRole("option", { name: profileLabel, exact: true }),
+    ).toBeVisible();
+    await expect(
+      configListbox
+        .getByRole("option", { name: profileLabel, exact: true })
+        .getByTestId("utility-profile-agent-icon"),
+    ).toBeVisible();
   });
 
   test("wraps each settings sub-section in a bounded card, matching Voice Mode", async ({
@@ -290,166 +399,39 @@ test.describe("Utility Agents settings page", () => {
     );
   });
 
-  test("selecting an agent populates the model combobox (ACP probe)", async ({
+  test("selecting a profile configures the default utility agent", async ({
     testPage,
-    backend,
+    apiClient,
+    seedData,
   }) => {
-    // Regression guard for "I select an agent but can't select a model".
-    // The mock-agent binary advertises `mock-fast` (default) and `mock-smart`
-    // in its session/new response, so the boot-time ACP probe populates the
-    // host utility capability cache. In E2E (KANDEV_MOCK_AGENT=only) only
-    // `mock-agent` is registered in the inference-agent registry, so the
-    // Agent dropdown shows exactly one option: Mock. (Non-OK agents are no
-    // longer filtered out — see #1269 — but in this profile no other agent
-    // is registered to begin with.)
+    // Utility agents now use the same persisted agent profiles as task
+    // sessions. Keep this regression guard on the profile selector so a
+    // future change cannot reintroduce the legacy agent/model pair.
     const pageErrors: Error[] = [];
     testPage.on("pageerror", (err) => pageErrors.push(err));
 
-    // The probe runs in a goroutine at boot, so the first page load may
-    // land before the cache is populated. Poll the backend directly until
-    // mock-agent is reported with its models so the UI assertions below
-    // aren't racing the probe.
-    await expect
-      .poll(
-        async () => {
-          const resp = await testPage.request.get(
-            `${backend.baseUrl}/api/v1/utility/inference-agents`,
-          );
-          if (!resp.ok()) return 0;
-          const data = (await resp.json()) as {
-            agents: { id: string; models?: { id: string }[] | null }[];
-          };
-          const mock = data.agents.find((a) => a.id === "mock-agent");
-          return mock?.models?.length ?? 0;
-        },
-        { timeout: 15_000, intervals: [250, 500, 1000] },
-      )
-      .toBeGreaterThanOrEqual(2);
+    const { agents } = await apiClient.listAgents();
+    const profile = agents
+      .flatMap((agent) => agent.profiles ?? [])
+      .find((candidate) => candidate.id === seedData.agentProfileId);
+    if (!profile) throw new Error(`seed profile ${seedData.agentProfileId} was not found`);
+    const profileLabel = `${profile.agentDisplayName} • ${profile.name}`;
 
     await testPage.goto("/settings/utility-agents");
     await expect(
       testPage.getByRole("heading", { name: "Utility Agents", exact: true }),
     ).toBeVisible({ timeout: 15_000 });
 
-    // The default-model section has an Agent select (shadcn) and the shared
-    // model/config selector button used by profile settings.
-    const agentSelect = testPage
-      .locator('div:has(> label:text-is("Agent"))')
-      .first()
-      .getByRole("combobox");
-    const modelSelector = testPage.getByRole("button", {
-      name: "Default utility model settings",
-    });
-
-    // Model selector starts disabled until an agent is picked.
-    await expect(modelSelector).toBeDisabled();
-
-    // Open the Agent dropdown: the only healthy option in E2E is Mock.
-    // This implicitly guards the backend filter — if an auth_required or
-    // still-probing agent had leaked through, it would show up here too.
-    await agentSelect.click();
+    const profileSelect = testPage.getByTestId("utility-default-model-card").getByRole("combobox");
+    await profileSelect.click();
     const agentListbox = testPage.getByRole("listbox");
     await expect(agentListbox).toBeVisible();
-    await expect(agentListbox.getByRole("option")).toHaveCount(1);
-    await expect(agentListbox.getByRole("option", { name: "Mock", exact: true })).toBeVisible();
-    await agentListbox.getByRole("option", { name: "Mock", exact: true }).click();
-    await expect(agentListbox).not.toBeVisible();
-
-    // Model selector is now enabled. Open the popover and verify both
-    // probed models are listed.
-    await expect(modelSelector).toBeEnabled();
-    await modelSelector.click();
-    const suggestions = testPage.getByLabel("Suggestions");
-    await expect(suggestions.getByText("Mock Fast", { exact: true })).toBeVisible();
-    await expect(suggestions.getByText("Mock Smart", { exact: true })).toBeVisible();
-
-    // Short model lists hide the shared selector's filter input.
-    await expect(testPage.getByPlaceholder("Filter models...")).toHaveCount(0);
-
-    // Pick Mock Smart and verify the trigger reflects the selection.
-    await suggestions.getByText("Mock Smart", { exact: true }).click();
-    await expect(modelSelector).toContainText("Mock Smart");
-
-    expect(pageErrors, `uncaught errors: ${pageErrors.map((e) => e.message).join("; ")}`).toEqual(
-      [],
-    );
-  });
-
-  test("non-ok agent renders status note + Refresh re-probes", async ({ testPage }) => {
-    // Regression guard for "claude shown in picker but no models, with no
-    // explanation". The backend now surfaces probe status so the UI can
-    // render an inline note + Refresh button instead of a silently-empty
-    // Model picker. Stub both endpoints to drive the state machine.
-    const pageErrors: Error[] = [];
-    testPage.on("pageerror", (err) => pageErrors.push(err));
-
-    let refreshCount = 0;
-    await testPage.route("**/api/v1/utility/inference-agents", (route) => {
-      if (route.request().method() !== "GET") {
-        return route.fallback();
-      }
-      route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          agents: [
-            {
-              id: "stub-acp",
-              name: "Stub ACP Agent",
-              display_name: "Stub",
-              status: refreshCount === 0 ? "auth_required" : "ok",
-              status_message: refreshCount === 0 ? "please run `stub login`" : "",
-              models:
-                refreshCount === 0
-                  ? []
-                  : [{ id: "stub-fast", name: "Stub Fast", description: "", is_default: true }],
-            },
-          ],
-        }),
-      });
-    });
-
-    await testPage.route("**/api/v1/utility/inference-agents/stub-acp/refresh", (route) => {
-      refreshCount += 1;
-      route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          id: "stub-acp",
-          name: "Stub ACP Agent",
-          display_name: "Stub",
-          status: "ok",
-          models: [{ id: "stub-fast", name: "Stub Fast", description: "", is_default: true }],
-        }),
-      });
-    });
-
-    await testPage.goto("/settings/utility-agents");
     await expect(
-      testPage.getByRole("heading", { name: "Utility Agents", exact: true }),
-    ).toBeVisible({ timeout: 15_000 });
-
-    // Pick Stub from the Agent dropdown so the Default Model row binds
-    // selectedAgent to the auth_required entry.
-    const agentSelect = testPage
-      .locator('div:has(> label:text-is("Agent"))')
-      .first()
-      .getByRole("combobox");
-    await agentSelect.click();
-    await testPage.getByRole("option", { name: "Stub", exact: true }).click();
-
-    // Auth_required status copy renders, Refresh visible.
-    const note = testPage.getByTestId("inference-agent-status-note").first();
-    await expect(note).toBeVisible();
-    await expect(note).toContainText("Sign in to Stub");
-
-    const refresh = testPage.getByTestId("inference-agent-refresh").first();
-    await expect(refresh).toBeVisible();
-    await refresh.click();
-
-    // After Refresh, status note disappears (status:"ok" + 1 model).
-    await expect(testPage.getByTestId("inference-agent-status-note").first()).not.toBeVisible();
-    expect(refreshCount).toBe(1);
+      agentListbox.getByRole("option", { name: profileLabel, exact: true }),
+    ).toBeVisible();
+    await agentListbox.getByRole("option", { name: profileLabel, exact: true }).click();
+    await expect(agentListbox).not.toBeVisible();
+    await expect(profileSelect).toContainText(profileLabel);
 
     expect(pageErrors, `uncaught errors: ${pageErrors.map((e) => e.message).join("; ")}`).toEqual(
       [],

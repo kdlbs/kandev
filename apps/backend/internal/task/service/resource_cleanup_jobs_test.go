@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -312,9 +313,10 @@ func TestUnarchiveCancelsAndJoinsClaimedArchiveCleanup(t *testing.T) {
 	ctx := context.Background()
 	coordinator := activity.NewCoordinator(activity.Options{})
 	taskSvc.SetTaskResourceCleanupActivityGate(coordinatorCleanupActivityGate{coordinator: coordinator})
-	task, err := taskSvc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := taskSvc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-1", Title: "Archived task", ProjectID: "proj-1",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -411,9 +413,10 @@ func TestUnarchiveCancelsAndJoinsClaimedArchiveCleanup(t *testing.T) {
 func TestUnarchiveCancellationPreservesCleanupResourcesAfterBlockedCleaner(t *testing.T) {
 	taskSvc, repo := setupOfficeTest(t)
 	ctx := context.Background()
-	task, err := taskSvc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := taskSvc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-1", Title: "Archived task", ProjectID: "proj-1",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -530,9 +533,10 @@ func TestPerformTaskCleanup_CancellationStopsBeforeWorktreeCleanup(t *testing.T)
 func TestUnarchiveTaskTreeCancelsPendingArchiveCleanup(t *testing.T) {
 	taskSvc, repo := setupOfficeTest(t)
 	ctx := context.Background()
-	task, err := taskSvc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := taskSvc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-1", Title: "Archived task", ProjectID: "proj-1",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -666,9 +670,10 @@ func TestArchiveFailsBeforeMutationWhenCleanupIntentCannotPersist(t *testing.T) 
 func TestCascadeArchivePersistsCleanupBeforeTaskMutation(t *testing.T) {
 	taskSvc, repo := setupOfficeTest(t)
 	ctx := context.Background()
-	task, err := taskSvc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := taskSvc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-1", Title: "Cascade archive", ProjectID: "proj-1",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -713,9 +718,10 @@ func TestWorkspaceDeletePersistsCleanupBeforeTaskCascade(t *testing.T) {
 func TestCascadeDeletePersistsCleanupBeforeTaskMutation(t *testing.T) {
 	taskSvc, repo := setupOfficeTest(t)
 	ctx := context.Background()
-	task, err := taskSvc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := taskSvc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-1", Title: "Cascade delete", ProjectID: "proj-1",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -1118,6 +1124,53 @@ func TestTaskResourceCleanupMissingResourcesSucceed(t *testing.T) {
 				t.Fatalf("cleanup state = %q, want succeeded", got.State)
 			}
 		})
+	}
+}
+
+// TestTaskResourceCleanupJobSnapshotRoundTripsMultiRepoWorktrees proves that
+// the durable cleanup job preserves every task-environment repository through
+// JSON snapshot encoding and processing. A future change to the snapshot
+// shape or inventory loading must not silently drop Repos[] and skip a
+// repository's worktree teardown.
+func TestTaskResourceCleanupJobSnapshotRoundTripsMultiRepoWorktrees(t *testing.T) {
+	taskSvc, repo := setupOfficeTest(t)
+	taskSvc.StopTaskResourceCleanupWorker()
+	destroyer := &stubDestroyer{}
+	taskSvc.SetEnvironmentDestroyer(destroyer)
+
+	env := &models.TaskEnvironment{
+		ID: "env-multi-snapshot",
+		Repos: []*models.TaskEnvironmentRepo{
+			{RepositoryID: "repo-a", WorktreeID: "wt-primary"},
+			{RepositoryID: "repo-b", WorktreeID: "wt-secondary"},
+		},
+	}
+	snapshot, err := json.Marshal(taskResourceCleanupSnapshot{
+		TaskEnvironment:      env,
+		DeleteEnvironmentRow: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := &models.TaskResourceCleanupJob{
+		ID:               "multi-repo-snapshot-roundtrip",
+		OperationID:      "cascade_delete:multi-repo-snapshot:roundtrip",
+		TaskID:           "deleted-multi-repo-task",
+		Trigger:          models.TaskResourceCleanupTriggerCascadeDelete,
+		State:            models.TaskResourceCleanupStatePending,
+		ResourceSnapshot: string(snapshot),
+	}
+	if err := repo.CreateTaskResourceCleanupJob(context.Background(), job); err != nil {
+		t.Fatalf("CreateTaskResourceCleanupJob: %v", err)
+	}
+
+	if err := taskSvc.processTaskResourceCleanupJob(context.Background(), job.ID); err != nil {
+		t.Fatalf("processTaskResourceCleanupJob: %v", err)
+	}
+
+	want := []string{"wt-primary", "wt-secondary"}
+	if got := destroyer.worktreeCalls; !reflect.DeepEqual(got, want) {
+		t.Fatalf("worktree destroy calls = %v, want %v (Repos[] did not survive the snapshot round trip)", got, want)
 	}
 }
 

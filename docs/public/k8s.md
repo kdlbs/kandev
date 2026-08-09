@@ -252,6 +252,12 @@ This release includes a one-time task-worktree ownership schema cutover (see [Op
 - All writers stopped during the cutover — with PostgreSQL, do not run a mixed-version fleet across the upgrade; the cutover takes a database advisory lock and fails closed if it cannot serialize.
 - One successful schema initializer: keep the deployment at a single replica during startup, and check `kubectl rollout status` before scaling out.
 
+If the initializer reports a worktree-ownership conflict, stop the rollout and
+do not delete database rows. The transaction leaves the legacy schema intact.
+Restore service with a compatible pre-cutover image, or deploy the migration
+hotfix and retry against the unchanged PVC. Do not run an older image against a
+database after the cutover has committed.
+
 `kubectl rollout undo` changes the image, not the database schema. After the cutover the final schema is intentionally not readable by older binaries, so a binary downgrade requires restoring the matching pre-upgrade database backup — do not start an older image against the normalized database. Reapplying the checked-in `k8s/deployment.yaml` without the image transformation resets the image to `kandev:latest`, so keep your production customization in your own overlay or deployment repository.
 
 ## Remove while retaining data

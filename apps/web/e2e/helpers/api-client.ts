@@ -171,6 +171,7 @@ type CreateTaskOpts = {
   repository_ids?: string[];
   repositories?: TaskRepositoryInput[];
   plan_mode?: boolean;
+  autopilot?: boolean;
   metadata?: Record<string, unknown>;
   parent_id?: string;
   workspace_mode?: "inherit_parent" | "new_workspace" | "shared_group";
@@ -221,6 +222,7 @@ function buildCreateTaskBody(
   );
   setIf(body, "attachments", options.attachments);
   if (options.plan_mode) body.plan_mode = true;
+  if (options.autopilot) body.autopilot = true;
   setIf(body, "parent_id", options.parent_id);
   setIf(body, "workspace_mode", options.workspace_mode);
   setIf(body, "workspace_group_id", options.workspace_group_id);
@@ -245,6 +247,7 @@ type OptionalAgentTaskOpts = {
   metadata?: Record<string, unknown>;
   parent_id?: string;
   workspace_mode?: "inherit_parent" | "new_workspace" | "shared_group";
+  autopilot?: boolean;
   attachments?: MessageAttachmentInput[];
 };
 
@@ -268,6 +271,7 @@ function buildOptionalAgentTaskFields(opts?: OptionalAgentTaskOpts): Record<stri
   setIf(fields, "metadata", opts.metadata);
   setIf(fields, "parent_id", opts.parent_id);
   setIf(fields, "workspace_mode", opts.workspace_mode);
+  if (opts.autopilot) fields.autopilot = true;
   setIf(fields, "attachments", opts.attachments);
   return fields;
 }
@@ -430,6 +434,8 @@ export class ApiClient {
       repositories?: TaskRepositoryInput[];
       /** When true, task is placed at position 0 regardless of is_start_step. */
       plan_mode?: boolean;
+      /** Start the task with the immutable autopilot MCP/prompt contract. */
+      autopilot?: boolean;
       /** Extra metadata to store on the task. */
       metadata?: Record<string, unknown>;
       /** Parent task ID for subtasks. */
@@ -642,6 +648,8 @@ export class ApiClient {
       parent_id?: string;
       /** Workspace behavior for a child task. */
       workspace_mode?: "inherit_parent" | "new_workspace" | "shared_group";
+      /** Start the task with the immutable autopilot MCP/prompt contract. */
+      autopilot?: boolean;
       attachments?: MessageAttachmentInput[];
     },
   ): Promise<CreateTaskResponse> {
@@ -932,6 +940,7 @@ export class ApiClient {
     keyboard_shortcuts?: Record<string, unknown>;
     default_utility_agent_id?: string;
     default_utility_model?: string;
+    default_utility_agent_profile_id?: string;
     sidebar_views?: unknown[];
     sidebar_active_view_id?: string;
     sidebar_draft?: unknown;
@@ -1895,6 +1904,7 @@ export class ApiClient {
     tasks: Array<{
       id: string;
       title: string;
+      autopilot?: boolean;
       workflow_step_id?: string;
       status_summary?: TaskStatusSummary | null;
     }>;
@@ -1933,6 +1943,7 @@ export class ApiClient {
   async getTask(taskId: string): Promise<{
     id: string;
     title: string;
+    autopilot?: boolean;
     primary_session_id?: string | null;
     state?: string;
     workflow_step_id?: string;

@@ -32,18 +32,20 @@ type Mutations interface {
 }
 
 type Capabilities struct {
-	ManagedGoCachePath       string `json:"managed_go_cache_path"`
-	GoCacheAdoptionAvailable bool   `json:"go_cache_adoption_available"`
-	DockerAvailable          bool   `json:"docker_available"`
-	DockerHost               string `json:"docker_host"`
-	HostGlobalDockerCleanup  bool   `json:"host_global_docker_cleanup_allowed"`
+	ManagedGoCachePath          string `json:"managed_go_cache_path"`
+	GoCacheAdoptionAvailable    bool   `json:"go_cache_adoption_available"`
+	TemporaryArtifactsAvailable bool   `json:"temporary_artifacts_available"`
+	DockerAvailable             bool   `json:"docker_available"`
+	DockerHost                  string `json:"docker_host"`
+	HostGlobalDockerCleanup     bool   `json:"host_global_docker_cleanup_allowed"`
 }
 
 type Summary struct {
-	Workspaces any `json:"workspaces"`
-	GoCache    any `json:"go_cache"`
-	Quarantine any `json:"quarantine"`
-	Docker     any `json:"docker"`
+	Workspaces         any `json:"workspaces"`
+	GoCache            any `json:"go_cache"`
+	Quarantine         any `json:"quarantine"`
+	TemporaryArtifacts any `json:"temporary_artifacts"`
+	Docker             any `json:"docker"`
 }
 
 type DiskCapacity struct {

@@ -110,6 +110,7 @@ describe("system storage slice", () => {
       capabilities: {
         managed_go_cache_path: "/data/cache/go-build",
         go_cache_adoption_available: true,
+        temporary_artifacts_available: false,
         docker_available: false,
         docker_host: "",
         host_global_docker_cleanup_allowed: false,
@@ -118,6 +119,10 @@ describe("system storage slice", () => {
         workspaces: { active_bytes: 1, candidate_bytes: 2 },
         go_cache: { path: "/data/cache/go-build", size_bytes: 3, owned: true, enabled: false },
         quarantine: { count: 0, size_bytes: 0 },
+        temporary_artifacts: {
+          available: false,
+          warning: "temporary artifact registry unavailable",
+        },
         docker: {
           available: false,
           build_cache_bytes: 0,

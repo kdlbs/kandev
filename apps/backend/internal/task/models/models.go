@@ -128,6 +128,16 @@ const (
 	// MetaKeyAutomationTargetTaskID binds a merged-PR automation run to the
 	// task selected by its event. The archive handler enforces this value.
 	MetaKeyAutomationTargetTaskID = "automation_target_task_id"
+	// Parent-question message metadata is durable state for an autopilot child
+	// waiting for a decision from its direct parent. The question ID is also
+	// the child clarification message ID, so a parent reply can be idempotent
+	// without a second persistence table.
+	MetaKeyParentQuestionID       = "parent_question_id"
+	MetaKeyParentQuestion         = "parent_question"
+	MetaKeyParentQuestionParentID = "parent_task_id"
+	MetaKeyParentQuestionChildID  = "child_task_id"
+	MetaKeyParentQuestionStatus   = "parent_question_status"
+	MetaKeyParentQuestionResponse = "parent_question_response"
 )
 
 // IsAgentTitlePending reports whether task metadata contains the durable
@@ -579,6 +589,7 @@ type Task struct {
 	WorkspaceFolders []*TaskWorkspaceFolder `json:"workspace_folders,omitempty"`
 	IsEphemeral      bool                   `json:"is_ephemeral"`        // Ephemeral tasks are not shown in kanban, used for quick chat
 	ParentID         string                 `json:"parent_id,omitempty"` // FK to parent task for subtasks
+	Autopilot        bool                   `json:"autopilot"`           // Fixed at task creation
 	ArchivedAt       *time.Time             `json:"archived_at,omitempty"`
 	// ArchivedByCascadeID is set when the task was archived as part of an
 	// office task-handoffs cascade (phase 6). UnarchiveTaskByCascade uses
@@ -605,6 +616,16 @@ type Task struct {
 	ProjectID              string `json:"project_id,omitempty"` // FK to office project
 	Labels                 string `json:"labels,omitempty"`     // JSON array string, default "[]"
 	Identifier             string `json:"identifier,omitempty"` // e.g. "KAN-42"
+
+	// ExternalID is a caller-supplied identity used for create-idempotency
+	// (docs/specs/tasks/external-id-idempotency/spec.md). Empty when the task
+	// holds none. Unique per (workspace_id, external_id) when non-empty.
+	ExternalID string `json:"external_id,omitempty"`
+	// ExternalIDSettledAt is non-nil once the create that claimed ExternalID
+	// finished its required synchronous work. Nil means unsettled — the
+	// claiming create may still be in progress. Both fields are cleared
+	// together on release.
+	ExternalIDSettledAt *time.Time `json:"external_id_settled_at,omitempty"`
 
 	// IsFromOffice is a read-time projection set by the task repo's SELECT
 	// (see isFromOfficeProjection in repository/sqlite/task.go). True when
@@ -1854,6 +1875,7 @@ func (t *Task) ToAPI() *v1.Task {
 		Interrupted:  t.Metadata[MetaKeyInterruptedAt] != nil,
 		IsEphemeral:  t.IsEphemeral,
 		ParentID:     t.ParentID,
+		Autopilot:    t.Autopilot,
 	}
 	if t.Identifier != "" {
 		result.Identifier = t.Identifier

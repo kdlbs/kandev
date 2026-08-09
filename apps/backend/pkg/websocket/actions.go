@@ -383,6 +383,7 @@ const (
 	ActionMCPUpdateRepositoryBaseBranch = "mcp.update_repository_base_branch"
 	ActionMCPStepComplete               = "mcp.step_complete" // ADR 0015: agent-emitted explicit completion signal
 	ActionMCPAskUserQuestion            = "mcp.ask_user_question"
+	ActionMCPAskParentQuestion          = "mcp.ask_parent_question"
 	ActionMCPCreateTaskPlan             = "mcp.create_task_plan"
 	ActionMCPGetTaskPlan                = "mcp.get_task_plan"
 	ActionMCPUpdateTaskPlan             = "mcp.update_task_plan"

@@ -26,6 +26,7 @@ import (
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/planws"
 	taskrepository "github.com/kandev/kandev/internal/task/repository"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
@@ -354,6 +355,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPGetTaskConversation, h.handleGetTaskConversation)
 	d.RegisterFunc(ws.ActionMCPListTaskSessions, h.handleListTaskSessions)
 	d.RegisterFunc(ws.ActionMCPAskUserQuestion, h.handleAskUserQuestion)
+	d.RegisterFunc(ws.ActionMCPAskParentQuestion, h.handleAskParentQuestion)
 	d.RegisterFunc(ws.ActionMCPCreateTaskPlan, h.handleCreateTaskPlan)
 	d.RegisterFunc(ws.ActionMCPGetTaskPlan, h.handleGetTaskPlan)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPlan, h.handleUpdateTaskPlan)
@@ -568,6 +570,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		WorkspaceMode          string               `json:"workspace_mode"`
 		Title                  string               `json:"title"`
 		Description            string               `json:"description"`
+		Autopilot              bool                 `json:"autopilot"`
 		AgentProfileID         string               `json:"agent_profile_id"`
 		ExecutorProfileID      string               `json:"executor_profile_id"`
 		StartAgent             *bool                `json:"start_agent"`               // nil means default to true for backward compatibility
@@ -575,6 +578,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		BaseBranch             string               `json:"base_branch"`               // top-level fallback applied to every resolved repo only when no per-repo entries are supplied; explicit per-repo BaseBranch is authoritative when Repositories is set
 		BlockedBy              []string             `json:"blocked_by"`                // task IDs that must complete before this task
 		AssigneeAgentProfileID string               `json:"assignee_agent_profile_id"` // agent instance to assign the task to
+		ExternalID             string               `json:"external_id"`               // caller-supplied create-idempotency key
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -680,7 +684,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		}
 		return ws.NewError(msg.ID, msg.Action, code, err.Error(), nil)
 	}
-	metadata = mergeMCPMetadata(metadata, workspacePolicy.MetadataBlock())
+	metadata = workspacePolicy.MergeMetadataBlock(metadata)
 	var deferredLaunch map[string]interface{}
 	if startAgent {
 		deferredLaunch = map[string]interface{}{
@@ -690,18 +694,20 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		}
 	}
 
-	task, err := h.taskSvc.CreateTask(ctx, &service.CreateTaskRequest{
+	result, err := h.taskSvc.CreateTask(ctx, &service.CreateTaskRequest{
 		ParentID:               req.ParentID,
 		WorkspaceID:            req.WorkspaceID,
 		WorkflowID:             req.WorkflowID,
 		WorkflowStepID:         req.WorkflowStepID,
 		Title:                  req.Title,
 		Description:            req.Description,
+		Autopilot:              req.Autopilot,
 		Repositories:           repos,
 		BlockedBy:              req.BlockedBy,
 		AssigneeAgentProfileID: req.AssigneeAgentProfileID,
 		Metadata:               metadata,
 		DeferredLaunch:         deferredLaunch,
+		ExternalID:             req.ExternalID,
 	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))
@@ -712,6 +718,24 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		}
 		return ws.NewError(msg.ID, msg.Action, code, message, nil)
 	}
+
+	// The MCP skip is a data-loss guard, not just an optimization: the steps
+	// below resolve remote contributions from the REQUEST (resolveMCPRemote
+	// Contributions above) but index them against the RETURNED task's
+	// repositories, and every rollback path on a mismatch calls DeleteTask.
+	// A retry landing on a Found outcome — the existing task, whose
+	// repository list need not match this retry's payload — would then
+	// misindex, roll back, and delete the task the caller was trying to
+	// recover. Both Found outcomes have no side effects, so skip everything
+	// below and return the existing task as-is.
+	if result.Outcome != service.CreateTaskOutcomeCreated {
+		return ws.NewResponse(msg.ID, msg.Action, mcpCreateTaskResult{
+			TaskDTO:          dto.FromTask(result.Task),
+			Deduplicated:     true,
+			CreationComplete: result.Outcome == service.CreateTaskOutcomeFoundSettled,
+		})
+	}
+	task := result.Task
 
 	for index, resolution := range contributions {
 		if resolution == nil {
@@ -747,12 +771,48 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		}
 	}
 
+	// Settlement (create-sequence step 7): after policy attach, before
+	// auto-start dispatch.
+	settled, survivor, settleErr := h.taskSvc.SettleExternalID(ctx, task.ID, task.ExternalID)
+	if settleErr != nil {
+		if errors.Is(settleErr, taskrepo.ErrTaskNotFound) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task not found", nil)
+		}
+		h.logger.Error("failed to settle external_id", zap.String("task_id", task.ID), zap.Error(settleErr))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to create task", nil)
+	}
+	if !settled {
+		// CreatedIdentityLost: another actor released the identity while
+		// this create was running. The task survives holding no
+		// external_id; per the spec, no asynchronous work (auto-start) is
+		// dispatched for it.
+		return ws.NewResponse(msg.ID, msg.Action, mcpCreateTaskResult{
+			TaskDTO:          dto.FromTask(survivor),
+			Deduplicated:     false,
+			CreationComplete: true,
+		})
+	}
+
 	// Auto-start agent session asynchronously only if requested and admitted.
 	if startAgent && task.QueuedForStepID == "" && h.sessionLauncher != nil {
 		h.launchAutoStartTask(ctx, task, launchConfig)
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
+	return ws.NewResponse(msg.ID, msg.Action, mcpCreateTaskResult{
+		TaskDTO:          dto.FromTask(task),
+		Deduplicated:     false,
+		CreationComplete: true,
+	})
+}
+
+// mcpCreateTaskResult is create_task_kandev's tool-result shape: the task
+// DTO plus deduplicated/creation_complete, per
+// docs/specs/tasks/external-id-idempotency/spec.md, "MCP" — required
+// booleans, not presence-only markers, mirroring the REST create response.
+type mcpCreateTaskResult struct {
+	dto.TaskDTO
+	Deduplicated     bool `json:"deduplicated"`
+	CreationComplete bool `json:"creation_complete"`
 }
 
 func classifyCreateTaskError(err error) string {
@@ -763,6 +823,7 @@ func classifyCreateTaskError(err error) string {
 		return ws.ErrorCodeValidation
 	case errors.Is(err, service.ErrSubtaskDepthExceeded),
 		errors.Is(err, service.ErrInvalidTaskWorkflow),
+		errors.Is(err, service.ErrExternalIDInvalid),
 		isMCPWorkflowNotFoundError(err):
 		return ws.ErrorCodeValidation
 	default:
@@ -933,19 +994,6 @@ func (h *Handlers) resolveMCPWorkspacePolicy(parentID, workspaceMode string) (se
 	}
 
 	return service.WorkspacePolicy{Mode: mode}, nil
-}
-
-func mergeMCPMetadata(base, extra map[string]interface{}) map[string]interface{} {
-	if len(extra) == 0 {
-		return base
-	}
-	if base == nil {
-		base = map[string]interface{}{}
-	}
-	for k, v := range extra {
-		base[k] = v
-	}
-	return base
 }
 
 func applyMCPTaskScopeDefaults(parentID, workspaceID, workflowID, workflowStepID string, explicitWorkspaceID, explicitWorkflowID bool, resolved taskRepoResult) (string, string, string) {
@@ -1992,12 +2040,13 @@ func (h *Handlers) publishStepCompletionEvent(
 // unattributed message.
 func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		TaskID          string `json:"task_id"`
-		SessionID       string `json:"session_id"`
-		Prompt          string `json:"prompt"`
-		SenderTaskID    string `json:"sender_task_id"`
-		SenderSessionID string `json:"sender_session_id"`
-		DeliveryMode    string `json:"delivery_mode"`
+		TaskID            string `json:"task_id"`
+		SessionID         string `json:"session_id"`
+		Prompt            string `json:"prompt"`
+		SenderTaskID      string `json:"sender_task_id"`
+		SenderSessionID   string `json:"sender_session_id"`
+		DeliveryMode      string `json:"delivery_mode"`
+		ReplyToQuestionID string `json:"reply_to_question_id"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -2053,6 +2102,22 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 			"failed to look up target task: "+err.Error(), nil)
 	}
 
+	parentReply, err := h.validateParentQuestionReply(ctx, req.ReplyToQuestionID, req.TaskID, senderTask, targetTask)
+	if err != nil {
+		var parentQuestionErr *parentQuestionError
+		if errors.As(err, &parentQuestionErr) {
+			return ws.NewError(msg.ID, msg.Action, parentQuestionErr.code, parentQuestionErr.message, nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
+	if parentReply != nil && parentReply.alreadyAnswered {
+		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+			"task_id":              req.TaskID,
+			"reply_to_question_id": req.ReplyToQuestionID,
+			"status":               "already_answered",
+		})
+	}
+
 	session, errResp := h.resolveMessageTargetSession(ctx, msg, req.TaskID, req.SessionID)
 	if errResp != nil {
 		return errResp, nil
@@ -2061,6 +2126,10 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 	prompt := h.appendPromptReferenceExpansionContext(ctx, req.Prompt)
 	senderSessionName := h.lookupSenderSessionName(ctx, req.SenderTaskID, req.SenderSessionID)
 	wrappedPrompt, senderMeta := wrapAgentMessage(prompt, senderTask, req.SenderSessionID, senderSessionName, req.SenderTaskID == req.TaskID)
+	if req.ReplyToQuestionID != "" {
+		senderMeta[models.MetaKeyParentQuestionID] = req.ReplyToQuestionID
+		senderMeta[models.MetaKeyParentQuestionResponse] = req.Prompt
+	}
 
 	// Interrupt intent is explicit, never inferred: a parent/child
 	// relationship alone no longer drives interruption (see
@@ -2081,9 +2150,22 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden,
 			`delivery_mode="interrupt" is only allowed when the sender is the target task's direct parent`, nil)
 	}
+	if parentReply != nil {
+		// Claim the durable question before dispatch. A failed status update after
+		// delivery would make a retry send the same answer a second time.
+		if err := h.markParentQuestionAnswered(ctx, parentReply.message, req.Prompt); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "parent question could not be claimed: "+err.Error(), nil)
+		}
+	}
 
 	result, err := h.dispatchTaskMessage(ctx, req.TaskID, session, wrappedPrompt, senderMeta, wantsInterrupt, req.SessionID != "")
 	if err != nil {
+		if parentReply != nil {
+			if restoreErr := h.restoreParentQuestionPending(ctx, parentReply.message); restoreErr != nil {
+				h.logger.Error("failed to restore parent question after answer dispatch failure",
+					zap.String("question_id", parentReply.message.ID), zap.Error(restoreErr))
+			}
+		}
 		var qfErr *queueFullDispatchError
 		if errors.As(err, &qfErr) {
 			return ws.NewError(msg.ID, msg.Action, messagequeue.QueueFullErrorCode,
@@ -2092,7 +2174,6 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
-
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"task_id":    req.TaskID,
 		"session_id": result.sessionID,
@@ -3358,12 +3439,27 @@ func (h *Handlers) setSessionWaitingForInput(ctx context.Context, taskID, sessio
 		return
 	}
 
-	// Update task state to REVIEW
+	// Update task state to REVIEW. Use the task service when available so the
+	// state change publishes the pending-action projection after the
+	// clarification message is persisted. The repository fallback keeps this
+	// helper usable in small handler tests and alternate integrations.
 	if taskID != "" {
-		if err := h.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview); err != nil {
+		var stateErr error
+		if h.taskSvc != nil {
+			_, stateErr = h.taskSvc.UpdateTaskStateIfSessionState(
+				ctx,
+				taskID,
+				sessionID,
+				models.TaskSessionStateWaitingForInput,
+				v1.TaskStateReview,
+			)
+		} else if h.taskRepo != nil {
+			stateErr = h.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview)
+		}
+		if stateErr != nil {
 			h.logger.Warn("failed to update task state to REVIEW",
 				zap.String("task_id", taskID),
-				zap.Error(err))
+				zap.Error(stateErr))
 		}
 	}
 
@@ -3471,10 +3567,7 @@ func (h *Handlers) handleCreateTaskPlan(ctx context.Context, msg *ws.Message) (*
 		CreatedBy: createdBy,
 	})
 	if err != nil {
-		if errors.Is(err, service.ErrTaskIDRequired) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
-		}
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create task plan: "+err.Error(), nil)
+		return planws.CreateError(msg, err)
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, dto.TaskPlanFromModel(plan))
@@ -3482,19 +3575,14 @@ func (h *Handlers) handleCreateTaskPlan(ctx context.Context, msg *ws.Message) (*
 
 // handleGetTaskPlan retrieves a task plan.
 func (h *Handlers) handleGetTaskPlan(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req struct {
-		TaskID string `json:"task_id"`
-	}
+	var req planws.TaskIDRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
 
 	plan, err := h.planService.GetPlan(ctx, req.TaskID)
 	if err != nil {
-		if errors.Is(err, service.ErrTaskIDRequired) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
-		}
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task plan", nil)
+		return planws.GetError(msg, err)
 	}
 	if plan == nil {
 		// Return empty object if no plan exists
@@ -3531,13 +3619,7 @@ func (h *Handlers) handleUpdateTaskPlan(ctx context.Context, msg *ws.Message) (*
 		CreatedBy: createdBy,
 	})
 	if err != nil {
-		if errors.Is(err, service.ErrTaskIDRequired) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
-		}
-		if errors.Is(err, service.ErrTaskPlanNotFound) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Task plan not found", nil)
-		}
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update task plan: "+err.Error(), nil)
+		return planws.UpdateError(msg, err)
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, dto.TaskPlanFromModel(plan))
@@ -3545,22 +3627,14 @@ func (h *Handlers) handleUpdateTaskPlan(ctx context.Context, msg *ws.Message) (*
 
 // handleDeleteTaskPlan deletes a task plan.
 func (h *Handlers) handleDeleteTaskPlan(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req struct {
-		TaskID string `json:"task_id"`
-	}
+	var req planws.TaskIDRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
 
 	err := h.planService.DeletePlan(ctx, req.TaskID)
 	if err != nil {
-		if errors.Is(err, service.ErrTaskIDRequired) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
-		}
-		if errors.Is(err, service.ErrTaskPlanNotFound) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Task plan not found", nil)
-		}
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete task plan: "+err.Error(), nil)
+		return planws.DeleteError(msg, err)
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"success": true})

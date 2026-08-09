@@ -43,6 +43,9 @@ func (r *Repository) migrateSessionsAddCostColumns() {
 
 // runMigrations applies idempotent ALTER TABLE migrations for schema evolution.
 func (r *Repository) runMigrations() error {
+	if err := r.migrateTaskPriorityToTextPostgres(); err != nil {
+		return err
+	}
 	if err := r.ensureTaskWorkspaceFoldersSchema(); err != nil {
 		return err
 	}
@@ -70,6 +73,7 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("workspaces.default_config_agent_profile_id", `ALTER TABLE workspaces ADD COLUMN default_config_agent_profile_id TEXT DEFAULT ''`)
 	r.migrate.Apply("task_sessions.task_environment_id", `ALTER TABLE task_sessions ADD COLUMN task_environment_id TEXT DEFAULT ''`)
 	r.migrate.Apply("tasks.parent_id", `ALTER TABLE tasks ADD COLUMN parent_id TEXT DEFAULT ''`)
+	r.migrate.Apply("tasks.autopilot_enabled", `ALTER TABLE tasks ADD COLUMN autopilot_enabled INTEGER NOT NULL DEFAULT 0`)
 	// Remove FK constraint on workflow_id to allow ephemeral tasks without workflows
 	if err := r.migrateTasksRemoveWorkflowFK(); err != nil {
 		return err
@@ -164,6 +168,21 @@ func (r *Repository) runMigrations() error {
 	// Office task-handoffs phase 6 - tag tasks archived as part of a cascade so
 	// unarchive can restore exactly the descendants that cascade archived.
 	r.migrate.Apply("tasks.archived_by_cascade_id", `ALTER TABLE tasks ADD COLUMN archived_by_cascade_id TEXT DEFAULT ''`)
+
+	// Task create-idempotency (docs/specs/tasks/external-id-idempotency).
+	// external_id needs an explicit deterministic collation: SQLite TEXT
+	// columns already compare BINARY by default, but an unqualified Postgres
+	// column silently inherits the database's default collation, which may be
+	// case-insensitive or nondeterministic. The partial unique index syntax
+	// (CREATE UNIQUE INDEX ... WHERE ...) is supported identically by both
+	// dialects, so it needs no branch.
+	if dialect.IsPostgres(r.db.DriverName()) {
+		r.migrate.Apply("tasks.external_id", `ALTER TABLE tasks ADD COLUMN external_id TEXT COLLATE "C"`)
+	} else {
+		r.migrate.Apply("tasks.external_id", `ALTER TABLE tasks ADD COLUMN external_id TEXT COLLATE BINARY`)
+	}
+	r.migrate.Apply("tasks.external_id_settled_at", `ALTER TABLE tasks ADD COLUMN external_id_settled_at TIMESTAMP`)
+	r.migrate.Apply("uniq_tasks_external_id", `CREATE UNIQUE INDEX IF NOT EXISTS uniq_tasks_external_id ON tasks(workspace_id, external_id) WHERE external_id IS NOT NULL`)
 
 	// Office workspace extensions
 	r.migrate.Apply("workspaces.task_prefix", `ALTER TABLE workspaces ADD COLUMN task_prefix TEXT DEFAULT 'KAN'`)
@@ -499,13 +518,14 @@ func (r *Repository) migrateTasksRemoveWorkflowFK() error {
 			metadata TEXT DEFAULT '{}',
 			is_ephemeral INTEGER NOT NULL DEFAULT 0,
 			parent_id TEXT DEFAULT '',
+			autopilot_enabled INTEGER NOT NULL DEFAULT 0,
 			archived_at TIMESTAMP,
 			created_at TIMESTAMP NOT NULL,
 			updated_at TIMESTAMP NOT NULL
 		)`,
 		`INSERT INTO tasks_new SELECT
 			id, workspace_id, workflow_id, workflow_step_id, title, description,
-			state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, archived_at, created_at, updated_at
+			state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled, archived_at, created_at, updated_at
 		FROM tasks`,
 		`DROP TABLE tasks`,
 		`ALTER TABLE tasks_new RENAME TO tasks`,

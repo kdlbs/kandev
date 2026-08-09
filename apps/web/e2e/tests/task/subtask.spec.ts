@@ -97,6 +97,21 @@ test.describe("Subtask basics", () => {
     await session.openCreateSubtaskForSidebarTask("Subtask Parent");
 
     // The compact NewSubtaskDialog should open with pre-filled title containing numeric suffix
+    const dialog = testPage.getByTestId("new-subtask-dialog");
+    await expect(dialog.getByTestId("autopilot-toggle-row")).toBeVisible();
+    await expect(testPage.locator('[data-slot="tooltip-content"][data-state="open"]')).toHaveCount(
+      0,
+    );
+    await expect(dialog.getByTestId("autopilot-info")).not.toBeFocused();
+    await expect(dialog.getByRole("switch", { name: "Autopilot" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    await dialog.getByTestId("autopilot-info").hover();
+    await expect(testPage.getByRole("tooltip")).toContainText(
+      "The agent works independently and asks the parent task only when a critical decision blocks progress.",
+    );
+
     const titleInput = testPage.getByTestId("subtask-title-input");
     await expect(titleInput).toBeVisible({ timeout: 5_000 });
     await expect(titleInput).toHaveValue(/Subtask Parent \/ Subtask \d+/);
@@ -118,6 +133,57 @@ test.describe("Subtask basics", () => {
     await kanban.goto();
     const subtaskCard = kanban.taskCardByTitle(/Subtask Parent \/ Subtask \d+/);
     await expect(subtaskCard).toBeVisible({ timeout: 10_000 });
+  });
+
+  test("does not focus autopilot help when subtask titles are generated", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const initialSettings = await apiClient.getUserSettings();
+    try {
+      await apiClient.saveUserSettings({ agent_generated_task_titles: true });
+
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        "Generated-title subtask parent",
+        seedData.agentProfileId,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          repository_ids: [seedData.repositoryId],
+        },
+      );
+
+      await testPage.goto(`/t/${task.id}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await session.waitForChatIdle({ timeout: 30_000 });
+      await session.openCreateSubtaskForSidebarTask("Generated-title subtask parent");
+
+      const dialog = testPage.getByTestId("new-subtask-dialog");
+      await expect(dialog.getByTestId("subtask-title-input")).toHaveCount(0);
+      await expect(dialog.getByTestId("subtask-context-autopilot-row")).toBeVisible();
+      const contextTrigger = dialog
+        .getByTestId("subtask-context-autopilot-row")
+        .locator('[data-slot="select-trigger"]');
+      const contextHeight = await contextTrigger.evaluate((element) =>
+        Math.round(element.getBoundingClientRect().height),
+      );
+      const autopilotHeight = await dialog
+        .getByTestId("autopilot-toggle-row")
+        .evaluate((element) => Math.round(element.getBoundingClientRect().height));
+      expect(autopilotHeight).toBe(contextHeight);
+      await expect(dialog.getByTestId("autopilot-info")).not.toBeFocused();
+      await expect(dialog.getByTestId("subtask-prompt-input")).toBeFocused();
+      await expect(
+        testPage.locator('[data-slot="tooltip-content"][data-state="open"]'),
+      ).toHaveCount(0);
+    } finally {
+      await apiClient.saveUserSettings({
+        agent_generated_task_titles: Boolean(initialSettings.settings.agent_generated_task_titles),
+      });
+    }
   });
 });
 

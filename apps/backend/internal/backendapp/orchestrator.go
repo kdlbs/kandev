@@ -38,6 +38,8 @@ import (
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	userservice "github.com/kandev/kandev/internal/user/service"
+	utilitymodels "github.com/kandev/kandev/internal/utility/models"
+	utilityservice "github.com/kandev/kandev/internal/utility/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 )
@@ -428,7 +430,7 @@ func (a *reviewTaskCreatorAdapter) CreateReviewTask(ctx context.Context, req *or
 			PRNumber:       r.PRNumber,
 		})
 	}
-	return a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	result, err := a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID:    req.WorkspaceID,
 		WorkflowID:     req.WorkflowID,
 		WorkflowStepID: req.WorkflowStepID,
@@ -439,6 +441,10 @@ func (a *reviewTaskCreatorAdapter) CreateReviewTask(ctx context.Context, req *or
 		IsEphemeral:    req.IsEphemeral,
 		Origin:         req.Origin,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return result.Task, nil
 }
 
 // issueTaskCreatorAdapter adapts the task service to the orchestrator's IssueTaskCreator interface.
@@ -455,7 +461,7 @@ func (a *issueTaskCreatorAdapter) CreateIssueTask(ctx context.Context, req *orch
 			BaseBranch:   r.BaseBranch,
 		})
 	}
-	return a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	result, err := a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID:    req.WorkspaceID,
 		WorkflowID:     req.WorkflowID,
 		WorkflowStepID: req.WorkflowStepID,
@@ -464,6 +470,10 @@ func (a *issueTaskCreatorAdapter) CreateIssueTask(ctx context.Context, req *orch
 		Metadata:       req.Metadata,
 		Repositories:   repos,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return result.Task, nil
 }
 
 // jiraServiceAdapter exposes the JIRA service's issue-watch dedup methods to
@@ -567,6 +577,55 @@ func (a *profileLookupAdapter) LookupProfile(ctx context.Context, profileID stri
 // types into it.
 type automationDepsAdapter struct {
 	store *automationpkg.Store
+}
+
+type utilityDepsAdapter struct {
+	svc     *utilityservice.Service
+	userSvc *userservice.Service
+}
+
+func (a *utilityDepsAdapter) ListUtilityAgentsByAgentProfile(ctx context.Context, profileID string) ([]agentsettingscontroller.UtilityAgentReference, error) {
+	if a == nil || a.svc == nil {
+		return nil, nil
+	}
+	agents, err := a.svc.ListAgents(ctx)
+	if err != nil {
+		return nil, err
+	}
+	refs := make([]agentsettingscontroller.UtilityAgentReference, 0)
+	defaultProfileID := ""
+	if a.userSvc != nil {
+		defaultProfileID, err = a.userSvc.GetDefaultUtilityAgentProfileID(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	for _, agent := range agents {
+		if agent != nil && (agent.AgentProfileID == profileID ||
+			(agent.ProfileBindingState == utilitymodels.ProfileBindingInherit && defaultProfileID == profileID)) {
+			refs = append(refs, agentsettingscontroller.UtilityAgentReference{ID: agent.ID, Name: agent.Name})
+		}
+	}
+	return refs, nil
+}
+
+func (a *utilityDepsAdapter) ClearUtilityAgentProfileBindings(ctx context.Context, profileID string) error {
+	if a == nil || a.svc == nil {
+		return nil
+	}
+	if err := a.svc.ClearAgentProfileBindings(ctx, profileID); err != nil {
+		return err
+	}
+	if a.userSvc != nil {
+		defaultProfileID, err := a.userSvc.GetDefaultUtilityAgentProfileID(ctx)
+		if err != nil {
+			return err
+		}
+		if defaultProfileID == profileID {
+			return a.svc.ClearInheritedProfileBindings(ctx)
+		}
+	}
+	return nil
 }
 
 func (a *automationDepsAdapter) ListEnabledAutomationsByAgentProfile(
