@@ -7,10 +7,17 @@ import (
 )
 
 // handleWSBackgroundProbe handles the agent.background.probe WS action.
-// It reports whether background processes spawned during the given ACP session
-// are still alive. This stub returns "unknown" for all calls; the real
-// process-tree walk is implemented in a later task.
-func (s *Server) handleWSBackgroundProbe(_ context.Context, msg *ws.Message) *ws.Message {
-	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]any{"result": "unknown"})
+// It walks the agent's process tree and reports whether any descendant process
+// born at or after the most recent turn start is still alive.
+func (s *Server) handleWSBackgroundProbe(ctx context.Context, msg *ws.Message) *ws.Message {
+	var req struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := msg.ParsePayload(&req); err != nil {
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]any{"result": "unknown"})
+		return resp
+	}
+	result := s.procMgr.ProbeProcessTree(ctx, req.SessionID)
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]any{"result": result})
 	return resp
 }

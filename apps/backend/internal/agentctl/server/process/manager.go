@@ -214,6 +214,11 @@ type Manager struct {
 	lifetimeCtx      context.Context
 	lifetimeCancel   context.CancelFunc
 	mainReapPending  atomic.Bool
+	// lastPromptAt stores the unix-nanosecond timestamp of the most recent
+	// agent.prompt arrival. Zero means no prompt has been received yet.
+	// Written by RecordTurnStart (called from the WS prompt handler);
+	// read by ProbeProcessTree. Uses atomic to avoid holding mu.
+	lastPromptAt atomic.Int64
 	// stopChClosed guards close(stopCh), which is the only part of teardown
 	// that is not naturally idempotent. It is reset wherever stopCh itself is
 	// created so the flag always describes the current channel — a Start that
@@ -1759,6 +1764,57 @@ func (m *Manager) agentPID() int {
 		return 0
 	}
 	return m.cmd.Process.Pid
+}
+
+// RecordTurnStart stamps the time of the most recent agent.prompt arrival.
+// Called from the WebSocket prompt handler on the serialised WS goroutine.
+func (m *Manager) RecordTurnStart(t time.Time) {
+	m.lastPromptAt.Store(t.UnixNano())
+}
+
+// LastTurnStart returns the timestamp of the most recent agent.prompt arrival.
+// Returns the zero time when no prompt has been received yet.
+func (m *Manager) LastTurnStart() time.Time {
+	ns := m.lastPromptAt.Load()
+	if ns == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, ns)
+}
+
+// AgentPID returns the PID of the agent subprocess for the given ACP session ID.
+// Returns ok=false when the session ID does not match the current session or
+// when no subprocess is running.
+func (m *Manager) AgentPID(acpSessionID string) (int, bool) {
+	m.mu.RLock()
+	pid := m.agentPID()
+	a := m.adapter
+	m.mu.RUnlock()
+	if pid == 0 || a == nil {
+		return 0, false
+	}
+	if a.GetSessionID() != acpSessionID {
+		return 0, false
+	}
+	return pid, true
+}
+
+// ProbeProcessTree walks the agent's process tree and reports whether any
+// descendant process born at or after the most recent turn start is still alive.
+// Returns "live", "settled", or "unknown".
+func (m *Manager) ProbeProcessTree(ctx context.Context, acpSessionID string) string {
+	pid, ok := m.AgentPID(acpSessionID)
+	if !ok {
+		return probeResultUnknown
+	}
+	turnRef := m.LastTurnStart()
+	if turnRef.IsZero() {
+		return probeResultUnknown
+	}
+	budget := parseProbeEnvBudget()
+	probeCtx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	return walkProcessTree(probeCtx, pid, turnRef)
 }
 
 func (m *Manager) agentProtocol() string {

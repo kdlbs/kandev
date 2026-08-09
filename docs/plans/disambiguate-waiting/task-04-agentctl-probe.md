@@ -2,7 +2,7 @@
 task: 04
 title: "Agentctl probe — real process-tree walk"
 wave: 1
-status: todo
+status: done
 depends_on: [01, 02]
 spec_acs: AC-70, AC-70a, AC-71, AC-72, AC-80, AC-81
 ---
