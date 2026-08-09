@@ -89,6 +89,8 @@
   "commandMergeKeywords": "merge, integrar, git, ramo",
   "commandNewAgent": "Novo agente",
   "commandNewAgentKeywords": "novo, agente, sessão, iniciar agente, nova sessão",
+  "commandOpenRecentTaskSwitcher": "Abrir o seletor de tarefas recentes",
+  "commandOpenRecentTaskSwitcherKeywords": "recentes, tarefa, seletor, histórico, tarefas recentes, mudar de tarefa, alternar entre tarefas recentes",
   "commandPaletteMode": "Modo do painel de comandos",
   "commandPreviewAddTerminalPanel": "Adicionar painel de terminal",
   "commandPreviewCommitChanges": "Fazer commit das alterações",

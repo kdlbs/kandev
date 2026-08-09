@@ -89,6 +89,8 @@
   "commandMergeKeywords": "merge, git, branch",
   "commandNewAgent": "New Agent",
   "commandNewAgentKeywords": "new, agent, session, start agent, new session",
+  "commandOpenRecentTaskSwitcher": "Open Recent Task Switcher",
+  "commandOpenRecentTaskSwitcherKeywords": "recent, task, switcher, history, recent tasks, switch task, switch recent tasks",
   "commandPaletteMode": "Command palette mode",
   "commandPreviewAddTerminalPanel": "Add Terminal Panel",
   "commandPreviewCommitChanges": "Commit Changes",

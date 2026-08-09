@@ -1909,4 +1909,9 @@ export const i18nGuardFiles = [
   // `sidebarViewName()` instead. Found by the pseudo oracle, not by lint: it is
   // a `.ts` constant, which `mode: "jsx-only"` never inspects.
   "lib/state/slices/ui/sidebar-view-builtins.ts",
+  // The last English row in the palette. Its `group` was already translated —
+  // it has to be, since the palette groups by the resolved value — and a
+  // comment deferred the `label`/`keywords` to "the components/task migration".
+  // Both are palette copy and belong with the rest of it.
+  "components/task/recent-task-switcher-hooks.ts",
 ];

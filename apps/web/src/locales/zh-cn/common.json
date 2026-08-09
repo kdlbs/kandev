@@ -89,6 +89,8 @@
   "commandMergeKeywords": "合并, git, 分支, merge",
   "commandNewAgent": "新建代理",
   "commandNewAgentKeywords": "新建, 代理, 会话, 启动代理, 新建会话, agent",
+  "commandOpenRecentTaskSwitcher": "打开最近任务切换器",
+  "commandOpenRecentTaskSwitcherKeywords": "最近, 任务, 切换器, 历史, 最近任务, 切换任务, 切换最近任务, recent",
   "commandPaletteMode": "命令面板模式",
   "commandPreviewAddTerminalPanel": "添加终端面板",
   "commandPreviewCommitChanges": "提交更改",
