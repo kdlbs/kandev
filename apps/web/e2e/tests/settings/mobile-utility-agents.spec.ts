@@ -87,15 +87,22 @@ test.describe("Mobile utility agents action rows", () => {
     // to itself (minus the edit button), not a slice shared with the name
     // column.
     const row = testPage.getByTestId("utility-action-row-builtin-commit-message");
-    const select = row.getByRole("combobox");
+    const select = row.getByTestId("utility-profile-picker-action-builtin-commit-message");
     const selectBox = await select.boundingBox();
     expect(selectBox).not.toBeNull();
     expect(selectBox!.width).toBeGreaterThanOrEqual(150);
 
     // The profile selector and edit button must stay clickable, not clipped
     // outside the card.
-    await select.click();
-    await testPage.getByRole("option", { name: profileLabel, exact: true }).click();
+    await expect(select).toContainText(profileLabel);
+    await select.tap();
+    const dropdown = testPage.getByTestId(
+      "utility-profile-picker-action-builtin-commit-message-dropdown",
+    );
+    await dropdown.getByPlaceholder("Search agent profiles...").fill(profile.agentDisplayName);
+    const option = dropdown.getByRole("option", { name: profileLabel, exact: true });
+    await expect(option.getByTestId("utility-profile-agent-icon")).toBeVisible();
+    await option.tap();
     await expect(select).toContainText(profileLabel);
 
     await row.getByRole("button").last().click();

@@ -3,11 +3,11 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateWorkspaceAction } from "@/app/actions/workspaces";
 import { useSettingsSaveContributor } from "./settings-save-provider";
 import { SettingsCard } from "./settings-card";
+import { UtilityAgentProfilePicker } from "./utility-agent-profile-picker";
 
 export function ConfigChatAgentSection() {
   const { t } = useTranslation();
@@ -69,22 +69,20 @@ export function ConfigChatAgentSection() {
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="text-sm text-muted-foreground">{t("settings:configChatAgentDescription")}</p>
-        <Select
+        <UtilityAgentProfilePicker
+          profiles={profiles}
           value={draftProfileId || "none"}
           onValueChange={(value) => setDraftProfileId(value === "none" ? "" : value)}
-        >
-          <SelectTrigger className="w-full max-w-sm cursor-pointer" data-settings-dirty={isDirty}>
-            <SelectValue placeholder={t("settings:configChatAgentPlaceholder")} />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="none">{t("settings:configChatAgentNoDefault")}</SelectItem>
-            {profiles.map((p) => (
-              <SelectItem key={p.id} value={p.id} className="cursor-pointer">
-                {p.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          fallback={{ value: "none", label: t("settings:configChatAgentNoDefault") }}
+          unavailableValue={
+            draftProfileId && !profiles.some((profile) => profile.id === draftProfileId)
+              ? draftProfileId
+              : undefined
+          }
+          testId="utility-profile-picker-config-chat"
+          triggerClassName="w-full max-w-sm"
+          includeWorkspaceProfiles
+        />
       </CardContent>
     </SettingsCard>
   );

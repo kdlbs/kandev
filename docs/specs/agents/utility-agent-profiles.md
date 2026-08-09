@@ -189,6 +189,47 @@ new state is authoritative after the migration.
 - **GIVEN** a saved default and action override, **WHEN** the page reloads, **THEN** both profile
   selections render from backend state and no legacy agent/model picker appears.
 
+## Utility Agents settings discoverability
+
+The Utility Agents page must explain the scope of these helpers and place related settings in the
+order that users need them.
+
+- The page description must explain that utility agents are one-shot helpers for Kandev UI actions,
+  such as commit and PR text generation or prompt enhancement. It must also state that they are not
+  the agents that run inside task sessions.
+- The **Configuration Chat Agent** card appears directly below the **Default utility agent model**
+  card. The **Actions** card follows it, and the custom utility-agent card remains after the action
+  overrides.
+- The **Actions** card has a description that says it overrides the profile for a specific Kandev UI
+  action. The description must make clear that these actions are not task-session agent work.
+- Every agent-profile selector on this page uses the same searchable control. This includes the
+  default utility profile, each action override, the custom utility-agent dialog, and the
+  Configuration Chat Agent selector.
+- The selector trigger and every option show the parent agent icon next to the profile label. The
+  icon uses the existing agent-logo component and must keep the profile name readable when the
+  label is long.
+- Typing in the selector filters by the visible profile label and parent agent name. Keyboard focus,
+  arrow navigation, Enter selection, Escape close, and the selected value must work on desktop and
+  phone viewports.
+- A saved unavailable profile keeps its repair state and remains visible as an unavailable option.
+  Search must not hide that selected value when the selector opens.
+- The selector keeps the existing eligibility rules for utility profiles. Search changes only how
+  the eligible list is found; it does not add workspace, passthrough, disabled, or non-inference
+  profiles.
+
+### Settings discoverability scenarios
+
+- **GIVEN** the Utility Agents page is open, **WHEN** the user scans the cards, **THEN** the order is
+  default utility profile, Configuration Chat Agent, Actions, and custom utility agents.
+- **GIVEN** a user who does not know the term utility agent, **WHEN** they read the page heading and
+  description, **THEN** they understand that the helpers run one Kandev UI action at a time and are
+  separate from task agents.
+- **GIVEN** a profile selector with several agent profiles, **WHEN** the user types an agent or
+  profile name, **THEN** only matching options remain and each option still shows its agent icon.
+- **GIVEN** a phone viewport, **WHEN** the user opens any profile selector and types a filter,
+  **THEN** the control stays within the viewport, the list can scroll, and the same icon and filter
+  behavior is available without horizontal document overflow.
+
 ## Out of scope
 
 - Adding executor/worktree selection to utility agents; sessionless calls remain host-run in their

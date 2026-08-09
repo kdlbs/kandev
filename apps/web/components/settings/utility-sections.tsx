@@ -5,19 +5,18 @@ import { IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { CardAction, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import type { UtilityAgent } from "@/lib/api/domains/utility-api";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { STANDALONE_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/standalone";
 import { isUtilityAgentDirty } from "@/components/settings/utility-dirty";
+import {
+  UtilityAgentProfilePicker,
+  utilityProfileEligibility,
+} from "@/components/settings/utility-agent-profile-picker";
 
 export const USE_DEFAULT = "__USE_DEFAULT__";
 const UNCONFIGURED = "__UNCONFIGURED__";
-
-function profileLabel(profile: AgentProfileOption): string {
-  return profile.label || profile.id;
-}
 
 export function DefaultModelSection({
   profiles,
@@ -31,9 +30,7 @@ export function DefaultModelSection({
   isDirty: boolean;
 }) {
   const { t } = useTranslation();
-  const eligibleProfiles = profiles.filter(
-    (profile) => profile.enabled !== false && !profile.cli_passthrough && !profile.workspace_id,
-  );
+  const eligibleProfiles = profiles.filter(utilityProfileEligibility);
   const selected = eligibleProfiles.find((profile) => profile.id === profileId);
   return (
     <SettingsCard
@@ -54,27 +51,15 @@ export function DefaultModelSection({
           <Label className="text-xs text-muted-foreground">
             {t("settings:utilityAgentProfile")}
           </Label>
-          <Select
+          <UtilityAgentProfilePicker
+            profiles={profiles}
             value={profileId || USE_DEFAULT}
             onValueChange={(value) => onProfileChange(value === USE_DEFAULT ? "" : value)}
-          >
-            <SelectTrigger className="w-full cursor-pointer" data-settings-dirty={isDirty}>
-              <SelectValue placeholder={t("settings:utilitySelectProfile")} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={USE_DEFAULT}>{t("settings:utilityNoDefaultProfile")}</SelectItem>
-              {profileId && !selected && (
-                <SelectItem value={profileId}>
-                  {t("settings:utilityUnavailableProfile", { name: profileId })}
-                </SelectItem>
-              )}
-              {eligibleProfiles.map((profile) => (
-                <SelectItem key={profile.id} value={profile.id}>
-                  {profileLabel(profile)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            fallback={{ value: USE_DEFAULT, label: t("settings:utilityNoDefaultProfile") }}
+            unavailableValue={profileId && !selected ? profileId : undefined}
+            testId="utility-profile-picker-default"
+            triggerClassName="w-full"
+          />
           {profileId && !selected && (
             <p className="text-xs text-destructive">{t("settings:utilityProfileNeedsRepair")}</p>
           )}
@@ -117,32 +102,18 @@ export function BuiltinActionRow({
         <p className="text-xs text-muted-foreground truncate">{agent.description}</p>
       </div>
       <div className="flex items-center gap-2">
-        <Select value={currentValue} onValueChange={(value) => onProfileChange(agent, value)}>
-          <SelectTrigger
-            className="min-w-0 flex-1 cursor-pointer md:w-[280px] md:flex-none"
-            data-settings-dirty={isDirty}
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={USE_DEFAULT}>{defaultLabel}</SelectItem>
-            {currentValue === UNCONFIGURED && (
-              <SelectItem value={UNCONFIGURED} disabled>
-                {t("settings:utilityProfileNeedsRepair")}
-              </SelectItem>
-            )}
-            {profiles
-              .filter(
-                (profile) =>
-                  profile.enabled !== false && !profile.cli_passthrough && !profile.workspace_id,
-              )
-              .map((profile) => (
-                <SelectItem key={profile.id} value={profile.id}>
-                  {profileLabel(profile)}
-                </SelectItem>
-              ))}
-          </SelectContent>
-        </Select>
+        <UtilityAgentProfilePicker
+          profiles={profiles}
+          value={currentValue}
+          onValueChange={(value) => onProfileChange(agent, value)}
+          fallback={{ value: USE_DEFAULT, label: defaultLabel }}
+          unavailableValue={currentValue === UNCONFIGURED ? currentValue : undefined}
+          unavailableLabel={
+            currentValue === UNCONFIGURED ? t("settings:utilityProfileNeedsRepair") : undefined
+          }
+          testId={`utility-profile-picker-action-${agent.id}`}
+          triggerClassName="min-w-0 flex-1 md:w-[280px] md:flex-none"
+        />
         <Button
           variant="ghost"
           size="sm"
@@ -190,6 +161,9 @@ export function PerActionOverridesSection({
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-0">
+        <p className="pb-3 text-sm text-muted-foreground">
+          {t("settings:utilityActionsDescription")}
+        </p>
         {builtins.map((agent) => (
           <BuiltinActionRow
             key={agent.id}
@@ -228,7 +202,7 @@ export function CustomAgentRow({
         <div className="text-sm font-medium">{agent.name}</div>
         <p className="text-xs text-muted-foreground truncate">{agent.description}</p>
         <p className="text-xs text-muted-foreground truncate">
-          {profile ? profileLabel(profile) : t("settings:utilityProfileNeedsRepair")}
+          {profile ? profile.label || profile.id : t("settings:utilityProfileNeedsRepair")}
         </p>
       </div>
       <div className="flex items-center gap-2">

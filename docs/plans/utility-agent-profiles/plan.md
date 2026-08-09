@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/agents/utility-agent-profiles.md
 created: 2026-08-08
-status: complete
+status: in_progress
 ---
 
 # Implementation Plan: Profile-backed Utility Agents
@@ -13,7 +13,9 @@ unambiguous legacy choices, and make both sessionless and task-session-bound one
 apply the complete resolved profile. Warn users before a profile change breaks utility bindings.
 Land persistence and API contracts first, then the shared profile-aware one-shot runner and its
 plugin/review consumers, followed by the Settings UI, dependency dialogs, desktop/mobile E2E
-coverage, and public documentation.
+coverage, and public documentation. The settings surface also needs a discoverability follow-up:
+explain the one-shot UI scope, place Configuration Chat Agent next to the default profile, and use
+one icon-enabled searchable profile picker everywhere on the page.
 
 ## Architecture and migration
 
@@ -144,6 +146,22 @@ Replace the custom-agent dialog's two-column agent/model controls and live probe
 agent-profile picker. Gate create/save on name, prompt, and eligible profile. Custom rows display
 the selected profile label; missing/deleted/disabled selections show localized repair copy.
 
+### Utility Agents settings discoverability follow-up
+
+Keep the page's existing Settings save/discard ownership and move the Configuration Chat Agent card
+into the Utility Agents card sequence directly after the default profile card. The rendered order is
+default utility profile, Configuration Chat Agent, Actions, and custom utility agents. Improve the
+page and Actions descriptions so they explain that utility agents perform one Kandev UI operation at
+a time and are separate from agents that run inside task sessions.
+
+Replace the page's remaining Radix profile selects with one shared profile-picker composition based
+on the existing `Combobox` and `AgentLogo` components. The picker must render the icon in the trigger
+and each option, search by profile label and parent agent name, preserve unavailable selected IDs for
+repair, and retain the existing utility eligibility rules. Apply the same interaction to the default
+profile, built-in action overrides, custom utility-agent dialog, and Configuration Chat Agent selector.
+Keep the popover width bounded to the trigger, keep the list internally scrollable on phones, and
+preserve keyboard and touch behavior without document horizontal overflow.
+
 Update English and Chinese catalogs and regenerate pseudo-locale output. Keep test IDs stable where
 they describe cards/rows rather than the removed model controls; add explicit profile-picker IDs
 for robust E2E selection.
@@ -212,6 +230,11 @@ explicit force confirmation. The dialog does not offer an automatic replacement.
   and opens custom edit, THEN the controls remain tappable, the card/dialog stay viewport-contained,
   and `document.scrollWidth <= document.clientWidth`. **File:**
   `apps/web/e2e/tests/settings/mobile-utility-agents.spec.ts`, `mobile-chrome` project.
+- **Discoverability scenario:** GIVEN the Utility Agents page, WHEN the user reads the page and
+  opens each profile selector, THEN the card order and explanatory descriptions are correct, the
+  selected profile and every option show an agent icon, and typing filters by profile or agent name.
+  **Files:** `apps/web/e2e/tests/settings/utility-agents.spec.ts`,
+  `apps/web/e2e/tests/settings/mobile-utility-agents.spec.ts`.
 
 ## Public documentation
 
@@ -247,6 +270,10 @@ Wave 4:
 
 - [ ] [task-05-utility-profile-e2e](task-05-utility-profile-e2e.md)
 - [ ] [task-06-update-utility-documentation](task-06-update-utility-documentation.md)
+
+Wave 5 (settings discoverability follow-up):
+
+- [x] [task-08-utility-settings-discoverability](task-08-utility-settings-discoverability.md)
 
 Execution remains sequential in the primary conversation by default. Tasks 02, 04, and 07 own
 disjoint backend/frontend files after the task-01 contract lands; tasks 05 and 06 are also disjoint,

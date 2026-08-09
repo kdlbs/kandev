@@ -6,7 +6,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import {
   type UtilityAgent,
   createUtilityAgent,
@@ -15,6 +14,7 @@ import {
 } from "@/lib/api/domains/utility-api";
 import { useAppStore } from "@/components/state-provider";
 import { ScriptEditor } from "./profile-edit/script-editor";
+import { UtilityAgentProfilePicker } from "./utility-agent-profile-picker";
 import type { ScriptPlaceholder } from "./profile-edit/script-editor-completions";
 
 type Props = {
@@ -123,26 +123,18 @@ export function UtilityAgentDialog({ open, onOpenChange, agent, onSuccess }: Pro
           </div>
           <div className="space-y-2">
             <Label>{t("settings:utilityAgentProfile")}</Label>
-            <Select
+            <UtilityAgentProfilePicker
+              profiles={profiles}
               value={form.profile_id}
               onValueChange={(value) => setForm((current) => ({ ...current, profile_id: value }))}
-            >
-              <SelectTrigger className="cursor-pointer">
-                <SelectValue placeholder={t("settings:utilitySelectProfile")} />
-              </SelectTrigger>
-              <SelectContent>
-                {form.profile_id && !eligible.some((profile) => profile.id === form.profile_id) && (
-                  <SelectItem value={form.profile_id}>
-                    {t("settings:utilityUnavailableProfile", { name: form.profile_id })}
-                  </SelectItem>
-                )}
-                {eligible.map((profile) => (
-                  <SelectItem key={profile.id} value={profile.id}>
-                    {profile.label || profile.id}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              unavailableValue={
+                form.profile_id && !eligible.some((profile) => profile.id === form.profile_id)
+                  ? form.profile_id
+                  : undefined
+              }
+              testId="utility-profile-picker-custom"
+              triggerClassName="w-full"
+            />
             {form.profile_id && !eligible.some((profile) => profile.id === form.profile_id) && (
               <p className="text-xs text-destructive">{t("settings:utilityProfileNeedsRepair")}</p>
             )}

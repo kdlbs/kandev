@@ -10,7 +10,7 @@ import { test, expect } from "../../fixtures/test-base";
  * interactions (open the page, inspect sections, open the create dialog).
  */
 test.describe("Utility Agents settings page", () => {
-  test("action model dropdown keeps wheel scrolling inside the menu", async ({ testPage }) => {
+  test("profile picker keeps wheel scrolling inside the menu", async ({ testPage }) => {
     const models = Array.from({ length: 36 }, (_, index) => ({
       id: `claude-model-${String(index + 1).padStart(2, "0")}`,
       name: `Claude Model ${String(index + 1).padStart(2, "0")}`,
@@ -72,7 +72,7 @@ test.describe("Utility Agents settings page", () => {
       testWindow.__utilitySelectWheelEvents = 0;
       document.addEventListener("wheel", (event) => {
         const target = event.target;
-        if (target instanceof Element && target.closest('[data-slot="select-content"]')) {
+        if (target instanceof Element && target.closest('[data-slot="popover-content"]')) {
           testWindow.__utilitySelectWheelEvents = (testWindow.__utilitySelectWheelEvents ?? 0) + 1;
         }
       });
@@ -81,9 +81,9 @@ test.describe("Utility Agents settings page", () => {
     const actionRow = testPage.getByTestId("utility-action-row-builtin-commit-message");
     const actionSelect = actionRow.getByRole("combobox");
     await actionSelect.click();
-    const selectContent = testPage.locator('[data-slot="select-content"]').first();
-    await expect(selectContent).toBeVisible();
-    await selectContent.evaluate((element) => {
+    const popoverContent = testPage.locator('[data-slot="popover-content"]').first();
+    await expect(popoverContent).toBeVisible();
+    await popoverContent.evaluate((element) => {
       const testWindow = window as Window & { __utilitySelectRawWheelEvents?: number };
       testWindow.__utilitySelectRawWheelEvents = 0;
       element.addEventListener("wheel", () => {
@@ -92,7 +92,7 @@ test.describe("Utility Agents settings page", () => {
       });
     });
 
-    await selectContent.dispatchEvent("wheel", {
+    await popoverContent.dispatchEvent("wheel", {
       bubbles: true,
       cancelable: true,
       deltaY: 900,
@@ -163,7 +163,9 @@ test.describe("Utility Agents settings page", () => {
       testPage.getByRole("heading", { name: "Utility Agents", exact: true }),
     ).toBeVisible({ timeout: 15_000 });
     await expect(
-      testPage.getByText("One-shot AI helpers for commits, PRs, and prompts."),
+      testPage.getByText(
+        "One-shot helpers run Kandev UI actions such as commit and PR text generation or prompt enhancement. They are separate from agents that work inside task sessions.",
+      ),
     ).toBeVisible();
 
     // Default-model section.
@@ -182,6 +184,86 @@ test.describe("Utility Agents settings page", () => {
     expect(pageErrors, `uncaught errors: ${pageErrors.map((e) => e.message).join("; ")}`).toEqual(
       [],
     );
+  });
+
+  test("explains utility actions and filters profile pickers with agent icons", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { agents } = await apiClient.listAgents();
+    const profile = agents
+      .flatMap((agent) => agent.profiles ?? [])
+      .find((candidate) => candidate.id === seedData.agentProfileId);
+    if (!profile) throw new Error(`seed profile ${seedData.agentProfileId} was not found`);
+    const profileLabel = `${profile.agentDisplayName} • ${profile.name}`;
+
+    await testPage.goto("/settings/utility-agents");
+    await expect(
+      testPage.getByRole("heading", { name: "Utility Agents", exact: true }),
+    ).toBeVisible({ timeout: 15_000 });
+
+    await expect(
+      testPage.getByText(
+        "One-shot helpers run Kandev UI actions such as commit and PR text generation or prompt enhancement. They are separate from agents that work inside task sessions.",
+      ),
+    ).toBeVisible();
+    await expect(
+      testPage.getByText(
+        "Override the profile for a specific Kandev UI action. These actions do not configure agents that run inside task sessions.",
+      ),
+    ).toBeVisible();
+
+    const cardOrder = await testPage.evaluate(() => {
+      const ids = [
+        "utility-default-model-card",
+        "config-chat-agent-card",
+        "utility-actions-card",
+        "utility-custom-agents-card",
+      ];
+      const cards = ids.map((id) => document.querySelector(`[data-testid="${id}"]`));
+      return cards.every(
+        (card, index) =>
+          card !== null &&
+          cards
+            .slice(index + 1)
+            .every(
+              (next) =>
+                next !== null &&
+                Boolean(card.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING),
+            ),
+      );
+    });
+    expect(cardOrder).toBe(true);
+
+    const picker = testPage.getByTestId("utility-profile-picker-default");
+    await picker.click();
+    const listbox = testPage.getByRole("listbox");
+    await expect(listbox).toBeVisible();
+    await testPage.getByPlaceholder("Search agent profiles...").fill(profile.agentDisplayName);
+    const option = listbox.getByRole("option", { name: profileLabel, exact: true });
+    await expect(option).toBeVisible();
+    await expect(option.getByTestId("utility-profile-agent-icon")).toBeVisible();
+    await option.click();
+    await expect(picker).toContainText(profileLabel);
+    await testPage.keyboard.press("Escape");
+
+    const configPicker = testPage.getByTestId("utility-profile-picker-config-chat");
+    await configPicker.click();
+    const configDropdown = testPage.getByTestId("utility-profile-picker-config-chat-dropdown");
+    const configListbox = configDropdown.getByRole("listbox");
+    await testPage
+      .getByTestId("utility-profile-picker-config-chat-dropdown")
+      .getByPlaceholder("Search agent profiles...")
+      .fill(profile.name);
+    await expect(
+      configListbox.getByRole("option", { name: profileLabel, exact: true }),
+    ).toBeVisible();
+    await expect(
+      configListbox
+        .getByRole("option", { name: profileLabel, exact: true })
+        .getByTestId("utility-profile-agent-icon"),
+    ).toBeVisible();
   });
 
   test("wraps each settings sub-section in a bounded card, matching Voice Mode", async ({

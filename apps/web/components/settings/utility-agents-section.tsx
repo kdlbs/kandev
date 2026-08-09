@@ -12,6 +12,7 @@ import {
 import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { UtilityAgentDialog } from "@/components/settings/utility-agent-dialog";
+import { ConfigChatAgentSection } from "@/components/settings/config-chat-agent-section";
 import {
   DefaultModelSection,
   PerActionOverridesSection,
@@ -193,6 +194,7 @@ export function UtilityAgentsSection() {
             onProfileChange={setDefaultProfileId}
             isDirty={defaultProfileId !== savedDefaultProfileId}
           />
+          <ConfigChatAgentSection />
           <PerActionOverridesSection
             builtins={builtins}
             profiles={profiles}
