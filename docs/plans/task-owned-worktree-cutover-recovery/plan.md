@@ -115,3 +115,20 @@ silently discarded without a canonical owner.
 - `make -C apps/backend test` — passed.
 - `node scripts/validate-public-docs.mjs` — passed; 41 pages validated.
 - `git diff --check` — passed.
+
+## PR Fixup Results
+
+- Remediation commit `44ffff81` added terminal-state coverage for
+  `COMPLETED`, `FAILED`, and `CANCELLED`, the unexpected `CREATED` safety
+  fixture, and cached historical ownership classification.
+- Focused cutover tests passed after the remediation, and `git diff --check`
+  passed.
+- The actionable review thread was replied to and resolved after the cache
+  fix; the exact-head unresolved thread count is zero.
+- Exact-head PR state for `44ffff81`: checks snapshot complete, 4 passed, 0
+  failed, 12 pending, 0 approval-required runs, 0 issue comments, and 0
+  unresolved review threads. The PR is open and mergeable; GitHub reports
+  `UNSTABLE` only because checks are still running.
+- Pending checks are Backend (Windows), Backend Postgres, Backend Static
+  Checks, Backend Tests (1/2), Backend Tests (2/2), five CodeQL analyses,
+  `deploy-same-repo`, and the Cloudflare Pages preview deployment.
