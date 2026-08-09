@@ -216,7 +216,11 @@ func TestOwnershipLockConflictErrorIncludesTarget(t *testing.T) {
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("second Acquire error = %v, want ErrConflict", err)
 	}
-	if !strings.Contains(err.Error(), targets[0].ResourcePath) {
-		t.Fatalf("conflict error = %q, want canonical home path %q", err, targets[0].ResourcePath)
+	var conflict *ConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("second Acquire error = %T, want ConflictError", err)
+	}
+	if conflict.Target.ResourcePath != targets[0].ResourcePath {
+		t.Fatalf("conflict target = %q, want canonical home path %q", conflict.Target.ResourcePath, targets[0].ResourcePath)
 	}
 }
