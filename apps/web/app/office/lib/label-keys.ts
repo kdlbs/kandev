@@ -68,3 +68,15 @@ export const CONCURRENCY_POLICY_LABEL_KEYS: Record<string, string> = {
   coalesce_if_active: "office:coalesceIfActive",
   always_create: "office:alwaysCreate",
 };
+
+/**
+ * Budget overrun actions. The costs card rendered the wire value with
+ * `actionOnExceed.replace(/_/g, " ")`, which is pseudo-English: a translator
+ * with a complete catalog still saw "block new tasks" spelled out of an
+ * identifier.
+ */
+export const BUDGET_ACTION_LABEL_KEYS: Record<string, string> = {
+  notify_only: "office:budgetActionNotifyOnly",
+  pause_agent: "office:budgetActionPauseAgent",
+  block_new_tasks: "office:budgetActionBlockNewTasks",
+};

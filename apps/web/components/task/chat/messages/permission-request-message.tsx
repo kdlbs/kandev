@@ -54,7 +54,7 @@ export function PermissionRequestMessage({ comment }: PermissionRequestMessagePr
     });
 
   const statusBadge = getPermissionStatusBadge(permissionStatus);
-  const titleText = comment.content || "Permission Required";
+  const titleText = comment.content || t("task:permissionRequired");
   const detailSummary = summarizePermissionAction(permissionMetadata?.action_details, titleText);
 
   return (

@@ -1,4 +1,5 @@
 import type { AgentUpdateJob, AgentUpdatePreview } from "@/lib/api";
+import { t } from "@/lib/i18n";
 
 export type RuntimeVersionPair = {
   currentVersion: string;
@@ -10,7 +11,7 @@ export function resolveRuntimeVersionPair(
   preview: AgentUpdatePreview | null,
   job?: AgentUpdateJob,
 ): RuntimeVersionPair {
-  const currentVersion = job?.current_version || preview?.current_version || "Unknown";
+  const currentVersion = job?.current_version || preview?.current_version || t("common:unknown");
   const targetVersion = job?.target_version || preview?.target_version;
   const versionsMatch = Boolean(
     targetVersion && currentVersion !== "Unknown" && currentVersion === targetVersion,

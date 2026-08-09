@@ -1,5 +1,6 @@
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { TaskPlan, TaskPlanRevision } from "@/lib/types/http";
+import { t } from "@/lib/i18n";
 
 const WS_CLIENT_UNAVAILABLE = "WebSocket client not available";
 
@@ -35,7 +36,7 @@ export async function createTaskPlan(
   }
   const response = await client.request("task.plan.create", {
     task_id: taskId,
-    title: title || "Plan",
+    title: title || t("task:plan"),
     content,
     created_by: "user",
   });

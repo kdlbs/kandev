@@ -21,6 +21,7 @@ import { useAppStore } from "@/components/state-provider";
 import { PlanRevisionPreviewDialog } from "./task-plan-preview-dialog";
 import { PlanRevisionDiffDialog } from "./task-plan-diff-dialog";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 type ComparePair = [string | null, string | null];
 
@@ -46,7 +47,8 @@ type TaskPlanRevisionsProps = {
 
 /** Label rendered in the UI for any user-authored revision. Display-only —
  * the backend still stamps its own author_name on the row. */
-const USER_DISPLAY_NAME = "You";
+/** Catalog key, not copy — resolving at module scope freezes the locale. */
+const USER_DISPLAY_NAME_KEY = "common:you";
 
 export function TaskPlanRevisions(props: TaskPlanRevisionsProps) {
   const [open, setOpen] = useState(false);
@@ -267,7 +269,7 @@ function RevisionsDialogStack({
         // Remount on revision change so loader state resets without setState-in-effect.
         key={`preview-${previewRevision?.id ?? "none"}`}
         revision={previewRevision}
-        authorLabel={previewRevision ? authorLabel(previewRevision) : ""}
+        authorLabel={previewRevision ? authorLabel(previewRevision, t) : ""}
         loadContent={loadRevisionContent}
         onClose={() => setPreviewRevision(null)}
         onRestore={() => {
@@ -307,9 +309,9 @@ function RevisionsDialogStack({
 
 /** Display label for an author. User revisions always render as "You";
  * agent revisions use the stored author_name (the agent profile display name). */
-function authorLabel(revision: TaskPlanRevision): string {
-  if (revision.author_kind === "user") return USER_DISPLAY_NAME;
-  return revision.author_name || "Agent";
+function authorLabel(revision: TaskPlanRevision, t: TFunction): string {
+  if (revision.author_kind === "user") return t(USER_DISPLAY_NAME_KEY);
+  return revision.author_name || t("common:agent");
 }
 
 /** Resolve the active session's agent backend name (e.g. "claude", "codex") so
@@ -370,6 +372,7 @@ function RevisionAuthor({
   revision: TaskPlanRevision;
   agentName: string | null;
 }) {
+  const { t } = useTranslation();
   if (revision.author_kind === "agent") {
     return (
       <>
@@ -384,7 +387,7 @@ function RevisionAuthor({
     <>
       <IconUser className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
       <span className="text-xs text-foreground truncate" data-testid="plan-revision-author">
-        {USER_DISPLAY_NAME}
+        {t(USER_DISPLAY_NAME_KEY)}
       </span>
     </>
   );

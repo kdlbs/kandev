@@ -6,6 +6,7 @@ import { Button } from "@kandev/ui/button";
 import { IconTrash } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { BudgetPolicy } from "@/lib/state/slices/office/types";
+import { BUDGET_ACTION_LABEL_KEYS } from "@/app/office/lib/label-keys";
 import { cn, formatDollars } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 // Module-level `t`, resolved at call time: `getBudgetStatus` is a plain helper
@@ -95,12 +96,18 @@ export function BudgetPolicyCard({ policy, spentSubcents = 0, onDelete }: Props)
             <span>{t("office:remainingAmount", { amount: formatDollars(remaining) })}</span>
           </div>
           <div className="flex gap-2 text-xs text-muted-foreground mt-1">
-            {/* `period` and `actionOnExceed` are wire enums; only the field
-                labels are copy, so the values are interpolated as-is. */}
+            {/* `period` is a wire enum shown as-is; `actionOnExceed` used to be
+                de-underscored into pseudo-English and now resolves through the
+                shared label map. */}
             <span>{t("office:periodValue", { period: policy.period })}</span>
             <span>{t("office:alertPercent", { percent: policy.alertThresholdPct })}</span>
             <span>
-              {t("office:actionValue", { action: policy.actionOnExceed.replace(/_/g, " ") })}
+              {t("office:actionValue", {
+                action: t(
+                  BUDGET_ACTION_LABEL_KEYS[policy.actionOnExceed] ??
+                    "office:budgetActionNotifyOnly",
+                ),
+              })}
             </span>
           </div>
         </div>

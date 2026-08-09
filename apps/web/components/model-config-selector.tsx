@@ -2,6 +2,7 @@
 
 import { memo, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { IconCheck, IconChevronDown, IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
 
 import { cn } from "@/lib/utils";
@@ -155,6 +156,7 @@ function triggerDetails(
   currentModel: string | null,
   modelConfig: SelectConfigOption | undefined,
   extraConfigOptions: SelectConfigOption[],
+  t: TFunction,
 ): TriggerDetail[] {
   let modelValue = "";
   if (modelConfig) {
@@ -166,7 +168,7 @@ function triggerDetails(
     ? [
         {
           id: modelConfig?.id || MODEL_CONFIG_CATEGORY,
-          name: modelConfig?.name || "Model",
+          name: modelConfig?.name || t("common:model"),
           value: modelValue,
         },
       ]
@@ -531,8 +533,8 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
   onModelChange,
   onConfigChange,
   disabled,
-  placeholder = "Select model...",
-  ariaLabel = "Model settings",
+  placeholder,
+  ariaLabel,
   variant = "field",
   popoverSide = "bottom",
   triggerClassName: customTriggerClassName,
@@ -557,7 +559,7 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
   );
   const details =
     triggerSummary === "changed"
-      ? triggerDetails(modelOptions, currentModel, modelConfig, extraConfigOptions)
+      ? triggerDetails(modelOptions, currentModel, modelConfig, extraConfigOptions, t)
       : undefined;
   // The (fallback) marker is a live WS signal, not replayed on reload. When
   // it is active, explain on the trigger that the note is transient so users
@@ -583,11 +585,11 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <ModelConfigSelectorTrigger
-        ariaLabel={ariaLabel}
+        ariaLabel={ariaLabel ?? t("agents:modelSettings")}
         details={details}
         disabled={disabled}
         label={label}
-        placeholder={placeholder}
+        placeholder={placeholder ?? t("agents:selectModel")}
         triggerClassName={customTriggerClassName}
         triggerTitle={triggerTitle}
         variant={variant}

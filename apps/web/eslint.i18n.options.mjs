@@ -1879,4 +1879,28 @@ export const i18nGuardFiles = [
   // so `name`/`description` stay canonical English and the settings list renders
   // `nameKey`/`descriptionKey`.
   "lib/layout/layout-profiles.ts",
+  // English `??` / `||` fallbacks — "Agent", "Terminal", "Repository",
+  // "Untitled task", "An error occurred". They render whenever the real value
+  // is absent, which is a normal path rather than an edge case, and none of
+  // them is a JSX literal, so the guard never saw them. Values that are
+  // PERSISTED or sent to an agent verbatim ("New Repository", the quick-chat
+  // session name, `use-plan-actions`' default prompt) are deliberately still
+  // English and stay off this list.
+  "components/review/review-diff-list-groups.tsx",
+  "components/review/review-dialog.tsx",
+  "components/task/changes-git-credential-display.ts",
+  "components/task/task-session-sidebar-archived-item.ts",
+  "hooks/domains/session/use-session-resumption.ts",
+  "hooks/domains/session/use-terminals.ts",
+  "hooks/domains/session/use-user-shells.ts",
+  "hooks/use-editor-keybinds.ts",
+  "hooks/use-summarize-session.ts",
+  "hooks/use-update-available-toast.ts",
+  "lib/agent-runtime-update.ts",
+  "lib/api/domains/plan-api.ts",
+  "lib/capability-warning.ts",
+  "lib/github-auth.ts",
+  "lib/recent-tasks.ts",
+  "lib/state/slices/comments/format.ts",
+  "lib/utils/file-diff.ts",
 ];
