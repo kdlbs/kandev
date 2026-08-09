@@ -48,9 +48,12 @@ export function GitHubPRMergedConfig({ config, workspaceId, onUpdate }: GitHubPR
         <p className="text-xs text-destructive">{t("automations:prMergedDeadConfigWarning")}</p>
       )}
       <div className="space-y-1.5">
-        <Label className="text-xs">{t("automations:baseBranchesLabel")}</Label>
+        <Label className="text-xs" htmlFor="github-pr-merged-base-branches">
+          {t("automations:baseBranchesLabel")}
+        </Label>
         {/* Example branch names — data the user types verbatim, not copy. */}
         <Input
+          id="github-pr-merged-base-branches"
           value={branches}
           onChange={(e) => {
             setBranches(e.target.value);

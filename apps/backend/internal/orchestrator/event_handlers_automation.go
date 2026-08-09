@@ -143,6 +143,22 @@ func (s *Service) createAutomationTask(ctx context.Context, evt *automation.Auto
 		return
 	}
 
+	metadata := map[string]interface{}{
+		"automation_id":                 a.ID,
+		"automation_name":               a.Name,
+		"trigger_id":                    evt.TriggerID,
+		"trigger_type":                  string(evt.TriggerType),
+		models.MetaKeyAgentProfileID:    a.AgentProfileID,
+		models.MetaKeyExecutorProfileID: a.ExecutorProfileID,
+	}
+	if evt.TriggerType == automation.TriggerTypeGitHubPRMerged {
+		var triggerData struct {
+			TaskID string `json:"task_id"`
+		}
+		_ = json.Unmarshal(evt.TriggerData, &triggerData)
+		metadata[models.MetaKeyAutomationTargetTaskID] = triggerData.TaskID
+	}
+
 	// Every automation produces the same kind of run: an ordinary, persistent
 	// task tagged with origin=automation_run. The origin — not is_ephemeral —
 	// is what keeps it off the kanban and out of task lists, so the task keeps
@@ -156,15 +172,8 @@ func (s *Service) createAutomationTask(ctx context.Context, evt *automation.Auto
 		Title:          title,
 		Description:    prompt,
 		Repositories:   repositories,
-		Metadata: map[string]interface{}{
-			"automation_id":                 a.ID,
-			"automation_name":               a.Name,
-			"trigger_id":                    evt.TriggerID,
-			"trigger_type":                  string(evt.TriggerType),
-			models.MetaKeyAgentProfileID:    a.AgentProfileID,
-			models.MetaKeyExecutorProfileID: a.ExecutorProfileID,
-		},
-		Origin: models.TaskOriginAutomationRun,
+		Metadata:       metadata,
+		Origin:         models.TaskOriginAutomationRun,
 	})
 	if taskErr != nil {
 		s.logger.Error("failed to create automation task",

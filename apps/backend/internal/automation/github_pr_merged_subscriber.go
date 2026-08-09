@@ -41,14 +41,6 @@ func (s *GitHubPRMergedSubscriber) Start(_ context.Context) {
 		return
 	}
 
-	lookup := s.svc.TaskOriginLookup()
-	if lookup == nil {
-		s.logger.Warn("github_pr_merged trigger will not fire: no task-origin lookup is wired",
-			zap.String("trigger_type", string(TriggerTypeGitHubPRMerged)))
-		s.started = true
-		return
-	}
-
 	if s.eventBus == nil {
 		s.started = true
 		return
@@ -62,7 +54,12 @@ func (s *GitHubPRMergedSubscriber) Start(_ context.Context) {
 	}
 	s.sub = sub
 	s.started = true
-	s.logger.Info("github_pr_merged subscription active")
+	if s.svc.TaskOriginLookup() == nil {
+		s.logger.Warn("github_pr_merged trigger will not fire until a task-origin lookup is wired",
+			zap.String("trigger_type", string(TriggerTypeGitHubPRMerged)))
+	} else {
+		s.logger.Info("github_pr_merged subscription active")
+	}
 }
 
 // Stop unsubscribes from the bus. Idempotent.
@@ -87,9 +84,9 @@ type firedKey struct {
 }
 
 func (s *GitHubPRMergedSubscriber) handlePRUpdated(ctx context.Context, event *bus.Event) error {
-	// Gate 1: payload must be a non-nil *github.TaskPR.
-	pr, ok := event.Data.(*github.TaskPR)
-	if !ok || pr == nil {
+	// Gate 1: payload must be a typed TaskPR or its JSON-decoded bus form.
+	pr, ok := normalizeTaskPR(event.Data)
+	if !ok {
 		return nil
 	}
 
@@ -144,6 +141,28 @@ func (s *GitHubPRMergedSubscriber) handlePRUpdated(ctx context.Context, event *b
 		s.checkMergedTrigger(ctx, &triggers[i], pr, workspaceID, fired)
 	}
 	return nil
+}
+
+// normalizeTaskPR accepts both event representations used by the configured
+// event buses. The in-memory bus preserves the typed pointer, while NATS
+// decodes JSON data into an untyped map before invoking subscribers.
+func normalizeTaskPR(data interface{}) (*github.TaskPR, bool) {
+	switch pr := data.(type) {
+	case *github.TaskPR:
+		return pr, pr != nil
+	case github.TaskPR:
+		return &pr, true
+	default:
+		encoded, err := json.Marshal(data)
+		if err != nil {
+			return nil, false
+		}
+		var decoded github.TaskPR
+		if err := json.Unmarshal(encoded, &decoded); err != nil {
+			return nil, false
+		}
+		return &decoded, true
+	}
 }
 
 func (s *GitHubPRMergedSubscriber) checkMergedTrigger(

@@ -537,16 +537,13 @@ func startAgentInfrastructure(
 	}
 
 	// Wire automation service into orchestrator for trigger-based task creation.
-	// Automation must start before the GitHub poller so the
-	// GitHubPRMergedSubscriber is listening before the first poller event fires.
+	// The service is constructed and wired here, but starts after the orchestrator
+	// has subscribed to automation.triggered in startGatewayAndServe.
 	// The Automation subsystem is independent of the Office feature flag — it
-	// has its own cron scheduler, GitHub poller, and webhook handler, and
-	// creates tasks via the task service directly.
+	// has its own cron scheduler, GitHub poller, webhook handler, and creates
+	// tasks via the task service directly.
 	if services.Automation != nil {
 		orchestratorSvc.SetAutomationService(services.Automation.Service)
-		services.Automation.Start(ctx)
-		addCleanup(func() error { services.Automation.Stop(); return nil })
-		log.Info("Automation scheduler and evaluator started")
 	}
 
 	// Wire GitHub service into orchestrator for PR auto-detection on push
@@ -557,12 +554,6 @@ func startAgentInfrastructure(
 		services.GitHub.SetTaskSessionChecker(&taskSessionCheckerAdapter{repo: repos.Task})
 		log.Info("GitHub service configured for orchestrator (PR auto-detection enabled)")
 
-		// Start GitHub background poller
-		ghPoller := githubpkg.NewPoller(services.GitHub, eventBus, log)
-		ghPoller.SetTaskBranchProvider(orchestratorSvc)
-		ghPoller.Start(ctx)
-		addCleanup(func() error { ghPoller.Stop(); return nil })
-		log.Info("GitHub poller started")
 	}
 
 	// Start GitLab background poller + wire the service into the
@@ -650,6 +641,22 @@ func startAgentInfrastructure(
 
 	return startGatewayAndServe(ctx, cfg, log, eventBus, agentRuntimeAvailability, dbPool, repos, services,
 		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, repoCloner, agentctlBinaryPath, addCleanup, runCleanups)
+}
+
+// startOrchestratorAndAutomationConsumers establishes the event-consumer
+// chain in dependency order. The GitHub poller performs an immediate sweep on
+// start, so both downstream consumers must be ready before it is started.
+func startOrchestratorAndAutomationConsumers(
+	startOrchestrator func() error,
+	startAutomation func(),
+	startGitHubPoller func(),
+) error {
+	if err := startOrchestrator(); err != nil {
+		return err
+	}
+	startAutomation()
+	startGitHubPoller()
+	return nil
 }
 
 // startGatewayAndServe sets up the WebSocket gateway, HTTP routes, starts the server,
@@ -751,7 +758,27 @@ func startGatewayAndServe(
 		services.Plugins.SetUtilityAgent(pluginsUtilityAgentAdapter{svc: services.Utility}, pluginsHostUtilityAdapter{mgr: hostUtilityMgr})
 	}
 
-	if err := orchestratorSvc.Start(ctx); err != nil {
+	if err := startOrchestratorAndAutomationConsumers(
+		func() error { return orchestratorSvc.Start(ctx) },
+		func() {
+			if services.Automation == nil {
+				return
+			}
+			services.Automation.Start(ctx)
+			addCleanup(func() error { services.Automation.Stop(); return nil })
+			log.Info("Automation scheduler and evaluator started")
+		},
+		func() {
+			if services.GitHub == nil {
+				return
+			}
+			ghPoller := githubpkg.NewPoller(services.GitHub, eventBus, log)
+			ghPoller.SetTaskBranchProvider(orchestratorSvc)
+			ghPoller.Start(ctx)
+			addCleanup(func() error { ghPoller.Stop(); return nil })
+			log.Info("GitHub poller started")
+		},
+	); err != nil {
 		log.Error("Failed to start orchestrator", zap.Error(err))
 		return false
 	}

@@ -98,6 +98,28 @@ Select at least one repository. Although the UI offers **All repos**, an empty r
 
 The current evaluator does not apply label filters, and the current form does not offer them.
 
+### GitHub pull requests merged
+
+The **Pull request merged** condition watches pull requests linked to tasks in the
+automation's workspace. Select **All repositories** or an explicit repository list, then
+optionally filter by the pull request's base branch (for example `main` or `release/*`).
+Kandev uses the existing GitHub PR poller, so a merge can take up to one minute to be
+noticed. There is no backfill sweep when you create or enable the condition: it fires on
+the first qualifying `github.task_pr.updated` event. Linking an already-merged PR, or a
+later sync that changes a merged PR row, can therefore qualify that task once.
+
+Each firing creates a hidden automation run task and carries the linked task id as
+`{{data.task_id}}`. The default prompt asks the agent to call `archive_task_kandev` for
+that task. The backend also binds the run to the event-selected task, so a missing or
+different archive target is rejected before any task is changed. An already archived
+target is safe and reports `already_archived`.
+
+The merge is deduplicated per automation, task, repository, and pull-request number. A
+concurrency-cap skip or a failure before a task is created does not consume that key, but
+there is no durable retry queue; another PR update must arrive for it to be tried again.
+**Run now** creates a manual run without a linked task id, so it tests the automation but
+does not replay a missed merge.
+
 ### GitHub push and CI checks
 
 Push and CI-check conditions are webhook-driven rather than polled. They require a workspace GitHub App connection (Settings > Workspaces > _workspace_ > GitHub) whose installation is subscribed to the `push` and `check_run` events. When the App delivers a matching, HMAC-verified webhook, the installation is resolved to its workspace and the matching automation fires.

@@ -223,6 +223,81 @@ func TestGitHubPRMergedSubscriberWrongPayloadType(t *testing.T) {
 	}
 }
 
+// TestGitHubPRMergedSubscriberAcceptsJSONDecodedPayload verifies the NATS wire
+// representation is normalized to the same TaskPR accepted by the in-memory
+// bus. NATS decodes Event.Data into an untyped JSON object.
+func TestGitHubPRMergedSubscriberAcceptsJSONDecodedPayload(t *testing.T) {
+	svc := newPRMergedTestService(t)
+	lookup := &fakeTaskOriginLookup{
+		results: map[string]fakeOriginResult{
+			"t_abc123": {workspaceID: "ws-1", ok: true},
+		},
+	}
+	newPRMergedSubscriber(t, svc, lookup)
+	fired := subscribeAutomationTriggered(t, svc.eventBus)
+
+	a := createTestAutomation(t, svc, "ws-1")
+	addTestTrigger(t, svc, a.ID, TriggerTypeGitHubPRMerged, GitHubPRMergedTriggerConfig{AllRepos: true})
+
+	wireData, err := json.Marshal(mergedPR())
+	if err != nil {
+		t.Fatalf("marshal TaskPR: %v", err)
+	}
+	var decodedData map[string]interface{}
+	if err := json.Unmarshal(wireData, &decodedData); err != nil {
+		t.Fatalf("unmarshal TaskPR wire data: %v", err)
+	}
+	if err := svc.eventBus.Publish(context.Background(), events.GitHubTaskPRUpdated, bus.NewEvent(
+		events.GitHubTaskPRUpdated, "nats-wire", decodedData,
+	)); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+
+	select {
+	case evt := <-fired:
+		if evt.AutomationID != a.ID {
+			t.Fatalf("unexpected automation id: %q", evt.AutomationID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected AutomationTriggered event for JSON-decoded payload")
+	}
+}
+
+// TestGitHubPRMergedSubscriberLateLookupRecovers verifies that the subscriber
+// remains attached when the lookup is temporarily unwired and starts working
+// on the next event after the lookup is installed.
+func TestGitHubPRMergedSubscriberLateLookupRecovers(t *testing.T) {
+	svc := newPRMergedTestService(t)
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("NewFromZap: %v", err)
+	}
+	sub := NewGitHubPRMergedSubscriber(svc, svc.eventBus, log)
+	t.Cleanup(sub.Stop)
+	sub.Start(context.Background())
+
+	lookup := &fakeTaskOriginLookup{
+		results: map[string]fakeOriginResult{
+			"t_abc123": {workspaceID: "ws-1", ok: true},
+		},
+	}
+	svc.SetTaskOriginLookup(lookup)
+	fired := subscribeAutomationTriggered(t, svc.eventBus)
+
+	a := createTestAutomation(t, svc, "ws-1")
+	addTestTrigger(t, svc, a.ID, TriggerTypeGitHubPRMerged, GitHubPRMergedTriggerConfig{AllRepos: true})
+	publishPRUpdated(t, svc, mergedPR())
+
+	select {
+	case evt := <-fired:
+		if evt.AutomationID != a.ID {
+			t.Fatalf("unexpected automation id: %q", evt.AutomationID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected AutomationTriggered event after late lookup wiring")
+	}
+}
+
 // TestGitHubPRMergedSubscriberStateVariants verifies gate 3 allows
 // case-insensitive "Merged" / " merged " variants.
 func TestGitHubPRMergedSubscriberStateVariants(t *testing.T) {
@@ -583,7 +658,8 @@ func TestGitHubPRMergedSubscriberStartIdempotent(t *testing.T) {
 
 // TestGitHubPRMergedSubscriberStartWithNilLookup verifies that Start with no
 // lookup wired sets started=true (subsequent starts are no-ops), emits exactly
-// one warn log naming github_pr_merged, and does not subscribe to the bus.
+// one warn log naming github_pr_merged, and remains subscribed for late lookup
+// wiring.
 // Spec lines 1368-1371: "emits exactly one log line at warn naming github_pr_merged."
 func TestGitHubPRMergedSubscriberStartWithNilLookup(t *testing.T) {
 	svc := newPRMergedTestService(t)
@@ -601,8 +677,8 @@ func TestGitHubPRMergedSubscriberStartWithNilLookup(t *testing.T) {
 	if !sub.started {
 		t.Fatal("started should be true even when lookup is nil")
 	}
-	if sub.sub != nil {
-		t.Fatal("sub should not have subscribed when lookup is nil")
+	if sub.sub == nil {
+		t.Fatal("sub should subscribe even when lookup is nil")
 	}
 
 	entries := obs.All()

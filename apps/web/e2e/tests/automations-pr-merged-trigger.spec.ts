@@ -153,7 +153,6 @@ test.describe("automations — Pull request merged trigger", () => {
 
     await testPage.goto(`/settings/workspace/${seedData.workspaceId}/automations/${automation.id}`);
     await testPage.getByTestId("automation-editor").waitFor({ state: "visible", timeout: 15_000 });
-
     // Expand the trigger card
     await testPage
       .getByRole("button", { name: /PR merged/i })
@@ -251,7 +250,6 @@ test.describe("automations — Pull request merged trigger", () => {
 
     await testPage.goto(`/settings/workspace/${seedData.workspaceId}/automations/${automation.id}`);
     await testPage.getByTestId("automation-editor").waitFor({ state: "visible", timeout: 15_000 });
-
     // Expand the trigger card
     await testPage
       .getByRole("button", { name: /PR merged/i })
@@ -270,6 +268,12 @@ test.describe("automations — Pull request merged trigger", () => {
     });
     await allReposSwitch.click();
     await expect(allReposSwitch).toBeChecked();
+    // Wait for the parent draft to render the cleared repository list before
+    // submitting. The switch updates first; saving in that intermediate render
+    // can otherwise race the config state update when the suite runs in full.
+    await expect(testPage.getByText("acme/api", { exact: true })).not.toBeVisible({
+      timeout: 5_000,
+    });
 
     const automationsPage = new AutomationsPage(testPage, seedData.workspaceId);
 
@@ -420,6 +424,51 @@ test.describe("automations — Pull request merged trigger", () => {
     // Target task should no longer appear in the active task list
     const { tasks } = await apiClient.listTasks(seedData.workspaceId);
     expect(tasks.find((t) => t.id === target.id)).toBeUndefined();
+  });
+
+  test("agent behavior: a wrong same-owner archive target is rejected", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const target = await apiClient.createTask(seedData.workspaceId, "Bound Archive Target", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    const decoy = await apiClient.createTask(seedData.workspaceId, "Same Owner Decoy", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    const automation = await apiClient.seedAutomation({
+      workspaceId: seedData.workspaceId,
+      name: "Reject Wrong Archive Target",
+      workflowId: seedData.workflowId,
+      workflowStepId: seedData.startStepId,
+      prompt: `e2e:mcp:kandev:archive_task_kandev({"task_id":"${decoy.id}"})\ne2e:message("wrong-target-rejected")`,
+      agentProfileId: seedData.agentProfileId,
+    });
+    await apiClient.seedTrigger({
+      automationId: automation.id,
+      type: "github_pr_merged",
+      config: { all_repos: true, repos: [], base_branches: [] },
+      enabled: true,
+    });
+
+    const { run_task_id } = await apiClient.firePRMerged({
+      taskId: target.id,
+      automationId: automation.id,
+      owner: "acme",
+      repo: "api",
+    });
+
+    await testPage.goto(`/t/${run_task_id}`);
+    await expect(testPage.getByText("wrong-target-rejected", { exact: true })).toBeVisible({
+      timeout: 30_000,
+    });
+
+    const { tasks } = await apiClient.listTasks(seedData.workspaceId);
+    expect(tasks.find((task) => task.id === target.id)).toBeDefined();
+    expect(tasks.find((task) => task.id === decoy.id)).toBeDefined();
   });
 
   test("agent behavior: archive_task_kandev on an already-archived target succeeds and run completes", async ({

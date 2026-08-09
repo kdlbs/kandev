@@ -134,3 +134,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-08-agentctl-crash-containment | [Publish Immutable Agent Events and Explicit Runtime Failure State](2026-08-08-agentctl-crash-containment.md) | proposed | backend, frontend, protocol, operations | 2026-08-08 |
 | 2026-08-08-workspace-scoped-task-create-workflow-memory | [Remember Task-Create Workflows Per Workspace](2026-08-08-workspace-scoped-task-create-workflow-memory.md) | accepted | backend, frontend | 2026-08-08 |
 | 2026-08-08-task-owned-worktree-lifetime | [Keep Worktree Ownership at the Task Lifecycle](2026-08-08-task-owned-worktree-lifetime.md) | accepted | backend, frontend | 2026-08-08 |
+| 2026-08-09-bind-automation-mutations-to-event-targets | [Bind Automation Mutations to Event Targets](2026-08-09-bind-automation-mutations-to-event-targets.md) | accepted | backend, agentctl, protocol, security, workflow | 2026-08-09 |

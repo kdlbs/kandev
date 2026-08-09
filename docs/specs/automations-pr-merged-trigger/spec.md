@@ -1,7 +1,10 @@
 ---
 status: draft
 created: 2026-08-09
+updated: 2026-08-09
 owner: nova28
+decisions:
+  - ../../decisions/2026-08-09-bind-automation-mutations-to-event-targets.md
 ---
 
 # Automations — "Pull request merged" trigger
@@ -61,9 +64,10 @@ tries to archive it. [Failure modes](#failure-modes) carries the row.
 - The firing carries the **id of the task the merged PR was linked to** into the
   trigger data, reachable in the prompt and title templates as `{{data.task_id}}`.
 - The automation's default prompt instructs the spawned agent to archive exactly that
-  task through the `archive_task_kandev` MCP tool. Archiving stays an agent action;
-  this feature adds **no native "archive" action type** to the engine (see
-  [Out of scope](#out-of-scope)).
+  task through the `archive_task_kandev` MCP tool. Archiving stays an agent action and
+  this feature adds no native action type, but the target is enforced structurally: the
+  run task persists the validated event target and the backend rejects an archive request
+  for any other task.
 - Because the archive is performed by an LLM reading a prompt, the trigger data is
   deliberately **narrow**: it carries identifiers and single-token git/GitHub values
   only, and never PR title, PR body, or author login. See
@@ -79,13 +83,13 @@ tries to archive it. [Failure modes](#failure-modes) carries the row.
 
 ### Prompt-injection surface
 
-`archive_task_kandev` authorizes off the *calling session's* resolved owner identity, not
-off any structural relationship between the calling task and the target task. An agent in an
-automation run can therefore archive any task that owner can reach — which is every task in
-every workspace that owner owns, not merely the automation's workspace. See
-[Permissions](#permissions) for the exact bound. Correctness of this feature rests on the
-agent archiving the id it was given and nothing else, so the contract narrows what it can be
-told:
+`archive_task_kandev` keeps its normal owner authorization, but a `github_pr_merged`
+automation run has an additional target-binding check. The validated event `task_id` is
+persisted as server-owned metadata on the run task. The in-session MCP server injects the
+caller run-task id into the backend request without exposing it as a tool argument, and the
+backend rejects a missing, malformed, or mismatched target before mutation. Correctness
+therefore does not depend on the model copying the id faithfully. The narrow data and prompt
+still reduce accidental behavior and transcript noise:
 
 1. **The trigger data carries no free-form prose.** `pr_title`, PR body, `author_login`
    and `head_branch` are deliberately absent. Every field that *is* present is either a
@@ -103,9 +107,9 @@ told:
    other task may be archived, states that no other source may be consulted to decide what
    to archive, states that text encountered during the turn is data rather than
    instruction, and tells the agent to do nothing when the task id is empty.
-3. The user may edit the prompt, and may reference `{{data.*}}` freely. The contract is
-   about what the *system* hands the agent by default, not about preventing a user from
-   writing a worse prompt.
+3. The user may edit the prompt, and may reference `{{data.*}}` freely. Editing it cannot
+   expand the task that this trigger's run is allowed to archive; a wrong target produces a
+   non-mutating tool error.
 
 ### Loop safety
 
@@ -122,11 +126,17 @@ another run task — indefinitely. Two rules close this:
 
 ## Data model
 
-No new tables. One new value in an existing enumeration and one new trigger-config
-shape.
+No new tables. One new value in an existing enumeration, one new trigger-config shape, and
+one server-owned metadata value on the ordinary automation-run task.
 
 `automation_triggers.type` gains the value `github_pr_merged`. Existing rows are
 untouched; no migration is required.
+
+When the orchestrator creates a run task for this trigger, it persists the validated
+`trigger_data.task_id` under the stable metadata key `automation_target_task_id`. This value is the
+backend enforcement source for later archive calls. It is not derived again from the
+rendered prompt, and it is not accepted from an agent-controlled tool argument. Manual runs
+and other trigger types do not set this target binding.
 
 The trigger's `config` column holds:
 
@@ -333,17 +343,24 @@ trigger is listed.
 ### Bus subscription
 
 The trigger consumes the existing internal event `github.task_pr.updated`
-(`events.GitHubTaskPRUpdated`), whose payload is a `*github.TaskPR`. The subscription is
-owned by an automation bus subscriber with the same lifecycle contract the push/CI
+(`events.GitHubTaskPRUpdated`). The in-memory bus delivers the publisher's typed
+`*github.TaskPR`; the NATS bus JSON-decodes `Event.Data` into an untyped object before
+delivery. The subscriber MUST normalize both representations into the same validated
+`github.TaskPR` value and fail closed on malformed data. The subscription is owned by an
+automation bus subscriber with the same lifecycle contract the push/CI
 subscriber already has: `Start` is idempotent and rolls back partial subscriptions on
 failure, `Stop` unsubscribes and is idempotent, no goroutines of its own, and it starts
 and stops with the automation components.
 
 #### Start-up ordering is part of this contract, not an implementation detail
 
-**The automation components MUST start before the GitHub poller.** This is a required
+**The full consumer chain MUST start before the GitHub poller.** This is a required
 ordering, not a preference, and it is what makes the down-time recovery guarantee in
-[Persistence guarantees](#persistence-guarantees) true rather than aspirational.
+[Persistence guarantees](#persistence-guarantees) true rather than aspirational:
+
+1. the orchestrator starts and subscribes to `automation.triggered`;
+2. the automation components start and subscribe to `github.task_pr.updated`;
+3. the GitHub poller starts and may run its immediate reconciliation sweep.
 
 The reason is that the event is ephemeral. `prMonitorLoop` runs its first `checkPRWatches`
 **immediately**, before its first ticker wait — the comment on that line says so outright
@@ -355,13 +372,13 @@ is not guaranteed to publish again from the lifecycle path. So a subscription th
 after that sweep does not merely arrive late — it misses the only notification that PR will
 produce, permanently.
 
-**Today the order is the wrong way round**, which is why this is stated as a change rather
-than as an observation: in `internal/backendapp/main.go` the GitHub poller is started inside
-the `services.GitHub != nil` block, and `services.Automation.Start(ctx)` runs in a separate,
-later `services.Automation != nil` block. The two blocks are independent — the automation
-block depends only on `orchestratorSvc.SetAutomationService(...)` immediately above it — so
-moving the automation block above the GitHub block satisfies this requirement without
-reordering anything else.
+**Today the full order is wrong**, which is why this is stated as a change rather than as an
+observation. Starting the automation subscriber before the GitHub block is not sufficient:
+`orchestratorSvc.Start(ctx)`, which subscribes to `automation.triggered`, currently runs later
+inside `startGatewayAndServe`. Component start-up must move to the point immediately after
+that successful orchestrator start, while service construction and dependency wiring remain
+earlier. Cleanup is registered in reverse dependency order so the poller stops before its
+consumers.
 
 This ordering also constrains where the lookup is wired; see
 [the wiring seam](#task-lookup).
@@ -439,15 +456,13 @@ lookup wired at construction → automation components started → GitHub poller
 
 The subscriber reads it from the service; it does not hold its own copy.
 
-**The subscriber reads the lookup live, per event — it does not snapshot at `Start`.** That
-follows from "it does not hold its own copy" and is stated because the two readings behave
-differently if the wiring order is ever broken: with a live read, a lookup wired late begins
-working from the next event onward, whereas a snapshot would leave the trigger type
-permanently inert. The consequence is that **the start-up log line is advisory, not
-authoritative** — it reports the state at start-up, which is the true state in every
-supported configuration, but it is not a guarantee about the rest of the process's life.
-Nothing enforces the wiring order mechanically; wiring it late is unsupported rather than
-detected.
+**The subscriber reads the lookup live, per event — it does not snapshot at `Start`.**
+`Start` MUST subscribe even when no lookup is currently wired. With a live read, the
+subscriber fails closed while the lookup is absent and begins working on the next event
+after a lookup is wired. Returning successfully without subscribing would make the
+`started` flag permanent and contradict this recovery contract. The start-up log line is
+therefore advisory: it reports the state at start-up, not the state for the rest of the
+process's life.
 
 **When no lookup is wired, `github_pr_merged` MUST NOT fire at all.** This is a
 fail-closed rule, not an optional validation: without the lookup neither the
@@ -464,7 +479,8 @@ degree rather than left as "logged once at start-up".
   it subscribed and whether a lookup is present, and it is the same place the existing
   push/CI subscriber already logs its own started/failed lines.
 - **Unwired branch — level `warn`, emitted exactly once per `Start`.** It MUST name the
-  trigger type `github_pr_merged` and state that it will not fire. `warn` rather than
+  trigger type `github_pr_merged` and state that events will fail closed until the lookup is
+  available. `warn` rather than
   `error` because the process is healthy and every other trigger type still works; `warn`
   rather than `info` because a silently inert condition is a misconfiguration an operator
   needs to see.
@@ -589,7 +605,8 @@ observable and both scenario-covered.
 event is dropped and **no trigger is evaluated or listed at all** — the trigger table is
 never queried:
 
-1. **Payload** — the event data is a non-nil `*github.TaskPR`.
+1. **Payload** — the event data normalizes from either a non-nil typed `*github.TaskPR` or
+   its NATS JSON-decoded object representation into a valid `github.TaskPR`.
 2. **Task id present** — `TaskID` is non-empty. There is nothing to archive otherwise.
 3. **Merged** — `State`, trimmed and compared case-insensitively, equals `merged`.
    `MergedAt` is deliberately **not** part of this test: some sync paths persist the
@@ -912,30 +929,22 @@ precisely so the common case never has to be diagnosed from either.
 - In an unowned workspace (pre-auth rows), in-session MCP scopes to the unowned sentinel,
   which reaches unowned rows only. The target task is in the same unowned workspace, so
   it remains reachable.
-- **The reach is owner-scoped, not workspace-scoped — stated accurately, because the trade
-  in [Out of scope](#out-of-scope) is argued against this number.** `handleArchiveTask`
-  performs no workspace check of its own; it calls `ArchiveTask` under the identity that
-  in-session MCP scope resolution attached, and that resolution resolves the **owner of the
-  run task's workspace**, not a workspace boundary. So an agent that ignores its prompt can
-  reach every task that owner can reach — which spans **every workspace that owner owns**,
-  not only the automation's. Where the workspace has no owner, the reach is the unowned
-  sentinel's: all unowned rows.
+- The existing owner authorization remains necessary but is no longer the only bound.
+  `handleArchiveTask` receives the current MCP run-task id as server-injected context. For a
+  `github_pr_merged` automation run, it loads that caller and requires the requested target
+  to equal the persisted event target before calling `ArchiveTask`. The agent cannot choose
+  or override the caller id through the tool schema.
 - What gate 8 does and does not buy: it guarantees the **intended** target is reachable **at
   the moment the trigger fires**, so the archive the feature is for cannot fail on
   authorization for any reason present at that moment. It is a point-in-time check, not a
   standing guarantee — the archive itself happens minutes later inside the agent's turn, and
   `tasks.workspace_id` is writable, so a target moved to another workspace (or a workspace
   whose owner changes) in that window can still be denied. [Failure modes](#failure-modes)
-  carries the row. It bounds nothing about what else is reachable. **No cross-user reach is created by this feature; cross-workspace reach
-  within one owner's own workspaces already exists and is not narrowed here.** The earlier
-  claim that this feature creates no cross-workspace reach was wrong and is withdrawn.
-- Why the trade still stands on the corrected number: the residual is bounded by *one
-  owner's own* data, the agent is given a single id and a prompt that forbids consulting any
-  other source, the data map carries no attacker-controlled prose (see
-  [Prompt-injection surface](#prompt-injection-surface)), and every archive is a reversible,
-  audited tool call rather than a delete. Closing it structurally would require the engine to
-  verify that the archived task is the one the trigger named, which needs the native action
-  this spec deliberately excludes.
+  carries the row. The generic tool remains owner-scoped for other callers, but this run's
+  target-binding check narrows the mutation to the event-selected task.
+- A missing binding, a malformed target value, or a requested id mismatch fails closed and
+  archives nothing. Other task sessions and other trigger types keep the existing generic
+  owner-scoped archive behavior.
 - The trigger never archives anything itself. Every archive in this flow is an agent tool
   call, audited as such.
 
@@ -943,15 +952,15 @@ precisely so the common case never has to be diagnosed from either.
 
 | Condition | Behavior |
 |---|---|
-| Event payload is nil or not a `*github.TaskPR` | Ignored; no error surfaced; no trigger evaluated. |
+| Event payload is nil, malformed, or neither a typed `TaskPR` nor its NATS JSON object form | Ignored; no trigger evaluated. |
 | Listing enabled `github_pr_merged` triggers fails | Logged at error; the event is dropped. No retry. |
 | A trigger's `config` JSON is invalid | That trigger is skipped with a debug log; the other triggers for the same event are still evaluated. |
 | The trigger's automation cannot be loaded **at fire time** (inside `FireTrigger`, synchronously, before any row is written) | That trigger is skipped with a debug log and **no run row of any status** — `FireTrigger` returns a skip result the subscriber discards. This is the *first* of two stages at which "automation not found" can be observed; the next row is the other. |
 | The trigger's automation cannot be loaded **at task-creation time** (the orchestrator's later, asynchronous reload on its own goroutine) | `recordFailedRun` writes a **`failed`** run row carrying an **empty** `dedup_key`, so the run log *does* show a row for this one. Both stages fail closed and create no task; they differ only in whether a row is visible. Named because the write-site table's third row lists "automation not found" among `recordFailedRun`'s call sites, and without the stage split that reads as contradicting the row above. |
 | Task lookup cannot resolve the task (row missing or deleted) | Fail closed: no trigger is listed and no run row is written. Logged at **debug** — an ordinary outcome. |
 | Task lookup fails for an infrastructural reason (query error) | The adapter collapses it to `ok == false`, so it fails closed identically — but it is logged at **warn** with the task id and the underlying error, because nothing else records that a merge was dropped for a reason that was not the data's fault. See [Task lookup](#task-lookup). |
-| No task lookup wired | Fail closed: the trigger type never fires. **The subscriber's `Start` emits exactly one log line, at `warn`**, naming `github_pr_merged` and stating that it will not fire because no task-origin lookup is wired. See [the start-up log line](#the-start-up-log-line-is-pinned) for the emitter, the level, and the wired-branch counterpart. |
-| The automation components start **after** the GitHub poller | Unsupported configuration. The poller's immediate startup sweep publishes into a bus with no automation subscriber attached, so a merge that landed during the outage is dropped and may never republish. Nothing detects this at runtime — the ordering is a build-time requirement, not a checked invariant. See [Bus subscription](#start-up-ordering-is-part-of-this-contract-not-an-implementation-detail). |
+| No task lookup wired | Fail closed for each event. **The subscriber still subscribes**, and its `Start` emits exactly one `warn` naming `github_pr_merged`; if the lookup is wired later, the next event is evaluated normally. |
+| The orchestrator or automation subscriber starts **after** the GitHub poller | Unsupported configuration. The poller's immediate startup sweep can publish into a chain with a missing consumer, so a merge that landed during the outage is dropped and may never republish. See [Bus subscription](#start-up-ordering-is-part-of-this-contract-not-an-implementation-detail). |
 | `PRNumber <= 0`, or `Owner` / `Repo` empty | Fail closed at the per-event gates; no trigger is listed. |
 | `PRURL` empty | Not a gate. The trigger fires and `{{data.pr_url}}` renders as an empty string. |
 | `FireTrigger` returns an error (dedup-query failure, cap-count failure, publish failure) | Logged at error. **Not retried within this event**, and **no run row of any kind is written** — these paths return before any row is created, so the run log shows nothing. A later `github.task_pr.updated` for the same row is admitted, because no task was created and therefore the key was never consumed (see [Idempotency](#which-runs-consume-the-dedup-key)) — but no such event is guaranteed to arrive. **Manual Run is not a recourse for this trigger type** (next row). |
@@ -961,7 +970,7 @@ precisely so the common case never has to be diagnosed from either.
 | The target task has been deleted | The agent's `archive_task_kandev` call fails and the agent reports the error. The **run is still recorded as `succeeded`** if the turn itself ended cleanly — run status reflects the turn, never the archive (see [Run task shape](#run-task-shape)). Nothing else is archived; the transcript is the evidence. |
 | A review watch with `cleanup_policy: auto` deletes the target **before** the per-event task lookup | The lookup cannot resolve the task, so gate 6 fails, **no trigger is listed and no run row is created at all**. There is no tool call and nothing to succeed or fail. This is the more likely of the two phases, because both subsystems react to the same merge and the watch does not have to create a task first. See [Why](#why). |
 | A review watch with `cleanup_policy: auto` deletes the target **after** the run has started | The lookup succeeded, so a run task exists and an agent is running. The agent's `archive_task_kandev` call then fails and it reports the error; the run is still recorded as `succeeded` if the turn ended cleanly. Same observable as the deleted-target row above. |
-| The agent archives the wrong task | Not defended against structurally — see [Prompt-injection surface](#prompt-injection-surface). Mitigated by the narrow data map and the pinned default prompt. |
+| A `github_pr_merged` run asks to archive a task other than its persisted event target, or its binding metadata is missing/malformed | Rejected before mutation; no task is archived. The tool returns an error and the transcript records it. |
 | The automation is at `max_concurrent_runs` | A `skipped` run row is recorded with the cap as its reason, carrying an **empty** `dedup_key` — so no task was created and the key is not consumed, and a later event for the same PR is admitted. If no later event arrives, the task is never archived and there is no automatic recovery; this is the accepted residual recorded in [Idempotency](#which-runs-consume-the-dedup-key). |
 | The automation is at `max_concurrent_runs` and further matching events keep arriving | **Each one writes another `skipped` row.** Nothing collapses them, because the rows carry no key to match on. The run log shows several identical skip rows for one pull request and the summary reads `skipped` until **a later firing records a row** — freeing the cap slot writes nothing and recomputes nothing, so the summary does not clear on its own. Accepted, and bounded by the number of post-merge sync events for that PR — see [Idempotency](#which-runs-consume-the-dedup-key). |
 | The workspace has no repository | The firing is recorded as a `failed` run with "no repository available", carrying an **empty** `dedup_key` — no task was created, so the key is not consumed. |
@@ -1200,8 +1209,8 @@ Three consequences, all intended and all scenario-covered:
 - The subscription itself is process-local and is re-established on start-up.
 - A merge that happens while Kandev is **down** is detected on the first poll after
   start-up: the row still reads `open`, the sync writes `merged`, the change publishes,
-  and the trigger fires. **This guarantee holds only because the automation components
-  start before the GitHub poller**, which
+  and the trigger fires. **This guarantee holds only because the orchestrator event
+  subscription and then the automation components start before the GitHub poller**, which
   [Bus subscription](#start-up-ordering-is-part-of-this-contract-not-an-implementation-detail)
   requires. It is stated as a dependency rather than left implicit because the dependency is
   not obvious and the failure is silent: `prMonitorLoop` runs its first `checkPRWatches`
@@ -1209,10 +1218,9 @@ Three consequences, all intended and all scenario-covered:
   event into a bus with no automation subscriber attached, the event is dropped, and — since
   the row is now persisted as merged — the PR may never publish a qualifying event again.
   The overnight-merge case is the single most likely real-world path into this feature, so
-  this ordering is load-bearing rather than incidental. **The end-to-end down-time-recovery
-  scenario is its sole observable** — nothing asserts the wiring order directly, because no
-  seam exists to assert it on; see the Engine-integration group under
-  [Scenarios](#scenarios) for why, and for the two shortcuts that are forbidden there.
+  this ordering is load-bearing rather than incidental. The end-to-end down-time-recovery
+  scenario is the required observable; an extracted start helper may support that test, but
+  a source-line ordering assertion may not substitute for the behavior.
 - A merge that was already **persisted** as merged before the outage is a different case,
   and the honest answer is that it **may or may not** fire. It will not be republished by
   `reconcileTaskPRLifecycle` — that path publishes only on `state` / `merged_at` /
@@ -1231,6 +1239,12 @@ Three consequences, all intended and all scenario-covered:
 
 Detection and matching:
 
+- **GIVEN** the same valid `github.task_pr.updated` event delivered once by the in-memory
+  bus as `*github.TaskPR` and once through the NATS JSON wire representation, **WHEN** the
+  subscriber evaluates each delivery, **THEN** both normalize to the same trigger data and
+  firing decision.
+- **GIVEN** a malformed NATS-decoded event object, **WHEN** it is delivered, **THEN** it is
+  ignored without listing or firing a trigger.
 - **GIVEN** an enabled automation in workspace W with a `github_pr_merged` trigger and
   `all_repos: true`, **AND** task T in W with a linked PR `acme/api#7` in state `open`,
   **WHEN** the PR poller observes the PR is merged, **THEN** the automation fires once and
@@ -1365,6 +1379,9 @@ Scoping and safety:
   not a `failed` run, not a `skipped` run, nothing.
 - **GIVEN** no task lookup is wired, **WHEN** any merged-PR event arrives, **THEN** no
   `github_pr_merged` trigger fires.
+- **GIVEN** the subscriber starts before a task lookup is wired, **WHEN** the lookup is
+  installed later and a subsequent valid event arrives, **THEN** that event is evaluated
+  and can fire without restarting or re-subscribing the subscriber.
 - **GIVEN** no task lookup is wired, **WHEN** the automation bus subscriber's `Start` runs,
   **THEN** it emits exactly **one** log line at **`warn`** naming `github_pr_merged` and
   stating the type will not fire. Asserted on the level and the trigger-type name, because
@@ -1392,24 +1409,15 @@ Scoping and safety:
 
 Engine integration:
 
-- **The start-up ordering's ONLY observable is the down-time-recovery scenario immediately
-  below. No separate assertion on the start-up wiring is required, and none may be added.**
-  This is stated rather than left implied because the obvious reading — assert the start
-  order directly — has no seam to attach to: both starts sit inside
-  `startAgentInfrastructure`, a single `//nolint:funlen` function with no ordered-start
-  helper, no injectable start list and no return value exposing order, and no test in
-  `internal/backendapp` asserts the relative start order of two blocks today. Two things a
-  builder might reach for are therefore **forbidden**: refactoring
-  `startAgentInfrastructure` to create such a seam (unscoped structural work in a file this
-  change already touches for one block move), and a source-order or line-number assertion
-  (no precedent in this repo, and it breaks on any unrelated edit above it). The behaviour
-  the ordering exists for is what gets asserted; the ordering itself stays a build-time
-  requirement, per [Out of scope](#out-of-scope). See
-  [Bus subscription](#start-up-ordering-is-part-of-this-contract-not-an-implementation-detail).
+- The ordering is proved behaviorally, not with a source-line assertion. A narrow helper or
+  fake component seam may be extracted if needed to drive the real start sequence, but it
+  must preserve production ownership and must not introduce a subscriber-to-poller
+  dependency.
 - **GIVEN** a linked PR whose row still reads `open` while Kandev is down, **AND** the PR was
   merged during that outage, **WHEN** Kandev starts and the poller's first `checkPRWatches`
-  sweep runs, **THEN** the automation subscriber is already attached, the merged-state event
-  is delivered, and the trigger fires. This is the down-time recovery guarantee in
+  sweep runs, **THEN** the orchestrator's automation-event subscription and the merged-PR
+  subscriber are already attached, the merged-state event is delivered, and the trigger
+  fires. This is the down-time recovery guarantee in
   [Persistence guarantees](#persistence-guarantees), observed end to end rather than assumed.
 - **GIVEN** a matching firing whose task was created but whose `recordSuccessRun` write
   **fails**, **WHEN** the firing completes, **THEN** the created task is deleted, **no run
@@ -1487,6 +1495,15 @@ covered separately and mechanically by the exact-match registry assertion in the
 - **GIVEN** a run task launched by this trigger and a scripted agent that archives the id it
   is given, **WHEN** the run executes, **THEN** `archive_task_kandev` is called with the id
   from `{{data.task_id}}` and the target task becomes archived.
+- **GIVEN** a run task launched by this trigger and a scripted agent that supplies a
+  different task id reachable by the same owner, **WHEN** it calls `archive_task_kandev`,
+  **THEN** the backend rejects the request and neither task is mutated.
+- **GIVEN** a `github_pr_merged` automation run whose target-binding metadata is absent or
+  malformed, **WHEN** it calls `archive_task_kandev`, **THEN** the backend fails closed and
+  archives nothing.
+- **GIVEN** an ordinary task session or an automation run from another trigger type,
+  **WHEN** it calls `archive_task_kandev` for an owner-authorized target, **THEN** its
+  existing behavior is unchanged.
 - **GIVEN** the target task is already archived, **WHEN** the scripted agent calls
   `archive_task_kandev`, **THEN** the call succeeds with `already_archived: true` and the
   run is recorded as succeeded.
@@ -1576,6 +1593,12 @@ Editor:
   backend, as for every other trigger type), while the **list-page badge** renders a
   **frontend** i18n key, `automations:triggerLabelGithubPrMerged`. Neither substitutes for
   the other; a build that adds only the registry entry does not compile.
+- **GIVEN** the mobile Chrome settings flow, **WHEN** the user selects this trigger, changes
+  repository and base-branch settings, saves, and reopens it, **THEN** the configuration
+  round-trips using the same state as desktop, the page has no horizontal overflow, and all
+  controls remain visible and touch-operable.
+- **GIVEN** assistive technology focuses the base-branch field, **WHEN** its accessible name
+  is computed, **THEN** it is associated with the localized base-branch label.
 
 ## Out of scope
 
@@ -1584,10 +1607,8 @@ Editor:
   re-consent. The ~60s poller latency is accepted in exchange, and is stated in the
   condition's own description so users are not surprised by it.
 - **No native "archive" action type.** The engine's only action stays "create and start a
-  task". Archiving remains an agent MCP call. This was an explicit trade — reusing the
-  existing action keeps the engine single-purpose — and the injection risk it creates is
-  answered by the narrow data map and narrow default prompt rather than by adding a
-  deterministic action. A future change of mind is a new spec, not an amendment.
+  task". Archiving remains an agent MCP call. The backend mutation boundary enforces the
+  event-selected target, so deterministic safety does not require a second action model.
 - **No change to the existing `github_pr` trigger's behavior, with ONE named carve-out.**
   Its open-PR polling, its `all_repos` editor-only key, and its repository-picker
   disablement are untouched, and it continues to receive no `workspaceId` so its selector
@@ -1616,25 +1637,18 @@ Editor:
   [Idempotency](#which-runs-consume-the-dedup-key) instead. It is also the correct fix if the
   cap-skip noise or the unretried-merge residual ever needs tightening — not storing the key
   on the rows the consume rule needs keyless.
-- **No mechanical enforcement of the start-up ordering, and no direct assertion on it
-  either.** The requirement that the automation components start before the GitHub poller is
-  a build-time constraint whose only observable is the end-to-end down-time-recovery
-  scenario. Nothing detects a violation at runtime — no assertion, no panic — and nothing
-  detects it at test time either, so a future refactor that reorders the two blocks fails
-  that one behavioural scenario and nothing else. Accepted for two reasons: a runtime guard
-  would need the subscriber to know about the poller, a dependency this spec will not add;
-  and a test-time guard would need a start-ordering seam inside
-  `startAgentInfrastructure` that does not exist and is not in scope to create. See
-  [Bus subscription](#start-up-ordering-is-part-of-this-contract-not-an-implementation-detail)
-  and the Engine-integration group under [Scenarios](#scenarios).
+- **No runtime dependency between the subscriber and poller.** Start-up order is expressed
+  by backend composition and proved through the down-time-recovery behavior; the subscriber
+  does not gain a reference to the GitHub poller or a production-only readiness assertion.
 - **No per-row observation checkpoint.** Distinguishing "this PR just merged" from "this PR
   was already merged when we first saw it" would require persisting a prior-state marker per
   linked PR. That is not built; the consequences are stated under
   [Retroactivity](#retroactivity-and-first-observation-semantics) instead.
 - **No test of a real model's judgement.** The agent-behavior scenarios run against the
   scripted mock agent. Whether a frontier model can be induced to archive the wrong task is
-  not something this spec's tests answer — the structural answer is the narrow data map and
-  the pinned prompt, and the residual is accepted here.
+  not something this spec's tests answer. The backend target binding makes that judgment
+  irrelevant to which task can be mutated; the narrow data map and pinned prompt still make
+  the intended action clear.
 - **No change to `HasRunWithDedupKey` at all.** Not its signature, not its query, not its
   meaning for any trigger type. The consume rule is implemented on the **write** side by
   controlling what goes into `automation_runs.dedup_key`, so `github_push` and `github_ci`
@@ -1668,8 +1682,8 @@ Editor:
   **must not** be built: it would require the per-row observation checkpoint excluded in the
   very next bullet, so a builder who implemented it would be stuck between two out-of-scope
   bullets.
-- **No structural authorization of the archive.** The engine does not verify that the task
-  an agent archives is the one the trigger named. That check would require a native action
-  and is excluded above.
+- **No global restriction on the generic archive tool.** Target binding applies only when
+  the caller is a `github_pr_merged` automation run with an authoritative event target.
+  Other callers keep their existing owner-authorized behavior.
 - **No per-trigger author, label or draft filters.** A merged PR is a merged PR; the
   repository and base branch are the only axes offered.
