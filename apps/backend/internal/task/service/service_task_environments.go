@@ -383,50 +383,87 @@ func (s *Service) teardownEnvironmentResources(ctx context.Context, env *models.
 }
 
 // teardownEnvironmentWorktrees destroys every repo's worktree recorded on
-// env: the legacy singular WorktreeID plus every Repos[] entry, de-duped so a
-// row that mirrors the legacy field (single-repo environments predating the
-// multi-repo backfill, or a multi-repo environment whose first repo matches)
-// is only destroyed once. Resolves by path/repository, not ID alone: once the
-// owning session is deleted, task_session_worktrees — the only table that
-// stores a worktree's on-disk path for an ID-only lookup — cascades away, so
-// every repo, including the primary via the legacy field, needs its durable
-// TaskEnvironment/TaskEnvironmentRepo path to resolve.
+// env: every Repos[] entry plus the legacy singular fields, de-duped by
+// worktree ID so a row that mirrors the legacy field (single-repo
+// environments predating the multi-repo backfill, or a multi-repo
+// environment whose first repo matches) is only destroyed once. Repos[] is
+// merged first so its per-repo handle — which reliably carries its own
+// repository_id — wins; the legacy fields only backfill data a Repos[] entry
+// is missing; they never overwrite a value already resolved from Repos[].
+// This matters because env.WorktreeID is always worktrees[0].WorktreeID
+// (see env_preparer_worktree.go), so the legacy handle always collides with
+// Repos[0] but predates the multi-repo backfill and can carry an empty
+// RepositoryID even when Repos[0] has the real one. Resolves by
+// path/repository, not ID alone: once the owning session is deleted,
+// task_session_worktrees — the only table that stores a worktree's on-disk
+// path for an ID-only lookup — cascades away, so every repo, including the
+// primary, needs its durable TaskEnvironment/TaskEnvironmentRepo path to
+// resolve.
 func (s *Service) teardownEnvironmentWorktrees(
 	ctx context.Context,
 	env *models.TaskEnvironment,
 	contextError func() error,
 	errs *[]error,
 ) error {
-	destroyed := make(map[string]struct{}, len(env.Repos)+1)
-	destroyOne := func(worktreeID, worktreePath, repositoryID string) error {
-		if worktreeID == "" {
-			return nil
-		}
-		if _, ok := destroyed[worktreeID]; ok {
-			return nil
-		}
-		destroyed[worktreeID] = struct{}{}
+	handles, order := mergeEnvironmentWorktreeHandles(env)
+	for _, worktreeID := range order {
 		if err := contextError(); err != nil {
 			return err
 		}
-		if err := s.envDestroyer.DestroyWorktreeAt(ctx, worktreeID, worktreePath, repositoryID); err != nil {
+		h := handles[worktreeID]
+		if err := s.envDestroyer.DestroyWorktreeAt(ctx, h.worktreeID, h.worktreePath, h.repositoryID); err != nil {
 			if !errors.Is(err, worktree.ErrWorktreeNotFound) {
-				*errs = append(*errs, fmt.Errorf("destroy worktree %s: %w", worktreeID, err))
+				*errs = append(*errs, fmt.Errorf("destroy worktree %s: %w", h.worktreeID, err))
 			}
 		}
-		return nil
+	}
+	return nil
+}
+
+// environmentWorktreeHandle is the resolved (worktree_id, worktree_path,
+// repository_id) triple teardownEnvironmentWorktrees needs to destroy one
+// worktree.
+type environmentWorktreeHandle struct {
+	worktreeID   string
+	worktreePath string
+	repositoryID string
+}
+
+// mergeEnvironmentWorktreeHandles builds one destroy handle per unique
+// worktree ID recorded on env, merging env.Repos[] (added first) with the
+// legacy singular fields (added last). Adding an already-seen ID only
+// backfills fields the existing handle is missing — it never downgrades a
+// value the earlier, more complete handle already resolved. order preserves
+// first-seen insertion order so destroy calls stay deterministic.
+func mergeEnvironmentWorktreeHandles(env *models.TaskEnvironment) (map[string]environmentWorktreeHandle, []string) {
+	handles := make(map[string]environmentWorktreeHandle, len(env.Repos)+1)
+	order := make([]string, 0, len(env.Repos)+1)
+	add := func(worktreeID, worktreePath, repositoryID string) {
+		if worktreeID == "" {
+			return
+		}
+		existing, ok := handles[worktreeID]
+		if !ok {
+			handles[worktreeID] = environmentWorktreeHandle{worktreeID, worktreePath, repositoryID}
+			order = append(order, worktreeID)
+			return
+		}
+		if existing.worktreePath == "" && worktreePath != "" {
+			existing.worktreePath = worktreePath
+		}
+		if existing.repositoryID == "" && repositoryID != "" {
+			existing.repositoryID = repositoryID
+		}
+		handles[worktreeID] = existing
 	}
 
-	if err := destroyOne(env.WorktreeID, env.WorktreePath, env.RepositoryID); err != nil {
-		return err
-	}
 	for _, repo := range env.Repos {
 		if repo == nil {
 			continue
 		}
-		if err := destroyOne(repo.WorktreeID, repo.WorktreePath, repo.RepositoryID); err != nil {
-			return err
-		}
+		add(repo.WorktreeID, repo.WorktreePath, repo.RepositoryID)
 	}
-	return nil
+	add(env.WorktreeID, env.WorktreePath, env.RepositoryID)
+
+	return handles, order
 }

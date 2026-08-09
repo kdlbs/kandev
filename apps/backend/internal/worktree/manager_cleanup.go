@@ -15,6 +15,7 @@ import (
 
 	"github.com/kandev/kandev/internal/system/storage"
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 func (m *Manager) PruneQuarantinedWorkspace(ctx context.Context, entry storage.QuarantineEntry) error {
@@ -192,6 +193,22 @@ func (m *Manager) RemoveAt(ctx context.Context, worktreeID, worktreePath, reposi
 		return ErrWorktreeNotFound
 	}
 
+	// Resolved before the lock (its result is the lock key), but every
+	// stateful check below — the reference count, then the removal itself —
+	// happens under it, mirroring removeWorktree's ordering so a reference
+	// can't be inserted between the count check and the removal.
+	repoPath, resolvable, err := m.resolveRepositoryPath(ctx, repositoryID)
+	if err != nil {
+		return fmt.Errorf("resolve repository path for worktree %s: %w", worktreeID, err)
+	}
+
+	repoLock := m.getRepoLock(repoPath)
+	repoLock.Lock()
+	defer func() {
+		repoLock.Unlock()
+		m.releaseRepoLock(repoPath)
+	}()
+
 	activeReferences, err := m.CountActiveWorktreeReferences(ctx, worktreeID, nil)
 	if err != nil {
 		return fmt.Errorf("count active references for worktree %s: %w", worktreeID, err)
@@ -201,14 +218,13 @@ func (m *Manager) RemoveAt(ctx context.Context, worktreeID, worktreePath, reposi
 			zap.String("worktree_id", worktreeID))
 		return nil
 	}
-
-	repoPath := m.resolveRepositoryPath(ctx, repositoryID)
-	repoLock := m.getRepoLock(repoPath)
-	repoLock.Lock()
-	defer func() {
-		repoLock.Unlock()
-		m.releaseRepoLock(repoPath)
-	}()
+	if !resolvable {
+		m.logger.Warn("removing worktree without a resolvable source repository; "+
+			"its git worktree registration cannot be pruned and may remain stale",
+			zap.String("worktree_id", worktreeID),
+			zap.String("worktree_path", worktreePath),
+			zap.String("repository_id", repositoryID))
+	}
 
 	if err := m.removeWorktreeDir(ctx, worktreePath, repoPath); err != nil {
 		return fmt.Errorf("remove worktree directory %s: %w", worktreePath, err)
@@ -217,24 +233,35 @@ func (m *Manager) RemoveAt(ctx context.Context, worktreeID, worktreePath, reposi
 }
 
 // resolveRepositoryPath resolves a repository's main checkout path for
-// RemoveAt's path-only fallback. Returns "" when unresolvable —
-// removeWorktreeDir still removes the worktree directory directly via
-// forceRemoveDir in that case; it just can't run `git worktree remove`/
-// `prune` from the main repository first.
-func (m *Manager) resolveRepositoryPath(ctx context.Context, repositoryID string) string {
+// RemoveAt's path-only fallback. resolvable is false when the repository is
+// genuinely unresolvable — no provider wired, no repository_id recorded, or
+// the repository row itself no longer exists — which is a permanent
+// condition a retry cannot fix: removeWorktreeDir must then skip `git
+// worktree remove`/`prune` entirely rather than run them with an empty Dir.
+// exec.Cmd treats an empty Dir as the calling process's own working
+// directory, never the worktree's actual source repository, so running git
+// there would silently misregister/prune an unrelated repository while
+// still reporting success. Any other lookup failure (a transient DB error,
+// for example) is returned so the caller can retry instead of silently
+// degrading — unlike the package's other GetRepository call sites
+// (runWorktreeSetupScript, copyConfiguredFiles), which log and continue
+// because they're best-effort side operations; this one gates whether a
+// destructive removal is safe to report as done.
+func (m *Manager) resolveRepositoryPath(ctx context.Context, repositoryID string) (path string, resolvable bool, err error) {
 	if m.repoProvider == nil || repositoryID == "" {
-		return ""
+		return "", false, nil
 	}
 	repo, err := m.repoProvider.GetRepository(ctx, repositoryID)
 	if err != nil {
-		m.logger.Warn("failed to resolve repository path for path-based worktree removal",
-			zap.String("repository_id", repositoryID), zap.Error(err))
-		return ""
+		if errors.Is(err, repoerrors.ErrRepositoryNotFound) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("look up repository %s: %w", repositoryID, err)
 	}
-	if repo == nil {
-		return ""
+	if repo == nil || repo.LocalPath == "" {
+		return "", false, nil
 	}
-	return repo.LocalPath
+	return repo.LocalPath, true, nil
 }
 
 // removeWorktree performs the actual removal of a worktree.
@@ -518,6 +545,20 @@ func (m *Manager) OnTaskDeleted(ctx context.Context, taskID string) error {
 // layout (see issue #1266). The rmdir is a best-effort no-op if the parent
 // still has siblings or contains workspace-scoped content.
 func (m *Manager) removeWorktreeDir(ctx context.Context, worktreePath, repoPath string) error {
+	if repoPath == "" {
+		// No source repository to scope `git worktree remove`/`prune` to.
+		// exec.Cmd treats an empty Dir as this process's own working
+		// directory — never the worktree's actual source repo — so running
+		// git here would operate on an unrelated repository instead. Remove
+		// the directory directly; any stale registration left behind in the
+		// real source repo is the caller's (RemoveAt's) to log.
+		if err := m.forceRemoveDir(ctx, worktreePath); err != nil {
+			return err
+		}
+		m.tryRemoveEmptyTaskDir(worktreePath)
+		return nil
+	}
+
 	// First try git worktree remove
 	cmd := newGitCommand(ctx, "worktree", "remove", "--force", worktreePath)
 	cmd.Dir = repoPath

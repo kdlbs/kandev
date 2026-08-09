@@ -52,10 +52,17 @@ func (s *stubEnvRepo) DeleteTaskEnvironment(context.Context, string) error {
 }
 func (s *stubEnvRepo) DeleteTaskEnvironmentsByTask(context.Context, string) error { return nil }
 
+type worktreeDestroyCall struct {
+	worktreeID   string
+	worktreePath string
+	repositoryID string
+}
+
 type stubDestroyer struct {
 	containerCalls       []string
 	sandboxCalls         []string
 	worktreeCalls        []string
+	worktreeCallDetails  []worktreeDestroyCall
 	cancelAfterContainer context.CancelFunc
 	pushCalls            int
 	containerErr         error
@@ -75,8 +82,11 @@ func (s *stubDestroyer) DestroySandbox(_ context.Context, id, _ string) error {
 	s.sandboxCalls = append(s.sandboxCalls, id)
 	return s.sandboxErr
 }
-func (s *stubDestroyer) DestroyWorktreeAt(_ context.Context, id, _ string, _ string) error {
+func (s *stubDestroyer) DestroyWorktreeAt(_ context.Context, id, worktreePath, repositoryID string) error {
 	s.worktreeCalls = append(s.worktreeCalls, id)
+	s.worktreeCallDetails = append(s.worktreeCallDetails, worktreeDestroyCall{
+		worktreeID: id, worktreePath: worktreePath, repositoryID: repositoryID,
+	})
 	return s.worktreeErr
 }
 func (s *stubDestroyer) PushEnvironmentBranch(context.Context, *models.TaskEnvironment) error {
@@ -263,6 +273,41 @@ func TestTeardownEnvironmentResources_ReposOnlyEnvironmentIsNotShortCircuited(t 
 	}
 	if len(destroyer.worktreeCalls) != 2 {
 		t.Fatalf("worktree destroy calls = %v, want 2", destroyer.worktreeCalls)
+	}
+}
+
+// TestTeardownEnvironmentResources_LegacyFieldsBackfillMissingRepoHandleFields
+// is the regression test for Review Finding 2: env.WorktreeID is always
+// worktrees[0].WorktreeID (env_preparer_worktree.go), so the legacy handle
+// always collides with the first Repos[] entry — but it predates the
+// multi-repo backfill and can carry an empty WorktreePath/RepositoryID even
+// when the matching Repos[] entry has both. If the legacy (incomplete)
+// handle is destroyed first and marks the ID "already handled" before the
+// complete Repos[] handle runs, the worktree is torn down with an
+// unresolvable repository_id even though a resolvable one was available.
+func TestTeardownEnvironmentResources_LegacyFieldsBackfillMissingRepoHandleFields(t *testing.T) {
+	svc := newResetTestService(t, &stubEnvRepo{})
+	destroyer := &stubDestroyer{}
+	svc.SetEnvironmentDestroyer(destroyer)
+
+	err := svc.teardownEnvironmentResources(context.Background(), &models.TaskEnvironment{
+		WorktreeID:   "wt-primary",
+		WorktreePath: "",
+		RepositoryID: "",
+		Repos: []*models.TaskEnvironmentRepo{
+			{RepositoryID: "repo-a", WorktreeID: "wt-primary", WorktreePath: "/worktrees/repo-a"},
+		},
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(destroyer.worktreeCallDetails) != 1 {
+		t.Fatalf("worktree destroy calls = %+v, want 1", destroyer.worktreeCallDetails)
+	}
+	got := destroyer.worktreeCallDetails[0]
+	if got.repositoryID != "repo-a" || got.worktreePath != "/worktrees/repo-a" {
+		t.Fatalf("destroy call = %+v, want repositoryID=repo-a worktreePath=/worktrees/repo-a", got)
 	}
 }
 

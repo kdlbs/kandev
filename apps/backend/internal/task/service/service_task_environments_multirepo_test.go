@@ -105,13 +105,15 @@ func initSimpleGitRepo(t *testing.T) string {
 	return repoPath
 }
 
-func runGitTestCmd(t *testing.T, repoPath string, args ...string) {
+func runGitTestCmd(t *testing.T, repoPath string, args ...string) []byte {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = repoPath
-	if out, err := cmd.CombinedOutput(); err != nil {
+	out, err := cmd.CombinedOutput()
+	if err != nil {
 		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, out)
 	}
+	return out
 }
 
 // TestTeardownEnvironmentResources_MultiRepoRemovesEveryWorktreeFromDisk is
@@ -121,6 +123,16 @@ func runGitTestCmd(t *testing.T, repoPath string, args ...string) {
 // must still remove every repo's worktree directory — including the
 // primary, whose legacy env.WorktreeID lookup fails identically to the
 // secondary repos once the session-scoped row is gone.
+//
+// Persists real `repositories` rows (production shape: env.RepositoryID is
+// always set from the primary repo, see executor_execute.go) so RemoveAt's
+// path-only fallback can resolve each worktree's source repository. Without
+// that, resolveRepositoryPath can't scope `git worktree remove`/`prune` to
+// the correct repo, so os.Stat alone is not a sufficient assertion: the
+// directory can be gone while the SOURCE repo is left with a stale
+// `prunable` registration that blocks recreating a worktree at that path
+// (Review Finding 3) — so this test also asserts each source repo's own
+// `git worktree list` is clean afterward.
 func TestTeardownEnvironmentResources_MultiRepoRemovesEveryWorktreeFromDisk(t *testing.T) {
 	svc, mgr, repo := newRealWorktreeTestService(t)
 	ctx := context.Background()
@@ -136,9 +148,19 @@ func TestTeardownEnvironmentResources_MultiRepoRemovesEveryWorktreeFromDisk(t *t
 		t.Fatalf("create session: %v", err)
 	}
 
+	repoAPath := initSimpleGitRepo(t)
+	repoBPath := initSimpleGitRepo(t)
+	for id, path := range map[string]string{"repo-a": repoAPath, "repo-b": repoBPath} {
+		if err := repo.CreateRepository(ctx, &models.Repository{
+			ID: id, WorkspaceID: "workspace", Name: id, SourceType: "local", LocalPath: path,
+		}); err != nil {
+			t.Fatalf("create repository %s: %v", id, err)
+		}
+	}
+
 	primary, err := mgr.Create(ctx, worktree.CreateRequest{
 		TaskID: "task-multi", SessionID: "session-multi", TaskTitle: "Multi repo",
-		RepositoryID: "repo-a", RepositoryPath: initSimpleGitRepo(t),
+		RepositoryID: "repo-a", RepositoryPath: repoAPath,
 		BaseBranch: "main", TaskDirName: "task-multi", RepoName: "repo-a",
 	})
 	if err != nil {
@@ -146,7 +168,7 @@ func TestTeardownEnvironmentResources_MultiRepoRemovesEveryWorktreeFromDisk(t *t
 	}
 	secondary, err := mgr.Create(ctx, worktree.CreateRequest{
 		TaskID: "task-multi", SessionID: "session-multi", TaskTitle: "Multi repo",
-		RepositoryID: "repo-b", RepositoryPath: initSimpleGitRepo(t),
+		RepositoryID: "repo-b", RepositoryPath: repoBPath,
 		BaseBranch: "main", TaskDirName: "task-multi", RepoName: "repo-b",
 	})
 	if err != nil {
@@ -156,6 +178,7 @@ func TestTeardownEnvironmentResources_MultiRepoRemovesEveryWorktreeFromDisk(t *t
 	env := &models.TaskEnvironment{
 		ID:           "env-multi",
 		TaskID:       "task-multi",
+		RepositoryID: "repo-a",
 		WorktreeID:   primary.ID,
 		WorktreePath: primary.Path,
 		Repos: []*models.TaskEnvironmentRepo{
@@ -180,5 +203,18 @@ func TestTeardownEnvironmentResources_MultiRepoRemovesEveryWorktreeFromDisk(t *t
 	}
 	if _, statErr := os.Stat(secondary.Path); !os.IsNotExist(statErr) {
 		t.Errorf("secondary worktree directory still on disk: %s (stat err = %v)", secondary.Path, statErr)
+	}
+	assertNoWorktreeRegistration(t, repoAPath, primary.Path)
+	assertNoWorktreeRegistration(t, repoBPath, secondary.Path)
+}
+
+// assertNoWorktreeRegistration fails the test if repoPath's own `git
+// worktree list` still references worktreePath — i.e. the registration
+// wasn't (or couldn't be) pruned from the correct source repository.
+func assertNoWorktreeRegistration(t *testing.T, repoPath, worktreePath string) {
+	t.Helper()
+	out := string(runGitTestCmd(t, repoPath, "worktree", "list", "--porcelain"))
+	if strings.Contains(out, worktreePath) {
+		t.Errorf("stale worktree registration for %s remains in source repo %s:\n%s", worktreePath, repoPath, out)
 	}
 }
