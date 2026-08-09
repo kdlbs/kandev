@@ -95,6 +95,7 @@ type wsCreateTaskRequest struct {
 	WorkflowStepID    string                    `json:"workflow_step_id"`
 	Title             string                    `json:"title"`
 	Description       string                    `json:"description,omitempty"`
+	Autopilot         bool                      `json:"autopilot,omitempty"`
 	Priority          string                    `json:"priority,omitempty"`
 	State             *v1.TaskState             `json:"state,omitempty"`
 	Repositories      []httpTaskRepositoryInput `json:"repositories,omitempty"`
@@ -181,6 +182,7 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		WorkflowStepID: req.WorkflowStepID,
 		Title:          title,
 		Description:    description,
+		Autopilot:      req.Autopilot,
 		Priority:       req.Priority,
 		State:          req.State,
 		Repositories:   convertToServiceRepos(repos),

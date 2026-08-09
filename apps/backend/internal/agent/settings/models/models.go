@@ -45,6 +45,17 @@ type AgentProfile struct {
 	// Validated against the host utility capability cache by the reconciler.
 	Model string `json:"model" db:"model"`
 
+	// FallbackModel is the optional ACP model ID the runtime switches to when
+	// the start model (Model) becomes unavailable. Empty means "no explicit
+	// fallback". Ignored at runtime when AutoFallback is enabled.
+	FallbackModel string `json:"fallback_model,omitempty" db:"fallback_model"`
+
+	// AutoFallback opts the profile into the legacy automatic-fallback
+	// behavior: session-start model application is best-effort and office
+	// post-start failures re-dispatch to the next provider candidate. When
+	// enabled, FallbackModel is ignored and the UI hides its field.
+	AutoFallback bool `json:"auto_fallback" db:"auto_fallback"`
+
 	// Mode is the optional ACP session mode applied via session/set_mode at
 	// session start. Empty when the agent does not advertise modes.
 	// The DB column is nullable; the settings repo handles the empty-string ↔ NULL

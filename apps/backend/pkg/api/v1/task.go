@@ -155,6 +155,7 @@ type Task struct {
 	Interrupted bool   `json:"interrupted,omitempty"`
 	IsEphemeral bool   `json:"is_ephemeral"`        // Ephemeral tasks are not shown in kanban, used for quick chat
 	ParentID    string `json:"parent_id,omitempty"` // FK to parent task for subtasks
+	Autopilot   bool   `json:"autopilot"`
 	Identifier  string `json:"identifier,omitempty"`
 }
 

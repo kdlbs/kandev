@@ -10,6 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -463,7 +464,31 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 	// retry-by-classifier path lives behind HandleRunFailure for
 	// rate-limit-retry callers; we deliberately do NOT call into it
 	// here. See docs/specs/office-agent-error-handling.
-	return s.HandleAgentFailure(ctx, run, data.ErrorMessage)
+	return s.HandleAgentFailure(ctx, run, enrichModelFailureMessage(run, data.ErrorMessage))
+}
+
+// enrichModelFailureMessage prepends the actionable "change the model" copy
+// when a run fails with a provider/model availability error in strict mode
+// (no auto-fallback toggle, no fallback model — the routing dispatcher
+// escalates instead of re-dispatching). The raw agent error is preserved
+// after the hint so the run detail and chat still show the original cause.
+func enrichModelFailureMessage(run *models.Run, message string) string {
+	if run == nil || run.ResolvedModel == nil || *run.ResolvedModel == "" || message == "" {
+		return message
+	}
+	provider := ""
+	if run.ResolvedProviderID != nil {
+		provider = *run.ResolvedProviderID
+	}
+	classified := routingerr.Classify(routingerr.Input{
+		Phase:      routingerr.PhaseStreaming,
+		ProviderID: provider,
+		Stderr:     message,
+	})
+	if !routingerr.IsAvailabilityCode(classified.Code) {
+		return message
+	}
+	return routingerr.ModelUnavailableMessage(*run.ResolvedModel) + "\n\n" + message
 }
 
 // tryPostStartFallback delegates to the routing dispatcher when one is

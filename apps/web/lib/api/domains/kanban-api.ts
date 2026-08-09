@@ -108,6 +108,8 @@ export async function createTask(
     workspace_group_id?: string;
     default_child_workspace?: "inherit_parent" | "new_workspace";
     default_child_ordering?: "sequential" | "parallel";
+    /** Start the task in autopilot mode. Fixed at creation time. */
+    autopilot?: boolean;
   },
   options?: ApiRequestOptions,
 ) {

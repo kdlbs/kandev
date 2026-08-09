@@ -304,6 +304,7 @@ func (r *Repository) initTaskSchema() error {
 		queued_for_step_id TEXT NOT NULL DEFAULT '',
 		queued_at TIMESTAMP,
 		metadata TEXT DEFAULT '{}',
+		autopilot_enabled INTEGER NOT NULL DEFAULT 0,
 		archived_at TIMESTAMP,
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL

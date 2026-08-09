@@ -446,6 +446,9 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 				RequiresCompletionSignal:       requiresSignal,
 				IncludeCoordinatorTaskControls: !configMode,
 				IncludeTaskTitleTool:           !configMode && titleOwner,
+				Autopilot:                      task.Autopilot,
+				IncludeUserQuestionTool:        !task.Autopilot && !sessionResp.Session.IsPassthrough,
+				IncludeParentQuestionTool:      task.Autopilot && task.ParentID != "",
 			}, referenceContext)
 		}
 	}

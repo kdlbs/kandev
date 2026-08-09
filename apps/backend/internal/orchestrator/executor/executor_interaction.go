@@ -721,6 +721,11 @@ func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Tas
 		return nil, err
 	}
 	req.McpMode = mcpMode
+	profileContext, err := e.resolveTaskSessionMCPProfile(ctx, task.ID, session, true)
+	if err != nil {
+		return nil, err
+	}
+	req.McpProfile = &profileContext
 
 	repositoryPath, err := e.applyRepositoryToSwitchRequest(ctx, req, session, execConfig)
 	if err != nil {
@@ -737,6 +742,8 @@ func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Tas
 	if err != nil {
 		return nil, err
 	}
+	req.McpProviders = deriveMCPProviders(allRepos)
+	profileContext.Providers = req.McpProviders
 	if err := e.resolveLaunchEnvironment(ctx, req, execConfig.ProfileEnvVars, allRepos); err != nil {
 		return nil, err
 	}

@@ -43,12 +43,16 @@ this spec was written and is out of scope.)
   integrations from left panel navigation"**, disabled (off) by default.
 - When that setting is **off** (default), a disabled-but-configured
   integration MUST still appear in the left panel navigation (the sidebar's
-  Integrations section and its mobile-menu equivalent) exactly as it does
-  today for an enabled integration — only credential/health status controls
-  nav visibility.
-- When that setting is **on**, a disabled integration MUST be hidden from the
-  left panel navigation regardless of its credential/health status. An
-  enabled, healthy integration is unaffected.
+  Integrations section, its mobile-menu equivalent, and the Settings left
+  panel's per-workspace Integrations list under Settings → Workspaces →
+  <workspace>) exactly as it does today for an enabled integration — only
+  credential/health status controls nav visibility.
+- When that setting is **on**, a disabled integration MUST be hidden from all
+  of those left-panel surfaces regardless of its credential/health status. An
+  enabled, healthy integration is unaffected. Only integrations whose
+  enable/disable toggle is off are hidden — an enabled-but-unconfigured
+  integration stays listed (the Settings tree keeps its own configured-status
+  badge convention).
 - The new setting SHALL NOT change any other behavior gated on an
   integration's existing "available" signal (e.g. Jira/Linear import
   popovers, Kanban external-link buttons, task-top-bar issue buttons) — those
@@ -144,11 +148,13 @@ toggle).
   false` (its documented default) under the same failure, so a storage
   failure never hides an integration a user can't otherwise see or control.
 - No integration ever hides from a *settings* page based on the new nav
-  setting — `hideDisabled` only ever affects `useNavAvailability`'s output,
-  never a settings route's reachability. A user can always reach a disabled
-  integration's own settings page directly (by URL, from the index page, or
-  from the sidebar's Settings section) and re-enable it even while the
-  left-panel nav entry is hidden.
+  setting — `hideDisabled` affects only left-panel navigation surfaces
+  (`useNavAvailability`'s output for the main sidebar and mobile menu, and
+  `WorkspaceIntegrationItems`' filter for the Settings left panel's
+  per-workspace Integrations tree), never a settings route's reachability.
+  A user can always reach a disabled integration's own settings page
+  directly (by URL, from the index page, or from the sidebar's Settings
+  section) and re-enable it even while the left-panel nav entry is hidden.
 
 ## Persistence guarantees
 
@@ -203,20 +209,23 @@ is not synced across devices/browsers.
   visibility, not functional gating (unlike Jira/Linear/Sentry's
   existing toggle, which already gates other surfaces and is unchanged by
   this feature).
-- No change to the Settings-page navigation tree
-  (`components/app-sidebar/sections/settings/workspaces-group.tsx`) — "left
-  panel navigation" in this spec refers to the main `AppSidebar`'s
-  Integrations section and its mobile-menu equivalent
-  (`components/app-sidebar/sections/integrations-section.tsx`,
-  `components/integrations/integrations-menu.tsx`), not the Settings
-  section's own workspace/integration tree, which has a different,
-  unrelated status-badge convention and is not user-navigable "left panel
-  navigation" in the product sense used by this request.
-- Sentry has no left-panel nav destination today (see
+- No change to the Settings-page navigation tree's status-badge convention
+  (`components/app-sidebar/sections/settings/workspaces-group.tsx`): its
+  per-workspace Integrations list keeps the configured-status badge
+  ("Enabled" = credentials/health present), which is unrelated to the
+  enable/disable toggle. The "hide disabled" setting DOES filter that list
+  (a disabled integration is hidden from it when the setting is on), since
+  users reach it through left-panel navigation; the badge convention itself
+  is unchanged.
+- Sentry has no main-sidebar nav destination today (see
   `lib/navigation/core-destinations.ts` — only Azure DevOps, GitHub, GitLab,
-  Jira and Linear are nav-gated). The new "hide disabled" setting therefore
-  has no observable effect for Sentry; its existing slider (own page
-  + new index-page row) still works for the enable/disable state itself.
+  Jira and Linear are nav-gated), so the setting has no effect for Sentry in
+  the main sidebar or mobile menu. Sentry DOES appear in the Settings left
+  panel's per-workspace Integrations tree (all six integrations are always
+  listed there), so with the setting on and Sentry's toggle off it is hidden
+  from that tree like any other disabled integration; its existing slider
+  (own page + new index-page row) still works for the enable/disable state
+  itself.
 - No new command-palette entries or keyboard shortcuts for the new toggles.
 
 ## Open questions

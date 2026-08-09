@@ -1462,5 +1462,10 @@
   "yourBranchesLabel": "Os seus branches:",
   "yourChangedFilesWillAppearHere": "Os seus ficheiros alterados aparecem aqui",
   "yourCodeLivesInLabel": "O seu código está em:",
-  "yourReviewIsRequestedOnThis": "A sua revisão foi pedida nesta tarefa."
+  "yourReviewIsRequestedOnThis": "A sua revisão foi pedida nesta tarefa.",
+  "autopilot": "Piloto automático",
+  "autopilotDescription": "O agente trabalha de forma independente e pergunta à tarefa pai apenas quando uma decisão crítica bloqueia o progresso. Depois, espera pela resposta antes de continuar.",
+  "autopilotInfoLabel": "Mais informações sobre o piloto automático",
+  "autopilotSidebarDescription": "Tarefa em piloto automático",
+  "autopilotChatDescription": "O piloto automático está ativo. O agente pergunta ao seu pai apenas sobre decisões críticas."
 }

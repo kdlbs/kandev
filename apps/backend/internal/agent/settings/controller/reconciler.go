@@ -388,17 +388,25 @@ func (r *ProfileReconciler) healProfile(
 		changed = true
 	}
 
+	// No-silent-model-fallback: a configured model that is no longer
+	// advertised (e.g. provider auth expired) is KEPT, never overwritten
+	// with the probe default. The UI surfaces it as unavailable so the user
+	// decides — implicitly switching models on boot is exactly what this
+	// feature forbids. Only the empty-model case ("use the agent's
+	// default") is seeded from the probe.
 	if p.Model != "" && !modelExists(p.Model, caps.Models) {
-		r.log.Info("profile model no longer available, auto-healing",
+		r.log.Info("profile model no longer available, keeping (no silent fallback)",
 			zap.String("profile_id", p.ID),
-			zap.String("old_model", p.Model),
-			zap.String("new_model", caps.CurrentModelID))
-		p.Model = caps.CurrentModelID
-		changed = true
+			zap.String("model", p.Model))
 	}
 	if p.Model == "" && caps.CurrentModelID != "" {
 		p.Model = caps.CurrentModelID
 		changed = true
+	}
+	if p.FallbackModel != "" && !modelExists(p.FallbackModel, caps.Models) {
+		r.log.Info("profile fallback model no longer available, keeping (no silent fallback)",
+			zap.String("profile_id", p.ID),
+			zap.String("fallback_model", p.FallbackModel))
 	}
 
 	if p.Mode != "" && !modeExists(p.Mode, caps.Modes) {

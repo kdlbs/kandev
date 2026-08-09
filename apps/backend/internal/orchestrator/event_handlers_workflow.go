@@ -1677,12 +1677,20 @@ func (s *Service) autoStartStepPrompt(
 	recordedPrompt := agentPrompt
 	titleOwner := false
 	isOfficeTask := false
+	var taskForPrompt *models.Task
 	if session.State == models.TaskSessionStateCreated {
 		var officeErr error
 		isOfficeTask, officeErr = s.lookupOfficeTask(ctx, taskID)
 		if officeErr != nil {
 			requeueTaken()
 			return fmt.Errorf("resolve MCP mode for workflow auto-start: %w", officeErr)
+		}
+		if !isOfficeTask {
+			taskForPrompt, officeErr = s.repo.GetTask(ctx, taskID)
+			if officeErr != nil {
+				requeueTaken()
+				return fmt.Errorf("load task for autopilot prompt: %w", officeErr)
+			}
 		}
 		configMode, _ := session.Metadata["config_mode"].(bool)
 		if !configMode && !isOfficeTask {
@@ -1705,6 +1713,9 @@ func (s *Service) autoStartStepPrompt(
 				RequiresCompletionSignal:       requiresSignal,
 				IncludeCoordinatorTaskControls: !configMode,
 				IncludeTaskTitleTool:           !configMode && titleOwner,
+				Autopilot:                      taskForPrompt != nil && taskForPrompt.Autopilot,
+				IncludeUserQuestionTool:        taskForPrompt == nil || !taskForPrompt.Autopilot,
+				IncludeParentQuestionTool:      taskForPrompt != nil && taskForPrompt.Autopilot && taskForPrompt.ParentID != "",
 			}, referenceContext)
 		}
 	}

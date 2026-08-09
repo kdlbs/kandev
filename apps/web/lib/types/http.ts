@@ -330,6 +330,8 @@ export type Task = ActiveSubagentCountFields & {
   position: number;
   title: string;
   description: string;
+  /** True when the task was created in autopilot mode. Immutable after creation. */
+  autopilot?: boolean;
   state: TaskState;
   priority: number;
   wip_admitted?: boolean;

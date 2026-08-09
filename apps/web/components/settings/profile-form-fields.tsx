@@ -9,13 +9,6 @@ import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Skeleton } from "@kandev/ui/skeleton";
 import { Switch } from "@kandev/ui/switch";
-import { ModeCombobox } from "@/components/settings/mode-combobox";
-import {
-  configOptionToModelOptions,
-  isModelConfigOption,
-  ModelConfigSelector,
-  type SelectConfigOption,
-} from "@/components/model-config-selector";
 import { useProfileModelCapabilities } from "@/hooks/domains/settings/use-profile-model-capabilities";
 import {
   PERMISSION_APPLY_AGENTCTL_AUTO_APPROVE,
@@ -37,6 +30,11 @@ import {
   profileModelIsDirty,
 } from "@/components/settings/profile-capability-helpers";
 import { modelConfigOptions } from "@/components/settings/profile-model-config";
+import {
+  ModelFallbackSection,
+  ModelPicker,
+  ModePicker,
+} from "@/components/settings/profile-model-fields";
 import type {
   CLIFlag,
   CommandEntry,
@@ -51,6 +49,10 @@ import type {
 export type ProfileFormData = {
   name: string;
   model: string;
+  /** Optional single fallback model applied when `model` is unavailable. */
+  fallback_model?: string;
+  /** Legacy automatic-fallback opt-in; hides the fallback_model field. */
+  auto_fallback?: boolean;
   mode: string;
   config_options?: Record<string, string>;
   cli_passthrough: boolean;
@@ -252,74 +254,6 @@ function PermissionToggles({
   );
 }
 
-function ModelPicker({
-  profile,
-  models,
-  currentModelId,
-  configOptions,
-  onChange,
-}: {
-  profile: ProfileFormData;
-  models: ModelEntry[];
-  currentModelId: string | undefined;
-  configOptions: SelectConfigOption[];
-  onChange: (patch: Partial<ProfileFormData>) => void;
-}) {
-  const { t } = useTranslation();
-  const modelConfig = configOptions.find(isModelConfigOption);
-  const modelOptions = modelConfig
-    ? configOptionToModelOptions(modelConfig)
-    : models.map((model) => ({
-        id: model.id,
-        name: model.name,
-        description: model.description || (model.id !== model.name ? model.id : undefined),
-        usageMultiplier:
-          typeof model.meta?.copilotUsage === "string" ? model.meta.copilotUsage : undefined,
-      }));
-  const currentModel = profile.model || modelConfig?.currentValue || currentModelId || null;
-  const selectedConfigOptions = configOptions.map((option) => ({
-    ...option,
-    currentValue: isModelConfigOption(option)
-      ? profile.model || option.currentValue
-      : profile.config_options?.[option.id] || option.currentValue,
-  }));
-
-  return (
-    <ModelConfigSelector
-      modelOptions={modelOptions}
-      currentModel={currentModel}
-      configOptions={selectedConfigOptions}
-      onModelChange={(value) => onChange({ model: value })}
-      onConfigChange={(configId, value) =>
-        onChange({ config_options: { ...(profile.config_options ?? {}), [configId]: value } })
-      }
-      placeholder={t("agents:selectAModel")}
-      ariaLabel={t("agents:profileStartModelSettings")}
-    />
-  );
-}
-
-function ModePicker({
-  profile,
-  modes,
-  currentModeId,
-  onChange,
-}: {
-  profile: ProfileFormData;
-  modes: ModeEntry[];
-  currentModeId: string | undefined;
-  onChange: (patch: Partial<ProfileFormData>) => void;
-}) {
-  return (
-    <ModeCombobox
-      value={profile.mode}
-      onChange={(value) => onChange({ mode: value })}
-      modes={modes}
-      currentModeId={currentModeId}
-    />
-  );
-}
-
 type CapabilitiesRowProps = {
   profile: ProfileFormData;
   models: ModelEntry[];
@@ -422,6 +356,8 @@ function CapabilitiesRowContent({
             currentModelId={currentModelId}
             configOptions={configOptions}
             onChange={onChange}
+            ariaLabel={t("settings:startModelAria")}
+            goneModelLabel={t("settings:startModelUnavailable")}
           />
           <ModelConfigResolutionStatus
             status={configStatus}
@@ -451,6 +387,15 @@ function CapabilitiesRowContent({
       {activeMode?.description && (
         <p className="text-xs text-muted-foreground">{activeMode.description}</p>
       )}
+      <ModelFallbackSection
+        profile={profile}
+        models={models}
+        configOptions={configOptions}
+        baselineProfile={baselineProfile}
+        labelCls={labelCls}
+        gapCls={gapCls}
+        onChange={onChange}
+      />
       {commands.length > 0 && <CommandsButton commands={commands} />}
       <CapabilityStatusMessage status={status} />
     </div>

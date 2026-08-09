@@ -93,9 +93,10 @@
       "audiences": ["user"],
       "stability": "stable",
       "docs": ["sessions-and-review", "coordination", "automation-and-mcp", "agent-communication"],
-      "sources": ["apps/backend/internal/mcp/handlers/spawn_session.go", "apps/web/components/task/dockview-session-tabs.ts"],
-      "tests": ["apps/backend/internal/mcp/handlers/spawn_session_test.go", "apps/web/components/task/dockview-session-tabs.test.ts"],
+      "sources": ["apps/backend/internal/mcp/handlers/spawn_session.go", "apps/backend/internal/mcp/handlers/parent_question.go", "apps/web/components/task/dockview-session-tabs.ts"],
+      "tests": ["apps/backend/internal/mcp/handlers/spawn_session_test.go", "apps/backend/internal/mcp/handlers/parent_question_test.go", "apps/web/components/task/dockview-session-tabs.test.ts"],
       "mcpTools": [
+        "ask_parent_question_kandev",
         "ask_user_question_kandev",
         "get_task_conversation_kandev",
         "get_task_document_kandev",

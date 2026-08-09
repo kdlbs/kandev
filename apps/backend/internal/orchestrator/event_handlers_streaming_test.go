@@ -2979,6 +2979,84 @@ func TestHandleSessionModelsEventCapturesOriginalEffectiveConfigurationOnce(t *t
 	require.Equal(t, map[string]string{"reasoning_effort": "high"}, original.ConfigOptions)
 }
 
+// TestHandleSessionModelFallbackEventPublishesToWS verifies the fallback event publishes the WS notification.
+
+func TestHandleSessionModelFallbackEventPublishesToWS(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	eb := &recordingEventBus{}
+	svc := &Service{logger: testLogger(), repo: repo, eventBus: eb}
+
+	svc.handleSessionModelFallbackEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:    "t1",
+		SessionID: "s1",
+		AgentID:   "a1",
+		Data: &lifecycle.AgentStreamEventData{
+			FallbackModel: "deepseek/deepseek-v4-flash",
+		},
+	})
+
+	require.Len(t, eb.events, 1)
+	require.Equal(t, events.BuildSessionModelFallbackSubject("s1"), eb.events[0].subject)
+	payload := eb.events[0].event.Data.(lifecycle.SessionModelFallbackEventPayload)
+	require.Equal(t, "s1", payload.SessionID)
+	require.Equal(t, "deepseek/deepseek-v4-flash", payload.FallbackModel)
+}
+
+// TestHandleAgentStreamEventRoutesSessionModelFallback pins the dispatch
+// mapping: a "session_model_fallback" stream event must reach
+// handleSessionModelFallbackEvent and publish the WS notification.
+func TestHandleAgentStreamEventRoutesSessionModelFallback(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	eb := &recordingEventBus{}
+	svc := &Service{logger: testLogger(), repo: repo, eventBus: eb}
+
+	svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:      "t1",
+		SessionID:   "s1",
+		ExecutionID: "exec-1",
+		AgentID:     "a1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type:          "session_model_fallback",
+			FallbackModel: "gpt-5",
+		},
+	})
+
+	require.Len(t, eb.events, 1)
+	require.Equal(t, events.BuildSessionModelFallbackSubject("s1"), eb.events[0].subject)
+	payload := eb.events[0].event.Data.(lifecycle.SessionModelFallbackEventPayload)
+	require.Equal(t, "gpt-5", payload.FallbackModel)
+}
+
+// TestHandleSessionModelFallbackEventResolvesSessionFromTask covers the
+// delayed-session path: the fallback fires during session init, before the
+// execution's task-session id is linked, so the handler must resolve the
+// session from the task id instead of dropping the note.
+func TestHandleSessionModelFallbackEventResolvesSessionFromTask(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	eb := &recordingEventBus{}
+	svc := &Service{logger: testLogger(), repo: repo, eventBus: eb}
+
+	svc.handleSessionModelFallbackEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:  "t1",
+		AgentID: "a1",
+		Data: &lifecycle.AgentStreamEventData{
+			FallbackModel: "gpt-5",
+		},
+	})
+
+	require.Len(t, eb.events, 1)
+	require.Equal(t, events.BuildSessionModelFallbackSubject("s1"), eb.events[0].subject)
+	payload := eb.events[0].event.Data.(lifecycle.SessionModelFallbackEventPayload)
+	require.Equal(t, "s1", payload.SessionID)
+	require.Equal(t, "gpt-5", payload.FallbackModel)
+}
+
 func TestHandleSessionModelsEventStoresBaselineCandidateAndPublishesLiveState(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

@@ -7,8 +7,68 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
 )
+
+// ExecuteProfilePrompt resolves a complete profile snapshot at call start
+// and executes it through the host utility instance. A missing or ineligible
+// profile fails before dispatch; no agent/model fallback is used.
+func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt string) (*PromptResult, error) {
+	if m.profileResolver == nil {
+		return nil, errors.New("utility profile resolver is not configured")
+	}
+	profile, err := m.profileResolver.Resolve(ctx, profileID)
+	if err != nil {
+		return nil, err
+	}
+	cliFlags, err := cliflags.Resolve(profile.CLIFlags)
+	if err != nil {
+		return nil, fmt.Errorf("resolve profile cli flags: %w", err)
+	}
+	var prefix []string
+	if profile.CommandPrefix != "" {
+		if err := cliflags.ValidateCommandPrefix(profile.CommandPrefix); err != nil {
+			return nil, err
+		}
+		prefix, err = cliflags.Tokenise(profile.CommandPrefix)
+		if err != nil {
+			return nil, err
+		}
+	}
+	env := make(map[string]string, len(profile.EnvVars))
+	for _, value := range profile.EnvVars {
+		if value.Key != "" && value.SecretID == "" {
+			env[value.Key] = value.Value
+		}
+	}
+	inst, ia, err := m.getInstance(ctx, profile.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	cfg := ia.InferenceConfig()
+	resolved := m.resolveModel(profile.AgentID, profile.Model, ia)
+	autoApprove := profile.AutoApprove
+	req := &agentctlutil.PromptRequest{
+		Prompt:                 prompt,
+		AgentID:                profile.AgentID,
+		Model:                  resolved,
+		Mode:                   profile.Mode,
+		AutoApprovePermissions: &autoApprove,
+		InferenceConfig: &agentctlutil.InferenceConfigDTO{
+			Command: cfg.Command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: inst.workDir,
+			Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: cliFlags, CommandPrefix: prefix,
+		},
+	}
+	resp, err := inst.client.InferencePrompt(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if !resp.Success {
+		return nil, errors.New(resp.Error)
+	}
+	return &PromptResult{Response: resp.Response, Model: resp.Model, PromptTokens: resp.PromptTokens, ResponseTokens: resp.ResponseTokens, DurationMs: resp.DurationMs}, nil
+}
 
 // GetAll returns a snapshot of every probed agent type's capabilities.
 func (m *Manager) GetAll() []AgentCapabilities {

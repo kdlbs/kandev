@@ -322,6 +322,7 @@ func (r *Repository) runTaskPriorityRecreate() error {
 	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN wip_admitted INTEGER NOT NULL DEFAULT 1`)
 	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN queued_for_step_id TEXT NOT NULL DEFAULT ''`)
 	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN queued_at TIMESTAMP`)
+	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN autopilot_enabled INTEGER NOT NULL DEFAULT 0`)
 	// Same defensive add for external_id/external_id_settled_at
 	// (docs/specs/tasks/external-id-idempotency): real installs already have
 	// these from task/repository/sqlite/base.go runMigrations(), but older
@@ -370,6 +371,7 @@ func taskPriorityMigrationStatements() []string {
 			metadata TEXT DEFAULT '{}',
 			is_ephemeral INTEGER NOT NULL DEFAULT 0,
 			parent_id TEXT DEFAULT '',
+			autopilot_enabled INTEGER NOT NULL DEFAULT 0,
 			archived_at TIMESTAMP,
 			archived_by_cascade_id TEXT DEFAULT '',
 			created_at TIMESTAMP NOT NULL,
@@ -396,7 +398,7 @@ func taskPriorityMigrationStatements() []string {
 		// meaningful "no identity" state.
 		`INSERT INTO tasks_priority_new (
 			id, workspace_id, workflow_id, workflow_step_id, title, description,
-			state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id,
+			state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled,
 			archived_at, archived_by_cascade_id, created_at, updated_at,
 			origin, project_id,
 			labels, identifier,
@@ -408,7 +410,7 @@ func taskPriorityMigrationStatements() []string {
 			COALESCE(state,'TODO'), 'medium', COALESCE(position,0),
 			COALESCE(wip_admitted,1), COALESCE(queued_for_step_id,''), queued_at,
 			COALESCE(metadata,'{}'), COALESCE(is_ephemeral,0),
-			COALESCE(parent_id,''), archived_at,
+			COALESCE(parent_id,''), COALESCE(autopilot_enabled,0), archived_at,
 			COALESCE(archived_by_cascade_id,''),
 			created_at, updated_at,
 			COALESCE(origin,'manual'),

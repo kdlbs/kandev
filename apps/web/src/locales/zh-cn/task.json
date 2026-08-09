@@ -1450,5 +1450,10 @@
   "yourBranchesLabel": "你的分支：",
   "yourChangedFilesWillAppearHere": "你更改的文件将显示在此",
   "yourCodeLivesInLabel": "你的代码位于：",
-  "yourReviewIsRequestedOnThis": "请求你审阅此任务。"
+  "yourReviewIsRequestedOnThis": "请求你审阅此任务。",
+  "autopilot": "自动驾驶",
+  "autopilotDescription": "代理会自主工作，只有在关键决策阻碍进展时才会向父任务询问，然后等待答复再继续。",
+  "autopilotInfoLabel": "了解自动驾驶模式",
+  "autopilotSidebarDescription": "自动驾驶任务",
+  "autopilotChatDescription": "自动驾驶已启用。代理只会向父任务询问关键决策。"
 }

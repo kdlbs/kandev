@@ -180,6 +180,29 @@ func TestFormatKandevContext_CoordinatorTaskControlsFollowCapability(t *testing.
 	}
 }
 
+func TestFormatKandevContext_AutopilotChildUsesParentQuestionOnly(t *testing.T) {
+	result := FormatKandevContextWithOptions("task-child", "session-child", KandevContextOptions{
+		Autopilot:                      true,
+		IncludeParentQuestionTool:      true,
+		IncludeUserQuestionTool:        false,
+		IncludeCoordinatorTaskControls: true,
+	})
+	assert.Contains(t, result, "AUTOPILOT MODE")
+	assert.Contains(t, result, "ask_parent_question_kandev")
+	assert.NotContains(t, result, "ask_user_question_kandev")
+	assert.Contains(t, result, "end your turn")
+}
+
+func TestFormatKandevContext_AutopilotRootHasNoQuestionTool(t *testing.T) {
+	result := FormatKandevContextWithOptions("task-root", "session-root", KandevContextOptions{
+		Autopilot:               true,
+		IncludeUserQuestionTool: false,
+	})
+	assert.Contains(t, result, "AUTOPILOT MODE")
+	assert.NotContains(t, result, "ask_parent_question_kandev")
+	assert.NotContains(t, result, "ask_user_question_kandev")
+}
+
 func TestFormatKandevContext_InjectsIDs(t *testing.T) {
 	result := FormatKandevContext("task-abc", "session-xyz", false)
 	assert.Contains(t, result, "Kandev Task ID: task-abc")
