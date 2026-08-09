@@ -237,6 +237,34 @@ test.describe("Utility Agents settings page", () => {
     expect(cardOrder).toBe(true);
 
     const picker = testPage.getByTestId("utility-profile-picker-default");
+    const configPicker = testPage.getByTestId("utility-profile-picker-config-chat");
+    await expect(picker).toHaveClass(/border-border/);
+    await expect(configPicker).toHaveClass(/border-border/);
+    await expect(
+      testPage.getByTestId("config-chat-agent-card").getByText("Agent profile", { exact: true }),
+    ).toBeVisible();
+    const [defaultPickerBox, configPickerBox] = await Promise.all([
+      picker.boundingBox(),
+      configPicker.boundingBox(),
+    ]);
+    expect(defaultPickerBox).not.toBeNull();
+    expect(configPickerBox).not.toBeNull();
+    expect(defaultPickerBox!.width).toBeCloseTo(configPickerBox!.width, 0);
+
+    const cardTypography = await testPage
+      .locator('[data-slot="card-title"] h3')
+      .evaluateAll((elements) =>
+        elements.map((element) => {
+          const style = getComputedStyle(element);
+          return {
+            fontFamily: style.fontFamily,
+            fontSize: style.fontSize,
+            lineHeight: style.lineHeight,
+          };
+        }),
+      );
+    expect(new Set(cardTypography.map((style) => JSON.stringify(style))).size).toBe(1);
+
     await picker.click();
     const listbox = testPage.getByRole("listbox");
     await expect(listbox).toBeVisible();
@@ -248,7 +276,6 @@ test.describe("Utility Agents settings page", () => {
     await expect(picker).toContainText(profileLabel);
     await testPage.keyboard.press("Escape");
 
-    const configPicker = testPage.getByTestId("utility-profile-picker-config-chat");
     await configPicker.click();
     const configDropdown = testPage.getByTestId("utility-profile-picker-config-chat-dropdown");
     const configListbox = configDropdown.getByRole("listbox");

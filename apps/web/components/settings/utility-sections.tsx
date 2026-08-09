@@ -39,7 +39,7 @@ export function DefaultModelSection({
       data-testid="utility-default-model-card"
     >
       <CardHeader>
-        <CardTitle className="text-base">
+        <CardTitle className="text-base font-semibold leading-5">
           <h3>{t("settings:utilityDefaultModelTitle")}</h3>
         </CardTitle>
       </CardHeader>
@@ -48,7 +48,7 @@ export function DefaultModelSection({
           {t("settings:utilityDefaultModelDescription")}
         </p>
         <div className="space-y-2">
-          <Label className="text-xs text-muted-foreground">
+          <Label className="text-xs font-medium text-muted-foreground">
             {t("settings:utilityAgentProfile")}
           </Label>
           <UtilityAgentProfilePicker
@@ -58,7 +58,7 @@ export function DefaultModelSection({
             fallback={{ value: USE_DEFAULT, label: t("settings:utilityNoDefaultProfile") }}
             unavailableValue={profileId && !selected ? profileId : undefined}
             testId="utility-profile-picker-default"
-            triggerClassName="w-full"
+            triggerClassName="w-full max-w-sm font-normal"
           />
           {profileId && !selected && (
             <p className="text-xs text-destructive">{t("settings:utilityProfileNeedsRepair")}</p>
@@ -98,7 +98,7 @@ export function BuiltinActionRow({
       data-settings-dirty={isDirty}
     >
       <div className="min-w-0 md:flex-1">
-        <div className="text-sm font-medium truncate">{agent.name}</div>
+        <div className="text-sm font-medium leading-5 truncate">{agent.name}</div>
         <p className="text-xs text-muted-foreground truncate">{agent.description}</p>
       </div>
       <div className="flex items-center gap-2">
@@ -156,7 +156,7 @@ export function PerActionOverridesSection({
       data-testid="utility-actions-card"
     >
       <CardHeader>
-        <CardTitle className="text-base">
+        <CardTitle className="text-base font-semibold leading-5">
           <h3>{t("settings:utilityActionsTitle")}</h3>
         </CardTitle>
       </CardHeader>
@@ -247,7 +247,7 @@ export function CustomAgentsSection({
       data-testid="utility-custom-agents-card"
     >
       <CardHeader>
-        <CardTitle className="text-base">
+        <CardTitle className="text-base font-semibold leading-5">
           <h3>{t("settings:utilityCustomAgentsTitle")}</h3>
         </CardTitle>
         <CardAction>

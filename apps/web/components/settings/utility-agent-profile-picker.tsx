@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Combobox, type ComboboxOption } from "@/components/combobox";
 import { AgentLogo } from "@/components/agent-logo";
+import { cn } from "@/lib/utils";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 
 export const utilityProfileEligibility = (profile: AgentProfileOption) =>
@@ -99,7 +100,10 @@ export function UtilityAgentProfilePicker({
       ariaLabel={t("settings:utilityAgentProfile")}
       testId={testId}
       dropdownTestId={`${testId}-dropdown`}
-      triggerClassName={triggerClassName}
+      triggerClassName={cn(
+        "border-border dark:bg-input/30 hover:bg-input/50 hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground font-normal",
+        triggerClassName,
+      )}
       className="max-h-[min(60vh,24rem)]"
     />
   );
