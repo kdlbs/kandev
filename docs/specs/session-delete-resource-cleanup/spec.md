@@ -109,9 +109,11 @@ Canonical `task_environment_repos` rows take precedence when the legacy flat
 environment fields or session references repeat the same physical worktree.
 Legacy session rows marked `deleted` (or carrying `deleted_at`) and stale
 references from terminal sessions are historical evidence, not additional
-owners, and must not block the cutover. A non-terminal session or a worktree
-that has no canonical owner still requires compatible identity, path, branch,
-and repository data; unresolved live ownership fails closed with a diagnostic.
+owners, and bypass validation only when a canonical repository owner exists.
+A terminal-only reference without a canonical owner, a non-terminal session,
+or a worktree that has no canonical owner still requires compatible identity,
+path, branch, and repository data; unresolved ownership fails closed with a
+diagnostic.
 
 After backfill validation, the same upgrade drops `task_session_worktrees` and
 the deprecated flat worktree columns from `task_environments`. It also removes

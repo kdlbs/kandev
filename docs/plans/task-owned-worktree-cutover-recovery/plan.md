@@ -60,6 +60,16 @@ database is recoverable without destructive repair.
   **File:** same migration test file.
   **How:** Extend the existing conflicting-worktrees fixture with a
   non-terminal session and assert rollback.
+- **What:** Terminal session references for `COMPLETED`, `FAILED`, and
+  `CANCELLED` cannot override a canonical owner.
+  **File:** same migration test file.
+  **How:** Run the table-driven `TestCutover_IgnoresTerminalHistoricalSessionConflict`
+  fixture and assert the canonical worktree remains selected for each state.
+- **What:** An unexpected `CREATED` session-worktree reference without a
+  canonical repository row is preserved for backfill.
+  **File:** same migration test file.
+  **How:** Run `TestCutover_PreservesCreatedSessionWorktreeWithoutCanonicalOwner`
+  and assert the physical worktree is present after cutover.
 - **What:** The full repository initializer can upgrade a representative
   legacy database.
   **File:** same migration test file.
@@ -97,6 +107,8 @@ silently discarded without a canonical owner.
 
 - `GOCACHE=/tmp/kandev-go-cache go test ./internal/task/repository/sqlite -run
   'TestCutover_(CanonicalRepoWinsOverStaleFlatMetadata|IgnoresDeletedHistoricalSessionConflict)' -count=1` — passed.
+- `GOCACHE=/tmp/kandev-go-cache go test ./internal/task/repository/sqlite -run
+  'TestCutover_(IgnoresTerminalHistoricalSessionConflict|PreservesCreatedSessionWorktreeWithoutCanonicalOwner)' -count=1` — passed.
 - `GOCACHE=/tmp/kandev-go-cache go test ./internal/task/repository/sqlite -run
   'TestCutover' -count=1` — passed.
 - `GOCACHE=/tmp/kandev-go-cache go test ./internal/task/repository/sqlite -count=1` — passed.

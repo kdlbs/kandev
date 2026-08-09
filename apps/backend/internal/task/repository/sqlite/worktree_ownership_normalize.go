@@ -14,18 +14,19 @@ import (
 
 // worktreeCutover holds the legacy inventory and the normalized result.
 type worktreeCutover struct {
-	envs          map[string]*legacyEnv
-	taskEnvs      map[string][]*legacyEnv
-	sessions      map[string]*legacySession
-	sessionTasks  map[string]string
-	sessionEnvIDs map[string]string
-	envRepos      []legacyEnvRepo
-	sessionWts    []legacySessionWorktree
-	tasks         map[string]*taskWorktreeTargets
-	taskEnvIDs    map[string]string
-	loserEnvIDs   map[string]bool
-	executorTypes map[string]string
-	conflicts     []string
+	envs                         map[string]*legacyEnv
+	taskEnvs                     map[string][]*legacyEnv
+	sessions                     map[string]*legacySession
+	sessionTasks                 map[string]string
+	sessionEnvIDs                map[string]string
+	historicalWorktreeSuperseded map[string]bool
+	envRepos                     []legacyEnvRepo
+	sessionWts                   []legacySessionWorktree
+	tasks                        map[string]*taskWorktreeTargets
+	taskEnvIDs                   map[string]string
+	loserEnvIDs                  map[string]bool
+	executorTypes                map[string]string
+	conflicts                    []string
 }
 
 type legacyEnv struct {
@@ -459,23 +460,28 @@ func (c *worktreeCutover) linkSessions() {
 // same task/repository slot. A historical row with no canonical replacement
 // remains eligible for backfill.
 func (c *worktreeCutover) isSupersededHistoricalWorktree(wt legacySessionWorktree) bool {
+	cacheKey := wt.sessionID + "\x00" + wt.worktreeID
+	if superseded, ok := c.historicalWorktreeSuperseded[cacheKey]; ok {
+		return superseded
+	}
+
+	superseded := false
 	if isLegacyDeletedWorktree(wt) {
-		return true
-	}
-	session, ok := c.sessions[wt.sessionID]
-	if !ok || !isLegacyHistoricalSession(session.state) {
-		return false
-	}
-	for _, row := range c.envRepos {
-		env, ok := c.envs[row.envID]
-		if !ok || env.taskID != session.taskID || row.worktreeID == "" {
-			continue
-		}
-		if row.repositoryID == wt.repositoryID && row.branchSlug == wt.branchSlug {
-			return true
+		superseded = true
+	} else if session, ok := c.sessions[wt.sessionID]; ok && isLegacyHistoricalSession(session.state) {
+		for _, row := range c.envRepos {
+			env, ok := c.envs[row.envID]
+			if !ok || env.taskID != session.taskID || row.worktreeID == "" {
+				continue
+			}
+			if row.repositoryID == wt.repositoryID && row.branchSlug == wt.branchSlug {
+				superseded = true
+				break
+			}
 		}
 	}
-	return false
+	c.historicalWorktreeSuperseded[cacheKey] = superseded
+	return superseded
 }
 
 // registerWorktreeIdentities ensures every physical worktree is owned by
