@@ -1,6 +1,5 @@
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import type { TFunction } from "i18next";
 import { useToast } from "@/components/toast-provider";
 
 type GitOperationResult = { success: boolean; output: string; error?: string };
@@ -10,9 +9,15 @@ type GitOperationResult = { success: boolean; output: string; error?: string };
  * repository in a multi-repo task. The parenthesised repo form is a catalog
  * entry rather than a template literal so a locale can move or re-punctuate it.
  */
-export function gitOperationLabel(t: TFunction, operationKey: string, repo?: string): string {
-  const operation = t(operationKey);
-  return repo ? t("common:gitOperationScoped", { operation, repo }) : operation;
+export function gitOperationLabel(
+  // Deliberately not `TFunction`: callers include plain helpers that use the
+  // module-level `t` from `@/lib/i18n`, whose signature is narrower.
+  translate: (key: string, values?: Record<string, unknown>) => string,
+  operationKey: string,
+  repo?: string,
+): string {
+  const operation = translate(operationKey);
+  return repo ? translate("common:gitOperationScoped", { operation, repo }) : operation;
 }
 
 /**

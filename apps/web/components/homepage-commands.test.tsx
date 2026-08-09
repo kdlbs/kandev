@@ -4,7 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   routerPush: vi.fn(),
   onViewModeChange: vi.fn(),
-  commands: [] as Array<{ id: string; label?: string; group?: string; action?: () => void }>,
+  commands: [] as Array<{
+    id: string;
+    label?: string;
+    group?: string;
+    keywords?: string[];
+    action?: () => void;
+  }>,
   activeWorkspaceId: "workspace-1" as string | null,
   activeWorkflowId: "workflow-1" as string | null,
 }));
@@ -87,6 +93,10 @@ describe("HomepageCommands", () => {
       [
         ["label", command.label],
         ["group", command.group],
+        // Search keywords are matched, never displayed, but a non-English user
+        // types in their own language — leaving them English makes the command
+        // unfindable. They arrive as one comma-separated catalog value.
+        ["keywords", command.keywords?.join(",")],
       ]
         .filter(([, value]) => typeof value === "string" && !value.startsWith("«"))
         .map(([field, value]) => `${command.id}.${field} = ${value}`),
@@ -94,5 +104,6 @@ describe("HomepageCommands", () => {
 
     expect(inlined).toEqual([]);
     expect(mocks.commands.length).toBeGreaterThan(0);
+    expect(mocks.commands.every((command) => (command.keywords?.length ?? 0) > 0)).toBe(true);
   });
 });

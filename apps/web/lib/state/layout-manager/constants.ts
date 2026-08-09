@@ -135,9 +135,26 @@ export const PANEL_REGISTRY: Record<string, Omit<LayoutPanel, "id"> & { titleKey
  * file's comment.
  */
 
-/** The canonical English title stored in a saved layout, if `id` is known. */
-export function canonicalPanelTitle(id: string): string | undefined {
-  return PANEL_REGISTRY[id]?.title;
+/**
+ * Registry entry for a panel.
+ *
+ * Falls back to the COMPONENT when the id is not an exact key, because several
+ * panel families mint dynamic ids from their component — `browser:<url>`,
+ * `pr-detail|<key>`, `mr-detail|<key>`. Matching on the id alone left those
+ * outside the canonical/localized split entirely: they were created with a
+ * localized title, captured verbatim into the saved layout, and then could not
+ * be re-localized on restore, so the layout showed whichever locale created it.
+ */
+export function panelRegistryEntry(
+  id: string,
+  component?: string,
+): (typeof PANEL_REGISTRY)[string] | undefined {
+  return PANEL_REGISTRY[id] ?? (component ? PANEL_REGISTRY[component] : undefined);
+}
+
+/** The canonical English title stored in a saved layout, if the panel is known. */
+export function canonicalPanelTitle(id: string, component?: string): string | undefined {
+  return panelRegistryEntry(id, component)?.title;
 }
 
 /**

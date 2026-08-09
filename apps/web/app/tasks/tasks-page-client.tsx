@@ -168,7 +168,7 @@ function useTaskOperations({
 }
 
 function errorDescription(err: unknown): string {
-  return err instanceof Error ? err.message : t("tasks:unknownError");
+  return err instanceof Error ? err.message : t("common:unknownError");
 }
 
 function useTaskMutations(fetchTasks: () => void) {

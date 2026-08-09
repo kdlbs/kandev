@@ -152,7 +152,7 @@ function serializePanels(state: LayoutState): Record<
           // keeps the canonical English title — see `panelFromDockviewPanel`,
           // which canonicalizes again on capture so a translated title can
           // never reach storage.
-          title: panelTitle(panel.id, panel.title),
+          title: panelTitle(panel.id, panel.title, panel.component),
           ...(panel.tabComponent ? { tabComponent: panel.tabComponent } : {}),
           ...(panel.params ? { params: panel.params } : {}),
         };
@@ -201,7 +201,7 @@ function panelFromDockviewPanel(panel: any): LayoutPanel {
     component: panel.view?.contentComponent ?? panel.id,
     // CAPTURE direction: dockview holds the localized title, and this result is
     // what gets persisted, so a registry panel goes back to canonical English.
-    title: canonicalPanelTitle(panel.id) ?? panel.title ?? panel.id,
+    title: canonicalPanelTitle(panel.id, panel.view?.contentComponent) ?? panel.title ?? panel.id,
     ...(panel.view?.tabComponent ? { tabComponent: panel.view.tabComponent } : {}),
     ...(panel.params ? { params: panel.params as Record<string, unknown> } : {}),
   };
@@ -365,12 +365,13 @@ function normalizePanel(
   // A layout saved before this split (or by an older build) can carry a
   // translated title; normalise it back to canonical English so the render
   // direction is the only place a locale is applied.
-  if (KNOWN_PANEL_IDS.has(p.id)) return { ...p, title: canonicalPanelTitle(p.id) ?? p.title };
+  if (KNOWN_PANEL_IDS.has(p.id))
+    return { ...p, title: canonicalPanelTitle(p.id, p.component) ?? p.title };
 
   if (p.component === "browser") {
     const url = (p.params?.url as string) ?? "";
     const id = url ? `browser:${url}` : `browser-saved-${++counters.browser}`;
-    return { ...p, id, params: { url } };
+    return { ...p, id, params: { url }, title: canonicalPanelTitle(id, p.component) ?? p.title };
   }
   return p;
 }

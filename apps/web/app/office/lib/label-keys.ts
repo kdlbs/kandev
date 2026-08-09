@@ -75,6 +75,11 @@ export const CONCURRENCY_POLICY_LABEL_KEYS: Record<string, string> = {
  * with a complete catalog still saw "block new tasks" spelled out of an
  * identifier.
  */
+export const BUDGET_PERIOD_LABEL_KEYS: Record<string, string> = {
+  monthly: "office:budgetPeriodMonthly",
+  total: "office:budgetPeriodTotal",
+};
+
 export const BUDGET_ACTION_LABEL_KEYS: Record<string, string> = {
   notify_only: "office:budgetActionNotifyOnly",
   pause_agent: "office:budgetActionPauseAgent",

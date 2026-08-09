@@ -108,6 +108,8 @@
   "budgetAmount": "预算：{{amount}}",
   "budgetCapConcurrencyAndExecutionEnvironment": "预算上限、并发与执行环境。",
   "budgetLimitsConcurrencyAndExecutionEnvironment": "预算限制、并发与执行环境。",
+  "budgetPeriodMonthly": "每月",
+  "budgetPeriodTotal": "总计",
   "budgetPolicies": "预算策略",
   "budgetPolicyCreated": "预算策略已创建",
   "budgetPolicyDeleted": "预算策略已删除",

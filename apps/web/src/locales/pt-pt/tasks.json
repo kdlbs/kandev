@@ -50,6 +50,5 @@
   "unarchivedBranchesMissing_one": "O ramo {{branches}} já não existe localmente nem no remoto — a próxima sessão começa de novo a partir do ramo base.",
   "unarchivedBranchesMissing_other": "Os ramos {{branches}} já não existem localmente nem no remoto — a próxima sessão começa de novo a partir do ramo base.",
   "unarchivedTaskRestored": "A tarefa foi restaurada.",
-  "unarchiveTask": "Desarquivar tarefa",
-  "unknownError": "Erro desconhecido"
+  "unarchiveTask": "Desarquivar tarefa"
 }

@@ -1,6 +1,6 @@
 import { t } from "@/lib/i18n";
 
-import { PANEL_REGISTRY } from "./constants";
+import { panelRegistryEntry } from "./constants";
 
 /**
  * The display title for a registry panel, in the active locale.
@@ -23,8 +23,8 @@ import { PANEL_REGISTRY } from "./constants";
  * dockview. `toSerializedDockview` localizes on the way in and
  * `panelFromDockviewPanel` canonicalizes on the way back out.
  */
-export function panelTitle(id: string, fallback?: string): string {
-  const config = PANEL_REGISTRY[id];
+export function panelTitle(id: string, fallback?: string, component?: string): string {
+  const config = panelRegistryEntry(id, component);
   if (!config) return fallback ?? id;
   return config.titleKey ? t(config.titleKey) : config.title;
 }

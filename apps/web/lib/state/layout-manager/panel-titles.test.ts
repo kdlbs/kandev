@@ -41,6 +41,24 @@ describe("panelTitle", () => {
     expect(panelTitle("diff:src/app.ts", "Diff [app.ts]")).toBe("Diff [app.ts]");
   });
 
+  const BROWSER_PANEL_ID = "browser:https://example.com";
+
+  it("resolves a dynamic id through its component", async () => {
+    // `browser:<url>`, `pr-detail|<key>` and `mr-detail|<key>` are minted per
+    // instance, so an exact-id lookup misses them. Without the component
+    // fallback they were created localized, captured verbatim into the saved
+    // layout, and could not be re-localized on restore — the layout then showed
+    // whichever locale had created it.
+    expect(panelTitle(BROWSER_PANEL_ID, undefined, "browser")).toBe("Browser");
+    expect(canonicalPanelTitle(BROWSER_PANEL_ID, "browser")).toBe("Browser");
+    expect(canonicalPanelTitle("mr-detail|kandev!7", "mr-detail")).toBe("Merge Request");
+
+    await i18n.changeLanguage("pseudo");
+    expect(panelTitle(BROWSER_PANEL_ID, undefined, "browser")).not.toBe("Browser");
+    // Storage stays canonical whatever the locale.
+    expect(canonicalPanelTitle(BROWSER_PANEL_ID, "browser")).toBe("Browser");
+  });
+
   it("leaves a product name untranslated", async () => {
     await i18n.changeLanguage("pseudo");
     expect(panelTitle("vscode")).toBe("VS Code");

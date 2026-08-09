@@ -50,6 +50,5 @@
   "unarchivedBranchesMissing_one": "分支 {{branches}} 在本地和远程都已不存在——下一个会话将从基础分支重新开始。",
   "unarchivedBranchesMissing_other": "分支 {{branches}} 在本地和远程都已不存在——下一个会话将从基础分支重新开始。",
   "unarchivedTaskRestored": "任务已恢复。",
-  "unarchiveTask": "取消归档任务",
-  "unknownError": "未知错误"
+  "unarchiveTask": "取消归档任务"
 }

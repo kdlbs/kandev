@@ -108,6 +108,8 @@
   "budgetAmount": "Ɓũďĝēţ: {{amount}}",
   "budgetCapConcurrencyAndExecutionEnvironment": "Ɓũďĝēţ ćàƥ, ćōńćũŕŕēńćŷ, àńď ēxēćũţĩōń ēńvĩŕōńḿēńţ.",
   "budgetLimitsConcurrencyAndExecutionEnvironment": "Ɓũďĝēţ ĺĩḿĩţś, ćōńćũŕŕēńćŷ, àńď ēxēćũţĩōń ēńvĩŕōńḿēńţ.",
+  "budgetPeriodMonthly": "ḿōńţĥĺŷ",
+  "budgetPeriodTotal": "ţōţàĺ",
   "budgetPolicies": "Ɓũďĝēţ Ƥōĺĩćĩēś",
   "budgetPolicyCreated": "Ɓũďĝēţ ƥōĺĩćŷ ćŕēàţēď",
   "budgetPolicyDeleted": "Ɓũďĝēţ ƥōĺĩćŷ ďēĺēţēď",

@@ -27,12 +27,19 @@ export const DEFAULT_VIEW_NAME_KEY = "sidebar:viewAllTasks";
 
 export const DEFAULT_VIEW: SidebarView = createDefaultSidebarView(DEFAULT_VIEW_ID, "All tasks");
 
-/** Display name for a view: the built-in resolves through the catalog. */
+/**
+ * Display name for a view.
+ *
+ * Only the built-in that still carries its canonical name resolves through the
+ * catalog. The built-in is renameable like any other view, so keying off the id
+ * alone would show the translated default over a name the user chose.
+ */
 export function sidebarViewName(
   view: Pick<SidebarView, "id" | "name">,
   translate: (key: string) => string,
 ): string {
-  return view.id === DEFAULT_VIEW_ID ? translate(DEFAULT_VIEW_NAME_KEY) : view.name;
+  const isUnrenamedBuiltIn = view.id === DEFAULT_VIEW_ID && view.name === DEFAULT_VIEW.name;
+  return isUnrenamedBuiltIn ? translate(DEFAULT_VIEW_NAME_KEY) : view.name;
 }
 
 export const DEFAULT_ACTIVE_VIEW_ID = DEFAULT_VIEW_ID;

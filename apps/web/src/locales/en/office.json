@@ -108,6 +108,8 @@
   "budgetAmount": "Budget: {{amount}}",
   "budgetCapConcurrencyAndExecutionEnvironment": "Budget cap, concurrency, and execution environment.",
   "budgetLimitsConcurrencyAndExecutionEnvironment": "Budget limits, concurrency, and execution environment.",
+  "budgetPeriodMonthly": "monthly",
+  "budgetPeriodTotal": "total",
   "budgetPolicies": "Budget Policies",
   "budgetPolicyCreated": "Budget policy created",
   "budgetPolicyDeleted": "Budget policy deleted",

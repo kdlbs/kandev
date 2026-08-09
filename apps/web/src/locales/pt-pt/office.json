@@ -108,6 +108,8 @@
   "budgetAmount": "Orçamento: {{amount}}",
   "budgetCapConcurrencyAndExecutionEnvironment": "Limite de orçamento, concorrência e ambiente de execução.",
   "budgetLimitsConcurrencyAndExecutionEnvironment": "Limites de orçamento, concorrência e ambiente de execução.",
+  "budgetPeriodMonthly": "mensal",
+  "budgetPeriodTotal": "total",
   "budgetPolicies": "Políticas de orçamento",
   "budgetPolicyCreated": "Política de orçamento criada",
   "budgetPolicyDeleted": "Política de orçamento eliminada",

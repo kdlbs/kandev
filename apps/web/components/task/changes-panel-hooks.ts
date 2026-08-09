@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { t } from "@/lib/i18n";
+import { gitOperationLabel } from "@/hooks/use-git-with-feedback";
 import type { useToast } from "@/components/toast-provider";
 import type { SessionGit, PerRepoOperationResult } from "@/hooks/domains/session/use-session-git";
 
@@ -38,7 +39,7 @@ type GitOperationFn = (op: () => Promise<GitOperationResultLike>, name: string) 
  * present, summarise per-repo successes/failures instead of returning the
  * raw output (which was just the last repo's text and hid partial-success).
  */
-function describePerRepo(
+export function describePerRepo(
   perRepo: PerRepoOperationResult[],
   operationName: string,
 ): { title: string; description: string; variant: "success" | "error" } {
@@ -73,6 +74,11 @@ function describePerRepo(
   }
   // Partial success: surface as error so the user notices, but include the
   // succeeded list in the description so they don't retry the whole op.
+  //
+  // `gitOperationPartialDescription` carries `_one` as well as `_other` because
+  // i18next requires both, but `_one` is unreachable here by construction: this
+  // branch needs at least one success AND one failure, so `count` is never 1.
+  // Translators can treat the singular as a formality.
   return {
     title: t("common:gitOperationPartiallySucceeded", { operation: operationName }),
     description: t("common:gitOperationPartialDescription", {
@@ -84,12 +90,6 @@ function describePerRepo(
     }),
     variant: "error",
   };
-}
-
-/** Resolve an operation name, scoped to one repo in a multi-repo task. */
-function labelWithRepo(operationKey: string, repo: string | undefined): string {
-  const operation = t(operationKey);
-  return repo ? t("common:gitOperationScoped", { operation, repo }) : operation;
 }
 
 export function useChangesGitHandlers(
@@ -131,7 +131,10 @@ export function useChangesGitHandlers(
 
   const handlePull = useCallback(
     (repo?: string) => {
-      handleGitOperation(() => gitOps.pull(false, repo), labelWithRepo("common:gitOpPull", repo));
+      handleGitOperation(
+        () => gitOps.pull(false, repo),
+        gitOperationLabel(t, "common:gitOpPull", repo),
+      );
     },
     [handleGitOperation, gitOps],
   );
@@ -140,7 +143,7 @@ export function useChangesGitHandlers(
       const targetBranch = baseBranch?.replace(/^origin\//, "") || "main";
       handleGitOperation(
         () => gitOps.rebase(targetBranch, repo),
-        labelWithRepo("common:gitOpRebase", repo),
+        gitOperationLabel(t, "common:gitOpRebase", repo),
       );
     },
     [handleGitOperation, gitOps, baseBranch],
@@ -150,7 +153,7 @@ export function useChangesGitHandlers(
       const targetBranch = baseBranch?.replace(/^origin\//, "") || "main";
       handleGitOperation(
         () => gitOps.merge(targetBranch, repo),
-        labelWithRepo("common:gitOpMerge", repo),
+        gitOperationLabel(t, "common:gitOpMerge", repo),
       );
     },
     [handleGitOperation, gitOps, baseBranch],
@@ -159,7 +162,7 @@ export function useChangesGitHandlers(
     (repo?: string) => {
       handleGitOperation(
         () => gitOps.push(undefined, repo),
-        labelWithRepo("common:gitOpPush", repo),
+        gitOperationLabel(t, "common:gitOpPush", repo),
       );
     },
     [handleGitOperation, gitOps],
@@ -168,7 +171,7 @@ export function useChangesGitHandlers(
     (repo?: string) => {
       handleGitOperation(
         () => gitOps.push({ force: true }, repo),
-        labelWithRepo("common:gitOpForcePush", repo),
+        gitOperationLabel(t, "common:gitOpForcePush", repo),
       );
     },
     [handleGitOperation, gitOps],
