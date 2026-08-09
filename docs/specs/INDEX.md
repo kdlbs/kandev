@@ -39,5 +39,8 @@ The following specifications were added after this migration and remain in the l
 - [Workflow on_enter action dispatch](workflow-on-enter-action-dispatch/spec.md) (draft)
 - [Kubernetes Executor](kubernetes-executor/spec.md) (implemented)
 - [Task Delivery Ledger](task-delivery-ledger/spec.md) (draft)
+- [Waiting Attribution](disambiguate-waiting/spec.md) (draft)
+- [ACP Form Elicitation](acp-elicitation/spec.md) (draft)
+- [Parked-Session Notification Deferral](parked-notification-deferral/spec.md) (draft)
 
 ## Authoring rule
