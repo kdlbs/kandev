@@ -38,4 +38,26 @@ describe("sessionStatusTooltip", () => {
       sessionStatusTooltip("COMPLETED", { permission: false, clarification: false }, "background"),
     ).toBe("Complete");
   });
+
+  it("labels a parked session as background-running (AC-51a)", () => {
+    expect(
+      sessionStatusTooltip(
+        "WAITING_FOR_INPUT",
+        { permission: false, clarification: false },
+        null,
+        true,
+      ),
+    ).toBe("Background running");
+  });
+
+  it("does not show background-running for a non-parked session with no foreground activity", () => {
+    expect(
+      sessionStatusTooltip(
+        "WAITING_FOR_INPUT",
+        { permission: false, clarification: false },
+        null,
+        false,
+      ),
+    ).toBe("Waiting for input");
+  });
 });

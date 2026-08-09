@@ -204,6 +204,7 @@ function SessionReopenMenuItem({
           {getSessionStateIcon(session.state, "h-3 w-3", session.foreground_activity, {
             hasPendingClarification: pending.clarification,
             hasPendingPermission: pending.permission,
+            parkedOnBackgroundWork: session.parked_on_background_work ?? false,
           })}
         </span>
       )}

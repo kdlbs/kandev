@@ -328,6 +328,11 @@ export function getTaskStateIcon(
   if (config === TASK_INTERRUPTED_ICON) {
     return <InterruptedTaskIcon className={cn("h-4 w-4", className)} />;
   }
+  // The background-work affordance carries data-testid and a tooltip, so it
+  // must render through BackgroundWorkTaskIcon rather than a bare IconLoader.
+  if (config === TASK_BACKGROUND_ICON) {
+    return <BackgroundWorkTaskIcon className={cn("h-4 w-4", className)} />;
+  }
   return <config.Icon className={cn("h-4 w-4", config.className, className)} />;
 }
 

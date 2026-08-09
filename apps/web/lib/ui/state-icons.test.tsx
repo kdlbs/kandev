@@ -6,7 +6,6 @@ import {
   IconCheck,
   IconCircleCheck,
   IconCircleFilled,
-  IconLoader,
   IconLoader2,
   IconMessageQuestion,
   IconShieldQuestion,
@@ -21,6 +20,7 @@ import {
 } from "./state-icons";
 
 const ANIMATE_SPIN = "animate-spin";
+const BG_TESTID = '[data-testid="task-state-background-running"]';
 
 function iconType(node: ReactNode) {
   if (!isValidElement(node)) throw new Error("Expected React element");
@@ -137,11 +137,13 @@ describe("getTaskStateIcon — waiting-for-input variants", () => {
   });
 
   it("lets background activity win over a coarse waiting state without pending input", () => {
-    expect(
-      iconType(
-        getTaskStateIcon("WAITING_FOR_INPUT", undefined, { foregroundActivity: "background" }),
-      ),
-    ).toBe(IconLoader);
+    const { container } = render(
+      <TooltipProvider>
+        {getTaskStateIcon("WAITING_FOR_INPUT", undefined, { foregroundActivity: "background" })}
+      </TooltipProvider>,
+    );
+    expect(container.querySelector(BG_TESTID)).not.toBeNull();
+    expect(container.querySelector('[data-testid="task-state-waiting-for-input"]')).toBeNull();
   });
 });
 
@@ -158,9 +160,14 @@ describe("getTaskStateIcon — task-level activity tri-state", () => {
   });
 
   it("(b) background shows a working spinner — never the done check — over a done coarse state", () => {
-    const bg = getTaskStateIcon("COMPLETED", undefined, { foregroundActivity: "background" });
-    expect(iconType(bg)).toBe(IconLoader);
-    expect(iconType(bg)).not.toBe(IconCheck);
+    const { container } = render(
+      <TooltipProvider>
+        {getTaskStateIcon("COMPLETED", undefined, { foregroundActivity: "background" })}
+      </TooltipProvider>,
+    );
+    expect(container.querySelector(BG_TESTID)).not.toBeNull();
+    // The done check must NOT appear when background work is live.
+    expect(container.querySelector('[data-testid="task-state-turn-finished"]')).toBeNull();
   });
 
   it("(c) falls through to the coarse task state when no session is active", () => {
@@ -168,57 +175,6 @@ describe("getTaskStateIcon — task-level activity tri-state", () => {
       IconCheck,
     );
     expect(iconType(getTaskStateIcon("COMPLETED", undefined))).toBe(IconCheck);
-  });
-
-  it("renders the accessible interrupted icon with the tooltip label", () => {
-    const { container } = render(
-      <TooltipProvider>
-        {getTaskStateIcon("REVIEW", undefined, { interrupted: true })}
-      </TooltipProvider>,
-    );
-    const icon = container.querySelector('[data-testid="task-state-interrupted"]');
-    expect(icon).not.toBeNull();
-    expect(icon?.className).toContain("text-red-500");
-    expect(container.querySelector('[aria-label="Interrupted by restart"]')).not.toBeNull();
-    // The icon itself is decorative; the label lives on the trigger.
-    expect(icon?.getAttribute("aria-hidden")).toBe("true");
-  });
-
-  it("keeps terminal state icons over a lingering interrupted marker", () => {
-    expect(iconType(getTaskStateIcon("COMPLETED", undefined, { interrupted: true }))).toBe(
-      IconCheck,
-    );
-    expect(iconType(getTaskStateIcon("FAILED", undefined, { interrupted: true }))).toBe(IconX);
-    expect(iconType(getTaskStateIcon("CANCELLED", undefined, { interrupted: true }))).toBe(IconX);
-  });
-
-  it("keeps active and pending affordances over the interrupted marker", () => {
-    expect(
-      iconType(
-        getTaskStateIcon("REVIEW", undefined, {
-          foregroundActivity: "generating",
-          interrupted: true,
-        }),
-      ),
-    ).toBe(IconLoader2);
-    expect(
-      iconType(
-        getTaskStateIcon("REVIEW", undefined, {
-          foregroundActivity: "background",
-          interrupted: true,
-        }),
-      ),
-    ).toBe(IconLoader);
-    expect(
-      iconType(
-        getTaskStateIcon("REVIEW", undefined, { hasPendingClarification: true, interrupted: true }),
-      ),
-    ).toBe(IconMessageQuestion);
-    expect(
-      iconType(
-        getTaskStateIcon("REVIEW", undefined, { hasPendingPermission: true, interrupted: true }),
-      ),
-    ).toBe(IconShieldQuestion);
   });
 
   it("safe fallback: an in-progress task with a MISSING aggregate reads not-done, never a check", () => {
@@ -259,15 +215,75 @@ describe("getTaskStateIcon — task-level activity tri-state", () => {
     const generating = iconClassName(
       getTaskStateIcon("IN_PROGRESS", undefined, { foregroundActivity: "generating" }),
     );
-    const background = iconClassName(
-      getTaskStateIcon("IN_PROGRESS", undefined, { foregroundActivity: "background" }),
-    );
     const done = iconClassName(
       getTaskStateIcon("COMPLETED", undefined, { foregroundActivity: null }),
     );
-    expect(background).toContain("text-violet-500");
-    expect(background).not.toBe(generating);
-    expect(background).not.toBe(done);
+    // Background delegates to BackgroundWorkTaskIcon; the inner icon carries the
+    // violet class. Check it via render+querySelector rather than the wrapper props.
+    const { container } = render(
+      <TooltipProvider>
+        {getTaskStateIcon("IN_PROGRESS", undefined, { foregroundActivity: "background" })}
+      </TooltipProvider>,
+    );
+    const bgIcon = container.querySelector(BG_TESTID);
+    expect(bgIcon?.className).toContain("text-violet-500");
+    expect(bgIcon?.className).not.toContain(generating);
+    expect(bgIcon?.className).not.toContain(done);
+  });
+});
+
+describe("getTaskStateIcon — interrupted marker", () => {
+  it("renders the accessible interrupted icon with the tooltip label", () => {
+    const { container } = render(
+      <TooltipProvider>
+        {getTaskStateIcon("REVIEW", undefined, { interrupted: true })}
+      </TooltipProvider>,
+    );
+    const icon = container.querySelector('[data-testid="task-state-interrupted"]');
+    expect(icon).not.toBeNull();
+    expect(icon?.className).toContain("text-red-500");
+    expect(container.querySelector('[aria-label="Interrupted by restart"]')).not.toBeNull();
+    // The icon itself is decorative; the label lives on the trigger.
+    expect(icon?.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("keeps terminal state icons over a lingering interrupted marker", () => {
+    expect(iconType(getTaskStateIcon("COMPLETED", undefined, { interrupted: true }))).toBe(
+      IconCheck,
+    );
+    expect(iconType(getTaskStateIcon("FAILED", undefined, { interrupted: true }))).toBe(IconX);
+    expect(iconType(getTaskStateIcon("CANCELLED", undefined, { interrupted: true }))).toBe(IconX);
+  });
+
+  it("keeps active and pending affordances over the interrupted marker", () => {
+    expect(
+      iconType(
+        getTaskStateIcon("REVIEW", undefined, {
+          foregroundActivity: "generating",
+          interrupted: true,
+        }),
+      ),
+    ).toBe(IconLoader2);
+    // background + interrupted: the background-running affordance wins.
+    const { container: bgContainer } = render(
+      <TooltipProvider>
+        {getTaskStateIcon("REVIEW", undefined, {
+          foregroundActivity: "background",
+          interrupted: true,
+        })}
+      </TooltipProvider>,
+    );
+    expect(bgContainer.querySelector(BG_TESTID)).not.toBeNull();
+    expect(
+      iconType(
+        getTaskStateIcon("REVIEW", undefined, { hasPendingClarification: true, interrupted: true }),
+      ),
+    ).toBe(IconMessageQuestion);
+    expect(
+      iconType(
+        getTaskStateIcon("REVIEW", undefined, { hasPendingPermission: true, interrupted: true }),
+      ),
+    ).toBe(IconShieldQuestion);
   });
 });
 
@@ -495,20 +511,31 @@ describe("shouldShowTaskRunningSpinner", () => {
 
 describe("getTaskStateIcon — parked-on-background-work (AC-52, AC-23, AC-34)", () => {
   // AC-52: task-level icon overrides WAITING_FOR_INPUT when parked.
+  // After fix, getTaskStateIcon delegates to BackgroundWorkTaskIcon which carries
+  // data-testid="task-state-background-running" and the violet spinner.
   it("shows the background spinner (violet) instead of the question mark when parked (AC-52)", () => {
-    const icon = getTaskStateIcon("WAITING_FOR_INPUT", undefined, {
-      parkedOnBackgroundWork: true,
-    });
-    expect(iconType(icon)).toBe(IconLoader);
-    expect(iconType(icon)).not.toBe(IconMessageQuestion);
-    expect(iconClassName(icon)).toContain("text-violet-500");
+    const { container } = render(
+      <TooltipProvider>
+        {getTaskStateIcon("WAITING_FOR_INPUT", undefined, { parkedOnBackgroundWork: true })}
+      </TooltipProvider>,
+    );
+    const icon = container.querySelector(BG_TESTID);
+    expect(icon).not.toBeNull();
+    expect(icon?.className).toContain("text-violet-500");
+    expect(icon?.className).toContain(ANIMATE_SPIN);
+    expect(container.querySelector('[data-testid="task-state-waiting-for-input"]')).toBeNull();
   });
 
   // AC-23: parked overrides WAITING_FOR_INPUT even when that is the coarse state.
   it("overrides the coarse WAITING_FOR_INPUT question mark on a REVIEW task when parked (AC-34)", () => {
-    const icon = getTaskStateIcon("REVIEW", undefined, { parkedOnBackgroundWork: true });
-    expect(iconType(icon)).toBe(IconLoader);
-    expect(iconType(icon)).not.toBe(IconCheck);
+    const { container } = render(
+      <TooltipProvider>
+        {getTaskStateIcon("REVIEW", undefined, { parkedOnBackgroundWork: true })}
+      </TooltipProvider>,
+    );
+    const icon = container.querySelector(BG_TESTID);
+    expect(icon).not.toBeNull();
+    expect(container.querySelector('[data-testid="task-state-turn-finished"]')).toBeNull();
   });
 
   it("does not show the parked spinner when parkedOnBackgroundWork is false", () => {
@@ -545,7 +572,7 @@ describe("BackgroundWorkTaskIcon — tooltip affordance (AC-73a)", () => {
         <BackgroundWorkTaskIcon />
       </TooltipProvider>,
     );
-    const icon = container.querySelector('[data-testid="task-state-background-running"]');
+    const icon = container.querySelector(BG_TESTID);
     expect(icon).not.toBeNull();
     expect(icon?.className).toContain(ANIMATE_SPIN);
     expect(icon?.className).toContain("text-violet-500");
@@ -559,7 +586,7 @@ describe("BackgroundWorkTaskIcon — tooltip affordance (AC-73a)", () => {
         <BackgroundWorkTaskIcon className="h-3.5 w-3.5 mt-[1px]" />
       </TooltipProvider>,
     );
-    const icon = container.querySelector('[data-testid="task-state-background-running"]');
+    const icon = container.querySelector(BG_TESTID);
     expect(icon?.className).toContain("h-3.5");
     expect(icon?.className).toContain("mt-[1px]");
   });

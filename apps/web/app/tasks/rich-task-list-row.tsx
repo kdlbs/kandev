@@ -40,6 +40,7 @@ function PrimaryTaskLine({
         foregroundActivity: task.foreground_activity,
         hasPendingPermission: pendingInput.permission,
         interrupted: task.interrupted,
+        parkedOnBackgroundWork: task.parked_on_background_work === true,
       })}
       <span className="min-w-0 truncate font-medium" data-testid="tasks-list-row-title">
         {task.title}

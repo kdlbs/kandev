@@ -73,6 +73,70 @@ function isFile(fsImpl, fullPath) {
   }
 }
 
+// Expand `{a,b}` brace alternatives. Single-level only (no nesting).
+function expandBraces(pattern) {
+  const m = pattern.match(/^([^{]*)\{([^}]+)\}(.*)$/);
+  if (!m) return [pattern];
+  const [, prefix, alts, suffix] = m;
+  return alts.split(",").flatMap((alt) => expandBraces(prefix + alt + suffix));
+}
+
+// Translate a simple glob pattern (no brace expressions) into a RegExp.
+// Handles: ** (any path depth), * (one segment), ? (one char), [...] (classes).
+// Glob `[]]` means "match ]" and `[[]` means "match [" — both are bracket escapes.
+function globPatternToRegex(pattern) {
+  let r = "";
+  let i = 0;
+  while (i < pattern.length) {
+    const c = pattern[i];
+    if (c === "*" && pattern[i + 1] === "*") {
+      r += ".*";
+      i += 2;
+      if (pattern[i] === "/") i++;
+    } else if (c === "*") {
+      r += "[^/]*";
+      i++;
+    } else if (c === "?") {
+      r += "[^/]";
+      i++;
+    } else if (c === "[") {
+      // A ] immediately after [ (or after [^) is a class member, not the closer.
+      let j = i + 1;
+      if (pattern[j] === "^") j++;
+      if (pattern[j] === "]") j++;
+      const end = pattern.indexOf("]", j);
+      if (end === -1) {
+        r += "\\[";
+        i++;
+      } else {
+        const cls = pattern.slice(i + 1, end);
+        if (cls === "]") r += "\\]";
+        else if (cls === "[") r += "\\[";
+        else r += "[" + cls + "]";
+        i = end + 1;
+      }
+    } else if (".+^${}()|\\".includes(c)) {
+      r += "\\" + c;
+      i++;
+    } else {
+      r += c;
+      i++;
+    }
+  }
+  return new RegExp("^" + r + "$");
+}
+
+// Polyfill for fs.globSync (added in Node 22). Uses readdirSync with
+// {recursive:true} (available since Node 18.17) + pattern matching.
+function legacyGlobSync(pattern, cwd, fsImpl) {
+  const patterns = expandBraces(pattern).map(globPatternToRegex);
+  const all = fsImpl.readdirSync(cwd, { recursive: true });
+  return all.filter((f) => {
+    const normalized = String(f).replace(/\\/g, "/");
+    return patterns.some((re) => re.test(normalized));
+  });
+}
+
 /**
  * The files an allowlist entry currently matches, rooted at `cwd`.
  *
@@ -91,6 +155,14 @@ function isFile(fsImpl, fullPath) {
  * matches `.../trigger-configs`), so it is not only the literal case.
  */
 export function filesForEntry(entry, { cwd, fsImpl }) {
-  const candidates = GLOB_METACHARACTERS.test(entry) ? fsImpl.globSync(entry, { cwd }) : [entry];
+  let candidates;
+  if (GLOB_METACHARACTERS.test(entry)) {
+    candidates =
+      typeof fsImpl.globSync === "function"
+        ? fsImpl.globSync(entry, { cwd })
+        : legacyGlobSync(entry, cwd, fsImpl);
+  } else {
+    candidates = [entry];
+  }
   return candidates.filter((candidate) => isFile(fsImpl, `${cwd}/${candidate}`));
 }

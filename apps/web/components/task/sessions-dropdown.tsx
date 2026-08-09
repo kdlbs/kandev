@@ -69,11 +69,12 @@ export function sessionStatusTooltip(
   state: TaskSessionState,
   pending: PendingInput,
   foregroundActivity?: ForegroundActivity | null,
+  parkedOnBackgroundWork?: boolean,
 ): string {
   const canRequestInput = state === "RUNNING" || state === "WAITING_FOR_INPUT";
   if (canRequestInput && pending.permission) return t("task:sessionStatusPermissionRequested");
   if (canRequestInput && pending.clarification) return t("task:sessionStatusWaitingForInput");
-  if (canRequestInput && foregroundActivity === "background")
+  if (canRequestInput && (parkedOnBackgroundWork || foregroundActivity === "background"))
     return t("task:sessionStatusBackgroundRunning");
   return t(STATUS_LABEL_KEYS[mapSessionStatus(state)]);
 }
@@ -475,11 +476,17 @@ function SessionRow({
               {getSessionStateIcon(session.state, "h-3.5 w-3.5", session.foreground_activity, {
                 hasPendingClarification: pending.clarification,
                 hasPendingPermission: pending.permission,
+                parkedOnBackgroundWork: session.parked_on_background_work ?? false,
               })}
             </div>
           </TooltipTrigger>
           <TooltipContent side="left">
-            {sessionStatusTooltip(session.state, pending, session.foreground_activity)}
+            {sessionStatusTooltip(
+              session.state,
+              pending,
+              session.foreground_activity,
+              session.parked_on_background_work ?? false,
+            )}
           </TooltipContent>
         </Tooltip>
       </div>
