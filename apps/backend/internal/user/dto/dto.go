@@ -68,7 +68,7 @@ type UserSettingsDTO struct {
 	SystemMetricsDisplay            models.SystemMetricsDisplaySettings `json:"system_metrics_display"`
 	AppStatusBarOrder               models.AppStatusBarOrder            `json:"app_status_bar_order"`
 	VoiceMode                       models.VoiceModeSettings            `json:"voice_mode"`
-	KanbanHiddenStepIDs             map[string][]string                 `json:"kanban_hidden_step_ids,omitempty"`
+	KanbanHiddenStepIDs             map[string][]string                 `json:"kanban_hidden_step_ids"`
 	UpdatedAt                       string                              `json:"updated_at"`
 }
 

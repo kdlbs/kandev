@@ -182,7 +182,10 @@ function StepsSection({
                 <p className="text-xs font-medium text-muted-foreground">{wf.name}</p>
               )}
               {steps.map((step) => (
-                <label key={step.id} className="flex items-center gap-2 cursor-pointer">
+                <label
+                  key={step.id}
+                  className="flex min-h-11 cursor-pointer items-center gap-2 px-2"
+                >
                   <Checkbox
                     data-testid={`steps-filter-step-${step.id}`}
                     checked={!hidden.includes(step.id)}

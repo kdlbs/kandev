@@ -680,6 +680,7 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		SidebarTaskPrefs:                normalizeSidebarTaskPrefs(models.SidebarTaskPrefs{}),
 		AppStatusBarOrder:               normalizeAppStatusBarOrder(models.AppStatusBarOrder{}),
 		VoiceMode:                       defaultVoiceModeSettings(),
+		KanbanHiddenStepIDs:             map[string][]string{},
 	}
 }
 
