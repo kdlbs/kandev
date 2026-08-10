@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useCallback, useState, type ComponentPropsWithoutRef } from "react";
+import { forwardRef, useCallback, useRef, useState, type ComponentPropsWithoutRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useRouter } from "@/lib/routing/client-router";
 import {
@@ -111,13 +111,21 @@ function useMenuOpenState(controlledOpen?: boolean, onOpenChange?: (open: boolea
   return { open: isControlled ? controlledOpen : uncontrolledOpen, setOpen };
 }
 
-function workspaceType(workspace: WorkspaceItem | undefined): WorkspaceType {
-  return workspace?.office_workflow_id ? "office" : "kanban";
+function useControlledMenuFocus(controlledOpen: boolean | undefined) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const handleOpenAutoFocus = useCallback(
+    (event: Event) => {
+      if (controlledOpen === undefined) return;
+      event.preventDefault();
+      contentRef.current?.focus({ preventScroll: true });
+    },
+    [controlledOpen],
+  );
+  return { contentRef, handleOpenAutoFocus };
 }
 
-function focusControlledMenu(event: Event) {
-  event.preventDefault();
-  (event.currentTarget as HTMLElement).focus({ preventScroll: true });
+function workspaceType(workspace: WorkspaceItem | undefined): WorkspaceType {
+  return workspace?.office_workflow_id ? "office" : "kanban";
 }
 
 /** Returns a catalog key, not copy: this is a plain function with no hook. */
@@ -265,7 +273,7 @@ export function AppSidebarWorkspacePicker({
   const activeWorkspace = workspaces.items.find((w) => w.id === workspaces.activeId);
   const activeId = activeWorkspace?.id ?? null;
   const activeName = activeWorkspace?.name ?? t("sidebar:workspaceFallback");
-  const handleOpenAutoFocus = controlledOpen === undefined ? undefined : focusControlledMenu;
+  const { contentRef, handleOpenAutoFocus } = useControlledMenuFocus(controlledOpen);
 
   const handleSelect = useCallback(
     (workspace: WorkspaceItem) => {
@@ -327,6 +335,7 @@ export function AppSidebarWorkspacePicker({
         />
       </DropdownMenuTrigger>
       <DropdownMenuContent
+        ref={contentRef}
         onOpenAutoFocus={handleOpenAutoFocus}
         align={contentAlign}
         className={cn("w-72", contentClassName)}
