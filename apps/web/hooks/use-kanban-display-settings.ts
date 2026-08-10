@@ -6,7 +6,7 @@ import { useUserDisplaySettings } from "@/hooks/use-user-display-settings";
 import { useTaskListingView } from "@/hooks/use-task-listing-view";
 import { linkToTaskOverview } from "@/lib/links";
 import type { WorkflowsState } from "@/lib/state/slices";
-import { selectWorkflowSwimlanes } from "@/components/kanban/swimlane-container";
+import { selectWorkflowSwimlanes } from "@/lib/kanban/workflow-swimlanes";
 
 type UserSettingsFields = {
   workspaceId: string | null;
