@@ -524,6 +524,7 @@ export type AppState = KanbanSlice & {
   setAppSidebarSettingsMode: UIA["setAppSidebarSettingsMode"];
   toggleAppSidebarSettingsMode: UIA["toggleAppSidebarSettingsMode"];
   setImproveDialogOpen: UIA["setImproveDialogOpen"];
+  setWorkspacePickerOpen: UIA["setWorkspacePickerOpen"];
   acknowledgeAgentErrors: UIA["acknowledgeAgentErrors"];
   dismissAgentError: UIA["dismissAgentError"];
 } & GitHubSliceActions &

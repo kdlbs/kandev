@@ -253,6 +253,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [native-code-review](native-code-review/spec.md) | building |
 | [missing-task-route-recovery](missing-task-route-recovery/spec.md) | draft |
 | [browser-inspect-annotations-save](browser-inspect-annotations-save/spec.md) | shipped |
+| [automations-pr-merged-trigger](automations-pr-merged-trigger/spec.md) | draft |
 | [no-silent-model-fallback](no-silent-model-fallback/spec.md) | approved |
 
 ---

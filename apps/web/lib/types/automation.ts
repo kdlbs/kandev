@@ -1,6 +1,12 @@
 // Automation types matching backend models in internal/automation/models.go
 
-export type TriggerType = "scheduled" | "github_pr" | "github_push" | "github_ci" | "webhook";
+export type TriggerType =
+  | "scheduled"
+  | "github_pr"
+  | "github_pr_merged"
+  | "github_push"
+  | "github_ci"
+  | "webhook";
 
 export type RunStatus =
   | "triggered"

@@ -28,7 +28,8 @@ describe("CONFIGURABLE_SHORTCUTS", () => {
     expect(ids).toContain("VOICE_INPUT_TOGGLE");
     expect(ids).toContain("REVERSE_SEARCH");
     expect(ids).toContain("OPEN_TASK_PR");
-    expect(ids).toHaveLength(16);
+    expect(ids).toContain("WORKSPACE_PICKER");
+    expect(ids).toHaveLength(17);
   });
 
   it("each entry has a label and default matching SHORTCUTS", () => {
@@ -72,6 +73,9 @@ describe("CONFIGURABLE_SHORTCUTS", () => {
 
     expect(CONFIGURABLE_SHORTCUTS.OPEN_TASK_PR.label).toBe("Open Task Pull Request");
     expect(CONFIGURABLE_SHORTCUTS.OPEN_TASK_PR.default).toBe(SHORTCUTS.OPEN_TASK_PR);
+
+    expect(CONFIGURABLE_SHORTCUTS.WORKSPACE_PICKER.label).toBe("Open Workspace Picker");
+    expect(CONFIGURABLE_SHORTCUTS.WORKSPACE_PICKER.default).toBe(SHORTCUTS.WORKSPACE_PICKER);
   });
 });
 

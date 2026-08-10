@@ -126,6 +126,9 @@ const (
 	// MetaKeyPortForwardingEnabled controls whether a task exposes its
 	// session port-forwarding controls in the task UI.
 	MetaKeyPortForwardingEnabled = "port_forwarding_enabled"
+	// MetaKeyAutomationTargetTaskID binds a merged-PR automation run to the
+	// task selected by its event. The archive handler enforces this value.
+	MetaKeyAutomationTargetTaskID = "automation_target_task_id"
 	// Parent-question message metadata is durable state for an autopilot child
 	// waiting for a decision from its direct parent. The question ID is also
 	// the child clarification message ID, so a parent reply can be idempotent
