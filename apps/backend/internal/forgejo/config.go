@@ -144,6 +144,21 @@ func (s *Store) DeleteConfig(ctx context.Context, workspaceID string) error {
 	return err
 }
 
+func (s *Store) UpdateHealth(ctx context.Context, workspaceID string, ok bool, message string, checkedAt time.Time) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE forgejo_configs SET last_ok = ?, last_error = ?, last_checked_at = ?, revision = revision + 1, updated_at = ? WHERE workspace_id = ?`, ok, message, checkedAt, checkedAt, workspaceID)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return ErrNotConfigured
+	}
+	return nil
+}
+
 type Service struct {
 	store   *Store
 	secrets WorkspaceSecretStore
@@ -187,6 +202,30 @@ func (s *Service) ClientForWorkspace(ctx context.Context, workspaceID string) (C
 		return nil, ErrNotConfigured
 	}
 	return NewPATClient(config.Origin, token)
+}
+
+// RefreshConnection persists the result of a live identity probe. This is
+// suitable for a periodic integration-health poller and never exposes a PAT.
+func (s *Service) RefreshConnection(ctx context.Context, workspaceID string) (*Config, error) {
+	client, err := s.ClientForWorkspace(ctx, workspaceID)
+	checkedAt := time.Now().UTC()
+	if err != nil {
+		return nil, err
+	}
+	user, err := client.GetAuthenticatedUser(ctx)
+	if err != nil {
+		_ = s.store.UpdateHealth(ctx, workspaceID, false, "Forgejo connection check failed", checkedAt)
+		return nil, err
+	}
+	if err := s.store.UpdateHealth(ctx, workspaceID, true, "", checkedAt); err != nil {
+		return nil, err
+	}
+	config, err := s.GetConfig(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	config.Username = user.Login
+	return config, nil
 }
 
 func (s *Service) ListRepositories(ctx context.Context, workspaceID string, page, limit int) ([]Repository, int, error) {

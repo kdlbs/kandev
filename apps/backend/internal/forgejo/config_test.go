@@ -228,3 +228,19 @@ func TestService_ListsWorkspaceQueue(t *testing.T) {
 		t.Fatalf("issues=%#v pulls=%#v err=%v", issues, pulls, err)
 	}
 }
+
+func TestService_RefreshConnectionPersistsHealth(t *testing.T) {
+	service, secrets := newConfigTestService(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(`{"login":"alice"}`)) }))
+	t.Cleanup(server.Close)
+	if err := service.store.SaveConfig(context.Background(), &Config{WorkspaceID: "workspace-a", Origin: server.URL}); err != nil {
+		t.Fatal(err)
+	}
+	if err := secrets.Set(context.Background(), SecretKeyForWorkspace("workspace-a"), "Forgejo token", "token"); err != nil {
+		t.Fatal(err)
+	}
+	config, err := service.RefreshConnection(context.Background(), "workspace-a")
+	if err != nil || !config.LastOK || config.LastCheckedAt == nil {
+		t.Fatalf("config=%#v err=%v", config, err)
+	}
+}
