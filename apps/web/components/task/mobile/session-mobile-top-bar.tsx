@@ -18,6 +18,7 @@ import {
 import { MobileRepoPill } from "./mobile-repo-pill";
 import { TaskTopBarPluginActions } from "@/components/task/task-top-bar-plugin-actions";
 import { MRTopbarButton } from "@/components/gitlab/mr-topbar-button";
+import { ForgejoTaskLinksButton } from "@/components/forgejo/forgejo-task-links-button";
 
 type SessionMobileTopBarProps = {
   taskId?: string | null;
@@ -238,6 +239,7 @@ function MobileTopBarActions({
     <div className="flex items-center gap-1" data-testid="mobile-topbar-actions">
       <MobileRepoPill taskId={taskId ?? null} workspaceId={workspaceId ?? null} />
       <MRTopbarButton compact mobile />
+      <ForgejoTaskLinksButton compact mobile />
       {!isArchived && (
         <TaskTopBarPluginActions
           sessionId={sessionId ?? null}

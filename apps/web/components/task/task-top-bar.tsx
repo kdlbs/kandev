@@ -11,6 +11,7 @@ import { LayoutPresetSelector } from "@/components/task/layout-preset-selector";
 import { DocumentControls } from "@/components/task/document/document-controls";
 import { PRTopbarButton } from "@/components/github/pr-topbar-button";
 import { MRTopbarButton } from "@/components/gitlab/mr-topbar-button";
+import { ForgejoTaskLinksButton } from "@/components/forgejo/forgejo-task-links-button";
 import { JiraTicketButton, extractJiraKey } from "@/components/jira/jira-ticket-button";
 import { LinearIssueButton, extractLinearKey } from "@/components/linear/linear-issue-button";
 import { useJiraAvailable } from "@/hooks/domains/jira/use-jira-availability";
@@ -254,6 +255,7 @@ function AttentionStatusGroup({
           <GitHubIssueTopbarButton issueUrl={issueUrl} issueNumber={issueNumber} />
           <PRTopbarButton />
           <MRTopbarButton />
+          <ForgejoTaskLinksButton />
           <IssueTrackerButtons workspaceId={workspaceId} taskTitle={taskTitle} />
         </>
       )}
