@@ -251,7 +251,15 @@ Flags take precedence over the equivalent port variables. `KANDEV_BACKEND_PORT` 
 
 The launcher also sets the selected server and `agentctl` ports for the backend. Treat its supervisor socket and manifest under `<home>/supervisor/` as private implementation state, not a control API.
 
-`--debug` sets `KANDEV_DEBUG_AGENT_MESSAGES=true` and `KANDEV_DEBUG_PPROF_ENABLED=true`. Debug events go to `<home>/logs/backend-logs.log`; warn and above still appear on stdout. ACP logs can contain full prompts, file content, and tool calls, while diagnostic endpoints expose process details. Use debug mode only on a trusted machine and remove retained debug logs afterward. [Configuration](./configuration.md) lists locations and retention.
+`--debug` sets `KANDEV_DEBUG_AGENT_MESSAGES=true` and
+`KANDEV_DEBUG_PPROF_ENABLED=true` without selecting the `dev` profile. The
+`make start-debug` launcher also defaults the browser title to `Debug Kandev`;
+`make dev` selects the development profile and uses `Dev Kandev`. Debug events
+go to `<home>/logs/backend-logs.log`; warn and above still appear on stdout.
+ACP logs can contain full prompts, file content, and tool calls, while
+diagnostic endpoints expose process details. Use debug mode only on a trusted
+machine and remove retained debug logs afterward. [Configuration](./configuration.md)
+lists locations and retention.
 
 ## Data and cleanup
 

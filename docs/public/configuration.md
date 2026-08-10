@@ -58,7 +58,7 @@ Some common camelCase keys have explicit compatibility aliases. Use the document
 | `server.readTimeout` | `KANDEV_SERVER_READTIMEOUT` | `30` | HTTP read timeout in seconds. |
 | `server.writeTimeout` | `KANDEV_SERVER_WRITETIMEOUT` | `30` | HTTP write timeout in seconds. |
 | `server.webInternalUrl` | `KANDEV_WEB_INTERNAL_URL` | empty | Development reverse-proxy target for a separately running web app. Installed releases normally serve embedded assets. |
-| `server.webTitlePrefix` | `KANDEV_WEB_TITLE_PREFIX` | empty | Prefixes the browser tab title as `<prefix> Kandev` (for example `TEST` renders `TEST Kandev`), so several instances stay distinguishable in adjacent tabs. `make dev` defaults to `Dev`; PR previews use `Preview`. An explicit value overrides these defaults. Empty keeps the plain `Kandev` title. |
+| `server.webTitlePrefix` | `KANDEV_WEB_TITLE_PREFIX` | empty | Prefixes the browser tab title as `<prefix> Kandev` (for example `TEST` renders `TEST Kandev`), so several instances stay distinguishable in adjacent tabs. `make dev` defaults to `Dev`; `make start-debug` keeps production defaults, enables diagnostics, and defaults to `Debug`; PR previews use `Preview`. An explicit value overrides these defaults. Empty keeps the plain `Kandev` title. |
 
 The default host exposes the server on every interface even though the CLI prints a `localhost` URL. The current local product path must not be treated as an authenticated multi-user perimeter. For remote access, bind to loopback and use a trusted authenticated tunnel/proxy, or isolate the network at the deployment layer.
 
@@ -170,9 +170,17 @@ Discovery roots bound automatic filesystem traversal, so scope them narrowly. Th
 | YAML key | Environment variable | Default | Current behavior |
 |---|---|---|---|
 | `debug.devMode` | `KANDEV_DEBUG_DEV_MODE` | `false` | Enables diagnostic endpoints and agent-message debug logging. |
-| `debug.pprofEnabled` | `KANDEV_DEBUG_PPROF_ENABLED` | `false` | Legacy alias; also enables debug mode. |
+| `debug.pprofEnabled` | `KANDEV_DEBUG_PPROF_ENABLED` | `false` | Legacy diagnostics switch. It enables pprof behavior but does not select the `dev` profile. |
 
-Debug mode is high risk. It enables local diagnostic surfaces and implies `KANDEV_DEBUG_AGENT_MESSAGES=true` and `KANDEV_DEBUG_PPROF_ENABLED=true` when not explicitly locked by the environment. ACP JSONL frames include complete prompts, file content, and tool calls. Do not enable it on a shared or network-exposed backend.
+`KANDEV_DEBUG_DEV_MODE=true` selects the `dev` profile. `make dev` sets that
+selector and defaults the browser title to `Dev Kandev`. `make start-debug`
+enables pprof and debug logging without selecting the `dev` profile, and
+defaults the browser title to `Debug Kandev`. Debug mode is high risk. It
+enables local diagnostic surfaces and implies
+`KANDEV_DEBUG_AGENT_MESSAGES=true` and `KANDEV_DEBUG_PPROF_ENABLED=true` when
+not explicitly locked by the environment. ACP JSONL frames include complete
+prompts, file content, and tool calls. Do not enable it on a shared or
+network-exposed backend.
 
 ## Minimal examples
 
@@ -304,7 +312,7 @@ Copying this entire file is unnecessary and can freeze old defaults in a deploym
 | `features.auth` | `KANDEV_FEATURES_AUTH` | off | Authentication and per-user workspaces for the whole install. |
 | `features.claudeBackgroundPromptHandoff` | `KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF` | off | High-risk Claude Code experiment that exposes recognized background-only activity and admits a successor prompt. |
 | `features.claudeMidTurnSteering` | `KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING` | off | High-risk Claude Code experiment that delivers a prompt into a still-generating turn (mid-turn steering) instead of queuing it, for agents advertising prompt queueing. |
-| `debug.devMode` | `KANDEV_DEBUG_DEV_MODE` (also locked by explicit legacy/debug-message vars) | off | High-risk diagnostic endpoints and ACP frame logging. |
+| `debug.devMode` | `KANDEV_DEBUG_DEV_MODE` | off | High-risk diagnostic endpoints and ACP frame logging. |
 
 UI changes are persisted in the database and require a restart. An explicitly set environment value wins and locks the UI control. Otherwise a database override wins over the embedded profile/default. Resetting a toggle removes its database override.
 

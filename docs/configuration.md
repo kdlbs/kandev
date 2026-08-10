@@ -34,9 +34,10 @@ All env vars use the `KANDEV_` prefix. Nested keys map by replacing `.` with `_`
 
 The aliases on the right are explicit bindings - see `LoadWithPath` in `config.go` for the full list. New keys should follow the deterministic rule (`KANDEV_<SECTION>_<KEYUPPERCASE>`) unless there is a reason to add an alias.
 
-The `make dev` launcher uses `Dev` as the default browser title prefix, and PR
-preview environments use `Preview`. An explicit `KANDEV_WEB_TITLE_PREFIX`
-value overrides those environment defaults.
+The `make dev` launcher uses `Dev` as the default browser title prefix. The
+`make start-debug` launcher keeps production defaults, enables diagnostics, and
+uses `Debug`. PR preview environments use `Preview`. An explicit
+`KANDEV_WEB_TITLE_PREFIX` value overrides those environment defaults.
 
 ## Full `config.yaml` example
 

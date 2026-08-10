@@ -30,6 +30,7 @@ func backendEnv(ports portConfig, logLevel, consoleLogLevel string, debug bool, 
 	if debug {
 		env = upsertEnv(env, "KANDEV_DEBUG_AGENT_MESSAGES", "true")
 		env = upsertEnv(env, "KANDEV_DEBUG_PPROF_ENABLED", "true")
+		env = setEnvIfUnset(env, "KANDEV_WEB_TITLE_PREFIX", "Debug")
 	}
 	return env
 }
@@ -39,6 +40,16 @@ func upsertEnv(env []string, key, value string) []string {
 	for i, item := range env {
 		if len(item) >= len(prefix) && item[:len(prefix)] == prefix {
 			env[i] = prefix + value
+			return env
+		}
+	}
+	return append(env, prefix+value)
+}
+
+func setEnvIfUnset(env []string, key, value string) []string {
+	prefix := key + "="
+	for _, item := range env {
+		if len(item) >= len(prefix) && item[:len(prefix)] == prefix {
 			return env
 		}
 	}

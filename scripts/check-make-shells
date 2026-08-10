@@ -38,7 +38,7 @@ expect() {
 	# NULL_REDIR (rather than passing /dev/null) also dodges Git Bash rewriting
 	# a /dev/null argument to `nul` on its way to native make. None of this
 	# affects the run/dev/start-debug recipes under assertion.
-	got=$(make -C "$backend_dir" OS="$os" MSYSTEM="$msys" NULL_REDIR= BUILD_TIME=simulated -n "$target" 2>/dev/null \
+	got=$(env -u KANDEV_WEB_TITLE_PREFIX make -C "$backend_dir" OS="$os" MSYSTEM="$msys" NULL_REDIR= BUILD_TIME=simulated -n "$target" 2>/dev/null \
 		| grep -F "$marker" \
 		| sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s/[[:space:]]\{1,\}/ /g' \
 		|| true)
@@ -53,18 +53,18 @@ expect() {
 
 # Unix — no .exe, POSIX env-prefix + exec.
 expect unix '' '' run         './bin/kandev __backend'
-expect unix '' '' dev         'KANDEV_DEBUG_PPROF_ENABLED=true exec ./bin/kandev __backend'
-expect unix '' '' start-debug 'KANDEV_DEBUG_PPROF_ENABLED=true KANDEV_LOG_LEVEL=debug exec ./bin/kandev __backend'
+expect unix '' '' dev         'KANDEV_DEBUG_DEV_MODE=true exec ./bin/kandev __backend'
+expect unix '' '' start-debug 'KANDEV_DEBUG_PPROF_ENABLED=true KANDEV_LOG_LEVEL=debug KANDEV_WEB_TITLE_PREFIX=Debug exec ./bin/kandev __backend'
 
 # Native Windows (cmd/PowerShell) — .exe, `set VAR=VAL&`, backslash path, no exec.
 expect windows-native Windows_NT '' run         '"bin\kandev.exe" __backend'
-expect windows-native Windows_NT '' dev         'set KANDEV_DEBUG_PPROF_ENABLED=true& "bin\kandev.exe" __backend'
-expect windows-native Windows_NT '' start-debug 'set KANDEV_DEBUG_PPROF_ENABLED=true& set KANDEV_LOG_LEVEL=debug& "bin\kandev.exe" __backend'
+expect windows-native Windows_NT '' dev         'set KANDEV_DEBUG_DEV_MODE=true& "bin\kandev.exe" __backend'
+expect windows-native Windows_NT '' start-debug 'set KANDEV_DEBUG_PPROF_ENABLED=true& set KANDEV_LOG_LEVEL=debug& set KANDEV_WEB_TITLE_PREFIX=Debug& "bin\kandev.exe" __backend'
 
 # Git Bash/MSYS — .exe suffix but POSIX syntax (recipes run through sh).
 expect git-bash Windows_NT MINGW64 run         './bin/kandev.exe __backend'
-expect git-bash Windows_NT MINGW64 dev         'KANDEV_DEBUG_PPROF_ENABLED=true exec ./bin/kandev.exe __backend'
-expect git-bash Windows_NT MINGW64 start-debug 'KANDEV_DEBUG_PPROF_ENABLED=true KANDEV_LOG_LEVEL=debug exec ./bin/kandev.exe __backend'
+expect git-bash Windows_NT MINGW64 dev         'KANDEV_DEBUG_DEV_MODE=true exec ./bin/kandev.exe __backend'
+expect git-bash Windows_NT MINGW64 start-debug 'KANDEV_DEBUG_PPROF_ENABLED=true KANDEV_LOG_LEVEL=debug KANDEV_WEB_TITLE_PREFIX=Debug exec ./bin/kandev.exe __backend'
 
 # deadcode — the analyzer is invoked through the same shell-specific env-prefix
 # mechanism, but its command has no __backend marker, so match its module path.

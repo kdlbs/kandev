@@ -7,6 +7,10 @@ GO := go
 GOFLAGS := -v
 LDFLAGS := -s -w
 
+# Debug launches get a distinct browser identity by default. An explicit
+# environment or command-line value still wins through Make's `?=` semantics.
+KANDEV_WEB_TITLE_PREFIX ?= Debug
+
 # Cross-platform commands
 #
 # Two independent axes decide these variables; conflating them breaks Git
@@ -50,8 +54,8 @@ ifeq ($(OS)$(MSYSTEM),Windows_NT)
   GO_DARWIN_AMD64 = set CGO_ENABLED=0& set GOOS=darwin& set GOARCH=amd64&
   # Run-target env prefixes and binary invocation. cmd.exe has no `NAME=VAL cmd`
   # syntax (use `set NAME=VAL&`) and no `exec`; the binary path needs backslashes.
-  DEV_ENV = set KANDEV_DEBUG_PPROF_ENABLED=true&
-  DEBUG_ENV = set KANDEV_DEBUG_PPROF_ENABLED=true& set KANDEV_LOG_LEVEL=debug&
+  DEV_ENV = set KANDEV_DEBUG_DEV_MODE=true&
+  DEBUG_ENV = set KANDEV_DEBUG_PPROF_ENABLED=true& set KANDEV_LOG_LEVEL=debug& set KANDEV_WEB_TITLE_PREFIX=$(KANDEV_WEB_TITLE_PREFIX)&
   EXEC =
   RUN_BIN = "$(subst /,\,$(BUILD_DIR)/$(BINARY_NAME)$(EXE))"
   # check-make-shells is a bash script; native cmd.exe can't run its shebang, so
@@ -75,8 +79,8 @@ else
   GO_LINUX_ARM64 = CGO_ENABLED=0 GOOS=linux GOARCH=arm64
   GO_DARWIN_ARM64 = CGO_ENABLED=0 GOOS=darwin GOARCH=arm64
   GO_DARWIN_AMD64 = CGO_ENABLED=0 GOOS=darwin GOARCH=amd64
-  DEV_ENV = KANDEV_DEBUG_PPROF_ENABLED=true
-  DEBUG_ENV = KANDEV_DEBUG_PPROF_ENABLED=true KANDEV_LOG_LEVEL=debug
+  DEV_ENV = KANDEV_DEBUG_DEV_MODE=true
+  DEBUG_ENV = KANDEV_DEBUG_PPROF_ENABLED=true KANDEV_LOG_LEVEL=debug KANDEV_WEB_TITLE_PREFIX=$(KANDEV_WEB_TITLE_PREFIX)
   EXEC = exec
   RUN_BIN = ./$(BUILD_DIR)/$(BINARY_NAME)$(EXE)
   CHECK_SHELLS = @../../scripts/check-make-shells
