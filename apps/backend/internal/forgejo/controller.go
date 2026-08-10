@@ -24,6 +24,8 @@ func RegisterRoutes(router *gin.Engine, service *Service) {
 	api.GET("/issues", controller.listIssues)
 	api.GET("/pull-requests", controller.listPullRequests)
 	api.GET("/pull-request-details", controller.getPullRequestDetails)
+	api.POST("/pull-request-comments", controller.createPullRequestComment)
+	api.POST("/pull-request-reviews", controller.submitPullRequestReview)
 	api.GET("/queue", controller.listQueue)
 	api.POST("/connection/refresh", controller.refreshConnection)
 	api.GET("/issue-watches", controller.listIssueWatches)
@@ -175,6 +177,39 @@ func (c *Controller) getPullRequestDetails(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, details)
+}
+
+func (c *Controller) createPullRequestComment(ctx *gin.Context) {
+	var request struct {
+		Owner  string `json:"owner"`
+		Repo   string `json:"repo"`
+		Number int    `json:"number"`
+		Body   string `json:"body"`
+	}
+	if err := ctx.ShouldBindJSON(&request); err != nil || strings.TrimSpace(request.Owner) == "" || strings.TrimSpace(request.Repo) == "" || request.Number < 1 || strings.TrimSpace(request.Body) == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "owner, repo, positive number, and body are required"})
+		return
+	}
+	comment, err := c.service.CreatePullRequestComment(ctx.Request.Context(), c.workspaceID(ctx), request.Owner, request.Repo, request.Number, request.Body)
+	if err != nil {
+		c.error(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusCreated, comment)
+}
+
+func (c *Controller) submitPullRequestReview(ctx *gin.Context) {
+	var input SubmitPullRequestReviewInput
+	if err := ctx.ShouldBindJSON(&input); err != nil || strings.TrimSpace(input.Owner) == "" || strings.TrimSpace(input.Repo) == "" || input.Number < 1 || strings.TrimSpace(input.Event) == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "owner, repo, positive number, and event are required"})
+		return
+	}
+	review, err := c.service.SubmitPullRequestReview(ctx.Request.Context(), c.workspaceID(ctx), input)
+	if err != nil {
+		c.error(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusCreated, review)
 }
 
 func (c *Controller) listTaskIssues(ctx *gin.Context) {

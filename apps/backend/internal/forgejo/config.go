@@ -326,6 +326,30 @@ func (s *Service) GetPullRequestDetails(ctx context.Context, workspaceID, owner,
 	return &PullRequestDetails{PullRequest: pull, Commits: commits, Files: files, Comments: comments, Reviews: reviews}, nil
 }
 
+func (s *Service) CreatePullRequestComment(ctx context.Context, workspaceID, owner, repo string, number int, body string) (*PullRequestComment, error) {
+	client, err := s.ClientForWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	writer, ok := client.(PullRequestReviewWriter)
+	if !ok {
+		return nil, ErrUnsupported
+	}
+	return writer.CreatePullRequestComment(ctx, owner, repo, number, body)
+}
+
+func (s *Service) SubmitPullRequestReview(ctx context.Context, workspaceID string, input SubmitPullRequestReviewInput) (*PullRequestReview, error) {
+	client, err := s.ClientForWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	writer, ok := client.(PullRequestReviewWriter)
+	if !ok {
+		return nil, ErrUnsupported
+	}
+	return writer.SubmitPullRequestReview(ctx, input)
+}
+
 type QueueIssue struct {
 	Repository Repository `json:"repository"`
 	Issue      Issue      `json:"issue"`

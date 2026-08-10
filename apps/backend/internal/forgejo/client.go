@@ -82,6 +82,11 @@ type PullRequestReview struct {
 	SubmittedAt           *time.Time
 }
 
+type SubmitPullRequestReviewInput struct {
+	Owner, Repo, Body, Event string
+	Number                   int
+}
+
 // PullRequestDetailsClient is available when the configured Forgejo server
 // exposes the standard review endpoints. Callers may report ErrUnsupported
 // when a different client implementation does not provide it.
@@ -90,6 +95,11 @@ type PullRequestDetailsClient interface {
 	ListPullRequestFiles(context.Context, string, string, int) ([]PullRequestFile, error)
 	ListPullRequestComments(context.Context, string, string, int) ([]PullRequestComment, error)
 	ListPullRequestReviews(context.Context, string, string, int) ([]PullRequestReview, error)
+}
+
+type PullRequestReviewWriter interface {
+	CreatePullRequestComment(context.Context, string, string, int, string) (*PullRequestComment, error)
+	SubmitPullRequestReview(context.Context, SubmitPullRequestReviewInput) (*PullRequestReview, error)
 }
 
 type rawPullRequest struct {
@@ -365,6 +375,45 @@ func (c *PATClient) ListPullRequestReviews(ctx context.Context, owner, repo stri
 		result[i] = PullRequestReview{ID: raw[i].ID, State: raw[i].State, Body: raw[i].Body, Reviewer: raw[i].User.Login, SubmittedAt: raw[i].SubmittedAt}
 	}
 	return result, nil
+}
+
+func (c *PATClient) CreatePullRequestComment(ctx context.Context, owner, repo string, number int, body string) (*PullRequestComment, error) {
+	if strings.TrimSpace(owner) == "" || strings.TrimSpace(repo) == "" || number < 1 || strings.TrimSpace(body) == "" {
+		return nil, errors.New("Forgejo pull request comment identity and body are required")
+	}
+	var raw struct {
+		ID        int64     `json:"id"`
+		Body      string    `json:"body"`
+		HTMLURL   string    `json:"html_url"`
+		Path      string    `json:"path"`
+		CreatedAt time.Time `json:"created_at"`
+		User      User      `json:"user"`
+	}
+	if err := c.post(ctx, fmt.Sprintf("/repos/%s/%s/issues/%d/comments", url.PathEscape(owner), url.PathEscape(repo), number), map[string]any{"body": body}, &raw); err != nil {
+		return nil, err
+	}
+	return &PullRequestComment{ID: raw.ID, Body: raw.Body, Author: raw.User.Login, HTMLURL: raw.HTMLURL, Path: raw.Path, CreatedAt: raw.CreatedAt}, nil
+}
+
+func (c *PATClient) SubmitPullRequestReview(ctx context.Context, input SubmitPullRequestReviewInput) (*PullRequestReview, error) {
+	if strings.TrimSpace(input.Owner) == "" || strings.TrimSpace(input.Repo) == "" || input.Number < 1 || strings.TrimSpace(input.Event) == "" {
+		return nil, errors.New("Forgejo pull request review identity and event are required")
+	}
+	event := strings.ToUpper(strings.TrimSpace(input.Event))
+	if event != "APPROVE" && event != "REQUEST_CHANGES" && event != "COMMENT" {
+		return nil, errors.New("Forgejo pull request review event must be APPROVE, REQUEST_CHANGES, or COMMENT")
+	}
+	var raw struct {
+		ID          int64      `json:"id"`
+		State       string     `json:"state"`
+		Body        string     `json:"body"`
+		SubmittedAt *time.Time `json:"submitted_at"`
+		User        User       `json:"user"`
+	}
+	if err := c.post(ctx, fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", url.PathEscape(input.Owner), url.PathEscape(input.Repo), input.Number), map[string]any{"body": input.Body, "event": event}, &raw); err != nil {
+		return nil, err
+	}
+	return &PullRequestReview{ID: raw.ID, State: raw.State, Body: raw.Body, Reviewer: raw.User.Login, SubmittedAt: raw.SubmittedAt}, nil
 }
 
 func (c *PATClient) getPullRequestResource(ctx context.Context, owner, repo string, number int, resource string, target any) error {

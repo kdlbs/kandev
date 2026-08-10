@@ -162,3 +162,34 @@ func TestPATClientListsPullRequestReviewResources(t *testing.T) {
 		t.Fatalf("reviews=%#v err=%v", reviews, err)
 	}
 }
+
+func TestPATClientWritesPullRequestFeedback(t *testing.T) {
+	server := newServer(t, func(w http.ResponseWriter, request *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(request.Body).Decode(&body)
+		switch request.URL.Path {
+		case "/api/v1/repos/owner/repo/issues/7/comments":
+			if body["body"] != "please fix" {
+				t.Fatalf("comment body=%#v", body)
+			}
+			_, _ = w.Write([]byte(`{"id":1,"body":"please fix","user":{"login":"alice"}}`))
+		case "/api/v1/repos/owner/repo/pulls/7/reviews":
+			if body["event"] != "APPROVE" {
+				t.Fatalf("review body=%#v", body)
+			}
+			_, _ = w.Write([]byte(`{"id":2,"state":"APPROVED","user":{"login":"alice"}}`))
+		default:
+			http.NotFound(w, request)
+		}
+	})
+	t.Cleanup(server.Close)
+	client, _ := NewPATClient(server.URL, "token")
+	comment, err := client.CreatePullRequestComment(context.Background(), "owner", "repo", 7, "please fix")
+	if err != nil || comment.ID != 1 {
+		t.Fatalf("comment=%#v err=%v", comment, err)
+	}
+	review, err := client.SubmitPullRequestReview(context.Background(), SubmitPullRequestReviewInput{Owner: "owner", Repo: "repo", Number: 7, Event: "approve"})
+	if err != nil || review.State != "APPROVED" {
+		t.Fatalf("review=%#v err=%v", review, err)
+	}
+}
