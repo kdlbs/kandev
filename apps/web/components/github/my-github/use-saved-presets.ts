@@ -118,6 +118,25 @@ function useWorkspaceSavedPresets(workspaceId: string | null) {
   return { workspacePresets, setWorkspacePresets: setWorkspacePresetsFromLocal };
 }
 
+function discardSavedPreset(presets: SavedPreset[], id: string): SavedPreset[] {
+  return presets.filter((preset) => preset.id !== id);
+}
+
+function restoreSavedPreset(
+  presets: SavedPreset[],
+  preset: SavedPreset,
+  originalIndex: number,
+): SavedPreset[] {
+  if (presets.some((candidate) => candidate.id === preset.id)) return presets;
+  const restored =
+    preset.isDefault &&
+    presets.some((candidate) => candidate.kind === preset.kind && candidate.isDefault)
+      ? { ...preset, isDefault: false }
+      : preset;
+  const insertionIndex = Math.min(originalIndex, presets.length);
+  return [...presets.slice(0, insertionIndex), restored, ...presets.slice(insertionIndex)];
+}
+
 export function useSavedPresets(workspaceId: string | null = null) {
   const presets = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   const { workspacePresets, setWorkspacePresets } = useWorkspaceSavedPresets(workspaceId);
@@ -154,7 +173,7 @@ export function useSavedPresets(workspaceId: string | null = null) {
   }, []);
 
   const save = useCallback(
-    (input: Omit<SavedPreset, "id" | "createdAt" | "isDefault">) => {
+    async (input: Omit<SavedPreset, "id" | "createdAt" | "isDefault">) => {
       if (workspaceId && workspacePresets === undefined) return null;
       const preset: SavedPreset = {
         ...input,
@@ -164,25 +183,41 @@ export function useSavedPresets(workspaceId: string | null = null) {
       };
       const append = (current: SavedPreset[]) =>
         current.some((saved) => saved.id === preset.id) ? current : [...current, preset];
-      // An earlier queued mutation may briefly persist its older snapshot; this optimistic
-      // update's queued write then persists the latest complete list.
       applyLocal(append(activePresetsRef.current));
-      void queueMutation(async () => {
-        await persist(append(activePresetsRef.current));
-      }).catch(() => {});
-      return preset;
+      try {
+        await queueMutation(async () => {
+          await persist(append(activePresetsRef.current));
+        });
+        return preset;
+      } catch (error) {
+        const current = activePresetsRef.current;
+        const rolledBack = discardSavedPreset(current, preset.id);
+        if (rolledBack.length !== current.length) applyLocal(rolledBack);
+        throw error;
+      }
     },
     [applyLocal, persist, queueMutation, workspaceId, workspacePresets],
   );
 
   const remove = useCallback(
-    (id: string) => {
-      if (workspaceId && workspacePresets === undefined) return;
-      const discard = (current: SavedPreset[]) => current.filter((preset) => preset.id !== id);
-      applyLocal(discard(activePresetsRef.current));
-      void queueMutation(async () => {
-        await persist(discard(activePresetsRef.current));
-      }).catch(() => {});
+    async (id: string) => {
+      if (workspaceId && workspacePresets === undefined) return false;
+      const current = activePresetsRef.current;
+      const originalIndex = current.findIndex((preset) => preset.id === id);
+      if (originalIndex === -1) return false;
+      const removedPreset = current[originalIndex];
+      applyLocal(discardSavedPreset(current, id));
+      try {
+        await queueMutation(async () => {
+          await persist(discardSavedPreset(activePresetsRef.current, id));
+        });
+        return true;
+      } catch (error) {
+        const latest = activePresetsRef.current;
+        const rolledBack = restoreSavedPreset(latest, removedPreset, originalIndex);
+        if (rolledBack !== latest) applyLocal(rolledBack);
+        throw error;
+      }
     },
     [applyLocal, persist, queueMutation, workspaceId, workspacePresets],
   );
@@ -196,8 +231,8 @@ export function useSavedPresets(workspaceId: string | null = null) {
         if (next === activePresetsRef.current) return;
         await persist(next);
         persisted = true;
-        // Concurrent save/remove calls can update local state while persistence is in flight.
-        // Reapply the default to that latest snapshot; its queued write persists the merged list.
+        // A sibling hook can update the shared portable snapshot while persistence is in flight.
+        // Reapply the default to that latest state before publishing this mutation.
         const latest = activePresetsRef.current;
         const remerged = setSavedPresetDefault(latest, kind, id);
         if (remerged !== latest) applyLocal(remerged);

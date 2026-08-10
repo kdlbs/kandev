@@ -8,6 +8,8 @@ import type { SidebarSelection } from "./presets-sidebar";
 import type { SavedPreset } from "./saved-preset-model";
 import type { useSavedPresets } from "./use-saved-presets";
 
+type SavedPresetStore = ReturnType<typeof useSavedPresets>;
+
 type SavedPresetActionsOptions = {
   selection: SidebarSelection;
   customQuery: string;
@@ -16,7 +18,7 @@ type SavedPresetActionsOptions = {
   setProgrammaticSelection: (selection: SidebarSelection) => void;
   setQueryImmediate: (query: string) => void;
   setRepoFilter: (repo: string) => void;
-  savedPresetStore: ReturnType<typeof useSavedPresets>;
+  savedPresetStore: SavedPresetStore;
   markSearchInteracted: () => void;
 };
 
@@ -30,6 +32,103 @@ function firstPresetSelection(
     selection: { kind, source: "preset", id: preset?.value ?? "" } as SidebarSelection,
     filter: preset?.filter ?? "",
   };
+}
+
+function useConfirmSave({
+  kind,
+  customQuery,
+  save,
+  markSearchInteracted,
+  setProgrammaticSelection,
+  setQueryImmediate,
+  setRepoFilter,
+  reportError,
+}: {
+  kind: SidebarSelection["kind"];
+  customQuery: string;
+  save: SavedPresetStore["save"];
+  markSearchInteracted: () => void;
+  setProgrammaticSelection: (selection: SidebarSelection) => void;
+  setQueryImmediate: (query: string) => void;
+  setRepoFilter: (repo: string) => void;
+  reportError: () => void;
+}) {
+  return useCallback(
+    async (label: string, defaultRepoFilter: string) => {
+      markSearchInteracted();
+      try {
+        const created = await save({ kind, label, customQuery, repoFilter: defaultRepoFilter });
+        if (!created) return;
+        setProgrammaticSelection({ kind, source: "saved", id: created.id });
+        setQueryImmediate(customQuery);
+        setRepoFilter(defaultRepoFilter);
+      } catch {
+        reportError();
+      }
+    },
+    [
+      customQuery,
+      kind,
+      markSearchInteracted,
+      reportError,
+      save,
+      setProgrammaticSelection,
+      setQueryImmediate,
+      setRepoFilter,
+    ],
+  );
+}
+
+function useDeleteSaved({
+  selection,
+  prPresets,
+  issuePresets,
+  remove,
+  markSearchInteracted,
+  setProgrammaticSelection,
+  setQueryImmediate,
+  setRepoFilter,
+  reportError,
+}: {
+  selection: SidebarSelection;
+  prPresets: PresetOption[];
+  issuePresets: PresetOption[];
+  remove: SavedPresetStore["remove"];
+  markSearchInteracted: () => void;
+  setProgrammaticSelection: (selection: SidebarSelection) => void;
+  setQueryImmediate: (query: string) => void;
+  setRepoFilter: (repo: string) => void;
+  reportError: () => void;
+}) {
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
+  return useCallback(
+    async (id: string) => {
+      markSearchInteracted();
+      try {
+        const removed = await remove(id);
+        const currentSelection = selectionRef.current;
+        if (removed && currentSelection.source === "saved" && currentSelection.id === id) {
+          const fallback = firstPresetSelection(currentSelection.kind, prPresets, issuePresets);
+          setProgrammaticSelection(fallback.selection);
+          setQueryImmediate(fallback.filter);
+          setRepoFilter("");
+        }
+      } catch {
+        reportError();
+      }
+    },
+    [
+      issuePresets,
+      markSearchInteracted,
+      prPresets,
+      remove,
+      reportError,
+      setProgrammaticSelection,
+      setQueryImmediate,
+      setRepoFilter,
+    ],
+  );
 }
 
 export function useSavedPresetActions({
@@ -54,54 +153,35 @@ export function useSavedPresetActions({
     setDefault: setSavedPresetDefault,
   } = savedPresetStore;
 
-  const onConfirmSave = useCallback(
-    (label: string, defaultRepoFilter: string) => {
-      markSearchInteracted();
-      const created = saveSavedPreset({
-        kind: selection.kind,
-        label,
-        customQuery,
-        repoFilter: defaultRepoFilter,
-      });
-      if (!created) return;
-      setProgrammaticSelection({ kind: selection.kind, source: "saved", id: created.id });
-      setQueryImmediate(customQuery);
-      setRepoFilter(defaultRepoFilter);
-    },
-    [
-      customQuery,
-      markSearchInteracted,
-      saveSavedPreset,
-      selection.kind,
-      setProgrammaticSelection,
-      setQueryImmediate,
-      setRepoFilter,
-    ],
+  const reportSaveError = useCallback(
+    () => toast({ description: t("integrations:failedToSaveSavedQuery"), variant: "error" }),
+    [t, toast],
   );
-
-  const onDeleteSaved = useCallback(
-    (id: string) => {
-      markSearchInteracted();
-      removeSavedPreset(id);
-      if (selection.source !== "saved" || selection.id !== id) return;
-      const fallback = firstPresetSelection(selection.kind, prPresets, issuePresets);
-      setProgrammaticSelection(fallback.selection);
-      setQueryImmediate(fallback.filter);
-      setRepoFilter("");
-    },
-    [
-      markSearchInteracted,
-      removeSavedPreset,
-      issuePresets,
-      prPresets,
-      selection.id,
-      selection.kind,
-      selection.source,
-      setProgrammaticSelection,
-      setQueryImmediate,
-      setRepoFilter,
-    ],
+  const reportDeleteError = useCallback(
+    () => toast({ description: t("integrations:failedToDeleteSavedQuery"), variant: "error" }),
+    [t, toast],
   );
+  const onConfirmSave = useConfirmSave({
+    kind: selection.kind,
+    customQuery,
+    save: saveSavedPreset,
+    markSearchInteracted,
+    setProgrammaticSelection,
+    setQueryImmediate,
+    setRepoFilter,
+    reportError: reportSaveError,
+  });
+  const onDeleteSaved = useDeleteSaved({
+    selection,
+    prPresets,
+    issuePresets,
+    remove: removeSavedPreset,
+    markSearchInteracted,
+    setProgrammaticSelection,
+    setQueryImmediate,
+    setRepoFilter,
+    reportError: reportDeleteError,
+  });
 
   const onToggleSavedDefault = useCallback(
     async (preset: SavedPreset) => {

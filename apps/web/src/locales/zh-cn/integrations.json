@@ -44,6 +44,8 @@
   "enableIntegrationNamed": "启用 {{name}}",
   "enterCommitMessage": "输入提交信息…",
   "failedToCopyConfig": "复制配置失败：{{err}}",
+  "failedToDeleteSavedQuery": "删除已保存的查询失败",
+  "failedToSaveSavedQuery": "保存查询失败",
   "failedToUpdateDefaultView": "更新默认视图失败",
   "filesChanged_one": "已更改 <0>{{count}}</0> 个文件",
   "filesChanged_other": "已更改 <0>{{count}}</0> 个文件",

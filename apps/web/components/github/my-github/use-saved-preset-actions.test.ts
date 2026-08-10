@@ -50,8 +50,8 @@ type Options = Parameters<typeof useSavedPresetActions>[0];
 function makeStore(overrides: Partial<SavedPresetStore> = {}): SavedPresetStore {
   return {
     presets: [],
-    save: vi.fn(() => null),
-    remove: vi.fn(),
+    save: vi.fn(async () => null),
+    remove: vi.fn(async () => false),
     setDefault: vi.fn(async () => false),
     ...overrides,
   } as SavedPresetStore;
@@ -93,9 +93,9 @@ beforeEach(() => {
   mockToast.mockReset();
 });
 
-describe("useSavedPresetActions query actions", () => {
-  it("saves the current query, commits it, selects it, and applies its repository", () => {
-    const save = vi.fn(() => savedPreset);
+describe("useSavedPresetActions save actions", () => {
+  it("saves the current query, commits it, selects it, and applies its repository", async () => {
+    const save = vi.fn(async () => savedPreset);
     const store = makeStore({ presets: [savedPreset], save });
     const {
       result,
@@ -105,7 +105,7 @@ describe("useSavedPresetActions query actions", () => {
       markSearchInteracted,
     } = renderActions({ selection: { kind: "issue", source: "preset", id: "assigned" } }, store);
 
-    act(() => result.current.onConfirmSave("Assigned in Kandev", REPO));
+    await act(async () => result.current.onConfirmSave("Assigned in Kandev", REPO));
 
     expect(useSavedPresets).not.toHaveBeenCalled();
     expect(markSearchInteracted).toHaveBeenCalledOnce();
@@ -125,8 +125,8 @@ describe("useSavedPresetActions query actions", () => {
     expect(result.current.savedPresets).toEqual([savedPreset]);
   });
 
-  it("leaves selection and repository unchanged when saving returns null", () => {
-    const save = vi.fn(() => null);
+  it("leaves selection and repository unchanged when saving returns null", async () => {
+    const save = vi.fn(async () => null);
     const {
       result,
       setProgrammaticSelection,
@@ -135,7 +135,7 @@ describe("useSavedPresetActions query actions", () => {
       markSearchInteracted,
     } = renderActions({}, makeStore({ save }));
 
-    act(() => result.current.onConfirmSave("Unavailable", REPO));
+    await act(async () => result.current.onConfirmSave("Unavailable", REPO));
 
     expect(markSearchInteracted).toHaveBeenCalledOnce();
     expect(save).toHaveBeenCalledWith({
@@ -149,8 +149,25 @@ describe("useSavedPresetActions query actions", () => {
     expect(setRepoFilter).not.toHaveBeenCalled();
   });
 
-  it("deletes the active saved query and selects the first same-kind preset", () => {
-    const remove = vi.fn();
+  it("reports a save persistence failure without selecting the optimistic preset", async () => {
+    const failure = Promise.reject(new Error("settings down"));
+    void failure.catch(() => undefined);
+    const save = vi.fn(() => failure);
+    const { result, setProgrammaticSelection } = renderActions({}, makeStore({ save }));
+
+    await act(async () => result.current.onConfirmSave("Unavailable", REPO));
+
+    expect(mockToast).toHaveBeenCalledWith({
+      description: "Failed to save saved query",
+      variant: "error",
+    });
+    expect(setProgrammaticSelection).not.toHaveBeenCalled();
+  });
+});
+
+describe("useSavedPresetActions delete actions", () => {
+  it("deletes the active saved query and selects the first same-kind preset", async () => {
+    const remove = vi.fn(async () => true);
     const {
       result,
       setProgrammaticSelection,
@@ -159,7 +176,7 @@ describe("useSavedPresetActions query actions", () => {
       markSearchInteracted,
     } = renderActions({}, makeStore({ presets: [savedPreset], remove }));
 
-    act(() => result.current.onDeleteSaved(savedPreset.id));
+    await act(async () => result.current.onDeleteSaved(savedPreset.id));
 
     expect(markSearchInteracted).toHaveBeenCalledOnce();
     expect(remove).toHaveBeenCalledWith(savedPreset.id);
@@ -175,8 +192,8 @@ describe("useSavedPresetActions query actions", () => {
     expect(setRepoFilter).toHaveBeenCalledWith("");
   });
 
-  it("deletes an inactive saved query without changing the active search", () => {
-    const remove = vi.fn();
+  it("deletes an inactive saved query without changing the active search", async () => {
+    const remove = vi.fn(async () => true);
     const {
       result,
       setProgrammaticSelection,
@@ -188,7 +205,7 @@ describe("useSavedPresetActions query actions", () => {
       makeStore({ presets: [savedPreset], remove }),
     );
 
-    act(() => result.current.onDeleteSaved(savedPreset.id));
+    await act(async () => result.current.onDeleteSaved(savedPreset.id));
 
     expect(markSearchInteracted).toHaveBeenCalledOnce();
     expect(remove).toHaveBeenCalledWith(savedPreset.id);
@@ -196,12 +213,32 @@ describe("useSavedPresetActions query actions", () => {
     expect(setQueryImmediate).not.toHaveBeenCalled();
     expect(setRepoFilter).not.toHaveBeenCalled();
   });
+
+  it("reports a delete persistence failure", async () => {
+    const failure = Promise.reject(new Error("settings down"));
+    void failure.catch(() => undefined);
+    const remove = vi.fn(() => failure);
+    const { result, setProgrammaticSelection, setQueryImmediate, setRepoFilter } = renderActions(
+      {},
+      makeStore({ remove }),
+    );
+
+    await act(async () => result.current.onDeleteSaved(savedPreset.id));
+
+    expect(mockToast).toHaveBeenCalledWith({
+      description: "Failed to delete saved query",
+      variant: "error",
+    });
+    expect(setProgrammaticSelection).not.toHaveBeenCalled();
+    expect(setQueryImmediate).not.toHaveBeenCalled();
+    expect(setRepoFilter).not.toHaveBeenCalled();
+  });
 });
 
 describe("useSavedPresetActions default deletion", () => {
-  it("deletes an inactive default without changing the active search", () => {
+  it("deletes an inactive default without changing the active search", async () => {
     const inactiveDefault = { ...savedPreset, isDefault: true };
-    const remove = vi.fn();
+    const remove = vi.fn(async () => true);
     const {
       result,
       setProgrammaticSelection,
@@ -213,7 +250,7 @@ describe("useSavedPresetActions default deletion", () => {
       makeStore({ presets: [inactiveDefault], remove }),
     );
 
-    act(() => result.current.onDeleteSaved(inactiveDefault.id));
+    await act(async () => result.current.onDeleteSaved(inactiveDefault.id));
 
     expect(markSearchInteracted).toHaveBeenCalledOnce();
     expect(remove).toHaveBeenCalledWith(inactiveDefault.id);

@@ -44,6 +44,8 @@
   "enableIntegrationNamed": "Enable {{name}}",
   "enterCommitMessage": "Enter commit message...",
   "failedToCopyConfig": "Failed to copy config: {{err}}",
+  "failedToDeleteSavedQuery": "Failed to delete saved query",
+  "failedToSaveSavedQuery": "Failed to save saved query",
   "failedToUpdateDefaultView": "Failed to update default view",
   "filesChanged_one": "<0>{{count}}</0> file changed",
   "filesChanged_other": "<0>{{count}}</0> files changed",

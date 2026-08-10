@@ -44,6 +44,8 @@
   "enableIntegrationNamed": "Ēńàƀĺē {{name}}",
   "enterCommitMessage": "Ēńţēŕ ćōḿḿĩţ ḿēśśàĝē...",
   "failedToCopyConfig": "Ƒàĩĺēď ţō ćōƥŷ ćōńƒĩĝ: {{err}}",
+  "failedToDeleteSavedQuery": "Ƒàĩĺēď ţō ďēĺēţē śàvēď qũēŕŷ",
+  "failedToSaveSavedQuery": "Ƒàĩĺēď ţō śàvē śàvēď qũēŕŷ",
   "failedToUpdateDefaultView": "Ƒàĩĺēď ţō ũƥďàţē ďēƒàũĺţ vĩēŵ",
   "filesChanged_one": "<0>{{count}}</0> ƒĩĺē ćĥàńĝēď",
   "filesChanged_other": "<0>{{count}}</0> ƒĩĺēś ćĥàńĝēď",

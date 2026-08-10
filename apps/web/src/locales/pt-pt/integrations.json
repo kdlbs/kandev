@@ -44,6 +44,8 @@
   "enableIntegrationNamed": "Ativar {{name}}",
   "enterCommitMessage": "Introduza a mensagem de commit...",
   "failedToCopyConfig": "Não foi possível copiar a configuração: {{err}}",
+  "failedToDeleteSavedQuery": "Não foi possível eliminar a consulta guardada",
+  "failedToSaveSavedQuery": "Não foi possível guardar a consulta",
   "failedToUpdateDefaultView": "Não foi possível atualizar a vista pré-definida",
   "filesChanged_one": "<0>{{count}}</0> ficheiro alterado",
   "filesChanged_other": "<0>{{count}}</0> ficheiros alterados",

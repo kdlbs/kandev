@@ -124,13 +124,14 @@ async function expectPendingDefaultTargetRemoval(mode: PersistenceMode) {
   });
   await waitFor(() => expectPersistenceCalls(mode, 1));
 
+  let removeMutation!: Promise<boolean>;
   act(() => {
-    result.current.remove("pr-b");
+    removeMutation = result.current.remove("pr-b");
   });
 
   await act(async () => {
     resolveDefault();
-    await defaultMutation;
+    await Promise.all([defaultMutation, removeMutation]);
   });
   await waitFor(() => expectPersistenceCalls(mode, 2));
 
@@ -160,23 +161,24 @@ describe("useSavedPresets mutation ordering", () => {
     });
     await waitFor(() => expectPersistenceCalls(mode, 1));
 
-    let created: SavedPreset | null = null;
+    let saveMutation!: Promise<SavedPreset | null>;
     act(() => {
-      created = result.current.save({
+      saveMutation = result.current.save({
         kind: "pr",
         label: "Saved while pending",
         customQuery: "is:open",
         repoFilter: "kdlbs/kandev",
       });
     });
-    const saved = requirePreset(created);
 
+    let created: SavedPreset | null = null;
     await act(async () => {
       resolveDefault();
-      await defaultMutation;
+      [, created] = await Promise.all([defaultMutation, saveMutation]);
     });
     await waitFor(() => expectPersistenceCalls(mode, 2));
 
+    const saved = requirePreset(created);
     const expected = [{ ...prA, isDefault: false }, { ...prB, isDefault: true }, saved];
     expect(result.current.presets).toEqual(expected);
     expectLastPersisted(mode, expected);
@@ -194,13 +196,14 @@ describe("useSavedPresets mutation ordering", () => {
     });
     await waitFor(() => expectPersistenceCalls(mode, 1));
 
+    let removeMutation!: Promise<boolean>;
     act(() => {
-      result.current.remove("pr-a");
+      removeMutation = result.current.remove("pr-a");
     });
 
     await act(async () => {
       resolveDefault();
-      await defaultMutation;
+      await Promise.all([defaultMutation, removeMutation]);
     });
     await waitFor(() => expectPersistenceCalls(mode, 2));
 
@@ -221,8 +224,9 @@ describe("useSavedPresets mutation ordering", () => {
       .mockResolvedValue(workspaceSettings());
     const firstHook = await renderLoaded("workspace", [valid]);
 
+    let firstSave!: Promise<SavedPreset | null>;
     act(() => {
-      firstHook.result.current.save({
+      firstSave = firstHook.result.current.save({
         kind: "pr",
         label: "First write",
         customQuery: "is:open",
@@ -234,8 +238,9 @@ describe("useSavedPresets mutation ordering", () => {
 
     __resetSnapshotForTests();
     const secondHook = await renderLoaded("workspace", [valid]);
+    let secondSave!: Promise<SavedPreset | null>;
     act(() => {
-      secondHook.result.current.save({
+      secondSave = secondHook.result.current.save({
         kind: "pr",
         label: "Second write",
         customQuery: "is:closed",
@@ -244,6 +249,9 @@ describe("useSavedPresets mutation ordering", () => {
     });
 
     await waitFor(() => expect(updateGitHubWorkspaceSettings).toHaveBeenCalledTimes(2));
-    firstWrite.resolve(workspaceSettings());
+    await act(async () => {
+      firstWrite.resolve(workspaceSettings());
+      await Promise.all([firstSave, secondSave]);
+    });
   });
 });

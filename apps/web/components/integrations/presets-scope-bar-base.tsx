@@ -207,6 +207,7 @@ export type IntegrationScopeBarProps<K extends string> = {
   onDeleteSaved: (id: string) => void;
   canSaveCurrent: boolean;
   onSaveCurrent: () => void;
+  /** Emits only the stable id; domain wrappers own richer saved-query data. */
   onToggleSavedDefault?: (id: string) => void;
   defaultMutationPending?: boolean;
 };
