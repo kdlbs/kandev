@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,24 +16,29 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
-// postGitPull drives POST /api/v1/git/pull through the real router and decodes
-// the handler's result. Anything other than 200 is fatal: the handler answers
+// postGitJSON drives a git endpoint through the real router and decodes the
+// handler's result. Anything other than 200 is fatal: these handlers answer
 // operational failures with 200 + Success:false, so a non-200 means the request
-// never reached GitOperator.Pull.
-func postGitPull(t *testing.T, srv *Server, body string) process.GitOperationResult {
+// never reached the GitOperator at all.
+func postGitJSON(t *testing.T, srv *Server, path, body string) process.GitOperationResult {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/git/pull", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	srv.Router().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("POST /api/v1/git/pull status = %d, want 200: %s", rec.Code, rec.Body.String())
+		t.Fatalf("POST %s status = %d, want 200: %s", path, rec.Code, rec.Body.String())
 	}
 	var result process.GitOperationResult
 	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
-		t.Fatalf("decode pull response: %v (body %s)", err, rec.Body.String())
+		t.Fatalf("decode %s response: %v (body %s)", path, err, rec.Body.String())
 	}
 	return result
+}
+
+func postGitPull(t *testing.T, srv *Server, body string) process.GitOperationResult {
+	t.Helper()
+	return postGitJSON(t, srv, "/api/v1/git/pull", body)
 }
 
 // newPullAPIServer wires the api Server over an existing working copy.
@@ -158,4 +164,109 @@ func TestHandleGitPull_RebaseConflictAutoAborts(t *testing.T) {
 	if status := strings.TrimSpace(runGitAPI(t, repoDir, "status", "--porcelain")); status != "" {
 		t.Errorf("working tree is dirty after the abort:\n%s", status)
 	}
+}
+
+// runGitAPIExpectFailure runs git and requires a non-zero exit. Leaving a
+// repository mid-rebase or mid-merge means running a command that conflicts,
+// so the failure is the point — runGitAPI would call t.Fatalf on it.
+func runGitAPIExpectFailure(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	full := append([]string{
+		"-C", dir,
+		"-c", "commit.gpgsign=false",
+		"-c", "tag.gpgsign=false",
+	}, args...)
+	cmd := exec.Command("git", full...)
+	env := make([]string, 0, len(os.Environ()))
+	for _, e := range os.Environ() {
+		if strings.HasPrefix(e, "GIT_") {
+			continue
+		}
+		env = append(env, e)
+	}
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("git %v was expected to conflict but succeeded:\n%s", args, out)
+	}
+}
+
+// setupConflictingBranches leaves repoDir checked out on feature/x, whose only
+// commit adds shared.txt with content that conflicts with main's. Returns the
+// feature tip, which an abort must restore.
+func setupConflictingBranches(t *testing.T, repoDir string) string {
+	t.Helper()
+	runGitAPI(t, repoDir, "checkout", "-b", "feature/x")
+	commitLocally(t, repoDir, "shared.txt", "feature version\n", "feat: feature edit")
+	featureTip := strings.TrimSpace(runGitAPI(t, repoDir, "rev-parse", "HEAD"))
+
+	runGitAPI(t, repoDir, "checkout", "main")
+	commitLocally(t, repoDir, "shared.txt", "main version\n", "feat: main edit")
+
+	runGitAPI(t, repoDir, "checkout", "feature/x")
+	return featureTip
+}
+
+// assertAbortRestoredRepo pins the post-abort state: no in-progress operation
+// left behind, HEAD back where it started, and a clean working tree.
+func assertAbortRestoredRepo(t *testing.T, repoDir, wantHead string) {
+	t.Helper()
+	for _, name := range []string{"rebase-merge", "rebase-apply", "MERGE_HEAD"} {
+		if _, err := os.Stat(filepath.Join(repoDir, ".git", name)); err == nil {
+			t.Errorf(".git/%s still exists — the operation was not aborted", name)
+		}
+	}
+	if got := strings.TrimSpace(runGitAPI(t, repoDir, "rev-parse", "HEAD")); got != wantHead {
+		t.Errorf("HEAD = %q after the abort, want %q", got, wantHead)
+	}
+	if status := strings.TrimSpace(runGitAPI(t, repoDir, "status", "--porcelain")); status != "" {
+		t.Errorf("working tree is dirty after the abort:\n%s", status)
+	}
+}
+
+// TestHandleGitAbort_ClearsInProgressRebase drives POST /api/v1/git/abort with
+// {"operation": "rebase"} against a repository genuinely stuck mid-rebase.
+// GitOperator.Abort issues "rebase --abort", which the flag allowlist rejected,
+// so this endpoint failed for every caller regardless of repository state.
+func TestHandleGitAbort_ClearsInProgressRebase(t *testing.T) {
+	repoDir, cleanup := setupAPITestRepo(t)
+	t.Cleanup(cleanup)
+
+	featureTip := setupConflictingBranches(t, repoDir)
+	runGitAPIExpectFailure(t, repoDir, "rebase", "main")
+	if _, err := os.Stat(filepath.Join(repoDir, ".git", "rebase-merge")); err != nil {
+		t.Fatalf("fixture did not leave a rebase in progress: %v", err)
+	}
+
+	srv := newPullAPIServer(t, repoDir)
+	result := postGitJSON(t, srv, "/api/v1/git/abort", `{"operation": "rebase"}`)
+
+	if !result.Success {
+		t.Fatalf("abort rebase failed: error=%q output=%q", result.Error, result.Output)
+	}
+	if result.Operation != "abort" {
+		t.Errorf("result.Operation = %q, want %q", result.Operation, "abort")
+	}
+	assertAbortRestoredRepo(t, repoDir, featureTip)
+}
+
+// TestHandleGitAbort_ClearsInProgressMerge is the "merge" half of the same
+// endpoint; it issues "merge --abort" through the same allowlist.
+func TestHandleGitAbort_ClearsInProgressMerge(t *testing.T) {
+	repoDir, cleanup := setupAPITestRepo(t)
+	t.Cleanup(cleanup)
+
+	featureTip := setupConflictingBranches(t, repoDir)
+	runGitAPIExpectFailure(t, repoDir, "merge", "main")
+	if _, err := os.Stat(filepath.Join(repoDir, ".git", "MERGE_HEAD")); err != nil {
+		t.Fatalf("fixture did not leave a merge in progress: %v", err)
+	}
+
+	srv := newPullAPIServer(t, repoDir)
+	result := postGitJSON(t, srv, "/api/v1/git/abort", `{"operation": "merge"}`)
+
+	if !result.Success {
+		t.Fatalf("abort merge failed: error=%q output=%q", result.Error, result.Output)
+	}
+	assertAbortRestoredRepo(t, repoDir, featureTip)
 }
