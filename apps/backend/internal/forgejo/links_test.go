@@ -72,3 +72,23 @@ func TestStore_DeleteTaskLinksIsWorkspaceScoped(t *testing.T) {
 		t.Fatalf("delete: %v", err)
 	}
 }
+
+func TestStore_GetTaskLinkIsWorkspaceScoped(t *testing.T) {
+	store := newConfigTestStore(t)
+	createLinkTestTask(t, store, "workspace-a", "task-a")
+	ctx := context.Background()
+	if err := store.UpsertTaskPR(ctx, &TaskPR{TaskID: "task-a", Origin: "https://forgejo.example", Owner: "owner", Repo: "repo", PRNumber: 8, PRURL: "url", PRTitle: "PR", HeadBranch: "feature", BaseBranch: "main", State: "open"}); err != nil {
+		t.Fatal(err)
+	}
+	links, err := store.ListTaskPRs(ctx, "workspace-a", "task-a")
+	if err != nil || len(links) != 1 {
+		t.Fatalf("links=%#v err=%v", links, err)
+	}
+	got, err := store.GetTaskPRLink(ctx, "workspace-a", links[0].ID)
+	if err != nil || got.PRNumber != 8 {
+		t.Fatalf("link=%#v err=%v", got, err)
+	}
+	if _, err := store.GetTaskPRLink(ctx, "workspace-b", links[0].ID); !errors.Is(err, ErrTaskLinkNotFound) {
+		t.Fatalf("cross-workspace lookup=%v", err)
+	}
+}
