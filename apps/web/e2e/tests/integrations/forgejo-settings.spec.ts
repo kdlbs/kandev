@@ -100,3 +100,55 @@ test.describe("Forgejo queue", () => {
     await assertNoDocumentHorizontalOverflow(testPage, "Forgejo queue");
   });
 });
+
+test.describe("Forgejo task links", () => {
+  test("prefills pull request creation from a task worktree branch", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTask(seedData.workspaceId, "Forgejo task PR", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repositories: [
+        {
+          repository_id: seedData.repositoryId,
+          base_branch: "main",
+          checkout_branch: "feat/forgejo-e2e",
+        },
+      ],
+    });
+    const config = {
+      workspace_id: seedData.workspaceId,
+      origin: "https://forgejo.example",
+      username: "alice",
+      has_secret: true,
+      has_webhook_secret: false,
+      last_ok: true,
+      created_at: "",
+      updated_at: "",
+    };
+    await testPage.route("**/api/v1/forgejo/config?*", (route) =>
+      route.fulfill({ contentType: "application/json", body: JSON.stringify(config) }),
+    );
+    await testPage.route(`**/api/v1/forgejo/tasks/${task.id}/issues?*`, (route) =>
+      route.fulfill({ contentType: "application/json", body: JSON.stringify({ issues: [] }) }),
+    );
+    await testPage.route(`**/api/v1/forgejo/tasks/${task.id}/pull-requests?*`, (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ pull_requests: [] }),
+      }),
+    );
+
+    await testPage.goto(`/t/${task.id}`);
+    await expect(testPage.getByTestId("forgejo-task-links-button")).toBeVisible();
+    await testPage.getByTestId("forgejo-task-links-button").click();
+    await testPage.getByText("Create pull request", { exact: true }).click();
+
+    const dialog = testPage.getByRole("dialog", { name: "Create Forgejo pull request" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByLabel("Source branch")).toHaveValue("feat/forgejo-e2e");
+    await expect(dialog.getByLabel("Base branch")).toHaveValue("main");
+  });
+});

@@ -48,19 +48,19 @@ type TaskLike = Pick<KanbanState["tasks"][number], "id" | "title" | "repositorie
 
 function taskRepositoryDefaults(task: TaskLike | null, repositories: Repository[] | undefined) {
   const linked = task?.repositories?.slice().sort((a, b) => a.position - b.position) ?? [];
-  for (const taskRepository of linked) {
-    const repository = repositories?.find((item) => item.id === taskRepository.repository_id);
-    if (repository?.provider_owner && repository.provider_name) {
-      return {
-        repositoryID: repository.id,
-        owner: repository.provider_owner,
-        repo: repository.provider_name,
-        head: taskRepository.checkout_branch || "",
-        base: taskRepository.base_branch || repository.default_branch || "",
-      };
-    }
-  }
-  return { repositoryID: "", owner: "", repo: "", head: "", base: "" };
+  const taskRepository = linked[0];
+  if (!taskRepository) return { repositoryID: "", owner: "", repo: "", head: "", base: "" };
+  const repository = repositories?.find((item) => item.id === taskRepository.repository_id);
+  return {
+    repositoryID: taskRepository.repository_id,
+    owner: repository?.provider_owner ?? "",
+    repo: repository?.provider_name ?? "",
+    // A valid task worktree is useful even before the Kandev repository has
+    // been associated with a Forgejo provider identity. Users can fill owner/
+    // repository, but should not need to rediscover the branch they pushed.
+    head: taskRepository.checkout_branch || "",
+    base: taskRepository.base_branch || repository?.default_branch || "",
+  };
 }
 
 function ForgejoTaskDialog({
