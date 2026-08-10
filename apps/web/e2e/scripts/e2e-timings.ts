@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -504,7 +505,19 @@ export function readBlobReportJsonl(filePath: string): string {
     .filter(Boolean);
   const reportFile = entries.find((entry) => entry.endsWith("report.jsonl"));
   if (!reportFile) throw new Error(`Blob report ${filePath} does not contain report.jsonl`);
-  return execFileSync("unzip", ["-p", filePath, reportFile], { encoding: "utf8" });
+
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-blob-report-"));
+  const outputPath = path.join(tempDir, "report.jsonl");
+  const outputFd = fs.openSync(outputPath, "w");
+  try {
+    execFileSync("unzip", ["-p", filePath, reportFile], {
+      stdio: ["ignore", outputFd, "pipe"],
+    });
+    return fs.readFileSync(outputPath, "utf8");
+  } finally {
+    fs.closeSync(outputFd);
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 }
 
 export function parseBlobReports(inputPath: string): TimingObservation[] {

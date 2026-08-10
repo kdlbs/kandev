@@ -9,6 +9,7 @@ import {
   normalizeReportPath,
   parseBlobReportJsonl,
   quantile,
+  readBlobReportJsonl,
   readTimingProfile,
   type ShardMetadata,
   type TimingObservation,
@@ -80,6 +81,14 @@ describe("e2e timing collection", () => {
       durationSeconds: 1.2,
     });
     expect(observations[1]?.retry).toBe(1);
+  });
+
+  it("reads an unpacked blob report", () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-blob-report-"));
+    const filePath = path.join(directory, "report.jsonl");
+    fs.writeFileSync(filePath, reportJsonl());
+
+    expect(readBlobReportJsonl(filePath)).toBe(reportJsonl());
   });
 
   it("uses only first-attempt passing results as baseline samples", () => {
