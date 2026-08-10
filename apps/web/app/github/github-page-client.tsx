@@ -290,7 +290,7 @@ function useGitHubPageState(workspaceId: string | null, enabled: boolean) {
     onConfirmSave,
     onDeleteSaved,
     onToggleSavedDefault,
-    defaultMutationPending,
+    defaultMutationPendingId,
   } = useSavedPresetActions({
     workspaceId,
     selection,
@@ -354,7 +354,7 @@ function useGitHubPageState(workspaceId: string | null, enabled: boolean) {
     onConfirmSave,
     onDeleteSaved,
     onToggleSavedDefault,
-    defaultMutationPending,
+    defaultMutationPendingId,
     resolvedPrPresets,
     resolvedIssuePresets,
   };
@@ -386,7 +386,7 @@ function AuthenticatedLayout({
         savedPresets={state.savedPresets}
         onDeleteSaved={state.onDeleteSaved}
         onToggleSavedDefault={state.onToggleSavedDefault}
-        defaultMutationPending={state.defaultMutationPending}
+        defaultMutationPendingId={state.defaultMutationPendingId}
         canSaveCurrent={state.canSaveCurrent}
         onSaveCurrent={state.onOpenSaveDialog}
         prPresets={state.resolvedPrPresets}
@@ -506,7 +506,7 @@ export function GitHubPageClient({
             savedPresets={state.savedPresets}
             onDeleteSaved={state.onDeleteSaved}
             onToggleSavedDefault={state.onToggleSavedDefault}
-            defaultMutationPending={state.defaultMutationPending}
+            defaultMutationPendingId={state.defaultMutationPendingId}
             canSaveCurrent={state.canSaveCurrent}
             onSaveCurrent={onMobileSaveCurrent}
             prPresets={state.resolvedPrPresets}

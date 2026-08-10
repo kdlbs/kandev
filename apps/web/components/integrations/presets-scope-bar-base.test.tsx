@@ -157,7 +157,7 @@ describe("IntegrationScopeBar saved defaults", () => {
   });
 
   it("disables every default action while a mutation is pending", () => {
-    renderBar({ defaultMutationPending: true });
+    renderBar({ defaultMutationPendingId: "saved-b" });
     const currentDefault = screen.getByRole("menuitemcheckbox", {
       name: "Updating default view… Clear Current default as default view",
     });
@@ -167,13 +167,16 @@ describe("IntegrationScopeBar saved defaults", () => {
 
     expect(currentDefault.getAttribute(ARIA_DISABLED_ATTRIBUTE)).toBe("true");
     expect(currentDefault.getAttribute("aria-busy")).toBeNull();
-    expect(currentDefault.querySelector("svg")?.getAttribute("class")).toContain("animate-pulse");
+    expect(currentDefault.querySelector("svg")?.getAttribute("class")).not.toContain(
+      "animate-pulse",
+    );
     const futureDefault = screen.getByRole("menuitemcheckbox", {
       name: "Updating default view… Set Future default as default view",
     });
     expect(futureDefault.getAttribute(ARIA_DISABLED_ATTRIBUTE)).toBe("true");
     expect(futureDefault.querySelector("svg")?.getAttribute("class")).toContain("fill-amber-500");
     expect(futureDefault.querySelector("svg")?.getAttribute("class")).toContain("opacity-60");
+    expect(futureDefault.querySelector("svg")?.getAttribute("class")).toContain("animate-pulse");
     expect(currentDelete.getAttribute(ARIA_DISABLED_ATTRIBUTE)).toBe("true");
     expect(currentDelete.className).toContain("group-hover/saved:data-[disabled]:opacity-50");
     expect(

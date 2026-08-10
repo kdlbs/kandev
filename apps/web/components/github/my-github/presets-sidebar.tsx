@@ -27,7 +27,7 @@ type PresetsSidebarProps = {
   canSaveCurrent: boolean;
   onSaveCurrent: () => void;
   onToggleSavedDefault: (preset: SavedPreset) => void;
-  defaultMutationPending: boolean;
+  defaultMutationPendingId: string | null;
   prPresets?: PresetOption[];
   issuePresets?: PresetOption[];
 };
@@ -144,7 +144,7 @@ function SavedSection({
   canSaveCurrent,
   onSaveCurrent,
   onToggleSavedDefault,
-  defaultMutationPending,
+  defaultMutationPendingId,
 }: {
   saved: SavedPreset[];
   selected: SidebarSelection;
@@ -154,9 +154,10 @@ function SavedSection({
   canSaveCurrent: boolean;
   onSaveCurrent: () => void;
   onToggleSavedDefault: (preset: SavedPreset) => void;
-  defaultMutationPending: boolean;
+  defaultMutationPendingId: string | null;
 }) {
   const { t } = useTranslation();
+  const defaultMutationPending = defaultMutationPendingId !== null;
   return (
     <>
       <SectionHeader title={t("github:saved")} />
@@ -178,6 +179,7 @@ function SavedSection({
                 label={s.label}
                 isDefault={s.isDefault}
                 disabled={defaultMutationPending}
+                pending={defaultMutationPendingId === s.id}
                 variant="button"
                 testId={`github-saved-query-default-${s.id}`}
                 onToggle={() => void onToggleSavedDefault(s)}
@@ -223,7 +225,7 @@ export function PresetsSidebar({
   canSaveCurrent,
   onSaveCurrent,
   onToggleSavedDefault,
-  defaultMutationPending,
+  defaultMutationPendingId,
   prPresets = PR_PRESETS,
   issuePresets = ISSUE_PRESETS,
 }: PresetsSidebarProps) {
@@ -262,7 +264,7 @@ export function PresetsSidebar({
         canSaveCurrent={canSaveCurrent}
         onSaveCurrent={onSaveCurrent}
         onToggleSavedDefault={onToggleSavedDefault}
-        defaultMutationPending={defaultMutationPending}
+        defaultMutationPendingId={defaultMutationPendingId}
       />
     </nav>
   );

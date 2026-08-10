@@ -26,7 +26,7 @@ describe("PresetsSidebar saved defaults", () => {
         canSaveCurrent={false}
         onSaveCurrent={vi.fn()}
         onToggleSavedDefault={vi.fn()}
-        defaultMutationPending
+        defaultMutationPendingId={savedPreset.id}
         prPresets={[]}
         issuePresets={[]}
       />,
@@ -58,7 +58,7 @@ describe("PresetsSidebar saved defaults", () => {
         canSaveCurrent={false}
         onSaveCurrent={vi.fn()}
         onToggleSavedDefault={vi.fn()}
-        defaultMutationPending={false}
+        defaultMutationPendingId={null}
       />,
     );
 
@@ -78,7 +78,7 @@ describe("PresetsSidebar saved defaults", () => {
         canSaveCurrent={false}
         onSaveCurrent={vi.fn()}
         onToggleSavedDefault={vi.fn()}
-        defaultMutationPending={false}
+        defaultMutationPendingId={null}
       />,
     );
 

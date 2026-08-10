@@ -16,7 +16,7 @@ type PresetsScopeBarProps = {
   canSaveCurrent: boolean;
   onSaveCurrent: () => void;
   onToggleSavedDefault: (preset: SavedPreset) => void;
-  defaultMutationPending: boolean;
+  defaultMutationPendingId: string | null;
   prPresets?: PresetOption[];
   issuePresets?: PresetOption[];
 };

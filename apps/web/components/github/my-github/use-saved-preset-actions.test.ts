@@ -215,31 +215,31 @@ async function expectDefaultPendingScopedToWorkspace() {
   act(() => {
     firstMutation = result.current.onToggleSavedDefault(savedPreset);
   });
-  expect(result.current.defaultMutationPending).toBe(true);
+  expect(result.current.defaultMutationPendingId).toBe(savedPreset.id);
 
   rerender({ workspaceId: SECOND_WORKSPACE_ID });
-  expect(result.current.defaultMutationPending).toBe(false);
+  expect(result.current.defaultMutationPendingId).toBeNull();
 
   let secondMutation!: Promise<void>;
   act(() => {
     secondMutation = result.current.onToggleSavedDefault(savedPreset);
   });
   expect(setDefault).toHaveBeenCalledTimes(2);
-  expect(result.current.defaultMutationPending).toBe(true);
+  expect(result.current.defaultMutationPendingId).toBe(savedPreset.id);
 
   await act(async () => {
     finishFirst();
     await firstMutation;
   });
   expect(markSearchInteracted).not.toHaveBeenCalled();
-  expect(result.current.defaultMutationPending).toBe(true);
+  expect(result.current.defaultMutationPendingId).toBe(savedPreset.id);
 
   await act(async () => {
     finishSecond();
     await secondMutation;
   });
   expect(markSearchInteracted).toHaveBeenCalledOnce();
-  expect(result.current.defaultMutationPending).toBe(false);
+  expect(result.current.defaultMutationPendingId).toBeNull();
 }
 
 beforeEach(() => {
@@ -521,7 +521,7 @@ describe("useSavedPresetActions default actions", () => {
 
     expect(markSearchInteracted).not.toHaveBeenCalled();
     expect(setDefault).toHaveBeenCalledWith("issue", savedPreset.id);
-    expect(result.current.defaultMutationPending).toBe(true);
+    expect(result.current.defaultMutationPendingId).toBe(savedPreset.id);
     expect(setProgrammaticSelection).not.toHaveBeenCalled();
     expect(setQueryImmediate).not.toHaveBeenCalled();
     expect(setRepoFilter).not.toHaveBeenCalled();
@@ -531,7 +531,7 @@ describe("useSavedPresetActions default actions", () => {
       await mutation;
     });
     expect(markSearchInteracted).toHaveBeenCalledOnce();
-    expect(result.current.defaultMutationPending).toBe(false);
+    expect(result.current.defaultMutationPendingId).toBeNull();
   });
 
   it("clears an existing default and reports persistence failure", async () => {
@@ -554,6 +554,6 @@ describe("useSavedPresetActions default actions", () => {
       variant: "error",
     });
     expect(markSearchInteracted).not.toHaveBeenCalled();
-    expect(result.current.defaultMutationPending).toBe(false);
+    expect(result.current.defaultMutationPendingId).toBeNull();
   });
 });

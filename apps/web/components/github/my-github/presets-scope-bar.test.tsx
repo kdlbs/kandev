@@ -16,12 +16,12 @@ const savedPreset: SavedPreset = {
 
 vi.mock("@/components/integrations/presets-scope-bar-base", () => ({
   IntegrationScopeBar: ({
-    defaultMutationPending,
+    defaultMutationPendingId,
     onKindChange,
     onToggleSavedDefault,
     savedPresets,
   }: {
-    defaultMutationPending?: boolean;
+    defaultMutationPendingId?: string | null;
     onKindChange?: (kind: "pr" | "issue") => void;
     onToggleSavedDefault?: (id: string) => void;
     savedPresets: Array<{ id: string }>;
@@ -30,7 +30,8 @@ vi.mock("@/components/integrations/presets-scope-bar-base", () => ({
     return (
       <div
         data-testid="scope-bar-default-action"
-        data-pending={defaultMutationPending}
+        data-pending={defaultMutationPendingId !== null}
+        data-pending-id={defaultMutationPendingId}
         data-callback-stable={initialDefaultAction.current === onToggleSavedDefault}
       >
         <button
@@ -65,7 +66,7 @@ function expectExplicitKindSwitchRequest() {
       canSaveCurrent={false}
       onSaveCurrent={vi.fn()}
       onToggleSavedDefault={vi.fn()}
-      defaultMutationPending={false}
+      defaultMutationPendingId={null}
       prPresets={[]}
       issuePresets={[]}
     />,
@@ -88,7 +89,7 @@ describe("PresetsScopeBar default adapter", () => {
         canSaveCurrent={false}
         onSaveCurrent={vi.fn()}
         onToggleSavedDefault={vi.fn()}
-        defaultMutationPending
+        defaultMutationPendingId={savedPreset.id}
         prPresets={[]}
         issuePresets={[]}
       />,
@@ -96,6 +97,9 @@ describe("PresetsScopeBar default adapter", () => {
 
     expect(screen.getByTestId("scope-bar-default-action").getAttribute("data-pending")).toBe(
       "true",
+    );
+    expect(screen.getByTestId("scope-bar-default-action").getAttribute("data-pending-id")).toBe(
+      savedPreset.id,
     );
   });
 
@@ -111,7 +115,7 @@ describe("PresetsScopeBar default adapter", () => {
         canSaveCurrent={false}
         onSaveCurrent={vi.fn()}
         onToggleSavedDefault={onToggleSavedDefault}
-        defaultMutationPending={false}
+        defaultMutationPendingId={null}
         prPresets={[]}
         issuePresets={[]}
       />,
@@ -131,7 +135,7 @@ describe("PresetsScopeBar default adapter", () => {
       canSaveCurrent: false,
       onSaveCurrent: vi.fn(),
       onToggleSavedDefault: vi.fn(),
-      defaultMutationPending: false,
+      defaultMutationPendingId: null,
       prPresets: [],
       issuePresets: [],
     };
@@ -160,7 +164,7 @@ describe("PresetsScopeBar default adapter", () => {
         canSaveCurrent={false}
         onSaveCurrent={vi.fn()}
         onToggleSavedDefault={onToggleSavedDefault}
-        defaultMutationPending={false}
+        defaultMutationPendingId={null}
         prPresets={[]}
         issuePresets={[]}
       />,

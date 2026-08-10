@@ -113,7 +113,7 @@ function SavedMenu<K extends string>({
   canSaveCurrent,
   onSaveCurrent,
   onToggleSavedDefault,
-  defaultMutationPending,
+  defaultMutationPendingId,
 }: {
   testId: string;
   selected: ScopeSelection<K>;
@@ -123,9 +123,10 @@ function SavedMenu<K extends string>({
   canSaveCurrent: boolean;
   onSaveCurrent: () => void;
   onToggleSavedDefault?: (id: string) => void;
-  defaultMutationPending: boolean;
+  defaultMutationPendingId: string | null;
 }) {
   const { t } = useTranslation();
+  const defaultMutationPending = defaultMutationPendingId !== null;
   const activeSaved = selected.source === "saved";
   const activeLabel = activeSaved ? saved.find((s) => s.id === selected.id)?.label : null;
   return (
@@ -161,6 +162,7 @@ function SavedMenu<K extends string>({
                   label={s.label}
                   isDefault={s.isDefault === true}
                   disabled={defaultMutationPending}
+                  pending={defaultMutationPendingId === s.id}
                   variant="dropdown-item"
                   testId={`saved-query-default-${s.id}`}
                   onToggle={() => onToggleSavedDefault(s.id)}
@@ -213,7 +215,7 @@ export type IntegrationScopeBarProps<K extends string> = {
   onSaveCurrent: () => void;
   /** Emits only the stable id; domain wrappers own richer saved-query data. */
   onToggleSavedDefault?: (id: string) => void;
-  defaultMutationPending?: boolean;
+  defaultMutationPendingId?: string | null;
 };
 
 export function IntegrationScopeBar<K extends string>({
@@ -230,7 +232,7 @@ export function IntegrationScopeBar<K extends string>({
   canSaveCurrent,
   onSaveCurrent,
   onToggleSavedDefault,
-  defaultMutationPending = false,
+  defaultMutationPendingId = null,
 }: IntegrationScopeBarProps<K>) {
   const presets = presetsByKind(selected.kind);
   const saved = savedPresets.filter((p) => p.kind === selected.kind);
@@ -276,7 +278,7 @@ export function IntegrationScopeBar<K extends string>({
           canSaveCurrent={canSaveCurrent}
           onSaveCurrent={onSaveCurrent}
           onToggleSavedDefault={onToggleSavedDefault}
-          defaultMutationPending={defaultMutationPending}
+          defaultMutationPendingId={defaultMutationPendingId}
         />
       </div>
     </div>

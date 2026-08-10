@@ -9,6 +9,7 @@ type SavedQueryDefaultButtonProps = {
   label: string;
   isDefault: boolean;
   disabled?: boolean;
+  pending?: boolean;
   /** `dropdown-item` must render inside Radix `DropdownMenuContent`. */
   variant: "dropdown-item" | "button";
   testId?: string;
@@ -19,6 +20,7 @@ export function SavedQueryDefaultButton({
   label,
   isDefault,
   disabled = false,
+  pending = false,
   variant,
   testId,
   onToggle,
@@ -36,8 +38,8 @@ export function SavedQueryDefaultButton({
   const iconClassName = cn(
     "h-4 w-4",
     isDefault && "fill-amber-500 text-amber-500",
-    disabled && !isDefault && "fill-amber-500 text-amber-500 opacity-60",
-    disabled && "animate-pulse motion-reduce:animate-none",
+    pending && !isDefault && "fill-amber-500 text-amber-500 opacity-60",
+    pending && "animate-pulse motion-reduce:animate-none",
   );
   if (variant === "dropdown-item") {
     return (

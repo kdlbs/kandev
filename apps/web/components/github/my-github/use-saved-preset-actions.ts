@@ -11,6 +11,9 @@ import type { useSavedPresets } from "./use-saved-presets";
 type SavedPresetStore = ReturnType<typeof useSavedPresets>;
 type WorkspaceId = string | null;
 type IsCurrentWorkspace = (workspaceId: WorkspaceId) => boolean;
+type PendingDefaultMutation = {
+  presetId: string;
+};
 
 type SavedPresetActionsOptions = {
   workspaceId: string | null;
@@ -176,9 +179,10 @@ export function useSavedPresetActions({
   const { t } = useTranslation();
   const { toast } = useToast();
   const [, setDefaultMutationVersion] = useState(0);
-  const pendingDefaultMutationsRef = useRef(new Map<WorkspaceId, symbol>());
+  const pendingDefaultMutationsRef = useRef(new Map<WorkspaceId, PendingDefaultMutation>());
   const isCurrentWorkspace = useIsCurrentWorkspace(workspaceId);
-  const defaultMutationPending = pendingDefaultMutationsRef.current.has(workspaceId);
+  const pendingDefaultMutation = pendingDefaultMutationsRef.current.get(workspaceId);
+  const defaultMutationPendingId = pendingDefaultMutation?.presetId ?? null;
   const {
     presets: savedPresets,
     save: saveSavedPreset,
@@ -224,8 +228,8 @@ export function useSavedPresetActions({
     async (preset: SavedPreset) => {
       const pendingMutations = pendingDefaultMutationsRef.current;
       if (pendingMutations.has(workspaceId)) return;
-      const mutationToken = Symbol();
-      pendingMutations.set(workspaceId, mutationToken);
+      const pendingMutation: PendingDefaultMutation = { presetId: preset.id };
+      pendingMutations.set(workspaceId, pendingMutation);
       setDefaultMutationVersion((version) => version + 1);
       try {
         const defaultId = preset.isDefault ? null : preset.id;
@@ -242,7 +246,7 @@ export function useSavedPresetActions({
           variant: "error",
         });
       } finally {
-        if (pendingMutations.get(workspaceId) === mutationToken) {
+        if (pendingMutations.get(workspaceId) === pendingMutation) {
           pendingMutations.delete(workspaceId);
           if (isCurrentWorkspace(workspaceId)) {
             setDefaultMutationVersion((version) => version + 1);
@@ -258,6 +262,6 @@ export function useSavedPresetActions({
     onConfirmSave,
     onDeleteSaved,
     onToggleSavedDefault,
-    defaultMutationPending,
+    defaultMutationPendingId,
   };
 }
