@@ -78,6 +78,34 @@ async function expectNewWorkspaceDefaultAfterManualSelection() {
   expect(setRepoFilter).toHaveBeenLastCalledWith(prDefault.repoFilter);
 }
 
+function expectConfiguredPresetFallbackOnKindSwitch() {
+  const setUserSelection = vi.fn();
+  const setQueryImmediate = vi.fn();
+  const setRepoFilter = vi.fn();
+  const { result } = renderHook(() =>
+    useSidebarSelectionHandler({
+      currentKind: "pr",
+      savedPresets: [],
+      resolvedPrPresets: prPresets,
+      resolvedIssuePresets: issuePresets,
+      setQueryImmediate,
+      setRepoFilter,
+      setUserSelection,
+      markSearchInteracted: vi.fn(),
+    }),
+  );
+
+  act(() => result.current({ kind: "issue", source: "preset", id: issuePreset.value }));
+
+  expect(setUserSelection).toHaveBeenCalledWith({
+    kind: "issue",
+    source: "preset",
+    id: issuePreset.value,
+  });
+  expect(setQueryImmediate).toHaveBeenCalledWith(issuePreset.filter);
+  expect(setRepoFilter).toHaveBeenCalledWith("");
+}
+
 describe("useInitialSidebarSelection", () => {
   it("does not reapply an unchanged default when preset references change", async () => {
     const setQueryImmediate = vi.fn();
@@ -197,6 +225,11 @@ describe("useSidebarSelectionHandler", () => {
     expect(setQueryImmediate).toHaveBeenCalledWith(issueDefault.customQuery);
     expect(setRepoFilter).toHaveBeenCalledWith(issueDefault.repoFilter);
   });
+
+  it(
+    "falls back to the first configured preset when the destination has no saved default",
+    expectConfiguredPresetFallbackOnKindSwitch,
+  );
 
   it("keeps an explicit selection within the current kind", () => {
     const setUserSelection = vi.fn();
