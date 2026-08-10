@@ -1652,7 +1652,14 @@ func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
 }
 
 func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
-	deleteCtx, cancel := context.WithTimeout(context.Background(), constants.TaskDeleteTimeout)
+	// WithoutCancel, not Background: a delete tears down worktrees, containers
+	// and subtree rows, so it must survive the client navigating away — but
+	// context.Background() also dropped the caller identity the auth middleware
+	// attached, and an identity-free context reads as an internal caller, which
+	// authorizes everything. WithoutCancel keeps the request's values and drops
+	// only its cancellation.
+	deleteCtx, cancel := context.WithTimeout(
+		context.WithoutCancel(c.Request.Context()), constants.TaskDeleteTimeout)
 	defer cancel()
 	taskID := c.Param("id")
 	cascade := cascadeQueryParam(c)

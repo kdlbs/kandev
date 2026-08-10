@@ -200,6 +200,7 @@ type HandoffService struct {
 	runCanceller       RunCanceller
 	eventPublisher     TaskEventPublisher
 	resourceCleaner    TaskResourceCleaner
+	taskAccessCheck    func(ctx context.Context, taskID string) error
 	logger             *logger.Logger
 	parentLock         parentMutex
 	workspaceGroupLock parentMutex
@@ -276,6 +277,28 @@ type taskResourceCleanupCoordinator interface {
 // Optional — when nil the cascade does not tear down runtime resources.
 func (s *HandoffService) SetTaskResourceCleaner(c TaskResourceCleaner) {
 	s.resourceCleaner = c
+}
+
+// SetTaskAccessChecker installs the per-user task check applied by the cascade
+// entry points. Same contract as orchestrator.Service.SetTaskAccessChecker: the
+// checker returns nil for contexts without a request identity, so internal
+// callers (event bus, schedulers, workflow engine) stay unscoped, and leaving it
+// unwired keeps the pre-auth see-everything behavior.
+//
+// The cascade methods walk the task repository directly and never reach
+// Service.DeleteTask / Service.ArchiveTask, so they inherit nothing from the
+// task service's authorize* helpers — without this they are the unguarded half
+// of every archive and delete route.
+func (s *HandoffService) SetTaskAccessChecker(check func(ctx context.Context, taskID string) error) {
+	s.taskAccessCheck = check
+}
+
+// authorizeTask applies the configured per-user task check. No-op when unwired.
+func (s *HandoffService) authorizeTask(ctx context.Context, taskID string) error {
+	if s.taskAccessCheck == nil || taskID == "" {
+		return nil
+	}
+	return s.taskAccessCheck(ctx, taskID)
 }
 
 // NewHandoffService creates a HandoffService. blockers and wsGroups may be

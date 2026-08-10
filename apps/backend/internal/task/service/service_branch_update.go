@@ -50,6 +50,12 @@ func (s *Service) UpdateRepositoryBaseBranch(ctx context.Context, req UpdateRepo
 	if err != nil {
 		return nil, err
 	}
+	// Ahead of every repository read. The WS action names task_id so the gateway
+	// backstop already covers that transport, but this method is also reachable
+	// over HTTP and MCP, and a backstop is not a substitute for a service guard.
+	if err := s.authorizeTaskID(ctx, req.TaskID); err != nil {
+		return nil, err
+	}
 	taskRepo, err := s.loadTaskRepositoryForUpdate(ctx, req.TaskID, req.TaskRepositoryID)
 	if err != nil {
 		return nil, err
