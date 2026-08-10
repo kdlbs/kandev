@@ -106,6 +106,8 @@ export function useSidebarSelectionHandler({
   markSearchInteracted: () => void;
   currentKind: SidebarSelection["kind"];
 }) {
+  const savedPresetsRef = useRef(savedPresets);
+  savedPresetsRef.current = savedPresets;
   return useCallback(
     (selection: SidebarSelection) => {
       // The empty preset id is only meaningful when the kind toggle changes kinds.
@@ -118,7 +120,7 @@ export function useSidebarSelectionHandler({
       if (selection.kind !== currentKind) {
         const target = resolveDefaultSidebarTarget(
           selection.kind,
-          savedPresets,
+          savedPresetsRef.current,
           selection.kind === "pr" ? resolvedPrPresets : resolvedIssuePresets,
         );
         setUserSelection(target.selection);
@@ -128,7 +130,7 @@ export function useSidebarSelectionHandler({
       }
       setUserSelection(selection);
       if (selection.source === "saved") {
-        const found = savedPresets.find((preset) => preset.id === selection.id);
+        const found = savedPresetsRef.current.find((preset) => preset.id === selection.id);
         setQueryImmediate(found?.customQuery ?? "");
         setRepoFilter(found?.repoFilter ?? "");
         return;
@@ -140,7 +142,6 @@ export function useSidebarSelectionHandler({
       setRepoFilter("");
     },
     [
-      savedPresets,
       setQueryImmediate,
       resolvedPrPresets,
       resolvedIssuePresets,

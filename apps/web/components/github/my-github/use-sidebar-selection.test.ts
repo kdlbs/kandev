@@ -132,6 +132,40 @@ function expectSameKindSentinelNoop() {
   expect(setRepoFilter).not.toHaveBeenCalled();
 }
 
+function expectStableHandlerWithRefreshedSavedPresets() {
+  const setUserSelection = vi.fn();
+  const setQueryImmediate = vi.fn();
+  const setRepoFilter = vi.fn();
+  const markSearchInteracted = vi.fn();
+  const { result, rerender } = renderHook(
+    ({ savedPresets }) =>
+      useSidebarSelectionHandler({
+        currentKind: "pr",
+        savedPresets,
+        resolvedPrPresets: prPresets,
+        resolvedIssuePresets: issuePresets,
+        setQueryImmediate,
+        setRepoFilter,
+        setUserSelection,
+        markSearchInteracted,
+      }),
+    { initialProps: { savedPresets: [prDefault] } },
+  );
+  const initialHandler = result.current;
+
+  rerender({ savedPresets: [prDefault, issueDefault] });
+
+  expect(result.current).toBe(initialHandler);
+  act(() => initialHandler({ kind: "issue", source: "preset", id: "" }));
+  expect(setUserSelection).toHaveBeenCalledWith({
+    kind: "issue",
+    source: "saved",
+    id: issueDefault.id,
+  });
+  expect(setQueryImmediate).toHaveBeenCalledWith(issueDefault.customQuery);
+  expect(setRepoFilter).toHaveBeenCalledWith(issueDefault.repoFilter);
+}
+
 describe("useInitialSidebarSelection", () => {
   it("does not reapply an unchanged default when preset references change", async () => {
     const setQueryImmediate = vi.fn();
@@ -258,6 +292,11 @@ describe("useSidebarSelectionHandler", () => {
   );
 
   it("ignores a same-kind toggle sentinel", expectSameKindSentinelNoop);
+
+  it(
+    "keeps the handler stable while using refreshed saved presets",
+    expectStableHandlerWithRefreshedSavedPresets,
+  );
 
   it("keeps an explicit selection within the current kind", () => {
     const setUserSelection = vi.fn();

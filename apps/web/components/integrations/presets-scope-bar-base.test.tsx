@@ -3,6 +3,8 @@ import { IconInbox } from "@tabler/icons-react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { IntegrationScopeBar, type IntegrationScopeBarProps } from "./presets-scope-bar-base";
 
+let lastMenuItemSelectEvent: Event | null = null;
+
 vi.mock("@kandev/ui/dropdown-menu", () => ({
   DropdownMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -16,18 +18,26 @@ vi.mock("@kandev/ui/dropdown-menu", () => ({
     ...props
   }: React.HTMLAttributes<HTMLDivElement> & {
     disabled?: boolean;
-    onSelect?: () => void;
-  }) => (
-    <div
-      {...props}
-      role="menuitem"
-      aria-disabled={disabled}
-      onClick={() => !disabled && onSelect?.()}
-      onPointerUp={() => !disabled && onSelect?.()}
-    >
-      {children}
-    </div>
-  ),
+    onSelect?: (event: Event) => void;
+  }) => {
+    const select = () => {
+      if (disabled) return;
+      const event = new Event("select", { cancelable: true });
+      lastMenuItemSelectEvent = event;
+      onSelect?.(event);
+    };
+    return (
+      <div
+        {...props}
+        role="menuitem"
+        aria-disabled={disabled}
+        onClick={select}
+        onPointerUp={select}
+      >
+        {children}
+      </div>
+    );
+  },
   DropdownMenuCheckboxItem: ({
     children,
     checked,
@@ -58,15 +68,20 @@ vi.mock("@kandev/ui/dropdown-menu", () => ({
   DropdownMenuSeparator: () => <hr />,
 }));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  lastMenuItemSelectEvent = null;
+});
 
 type Kind = "pr" | "issue";
 type Props = IntegrationScopeBarProps<Kind>;
 const ARIA_DISABLED_ATTRIBUTE = "aria-disabled";
+const FUTURE_DELETE_LABEL = "Delete Future default saved query";
 
 function renderBar(overrides: Partial<Props> = {}) {
   const onSelect = vi.fn();
   const onToggleSavedDefault = vi.fn();
+  const onDeleteSaved = vi.fn();
   const props: Props = {
     testId: "scope-bar",
     savedMenuTestId: "saved-menu",
@@ -88,7 +103,7 @@ function renderBar(overrides: Partial<Props> = {}) {
       { id: "saved-a", kind: "pr", label: "Current default", isDefault: true },
       { id: "saved-b", kind: "pr", label: "Future default", isDefault: false },
     ],
-    onDeleteSaved: vi.fn(),
+    onDeleteSaved,
     canSaveCurrent: false,
     onSaveCurrent: vi.fn(),
     onToggleSavedDefault,
@@ -98,6 +113,7 @@ function renderBar(overrides: Partial<Props> = {}) {
     ...render(<IntegrationScopeBar {...props} />),
     onSelect,
     onToggleSavedDefault,
+    onDeleteSaved,
   };
 }
 
@@ -144,7 +160,7 @@ describe("IntegrationScopeBar saved defaults", () => {
     expect(
       screen
         .getByRole("menuitem", {
-          name: "Delete Future default saved query",
+          name: FUTURE_DELETE_LABEL,
         })
         .getAttribute(ARIA_DISABLED_ATTRIBUTE),
     ).toBe("true");
@@ -164,10 +180,17 @@ describe("IntegrationScopeBar saved defaults", () => {
         .getByRole("menuitem", { name: "Delete Current default saved query" })
         .getAttribute("title"),
     ).toBe("Delete Current default saved query");
-    expect(
-      screen
-        .getByRole("menuitem", { name: "Delete Future default saved query" })
-        .getAttribute("title"),
-    ).toBe("Delete Future default saved query");
+    expect(screen.getByRole("menuitem", { name: FUTURE_DELETE_LABEL }).getAttribute("title")).toBe(
+      FUTURE_DELETE_LABEL,
+    );
+  });
+
+  it("prevents the menu from closing when a saved query is deleted", () => {
+    const { onDeleteSaved } = renderBar();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: FUTURE_DELETE_LABEL }));
+
+    expect(onDeleteSaved).toHaveBeenCalledWith("saved-b");
+    expect(lastMenuItemSelectEvent?.defaultPrevented).toBe(true);
   });
 });
