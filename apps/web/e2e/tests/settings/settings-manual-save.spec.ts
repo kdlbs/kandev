@@ -127,16 +127,21 @@ test.describe("Settings manual save", () => {
 
       const surface = floatingSave.getByTestId("settings-floating-save-surface");
       const contentArea = testPage.getByTestId("settings-scroll-container");
-      const surfaceBox = await surface.boundingBox();
-      const contentBox = await contentArea.boundingBox();
+      const configChatButton = testPage.getByRole("button", { name: "Configuration Chat" });
+      const [surfaceBox, contentBox, configChatBox] = await Promise.all([
+        surface.boundingBox(),
+        contentArea.boundingBox(),
+        configChatButton.boundingBox(),
+      ]);
       expect(surfaceBox).not.toBeNull();
       expect(contentBox).not.toBeNull();
+      expect(configChatBox).not.toBeNull();
       expect(surfaceBox!.height).toBeLessThanOrEqual(48);
       expect(
         Math.abs(surfaceBox!.x + surfaceBox!.width / 2 - (contentBox!.x + contentBox!.width / 2)),
       ).toBeLessThanOrEqual(2);
       expect(
-        Math.abs(surfaceBox!.y + surfaceBox!.height - (contentBox!.y + contentBox!.height - 20)),
+        Math.abs(surfaceBox!.y + surfaceBox!.height - (configChatBox!.y + configChatBox!.height)),
       ).toBeLessThanOrEqual(2);
       await expect(floatingSave).not.toHaveClass(/bg-success/);
       await expect(floatingSave.getByRole("button", { name: "Save changes" })).toHaveClass(
