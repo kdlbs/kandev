@@ -70,13 +70,51 @@ letter tile.
 
 ### Keep plugins updated
 
-When the marketplace advertises a newer version than the one you have
-installed, the **Installed** tab shows an **Update to v`<version>`** button on
-that plugin's row. Clicking it reinstalls the newer tarball through the normal
-pipeline; Enable, Disable, and Uninstall are unchanged.
+Every row on the **Installed** tab shows the plugin's latest known marketplace
+version next to its installed version (e.g. "Latest v2.1.0"), so you can see
+version drift at a glance, not only when an update is available. A plugin
+that isn't in any configured source shows a "not in the marketplace" hint
+instead.
 
-Updates are never automatic; kandev surfaces the newer version and waits for
-an explicit click. There are no update channels and no background auto-update.
+This check runs once when the page loads, and again whenever you click
+**Sync**: Sync reconciles your local plugins folder first, then checks the
+marketplace for newer versions, so the button's result (the version info)
+actually shows up without reloading the page. While a check is running the
+header shows a "Checking for updates…" indicator; once it completes it shows
+when it last checked. If the marketplace can't be reached, an inline error
+explains that, but your installed plugins, and Enable/Disable/Uninstall, are
+never affected.
+
+When the marketplace advertises a newer version than the one you have
+installed, the row also shows an **Update available: v`<version>`** badge and
+an **Update to v`<version>`** button. Clicking it reinstalls the newer tarball
+through the normal pipeline; while it's in progress the button shows a
+spinner and Enable/Disable/Uninstall are disabled. On success the version and
+badge refresh; on failure an inline error shows the reason and the button
+stays clickable so you can retry.
+
+Updates are never automatic from this button; kandev surfaces the newer
+version and waits for an explicit click. Separately, an **opt-in** background
+auto-updater can install newer versions for you; see [Auto-update
+(opt-in)](#auto-update-opt-in) below for the instance-wide and per-plugin
+toggles. There are no update channels, version pinning, or scheduled
+maintenance windows in either case.
+
+### Auto-update (opt-in)
+
+Beyond the manual **Update available** button, kandev can update installed
+plugins in the background, **off by default**. An instance-wide
+**"Automatically update plugins"** switch (Settings > Plugins) sets the
+default for every installed plugin; each row also has its own switch that can
+override the default either way, with a **Reset** control to clear the
+override and inherit the default again.
+
+Only plugins that are currently **active** *and* opted in are eligible, on a
+periodic background sweep. A disabled or errored plugin is never
+auto-updated and stays on its installed version until you re-enable it. A
+failed auto-update behaves exactly like a failed manual one: the installed
+version is left untouched, or the plugin lands in the same **Error** state a
+failed manual update would.
 
 ### Add a team or corporate source
 

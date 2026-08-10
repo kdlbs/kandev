@@ -382,6 +382,112 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await expect(globalToggle).toHaveAttribute("aria-checked", "false");
   });
 
+  /**
+   * Deliberate scope limit (see docs/plans/plugins/task-*): there is no
+   * fixture package for a *second* signed version, so this proves the
+   * sync-triggered check surfaces the "Update available" badge via a
+   * route-mocked catalog, and that a manual update failing against a
+   * (deliberately unreachable) mocked `package_url` renders inline without
+   * disturbing the rest of the row. The real, successful reinstall path is
+   * covered at the unit level (use-plugin-update-action.test.tsx).
+   */
+  test("marketplace update check: Sync surfaces an available-version badge, and a failing manual update shows an inline error", async ({
+    testPage,
+  }) => {
+    test.setTimeout(60_000);
+
+    await openInstallDialog(testPage);
+    await uploadPackage(testPage, PACKAGE_PATH);
+    const pluginRow = testPage.getByTestId(`plugin-row-${PLUGIN_ID}`);
+    await expect(pluginRow).toBeVisible({ timeout: 15_000 });
+
+    const newerVersion = "9.9.9";
+    await testPage.route("**/api/plugins/marketplace", async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          plugins: [
+            {
+              id: PLUGIN_ID,
+              name: "E2E Hello",
+              description: "",
+              author: "kandev",
+              categories: [],
+              icon_url: "",
+              repo_url: "",
+              version: newerVersion,
+              min_kandev_version: "",
+              package_url: "https://example.invalid/kandev-plugin-e2e-9.9.9.tar.gz",
+              package_sha256: "",
+              stars: 0,
+              updated_at: new Date(0).toISOString(),
+              install_state: "update_available",
+              installed_version: "1.0.0",
+              source_id: "official",
+              source_name: "Kandev Official",
+            },
+          ],
+          sources: [
+            {
+              id: "official",
+              name: "Kandev Official",
+              url: "https://example.invalid",
+              enabled: true,
+              builtin: true,
+              healthy: true,
+            },
+          ],
+        }),
+      });
+    });
+    await testPage.route("**/api/plugins/marketplace/refresh", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ refreshed: true }),
+      }),
+    );
+
+    const syncButton = testPage.getByTestId("plugins-sync-button");
+    await syncButton.click();
+
+    const latestVersion = pluginRow.getByTestId(`plugin-latest-version-${PLUGIN_ID}`);
+    const updateBadge = pluginRow.getByTestId(`plugin-update-available-${PLUGIN_ID}`);
+    const updateButton = pluginRow.getByTestId(`plugin-update-${PLUGIN_ID}`);
+    await expect(latestVersion).toContainText(newerVersion, { timeout: 15_000 });
+    await expect(updateBadge).toContainText(newerVersion);
+    await expect(updateButton).toBeVisible();
+    await expect(testPage.getByTestId("plugins-updates-last-checked")).toBeVisible();
+
+    // AC12 — at a 375px viewport the badge wraps onto its own line with no
+    // horizontal overflow, and the Update button keeps a >=44px touch target.
+    await testPage.setViewportSize({ width: 375, height: 800 });
+    await expect(updateButton).toBeVisible();
+    const rowBox = await pluginRow.boundingBox();
+    const buttonBox = await updateButton.boundingBox();
+    if (!rowBox || !buttonBox) throw new Error("expected bounding boxes for row and update button");
+    expect(buttonBox.height).toBeGreaterThanOrEqual(44);
+    expect(buttonBox.x + buttonBox.width).toBeLessThanOrEqual(rowBox.x + rowBox.width + 1);
+    await testPage.setViewportSize({ width: 1280, height: 800 });
+
+    // The update tries to install from the (deliberately unreachable) mocked
+    // package_url and fails — the row surfaces the error inline, keeps the
+    // old version, and keeps the button clickable, without disturbing
+    // enable/disable/uninstall or the rest of the row.
+    await updateButton.click();
+    await expect(pluginRow.getByTestId(`plugin-update-error-${PLUGIN_ID}`)).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(updateButton).toBeEnabled();
+    await expect(pluginRow.getByText("Active", { exact: true })).toBeVisible();
+    await expect(pluginRow.getByRole("button", { name: "Disable" })).toBeEnabled();
+
+    await testPage.unroute("**/api/plugins/marketplace");
+    await testPage.unroute("**/api/plugins/marketplace/refresh");
+  });
+
   test("shows boot failure diagnostics and retries an errored plugin", async ({
     testPage,
     apiClient,

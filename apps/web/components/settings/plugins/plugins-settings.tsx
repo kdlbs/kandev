@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -10,12 +9,13 @@ import { SettingsPageTemplate } from "@/components/settings/settings-page-templa
 import { useAutoUpdateSettings } from "@/hooks/domains/plugins/use-auto-update-settings";
 import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
 import { usePluginUpdates } from "@/hooks/domains/plugins/use-plugin-updates";
-import type { MarketplaceEntry } from "@/lib/types/plugins";
 import { InstallPluginDialog } from "./install-plugin-dialog";
 import { MarketplaceBrowser } from "./marketplace-browser";
-import { PluginRow } from "./plugin-row";
+import { PluginRow, type PluginRowUpdateState } from "./plugin-row";
+import { PluginUpdateStatus } from "./plugin-update-status";
 import { UninstallPluginDialog } from "./uninstall-plugin-dialog";
 import { usePluginActions } from "./use-plugin-actions";
+import { usePluginUpdateAction } from "./use-plugin-update-action";
 
 /**
  * Operator UI to browse, install, enable, disable, uninstall, and update kandev
@@ -27,19 +27,18 @@ export function PluginsSettings() {
   const list = usePlugins();
   const actions = usePluginActions();
   const autoUpdate = useAutoUpdateSettings();
-  const { updates, reload: reloadUpdates } = usePluginUpdates();
-  const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const updates = usePluginUpdates();
+  const updateAction = usePluginUpdateAction(actions.marketplaceInstall, updates.reload);
 
-  // Update = install the newer package over the current one (marketplaceInstall
-  // upserts the new record into the store, so the row's version refreshes),
-  // then re-check the catalog so the resolved update drops off the row.
-  const handleUpdate = async (entry: MarketplaceEntry) => {
-    setUpdatingId(entry.id);
-    try {
-      await actions.marketplaceInstall(entry.package_url);
-      reloadUpdates();
-    } finally {
-      setUpdatingId(null);
+  // Sync scans the local plugins folder; it never touches the marketplace on
+  // its own. Chaining a catalog check after it is what makes the button's
+  // result (newer versions) actually show up. Skip the check when the sync
+  // itself failed against an unreachable backend — a second failure on the
+  // same root cause would just be a redundant error.
+  const handleSyncAndCheck = async () => {
+    const result = await actions.handleSync();
+    if (result.ok) {
+      await updates.checkForUpdates();
     }
   };
 
@@ -72,8 +71,8 @@ export function PluginsSettings() {
             actions={actions}
             autoUpdate={autoUpdate}
             updates={updates}
-            updatingId={updatingId}
-            onUpdate={handleUpdate}
+            updateAction={updateAction}
+            onSync={handleSyncAndCheck}
           />
         </TabsContent>
 
@@ -104,36 +103,38 @@ type InstalledTabProps = {
   list: ReturnType<typeof usePlugins>;
   actions: ReturnType<typeof usePluginActions>;
   autoUpdate: ReturnType<typeof useAutoUpdateSettings>;
-  updates: Map<string, MarketplaceEntry>;
-  updatingId: string | null;
-  onUpdate: (entry: MarketplaceEntry) => void;
+  updates: ReturnType<typeof usePluginUpdates>;
+  updateAction: ReturnType<typeof usePluginUpdateAction>;
+  onSync: () => void;
 };
 
-/** The Installed tab: auto-update toggle, sync/install toolbar, sync errors, and the plugin list. */
+/** The Installed tab: auto-update toggle, sync/install toolbar, update status, sync errors, and the plugin list. */
 function InstalledTab({
   list,
   actions,
   autoUpdate,
   updates,
-  updatingId,
-  onUpdate,
+  updateAction,
+  onSync,
 }: InstalledTabProps) {
   const { t } = useTranslation();
+  const syncing = actions.syncBusy || updates.checking;
+
   return (
     <>
       <GlobalAutoUpdateToggle settings={autoUpdate} />
 
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-sm font-medium text-foreground">{t("plugins:installedPlugins")}</div>
         <div className="flex items-center gap-2">
           <Button
             data-testid="plugins-sync-button"
             variant="secondary"
-            disabled={actions.syncBusy}
-            onClick={actions.handleSync}
+            disabled={syncing}
+            onClick={onSync}
             className="cursor-pointer"
           >
-            <IconRefresh className={`h-4 w-4 ${actions.syncBusy ? "animate-spin" : ""}`} />
+            <IconRefresh className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
             {t("plugins:sync")}
           </Button>
           <Button
@@ -145,6 +146,12 @@ function InstalledTab({
           </Button>
         </div>
       </div>
+
+      <PluginUpdateStatus
+        checking={updates.checking}
+        lastCheckedAt={updates.lastCheckedAt}
+        error={updates.error}
+      />
 
       {actions.syncErrors.length > 0 && (
         <div
@@ -164,8 +171,7 @@ function InstalledTab({
         actions={actions}
         autoUpdateDefault={autoUpdate.autoUpdateDefault}
         updates={updates}
-        updatingId={updatingId}
-        onUpdate={onUpdate}
+        updateAction={updateAction}
       />
     </>
   );
@@ -209,19 +215,11 @@ type PluginListProps = {
   list: ReturnType<typeof usePlugins>;
   actions: ReturnType<typeof usePluginActions>;
   autoUpdateDefault: boolean;
-  updates: Map<string, MarketplaceEntry>;
-  updatingId: string | null;
-  onUpdate: (entry: MarketplaceEntry) => void;
+  updates: ReturnType<typeof usePluginUpdates>;
+  updateAction: ReturnType<typeof usePluginUpdateAction>;
 };
 
-function PluginList({
-  list,
-  actions,
-  autoUpdateDefault,
-  updates,
-  updatingId,
-  onUpdate,
-}: PluginListProps) {
+function PluginList({ list, actions, autoUpdateDefault, updates, updateAction }: PluginListProps) {
   const { t } = useTranslation();
   const { items, loaded, loading, error } = list;
 
@@ -251,21 +249,30 @@ function PluginList({
 
   return (
     <div className="space-y-3">
-      {items.map((plugin) => (
-        <PluginRow
-          key={plugin.id}
-          plugin={plugin}
-          busy={actions.busyId === plugin.id || updatingId === plugin.id}
-          update={updates.get(plugin.id)}
-          autoUpdateDefault={autoUpdateDefault}
-          autoUpdateBusy={actions.autoUpdateBusyId === plugin.id}
-          onEnable={actions.handleEnable}
-          onDisable={actions.handleDisable}
-          onUninstall={actions.openUninstall}
-          onUpdate={onUpdate}
-          onSetAutoUpdate={actions.handleSetAutoUpdate}
-        />
-      ))}
+      {items.map((plugin) => {
+        const rowUpdate: PluginRowUpdateState = {
+          latest: updates.latestById.get(plugin.id),
+          hasUpdate: updates.updates.has(plugin.id),
+          checked: updates.checked,
+          busy: updateAction.updatingId === plugin.id,
+          error: updateAction.errorsById.get(plugin.id),
+        };
+        return (
+          <PluginRow
+            key={plugin.id}
+            plugin={plugin}
+            busy={actions.busyId === plugin.id || rowUpdate.busy}
+            update={rowUpdate}
+            autoUpdateDefault={autoUpdateDefault}
+            autoUpdateBusy={actions.autoUpdateBusyId === plugin.id}
+            onEnable={actions.handleEnable}
+            onDisable={actions.handleDisable}
+            onUninstall={actions.openUninstall}
+            onUpdate={updateAction.runUpdate}
+            onSetAutoUpdate={actions.handleSetAutoUpdate}
+          />
+        );
+      })}
     </div>
   );
 }

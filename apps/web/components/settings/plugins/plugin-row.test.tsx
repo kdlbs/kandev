@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { PluginRow } from "./plugin-row";
+import { PluginRow, type PluginRowUpdateState } from "./plugin-row";
 import type { MarketplaceEntry, PluginRecord } from "@/lib/types/plugins";
 
 afterEach(() => cleanup());
@@ -24,7 +24,7 @@ function plugin(overrides: Partial<PluginRecord> = {}): PluginRecord {
   };
 }
 
-function updateEntry(): MarketplaceEntry {
+function marketplaceEntry(overrides: Partial<MarketplaceEntry> = {}): MarketplaceEntry {
   return {
     id: "acme",
     name: "Acme",
@@ -42,10 +42,23 @@ function updateEntry(): MarketplaceEntry {
     install_state: "update_available",
     source_id: "official",
     source_name: "Kandev Official",
+    ...overrides,
+  };
+}
+
+function updateState(overrides: Partial<PluginRowUpdateState> = {}): PluginRowUpdateState {
+  return {
+    latest: marketplaceEntry(),
+    hasUpdate: true,
+    checked: true,
+    busy: false,
+    ...overrides,
   };
 }
 
 const noop = () => undefined;
+const UPDATE_BUTTON_TESTID = "plugin-update-acme";
+const LATEST_VERSION_TESTID = "plugin-latest-version-acme";
 
 // baseProps carries the always-required callbacks/flags so each test only
 // spells out the props it is actually asserting on.
@@ -63,17 +76,110 @@ describe("PluginRow update button", () => {
   it("shows an Update button with the new version and fires onUpdate", () => {
     const onUpdate = vi.fn();
     render(
-      <PluginRow {...baseProps} plugin={plugin()} update={updateEntry()} onUpdate={onUpdate} />,
+      <PluginRow {...baseProps} plugin={plugin()} update={updateState()} onUpdate={onUpdate} />,
     );
-    const button = screen.getByTestId("plugin-update-acme");
+    const button = screen.getByTestId(UPDATE_BUTTON_TESTID);
     expect(button.textContent).toContain("Update to v2.0.0");
     fireEvent.click(button);
-    expect(onUpdate).toHaveBeenCalledWith(updateEntry());
+    expect(onUpdate).toHaveBeenCalledWith(marketplaceEntry());
   });
 
   it("renders no Update button when there is no pending update", () => {
     render(<PluginRow {...baseProps} plugin={plugin()} />);
-    expect(screen.queryByTestId("plugin-update-acme")).toBeNull();
+    expect(screen.queryByTestId(UPDATE_BUTTON_TESTID)).toBeNull();
+  });
+
+  it("shows a spinner and 'Updating…' while a manual update is in flight, and disables Enable/Disable/Uninstall", () => {
+    render(
+      <PluginRow
+        {...baseProps}
+        busy
+        plugin={plugin()}
+        update={updateState({ busy: true })}
+        onUpdate={noop}
+      />,
+    );
+    const button = screen.getByTestId(UPDATE_BUTTON_TESTID);
+    expect(button.textContent).toContain("Updating");
+    expect(button.querySelector(".animate-spin")).not.toBeNull();
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Uninstall" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+  });
+
+  it("shows an inline error after a failed manual update, and keeps the button clickable", () => {
+    const onUpdate = vi.fn();
+    render(
+      <PluginRow
+        {...baseProps}
+        plugin={plugin()}
+        update={updateState({ error: "bad checksum" })}
+        onUpdate={onUpdate}
+      />,
+    );
+    expect(screen.getByTestId("plugin-update-error-acme").textContent).toContain("bad checksum");
+    const button = screen.getByTestId(UPDATE_BUTTON_TESTID);
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(button);
+    expect(onUpdate).toHaveBeenCalled();
+  });
+});
+
+describe("PluginRow latest version info", () => {
+  it("shows the latest version and an update-available badge when a newer version exists", () => {
+    render(<PluginRow {...baseProps} plugin={plugin()} update={updateState()} onUpdate={noop} />);
+    expect(screen.getByTestId(LATEST_VERSION_TESTID).textContent).toContain("Latest v2.0.0");
+    expect(screen.getByTestId("plugin-update-available-acme").textContent).toContain(
+      "Update available: v2.0.0",
+    );
+  });
+
+  it("shows the latest version with no badge and no button when already up to date", () => {
+    render(
+      <PluginRow
+        {...baseProps}
+        plugin={plugin()}
+        update={updateState({
+          latest: marketplaceEntry({ version: "1.0.0", install_state: "installed" }),
+          hasUpdate: false,
+        })}
+      />,
+    );
+    expect(screen.getByTestId(LATEST_VERSION_TESTID).textContent).toContain("Latest v1.0.0");
+    expect(screen.queryByTestId("plugin-update-available-acme")).toBeNull();
+    expect(screen.queryByTestId(UPDATE_BUTTON_TESTID)).toBeNull();
+  });
+
+  it("shows a not-in-marketplace hint once checked and absent from every catalog", () => {
+    render(
+      <PluginRow
+        {...baseProps}
+        plugin={plugin()}
+        update={updateState({ latest: undefined, hasUpdate: false, checked: true })}
+      />,
+    );
+    expect(screen.getByTestId("plugin-not-in-marketplace-acme")).toBeTruthy();
+    expect(screen.queryByTestId(LATEST_VERSION_TESTID)).toBeNull();
+  });
+
+  it("shows neither the latest version nor the not-in-marketplace hint before the first successful check", () => {
+    render(
+      <PluginRow
+        {...baseProps}
+        plugin={plugin()}
+        update={updateState({ latest: undefined, hasUpdate: false, checked: false })}
+      />,
+    );
+    expect(screen.queryByTestId(LATEST_VERSION_TESTID)).toBeNull();
+    expect(screen.queryByTestId("plugin-not-in-marketplace-acme")).toBeNull();
+  });
+
+  it("renders nothing update-related when no update prop is passed at all", () => {
+    render(<PluginRow {...baseProps} plugin={plugin()} />);
+    expect(screen.queryByTestId(LATEST_VERSION_TESTID)).toBeNull();
+    expect(screen.queryByTestId("plugin-not-in-marketplace-acme")).toBeNull();
+    expect(screen.queryByTestId("plugin-update-available-acme")).toBeNull();
   });
 });
 

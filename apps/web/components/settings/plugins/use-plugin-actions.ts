@@ -235,13 +235,18 @@ function useInstallAction(upsertPlugin: (p: PluginRecord) => void) {
   // toast rather than the dialog-scoped installError region — the Browse tab
   // has no such region. It resolves even on failure (after toasting) so its
   // fire-and-forget onClick callers never leak an unhandled rejection; their
-  // try/finally still clears per-entry busy state.
-  const marketplaceInstall = async (url: string) => {
+  // try/finally still clears per-entry busy state. The resolved
+  // `{ ok, error }` lets a caller that needs the outcome (the manual-update
+  // action) render a per-row failure state without also duplicating the toast.
+  const marketplaceInstall = async (url: string): Promise<{ ok: boolean; error?: string }> => {
     try {
       const result = await installPluginFromUrl(url);
       await afterInstall(result);
+      return { ok: true };
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("plugins:failedToInstallPlugin"));
+      const message = err instanceof Error ? err.message : t("plugins:failedToInstallPlugin");
+      toast.error(message);
+      return { ok: false, error: message };
     }
   };
 
@@ -269,12 +274,17 @@ function useInstallAction(upsertPlugin: (p: PluginRecord) => void) {
  * UI bundle, but (unlike install/enable) this does not hot-load it — an
  * operator can re-enable it (or reload) to pick up the bundle; wiring a
  * silent hot-load here is out of scope for the sync button itself.
+ *
+ * `handleSync` resolves `{ ok }` (never throws) so a caller that chains a
+ * marketplace update check after the sync (plugins-settings.tsx) can skip
+ * that second request when the sync itself already failed — avoiding two
+ * stacked error toasts for what's likely one unreachable-backend root cause.
  */
 function useSyncAction(setPlugins: (plugins: PluginRecord[]) => void) {
   const [syncBusy, setSyncBusy] = useState(false);
   const [syncErrors, setSyncErrors] = useState<SyncError[]>([]);
 
-  const handleSync = async () => {
+  const handleSync = async (): Promise<{ ok: boolean }> => {
     setSyncBusy(true);
     try {
       const result = await syncPlugins();
@@ -282,8 +292,10 @@ function useSyncAction(setPlugins: (plugins: PluginRecord[]) => void) {
       setPlugins(refreshed);
       setSyncErrors(result.errors ?? []);
       toast.success(summarizeSyncResult(result));
+      return { ok: true };
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("plugins:failedToSyncPlugins"));
+      return { ok: false };
     } finally {
       setSyncBusy(false);
     }
