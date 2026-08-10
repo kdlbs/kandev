@@ -39,8 +39,10 @@ func (f *fakeBackgroundProbe) callCount() int {
 
 // parkedTestService builds a Service wired for the parked-projection tests:
 // a real sqlite repo (so currentSessionState reads real persisted state),
-// the flag forced on, and a fake probe.
-func parkedTestService(t *testing.T, taskID, sessionID string, probe *fakeBackgroundProbe) *Service {
+// the flag forced on, and a fake probe. Takes the backgroundProbePort
+// interface rather than *fakeBackgroundProbe so tests can also supply other
+// doubles (e.g. blockingProbe) without widening fakeBackgroundProbe itself.
+func parkedTestService(t *testing.T, taskID, sessionID string, probe backgroundProbePort) *Service {
 	t.Helper()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, taskID, sessionID, "step1")
@@ -73,12 +75,20 @@ func TestParked_FormulaRequiresAllThreeTerms(t *testing.T) {
 		probe := &fakeBackgroundProbe{result: probeResultLive}
 		svc := parkedTestService(t, "t1", "s1", probe)
 		attestShellLaunch(ctx, svc, "t1", "s1")
+		beforeActivity := svc.ForegroundActivity("s1")
 
 		svc.updateTaskSessionState(ctx, "t1", "s1", models.TaskSessionStateWaitingForInput, "", false)
 
 		require.True(t, svc.ParkedProjectionSnapshot("s1"), "session should be parked")
 		require.True(t, svc.TaskParkedProjectionSnapshot("t1"), "task should be parked")
 		require.Equal(t, 1, probe.callCount())
+		// AC-22: parking is a projection layered on top of, not a mutation of,
+		// foreground_activity — the settle hook must not change what the
+		// existing foreground-activity computation reports. Previously this
+		// clause was named in the subtest but never asserted (Review round 2
+		// should-fix item 1).
+		require.Equal(t, beforeActivity, svc.ForegroundActivity("s1"),
+			"parking must not change foreground_activity from what it reported before the settle hook ran")
 	})
 
 	t.Run("no attestation -> false regardless of probe result (AC-24)", func(t *testing.T) {
@@ -489,6 +499,42 @@ func TestParked_QueuedPromptDoesNotUnpark(t *testing.T) {
 	require.False(t, svc.ParkedProjectionSnapshot("s1"), "admission into RUNNING clears it")
 }
 
+// TestParked_AC74_StaleAfterBackgroundWorkExitsUntilResume closes AC-74(V1)'s
+// test debt (Review round 2 should-fix item 3): once a session is parked on
+// its one synchronous settle sample, the background workload subsequently
+// exiting must NOT clear the projection and must NOT trigger a further
+// probe — V1 has no sampler, so parked stays true until the session actually
+// leaves WAITING_FOR_INPUT. This is distinct from
+// TestParked_QueuedPromptDoesNotUnpark (AC-75), which never varies the probe
+// result and so cannot distinguish "correctly stale" from "accidentally
+// never re-checked". Here the probe's own result is flipped to "settled"
+// after parking to prove staleness is a deliberate feature, not an
+// unexercised accident.
+func TestParked_AC74_StaleAfterBackgroundWorkExitsUntilResume(t *testing.T) {
+	ctx := context.Background()
+	probe := &fakeBackgroundProbe{result: probeResultLive}
+	svc := parkedTestService(t, "t1", "s1", probe)
+	attestShellLaunch(ctx, svc, "t1", "s1")
+
+	svc.updateTaskSessionState(ctx, "t1", "s1", models.TaskSessionStateWaitingForInput, "", false)
+	require.True(t, svc.ParkedProjectionSnapshot("s1"), "session should be parked")
+	require.Equal(t, 1, probe.callCount())
+
+	// The background workload exits — simulated by flipping the probe's own
+	// result. AC-74(V1): no further probe is taken, so this change is never
+	// observed and parked remains true indefinitely.
+	probe.mu.Lock()
+	probe.result = probeResultSettled
+	probe.mu.Unlock()
+
+	require.True(t, svc.ParkedProjectionSnapshot("s1"),
+		"parked must remain true after the background workload exits — no sampler re-checks it (AC-74 V1)")
+	require.Equal(t, 1, probe.callCount(), "no further probe may be issued while the session stays WAITING_FOR_INPUT")
+
+	svc.updateTaskSessionState(ctx, "t1", "s1", models.TaskSessionStateRunning, "", true)
+	require.False(t, svc.ParkedProjectionSnapshot("s1"), "leaving WAITING_FOR_INPUT clears it")
+}
+
 // panickingBackgroundProbe is a test double for backgroundProbePort whose
 // ProbeBackgroundWorkloads always panics, for AC-46 condition 7.
 type panickingBackgroundProbe struct{}
@@ -528,6 +574,54 @@ func TestRunProbe_PanickingProbeResolvesToUnknown(t *testing.T) {
 		got := svc.runProbe(context.Background(), "s1")
 		require.Equal(t, probeResultUnknown, got, "a panicking probe must resolve to unknown, not crash the caller")
 	})
+}
+
+// blockingTransportProbe is a test double for backgroundProbePort that
+// simulates a stalled/half-open agentctl WebSocket connection: it never
+// returns on its own, only when its own ctx is cancelled — exactly like the
+// real sendStreamRequest's `select { case <-respCh: ...; case <-ctx.Done():
+// ... }` behaves when the response frame never arrives (Review round 2
+// MUST-FIX 1). Returns ctx.Err() so a caller that (incorrectly) read the
+// error would still not fabricate a live/settled result.
+type blockingTransportProbe struct{}
+
+func (blockingTransportProbe) ProbeBackgroundWorkloads(ctx context.Context, _ string) (string, error) {
+	<-ctx.Done()
+	return "", ctx.Err()
+}
+
+// TestRunProbe_BlockedTransportResolvesToUnknownWithinBudget is the Review
+// round 2 MUST-FIX 1 regression: runProbe's own doc comment used to claim
+// "the whole round trip is already bounded without a second, speculative
+// budget concept" — false, because the only context.WithTimeout in the
+// chain lived inside agentctl's process.Manager.ProbeProcessTree, on the far
+// side of the WebSocket boundary, bounding just the OS-level walk. Nothing
+// bounded the orchestrator's own wait for the response to travel back over
+// the wire, so a wedged/half-open agentctl connection blocked the settle
+// transition indefinitely — violating spec §7.3 ("The settle transition is
+// never delayed beyond the budget") and AC-40. runProbe must now apply its
+// own context.WithTimeout(ctx, budget) around the port call so a transport
+// that never responds still resolves to unknown within the configured
+// budget, not the caller's (possibly deadline-free) ctx.
+func TestRunProbe_BlockedTransportResolvesToUnknownWithinBudget(t *testing.T) {
+	t.Setenv("KANDEV_PARKED_PROBE_BUDGET", "50ms")
+	svc := parkedTestService(t, "t1", "s1", blockingTransportProbe{})
+
+	resultCh := make(chan string, 1)
+	start := time.Now()
+	go func() {
+		resultCh <- svc.runProbe(context.Background(), "s1")
+	}()
+
+	select {
+	case got := <-resultCh:
+		elapsed := time.Since(start)
+		require.Equal(t, probeResultUnknown, got, "a wedged transport must resolve to unknown")
+		require.Less(t, elapsed, 2*time.Second,
+			"the settle transition must not be delayed beyond the budget (spec §7.3/AC-40), even when the caller's own ctx has no deadline")
+	case <-time.After(2 * time.Second):
+		t.Fatal("runProbe did not return within 2s of a wedged transport — the settle path has no independent timeout")
+	}
 }
 
 // lastParkedOnBackgroundWorkValue returns the parked_on_background_work field

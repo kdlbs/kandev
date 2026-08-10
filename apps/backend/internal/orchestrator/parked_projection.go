@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 
+	"github.com/kandev/kandev/internal/common/parkedprobe"
 	"github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
 )
@@ -65,11 +66,20 @@ func (s *Service) currentSessionState(ctx context.Context, sessionID string) mod
 // result, and a panicking implementation all resolve to "unknown" (AC-46) —
 // the caller MUST NOT read the port's returned value when it also returned a
 // non-nil error, so that rule is applied once here rather than trusted to
-// every caller. No independent orchestrator-level timeout is applied: the
-// probe's own budget (KANDEV_PARKED_PROBE_BUDGET) is already enforced at the
-// innermost synchronous walk (process.Manager.ProbeProcessTree), and every
-// layer above it is a thin, fast passthrough — so the whole round trip is
-// already bounded without a second, speculative budget concept.
+// every caller.
+//
+// Applies its own context.WithTimeout(ctx, budget) around the port call
+// (spec §7.3: "the synchronous probe runs under context.WithTimeout(ctx,
+// budget)"). This orchestrator-level bound is necessary, not speculative:
+// process.Manager.ProbeProcessTree's own context.WithTimeout only wraps the
+// OS-level walk on the agentctl side of the WebSocket boundary — it cannot
+// bound the round trip back to this call, which blocks on
+// client_stream.go's select{respCh/ctx.Done()} for as long as ctx itself
+// allows. Production settle-path contexts have no deadline of their own (the
+// event bus publishes with context.Background()), so without this timeout a
+// wedged/half-open agentctl connection would block the settle transition
+// indefinitely (Review round 2 MUST-FIX 1) — violating AC-40's "not delayed
+// beyond the budget."
 func (s *Service) runProbe(ctx context.Context, sessionID string) (result string) {
 	result = probeResultUnknown
 	defer func() {
@@ -82,7 +92,9 @@ func (s *Service) runProbe(ctx context.Context, sessionID string) (result string
 			result = probeResultUnknown
 		}
 	}()
-	value, err := s.backgroundProbe.ProbeBackgroundWorkloads(ctx, sessionID)
+	probeCtx, cancel := context.WithTimeout(ctx, parkedprobe.ParseEnvBudget(s.logger))
+	defer cancel()
+	value, err := s.backgroundProbe.ProbeBackgroundWorkloads(probeCtx, sessionID)
 	if err != nil {
 		return probeResultUnknown
 	}
