@@ -22,7 +22,7 @@ repositoryProviderIds?: string[] }`. `repositoryProviderIds` is JSON
    bundle can initialize, the loader supplies its `repositoryProviderIds` to the
    registry (for example `setDeclaredRepositoryProviderIds(pluginId, ids)`). The scoped
    registry then rejects `registerRepositoryProvider` or `registerReviewProvider` IDs
-   absent from that declared set. An absent field preserves older-host compatibility;
+   outside that declared set. An omitted field preserves older-host compatibility;
    it does not invent provider ownership.
 3. Each bundle, when evaluated, calls the global:
    ```ts
