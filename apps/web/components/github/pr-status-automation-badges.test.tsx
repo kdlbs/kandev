@@ -10,7 +10,7 @@ import {
 } from "./pr-status-automation-badges";
 import type { AutomationFlags } from "./pr-status-automation-badges";
 
-const FOLLOW_UP_BADGE_TESTID = "pr-status-follow-up-chip";
+const PR_EVENTS_BADGE_TESTID = "pr-status-pr-events-chip";
 const PR = { repository_id: "repo-1", pr_number: 42 } as TaskPR;
 
 function makeOptions(overrides: Partial<TaskCIAutomationOptions> = {}): TaskCIAutomationOptions {
@@ -44,29 +44,30 @@ afterEach(cleanup);
 describe("AutomationFlagBadges", () => {
   it.each([
     [flags(), null, null],
-    [flags({ promptOnReviewRequested: true }), "Follow-up 1/3", "1"],
-    [flags({ promptOnReviewRequested: true, promptOnMerged: true }), "Follow-up 2/3", "2"],
+    [flags({ promptOnReviewRequested: true }), "PR events 1/3", "1"],
+    [flags({ promptOnReviewRequested: true, promptOnMerged: true }), "PR events 2/3", "2"],
     [
       flags({ promptOnReviewRequested: true, promptOnMerged: true, promptOnClosed: true }),
-      "Follow-up 3/3",
+      "PR events 3/3",
       "3",
     ],
   ])(
-    "renders one grouped badge for the enabled follow-up count",
+    "renders one grouped badge for the enabled PR event count",
     (automation, expectedText, expectedCount) => {
       render(<AutomationFlagBadges automation={automation} />);
 
-      const badge = screen.queryByTestId(FOLLOW_UP_BADGE_TESTID);
+      const badge = screen.queryByTestId(PR_EVENTS_BADGE_TESTID);
       if (!expectedText) {
         expect(badge).toBeNull();
         return;
       }
       expect(badge?.textContent).toBe(expectedText);
-      expect(badge?.getAttribute("data-follow-up-count")).toBe(expectedCount);
+      expect(badge?.getAttribute("data-pr-events-count")).toBe(expectedCount);
+      expect(badge?.getAttribute("data-legacy-testid")).toBe("pr-status-follow-up-chip");
     },
   );
 
-  it("derives the same task-wide follow-ups for single and multiple PR chips", () => {
+  it("derives the same task-wide PR events for single and multiple PR chips", () => {
     const options = makeOptions({
       prompt_on_review_requested: true,
       prompt_on_merged: true,

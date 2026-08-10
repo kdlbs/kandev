@@ -29,8 +29,8 @@ Decision: [ADR-0051](../../decisions/0051-pr-agent-notifications-extend-task-pr-
 - The same controls are available anywhere the task PR CI popover is rendered, including the normal chat input status bar and passthrough toolbar surfaces.
 - The shared desktop popover and mobile drawer keep auto-fix and auto-merge in
   the primary automation list. The three agent lifecycle prompt switches live
-  together in a collapsed `Review follow-up` section.
-- `Review follow-up` is presentation only. Its switches retain the same
+  together in a collapsed `PR events` section.
+- `PR events` is presentation only. Its switches retain the same
   task-wide behavior and remain reachable on desktop and mobile. When any of
   its three options is enabled, the section opens so active automation is not
   concealed.
@@ -160,14 +160,14 @@ Decision: [ADR-0051](../../decisions/0051-pr-agent-notifications-extend-task-pr-
 - Auto-fix is capped at 10 accepted rounds per task/repository/PR. A round is counted when Kandev sends a prompt directly or inserts a new queued auto-fix prompt. Replacing an already queued auto-fix prompt does not count as another round.
 - The auto-fix enabled chip above the chat input shows round progress as `Auto-fix N/10`; PRs paused by the backend after the cap is reached show `Auto-fix 10/10` with warning/paused styling.
 - While the PR status chip is present above the chat input, active lifecycle
-  prompting appears as one compact `Follow-up N/3` badge, where `N` is the
+  prompting appears as one compact `PR events N/3` badge, where `N` is the
   number of enabled options among review requested, merged, and closed. The
   badge is absent when all three options are disabled. It remains one
   task-wide badge for tasks with multiple linked PRs and does not replace the
   independent auto-fix progress or auto-merge badges.
-- The grouped follow-up badge is presentation only. Activating the surrounding
+- The grouped PR events badge is presentation only. Activating the surrounding
   PR status chip opens the existing desktop popover or mobile drawer where the
-  three `Review follow-up` switches remain independently visible and
+  three `PR events` switches remain independently visible and
   configurable. The chip's accessible description identifies each enabled
   lifecycle event rather than exposing only the count.
 - When status-bar items compete for space on phones or narrow windows, the
@@ -493,11 +493,11 @@ Auto-merge cycle for one task/PR:
 - **GIVEN** auto-fix has used 1 of 10 rounds for a PR, **WHEN** the user views the auto-fix chip above the chat input and opens the round-count help affordance, **THEN** the chip reads `Auto-fix 1/10` and the hover/drawer explanation states that one round out of ten has been used.
 - **GIVEN** one, two, or all three lifecycle prompt options are enabled for a
   task with a rendered PR status chip, **WHEN** the user views the tray above
-  the chat input, **THEN** one badge reads `Follow-up 1/3`, `Follow-up 2/3`, or
-  `Follow-up 3/3`, respectively, and the chip's accessible description names
+  the chat input, **THEN** one badge reads `PR events 1/3`, `PR events 2/3`, or
+  `PR events 3/3`, respectively, and the chip's accessible description names
   the enabled lifecycle events.
 - **GIVEN** all three lifecycle prompt options are disabled, **WHEN** the user
-  views the PR status chip above the chat input, **THEN** no follow-up badge is
+  views the PR status chip above the chat input, **THEN** no PR events badge is
   rendered.
 - **GIVEN** auto-fix, auto-merge, and all three lifecycle prompt options are
   enabled alongside other composer-tray controls, **WHEN** the task is viewed

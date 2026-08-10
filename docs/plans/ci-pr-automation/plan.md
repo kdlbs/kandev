@@ -51,12 +51,12 @@ This extends the existing queue without a new schema or subsystem.
 
 The 2026-07-29 UI refinement keeps all task-wide controls functional while
 grouping the three lifecycle prompt switches in a shared desktop/mobile
-`Review follow-up` disclosure. Auto-fix and auto-merge remain primary, and the
+`PR events` disclosure. Auto-fix and auto-merge remain primary, and the
 disclosure opens whenever one of its options is enabled.
 
 The 2026-08-10 composer-tray refinement surfaces those lifecycle options next
 to the existing auto-fix and auto-merge badges without adding three more pills.
-One task-wide `Follow-up N/3` badge summarizes enabled lifecycle prompts, the
+One task-wide `PR events N/3` badge summarizes enabled lifecycle prompts, the
 accessible chip description names them, and the status row wraps complete
 controls under width pressure instead of overflowing the document.
 
@@ -347,7 +347,7 @@ Files:
 - `apps/web/e2e/tests/pr/mobile-pr-ci-chip.spec.ts`
 
 Extend the task-wide automation flags already derived by `PRStatusChip` with
-the three lifecycle booleans. Render one translated `Follow-up N/3` badge when
+the three lifecycle booleans. Render one translated `PR events N/3` badge when
 at least one is enabled; keep the existing `Auto-fix N/10` and `Auto-merge`
 badges independent. The count is visual compression, not the complete
 accessible contract: the chip's accessible description names each enabled
@@ -537,7 +537,7 @@ viewport or a narrow desktop window.
   **How:** render the dialog and assert the selected policy description.
 
 - **What:** the PR status chip renders no lifecycle badge for zero enabled
-  lifecycle options, one grouped `Follow-up N/3` badge for one through three
+  lifecycle options, one grouped `PR events N/3` badge for one through three
   enabled options, and an accessible description that names the enabled
   events in both single- and multi-PR branches.
   **File:** `apps/web/components/github/pr-status-automation-badges.test.tsx`
@@ -598,7 +598,7 @@ viewport or a narrow desktop window.
 
 - **Scenario:** GIVEN all five PR automations are enabled, WHEN the user views
   the desktop composer tray and opens the PR chip, THEN `Auto-fix N/10`,
-  `Auto-merge`, and one `Follow-up 3/3` badge are visible and the existing
+  `Auto-merge`, and one `PR events 3/3` badge are visible and the existing
   detailed controls remain reachable.
   **File:** `apps/web/e2e/tests/pr/ci-automation-options.spec.ts`
   **What to verify:** grouped badge text, one badge instance, accessible event
@@ -668,13 +668,13 @@ Wave 11 (final review remediation):
 
 - [x] [task-19-final-review-remediation](task-19-final-review-remediation.md)
 
-Wave 12 (review follow-up presentation):
+Wave 12 (PR events presentation):
 
 - [x] [task-20-role-aware-automation-controls](task-20-role-aware-automation-controls.md)
 
-Wave 13 (composer-tray follow-up summary):
+Wave 13 (composer-tray PR events summary):
 
-- [x] [task-21-composer-tray-follow-up-badge](task-21-composer-tray-follow-up-badge.md)
+- [x] [task-21-composer-tray-pr-events-badge](task-21-composer-tray-pr-events-badge.md)
 
 ---
 
@@ -700,7 +700,7 @@ Targeted E2E:
 ```bash
 cd apps/web && pnpm e2e:run tests/pr/ci-automation-options.spec.ts tests/pr/mobile-ci-automation-options.spec.ts
 cd apps/web && pnpm e2e:run tests/pr/ci-automation-options.spec.ts -- --grep "composer tray"
-cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/pr/mobile-pr-ci-chip.spec.ts -- --grep "follow-up automations"
+cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/pr/mobile-pr-ci-chip.spec.ts -- --grep "PR event automations"
 ```
 
 Final verification:
@@ -715,7 +715,7 @@ make typecheck test lint
 ## Verification Results
 
 Task 21 completed on 2026-08-10 with Red-Green-Refactor evidence. The focused
-component suite first failed because `pr-status-follow-up-chip` was absent, and
+component suite first failed because `pr-status-pr-events-chip` was absent, and
 the compact desktop and Pixel 5 browser scenarios then failed with computed
 `flex-wrap: nowrap`. After implementation and refactor:
 
@@ -736,7 +736,7 @@ the compact desktop and Pixel 5 browser scenarios then failed with computed
   build and passed 1 test in `mobile-chrome`, including tray containment,
   drawer reachability, and all five independent switches.
 - A Pixel 5 screenshot was captured at
-  `apps/web/.pr-assets/mobile-pr-ci-chip--mobile-pr-follow-up-automation-tray.png`,
+  `apps/web/.pr-assets/mobile-pr-ci-chip--mobile-pr-pr-events-automation-tray.png`,
   inspected for density and legibility, then removed with the other ignored
   capture artifacts after inspection.
 

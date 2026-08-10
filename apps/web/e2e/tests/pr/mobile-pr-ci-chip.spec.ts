@@ -89,8 +89,8 @@ async function seedTaskWithTwoPRs(args: SeedTaskArgs): Promise<string> {
     repo: "api",
     pr_number: 100,
     pr_url: `https://github.com/${OWNER}/api/pull/100`,
-    pr_title: "Follow-up mobile PR",
-    head_branch: "feat/mobile-follow-up",
+    pr_title: "PR events mobile PR",
+    head_branch: "feat/mobile-pr-events",
     base_branch: "main",
     author_login: "test-user",
     state: "open",
@@ -111,7 +111,7 @@ async function openTask(testPage: import("@playwright/test").Page, taskId: strin
 }
 
 test.describe("mobile PR CI chip drawer", () => {
-  test("keeps grouped follow-up automations usable without tray overflow", async ({
+  test("keeps grouped PR event automations usable without tray overflow", async ({
     testPage,
     apiClient,
     seedData,
@@ -121,7 +121,7 @@ test.describe("mobile PR CI chip drawer", () => {
     const taskId = await seedTaskWithPRAndTodos({
       apiClient,
       seedData,
-      title: "Mobile follow-up automation tray",
+      title: "Mobile PR event automation tray",
       prOverrides: {
         checks_state: "pending",
         checks_total: 4,
@@ -144,8 +144,8 @@ test.describe("mobile PR CI chip drawer", () => {
     await expect(chip).toBeVisible({ timeout: 15_000 });
     await expect(chip.getByTestId("pr-status-auto-fix-chip")).toContainText("Auto-fix 0/10");
     await expect(chip.getByTestId("pr-status-auto-merge-chip")).toHaveText("Auto-merge");
-    await expect(chip.getByTestId("pr-status-follow-up-chip")).toHaveText("Follow-up 3/3");
-    await expect(chip.getByTestId("pr-status-follow-up-chip")).toHaveCount(1);
+    await expect(chip.getByTestId("pr-status-pr-events-chip")).toHaveText("PR events 3/3");
+    await expect(chip.getByTestId("pr-status-pr-events-chip")).toHaveCount(1);
 
     const statusBar = session.activeChat().getByTestId("chat-status-bar");
     await expect(statusBar).toHaveCSS("flex-wrap", "wrap");
@@ -163,8 +163,8 @@ test.describe("mobile PR CI chip drawer", () => {
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
       ),
     ).toBe(true);
-    await prCapture.screenshot("mobile-pr-follow-up-automation-tray", {
-      caption: "Grouped PR follow-up automation badge in the mobile composer tray",
+    await prCapture.screenshot("mobile-pr-pr-events-automation-tray", {
+      caption: "Grouped PR event automation badge in the mobile composer tray",
     });
 
     await session.tapPRStatusChip();

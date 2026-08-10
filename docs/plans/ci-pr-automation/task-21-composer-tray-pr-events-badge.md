@@ -1,6 +1,6 @@
 ---
-id: "21-composer-tray-follow-up-badge"
-title: "Composer tray follow-up badge"
+id: "21-composer-tray-pr-events-badge"
+title: "Composer tray PR events badge"
 status: done
 wave: 13
 depends_on:
@@ -9,7 +9,7 @@ plan: "plan.md"
 spec: "../../specs/ui/ci-pr-automation.md"
 ---
 
-# Task 21: Composer tray follow-up badge
+# Task 21: Composer tray PR events badge
 
 ## Intent
 
@@ -19,12 +19,12 @@ phones or narrow windows.
 
 ## Acceptance
 
-- The single- and multi-PR status chips render one translated `Follow-up N/3`
+- The single- and multi-PR status chips render one translated `PR events N/3`
   badge when one or more lifecycle prompt options are enabled, render none when
   all are disabled, retain the existing auto-fix/auto-merge badges, and name
   each enabled lifecycle event in the chip's accessible description.
 - The grouped badge remains part of the existing PR-chip tap/hover target; the
-  popover/drawer still exposes the independent `Review follow-up` switches and
+  popover/drawer still exposes the independent `PR events` switches and
   no new automation overlay or stored state is introduced.
 - With all five automations and other composer-tray controls present, the tray
   keeps complete controls visible or wraps them without document-level
@@ -48,7 +48,7 @@ cd apps && pnpm --filter @kandev/web test -- pr-status-chip pr-status-automation
 cd apps && pnpm --filter @kandev/web i18n:check
 cd apps/web && node --max-old-space-size=4096 node_modules/typescript/bin/tsc --noEmit
 cd apps/web && pnpm e2e:run tests/pr/ci-automation-options.spec.ts -- --grep "composer tray"
-cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/pr/mobile-pr-ci-chip.spec.ts -- --grep "follow-up automations"
+cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/pr/mobile-pr-ci-chip.spec.ts -- --grep "PR event automations"
 ```
 
 Confirm Playwright discovers both intended scenarios. The managed E2E runner
@@ -68,7 +68,7 @@ UI changes.
 
 ## Dependencies
 
-- Task 20's shared `Review follow-up` controls and task-wide lifecycle
+- Task 20's shared `PR events` controls and task-wide lifecycle
   booleans.
 - Existing `PRStatusChipDrawer`, `PRCIPopover`, and `MultiPRCIPopover`
   presentation paths.
@@ -99,7 +99,7 @@ one focused vertical slice.
 
 - Lifecycle options are task-wide; the summary must not vary with the selected
   PR or multiply for multi-PR tasks.
-- `Follow-up N/3` is deliberately compact. The accessible description must
+- `PR events N/3` is deliberately compact. The accessible description must
   preserve the exact enabled-event information that the visual count omits.
 - Status-row wrapping must keep the PR chip internally intact, preserve the
   right-control group, and avoid a second horizontal or vertical scroll owner.
@@ -117,7 +117,7 @@ conversation.
 
 ## Results
 
-- Added one violet `Follow-up N/3` badge derived from the three task-wide
+- Added one violet `PR events N/3` badge derived from the three task-wide
   lifecycle switches. Single- and multi-PR chips share the same derivation,
   retain the independent auto-fix/auto-merge badges, and expose translated
   accessible descriptions that enumerate the enabled lifecycle events.
@@ -127,7 +127,7 @@ conversation.
 - Made `ChatStatusBar` wrap complete controls and made the PR chip non-shrinking
   and non-breaking. The compact desktop and configured Pixel 5 scenarios assert
   containment, a real center-point hit target, and zero document overflow.
-- Red evidence: the component suite failed on the missing follow-up badge; both
+- Red evidence: the component suite failed on the missing PR events badge; both
   new browser scenarios failed because the tray computed to `flex-wrap:
   nowrap`.
 - Green evidence: 47 focused Vitest tests passed in 3 files; i18n check and
@@ -138,5 +138,5 @@ conversation.
   `libnspr4` and `libnss3` into a task-local `/tmp` runtime. No host packages
   were changed. The runtime and ignored screenshot artifacts were removed after
   verification.
-- Residual risk: Portuguese and Simplified Chinese use the existing English
-  fallback for the seven new keys until the advisory locale backlog is updated.
+- Residual risk: none specific to the terminology rename; the existing advisory
+  locale backlog remains outside this task.

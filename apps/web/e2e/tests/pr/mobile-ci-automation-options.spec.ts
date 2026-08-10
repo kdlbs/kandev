@@ -121,11 +121,11 @@ test.describe("mobile PR CI automation options", () => {
       drawer.getByRole("switch", { name: "Auto-fix CI and address comments" }),
     ).toBeVisible();
     await expect(drawer.getByRole("switch", { name: "Auto-merge when ready" })).toBeVisible();
-    const reviewFollowUp = drawer.getByTestId("ci-review-follow-up-trigger");
-    await expect(reviewFollowUp).toHaveAttribute("aria-expanded", "false");
-    await expect(reviewFollowUp).toHaveCSS("min-height", "44px");
-    await reviewFollowUp.tap();
-    await expect(reviewFollowUp).toHaveAttribute("aria-expanded", "true");
+    const prEvents = drawer.getByTestId("ci-pr-events-trigger");
+    await expect(prEvents).toHaveAttribute("aria-expanded", "false");
+    await expect(prEvents).toHaveCSS("min-height", "44px");
+    await prEvents.tap();
+    await expect(prEvents).toHaveAttribute("aria-expanded", "true");
     await expect(drawer.getByRole("switch", { name: "Your review is requested" })).toBeVisible();
     await expect(drawer.getByRole("switch", { name: "PR merged" })).toBeVisible();
     await expect(drawer.getByRole("switch", { name: "PR closed without merging" })).toBeVisible();
@@ -197,7 +197,7 @@ test.describe("mobile PR CI automation options", () => {
     await session.tapPRStatusChip();
 
     const drawer = session.prStatusChipDrawer();
-    await drawer.getByTestId("ci-review-follow-up-trigger").tap();
+    await drawer.getByTestId("ci-pr-events-trigger").tap();
     await expect(drawer.getByRole("switch", { name: "Your review is requested" })).toBeVisible();
     await expect(drawer.getByRole("alert")).toContainText(
       "Lifecycle prompt could not be delivered to a task session.",

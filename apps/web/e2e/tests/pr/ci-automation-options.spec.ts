@@ -107,7 +107,7 @@ async function interceptLifecycleError(
 }
 
 test.describe("PR CI automation options", () => {
-  test("composer tray groups follow-up automations in a narrow window", async ({
+  test("composer tray groups PR event automations in a narrow window", async ({
     testPage,
     apiClient,
     seedData,
@@ -137,9 +137,9 @@ test.describe("PR CI automation options", () => {
     await expect(chip).toBeVisible({ timeout: 15_000 });
     await expect(chip.getByTestId("pr-status-auto-fix-chip")).toContainText("Auto-fix 0/10");
     await expect(chip.getByTestId("pr-status-auto-merge-chip")).toHaveText("Auto-merge");
-    const followUp = chip.getByTestId("pr-status-follow-up-chip");
-    await expect(followUp).toHaveText("Follow-up 3/3");
-    await expect(followUp).toHaveAttribute("data-follow-up-count", "3");
+    const prEvents = chip.getByTestId("pr-status-pr-events-chip");
+    await expect(prEvents).toHaveText("PR events 3/3");
+    await expect(prEvents).toHaveAttribute("data-pr-events-count", "3");
     await expect(chip).toHaveAttribute("aria-label", /Your review is requested/);
     await expect(chip).toHaveAttribute("aria-label", /PR merged/);
     await expect(chip).toHaveAttribute("aria-label", /PR closed without merging/);
@@ -190,10 +190,10 @@ test.describe("PR CI automation options", () => {
       popover.getByRole("switch", { name: "Auto-fix CI and address comments" }),
     ).toBeVisible();
     await expect(popover.getByRole("switch", { name: "Auto-merge when ready" })).toBeVisible();
-    const reviewFollowUp = popover.getByTestId("ci-review-follow-up-trigger");
-    await expect(reviewFollowUp).toHaveAttribute("aria-expanded", "false");
-    await reviewFollowUp.click();
-    await expect(reviewFollowUp).toHaveAttribute("aria-expanded", "true");
+    const prEvents = popover.getByTestId("ci-pr-events-trigger");
+    await expect(prEvents).toHaveAttribute("aria-expanded", "false");
+    await prEvents.click();
+    await expect(prEvents).toHaveAttribute("aria-expanded", "true");
     await expect(popover.getByRole("switch", { name: "Your review is requested" })).toBeVisible();
     await expect(popover.getByRole("switch", { name: "PR merged" })).toBeVisible();
     await expect(popover.getByRole("switch", { name: "PR closed without merging" })).toBeVisible();
@@ -279,7 +279,7 @@ test.describe("PR CI automation options", () => {
 
     const session = await openTask(testPage, taskId);
     const popover = session.prTopbarPopover();
-    await popover.getByTestId("ci-review-follow-up-trigger").click();
+    await popover.getByTestId("ci-pr-events-trigger").click();
     await expect(popover.getByRole("switch", { name: "Your review is requested" })).toBeVisible();
     await expect(popover.getByRole("alert")).toContainText(
       "Lifecycle prompt could not be delivered to a task session.",

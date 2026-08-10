@@ -69,7 +69,7 @@ function pickAttentionRound(roundInfos: AutoFixRoundInfo[]): AutoFixRoundInfo | 
   });
 }
 
-function followUpCount(automation: AutomationFlags): number {
+function prEventsCount(automation: AutomationFlags): number {
   return [
     automation.promptOnReviewRequested,
     automation.promptOnMerged,
@@ -99,8 +99,8 @@ function autoFixAriaLabel(automation: AutomationFlags, t: TFunction): string | n
 
 export function AutomationFlagBadges({ automation }: { automation: AutomationFlags }) {
   const { t } = useTranslation();
-  const enabledFollowUps = followUpCount(automation);
-  if (!automation.autoFix && !automation.autoMerge && enabledFollowUps === 0) return null;
+  const enabledPrEvents = prEventsCount(automation);
+  if (!automation.autoFix && !automation.autoMerge && enabledPrEvents === 0) return null;
   const autoFixRound = automation.autoFixRound;
   return (
     <>
@@ -126,13 +126,14 @@ export function AutomationFlagBadges({ automation }: { automation: AutomationFla
           {t("github:autoMerge")}
         </span>
       )}
-      {enabledFollowUps > 0 && (
+      {enabledPrEvents > 0 && (
         <span
-          data-testid="pr-status-follow-up-chip"
-          data-follow-up-count={enabledFollowUps}
+          data-testid="pr-status-pr-events-chip"
+          data-legacy-testid="pr-status-follow-up-chip"
+          data-pr-events-count={enabledPrEvents}
           className="rounded-sm bg-violet-500/15 px-1 py-0.5 text-[9px] font-medium leading-none text-violet-500"
         >
-          {t("github:followUp")} {enabledFollowUps}/3
+          {t("github:prEvents")} {enabledPrEvents}/3
         </span>
       )}
     </>
