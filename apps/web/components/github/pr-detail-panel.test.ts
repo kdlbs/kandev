@@ -196,7 +196,7 @@ describe("shouldHideApproveButton", () => {
   });
 
   // Regression: pre-fix this returned false (button shown), so the green
-  // Approve button appeared on every PR — including the viewer's own — during
+  // Approve button appeared on every PR, including the viewer's own, during
   // the brief window before /api/v1/github/status resolved client-side.
   it("hides when current user is unknown (status not loaded yet)", () => {
     expect(shouldHideApproveButton(makeTaskPR({ author_login: "alice" }), null, null)).toBe(true);
@@ -244,7 +244,7 @@ describe("shouldHideApproveButton", () => {
 
   it("prefers feedback.pr.author_login over taskPR.author_login when both present", () => {
     // taskPR may be stale; live feedback wins. Here the stored author looks
-    // like a different user but feedback says it's actually us — must hide.
+    // like a different user but feedback says it is actually us, so it must hide.
     const feedback = makeFeedback({ pr: { author_login: "bob" } });
     expect(shouldHideApproveButton(makeTaskPR({ author_login: "alice" }), feedback, "bob")).toBe(
       true,
@@ -503,8 +503,9 @@ describe("PRDetailContent persistent request expiry", () => {
     feedbackMocks.value = makeFeedback({ reviews: [dismissedReview()] });
     reviewMocks.requestReviewers.mockResolvedValue({ requested: true });
     renderPRDetail();
+    const timersBeforeRequest = vi.getTimerCount();
     await act(async () => fireEvent.click(screen.getByTestId(RE_REQUEST_BUTTON)));
-    expect(vi.getTimerCount()).toBe(1);
+    expect(vi.getTimerCount()).toBe(timersBeforeRequest + 1);
 
     act(() => vi.advanceTimersByTime(5 * 60 * 1000));
 

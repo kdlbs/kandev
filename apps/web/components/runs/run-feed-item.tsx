@@ -14,7 +14,7 @@ import { isOpenRun, statusDotClass, statusLabelKey } from "./run-status";
 export function outcomeText(run: AutomationRun): string {
   if (run.error_message) return run.error_message;
   if (run.summary) return run.summary;
-  if (isOpenRun(run.status)) return "Still running — no report yet.";
+  if (isOpenRun(run.status)) return "Still running - no report yet.";
   return "No report recorded.";
 }
 

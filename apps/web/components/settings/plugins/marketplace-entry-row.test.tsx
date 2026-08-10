@@ -50,6 +50,6 @@ describe("MarketplaceEntryRow repo link", () => {
 
   it("renders unknown (null) stars as a dash, not zero", () => {
     render(<MarketplaceEntryRow entry={entry({ stars: null })} busy={false} onInstall={noop} />);
-    expect(screen.getByText("—")).toBeTruthy();
+    expect(screen.getByText("-")).toBeTruthy();
   });
 });

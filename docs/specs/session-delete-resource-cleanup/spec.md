@@ -120,10 +120,14 @@ environment across tasks. Such a borrowing task gains no environment of its
 own, and the shared physical worktree keeps exactly one owner.
 Legacy session rows marked `deleted` (or carrying `deleted_at`) and stale
 references from terminal sessions are historical evidence, not additional
-owners, and bypass validation only when a canonical repository owner exists.
-A terminal-only reference without a canonical owner, a non-terminal session,
-or a worktree that has no canonical owner still requires compatible identity,
-path, branch, and repository data; unresolved ownership fails closed with a
+owners. A terminal reference bypasses validation when a higher-precedence
+task-owned source exists for the same repository and branch slot. This source
+can be a canonical repository row or the surviving flat environment row. The
+higher-precedence source remains the owner when the terminal reference carries
+a different physical `worktree_id`. A terminal-only reference without a
+higher-precedence owner still requires compatible identity, path, branch, and
+repository data. A non-terminal session with a different physical identity
+also requires compatible data. Unresolved ownership fails closed with a
 diagnostic.
 
 After backfill validation, the same upgrade drops `task_session_worktrees` and
@@ -220,8 +224,9 @@ remain the authorization boundary for physical cleanup.
   closed, the transaction rolls back, and the pre-upgrade database remains
   authoritative instead of authorizing future deletion from ambiguous data.
 - Historical deleted session-worktree rows and stale references from terminal
-  sessions do not block migration when a canonical task-owned repository row
-  exists; the canonical row remains authoritative.
+  sessions do not block migration when a higher-precedence task-owned source
+  exists for the same repository and branch slot. The higher-precedence source
+  remains authoritative.
 - A legacy session row that repeats a higher-precedence physical `worktree_id`
   cannot block migration solely because its path or branch metadata is stale,
   including when the session is resumable. The higher-precedence repository or
@@ -297,6 +302,10 @@ remain the authorization boundary for physical cleanup.
   repeats the surviving task environment's `worktree_id` with stale path or
   branch metadata, **WHEN** the new binary starts, **THEN** the flat environment
   metadata is retained and the cutover completes.
+- **GIVEN** a terminal legacy session references an older physical worktree for
+  the surviving flat environment's repository slot, **WHEN** the new binary
+  starts, **THEN** the flat environment remains the owner and the cutover
+  completes.
 - **GIVEN** a legacy session of one task is bound to another task's environment
   and carries a session-worktree row for that shared workspace, **WHEN** the new
   binary starts, **THEN** the worktree is normalized onto the owning task's

@@ -140,7 +140,7 @@ describe("RemoteCredentialsCard", () => {
     fireEvent.click(await screen.findByText("Codex"));
 
     expect(
-      screen.getByText(".codex/auth.json, .codex/config.toml — files not found on this machine"),
+      screen.getByText(".codex/auth.json, .codex/config.toml; files not found on this machine"),
     ).toBeTruthy();
   });
 });

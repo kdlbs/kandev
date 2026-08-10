@@ -376,9 +376,9 @@ function SettingsShell({
 
   return (
     <TooltipProvider>
-      <SettingsSaveProvider key={pathname}>
-        <SettingsTargetProvider>
-          <main className="flex min-h-0 flex-1 flex-col">
+      <main className="relative flex min-h-0 flex-1 flex-col">
+        <SettingsSaveProvider key={pathname} placement="content">
+          <SettingsTargetProvider>
             <PageTopbar
               title={title}
               backHref={backHref}
@@ -393,13 +393,13 @@ function SettingsShell({
               shrink below its content height so overflow-y-auto can take effect. */}
             <div
               data-testid="settings-scroll-container"
-              className="flex min-w-0 min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4 pb-[calc(11rem_+_env(safe-area-inset-bottom)_+_var(--app-status-bar-height))]"
+              className="flex min-w-0 min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4 pb-[calc(8rem_+_env(safe-area-inset-bottom)_+_var(--app-status-bar-height))] md:pb-[calc(5.5rem_+_env(safe-area-inset-bottom)_+_var(--app-status-bar-height))]"
             >
               {children}
             </div>
-          </main>
-        </SettingsTargetProvider>
-      </SettingsSaveProvider>
+          </SettingsTargetProvider>
+        </SettingsSaveProvider>
+      </main>
     </TooltipProvider>
   );
 }

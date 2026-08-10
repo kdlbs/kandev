@@ -3,6 +3,7 @@ package websocket
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/kandev/kandev/internal/auth/authn"
 )
@@ -26,16 +27,22 @@ import (
 
 // scopedActionRefs are the payload fields that name a per-user resource.
 //
-// All three names must stay in sync with what handlers actually send. The
+// All four names must stay in sync with what handlers actually send. The
 // user-shell actions key off task_environment_id and treat task_id as
 // optional, so checking only task_id let `user_shell.stop` tear down another
 // user's terminal by naming their environment with task_id empty. An action
-// that invents a fourth name for the same kind of resource silently opts out
+// that invents a fifth name for the same kind of resource silently opts out
 // of this backstop — see AGENTS.md.
+//
+// ID is the same escape hatch found a second time: task.state and task.move
+// name their task `id`, so a task_id-only backstop parsed no refs and let one
+// user mutate any other user's task. It is read only for top-level task.<verb>
+// actions — see isTopLevelTaskAction.
 type scopedActionRefs struct {
 	TaskID            string `json:"task_id"`
 	SessionID         string `json:"session_id"`
 	TaskEnvironmentID string `json:"task_environment_id"`
+	ID                string `json:"id"`
 }
 
 // authorizeAction reports why a dispatched action must be refused, or nil when
@@ -44,7 +51,7 @@ type scopedActionRefs struct {
 // No-op for connections without a real identity: identity-less internal
 // clients and the synthetic identity injected while auth is disabled keep the
 // pre-auth see-everything behavior, exactly as callerScope does server-side.
-func (c *Client) authorizeAction(ctx context.Context, payload json.RawMessage) error {
+func (c *Client) authorizeAction(ctx context.Context, action string, payload json.RawMessage) error {
 	if c.identity.UserID == "" || c.identity.Synthetic {
 		return nil
 	}
@@ -52,14 +59,18 @@ func (c *Client) authorizeAction(ctx context.Context, payload json.RawMessage) e
 	if !ok {
 		return nil
 	}
+	taskID := refs.TaskID
+	if taskID == "" && isTopLevelTaskAction(action) {
+		taskID = refs.ID
+	}
 	policy := c.hub.authPolicy
 	if refs.SessionID != "" && policy.Subscriptions.Session != nil {
 		if err := policy.Subscriptions.Session(ctx, refs.SessionID); err != nil {
 			return err
 		}
 	}
-	if refs.TaskID != "" && policy.Subscriptions.Task != nil {
-		if err := policy.Subscriptions.Task(ctx, refs.TaskID); err != nil {
+	if taskID != "" && policy.Subscriptions.Task != nil {
+		if err := policy.Subscriptions.Task(ctx, taskID); err != nil {
 			return err
 		}
 	}
@@ -83,7 +94,25 @@ func parseScopedActionRefs(payload json.RawMessage) (scopedActionRefs, bool) {
 		// Non-object payloads (arrays, bare values) name no resource.
 		return scopedActionRefs{}, false
 	}
-	return refs, refs.TaskID != "" || refs.SessionID != "" || refs.TaskEnvironmentID != ""
+	return refs, refs.TaskID != "" || refs.SessionID != "" || refs.TaskEnvironmentID != "" || refs.ID != ""
+}
+
+// isTopLevelTaskAction reports whether an action's payload `id` names a task.
+//
+// True for "task." plus exactly one more segment — task.get, task.update,
+// task.delete, task.move, task.state, task.archive, and any future sibling.
+// Deliberately a rule about namespace depth rather than a list of action names:
+// a list has the same "someone forgot to add it" failure mode this backstop
+// exists to remove.
+//
+// Deeper namespaces are excluded because their `id` names something else:
+// task.plan.revision.get carries a revision ID and task.review.finding.update a
+// finding ID, so checking either as a task ID would deny legitimate calls.
+// Those actions carry task_id when they are task-scoped.
+func isTopLevelTaskAction(action string) bool {
+	const prefix = "task."
+	rest, found := strings.CutPrefix(action, prefix)
+	return found && !strings.Contains(rest, ".")
 }
 
 // identityIsScoped reports whether this client's identity participates in

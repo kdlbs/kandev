@@ -421,7 +421,7 @@ function NextRun({
       {local !== utc && <span className="text-muted-foreground/70"> · {utc} UTC</span>}
       {showTimezonePrompt && (
         <>
-          {" — "}
+          {" - "}
           <button
             type="button"
             onClick={onAdoptBrowserTimezone}

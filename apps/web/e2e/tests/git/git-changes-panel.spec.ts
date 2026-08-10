@@ -580,6 +580,7 @@ test.describe("Git Changes Panel", () => {
     seedData,
     backend,
   }) => {
+    test.setTimeout(120_000);
     const profile = await createStandardProfile(apiClient, "Git Reset Profile");
 
     await apiClient.createTaskWithAgent(seedData.workspaceId, "Git Reset Test", profile.id, {

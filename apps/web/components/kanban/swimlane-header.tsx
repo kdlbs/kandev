@@ -1,6 +1,6 @@
 "use client";
 
-import type { HTMLAttributes } from "react";
+import type { HTMLAttributes, ReactNode } from "react";
 import { Badge } from "@kandev/ui/badge";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { IconChevronRight, IconGripVertical } from "@tabler/icons-react";
@@ -15,6 +15,8 @@ export type SwimlaneHeaderProps = {
   dragHandleProps?: HTMLAttributes<HTMLDivElement>;
   onToggleMultiSelect?: () => void;
   isMultiSelectMode?: boolean;
+  /** Per-lane column visibility control; the header stays a pure props component. */
+  columnsMenu?: ReactNode;
 };
 
 export function SwimlaneHeader({
@@ -25,6 +27,7 @@ export function SwimlaneHeader({
   dragHandleProps,
   onToggleMultiSelect,
   isMultiSelectMode,
+  columnsMenu,
 }: SwimlaneHeaderProps) {
   const { t } = useTranslation();
   return (
@@ -75,7 +78,10 @@ export function SwimlaneHeader({
           <span className="text-muted-foreground/60">{taskCount}</span>
         </Badge>
       </button>
-      <div className="border-t border-dashed border-border/50" />
+      <div className="flex items-center gap-1">
+        <div className="flex-1 border-t border-dashed border-border/50" />
+        {columnsMenu}
+      </div>
     </div>
   );
 }

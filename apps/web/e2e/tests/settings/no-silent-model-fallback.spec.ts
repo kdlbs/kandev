@@ -32,6 +32,24 @@ test.describe("No silent model fallback", () => {
       await expect(trigger).toContainText(GONE_MODEL);
       await expect(trigger).toHaveClass(/text-destructive/);
 
+      const capabilitiesRow = testPage.getByTestId("profile-capabilities-model-row");
+      const modelOptionsError = testPage.getByTestId("model-config-resolution-error");
+      const refreshCapabilities = testPage.getByTestId("profile-refresh-capabilities");
+      await expect(modelOptionsError).toBeVisible({ timeout: 15_000 });
+      const capabilitiesBox = await capabilitiesRow.boundingBox();
+      const modelOptionsErrorBox = await modelOptionsError.boundingBox();
+      const refreshBox = await refreshCapabilities.boundingBox();
+      expect(capabilitiesBox).not.toBeNull();
+      expect(modelOptionsErrorBox).not.toBeNull();
+      expect(refreshBox).not.toBeNull();
+      if (!capabilitiesBox || !modelOptionsErrorBox || !refreshBox) {
+        throw new Error("model capability controls are not laid out");
+      }
+      expect(modelOptionsErrorBox.y).toBeGreaterThanOrEqual(
+        capabilitiesBox.y + capabilitiesBox.height - 1,
+      );
+      expect(refreshBox.y).toBeLessThan(capabilitiesBox.y + capabilitiesBox.height);
+
       const fallbackSettings = testPage.getByTestId("profile-fallback-settings");
       const fallbackTrigger = testPage.getByTestId("profile-fallback-settings-trigger");
       await expect(fallbackTrigger).toBeVisible({ timeout: 10_000 });
@@ -94,6 +112,22 @@ test.describe("No silent model fallback", () => {
       await expect(testPage.getByTestId("profile-fallback-settings-summary")).toContainText(
         "Automatic fallback enabled",
       );
+
+      // Less frequently used launch settings follow the fallback disclosure.
+      // Keep the command prefix out of the default card height until requested.
+      const advancedOptions = testPage.getByTestId("profile-advanced-options");
+      const advancedTrigger = testPage.getByTestId("profile-advanced-options-trigger");
+      await expect(advancedTrigger).toBeVisible({ timeout: 10_000 });
+      await expect(testPage.getByTestId("command-prefix-input")).toBeHidden();
+      const fallbackBox = await fallbackSettings.boundingBox();
+      const advancedBox = await advancedOptions.boundingBox();
+      expect(fallbackBox).not.toBeNull();
+      expect(advancedBox).not.toBeNull();
+      if (!fallbackBox || !advancedBox) throw new Error("profile disclosures are not laid out");
+      expect(advancedBox.y - (fallbackBox.y + fallbackBox.height)).toBeLessThanOrEqual(8);
+
+      await advancedTrigger.click();
+      await expect(testPage.getByTestId("command-prefix-input")).toBeVisible();
 
       // The gone model survives a save (no auto-heal on save).
       const saveButton = testPage.getByRole("button", { name: /^Save( changes)?$/i }).first();

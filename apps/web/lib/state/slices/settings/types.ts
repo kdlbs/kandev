@@ -255,6 +255,7 @@ export type UserSettingsState = {
   systemMetricsDisplay: { showInTopbar: boolean; simplified: boolean };
   appStatusBarOrder: AppStatusBarOrderState;
   voiceMode: VoiceModeState;
+  hiddenWorkflowStepIds: Record<string, string[]>;
   loaded: boolean;
 };
 

@@ -117,18 +117,18 @@ export function ModelFallbackSettingsShell({
     <Collapsible
       open={open}
       onOpenChange={setOpen}
-      className="space-y-2"
+      className="space-y-1"
       data-testid="profile-fallback-settings"
     >
       <div
-        className="flex min-h-11 min-w-0 items-center gap-2"
+        className="flex min-h-11 min-w-0 items-center gap-2 md:min-h-9"
         data-settings-dirty={isDirty}
         data-settings-dirty-level="container"
       >
         <CollapsibleTrigger asChild>
           <button
             type="button"
-            className="flex min-h-11 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-1 text-left hover:bg-muted/40"
+            className="flex min-h-11 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-1 py-0 text-left hover:bg-muted/40 md:min-h-9"
             data-testid="profile-fallback-settings-trigger"
           >
             <IconChevronRight
