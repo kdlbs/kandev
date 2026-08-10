@@ -249,6 +249,33 @@ func (p *racingProbe) ProbeBackgroundWorkloads(_ context.Context, _ string) (str
 	return p.result, nil
 }
 
+// TestParked_V1_04_ExactlyOneProbePerRacingSettle verifies V1-04: when two
+// settle paths race the same session's transition into WAITING_FOR_INPUT,
+// exactly one wins the state CAS (persistTaskSessionState's conditional
+// update) and exactly one synchronous probe is issued — no extra lock is
+// added for this; the CAS itself is the serialization point (§7.2). Two real
+// goroutines call updateTaskSessionState concurrently, joined via
+// sync.WaitGroup rather than a sleep.
+func TestParked_V1_04_ExactlyOneProbePerRacingSettle(t *testing.T) {
+	ctx := context.Background()
+	probe := &fakeBackgroundProbe{result: probeResultLive}
+	svc := parkedTestService(t, "t1", "s1", probe)
+	attestShellLaunch(ctx, svc, "t1", "s1")
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			defer wg.Done()
+			svc.updateTaskSessionState(ctx, "t1", "s1", models.TaskSessionStateWaitingForInput, "", false)
+		}()
+	}
+	wg.Wait()
+
+	require.Equal(t, 1, probe.callCount(), "exactly one settle path should win the CAS and issue a probe")
+	require.True(t, svc.ParkedProjectionSnapshot("s1"))
+}
+
 // TestParked_TaskLevelOR verifies AC-49: task-level parked is the OR of its
 // sessions' parked states, and un-parking one member while another stays
 // parked keeps the task-level value true.
