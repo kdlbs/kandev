@@ -297,6 +297,8 @@ export function useSavedPresets(workspaceId: string | null = null) {
         // Re-read the scoped context so that concurrent mutations applied
         // during the await (e.g. sibling-hook writes for portable user settings)
         // are merged in before publishing the new default state.
+        // This is also a no-op when a concurrent remove deleted the target:
+        // setSavedPresetDefault returns the same reference for a missing id.
         const latest = readMutationPresets(context);
         const remerged = setSavedPresetDefault(latest, kind, id);
         if (remerged !== latest) applyLocal(context, remerged);
