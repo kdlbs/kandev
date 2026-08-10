@@ -38,14 +38,6 @@ const legacyValid = {
 
 const valid: SavedPreset = { ...legacyValid, isDefault: false };
 
-type DefaultSetter = (kind: SavedPreset["kind"], id: string | null) => Promise<void>;
-
-function defaultSetter(current: ReturnType<typeof useSavedPresets>): DefaultSetter {
-  const setDefault = (current as unknown as { setDefault?: DefaultSetter }).setDefault;
-  expect(setDefault, "setDefault hook action").toBeTypeOf("function");
-  return setDefault as DefaultSetter;
-}
-
 function resetTestState() {
   window.localStorage.clear();
   __resetSnapshotForTests();
@@ -308,7 +300,7 @@ describe("useSavedPresets default persistence", () => {
 
     let mutation!: Promise<void>;
     act(() => {
-      mutation = defaultSetter(result.current)("pr", "pr-b");
+      mutation = result.current.setDefault("pr", "pr-b");
     });
     expect(result.current.presets.map((preset) => preset.isDefault)).toEqual([true, false, true]);
 
@@ -332,7 +324,7 @@ describe("useSavedPresets default persistence", () => {
     const { result } = renderHook(() => useSavedPresets(WORKSPACE_ID));
     await waitFor(() => expect(result.current.presets).toHaveLength(2));
 
-    await expect(defaultSetter(result.current)("pr", "pr-b")).rejects.toThrow(SETTINGS_DOWN);
+    await expect(result.current.setDefault("pr", "pr-b")).rejects.toThrow(SETTINGS_DOWN);
 
     expect(result.current.presets.map((preset) => preset.isDefault)).toEqual([true, false]);
   });
@@ -349,7 +341,7 @@ describe("useSavedPresets default persistence", () => {
     await waitFor(() => expect(result.current.presets).toEqual([prA]));
 
     await act(async () => {
-      await defaultSetter(result.current)("pr", "pr-a");
+      await result.current.setDefault("pr", "pr-a");
     });
 
     expect(updateUserSettings).toHaveBeenCalledWith({
@@ -368,7 +360,7 @@ describe("useSavedPresets default persistence", () => {
     const { result } = renderHook(() => useSavedPresets());
     await waitFor(() => expect(result.current.presets).toHaveLength(2));
 
-    await expect(defaultSetter(result.current)("pr", "pr-b")).rejects.toThrow(SETTINGS_DOWN);
+    await expect(result.current.setDefault("pr", "pr-b")).rejects.toThrow(SETTINGS_DOWN);
 
     expect(result.current.presets.map((preset) => preset.isDefault)).toEqual([true, false]);
   });

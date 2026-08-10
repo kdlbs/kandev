@@ -12,7 +12,6 @@ const SETTINGS_TIMESTAMP = "2026-01-01T00:00:00Z";
 const MODES = ["workspace", "portable user"] as const;
 
 type PersistenceMode = (typeof MODES)[number];
-type DefaultSetter = (kind: SavedPreset["kind"], id: string | null) => Promise<void>;
 
 const valid: SavedPreset = {
   id: "pr-a",
@@ -55,10 +54,6 @@ function workspaceSettings(
     created_at: SETTINGS_TIMESTAMP,
     updated_at: SETTINGS_TIMESTAMP,
   } as Awaited<ReturnType<typeof fetchGitHubWorkspaceSettings>>;
-}
-
-function defaultSetter(current: ReturnType<typeof useSavedPresets>): DefaultSetter {
-  return current.setDefault;
 }
 
 function requirePreset(value: SavedPreset | null): SavedPreset {
@@ -134,7 +129,7 @@ describe("useSavedPresets mutation ordering", () => {
 
     let defaultMutation!: Promise<void>;
     act(() => {
-      defaultMutation = defaultSetter(result.current)("pr", "pr-b");
+      defaultMutation = result.current.setDefault("pr", "pr-b");
     });
     await waitFor(() => expectPersistenceCalls(mode, 1));
 
@@ -168,7 +163,7 @@ describe("useSavedPresets mutation ordering", () => {
 
     let defaultMutation!: Promise<void>;
     act(() => {
-      defaultMutation = defaultSetter(result.current)("pr", "pr-b");
+      defaultMutation = result.current.setDefault("pr", "pr-b");
     });
     await waitFor(() => expectPersistenceCalls(mode, 1));
 

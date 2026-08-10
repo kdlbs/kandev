@@ -45,15 +45,7 @@ const issuePreset: PresetOption = {
 };
 
 type SavedPresetStore = ReturnType<typeof useSavedPresets>;
-type CurrentOptions = Parameters<typeof useSavedPresetActions>[0];
-type FutureOptions = Omit<CurrentOptions, "workspaceId"> & {
-  savedPresetStore: SavedPresetStore;
-  markSearchInteracted: () => void;
-};
-type FutureActions = ReturnType<typeof useSavedPresetActions> & {
-  onToggleSavedDefault?: (preset: SavedPreset) => Promise<void>;
-  defaultMutationPending?: boolean;
-};
+type Options = Parameters<typeof useSavedPresetActions>[0];
 
 function makeStore(overrides: Partial<SavedPresetStore> = {}): SavedPresetStore {
   return {
@@ -66,14 +58,14 @@ function makeStore(overrides: Partial<SavedPresetStore> = {}): SavedPresetStore 
 }
 
 function renderActions(
-  overrides: Partial<FutureOptions> = {},
+  overrides: Partial<Options> = {},
   savedPresetStore = makeStore({ presets: [savedPreset] }),
 ) {
   const setProgrammaticSelection = vi.fn();
   const setQueryImmediate = vi.fn();
   const setRepoFilter = vi.fn();
   const markSearchInteracted = vi.fn();
-  const options: FutureOptions = {
+  const options: Options = {
     selection: { kind: "issue", source: "saved", id: savedPreset.id },
     customQuery: QUERY,
     resolvedPrPresets: [prPreset],
@@ -88,18 +80,12 @@ function renderActions(
   vi.mocked(useSavedPresets).mockReturnValue(options.savedPresetStore);
 
   return {
-    ...renderHook(() => useSavedPresetActions(options as unknown as CurrentOptions)),
+    ...renderHook(() => useSavedPresetActions(options)),
     setProgrammaticSelection,
     setQueryImmediate,
     setRepoFilter,
     markSearchInteracted,
   };
-}
-
-function toggleDefault(current: ReturnType<typeof useSavedPresetActions>) {
-  const action = (current as FutureActions).onToggleSavedDefault;
-  expect(action, "onToggleSavedDefault action").toBeTypeOf("function");
-  return action as NonNullable<FutureActions["onToggleSavedDefault"]>;
 }
 
 beforeEach(() => {
@@ -152,6 +138,12 @@ describe("useSavedPresetActions query actions", () => {
     act(() => result.current.onConfirmSave("Unavailable", REPO));
 
     expect(markSearchInteracted).toHaveBeenCalledOnce();
+    expect(save).toHaveBeenCalledWith({
+      kind: "issue",
+      label: "Unavailable",
+      customQuery: QUERY,
+      repoFilter: REPO,
+    });
     expect(setProgrammaticSelection).not.toHaveBeenCalled();
     expect(setQueryImmediate).not.toHaveBeenCalled();
     expect(setRepoFilter).not.toHaveBeenCalled();
@@ -206,7 +198,7 @@ describe("useSavedPresetActions default actions", () => {
         }),
     );
     const { result } = renderActions({}, makeStore({ presets: [savedPreset], setDefault }));
-    const toggle = toggleDefault(result.current);
+    const toggle = result.current.onToggleSavedDefault;
 
     let firstMutation!: Promise<void>;
     let secondMutation!: Promise<void>;
@@ -242,12 +234,12 @@ describe("useSavedPresetActions default actions", () => {
 
     let mutation!: Promise<void>;
     act(() => {
-      mutation = toggleDefault(result.current)(savedPreset);
+      mutation = result.current.onToggleSavedDefault(savedPreset);
     });
 
     expect(markSearchInteracted).toHaveBeenCalledOnce();
     expect(setDefault).toHaveBeenCalledWith("issue", savedPreset.id);
-    expect((result.current as FutureActions).defaultMutationPending).toBe(true);
+    expect(result.current.defaultMutationPending).toBe(true);
     expect(setProgrammaticSelection).not.toHaveBeenCalled();
     expect(setQueryImmediate).not.toHaveBeenCalled();
     expect(setRepoFilter).not.toHaveBeenCalled();
@@ -256,7 +248,7 @@ describe("useSavedPresetActions default actions", () => {
       finish();
       await mutation;
     });
-    expect((result.current as FutureActions).defaultMutationPending).toBe(false);
+    expect(result.current.defaultMutationPending).toBe(false);
   });
 
   it("clears an existing default and reports persistence failure", async () => {
@@ -267,7 +259,7 @@ describe("useSavedPresetActions default actions", () => {
     const { result } = renderActions({}, makeStore({ presets: [currentDefault], setDefault }));
 
     await act(async () => {
-      await toggleDefault(result.current)(currentDefault);
+      await result.current.onToggleSavedDefault(currentDefault);
     });
 
     expect(setDefault).toHaveBeenCalledWith("issue", null);
@@ -275,6 +267,6 @@ describe("useSavedPresetActions default actions", () => {
       description: "Failed to update default view",
       variant: "error",
     });
-    expect((result.current as FutureActions).defaultMutationPending).toBe(false);
+    expect(result.current.defaultMutationPending).toBe(false);
   });
 });
