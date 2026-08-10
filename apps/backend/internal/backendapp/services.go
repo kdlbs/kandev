@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/db"
 	editorservice "github.com/kandev/kandev/internal/editors/service"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/forgejo"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/gitlab"
 	"github.com/kandev/kandev/internal/integrations/secretadapter"
@@ -118,6 +119,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		}
 	}
 	gitlabSvc := initGitLabService(dbPool, eventBus, repos.Secrets, log)
+	forgejoSvc := initForgejoService(dbPool, repos.Secrets, log)
 	azureDevOpsSvc := initAzureDevOpsService(dbPool, eventBus, repos.Secrets, log)
 	if azureDevOpsSvc != nil {
 		azureDevOpsSvc.SetRepositoryLookup(&repositoryLookupAdapter{svc: taskSvc})
@@ -162,6 +164,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		Utility:      utilitySvc,
 		Workflow:     workflowSvc,
 		GitHub:       githubSvc,
+		Forgejo:      forgejoSvc,
 		GitLab:       gitlabSvc,
 		AzureDevOps:  azureDevOpsSvc,
 		Jira:         jiraSvc,
@@ -188,6 +191,18 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	}
 	services.Mentions = mentionComponents
 	return services, agentSettingsController, nil
+}
+
+// initForgejoService wires the workspace-scoped Forgejo configuration store.
+// Like other provider integrations, failures are non-fatal so the server is
+// still usable when a local database is temporarily unavailable.
+func initForgejoService(dbPool *db.Pool, secretsStore secrets.SecretStore, log *logger.Logger) *forgejo.Service {
+	store, err := forgejo.NewStore(dbPool.Writer(), dbPool.Reader())
+	if err != nil {
+		log.Warn("Forgejo service initialization failed (non-fatal)", zap.Error(err))
+		return nil
+	}
+	return forgejo.NewService(store, secretadapter.New(secretsStore))
 }
 
 type githubBrokerScopeAuthorizer struct {

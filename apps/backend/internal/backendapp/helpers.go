@@ -44,6 +44,7 @@ import (
 	editorhandlers "github.com/kandev/kandev/internal/editors/handlers"
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/forgejo"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/gitlab"
@@ -1011,6 +1012,11 @@ func registerSecondaryRoutes(
 		github.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.GitHub, p.log)
 		github.RegisterMockRoutes(p.router, p.services.GitHub, p.log)
 		p.log.Debug("Registered GitHub handlers (HTTP + WebSocket)")
+	}
+
+	if p.services.Forgejo != nil {
+		forgejo.RegisterRoutes(p.router, p.services.Forgejo)
+		p.log.Debug("Registered Forgejo handlers (HTTP)")
 	}
 
 	if p.services.GitLab != nil {

@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/azuredevops"
 	editorservice "github.com/kandev/kandev/internal/editors/service"
 	editorstore "github.com/kandev/kandev/internal/editors/store"
+	"github.com/kandev/kandev/internal/forgejo"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/gitlab"
 	"github.com/kandev/kandev/internal/jira"
@@ -70,6 +71,7 @@ type Services struct {
 	Utility      *utilityservice.Service
 	Workflow     *workflowservice.Service
 	GitHub       *github.Service
+	Forgejo      *forgejo.Service
 	GitLab       *gitlab.Service
 	AzureDevOps  *azuredevops.Service
 	Jira         *jira.Service
