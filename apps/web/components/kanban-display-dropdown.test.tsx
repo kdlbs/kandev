@@ -262,6 +262,34 @@ describe("KanbanDisplayDropdown — Steps section", () => {
     expect(screen.queryByText("kanban:steps")).toBeNull();
     expect(screen.queryByTestId(/steps-filter-group-/)).toBeNull();
   });
+
+  // The dropdown half of the tablet-exclusivity criterion (item 2): once
+  // expanded, exactly one steps-filter-step-<stepId> exists per step of the
+  // expanded group — a duplication check paired with an expected-count
+  // assertion so it cannot pass vacuously.
+  it("holds exactly one steps-filter-step-<stepId> per step of an expanded group, no duplication", () => {
+    useKanbanDisplaySettingsMock.mockReturnValue({
+      ...defaultMockSettings(),
+      eligibleWorkflows: [STEPS_WF_A, STEPS_WF_B],
+      snapshots: {
+        [STEPS_WF_A_ID]: {
+          steps: [
+            { id: "step-1", title: "Step 1", position: 0 },
+            { id: "step-2", title: "Step 2", position: 1 },
+          ],
+        },
+        [STEPS_WF_B_ID]: { steps: [{ id: "step-3", title: "Step 3", position: 0 }] },
+      },
+    });
+    render(<KanbanDisplayDropdown />);
+    openDropdown();
+
+    fireEvent.click(screen.getByTestId(`steps-filter-group-toggle-${STEPS_WF_A_ID}`));
+
+    expect(screen.getAllByTestId("steps-filter-step-step-1")).toHaveLength(1);
+    expect(screen.getAllByTestId("steps-filter-step-step-2")).toHaveLength(1);
+    expect(screen.queryByTestId("steps-filter-step-step-3")).toBeNull();
+  });
 });
 
 describe("KanbanDisplayDropdown — Steps section checkbox interaction", () => {

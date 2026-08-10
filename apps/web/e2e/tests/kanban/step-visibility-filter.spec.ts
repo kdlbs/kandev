@@ -28,7 +28,21 @@ async function closeDisplayDropdown(kanban: KanbanPage) {
   await expect(trigger).not.toHaveAttribute("data-state", "open");
 }
 
+// R2: with a second workflow seeded, the Steps section now shows a disclosure
+// header per workflow group and starts collapsed by default (nothing hidden
+// yet) — a checked-state assertion or a checkbox click against a collapsed
+// group's steps matches nothing and passes vacuously, so every such
+// interaction gains this expand step first.
+async function expandStepsGroup(kanban: KanbanPage, workflowId: string) {
+  const toggle = kanban.page.getByTestId(`steps-filter-group-toggle-${workflowId}`);
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") {
+    await toggle.click();
+  }
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+}
+
 test.describe("Kanban step visibility filter", () => {
+  let workflowAId: string | null = null;
   let workflowBId: string | null = null;
   let startStepAId: string | null = null;
   let secondStepAId: string | null = null;
@@ -37,6 +51,7 @@ test.describe("Kanban step visibility filter", () => {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   test.beforeEach(async ({ apiClient, seedData, testPage }) => {
     // Use the existing seed workflow A start step
+    workflowAId = seedData.workflowId;
     startStepAId = seedData.startStepId;
 
     // Workflow A needs a SECOND step holding a second task so that hiding the
@@ -78,6 +93,7 @@ test.describe("Kanban step visibility filter", () => {
       await apiClient.deleteWorkflowStep(secondStepAId).catch(() => {});
       secondStepAId = null;
     }
+    workflowAId = null;
     startStepAId = null;
     startStepBId = null;
     // Clear hidden step IDs and restore default filter
@@ -112,7 +128,9 @@ test.describe("Kanban step visibility filter", () => {
     await expect(kanban.taskCardByTitle(TASK_B)).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
 
     // Hide the start step of workflow A
+    if (!workflowAId) throw new Error("workflowAId not set");
     await openDisplayDropdown(kanban);
+    await expandStepsGroup(kanban, workflowAId);
     await testPage.getByTestId(`steps-filter-step-${startStepAId}`).click();
     await closeDisplayDropdown(kanban);
 
@@ -186,7 +204,7 @@ test.describe("Kanban step visibility filter", () => {
   test("step filter is scoped per workflow — hiding a step in A does not hide the same-named step in B", async ({
     testPage,
   }) => {
-    if (!startStepAId || !secondStepAId || !startStepBId) {
+    if (!workflowAId || !workflowBId || !startStepAId || !secondStepAId || !startStepBId) {
       throw new Error("step IDs not set");
     }
 
@@ -206,9 +224,11 @@ test.describe("Kanban step visibility filter", () => {
 
     // Hide the start step of workflow A only
     await openDisplayDropdown(kanban);
+    await expandStepsGroup(kanban, workflowAId);
     await testPage.getByTestId(`steps-filter-step-${startStepAId}`).click();
 
     // Workflow B's start step checkbox must remain checked
+    await expandStepsGroup(kanban, workflowBId);
     const checkboxB = testPage.getByTestId(`steps-filter-step-${startStepBId}`);
     await expect(checkboxB).toBeChecked();
     await closeDisplayDropdown(kanban);
@@ -235,7 +255,7 @@ test.describe("Kanban step visibility filter", () => {
   test("AC-08: a workflow whose every step is hidden disappears from All Workflows view while others are unaffected", async ({
     testPage,
   }) => {
-    if (!startStepAId || !secondStepAId || !startStepBId) {
+    if (!workflowAId || !startStepAId || !secondStepAId || !startStepBId) {
       throw new Error("step IDs not set");
     }
 
@@ -256,8 +276,12 @@ test.describe("Kanban step visibility filter", () => {
     });
     await expect(kanban.taskCardByTitle(TASK_B)).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
 
-    // Hide BOTH of workflow A's steps — every step of A is now unticked
+    // Hide BOTH of workflow A's steps — every step of A is now unticked.
+    // Expanding once is enough: an explicit disclosure choice wins over the
+    // recomputed default for the rest of this visit, so A stays expanded
+    // across both step toggles below.
     await openDisplayDropdown(kanban);
+    await expandStepsGroup(kanban, workflowAId);
     await testPage.getByTestId(`steps-filter-step-${startStepAId}`).click();
     await testPage.getByTestId(`steps-filter-step-${secondStepAId}`).click();
     await closeDisplayDropdown(kanban);

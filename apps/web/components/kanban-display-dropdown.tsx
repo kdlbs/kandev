@@ -12,14 +12,15 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { IconAdjustmentsHorizontal } from "@tabler/icons-react";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
+import { useStepsDisclosureOverrides } from "@/hooks/use-steps-disclosure-overrides";
 import {
   pluginTaskFilterRegistrationKey,
   type PluginTaskFilterRegistration,
 } from "@/lib/plugins/registry";
 import type { Repository } from "@/lib/types/http";
 import type { WorkflowsState } from "@/lib/state/slices";
-import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
-import { useMemo, useRef, type ComponentProps } from "react";
+import { StepsVisibilitySection } from "@/components/kanban/steps-visibility-section";
+import { useMemo, useRef, useState, type ComponentProps } from "react";
 import { useTranslation } from "react-i18next";
 import { getRepositoryPlaceholderKey } from "@/lib/kanban/repository-placeholder";
 
@@ -148,56 +149,23 @@ function PluginFilterSection({
   );
 }
 
-function StepsSection({
-  eligibleWorkflows,
-  snapshots,
-  hiddenWorkflowStepIds,
-  onToggleStepVisibility,
-}: {
-  eligibleWorkflows: Array<{ id: string; name: string }>;
-  snapshots: Record<string, WorkflowSnapshotData>;
-  hiddenWorkflowStepIds: Record<string, string[]>;
-  onToggleStepVisibility: (workflowId: string, stepId: string) => void;
-}) {
-  const { t } = useTranslation();
-  // Spec: one group per eligible workflow (a loaded snapshot), full stop — a
-  // workflow with zero steps still gets a (steps-less) group rather than
-  // being dropped, so it isn't silently absent from the filter surface.
-  if (eligibleWorkflows.length === 0) return null;
-  const showWorkflowLabels = eligibleWorkflows.length > 1;
+function StepsSection(
+  props: Omit<
+    ComponentProps<typeof StepsVisibilitySection>,
+    "overrides" | "onToggleGroupDisclosure"
+  > & { open: boolean },
+) {
+  const { open, ...sectionProps } = props;
+  const { overrides, toggleDisclosure } = useStepsDisclosureOverrides(open, "dropdown");
+  if (sectionProps.eligibleWorkflows.length === 0) return null;
   return (
     <>
       <DropdownMenuSeparator />
-      <div className="space-y-1.5">
-        <DropdownMenuLabel className="px-0 text-foreground">{t("kanban:steps")}</DropdownMenuLabel>
-        <p className="text-xs text-muted-foreground">{t("kanban:stepsSectionDescription")}</p>
-        {eligibleWorkflows.map((wf) => {
-          const steps = [...(snapshots[wf.id]?.steps ?? [])].sort(
-            (a, b) => a.position - b.position || a.id.localeCompare(b.id),
-          );
-          const hidden = hiddenWorkflowStepIds[wf.id] ?? [];
-          return (
-            <div key={wf.id} className="space-y-1" data-testid={`steps-filter-group-${wf.id}`}>
-              {showWorkflowLabels && (
-                <p className="text-xs font-medium text-muted-foreground">{wf.name}</p>
-              )}
-              {steps.map((step) => (
-                <label
-                  key={step.id}
-                  className="flex min-h-11 cursor-pointer items-center gap-2 px-2"
-                >
-                  <Checkbox
-                    data-testid={`steps-filter-step-${step.id}`}
-                    checked={!hidden.includes(step.id)}
-                    onCheckedChange={() => onToggleStepVisibility(wf.id, step.id)}
-                  />
-                  <span className="text-sm text-foreground">{step.title}</span>
-                </label>
-              ))}
-            </div>
-          );
-        })}
-      </div>
+      <StepsVisibilitySection
+        {...sectionProps}
+        overrides={overrides}
+        onToggleGroupDisclosure={toggleDisclosure}
+      />
     </>
   );
 }
@@ -289,9 +257,10 @@ export function KanbanDisplayDropdown({
 
   const repositoryValue = allRepositoriesSelected ? "all" : (selectedRepositoryId ?? "all");
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
 
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
         <Button
           ref={triggerRef}
@@ -339,6 +308,7 @@ export function KanbanDisplayDropdown({
           })}
           {currentPage === "kanban" && (
             <StepsSection
+              open={open}
               eligibleWorkflows={eligibleWorkflows}
               snapshots={snapshots}
               hiddenWorkflowStepIds={hiddenWorkflowStepIds}

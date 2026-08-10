@@ -82,6 +82,7 @@
   "step": "Step",
   "steps": "Steps",
   "stepsSectionDescription": "Uncheck a step to hide its column and tasks on this board. It also stops appearing as a move destination on the card menu and bulk-move toolbar for that workflow — re-check it to move tasks there again.",
+  "stepsShownOfTotal": "{{shown}} of {{total}} shown",
   "subtaskOf": "Subtask of",
   "taskList": "Task list",
   "tasksOverWipLimit": "{{label}} tasks, over WIP limit",
