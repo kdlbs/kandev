@@ -115,10 +115,11 @@ surface.
   authenticated action; host verifies repository, session, and worktree branch authority.
 - **Code-host task status:** registered review providers publish normalized
   `ReviewItemSummary.taskStatus`. Host task chrome automatically renders the shared
-  topbar button, composer CI chip, desktop popover/mobile drawer, and 90-second
-  deduplicated refresh. Do not add provider visual slots or provider-owned status
-  pollers for these locations; adapt GitHub and plugins through the shared
-  `components/integrations/change-request-*` anatomy.
+  topbar button, composer CI chip, desktop popover/mobile drawer, and association-icon
+  hover summary. Association detail refresh is lazy on hover/focus; workspace association
+  discovery and visible task status use deduplicated refreshes. Do not add provider visual
+  slots or provider-owned status pollers for these locations; adapt GitHub and plugins
+  through the shared `components/integrations/change-request-*` anatomy.
 - **Code-host review detail:** GitHub and compatible review providers render
   `components/integrations/change-request-detail.tsx` (also exposed as
   `host.ui.ChangeRequestDetail`). Providers own normalized data/capabilities/actions,

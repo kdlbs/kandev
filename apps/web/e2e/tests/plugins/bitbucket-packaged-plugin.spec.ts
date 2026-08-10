@@ -83,6 +83,65 @@ const CAPTURE_ACTION_RESPONSES: Record<string, unknown> = {
   "pullrequests.associations": { associations: [] },
 };
 
+const LINKED_REVIEW_KEY = "northstar-labs/relay#42";
+
+function linkedPullRequest(taskId: string) {
+  return {
+    id: "42",
+    review_key: LINKED_REVIEW_KEY,
+    number: 42,
+    title: "Add audit log export with retention controls",
+    url: "https://bitbucket.org/northstar-labs/relay/pull-requests/42",
+    repository_id: "northstar-labs/relay",
+    repository_name: "relay",
+    state: "OPEN",
+    source_branch: "feature/audit-export",
+    destination_branch: "main",
+    updated_at: "2026-08-10T15:30:00Z",
+    associations: [{ review_key: LINKED_REVIEW_KEY, task_id: taskId }],
+    participants: [{ id: "reviewer-1", name: "Maya Chen", role: "REVIEWER", approved: true }],
+    statuses: [
+      {
+        key: "build",
+        name: "Build",
+        state: "SUCCESSFUL",
+        url: "https://bitbucket.org/northstar-labs/relay/addon/pipelines/home#!/results/84",
+      },
+    ],
+  };
+}
+
+async function mockLinkedPullRequestState(page: Page, taskId: string): Promise<() => number> {
+  let detailRequests = 0;
+  const pullRequest = linkedPullRequest(taskId);
+  await page.route(`**/api/plugins/${PLUGIN_ID}/actions/**`, async (route) => {
+    const actionKey = new URL(route.request().url()).pathname.split("/").at(-1) ?? "";
+    if (actionKey === "pullrequests.associations") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          associations: [
+            { review_key: LINKED_REVIEW_KEY, task_id: taskId, task_title: "Sidebar summary" },
+          ],
+        }),
+      });
+      return;
+    }
+    if (actionKey === "pullrequests.get") {
+      detailRequests += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ...pullRequest, pull_requests: [pullRequest] }),
+      });
+      return;
+    }
+    await route.continue();
+  });
+  return () => detailRequests;
+}
+
 test.skip(!packagePath, "requires KANDEV_BITBUCKET_PLUGIN_PACKAGE from the attached plugin repo");
 
 async function mockConfiguredCaptureState(page: Page): Promise<void> {
@@ -263,5 +322,43 @@ test.describe("Bitbucket packaged plugin", () => {
       caption: "Native mobile Bitbucket filter sheet",
     });
     capture.flush();
+  });
+
+  test("shows the shared pull-request summary from the uploaded package on sidebar hover", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+    const title = "Bitbucket sidebar summary";
+    const task = await apiClient.createTask(seedData.workspaceId, title, {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    const getDetailRequests = await mockLinkedPullRequestState(testPage, task.id);
+
+    await installPackagedPlugin(testPage);
+    await testPage.goto("/");
+
+    const taskRow = testPage.getByTestId("sidebar-task-item").filter({ hasText: title });
+    await expect(taskRow).toBeVisible({ timeout: 15_000 });
+    const icon = taskRow.getByTestId(`registered-change-request-task-icon-${task.id}`);
+    await expect(icon).toHaveAttribute("aria-label", "1 Bitbucket pull request linked");
+    expect(getDetailRequests()).toBe(0);
+
+    await icon.hover();
+    await expect.poll(getDetailRequests).toBeGreaterThan(0);
+    const summary = testPage
+      .locator(
+        '[data-slot="tooltip-content"]:not([data-state="closed"]) > [data-testid="pr-task-status-summary"]',
+      )
+      .first();
+    await expect(summary).toBeVisible();
+    await expect(summary.getByTestId("pr-task-status-number")).toHaveText("PR #42");
+    await expect(summary.getByTestId("pr-task-status-title")).toHaveText(
+      "Add audit log export with retention controls",
+    );
+    await expect(summary.getByTestId("pr-task-status-review")).toContainText("Approved");
+    await expect(summary.getByTestId("pr-task-status-ci")).toContainText("Passed");
   });
 });

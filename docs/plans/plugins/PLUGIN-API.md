@@ -741,6 +741,8 @@ interface ReviewProviderRegistration {
   refresh(taskId: string, signal: AbortSignal): Promise<void>;
   // Implement all three association callbacks together. The host performs one
   // workspace-bounded refresh and renders native task-list/card indicators.
+  // Hover/focus lazily calls refresh(taskId), then renders taskStatus through
+  // the same host-owned structured summary used by first-party providers.
   getAssociationSnapshot?(workspaceId: string): readonly ReviewTaskAssociation[];
   subscribeAssociations?(workspaceId: string, listener: () => void): () => void;
   refreshAssociations?(workspaceId: string, signal: AbortSignal): Promise<void>;

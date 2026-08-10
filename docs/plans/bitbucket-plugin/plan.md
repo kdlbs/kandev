@@ -122,13 +122,18 @@ Wave 3h (corrective native workflow pass after final manual evaluation):
 
 - [x] [task 12h — native create, unlink, task indicators, and saved queries](task-12h-native-create-unlink-indicators-saved-queries.md)
 
+Wave 3i (corrective sidebar hover parity after manual evaluation):
+
+- [x] [task 12i — shared task-indicator hover summary](task-12i-shared-task-indicator-hover-summary.md)
+
 Wave 4:
 
 - [ ] [task 13 — contract E2E, release, and marketplace](task-13-contract-e2e-release-marketplace.md)
 
 ## Current status
 
-Tasks 01–12h are implemented. Task 13 remains the release/marketplace gate.
+Tasks 01–12i are implemented. Task 13 remains the
+release/marketplace gate.
 Live Cloud evaluation showed that task 12's permanent
 desktop queue/review split diverged from the first-party `/github` page despite being
 functionally complete; task 12b replaced it with the approved list-first parity model
@@ -164,6 +169,11 @@ through the registered provider after a real Git push, shared unlink with reload
 detachment, workspace-hydrated sidebar indicators, and saved-query persistence and
 restoration. The native Create PR control remains Kandev's existing Changes-panel
 control; no duplicate plugin-specific create button was added.
+Task 12i removed the association indicator's count-only tooltip. Registered providers
+now reuse GitHub's host-owned structured pull-request summary and load task detail only
+when the desktop indicator opens; the existing mobile Status/Review surfaces remain the
+touch path. Unit, packaged-plugin desktop E2E, mobile contract E2E, typecheck, and lint
+pass.
 The packaged generic host contract passes on desktop and
 mobile. The actual package passes its unconfigured action, disable/re-enable, desktop,
 and mobile lifecycle checks; its canonical composer reference now rehydrates the

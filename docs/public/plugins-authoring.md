@@ -897,7 +897,12 @@ A review provider can implement the workspace association snapshot/subscription/
 trio plus `unlink`. Kandev then owns sidebar/Kanban/list PR indicators and the shared
 desktop/mobile unlink control. `unlink` removes only the selected task association and
 must not delete the remote change request. After it resolves, Kandev refreshes both the
-task review snapshot and the workspace association snapshot.
+task review snapshot and the workspace association snapshot. On desktop, hovering or
+keyboard-focusing an association indicator lazily refreshes the matching task review and
+renders the same structured pull-request summary used by first-party providers. Publish
+`ReviewItemSummary.taskStatus` to supply state, review, and CI rows; do not poll every
+sidebar task on mount. Mobile exposes the same review data through the native Status and
+Review surfaces because it has no hover interaction.
 
 Registered review panels use `host.ui.ChangeRequestDetail`, the same detail
 component consumed by GitHub. Supply provider-neutral identity, state, branches,

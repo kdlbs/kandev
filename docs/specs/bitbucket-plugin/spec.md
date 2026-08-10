@@ -139,7 +139,12 @@ and reference work, while remaining independently releasable as an official plug
   request's source/head commit, never its destination commit.
 - The review provider exposes one bounded workspace association snapshot. Kandev uses
   it to render its semantic pull-request glyph beside linked tasks in task switcher,
-  Kanban, and rich task-list rows, without issuing one provider request per task.
+  Kanban, and rich task-list rows, without issuing one provider request per task. On
+  mouse hover or keyboard focus, that glyph opens the same host-owned structured
+  pull-request summary used by GitHub (number, title, review, CI, and available state),
+  resolving detail lazily through the registered review-provider snapshot. A plain
+  count-only tooltip is not parity. Touch/mobile continues through the native task
+  status and Review surfaces; no required information or action is hover-only.
 - Clone, fetch, and push resolve through the provider-neutral short-lived credential
   broker. Secrets never appear in clone URLs, task metadata/state, environment
   variables, command arguments, logs, or executor payloads.

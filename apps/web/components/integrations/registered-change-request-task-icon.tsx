@@ -1,11 +1,22 @@
 "use client";
 
-import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { IconGitPullRequest } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
+import {
+  refreshReviewProvider,
+  useReviewProviderUpdates,
+} from "@/components/task/review-panel-provider";
+import {
+  ChangeRequestTaskStatusSummary,
+  type ChangeRequestTaskStatusSummaryData,
+  type ChangeRequestTaskSummaryRow,
+} from "@/components/integrations/change-request-task-status-summary";
 import { usePluginRegistry, type PluginReviewProviderRegistration } from "@/lib/plugins/registry";
+import type { ReviewItemSummary, ReviewTaskStatus } from "@/lib/plugins/types";
 import { useTranslation } from "react-i18next";
+import { useChangeRequestTaskTooltipState } from "./use-change-request-task-tooltip-state";
 
 type AssociationRefresh = NonNullable<PluginReviewProviderRegistration["refreshAssociations"]>;
 type RefreshEntry = {
@@ -117,22 +128,85 @@ function useRegisteredTaskAssociations(taskId: string) {
   );
 }
 
+function taskStatusRows(status: ReviewTaskStatus): ChangeRequestTaskSummaryRow[] {
+  const rows: ChangeRequestTaskSummaryRow[] = [];
+  if (status.state === "merged") rows.push({ kind: "state", status: "merged", tone: "merged" });
+  if (status.state === "closed") rows.push({ kind: "state", status: "closed", tone: "danger" });
+  if (status.state === "draft") rows.push({ kind: "state", status: "draft", tone: "muted" });
+  if (status.review?.state === "approved") {
+    rows.push({ kind: "review", status: "approved", tone: "success" });
+  } else if (status.review?.state === "changes_requested") {
+    rows.push({ kind: "review", status: "changes_requested", tone: "danger" });
+  } else if (status.review?.state === "pending") {
+    rows.push({ kind: "review", status: "pending_review", tone: "info" });
+  }
+  if (status.pipelineState === "success") {
+    rows.push({ kind: "ci", status: "passed", tone: "success" });
+  } else if (status.pipelineState === "failure") {
+    rows.push({ kind: "ci", status: "failed", tone: "danger" });
+  } else if (status.pipelineState === "pending") {
+    rows.push({ kind: "ci", status: "in_progress", tone: "warning" });
+  }
+  return rows;
+}
+
+function taskStatusSummary(review: ReviewItemSummary): ChangeRequestTaskStatusSummaryData | null {
+  if (!review.taskStatus) return null;
+  return {
+    number: review.taskStatus.number,
+    title: review.title,
+    rows: taskStatusRows(review.taskStatus),
+  };
+}
+
 export function RegisteredChangeRequestTaskIcon({ taskId }: { taskId: string }) {
   const { t } = useTranslation();
   const associations = useRegisteredTaskAssociations(taskId);
+  const providers = useMemo(
+    () => Array.from(new Set(associations.map(({ provider }) => provider))),
+    [associations],
+  );
+  const reviewVersion = useReviewProviderUpdates(taskId, providers);
+  const summaries = useMemo(() => {
+    const keysByProvider = new Map<string, Set<string>>();
+    associations.forEach(({ association, provider }) => {
+      const keys = keysByProvider.get(provider.id) ?? new Set<string>();
+      keys.add(association.reviewKey);
+      keysByProvider.set(provider.id, keys);
+    });
+    return providers.flatMap((provider) => {
+      const keys = keysByProvider.get(provider.id);
+      if (!keys) return [];
+      return provider
+        .getSnapshot(taskId)
+        .filter((review) => keys.has(review.reviewKey))
+        .flatMap((review) => {
+          const summary = taskStatusSummary(review);
+          return summary ? [summary] : [];
+        });
+    });
+  }, [associations, providers, reviewVersion, taskId]);
+  const refreshDetails = useCallback(() => {
+    providers.forEach((provider) => void refreshReviewProvider(provider, taskId));
+  }, [providers, taskId]);
+  const tooltip = useChangeRequestTaskTooltipState(refreshDetails);
   if (associations.length === 0) return null;
   const labels = Array.from(new Set(associations.map(({ provider }) => provider.label)));
   const providerLabel = labels.length === 1 ? labels[0] : t("integrations:registeredProvider");
   const count = associations.length;
   const label = t("integrations:linkedProviderPullRequests", { count, provider: providerLabel });
   return (
-    <Tooltip>
+    <Tooltip open={tooltip.open}>
       <TooltipTrigger asChild>
         <span
           data-testid={`registered-change-request-task-icon-${taskId}`}
           role="img"
           tabIndex={0}
           aria-label={label}
+          onPointerEnter={tooltip.onPointerEnter}
+          onPointerLeave={tooltip.onPointerLeave}
+          onFocus={tooltip.onFocus}
+          onBlur={tooltip.onBlur}
           className="inline-flex shrink-0 items-center gap-0.5 text-muted-foreground"
         >
           <IconGitPullRequest aria-hidden="true" className="h-3.5 w-3.5" />
@@ -141,7 +215,13 @@ export function RegisteredChangeRequestTaskIcon({ taskId }: { taskId: string }) 
           ) : null}
         </span>
       </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
+      <TooltipContent
+        sideOffset={6}
+        onEscapeKeyDown={tooltip.onEscapeKeyDown}
+        className="w-80 max-w-[calc(100vw-1rem)] p-3"
+      >
+        {summaries.length > 0 ? <ChangeRequestTaskStatusSummary summaries={summaries} /> : label}
+      </TooltipContent>
     </Tooltip>
   );
 }
