@@ -564,5 +564,51 @@ func (c *PATClient) do(request *http.Request, target any) (int, error) {
 		return 0, err
 	}
 	total, _ := strconv.Atoi(response.Header.Get("x-total-count"))
+	if total == 0 {
+		total = paginationTotalFromLink(response.Header.Get("Link"), request.URL.Query())
+	}
 	return total, nil
+}
+
+// paginationTotalFromLink provides a conservative count fallback for Forgejo
+// instances that expose RFC 5988 pagination links but omit x-total-count. The
+// last page's exact item count is unknowable from Link alone, so returning the
+// page boundary intentionally keeps the UI's Next control available instead
+// of silently truncating provider data.
+func paginationTotalFromLink(link string, query url.Values) int {
+	if strings.TrimSpace(link) == "" {
+		return 0
+	}
+	limit, _ := strconv.Atoi(query.Get("limit"))
+	if limit < 1 {
+		limit = 30
+	}
+	current, _ := strconv.Atoi(query.Get("page"))
+	if current < 1 {
+		current = 1
+	}
+	for _, part := range strings.Split(link, ",") {
+		if !strings.Contains(part, `rel="last"`) && !strings.Contains(part, `rel="next"`) {
+			continue
+		}
+		start, end := strings.Index(part, "<"), strings.Index(part, ">")
+		if start < 0 || end <= start {
+			continue
+		}
+		linked, err := url.Parse(part[start+1 : end])
+		if err != nil {
+			continue
+		}
+		page, err := strconv.Atoi(linked.Query().Get("page"))
+		if err != nil || page < 1 {
+			continue
+		}
+		if strings.Contains(part, `rel="last"`) {
+			return page * limit
+		}
+		if page > current {
+			return page * limit
+		}
+	}
+	return 0
 }

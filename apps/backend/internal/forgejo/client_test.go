@@ -80,6 +80,19 @@ func TestPATClientRepositoriesUsePagination(t *testing.T) {
 	}
 }
 
+func TestPATClientUsesLinkHeaderWhenTotalCountIsUnavailable(t *testing.T) {
+	server := newServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Link", `<https://forgejo.example/api/v1/user/repos?page=3&limit=25>; rel="last"`)
+		_, _ = w.Write([]byte(`[{"name":"rf-consulting","full_name":"botwork123/rf-consulting","owner":{"login":"botwork123"}}]`))
+	})
+	t.Cleanup(server.Close)
+	client, _ := NewPATClient(server.URL, "token")
+	_, total, err := client.ListRepositories(context.Background(), 1, 25)
+	if err != nil || total != 75 {
+		t.Fatalf("total=%d err=%v", total, err)
+	}
+}
+
 func TestPATClientIssuesExcludePullRequests(t *testing.T) {
 	server := newServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`[{"number":1,"title":"Issue","state":"open"},{"number":2,"title":"PR","pull_request":{}}]`))
