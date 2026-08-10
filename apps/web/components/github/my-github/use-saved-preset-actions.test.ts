@@ -77,13 +77,56 @@ function renderActions(
     markSearchInteracted,
     ...overrides,
   };
+  const rendered = renderHook((currentOptions: Options) => useSavedPresetActions(currentOptions), {
+    initialProps: options,
+  });
   return {
-    ...renderHook(() => useSavedPresetActions(options)),
+    ...rendered,
+    rerender: (nextOverrides: Partial<Options> = {}) =>
+      rendered.rerender({ ...options, ...nextOverrides }),
     setProgrammaticSelection,
     setQueryImmediate,
     setRepoFilter,
     markSearchInteracted,
   };
+}
+
+async function expectLatestPresetCatalogAfterDelete() {
+  let finishRemove!: (removed: boolean) => void;
+  const remove = vi.fn(
+    () =>
+      new Promise<boolean>((resolve) => {
+        finishRemove = resolve;
+      }),
+  );
+  const refreshedIssuePreset: PresetOption = {
+    ...issuePreset,
+    value: "mentioned",
+    label: "Mentioned",
+    filter: "mentions:@me is:open",
+  };
+  const { result, rerender, setProgrammaticSelection, setQueryImmediate } = renderActions(
+    {},
+    makeStore({ presets: [savedPreset], remove }),
+  );
+
+  let deletion!: Promise<void>;
+  act(() => {
+    deletion = result.current.onDeleteSaved(savedPreset.id);
+  });
+  rerender({ resolvedIssuePresets: [refreshedIssuePreset] });
+
+  await act(async () => {
+    finishRemove(true);
+    await deletion;
+  });
+
+  expect(setProgrammaticSelection).toHaveBeenCalledWith({
+    kind: "issue",
+    source: "preset",
+    id: refreshedIssuePreset.value,
+  });
+  expect(setQueryImmediate).toHaveBeenCalledWith(refreshedIssuePreset.filter);
 }
 
 beforeEach(() => {
@@ -198,6 +241,10 @@ describe("useSavedPresetActions delete actions", () => {
     });
     expect(setQueryImmediate).toHaveBeenCalledWith(issuePreset.filter);
     expect(setRepoFilter).toHaveBeenCalledWith("");
+  });
+
+  it("uses the latest preset catalog when an active deletion finishes", async () => {
+    await expectLatestPresetCatalogAfterDelete();
   });
 
   it("deletes an inactive saved query without changing the active search", async () => {

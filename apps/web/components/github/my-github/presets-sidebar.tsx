@@ -225,8 +225,7 @@ export function PresetsSidebar({
   const presets = selected.kind === "pr" ? prPresets : issuePresets;
   const saved = savedPresets.filter((p) => p.kind === selected.kind);
   const onKindChange = (kind: "pr" | "issue") => {
-    const fallback = (kind === "pr" ? prPresets : issuePresets)[0]?.value ?? "";
-    onSelect({ kind, source: "preset", id: fallback });
+    onSelect({ kind, source: "preset", id: "" });
   };
   return (
     <nav className="flex w-full min-w-0 flex-col overflow-x-hidden py-3">

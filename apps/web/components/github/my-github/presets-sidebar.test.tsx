@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SavedPreset } from "./saved-preset-model";
 import { PresetsSidebar } from "./presets-sidebar";
@@ -45,5 +45,25 @@ describe("PresetsSidebar saved defaults", () => {
     expect(defaultAction.disabled).toBe(true);
     expect(defaultAction.getAttribute("aria-busy")).toBeNull();
     expect(defaultAction.querySelector("svg")?.getAttribute("class")).toContain("animate-pulse");
+  });
+
+  it("sends only the destination kind when switching views", () => {
+    const onSelect = vi.fn();
+    render(
+      <PresetsSidebar
+        selected={{ kind: "pr", source: "saved", id: savedPreset.id }}
+        onSelect={onSelect}
+        savedPresets={[savedPreset]}
+        onDeleteSaved={vi.fn()}
+        canSaveCurrent={false}
+        onSaveCurrent={vi.fn()}
+        onToggleSavedDefault={vi.fn()}
+        defaultMutationPending={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Issues" }));
+
+    expect(onSelect).toHaveBeenCalledWith({ kind: "issue", source: "preset", id: "" });
   });
 });

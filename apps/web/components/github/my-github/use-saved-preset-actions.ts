@@ -103,6 +103,8 @@ function useDeleteSaved({
 }) {
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
+  const presetsRef = useRef({ prPresets, issuePresets });
+  presetsRef.current = { prPresets, issuePresets };
   return useCallback(
     async (id: string) => {
       try {
@@ -112,7 +114,11 @@ function useDeleteSaved({
         markSearchInteracted();
         const currentSelection = selectionRef.current;
         if (currentSelection.source === "saved" && currentSelection.id === id) {
-          const fallback = firstPresetSelection(currentSelection.kind, prPresets, issuePresets);
+          const fallback = firstPresetSelection(
+            currentSelection.kind,
+            presetsRef.current.prPresets,
+            presetsRef.current.issuePresets,
+          );
           setProgrammaticSelection(fallback.selection);
           setQueryImmediate(fallback.filter);
           setRepoFilter("");
@@ -122,9 +128,7 @@ function useDeleteSaved({
       }
     },
     [
-      issuePresets,
       markSearchInteracted,
-      prPresets,
       remove,
       reportError,
       setProgrammaticSelection,
