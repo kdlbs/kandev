@@ -125,6 +125,10 @@ is the completeness check. Full guide: [`docs/i18n.md`](docs/i18n.md).
 ### GitHub Operations
 Skills use `gh` CLI by default. If a `gh` command fails (not installed, not authenticated, etc.), use whatever GitHub tools are available in the environment (MCP GitHub tools, API tools, etc.) to accomplish the same operation. The goal is the same — the tool may differ.
 
+When asked to assign an issue to "my user", resolve the authenticated GitHub
+login through the available connector or CLI first, assign that exact login,
+then re-read the issue and verify the assignee.
+
 For multiline Markdown issue or PR bodies, write the body to a file and pass it
 with the relevant `gh ... --body-file <path>` option. Do not send escaped
 newlines through `--body`; GitHub will render them literally.
