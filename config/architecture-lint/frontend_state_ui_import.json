@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "rule": "ARCH-FRONTEND-STATE-UI-IMPORT",
+  "entries": [
+    {
+      "import": "@/components/app-sidebar/app-sidebar-constants",
+      "path": "apps/web/lib/state/slices/ui/app-sidebar-actions.ts"
+    },
+    {
+      "import": "@/components/app-sidebar/app-sidebar-constants",
+      "path": "apps/web/lib/state/slices/ui/ui-slice.ts"
+    }
+  ]
+}

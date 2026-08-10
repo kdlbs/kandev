@@ -56,9 +56,8 @@ apps/backend/
 │   │   ├── models/       # Task, Session, Executor, Message models
 │   │   ├── repository/   # Database access (SQLite)
 │   │   └── service/      # Task business logic
-│   ├── office/           # Autonomous agent management (agents, approvals, channels, config, costs,
-│   │                     # dashboard, infra, labels, onboarding, projects, repository, runtime,
-│   │                     # routines, routing, scheduler, service, shared, skills, workspaces)
+│   ├── runs/             # Generic backend-wide run scheduling and execution state
+│   ├── office/           # Autonomous agent management (agents, approvals, channels, config, costs, dashboard, infra, labels, onboarding, projects, repository, runtime, routines, routing, scheduler, service, shared, skills, workspaces)
 │   ├── events/           # Event bus for internal pub/sub
 │   ├── gateway/          # WebSocket gateway
 │   ├── github/           # GitHub API integration (PRs, reviews, webhooks)
@@ -85,11 +84,7 @@ apps/backend/
 │   ├── tools/            # Tool integrations
 │   ├── user/             # User management
 │   ├── utility/          # Shared utility functions
-│   ├── workflow/         # Workflow engine
-│   │   ├── engine/       # Typed state-machine engine
-│   │   ├── models/       # Workflow step, template, and history models
-│   │   ├── repository/   # Workflow persistence (SQLite)
-│   │   └── service/      # Workflow CRUD, step resolution, and sync apply
+│   ├── workflow/         # Workflow engine (engine, models, repository, service)
 │   ├── workflowsync/     # GitHub workflow sync (per-workspace repo config, poller, force sync)
 │   └── worktree/         # Git worktree management for workspace isolation
 ```
@@ -134,6 +129,8 @@ replace state verification, installation association, or HMAC verification.
 - Idempotent by `OperationID`; session-scoped data bag via `MachineState.Data`
 
 **Agent Runtime** (`internal/agent/runtime/`) is the single seam for launching, resuming, stopping, and observing agent executions. ADR 0004 introduced this in Phase 1 of task-model-unification. The public surface is `runtime.Runtime` (`runtime.go`); a thin facade (`facade.go`) delegates to a `Backend` (satisfied by `*lifecycle.Manager`).
+
+**Run scheduling ownership:** `internal/runs/` is generic; only `internal/backendapp/` constructs and owns the single `internal/runs/scheduler` and its lifecycle. Office adapters may depend on runs, but generic runs must not import `internal/office` or its subpackages.
 
 **Runtime environment invariant:** `Agent.Runtime().Env` applies to every ACP subprocess entry point. Route new overrides through host-utility probes and sessionless prompts into agentctl child processes before sanitization; cover probe DTO, prompt DTO, and child-process boundaries.
 
