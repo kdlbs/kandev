@@ -759,7 +759,7 @@ func clarificationMultiQuestionArgs() map[string]any {
 				},
 			},
 		},
-		"context": "Picking the foundational stack — answer all three so we can move forward.",
+		"context": "Picking the foundational stack: answer all three so we can move forward.",
 	}
 }
 
@@ -960,7 +960,7 @@ func walkthroughDemoArgs() map[string]interface{} {
 			wtStep("File C", "walkthrough_c.txt",
 				"Step 4: WALKTHROUGH_CHANGE_C lives in file C.", 2, 0),
 			wtStep("Unchanged file", "walkthrough_base.txt",
-				"Step 5: WALKTHROUGH_UNCHANGED — this base file did not change; shown from its current state.", 1, 0),
+				"Step 5: WALKTHROUGH_UNCHANGED: this base file did not change; shown from its current state.", 1, 0),
 		},
 	}
 }
@@ -1161,7 +1161,7 @@ func scenarioMarkdownTable(e *emitter) {
 		"|---|---|\n" +
 		"| **Failing test** | `TestHandleAgentBootReady_DrainsOrphanedQueuedMessage/already_WAITING_FOR_INPUT_(boot_raced_persistResumeState)` |\n" +
 		"| **Symptom** | `session.State = \"RUNNING\", want WAITING_FOR_INPUT` |\n" +
-		"| **Root cause** | Pre-existing race, not introduced by this PR. `handleAgentBootReady` synchronously flips state to `WAITING_FOR_INPUT` then spawns a goroutine that calls `PromptTask` → flips state to `RUNNING`. The test asserted on `WAITING_FOR_INPUT` immediately after the handler returned — on faster CI scheduling the goroutine wins the race. The kandev-ci container apparently schedules tighter than the github-hosted ubuntu, so it loses where the previous env got lucky. |\n" +
-		"| **Fix** | Cherry-picked `b8d06ea8 test(backend): fix race in TestHandleAgentBootReady_DrainsOrphanedQueuedMessage` from `feature/subtask-with-repo-se-vhz` (a parallel branch that already addressed this). The test now accepts either `WAITING_FOR_INPUT` or `RUNNING` — both prove the boot-ready flip landed and rule out the original `STARTING + queue still full` regression. |\n" +
+		"| **Root cause** | Pre-existing race, not introduced by this PR. `handleAgentBootReady` synchronously flips state to `WAITING_FOR_INPUT` then spawns a goroutine that calls `PromptTask` and flips state to `RUNNING`. The test asserted on `WAITING_FOR_INPUT` immediately after the handler returned. On faster CI scheduling the goroutine wins the race. The kandev-ci container apparently schedules tighter than the github-hosted ubuntu, so it loses where the previous env got lucky. |\n" +
+		"| **Fix** | Cherry-picked `b8d06ea8 test(backend): fix race in TestHandleAgentBootReady_DrainsOrphanedQueuedMessage` from `feature/subtask-with-repo-se-vhz` (a parallel branch that already addressed this). The test now accepts either `WAITING_FOR_INPUT` or `RUNNING`. Both prove the boot-ready flip landed and rule out the original `STARTING + queue still full` regression. |\n" +
 		"| **Local verification** | `go test -race -count=5` → 5/5 PASS. |\n")
 }

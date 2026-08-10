@@ -125,7 +125,7 @@ export function SentryIssueWatchersSection({ workspaceId }: { workspaceId: strin
     (id: string) => {
       // An em dash is a glyph, not copy — it stays out of the catalog. The
       // resolved name is the user's own instance name, also never translated.
-      if (!id) return "—";
+      if (!id) return "-";
       return instances.find((i) => i.id === id)?.name ?? t("sentry:instanceUnavailable");
     },
     [instances, t],

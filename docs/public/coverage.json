@@ -6,7 +6,7 @@
       "audiences": ["user", "operator"],
       "stability": "stable",
       "docs": ["index", "use-kandev", "cli", "desktop-app", "run-as-a-service"],
-      "sources": ["apps/cli/bin/native-shim.js", "apps/cli/src/cli.ts", "apps/desktop/src-tauri/src/lib.rs"],
+      "sources": ["apps/cli/bin/native-shim.js", "apps/backend/internal/launcher/launcher.go", "apps/desktop/src-tauri/src/lib.rs"],
       "tests": ["apps/cli/bin/native-shim.test.mjs", "apps/desktop/e2e/desktop-launch-smoke.test.mjs"]
     },
     {
@@ -330,8 +330,8 @@
       "audiences": ["operator"],
       "stability": "stable",
       "docs": ["docker", "k8s", "run-as-a-service", "windows-support", "operations"],
-      "sources": ["Dockerfile", "apps/cli/src/service/index.ts"],
-      "tests": ["apps/web/e2e/tests/docker/docker-launch.spec.ts", "apps/cli/src/service/install_helpers.test.ts"]
+      "sources": ["Dockerfile", "apps/backend/internal/launcher/service.go"],
+      "tests": ["apps/web/e2e/tests/docker/docker-launch.spec.ts"]
     },
     {
       "id": "office-mode",

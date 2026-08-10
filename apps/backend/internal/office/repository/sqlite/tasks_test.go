@@ -44,6 +44,9 @@ func newSearchTestRepo(t *testing.T) *sqlite.Repository {
 			identifier TEXT DEFAULT '',
 			is_ephemeral INTEGER DEFAULT 0,
 			origin TEXT DEFAULT 'manual',
+			metadata TEXT DEFAULT '{}',
+			checkout_agent_id TEXT,
+			checkout_at TIMESTAMP,
 			archived_at TIMESTAMP,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP

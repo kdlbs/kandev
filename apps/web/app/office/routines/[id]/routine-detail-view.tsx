@@ -387,7 +387,7 @@ function DetailReadOnlyCard({
         </div>
         <div>
           {t("office:nextFire", {
-            when: nextRunAt ? new Date(nextRunAt).toLocaleString() : "—",
+            when: nextRunAt ? new Date(nextRunAt).toLocaleString() : "-",
           })}
         </div>
       </CardContent>

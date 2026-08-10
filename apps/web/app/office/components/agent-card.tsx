@@ -239,7 +239,7 @@ function pickSubtitle(t: TFunction, summary: AgentSummary): string {
   if (summary.status === "live") return t("office:liveNow");
   if (summary.status === "never_run") return t("office:neverRun");
   const last = summary.last_session;
-  if (!last) return "—";
+  if (!last) return "-";
   const ts = last.completed_at ?? last.started_at;
   if (summary.last_run_status === "failed") {
     return t("office:lastRunFailedAgo", { ago: timeAgo(ts) });

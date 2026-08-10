@@ -39,6 +39,13 @@ export type ConnectionState = {
 export type MobileKanbanState = {
   /** Last selected workflow step id, keyed by workflow id (phone board). */
   activeStepIdByWorkflowId: Record<string, string>;
+  /**
+   * The workflow the phone board is currently showing, published by
+   * `SwimlaneContainer` so the menu drawer configures the same board the user
+   * is looking at rather than deriving a second notion of focus. Null off the
+   * phone kanban.
+   */
+  focusedWorkflowId: string | null;
   isMenuOpen: boolean;
   isSearchOpen: boolean;
 };
@@ -265,6 +272,7 @@ export type UISliceActions = {
   setMobileKanbanActiveStep: (workflowId: string, stepId: string) => void;
   setMobileKanbanMenuOpen: (open: boolean) => void;
   setMobileKanbanSearchOpen: (open: boolean) => void;
+  setMobileKanbanFocusedWorkflow: (workflowId: string | null) => void;
   setMobileSessionPanel: (sessionId: string, panel: MobileSessionPanel) => void;
   setMobileSessionReview: (sessionId: string, reviewItemId: string | null) => void;
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;

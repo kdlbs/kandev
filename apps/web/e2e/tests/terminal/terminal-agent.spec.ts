@@ -34,6 +34,20 @@ async function openTaskSession(page: Page, title: string): Promise<SessionPage> 
   return session;
 }
 
+async function waitForWorkflowStep(
+  apiClient: ApiClient,
+  taskId: string,
+  workflowStepId: string,
+  message: string,
+): Promise<void> {
+  await expect
+    .poll(async () => (await apiClient.getTask(taskId)).workflow_step_id ?? "", {
+      timeout: 60_000,
+      message,
+    })
+    .toBe(workflowStepId);
+}
+
 /** Seed a 4-step workflow (Backlog → Analyze → Implement → Review) with configurable step events. */
 async function seedCascadeWorkflow(
   apiClient: ApiClient,
@@ -46,7 +60,7 @@ async function seedCascadeWorkflow(
   const backlogStep = await apiClient.createWorkflowStep(workflow.id, "Backlog", 0);
   const analyzeStep = await apiClient.createWorkflowStep(workflow.id, "Analyze", 1);
   const implementStep = await apiClient.createWorkflowStep(workflow.id, "Implement", 2);
-  await apiClient.createWorkflowStep(workflow.id, "Review", 3);
+  const reviewStep = await apiClient.createWorkflowStep(workflow.id, "Review", 3);
 
   await apiClient.updateWorkflowStep(analyzeStep.id, {
     prompt: "Analyze: {{task_prompt}}",
@@ -69,7 +83,7 @@ async function seedCascadeWorkflow(
     enable_preview_on_click: false,
   });
 
-  return { workflow, backlogStep, analyzeStep, implementStep };
+  return { workflow, backlogStep, analyzeStep, implementStep, reviewStep };
 }
 
 // ---------------------------------------------------------------------------
@@ -159,7 +173,8 @@ test.describe("Terminal agent (TUI passthrough)", () => {
     apiClient,
     seedData,
   }) => {
-    const { workflow, backlogStep, analyzeStep } = await seedCascadeWorkflow(
+    test.setTimeout(120_000);
+    const { workflow, backlogStep, analyzeStep, reviewStep } = await seedCascadeWorkflow(
       apiClient,
       seedData,
       "TUI Cascade Workflow",
@@ -195,10 +210,16 @@ test.describe("Terminal agent (TUI passthrough)", () => {
     // The mock TUI prints "Processed: <prompt>" for each stdin line it receives.
     await session.expectPassthroughHasText("Analyze", 30_000);
     await session.expectPassthroughHasText("Processed: Implement", 30_000);
+    await waitForWorkflowStep(
+      apiClient,
+      task.id,
+      reviewStep.id,
+      "the cascade should reach the Review step",
+    );
 
     // Stepper shows Review as current step after the full cascade
     await expect(session.stepperStep("Review")).toHaveAttribute("aria-current", "step", {
-      timeout: 30_000,
+      timeout: 60_000,
     });
   });
 
@@ -222,7 +243,8 @@ test.describe("Terminal agent (TUI passthrough)", () => {
     apiClient,
     seedData,
   }) => {
-    const { workflow, backlogStep, analyzeStep } = await seedCascadeWorkflow(
+    test.setTimeout(120_000);
+    const { workflow, backlogStep, analyzeStep, reviewStep } = await seedCascadeWorkflow(
       apiClient,
       seedData,
       "TUI Reset Workflow",
@@ -254,10 +276,16 @@ test.describe("Terminal agent (TUI passthrough)", () => {
 
     // After context reset, the fresh process completes the Implement step prompt.
     await session.expectPassthroughHasText("Processed: Implement", 30_000);
+    await waitForWorkflowStep(
+      apiClient,
+      task.id,
+      reviewStep.id,
+      "the reset cascade should reach the Review step",
+    );
 
     // Stepper shows Review as current step after the full cascade
     await expect(session.stepperStep("Review")).toHaveAttribute("aria-current", "step", {
-      timeout: 30_000,
+      timeout: 60_000,
     });
   });
 

@@ -53,6 +53,7 @@ Product-wide capabilities that are not tied to a single feature area.
 | [diagnostic-logging](platform/diagnostic-logging.md) | approved |
 | [provider-error-recovery](platform/provider-error-recovery.md) | draft |
 | [health-endpoint-version](health-endpoint-version/spec.md) | building |
+| [go-dev-launcher](go-dev-launcher/spec.md) | draft |
 
 ## tasks/ — task & workflow model
 
@@ -255,6 +256,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [browser-inspect-annotations-save](browser-inspect-annotations-save/spec.md) | shipped |
 | [automations-pr-merged-trigger](automations-pr-merged-trigger/spec.md) | draft |
 | [no-silent-model-fallback](no-silent-model-fallback/spec.md) | approved |
+| [board-step-visibility-filter](board-step-visibility-filter/spec.md) | draft |
 
 ---
 

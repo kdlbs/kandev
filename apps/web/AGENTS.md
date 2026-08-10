@@ -113,13 +113,10 @@ surface.
   anatomy or add dashboard review/launch flows outside the native task dialog and
   registered review surface. Plugins may override create transport only through an
   authenticated action; host verifies repository, session, and worktree branch authority.
-- **Code-host task status:** registered review providers publish normalized
-  `ReviewItemSummary.taskStatus`. Host task chrome automatically renders the shared
-  topbar button, composer CI chip, desktop popover/mobile drawer, and association-icon
-  hover summary. Association detail refresh is lazy on hover/focus; workspace association
-  discovery and visible task status use deduplicated refreshes. Do not add provider visual
-  slots or provider-owned status pollers for these locations; adapt GitHub and plugins
-  through the shared `components/integrations/change-request-*` anatomy.
+- **Code-host task status:** registered providers publish `ReviewItemSummary.taskStatus`.
+  Host chrome renders shared topbar, composer, popover/drawer, and lazy hover/focus
+  summaries with deduplicated discovery/status refreshes. Do not add visual slots or
+  provider pollers; use the shared `components/integrations/change-request-*` anatomy.
 - **Code-host review detail:** GitHub and compatible review providers render
   `components/integrations/change-request-detail.tsx` (also exposed as
   `host.ui.ChangeRequestDetail`). Providers own normalized data/capabilities/actions,
@@ -219,15 +216,16 @@ write it.
 Add English keys to `src/locales/en/<namespace>.json`; use `useTranslation()` in
 components and module-level `t` only inside plain helper calls. `<Trans>` is only
 for markup, and a `t()` child corrupts its tag indices.
-
 Do not translate domain data, identifiers, test IDs, discriminants, comparison
 tokens, or map keys; split display copy from logic before translating it.
-
 Keep `lib/i18n/provider.tsx` module initialization; removing it blanks the app.
 
 Use i18next `_one`/`_other` plural keys; never build English suffixes locally.
 
 Never capture `t()` in a module-level constant; it freezes the boot locale.
+
+UI punctuation: avoid Unicode em dash (U+2014) in user-facing copy and locale values.
+`pnpm run i18n:check` enforces periods, colons, commas, semicolons, and parentheses.
 
 `pnpm lint` fails on hardcoded UI strings (`i18next/no-literal-string` is an
 **error**), but **only on the `i18nGuardFiles` allowlist** in
@@ -242,9 +240,12 @@ guard on a path not yet on the list.
 `pnpm run i18n:ratchet` guards all new/changed lines independently of that
 allowlist; untouched literals are not reported.
 
-`pnpm run i18n:check` validates catalogs, pseudo locale, `<Trans>` indices,
-plurals, and module-scope translations. Tooling requires Node 24. Full guide:
-[`docs/i18n.md`](../../docs/i18n.md); behavior spec:
+The rule sees JSX literals but misses `confirm()` and plain `.ts` helper copy; it
+also skips SCREAMING_CASE constants, so review config tables by eye. `i18n:check`
+gates key/catalog drift, `<Trans>` indices, inline plurals, module-scope `t()`, and
+the **pseudo-locale** (Settings → General → Appearance) completeness check. It
+needs **Node 24**. Full guide:
+[`docs/i18n.md`](../../docs/i18n.md); spec:
 [`docs/specs/platform/i18n.md`](../../docs/specs/platform/i18n.md).
 
 ## Markdown safety
@@ -293,8 +294,7 @@ plugin leaks a stale registration.
 
 ## Testing notes
 
-- jsdom drops `secure` cookies over `http`, so `document.cookie` reads back empty. To assert a cookie write in a Vitest unit test, intercept the setter with `Object.defineProperty(document, "cookie", { set: ... })` and restore it after.
-- jsdom synthetic mouse events do not reliably open Radix Tooltip. In component tests, use
-  `TooltipProvider` and assert keyboard focus; cover pointer hover in Playwright with `locator.hover()`
-  and a visible `role="tooltip"`, keeping regressions that jsdom cannot exercise.
-- In Playwright tests, avoid strict locators that assume only one `terminal-panel` or `.xterm` exists. Mobile and dockview layouts can mount multiple terminal instances; scope to the active panel or use `.first()` / `.last()` deliberately with a comment or helper. Shared E2E helpers that inspect mounted React/DOM internals must also be scoped to the active panel/container, not global selectors, because hidden or stale mounted panels can coexist in dock/mobile layouts.
+- jsdom secure cookies need cookie-setter interception; Radix Tooltip tests use
+  keyboard focus, while Playwright covers pointer hover with `locator.hover()`.
+- Scope terminal selectors to the active panel/container; mobile and dockview may
+  mount multiple instances, so shared helpers must not use global selectors.

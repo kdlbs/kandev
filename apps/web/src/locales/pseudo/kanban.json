@@ -89,5 +89,7 @@
   "whenEnabledClickingATaskOpens": "Ŵĥēń ēńàƀĺēď, ćĺĩćķĩńĝ à ţàśķ ōƥēńś ţĥē ƥŕēvĩēŵ ƥàńēĺ. Ŵĥēń ďĩśàƀĺēď, ćĺĩćķĩńĝ ńàvĩĝàţēś ďĩŕēćţĺŷ ţō ţĥē śēśśĩōń.",
   "wipTaskCount": "{{label}} ţàśķś",
   "workflow": "Ŵōŕķƒĺōŵ",
-  "workflowStepFallback": "ŵōŕķƒĺōŵ śţēƥ {{stepId}}"
+  "workflowStepFallback": "ŵōŕķƒĺōŵ śţēƥ {{stepId}}",
+  "columns": "Ćōĺũḿńś",
+  "columnsForWorkflow": "Ćōĺũḿńś ƒōŕ {{name}}"
 }

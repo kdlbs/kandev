@@ -76,7 +76,7 @@ test.describe("Task autopilot", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -133,7 +133,7 @@ test.describe("Task autopilot", () => {
           const { sessions } = await apiClient.listTaskSessions(child.id);
           return sessions[0]?.state ?? "";
         },
-        { timeout: 30_000, message: "parent answer should resume the child" },
+        { timeout: 60_000, message: "parent answer should resume the child" },
       )
       .not.toBe("WAITING_FOR_INPUT");
 

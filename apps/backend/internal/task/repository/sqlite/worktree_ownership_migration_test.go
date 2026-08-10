@@ -633,6 +633,107 @@ func TestCutover_PrefersFlatMetadataForSameWorktree(t *testing.T) {
 	}
 }
 
+// TestCutover_IgnoresTerminalWorktreeDifferentFromFlatOwner proves that
+// terminal session history cannot replace the surviving flat environment
+// owner for the same repository and empty branch slot.
+func TestCutover_IgnoresTerminalWorktreeDifferentFromFlatOwner(t *testing.T) {
+	for _, state := range []string{"COMPLETED", "FAILED", "CANCELLED"} {
+		t.Run(state, func(t *testing.T) {
+			db := openLegacyDB(t)
+			now := time.Now().UTC().Truncate(time.Second)
+			seed := legacySeed{envID: "env-flat-terminal", taskID: "task-flat-terminal", repoID: "repo-flat-terminal", sessionID: "sess-flat-terminal"}
+			seedLegacyTask(t, db, seed, now)
+			if _, err := db.Exec(db.Rebind(`UPDATE task_sessions SET state = ? WHERE id = ?`), state, seed.sessionID); err != nil {
+				t.Fatalf("set session state: %v", err)
+			}
+			seedLegacyFlatEnv(t, db, seed, "wt-flat-current", "/tasks/flat-terminal/repo", "feature/current", now)
+			seedLegacySessionWorktree(t, db, seed.sessionID, "wt-flat-old", seed.repoID, "", "/tasks/flat-terminal/old", "feature/old", "active", now)
+
+			repo, err := NewWithDB(db, db, nil)
+			if err != nil {
+				t.Fatalf("cutover: %v", err)
+			}
+			env, err := repo.GetTaskEnvironment(context.Background(), seed.envID)
+			if err != nil {
+				t.Fatalf("get task environment: %v", err)
+			}
+			if len(env.Repos) != 1 || env.Repos[0].WorktreeID != "wt-flat-current" {
+				t.Fatalf("flat environment owner = %+v", env.Repos)
+			}
+		})
+	}
+}
+
+// TestCutover_PreservesTerminalWorktreeOutsideFlatOwnerSlot proves that flat
+// source precedence does not discard a different repository or branch slot.
+func TestCutover_PreservesTerminalWorktreeOutsideFlatOwnerSlot(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		sessionRepoID     string
+		sessionBranchSlug string
+	}{
+		{name: "different repository", sessionRepoID: "repo-flat-terminal-other"},
+		{name: "non-empty branch", sessionRepoID: "repo-flat-terminal", sessionBranchSlug: "feature/old"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := openLegacyDB(t)
+			now := time.Now().UTC().Truncate(time.Second)
+			seed := legacySeed{envID: "env-flat-terminal", taskID: "task-flat-terminal", repoID: "repo-flat-terminal", sessionID: "sess-flat-terminal"}
+			seedLegacyTask(t, db, seed, now)
+			seedLegacyFlatEnv(t, db, seed, "wt-flat-current", "/tasks/flat-terminal/repo", "feature/current", now)
+			seedLegacySessionWorktree(t, db, seed.sessionID, "wt-flat-old", tc.sessionRepoID, tc.sessionBranchSlug, "/tasks/flat-terminal/old", "feature/old", "active", now)
+
+			repo, err := NewWithDB(db, db, nil)
+			if err != nil {
+				t.Fatalf("cutover: %v", err)
+			}
+			env, err := repo.GetTaskEnvironment(context.Background(), seed.envID)
+			if err != nil {
+				t.Fatalf("get task environment: %v", err)
+			}
+
+			slots := make(map[string]string, len(env.Repos))
+			for _, envRepo := range env.Repos {
+				slots[envRepo.RepositoryID+"\x00"+envRepo.BranchSlug] = envRepo.WorktreeID
+			}
+			flatSlot := seed.repoID + "\x00"
+			sessionSlot := tc.sessionRepoID + "\x00" + tc.sessionBranchSlug
+			if len(env.Repos) != 2 || slots[flatSlot] != "wt-flat-current" || slots[sessionSlot] != "wt-flat-old" {
+				t.Fatalf("preserved repository slots = %+v", env.Repos)
+			}
+		})
+	}
+}
+
+// TestCutover_RejectsLiveWorktreeDifferentFromFlatOwner proves that a
+// non-terminal session with a different physical identity still fails closed.
+func TestCutover_RejectsLiveWorktreeDifferentFromFlatOwner(t *testing.T) {
+	for _, state := range []string{"RUNNING", "WAITING_FOR_INPUT"} {
+		t.Run(state, func(t *testing.T) {
+			db := openLegacyDB(t)
+			now := time.Now().UTC().Truncate(time.Second)
+			seed := legacySeed{envID: "env-flat-live", taskID: "task-flat-live", repoID: "repo-flat-live", sessionID: "sess-flat-live"}
+			seedLegacyTask(t, db, seed, now)
+			if _, err := db.Exec(db.Rebind(`UPDATE task_sessions SET state = ? WHERE id = ?`), state, seed.sessionID); err != nil {
+				t.Fatalf("set session state: %v", err)
+			}
+			seedLegacyFlatEnv(t, db, seed, "wt-flat-current", "/tasks/flat-live/repo", "feature/current", now)
+			seedLegacySessionWorktree(t, db, seed.sessionID, "wt-flat-live", seed.repoID, "", "/tasks/flat-live/old", "feature/live", "active", now)
+
+			_, err := NewWithDB(db, db, nil)
+			if err == nil {
+				t.Fatal("expected live worktree conflict")
+			}
+			if !strings.Contains(err.Error(), "conflict") {
+				t.Fatalf("error must describe the conflict, got: %v", err)
+			}
+			if !legacyTableExists(t, db, "task_session_worktrees") {
+				t.Fatal("legacy table must survive a failed cutover")
+			}
+		})
+	}
+}
+
 // TestCutover_IgnoresDeletedHistoricalSessionConflict proves that a deleted
 // session reference cannot override an existing task-owned repository row.
 func TestCutover_IgnoresDeletedHistoricalSessionConflict(t *testing.T) {

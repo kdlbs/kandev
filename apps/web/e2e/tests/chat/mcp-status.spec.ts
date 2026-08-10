@@ -45,7 +45,7 @@ test("desktop MCP status is available from the neutral composer trigger", async 
   await expect(
     popover
       .getByText(
-        /^(Unknown|Delivered — connection unverified|Connected|Active|Failed|Filtered|Unavailable)$/,
+        /^(Unknown|Delivered - connection unverified|Connected|Active|Failed|Filtered|Unavailable)$/,
       )
       .first(),
   ).toBeVisible();

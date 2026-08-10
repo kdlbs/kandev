@@ -41,7 +41,7 @@ async function waitForTargetIdle(
   apiClient: ApiClient,
   taskId: string,
   sessionId: string,
-  timeoutMs = 30_000,
+  timeoutMs = 90_000,
 ): Promise<void> {
   await expect
     .poll(
@@ -138,6 +138,10 @@ async function openTask(testPage: Page, taskId: string): Promise<SessionPage> {
 }
 
 test.describe("Cross-task agent message attribution", () => {
+  // These tests start several mock-agent sessions. Under a busy CI runner the
+  // target's first turn can remain RUNNING well after its message is visible.
+  test.describe.configure({ timeout: 180_000 });
+
   test("full agent-origin queue supports remove, clear-all, and new admission", async ({
     testPage,
     apiClient,

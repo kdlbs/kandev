@@ -116,7 +116,7 @@ export function SetupWizard() {
       if (err instanceof ApiError) {
         setError(
           err.status === 409
-            ? "Setup is no longer available — an account already exists."
+            ? "Setup is no longer available - an account already exists."
             : (err.message ?? "Setup failed. Please try again."),
         );
         return;

@@ -903,13 +903,13 @@ export class SessionPage {
   }
 
   /** Click a dockview tab by its visible label (e.g. "Changes", "Files", "Terminal"). */
-  async clickTab(label: string): Promise<void> {
+  async clickTab(label: string, options: { force?: boolean } = {}): Promise<void> {
     const tab = this.page
       .locator(".dv-default-tab:visible")
       .filter({ hasText: new RegExp(`^${escapeRegExp(label)}(?: \\(\\d+\\))?$`) })
       .first();
     await expect(tab).toBeVisible();
-    await tab.click();
+    await tab.click(options);
   }
 
   /**
@@ -1100,7 +1100,7 @@ export class SessionPage {
    * placeholder decoration is only rendered while the editor has no content.
    */
   async waitForDirectInput(timeout = 15_000) {
-    await expect(this.anyIdleInput()).toBeVisible({ timeout });
+    await this.waitForChatIdle({ timeout, requireEditable: true });
   }
 
   /** The composer's send/submit button (scoped to the active chat panel). */

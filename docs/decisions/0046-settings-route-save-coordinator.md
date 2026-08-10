@@ -1,6 +1,6 @@
 # 0046: Settings route save coordinator
 
-**Status:** accepted
+**Status:** accepted (amended 2026-08-09)
 **Date:** 2026-07-14
 **Area:** frontend
 
@@ -10,7 +10,7 @@ Settings pages use several persistence models: immediate writes from controls, l
 
 ## Decision
 
-The settings shell will own a route-scoped save coordinator. Descendant forms register stable contributors containing an identity, dirty and validation state, a save callback, and a discard callback. The coordinator renders one fixed bottom-right action, saves all dirty contributors in stable order, preserves per-contributor success or failure, and supplies dirty-route navigation protection.
+The settings shell will own a route-scoped save coordinator. Descendant forms register stable contributors containing an identity, dirty and validation state, a save callback, and a discard callback. The coordinator renders one fixed bottom-centered save surface, or portals that surface into the Configuration Chat action host while its popover is open, saves all dirty contributors in stable order, preserves per-contributor success or failure, and supplies dirty-route navigation protection. The surface also exposes a local reset action that invokes the registered discard callbacks without persistence.
 
 Draft state and API payload construction remain with the domain component that owns the setting. A page-level owner combines sections that write the same backend resource so the coordinator does not issue competing replacements. Immediate named commands and dialog submissions do not register as dirty contributors.
 
@@ -18,7 +18,7 @@ The user-visible contract is defined by [Settings Manual Save](../specs/ui/setti
 
 ## Consequences
 
-- Settings routes gain consistent save feedback and a viewport-reachable action without centralizing every domain model.
+- Settings routes gain consistent save feedback and a viewport-reachable centered action without centralizing every domain model.
 - Multiple cards, including workflow cards, can participate in one Save while retaining independent failure state.
 - Route navigation can use the same dirty registry as the floating action.
 - Components must maintain a saved baseline and compare submitted revisions so an in-flight completion cannot clear newer edits.

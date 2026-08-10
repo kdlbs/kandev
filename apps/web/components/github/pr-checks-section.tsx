@@ -59,7 +59,7 @@ function buildAllFailedMessage(checks: CheckRun[]): string {
   const failed = checks.filter(isFailedCheck);
   const parts = [`### ${failed.length} CI Check${failed.length !== 1 ? "s" : ""} Failed`, ""];
   for (const check of failed) {
-    parts.push(`**${check.name}** — ${check.conclusion}`);
+    parts.push(`**${check.name}** - ${check.conclusion}`);
     if (check.output) parts.push(check.output);
     if (check.html_url) parts.push(`URL: ${check.html_url}`);
     parts.push("");
@@ -99,7 +99,7 @@ export function ChecksSection({
     return () => clearInterval(id);
   }, [hasRunning]);
 
-  const summary = checks.length > 0 ? ` \u2014 ${formatSectionSummary(checks, t)}` : "";
+  const summary = checks.length > 0 ? ` - ${formatSectionSummary(checks, t)}` : "";
   const hasFailed = checks.some(isFailedCheck);
 
   return (

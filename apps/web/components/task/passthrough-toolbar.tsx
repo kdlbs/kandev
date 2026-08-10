@@ -358,7 +358,7 @@ function CommentsTooltipBody({ commentsOpen, count }: { commentsOpen: boolean; c
       <p className="text-muted-foreground">
         <Trans i18nKey="task:sendToAgentHelp">
           Hit <strong>Send to agent</strong> inside the panel to deliver them to the CLI agent right
-          away, or just open the chat box and type a follow-up — the comments will be prepended.
+          away, or just open the chat box and type a follow-up - the comments will be prepended.
         </Trans>
       </p>
     </div>

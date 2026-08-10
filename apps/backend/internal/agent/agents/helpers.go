@@ -15,7 +15,7 @@ var agentctlAutoApproveSetting = PermissionSetting{
 	Supported:   true,
 	Default:     false,
 	Label:       "Auto-approve all permissions",
-	Description: "Kandev allows every agent permission request without prompting you. Dangerous — use only in trusted workspaces.",
+	Description: "Kandev allows every agent permission request without prompting you. Dangerous. Use only in trusted workspaces.",
 	ApplyMethod: PermissionApplyMethodAgentctlAutoApprove,
 }
 

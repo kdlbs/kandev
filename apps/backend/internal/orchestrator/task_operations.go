@@ -172,16 +172,41 @@ func isAgentAlreadyRunningError(err error) bool {
 	return err != nil && errors.Is(err, lifecycle.ErrAgentAlreadyRunning)
 }
 
-func validateSessionWorktrees(session *models.TaskSession) error {
+// missingSessionWorktreePaths returns the session's recorded worktree
+// directories that are no longer on disk.
+func missingSessionWorktreePaths(session *models.TaskSession) []string {
+	var missing []string
 	for _, wt := range session.Worktrees {
-		if wt.WorktreePath == "" {
+		if wt == nil || wt.WorktreePath == "" {
 			continue
 		}
 		if _, err := os.Stat(wt.WorktreePath); err != nil {
-			return fmt.Errorf("worktree path not found: %w", err)
+			missing = append(missing, wt.WorktreePath)
 		}
 	}
-	return nil
+	return missing
+}
+
+// noteMissingWorktreesBeforeResume records that a resume is about to go
+// through the worktree manager's recreate path.
+//
+// A missing directory is NOT a resume blocker. Archive cleanup deletes the
+// worktree directory while keeping the environment repository row and the git
+// branch (DestroyWorktree passes removeBranch=false), so *every* resume after
+// an unarchive observes exactly this shape. worktree.Manager.Create reuses the
+// stored record, restores the branch — locally, or by fetching it back from
+// origin — and rebuilds the directory at the same path, which is what the
+// recreate path was written for. Rejecting the resume here instead made
+// unarchive a dead end: the session could never be resumed and the workspace
+// was never restored, even though the work itself was still intact.
+func (s *Service) noteMissingWorktreesBeforeResume(sessionID string, session *models.TaskSession) {
+	missing := missingSessionWorktreePaths(session)
+	if len(missing) == 0 {
+		return
+	}
+	s.logger.Info("worktree directory missing on resume; it will be recreated from the stored branch",
+		zap.String("session_id", sessionID),
+		zap.Strings("paths", missing))
 }
 
 // EnqueueTask manually adds a task to the queue
@@ -1584,9 +1609,7 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 		// the record may already have been cleaned up before the user clicked Resume — allow it.
 		return nil, fmt.Errorf("session is not resumable: no executor record")
 	}
-	if err := validateSessionWorktrees(session); err != nil {
-		return nil, err
-	}
+	s.noteMissingWorktreesBeforeResume(sessionID, session)
 
 	// Completed sessions cannot be restarted — they require a new session.
 	// Failed and cancelled sessions keep the resume token so the relaunched
@@ -1970,9 +1993,7 @@ func (s *Service) attemptColdResume(
 		return false, fmt.Errorf("session is not resumable: no executor record (state: %s)", session.State)
 	}
 
-	if err := validateSessionWorktrees(session); err != nil {
-		return false, err
-	}
+	s.noteMissingWorktreesBeforeResume(sessionID, session)
 
 	// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the resume.
 	// The lifecycle layer publishes events.AgentBootReady (handled by handleAgentBootReady)
@@ -2520,14 +2541,11 @@ func (s *Service) validateResumeEligibility(session *models.TaskSession, resp dt
 		return resp
 	}
 
-	// Check if worktree exists (if one was used)
-	if len(session.Worktrees) > 0 && session.Worktrees[0].WorktreePath != "" {
-		if _, err := os.Stat(session.Worktrees[0].WorktreePath); err != nil {
-			resp.Error = "worktree not found"
-			resp.IsResumable = false
-			return resp
-		}
-	}
+	// A missing worktree directory does not make the session unresumable.
+	// Archive cleanup deletes the directory and keeps the branch, so reporting
+	// IsResumable=false here would hide the resume affordance for every
+	// unarchived task — see noteMissingWorktreesBeforeResume. The resume
+	// itself recreates the directory through the worktree manager.
 
 	// Don't auto-resume sessions in error-recovery state.
 	if isErrorRecoveryState(session) {

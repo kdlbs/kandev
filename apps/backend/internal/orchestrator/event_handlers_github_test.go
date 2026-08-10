@@ -41,18 +41,23 @@ type mockGitHubService struct {
 	getPRWatchBySessionRepoAndBranchCalls int
 	exactTaskPRCalls                      int
 	lastExactPRLookup                     github.PRFeedbackEvent
-	prWatch                               *github.PRWatch // returned by GetPRWatchBySession (nil = no watch)
-	ensureWatchCalls                      int
-	createWatchCalls                      int
-	associateCalls                        int
-	updateBranchCalls                     int
-	updatePRNumberCalls                   int
-	resetWatchCalls                       int
-	resetWatchBranch                      string
-	ensureWatchBranch                     string
-	createWatchBranch                     string
-	updatedBranch                         string
-	updatedPRNumber                       int
+	prWatch                               *github.PRWatch // single-watch fixture (nil = no watch)
+	// sessionWatches is the multi-branch fixture: when set, the branch-scoped
+	// lookups honour repository_id + branch instead of returning prWatch for
+	// every query, so tests can assert that a branch switch leaves another
+	// branch's found-PR watch alone.
+	sessionWatches      []*github.PRWatch
+	ensureWatchCalls    int
+	createWatchCalls    int
+	associateCalls      int
+	updateBranchCalls   int
+	updatePRNumberCalls int
+	resetWatchCalls     int
+	resetWatchBranch    string
+	ensureWatchBranch   string
+	createWatchBranch   string
+	updatedBranch       string
+	updatedPRNumber     int
 	// repository_id captured by the most recent CreatePRWatch /
 	// AssociatePRWithTask call. Used by the multi-repo push tests to assert
 	// the per-repo scoping (an empty value indicates the legacy single-repo
@@ -311,15 +316,35 @@ func (m *mockGitHubService) EnsurePRWatchForWorkspace(
 ) (*github.PRWatch, error) {
 	return m.EnsurePRWatch(ctx, sessionID, taskID, repositoryID, owner, repo, branch)
 }
-func (m *mockGitHubService) GetPRWatchBySession(_ context.Context, _ string) (*github.PRWatch, error) {
-	return m.prWatch, nil
-}
 func (m *mockGitHubService) GetPRWatchBySessionAndRepo(_ context.Context, _, _ string) (*github.PRWatch, error) {
 	return m.prWatch, nil
 }
-func (m *mockGitHubService) GetPRWatchBySessionRepoAndBranch(_ context.Context, _, _, _ string) (*github.PRWatch, error) {
+func (m *mockGitHubService) GetPRWatchBySessionRepoAndBranch(
+	_ context.Context, _, repositoryID, branch string,
+) (*github.PRWatch, error) {
 	m.getPRWatchBySessionRepoAndBranchCalls++
-	return m.prWatch, nil
+	if m.sessionWatches == nil {
+		return m.prWatch, nil
+	}
+	for _, watch := range m.sessionWatches {
+		if watch != nil && watch.RepositoryID == repositoryID && watch.Branch == branch {
+			return watch, nil
+		}
+	}
+	return nil, nil
+}
+
+// ListPRWatchesBySession serves the per-branch watch bookkeeping. Tests that
+// leave sessionWatches nil fall back to the single prWatch field so the
+// existing single-watch fixtures keep working.
+func (m *mockGitHubService) ListPRWatchesBySession(_ context.Context, _ string) ([]*github.PRWatch, error) {
+	if m.sessionWatches != nil {
+		return m.sessionWatches, nil
+	}
+	if m.prWatch == nil {
+		return nil, nil
+	}
+	return []*github.PRWatch{m.prWatch}, nil
 }
 func (m *mockGitHubService) CreatePRWatch(_ context.Context, _, _, repositoryID, _, _ string, _ int, branch string) (*github.PRWatch, error) {
 	m.createWatchCalls++

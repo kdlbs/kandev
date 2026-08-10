@@ -114,7 +114,7 @@ function buildWorkflowMessage(group: WorkflowGroup): string {
     "",
   ];
   for (const job of failed) {
-    lines.push(`- **${job.name}** — ${job.conclusion || job.status}`);
+    lines.push(`- **${job.name}** - ${job.conclusion || job.status}`);
     if (job.output) lines.push(`  ${job.output}`);
     if (job.html_url) lines.push(`  ${job.html_url}`);
   }

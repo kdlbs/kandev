@@ -99,7 +99,12 @@ export const defaultUIState: UISliceState = {
   rightPanel: { activeTabBySessionId: {} },
   diffs: { files: [] },
   connection: { status: "disconnected", error: null, issueSeverity: "none" },
-  mobileKanban: { activeStepIdByWorkflowId: {}, isMenuOpen: false, isSearchOpen: false },
+  mobileKanban: {
+    activeStepIdByWorkflowId: {},
+    isMenuOpen: false,
+    isSearchOpen: false,
+    focusedWorkflowId: null,
+  },
   mobileSession: {
     activePanelBySessionId: {},
     reviewItemIdBySessionId: {},
@@ -206,6 +211,10 @@ function buildMobileActions(set: ImmerSet) {
     setMobileKanbanSearchOpen: (open: boolean) =>
       set((draft) => {
         draft.mobileKanban.isSearchOpen = open;
+      }),
+    setMobileKanbanFocusedWorkflow: (workflowId: string | null) =>
+      set((draft) => {
+        draft.mobileKanban.focusedWorkflowId = workflowId;
       }),
     setMobileSessionPanel: (
       sessionId: string,

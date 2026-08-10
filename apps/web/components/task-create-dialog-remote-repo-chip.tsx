@@ -327,7 +327,7 @@ function StagedRemoteUrlHint() {
   return (
     <div className="px-2 pt-1 text-xs text-muted-foreground">
       <Trans i18nKey="task:remoteUrlPressEnter">
-        <span className="font-medium text-foreground">Remote URL</span> — press Enter to submit it.
+        <span className="font-medium text-foreground">Remote URL</span> - press Enter to submit it.
       </Trans>
     </div>
   );

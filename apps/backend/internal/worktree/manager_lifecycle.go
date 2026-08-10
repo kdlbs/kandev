@@ -1188,10 +1188,16 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 		}
 	}
 
-	// Update record
+	// Update record. DeletedAt must be cleared alongside the status: archive
+	// cleanup releases the reference (status=deleted + deleted_at), and
+	// UpdateWorktree persists deleted_at verbatim — leaving it set would keep
+	// the freshly recreated worktree invisible to every lookup that filters on
+	// `deleted_at IS NULL`, so the next launch would mint a brand-new worktree
+	// beside the one we just restored.
 	now := time.Now()
 	existing.Path = worktreePath
 	existing.Status = StatusActive
+	existing.DeletedAt = nil
 	existing.UpdatedAt = now
 
 	if m.store != nil {

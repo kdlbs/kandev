@@ -94,7 +94,7 @@ describe("getRangeLabel", () => {
 
 describe("formatDuration", () => {
   it("renders an em-dash for zero", () => {
-    expect(formatDuration(0)).toBe("—");
+    expect(formatDuration(0)).toBe("-");
   });
 
   it("formats seconds, minutes, and hours", () => {
@@ -173,7 +173,7 @@ describe("toPanelState", () => {
 describe("buildStatsSummary", () => {
   it("includes completion %, top repo, and git line", () => {
     const summary = buildStatsSummary(sampleStats, "Last Month", 4);
-    expect(summary).toContain("*Kandev Stats — Last Month*");
+    expect(summary).toContain("*Kandev Stats - Last Month*");
     expect(summary).toContain("10 total (4 done, 2 in progress) · 40% completion");
     expect(summary).toContain("Completed (Last Month): 4");
     expect(summary).toContain("Top repo: kandev (6 tasks)");
@@ -193,8 +193,8 @@ describe("buildStatsSummary", () => {
       },
     };
     const summary = buildStatsSummary(empty, "All Time", 0);
-    expect(summary).toContain("Top repo: —");
+    expect(summary).toContain("Top repo: -");
     expect(summary).toContain("Git: no git activity");
-    expect(summary).toContain("0 total (0 done, 0 in progress) · — completion");
+    expect(summary).toContain("0 total (0 done, 0 in progress) · - completion");
   });
 });
