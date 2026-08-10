@@ -69,7 +69,7 @@ func dialWorkspaceInputLoop(t *testing.T, shell io.Writer) *websocket.Conn {
 			return
 		}
 		defer func() { _ = conn.Close() }()
-		srv.handleWorkspaceStreamInput(conn, shell, done)
+		srv.handleWorkspaceStreamInput(&workspaceStreamConn{conn: conn}, shell, done)
 		close(loopReturned)
 	}))
 
@@ -89,6 +89,40 @@ func dialWorkspaceInputLoop(t *testing.T, shell io.Writer) *websocket.Conn {
 		httpServer.Close()
 	})
 	return conn
+}
+
+// dialWorkspaceStreamEndpoint drives the whole /workspace/stream endpoint over
+// a real listener and registers the teardown every stream test needs.
+//
+// Cleanups run last-registered-first, so the shutdown loop releases the handler
+// before httpServer.Close, which waits on it. Registering both here, where the
+// resources are created, keeps an early t.Fatal in the caller from stranding
+// the client, the listener, and the handler's goroutines — the forwarding loop
+// parks in its select — for the rest of the package run.
+func dialWorkspaceStreamEndpoint(t *testing.T) (*Server, *websocket.Conn) {
+	t.Helper()
+	srv := newTestServer(t)
+	handlerReturned := make(chan struct{})
+	// sync.Once: a second request to this server — a retry, or a future edit
+	// that dials twice — would otherwise close an already-closed channel and
+	// panic on a server goroutine, taking down the whole test binary.
+	var returnedOnce sync.Once
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer returnedOnce.Do(func() { close(handlerReturned) })
+		srv.Router().ServeHTTP(w, r)
+	}))
+	t.Cleanup(httpServer.Close)
+
+	conn, _, err := websocket.DefaultDialer.Dial(
+		"ws"+strings.TrimPrefix(httpServer.URL, "http")+"/api/v1/workspace/stream", nil)
+	if err != nil {
+		t.Fatalf("dial workspace stream: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = conn.Close()
+		waitForWorkspaceStreamShutdown(t, srv.procMgr.GetWorkspaceTracker().NotifyGitCommit, handlerReturned)
+	})
+	return srv, conn
 }
 
 func readWorkspaceMessage(t *testing.T, conn *websocket.Conn) types.WorkspaceStreamMessage {
@@ -179,31 +213,7 @@ func TestHandleWorkspaceStreamInput_IgnoresNonInputMessages(t *testing.T) {
 // keeps publishing until the handler returns; the channel, not a fixed sleep,
 // is what the test waits on.
 func TestHandleWorkspaceStreamWS_ForwardsTrackerEvents(t *testing.T) {
-	srv := newTestServer(t)
-	handlerReturned := make(chan struct{})
-	// sync.Once: a second request to this server — a retry, or a future edit
-	// that dials twice — would otherwise close an already-closed channel and
-	// panic on a server goroutine, taking down the whole test binary.
-	var returnedOnce sync.Once
-	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer returnedOnce.Do(func() { close(handlerReturned) })
-		srv.Router().ServeHTTP(w, r)
-	}))
-
-	conn, _, err := websocket.DefaultDialer.Dial(
-		"ws"+strings.TrimPrefix(httpServer.URL, "http")+"/api/v1/workspace/stream", nil)
-	if err != nil {
-		httpServer.Close()
-		t.Fatalf("dial workspace stream: %v", err)
-	}
-	// Registered before any assertion below can t.Fatal. httpServer.Close waits
-	// for the handler, so it must run after the shutdown loop has released it —
-	// cleanups run last-registered-first, hence this ordering.
-	t.Cleanup(httpServer.Close)
-	t.Cleanup(func() {
-		_ = conn.Close()
-		waitForWorkspaceStreamShutdown(t, srv.procMgr.GetWorkspaceTracker().NotifyGitCommit, handlerReturned)
-	})
+	srv, conn := dialWorkspaceStreamEndpoint(t)
 
 	if got := readWorkspaceMessage(t, conn); got.Type != types.WorkspaceMessageTypeConnected {
 		t.Fatalf("first frame type = %q, want %q", got.Type, types.WorkspaceMessageTypeConnected)
@@ -230,11 +240,13 @@ func TestHandleWorkspaceStreamWS_ForwardsTrackerEvents(t *testing.T) {
 		t.Errorf("message = %q, want %q", event.GitCommit.Message, "streamed commit")
 	}
 
-	// Deliberately no ping here: the input goroutine answers a ping by writing
-	// the pong onto this same connection, while the forwarding loop above is
-	// also writing to it, and a gorilla *Conn permits only one concurrent
-	// writer. Ping/pong is covered against the input loop in isolation by
-	// TestHandleWorkspaceStreamInput_AnswersPing.
+	// The input goroutine answers a ping by writing the pong onto this same
+	// connection while the forwarding loop above also writes to it. Both go
+	// through workspaceStreamConn, so the two writers no longer collide.
+	writeWorkspaceMessage(t, conn, types.NewWorkspacePing())
+	if got := readWorkspaceMessage(t, conn); got.Type != types.WorkspaceMessageTypePong {
+		t.Errorf("reply type = %q, want %q", got.Type, types.WorkspaceMessageTypePong)
+	}
 }
 
 // waitForWorkspaceStreamShutdown republishes until the handler's forwarding
