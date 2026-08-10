@@ -50,7 +50,7 @@ export function useInitialSidebarSelection({
   useEffect(() => {
     userSelectedRef.current = false;
     autoResetSearchRef.current = true;
-  }, [workspaceId, autoResetSearchRef]);
+  }, [workspaceId]);
 
   useEffect(() => {
     if (userSelectedRef.current || !autoResetSearchRef.current) return;
@@ -67,14 +67,7 @@ export function useInitialSidebarSelection({
     );
     setQueryImmediate(target.query);
     setRepoFilter(target.repoFilter);
-  }, [
-    workspaceId,
-    savedPresets,
-    resolvedPrPresets,
-    autoResetSearchRef,
-    setQueryImmediate,
-    setRepoFilter,
-  ]);
+  }, [workspaceId, savedPresets, resolvedPrPresets, setQueryImmediate, setRepoFilter]);
 
   const setUserSelection = useCallback((next: SidebarSelection) => {
     userSelectedRef.current = true;

@@ -74,7 +74,7 @@ function useUserSavedPresetsSync(enabled: boolean) {
     fetchUserSettings({ cache: "no-store" })
       .then((response) => {
         const serverPresets = readSavedPresets(response.settings.github_saved_presets);
-        if (cancelled || !serverPresets || snapshotVersion !== initialVersion) return;
+        if (cancelled || snapshotVersion !== initialVersion) return;
         publish(serverPresets);
       })
       .catch(() => {});
@@ -98,7 +98,7 @@ function useWorkspaceSavedPresets(workspaceId: string | null) {
     fetchGitHubWorkspaceSettings(workspaceId)
       .then((settings) => {
         if (cancelled || seq !== writeSeq.current) return;
-        const serverPresets = readSavedPresets(settings.saved_presets) ?? [];
+        const serverPresets = readSavedPresets(settings.saved_presets);
         setWorkspacePresets(serverPresets);
       })
       .catch(() => {
@@ -191,6 +191,8 @@ export function useSavedPresets(workspaceId: string | null = null) {
         const next = setSavedPresetDefault(activePresetsRef.current, kind, id);
         if (next === activePresetsRef.current) return;
         await persist(next);
+        // Concurrent save/remove calls can update local state while persistence is in flight.
+        // Reapply the default to that latest snapshot; its queued write persists the merged list.
         applyLocal(setSavedPresetDefault(activePresetsRef.current, kind, id));
       });
     },

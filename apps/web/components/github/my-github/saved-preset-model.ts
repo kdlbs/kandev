@@ -20,8 +20,8 @@ export type DefaultSidebarTarget = {
   repoFilter: string;
 };
 
-export function readSavedPresets(value: unknown): SavedPreset[] | null {
-  if (!Array.isArray(value)) return null;
+export function readSavedPresets(value: unknown): SavedPreset[] {
+  if (!Array.isArray(value)) return [];
   const defaultKinds = new Set<SavedPresetKind>();
   return value.flatMap((candidate): SavedPreset[] => {
     if (typeof candidate !== "object" || candidate === null) return [];

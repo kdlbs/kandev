@@ -197,6 +197,32 @@ describe("useSavedPresetActions query actions", () => {
 });
 
 describe("useSavedPresetActions default actions", () => {
+  it("ignores a second default toggle while the first is pending", async () => {
+    let finish!: () => void;
+    const setDefault = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const { result } = renderActions({}, makeStore({ presets: [savedPreset], setDefault }));
+    const toggle = toggleDefault(result.current);
+
+    let firstMutation!: Promise<void>;
+    let secondMutation!: Promise<void>;
+    act(() => {
+      firstMutation = toggle(savedPreset);
+      secondMutation = toggle(savedPreset);
+    });
+
+    expect(setDefault).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      finish();
+      await Promise.all([firstMutation, secondMutation]);
+    });
+  });
+
   it("sets a future default without changing the current search and exposes pending state", async () => {
     let finish!: () => void;
     const setDefault = vi.fn(

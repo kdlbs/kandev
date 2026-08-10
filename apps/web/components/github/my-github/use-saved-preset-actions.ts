@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useToast } from "@/components/toast-provider";
 import type { PresetOption } from "./search-bar";
@@ -45,6 +45,7 @@ export function useSavedPresetActions({
   const { t } = useTranslation();
   const { toast } = useToast();
   const [defaultMutationPending, setDefaultMutationPending] = useState(false);
+  const defaultMutationPendingRef = useRef(false);
   const {
     presets: savedPresets,
     save: saveSavedPreset,
@@ -77,7 +78,8 @@ export function useSavedPresetActions({
   };
 
   const onToggleSavedDefault = async (preset: SavedPreset) => {
-    if (defaultMutationPending) return;
+    if (defaultMutationPendingRef.current) return;
+    defaultMutationPendingRef.current = true;
     markSearchInteracted();
     setDefaultMutationPending(true);
     try {
@@ -88,6 +90,7 @@ export function useSavedPresetActions({
         variant: "error",
       });
     } finally {
+      defaultMutationPendingRef.current = false;
       setDefaultMutationPending(false);
     }
   };

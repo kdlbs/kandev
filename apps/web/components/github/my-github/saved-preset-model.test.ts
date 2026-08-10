@@ -21,6 +21,10 @@ function preset(id: string, kind: SavedPresetKind, isDefault = false): SavedPres
 }
 
 describe("saved preset parsing", () => {
+  it("returns an empty list for non-array input", () => {
+    expect(readSavedPresets(undefined)).toEqual([]);
+  });
+
   it.each([
     { field: "customQuery", value: undefined },
     { field: "customQuery", value: 42 },
