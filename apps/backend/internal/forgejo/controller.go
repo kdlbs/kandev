@@ -2,6 +2,7 @@ package forgejo
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -20,6 +21,7 @@ func RegisterRoutes(router *gin.Engine, service *Service) {
 	api.PUT("/config", controller.setConfig)
 	api.POST("/config/test", controller.testConfig)
 	api.DELETE("/config", controller.deleteConfig)
+	api.POST("/webhooks", controller.handleWebhook)
 	api.GET("/repositories", controller.listRepositories)
 	api.GET("/issues", controller.listIssues)
 	api.GET("/pull-requests", controller.listPullRequests)
@@ -41,6 +43,27 @@ func RegisterRoutes(router *gin.Engine, service *Service) {
 	api.DELETE("/task-pull-requests/:linkID", controller.unlinkTaskPullRequest)
 	api.POST("/task-issues/:linkID/refresh", controller.refreshTaskIssue)
 	api.POST("/task-pull-requests/:linkID/refresh", controller.refreshTaskPullRequest)
+}
+
+func (c *Controller) handleWebhook(ctx *gin.Context) {
+	payload, err := io.ReadAll(http.MaxBytesReader(ctx.Writer, ctx.Request.Body, maxResponseSize))
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid webhook payload"})
+		return
+	}
+	deliveryID := strings.TrimSpace(ctx.GetHeader("X-Gitea-Delivery"))
+	if deliveryID == "" {
+		deliveryID = strings.TrimSpace(ctx.GetHeader("X-Forgejo-Delivery"))
+	}
+	if deliveryID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "webhook delivery ID required"})
+		return
+	}
+	if err := c.service.HandleWebhook(ctx.Request.Context(), c.workspaceID(ctx), deliveryID, ctx.GetHeader("X-Gitea-Signature"), payload); err != nil {
+		c.error(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusAccepted, gin.H{"accepted": true})
 }
 
 func (c *Controller) listIssueWatches(ctx *gin.Context) {
@@ -374,6 +397,10 @@ func (c *Controller) error(ctx *gin.Context, err error) {
 	}
 	if errors.Is(err, ErrWatchNotFound) {
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "Forgejo issue watch not found"})
+		return
+	}
+	if errors.Is(err, ErrInvalidWebhookSignature) {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "invalid Forgejo webhook signature"})
 		return
 	}
 	if strings.Contains(err.Error(), "owner and repository are required") {

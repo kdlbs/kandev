@@ -18,21 +18,23 @@ var (
 )
 
 type Config struct {
-	WorkspaceID   string     `json:"workspace_id" db:"workspace_id"`
-	Origin        string     `json:"origin" db:"origin"`
-	Username      string     `json:"username" db:"username"`
-	HasSecret     bool       `json:"has_secret" db:"-"`
-	LastOK        bool       `json:"last_ok" db:"last_ok"`
-	LastError     string     `json:"last_error,omitempty" db:"last_error"`
-	LastCheckedAt *time.Time `json:"last_checked_at,omitempty" db:"last_checked_at"`
-	Revision      int64      `json:"revision" db:"revision"`
-	CreatedAt     time.Time  `json:"created_at" db:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at" db:"updated_at"`
+	WorkspaceID      string     `json:"workspace_id" db:"workspace_id"`
+	Origin           string     `json:"origin" db:"origin"`
+	Username         string     `json:"username" db:"username"`
+	HasSecret        bool       `json:"has_secret" db:"-"`
+	HasWebhookSecret bool       `json:"has_webhook_secret" db:"-"`
+	LastOK           bool       `json:"last_ok" db:"last_ok"`
+	LastError        string     `json:"last_error,omitempty" db:"last_error"`
+	LastCheckedAt    *time.Time `json:"last_checked_at,omitempty" db:"last_checked_at"`
+	Revision         int64      `json:"revision" db:"revision"`
+	CreatedAt        time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at" db:"updated_at"`
 }
 
 type SetConfigRequest struct {
-	Origin string `json:"origin"`
-	Token  string `json:"token,omitempty"`
+	Origin        string `json:"origin"`
+	Token         string `json:"token,omitempty"`
+	WebhookSecret string `json:"webhook_secret,omitempty"`
 }
 
 type TestConnectionResult struct {
@@ -50,6 +52,10 @@ type WorkspaceSecretStore interface {
 
 func SecretKeyForWorkspace(workspaceID string) string {
 	return "forgejo:" + strings.TrimSpace(workspaceID) + ":token"
+}
+
+func WebhookSecretKeyForWorkspace(workspaceID string) string {
+	return "forgejo:" + strings.TrimSpace(workspaceID) + ":webhook_secret"
 }
 
 type Store struct {
@@ -141,6 +147,13 @@ func NewStore(db, ro *sqlx.DB) (*Store, error) {
 		task_id TEXT NOT NULL, created_at DATETIME NOT NULL,
 		PRIMARY KEY (watch_id, owner, repo, issue_number)
 	)`)
+	if err != nil {
+		return nil, err
+	}
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS forgejo_webhook_deliveries (
+		workspace_id TEXT NOT NULL, delivery_id TEXT NOT NULL, payload_hash TEXT NOT NULL,
+		created_at DATETIME NOT NULL, PRIMARY KEY(workspace_id, delivery_id)
+	)`)
 	return store, err
 }
 
@@ -212,6 +225,10 @@ func (s *Service) GetConfig(ctx context.Context, workspaceID string) (*Config, e
 		return config, err
 	}
 	config.HasSecret, err = s.secrets.Exists(ctx, SecretKeyForWorkspace(workspaceID))
+	if err != nil {
+		return config, err
+	}
+	config.HasWebhookSecret, err = s.secrets.Exists(ctx, WebhookSecretKeyForWorkspace(workspaceID))
 	return config, err
 }
 
@@ -632,6 +649,11 @@ func (s *Service) SetConfig(ctx context.Context, workspaceID string, request *Se
 			return nil, err
 		}
 	}
+	if secret := strings.TrimSpace(request.WebhookSecret); secret != "" {
+		if err := s.secrets.Set(ctx, WebhookSecretKeyForWorkspace(workspaceID), "Forgejo webhook secret", secret); err != nil {
+			return nil, err
+		}
+	}
 	if err := s.store.SaveConfig(ctx, config); err != nil {
 		return nil, err
 	}
@@ -659,6 +681,9 @@ func (s *Service) DeleteConfig(ctx context.Context, workspaceID string) error {
 	}
 	if s.secrets != nil {
 		if err := s.secrets.Delete(ctx, SecretKeyForWorkspace(workspaceID)); err != nil {
+			return err
+		}
+		if err := s.secrets.Delete(ctx, WebhookSecretKeyForWorkspace(workspaceID)); err != nil {
 			return err
 		}
 	}
