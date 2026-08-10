@@ -822,6 +822,9 @@ func (s *Service) SetConfig(ctx context.Context, workspaceID string, request *Se
 	if err != nil {
 		return nil, fmt.Errorf("test Forgejo connection: %w", err)
 	}
+	if _, err := client.GetServerVersion(ctx); err != nil {
+		return nil, fmt.Errorf("validate Forgejo server version: %w", err)
+	}
 	config := &Config{WorkspaceID: workspaceID, Origin: client.origin.String(), Username: user.Login, LastOK: true}
 	now := time.Now().UTC()
 	config.LastCheckedAt = &now
@@ -859,6 +862,12 @@ func (s *Service) TestConfig(ctx context.Context, request *SetConfigRequest) *Te
 	user, err := client.GetAuthenticatedUser(ctx)
 	if err != nil {
 		return &TestConnectionResult{Error: "Forgejo connection test failed"}
+	}
+	if _, err := client.GetServerVersion(ctx); err != nil {
+		if errors.Is(err, ErrUnsupportedServerVersion) {
+			return &TestConnectionResult{Error: "This Forgejo server does not expose REST API v1"}
+		}
+		return &TestConnectionResult{Error: "Could not validate the Forgejo server version"}
 	}
 	return &TestConnectionResult{OK: true, Username: user.Login}
 }

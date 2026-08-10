@@ -3,6 +3,7 @@ package forgejo
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -31,6 +32,35 @@ func TestPATClientAuthenticatesWithForgejoToken(t *testing.T) {
 	user, err := client.GetAuthenticatedUser(context.Background())
 	if err != nil || user.Login != "rob" {
 		t.Fatalf("user=%#v err=%v", user, err)
+	}
+}
+
+func TestPATClientValidatesForgejoRESTV1Version(t *testing.T) {
+	server := newServer(t, func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/api/v1/version" {
+			t.Fatalf("path = %s", request.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"version": "1.21.7"})
+	})
+	t.Cleanup(server.Close)
+	client, err := NewPATClient(server.URL, "token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	version, err := client.GetServerVersion(context.Background())
+	if err != nil || version != "1.21.7" {
+		t.Fatalf("version=%q err=%v", version, err)
+	}
+}
+
+func TestPATClientRejectsUnsupportedForgejoAPIVersion(t *testing.T) {
+	server := newServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"version": "2.0.0"})
+	})
+	t.Cleanup(server.Close)
+	client, _ := NewPATClient(server.URL, "token")
+	if _, err := client.GetServerVersion(context.Background()); !errors.Is(err, ErrUnsupportedServerVersion) {
+		t.Fatalf("version error=%v, want ErrUnsupportedServerVersion", err)
 	}
 }
 

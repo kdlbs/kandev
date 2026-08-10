@@ -103,14 +103,17 @@ func TestStore_ConfigIsScopedToWorkspace(t *testing.T) {
 func TestService_SetConfigTestsBeforePersisting(t *testing.T) {
 	service, secrets := newConfigTestService(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/user" {
-			http.NotFound(w, r)
-			return
-		}
 		if got := r.Header.Get("Authorization"); got != "token test-token" {
 			t.Fatalf("authorization = %q", got)
 		}
-		_, _ = w.Write([]byte(`{"login":"alice"}`))
+		switch r.URL.Path {
+		case "/api/v1/user":
+			_, _ = w.Write([]byte(`{"login":"alice"}`))
+		case "/api/v1/version":
+			_, _ = w.Write([]byte(`{"version":"1.21.7"}`))
+		default:
+			http.NotFound(w, r)
+		}
 	}))
 	t.Cleanup(server.Close)
 
@@ -151,6 +154,10 @@ func TestService_SetConfigRetainsExistingToken(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "token existing-token" {
 			t.Fatalf("authorization = %q", got)
+		}
+		if r.URL.Path == "/api/v1/version" {
+			_, _ = w.Write([]byte(`{"version":"1.21.7"}`))
+			return
 		}
 		_, _ = w.Write([]byte(`{"login":"alice"}`))
 	}))

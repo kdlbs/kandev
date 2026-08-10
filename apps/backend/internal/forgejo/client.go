@@ -22,7 +22,10 @@ const (
 	maxResponseSize = 2 << 20
 )
 
-var ErrInvalidOrigin = errors.New("forgejo: invalid origin")
+var (
+	ErrInvalidOrigin            = errors.New("forgejo: invalid origin")
+	ErrUnsupportedServerVersion = errors.New("forgejo: unsupported server API version")
+)
 
 type APIError struct {
 	StatusCode int
@@ -122,6 +125,13 @@ type BranchLookupClient interface {
 	GetBranch(context.Context, string, string, string) error
 }
 
+// ServerVersionClient validates that a Forgejo server exposes the REST v1 API
+// this integration implements. It is intentionally separate from Client so
+// deterministic test clients can implement only the capability under test.
+type ServerVersionClient interface {
+	GetServerVersion(context.Context) (string, error)
+}
+
 type rawPullRequest struct {
 	Number         int    `json:"number"`
 	Title          string `json:"title"`
@@ -204,6 +214,22 @@ func (c *PATClient) GetAuthenticatedUser(ctx context.Context) (*User, error) {
 		return nil, errors.New("Forgejo returned an empty login")
 	}
 	return &user, nil
+}
+
+func (c *PATClient) GetServerVersion(ctx context.Context) (string, error) {
+	var response struct {
+		Version string `json:"version"`
+	}
+	if _, err := c.get(ctx, "/version", nil, &response); err != nil {
+		return "", err
+	}
+	version := strings.TrimSpace(response.Version)
+	majorText := strings.SplitN(strings.TrimPrefix(version, "v"), ".", 2)[0]
+	major, err := strconv.Atoi(majorText)
+	if err != nil || major != 1 {
+		return "", fmt.Errorf("%w: Forgejo REST v1 required, server reported %q", ErrUnsupportedServerVersion, version)
+	}
+	return version, nil
 }
 
 func (c *PATClient) ListRepositories(ctx context.Context, page, limit int) ([]Repository, int, error) {
