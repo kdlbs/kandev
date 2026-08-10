@@ -82,6 +82,20 @@ func TestPATClientCreatePullRequest(t *testing.T) {
 	}
 }
 
+func TestPATClientChecksRemoteBranchBeforePRCreation(t *testing.T) {
+	server := newServer(t, func(w http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodGet || request.URL.Path != "/api/v1/repos/owner/repo/branches/feat%2Fforgejo" {
+			t.Fatalf("request = %s %s", request.Method, request.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"name":"feat/forgejo"}`))
+	})
+	t.Cleanup(server.Close)
+	client, _ := NewPATClient(server.URL, "token")
+	if err := client.GetBranch(context.Background(), "owner", "repo", "feat/forgejo"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPATClientGetsPullRequest(t *testing.T) {
 	server := newServer(t, func(w http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/api/v1/repos/owner/repo/pulls/7" {

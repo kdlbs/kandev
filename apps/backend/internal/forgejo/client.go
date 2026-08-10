@@ -115,6 +115,13 @@ type ActionsClient interface {
 	ListActionRuns(context.Context, string, string, int, int) ([]ActionRun, int, error)
 }
 
+// BranchLookupClient proves a branch exists on Forgejo before a PR is created.
+// This deliberately asks the remote provider rather than trusting a local
+// worktree ref, which may be stale or absent for remote executors.
+type BranchLookupClient interface {
+	GetBranch(context.Context, string, string, string) error
+}
+
 type rawPullRequest struct {
 	Number         int    `json:"number"`
 	Title          string `json:"title"`
@@ -300,6 +307,15 @@ func (c *PATClient) CreatePullRequest(ctx context.Context, input CreatePullReque
 		return nil, err
 	}
 	return raw.pullRequest(), nil
+}
+
+func (c *PATClient) GetBranch(ctx context.Context, owner, repo, branch string) error {
+	if strings.TrimSpace(owner) == "" || strings.TrimSpace(repo) == "" || strings.TrimSpace(branch) == "" {
+		return errors.New("Forgejo branch identity required")
+	}
+	var ignored json.RawMessage
+	_, err := c.get(ctx, fmt.Sprintf("/repos/%s/%s/branches/%s", url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(branch)), nil, &ignored)
+	return err
 }
 
 func (c *PATClient) GetPullRequest(ctx context.Context, owner, repo string, number int) (*PullRequest, error) {

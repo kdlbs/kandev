@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -14,9 +15,10 @@ import (
 )
 
 var (
-	ErrWorkspaceRequired = errors.New("forgejo: workspace_id required")
-	ErrNotConfigured     = errors.New("forgejo: workspace not configured")
-	ErrUnsupported       = errors.New("forgejo: capability unavailable on this Forgejo client")
+	ErrWorkspaceRequired   = errors.New("forgejo: workspace_id required")
+	ErrNotConfigured       = errors.New("forgejo: workspace not configured")
+	ErrUnsupported         = errors.New("forgejo: capability unavailable on this Forgejo client")
+	ErrHeadBranchNotPushed = errors.New("forgejo: pull request source branch is not pushed")
 )
 
 type Config struct {
@@ -575,6 +577,17 @@ func (s *Service) CreateTaskPullRequest(ctx context.Context, workspaceID, taskID
 	client, err := s.ClientForWorkspace(ctx, workspaceID)
 	if err != nil {
 		return nil, err
+	}
+	branches, ok := client.(BranchLookupClient)
+	if !ok {
+		return nil, ErrUnsupported
+	}
+	if err := branches.GetBranch(ctx, input.Owner, input.Repo, input.Head); err != nil {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
+			return nil, fmt.Errorf("%w: push %q to Forgejo before creating a pull request", ErrHeadBranchNotPushed, input.Head)
+		}
+		return nil, fmt.Errorf("verify Forgejo source branch: %w", err)
 	}
 	pull, err := client.CreatePullRequest(ctx, input)
 	if err != nil {
