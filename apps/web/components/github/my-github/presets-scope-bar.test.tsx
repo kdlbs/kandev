@@ -17,10 +17,12 @@ const savedPreset: SavedPreset = {
 vi.mock("@/components/integrations/presets-scope-bar-base", () => ({
   IntegrationScopeBar: ({
     defaultMutationPending,
+    onKindChange,
     onToggleSavedDefault,
     savedPresets,
   }: {
     defaultMutationPending?: boolean;
+    onKindChange?: (kind: "pr" | "issue") => void;
     onToggleSavedDefault?: (id: string) => void;
     savedPresets: Array<{ id: string }>;
   }) => {
@@ -36,6 +38,11 @@ vi.mock("@/components/integrations/presets-scope-bar-base", () => ({
           data-testid="scope-bar-default-toggle"
           onClick={() => onToggleSavedDefault?.(savedPresets[0]?.id ?? "missing-preset")}
         />
+        <button
+          type="button"
+          data-testid="scope-bar-kind-switch"
+          onClick={() => onKindChange?.("issue")}
+        />
       </div>
     );
   },
@@ -46,7 +53,31 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+function expectExplicitKindSwitchRequest() {
+  const onSelect = vi.fn();
+
+  render(
+    <PresetsScopeBar
+      selected={{ kind: "pr", source: "preset", id: "review" }}
+      onSelect={onSelect}
+      savedPresets={[]}
+      onDeleteSaved={vi.fn()}
+      canSaveCurrent={false}
+      onSaveCurrent={vi.fn()}
+      onToggleSavedDefault={vi.fn()}
+      defaultMutationPending={false}
+      prPresets={[]}
+      issuePresets={[]}
+    />,
+  );
+
+  fireEvent.click(screen.getByTestId("scope-bar-kind-switch"));
+  expect(onSelect).toHaveBeenCalledWith({ kind: "issue", source: "kind-switch" });
+}
+
 describe("PresetsScopeBar default adapter", () => {
+  it("emits an explicit kind-switch request", expectExplicitKindSwitchRequest);
+
   it("forwards pending state to the desktop default action", () => {
     render(
       <PresetsScopeBar

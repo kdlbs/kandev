@@ -14,10 +14,13 @@ export type SidebarSelection = {
   id: string;
 };
 
+export type SidebarSelectionRequest =
+  | SidebarSelection
+  | { kind: SidebarSelection["kind"]; source: "kind-switch" };
+
 type PresetsSidebarProps = {
   selected: SidebarSelection;
-  /** Kind switches use `id: ""`; the handler must resolve the destination default or fallback. */
-  onSelect: (s: SidebarSelection) => void;
+  onSelect: (request: SidebarSelectionRequest) => void;
   savedPresets: SavedPreset[];
   onDeleteSaved: (id: string) => void;
   canSaveCurrent: boolean;
@@ -227,9 +230,7 @@ export function PresetsSidebar({
   const saved = savedPresets.filter((p) => p.kind === selected.kind);
   const onKindChange = (kind: "pr" | "issue") => {
     if (kind === selected.kind) return;
-    // id is a sentinel; the selection handler resolves the destination's saved default
-    // or first configured preset when it sees the kind change.
-    onSelect({ kind, source: "preset", id: "" });
+    onSelect({ kind, source: "kind-switch" });
   };
   return (
     <nav className="flex w-full min-w-0 flex-col overflow-x-hidden py-3">

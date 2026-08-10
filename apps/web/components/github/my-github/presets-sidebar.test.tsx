@@ -64,7 +64,7 @@ describe("PresetsSidebar saved defaults", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Issues" }));
 
-    expect(onSelect).toHaveBeenCalledWith({ kind: "issue", source: "preset", id: "" });
+    expect(onSelect).toHaveBeenCalledWith({ kind: "issue", source: "kind-switch" });
   });
 
   it("ignores reselecting the active kind", () => {

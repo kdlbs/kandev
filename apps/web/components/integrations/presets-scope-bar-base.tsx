@@ -204,6 +204,8 @@ export type IntegrationScopeBarProps<K extends string> = {
   kinds: ReadonlyArray<{ value: K; label: string }>;
   selected: ScopeSelection<K>;
   onSelect: (s: ScopeSelection<K>) => void;
+  /** Overrides the default first-preset selection when the active kind changes. */
+  onKindChange?: (kind: K) => void;
   presetsByKind: (kind: K) => ScopePreset[];
   savedPresets: ScopeSavedPreset<K>[];
   onDeleteSaved: (id: string) => void;
@@ -221,6 +223,7 @@ export function IntegrationScopeBar<K extends string>({
   kinds,
   selected,
   onSelect,
+  onKindChange,
   presetsByKind,
   savedPresets,
   onDeleteSaved,
@@ -234,7 +237,11 @@ export function IntegrationScopeBar<K extends string>({
   const inbox = presets.filter((p) => p.group === "inbox");
   const created = presets.filter((p) => p.group === "created");
 
-  const onKindChange = (kind: K) => {
+  const handleKindChange = (kind: K) => {
+    if (onKindChange) {
+      onKindChange(kind);
+      return;
+    }
     onSelect({ kind, source: "preset", id: presetsByKind(kind)[0]?.value ?? "" });
   };
 
@@ -253,7 +260,7 @@ export function IntegrationScopeBar<K extends string>({
       className={cn("flex items-center gap-1.5 overflow-x-auto px-4 py-2 sm:px-6", className)}
       data-testid={testId}
     >
-      <KindSegment kinds={kinds} active={selected.kind} onChange={onKindChange} />
+      <KindSegment kinds={kinds} active={selected.kind} onChange={handleKindChange} />
       <Divider />
       {inbox.map(renderPill)}
       {inbox.length > 0 && created.length > 0 && <Divider />}

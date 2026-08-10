@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PresetOption } from "./search-bar";
-import type { SidebarSelection } from "./presets-sidebar";
+import type { SidebarSelection, SidebarSelectionRequest } from "./presets-sidebar";
 import {
   findDefaultSavedPreset,
   resolveDefaultSidebarTarget,
@@ -12,7 +12,8 @@ import {
 type InitialSidebarSelectionOptions = {
   workspaceId: string | null;
   resolvedPrPresets: PresetOption[];
-  autoResetSearchRef: MutableRefObject<boolean>;
+  shouldAutoResetSearch: () => boolean;
+  resetSearchOnWorkspaceChange: () => void;
   setQueryImmediate: (query: string) => void;
   setRepoFilter: (repo: string) => void;
   savedPresets?: SavedPreset[];
@@ -40,7 +41,8 @@ function sameAppliedSidebarTarget(
 export function useInitialSidebarSelection({
   workspaceId,
   resolvedPrPresets,
-  autoResetSearchRef,
+  shouldAutoResetSearch,
+  resetSearchOnWorkspaceChange,
   setQueryImmediate,
   setRepoFilter,
   savedPresets = [],
@@ -60,10 +62,9 @@ export function useInitialSidebarSelection({
     if (resetWorkspaceIdRef.current !== workspaceId) {
       resetWorkspaceIdRef.current = workspaceId;
       userSelectedRef.current = false;
-      // Re-enable default selection for the new workspace even after prior interaction.
-      autoResetSearchRef.current = true;
+      resetSearchOnWorkspaceChange();
     }
-    if (userSelectedRef.current || !autoResetSearchRef.current) return;
+    if (userSelectedRef.current || !shouldAutoResetSearch()) return;
     const target = resolvedPrTarget;
     const appliedTarget = { workspaceId, ...target };
     if (sameAppliedSidebarTarget(lastAppliedTargetRef.current, appliedTarget)) return;
@@ -77,7 +78,14 @@ export function useInitialSidebarSelection({
     );
     setQueryImmediate(target.query);
     setRepoFilter(target.repoFilter);
-  }, [workspaceId, resolvedPrTarget, setQueryImmediate, setRepoFilter]);
+  }, [
+    workspaceId,
+    resolvedPrTarget,
+    setQueryImmediate,
+    setRepoFilter,
+    resetSearchOnWorkspaceChange,
+    shouldAutoResetSearch,
+  ]);
 
   const setUserSelection = useCallback((next: SidebarSelection) => {
     userSelectedRef.current = true;
@@ -111,15 +119,10 @@ export function useSidebarSelectionHandler({
   const resolvedPresetsRef = useRef({ pr: resolvedPrPresets, issue: resolvedIssuePresets });
   resolvedPresetsRef.current = { pr: resolvedPrPresets, issue: resolvedIssuePresets };
   return useCallback(
-    (selection: SidebarSelection) => {
-      // The empty preset id is only meaningful when the kind toggle changes kinds.
-      if (selection.kind === currentKind && selection.source === "preset" && selection.id === "") {
-        return;
-      }
-      markSearchInteracted();
-      // Kind-switch: always resolve from the saved default (or first configured preset),
-      // not from the specific id in `selection`, which is just the kind-toggle fallback.
-      if (selection.kind !== currentKind) {
+    (selection: SidebarSelectionRequest) => {
+      if (selection.source === "kind-switch") {
+        if (selection.kind === currentKind) return;
+        markSearchInteracted();
         const target = resolveDefaultSidebarTarget(
           selection.kind,
           savedPresetsRef.current,
@@ -130,6 +133,7 @@ export function useSidebarSelectionHandler({
         setRepoFilter(target.repoFilter);
         return;
       }
+      markSearchInteracted();
       setUserSelection(selection);
       if (selection.source === "saved") {
         const found = savedPresetsRef.current.find((preset) => preset.id === selection.id);

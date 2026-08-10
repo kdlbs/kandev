@@ -232,6 +232,10 @@ function useSearchInteractionControls(
   setRepoFilterRaw: (repo: string) => void,
 ) {
   const autoResetSearchRef = useRef(true);
+  const shouldAutoResetSearch = useCallback(() => autoResetSearchRef.current, []);
+  const resetSearchOnWorkspaceChange = useCallback(() => {
+    autoResetSearchRef.current = true;
+  }, []);
   const markSearchInteracted = useCallback(() => {
     autoResetSearchRef.current = false;
   }, []);
@@ -249,7 +253,12 @@ function useSearchInteractionControls(
     },
     [markSearchInteracted, setRepoFilterRaw],
   );
-  return { autoResetSearchRef, markSearchInteracted, setCustomQuery, setRepoFilter };
+  return {
+    autoResetSearch: { shouldAutoResetSearch, resetSearchOnWorkspaceChange },
+    markSearchInteracted,
+    setCustomQuery,
+    setRepoFilter,
+  };
 }
 
 function useGitHubPageState(workspaceId: string | null, enabled: boolean) {
@@ -266,11 +275,11 @@ function useGitHubPageState(workspaceId: string | null, enabled: boolean) {
   const [repoFilter, setRepoFilterRaw] = useState("");
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const savedPresetStore = useSavedPresets(workspaceId);
-  const { autoResetSearchRef, markSearchInteracted, setCustomQuery, setRepoFilter } =
+  const { autoResetSearch, markSearchInteracted, setCustomQuery, setRepoFilter } =
     useSearchInteractionControls(setCustomQueryRaw, setRepoFilterRaw);
   const { selection, setProgrammaticSelection, setUserSelection } = useInitialSidebarSelection({
     workspaceId,
-    autoResetSearchRef,
+    ...autoResetSearch,
     resolvedPrPresets,
     setQueryImmediate,
     setRepoFilter: setRepoFilterRaw,

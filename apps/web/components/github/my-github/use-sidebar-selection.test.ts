@@ -25,6 +25,7 @@ const issuePreset: PresetOption = {
 const prPresets = [prPreset];
 const issuePresets = [issuePreset];
 const WORKSPACE_ID = "workspace-1";
+const KIND_SWITCH = "kind-switch" as const;
 
 const prDefault: SavedPreset = {
   id: "saved-pr",
@@ -44,16 +45,30 @@ const issueDefault: SavedPreset = {
   customQuery: "assignee:@me label:bug",
 };
 
+function createAutoResetControls() {
+  let enabled = true;
+  return {
+    shouldAutoResetSearch: () => enabled,
+    resetSearchOnWorkspaceChange: vi.fn(() => {
+      enabled = true;
+    }),
+    disable: () => {
+      enabled = false;
+    },
+  };
+}
+
 async function expectNewWorkspaceDefaultAfterManualSelection() {
   const setQueryImmediate = vi.fn();
   const setRepoFilter = vi.fn();
-  const autoResetSearchRef = { current: true };
+  const autoReset = createAutoResetControls();
   const { result, rerender } = renderHook(
     ({ workspaceId, savedPresets }) =>
       useInitialSidebarSelection({
         workspaceId,
         resolvedPrPresets: prPresets,
-        autoResetSearchRef,
+        shouldAutoResetSearch: autoReset.shouldAutoResetSearch,
+        resetSearchOnWorkspaceChange: autoReset.resetSearchOnWorkspaceChange,
         setQueryImmediate,
         setRepoFilter,
         savedPresets,
@@ -68,14 +83,16 @@ async function expectNewWorkspaceDefaultAfterManualSelection() {
   const manual: SidebarSelection = { kind: "pr", source: "preset", id: "manual" };
   act(() => {
     result.current.setUserSelection(manual);
-    autoResetSearchRef.current = false;
+    autoReset.disable();
   });
+  autoReset.resetSearchOnWorkspaceChange.mockClear();
 
   rerender({ workspaceId: "workspace-2", savedPresets: [prDefault] });
 
   await waitFor(() => expect(result.current.selection.id).toBe(prDefault.id));
   expect(setQueryImmediate).toHaveBeenLastCalledWith(prDefault.customQuery);
   expect(setRepoFilter).toHaveBeenLastCalledWith(prDefault.repoFilter);
+  expect(autoReset.resetSearchOnWorkspaceChange).toHaveBeenCalledOnce();
 }
 
 function expectConfiguredPresetFallbackOnKindSwitch() {
@@ -95,7 +112,7 @@ function expectConfiguredPresetFallbackOnKindSwitch() {
     }),
   );
 
-  act(() => result.current({ kind: "issue", source: "preset", id: issuePreset.value }));
+  act(() => result.current({ kind: "issue", source: KIND_SWITCH }));
 
   expect(setUserSelection).toHaveBeenCalledWith({
     kind: "issue",
@@ -124,7 +141,7 @@ function expectSameKindSentinelNoop() {
     }),
   );
 
-  act(() => result.current({ kind: "pr", source: "preset", id: "" }));
+  act(() => result.current({ kind: "pr", source: KIND_SWITCH }));
 
   expect(markSearchInteracted).not.toHaveBeenCalled();
   expect(setUserSelection).not.toHaveBeenCalled();
@@ -166,7 +183,7 @@ function expectStableHandlerWithRefreshedPresetCatalogs() {
   });
 
   expect(result.current).toBe(initialHandler);
-  act(() => initialHandler({ kind: "issue", source: "preset", id: "" }));
+  act(() => initialHandler({ kind: "issue", source: KIND_SWITCH }));
   expect(setUserSelection).toHaveBeenCalledWith({
     kind: "issue",
     source: "saved",
@@ -189,7 +206,7 @@ function expectStableHandlerWithRefreshedPresetCatalogs() {
     currentIssuePresets: [refreshedIssuePreset],
   });
   expect(result.current).toBe(initialHandler);
-  act(() => initialHandler({ kind: "issue", source: "preset", id: "" }));
+  act(() => initialHandler({ kind: "issue", source: KIND_SWITCH }));
   expect(setUserSelection).toHaveBeenCalledWith({
     kind: "issue",
     source: "preset",
@@ -203,13 +220,14 @@ describe("useInitialSidebarSelection", () => {
   it("does not reapply an unchanged default when preset references change", async () => {
     const setQueryImmediate = vi.fn();
     const setRepoFilter = vi.fn();
-    const autoResetSearchRef = { current: true };
+    const autoReset = createAutoResetControls();
     const { rerender } = renderHook(
       ({ savedPresets }) =>
         useInitialSidebarSelection({
           workspaceId: WORKSPACE_ID,
           resolvedPrPresets: prPresets,
-          autoResetSearchRef,
+          shouldAutoResetSearch: autoReset.shouldAutoResetSearch,
+          resetSearchOnWorkspaceChange: autoReset.resetSearchOnWorkspaceChange,
           setQueryImmediate,
           setRepoFilter,
           savedPresets,
@@ -227,13 +245,14 @@ describe("useInitialSidebarSelection", () => {
   it("applies a saved PR default when saved queries hydrate", async () => {
     const setQueryImmediate = vi.fn();
     const setRepoFilter = vi.fn();
-    const autoResetSearchRef = { current: true };
+    const autoReset = createAutoResetControls();
     const { result, rerender } = renderHook(
       ({ savedPresets }) =>
         useInitialSidebarSelection({
           workspaceId: WORKSPACE_ID,
           resolvedPrPresets: prPresets,
-          autoResetSearchRef,
+          shouldAutoResetSearch: autoReset.shouldAutoResetSearch,
+          resetSearchOnWorkspaceChange: autoReset.resetSearchOnWorkspaceChange,
           setQueryImmediate,
           setRepoFilter,
           savedPresets,
@@ -258,13 +277,14 @@ describe("useInitialSidebarSelection", () => {
   it("does not apply a late default after manual selection", async () => {
     const setQueryImmediate = vi.fn();
     const setRepoFilter = vi.fn();
-    const autoResetSearchRef = { current: true };
+    const autoReset = createAutoResetControls();
     const { result, rerender } = renderHook(
       ({ savedPresets }) =>
         useInitialSidebarSelection({
           workspaceId: WORKSPACE_ID,
           resolvedPrPresets: prPresets,
-          autoResetSearchRef,
+          shouldAutoResetSearch: autoReset.shouldAutoResetSearch,
+          resetSearchOnWorkspaceChange: autoReset.resetSearchOnWorkspaceChange,
           setQueryImmediate,
           setRepoFilter,
           savedPresets,
@@ -307,7 +327,7 @@ describe("useSidebarSelectionHandler", () => {
       }),
     );
 
-    act(() => result.current({ kind: "issue", source: "preset", id: issuePreset.value }));
+    act(() => result.current({ kind: "issue", source: KIND_SWITCH }));
 
     expect(markSearchInteracted).toHaveBeenCalledOnce();
     expect(setUserSelection).toHaveBeenCalledWith({

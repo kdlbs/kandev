@@ -5,12 +5,12 @@ import { useTranslation } from "react-i18next";
 import { IntegrationScopeBar } from "@/components/integrations/presets-scope-bar-base";
 import { PR_PRESETS, ISSUE_PRESETS, type PresetOption } from "./search-bar";
 import type { SavedPreset } from "./saved-preset-model";
-import type { SidebarSelection } from "./presets-sidebar";
+import type { SidebarSelection, SidebarSelectionRequest } from "./presets-sidebar";
 
 type PresetsScopeBarProps = {
   className?: string;
   selected: SidebarSelection;
-  onSelect: (s: SidebarSelection) => void;
+  onSelect: (request: SidebarSelectionRequest) => void;
   savedPresets: SavedPreset[];
   onDeleteSaved: (id: string) => void;
   canSaveCurrent: boolean;
@@ -36,6 +36,7 @@ export function PresetsScopeBar({
   prPresets = PR_PRESETS,
   issuePresets = ISSUE_PRESETS,
   savedPresets,
+  onSelect,
   onToggleSavedDefault,
   ...props
 }: PresetsScopeBarProps) {
@@ -55,9 +56,15 @@ export function PresetsScopeBar({
     },
     [onToggleSavedDefault],
   );
+  const handleKindChange = useCallback(
+    (kind: SidebarSelection["kind"]) => onSelect({ kind, source: "kind-switch" }),
+    [onSelect],
+  );
   return (
     <IntegrationScopeBar
       {...props}
+      onSelect={onSelect}
+      onKindChange={handleKindChange}
       savedPresets={savedPresets}
       onToggleSavedDefault={handleToggleSavedDefault}
       testId="github-presets-scope-bar"

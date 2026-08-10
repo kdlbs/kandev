@@ -118,6 +118,16 @@ function renderBar(overrides: Partial<Props> = {}) {
 }
 
 describe("IntegrationScopeBar saved defaults", () => {
+  it("delegates kind changes to the explicit callback when provided", () => {
+    const onKindChange = vi.fn();
+    const { onSelect } = renderBar({ onKindChange });
+
+    fireEvent.click(screen.getByRole("button", { name: "Issues" }));
+
+    expect(onKindChange).toHaveBeenCalledWith("issue");
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
   it("renders set and clear markers without selecting the saved query", () => {
     const { onSelect, onToggleSavedDefault } = renderBar();
     const clear = screen.getByRole("menuitemcheckbox", {
