@@ -224,6 +224,10 @@ export function useSavedPresets(workspaceId: string | null = null) {
     [workspaceId],
   );
 
+  /**
+   * @returns The created preset, or null while workspace settings are unavailable.
+   * @throws The persistence error after rolling back the optimistic update.
+   */
   const save = useCallback(
     async (input: Omit<SavedPreset, "id" | "createdAt" | "isDefault">) => {
       if (workspaceId && workspacePresetsRef.current === undefined) return null;
@@ -252,6 +256,10 @@ export function useSavedPresets(workspaceId: string | null = null) {
     [applyLocal, queueMutation, workspaceId],
   );
 
+  /**
+   * @returns Whether an existing preset was removed.
+   * @throws The persistence error after rolling back the optimistic update.
+   */
   const remove = useCallback(
     async (id: string) => {
       if (workspaceId && workspacePresetsRef.current === undefined) return false;

@@ -360,9 +360,10 @@ describe("useSavedPresetActions delete actions", () => {
     expect(setRepoFilter).toHaveBeenCalledWith("");
   });
 
-  it("uses the latest preset catalog when an active deletion finishes", async () => {
-    await expectLatestPresetCatalogAfterDelete();
-  });
+  it(
+    "uses the latest preset catalog when an active deletion finishes",
+    expectLatestPresetCatalogAfterDelete,
+  );
 
   it("deletes an inactive saved query without changing the active search", async () => {
     const remove = vi.fn(async () => true);
