@@ -90,7 +90,7 @@ describe("PresetsScopeBar default adapter", () => {
     expect(onToggleSavedDefault).toHaveBeenCalledWith(savedPreset);
   });
 
-  it("keeps the default adapter stable across unchanged renders", () => {
+  it("keeps the default adapter stable while using refreshed presets", () => {
     const savedPresets = [savedPreset];
     const props = {
       selected: { kind: "pr", source: "saved", id: savedPreset.id } as const,
@@ -105,12 +105,15 @@ describe("PresetsScopeBar default adapter", () => {
       issuePresets: [],
     };
     const { rerender } = render(<PresetsScopeBar {...props} />);
+    const refreshedPreset = { ...savedPreset, label: "Updated", isDefault: true };
 
-    rerender(<PresetsScopeBar {...props} />);
+    rerender(<PresetsScopeBar {...props} savedPresets={[refreshedPreset]} />);
 
     expect(
       screen.getByTestId("scope-bar-default-action").getAttribute("data-callback-stable"),
     ).toBe("true");
+    fireEvent.click(screen.getByTestId("scope-bar-default-toggle"));
+    expect(props.onToggleSavedDefault).toHaveBeenCalledWith(refreshedPreset);
   });
 
   it("warns in development when a stale default target is requested", () => {

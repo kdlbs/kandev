@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { IntegrationScopeBar } from "@/components/integrations/presets-scope-bar-base";
 import { PR_PRESETS, ISSUE_PRESETS, type PresetOption } from "./search-bar";
@@ -40,9 +40,11 @@ export function PresetsScopeBar({
   ...props
 }: PresetsScopeBarProps) {
   const { t } = useTranslation();
+  const savedPresetsRef = useRef(savedPresets);
+  savedPresetsRef.current = savedPresets;
   const handleToggleSavedDefault = useCallback(
     (id: string) => {
-      const preset = savedPresets.find((candidate) => candidate.id === id);
+      const preset = savedPresetsRef.current.find((candidate) => candidate.id === id);
       if (!preset) {
         if (process.env.NODE_ENV !== "production") {
           console.warn("[github:presets] default toggle target missing", { id });
@@ -51,7 +53,7 @@ export function PresetsScopeBar({
       }
       void onToggleSavedDefault(preset);
     },
-    [onToggleSavedDefault, savedPresets],
+    [onToggleSavedDefault],
   );
   return (
     <IntegrationScopeBar
