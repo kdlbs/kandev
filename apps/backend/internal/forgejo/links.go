@@ -120,6 +120,36 @@ func (s *Store) ListTaskPRs(ctx context.Context, workspaceID, taskID string) ([]
 	return result, nil
 }
 
+func (s *Store) DeleteTaskIssue(ctx context.Context, workspaceID, linkID string) error {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM forgejo_task_issues WHERE id = ? AND task_id IN (SELECT id FROM tasks WHERE workspace_id = ?)`, linkID, workspaceID)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return ErrTaskLinkNotFound
+	}
+	return nil
+}
+
+func (s *Store) DeleteTaskPR(ctx context.Context, workspaceID, linkID string) error {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM forgejo_task_prs WHERE id = ? AND task_id IN (SELECT id FROM tasks WHERE workspace_id = ?)`, linkID, workspaceID)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return ErrTaskLinkNotFound
+	}
+	return nil
+}
+
 func (s *Store) assertTaskWorkspace(ctx context.Context, workspaceID, taskID string) error {
 	var found int
 	err := s.ro.GetContext(ctx, &found, `SELECT 1 FROM tasks WHERE id = ? AND workspace_id = ?`, taskID, workspaceID)

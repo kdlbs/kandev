@@ -28,6 +28,24 @@ func RegisterRoutes(router *gin.Engine, service *Service) {
 	api.POST("/task-pull-requests/create", controller.createTaskPullRequest)
 	api.GET("/tasks/:taskID/issues", controller.listTaskIssues)
 	api.POST("/task-issues", controller.associateIssue)
+	api.DELETE("/task-issues/:linkID", controller.unlinkTaskIssue)
+	api.DELETE("/task-pull-requests/:linkID", controller.unlinkTaskPullRequest)
+}
+
+func (c *Controller) unlinkTaskIssue(ctx *gin.Context) {
+	if err := c.service.UnlinkTaskIssue(ctx.Request.Context(), c.workspaceID(ctx), strings.TrimSpace(ctx.Param("linkID"))); err != nil {
+		c.error(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"deleted": true})
+}
+
+func (c *Controller) unlinkTaskPullRequest(ctx *gin.Context) {
+	if err := c.service.UnlinkTaskPullRequest(ctx.Request.Context(), c.workspaceID(ctx), strings.TrimSpace(ctx.Param("linkID"))); err != nil {
+		c.error(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"deleted": true})
 }
 
 func (c *Controller) createTaskPullRequest(ctx *gin.Context) {
@@ -218,6 +236,10 @@ func (c *Controller) error(ctx *gin.Context, err error) {
 	}
 	if errors.Is(err, ErrNotConfigured) {
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "Forgejo workspace is not configured"})
+		return
+	}
+	if errors.Is(err, ErrTaskLinkNotFound) {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "Forgejo task link not found"})
 		return
 	}
 	if strings.Contains(err.Error(), "owner and repository are required") {

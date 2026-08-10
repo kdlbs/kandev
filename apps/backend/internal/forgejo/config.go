@@ -312,6 +312,13 @@ func (s *Service) CreateTaskPullRequest(ctx context.Context, workspaceID, taskID
 	return nil, ErrTaskLinkNotFound
 }
 
+func (s *Service) UnlinkTaskIssue(ctx context.Context, workspaceID, linkID string) error {
+	return s.store.DeleteTaskIssue(ctx, workspaceID, linkID)
+}
+func (s *Service) UnlinkTaskPullRequest(ctx context.Context, workspaceID, linkID string) error {
+	return s.store.DeleteTaskPR(ctx, workspaceID, linkID)
+}
+
 func (s *Service) SetConfig(ctx context.Context, workspaceID string, request *SetConfigRequest) (*Config, error) {
 	if strings.TrimSpace(workspaceID) == "" {
 		return nil, ErrWorkspaceRequired
