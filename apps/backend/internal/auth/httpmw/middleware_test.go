@@ -187,6 +187,22 @@ func TestEnabledModeAllowlistMatrix(t *testing.T) {
 			name: "github app webhook", method: http.MethodPost,
 			path: "/api/v1/github/app/registrations/reg1/webhook",
 		},
+		{
+			name: "github app manifest callback", method: http.MethodGet,
+			path: "/api/v1/github/app/registrations/reg1/manifest/callback",
+		},
+		{
+			name: "github app installation callback", method: http.MethodGet,
+			path: "/api/v1/github/app/registrations/reg1/install/callback",
+		},
+		{
+			name: "github app personal callback", method: http.MethodGet,
+			path: "/api/v1/github/app/registrations/reg1/personal/callback",
+		},
+		{
+			name: "github app callback wrong method", method: http.MethodPost,
+			path: "/api/v1/github/app/registrations/reg1/manifest/callback", blocked: true,
+		},
 
 		{name: "office without bearer", method: http.MethodGet, path: "/api/v1/office/tasks/t1", blocked: true},
 		{
