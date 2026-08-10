@@ -11,7 +11,10 @@ import (
 	"github.com/google/uuid"
 )
 
-var ErrTaskLinkNotFound = errors.New("forgejo: task link not found")
+var (
+	ErrTaskLinkNotFound   = errors.New("forgejo: task link not found")
+	ErrIssueAlreadyLinked = errors.New("forgejo: issue is already linked to another task")
+)
 
 // TaskIssue is a durable Forgejo issue association for a Kandev task.
 type TaskIssue struct {
@@ -68,6 +71,41 @@ func (s *Store) UpsertTaskIssue(ctx context.Context, issue *TaskIssue) error {
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(task_id, repository_id, owner, repo, issue_number) DO UPDATE SET origin=excluded.origin, issue_url=excluded.issue_url, title=excluded.title, state=excluded.state, last_synced_at=excluded.last_synced_at, updated_at=excluded.updated_at`,
 		issue.ID, issue.TaskID, issue.RepositoryID, issue.Origin, issue.Owner, issue.Repo, issue.IssueNumber, issue.IssueURL, issue.Title, issue.State, issue.LastSyncedAt, issue.CreatedAt, issue.UpdatedAt)
+	return err
+}
+
+// ReserveIssueImport atomically records the one Kandev task that owns an
+// external Forgejo issue in a workspace. The returned false value is
+// idempotent when the same task already owns the import; otherwise callers
+// must return ErrIssueAlreadyLinked instead of duplicating provider work.
+func (s *Store) ReserveIssueImport(ctx context.Context, workspaceID, origin, owner, repo string, number int, taskID string) (bool, string, error) {
+	result, err := s.db.ExecContext(ctx, `INSERT INTO forgejo_issue_imports (workspace_id, origin, owner, repo, issue_number, task_id, imported_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(workspace_id, origin, owner, repo, issue_number) DO NOTHING`,
+		workspaceID, origin, owner, repo, number, taskID, time.Now().UTC())
+	if err != nil {
+		return false, "", err
+	}
+	created, err := result.RowsAffected()
+	if err != nil {
+		return false, "", err
+	}
+	if created == 1 {
+		return true, taskID, nil
+	}
+	var existingTaskID string
+	err = s.ro.GetContext(ctx, &existingTaskID, `SELECT task_id FROM forgejo_issue_imports
+		WHERE workspace_id = ? AND origin = ? AND owner = ? AND repo = ? AND issue_number = ?`,
+		workspaceID, origin, owner, repo, number)
+	if err != nil {
+		return false, "", err
+	}
+	return false, existingTaskID, nil
+}
+
+func (s *Store) ReleaseIssueImport(ctx context.Context, workspaceID, origin, owner, repo string, number int, taskID string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM forgejo_issue_imports
+		WHERE workspace_id = ? AND origin = ? AND owner = ? AND repo = ? AND issue_number = ? AND task_id = ?`,
+		workspaceID, origin, owner, repo, number, taskID)
 	return err
 }
 

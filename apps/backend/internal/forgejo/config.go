@@ -105,6 +105,19 @@ func NewStore(db, ro *sqlx.DB) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS forgejo_issue_imports (
+		workspace_id TEXT NOT NULL,
+		origin TEXT NOT NULL,
+		owner TEXT NOT NULL,
+		repo TEXT NOT NULL,
+		issue_number INTEGER NOT NULL,
+		task_id TEXT NOT NULL,
+		imported_at DATETIME NOT NULL,
+		PRIMARY KEY (workspace_id, origin, owner, repo, issue_number)
+	)`)
+	if err != nil {
+		return nil, err
+	}
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS forgejo_task_prs (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,
@@ -548,21 +561,40 @@ func (s *Service) AssociateIssue(ctx context.Context, workspaceID, taskID, repos
 	if err := s.store.assertTaskWorkspace(ctx, workspaceID, taskID); err != nil {
 		return nil, err
 	}
+	config, err := s.store.GetConfig(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if config == nil {
+		return nil, ErrNotConfigured
+	}
+	claimed, existingTaskID, err := s.store.ReserveIssueImport(ctx, workspaceID, config.Origin, owner, repo, number, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if !claimed && existingTaskID != taskID {
+		return nil, ErrIssueAlreadyLinked
+	}
 	client, err := s.ClientForWorkspace(ctx, workspaceID)
 	if err != nil {
+		if claimed {
+			_ = s.store.ReleaseIssueImport(ctx, workspaceID, config.Origin, owner, repo, number, taskID)
+		}
 		return nil, err
 	}
 	issue, err := client.GetIssue(ctx, owner, repo, number)
 	if err != nil {
-		return nil, err
-	}
-	config, err := s.store.GetConfig(ctx, workspaceID)
-	if err != nil {
+		if claimed {
+			_ = s.store.ReleaseIssueImport(ctx, workspaceID, config.Origin, owner, repo, number, taskID)
+		}
 		return nil, err
 	}
 	now := time.Now().UTC()
 	link := &TaskIssue{TaskID: taskID, RepositoryID: repositoryID, Origin: config.Origin, Owner: owner, Repo: repo, IssueNumber: issue.Number, IssueURL: issue.HTMLURL, Title: issue.Title, State: issue.State, LastSyncedAt: &now}
 	if err := s.store.UpsertTaskIssue(ctx, link); err != nil {
+		if claimed {
+			_ = s.store.ReleaseIssueImport(ctx, workspaceID, config.Origin, owner, repo, number, taskID)
+		}
 		return nil, err
 	}
 	links, err := s.store.ListTaskIssues(ctx, workspaceID, taskID)

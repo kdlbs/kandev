@@ -469,6 +469,10 @@ func (c *Controller) error(ctx *gin.Context, err error) {
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "Forgejo task link not found"})
 		return
 	}
+	if errors.Is(err, ErrIssueAlreadyLinked) {
+		ctx.JSON(http.StatusConflict, gin.H{"error": "This Forgejo issue is already linked to another Kandev task"})
+		return
+	}
 	if errors.Is(err, ErrWatchNotFound) {
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "Forgejo issue watch not found"})
 		return

@@ -35,6 +35,27 @@ func TestStore_TaskLinksAreScopedAndUpserted(t *testing.T) {
 	}
 }
 
+func TestStore_ReserveIssueImportIsWorkspaceScopedAndIdempotent(t *testing.T) {
+	store := newConfigTestStore(t)
+	ctx := context.Background()
+	claimed, taskID, err := store.ReserveIssueImport(ctx, "workspace-a", "https://forgejo.example", "acme", "app", 7, "task-a")
+	if err != nil || !claimed || taskID != "task-a" {
+		t.Fatalf("first issue import = claimed:%v task:%q err:%v", claimed, taskID, err)
+	}
+	claimed, taskID, err = store.ReserveIssueImport(ctx, "workspace-a", "https://forgejo.example", "acme", "app", 7, "task-a")
+	if err != nil || claimed || taskID != "task-a" {
+		t.Fatalf("same task import = claimed:%v task:%q err:%v", claimed, taskID, err)
+	}
+	claimed, taskID, err = store.ReserveIssueImport(ctx, "workspace-a", "https://forgejo.example", "acme", "app", 7, "task-b")
+	if err != nil || claimed || taskID != "task-a" {
+		t.Fatalf("second task import = claimed:%v task:%q err:%v", claimed, taskID, err)
+	}
+	claimed, taskID, err = store.ReserveIssueImport(ctx, "workspace-b", "https://forgejo.example", "acme", "app", 7, "task-c")
+	if err != nil || !claimed || taskID != "task-c" {
+		t.Fatalf("other workspace import = claimed:%v task:%q err:%v", claimed, taskID, err)
+	}
+}
+
 func TestStore_TaskPRLinksAreScopedAndUpserted(t *testing.T) {
 	store := newConfigTestStore(t)
 	createLinkTestTask(t, store, "workspace-a", "task-a")
