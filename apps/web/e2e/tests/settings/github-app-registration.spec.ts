@@ -152,10 +152,11 @@ test.describe("Workspace GitHub App onboarding", () => {
         active: true,
       },
       callback_urls: [
+        `https://1.1.1.1/api/v1/github/app/registrations/${registrationId}/install/callback`,
         `https://1.1.1.1/api/v1/github/app/registrations/${registrationId}/personal/callback`,
       ],
-      setup_url: `https://1.1.1.1/api/v1/github/app/registrations/${registrationId}/install/callback`,
     });
+    expect(manifest).not.toHaveProperty("setup_url");
 
     await apiClient.mockGitHubSetAppRegistration({
       id: registrationId!,
@@ -202,6 +203,9 @@ test.describe("Workspace GitHub App onboarding", () => {
     await expect(
       connection.getByText(preparation.install_callback_url, { exact: true }),
     ).toBeVisible();
+    await expect(connection.getByText("User authorization callback URL 1")).toBeVisible();
+    await expect(connection.getByText("User authorization callback URL 2")).toBeVisible();
+    await expect(connection.getByText("Setup URL")).toHaveCount(0);
     await expect(connection.getByText(preparation.webhook_url, { exact: true })).toBeVisible();
     await expect(connection.getByText(/application\/json/)).toBeVisible();
     await expect(connection.getByText(/SSL verification enabled/)).toBeVisible();

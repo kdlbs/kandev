@@ -27,8 +27,17 @@ describe("GitHubAppImportGuide", () => {
       />,
     );
     expect(screen.getByText("Homepage URL")).toBeTruthy();
-    expect(screen.getByText("User authorization callback URL")).toBeTruthy();
-    expect(screen.getByText("Setup URL")).toBeTruthy();
+    expect(screen.getByText("User authorization callback URL 1")).toBeTruthy();
+    expect(screen.getByText("User authorization callback URL 2")).toBeTruthy();
+    expect(
+      screen
+        .getAllByText(/^https:\/\/kandev\.example\/(?:install|personal)\/callback$/)
+        .map((element) => element.textContent),
+    ).toEqual([
+      "https://kandev.example/install/callback",
+      "https://kandev.example/personal/callback",
+    ]);
+    expect(screen.queryByText("Setup URL")).toBeNull();
     expect(screen.getByText("Webhook URL")).toBeTruthy();
     expect(screen.getByText(/application\/json/)).toBeTruthy();
     expect(screen.getByText(/SSL verification enabled/)).toBeTruthy();

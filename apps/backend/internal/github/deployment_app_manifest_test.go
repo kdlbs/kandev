@@ -51,9 +51,10 @@ func TestDeploymentAppManifestExactPolicyAndURLs(t *testing.T) {
 	if manifest.URL != "https://kandev.example" ||
 		manifest.RedirectURL != "https://kandev.example/api/v1/github/app/registration/callback" ||
 		!reflect.DeepEqual(manifest.CallbackURLs, []string{
+			"https://kandev.example/api/v1/github/app/install/callback",
 			"https://kandev.example/api/v1/github/personal-connection/callback",
 		}) ||
-		manifest.SetupURL != "https://kandev.example/api/v1/github/app/install/callback" ||
+		manifest.SetupURL != "" ||
 		manifest.HookAttributes.URL != "https://kandev.example/api/v1/github/app/webhook" ||
 		!manifest.HookAttributes.Active {
 		t.Fatalf("manifest URLs = %+v", manifest)
@@ -96,9 +97,12 @@ func TestDeploymentAppManifestUsesPreallocatedRegistrationRoutes(t *testing.T) {
 	wantPrefix := "https://kandev.example/api/v1/github/app/registrations/" + registrationID
 	manifest := submission.Manifest
 	if manifest.RedirectURL != wantPrefix+"/manifest/callback" ||
-		manifest.SetupURL != wantPrefix+"/install/callback" ||
+		manifest.SetupURL != "" ||
 		manifest.HookAttributes.URL != wantPrefix+"/webhook" ||
-		!reflect.DeepEqual(manifest.CallbackURLs, []string{wantPrefix + "/personal/callback"}) {
+		!reflect.DeepEqual(manifest.CallbackURLs, []string{
+			wantPrefix + "/install/callback",
+			wantPrefix + "/personal/callback",
+		}) {
 		t.Fatalf("registration-specific manifest URLs = %+v", manifest)
 	}
 	if manifest.Public {
