@@ -5,7 +5,8 @@ import { useTranslation } from "react-i18next";
 import { useToast } from "@/components/toast-provider";
 import type { PresetOption } from "./search-bar";
 import type { SidebarSelection } from "./presets-sidebar";
-import type { SavedPreset, useSavedPresets } from "./use-saved-presets";
+import type { SavedPreset } from "./saved-preset-model";
+import type { useSavedPresets } from "./use-saved-presets";
 
 type SavedPresetActionsOptions = {
   selection: SidebarSelection;

@@ -4,7 +4,7 @@ import { IconX, IconDeviceFloppy, IconBookmark } from "@tabler/icons-react";
 import type { Icon } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { PR_PRESETS, ISSUE_PRESETS, type PresetOption, type PresetGroup } from "./search-bar";
-import type { SavedPreset } from "./use-saved-presets";
+import type { SavedPreset } from "./saved-preset-model";
 import { useTranslation } from "react-i18next";
 import { SavedQueryDefaultButton } from "@/components/integrations/saved-query-default-button";
 

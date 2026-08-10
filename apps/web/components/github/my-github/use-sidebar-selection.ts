@@ -3,8 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import type { PresetOption } from "./search-bar";
 import type { SidebarSelection } from "./presets-sidebar";
-import type { SavedPreset } from "./use-saved-presets";
-import { findDefaultSavedPreset, resolveDefaultSidebarTarget } from "./saved-preset-model";
+import {
+  findDefaultSavedPreset,
+  resolveDefaultSidebarTarget,
+  type SavedPreset,
+} from "./saved-preset-model";
 
 type InitialSidebarSelectionOptions = {
   workspaceId: string | null;

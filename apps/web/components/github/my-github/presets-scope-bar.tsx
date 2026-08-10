@@ -2,7 +2,7 @@
 
 import { IntegrationScopeBar } from "@/components/integrations/presets-scope-bar-base";
 import { PR_PRESETS, ISSUE_PRESETS, type PresetOption } from "./search-bar";
-import type { SavedPreset } from "./use-saved-presets";
+import type { SavedPreset } from "./saved-preset-model";
 import type { SidebarSelection } from "./presets-sidebar";
 import { useTranslation } from "react-i18next";
 

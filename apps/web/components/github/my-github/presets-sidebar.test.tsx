@@ -39,12 +39,11 @@ describe("PresetsSidebar saved defaults", () => {
         }) as HTMLButtonElement
       ).disabled,
     ).toBe(true);
-    expect(
-      (
-        screen.getByRole("button", {
-          name: "Set Kandev PRs as default view",
-        }) as HTMLButtonElement
-      ).disabled,
-    ).toBe(true);
+    const defaultAction = screen.getByRole("button", {
+      name: "Set Kandev PRs as default view",
+    }) as HTMLButtonElement;
+    expect(defaultAction.disabled).toBe(true);
+    expect(defaultAction.getAttribute("aria-busy")).toBe("true");
+    expect(defaultAction.querySelector("svg")?.getAttribute("class")).toContain("animate-pulse");
   });
 });

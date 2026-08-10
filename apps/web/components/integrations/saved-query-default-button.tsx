@@ -29,19 +29,25 @@ export function SavedQueryDefaultButton({
       : "integrations:setSavedQueryAsDefaultView",
     { label },
   );
+  const iconClassName = cn(
+    "h-4 w-4",
+    isDefault && "fill-amber-500 text-amber-500",
+    disabled && "animate-pulse motion-reduce:animate-none",
+  );
   if (size === "desktop") {
     return (
       <DropdownMenuCheckboxItem
         checked={isDefault}
         disabled={disabled}
         aria-label={accessibleLabel}
+        aria-busy={disabled}
         title={accessibleLabel}
         data-testid={testId}
         onSelect={(event) => event.preventDefault()}
-        onCheckedChange={onToggle}
+        onCheckedChange={() => onToggle()}
         className="h-7 min-h-7 w-7 shrink-0 cursor-pointer justify-center p-0 text-muted-foreground hover:text-foreground [&_[data-slot=dropdown-menu-checkbox-item-indicator]]:hidden"
       >
-        <IconStar className={cn("h-4 w-4", isDefault && "fill-amber-500 text-amber-500")} />
+        <IconStar className={iconClassName} />
       </DropdownMenuCheckboxItem>
     );
   }
@@ -51,6 +57,7 @@ export function SavedQueryDefaultButton({
       type="button"
       aria-label={accessibleLabel}
       aria-pressed={isDefault}
+      aria-busy={disabled}
       title={accessibleLabel}
       disabled={disabled}
       data-testid={testId}
@@ -60,7 +67,7 @@ export function SavedQueryDefaultButton({
         "h-11 w-11",
       )}
     >
-      <IconStar className={cn("h-4 w-4", isDefault && "fill-amber-500 text-amber-500")} />
+      <IconStar className={iconClassName} />
     </button>
   );
 }
