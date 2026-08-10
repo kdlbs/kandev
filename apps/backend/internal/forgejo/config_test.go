@@ -265,3 +265,43 @@ func TestService_RefreshConnectionPersistsFailureWithoutDeletingConfig(t *testin
 		t.Fatalf("config=%#v err=%v", config, err)
 	}
 }
+
+func TestService_PollIssueWatchCreatesEachMatchingTaskOnce(t *testing.T) {
+	service, secrets := newConfigTestService(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/repos/owner/repo/issues" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`[{"number":7,"title":"Fix sync","body":"Details","state":"open","html_url":"https://forgejo.example/owner/repo/issues/7","labels":[{"name":"ready"}]}]`))
+	}))
+	t.Cleanup(server.Close)
+	ctx := context.Background()
+	if err := service.store.SaveConfig(ctx, &Config{WorkspaceID: "workspace-a", Origin: server.URL}); err != nil {
+		t.Fatal(err)
+	}
+	if err := secrets.Set(ctx, SecretKeyForWorkspace("workspace-a"), "Forgejo token", "token"); err != nil {
+		t.Fatal(err)
+	}
+	watch := &IssueWatch{WorkspaceID: "workspace-a", WorkflowID: "workflow-a", WorkflowStepID: "step-a", RepositoryID: "repo-a", BaseBranch: "main", Owner: "owner", Repo: "repo", Labels: "ready", Enabled: true}
+	if err := service.SaveIssueWatch(ctx, "workspace-a", watch); err != nil {
+		t.Fatal(err)
+	}
+	created := 0
+	service.SetIssueTaskCreator(func(_ context.Context, gotWatch *IssueWatch, gotIssue Issue) (string, error) {
+		created++
+		if gotWatch.Prompt != "" || gotIssue.Number != 7 {
+			t.Fatalf("unexpected watch=%#v issue=%#v", gotWatch, gotIssue)
+		}
+		return "task-7", nil
+	})
+	for range 2 {
+		issues, err := service.PollIssueWatch(ctx, "workspace-a", watch.ID)
+		if err != nil || len(issues) != 1 {
+			t.Fatalf("poll issues=%#v err=%v", issues, err)
+		}
+	}
+	if created != 1 {
+		t.Fatalf("created=%d, want one task", created)
+	}
+}

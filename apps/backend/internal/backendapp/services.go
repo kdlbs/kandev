@@ -120,6 +120,24 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	}
 	gitlabSvc := initGitLabService(dbPool, eventBus, repos.Secrets, log)
 	forgejoSvc := initForgejoService(dbPool, repos.Secrets, log)
+	if forgejoSvc != nil {
+		forgejoSvc.SetIssueTaskCreator(func(ctx context.Context, watch *forgejo.IssueWatch, issue forgejo.Issue) (string, error) {
+			description := fmt.Sprintf("Source Forgejo issue: %s\n\n%s", issue.HTMLURL, issue.Body)
+			if prompt := strings.TrimSpace(watch.Prompt); prompt != "" {
+				description += "\n\nWatch instructions:\n" + prompt
+			}
+			task, err := taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+				WorkspaceID: watch.WorkspaceID, WorkflowID: watch.WorkflowID, WorkflowStepID: watch.WorkflowStepID,
+				Title: issue.Title, Description: description, Priority: "medium",
+				Repositories: []taskservice.TaskRepositoryInput{{RepositoryID: watch.RepositoryID, BaseBranch: watch.BaseBranch}},
+				Metadata:     map[string]interface{}{"forgejo_issue": map[string]interface{}{"owner": watch.Owner, "repo": watch.Repo, "number": issue.Number, "url": issue.HTMLURL}},
+			})
+			if err != nil {
+				return "", err
+			}
+			return task.ID, nil
+		})
+	}
 	azureDevOpsSvc := initAzureDevOpsService(dbPool, eventBus, repos.Secrets, log)
 	if azureDevOpsSvc != nil {
 		azureDevOpsSvc.SetRepositoryLookup(&repositoryLookupAdapter{svc: taskSvc})

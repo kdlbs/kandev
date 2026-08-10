@@ -82,10 +82,10 @@ func (s *Store) MarkIssueWatchPolled(ctx context.Context, id string, pollTime ti
 	return err
 }
 
-// ClaimIssueWatchTask atomically reserves an external issue for one Kandev
-// task. A false result means an earlier poll already created the task.
-func (s *Store) ClaimIssueWatchTask(ctx context.Context, watchID, owner, repo string, number int, taskID string) (bool, error) {
-	result, err := s.db.ExecContext(ctx, `INSERT INTO forgejo_issue_watch_tasks (watch_id, owner, repo, issue_number, task_id, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(watch_id, owner, repo, issue_number) DO NOTHING`, watchID, owner, repo, number, taskID, time.Now().UTC())
+// ReserveIssueWatchTask atomically claims an external issue before task
+// creation. The task ID is completed afterwards because Kandev assigns it.
+func (s *Store) ReserveIssueWatchTask(ctx context.Context, watchID, owner, repo string, number int) (bool, error) {
+	result, err := s.db.ExecContext(ctx, `INSERT INTO forgejo_issue_watch_tasks (watch_id, owner, repo, issue_number, task_id, created_at) VALUES (?, ?, ?, ?, '', ?) ON CONFLICT(watch_id, owner, repo, issue_number) DO NOTHING`, watchID, owner, repo, number, time.Now().UTC())
 	if err != nil {
 		return false, err
 	}
@@ -94,6 +94,30 @@ func (s *Store) ClaimIssueWatchTask(ctx context.Context, watchID, owner, repo st
 		return false, err
 	}
 	return count == 1, nil
+}
+
+func (s *Store) CompleteIssueWatchTask(ctx context.Context, watchID, owner, repo string, number int, taskID string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE forgejo_issue_watch_tasks SET task_id = ? WHERE watch_id = ? AND owner = ? AND repo = ? AND issue_number = ?`, taskID, watchID, owner, repo, number)
+	return err
+}
+
+func (s *Store) ReleaseIssueWatchTask(ctx context.Context, watchID, owner, repo string, number int) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM forgejo_issue_watch_tasks WHERE watch_id = ? AND owner = ? AND repo = ? AND issue_number = ? AND task_id = ''`, watchID, owner, repo, number)
+	return err
+}
+
+// ClaimIssueWatchTask remains a small atomic helper for callers that already
+// have a task ID. New watch processing should use Reserve/Complete instead.
+func (s *Store) ClaimIssueWatchTask(ctx context.Context, watchID, owner, repo string, number int, taskID string) (bool, error) {
+	claimed, err := s.ReserveIssueWatchTask(ctx, watchID, owner, repo, number)
+	if err != nil || !claimed {
+		return claimed, err
+	}
+	if err := s.CompleteIssueWatchTask(ctx, watchID, owner, repo, number, taskID); err != nil {
+		_ = s.ReleaseIssueWatchTask(ctx, watchID, owner, repo, number)
+		return false, err
+	}
+	return true, nil
 }
 
 func (s *Store) GetIssueWatch(ctx context.Context, workspaceID, id string) (*IssueWatch, error) {

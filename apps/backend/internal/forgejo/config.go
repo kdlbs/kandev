@@ -185,12 +185,21 @@ func (s *Store) UpdateHealth(ctx context.Context, workspaceID string, ok bool, m
 }
 
 type Service struct {
-	store   *Store
-	secrets WorkspaceSecretStore
+	store            *Store
+	secrets          WorkspaceSecretStore
+	issueTaskCreator IssueTaskCreator
 }
+
+// IssueTaskCreator creates a Kandev task for a watched Forgejo issue. It is
+// injected by backendapp to keep this provider package independent of task.
+type IssueTaskCreator func(context.Context, *IssueWatch, Issue) (string, error)
 
 func NewService(store *Store, secrets WorkspaceSecretStore) *Service {
 	return &Service{store: store, secrets: secrets}
+}
+
+func (s *Service) SetIssueTaskCreator(creator IssueTaskCreator) {
+	s.issueTaskCreator = creator
 }
 
 func (s *Service) GetConfig(ctx context.Context, workspaceID string) (*Config, error) {
@@ -457,10 +466,45 @@ func (s *Service) PollIssueWatch(ctx context.Context, workspaceID, watchID strin
 		_ = s.store.MarkIssueWatchPolled(ctx, watch.ID, now, "Forgejo issue watch poll failed")
 		return nil, err
 	}
+	matching := filterWatchedIssues(issues, watch.Labels)
+	if s.issueTaskCreator != nil && watch.Enabled && watch.WorkflowID != "" {
+		for _, issue := range matching {
+			claimed, claimErr := s.store.ReserveIssueWatchTask(ctx, watch.ID, watch.Owner, watch.Repo, issue.Number)
+			if claimErr != nil {
+				return nil, claimErr
+			}
+			if !claimed {
+				continue
+			}
+			taskID, createErr := s.issueTaskCreator(ctx, watch, issue)
+			if createErr != nil {
+				_ = s.store.ReleaseIssueWatchTask(ctx, watch.ID, watch.Owner, watch.Repo, issue.Number)
+				_ = s.store.MarkIssueWatchPolled(ctx, watch.ID, now, "Forgejo issue watch task creation failed")
+				return nil, createErr
+			}
+			if err := s.recordWatchedIssue(ctx, workspaceID, taskID, watch, issue); err != nil {
+				_ = s.store.ReleaseIssueWatchTask(ctx, watch.ID, watch.Owner, watch.Repo, issue.Number)
+				_ = s.store.MarkIssueWatchPolled(ctx, watch.ID, now, "Forgejo issue watch task link failed")
+				return nil, err
+			}
+			if err := s.store.CompleteIssueWatchTask(ctx, watch.ID, watch.Owner, watch.Repo, issue.Number, taskID); err != nil {
+				return nil, err
+			}
+		}
+	}
 	if err := s.store.MarkIssueWatchPolled(ctx, watch.ID, now, ""); err != nil {
 		return nil, err
 	}
-	return filterWatchedIssues(issues, watch.Labels), nil
+	return matching, nil
+}
+
+func (s *Service) recordWatchedIssue(ctx context.Context, workspaceID, taskID string, watch *IssueWatch, issue Issue) error {
+	config, err := s.store.GetConfig(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	return s.store.UpsertTaskIssue(ctx, &TaskIssue{TaskID: taskID, RepositoryID: watch.RepositoryID, Origin: config.Origin, Owner: watch.Owner, Repo: watch.Repo, IssueNumber: issue.Number, IssueURL: issue.HTMLURL, Title: issue.Title, State: issue.State, LastSyncedAt: &now})
 }
 
 func (s *Service) RefreshTaskIssue(ctx context.Context, workspaceID, linkID string) (*TaskIssue, error) {
