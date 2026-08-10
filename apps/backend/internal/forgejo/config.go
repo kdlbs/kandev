@@ -279,6 +279,39 @@ func (s *Service) AssociateIssue(ctx context.Context, workspaceID, taskID, repos
 	return nil, ErrTaskLinkNotFound
 }
 
+func (s *Service) CreateTaskPullRequest(ctx context.Context, workspaceID, taskID, repositoryID string, input CreatePullRequestInput) (*TaskPR, error) {
+	if err := s.store.assertTaskWorkspace(ctx, workspaceID, taskID); err != nil {
+		return nil, err
+	}
+	client, err := s.ClientForWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	pull, err := client.CreatePullRequest(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+	config, err := s.store.GetConfig(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	link := &TaskPR{TaskID: taskID, RepositoryID: repositoryID, Origin: config.Origin, Owner: input.Owner, Repo: input.Repo, PRNumber: pull.Number, PRURL: pull.HTMLURL, PRTitle: pull.Title, HeadBranch: pull.Head, BaseBranch: pull.Base, State: pull.State, Draft: pull.Draft, LastSyncedAt: &now}
+	if err := s.store.UpsertTaskPR(ctx, link); err != nil {
+		return nil, err
+	}
+	links, err := s.store.ListTaskPRs(ctx, workspaceID, taskID)
+	if err != nil {
+		return nil, err
+	}
+	for _, candidate := range links {
+		if candidate.Owner == input.Owner && candidate.Repo == input.Repo && candidate.PRNumber == pull.Number {
+			return candidate, nil
+		}
+	}
+	return nil, ErrTaskLinkNotFound
+}
+
 func (s *Service) SetConfig(ctx context.Context, workspaceID string, request *SetConfigRequest) (*Config, error) {
 	if strings.TrimSpace(workspaceID) == "" {
 		return nil, ErrWorkspaceRequired
