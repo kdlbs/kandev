@@ -170,7 +170,7 @@ export const ModeSelector = memo(function ModeSelector({
   }
 
   const currentMode = modeState.availableModes.find((m) => m.id === modeState.currentModeId);
-  const displayName = currentMode?.name || modeState.currentModeId || "Mode";
+  const displayName = currentMode?.name || modeState.currentModeId || t("common:mode");
 
   return (
     <DropdownMenu open={dropdownOpen} onOpenChange={handleDropdownOpenChange}>

@@ -58,7 +58,7 @@ func (m *Manager) resolveMcpServers(ctx context.Context, execution *AgentExecuti
 	if execution == nil {
 		return nil, nil
 	}
-	return m.resolveMcpServersWithParams(ctx, execution.AgentProfileID, execution.Metadata, agentConfig)
+	return m.resolveMcpServersWithParams(ctx, execution.AgentProfileID, execution.MetadataSnapshot(), agentConfig)
 }
 
 // applyExecutorMcpPolicy reads executor metadata and applies any executor-scoped MCP policy

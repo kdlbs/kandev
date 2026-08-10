@@ -57,8 +57,14 @@ Top-level sections are purely for human readability (the loader walks every leaf
 | signal | profile | who sets it |
 |---|---|---|
 | `KANDEV_E2E_MOCK=true` | `e2e` | `apps/web/e2e/fixtures/backend.ts` |
-| `KANDEV_DEBUG_DEV_MODE=true` (or `…_PPROF_ENABLED=true`) | `dev` | `apps/cli/src/dev.ts` |
+| `KANDEV_DEBUG_DEV_MODE=true` | `dev` | `apps/cli/src/dev.ts`, the `make dev` backend target |
 | (neither) | `prod` | the default for any other launch |
+
+`KANDEV_DEBUG_PPROF_ENABLED` is a legacy debug behavior variable. It enables
+pprof when a launcher sets it, but it does not select the `dev` profile. This
+keeps `make start-debug` on the production profile while it retains debug
+diagnostics; that launcher supplies the explicit `Debug` title prefix. See
+[ADR-2026-08-10-debug-launcher-profile-selection](2026-08-10-debug-launcher-profile-selection.md).
 
 `profiles.ApplyProfile()` then walks every leaf and calls `os.Setenv` **only when the var is not already set** and **only when the resolved value is non-empty**. Empty means "leave unset."
 

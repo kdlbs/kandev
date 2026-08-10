@@ -1,4 +1,5 @@
 import type { GitHubStatus } from "@/lib/types/github";
+import { t } from "@/lib/i18n";
 
 export function hasGitHubPersonalActor(status: GitHubStatus | null): boolean {
   const actor = status?.effective_personal_actor;
@@ -18,7 +19,7 @@ export function getGitHubPersonalIdentityState(status: GitHubStatus): GitHubPers
     active && principal?.source === "github_app_user" && status.personal?.status === "active",
   );
   let actor = "Unavailable";
-  if (active) actor = principal?.login ?? "Unavailable";
+  if (active) actor = principal?.login ?? t("common:unavailable");
   else if (status.automation?.source === "github_app_installation") actor = "Not connected";
   return { active, actor, personalOAuthActive };
 }

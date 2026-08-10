@@ -7,6 +7,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { getTask } from "@/lib/api/domains/office-extended-api";
 import type { OfficeTask } from "@/lib/state/slices/office/types";
 import { StatusIcon } from "@/app/office/tasks/status-icon";
+import { normalizeTaskStatus } from "@/app/office/tasks/normalize-status";
+import { PRIORITY_LABEL_KEYS, STATUS_LABEL_KEYS } from "@/app/office/lib/label-keys";
 import { useTranslation } from "react-i18next";
 
 type TasksTouchedProps = {
@@ -136,20 +138,22 @@ function TaskTableRow({ row }: { row: RowState }) {
       <TableCell>
         <span className="inline-flex items-center gap-1.5 text-xs">
           <StatusIcon status={task.status} className="h-3.5 w-3.5" />
-          {formatStatus(task.status)}
+          {/* `status.replace(/_/g, " ")` used to render the wire identifier as
+              pseudo-English ("in progress"), which no catalog can fix.
+              `STATUS_LABEL_KEYS` is the same map the board, filters and status
+              icon already resolve through. */}
+          {t(STATUS_LABEL_KEYS[normalizeTaskStatus(task.status)])}
         </span>
       </TableCell>
-      <TableCell className="text-xs capitalize">{task.priority || "—"}</TableCell>
+      <TableCell className="text-xs">
+        {task.priority ? t(PRIORITY_LABEL_KEYS[task.priority] ?? "office:none") : "—"}
+      </TableCell>
     </TableRow>
   );
 }
 
 function shortId(id: string): string {
   return id.length > 8 ? id.slice(0, 8) : id;
-}
-
-function formatStatus(status: string): string {
-  return status.replace(/_/g, " ");
 }
 
 /**

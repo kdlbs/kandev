@@ -140,5 +140,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-08-workspace-scoped-task-create-workflow-memory | [Remember Task-Create Workflows Per Workspace](2026-08-08-workspace-scoped-task-create-workflow-memory.md) | accepted | backend, frontend | 2026-08-08 |
 | 2026-08-08-owned-temp-artifact-cleanup | [Clean only registered Kandev temporary artifacts](2026-08-08-owned-temp-artifact-cleanup.md) | accepted | backend, frontend, infra, security | 2026-08-08 |
 | 2026-08-08-task-owned-worktree-lifetime | [Keep Worktree Ownership at the Task Lifecycle](2026-08-08-task-owned-worktree-lifetime.md) | accepted | backend, frontend | 2026-08-08 |
+| 2026-08-09-bind-automation-mutations-to-event-targets | [Bind Automation Mutations to Event Targets](2026-08-09-bind-automation-mutations-to-event-targets.md) | accepted | backend, agentctl, protocol, security, workflow | 2026-08-09 |
 | 2026-08-09-exclusive-runtime-state-ownership | [Lock Runtime State Before Backend Startup](2026-08-09-exclusive-runtime-state-ownership.md) | accepted | backend, infra | 2026-08-09 |
 | 2026-08-10-duration-aware-e2e-sharding | [Duration-aware E2E sharding uses rolling `main` timings](2026-08-10-duration-aware-e2e-sharding.md) | accepted | infra, workflow | 2026-08-10 |
+| 2026-08-10-debug-launcher-profile-selection | [Keep Debug Launches on the Production Profile](2026-08-10-debug-launcher-profile-selection.md) | accepted | backend, frontend, cli | 2026-08-10 |

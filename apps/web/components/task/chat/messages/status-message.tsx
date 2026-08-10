@@ -134,7 +134,7 @@ function parseStatusMetadata(comment: Message) {
   const progress =
     typeof metadata?.progress === "number" ? Math.min(Math.max(metadata.progress, 0), 100) : null;
   const statusLine = metadata?.stage || metadata?.status;
-  const message = metadata?.message || comment.content || statusLine || "Status update";
+  const message = metadata?.message || comment.content || statusLine || t("task:statusUpdate");
   const isError = comment.type === "error" || metadata?.variant === "error";
   const isWarning = metadata?.variant === "warning" || metadata?.cancelled === true;
   return { metadata, progress, statusLine, message, isError, isWarning };

@@ -287,6 +287,51 @@ func TestCreateAutomationTask_TagsOriginAndLeavesTaskNonEphemeral(t *testing.T) 
 		"the execution mode is withdrawn and must not be stamped on the task")
 }
 
+func TestCreateAutomationTask_BindsMergedPRTarget(t *testing.T) {
+	repo := setupTestRepo(t)
+	creator := &stubReviewTaskCreator{task: &models.Task{ID: "t-created"}}
+	autoSvc := &stubAutomationService{automation: &automation.Automation{
+		ID: "a-merged", WorkspaceID: "ws-merged", Name: "archive merged", Prompt: "archive", Enabled: true,
+	}}
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.SetAutomationService(autoSvc)
+	svc.reviewTaskCreator = creator
+	seedAutomationWorkspaceRepo(t, repo, "ws-merged")
+
+	svc.createAutomationTask(context.Background(), &automation.AutomationTriggeredEvent{
+		AutomationID: "a-merged", TriggerID: "trg-merged", TriggerType: automation.TriggerTypeGitHubPRMerged,
+		TriggerData: json.RawMessage(`{"task_id":"target-task-1"}`),
+	})
+
+	require.NotNil(t, creator.got)
+	require.Equal(t, "target-task-1", creator.got.Metadata[models.MetaKeyAutomationTargetTaskID])
+}
+
+func TestRecordFailedRun_MergedPRDoesNotConsumeDedupKey(t *testing.T) {
+	autoSvc := &stubAutomationService{}
+	svc := &Service{automationService: autoSvc}
+	svc.recordFailedRun(context.Background(), &automation.AutomationTriggeredEvent{
+		AutomationID: "a-merged", TriggerID: "trg-merged", TriggerType: automation.TriggerTypeGitHubPRMerged,
+		DedupKey: "pr_merged:task-1:acme/api#7", TriggerData: json.RawMessage(`{}`),
+	}, "no repository available")
+
+	require.Len(t, autoSvc.runs, 1)
+	require.Empty(t, autoSvc.runs[0].DedupKey)
+}
+
+func TestRecordFailedRun_OtherTriggerKeepsDedupKey(t *testing.T) {
+	autoSvc := &stubAutomationService{}
+	svc := &Service{automationService: autoSvc}
+	svc.recordFailedRun(context.Background(), &automation.AutomationTriggeredEvent{
+		AutomationID: "a-scheduled", TriggerID: "trg-scheduled", TriggerType: automation.TriggerTypeScheduled,
+		DedupKey: "scheduled:trg:1", TriggerData: json.RawMessage(`{}`),
+	}, "no repository available")
+
+	require.Len(t, autoSvc.runs, 1)
+	require.Equal(t, "scheduled:trg:1", autoSvc.runs[0].DedupKey)
+}
+
 // Workflow and step are optional for every automation: no run is placed on a
 // board, so no automation needs a starting column.
 func TestCreateAutomationTask_WorksWithoutWorkflowOrStep(t *testing.T) {

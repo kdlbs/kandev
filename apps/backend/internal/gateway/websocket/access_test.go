@@ -4,14 +4,210 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/gin-gonic/gin"
 
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
+
+// connectionAuthResult captures what requireConnectionAuth did to one request:
+// whether the chain continued, the identity the downstream handler saw, and the
+// HTTP response.
+type connectionAuthResult struct {
+	recorder   *httptest.ResponseRecorder
+	nextCalled bool
+	identity   authn.Identity
+	hasID      bool
+}
+
+// runConnectionAuth drives requireConnectionAuth through a real gin router so
+// both halves of the contract are observable: c.Next() reaching the downstream
+// handler, and AbortWithStatusJSON stopping the chain before it.
+func runConnectionAuth(t *testing.T, policy AuthPolicy, query string, preset *authn.Identity) connectionAuthResult {
+	t.Helper()
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	gateway := NewGateway(log)
+	gateway.SetAuthPolicy(policy)
+
+	result := connectionAuthResult{recorder: httptest.NewRecorder()}
+	router := gin.New()
+	if preset != nil {
+		identity := *preset
+		router.Use(func(c *gin.Context) {
+			authn.SetOnGin(c, identity)
+			c.Next()
+		})
+	}
+	router.GET("/ws", gateway.requireConnectionAuth(), func(c *gin.Context) {
+		result.nextCalled = true
+		result.identity, result.hasID = authn.FromGin(c)
+		c.Status(http.StatusOK)
+	})
+	router.ServeHTTP(result.recorder, httptest.NewRequest(http.MethodGet, "/ws"+query, nil))
+	return result
+}
+
+// TestRequireConnectionAuth covers the 401 gate in front of WebSocket upgrades
+// and the VS Code / port proxy routes.
+//
+// Must-not-regress: the enforced-and-anonymous row. Inverting the enforcement
+// check (`policy.Enforced()` instead of `!policy.Enforced()`) turns this
+// middleware into a total auth bypass precisely when auth IS enforced, and
+// nothing else in the suite notices.
+func TestRequireConnectionAuth(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	const patToken = "kandev_pat_valid"
+	sessionIdentity := authn.Identity{UserID: "user-session", Role: authn.RoleMember, SessionID: "sess-1"}
+	tokenIdentity := authn.Identity{UserID: "user-pat", Role: authn.RoleMember, TokenID: "tok-1"}
+
+	enforced := func() bool { return true }
+	// resolvedToken is shared by the ResolveToken stubs below and reset at the
+	// top of every subtest, so these subtests must stay sequential — do not add
+	// t.Parallel() here without giving each case its own capture.
+	var resolvedToken string
+	resolveValid := func(_ context.Context, token string) (authn.Identity, bool) {
+		resolvedToken = token
+		return tokenIdentity, true
+	}
+	resolveReject := func(_ context.Context, token string) (authn.Identity, bool) {
+		resolvedToken = token
+		return authn.Identity{}, false
+	}
+
+	cases := []struct {
+		name       string
+		policy     AuthPolicy
+		query      string
+		preset     *authn.Identity
+		wantStatus int
+		wantNext   bool
+		wantUserID string
+		wantToken  string
+	}{
+		{
+			name:       "no enforcement hook passes through",
+			policy:     AuthPolicy{},
+			wantStatus: http.StatusOK,
+			wantNext:   true,
+		},
+		{
+			name:       "enforcement disabled passes through",
+			policy:     AuthPolicy{Enforced: func() bool { return false }, ResolveToken: resolveValid},
+			wantStatus: http.StatusOK,
+			wantNext:   true,
+		},
+		{
+			name:       "enforced without identity or token is rejected",
+			policy:     AuthPolicy{Enforced: enforced, ResolveToken: resolveValid},
+			wantStatus: http.StatusUnauthorized,
+			wantNext:   false,
+		},
+		{
+			name:       "enforced with an already-resolved identity passes through",
+			policy:     AuthPolicy{Enforced: enforced},
+			preset:     &sessionIdentity,
+			wantStatus: http.StatusOK,
+			wantNext:   true,
+			wantUserID: sessionIdentity.UserID,
+		},
+		{
+			// Branch order matters: an established identity must win over a
+			// query credential. Resolving ?token= first would let any caller
+			// overwrite the identity the HTTP auth middleware already
+			// authenticated — wantToken "" pins that ResolveToken never runs.
+			name:       "enforced with an identity present ignores the query token",
+			policy:     AuthPolicy{Enforced: enforced, ResolveToken: resolveValid},
+			query:      "?token=" + patToken,
+			preset:     &sessionIdentity,
+			wantStatus: http.StatusOK,
+			wantNext:   true,
+			wantUserID: sessionIdentity.UserID,
+			wantToken:  "",
+		},
+		{
+			name:       "enforced with a valid query token passes through and sets the identity",
+			policy:     AuthPolicy{Enforced: enforced, ResolveToken: resolveValid},
+			query:      "?token=" + patToken,
+			wantStatus: http.StatusOK,
+			wantNext:   true,
+			wantUserID: tokenIdentity.UserID,
+			wantToken:  patToken,
+		},
+		{
+			name:       "enforced with a rejected query token is rejected",
+			policy:     AuthPolicy{Enforced: enforced, ResolveToken: resolveReject},
+			query:      "?token=" + patToken,
+			wantStatus: http.StatusUnauthorized,
+			wantNext:   false,
+			wantToken:  patToken,
+		},
+		{
+			name:       "enforced with a query token but no resolver is rejected",
+			policy:     AuthPolicy{Enforced: enforced},
+			query:      "?token=" + patToken,
+			wantStatus: http.StatusUnauthorized,
+			wantNext:   false,
+		},
+		{
+			name:       "enforced with an empty query token is rejected",
+			policy:     AuthPolicy{Enforced: enforced, ResolveToken: resolveValid},
+			query:      "?token=",
+			wantStatus: http.StatusUnauthorized,
+			wantNext:   false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resolvedToken = ""
+			got := runConnectionAuth(t, tc.policy, tc.query, tc.preset)
+
+			if got.recorder.Code != tc.wantStatus {
+				t.Errorf("status = %d, want %d (body %s)", got.recorder.Code, tc.wantStatus, got.recorder.Body.String())
+			}
+			if got.nextCalled != tc.wantNext {
+				t.Errorf("downstream handler called = %v, want %v", got.nextCalled, tc.wantNext)
+			}
+			if resolvedToken != tc.wantToken {
+				t.Errorf("ResolveToken received %q, want %q", resolvedToken, tc.wantToken)
+			}
+			if tc.wantStatus == http.StatusUnauthorized {
+				assertAuthRequiredBody(t, got.recorder)
+				return
+			}
+			if tc.wantUserID != "" {
+				if !got.hasID {
+					t.Fatalf("downstream handler saw no identity, want user %q", tc.wantUserID)
+				}
+				if got.identity.UserID != tc.wantUserID {
+					t.Errorf("identity user = %q, want %q", got.identity.UserID, tc.wantUserID)
+				}
+			}
+		})
+	}
+}
+
+func assertAuthRequiredBody(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("401 body is not JSON (%q): %v", rec.Body.String(), err)
+	}
+	if body["error"] != "authentication required" {
+		t.Errorf("401 body error = %q, want %q", body["error"], "authentication required")
+	}
+}
 
 func newAccessTestHub(t *testing.T) *Hub {
 	t.Helper()

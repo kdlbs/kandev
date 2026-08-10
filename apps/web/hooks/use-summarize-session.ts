@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { executeUtilityPrompt } from "@/lib/api/domains/utility-api";
 import { listTaskSessionMessages } from "@/lib/api/domains/session-api";
 import type { Message } from "@/lib/types/http";
+import { t } from "@/lib/i18n";
 
 export type SummarizeSessionResult = {
   summary: string | null;
@@ -39,7 +40,7 @@ export function useSummarizeSession() {
         conversation_history: transcript,
       });
       if (!result.success) {
-        return { summary: null, error: result.error || "Summarize utility returned no result" };
+        return { summary: null, error: result.error || t("task:summarizeReturnedNoResult") };
       }
       return { summary: result.response ?? null };
     } catch (error) {

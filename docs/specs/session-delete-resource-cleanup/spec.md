@@ -112,6 +112,12 @@ worktree fields take precedence over a legacy session reference to the same
 physical `worktree_id`. This source precedence applies regardless of session
 lifecycle state: path or branch drift on a lower-precedence row does not create
 a second owner when the physical identity is unchanged.
+A legacy session's worktree is normalized onto the environment the session
+resolves to, which is not always an environment owned by the session's own
+task: workspace-group members, subtasks inheriting a parent workspace, and
+tasks that received an environment through ownership handoff share one
+environment across tasks. Such a borrowing task gains no environment of its
+own, and the shared physical worktree keeps exactly one owner.
 Legacy session rows marked `deleted` (or carrying `deleted_at`) and stale
 references from terminal sessions are historical evidence, not additional
 owners, and bypass validation only when a canonical repository owner exists.
@@ -220,6 +226,8 @@ remain the authorization boundary for physical cleanup.
   cannot block migration solely because its path or branch metadata is stale,
   including when the session is resumable. The higher-precedence repository or
   flat environment metadata remains authoritative.
+- A session bound to another task's environment does not block migration and
+  does not create a second owner for the shared worktree.
 - If migration fails after shadow tables are populated or after legacy DDL has
   begun, the database transaction restores the complete legacy schema and data.
 - If SQLite cannot create its pre-upgrade snapshot, startup stops before the
@@ -289,6 +297,11 @@ remain the authorization boundary for physical cleanup.
   repeats the surviving task environment's `worktree_id` with stale path or
   branch metadata, **WHEN** the new binary starts, **THEN** the flat environment
   metadata is retained and the cutover completes.
+- **GIVEN** a legacy session of one task is bound to another task's environment
+  and carries a session-worktree row for that shared workspace, **WHEN** the new
+  binary starts, **THEN** the worktree is normalized onto the owning task's
+  environment, both sessions keep that environment, the borrowing task gains no
+  environment of its own, and the cutover completes.
 - **GIVEN** a non-terminal session references a worktree that conflicts with
   the canonical owner and cannot be reconciled, **WHEN** the new binary starts,
   **THEN** startup fails closed, the transaction rolls back, and the verified

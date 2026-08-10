@@ -266,7 +266,8 @@ func (r *Repository) validateCutover(c *worktreeCutover, tx *sqlx.Tx) error {
 	}
 
 	// Every session that referenced a worktree must resolve to an
-	// environment that owns that worktree.
+	// environment that owns that worktree. The owning environment can belong
+	// to another task when the session borrows a shared workspace.
 	for _, wt := range c.sessionWts {
 		if c.isSupersededSessionWorktree(wt) {
 			continue
@@ -275,10 +276,13 @@ func (r *Repository) validateCutover(c *worktreeCutover, tx *sqlx.Tx) error {
 		if envID == "" {
 			return fmt.Errorf("cutover: session %s lost its environment", wt.sessionID)
 		}
-		targets, ok := c.tasks[c.sessionTasks[wt.sessionID]]
+		ownerTaskID := c.sessionOwnerTaskID(wt.sessionID)
+		targets, ok := c.tasks[ownerTaskID]
 		if !ok || targets.envID != envID || !targets.ownsWorktree(wt.worktreeID) {
-			return fmt.Errorf("cutover: session %s worktree %s has no environment-repository owner",
-				wt.sessionID, wt.worktreeID)
+			return fmt.Errorf(
+				"cutover: session %s worktree %s has no environment-repository owner "+
+					"(session task %s, environment %s owned by task %s)",
+				wt.sessionID, wt.worktreeID, c.sessionTasks[wt.sessionID], envID, ownerTaskID)
 		}
 	}
 

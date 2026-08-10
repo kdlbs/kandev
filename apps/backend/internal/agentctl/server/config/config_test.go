@@ -282,6 +282,40 @@ func TestCollectAgentEnvPreservesParentIndexedGitConfig(t *testing.T) {
 	}
 }
 
+func TestCollectAgentEnvIgnoresParentIndexedGitConfigBeyondCount(t *testing.T) {
+	// Hosts inherit indexed entries from a parent that later lowered
+	// GIT_CONFIG_COUNT. Git ignores the leftovers, so instance creation must
+	// too instead of failing every task start.
+	clearParentIndexedGitConfig(t)
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "core.hooksPath")
+	t.Setenv("GIT_CONFIG_VALUE_0", "/opt/locstat/hooks")
+	t.Setenv("GIT_CONFIG_KEY_1", "notes.augment.mergeStrategy")
+	t.Setenv("GIT_CONFIG_VALUE_1", "cat_sort_uniq")
+
+	env, err := CollectAgentEnvWithError(map[string]string{
+		"GIT_CONFIG_COUNT":   "1",
+		"GIT_CONFIG_KEY_0":   "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_0": "!agentctl git-credential",
+	})
+	if err != nil {
+		t.Fatalf("CollectAgentEnvWithError() error = %v", err)
+	}
+
+	if got := envSliceValue(env, "GIT_CONFIG_COUNT"); got != "2" {
+		t.Fatalf("GIT_CONFIG_COUNT = %q, want 2", got)
+	}
+	if got := envSliceValue(env, "GIT_CONFIG_KEY_0"); got != "core.hooksPath" {
+		t.Fatalf("GIT_CONFIG_KEY_0 = %q, want core.hooksPath", got)
+	}
+	if got := envSliceValue(env, "GIT_CONFIG_KEY_1"); got != "credential.https://github.com.helper" {
+		t.Fatalf("GIT_CONFIG_KEY_1 = %q, want managed helper", got)
+	}
+	if got := envSliceValue(env, "GIT_CONFIG_KEY_2"); got != "" {
+		t.Fatalf("GIT_CONFIG_KEY_2 = %q, want stray parent entry dropped", got)
+	}
+}
+
 func TestCollectAgentEnvPreservesParentGitConfigHook(t *testing.T) {
 	clearParentIndexedGitConfig(t)
 	repository := t.TempDir()

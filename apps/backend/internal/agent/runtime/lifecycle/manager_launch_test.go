@@ -768,7 +768,7 @@ func TestConfigureAndStartAgent_DoesNotSendTaskDescriptionEnv(t *testing.T) {
 		AgentProfileID: "profile-1",
 		AgentCommand:   "npx -y @agentclientprotocol/codex-acp",
 		WorkspacePath:  t.TempDir(),
-		Metadata: map[string]interface{}{
+		metadata: map[string]interface{}{
 			"runtime_env":      map[string]string{"KEEP_ME": "yes"},
 			"task_description": strings.Repeat("large prompt\n", 1000),
 		},
@@ -827,7 +827,7 @@ func TestConfigureAndStartAgent_SpillsLargeWakePayloadEnv(t *testing.T) {
 		AgentProfileID: "profile-1",
 		AgentCommand:   "npx -y @agentclientprotocol/codex-acp",
 		WorkspacePath:  workspace,
-		Metadata: map[string]interface{}{
+		metadata: map[string]interface{}{
 			"runtime_env": map[string]string{
 				"KANDEV_RUN_ID":            "run-2",
 				"KANDEV_WAKE_PAYLOAD_JSON": payload,
@@ -864,7 +864,7 @@ func TestSetExecutionEnv_DoesNotSnapshotProfileEnvVars(t *testing.T) {
 		ID:             "exec-1",
 		SessionID:      "session-1",
 		AgentProfileID: "profile-1",
-		Metadata:       map[string]interface{}{},
+		metadata:       map[string]interface{}{},
 	}
 	if err := mgr.executionStore.Add(execution); err != nil {
 		t.Fatalf("seed execution: %v", err)
@@ -874,9 +874,10 @@ func TestSetExecutionEnv_DoesNotSnapshotProfileEnvVars(t *testing.T) {
 		t.Fatalf("SetExecutionEnv: %v", err)
 	}
 
-	runtimeEnv, ok := execution.Metadata["runtime_env"].(map[string]string)
+	rawEnv, _ := execution.metadataValue("runtime_env")
+	runtimeEnv, ok := rawEnv.(map[string]string)
 	if !ok {
-		t.Fatalf("runtime_env missing or wrong type: %#v", execution.Metadata["runtime_env"])
+		t.Fatalf("runtime_env missing or wrong type: %#v", rawEnv)
 	}
 	if runtimeEnv["EXECUTOR_ONLY"] != "executor" {
 		t.Fatalf("executor env missing: %+v", runtimeEnv)
@@ -2235,10 +2236,10 @@ func TestLaunch_PersistsDockerRuntimeSecrets(t *testing.T) {
 		t.Fatalf("Launch returned error: %v", err)
 	}
 
-	if got := mgr.revealRuntimeSecret(context.Background(), execution.Metadata, MetadataKeyAuthTokenSecret); got != "agentctl-token" {
+	if got := mgr.revealRuntimeSecret(context.Background(), execution.MetadataSnapshot(), MetadataKeyAuthTokenSecret); got != "agentctl-token" {
 		t.Fatalf("revealed auth token = %q, want agentctl-token", got)
 	}
-	if got := mgr.revealRuntimeSecret(context.Background(), execution.Metadata, MetadataKeyBootstrapNonceSecret); got != "bootstrap-nonce" {
+	if got := mgr.revealRuntimeSecret(context.Background(), execution.MetadataSnapshot(), MetadataKeyBootstrapNonceSecret); got != "bootstrap-nonce" {
 		t.Fatalf("revealed bootstrap nonce = %q, want bootstrap-nonce", got)
 	}
 }

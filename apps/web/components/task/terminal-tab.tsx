@@ -138,13 +138,14 @@ function useTerminalTabClose({
 }
 
 export function TerminalTab(props: IDockviewPanelHeaderProps) {
+  const { t } = useTranslation();
   const { terminalId, taskID: stampedTaskID, environmentId: stampedEnv } = extractParams(props);
   const activeTaskID = useAppStore((s) => s.tasks?.activeTaskId ?? null);
   const taskID = stampedTaskID ?? activeTaskID ?? null;
   const { shell, isOrdinary, seq, showBadge, displayName, closable } = useTerminalTabState(
     stampedEnv,
     terminalId,
-    props.api.title ?? "Terminal",
+    props.api.title ?? t("common:terminal"),
   );
 
   // DockviewDefaultTab reads the title from `api.title` directly and
