@@ -158,6 +158,15 @@ describe("useSavedPresets workspace sync", () => {
     expect(updateGitHubWorkspaceSettings).not.toHaveBeenCalled();
   });
 
+  it("does not set a default while workspace presets are still loading", async () => {
+    vi.mocked(fetchGitHubWorkspaceSettings).mockReturnValue(new Promise(() => {}));
+
+    const { result } = renderHook(() => useSavedPresets(WORKSPACE_ID));
+
+    await expect(result.current.setDefault("pr", "p_1")).resolves.toBeUndefined();
+    expect(updateGitHubWorkspaceSettings).not.toHaveBeenCalled();
+  });
+
   it("does not remove after workspace presets fail to load", async () => {
     vi.mocked(fetchGitHubWorkspaceSettings).mockRejectedValue(new Error(SETTINGS_DOWN));
 

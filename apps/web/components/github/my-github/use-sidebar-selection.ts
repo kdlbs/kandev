@@ -24,7 +24,8 @@ function sameAppliedSidebarTarget(
   next: AppliedSidebarTarget,
 ) {
   return (
-    current?.workspaceId === next.workspaceId &&
+    current !== null &&
+    current.workspaceId === next.workspaceId &&
     current.selection.kind === next.selection.kind &&
     current.selection.source === next.selection.source &&
     current.selection.id === next.selection.id &&

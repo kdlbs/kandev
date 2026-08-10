@@ -184,9 +184,7 @@ export function useSavedPresets(workspaceId: string | null = null) {
 
   const setDefault = useCallback(
     async (kind: SavedPresetKind, id: string | null) => {
-      if (workspaceId && workspacePresets === undefined) {
-        throw new Error("Saved queries are not loaded");
-      }
+      if (workspaceId && workspacePresets === undefined) return;
       await queueMutation(async () => {
         const next = setSavedPresetDefault(activePresetsRef.current, kind, id);
         if (next === activePresetsRef.current) return;
