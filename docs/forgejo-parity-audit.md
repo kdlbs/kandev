@@ -26,11 +26,36 @@ v1 API rather than through GitLab adapters.
 - Kandev does not automatically close Forgejo issues or map Kanban columns back
   to provider state.
 
-## Remaining delivery gates
+## Delivery evidence
 
-- Replace the compact Forgejo settings implementation with the shared settings
-  save coordinator and a dedicated Zustand/WebSocket state slice.
-- Add frontend hook/component tests and desktop/mobile Playwright coverage for
-  connection, queue, watches, PR feedback, and disconnect.
-- Run the suite under a Node runtime compatible with Vitest/Rolldown; the
-  current local Node runtime lacks `node:util.styleText`.
+- The settings form participates in the shared settings-save coordinator; the
+  Forgejo Zustand slice and WebSocket handlers refresh workspace watches,
+  presets, queue data, and per-task links without a full-page reload.
+- Unit coverage covers the Forgejo state slice, WebSocket handlers, API hooks,
+  queue task creation/linking, task-link controls, and PR detail actions.
+- Playwright coverage covers workspace-scoped connection state, mobile settings
+  layout, issue-watch save/poll workflow context, queue linking, and task PR
+  branch prefill. The test uses mocked Forgejo responses while exercising the
+  real Kandev backend and browser UI.
+- Backend coverage includes REST client contracts, workspace authorization,
+  watch task dedupe/inflight behavior, poller lifecycle, signed webhook replay
+  protection, task-link refresh, and the durable `forgejo_issue_imports`
+  one-task-per-issue claim.
+
+## Validation command set
+
+Run the provider-focused checks from the repository root:
+
+```bash
+cd apps/backend
+go test ./internal/forgejo ./internal/gateway/websocket ./internal/backendapp
+
+cd ../web
+pnpm exec tsc --noEmit
+pnpm exec vitest run app/forgejo/forgejo-page-client.test.tsx \
+  components/forgejo/forgejo-task-links-button.test.tsx \
+  hooks/domains/forgejo lib/state/slices/forgejo/forgejo-slice.test.ts \
+  lib/ws/handlers/forgejo.test.ts
+pnpm exec playwright test --config e2e/playwright.config.ts \
+  e2e/tests/integrations/forgejo-settings.spec.ts
+```
