@@ -54,6 +54,12 @@ grouping the three lifecycle prompt switches in a shared desktop/mobile
 `Review follow-up` disclosure. Auto-fix and auto-merge remain primary, and the
 disclosure opens whenever one of its options is enabled.
 
+The 2026-08-10 composer-tray refinement surfaces those lifecycle options next
+to the existing auto-fix and auto-merge badges without adding three more pills.
+One task-wide `Follow-up N/3` badge summarizes enabled lifecycle prompts, the
+accessible chip description names them, and the status row wraps complete
+controls under width pressure instead of overflowing the document.
+
 ---
 
 ## Backend
@@ -328,6 +334,64 @@ Files:
 
 The settings page should list the seeded built-in `ci-auto-fix` prompt through the existing prompt list API. Add tests only if the UI needs explicit handling for the new built-in prompt.
 
+### Composer tray automation summary
+
+Files:
+
+- `apps/web/components/github/pr-status-chip.tsx`
+- `apps/web/components/github/pr-status-automation-badges.tsx`
+- `apps/web/components/github/pr-status-automation-badges.test.tsx`
+- `apps/web/components/task/chat/chat-input-area.tsx`
+- `apps/web/src/locales/en/github.json`
+- `apps/web/e2e/tests/pr/ci-automation-options.spec.ts`
+- `apps/web/e2e/tests/pr/mobile-pr-ci-chip.spec.ts`
+
+Extend the task-wide automation flags already derived by `PRStatusChip` with
+the three lifecycle booleans. Render one translated `Follow-up N/3` badge when
+at least one is enabled; keep the existing `Auto-fix N/10` and `Auto-merge`
+badges independent. The count is visual compression, not the complete
+accessible contract: the chip's accessible description names each enabled
+event using the established switch labels.
+
+Use the same summary in the single-PR and multi-PR chip branches because the
+options are task-wide. Do not add a badge when all lifecycle booleans are false
+or while no options have loaded, and do not create another click target. The
+surrounding PR chip continues to open `PRCIPopover` or `MultiPRCIPopover` on
+fine pointers and the existing `PRStatusChipDrawer` surface on touch.
+
+Allow `ChatStatusBar` to wrap complete top-level controls when its row cannot
+fit. Preserve the existing right-control group and keep each PR chip internally
+intact so automation labels do not split or become horizontally scrollable.
+The document must not gain horizontal overflow at the configured phone
+viewport or a narrow desktop window.
+
+#### Mobile design contract
+
+- **Desktop outcome:** the composer tray shows auto-fix, auto-merge, and one
+  grouped lifecycle badge; hovering/focusing the existing PR chip still opens
+  the full automation popover.
+- **Mobile entry point:** tap the existing PR status chip in the composer tray.
+- **Nearest shipped exemplar:** `PRStatusChipDrawer` in
+  `apps/web/components/github/pr-status-chip.tsx`; retain its current inset
+  bottom drawer, fixed header, `max-h-[80vh]`, and single internal scroll body.
+- **Hierarchy and primary action:** PR/CI status remains first, followed by
+  compact active-automation badges. The whole chip remains the one primary tap
+  target; detailed switches stay in the drawer.
+- **Surface rationale:** the badge is glanceable task status, while three
+  independently editable switches are deeper temporary controls that already
+  fit the existing drawer. A second drawer or nested pill menu would add an
+  unnecessary interaction step.
+- **Geometry:** the composer tray owns wrapping but not scrolling; the drawer
+  remains the only automation-detail scroll owner. No new fixed control or
+  safe-area behavior is introduced.
+- **Shared versus mobile-specific:** automation derivation, count, translated
+  labels, accessible description, and badge markup remain shared. Only the
+  existing popover/drawer shells vary by pointer and viewport.
+- **Proof:** focused component tests cover zero-to-three lifecycle counts and
+  single/multi-PR parity; desktop and `mobile-chrome` E2E cover all active
+  badges, drawer reachability, tray containment, and absence of document-level
+  horizontal overflow.
+
 ---
 
 ## Tests
@@ -472,6 +536,20 @@ The settings page should list the seeded built-in `ci-auto-fix` prompt through t
   **File:** focused Review Watch dialog/component test
   **How:** render the dialog and assert the selected policy description.
 
+- **What:** the PR status chip renders no lifecycle badge for zero enabled
+  lifecycle options, one grouped `Follow-up N/3` badge for one through three
+  enabled options, and an accessible description that names the enabled
+  events in both single- and multi-PR branches.
+  **File:** `apps/web/components/github/pr-status-automation-badges.test.tsx`
+  **How:** table-driven component cases using task-wide automation options.
+
+- **What:** the composer status row can wrap complete controls without
+  splitting the PR chip or changing its existing click target.
+  **File:** `apps/web/components/task/chat/chat-input-area.test.tsx` when a
+  meaningful component assertion is possible; otherwise prove geometry in the
+  focused E2E scenarios below.
+  **How:** render/class contract assertion or browser geometry, not a snapshot.
+
 ---
 
 ## E2E Tests
@@ -517,6 +595,22 @@ The settings page should list the seeded built-in `ci-auto-fix` prompt through t
   **File:** `apps/web/e2e/tests/pr/mobile-ci-automation-options.spec.ts`
   **What to verify:** visible error, label, scrollable drawer containment, and
   `document.documentElement.scrollWidth <= clientWidth`.
+
+- **Scenario:** GIVEN all five PR automations are enabled, WHEN the user views
+  the desktop composer tray and opens the PR chip, THEN `Auto-fix N/10`,
+  `Auto-merge`, and one `Follow-up 3/3` badge are visible and the existing
+  detailed controls remain reachable.
+  **File:** `apps/web/e2e/tests/pr/ci-automation-options.spec.ts`
+  **What to verify:** grouped badge text, one badge instance, accessible event
+  names, and unchanged popover entry.
+
+- **Scenario:** GIVEN all five PR automations and other composer-tray controls
+  are visible on the configured phone viewport, WHEN the user views the tray
+  and taps the PR chip, THEN complete controls fit or wrap, the drawer opens,
+  and neither the tray nor document overflows horizontally.
+  **File:** `apps/web/e2e/tests/pr/mobile-pr-ci-chip.spec.ts`
+  **What to verify:** grouped badge count, tap outcome, tray/control bounding
+  boxes, and `scrollWidth <= clientWidth`.
 
 ---
 
@@ -578,6 +672,10 @@ Wave 12 (review follow-up presentation):
 
 - [x] [task-20-role-aware-automation-controls](task-20-role-aware-automation-controls.md)
 
+Wave 13 (composer-tray follow-up summary):
+
+- [x] [task-21-composer-tray-follow-up-badge](task-21-composer-tray-follow-up-badge.md)
+
 ---
 
 ## Verification Commands
@@ -592,13 +690,17 @@ Targeted frontend:
 
 ```bash
 cd apps && pnpm --filter @kandev/web test -- pr-ci-popover.automation
-cd apps/web && pnpm run typecheck
+cd apps && pnpm --filter @kandev/web test -- pr-status-chip pr-status-automation-badges
+cd apps && pnpm --filter @kandev/web i18n:check
+cd apps/web && node --max-old-space-size=4096 node_modules/typescript/bin/tsc --noEmit
 ```
 
 Targeted E2E:
 
 ```bash
 cd apps/web && pnpm e2e:run tests/pr/ci-automation-options.spec.ts tests/pr/mobile-ci-automation-options.spec.ts
+cd apps/web && pnpm e2e:run tests/pr/ci-automation-options.spec.ts -- --grep "composer tray"
+cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/pr/mobile-pr-ci-chip.spec.ts -- --grep "follow-up automations"
 ```
 
 Final verification:
@@ -607,6 +709,36 @@ Final verification:
 make fmt
 make typecheck test lint
 ```
+
+---
+
+## Verification Results
+
+Task 21 completed on 2026-08-10 with Red-Green-Refactor evidence. The focused
+component suite first failed because `pr-status-follow-up-chip` was absent, and
+the compact desktop and Pixel 5 browser scenarios then failed with computed
+`flex-wrap: nowrap`. After implementation and refactor:
+
+- `pnpm --filter @kandev/web test -- pr-status-chip
+  pr-status-automation-badges` passed 47 tests in 3 files.
+- `pnpm run i18n:check && pnpm run i18n:ratchet` passed; the pseudo catalog is
+  synchronized and real-locale gaps remain advisory under the existing English
+  fallback policy.
+- Targeted ESLint passed with zero findings for the changed frontend and E2E
+  files.
+- `node --max-old-space-size=4096 node_modules/typescript/bin/tsc --noEmit`
+  passed. The package script's default 2 GB heap had exhausted when it ran in
+  parallel with other checks, so the successful isolated run used 4 GB.
+- The managed production-build compact desktop scenario passed 1 test in the
+  Chromium project, including badge content, accessible event names, complete
+  target geometry, popover reachability, and horizontal containment.
+- The final `--no-build` Pixel 5 scenario reused that unchanged production
+  build and passed 1 test in `mobile-chrome`, including tray containment,
+  drawer reachability, and all five independent switches.
+- A Pixel 5 screenshot was captured at
+  `apps/web/.pr-assets/mobile-pr-ci-chip--mobile-pr-follow-up-automation-tray.png`,
+  inspected for density and legibility, then removed with the other ignored
+  capture artifacts after inspection.
 
 ---
 
@@ -679,6 +811,16 @@ make typecheck test lint
 - Lifecycle evaluation may clear a resolved lifecycle error, but a shared
   auto-fix or auto-merge error from the same CI automation pass must be
   persisted after lifecycle evaluation so it remains visible.
+- Lifecycle summary is task-wide even when rendered beside one selected PR.
+  Single- and multi-PR chips must derive one count from task options, never
+  multiply the badge by linked PR count or selected-PR state.
+- The compact visual count is not sufficient accessible detail. The PR chip's
+  accessible description must name every enabled lifecycle event, and the
+  translated badge must remain concise enough to keep the existing compact
+  composer chrome usable.
+- Wrapping the composer status row must preserve complete interactive targets
+  and the existing right-control group. It must not introduce horizontal
+  scrolling, split one PR chip across lines, or hide automation controls.
 - The product currently trusts any client that can reach the Kandev backend as
   an operator, and auto-fix intentionally passes provider feedback to a
   privileged task agent. HTTP authentication/capability tokens and

@@ -159,6 +159,22 @@ Decision: [ADR-0051](../../decisions/0051-pr-agent-notifications-extend-task-pr-
 - When auto-fix is enabled and the task session is busy, Kandev keeps at most one pending CI auto-fix queue entry per task/repository/PR. Newer feedback replaces that pending entry instead of appending another queued `@ci-auto-fix` message.
 - Auto-fix is capped at 10 accepted rounds per task/repository/PR. A round is counted when Kandev sends a prompt directly or inserts a new queued auto-fix prompt. Replacing an already queued auto-fix prompt does not count as another round.
 - The auto-fix enabled chip above the chat input shows round progress as `Auto-fix N/10`; PRs paused by the backend after the cap is reached show `Auto-fix 10/10` with warning/paused styling.
+- While the PR status chip is present above the chat input, active lifecycle
+  prompting appears as one compact `Follow-up N/3` badge, where `N` is the
+  number of enabled options among review requested, merged, and closed. The
+  badge is absent when all three options are disabled. It remains one
+  task-wide badge for tasks with multiple linked PRs and does not replace the
+  independent auto-fix progress or auto-merge badges.
+- The grouped follow-up badge is presentation only. Activating the surrounding
+  PR status chip opens the existing desktop popover or mobile drawer where the
+  three `Review follow-up` switches remain independently visible and
+  configurable. The chip's accessible description identifies each enabled
+  lifecycle event rather than exposing only the count.
+- When status-bar items compete for space on phones or narrow windows, the
+  composer tray wraps complete controls onto another line instead of clipping
+  a badge, shrinking it into unreadable text, or creating document-level
+  horizontal overflow. The PR chip and its badges remain one tap target; the
+  responsive layout does not add a second automation control or overlay.
 - Hovering the round-count help icon on desktop, or opening the same PR CI drawer on mobile and using the same help affordance, explains in plain language how many rounds have been used, what counts as a round, that queue replacement does not count again, and that Kandev pauses when 10/10 has no pending auto-fix message left to update.
 - Accepted round-count changes and exhausted-state changes are broadcast to open clients through the task CI options update event so the chip stays current without a reload.
 - The PR automation popover/drawer shows the selected linked PR's
@@ -475,6 +491,18 @@ Auto-merge cycle for one task/PR:
 - **GIVEN** auto-fix is enabled on a task with a primary active session and a newer non-primary active session, **WHEN** the first actionable PR feedback appears, **THEN** Kandev sends or queues the auto-fix prompt on the primary session, not the newer session.
 - **GIVEN** auto-fix has already accepted a round for one task session, **WHEN** another active session is created for the same task and new actionable PR feedback appears, **THEN** Kandev sends or queues the auto-fix prompt on the previously recorded session, not the newer session.
 - **GIVEN** auto-fix has used 1 of 10 rounds for a PR, **WHEN** the user views the auto-fix chip above the chat input and opens the round-count help affordance, **THEN** the chip reads `Auto-fix 1/10` and the hover/drawer explanation states that one round out of ten has been used.
+- **GIVEN** one, two, or all three lifecycle prompt options are enabled for a
+  task with a rendered PR status chip, **WHEN** the user views the tray above
+  the chat input, **THEN** one badge reads `Follow-up 1/3`, `Follow-up 2/3`, or
+  `Follow-up 3/3`, respectively, and the chip's accessible description names
+  the enabled lifecycle events.
+- **GIVEN** all three lifecycle prompt options are disabled, **WHEN** the user
+  views the PR status chip above the chat input, **THEN** no follow-up badge is
+  rendered.
+- **GIVEN** auto-fix, auto-merge, and all three lifecycle prompt options are
+  enabled alongside other composer-tray controls, **WHEN** the task is viewed
+  on a phone or narrow window, **THEN** every complete control remains visible
+  or wraps within the tray and the document has no horizontal overflow.
 - **GIVEN** auto-fix has already used 10 rounds for a PR and no pending auto-fix queue entry exists, **WHEN** new actionable feedback appears, **THEN** Kandev does not send or queue another prompt and records the PR as paused at `Auto-fix 10/10`.
 - **GIVEN** auto-fix has already used 10 rounds for a PR and the 10th round is still queued, **WHEN** new actionable feedback appears, **THEN** Kandev replaces that pending queued prompt without incrementing the round count.
 - **GIVEN** auto-fix sends a prompt for feedback that the backend considered prompt-worthy but the agent determines is already addressed or otherwise non-actionable, **WHEN** the agent reviews that prompt, **THEN** the agent does not modify files, commit, or push and only reports that there is nothing actionable to address.
@@ -576,6 +604,8 @@ Auto-merge cycle for one task/PR:
 - Streaming CI logs into the chat or popover.
 - Editing GitHub branch protection, review rules, or workflow files directly from the automation controls.
 - GitLab merge request automation.
+- Changing when terminal-only PR associations hide the PR status chip. Existing
+  merged/closed banners continue to own that tray state.
 
 ## Open questions
 
