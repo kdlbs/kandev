@@ -148,41 +148,47 @@ function SavedMenu<K extends string>({
         {saved.length === 0 ? (
           <DropdownMenuItem disabled>{t("integrations:noSavedQueriesYet")}</DropdownMenuItem>
         ) : (
-          saved.map((s) => (
-            <div key={s.id} role="none" className="group/saved flex items-center gap-0.5">
-              <DropdownMenuItem
-                onSelect={() => onSelect({ kind: s.kind, source: "saved", id: s.id })}
-                className="min-w-0 flex-1 cursor-pointer gap-2"
-              >
-                <IconBookmark className="h-3.5 w-3.5 shrink-0" />
-                <span className="flex-1 truncate">{s.label}</span>
-              </DropdownMenuItem>
-              {onToggleSavedDefault && (
-                <SavedQueryDefaultDropdownItem
-                  label={s.label}
-                  isDefault={s.isDefault === true}
-                  disabled={defaultMutationPending}
-                  pending={defaultMutationPendingId === s.id}
-                  testId={`saved-query-default-${s.id}`}
-                  onToggle={() => onToggleSavedDefault(s.id)}
-                />
-              )}
-              {/* A peer Radix item is intentional: arrow navigation reaches delete,
+          saved.map((s) => {
+            const deleteLabel = t("integrations:deleteSavedQueryNamed", { label: s.label });
+            const accessibleDeleteLabel = defaultMutationPending
+              ? t("integrations:savedQueryDefaultUpdateInProgress", { action: deleteLabel })
+              : deleteLabel;
+            return (
+              <div key={s.id} role="none" className="group/saved flex items-center gap-0.5">
+                <DropdownMenuItem
+                  onSelect={() => onSelect({ kind: s.kind, source: "saved", id: s.id })}
+                  className="min-w-0 flex-1 cursor-pointer gap-2"
+                >
+                  <IconBookmark className="h-3.5 w-3.5 shrink-0" />
+                  <span className="flex-1 truncate">{s.label}</span>
+                </DropdownMenuItem>
+                {onToggleSavedDefault && (
+                  <SavedQueryDefaultDropdownItem
+                    label={s.label}
+                    isDefault={s.isDefault === true}
+                    disabled={defaultMutationPending}
+                    pending={defaultMutationPendingId === s.id}
+                    testId={`saved-query-default-${s.id}`}
+                    onToggle={() => onToggleSavedDefault(s.id)}
+                  />
+                )}
+                {/* A peer Radix item is intentional: arrow navigation reaches delete,
                   and focus opacity reveals it without pointer hover. */}
-              <DropdownMenuItem
-                disabled={defaultMutationPending}
-                onSelect={(event) => {
-                  event.preventDefault();
-                  onDeleteSaved(s.id);
-                }}
-                className="h-7 min-h-7 w-7 shrink-0 cursor-pointer justify-center p-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus:opacity-100 group-hover/saved:opacity-100 data-[disabled]:cursor-wait data-[disabled]:opacity-50 group-hover/saved:data-[disabled]:opacity-50"
-                title={t("integrations:deleteSavedQueryNamed", { label: s.label })}
-                aria-label={t("integrations:deleteSavedQueryNamed", { label: s.label })}
-              >
-                <IconX className="h-3.5 w-3.5" />
-              </DropdownMenuItem>
-            </div>
-          ))
+                <DropdownMenuItem
+                  disabled={defaultMutationPending}
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    onDeleteSaved(s.id);
+                  }}
+                  className="h-7 min-h-7 w-7 shrink-0 cursor-pointer justify-center p-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus:opacity-100 group-hover/saved:opacity-100 data-[disabled]:cursor-wait data-[disabled]:opacity-50 group-hover/saved:data-[disabled]:opacity-50"
+                  title={accessibleDeleteLabel}
+                  aria-label={accessibleDeleteLabel}
+                >
+                  <IconX className="h-3.5 w-3.5" />
+                </DropdownMenuItem>
+              </div>
+            );
+          })
         )}
         <DropdownMenuSeparator />
         <DropdownMenuItem

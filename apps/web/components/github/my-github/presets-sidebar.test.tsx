@@ -35,7 +35,7 @@ describe("PresetsSidebar saved defaults", () => {
     expect(
       (
         screen.getByRole("button", {
-          name: "Delete Kandev PRs saved query",
+          name: "Updating default view… Delete Kandev PRs saved query",
         }) as HTMLButtonElement
       ).disabled,
     ).toBe(true);

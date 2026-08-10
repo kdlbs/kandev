@@ -166,37 +166,43 @@ function SavedSection({
           {t("github:noSavedQueriesYet")}
         </div>
       )}
-      {saved.map((s) => (
-        <PresetItem
-          key={s.id}
-          label={s.label}
-          Icon={IconBookmark}
-          active={selected.source === "saved" && selected.id === s.id}
-          onClick={() => onSelect({ kind, source: "saved", id: s.id })}
-          trailing={
-            <div className="flex shrink-0 items-center">
-              <SavedQueryDefaultButton
-                label={s.label}
-                isDefault={s.isDefault}
-                disabled={defaultMutationPending}
-                pending={defaultMutationPendingId === s.id}
-                testId={`github-saved-query-default-${s.id}`}
-                onToggle={() => void onToggleSavedDefault(s)}
-              />
-              <button
-                type="button"
-                disabled={defaultMutationPending}
-                onClick={() => onDelete(s.id)}
-                className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-wait disabled:opacity-50"
-                title={t("integrations:deleteSavedQueryNamed", { label: s.label })}
-                aria-label={t("integrations:deleteSavedQueryNamed", { label: s.label })}
-              >
-                <IconX className="h-4 w-4" />
-              </button>
-            </div>
-          }
-        />
-      ))}
+      {saved.map((s) => {
+        const deleteLabel = t("integrations:deleteSavedQueryNamed", { label: s.label });
+        const accessibleDeleteLabel = defaultMutationPending
+          ? t("integrations:savedQueryDefaultUpdateInProgress", { action: deleteLabel })
+          : deleteLabel;
+        return (
+          <PresetItem
+            key={s.id}
+            label={s.label}
+            Icon={IconBookmark}
+            active={selected.source === "saved" && selected.id === s.id}
+            onClick={() => onSelect({ kind, source: "saved", id: s.id })}
+            trailing={
+              <div className="flex shrink-0 items-center">
+                <SavedQueryDefaultButton
+                  label={s.label}
+                  isDefault={s.isDefault}
+                  disabled={defaultMutationPending}
+                  pending={defaultMutationPendingId === s.id}
+                  testId={`github-saved-query-default-${s.id}`}
+                  onToggle={() => void onToggleSavedDefault(s)}
+                />
+                <button
+                  type="button"
+                  disabled={defaultMutationPending}
+                  onClick={() => onDelete(s.id)}
+                  className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-wait disabled:opacity-50"
+                  title={accessibleDeleteLabel}
+                  aria-label={accessibleDeleteLabel}
+                >
+                  <IconX className="h-4 w-4" />
+                </button>
+              </div>
+            }
+          />
+        );
+      })}
       <button
         type="button"
         onClick={onSaveCurrent}

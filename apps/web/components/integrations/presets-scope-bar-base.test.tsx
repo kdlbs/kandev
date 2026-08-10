@@ -162,7 +162,7 @@ describe("IntegrationScopeBar saved defaults", () => {
       name: "Updating default view… Clear Current default as default view",
     });
     const currentDelete = screen.getByRole("menuitem", {
-      name: "Delete Current default saved query",
+      name: "Updating default view… Delete Current default saved query",
     });
 
     expect(currentDefault.getAttribute(ARIA_DISABLED_ATTRIBUTE)).toBe("true");
@@ -182,7 +182,7 @@ describe("IntegrationScopeBar saved defaults", () => {
     expect(
       screen
         .getByRole("menuitem", {
-          name: FUTURE_DELETE_LABEL,
+          name: `Updating default view… ${FUTURE_DELETE_LABEL}`,
         })
         .getAttribute(ARIA_DISABLED_ATTRIBUTE),
     ).toBe("true");

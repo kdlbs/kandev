@@ -298,7 +298,10 @@ export function useSavedPresets(workspaceId: string | null = null) {
       await queueMutation(async () => {
         const current = readMutationPresets(context);
         const next = setSavedPresetDefault(current, kind, id);
-        if (next === current) return;
+        if (next === current) {
+          // No-op when already matched or the target was removed while queued.
+          return;
+        }
         await persistSavedPresets(context, next);
         persisted = true;
         // `setDefault` publishes only after persistence succeeds (no optimistic update).
