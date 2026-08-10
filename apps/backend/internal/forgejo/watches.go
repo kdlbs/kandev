@@ -125,6 +125,12 @@ func (s *Store) ReleaseIssueWatchTask(ctx context.Context, watchID, owner, repo 
 	return err
 }
 
+func (s *Store) CountIssueWatchInflightTasks(ctx context.Context, watchID string) (int, error) {
+	var count int
+	err := s.ro.GetContext(ctx, &count, `SELECT COUNT(*) FROM forgejo_issue_watch_tasks w JOIN tasks t ON t.id = w.task_id WHERE w.watch_id = ? AND w.task_id <> '' AND t.state NOT IN ('COMPLETED', 'FAILED', 'CANCELLED')`, watchID)
+	return count, err
+}
+
 // ClaimIssueWatchTask remains a small atomic helper for callers that already
 // have a task ID. New watch processing should use Reserve/Complete instead.
 func (s *Store) ClaimIssueWatchTask(ctx context.Context, watchID, owner, repo string, number int, taskID string) (bool, error) {

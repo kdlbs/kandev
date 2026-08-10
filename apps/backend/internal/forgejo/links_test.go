@@ -131,3 +131,24 @@ func TestStore_ClaimsWatchIssueOnce(t *testing.T) {
 		t.Fatalf("second=%t err=%v", second, err)
 	}
 }
+
+func TestStore_CountsOnlyActiveWatchTasks(t *testing.T) {
+	store := newConfigTestStore(t)
+	ctx := context.Background()
+	if _, err := store.db.Exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, state TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO tasks (id, state) VALUES ('active', 'RUNNING'), ('done', 'COMPLETED')`); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := store.ClaimIssueWatchTask(ctx, "watch", "owner", "repo", 1, "active"); err != nil || !ok {
+		t.Fatalf("claim active=%t err=%v", ok, err)
+	}
+	if ok, err := store.ClaimIssueWatchTask(ctx, "watch", "owner", "repo", 2, "done"); err != nil || !ok {
+		t.Fatalf("claim done=%t err=%v", ok, err)
+	}
+	count, err := store.CountIssueWatchInflightTasks(ctx, "watch")
+	if err != nil || count != 1 {
+		t.Fatalf("count=%d err=%v", count, err)
+	}
+}

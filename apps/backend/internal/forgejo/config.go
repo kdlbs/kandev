@@ -559,6 +559,15 @@ func (s *Service) PollIssueWatch(ctx context.Context, workspaceID, watchID strin
 	matching := filterWatchedIssues(issues, watch.Labels)
 	if s.issueTaskCreator != nil && watch.Enabled && watch.WorkflowID != "" {
 		for _, issue := range matching {
+			if watch.InflightLimit > 0 {
+				inflight, countErr := s.store.CountIssueWatchInflightTasks(ctx, watch.ID)
+				if countErr != nil {
+					return nil, countErr
+				}
+				if inflight >= watch.InflightLimit {
+					break
+				}
+			}
 			claimed, claimErr := s.store.ReserveIssueWatchTask(ctx, watch.ID, watch.Owner, watch.Repo, issue.Number)
 			if claimErr != nil {
 				return nil, claimErr
