@@ -22,6 +22,15 @@ func TestHandleWorkspaceStreamWS_ConcurrentEventsAndPings(t *testing.T) {
 	srv := newTestServer(t)
 	ts, handlerDone := newWorkspaceStreamTestServer(t, srv)
 	conn := dialWorkspaceStream(t, ts)
+	// Registered here rather than at the end of the test: every read below can
+	// t.Fatal, which skips end-of-test statements and would strand the client
+	// conn, the listener, and the handler's goroutines — the forwarding loop
+	// parks in its select — for the rest of the package run. Cleanups are LIFO,
+	// so this joins the handler before the server's own cleanup closes down.
+	t.Cleanup(func() {
+		closeWorkspaceStream(t, conn)
+		joinWorkspaceStreamHandler(t, srv, handlerDone)
+	})
 	// One deadline for every read in the test, so an unexpected message type
 	// cannot extend the run by a fresh per-message timeout.
 	deadline := workspaceStreamDeadline(t)
@@ -68,10 +77,6 @@ func TestHandleWorkspaceStreamWS_ConcurrentEventsAndPings(t *testing.T) {
 			want[msg.Type] = true
 		}
 	}
-
-	closeWorkspaceStream(t, conn)
-	joinWorkspaceStreamHandler(t, srv, handlerDone)
-	ts.Close()
 }
 
 // newWorkspaceStreamTestServer serves the API router over a real listener and
@@ -85,6 +90,7 @@ func newWorkspaceStreamTestServer(t *testing.T, srv *Server) (*httptest.Server, 
 		defer once.Do(func() { close(done) })
 		srv.router.ServeHTTP(w, r)
 	}))
+	t.Cleanup(ts.Close)
 	return ts, done
 }
 
@@ -125,11 +131,14 @@ func readWorkspaceStreamMessage(t *testing.T, conn *websocket.Conn, deadline tim
 	return msg
 }
 
+// closeWorkspaceStream reports a close failure with Errorf rather than Fatalf:
+// it runs from a cleanup, and a Fatal there would skip the remaining cleanups
+// that join the handler and shut the listener down.
 func closeWorkspaceStream(t *testing.T, conn *websocket.Conn) {
 	t.Helper()
 	_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 	if err := conn.Close(); err != nil {
-		t.Fatalf("close client conn: %v", err)
+		t.Errorf("close client conn: %v", err)
 	}
 }
 
