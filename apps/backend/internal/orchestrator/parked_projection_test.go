@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -274,6 +275,109 @@ func TestParked_V1_04_ExactlyOneProbePerRacingSettle(t *testing.T) {
 
 	require.Equal(t, 1, probe.callCount(), "exactly one settle path should win the CAS and issue a probe")
 	require.True(t, svc.ParkedProjectionSnapshot("s1"))
+}
+
+// firstPublishBlocksEventBus is a test double for bus.EventBus whose FIRST
+// Publish call for a matching subject blocks until release is closed; every
+// other call (including the earlier publishTaskSessionStateChanged call the
+// same transition issues for events.TaskSessionStateChanged) passes through
+// immediately. Used to force a genuine goroutine-scheduling window between a
+// transition's session-level parkedStatesMu write (which happens before
+// publishParkedChanged's events.TaskSessionActivityChanged publish) and its
+// own updateTaskParkedState call (which happens after) — the exact window
+// MUST-FIX 1 (review round 1) closed.
+type firstPublishBlocksEventBus struct {
+	subject string
+	mu      sync.Mutex
+	blocked bool
+	entered chan struct{}
+	release chan struct{}
+}
+
+func newFirstPublishBlocksEventBus(subject string) *firstPublishBlocksEventBus {
+	return &firstPublishBlocksEventBus{
+		subject: subject,
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+}
+
+func (b *firstPublishBlocksEventBus) Publish(_ context.Context, subject string, _ *bus.Event) error {
+	if subject != b.subject {
+		return nil
+	}
+	b.mu.Lock()
+	first := !b.blocked
+	b.blocked = true
+	b.mu.Unlock()
+	if first {
+		close(b.entered)
+		<-b.release
+	}
+	return nil
+}
+
+func (b *firstPublishBlocksEventBus) Subscribe(string, bus.EventHandler) (bus.Subscription, error) {
+	return nil, nil
+}
+
+func (b *firstPublishBlocksEventBus) QueueSubscribe(string, string, bus.EventHandler) (bus.Subscription, error) {
+	return nil, nil
+}
+
+func (b *firstPublishBlocksEventBus) Request(context.Context, string, *bus.Event, time.Duration) (*bus.Event, error) {
+	return nil, nil
+}
+
+func (b *firstPublishBlocksEventBus) Close()            {}
+func (b *firstPublishBlocksEventBus) IsConnected() bool { return true }
+
+// TestParked_ConcurrentSettleAndResumeConvergeOnCurrentState is an
+// adversarial Testing-phase extension of MUST-FIX 1 (review round 1): it
+// reproduces the exact bug through real goroutine scheduling and the public
+// API, rather than the direct internal-state manipulation Build's regression
+// test used. A session settles to WAITING_FOR_INPUT and its own delayed
+// task-level publish (blocked mid-flight via firstPublishBlocksEventBus) is
+// still in flight when a second, real transition resumes the same session
+// into RUNNING and completes its own task-level publish first. Without the
+// fix (updateTaskParkedState re-reading the authoritative value at call
+// time), the delayed settle's publish would resurrect a stale `true` after
+// the resume already correctly published `false`.
+func TestParked_ConcurrentSettleAndResumeConvergeOnCurrentState(t *testing.T) {
+	ctx := context.Background()
+	probe := &fakeBackgroundProbe{result: probeResultLive}
+	svc := parkedTestService(t, "t1", "s1", probe)
+	attestShellLaunch(ctx, svc, "t1", "s1")
+
+	eb := newFirstPublishBlocksEventBus(events.TaskSessionActivityChanged)
+	svc.eventBus = eb
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		svc.updateTaskSessionState(ctx, "t1", "s1", models.TaskSessionStateWaitingForInput, "", false)
+	}()
+
+	<-eb.entered // the settle's own task-level publish is now blocked, ps.parked already written true
+
+	require.True(t, svc.ParkedProjectionSnapshot("s1"), "session-level write must have already landed while the settle's publish is blocked")
+
+	// A second, real transition resumes the session out of WAITING_FOR_INPUT
+	// while the settle's publish is still blocked. Its own Publish call is
+	// the SECOND call to eb, so it passes through immediately — this
+	// transition's updateTaskParkedState call completes in full before the
+	// settle's delayed one resumes.
+	svc.updateTaskSessionState(ctx, "t1", "s1", models.TaskSessionStateRunning, "", true)
+	require.False(t, svc.ParkedProjectionSnapshot("s1"))
+	require.False(t, svc.TaskParkedProjectionSnapshot("t1"), "resume's publish must land correctly before the settle's delayed publish resumes")
+
+	close(eb.release) // let the settle's delayed publish (and its updateTaskParkedState call) proceed
+	wg.Wait()
+
+	require.False(t, svc.ParkedProjectionSnapshot("s1"), "session must not be parked after resuming")
+	require.False(t, svc.TaskParkedProjectionSnapshot("t1"),
+		"the settle's delayed task-level publish must not resurrect a stale true after the resume already published false")
 }
 
 // TestParked_TaskLevelOR verifies AC-49: task-level parked is the OR of its
