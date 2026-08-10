@@ -1,5 +1,5 @@
 import { fetchJson, type ApiRequestOptions } from "../client";
-import type { ForgejoConfig, ForgejoIssue, ForgejoIssueWatch, ForgejoPullRequest, ForgejoPullRequestComment, ForgejoPullRequestDetails, ForgejoPullRequestReview, ForgejoRepository, ForgejoReviewWatch, ForgejoTaskIssue, ForgejoTaskPR, SetForgejoConfigRequest, TestForgejoConnectionResult } from "@/lib/types/forgejo";
+import type { ForgejoActionPreset, ForgejoConfig, ForgejoIssue, ForgejoIssueWatch, ForgejoPullRequest, ForgejoPullRequestComment, ForgejoPullRequestDetails, ForgejoPullRequestReview, ForgejoRepository, ForgejoReviewWatch, ForgejoTaskIssue, ForgejoTaskPR, SetForgejoConfigRequest, TestForgejoConnectionResult } from "@/lib/types/forgejo";
 
 type WorkspaceOptions = ApiRequestOptions & { workspaceId: string };
 const path = (route: string, workspaceId: string) => `${route}${route.includes("?") ? "&" : "?"}workspace_id=${encodeURIComponent(workspaceId)}`;
@@ -32,3 +32,6 @@ export const pollForgejoIssueWatch = (watchId: string, options: WorkspaceOptions
 export const listForgejoReviewWatches = (options: WorkspaceOptions) => fetchJson<{ watches: ForgejoReviewWatch[] }>(path("/api/v1/forgejo/review-watches", options.workspaceId), withoutWorkspace(options));
 export const saveForgejoReviewWatch = (watch: Partial<ForgejoReviewWatch> & { owner: string; repo: string }, options: WorkspaceOptions) => fetchJson<ForgejoReviewWatch>(path("/api/v1/forgejo/review-watches", options.workspaceId), { ...withoutWorkspace(options), init: { method: "PUT", body: JSON.stringify(watch) } });
 export const deleteForgejoReviewWatch = (watchId: string, options: WorkspaceOptions) => fetchJson<{ deleted: boolean }>(path(`/api/v1/forgejo/review-watches/${encodeURIComponent(watchId)}`, options.workspaceId), { ...withoutWorkspace(options), init: { method: "DELETE" } });
+export const listForgejoActionPresets = (options: WorkspaceOptions) => fetchJson<{ presets: ForgejoActionPreset[] }>(path("/api/v1/forgejo/action-presets", options.workspaceId), withoutWorkspace(options));
+export const saveForgejoActionPreset = (preset: Partial<ForgejoActionPreset> & { kind: string; name: string }, options: WorkspaceOptions) => fetchJson<ForgejoActionPreset>(path("/api/v1/forgejo/action-presets", options.workspaceId), { ...withoutWorkspace(options), init: { method: "PUT", body: JSON.stringify(preset) } });
+export const deleteForgejoActionPreset = (presetId: string, options: WorkspaceOptions) => fetchJson<{ deleted: boolean }>(path(`/api/v1/forgejo/action-presets/${encodeURIComponent(presetId)}`, options.workspaceId), { ...withoutWorkspace(options), init: { method: "DELETE" } });
