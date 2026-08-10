@@ -125,21 +125,11 @@ is the completeness check. Full guide: [`docs/i18n.md`](docs/i18n.md).
 ### GitHub Operations
 Skills use `gh` CLI by default. If a `gh` command fails (not installed, not authenticated, etc.), use whatever GitHub tools are available in the environment (MCP GitHub tools, API tools, etc.) to accomplish the same operation. The goal is the same — the tool may differ.
 
-When asked to assign an issue to "my user", resolve the authenticated GitHub
-login through the available connector or CLI first, assign that exact login,
-then re-read the issue and verify the assignee.
-
 For multiline Markdown issue or PR bodies, write the body to a file and pass it
 with the relevant `gh ... --body-file <path>` option. Do not send escaped
 newlines through `--body`; GitHub will render them literally.
 
 For PR review/fixup workflows, prefer the repo helpers before manually querying GitHub/GraphQL: `scripts/pr-state --summary <PR>` for checks and unresolved-thread state, `scripts/pr-state --comment <comment_id>` for a full review-comment body, `scripts/pr-resolve list <PR>` for actionable unresolved review threads, and `scripts/pr-resolve reply <PR> <comment_id> <thread_id> "<body>"` to reply, resolve, and react in one call.
-
-For new or updated GitHub Actions pins, verify that the referenced action's
-`action.yml` declares `runs.using: node24`. Fetch the manifest at the pinned
-SHA, dereference annotated-tag pins through the tag object before fetching it,
-and reject actions that still declare `node20` (or are not `composite`/Docker
-actions).
 
 When a Kandev system message references an MCP tool that is not visible in the active tool list, use the runtime's tool discovery mechanism, such as `tool_search` when available, before falling back to a less specific workflow. Some task messaging and platform helpers are exposed on demand.
 
@@ -196,11 +186,6 @@ review that must start after merge, create it with `parent_id: "self"`,
 `workspace_mode: "new_workspace"`, and the reviewed PR's base branch; otherwise
 a same-repository subtask inherits the reviewed branch. Set `start_agent: false`
 when the follow-up is intentionally queued until merge.
-
-When the user asks for a todo list or durable progress plan, create or update the
-persistent Kandev task plan alongside the transient checklist. Before handoff,
-refresh plan statuses, validation results, remediation commits, PR head,
-review-thread state, and pending CI/mergeability.
 
 ### Third-party integrations
 
