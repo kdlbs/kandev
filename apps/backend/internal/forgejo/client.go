@@ -100,6 +100,7 @@ type Client interface {
 	GetAuthenticatedUser(context.Context) (*User, error)
 	ListRepositories(context.Context, int, int) ([]Repository, int, error)
 	ListIssues(context.Context, string, string, int, int) ([]Issue, int, error)
+	GetIssue(context.Context, string, string, int) (*Issue, error)
 	GetPullRequest(context.Context, string, string, int) (*PullRequest, error)
 	CreatePullRequest(context.Context, CreatePullRequestInput) (*PullRequest, error)
 }
@@ -186,6 +187,17 @@ func (c *PATClient) ListIssues(ctx context.Context, owner, repo string, page, li
 		issues = append(issues, Issue{Number: issue.Number, Title: issue.Title, State: issue.State, HTMLURL: issue.HTMLURL, Body: issue.Body})
 	}
 	return issues, total, nil
+}
+
+func (c *PATClient) GetIssue(ctx context.Context, owner, repo string, number int) (*Issue, error) {
+	if strings.TrimSpace(owner) == "" || strings.TrimSpace(repo) == "" || number < 1 {
+		return nil, errors.New("Forgejo issue identity required")
+	}
+	var issue Issue
+	if _, err := c.get(ctx, fmt.Sprintf("/repos/%s/%s/issues/%d", url.PathEscape(owner), url.PathEscape(repo), number), nil, &issue); err != nil {
+		return nil, err
+	}
+	return &issue, nil
 }
 
 func (c *PATClient) CreatePullRequest(ctx context.Context, input CreatePullRequestInput) (*PullRequest, error) {

@@ -238,6 +238,39 @@ func (s *Service) AssociatePullRequest(ctx context.Context, workspaceID, taskID,
 	return nil, ErrTaskLinkNotFound
 }
 
+func (s *Service) AssociateIssue(ctx context.Context, workspaceID, taskID, repositoryID, owner, repo string, number int) (*TaskIssue, error) {
+	if err := s.store.assertTaskWorkspace(ctx, workspaceID, taskID); err != nil {
+		return nil, err
+	}
+	client, err := s.ClientForWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	issue, err := client.GetIssue(ctx, owner, repo, number)
+	if err != nil {
+		return nil, err
+	}
+	config, err := s.store.GetConfig(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	link := &TaskIssue{TaskID: taskID, RepositoryID: repositoryID, Origin: config.Origin, Owner: owner, Repo: repo, IssueNumber: issue.Number, IssueURL: issue.HTMLURL, Title: issue.Title, State: issue.State, LastSyncedAt: &now}
+	if err := s.store.UpsertTaskIssue(ctx, link); err != nil {
+		return nil, err
+	}
+	links, err := s.store.ListTaskIssues(ctx, workspaceID, taskID)
+	if err != nil {
+		return nil, err
+	}
+	for _, candidate := range links {
+		if candidate.Owner == owner && candidate.Repo == repo && candidate.IssueNumber == issue.Number {
+			return candidate, nil
+		}
+	}
+	return nil, ErrTaskLinkNotFound
+}
+
 func (s *Service) SetConfig(ctx context.Context, workspaceID string, request *SetConfigRequest) (*Config, error) {
 	if strings.TrimSpace(workspaceID) == "" {
 		return nil, ErrWorkspaceRequired

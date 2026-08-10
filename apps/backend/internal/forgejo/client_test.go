@@ -96,3 +96,18 @@ func TestPATClientGetsPullRequest(t *testing.T) {
 		t.Fatalf("pull=%#v err=%v", pull, err)
 	}
 }
+
+func TestPATClientGetsIssue(t *testing.T) {
+	server := newServer(t, func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/api/v1/repos/owner/repo/issues/7" {
+			t.Fatalf("path=%s", request.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"number":7,"title":"Issue","state":"open","html_url":"https://forgejo.example/owner/repo/issues/7"}`))
+	})
+	t.Cleanup(server.Close)
+	client, _ := NewPATClient(server.URL, "token")
+	issue, err := client.GetIssue(context.Background(), "owner", "repo", 7)
+	if err != nil || issue.Title != "Issue" {
+		t.Fatalf("issue=%#v err=%v", issue, err)
+	}
+}

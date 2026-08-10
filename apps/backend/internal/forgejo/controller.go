@@ -24,6 +24,37 @@ func RegisterRoutes(router *gin.Engine, service *Service) {
 	api.GET("/issues", controller.listIssues)
 	api.GET("/tasks/:taskID/pull-requests", controller.listTaskPRs)
 	api.POST("/task-pull-requests", controller.associatePullRequest)
+	api.GET("/tasks/:taskID/issues", controller.listTaskIssues)
+	api.POST("/task-issues", controller.associateIssue)
+}
+
+func (c *Controller) listTaskIssues(ctx *gin.Context) {
+	issues, err := c.service.store.ListTaskIssues(ctx.Request.Context(), c.workspaceID(ctx), ctx.Param("taskID"))
+	if err != nil {
+		c.error(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"issues": issues})
+}
+
+func (c *Controller) associateIssue(ctx *gin.Context) {
+	var request struct {
+		TaskID       string `json:"task_id"`
+		RepositoryID string `json:"repository_id"`
+		Owner        string `json:"owner"`
+		Repo         string `json:"repo"`
+		Number       int    `json:"number"`
+	}
+	if err := ctx.ShouldBindJSON(&request); err != nil || strings.TrimSpace(request.TaskID) == "" || strings.TrimSpace(request.Owner) == "" || strings.TrimSpace(request.Repo) == "" || request.Number < 1 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "task_id, owner, repo, and number are required"})
+		return
+	}
+	issue, err := c.service.AssociateIssue(ctx.Request.Context(), c.workspaceID(ctx), request.TaskID, request.RepositoryID, request.Owner, request.Repo, request.Number)
+	if err != nil {
+		c.error(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, issue)
 }
 
 func (c *Controller) listTaskPRs(ctx *gin.Context) {
