@@ -7,6 +7,7 @@ const withoutWorkspace = ({ workspaceId: _workspaceId, ...options }: WorkspaceOp
 
 export const getForgejoConfig = async (options: WorkspaceOptions) => (await fetchJson<ForgejoConfig | undefined>(path("/api/v1/forgejo/config", options.workspaceId), withoutWorkspace(options))) ?? null;
 export const setForgejoConfig = (payload: SetForgejoConfigRequest, options: WorkspaceOptions) => fetchJson<ForgejoConfig>(path("/api/v1/forgejo/config", options.workspaceId), { ...withoutWorkspace(options), init: { method: "PUT", body: JSON.stringify(payload) } });
+export const deleteForgejoConfig = (options: WorkspaceOptions) => fetchJson<{ deleted: boolean }>(path("/api/v1/forgejo/config", options.workspaceId), { ...withoutWorkspace(options), init: { method: "DELETE" } });
 export const testForgejoConfig = (payload: SetForgejoConfigRequest, options: WorkspaceOptions) => fetchJson<TestForgejoConnectionResult>(path("/api/v1/forgejo/config/test", options.workspaceId), { ...withoutWorkspace(options), init: { method: "POST", body: JSON.stringify(payload) } });
 export const refreshForgejoConnection = (options: WorkspaceOptions) => fetchJson<ForgejoConfig>(path("/api/v1/forgejo/connection/refresh", options.workspaceId), { ...withoutWorkspace(options), init: { method: "POST" } });
 export const listForgejoRepositories = (options: WorkspaceOptions) => fetchJson<{ repositories: ForgejoRepository[]; total_count: number }>(path("/api/v1/forgejo/repositories", options.workspaceId), withoutWorkspace(options));
