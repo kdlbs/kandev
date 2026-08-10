@@ -138,6 +138,17 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			}
 			return task.ID, nil
 		})
+		forgejoSvc.SetReviewTaskCreator(func(ctx context.Context, watch *forgejo.ReviewWatch, pull forgejo.PullRequest) (string, error) {
+			description := fmt.Sprintf("Source Forgejo pull request: %s", pull.HTMLURL)
+			if prompt := strings.TrimSpace(watch.Prompt); prompt != "" {
+				description += "\n\nWatch instructions:\n" + prompt
+			}
+			task, err := taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{WorkspaceID: watch.WorkspaceID, WorkflowID: watch.WorkflowID, WorkflowStepID: watch.WorkflowStepID, Title: pull.Title, Description: description, Priority: "medium", Repositories: []taskservice.TaskRepositoryInput{{RepositoryID: watch.RepositoryID, BaseBranch: watch.BaseBranch}}, Metadata: map[string]interface{}{"forgejo_pull_request": map[string]interface{}{"owner": watch.Owner, "repo": watch.Repo, "number": pull.Number, "url": pull.HTMLURL}}, AssigneeAgentProfileID: watch.AgentProfileID})
+			if err != nil {
+				return "", err
+			}
+			return task.ID, nil
+		})
 	}
 	azureDevOpsSvc := initAzureDevOpsService(dbPool, eventBus, repos.Secrets, log)
 	if azureDevOpsSvc != nil {

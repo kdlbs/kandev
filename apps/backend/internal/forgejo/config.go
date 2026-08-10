@@ -158,6 +158,16 @@ func NewStore(db, ro *sqlx.DB) (*Store, error) {
 		workspace_id TEXT NOT NULL, delivery_id TEXT NOT NULL, payload_hash TEXT NOT NULL,
 		created_at DATETIME NOT NULL, PRIMARY KEY(workspace_id, delivery_id)
 	)`)
+	if err != nil {
+		return nil, err
+	}
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS forgejo_review_watches (
+		id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, workflow_id TEXT NOT NULL DEFAULT '', workflow_step_id TEXT NOT NULL DEFAULT '', repository_id TEXT NOT NULL DEFAULT '', base_branch TEXT NOT NULL DEFAULT '', prompt TEXT NOT NULL DEFAULT '', agent_profile_id TEXT NOT NULL DEFAULT '', owner TEXT NOT NULL, repo TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, poll_interval_seconds INTEGER NOT NULL DEFAULT 300, last_polled_at DATETIME, last_error TEXT NOT NULL DEFAULT '', created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL, UNIQUE(workspace_id, owner, repo)
+	)`)
+	if err != nil {
+		return nil, err
+	}
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS forgejo_review_watch_tasks (watch_id TEXT NOT NULL, owner TEXT NOT NULL, repo TEXT NOT NULL, pr_number INTEGER NOT NULL, task_id TEXT NOT NULL DEFAULT '', created_at DATETIME NOT NULL, PRIMARY KEY(watch_id, owner, repo, pr_number))`)
 	return store, err
 }
 
@@ -203,14 +213,16 @@ func (s *Store) UpdateHealth(ctx context.Context, workspaceID string, ok bool, m
 }
 
 type Service struct {
-	store            *Store
-	secrets          WorkspaceSecretStore
-	issueTaskCreator IssueTaskCreator
+	store             *Store
+	secrets           WorkspaceSecretStore
+	issueTaskCreator  IssueTaskCreator
+	reviewTaskCreator ReviewTaskCreator
 }
 
 // IssueTaskCreator creates a Kandev task for a watched Forgejo issue. It is
 // injected by backendapp to keep this provider package independent of task.
 type IssueTaskCreator func(context.Context, *IssueWatch, Issue) (string, error)
+type ReviewTaskCreator func(context.Context, *ReviewWatch, PullRequest) (string, error)
 
 func NewService(store *Store, secrets WorkspaceSecretStore) *Service {
 	return &Service{store: store, secrets: secrets}
@@ -219,6 +231,7 @@ func NewService(store *Store, secrets WorkspaceSecretStore) *Service {
 func (s *Service) SetIssueTaskCreator(creator IssueTaskCreator) {
 	s.issueTaskCreator = creator
 }
+func (s *Service) SetReviewTaskCreator(creator ReviewTaskCreator) { s.reviewTaskCreator = creator }
 
 func (s *Service) GetConfig(ctx context.Context, workspaceID string) (*Config, error) {
 	if strings.TrimSpace(workspaceID) == "" {

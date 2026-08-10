@@ -318,6 +318,41 @@ func TestActionRunState(t *testing.T) {
 	}
 }
 
+func TestService_PollReviewWatchCreatesTaskOnce(t *testing.T) {
+	service, secrets := newConfigTestService(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		_, _ = w.Write([]byte(`[{"number":8,"title":"Review me","state":"open","html_url":"https://forgejo.example/owner/repo/pulls/8","head":{"ref":"feature"},"base":{"ref":"main"}}]`))
+	}))
+	t.Cleanup(server.Close)
+	ctx := context.Background()
+	if err := service.store.SaveConfig(ctx, &Config{WorkspaceID: "workspace-a", Origin: server.URL}); err != nil {
+		t.Fatal(err)
+	}
+	if err := secrets.Set(ctx, SecretKeyForWorkspace("workspace-a"), "Forgejo token", "token"); err != nil {
+		t.Fatal(err)
+	}
+	watch := &ReviewWatch{WorkspaceID: "workspace-a", WorkflowID: "workflow-a", Owner: "owner", Repo: "repo", Enabled: true}
+	if err := service.SaveReviewWatch(ctx, "workspace-a", watch); err != nil {
+		t.Fatal(err)
+	}
+	created := 0
+	service.SetReviewTaskCreator(func(_ context.Context, _ *ReviewWatch, pull PullRequest) (string, error) {
+		created++
+		if pull.Number != 8 {
+			t.Fatalf("pull=%#v", pull)
+		}
+		return "task-8", nil
+	})
+	for range 2 {
+		if _, err := service.PollReviewWatch(ctx, watch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if created != 1 {
+		t.Fatalf("created=%d", created)
+	}
+}
+
 func TestController_MapsUnsupportedCapability(t *testing.T) {
 	service, _ := newConfigTestService(t)
 	router := gin.New()

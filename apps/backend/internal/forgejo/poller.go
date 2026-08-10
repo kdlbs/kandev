@@ -68,12 +68,33 @@ func (p *Poller) loop(ctx context.Context) {
 	ticker := time.NewTicker(defaultIssueWatchPollInterval)
 	defer ticker.Stop()
 	p.runIssueWatches(ctx, time.Now().UTC())
+	p.runReviewWatches(ctx, time.Now().UTC())
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case now := <-ticker.C:
 			p.runIssueWatches(ctx, now.UTC())
+			p.runReviewWatches(ctx, now.UTC())
+		}
+	}
+}
+
+func (p *Poller) runReviewWatches(ctx context.Context, now time.Time) {
+	watches, err := p.service.ListAllReviewWatches(ctx)
+	if err != nil {
+		p.logger.Warn("Forgejo poller: list review watches", zap.Error(err))
+		return
+	}
+	for _, watch := range watches {
+		if ctx.Err() != nil {
+			return
+		}
+		if !watch.Enabled || !shouldPollIssueWatch(watch.LastPolledAt, watch.PollIntervalSeconds, now) {
+			continue
+		}
+		if _, err := p.service.PollReviewWatch(ctx, watch); err != nil {
+			p.logger.Debug("Forgejo poller: poll review watch", zap.String("watch_id", watch.ID), zap.Error(err))
 		}
 	}
 }
