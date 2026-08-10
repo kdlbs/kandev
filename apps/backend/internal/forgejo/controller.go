@@ -403,6 +403,10 @@ func (c *Controller) error(ctx *gin.Context, err error) {
 		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "invalid Forgejo webhook signature"})
 		return
 	}
+	if errors.Is(err, ErrUnsupported) {
+		ctx.JSON(http.StatusNotImplemented, gin.H{"error": "this Forgejo server does not expose the requested capability"})
+		return
+	}
 	if strings.Contains(err.Error(), "owner and repository are required") {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "owner and repo query parameters required"})
 		return

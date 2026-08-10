@@ -317,3 +317,16 @@ func TestActionRunState(t *testing.T) {
 		t.Fatalf("failure=%q", got)
 	}
 }
+
+func TestController_MapsUnsupportedCapability(t *testing.T) {
+	service, _ := newConfigTestService(t)
+	router := gin.New()
+	controller := &Controller{service: service}
+	response := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(response)
+	controller.error(context, ErrUnsupported)
+	if response.Code != http.StatusNotImplemented {
+		t.Fatalf("status=%d", response.Code)
+	}
+	_ = router
+}
