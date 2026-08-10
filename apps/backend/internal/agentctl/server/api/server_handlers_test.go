@@ -227,14 +227,43 @@ func TestShellEndpoints_AfterExplicitStart(t *testing.T) {
 		t.Errorf("cwd = %q, want the workspace root %q", statusBody.Cwd, workDir)
 	}
 
-	buffer := serverGet(t, srv, "/api/v1/shell/buffer")
-	if buffer.Code != http.StatusOK {
-		t.Fatalf("shell buffer = %d, want 200 (body %s)", buffer.Code, buffer.Body.String())
+	// Drive a marker through the PTY and read it back, so the buffer assertion
+	// is about captured output rather than merely a 200 with valid JSON. The
+	// shell echoes its input, so this does not depend on a command running.
+	const marker = "kandev-shell-marker"
+	if _, err := procMgr.Shell().Write([]byte("echo " + marker + "\r")); err != nil {
+		t.Fatalf("write to shell: %v", err)
 	}
-	var bufferBody ShellBufferResponse
-	if err := json.Unmarshal(buffer.Body.Bytes(), &bufferBody); err != nil {
-		t.Fatalf("decode shell buffer: %v", err)
+	buffered := awaitShellBuffer(t, srv, marker)
+	if !strings.Contains(buffered, marker) {
+		t.Errorf("shell buffer = %q, want it to contain %q", buffered, marker)
 	}
+}
+
+// awaitShellBuffer polls the buffer endpoint until it carries marker. The PTY
+// delivers its prompt and the echoed keystrokes asynchronously, so the marker —
+// not a fixed wait — is the synchronisation point; the deadline only detects
+// failure.
+func awaitShellBuffer(t *testing.T, srv *Server, marker string) string {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	var last string
+	for time.Now().Before(deadline) {
+		rec := serverGet(t, srv, "/api/v1/shell/buffer")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("shell buffer = %d, want 200 (body %s)", rec.Code, rec.Body.String())
+		}
+		var body ShellBufferResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode shell buffer: %v", err)
+		}
+		last = body.Data
+		if strings.Contains(last, marker) {
+			return last
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return last
 }
 
 // TestPprofRoutes_GatedOnEnv pins the debug surface behind its environment

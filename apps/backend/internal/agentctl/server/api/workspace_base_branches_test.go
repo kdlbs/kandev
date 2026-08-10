@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -15,6 +16,20 @@ func (f *gitAPIFixture) publishStagingAt(t *testing.T, ref string) string {
 	runGitAPI(t, f.repo, "branch", "staging", ref)
 	runGitAPI(t, f.repo, "push", "origin", "staging")
 	return strings.TrimSpace(runGitAPI(t, f.repo, "rev-parse", "staging"))
+}
+
+// joinDetachedBaseBranchRefresh blocks until the goroutine UpdateBaseBranches
+// spawns has finished. That goroutine runs RefreshGitStatus with
+// context.Background — it does not stop when the request ends — and it shells
+// out to git inside the fixture's t.TempDir(), so a test that returned without
+// joining it would race its own directory removal.
+//
+// RefreshGitStatus takes the tracker's updateMu for the whole call, so calling
+// it here cannot return until the detached one has released it. That makes it a
+// join, not a wait.
+func joinDetachedBaseBranchRefresh(t *testing.T, srv *Server) {
+	t.Helper()
+	srv.procMgr.GetWorkspaceTracker().RefreshGitStatus(context.Background())
 }
 
 func gitStatusBaseCommit(t *testing.T, srv *Server) string {
@@ -59,6 +74,7 @@ func TestHandleSetBaseBranches_RetargetsComparison(t *testing.T) {
 	if !body["ok"] {
 		t.Errorf("response = %v, want ok:true", body)
 	}
+	joinDetachedBaseBranchRefresh(t, fixture.server)
 	if got := gitStatusBaseCommit(t, fixture.server); got != stagingTip {
 		t.Errorf("base_commit = %q, want the merge-base with staging %q", got, stagingTip)
 	}
@@ -81,6 +97,7 @@ func TestHandleSetBaseBranches_DropsUnsafeRefs(t *testing.T) {
 			if rec.Code != http.StatusOK {
 				t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
 			}
+			joinDetachedBaseBranchRefresh(t, fixture.server)
 			got := gitStatusBaseCommit(t, fixture.server)
 			if got == stagingTip {
 				t.Fatalf("base_commit moved to staging's tip; %q was accepted as a ref", unsafe)
@@ -105,6 +122,7 @@ func TestHandleSetBaseBranches_AcceptsOriginPrefixedRefs(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d (body %s)", rec.Code, rec.Body.String())
 	}
+	joinDetachedBaseBranchRefresh(t, fixture.server)
 	if got := gitStatusBaseCommit(t, fixture.server); got != stagingTip {
 		t.Errorf("base_commit = %q, want the merge-base with origin/staging %q", got, stagingTip)
 	}

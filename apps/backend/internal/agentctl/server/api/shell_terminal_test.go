@@ -115,19 +115,20 @@ func TestShellTerminalLifecycle(t *testing.T) {
 		Cols:       100,
 		Rows:       30,
 	})
+	// Registered the moment the PTY can exist — before the assertions below,
+	// any of which can t.Fatal and would otherwise leave the shell and its
+	// goroutines running into goleak's check.
+	t.Cleanup(func() {
+		if err := srv.procMgr.ShellManager().StopAll(); err != nil {
+			t.Errorf("stop all terminals: %v", err)
+		}
+	})
 	if start.Code != http.StatusOK {
 		t.Fatalf("start status = %d (body %s)", start.Code, start.Body.String())
 	}
 	if got := decodeShellTerminalBody(t, start); got["status"] != "started" || got["terminal_id"] != terminalID {
 		t.Fatalf("start body = %+v", got)
 	}
-	// Registered before any assertion can fail, so a mid-test failure still
-	// reaps the PTY and its goroutines rather than tripping goleak.
-	t.Cleanup(func() {
-		if err := srv.procMgr.ShellManager().StopAll(); err != nil {
-			t.Errorf("stop all terminals: %v", err)
-		}
-	})
 
 	httpServer := httptest.NewServer(srv.Router())
 	defer httpServer.Close()
@@ -136,6 +137,7 @@ func TestShellTerminalLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial terminal stream: %v", err)
 	}
+	defer func() { _ = conn.Close() }()
 
 	// A resize control frame must be consumed as a command, never written to
 	// the PTY — otherwise its JSON would land in the user's command line.
@@ -169,7 +171,6 @@ func TestShellTerminalLifecycle(t *testing.T) {
 		t.Errorf("buffered output = %q, want it to contain the streamed marker", replayed.Data)
 	}
 
-	_ = conn.Close()
 	stop := shellTerminalRequest(t, srv, http.MethodDelete, "/api/v1/shell/terminal/"+terminalID, nil)
 	if stop.Code != http.StatusOK {
 		t.Fatalf("stop status = %d (body %s)", stop.Code, stop.Body.String())

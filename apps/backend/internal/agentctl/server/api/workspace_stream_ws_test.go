@@ -181,8 +181,12 @@ func TestHandleWorkspaceStreamInput_IgnoresNonInputMessages(t *testing.T) {
 func TestHandleWorkspaceStreamWS_ForwardsTrackerEvents(t *testing.T) {
 	srv := newTestServer(t)
 	handlerReturned := make(chan struct{})
+	// sync.Once: a second request to this server — a retry, or a future edit
+	// that dials twice — would otherwise close an already-closed channel and
+	// panic on a server goroutine, taking down the whole test binary.
+	var returnedOnce sync.Once
 	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer close(handlerReturned)
+		defer returnedOnce.Do(func() { close(handlerReturned) })
 		srv.Router().ServeHTTP(w, r)
 	}))
 
@@ -192,6 +196,14 @@ func TestHandleWorkspaceStreamWS_ForwardsTrackerEvents(t *testing.T) {
 		httpServer.Close()
 		t.Fatalf("dial workspace stream: %v", err)
 	}
+	// Registered before any assertion below can t.Fatal. httpServer.Close waits
+	// for the handler, so it must run after the shutdown loop has released it —
+	// cleanups run last-registered-first, hence this ordering.
+	t.Cleanup(httpServer.Close)
+	t.Cleanup(func() {
+		_ = conn.Close()
+		waitForWorkspaceStreamShutdown(t, srv.procMgr.GetWorkspaceTracker().NotifyGitCommit, handlerReturned)
+	})
 
 	if got := readWorkspaceMessage(t, conn); got.Type != types.WorkspaceMessageTypeConnected {
 		t.Fatalf("first frame type = %q, want %q", got.Type, types.WorkspaceMessageTypeConnected)
@@ -223,9 +235,6 @@ func TestHandleWorkspaceStreamWS_ForwardsTrackerEvents(t *testing.T) {
 	// also writing to it, and a gorilla *Conn permits only one concurrent
 	// writer. Ping/pong is covered against the input loop in isolation by
 	// TestHandleWorkspaceStreamInput_AnswersPing.
-	_ = conn.Close()
-	waitForWorkspaceStreamShutdown(t, tracker.NotifyGitCommit, handlerReturned)
-	httpServer.Close()
 }
 
 // waitForWorkspaceStreamShutdown republishes until the handler's forwarding
@@ -239,6 +248,13 @@ func waitForWorkspaceStreamShutdown(
 ) {
 	t.Helper()
 	deadline := time.After(wsTestTimeout)
+	// One timer, reset per iteration: time.After in a loop leaks a timer per
+	// pass that the runtime cannot collect until it fires.
+	retry := time.NewTimer(0)
+	defer retry.Stop()
+	if !retry.Stop() {
+		<-retry.C
+	}
 	for {
 		select {
 		case <-handlerReturned:
@@ -248,10 +264,14 @@ func waitForWorkspaceStreamShutdown(
 		default:
 		}
 		publish(&types.GitCommitNotification{CommitSHA: "3333333333333333333333333333333333333333"})
+		retry.Reset(5 * time.Millisecond)
 		select {
 		case <-handlerReturned:
+			if !retry.Stop() {
+				<-retry.C
+			}
 			return
-		case <-time.After(5 * time.Millisecond):
+		case <-retry.C:
 		}
 	}
 }

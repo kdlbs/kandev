@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -871,10 +872,10 @@ func TestHandleGitStatus_ReportsWorktreeState(t *testing.T) {
 	if result.Branch != "feature/work" {
 		t.Errorf("branch = %q, want %q", result.Branch, "feature/work")
 	}
-	if !slicesContains(result.Untracked, "untracked.txt") {
+	if !slices.Contains(result.Untracked, "untracked.txt") {
 		t.Errorf("untracked = %v, want it to contain untracked.txt", result.Untracked)
 	}
-	if !slicesContains(result.Modified, "one.txt") {
+	if !slices.Contains(result.Modified, "one.txt") {
 		t.Errorf("modified = %v, want it to contain one.txt", result.Modified)
 	}
 	if result.Timestamp == "" {
@@ -969,13 +970,4 @@ func TestHandleGitError_ClassifiesOperationInProgress(t *testing.T) {
 			}
 		})
 	}
-}
-
-func slicesContains(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
 }

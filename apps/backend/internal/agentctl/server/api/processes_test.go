@@ -45,31 +45,47 @@ func decodeProcessError(t *testing.T, rec *httptest.ResponseRecorder) string {
 	return body.Error
 }
 
-// awaitProcessStatus polls the get-process endpoint until the process reaches
-// one of the terminal states. It drives a real subprocess, so there is nothing
-// to synchronise on but the observable status; the deadline is a failure
-// detector rather than a timing assumption.
-func awaitProcessStatus(t *testing.T, srv *Server, id string, want ...types.ProcessStatus) process.ProcessInfo {
+// awaitProcessOutput polls the get-process endpoint until the buffered output
+// contains marker, and returns the snapshot that carried it. The process must
+// still be running: a finished process is reaped out of the runner's map (see
+// ProcessRunner.ensureProcessGroupReaped), so its output is only observable
+// while it is alive.
+func awaitProcessOutput(t *testing.T, srv *Server, id, marker string) process.ProcessInfo {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	var last process.ProcessInfo
 	for time.Now().Before(deadline) {
 		rec := processRequest(t, srv, http.MethodGet, "/api/v1/processes/"+id+"?include_output=true", nil)
 		if rec.Code != http.StatusOK {
-			t.Fatalf("get process status = %d (body %s)", rec.Code, rec.Body.String())
+			t.Fatalf("get process = %d, want 200 — the process was retired before its output could be read (body %s)",
+				rec.Code, rec.Body.String())
 		}
 		if err := json.Unmarshal(rec.Body.Bytes(), &last); err != nil {
 			t.Fatalf("decode process info: %v", err)
 		}
-		for _, status := range want {
-			if last.Status == status {
-				return last
-			}
+		if strings.Contains(processOutputText(last), marker) {
+			return last
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("process %s never reached %v (last status %q)", id, want, last.Status)
+	t.Fatalf("process %s never emitted %q (last snapshot %+v)", id, marker, last)
 	return last
+}
+
+// awaitProcessRetired polls until the process is gone from the runner. Exiting
+// and being reaped are one step as far as the HTTP surface is concerned: there
+// is no window in which a finished process is still fetchable, so this is the
+// only terminal state a caller can observe over REST.
+func awaitProcessRetired(t *testing.T, srv *Server, id string) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		if rec := processRequest(t, srv, http.MethodGet, "/api/v1/processes/"+id, nil); rec.Code == http.StatusNotFound {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("process %s was still fetchable after it should have exited and been reaped", id)
 }
 
 func processOutputText(info process.ProcessInfo) string {
@@ -115,10 +131,15 @@ func TestHandleStartProcess_Rejections(t *testing.T) {
 	}
 }
 
-// TestProcessLifecycle_StartListGetCapturesOutput drives a real short-lived
-// command through every read endpoint: the start response, the session-scoped
-// list, and the per-process fetch with buffered output. Asserting the captured
-// stdout is what proves the output plumbing is wired, not just the status field.
+// TestProcessLifecycle_StartListGetCapturesOutput drives a real command through
+// every read endpoint: the start response, the session-scoped list, and the
+// per-process fetch with buffered output. Asserting the captured stdout is what
+// proves the output plumbing is wired, not just the status field.
+//
+// The command prints and then blocks. A command that exits immediately cannot be
+// read back at all — the runner reaps a finished process out of its map, so the
+// fetch races the exit and answers 404 as soon as the machine is quick enough
+// (which is exactly how this test first failed in CI but not locally).
 func TestProcessLifecycle_StartListGetCapturesOutput(t *testing.T) {
 	srv := newTestServer(t)
 
@@ -126,7 +147,7 @@ func TestProcessLifecycle_StartListGetCapturesOutput(t *testing.T) {
 		SessionID:  "session-a",
 		Kind:       types.ProcessKindCustom,
 		ScriptName: "marker",
-		Command:    "printf 'kandev-marker\\n'",
+		Command:    "printf 'kandev-marker\\n'; sleep 120",
 	})
 	if start.Code != http.StatusOK {
 		t.Fatalf("start status = %d (body %s)", start.Code, start.Body.String())
@@ -141,6 +162,7 @@ func TestProcessLifecycle_StartListGetCapturesOutput(t *testing.T) {
 	if started.Process.SessionID != "session-a" || started.Process.ScriptName != "marker" {
 		t.Errorf("process = %+v, want the requested session and script name", started.Process)
 	}
+	stopProcessOnCleanup(t, srv, started.Process.ID)
 
 	listed := processRequest(t, srv, http.MethodGet, "/api/v1/processes?session_id=session-a", nil)
 	if listed.Code != http.StatusOK {
@@ -163,25 +185,25 @@ func TestProcessLifecycle_StartListGetCapturesOutput(t *testing.T) {
 		t.Errorf("list for session-b = %+v, want no processes; the filter is not applied", otherInfos)
 	}
 
-	final := awaitProcessStatus(t, srv, started.Process.ID, types.ProcessStatusExited, types.ProcessStatusFailed)
-	if final.Status != types.ProcessStatusExited {
-		t.Fatalf("final status = %q, want %q", final.Status, types.ProcessStatusExited)
+	live := awaitProcessOutput(t, srv, started.Process.ID, "kandev-marker")
+	if live.Status != types.ProcessStatusRunning {
+		t.Errorf("status = %q, want %q while the command is still blocked", live.Status, types.ProcessStatusRunning)
 	}
-	if final.ExitCode == nil || *final.ExitCode != 0 {
-		t.Errorf("exit_code = %v, want 0", final.ExitCode)
+	if live.ExitCode != nil {
+		t.Errorf("exit_code = %v, want nil for a running process", *live.ExitCode)
 	}
-	if got := processOutputText(final); !strings.Contains(got, "kandev-marker") {
-		t.Errorf("captured output = %q, want it to contain the printed marker", got)
+	if live.Command != "printf 'kandev-marker\\n'; sleep 120" {
+		t.Errorf("command = %q, want the command as submitted", live.Command)
 	}
 }
 
 // TestHandleGetProcess_OmitsOutputByDefault pins the include_output query
 // parameter. Buffered output can be megabytes, so the list-facing fetch must
-// not carry it unless asked.
+// not carry it unless asked — and must carry it when it is.
 func TestHandleGetProcess_OmitsOutputByDefault(t *testing.T) {
 	srv := newTestServer(t)
-	id := startTestProcess(t, srv, "session-c", "printf 'kandev-marker\\n'")
-	awaitProcessStatus(t, srv, id, types.ProcessStatusExited, types.ProcessStatusFailed)
+	id := startTestProcess(t, srv, "session-c", "printf 'kandev-marker\\n'; sleep 120")
+	awaitProcessOutput(t, srv, id, "kandev-marker")
 
 	rec := processRequest(t, srv, http.MethodGet, "/api/v1/processes/"+id, nil)
 	if rec.Code != http.StatusOK {
@@ -193,6 +215,30 @@ func TestHandleGetProcess_OmitsOutputByDefault(t *testing.T) {
 	}
 	if len(info.Output) != 0 {
 		t.Errorf("output = %+v, want none without include_output=true", info.Output)
+	}
+	if info.ID != id {
+		t.Errorf("id = %q, want %q", info.ID, id)
+	}
+}
+
+// TestProcessLifecycle_ExitedProcessIsRetired pins the reaping contract that
+// makes the two tests above use a blocking command: once a process exits, the
+// runner removes it, so REST has no "exited" state to report — the process
+// simply stops existing. Anything that needs the exit code must observe the
+// `process_status` event instead.
+func TestProcessLifecycle_ExitedProcessIsRetired(t *testing.T) {
+	srv := newTestServer(t)
+	id := startTestProcess(t, srv, "session-e", "printf 'done\\n'")
+
+	awaitProcessRetired(t, srv, id)
+
+	listed := processRequest(t, srv, http.MethodGet, "/api/v1/processes?session_id=session-e", nil)
+	var remaining []process.ProcessInfo
+	if err := json.Unmarshal(listed.Body.Bytes(), &remaining); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(remaining) != 0 {
+		t.Errorf("list after exit = %+v, want it emptied", remaining)
 	}
 }
 
@@ -323,5 +369,23 @@ func startTestProcess(t *testing.T, srv *Server, sessionID, command string) stri
 	if started.Process == nil {
 		t.Fatalf("start response carries no process: %s", rec.Body.String())
 	}
+	stopProcessOnCleanup(t, srv, started.Process.ID)
 	return started.Process.ID
+}
+
+// stopProcessOnCleanup reaps the subprocess when the test ends, including on an
+// early t.Fatal. Several of these tests deliberately start a command that blocks
+// for two minutes; without this the process — and the runner goroutines waiting
+// on it — outlive the test and trip goleak. Stopping an already-retired process
+// is a no-op success, so this is safe for every caller.
+func stopProcessOnCleanup(t *testing.T, srv *Server, id string) {
+	t.Helper()
+	t.Cleanup(func() {
+		rec := processRequest(t, srv, http.MethodPost, "/api/v1/processes/stop", process.StopProcessRequest{
+			ProcessID: id,
+		})
+		if rec.Code != http.StatusOK {
+			t.Errorf("cleanup stop of %s = %d (body %s)", id, rec.Code, rec.Body.String())
+		}
+	})
 }

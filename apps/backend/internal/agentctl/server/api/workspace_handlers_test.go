@@ -445,6 +445,9 @@ func TestHandleFileRename_Rejections(t *testing.T) {
 			if got.Success {
 				t.Errorf("success = true, want false")
 			}
+			if got.Error == "" {
+				t.Fatalf("error is empty; the refusal reason must reach the caller")
+			}
 			if !strings.Contains(got.Error, tc.wantError) {
 				t.Errorf("error = %q, want it to contain %q", got.Error, tc.wantError)
 			}
