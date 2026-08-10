@@ -15,6 +15,30 @@ const savedPreset: SavedPreset = {
   isDefault: false,
 };
 
+function expectDeleteDoesNotSelect() {
+  const onSelect = vi.fn();
+  const onDeleteSaved = vi.fn();
+  render(
+    <PresetsSidebar
+      selected={{ kind: "pr", source: "saved", id: savedPreset.id }}
+      onSelect={onSelect}
+      savedPresets={[savedPreset]}
+      onDeleteSaved={onDeleteSaved}
+      canSaveCurrent={false}
+      onSaveCurrent={vi.fn()}
+      onToggleSavedDefault={vi.fn()}
+      defaultMutationPendingId={null}
+      prPresets={[]}
+      issuePresets={[]}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Delete Kandev PRs saved query" }));
+
+  expect(onDeleteSaved).toHaveBeenCalledWith(savedPreset.id);
+  expect(onSelect).not.toHaveBeenCalled();
+}
+
 describe("PresetsSidebar saved defaults", () => {
   it("disables saved-query actions while a default mutation is pending", () => {
     render(
@@ -86,4 +110,6 @@ describe("PresetsSidebar saved defaults", () => {
 
     expect(onSelect).not.toHaveBeenCalled();
   });
+
+  it("deletes a saved query without selecting it", expectDeleteDoesNotSelect);
 });
