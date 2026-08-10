@@ -15,6 +15,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 )
 
 // spawnSleepChild starts a parent shell process that in turn spawns a
@@ -321,4 +323,46 @@ func TestManager_RecordAndLastTurnStart(t *testing.T) {
 	got := m.LastTurnStart()
 	// Within 1ms due to truncation to millisecond precision above.
 	assert.WithinDuration(t, ref, got, time.Millisecond)
+}
+
+// fakeSessionAdapter embeds the interface so the fake satisfies the whole
+// AgentAdapter surface while implementing only GetSessionID, the one method
+// AgentPID calls.
+type fakeSessionAdapter struct {
+	adapter.AgentAdapter
+	sessionID string
+}
+
+func (f *fakeSessionAdapter) GetSessionID() string { return f.sessionID }
+
+// TestManager_ProbeProcessTree_BudgetElapsedResolvesToUnknown verifies AC-46
+// condition 2: when KANDEV_PARKED_PROBE_BUDGET is set so tight that
+// ProbeProcessTree's own context.WithTimeout deadline has already elapsed by
+// the time walkProcessTree runs, the result is "unknown" — never "live" or
+// "settled" — and the call returns promptly rather than blocking, matching
+// AC-40's "not delayed beyond the budget".
+func TestManager_ProbeProcessTree_BudgetElapsedResolvesToUnknown(t *testing.T) {
+	t.Setenv("KANDEV_PARKED_PROBE_BUDGET", "1ns")
+
+	const acpSessionID = "acp-session-budget"
+	cmd := exec.Command("/bin/sh", "-c", "sleep 30")
+	require.NoError(t, cmd.Start())
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+
+	root, ok := captureRootIdentity(cmd.Process.Pid)
+	require.True(t, ok, "expected to capture root identity for the running process")
+
+	m := &Manager{cmd: cmd, adapter: &fakeSessionAdapter{sessionID: acpSessionID}}
+	m.agentRootIdentity.Store(root)
+	m.RecordTurnStart(time.Now())
+
+	start := time.Now()
+	result := m.ProbeProcessTree(context.Background(), acpSessionID)
+	elapsed := time.Since(start)
+
+	assert.Equal(t, probeResultUnknown, result, "an already-elapsed budget must resolve to unknown")
+	assert.Less(t, elapsed, 2*time.Second, "the probe must not block beyond a reasonable margin over its 1ns budget")
 }

@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -307,4 +309,95 @@ func TestParked_QueuedPromptDoesNotUnpark(t *testing.T) {
 
 	svc.updateTaskSessionState(ctx, "t1", "s1", models.TaskSessionStateRunning, "", true)
 	require.False(t, svc.ParkedProjectionSnapshot("s1"), "admission into RUNNING clears it")
+}
+
+// panickingBackgroundProbe is a test double for backgroundProbePort whose
+// ProbeBackgroundWorkloads always panics, for AC-46 condition 7.
+type panickingBackgroundProbe struct{}
+
+func (panickingBackgroundProbe) ProbeBackgroundWorkloads(context.Context, string) (string, error) {
+	panic("probe port implementation panicked")
+}
+
+// TestRunProbe_ErrorAlongsideLiveValueResolvesToUnknown verifies AC-46
+// condition 6: a probe port that returns a non-nil error alongside a "live"
+// value must not have that value read — runProbe must resolve to unknown
+// regardless, per the rule stated in runProbe's own doc comment ("the caller
+// MUST NOT read the port's returned value when it also returned a non-nil
+// error"). A port that violates its own contract this way is exactly the
+// case this defensive check exists for.
+func TestRunProbe_ErrorAlongsideLiveValueResolvesToUnknown(t *testing.T) {
+	probe := &fakeBackgroundProbe{result: probeResultLive, err: errors.New("port contract violation")}
+	svc := parkedTestService(t, "t1", "s1", probe)
+
+	got := svc.runProbe(context.Background(), "s1")
+
+	require.Equal(t, probeResultUnknown, got, "a non-nil error must force unknown even when the value is live")
+}
+
+// TestRunProbe_PanickingProbeResolvesToUnknown verifies AC-46 condition 7: a
+// probe port implementation that panics must not crash the settle hook —
+// runProbe's defer/recover must catch it and resolve to unknown.
+func TestRunProbe_PanickingProbeResolvesToUnknown(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.messageCreator = &mockMessageCreator{}
+	svc.config.ParkedOnBackgroundWork = true
+	svc.SetBackgroundProbe(panickingBackgroundProbe{})
+
+	require.NotPanics(t, func() {
+		got := svc.runProbe(context.Background(), "s1")
+		require.Equal(t, probeResultUnknown, got, "a panicking probe must resolve to unknown, not crash the caller")
+	})
+}
+
+// lastParkedOnBackgroundWorkValue returns the parked_on_background_work field
+// from the most recently published events.TaskSessionActivityChanged event,
+// failing the test if none was published.
+func lastParkedOnBackgroundWorkValue(t *testing.T, eb *recordingEventBus) bool {
+	t.Helper()
+	for i := len(eb.events) - 1; i >= 0; i-- {
+		rec := eb.events[i]
+		if rec.subject != events.TaskSessionActivityChanged {
+			continue
+		}
+		data, ok := rec.event.Data.(map[string]interface{})
+		require.True(t, ok, "expected event.Data to be a map, got %T", rec.event.Data)
+		v, ok := data["parked_on_background_work"]
+		require.True(t, ok, "parked_on_background_work missing from session.activity_changed payload: %#v", data)
+		b, ok := v.(bool)
+		require.True(t, ok, "parked_on_background_work = %#v, want bool", v)
+		return b
+	}
+	t.Fatal("no events.TaskSessionActivityChanged event was published")
+	return false
+}
+
+// TestPublishForegroundActivityNow_CarriesParkedOnBackgroundWork closes the
+// wire-level gap the Testing phase found: the session-level
+// session.activity_changed carrier (turn_activity.go's
+// publishForegroundActivityNow) must actually put parked_on_background_work
+// on the published event, not just in the in-memory projection — mirroring
+// the proof TestPublishTaskActivityIfChanged_EmitsOnParkedOnlyChange already
+// gives the task-level carrier.
+func TestPublishForegroundActivityNow_CarriesParkedOnBackgroundWork(t *testing.T) {
+	ctx := context.Background()
+	probe := &fakeBackgroundProbe{result: probeResultLive}
+	svc := parkedTestService(t, "t1", "s1", probe)
+	eb := &recordingEventBus{}
+	svc.eventBus = eb
+
+	attestShellLaunch(ctx, svc, "t1", "s1")
+	svc.updateTaskSessionState(ctx, "t1", "s1", models.TaskSessionStateWaitingForInput, "", false)
+	require.True(t, svc.ParkedProjectionSnapshot("s1"), "precondition: session should be parked")
+
+	svc.publishForegroundActivityNow(ctx, "t1", "s1", nil, 0)
+	require.True(t, lastParkedOnBackgroundWorkValue(t, eb), "parked session must publish parked_on_background_work=true on the wire")
+
+	svc.updateTaskSessionState(ctx, "t1", "s1", models.TaskSessionStateRunning, "", true)
+	require.False(t, svc.ParkedProjectionSnapshot("s1"), "precondition: session should have un-parked")
+
+	svc.publishForegroundActivityNow(ctx, "t1", "s1", nil, 0)
+	require.False(t, lastParkedOnBackgroundWorkValue(t, eb), "un-parked session must publish parked_on_background_work=false on the wire")
 }
