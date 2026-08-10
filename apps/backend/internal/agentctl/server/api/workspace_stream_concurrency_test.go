@@ -22,8 +22,11 @@ func TestHandleWorkspaceStreamWS_ConcurrentEventsAndPings(t *testing.T) {
 	srv := newTestServer(t)
 	ts, handlerDone := newWorkspaceStreamTestServer(t, srv)
 	conn := dialWorkspaceStream(t, ts)
+	// One deadline for every read in the test, so an unexpected message type
+	// cannot extend the run by a fresh per-message timeout.
+	deadline := workspaceStreamDeadline(t)
 
-	if msg := readWorkspaceStreamMessage(t, conn); msg.Type != types.WorkspaceMessageTypeConnected {
+	if msg := readWorkspaceStreamMessage(t, conn, deadline); msg.Type != types.WorkspaceMessageTypeConnected {
 		t.Fatalf("first message type = %q, want %q", msg.Type, types.WorkspaceMessageTypeConnected)
 	}
 
@@ -60,7 +63,7 @@ func TestHandleWorkspaceStreamWS_ConcurrentEventsAndPings(t *testing.T) {
 		types.WorkspaceMessageTypeGitCommit: false,
 	}
 	for !want[types.WorkspaceMessageTypePong] || !want[types.WorkspaceMessageTypeGitCommit] {
-		msg := readWorkspaceStreamMessage(t, conn)
+		msg := readWorkspaceStreamMessage(t, conn, deadline)
 		if _, tracked := want[msg.Type]; tracked {
 			want[msg.Type] = true
 		}
@@ -98,9 +101,21 @@ func dialWorkspaceStream(t *testing.T, ts *httptest.Server) *websocket.Conn {
 	return conn
 }
 
-func readWorkspaceStreamMessage(t *testing.T, conn *websocket.Conn) types.WorkspaceStreamMessage {
+// workspaceStreamDeadline bounds a whole test's reads. It never outruns the
+// budget `go test -timeout` already enforces, so a stuck server surfaces as a
+// test failure rather than a runner-level panic.
+func workspaceStreamDeadline(t *testing.T) time.Time {
 	t.Helper()
-	if err := conn.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
+	deadline := time.Now().Add(30 * time.Second)
+	if runnerDeadline, ok := t.Deadline(); ok && runnerDeadline.Before(deadline) {
+		return runnerDeadline
+	}
+	return deadline
+}
+
+func readWorkspaceStreamMessage(t *testing.T, conn *websocket.Conn, deadline time.Time) types.WorkspaceStreamMessage {
+	t.Helper()
+	if err := conn.SetReadDeadline(deadline); err != nil {
 		t.Fatalf("SetReadDeadline: %v", err)
 	}
 	var msg types.WorkspaceStreamMessage
@@ -123,20 +138,21 @@ func closeWorkspaceStream(t *testing.T, conn *websocket.Conn) {
 // tracker is nudged until the write fails and the handler unwinds.
 func joinWorkspaceStreamHandler(t *testing.T, srv *Server, done <-chan struct{}) {
 	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
+	nudge := time.NewTicker(5 * time.Millisecond)
+	defer nudge.Stop()
+	timeout := time.NewTimer(15 * time.Second)
+	defer timeout.Stop()
 	for {
 		select {
 		case <-done:
 			return
-		default:
-		}
-		if time.Now().After(deadline) {
+		case <-timeout.C:
 			t.Fatal("workspace stream handler did not return after client disconnect")
+		case <-nudge.C:
+			srv.procMgr.GetWorkspaceTracker().NotifyGitCommit(&types.GitCommitNotification{
+				Timestamp: time.Now(),
+				CommitSHA: "shutdown-nudge",
+			})
 		}
-		srv.procMgr.GetWorkspaceTracker().NotifyGitCommit(&types.GitCommitNotification{
-			Timestamp: time.Now(),
-			CommitSHA: "shutdown-nudge",
-		})
-		time.Sleep(5 * time.Millisecond)
 	}
 }
