@@ -176,11 +176,10 @@ func walkProcessTree(ctx context.Context, root rootIdentity, marker turnStartMar
 }
 
 // linuxBootTime returns a wall-clock estimate of system boot time, derived
-// from /proc/uptime read at this instant. Used as the single anchor every
-// descendant's tick-domain start time in one walk is converted against, so
-// all comparisons in the walk are internally consistent even though the
-// anchor itself is a fresh read rather than one frozen at turn-start (a
-// documented scope boundary — see the Linux clock-domain note in
+// from /proc/uptime read at this instant. Called only from newTurnStartMarker,
+// which records the boot anchor once at RecordTurnStart (stamp) time — the
+// returned anchor is frozen into turnStartMarker.bootTicks and no probe ever
+// re-reads it (see the Linux clock-domain note in
 // docs/specs/disambiguate-waiting/spec.md, "Start-time source and
 // resolution").
 func linuxBootTime() (time.Time, bool) {

@@ -283,10 +283,14 @@ func (s *Service) ParkedProjectionSnapshot(sessionID string) bool {
 }
 
 // TaskParkedProjectionSnapshot implements dto.TaskParkedProjectionProvider —
-// the boolean-only form (D-2: no epoch, no revision).
+// the boolean-only form (D-2: no epoch, no revision). Read-only, so it takes
+// taskParkedStatesMu's read lock: task-list builds call this once per task,
+// and an exclusive lock here would serialize every concurrent list read
+// through a single mutex for no reason — the write side (updateTaskParkedState)
+// still takes the write lock.
 func (s *Service) TaskParkedProjectionSnapshot(taskID string) bool {
-	s.taskParkedStatesMu.Lock()
-	defer s.taskParkedStatesMu.Unlock()
+	s.taskParkedStatesMu.RLock()
+	defer s.taskParkedStatesMu.RUnlock()
 	ts, ok := s.taskParkedStates[taskID]
 	if !ok {
 		return false

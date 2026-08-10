@@ -356,7 +356,7 @@ type Service struct {
 	parkedStates map[string]*sessionParkedState
 
 	// taskParkedStatesMu guards taskParkedStates.
-	taskParkedStatesMu sync.Mutex
+	taskParkedStatesMu sync.RWMutex
 	// taskParkedStates holds the task-level OR of all session parked states.
 	taskParkedStates map[string]*taskParkedState
 

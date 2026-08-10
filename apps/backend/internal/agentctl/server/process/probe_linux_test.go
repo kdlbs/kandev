@@ -34,11 +34,17 @@ func TestWalkProcessTree_LinuxStartTimeSource(t *testing.T) {
 	root, ok := captureRootIdentity(parentPID)
 	require.True(t, ok, "expected to capture the spawned parent's root identity")
 
-	childStart, ok := linuxChildStartTime(parentPID)
+	// A single linuxBootTime() anchor converts childTicks into turnRef, so
+	// the two independent /proc/uptime reads a wall-clock round trip would
+	// need can never disagree by a sub-millisecond delta and shift the
+	// boundary this test is specifically pinning.
+	bootTime, ok := linuxBootTime()
+	require.True(t, ok, "expected /proc/uptime to be readable in CI")
+
+	childTicks, ok := linuxChildStartTime(parentPID)
 	require.True(t, ok, "expected to find the spawned descendant under /proc")
 
-	bucketStart := childStart.Truncate(linuxProcStatResolution)
-	turnRef := bucketStart.Add(linuxProcStatResolution).Add(-time.Nanosecond)
+	turnRef := bootTime.Add(time.Duration(childTicks+1)*linuxProcStatResolution - time.Nanosecond)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -80,16 +86,14 @@ func TestNewTurnStartMarker_ComputesBootTicksOnce(t *testing.T) {
 }
 
 // linuxChildStartTime finds the direct child of parentPID under /proc and
-// returns its recorded (tick-resolution) wall-clock start time, using the
-// same boot-anchor conversion walkProcessTree does.
-func linuxChildStartTime(parentPID int) (time.Time, bool) {
-	bootTime, ok := linuxBootTime()
-	if !ok {
-		return time.Time{}, false
-	}
+// returns its raw ticks-since-boot start time. Callers that need a wall-clock
+// value convert it themselves against their own single linuxBootTime()
+// anchor, so a boundary test never round-trips through two independent
+// /proc/uptime reads.
+func linuxChildStartTime(parentPID int) (int64, bool) {
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
-		return time.Time{}, false
+		return 0, false
 	}
 	for _, e := range entries {
 		if !e.IsDir() {
@@ -103,7 +107,7 @@ func linuxChildStartTime(parentPID int) (time.Time, bool) {
 		if err != nil || stat.ppid != parentPID {
 			continue
 		}
-		return bootTime.Add(time.Duration(stat.startTicks) * time.Second / linuxClockTicksPerSecond), true
+		return stat.startTicks, true
 	}
-	return time.Time{}, false
+	return 0, false
 }

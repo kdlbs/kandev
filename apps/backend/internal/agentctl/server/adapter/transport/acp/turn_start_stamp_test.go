@@ -142,8 +142,10 @@ func TestSendPrompt_DoesNotRecordTurnStartForDroppedWakeup(t *testing.T) {
 	a.fireWakeup("stale-session-id", "stale wakeup")
 
 	// Give the (synchronous, in this drop case) path a moment, then confirm
-	// nothing was recorded.
-	time.Sleep(50 * time.Millisecond)
+	// nothing was recorded. fireWakeup spawns an untracked goroutine
+	// (AGENTS.md), so this in-process negative assertion uses the ~100ms
+	// window AGENTS.md recommends rather than an arbitrary shorter sleep.
+	time.Sleep(100 * time.Millisecond)
 	if got := recorder.count(); got != 0 {
 		t.Fatalf("RecordTurnStart called %d times for a dropped wakeup, want 0", got)
 	}

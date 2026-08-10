@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -90,9 +91,9 @@ func TestProbeBackgroundWorkloads_TransportErrorPropagates(t *testing.T) {
 // condition at the Client layer: an already-done context resolves without a
 // frame ever leaving sendStreamRequest.
 func TestProbeBackgroundWorkloads_CancelledContext(t *testing.T) {
-	called := false
+	var called atomic.Bool
 	c, ts := newTestClientWithStream(t, func(msg ws.Message) *ws.Message {
-		called = true
+		called.Store(true)
 		resp, _ := ws.NewResponse(msg.ID, msg.Action, probeBackgroundWorkloadsResponse{Result: "live"})
 		return resp
 	})
@@ -111,7 +112,7 @@ func TestProbeBackgroundWorkloads_CancelledContext(t *testing.T) {
 	}
 	// Give any stray goroutine a moment, then confirm no frame reached the server.
 	time.Sleep(20 * time.Millisecond)
-	if called {
+	if called.Load() {
 		t.Fatal("expected no request to reach the server for an already-cancelled context")
 	}
 }
