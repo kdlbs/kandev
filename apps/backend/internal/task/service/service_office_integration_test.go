@@ -94,7 +94,7 @@ func TestIntegration_CreateTask_OnboardingShape(t *testing.T) {
 		ID: "wf-1", WorkspaceID: "ws-1", Name: "Office",
 	})
 
-	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID:            "ws-1",
 		WorkflowID:             "wf-1",
 		Title:                  "First task from onboarding",
@@ -103,6 +103,7 @@ func TestIntegration_CreateTask_OnboardingShape(t *testing.T) {
 		AssigneeAgentProfileID: "agent-ceo",
 		Origin:                 "onboarding",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask should succeed against the real office schema, got %v", err)
 	}

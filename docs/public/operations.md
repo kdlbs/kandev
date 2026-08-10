@@ -67,10 +67,10 @@ curl -fsS http://127.0.0.1:38429/health
 After startup it returns HTTP 200 with:
 
 ```json
-{"status":"ok","service":"kandev","mode":"websocket+http"}
+{"status":"ok","service":"kandev","mode":"websocket+http","version":"1.2.3"}
 ```
 
-It returns HTTP 503 with `status: "starting"` until routes, the agent registry, and the listener are ready. The supplied Kubernetes probes use this endpoint.
+It returns HTTP 503 with `status: "starting"` (plus the same `version`) until routes, the agent registry, and the listener are ready. The supplied Kubernetes probes use this endpoint. `/health` is unauthenticated even when auth is enabled, so it's also the credential-free way for monitoring to read the running version — no need to authenticate to **System > About** just to check what build is deployed.
 
 For application diagnostics, open **Settings > System > Status** or request:
 
@@ -135,6 +135,11 @@ policy saves reuse the displayed snapshot instead of scanning disk again. The pa
 snapshot was last analyzed. Select **Analyze** to force a fresh scan; restarting the backend also
 clears the in-memory snapshot.
 
+The page also shows the current percentage used on the filesystem containing Kandev's storage,
+along with used, available, and total capacity. This is host-volume capacity, not just the bytes
+that Kandev can classify. The card warns at 80% full and uses a critical style at 90%; these
+thresholds do not trigger cleanup.
+
 Scheduled cleanup is disabled by default and runs only after the configured resource-idle quiet
 period. Orphaned task workspaces and rotated Go caches move into Kandev's quarantine before
 permanent deletion. Each entry shows its `delete_after` retention deadline: **Delete** and
@@ -151,9 +156,34 @@ checks still apply.
 If scheduled cleanup is disabled, no independent quarantine sweeper runs: use a full **Run now** or
 one of the quarantine actions when you want cleanup.
 
+The Workspaces policy includes an off-by-default **Remove dependencies from archived or deleted
+task workspaces** option. When enabled, a scheduled cleanup or the matching manual action can
+recursively remove only these directories from eligible, unprotected Kandev task workspaces:
+
+`node_modules`, `bower_components`, `.pnpm-store`, `.yarn/cache`, `.yarn/unplugged`, `.venv`,
+`venv`, `.tox`, `.nox`, `__pypackages__`, `Pods`, and `.gradle`.
+
+The Storage page always shows this exact list next to an information control. Kandev skips missing
+directories, never follows symlinks, and does not target ambiguous names such as `vendor`, `target`,
+`build`, `dist`, `.cache`, or `.git`. Only archived or deleted workspaces without active or
+protected references qualify. This does not change the existing full-workspace lifecycle (seven
+days of orphan grace followed by seven days of quarantine retention), and restoring a workspace
+after dependency pruning may require reinstalling its dependencies.
+
 Host-wide Docker build-cache and unused-image cleanup remain disabled until you confirm that Kandev
 owns a dedicated Docker daemon.
 Do not enable those rules on a daemon shared with unrelated workloads.
+
+The Storage page also reports **Kandev temporary artifacts** created by services that need a
+short-lived directory under the host temporary root. Each current artifact is registered in the
+Kandev database and carries an owner-only marker in its exact directory. Active artifacts and
+artifacts created within the last 24 hours are protected. **Clean stale artifacts** is a manual-only
+action: it moves eligible, registered artifacts into Kandev quarantine on the same filesystem so
+they can be restored during the configured retention period. It does not permanently delete them.
+The action does not inspect or claim arbitrary `/tmp` entries, shared caches, Node or Playwright
+caches, preview/CI/dev-harness directories, or temporary data belonging to another Kandev
+installation. A missing registry or failed measurement is shown as unavailable rather than as
+zero usage. The inherited `TMPDIR`, `TMP`, and `TEMP` behavior below is unchanged.
 
 Host-local agents inherit the Kandev service's `TMPDIR`, `TMP`, and `TEMP` values unchanged. If the
 service leaves them unset, agent tools use their normal operating-system defaults; if an operator
@@ -208,6 +238,20 @@ pg_dump --host "$PGHOST" --port "${PGPORT:-5432}" \
   --file "kandev-$(date -u +%Y%m%dT%H%M%SZ).dump" \
   "${PGDATABASE:-kandev}"
 ```
+
+Some releases perform a one-time schema cutover that rewrites ownership tables and drops legacy schema (for example the task-worktree ownership normalization). Before such an upgrade:
+
+1. Take and **verify** a backup. For PostgreSQL use the pattern above. For SQLite, create a manual snapshot from **Settings > System > Backups** (or `sqlite3` `VACUUM INTO`) and verify it: the automatic pre-migration snapshot is taken during startup of the new binary, so it cannot be verified before the upgrade starts.
+2. Stop all backend writers during the cutover. Do not run a mixed-version fleet across the upgrade; the migration takes a database advisory lock and aborts on lock timeout without changing the schema or data.
+3. Let exactly one schema initializer run and reach a healthy state before starting additional instances.
+
+If the new binary reports a worktree-ownership conflict and exits, stop the
+rollout. The cutover is transactional, so the legacy database remains
+authoritative. Do not delete ownership rows by hand. Start a compatible
+pre-cutover binary to restore service, or deploy the migration hotfix and retry
+the upgrade against the unchanged database.
+
+The normalized schema is intentionally incompatible with older binaries. To downgrade, stop all instances and restore the pre-upgrade backup — never start an older binary against a post-cutover database. SQLite restores from its automatic pre-migration snapshot; PostgreSQL restores your verified `pg_dump` backup.
 
 Switching `database.driver` does not migrate data. PostgreSQL and shared NATS remove two single-process data constraints, but they do not make Kandev horizontally scalable: WebSocket subscriptions, execution lifecycle/control state, and task workspaces remain process- or filesystem-local. The current product and supplied deployment validate one backend replica only; do not add replicas based on the database and event bus alone.
 

@@ -164,7 +164,7 @@ export function KanbanHeaderMobile({
   const setSearchOpen = useAppStore((state) => state.setMobileKanbanSearchOpen);
   const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
   const handleOpenQuickTerminal = useQuickTerminalLauncher(workspaceId);
-  const isHome = title === "Home";
+  const isHome = currentPage !== "tasks";
 
   const toggleSearch = () => {
     const next = !isSearchOpen;

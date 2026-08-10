@@ -213,7 +213,22 @@ const taskSessionFromClause = `FROM task_sessions ts
 
 // CreateTaskSession creates a new agent session
 func (r *Repository) CreateTaskSession(ctx context.Context, session *models.TaskSession) error {
-	return r.createTaskSession(ctx, r.db, session)
+	// The task cleanup barrier serializes session creation against archive/
+	// delete preparation (ADR-2026-08-08): PostgreSQL takes a row lock on the
+	// task, SQLite serializes the writer transaction. A creation admitted
+	// after cleanup inventory was captured would be missed by the snapshot.
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.taskCleanupBarrierLocked(ctx, tx, session.TaskID); err != nil {
+		return err
+	}
+	if err := r.createTaskSession(ctx, tx, session); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // CreateOfficeTaskSession creates an Office session and atomically marks it as
@@ -1892,68 +1907,106 @@ func (r *Repository) DeleteTaskSession(ctx context.Context, id string) error {
 }
 
 // Task Session Worktree operations
+//
+// Sessions reference worktrees only through task_sessions.task_environment_id;
+// the physical worktree records live on task_environment_repos (owned by the
+// task environment, not the session). All session-scoped queries below join
+// through that link.
 
-func (r *Repository) CreateTaskSessionWorktree(ctx context.Context, sessionWorktree *models.TaskSessionWorktree) error {
-	if sessionWorktree.ID == "" {
-		sessionWorktree.ID = uuid.New().String()
+// envRepoSelectCols is the SELECT projection for a task_environment_repos row
+// in session-scoped worktree queries.
+const envRepoSelectCols = `
+	ter.id, ter.task_environment_id, ter.repository_id,
+	COALESCE(ter.branch_slug, ''), COALESCE(ter.worktree_id, ''),
+	COALESCE(ter.worktree_path, ''), COALESCE(ter.worktree_branch, ''),
+	ter.position, COALESCE(ter.error_message, ''), ter.status,
+	ter.created_at, ter.updated_at, ter.merged_at, ter.deleted_at`
+
+// scanEnvRepoRow scans one task_environment_repos row into a
+// models.TaskEnvironmentRepo.
+func scanEnvRepoRow(scanner rowScanner) (*models.TaskEnvironmentRepo, error) {
+	row := &models.TaskEnvironmentRepo{}
+	var mergedAt, deletedAt sql.NullTime
+	if err := scanner.Scan(
+		&row.ID, &row.TaskEnvironmentID, &row.RepositoryID, &row.BranchSlug,
+		&row.WorktreeID, &row.WorktreePath, &row.WorktreeBranch, &row.Position,
+		&row.ErrorMessage, &row.Status, &row.CreatedAt, &row.UpdatedAt,
+		&mergedAt, &deletedAt,
+	); err != nil {
+		return nil, err
 	}
-	now := time.Now().UTC()
-	sessionWorktree.CreatedAt = now
-	updatedAt := now
+	if mergedAt.Valid {
+		t := mergedAt.Time
+		row.MergedAt = &t
+	}
+	if deletedAt.Valid {
+		t := deletedAt.Time
+		row.DeletedAt = &t
+	}
+	return row, nil
+}
 
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO task_session_worktrees (
-			id, session_id, worktree_id, repository_id, branch_slug, position,
-			worktree_path, worktree_branch, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(session_id, worktree_id) DO UPDATE SET
-			repository_id = excluded.repository_id,
-			branch_slug = CASE
-				WHEN excluded.branch_slug != '' THEN excluded.branch_slug
-				ELSE task_session_worktrees.branch_slug
-			END,
-			position = excluded.position,
-			worktree_path = excluded.worktree_path,
-			worktree_branch = excluded.worktree_branch,
-			updated_at = excluded.updated_at
-	`),
-		sessionWorktree.ID,
-		sessionWorktree.SessionID,
-		sessionWorktree.WorktreeID,
-		sessionWorktree.RepositoryID,
-		sessionWorktree.BranchSlug,
-		sessionWorktree.Position,
-		sessionWorktree.WorktreePath,
-		sessionWorktree.WorktreeBranch,
-		sessionWorktree.CreatedAt,
-		updatedAt,
-	)
-	return err
+// rowScanner abstracts *sql.Row and *sql.Rows so env-repo rows scan through
+// one helper.
+type rowScanner interface {
+	Scan(dest ...interface{}) error
+}
+
+// ListTaskSessionWorktrees returns the active environment-repository rows of
+// the session's task environment. Sessions sharing an environment observe the
+// same worktrees.
+func (r *Repository) ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskEnvironmentRepo, error) {
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT `+envRepoSelectCols+`
+		FROM task_environment_repos ter
+		INNER JOIN task_sessions ts ON ts.task_environment_id = ter.task_environment_id
+		WHERE ts.id = ?
+		  AND ter.deleted_at IS NULL
+		  AND ter.status = 'active'
+		ORDER BY ter.position ASC, ter.created_at ASC
+	`), sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var repos []*models.TaskEnvironmentRepo
+	for rows.Next() {
+		row, err := scanEnvRepoRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		repos = append(repos, row)
+	}
+	return repos, rows.Err()
 }
 
 // UpdateTaskSessionWorktreeBranch updates the cached worktree_branch for all
-// worktrees belonging to a session. Called when a branch switch or rename is
-// detected in the live workspace so downstream consumers (PR watch
-// reconciliation, branch listings) see the current branch rather than the
-// value captured at worktree creation.
+// repository rows of the session's task environment. Called when a branch
+// switch or rename is detected in the live workspace so downstream consumers
+// (PR watch reconciliation, branch listings) see the current branch rather
+// than the value captured at worktree creation.
 func (r *Repository) UpdateTaskSessionWorktreeBranch(ctx context.Context, sessionID, branch string) error {
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_session_worktrees SET worktree_branch = ?, updated_at = ? WHERE session_id = ?
+		UPDATE task_environment_repos SET worktree_branch = ?, updated_at = ?
+		WHERE task_environment_id = (SELECT task_environment_id FROM task_sessions WHERE id = ?)
+		  AND deleted_at IS NULL
+		  AND status = 'active'
 	`), branch, now, sessionID)
 	return err
 }
 
 // UpdateTaskSessionWorktreeBranchByRepository updates the cached worktree_branch
-// for one repository row in a session. Use this for repo-scoped live git
-// operations in multi-repo tasks so sibling repositories keep their branch
-// snapshots.
+// for one repository row in the session's environment. Use this for repo-scoped
+// live git operations in multi-repo tasks so sibling repositories keep their
+// branch snapshots.
 func (r *Repository) UpdateTaskSessionWorktreeBranchByRepository(ctx context.Context, sessionID, repositoryID, branch string) error {
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_session_worktrees
+		UPDATE task_environment_repos
 		SET worktree_branch = ?, updated_at = ?
-		WHERE session_id = ?
+		WHERE task_environment_id = (SELECT task_environment_id FROM task_sessions WHERE id = ?)
 		  AND repository_id = ?
 		  AND deleted_at IS NULL
 		  AND status = 'active'
@@ -1967,9 +2020,9 @@ func (r *Repository) UpdateTaskSessionWorktreeBranchByRepository(ctx context.Con
 func (r *Repository) UpdateTaskSessionWorktreeBranchByWorktree(ctx context.Context, sessionID, worktreeID, branch string) error {
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_session_worktrees
+		UPDATE task_environment_repos
 		SET worktree_branch = ?, updated_at = ?
-		WHERE session_id = ?
+		WHERE task_environment_id = (SELECT task_environment_id FROM task_sessions WHERE id = ?)
 		  AND worktree_id = ?
 		  AND deleted_at IS NULL
 		  AND status = 'active'
@@ -1977,54 +2030,15 @@ func (r *Repository) UpdateTaskSessionWorktreeBranchByWorktree(ctx context.Conte
 	return err
 }
 
-func (r *Repository) ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error) {
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT
-			tsw.id, tsw.session_id, tsw.worktree_id, tsw.repository_id,
-			COALESCE(tsw.branch_slug, ''), tsw.position,
-			tsw.worktree_path, tsw.worktree_branch, tsw.created_at
-		FROM task_session_worktrees tsw
-		WHERE tsw.session_id = ?
-		  AND tsw.deleted_at IS NULL
-		  AND tsw.status = 'active'
-		ORDER BY tsw.position ASC, tsw.created_at ASC
-	`), sessionID)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var worktrees []*models.TaskSessionWorktree
-	for rows.Next() {
-		var wt models.TaskSessionWorktree
-		err := rows.Scan(
-			&wt.ID,
-			&wt.SessionID,
-			&wt.WorktreeID,
-			&wt.RepositoryID,
-			&wt.BranchSlug,
-			&wt.Position,
-			&wt.WorktreePath,
-			&wt.WorktreeBranch,
-			&wt.CreatedAt,
-		)
-		if err != nil {
-			return nil, err
-		}
-		worktrees = append(worktrees, &wt)
-	}
-	return worktrees, rows.Err()
-}
-
-// ListWorktreesBySessionIDs returns all worktrees for the given session IDs,
-// grouped by session ID. This eliminates N+1 queries when loading worktrees
-// for multiple sessions. Chunks input above sqliteMaxHostParams (500) because
-// callers like loadWorktreesBatch — invoked from BatchGetSessionsByTaskIDs —
-// can pass `chunk_size_tasks × avg_sessions_per_task` IDs, which crosses
-// SQLite's SQLITE_MAX_VARIABLE_NUMBER (999 on older builds) at modest task
-// volumes (500 tasks × 2 sessions = 1000 placeholders).
-func (r *Repository) ListWorktreesBySessionIDs(ctx context.Context, sessionIDs []string) (map[string][]*models.TaskSessionWorktree, error) {
-	result := make(map[string][]*models.TaskSessionWorktree, len(sessionIDs))
+// ListWorktreesBySessionIDs returns the active environment-repository rows for
+// the given session IDs, grouped by session ID. This eliminates N+1 queries
+// when loading worktrees for multiple sessions. Chunks input above
+// sqliteMaxHostParams (500) because callers like loadWorktreesBatch — invoked
+// from BatchGetSessionsByTaskIDs — can pass
+// `chunk_size_tasks × avg_sessions_per_task` IDs, which crosses SQLite's
+// SQLITE_MAX_VARIABLE_NUMBER (999 on older builds) at modest task volumes.
+func (r *Repository) ListWorktreesBySessionIDs(ctx context.Context, sessionIDs []string) (map[string][]*models.TaskEnvironmentRepo, error) {
+	result := make(map[string][]*models.TaskEnvironmentRepo, len(sessionIDs))
 	if len(sessionIDs) == 0 {
 		return result, nil
 	}
@@ -2043,16 +2057,16 @@ func (r *Repository) ListWorktreesBySessionIDs(ctx context.Context, sessionIDs [
 func (r *Repository) appendWorktreesForSessionChunk(
 	ctx context.Context,
 	sessionIDs []string,
-	result map[string][]*models.TaskSessionWorktree,
+	result map[string][]*models.TaskEnvironmentRepo,
 ) error {
 	placeholders, args := buildInPlaceholders(sessionIDs)
-	query := `SELECT tsw.id, tsw.session_id, tsw.worktree_id, tsw.repository_id, tsw.position,
-		COALESCE(tsw.branch_slug, ''), tsw.worktree_path, tsw.worktree_branch, tsw.created_at
-		FROM task_session_worktrees tsw
-		WHERE tsw.session_id IN (` + placeholders + `)
-		  AND tsw.deleted_at IS NULL
-		  AND tsw.status = 'active'
-		ORDER BY tsw.position ASC, tsw.created_at ASC`
+	query := `SELECT ts.id AS session_id, ` + envRepoSelectCols + `
+		FROM task_environment_repos ter
+		INNER JOIN task_sessions ts ON ts.task_environment_id = ter.task_environment_id
+		WHERE ts.id IN (` + placeholders + `)
+		  AND ter.deleted_at IS NULL
+		  AND ter.status = 'active'
+		ORDER BY ter.position ASC, ter.created_at ASC`
 
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
 	if err != nil {
@@ -2061,32 +2075,26 @@ func (r *Repository) appendWorktreesForSessionChunk(
 	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
-		var wt models.TaskSessionWorktree
-		if err := rows.Scan(&wt.ID, &wt.SessionID, &wt.WorktreeID, &wt.RepositoryID,
-			&wt.Position, &wt.BranchSlug, &wt.WorktreePath, &wt.WorktreeBranch, &wt.CreatedAt); err != nil {
+		var sessionID string
+		var mergedAt, deletedAt sql.NullTime
+		row := &models.TaskEnvironmentRepo{}
+		if err := rows.Scan(&sessionID, &row.ID, &row.TaskEnvironmentID, &row.RepositoryID,
+			&row.BranchSlug, &row.WorktreeID, &row.WorktreePath, &row.WorktreeBranch,
+			&row.Position, &row.ErrorMessage, &row.Status, &row.CreatedAt, &row.UpdatedAt,
+			&mergedAt, &deletedAt); err != nil {
 			return err
 		}
-		result[wt.SessionID] = append(result[wt.SessionID], &wt)
+		if mergedAt.Valid {
+			t := mergedAt.Time
+			row.MergedAt = &t
+		}
+		if deletedAt.Valid {
+			t := deletedAt.Time
+			row.DeletedAt = &t
+		}
+		result[sessionID] = append(result[sessionID], row)
 	}
 	return rows.Err()
-}
-
-func (r *Repository) DeleteTaskSessionWorktree(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_session_worktrees WHERE id = ?`), id)
-	if err != nil {
-		return err
-	}
-
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("task session worktree not found: %s", id)
-	}
-	return nil
-}
-
-func (r *Repository) DeleteTaskSessionWorktreesBySession(ctx context.Context, sessionID string) error {
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_session_worktrees WHERE session_id = ?`), sessionID)
-	return err
 }
 
 // GetPrimarySessionByTaskID retrieves the primary session for a task.

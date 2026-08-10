@@ -1,3 +1,4 @@
+import { t } from "@/lib/i18n";
 export type GitCredentialDisplay = {
   source: string;
   detail: string;
@@ -57,7 +58,7 @@ export function getGitCredentialDisplay(
     case "executor":
       return {
         source: "Executor credentials",
-        detail: actor || "Credentials available in the selected executor",
+        detail: actor || t("task:credentialsAvailableInExecutor"),
         transport: transportLabels[transport] ?? "executor Git and gh credentials",
       };
     default:

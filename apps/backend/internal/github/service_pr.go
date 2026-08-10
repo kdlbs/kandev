@@ -309,7 +309,8 @@ func (s *Service) GetPRFeedback(ctx context.Context, owner, repo string, number 
 	if s.client == nil {
 		return nil, fmt.Errorf("github client not available")
 	}
-	return s.getPRFeedback(ctx, s.client, "legacy", owner, repo, number)
+	// No workspace to scope a persist to; this legacy entry point reads only.
+	return s.getPRFeedback(ctx, s.client, "legacy", "", owner, repo, number)
 }
 
 func (s *Service) GetPRFeedbackForWorkspace(
@@ -322,11 +323,11 @@ func (s *Service) GetPRFeedbackForWorkspace(
 	if err != nil {
 		return nil, err
 	}
-	return s.getPRFeedback(ctx, resolved.Client, resolved.CacheScope, owner, repo, number)
+	return s.getPRFeedback(ctx, resolved.Client, resolved.CacheScope, workspaceID, owner, repo, number)
 }
 
 func (s *Service) getPRFeedback(
-	ctx context.Context, client Client, cacheScope, owner, repo string, number int,
+	ctx context.Context, client Client, cacheScope, workspaceID, owner, repo string, number int,
 ) (*PRFeedback, error) {
 	// Detach the upstream call's context from the singleflight leader: a
 	// cancelled leader (user closes the tab) would otherwise return its
@@ -340,7 +341,17 @@ func (s *Service) getPRFeedback(
 	defer cancelFetch()
 	key := scopedCacheKey(cacheScope, prStatusCacheKey(owner, repo, number))
 	v, err := s.prFeedbackCache.doOrFetch(key, func() (any, error) {
-		return client.GetPRFeedback(fetchCtx, owner, repo, number)
+		feedback, fetchErr := client.GetPRFeedback(fetchCtx, owner, repo, number)
+		if fetchErr != nil {
+			return nil, fetchErr
+		}
+		// Persist inside the fetch closure, not around doOrFetch: this runs
+		// once per real upstream call (TTL miss, singleflight leader) rather
+		// than on every panel render served from cache, and it inherits
+		// fetchCtx so a client disconnecting mid-flight can't abort the write
+		// that its own fetch just earned.
+		s.persistPRFeedbackState(fetchCtx, workspaceID, feedback)
+		return feedback, nil
 	})
 	if err != nil {
 		return nil, err

@@ -79,6 +79,10 @@ func (c *NoopClient) ListPipelines(context.Context, string, string) ([]Pipeline,
 	return nil, ErrNoClient
 }
 
+func (c *NoopClient) ListPipelineJobs(context.Context, string, int64) ([]PipelineJob, error) {
+	return nil, ErrNoClient
+}
+
 func (c *NoopClient) GetMRFeedback(context.Context, string, int) (*MRFeedback, error) {
 	return nil, ErrNoClient
 }
@@ -108,6 +112,14 @@ func (c *NoopClient) CreateMR(context.Context, string, string, string, string, s
 }
 
 func (c *NoopClient) ListProjectBranches(context.Context, string) ([]RepoBranch, error) {
+	return nil, ErrNoClient
+}
+
+func (c *NoopClient) ListRepoTree(context.Context, string, string, string) ([]RepoTreeEntry, error) {
+	return nil, ErrNoClient
+}
+
+func (c *NoopClient) GetRepoFileContent(context.Context, string, string, string) ([]byte, error) {
 	return nil, ErrNoClient
 }
 

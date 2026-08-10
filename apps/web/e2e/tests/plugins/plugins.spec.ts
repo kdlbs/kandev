@@ -48,6 +48,7 @@ import type { Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
+import { holdPluginInstallResponse } from "../../helpers/plugin-install";
 
 const PLUGIN_ID = "kandev-plugin-e2e";
 const NAV_ITEM_ID = "e2e-hello";
@@ -131,6 +132,32 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
   // so the next iteration starts from a clean slate.
   test.afterEach(async ({ apiClient }) => {
     await uninstallViaApi(apiClient);
+  });
+
+  test("shows an install spinner while an upload install is pending", async ({ testPage }) => {
+    test.setTimeout(90_000);
+
+    await openInstallDialog(testPage);
+    const heldInstall = await holdPluginInstallResponse(testPage);
+    try {
+      await uploadPackage(testPage, PACKAGE_PATH);
+      await heldInstall.requestSeen;
+
+      const installButton = testPage.getByTestId("install-plugin-upload-submit");
+      await expect(installButton).toBeDisabled();
+      await expect(installButton).toHaveAttribute("aria-busy", "true");
+      await expect(installButton.locator(".animate-spin")).toBeVisible();
+      await expect(installButton).toHaveText(/Installing/);
+    } finally {
+      heldInstall.release();
+      if (heldInstall.requestStarted()) await heldInstall.responseSettled;
+      await testPage.unroute("**/api/plugins/install");
+    }
+
+    const installButton = testPage.getByTestId("install-plugin-upload-submit");
+    await expect(installButton).toBeEnabled();
+    await expect(installButton).toHaveText("Install");
+    await expect(testPage.getByTestId("install-plugin-error")).toContainText("install failed");
   });
 
   test("installs via upload, loads the UI, live-updates via WS+gRPC, and uninstalls", async ({
@@ -446,12 +473,137 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await testPage.keyboard.press("ControlOrMeta+Shift+J");
     const modal = testPage.getByTestId("hello-demo-modal");
     await expect(modal).toBeVisible();
-    await expect(modal).toHaveText("Hello from the plugin modal");
+    // toContainText, not toHaveText: the modal body also carries the tooltip
+    // trigger exercised by the hover spec below, and this assertion is about
+    // the keybinding reaching host.openModal, not the body's exact contents.
+    await expect(modal).toContainText("Hello from the plugin modal");
 
     // --- The host Dialog's built-in close button dismisses the (dismissible
     // by default) modal. ---
     await testPage.getByRole("button", { name: "Close" }).click();
     await expect(modal).not.toBeVisible();
+  });
+
+  // `PluginModalHost` mounts as a sibling of `<AppShell>` (src/main.tsx), so it
+  // is outside the app-wide TooltipProvider in app/layout.tsx and needs its
+  // own. The unit test for this asserts via focus, because jsdom does not
+  // reliably open a Radix tooltip from synthetic hover (apps/web/CLAUDE.md) —
+  // real pointer hover, and the portaled role="tooltip" it produces, are only
+  // assertable in a browser.
+  test("a Tooltip inside host.openModal content opens on real pointer hover", async ({
+    testPage,
+  }) => {
+    test.setTimeout(60_000);
+
+    await openInstallDialog(testPage);
+    await uploadPackage(testPage, PACKAGE_PATH);
+    await expect(testPage.getByTestId(`plugin-row-${PLUGIN_ID}`)).toBeVisible({ timeout: 15_000 });
+
+    await testPage.goto("/");
+    await testPage.reload();
+    await expect(testPage.getByTestId(`plugin-nav-item-${NAV_ITEM_ID}`)).toBeVisible({
+      timeout: 15_000,
+    });
+
+    await testPage.keyboard.press("ControlOrMeta+Shift+J");
+    const modal = testPage.getByTestId("hello-demo-modal");
+    await expect(modal).toBeVisible();
+
+    // Without a provider in scope the Tooltip throws during render and
+    // PluginErrorBoundary swallows the entire modal body, so the trigger
+    // being present is itself part of the assertion.
+    const trigger = testPage.getByTestId("hello-modal-tooltip-trigger");
+    await expect(trigger).toBeVisible();
+
+    await trigger.hover();
+    await expect(
+      testPage.getByRole("tooltip").filter({ hasText: "Tooltip inside a plugin modal" }),
+    ).toBeVisible();
+  });
+
+  // host.toast is a per-plugin Proxy over sonner. The unit tests only ever see
+  // it against a mocked sonner, so nothing has observed its runtime behavior:
+  // that a real toast renders, and that `.error` does NOT file a
+  // frontend-error report the way the app's own reporting seam does.
+  test("host.toast.error renders a real toast and files no frontend-error report", async ({
+    testPage,
+  }) => {
+    test.setTimeout(60_000);
+
+    await openInstallDialog(testPage);
+    await uploadPackage(testPage, PACKAGE_PATH);
+    await expect(testPage.getByTestId(`plugin-row-${PLUGIN_ID}`)).toBeVisible({ timeout: 15_000 });
+
+    await testPage.goto("/");
+    await testPage.reload();
+    await testPage.getByTestId(`plugin-nav-item-${NAV_ITEM_ID}`).click();
+
+    const reportRequests: string[] = [];
+    testPage.on("request", (request) => {
+      if (request.url().includes("/api/v1/system/logs/frontend-errors")) {
+        reportRequests.push(request.url());
+      }
+    });
+    const consoleErrors: string[] = [];
+    testPage.on("console", (message) => {
+      if (message.type() === "error") consoleErrors.push(message.text());
+    });
+
+    const trigger = testPage.getByTestId("hello-toast-error");
+    await expect(trigger).toBeVisible({ timeout: 15_000 });
+    await trigger.click();
+
+    // The real sonner <Toaster/> the app mounts in app/layout.tsx.
+    await expect(
+      testPage.locator("[data-sonner-toast]").filter({ hasText: "Plugin toast error" }),
+    ).toBeVisible();
+
+    // The load-bearing assertion: the app's reporting seam would POST here on
+    // every .error, so a polling plugin would file an Error-level backend log
+    // entry per cycle. The report is scheduled in a microtask and sent async,
+    // so give it a real chance to fire before asserting it never did.
+    await testPage.waitForTimeout(500);
+    expect(reportRequests).toEqual([]);
+
+    // Attribution goes to the console instead, matching every other plugin
+    // failure path.
+    expect(consoleErrors.some((line) => line.includes(`toast.error from "${PLUGIN_ID}"`))).toBe(
+      true,
+    );
+  });
+
+  // host.theme is a live getter and host.onThemeChange is backed by a
+  // MutationObserver on <html>'s class. jsdom's MutationObserver is a shim, so
+  // only a browser proves a real theme flip reaches a plugin subscriber.
+  test("host.onThemeChange fires in a real browser when the app theme flips", async ({
+    testPage,
+  }) => {
+    test.setTimeout(60_000);
+
+    await openInstallDialog(testPage);
+    await uploadPackage(testPage, PACKAGE_PATH);
+    await expect(testPage.getByTestId(`plugin-row-${PLUGIN_ID}`)).toBeVisible({ timeout: 15_000 });
+
+    await testPage.goto("/");
+    await testPage.reload();
+    await testPage.getByTestId(`plugin-nav-item-${NAV_ITEM_ID}`).click();
+
+    // The readout seeds from host.theme once, then only ever updates from an
+    // onThemeChange notification — so a stale value here means the
+    // subscription never fired.
+    const readout = testPage.getByTestId("hello-theme-readout");
+    await expect(readout).toBeVisible({ timeout: 15_000 });
+    const before = await readout.textContent();
+    expect(before === "light" || before === "dark").toBe(true);
+
+    // Flip through the app's own command, not by poking the DOM, so this
+    // exercises AppThemeProvider the way a user would.
+    const target = before === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode";
+    await testPage.keyboard.press("ControlOrMeta+k");
+    await testPage.getByRole("option", { name: target }).click();
+
+    await expect(readout).toHaveText(before === "dark" ? "light" : "dark");
+    await expect(readout).toHaveAttribute("data-theme-changes", "1");
   });
 
   test("settings page: schema-driven form, secret masking, and Host GetConfig delivery", async ({

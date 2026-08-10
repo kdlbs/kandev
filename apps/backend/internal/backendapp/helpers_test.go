@@ -57,10 +57,11 @@ func TestRegisterTaskRoutesWiresProductionWorkspaceRestorer(t *testing.T) {
 	if err != nil || len(steps) == 0 {
 		t.Fatalf("ListStepsByWorkflow: steps=%d err=%v", len(steps), err)
 	}
-	task, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	taskResult, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID: workspaces[0].ID, WorkflowID: workflows[0].ID,
 		WorkflowStepID: steps[0].ID, Title: "Production unarchive wiring",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -316,15 +317,26 @@ func TestResolveRepositoryIDForSubpathMatchesSanitizedRepositoryName(t *testing.
 	}); err != nil {
 		t.Fatalf("CreateTaskRepository: %v", err)
 	}
-	if err := repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
-		ID:             "session-worktree-1",
-		SessionID:      "session-1",
-		WorktreeID:     "worktree-1",
-		RepositoryID:   "repo-1",
-		WorktreePath:   "/tmp/worktree",
-		WorktreeBranch: "feature/test",
-		BranchSlug:     "test",
-		Position:       0,
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-1", TaskID: "task-1", ExecutorType: "worktree",
+		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	if _, err := sqlxDB.Exec(sqlxDB.Rebind(
+		`UPDATE task_sessions SET task_environment_id = ? WHERE id = ?`),
+		"env-1", "session-1"); err != nil {
+		t.Fatalf("link session to env: %v", err)
+	}
+	if err := repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		ID:                "session-worktree-1",
+		TaskEnvironmentID: "env-1",
+		RepositoryID:      "repo-1",
+		WorktreeID:        "worktree-1",
+		WorktreePath:      "/tmp/worktree",
+		WorktreeBranch:    "feature/test",
+		BranchSlug:        "test",
+		Position:          0,
 	}); err != nil {
 		t.Fatalf("CreateTaskSessionWorktree: %v", err)
 	}
@@ -460,12 +472,13 @@ func TestBootInitialStateHomeIncludesKanbanFirstPaintState(t *testing.T) {
 	if len(steps) == 0 {
 		t.Fatal("expected seeded default workflow step")
 	}
-	task, err := taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	taskResult, err := taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID:    workspaces[0].ID,
 		WorkflowID:     workflows[0].ID,
 		WorkflowStepID: steps[0].ID,
 		Title:          "Boot home task",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -736,13 +749,14 @@ func TestBootRouteDataTaskDetailIncludesTaskPageData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListStepsByWorkflow: %v", err)
 	}
-	task, err := taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	taskResult, err := taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID:    workspaces[0].ID,
 		WorkflowID:     workflows[0].ID,
 		WorkflowStepID: steps[0].ID,
 		Title:          "Boot detail task",
 		Description:    "Should be present before React mounts",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -813,12 +827,13 @@ func TestBootPayloadMissingTaskFallsBackToHomeKanbanState(t *testing.T) {
 	if err != nil || len(steps) == 0 {
 		t.Fatalf("ListStepsByWorkflow: count=%d err=%v", len(steps), err)
 	}
-	task, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	taskResult, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID:    workspaces[0].ID,
 		WorkflowID:     workflows[0].ID,
 		WorkflowStepID: steps[0].ID,
 		Title:          "Visible sibling task",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -916,12 +931,13 @@ func TestBootPayloadValidTaskKeepsRouteSpecificState(t *testing.T) {
 	if err != nil || len(steps) == 0 {
 		t.Fatalf("ListStepsByWorkflow: count=%d err=%v", len(steps), err)
 	}
-	task, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	taskResult, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID:    workspaces[0].ID,
 		WorkflowID:     workflows[0].ID,
 		WorkflowStepID: steps[0].ID,
 		Title:          "Valid detail task",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -960,11 +976,12 @@ func TestBootTaskDetailMessagesProjectShellOutput(t *testing.T) {
 	if err != nil || len(workspaces) == 0 {
 		t.Fatalf("ListWorkspaces: %v", err)
 	}
-	task, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	taskResult, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID: workspaces[0].ID,
 		Title:       "Shell output projection",
 		IsEphemeral: true,
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -1029,10 +1046,11 @@ func TestBootRouteDataTaskDetailIncludesPersistedSessionModels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListStepsByWorkflow: %v", err)
 	}
-	task, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	taskResult, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID: workspaces[0].ID, WorkflowID: workflows[0].ID,
 		WorkflowStepID: steps[0].ID, Title: "Hydrated model selector",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -1117,10 +1135,11 @@ func TestBootRouteDataTaskDetailIncludesPersistedTurns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListStepsByWorkflow: %v", err)
 	}
-	task, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	taskResult, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID: workspaces[0].ID, WorkflowID: workflows[0].ID,
 		WorkflowStepID: steps[0].ID, Title: "Hydrated turn snapshot",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -1202,13 +1221,14 @@ func TestBootRouteDataTasksIncludesFirstPageRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListStepsByWorkflow: %v", err)
 	}
-	created, err := taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	createdResult, err := taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID:    workspaces[0].ID,
 		WorkflowID:     workflows[0].ID,
 		WorkflowStepID: steps[0].ID,
 		Title:          "Tasks table row",
 		Description:    "Visible on first paint",
 	})
+	created := createdResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -1339,6 +1359,33 @@ func TestBootPayloadIncludesDebugRuntimeWhenDevMode(t *testing.T) {
 	}
 	if !decoded.Runtime.Debug {
 		t.Fatal("runtime.debug = false, want true when backend devMode is enabled")
+	}
+}
+
+func TestBootPayloadCarriesConfiguredTitlePrefix(t *testing.T) {
+	t.Parallel()
+
+	payload := bootPayload(
+		context.Background(),
+		nil,
+		routeParams{webTitlePrefix: "TEST"},
+		webapp.ClassifyRoute("/"),
+	)
+	if got := payload.Runtime.TitlePrefix; got != "TEST" {
+		t.Fatalf("runtime.titlePrefix = %q, want %q", got, "TEST")
+	}
+}
+
+func TestBootPayloadOmitsUnsetTitlePrefix(t *testing.T) {
+	t.Parallel()
+
+	payload := bootPayload(context.Background(), nil, routeParams{}, webapp.ClassifyRoute("/"))
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("Marshal payload: %v", err)
+	}
+	if strings.Contains(string(raw), "titlePrefix") {
+		t.Fatalf("expected titlePrefix to be omitted, got: %s", raw)
 	}
 }
 

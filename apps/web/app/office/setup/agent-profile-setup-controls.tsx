@@ -9,6 +9,7 @@ import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import type { Tier } from "@/lib/state/slices/office/types";
 import { useAgentProfileOptions } from "@/components/task-create-dialog-options";
+import { useTranslation } from "react-i18next";
 
 export type ProfileSetupChange = {
   agentProfileId?: string;
@@ -56,7 +57,8 @@ export function useSelectableProfileOptions(agentProfiles: AgentProfileOption[])
           !!getCapabilityWarning(
             sortedProfiles[i]?.capability_status,
             sortedProfiles[i]?.capability_error,
-          ),
+          ) ||
+          !!opt.disabled,
       })),
     [baseOptions, sortedProfiles],
   );
@@ -112,6 +114,7 @@ export function CreateProfileButton({
   hasProfiles: boolean;
   onCreateClick: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Button
       type="button"
@@ -119,7 +122,7 @@ export function CreateProfileButton({
       onClick={onCreateClick}
       className="h-auto p-0 cursor-pointer text-primary"
     >
-      {hasProfiles ? "+ Create a new CLI profile" : "Create one inline"}
+      {hasProfiles ? t("office:createANewCliProfile") : t("office:createOneInline")}
     </Button>
   );
 }

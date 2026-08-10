@@ -24,12 +24,13 @@ func reparentFixture(t *testing.T) (*Service, *MockEventBus, *sqliterepo.Reposit
 	}
 	create := func(title string) *models.Task {
 		t.Helper()
-		task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
 			WorkspaceID:    "ws-1",
 			WorkflowID:     "wf-1",
 			WorkflowStepID: "step-1",
 			Title:          title,
 		})
+		task := taskResult.Task
 		if err != nil {
 			t.Fatalf("create task %q: %v", title, err)
 		}
@@ -322,5 +323,134 @@ func TestService_UpdateTask_RejectsCrossWorkspaceParent(t *testing.T) {
 	_, err := svc.UpdateTask(ctx, child.ID, &UpdateTaskRequest{ParentID: strptr(other.ID)})
 	if err == nil || !strings.Contains(err.Error(), "workspace") {
 		t.Fatalf("expected cross-workspace error, got %v", err)
+	}
+}
+
+// setInheritedWorkspaceMode stamps an inherit_parent workspace block (with a
+// group id) onto an existing task row, simulating a subtask created under a
+// parent with inherited workspace policy.
+func setInheritedWorkspaceMode(t *testing.T, ctx context.Context, repo *sqliterepo.Repository, taskID string) {
+	t.Helper()
+	task, err := repo.GetTask(ctx, taskID)
+	if err != nil {
+		t.Fatalf("GetTask %s: %v", taskID, err)
+	}
+	task.Metadata["workspace"] = map[string]interface{}{
+		"mode":     "inherit_parent",
+		"group_id": "group-1",
+	}
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatalf("UpdateTask fixture %s: %v", taskID, err)
+	}
+}
+
+func assertWorkspaceMode(t *testing.T, metadata map[string]interface{}, want string) {
+	t.Helper()
+	workspace, ok := metadata["workspace"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("workspace metadata = %#v", metadata["workspace"])
+	}
+	if workspace["mode"] != want {
+		t.Fatalf("workspace mode = %#v, want %s", workspace["mode"], want)
+	}
+}
+
+// Reparenting an inherit_parent subtask must normalize the mode to
+// shared_group — the same composite result as detach-then-nest — while
+// keeping its workspace group id.
+func TestService_UpdateTask_ReparentNormalizesInheritedWorkspaceMode(t *testing.T) {
+	svc, eventBus, repo, create := reparentFixture(t)
+	ctx := context.Background()
+	oldParent := create("Old parent")
+	child := create("Child")
+	newParent := create("New parent")
+	if _, err := svc.UpdateTask(ctx, child.ID, &UpdateTaskRequest{ParentID: strptr(oldParent.ID)}); err != nil {
+		t.Fatalf("nest child under old parent: %v", err)
+	}
+	setInheritedWorkspaceMode(t, ctx, repo, child.ID)
+	eventBus.ClearEvents()
+
+	updated, err := svc.UpdateTask(ctx, child.ID, &UpdateTaskRequest{ParentID: strptr(newParent.ID)})
+	if err != nil {
+		t.Fatalf("reparent: %v", err)
+	}
+	if updated.ParentID != newParent.ID {
+		t.Fatalf("ParentID = %q, want %q", updated.ParentID, newParent.ID)
+	}
+	assertWorkspaceMode(t, updated.Metadata, "shared_group")
+
+	persisted, err := repo.GetTask(ctx, child.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	assertWorkspaceMode(t, persisted.Metadata, "shared_group")
+	workspace := persisted.Metadata["workspace"].(map[string]interface{})
+	if workspace["group_id"] != "group-1" {
+		t.Fatalf("workspace group_id = %#v, want group-1", workspace["group_id"])
+	}
+
+	eventData := singleDetachmentEventData(t, eventBus)
+	if eventData["parent_id"] != newParent.ID {
+		t.Fatalf("event parent_id = %#v, want %q", eventData["parent_id"], newParent.ID)
+	}
+	eventMetadata, ok := eventData["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("event metadata = %#v", eventData["metadata"])
+	}
+	assertWorkspaceMode(t, eventMetadata, "shared_group")
+}
+
+// Un-nesting through UpdateTask (empty parent_id) must apply the same
+// normalization as the detach endpoint.
+func TestService_UpdateTask_UnnestNormalizesInheritedWorkspaceMode(t *testing.T) {
+	svc, eventBus, repo, create := reparentFixture(t)
+	ctx := context.Background()
+	parent := create("Parent")
+	child := create("Child")
+	if _, err := svc.UpdateTask(ctx, child.ID, &UpdateTaskRequest{ParentID: strptr(parent.ID)}); err != nil {
+		t.Fatalf("nest: %v", err)
+	}
+	setInheritedWorkspaceMode(t, ctx, repo, child.ID)
+	eventBus.ClearEvents()
+
+	updated, err := svc.UpdateTask(ctx, child.ID, &UpdateTaskRequest{ParentID: strptr("")})
+	if err != nil {
+		t.Fatalf("unnest: %v", err)
+	}
+	assertWorkspaceMode(t, updated.Metadata, "shared_group")
+
+	persisted, err := repo.GetTask(ctx, child.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	assertWorkspaceMode(t, persisted.Metadata, "shared_group")
+}
+
+// Non-inherited workspace modes must survive a re-parent untouched.
+func TestService_UpdateTask_ReparentPreservesNonInheritedWorkspaceModes(t *testing.T) {
+	for _, mode := range []string{"shared_group", "new_workspace"} {
+		t.Run(mode, func(t *testing.T) {
+			svc, _, repo, create := reparentFixture(t)
+			ctx := context.Background()
+			child := create("Child")
+			newParent := create("New parent")
+			task, err := repo.GetTask(ctx, child.ID)
+			if err != nil {
+				t.Fatalf("GetTask: %v", err)
+			}
+			task.Metadata["workspace"] = map[string]interface{}{
+				"mode":     mode,
+				"group_id": "group-1",
+			}
+			if err := repo.UpdateTask(ctx, task); err != nil {
+				t.Fatalf("UpdateTask fixture: %v", err)
+			}
+
+			updated, err := svc.UpdateTask(ctx, child.ID, &UpdateTaskRequest{ParentID: strptr(newParent.ID)})
+			if err != nil {
+				t.Fatalf("reparent: %v", err)
+			}
+			assertWorkspaceMode(t, updated.Metadata, mode)
+		})
 	}
 }

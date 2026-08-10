@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { t } from "@/lib/i18n";
 import { requestPRReviewers } from "@/lib/api/domains/github-review-api";
 import type { PRReview, RequestedReviewer, TaskPR } from "@/lib/types/github";
 
@@ -208,8 +209,8 @@ export function usePRScopedReviewRequest(
     async (reviewer: string) => {
       if (!workspaceId || !identity) {
         toast({
-          title: "Failed to re-request review",
-          description: "Select a workspace before requesting review.",
+          title: t("github:failedToReRequestReview"),
+          description: t("github:selectWorkspaceBeforeRequestingReview"),
           variant: "error",
         });
         return;
@@ -228,14 +229,17 @@ export function usePRScopedReviewRequest(
       } catch (error) {
         finishRequest(identity, reviewer, operationId, false);
         toast({
-          title: "Failed to re-request review",
-          description: error instanceof Error ? error.message : "An error occurred",
+          title: t("github:failedToReRequestReview"),
+          description: error instanceof Error ? error.message : t("common:anErrorOccurred"),
           variant: "error",
         });
         return;
       }
       finishRequest(identity, reviewer, operationId, true);
-      toast({ description: `Review re-requested from ${reviewer}`, variant: "success" });
+      toast({
+        description: t("github:reviewReRequestedFrom", { reviewer }),
+        variant: "success",
+      });
       try {
         refresh();
       } catch {

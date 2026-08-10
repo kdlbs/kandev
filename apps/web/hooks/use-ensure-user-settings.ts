@@ -35,11 +35,21 @@ function mergeTaskCreateLastUsedOverlay(
 ): UserSettingsState {
   const definedPending = compactTaskCreateLastUsedOverlay(pending);
   if (Object.keys(definedPending).length === 0) return settings;
+  const pendingWorkflowIds = definedPending.workflowIdsByWorkspace;
+  const { workflowIdsByWorkspace: _ignored, ...scalarPending } = definedPending;
   return {
     ...settings,
     taskCreateLastUsed: {
       ...settings.taskCreateLastUsed,
-      ...definedPending,
+      ...scalarPending,
+      ...(pendingWorkflowIds
+        ? {
+            workflowIdsByWorkspace: {
+              ...settings.taskCreateLastUsed.workflowIdsByWorkspace,
+              ...pendingWorkflowIds,
+            },
+          }
+        : {}),
     },
   };
 }

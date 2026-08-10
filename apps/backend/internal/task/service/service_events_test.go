@@ -531,6 +531,18 @@ func TestPublishTaskUpdated_FallbackRepositoryID(t *testing.T) {
 	}
 }
 
+func TestPublishTaskUpdated_EmitsAutopilot(t *testing.T) {
+	svc, eventBus, _ := createTestService(t)
+	svc.PublishTaskUpdated(context.Background(), &models.Task{
+		ID: "task-autopilot", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Autopilot: true,
+	})
+
+	data := singlePublishedEventData(t, eventBus)
+	if got, ok := data["autopilot"].(bool); !ok || !got {
+		t.Fatalf("autopilot payload = %#v, want true", data["autopilot"])
+	}
+}
+
 func TestPublishWorkspaceSourcesAdoptedPublishesSessionScopedPayload(t *testing.T) {
 	svc, eventBus, _ := createTestService(t)
 	eventBus.ClearEvents()

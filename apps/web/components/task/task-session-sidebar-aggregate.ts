@@ -128,8 +128,16 @@ function applyActiveKanbanFallback(
   const activeStepIds = new Set(activeSteps.map((s) => s.id));
   for (const t of activeTasks) {
     if (activeStepIds.size > 0 && !activeStepIds.has(t.workflowStepId)) continue;
-    const activeTask = { ...t, _workflowId: activeWorkflowId };
     const existingIndex = acc.tasks.findIndex((task) => task.id === t.id);
+    const projectedTask = existingIndex >= 0 ? acc.tasks[existingIndex] : undefined;
+    const activeTask = {
+      ...t,
+      // Autopilot is immutable after creation. The active slice can be fed by
+      // a partial WS event, so do not let it erase the value from the full
+      // workflow projection.
+      autopilot: t.autopilot ?? projectedTask?.autopilot,
+      _workflowId: activeWorkflowId,
+    };
     if (existingIndex >= 0) {
       if (activeTaskIsNewer(t, acc.tasks[existingIndex])) {
         acc.tasks[existingIndex] = activeTask;

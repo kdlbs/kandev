@@ -82,7 +82,7 @@ func TestMockRepositoryGetTaskSessionReturnsDetachedMutableFields(t *testing.T) 
 		ExecutorSnapshot:     newSnapshot(),
 		EnvironmentSnapshot:  newSnapshot(),
 		RepositorySnapshot:   newSnapshot(),
-		Worktrees: []*models.TaskSessionWorktree{
+		Worktrees: []*models.TaskEnvironmentRepo{
 			{ID: "worktree-1", WorktreePath: "/original"},
 			nil,
 		},
@@ -636,10 +636,14 @@ func TestLaunchPreparedSession_InheritsEnvFromSessionEnvironmentID(t *testing.T)
 	parentEnv := &models.TaskEnvironment{
 		ID:            "env-parent",
 		TaskID:        "task-parent",
-		WorktreeID:    "wt-parent",
-		WorktreePath:  "/tmp/parent",
 		WorkspacePath: "/tmp/parent",
 		Status:        models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{{
+			TaskEnvironmentID: "env-parent",
+			RepositoryID:      "repo-parent",
+			WorktreeID:        "wt-parent",
+			WorktreePath:      "/tmp/parent",
+		}},
 	}
 	repo.taskEnvironments[parentEnv.ID] = parentEnv
 
@@ -687,9 +691,9 @@ func TestLaunchPreparedSession_InheritsEnvFromSessionEnvironmentID(t *testing.T)
 	// existingEnv.WorktreeID must flow through. When it didn't, this
 	// assertion is a no-op — the env-id inheritance above is the load-
 	// bearing check for the regression we're guarding against.
-	if gotUseWorktree && gotWorktreeID != parentEnv.WorktreeID {
+	if gotUseWorktree && gotWorktreeID != "wt-parent" {
 		t.Errorf("expected reused WorktreeID=%q from inherited env; got %q",
-			parentEnv.WorktreeID, gotWorktreeID)
+			"wt-parent", gotWorktreeID)
 	}
 	// No fresh env row should be created — the inherited one was reused.
 	if len(repo.createTaskEnvironmentCalls) != 0 {

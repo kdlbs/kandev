@@ -23,6 +23,7 @@ import {
 import { SETUP_WIZARD_STEP_COUNT, SETUP_WIZARD_STEPS } from "./setup-wizard-steps";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 import type { Tier } from "@/lib/state/slices/office/types";
+import { useTranslation } from "react-i18next";
 
 export { DEFAULT_ONBOARDING_TASK_DESCRIPTION, DEFAULT_ONBOARDING_TASK_TITLE };
 
@@ -189,6 +190,7 @@ export function SetupWizard({
   defaultAgentProfileId,
   suggestedWorkspaceName,
 }: SetupWizardProps) {
+  const { t } = useTranslation();
   const router = useRouter();
   // mode === "new" means the user explicitly asked for a fresh workspace
   // (e.g. clicked "Add workspace" on the dashboard) — skip the FS import
@@ -214,30 +216,30 @@ export function SetupWizard({
     setSubmitting(true);
     try {
       const result = await submitOnboarding(data);
-      toast.success("Workspace created successfully");
+      toast.success(t("office:workspaceCreatedSuccessfully"));
       document.cookie = `office-active-workspace=${result.workspaceId}; path=/; max-age=86400; samesite=strict; secure`;
       router.push(`/office?workspaceId=${result.workspaceId}`);
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to complete setup");
+      toast.error(err instanceof Error ? err.message : t("office:failedToCompleteSetup"));
     } finally {
       setSubmitting(false);
     }
-  }, [data, router]);
+  }, [data, router, t]);
 
   const handleImportFS = useCallback(async () => {
     setSubmitting(true);
     try {
       const result = await importFromFS();
-      toast.success(`Imported ${result.importedCount} config entries`);
+      toast.success(t("office:importedConfigEntries", { importedCount: result.importedCount }));
       router.push("/office");
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to import settings");
+      toast.error(err instanceof Error ? err.message : t("office:failedToImportSettings"));
     } finally {
       setSubmitting(false);
     }
-  }, [router]);
+  }, [router, t]);
 
   const closeHref = "/";
 
@@ -253,28 +255,30 @@ export function SetupWizard({
     );
   }
   return (
-    <div className="fixed inset-0 z-50 bg-background flex items-center justify-center">
-      <div className="relative w-full max-w-2xl mx-auto px-6">
-        <CloseButton href={closeHref} />
-        <StepIndicator current={step} total={SETUP_WIZARD_STEP_COUNT} />
-        <div className="mt-8">
-          <WizardStepContent
+    <div className="fixed inset-0 z-50 bg-background overflow-y-auto">
+      <div className="flex min-h-full items-center justify-center px-6 py-8">
+        <div className="relative w-full max-w-2xl mx-auto">
+          <CloseButton href={closeHref} />
+          <StepIndicator current={step} total={SETUP_WIZARD_STEP_COUNT} />
+          <div className="mt-8">
+            <WizardStepContent
+              step={step}
+              data={data}
+              agentProfiles={profileOptions}
+              patch={patch}
+              onAgentProfilesChange={setProfileOptions}
+            />
+          </div>
+          <WizardFooter
             step={step}
-            data={data}
-            agentProfiles={profileOptions}
-            patch={patch}
-            onAgentProfilesChange={setProfileOptions}
+            canAdvance={canAdvance}
+            submitting={submitting}
+            onBack={() => setStep((s) => s - 1)}
+            onNext={() => setStep((s) => s + 1)}
+            onSkip={skipInitialTask}
+            onSubmit={handleSubmit}
           />
         </div>
-        <WizardFooter
-          step={step}
-          canAdvance={canAdvance}
-          submitting={submitting}
-          onBack={() => setStep((s) => s - 1)}
-          onNext={() => setStep((s) => s + 1)}
-          onSkip={skipInitialTask}
-          onSubmit={handleSubmit}
-        />
       </div>
     </div>
   );

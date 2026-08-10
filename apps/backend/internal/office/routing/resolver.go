@@ -15,6 +15,7 @@ import (
 // import dependency on the repo. Values must stay in sync.
 const (
 	healthStateHealthy            = "healthy"
+	healthStateShortRetry         = "short_retry"
 	healthStateDegraded           = "degraded"
 	healthStateUserActionRequired = "user_action_required"
 )
@@ -49,7 +50,10 @@ const (
 var autoRetryableCodes = map[string]struct{}{
 	"rate_limited":           {},
 	"quota_limited":          {},
+	"network_unavailable":    {},
 	"provider_unavailable":   {},
+	"provider_overloaded":    {},
+	"model_capacity":         {},
 	"unknown_provider_error": {},
 }
 
@@ -189,8 +193,12 @@ func (r *Resolver) Resolve(
 		return nil, ErrEmptyOrder
 	}
 	res := &Resolution{Enabled: cfg.Enabled, RequestedTier: tier, ProviderOrder: order}
+	idx, err := r.loadHealthIndex(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
 	if !cfg.Enabled {
-		if err := r.evaluateProvider(ctx, workspaceID, res, cfg, nil, order[0], tier, r.clock()); err != nil {
+		if _, err := r.evaluateProvider(ctx, workspaceID, res, cfg, idx, order[0], tier, r.clock(), true); err != nil {
 			return nil, err
 		}
 		if len(res.Candidates) == 0 {
@@ -198,18 +206,22 @@ func (r *Resolver) Resolve(
 		}
 		return res, nil
 	}
-	idx, err := r.loadHealthIndex(ctx, workspaceID)
-	if err != nil {
-		return nil, err
-	}
 	excluded := providerExcludeSet(opts.ExcludeProviders)
 	now := r.clock()
 	for _, pid := range order {
 		if _, skip := excluded[pid]; skip {
 			continue
 		}
-		if err := r.evaluateProvider(ctx, workspaceID, res, cfg, idx, pid, tier, now); err != nil {
+		shortRetry, err := r.evaluateProvider(ctx, workspaceID, res, cfg, idx, pid, tier, now, false)
+		if err != nil {
 			return nil, err
+		}
+		if shortRetry {
+			// A live short-retry cooldown is an owner-scoped wait, not a
+			// reason to switch providers. Stop before considering later
+			// candidates so concurrent Office runs do not create a fallback
+			// stampede while the owning route is cooling down.
+			break
 		}
 	}
 	if len(res.Candidates) == 0 {
@@ -224,8 +236,8 @@ func (r *Resolver) Resolve(
 func (r *Resolver) evaluateProvider(
 	ctx context.Context, workspaceID string,
 	res *Resolution, cfg *WorkspaceConfig, idx healthIndex,
-	pid ProviderID, tier Tier, now time.Time,
-) error {
+	pid ProviderID, tier Tier, now time.Time, shortRetryOnly bool,
+) (bool, error) {
 	prof, ok := cfg.ProviderProfiles[pid]
 	model := prof.TierMap.Model(tier)
 	executionProfileID := prof.ExecutionProfileID(tier)
@@ -234,19 +246,21 @@ func (r *Resolver) evaluateProvider(
 			ProviderID: pid,
 			Reason:     SkipReasonMissingModelMapping,
 		})
-		return nil
+		return false, nil
 	}
 	if r.profiles != nil {
 		resolvedModel, err := r.resolveExecutionProfile(ctx, workspaceID, pid, tier, executionProfileID)
 		if err != nil {
-			return err
+			return false, err
 		}
 		model = resolvedModel
 	}
 	if hit, found := lookupHealth(idx, pid, tier, model); found {
-		if sc, skip := classifyHealthHit(pid, hit, now); skip {
-			res.SkippedDegraded = append(res.SkippedDegraded, sc)
-			return nil
+		if !shortRetryOnly || hit.State == models.ProviderHealthState(healthStateShortRetry) {
+			if sc, skip := classifyHealthHit(pid, hit, now); skip {
+				res.SkippedDegraded = append(res.SkippedDegraded, sc)
+				return sc.State == healthStateShortRetry, nil
+			}
 		}
 	}
 	res.Candidates = append(res.Candidates, Candidate{
@@ -258,7 +272,7 @@ func (r *Resolver) evaluateProvider(
 		Flags:              prof.Flags,
 		Env:                prof.Env,
 	})
-	return nil
+	return false, nil
 }
 
 func (r *Resolver) resolveExecutionProfile(
@@ -373,7 +387,7 @@ func classifyHealthHit(
 		AutoRetry:  IsAutoRetryableCode(row.ErrorCode),
 	}
 	switch string(row.State) {
-	case healthStateDegraded:
+	case healthStateShortRetry, healthStateDegraded:
 		if row.RetryAt == nil || !row.RetryAt.After(now) {
 			return SkippedCandidate{}, false
 		}

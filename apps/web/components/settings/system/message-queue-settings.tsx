@@ -8,7 +8,8 @@ import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Spinner } from "@kandev/ui/spinner";
-import { IconAlertCircle, IconLock } from "@tabler/icons-react";
+import { Switch } from "@kandev/ui/switch";
+import { IconAlertCircle, IconInfoCircle, IconLock } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { SettingsCard } from "@/components/settings/settings-card";
@@ -21,6 +22,8 @@ import type { MessageQueueSettingsResponse, MessageQueueSettingsSource } from "@
 
 const ENVIRONMENT_VARIABLE = "KANDEV_QUEUE_MAX_PER_SESSION";
 
+/** Parses the max-per-session draft text into a non-negative safe integer,
+ * or `null` when the text isn't a valid whole number. */
 function parseMaximum(value: string): number | null {
   const trimmed = value.trim();
   if (!/^\d+$/.test(trimmed)) return null;
@@ -28,6 +31,7 @@ function parseMaximum(value: string): number | null {
   return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
+/** Maps an effective-settings source enum to its i18n label key. */
 function sourceLabelKey(source: MessageQueueSettingsSource): string {
   switch (source) {
     case "setting":
@@ -39,14 +43,16 @@ function sourceLabelKey(source: MessageQueueSettingsSource): string {
   }
 }
 
-function useMessageQueueSettingsDraft() {
-  const { t } = useTranslation();
-  const role = useAppStore((state) => state.auth.user?.role);
+/** Loads the persisted snapshot and owns the two editable drafts (the
+ * max-per-session text field and the merge-enabled toggle). Split out of
+ * `useMessageQueueSettingsDraft` so neither function needs to grow past the
+ * project's per-function line limit as the page gains fields. */
+function useMessageQueueSettingsLoad() {
   const [snapshot, setSnapshot] = useState<MessageQueueSettingsResponse | null>(null);
   const [draft, setDraft] = useState("");
+  const [mergeDraft, setMergeDraft] = useState(true);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
-  const [saveFailed, setSaveFailed] = useState(false);
   const loadVersion = useRef(0);
 
   const reload = useCallback(async () => {
@@ -58,6 +64,7 @@ function useMessageQueueSettingsDraft() {
       if (version !== loadVersion.current) return;
       setSnapshot(response);
       setDraft(String(response.settings.max_per_session));
+      setMergeDraft(response.settings.merge_enabled);
     } catch {
       if (version === loadVersion.current) setLoadFailed(true);
     } finally {
@@ -72,36 +79,72 @@ function useMessageQueueSettingsDraft() {
     };
   }, [reload]);
 
+  return {
+    snapshot,
+    setSnapshot,
+    draft,
+    setDraft,
+    mergeDraft,
+    setMergeDraft,
+    loading,
+    loadFailed,
+    reload,
+  };
+}
+
+/** Derives dirty/validity/permission state from the loaded snapshot and the
+ * two drafts, and registers the combined save/discard contributor that the
+ * page's floating save bar drives. */
+function useMessageQueueSettingsDraft() {
+  const { t } = useTranslation();
+  const role = useAppStore((state) => state.auth.user?.role);
+  const [saveFailed, setSaveFailed] = useState(false);
+  const load = useMessageQueueSettingsLoad();
+  const { snapshot, setSnapshot, draft, setDraft, mergeDraft, setMergeDraft } = load;
+
   const parsed = parseMaximum(draft);
   const baseline = snapshot?.settings.max_per_session;
-  const isDirty = baseline !== undefined && draft !== String(baseline);
+  const mergeBaseline = snapshot?.settings.merge_enabled;
+  const isMaxDirty = baseline !== undefined && draft !== String(baseline);
+  const isMergeDirty = mergeBaseline !== undefined && mergeDraft !== mergeBaseline;
+  const isDirty = isMaxDirty || isMergeDirty;
   const isAdmin = role === undefined || role === "admin";
   const isLocked = snapshot?.effective.locked === true;
+  // The environment lock only governs max_per_session; merging has no
+  // environment override, so an admin may always toggle it.
   const canEdit = isAdmin && !isLocked;
+  const canEditMerge = isAdmin;
   let invalidReason: string | undefined;
   if (parsed === null) invalidReason = t("system:messageQueueValidation");
   else if (!isAdmin) invalidReason = t("system:messageQueueAdminOnly");
-  else if (isLocked) {
-    invalidReason = t("system:messageQueueEnvironmentLocked", {
-      variable: ENVIRONMENT_VARIABLE,
-    });
+  else if (isLocked && isMaxDirty) {
+    invalidReason = t("system:messageQueueEnvironmentLocked", { variable: ENVIRONMENT_VARIABLE });
   }
 
   useSettingsSaveContributor({
     id: "system-message-queue",
-    revision: draft,
+    revision: `${draft}:${mergeDraft}`,
     isDirty,
-    canSave: parsed !== null && canEdit,
+    canSave: parsed !== null && (isMaxDirty ? canEdit : canEditMerge),
     invalidReason,
     save: async () => {
-      if (parsed === null || !canEdit) throw new Error(invalidReason);
+      if (parsed === null || (isMaxDirty && !canEdit) || (isMergeDirty && !canEditMerge)) {
+        throw new Error(invalidReason);
+      }
       const submitted = draft;
+      const submittedMerge = mergeDraft;
       setSaveFailed(false);
       try {
-        const response = await updateMessageQueueSettings({ max_per_session: parsed });
+        const response = await updateMessageQueueSettings({
+          ...(isMaxDirty ? { max_per_session: parsed } : {}),
+          ...(isMergeDirty ? { merge_enabled: mergeDraft } : {}),
+        });
         setSnapshot(response);
         setDraft((current) =>
           current === submitted ? String(response.settings.max_per_session) : current,
+        );
+        setMergeDraft((current) =>
+          current === submittedMerge ? response.settings.merge_enabled : current,
         );
       } catch (error) {
         setSaveFailed(true);
@@ -110,6 +153,7 @@ function useMessageQueueSettingsDraft() {
     },
     discard: () => {
       if (baseline !== undefined) setDraft(String(baseline));
+      if (mergeBaseline !== undefined) setMergeDraft(mergeBaseline);
       setSaveFailed(false);
     },
   });
@@ -118,16 +162,118 @@ function useMessageQueueSettingsDraft() {
     snapshot,
     draft,
     setDraft,
-    loading,
-    loadFailed,
+    mergeDraft,
+    setMergeDraft,
+    loading: load.loading,
+    loadFailed: load.loadFailed,
     saveFailed,
     isDirty,
     isAdmin,
     isLocked,
-    reload,
+    reload: load.reload,
   };
 }
 
+type QueueLimitFieldsProps = {
+  draft: string;
+  onDraftChange: (value: string) => void;
+  disabled: boolean;
+  configured: number;
+  effectiveValue: string;
+  source: MessageQueueSettingsSource;
+};
+
+/** Renders the per-session limit input plus the configured/effective summary
+ * badge; a pure presentational block extracted so `MessageQueueSettings`
+ * stays under the per-function line limit. */
+function QueueLimitFields({
+  draft,
+  onDraftChange,
+  disabled,
+  configured,
+  effectiveValue,
+  source,
+}: QueueLimitFieldsProps) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <div className="min-w-0 space-y-2">
+        <Label htmlFor="message-queue-max-per-session">
+          {t("system:messageQueueMaximumLabel")}
+        </Label>
+        <Input
+          id="message-queue-max-per-session"
+          data-testid="message-queue-max-per-session"
+          type="number"
+          inputMode="numeric"
+          min={0}
+          step={1}
+          value={draft}
+          disabled={disabled}
+          onChange={(event) => onDraftChange(event.target.value)}
+          className="h-11 w-full max-w-xs"
+        />
+        <p className="text-xs text-muted-foreground">{t("system:messageQueueUnlimitedHelp")}</p>
+      </div>
+      <div className="rounded-md border border-border/70 bg-muted/20 p-3 text-sm">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-muted-foreground">{t("system:messageQueueConfigured")}</span>
+          <span>{configured}</span>
+          <span className="text-muted-foreground">{t("system:messageQueueEffective")}</span>
+          <strong data-testid="message-queue-effective-value">{effectiveValue}</strong>
+          <Badge variant="secondary" data-testid="message-queue-source">
+            {t(sourceLabelKey(source))}
+          </Badge>
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground">
+          {t("system:messageQueueEffectiveHelp")}
+        </p>
+      </div>
+    </>
+  );
+}
+
+type MergeToggleFieldsProps = {
+  enabled: boolean;
+  onChange: (next: boolean) => void;
+  disabled: boolean;
+};
+
+/** Renders the merge-enabled switch plus its limitations notice; extracted
+ * for the same per-function line-limit reason as `QueueLimitFields`. */
+function MergeToggleFields({ enabled, onChange, disabled }: MergeToggleFieldsProps) {
+  const { t } = useTranslation();
+  return (
+    <div className="min-w-0 space-y-3 border-t border-border/70 pt-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 space-y-1">
+          <Label htmlFor="message-queue-merge-enabled">
+            {t("system:messageQueueMergeToggleLabel")}
+          </Label>
+          <p className="text-sm text-muted-foreground">
+            {t("system:messageQueueMergeDescription")}
+          </p>
+        </div>
+        <Switch
+          id="message-queue-merge-enabled"
+          data-testid="message-queue-merge-enabled"
+          checked={enabled}
+          disabled={disabled}
+          onCheckedChange={onChange}
+          aria-label={t("system:messageQueueMergeToggleLabel")}
+          className="cursor-pointer disabled:cursor-not-allowed"
+        />
+      </div>
+      <div className="flex gap-2 rounded-md border border-border/70 bg-muted/20 p-3 text-sm text-muted-foreground">
+        <IconInfoCircle className="size-4 shrink-0" />
+        <p>{t("system:messageQueueMergeNotice")}</p>
+      </div>
+    </div>
+  );
+}
+
+/** Settings → General → Message Queue page: the per-session queue limit and
+ * the queued-message merge toggle, sharing one save contributor. */
 export function MessageQueueSettings() {
   const { t } = useTranslation();
   const state = useMessageQueueSettingsDraft();
@@ -165,39 +311,14 @@ export function MessageQueueSettings() {
       </CardHeader>
       <CardContent className="min-w-0 space-y-5">
         <p className="text-sm text-muted-foreground">{t("system:messageQueueLimitDescription")}</p>
-        <div className="min-w-0 space-y-2">
-          <Label htmlFor="message-queue-max-per-session">
-            {t("system:messageQueueMaximumLabel")}
-          </Label>
-          <Input
-            id="message-queue-max-per-session"
-            data-testid="message-queue-max-per-session"
-            type="number"
-            inputMode="numeric"
-            min={0}
-            step={1}
-            value={state.draft}
-            disabled={!state.isAdmin || state.isLocked}
-            onChange={(event) => state.setDraft(event.target.value)}
-            className="h-11 w-full max-w-xs"
-          />
-          <p className="text-xs text-muted-foreground">{t("system:messageQueueUnlimitedHelp")}</p>
-        </div>
-
-        <div className="rounded-md border border-border/70 bg-muted/20 p-3 text-sm">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-muted-foreground">{t("system:messageQueueConfigured")}</span>
-            <span>{settings.max_per_session}</span>
-            <span className="text-muted-foreground">{t("system:messageQueueEffective")}</span>
-            <strong data-testid="message-queue-effective-value">{effectiveValue}</strong>
-            <Badge variant="secondary" data-testid="message-queue-source">
-              {t(sourceLabelKey(effective.source))}
-            </Badge>
-          </div>
-          <p className="mt-2 text-xs text-muted-foreground">
-            {t("system:messageQueueEffectiveHelp")}
-          </p>
-        </div>
+        <QueueLimitFields
+          draft={state.draft}
+          onDraftChange={state.setDraft}
+          disabled={!state.isAdmin || state.isLocked}
+          configured={settings.max_per_session}
+          effectiveValue={effectiveValue}
+          source={effective.source}
+        />
 
         {state.isLocked && (
           <Alert>
@@ -217,6 +338,12 @@ export function MessageQueueSettings() {
             <AlertDescription>{t("system:messageQueueSaveFailed")}</AlertDescription>
           </Alert>
         )}
+
+        <MergeToggleFields
+          enabled={state.mergeDraft}
+          onChange={state.setMergeDraft}
+          disabled={!state.isAdmin}
+        />
       </CardContent>
     </SettingsCard>
   );

@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -165,7 +166,8 @@ type CreateRequest struct {
 	McpMode string `json:"mcp_mode,omitempty"`
 
 	// McpProviders limits task-mode review automation tools to attached providers.
-	McpProviders []string `json:"mcp_providers,omitempty"`
+	McpProviders []string            `json:"mcp_providers,omitempty"`
+	McpProfile   *mcpprofile.Context `json:"mcp_profile,omitempty"`
 
 	// RequiresProcessKill forces the agent's process group to be killed on
 	// shutdown instead of relying on stdin close. Required for agents whose

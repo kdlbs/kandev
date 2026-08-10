@@ -46,6 +46,8 @@ export type SwimlaneContainerProps = {
   showMaximizeButton?: boolean;
   searchQuery?: string;
   selectedRepositoryIds?: string[];
+  /** Predicate combining every active plugin `registerTaskFilter` selection (AND semantics). */
+  matchesPluginTaskFilters?: (taskId: string) => boolean;
   selectedIds?: Set<string>;
   onToggleSelect?: (taskId: string) => void;
   onSelectRange?: (taskId: string, orderedIds: string[]) => void;
@@ -91,11 +93,13 @@ function renderEmptyState(emptyMessage: string) {
   );
 }
 
-function filterTasks(
+/** Exported for unit testing; not part of the module's public component API. */
+export function filterTasks(
   snapshots: Record<string, { tasks: Task[] }>,
   workflowId: string,
   repoFilter: ReturnType<typeof mapSelectedRepositoryIds>,
   searchQuery?: string,
+  matchesPluginTaskFilters?: (taskId: string) => boolean,
 ): Task[] {
   const snapshot = snapshots[workflowId];
   if (!snapshot) return [];
@@ -108,6 +112,9 @@ function filterTasks(
         t.title.toLowerCase().includes(q) ||
         (t.description && t.description.toLowerCase().includes(q)),
     );
+  }
+  if (matchesPluginTaskFilters) {
+    tasks = tasks.filter((t) => matchesPluginTaskFilters(t.id));
   }
   return tasks;
 }
@@ -237,10 +244,62 @@ function useWorkflowReorder(
   return { sensors, canSort, handleDragEnd };
 }
 
+type WorkflowLike = { id: string; name: string; hidden?: boolean };
+
+/**
+ * Selects the workflow swimlanes the board renders.
+ *
+ * - No filter ("All Workflows"): every workflow with a loaded snapshot that is
+ *   not hidden (system/office workflows stay off the board by design).
+ * - Explicit filter: the selected workflow itself, hidden or not. The display
+ *   dropdown offers every workflow in the store — including hidden ones like
+ *   Improve Kandev — so an explicit selection must render that board;
+ *   resolving against the visible-only list would silently show "No tasks yet"
+ *   for a workflow that has tasks.
+ */
+export function selectWorkflowSwimlanes(
+  workflowFilter: string | null | undefined,
+  workflows: WorkflowLike[],
+  snapshots: Record<string, unknown>,
+): WorkflowLike[] {
+  if (workflowFilter) {
+    const workflow = workflows.find((item) => item.id === workflowFilter && snapshots[item.id]);
+    return workflow ? [workflow] : [];
+  }
+  return workflows.filter((workflow) => !workflow.hidden && snapshots[workflow.id]);
+}
+
+/**
+ * Selects the workflows the mobile board navigator offers. The navigator is
+ * the only workflow switcher on the mobile kanban page (the display menu hides
+ * its workflow select there), so hidden workflows with tasks — e.g. Improve
+ * Kandev, whose tasks land in a hidden workflow — must be reachable, mirroring
+ * the sidebar which already aggregates their snapshots. Empty hidden system
+ * workflows stay out.
+ */
+export function selectMobileNavigatorWorkflows(
+  visibleOrdered: WorkflowLike[],
+  workflows: WorkflowLike[],
+  getFilteredTasks: (workflowId: string) => unknown[],
+): Array<{ workflow: WorkflowLike; tasks: unknown[] }> {
+  const visibleIds = new Set(visibleOrdered.map((workflow) => workflow.id));
+  const entries: Array<{ workflow: WorkflowLike; tasks: unknown[] }> = [];
+  for (const workflow of visibleOrdered) {
+    entries.push({ workflow, tasks: getFilteredTasks(workflow.id) });
+  }
+  for (const workflow of workflows) {
+    if (!workflow.hidden || visibleIds.has(workflow.id)) continue;
+    const tasks = getFilteredTasks(workflow.id);
+    if (tasks.length > 0) entries.push({ workflow, tasks });
+  }
+  return entries;
+}
+
 function useSwimlaneData(
   workflowFilter: string | null | undefined,
   selectedRepositoryIds: string[],
   searchQuery: string,
+  matchesPluginTaskFilters?: (taskId: string) => boolean,
 ) {
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
   const isLoading = useAppStore((state) => state.kanbanMulti.isLoading);
@@ -256,23 +315,41 @@ function useSwimlaneData(
     [repositories, selectedRepositoryIds],
   );
   const allOrderedWorkflows = useMemo(
-    () => workflows.filter((workflow) => !workflow.hidden && snapshots[workflow.id]),
+    () => selectWorkflowSwimlanes(null, workflows, snapshots),
     [workflows, snapshots],
   );
-  const orderedWorkflows = useMemo(() => {
-    if (workflowFilter) {
-      const workflow = allOrderedWorkflows.find((item) => item.id === workflowFilter);
-      return workflow ? [workflow] : [];
-    }
-    return allOrderedWorkflows;
-  }, [workflowFilter, allOrderedWorkflows]);
-
-  const getFilteredTasks = useCallback(
-    (wfId: string) => filterTasks(snapshots, wfId, repoFilter, searchQuery),
-    [snapshots, repoFilter, searchQuery],
+  const orderedWorkflows = useMemo(
+    () => selectWorkflowSwimlanes(workflowFilter, workflows, snapshots),
+    [workflowFilter, workflows, snapshots],
   );
 
-  return { snapshots, isLoading, orderedWorkflows, allOrderedWorkflows, getFilteredTasks };
+  const getFilteredTasks = useCallback(
+    (wfId: string) =>
+      filterTasks(snapshots, wfId, repoFilter, searchQuery, matchesPluginTaskFilters),
+    [snapshots, repoFilter, searchQuery, matchesPluginTaskFilters],
+  );
+
+  // The mobile board navigator is the only workflow switcher on the mobile
+  // kanban page (the display menu hides its workflow select there), so hidden
+  // workflows with tasks are included alongside the visible ones. The selector
+  // returns the filtered tasks with each entry so `getFilteredTasks` runs once
+  // per workflow and the task count reuses that result.
+  const workflowOptions = useMemo(
+    () =>
+      selectMobileNavigatorWorkflows(allOrderedWorkflows, workflows, getFilteredTasks).map(
+        ({ workflow, tasks }) => ({ ...workflow, taskCount: tasks.length }),
+      ),
+    [allOrderedWorkflows, workflows, getFilteredTasks],
+  );
+
+  return {
+    snapshots,
+    isLoading,
+    orderedWorkflows,
+    allOrderedWorkflows,
+    workflowOptions,
+    getFilteredTasks,
+  };
 }
 
 function getVisibleWorkflows(
@@ -377,8 +454,13 @@ export function SwimlaneContainer(containerProps: SwimlaneContainerProps) {
   const { viewMode, workflowFilter, searchQuery, selectedRepositoryIds = [] } = containerProps;
   const { isMobile } = useResponsiveBreakpoint();
   const { isCollapsed, toggleCollapse } = useSwimlaneCollapse();
-  const { snapshots, isLoading, orderedWorkflows, allOrderedWorkflows, getFilteredTasks } =
-    useSwimlaneData(workflowFilter, selectedRepositoryIds, searchQuery ?? "");
+  const { snapshots, isLoading, orderedWorkflows, workflowOptions, getFilteredTasks } =
+    useSwimlaneData(
+      workflowFilter,
+      selectedRepositoryIds,
+      searchQuery ?? "",
+      containerProps.matchesPluginTaskFilters,
+    );
   const {
     sensors: workflowSensors,
     canSort: canSortWorkflows,
@@ -402,10 +484,6 @@ export function SwimlaneContainer(containerProps: SwimlaneContainerProps) {
     focusedWorkflowId,
     visibleWorkflows,
   );
-  const workflowOptions = allOrderedWorkflows.map((workflow) => ({
-    ...workflow,
-    taskCount: getFilteredTasks(workflow.id).length,
-  }));
   const mobileWorkflowNavigation =
     isMobileKanban && focusedWorkflowId && containerProps.onWorkflowChange
       ? {

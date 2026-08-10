@@ -54,11 +54,13 @@ func TestInitWorkflowSyncService_WiresRealWorkspaceAuthorization(t *testing.T) {
 	}
 
 	// A non-nil GitHub service is required for initWorkflowSyncService to
-	// wire anything at all (see its early "GitHub unavailable" return); the
-	// client itself is never exercised by this test.
+	// wire anything at all (see its early "no GitHub or GitLab service
+	// available" return); the client itself is never exercised by this
+	// test. GitLab is left nil — this test only covers the shared
+	// authorization wiring, which applies regardless of provider.
 	githubSvc := github.NewService(nil, github.AuthMethodNone, nil, nil, nil, log)
 
-	svc := initWorkflowSyncService(db.NewPool(sqlxDB, sqlxDB), githubSvc, harness.workflowSvc, harness.taskSvc, log)
+	svc := initWorkflowSyncService(db.NewPool(sqlxDB, sqlxDB), githubSvc, nil, harness.workflowSvc, harness.taskSvc, log)
 	if svc == nil {
 		t.Fatal("initWorkflowSyncService returned nil")
 	}

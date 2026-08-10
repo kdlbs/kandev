@@ -5,6 +5,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import type { AgentRoutePreview } from "@/lib/state/slices/office/types";
 import { providerLabel } from "./provider-order-editor";
+import { useTranslation } from "react-i18next";
 
 type Props = {
   agents: AgentRoutePreview[];
@@ -12,30 +13,31 @@ type Props = {
 };
 
 export function AgentPreviewTable({ agents, isLoading }: Props) {
+  const { t } = useTranslation();
   const sorted = [...agents].sort((a, b) => a.agent_name.localeCompare(b.agent_name));
   return (
     <div className="rounded-lg border border-border overflow-hidden">
       <div className="px-4 py-3 border-b border-border">
-        <p className="text-sm font-medium">Resolved routes</p>
+        <p className="text-sm font-medium">{t("office:resolvedRoutes")}</p>
         <p className="text-xs text-muted-foreground mt-0.5">
-          What each agent would launch with the current settings.
+          {t("office:whatEachAgentWouldLaunchWith")}
         </p>
       </div>
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Agent</TableHead>
-            <TableHead>Tier</TableHead>
-            <TableHead>Primary</TableHead>
-            <TableHead>Fallback</TableHead>
-            <TableHead>Status</TableHead>
+            <TableHead>{t("office:agent")}</TableHead>
+            <TableHead>{t("office:tier")}</TableHead>
+            <TableHead>{t("office:primary")}</TableHead>
+            <TableHead>{t("office:fallback")}</TableHead>
+            <TableHead>{t("common:status")}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {sorted.length === 0 ? (
             <TableRow>
               <TableCell colSpan={5} className="text-center text-xs text-muted-foreground py-6">
-                {isLoading ? "Loading…" : "No agents in this workspace yet."}
+                {isLoading ? t("common:loading") : t("office:noAgentsInThisWorkspaceYet")}
               </TableCell>
             </TableRow>
           ) : (
@@ -48,6 +50,7 @@ export function AgentPreviewTable({ agents, isLoading }: Props) {
 }
 
 function PreviewRow({ a }: { a: AgentRoutePreview }) {
+  const { t } = useTranslation();
   return (
     <TableRow data-testid={`preview-row-${a.agent_id}`}>
       <TableCell>
@@ -74,7 +77,7 @@ function PreviewRow({ a }: { a: AgentRoutePreview }) {
             {providerLabel(a.primary_provider_id)} / {a.primary_model || "—"}
           </span>
         ) : (
-          <span className="text-xs text-muted-foreground italic">none</span>
+          <span className="text-xs text-muted-foreground italic">{t("office:noneLower")}</span>
         )}
       </TableCell>
       <TableCell>
@@ -104,15 +107,16 @@ function FallbackChain({ chain }: { chain: AgentRoutePreview["fallback_chain"] }
 }
 
 function StatusBadges({ missing, degraded }: { missing: string[]; degraded: boolean }) {
+  const { t } = useTranslation();
   if (missing.length === 0 && !degraded) {
-    return <Badge variant="outline">Ready</Badge>;
+    return <Badge variant="outline">{t("office:ready")}</Badge>;
   }
   return (
     <div className="flex flex-wrap gap-1">
-      {degraded && <Badge variant="destructive">Degraded</Badge>}
+      {degraded && <Badge variant="destructive">{t("office:degraded")}</Badge>}
       {missing.length > 0 && (
         <Badge variant="outline" title={missing.join(", ")}>
-          {missing.length} missing
+          {t("office:missingCount", { count: missing.length })}
         </Badge>
       )}
     </div>

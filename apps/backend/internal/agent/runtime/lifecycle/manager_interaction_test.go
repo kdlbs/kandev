@@ -245,7 +245,7 @@ func TestManager_RestartAgentProcess_Success(t *testing.T) {
 		AgentCommand:   "auggie --model test",
 		Status:         v1.AgentStatusRunning,
 		WorkspacePath:  "/workspace",
-		Metadata: map[string]interface{}{
+		metadata: map[string]interface{}{
 			"task_description": "review the changes",
 		},
 		agentctl:     client,
@@ -841,7 +841,7 @@ func TestManager_SetSessionModel_Passthrough_PersistsOverride(t *testing.T) {
 		SessionID:            "session-pt",
 		PassthroughProcessID: "pt-process-1",
 		Status:               v1.AgentStatusRunning,
-		Metadata:             map[string]interface{}{},
+		metadata:             map[string]interface{}{},
 		agentctl:             nil, // passthrough sessions have no agentctl client
 	}
 	require.NoError(t, mgr.executionStore.Add(exec))
@@ -851,21 +851,21 @@ func TestManager_SetSessionModel_Passthrough_PersistsOverride(t *testing.T) {
 	// must already be persisted by the time the restart fires.
 	_ = mgr.SetSessionModel(context.Background(), exec.ID, "claude-opus-4-7")
 
-	require.Equal(t, "claude-opus-4-7", exec.Metadata[MetadataKeyModelOverride],
+	require.Equal(t, "claude-opus-4-7", exec.metadataString(MetadataKeyModelOverride),
 		"SetSessionModel must persist model override on passthrough executions")
 }
 
 func TestEffectivePassthroughModel(t *testing.T) {
 	t.Run("returns override when set", func(t *testing.T) {
 		execution := &AgentExecution{
-			Metadata: map[string]interface{}{MetadataKeyModelOverride: "claude-opus-4-7"},
+			metadata: map[string]interface{}{MetadataKeyModelOverride: "claude-opus-4-7"},
 		}
 		profile := &AgentProfileInfo{Model: "claude-sonnet-4-6"}
 		require.Equal(t, "claude-opus-4-7", effectivePassthroughModel(execution, profile))
 	})
 
 	t.Run("falls back to profile model when override empty", func(t *testing.T) {
-		execution := &AgentExecution{Metadata: map[string]interface{}{}}
+		execution := &AgentExecution{metadata: map[string]interface{}{}}
 		profile := &AgentProfileInfo{Model: "claude-sonnet-4-6"}
 		require.Equal(t, "claude-sonnet-4-6", effectivePassthroughModel(execution, profile))
 	})
@@ -1439,7 +1439,7 @@ func TestIsRemoteSession(t *testing.T) {
 			SessionID:   "session-2",
 			RuntimeName: executor.NameStandalone,
 			Status:      v1.AgentStatusRunning,
-			Metadata:    map[string]interface{}{MetadataKeyIsRemote: true},
+			metadata:    map[string]interface{}{MetadataKeyIsRemote: true},
 		})
 		mgr := &Manager{executionStore: store}
 		require.True(t, mgr.IsRemoteSession(context.Background(), "session-2"))
@@ -1547,7 +1547,7 @@ func TestShouldUseContainerShell(t *testing.T) {
 			SessionID:   "session-3",
 			RuntimeName: executor.NameStandalone,
 			Status:      v1.AgentStatusRunning,
-			Metadata:    map[string]interface{}{MetadataKeyIsRemote: true},
+			metadata:    map[string]interface{}{MetadataKeyIsRemote: true},
 		})
 		mgr := &Manager{executionStore: store}
 		require.True(t, mgr.ShouldUseContainerShell(context.Background(), "session-3"))

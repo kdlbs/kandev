@@ -21,6 +21,7 @@ import {
 } from "./changes-panel-repo-groups";
 import { PRFilesGroupedList } from "./changes-panel-pr-files";
 import type { CommitDetailTarget, OpenDiffOptions } from "./changes-diff-target";
+import { useTranslation } from "react-i18next";
 
 // --- Timeline visual components ---
 
@@ -55,7 +56,7 @@ function TimelineSection({
   children?: React.ReactNode;
   collapsible?: boolean;
   defaultCollapsed?: boolean;
-  "data-testid"?: string;
+  "data-testid": string;
 }) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
   // Git data arrives in separate async store updates, so `defaultCollapsed`
@@ -94,7 +95,7 @@ function TimelineSection({
                   setCollapsed((c) => !c);
                 }}
                 aria-expanded={!collapsed}
-                data-testid={`${testId ?? label.toLowerCase()}-collapse-toggle`}
+                data-testid={`${testId}-collapse-toggle`}
               >
                 {label}
                 {typeof count === "number" && (
@@ -168,6 +169,7 @@ export function CommitsSection({
   prByRepo,
   defaultCollapsed = true,
 }: CommitsSectionProps) {
+  const { t } = useTranslation();
   const groups = groupByRepositoryName(commits, (c) => c.repository_name);
   const aheadByRepo = new Map((perRepoStatus ?? []).map((s) => [s.repository_name, s.ahead]));
   // Single-repo: drop the per-repo sub-header (CommitsRepoGroup with
@@ -189,7 +191,7 @@ export function CommitsSection({
   return (
     <TimelineSection
       dotColor={DOT_COLORS.commits}
-      label="Commits"
+      label={t("task:commits")}
       count={commits.length}
       defaultCollapsed={defaultCollapsed}
       data-testid="commits-section"
@@ -556,10 +558,11 @@ export function PRFilesSection({
   repoDisplayName,
   defaultCollapsed = true,
 }: PRFilesSectionProps) {
+  const { t } = useTranslation();
   return (
     <TimelineSection
       dotColor={DOT_COLORS.pr}
-      label="PR Changes"
+      label={t("task:prChanges")}
       count={files.length}
       defaultCollapsed={defaultCollapsed}
       data-testid="pr-changes-section"
@@ -588,6 +591,7 @@ export function ReviewProgressBar({
   totalFileCount,
   onOpenReview,
 }: ReviewProgressBarProps) {
+  const { t } = useTranslation();
   const progressPercent = totalFileCount > 0 ? (reviewedCount / totalFileCount) * 100 : 0;
 
   if (totalFileCount <= 0) return null;
@@ -611,7 +615,7 @@ export function ReviewProgressBar({
         </div>
       </TooltipTrigger>
       <TooltipContent>
-        {reviewedCount} of {totalFileCount} files reviewed
+        {t("task:filesReviewedCount", { reviewedCount, totalFileCount })}
       </TooltipContent>
     </Tooltip>
   );

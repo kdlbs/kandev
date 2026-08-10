@@ -45,6 +45,13 @@ type Repository interface {
 	// CountBySession returns the number of entries for a session.
 	CountBySession(ctx context.Context, sessionID string) (int, error)
 
+	// CountPendingByTaskIDs returns the number of pending entries per task,
+	// keyed by task_id, for every requested task ID (zero when a task has no
+	// pending entries). Pending excludes durable lifecycle rows already
+	// reserved in flight, matching GetStatus semantics. The reserved exclusion
+	// is applied in Go via IsReservedInFlight, never by matching JSON in SQL.
+	CountPendingByTaskIDs(ctx context.Context, taskIDs []string) (map[string]int, error)
+
 	// TakeHead atomically returns and deletes the lowest-position entry for the
 	// session. Returns nil, nil if the queue is empty.
 	TakeHead(ctx context.Context, sessionID string) (*QueuedMessage, error)
@@ -109,6 +116,17 @@ type Repository interface {
 	// missing source returns ErrEntryNotFound.
 	MergeIntoAbove(ctx context.Context, sessionID, sourceID, queuedBy string) (*QueuedMessage, error)
 
+	// ReorderEntries atomically rewrites the FIFO positions of the session's
+	// pending entries to match orderedIDs. The submitted list must be an exact
+	// permutation of the currently visible pending (not reserved-in-flight)
+	// entry ids ordered as the caller wants them; any drift — missing, extra,
+	// or duplicate ids, or an id belonging to a reserved in-flight row —
+	// returns ErrQueueChanged and leaves the queue untouched. Reserved
+	// in-flight rows keep their place in the sequence; visible rows are
+	// interleaved in the submitted order and all positions are compacted to
+	// 1..N in one transaction.
+	ReorderEntries(ctx context.Context, sessionID string, orderedIDs []string) error
+
 	// DeleteByID removes a single entry. The session scope (`AND session_id = ?`)
 	// is mandatory so a caller can't delete an entry by guessing its UUID across
 	// sessions — the queue_full MCP payload deliberately discloses sibling-task
@@ -142,6 +160,7 @@ type Repository interface {
 	TakePendingMove(ctx context.Context, sessionID string) (*PendingMove, error)
 }
 
+// applyMetadataUpdates merges metadata key updates into current; a nil value removes the key.
 func applyMetadataUpdates(current, updates map[string]interface{}) map[string]interface{} {
 	merged := make(map[string]interface{}, len(current)+len(updates))
 	for key, value := range current {

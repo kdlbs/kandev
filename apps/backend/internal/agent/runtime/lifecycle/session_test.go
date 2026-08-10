@@ -239,6 +239,223 @@ func createTestClient(t *testing.T, serverURL string) *agentctl.Client {
 
 // --- Tests ---
 
+// TestInitializeAndPromptWithLayers_StrictPolicyFailsGoneModel verifies the
+// start-model policy is applied to the EFFECTIVE model (profile start model or
+// persisted runtime override) and a strict profile fails the launch explicitly
+// when that model is unavailable. This is the regression guard for the
+// no-silent model-fallback gate: an unavailable model must never silently
+// continue on the provider default, and a failed launch must not look
+// initialized.
+func TestInitializeAndPromptWithLayers_StrictPolicyFailsGoneModel(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		profileModel string
+		runtimeModel string
+	}{
+		{name: "profile start model gone", profileModel: "claude-gone", runtimeModel: ""},
+		{name: "runtime override gone", profileModel: "", runtimeModel: "claude-gone"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := newMockAgentServer(t)
+			defer mock.Close()
+
+			log := newSessionTestLogger()
+			stopCh := newTestStopCh(t)
+			sm := NewSessionManager(log, stopCh)
+			streamMgr := NewStreamManager(log, StreamCallbacks{
+				OnAgentEvent: func(execution *AgentExecution, event agentctl.AgentEvent) {},
+			}, nil, stopCh)
+			cleanupStreamManager(t, stopCh, streamMgr)
+			sm.SetDependencies(NewEventPublisher(&MockEventBusWithTracking{}, log), streamMgr, nil, nil)
+
+			client := createTestClient(t, mock.server.URL)
+			defer client.Close()
+			execution := &AgentExecution{
+				ID:            "exec-1",
+				TaskID:        "task-1",
+				SessionID:     "session-1",
+				WorkspacePath: "/workspace",
+				agentctl:      client,
+				promptDoneCh:  make(chan PromptCompletionSignal, 1),
+			}
+			// Advertise only gpt-5; the policy model (claude-gone) is missing.
+			execution.SetModelState(modelState("gpt-5"))
+			agentConfig := &testAgent{
+				id:      "test-agent",
+				enabled: true,
+				runtimeConfig: &agents.RuntimeConfig{
+					Cmd:            agents.NewCommand("test-agent"),
+					Protocol:       agent.ProtocolACP,
+					SessionConfig:  agents.SessionConfig{},
+					ResourceLimits: agents.ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
+				},
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			err := sm.InitializeAndPromptWithLayers(
+				ctx, execution, agentConfig, "", nil, nil,
+				func(executionID string) error { return nil },
+				tc.profileModel, "plan", nil,
+				tc.runtimeModel, "", nil,
+				StartModelPolicy{},
+			)
+			if err == nil {
+				t.Fatal("expected InitializeAndPromptWithLayers to fail for an unavailable model")
+			}
+			if !strings.Contains(err.Error(), "claude-gone") {
+				t.Errorf("error should name the unavailable model, got %q", err.Error())
+			}
+			if execution.sessionInitialized {
+				t.Error("a failed launch must not be marked initialized")
+			}
+		})
+	}
+}
+
+// TestInitializeAndPrompt_AppliesStartModelPolicyExactlyOnce verifies the
+// start-model policy's SetModel is not repeated by the profile layers: the
+// policy applies the model, then the layers must only record it as applied
+// (a second SetModel would be a redundant ACP round-trip whose failure would
+// be silently logged while the session still starts).
+func TestInitializeAndPrompt_AppliesStartModelPolicyExactlyOnce(t *testing.T) {
+	mock := newMockAgentServer(t)
+	defer mock.Close()
+
+	log := newSessionTestLogger()
+	stopCh := newTestStopCh(t)
+	sm := NewSessionManager(log, stopCh)
+	streamMgr := NewStreamManager(log, StreamCallbacks{
+		OnAgentEvent: func(execution *AgentExecution, event agentctl.AgentEvent) {},
+	}, nil, stopCh)
+	cleanupStreamManager(t, stopCh, streamMgr)
+	sm.SetDependencies(NewEventPublisher(&MockEventBusWithTracking{}, log), streamMgr, nil, nil)
+
+	client := createTestClient(t, mock.server.URL)
+	defer client.Close()
+	execution := &AgentExecution{
+		ID:            "exec-1",
+		TaskID:        "task-1",
+		SessionID:     "session-1",
+		WorkspacePath: "/workspace",
+		agentctl:      client,
+		promptDoneCh:  make(chan PromptCompletionSignal, 1),
+	}
+	execution.SetModelState(modelState("gpt-5"))
+	agentConfig := &testAgent{
+		id:      "test-agent",
+		enabled: true,
+		runtimeConfig: &agents.RuntimeConfig{
+			Cmd:            agents.NewCommand("test-agent"),
+			Protocol:       agent.ProtocolACP,
+			SessionConfig:  agents.SessionConfig{},
+			ResourceLimits: agents.ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil,
+		func(executionID string) error { return nil },
+		StartModelPolicy{Model: "gpt-5"}, "plan", nil)
+	if err != nil {
+		t.Fatalf("InitializeAndPrompt failed: %v", err)
+	}
+	setModelCalls := 0
+	for _, action := range mock.getActionLog() {
+		if action == "agent.session.set_model" {
+			setModelCalls++
+		}
+	}
+	if setModelCalls != 1 {
+		t.Fatalf("set_model calls = %d, want exactly 1 (the policy applies the model once)", setModelCalls)
+	}
+}
+
+// TestInitializeAndPrompt_AutoFallbackFailureDoesNotRetryModel verifies that
+// the legacy best-effort policy owns its failed SetModel attempt. The profile
+// layers must not send the same request a second time after the policy has
+// deliberately continued on the provider default.
+func TestInitializeAndPrompt_AutoFallbackFailureDoesNotRetryModel(t *testing.T) {
+	mock := newMockAgentServer(t)
+	defer mock.Close()
+	mock.handler = func(msg ws.Message) *ws.Message {
+		if msg.Action == "agent.session.set_model" {
+			resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "model unavailable", nil)
+			return resp
+		}
+		return mock.defaultHandler(msg)
+	}
+
+	log := newSessionTestLogger()
+	stopCh := newTestStopCh(t)
+	sm := NewSessionManager(log, stopCh)
+	streamMgr := NewStreamManager(log, StreamCallbacks{
+		OnAgentEvent: func(execution *AgentExecution, event agentctl.AgentEvent) {},
+	}, nil, stopCh)
+	cleanupStreamManager(t, stopCh, streamMgr)
+	eventBus := &MockEventBusWithTracking{}
+	sm.SetDependencies(NewEventPublisher(eventBus, log), streamMgr, nil, nil)
+
+	client := createTestClient(t, mock.server.URL)
+	defer client.Close()
+	execution := &AgentExecution{
+		ID:            "exec-1",
+		TaskID:        "task-1",
+		SessionID:     "session-1",
+		WorkspacePath: "/workspace",
+		agentctl:      client,
+		promptDoneCh:  make(chan PromptCompletionSignal, 1),
+	}
+	execution.SetModelState(&CachedModelState{
+		CurrentModelID: "provider-default",
+		Models:         []streams.SessionModelInfo{{ModelID: "gpt-5"}},
+	})
+	agentConfig := &testAgent{
+		id:      "test-agent",
+		enabled: true,
+		runtimeConfig: &agents.RuntimeConfig{
+			Cmd:            agents.NewCommand("test-agent"),
+			Protocol:       agent.ProtocolACP,
+			SessionConfig:  agents.SessionConfig{},
+			ResourceLimits: agents.ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil,
+		func(executionID string) error { return nil },
+		StartModelPolicy{Model: "gpt-5", AutoFallback: true}, "plan", nil)
+	if err != nil {
+		t.Fatalf("InitializeAndPrompt failed: %v", err)
+	}
+
+	setModelCalls := 0
+	for _, action := range mock.getActionLog() {
+		if action == "agent.session.set_model" {
+			setModelCalls++
+		}
+	}
+	if setModelCalls != 1 {
+		t.Fatalf("set_model calls = %d, want exactly 1 policy attempt", setModelCalls)
+	}
+
+	var original *AgentStreamEventPayload
+	for _, event := range eventBus.getStreamEvents() {
+		if event.Data != nil && originalConfigEventData(event.Data.Data) {
+			original = &event
+			break
+		}
+	}
+	if original == nil {
+		t.Fatal("expected original configuration snapshot")
+	}
+	if original.Data.CurrentModelID != "provider-default" {
+		t.Fatalf("original model = %q, want provider-default after failed policy attempt", original.Data.CurrentModelID)
+	}
+}
+
 func TestInitializeAndPrompt_StreamBeforeInitialize(t *testing.T) {
 	// This test verifies the critical ordering: stream connects BEFORE initialize is called.
 	mock := newMockAgentServer(t)
@@ -285,7 +502,7 @@ func TestInitializeAndPrompt_StreamBeforeInitialize(t *testing.T) {
 
 	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
 		return nil
-	}, "", "", nil)
+	}, StartModelPolicy{}, "", nil)
 	if err != nil {
 		t.Fatalf("InitializeAndPrompt failed: %v", err)
 	}
@@ -366,7 +583,7 @@ func TestInitializeAndPrompt_AppliesProfileConfigOptions(t *testing.T) {
 	defer cancel()
 	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
 		return nil
-	}, "sonnet", "plan", map[string]string{
+	}, StartModelPolicy{Model: "sonnet"}, "plan", map[string]string{
 		"effort": "high",
 		"model":  "ignored",
 		"mode":   "ignored",
@@ -811,7 +1028,7 @@ func TestInitializeAndPrompt_StreamTimeout(t *testing.T) {
 
 	err = sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
 		return nil
-	}, "", "", nil)
+	}, StartModelPolicy{}, "", nil)
 
 	// Should fail because stream couldn't connect and Initialize fails
 	if err == nil {
@@ -866,7 +1083,7 @@ func TestInitializeAndPrompt_WithTaskDescription(t *testing.T) {
 
 	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "Build a feature", nil, nil, func(executionID string) error {
 		return nil
-	}, "", "", nil)
+	}, StartModelPolicy{}, "", nil)
 	if err != nil {
 		t.Fatalf("InitializeAndPrompt failed: %v", err)
 	}
@@ -934,7 +1151,7 @@ func TestInitializeAndPrompt_NoStreamManager(t *testing.T) {
 	// But it should NOT panic due to nil streamManager.
 	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
 		return nil
-	}, "", "", nil)
+	}, StartModelPolicy{}, "", nil)
 
 	// Expect error because Initialize call over WS will fail (stream not connected)
 	if err == nil {

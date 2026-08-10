@@ -1,7 +1,7 @@
 ---
 status: approved
 created: 2026-08-01
-updated: 2026-08-02
+updated: 2026-08-09
 owner: kandev
 ---
 
@@ -41,6 +41,8 @@ detail surface.
 - `message.add` uses a stable client-generated message ID so an uncertain send
   can be reconciled or retried without creating or dispatching a duplicate.
 - Existing desktop and mobile status/icon precedence remains unchanged.
+- Startup recovery publishes every repaired session state through the semantic task event path.
+  Persisted summaries converge before the backend reports readiness.
 
 ## Task status summary
 
@@ -71,6 +73,16 @@ remain during migration, but switchers use the summary when present.
 - Pending permission outranks pending clarification for the row's primary
   state icon. Both outrank generating/background activity, which outranks
   coarse lifecycle state. This is the existing task-row precedence.
+- A session's `pending_action` clears only when the specific request that armed
+  it resolves — a `message.updated` on that same permission/clarification
+  request row (matched by type and `pending_id`) reaching a terminal,
+  non-`pending` status, or that row's deletion. An unrelated message on the
+  same session (a tool call, script execution, or any other row that merely
+  carries its own terminal status metadata) must not clear a different
+  session's armed `pending_action`, and must not clear the current session's
+  `pending_action` unless it is that same request row. Otherwise a session that
+  is busy streaming ordinary tool activity right after a permission/
+  clarification request clears the affordance before the user ever answers it.
 - `active_error` is independent of the primary state icon. It represents the
   newest relevant recoverable agent error and clears after an authoritative
   dismissal or a newer agent response according to the existing error rules.
@@ -118,6 +130,8 @@ remain during migration, but switchers use the summary when present.
   events from publishing duplicate revisions or losing a newer value.
 - Missing rows are rebuilt from authoritative records. List and boot loaders
   batch summary reads and may batch repairs; they do not perform an N+1 query.
+- Existing rows are repaired after startup recovery changes authoritative session state. Missing-row
+  hydration is not the only recovery path for a stale summary.
 - Live Git observations remain coalesced before persistence/publication.
   Running executions maintain the slow monitoring baseline independently of
   browser subscribers; active focus may request fast monitoring. Settled tasks
@@ -216,6 +230,12 @@ intermediate replacement.
 - **GIVEN** a recoverable error is dismissed or followed by a newer agent
   response, **WHEN** the projector processes that occurrence, **THEN** the
   independent error indicator clears on both task switchers.
+- **GIVEN** a session's agent requests permission and, before that request is
+  answered, the same session emits an unrelated tool call/execute/read message
+  that reaches its own terminal status, **WHEN** the projector processes that
+  unrelated message, **THEN** `pending_action` for the session remains
+  `permission` (the affordance does not flash and disappear before the user
+  answers it).
 - **GIVEN** notification traffic saturates its queue, **WHEN** the selected
   session sends `message.add`, **THEN** the correlated response is delivered
   first or the connection closes for deterministic reconciliation.
@@ -240,6 +260,9 @@ intermediate replacement.
 - **GIVEN** a phone viewport, **WHEN** task summaries change, **THEN** the
   existing task-switcher sheet shows the same badges and precedence as the
   desktop sidebar without new navigation, scroll, or touch behavior.
+- **GIVEN** a stored summary reports a `RUNNING` primary session with `generating` activity,
+  **WHEN** startup recovery changes that session to `WAITING_FOR_INPUT`, **THEN** a newer summary
+  reports the waiting state and no generating activity before the backend reports readiness.
 
 ## Out of scope
 
@@ -264,3 +287,5 @@ intermediate replacement.
   [`../../plans/bounded-task-status-delivery/plan.md`](../../plans/bounded-task-status-delivery/plan.md)
 - Stream overload repair:
   [`../../plans/session-stream-overload-isolation/plan.md`](../../plans/session-stream-overload-isolation/plan.md)
+- Startup-summary repair:
+  [`../../plans/backend-runtime-state-ownership/plan.md`](../../plans/backend-runtime-state-ownership/plan.md)

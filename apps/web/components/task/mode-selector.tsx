@@ -17,6 +17,7 @@ import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { setSessionMode } from "@/lib/api/domains/session-api";
 import { cn } from "@/lib/utils";
 import type { Agent, AgentProfile, AvailableAgent } from "@/lib/types/http";
+import { useTranslation } from "react-i18next";
 
 type ModeOption = {
   id: string;
@@ -127,6 +128,7 @@ export const ModeSelector = memo(function ModeSelector({
   sessionId,
   triggerClassName,
 }: ModeSelectorProps) {
+  const { t } = useTranslation();
   const modeState = useModeSelectorState(sessionId);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [tooltipOpen, setTooltipOpen] = useState(false);
@@ -168,7 +170,7 @@ export const ModeSelector = memo(function ModeSelector({
   }
 
   const currentMode = modeState.availableModes.find((m) => m.id === modeState.currentModeId);
-  const displayName = currentMode?.name || modeState.currentModeId || "Mode";
+  const displayName = currentMode?.name || modeState.currentModeId || t("common:mode");
 
   return (
     <DropdownMenu open={dropdownOpen} onOpenChange={handleDropdownOpenChange}>
@@ -189,10 +191,10 @@ export const ModeSelector = memo(function ModeSelector({
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
-        <TooltipContent side="top">Agent permission mode</TooltipContent>
+        <TooltipContent side="top">{t("task:agentPermissionMode")}</TooltipContent>
       </Tooltip>
       <DropdownMenuContent align="start" side="top" className="min-w-[280px]">
-        <DropdownMenuLabel>Available Modes</DropdownMenuLabel>
+        <DropdownMenuLabel>{t("task:availableModes")}</DropdownMenuLabel>
         {modeState.availableModes.map((mode) => (
           <DropdownMenuItem
             key={mode.id}

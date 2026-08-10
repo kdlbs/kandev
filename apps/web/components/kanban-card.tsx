@@ -63,6 +63,8 @@ export interface Task {
    * affordance on the card status icon.
    */
   foregroundActivity?: ForegroundActivity | null;
+  /** True when the task's session was mid-turn when the backend died. */
+  interrupted?: boolean;
   /** Live subagents summed across this task's sessions; drives the count chip. */
   activeSubagentCount?: number;
   reviewStatus?: "pending" | "approved" | "changes_requested" | "rejected" | null;

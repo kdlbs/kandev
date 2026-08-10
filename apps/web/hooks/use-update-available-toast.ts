@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { nativeNotifications } from "@/lib/desktop/native-notification-client";
+import { t } from "@/lib/i18n";
 
 export function useUpdateAvailableToast() {
   const notification = useAppStore((s) => s.updateAvailableNotification);
@@ -19,7 +20,7 @@ export function useUpdateAvailableToast() {
     }
     shownRef.current.add(notification.version);
 
-    const title = notification.title || "Kandev update available";
+    const title = notification.title || t("task:kandevUpdateAvailable");
     const body =
       notification.body ||
       `Kandev ${notification.version} is available. Open Settings > System > Updates to review it.`;

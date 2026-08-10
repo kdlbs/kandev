@@ -119,7 +119,12 @@ async function main(): Promise<void> {
     if (!repoRoot) {
       throw new Error("Unable to locate repo root for dev. Run from the repo.");
     }
-    await runDev({ repoRoot, backendPort, webPort });
+    await runDev({
+      repoRoot,
+      backendPort,
+      backendPortSource: resolved.backendPortSource,
+      webPort,
+    });
     return;
   }
 
@@ -131,6 +136,7 @@ async function main(): Promise<void> {
     await runStart({
       repoRoot,
       backendPort,
+      backendPortSource: resolved.backendPortSource,
       verbose: options.verbose,
       debug: options.debug,
       headless: options.headless,
@@ -141,6 +147,7 @@ async function main(): Promise<void> {
   await runRelease({
     runtimeVersion: options.runtimeVersion,
     backendPort,
+    backendPortSource: resolved.backendPortSource,
     verbose: options.verbose,
     debug: options.debug,
     headless: options.headless,

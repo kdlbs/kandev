@@ -68,6 +68,7 @@ function makeUnloadedSettings(): UserSettingsState {
     showScrollToLastPrompt: true,
     showScrollToStart: false,
     showTranscriptAutoScrollControl: true,
+    showTodoListPanel: false,
     showReleaseNotification: true,
     releaseNotesLastSeenVersion: null,
     savedLayouts: [],
@@ -80,6 +81,7 @@ function makeUnloadedSettings(): UserSettingsState {
       branch: null,
       agentProfileId: null,
       executorProfileId: null,
+      workflowIdsByWorkspace: {},
     },
     jiraSavedViews: undefined,
     jiraTaskPresets: undefined,
@@ -161,7 +163,9 @@ describe("useEnsureUserSettings", () => {
     resolveFetch(userSettingsResponse());
     await waitFor(() => expect(mockSetUserSettings).toHaveBeenCalled());
   });
+});
 
+describe("useEnsureUserSettings — fetched settings overlays", () => {
   it("merges only defined queued task-create fields over fetched settings", async () => {
     mockReadQueuedTaskCreateLastUsedState.mockReturnValue({
       repositoryId: undefined,
@@ -186,6 +190,7 @@ describe("useEnsureUserSettings", () => {
       branch: "main",
       agentProfileId: "agent-2",
       executorProfileId: "exec-profile-1",
+      workflowIdsByWorkspace: {},
       synced: true,
     });
   });
@@ -258,6 +263,7 @@ describe("useEnsureUserSettings — loaded settings overlay", () => {
         branch: "main",
         agentProfileId: "agent-1",
         executorProfileId: "exec-1",
+        workflowIdsByWorkspace: {},
       },
     };
     mockReadQueuedTaskCreateLastUsedState.mockReturnValue({
@@ -275,6 +281,7 @@ describe("useEnsureUserSettings — loaded settings overlay", () => {
       branch: "feature",
       agentProfileId: "agent-1",
       executorProfileId: "exec-1",
+      workflowIdsByWorkspace: {},
     });
   });
 });

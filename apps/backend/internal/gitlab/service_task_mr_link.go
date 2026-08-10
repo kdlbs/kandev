@@ -300,6 +300,14 @@ func taskMRFromStatus(taskID, repositoryID, host, projectPath string, status *MR
 		RequiredApprovals: status.RequiredApprovals, PipelineJobsTotal: status.PipelineJobsTotal,
 		PipelineJobsPass: status.PipelineJobsPassing, CreatedAt: mr.CreatedAt, MergedAt: mr.MergedAt,
 		ClosedAt: mr.ClosedAt, LastSyncedAt: &now,
+		DetailedMergeStatus: status.DetailedMergeStatus, ReviewerCount: status.ReviewerCount,
+		UnapprovedReviewers: status.UnapprovedReviewers,
+		// UnresolvedDiscussions is deliberately NOT taken from status (it is
+		// always 0 there — GetMRStatus skips discussions, see MRStatus's type
+		// doc). The auto-fix/auto-merge evaluation pass persists it separately
+		// via Store.UpdateTaskMRUnresolvedDiscussions for automation-subscribed
+		// MRs only; overwriting it here on every lifecycle sync would clobber
+		// that value back to 0 on the very next poll.
 	}
 }
 

@@ -18,15 +18,19 @@ import type {
 } from "@/lib/types/azure-devops";
 import type { Repository, Task, Workflow, WorkflowStep } from "@/lib/types/http";
 import { truncateRemoteTaskTitle } from "@/lib/task-title";
+import { t } from "@/lib/i18n";
 
 export type AzureDevOpsLaunchPayload =
   | { kind: "work-item"; item: AzureDevOpsWorkItem; action?: AzureDevOpsActionPreset }
   | { kind: "pull-request"; pullRequest: AzureDevOpsPullRequest; action?: AzureDevOpsActionPreset };
 
 function plainText(value: string | undefined): string {
-  if (!value) return "(no description)";
+  // Resolved per call, not at module load, so the fallback follows the active
+  // locale. `launchText` runs inside the launcher's `useMemo`, i.e. at render.
+  const fallback = t("azuredevops:descriptionFallback");
+  if (!value) return fallback;
   const document = new DOMParser().parseFromString(value, "text/html");
-  return document.body.textContent?.trim() || "(no description)";
+  return document.body.textContent?.trim() || fallback;
 }
 
 function launchText(payload: AzureDevOpsLaunchPayload) {
@@ -137,7 +141,7 @@ export function AzureDevOpsTaskLauncher({
   const onSuccess = async (task: Task) => {
     if (payload?.kind === "work-item" && workspaceId) {
       if (!payload.item.project) {
-        toast.error("Failed to link Azure DevOps work item: project is missing.");
+        toast.error(t("azuredevops:failedToLinkWorkItemNoProject"));
       } else {
         try {
           const linked = await associateAzureDevOpsWorkItem(workspaceId, task.id, {
@@ -148,7 +152,7 @@ export function AzureDevOpsTaskLauncher({
           setTaskWorkItem(task.id, linked);
         } catch (error: unknown) {
           toast.error(
-            error instanceof Error ? error.message : "Failed to link Azure DevOps work item.",
+            error instanceof Error ? error.message : t("azuredevops:failedToLinkWorkItem"),
           );
         }
       }
@@ -163,7 +167,7 @@ export function AzureDevOpsTaskLauncher({
         setTaskPullRequest(task.id, linked);
       } catch (error: unknown) {
         toast.error(
-          error instanceof Error ? error.message : "Failed to link Azure DevOps pull request.",
+          error instanceof Error ? error.message : t("azuredevops:failedToLinkPullRequest"),
         );
       }
     }

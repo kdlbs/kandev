@@ -18,6 +18,10 @@ type PromptRequest struct {
 	// If empty, no session/set_mode call is made and the agent default is used.
 	Mode string `json:"mode,omitempty"`
 
+	// Profile-owned launch policy. These values are resolved by the backend
+	// at call start and are never accepted from an external client.
+	AutoApprovePermissions *bool `json:"auto_approve_permissions,omitempty"`
+
 	// InferenceConfig is the agent's inference configuration.
 	// This is passed from the backend which has access to the agent registry.
 	InferenceConfig *InferenceConfigDTO `json:"inference_config,omitempty"`
@@ -59,6 +63,18 @@ type HTTPHeaderDTO struct {
 type ProbeRequest struct {
 	// AgentID is the agent to probe (e.g., "claude-acp", "codex-acp").
 	AgentID string `json:"agent_id" binding:"required"`
+
+	// Model optionally asks the probe to apply a model after session/new and
+	// return the provider's resulting configuration options.
+	Model string `json:"model,omitempty"`
+
+	// Mode optionally selects a session mode before the probe returns its
+	// resolved configuration options.
+	Mode string `json:"mode,omitempty"`
+
+	// ConfigOptions optionally applies additional select values before the
+	// probe returns its resolved configuration options.
+	ConfigOptions map[string]string `json:"config_options,omitempty"`
 
 	// Refresh asks agent-specific discovery fallbacks to invalidate their own
 	// model caches. ACP session discovery itself always starts a fresh process.
@@ -102,7 +118,7 @@ type ProbeResponse struct {
 	CurrentModeID string `json:"current_mode_id,omitempty"`
 
 	// ConfigOptions are select-style session options advertised by session/new.
-	ConfigOptions []ProbeConfigOption `json:"config_options,omitempty"`
+	ConfigOptions []ProbeConfigOption `json:"config_options"`
 
 	// Commands are the slash commands the agent advertises via the
 	// `available_commands_update` session notification (drained briefly
@@ -184,7 +200,9 @@ type InferenceConfigDTO struct {
 	Env map[string]string `json:"env,omitempty"`
 	// StripEnv lists environment variables to strip from the inference
 	// subprocess environment entirely (not just set to empty).
-	StripEnv []string `json:"strip_env,omitempty"`
+	StripEnv      []string `json:"strip_env,omitempty"`
+	CLIFlags      []string `json:"cli_flags,omitempty"`
+	CommandPrefix []string `json:"command_prefix,omitempty"`
 }
 
 // PromptResponse is the response from executing a utility prompt.

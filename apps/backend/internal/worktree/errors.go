@@ -68,6 +68,18 @@ var (
 	// usable characters after sanitization. Callers that pass an explicit slug
 	// must populate something the filesystem can accept.
 	ErrInvalidBranchSlug = errors.New("branch slug has no usable characters after sanitization")
+
+	// ErrEnvironmentNotResolved is returned by the store when a worktree
+	// cannot be persisted because the session has no task environment yet
+	// (initial materialization). The manager treats it as a skip, not a
+	// failure — the launch's environment persistence records the worktree.
+	ErrEnvironmentNotResolved = errors.New("session has no task environment")
+
+	// ErrTaskCleanupInProgress is returned by the store when the owning
+	// task has an active lifecycle cleanup barrier. The caller compensates
+	// the just-created physical worktree instead of admitting it after
+	// cleanup inventory was captured.
+	ErrTaskCleanupInProgress = errors.New("task cleanup in progress")
 )
 
 // containsAuthFailure checks if git output indicates an authentication failure.

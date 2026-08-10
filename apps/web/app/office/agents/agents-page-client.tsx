@@ -13,12 +13,14 @@ import { AgentCard } from "./components/agent-card";
 import { CreateAgentDialog } from "./components/create-agent-dialog";
 import { EmptyState } from "../components/shared/empty-state";
 import { PageHeader } from "../components/shared/page-header";
+import { useTranslation } from "react-i18next";
 
 type AgentsPageClientProps = {
   initialAgents: AgentProfile[];
 };
 
 export function AgentsPageClient({ initialAgents }: AgentsPageClientProps) {
+  const { t } = useTranslation();
   const agents = useAppStore((s) => s.office.agentProfiles);
   const setOfficeAgentProfiles = useAppStore((s) => s.setOfficeAgentProfiles);
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
@@ -55,19 +57,19 @@ export function AgentsPageClient({ initialAgents }: AgentsPageClientProps) {
   return (
     <div className="p-6 space-y-4">
       <PageHeader
-        title="Agents"
+        title={t("office:agents")}
         action={
           <Button size="sm" className="cursor-pointer" onClick={() => setShowCreate(true)}>
             <IconPlus className="h-4 w-4 mr-1" />
-            New Agent
+            {t("office:newAgent")}
           </Button>
         }
       />
 
       {agents.length === 0 ? (
         <EmptyState
-          message="No agents yet."
-          description="Create a CEO agent to start orchestrating work across your projects."
+          message={t("office:noAgentsYet")}
+          description={t("office:createACeoAgentToStart")}
           action={
             <Button
               variant="outline"
@@ -76,7 +78,7 @@ export function AgentsPageClient({ initialAgents }: AgentsPageClientProps) {
               onClick={() => setShowCreate(true)}
             >
               <IconPlus className="h-4 w-4 mr-1" />
-              Create Agent
+              {t("office:createAgent")}
             </Button>
           }
         />

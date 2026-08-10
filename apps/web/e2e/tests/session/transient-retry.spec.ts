@@ -47,14 +47,12 @@ test.describe("transient provider error (529 Overloaded) retry", () => {
 
     // /overloaded:9 keeps failing, so each backoff retry re-drives the prompt
     // and the orchestrator advances the attempt counter. The yellow card must
-    // progress from attempt 1/3 to attempt 2/3 — proving the retry loop is live
+    // progress from attempt 1 of 5 to attempt 2 of 5 — proving the retry loop is live
     // and paced rather than an instant, silent resume.
     await session.sendMessage("/overloaded:9");
 
-    await expect(session.chat.getByText(/retrying in 5s \(attempt 1\/3\)/i)).toBeVisible({
-      timeout: 30_000,
-    });
-    await expect(session.chat.getByText(/attempt 2\/3/i)).toBeVisible({ timeout: 30_000 });
+    await expect(session.chat.getByText(/attempt 1 of 5/i)).toBeVisible({ timeout: 30_000 });
+    await expect(session.chat.getByText(/attempt 2 of 5/i)).toBeVisible({ timeout: 30_000 });
   });
 
   test("a 529 on the very first turn retries (launch prompt is cached)", async ({
@@ -80,9 +78,7 @@ test.describe("transient provider error (529 Overloaded) retry", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    await expect(session.chat.getByText(/retrying in 5s \(attempt 1\/3\)/i)).toBeVisible({
-      timeout: 30_000,
-    });
-    await expect(session.chat.getByText(/attempt 2\/3/i)).toBeVisible({ timeout: 30_000 });
+    await expect(session.chat.getByText(/attempt 1 of 5/i)).toBeVisible({ timeout: 30_000 });
+    await expect(session.chat.getByText(/attempt 2 of 5/i)).toBeVisible({ timeout: 30_000 });
   });
 });

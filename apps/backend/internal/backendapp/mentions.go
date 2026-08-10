@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/gitlab"
 	"github.com/kandev/kandev/internal/mentions"
@@ -24,6 +25,7 @@ type MentionComponents struct {
 	Registry   *mentions.Registry
 	Search     mentions.Searcher
 	Submission entityrefs.SubmissionValidator
+	Log        *logger.Logger
 }
 
 type mentionWorkspaceResolver interface {
@@ -35,6 +37,7 @@ type mentionConversationResolver interface {
 }
 
 func newMentionComponents(
+	log *logger.Logger,
 	workspaces mentionWorkspaceResolver,
 	conversations mentionConversationResolver,
 	providers ...mentions.MentionProvider,
@@ -47,12 +50,13 @@ func newMentionComponents(
 	}
 	search := &workspaceValidatingMentionSearcher{
 		workspaces: workspaces,
-		searcher:   mentions.NewService(registry),
+		searcher:   mentions.NewService(registry, mentions.WithLogger(log)),
 	}
 	return &MentionComponents{
 		Registry:   registry,
 		Search:     search,
 		Submission: entityrefs.NewSubmissionService(conversations, registry),
+		Log:        log,
 	}, nil
 }
 
@@ -70,14 +74,14 @@ func (s *workspaceValidatingMentionSearcher) Search(
 		return nil, mentions.ErrInvalidRequest
 	}
 	if s == nil || s.workspaces == nil || s.searcher == nil {
-		return nil, errors.New("mention search is unavailable")
+		return nil, mentions.NewSearchFailure(mentions.FailureStageSearch, mentions.FailureClassInternal, errors.New("mention search is unavailable"))
 	}
 	workspace, err := s.workspaces.GetWorkspace(ctx, request.WorkspaceID)
 	if err != nil {
 		if errors.Is(err, repository.ErrWorkspaceNotFound) {
 			return nil, mentions.ErrWorkspaceNotFound
 		}
-		return nil, fmt.Errorf("validate mention workspace: %w", err)
+		return nil, mentions.NewSearchFailure(mentions.FailureStageWorkspaceValidation, mentions.FailureClassWorkspaceLookup, err)
 	}
 	if workspace == nil || workspace.ID != request.WorkspaceID {
 		return nil, mentions.ErrWorkspaceNotFound
@@ -298,5 +302,5 @@ func registerMentionRoutes(router gin.IRoutes, components *MentionComponents) {
 	if router == nil || components == nil || components.Search == nil {
 		return
 	}
-	mentions.NewHandler(components.Search).RegisterRoutes(router)
+	mentions.NewHandler(components.Search, components.Log).RegisterRoutes(router)
 }

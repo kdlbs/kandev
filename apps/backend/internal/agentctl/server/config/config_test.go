@@ -24,10 +24,69 @@ func TestNewInstanceConfigNormalizesMcpProviders(t *testing.T) {
 func TestCollectAgentEnvKeepsGitHubCLIShimAheadOfProfilePath(t *testing.T) {
 	t.Setenv("KANDEV_GITHUB_CREDENTIAL_BROKER_URL", "https://kandev.example/api/github/credentials/resolve")
 	t.Setenv("KANDEV_GITHUB_CLI_SHIM_DIR", "/kandev/shims")
-	env := CollectAgentEnv(map[string]string{"PATH": "/profile/bin:/usr/bin"})
+	// The profile path is joined with the platform separator rather than a
+	// literal ":" so SplitList sees two entries on Windows too — hardcoding the
+	// Unix separator made this fail there with the shim ahead of one unsplit entry.
+	profilePath := strings.Join([]string{"/profile/bin", "/usr/bin"}, string(os.PathListSeparator))
+	env := CollectAgentEnv(map[string]string{"PATH": profilePath})
 	want := strings.Join([]string{"/kandev/shims", "/profile/bin", "/usr/bin"}, string(os.PathListSeparator))
 	if got := envSliceValue(env, "PATH"); got != want {
 		t.Fatalf("PATH = %q, want %q", got, want)
+	}
+}
+
+// Windows hands the search path down as "Path". Writing "PATH" used to leave
+// that untouched and add a second variable holding only the shim directory, so
+// `cmd /c npx …` resolved against the shim dir alone and the agent died with
+// "'npx' is not recognized". Both branches are exercised through the parameter
+// rather than runtime.GOOS so the regression is caught on every runner.
+func TestSearchPathKey(t *testing.T) {
+	inherited := map[string]string{"Path": "/node/bin"}
+	if got := searchPathKey(inherited, true); got != "Path" {
+		t.Fatalf("searchPathKey(case-insensitive) = %q, want the inherited %q", got, "Path")
+	}
+	if got := searchPathKey(inherited, false); got != "PATH" {
+		t.Fatalf("searchPathKey(case-sensitive) = %q, want %q — a Unix \"Path\" is a different variable", got, "PATH")
+	}
+
+	both := map[string]string{"PATH": "/exact", "Path": "/variant"}
+	if got := searchPathKey(both, true); got != "PATH" {
+		t.Fatalf("searchPathKey with both keys = %q, want the exact match to win", got)
+	}
+}
+
+func TestPrependPathEntryExtendsTheKeyItFound(t *testing.T) {
+	env := map[string]string{
+		"PATH": strings.Join([]string{"/node/bin", "/usr/bin"}, string(os.PathListSeparator)),
+	}
+
+	prependPathEntry(env, "/kandev/shims", false)
+
+	want := strings.Join([]string{"/kandev/shims", "/node/bin", "/usr/bin"}, string(os.PathListSeparator))
+	if env["PATH"] != want {
+		t.Fatalf("PATH = %q, want %q", env["PATH"], want)
+	}
+	if len(env) != 1 {
+		t.Fatalf("prependPathEntry left %d variables, want the one it extended: %v", len(env), env)
+	}
+}
+
+// The regression itself: an environment carrying only the Windows-style "Path"
+// must have that entry extended, not shadowed by a freshly created "PATH"
+// holding the shim directory alone.
+func TestPrependPathEntryExtendsInheritedWindowsPathKey(t *testing.T) {
+	env := map[string]string{
+		"Path": strings.Join([]string{"/node/bin", "/usr/bin"}, string(os.PathListSeparator)),
+	}
+
+	prependPathEntry(env, "/kandev/shims", true)
+
+	if _, duplicated := env["PATH"]; duplicated {
+		t.Fatalf("prependPathEntry added a second search-path variable: %v", env)
+	}
+	want := strings.Join([]string{"/kandev/shims", "/node/bin", "/usr/bin"}, string(os.PathListSeparator))
+	if env["Path"] != want {
+		t.Fatalf("Path = %q, want %q", env["Path"], want)
 	}
 }
 
@@ -220,6 +279,40 @@ func TestCollectAgentEnvPreservesParentIndexedGitConfig(t *testing.T) {
 	}
 	if got := envSliceValue(env, "GIT_CONFIG_KEY_2"); got != "credential.https://github.com.helper" {
 		t.Fatalf("GIT_CONFIG_KEY_2 = %q, want managed helper", got)
+	}
+}
+
+func TestCollectAgentEnvIgnoresParentIndexedGitConfigBeyondCount(t *testing.T) {
+	// Hosts inherit indexed entries from a parent that later lowered
+	// GIT_CONFIG_COUNT. Git ignores the leftovers, so instance creation must
+	// too instead of failing every task start.
+	clearParentIndexedGitConfig(t)
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "core.hooksPath")
+	t.Setenv("GIT_CONFIG_VALUE_0", "/opt/locstat/hooks")
+	t.Setenv("GIT_CONFIG_KEY_1", "notes.augment.mergeStrategy")
+	t.Setenv("GIT_CONFIG_VALUE_1", "cat_sort_uniq")
+
+	env, err := CollectAgentEnvWithError(map[string]string{
+		"GIT_CONFIG_COUNT":   "1",
+		"GIT_CONFIG_KEY_0":   "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_0": "!agentctl git-credential",
+	})
+	if err != nil {
+		t.Fatalf("CollectAgentEnvWithError() error = %v", err)
+	}
+
+	if got := envSliceValue(env, "GIT_CONFIG_COUNT"); got != "2" {
+		t.Fatalf("GIT_CONFIG_COUNT = %q, want 2", got)
+	}
+	if got := envSliceValue(env, "GIT_CONFIG_KEY_0"); got != "core.hooksPath" {
+		t.Fatalf("GIT_CONFIG_KEY_0 = %q, want core.hooksPath", got)
+	}
+	if got := envSliceValue(env, "GIT_CONFIG_KEY_1"); got != "credential.https://github.com.helper" {
+		t.Fatalf("GIT_CONFIG_KEY_1 = %q, want managed helper", got)
+	}
+	if got := envSliceValue(env, "GIT_CONFIG_KEY_2"); got != "" {
+		t.Fatalf("GIT_CONFIG_KEY_2 = %q, want stray parent entry dropped", got)
 	}
 }
 

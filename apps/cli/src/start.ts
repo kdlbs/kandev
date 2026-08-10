@@ -13,6 +13,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import type { BackendPortSource } from "./args";
 import {
   HEALTH_TIMEOUT_MS_RELEASE,
   resolveDataDir,
@@ -37,6 +38,7 @@ export type StartOptions = {
   repoRoot: string;
   /** Optional preferred backend port (finds available port if not specified) */
   backendPort?: number;
+  backendPortSource?: BackendPortSource;
   /** Show backend info logs on stdout */
   verbose?: boolean;
   /** Retain backend debug logs in its file + agent message dumps */
@@ -60,11 +62,12 @@ export type StartOptions = {
 export async function runStart({
   repoRoot,
   backendPort,
+  backendPortSource,
   verbose = false,
   debug = false,
   headless = false,
 }: StartOptions): Promise<void> {
-  const ports = await pickBackendPorts(backendPort);
+  const ports = await pickBackendPorts({ backendPort, backendPortSource });
 
   const backendBin = path.join(repoRoot, "apps", "backend", "bin", getBinaryName("kandev"));
   if (!fs.existsSync(backendBin)) {
@@ -117,13 +120,19 @@ export async function runStart({
 
   const healthTimeoutMs = resolveHealthTimeoutMs(HEALTH_TIMEOUT_MS_RELEASE);
   console.log("[kandev] starting backend...");
-  await waitForHealth(ports.backendUrl, backend.proc, healthTimeoutMs, () => {
-    const buffered = output.read();
-    if (buffered.trim().length === 0) return;
-    console.error("[kandev] --- backend stdout (last captured output) ---");
-    console.error(buffered.trimEnd());
-    console.error("[kandev] --- end backend stdout ---");
-  });
+  await waitForHealth(
+    ports.backendUrl,
+    backend.proc,
+    healthTimeoutMs,
+    backendEnv.KANDEV_DESKTOP_HEALTH_TOKEN,
+    () => {
+      const buffered = output.read();
+      if (buffered.trim().length === 0) return;
+      console.error("[kandev] --- backend stdout (last captured output) ---");
+      console.error(buffered.trimEnd());
+      console.error("[kandev] --- end backend stdout ---");
+    },
+  );
   console.log(`[kandev] backend ready at ${ports.backendUrl}`);
 
   console.log("[kandev] open: " + ports.backendUrl);

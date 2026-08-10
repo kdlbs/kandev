@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "@/lib/toast/sonner";
+import { t } from "@/lib/i18n";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { createQueuedUserSettingsSync } from "@/lib/user-settings-sync";
 import type { AppStatusBarOrderState } from "@/lib/state/slices/settings/types";
@@ -49,7 +50,7 @@ export function useAppStatusBarOrder<T extends AppStatusItemDescriptor>(activeIt
         .catch(() => {
           if (latestRevision.current !== revision) return;
           setOptimisticOrder(null);
-          toast.error("Could not save status bar order");
+          toast.error(t("task:couldNotSaveStatusBarOrder"));
         });
     },
     [activeItems, order, store],

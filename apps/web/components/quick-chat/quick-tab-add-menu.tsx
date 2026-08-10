@@ -35,7 +35,7 @@ export function QuickTabAddMenu({ onNewAgent, onNewTerminal }: QuickTabAddMenuPr
           <IconPlus className="h-4 w-4 sm:h-3.5 sm:w-3.5" aria-hidden />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-64">
+      <DropdownMenuContent align="start" className="w-64" data-testid="quick-chat-add-menu-content">
         <DropdownMenuLabel className="text-xs text-muted-foreground">
           {t("common:agents")}
         </DropdownMenuLabel>

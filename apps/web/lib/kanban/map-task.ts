@@ -31,6 +31,7 @@ export type TaskLike = {
   workflow_step_id?: string;
   title?: string;
   description?: string | null;
+  autopilot?: boolean;
   position?: number;
   state?: TaskState;
   repositories?: Array<{
@@ -51,6 +52,8 @@ export type TaskLike = {
   primary_session_state?: TaskSessionState | string | null;
   primary_session_pending_action?: TaskPendingAction | null;
   task_pending_action?: TaskPendingAction | null;
+  /** True when the task's session was mid-turn when the backend died. */
+  interrupted?: boolean;
   foreground_activity?: ForegroundActivity | null;
   active_subagent_count?: number;
   session_count?: number | null;
@@ -137,6 +140,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     workflowStepId: source.workflow_step_id ?? "",
     title: source.title ?? "",
     description: source.description ?? undefined,
+    autopilot: source.autopilot,
     position: source.position ?? 0,
     state: source.state,
     repositoryId: pickRepositoryId(source),
@@ -146,6 +150,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     primarySessionState: source.primary_session_state ?? undefined,
     primarySessionPendingAction: pickPendingAction(source.primary_session_pending_action),
     taskPendingAction: pickPendingAction(source.task_pending_action),
+    interrupted: source.interrupted,
     foregroundActivity: pickForegroundActivity(source.foreground_activity),
     activeSubagentCount: source.active_subagent_count ?? undefined,
     sessionCount: source.session_count ?? undefined,
@@ -162,6 +167,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     queuedForStepId: source.queued_for_step_id,
     queuedAt: source.queued_at,
     statusSummary: source.status_summary,
+    metadata: source.metadata,
     isArchived: source.archived_at != null,
     isPRReview: isPRReviewFromMetadata(source.metadata),
     isIssueWatch: isIssueWatchFromMetadata(source.metadata),

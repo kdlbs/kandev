@@ -63,14 +63,37 @@ func newAutoInjectExecution(description string) *AgentExecution {
 		PassthroughProcessID: "proc-abc",
 	}
 	if description != "" {
-		exec.Metadata = map[string]interface{}{
-			"task_description": description,
-		}
+		exec.setMetadataValue("task_description", description)
 	}
 	return exec
 }
 
+// TestAutoInject_disabled_does_nothing covers the only remaining no-write
+// case under the new gating: a generic passthrough tool with no PromptFlag and
+// no task description must not receive spurious stdin. (A non-LLM TUI like k9s
+// launched without a task lands here.) AutoInjectPrompt is irrelevant now —
+// delivery is keyed on the absence of a PromptFlag, and a description is what
+// makes stdin delivery fire.
 func TestAutoInject_disabled_does_nothing(t *testing.T) {
+	mgr := newTestManager(t)
+	runner := &fakePassthroughRunner{}
+
+	mgr.autoInjectInitialPromptWith(runner, newAutoInjectExecution(""), agents.PassthroughConfig{
+		AutoInjectPrompt: false,
+		SubmitSequence:   "\r",
+	})
+
+	if runner.writeCalled {
+		t.Fatalf("expected no stdin write when task description is empty, got data=%q", runner.writtenData)
+	}
+}
+
+// TestAutoInject_writes_without_auto_inject_flag is the custom-TUI regression:
+// an agent with neither AutoInjectPrompt nor a PromptFlag (the default for
+// agents built from a tui_config, e.g. fuelclaude-opus) must still receive its
+// task description via PTY stdin. Before the fix the prompt was appended as a
+// positional arg that zsh -ic dropped, so the agent started at an empty prompt.
+func TestAutoInject_writes_without_auto_inject_flag(t *testing.T) {
 	mgr := newTestManager(t)
 	runner := &fakePassthroughRunner{}
 
@@ -79,8 +102,11 @@ func TestAutoInject_disabled_does_nothing(t *testing.T) {
 		SubmitSequence:   "\r",
 	})
 
-	if runner.writeCalled {
-		t.Fatalf("expected no stdin write when AutoInjectPrompt is false, got data=%q", runner.writtenData)
+	if !runner.writeCalled {
+		t.Fatalf("expected WriteStdin to be called for a no-flag custom TUI agent")
+	}
+	if runner.writtenData != "do a thing\r" {
+		t.Errorf("WriteStdin data = %q, want %q", runner.writtenData, "do a thing\r")
 	}
 }
 

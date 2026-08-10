@@ -66,8 +66,8 @@ export function NotificationSoundSection({
     >
       <div className="flex items-center justify-between gap-4">
         <div>
-          <div className="text-base font-medium">{t("settings:notificationSound")}</div>
-          <p className="text-sm text-muted-foreground">
+          <div className="text-sm font-medium">{t("settings:notificationSound")}</div>
+          <p className="text-xs text-muted-foreground">
             {t("settings:notificationSoundDescription")}
           </p>
         </div>

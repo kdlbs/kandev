@@ -145,7 +145,7 @@ function PRSingleButton({
   triggerRef,
 }: {
   pr: TaskPR;
-  refreshTaskPR: () => void;
+  refreshTaskPR: () => void | Promise<void>;
   triggerRef?: TriggerRef;
 }) {
   const addPRPanel = useDockviewStore((s) => s.addPRPanel);
@@ -229,7 +229,7 @@ function PRMultiButton({
   triggerRef,
 }: {
   prs: TaskPR[];
-  refreshTaskPR: () => void;
+  refreshTaskPR: () => void | Promise<void>;
   onRemovePR: (associationId: string) => Promise<void>;
   triggerRef?: TriggerRef;
 }) {

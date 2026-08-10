@@ -26,6 +26,10 @@ function task(overrides: Partial<SheetTask> = {}): SheetTask {
 }
 
 describe("toSheetItem", () => {
+  it("carries the autopilot marker onto the mobile sheet row", () => {
+    expect(toSheetItem(task({ autopilot: true }), emptyCtx()).autopilot).toBe(true);
+  });
+
   // The mobile task-switcher row must read the same task-level most-active-wins
   // aggregate the desktop sidebar and board card read, so a background-running
   // secondary session is caught on mobile too.
@@ -132,5 +136,23 @@ describe("toSheetItem", () => {
         dismissedAgentErrors: { "session-1": "older-error" },
       }).agentErrorMessage,
     ).toBe(ERROR_PREVIEW);
+  });
+});
+
+describe("toSheetItem queued prompt count", () => {
+  it("carries the queued prompt count from the task status summary", () => {
+    const item = toSheetItem(
+      task({ statusSummary: { revision: 3, updated_at: UPDATED_AT, queued_prompt_count: 2 } }),
+      emptyCtx(),
+    );
+    expect(item.queuedCount).toBe(2);
+  });
+
+  it("leaves queuedCount undefined when nothing is queued", () => {
+    const item = toSheetItem(
+      task({ statusSummary: { revision: 4, updated_at: UPDATED_AT } }),
+      emptyCtx(),
+    );
+    expect(item.queuedCount).toBeUndefined();
   });
 });

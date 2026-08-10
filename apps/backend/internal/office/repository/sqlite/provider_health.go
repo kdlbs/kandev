@@ -24,6 +24,7 @@ const (
 // three high-level states.
 const (
 	HealthStateHealthy            = "healthy"
+	HealthStateShortRetry         = "short_retry"
 	HealthStateDegraded           = "degraded"
 	HealthStateUserActionRequired = "user_action_required"
 )
@@ -39,7 +40,10 @@ const (
 	codeSubscriptionRequired  = "subscription_required"
 	codeQuotaLimited          = "quota_limited"
 	codeRateLimited           = "rate_limited"
+	codeNetworkUnavailable    = "network_unavailable"
 	codeProviderUnavailable   = "provider_unavailable"
+	codeProviderOverloaded    = "provider_overloaded"
+	codeModelCapacity         = "model_capacity"
 	codeProviderNotConfigured = "provider_not_configured"
 	codeModelUnavailable      = "model_unavailable"
 )
@@ -58,8 +62,11 @@ func ScopeFromCode(code, model string, tier routing.Tier) (scope, value string) 
 	case codeProviderNotConfigured:
 		return HealthScopeTier, string(tier)
 	case codeAuthRequired, codeMissingCredentials, codeSubscriptionRequired,
-		codeQuotaLimited, codeRateLimited, codeProviderUnavailable:
+		codeQuotaLimited, codeRateLimited, codeNetworkUnavailable,
+		codeProviderUnavailable, codeProviderOverloaded:
 		return HealthScopeProvider, ""
+	case codeModelCapacity:
+		return HealthScopeModel, model
 	}
 	return HealthScopeProvider, ""
 }
@@ -128,12 +135,12 @@ func (r *Repository) ListProviderHealth(
 	return out, nil
 }
 
-// MarkProviderDegraded upserts a degraded (or user-action-required)
-// row. On a degraded→degraded transition (the previous row was already
-// non-healthy) the stored backoff_step is incremented by one — so
-// repeated probe failures escalate even when the caller passes the
-// same h. The caller-supplied BackoffStep is used as the floor for
-// the first transition into non-healthy.
+// MarkProviderDegraded upserts a degraded, short-retry, or
+// user-action-required row. On a degraded→degraded transition (the previous
+// row was already long-horizon non-healthy) the stored backoff_step is
+// incremented by one. Short-retry transitions deliberately do not consume
+// the long-horizon backoff budget; the caller-supplied BackoffStep is used as
+// the floor for the first transition into non-healthy.
 //
 // last_failure is stamped to now if the caller did not set it.
 func (r *Repository) MarkProviderDegraded(
@@ -178,8 +185,8 @@ func (r *Repository) MarkProviderDegraded(
 }
 
 // nextBackoffStep returns h.BackoffStep on a fresh row or transition
-// from healthy, and existingStep+1 when the prior row was already
-// degraded / user_action_required.
+// from healthy/short_retry, and existingStep+1 when the prior row was
+// already degraded / user_action_required.
 func (r *Repository) nextBackoffStep(
 	ctx context.Context, h models.ProviderHealth,
 ) (int, error) {
@@ -196,7 +203,7 @@ func (r *Repository) nextBackoffStep(
 	if err != nil {
 		return 0, fmt.Errorf("provider_health: read prior step: %w", err)
 	}
-	if existingState == HealthStateHealthy {
+	if existingState == HealthStateHealthy || existingState == HealthStateShortRetry {
 		return h.BackoffStep, nil
 	}
 	return existingStep + 1, nil

@@ -1,9 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { WorkspaceSettingsHeader } from "@/app/settings/workspace/workspace-settings-header";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import Link from "@/components/routing/app-link";
 import { useRouter } from "@/lib/routing/client-router";
 import { IconGitBranch } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -50,6 +50,8 @@ type RepositoryItem = RepositoryWithScripts & { __autoOpen?: boolean };
 type WorkspaceRepositoriesClientProps = {
   workspace: Workspace | null;
   repositories: RepositoryWithScripts[];
+  /** The dedicated Improve Kandev workspace is configuration-immutable. */
+  isImproveWorkspace?: boolean;
 };
 
 function buildDraftRepo(
@@ -518,9 +520,13 @@ function useWorkspaceRepositoriesPage(
 export function WorkspaceRepositoriesClient({
   workspace,
   repositories,
+  isImproveWorkspace = false,
 }: WorkspaceRepositoriesClientProps) {
-  const state = useWorkspaceRepositoriesPage(workspace, repositories);
   const { t } = useTranslation();
+  const pageDescription = isImproveWorkspace
+    ? t("workspaces:repositoriesReadOnlyImprove")
+    : t("workspaces:manageRepositoriesConnected");
+  const state = useWorkspaceRepositoriesPage(workspace, repositories);
   const {
     router,
     repositoryItems,
@@ -554,28 +560,18 @@ export function WorkspaceRepositoriesClient({
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold">{workspace.name}</h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            {t("workspaces:manageRepositoriesConnected")}
-          </p>
-        </div>
-        <Button asChild variant="outline" size="sm">
-          <Link href={`/settings/workspace/${workspace.id}`}>
-            {t("workspaces:workspaceSettingsLink")}
-          </Link>
-        </Button>
-      </div>
+      <WorkspaceSettingsHeader workspace={workspace} description={pageDescription} />
       <Separator />
       <SettingsSection
         icon={<IconGitBranch className="h-5 w-5" />}
         title={t("workspaces:repositories")}
         description={t("workspaces:repositoriesInThisWorkspace")}
         action={
-          <Button size="sm" className="cursor-pointer" onClick={openDialog}>
-            {t("workspaces:addLocalRepository")}
-          </Button>
+          isImproveWorkspace ? undefined : (
+            <Button size="sm" className="cursor-pointer" onClick={openDialog}>
+              {t("workspaces:addLocalRepository")}
+            </Button>
+          )
         }
       >
         <div className="grid gap-3">
@@ -587,6 +583,7 @@ export function WorkspaceRepositoriesClient({
               isRepositoryDirty={isRepositoryDirty(repo, savedRepositoriesById.get(repo.id))}
               areScriptsDirty={areRepositoryScriptsDirty(repo, savedRepositoriesById.get(repo.id))}
               autoOpen={Boolean(repo.__autoOpen)}
+              readOnly={isImproveWorkspace}
               onUpdate={handleUpdateRepository}
               onAddScript={handleAddRepositoryScript}
               onUpdateScript={handleUpdateRepositoryScript}
@@ -597,23 +594,25 @@ export function WorkspaceRepositoriesClient({
           ))}
         </div>
       </SettingsSection>
-      <DiscoverRepoDialog
-        open={localRepoDialogOpen}
-        onOpenChange={setLocalRepoDialogOpen}
-        isLoading={isDiscovering}
-        filteredRepositories={filteredRepositories}
-        repoSearch={repoSearch}
-        onRepoSearchChange={setRepoSearch}
-        selectedRepoPath={selectedRepoPath}
-        onSelectRepoPath={handleSelectRepoPath}
-        manualRepoPath={manualRepoPath}
-        onManualRepoPathChange={handleManualRepoPathChange}
-        manualValidation={manualValidation}
-        onValidateManualPath={handleValidateManualPath}
-        isValidating={isValidating}
-        canSave={canSave}
-        onConfirm={handleConfirmLocalRepository}
-      />
+      {!isImproveWorkspace && (
+        <DiscoverRepoDialog
+          open={localRepoDialogOpen}
+          onOpenChange={setLocalRepoDialogOpen}
+          isLoading={isDiscovering}
+          filteredRepositories={filteredRepositories}
+          repoSearch={repoSearch}
+          onRepoSearchChange={setRepoSearch}
+          selectedRepoPath={selectedRepoPath}
+          onSelectRepoPath={handleSelectRepoPath}
+          manualRepoPath={manualRepoPath}
+          onManualRepoPathChange={handleManualRepoPathChange}
+          manualValidation={manualValidation}
+          onValidateManualPath={handleValidateManualPath}
+          isValidating={isValidating}
+          canSave={canSave}
+          onConfirm={handleConfirmLocalRepository}
+        />
+      )}
     </div>
   );
 }

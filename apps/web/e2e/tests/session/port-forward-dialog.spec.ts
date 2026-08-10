@@ -87,28 +87,107 @@ async function seedLocalSession(
 }
 
 test.describe("Port Forward Dialog", () => {
-  test("button is hidden for local executor session", async ({ testPage, apiClient, seedData }) => {
+  test("local executor can enable the port forwarding control", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
     const { session } = await seedLocalSession(testPage, apiClient, seedData, "Local Port Test");
     await expect(session.portForwardButton).not.toBeVisible();
+    await session.enablePortForwarding();
+    await expect(session.portForwardButton).toBeVisible();
   });
 
-  test("button is visible for mock remote executor session", async ({
+  test("button is visible for mock remote executor after launcher enable", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
     const { session } = await seedRemoteSession(testPage, apiClient, seedData, "Remote Port Test");
+    await expect(session.portForwardButton).toBeHidden();
+    await session.enablePortForwarding();
+    await expect(session.portForwardButton).toBeVisible();
+  });
+
+  test("disabling the preference hides the top-bar control", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { session } = await seedRemoteSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Disable Port Forwarding Test",
+    );
+    await session.enablePortForwarding();
+    await expect(session.portForwardButton).toBeVisible();
+
+    await session.togglePortForwardingPreference();
+
+    await expect(session.portForwardButton).not.toBeVisible();
+  });
+
+  test("disabling visibility leaves an active tunnel available", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { session } = await seedRemoteSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Active Tunnel Visibility Test",
+    );
+    await session.enablePortForwarding();
+    await session.portForwardButton.click();
+    await expect(session.portForwardDialog).toBeVisible();
+
+    await session.portForwardInput.fill("3000");
+    await session.portForwardAddButton.click();
+    const row = session.portForwardRow(3000);
+    await expect(row).toBeVisible();
+    await session.portForwardTunnelToggle(3000).click();
+    await session.portForwardTunnelStart(3000).click();
+    await expect(row.locator("a[target='_blank']")).toHaveCount(2);
+
+    await session.portForwardDialog.getByRole("button", { name: "Close" }).click();
+    await session.togglePortForwardingPreference();
+    await expect(session.portForwardButton).not.toBeVisible();
+
+    await session.togglePortForwardingPreference();
+    await expect(session.portForwardButton).toBeVisible();
+    await session.portForwardButton.click();
+    await expect(session.portForwardDialog).toBeVisible();
+    await expect(session.portForwardRow(3000).locator("a[target='_blank']")).toHaveCount(2);
+    await session.portForwardDialog.getByRole("button", { name: "Close" }).click();
+  });
+
+  test("preference survives a task page reload", async ({ testPage, apiClient, seedData }) => {
+    const { session } = await seedLocalSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Persist Port Forwarding Test",
+    );
+    await session.enablePortForwarding();
+
+    await testPage.reload();
+    await session.waitForLoad();
+
     await expect(session.portForwardButton).toBeVisible();
   });
 
   test("dialog opens on button click", async ({ testPage, apiClient, seedData }) => {
     const { session } = await seedRemoteSession(testPage, apiClient, seedData, "Dialog Open Test");
+    await session.enablePortForwarding();
     await session.portForwardButton.click();
     await expect(session.portForwardDialog).toBeVisible();
   });
 
   test("auto-refresh loads port list on open", async ({ testPage, apiClient, seedData }) => {
     const { session } = await seedRemoteSession(testPage, apiClient, seedData, "Refresh Test");
+    await session.enablePortForwarding();
     await session.portForwardButton.click();
     await expect(session.portForwardDialog).toBeVisible();
     // Dialog auto-refreshes on open; wait for the placeholder to disappear,
@@ -121,6 +200,7 @@ test.describe("Port Forward Dialog", () => {
 
   test("add manual port shows row with Manual badge", async ({ testPage, apiClient, seedData }) => {
     const { session } = await seedRemoteSession(testPage, apiClient, seedData, "Manual Port Test");
+    await session.enablePortForwarding();
     await session.portForwardButton.click();
     await expect(session.portForwardDialog).toBeVisible();
 
@@ -132,8 +212,68 @@ test.describe("Port Forward Dialog", () => {
     await expect(row.getByText("Manual")).toBeVisible();
   });
 
+  test("opens the proxy URL in the existing Browser panel", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { session } = await seedRemoteSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Open Proxy Browser Panel Test",
+    );
+    await session.enablePortForwarding();
+    await session.addBrowserPanel();
+    await expect(session.browserPanel).toBeVisible();
+    const browserPanelCount = await testPage.getByTestId("browser-panel").count();
+    expect(browserPanelCount).toBe(1);
+
+    await session.portForwardButton.click();
+    await expect(session.portForwardDialog).toBeVisible();
+    await session.portForwardInput.fill("3000");
+    await session.portForwardAddButton.click();
+
+    const row = session.portForwardRow(3000);
+    const proxyUrl = await row.locator("a[target='_blank']").getAttribute("href");
+    expect(proxyUrl).toBeTruthy();
+    await session.portForwardOpenBrowser(3000).click();
+
+    await expect(session.portForwardDialog).toBeHidden();
+    await expect(session.browserPanel).toBeVisible();
+    await expect(testPage.getByTestId("browser-panel")).toHaveCount(browserPanelCount);
+    await expect(session.browserAddressInput).toHaveValue(proxyUrl!);
+    await expect(session.browserPanel.locator("iframe")).toHaveAttribute("src", proxyUrl!);
+  });
+
+  test("opens the proxy URL in a new Browser panel", async ({ testPage, apiClient, seedData }) => {
+    const { session } = await seedRemoteSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Open Proxy In New Browser Panel Test",
+    );
+    await session.enablePortForwarding();
+
+    await session.portForwardButton.click();
+    await expect(session.portForwardDialog).toBeVisible();
+    await session.portForwardInput.fill("3000");
+    await session.portForwardAddButton.click();
+
+    const row = session.portForwardRow(3000);
+    const proxyUrl = await row.locator("a[target='_blank']").getAttribute("href");
+    expect(proxyUrl).toBeTruthy();
+    await session.portForwardOpenBrowser(3000).click();
+
+    await expect(session.portForwardDialog).toBeHidden();
+    await expect(session.browserPanel).toBeVisible();
+    await expect(session.browserAddressInput).toHaveValue(proxyUrl!);
+    await expect(session.browserPanel.locator("iframe")).toHaveAttribute("src", proxyUrl!);
+  });
+
   test("rejects invalid port number", async ({ testPage, apiClient, seedData }) => {
     const { session } = await seedRemoteSession(testPage, apiClient, seedData, "Invalid Port Test");
+    await session.enablePortForwarding();
     await session.portForwardButton.click();
     await expect(session.portForwardDialog).toBeVisible();
 
@@ -151,6 +291,7 @@ test.describe("Port Forward Dialog", () => {
       seedData,
       "Duplicate Port Test",
     );
+    await session.enablePortForwarding();
     await session.portForwardButton.click();
     await expect(session.portForwardDialog).toBeVisible();
 
@@ -172,6 +313,7 @@ test.describe("Port Forward Dialog", () => {
       seedData,
       "Proxy URL Test",
     );
+    await session.enablePortForwarding();
     await session.portForwardButton.click();
     await expect(session.portForwardDialog).toBeVisible();
 
@@ -188,6 +330,7 @@ test.describe("Port Forward Dialog", () => {
 
   test("Enter key submits port", async ({ testPage, apiClient, seedData }) => {
     const { session } = await seedRemoteSession(testPage, apiClient, seedData, "Enter Key Test");
+    await session.enablePortForwarding();
     await session.portForwardButton.click();
     await expect(session.portForwardDialog).toBeVisible();
 

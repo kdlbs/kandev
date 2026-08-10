@@ -4,7 +4,6 @@ package metrics
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"syscall"
 	"time"
@@ -20,11 +19,24 @@ type diskStatfsResult struct {
 }
 
 func diskPercent(ctx context.Context, path string) (float64, error) {
+	capacity, err := DiskUsage(ctx, path)
+	if err != nil {
+		return 0, err
+	}
+	return capacity.UsedPercent, nil
+}
+
+func DiskUsage(ctx context.Context, path string) (DiskCapacity, error) {
+	release, err := acquireDiskUsageCall(ctx)
+	if err != nil {
+		return DiskCapacity{}, err
+	}
 	result := make(chan diskStatfsResult, 1)
 	go func() {
+		defer release()
 		var stat syscall.Statfs_t
-		err := statfs(path, &stat)
-		result <- diskStatfsResult{stat: stat, err: err}
+		callErr := statfs(path, &stat)
+		result <- diskStatfsResult{stat: stat, err: callErr}
 	}()
 
 	timer := time.NewTimer(diskStatfsTimeout)
@@ -32,22 +44,27 @@ func diskPercent(ctx context.Context, path string) (float64, error) {
 
 	select {
 	case <-ctx.Done():
-		return 0, ctx.Err()
+		return DiskCapacity{}, ctx.Err()
 	case <-timer.C:
-		return 0, fmt.Errorf("disk usage timed out for %q", path)
+		return DiskCapacity{}, fmt.Errorf("disk usage timed out for %q", path)
 	case res := <-result:
 		if res.err != nil {
-			return 0, res.err
+			return DiskCapacity{}, res.err
 		}
-		return diskPercentFromStatfs(res.stat)
+		return diskCapacityFromStatfs(res.stat)
 	}
 }
 
 func diskPercentFromStatfs(stat syscall.Statfs_t) (float64, error) {
-	total := stat.Blocks * uint64(stat.Bsize)
-	free := stat.Bavail * uint64(stat.Bsize)
-	if total == 0 {
-		return 0, errors.New("disk total is zero")
+	capacity, err := diskCapacityFromStatfs(stat)
+	if err != nil {
+		return 0, err
 	}
-	return (1 - float64(free)/float64(total)) * 100, nil
+	return capacity.UsedPercent, nil
+}
+
+func diskCapacityFromStatfs(stat syscall.Statfs_t) (DiskCapacity, error) {
+	total := stat.Blocks * uint64(stat.Bsize)
+	available := stat.Bavail * uint64(stat.Bsize)
+	return diskCapacityFromBytes(total, available)
 }

@@ -8,7 +8,6 @@ import {
   IconBrandGithub,
   IconBrandGitlab,
   IconBrandSentry,
-  IconBrandSlack,
   IconFolder,
   IconGitBranch,
   IconHexagon,
@@ -19,12 +18,18 @@ import {
 import { useAppStore } from "@/components/state-provider";
 import { AzureDevOpsIcon } from "@/components/icons/azure-devops-icon";
 import { useAzureDevOpsAvailable } from "@/hooks/domains/azure-devops/use-azure-devops-availability";
+import { useAzureDevOpsEnabled } from "@/hooks/domains/azure-devops/use-azure-devops-enabled";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
+import { useGitHubEnabled } from "@/hooks/domains/github/use-github-enabled";
 import { useGitLabAvailable } from "@/hooks/domains/gitlab/use-task-mr";
+import { useGitLabEnabled } from "@/hooks/domains/gitlab/use-gitlab-enabled";
+import { useHideDisabledIntegrationsInNav } from "@/hooks/domains/integrations/use-hide-disabled-integrations-in-nav";
 import { useJiraAuthed } from "@/hooks/domains/jira/use-jira-availability";
+import { useJiraEnabled } from "@/hooks/domains/jira/use-jira-enabled";
 import { useLinearAuthed } from "@/hooks/domains/linear/use-linear-availability";
+import { useLinearEnabled } from "@/hooks/domains/linear/use-linear-enabled";
 import { useSentryAvailable } from "@/hooks/domains/sentry/use-sentry-availability";
-import { useSlackAuthed } from "@/hooks/domains/slack/use-slack-availability";
+import { useSentryEnabled } from "@/hooks/domains/sentry/use-sentry-enabled";
 import { WORKSPACE_INTEGRATIONS } from "@/lib/settings-discovery/catalog/integrations";
 import { WORKSPACES_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/workspaces";
 import { SettingsGroup, SettingsLeaf } from "./settings-nav-primitives";
@@ -38,7 +43,6 @@ const INTEGRATION_ICONS: Record<(typeof WORKSPACE_INTEGRATIONS)[number][0], Inte
   jira: IconTicket,
   linear: IconHexagon,
   sentry: IconBrandSentry,
-  slack: IconBrandSlack,
 };
 
 // Rendered as components, not module-scope JSX constants: `t()` must resolve at
@@ -76,31 +80,50 @@ function WorkspaceIntegrationItems({
   const jira = useJiraAuthed(workspaceId);
   const linear = useLinearAuthed(workspaceId);
   const sentry = useSentryAvailable(workspaceId);
-  const slack = useSlackAuthed(workspaceId);
-  const enabled = new Set([
+  const { enabled: azureDevOpsEnabled } = useAzureDevOpsEnabled();
+  const { enabled: githubEnabled } = useGitHubEnabled();
+  const { enabled: gitlabEnabled } = useGitLabEnabled();
+  const { enabled: jiraEnabled } = useJiraEnabled();
+  const { enabled: linearEnabled } = useLinearEnabled();
+  const { enabled: sentryEnabled } = useSentryEnabled();
+  const { hideDisabled } = useHideDisabledIntegrationsInNav();
+  const configured = new Set([
     ...(azureDevOps ? ["azure-devops"] : []),
     ...(githubStatus?.authenticated || githubStatus?.token_configured ? ["github"] : []),
     ...(gitlab ? ["gitlab"] : []),
     ...(jira ? ["jira"] : []),
     ...(linear ? ["linear"] : []),
     ...(sentry ? ["sentry"] : []),
-    ...(slack ? ["slack"] : []),
   ]);
+  const toggleEnabled: Record<(typeof WORKSPACE_INTEGRATIONS)[number][0], boolean> = {
+    "azure-devops": azureDevOpsEnabled,
+    github: githubEnabled,
+    gitlab: gitlabEnabled,
+    jira: jiraEnabled,
+    linear: linearEnabled,
+    sentry: sentryEnabled,
+  };
 
-  return WORKSPACE_INTEGRATIONS.map(([slug, label]) => {
-    const href = `${integrationsPath}/${slug}`;
-    return (
-      <SettingsLeaf
-        key={href}
-        href={href}
-        label={label}
-        labelSuffix={enabled.has(slug) ? <EnabledBadge /> : undefined}
-        icon={INTEGRATION_ICONS[slug]}
-        isActive={pathname === href}
-        depth={3}
-      />
-    );
-  });
+  // Configured status gates the badge only, never the row itself — the tree
+  // always lists all six integrations regardless of credentials, so the
+  // filter here hides only disabled integrations (intentionally looser than
+  // useNavAvailability's `configured && (!hideDisabled || enabled)`).
+  return WORKSPACE_INTEGRATIONS.filter(([slug]) => !hideDisabled || toggleEnabled[slug]).map(
+    ([slug, label]) => {
+      const href = `${integrationsPath}/${slug}`;
+      return (
+        <SettingsLeaf
+          key={href}
+          href={href}
+          label={label}
+          labelSuffix={configured.has(slug) ? <EnabledBadge /> : undefined}
+          icon={INTEGRATION_ICONS[slug]}
+          isActive={pathname === href}
+          depth={3}
+        />
+      );
+    },
+  );
 }
 
 type WorkspacesGroupProps = {

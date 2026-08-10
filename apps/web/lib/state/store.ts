@@ -11,6 +11,7 @@ import type {
   TaskWalkthrough,
 } from "@/lib/types/http";
 import type { SystemHealthResponse } from "@/lib/types/health";
+import type { AgentRuntimeAvailability } from "@/lib/types/agent-runtime";
 import type { UISliceActions as UIA } from "./slices/ui/types";
 import type * as UISliceTypes from "./slices/ui/types";
 import type { AgentUpdateJob, InstallJob } from "./slices/settings/types";
@@ -212,6 +213,7 @@ export type AppState = KanbanSlice & {
 
   // System slice (actions merged via SystemSliceActions intersection on AppState)
   system: (typeof defaultSystemState)["system"];
+  agentRuntime: AgentRuntimeAvailability | null;
 
   // Plugins slice (actions merged via PluginsSliceActions intersection on AppState)
   plugins: (typeof defaultPluginsState)["plugins"];
@@ -342,6 +344,7 @@ export type AppState = KanbanSlice & {
   setSystemHealth: (response: SystemHealthResponse) => void;
   setSystemHealthLoading: (loading: boolean) => void;
   invalidateSystemHealth: () => void;
+  setAgentRuntime: (snapshot: AgentRuntimeAvailability | null) => void;
   openQuickChat: UIA["openQuickChat"];
   addQuickChatSession: UIA["addQuickChatSession"];
   reuseOrCreateQuickTerminal: UIA["reuseOrCreateQuickTerminal"];
@@ -473,6 +476,8 @@ export type AppState = KanbanSlice & {
       models: SessionModelEntry[];
       configOptions: ConfigOptionEntry[];
       configBaseline?: Record<string, string>;
+      /** Set when the session started on the profile's fallback model. */
+      fallbackModel?: string;
     },
   ) => void;
   // Prompt usage actions
@@ -518,6 +523,7 @@ export type AppState = KanbanSlice & {
   setAppSidebarWidth: UIA["setAppSidebarWidth"];
   setAppSidebarSettingsMode: UIA["setAppSidebarSettingsMode"];
   toggleAppSidebarSettingsMode: UIA["toggleAppSidebarSettingsMode"];
+  setImproveDialogOpen: UIA["setImproveDialogOpen"];
   acknowledgeAgentErrors: UIA["acknowledgeAgentErrors"];
   dismissAgentError: UIA["dismissAgentError"];
 } & GitHubSliceActions &
@@ -581,6 +587,10 @@ export function createAppStore(initialState?: HydrationState) {
       ...createAuthSlice(set as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createSystemSlice(set as any, get as any, api as any),
+      setAgentRuntime: (snapshot) =>
+        set((draft) => {
+          draft.agentRuntime = snapshot;
+        }),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createUISlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

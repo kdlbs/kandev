@@ -514,6 +514,7 @@ type StepConfigPanelProps = {
   onUpdate: (updates: Partial<WorkflowStep>) => void;
   onRemove: () => void;
   readOnly?: boolean;
+  onSessionConfigResolutionPendingChange?: (pending: boolean) => void;
 };
 
 export function StepConfigPanel({
@@ -523,6 +524,7 @@ export function StepConfigPanel({
   onUpdate,
   onRemove,
   readOnly = false,
+  onSessionConfigResolutionPendingChange,
 }: StepConfigPanelProps) {
   const [localName, setLocalName] = useState(step.name);
   const [localPrompt, setLocalPrompt] = useState(step.prompt ?? "");
@@ -563,7 +565,10 @@ export function StepConfigPanel({
           toggleOnEnterAction={actions.toggleOnEnterAction}
           readOnly={readOnly}
         />
-        <SessionConfigEditor {...{ step, savedStep, steps, onUpdate, readOnly }} />
+        <SessionConfigEditor
+          {...{ step, savedStep, steps, onUpdate, readOnly }}
+          onResolutionPendingChange={onSessionConfigResolutionPendingChange}
+        />
         <StepTransitionsSection
           step={step}
           savedStep={savedStep}

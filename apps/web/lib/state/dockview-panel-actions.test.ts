@@ -28,6 +28,119 @@ import {
 // Tests
 // ---------------------------------------------------------------------------
 
+const BROWSER_COMPONENT = "browser";
+const BROWSER_GROUP = "group-browser";
+const EXAMPLE_URL = "https://example.test";
+const NEW_URL = `${EXAMPLE_URL}/new/`;
+
+describe("openBrowserPanel", () => {
+  let api: DockviewApi;
+  let actions: ReturnType<typeof buildPanelActions>;
+
+  beforeEach(() => {
+    ({ api, actions } = build(makeApi({ extraGroupIds: [BROWSER_GROUP] })));
+  });
+
+  it("creates and activates a Browser panel in the center group", () => {
+    const url = `${EXAMPLE_URL}/port-proxy/session/3000/`;
+
+    actions.openBrowserPanel(url);
+
+    const browser = api.panels.find(
+      (panel) => panel.api.component === BROWSER_COMPONENT,
+    ) as unknown as MockPanel;
+    expect(browser).toBeDefined();
+    expect(browser.id).toBe(`browser:${url}`);
+    expect(browser.group.id).toBe(CENTER_GROUP);
+    expect(browser.params.url).toBe(url);
+    expect(browser.isActive).toBe(true);
+  });
+
+  it("uses the Dockview placement fallback when the stored center group is stale", () => {
+    const { api: staleApi, actions: staleActions, store } = build(makeApi());
+    store.set({ centerGroupId: "stale-center-group" });
+
+    staleActions.openBrowserPanel(NEW_URL);
+
+    const browser = staleApi.panels.find((panel) => panel.api.component === BROWSER_COMPONENT);
+    expect(browser?.group.id).toBe(CENTER_GROUP);
+  });
+
+  it("updates and focuses the active Browser panel without creating a duplicate", () => {
+    const oldUrl = `${EXAMPLE_URL}/old/`;
+    const newUrl = NEW_URL;
+    api.addPanel({
+      id: `browser:${oldUrl}`,
+      component: BROWSER_COMPONENT,
+      title: "Browser",
+      params: { url: oldUrl },
+      position: { referenceGroup: BROWSER_GROUP },
+    });
+
+    actions.openBrowserPanel(newUrl);
+
+    const browsers = api.panels.filter(
+      (panel) => panel.api.component === BROWSER_COMPONENT,
+    ) as unknown as MockPanel[];
+    expect(browsers).toHaveLength(1);
+    const browser = browsers[0]!;
+    expect(browser.params.url).toBe(newUrl);
+    expect(browser.isActive).toBe(true);
+    expect(browser.group.id).toBe(BROWSER_GROUP);
+  });
+
+  it("prefers the active Browser panel over an earlier Browser panel", () => {
+    const firstUrl = `${EXAMPLE_URL}/first/`;
+    const secondUrl = `${EXAMPLE_URL}/second/`;
+    const newUrl = NEW_URL;
+    api.addPanel({
+      id: `browser:${firstUrl}`,
+      component: BROWSER_COMPONENT,
+      title: "Browser",
+      params: { url: firstUrl },
+      position: { referenceGroup: BROWSER_GROUP },
+    });
+    const second = api.addPanel({
+      id: `browser:${secondUrl}`,
+      component: BROWSER_COMPONENT,
+      title: "Browser",
+      params: { url: secondUrl },
+      position: { referenceGroup: CENTER_GROUP },
+    });
+    second.api.setActive();
+
+    actions.openBrowserPanel(newUrl);
+
+    expect((api.getPanel(`browser:${firstUrl}`) as unknown as MockPanel).params.url).toBe(firstUrl);
+    expect((api.getPanel(`browser:${secondUrl}`) as unknown as MockPanel).params.url).toBe(newUrl);
+    expect((api.getPanel(`browser:${secondUrl}`) as unknown as MockPanel).isActive).toBe(true);
+  });
+
+  it("uses the first Browser panel when another panel is active", () => {
+    const browserUrl = `${EXAMPLE_URL}/browser/`;
+    const chat = api.addPanel({
+      id: "chat",
+      component: "chat",
+      title: "Chat",
+      position: { referenceGroup: CENTER_GROUP },
+    });
+    const browser = api.addPanel({
+      id: `browser:${browserUrl}`,
+      component: BROWSER_COMPONENT,
+      title: "Browser",
+      params: { url: browserUrl },
+      position: { referenceGroup: BROWSER_GROUP },
+    });
+    chat.api.setActive();
+
+    actions.openBrowserPanel(NEW_URL);
+
+    const mockBrowser = browser as unknown as MockPanel;
+    expect(mockBrowser.params.url).toBe(NEW_URL);
+    expect(mockBrowser.isActive).toBe(true);
+  });
+});
+
 describe("addFileEditorPanel — preview behavior", () => {
   let api: DockviewApi;
   let actions: ReturnType<typeof buildPanelActions>;

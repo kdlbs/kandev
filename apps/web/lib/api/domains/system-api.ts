@@ -17,6 +17,7 @@ import type {
   StorageAdoptionResponse,
   StorageMaintenanceRun,
   StorageMaintenanceSettings,
+  StorageDiskCapacityResponse,
   StorageOverviewResponse,
   StoragePolicyResponse,
   StorageQuarantineEntry,
@@ -270,6 +271,15 @@ export function fetchStorageOverview(
   options?: ApiRequestOptions,
 ): Promise<StorageOverviewResponse> {
   return fetchJson<StorageOverviewResponse>(`${SYSTEM_BASE}/storage`, {
+    ...options,
+    cache: "no-store",
+  });
+}
+
+export function fetchStorageDisk(
+  options?: ApiRequestOptions,
+): Promise<StorageDiskCapacityResponse> {
+  return fetchJson<StorageDiskCapacityResponse>(`${SYSTEM_BASE}/storage/disk`, {
     ...options,
     cache: "no-store",
   });

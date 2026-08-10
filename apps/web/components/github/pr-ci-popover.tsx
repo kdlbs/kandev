@@ -8,6 +8,7 @@ import {
   IconCircleX,
   IconExternalLink,
   IconGitPullRequest,
+  IconLoader2,
   IconMessageCircle,
   IconPlus,
 } from "@tabler/icons-react";
@@ -493,7 +494,13 @@ function elapsedLabel(
   return t("github:updatedAgo", { elapsed: formatElapsedShort(elapsed) });
 }
 
-function PRPopoverFooter({ lastUpdatedAt }: { lastUpdatedAt: number | null }) {
+function PRPopoverFooter({
+  lastUpdatedAt,
+  isRefreshing,
+}: {
+  lastUpdatedAt: number | null;
+  isRefreshing: boolean;
+}) {
   const { t } = useTranslation();
   // Capture a "now" snapshot only inside the setInterval callback (an event
   // handler — no impurity in render, no setState during commit). When no
@@ -509,18 +516,31 @@ function PRPopoverFooter({ lastUpdatedAt }: { lastUpdatedAt: number | null }) {
     lastUpdatedAt == null
       ? null
       : Math.max(0, Math.floor(((now ?? lastUpdatedAt) - lastUpdatedAt) / 1000));
-  if (lastUpdatedAt == null) return null;
+  // The first open of a PR has no cache entry yet — that's the slowest fetch of
+  // all, so the footer has to exist for the spinner even with nothing to date.
+  if (lastUpdatedAt == null && !isRefreshing) return null;
   return (
     <div
       data-testid="pr-popover-footer"
       className="flex items-center justify-end border-t border-border/50 pt-1.5"
     >
-      <span
-        data-testid="pr-popover-updated-at"
-        className="text-[10px] text-muted-foreground tabular-nums"
-      >
-        {elapsedLabel(elapsed, t)}
-      </span>
+      {isRefreshing ? (
+        <span
+          data-testid="pr-popover-updating"
+          role="status"
+          className="flex items-center gap-1.5 text-[10px] text-muted-foreground"
+        >
+          <IconLoader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+          {t("github:updatingStatus")}
+        </span>
+      ) : (
+        <span
+          data-testid="pr-popover-updated-at"
+          className="text-[10px] text-muted-foreground tabular-nums"
+        >
+          {elapsedLabel(elapsed, t)}
+        </span>
+      )}
     </div>
   );
 }
@@ -561,12 +581,12 @@ export function PRCIPopover({
   pr: TaskPR;
   enabled: boolean;
   onOpenDetailPanel?: () => void;
-  refreshTaskPR?: () => void;
+  refreshTaskPR?: () => void | Promise<void>;
 }) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const { status: ghStatus } = useGitHubStatus(workspaceId);
   const authLost = ghStatus !== null && !ghStatus.authenticated;
-  const { feedback, isFetching, lastUpdatedAt, refetch } = usePRCIPopover(
+  const { feedback, isFetching, isRefreshing, lastUpdatedAt, refetch } = usePRCIPopover(
     workspaceId,
     pr,
     enabled && !authLost,
@@ -600,7 +620,7 @@ export function PRCIPopover({
           <PRMergeButton taskPR={pr} onMerged={refetch} compact />
         </>
       )}
-      <PRPopoverFooter lastUpdatedAt={lastUpdatedAt} />
+      <PRPopoverFooter lastUpdatedAt={lastUpdatedAt} isRefreshing={isRefreshing} />
     </div>
   );
 }

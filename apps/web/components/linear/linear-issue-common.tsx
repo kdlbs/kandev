@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { formatDistanceToNow } from "date-fns";
+import { formatTimeDistance } from "@/lib/i18n/date-locale";
 import { Avatar, AvatarFallback, AvatarImage } from "@kandev/ui/avatar";
 import { getLinearIssue, setLinearIssueState } from "@/lib/api/domains/linear-api";
 import type { LinearIssue, LinearStateCategory } from "@/lib/types/linear";
@@ -35,12 +35,11 @@ export function stateBadgeClass(category: LinearStateCategory | undefined): stri
   }
 }
 
-export function formatRelative(iso: string | undefined): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return formatDistanceToNow(d, { addSuffix: true });
-}
+// Alias of the one canonical distance formatter, kept under this module's
+// historical name so existing consumers and their imports are unchanged.
+// Callers inside React should pass `useDateLocale()` so the value re-renders
+// when a lazily loaded locale lands; the default keeps other callers correct.
+export const formatRelative = formatTimeDistance;
 
 export function PersonCell({ name, avatar }: { name?: string; avatar?: string }) {
   const { t } = useTranslation();

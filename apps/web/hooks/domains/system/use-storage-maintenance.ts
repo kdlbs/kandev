@@ -23,6 +23,7 @@ import {
   analyzeStorage,
   deleteStorageQuarantine,
   fetchStorageOverview,
+  fetchStorageDisk,
   fetchStoragePolicy,
   fetchStorageQuarantine,
   fetchStorageRuns,
@@ -96,7 +97,7 @@ export function settingsWithDockerAcknowledgement(
   };
 }
 
-export type StorageSection = "policy" | "overview" | "runs" | "quarantine";
+export type StorageSection = "policy" | "overview" | "disk" | "runs" | "quarantine";
 export type StorageSectionLoading = Record<StorageSection, boolean>;
 export type StorageSectionErrors = Record<StorageSection, string | null>;
 type Reload = (sections?: StorageSection[]) => Promise<void>;
@@ -376,23 +377,27 @@ export function useStorageMaintenance() {
   const storage = useAppStore((state) => state.system.storage);
   const setPolicy = useAppStore((state) => state.setSystemStoragePolicy);
   const setOverview = useAppStore((state) => state.setSystemStorageOverview);
+  const setDisk = useAppStore((state) => state.setSystemStorageDisk);
   const setRuns = useAppStore((state) => state.setSystemStorageRuns);
   const setQuarantine = useAppStore((state) => state.setSystemStorageQuarantine);
   const [loading, setLoading] = useState<StorageSectionLoading>({
     policy: true,
     overview: true,
+    disk: true,
     runs: true,
     quarantine: true,
   });
   const [sectionErrors, setSectionErrors] = useState<StorageSectionErrors>({
     policy: null,
     overview: null,
+    disk: null,
     runs: null,
     quarantine: null,
   });
   const sectionGenerations = useRef<Record<StorageSection, number>>({
     policy: 0,
     overview: 0,
+    disk: 0,
     runs: 0,
     quarantine: 0,
   });
@@ -421,13 +426,15 @@ export function useStorageMaintenance() {
     [],
   );
   const reload = useCallback(
-    async (sections: StorageSection[] = ["policy", "overview", "runs", "quarantine"]) => {
+    async (sections: StorageSection[] = ["policy", "overview", "disk", "runs", "quarantine"]) => {
       const jobs = sections.map((section) => {
         switch (section) {
           case "policy":
             return loadSection("policy", fetchStoragePolicy, setPolicy);
           case "overview":
             return loadSection("overview", fetchStorageOverview, setOverview);
+          case "disk":
+            return loadSection("disk", fetchStorageDisk, setDisk);
           case "runs":
             return loadSection("runs", () => fetchStorageRuns(20), setRuns);
           case "quarantine":
@@ -440,7 +447,7 @@ export function useStorageMaintenance() {
       );
       if (failure) throw failure.reason;
     },
-    [loadSection, setOverview, setPolicy, setQuarantine, setRuns],
+    [loadSection, setDisk, setOverview, setPolicy, setQuarantine, setRuns],
   );
   const commitAdoptedPolicy = useCallback(
     (policy: StoragePolicyResponse) => {

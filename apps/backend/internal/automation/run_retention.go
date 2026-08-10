@@ -50,15 +50,15 @@ const runWorktreeSweepWindow = 200
 // Excluding the reclaimed ones makes the window slide: each firing sees only
 // runs that still cost disk, so the backlog drains across successive firings
 // and the steady state is a window one deep. The worktree row is reached
-// through task_sessions because that is how a checkout is keyed — a task owns
-// sessions, a session owns worktree rows — and `status <> 'deleted'` is the
-// exact inverse of what worktree.Manager.ReleaseWorktreeReference writes when
-// a checkout goes away.
+// through the task environment because that is how a checkout is keyed — a
+// task owns an environment, an environment owns worktree rows — and
+// `status <> 'deleted'` is the exact inverse of what
+// worktree.Manager.ReleaseWorktreeReference writes when a checkout goes away.
 const runHasLiveWorktreeSQL = `
 			EXISTS (
-				SELECT 1 FROM task_session_worktrees tsw
-				JOIN task_sessions wts ON wts.id = tsw.session_id
-				WHERE wts.task_id = ar.task_id AND tsw.status <> ?
+				SELECT 1 FROM task_environment_repos ter
+				JOIN task_environments wte ON wte.id = ter.task_environment_id
+				WHERE wte.task_id = ar.task_id AND ter.status <> ?
 			)`
 
 // PrunableRunTaskIDs names the tasks whose workspaces may be reclaimed, given a

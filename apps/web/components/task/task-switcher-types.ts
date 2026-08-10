@@ -14,10 +14,13 @@ export type TaskLinkHandler = (taskId: string, taskTitle?: string) => void;
 export type TaskSwitcherItem = {
   id: string;
   title: string;
+  autopilot?: boolean;
   state?: TaskState;
   sessionState?: TaskSessionState;
   /** Task-level most-active-wins busy aggregate (ADR-0049) from the task record. */
   foregroundActivity?: ForegroundActivity | null;
+  /** True when the task's session was mid-turn when the backend died. */
+  interrupted?: boolean;
   description?: string;
   workflowId?: string;
   workflowName?: string;
@@ -39,6 +42,8 @@ export type TaskSwitcherItem = {
   parentTaskId?: string;
   workspaceMode?: "inherit_parent" | "new_workspace" | "shared_group";
   prInfo?: { number: number; state: string; aggregateState?: string };
+  /** Number of prompts currently en-queued for this task (mail badge). */
+  queuedCount?: number;
   isPRReview?: boolean;
   isIssueWatch?: boolean;
   issueInfo?: { url: string; number: number };
@@ -72,6 +77,8 @@ export type TaskSwitcherProps = {
   onTogglePin?: (taskId: string) => void;
   onReorderGroup?: (groupTaskIds: string[]) => void;
   onReorderSubtasks?: (parentTaskId: string, orderedSubtaskIds: string[]) => void;
+  /** Re-parent a task under another task (drag onto a nest drop zone). */
+  onNestTask?: (taskId: string, parentTaskId: string) => void;
   pinnedTaskIds?: string[];
   deletingTaskId?: string | null;
   isLoading?: boolean;

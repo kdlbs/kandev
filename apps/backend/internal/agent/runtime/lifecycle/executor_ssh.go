@@ -44,8 +44,12 @@ type sshSessionState struct {
 	agentctlClient *agentctl.Client
 	pid            int
 	remoteDir      string
+	remoteTaskDir  string
 	authToken      string
 	reusingProcess bool
+	metadata       map[string]interface{}
+	prepareEnv     map[string]string
+	platform       SSHRemotePlatform
 }
 
 // SSHExecutor implements ExecutorBackend for SSH-reachable Linux and macOS hosts.
@@ -61,6 +65,8 @@ type SSHExecutor struct {
 	logger           *logger.Logger
 	brokerPreflight  func(context.Context, *ssh.Client, *ExecutorCreateRequest, SSHRemotePlatform) error
 	stopRemote       func(context.Context, *ssh.Client, string, int) error
+	closeClient      func(*ssh.Client) error
+	cleanupScript    func(context.Context, *ssh.Client, string, map[string]interface{}, map[string]string, SSHRemotePlatform, string, string) error
 
 	mu       sync.Mutex
 	sessions map[string]*sshSessionState // keyed by ExecutorInstance.InstanceID
@@ -83,6 +89,8 @@ func NewSSHExecutor(
 	}
 	executor.brokerPreflight = executor.preflightGitHubCredentialBroker
 	executor.stopRemote = stopRemoteAgentctl
+	executor.closeClient = func(client *ssh.Client) error { return client.Close() }
+	executor.cleanupScript = executor.runCleanupScript
 	return executor
 }
 
@@ -111,10 +119,20 @@ func (r *SSHExecutor) Close() error {
 			_ = s.forwarder.Close()
 		}
 		if s.client != nil {
-			_ = s.client.Close()
+			_ = r.closeSSHClient(s.client)
 		}
 	}
 	return nil
+}
+
+func (r *SSHExecutor) closeSSHClient(client *ssh.Client) error {
+	if client == nil {
+		return nil
+	}
+	if r.closeClient != nil {
+		return r.closeClient(client)
+	}
+	return client.Close()
 }
 
 // targetFromMetadata builds an SSHTarget from the executor metadata
@@ -205,39 +223,43 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 		return nil, err
 	}
 
-	if err := r.preflightAgentBinary(ctx, client, req, platform); err != nil {
-		return nil, err
-	}
-
 	workdir := r.workdirRoot(req.Metadata)
-	taskDir, sessionDir, err := r.prepareRemoteDirs(ctx, client, workdir, req)
+	taskDir, err := r.prepareRemoteTaskDir(ctx, client, workdir, req)
 	if err != nil {
 		return nil, err
 	}
 	r.maybeUploadCredentials(ctx, client, req, platform)
+	if err := r.runPrepareScript(ctx, client, taskDir, req, platform, agentctlBin); err != nil {
+		return nil, err
+	}
+	if err := r.verifyPrimaryCheckout(ctx, client, taskDir, req, platform); err != nil {
+		return nil, err
+	}
+	sessionDir, err := r.prepareRemoteSessionDir(ctx, client, taskDir, req)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.preflightAgentBinary(ctx, client, req, platform); err != nil {
+		return nil, err
+	}
 
 	port, pid, fwd, authToken, err := r.startAndForwardAgentctl(ctx, client, agentctlBin, taskDir, sessionDir, req, platform)
 	if err != nil {
 		return nil, err
 	}
-	if binding, ok := req.RemoteContributions[""]; ok {
-		if err := r.materializeSSHRemoteContribution(ctx, client, agentctlBin, taskDir, req, platform, &binding); err != nil {
-			_ = fwd.Close()
-			cleanupCtx, cancel := sshRemoteCleanupContext(ctx)
-			_ = stopRemoteAgentctl(cleanupCtx, client, sessionDir, pid)
-			cancel()
-			return nil, err
-		}
-	}
 
 	r.mu.Lock()
 	r.sessions[req.InstanceID] = &sshSessionState{
-		target:    target,
-		client:    client,
-		forwarder: fwd,
-		pid:       pid,
-		remoteDir: sessionDir,
-		authToken: authToken,
+		target:        target,
+		client:        client,
+		forwarder:     fwd,
+		pid:           pid,
+		remoteDir:     sessionDir,
+		remoteTaskDir: taskDir,
+		authToken:     authToken,
+		metadata:      cloneSSHMetadata(req.Metadata),
+		prepareEnv:    sshRemoteContributionEnv(req, agentctlBin),
+		platform:      platform,
 	}
 	r.mu.Unlock()
 	released = true // ownership transferred to session state; released on StopInstance
@@ -306,20 +328,25 @@ func (r *SSHExecutor) prepareRemoteHost(
 	return agentctlBin, info.Platform, nil
 }
 
-// prepareRemoteDirs makes <workdir>/tasks/<taskDir> and <taskDir>/.kandev/sessions/<sid>.
-func (r *SSHExecutor) prepareRemoteDirs(ctx context.Context, client *ssh.Client, workdir string, req *ExecutorCreateRequest) (string, string, error) {
+// prepareRemoteTaskDir makes <workdir>/tasks/<taskDir> before preparation runs.
+func (r *SSHExecutor) prepareRemoteTaskDir(ctx context.Context, client *ssh.Client, workdir string, req *ExecutorCreateRequest) (string, error) {
 	taskDir, err := ensureRemoteTaskDir(ctx, client, workdir, sshTaskDirName(req))
 	if err != nil {
 		r.report(req.OnProgress, "Preparing task directory", PrepareStepFailed, err.Error())
-		return "", "", err
-	}
-	sessionDir, err := ensureRemoteSessionDir(ctx, client, taskDir, req.SessionID)
-	if err != nil {
-		r.report(req.OnProgress, "Preparing task directory", PrepareStepFailed, err.Error())
-		return "", "", err
+		return "", err
 	}
 	r.report(req.OnProgress, "Preparing task directory", PrepareStepCompleted, taskDir)
-	return taskDir, sessionDir, nil
+	return taskDir, nil
+}
+
+func (r *SSHExecutor) prepareRemoteSessionDir(ctx context.Context, client *ssh.Client, taskDir string, req *ExecutorCreateRequest) (string, error) {
+	sessionDir, err := ensureRemoteSessionDir(ctx, client, taskDir, req.SessionID)
+	if err != nil {
+		r.report(req.OnProgress, "Preparing session directory", PrepareStepFailed, err.Error())
+		return "", err
+	}
+	r.report(req.OnProgress, "Preparing session directory", PrepareStepCompleted, sessionDir)
+	return sessionDir, nil
 }
 
 // startAndForwardAgentctl spawns the per-session agentctl on the remote,
@@ -501,12 +528,18 @@ func (r *SSHExecutor) StopInstance(ctx context.Context, instance *ExecutorInstan
 	if state.forwarder != nil {
 		_ = state.forwarder.Close()
 	}
+	if shouldRunExecutorCleanup(instance.StopReason) && state.client != nil && r.cleanupScript != nil {
+		metadata := mergeSSHMetadata(state.metadata, instance.Metadata)
+		if err := r.cleanupScript(ctx, state.client, state.remoteTaskDir, metadata, state.prepareEnv, state.platform, instance.InstanceID, instance.StopReason); err != nil {
+			r.logger.Warn("failed to run SSH cleanup script", zap.String("instance_id", instance.InstanceID), zap.Error(err))
+		}
+	}
 	if !sshShouldStopRemoteAgentctl(instance, force) {
 		r.logger.Info("preserving SSH agentctl after agent stop",
 			zap.String("instance_id", instance.InstanceID),
 			zap.String("stop_reason", instance.StopReason))
 		if state.client != nil {
-			_ = state.client.Close()
+			_ = r.closeSSHClient(state.client)
 		}
 		return nil
 	}
@@ -516,9 +549,13 @@ func (r *SSHExecutor) StopInstance(ctx context.Context, instance *ExecutorInstan
 	// the connection on the floor.
 	if state.client != nil {
 		cleanupCtx, cancel := sshRemoteCleanupContext(ctx)
-		_ = stopRemoteAgentctl(cleanupCtx, state.client, state.remoteDir, state.pid)
+		stopRemote := r.stopRemote
+		if stopRemote == nil {
+			stopRemote = stopRemoteAgentctl
+		}
+		_ = stopRemote(cleanupCtx, state.client, state.remoteDir, state.pid)
 		cancel()
-		_ = state.client.Close()
+		_ = r.closeSSHClient(state.client)
 	}
 	return nil
 }
@@ -588,6 +625,11 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 	if err != nil {
 		return fmt.Errorf("ssh resume: connect: %w", err)
 	}
+	agentctlBin, err := expandRemoteHome(ctx, client, sshRemoteAgentctlPath)
+	if err != nil {
+		_ = client.Close()
+		return fmt.Errorf("ssh resume: resolve agentctl path: %w", err)
+	}
 
 	// SSH liveness is judged on the REMOTE host: MetadataKeySSHRemoteAgentctlPID
 	// (mirrored into executors_running.pid) is a pid on the remote box, so it is
@@ -624,8 +666,11 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 		agentctlClient: instanceClient,
 		pid:            pid,
 		remoteDir:      sessionDir,
+		remoteTaskDir:  taskDir,
 		authToken:      req.AuthToken,
 		reusingProcess: reusingProcess,
+		metadata:       cloneSSHMetadata(req.Metadata),
+		prepareEnv:     sshRemoteContributionEnv(req, agentctlBin),
 	}
 	r.mu.Unlock()
 
@@ -731,12 +776,12 @@ func (r *SSHExecutor) resetTrackedManagedBrokerResume(
 	}
 	if err := stopRemote(ctx, state.client, state.remoteDir, state.pid); err != nil {
 		if state.client != nil {
-			_ = state.client.Close()
+			_ = r.closeSSHClient(state.client)
 		}
 		return fmt.Errorf("ssh resume: stop stale broker-backed agentctl: %w", err)
 	}
 	if state.client != nil {
-		_ = state.client.Close()
+		_ = r.closeSSHClient(state.client)
 	}
 	clearSSHResumeRuntimeMetadata(req.Metadata)
 	return nil

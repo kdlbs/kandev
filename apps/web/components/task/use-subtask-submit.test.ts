@@ -270,6 +270,17 @@ describe("useSubtaskSubmit", () => {
     expect(mockReplaceTaskUrl).toHaveBeenCalledWith(CREATED_TASK_ID);
   });
 
+  it("sends the autopilot creation flag for a subtask", async () => {
+    const opts = makeSubmitOptions({ autopilot: true });
+    const { result } = renderHook(() => useSubtaskSubmit(opts));
+
+    await act(async () => {
+      await result.current.handleSubmit({ preventDefault: vi.fn() } as never);
+    });
+
+    expect(mockCreateTask).toHaveBeenCalledWith(expect.objectContaining({ autopilot: true }));
+  });
+
   it("requires a title when auto-title mode is omitted", async () => {
     const opts = makeSubmitOptions({ title: "" });
     const { result } = renderHook(() => useSubtaskSubmit(opts));

@@ -388,6 +388,10 @@ test.describe("Session tab management — primary session persistence", () => {
       )
       .toBe(true);
 
+    await expect(
+      testPage.getByTestId("toast-message").filter({ hasText: "Set primary" }),
+    ).toHaveCount(0);
+
     await expect(starInTab(session, session2Id)).toBeVisible({ timeout: 5_000 });
     await expect(starInTab(session, session1Id)).not.toBeVisible({ timeout: 5_000 });
 

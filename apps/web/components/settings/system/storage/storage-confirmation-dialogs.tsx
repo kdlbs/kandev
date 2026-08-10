@@ -116,6 +116,38 @@ export function ExternalGoCacheDialog({
   );
 }
 
+export function TemporaryArtifactsDialog({
+  open,
+  onOpenChange,
+  onConfirm,
+}: Pick<ConfirmationDialogProps, "open" | "onOpenChange" | "onConfirm">) {
+  const { t } = useTranslation();
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-md">
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t("system:storageTemporaryArtifactsDialogTitle")}</AlertDialogTitle>
+          <AlertDialogDescription className="text-left">
+            {t("system:storageTemporaryArtifactsDialogDescription")}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel className="min-h-11 cursor-pointer">
+            {t("common:cancel")}
+          </AlertDialogCancel>
+          <AlertDialogAction
+            onClick={onConfirm}
+            className="min-h-11 cursor-pointer"
+            data-testid="storage-temporary-artifacts-confirm"
+          >
+            {t("system:storageTemporaryArtifactsDialogAction")}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 export function PermanentDeleteDialog({
   entry,
   ...props

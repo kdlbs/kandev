@@ -41,6 +41,35 @@ spec: "../../specs/platform/mid-turn-steering.md"
 
 ## Validation Results
 
+Re-run on 2026-08-06 against the branch merged with `main`. Supersedes the
+2026-08-04 entry below, which predates two real fixes in this exact area and
+did not disclose them.
+
+- `cd apps/backend && go test -race ./internal/orchestrator/...`: passed.
+- A human PR reviewer found and commit `26f275882` fixed two real bugs here on
+  2026-08-05: `SteerTask` bypassing the task/session authorization boundary,
+  and a queue-order race where ordinary `QueueMessage*` writers did not share
+  `SteerTask`'s admission lock. Both are now closed via
+  `authorizeTaskSessionPair` (first line of `SteerTask`) and
+  `messagequeue.Service.WithSessionAdmission`, a shared per-session lock every
+  insertion path and `SteerTask` acquire.
+- An independent Codex review on 2026-08-06 found a narrower third instance of
+  the same ordering-race class: `SteerTask` releases that admission lock
+  before its own blocking dispatch (see its own comment at steer.go), so a
+  message queued in that window — with the turn completing in the same
+  window — could let an ordinary drain dispatch it ahead of the steer that
+  was admitted first. Fixed by making both non-cancelling drain paths
+  (`drainQueuedMessageForPromptableSessionLocked`, which
+  `DrainQueuedMessage` delegates to, and `takeIfPromptableLocked`) defer to
+  `isSteerInFlight` the same way they already defer to
+  `isQueuedDispatchInFlight`. Regression-pinned by
+  `TestDrainPaths_DeferToInFlightSteer`, confirmed to fail without the fix.
+- Admission predicate, order rule (never jumps a non-empty queue) and the
+  single-in-flight-steer rule are covered by `orchestrator/steer_test.go`,
+  including its concurrent-submission case, under `-race`.
+
+---
+
 Re-run on 2026-08-04 against the branch merged with `main`.
 
 - `cd apps/backend && go test -race ./internal/orchestrator/...`: passed.

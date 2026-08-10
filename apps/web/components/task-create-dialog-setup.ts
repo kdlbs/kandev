@@ -136,6 +136,7 @@ function useSubmitHandlersWiring({
     isSessionMode,
     isEditMode,
     autoTitle,
+    autopilot: fs.autopilot,
     isPassthroughProfile: computed.isPassthroughProfile,
     taskName: fs.taskName,
     workspaceId,
@@ -195,7 +196,14 @@ function useDialogSetupData(
   const { open, workspaceId, workflowId, defaultStepId, initialValues } = props;
   const { toast } = useToast();
   const upsertWorkspaceRepository = useAppStore((state) => state.upsertRepository);
-  const data = useTaskCreateDialogData(open, workspaceId, workflowId, defaultStepId, fs);
+  const data = useTaskCreateDialogData({
+    open,
+    workspaceId,
+    workflowId,
+    defaultStepId,
+    fs,
+    lockedWorkflow: props.lockedFields?.workflow === true,
+  });
   const {
     workflows,
     agentProfiles,
@@ -228,7 +236,7 @@ function useDialogSetupData(
     lastUsedBranch: taskCreateLastUsed.branch,
     preserveBranch: initialValues?.checkoutBranch || initialValues?.branch,
   });
-  useLockedFieldSync(open, workflowId, initialValues, fs);
+  useLockedFieldSync(open, workflowId, initialValues, fs, props.lockedFields?.workflow === true);
   const handlers = useDialogHandlers(fs, repositories, {
     workspaceId,
     executors,
@@ -255,7 +263,13 @@ export function useTaskCreateDialogSetup(
     (state) => state.userSettings.agentGeneratedTaskTitles,
   );
   const autoTitle = mode === "create" && agentGeneratedTaskTitles;
-  const fs = useDialogFormState(open, workspaceId, workflowId, initialValues);
+  const fs = useDialogFormState(
+    open,
+    workspaceId,
+    workflowId,
+    initialValues,
+    resolvedProps.lockedFields?.workflow === true,
+  );
   const sessionRepoName = useSessionRepoName(isSessionMode);
   const data = useDialogSetupData(resolvedProps, fs);
   const {

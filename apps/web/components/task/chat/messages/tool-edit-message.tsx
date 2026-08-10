@@ -19,6 +19,7 @@ import { transformFileMutation, type FileMutation } from "@/lib/diff";
 import { useExpandState } from "./use-expand-state";
 import { useOpenFileAtLine } from "@/hooks/use-file-editors";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 type ModifyFilePayload = {
   file_path?: string;
@@ -48,6 +49,7 @@ function EditStatusIcon({ status }: { status: string | undefined }) {
 
 // getEditSummary returns the short header label for an edit/write card.
 function getEditSummary(
+  t: TFunction,
   content: string,
   worktreePath: string | undefined,
   isWriteOperation: boolean,
@@ -55,7 +57,7 @@ function getEditSummary(
 ): string {
   const baseSummary = transformPathsInText(content, worktreePath);
   if (isWriteOperation && lineCount > 0) {
-    return `${baseSummary} (${lineCount} line${lineCount !== 1 ? "s" : ""})`;
+    return t("task:editSummaryLines", { summary: baseSummary, count: lineCount });
   }
   return baseSummary;
 }
@@ -166,6 +168,7 @@ export const ToolEditMessage = memo(function ToolEditMessage({
   sessionId,
   onOpenFile,
 }: ToolEditMessageProps) {
+  const { t } = useTranslation();
   const {
     status,
     filePath,
@@ -181,7 +184,7 @@ export const ToolEditMessage = memo(function ToolEditMessage({
   const autoExpanded = status === "running";
   const { isExpanded, handleToggle } = useExpandState(status, autoExpanded);
   const Icon = isWriteOperation ? IconFilePlus : IconEdit;
-  const summary = getEditSummary(comment.content, worktreePath, isWriteOperation, lineCount);
+  const summary = getEditSummary(t, comment.content, worktreePath, isWriteOperation, lineCount);
 
   const handleCopyPath = (e: React.MouseEvent) => {
     e.stopPropagation();

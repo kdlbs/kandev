@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/configloader"
@@ -81,7 +82,8 @@ type RoutingDispatcher interface {
 	// run that was launched via routing. Returns handled=true when the
 	// routing path requeued the run (caller should NOT escalate).
 	HandlePostStartFailure(ctx context.Context, run *models.Run,
-		agent *models.AgentInstance, errorMessage string) (handled bool, err error)
+		agent *models.AgentInstance, errorMessage string,
+		providerError *streams.ProviderError) (handled bool, err error)
 	// MarkRunSuccessHealth flips a successful run's resolved provider /
 	// model / tier scopes back to healthy.
 	MarkRunSuccessHealth(ctx context.Context, run *models.Run,

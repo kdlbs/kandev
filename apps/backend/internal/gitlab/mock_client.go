@@ -3,6 +3,7 @@ package gitlab
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -32,6 +33,10 @@ type MockClient struct {
 	// pipelines for that project). Keying by mockMRKey here would
 	// make iteration order matter when multiple MRs share a project.
 	pipelines map[string][]Pipeline
+	// pipelineJobs is keyed by pipeline ID (unique across projects in the
+	// mock's fixture data), mirroring the real API's per-pipeline jobs
+	// endpoint.
+	pipelineJobs map[int64][]PipelineJob
 	// approvals tracks who has approved each MR. requiredApprovals tracks
 	// the project-level required-count GitLab returns alongside the
 	// approved_by list. Both are seeded separately because the GitLab
@@ -41,6 +46,7 @@ type MockClient struct {
 	requiredApprovals  map[mockMRKey]int
 	issues             map[mockIssueKey]*Issue
 	branches           map[string][]RepoBranch
+	repoFiles          map[mockRepoFileKey][]byte
 	members            map[string][]ProjectMember
 	mrSubscriptions    map[mockMRKey]bool
 	issueSubscriptions map[mockIssueKey]bool
@@ -55,6 +61,14 @@ type mockMRKey struct {
 type mockIssueKey struct {
 	Project string
 	IID     int
+}
+
+// mockRepoFileKey identifies a seeded repository file. Ref is part of the key
+// so a test can seed different content per branch.
+type mockRepoFileKey struct {
+	Project string
+	Ref     string
+	Path    string
 }
 
 // NewMockClient builds a fresh mock with a small canned dataset.
@@ -82,10 +96,12 @@ func (c *MockClient) resetLocked() {
 	c.files = make(map[mockMRKey][]MRFile)
 	c.commits = make(map[mockMRKey][]MRCommitInfo)
 	c.pipelines = make(map[string][]Pipeline)
+	c.pipelineJobs = make(map[int64][]PipelineJob)
 	c.approvals = make(map[mockMRKey][]MRApproval)
 	c.requiredApprovals = make(map[mockMRKey]int)
 	c.issues = make(map[mockIssueKey]*Issue)
 	c.branches = make(map[string][]RepoBranch)
+	c.repoFiles = make(map[mockRepoFileKey][]byte)
 	c.members = make(map[string][]ProjectMember)
 	c.mrSubscriptions = make(map[mockMRKey]bool)
 	c.issueSubscriptions = make(map[mockIssueKey]bool)
@@ -168,6 +184,15 @@ func (c *MockClient) SeedPipelines(projectPath string, pipelines []Pipeline) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.pipelines[projectPath] = pipelines
+}
+
+// SeedPipelineJobs registers the jobs returned for a given pipeline ID,
+// mirroring the real API's per-pipeline jobs endpoint. Seed pipelines with
+// SeedPipelines first so the pipeline ID referenced here exists.
+func (c *MockClient) SeedPipelineJobs(pipelineID int64, jobs []PipelineJob) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.pipelineJobs[pipelineID] = jobs
 }
 
 // SeedApprovals registers the approval state for (projectPath, iid):
@@ -310,6 +335,12 @@ func (c *MockClient) ListPipelines(_ context.Context, projectPath, _ string) ([]
 	return []Pipeline{}, nil
 }
 
+func (c *MockClient) ListPipelineJobs(_ context.Context, _ string, pipelineID int64) ([]PipelineJob, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]PipelineJob(nil), c.pipelineJobs[pipelineID]...), nil
+}
+
 func (c *MockClient) GetMRFeedback(ctx context.Context, projectPath string, iid int) (*MRFeedback, error) {
 	mr, err := c.GetMR(ctx, projectPath, iid)
 	if err != nil {
@@ -325,6 +356,17 @@ func (c *MockClient) GetMRFeedback(ctx context.Context, projectPath string, iid 
 	var pipelines []Pipeline
 	if mr.HeadSHA != "" || mr.HeadBranch != "" {
 		pipelines, _ = c.ListPipelines(ctx, projectPath, mr.HeadBranch)
+	}
+	if len(pipelines) > 0 {
+		// Only overwrite the seeded pipeline's job counts/list when jobs were
+		// explicitly seeded via SeedPipelineJobs — see the identical guard
+		// (and its rationale) in GetMRStatus above.
+		if jobs, _ := c.ListPipelineJobs(ctx, projectPath, pipelines[0].ID); len(jobs) > 0 {
+			total, passing, _ := summarizePipelineJobs(jobs)
+			pipelines[0].JobsTotal = total
+			pipelines[0].JobsPassing = passing
+			pipelines[0].Jobs = jobs
+		}
 	}
 	return &MRFeedback{
 		MR:          mr,
@@ -344,6 +386,17 @@ func (c *MockClient) GetMRStatus(ctx context.Context, projectPath string, iid in
 	if mr.HeadSHA != "" || mr.HeadBranch != "" {
 		pipelines, _ = c.ListPipelines(ctx, projectPath, mr.HeadBranch)
 	}
+	if len(pipelines) > 0 {
+		// Only overwrite the seeded pipeline's job counts when jobs were
+		// explicitly seeded via SeedPipelineJobs — tests that seed
+		// JobsTotal/JobsPassing directly on the Pipeline (the pre-jobs-API
+		// convention) must keep working unchanged.
+		if jobs, _ := c.ListPipelineJobs(ctx, projectPath, pipelines[0].ID); len(jobs) > 0 {
+			total, passing, _ := summarizePipelineJobs(jobs)
+			pipelines[0].JobsTotal = total
+			pipelines[0].JobsPassing = passing
+		}
+	}
 	approvals, _ := c.ListMRApprovals(ctx, projectPath, iid)
 	c.mu.Lock()
 	required := c.requiredApprovals[mockMRKey{Project: projectPath, IID: iid}]
@@ -359,6 +412,9 @@ func (c *MockClient) GetMRStatus(ctx context.Context, projectPath string, iid in
 		RequiredApprovals:   required,
 		PipelineJobsTotal:   jobsTotal,
 		PipelineJobsPassing: jobsPassing,
+		DetailedMergeStatus: mr.DetailedMergeStatus,
+		ReviewerCount:       len(mr.Reviewers),
+		UnapprovedReviewers: countUnapprovedReviewers(mr.Reviewers, approvals),
 	}, nil
 }
 
@@ -439,6 +495,68 @@ func (c *MockClient) ListProjectBranches(_ context.Context, projectPath string) 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.branches[projectPath], nil
+}
+
+// SeedRepoFile registers repository file content the mock will serve from
+// ListRepoTree and GetRepoFileContent.
+func (c *MockClient) SeedRepoFile(projectPath, ref, path string, content []byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.repoFiles[mockRepoFileKey{Project: projectPath, Ref: ref, Path: path}] = content
+}
+
+// ListRepoTree returns the seeded files directly under path. Like the real
+// endpoint this is non-recursive, so a file nested deeper surfaces as its
+// intermediate directory entry rather than as a blob.
+func (c *MockClient) ListRepoTree(
+	_ context.Context, projectPath, path, ref string,
+) ([]RepoTreeEntry, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	prefix := ""
+	if path != "" {
+		prefix = strings.TrimSuffix(path, "/") + "/"
+	}
+	seen := make(map[string]bool)
+	entries := make([]RepoTreeEntry, 0)
+	for key := range c.repoFiles {
+		if key.Project != projectPath || key.Ref != ref || !strings.HasPrefix(key.Path, prefix) {
+			continue
+		}
+		rest := strings.TrimPrefix(key.Path, prefix)
+		if rest == "" {
+			continue
+		}
+		name, entryType := rest, TreeEntryTypeBlob
+		if idx := strings.Index(rest, "/"); idx >= 0 {
+			name, entryType = rest[:idx], TreeEntryTypeTree
+		}
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		entries = append(entries, RepoTreeEntry{
+			Name: name,
+			Type: entryType,
+			Path: prefix + name,
+		})
+	}
+	// Map iteration is unordered; sort so seeded fixtures list deterministically.
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
+	return entries, nil
+}
+
+func (c *MockClient) GetRepoFileContent(
+	_ context.Context, projectPath, path, ref string,
+) ([]byte, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	content, ok := c.repoFiles[mockRepoFileKey{Project: projectPath, Ref: ref, Path: path}]
+	if !ok {
+		return nil, fmt.Errorf("mock: file %q not found in %s@%s", path, projectPath, ref)
+	}
+	return content, nil
 }
 
 func (c *MockClient) ListIssues(context.Context, string, string) ([]*Issue, error) {

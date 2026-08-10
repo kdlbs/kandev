@@ -14,14 +14,28 @@ import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import type { IssueDraft } from "./new-task-draft";
+import { PRIORITY_LABEL_KEYS, STATUS_LABEL_KEYS } from "../lib/label-keys";
+import { useTranslation } from "react-i18next";
 
 type StatusOption = { value: string; label: string; className: string };
 type PriorityOption = { value: string; label: string; icon: typeof IconMinus; className: string };
 
-const FALLBACK_STATUS_OPTIONS: StatusOption[] = [
-  { value: "backlog", label: "Backlog", className: "text-muted-foreground" },
-  { value: "todo", label: "Todo", className: "text-blue-600 dark:text-blue-400" },
-  { value: "in_progress", label: "In Progress", className: "text-yellow-600 dark:text-yellow-400" },
+// The fallback tables carry `labelKey`, not `label`: they are module scope, so a
+// `t()` here would resolve once at import and freeze at the boot locale. The
+// hooks below resolve the key at render. `value` stays untranslated — it is the
+// persisted status/priority id.
+const FALLBACK_STATUS_OPTIONS = [
+  { value: "backlog", labelKey: STATUS_LABEL_KEYS.backlog, className: "text-muted-foreground" },
+  {
+    value: "todo",
+    labelKey: STATUS_LABEL_KEYS.todo,
+    className: "text-blue-600 dark:text-blue-400",
+  },
+  {
+    value: "in_progress",
+    labelKey: STATUS_LABEL_KEYS.in_progress,
+    className: "text-yellow-600 dark:text-yellow-400",
+  },
 ];
 
 const PRIORITY_ICONS: Record<string, typeof IconMinus> = {
@@ -31,11 +45,31 @@ const PRIORITY_ICONS: Record<string, typeof IconMinus> = {
   low: IconArrowDown,
 };
 
-const FALLBACK_PRIORITY_OPTIONS: PriorityOption[] = [
-  { value: "critical", label: "Critical", icon: IconAlertTriangle, className: "text-red-600" },
-  { value: "high", label: "High", icon: IconArrowUp, className: "text-orange-600" },
-  { value: "medium", label: "Medium", icon: IconMinus, className: "text-yellow-600" },
-  { value: "low", label: "Low", icon: IconArrowDown, className: "text-blue-600" },
+const FALLBACK_PRIORITY_OPTIONS = [
+  {
+    value: "critical",
+    labelKey: PRIORITY_LABEL_KEYS.critical,
+    icon: IconAlertTriangle,
+    className: "text-red-600",
+  },
+  {
+    value: "high",
+    labelKey: PRIORITY_LABEL_KEYS.high,
+    icon: IconArrowUp,
+    className: "text-orange-600",
+  },
+  {
+    value: "medium",
+    labelKey: PRIORITY_LABEL_KEYS.medium,
+    icon: IconMinus,
+    className: "text-yellow-600",
+  },
+  {
+    value: "low",
+    labelKey: PRIORITY_LABEL_KEYS.low,
+    icon: IconArrowDown,
+    className: "text-blue-600",
+  },
 ];
 
 type Props = {
@@ -44,9 +78,17 @@ type Props = {
 };
 
 function useStatusOptions(): StatusOption[] {
+  const { t } = useTranslation();
   const meta = useAppStore((s) => s.office.meta);
-  if (!meta) return FALLBACK_STATUS_OPTIONS;
-  // Only show creation-relevant statuses (backlog, todo, in_progress)
+  if (!meta) {
+    return FALLBACK_STATUS_OPTIONS.map((o) => ({
+      value: o.value,
+      label: t(o.labelKey),
+      className: o.className,
+    }));
+  }
+  // Only show creation-relevant statuses (backlog, todo, in_progress).
+  // Labels come from the workspace's own status metadata, so they travel as-is.
   const creationStatuses = ["backlog", "todo", "in_progress"];
   return meta.statuses
     .filter((s) => creationStatuses.includes(s.id))
@@ -82,9 +124,18 @@ function StatusChip({ draft, onUpdate }: Props) {
 }
 
 function usePriorityOptions(): PriorityOption[] {
+  const { t } = useTranslation();
   const meta = useAppStore((s) => s.office.meta);
-  if (!meta) return FALLBACK_PRIORITY_OPTIONS;
-  // Exclude "none" from the creation picker
+  if (!meta) {
+    return FALLBACK_PRIORITY_OPTIONS.map((o) => ({
+      value: o.value,
+      label: t(o.labelKey),
+      icon: o.icon,
+      className: o.className,
+    }));
+  }
+  // Exclude "none" from the creation picker. Labels come from the workspace's
+  // own priority metadata, so they travel as-is.
   return meta.priorities
     .filter((p) => p.id !== "none")
     .map((p) => ({
@@ -128,13 +179,14 @@ function PriorityChip({ draft, onUpdate }: Props) {
 }
 
 export function NewTaskBottomBar({ draft, onUpdate }: Props) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-2 pt-2 border-t border-border">
       <StatusChip draft={draft} onUpdate={onUpdate} />
       <PriorityChip draft={draft} onUpdate={onUpdate} />
       <Button variant="outline" size="sm" className="cursor-pointer h-7 text-xs">
         <IconUpload className="h-3.5 w-3.5 mr-1" />
-        Upload
+        {t("office:upload")}
       </Button>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -142,7 +194,7 @@ export function NewTaskBottomBar({ draft, onUpdate }: Props) {
             <IconDotsVertical className="h-4 w-4" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>More options</TooltipContent>
+        <TooltipContent>{t("office:moreOptions")}</TooltipContent>
       </Tooltip>
     </div>
   );

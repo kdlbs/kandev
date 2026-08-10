@@ -493,6 +493,19 @@ describe("appSidebar actions", () => {
   });
 });
 
+describe("appSidebar improve dialog flag", () => {
+  it("setImproveDialogOpen toggles the shared Improve Kandev dialog flag", () => {
+    const store = makeStore();
+    expect(store.getState().appSidebar.improveDialogOpen).toBe(false);
+
+    store.getState().setImproveDialogOpen(true);
+    expect(store.getState().appSidebar.improveDialogOpen).toBe(true);
+
+    store.getState().setImproveDialogOpen(false);
+    expect(store.getState().appSidebar.improveDialogOpen).toBe(false);
+  });
+});
+
 describe("agent error sidebar acknowledgements", () => {
   beforeEach(() => {
     window.localStorage.clear();

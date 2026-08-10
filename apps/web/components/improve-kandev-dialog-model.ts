@@ -3,6 +3,13 @@ import type { WorkflowStep } from "@/lib/types/http";
 
 export const IMPROVE_KANDEV_SKIP_INTRO_KEY = "kandev.improveKandev.skipIntro";
 
+/**
+ * Exact name of the dedicated workspace all improve tasks land in. Mirrors
+ * `improveWorkspaceName` in the backend bootstrap handler; the frontend uses it
+ * to recognize the workspace for New Task routing.
+ */
+export const IMPROVE_KANDEV_WORKSPACE_NAME = "Improve Kandev";
+
 export type ImproveKandevKind = "bug" | "feature" | "issue";
 export type ImproveKandevMode = "intro" | "create";
 

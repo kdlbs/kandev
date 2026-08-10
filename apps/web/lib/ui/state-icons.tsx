@@ -1,4 +1,6 @@
 import type { ComponentType } from "react";
+import { useTranslation } from "react-i18next";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
   IconAlertCircle,
   IconAlertTriangle,
@@ -106,6 +108,15 @@ const PENDING_PERMISSION_ICON: IconConfig = {
   className: STYLE_PERMISSION,
 };
 
+// The task-level interrupted affordance: the session was mid-turn when the
+// backend died and the task has not been resumed. A red alert circle — red is
+// otherwise the error/cancelled hue, but the alert shape plus the REVIEW/idle
+// coarse state it replaces keeps it distinct from the terminal X affordances.
+const TASK_INTERRUPTED_ICON: IconConfig = {
+  Icon: IconAlertCircle,
+  className: STYLE_ERROR,
+};
+
 const DEFAULT_TASK_ICON: IconConfig = {
   Icon: IconAlertCircle,
   className: STYLE_MUTED,
@@ -135,6 +146,61 @@ const ACTIVE_SESSION_STATES: ReadonlySet<string> = new Set<TaskSessionState>([
   "STARTING",
   "RUNNING",
 ]);
+
+// Terminal task states whose own icon (done check, failure X, cancel pause)
+// always wins over the interrupted marker.
+const TERMINAL_TASK_STATES: ReadonlySet<TaskState | undefined> = new Set([
+  "COMPLETED",
+  "FAILED",
+  "CANCELLED",
+]);
+
+/**
+ * True when the task or its primary session is in a terminal state whose own
+ * icon (done check, failure X, cancel pause) must win over the interrupted
+ * marker.
+ */
+export function isTerminalInterruptedState(
+  state?: TaskState,
+  sessionState?: TaskSessionState,
+): boolean {
+  return (
+    state === "COMPLETED" ||
+    state === "FAILED" ||
+    state === "CANCELLED" ||
+    sessionState === "COMPLETED" ||
+    sessionState === "FAILED" ||
+    sessionState === "CANCELLED"
+  );
+}
+
+/**
+ * Shared red alert affordance for a task whose session was mid-turn when the
+ * backend died. Carries the accessible "Interrupted by restart" label and
+ * tooltip, so every surface that renders the interrupted state (sidebar rows,
+ * board cards, graph nodes, open-task header) presents it consistently.
+ */
+export function InterruptedTaskIcon({ className }: { className?: string }) {
+  const { t } = useTranslation();
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          aria-label={t("common:interruptedByRestart")}
+          tabIndex={0}
+          className="flex shrink-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-1"
+        >
+          <IconAlertCircle
+            aria-hidden="true"
+            data-testid="task-state-interrupted"
+            className={cn("text-red-500", className)}
+          />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="right">{t("common:interruptedByRestart")}</TooltipContent>
+    </Tooltip>
+  );
+}
 
 /**
  * Returns true when the kanban card should show the spinning loader. The task
@@ -177,12 +243,21 @@ export function isTaskInFlight(foregroundActivity?: ForegroundActivity | null): 
   return foregroundActivity === "generating" || foregroundActivity === "background";
 }
 
-function getTaskStateIconConfig(
-  state?: TaskState,
-  hasPendingClarification = false,
-  foregroundActivity?: ForegroundActivity | null,
-  hasPendingPermission = false,
-): IconConfig {
+type TaskStateIconOptions = {
+  hasPendingClarification?: boolean;
+  foregroundActivity?: ForegroundActivity | null;
+  hasPendingPermission?: boolean;
+  /** True when the task's session was mid-turn when the backend died. */
+  interrupted?: boolean;
+};
+
+function getTaskStateIconConfig(state?: TaskState, options: TaskStateIconOptions = {}): IconConfig {
+  const {
+    hasPendingClarification = false,
+    foregroundActivity,
+    hasPendingPermission = false,
+    interrupted = false,
+  } = options;
   if (shouldUsePermissionTaskIcon(hasPendingPermission)) {
     return PENDING_PERMISSION_ICON;
   }
@@ -195,6 +270,12 @@ function getTaskStateIconConfig(
   if (foregroundActivity === "generating") return TASK_GENERATING_ICON;
   if (foregroundActivity === "background") return TASK_BACKGROUND_ICON;
   if (isWaitingForInputState(state)) return TASK_STATE_ICONS.WAITING_FOR_INPUT;
+  // Interrupted (startup reconciliation marker): replaces the idle/done
+  // affordances but never overrides terminal states, which keep their own
+  // icons (done check, failure X, cancel pause).
+  if (interrupted && !TERMINAL_TASK_STATES.has(state)) {
+    return TASK_INTERRUPTED_ICON;
+  }
   if (!state) return DEFAULT_TASK_ICON;
   return TASK_STATE_ICONS[state] ?? DEFAULT_TASK_ICON;
 }
@@ -202,16 +283,14 @@ function getTaskStateIconConfig(
 export function getTaskStateIcon(
   state?: TaskState,
   className?: string,
-  hasPendingClarification = false,
-  foregroundActivity?: ForegroundActivity | null,
-  hasPendingPermission = false,
+  options: TaskStateIconOptions = {},
 ) {
-  const config = getTaskStateIconConfig(
-    state,
-    hasPendingClarification,
-    foregroundActivity,
-    hasPendingPermission,
-  );
+  const config = getTaskStateIconConfig(state, options);
+  // The interrupted affordance carries its own tooltip and accessible label,
+  // so it must render through the shared component rather than a bare icon.
+  if (config === TASK_INTERRUPTED_ICON) {
+    return <InterruptedTaskIcon className={cn("h-4 w-4", className)} />;
+  }
   return <config.Icon className={cn("h-4 w-4", config.className, className)} />;
 }
 

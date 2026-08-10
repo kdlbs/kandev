@@ -4,6 +4,7 @@ package github
 const (
 	prStateMerged = "merged"
 	prStateClosed = "closed"
+	prStateOpen   = "open"
 )
 
 // PR review states from the GitHub API.

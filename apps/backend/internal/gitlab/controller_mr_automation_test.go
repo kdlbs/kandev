@@ -75,6 +75,125 @@ func TestControllerPatchTaskMRAutomation_SetsSingleSwitch(t *testing.T) {
 	}
 }
 
+// TestControllerPatchTaskMRAutomation_AutoFixEnabled covers AC2: PATCH with
+// auto_fix_enabled returns 200 with it true, and a subsequent GET agrees.
+func TestControllerPatchTaskMRAutomation_AutoFixEnabled(t *testing.T) {
+	router, _ := newMRAutomationControllerFixture(t)
+	body := `{"auto_fix_enabled":true}`
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/gitlab/tasks/task-1/mr-automation", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("PATCH status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	var patched TaskMRAutomationResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &patched); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !patched.AutoFixEnabled {
+		t.Fatalf("auto_fix_enabled = false after PATCH, want true: %+v", patched)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/gitlab/tasks/task-1/mr-automation", nil)
+	getResp := httptest.NewRecorder()
+	router.ServeHTTP(getResp, getReq)
+	var got TaskMRAutomationResponse
+	if err := json.Unmarshal(getResp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode GET: %v", err)
+	}
+	if !got.AutoFixEnabled {
+		t.Fatalf("GET auto_fix_enabled = false, want true: %+v", got)
+	}
+}
+
+// TestControllerPatchTaskMRAutomation_RejectsUnknownAutomationField and
+// TestControllerPatchTaskMRAutomation_RejectsNullAutoFixSwitch extend AC3's
+// controller contract (inherited from #2125) to the new fields.
+func TestControllerPatchTaskMRAutomation_RejectsUnknownAutomationField(t *testing.T) {
+	router, _ := newMRAutomationControllerFixture(t)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/gitlab/tasks/task-1/mr-automation", strings.NewReader(`{"auto_fx_enabled":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	if !strings.Contains(resp.Body.String(), "unknown MR automation field") {
+		t.Fatalf("unexpected error body: %s", resp.Body.String())
+	}
+}
+
+func TestControllerPatchTaskMRAutomation_RejectsNullAutoFixSwitch(t *testing.T) {
+	router, _ := newMRAutomationControllerFixture(t)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/gitlab/tasks/task-1/mr-automation", strings.NewReader(`{"auto_fix_enabled":null}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+}
+
+// TestControllerGetTaskMRAutomation_DefaultPromptFields covers AC4: the
+// response always carries auto_fix_max_rounds, a non-empty
+// effective_auto_fix_prompt, and using_default_prompt=true with no override.
+func TestControllerGetTaskMRAutomation_DefaultPromptFields(t *testing.T) {
+	router, _ := newMRAutomationControllerFixture(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/gitlab/tasks/task-1/mr-automation", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	var got TaskMRAutomationResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.AutoFixMaxRounds != TaskMRAutoFixMaxRounds {
+		t.Errorf("AutoFixMaxRounds = %d, want %d", got.AutoFixMaxRounds, TaskMRAutoFixMaxRounds)
+	}
+	if got.EffectiveAutoFixPrompt == "" {
+		t.Error("EffectiveAutoFixPrompt is empty, want the embedded default")
+	}
+	if !got.UsingDefaultPrompt {
+		t.Error("UsingDefaultPrompt = false, want true when no override is set")
+	}
+}
+
+// TestControllerPatchTaskMRAutomation_PromptOverrideRoundTrip covers AC5.
+func TestControllerPatchTaskMRAutomation_PromptOverrideRoundTrip(t *testing.T) {
+	router, _ := newMRAutomationControllerFixture(t)
+	setOverride := `{"auto_fix_prompt_override":"custom prompt text"}`
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/gitlab/tasks/task-1/mr-automation", strings.NewReader(setOverride))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	var withOverride TaskMRAutomationResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &withOverride); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if withOverride.EffectiveAutoFixPrompt != "custom prompt text" {
+		t.Errorf("EffectiveAutoFixPrompt = %q, want the override", withOverride.EffectiveAutoFixPrompt)
+	}
+	if withOverride.UsingDefaultPrompt {
+		t.Error("UsingDefaultPrompt = true with an override set, want false")
+	}
+
+	clearOverride := `{"auto_fix_prompt_override":""}`
+	req2 := httptest.NewRequest(http.MethodPatch, "/api/v1/gitlab/tasks/task-1/mr-automation", strings.NewReader(clearOverride))
+	req2.Header.Set("Content-Type", "application/json")
+	resp2 := httptest.NewRecorder()
+	router.ServeHTTP(resp2, req2)
+	var cleared TaskMRAutomationResponse
+	if err := json.Unmarshal(resp2.Body.Bytes(), &cleared); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !cleared.UsingDefaultPrompt {
+		t.Error("UsingDefaultPrompt = false after clearing the override, want true")
+	}
+	if cleared.EffectiveAutoFixPrompt == "custom prompt text" {
+		t.Error("EffectiveAutoFixPrompt still the override after clearing it")
+	}
+}
+
 func TestControllerPatchTaskMRAutomation_EmptyBodyRejected(t *testing.T) {
 	router, _ := newMRAutomationControllerFixture(t)
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/gitlab/tasks/task-1/mr-automation", strings.NewReader(`{}`))

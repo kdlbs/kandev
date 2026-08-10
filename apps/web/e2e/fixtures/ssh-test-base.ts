@@ -1,12 +1,17 @@
 import { expect, type Page, test as base } from "@playwright/test";
-import { execSync } from "node:child_process";
-import fs from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+  execInContainer,
+  startSSHServer,
+  stopSSHServer,
+  type SSHServerHandle,
+} from "../helpers/ssh";
 import path from "node:path";
 import { backendFixture, type BackendContext } from "./backend";
 import { hasSSHContainerSupport, buildE2ESSHImage, SSH_E2E_IMAGE_TAG } from "./ssh-image";
-import { startSSHServer, stopSSHServer, type SSHServerHandle } from "../helpers/ssh";
 import { ApiClient } from "../helpers/api-client";
 import { makeGitEnv } from "../helpers/git-helper";
+import { startHTTPGitFixture } from "../helpers/http-git-server";
 import type { WorkflowStep } from "../../lib/types/http";
 
 export type SSHSeedData = {
@@ -26,6 +31,8 @@ export type SSHSeedData = {
   sshExecutorProfileId: string;
   /** Live handle to the sshd container the executor connects to. */
   sshTarget: SSHServerHandle;
+  /** Removes the worker-scoped HTTP Git fixture and its SSH URL rewrite. */
+  sshGitFixtureCleanup: () => Promise<void>;
 };
 
 /**
@@ -86,10 +93,12 @@ export const sshTest = backendFixture.extend<
         throw e;
       }
 
+      let seed: Omit<SSHSeedData, "sshTarget"> | undefined;
       try {
-        const seed = await seedSSHWorkspace(apiClient, backend, sshTarget);
+        seed = await seedSSHWorkspace(apiClient, backend, sshTarget);
         await use({ ...seed, sshTarget });
       } finally {
+        await seed?.sshGitFixtureCleanup().catch(() => undefined);
         stopSSHServer(sshTarget);
       }
     },
@@ -171,53 +180,83 @@ async function seedSSHWorkspace(
   const sorted = steps.sort((a, b) => a.position - b.position);
   const startStep = sorted.find((s) => s.is_start_step) ?? sorted[0];
 
-  // SSH executor clones inside the remote container; needs a fetchable URL.
-  // Same offline-bare-repo trick the Docker fixture uses.
-  const remoteDir = path.join(backend.tmpDir, "repos", "e2e-ssh-remote.git");
-  fs.mkdirSync(path.dirname(remoteDir), { recursive: true });
-  const gitEnv = makeGitEnv(backend.tmpDir);
-  execSync(`git init --bare -b main "${remoteDir}"`, { env: gitEnv });
-
-  const repoDir = path.join(backend.tmpDir, "repos", "e2e-ssh-repo");
-  fs.mkdirSync(repoDir, { recursive: true });
-  execSync("git init -b main", { cwd: repoDir, env: gitEnv });
-  execSync('git commit --allow-empty -m "init"', { cwd: repoDir, env: gitEnv });
-  execSync(`git remote add origin "file://${remoteDir}"`, { cwd: repoDir, env: gitEnv });
-  execSync("git push origin main", { cwd: repoDir, env: gitEnv });
-  const repo = await apiClient.createRepository(workspace.id, repoDir);
-
-  const { agents } = await apiClient.listAgents();
-  const mock = agents.find((a) => a.name === "mock-agent");
-  const agentProfileId = mock?.profiles[0]?.id;
-  if (!agentProfileId) throw new Error("SSH E2E seed: mock-agent profile missing");
-
-  const sshExecutor = await apiClient.createSSHExecutor("E2E SSH Target", {
-    ssh_host: sshTarget.host,
-    ssh_port: String(sshTarget.port),
-    ssh_user: sshTarget.user,
-    ssh_identity_source: "file",
-    ssh_identity_file: sshTarget.identityFile,
-    ssh_host_fingerprint: sshTarget.hostFingerprint,
-  });
-
-  const profile = await apiClient.createExecutorProfile(sshExecutor.id, {
-    name: "E2E SSH",
-    config: {},
-    prepare_script: "",
-    cleanup_script: "",
-    env_vars: [],
-  });
-
-  return {
-    workspaceId: workspace.id,
-    workflowId: workflow.id,
-    startStepId: startStep.id,
-    steps: sorted,
-    repositoryId: repo.id,
-    agentProfileId,
-    sshExecutorId: sshExecutor.id,
-    sshExecutorProfileId: profile.id,
+  // SSH executor clones inside the remote container, so the fixture must be
+  // reachable from that container rather than using a host-only file:// URL.
+  // The HTTP server is disposable and the SSH target rewrites the canonical
+  // provider URL to its Docker-bridge endpoint without changing Git origin.
+  const gitFixture = await startHTTPGitFixture(backend.tmpDir, "e2e-ssh");
+  const localRepoDir = path.join(backend.tmpDir, "repos", "e2e-ssh-repo");
+  const localGitEnv = makeGitEnv(backend.tmpDir);
+  execFileSync(
+    "git",
+    ["clone", path.join(backend.tmpDir, "fixture", "e2e-ssh.git"), localRepoDir],
+    { env: localGitEnv },
+  );
+  const rewriteKey = gitFixture.gitConfigEnvVars.find(
+    ({ key }) => key === "GIT_CONFIG_KEY_0",
+  )?.value;
+  const rewriteValue = gitFixture.gitConfigEnvVars.find(
+    ({ key }) => key === "GIT_CONFIG_VALUE_0",
+  )?.value;
+  if (!rewriteKey || !rewriteValue) {
+    await gitFixture.close();
+    throw new Error("SSH E2E seed: HTTP Git fixture did not provide its URL rewrite");
+  }
+  const sshGitFixtureCleanup = async () => {
+    try {
+      execInContainer(sshTarget, ["git", "config", "--system", "--unset-all", rewriteKey]);
+    } catch {
+      // The target may already have exited after a failed fixture setup.
+    }
+    await gitFixture.close();
   };
+  try {
+    execInContainer(sshTarget, ["git", "config", "--system", rewriteKey, rewriteValue]);
+    const repo = await apiClient.createRepository(workspace.id, gitFixture.checkoutPath, "main", {
+      name: "fixture/e2e-ssh",
+      provider: "gitlab",
+      provider_host: "https://gitlab.com",
+      provider_owner: "fixture",
+      provider_name: "e2e-ssh",
+    });
+
+    const { agents } = await apiClient.listAgents();
+    const mock = agents.find((a) => a.name === "mock-agent");
+    const agentProfileId = mock?.profiles[0]?.id;
+    if (!agentProfileId) throw new Error("SSH E2E seed: mock-agent profile missing");
+
+    const sshExecutor = await apiClient.createSSHExecutor("E2E SSH Target", {
+      ssh_host: sshTarget.host,
+      ssh_port: String(sshTarget.port),
+      ssh_user: sshTarget.user,
+      ssh_identity_source: "file",
+      ssh_identity_file: sshTarget.identityFile,
+      ssh_host_fingerprint: sshTarget.hostFingerprint,
+    });
+
+    const profile = await apiClient.createExecutorProfile(sshExecutor.id, {
+      name: "E2E SSH",
+      config: {},
+      prepare_script: "",
+      cleanup_script: "",
+      env_vars: [],
+    });
+
+    return {
+      workspaceId: workspace.id,
+      workflowId: workflow.id,
+      startStepId: startStep.id,
+      steps: sorted,
+      repositoryId: repo.id,
+      agentProfileId,
+      sshExecutorId: sshExecutor.id,
+      sshExecutorProfileId: profile.id,
+      sshGitFixtureCleanup,
+    };
+  } catch (error) {
+    await sshGitFixtureCleanup().catch(() => undefined);
+    throw error;
+  }
 }
 
 export { expect } from "@playwright/test";

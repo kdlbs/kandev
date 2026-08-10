@@ -121,15 +121,26 @@ func PlanMode() string { return prompts.Get("plan-mode") }
 
 // KandevContext returns the task-mode system prompt template that provides
 // Kandev-specific instructions and session context to agents. Contains
-// {task_id}, {session_id}, {step_complete_section}, and {task_title_section}
-// placeholders — use
+// task, session, capability, and question placeholders — use
 // [FormatKandevContext] to inject values.
 func KandevContext() string {
 	return Resolve("kandev-context", map[string]string{
 		"coordinator_task_control_section": coordinatorTaskControlSection,
 		"task_title_section":               "",
+		"autopilot_section":                "",
+		"question_tool_section":            userQuestionSection,
 	})
 }
+
+const userQuestionSection = `- ask_user_question_kandev: Ask the user one or more clarifying questions in a single tool call. Use this whenever you need user input to proceed. Required params: questions (array of 1-4 question objects; each object has prompt (string) and options (array of 2-6 {label, description})). Optional: context (string).
+`
+
+const parentQuestionSection = `- ask_parent_question_kandev: Ask the direct parent task one or more critical questions. Use this only when you cannot continue safely without a parent decision. The question is sent to the parent task, and this call MUST end your turn; do not use an operator-question tool.
+`
+
+const autopilotSection = `AUTOPILOT MODE:
+This task runs in autopilot mode. Continue independently and make reasonable decisions without asking the operator. Ask for help only when a decision is critical, unsafe, or cannot be inferred from the task context. If a direct parent exists, use the available parent-question tool for that critical question. The question tool ends the current turn, so do not make another tool call or continue working after you ask it. If there is no parent, do not ask a question; choose the safest reversible path and report the limitation in your final response.
+`
 
 // stepCompleteSection is the description + instruction block for the
 // step_complete_kandev MCP tool. Only injected when the current workflow step
@@ -156,6 +167,7 @@ const stepCompleteSection = "- step_complete_kandev: Signal that every user-stat
 // in the template to avoid broadening this feature into a cleanup of older mode
 // mismatches.
 const coordinatorTaskControlSection = " Optional: session_id, delivery_mode. " +
+	"For an autopilot child question, also pass reply_to_question_id with the question ID from the child message. " +
 	"Use delivery_mode=\"queued\" or omit it for information that can wait. " +
 	"Use delivery_mode=\"interrupt\" for urgent replacement work on a running direct child; " +
 	"if immediate cancel-and-dispatch cannot be confirmed safely, the message remains queued. " +
@@ -190,6 +202,9 @@ type KandevContextOptions struct {
 	RequiresCompletionSignal       bool
 	IncludeCoordinatorTaskControls bool
 	IncludeTaskTitleTool           bool
+	Autopilot                      bool
+	IncludeUserQuestionTool        bool
+	IncludeParentQuestionTool      bool
 }
 
 // FormatKandevContext returns the Kandev context prompt with task and session IDs injected.
@@ -219,12 +234,25 @@ func FormatKandevContextWithOptions(taskID, sessionID string, options KandevCont
 	if options.IncludeTaskTitleTool {
 		taskTitle = taskTitleSection
 	}
+	questionTool := ""
+	switch {
+	case options.IncludeParentQuestionTool:
+		questionTool = parentQuestionSection
+	case options.IncludeUserQuestionTool || !options.Autopilot:
+		questionTool = userQuestionSection
+	}
+	autopilot := ""
+	if options.Autopilot {
+		autopilot = autopilotSection
+	}
 	return Resolve("kandev-context", map[string]string{
 		"task_id":                          taskID,
 		"session_id":                       sessionID,
 		"step_complete_section":            section,
 		"task_title_section":               taskTitle,
 		"coordinator_task_control_section": coordinatorControls,
+		"autopilot_section":                autopilot,
+		"question_tool_section":            questionTool,
 	})
 }
 

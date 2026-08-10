@@ -50,9 +50,9 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	assert.Contains(t, props, "prompt")
 	assert.ElementsMatch(t, []string{
 		"parent_id", "workspace_id", "workflow_id", "workflow_step_id", "workspace_mode",
-		"title", "prompt", "agent_profile_id", "executor_profile_id", "start_agent",
-		"repository_id", "local_path", "repository_url", "base_branch",
-	}, propertyNames(props), "remote contribution support must not add tool properties")
+		"title", "prompt", "autopilot", "agent_profile_id", "executor_profile_id", "start_agent",
+		"repository_id", "local_path", "repository_url", "base_branch", "external_id",
+	}, propertyNames(props), "unexpected change to the advertised create_task_kandev schema")
 	assert.NotContains(t, props, "description", "legacy alias must not increase the advertised schema")
 	assert.Contains(t, tool.Tool.Description, "'prompt' is the sub-agent's initial prompt")
 	assert.NotContains(t, tool.Tool.Description, "'description' is the sub-agent's initial prompt")
@@ -107,6 +107,24 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	assert.False(t, requiredSet["parent_id"], "parent_id should not be required")
 	assert.False(t, requiredSet["workspace_id"], "workspace_id should not be required")
 	assert.False(t, requiredSet["workflow_id"], "workflow_id should not be required")
+}
+
+func TestCreateTask_AutopilotPayload(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{"id": "subtask-1", "parent_id": "task-current", "autopilot": true},
+	}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "create_task_kandev", map[string]interface{}{
+		"title":     "Run independently",
+		"parent_id": "self",
+		"autopilot": true,
+	})
+
+	assert.False(t, result.IsError)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, true, payload["autopilot"])
 }
 
 func propertyNames(properties map[string]interface{}) []string {
@@ -646,10 +664,11 @@ func TestMessageTask_ForwardsToBackend(t *testing.T) {
 	s := newTaskModeServer(t, backend, "task-current")
 
 	result := callTool(t, s, "message_task_kandev", map[string]interface{}{
-		"task_id":       "task-target",
-		"session_id":    "sess-target",
-		"prompt":        "follow up",
-		"delivery_mode": "interrupt",
+		"task_id":              "task-target",
+		"session_id":           "sess-target",
+		"prompt":               "follow up",
+		"delivery_mode":        "interrupt",
+		"reply_to_question_id": "question-1",
 	})
 
 	assert.False(t, result.IsError)
@@ -661,6 +680,7 @@ func TestMessageTask_ForwardsToBackend(t *testing.T) {
 	assert.Equal(t, "sess-target", payload["session_id"])
 	assert.Equal(t, "follow up", payload["prompt"])
 	assert.Equal(t, "interrupt", payload["delivery_mode"])
+	assert.Equal(t, "question-1", payload["reply_to_question_id"])
 	assert.Equal(t, "task-current", payload["sender_task_id"])
 	assert.Equal(t, "test-session", payload["sender_session_id"])
 }
@@ -678,6 +698,7 @@ func TestMessageTask_DescriptionExplainsQueueInterruptAndStop(t *testing.T) {
 	assert.Contains(t, description, `delivery_mode="interrupt"`)
 	assert.Contains(t, description, "stop_task_kandev")
 	assert.Contains(t, description, `safely falls back to "queued"`)
+	assert.Contains(t, description, "reply_to_question_id")
 }
 
 func TestMessageTask_MissingTaskID_ReturnsError(t *testing.T) {

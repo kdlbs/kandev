@@ -622,15 +622,13 @@ func (s *Service) refreshStaleWorkspaceWatches(workspaceID string, staleTasks ma
 		defer s.inflightWorkspaceRefreshes.Delete(workspaceID)
 		syncCtx, cancel := context.WithTimeout(s.stopCtx, 60*time.Second)
 		defer cancel()
-		var allWatches []*PRWatch
-		for taskID := range staleTasks {
-			watches, err := s.store.ListPRWatchesByTask(syncCtx, taskID)
-			if err != nil {
-				s.logger.Debug("list PR watches for refresh failed",
-					zap.String("task_id", taskID), zap.Error(err))
-				continue
-			}
-			allWatches = append(allWatches, watches...)
+		allWatches, unwatched := s.collectStaleWorkspaceSyncTargets(syncCtx, staleTasks)
+		// PRs left behind by a branch handover have no watch to fan in, so
+		// they would stay stale on every workspace load. Reconcile them in
+		// one batched call for the whole workspace; once a row reaches a
+		// terminal state it drops out of this set permanently.
+		if len(unwatched) > 0 {
+			s.syncUnwatchedTaskPRs(syncCtx, unwatched, workspaceID)
 		}
 		if len(allWatches) == 0 {
 			return
@@ -702,7 +700,25 @@ type taskPRSyncState struct {
 	checksTotal, checksPassing                  int
 	unresolved, reviewCount, pendingReviewCount int
 	requiredReviews                             *int
-	baseBranch, mergeableState                  string
+	baseBranch, mergeableState, state           string
+	mergedAt, closedAt                          *time.Time
+}
+
+// resolveTerminalMergeState keeps a row that already reached "merged" there.
+// GitHub cannot un-merge a PR, so a live read reporting anything else for a
+// merged row is stale — an eventually-consistent REST reply, or a fetch that
+// started before a concurrent writer observed the merge. Without this, two
+// writers racing the same PR could flip its badge back to green.
+//
+// Only "merged" is guarded. The PR detail panel used to apply a full
+// merged > closed > open rank client-side; that is deliberately not ported,
+// because closed -> open is a real transition (a PR can be reopened on GitHub)
+// and ranking it as a regression would pin every reopened PR closed forever.
+func resolveTerminalMergeState(tp *TaskPR, pr *PR) (string, *time.Time, *time.Time) {
+	if tp.State == prStateMerged && pr.State != prStateMerged {
+		return tp.State, tp.MergedAt, tp.ClosedAt
+	}
+	return pr.State, pr.MergedAt, pr.ClosedAt
 }
 
 func (s *Service) prepareTaskPRSyncState(ctx context.Context, tp *TaskPR, status *PRStatus) taskPRSyncState {
@@ -757,10 +773,12 @@ func (s *Service) prepareTaskPRSyncState(ctx context.Context, tp *TaskPR, status
 	if status.PR.Draft {
 		nextMergeableState = "draft"
 	}
+	nextState, nextMergedAt, nextClosedAt := resolveTerminalMergeState(tp, status.PR)
 	return taskPRSyncState{
 		checksTotal: nextChecksTotal, checksPassing: nextChecksPassing,
 		unresolved: nextUnresolved, reviewCount: nextReviewCount, pendingReviewCount: nextPendingReviewCount,
 		requiredReviews: nextRequiredReviews, baseBranch: nextBaseBranch, mergeableState: nextMergeableState,
+		state: nextState, mergedAt: nextMergedAt, closedAt: nextClosedAt,
 	}
 }
 
@@ -782,7 +800,7 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	}
 	next := s.prepareTaskPRSyncState(ctx, tp, status)
 
-	changed := tp.State != status.PR.State ||
+	changed := tp.State != next.state ||
 		tp.PRTitle != status.PR.Title ||
 		tp.Additions != status.PR.Additions ||
 		tp.Deletions != status.PR.Deletions ||
@@ -796,15 +814,15 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 		tp.ChecksPassing != next.checksPassing ||
 		tp.UnresolvedReviewThreads != next.unresolved ||
 		tp.BaseBranch != next.baseBranch ||
-		!timeEqual(tp.MergedAt, status.PR.MergedAt) ||
-		!timeEqual(tp.ClosedAt, status.PR.ClosedAt)
+		!timeEqual(tp.MergedAt, next.mergedAt) ||
+		!timeEqual(tp.ClosedAt, next.closedAt)
 
-	tp.State = status.PR.State
+	tp.State = next.state
 	tp.PRTitle = status.PR.Title
 	tp.Additions = status.PR.Additions
 	tp.Deletions = status.PR.Deletions
-	tp.MergedAt = status.PR.MergedAt
-	tp.ClosedAt = status.PR.ClosedAt
+	tp.MergedAt = next.mergedAt
+	tp.ClosedAt = next.closedAt
 	tp.ReviewState = status.ReviewState
 	tp.ChecksState = status.ChecksState
 	tp.MergeableState = next.mergeableState
@@ -897,17 +915,27 @@ func (s *Service) triggerPRSyncAllPermanent(ctx context.Context, taskID string) 
 		return nil, false, fmt.Errorf("list PR watches: %w", err)
 	}
 	if len(watches) == 0 {
-		// No watches — fall back to whatever TaskPRs already exist (e.g.
-		// PRs imported via task-create-from-PR-URL where the watch is
-		// optional). Empty slice if none. permanent=false (the task can
-		// still acquire a watch later via push detection).
-		existing, listErr := s.store.ListTaskPRsByTask(ctx, taskID)
+		// No watches — the TaskPRs that already exist (e.g. PRs imported via
+		// task-create-from-PR-URL where the watch is optional) have no other
+		// sync path at all, so reconcile them here rather than returning the
+		// stored snapshot verbatim. Empty slice if none. permanent=false (the
+		// task can still acquire a watch later via push detection).
+		existing, listErr := s.reconcileTaskUnwatchedPRs(ctx, taskID, nil)
 		if listErr != nil {
-			return nil, false, fmt.Errorf("list task PRs: %w", listErr)
+			return nil, false, listErr
 		}
 		return existing, false, nil
 	}
 	prs, syncErr := s.runBatchedOrPerWatchSync(ctx, taskID, watches)
+	// PRs the task linked from an earlier branch are no longer covered by any
+	// watch — the loop above cannot see them, and without this they keep their
+	// last-observed state (open, green, mergeable) forever.
+	if reconciled, listErr := s.reconcileTaskUnwatchedPRs(ctx, taskID, watches); listErr != nil {
+		s.logger.Debug("unwatched task PR reconciliation failed",
+			zap.String("task_id", taskID), zap.Error(listErr))
+	} else {
+		prs = reconciled
+	}
 	return prs, s.areAllWatchesPermanentlyMissing(ctx, watches), syncErr
 }
 

@@ -227,16 +227,19 @@ func TestHTTPStartQuickChatRejectsInvalidRepositoryShapes(t *testing.T) {
 // passthrough start_agent prompt-delivery fix: the synchronous prepare must
 // carry DeferredStart=true so launchPrepare does not eagerly upgrade a
 // passthrough profile into a promptless PTY launch and pre-empt the
-// prompt-bearing IntentStartCreated that follows. Returning an error from the
-// prepare call keeps the async start goroutine from spawning, so the assertion
-// reads orch.requests without racing it.
+// prompt-bearing IntentStartCreated that follows. A prepare error returns a
+// nil dispatch, and dispatchTaskSession no-ops on a nil dispatch — the
+// caller structurally cannot reach the async start goroutine without a
+// successful prepare, so the assertion reads orch.requests without racing it.
 func TestStartAgentForNewTask_SetsDeferredStart(t *testing.T) {
 	orch := &captureOrchestrator{prepErr: errors.New("prepare failed")}
 	h := &TaskHandlers{orchestrator: orch, logger: newTestLogger(t)}
 
 	resp := &createTaskResponse{}
 	body := httpCreateTaskRequest{StartAgent: true, AgentProfileID: "profile-1"}
-	h.startAgentForNewTask(context.Background(), resp, "task-1", "do the thing", body, "step-1")
+	dispatch := h.prepareStartAgentSession(context.Background(), resp, "task-1", body, "step-1")
+	require.Nil(t, dispatch, "a prepare failure must not produce a dispatch")
+	h.dispatchTaskSession("task-1", "do the thing", body, dispatch)
 
 	orch.mu.Lock()
 	defer orch.mu.Unlock()
@@ -560,10 +563,11 @@ func TestHTTPCreateTaskRecordsFinalLastUsedSelections(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
 	require.Equal(t, 1, recorder.calls)
 	assert.Equal(t, usermodels.TaskCreateLastUsed{
-		RepositoryID:      "repo-2",
-		Branch:            "feature/current",
-		AgentProfileID:    "agent-2",
-		ExecutorProfileID: "exec-profile-2",
+		RepositoryID:           "repo-2",
+		Branch:                 "feature/current",
+		AgentProfileID:         "agent-2",
+		ExecutorProfileID:      "exec-profile-2",
+		WorkflowIDsByWorkspace: map[string]string{"ws-1": "wf-1"},
 	}, recorder.got)
 }
 
@@ -602,8 +606,9 @@ func TestHTTPCreateTaskRecordsRepositoryWithoutProfileIDs(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
 	require.Equal(t, 1, recorder.calls)
 	assert.Equal(t, usermodels.TaskCreateLastUsed{
-		RepositoryID: "repo-2",
-		Branch:       "main",
+		RepositoryID:           "repo-2",
+		Branch:                 "main",
+		WorkflowIDsByWorkspace: map[string]string{"ws-1": "wf-1"},
 	}, recorder.got)
 }
 
@@ -642,6 +647,21 @@ func TestBuildTaskCreateLastUsedPatchRecordsFirstWorkspaceRepository(t *testing.
 		RepositoryID:      "repo-without-branch",
 		AgentProfileID:    "agent-2",
 		ExecutorProfileID: "exec-profile-2",
+	}, patch)
+}
+
+func TestBuildTaskCreateLastUsedPatchRecordsWorkspaceWorkflow(t *testing.T) {
+	patch := buildTaskCreateLastUsedPatch(httpCreateTaskRequest{
+		WorkspaceID:       "workspace-1",
+		WorkflowID:        "workflow-1",
+		AgentProfileID:    "agent-2",
+		ExecutorProfileID: "exec-profile-2",
+	}, nil)
+
+	assert.Equal(t, usermodels.TaskCreateLastUsed{
+		WorkflowIDsByWorkspace: map[string]string{"workspace-1": "workflow-1"},
+		AgentProfileID:         "agent-2",
+		ExecutorProfileID:      "exec-profile-2",
 	}, patch)
 }
 
@@ -725,10 +745,11 @@ func TestWSCreateTaskRecordsFinalLastUsedSelections(t *testing.T) {
 	require.Equal(t, ws.MessageTypeResponse, resp.Type)
 	require.Equal(t, 1, recorder.calls)
 	assert.Equal(t, usermodels.TaskCreateLastUsed{
-		RepositoryID:      "repo-2",
-		Branch:            "feature/current",
-		AgentProfileID:    "agent-2",
-		ExecutorProfileID: "exec-profile-2",
+		RepositoryID:           "repo-2",
+		Branch:                 "feature/current",
+		AgentProfileID:         "agent-2",
+		ExecutorProfileID:      "exec-profile-2",
+		WorkflowIDsByWorkspace: map[string]string{"ws-1": "wf-1"},
 	}, recorder.got)
 }
 
@@ -797,8 +818,9 @@ func TestWSCreateTaskRecordsFreshBranchRequestBase(t *testing.T) {
 	require.Equal(t, ws.MessageTypeResponse, resp.Type)
 	require.Equal(t, 1, recorder.calls)
 	assert.Equal(t, usermodels.TaskCreateLastUsed{
-		RepositoryID: "repo-2",
-		Branch:       "main",
+		RepositoryID:           "repo-2",
+		Branch:                 "main",
+		WorkflowIDsByWorkspace: map[string]string{"ws-1": "wf-1"},
 	}, recorder.got)
 }
 

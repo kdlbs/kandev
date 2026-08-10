@@ -5,6 +5,11 @@ const { computeDialogDefaultStepId, computeSingleWorkflowFallbackId } = taskCrea
 const HIDDEN_WORKFLOW_ID = "improve-kandev";
 const VISIBLE_WORKFLOW_ID = "visible";
 const VISIBLE_START_STEP_ID = "visible-start";
+const DEV_WORKFLOW_ID = "dev";
+const REVIEW_WORKFLOW_ID = "review";
+const SUPPORT_WORKFLOW_ID = "support";
+const WORKSPACE_ONE = "workspace-1";
+const WORKSPACE_TWO = "workspace-2";
 
 type WorkflowContextResolver = (
   workflowId: string | null,
@@ -21,6 +26,109 @@ describe("computeSingleWorkflowFallbackId", () => {
     ]);
 
     expect(workflowId).toBe("kanban");
+  });
+});
+
+const WORKFLOW_RESOLUTION_WORKFLOWS = [
+  { id: DEV_WORKFLOW_ID, workspaceId: WORKSPACE_ONE },
+  { id: REVIEW_WORKFLOW_ID, workspaceId: WORKSPACE_ONE },
+  { id: SUPPORT_WORKFLOW_ID, workspaceId: WORKSPACE_TWO },
+  { id: "hidden", workspaceId: WORKSPACE_ONE, hidden: true },
+];
+
+const WORKFLOW_RESOLUTION_CASES = [
+  {
+    name: "prefers a locked workflow",
+    args: {
+      workspaceId: WORKSPACE_ONE,
+      lockedWorkflowId: REVIEW_WORKFLOW_ID,
+      manualWorkflowId: null,
+      lastUsedWorkflowId: DEV_WORKFLOW_ID,
+      contextWorkflowId: DEV_WORKFLOW_ID,
+      workflows: WORKFLOW_RESOLUTION_WORKFLOWS,
+    },
+    expected: REVIEW_WORKFLOW_ID,
+  },
+  {
+    name: "prefers a workflow manually selected in the open dialog",
+    args: {
+      workspaceId: WORKSPACE_ONE,
+      lockedWorkflowId: null,
+      manualWorkflowId: REVIEW_WORKFLOW_ID,
+      lastUsedWorkflowId: DEV_WORKFLOW_ID,
+      contextWorkflowId: DEV_WORKFLOW_ID,
+      workflows: WORKFLOW_RESOLUTION_WORKFLOWS,
+    },
+    expected: REVIEW_WORKFLOW_ID,
+  },
+  {
+    name: "prefers workspace last-used over an unlocked conflicting filter",
+    args: {
+      workspaceId: WORKSPACE_ONE,
+      lockedWorkflowId: null,
+      manualWorkflowId: null,
+      lastUsedWorkflowId: DEV_WORKFLOW_ID,
+      contextWorkflowId: REVIEW_WORKFLOW_ID,
+      workflows: WORKFLOW_RESOLUTION_WORKFLOWS,
+    },
+    expected: DEV_WORKFLOW_ID,
+  },
+  {
+    name: "falls back when remembered workflow is hidden",
+    args: {
+      workspaceId: WORKSPACE_ONE,
+      lockedWorkflowId: null,
+      manualWorkflowId: null,
+      lastUsedWorkflowId: "hidden",
+      contextWorkflowId: REVIEW_WORKFLOW_ID,
+      workflows: WORKFLOW_RESOLUTION_WORKFLOWS,
+    },
+    expected: REVIEW_WORKFLOW_ID,
+  },
+  {
+    name: "falls back when remembered workflow belongs to another workspace",
+    args: {
+      workspaceId: WORKSPACE_ONE,
+      lockedWorkflowId: null,
+      manualWorkflowId: null,
+      lastUsedWorkflowId: SUPPORT_WORKFLOW_ID,
+      contextWorkflowId: REVIEW_WORKFLOW_ID,
+      workflows: WORKFLOW_RESOLUTION_WORKFLOWS,
+    },
+    expected: REVIEW_WORKFLOW_ID,
+  },
+  {
+    name: "selects the sole visible workflow without context",
+    args: {
+      workspaceId: WORKSPACE_TWO,
+      lockedWorkflowId: null,
+      manualWorkflowId: null,
+      lastUsedWorkflowId: null,
+      contextWorkflowId: null,
+      workflows: [
+        { id: SUPPORT_WORKFLOW_ID, workspaceId: WORKSPACE_TWO },
+        { id: "hidden", workspaceId: WORKSPACE_TWO, hidden: true },
+      ],
+    },
+    expected: SUPPORT_WORKFLOW_ID,
+  },
+  {
+    name: "leaves multiple workflows unselected without a valid default",
+    args: {
+      workspaceId: WORKSPACE_ONE,
+      lockedWorkflowId: null,
+      manualWorkflowId: null,
+      lastUsedWorkflowId: null,
+      contextWorkflowId: null,
+      workflows: WORKFLOW_RESOLUTION_WORKFLOWS,
+    },
+    expected: null,
+  },
+];
+
+describe("resolveEffectiveTaskCreateWorkflowId", () => {
+  it.each(WORKFLOW_RESOLUTION_CASES)("$name", ({ args, expected }) => {
+    expect(taskCreateDefaults.resolveEffectiveTaskCreateWorkflowId(args)).toBe(expected);
   });
 });
 

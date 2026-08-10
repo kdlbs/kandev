@@ -1,7 +1,10 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import {
+  IconArchive,
   IconPlayerStop,
   IconGitCommit,
   IconArrowUp,
@@ -19,7 +22,7 @@ import {
 } from "@tabler/icons-react";
 import { useRegisterCommands } from "@/hooks/use-register-commands";
 import { useGitOperations } from "@/hooks/use-git-operations";
-import { useGitWithFeedback } from "@/hooks/use-git-with-feedback";
+import { gitOperationLabel, useGitWithFeedback } from "@/hooks/use-git-with-feedback";
 import { usePanelActions } from "@/hooks/use-panel-actions";
 import { useVcsDialogs } from "@/components/vcs/vcs-dialogs";
 import { useAppStore } from "@/components/state-provider";
@@ -28,6 +31,9 @@ import { createFile } from "@/lib/ws/workspace-files";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { NewSessionDialog } from "@/components/task/new-session-dialog";
 import { NewSubtaskDialog } from "@/components/task/new-subtask-dialog";
+import { TaskArchiveConfirmFlow } from "@/components/task/task-archive-confirm-flow";
+import { useTaskArchiveConfirm } from "@/hooks/use-task-archive-confirm";
+import { searchKeywords } from "@/lib/commands/search-keywords";
 import type { CommandItem } from "@/lib/commands/types";
 
 type SessionCommandsProps = {
@@ -36,6 +42,8 @@ type SessionCommandsProps = {
   isAgentRunning?: boolean;
   hasWorktree?: boolean;
   isPassthrough?: boolean;
+  /** Archived tasks are read-only, so the palette hides the archive command. */
+  isTaskArchived?: boolean;
 };
 
 type GitRunFn = (
@@ -45,98 +53,124 @@ type GitRunFn = (
 type GitOps = ReturnType<typeof useGitOperations>;
 type PanelActions = ReturnType<typeof usePanelActions>;
 
-function buildSessionCommands(
+// Catalog keys, not copy — safe at module scope because nothing calls `t()`
+// here. The palette groups by the RESOLVED value, so every producer of a group
+// must go through these constants; `global-commands.tsx` does the same.
+const GROUP_AGENT = "common:commandGroupAgent";
+const GROUP_GIT = "common:commandGroupGit";
+const GROUP_WORKSPACE = "common:commandGroupWorkspace";
+const GROUP_PANELS = "common:commandGroupPanels";
+
+export function buildSessionCommands(
   isAgentRunning: boolean | undefined,
   cancelTurn: () => void,
+  t: TFunction,
 ): CommandItem[] {
   const items: CommandItem[] = [];
   if (isAgentRunning)
     items.push({
       id: "session-cancel",
-      label: "Cancel Turn",
-      group: "Agent",
+      label: t("common:commandCancelTurn"),
+      group: t(GROUP_AGENT),
       icon: <IconPlayerStop className="size-3.5" />,
-      keywords: ["cancel", "stop", "turn", "cancel agent", "stop agent", "interrupt agent"],
+      keywords: searchKeywords(t, "common:commandCancelTurnKeywords"),
       action: cancelTurn,
     });
   return items;
 }
 
-function buildGitCommands(
-  git: GitOps,
-  baseBranch: string | undefined,
-  openCommitDialog: () => void,
-  openPRDialog: () => void,
-  runGitWithFeedback: GitRunFn,
-): CommandItem[] {
+type GitCommandOptions = {
+  git: GitOps;
+  baseBranch: string | undefined;
+  openCommitDialog: () => void;
+  openPRDialog: () => void;
+  runGitWithFeedback: GitRunFn;
+  t: TFunction;
+};
+
+export function buildGitCommands({
+  git,
+  baseBranch,
+  openCommitDialog,
+  openPRDialog,
+  runGitWithFeedback,
+  t,
+}: GitCommandOptions): CommandItem[] {
+  const group = t(GROUP_GIT);
   return [
     {
       id: "git-commit",
-      label: "Commit Changes",
-      group: "Git",
+      label: t("common:commandCommitChanges"),
+      group,
       icon: <IconGitCommit className="size-3.5" />,
-      keywords: ["commit", "git", "save changes", "git commit"],
+      keywords: searchKeywords(t, "common:commandCommitChangesKeywords"),
       action: openCommitDialog,
     },
     {
       id: "git-push",
-      label: "Push",
-      group: "Git",
+      label: t("common:gitOpPush"),
+      group,
       icon: <IconArrowUp className="size-3.5" />,
-      keywords: ["push", "git", "push changes", "push to remote", "upload changes"],
-      action: () => runGitWithFeedback(() => git.push(), "Push"),
+      keywords: searchKeywords(t, "common:commandPushKeywords"),
+      action: () => runGitWithFeedback(() => git.push(), gitOperationLabel(t, "common:gitOpPush")),
     },
     {
       id: "git-pull",
-      label: "Pull",
-      group: "Git",
+      label: t("common:gitOpPull"),
+      group,
       icon: <IconArrowDown className="size-3.5" />,
-      keywords: ["pull", "git", "pull changes", "download changes"],
-      action: () => runGitWithFeedback(() => git.pull(), "Pull"),
+      keywords: searchKeywords(t, "common:commandPullKeywords"),
+      action: () => runGitWithFeedback(() => git.pull(), gitOperationLabel(t, "common:gitOpPull")),
     },
     {
       id: "git-create-pr",
-      label: "Create PR",
-      group: "Git",
+      label: t("common:commandCreatePr"),
+      group,
       icon: <IconGitPullRequest className="size-3.5" />,
-      keywords: ["pull request", "pr", "open pull request", "submit pull request", "git"],
+      keywords: searchKeywords(t, "common:commandCreatePrKeywords"),
       action: openPRDialog,
     },
     {
       id: "git-rebase",
-      label: "Rebase",
-      group: "Git",
+      label: t("common:gitOpRebase"),
+      group,
       icon: <IconGitBranch className="size-3.5" />,
-      keywords: ["rebase", "git", "branch"],
+      keywords: searchKeywords(t, "common:commandRebaseKeywords"),
       action: () => {
-        const t = baseBranch?.replace(/^origin\//, "") || "main";
-        return runGitWithFeedback(() => git.rebase(t), "Rebase");
+        const target = baseBranch?.replace(/^origin\//, "") || "main";
+        return runGitWithFeedback(
+          () => git.rebase(target),
+          gitOperationLabel(t, "common:gitOpRebase"),
+        );
       },
     },
     {
       id: "git-merge",
-      label: "Merge",
-      group: "Git",
+      label: t("common:gitOpMerge"),
+      group,
       icon: <IconGitMerge className="size-3.5" />,
-      keywords: ["merge", "git", "branch"],
+      keywords: searchKeywords(t, "common:commandMergeKeywords"),
       action: () => {
-        const t = baseBranch?.replace(/^origin\//, "") || "main";
-        return runGitWithFeedback(() => git.merge(t), "Merge");
+        const target = baseBranch?.replace(/^origin\//, "") || "main";
+        return runGitWithFeedback(
+          () => git.merge(target),
+          gitOperationLabel(t, "common:gitOpMerge"),
+        );
       },
     },
   ];
 }
 
-function buildWorkspaceCommands(sessionId: string): CommandItem[] {
+export function buildWorkspaceCommands(sessionId: string, t: TFunction): CommandItem[] {
   return [
     {
       id: "workspace-create-file",
-      label: "Create File",
-      group: "Workspace",
+      label: t("common:commandCreateFile"),
+      group: t(GROUP_WORKSPACE),
       icon: <IconFilePlus className="size-3.5" />,
-      keywords: ["create", "new", "file", "add"],
+      keywords: searchKeywords(t, "common:commandCreateFileKeywords"),
       enterMode: "input",
-      inputPlaceholder: "File path relative to workspace root...",
+      inputPlaceholder: t("common:commandCreateFilePlaceholder"),
       onInputSubmit: async (path) => {
         const client = getWebSocketClient();
         if (!client) return;
@@ -154,80 +188,156 @@ function buildWorkspaceCommands(sessionId: string): CommandItem[] {
   ];
 }
 
-function buildTaskCommands(
-  activeTaskId: string | null,
-  openNewAgent: () => void,
-  openSubtask: () => void,
-): CommandItem[] {
+type TaskCommandOptions = {
+  activeTaskId: string | null;
+  isTaskArchived: boolean;
+  t: TFunction;
+  openNewAgent: () => void;
+  openSubtask: () => void;
+  requestArchive: () => void;
+};
+
+export function buildTaskCommands({
+  activeTaskId,
+  isTaskArchived,
+  t,
+  openNewAgent,
+  openSubtask,
+  requestArchive,
+}: TaskCommandOptions): CommandItem[] {
   if (!activeTaskId) return [];
-  return [
+  const items: CommandItem[] = [
     {
       id: "agent-new",
-      label: "New Agent",
-      group: "Agent",
+      label: t("common:commandNewAgent"),
+      group: t(GROUP_AGENT),
       icon: <IconMessagePlus className="size-3.5" />,
-      keywords: ["new", "agent", "session", "start agent", "new session"],
+      keywords: searchKeywords(t, "common:commandNewAgentKeywords"),
       action: openNewAgent,
     },
     {
       id: "subtask-create",
-      label: "Create Subtask",
-      group: "Tasks",
+      label: t("common:commandCreateSubtask"),
+      group: t("common:commandGroupTasks"),
       icon: <IconSubtask className="size-3.5" />,
-      keywords: ["subtask", "create", "new subtask", "new sub-task", "child task"],
+      keywords: searchKeywords(t, "common:commandCreateSubtaskKeywords"),
       action: openSubtask,
     },
   ];
+  // An archived task cannot be archived again; the palette offers no archive
+  // entry for it rather than surfacing a command that always fails.
+  if (!isTaskArchived) {
+    items.push({
+      id: "task-archive",
+      label: t("tasks:archiveTask"),
+      group: t("common:commandGroupTasks"),
+      icon: <IconArchive className="size-3.5" />,
+      keywords: searchKeywords(t, "common:commandArchiveTaskKeywords"),
+      action: requestArchive,
+    });
+  }
+  return items;
 }
 
-function buildPanelCommands(
+export function buildPanelCommands(
   panels: PanelActions,
   isPassthrough: boolean | undefined,
+  t: TFunction,
 ): CommandItem[] {
+  const group = t(GROUP_PANELS);
   const items: CommandItem[] = [
     {
       id: "panel-browser",
-      label: "Add Browser Panel",
-      group: "Panels",
+      label: t("common:commandAddBrowserPanel"),
+      group,
       icon: <IconBrowser className="size-3.5" />,
-      keywords: ["browser", "preview", "web", "open browser preview", "web preview", "app preview"],
+      keywords: searchKeywords(t, "common:commandAddBrowserPanelKeywords"),
       action: () => panels.addBrowser(),
     },
     {
       id: "panel-terminal",
-      label: "Add Terminal Panel",
-      group: "Panels",
+      label: t("common:commandAddTerminalPanel"),
+      group,
       icon: <IconTerminal2 className="size-3.5" />,
-      keywords: ["terminal", "shell", "console", "new terminal", "open terminal", "command line"],
+      keywords: searchKeywords(t, "common:commandAddTerminalPanelKeywords"),
       action: () => panels.addTerminal(),
     },
   ];
   if (!isPassthrough)
     items.push({
       id: "panel-plan",
-      label: "Add Plan Panel",
-      group: "Panels",
+      label: t("common:commandAddPlanPanel"),
+      group,
       icon: <IconFileText className="size-3.5" />,
-      keywords: ["plan", "document", "task plan", "implementation plan", "plan details"],
+      keywords: searchKeywords(t, "common:commandAddPlanPanelKeywords"),
       action: () => panels.addPlan(),
     });
   items.push({
     id: "panel-changes",
-    label: "Add Changes Panel",
-    group: "Panels",
+    label: t("common:commandAddChangesPanel"),
+    group,
     icon: <IconFileDiff className="size-3.5" />,
-    keywords: [
-      "changes",
-      "diff",
-      "git changes",
-      "changed files",
-      "source control",
-      "git diff",
-      "review changes",
-    ],
+    keywords: searchKeywords(t, "common:commandAddChangesPanelKeywords"),
     action: () => panels.addChanges(),
   });
   return items;
+}
+
+function useCancelTurn(sessionId: string | null) {
+  return useCallback(async () => {
+    if (!sessionId) return;
+    const client = getWebSocketClient();
+    if (!client) return;
+    try {
+      await client.request("agent.cancel", { session_id: sessionId }, 15000);
+    } catch (error) {
+      console.error("Failed to cancel agent turn:", error);
+    }
+  }, [sessionId]);
+}
+
+function useCommandDialogState() {
+  const [newAgentOpen, setNewAgentOpen] = useState(false);
+  const [subtaskOpen, setSubtaskOpen] = useState(false);
+  const openNewAgent = useCallback(() => setNewAgentOpen(true), []);
+  const openSubtask = useCallback(() => setSubtaskOpen(true), []);
+  return { newAgentOpen, setNewAgentOpen, subtaskOpen, setSubtaskOpen, openNewAgent, openSubtask };
+}
+
+type SessionCommandDialogsProps = {
+  activeTaskId: string;
+  activeTaskTitle: string;
+  dialogs: ReturnType<typeof useCommandDialogState>;
+  archive: ReturnType<typeof useTaskArchiveConfirm>;
+};
+
+/** Dialogs the task-scoped palette commands open. */
+function SessionCommandDialogs({
+  activeTaskId,
+  activeTaskTitle,
+  dialogs,
+  archive,
+}: SessionCommandDialogsProps) {
+  return (
+    <>
+      <NewSessionDialog
+        open={dialogs.newAgentOpen}
+        onOpenChange={dialogs.setNewAgentOpen}
+        taskId={activeTaskId}
+      />
+      <NewSubtaskDialog
+        open={dialogs.subtaskOpen}
+        onOpenChange={dialogs.setSubtaskOpen}
+        parentTaskId={activeTaskId}
+        parentTaskTitle={activeTaskTitle}
+      />
+      <TaskArchiveConfirmFlow
+        taskId={activeTaskId}
+        archive={archive}
+        confirmTestId="palette-archive-confirm"
+      />
+    </>
+  );
 }
 
 export function SessionCommands({
@@ -236,7 +346,9 @@ export function SessionCommands({
   isAgentRunning,
   hasWorktree,
   isPassthrough,
+  isTaskArchived,
 }: SessionCommandsProps) {
+  const { t } = useTranslation();
   const git = useGitOperations(sessionId);
   const panels = usePanelActions();
   const { openCommitDialog, openPRDialog } = useVcsDialogs();
@@ -249,21 +361,9 @@ export function SessionCommands({
     return s.kanban.tasks.find((t: { id: string }) => t.id === id)?.title ?? "";
   });
 
-  const [showNewAgentDialog, setShowNewAgentDialog] = useState(false);
-  const [showSubtaskDialog, setShowSubtaskDialog] = useState(false);
-  const openNewAgent = useCallback(() => setShowNewAgentDialog(true), []);
-  const openSubtask = useCallback(() => setShowSubtaskDialog(true), []);
-
-  const cancelTurn = useCallback(async () => {
-    if (!sessionId) return;
-    const client = getWebSocketClient();
-    if (!client) return;
-    try {
-      await client.request("agent.cancel", { session_id: sessionId }, 15000);
-    } catch (error) {
-      console.error("Failed to cancel agent turn:", error);
-    }
-  }, [sessionId]);
+  const dialogs = useCommandDialogState();
+  const { openNewAgent, openSubtask } = dialogs;
+  const cancelTurn = useCancelTurn(sessionId);
 
   const runGitWithFeedback = useCallback(
     async (
@@ -276,16 +376,39 @@ export function SessionCommands({
     [panels, gitWithFeedback],
   );
 
+  const archive = useTaskArchiveConfirm(activeTaskId);
+  const { requestArchive } = archive;
+
+  // Session-scoped commands need a live session; task-scoped ones only need the
+  // task, so they stay available while a session is still being ensured.
   const commands = useMemo<CommandItem[]>(() => {
-    if (!sessionId) return [];
+    const sessionScoped = sessionId
+      ? [
+          ...buildSessionCommands(isAgentRunning, cancelTurn, t),
+          ...(hasWorktree
+            ? buildGitCommands({
+                git,
+                baseBranch,
+                openCommitDialog,
+                openPRDialog,
+                runGitWithFeedback,
+                t,
+              })
+            : []),
+          ...(hasWorktree ? buildWorkspaceCommands(sessionId, t) : []),
+          ...buildPanelCommands(panels, isPassthrough, t),
+        ]
+      : [];
     const items = [
-      ...buildSessionCommands(isAgentRunning, cancelTurn),
-      ...(hasWorktree
-        ? buildGitCommands(git, baseBranch, openCommitDialog, openPRDialog, runGitWithFeedback)
-        : []),
-      ...(hasWorktree ? buildWorkspaceCommands(sessionId) : []),
-      ...buildPanelCommands(panels, isPassthrough),
-      ...buildTaskCommands(activeTaskId, openNewAgent, openSubtask),
+      ...sessionScoped,
+      ...buildTaskCommands({
+        activeTaskId,
+        isTaskArchived: Boolean(isTaskArchived),
+        t,
+        openNewAgent,
+        openSubtask,
+        requestArchive,
+      }),
     ];
     return items.map((cmd) => ({ ...cmd, priority: 0 }));
   }, [
@@ -298,32 +421,26 @@ export function SessionCommands({
     isAgentRunning,
     hasWorktree,
     isPassthrough,
+    isTaskArchived,
+    t,
     openCommitDialog,
     openPRDialog,
     runGitWithFeedback,
     openNewAgent,
     openSubtask,
+    requestArchive,
   ]);
 
   useRegisterCommands(commands);
 
+  if (!activeTaskId) return null;
+
   return (
-    <>
-      {activeTaskId && (
-        <NewSessionDialog
-          open={showNewAgentDialog}
-          onOpenChange={setShowNewAgentDialog}
-          taskId={activeTaskId}
-        />
-      )}
-      {activeTaskId && (
-        <NewSubtaskDialog
-          open={showSubtaskDialog}
-          onOpenChange={setShowSubtaskDialog}
-          parentTaskId={activeTaskId}
-          parentTaskTitle={activeTaskTitle}
-        />
-      )}
-    </>
+    <SessionCommandDialogs
+      activeTaskId={activeTaskId}
+      activeTaskTitle={activeTaskTitle}
+      dialogs={dialogs}
+      archive={archive}
+    />
   );
 }

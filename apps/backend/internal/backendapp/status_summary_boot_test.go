@@ -25,12 +25,13 @@ func TestBootKanbanSnapshotHydratesTaskStatusSummaryInBatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list workflow steps: %v", err)
 	}
-	task, err := harness.taskSvc.CreateTask(ctx, &service.CreateTaskRequest{
+	taskResult, err := harness.taskSvc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID:    workspaces[0].ID,
 		WorkflowID:     workflows[0].ID,
 		WorkflowStepID: steps[0].ID,
 		Title:          "Summary hydration task",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -79,4 +80,76 @@ func TestBootKanbanSnapshotHydratesTaskStatusSummaryInBatch(t *testing.T) {
 		return
 	}
 	t.Fatalf("task %q missing from boot snapshot: %s", task.ID, raw)
+}
+
+type bootFakeQueuedCounter struct {
+	byTask map[string]int
+}
+
+func (f bootFakeQueuedCounter) CountPendingByTaskIDs(_ context.Context, taskIDs []string) (map[string]int, error) {
+	out := make(map[string]int, len(taskIDs))
+	for _, id := range taskIDs {
+		out[id] = f.byTask[id]
+	}
+	return out, nil
+}
+
+func TestBootKanbanSnapshotStampsQueuedPromptCount(t *testing.T) {
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+	workspaces, err := harness.taskSvc.ListWorkspaces(ctx)
+	if err != nil {
+		t.Fatalf("list workspaces: %v", err)
+	}
+	workflows, err := harness.taskSvc.ListWorkflows(ctx, workspaces[0].ID, true)
+	if err != nil {
+		t.Fatalf("list workflows: %v", err)
+	}
+	steps, err := harness.workflowSvc.ListStepsByWorkflow(ctx, workflows[0].ID)
+	if err != nil {
+		t.Fatalf("list workflow steps: %v", err)
+	}
+	taskResult, err := harness.taskSvc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID:    workspaces[0].ID,
+		WorkflowID:     workflows[0].ID,
+		WorkflowStepID: steps[0].ID,
+		Title:          "Queued count boot task",
+	})
+	task := taskResult.Task
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	harness.taskSvc.SetQueuedPromptCounter(bootFakeQueuedCounter{byTask: map[string]int{task.ID: 2}})
+
+	state := bootInitialState(ctx, nil, routeParams{
+		taskSvc:  harness.taskSvc,
+		services: &Services{Workflow: harness.workflowSvc},
+	}, webapp.ClassifyRoute("/"))
+	raw, err := json.Marshal(state)
+	if err != nil {
+		t.Fatalf("marshal boot state: %v", err)
+	}
+	var decoded struct {
+		KanbanMulti struct {
+			Snapshots map[string]struct {
+				Tasks []struct {
+					ID            string                           `json:"id"`
+					StatusSummary *statussummary.TaskStatusSummary `json:"statusSummary"`
+				} `json:"tasks"`
+			} `json:"snapshots"`
+		} `json:"kanbanMulti"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decode boot state: %v", err)
+	}
+	for _, item := range decoded.KanbanMulti.Snapshots[workflows[0].ID].Tasks {
+		if item.ID != task.ID {
+			continue
+		}
+		if item.StatusSummary == nil || item.StatusSummary.QueuedPromptCount != 2 {
+			t.Fatalf("boot status summary queued prompt count = %#v, want 2", item.StatusSummary)
+		}
+		return
+	}
+	t.Fatalf("task %q missing from boot snapshot", task.ID)
 }

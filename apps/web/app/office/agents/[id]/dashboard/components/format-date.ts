@@ -1,11 +1,15 @@
+import { formatDate } from "@/lib/i18n/formats";
+
 /**
  * Formatting helpers shared by the dashboard chart cards. Kept as a
  * standalone module so the unit tests can pin the output shape
  * without re-rendering an entire card.
  */
 
-const DOWS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+// Weekday and month names come from `Intl` through the shared `formatDate`
+// helper rather than a hardcoded English array. Under `en` the output is
+// unchanged ("Mon", "Jan"); every other locale now gets its own names instead of
+// English ones. `timeZone: "UTC"` preserves the UTC bucketing below.
 
 /**
  * Compact two-line label used under each chart bar. The first line
@@ -21,7 +25,7 @@ export function formatBarLabel(iso: string): string {
   const d = new Date(`${iso}T00:00:00Z`);
   if (Number.isNaN(d.getTime())) return iso;
   const day = d.getUTCDate();
-  const dow = DOWS[d.getUTCDay()] ?? "";
+  const dow = formatDate(d, { weekday: "short", timeZone: "UTC" });
   return `${day} ${dow}`;
 }
 
@@ -35,7 +39,7 @@ export function formatShortDate(iso: string): string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) return iso;
   const d = new Date(`${dateOnly}T00:00:00Z`);
   if (Number.isNaN(d.getTime())) return iso;
-  const month = MONTHS[d.getUTCMonth()] ?? "";
+  const month = formatDate(d, { month: "short", timeZone: "UTC" });
   return `${month} ${d.getUTCDate()}`;
 }
 

@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   setActiveTask: vi.fn(),
   setActiveSession: vi.fn(),
   openQuickChat: vi.fn(),
+  setImproveDialogOpen: vi.fn(),
   openQuickTerminal: vi.fn(),
   dialogTaskSessionId: null as string | null,
   dialogWillNavigate: false,
@@ -21,13 +22,18 @@ function renderItem(collapsed: boolean) {
 }
 
 const state = {
-  workspaces: { activeId: "ws-1" as string | null },
+  workspaces: {
+    activeId: "ws-1" as string | null,
+    items: [{ id: "ws-1", name: "Default Workspace" }],
+  },
+  appSidebar: { improveDialogOpen: false },
   kanban: {
     workflowId: "wf-1" as string | null,
     steps: [{ id: "s1", title: "Todo" }],
   },
   setActiveTask: mocks.setActiveTask,
   setActiveSession: mocks.setActiveSession,
+  setImproveDialogOpen: mocks.setImproveDialogOpen,
 };
 const QUICK_TERMINAL_TEST_ID = "sidebar-quick-terminal-shortcut";
 const QUICK_CHAT_TEST_ID = "sidebar-quick-chat-shortcut";
@@ -86,14 +92,25 @@ import { requestNewTaskCreation } from "@/lib/desktop/new-task-request";
 const OFFICE_DIALOG_TESTID = "office-new-task-dialog";
 const REGULAR_DIALOG_TESTID = "regular-task-create-dialog";
 
+function setImproveWorkspaceActive() {
+  state.workspaces.activeId = "ws-improve";
+  state.workspaces.items = [
+    { id: "ws-1", name: "Default Workspace" },
+    { id: "ws-improve", name: "Improve Kandev" },
+  ];
+}
+
 function resetTestState() {
   state.workspaces.activeId = "ws-1";
+  state.workspaces.items = [{ id: "ws-1", name: "Default Workspace" }];
+  state.appSidebar.improveDialogOpen = false;
   state.kanban.workflowId = "wf-1";
   state.kanban.steps = [{ id: "s1", title: "Todo" }];
   mocks.routerPush.mockClear();
   mocks.setActiveTask.mockClear();
   mocks.setActiveSession.mockClear();
   mocks.openQuickChat.mockClear();
+  mocks.setImproveDialogOpen.mockClear();
   mocks.openQuickTerminal.mockClear();
   mocks.dialogTaskSessionId = null;
   mocks.dialogWillNavigate = false;
@@ -152,6 +169,34 @@ describe("AppSidebarNewTaskItem dialog routing", () => {
     renderItem(false);
     expect(screen.queryByTestId(REGULAR_DIALOG_TESTID)).toBeNull();
     expect(screen.queryByTestId(OFFICE_DIALOG_TESTID)).toBeNull();
+  });
+
+  it("opens the shared Improve Kandev dialog inside the dedicated Improve Kandev workspace", () => {
+    setImproveWorkspaceActive();
+    renderItem(false);
+    // The item does not mount a dialog itself in the improve workspace — the
+    // footer-hosted Improve Kandev dialog opens via the shared store flag.
+    expect(screen.queryByTestId(REGULAR_DIALOG_TESTID)).toBeNull();
+
+    screen.getByTestId("create-task-button").click();
+
+    expect(mocks.setImproveDialogOpen).toHaveBeenCalledWith(true);
+  });
+
+  it("routes the shared New Task request to the Improve Kandev dialog in the improve workspace", () => {
+    setImproveWorkspaceActive();
+    renderItem(false);
+
+    act(() => requestNewTaskCreation());
+
+    expect(mocks.setImproveDialogOpen).toHaveBeenCalledWith(true);
+    expect(mocks.setImproveDialogOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the regular dialog in a non-improve workspace", () => {
+    renderItem(false);
+    expect(screen.getByTestId(REGULAR_DIALOG_TESTID)).toBeTruthy();
+    expect(mocks.setImproveDialogOpen).not.toHaveBeenCalled();
   });
 });
 

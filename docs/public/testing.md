@@ -93,7 +93,7 @@ Projects in `apps/web/e2e/playwright.config.ts` are:
 | `mobile-chrome` | Pixel 5 responsive browser journeys, not a native mobile app |
 | `containers` | Real Docker executor and Docker-hosted SSH target; selectable directly and skipped without Docker |
 
-The root `make test-e2e` target leaves project selection to Playwright and therefore runs every project whose prerequisites are available. The managed `pnpm e2e:run` command defaults to `chromium`; select another project explicitly.
+The root `make test-e2e` target runs the managed runner once per declared project (`routing`, `auth`, `chromium`, `mobile-chrome`, `containers`), so it covers the same projects Playwright would run unscoped. The managed `pnpm e2e:run` command defaults to `chromium`; select another project explicitly.
 
 Run container-backed cases explicitly:
 

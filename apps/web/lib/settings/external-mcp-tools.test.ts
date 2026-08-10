@@ -4,17 +4,18 @@ import enSettings from "@/src/locales/en/settings.json";
 
 describe("external MCP tool catalog", () => {
   // NOTE: this pins the CATALOG, which currently lags the backend. `ModeExternal`
-  // registers 32 tools (12 workflow + 4 agent + 4 mcp + 5 executor + 6 task +
+  // registers 33 tools (12 workflow + 4 agent + 4 mcp + 5 executor + 7 task +
   // 1 create_task — see `TestServerModeExternal_ToolCount`), and this catalog
-  // lists 29: `list_repositories_kandev`, `import_workflow_kandev` and one task
-  // tool are missing, so the page under-advertises the endpoint by three.
+  // lists 30: `list_repositories_kandev`, `import_workflow_kandev` and
+  // `get_task_conversation_kandev` are missing, so the page under-advertises
+  // the endpoint by three.
   //
   // That drift predates this file's localization and is left alone here on
   // purpose: adding the three means writing three new user-facing descriptions
   // that have to be checked against the backend's own wording, which is a
   // content change and not a copy migration. Update this number with them.
-  it("lists 29 tools, the catalog's current contents", () => {
-    expect(countExternalMcpTools()).toBe(29);
+  it("lists 30 tools, the catalog's current contents", () => {
+    expect(countExternalMcpTools()).toBe(30);
   });
 
   it("every tool name is unique and ends with the kandev suffix", () => {

@@ -54,7 +54,7 @@ Right-click an agent tab on desktop to manage it. Available actions depend on it
 | **Set as Primary** | Makes a stoppable session the task's primary target |
 | **Stop** | Cancels the active agent turn for this session |
 | **Resume** | Attempts to continue a completed, failed, or cancelled session |
-| **Delete** | Permanently removes the conversation; if it was primary, another session is promoted when possible |
+| **Delete** | Permanently removes the conversation; if it was primary, another session is promoted when possible. The task workspace and its files are kept — a later session reuses them |
 | **Share** | Opens the publishing preview for an eligible session |
 | **Handoff** | Starts another session with a generated summary of this conversation |
 | **Close Others** | Closes other visible agent panels without deleting their sessions |
@@ -248,12 +248,17 @@ Lifecycle messages only report the observed event and canonical PR URL; the task
 
 ### GitLab MR automation
 
-The GitLab MR topbar control has a **Review follow-up** group with the same three notification switches as GitHub's. The switches are task-level and apply to every merge request linked to the task:
+The GitLab MR topbar control has an **Automation** group with the same two action controls as GitHub's:
+
+- **Auto-fix CI and address comments** sends the agent a new or changed failing pipeline job or unresolved discussion note once the pipeline settles, and stops after 10 repair rounds for that MR. Disable and re-enable it to reset the limit.
+- **Auto-merge when ready** merges only after the pipeline passes, unresolved discussions are cleared, and GitLab's own merge-readiness check agrees.
+
+Below that, open **Review follow-up** for the same three notification switches GitHub uses, task-level and applying to every merge request linked to the task:
 
 - **Your review is requested** wakes the agent when the workspace's connected GitLab account is newly added as a reviewer on the MR. Staying assigned across MR updates does not re-fire it; being removed and re-added — for example, for a re-review after changes — does.
 - **MR merged** and **MR closed without merging** independently wake the agent when review work ends.
 
-GitLab has no auto-fix or auto-merge automation. Lifecycle messages only report the observed event and canonical MR URL, and Kandev delivers them through the same task-session queue as GitHub's. See [Integrations](integrations.md#gitlab).
+Lifecycle messages only report the observed event and canonical MR URL, and Kandev delivers them through the same task-session queue as GitHub's. The repair prompt comes from the built-in `mr-auto-fix` saved prompt and can be overridden for the task. Hovering the MR control in the desktop top bar (a single linked MR only) opens a preview with the pipeline pass rate, approval status, and unresolved-discussion count without opening the dropdown; touch surfaces skip the preview and tap straight to the dropdown. A linked MR also shows a status badge on the task's Kanban card, next to any linked pull-request badge. See [Integrations](integrations.md#gitlab).
 
 > **Confidentiality:** redaction is heuristic, a secret Gist is accessible to anyone with its URL, and the snapshot is rendered through a third-party service. Inspect the preview and do not share material that must remain private.
 
@@ -287,7 +292,7 @@ Before moving a task to done:
 ## Troubleshooting
 
 - **New Agent has no profiles:** create a profile compatible with the task executor. A profile for another executor is intentionally hidden.
-- **Summary or generated text fails:** configure the corresponding utility agent and a reachable model in **Settings > Utility Agents**.
+- **Summary or generated text fails:** configure the corresponding utility agent with an enabled ACP profile in **Settings > Utility Agents**. Repair any stale or disabled profile binding before retrying.
 - **Resume fails:** start fresh when the executor no longer has resumable session state, then supply a summary or copy the relevant context.
 - **A peer message never arrives:** check the target session state and ID. Running sessions queue messages; failed or cancelled sessions reject them. For a full queue, expand its chip and run, remove, or clear pending work before retrying; an admin can also review the install-wide limit under **Settings > General > Message Queue**.
 - **Changes is empty:** select the correct repository and comparison, then confirm the agent wrote inside the materialized task path.

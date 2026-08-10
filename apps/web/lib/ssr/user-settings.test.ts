@@ -147,7 +147,9 @@ describe("buildCoreFields", () => {
     const result = buildCoreFields(settings);
     expect(result.terminalFontFamily).toBeNull();
   });
+});
 
+describe("buildCoreFields task-create last-used mapping", () => {
   it("does not mark an empty task-create last-used object as synced", () => {
     const settings = {
       task_create_last_used: {},
@@ -159,6 +161,7 @@ describe("buildCoreFields", () => {
       branch: null,
       agentProfileId: null,
       executorProfileId: null,
+      workflowIdsByWorkspace: {},
       synced: false,
     });
   });
@@ -173,6 +176,29 @@ describe("buildCoreFields", () => {
     const result = buildCoreFields(settings);
     expect(result.taskCreateLastUsed).toMatchObject({
       repositoryId: "repo-1",
+      synced: true,
+    });
+  });
+
+  it("maps workspace-scoped workflow history and marks it as synced", () => {
+    const result = buildCoreFields({
+      task_create_last_used: {
+        workflow_ids_by_workspace: {
+          "workspace-1": "workflow-1",
+          "workspace-2": "workflow-2",
+        },
+      },
+    });
+
+    expect(result.taskCreateLastUsed).toEqual({
+      repositoryId: null,
+      branch: null,
+      agentProfileId: null,
+      executorProfileId: null,
+      workflowIdsByWorkspace: {
+        "workspace-1": "workflow-1",
+        "workspace-2": "workflow-2",
+      },
       synced: true,
     });
   });
@@ -386,6 +412,24 @@ describe("transcript navigation settings", () => {
       showScrollToStart: false,
       showTranscriptAutoScrollControl: false,
     });
+  });
+});
+
+describe("todo list panel setting", () => {
+  it("defaults to hidden and preserves an explicit true", () => {
+    const fallback = mapUserSettingsResponse(null) as { showTodoListPanel?: boolean };
+    const enabled = mapUserSettingsResponse({
+      settings: {
+        user_id: DEFAULT_USER_ID,
+        workspace_id: toWorkspaceId(""),
+        repository_ids: [],
+        show_todo_list_panel: true,
+        updated_at: UPDATED_AT,
+      } as unknown as NonNullable<Parameters<typeof mapUserSettingsResponse>[0]>["settings"],
+    }) as { showTodoListPanel?: boolean };
+
+    expect(fallback.showTodoListPanel).toBe(false);
+    expect(enabled.showTodoListPanel).toBe(true);
   });
 });
 

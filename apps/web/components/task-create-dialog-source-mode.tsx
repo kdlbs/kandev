@@ -1,6 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 export type SourceMode = "workspace" | "remote" | "scratch";
 
@@ -37,10 +38,11 @@ export function ControlledSourceModeSwitch<T extends string>({
   onModeChange,
   touchSized = false,
 }: ControlledSourceModeSwitchProps<T>) {
+  const { t } = useTranslation();
   return (
     <div
       role="radiogroup"
-      aria-label="Source"
+      aria-label={t("task:source")}
       className="inline-flex items-center rounded-md border border-border/60 bg-muted/20 p-0.5"
     >
       {options.map((option) => {
@@ -86,6 +88,7 @@ export function SourceModeSwitch({
   onToggleRemote,
   onToggleNoRepository,
 }: SourceModeSwitchProps) {
+  const { t } = useTranslation();
   if (!onToggleRemote && !onToggleNoRepository) return null;
   const mode = resolveMode(useRemote, noRepository);
   const setMode = (next: SourceMode) =>
@@ -101,19 +104,25 @@ export function SourceModeSwitch({
         mode={mode}
         onModeChange={setMode}
         options={[
-          { value: "workspace", label: "Repo", testId: "source-mode-workspace" },
+          { value: "workspace", label: t("task:repo"), testId: "source-mode-workspace" },
           ...(onToggleRemote
             ? [
                 {
                   value: "remote" as const,
-                  label: "Remote",
+                  label: t("task:remote"),
                   testId: "source-mode-remote",
                   legacyTestId: "toggle-github-url",
                 },
               ]
             : []),
           ...(onToggleNoRepository
-            ? [{ value: "scratch" as const, label: "None", testId: "source-mode-scratch" }]
+            ? [
+                {
+                  value: "scratch" as const,
+                  label: t("task:groupNone"),
+                  testId: "source-mode-scratch",
+                },
+              ]
             : []),
         ]}
       />

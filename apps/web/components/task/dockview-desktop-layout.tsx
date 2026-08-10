@@ -40,6 +40,7 @@ import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
 import { setupSessionTabSync } from "./dockview-session-tab-sync";
 import { setupChatPanelSafetyNet, useAutoSessionTab } from "./dockview-session-tabs";
 import { useSyncReviewPanel } from "./dockview-review-panel-sync";
+import { useSyncTodoPanel } from "./dockview-todo-panel-sync";
 import {
   useCompactDockviewDefault,
   useDockviewUnmountCleanup,
@@ -130,6 +131,7 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> =
   browser: PortalSlot,
   vscode: PortalSlot,
   plan: PortalSlot,
+  todos: PortalSlot,
   "pr-detail": PortalSlot,
   "mr-detail": PortalSlot,
   "plugin-panel": PortalSlot,
@@ -415,6 +417,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   useChangesPanelAutoFocus(changesFocusKey);
 
   useSyncReviewPanel();
+  useSyncTodoPanel();
   useDockviewUnmountCleanup(saveTimerRef, readyDisposersRef);
 
   // Visual masking: hide the dockview container during slow-path layout

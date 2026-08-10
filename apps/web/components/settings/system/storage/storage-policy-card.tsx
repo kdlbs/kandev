@@ -1,17 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Input } from "@kandev/ui/input";
-import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
 import { useTranslation } from "react-i18next";
 import { settingsWithDockerAcknowledgement } from "@/hooks/domains/system/use-storage-maintenance";
 import type { StorageCapabilities, StorageMaintenanceSettings } from "@/lib/types/system";
 import { DedicatedDockerDialog, ExternalGoCacheDialog } from "./storage-confirmation-dialogs";
-import { StorageActionButton } from "./storage-action-button";
+import { StorageAdoptionField } from "./storage-adoption-field";
 import { NumberField, PolicySection, SettingRow } from "./storage-policy-fields";
-import { StorageSettingHelp } from "./storage-setting-help";
 import { bytesToGigabytes, gigabytesToBytes } from "./storage-units";
+import { StorageWorkspaceDependencySettings } from "./storage-workspace-dependency-settings";
 
 type Props = {
   settings: StorageMaintenanceSettings;
@@ -20,6 +18,7 @@ type Props = {
   pending: boolean;
   onChange: (settings: StorageMaintenanceSettings) => void;
   onAdopt: (path: string) => Promise<void>;
+  onCleanDependencies?: () => void;
 };
 
 type PolicySectionProps = Pick<
@@ -94,7 +93,13 @@ function ScheduleSection({ settings, savedSettings, pending, onChange }: PolicyS
   );
 }
 
-function WorkspaceSection({ settings, savedSettings, pending, onChange }: PolicySectionProps) {
+function WorkspaceSection({
+  settings,
+  savedSettings,
+  pending,
+  onChange,
+  onCleanDependencies,
+}: PolicySectionProps & Pick<Props, "onCleanDependencies">) {
   const { t } = useTranslation();
   const workspacesDirty = settingIsDirty(
     settings,
@@ -107,12 +112,17 @@ function WorkspaceSection({ settings, savedSettings, pending, onChange }: Policy
     savedSettings,
     (value) => value.kandev_containers.enabled,
   );
+  const dependencyCleanupDirty = settingIsDirty(
+    settings,
+    savedSettings,
+    (value) => value.workspaces.dependency_cleanup_enabled,
+  );
   return (
     <PolicySection
       sectionId="workspaces"
       title={t("system:storageWorkspacesTitle")}
       description={t("system:storageWorkspacesDescription")}
-      isDirty={workspacesDirty || graceDirty || containersDirty}
+      isDirty={workspacesDirty || graceDirty || dependencyCleanupDirty || containersDirty}
     >
       <SettingRow
         title={t("system:storageOrphanWorkspaces")}
@@ -122,7 +132,9 @@ function WorkspaceSection({ settings, savedSettings, pending, onChange }: Policy
           <Switch
             checked={settings.workspaces.enabled}
             disabled={pending}
-            onCheckedChange={(enabled) => onChange({ ...settings, workspaces: { enabled } })}
+            onCheckedChange={(enabled) =>
+              onChange({ ...settings, workspaces: { ...settings.workspaces, enabled } })
+            }
             aria-label={t("system:storageCleanOrphanWorkspacesAria")}
             data-settings-dirty={workspacesDirty}
           />
@@ -141,6 +153,13 @@ function WorkspaceSection({ settings, savedSettings, pending, onChange }: Policy
           isDirty={graceDirty}
         />
       </div>
+      <StorageWorkspaceDependencySettings
+        settings={settings}
+        savedSettings={savedSettings}
+        pending={pending}
+        onChange={onChange}
+        onCleanDependencies={onCleanDependencies}
+      />
       <SettingRow
         title={t("system:storageKandevContainers")}
         description={t("system:storageContainersDescription")}
@@ -156,59 +175,6 @@ function WorkspaceSection({ settings, savedSettings, pending, onChange }: Policy
         }
       />
     </PolicySection>
-  );
-}
-
-function AdoptionField({
-  path,
-  setPath,
-  onOpen,
-  pending,
-  enabled,
-}: {
-  path: string;
-  setPath: (path: string) => void;
-  onOpen: () => void;
-  pending: boolean;
-  enabled: boolean;
-}) {
-  const { t } = useTranslation();
-  let disabledReason: string | undefined;
-  if (pending) disabledReason = t("system:storageActionPending");
-  else if (!enabled) disabledReason = t("system:storageEnableGoCacheFirst");
-  else if (!path.trim()) disabledReason = t("system:storageEnterCachePathFirst");
-  const fieldLabel = t("system:storageExternalGoCache");
-  return (
-    <div className="min-w-0 space-y-2 pt-3">
-      <div className="flex items-center gap-1">
-        <Label htmlFor="storage-adoption-path">{fieldLabel}</Label>
-        <StorageSettingHelp label={fieldLabel}>
-          {t("system:storageExternalGoCacheHelp")}
-        </StorageSettingHelp>
-      </div>
-      <p className="text-xs text-muted-foreground">
-        {t("system:storageExternalGoCacheDescription")}
-      </p>
-      <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
-        <Input
-          id="storage-adoption-path"
-          value={path}
-          disabled={pending || !enabled}
-          onChange={(event) => setPath(event.target.value)}
-          placeholder="/root/.cache/go-build"
-          className="h-11 min-w-0 font-mono"
-          data-testid="storage-go-cache-adopt-path"
-        />
-        <StorageActionButton
-          variant="outline"
-          disabledReason={disabledReason}
-          onClick={onOpen}
-          data-testid="storage-go-cache-adopt"
-        >
-          {t("system:storageAdoptCache")}
-        </StorageActionButton>
-      </div>
-    </div>
   );
 }
 
@@ -277,7 +243,7 @@ function GoCacheSection({
         />
       </div>
       {capabilities.go_cache_adoption_available && (
-        <AdoptionField
+        <StorageAdoptionField
           path={adoptionPath}
           setPath={setAdoptionPath}
           pending={pending}
@@ -518,6 +484,7 @@ export function StoragePolicyCard({
   pending,
   onChange,
   onAdopt,
+  onCleanDependencies,
 }: Props) {
   const { t } = useTranslation();
   const [dockerDialogOpen, setDockerDialogOpen] = useState(false);
@@ -554,6 +521,7 @@ export function StoragePolicyCard({
           capabilities={capabilities}
           pending={pending}
           onChange={onChange}
+          onCleanDependencies={onCleanDependencies}
         />
         <GoCacheSection
           settings={settings}

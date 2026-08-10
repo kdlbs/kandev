@@ -13,13 +13,12 @@ import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { SettingsCard } from "@/components/settings/settings-card";
-import { useLinearEnabled } from "@/hooks/domains/linear/use-linear-enabled";
+import { LinearEnabledControl } from "@/components/linear/linear-enabled-control";
 import {
   IntegrationAuthStatusBanner,
   type IntegrationAuthHealth,
 } from "@/components/integrations/auth-status-banner";
 import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
-import { DraftedIntegrationEnabledControl } from "@/components/integrations/drafted-integration-enabled-control";
 import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 import {
   getLinearConfig,
@@ -413,11 +412,7 @@ function useLinearSettings(workspaceId: string) {
   };
 }
 
-function EnabledPill() {
-  const { enabled, setEnabled } = useLinearEnabled();
-  return <DraftedIntegrationEnabledControl id="linear" enabled={enabled} persist={setEnabled} />;
-}
-
+/** Linear connection card: title/enable toggle, API key form, and save/test actions. */
 export function LinearConnectionSection({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation();
   const s = useLinearSettings(workspaceId);
@@ -444,7 +439,7 @@ export function LinearConnectionSection({ workspaceId }: { workspaceId: string }
       icon={<IconHexagon className="h-5 w-5" />}
       title={t("linear:linearIntegration")}
       description={t("linear:linearIntegrationDescription")}
-      action={<EnabledPill />}
+      action={<LinearEnabledControl />}
     >
       <SettingsCard isDirty={dirty}>
         <CardContent className="space-y-4 pt-6">
@@ -485,6 +480,7 @@ type LinearIntegrationPageProps = {
   workspaceId?: string;
 };
 
+/** Linear's own settings page: connection card plus issue-watchers section. */
 export function LinearIntegrationPage({ workspaceId }: LinearIntegrationPageProps = {}) {
   return (
     <div className="space-y-8">

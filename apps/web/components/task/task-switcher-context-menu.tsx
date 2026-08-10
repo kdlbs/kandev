@@ -316,10 +316,13 @@ function BulkSelectionMenuItems({
   closeMenu: () => void;
   moveTasks: ReturnType<typeof useTaskWorkflowMove>;
 }) {
+  const { t } = useTranslation();
   const n = actingIds.length;
   const allPinned =
     actingIds.length > 0 && actingIds.every((id) => pinnedTaskIds?.includes(id) ?? false);
-  const pinLabel = `${allPinned ? "Unpin" : "Pin"} ${n} ${n === 1 ? "task" : "tasks"}`;
+  const pinLabel = allPinned
+    ? t("task:unpinTasksCount", { count: n })
+    : t("task:pinTasksCount", { count: n });
   return (
     <>
       {onBulkPin && (
@@ -357,7 +360,7 @@ function BulkSelectionMenuItems({
           <ContextMenuSeparator />
           <ContextMenuItem variant="destructive" onSelect={() => onBulkDelete(actingIds)}>
             <IconTrash className="mr-2 h-4 w-4" />
-            Delete {n} tasks
+            {t("task:deleteTasksCount", { count: n })}
           </ContextMenuItem>
         </>
       )}
@@ -419,11 +422,12 @@ function TaskPinItem({
   disabled?: boolean;
   onTogglePin?: (taskId: string) => void;
 }) {
+  const { t } = useTranslation();
   if (!onTogglePin) return null;
   return (
     <ContextMenuItem disabled={disabled} onSelect={() => onTogglePin(taskId)}>
       {isPinned ? <IconPinFilled className="mr-2 h-4 w-4" /> : <IconPin className="mr-2 h-4 w-4" />}
-      {isPinned ? "Unpin" : "Pin"}
+      {isPinned ? t("task:unpin") : t("task:annotationPin")}
     </ContextMenuItem>
   );
 }
@@ -437,11 +441,12 @@ function TaskRenameItem({
   disabled?: boolean;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
 }) {
+  const { t } = useTranslation();
   if (!onRenameTask) return null;
   return (
     <ContextMenuItem disabled={disabled} onSelect={() => onRenameTask(task.id, task.title)}>
       <IconPencil className="mr-2 h-4 w-4" />
-      Rename
+      {t("task:rename")}
     </ContextMenuItem>
   );
 }
@@ -565,6 +570,7 @@ function TaskLinkMenu({
   onLinkLinearIssue?: () => void;
   onLinkSentryIssue?: () => void;
 }) {
+  const { t } = useTranslation();
   if (
     !onLinkPullRequest &&
     !onLinkIssue &&
@@ -579,19 +585,19 @@ function TaskLinkMenu({
     <ContextMenuSub>
       <ContextMenuSubTrigger disabled={disabled}>
         <IconLink className="mr-2 h-4 w-4" />
-        Link
+        {t("task:link")}
       </ContextMenuSubTrigger>
       <ContextMenuSubContent className="w-56">
         {onLinkPullRequest && (
           <ContextMenuItem disabled={disabled} onSelect={onLinkPullRequest}>
             <IconGitPullRequest className="mr-2 h-4 w-4" />
-            GitHub Pull Request
+            {t("task:githubPullRequest")}
           </ContextMenuItem>
         )}
         {onLinkIssue && (
           <ContextMenuItem disabled={disabled} onSelect={onLinkIssue}>
             <IconCircleDot className="mr-2 h-4 w-4" />
-            GitHub Issue
+            {t("task:githubIssue")}
           </ContextMenuItem>
         )}
         {onLinkMergeRequest && (
@@ -601,25 +607,25 @@ function TaskLinkMenu({
             onSelect={onLinkMergeRequest}
           >
             <IconBrandGitlab className="mr-2 h-4 w-4" />
-            GitLab Merge Request
+            {t("task:gitlabMergeRequest")}
           </ContextMenuItem>
         )}
         {onLinkJiraTicket && (
           <ContextMenuItem disabled={disabled} onSelect={onLinkJiraTicket}>
             <IconTicket className="mr-2 h-4 w-4" />
-            Jira Ticket
+            {t("task:jiraTicket")}
           </ContextMenuItem>
         )}
         {onLinkLinearIssue && (
           <ContextMenuItem disabled={disabled} onSelect={onLinkLinearIssue}>
             <IconCircleDot className="mr-2 h-4 w-4" />
-            Linear Issue
+            {t("task:linearIssue")}
           </ContextMenuItem>
         )}
         {onLinkSentryIssue && (
           <ContextMenuItem disabled={disabled} onSelect={onLinkSentryIssue}>
             <IconBrandSentry className="mr-2 h-4 w-4" />
-            Sentry Issue
+            {t("task:sentryIssue")}
           </ContextMenuItem>
         )}
       </ContextMenuSubContent>

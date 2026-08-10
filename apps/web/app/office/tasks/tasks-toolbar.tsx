@@ -18,6 +18,7 @@ import type {
 import { TaskFilters } from "./task-filters";
 import { TaskSort } from "./task-sort";
 import { TaskGroup } from "./task-group";
+import { useTranslation } from "react-i18next";
 
 type IssuesToolbarProps = {
   viewMode: TaskViewMode;
@@ -49,6 +50,7 @@ function ViewModeToggles({
   onViewModeChange: (mode: TaskViewMode) => void;
   onToggleNesting: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <Tooltip>
@@ -62,7 +64,7 @@ function ViewModeToggles({
             <IconList className="h-4 w-4" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>List view</TooltipContent>
+        <TooltipContent>{t("office:listView")}</TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -75,7 +77,7 @@ function ViewModeToggles({
             <IconColumns3 className="h-4 w-4" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Board view</TooltipContent>
+        <TooltipContent>{t("office:boardView")}</TooltipContent>
       </Tooltip>
       <Separator orientation="vertical" className="h-6 mx-1" />
       {viewMode === "list" && (
@@ -90,7 +92,7 @@ function ViewModeToggles({
               <IconListTree className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Toggle nesting</TooltipContent>
+          <TooltipContent>{t("office:toggleNesting")}</TooltipContent>
         </Tooltip>
       )}
     </>
@@ -115,6 +117,7 @@ export function TasksToolbar({
   onShowSystemChange,
   onNewIssue,
 }: IssuesToolbarProps) {
+  const { t } = useTranslation();
   const [searchValue, setSearchValue] = useState(filters.search);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -138,12 +141,12 @@ export function TasksToolbar({
     <div className="flex items-center gap-2">
       <Button className="cursor-pointer" onClick={onNewIssue}>
         <IconPlus className="h-4 w-4 mr-1" />
-        New Task
+        {t("office:newTask")}
       </Button>
       <div className="relative flex-1 max-w-[300px]">
         <IconSearch className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
-          placeholder="Search tasks..."
+          placeholder={t("office:searchTasks")}
           className="pl-8"
           value={searchValue}
           onChange={handleSearchInput}
@@ -155,7 +158,7 @@ export function TasksToolbar({
           onCheckedChange={(v) => onShowSystemChange(v === true)}
           className="cursor-pointer"
         />
-        Show system tasks
+        {t("office:showSystemTasks")}
       </Label>
       <div className="ml-auto flex items-center gap-1">
         <ViewModeToggles

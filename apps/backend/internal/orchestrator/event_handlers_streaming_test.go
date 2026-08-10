@@ -2100,6 +2100,170 @@ func TestSetSessionStartingCanDeferTaskInProgress(t *testing.T) {
 	require.Empty(t, taskRepo.stateWrites)
 }
 
+// recordingTaskUpdatedPublisher captures task.updated publishes so tests can
+// assert the interrupted-marker clear republishes the task.
+type recordingTaskUpdatedPublisher struct {
+	updatedTaskIDs []string
+}
+
+func (r *recordingTaskUpdatedPublisher) PublishTaskUpdated(_ context.Context, task *models.Task, _ ...string) {
+	if task != nil {
+		r.updatedTaskIDs = append(r.updatedTaskIDs, task.ID)
+	}
+}
+func (r *recordingTaskUpdatedPublisher) PublishTaskStateChanged(context.Context, *models.Task, v1.TaskState) {
+}
+func (r *recordingTaskUpdatedPublisher) PublishTaskActivityIfChanged(context.Context, string) {}
+
+func seedInterruptedMarker(t *testing.T, repo *sqliterepo.Repository, taskID string) {
+	t.Helper()
+	if err := repo.SetTaskMetadataKey(context.Background(), taskID, models.MetaKeyInterruptedAt, time.Now().UTC().Format(time.RFC3339)); err != nil {
+		t.Fatalf("seed interrupted marker: %v", err)
+	}
+}
+
+func TestSessionStartClearsInterruptedMarker(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("state hook transition to STARTING clears and republishes", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		seedInterruptedMarker(t, repo, "t1")
+
+		publisher := &recordingTaskUpdatedPublisher{}
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.SetTaskEventPublisher(publisher)
+
+		updated, changed := svc.updateTaskSessionStateWithHook(
+			ctx, "t1", "s1", models.TaskSessionStateStarting, "", false, nil,
+		)
+		require.NotNil(t, updated)
+		require.True(t, changed)
+
+		task, err := repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		_, marked := task.Metadata[models.MetaKeyInterruptedAt]
+		require.False(t, marked, "marker must be cleared when the session enters STARTING")
+		require.Equal(t, []string{"t1"}, publisher.updatedTaskIDs,
+			"task.updated must be republished after clearing the marker")
+	})
+
+	t.Run("launch path via setSessionStarting clears and republishes", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		seedInterruptedMarker(t, repo, "t1")
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		session.State = models.TaskSessionStateStarting
+		session.ErrorMessage = ""
+		session.UpdatedAt = time.Now().UTC()
+
+		publisher := &recordingTaskUpdatedPublisher{}
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.SetTaskEventPublisher(publisher)
+
+		require.NoError(t, svc.setSessionStarting(ctx, "t1", session, models.TaskSessionStateRunning, true))
+
+		task, err := repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		_, marked := task.Metadata[models.MetaKeyInterruptedAt]
+		require.False(t, marked, "marker must be cleared on the launch path")
+		require.Equal(t, []string{"t1"}, publisher.updatedTaskIDs,
+			"task.updated must be republished after clearing the marker")
+	})
+
+	t.Run("no marker means no republish", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		publisher := &recordingTaskUpdatedPublisher{}
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.SetTaskEventPublisher(publisher)
+
+		updated, changed := svc.updateTaskSessionStateWithHook(
+			ctx, "t1", "s1", models.TaskSessionStateStarting, "", false, nil,
+		)
+		require.NotNil(t, updated)
+		require.True(t, changed)
+		require.Empty(t, publisher.updatedTaskIDs,
+			"no task.updated may be published when no marker was removed")
+	})
+}
+
+// Nothing else ever retires a stored agent failure, so without this clear every
+// path that re-derives task status from session metadata resurrects it and the
+// error icon never goes away.
+func TestClearRecoveredAgentErrorOnTurnCompletion(t *testing.T) {
+	ctx := context.Background()
+
+	seedError := func(t *testing.T, repo *sqliterepo.Repository) {
+		t.Helper()
+		require.NoError(t, repo.SetSessionMetadataKey(
+			ctx, "s1", models.SessionMetaKeyLastAgentError,
+			models.LastAgentError{Message: "agent crashed", OccurredAt: time.Now().UTC().Add(-time.Hour)},
+		))
+	}
+
+	errorEvents := func(eb *recordingEventBus) []recordedEvent {
+		var out []recordedEvent
+		for _, recorded := range eb.events {
+			if recorded.event != nil && recorded.event.Type == events.TaskSessionErrorChanged {
+				out = append(out, recorded)
+			}
+		}
+		return out
+	}
+
+	newService := func(repo *sqliterepo.Repository) (*Service, *recordingEventBus) {
+		eb := &recordingEventBus{}
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.eventBus = eb
+		return svc, eb
+	}
+
+	t.Run("clears the record and publishes it inactive", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		seedError(t, repo)
+		svc, eb := newService(repo)
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		svc.clearRecoveredAgentError(ctx, "t1", session)
+
+		stored, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		_, ok := models.LoadLastAgentError(stored.Metadata)
+		require.False(t, ok, "a recovered failure must not keep driving the error icon")
+
+		// The session-state publish that follows reads session_metadata straight
+		// off this object, so a stale copy would re-arm the icon immediately.
+		_, ok = models.LoadLastAgentError(session.Metadata)
+		require.False(t, ok, "the in-memory copy must be cleared too")
+
+		published := errorEvents(eb)
+		require.Len(t, published, 1, "clients need one event to drop the icon")
+		data, ok := published[0].event.Data.(map[string]interface{})
+		require.True(t, ok)
+		require.Equal(t, false, data["active"])
+		require.Equal(t, "s1", data["session_id"])
+	})
+
+	t.Run("stays silent when the session has no stored error", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		svc, eb := newService(repo)
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		svc.clearRecoveredAgentError(ctx, "t1", session)
+
+		require.Empty(t, errorEvents(eb),
+			"every later completion must stay silent so turns do not churn the row")
+	})
+}
+
 func TestSetSessionStartingRejectsTerminalSession(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -2813,6 +2977,84 @@ func TestHandleSessionModelsEventCapturesOriginalEffectiveConfigurationOnce(t *t
 	require.True(t, ok)
 	require.Equal(t, "gpt-5.6-sol", original.Model)
 	require.Equal(t, map[string]string{"reasoning_effort": "high"}, original.ConfigOptions)
+}
+
+// TestHandleSessionModelFallbackEventPublishesToWS verifies the fallback event publishes the WS notification.
+
+func TestHandleSessionModelFallbackEventPublishesToWS(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	eb := &recordingEventBus{}
+	svc := &Service{logger: testLogger(), repo: repo, eventBus: eb}
+
+	svc.handleSessionModelFallbackEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:    "t1",
+		SessionID: "s1",
+		AgentID:   "a1",
+		Data: &lifecycle.AgentStreamEventData{
+			FallbackModel: "deepseek/deepseek-v4-flash",
+		},
+	})
+
+	require.Len(t, eb.events, 1)
+	require.Equal(t, events.BuildSessionModelFallbackSubject("s1"), eb.events[0].subject)
+	payload := eb.events[0].event.Data.(lifecycle.SessionModelFallbackEventPayload)
+	require.Equal(t, "s1", payload.SessionID)
+	require.Equal(t, "deepseek/deepseek-v4-flash", payload.FallbackModel)
+}
+
+// TestHandleAgentStreamEventRoutesSessionModelFallback pins the dispatch
+// mapping: a "session_model_fallback" stream event must reach
+// handleSessionModelFallbackEvent and publish the WS notification.
+func TestHandleAgentStreamEventRoutesSessionModelFallback(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	eb := &recordingEventBus{}
+	svc := &Service{logger: testLogger(), repo: repo, eventBus: eb}
+
+	svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:      "t1",
+		SessionID:   "s1",
+		ExecutionID: "exec-1",
+		AgentID:     "a1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type:          "session_model_fallback",
+			FallbackModel: "gpt-5",
+		},
+	})
+
+	require.Len(t, eb.events, 1)
+	require.Equal(t, events.BuildSessionModelFallbackSubject("s1"), eb.events[0].subject)
+	payload := eb.events[0].event.Data.(lifecycle.SessionModelFallbackEventPayload)
+	require.Equal(t, "gpt-5", payload.FallbackModel)
+}
+
+// TestHandleSessionModelFallbackEventResolvesSessionFromTask covers the
+// delayed-session path: the fallback fires during session init, before the
+// execution's task-session id is linked, so the handler must resolve the
+// session from the task id instead of dropping the note.
+func TestHandleSessionModelFallbackEventResolvesSessionFromTask(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	eb := &recordingEventBus{}
+	svc := &Service{logger: testLogger(), repo: repo, eventBus: eb}
+
+	svc.handleSessionModelFallbackEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:  "t1",
+		AgentID: "a1",
+		Data: &lifecycle.AgentStreamEventData{
+			FallbackModel: "gpt-5",
+		},
+	})
+
+	require.Len(t, eb.events, 1)
+	require.Equal(t, events.BuildSessionModelFallbackSubject("s1"), eb.events[0].subject)
+	payload := eb.events[0].event.Data.(lifecycle.SessionModelFallbackEventPayload)
+	require.Equal(t, "s1", payload.SessionID)
+	require.Equal(t, "gpt-5", payload.FallbackModel)
 }
 
 func TestHandleSessionModelsEventStoresBaselineCandidateAndPublishesLiveState(t *testing.T) {

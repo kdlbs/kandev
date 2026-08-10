@@ -18,6 +18,7 @@ import type { useToast } from "@/components/toast-provider";
 import type { AgentProfileDeleteConflict } from "@/components/settings/agent-profile-delete-dialog";
 import { t as translate } from "@/lib/i18n";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
+import { ApiError } from "@/lib/api/client";
 import type { Agent, AgentProfile, PermissionSetting } from "@/lib/types/http";
 
 export type SaveStatus = "idle" | "loading" | "success" | "error";
@@ -65,6 +66,7 @@ type ProfileEditorActionsOptions = {
   settingsAgents: Agent[];
   syncAgentsToStore: (agents: Agent[]) => void;
   toast: ReturnType<typeof useToast>["toast"];
+  onUtilityConflict?: (agents: Array<{ id: string; name: string }>) => void;
 };
 
 export function useProfileSave({
@@ -77,8 +79,10 @@ export function useProfileSave({
   settingsAgents,
   syncAgentsToStore,
   toast,
+  onUtilityConflict,
 }: ProfileEditorActionsOptions) {
-  return async () => {
+  // eslint-disable-next-line complexity
+  return async (force = false) => {
     if (!draft.name.trim()) {
       toast({
         title: translate("agents:profileNameRequiredTitle"),
@@ -91,23 +95,29 @@ export function useProfileSave({
     // default", which is applied through ACP session model selection at session start.
     setSaveStatus("loading");
     try {
-      const updated = await updateAgentProfileAction(draft.id, {
-        name: draft.name,
-        model: draft.model,
-        mode: draft.mode,
-        config_options: draft.configOptions ?? {},
-        ...permissionsToProfilePatch(draft),
-        cli_passthrough: draft.cliPassthrough,
-        // Omit an unchanged enabled value so a profile editor save cannot
-        // resurrect a concurrent list-toggle response from its stale draft.
-        enabled:
-          (draft.enabled ?? true) !== (savedProfile.enabled ?? true)
-            ? (draft.enabled ?? true)
-            : undefined,
-        cli_flags: draft.cliFlags,
-        command_prefix: draft.commandPrefix ?? "",
-        env_vars: draft.envVars ?? [],
-      });
+      const updated = await updateAgentProfileAction(
+        draft.id,
+        {
+          name: draft.name,
+          model: draft.model,
+          fallback_model: draft.fallbackModel ?? "",
+          auto_fallback: draft.autoFallback ?? false,
+          mode: draft.mode,
+          config_options: draft.configOptions ?? {},
+          ...permissionsToProfilePatch(draft),
+          cli_passthrough: draft.cliPassthrough,
+          // Omit an unchanged enabled value so a profile editor save cannot
+          // resurrect a concurrent list-toggle response from its stale draft.
+          enabled:
+            (draft.enabled ?? true) !== (savedProfile.enabled ?? true)
+              ? (draft.enabled ?? true)
+              : undefined,
+          cli_flags: draft.cliFlags,
+          command_prefix: draft.commandPrefix ?? "",
+          env_vars: draft.envVars ?? [],
+        },
+        force,
+      );
       setSavedProfile(updated);
       setDraft((current) => preserveNewerProfileDraft(current, draft, updated));
       const nextAgents = settingsAgents.map((agentItem: Agent) =>
@@ -123,6 +133,15 @@ export function useProfileSave({
       syncAgentsToStore(nextAgents);
       setSaveStatus("success");
     } catch (error) {
+      if (
+        error instanceof ApiError &&
+        error.status === 409 &&
+        Array.isArray((error.body as { utility_agents?: unknown[] } | null)?.utility_agents)
+      ) {
+        onUtilityConflict?.(
+          (error.body as { utility_agents: Array<{ id: string; name: string }> }).utility_agents,
+        );
+      }
       setSaveStatus("error");
       toast({
         title: translate("agents:failedToSaveProfile"),
@@ -180,6 +199,7 @@ export function useProfileDelete(
         watchers: result.watchers,
         routingTiers: result.routingTiers,
         automations: result.automations,
+        utilityAgents: result.utilityAgents,
       });
     } else {
       toast({
@@ -201,6 +221,7 @@ export function useProfileDelete(
         watchers: result.watchers,
         routingTiers: result.routingTiers,
         automations: result.automations,
+        utilityAgents: result.utilityAgents,
       });
     } else if (result.status === "error") {
       toast({

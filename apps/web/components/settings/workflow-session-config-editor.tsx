@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -34,6 +34,7 @@ type SessionConfigEditorProps = {
   steps: WorkflowStep[];
   onUpdate: (updates: Partial<WorkflowStep>) => void;
   readOnly: boolean;
+  onResolutionPendingChange?: (pending: boolean) => void;
 };
 
 export function SessionConfigToggle({
@@ -94,6 +95,7 @@ export function SessionConfigEditor({
   steps,
   onUpdate,
   readOnly,
+  onResolutionPendingChange,
 }: SessionConfigEditorProps) {
   const profiles = useHealthyAgentProfiles(step.agent_profile_id);
   const availableAgents = useAvailableAgents();
@@ -107,6 +109,22 @@ export function SessionConfigEditor({
   const isDirty = isWorkflowStepValueDirty(step, savedStep, (item) =>
     JSON.stringify(configureSessionAction(item)?.config?.rules ?? []),
   );
+  const [pendingRuleKeys, setPendingRuleKeys] = useState<Set<string>>(() => new Set());
+  const updateRuleResolutionPending = useCallback((key: string, pending: boolean) => {
+    setPendingRuleKeys((current) => {
+      const next = new Set(current);
+      if (pending) next.add(key);
+      else next.delete(key);
+      if (next.size === current.size && [...next].every((item) => current.has(item))) {
+        return current;
+      }
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    onResolutionPendingChange?.(pendingRuleKeys.size > 0);
+  }, [onResolutionPendingChange, pendingRuleKeys]);
 
   const updateRules = (nextRules: ConfigureSessionRule[]) => {
     onUpdate(withConfigureSessionRules(step, nextRules));
@@ -166,6 +184,7 @@ export function SessionConfigEditor({
         fixedProfile={!!step.agent_profile_id}
         onChooseCarryRule={createCarryRule}
         onUpdateRules={updateRules}
+        onResolutionPendingChange={updateRuleResolutionPending}
       />
     </section>
   );
@@ -182,6 +201,7 @@ function SessionConfigBody({
   fixedProfile,
   onChooseCarryRule,
   onUpdateRules,
+  onResolutionPendingChange,
 }: {
   step: WorkflowStep;
   action: ReturnType<typeof configureSessionAction>;
@@ -196,6 +216,7 @@ function SessionConfigBody({
     operation: ConfigureSessionOperation,
   ) => void;
   onUpdateRules: (rules: ConfigureSessionRule[]) => void;
+  onResolutionPendingChange: (key: string, pending: boolean) => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -223,6 +244,7 @@ function SessionConfigBody({
           fixedProfile={fixedProfile}
           onChooseCarryRule={onChooseCarryRule}
           onUpdateRules={onUpdateRules}
+          onResolutionPendingChange={onResolutionPendingChange}
         />
       )}
     </>
@@ -238,6 +260,7 @@ function SessionConfigRuleList({
   fixedProfile,
   onChooseCarryRule,
   onUpdateRules,
+  onResolutionPendingChange,
 }: {
   rules: ConfigureSessionRule[];
   warnings: SessionConfigCarryWarning[];
@@ -250,6 +273,7 @@ function SessionConfigRuleList({
     operation: ConfigureSessionOperation,
   ) => void;
   onUpdateRules: (rules: ConfigureSessionRule[]) => void;
+  onResolutionPendingChange: (key: string, pending: boolean) => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -277,6 +301,7 @@ function SessionConfigRuleList({
           )}
           availableAgents={availableAgents}
           readOnly={readOnly}
+          onResolutionPendingChange={onResolutionPendingChange}
           onChange={(nextRule) => {
             if (
               nextRule.agent_name !== rule.agent_name &&

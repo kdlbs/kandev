@@ -2,6 +2,7 @@ package acp
 
 import (
 	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 
@@ -61,6 +62,106 @@ func TestSendUpdateBackpressureIsCanceledOnClose(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("sendUpdate remained blocked after adapter close")
+	}
+}
+
+func TestSendUpdateSnapshotsNormalizedPayloadBeforeQueueing(t *testing.T) {
+	a := newTestAdapter()
+	t.Cleanup(func() { _ = a.Close() })
+
+	nested := map[string]any{"value": "before"}
+	payload := streams.NewGeneric("custom_tool", map[string]any{"nested": nested})
+	a.sendUpdate(AgentEvent{
+		Type:              streams.EventTypeToolCall,
+		NormalizedPayload: payload,
+	})
+
+	event := <-a.updatesCh
+	nested["value"] = "after"
+
+	data, err := json.Marshal(event.NormalizedPayload)
+	if err != nil {
+		t.Fatalf("marshal queued payload: %v", err)
+	}
+	want := `{"kind":"generic","generic":{"name":"custom_tool","input":{"nested":{"value":"before"}}}}`
+	if string(data) != want {
+		t.Fatalf("queued payload changed after source mutation: got %s, want %s", data, want)
+	}
+}
+
+func TestSendUpdateLockedSnapshotsNormalizedPayloadBeforeQueueing(t *testing.T) {
+	a := newTestAdapter()
+	t.Cleanup(func() { _ = a.Close() })
+
+	nested := map[string]any{"value": "before"}
+	payload := streams.NewGeneric("custom_tool", map[string]any{"nested": nested})
+	a.mu.Lock()
+	if !a.sendUpdateLocked(AgentEvent{
+		Type:              streams.EventTypeToolCall,
+		NormalizedPayload: payload,
+	}) {
+		a.mu.Unlock()
+		t.Fatal("sendUpdateLocked did not enqueue event")
+	}
+	a.mu.Unlock()
+
+	event := <-a.updatesCh
+	nested["value"] = "after"
+	data, err := json.Marshal(event.NormalizedPayload)
+	if err != nil {
+		t.Fatalf("marshal queued payload: %v", err)
+	}
+	if !json.Valid(data) || string(data) == "" {
+		t.Fatalf("queued payload is not valid JSON: %s", data)
+	}
+	if string(data) != `{"kind":"generic","generic":{"name":"custom_tool","input":{"nested":{"value":"before"}}}}` {
+		t.Fatalf("queued payload changed after source mutation: %s", data)
+	}
+}
+
+func TestQueuedNormalizedPayloadCanMarshalDuringSourceMutation(t *testing.T) {
+	a := newTestAdapter()
+	t.Cleanup(func() { _ = a.Close() })
+
+	nested := map[string]any{"value": "before"}
+	payload := streams.NewGeneric("custom_tool", map[string]any{"nested": nested})
+	a.sendUpdate(AgentEvent{
+		Type:              streams.EventTypeToolCall,
+		NormalizedPayload: payload,
+	})
+	event := <-a.updatesCh
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		for index := 0; index < 10000; index++ {
+			nested["value"] = index
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		for index := 0; index < 10000; index++ {
+			if _, err := json.Marshal(event.NormalizedPayload); err != nil {
+				t.Errorf("marshal queued payload: %v", err)
+			}
+		}
+	}()
+	close(start)
+	wg.Wait()
+
+	data, err := json.Marshal(event.NormalizedPayload)
+	if err != nil {
+		t.Fatalf("marshal final queued payload: %v", err)
+	}
+	if !json.Valid(data) || string(data) == "" {
+		t.Fatalf("queued payload is not valid JSON: %s", data)
+	}
+	if string(data) != `{"kind":"generic","generic":{"name":"custom_tool","input":{"nested":{"value":"before"}}}}` {
+		t.Fatalf("queued payload changed during source mutation: %s", data)
 	}
 }
 

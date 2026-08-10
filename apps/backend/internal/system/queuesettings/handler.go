@@ -25,14 +25,17 @@ func handleGet(service *Service) gin.HandlerFunc {
 	}
 }
 
+// handleUpdate applies a partial SettingsPatch: the request body may name
+// only the fields it wants to change, and any field it omits keeps its
+// current persisted value (see Service.Update).
 func handleUpdate(service *Service) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
-		var settings Settings
-		if err := ctx.ShouldBindJSON(&settings); err != nil {
+		var patch SettingsPatch
+		if err := ctx.ShouldBindJSON(&patch); err != nil {
 			ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "invalid request"})
 			return
 		}
-		response, err := service.Update(ctx.Request.Context(), settings)
+		response, err := service.Update(ctx.Request.Context(), patch)
 		if err != nil {
 			switch {
 			case errors.Is(err, ErrValidation):
