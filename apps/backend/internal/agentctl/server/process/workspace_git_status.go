@@ -467,21 +467,40 @@ func (wt *WorkspaceTracker) getAheadBehindCounts(ctx context.Context, update *ty
 // (which would look like "just pushed" to a push-detection consumer).
 func (wt *WorkspaceTracker) getRemoteAheadBehindCounts(ctx context.Context, update *types.GitStatusUpdate, prior types.GitStatusUpdate) {
 	if update.RemoteBranch == "" {
+		update.RemoteHeadCommit = ""
 		update.RemoteAhead = 0
 		update.RemoteBehind = 0
+		return
+	}
+	// RemoteBranch came from Git, but keep the same inline ref boundary as the
+	// other status comparisons before using it in a command argument.
+	rest, hasOriginPrefix := strings.CutPrefix(update.RemoteBranch, "origin/")
+	check := update.RemoteBranch
+	if hasOriginPrefix {
+		check = rest
+	}
+	if !safeBranchRefPattern.MatchString(check) || strings.Contains(check, "..") || strings.HasSuffix(check, ".lock") {
+		carryRemoteSnapshot(update, prior)
+		return
+	}
+	remoteHeadOut, err := wt.runGitOutput(ctx, "rev-parse", "--verify", update.RemoteBranch+"^{commit}")
+	if err != nil {
+		wt.logger.Debug("getRemoteAheadBehindCounts: rev-parse failed, carrying forward", zap.Error(err))
+		carryRemoteSnapshot(update, prior)
 		return
 	}
 	countOut, err := wt.runGitOutput(ctx, "rev-list", "--left-right", "--count", "HEAD..."+update.RemoteBranch)
 	if err != nil {
 		wt.logger.Debug("getRemoteAheadBehindCounts: rev-list failed, carrying forward", zap.Error(err))
-		carryRemoteAheadBehind(update, prior)
+		carryRemoteSnapshot(update, prior)
 		return
 	}
 	parts := strings.Fields(string(countOut))
 	if len(parts) != 2 {
-		carryRemoteAheadBehind(update, prior)
+		carryRemoteSnapshot(update, prior)
 		return
 	}
+	update.RemoteHeadCommit = strings.TrimSpace(string(remoteHeadOut))
 	update.RemoteAhead, _ = strconv.Atoi(parts[0])
 	update.RemoteBehind, _ = strconv.Atoi(parts[1])
 }
@@ -689,6 +708,25 @@ func carryRemoteAheadBehind(update *types.GitStatusUpdate, prior types.GitStatus
 	if prior.HeadCommit == "" || prior.HeadCommit != update.HeadCommit {
 		return
 	}
+	update.RemoteAhead = prior.RemoteAhead
+	update.RemoteBehind = prior.RemoteBehind
+}
+
+// carryRemoteSnapshot keeps the upstream tip and divergence counts coherent
+// when one of the secondary upstream observations fails. A changed local HEAD
+// or tracking ref makes the previous snapshot unsafe, so the caller keeps the
+// zero-value unknown state instead.
+func carryRemoteSnapshot(update *types.GitStatusUpdate, prior types.GitStatusUpdate) {
+	update.RemoteHeadCommit = ""
+	update.RemoteAhead = 0
+	update.RemoteBehind = 0
+	if prior.HeadCommit == "" || prior.HeadCommit != update.HeadCommit {
+		return
+	}
+	if prior.RemoteBranch == "" || prior.RemoteBranch != update.RemoteBranch || prior.RemoteHeadCommit == "" {
+		return
+	}
+	update.RemoteHeadCommit = prior.RemoteHeadCommit
 	update.RemoteAhead = prior.RemoteAhead
 	update.RemoteBehind = prior.RemoteBehind
 }

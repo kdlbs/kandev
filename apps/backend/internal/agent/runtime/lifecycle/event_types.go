@@ -291,11 +291,12 @@ type GitStatusData struct {
 	// (@{upstream}), unlike Ahead/Behind which are relative to the base
 	// branch and never reach zero just because the branch was pushed. Push
 	// detection (event_handlers_git.go) reads RemoteAhead, not Ahead.
-	RemoteAhead     int         `json:"remote_ahead"`
-	RemoteBehind    int         `json:"remote_behind"`
-	Files           interface{} `json:"files,omitempty"`
-	BranchAdditions int         `json:"branch_additions,omitempty"`
-	BranchDeletions int         `json:"branch_deletions,omitempty"`
+	RemoteAhead      int         `json:"remote_ahead"`
+	RemoteBehind     int         `json:"remote_behind"`
+	RemoteHeadCommit string      `json:"remote_head_commit,omitempty"`
+	Files            interface{} `json:"files,omitempty"`
+	BranchAdditions  int         `json:"branch_additions,omitempty"`
+	BranchDeletions  int         `json:"branch_deletions,omitempty"`
 	// RepositoryName identifies which repository this status belongs to in
 	// multi-repo task workspaces. Empty for single-repo. Carried through to
 	// the frontend so the Changes panel can render per-repo group headers.

@@ -39,6 +39,7 @@ export type PerRepoStatus = {
   branch: string | null;
   ahead: number;
   behind: number;
+  pullBehind?: number;
   hasStaged: boolean;
   hasUnstaged: boolean;
 };
@@ -337,6 +338,7 @@ function PullTriggerContent({
 
 function PullDropdown({
   behindCount,
+  pullDisabled,
   isLoading,
   loadingOperation,
   repoNames,
@@ -347,6 +349,7 @@ function PullDropdown({
   repoDisplayName,
 }: {
   behindCount: number;
+  pullDisabled?: boolean;
   isLoading: boolean;
   loadingOperation: string | null;
   /** Always non-empty (single-repo includes the empty-name entry). */
@@ -358,6 +361,7 @@ function PullDropdown({
   /** Maps a repository_name to its display label. */
   repoDisplayName?: (repositoryName: string) => string | undefined;
 }) {
+  const { t } = useTranslation();
   const isPulling = loadingOperation === "pull";
   const isRebasing = loadingOperation === "rebase";
   // For single-repo (empty repo entry), the trigger label uses the global
@@ -365,7 +369,7 @@ function PullDropdown({
   // labels and the trigger summarises with the max.
   const triggerBehind =
     perRepoStatus.length > 0
-      ? Math.max(behindCount, ...perRepoStatus.map((s) => s.behind))
+      ? Math.max(behindCount, ...perRepoStatus.map((s) => s.pullBehind ?? 0))
       : behindCount;
   return (
     <DropdownMenu>
@@ -374,7 +378,8 @@ function PullDropdown({
           size="sm"
           variant="ghost"
           className="h-5 text-[11px] px-1.5 gap-1 cursor-pointer"
-          disabled={isLoading}
+          disabled={isLoading || pullDisabled}
+          title={pullDisabled ? t("task:remoteActionsDisabledHistoryChanged") : undefined}
         >
           <PullTriggerContent
             behindCount={triggerBehind}
@@ -390,6 +395,7 @@ function PullDropdown({
           onRepoPull={onRepoPull}
           onRepoRebase={onRepoRebase}
           onRepoMerge={onRepoMerge}
+          pullDisabled={pullDisabled}
           repoDisplayName={repoDisplayName}
         />
       </DropdownMenuContent>
@@ -484,6 +490,7 @@ export function ChangesPanelHeader({
   baseBranchDisplay,
   baseBranchByRepo,
   behindCount,
+  pullDisabled,
   isLoading,
   loadingOperation,
   onOpenDiffAll,
@@ -509,6 +516,7 @@ export function ChangesPanelHeader({
    *  back to baseBranchDisplay. Empty/missing for single-repo workspaces. */
   baseBranchByRepo?: Record<string, string>;
   behindCount: number;
+  pullDisabled?: boolean;
   isLoading: boolean;
   loadingOperation: string | null;
   onOpenDiffAll?: () => void;
@@ -562,6 +570,7 @@ export function ChangesPanelHeader({
           )}
           <PullDropdown
             behindCount={behindCount}
+            pullDisabled={pullDisabled}
             isLoading={isLoading}
             loadingOperation={loadingOperation}
             repoNames={repoNames}
