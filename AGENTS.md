@@ -110,7 +110,9 @@ is the completeness check. Full guide: [`docs/i18n.md`](docs/i18n.md).
 UI punctuation is plain and intentional: do not use the Unicode em dash (U+2014)
 in user-facing copy or locale values. Use a period, colon, comma, semicolon, or
 parentheses instead. This applies to English, pseudo, and translated catalogs,
-rendered fallback strings, and changelog copy. `pnpm run i18n:check` enforces it.
+rendered fallback strings. `pnpm run i18n:check` enforces it. Historical
+`CHANGELOG.md` entries are excluded because the changelog is generated release
+history and remains immutable.
 
 ### Knowledge
 - **Public docs:** Website-ready user documentation lives in `docs/public/**`. Use `/docs-maintainer` when a change affects CLI commands, config keys, install/deploy flows, workflows, executors, public APIs, screenshots, or user-facing terminology.

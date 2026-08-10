@@ -47,7 +47,7 @@ describe("check-no-em-dash-ui", () => {
     ]);
   });
 
-  it("scans locale values, rendered source, and changelog copy", () => {
+  it("scans locale values and rendered source, not changelog history", () => {
     const repoRoot = mkdtempSync(path.join(os.tmpdir(), "kandev-em-dash-"));
     temporaryDirectories.push(repoRoot);
     const webRoot = path.join(repoRoot, "apps", "web");
@@ -66,7 +66,6 @@ describe("check-no-em-dash-ui", () => {
     expect(scanUiEmDashViolations({ repoRoot, webRoot })).toEqual([
       { kind: "catalog", file: "apps/web/src/locales/en/settings.json", key: "label" },
       { kind: "source", file: "apps/web/components/settings.tsx", line: 1 },
-      { kind: "changelog", file: "CHANGELOG.md", line: 1 },
     ]);
   });
 });

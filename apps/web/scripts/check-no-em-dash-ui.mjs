@@ -2,10 +2,11 @@
 /**
  * Fail when user-visible UI copy contains a Unicode em dash.
  *
- * The check covers locale values, rendered web source strings, backend shared
- * page catalogs, and changelog entries rendered by the web app. Comments are
- * ignored in source files so this remains a copy check rather than a style
- * check for developer prose.
+ * The check covers locale values, rendered web source strings, and backend
+ * shared page catalogs. Historical changelog content is intentionally excluded
+ * because the changelog is generated release history and must remain immutable.
+ * Comments are ignored in source files so this remains a copy check rather than
+ * a style check for developer prose.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -263,20 +264,6 @@ export function scanUiEmDashViolations({ repoRoot = REPO_ROOT, webRoot = WEB_ROO
     }
   }
 
-  const changelog = path.join(repoRoot, "CHANGELOG.md");
-  if (fs.existsSync(changelog)) {
-    violations.push(
-      ...fs
-        .readFileSync(changelog, "utf8")
-        .split("\n")
-        .flatMap((line, index) =>
-          containsEmDash(line)
-            ? [{ kind: "changelog", file: "CHANGELOG.md", line: index + 1 }]
-            : [],
-        ),
-    );
-  }
-
   return violations;
 }
 
@@ -297,7 +284,7 @@ function main() {
     return;
   }
 
-  console.log("✓ no em dashes in UI strings, locale values, or rendered changelog copy.");
+  console.log("✓ no em dashes in UI strings or locale values.");
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
