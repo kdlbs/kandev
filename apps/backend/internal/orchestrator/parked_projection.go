@@ -132,7 +132,7 @@ func (s *Service) onSessionParkedHook(ctx context.Context, taskID, sessionID str
 
 	if newParked != oldParked {
 		s.publishParkedChanged(ctx, taskID, sessionID)
-		s.updateTaskParkedState(ctx, taskID, sessionID, newParked)
+		s.updateTaskParkedState(ctx, taskID, sessionID)
 	}
 }
 
@@ -180,7 +180,7 @@ func (s *Service) handleParkedStateTransition(ctx context.Context, taskID, sessi
 
 	if wasParked {
 		s.publishParkedChanged(ctx, taskID, sessionID)
-		s.updateTaskParkedState(ctx, taskID, sessionID, false)
+		s.updateTaskParkedState(ctx, taskID, sessionID)
 	}
 }
 
@@ -207,10 +207,23 @@ func (s *Service) publishParkedChanged(ctx context.Context, taskID, sessionID st
 // there is no sampler and therefore no concurrent, asynchronous transition
 // stream to reorder — the state CAS in updateTaskSessionStateWithHook is
 // already the single serialization point for a given session (§7.2).
-func (s *Service) updateTaskParkedState(ctx context.Context, taskID, sessionID string, parked bool) {
+//
+// Reads the CURRENT session-level projection via ParkedProjectionSnapshot at
+// call time rather than accepting a caller-captured bool: onSessionParkedHook
+// and handleParkedStateTransition each release parkedStatesMu before calling
+// this method, so two racing transitions for the same session can call it in
+// either physical order. A captured argument would let the physically-later
+// call carry an already-superseded value and permanently clobber the correct
+// one in taskParkedState.members, since that map is never re-synced.
+// Re-reading here means whichever call actually executes last always writes
+// whatever ps.parked currently holds, converging correctly regardless of
+// which logical transition triggered it first (see the review round 1
+// finding this closes).
+func (s *Service) updateTaskParkedState(ctx context.Context, taskID, sessionID string) {
 	if taskID == "" {
 		return
 	}
+	parked := s.ParkedProjectionSnapshot(sessionID)
 	s.taskParkedStatesMu.Lock()
 	ts := s.getOrCreateTaskParkedStateLocked(taskID)
 	ts.mu.Lock()

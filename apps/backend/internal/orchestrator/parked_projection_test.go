@@ -282,6 +282,45 @@ func TestParked_TaskLevelOR(t *testing.T) {
 	require.True(t, svc.TaskParkedProjectionSnapshot("t1"), "task must stay true while S1 is still parked")
 }
 
+// TestUpdateTaskParkedState_LateCallMustNotResurrectStaleValue closes
+// MUST-FIX 1 from review round 1: onSessionParkedHook and
+// handleParkedStateTransition each release parkedStatesMu, THEN call
+// updateTaskParkedState. Two racing transitions for the SAME session issue
+// two such calls with no ordering guarantee relative to each other — if the
+// physically later call carried a caller-captured value from before the
+// release, it could permanently clobber a correct, already-superseded one,
+// since taskParkedState.members is never re-synced. updateTaskParkedState
+// now re-reads ParkedProjectionSnapshot itself at call time instead of
+// trusting an argument, so this reproduces the exact interleaving by hand: a
+// later transition's publish (correctly false) runs first, then an earlier
+// transition's delayed publish runs second — even though the session-level
+// value was true when that earlier transition first observed it, the
+// delayed call must read the CURRENT (false) value, not resurrect true.
+func TestUpdateTaskParkedState_LateCallMustNotResurrectStaleValue(t *testing.T) {
+	ctx := context.Background()
+	svc := parkedTestService(t, "t1", "s1", &fakeBackgroundProbe{result: probeResultLive})
+	attestShellLaunch(ctx, svc, "t1", "s1")
+
+	svc.parkedStatesMu.Lock()
+	svc.parkedStates["s1"].parked = true
+	svc.parkedStatesMu.Unlock()
+
+	// A later, logically-subsequent transition already flipped the
+	// session-level value to false and published it first.
+	svc.parkedStatesMu.Lock()
+	svc.parkedStates["s1"].parked = false
+	svc.parkedStatesMu.Unlock()
+	svc.updateTaskParkedState(ctx, "t1", "s1")
+	require.False(t, svc.TaskParkedProjectionSnapshot("t1"))
+
+	// The earlier transition's own delayed publish call now runs. It reads
+	// live state at call time, so it must see the CURRENT false, not the
+	// true that was live when that earlier transition first observed it.
+	svc.updateTaskParkedState(ctx, "t1", "s1")
+	require.False(t, svc.TaskParkedProjectionSnapshot("t1"),
+		"a delayed task-level publish must not resurrect a parked value a later transition already superseded")
+}
+
 // TestParked_TaskNoSessions verifies AC-50: a task with no recorded
 // projection reports false.
 func TestParked_TaskNoSessions(t *testing.T) {
