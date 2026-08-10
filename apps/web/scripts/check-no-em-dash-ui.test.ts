@@ -53,6 +53,9 @@ describe("check-no-em-dash-ui", () => {
     const webRoot = path.join(repoRoot, "apps", "web");
     mkdirSync(path.join(webRoot, "src", "locales", "en"), { recursive: true });
     mkdirSync(path.join(webRoot, "components"), { recursive: true });
+    mkdirSync(path.join(repoRoot, "apps", "backend", "cmd", "mock-agent"), {
+      recursive: true,
+    });
     writeFileSync(
       path.join(webRoot, "src", "locales", "en", "settings.json"),
       JSON.stringify({ label: `Bad ${EM_DASH} copy` }),
@@ -61,11 +64,16 @@ describe("check-no-em-dash-ui", () => {
       path.join(webRoot, "components", "settings.tsx"),
       `export const label = "Bad ${EM_DASH} copy";\n`,
     );
+    writeFileSync(
+      path.join(repoRoot, "apps", "backend", "cmd", "mock-agent", "handler.go"),
+      `package main\n// ignored ${EM_DASH}\nconst copy = "Bad ${EM_DASH} copy"\n`,
+    );
     writeFileSync(path.join(repoRoot, "CHANGELOG.md"), `- Bad ${EM_DASH} release note\n`);
 
     expect(scanUiEmDashViolations({ repoRoot, webRoot })).toEqual([
       { kind: "catalog", file: "apps/web/src/locales/en/settings.json", key: "label" },
       { kind: "source", file: "apps/web/components/settings.tsx", line: 1 },
+      { kind: "source", file: "apps/backend/cmd/mock-agent/handler.go", line: 3 },
     ]);
   });
 });

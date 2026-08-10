@@ -2,9 +2,10 @@
 /**
  * Fail when user-visible UI copy contains a Unicode em dash.
  *
- * The check covers locale values, rendered web source strings, and backend
- * shared page catalogs. Historical changelog content is intentionally excluded
- * because the changelog is generated release history and must remain immutable.
+ * The check covers locale values, rendered web source strings, backend mock-agent
+ * response strings, and backend shared page catalogs. Historical changelog
+ * content is intentionally excluded because the changelog is generated release
+ * history and must remain immutable.
  * Comments are ignored in source files so this remains a copy check rather than
  * a style check for developer prose.
  */
@@ -17,6 +18,7 @@ export const EM_DASH = "\u2014";
 const WEB_ROOT = path.resolve(import.meta.dirname, "..");
 const REPO_ROOT = path.resolve(WEB_ROOT, "..", "..");
 const SOURCE_EXTENSIONS = new Set([".js", ".jsx", ".ts", ".tsx"]);
+const BACKEND_SOURCE_EXTENSIONS = new Set([".go"]);
 const IGNORED_DIRECTORIES = new Set(["dist", "e2e", "node_modules"]);
 const CODE_STATE = "code";
 const LINE_COMMENT_STATE = "line-comment";
@@ -259,6 +261,17 @@ export function scanUiEmDashViolations({ repoRoot = REPO_ROOT, webRoot = WEB_ROO
     for (const file of listFiles(directory, (candidate) => {
       const extension = path.extname(candidate);
       return SOURCE_EXTENSIONS.has(extension) && !/\.(test|spec)\.[^.]+$/.test(candidate);
+    })) {
+      violations.push(...findSourceViolations(fs.readFileSync(file, "utf8"), file, repoRoot));
+    }
+  }
+
+  const backendRenderedSourceRoots = [path.join(repoRoot, "apps", "backend", "cmd", "mock-agent")];
+  for (const directory of backendRenderedSourceRoots) {
+    for (const file of listFiles(directory, (candidate) => {
+      return (
+        BACKEND_SOURCE_EXTENSIONS.has(path.extname(candidate)) && !candidate.endsWith("_test.go")
+      );
     })) {
       violations.push(...findSourceViolations(fs.readFileSync(file, "utf8"), file, repoRoot));
     }

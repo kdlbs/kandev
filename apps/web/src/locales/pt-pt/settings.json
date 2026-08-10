@@ -521,6 +521,7 @@
   "restoreTheOriginalBuiltInLayout": "Restaurar o esquema incorporado original e descartar a sua substituição.",
   "resumeTheMostRecentlyOpenedTask": "Retomar a tarefa aberta mais recentemente nesta área de trabalho, neste dispositivo.",
   "retrySave": "Repetir a gravação",
+  "retryReset": "Repetir a reposição",
   "runningSprites": "Sprites em execução",
   "sameShortcutAs": "Mesmo atalho que: {{shortcuts}}",
   "saveAndLeave": "Guardar e sair",

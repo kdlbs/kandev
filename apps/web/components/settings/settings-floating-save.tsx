@@ -62,12 +62,13 @@ export function SettingsFloatingSave({
   const isSaved = status === "saved";
   const isInvalid = Boolean(invalidReason);
   const isBusy = isSaving || isDiscarding;
-  const { label: labelKey, accessible: accessibleKey } = saveButtonKeys(status);
+  const { label: labelKey, accessible: accessibleKey } = saveButtonKeys(status, errorKind);
   const errorMessage = errorMessageKeys(errorKind);
   const accessibleLabel = t(accessibleKey);
   const configChatFloatingActionsHost = useConfigChatFloatingActionsHost();
   const isHostedByConfigChat = configChatFloatingActionsHost !== null;
   const positioningClass = standalonePositioningClass(placement);
+  const primaryAction = status === "error" && errorKind === "reset" ? onReset : onSave;
   const saveAction = (
     <div
       className={cn(
@@ -117,7 +118,7 @@ export function SettingsFloatingSave({
             className="h-11 min-h-11 shrink-0 cursor-pointer bg-success px-3 text-sm text-success-foreground hover:bg-success/85 focus-visible:border-success focus-visible:ring-success/35 md:h-8 md:min-h-8"
             disabled={isBusy || isSaved || isInvalid}
             aria-label={accessibleLabel}
-            onClick={() => void onSave()}
+            onClick={() => void primaryAction()}
           >
             <SaveButtonIcon status={status} />
             {t(labelKey)}
@@ -224,11 +225,17 @@ function SaveButtonIcon({ status }: { status: SettingsSaveStatus }) {
  * the accessible name while saving ("Saving…" vs "Saving changes"), so the two
  * are separate keys rather than one string compared against itself.
  */
-function saveButtonKeys(status: SettingsSaveStatus): { label: string; accessible: string } {
+function saveButtonKeys(
+  status: SettingsSaveStatus,
+  errorKind?: SettingsSaveErrorKind | null,
+): { label: string; accessible: string } {
   if (status === "saving") {
     return { label: "settings:saving", accessible: "settings:savingChanges" };
   }
   if (status === "saved") return { label: "settings:saved", accessible: "settings:saved" };
+  if (status === "error" && errorKind === "reset") {
+    return { label: "settings:retryReset", accessible: "settings:retryReset" };
+  }
   if (status === "error") return { label: "settings:retrySave", accessible: "settings:retrySave" };
   return { label: "settings:saveChanges", accessible: "settings:saveChanges" };
 }

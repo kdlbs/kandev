@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import Link from "@/components/routing/app-link";
@@ -18,6 +18,7 @@ type Deferred = {
 
 const SAVE_CHANGES_LABEL = "Save changes";
 const RESET_LABEL = "Reset";
+const RETRY_RESET_LABEL = "Retry reset";
 const COULDNT_SAVE_LABEL = "Couldn't save";
 const COULDNT_RESET_LABEL = "Couldn't reset";
 const APPEARANCE_ID = "appearance";
@@ -50,6 +51,8 @@ function DraftContributor({
 }) {
   const [revision, setRevision] = useState(initialRevision);
   const [savedRevision, setSavedRevision] = useState(0);
+  const latestRevisionRef = useRef(revision);
+  latestRevisionRef.current = revision;
 
   useSettingsSaveContributor({
     id,
@@ -62,8 +65,14 @@ function DraftContributor({
       await onSave(submittedRevision);
       setSavedRevision(submittedRevision as number);
     },
-    discard: async () => {
+    discard: async (submittedRevision) => {
       await onDiscard?.();
+      if (
+        submittedRevision !== undefined &&
+        !Object.is(submittedRevision, latestRevisionRef.current)
+      ) {
+        return;
+      }
       setRevision(savedRevision);
     },
   });
@@ -204,15 +213,17 @@ describe("SettingsFloatingSave", () => {
   });
 
   it("keeps the route dirty when Reset fails", async () => {
+    let shouldFail = true;
+    const discarded = vi.fn(() => {
+      if (shouldFail) {
+        shouldFail = false;
+        throw new Error("discard failed");
+      }
+    });
+
     render(
       <SettingsSaveProvider>
-        <DraftContributor
-          id={APPEARANCE_ID}
-          onSave={vi.fn()}
-          onDiscard={() => {
-            throw new Error("discard failed");
-          }}
-        />
+        <DraftContributor id={APPEARANCE_ID} onSave={vi.fn()} onDiscard={discarded} />
       </SettingsSaveProvider>,
     );
 
@@ -224,6 +235,10 @@ describe("SettingsFloatingSave", () => {
     expect((screen.getByRole("button", { name: RESET_LABEL }) as HTMLButtonElement).disabled).toBe(
       false,
     );
+
+    fireEvent.click(screen.getByRole("button", { name: RETRY_RESET_LABEL }));
+    await waitFor(() => expect(screen.queryByTestId(FLOATING_SAVE_TEST_ID)).toBeNull());
+    expect(discarded).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -477,5 +492,43 @@ describe("SettingsSaveProvider navigation", () => {
     expect(await screen.findByTestId(FLOATING_SAVE_TEST_ID)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Remove draft" }));
     await waitFor(() => expect(screen.queryByTestId(FLOATING_SAVE_TEST_ID)).toBeNull());
+  });
+});
+
+describe("SettingsSaveProvider reset coordination", () => {
+  it("settles navigation requested while a standalone reset is pending", async () => {
+    window.history.replaceState({}, "", APPEARANCE_PATH);
+    const pending = deferred();
+
+    render(
+      <SettingsSaveProvider>
+        <DraftContributor id="appearance" onSave={vi.fn()} onDiscard={() => pending.promise} />
+        <Link href={TERMINAL_PATH}>Terminal</Link>
+      </SettingsSaveProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: RESET_LABEL }));
+    fireEvent.click(screen.getByRole("link", { name: "Terminal" }));
+    expect(await screen.findByRole("alertdialog")).toBeTruthy();
+
+    await act(async () => pending.resolve());
+    await waitFor(() => expect(window.location.pathname).toBe(TERMINAL_PATH));
+  });
+
+  it("preserves a newer edit made during an asynchronous reset", async () => {
+    const pending = deferred();
+
+    render(
+      <SettingsSaveProvider>
+        <DraftContributor id="profile" onSave={vi.fn()} onDiscard={() => pending.promise} />
+      </SettingsSaveProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: RESET_LABEL }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
+
+    await act(async () => pending.resolve());
+    await waitFor(() => expect(screen.getByTestId(FLOATING_SAVE_TEST_ID)).toBeTruthy());
+    expect(screen.getByRole("button", { name: SAVE_CHANGES_LABEL })).toBeTruthy();
   });
 });

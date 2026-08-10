@@ -37,7 +37,7 @@ export type SettingsSaveContributor = {
   canSave?: boolean;
   invalidReason?: string;
   save: (revision: SettingsSaveRevision) => Promise<void> | void;
-  discard: () => Promise<void> | void;
+  discard: (revision?: SettingsSaveRevision) => Promise<void> | void;
 };
 
 type RegisteredContributor = {
@@ -92,12 +92,8 @@ export function SettingsSaveProvider({
 
   const handleSave = useCallback(async (): Promise<boolean> => {
     const result = await saveAll();
-    if (!result.canLeave || !pendingNavigationRef.current) return result.canLeave;
-
-    const intent = pendingNavigationRef.current;
-    pendingNavigationRef.current = null;
-    setPendingNavigation(null);
-    intent.proceed();
+    if (!result.canLeave) return false;
+    settlePendingNavigation(pendingNavigationRef, setPendingNavigation);
     return true;
   }, [saveAll]);
 
@@ -105,11 +101,20 @@ export function SettingsSaveProvider({
     if (discardingRef.current) return false;
     discardingRef.current = true;
     setIsDiscarding(true);
+    const submitted = snapshotDirtyContributors(contributors);
+    let hasNewerChanges = false;
     try {
-      for (const { contributor } of getDirtyContributors(contributors)) {
-        await contributor.discard();
+      for (const { contributor } of submitted) {
+        if (!isCurrentRevision(contributors, contributor)) {
+          hasNewerChanges = true;
+          continue;
+        }
+        await contributor.discard(contributor.revision);
+        hasNewerChanges ||= hasNewerRevision(contributors, contributor);
       }
       refreshRegistry();
+      if (hasNewerChanges) return false;
+      settlePendingNavigation(pendingNavigationRef, setPendingNavigation);
       return true;
     } catch {
       markError("reset");
@@ -121,11 +126,7 @@ export function SettingsSaveProvider({
   }, [contributors, markError, refreshRegistry]);
 
   const discardAndLeave = useCallback(async () => {
-    if (!(await discardDirtyContributors())) return;
-    const intent = pendingNavigationRef.current;
-    pendingNavigationRef.current = null;
-    setPendingNavigation(null);
-    intent?.proceed();
+    await discardDirtyContributors();
   }, [discardDirtyContributors]);
 
   const continueEditing = useCallback(() => {
@@ -178,6 +179,16 @@ function useSettingsBeforeUnloadGuard(enabled: boolean) {
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [enabled]);
+}
+
+function settlePendingNavigation(
+  pendingNavigationRef: { current: NavigationIntent | null },
+  setPendingNavigation: (intent: NavigationIntent | null) => void,
+) {
+  const intent = pendingNavigationRef.current;
+  pendingNavigationRef.current = null;
+  setPendingNavigation(null);
+  intent?.proceed();
 }
 
 export function SettingsSaveDirtyScope({
@@ -344,6 +355,14 @@ function hasNewerRevision(
 ): boolean {
   const current = contributors.get(submitted.id)?.contributor;
   return Boolean(current && current.isDirty && !Object.is(current.revision, submitted.revision));
+}
+
+function isCurrentRevision(
+  contributors: Map<string, RegisteredContributor>,
+  submitted: SettingsSaveContributor,
+): boolean {
+  const current = contributors.get(submitted.id)?.contributor;
+  return Boolean(current && Object.is(current.revision, submitted.revision));
 }
 
 function compareContributors(left: RegisteredContributor, right: RegisteredContributor): number {

@@ -517,6 +517,7 @@
   "restoreTheOriginalBuiltInLayout": "Restore the original built-in layout and discard its override.",
   "resumeTheMostRecentlyOpenedTask": "Resume the most recently opened task in this workspace on this device.",
   "retrySave": "Retry save",
+  "retryReset": "Retry reset",
   "runningSprites": "Running Sprites",
   "sameShortcutAs": "Same shortcut as: {{shortcuts}}",
   "saveAndLeave": "Save and leave",

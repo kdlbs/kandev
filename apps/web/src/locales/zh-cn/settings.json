@@ -521,6 +521,7 @@
   "restoreTheOriginalBuiltInLayout": "恢复原始内置布局并舍弃其覆盖设置。",
   "resumeTheMostRecentlyOpenedTask": "在此设备上恢复此工作区中最近打开的任务。",
   "retrySave": "重试保存",
+  "retryReset": "重试重置",
   "runningSprites": "运行中的云沙盒",
   "sameShortcutAs": "与以下项使用相同快捷键：{{shortcuts}}",
   "saveAndLeave": "保存并离开",
