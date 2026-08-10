@@ -135,6 +135,11 @@ func NewStore(db, ro *sqlx.DB) (*Store, error) {
 	} {
 		_, _ = db.Exec(statement)
 	}
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS forgejo_issue_watch_tasks (
+		watch_id TEXT NOT NULL, owner TEXT NOT NULL, repo TEXT NOT NULL, issue_number INTEGER NOT NULL,
+		task_id TEXT NOT NULL, created_at DATETIME NOT NULL,
+		PRIMARY KEY (watch_id, owner, repo, issue_number)
+	)`)
 	return store, err
 }
 

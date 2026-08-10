@@ -119,3 +119,15 @@ func TestFilterWatchedIssues(t *testing.T) {
 		t.Fatalf("unfiltered=%#v", all)
 	}
 }
+
+func TestStore_ClaimsWatchIssueOnce(t *testing.T) {
+	store := newConfigTestStore(t)
+	first, err := store.ClaimIssueWatchTask(context.Background(), "watch", "owner", "repo", 7, "task-a")
+	if err != nil || !first {
+		t.Fatalf("first=%t err=%v", first, err)
+	}
+	second, err := store.ClaimIssueWatchTask(context.Background(), "watch", "owner", "repo", 7, "task-b")
+	if err != nil || second {
+		t.Fatalf("second=%t err=%v", second, err)
+	}
+}

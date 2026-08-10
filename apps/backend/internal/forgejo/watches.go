@@ -82,6 +82,20 @@ func (s *Store) MarkIssueWatchPolled(ctx context.Context, id string, pollTime ti
 	return err
 }
 
+// ClaimIssueWatchTask atomically reserves an external issue for one Kandev
+// task. A false result means an earlier poll already created the task.
+func (s *Store) ClaimIssueWatchTask(ctx context.Context, watchID, owner, repo string, number int, taskID string) (bool, error) {
+	result, err := s.db.ExecContext(ctx, `INSERT INTO forgejo_issue_watch_tasks (watch_id, owner, repo, issue_number, task_id, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(watch_id, owner, repo, issue_number) DO NOTHING`, watchID, owner, repo, number, taskID, time.Now().UTC())
+	if err != nil {
+		return false, err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return count == 1, nil
+}
+
 func (s *Store) GetIssueWatch(ctx context.Context, workspaceID, id string) (*IssueWatch, error) {
 	var watch IssueWatch
 	err := s.ro.GetContext(ctx, &watch, `SELECT * FROM forgejo_issue_watches WHERE id = ? AND workspace_id = ?`, id, workspaceID)
