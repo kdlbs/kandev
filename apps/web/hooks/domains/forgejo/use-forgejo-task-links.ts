@@ -8,12 +8,16 @@ import {
   unlinkForgejoPullRequest,
 } from "@/lib/api/domains/forgejo-api";
 import type { ForgejoTaskIssue, ForgejoTaskPR } from "@/lib/types/forgejo";
+import { useAppStore } from "@/components/state-provider";
 
 /** Workspace-scoped task links. The backend is the authority: reload after every mutation. */
 export function useForgejoTaskLinks(
   workspaceId: string | null | undefined,
   taskId: string | null | undefined,
 ) {
+  const revision = useAppStore((state) =>
+    workspaceId && taskId ? (state.forgejoTaskLinkRevisions[workspaceId]?.[taskId] ?? 0) : 0,
+  );
   const [issues, setIssues] = useState<ForgejoTaskIssue[]>([]);
   const [pullRequests, setPullRequests] = useState<ForgejoTaskPR[]>([]);
   const [loading, setLoading] = useState(false);
@@ -43,7 +47,7 @@ export function useForgejoTaskLinks(
 
   useEffect(() => {
     void reload();
-  }, [reload]);
+  }, [reload, revision]);
 
   const refreshIssue = useCallback(
     async (linkId: string) => {

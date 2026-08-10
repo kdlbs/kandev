@@ -93,6 +93,7 @@ export const defaultState = {
   gitlabStatus: defaultGitLabState.gitlabStatus,
   forgejoConfig: defaultForgejoState.forgejoConfig,
   forgejoQueue: defaultForgejoState.forgejoQueue,
+  forgejoTaskLinkRevisions: defaultForgejoState.forgejoTaskLinkRevisions,
   forgejoIssueWatches: defaultForgejoState.forgejoIssueWatches,
   forgejoReviewWatches: defaultForgejoState.forgejoReviewWatches,
   forgejoActionPresets: defaultForgejoState.forgejoActionPresets,

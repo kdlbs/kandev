@@ -21,19 +21,41 @@ export type ForgejoSliceState = {
   forgejoIssueWatches: Record<string, Loadable<ForgejoIssueWatch[]>>;
   forgejoReviewWatches: Record<string, Loadable<ForgejoReviewWatch[]>>;
   forgejoActionPresets: Record<string, Loadable<ForgejoActionPreset[]>>;
+  forgejoTaskLinkRevisions: Record<string, Record<string, number>>;
 };
 
 export type ForgejoSliceActions = {
-  setForgejoConfigState: (workspaceId: string, data: ForgejoConfig | null, error?: string | null) => void;
+  setForgejoConfigState: (
+    workspaceId: string,
+    data: ForgejoConfig | null,
+    error?: string | null,
+  ) => void;
   setForgejoConfigLoading: (workspaceId: string, loading: boolean) => void;
-  setForgejoQueueState: (workspaceId: string, data: ForgejoQueue | null, error?: string | null) => void;
+  setForgejoQueueState: (
+    workspaceId: string,
+    data: ForgejoQueue | null,
+    error?: string | null,
+  ) => void;
   setForgejoQueueLoading: (workspaceId: string, loading: boolean) => void;
-  setForgejoIssueWatchesState: (workspaceId: string, data: ForgejoIssueWatch[], error?: string | null) => void;
+  setForgejoIssueWatchesState: (
+    workspaceId: string,
+    data: ForgejoIssueWatch[],
+    error?: string | null,
+  ) => void;
   setForgejoIssueWatchesLoading: (workspaceId: string, loading: boolean) => void;
-  setForgejoReviewWatchesState: (workspaceId: string, data: ForgejoReviewWatch[], error?: string | null) => void;
+  setForgejoReviewWatchesState: (
+    workspaceId: string,
+    data: ForgejoReviewWatch[],
+    error?: string | null,
+  ) => void;
   setForgejoReviewWatchesLoading: (workspaceId: string, loading: boolean) => void;
-  setForgejoActionPresetsState: (workspaceId: string, data: ForgejoActionPreset[], error?: string | null) => void;
+  setForgejoActionPresetsState: (
+    workspaceId: string,
+    data: ForgejoActionPreset[],
+    error?: string | null,
+  ) => void;
   setForgejoActionPresetsLoading: (workspaceId: string, loading: boolean) => void;
+  markForgejoTaskLinksUpdated: (workspaceId: string, taskId: string) => void;
   resetForgejoWorkspaceState: (workspaceId: string) => void;
 };
 

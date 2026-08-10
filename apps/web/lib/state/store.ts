@@ -191,6 +191,7 @@ export type AppState = KanbanSlice & {
   forgejoIssueWatches: (typeof defaultForgejoState)["forgejoIssueWatches"];
   forgejoReviewWatches: (typeof defaultForgejoState)["forgejoReviewWatches"];
   forgejoActionPresets: (typeof defaultForgejoState)["forgejoActionPresets"];
+  forgejoTaskLinkRevisions: (typeof defaultForgejoState)["forgejoTaskLinkRevisions"];
 
   // Azure DevOps slice
   azureDevOpsTaskPullRequests: (typeof defaultAzureDevOpsState)["azureDevOpsTaskPullRequests"];

@@ -16,10 +16,16 @@ const config = {
 
 function makeStore(activeId: string | null) {
   const setForgejoConfigState = vi.fn();
+  const markForgejoTaskLinksUpdated = vi.fn();
   return {
     setForgejoConfigState,
+    markForgejoTaskLinksUpdated,
     store: {
-      getState: () => ({ workspaces: { activeId }, setForgejoConfigState }),
+      getState: () => ({
+        workspaces: { activeId },
+        setForgejoConfigState,
+        markForgejoTaskLinksUpdated,
+      }),
     } as unknown as StoreApi<AppState>,
   };
 }
@@ -46,5 +52,25 @@ describe("Forgejo WebSocket handlers", () => {
       payload: config,
     });
     expect(setForgejoConfigState).not.toHaveBeenCalled();
+  });
+
+  it("marks active task links stale after a scoped update", () => {
+    const { store, markForgejoTaskLinksUpdated } = makeStore("ws-a");
+    registerForgejoHandlers(store)["forgejo.task_links.updated"]!({
+      type: "notification",
+      action: "forgejo.task_links.updated",
+      payload: { workspace_id: "ws-a", task_id: "task-7" },
+    });
+    expect(markForgejoTaskLinksUpdated).toHaveBeenCalledWith("ws-a", "task-7");
+  });
+
+  it("does not leak task link updates across workspaces", () => {
+    const { store, markForgejoTaskLinksUpdated } = makeStore("ws-b");
+    registerForgejoHandlers(store)["forgejo.task_links.updated"]!({
+      type: "notification",
+      action: "forgejo.task_links.updated",
+      payload: { workspace_id: "ws-a", task_id: "task-7" },
+    });
+    expect(markForgejoTaskLinksUpdated).not.toHaveBeenCalled();
   });
 });

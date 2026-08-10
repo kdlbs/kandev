@@ -9,48 +9,84 @@ export const defaultForgejoState: ForgejoSliceState = {
   forgejoIssueWatches: {},
   forgejoReviewWatches: {},
   forgejoActionPresets: {},
+  forgejoTaskLinkRevisions: {},
 };
 
-type ImmerSet = Parameters<StateCreator<ForgejoSlice, [["zustand/immer", never]], [], ForgejoSlice>>[0];
+type ImmerSet = Parameters<
+  StateCreator<ForgejoSlice, [["zustand/immer", never]], [], ForgejoSlice>
+>[0];
 type ForgejoSliceCreator = StateCreator<ForgejoSlice, [["zustand/immer", never]], [], ForgejoSlice>;
 
 export const createForgejoSlice: ForgejoSliceCreator = (set: ImmerSet) => ({
   ...defaultForgejoState,
-  setForgejoConfigState: (workspaceId, data, error = null) => set((state) => {
-    state.forgejoConfig[workspaceId] = { data, loading: false, loaded: true, error };
-  }),
-  setForgejoConfigLoading: (workspaceId, loading) => set((state) => {
-    state.forgejoConfig[workspaceId] = { ...(state.forgejoConfig[workspaceId] ?? initial(null)), loading };
-  }),
-  setForgejoQueueState: (workspaceId, data, error = null) => set((state) => {
-    state.forgejoQueue[workspaceId] = { data, loading: false, loaded: true, error };
-  }),
-  setForgejoQueueLoading: (workspaceId, loading) => set((state) => {
-    state.forgejoQueue[workspaceId] = { ...(state.forgejoQueue[workspaceId] ?? initial(null)), loading };
-  }),
-  setForgejoIssueWatchesState: (workspaceId, data, error = null) => set((state) => {
-    state.forgejoIssueWatches[workspaceId] = { data, loading: false, loaded: true, error };
-  }),
-  setForgejoIssueWatchesLoading: (workspaceId, loading) => set((state) => {
-    state.forgejoIssueWatches[workspaceId] = { ...(state.forgejoIssueWatches[workspaceId] ?? initial([])), loading };
-  }),
-  setForgejoReviewWatchesState: (workspaceId, data, error = null) => set((state) => {
-    state.forgejoReviewWatches[workspaceId] = { data, loading: false, loaded: true, error };
-  }),
-  setForgejoReviewWatchesLoading: (workspaceId, loading) => set((state) => {
-    state.forgejoReviewWatches[workspaceId] = { ...(state.forgejoReviewWatches[workspaceId] ?? initial([])), loading };
-  }),
-  setForgejoActionPresetsState: (workspaceId, data, error = null) => set((state) => {
-    state.forgejoActionPresets[workspaceId] = { data, loading: false, loaded: true, error };
-  }),
-  setForgejoActionPresetsLoading: (workspaceId, loading) => set((state) => {
-    state.forgejoActionPresets[workspaceId] = { ...(state.forgejoActionPresets[workspaceId] ?? initial([])), loading };
-  }),
-  resetForgejoWorkspaceState: (workspaceId) => set((state) => {
-    delete state.forgejoConfig[workspaceId];
-    delete state.forgejoQueue[workspaceId];
-    delete state.forgejoIssueWatches[workspaceId];
-    delete state.forgejoReviewWatches[workspaceId];
-    delete state.forgejoActionPresets[workspaceId];
-  }),
+  setForgejoConfigState: (workspaceId, data, error = null) =>
+    set((state) => {
+      state.forgejoConfig[workspaceId] = { data, loading: false, loaded: true, error };
+    }),
+  setForgejoConfigLoading: (workspaceId, loading) =>
+    set((state) => {
+      state.forgejoConfig[workspaceId] = {
+        ...(state.forgejoConfig[workspaceId] ?? initial(null)),
+        loading,
+      };
+    }),
+  setForgejoQueueState: (workspaceId, data, error = null) =>
+    set((state) => {
+      state.forgejoQueue[workspaceId] = { data, loading: false, loaded: true, error };
+    }),
+  setForgejoQueueLoading: (workspaceId, loading) =>
+    set((state) => {
+      state.forgejoQueue[workspaceId] = {
+        ...(state.forgejoQueue[workspaceId] ?? initial(null)),
+        loading,
+      };
+    }),
+  setForgejoIssueWatchesState: (workspaceId, data, error = null) =>
+    set((state) => {
+      state.forgejoIssueWatches[workspaceId] = { data, loading: false, loaded: true, error };
+    }),
+  setForgejoIssueWatchesLoading: (workspaceId, loading) =>
+    set((state) => {
+      state.forgejoIssueWatches[workspaceId] = {
+        ...(state.forgejoIssueWatches[workspaceId] ?? initial([])),
+        loading,
+      };
+    }),
+  setForgejoReviewWatchesState: (workspaceId, data, error = null) =>
+    set((state) => {
+      state.forgejoReviewWatches[workspaceId] = { data, loading: false, loaded: true, error };
+    }),
+  setForgejoReviewWatchesLoading: (workspaceId, loading) =>
+    set((state) => {
+      state.forgejoReviewWatches[workspaceId] = {
+        ...(state.forgejoReviewWatches[workspaceId] ?? initial([])),
+        loading,
+      };
+    }),
+  setForgejoActionPresetsState: (workspaceId, data, error = null) =>
+    set((state) => {
+      state.forgejoActionPresets[workspaceId] = { data, loading: false, loaded: true, error };
+    }),
+  setForgejoActionPresetsLoading: (workspaceId, loading) =>
+    set((state) => {
+      state.forgejoActionPresets[workspaceId] = {
+        ...(state.forgejoActionPresets[workspaceId] ?? initial([])),
+        loading,
+      };
+    }),
+  markForgejoTaskLinksUpdated: (workspaceId, taskId) =>
+    set((state) => {
+      const revisions = state.forgejoTaskLinkRevisions[workspaceId] ?? {};
+      revisions[taskId] = (revisions[taskId] ?? 0) + 1;
+      state.forgejoTaskLinkRevisions[workspaceId] = revisions;
+    }),
+  resetForgejoWorkspaceState: (workspaceId) =>
+    set((state) => {
+      delete state.forgejoConfig[workspaceId];
+      delete state.forgejoQueue[workspaceId];
+      delete state.forgejoIssueWatches[workspaceId];
+      delete state.forgejoReviewWatches[workspaceId];
+      delete state.forgejoActionPresets[workspaceId];
+      delete state.forgejoTaskLinkRevisions[workspaceId];
+    }),
 });

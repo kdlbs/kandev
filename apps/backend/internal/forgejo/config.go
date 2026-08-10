@@ -248,6 +248,19 @@ func (s *Service) publishConfigUpdated(ctx context.Context, config *Config) {
 	_ = s.eventBus.Publish(ctx, events.ForgejoConfigUpdated, bus.NewEvent(events.ForgejoConfigUpdated, "forgejo", config))
 }
 
+type taskLinksUpdatedEvent struct {
+	WorkspaceID string `json:"workspace_id"`
+	TaskID      string `json:"task_id"`
+}
+
+func (s *Service) publishTaskLinksUpdated(ctx context.Context, workspaceID, taskID string) {
+	if s.eventBus == nil || workspaceID == "" || taskID == "" {
+		return
+	}
+	event := bus.NewEvent(events.ForgejoTaskLinksUpdated, "forgejo", &taskLinksUpdatedEvent{WorkspaceID: workspaceID, TaskID: taskID})
+	_ = s.eventBus.Publish(ctx, events.ForgejoTaskLinksUpdated, event)
+}
+
 func (s *Service) GetConfig(ctx context.Context, workspaceID string) (*Config, error) {
 	if strings.TrimSpace(workspaceID) == "" {
 		return nil, ErrWorkspaceRequired
@@ -495,6 +508,7 @@ func (s *Service) AssociatePullRequest(ctx context.Context, workspaceID, taskID,
 	}
 	for _, candidate := range links {
 		if candidate.Owner == owner && candidate.Repo == repo && candidate.PRNumber == pull.Number {
+			s.publishTaskLinksUpdated(ctx, workspaceID, taskID)
 			return candidate, nil
 		}
 	}
@@ -547,6 +561,7 @@ func (s *Service) AssociateIssue(ctx context.Context, workspaceID, taskID, repos
 	}
 	for _, candidate := range links {
 		if candidate.Owner == owner && candidate.Repo == repo && candidate.IssueNumber == issue.Number {
+			s.publishTaskLinksUpdated(ctx, workspaceID, taskID)
 			return candidate, nil
 		}
 	}
@@ -580,6 +595,7 @@ func (s *Service) CreateTaskPullRequest(ctx context.Context, workspaceID, taskID
 	}
 	for _, candidate := range links {
 		if candidate.Owner == input.Owner && candidate.Repo == input.Repo && candidate.PRNumber == pull.Number {
+			s.publishTaskLinksUpdated(ctx, workspaceID, taskID)
 			return candidate, nil
 		}
 	}
@@ -587,7 +603,15 @@ func (s *Service) CreateTaskPullRequest(ctx context.Context, workspaceID, taskID
 }
 
 func (s *Service) UnlinkTaskIssue(ctx context.Context, workspaceID, linkID string) error {
-	return s.store.DeleteTaskIssue(ctx, workspaceID, linkID)
+	link, err := s.store.GetTaskIssueLink(ctx, workspaceID, linkID)
+	if err != nil {
+		return err
+	}
+	if err := s.store.DeleteTaskIssue(ctx, workspaceID, linkID); err != nil {
+		return err
+	}
+	s.publishTaskLinksUpdated(ctx, workspaceID, link.TaskID)
+	return nil
 }
 
 func (s *Service) SaveIssueWatch(ctx context.Context, workspaceID string, watch *IssueWatch) error {
@@ -676,7 +700,11 @@ func (s *Service) recordWatchedIssue(ctx context.Context, workspaceID, taskID st
 		return err
 	}
 	now := time.Now().UTC()
-	return s.store.UpsertTaskIssue(ctx, &TaskIssue{TaskID: taskID, RepositoryID: watch.RepositoryID, Origin: config.Origin, Owner: watch.Owner, Repo: watch.Repo, IssueNumber: issue.Number, IssueURL: issue.HTMLURL, Title: issue.Title, State: issue.State, LastSyncedAt: &now})
+	err = s.store.UpsertTaskIssue(ctx, &TaskIssue{TaskID: taskID, RepositoryID: watch.RepositoryID, Origin: config.Origin, Owner: watch.Owner, Repo: watch.Repo, IssueNumber: issue.Number, IssueURL: issue.HTMLURL, Title: issue.Title, State: issue.State, LastSyncedAt: &now})
+	if err == nil {
+		s.publishTaskLinksUpdated(ctx, workspaceID, taskID)
+	}
+	return err
 }
 
 func (s *Service) RefreshTaskIssue(ctx context.Context, workspaceID, linkID string) (*TaskIssue, error) {
@@ -695,7 +723,15 @@ func (s *Service) RefreshTaskPullRequest(ctx context.Context, workspaceID, linkI
 	return s.AssociatePullRequest(ctx, workspaceID, link.TaskID, link.RepositoryID, link.Owner, link.Repo, link.PRNumber)
 }
 func (s *Service) UnlinkTaskPullRequest(ctx context.Context, workspaceID, linkID string) error {
-	return s.store.DeleteTaskPR(ctx, workspaceID, linkID)
+	link, err := s.store.GetTaskPRLink(ctx, workspaceID, linkID)
+	if err != nil {
+		return err
+	}
+	if err := s.store.DeleteTaskPR(ctx, workspaceID, linkID); err != nil {
+		return err
+	}
+	s.publishTaskLinksUpdated(ctx, workspaceID, link.TaskID)
+	return nil
 }
 
 func (s *Service) SetConfig(ctx context.Context, workspaceID string, request *SetConfigRequest) (*Config, error) {

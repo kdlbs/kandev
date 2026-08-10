@@ -11,5 +11,15 @@ export function registerForgejoHandlers(store: StoreApi<AppState>): WsHandlers {
       if (!workspaceId || store.getState().workspaces.activeId !== workspaceId) return;
       store.getState().setForgejoConfigState(workspaceId, config.origin ? config : null);
     },
+    "forgejo.task_links.updated": (message) => {
+      const payload = message.payload as { workspace_id?: string; task_id?: string };
+      if (
+        !payload.workspace_id ||
+        !payload.task_id ||
+        store.getState().workspaces.activeId !== payload.workspace_id
+      )
+        return;
+      store.getState().markForgejoTaskLinksUpdated(payload.workspace_id, payload.task_id);
+    },
   };
 }

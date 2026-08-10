@@ -652,6 +652,10 @@ export type BackendMessageMap = OfficeBackendMessageMap &
       TaskMR & { workspace_id: string }
     >;
     "forgejo.config.updated": BackendMessage<"forgejo.config.updated", ForgejoConfig>;
+    "forgejo.task_links.updated": BackendMessage<
+      "forgejo.task_links.updated",
+      { workspace_id: string; task_id: string }
+    >;
     "run.event.appended": BackendMessage<"run.event.appended", RunEventAppendedPayload>;
   };
 

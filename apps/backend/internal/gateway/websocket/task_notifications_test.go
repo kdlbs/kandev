@@ -39,7 +39,7 @@ func TestTaskEventBroadcaster_NoDuplicateSubscriptions(t *testing.T) {
 	//
 	// Update this number when adding or removing event subscriptions in
 	// RegisterTaskNotifications — it is intentionally exact.
-	const wantSubscriptions = 62
+	const wantSubscriptions = 63
 	if got := len(b.subscriptions); got != wantSubscriptions {
 		t.Errorf("RegisterTaskNotifications created %d subscriptions, want %d — "+
 			"did an event get subscribed twice?", got, wantSubscriptions)
@@ -57,6 +57,7 @@ func TestTaskEventBroadcaster_NoDuplicateSubscriptions(t *testing.T) {
 		events.GitHubTaskPRUpdated,
 		events.GitLabTaskMRUpdated,
 		events.ForgejoConfigUpdated,
+		events.ForgejoTaskLinksUpdated,
 	} {
 		subject := subject
 		t.Run(subject, func(t *testing.T) {
