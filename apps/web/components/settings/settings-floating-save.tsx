@@ -25,7 +25,7 @@ export type SettingsSavePlacement = "content" | "viewport";
 
 function standalonePositioningClass(placement: SettingsSavePlacement): string {
   if (placement === "content") {
-    return "absolute inset-x-0 bottom-[calc(5rem_+_env(safe-area-inset-bottom))] pl-[calc(1rem_+_env(safe-area-inset-left))] pr-[calc(1rem_+_env(safe-area-inset-right))] md:bottom-[calc(1.5rem_+_env(safe-area-inset-bottom))]";
+    return "absolute inset-x-0 bottom-[calc(5rem_+_env(safe-area-inset-bottom))] pl-[calc(1rem_+_env(safe-area-inset-left))] pr-[calc(1rem_+_env(safe-area-inset-right))] md:bottom-[calc(1.6875rem_+_env(safe-area-inset-bottom))]";
   }
   return "fixed inset-x-0 bottom-[calc(5.25rem_+_env(safe-area-inset-bottom)_+_var(--app-status-bar-height))] pl-[calc(1rem_+_env(safe-area-inset-left))] pr-[calc(1rem_+_env(safe-area-inset-right))]";
 }
@@ -79,7 +79,7 @@ export function SettingsFloatingSave({
       data-status={status}
     >
       <div
-        className="pointer-events-auto flex w-fit max-w-full items-center gap-1 rounded-lg border border-border/80 bg-card/95 px-1 shadow-md backdrop-blur-sm"
+        className="pointer-events-auto flex w-fit max-w-full items-center gap-1 rounded-lg border border-border/80 bg-card/95 px-1 shadow-md backdrop-blur-sm md:py-0.5"
         data-testid="settings-floating-save-surface"
       >
         <div className="min-w-0 max-w-52 flex-1 space-y-0.5 px-1">
@@ -105,7 +105,7 @@ export function SettingsFloatingSave({
           <Button
             type="button"
             variant="outline"
-            className="h-11 min-h-11 shrink-0 cursor-pointer px-3 text-sm md:h-9 md:min-h-9"
+            className="h-11 min-h-11 shrink-0 cursor-pointer px-3 text-sm md:h-8 md:min-h-8"
             disabled={isBusy || isSaved}
             onClick={() => void onReset()}
           >
@@ -114,7 +114,7 @@ export function SettingsFloatingSave({
           <Button
             type="button"
             size="default"
-            className="h-11 min-h-11 shrink-0 cursor-pointer bg-success px-3 text-sm text-success-foreground hover:bg-success/85 focus-visible:border-success focus-visible:ring-success/35 md:h-9 md:min-h-9"
+            className="h-11 min-h-11 shrink-0 cursor-pointer bg-success px-3 text-sm text-success-foreground hover:bg-success/85 focus-visible:border-success focus-visible:ring-success/35 md:h-8 md:min-h-8"
             disabled={isBusy || isSaved || isInvalid}
             aria-label={accessibleLabel}
             onClick={() => void onSave()}

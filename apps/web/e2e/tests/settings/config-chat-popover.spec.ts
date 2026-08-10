@@ -81,9 +81,9 @@ test.describe("Configuration Chat", () => {
       expect(configChatBox).not.toBeNull();
       expect(resetBox).not.toBeNull();
       expect(saveBox).not.toBeNull();
-      expect(closedSurfaceBox!.height).toBeLessThanOrEqual(48);
-      expect(resetBox!.height).toBeLessThanOrEqual(36);
-      expect(saveBox!.height).toBeLessThanOrEqual(36);
+      expect(closedSurfaceBox!.height).toBeLessThanOrEqual(40);
+      expect(resetBox!.height).toBeLessThanOrEqual(32);
+      expect(saveBox!.height).toBeLessThanOrEqual(32);
       expect(
         Math.abs(
           closedSurfaceBox!.x +
@@ -91,11 +91,12 @@ test.describe("Configuration Chat", () => {
             (contentBox!.x + contentBox!.width / 2),
         ),
       ).toBeLessThanOrEqual(2);
+      expect(closedSurfaceBox!.height - saveBox!.height).toBeGreaterThanOrEqual(6);
       expect(
         Math.abs(
           closedSurfaceBox!.y +
-            closedSurfaceBox!.height -
-            (configChatBox!.y + configChatBox!.height),
+            closedSurfaceBox!.height / 2 -
+            (configChatBox!.y + configChatBox!.height / 2),
         ),
       ).toBeLessThanOrEqual(2);
       await expect(saveButton).toHaveClass(/bg-success/);

@@ -141,7 +141,9 @@ test.describe("Settings manual save", () => {
         Math.abs(surfaceBox!.x + surfaceBox!.width / 2 - (contentBox!.x + contentBox!.width / 2)),
       ).toBeLessThanOrEqual(2);
       expect(
-        Math.abs(surfaceBox!.y + surfaceBox!.height - (configChatBox!.y + configChatBox!.height)),
+        Math.abs(
+          surfaceBox!.y + surfaceBox!.height / 2 - (configChatBox!.y + configChatBox!.height / 2),
+        ),
       ).toBeLessThanOrEqual(2);
       await expect(floatingSave).not.toHaveClass(/bg-success/);
       await expect(floatingSave.getByRole("button", { name: "Save changes" })).toHaveClass(
