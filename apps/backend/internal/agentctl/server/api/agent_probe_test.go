@@ -61,3 +61,38 @@ func TestHandleWSBackgroundProbe_MalformedPayloadResolvesToUnknown(t *testing.T)
 		t.Fatalf("result = %q, want unknown", payload.Result)
 	}
 }
+
+// TestProbeProcessTreeRecovered_PanicResolvesToUnknown is the Review round 2
+// MUST-FIX 2 regression: a panic inside the process-tree walk, on the
+// agentctl side of the WebSocket boundary, must resolve to "unknown" rather
+// than crash the whole agentctl process. The backend orchestrator's own
+// recover (orchestrator.Service.runProbe) cannot catch this — it runs in a
+// separate process on the far side of the WS boundary — so this package
+// needs its own, mirroring the existing recover pattern in port_proxy.go and
+// vscode_proxy.go.
+func TestProbeProcessTreeRecovered_PanicResolvesToUnknown(t *testing.T) {
+	var got string
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("probeProcessTreeRecovered must not let a panic escape, got: %v", r)
+			}
+		}()
+		got = probeProcessTreeRecovered(nil, func() string {
+			panic("process-tree walk panicked")
+		})
+	}()
+	if got != "unknown" {
+		t.Fatalf("result = %q, want unknown", got)
+	}
+}
+
+// TestProbeProcessTreeRecovered_NoPanicPassesResultThrough confirms the
+// recover wrapper is transparent on the non-panic path — it must not mask a
+// real "live"/"settled" result as "unknown".
+func TestProbeProcessTreeRecovered_NoPanicPassesResultThrough(t *testing.T) {
+	got := probeProcessTreeRecovered(nil, func() string { return "live" })
+	if got != "live" {
+		t.Fatalf("result = %q, want live", got)
+	}
+}
