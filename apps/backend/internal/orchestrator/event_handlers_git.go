@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
@@ -160,7 +161,7 @@ func (s *Service) handleGitStatusUpdate(ctx context.Context, data watcher.GitEve
 	}
 
 	// Update PR watch branch if the user changed branches (e.g. renamed)
-	s.syncPRWatchBranch(ctx, data.SessionID, data.Status.Branch)
+	s.syncPRWatchBranch(ctx, data.TaskID, data.SessionID, data.Status.RepositoryName, data.Status.Branch)
 
 	// Push detection: when ahead goes from >0 to 0, a push happened
 	s.trackPushAndAssociatePR(ctx, data)
@@ -409,32 +410,51 @@ func (s *Service) pushTrackerForget(sessionID string) {
 
 // syncPRWatchBranch updates the PR watch branch if the live git branch
 // differs from what's stored (e.g. user renamed the branch).
-// Only updates watches that haven't found a PR yet (pr_number=0).
-func (s *Service) syncPRWatchBranch(ctx context.Context, sessionID, liveBranch string) {
+// Only updates watches that haven't found a PR yet (pr_number=0), and only
+// within the repository the status belongs to — a session holds one watch per
+// (repository, branch), so a session-wide lookup would re-point whichever row
+// the query happened to return first.
+//
+// This runs on every git-status tick, so the single watch listing is also the
+// early-out: once every watch has found its PR there is nothing to re-point
+// and we return before resolving the repository.
+func (s *Service) syncPRWatchBranch(ctx context.Context, taskID, sessionID, repositoryName, liveBranch string) {
 	if s.githubService == nil || liveBranch == "" {
 		return
 	}
-	watch, err := s.githubService.GetPRWatchBySession(ctx, sessionID)
+	watches, err := s.githubService.ListPRWatchesBySession(ctx, sessionID)
 	if err != nil {
 		s.logger.Warn("failed to get PR watch for branch sync",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 		return
 	}
-	if watch == nil || watch.PRNumber != 0 {
+	if !anySearchingPRWatch(watches) {
 		return
 	}
-	if watch.Branch == liveBranch {
+	_, _, repositoryID := s.resolvePushRepo(ctx, sessionID, taskID, repositoryName)
+	if watchForRepoBranch(watches, repositoryID, liveBranch) != nil {
 		return
 	}
-	s.logger.Info("PR watch branch changed, updating from git status",
-		zap.String("session_id", sessionID),
-		zap.String("old_branch", watch.Branch),
-		zap.String("new_branch", liveBranch))
-	if updateErr := s.githubService.UpdatePRWatchBranchIfSearching(ctx, watch.ID, liveBranch); updateErr != nil {
-		s.logger.Error("failed to update PR watch branch",
-			zap.String("session_id", sessionID), zap.Error(updateErr))
+	s.repointSearchingPRWatch(ctx, watches, sessionID, repositoryID, liveBranch, "git status")
+}
+
+func anySearchingPRWatch(watches []*github.PRWatch) bool {
+	for _, watch := range watches {
+		if watch != nil && watch.PRNumber == 0 {
+			return true
+		}
 	}
+	return false
+}
+
+func watchForRepoBranch(watches []*github.PRWatch, repositoryID, branch string) *github.PRWatch {
+	for _, watch := range watches {
+		if watch != nil && watch.RepositoryID == repositoryID && watch.Branch == branch {
+			return watch
+		}
+	}
+	return nil
 }
 
 // handleContextWindowUpdated handles context window updates and persists them to session metadata
@@ -768,11 +788,13 @@ func (s *Service) handleBranchSwitched(ctx context.Context, data watcher.GitEven
 				zap.Error(err))
 		}
 
-		// Reset the PR watch for this session so the poller re-searches for a PR
-		// on the new branch. This handles both rename (same PR, new branch name)
-		// and stacked-PR workflows (switching to a different branch with its own
-		// open PR).
-		s.resetPRWatchForBranchSwitch(ctx, data.SessionID, data.BranchSwitch.CurrentBranch)
+		// Cover the new branch with a PR watch so the poller searches for its
+		// PR. This handles both rename (same PR, new branch name) and
+		// stacked-PR workflows (switching to a different branch with its own
+		// open PR) without stranding the branch we just left.
+		s.resetPRWatchForBranchSwitch(
+			ctx, data.TaskID, data.SessionID, data.BranchSwitch.RepositoryName, data.BranchSwitch.CurrentBranch,
+		)
 	}
 
 	// Forward branch_switched event to WebSocket subject for frontend real-time updates
@@ -860,33 +882,82 @@ func (s *Service) persistBranchSwitchWorktrees(
 	return nil
 }
 
-// resetPRWatchForBranchSwitch re-points the session's existing PR watch to the
-// new branch and marks it as searching (pr_number=0) so the poller will
-// discover the PR for the new branch on its next tick. If no watch exists this
-// is a no-op — a watch will be created on the next push.
-func (s *Service) resetPRWatchForBranchSwitch(ctx context.Context, sessionID, newBranch string) {
+// resetPRWatchForBranchSwitch makes sure the branch the session just checked
+// out is covered by a PR watch, so the poller discovers its PR on the next
+// tick.
+//
+// It never re-points a watch that has already found a PR. That watch is the
+// only handle keeping the previous branch's PR synced: both the poller and the
+// on-demand sync iterate watches, and CI automation only runs off the events
+// they publish. Re-pointing it froze that PR at its last-observed checks and
+// review state, which stalls auto-fix (it never sees new failures) and
+// auto-merge (it never sees the PR turn mergeable) for every branch but the
+// one currently checked out — the multi-branch failure this replaced.
+//
+// A branch renamed before any PR existed still reuses the searching watch, so
+// a task that hops between branches holds at most one searching watch per
+// repository plus one per PR it actually opened.
+func (s *Service) resetPRWatchForBranchSwitch(ctx context.Context, taskID, sessionID, repositoryName, newBranch string) {
 	if s.githubService == nil {
 		return
 	}
-	watch, err := s.githubService.GetPRWatchBySession(ctx, sessionID)
+	watches, err := s.githubService.ListPRWatchesBySession(ctx, sessionID)
 	if err != nil {
 		s.logger.Debug("failed to look up PR watch for branch switch",
 			zap.String("session_id", sessionID), zap.Error(err))
 		return
 	}
-	if watch == nil {
+	owner, repoName, repositoryID := s.resolvePushRepo(ctx, sessionID, taskID, repositoryName)
+	if watchForRepoBranch(watches, repositoryID, newBranch) != nil {
 		return
 	}
-	if watch.Branch == newBranch && watch.PRNumber == 0 {
+	if s.repointSearchingPRWatch(ctx, watches, sessionID, repositoryID, newBranch, "branch switch") {
 		return
 	}
-	if err := s.githubService.ResetPRWatch(ctx, watch.ID, newBranch); err != nil {
-		s.logger.Error("failed to reset PR watch after branch switch",
+	if owner == "" || repoName == "" {
+		return
+	}
+	workspaceID := s.taskWorkspaceID(ctx, taskID)
+	if workspaceID == "" {
+		return
+	}
+	if _, err := s.githubService.EnsurePRWatchForWorkspace(
+		ctx, workspaceID, sessionID, taskID, repositoryID, owner, repoName, newBranch,
+	); err != nil {
+		s.logger.Error("failed to add PR watch after branch switch",
 			zap.String("session_id", sessionID), zap.String("new_branch", newBranch),
 			zap.Error(err))
 		return
 	}
-	s.logger.Info("reset PR watch after branch switch",
+	s.logger.Info("added PR watch for switched branch",
 		zap.String("session_id", sessionID),
+		zap.String("repository_id", repositoryID),
 		zap.String("new_branch", newBranch))
+}
+
+// repointSearchingPRWatch moves the repository's still-searching watch
+// (pr_number=0) onto newBranch and reports whether it did. At most one such
+// watch exists per (session, repository), so reusing it keeps branch churn
+// from accumulating watches that will never find a PR.
+func (s *Service) repointSearchingPRWatch(
+	ctx context.Context, watches []*github.PRWatch, sessionID, repositoryID, newBranch, reason string,
+) bool {
+	for _, watch := range watches {
+		if watch == nil || watch.RepositoryID != repositoryID || watch.PRNumber != 0 {
+			continue
+		}
+		if err := s.githubService.ResetPRWatch(ctx, watch.ID, newBranch); err != nil {
+			s.logger.Error("failed to re-point PR watch",
+				zap.String("session_id", sessionID), zap.String("new_branch", newBranch),
+				zap.String("reason", reason), zap.Error(err))
+			return false
+		}
+		s.logger.Info("PR watch branch changed, updating",
+			zap.String("session_id", sessionID),
+			zap.String("old_branch", watch.Branch),
+			zap.String("new_branch", newBranch),
+			zap.String("reason", reason))
+		return true
+	}
+	return false
 }
