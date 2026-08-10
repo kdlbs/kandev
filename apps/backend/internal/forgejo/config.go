@@ -449,7 +449,13 @@ func (s *Service) AssociatePullRequest(ctx context.Context, workspaceID, taskID,
 		return nil, err
 	}
 	now := time.Now().UTC()
-	link := &TaskPR{TaskID: taskID, RepositoryID: repositoryID, Origin: config.Origin, Owner: owner, Repo: repo, PRNumber: pull.Number, PRURL: pull.HTMLURL, PRTitle: pull.Title, HeadBranch: pull.Head, BaseBranch: pull.Base, State: pull.State, Draft: pull.Draft, LastSyncedAt: &now}
+	ciState := ""
+	if actions, ok := client.(ActionsClient); ok {
+		if runs, _, actionsErr := actions.ListActionRuns(ctx, owner, repo, 1, 100); actionsErr == nil {
+			ciState = actionRunState(filterActionRunsForBranch(runs, pull.Head))
+		}
+	}
+	link := &TaskPR{TaskID: taskID, RepositoryID: repositoryID, Origin: config.Origin, Owner: owner, Repo: repo, PRNumber: pull.Number, PRURL: pull.HTMLURL, PRTitle: pull.Title, HeadBranch: pull.Head, BaseBranch: pull.Base, State: pull.State, Draft: pull.Draft, Mergeable: pull.Mergeable, CIState: ciState, LastSyncedAt: &now}
 	if err := s.store.UpsertTaskPR(ctx, link); err != nil {
 		return nil, err
 	}
@@ -463,6 +469,25 @@ func (s *Service) AssociatePullRequest(ctx context.Context, workspaceID, taskID,
 		}
 	}
 	return nil, ErrTaskLinkNotFound
+}
+
+func actionRunState(runs []ActionRun) string {
+	if len(runs) == 0 {
+		return ""
+	}
+	allSuccess := true
+	for _, run := range runs {
+		if run.Status != "completed" {
+			return "pending"
+		}
+		if run.Conclusion != "success" {
+			allSuccess = false
+		}
+	}
+	if allSuccess {
+		return "success"
+	}
+	return "failure"
 }
 
 func (s *Service) AssociateIssue(ctx context.Context, workspaceID, taskID, repositoryID, owner, repo string, number int) (*TaskIssue, error) {

@@ -305,3 +305,15 @@ func TestService_PollIssueWatchCreatesEachMatchingTaskOnce(t *testing.T) {
 		t.Fatalf("created=%d, want one task", created)
 	}
 }
+
+func TestActionRunState(t *testing.T) {
+	if got := actionRunState([]ActionRun{{Status: "completed", Conclusion: "success"}}); got != "success" {
+		t.Fatalf("success=%q", got)
+	}
+	if got := actionRunState([]ActionRun{{Status: "running"}}); got != "pending" {
+		t.Fatalf("pending=%q", got)
+	}
+	if got := actionRunState([]ActionRun{{Status: "completed", Conclusion: "failure"}}); got != "failure" {
+		t.Fatalf("failure=%q", got)
+	}
+}
