@@ -76,6 +76,15 @@ features:
     dev:  "false"
     e2e:  "false"
 
+  # parked-board-mvp: projects a Claude session that settled to
+  # WAITING_FOR_INPUT with a still-live detached background shell as
+  # "parked" on its board card. Off in every profile — a one-shot settle
+  # probe, no sampler, no eviction; see docs/specs/parked-board-mvp/spec.md.
+  KANDEV_FEATURES_PARKED_ON_BACKGROUND_WORK:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
 # ── Mock providers ────────────────────────────────────────────────
 # Swap real third-party services for in-memory fakes. Production
 # leaves all of these unset (real APIs). Dev opts into the mock agent

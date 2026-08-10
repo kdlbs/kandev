@@ -292,6 +292,11 @@ type Config struct {
 	// (opencode acp). The process manager uses the adapter's return value to
 	// decide whether to kill the entire process group on shutdown.
 	RequiresProcessKill bool
+
+	// RecordTurnStart stamps process.Manager's turn-start marker for the
+	// parked-on-background-work settle probe. Always plumbed and always
+	// called (D-1). May be nil; callers must guard.
+	RecordTurnStart shared.RecordTurnStartFunc
 }
 
 // ToSharedConfig converts this Config to the shared.Config used by transport adapters.
@@ -323,6 +328,7 @@ func (c *Config) ToSharedConfig() *shared.Config {
 		AssumeMcpSse:        c.AssumeMcpSse,
 		AssumeMcpHttp:       c.AssumeMcpHttp,
 		RequiresProcessKill: c.RequiresProcessKill,
+		RecordTurnStart:     c.RecordTurnStart,
 	}
 }
 
