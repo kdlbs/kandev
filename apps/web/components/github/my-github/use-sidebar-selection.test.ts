@@ -44,6 +44,30 @@ const issueDefault: SavedPreset = {
 };
 
 describe("useInitialSidebarSelection", () => {
+  it("does not reapply an unchanged default when preset references change", async () => {
+    const setQueryImmediate = vi.fn();
+    const setRepoFilter = vi.fn();
+    const autoResetSearchRef = { current: true };
+    const { rerender } = renderHook(
+      ({ savedPresets }) =>
+        useInitialSidebarSelection({
+          workspaceId: "workspace-1",
+          resolvedPrPresets: prPresets,
+          autoResetSearchRef,
+          setQueryImmediate,
+          setRepoFilter,
+          savedPresets,
+        }),
+      { initialProps: { savedPresets: [prDefault] } },
+    );
+    await waitFor(() => expect(setQueryImmediate).toHaveBeenCalledOnce());
+
+    rerender({ savedPresets: [{ ...prDefault }] });
+
+    expect(setQueryImmediate).toHaveBeenCalledOnce();
+    expect(setRepoFilter).toHaveBeenCalledOnce();
+  });
+
   it("applies a saved PR default when saved queries hydrate", async () => {
     const setQueryImmediate = vi.fn();
     const setRepoFilter = vi.fn();

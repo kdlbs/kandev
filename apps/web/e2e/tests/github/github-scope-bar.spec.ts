@@ -8,9 +8,10 @@ const SAVED_QUERY_FILTER = "assignee:@me is:open saved-default-repo-e2e";
 const DEFAULTS_TIMESTAMP = "2026-08-07T00:00:00Z";
 
 test.afterEach(async ({ testPage, seedData }) => {
-  await testPage.request.put("/api/v1/github/workspace-settings", {
+  const cleanupResponse = await testPage.request.put("/api/v1/github/workspace-settings", {
     data: { workspace_id: seedData.workspaceId, saved_presets: [] },
   });
+  expect(cleanupResponse.ok(), "afterEach saved-presets cleanup").toBe(true);
 });
 
 function issueRow(testPage: Page, title: string) {
@@ -118,9 +119,7 @@ test.describe("Desktop /github scope bar", () => {
     const setMarker = testPage.getByRole("button", {
       name: `Clear ${issueDefaultLabel} as default view`,
     });
-    if (!(await setMarker.isVisible())) {
-      await savedMenu.click();
-    }
+    await expect(setMarker).toBeVisible();
     await expect(setMarker).toHaveAttribute("aria-pressed", "true");
     await expect(title).toContainText("Assigned");
     await expect(repoFilter).toContainText("All repos");

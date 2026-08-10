@@ -111,14 +111,18 @@ describe("useSavedPresetActions query actions", () => {
   it("saves the current query, commits it, selects it, and applies its repository", () => {
     const save = vi.fn(() => savedPreset);
     const store = makeStore({ presets: [savedPreset], save });
-    const { result, setProgrammaticSelection, setQueryImmediate, setRepoFilter } = renderActions(
-      { selection: { kind: "issue", source: "preset", id: "assigned" } },
-      store,
-    );
+    const {
+      result,
+      setProgrammaticSelection,
+      setQueryImmediate,
+      setRepoFilter,
+      markSearchInteracted,
+    } = renderActions({ selection: { kind: "issue", source: "preset", id: "assigned" } }, store);
 
     act(() => result.current.onConfirmSave("Assigned in Kandev", REPO));
 
     expect(useSavedPresets).not.toHaveBeenCalled();
+    expect(markSearchInteracted).toHaveBeenCalledOnce();
     expect(save).toHaveBeenCalledWith({
       kind: "issue",
       label: "Assigned in Kandev",
@@ -137,13 +141,17 @@ describe("useSavedPresetActions query actions", () => {
 
   it("leaves selection and repository unchanged when saving returns null", () => {
     const save = vi.fn(() => null);
-    const { result, setProgrammaticSelection, setQueryImmediate, setRepoFilter } = renderActions(
-      {},
-      makeStore({ save }),
-    );
+    const {
+      result,
+      setProgrammaticSelection,
+      setQueryImmediate,
+      setRepoFilter,
+      markSearchInteracted,
+    } = renderActions({}, makeStore({ save }));
 
     act(() => result.current.onConfirmSave("Unavailable", REPO));
 
+    expect(markSearchInteracted).toHaveBeenCalledOnce();
     expect(setProgrammaticSelection).not.toHaveBeenCalled();
     expect(setQueryImmediate).not.toHaveBeenCalled();
     expect(setRepoFilter).not.toHaveBeenCalled();

@@ -15,6 +15,24 @@ type InitialSidebarSelectionOptions = {
   savedPresets?: SavedPreset[];
 };
 
+type AppliedSidebarTarget = ReturnType<typeof resolveDefaultSidebarTarget> & {
+  workspaceId: string | null;
+};
+
+function sameAppliedSidebarTarget(
+  current: AppliedSidebarTarget | null,
+  next: AppliedSidebarTarget,
+) {
+  return (
+    current?.workspaceId === next.workspaceId &&
+    current.selection.kind === next.selection.kind &&
+    current.selection.source === next.selection.source &&
+    current.selection.id === next.selection.id &&
+    current.query === next.query &&
+    current.repoFilter === next.repoFilter
+  );
+}
+
 export function useInitialSidebarSelection({
   workspaceId,
   resolvedPrPresets,
@@ -24,6 +42,7 @@ export function useInitialSidebarSelection({
   savedPresets = [],
 }: InitialSidebarSelectionOptions) {
   const userSelectedRef = useRef(false);
+  const lastAppliedTargetRef = useRef<AppliedSidebarTarget | null>(null);
   const [selection, setSelection] = useState<SidebarSelection>(
     () => resolveDefaultSidebarTarget("pr", savedPresets, resolvedPrPresets).selection,
   );
@@ -36,6 +55,9 @@ export function useInitialSidebarSelection({
   useEffect(() => {
     if (userSelectedRef.current || !autoResetSearchRef.current) return;
     const target = resolveDefaultSidebarTarget("pr", savedPresets, resolvedPrPresets);
+    const appliedTarget = { workspaceId, ...target };
+    if (sameAppliedSidebarTarget(lastAppliedTargetRef.current, appliedTarget)) return;
+    lastAppliedTargetRef.current = appliedTarget;
     setSelection((current) =>
       current.kind === target.selection.kind &&
       current.source === target.selection.source &&
