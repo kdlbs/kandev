@@ -143,6 +143,64 @@ func TestUpdateRepositoryBaseBranchDeniesForeignTask(t *testing.T) {
 	}
 }
 
+// TestScopedMoveStillPromotesFeederQueuedTask covers the follow-on work flagged
+// in review: the move guards run on a ctx that internal continuations inherit,
+// and feeder queue promotion is the one that can reach a guarded method. Freeing
+// a slot in a WIP-limited step as the owner must still pull the task queued in
+// the feeder step behind it.
+//
+// What this pins, precisely: promotion still happens end to end under a real
+// identity. It does NOT exercise the guard, because the SQLite repository
+// implements workflowQueuedTaskPromoter, so promotion takes the atomic branch and
+// never calls MoveTaskWithOptions at all — the guarded fallback in
+// promoteFeederQueuedTask is unreachable in production and only runs for repos
+// without that method. Verified by mutation: breaking the feeder pull fails this
+// test, while forcing a denying identity into the promotion path does not.
+//
+// The invariant that keeps the fallback safe is documented at that call site: a
+// step's PullFromStepID resolves within the same workflow, a workflow belongs to
+// one workspace, and a workspace has one owner.
+func TestScopedMoveStillPromotesFeederQueuedTask(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"step-b-feed": {ID: "step-b-feed", WorkflowID: "wf-b", Name: "Backlog", Position: 0},
+		"step-b-wip": {
+			ID: "step-b-wip", WorkflowID: "wf-b", Name: "Doing", Position: 1,
+			WIPLimit: 1, PullFromStepID: "step-b-feed",
+		},
+		"step-b-done": {ID: "step-b-done", WorkflowID: "wf-b", Name: "Done", Position: 2},
+	}})
+	must(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-b", Name: "B's", OwnerID: "user-b"}))
+	must(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-b", WorkspaceID: "ws-b", Name: "B flow"}))
+
+	// occupant fills the WIP-limited step; candidate waits in the feeder step.
+	must(t, repo.CreateTask(ctx, &models.Task{
+		ID: "task-occupant", WorkspaceID: "ws-b", WorkflowID: "wf-b", WorkflowStepID: "step-b-wip",
+		Title: "Occupant", State: v1.TaskStateTODO, Priority: priorityMedium, WIPAdmitted: true,
+	}))
+	must(t, repo.CreateTask(ctx, &models.Task{
+		ID: "task-queued", WorkspaceID: "ws-b", WorkflowID: "wf-b", WorkflowStepID: "step-b-feed",
+		Title: "Queued", State: v1.TaskStateTODO, Priority: priorityMedium,
+		QueuedForStepID: "step-b-wip",
+	}))
+
+	// The owner moves the occupant out, freeing the slot — under their identity,
+	// so every guard on the promotion path is live.
+	if _, err := svc.MoveTask(ctxAs("user-b"), "task-occupant", "wf-b", "step-b-done", 0); err != nil {
+		t.Fatalf("owner move out of the WIP step: %v", err)
+	}
+
+	promoted, err := repo.GetTask(ctx, "task-queued")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if promoted.WorkflowStepID != "step-b-wip" || !promoted.WIPAdmitted {
+		t.Fatalf("a scoped move did not pull the feeder-queued task: step=%s admitted=%v",
+			promoted.WorkflowStepID, promoted.WIPAdmitted)
+	}
+}
+
 // TestTaskWorkflowGuardsPrecedeRepositoryUse pins guard placement. The service
 // carries only the two repositories the guard itself reads; a denial that ran
 // after the first unrelated repo call would nil-panic instead of returning.
