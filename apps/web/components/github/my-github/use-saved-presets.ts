@@ -217,6 +217,8 @@ export function useSavedPresets(workspaceId: string | null = null) {
       applyLocal(discardSavedPreset(current, id));
       try {
         await queueMutation(async () => {
+          // Re-read the ref so concurrent saves appended after the optimistic remove
+          // are included in the persisted payload; the removed id is already absent.
           await persist(discardSavedPreset(activePresetsRef.current, id));
         });
         return true;

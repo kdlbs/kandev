@@ -174,7 +174,7 @@ function SavedSection({
                 label={s.label}
                 isDefault={s.isDefault}
                 disabled={defaultMutationPending}
-                size="mobile"
+                variant="button"
                 testId={`github-saved-query-default-${s.id}`}
                 onToggle={() => void onToggleSavedDefault(s)}
               />

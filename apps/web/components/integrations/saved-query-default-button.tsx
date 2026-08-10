@@ -9,8 +9,8 @@ type SavedQueryDefaultButtonProps = {
   label: string;
   isDefault: boolean;
   disabled?: boolean;
-  /** `desktop` must render inside Radix `DropdownMenuContent`; `mobile` is a plain button. */
-  size: "desktop" | "mobile";
+  /** `dropdown-item` must render inside Radix `DropdownMenuContent`. */
+  variant: "dropdown-item" | "button";
   testId?: string;
   onToggle: () => void;
 };
@@ -19,7 +19,7 @@ export function SavedQueryDefaultButton({
   label,
   isDefault,
   disabled = false,
-  size,
+  variant,
   testId,
   onToggle,
 }: SavedQueryDefaultButtonProps) {
@@ -38,7 +38,7 @@ export function SavedQueryDefaultButton({
     isDefault && "fill-amber-500 text-amber-500",
     disabled && "animate-pulse motion-reduce:animate-none",
   );
-  if (size === "desktop") {
+  if (variant === "dropdown-item") {
     return (
       <DropdownMenuCheckboxItem
         checked={isDefault}

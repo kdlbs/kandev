@@ -161,7 +161,7 @@ function SavedMenu<K extends string>({
                   label={s.label}
                   isDefault={s.isDefault === true}
                   disabled={defaultMutationPending}
-                  size="desktop"
+                  variant="dropdown-item"
                   testId={`saved-query-default-${s.id}`}
                   onToggle={() => onToggleSavedDefault(s.id)}
                 />
