@@ -3,7 +3,7 @@
 package process
 
 import (
-	"bytes"
+	"bufio"
 	"context"
 	"os/exec"
 	"strconv"
@@ -26,24 +26,37 @@ import (
 // child's own PID (via `echo $!`) alongside the root's, so the caller can
 // independently verify the zombie actually exists before probing — see
 // requireZombieState.
+//
+// The PID is read via cmd.StdoutPipe() + a synchronous bufio read in this
+// goroutine, NOT cmd.Stdout = &bytes.Buffer{}: with the latter, exec.Cmd
+// spawns its own internal goroutine to pump the pipe into the buffer via
+// io.Copy, and that goroutine is never synchronized with the caller except
+// by cmd.Wait() — reading the buffer after a bare time.Sleep (no
+// happens-before edge) is a genuine, 100%-reproducible data race between
+// that copy goroutine's writes and this function's read (caught by
+// Testing's `-race` pass on Build round 4's first attempt at this helper).
+// Reading directly from the pipe here means there is no second goroutine to
+// race, and ReadString blocks until the line actually arrives instead of
+// hoping a fixed sleep was long enough.
 func spawnZombieDescendant(t *testing.T) (rootPID, zombiePID int) {
 	t.Helper()
-	var stdout bytes.Buffer
 	cmd := exec.Command("/bin/sh", "-c", "sh -c 'true' & echo $!; exec sleep 300")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Stdout = &stdout
+	stdout, err := cmd.StdoutPipe()
+	require.NoError(t, err, "create stdout pipe")
+	reader := bufio.NewReader(stdout)
 	require.NoError(t, cmd.Start(), "start root shell")
 	t.Cleanup(func() {
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		_ = cmd.Wait()
 	})
-	// Give the backgrounded child time to exit and become a zombie, and for
-	// its "echo $!" line to land in the pipe buffer.
-	time.Sleep(200 * time.Millisecond)
-	pidLine := strings.TrimSpace(stdout.String())
-	require.NotEmpty(t, pidLine, "expected the backgrounded child's PID on stdout")
+	pidLine, err := reader.ReadString('\n')
+	require.NoError(t, err, "read the backgrounded child's PID from stdout")
+	pidLine = strings.TrimSpace(pidLine)
 	zPID, err := strconv.Atoi(pidLine)
 	require.NoError(t, err, "expected a numeric PID on stdout, got %q", pidLine)
+	// Give the backgrounded child time to exit and become a zombie.
+	time.Sleep(200 * time.Millisecond)
 	return cmd.Process.Pid, zPID
 }
 
