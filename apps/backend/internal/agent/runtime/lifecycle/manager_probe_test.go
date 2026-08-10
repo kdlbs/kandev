@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
 // TestProbeBackgroundWorkloads_EmptySessionID verifies AC-46's ninth
@@ -174,5 +176,63 @@ func TestProbeBackgroundWorkloads_TransportErrorResolvesToUnknown(t *testing.T) 
 	}
 	if result != "unknown" {
 		t.Fatalf("result = %q, want unknown", result)
+	}
+}
+
+// TestProbeBackgroundWorkloads_TranslatesKandevIDToACPIDOnTheWire closes
+// AC-45's port-level translation gap: the AC names, as its distinguishing
+// assertion, driving the port with a Kandev id and reading the ACP id off
+// the emitted frame — "which fails for an implementation that passes the
+// Kandev id straight through". Every prior test in this file short-circuits
+// to "unknown" before any frame is emitted (no agentctl client attached), so
+// none of them exercise this. Drives a real *agentctl.Client connected to a
+// mock agentctl WebSocket server (mirroring session_test.go's
+// newMockAgentServer/createTestClient pattern already used elsewhere in this
+// package) and asserts the wire payload carries the ACP session id, not the
+// Kandev session id the port was called with.
+func TestProbeBackgroundWorkloads_TranslatesKandevIDToACPIDOnTheWire(t *testing.T) {
+	mock := newMockAgentServer(t)
+	defer mock.Close()
+
+	var gotSessionID string
+	mock.handler = func(msg ws.Message) *ws.Message {
+		if msg.Action != "agent.background.probe" {
+			return nil
+		}
+		var payload struct {
+			SessionID string `json:"session_id"`
+		}
+		_ = msg.ParsePayload(&payload)
+		gotSessionID = payload.SessionID
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"result": "live"})
+		return resp
+	}
+
+	client := createTestClient(t, mock.server.URL)
+	defer client.Close()
+
+	ctx := context.Background()
+	if err := client.StreamUpdates(ctx, func(agentctl.AgentEvent) {}, nil, nil); err != nil {
+		t.Fatalf("failed to connect stream: %v", err)
+	}
+	time.Sleep(100 * time.Millisecond) // let the stream goroutine start
+
+	mgr := &Manager{logger: newTestLogger(), executionStore: NewExecutionStore()}
+	if err := mgr.executionStore.Add(&AgentExecution{
+		ID: "ex-7", SessionID: "kandev-sess-7", ACPSessionID: "acp-sess-7",
+		agentctl: client,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := mgr.ProbeBackgroundWorkloads(ctx, "kandev-sess-7")
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if result != "live" {
+		t.Fatalf("result = %q, want live", result)
+	}
+	if gotSessionID != "acp-sess-7" {
+		t.Fatalf("wire session_id = %q, want acp-sess-7 (the translated ACP id) — got the Kandev id straight through", gotSessionID)
 	}
 }
