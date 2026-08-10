@@ -46,6 +46,25 @@ func parseTimeString(s string) time.Time {
 	return time.Time{}
 }
 
+// rangeStartArg turns a range boundary into a value the timestamp columns can
+// actually be compared against, and into an untyped nil for an open-ended range
+// so the `? IS NULL` arm of each predicate matches.
+//
+// It has to bind the time.Time rather than a formatted string. These columns are
+// written by handing the driver a time.Time, which SQLite stores as
+// "2006-01-02 15:04:05.999999999-07:00", and their TIMESTAMP declaration gives
+// them NUMERIC affinity — a text bound parameter is never coerced, so `>=` is a
+// plain string comparison. Formatting the boundary as RFC3339 put a "T" where
+// every stored value has a space, and "T" sorts above " ", so rows dated on the
+// boundary day compared below the threshold whatever their time: each range
+// silently lost its first day.
+func rangeStartArg(start *time.Time) any {
+	if start == nil {
+		return nil
+	}
+	return start.UTC()
+}
+
 // GetTaskStats retrieves aggregated statistics for tasks in a workspace.
 func (r *Repository) GetTaskStats(
 	ctx context.Context,
@@ -53,10 +72,7 @@ func (r *Repository) GetTaskStats(
 	start *time.Time,
 	limit int,
 ) ([]*models.TaskStats, error) {
-	var startArg any
-	if start != nil {
-		startArg = start.UTC().Format(time.RFC3339)
-	}
+	startArg := rangeStartArg(start)
 	if limit <= 0 {
 		limit = 200
 	}
@@ -175,10 +191,7 @@ const (
 // index-only message-count subquery per qualifying turn (kept correlated to
 // stay portable between the SQLite and Postgres dialects).
 func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, start *time.Time) (*models.GlobalStats, error) {
-	var startArg any
-	if start != nil {
-		startArg = start.UTC().Format(time.RFC3339)
-	}
+	startArg := rangeStartArg(start)
 
 	drv := r.ro.DriverName()
 	dur := dialect.DurationMs(drv, "turn.completed_at", "turn.started_at")
@@ -394,10 +407,7 @@ func (r *Repository) GetCompletedTaskActivity(ctx context.Context, workspaceID s
 
 // GetRepositoryStats retrieves aggregated statistics for repositories in a workspace
 func (r *Repository) GetRepositoryStats(ctx context.Context, workspaceID string, start *time.Time) ([]*models.RepositoryStats, error) {
-	var startArg any
-	if start != nil {
-		startArg = start.UTC().Format(time.RFC3339)
-	}
+	startArg := rangeStartArg(start)
 
 	query := buildRepositoryStatsQuery(r.ro.DriverName())
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query),
@@ -516,10 +526,7 @@ func buildRepositoryStatsQuery(drv string) string {
 // under a blank label, mirroring how sessions with no agent profile were
 // already left out.
 func (r *Repository) GetModelUsage(ctx context.Context, workspaceID string, limit int, start *time.Time) ([]*models.ModelUsage, error) {
-	var startArg any
-	if start != nil {
-		startArg = start.UTC().Format(time.RFC3339)
-	}
+	startArg := rangeStartArg(start)
 
 	drv := r.ro.DriverName()
 	dur := dialect.DurationMs(drv, "turn.completed_at", "turn.started_at")
@@ -574,10 +581,7 @@ func (r *Repository) GetModelUsage(ctx context.Context, workspaceID string, limi
 
 // GetGitStats retrieves aggregated git statistics for a workspace
 func (r *Repository) GetGitStats(ctx context.Context, workspaceID string, start *time.Time) (*models.GitStats, error) {
-	var startArg any
-	if start != nil {
-		startArg = start.UTC().Format(time.RFC3339)
-	}
+	startArg := rangeStartArg(start)
 
 	query := `
 		SELECT

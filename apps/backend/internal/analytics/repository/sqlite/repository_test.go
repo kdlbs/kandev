@@ -872,6 +872,88 @@ func TestGetModelUsage_OrdersTiesDeterministically(t *testing.T) {
 	}
 }
 
+// Rows dated on the range's first day used to be dropped wholesale: the
+// boundary was bound as an RFC3339 string whose "T" separator sorts above the
+// space in the layout SQLite actually stores, and the TIMESTAMP columns' NUMERIC
+// affinity leaves a text parameter uncoerced, so ">=" was comparing strings.
+// "Last 7 days" was really the last 6 days plus today.
+//
+// Every timestamp here is written the way production writes it — by handing the
+// driver a time.Time — because the other tests in this file insert preformatted
+// RFC3339 strings, which is exactly why none of them saw this.
+func TestRangeStart_IncludesRowsLaterOnTheBoundaryDay(t *testing.T) {
+	dbConn := createTestDB(t)
+	repo, err := NewWithDB(dbConn, dbConn)
+	if err != nil {
+		t.Fatalf("NewWithDB failed: %v", err)
+	}
+
+	ctx := context.Background()
+	// Fixed clock: the boundary and both rows share one calendar day, so the
+	// separator mismatch is what decides the result, not the wall clock.
+	threshold := time.Date(2026, 3, 4, 12, 0, 0, 0, time.UTC)
+	before := threshold.Add(-6 * time.Hour)
+	after := threshold.Add(6 * time.Hour)
+
+	execOrFatal(t, dbConn, `INSERT INTO workspaces (id, name, created_at, updated_at) VALUES ('ws-1', 'Test', ?, ?)`, before, before)
+	execOrFatal(t, dbConn, `INSERT INTO boards (id, workspace_id, name, created_at, updated_at) VALUES ('board-1', 'ws-1', 'Board', ?, ?)`, before, before)
+
+	for _, row := range []struct {
+		suffix string
+		at     time.Time
+	}{{"before", before}, {"after", after}} {
+		execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES (?, 'ws-1', 'board-1', '', 'Task', 0, ?, ?)`,
+			"task-"+row.suffix, row.at, row.at)
+		execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, agent_profile_snapshot, state, started_at, updated_at) VALUES (?, ?, 'agent-1', '{"name":"Agent","model":"opus"}', 'COMPLETED', ?, ?)`,
+			"sess-"+row.suffix, "task-"+row.suffix, row.at, row.at)
+		execOrFatal(t, dbConn, `INSERT INTO task_session_commits (id, session_id, commit_sha, committed_at, files_changed, insertions, deletions, created_at) VALUES (?, ?, ?, ?, 1, 1, 0, ?)`,
+			"commit-"+row.suffix, "sess-"+row.suffix, "sha-"+row.suffix, row.at, row.at)
+	}
+
+	t.Run("model usage", func(t *testing.T) {
+		usage, err := repo.GetModelUsage(ctx, "ws-1", 5, &threshold)
+		if err != nil {
+			t.Fatalf("GetModelUsage failed: %v", err)
+		}
+		if len(usage) != 1 || usage[0].SessionCount != 1 {
+			t.Fatalf("expected the one session started after the boundary, got %+v", usage)
+		}
+	})
+
+	t.Run("global stats", func(t *testing.T) {
+		stats, err := repo.GetGlobalStats(ctx, "ws-1", &threshold)
+		if err != nil {
+			t.Fatalf("GetGlobalStats failed: %v", err)
+		}
+		if stats.TotalTasks != 1 {
+			t.Errorf("expected 1 task created after the boundary, got %d", stats.TotalTasks)
+		}
+		if stats.TotalSessions != 1 {
+			t.Errorf("expected 1 session started after the boundary, got %d", stats.TotalSessions)
+		}
+	})
+
+	t.Run("git stats", func(t *testing.T) {
+		stats, err := repo.GetGitStats(ctx, "ws-1", &threshold)
+		if err != nil {
+			t.Fatalf("GetGitStats failed: %v", err)
+		}
+		if stats.TotalCommits != 1 {
+			t.Errorf("expected 1 commit made after the boundary, got %d", stats.TotalCommits)
+		}
+	})
+
+	t.Run("open ended range keeps both", func(t *testing.T) {
+		stats, err := repo.GetGlobalStats(ctx, "ws-1", nil)
+		if err != nil {
+			t.Fatalf("GetGlobalStats failed: %v", err)
+		}
+		if stats.TotalTasks != 2 || stats.TotalSessions != 2 {
+			t.Errorf("expected both rows with no range, got %d tasks / %d sessions", stats.TotalTasks, stats.TotalSessions)
+		}
+	})
+}
+
 func TestGetGitStats_ExcludesEphemeralTasks(t *testing.T) {
 	dbConn := createTestDB(t)
 	repo, err := NewWithDB(dbConn, dbConn)
