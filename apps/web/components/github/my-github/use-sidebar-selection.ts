@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import type { PresetOption } from "./search-bar";
 import type { SidebarSelection } from "./presets-sidebar";
 import type { SavedPreset } from "./use-saved-presets";
-import { resolveDefaultSidebarTarget } from "./saved-preset-model";
+import { findDefaultSavedPreset, resolveDefaultSidebarTarget } from "./saved-preset-model";
 
 type InitialSidebarSelectionOptions = {
   workspaceId: string | null;
@@ -45,9 +45,13 @@ export function useInitialSidebarSelection({
   const userSelectedRef = useRef(false);
   const resetWorkspaceIdRef = useRef<string | null | undefined>(undefined);
   const lastAppliedTargetRef = useRef<AppliedSidebarTarget | null>(null);
-  const [selection, setSelection] = useState<SidebarSelection>(
-    () => resolveDefaultSidebarTarget("pr", savedPresets, resolvedPrPresets).selection,
+  const savedPrDefault = findDefaultSavedPreset(savedPresets, "pr");
+  const resolvedPrTarget = useMemo(
+    () =>
+      resolveDefaultSidebarTarget("pr", savedPrDefault ? [savedPrDefault] : [], resolvedPrPresets),
+    [savedPrDefault, resolvedPrPresets],
   );
+  const [selection, setSelection] = useState<SidebarSelection>(() => resolvedPrTarget.selection);
 
   useEffect(() => {
     if (resetWorkspaceIdRef.current !== workspaceId) {
@@ -56,7 +60,7 @@ export function useInitialSidebarSelection({
       autoResetSearchRef.current = true;
     }
     if (userSelectedRef.current || !autoResetSearchRef.current) return;
-    const target = resolveDefaultSidebarTarget("pr", savedPresets, resolvedPrPresets);
+    const target = resolvedPrTarget;
     const appliedTarget = { workspaceId, ...target };
     if (sameAppliedSidebarTarget(lastAppliedTargetRef.current, appliedTarget)) return;
     lastAppliedTargetRef.current = appliedTarget;
@@ -69,7 +73,7 @@ export function useInitialSidebarSelection({
     );
     setQueryImmediate(target.query);
     setRepoFilter(target.repoFilter);
-  }, [workspaceId, savedPresets, resolvedPrPresets, setQueryImmediate, setRepoFilter]);
+  }, [workspaceId, resolvedPrTarget, setQueryImmediate, setRepoFilter]);
 
   const setUserSelection = useCallback((next: SidebarSelection) => {
     userSelectedRef.current = true;

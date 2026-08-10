@@ -16,7 +16,7 @@ const savedPreset: SavedPreset = {
 };
 
 describe("PresetsSidebar saved defaults", () => {
-  it("disables delete while a default mutation is pending", () => {
+  it("disables saved-query actions while a default mutation is pending", () => {
     render(
       <PresetsSidebar
         selected={{ kind: "pr", source: "saved", id: savedPreset.id }}
@@ -36,6 +36,13 @@ describe("PresetsSidebar saved defaults", () => {
       (
         screen.getByRole("button", {
           name: "Delete Kandev PRs saved query",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Set Kandev PRs as default view",
         }) as HTMLButtonElement
       ).disabled,
     ).toBe(true);
