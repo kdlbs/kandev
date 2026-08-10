@@ -239,6 +239,10 @@ func seedBranchSwitchSession(t *testing.T, startBranch string) (*Service, *mockG
 	return svc, ghSvc
 }
 
+// switchBranch tags the event with RepositoryName, so these tests drive
+// resolvePushRepo's named-repository routing — the multi-repo path — rather
+// than its empty-name fallback to the session's primary repo. The git-status
+// test below leaves RepositoryName empty and covers the fallback.
 func switchBranch(t *testing.T, svc *Service, from, to string) {
 	t.Helper()
 	svc.handleBranchSwitched(context.Background(), watcher.GitEventData{
@@ -248,6 +252,7 @@ func switchBranch(t *testing.T, svc *Service, from, to string) {
 			PreviousBranch: from,
 			CurrentBranch:  to,
 			BaseCommit:     "deadbeef",
+			RepositoryName: "myrepo",
 		},
 	})
 }

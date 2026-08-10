@@ -436,7 +436,17 @@ func (s *Service) syncPRWatchBranch(ctx context.Context, taskID, sessionID, repo
 	if watchForRepoBranch(watches, repositoryID, liveBranch) != nil {
 		return
 	}
-	s.repointSearchingPRWatch(ctx, watches, sessionID, repositoryID, liveBranch, "git status")
+	if !s.repointSearchingPRWatch(ctx, watches, sessionID, repositoryID, liveBranch, "git status") {
+		// Reached only when the session has a searching watch but none for
+		// this repository — most often because resolvePushRepo could not
+		// resolve repositoryName and returned "". Silent here made "the PR
+		// for branch X was never picked up" indistinguishable from a failed
+		// reset; push detection and the poller still cover the branch.
+		s.logger.Debug("no searching PR watch to re-point for branch",
+			zap.String("session_id", sessionID),
+			zap.String("repository_id", repositoryID),
+			zap.String("branch", liveBranch))
+	}
 }
 
 func anySearchingPRWatch(watches []*github.PRWatch) bool {
