@@ -10,11 +10,22 @@ import (
 )
 
 type ReviewWatch struct {
-	ID, WorkspaceID, WorkflowID, WorkflowStepID, RepositoryID, BaseBranch, Prompt, AgentProfileID, Owner, Repo, LastError string
-	Enabled                                                                                                               bool
-	PollIntervalSeconds                                                                                                   int
-	LastPolledAt                                                                                                          *time.Time
-	CreatedAt, UpdatedAt                                                                                                  time.Time
+	ID                  string     `json:"id" db:"id"`
+	WorkspaceID         string     `json:"workspace_id" db:"workspace_id"`
+	WorkflowID          string     `json:"workflow_id" db:"workflow_id"`
+	WorkflowStepID      string     `json:"workflow_step_id" db:"workflow_step_id"`
+	RepositoryID        string     `json:"repository_id" db:"repository_id"`
+	BaseBranch          string     `json:"base_branch" db:"base_branch"`
+	Prompt              string     `json:"prompt" db:"prompt"`
+	AgentProfileID      string     `json:"agent_profile_id" db:"agent_profile_id"`
+	Owner               string     `json:"owner" db:"owner"`
+	Repo                string     `json:"repo" db:"repo"`
+	LastError           string     `json:"last_error,omitempty" db:"last_error"`
+	Enabled             bool       `json:"enabled" db:"enabled"`
+	PollIntervalSeconds int        `json:"poll_interval_seconds" db:"poll_interval_seconds"`
+	LastPolledAt        *time.Time `json:"last_polled_at,omitempty" db:"last_polled_at"`
+	CreatedAt           time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at" db:"updated_at"`
 }
 
 func (s *Store) UpsertReviewWatch(ctx context.Context, watch *ReviewWatch) error {

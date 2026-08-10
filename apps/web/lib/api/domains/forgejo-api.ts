@@ -1,5 +1,5 @@
 import { fetchJson, type ApiRequestOptions } from "../client";
-import type { ForgejoConfig, ForgejoIssue, ForgejoIssueWatch, ForgejoPullRequest, ForgejoPullRequestComment, ForgejoPullRequestDetails, ForgejoPullRequestReview, ForgejoRepository, ForgejoTaskIssue, ForgejoTaskPR, SetForgejoConfigRequest, TestForgejoConnectionResult } from "@/lib/types/forgejo";
+import type { ForgejoConfig, ForgejoIssue, ForgejoIssueWatch, ForgejoPullRequest, ForgejoPullRequestComment, ForgejoPullRequestDetails, ForgejoPullRequestReview, ForgejoRepository, ForgejoReviewWatch, ForgejoTaskIssue, ForgejoTaskPR, SetForgejoConfigRequest, TestForgejoConnectionResult } from "@/lib/types/forgejo";
 
 type WorkspaceOptions = ApiRequestOptions & { workspaceId: string };
 const path = (route: string, workspaceId: string) => `${route}${route.includes("?") ? "&" : "?"}workspace_id=${encodeURIComponent(workspaceId)}`;
@@ -29,3 +29,6 @@ export const listForgejoIssueWatches = (options: WorkspaceOptions) => fetchJson<
 export const saveForgejoIssueWatch = (watch: Partial<ForgejoIssueWatch> & { owner: string; repo: string }, options: WorkspaceOptions) => fetchJson<ForgejoIssueWatch>(path("/api/v1/forgejo/issue-watches", options.workspaceId), { ...withoutWorkspace(options), init: { method: "PUT", body: JSON.stringify(watch) } });
 export const deleteForgejoIssueWatch = (watchId: string, options: WorkspaceOptions) => fetchJson<{ deleted: boolean }>(path(`/api/v1/forgejo/issue-watches/${encodeURIComponent(watchId)}`, options.workspaceId), { ...withoutWorkspace(options), init: { method: "DELETE" } });
 export const pollForgejoIssueWatch = (watchId: string, options: WorkspaceOptions) => fetchJson<{ issues: ForgejoIssue[] }>(path(`/api/v1/forgejo/issue-watches/${encodeURIComponent(watchId)}/poll`, options.workspaceId), { ...withoutWorkspace(options), init: { method: "POST" } });
+export const listForgejoReviewWatches = (options: WorkspaceOptions) => fetchJson<{ watches: ForgejoReviewWatch[] }>(path("/api/v1/forgejo/review-watches", options.workspaceId), withoutWorkspace(options));
+export const saveForgejoReviewWatch = (watch: Partial<ForgejoReviewWatch> & { owner: string; repo: string }, options: WorkspaceOptions) => fetchJson<ForgejoReviewWatch>(path("/api/v1/forgejo/review-watches", options.workspaceId), { ...withoutWorkspace(options), init: { method: "PUT", body: JSON.stringify(watch) } });
+export const deleteForgejoReviewWatch = (watchId: string, options: WorkspaceOptions) => fetchJson<{ deleted: boolean }>(path(`/api/v1/forgejo/review-watches/${encodeURIComponent(watchId)}`, options.workspaceId), { ...withoutWorkspace(options), init: { method: "DELETE" } });
