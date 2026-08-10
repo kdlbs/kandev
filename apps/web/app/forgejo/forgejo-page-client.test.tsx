@@ -1,11 +1,13 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ForgejoPageClient } from "./forgejo-page-client";
 
 const api = vi.hoisted(() => ({
   createTask: vi.fn(),
   linkIssue: vi.fn(),
   linkPullRequest: vi.fn(),
+  listRepositories: vi.fn(),
+  listIssues: vi.fn(),
 }));
 const hooks = vi.hoisted(() => ({
   queue: vi.fn(),
@@ -16,6 +18,8 @@ vi.mock("@/lib/api/domains/kanban-api", () => ({ createTask: api.createTask }));
 vi.mock("@/lib/api/domains/forgejo-api", () => ({
   linkForgejoIssue: api.linkIssue,
   linkForgejoPullRequest: api.linkPullRequest,
+  listForgejoRepositories: api.listRepositories,
+  listForgejoIssues: api.listIssues,
 }));
 vi.mock("@/hooks/domains/forgejo/use-forgejo-queue", () => ({ useForgejoQueue: hooks.queue }));
 vi.mock("@/hooks/domains/forgejo/use-forgejo-pull-request-details", () => ({
@@ -38,6 +42,7 @@ const appState = {
 };
 
 describe("ForgejoPageClient", () => {
+  afterEach(cleanup);
   beforeEach(() => {
     vi.clearAllMocks();
     hooks.queue.mockReturnValue({
@@ -60,6 +65,11 @@ describe("ForgejoPageClient", () => {
     hooks.appStore.mockReturnValue(appState);
     api.createTask.mockResolvedValue({ id: "task-a", title: issue.title });
     api.linkIssue.mockResolvedValue({ id: "link-a" });
+    api.listRepositories.mockResolvedValue({
+      repositories: [{ owner: "acme", name: "app", full_name: "acme/app", default_branch: "main" }],
+      total_count: 1,
+    });
+    api.listIssues.mockResolvedValue({ issues: [issue], total_count: 31 });
   });
 
   it("creates and links a Kandev task from a queued Forgejo issue", async () => {
@@ -93,6 +103,26 @@ describe("ForgejoPageClient", () => {
         { task_id: "task-existing", owner: "acme", repo: "app", number: 7 },
         { workspaceId: "ws-a" },
       ),
+    );
+  });
+
+  it("browses repository issues by page", async () => {
+    render(<ForgejoPageClient workspaceId="ws-a" />);
+    expect(await screen.findByRole("combobox", { name: "Forgejo repository" })).toBeTruthy();
+    await waitFor(() =>
+      expect(api.listIssues).toHaveBeenCalledWith("acme", "app", {
+        workspaceId: "ws-a",
+        page: 1,
+        limit: 30,
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() =>
+      expect(api.listIssues).toHaveBeenLastCalledWith("acme", "app", {
+        workspaceId: "ws-a",
+        page: 2,
+        limit: 30,
+      }),
     );
   });
 });

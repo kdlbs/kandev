@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
@@ -9,7 +9,13 @@ import { useAppStore } from "@/components/state-provider";
 import { useForgejoQueue } from "@/hooks/domains/forgejo/use-forgejo-queue";
 import { useForgejoPullRequestDetails } from "@/hooks/domains/forgejo/use-forgejo-pull-request-details";
 import { createTask } from "@/lib/api/domains/kanban-api";
-import { linkForgejoIssue, linkForgejoPullRequest } from "@/lib/api/domains/forgejo-api";
+import {
+  linkForgejoIssue,
+  linkForgejoPullRequest,
+  listForgejoIssues,
+  listForgejoRepositories,
+} from "@/lib/api/domains/forgejo-api";
+import type { ForgejoIssue, ForgejoRepository } from "@/lib/types/forgejo";
 
 export function ForgejoPageClient({ workspaceId }: { workspaceId?: string }) {
   const { queue, loading, error, refresh } = useForgejoQueue(workspaceId);
@@ -167,6 +173,14 @@ function ForgejoPage({
           />
         </CardContent>
       </Card>
+      <ForgejoRepositoryIssueBrowser
+        workspaceId={workspaceId}
+        existingTaskID={existingTaskID}
+        onCreateTask={(repository, issue) => createIssueTask({ repository, issue })}
+        onLinkTask={(repository, issue) =>
+          linkExisting("issue", repository.owner, repository.name, issue.number)
+        }
+      />
       {!error &&
       !loading &&
       queue &&
@@ -283,6 +297,160 @@ function ForgejoPage({
         />
       ) : null}
     </main>
+  );
+}
+
+function ForgejoRepositoryIssueBrowser({
+  workspaceId,
+  existingTaskID,
+  onCreateTask,
+  onLinkTask,
+}: {
+  workspaceId: string;
+  existingTaskID: string;
+  onCreateTask: (repository: ForgejoRepository, issue: ForgejoIssue) => Promise<void>;
+  onLinkTask: (repository: ForgejoRepository, issue: ForgejoIssue) => Promise<void>;
+}) {
+  const [repositories, setRepositories] = useState<ForgejoRepository[]>([]);
+  const [selected, setSelected] = useState("");
+  const [issues, setIssues] = useState<ForgejoIssue[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [error, setError] = useState<string | null>(null);
+  const limit = 30;
+  const repository = repositories.find((item) => item.full_name === selected);
+
+  useEffect(() => {
+    let active = true;
+    void listForgejoRepositories({ workspaceId, limit: 100 })
+      .then((result) => {
+        if (!active) return;
+        setRepositories(result.repositories);
+        setSelected((current) => current || result.repositories[0]?.full_name || "");
+      })
+      .catch(
+        (cause) =>
+          active &&
+          setError(cause instanceof Error ? cause.message : "Could not load Forgejo repositories"),
+      );
+    return () => {
+      active = false;
+    };
+  }, [workspaceId]);
+
+  useEffect(() => {
+    if (!repository) return;
+    let active = true;
+    setError(null);
+    void listForgejoIssues(repository.owner, repository.name, { workspaceId, page, limit })
+      .then((result) => {
+        if (!active) return;
+        setIssues(result.issues);
+        setTotal(result.total_count);
+      })
+      .catch(
+        (cause) =>
+          active &&
+          setError(cause instanceof Error ? cause.message : "Could not load Forgejo issues"),
+      );
+    return () => {
+      active = false;
+    };
+  }, [page, repository, workspaceId]);
+
+  const pages = Math.max(1, Math.ceil(total / limit));
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Browse repository issues</CardTitle>
+        <CardDescription>
+          Select an accessible repository to browse open Forgejo issues by page.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <select
+          aria-label="Forgejo repository"
+          className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+          value={selected}
+          onChange={(event) => {
+            setSelected(event.target.value);
+            setPage(1);
+          }}
+        >
+          <option value="">Select a repository</option>
+          {repositories.map((item) => (
+            <option key={item.full_name} value={item.full_name}>
+              {item.full_name}
+            </option>
+          ))}
+        </select>
+        {error ? (
+          <p role="status" className="text-sm text-destructive">
+            {error}
+          </p>
+        ) : null}
+        {repository && !error ? (
+          <ul className="space-y-2 text-sm">
+            {issues.map((issue) => (
+              <li className="flex flex-wrap items-center gap-2" key={issue.number}>
+                <a
+                  className="hover:underline"
+                  href={issue.html_url}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  #{issue.number}: {issue.title}
+                </a>
+                <Button
+                  className="cursor-pointer"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void onCreateTask(repository, issue)}
+                >
+                  Create Kandev task
+                </Button>
+                <Button
+                  className="cursor-pointer"
+                  size="sm"
+                  variant="outline"
+                  disabled={!existingTaskID.trim()}
+                  onClick={() => void onLinkTask(repository, issue)}
+                >
+                  Link existing task
+                </Button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {repository ? (
+          <div className="flex items-center justify-between gap-2 text-sm">
+            <span>
+              Page {page} of {pages}
+            </span>
+            <div className="flex gap-2">
+              <Button
+                className="cursor-pointer"
+                size="sm"
+                variant="outline"
+                disabled={page === 1}
+                onClick={() => setPage((current) => current - 1)}
+              >
+                Previous
+              </Button>
+              <Button
+                className="cursor-pointer"
+                size="sm"
+                variant="outline"
+                disabled={page >= pages}
+                onClick={() => setPage((current) => current + 1)}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
   );
 }
 
