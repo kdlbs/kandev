@@ -28,6 +28,8 @@ export function SavedQueryDefaultButton({
       : "integrations:setSavedQueryAsDefaultView",
     { label },
   );
+  // Desktop instances sit inside a Radix menu item, so stop the complete pointer sequence;
+  // the same handlers are harmless for the standalone mobile-sidebar button.
   return (
     <button
       type="button"

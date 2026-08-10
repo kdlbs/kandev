@@ -163,6 +163,9 @@ describe("useSavedPresetActions query actions", () => {
 
     expect(markSearchInteracted).toHaveBeenCalledOnce();
     expect(remove).toHaveBeenCalledWith(savedPreset.id);
+    expect(remove.mock.invocationCallOrder[0]).toBeLessThan(
+      setProgrammaticSelection.mock.invocationCallOrder[0],
+    );
     expect(setProgrammaticSelection).toHaveBeenCalledWith({
       kind: "issue",
       source: "preset",

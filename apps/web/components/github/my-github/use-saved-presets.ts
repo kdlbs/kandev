@@ -161,6 +161,8 @@ export function useSavedPresets(workspaceId: string | null = null) {
       };
       const append = (current: SavedPreset[]) =>
         current.some((saved) => saved.id === preset.id) ? current : [...current, preset];
+      // An earlier queued mutation may briefly persist its older snapshot; this optimistic
+      // update's queued write then persists the latest complete list.
       applyLocal(append(activePresetsRef.current));
       void queueMutation(async () => {
         await persist(append(activePresetsRef.current));
