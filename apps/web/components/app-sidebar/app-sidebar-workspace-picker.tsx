@@ -111,20 +111,13 @@ function useMenuOpenState(controlledOpen?: boolean, onOpenChange?: (open: boolea
   return { open: isControlled ? controlledOpen : uncontrolledOpen, setOpen };
 }
 
-function useProgrammaticMenuFocus(open: boolean | undefined) {
-  return useCallback(
-    (content: HTMLDivElement | null) => {
-      if (!open || !content) return;
-      window.requestAnimationFrame(() => {
-        if (content.isConnected) content.focus({ preventScroll: true });
-      });
-    },
-    [open],
-  );
-}
-
 function workspaceType(workspace: WorkspaceItem | undefined): WorkspaceType {
   return workspace?.office_workflow_id ? "office" : "kanban";
+}
+
+function focusControlledMenu(event: Event) {
+  event.preventDefault();
+  (event.currentTarget as HTMLElement).focus({ preventScroll: true });
 }
 
 /** Returns a catalog key, not copy: this is a plain function with no hook. */
@@ -272,7 +265,7 @@ export function AppSidebarWorkspacePicker({
   const activeWorkspace = workspaces.items.find((w) => w.id === workspaces.activeId);
   const activeId = activeWorkspace?.id ?? null;
   const activeName = activeWorkspace?.name ?? t("sidebar:workspaceFallback");
-  const contentRef = useProgrammaticMenuFocus(open);
+  const handleOpenAutoFocus = controlledOpen === undefined ? undefined : focusControlledMenu;
 
   const handleSelect = useCallback(
     (workspace: WorkspaceItem) => {
@@ -334,7 +327,7 @@ export function AppSidebarWorkspacePicker({
         />
       </DropdownMenuTrigger>
       <DropdownMenuContent
-        ref={contentRef}
+        onOpenAutoFocus={handleOpenAutoFocus}
         align={contentAlign}
         className={cn("w-72", contentClassName)}
       >
