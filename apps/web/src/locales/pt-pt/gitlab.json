@@ -316,7 +316,6 @@
   "mrAutomationExplainAutoFixRounds": "Explicar as rondas de correção automática",
   "mrAutomationAutoFixPromptSaveFailed": "Não foi possível guardar o prompt de correção automática.",
   "mrAutomationAutoFixPromptResetFailed": "Não foi possível repor o prompt de correção automática.",
-  "mrPopoverOpenDetail": "Abrir os detalhes do merge request",
   "mrPopoverOpenInGitlab": "Abrir !{{mriid}} no GitLab",
   "mrPopoverUnlink": "Desassociar !{{mriid}}",
   "mrPopoverPassRate": "Taxa de sucesso",

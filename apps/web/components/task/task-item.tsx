@@ -33,6 +33,7 @@ import { RemoteCloudTooltip } from "./remote-cloud-tooltip";
 import { classifyTask } from "./task-classify";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { useTranslation } from "react-i18next";
+import { TaskAutopilotIcon } from "@/components/task/task-autopilot-icon";
 
 type DiffStats = {
   additions: number;
@@ -41,6 +42,7 @@ type DiffStats = {
 
 type TaskItemProps = {
   title: string;
+  autopilot?: boolean;
   state?: TaskState;
   sessionState?: TaskSessionState;
   /**
@@ -333,6 +335,7 @@ function TaskPRIcon({
 
 function TaskItemContent({
   title,
+  autopilot,
   taskId,
   isRemoteExecutor,
   remoteExecutorType,
@@ -348,6 +351,7 @@ function TaskItemContent({
   agentErrorMessage,
 }: {
   title: string;
+  autopilot?: boolean;
   taskId?: string;
   isRemoteExecutor?: boolean;
   remoteExecutorType?: string;
@@ -367,6 +371,7 @@ function TaskItemContent({
     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
       <span className="flex items-center gap-1 min-w-0 text-[13px] font-medium text-foreground leading-tight">
         <ScrollOnOverflow className="min-w-0">{title}</ScrollOnOverflow>
+        {autopilot && <TaskAutopilotIcon />}
         {isPinned && (
           <IconPinFilled
             data-testid="task-pinned-icon"
@@ -426,8 +431,13 @@ function TaskAgentErrorIcon({ message }: { message: string }) {
   );
 }
 
+// The row keeps its state and accessibility affordances together for keyboard
+// selection, so this small exception avoids splitting that interaction across
+// multiple components.
+// eslint-disable-next-line max-lines-per-function
 export const TaskItem = memo(function TaskItem({
   title,
+  autopilot,
   state,
   sessionState,
   foregroundActivity,
@@ -492,6 +502,7 @@ export const TaskItem = memo(function TaskItem({
       />
       <TaskItemContent
         title={title}
+        autopilot={autopilot}
         taskId={taskId}
         isRemoteExecutor={isRemoteExecutor}
         remoteExecutorType={remoteExecutorType}

@@ -71,7 +71,7 @@ test.describe("Office agent launch context", () => {
         .poll(
           async () => {
             const env = await apiClient.getTaskEnvironment(task.id);
-            worktreePath = env?.workspace_path ?? env?.worktree_path ?? "";
+            worktreePath = env?.workspace_path ?? env?.repos?.[0]?.worktree_path ?? "";
             return worktreePath;
           },
           { timeout: 30_000, message: "task environment workspace_path never appeared" },

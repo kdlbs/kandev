@@ -15,6 +15,7 @@ import { MAX_SIDEBAR_VIEWS } from "@/lib/state/slices/ui/sidebar-view-builtins";
 import { SidebarFilterPopover } from "@/components/task/sidebar-filter/sidebar-filter-popover";
 import { useSidebarViewPopover } from "@/components/task/sidebar-filter/use-sidebar-view-popover";
 import { cn } from "@/lib/utils";
+import { sidebarViewName } from "@/lib/state/slices/ui/sidebar-view-builtins";
 
 const TRIGGER_BUTTON_CLASS = cn(
   "flex h-5 items-center justify-center rounded-sm px-1.5 cursor-pointer",
@@ -42,7 +43,7 @@ export function TasksViewPicker() {
     [views, activeViewId],
   );
   const hasDraft = !!draft && draft.baseViewId === activeViewId;
-  const activeLabel = activeView?.name ?? t("sidebar:viewAll");
+  const activeLabel = activeView ? sidebarViewName(activeView, t) : t("sidebar:viewAll");
 
   return (
     <div className="flex items-center gap-0.5">
@@ -81,7 +82,7 @@ export function TasksViewPicker() {
                 className="cursor-pointer gap-2 text-xs"
               >
                 <IconCheck className={cn("h-3.5 w-3.5", isActive ? "opacity-100" : "opacity-0")} />
-                <span className="truncate">{view.name}</span>
+                <span className="truncate">{sidebarViewName(view, t)}</span>
               </DropdownMenuItem>
             );
           })}

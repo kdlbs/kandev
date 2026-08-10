@@ -26,6 +26,7 @@ vi.mock("@/components/state-provider", () => ({
       kanban: { tasks: [{ id: "task-1", primarySessionId: "session-a" }] },
       repositories: { itemsByWorkspaceId: mocks.repositoriesByWorkspaceId },
       messages: { bySession: mocks.messagesBySession },
+      executors: { items: [] },
       setActiveSession: mocks.setActiveSession,
     }),
 }));
@@ -44,7 +45,7 @@ vi.mock("@/hooks/domains/session/use-session-actions", () => ({
     remove: vi.fn(),
   }),
   isSessionStoppable: () => false,
-  isSessionDeletable: () => false,
+  isSessionDeletable: () => true,
   isSessionResumable: () => false,
 }));
 
@@ -341,5 +342,28 @@ describe("MobileSessionsPicker pending lifecycle", () => {
     expect(perm.textContent).toMatch(/permission/i);
 
     mocks.messagesBySession = {};
+  });
+});
+
+describe("MobileSessionsPicker session delete confirmation", () => {
+  it("states conversation deletion and workspace retention from the actions sheet", () => {
+    mocks.sessions = [session(SESSION_A, "profile-a", START_TIME, { state: "COMPLETED" })];
+    render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_A} fullWidth />);
+
+    // Open the picker sheet, then the session's actions menu.
+    fireEvent.click(screen.getByTestId(PILL_TESTID));
+    const dotsButton = screen.getByRole("button", { name: "Session actions" });
+    fireEvent.pointerDown(dotsButton);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+
+    const dialog = screen.getByRole("alertdialog");
+    expect(within(dialog).getByText(/permanently delete the conversation history/i)).toBeTruthy();
+    expect(
+      within(dialog).getAllByText(/task workspace and its files are kept/i).length,
+    ).toBeGreaterThan(0);
+    expect(within(dialog).getByText(/only session for this task/i)).toBeTruthy();
+    // No uncommitted/unpushed warning belongs on session deletion.
+    expect(within(dialog).queryByText(/uncommitted/i)).toBeNull();
+    expect(within(dialog).queryByText(/unpushed/i)).toBeNull();
   });
 });

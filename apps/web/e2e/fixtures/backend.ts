@@ -438,8 +438,9 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           // process.env.X before spawn — that already flows through the
           // `...sanitizeInheritedEnv(process.env)` spread above, and the
           // backend's ApplyProfile leaves already-set vars alone. (Note:
-          // KANDEV_FEATURES_* is the exception — it's stripped from the
-          // inherited env so the profile always governs feature flags.)
+          // KANDEV_FEATURES_* and KANDEV_WEB_TITLE_PREFIX are exceptions —
+          // they are stripped from the inherited env so the e2e profile
+          // always controls the baseline.)
           GIT_AUTHOR_NAME: "E2E Test",
           GIT_AUTHOR_EMAIL: "e2e@test.local",
           GIT_COMMITTER_NAME: "E2E Test",
@@ -539,6 +540,9 @@ function writeGitShimLauncher(shimDir: string, shimScript: string): void {
 //     in the test backend → /api/v1/office/* 404s. Dropping the whole
 //     KANDEV_FEATURES_* namespace lets the e2e profile govern feature flags so
 //     the suite always exercises them, regardless of where it's launched.
+//   - KANDEV_WEB_TITLE_PREFIX — the browser identity is profile-managed in
+//     this suite. Explicit per-test values are applied after this baseline is
+//     sanitized through `backend.restart(overrides)`.
 //   - PATH casing aliases — Windows commonly inherits `Path`; retaining it
 //     beside the fixture's new `PATH` makes child-process lookup order
 //     ambiguous. The caller restores one canonical PATH after sanitizing.
@@ -547,7 +551,9 @@ function sanitizeInheritedEnv(env: Record<string, string>): Record<string, strin
   delete cleaned.GH_TOKEN;
   delete cleaned.GITHUB_TOKEN;
   for (const key of Object.keys(cleaned)) {
-    if (key.startsWith("KANDEV_FEATURES_")) delete cleaned[key];
+    if (key === "KANDEV_WEB_TITLE_PREFIX" || key.startsWith("KANDEV_FEATURES_")) {
+      delete cleaned[key];
+    }
     if (key.toUpperCase() === "PATH") delete cleaned[key];
   }
   return cleaned;

@@ -176,6 +176,59 @@ func TestProjectorDoesNotSubscribeToRawStreamsOrStreamingMessageAppends(t *testi
 	_ = ctx
 }
 
+func TestProjectorRepairsStoredRunningSummaryAfterStartupRecovery(t *testing.T) {
+	store := newProjectorTestStore()
+	storedAt := time.Date(2026, 8, 1, 17, 59, 0, 0, time.UTC)
+	store.rows["task-startup-recovery"] = &StoredTaskStatusSummary{
+		TaskID:      "task-startup-recovery",
+		WorkspaceID: "workspace-1",
+		Summary: TaskStatusSummary{
+			Revision:            7,
+			UpdatedAt:           storedAt,
+			PrimarySession:      &PrimarySessionSummary{ID: "session-startup-recovery", State: "RUNNING"},
+			ForegroundActivity:  "generating",
+			ActiveSubagentCount: 2,
+		},
+	}
+
+	projector := NewProjector(ProjectorConfig{
+		Store: store,
+		ResolveWorkspace: func(context.Context, string) (string, error) {
+			return "workspace-1", nil
+		},
+		Now: func() time.Time { return storedAt.Add(time.Minute) },
+	})
+
+	if err := projector.HandleEvent(context.Background(), bus.NewEvent(events.TaskSessionStateChanged, "test", map[string]interface{}{
+		"task_id":               "task-startup-recovery",
+		"workspace_id":          "workspace-1",
+		"session_id":            "session-startup-recovery",
+		"new_state":             "WAITING_FOR_INPUT",
+		"is_primary":            true,
+		"foreground_activity":   nil,
+		"active_subagent_count": 0,
+	})); err != nil {
+		t.Fatalf("apply startup recovery event: %v", err)
+	}
+
+	got := store.summary("task-startup-recovery")
+	if got == nil || got.PrimarySession == nil {
+		t.Fatalf("repaired summary = %+v, want primary session", got)
+	}
+	if got.Revision <= 7 {
+		t.Fatalf("repaired summary revision = %d, want newer than 7", got.Revision)
+	}
+	if got.PrimarySession.State != "WAITING_FOR_INPUT" {
+		t.Errorf("primary session state = %q, want WAITING_FOR_INPUT", got.PrimarySession.State)
+	}
+	if got.ForegroundActivity != "" {
+		t.Errorf("foreground activity = %q, want empty", got.ForegroundActivity)
+	}
+	if got.ActiveSubagentCount != 0 {
+		t.Errorf("active subagent count = %d, want 0", got.ActiveSubagentCount)
+	}
+}
+
 func TestProjectorDerivesBoundedStatusAcrossSources(t *testing.T) {
 	_, store, eventBus, updates, _ := newProjectorTest(t)
 	const taskID = "task-status-sources"

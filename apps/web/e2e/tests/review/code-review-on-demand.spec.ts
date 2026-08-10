@@ -7,29 +7,19 @@ const REVIEWED_FILE = "review-target.ts";
 const SECOND_FILE = "review-second.ts";
 
 /**
- * Points the review runner at the mock agent.
+ * Points the review runner at the seeded agent profile.
  *
  * The built-in `code-review` utility agent seeds disabled, which makes the
- * resolver fall through to the user's default agent/model pair — so setting that
- * pair is all the on-demand path needs. It also keeps the spec honest about the
- * documented precedence rather than force-enabling a builtin behind the scenes.
+ * resolver fall through to the user's default profile. It also keeps the spec
+ * honest about the documented precedence rather than force-enabling a builtin.
  */
-async function configureReviewer(apiClient: {
-  listInferenceAgents: () => Promise<{
-    agents: Array<{ id: string; models: Array<{ id: string }> }>;
-  }>;
-  saveUserSettings: (settings: Record<string, unknown>) => Promise<void>;
-}) {
-  // The inference-agents endpoint is the right source: its `id` is the
-  // registered agent-type id the review runner resolves against. An agent row
-  // UUID from /api/v1/agents is rejected as "not inference-capable".
-  const { agents } = await apiClient.listInferenceAgents();
-  const agent = agents.find((candidate) => candidate.models.length > 0) ?? agents[0];
-  if (!agent) throw new Error("code review e2e: no inference-capable agent was discovered");
-  await apiClient.saveUserSettings({
-    default_utility_agent_id: agent.id,
-    default_utility_model: agent.models[0]?.id ?? "",
-  });
+async function configureReviewer(
+  apiClient: {
+    saveUserSettings: (settings: Record<string, unknown>) => Promise<void>;
+  },
+  profileId: string,
+) {
+  await apiClient.saveUserSettings({ default_utility_agent_profile_id: profileId });
 }
 
 test.describe("Native code review — on demand", () => {
@@ -41,7 +31,7 @@ test.describe("Native code review — on demand", () => {
     seedData,
     backend,
   }) => {
-    await configureReviewer(apiClient);
+    await configureReviewer(apiClient, seedData.agentProfileId);
 
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
@@ -178,6 +168,7 @@ test.describe("Native code review — on demand", () => {
     await apiClient.saveUserSettings({
       default_utility_agent_id: "",
       default_utility_model: "",
+      default_utility_agent_profile_id: "",
     });
 
     const task = await apiClient.createTaskWithAgent(

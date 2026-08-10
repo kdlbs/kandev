@@ -66,6 +66,9 @@ async function fetchAndWriteSnapshot(
         if (existing) {
           mapped.primarySessionId = mapped.primarySessionId || existing.primarySessionId;
           mapped.primarySessionState = mapped.primarySessionState || existing.primarySessionState;
+          // Autopilot is immutable after creation. Keep the cached value when
+          // an older or partial snapshot does not include the field.
+          mapped.autopilot = mapped.autopilot ?? existing.autopilot;
         }
         return mapped;
       })

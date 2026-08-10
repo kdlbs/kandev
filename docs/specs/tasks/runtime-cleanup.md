@@ -7,6 +7,8 @@ owner: cfl
 
 # Task Runtime Cleanup
 
+Decision: [ADR-2026-08-08-task-owned-worktree-lifetime](../../decisions/2026-08-08-task-owned-worktree-lifetime.md)
+
 ## Why
 
 Operators archive and delete completed tasks to keep the board usable and the
@@ -35,6 +37,15 @@ worktrees, or executor rows behind and the machine slowly runs out of memory.
   duration of that session. Cleanup can stop the current task's runtime rows, but
   must defer destructive worktree/container/sandbox teardown until no other
   active task session references the environment.
+- A task owns its materialized workspace independently of its sessions. Deleting
+  any session, including the task's last session, removes only that session and
+  its workspace references. It does not remove task workspace directories, Git
+  worktree registrations, or branches.
+- A task with zero sessions retains its materialized workspace so a later session
+  can reuse the same files and Git state.
+- Physical workspace cleanup is initiated only by task lifecycle operations:
+  archive, delete, cascade archive/delete, workspace delete, quick-chat expiry,
+  or explicit task-environment reset. Session deletion is not a cleanup trigger.
 - Agent subprocess shutdown kills the whole agent process group when graceful
   shutdown does not finish within the configured stop timeout.
 - Agent subprocess shutdown does not treat the command leader exiting as
@@ -127,6 +138,34 @@ not imply runtime resources have been released. Cleanup code must not use termin
 session state as a reason to skip runtime teardown when an `executors_running`
 row exists.
 
+### `task_environments` and `task_environment_repos`
+
+`task_environments.task_id` is the canonical workspace owner.
+`task_environment_repos` records the ordered repositories in that environment
+and is the single source of physical worktree identity, path, branch, status, and
+lifecycle timestamps. Task cleanup queries repository rows through the owning
+environment's `task_id`; it never needs a session row.
+
+Sessions refer to the complete shared workspace through
+`task_sessions.task_environment_id`. The legacy `task_session_worktrees` table is
+redundant and is removed after a transactional SQLite/PostgreSQL backfill into
+`task_environment_repos`. The same migration removes deprecated flat
+`repository_id`, `worktree_id`, `worktree_path`, and `worktree_branch` columns
+from `task_environments`. Runtime code, APIs, storage inventory, and cleanup use
+only the normalized schema; there is no permanent dual-read or dual-write path.
+
+The migration fails closed when existing environment, session, repository,
+identity, or path data cannot be normalized to exactly one environment owner.
+Fresh databases are created directly in the final schema.
+
+Normalization uses a dedicated error-returning migration under the database
+writer/migration lock. Shadow tables are populated and compared against the full
+legacy worktree inventory before legacy schema is dropped. Ownership, uniqueness,
+foreign keys, row counts, and the final schema are validated before commit. Any
+failure rolls back the entire cutover. SQLite additionally requires the existing
+fatal pre-upgrade snapshot; PostgreSQL uses transactional DDL under an advisory
+migration lock. The migration never performs filesystem or Git cleanup.
+
 ### `task_resource_cleanup_jobs`
 
 `task_resource_cleanup_jobs` is the durable task-lifecycle cleanup intent. It has
@@ -138,11 +177,21 @@ reuses the same cleanup job. `attempts` counts successful worker claims. A
 terminal `failed` row retains its final error and completion timestamp for
 diagnosis but is not selected by the automatic worker.
 
+A prepared task-lifecycle cleanup job also acts as a durable creation barrier.
+The barrier is reserved before resource inventory is captured. Session creation
+and physical worktree persistence serialize against the task row and refuse new
+ownership while archive/delete preparation is active. The barrier transaction
+never holds filesystem, target-path, or repository Git locks.
+
 ## API Surface
 
 No new user-facing HTTP or WebSocket action is required. Existing task archive,
 task delete, session stop, and backend startup behavior gain stronger cleanup
 guarantees.
+
+`session.delete` keeps its existing request and response contract. Success means
+the session row is gone. It does not mean the task workspace was cleaned, and it
+never enqueues task resource cleanup.
 
 Internal contracts:
 
@@ -252,6 +301,16 @@ The durable cleanup job wraps that resource lifecycle:
 - If an archived task is unarchived before cleanup completes, the worker cancels
   remaining archive cleanup. Already completed resource removal remains valid and
   the unarchive branch-recovery flow recreates the environment when possible.
+- If deleting a session fails, no physical workspace operation has been attempted;
+  the task-owned worktree record remains authoritative regardless of whether the
+  session mutation committed.
+- If a session or worktree creation races task archive/delete preparation, the
+  task lifecycle barrier wins before cleanup inventory is finalized. The creation
+  is rejected or its uncommitted materialization is compensated, and the cleanup
+  snapshot cannot omit a newly owned worktree.
+- If task-owned worktree backfill encounters conflicting ownership or path data,
+  startup fails closed with a diagnostic instead of choosing a row that could
+  authorize deletion of another task's workspace.
 
 ## Persistence Guarantees
 
@@ -270,6 +329,13 @@ The durable cleanup job wraps that resource lifecycle:
   resume automatically.
 - Cleanup snapshots needed after task deletion survive without foreign-keyed task,
   session, environment, or worktree rows.
+- A `task_environment_repos` row, its directory, Git registration, branch, and
+  uncommitted files survive deletion of every session for the task and survive
+  backend restart. They remain discoverable through
+  `task_environments.task_id` until task lifecycle cleanup takes ownership.
+- Storage inventory protects paths from task environment repository rows, not
+  only paths referenced by live sessions, so a zero-session task workspace is
+  not classified as orphaned.
 - Historical worktree rows for archived tasks remain available to unarchive branch
   recovery even after their on-disk directories are removed.
 - Orphaned OS processes without any durable `executors_running` row are outside
@@ -277,6 +343,28 @@ The durable cleanup job wraps that resource lifecycle:
   tool, but automatic task cleanup must not rely on process-name scanning.
 
 ## Scenarios
+
+- **GIVEN** a task with one stopped session, a registered worktree, and
+  uncommitted files, **WHEN** the session is deleted, **THEN** the task remains
+  with zero sessions and the directory, Git registration, branch, and files are
+  unchanged.
+- **GIVEN** a task whose last session was deleted, **WHEN** the backend restarts
+  and a new session is created, **THEN** the session reuses the task-owned
+  workspace and observes the preserved files.
+- **GIVEN** two sessions referencing the same task worktree, **WHEN** either
+  session is deleted, **THEN** the remaining session continues using the same
+  directory and no filesystem or Git cleanup command runs.
+- **GIVEN** a session has been deleted and the backend restarted, **WHEN** its
+  task is archived, **THEN** durable asynchronous task cleanup still discovers
+  the task-owned worktree by `task_id` and removes it unless another task holds
+  a protected shared reference.
+- **GIVEN** a session has been deleted and the backend restarted, **WHEN** its
+  task is deleted, **THEN** the cleanup job snapshot retains the worktree handles
+  after task-row cascades and retries filesystem or Git failures after restart.
+- **GIVEN** task cleanup preparation is racing a new session/worktree launch,
+  **WHEN** the lifecycle barrier is reserved, **THEN** no resource created after
+  the barrier can be omitted from the cleanup inventory or survive as an
+  untracked directory.
 
 - **GIVEN** a task has a `WAITING_FOR_INPUT` session and an
   `executors_running` row, **WHEN** the task is archived, **THEN** the runtime is
@@ -379,6 +467,9 @@ The durable cleanup job wraps that resource lifecycle:
 - A general-purpose OS process sweeper that kills every process named
   `codex-acp`, `claude-acp`, or `opencode`.
 - UI changes for showing runtime cleanup failures.
+- Per-session warnings about uncommitted or unpushed workspace state; ordinary
+  session deletion preserves that state. Destructive warnings remain attached
+  to task archive/delete/reset surfaces.
 - A user-facing action to replay a terminal failed cleanup job.
 - New user-facing archive/delete controls.
 - Changing the task/session state model beyond the cleanup guarantees described

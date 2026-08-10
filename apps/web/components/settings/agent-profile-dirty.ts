@@ -16,6 +16,8 @@ export function isProfileDirty(
   const changed = [
     draft.name !== savedProfile.name,
     draft.model !== savedProfile.model,
+    (draft.fallbackModel ?? "") !== (savedProfile.fallbackModel ?? ""),
+    (draft.autoFallback ?? false) !== (savedProfile.autoFallback ?? false),
     (draft.mode ?? "") !== (savedProfile.mode ?? ""),
     !areConfigOptionsEqual(draft.configOptions, savedProfile.configOptions),
     arePermissionsDirty(draft, savedProfile, permissionSettings),

@@ -1,11 +1,16 @@
 package improvekandev
 
 import (
+	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/system/storage"
+	"github.com/kandev/kandev/internal/system/storage/tempartifacts"
 )
 
 func TestCreateBundleDirWritesOwnerMarker(t *testing.T) {
@@ -69,40 +74,75 @@ func TestValidateBundleDir_RejectsBad(t *testing.T) {
 	}
 }
 
-func TestCleanupStaleBundles_RemovesOnlyStale(t *testing.T) {
-	root := t.TempDir()
+func TestCreateBundleDirWithRegistryDoesNotPersistAuthenticatedOwner(t *testing.T) {
+	store := &recordingArtifactStore{}
+	registry := tempartifacts.NewRegistry(tempartifacts.Config{
+		Store: store, TempRoot: os.TempDir(), OwnerPID: 1234, RunID: "test-run",
+		NewID: func() string { return "artifact-1" }, NewToken: func() string { return "token-1" },
+	})
+	dir, err := createBundleDirWithRegistry(context.Background(), "user-1", registry)
+	if err != nil {
+		t.Fatalf("createBundleDirWithRegistry: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
 
-	stale := filepath.Join(root, bundlePrefix+"old")
-	if err := os.Mkdir(stale, 0o755); err != nil {
-		t.Fatalf("mkdir stale: %v", err)
+	if strings.Contains(string(store.artifact.Metadata), "user-1") {
+		t.Fatalf("temporary artifact metadata contains authenticated owner: %s", store.artifact.Metadata)
 	}
-	old := time.Now().Add(-72 * time.Hour)
-	if err := os.Chtimes(stale, old, old); err != nil {
-		t.Fatalf("chtimes stale: %v", err)
+	var metadata map[string]any
+	if err := json.Unmarshal(store.artifact.Metadata, &metadata); err != nil {
+		t.Fatalf("decode temporary artifact metadata: %v", err)
 	}
+	if _, ok := metadata["owner"]; ok {
+		t.Fatalf("temporary artifact metadata contains owner field: %#v", metadata)
+	}
+}
 
-	fresh := filepath.Join(root, bundlePrefix+"new")
-	if err := os.Mkdir(fresh, 0o755); err != nil {
-		t.Fatalf("mkdir fresh: %v", err)
-	}
+type recordingArtifactStore struct {
+	artifact storage.TemporaryArtifact
+}
 
-	other := filepath.Join(root, "unrelated-dir")
-	if err := os.Mkdir(other, 0o755); err != nil {
-		t.Fatalf("mkdir other: %v", err)
-	}
-	if err := os.Chtimes(other, old, old); err != nil {
-		t.Fatalf("chtimes other: %v", err)
-	}
+func (s *recordingArtifactStore) CreateTemporaryArtifact(_ context.Context, artifact *storage.TemporaryArtifact) error {
+	s.artifact = *artifact
+	return nil
+}
 
-	cleanupStaleBundlesIn(root, 24*time.Hour, nil)
+func (s *recordingArtifactStore) GetTemporaryArtifact(_ context.Context, id string) (storage.TemporaryArtifact, error) {
+	if s.artifact.ID != id {
+		return storage.TemporaryArtifact{}, storage.ErrNotFound
+	}
+	return s.artifact, nil
+}
 
-	if _, err := os.Stat(stale); !os.IsNotExist(err) {
-		t.Errorf("stale bundle %q should have been removed: %v", stale, err)
+func (s *recordingArtifactStore) ListTemporaryArtifacts(context.Context) ([]storage.TemporaryArtifact, error) {
+	if s.artifact.ID == "" {
+		return nil, nil
 	}
-	if _, err := os.Stat(fresh); err != nil {
-		t.Errorf("fresh bundle %q should have been preserved: %v", fresh, err)
+	return []storage.TemporaryArtifact{s.artifact}, nil
+}
+
+func (s *recordingArtifactStore) HeartbeatTemporaryArtifact(_ context.Context, id string, at time.Time) error {
+	if s.artifact.ID != id || s.artifact.State != storage.TemporaryArtifactStateActive {
+		return storage.ErrNotFound
 	}
-	if _, err := os.Stat(other); err != nil {
-		t.Errorf("non-bundle dir %q should have been preserved: %v", other, err)
+	s.artifact.LastHeartbeatAt = &at
+	return nil
+}
+
+func (s *recordingArtifactStore) TransitionTemporaryArtifact(
+	_ context.Context,
+	id string,
+	next storage.TemporaryArtifactState,
+	lastError string,
+	at time.Time,
+) error {
+	if s.artifact.ID != id {
+		return storage.ErrNotFound
 	}
+	s.artifact.State = next
+	s.artifact.LastError = lastError
+	if next == storage.TemporaryArtifactStateClosed {
+		s.artifact.ClosedAt = &at
+	}
+	return nil
 }

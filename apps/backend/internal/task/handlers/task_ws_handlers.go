@@ -95,6 +95,7 @@ type wsCreateTaskRequest struct {
 	WorkflowStepID    string                    `json:"workflow_step_id"`
 	Title             string                    `json:"title"`
 	Description       string                    `json:"description,omitempty"`
+	Autopilot         bool                      `json:"autopilot,omitempty"`
 	Priority          string                    `json:"priority,omitempty"`
 	State             *v1.TaskState             `json:"state,omitempty"`
 	Repositories      []httpTaskRepositoryInput `json:"repositories,omitempty"`
@@ -175,12 +176,13 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		}
 	}
 
-	task, err := h.service.CreateTask(ctx, &service.CreateTaskRequest{
+	result, err := h.service.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID:    req.WorkspaceID,
 		WorkflowID:     req.WorkflowID,
 		WorkflowStepID: req.WorkflowStepID,
 		Title:          title,
 		Description:    description,
+		Autopilot:      req.Autopilot,
 		Priority:       req.Priority,
 		State:          req.State,
 		Repositories:   convertToServiceRepos(repos),
@@ -201,8 +203,13 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create task", nil)
 	}
 
+	task := result.Task
 	taskDTO := dto.FromTask(task)
-	response := createTaskResponse{TaskDTO: taskDTO}
+	// The WS task.create action does not accept external_id (deferred
+	// surface), so this is always a genuine, complete creation — never
+	// deduplicated, and CreationComplete must be true rather than the zero
+	// value false, which would misleadingly read as "still in progress".
+	response := createTaskResponse{TaskDTO: taskDTO, Deduplicated: false, CreationComplete: true}
 	if req.StartAgent && task.QueuedForStepID == "" && req.AgentProfileID != "" && h.orchestrator != nil {
 		launchResp, err := h.launchAgentForNewTask(ctx, taskDTO, req)
 		if err != nil {

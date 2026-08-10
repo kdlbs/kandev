@@ -8,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	mcpsrv "github.com/mark3labs/mcp-go/server"
@@ -162,6 +163,25 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.NotContains(t, tools, "update_task_state_kandev")
 	assert.NotContains(t, tools, "delete_workflow_step_kandev")
 	assert.NotContains(t, tools, "reorder_workflow_steps_kandev")
+}
+
+func TestServerProfile_AutopilotChildHasOnlyParentQuestion(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	profile := mcpprofile.New(mcpprofile.SurfaceKanbanTask, []mcpprofile.Capability{mcpprofile.CapabilityParentQuestion}, nil)
+	s := NewWithProfile(backend, "child-session", "child-task", 10005, log, "", false, profile)
+	tools := getRegisteredToolNames(s)
+
+	assert.Contains(t, tools, "ask_parent_question_kandev")
+	assert.NotContains(t, tools, "ask_user_question_kandev")
+
+	rootProfile := mcpprofile.New(mcpprofile.SurfaceKanbanTask, nil, nil)
+	root := NewWithProfile(backend, "root-session", "root-task", 10006, log, "", false, rootProfile)
+	rootTools := getRegisteredToolNames(root)
+	assert.NotContains(t, rootTools, "ask_parent_question_kandev")
+	assert.NotContains(t, rootTools, "ask_user_question_kandev")
 }
 
 func TestServerModeConfig_RegistersCorrectTools(t *testing.T) {
@@ -380,6 +400,46 @@ func TestServerSetProvidersAndModeSkipNormalizedNoOps(t *testing.T) {
 		t.Fatalf("normalized no-op emitted notification %q", notification.Method)
 	default:
 	}
+}
+
+func TestServerSetProfileSkipsEquivalentProfile(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	profile := mcpprofile.New(mcpprofile.SurfaceKanbanTask, []mcpprofile.Capability{mcpprofile.CapabilityUserQuestion}, []string{"github"})
+	s := NewWithProfile(backend, "test-session", "test-task", 10005, log, "", false, profile)
+	session := &providerRefreshTestSession{
+		id:            "initialized-profile-noop",
+		notifications: make(chan mcplib.JSONRPCNotification, 128),
+	}
+	require.NoError(t, s.mcpServer.RegisterSession(context.Background(), session))
+
+	s.SetProfile(mcpprofile.New(mcpprofile.SurfaceKanbanTask, []mcpprofile.Capability{mcpprofile.CapabilityUserQuestion}, []string{"github"}))
+
+	select {
+	case notification := <-session.notifications:
+		t.Fatalf("equivalent profile emitted notification %q", notification.Method)
+	default:
+	}
+}
+
+func TestServerSetModePreservesAdditiveCapabilities(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	profile := mcpprofile.New(mcpprofile.SurfaceKanbanTask, []mcpprofile.Capability{mcpprofile.CapabilityParentQuestion}, nil)
+	s := NewWithProfile(backend, "child-session", "child-task", 10005, log, "", false, profile)
+
+	s.SetMode(ModeConfig)
+	assert.True(t, s.Profile().HasCapability(mcpprofile.CapabilityParentQuestion))
+	assert.NotContains(t, getRegisteredToolNames(s), "ask_parent_question_kandev")
+
+	s.SetMode(ModeTask)
+	assert.True(t, s.Profile().HasCapability(mcpprofile.CapabilityParentQuestion))
+	assert.Contains(t, getRegisteredToolNames(s), "ask_parent_question_kandev")
+	assert.NotContains(t, getRegisteredToolNames(s), "ask_user_question_kandev")
 }
 
 func containsTool(tools []string, name string) bool {

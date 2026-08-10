@@ -54,6 +54,7 @@ type FormResetters = {
   setUseRemote: (v: boolean) => void;
   setNoRepository: (v: boolean) => void;
   setWorkspacePath: (v: string) => void;
+  setAutopilot: (v: boolean) => void;
   setGitHubUrlError: (v: string | null) => void;
   setFreshBranchEnabled: (v: boolean) => void;
   setCurrentLocalBranch: (v: string) => void;
@@ -199,6 +200,7 @@ function resetTaskForm(
   resetters.setExecutorProfileId("");
   resetters.setSelectedWorkflowId(workflowId);
   resetters.setFetchedSteps(null);
+  resetters.setAutopilot(false);
 }
 
 /** Resets repository discovery state */
@@ -344,6 +346,7 @@ function useFormStateValues(workflowId: string | null) {
   // means kandev creates a scratch workspace.
   const [noRepository, setNoRepository] = useState(false);
   const [workspacePath, setWorkspacePath] = useState("");
+  const [autopilot, setAutopilot] = useState(false);
   return {
     taskName,
     setTaskName,
@@ -379,6 +382,8 @@ function useFormStateValues(workflowId: string | null) {
     setNoRepository,
     workspacePath,
     setWorkspacePath,
+    autopilot,
+    setAutopilot,
   };
 }
 
@@ -447,6 +452,7 @@ export function useDialogFormState(
       setCurrentLocalBranch: freshBranch.setCurrentLocalBranch,
       setNoRepository: form.setNoRepository,
       setWorkspacePath: form.setWorkspacePath,
+      setAutopilot: form.setAutopilot,
     },
   });
 

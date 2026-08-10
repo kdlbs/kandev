@@ -43,7 +43,7 @@ type Runtime interface {
 
 `LaunchSpec` carries everything the runtime needs to run an agent: profile, executor, workspace, prompt, prior ACP session id (for resume), MCP mode, metadata. The runtime knows nothing about tasks, workflows, or office stages. Both the workflow engine and (separately) cron-driven trigger handlers call `Launch`.
 
-The runtime owns the *execution* tables: `agent_executions` (renamed `executors_running`), the message and turn family that's currently `task_session_messages` / `task_session_turns`, and `task_session_worktrees`. These are generic — they describe an agent conversation, not a task lifecycle.
+The runtime owns the *execution* tables: `agent_executions` (renamed `executors_running`) and the message and turn family that's currently `task_session_messages` / `task_session_turns`. These are generic — they describe an agent conversation, not a task lifecycle. Physical worktrees are task-environment resources under [ADR-2026-08-08-task-owned-worktree-lifetime](2026-08-08-task-owned-worktree-lifetime.md), not session execution records.
 
 The naming "runtime" is concrete: it's the runtime layer for agents, sitting under the workflow engine and atop agentctl + executor backends. Replaces the earlier draft's "kernel" (too generic).
 

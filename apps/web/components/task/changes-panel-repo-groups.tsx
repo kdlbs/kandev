@@ -47,8 +47,9 @@ export function RepoGroupItem({
   displayName?: string;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation();
   const stop = (e: React.MouseEvent) => e.stopPropagation();
-  const label = displayName || group.repositoryName || "Repository";
+  const label = displayName || group.repositoryName || t("common:repository");
   return (
     <li data-testid="changes-repo-group" data-repository-name={group.repositoryName || ""}>
       <div className="flex items-center justify-between gap-2 px-1 py-0.5">
@@ -246,8 +247,9 @@ export function CommitsRepoGroup({
   // Each repo has its own "latest unpushed commit" — revert/amend in this
   // group must target THIS repo's newest, not the merged-list newest.
   const firstUnpushedInGroup = groupCommits.findIndex((c) => c.pushed !== true);
+  const { t } = useTranslation();
   const stop = (e: React.MouseEvent) => e.stopPropagation();
-  const label = displayName || repositoryName || "Repository";
+  const label = displayName || repositoryName || t("common:repository");
   // Bug 10 acknowledged trade-off: `existingPrUrl` is sourced from a
   // workspace-scoped `prByRepo` map keyed only by "" today — the kandev task
   // model has one PR per task, not one PR per repo. As a result every per-

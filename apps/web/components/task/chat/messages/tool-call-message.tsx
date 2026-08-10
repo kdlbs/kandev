@@ -20,6 +20,7 @@ import { PermissionActionRow } from "./permission-action-row";
 import { ExpandableRow } from "./expandable-row";
 import { useExpandState } from "./use-expand-state";
 import { parsePermission, usePermissionResponseHandlers } from "./use-permission-handlers";
+import { t } from "@/lib/i18n";
 
 const TOOL_ICON_RULES: Array<{ keywords: string[]; Icon: typeof IconCode }> = [
   { keywords: ["edit", "replace", "write", "save"], Icon: IconEdit },
@@ -191,7 +192,7 @@ export const ToolCallMessage = memo(function ToolCallMessage({
   const { isExpanded, handleToggle } = useExpandState(status, autoExpanded);
 
   const metadata = comment.metadata as ToolCallMetadata | undefined;
-  const rawTitle = metadata?.title ?? comment.content ?? "Tool call";
+  const rawTitle = metadata?.title ?? comment.content ?? t("task:toolCall");
   const title = transformPathsInText(prettifyToolTitle(rawTitle), worktreePath);
 
   const formattedOutput = hasOutput && !inlineOutput ? formatToolOutput(output) : null;

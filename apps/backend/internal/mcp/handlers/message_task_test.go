@@ -262,17 +262,19 @@ func seedTaskWithSession(t *testing.T, svc *service.Service, repo seedRepo, stat
 	ctx := context.Background()
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
 	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
-	target, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	targetResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-1",
 		Title:       "Target task",
 	})
+	target := targetResult.Task
 	require.NoError(t, err)
-	sender, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	senderResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-1",
 		Title:       "Sender task",
 	})
+	sender := senderResult.Task
 	require.NoError(t, err)
 
 	sess := &models.TaskSession{
@@ -310,18 +312,20 @@ func seedChildTaskWithSession(t *testing.T, svc *service.Service, repo seedRepo,
 	ctx := context.Background()
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
 	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
-	parent, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	parentResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-1",
 		Title:       "Parent task",
 	})
+	parent := parentResult.Task
 	require.NoError(t, err)
-	child, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	childResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-1",
 		Title:       "Child task",
 		ParentID:    parent.ID,
 	})
+	child := childResult.Task
 	require.NoError(t, err)
 
 	sess := &models.TaskSession{
@@ -1888,17 +1892,19 @@ func TestHandleMessageTask_NoPrimarySession_Rejects(t *testing.T) {
 	ctx := context.Background()
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
 	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
-	target, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	targetResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-1",
 		Title:       "Sessionless task",
 	})
+	target := targetResult.Task
 	require.NoError(t, err)
-	sender, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	senderResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-1",
 		Title:       "Sender task",
 	})
+	sender := senderResult.Task
 	require.NoError(t, err)
 
 	h, _ := newMessageTaskHandler(t, svc)
@@ -1922,11 +1928,12 @@ func TestHandleMessageTask_NonexistentTask_ReportsTaskNotFound(t *testing.T) {
 	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
 	// Only the sender exists; the target task_id below was never created (mimics
 	// passing a truncated UUID prefix).
-	sender, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	senderResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-1",
 		Title:       "Sender task",
 	})
+	sender := senderResult.Task
 	require.NoError(t, err)
 
 	h, _ := newMessageTaskHandler(t, svc)

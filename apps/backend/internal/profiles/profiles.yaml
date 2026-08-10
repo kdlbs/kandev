@@ -158,6 +158,15 @@ debug:
     dev:  "true"
     e2e:  ""
 
+# ── Browser identity ─────────────────────────────────────────────
+# Distinguish the local development tab from release and preview tabs without
+# changing the title of production or e2e environments.
+ui:
+  KANDEV_WEB_TITLE_PREFIX:
+    prod: ""
+    dev:  "Dev"
+    e2e:  ""
+
 # ── E2E test tuning ───────────────────────────────────────────────
 # Behaviour knobs that only matter when running playwright. These
 # don't belong in dev (would mask real interactions) and never in

@@ -171,6 +171,7 @@ type CreateTaskOpts = {
   repository_ids?: string[];
   repositories?: TaskRepositoryInput[];
   plan_mode?: boolean;
+  autopilot?: boolean;
   metadata?: Record<string, unknown>;
   parent_id?: string;
   workspace_mode?: "inherit_parent" | "new_workspace" | "shared_group";
@@ -221,6 +222,7 @@ function buildCreateTaskBody(
   );
   setIf(body, "attachments", options.attachments);
   if (options.plan_mode) body.plan_mode = true;
+  if (options.autopilot) body.autopilot = true;
   setIf(body, "parent_id", options.parent_id);
   setIf(body, "workspace_mode", options.workspace_mode);
   setIf(body, "workspace_group_id", options.workspace_group_id);
@@ -245,6 +247,7 @@ type OptionalAgentTaskOpts = {
   metadata?: Record<string, unknown>;
   parent_id?: string;
   workspace_mode?: "inherit_parent" | "new_workspace" | "shared_group";
+  autopilot?: boolean;
   attachments?: MessageAttachmentInput[];
 };
 
@@ -268,6 +271,7 @@ function buildOptionalAgentTaskFields(opts?: OptionalAgentTaskOpts): Record<stri
   setIf(fields, "metadata", opts.metadata);
   setIf(fields, "parent_id", opts.parent_id);
   setIf(fields, "workspace_mode", opts.workspace_mode);
+  if (opts.autopilot) fields.autopilot = true;
   setIf(fields, "attachments", opts.attachments);
   return fields;
 }
@@ -430,6 +434,8 @@ export class ApiClient {
       repositories?: TaskRepositoryInput[];
       /** When true, task is placed at position 0 regardless of is_start_step. */
       plan_mode?: boolean;
+      /** Start the task with the immutable autopilot MCP/prompt contract. */
+      autopilot?: boolean;
       /** Extra metadata to store on the task. */
       metadata?: Record<string, unknown>;
       /** Parent task ID for subtasks. */
@@ -548,6 +554,8 @@ export class ApiClient {
     name: string,
     opts: {
       model: string;
+      fallback_model?: string;
+      auto_fallback?: boolean;
       mode?: string;
       config_options?: Record<string, string>;
       cli_passthrough?: boolean;
@@ -559,6 +567,8 @@ export class ApiClient {
     const response = await this.request<unknown>("POST", `/api/v1/agents/${agentId}/profiles`, {
       name,
       model: opts.model,
+      fallback_model: opts.fallback_model,
+      auto_fallback: opts.auto_fallback,
       mode: opts.mode,
       config_options: opts.config_options,
       cli_passthrough: opts.cli_passthrough ?? false,
@@ -642,6 +652,8 @@ export class ApiClient {
       parent_id?: string;
       /** Workspace behavior for a child task. */
       workspace_mode?: "inherit_parent" | "new_workspace" | "shared_group";
+      /** Start the task with the immutable autopilot MCP/prompt contract. */
+      autopilot?: boolean;
       attachments?: MessageAttachmentInput[];
     },
   ): Promise<CreateTaskResponse> {
@@ -932,6 +944,7 @@ export class ApiClient {
     keyboard_shortcuts?: Record<string, unknown>;
     default_utility_agent_id?: string;
     default_utility_model?: string;
+    default_utility_agent_profile_id?: string;
     sidebar_views?: unknown[];
     sidebar_active_view_id?: string;
     sidebar_draft?: unknown;
@@ -1895,6 +1908,7 @@ export class ApiClient {
     tasks: Array<{
       id: string;
       title: string;
+      autopilot?: boolean;
       workflow_step_id?: string;
       status_summary?: TaskStatusSummary | null;
     }>;
@@ -1933,6 +1947,7 @@ export class ApiClient {
   async getTask(taskId: string): Promise<{
     id: string;
     title: string;
+    autopilot?: boolean;
     primary_session_id?: string | null;
     state?: string;
     workflow_step_id?: string;
@@ -2063,6 +2078,13 @@ export class ApiClient {
     worktree_path?: string;
     workspace_path?: string;
     status: string;
+    repos?: Array<{
+      repository_id?: string;
+      worktree_id?: string;
+      worktree_path?: string;
+      worktree_branch?: string;
+      status?: string;
+    }>;
   } | null> {
     const res = await this.rawRequest("GET", `/api/v1/tasks/${taskId}/environment`);
     if (res.status === 404) return null;
@@ -2871,6 +2893,20 @@ export class ApiClient {
      */
     prompt?: string;
     /**
+     * Agent profile to run the automation's spawned tasks under. Required for
+     * tests that need the automation to actually launch an agent — without it
+     * autoStartAutomationTask calls StartTask with an empty profile ID, the
+     * lifecycle layer fails to resolve the agent, and the run task sits idle.
+     * Typically seedData.agentProfileId.
+     */
+    agentProfileId?: string;
+    /**
+     * Executor profile for the automation's spawned tasks. Typically
+     * seedData.worktreeExecutorProfileId. Optional — omit for tests that only
+     * assert on automation UI/list state and do not need agent execution.
+     */
+    executorProfileId?: string;
+    /**
      * Backdate the row's `execution_mode` to `task` after creation, which is
      * what an install predating the withdrawal of execution modes carries on
      * disk. The API ignores `execution_mode` on input by design, so this is
@@ -2886,6 +2922,8 @@ export class ApiClient {
       workflow_id: opts.workflowId ?? "",
       workflow_step_id: opts.workflowStepId ?? "",
       prompt: opts.prompt ?? "",
+      agent_profile_id: opts.agentProfileId ?? "",
+      executor_profile_id: opts.executorProfileId ?? "",
       legacy_board_card: opts.legacyBoardCard ?? false,
     });
   }
@@ -2904,6 +2942,20 @@ export class ApiClient {
     await this.request("PATCH", `/api/v1/e2e/tasks/${taskId}/origin`, { origin });
   }
 
+  async seedTrigger(opts: {
+    automationId: string;
+    type: string;
+    config?: Record<string, unknown>;
+    enabled?: boolean;
+  }): Promise<{ id: string; automation_id: string; type: string; enabled: boolean }> {
+    return this.request("POST", "/api/v1/e2e/automation-triggers", {
+      automation_id: opts.automationId,
+      type: opts.type,
+      config: opts.config ?? {},
+      enabled: opts.enabled ?? true,
+    });
+  }
+
   async seedAutomationRun(
     automationId: string,
     status = "skipped",
@@ -2914,6 +2966,42 @@ export class ApiClient {
       status,
       task_id: taskId ?? "",
     });
+  }
+
+  /**
+   * Fire a fake github_pr_merged event into the in-process event bus so the
+   * automation subscriber picks it up without real GitHub polling. The backend
+   * polls until the resulting automation run task is created and returns its id.
+   * Only works when KANDEV_MOCK_AGENT is active.
+   */
+  async firePRMerged(opts: {
+    taskId: string;
+    automationId: string;
+    owner: string;
+    repo: string;
+    prNumber?: number;
+    baseBranch?: string;
+  }): Promise<{ run_task_id: string }> {
+    return this.request("POST", "/api/v1/e2e/github/fire-pr-merged", {
+      task_id: opts.taskId,
+      automation_id: opts.automationId,
+      owner: opts.owner,
+      repo: opts.repo,
+      pr_number: opts.prNumber ?? 1,
+      base_branch: opts.baseBranch ?? "main",
+    });
+  }
+
+  /**
+   * Fire a manual automation trigger, mirroring the "Run" button path. The
+   * backend polls until the resulting run task is created and returns its id.
+   * Returns { skipped, reason } when the automation is at its concurrency cap.
+   * Only works when KANDEV_MOCK_AGENT is active.
+   */
+  async triggerAutomationManual(
+    automationId: string,
+  ): Promise<{ run_task_id?: string; skipped?: boolean; reason?: string }> {
+    return this.request("POST", `/api/v1/e2e/automations/${automationId}/trigger`, {});
   }
 
   /**

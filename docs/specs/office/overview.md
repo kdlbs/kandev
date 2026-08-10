@@ -73,7 +73,7 @@ This spec is the top-level entry point for Office. It covers the workspace model
 - A project is a container for related tasks, scoped to one or more repositories or filesystem folders.
 - Tasks can be unprojectized (`project_id` null) and continue to behave as today on the kanban.
 - The CEO and worker agents can assign tasks to projects on creation; users can move tasks between projects or remove them via the UI.
-- **Project repositories** are either a git URL (GitHub, GitLab, Bitbucket, any remote) or a local filesystem path. Tasks can target one repo (agent gets a single worktree) or several (multi-worktree session via the existing `TaskSessionWorktree[]` support). Repos are configured at the project level and inherited by tasks; tasks may target a subset.
+- **Project repositories** are either a git URL (GitHub, GitLab, Bitbucket, any remote) or a local filesystem path. Tasks can target one repo (agent gets a single worktree) or several (a task environment owns one repository row per worktree). Repos are configured at the project level and inherited by tasks; tasks may target a subset.
 - **Project executor configuration** is an optional override that defines how agent sessions run for tasks in this project (executor type, image, resource limits, worktree strategy, network policy, environment, prepare scripts). If unset, the workspace default executor is used.
 - **Views**:
   - `/office/projects` lists projects with name, status, color, repo count and names, task counts (total/in-progress/completed/blocked), budget utilization, lead agent and status, and a progress bar.

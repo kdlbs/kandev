@@ -15,6 +15,7 @@ import { RootErrorBoundary, RouteErrorBoundary } from "./app-error-boundary";
 import { SpaRoutes } from "./spa-routes";
 import { installVitePreloadRecovery } from "./vite-preload-recovery";
 import { markRenderingEngine } from "@/lib/browser/rendering-engine";
+import { applyTitlePrefix } from "@/lib/browser/document-title";
 
 installVitePreloadRecovery();
 markRenderingEngine(document.documentElement);
@@ -70,6 +71,10 @@ if (!root) {
 }
 
 void loadBootPayload().then(async (payload) => {
+  // The Go shell already rewrote <title>; this is the /api/v1/app-state boot
+  // path, which never renders through it.
+  applyTitlePrefix(payload.runtime?.titlePrefix, document);
+
   // Only `en` ships in the entry chunk, so a non-English boot has to fetch its
   // catalogs. Awaited HERE, in the promise the mount already waited on, rather
   // than after mounting: with `returnNull: false` a missing key renders as the

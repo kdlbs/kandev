@@ -26,12 +26,17 @@ All env vars use the `KANDEV_` prefix. Nested keys map by replacing `.` with `_`
 |---|---|
 | `server.port` | `KANDEV_SERVER_PORT` |
 | `server.webInternalUrl` | `KANDEV_SERVER_WEBINTERNALURL` (or alias `KANDEV_WEB_INTERNAL_URL`) |
+| `server.webTitlePrefix` | `KANDEV_SERVER_WEBTITLEPREFIX` (or alias `KANDEV_WEB_TITLE_PREFIX`) |
 | `database.dbName` | `KANDEV_DATABASE_DBNAME` |
 | `logging.maxSizeMb` | `KANDEV_LOGGING_MAXSIZEMB` |
 | `homeDir` | `KANDEV_HOME_DIR` (alias) |
 | `logging.level` | `KANDEV_LOG_LEVEL` (alias) |
 
 The aliases on the right are explicit bindings - see `LoadWithPath` in `config.go` for the full list. New keys should follow the deterministic rule (`KANDEV_<SECTION>_<KEYUPPERCASE>`) unless there is a reason to add an alias.
+
+The `make dev` launcher uses `Dev` as the default browser title prefix, and PR
+preview environments use `Preview`. An explicit `KANDEV_WEB_TITLE_PREFIX`
+value overrides those environment defaults.
 
 ## Full `config.yaml` example
 
@@ -48,6 +53,7 @@ server:
   readTimeout: 30          # seconds
   writeTimeout: 30         # seconds
   webInternalUrl: ""       # internal URL the backend uses to call the web app
+  webTitlePrefix: ""       # "TEST" -> browser tab title "TEST Kandev"
 
 database:
   driver: "sqlite"         # "sqlite" or "postgres"

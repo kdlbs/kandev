@@ -79,6 +79,7 @@ import (
 	spriteshandlers "github.com/kandev/kandev/internal/sprites"
 	sshhandlers "github.com/kandev/kandev/internal/ssh"
 	systemsvc "github.com/kandev/kandev/internal/system"
+	"github.com/kandev/kandev/internal/system/storage/tempartifacts"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	"github.com/kandev/kandev/internal/task/models"
@@ -527,6 +528,7 @@ type routeParams struct {
 	services                      *Services
 	systemSvc                     *systemsvc.Service
 	workspaceRestorer             taskhandlers.WorkspaceQuarantineRestorer
+	temporaryArtifacts            *tempartifacts.Registry
 	runtimeFlagsSvc               *runtimeflags.Service
 	dbPool                        *db.Pool
 	agentSettingsController       *agentsettingscontroller.Controller
@@ -548,6 +550,7 @@ type routeParams struct {
 	repoCloner                    *repoclone.Cloner
 	version                       string
 	webInternalURL                string
+	webTitlePrefix                string
 	devMode                       bool
 	httpPort                      int
 	features                      config.FeaturesConfig
@@ -801,7 +804,7 @@ func webAppHandlerOptions(p routeParams) []webapp.HandlerOption {
 // webRuntimeConfig builds the SPA's runtime block. `req` supplies the active
 // locale (from the kandev_locale cookie) so the shell can set <html lang> and the
 // client can activate the right catalog before first paint.
-func webRuntimeConfig(debug bool, req *http.Request) webapp.RuntimeConfig {
+func webRuntimeConfig(debug bool, titlePrefix string, req *http.Request) webapp.RuntimeConfig {
 	return webapp.RuntimeConfig{
 		APIPrefix:                         "/api/v1",
 		WebSocketPath:                     "/ws",
@@ -812,6 +815,7 @@ func webRuntimeConfig(debug bool, req *http.Request) webapp.RuntimeConfig {
 		// this from its own build mode.
 		NonProduction: profiles.DetectEnvironment() != profiles.EnvProd,
 		Locale:        i18n.FromRequest(req),
+		TitlePrefix:   strings.TrimSpace(titlePrefix),
 	}
 }
 
@@ -823,7 +827,7 @@ func bootPayload(ctx context.Context, req *http.Request, p routeParams, route we
 	}
 	payload := webapp.NewBootPayload(
 		route,
-		webRuntimeConfig(p.devMode, req),
+		webRuntimeConfig(p.devMode, p.webTitlePrefix, req),
 		initialState,
 	)
 	payload.RouteData = routeData
@@ -1216,13 +1220,11 @@ func registerSecondaryRoutes(
 			}
 		}
 		ikHandler := improvekandev.NewHandler(p.taskSvc, p.repoCloner, ghCopier, resolveDefaultWorkspace, p.version, p.log)
+		ikHandler.SetTemporaryArtifactRegistry(p.temporaryArtifacts)
 		if p.systemSvc != nil {
 			ikHandler.SetLogBundles(p.systemSvc.LogBundles)
 		}
 		improvekandev.RegisterRoutes(p.router, ikHandler)
-		improvekandev.CleanupStaleBundles(func(path string, err error) {
-			p.log.Warn("Improve Kandev: failed to clean stale bundle", zap.String("path", path), zap.Error(err))
-		})
 		p.log.Debug("Registered Improve Kandev handlers (HTTP)")
 	}
 
@@ -1233,7 +1235,7 @@ func registerSecondaryRoutes(
 		automationSvc = p.services.Automation.Service
 	}
 	registerE2EResetRoutes(
-		p.router, p.taskRepo, p.taskSvc, automationSvc, p.services.GitHub, p.services.GitLab, p.log,
+		p.router, p.taskRepo, p.taskSvc, automationSvc, p.services.GitHub, p.services.GitLab, p.eventBus, p.log,
 	)
 
 	if officetestharness.Enabled() {

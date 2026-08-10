@@ -72,9 +72,11 @@ type CreateAgentRequest struct {
 }
 
 type CreateAgentProfileRequest struct {
-	Name  string
-	Model string
-	Mode  string
+	Name          string
+	Model         string
+	FallbackModel string
+	AutoFallback  bool
+	Mode          string
 	// CLIFlags is the explicit list to persist. When nil the list is seeded
 	// from the agent's curated PermissionSettings() catalogue (all disabled
 	// by default) so a fresh profile opens with the agent's suggestions.
@@ -210,6 +212,8 @@ func (c *Controller) createAgentProfiles(ctx context.Context, agentID, displayNa
 			Name:             profileReq.Name,
 			AgentDisplayName: displayName,
 			Model:            profileReq.Model,
+			FallbackModel:    strings.TrimSpace(profileReq.FallbackModel),
+			AutoFallback:     profileReq.AutoFallback,
 			Mode:             profileReq.Mode,
 			CLIFlags:         cliFlags,
 			EnvVars:          envVarsFromDTO(profileReq.EnvVars),

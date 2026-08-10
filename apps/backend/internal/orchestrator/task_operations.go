@@ -570,6 +570,9 @@ func (s *Service) wrapCreatedSessionPrompt(
 			RequiresCompletionSignal:       s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
 			IncludeCoordinatorTaskControls: !configMode,
 			IncludeTaskTitleTool:           !configMode && titleOwner,
+			Autopilot:                      dbTask.Autopilot,
+			IncludeUserQuestionTool:        !dbTask.Autopilot && !session.IsPassthrough,
+			IncludeParentQuestionTool:      dbTask.Autopilot && dbTask.ParentID != "",
 		}, referenceContext, promptReferenceContext)
 	}
 }
@@ -965,15 +968,17 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// while the task is already bound to a signal-gated step in the DB.
 	if effectivePrompt != "" || len(attachments) > 0 {
 		effectivePrompt = s.applyLaunchPromptContext(ctx, launchPromptContext{
-			prompt:               effectivePrompt,
-			taskID:               task.ID,
-			sessionID:            sessionID,
-			isOfficeTask:         isOfficeTask,
-			isPassthrough:        skipKandevMCPWrap,
-			configMode:           configMode,
-			referenceContext:     promptReferenceContext,
-			includeTaskTitleTool: !configMode && titleOwner,
-			spawnOrigin:          opts.SpawnOrigin,
+			prompt:                    effectivePrompt,
+			taskID:                    task.ID,
+			sessionID:                 sessionID,
+			isOfficeTask:              isOfficeTask,
+			isPassthrough:             skipKandevMCPWrap,
+			configMode:                configMode,
+			referenceContext:          promptReferenceContext,
+			includeTaskTitleTool:      !configMode && titleOwner,
+			autopilot:                 task.Autopilot,
+			includeParentQuestionTool: task.Autopilot && task.ParentID != "",
+			spawnOrigin:               opts.SpawnOrigin,
 		})
 	}
 
@@ -1043,15 +1048,17 @@ func (s *Service) applyWorkflowSessionConfigBeforeLaunchForStep(
 // launchPromptContext carries what the first turn of a launch needs in order to
 // compose its system context.
 type launchPromptContext struct {
-	prompt               string
-	taskID               string
-	sessionID            string
-	isOfficeTask         bool
-	isPassthrough        bool
-	configMode           bool
-	includeTaskTitleTool bool
-	referenceContext     string
-	spawnOrigin          *SpawnOrigin
+	prompt                    string
+	taskID                    string
+	sessionID                 string
+	isOfficeTask              bool
+	isPassthrough             bool
+	configMode                bool
+	includeTaskTitleTool      bool
+	autopilot                 bool
+	includeParentQuestionTool bool
+	referenceContext          string
+	spawnOrigin               *SpawnOrigin
 }
 
 // applyLaunchPromptContext prepends the first-turn system context to a launch
@@ -1082,6 +1089,9 @@ func (s *Service) applyLaunchPromptContext(ctx context.Context, p launchPromptCo
 		RequiresCompletionSignal:       s.StepRequiresCompletionSignal(ctx, p.taskID),
 		IncludeCoordinatorTaskControls: !p.configMode,
 		IncludeTaskTitleTool:           p.includeTaskTitleTool,
+		Autopilot:                      p.autopilot,
+		IncludeUserQuestionTool:        !p.autopilot && !p.isPassthrough,
+		IncludeParentQuestionTool:      p.autopilot && p.includeParentQuestionTool,
 	}, p.referenceContext, spawnContext)
 }
 
@@ -2439,11 +2449,14 @@ func (s *Service) populateEnvironmentWorkspaceInfo(ctx context.Context, session 
 	if session.TaskEnvironmentID != "" && env.ID != session.TaskEnvironmentID {
 		return
 	}
-	if resp.WorktreePath == nil && env.WorktreePath != "" {
-		resp.WorktreePath = &env.WorktreePath
+	if len(env.Repos) == 0 {
+		return
 	}
-	if resp.WorktreeBranch == nil && env.WorktreeBranch != "" {
-		resp.WorktreeBranch = &env.WorktreeBranch
+	if resp.WorktreePath == nil && env.Repos[0].WorktreePath != "" {
+		resp.WorktreePath = &env.Repos[0].WorktreePath
+	}
+	if resp.WorktreeBranch == nil && env.Repos[0].WorktreeBranch != "" {
+		resp.WorktreeBranch = &env.Repos[0].WorktreeBranch
 	}
 }
 

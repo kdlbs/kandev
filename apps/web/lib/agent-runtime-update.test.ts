@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import i18n from "i18next";
 import type { AgentUpdateJob, AgentUpdatePreview } from "@/lib/api";
 import { canApproveAgentRuntimeUpdate, resolveRuntimeVersionPair } from "./agent-runtime-update";
 
@@ -27,12 +28,18 @@ describe("resolveRuntimeVersionPair", () => {
         preview(),
         job({ current_version: "0.63.0", target_version: "0.63.0" }),
       ),
-    ).toEqual({ currentVersion: "0.63.0", targetVersion: "0.63.0", versionsMatch: true });
+    ).toEqual({
+      currentVersion: "0.63.0",
+      hasCurrentVersion: true,
+      targetVersion: "0.63.0",
+      versionsMatch: true,
+    });
   });
 
   it("falls back to preview versions before a job exists", () => {
     expect(resolveRuntimeVersionPair(preview())).toEqual({
       currentVersion: "0.62.0",
+      hasCurrentVersion: true,
       targetVersion: "0.63.0",
       versionsMatch: false,
     });
@@ -67,5 +74,52 @@ describe("canApproveAgentRuntimeUpdate", () => {
     ],
   ])("returns %s = %s", (_name, state, expected) => {
     expect(canApproveAgentRuntimeUpdate(state)).toBe(expected);
+  });
+});
+
+/**
+ * The missing-version predicate used to be `currentVersion !== "Unknown"`, a
+ * comparison against the English placeholder. Once `currentVersion` became
+ * localized, that test was true in every other locale, so a missing version read
+ * as known and the approval gate opened. These pin the state to a flag and the
+ * string to display only.
+ */
+describe("missing current version under a non-English locale", () => {
+  afterEach(async () => {
+    await i18n.changeLanguage("en");
+  });
+
+  const missing = {
+    preview: preview({ current_version: "" }),
+    previewError: null,
+    loading: false,
+    updateInFlight: false,
+    starting: false,
+    installInFlight: false,
+  };
+
+  it.each(["en", "pt-pt", "zh-cn", "pseudo"])("stays un-approvable in %s", async (locale) => {
+    await i18n.changeLanguage(locale);
+
+    const pair = resolveRuntimeVersionPair(preview({ current_version: "" }));
+    expect(pair.hasCurrentVersion).toBe(false);
+    expect(canApproveAgentRuntimeUpdate(missing)).toBe(false);
+  });
+
+  it("still shows a localized placeholder to the user", async () => {
+    await i18n.changeLanguage("pseudo");
+    const pair = resolveRuntimeVersionPair(preview({ current_version: "" }));
+
+    expect(pair.currentVersion).not.toBe("Unknown");
+    expect(pair.currentVersion).toMatch(/[^\x20-\x7E]/);
+  });
+
+  it("does not treat a localized placeholder as matching a target version", async () => {
+    await i18n.changeLanguage("pt-pt");
+    const pair = resolveRuntimeVersionPair(
+      preview({ current_version: "", target_version: "0.63.0" }),
+    );
+
+    expect(pair.versionsMatch).toBe(false);
   });
 });

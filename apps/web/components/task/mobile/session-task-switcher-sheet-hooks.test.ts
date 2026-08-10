@@ -26,6 +26,10 @@ function task(overrides: Partial<SheetTask> = {}): SheetTask {
 }
 
 describe("toSheetItem", () => {
+  it("carries the autopilot marker onto the mobile sheet row", () => {
+    expect(toSheetItem(task({ autopilot: true }), emptyCtx()).autopilot).toBe(true);
+  });
+
   // The mobile task-switcher row must read the same task-level most-active-wins
   // aggregate the desktop sidebar and board card read, so a background-running
   // secondary session is caught on mobile too.

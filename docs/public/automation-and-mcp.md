@@ -98,6 +98,28 @@ Select at least one repository. Although the UI offers **All repos**, an empty r
 
 The current evaluator does not apply label filters, and the current form does not offer them.
 
+### GitHub pull requests merged
+
+The **Pull request merged** condition watches pull requests linked to tasks in the
+automation's workspace. Select **All repositories** or an explicit repository list, then
+optionally filter by the pull request's base branch (for example `main` or `release/*`).
+Kandev uses the existing GitHub PR poller, so a merge can take up to one minute to be
+noticed. There is no backfill sweep when you create or enable the condition: it fires on
+the first qualifying `github.task_pr.updated` event. Linking an already-merged PR, or a
+later sync that changes a merged PR row, can therefore qualify that task once.
+
+Each firing creates a hidden automation run task and carries the linked task id as
+`{{data.task_id}}`. The default prompt asks the agent to call `archive_task_kandev` for
+that task. The backend also binds the run to the event-selected task, so a missing or
+different archive target is rejected before any task is changed. An already archived
+target is safe and reports `already_archived`.
+
+The merge is deduplicated per automation, task, repository, and pull-request number. A
+concurrency-cap skip or a failure before a task is created does not consume that key, but
+there is no durable retry queue; another PR update must arrive for it to be tried again.
+**Run now** creates a manual run without a linked task id, so it tests the automation but
+does not replay a missed merge.
+
 ### GitHub push and CI checks
 
 Push and CI-check conditions are webhook-driven rather than polled. They require a workspace GitHub App connection (Settings > Workspaces > _workspace_ > GitHub) whose installation is subscribed to the `push` and `check_run` events. When the App delivers a matching, HMAC-verified webhook, the installation is resolved to its workspace and the matching automation fires.
@@ -164,6 +186,73 @@ Names ending in `_kandev` are the canonical MCP protocol tool names. Some agent 
 Task tools use normal client discovery. When `step_complete_kandev` is required but is not already visible, the agent should search the active tool catalog for its canonical name. Kandev does not request eager loading through client-specific metadata.
 
 `create_task_kandev` advertises `prompt` for instructions delivered to a newly started agent. Older callers may still send `description` when `prompt` is absent, but sending both is an error; the compatibility name is intentionally omitted from the advertised schema.
+
+### Autopilot tasks and MCP profiles
+
+Task creation accepts one optional boolean:
+
+```go
+mcp.WithBoolean(
+    "autopilot",
+    mcp.Description(
+        "Start this task in autopilot mode. Default: false. The value is fixed at creation and is not inherited by subtasks. The agent does not ask the user directly; it asks its direct parent only for critical decisions.",
+    ),
+),
+```
+
+The value defaults to `false`. It is fixed when the task is created and is not
+copied to a subtask. The task record is the source of truth after creation; a
+later task update cannot switch the prompt or MCP tools between normal and
+autopilot behavior.
+
+The top-level task dialog does not expose this option. The subtask dialog has a
+compact Autopilot switch with help text, but the value remains fixed after the
+subtask is created.
+
+Kandev builds the task MCP server from a backend-owned profile. The base
+surfaces are `kanban-task`, `office-task`, `configuration`, and `external`.
+Optional capability groups, such as task titles, provider automation, user
+questions, and parent questions, are added or removed from that base profile.
+This keeps tool discovery small and makes a context change atomic.
+
+For a Kanban task, normal sessions receive `ask_user_question_kandev`.
+An autopilot child receives `ask_parent_question_kandev` instead. An autopilot
+root receives neither question tool. Kandev never registers both question
+tools for one task session. Office sessions use their smaller skill/CLI
+surface and do not receive Kanban task-creation tools.
+
+An autopilot child should ask its parent only when a decision blocks useful
+progress. `ask_parent_question_kandev` returns a `question_id` immediately;
+the child turn then ends. The parent receives a durable question message and
+answers with `message_task_kandev` using the child task ID and
+`reply_to_question_id`. The child stays in the waiting-for-input state until
+the correlated answer arrives, so the sidebar shows the normal question
+indicator during the wait.
+
+### Create idempotency with `external_id`
+
+A caller that cannot tell whether an earlier `create_task_kandev` call (or `POST /api/v1/tasks`) actually landed — a crash before recording the response, a webhook redelivery — can pass an `external_id` and retry safely instead of guessing. `external_id` is an opaque, caller-chosen string, case-sensitive and byte-exact, unique per workspace: two workspaces can each hold their own task for the same value, but a second create for a value already held in the same workspace never makes a second task there. It is validated and trimmed like other free-text fields; a value that is empty after trimming is treated as if the field were omitted.
+
+Every create response — from both the MCP tool result and the REST response body — always carries two additional fields, whether or not the request included an `external_id`:
+
+- `deduplicated`: `true` when the returned task already existed for that identity, `false` when this call created it.
+- `creation_complete`: `false` only when the returned task is an existing one whose own create had not finished when observed and may still be running (it is not proof the other create is still alive — it may have crashed). Every other outcome reports `true`.
+
+<details>
+<summary>Reading the four outcomes</summary>
+
+| `deduplicated` | `creation_complete` | Meaning |
+| --- | --- | --- |
+| `false` | `true` | This call created the task. |
+| `true` | `true` | An earlier, finished create already holds this identity; that task is returned unchanged, with no new task, agent, or side effect of any kind. |
+| `true` | `false` | An earlier create for this identity had not finished when observed and may still be running — or may have crashed. The task is returned as-is; nothing about it is started, modified, or assumed finished. |
+| `false` | `true`, and `external_id` absent from the response | This call finished creating a task, but another actor released or reused the identity in the narrow window before settlement. The task exists and is otherwise normal; it simply is not holding that identity anymore. |
+
+</details>
+
+**Do not react to `creation_complete: false` by releasing the identity and retrying.** The other create may still be doing required work; releasing it out from under that work can produce two tasks for the same identity. `creation_complete: false` means "ask again later," not "safe to force." An operator who has independently confirmed a create is abandoned (not merely slow) can free its identity with `DELETE /api/v1/workspaces/:workspace_id/tasks/by-external-id?external_id=...`, which returns `204` and leaves the task itself untouched. `GET` the same path to look up the task currently holding an identity, including one still unsettled, without creating anything; it returns `404` when nothing holds it.
+
+Deleting or archiving the task that holds an identity does not carry the identity forward: archiving leaves it in place, but deleting the task frees the identity for reuse by a later create. `external_id` cannot be changed after creation — update requests that include it leave the task's identity untouched. The WebSocket `task.create` action and the plugin host's `Tasks().Create` do not accept `external_id`; use `create_task_kandev` or `POST /api/v1/tasks` for idempotent creates.
 
 A task session currently registers these tool groups:
 

@@ -105,6 +105,20 @@ settings appear only after typing, while **Go to Settings** remains in the comma
 Discovery searches setting names and curated aliases, never saved values, secrets, paths, or other
 configuration content.
 
+## Switch workspace
+
+The workspace picker sits in the sidebar header, next to the Kandev brand. It lists every
+workspace with a **Kanban** or **Office** badge and ends with the workspace-creation actions.
+
+From anywhere, press `Cmd/Ctrl+E` to open it with the keyboard: focus lands inside the menu,
+so arrow keys move between workspaces and **Enter** switches to the highlighted one. If the sidebar
+is collapsed, the shortcut expands it first. Rebind it under
+**Settings > General > Keyboard Shortcuts** (**Open Workspace Picker**) if it clashes with a
+browser or window-manager binding.
+
+The shortcut does nothing on narrow windows and phones, where the sidebar is hidden. Switch
+workspace there from the menu sheet instead.
+
 ## Add a local repository
 
 1. Open **Settings > Workspaces > Default Workspace > Repositories**. If you created or renamed the workspace, choose that workspace instead.

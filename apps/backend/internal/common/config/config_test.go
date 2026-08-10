@@ -32,6 +32,28 @@ func TestGitHubCredentialBrokerConfigEnvironmentBinding(t *testing.T) {
 	}
 }
 
+func TestWebTitlePrefixEnvironmentBinding(t *testing.T) {
+	t.Setenv("KANDEV_WEB_TITLE_PREFIX", "TEST")
+	cfg, err := LoadWithPath(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadWithPath: %v", err)
+	}
+	if got := cfg.Server.WebTitlePrefix; got != "TEST" {
+		t.Fatalf("web title prefix = %q, want %q", got, "TEST")
+	}
+}
+
+func TestWebTitlePrefixDefaultsEmpty(t *testing.T) {
+	t.Setenv("KANDEV_WEB_TITLE_PREFIX", "")
+	cfg, err := LoadWithPath(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadWithPath: %v", err)
+	}
+	if got := cfg.Server.WebTitlePrefix; got != "" {
+		t.Fatalf("web title prefix = %q, want empty", got)
+	}
+}
+
 // minimalValidConfig returns a Config that passes validate() out of the box.
 // Tests modify a copy to exercise individual validation branches.
 func minimalValidConfig() *Config {

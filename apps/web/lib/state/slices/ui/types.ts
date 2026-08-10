@@ -200,6 +200,13 @@ export type AppSidebarState = {
    * the same dialog instance. Transient, never persisted.
    */
   improveDialogOpen: boolean;
+  /**
+   * Open state of the workspace picker in the expanded sidebar header. Owned by
+   * the store so the global WORKSPACE_PICKER shortcut can open the menu without
+   * reaching into the DOM. Transient, never persisted. Only the sidebar-header
+   * picker instance binds to it — the mobile sheet keeps its own local state.
+   */
+  workspacePickerOpen: boolean;
 };
 
 export type UISliceState = {
@@ -348,6 +355,11 @@ export type UISliceActions = {
   toggleAppSidebarSettingsMode: () => void;
   /** Open/close the shared Improve Kandev dialog (footer + New Task routing). */
   setImproveDialogOpen: (open: boolean) => void;
+  /**
+   * Open/close the sidebar-header workspace picker. Opening force-expands the
+   * sidebar, since the trigger renders only in the expanded header.
+   */
+  setWorkspacePickerOpen: (open: boolean) => void;
   /** Record multiple sidebar badge acknowledgements with one localStorage merge. */
   acknowledgeAgentErrors: (stamps: Record<string, string>) => void;
   /** Record that `stamp` has been dismissed for `sessionId`. */

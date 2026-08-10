@@ -203,8 +203,7 @@ type repoStore interface {
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
 	ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error)
 	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
-	CreateTaskSessionWorktree(ctx context.Context, sessionWorktree *models.TaskSessionWorktree) error
-	ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error)
+	ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskEnvironmentRepo, error)
 	ListSessionsWithBranches(ctx context.Context) ([]models.SessionBranchInfo, error)
 	GetRepository(ctx context.Context, id string) (*models.Repository, error)
 	UpdateRepository(ctx context.Context, repository *models.Repository) error
@@ -1820,7 +1819,7 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 		return
 	}
 
-	s.reconcileActiveSessionOnStartup(ctx, running, sessionID, previousState)
+	s.reconcileActiveSessionOnStartup(ctx, running, sessionID, previousState, session)
 }
 
 func (s *Service) reconcileActiveSessionOnStartup(
@@ -1828,15 +1827,21 @@ func (s *Service) reconcileActiveSessionOnStartup(
 	running *models.ExecutorRunning,
 	sessionID string,
 	previousState models.TaskSessionState,
+	session *models.TaskSession,
 ) {
 	// Active states: STARTING, RUNNING, WAITING_FOR_INPUT
 	// Set session to WAITING_FOR_INPUT (idle, ready for lazy resume when user opens it)
 	if previousState != models.TaskSessionStateWaitingForInput {
-		if err := s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""); err != nil {
-			s.logger.Warn("failed to set session to WAITING_FOR_INPUT on startup",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-		}
+		s.updateTaskSessionStateWithHook(
+			ctx,
+			running.TaskID,
+			sessionID,
+			models.TaskSessionStateWaitingForInput,
+			"",
+			false,
+			nil,
+			session,
+		)
 	}
 	s.abandonOpenTurnsOnStartup(ctx, sessionID, "active session reconciled to waiting")
 

@@ -22,7 +22,7 @@ import {
 } from "@tabler/icons-react";
 import { useRegisterCommands } from "@/hooks/use-register-commands";
 import { useGitOperations } from "@/hooks/use-git-operations";
-import { useGitWithFeedback } from "@/hooks/use-git-with-feedback";
+import { gitOperationLabel, useGitWithFeedback } from "@/hooks/use-git-with-feedback";
 import { usePanelActions } from "@/hooks/use-panel-actions";
 import { useVcsDialogs } from "@/components/vcs/vcs-dialogs";
 import { useAppStore } from "@/components/state-provider";
@@ -53,98 +53,124 @@ type GitRunFn = (
 type GitOps = ReturnType<typeof useGitOperations>;
 type PanelActions = ReturnType<typeof usePanelActions>;
 
-function buildSessionCommands(
+// Catalog keys, not copy — safe at module scope because nothing calls `t()`
+// here. The palette groups by the RESOLVED value, so every producer of a group
+// must go through these constants; `global-commands.tsx` does the same.
+const GROUP_AGENT = "common:commandGroupAgent";
+const GROUP_GIT = "common:commandGroupGit";
+const GROUP_WORKSPACE = "common:commandGroupWorkspace";
+const GROUP_PANELS = "common:commandGroupPanels";
+
+export function buildSessionCommands(
   isAgentRunning: boolean | undefined,
   cancelTurn: () => void,
+  t: TFunction,
 ): CommandItem[] {
   const items: CommandItem[] = [];
   if (isAgentRunning)
     items.push({
       id: "session-cancel",
-      label: "Cancel Turn",
-      group: "Agent",
+      label: t("common:commandCancelTurn"),
+      group: t(GROUP_AGENT),
       icon: <IconPlayerStop className="size-3.5" />,
-      keywords: ["cancel", "stop", "turn", "cancel agent", "stop agent", "interrupt agent"],
+      keywords: searchKeywords(t, "common:commandCancelTurnKeywords"),
       action: cancelTurn,
     });
   return items;
 }
 
-function buildGitCommands(
-  git: GitOps,
-  baseBranch: string | undefined,
-  openCommitDialog: () => void,
-  openPRDialog: () => void,
-  runGitWithFeedback: GitRunFn,
-): CommandItem[] {
+type GitCommandOptions = {
+  git: GitOps;
+  baseBranch: string | undefined;
+  openCommitDialog: () => void;
+  openPRDialog: () => void;
+  runGitWithFeedback: GitRunFn;
+  t: TFunction;
+};
+
+export function buildGitCommands({
+  git,
+  baseBranch,
+  openCommitDialog,
+  openPRDialog,
+  runGitWithFeedback,
+  t,
+}: GitCommandOptions): CommandItem[] {
+  const group = t(GROUP_GIT);
   return [
     {
       id: "git-commit",
-      label: "Commit Changes",
-      group: "Git",
+      label: t("common:commandCommitChanges"),
+      group,
       icon: <IconGitCommit className="size-3.5" />,
-      keywords: ["commit", "git", "save changes", "git commit"],
+      keywords: searchKeywords(t, "common:commandCommitChangesKeywords"),
       action: openCommitDialog,
     },
     {
       id: "git-push",
-      label: "Push",
-      group: "Git",
+      label: t("common:gitOpPush"),
+      group,
       icon: <IconArrowUp className="size-3.5" />,
-      keywords: ["push", "git", "push changes", "push to remote", "upload changes"],
-      action: () => runGitWithFeedback(() => git.push(), "Push"),
+      keywords: searchKeywords(t, "common:commandPushKeywords"),
+      action: () => runGitWithFeedback(() => git.push(), gitOperationLabel(t, "common:gitOpPush")),
     },
     {
       id: "git-pull",
-      label: "Pull",
-      group: "Git",
+      label: t("common:gitOpPull"),
+      group,
       icon: <IconArrowDown className="size-3.5" />,
-      keywords: ["pull", "git", "pull changes", "download changes"],
-      action: () => runGitWithFeedback(() => git.pull(), "Pull"),
+      keywords: searchKeywords(t, "common:commandPullKeywords"),
+      action: () => runGitWithFeedback(() => git.pull(), gitOperationLabel(t, "common:gitOpPull")),
     },
     {
       id: "git-create-pr",
-      label: "Create PR",
-      group: "Git",
+      label: t("common:commandCreatePr"),
+      group,
       icon: <IconGitPullRequest className="size-3.5" />,
-      keywords: ["pull request", "pr", "open pull request", "submit pull request", "git"],
+      keywords: searchKeywords(t, "common:commandCreatePrKeywords"),
       action: openPRDialog,
     },
     {
       id: "git-rebase",
-      label: "Rebase",
-      group: "Git",
+      label: t("common:gitOpRebase"),
+      group,
       icon: <IconGitBranch className="size-3.5" />,
-      keywords: ["rebase", "git", "branch"],
+      keywords: searchKeywords(t, "common:commandRebaseKeywords"),
       action: () => {
-        const t = baseBranch?.replace(/^origin\//, "") || "main";
-        return runGitWithFeedback(() => git.rebase(t), "Rebase");
+        const target = baseBranch?.replace(/^origin\//, "") || "main";
+        return runGitWithFeedback(
+          () => git.rebase(target),
+          gitOperationLabel(t, "common:gitOpRebase"),
+        );
       },
     },
     {
       id: "git-merge",
-      label: "Merge",
-      group: "Git",
+      label: t("common:gitOpMerge"),
+      group,
       icon: <IconGitMerge className="size-3.5" />,
-      keywords: ["merge", "git", "branch"],
+      keywords: searchKeywords(t, "common:commandMergeKeywords"),
       action: () => {
-        const t = baseBranch?.replace(/^origin\//, "") || "main";
-        return runGitWithFeedback(() => git.merge(t), "Merge");
+        const target = baseBranch?.replace(/^origin\//, "") || "main";
+        return runGitWithFeedback(
+          () => git.merge(target),
+          gitOperationLabel(t, "common:gitOpMerge"),
+        );
       },
     },
   ];
 }
 
-function buildWorkspaceCommands(sessionId: string): CommandItem[] {
+export function buildWorkspaceCommands(sessionId: string, t: TFunction): CommandItem[] {
   return [
     {
       id: "workspace-create-file",
-      label: "Create File",
-      group: "Workspace",
+      label: t("common:commandCreateFile"),
+      group: t(GROUP_WORKSPACE),
       icon: <IconFilePlus className="size-3.5" />,
-      keywords: ["create", "new", "file", "add"],
+      keywords: searchKeywords(t, "common:commandCreateFileKeywords"),
       enterMode: "input",
-      inputPlaceholder: "File path relative to workspace root...",
+      inputPlaceholder: t("common:commandCreateFilePlaceholder"),
       onInputSubmit: async (path) => {
         const client = getWebSocketClient();
         if (!client) return;
@@ -183,18 +209,18 @@ export function buildTaskCommands({
   const items: CommandItem[] = [
     {
       id: "agent-new",
-      label: "New Agent",
-      group: "Agent",
+      label: t("common:commandNewAgent"),
+      group: t(GROUP_AGENT),
       icon: <IconMessagePlus className="size-3.5" />,
-      keywords: ["new", "agent", "session", "start agent", "new session"],
+      keywords: searchKeywords(t, "common:commandNewAgentKeywords"),
       action: openNewAgent,
     },
     {
       id: "subtask-create",
-      label: "Create Subtask",
+      label: t("common:commandCreateSubtask"),
       group: t("common:commandGroupTasks"),
       icon: <IconSubtask className="size-3.5" />,
-      keywords: ["subtask", "create", "new subtask", "new sub-task", "child task"],
+      keywords: searchKeywords(t, "common:commandCreateSubtaskKeywords"),
       action: openSubtask,
     },
   ];
@@ -213,51 +239,45 @@ export function buildTaskCommands({
   return items;
 }
 
-function buildPanelCommands(
+export function buildPanelCommands(
   panels: PanelActions,
   isPassthrough: boolean | undefined,
+  t: TFunction,
 ): CommandItem[] {
+  const group = t(GROUP_PANELS);
   const items: CommandItem[] = [
     {
       id: "panel-browser",
-      label: "Add Browser Panel",
-      group: "Panels",
+      label: t("common:commandAddBrowserPanel"),
+      group,
       icon: <IconBrowser className="size-3.5" />,
-      keywords: ["browser", "preview", "web", "open browser preview", "web preview", "app preview"],
+      keywords: searchKeywords(t, "common:commandAddBrowserPanelKeywords"),
       action: () => panels.addBrowser(),
     },
     {
       id: "panel-terminal",
-      label: "Add Terminal Panel",
-      group: "Panels",
+      label: t("common:commandAddTerminalPanel"),
+      group,
       icon: <IconTerminal2 className="size-3.5" />,
-      keywords: ["terminal", "shell", "console", "new terminal", "open terminal", "command line"],
+      keywords: searchKeywords(t, "common:commandAddTerminalPanelKeywords"),
       action: () => panels.addTerminal(),
     },
   ];
   if (!isPassthrough)
     items.push({
       id: "panel-plan",
-      label: "Add Plan Panel",
-      group: "Panels",
+      label: t("common:commandAddPlanPanel"),
+      group,
       icon: <IconFileText className="size-3.5" />,
-      keywords: ["plan", "document", "task plan", "implementation plan", "plan details"],
+      keywords: searchKeywords(t, "common:commandAddPlanPanelKeywords"),
       action: () => panels.addPlan(),
     });
   items.push({
     id: "panel-changes",
-    label: "Add Changes Panel",
-    group: "Panels",
+    label: t("common:commandAddChangesPanel"),
+    group,
     icon: <IconFileDiff className="size-3.5" />,
-    keywords: [
-      "changes",
-      "diff",
-      "git changes",
-      "changed files",
-      "source control",
-      "git diff",
-      "review changes",
-    ],
+    keywords: searchKeywords(t, "common:commandAddChangesPanelKeywords"),
     action: () => panels.addChanges(),
   });
   return items;
@@ -364,12 +384,19 @@ export function SessionCommands({
   const commands = useMemo<CommandItem[]>(() => {
     const sessionScoped = sessionId
       ? [
-          ...buildSessionCommands(isAgentRunning, cancelTurn),
+          ...buildSessionCommands(isAgentRunning, cancelTurn, t),
           ...(hasWorktree
-            ? buildGitCommands(git, baseBranch, openCommitDialog, openPRDialog, runGitWithFeedback)
+            ? buildGitCommands({
+                git,
+                baseBranch,
+                openCommitDialog,
+                openPRDialog,
+                runGitWithFeedback,
+                t,
+              })
             : []),
-          ...(hasWorktree ? buildWorkspaceCommands(sessionId) : []),
-          ...buildPanelCommands(panels, isPassthrough),
+          ...(hasWorktree ? buildWorkspaceCommands(sessionId, t) : []),
+          ...buildPanelCommands(panels, isPassthrough, t),
         ]
       : [];
     const items = [

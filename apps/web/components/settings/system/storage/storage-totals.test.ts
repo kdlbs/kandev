@@ -16,6 +16,18 @@ const completeSummary: StorageSummary = {
     unmanaged_size_bytes: 4,
   },
   quarantine: { count: 1, size_bytes: 2 },
+  temporary_artifacts: {
+    available: true,
+    total_count: 1,
+    total_bytes: 12,
+    active_count: 0,
+    active_bytes: 0,
+    protected_count: 0,
+    protected_bytes: 0,
+    stale_count: 1,
+    stale_bytes: 12,
+    skipped_count: 0,
+  },
   docker: {
     available: true,
     managed_container_count: 1,
@@ -28,7 +40,7 @@ const completeSummary: StorageSummary = {
 
 describe("storageAnalysisTotal", () => {
   it("sums non-overlapping top-level measurements", () => {
-    expect(storageAnalysisTotal(completeSummary)).toEqual({ bytes: 37, partial: false });
+    expect(storageAnalysisTotal(completeSummary)).toEqual({ bytes: 49, partial: false });
   });
 
   it("excludes workspace subsets and unused Docker images", () => {
@@ -51,7 +63,7 @@ describe("storageAnalysisTotal", () => {
       docker: { ...completeSummary.docker, available: false },
     };
 
-    expect(storageAnalysisTotal(summary)).toEqual({ bytes: 4, partial: true });
+    expect(storageAnalysisTotal(summary)).toEqual({ bytes: 16, partial: true });
   });
 
   it("does not require a user cache when no distinct path is reported", () => {
@@ -64,7 +76,7 @@ describe("storageAnalysisTotal", () => {
       },
     };
 
-    expect(storageAnalysisTotal(summary)).toEqual({ bytes: 33, partial: false });
+    expect(storageAnalysisTotal(summary)).toEqual({ bytes: 45, partial: false });
   });
 });
 

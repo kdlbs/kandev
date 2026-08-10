@@ -22,12 +22,13 @@ func seedTaskWithSessions(t *testing.T, svc *service.Service, repo seedRepo, ext
 	ctx := context.Background()
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
 	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
-	task, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	result, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-1",
 		Title:       "Multi-session task",
 	})
 	require.NoError(t, err)
+	task := result.Task
 
 	base := time.Now().Add(-time.Hour)
 	primary := &models.TaskSession{
@@ -179,7 +180,7 @@ func TestHandleListTaskSessions_TaskWithoutSessionsReturnsEmptyList(t *testing.T
 	ctx := context.Background()
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
 	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
-	task, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	result, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-1",
 		Title:       "Never started",
@@ -188,7 +189,7 @@ func TestHandleListTaskSessions_TaskWithoutSessionsReturnsEmptyList(t *testing.T
 
 	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
 	msg := makeWSMessage(t, ws.ActionMCPListTaskSessions, map[string]interface{}{
-		"task_id": task.ID,
+		"task_id": result.Task.ID,
 	})
 
 	resp, err := h.handleListTaskSessions(ctx, msg)

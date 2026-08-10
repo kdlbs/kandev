@@ -255,7 +255,7 @@ subscription vocabulary and wildcard rules are in the
 | Repositories | Repositories().List | api_read: repositories | List by workspace id |
 | Messages | Messages().List | api_read: messages | Historical user/agent content; Kandev system blocks are stripped |
 | Message send | Messages().Send | api_write: messages | Sends a prompt to a task session and records plugin:<id> author |
-| Utility agent | InvokeUtilityAgent(ctx, prompt) | agent_invoke: true plus config_schema.utility_agent (format: utility-agent) | One-shot completion using the operator-selected utility agent; missing selection is FailedPrecondition |
+| Utility agent | InvokeUtilityAgent(ctx, prompt) | agent_invoke: true plus config_schema.utility_agent (format: utility-agent) | One-shot completion using the selected utility-agent ID; Kandev resolves that utility's enabled profile, permissions, and launch settings. Missing or stale bindings are FailedPrecondition |
 
 The Go signatures, filters, DTOs, and pagination types live in
 apps/backend/pkg/pluginsdk/host.go and data_types.go. api_write task/message

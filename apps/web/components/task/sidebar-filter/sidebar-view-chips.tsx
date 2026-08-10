@@ -15,6 +15,8 @@ import { CSS } from "@dnd-kit/utilities";
 import { useAppStore } from "@/components/state-provider";
 import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
 import { cn } from "@/lib/utils";
+import { sidebarViewName } from "@/lib/state/slices/ui/sidebar-view-builtins";
+import { useTranslation } from "react-i18next";
 
 const DRAG_ACTIVATION_DISTANCE = 8;
 const TOUCH_DRAG_DELAY_MS = 250;
@@ -80,6 +82,7 @@ function SidebarViewChip({
   active: boolean;
   onSelect: () => void;
 }) {
+  const { t } = useTranslation();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: view.id,
   });
@@ -150,10 +153,10 @@ function SidebarViewChip({
           : "border-transparent text-muted-foreground hover:text-foreground",
         isDragging && "z-50 cursor-grabbing",
       )}
-      title={view.name}
+      title={sidebarViewName(view, t)}
       onClick={handleClick}
     >
-      <span className="block max-w-[120px] truncate">{view.name}</span>
+      <span className="block max-w-[120px] truncate">{sidebarViewName(view, t)}</span>
     </button>
   );
 }

@@ -54,7 +54,7 @@ Right-click an agent tab on desktop to manage it. Available actions depend on it
 | **Set as Primary** | Makes a stoppable session the task's primary target |
 | **Stop** | Cancels the active agent turn for this session |
 | **Resume** | Attempts to continue a completed, failed, or cancelled session |
-| **Delete** | Permanently removes the conversation; if it was primary, another session is promoted when possible |
+| **Delete** | Permanently removes the conversation; if it was primary, another session is promoted when possible. The task workspace and its files are kept — a later session reuses them |
 | **Share** | Opens the publishing preview for an eligible session |
 | **Handoff** | Starts another session with a generated summary of this conversation |
 | **Close Others** | Closes other visible agent panels without deleting their sessions |
@@ -292,7 +292,7 @@ Before moving a task to done:
 ## Troubleshooting
 
 - **New Agent has no profiles:** create a profile compatible with the task executor. A profile for another executor is intentionally hidden.
-- **Summary or generated text fails:** configure the corresponding utility agent and a reachable model in **Settings > Utility Agents**.
+- **Summary or generated text fails:** configure the corresponding utility agent with an enabled ACP profile in **Settings > Utility Agents**. Repair any stale or disabled profile binding before retrying.
 - **Resume fails:** start fresh when the executor no longer has resumable session state, then supply a summary or copy the relevant context.
 - **A peer message never arrives:** check the target session state and ID. Running sessions queue messages; failed or cancelled sessions reject them. For a full queue, expand its chip and run, remove, or clear pending work before retrying; an admin can also review the install-wide limit under **Settings > General > Message Queue**.
 - **Changes is empty:** select the correct repository and comparison, then confirm the agent wrote inside the materialized task path.

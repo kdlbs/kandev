@@ -59,6 +59,9 @@ surfaces. The core stays small; the ecosystem grows independently.
 - Plugins are distributed as a signed-or-unsigned release **tarball** and installed
   either by **URL** (kandev downloads it) or by **manual upload** (multipart file).
   There is no manifest-paste registration step.
+- The Settings > Plugins install dialog SHALL show the primary Install action as
+  busy while an install is in flight, including an animated loading indicator and
+  an installing label, while keeping the action disabled until the pipeline settles.
 - Capability-based access control: a plugin can only call Host RPCs it declared in its
   manifest; undeclared capabilities are rejected with a gRPC `PermissionDenied` status.
 - **Kandev owns the plugin process lifecycle**: it extracts the package, spawns the
@@ -398,7 +401,10 @@ service Host {
   workspace — so a plugin can delegate a lightweight LLM step without holding a
   provider API key. Returns gRPC `FailedPrecondition` when no utility agent is
   configured, selected agent was deleted, or it is disabled. See
-  [ADR 0048](../../decisions/0048-plugin-host-utility-agent-invoke.md).
+  [ADR 0048](../../decisions/0048-plugin-host-utility-agent-invoke.md). The plugin does not select
+  an execution profile directly; the selected utility agent resolves its effective profile and
+  complete launch/permission policy according to
+  [Profile-backed Utility Agents](../agents/utility-agent-profiles.md).
 
 Every Host RPC is capability-gated: `GetState`/`SetState`/`DeleteState`/`ListState`
 check `capabilities.state`, `RevealSecret` checks `capabilities.secrets`,
@@ -770,6 +776,14 @@ complete.
   operator uploads it via `POST /api/plugins/install` (multipart `package`), **THEN**
   kandev runs the same verify → validate → extract → spawn pipeline and the plugin
   reaches `active` without any URL ever being contacted.
+
+- **GIVEN** the operator has entered a valid URL or selected a package in the
+  Settings > Plugins install dialog, **WHEN** the operator submits the install,
+  **THEN** the primary Install action is disabled, marked busy, and shows an
+  animated loading indicator with the installing label until the install and
+  post-install loading pipeline settles. **WHEN** the pipeline succeeds, **THEN**
+  the dialog closes as usual. **WHEN** it fails, **THEN** the indicator stops, the
+  action becomes available for retry, and the existing inline error remains visible.
 
 - **GIVEN** an operator who extracted a plugin package directly into
   `~/.kandev/plugins/<id>/<version>/` on the host filesystem (no install call), **WHEN**

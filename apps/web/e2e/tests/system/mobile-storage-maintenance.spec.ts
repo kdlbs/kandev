@@ -2,10 +2,64 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Route } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
-import { seedManagedGoCache } from "../../helpers/storage-maintenance";
+import {
+  mockTemporaryArtifactOverview,
+  seedManagedGoCache,
+} from "../../helpers/storage-maintenance";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 
 test.describe("Mobile storage maintenance", () => {
+  test("keeps temporary artifact cleanup reachable with a touch-sized action", async ({
+    testPage,
+    prCapture,
+  }) => {
+    await mockTemporaryArtifactOverview(testPage);
+    await testPage.route("**/api/v1/system/storage/run", async (route) => {
+      expect(route.request().postDataJSON()).toEqual({ resources: ["temporary_artifacts"] });
+      await route.fulfill({
+        status: 202,
+        contentType: "application/json",
+        body: JSON.stringify({ job_id: "mobile-temporary-artifacts-cleanup" }),
+      });
+    });
+    await testPage.route("**/api/v1/system/jobs/**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          id: "mobile-temporary-artifacts-cleanup",
+          kind: "storage-cleanup",
+          state: "succeeded",
+          started_at: new Date().toISOString(),
+        }),
+      });
+    });
+
+    await testPage.goto("/settings/system/storage");
+    const trigger = testPage.getByTestId("storage-resource-temporary-artifacts-trigger");
+    await trigger.tap();
+    const cleanButton = testPage.getByTestId("storage-temporary-artifacts-clean");
+    await expect(cleanButton).toBeVisible();
+    const box = await cleanButton.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+    await cleanButton.tap();
+    await expect(testPage.getByText("Clean stale Kandev artifacts?")).toBeVisible();
+    await prCapture.screenshot("temporary-artifacts-confirmation", {
+      caption: "Mobile storage keeps stale artifact cleanup in a reachable confirmation",
+    });
+    await testPage.getByTestId("storage-temporary-artifacts-confirm").tap();
+    await expect(testPage.getByTestId("storage-run-now")).toHaveAttribute(
+      "data-job-state",
+      "succeeded",
+    );
+    await expect
+      .poll(() =>
+        testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      )
+      .toBe(true);
+  });
+
   test("explains busy activity and allows Run anyway without horizontal overflow", async ({
     testPage,
     prCapture,

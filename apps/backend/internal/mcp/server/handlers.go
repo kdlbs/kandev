@@ -173,10 +173,14 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 			"workspace_mode":      req.GetString("workspace_mode", ""),
 			"title":               title,
 			"description":         req.GetString("prompt", ""),
+			"autopilot":           req.GetBool("autopilot", false),
 			"agent_profile_id":    req.GetString("agent_profile_id", ""),
 			"executor_profile_id": req.GetString("executor_profile_id", ""),
 			"source_task_id":      s.taskID,
 			"start_agent":         startAgent,
+		}
+		if externalID := req.GetString("external_id", ""); externalID != "" {
+			payload["external_id"] = externalID
 		}
 
 		// Add repository info. For subtasks an explicit repo overrides the
@@ -382,6 +386,7 @@ func (s *Server) messageTaskHandler() server.ToolHandlerFunc {
 		}
 		copyOptionalStringArg(payload, req, "delivery_mode")
 		copyOptionalStringArg(payload, req, "session_id")
+		copyOptionalStringArg(payload, req, "reply_to_question_id")
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPMessageTask, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -567,6 +572,27 @@ func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
 		}
 
 		return extractQuestionAnswers(result, questions), nil
+	}
+}
+
+func (s *Server) askParentQuestionHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		questions, errResult := parseQuestions(req)
+		if errResult != nil {
+			return errResult, nil
+		}
+		payload := map[string]interface{}{
+			"task_id":    s.taskID,
+			"session_id": s.sessionID,
+			questionsArg: questions,
+			"context":    req.GetString("context", ""),
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPAskParentQuestion, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
 	}
 }
 

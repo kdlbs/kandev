@@ -20,3 +20,16 @@ var ErrRepositoryNotFound = errors.New("repository not found")
 
 // ErrTaskEnvironmentNotFound reports that no task environment row matched the supplied id.
 var ErrTaskEnvironmentNotFound = errors.New("task environment not found")
+
+// ErrExternalIDConflict reports that a task insert lost the uniqueness race
+// on uniq_tasks_external_id — the TOCTOU backstop for the create sequence's
+// step-3 lookup (docs/specs/tasks/external-id-idempotency/spec.md). Callers
+// must re-read by (workspace_id, external_id) and return the winner as a
+// Found outcome rather than surfacing this error.
+var ErrExternalIDConflict = errors.New("external_id already claimed by another task")
+
+// ErrTaskCleanupInProgress reports that a task lifecycle cleanup barrier is
+// active, so new sessions or physical worktrees cannot be admitted for the
+// task. Creation races resolve by rejecting the late comer; the cleanup
+// inventory was captured under the same barrier.
+var ErrTaskCleanupInProgress = errors.New("task cleanup in progress")

@@ -63,6 +63,8 @@ describe("WorkflowSection", () => {
 function makeFs(): DialogFormState {
   return {
     taskName: "",
+    autopilot: false,
+    setAutopilot: () => {},
     setTaskName: () => {},
     hasTitle: false,
     setHasTitle: () => {},

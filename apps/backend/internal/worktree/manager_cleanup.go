@@ -180,14 +180,20 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 		repoLock.Unlock()
 		m.releaseRepoLock(wt.RepositoryPath)
 	}()
-	activeReferences, err := m.CountActiveWorktreeReferences(ctx, wt.ID, []string{wt.SessionID})
+	// CountActiveWorktreeReferences already counts only sessions of OTHER
+	// tasks referencing the owning environment. No exclusions are passed:
+	// the worktree record returned by GetWorktreeByID carries an arbitrary
+	// session of that environment, and excluding it could hide a borrower
+	// and authorize deletion of a workspace another task still holds.
+	activeReferences, err := m.CountActiveWorktreeReferences(ctx, wt.ID, nil)
 	if err != nil {
 		return fmt.Errorf("count active references for worktree %s: %w", wt.ID, err)
 	}
 	if activeReferences > 0 {
-		if err := m.ReleaseWorktreeReference(ctx, wt); err != nil {
-			return fmt.Errorf("release shared worktree reference %s: %w", wt.ID, err)
-		}
+		// The worktree is owned by a task environment that another task's
+		// session still references. The single environment-repository row is
+		// the only record, so there is no per-session reference to release —
+		// leave the row and directory untouched.
 		m.logger.Info("preserved worktree still referenced by another task session",
 			zap.String("worktree_id", wt.ID),
 			zap.String("session_id", wt.SessionID),

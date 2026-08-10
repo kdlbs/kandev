@@ -6,6 +6,7 @@ import {
   ExternalGoCacheDialog,
   PermanentDeleteDialog,
   QuarantinePurgeDialog,
+  TemporaryArtifactsDialog,
 } from "./storage-confirmation-dialogs";
 
 afterEach(cleanup);
@@ -62,6 +63,18 @@ describe("storage confirmation dialogs", () => {
     expect(screen.getByText(/This will permanently remove/).textContent).toBe(
       "This will permanently remove 3 eligible items. 2 protected items remain until their retention deadlines. Type DELETE ELIGIBLE to continue.",
     );
+  });
+
+  it("confirms temporary artifact cleanup without a destructive type gate", () => {
+    const onConfirm = vi.fn();
+    render(<TemporaryArtifactsDialog open onOpenChange={vi.fn()} onConfirm={onConfirm} />);
+
+    expect(screen.getByText(/Eligible registered artifacts/)).toBeTruthy();
+    const action = screen.getByTestId("storage-temporary-artifacts-confirm") as HTMLButtonElement;
+    expect(action.disabled).toBe(false);
+    fireEvent.click(action);
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("textbox")).toBeNull();
   });
 });
 
