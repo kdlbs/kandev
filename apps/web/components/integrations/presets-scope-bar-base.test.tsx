@@ -117,7 +117,17 @@ function renderBar(overrides: Partial<Props> = {}) {
   };
 }
 
+function expectActiveKindReselectionNoop() {
+  const { onSelect } = renderBar();
+
+  fireEvent.click(screen.getByRole("button", { name: "Pull requests" }));
+
+  expect(onSelect).not.toHaveBeenCalled();
+}
+
 describe("IntegrationScopeBar saved defaults", () => {
+  it("ignores reselecting the active kind", expectActiveKindReselectionNoop);
+
   it("delegates kind changes to the explicit callback when provided", () => {
     const onKindChange = vi.fn();
     const { onSelect } = renderBar({ onKindChange });

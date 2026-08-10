@@ -238,6 +238,7 @@ export function IntegrationScopeBar<K extends string>({
   const created = presets.filter((p) => p.group === "created");
 
   const handleKindChange = (kind: K) => {
+    if (kind === selected.kind) return;
     if (onKindChange) {
       onKindChange(kind);
       return;
