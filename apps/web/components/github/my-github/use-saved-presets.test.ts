@@ -157,6 +157,32 @@ describe("useSavedPresets workspace sync", () => {
     expect(updateGitHubWorkspaceSettings).not.toHaveBeenCalled();
   });
 
+  it("keeps mutation callbacks stable across optimistic workspace updates", async () => {
+    vi.mocked(fetchGitHubWorkspaceSettings).mockResolvedValue(workspaceSettings([valid]));
+    vi.mocked(updateGitHubWorkspaceSettings).mockResolvedValue(workspaceSettings());
+
+    const { result } = renderHook(() => useSavedPresets(WORKSPACE_ID));
+    await waitFor(() => expect(result.current.presets).toEqual([valid]));
+    const callbacks = {
+      save: result.current.save,
+      remove: result.current.remove,
+      setDefault: result.current.setDefault,
+    };
+
+    await act(async () => {
+      await result.current.save({
+        kind: "pr",
+        label: "Stable callbacks",
+        customQuery: "is:open",
+        repoFilter: "",
+      });
+    });
+
+    expect(result.current.save).toBe(callbacks.save);
+    expect(result.current.remove).toBe(callbacks.remove);
+    expect(result.current.setDefault).toBe(callbacks.setDefault);
+  });
+
   it("does not remove after workspace presets fail to load", async () => {
     vi.mocked(fetchGitHubWorkspaceSettings).mockRejectedValue(new Error(SETTINGS_DOWN));
 

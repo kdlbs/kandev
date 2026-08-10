@@ -189,6 +189,8 @@ function useSavedPresetMutationContext(
 export function useSavedPresets(workspaceId: string | null = null) {
   const presets = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   const { workspacePresets, setWorkspacePresets } = useWorkspaceSavedPresets(workspaceId);
+  const workspacePresetsRef = useRef(workspacePresets);
+  workspacePresetsRef.current = workspacePresets;
   useUserSavedPresetsSync(!workspaceId);
   const activePresets = workspaceId ? (workspacePresets ?? emptySnapshot) : presets;
   const { mutationContextRef, applyLocal } = useSavedPresetMutationContext(
@@ -206,7 +208,7 @@ export function useSavedPresets(workspaceId: string | null = null) {
 
   const save = useCallback(
     async (input: Omit<SavedPreset, "id" | "createdAt" | "isDefault">) => {
-      if (workspaceId && workspacePresets === undefined) return null;
+      if (workspaceId && workspacePresetsRef.current === undefined) return null;
       const context = mutationContextRef.current;
       const preset: SavedPreset = {
         ...input,
@@ -229,12 +231,12 @@ export function useSavedPresets(workspaceId: string | null = null) {
         throw error;
       }
     },
-    [applyLocal, queueMutation, workspaceId, workspacePresets],
+    [applyLocal, queueMutation, workspaceId],
   );
 
   const remove = useCallback(
     async (id: string) => {
-      if (workspaceId && workspacePresets === undefined) return false;
+      if (workspaceId && workspacePresetsRef.current === undefined) return false;
       const context = mutationContextRef.current;
       const current = context.presets;
       const originalIndex = current.findIndex((preset) => preset.id === id);
@@ -255,7 +257,7 @@ export function useSavedPresets(workspaceId: string | null = null) {
         throw error;
       }
     },
-    [applyLocal, queueMutation, workspaceId, workspacePresets],
+    [applyLocal, queueMutation, workspaceId],
   );
 
   /**
@@ -264,7 +266,7 @@ export function useSavedPresets(workspaceId: string | null = null) {
    */
   const setDefault = useCallback(
     async (kind: SavedPresetKind, id: string | null) => {
-      if (workspaceId && workspacePresets === undefined) return false;
+      if (workspaceId && workspacePresetsRef.current === undefined) return false;
       const context = mutationContextRef.current;
       let persisted = false;
       await queueMutation(async () => {
@@ -282,7 +284,7 @@ export function useSavedPresets(workspaceId: string | null = null) {
       });
       return persisted;
     },
-    [applyLocal, queueMutation, workspaceId, workspacePresets],
+    [applyLocal, queueMutation, workspaceId],
   );
 
   return { presets: activePresets, save, remove, setDefault };
