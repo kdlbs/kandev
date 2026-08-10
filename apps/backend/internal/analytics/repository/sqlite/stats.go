@@ -504,8 +504,18 @@ func buildRepositoryStatsQuery(drv string) string {
 	`, dur)
 }
 
-// GetAgentUsage retrieves usage statistics per agent profile
-func (r *Repository) GetAgentUsage(ctx context.Context, workspaceID string, limit int, start *time.Time) ([]*models.AgentUsage, error) {
+// GetModelUsage retrieves usage statistics per model.
+//
+// Grouping on the model itself is what keeps two ranges consistent. Grouping on
+// the agent profile did not: a profile's snapshot name and model change every
+// time the user reconfigures it, so the group spans several of them and the
+// engine was free to label it from any row it liked — the same profile then
+// reported a different model per range, and per run.
+//
+// Sessions whose snapshot records no model are skipped rather than collected
+// under a blank label, mirroring how sessions with no agent profile were
+// already left out.
+func (r *Repository) GetModelUsage(ctx context.Context, workspaceID string, limit int, start *time.Time) ([]*models.ModelUsage, error) {
 	var startArg any
 	if start != nil {
 		startArg = start.UTC().Format(time.RFC3339)
@@ -513,28 +523,31 @@ func (r *Repository) GetAgentUsage(ctx context.Context, workspaceID string, limi
 
 	drv := r.ro.DriverName()
 	dur := dialect.DurationMs(drv, "turn.completed_at", "turn.started_at")
-	jeName := dialect.JSONExtract(drv, "s.agent_profile_snapshot", "name")
-	jeDisplay := dialect.JSONExtract(drv, "s.agent_profile_snapshot", "agent_display_name")
 	jeModel := dialect.JSONExtract(drv, "s.agent_profile_snapshot", "model")
 	jeModelName := dialect.JSONExtract(drv, "s.agent_profile_snapshot", "model_name")
 	jeLLM := dialect.JSONExtract(drv, "s.agent_profile_snapshot", "llm")
 
 	query := fmt.Sprintf(`
+		WITH scoped AS (
+			SELECT
+				s.id,
+				COALESCE(%s, %s, %s, '') as model
+			FROM task_sessions s
+			JOIN tasks t ON t.id = s.task_id
+			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND (? IS NULL OR s.started_at >= ?)
+		)
 		SELECT
-			s.agent_profile_id,
-			COALESCE(%s, %s, s.agent_profile_id) as agent_profile_name,
-			COALESCE(%s, %s, %s, '') as agent_model,
-			COUNT(DISTINCT s.id) as session_count,
+			scoped.model,
+			COUNT(DISTINCT scoped.id) as session_count,
 			COUNT(DISTINCT turn.id) as turn_count,
 			COALESCE(SUM(CASE WHEN turn.completed_at IS NOT NULL THEN %s ELSE 0 END), 0) as total_duration_ms
-		FROM task_sessions s
-		JOIN tasks t ON t.id = s.task_id
-		LEFT JOIN task_session_turns turn ON turn.task_session_id = s.id
-		WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND s.agent_profile_id != '' AND (? IS NULL OR s.started_at >= ?)
-		GROUP BY s.agent_profile_id
-		ORDER BY session_count DESC
+		FROM scoped
+		LEFT JOIN task_session_turns turn ON turn.task_session_id = scoped.id
+		WHERE scoped.model != ''
+		GROUP BY scoped.model
+		ORDER BY session_count DESC, turn_count DESC, scoped.model ASC
 		LIMIT ?
-	`, jeName, jeDisplay, jeModel, jeModelName, jeLLM, dur)
+	`, jeModel, jeModelName, jeLLM, dur)
 
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), workspaceID, startArg, startArg, limit)
 	if err != nil {
@@ -542,13 +555,12 @@ func (r *Repository) GetAgentUsage(ctx context.Context, workspaceID string, limi
 	}
 	defer func() { _ = rows.Close() }()
 
-	var results []*models.AgentUsage
+	var results []*models.ModelUsage
 	for rows.Next() {
-		var usage models.AgentUsage
+		var usage models.ModelUsage
 		var totalDurationMs float64
 		err := rows.Scan(
-			&usage.AgentProfileID, &usage.AgentProfileName, &usage.AgentModel,
-			&usage.SessionCount, &usage.TurnCount, &totalDurationMs,
+			&usage.Model, &usage.SessionCount, &usage.TurnCount, &totalDurationMs,
 		)
 		if err != nil {
 			return nil, err

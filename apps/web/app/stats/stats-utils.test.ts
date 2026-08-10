@@ -40,7 +40,7 @@ const sampleStats: StatsResponse = {
   task_stats: [],
   daily_activity: [],
   completed_activity: [],
-  agent_usage: [],
+  model_usage: [],
   repository_stats: [
     {
       repository_id: "r1",
