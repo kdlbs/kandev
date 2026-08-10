@@ -240,7 +240,7 @@ describe("useSavedPresetActions default actions", () => {
       mutation = result.current.onToggleSavedDefault(savedPreset);
     });
 
-    expect(markSearchInteracted).toHaveBeenCalledOnce();
+    expect(markSearchInteracted).not.toHaveBeenCalled();
     expect(setDefault).toHaveBeenCalledWith("issue", savedPreset.id);
     expect(result.current.defaultMutationPending).toBe(true);
     expect(setProgrammaticSelection).not.toHaveBeenCalled();
@@ -251,6 +251,7 @@ describe("useSavedPresetActions default actions", () => {
       finish();
       await mutation;
     });
+    expect(markSearchInteracted).toHaveBeenCalledOnce();
     expect(result.current.defaultMutationPending).toBe(false);
   });
 
@@ -259,7 +260,10 @@ describe("useSavedPresetActions default actions", () => {
     const setDefault = vi.fn(async () => {
       throw new Error("settings down");
     });
-    const { result } = renderActions({}, makeStore({ presets: [currentDefault], setDefault }));
+    const { result, markSearchInteracted } = renderActions(
+      {},
+      makeStore({ presets: [currentDefault], setDefault }),
+    );
 
     await act(async () => {
       await result.current.onToggleSavedDefault(currentDefault);
@@ -270,6 +274,7 @@ describe("useSavedPresetActions default actions", () => {
       description: "Failed to update default view",
       variant: "error",
     });
+    expect(markSearchInteracted).not.toHaveBeenCalled();
     expect(result.current.defaultMutationPending).toBe(false);
   });
 });

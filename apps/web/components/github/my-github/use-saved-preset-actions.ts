@@ -80,10 +80,10 @@ export function useSavedPresetActions({
   const onToggleSavedDefault = async (preset: SavedPreset) => {
     if (defaultMutationPendingRef.current) return;
     defaultMutationPendingRef.current = true;
-    markSearchInteracted();
     setDefaultMutationPending(true);
     try {
       await setSavedPresetDefault(preset.kind, preset.isDefault ? null : preset.id);
+      markSearchInteracted();
     } catch {
       toast({
         description: t("integrations:failedToUpdateDefaultView"),
