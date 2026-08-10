@@ -33,6 +33,9 @@ for the executor or local clone before creating a pull request from a task.
 - Issue watches and review watches can create one Kandev task per matching open
   issue or pull request. They retain their workflow, repository, branch,
   instructions, and optional agent profile; duplicate polls are safe.
+- Review-watch settings create a recurring PR-review queue; each open pull
+  request is claimed only once. Saved action presets retain reusable review
+  instructions per workspace and can be copied into a watch or review action.
 - Watch polling runs in the background and can enforce an active-task limit.
   Manual polling remains available for verification and recovery.
 - The Forgejo queue can show PR commits, changed-file counts, comments,
