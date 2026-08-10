@@ -129,7 +129,18 @@ func (s *Service) SetConfig(ctx context.Context, workspaceID string, request *Se
 	if request == nil {
 		return nil, errors.New("forgejo configuration required")
 	}
-	client, err := NewPATClient(request.Origin, request.Token)
+	token := strings.TrimSpace(request.Token)
+	if token == "" {
+		if s.secrets == nil {
+			return nil, errors.New("Forgejo secret store unavailable")
+		}
+		var err error
+		token, err = s.secrets.Reveal(ctx, SecretKeyForWorkspace(workspaceID))
+		if err != nil {
+			return nil, errors.New("Forgejo token required")
+		}
+	}
+	client, err := NewPATClient(request.Origin, token)
 	if err != nil {
 		return nil, err
 	}
@@ -140,14 +151,13 @@ func (s *Service) SetConfig(ctx context.Context, workspaceID string, request *Se
 	config := &Config{WorkspaceID: workspaceID, Origin: client.origin.String(), Username: user.Login, LastOK: true}
 	now := time.Now().UTC()
 	config.LastCheckedAt = &now
-	if strings.TrimSpace(request.Token) == "" {
-		return nil, errors.New("Forgejo token required")
-	}
 	if s.secrets == nil {
 		return nil, errors.New("Forgejo secret store unavailable")
 	}
-	if err := s.secrets.Set(ctx, SecretKeyForWorkspace(workspaceID), "Forgejo token", strings.TrimSpace(request.Token)); err != nil {
-		return nil, err
+	if strings.TrimSpace(request.Token) != "" {
+		if err := s.secrets.Set(ctx, SecretKeyForWorkspace(workspaceID), "Forgejo token", token); err != nil {
+			return nil, err
+		}
 	}
 	if err := s.store.SaveConfig(ctx, config); err != nil {
 		return nil, err

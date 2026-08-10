@@ -143,6 +143,24 @@ func TestService_SetConfigFailureDoesNotPersist(t *testing.T) {
 	}
 }
 
+func TestService_SetConfigRetainsExistingToken(t *testing.T) {
+	service, secrets := newConfigTestService(t)
+	if err := secrets.Set(context.Background(), SecretKeyForWorkspace("workspace-a"), "Forgejo token", "existing-token"); err != nil {
+		t.Fatalf("seed token: %v", err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "token existing-token" {
+			t.Fatalf("authorization = %q", got)
+		}
+		_, _ = w.Write([]byte(`{"login":"alice"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	if _, err := service.SetConfig(context.Background(), "workspace-a", &SetConfigRequest{Origin: server.URL}); err != nil {
+		t.Fatalf("update config while retaining token: %v", err)
+	}
+}
+
 func TestController_RequiresWorkspaceAndReportsUnconfigured(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	service, _ := newConfigTestService(t)
