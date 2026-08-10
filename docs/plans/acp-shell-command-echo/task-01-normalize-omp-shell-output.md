@@ -73,3 +73,15 @@ Implemented the provider-neutral normalization-state repair.
 
 Remaining risk is limited to provider output that is absent before it reaches
 the adapter; this change does not synthesize missing output or separators.
+
+PR fixup verification:
+
+- Review remediation commit `59f10560c8563a3fd68a5885cb555ecddaa302fc` added
+  exit-code assertions, clarified the recognized-stdout wording, and aligned
+  the verification command with the repository backend test target.
+- Focused regressions passed: 2 tests.
+- `rtk make -C apps/backend test` passed.
+- At the exact PR head, CI reported 36 passed, 0 failed, and only `E2E Shard
+  2/14` and `E2E Shard 6/14` still running. The review thread was resolved and
+  the PR was mergeable; GitHub reported `UNSTABLE` only because CI was still
+  in progress.

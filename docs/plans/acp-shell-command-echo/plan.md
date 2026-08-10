@@ -50,6 +50,20 @@ Diagnostic reproduction completed before implementation:
 - Focused regressions passed: 2 tests.
 - Full ACP adapter package passed: 764 tests.
 
+PR fixup verification:
+
+- Review remediation commit `59f10560c8563a3fd68a5885cb555ecddaa302fc` added
+  exit-code assertions for the metadata-only OMP result, clarified the
+  recognized-stdout wording, and changed the task verification to use the
+  repository backend test target.
+- Focused regressions passed: 2 tests.
+- `rtk make -C apps/backend test` passed.
+- At the exact PR head above, CI reported 36 passed, 0 failed, and two E2E
+  shards still in progress: `E2E Shard 2/14` and `E2E Shard 6/14`.
+- The review thread was replied to and resolved; no unresolved review threads
+  or actionable issue comments remain. GitHub reports the PR as mergeable with
+  `mergeStateStatus=UNSTABLE` while those checks run.
+
 ## Implementation Waves And Parallel Candidates
 
 - [x] [Task 01: Normalize OMP structured final shell output](task-01-normalize-omp-shell-output.md) (`done`)
