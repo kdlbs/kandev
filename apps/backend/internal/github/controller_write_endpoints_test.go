@@ -17,20 +17,7 @@ func doControllerJSON(
 	t *testing.T, router http.Handler, method, target string, payload any,
 ) *httptest.ResponseRecorder {
 	t.Helper()
-	var body []byte
-	switch typed := payload.(type) {
-	case nil:
-		body = nil
-	case string:
-		body = []byte(typed)
-	default:
-		encoded, err := json.Marshal(typed)
-		if err != nil {
-			t.Fatalf("marshal payload: %v", err)
-		}
-		body = encoded
-	}
-	request := httptest.NewRequest(method, target, bytes.NewReader(body))
+	request := httptest.NewRequest(method, target, bytes.NewReader(marshalPayload(t, payload)))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)

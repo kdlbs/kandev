@@ -556,6 +556,9 @@ func TestController_GetWorkspaceSettings_RequiresAWorkspace(t *testing.T) {
 	}
 }
 
+// Both auth endpoints route a missing workspace through writeGitHubAuthError,
+// so they owe the caller the 400 + github_workspace_required contract the
+// frontend switches on — not just "some failure".
 func TestController_ClearToken_RequiresAWorkspace(t *testing.T) {
 	router, _ := setupControllerTest(newControllerReadStub())
 	request := httptest.NewRequest(http.MethodDelete, "/api/v1/github/token", nil)
@@ -563,10 +566,7 @@ func TestController_ClearToken_RequiresAWorkspace(t *testing.T) {
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 
-	if response.Code == http.StatusOK {
-		t.Fatalf("status = %d, want a failure when workspace_id is missing; body = %s",
-			response.Code, response.Body)
-	}
+	assertWorkspaceRequiredResponse(t, response)
 }
 
 func TestController_GetStatus_RequiresAWorkspace(t *testing.T) {
@@ -576,9 +576,24 @@ func TestController_GetStatus_RequiresAWorkspace(t *testing.T) {
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 
-	if response.Code == http.StatusOK {
-		t.Fatalf("status = %d, want a failure when workspace_id is missing; body = %s",
-			response.Code, response.Body)
+	assertWorkspaceRequiredResponse(t, response)
+}
+
+func assertWorkspaceRequiredResponse(t *testing.T, response *httptest.ResponseRecorder) {
+	t.Helper()
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body = %s", response.Code, response.Body)
+	}
+	var body struct {
+		Code  string `json:"code"`
+		Error string `json:"error"`
+	}
+	decodeControllerBody(t, response, &body)
+	if body.Code != "github_workspace_required" {
+		t.Errorf("code = %q, want github_workspace_required", body.Code)
+	}
+	if body.Error == "" {
+		t.Error("error message is empty")
 	}
 }
 

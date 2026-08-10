@@ -76,17 +76,26 @@ func newLinkPaginatedPATServer(
 	t.Helper()
 	var recorded []patRequest
 	served := 0
+	// getPaginated follows Link headers strictly in order — request N+1 is only
+	// sent after N's response is fully read — so these handler goroutines never
+	// overlap today. The mutex mirrors newRecordingPATServer and keeps that from
+	// becoming a silent race if a future test drives this server concurrently.
+	var mu sync.Mutex
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		recorded = append(recorded, patRequest{
 			Method: r.Method, Path: r.URL.Path, Query: r.URL.RawQuery, Header: r.Header.Clone(),
 		})
-		if r.URL.Path != path || served >= len(pages) {
+		index := served
+		if r.URL.Path == path && served < len(pages) {
+			served++
+		}
+		mu.Unlock()
+		if r.URL.Path != path || index >= len(pages) {
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"message":"Not Found"}`))
 			return
 		}
-		index := served
-		served++
 		if index < len(pages)-1 {
 			next := githubAPIBase + path + "?per_page=100&page=" + strconv.Itoa(index+2)
 			w.Header().Set("Link", "<"+next+`>; rel="next"`)
