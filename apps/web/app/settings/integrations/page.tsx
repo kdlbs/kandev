@@ -2,6 +2,7 @@ import Link from "@/components/routing/app-link";
 import {
   IconBrandGithub,
   IconBrandGitlab,
+  IconGitFork,
   IconBrandAzure,
   IconBrandSentry,
   IconBrandSlack,
@@ -28,6 +29,12 @@ const INTEGRATIONS = [
     label: "GitLab",
     description: "Merge request creation, discussion replies, and self-managed hosts.",
     Icon: IconBrandGitlab,
+  },
+  {
+    slug: "forgejo",
+    label: "Forgejo",
+    description: "Self-hosted repositories, issues, and pull-request task links.",
+    Icon: IconGitFork,
   },
   {
     slug: "jira",
