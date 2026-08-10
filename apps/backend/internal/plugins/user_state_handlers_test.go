@@ -260,6 +260,181 @@ func TestUserStateListReturnsOrderedEntries(t *testing.T) {
 	}
 }
 
+// TestUserStateScanReturnsAcrossScopeIds pins Approach 3.1's happy path: a
+// cross-scope scan by key returns one entry per scopeId that has that key
+// set, not just the caller's exact scopeId.
+func TestUserStateScanReturnsAcrossScopeIds(t *testing.T) {
+	router, svc, _ := newUserStateTestRouter(t)
+	installUserStatePlugin(t, svc, "kandev-plugin-tags", true)
+
+	for _, taskID := range []string{"task_b", "task_a"} {
+		rec := userStateReq(router, http.MethodPut, "/api/plugins/kandev-plugin-tags/user-state/task/"+taskID+"/tags", "user_1", `{"value":["tag-1"]}`)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("PUT %s status = %d, body=%s", taskID, rec.Code, rec.Body.String())
+		}
+	}
+
+	rec := userStateReq(router, http.MethodGet, "/api/plugins/kandev-plugin-tags/user-state/task?key=tags", "user_1", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("SCAN status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Entries   []state.UserStateScopeEntry `json:"entries"`
+		Truncated bool                        `json:"truncated"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Truncated {
+		t.Fatalf("expected truncated = false")
+	}
+	if len(resp.Entries) != 2 || resp.Entries[0].ScopeID != "task_a" || resp.Entries[1].ScopeID != "task_b" {
+		t.Fatalf("entries = %+v, want [task_a, task_b] order", resp.Entries)
+	}
+}
+
+// TestUserStateScanMissingKeyReturns400 pins the required `key` query param.
+func TestUserStateScanMissingKeyReturns400(t *testing.T) {
+	router, svc, _ := newUserStateTestRouter(t)
+	installUserStatePlugin(t, svc, "kandev-plugin-tags", true)
+
+	rec := userStateReq(router, http.MethodGet, "/api/plugins/kandev-plugin-tags/user-state/task", "user_1", "")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestUserStateScanInvalidKeyReturns400 pins the key format validation.
+func TestUserStateScanInvalidKeyReturns400(t *testing.T) {
+	router, svc, _ := newUserStateTestRouter(t)
+	installUserStatePlugin(t, svc, "kandev-plugin-tags", true)
+
+	rec := userStateReq(router, http.MethodGet, "/api/plugins/kandev-plugin-tags/user-state/task?key=.bad", "user_1", "")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestUserStateScanWithoutCapabilityReturns403 pins AC17 for the scan route.
+func TestUserStateScanWithoutCapabilityReturns403(t *testing.T) {
+	router, svc, _ := newUserStateTestRouter(t)
+	installUserStatePlugin(t, svc, "kandev-plugin-no-user-state", false)
+
+	rec := userStateReq(router, http.MethodGet, "/api/plugins/kandev-plugin-no-user-state/user-state/task?key=tags", "user_1", "")
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestUserStateScanInactivePluginReturns404 pins AC17's 404 half for the scan route.
+func TestUserStateScanInactivePluginReturns404(t *testing.T) {
+	router, _, _ := newUserStateTestRouter(t)
+
+	rec := userStateReq(router, http.MethodGet, "/api/plugins/does-not-exist/user-state/task?key=tags", "user_1", "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestUserStateScanIsolatesByUser pins cross-user isolation for the scan route.
+func TestUserStateScanIsolatesByUser(t *testing.T) {
+	router, svc, _ := newUserStateTestRouter(t)
+	installUserStatePlugin(t, svc, "kandev-plugin-tags", true)
+
+	rec := userStateReq(router, http.MethodPut, "/api/plugins/kandev-plugin-tags/user-state/task/task_a/tags", "user_1", `{"value":["tag-1"]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = userStateReq(router, http.MethodGet, "/api/plugins/kandev-plugin-tags/user-state/task?key=tags", "user_2", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("SCAN status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Entries []state.UserStateScopeEntry `json:"entries"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Entries) != 0 {
+		t.Fatalf("expected no entries visible to user_2, got %+v", resp.Entries)
+	}
+}
+
+// TestUserStateScanRespectsLimit pins the truncated flag and the cap.
+func TestUserStateScanRespectsLimit(t *testing.T) {
+	router, svc, _ := newUserStateTestRouter(t)
+	installUserStatePlugin(t, svc, "kandev-plugin-tags", true)
+
+	for _, taskID := range []string{"task_a", "task_b", "task_c"} {
+		rec := userStateReq(router, http.MethodPut, "/api/plugins/kandev-plugin-tags/user-state/task/"+taskID+"/tags", "user_1", `{"value":["tag-1"]}`)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("PUT %s status = %d, body=%s", taskID, rec.Code, rec.Body.String())
+		}
+	}
+
+	rec := userStateReq(router, http.MethodGet, "/api/plugins/kandev-plugin-tags/user-state/task?key=tags&limit=2", "user_1", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("SCAN status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Entries   []state.UserStateScopeEntry `json:"entries"`
+		Truncated bool                        `json:"truncated"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d: %+v", len(resp.Entries), resp.Entries)
+	}
+	if !resp.Truncated {
+		t.Fatalf("expected truncated = true")
+	}
+}
+
+// TestUserStateScanRouteDoesNotShadowSiblingRoutes is the routing pin the
+// plan calls for: adding GET /:id/user-state/:scope (no scopeId segment)
+// alongside the existing /:scope/:scopeId and /:scope/:scopeId/:key routes
+// must not break either of those, and a trailing slash on the new route
+// must still 400 (missing key), never redirect into a different match.
+func TestUserStateScanRouteDoesNotShadowSiblingRoutes(t *testing.T) {
+	router, svc, _ := newUserStateTestRouter(t)
+	installUserStatePlugin(t, svc, "kandev-plugin-tags", true)
+
+	rec := userStateReq(router, http.MethodPut, "/api/plugins/kandev-plugin-tags/user-state/task/task_1/tags", "user_1", `{"value":["tag-1"]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = userStateReq(router, http.MethodGet, "/api/plugins/kandev-plugin-tags/user-state/task/task_1/tags", "user_1", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET (single) status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = userStateReq(router, http.MethodGet, "/api/plugins/kandev-plugin-tags/user-state/task/task_1", "user_1", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET (list) status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+
+	// A trailing slash on the new scan route has no scopeId segment to
+	// shadow into: gin's RedirectTrailingSlash canonicalizes it (301) back
+	// to the exact same scan path with the same query string, never into a
+	// different (and wrong) route. Follow that redirect and confirm it
+	// lands on the scan handler, not on userStateList/userStateGet.
+	rec = userStateReq(router, http.MethodGet, "/api/plugins/kandev-plugin-tags/user-state/task/?key=tags", "user_1", "")
+	if rec.Code != http.StatusMovedPermanently {
+		t.Fatalf("GET (scan, trailing slash) status = %d, want 301 redirect to the canonical scan path, body=%s", rec.Code, rec.Body.String())
+	}
+	location := rec.Header().Get("Location")
+	if location != "/api/plugins/kandev-plugin-tags/user-state/task?key=tags" {
+		t.Fatalf("redirect Location = %q, want the canonical scan path (not a different route)", location)
+	}
+	rec = userStateReq(router, http.MethodGet, location, "user_1", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET (following redirect) status = %d, want 200 from the scan handler, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 // TestUserStateConditionalWriteConflictReturns409 pins AC28.
 func TestUserStateConditionalWriteConflictReturns409(t *testing.T) {
 	router, svc, _ := newUserStateTestRouter(t)

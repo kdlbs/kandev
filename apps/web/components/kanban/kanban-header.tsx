@@ -241,7 +241,7 @@ function TabletHeader({
           <KanbanDisplayDropdown
             triggerSize="icon-lg"
             currentPage={currentPage}
-            pluginFilters={pluginTaskFilters.filters}
+            pluginFilters={pluginTaskFilters.visibleFilters}
             pluginFilterSelections={pluginTaskFilters.selections}
             onPluginFilterChange={pluginTaskFilters.setFilterSelection}
           />
@@ -334,7 +334,7 @@ function DesktopHeader({
           <KanbanDisplayDropdown
             triggerSize="icon-lg"
             currentPage={currentPage}
-            pluginFilters={pluginTaskFilters.filters}
+            pluginFilters={pluginTaskFilters.visibleFilters}
             pluginFilterSelections={pluginTaskFilters.selections}
             onPluginFilterChange={pluginTaskFilters.setFilterSelection}
           />

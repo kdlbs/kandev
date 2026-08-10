@@ -400,7 +400,7 @@ describe("buildHostApi — host.storage", () => {
   });
 });
 
-describe("buildHostApi — host.storage set/delete/list/subscribe", () => {
+describe("buildHostApi — host.storage set/delete", () => {
   const originalFetch = global.fetch;
 
   afterEach(() => {
@@ -470,6 +470,15 @@ describe("buildHostApi — host.storage set/delete/list/subscribe", () => {
     expect(url).toContain("/api/plugins/kandev-plugin-notes/user-state/task/task_1/note?writerId=");
     expect(init.method).toBe("DELETE");
   });
+});
+
+describe("buildHostApi — host.storage list/listByKey/subscribe", () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    vi.unstubAllEnvs();
+  });
 
   it("list() returns the entries array in order (AC27)", async () => {
     const entries = [
@@ -484,6 +493,50 @@ describe("buildHostApi — host.storage set/delete/list/subscribe", () => {
 
     const host = buildHostApi(NOTES_PLUGIN_ID, createAppStore());
     expect(await host.storage.list("task", "task_1")).toEqual(entries);
+  });
+
+  it("listByKey() GETs /user-state/:scope?key=... and returns entries + truncated", async () => {
+    const entries = [
+      { scopeId: "task_a", value: ["tag-1"], updatedAt: TEST_UPDATED_AT },
+      { scopeId: "task_b", value: ["tag-1"], updatedAt: "2026-01-01T00:00:01Z" },
+    ];
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ entries, truncated: false }), { status: 200 }),
+      );
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const host = buildHostApi(NOTES_PLUGIN_ID, createAppStore());
+    const result = await host.storage.listByKey("task", "tags");
+
+    expect(result).toEqual({ entries, truncated: false });
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toContain("/api/plugins/kandev-plugin-notes/user-state/task?key=tags");
+  });
+
+  it("listByKey() forwards options.limit as a query param", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ entries: [], truncated: false }), { status: 200 }),
+      );
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const host = buildHostApi(NOTES_PLUGIN_ID, createAppStore());
+    await host.storage.listByKey("task", "tags", { limit: 50 });
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toContain("limit=50");
+  });
+
+  it("listByKey() throws on a non-ok response", async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 500 })) as unknown as typeof fetch;
+
+    const host = buildHostApi(NOTES_PLUGIN_ID, createAppStore());
+    await expect(host.storage.listByKey("task", "tags")).rejects.toThrow(/500/);
   });
 
   it("subscribe() returns an unsubscribe function wired through the plugin registry", async () => {

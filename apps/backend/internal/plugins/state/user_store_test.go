@@ -179,6 +179,90 @@ func TestUserStoreListDoesNotLeakAcrossUsers(t *testing.T) {
 	}
 }
 
+// TestUserStoreListByKeyReturnsAcrossScopeIdsOrderedByScopeId pins the
+// cross-scope scan's core contract (Approach 3.1): unlike List, which is
+// pinned to one scopeId, ListByKey fans out across every scopeId for a
+// fixed key, ordered by scope_id -- e.g. every task carrying a given tag id.
+func TestUserStoreListByKeyReturnsAcrossScopeIdsOrderedByScopeId(t *testing.T) {
+	store := newTestUserStore(t)
+	ctx := context.Background()
+
+	for _, scopeID := range []string{"task_zeta", "task_alpha", "task_mu"} {
+		if _, err := store.Set(ctx, "kandev-plugin-tags", "user_1", "task", scopeID, "tags", json.RawMessage(`["tag-1"]`), nil); err != nil {
+			t.Fatalf("set %s: %v", scopeID, err)
+		}
+	}
+	// A different key on the same scope must not appear.
+	if _, err := store.Set(ctx, "kandev-plugin-tags", "user_1", "task", "task_alpha", "other", json.RawMessage(`1`), nil); err != nil {
+		t.Fatalf("set other key: %v", err)
+	}
+
+	entries, err := store.ListByKey(ctx, "kandev-plugin-tags", "user_1", "task", "tags", 100)
+	if err != nil {
+		t.Fatalf("list by key: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d: %+v", len(entries), entries)
+	}
+	want := []string{"task_alpha", "task_mu", "task_zeta"}
+	for i, e := range entries {
+		if e.ScopeID != want[i] {
+			t.Fatalf("entries[%d].ScopeID = %q, want %q (order: %+v)", i, e.ScopeID, want[i], entries)
+		}
+		if string(e.Value) != `["tag-1"]` {
+			t.Fatalf("entries[%d].Value = %q", i, e.Value)
+		}
+	}
+}
+
+// TestUserStoreListByKeyIsolatesByUserAndPlugin pins that a cross-scope scan
+// can never surface another user's or another plugin's rows, even though it
+// scans across scopeIds within one (plugin, user, scope, key).
+func TestUserStoreListByKeyIsolatesByUserAndPlugin(t *testing.T) {
+	store := newTestUserStore(t)
+	ctx := context.Background()
+
+	if _, err := store.Set(ctx, "kandev-plugin-tags", "user_1", "task", "task_a", "tags", json.RawMessage(`["tag-1"]`), nil); err != nil {
+		t.Fatalf("set user_1: %v", err)
+	}
+	if _, err := store.Set(ctx, "kandev-plugin-tags", "user_2", "task", "task_b", "tags", json.RawMessage(`["tag-1"]`), nil); err != nil {
+		t.Fatalf("set user_2: %v", err)
+	}
+	if _, err := store.Set(ctx, "kandev-plugin-other", "user_1", "task", "task_c", "tags", json.RawMessage(`["tag-1"]`), nil); err != nil {
+		t.Fatalf("set other plugin: %v", err)
+	}
+
+	entries, err := store.ListByKey(ctx, "kandev-plugin-tags", "user_1", "task", "tags", 100)
+	if err != nil {
+		t.Fatalf("list by key: %v", err)
+	}
+	if len(entries) != 1 || entries[0].ScopeID != "task_a" {
+		t.Fatalf("expected only task_a visible to user_1/kandev-plugin-tags, got %+v", entries)
+	}
+}
+
+// TestUserStoreListByKeyHonorsLimit pins the hard cap that keeps a
+// pathological board (thousands of tagged tasks) from returning an
+// unbounded payload to the frontend dropdown.
+func TestUserStoreListByKeyHonorsLimit(t *testing.T) {
+	store := newTestUserStore(t)
+	ctx := context.Background()
+
+	for _, scopeID := range []string{"task_a", "task_b", "task_c"} {
+		if _, err := store.Set(ctx, "kandev-plugin-tags", "user_1", "task", scopeID, "tags", json.RawMessage(`["tag-1"]`), nil); err != nil {
+			t.Fatalf("set %s: %v", scopeID, err)
+		}
+	}
+
+	entries, err := store.ListByKey(ctx, "kandev-plugin-tags", "user_1", "task", "tags", 2)
+	if err != nil {
+		t.Fatalf("list by key: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected exactly 2 entries (limit), got %d: %+v", len(entries), entries)
+	}
+}
+
 func TestUserStoreDeleteRemovesEntry(t *testing.T) {
 	store := newTestUserStore(t)
 	ctx := context.Background()

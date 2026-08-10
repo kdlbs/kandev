@@ -206,6 +206,51 @@ func (s *UserStore) List(ctx context.Context, pluginID, userID, scope, scopeID s
 	return entries, nil
 }
 
+// UserStateScopeEntry is a single row returned by UserStore.ListByKey,
+// scanning across every scopeId for a fixed (plugin, user, scope, key).
+type UserStateScopeEntry struct {
+	ScopeID   string          `db:"scope_id" json:"scopeId"`
+	Value     json.RawMessage `db:"value_json" json:"value"`
+	UpdatedAt time.Time       `db:"updated_at" json:"updatedAt"`
+}
+
+// ListByKey returns every state entry for the given plugin/user/scope/key,
+// across every scopeId, ordered by scope_id, capped at limit rows. This is
+// the cross-scope scan (Approach 3.1): the only host-side query that can
+// answer "how many tasks carry this tag" without a plugin-maintained
+// reverse index that would drift on any failed write.
+func (s *UserStore) ListByKey(
+	ctx context.Context, pluginID, userID, scope, key string, limit int,
+) ([]UserStateScopeEntry, error) {
+	rows, err := s.ro.QueryContext(ctx, s.ro.Rebind(`
+		SELECT scope_id, value_json, updated_at FROM plugin_user_state
+		WHERE plugin_id = ? AND user_id = ? AND scope = ? AND state_key = ?
+		ORDER BY scope_id
+		LIMIT ?
+	`), pluginID, userID, scope, key, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var entries []UserStateScopeEntry
+	for rows.Next() {
+		var scopeID, raw, updatedAtStr string
+		if err := rows.Scan(&scopeID, &raw, &updatedAtStr); err != nil {
+			return nil, err
+		}
+		updatedAt, err := time.Parse(time.RFC3339, updatedAtStr)
+		if err != nil {
+			return nil, fmt.Errorf("parse updated_at for scope_id %q: %w", scopeID, err)
+		}
+		entries = append(entries, UserStateScopeEntry{ScopeID: scopeID, Value: json.RawMessage(raw), UpdatedAt: updatedAt})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
 // DeleteAllForPlugin removes every plugin_user_state row for pluginID,
 // across every user, scope, and scope_id. Called by Service.Uninstall (AC20)
 // so a reinstalled or id-reused plugin never inherits stale per-user state.
