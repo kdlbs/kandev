@@ -2,12 +2,13 @@
 
 ## Goal
 
-Add a workspace-scoped Forgejo integration so a Kandev workspace can connect
-directly to a self-hosted Forgejo instance, import repository issues into the
-Kandev task board, and link/create Forgejo pull requests from Kandev tasks.
-
-The first release makes Kandev the execution Kanban and Forgejo the repository
-system of record. It does not attempt a second, continuously mirrored Kanban.
+Add a workspace-scoped Forgejo integration with functional parity to Kandev's
+GitLab integration, translated to Forgejo's REST v1 concepts and capabilities.
+This includes connection management, personal issue and pull-request queues,
+repository discovery, task links, watches, status refresh, action presets,
+and desktop/mobile UI flows. Kandev remains the execution Kanban; Forgejo is
+the repository system of record rather than a second continuously mirrored
+Kanban.
 
 ## Decisions
 
@@ -100,7 +101,8 @@ Extract a shared helper only when a concrete duplicate appears in this work.
 
 ### Persistence
 
-Add only the tables required by the vertical slice:
+Add the complete provider-owned persistence required by GitLab-equivalent
+flows:
 
 - `forgejo_configs(workspace_id, origin, username, last_ok, last_error,
   last_checked_at, revision, created_at, updated_at)`;
@@ -111,7 +113,10 @@ Add only the tables required by the vertical slice:
   last_synced_at, …)`;
 - `forgejo_issue_imports(workspace_id, origin, owner, repo, issue_number,
   task_id, imported_at)` with a uniqueness constraint preventing duplicate
-  task creation from one external issue.
+  task creation from one external issue;
+- watch, membership-subscription, action-preset, and refresh-state tables
+  corresponding to their GitLab counterparts, scoped by workspace and using
+  Forgejo's repository/issue/PR identity.
 
 All lookups must authorize through the owning workspace/task before exposing a
 link. Treat provider URLs and API payload text as untrusted display data.
@@ -151,7 +156,7 @@ form.
      connection and add HTTP-client tests for auth, pagination, malformed JSON,
      401/403/429/5xx, response limits, and origin normalization.
 
-2. **Repository and issue import**
+2. **Repository, issue, and PR parity**
    - Add paginated repository/issue discovery and selected-repository state.
    - Add the issue import/link service with transactional deduplication.
    - Route task creation through the existing task service and preserve the
@@ -159,7 +164,7 @@ form.
    - Add integration tests for workspace isolation, duplicate import races,
      closed issues, and unauthorized cross-workspace access.
 
-3. **Pull-request task linking**
+3. **Task linking and actions**
    - Discover existing PRs by task worktree branch; persist and refresh links.
    - Create a Forgejo PR only after the branch is confirmed pushed by Git;
      surface a clear Git-auth error separately from API-token errors.
@@ -171,20 +176,27 @@ form.
    - Add loading/error/empty states, accessibility labels, responsive mobile
      flow, unit tests, and Playwright coverage using the mock API.
 
-5. **Documentation and delivery**
+5. **Watches, polling, and event parity**
+   - Implement Forgejo equivalents of GitLab issue/review watches, ownership,
+     reset/self-heal, saved action presets, subscriptions, and health polling.
+   - Map reviews, comments/discussions, commits/files, mergeability, CI, and
+     merge actions only to Forgejo endpoints that exist; expose an explicit
+     unsupported response where Forgejo has no equivalent.
+   - Add WebSocket event publication and the same stale-data/reset behavior
+     used by the GitLab UI.
+
+6. **Documentation and delivery**
    - Document token scopes, origin/TLS expectations, separation of API and Git
      credentials, manual-sync behavior, and the non-goals of v1.
    - Run backend unit/lint tests, web typecheck/lint/unit tests, and focused
      desktop/mobile E2E tests. Commit the implementation in reviewable slices
      and open a Kandev PR.
 
-## Explicit non-goals for the first PR
+## Explicit non-goals
 
 - GitHub App compatibility, OAuth flow, or credential brokering.
 - Calling `fj`, `tea`, `gh`, or `git` as the Forgejo API client.
 - Bidirectional Kanban column mapping or automatic issue closure.
-- Webhook-triggered task creation, CI-failure repair, review actions, or merge
-  automation.
 - Forgejo Actions runner administration.
 - Sharing the Forgejo PAT with local, worktree, Docker, SSH, or Sprites agents.
 
