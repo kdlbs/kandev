@@ -76,7 +76,7 @@ function reviewSummary(reviews: ChangeRequestDetailReview[]) {
 function buildAllReviewsContext(reviews: ChangeRequestDetailReview[], url: string) {
   const lines = ["### All PR Reviews", ""];
   for (const review of reviews) {
-    lines.push(`**${review.author.name}** — ${reviewStateLabel(review.state)}`);
+    lines.push(`**${review.author.name}**: ${reviewStateLabel(review.state)}`);
     if (review.body) lines.push(review.body);
     lines.push("");
   }
@@ -196,7 +196,7 @@ export function ChangeRequestReviews({
   if (pendingCount > 0) {
     summaryParts.push(t("integrations:pendingCount", { count: pendingCount }));
   }
-  const summary = summaryParts.length > 0 ? ` — ${summaryParts.join(", ")}` : "";
+  const summary = summaryParts.length > 0 ? `: ${summaryParts.join(", ")}` : "";
   return (
     <CollapsibleSection
       title={t("integrations:reviews", { summary })}

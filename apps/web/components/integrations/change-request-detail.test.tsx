@@ -123,8 +123,8 @@ describe("ChangeRequestDetail interactions", () => {
       onAddContext,
     });
 
-    expect(screen.getByText("Reviews — 1 approved, 1 pending")).toBeTruthy();
-    expect(screen.getByText("CI Checks — 1 failed")).toBeTruthy();
+    expect(screen.getByText("Reviews: 1 approved, 1 pending")).toBeTruthy();
+    expect(screen.getByText("CI Checks: 1 failed")).toBeTruthy();
     expect(screen.getByText("platform (team)")).toBeTruthy();
 
     const addAll = screen.getAllByRole("button", { name: "Add all" });
@@ -132,9 +132,14 @@ describe("ChangeRequestDetail interactions", () => {
     addAll.forEach((button) => fireEvent.click(button));
     expect(onAddContext).toHaveBeenCalledWith("review", expect.stringContaining("All PR Reviews"));
     expect(onAddContext).toHaveBeenCalledWith(
+      "review",
+      expect.stringContaining("**Grace**: Approved"),
+    );
+    expect(onAddContext).toHaveBeenCalledWith(
       "check",
       expect.stringContaining("1 CI Check Failed"),
     );
+    expect(onAddContext).toHaveBeenCalledWith("check", expect.stringContaining("**CI**: failure"));
     expect(onAddContext).toHaveBeenCalledWith(
       "comment",
       expect.stringContaining("All PR Comments"),
@@ -155,7 +160,7 @@ describe("ChangeRequestDetail interactions", () => {
       },
     });
 
-    expect(screen.getByText("Reviews — 2 pending")).toBeTruthy();
+    expect(screen.getByText("Reviews: 2 pending")).toBeTruthy();
   });
 });
 

@@ -71,7 +71,7 @@ function buildAllFailedChecksContext(checks: ChangeRequestDetailCheck[]) {
   const failed = checks.filter(isFailedCheck);
   const lines = [`### ${failed.length} CI Check${failed.length === 1 ? "" : "s"} Failed`, ""];
   for (const check of failed) {
-    lines.push(`**${check.name}** — ${checkConclusionLabel(check)}`);
+    lines.push(`**${check.name}**: ${checkConclusionLabel(check)}`);
     if (check.output) lines.push(check.output);
     if (check.url) lines.push(`URL: ${check.url}`);
     lines.push("");
@@ -102,7 +102,7 @@ export function ChangeRequestChecks({
     return () => clearInterval(interval);
   }, [hasRunning]);
   const summary = checkSummary(detail.checks);
-  const summaryLabel = summary.length > 0 ? ` — ${summary.join(", ")}` : "";
+  const summaryLabel = summary.length > 0 ? `: ${summary.join(", ")}` : "";
   const failed = detail.checks.filter(isFailedCheck);
   return (
     <CollapsibleSection
