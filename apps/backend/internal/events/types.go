@@ -275,6 +275,11 @@ const (
 	GitLabWatchEvent     = "gitlab.watch.event"      // Watch created/deleted
 )
 
+// Event types for Forgejo integration.
+const (
+	ForgejoConfigUpdated = "forgejo.config.updated" // Workspace connection changed
+)
+
 // Event types for Jira integration
 const (
 	JiraNewIssue = "jira.new_issue" // New issue found matching a Jira issue watch

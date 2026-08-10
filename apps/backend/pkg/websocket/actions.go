@@ -480,6 +480,7 @@ const (
 	ActionGitLabMRFilesGet        = "gitlab.mr_files.get"
 	ActionGitLabMRCommitsGet      = "gitlab.mr_commits.get"
 	ActionGitLabTaskMRUpdated     = "gitlab.task_mr.updated"      // Notification
+	ActionForgejoConfigUpdated    = "forgejo.config.updated"      // Notification
 	ActionGitLabMRFeedbackNotify  = "gitlab.mr_feedback.notify"   // Notification
 	ActionGitLabNewReviewMRNotify = "gitlab.new_review_mr.notify" // Notification
 	ActionGitLabTaskMRSync        = "gitlab.task_mr.sync"

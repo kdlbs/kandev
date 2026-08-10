@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 )
 
 var (
@@ -221,6 +223,7 @@ type Service struct {
 	secrets           WorkspaceSecretStore
 	issueTaskCreator  IssueTaskCreator
 	reviewTaskCreator ReviewTaskCreator
+	eventBus          bus.EventBus
 }
 
 // IssueTaskCreator creates a Kandev task for a watched Forgejo issue. It is
@@ -236,6 +239,14 @@ func (s *Service) SetIssueTaskCreator(creator IssueTaskCreator) {
 	s.issueTaskCreator = creator
 }
 func (s *Service) SetReviewTaskCreator(creator ReviewTaskCreator) { s.reviewTaskCreator = creator }
+func (s *Service) SetEventBus(eventBus bus.EventBus)              { s.eventBus = eventBus }
+
+func (s *Service) publishConfigUpdated(ctx context.Context, config *Config) {
+	if s.eventBus == nil || config == nil {
+		return
+	}
+	_ = s.eventBus.Publish(ctx, events.ForgejoConfigUpdated, bus.NewEvent(events.ForgejoConfigUpdated, "forgejo", config))
+}
 
 func (s *Service) GetConfig(ctx context.Context, workspaceID string) (*Config, error) {
 	if strings.TrimSpace(workspaceID) == "" {
@@ -732,7 +743,11 @@ func (s *Service) SetConfig(ctx context.Context, workspaceID string, request *Se
 	if err := s.store.SaveConfig(ctx, config); err != nil {
 		return nil, err
 	}
-	return s.GetConfig(ctx, workspaceID)
+	stored, err := s.GetConfig(ctx, workspaceID)
+	if err == nil {
+		s.publishConfigUpdated(ctx, stored)
+	}
+	return stored, err
 }
 
 func (s *Service) TestConfig(ctx context.Context, request *SetConfigRequest) *TestConnectionResult {
@@ -762,5 +777,9 @@ func (s *Service) DeleteConfig(ctx context.Context, workspaceID string) error {
 			return err
 		}
 	}
-	return s.store.DeleteConfig(ctx, workspaceID)
+	if err := s.store.DeleteConfig(ctx, workspaceID); err != nil {
+		return err
+	}
+	s.publishConfigUpdated(ctx, &Config{WorkspaceID: workspaceID})
+	return nil
 }

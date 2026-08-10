@@ -119,7 +119,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		}
 	}
 	gitlabSvc := initGitLabService(dbPool, eventBus, repos.Secrets, log)
-	forgejoSvc := initForgejoService(dbPool, repos.Secrets, log)
+	forgejoSvc := initForgejoService(dbPool, eventBus, repos.Secrets, log)
 	if forgejoSvc != nil {
 		forgejoSvc.SetIssueTaskCreator(func(ctx context.Context, watch *forgejo.IssueWatch, issue forgejo.Issue) (string, error) {
 			description := fmt.Sprintf("Source Forgejo issue: %s\n\n%s", issue.HTMLURL, issue.Body)
@@ -226,13 +226,15 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 // initForgejoService wires the workspace-scoped Forgejo configuration store.
 // Like other provider integrations, failures are non-fatal so the server is
 // still usable when a local database is temporarily unavailable.
-func initForgejoService(dbPool *db.Pool, secretsStore secrets.SecretStore, log *logger.Logger) *forgejo.Service {
+func initForgejoService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secrets.SecretStore, log *logger.Logger) *forgejo.Service {
 	store, err := forgejo.NewStore(dbPool.Writer(), dbPool.Reader())
 	if err != nil {
 		log.Warn("Forgejo service initialization failed (non-fatal)", zap.Error(err))
 		return nil
 	}
-	return forgejo.NewService(store, secretadapter.New(secretsStore))
+	svc := forgejo.NewService(store, secretadapter.New(secretsStore))
+	svc.SetEventBus(eventBus)
+	return svc
 }
 
 type githubBrokerScopeAuthorizer struct {

@@ -32,6 +32,7 @@ import { registerUsersHandlers } from "@/lib/ws/handlers/users";
 import { registerWorkspacesHandlers } from "@/lib/ws/handlers/workspaces";
 import { registerGitHubHandlers } from "@/lib/ws/handlers/github";
 import { registerGitLabHandlers } from "@/lib/ws/handlers/gitlab";
+import { registerForgejoHandlers } from "@/lib/ws/handlers/forgejo";
 import { registerOfficeHandlers } from "@/lib/ws/handlers/office";
 import { registerRunHandlers } from "@/lib/ws/handlers/run";
 
@@ -69,6 +70,7 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerTurnsHandlers(store),
     ...registerGitHubHandlers(store),
     ...registerGitLabHandlers(store),
+    ...registerForgejoHandlers(store),
     ...registerOfficeHandlers(store),
     ...registerRunHandlers(),
   };
