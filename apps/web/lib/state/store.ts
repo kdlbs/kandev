@@ -25,6 +25,7 @@ import {
   createUISlice,
   createGitHubSlice,
   createGitLabSlice,
+  createForgejoSlice,
   createAzureDevOpsSlice,
   createJiraSlice,
   createLinearSlice,
@@ -42,6 +43,7 @@ import {
   defaultUIState,
   defaultGitHubState,
   defaultGitLabState,
+  defaultForgejoState,
   defaultAzureDevOpsState,
   defaultJiraState,
   defaultLinearState,
@@ -80,6 +82,7 @@ import {
   type AuthSliceActions,
   type GitHubSliceActions,
   type GitLabSliceActions,
+  type ForgejoSliceActions,
   type AzureDevOpsSliceActions,
   type JiraSliceActions,
   type LinearSliceActions,
@@ -181,6 +184,13 @@ export type AppState = KanbanSlice & {
   gitlabActionPresets: (typeof defaultGitLabState)["gitlabActionPresets"];
   gitlabStats: (typeof defaultGitLabState)["gitlabStats"];
   gitlabStatus: (typeof defaultGitLabState)["gitlabStatus"];
+
+  // Forgejo slice
+  forgejoConfig: (typeof defaultForgejoState)["forgejoConfig"];
+  forgejoQueue: (typeof defaultForgejoState)["forgejoQueue"];
+  forgejoIssueWatches: (typeof defaultForgejoState)["forgejoIssueWatches"];
+  forgejoReviewWatches: (typeof defaultForgejoState)["forgejoReviewWatches"];
+  forgejoActionPresets: (typeof defaultForgejoState)["forgejoActionPresets"];
 
   // Azure DevOps slice
   azureDevOpsTaskPullRequests: (typeof defaultAzureDevOpsState)["azureDevOpsTaskPullRequests"];
@@ -496,6 +506,7 @@ export type AppState = KanbanSlice & {
   dismissAgentError: UIA["dismissAgentError"];
 } & GitHubSliceActions &
   GitLabSliceActions &
+  ForgejoSliceActions &
   JiraSliceActions &
   LinearSliceActions &
   OfficeSliceActions &
@@ -538,6 +549,8 @@ export function createAppStore(initialState?: HydrationState) {
       ...createGitHubSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createGitLabSlice(set as any, get as any, api as any),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...createForgejoSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createAzureDevOpsSlice(set as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

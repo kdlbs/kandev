@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect } from "react";
 import { listForgejoQueue } from "@/lib/api/domains/forgejo-api";
 import type { ForgejoIssue, ForgejoPullRequest, ForgejoRepository } from "@/lib/types/forgejo";
+import { useAppStore } from "@/components/state-provider";
 
 export type ForgejoQueue = {
   issues: { repository: ForgejoRepository; issue: ForgejoIssue }[];
@@ -8,23 +9,33 @@ export type ForgejoQueue = {
 };
 
 export function useForgejoQueue(workspaceId: string | undefined) {
-  const [queue, setQueue] = useState<ForgejoQueue | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const state = useAppStore((app) =>
+    workspaceId ? app.forgejoQueue[workspaceId] : undefined,
+  );
+  const setQueue = useAppStore((app) => app.setForgejoQueueState);
+  const setLoading = useAppStore((app) => app.setForgejoQueueLoading);
 
   const refresh = useCallback(async () => {
     if (!workspaceId) return;
-    setLoading(true);
-    setError(null);
+    setLoading(workspaceId, true);
     try {
-      setQueue(await listForgejoQueue({ workspaceId }));
+      setQueue(workspaceId, await listForgejoQueue({ workspaceId }));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not load Forgejo queue");
+      setQueue(
+        workspaceId,
+        null,
+        cause instanceof Error ? cause.message : "Could not load Forgejo queue",
+      );
     } finally {
-      setLoading(false);
+      setLoading(workspaceId, false);
     }
-  }, [workspaceId]);
+  }, [setLoading, setQueue, workspaceId]);
 
   useEffect(() => { void refresh(); }, [refresh]);
-  return { queue, loading, error, refresh };
+  return {
+    queue: state?.data ?? null,
+    loading: state?.loading ?? false,
+    error: state?.error ?? null,
+    refresh,
+  };
 }
