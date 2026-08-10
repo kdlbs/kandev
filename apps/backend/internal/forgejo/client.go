@@ -82,6 +82,15 @@ type PullRequestReview struct {
 	SubmittedAt           *time.Time
 }
 
+type ActionRun struct {
+	ID         int64  `json:"id"`
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+	Event      string `json:"event"`
+	HeadBranch string `json:"head_branch"`
+	HeadSHA    string `json:"head_sha"`
+}
+
 type SubmitPullRequestReviewInput struct {
 	Owner, Repo, Body, Event string
 	Number                   int
@@ -100,6 +109,10 @@ type PullRequestDetailsClient interface {
 type PullRequestReviewWriter interface {
 	CreatePullRequestComment(context.Context, string, string, int, string) (*PullRequestComment, error)
 	SubmitPullRequestReview(context.Context, SubmitPullRequestReviewInput) (*PullRequestReview, error)
+}
+
+type ActionsClient interface {
+	ListActionRuns(context.Context, string, string, int, int) ([]ActionRun, int, error)
 }
 
 type rawPullRequest struct {
@@ -298,6 +311,24 @@ func (c *PATClient) GetPullRequest(ctx context.Context, owner, repo string, numb
 		return nil, err
 	}
 	return raw.pullRequest(), nil
+}
+
+func (c *PATClient) ListActionRuns(ctx context.Context, owner, repo string, page, limit int) ([]ActionRun, int, error) {
+	if strings.TrimSpace(owner) == "" || strings.TrimSpace(repo) == "" {
+		return nil, 0, errors.New("Forgejo owner and repository are required")
+	}
+	var raw struct {
+		WorkflowRuns []ActionRun `json:"workflow_runs"`
+		TotalCount   int         `json:"total_count"`
+	}
+	total, err := c.get(ctx, fmt.Sprintf("/repos/%s/%s/actions/runs", url.PathEscape(owner), url.PathEscape(repo)), pagination(page, limit), &raw)
+	if err != nil {
+		return nil, 0, err
+	}
+	if total == 0 {
+		total = raw.TotalCount
+	}
+	return raw.WorkflowRuns, total, nil
 }
 
 func (c *PATClient) ListPullRequestCommits(ctx context.Context, owner, repo string, number int) ([]PullRequestCommit, error) {

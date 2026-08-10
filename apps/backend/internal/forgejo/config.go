@@ -313,6 +313,7 @@ type PullRequestDetails struct {
 	Files       []PullRequestFile    `json:"files"`
 	Comments    []PullRequestComment `json:"comments"`
 	Reviews     []PullRequestReview  `json:"reviews"`
+	ActionRuns  []ActionRun          `json:"action_runs"`
 }
 
 func (s *Service) GetPullRequestDetails(ctx context.Context, workspaceID, owner, repo string, number int) (*PullRequestDetails, error) {
@@ -344,7 +345,24 @@ func (s *Service) GetPullRequestDetails(ctx context.Context, workspaceID, owner,
 	if err != nil {
 		return nil, err
 	}
-	return &PullRequestDetails{PullRequest: pull, Commits: commits, Files: files, Comments: comments, Reviews: reviews}, nil
+	var runs []ActionRun
+	if actions, ok := client.(ActionsClient); ok {
+		runs, _, err = actions.ListActionRuns(ctx, owner, repo, 1, 100)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &PullRequestDetails{PullRequest: pull, Commits: commits, Files: files, Comments: comments, Reviews: reviews, ActionRuns: filterActionRunsForBranch(runs, pull.Head)}, nil
+}
+
+func filterActionRunsForBranch(runs []ActionRun, branch string) []ActionRun {
+	result := make([]ActionRun, 0, len(runs))
+	for _, run := range runs {
+		if run.HeadBranch == branch {
+			result = append(result, run)
+		}
+	}
+	return result
 }
 
 func (s *Service) CreatePullRequestComment(ctx context.Context, workspaceID, owner, repo string, number int, body string) (*PullRequestComment, error) {

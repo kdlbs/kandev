@@ -193,3 +193,18 @@ func TestPATClientWritesPullRequestFeedback(t *testing.T) {
 		t.Fatalf("review=%#v err=%v", review, err)
 	}
 }
+
+func TestPATClientListsForgejoActionRuns(t *testing.T) {
+	server := newServer(t, func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/api/v1/repos/owner/repo/actions/runs" {
+			t.Fatalf("path=%s", request.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"total_count":1,"workflow_runs":[{"id":4,"status":"completed","conclusion":"success","head_branch":"feature/a"}]}`))
+	})
+	t.Cleanup(server.Close)
+	client, _ := NewPATClient(server.URL, "token")
+	runs, total, err := client.ListActionRuns(context.Background(), "owner", "repo", 1, 30)
+	if err != nil || total != 1 || len(runs) != 1 || runs[0].Conclusion != "success" {
+		t.Fatalf("runs=%#v total=%d err=%v", runs, total, err)
+	}
+}
