@@ -144,7 +144,7 @@ describe("useSidebarSelectionHandler", () => {
         setRepoFilter,
         setUserSelection,
         markSearchInteracted,
-      } as Parameters<typeof useSidebarSelectionHandler>[0] & { currentKind: "pr" }),
+      }),
     );
 
     act(() => result.current({ kind: "issue", source: "preset", id: issuePreset.value }));
@@ -178,7 +178,7 @@ describe("useSidebarSelectionHandler", () => {
         setRepoFilter,
         setUserSelection,
         markSearchInteracted: vi.fn(),
-      } as Parameters<typeof useSidebarSelectionHandler>[0] & { currentKind: "pr" }),
+      }),
     );
 
     act(() => result.current(requested));

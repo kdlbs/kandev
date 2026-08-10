@@ -95,12 +95,12 @@ export function useSidebarSelectionHandler({
   setRepoFilter: (repo: string) => void;
   setUserSelection: (next: SidebarSelection) => void;
   markSearchInteracted: () => void;
-  currentKind?: SidebarSelection["kind"];
+  currentKind: SidebarSelection["kind"];
 }) {
   return useCallback(
     (selection: SidebarSelection) => {
       markSearchInteracted();
-      if (currentKind && selection.kind !== currentKind) {
+      if (selection.kind !== currentKind) {
         const target = resolveDefaultSidebarTarget(
           selection.kind,
           savedPresets,

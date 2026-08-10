@@ -179,8 +179,9 @@ function SavedSection({
               />
               <button
                 type="button"
+                disabled={defaultMutationPending}
                 onClick={() => onDelete(s.id)}
-                className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-wait disabled:opacity-50"
                 title={t("integrations:deleteSavedQueryNamed", { label: s.label })}
                 aria-label={t("integrations:deleteSavedQueryNamed", { label: s.label })}
               >

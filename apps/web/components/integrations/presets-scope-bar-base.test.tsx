@@ -1,11 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { IconInbox } from "@tabler/icons-react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  IntegrationScopeBar,
-  type IntegrationScopeBarProps,
-  type ScopeSavedPreset,
-} from "./presets-scope-bar-base";
+import { IntegrationScopeBar, type IntegrationScopeBarProps } from "./presets-scope-bar-base";
 
 vi.mock("@kandev/ui/dropdown-menu", () => ({
   DropdownMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -38,16 +34,12 @@ vi.mock("@kandev/ui/dropdown-menu", () => ({
 afterEach(cleanup);
 
 type Kind = "pr" | "issue";
-type FutureProps = Omit<IntegrationScopeBarProps<Kind>, "savedPresets"> & {
-  savedPresets: Array<ScopeSavedPreset<Kind> & { isDefault: boolean }>;
-  onToggleSavedDefault?: (id: string) => void;
-  defaultMutationPending?: boolean;
-};
+type Props = IntegrationScopeBarProps<Kind>;
 
-function renderBar(overrides: Partial<FutureProps> = {}) {
+function renderBar(overrides: Partial<Props> = {}) {
   const onSelect = vi.fn();
   const onToggleSavedDefault = vi.fn();
-  const props: FutureProps = {
+  const props: Props = {
     testId: "scope-bar",
     savedMenuTestId: "saved-menu",
     kinds: [
@@ -73,9 +65,9 @@ function renderBar(overrides: Partial<FutureProps> = {}) {
     onSaveCurrent: vi.fn(),
     onToggleSavedDefault,
     ...overrides,
-  } as FutureProps;
+  };
   return {
-    ...render(<IntegrationScopeBar {...(props as IntegrationScopeBarProps<Kind>)} />),
+    ...render(<IntegrationScopeBar {...props} />),
     onSelect,
     onToggleSavedDefault,
   };
@@ -115,6 +107,20 @@ describe("IntegrationScopeBar saved defaults", () => {
       (
         screen.getByRole("button", {
           name: "Set Future default as default view",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Delete Current default saved query",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Delete Future default saved query",
         }) as HTMLButtonElement
       ).disabled,
     ).toBe(true);
