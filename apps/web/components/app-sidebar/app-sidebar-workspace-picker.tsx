@@ -121,7 +121,13 @@ function useControlledMenuFocus(controlledOpen: boolean | undefined) {
     },
     [controlledOpen],
   );
-  return { contentRef, handleOpenAutoFocus };
+  const handleEntryFocus = useCallback(
+    (event: Event) => {
+      if (controlledOpen !== undefined) event.preventDefault();
+    },
+    [controlledOpen],
+  );
+  return { contentRef, handleOpenAutoFocus, handleEntryFocus };
 }
 
 function workspaceType(workspace: WorkspaceItem | undefined): WorkspaceType {
@@ -273,7 +279,7 @@ export function AppSidebarWorkspacePicker({
   const activeWorkspace = workspaces.items.find((w) => w.id === workspaces.activeId);
   const activeId = activeWorkspace?.id ?? null;
   const activeName = activeWorkspace?.name ?? t("sidebar:workspaceFallback");
-  const { contentRef, handleOpenAutoFocus } = useControlledMenuFocus(controlledOpen);
+  const menuFocus = useControlledMenuFocus(controlledOpen);
 
   const handleSelect = useCallback(
     (workspace: WorkspaceItem) => {
@@ -335,8 +341,9 @@ export function AppSidebarWorkspacePicker({
         />
       </DropdownMenuTrigger>
       <DropdownMenuContent
-        ref={contentRef}
-        onOpenAutoFocus={handleOpenAutoFocus}
+        ref={menuFocus.contentRef}
+        onEntryFocus={menuFocus.handleEntryFocus}
+        onOpenAutoFocus={menuFocus.handleOpenAutoFocus}
         align={contentAlign}
         className={cn("w-72", contentClassName)}
       >

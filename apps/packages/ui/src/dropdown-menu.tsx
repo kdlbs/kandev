@@ -27,6 +27,7 @@ type DropdownMenuContentProps = React.ComponentPropsWithoutRef<
 > & {
   // Radix forwards this Menu.Content focus event at runtime, but its dropdown
   // facade omits the prop from the public declaration.
+  onEntryFocus?: (event: Event) => void;
   onOpenAutoFocus?: (event: Event) => void;
 };
 
