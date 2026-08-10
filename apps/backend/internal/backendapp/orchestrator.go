@@ -39,6 +39,8 @@ import (
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	userservice "github.com/kandev/kandev/internal/user/service"
+	utilitymodels "github.com/kandev/kandev/internal/utility/models"
+	utilityservice "github.com/kandev/kandev/internal/utility/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 )
@@ -174,6 +176,13 @@ func provideOrchestrator(
 	// Wire workflow step getter for prompt building
 	if workflowSvc != nil {
 		orchestratorSvc.SetWorkflowStepGetter(&orchestratorWorkflowStepGetterAdapter{svc: workflowSvc})
+	}
+
+	// Wire agent family resolution so configure_session rules can name an agent
+	// the way a workflow author writes it ("Claude") and still match the
+	// canonical ID a session stores ("claude-acp").
+	if agentRegistry != nil {
+		orchestratorSvc.SetAgentFamilyResolver(agentRegistry)
 	}
 
 	// Wire "@name" saved-prompt reference expansion into workflow-step prompt
@@ -372,14 +381,16 @@ func (a *orchestratorWorkflowStepGetterAdapter) GetPreviousStepByPosition(ctx co
 	return a.svc.GetPreviousStepByPosition(ctx, workflowID, currentPosition)
 }
 
-// GetWorkflowAgentProfileID implements orchestrator.WorkflowStepGetter.
-func (a *orchestratorWorkflowStepGetterAdapter) GetWorkflowAgentProfileID(ctx context.Context, workflowID string) (string, error) {
-	return a.svc.GetWorkflowAgentProfileID(ctx, workflowID)
-}
-
-// GetWorkflowPrompt implements orchestrator.WorkflowStepGetter.
-func (a *orchestratorWorkflowStepGetterAdapter) GetWorkflowPrompt(ctx context.Context, workflowID string) (string, error) {
-	return a.svc.GetWorkflowPrompt(ctx, workflowID)
+// GetWorkflowMeta implements orchestrator.WorkflowStepGetter.
+func (a *orchestratorWorkflowStepGetterAdapter) GetWorkflowMeta(ctx context.Context, workflowID string) (orchestrator.WorkflowMeta, error) {
+	meta, err := a.svc.GetWorkflowMeta(ctx, workflowID)
+	if err != nil {
+		return orchestrator.WorkflowMeta{}, err
+	}
+	return orchestrator.WorkflowMeta{
+		AgentProfileID: meta.AgentProfileID,
+		Prompt:         meta.Prompt,
+	}, nil
 }
 
 // reviewTaskCreatorAdapter adapts the task service to the orchestrator's ReviewTaskCreator interface.
@@ -398,7 +409,7 @@ func (a *reviewTaskCreatorAdapter) CreateReviewTask(ctx context.Context, req *or
 			PRNumber:       r.PRNumber,
 		})
 	}
-	return a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	result, err := a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID:    req.WorkspaceID,
 		WorkflowID:     req.WorkflowID,
 		WorkflowStepID: req.WorkflowStepID,
@@ -409,6 +420,10 @@ func (a *reviewTaskCreatorAdapter) CreateReviewTask(ctx context.Context, req *or
 		IsEphemeral:    req.IsEphemeral,
 		Origin:         req.Origin,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return result.Task, nil
 }
 
 // issueTaskCreatorAdapter adapts the task service to the orchestrator's IssueTaskCreator interface.
@@ -425,7 +440,7 @@ func (a *issueTaskCreatorAdapter) CreateIssueTask(ctx context.Context, req *orch
 			BaseBranch:   r.BaseBranch,
 		})
 	}
-	return a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	result, err := a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID:    req.WorkspaceID,
 		WorkflowID:     req.WorkflowID,
 		WorkflowStepID: req.WorkflowStepID,
@@ -434,6 +449,10 @@ func (a *issueTaskCreatorAdapter) CreateIssueTask(ctx context.Context, req *orch
 		Metadata:       req.Metadata,
 		Repositories:   repos,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return result.Task, nil
 }
 
 // jiraServiceAdapter exposes the JIRA service's issue-watch dedup methods to
@@ -537,6 +556,55 @@ func (a *profileLookupAdapter) LookupProfile(ctx context.Context, profileID stri
 // types into it.
 type automationDepsAdapter struct {
 	store *automationpkg.Store
+}
+
+type utilityDepsAdapter struct {
+	svc     *utilityservice.Service
+	userSvc *userservice.Service
+}
+
+func (a *utilityDepsAdapter) ListUtilityAgentsByAgentProfile(ctx context.Context, profileID string) ([]agentsettingscontroller.UtilityAgentReference, error) {
+	if a == nil || a.svc == nil {
+		return nil, nil
+	}
+	agents, err := a.svc.ListAgents(ctx)
+	if err != nil {
+		return nil, err
+	}
+	refs := make([]agentsettingscontroller.UtilityAgentReference, 0)
+	defaultProfileID := ""
+	if a.userSvc != nil {
+		defaultProfileID, err = a.userSvc.GetDefaultUtilityAgentProfileID(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	for _, agent := range agents {
+		if agent != nil && (agent.AgentProfileID == profileID ||
+			(agent.ProfileBindingState == utilitymodels.ProfileBindingInherit && defaultProfileID == profileID)) {
+			refs = append(refs, agentsettingscontroller.UtilityAgentReference{ID: agent.ID, Name: agent.Name})
+		}
+	}
+	return refs, nil
+}
+
+func (a *utilityDepsAdapter) ClearUtilityAgentProfileBindings(ctx context.Context, profileID string) error {
+	if a == nil || a.svc == nil {
+		return nil
+	}
+	if err := a.svc.ClearAgentProfileBindings(ctx, profileID); err != nil {
+		return err
+	}
+	if a.userSvc != nil {
+		defaultProfileID, err := a.userSvc.GetDefaultUtilityAgentProfileID(ctx)
+		if err != nil {
+			return err
+		}
+		if defaultProfileID == profileID {
+			return a.svc.ClearInheritedProfileBindings(ctx)
+		}
+	}
+	return nil
 }
 
 func (a *automationDepsAdapter) ListEnabledAutomationsByAgentProfile(
@@ -968,7 +1036,7 @@ func (a *repositoryResolverAdapter) persistDetectedDefaultBranch(
 	}); err != nil {
 		a.logger.Warn("failed to persist detected default branch",
 			zap.String("repository_id", repo.ID),
-			zap.String("branch", detected),
+			zap.String(branchFieldKey, detected),
 			zap.Error(err))
 	}
 	return detected

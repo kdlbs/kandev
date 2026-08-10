@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/auth/authn"
-	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
@@ -41,16 +40,6 @@ func ownerOnlyAuthorizer(ownerID, workspaceID string) func(context.Context, stri
 		}
 		return repoerrors.ErrWorkspaceNotFound
 	}
-}
-
-func newTestRouter(t *testing.T, svc *Service) *gin.Engine {
-	t.Helper()
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
-	require.NoError(t, err)
-	RegisterRoutes(router, svc, log)
-	return router
 }
 
 func withIdentity(req *http.Request, identity authn.Identity) *http.Request {

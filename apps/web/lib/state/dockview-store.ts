@@ -156,6 +156,7 @@ type DockviewStore = {
   addFileEditorPanel: (path: string, name: string, opts?: OpenPanelOpts) => void;
   promotePreviewToPinned: (type: PreviewType) => void;
   addBrowserPanel: (url?: string, groupId?: string) => void;
+  openBrowserPanel: (url: string) => void;
   addVscodePanel: () => void;
   openInternalVscode: (goto_: { file: string; line: number; col: number } | null) => void;
   addPlanPanel: (opts?: { groupId?: string; quiet?: boolean; inCenter?: boolean }) => void;

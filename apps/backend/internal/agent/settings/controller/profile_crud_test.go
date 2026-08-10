@@ -446,3 +446,60 @@ func TestUpdateProfile_SetsEnabled(t *testing.T) {
 		t.Fatalf("expected stored profile to be re-enabled, got %+v", st.updated)
 	}
 }
+
+// TestUpdateProfile_MixedEnabledAndFallbackPersistsBoth verifies a request
+// carrying enabled plus the fallback fields takes the full-update path. The
+// enabled-only shortcut must never silently drop FallbackModel/AutoFallback
+// supplied in the same PATCH.
+func TestUpdateProfile_MixedEnabledAndFallbackPersistsBoth(t *testing.T) {
+	ctrl := newTestController(map[string]agents.Agent{"test-agent": &testAgent{
+		id:          "test-agent",
+		name:        "test-agent",
+		displayName: "Test Agent",
+		enabled:     true,
+	}})
+	st := newFakeStore()
+	agent := &models.Agent{ID: "agent-1", Name: "test-agent"}
+	st.agents[agent.ID] = agent
+	st.byName[agent.Name] = agent
+	ctrl.repo = st
+
+	profile, err := ctrl.CreateProfile(context.Background(), CreateProfileRequest{
+		AgentID: "agent-1",
+		Name:    "Mixed",
+		Model:   "gpt-5",
+	})
+	if err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+
+	enabled := false
+	fallback := "gpt-5-mini"
+	autoFallback := true
+	updated, err := ctrl.UpdateProfile(context.Background(), UpdateProfileRequest{
+		ID:            profile.ID,
+		Enabled:       &enabled,
+		FallbackModel: &fallback,
+		AutoFallback:  &autoFallback,
+	})
+	if err != nil {
+		t.Fatalf("UpdateProfile: %v", err)
+	}
+	if updated.FallbackModel != fallback {
+		t.Fatalf("response fallback_model = %q, want %q (must not take the enabled-only path)", updated.FallbackModel, fallback)
+	}
+	if updated.Enabled {
+		t.Fatal("response enabled = true, want false")
+	}
+	if !updated.AutoFallback {
+		t.Fatal("response auto_fallback = false, want true")
+	}
+	stored, err := st.GetAgentProfile(context.Background(), profile.ID)
+	if err != nil {
+		t.Fatalf("GetAgentProfile: %v", err)
+	}
+	if stored.FallbackModel != fallback || !stored.AutoFallback {
+		t.Fatalf("stored fallback fields lost: fallback_model=%q auto_fallback=%v",
+			stored.FallbackModel, stored.AutoFallback)
+	}
+}

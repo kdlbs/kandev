@@ -38,7 +38,7 @@ func (s *Service) GetPRFeedbackForAutomation(
 	if err != nil {
 		return nil, err
 	}
-	return s.getPRFeedback(ctx, resolved.Client, resolved.CacheScope, owner, repo, number)
+	return s.getPRFeedback(ctx, resolved.Client, resolved.CacheScope, workspaceID, owner, repo, number)
 }
 
 func (s *Service) MergePRForAutomation(

@@ -6,15 +6,23 @@
  * registers a nav item, a top-level route, a `task-sidebar` slot component,
  * a `main-top-bar` slot component, a `task.created` WS handler, and the
  * `open-demo` keybinding (declared in manifest.yaml's `ui.keybindings`,
- * default `mod+shift+j`) which opens a `host.openModal(...)` demo modal.
- * Uses only host.React/host.jsx.
+ * default `mod+shift+j`) which opens a `host.openModal(...)` demo modal
+ * containing a `host.ui` Tooltip. Uses only host.React/host.jsx/host.ui.
+ *
+ * The plugin page also renders a `host.theme` readout kept current purely
+ * through `host.onThemeChange`, so an e2e can flip the app theme for real and
+ * prove the subscription fires in a browser (jsdom's MutationObserver is a
+ * shim, and jsdom cannot open a Radix tooltip from synthetic hover at all),
+ * plus a button that fires `host.toast.error` against the real sonner
+ * instance the app mounts.
  *
  * It also registers the plugin-hooks surface this fixture exists to drive
  * end to end: a "Notes" task panel (registerTaskPanel, mobile-enabled) that
  * round-trips a single per-user document through host.storage
  * (get on mount, debounced set, subscribe to pick up a write from another
- * tab/surface), a task-card-indicators slot component, and a
- * registerTaskMenuAction under the kanban card's "edit" group.
+ * tab/surface), a task-card-indicators slot component, a task-card-tags slot
+ * component, and a registerTaskMenuAction under the kanban card's "edit"
+ * group.
  *
  * The task-created counter lives in module scope (not component state) with
  * a tiny listener set, so it survives across route navigations (the page
@@ -91,19 +99,43 @@
     initialize: function (registry, host) {
       var React = host.React;
       var jsx = host.jsx;
+      var ui = host.ui;
+
+      // Reads host.theme once on mount, then tracks it purely through
+      // host.onThemeChange — so the readout only stays correct if the
+      // subscription actually fires. Also counts notifications, proving the
+      // host does not re-notify on unrelated <html> class churn.
+      function useHostTheme() {
+        var state = React.useState(function () {
+          return { theme: host.theme, changes: 0 };
+        });
+        var value = state[0];
+        var setValue = state[1];
+        React.useEffect(function () {
+          return host.onThemeChange(function (next) {
+            setValue(function (prev) {
+              return { theme: next, changes: prev.changes + 1 };
+            });
+          });
+        }, []);
+        return value;
+      }
 
       function PluginPage() {
         var count = useCounter(React);
         var connectionState = React.useState("Not checked");
         var connection = connectionState[0];
         var setConnection = connectionState[1];
+        var themeState = useHostTheme();
         function checkConnection() {
           host.api
             .invokeAction("connection-status", {
               workspaceId: host.store.getState().workspaces.activeId || undefined,
             })
             .then(function (result) {
-              setConnection(result.connected ? "Connected" : result.error || "Connection unavailable");
+              setConnection(
+                result.connected ? "Connected" : result.error || "Connection unavailable",
+              );
             })
             .catch(function (error) {
               setConnection(error instanceof Error ? error.message : "Connection unavailable");
@@ -124,7 +156,33 @@
             },
             "Check Bitbucket connection",
           ),
-          jsx("span", { id: "fixture-connection-result", "data-testid": "fixture-connection-result" }, connection),
+          jsx(
+            "span",
+            { id: "fixture-connection-result", "data-testid": "fixture-connection-result" },
+            connection,
+          ),
+          jsx(
+            "span",
+            {
+              "data-testid": "hello-theme-readout",
+              "data-theme-changes": String(themeState.changes),
+            },
+            themeState.theme,
+          ),
+          // host.toast is a per-plugin Proxy over sonner; unit tests only ever
+          // see it against a mocked sonner, so this button is how an e2e
+          // proves a real toast renders and that .error does NOT file a
+          // frontend-error report.
+          jsx(
+            "button",
+            {
+              "data-testid": "hello-toast-error",
+              onClick: function () {
+                host.toast.error("Plugin toast error");
+              },
+            },
+            "toast error",
+          ),
         );
       }
 
@@ -286,6 +344,15 @@
         );
       }
 
+      function CardTags(props) {
+        var slotProps = props.slotProps || {};
+        return jsx(
+          "span",
+          { "data-testid": "e2e-card-tags", "data-task-id": slotProps.taskId },
+          "tags",
+        );
+      }
+
       function StatusSlot(props) {
         var slotProps = props.slotProps || {};
         var id = slotProps.placement === "left" ? "hello-status-left" : "hello-status-right";
@@ -403,6 +470,7 @@
         mobileEnabled: true,
       });
       registry.registerComponent("task-card-indicators", CardIndicator);
+      registry.registerComponent("task-card-tags", CardTags);
       registry.registerTaskMenuAction({
         id: "enhance-notes",
         label: "Enhance notes",
@@ -425,10 +493,21 @@
 
       registry.registerKeybinding("open-demo", function () {
         function DemoModalContent() {
+          // The Tooltip is the point of this modal in e2e: PluginModalHost
+          // mounts outside AppShell, so without its own TooltipProvider a
+          // Tooltip here throws on render and the error boundary swallows the
+          // whole modal. jsdom cannot open a Radix tooltip from synthetic
+          // hover, so real pointer hover is only assertable here.
           return jsx(
             "div",
             { id: "hello-demo-modal", "data-testid": "hello-demo-modal" },
             "Hello from the plugin modal",
+            jsx(
+              ui.Tooltip,
+              null,
+              jsx(ui.TooltipTrigger, { "data-testid": "hello-modal-tooltip-trigger" }, "hover me"),
+              jsx(ui.TooltipContent, null, "Tooltip inside a plugin modal"),
+            ),
           );
         }
         host.openModal({

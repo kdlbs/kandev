@@ -214,6 +214,7 @@ to strings, but an unmounted name renders nowhere.
 | app-status-bar-right | Right side of desktop status bar or mobile status drawer | AppStatusBarSlotProps |
 | plugin-settings | Top of this plugin's Settings > Plugins page | { pluginId, status }; owner-scoped to the plugin being viewed |
 | task-card-indicators | Kanban card, beside the PR status icon | { taskId, workspaceId, workflowStepId } |
+| task-card-tags | Kanban card, its own row below the badges row | { taskId, workspaceId, workflowStepId } |
 
 AppStatusBarSlotProps is { placement, presentation, density, pathname,
 activeWorkspaceId, activeTaskId, activeSessionId }. Desktop presentation is a
@@ -254,7 +255,7 @@ subscription vocabulary and wildcard rules are in the
 | Repositories | Repositories().List | api_read: repositories | List by workspace id |
 | Messages | Messages().List | api_read: messages | Historical user/agent content; Kandev system blocks are stripped |
 | Message send | Messages().Send | api_write: messages | Sends a prompt to a task session and records plugin:<id> author |
-| Utility agent | InvokeUtilityAgent(ctx, prompt) | agent_invoke: true plus config_schema.utility_agent (format: utility-agent) | One-shot completion using the operator-selected utility agent; missing selection is FailedPrecondition |
+| Utility agent | InvokeUtilityAgent(ctx, prompt) | agent_invoke: true plus config_schema.utility_agent (format: utility-agent) | One-shot completion using the selected utility-agent ID; Kandev resolves that utility's enabled profile, permissions, and launch settings. Missing or stale bindings are FailedPrecondition |
 
 The Go signatures, filters, DTOs, and pagination types live in
 apps/backend/pkg/pluginsdk/host.go and data_types.go. api_write task/message
@@ -1455,10 +1456,14 @@ menu — group `"edit"` nests it inside the `Edit` submenu, group `"primary"`
 renders it as a flat, top-level item positioned between the "Move
 to"/"Send to workflow" submenus and the "Link" submenu.
 `task-card-indicators` (see the named slots table) is the matching read-only
-surface, rendered beside the PR status icon on every card. Both `visible(context)`
-and `run(context)` receive the card's actual `presentation`: `"desktop"` on the
-desktop kanban and `"mobile"` on the phone kanban. Use it when an action needs to
-choose responsive behavior; the host supplies it through the card composition.
+surface, rendered beside the PR status icon on every card. `task-card-tags`
+is a sibling read-only surface with the same `slotProps` shape, mounted in its
+own row instead of that cramped title-row spot — reach for it when a
+contribution (e.g. a row of tag chips) needs its own width. Both
+`visible(context)` and `run(context)` receive the card's actual `presentation`:
+`"desktop"` on the desktop kanban and `"mobile"` on the phone kanban. Use it
+when an action needs to choose responsive behavior; the host supplies it
+through the card composition.
 
 ```js
 registry.registerTaskMenuAction({

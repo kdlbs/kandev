@@ -54,6 +54,7 @@ export function useSubtaskFormState(workspaceId: string | null): DialogFormState
   const prInfoByUrl = usePRInfoByURL(workspaceId);
   const [agentProfileId, setAgentProfileId] = useState("");
   const [executorProfileId, setExecutorProfileId] = useState("");
+  const [autopilot, setAutopilot] = useState(false);
   const [useRemote, setUseRemote] = useState(false);
   const [githubUrlError, setGitHubUrlError] = useState<string | null>(null);
   // Discovered (on-disk) repos — populated by useDiscoverReposEffect when the
@@ -95,6 +96,8 @@ export function useSubtaskFormState(workspaceId: string | null): DialogFormState
       setExecutorId: NOOP,
       executorProfileId,
       setExecutorProfileId,
+      autopilot,
+      setAutopilot,
       discoveredRepositories,
       setDiscoveredRepositories,
       discoverReposLoading,
@@ -134,6 +137,7 @@ export function useSubtaskFormState(workspaceId: string | null): DialogFormState
       prInfoByUrl,
       agentProfileId,
       executorProfileId,
+      autopilot,
       useRemote,
       githubUrlError,
       discoveredRepositories,
@@ -159,6 +163,8 @@ const INERT_TITLE_DRAFT = {
   setHasDescription: NOOP,
   draftDescription: "",
   openCycle: 0,
+  autopilot: false,
+  setAutopilot: NOOP,
 } as const;
 
 // Fresh-branch (local-executor-only) and no-repo / scratch workspace mode are

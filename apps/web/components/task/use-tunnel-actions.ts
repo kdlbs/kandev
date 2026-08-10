@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import { startTunnel, stopTunnel } from "@/lib/api/domains/port-api";
 import { toast } from "@/lib/toast/sonner";
+import { t } from "@/lib/i18n";
 
 export function useTunnelActions(
   sessionId: string,
@@ -16,10 +17,12 @@ export function useTunnelActions(
       try {
         const tunnelPort = await startTunnel(sessionId, port, requestedPort);
         setActiveTunnels((prev) => new Map(prev).set(port, tunnelPort));
-        toast.success(`Tunnel started on port ${tunnelPort}`);
+        toast.success(t("task:tunnelStartedOnPort", { port: tunnelPort }));
       } catch (err) {
         toast.error(
-          `Failed to start tunnel: ${err instanceof Error ? err.message : "unknown error"}`,
+          t("task:failedToStartTunnel", {
+            error: err instanceof Error ? err.message : t("task:unknownError"),
+          }),
         );
       } finally {
         setPendingTunnels((prev) => {
@@ -42,10 +45,12 @@ export function useTunnelActions(
           next.delete(port);
           return next;
         });
-        toast.success("Tunnel stopped");
+        toast.success(t("task:tunnelStopped"));
       } catch (err) {
         toast.error(
-          `Failed to stop tunnel: ${err instanceof Error ? err.message : "unknown error"}`,
+          t("task:failedToStopTunnel", {
+            error: err instanceof Error ? err.message : t("task:unknownError"),
+          }),
         );
       } finally {
         setPendingTunnels((prev) => {

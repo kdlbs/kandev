@@ -25,6 +25,7 @@ type Props = { runId: string };
 // pseudo-English and could never be localized — one key per outcome instead.
 const OUTCOME_LABEL: Record<RouteAttemptOutcome, string> = {
   launched: "office:routeOutcomeLaunched",
+  retry_scheduled: "office:routeOutcomeRetryScheduled",
   failed_provider_unavailable: "office:routeOutcomeFailedProviderUnavailable",
   failed_other: "office:routeOutcomeFailedOther",
   skipped_degraded: "office:routeOutcomeSkippedDegraded",
@@ -38,6 +39,7 @@ const OUTCOME_VARIANT: Record<
   "default" | "secondary" | "destructive" | "outline"
 > = {
   launched: "default",
+  retry_scheduled: "secondary",
   failed_provider_unavailable: "destructive",
   failed_other: "destructive",
   skipped_degraded: "outline",

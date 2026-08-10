@@ -116,15 +116,111 @@ func isOfficeRequest(req *CreateTaskRequest) bool {
 		req.Origin == models.TaskOriginOnboarding
 }
 
-// CreateTask creates a new task and publishes a task.created event.
-// WorkflowID is required for non-ephemeral kanban tasks.
-// Office tasks (project_id set, or origin is agent_created/routine)
-// auto-resolve to the workspace's office workflow.
-// Ephemeral tasks (quick chat, config chat) must NOT have a workflow.
-func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*models.Task, error) {
-	if err := s.authorizeWorkspaceID(ctx, req.WorkspaceID); err != nil {
-		return nil, err
+// CreateTaskOutcome distinguishes why Service.CreateTask returned the task it
+// did, per the create-idempotency contract
+// (docs/specs/tasks/external-id-idempotency/spec.md). Only meaningful when
+// the request carried an external_id; a request without one always reports
+// CreateTaskOutcomeCreated. The fourth contract outcome, CreatedIdentityLost,
+// is not produced here — it is decided by the handler during settlement,
+// after this call returns (see the spec's "Settlement" section).
+type CreateTaskOutcome int
+
+const (
+	// CreateTaskOutcomeCreated means no task held the identity (or the
+	// request carried none): this call created the returned task.
+	CreateTaskOutcomeCreated CreateTaskOutcome = iota
+	// CreateTaskOutcomeFoundSettled means a task already held the identity
+	// and its creation had finished. No side effects occurred; the caller
+	// MUST skip all post-create work.
+	CreateTaskOutcomeFoundSettled
+	// CreateTaskOutcomeFoundUnsettled means a task already held the identity
+	// but its creation had not finished at observation time — it may still
+	// be running. No side effects occurred; the caller MUST skip all
+	// post-create work and MUST NOT release the identity and create again.
+	CreateTaskOutcomeFoundUnsettled
+)
+
+// CreateTaskResult is Service.CreateTask's return value.
+type CreateTaskResult struct {
+	Task    *models.Task
+	Outcome CreateTaskOutcome
+}
+
+// foundOutcomeFor classifies an existing task holding an external_id as
+// settled or unsettled, per the state machine in the spec's "State machine"
+// section: external_id_settled_at IS NULL means the claiming create had not
+// finished its required synchronous work at observation time.
+func foundOutcomeFor(task *models.Task) CreateTaskOutcome {
+	if task.ExternalIDSettledAt != nil {
+		return CreateTaskOutcomeFoundSettled
 	}
+	return CreateTaskOutcomeFoundUnsettled
+}
+
+// CreateTask creates a new task and publishes a task.created event, or —
+// when the request carries an external_id already held by a task — returns
+// that task instead, per the create-idempotency contract
+// (docs/specs/tasks/external-id-idempotency/spec.md). WorkflowID is required
+// for non-ephemeral kanban tasks. Office tasks (project_id set, or origin is
+// agent_created/routine) auto-resolve to the workspace's office workflow.
+// Ephemeral tasks (quick chat, config chat) must NOT have a workflow.
+//
+// The create sequence below is normative — step 3 (the identity lookup) MUST
+// precede identifier allocation, WIP admission, and every write, or a dedupe
+// hit burns a task_sequence number or fails with a capacity error instead of
+// returning the existing task:
+//
+//  1. authorize workspace
+//  2. validate + normalize external_id
+//  3. lookup by (workspace_id, external_id) — found → return Found, stop
+//  4. required create-time validation
+//  5. identifier allocation, WIP admission, task-row insert
+//     — unique violation, or any other pre-insert failure, re-reads by
+//     external_id before surfacing; a hit still returns Found
+//  6. required synchronous post-create work (repositories, blockers, event)
+//
+// Settlement (step 7) and asynchronous dispatch (step 8) are NOT done here:
+// required synchronous work continues in the REST/MCP handlers after this
+// call returns, so settlement is their responsibility (see the spec's
+// "Settlement call site" section).
+func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (CreateTaskResult, error) {
+	if err := s.authorizeWorkspaceID(ctx, req.WorkspaceID); err != nil {
+		return CreateTaskResult{}, err
+	}
+
+	externalID, err := NormalizeExternalID(req.ExternalID)
+	if err != nil {
+		return CreateTaskResult{}, err
+	}
+	req.ExternalID = externalID
+
+	if found, result, err := s.findTaskByExternalIDIfPresent(ctx, req.WorkspaceID, externalID); found {
+		return result, err
+	}
+
+	task, err := s.prepareTaskForCreation(ctx, req, externalID)
+	if err != nil {
+		if found, ok := s.recoverFoundTaskAfterInsertFailure(ctx, req.WorkspaceID, externalID); ok {
+			return found, nil
+		}
+		return CreateTaskResult{}, err
+	}
+
+	if err := s.createTaskWithCapacity(ctx, task); err != nil {
+		if found, ok := s.recoverFoundTaskAfterInsertFailure(ctx, req.WorkspaceID, externalID); ok {
+			return found, nil
+		}
+		s.logger.Error("failed to create task", zap.Error(err))
+		return CreateTaskResult{}, err
+	}
+
+	return s.finalizeCreatedTask(ctx, task, req)
+}
+
+// prepareTaskForCreation runs create-sequence steps 4-5's non-write half:
+// required validation, workflow/step resolution, and office identifier
+// assignment, producing the in-memory task CreateTask is about to insert.
+func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskRequest, externalID string) (*models.Task, error) {
 	if err := prepareAutoTitle(req); err != nil {
 		return nil, err
 	}
@@ -155,6 +251,7 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 
 	workflowStepID := s.resolveWorkflowStep(ctx, req)
 	task := s.buildTask(req, workflowStepID)
+	task.ExternalID = externalID
 
 	// Auto-assign identifier for office tasks
 	if isOfficeRequest(req) {
@@ -162,21 +259,22 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 			return nil, err
 		}
 	}
+	return task, nil
+}
 
-	if err := s.createTaskWithCapacity(ctx, task); err != nil {
-		s.logger.Error("failed to create task", zap.Error(err))
-		return nil, err
-	}
-
+// finalizeCreatedTask runs create-sequence step 6, the required synchronous
+// post-create work, after task has been inserted: blocker relationships,
+// task repositories, the created-event publish, and the feeder-pull refresh.
+func (s *Service) finalizeCreatedTask(ctx context.Context, task *models.Task, req *CreateTaskRequest) (CreateTaskResult, error) {
 	// Create blocker relationships if specified.
 	for _, blockerID := range req.BlockedBy {
 		if err := s.AddBlocker(ctx, task.ID, blockerID); err != nil {
-			return nil, fmt.Errorf("add blocker %s: %w", blockerID, err)
+			return CreateTaskResult{}, fmt.Errorf("add blocker %s: %w", blockerID, err)
 		}
 	}
 
 	if err := s.createTaskRepositories(ctx, task.ID, req.WorkspaceID, req.Repositories); err != nil {
-		return nil, err
+		return CreateTaskResult{}, err
 	}
 
 	// Load repositories into task for response
@@ -197,7 +295,54 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 	}
 	s.logger.Info("task created", zap.String("task_id", task.ID), zap.String("title", task.Title))
 
-	return task, nil
+	return CreateTaskResult{Task: task, Outcome: CreateTaskOutcomeCreated}, nil
+}
+
+// findTaskByExternalIDIfPresent is CreateTask's step-3 lookup: when the
+// request carries an external_id already held by a task, the caller MUST
+// return that task (found=true) instead of continuing the create. found is
+// false only when there is nothing to short-circuit on — no external_id, or
+// a genuine lookup miss — in which case the caller continues normally.
+func (s *Service) findTaskByExternalIDIfPresent(ctx context.Context, workspaceID, externalID string) (found bool, result CreateTaskResult, err error) {
+	if externalID == "" {
+		return false, CreateTaskResult{}, nil
+	}
+	task, lookupErr := s.tasks.GetTaskByExternalID(ctx, workspaceID, externalID)
+	switch {
+	case lookupErr == nil:
+		s.hydrateTaskRelations(ctx, task)
+		return true, CreateTaskResult{Task: task, Outcome: foundOutcomeFor(task)}, nil
+	case !errors.Is(lookupErr, taskrepo.ErrTaskNotFound):
+		return true, CreateTaskResult{}, lookupErr
+	default:
+		return false, CreateTaskResult{}, nil
+	}
+}
+
+// recoverFoundTaskAfterInsertFailure is the TOCTOU backstop for step 3, and
+// the admission-preemption guard: after a step-3 miss, ANY pre-insert
+// failure — a unique-index loss on uniq_tasks_external_id, WIP/capacity
+// admission rejecting the insert outright, or a step-4/5 failure inside
+// prepareTaskForCreation (validation, workflow resolution, or identifier
+// allocation) — must re-read by external_id before the original error
+// surfaces. This is the spec's "any pre-insert failure — capacity,
+// admission, or otherwise" wording taken literally: it is not scoped to
+// admission/capacity failures alone. A hit means another caller won the
+// race; ok=true tells the caller to return it as Found rather than a
+// failure. ok=false (no external_id, or the re-read also finds nothing)
+// means the original error must surface — this also covers a bare task-id
+// primary-key collision, unrelated to external_id, falling through
+// correctly, since no task holds this external_id either way.
+func (s *Service) recoverFoundTaskAfterInsertFailure(ctx context.Context, workspaceID, externalID string) (CreateTaskResult, bool) {
+	if externalID == "" {
+		return CreateTaskResult{}, false
+	}
+	found, lookupErr := s.tasks.GetTaskByExternalID(ctx, workspaceID, externalID)
+	if lookupErr != nil {
+		return CreateTaskResult{}, false
+	}
+	s.hydrateTaskRelations(ctx, found)
+	return CreateTaskResult{Task: found, Outcome: foundOutcomeFor(found)}, true
 }
 
 func deriveProvisionalTaskTitle(description string) (string, error) {
@@ -489,6 +634,7 @@ func (s *Service) buildTask(req *CreateTaskRequest, workflowStepID string) *mode
 		Metadata:               metadata,
 		IsEphemeral:            req.IsEphemeral,
 		ParentID:               req.ParentID,
+		Autopilot:              req.Autopilot,
 		AssigneeAgentProfileID: req.AssigneeAgentProfileID,
 		Origin:                 origin,
 		ProjectID:              req.ProjectID,
@@ -1244,17 +1390,25 @@ func (s *Service) GetTask(ctx context.Context, id string) (*models.Task, error) 
 	if err != nil {
 		return nil, err
 	}
+	s.hydrateTaskRelations(ctx, task)
+	return task, nil
+}
 
-	// Load task repositories
-	repos, err := s.taskRepos.ListTaskRepositories(ctx, id)
+// hydrateTaskRelations populates the relations every task read is expected
+// to carry — repositories and workspace folders — that a raw
+// repository-layer task struct does not include. Callers that bypass GetTask
+// (the create sequence's step-3 lookup, GetTaskByExternalID, and the
+// settlement zero-row survivor re-read) must call this explicitly, or a
+// retry/lookup silently returns a task missing fields a fresh GetTask would
+// have populated.
+func (s *Service) hydrateTaskRelations(ctx context.Context, task *models.Task) {
+	repos, err := s.taskRepos.ListTaskRepositories(ctx, task.ID)
 	if err != nil {
 		s.logger.Error("failed to list task repositories", zap.Error(err))
 	} else {
 		task.Repositories = repos
 	}
 	s.hydrateTaskWorkspaceFolders(ctx, task)
-
-	return task, nil
 }
 
 // UpdateTask updates an existing task and publishes a task.updated event
@@ -2650,10 +2804,11 @@ func (s *Service) filterSharedWorktreesForTaskCleanup(
 			filtered = append(filtered, wt)
 			continue
 		}
-		if err := guard.ReleaseWorktreeReference(ctx, wt); err != nil {
-			errs = append(errs, fmt.Errorf("release shared worktree reference %s: %w", wt.ID, err))
-			continue
-		}
+		// A worktree borrowed by another task is protected by the single
+		// environment-repository row it shares. There is no per-session
+		// reference to release: marking the row deleted would destroy the
+		// borrower's workspace. The environment ownership transfer handled
+		// earlier in the flow re-homes the row to the borrower.
 		s.logger.Info("preserving worktree still referenced by another active task",
 			zap.String("task_id", taskID),
 			zap.String("worktree_id", wt.ID),
@@ -2802,7 +2957,6 @@ func (s *Service) taskOwnsSessionWorktree(
 }
 
 func cleanupEligibleWorktrees(worktrees []*worktree.Worktree, env *models.TaskEnvironment, preserveExecutorRows map[string]struct{}) []*worktree.Worktree {
-	worktrees = excludeEnvironmentWorktree(worktrees, env)
 	if len(preserveExecutorRows) == 0 || len(worktrees) == 0 {
 		return worktrees
 	}
@@ -2851,20 +3005,6 @@ func (s *Service) cleanupTaskEnvironment(
 		}
 	}
 	return nil
-}
-
-func excludeEnvironmentWorktree(worktrees []*worktree.Worktree, env *models.TaskEnvironment) []*worktree.Worktree {
-	if env == nil || env.WorktreeID == "" || len(worktrees) == 0 {
-		return worktrees
-	}
-	filtered := worktrees[:0]
-	for _, wt := range worktrees {
-		if wt == nil || wt.ID == env.WorktreeID {
-			continue
-		}
-		filtered = append(filtered, wt)
-	}
-	return filtered
 }
 
 // ListTasks returns all tasks for a workflow

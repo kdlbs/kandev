@@ -116,15 +116,9 @@ func (p *Provider) classificationInputs(
 	if err != nil {
 		return "", "", nil, nil, nil, err
 	}
-	if p.config.Inventory == nil {
-		return "", "", nil, nil, nil, ErrInventoryIncomplete
-	}
-	inventory, err := p.config.Inventory.LoadWorkspaceInventory(ctx)
+	inventory, err := p.loadInventory(ctx)
 	if err != nil {
-		return "", "", nil, nil, nil, fmt.Errorf("load authoritative workspace inventory: %w", err)
-	}
-	if !inventory.Complete {
-		return "", "", nil, nil, nil, ErrInventoryIncomplete
+		return "", "", nil, nil, nil, err
 	}
 	protected, err := buildProtectedSet(tasksRoot, inventory)
 	if err != nil {

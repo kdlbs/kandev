@@ -18,11 +18,12 @@ import { Checkbox } from "@kandev/ui/checkbox";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { PRTaskIcon } from "@/components/github/pr-task-icon";
-import { PluginSlot } from "@/components/plugins/plugin-slot";
+import { MRTaskIcon } from "@/components/gitlab/mr-task-icon";
 import {
   KanbanCardDropdownMenuItems,
   type KanbanCardMenuEntry,
 } from "@/components/kanban-card-menu-items";
+import { TaskCardIndicators, TaskCardTags } from "@/components/kanban-card-plugin-slots";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { useTaskPendingInput } from "@/hooks/use-task-pending-input";
@@ -126,22 +127,6 @@ function RepoChipRow({ chips }: { chips: RepositoryChip[] }) {
   );
 }
 
-/**
- * `task-card-indicators` slot (AC13): reads the active workspace from the
- * store itself, rather than threading `workspaceId` through the
- * KanbanCardFrame -> KanbanCardShell -> KanbanCardBody prop chain, since
- * `<PluginSlot/>` already renders nothing when the slot is empty (AC14).
- */
-function TaskCardIndicators({ task }: { task: Task }) {
-  const workspaceId = useAppStore((state) => state.workspaces.activeId);
-  return (
-    <PluginSlot
-      name="task-card-indicators"
-      slotProps={{ taskId: task.id, workspaceId, workflowStepId: task.workflowStepId }}
-    />
-  );
-}
-
 export function KanbanCardBody({
   task,
   repositoryChips,
@@ -156,7 +141,7 @@ export function KanbanCardBody({
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <RepoChipRow chips={repositoryChips} />
-          <div className="flex items-center gap-1 min-w-0">
+          <div className="flex items-center gap-1 min-w-0" data-testid="kanban-card-title-row">
             <p
               data-testid="task-card-title"
               className="text-sm font-medium leading-tight line-clamp-1 min-w-0"
@@ -164,6 +149,7 @@ export function KanbanCardBody({
               {task.title}
             </p>
             <PRTaskIcon taskId={task.id} />
+            <MRTaskIcon taskId={task.id} />
             <TaskCardIndicators task={task} />
           </div>
         </div>
@@ -184,6 +170,7 @@ export function KanbanCardBody({
       )}
       <KanbanCardRelationship task={task} />
       <KanbanCardBadges task={task} />
+      <TaskCardTags task={task} />
     </>
   );
 }

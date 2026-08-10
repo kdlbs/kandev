@@ -541,6 +541,27 @@ func TestSearchFileCandidatesClampsCallerSuppliedLimit(t *testing.T) {
 	}
 }
 
+// The result slice must be sized from the matches we collected, never from the
+// caller-supplied limit, so a workspace with a handful of files cannot be made
+// to reserve a large slice by a single request.
+func TestSearchFileCandidatesSizesResultFromMatchCount(t *testing.T) {
+	candidates := []fileSearchCandidate{
+		{path: "src/query-a.go", matchPath: "src/query-a.go"},
+		{path: "src/query-b.go", matchPath: "src/query-b.go"},
+		{path: "src/unrelated.go", matchPath: "src/unrelated.go"},
+	}
+
+	results := searchFileCandidates(candidates, "query", math.MaxInt32)
+
+	if len(results) != 2 {
+		t.Fatalf("len(results) = %d, want the 2 matching candidates", len(results))
+	}
+	if cap(results) > len(candidates) {
+		t.Fatalf("cap(results) = %d, want no more than the %d candidates searched",
+			cap(results), len(candidates))
+	}
+}
+
 func TestSearchFileCandidatesDefaultsNonPositiveLimit(t *testing.T) {
 	candidates := make([]fileSearchCandidate, 0, fileSearchDefaultLimit+5)
 	for i := range fileSearchDefaultLimit + 5 {

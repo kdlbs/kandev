@@ -16,6 +16,7 @@ import { SessionCommands } from "@/components/session-commands";
 import { TaskPRShortcut } from "@/components/task/task-pr-shortcut";
 import { useEmbeddedVscodeSupport } from "@/components/task/task-page-editor-capability";
 import { VcsDialogsProvider } from "@/components/vcs/vcs-dialogs";
+import { PortForwardingVisibilityProvider } from "@/components/task/port-forwarding-visibility-provider";
 import {
   buildDebugEntries,
   buildArchivedValue,
@@ -104,7 +105,6 @@ function buildTaskTopBarProps(params: {
   effectiveSessionId: string | null;
   remote: ReturnType<typeof resolveRemoteExecutor>;
   sessionWorkflowStepId: string | null;
-  agentctlReady: boolean;
   embeddedVscodeSupported: boolean;
   officeTaskHref?: string | null;
   onTaskUnarchived: (taskId: string) => void;
@@ -128,8 +128,6 @@ function buildTaskTopBarProps(params: {
     issueUrl: taskProps.issueUrl,
     issueNumber: taskProps.issueNumber,
     isArchived: taskProps.isArchived,
-    isRemoteExecutor: params.remote.isRemoteExecutor,
-    isAgentctlReady: params.agentctlReady,
     embeddedVscodeSupported: params.embeddedVscodeSupported,
     remoteExecutorType: params.remote.remoteExecutorType,
     officeTaskHref: params.officeTaskHref,
@@ -260,7 +258,6 @@ function useTaskPageDerivedProps({
     effectiveSessionId,
     remote,
     sessionWorkflowStepId: sessionPanel.sessionWorkflowStepId,
-    agentctlReady: agentctlStatus.isReady,
     embeddedVscodeSupported: embeddedVscode,
     officeTaskHref,
     onTaskUnarchived,
@@ -287,36 +284,44 @@ export function TaskPageInner(props: TaskPageInnerProps) {
 
   return (
     <TooltipProvider>
-      <VcsDialogsProvider
+      <PortForwardingVisibilityProvider
+        taskId={taskProps.taskId}
+        metadata={task?.metadata}
         sessionId={effectiveSessionId}
-        baseBranch={taskProps.baseBranch}
-        taskTitle={taskProps.taskTitle}
-        displayBranch={merged.worktreeBranch}
+        isAgentctlReady={props.agentctlStatus.isReady}
+        isArchived={taskProps.isArchived}
       >
-        <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
-          <SessionCommands
-            sessionId={effectiveSessionId}
-            baseBranch={taskProps.baseBranch}
-            isAgentRunning={merged.isAgentWorking}
-            hasWorktree={Boolean(merged.worktreeBranch)}
-            isPassthrough={sessionPanel.isSessionPassthrough}
-            isTaskArchived={archivedValue.isArchived}
-          />
-          <TaskPRShortcut taskId={taskProps.taskId} />
-          <TaskDebugOverlay entries={debugEntries} />
-          {!isMobile && <TaskTopBar {...topBarProps} />}
-          {ensureSession.status === "error" && (
-            <EnsureSessionErrorBanner
-              error={ensureSession.error}
-              onRetry={ensureSession.retry}
-              workspaceId={task?.workspace_id ?? null}
+        <VcsDialogsProvider
+          sessionId={effectiveSessionId}
+          baseBranch={taskProps.baseBranch}
+          taskTitle={taskProps.taskTitle}
+          displayBranch={merged.worktreeBranch}
+        >
+          <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
+            <SessionCommands
+              sessionId={effectiveSessionId}
+              baseBranch={taskProps.baseBranch}
+              isAgentRunning={merged.isAgentWorking}
+              hasWorktree={Boolean(merged.worktreeBranch)}
+              isPassthrough={sessionPanel.isSessionPassthrough}
+              isTaskArchived={archivedValue.isArchived}
             />
-          )}
-          <TaskArchivedProvider value={archivedValue}>
-            <TaskLayout {...layoutProps} />
-          </TaskArchivedProvider>
-        </div>
-      </VcsDialogsProvider>
+            <TaskPRShortcut taskId={taskProps.taskId} />
+            <TaskDebugOverlay entries={debugEntries} />
+            {!isMobile && <TaskTopBar {...topBarProps} />}
+            {ensureSession.status === "error" && (
+              <EnsureSessionErrorBanner
+                error={ensureSession.error}
+                onRetry={ensureSession.retry}
+                workspaceId={task?.workspace_id ?? null}
+              />
+            )}
+            <TaskArchivedProvider value={archivedValue}>
+              <TaskLayout {...layoutProps} />
+            </TaskArchivedProvider>
+          </div>
+        </VcsDialogsProvider>
+      </PortForwardingVisibilityProvider>
     </TooltipProvider>
   );
 }

@@ -44,6 +44,13 @@ function expectPreparingSpinner(): void {
 }
 
 describe("TaskItem status icon", () => {
+  it("shows the autopilot icon with an accessible description", () => {
+    renderTaskItem({ autopilot: true });
+
+    expect(screen.getByTestId("task-autopilot-icon")).not.toBeNull();
+    expect(screen.getByLabelText(/autopilot task/i)).not.toBeNull();
+  });
+
   it("shows a dashed progress check when the session is idle after a non-final turn", () => {
     renderTaskItem({ sessionState: "WAITING_FOR_INPUT" });
 
@@ -212,6 +219,14 @@ describe("TaskItem interrupted icon", () => {
 
     expect(screen.queryByTestId(INTERRUPTED_ICON_TEST_ID)).toBeNull();
     expect(screen.queryByTestId(WAITING_FOR_INPUT_ICON_TEST_ID)).not.toBeNull();
+  });
+});
+
+describe("TaskItem autopilot identity", () => {
+  it("does not show the autopilot icon when the marker is false", () => {
+    renderTaskItem({ autopilot: false });
+
+    expect(screen.queryByTestId("task-autopilot-icon")).toBeNull();
   });
 });
 

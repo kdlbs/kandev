@@ -133,7 +133,7 @@ func (a *taskCreatorAdapter) CreateOfficeTaskAsAgent(ctx context.Context, worksp
 func (a *taskCreatorAdapter) createOfficeTask(
 	ctx context.Context, workspaceID, projectID, assigneeAgentID, title, description, origin string,
 ) (string, error) {
-	task, err := a.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{ //nolint:exhaustruct
+	result, err := a.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{ //nolint:exhaustruct
 		WorkspaceID:            workspaceID,
 		Title:                  title,
 		Description:            description,
@@ -144,7 +144,7 @@ func (a *taskCreatorAdapter) createOfficeTask(
 	if err != nil {
 		return "", err
 	}
-	return task.ID, nil
+	return result.Task.ID, nil
 }
 
 // CreateOfficeTaskInWorkflow creates an office task pinned to a specific
@@ -154,7 +154,7 @@ func (a *taskCreatorAdapter) createOfficeTask(
 func (a *taskCreatorAdapter) CreateOfficeTaskInWorkflow(
 	ctx context.Context, workspaceID, projectID, assigneeAgentID, workflowID, title, description string,
 ) (string, error) {
-	task, err := a.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{ //nolint:exhaustruct
+	result, err := a.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{ //nolint:exhaustruct
 		WorkspaceID:            workspaceID,
 		WorkflowID:             workflowID,
 		Title:                  title,
@@ -166,7 +166,7 @@ func (a *taskCreatorAdapter) CreateOfficeTaskInWorkflow(
 	if err != nil {
 		return "", err
 	}
-	return task.ID, nil
+	return result.Task.ID, nil
 }
 
 func (a *taskCreatorAdapter) CreateOfficeSubtask(

@@ -22,9 +22,10 @@ type fakePluginTaskWriteService struct {
 	deletedID  string
 }
 
-func (f *fakePluginTaskWriteService) CreateTask(_ context.Context, req *taskservice.CreateTaskRequest) (*taskmodels.Task, error) {
+func (f *fakePluginTaskWriteService) CreateTask(_ context.Context, req *taskservice.CreateTaskRequest) (taskservice.CreateTaskResult, error) {
 	f.lastCreate = req
-	return &taskmodels.Task{ID: "task-1", WorkspaceID: req.WorkspaceID, WorkflowID: req.WorkflowID, Title: req.Title}, nil
+	task := &taskmodels.Task{ID: "task-1", WorkspaceID: req.WorkspaceID, WorkflowID: req.WorkflowID, Title: req.Title}
+	return taskservice.CreateTaskResult{Task: task, Outcome: taskservice.CreateTaskOutcomeCreated}, nil
 }
 
 func (f *fakePluginTaskWriteService) UpdateTask(_ context.Context, id string, req *taskservice.UpdateTaskRequest) (*taskmodels.Task, error) {

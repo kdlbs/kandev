@@ -47,8 +47,8 @@ export function DesktopNotificationsSection({
     <SettingsTarget targetId={GENERAL_SETTINGS_TARGETS.desktopNotifications} className="space-y-4">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <div className="text-base font-medium">{t("settings:desktopNotifications")}</div>
-          <p className="text-sm text-muted-foreground">
+          <div className="text-sm font-medium">{t("settings:desktopNotifications")}</div>
+          <p className="text-xs text-muted-foreground">
             {t("settings:desktopNotificationsDescription")}
           </p>
         </div>
@@ -99,7 +99,7 @@ export function DesktopNotificationsSection({
                 <IconBell className="h-4 w-4" />
               </Button>
             </HoverCardTrigger>
-            <HoverCardContent side="top" className="text-sm">
+            <HoverCardContent side="top">
               {t("settings:notificationsNotShowingHint")}
             </HoverCardContent>
           </HoverCard>
@@ -107,17 +107,17 @@ export function DesktopNotificationsSection({
       </div>
 
       {notificationPermission === "denied" && (
-        <p className="text-sm text-amber-600">
+        <p className="text-xs text-amber-600">
           {nativeNotifications.isAvailable()
             ? t("settings:notificationsBlockedInOs")
             : t("settings:notificationsBlockedInBrowser")}
         </p>
       )}
       {notificationPermission === "unsupported" && (
-        <p className="text-sm text-amber-600">{t("settings:notificationsUnsupported")}</p>
+        <p className="text-xs text-amber-600">{t("settings:notificationsUnsupported")}</p>
       )}
       {notificationPermission === "error" && (
-        <p className="text-sm text-amber-600">{t("settings:notificationPermissionCheckFailed")}</p>
+        <p className="text-xs text-amber-600">{t("settings:notificationPermissionCheckFailed")}</p>
       )}
     </SettingsTarget>
   );

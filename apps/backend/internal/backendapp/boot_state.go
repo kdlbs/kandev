@@ -75,6 +75,11 @@ func bootInitialState(
 			return state
 		}
 	}
+	if p.agentRuntimeAvailability != nil {
+		if snapshot, ok := p.agentRuntimeAvailability.Snapshot(); ok {
+			state["agentRuntime"] = snapshot
+		}
+	}
 
 	if route.Route == webapp.RouteSettings {
 		builder.addWorkspaceState(ctx, state, nil)
@@ -1025,7 +1030,7 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 				"sessionId":    session.ID,
 				"repositoryId": nullString(dto.RepositoryID),
 				"path":         nullString(dto.WorktreePath),
-				"branch":       nullString(dto.WorktreeBranch),
+				branchFieldKey: nullString(dto.WorktreeBranch),
 			}
 			worktreesBySession[session.ID] = []string{dto.WorktreeID}
 		}
@@ -1140,8 +1145,8 @@ func (b bootStateBuilder) addTaskDetailAgentsState(ctx context.Context, state ma
 	state["settingsAgents"] = map[string]any{"items": response.Agents}
 	state["settingsData"] = map[string]any{"agentsLoaded": true, "executorsLoaded": false}
 	state["agentProfiles"] = map[string]any{
-		"items":   agentProfileOptionStates(response.Agents),
-		"version": 0,
+		"items":         agentProfileOptionStates(response.Agents),
+		versionFieldKey: 0,
 	}
 }
 

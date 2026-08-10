@@ -19,6 +19,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const queryTrue = "true"
+
 var availableAgentsBroadcastTimeout = 10 * time.Second
 
 type Handlers struct {
@@ -62,6 +64,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.POST("/agents/:id/profiles", h.interlock, h.httpCreateProfile)
 	api.GET("/agents/:id/logo", h.httpGetAgentLogo)
 	api.GET("/agent-models/:agentName", h.httpGetAgentModels)
+	api.POST("/agent-models/:agentName/resolve", h.httpResolveAgentModelConfig)
 	api.POST("/agent-command-preview/:agentName", h.httpPreviewAgentCommand)
 	api.POST("/agent-install/:agentName", h.interlock, h.httpInstallAgent)
 	api.GET("/agent-update/:agentName/preview", h.httpPreviewAgentUpdate)
@@ -305,6 +308,8 @@ type createAgentRequest struct {
 type createAgentProfileRequest struct {
 	Name          string                 `json:"name"`
 	Model         string                 `json:"model"`
+	FallbackModel string                 `json:"fallback_model,omitempty"`
+	AutoFallback  bool                   `json:"auto_fallback"`
 	Mode          string                 `json:"mode,omitempty"`
 	CLIFlags      []dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
 	EnvVars       []dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
@@ -330,6 +335,8 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 		profiles = append(profiles, controller.CreateAgentProfileRequest{
 			Name:          profile.Name,
 			Model:         profile.Model,
+			FallbackModel: profile.FallbackModel,
+			AutoFallback:  profile.AutoFallback,
 			Mode:          profile.Mode,
 			CLIFlags:      profile.CLIFlags,
 			EnvVars:       profile.EnvVars,
@@ -491,6 +498,8 @@ func (h *Handlers) httpUpdateProfileMcpConfig(c *gin.Context) {
 type createProfileRequest struct {
 	Name           string                 `json:"name"`
 	Model          string                 `json:"model"`
+	FallbackModel  string                 `json:"fallback_model,omitempty"`
+	AutoFallback   bool                   `json:"auto_fallback"`
 	Mode           string                 `json:"mode,omitempty"`
 	ConfigOptions  map[string]string      `json:"config_options,omitempty"`
 	AllowIndexing  bool                   `json:"allow_indexing"`
@@ -515,6 +524,8 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 		AgentID:        c.Param("id"),
 		Name:           body.Name,
 		Model:          body.Model,
+		FallbackModel:  body.FallbackModel,
+		AutoFallback:   body.AutoFallback,
 		Mode:           body.Mode,
 		ConfigOptions:  body.ConfigOptions,
 		AllowIndexing:  body.AllowIndexing,
@@ -545,6 +556,8 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 type updateProfileRequest struct {
 	Name           *string                 `json:"name,omitempty"`
 	Model          *string                 `json:"model,omitempty"`
+	FallbackModel  *string                 `json:"fallback_model,omitempty"`
+	AutoFallback   *bool                   `json:"auto_fallback,omitempty"`
 	Mode           *string                 `json:"mode,omitempty"`
 	ConfigOptions  *map[string]string      `json:"config_options,omitempty"`
 	AllowIndexing  *bool                   `json:"allow_indexing,omitempty"`
@@ -570,6 +583,8 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 		ID:             c.Param("id"),
 		Name:           body.Name,
 		Model:          body.Model,
+		FallbackModel:  body.FallbackModel,
+		AutoFallback:   body.AutoFallback,
 		Mode:           body.Mode,
 		ConfigOptions:  body.ConfigOptions,
 		AllowIndexing:  body.AllowIndexing,
@@ -579,6 +594,7 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 		CLIFlags:       body.CLIFlags,
 		EnvVars:        body.EnvVars,
 		CommandPrefix:  body.CommandPrefix,
+		Force:          c.Query("force") == queryTrue,
 	})
 	if err != nil {
 		if err == controller.ErrAgentProfileNotFound {
@@ -587,6 +603,11 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 		}
 		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		var inUseErr *controller.ErrProfileInUseDetail
+		if errors.As(err, &inUseErr) {
+			c.JSON(http.StatusConflict, gin.H{"error": "agent profile is in use", "utility_agents": inUseErr.UtilityAgents})
 			return
 		}
 		h.logger.Error("failed to update profile", zap.Error(err))
@@ -618,6 +639,7 @@ func (h *Handlers) httpDeleteProfile(c *gin.Context) {
 				"watchers":        inUseErr.Watchers,
 				"routing_tiers":   inUseErr.RoutingTiers,
 				"automations":     inUseErr.Automations,
+				"utility_agents":  inUseErr.UtilityAgents,
 			})
 			return
 		}
@@ -712,7 +734,7 @@ func (h *Handlers) httpGetAgentModels(c *gin.Context) {
 
 	resp, err := h.controller.FetchDynamicModels(c.Request.Context(), agentName, refresh)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, controller.ErrAgentNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "agent not found"})
 			return
 		}
@@ -721,5 +743,33 @@ func (h *Handlers) httpGetAgentModels(c *gin.Context) {
 		return
 	}
 
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *Handlers) httpResolveAgentModelConfig(c *gin.Context) {
+	agentName := strings.TrimSpace(c.Param("agentName"))
+	if agentName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "agent name is required"})
+		return
+	}
+	var req dto.ResolveAgentModelConfigRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid model resolution request"})
+		return
+	}
+	resp, err := h.controller.ResolveAgentModelConfig(c.Request.Context(), agentName, req)
+	if err != nil {
+		if errors.Is(err, controller.ErrModelRequired) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "model is required"})
+			return
+		}
+		if errors.Is(err, controller.ErrAgentNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "agent not found"})
+			return
+		}
+		h.logger.Error("failed to resolve agent model options", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve agent model options"})
+		return
+	}
 	c.JSON(http.StatusOK, resp)
 }

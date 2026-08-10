@@ -8,6 +8,7 @@ import {
   IconCircleX,
   IconExternalLink,
   IconGitPullRequest,
+  IconLoader2,
   IconMessageCircle,
   IconPlus,
 } from "@tabler/icons-react";
@@ -355,9 +356,13 @@ export function ChangeRequestCommentsRow({ count, label }: { count: number; labe
 export function ChangeRequestPopoverFooter({
   updatedAt,
   formatElapsed,
+  isRefreshing = false,
+  updatingLabel = t("integrations:loading"),
 }: {
   updatedAt?: number;
   formatElapsed?: (seconds: number) => string;
+  isRefreshing?: boolean;
+  updatingLabel?: string;
 }) {
   const [now, setNow] = useState(updatedAt);
   useEffect(() => {
@@ -365,20 +370,32 @@ export function ChangeRequestPopoverFooter({
     const timer = setInterval(() => setNow(Date.now()), 10_000);
     return () => clearInterval(timer);
   }, [updatedAt]);
-  if (updatedAt == null) return null;
-  const seconds = Math.max(0, Math.floor(((now ?? updatedAt) - updatedAt) / 1000));
+  if (updatedAt == null && !isRefreshing) return null;
+  const seconds =
+    updatedAt == null ? 0 : Math.max(0, Math.floor(((now ?? updatedAt) - updatedAt) / 1000));
   const elapsed = formatElapsed ? formatElapsed(seconds) : defaultElapsed(seconds);
   return (
     <div
       data-testid="pr-popover-footer"
       className="flex items-center justify-end border-t border-border/50 pt-1.5"
     >
-      <span
-        data-testid="pr-popover-updated-at"
-        className="text-[10px] tabular-nums text-muted-foreground"
-      >
-        {elapsed}
-      </span>
+      {isRefreshing ? (
+        <span
+          data-testid="pr-popover-updating"
+          role="status"
+          className="flex items-center gap-1.5 text-[10px] text-muted-foreground"
+        >
+          <IconLoader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+          {updatingLabel}
+        </span>
+      ) : (
+        <span
+          data-testid="pr-popover-updated-at"
+          className="text-[10px] tabular-nums text-muted-foreground"
+        >
+          {elapsed}
+        </span>
+      )}
     </div>
   );
 }

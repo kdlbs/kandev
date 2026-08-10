@@ -70,7 +70,11 @@ Conditional rules are stored inside the existing `workflow_steps.events` JSON as
 
 Constraints:
 
-- `agent_name` is non-empty and unique within the action.
+- `agent_name` is non-empty and textually unique within the action. It is resolved against the agent registry before a rule is selected, so a canonical agent ID (`claude-acp`), a display name (`Claude`), or an agent name (`Claude ACP Agent`) all select the same family, case-insensitively.
+- Resolution is refused rather than guessed when a reference does not name exactly one installed agent. Custom TUI agents choose their own slug and display name and share the built-ins' namespace, so a reference can name two agents at once; a canonical agent ID is unambiguous by construction and always resolves.
+- Because uniqueness is validated on the written `agent_name` but selection happens after resolution, two textually different rules can name one family. That is detected when the step runs, not when the workflow is saved. Applying either would make array order decide the step's model, so neither is applied.
+- Both refusals are scoped to the session being configured. A step routinely carries rules for agents this session is not running, and a reference is only refused when it could govern *this* session — that is, when the session's own family is among the agents it names. An ambiguous reference naming only other agents is the same deliberate no-op as any other rule for a different agent, and does not withdraw the rule that does match. Refusing the whole action instead would let one colliding agent name switch per-step model selection off for every agent at once, which is the defect this resolution exists to remove.
+- Two outcomes are silent, both of them deliberate no-ops for this session: a rule naming a known but different agent, and a rule whose reference is ambiguous among agents that do not include this session's family. Naming no known agent, naming a reference ambiguous *for this session*, and two rules resolving to the session's family each apply nothing and raise a session warning saying which — a session setting that goes missing without explanation is the other half of the same failure mode.
 - `operation` is `set`, `keep`, or `restore_original`.
 - A `set` rule contains a non-empty `model` or at least one non-empty `config_options` entry.
 - `keep` and `restore_original` rules do not contain `model` or `config_options`.
@@ -112,6 +116,8 @@ The backend validates the action on workflow-step create/update and import. Inva
 
 Existing agent capability responses provide the editor's family names, models, and ACP select options. Existing task-session model/configuration mechanisms apply and persist runtime changes.
 
+When an ACP provider's options depend on the selected model, the editor uses the model-aware capability contract in [Dynamic Provider Model Options](../agents/dynamic-provider-options.md) to replace the baseline option snapshot before saving a rule.
+
 ## State machine
 
 For each original agent family on each possible workflow path, the editor and runtime use these effective states:
@@ -140,7 +146,7 @@ The same users who can edit a workspace workflow can create, change, or remove c
 - If the session is not running but can be launched or resumed, Kandev records the requested overrides first so initialization applies them before the next prompt.
 - If `restore_original` has no trustworthy original effective snapshot, Kandev changes nothing, warns that restoration is unavailable for that legacy or incomplete session, and continues the step.
 - If an option captured in the original snapshot is no longer advertised, restoration skips that option, restores the remaining fields, and reports the skipped option in the warning.
-- Capability discovery failures keep the conditional editor readable, show the existing agent capability error, and prevent saving a new `set` rule whose values cannot be selected. Existing persisted rules remain visible and removable.
+- Capability discovery keeps the conditional editor readable and shows a localized, retryable status. While discovery is pending, coordinated save is blocked. After a failed discovery, the author may save the selected model without new or unverified option values; existing persisted rules remain visible, and failed discovery does not remove their saved option values.
 
 ## Persistence guarantees
 

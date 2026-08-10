@@ -2,9 +2,12 @@
 
 import { IconGitPullRequest } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { useState, type FocusEvent, type PointerEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";
 import type { TaskPR } from "@/lib/types/github";
+import { derivePRTaskStatusSummary, PRTaskStatusSummary } from "./pr-task-status-summary";
 
 const MUTED_FOREGROUND = "text-muted-foreground";
 const PURPLE_500 = "text-purple-500";
@@ -166,21 +169,6 @@ export function getPRStatusColor(pr: TaskPR): string {
   return MUTED_FOREGROUND;
 }
 
-export function getPRTooltip(pr: TaskPR): string {
-  const parts = [`PR #${pr.pr_number}: ${pr.pr_title}`];
-  if (pr.state !== "open") parts.push(`State: ${pr.state}`);
-  if (pr.review_state) parts.push(`Review: ${pr.review_state}`);
-  if (pr.checks_state) parts.push(`CI: ${pr.checks_state}`);
-  if (isPRDraft(pr)) {
-    parts.push("Draft");
-  } else if (isPRReadyToMerge(pr)) {
-    parts.push("Ready to merge");
-  } else if (pr.mergeable_state && pr.mergeable_state !== "unknown" && pr.state === "open") {
-    parts.push(`Mergeable: ${pr.mergeable_state}`);
-  }
-  return parts.join(" | ");
-}
-
 /**
  * Picks the most attention-worthy color across N PRs. For multi-repo tasks one
  * red PR should dominate the visual even if the others are green. Terminal
@@ -256,52 +244,106 @@ export function PRTaskIcon({ taskId }: { taskId: string }) {
   return <MultiPRIcon taskId={taskId} prs={prs} />;
 }
 
+function usePRTaskTooltipState() {
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+
+  return {
+    open: !dismissed && (hovered || focused),
+    onPointerEnter(event: PointerEvent<HTMLSpanElement>) {
+      if (event.pointerType !== "mouse") return;
+      setHovered(true);
+      setDismissed(false);
+    },
+    onPointerLeave(event: PointerEvent<HTMLSpanElement>) {
+      if (event.pointerType !== "mouse") return;
+      setHovered(false);
+      if (!focused) setDismissed(false);
+    },
+    onFocus(event: FocusEvent<HTMLSpanElement>) {
+      if (!event.currentTarget.matches(":focus-visible")) return;
+      setFocused(true);
+      setDismissed(false);
+    },
+    onBlur() {
+      setFocused(false);
+      if (!hovered) setDismissed(false);
+    },
+    onEscapeKeyDown() {
+      setDismissed(true);
+    },
+  };
+}
+
 function SinglePRIcon({ taskId, pr }: { taskId: string; pr: TaskPR }) {
+  const { t } = useTranslation();
+  const tooltip = usePRTaskTooltipState();
+  const readyToMerge = isPRReadyToMerge(pr);
+  const summary = derivePRTaskStatusSummary(pr, readyToMerge);
   return (
-    <Tooltip>
+    <Tooltip open={tooltip.open}>
       <TooltipTrigger asChild>
         <span
           data-testid={`pr-task-icon-${taskId}`}
           data-pr-state={pr.state}
           data-pr-count="1"
-          data-pr-ready-to-merge={isPRReadyToMerge(pr) ? "true" : "false"}
+          data-pr-ready-to-merge={readyToMerge ? "true" : "false"}
+          role="img"
+          tabIndex={0}
+          aria-label={t("github:pullRequestStatus", { number: pr.pr_number })}
+          onPointerEnter={tooltip.onPointerEnter}
+          onPointerLeave={tooltip.onPointerLeave}
+          onFocus={tooltip.onFocus}
+          onBlur={tooltip.onBlur}
           className={cn("inline-flex items-center shrink-0", getPRStatusColor(pr))}
         >
-          <IconGitPullRequest className="h-3.5 w-3.5" />
+          <IconGitPullRequest aria-hidden="true" className="h-3.5 w-3.5" />
         </span>
       </TooltipTrigger>
-      <TooltipContent>{getPRTooltip(pr)}</TooltipContent>
+      <TooltipContent
+        sideOffset={6}
+        onEscapeKeyDown={tooltip.onEscapeKeyDown}
+        className="w-80 max-w-[calc(100vw-1rem)] p-3"
+      >
+        <PRTaskStatusSummary summaries={[summary]} />
+      </TooltipContent>
     </Tooltip>
   );
 }
 
 function MultiPRIcon({ taskId, prs }: { taskId: string; prs: TaskPR[] }) {
+  const { t } = useTranslation();
+  const tooltip = usePRTaskTooltipState();
   const aggregateColor = aggregatePRStatusColor(prs);
   const allReady = areAllOpenPRsReadyToMerge(prs);
+  const summaries = prs.map((pr) => derivePRTaskStatusSummary(pr, isPRReadyToMerge(pr)));
   return (
-    <Tooltip>
+    <Tooltip open={tooltip.open}>
       <TooltipTrigger asChild>
         <span
           data-testid={`pr-task-icon-${taskId}`}
           data-pr-count={prs.length}
           data-pr-ready-to-merge={allReady ? "true" : "false"}
+          role="img"
+          tabIndex={0}
+          aria-label={t("github:pullRequestStatuses", { count: prs.length })}
+          onPointerEnter={tooltip.onPointerEnter}
+          onPointerLeave={tooltip.onPointerLeave}
+          onFocus={tooltip.onFocus}
+          onBlur={tooltip.onBlur}
           className={cn("inline-flex items-center gap-0.5 shrink-0", aggregateColor)}
         >
-          <IconGitPullRequest className="h-3.5 w-3.5" />
-          <span className="text-[9px] font-semibold leading-none">{prs.length}</span>
+          <IconGitPullRequest aria-hidden="true" className="h-3.5 w-3.5" />
+          <span className="text-[9px] font-semibold leading-none tabular-nums">{prs.length}</span>
         </span>
       </TooltipTrigger>
-      <TooltipContent>
-        <div className="flex flex-col gap-1 text-xs">
-          {prs.map((pr) => (
-            <div key={pr.id} className="flex items-center gap-2">
-              <span className={cn("inline-flex shrink-0", getPRStatusColor(pr))}>
-                <IconGitPullRequest className="h-3 w-3" />
-              </span>
-              <span>{getPRTooltip(pr)}</span>
-            </div>
-          ))}
-        </div>
+      <TooltipContent
+        sideOffset={6}
+        onEscapeKeyDown={tooltip.onEscapeKeyDown}
+        className="w-80 max-w-[calc(100vw-1rem)] p-3"
+      >
+        <PRTaskStatusSummary summaries={summaries} />
       </TooltipContent>
     </Tooltip>
   );

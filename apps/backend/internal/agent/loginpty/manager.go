@@ -21,6 +21,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/ptyexec"
 	"go.uber.org/zap"
 )
 
@@ -366,7 +367,7 @@ type Session struct {
 	lifetime   sessionLifetime
 	mu         sync.Mutex
 	cmd        *exec.Cmd
-	pty        ptyHandle
+	pty        ptyexec.PtyHandle
 	running    bool
 	startedAt  time.Time
 	finishedAt *time.Time
@@ -408,7 +409,7 @@ func (s *Session) start(cmd []string, cols, rows uint16) error {
 	c := exec.Command(cmd[0], cmd[1:]...) // #nosec G204 — command is hard-coded per agent
 	c.Env = buildLoginEnv()
 
-	handle, err := startPTYWithSize(c, cols, rows)
+	handle, err := ptyexec.Start(c, cols, rows)
 	if err != nil {
 		return fmt.Errorf("start pty: %w", err)
 	}

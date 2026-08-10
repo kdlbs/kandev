@@ -261,6 +261,10 @@ export interface StorageResourceSettings {
   enabled: boolean;
 }
 
+export interface StorageWorkspaceSettings extends StorageResourceSettings {
+  dependency_cleanup_enabled: boolean;
+}
+
 export interface StorageGoCacheSettings {
   enabled: boolean;
   max_bytes: number;
@@ -282,7 +286,7 @@ export interface StorageMaintenanceSettings {
   idle_for_minutes: number;
   orphan_grace_hours: number;
   quarantine_retention_hours: number;
-  workspaces: StorageResourceSettings;
+  workspaces: StorageWorkspaceSettings;
   kandev_containers: StorageResourceSettings;
   go_cache: StorageGoCacheSettings;
   docker: StorageDockerSettings;
@@ -291,6 +295,7 @@ export interface StorageMaintenanceSettings {
 export interface StorageCapabilities {
   managed_go_cache_path: string;
   go_cache_adoption_available: boolean;
+  temporary_artifacts_available: boolean;
   docker_available: boolean;
   docker_host: string;
   host_global_docker_cleanup_allowed: boolean;
@@ -340,10 +345,26 @@ export type StorageQuarantineSummary =
       size_bytes?: never;
     };
 
+export interface StorageTemporaryArtifactsSummary {
+  available?: boolean;
+  total_count?: number;
+  total_bytes?: number;
+  active_count?: number;
+  active_bytes?: number;
+  protected_count?: number;
+  protected_bytes?: number;
+  stale_count?: number;
+  stale_bytes?: number;
+  skipped_count?: number;
+  warnings?: string[];
+  warning?: string;
+}
+
 export interface StorageSummary {
   workspaces: StorageWorkspaceSummary;
   go_cache: StorageGoCacheSummary;
   quarantine: StorageQuarantineSummary;
+  temporary_artifacts: StorageTemporaryArtifactsSummary;
   docker: StorageDockerSummary;
 }
 
@@ -379,7 +400,7 @@ export interface StorageMaintenanceRun {
 
 export interface StorageQuarantineEntry {
   id: string;
-  resource_type: "task_workspace" | "go_cache";
+  resource_type: "task_workspace" | "go_cache" | "temporary_artifact";
   task_id?: string;
   workspace_id?: string;
   original_path: string;
@@ -419,6 +440,16 @@ export interface StorageOverviewResponse {
   summary: StorageSummary;
   analyzed_at: string;
   last_run: StorageMaintenanceRun | null;
+}
+
+export interface StorageDiskCapacityResponse {
+  path: string;
+  total_bytes: number;
+  used_bytes: number;
+  available_bytes: number;
+  used_percent: number;
+  available: boolean;
+  warning?: string;
 }
 
 export interface StoragePolicyResponse {

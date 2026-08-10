@@ -170,7 +170,8 @@ const PluginUserStateUpdated = "plugin.user-state.updated"
 // create/restore, disk walk). Published by internal/system/jobs.Tracker on
 // every state transition and broadcast to all WebSocket clients.
 const (
-	SystemJobUpdate = "system.job.update"
+	SystemJobUpdate                 = "system.job.update"
+	AgentRuntimeAvailabilityChanged = "system.agent_runtime.availability_changed"
 )
 
 // Event types for environments
@@ -259,10 +260,11 @@ const (
 
 // Event types for ACP capabilities and models
 const (
-	AgentCapabilitiesUpdated = "agent_capabilities.updated" // Agent capabilities received
-	SessionModelsUpdated     = "session_models.updated"     // Session models received
-	SessionInfoUpdated       = "session_info.updated"       // ACP session info received
-	SessionMCPStatusUpdated  = "session_mcp_status.updated" // MCP attachment evidence changed
+	AgentCapabilitiesUpdated    = "agent_capabilities.updated"     // Agent capabilities received
+	SessionModelsUpdated        = "session_models.updated"         // Session models received
+	SessionModelFallbackUpdated = "session_model_fallback.updated" // Session started on the profile's fallback model
+	SessionInfoUpdated          = "session_info.updated"           // ACP session info received
+	SessionMCPStatusUpdated     = "session_mcp_status.updated"     // MCP attachment evidence changed
 )
 
 // Event types for session todos (ACP plan entries)
@@ -463,6 +465,18 @@ func BuildSessionModelsSubject(sessionID string) string {
 // BuildSessionModelsWildcardSubject creates a wildcard subscription for all session models events
 func BuildSessionModelsWildcardSubject() string {
 	return SessionModelsUpdated + ".*"
+}
+
+// BuildSessionModelFallbackSubject creates a session-specific fallback-model
+// subject.
+func BuildSessionModelFallbackSubject(sessionID string) string {
+	return SessionModelFallbackUpdated + "." + sessionID
+}
+
+// BuildSessionModelFallbackWildcardSubject creates a wildcard subscription
+// for all session fallback-model events.
+func BuildSessionModelFallbackWildcardSubject() string {
+	return SessionModelFallbackUpdated + ".*"
 }
 
 // BuildSessionMCPStatusSubject creates a session-specific MCP status subject.

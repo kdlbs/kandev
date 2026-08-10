@@ -60,6 +60,9 @@ surfaces. The core stays small; the ecosystem grows independently.
 - Plugins are distributed as a signed-or-unsigned release **tarball** and installed
   either by **URL** (kandev downloads it) or by **manual upload** (multipart file).
   There is no manifest-paste registration step.
+- The Settings > Plugins install dialog SHALL show the primary Install action as
+  busy while an install is in flight, including an animated loading indicator and
+  an installing label, while keeping the action disabled until the pipeline settles.
 - Capability-based access control: a plugin can only call Host RPCs it declared in its
   manifest; undeclared capabilities are rejected with a gRPC `PermissionDenied` status.
 - **Kandev owns the plugin process lifecycle**: it extracts the package, spawns the
@@ -460,7 +463,10 @@ service Host {
   workspace — so a plugin can delegate a lightweight LLM step without holding a
   provider API key. Returns gRPC `FailedPrecondition` when no utility agent is
   configured, selected agent was deleted, or it is disabled. See
-  [ADR 0048](../../decisions/0048-plugin-host-utility-agent-invoke.md).
+  [ADR 0048](../../decisions/0048-plugin-host-utility-agent-invoke.md). The plugin does not select
+  an execution profile directly; the selected utility agent resolves its effective profile and
+  complete launch/permission policy according to
+  [Profile-backed Utility Agents](../agents/utility-agent-profiles.md).
 
 Every Host RPC is capability-gated: `GetState`/`SetState`/`DeleteState`/`ListState`
 check `capabilities.state`, `RevealSecret` checks `capabilities.secrets`,
@@ -727,6 +733,10 @@ Mattermost-webapp model), not iframes. The full contract lives in
   without blocking the menu from closing. `registerComponent("task-card-indicators",
   C)` renders `C` beside the PR status icon on every kanban card, receiving
   `{ taskId, workspaceId, workflowStepId }` as `slotProps`.
+  `registerComponent("task-card-tags", C)` renders `C` in its own row on every
+  kanban card (below the badges row), receiving the same
+  `{ taskId, workspaceId, workflowStepId }` shape — for a contribution too wide
+  for the cramped title-row `task-card-indicators` spot, e.g. a row of tag chips.
 - **`host.storage`:** authenticated, per-user key/value storage
   (`get`/`set`/`delete`/`list`/`subscribe`), backed by the `plugin_user_state`
   table (separate from the plugin-backend-only `plugin_state` table — no gRPC/proto
@@ -871,6 +881,14 @@ complete.
   operator uploads it via `POST /api/plugins/install` (multipart `package`), **THEN**
   kandev runs the same verify → validate → extract → spawn pipeline and the plugin
   reaches `active` without any URL ever being contacted.
+
+- **GIVEN** the operator has entered a valid URL or selected a package in the
+  Settings > Plugins install dialog, **WHEN** the operator submits the install,
+  **THEN** the primary Install action is disabled, marked busy, and shows an
+  animated loading indicator with the installing label until the install and
+  post-install loading pipeline settles. **WHEN** the pipeline succeeds, **THEN**
+  the dialog closes as usual. **WHEN** it fails, **THEN** the indicator stops, the
+  action becomes available for retry, and the existing inline error remains visible.
 
 - **GIVEN** an operator who extracted a plugin package directly into
   `~/.kandev/plugins/<id>/<version>/` on the host filesystem (no install call), **WHEN**
@@ -1047,6 +1065,18 @@ complete.
   record remain installed for retry, and no successful-uninstall response is emitted.
   **WHEN** cleanup later succeeds and uninstall is retried, **THEN** all users' rows,
   the package, and the record are removed.
+
+- **GIVEN** a plugin registers a component for `"task-card-tags"`, **WHEN** any
+  kanban card renders, **THEN** that component mounts in its own row (distinct
+  from the title row hosting `"task-card-indicators"`), receiving exactly
+  `{ taskId, workspaceId, workflowStepId }` for that card. **GIVEN** no plugin
+  is registered for the slot, **WHEN** a card renders, **THEN** no extra DOM
+  node or empty-row spacing appears. **GIVEN** two plugins register for
+  `"task-card-tags"`, **WHEN** a card renders, **THEN** both render, in
+  registration order. **GIVEN** a `"task-card-tags"` component throws during
+  render, **WHEN** that card renders, **THEN** the card's title and its other
+  slot components (e.g. `"task-card-indicators"`) still render, isolated by
+  the existing per-registration error boundary.
 
 ## Out of scope
 

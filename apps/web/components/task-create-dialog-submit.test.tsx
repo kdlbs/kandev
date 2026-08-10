@@ -125,6 +125,7 @@ function makeDeps(overrides: Partial<SubmitHandlersDeps>): SubmitHandlersDeps {
   return {
     isSessionMode: false,
     isEditMode: false,
+    autopilot: false,
     isPassthroughProfile: false,
     taskName: "My CLI task",
     workspaceId: "ws-1",

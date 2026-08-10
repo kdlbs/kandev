@@ -134,15 +134,16 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 	}
 
 	// Extract worktree info from metadata if available
+	metadata := execution.MetadataSnapshot()
 	var worktreeID, worktreePath, worktreeBranch string
-	if execution.Metadata != nil {
-		if id, ok := execution.Metadata["worktree_id"].(string); ok {
+	if metadata != nil {
+		if id, ok := metadata["worktree_id"].(string); ok {
 			worktreeID = id
 		}
-		if path, ok := execution.Metadata["worktree_path"].(string); ok {
+		if path, ok := metadata["worktree_path"].(string); ok {
 			worktreePath = path
 		}
-		if branch, ok := execution.Metadata["worktree_branch"].(string); ok {
+		if branch, ok := metadata["worktree_branch"].(string); ok {
 			worktreeBranch = branch
 		}
 	}
@@ -173,7 +174,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		WorktreePath:     worktreePath,
 		WorktreeBranch:   worktreeBranch,
 		WorkspacePath:    execution.WorkspacePath,
-		Metadata:         execution.Metadata,
+		Metadata:         metadata,
 		PrepareResult:    execution.PrepareResult,
 		Worktrees:        worktrees,
 	}, nil
@@ -206,6 +207,7 @@ func buildLifecycleLaunchRequest(
 		PreviousExecutionID:           req.PreviousExecutionID,
 		McpMode:                       req.McpMode,
 		McpProviders:                  req.McpProviders,
+		McpProfile:                    req.McpProfile,
 		IsEphemeral:                   req.IsEphemeral,
 		IsPassthrough:                 req.IsPassthrough,
 		SetupScript:                   req.SetupScript,

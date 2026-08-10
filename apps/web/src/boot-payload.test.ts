@@ -76,6 +76,22 @@ describe("readBootPayload", () => {
     expect(readBootPayload(win).runtime?.debug).toBe(true);
     expect(win.__KANDEV_DEBUG).toBe(true);
   });
+
+  it("reads the browser tab title prefix from the runtime block", () => {
+    const win = {
+      __KANDEV_BOOT_PAYLOAD__: { runtime: { titlePrefix: "TEST" } },
+    } as unknown as Window;
+
+    expect(readBootPayload(win).runtime?.titlePrefix).toBe("TEST");
+  });
+
+  it("leaves the title prefix undefined when the runtime block omits it", () => {
+    const win = {
+      __KANDEV_BOOT_PAYLOAD__: { runtime: { apiPrefix: "/api/v1" } },
+    } as unknown as Window;
+
+    expect(readBootPayload(win).runtime?.titlePrefix).toBeUndefined();
+  });
 });
 
 describe("readBootPayload plugins", () => {

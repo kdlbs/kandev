@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   purge: vi.fn(),
   fetchJob: vi.fn(),
   fetchOverview: vi.fn(),
+  fetchDisk: vi.fn(),
   fetchPolicy: vi.fn(),
   fetchQuarantine: vi.fn(),
   fetchRuns: vi.fn(),
@@ -36,6 +37,7 @@ vi.mock("@/lib/api/domains/system-api", () => ({
   purgeStorageQuarantine: mocks.purge,
   fetchSystemJob: mocks.fetchJob,
   fetchStorageOverview: mocks.fetchOverview,
+  fetchStorageDisk: mocks.fetchDisk,
   fetchStoragePolicy: mocks.fetchPolicy,
   fetchStorageQuarantine: mocks.fetchQuarantine,
   fetchStorageRuns: mocks.fetchRuns,
@@ -55,7 +57,7 @@ const settings: StorageMaintenanceSettings = {
   idle_for_minutes: 10,
   orphan_grace_hours: 168,
   quarantine_retention_hours: 168,
-  workspaces: { enabled: true },
+  workspaces: { enabled: true, dependency_cleanup_enabled: false },
   kandev_containers: { enabled: true },
   go_cache: { enabled: false, max_bytes: 16106127360, adopted_path: "" },
   docker: {
@@ -73,6 +75,7 @@ const overview: StorageOverviewResponse = {
   capabilities: {
     managed_go_cache_path: "/data/cache/go-build",
     go_cache_adoption_available: true,
+    temporary_artifacts_available: true,
     docker_available: true,
     docker_host: "unix:///var/run/docker.sock",
     host_global_docker_cleanup_allowed: true,
@@ -81,6 +84,18 @@ const overview: StorageOverviewResponse = {
     workspaces: { active_bytes: 10, candidate_bytes: 20 },
     go_cache: { path: "/data/cache/go-build", size_bytes: 30, owned: true, enabled: false },
     quarantine: { count: 2, size_bytes: 35 },
+    temporary_artifacts: {
+      available: true,
+      total_count: 0,
+      total_bytes: 0,
+      active_count: 0,
+      active_bytes: 0,
+      protected_count: 0,
+      protected_bytes: 0,
+      stale_count: 0,
+      stale_bytes: 0,
+      skipped_count: 0,
+    },
     docker: {
       available: true,
       build_cache_bytes: 40,
@@ -91,6 +106,15 @@ const overview: StorageOverviewResponse = {
   },
   analyzed_at: "2026-07-23T12:00:00Z",
   last_run: null,
+};
+
+const disk = {
+  path: "/data",
+  total_bytes: 100,
+  used_bytes: 80,
+  available_bytes: 20,
+  used_percent: 80,
+  available: true,
 };
 
 const cleanupJobId = "cleanup-job";
@@ -120,6 +144,7 @@ function wrapper({ children }: { children: ReactNode }) {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.fetchOverview.mockResolvedValue(overview);
+  mocks.fetchDisk.mockResolvedValue(disk);
   mocks.fetchPolicy.mockResolvedValue({
     settings: overview.settings,
     capabilities: overview.capabilities,
@@ -146,6 +171,7 @@ describe("useStorageMaintenance", () => {
       runs: false,
       quarantine: false,
       overview: true,
+      disk: false,
     });
     expect(result.current.overview).toBeNull();
 
@@ -162,6 +188,7 @@ describe("useStorageMaintenance", () => {
     await waitFor(() => expect(result.current.overview).toEqual(overview));
     expect(mocks.fetchRuns).toHaveBeenCalledWith(20);
     expect(mocks.fetchQuarantine).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchDisk).toHaveBeenCalledTimes(1);
     expect(result.current.pendingAction).toBeNull();
   });
 
@@ -248,6 +275,20 @@ describe("useStorageMaintenance", () => {
 
     expect(result.current.cleanupJob).toBeUndefined();
     expect(result.current.error).toBe("storage maintenance is busy");
+  });
+});
+
+describe("useStorageMaintenance disk isolation", () => {
+  it("keeps the other sections usable when the disk request fails", async () => {
+    mocks.fetchDisk.mockRejectedValueOnce(new Error("disk unavailable"));
+    const { result } = renderHook(() => useStorageMaintenance(), { wrapper });
+
+    await waitFor(() => expect(result.current.sectionErrors.disk).toBe("disk unavailable"));
+    expect(result.current.policy?.settings).toEqual(settings);
+    expect(result.current.overview).toEqual(overview);
+    expect(result.current.runs).toEqual([]);
+    expect(result.current.quarantine).toEqual([]);
+    expect(result.current.loading.disk).toBe(false);
   });
 });
 

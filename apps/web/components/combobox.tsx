@@ -210,6 +210,7 @@ export const Combobox = memo(function Combobox({
         align={popoverAlign}
         portal={popoverPortal}
         portalContainer={portalContainer}
+        onWheel={(event) => event.stopPropagation()}
       >
         <Command
           value={highlighted}

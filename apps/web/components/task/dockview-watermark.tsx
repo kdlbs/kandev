@@ -16,6 +16,7 @@ import { AddPanelMenuItems } from "./dockview-add-panel-items";
 import { NewSessionDialog } from "./new-session-dialog";
 import { useActiveSessionDevScript } from "./repository-scripts-menu";
 import { useTranslation } from "react-i18next";
+import { useOptionalPortForwardingVisibility } from "./port-forwarding-visibility-provider";
 
 /**
  * Watermark rendered by Dockview when a group becomes empty (e.g. after
@@ -96,6 +97,7 @@ function useWatermarkMenuState(
   });
   const { prs } = useTaskPR(taskID);
   const mrs = useTaskMRs(taskID);
+  const portForwarding = useOptionalPortForwardingVisibility();
   return useMemo(
     () => ({
       taskId: taskID,
@@ -104,8 +106,9 @@ function useWatermarkMenuState(
       hasFiles: Boolean(containerApi.getPanel("files") ?? containerApi.getPanel("all-files")),
       prs,
       mrs,
+      portForwarding,
     }),
-    [taskID, isPassthrough, containerApi, prs, mrs],
+    [taskID, isPassthrough, containerApi, prs, mrs, portForwarding],
   );
 }
 
@@ -152,7 +155,7 @@ function useWatermarkHandlers(
           groupId,
           environmentId,
           undefined,
-          result.label ?? "Script",
+          result.label ?? t("common:script"),
         );
       } catch (error) {
         console.error("Failed to run script:", error);

@@ -97,8 +97,28 @@ export async function updateWorkspaceAction(
   });
 }
 
-export async function deleteWorkspaceAction(id: string, confirmName: string) {
-  await fetchJson<void>(`${apiBaseUrl}/api/v1/office/workspaces/${id}`, {
+// Workspace deletion has two backend routes and the caller must pick by flag.
+//
+// The office route (`/api/v1/office/workspaces/:id`) additionally purges
+// office-owned rows, which have no FK cascade to `workspaces` and are removed by
+// an explicit statement list in
+// `internal/office/repository/sqlite/workspace_deletion.go`. But the whole
+// `/api/v1/office` router group is only mounted when the office services exist,
+// and those are skipped when `features.office` is off — the production default.
+// Calling it there 404s, which is how Settings deletion broke for every
+// non-office install.
+//
+// So: office on -> office route (cascade plus office cleanup); office off ->
+// generic route, which owns the same task/workflow cascade and confirm-name
+// guard and is the only one mounted. `officeEnabled` is required rather than
+// defaulted so a new call site has to make the choice explicitly.
+export async function deleteWorkspaceAction(
+  id: string,
+  confirmName: string,
+  officeEnabled: boolean,
+) {
+  const path = officeEnabled ? `office/workspaces/${id}` : `workspaces/${id}`;
+  await fetchJson<void>(`${apiBaseUrl}/api/v1/${path}`, {
     method: "DELETE",
     body: JSON.stringify({ confirm_name: confirmName }),
   });

@@ -157,6 +157,76 @@ func TestRenderShellInsertsLangWhenAbsent(t *testing.T) {
 	}
 }
 
+func TestRenderShellRewritesTitleFromPrefix(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		prefix    string
+		wantTitle string
+	}{
+		{name: "prefix set", prefix: "TEST", wantTitle: "<title>TEST Kandev</title>"},
+		{name: "prefix trimmed", prefix: "  TEST  ", wantTitle: "<title>TEST Kandev</title>"},
+		{name: "empty prefix keeps shell title", prefix: "", wantTitle: "<title>Kandev</title>"},
+		{name: "blank prefix keeps shell title", prefix: "   ", wantTitle: "<title>Kandev</title>"},
+		{
+			name:      "html special characters are escaped",
+			prefix:    `</title><script>alert(1)</script>`,
+			wantTitle: "<title>&lt;/title&gt;&lt;script&gt;alert(1)&lt;/script&gt; Kandev</title>",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assets := fstest.MapFS{
+				"index.html": {
+					Data: []byte(`<!doctype html><html lang="en"><head><title>Kandev</title></head><body></body></html>`),
+				},
+			}
+			payload := NewBootPayload(ClassifyRoute("/"), RuntimeConfig{TitlePrefix: tc.prefix}, nil)
+			html, err := RenderShell(assets, "index.html", payload)
+			if err != nil {
+				t.Fatalf("RenderShell: %v", err)
+			}
+			if got := string(html); !strings.Contains(got, tc.wantTitle) {
+				t.Fatalf("expected %q in shell, got: %s", tc.wantTitle, got)
+			}
+		})
+	}
+}
+
+func TestRenderShellLeavesShellWithoutTitleUntouched(t *testing.T) {
+	t.Parallel()
+
+	assets := fstest.MapFS{
+		"index.html": {Data: []byte(`<!doctype html><html lang="en"><head></head><body></body></html>`)},
+	}
+	payload := NewBootPayload(ClassifyRoute("/"), RuntimeConfig{TitlePrefix: "TEST"}, nil)
+	html, err := RenderShell(assets, "index.html", payload)
+	if err != nil {
+		t.Fatalf("RenderShell: %v", err)
+	}
+	if strings.Contains(string(html), "<title") {
+		t.Fatalf("expected no title element to be created, got: %s", html)
+	}
+}
+
+func TestComposeTitle(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct{ in, want string }{
+		{"", "Kandev"},
+		{"   ", "Kandev"},
+		{"TEST", "TEST Kandev"},
+		{"  staging  ", "staging Kandev"},
+	} {
+		if got := ComposeTitle(tc.in); got != tc.want {
+			t.Fatalf("ComposeTitle(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestNormalizeLocale(t *testing.T) {
 	t.Parallel()
 

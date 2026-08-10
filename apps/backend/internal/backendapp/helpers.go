@@ -79,6 +79,7 @@ import (
 	spriteshandlers "github.com/kandev/kandev/internal/sprites"
 	sshhandlers "github.com/kandev/kandev/internal/ssh"
 	systemsvc "github.com/kandev/kandev/internal/system"
+	"github.com/kandev/kandev/internal/system/storage/tempartifacts"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	"github.com/kandev/kandev/internal/task/models"
@@ -105,6 +106,10 @@ const (
 	agentShutdownTimeout     = 20 * time.Second
 	httpShutdownTimeout      = 10 * time.Second
 	tracingShutdownTimeout   = 5 * time.Second
+	branchFieldKey           = "branch"
+	versionFieldKey          = "version"
+	kandevName               = "kandev"
+	startingStatus           = "starting"
 )
 
 // buildSessionDataProvider constructs the session data provider function used by the WebSocket hub
@@ -333,7 +338,7 @@ func tryGetLiveGitStatus(ctx context.Context, lifecycleMgr *lifecycle.Manager, s
 // stores it under byEnvironmentRepo[envKey][repository_name].
 func buildGitStatusNotification(sessionID, repositoryName string, status client.GitStatusResult) *ws.Message {
 	statusPayload := map[string]interface{}{
-		"branch":           status.Branch,
+		branchFieldKey:     status.Branch,
 		"remote_branch":    status.RemoteBranch,
 		"ahead":            status.Ahead,
 		"behind":           status.Behind,
@@ -391,7 +396,7 @@ func appendDBSnapshotGitStatus(ctx context.Context, taskRepo *sqliterepo.Reposit
 		"session_id": sessionID,
 		"timestamp":  metadata["timestamp"],
 		"status": map[string]interface{}{
-			"branch":           latestSnapshot.Branch,
+			branchFieldKey:     latestSnapshot.Branch,
 			"remote_branch":    latestSnapshot.RemoteBranch,
 			"ahead":            latestSnapshot.Ahead,
 			"behind":           latestSnapshot.Behind,
@@ -527,6 +532,7 @@ type routeParams struct {
 	services                      *Services
 	systemSvc                     *systemsvc.Service
 	workspaceRestorer             taskhandlers.WorkspaceQuarantineRestorer
+	temporaryArtifacts            *tempartifacts.Registry
 	runtimeFlagsSvc               *runtimeflags.Service
 	dbPool                        *db.Pool
 	agentSettingsController       *agentsettingscontroller.Controller
@@ -543,10 +549,12 @@ type routeParams struct {
 	secretStore                   secrets.SecretStore
 	mcpConfigSvc                  *mcpconfig.Service
 	authSvc                       *auth.Service
+	agentRuntimeAvailability      *client.Availability
 	addCleanup                    func(func() error)
 	repoCloner                    *repoclone.Cloner
 	version                       string
 	webInternalURL                string
+	webTitlePrefix                string
 	devMode                       bool
 	httpPort                      int
 	features                      config.FeaturesConfig
@@ -675,16 +683,7 @@ func registerRoutes(p routeParams) {
 	// Before that, return 503 so callers (including the e2e fixture's
 	// waitForHealth) keep polling instead of racing ahead and hitting
 	// 404s on routes that aren't wired yet.
-	p.router.GET("/health", func(c *gin.Context) {
-		if !ready.Load() {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "starting", "service": "kandev"})
-			return
-		}
-		if token := desktopHealthToken(); token != "" {
-			c.Header(desktopHealthTokenHeader, token)
-		}
-		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "kandev", "mode": "websocket+http"})
-	})
+	p.router.GET("/health", healthHandler(p))
 
 	// /api/v1/features is a public, unauthenticated read of the runtime
 	// feature-flag map. The frontend SSR-fetches it once per page render to
@@ -704,7 +703,6 @@ func registerRoutes(p routeParams) {
 		payload := bootPayload(c.Request.Context(), c.Request, p, route)
 		c.JSON(http.StatusOK, payload)
 	})
-
 	if p.webInternalURL == "" {
 		if handler, distDir, ok := newWebAppHandler(p); ok {
 			p.router.NoRoute(func(c *gin.Context) {
@@ -746,6 +744,42 @@ func registerRoutes(p routeParams) {
 	}
 }
 
+// healthHandler serves GET /health. The response always carries the
+// process's running version — in both the ready and not-ready bodies — so an
+// operator can identify the build of a backend that is stuck starting, and so
+// a monitor never needs a credential to read it (see docs/specs/
+// health-endpoint-version/spec.md).
+func healthHandler(p routeParams) gin.HandlerFunc {
+	// p.version is normally the package-level Version wired in by run()'s
+	// registerRoutes call. Falling back here keeps the never-empty guarantee
+	// (AC-11) true regardless of that call-site wiring, since standing up
+	// run()'s full DI graph in a test just to exercise that one field
+	// assignment is out of proportion to this change.
+	version := p.version
+	if version == "" {
+		version = Version
+	}
+	return func(c *gin.Context) {
+		if !ready.Load() {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"status":        startingStatus,
+				"service":       kandevName,
+				versionFieldKey: version,
+			})
+			return
+		}
+		if token := desktopHealthToken(); token != "" {
+			c.Header(desktopHealthTokenHeader, token)
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"status":        "ok",
+			"service":       kandevName,
+			"mode":          "websocket+http",
+			versionFieldKey: version,
+		})
+	}
+}
+
 func desktopHealthToken() string {
 	return strings.TrimSpace(os.Getenv(desktopHealthTokenEnv))
 }
@@ -774,7 +808,7 @@ func webAppHandlerOptions(p routeParams) []webapp.HandlerOption {
 // webRuntimeConfig builds the SPA's runtime block. `req` supplies the active
 // locale (from the kandev_locale cookie) so the shell can set <html lang> and the
 // client can activate the right catalog before first paint.
-func webRuntimeConfig(debug bool, req *http.Request) webapp.RuntimeConfig {
+func webRuntimeConfig(debug bool, titlePrefix string, req *http.Request) webapp.RuntimeConfig {
 	return webapp.RuntimeConfig{
 		APIPrefix:                         "/api/v1",
 		WebSocketPath:                     "/ws",
@@ -785,6 +819,7 @@ func webRuntimeConfig(debug bool, req *http.Request) webapp.RuntimeConfig {
 		// this from its own build mode.
 		NonProduction: profiles.DetectEnvironment() != profiles.EnvProd,
 		Locale:        i18n.FromRequest(req),
+		TitlePrefix:   strings.TrimSpace(titlePrefix),
 	}
 }
 
@@ -796,7 +831,7 @@ func bootPayload(ctx context.Context, req *http.Request, p routeParams, route we
 	}
 	payload := webapp.NewBootPayload(
 		route,
-		webRuntimeConfig(p.devMode, req),
+		webRuntimeConfig(p.devMode, p.webTitlePrefix, req),
 		initialState,
 	)
 	payload.RouteData = routeData
@@ -1195,13 +1230,11 @@ func registerSecondaryRoutes(
 			}
 		}
 		ikHandler := improvekandev.NewHandler(p.taskSvc, p.repoCloner, ghCopier, resolveDefaultWorkspace, p.version, p.log)
+		ikHandler.SetTemporaryArtifactRegistry(p.temporaryArtifacts)
 		if p.systemSvc != nil {
 			ikHandler.SetLogBundles(p.systemSvc.LogBundles)
 		}
 		improvekandev.RegisterRoutes(p.router, ikHandler)
-		improvekandev.CleanupStaleBundles(func(path string, err error) {
-			p.log.Warn("Improve Kandev: failed to clean stale bundle", zap.String("path", path), zap.Error(err))
-		})
 		p.log.Debug("Registered Improve Kandev handlers (HTTP)")
 	}
 

@@ -54,6 +54,7 @@ type FormResetters = {
   setUseRemote: (v: boolean) => void;
   setNoRepository: (v: boolean) => void;
   setWorkspacePath: (v: string) => void;
+  setAutopilot: (v: boolean) => void;
   setGitHubUrlError: (v: string | null) => void;
   setFreshBranchEnabled: (v: boolean) => void;
   setCurrentLocalBranch: (v: string) => void;
@@ -69,6 +70,7 @@ type FormResetEffectsArgs = {
   setCurrentDefaults: (v: { name: string; description: string }) => void;
   setOpenCycle: React.Dispatch<React.SetStateAction<number>>;
   prevOpenRef: React.RefObject<boolean>;
+  lockedWorkflow: boolean;
 };
 
 function useFormResetEffects({
@@ -81,6 +83,7 @@ function useFormResetEffects({
   setCurrentDefaults,
   setOpenCycle,
   prevOpenRef,
+  lockedWorkflow,
 }: FormResetEffectsArgs) {
   // Restore draft or initialValues when dialog opens
   useEffect(() => {
@@ -104,10 +107,16 @@ function useFormResetEffects({
       initial_branch: initialValues?.branch ?? initialValues?.checkoutBranch ?? "-",
     });
     setCurrentDefaults(defaults);
-    resetTaskForm(resetters, defaults.name, defaults.description, workflowId, initialValues);
+    resetTaskForm(
+      resetters,
+      defaults.name,
+      defaults.description,
+      lockedWorkflow ? workflowId : null,
+      initialValues,
+    );
     setDraftDescription(defaults.description);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, workflowId, workspaceId]);
+  }, [lockedWorkflow, open, workflowId, workspaceId]);
 
   useEffect(() => {
     if (!open) return;
@@ -191,6 +200,7 @@ function resetTaskForm(
   resetters.setExecutorProfileId("");
   resetters.setSelectedWorkflowId(workflowId);
   resetters.setFetchedSteps(null);
+  resetters.setAutopilot(false);
 }
 
 function firstDefined<T>(...values: Array<T | undefined>): T | undefined {
@@ -369,6 +379,7 @@ function useFormStateValues(workflowId: string | null) {
   // means kandev creates a scratch workspace.
   const [noRepository, setNoRepository] = useState(false);
   const [workspacePath, setWorkspacePath] = useState("");
+  const [autopilot, setAutopilot] = useState(false);
   return {
     taskName,
     setTaskName,
@@ -404,6 +415,8 @@ function useFormStateValues(workflowId: string | null) {
     setNoRepository,
     workspacePath,
     setWorkspacePath,
+    autopilot,
+    setAutopilot,
   };
 }
 
@@ -430,6 +443,7 @@ export function useDialogFormState(
   workspaceId: string | null,
   workflowId: string | null,
   initialValues?: TaskCreateDialogInitialValues,
+  lockedWorkflow = false,
 ) {
   const form = useFormStateValues(workflowId);
   const discovery = useDiscoveryState();
@@ -450,6 +464,7 @@ export function useDialogFormState(
     setCurrentDefaults: form.setCurrentDefaults,
     setOpenCycle: form.setOpenCycle,
     prevOpenRef: form.prevOpenRef,
+    lockedWorkflow,
     resetters: {
       setTaskName: form.setTaskName,
       setHasTitle: form.setHasTitle,
@@ -470,6 +485,7 @@ export function useDialogFormState(
       setCurrentLocalBranch: freshBranch.setCurrentLocalBranch,
       setNoRepository: form.setNoRepository,
       setWorkspacePath: form.setWorkspacePath,
+      setAutopilot: form.setAutopilot,
     },
   });
 
@@ -612,13 +628,23 @@ export function useSessionRepoName(isSessionMode: boolean) {
   }, [isSessionMode, activeTaskId, kanbanTasks, reposByWorkspace]);
 }
 
-export function useTaskCreateDialogData(
-  open: boolean,
-  workspaceId: string | null,
-  workflowId: string | null,
-  defaultStepId: string | null,
-  fs: DialogFormState,
-) {
+type TaskCreateDialogDataArgs = {
+  open: boolean;
+  workspaceId: string | null;
+  workflowId: string | null;
+  defaultStepId: string | null;
+  fs: DialogFormState;
+  lockedWorkflow?: boolean;
+};
+
+export function useTaskCreateDialogData({
+  open,
+  workspaceId,
+  workflowId,
+  defaultStepId,
+  fs,
+  lockedWorkflow = false,
+}: TaskCreateDialogDataArgs) {
   const workflows = useAppStore((state) => state.workflows.items);
   const workspaces = useAppStore((state) => state.workspaces.items);
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
@@ -655,6 +681,10 @@ export function useTaskCreateDialogData(
     repositories,
     workflows,
     snapshots,
+    lockedWorkflow,
+    lastUsedWorkflowIdsByWorkspace:
+      taskCreateUserSettings.userSettings.taskCreateLastUsed.workflowIdsByWorkspace ?? {},
+    userSettingsLoaded: taskCreateUserSettings.loaded,
   });
   return {
     workflows,

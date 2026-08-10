@@ -39,6 +39,15 @@ export class SessionPage {
   get portForwardButton() {
     return this.page.getByTestId("port-forward-button");
   }
+  get portForwardingMenuItem() {
+    return this.page.getByTestId("port-forwarding-menu-item");
+  }
+  get mobileSessionMenu() {
+    return this.page.getByTestId("mobile-session-menu");
+  }
+  get mobilePortForwardingToggle() {
+    return this.page.getByTestId("mobile-port-forwarding-toggle");
+  }
   get portForwardDialog() {
     return this.page.getByTestId("port-forward-dialog");
   }
@@ -53,6 +62,45 @@ export class SessionPage {
   }
   portForwardRow(port: number) {
     return this.page.getByTestId(`port-forward-row-${port}`);
+  }
+  portForwardTunnelToggle(port: number) {
+    return this.portForwardRow(port).getByRole("button").first();
+  }
+  portForwardTunnelStart(port: number) {
+    return this.portForwardRow(port).getByRole("button", { name: "Start", exact: true });
+  }
+  portForwardOpenBrowser(port: number) {
+    return this.portForwardRow(port).getByTestId(`port-forward-open-browser-${port}`);
+  }
+  get browserPanel() {
+    return this.page.locator('[data-testid="browser-panel"]:visible').first();
+  }
+  get browserAddressInput() {
+    return this.browserPanel.locator("input").first();
+  }
+
+  async togglePortForwardingPreference(): Promise<void> {
+    await this.addPanelButton().click();
+    await expect(this.portForwardingMenuItem).toBeVisible();
+    const enabling = (await this.portForwardingMenuItem.getAttribute("aria-checked")) !== "true";
+    await this.portForwardingMenuItem.click({ force: true });
+    if (enabling) {
+      await this.portForwardDialog
+        .waitFor({ state: "visible", timeout: 5_000 })
+        .catch(() => undefined);
+    }
+    if (await this.portForwardDialog.isVisible()) {
+      await this.portForwardDialog.getByRole("button", { name: "Close" }).click();
+    }
+    await this.page.keyboard.press("Escape");
+    await expect(this.portForwardingMenuItem).toBeHidden();
+    await expect(this.portForwardDialog).toBeHidden();
+  }
+
+  async enablePortForwarding(): Promise<void> {
+    if (await this.portForwardButton.isVisible()) return;
+    await this.togglePortForwardingPreference();
+    await expect(this.portForwardButton).toBeVisible();
   }
 
   // Chat status bar locators
@@ -567,9 +615,9 @@ export class SessionPage {
     return this.page.getByTestId("recovery-cancel-retry-button");
   }
 
-  /** The yellow "Provider overloaded — retrying…" status card text. */
+  /** The yellow provider-error retry status card. */
   transientRetryCard(): Locator {
-    return this.chat.getByText(/Provider overloaded — retrying/i);
+    return this.activeChat().getByTestId("transient-retry-card");
   }
 
   /** Context reset divider shown in chat after resetting agent context. */
@@ -773,6 +821,11 @@ export class SessionPage {
   /** Footer "updated Ns ago" timestamp text. */
   prPopoverUpdatedAt(): Locator {
     return this.prTopbarPopover().getByTestId("pr-popover-updated-at");
+  }
+
+  /** Footer spinner + "Updating…", shown while a refresh is in flight. */
+  prPopoverUpdating(): Locator {
+    return this.prTopbarPopover().getByTestId("pr-popover-updating");
   }
 
   /** Empty-state row when the PR has no checks yet. */
@@ -1008,6 +1061,7 @@ export class SessionPage {
    */
   async sendMessage(text: string) {
     const editor = await this.composerReady();
+    await this.waitForDirectInput();
     await editor.click();
     await editor.fill(text);
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
@@ -1020,6 +1074,7 @@ export class SessionPage {
    */
   async sendMessageViaButton(text: string) {
     const editor = await this.composerReady();
+    await this.waitForDirectInput();
     await editor.click();
     await editor.fill(text);
     const isTouch = await this.page.evaluate(() => window.matchMedia("(pointer: coarse)").matches);
@@ -1028,6 +1083,24 @@ export class SessionPage {
       return;
     }
     await this.clickSubmitWhenReady();
+  }
+
+  /**
+   * Wait until the composer is in direct-input mode — the idle placeholder
+   * ("Continue working on the task...") visible, not the queue affordance
+   * ("Queue instructions to the agent...").
+   *
+   * The submit button stays enabled while the session is busy (the queue
+   * affordance lets you type-and-queue), and `composerReady()` only checks
+   * editability, so a send right after a turn completes can race the store's
+   * RUNNING→WAITING_FOR_INPUT transition and silently queue the message
+   * instead of delivering it. Gating the send on the idle placeholder makes
+   * sends to an idle session deterministic: typing only starts once the store
+   * session state is genuinely promptable. Must run on an empty editor — the
+   * placeholder decoration is only rendered while the editor has no content.
+   */
+  async waitForDirectInput(timeout = 15_000) {
+    await expect(this.anyIdleInput()).toBeVisible({ timeout });
   }
 
   /** The composer's send/submit button (scoped to the active chat panel). */
@@ -1298,6 +1371,12 @@ export class SessionPage {
   /** "+" button in the dockview header to open the add-panel dropdown. */
   addPanelButton(): Locator {
     return this.page.getByTestId("dockview-add-panel-btn").first();
+  }
+
+  /** Open a blank built-in Browser panel from the dockview + menu. */
+  async addBrowserPanel(): Promise<void> {
+    await this.addPanelButton().click();
+    await this.page.getByRole("menuitem", { name: "Browser", exact: true }).click();
   }
 
   /** "New Session" menu item in the dockview + dropdown. */

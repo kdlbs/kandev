@@ -19,6 +19,7 @@ const STATE_PILL: Record<
   { labelKey: string; variant: "default" | "secondary" | "destructive" | "outline" }
 > = {
   healthy: { labelKey: "office:healthy", variant: "secondary" },
+  short_retry: { labelKey: "office:shortRetry", variant: "outline" },
   degraded: { labelKey: "office:degraded", variant: "destructive" },
   user_action_required: { labelKey: "office:needsAction", variant: "destructive" },
 };
@@ -94,6 +95,7 @@ function collapseByProvider(rows: ProviderHealth[]): Map<string, ProviderHealth>
 function severity(s: ProviderHealthState): number {
   if (s === "user_action_required") return 2;
   if (s === "degraded") return 1;
+  if (s === "short_retry") return 1;
   return 0;
 }
 

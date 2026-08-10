@@ -108,8 +108,8 @@ type ProviderDefaultBranchProber interface {
 	ProbeDefaultBranch(ctx context.Context, provider, owner, name string) (string, error)
 }
 
-// BranchMaterializer creates a worktree on disk and persists a
-// task_session_worktrees row for a newly added task_repository row, without
+// BranchMaterializer creates a worktree on disk and persists the
+// task_environment_repos row for a newly added task_repository row, without
 // restarting the agent. Used by AddBranchToTask so MCP-driven "add a branch
 // to this task" actually surfaces the new worktree in the UI on the next
 // poll, rather than waiting for a session relaunch.

@@ -72,9 +72,9 @@ func emitEditFile(e *emitter, model string) {
 		acp.ToolCallLocation{Path: f.absPath})
 
 	if e.requestPermission(toolID, "Edit "+f.relPath, acp.ToolKindEdit, input) {
-		e.completeTool(toolID, map[string]any{"result": "File edited successfully: " + f.absPath})
+		e.completeTool(toolID, map[string]any{toolKeyResult: "File edited successfully: " + f.absPath})
 	} else {
-		e.completeTool(toolID, map[string]any{"result": "Permission denied for Edit"})
+		e.completeTool(toolID, map[string]any{toolKeyResult: "Permission denied for Edit"})
 		e.text("Permission denied for Edit, skipping.")
 	}
 }
@@ -104,7 +104,7 @@ func emitCodeSearch(e *emitter, model string) {
 	toolID := nextToolID()
 	randomDelay(model)
 
-	searchPatterns := []string{"func ", "import ", "TODO", "return ", "error", "type "}
+	searchPatterns := []string{"func ", "import ", "TODO", "return ", toolKeyError, "type "}
 	pattern := searchPatterns[state.toolCallCounter%len(searchPatterns)]
 
 	f := randomFile()
@@ -175,7 +175,7 @@ func emitTodo(e *emitter, model string) {
 	})
 
 	randomDelay(model)
-	e.completeTool(toolID, map[string]any{"result": "Todo list updated: 3 items (1 in progress, 2 pending)"})
+	e.completeTool(toolID, map[string]any{toolKeyResult: "Todo list updated: 3 items (1 in progress, 2 pending)"})
 }
 
 // emitMermaidSequence emits a rich markdown message containing mermaid diagrams.
@@ -343,8 +343,8 @@ func emitWebFetch(e *emitter, model string) {
 	randomDelay(model)
 
 	e.startTool(toolID, "Fetch API docs", acp.ToolKindFetch, map[string]any{
-		"url":    "https://example.com/api/docs",
-		"prompt": "Extract the API endpoints and their descriptions",
+		"url":                  "https://example.com/api/docs",
+		clarificationPromptKey: "Extract the API endpoints and their descriptions",
 	})
 
 	randomDelay(model)

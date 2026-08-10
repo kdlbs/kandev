@@ -17,6 +17,18 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 )
 
+// Advertised model ids. mock-slow is a delay tier (see delayRange) that E2E
+// fixtures select for slow responses; it must be advertised for the
+// no-silent-model-fallback strict policy to accept it.
+const (
+	modelFast           = "mock-fast"
+	modelSmart          = "mock-smart"
+	modelSlow           = "mock-slow"
+	reasoningEffortLow  = "low"
+	reasoningEffortMed  = "medium"
+	reasoningEffortHigh = "high"
+)
+
 // logOutput is the writer for log messages (stderr). Tests can override this.
 var logOutput io.Writer = os.Stderr
 
@@ -167,18 +179,45 @@ func mockSessionModes() *acp.SessionModeState {
 }
 
 func mockSessionConfigOptions() []acp.SessionConfigOption {
+	return mockSessionConfigOptionsForModel("mock-fast")
+}
+
+func mockSessionConfigOptionsForModel(model string) []acp.SessionConfigOption {
 	modelCat := acp.SessionConfigOptionCategoryModel
 	modeCat := acp.SessionConfigOptionCategoryMode
 	thoughtCat := acp.SessionConfigOptionCategoryThoughtLevel
+	effortID := acp.SessionConfigId("effort")
+	effortName := "Effort"
+	effortDescription := "Controls how much reasoning the mock model uses"
+	effortValue := acp.SessionConfigValueId(reasoningEffortMed)
+	effortOptions := acp.SessionConfigSelectOptionsUngrouped{
+		{Value: reasoningEffortLow, Name: "Low", Description: ptr("Faster responses with less reasoning")},
+		{Value: reasoningEffortMed, Name: "Medium", Description: ptr("Balanced speed and reasoning")},
+		{Value: reasoningEffortHigh, Name: "High", Description: ptr("More reasoning for complex tasks")},
+	}
+	if model == modelSmart {
+		effortDescription = "Controls the reasoning depth for the smart mock model"
+		effortValue = reasoningEffortHigh
+		effortOptions = acp.SessionConfigSelectOptionsUngrouped{
+			{Value: reasoningEffortLow, Name: "Low", Description: ptr("Use less reasoning")},
+			{Value: reasoningEffortHigh, Name: "High", Description: ptr("Use deeper reasoning")},
+			{Value: "max", Name: "Max", Description: ptr("Use maximum reasoning")},
+		}
+	}
 	return []acp.SessionConfigOption{
 		{Select: &acp.SessionConfigOptionSelect{
 			Category:     &modelCat,
-			CurrentValue: "mock-fast",
+			CurrentValue: acp.SessionConfigValueId(model),
 			Id:           "model",
 			Name:         "Model",
 			Options: acp.SessionConfigSelectOptions{Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
-				{Value: "mock-fast", Name: "Mock Fast", Description: ptr("Fast mock model for testing")},
-				{Value: "mock-smart", Name: "Mock Smart", Description: ptr("Smart mock model for testing")},
+				{Value: modelFast, Name: "Mock Fast", Description: ptr("Fast mock model for testing")},
+				{Value: modelSmart, Name: "Mock Smart", Description: ptr("Smart mock model for testing")},
+				// E2E fixtures use "mock-slow" for the slow-response delay tier.
+				// It must be advertised so the no-silent-model-fallback strict
+				// policy (which fails session start when the profile model is
+				// absent from the advertised list) does not reject it.
+				{Value: modelSlow, Name: "Mock Slow", Description: ptr("Slow mock model for testing")},
 			}},
 			Type: "select",
 		}},
@@ -195,16 +234,12 @@ func mockSessionConfigOptions() []acp.SessionConfigOption {
 		}},
 		{Select: &acp.SessionConfigOptionSelect{
 			Category:     &thoughtCat,
-			CurrentValue: "medium",
-			Id:           "effort",
-			Name:         "Effort",
-			Description:  ptr("Controls how much reasoning the mock model uses"),
-			Options: acp.SessionConfigSelectOptions{Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
-				{Value: "low", Name: "Low", Description: ptr("Faster responses with less reasoning")},
-				{Value: "medium", Name: "Medium", Description: ptr("Balanced speed and reasoning")},
-				{Value: "high", Name: "High", Description: ptr("More reasoning for complex tasks")},
-			}},
-			Type: "select",
+			CurrentValue: effortValue,
+			Id:           effortID,
+			Name:         effortName,
+			Description:  ptr(effortDescription),
+			Options:      acp.SessionConfigSelectOptions{Ungrouped: &effortOptions},
+			Type:         "select",
 		}},
 	}
 }
@@ -338,8 +373,28 @@ func (a *mockAgent) SetSessionConfigOption(_ context.Context, req acp.SetSession
 	if !found {
 		return acp.SetSessionConfigOptionResponse{}, fmt.Errorf("unknown mock config option %q", req.ValueId.ConfigId)
 	}
+	if req.ValueId.ConfigId == "model" {
+		modeValue := mockConfigOptionValue(options, "mode")
+		options = mockSessionConfigOptionsForModel(string(req.ValueId.Value))
+		for i := range options {
+			if options[i].Select != nil && options[i].Select.Id == "mode" && modeValue != "" {
+				if mockConfigOptionContainsValue(options[i].Select.Options, modeValue) {
+					options[i].Select.CurrentValue = modeValue
+				}
+			}
+		}
+	}
 	a.sessionConfig[req.ValueId.SessionId] = options
 	return acp.SetSessionConfigOptionResponse{ConfigOptions: cloneSessionConfigOptions(options)}, nil
+}
+
+func mockConfigOptionValue(options []acp.SessionConfigOption, id acp.SessionConfigId) acp.SessionConfigValueId {
+	for _, option := range options {
+		if option.Select != nil && option.Select.Id == id {
+			return option.Select.CurrentValue
+		}
+	}
+	return ""
 }
 
 func mockConfigOptionContainsValue(options acp.SessionConfigSelectOptions, value acp.SessionConfigValueId) bool {
@@ -439,7 +494,7 @@ func mockAvailableCommands() []acp.AvailableCommand {
 		{Name: "detached-background", Description: "Launch work that outlives the foreground turn (default 8s)", Input: hint("duration (e.g. 8s)")},
 		{Name: "async-subagent-lifecycle", Description: "Replay an async Agent lifecycle (default 20s)", Input: hint("duration (e.g. 20s)")},
 		{Name: "async-subagent-teardown", Description: "Replay async Agent work with a missing completion"},
-		{Name: "error", Description: "Simulate an error"},
+		{Name: toolKeyError, Description: "Simulate an error"},
 		{Name: "overloaded", Description: "Simulate a transient 529 Overloaded error (fails once, then recovers)"},
 		{Name: "thinking", Description: "Emit thinking/reasoning blocks"},
 		{Name: "crash", Description: "Simulate agent crash"},

@@ -81,17 +81,37 @@ test.describe("Workflow settings", () => {
     seedData,
     prCapture,
   }) => {
+    // The host-utility probe runs asynchronously during backend startup. Wait
+    // for the deterministic mock provider used by this spec instead of
+    // selecting whichever provider happens to be first in the response.
+    await expect
+      .poll(
+        async () => {
+          const available = await testPage.request.get(
+            `${backend.baseUrl}/api/v1/agents/available`,
+          );
+          if (!available.ok()) return false;
+          const payload = (await available.json()) as {
+            agents?: Array<{
+              name: string;
+              model_config?: { config_options?: Array<{ id: string }> };
+            }>;
+          };
+          const mock = payload.agents?.find((item) => item.name === "mock-agent");
+          return Boolean(
+            mock?.model_config?.config_options?.some((option) => option.id === "effort"),
+          );
+        },
+        { timeout: 20_000, intervals: [250, 500, 1_000] },
+      )
+      .toBe(true);
+
     const available = await testPage.request.get(`${backend.baseUrl}/api/v1/agents/available`);
     expect(available.ok()).toBe(true);
     const availablePayload = (await available.json()) as {
-      agents?: Array<{
-        name: string;
-        model_config?: { config_options?: Array<{ id: string }> };
-      }>;
+      agents?: Array<{ name: string }>;
     };
-    const agent = availablePayload.agents?.find((item) =>
-      item.model_config?.config_options?.some((option) => option.id === "effort"),
-    );
+    const agent = availablePayload.agents?.find((item) => item.name === "mock-agent");
     expect(agent).toBeDefined();
 
     const workflow = await apiClient.createWorkflow(
@@ -124,7 +144,7 @@ test.describe("Workflow settings", () => {
     await settings.click();
     await testPage.getByText("Mock Smart", { exact: true }).click();
     await testPage.getByTestId("config-option-trigger-effort").click();
-    await testPage.getByRole("button", { name: "High", exact: true }).click();
+    await testPage.getByRole("button", { name: "Max", exact: true }).click();
     await testPage.keyboard.press("Escape");
     await prCapture.screenshot("desktop-original-session-editor", {
       caption: "Workflow step editor with a conditional original-session model and effort rule.",
@@ -141,7 +161,7 @@ test.describe("Workflow settings", () => {
               agent_name: agent!.name,
               operation: "set",
               model: "mock-smart",
-              config_options: { effort: "high" },
+              config_options: { effort: "max" },
             },
           ],
         },
@@ -458,6 +478,91 @@ test.describe("Workflow settings", () => {
 
     await page.goto(seedData.workspaceId);
     await expect(await page.findWorkflowCard("Manually Saved Workflow Name")).toBeVisible();
+  });
+
+  test("edits and persists a workflow description", async ({ testPage, apiClient, seedData }) => {
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Workflow Description Save",
+    );
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+
+    const card = await page.findWorkflowCard(workflow.name);
+    const descriptionInput = card.getByLabel("Description", { exact: true });
+    await expect(descriptionInput).toBeVisible();
+    await expect(descriptionInput).toBeEnabled();
+    await descriptionInput.fill("rev 1 (2026-08-08) — test description");
+
+    await expect(descriptionInput).toHaveAttribute("data-settings-dirty", "true");
+
+    expect(
+      (await apiClient.listWorkflows(seedData.workspaceId)).workflows.find(
+        (candidate) => candidate.id === workflow.id,
+      )?.description,
+    ).toBeFalsy();
+    await page.saveChanges();
+
+    await expect(descriptionInput).toHaveAttribute("data-settings-dirty", "false");
+
+    await page.goto(seedData.workspaceId);
+    const reloadedCard = await page.findWorkflowCard(workflow.name);
+    await expect(reloadedCard.getByTestId("workflow-description-input")).toHaveValue(
+      "rev 1 (2026-08-08) — test description",
+    );
+  });
+
+  test("syncs a cross-tab description/prompt update live without clobbering an unsaved edit", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    // Regression coverage for the WS store-sync effect in use-workflow-settings.ts:
+    // it used to only propagate `name` from workflow.updated events, leaving
+    // description/prompt/agent_profile_id stale on an open settings page until a
+    // full reload. Simulates "another tab" by mutating via the API (which fires the
+    // real workflow.updated WS event) while this page stays open — no page.goto.
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Cross-Tab Sync Test");
+    await apiClient.updateWorkflow(workflow.id, { description: "Old description" });
+
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+    const card = await page.findWorkflowCard(workflow.name);
+    const descriptionInput = card.getByLabel("Description", { exact: true });
+    await expect(descriptionInput).toHaveValue("Old description");
+
+    // Local, unsaved edit to a different field (name) — must survive the cross-tab sync below.
+    const nameInput = card.locator("input").first();
+    await nameInput.fill("Unsaved local name");
+    await expect(nameInput).toHaveAttribute("data-settings-dirty", "true");
+
+    // "Another tab" edits description and prompt via the API.
+    await apiClient.updateWorkflow(workflow.id, {
+      description: "New description from another tab",
+      prompt: "New prompt from another tab",
+    });
+
+    // Description and prompt update live via WS, with no local draft on either field.
+    await expect(descriptionInput).toHaveValue("New description from another tab");
+    await expect(descriptionInput).toHaveAttribute("data-settings-dirty", "false");
+    const promptInput = card.getByTestId("workflow-prompt-input");
+    await expect(promptInput).toBeVisible();
+    await expect(promptInput).toHaveValue("New prompt from another tab");
+    await expect(promptInput).toHaveAttribute("data-settings-dirty", "false");
+
+    // The unsaved local name edit was not clobbered by the cross-tab sync.
+    await expect(nameInput).toHaveValue("Unsaved local name");
+    await expect(nameInput).toHaveAttribute("data-settings-dirty", "true");
+
+    // The saved-baseline is what future dirty checks compare against, so saving now
+    // must persist the local name edit alongside the already-synced description/prompt.
+    await page.saveChanges();
+    const persisted = (await apiClient.listWorkflows(seedData.workspaceId)).workflows.find(
+      (candidate) => candidate.id === workflow.id,
+    );
+    expect(persisted?.name).toBe("Unsaved local name");
+    expect(persisted?.description).toBe("New description from another tab");
+    expect(persisted?.prompt).toBe("New prompt from another tab");
   });
 });
 

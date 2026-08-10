@@ -11,6 +11,10 @@ vi.mock("@/lib/config", () => ({
 const DECLARED_PROVIDER_PLUGIN_ID = "plugin-declared-provider";
 const LEGACY_PROVIDER_PLUGIN_ID = "plugin-legacy-provider";
 
+const NOOP_TOAST = new Proxy(() => 0, {
+  get: () => () => 0,
+}) as unknown as PluginHostApi["toast"];
+
 function makeHostFactory(pluginId: string): PluginHostApi {
   return {
     pluginId,
@@ -29,10 +33,13 @@ function makeHostFactory(pluginId: string): PluginHostApi {
     ui: {},
     useResponsiveBreakpoint,
     theme: "light",
+    onThemeChange: () => () => {},
     navigate: () => {},
     openModal: () => ({ close: () => {} }),
     openTaskLinkDialog: () => ({ close: () => {} }),
     openTaskReview: () => {},
+    toast: NOOP_TOAST,
+    utils: { cn: () => "", formatRelativeTime: () => "" },
     storage: {
       get: async () => undefined,
       set: async () => ({ updatedAt: "" }),

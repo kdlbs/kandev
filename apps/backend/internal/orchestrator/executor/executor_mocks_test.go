@@ -260,7 +260,6 @@ type mockRepository struct {
 	executorsRunning     map[string]*models.ExecutorRunning
 	taskEnvironments     map[string]*models.TaskEnvironment
 	taskEnvironmentRepos map[string][]*models.TaskEnvironmentRepo // env_id → rows
-	sessionWorktrees     []*models.TaskSessionWorktree
 
 	// Optional hook to inject behavior into GetTaskSession (e.g. simulate a
 	// transient DB error); if nil, the default map lookup is used.
@@ -444,7 +443,7 @@ func cloneMockTaskSession(session *models.TaskSession) *models.TaskSession {
 	clone.EnvironmentSnapshot = cloneMockSessionMap(session.EnvironmentSnapshot)
 	clone.RepositorySnapshot = cloneMockSessionMap(session.RepositorySnapshot)
 	if session.Worktrees != nil {
-		clone.Worktrees = make([]*models.TaskSessionWorktree, len(session.Worktrees))
+		clone.Worktrees = make([]*models.TaskEnvironmentRepo, len(session.Worktrees))
 		for i, worktree := range session.Worktrees {
 			if worktree == nil {
 				continue
@@ -555,11 +554,6 @@ func (m *mockRepository) GetExecutor(ctx context.Context, id string) (*models.Ex
 }
 
 func (m *mockRepository) UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error {
-	return nil
-}
-
-func (m *mockRepository) CreateTaskSessionWorktree(_ context.Context, worktree *models.TaskSessionWorktree) error {
-	m.sessionWorktrees = append(m.sessionWorktrees, worktree)
 	return nil
 }
 
@@ -925,21 +919,21 @@ func (m *mockRepository) GetLastAgentMessage(_ context.Context, _ string) (strin
 }
 
 // Task Session Worktree operations
-func (m *mockRepository) ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error) {
-	var out []*models.TaskSessionWorktree
-	for _, wt := range m.sessionWorktrees {
-		if wt.SessionID == sessionID {
-			out = append(out, wt)
-		}
+func (m *mockRepository) ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskEnvironmentRepo, error) {
+	if m.taskEnvironmentRepos == nil {
+		return nil, nil
 	}
-	return out, nil
+	// Resolve session → environment, then return that environment's repos.
+	for _, session := range m.sessions {
+		if session == nil || session.ID != sessionID {
+			continue
+		}
+		return m.taskEnvironmentRepos[session.TaskEnvironmentID], nil
+	}
+	return nil, nil
 }
-func (m *mockRepository) ListWorktreesBySessionIDs(_ context.Context, _ []string) (map[string][]*models.TaskSessionWorktree, error) {
-	return make(map[string][]*models.TaskSessionWorktree), nil
-}
-func (m *mockRepository) DeleteTaskSessionWorktree(ctx context.Context, id string) error { return nil }
-func (m *mockRepository) DeleteTaskSessionWorktreesBySession(ctx context.Context, sessionID string) error {
-	return nil
+func (m *mockRepository) ListWorktreesBySessionIDs(_ context.Context, _ []string) (map[string][]*models.TaskEnvironmentRepo, error) {
+	return make(map[string][]*models.TaskEnvironmentRepo), nil
 }
 
 // Git Snapshot operations

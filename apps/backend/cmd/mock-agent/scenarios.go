@@ -19,7 +19,7 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"simple-message":          scenarioSimpleMessage,
 	"read-and-edit":           scenarioReadAndEdit,
 	"permission-flow":         scenarioPermissionFlow,
-	"error":                   scenarioError,
+	toolKeyError:              scenarioError,
 	"subagent":                scenarioSubagent,
 	"all-tools":               scenarioAllTools,
 	"multi-turn":              scenarioMultiTurn,
@@ -80,7 +80,7 @@ func scenarioSteerDeferSetup(e *emitter) {
 	// (or an e2e assertion) would see nothing until the turn eventually ends.
 	flushID := nextToolID()
 	e.startTool(flushID, "Acknowledge predecessor answer", acp.ToolKindOther, map[string]any{})
-	e.completeTool(flushID, map[string]any{"result": "ok"})
+	e.completeTool(flushID, map[string]any{toolKeyResult: "ok"})
 	waitForDelay(e.ctx, steerSetupHoldMillis)
 }
 
@@ -150,9 +150,9 @@ func scenarioReadAndEdit(e *emitter) {
 
 	fixedDelay(50)
 	if allowed {
-		e.completeTool(editID, map[string]any{"result": "File edited successfully: " + f.absPath})
+		e.completeTool(editID, map[string]any{toolKeyResult: "File edited successfully: " + f.absPath})
 	} else {
-		e.completeTool(editID, map[string]any{"result": "Edit was denied"})
+		e.completeTool(editID, map[string]any{toolKeyResult: "Edit was denied"})
 		e.text("Edit was denied.")
 	}
 
@@ -208,7 +208,7 @@ func scenarioKandevMCPPermission(e *emitter) {
 			"total":      1,
 		})
 	} else {
-		e.completeTool(id, map[string]any{"error": "denied"})
+		e.completeTool(id, map[string]any{toolKeyError: "denied"})
 	}
 
 	fixedDelay(50)
@@ -303,7 +303,7 @@ func scenarioAllTools(e *emitter) {
 	fixedDelay(50)
 	webID := nextToolID()
 	e.startTool(webID, "Fetch example.com", acp.ToolKindFetch,
-		map[string]any{"url": "https://example.com", "prompt": "Summarize"})
+		map[string]any{"url": "https://example.com", clarificationPromptKey: "Summarize"})
 	fixedDelay(50)
 	e.completeTool(webID, map[string]any{"content": "Example page content"})
 
@@ -347,9 +347,9 @@ func scenarioAllToolsEditBash(e *emitter, editFile fileInfo) {
 	allowed := e.requestPermission(editID, "Edit "+editFile.relPath, acp.ToolKindEdit, editInput)
 	fixedDelay(50)
 	if allowed {
-		e.completeTool(editID, map[string]any{"result": "File edited successfully: " + editFile.absPath})
+		e.completeTool(editID, map[string]any{toolKeyResult: "File edited successfully: " + editFile.absPath})
 	} else {
-		e.completeTool(editID, map[string]any{"result": "Edit denied"})
+		e.completeTool(editID, map[string]any{toolKeyResult: "Edit denied"})
 		e.text("Edit denied.")
 	}
 
@@ -1038,11 +1038,11 @@ func emitWalkthroughTour(e *emitter, doneText string) {
 	e.startTool(toolID, toolName, acp.ToolKindOther, args)
 	result, err := callMCPTool("kandev", toolName, args)
 	if err != nil {
-		e.completeTool(toolID, map[string]any{"error": "MCP error: " + err.Error()})
+		e.completeTool(toolID, map[string]any{toolKeyError: "MCP error: " + err.Error()})
 		e.text(fmt.Sprintf("show_walkthrough failed: %s", err))
 		return
 	}
-	e.completeTool(toolID, map[string]any{"result": result})
+	e.completeTool(toolID, map[string]any{toolKeyResult: result})
 	fixedDelay(50)
 	e.text(doneText)
 }

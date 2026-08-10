@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -318,6 +319,50 @@ func (c *Controller) FetchDynamicModels(ctx context.Context, agentName string, r
 			Name:        c.Name,
 			Description: c.Description,
 		})
+	}
+	return resp, nil
+}
+
+// ResolveAgentModelConfig returns the complete provider configuration-option
+// snapshot after applying a selected model in a sessionless ACP probe.
+func (c *Controller) ResolveAgentModelConfig(
+	ctx context.Context,
+	agentName string,
+	req dto.ResolveAgentModelConfigRequest,
+) (*dto.AgentModelConfigResponse, error) {
+	if _, ok := c.agentRegistry.Get(agentName); !ok {
+		return nil, fmt.Errorf("%w: %s", ErrAgentNotFound, agentName)
+	}
+	if strings.TrimSpace(req.Model) == "" {
+		return nil, ErrModelRequired
+	}
+	resp := &dto.AgentModelConfigResponse{
+		AgentName:     agentName,
+		Model:         req.Model,
+		Status:        string(hostutility.StatusNotConfigured),
+		ConfigOptions: []dto.ConfigOptionDTO{},
+	}
+	if c.hostUtility == nil {
+		return resp, nil
+	}
+
+	resolution, err := c.hostUtility.ResolveModelConfig(ctx, agentName, hostutility.ModelConfigResolutionRequest{
+		Model:         req.Model,
+		Mode:          req.Mode,
+		ConfigOptions: req.ConfigOptions,
+		Refresh:       req.Refresh,
+	})
+	if err != nil {
+		return nil, err
+	}
+	resp.Status = string(resolution.Status)
+	resp.ConfigOptions = configOptionDTOs(resolution.ConfigOptions)
+	if resolution.Error != "" {
+		message := "model option resolution failed"
+		if resolution.Status == hostutility.StatusAuthRequired {
+			message = "agent authentication is required"
+		}
+		resp.Error = &message
 	}
 	return resp, nil
 }

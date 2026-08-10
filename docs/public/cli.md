@@ -222,7 +222,7 @@ Supported actions are `install`, `uninstall`, `start`, `stop`, `restart`, `statu
 | Backend (UI, HTTP, WebSocket, MCP) | `38429` | If no port was requested and this port cannot bind on loopback, try up to 10 random ports in `10000`-`60000`. |
 | Core `agentctl` | `39429` | Uses the same automatic fallback strategy and never shares the backend port. |
 
-There is no separate web-server port in an installed release: the backend serves embedded assets. If `--port`, `KANDEV_BACKEND_PORT`, or `KANDEV_PORT` specifies a port, the launcher does not substitute another one; backend startup fails if the configured listen address cannot bind it.
+There is no separate web-server port in an installed release: the backend serves embedded assets. For the `run`, `start`, and development launcher flows, if `--port`, `KANDEV_BACKEND_PORT`, or `KANDEV_PORT` specifies a port, the launcher checks it before declaring the backend ready, does not substitute another one, and fails startup if the configured listen address cannot bind it. `kandev service install --port` remains the separate installer behavior described above.
 
 The launcher prints `http://localhost:<port>`, but the backend's default `server.host` is `0.0.0.0`. That can expose Kandev to other machines on the network, and the current local product path is not an authenticated multi-user boundary. Bind it to loopback unless remote access is deliberately protected:
 

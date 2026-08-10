@@ -138,6 +138,7 @@ function TaskRowItem({
         )
       }
       title={task.title}
+      autopilot={task.autopilot}
       state={task.state}
       sessionState={task.sessionState}
       foregroundActivity={task.foregroundActivity}

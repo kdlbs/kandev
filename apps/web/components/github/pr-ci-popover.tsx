@@ -215,11 +215,19 @@ function PRCommentsRow({ pr }: { pr: TaskPR }) {
   );
 }
 
-function PRPopoverFooter({ lastUpdatedAt }: { lastUpdatedAt: number | null }) {
+function PRPopoverFooter({
+  lastUpdatedAt,
+  isRefreshing,
+}: {
+  lastUpdatedAt: number | null;
+  isRefreshing: boolean;
+}) {
   const { t } = useTranslation();
   return (
     <ChangeRequestPopoverFooter
       updatedAt={lastUpdatedAt ?? undefined}
+      isRefreshing={isRefreshing}
+      updatingLabel={t("github:updatingStatus")}
       formatElapsed={(seconds) =>
         seconds === 0
           ? t("github:updatedJustNow")
@@ -264,12 +272,12 @@ export function PRCIPopover({
   pr: TaskPR;
   enabled: boolean;
   onOpenDetailPanel?: () => void;
-  refreshTaskPR?: () => void;
+  refreshTaskPR?: () => void | Promise<void>;
 }) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const { status: ghStatus } = useGitHubStatus(workspaceId);
   const authLost = ghStatus !== null && !ghStatus.authenticated;
-  const { feedback, isFetching, lastUpdatedAt, refetch } = usePRCIPopover(
+  const { feedback, isFetching, isRefreshing, lastUpdatedAt, refetch } = usePRCIPopover(
     workspaceId,
     pr,
     enabled && !authLost,
@@ -299,7 +307,7 @@ export function PRCIPopover({
           <PRMergeButton taskPR={pr} onMerged={refetch} compact />
         </>
       )}
-      <PRPopoverFooter lastUpdatedAt={lastUpdatedAt} />
+      <PRPopoverFooter lastUpdatedAt={lastUpdatedAt} isRefreshing={isRefreshing} />
     </ChangeRequestCIPopoverFrame>
   );
 }

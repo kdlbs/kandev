@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -287,18 +288,7 @@ func passthroughMCPConfigPort(execution *AgentExecution) int {
 	if execution.standalonePort > 0 {
 		return execution.standalonePort
 	}
-	if execution.Metadata == nil {
-		return 0
-	}
-	switch value := execution.Metadata["standalone_port"].(type) {
-	case int:
-		return value
-	case int64:
-		return int(value)
-	case float64:
-		return int(value)
-	}
-	return 0
+	return execution.metadataInt("standalone_port")
 }
 
 func safePassthroughMCPConfigName(value string) string {
@@ -364,7 +354,7 @@ func (m *Manager) passthroughMCPServers(ctx context.Context, execution *AgentExe
 		Type: string(mcpconfig.ServerTypeHTTP),
 		URL:  fmt.Sprintf("http://localhost:%d/mcp", port),
 	}}
-	profileServers, err := m.resolveMcpServersWithParams(ctx, execution.AgentProfileID, execution.Metadata, agentConfig)
+	profileServers, err := m.resolveMcpServersWithParams(ctx, execution.AgentProfileID, execution.MetadataSnapshot(), agentConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -559,10 +549,7 @@ func (m *Manager) cleanupPassthroughMCPConfig(execution *AgentExecution) {
 				zap.Error(err))
 		}
 	}
-	if execution.Metadata != nil {
-		delete(execution.Metadata, metadataKeyPassthroughMCPFiles)
-		delete(execution.Metadata, metadataKeyPassthroughMCPEnv)
-	}
+	execution.deleteMetadataValues(metadataKeyPassthroughMCPFiles, metadataKeyPassthroughMCPEnv)
 }
 
 func appendUnique(list []string, value string) []string {
@@ -577,10 +564,11 @@ func appendUnique(list []string, value string) []string {
 // getPassthroughMCPFiles reads the recorded config-file list, tolerating both
 // []string (in-memory) and []interface{} (JSON-decoded after a restart).
 func getPassthroughMCPFiles(execution *AgentExecution) []string {
-	if execution == nil || execution.Metadata == nil {
+	if execution == nil {
 		return nil
 	}
-	switch v := execution.Metadata[metadataKeyPassthroughMCPFiles].(type) {
+	value, _ := execution.metadataValue(metadataKeyPassthroughMCPFiles)
+	switch v := value.(type) {
 	case []string:
 		return append([]string(nil), v...)
 	case []interface{}:
@@ -597,21 +585,23 @@ func getPassthroughMCPFiles(execution *AgentExecution) []string {
 }
 
 func setPassthroughMCPFiles(execution *AgentExecution, files []string) {
-	if execution.Metadata == nil {
-		execution.Metadata = map[string]interface{}{}
-	}
-	execution.Metadata[metadataKeyPassthroughMCPFiles] = files
+	execution.setMetadataValue(metadataKeyPassthroughMCPFiles, files)
 }
 
 // getPassthroughMCPEnv reads the recorded MCP env map, tolerating both
 // map[string]string and map[string]interface{} (JSON-decoded after a restart).
+// Like getPassthroughMCPFiles it returns a copy, so a caller that mutates the
+// result cannot reach the stored map behind metadataMu's back.
 func getPassthroughMCPEnv(execution *AgentExecution) map[string]string {
-	if execution == nil || execution.Metadata == nil {
+	if execution == nil {
 		return nil
 	}
-	switch v := execution.Metadata[metadataKeyPassthroughMCPEnv].(type) {
+	value, _ := execution.metadataValue(metadataKeyPassthroughMCPEnv)
+	switch v := value.(type) {
 	case map[string]string:
-		return v
+		out := make(map[string]string, len(v))
+		maps.Copy(out, v)
+		return out
 	case map[string]interface{}:
 		out := make(map[string]string, len(v))
 		for key, item := range v {
@@ -629,10 +619,7 @@ func setPassthroughMCPEnv(execution *AgentExecution, env map[string]string) {
 	if len(env) == 0 {
 		return
 	}
-	if execution.Metadata == nil {
-		execution.Metadata = map[string]interface{}{}
-	}
-	execution.Metadata[metadataKeyPassthroughMCPEnv] = env
+	execution.setMetadataValue(metadataKeyPassthroughMCPEnv, env)
 }
 
 // passthroughAgentCommand validates passthrough support and builds the command for a passthrough session.
@@ -799,10 +786,8 @@ func profileModel(p *AgentProfileInfo) string {
 // model is baked into the CLI command at launch time — there is no live channel
 // to swap it, so the PTY must be relaunched with a new --model.
 func effectivePassthroughModel(execution *AgentExecution, profile *AgentProfileInfo) string {
-	if execution != nil && execution.Metadata != nil {
-		if override, ok := execution.Metadata[MetadataKeyModelOverride].(string); ok && override != "" {
-			return override
-		}
+	if override := execution.metadataString(MetadataKeyModelOverride); override != "" {
+		return override
 	}
 	return profileModel(profile)
 }

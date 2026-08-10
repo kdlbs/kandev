@@ -44,21 +44,12 @@ function CreateModeBody(props: DialogFormBodyProps) {
     workspaceId,
     onJiraImport,
     onLinearImport,
-    agentProfileOptions,
-    executorProfileOptions,
-    agentProfiles,
-    agentProfilesLoading,
-    executorsLoading,
-    isCreatingSession,
     fs,
     onTaskNameChange,
     onRowRepositoryChange,
     onRowBranchChange,
-    onAgentProfileChange,
-    onExecutorProfileChange,
     onToggleRemote,
     onToggleFreshBranch,
-    workflowAgentLocked,
     repositories,
     onRefreshRepositories,
     repositoriesRefreshing,
@@ -115,23 +106,29 @@ function CreateModeBody(props: DialogFormBodyProps) {
         autoFocusDescription={!isTaskStarted && !(showTaskName && taskNameAutoFocus)}
         onVoiceAutoSend={props.onVoiceAutoSend}
       />
-      <CreateModeSelectors
-        isTaskStarted={isTaskStarted}
-        agentProfileOptions={agentProfileOptions}
-        executorProfileOptions={executorProfileOptions}
-        agentProfiles={agentProfiles}
-        agentProfilesLoading={agentProfilesLoading}
-        executorsLoading={executorsLoading}
-        isCreatingSession={isCreatingSession}
-        fs={fs}
-        onAgentProfileChange={onAgentProfileChange}
-        onExecutorProfileChange={onExecutorProfileChange}
-        workflowAgentLocked={workflowAgentLocked}
-        noCompatibleAgent={props.noCompatibleAgent}
-        executorProfileName={props.executorProfileName}
-      />
+      <CreateModeAgentSelectors {...props} />
       {props.bottomSlot}
     </>
+  );
+}
+
+function CreateModeAgentSelectors(props: DialogFormBodyProps) {
+  return (
+    <CreateModeSelectors
+      isTaskStarted={props.isTaskStarted}
+      agentProfileOptions={props.agentProfileOptions}
+      executorProfileOptions={props.executorProfileOptions}
+      agentProfiles={props.agentProfiles}
+      agentProfilesLoading={props.agentProfilesLoading}
+      executorsLoading={props.executorsLoading}
+      isCreatingSession={props.isCreatingSession}
+      fs={props.fs}
+      onAgentProfileChange={props.onAgentProfileChange}
+      onExecutorProfileChange={props.onExecutorProfileChange}
+      workflowAgentLocked={props.workflowAgentLocked}
+      noCompatibleAgent={props.noCompatibleAgent}
+      executorProfileName={props.executorProfileName}
+    />
   );
 }
 

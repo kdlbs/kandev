@@ -346,6 +346,9 @@ func (s *Service) updateTaskStateIfSessionState(
 
 // UpdateTaskMetadata updates only the metadata of a task (merges with existing)
 func (s *Service) UpdateTaskMetadata(ctx context.Context, id string, metadata map[string]interface{}) (*models.Task, error) {
+	if err := s.authorizeTaskID(ctx, id); err != nil {
+		return nil, err
+	}
 	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
 		return nil, err
@@ -365,6 +368,7 @@ func (s *Service) UpdateTaskMetadata(ctx context.Context, id string, metadata ma
 		return nil, err
 	}
 
+	s.PublishTaskUpdated(ctx, task)
 	s.logger.Debug("task metadata updated", zap.String("task_id", id), zap.Any("metadata", metadata))
 	return task, nil
 }

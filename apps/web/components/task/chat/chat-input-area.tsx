@@ -43,6 +43,7 @@ import { cn } from "@/lib/utils";
 import { resolveComposerWorkspaceId } from "./composer-workspace";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
+import { AutopilotChatChip, useTaskAutopilot } from "./task-autopilot-chat-chip";
 
 const PLAN_CONTEXT_PATH = "plan:context";
 
@@ -397,6 +398,7 @@ function ChatStatusBar({
   const { t } = useTranslation();
   const showTodos = todoItems.length > 0;
   const showProceed = !!nextStepName && !isAgentBusy;
+  const autopilot = useTaskAutopilot(taskId);
   const showAutoScrollControl = useAppStore(
     (state) => state.userSettings.showTranscriptAutoScrollControl,
   );
@@ -426,6 +428,7 @@ function ChatStatusBar({
       className="flex items-center gap-1.5 py-1 text-xs text-muted-foreground"
     >
       {showTodos && <TodoIndicator todos={todoItems} />}
+      {autopilot && <AutopilotChatChip />}
       <PRStatusChip taskId={taskId} />
       <AzureDevOpsTaskPullRequestChip taskId={taskId} />
       <RegisteredChangeRequestStatus taskId={taskId} sessionId={sessionId} surface="composer" />

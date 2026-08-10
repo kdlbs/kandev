@@ -302,8 +302,10 @@ The UI edits the auto-fix prompt only. Lifecycle messages use immutable,
 server-owned templates that include only the linked PR's canonical URL; their
 text cannot be customized through the UI, HTTP, MCP, or storage. They report the
 observed event without prescribing an action; the task workflow and agent
-context determine the response. Destination workflow steps and GitLab lifecycle
-parity are follow-up work.
+context determine the response. GitLab has the same auto-fix, auto-merge, and
+lifecycle controls — see "Automate a linked merge request" below. Selecting a
+destination workflow step for a lifecycle event remains follow-up work for
+both providers.
 
 </details>
 
@@ -348,15 +350,21 @@ These actions use the connected GitLab user's permissions and do not bypass prot
 
 ### Automate a linked merge request
 
-For a task with a linked GitLab merge request, open the MR topbar control and expand **Review follow-up**. The automation controls are task-level booleans: **Your review is requested**, **MR merged**, and **MR closed without merging**. Enabling a control applies it to every MR linked to that task; GitLab has no auto-fix or auto-merge automation, so these three lifecycle switches are the only controls.
+For a task with a linked GitLab merge request, open the MR topbar control. The **Automation** group has the same two task-level controls as GitHub's PRs: **Auto-fix CI and address comments** and **Auto-merge when ready**. Below it, expand **Review follow-up** for three lifecycle booleans: **Your review is requested**, **MR merged**, and **MR closed without merging**. Enabling any control applies it to every MR linked to that task; Kandev tracks delivery and deduplication separately for each linked MR.
 
 Kandev reuses the existing lightweight task MR poller, which checks linked MRs roughly once per minute; it does not add a separate scheduler. Saving enabled options also evaluates the task's current linked MRs without waiting for the next poll.
+
+**Auto-fix CI and address comments** waits for the linked MR's pipeline to settle, then sends the agent a new or changed failing job or unresolved discussion note. It stops after 10 repair rounds for that MR; disable and re-enable it to reset the limit. The repair prompt comes from the built-in `mr-auto-fix` saved prompt and can be overridden per task from the same control, mirroring GitHub's auto-fix prompt editor. Auto-fix and lifecycle notifications stop once the MR is merged, closed, or locked.
+
+**Auto-merge when ready** merges the linked MR only when it is open, not a draft, its pipeline is passing, it has no unresolved discussions, and GitLab's own merge-readiness verdict (`detailed_merge_status`, falling back to `merge_status` on older GitLab versions) agrees. An auto-fix dispatch in the same evaluation pass takes priority over an auto-merge attempt in that pass.
 
 **Your review is requested** matches the GitLab account connected to the task's workspace against the MR's current reviewer list — GitLab has no separate "review requested" API event, so appearing as a reviewer is the signal. The first observation is a quiet baseline; only a later false-to-true transition to being a reviewer wakes the agent. Staying assigned across MR updates does not re-fire it; clearing the reviewer assignment and being re-added — for example, for a re-review after changes — rearms the next transition.
 
 **MR merged** and **MR closed without merging** each notify once when the linked MR enters that terminal state; reopening and re-closing an MR re-arms the notification. Kandev delivers lifecycle notifications to the task's active promptable session, preferring the primary session, and does not interrupt a busy session — it queues the message for delivery when that session is available. Lifecycle messages report only the observed event and the MR's canonical URL and cannot be customized.
 
 For a GitLab Review Watch task with any MR lifecycle prompt enabled, the **Auto** cleanup policy retains the terminal task so lifecycle delivery can finish, matching the GitHub review-watch behavior described above.
+
+On desktop, hovering the MR topbar control for a task with one linked MR opens a preview of the pipeline pass rate, approval status, and unresolved-discussion count without opening the dropdown; clicking still opens the dropdown as before. Touch surfaces skip the hover preview. A linked MR also adds a status badge to the task's Kanban card, alongside any linked pull-request badge; a task with several linked MRs shows one badge with a count.
 
 ### Create review and issue watches
 

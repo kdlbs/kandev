@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { DockviewApi } from "dockview-react";
-import { buildExtraPanelActions } from "./dockview-panel-actions";
+import { buildExtraPanelActions, reviewPanelId } from "./dockview-panel-actions";
 import { CENTER_GROUP } from "./layout-manager";
 import { makeApi, makeStore } from "./dockview-panel-actions.test-utils";
 import type { MockPanel } from "./dockview-panel-actions.test-utils";
+
+const PR_DETAILS_TITLE = "PR Details";
 
 describe("addPRPanel — dedup with legacy auto-shown panel", () => {
   const PR_KEY = "testorg/testrepo/101";
@@ -265,5 +267,57 @@ describe("addPluginPanel / closePluginPanels", () => {
 
     expect(api.getPanel(PLUGIN_PANEL_ID)).toBeUndefined();
     expect(api.getPanel("plugin:kandev-plugin-other:widget")).toBeDefined();
+  });
+});
+
+describe("addReviewPanel", () => {
+  const providerId = "bitbucket";
+  const reviewKey = "project/repository/42";
+  const title = "Bitbucket Pull Request";
+  const panelId = `review-detail|${providerId}|${encodeURIComponent(reviewKey)}`;
+
+  it("opens a provider-neutral panel with normalized params in the canonical review group", () => {
+    const api = makeApi();
+    const actions = buildExtraPanelActions(makeStore(api).get);
+    api.addPanel({
+      id: "pr-detail",
+      component: "pr-detail",
+      title: PR_DETAILS_TITLE,
+      position: { referenceGroup: "provider-review-group" },
+    });
+
+    actions.addReviewPanel(providerId, reviewKey, title);
+
+    const panel = api.getPanel(panelId) as unknown as MockPanel;
+    expect(panel.title).toBe(title);
+    expect(panel.params).toEqual({ providerId, reviewKey });
+    expect(panel.group.id).toBe("provider-review-group");
+  });
+
+  it("focuses the canonical review panel when it already renders the requested review", () => {
+    const api = makeApi();
+    const actions = buildExtraPanelActions(makeStore(api).get);
+    api.addPanel({
+      id: "pr-detail",
+      component: "pr-detail",
+      title: PR_DETAILS_TITLE,
+      params: { providerId, reviewKey },
+    });
+
+    actions.addReviewPanel(providerId, reviewKey, title);
+
+    expect((api.getPanel("pr-detail") as unknown as MockPanel).isActive).toBe(true);
+    expect(api.getPanel(panelId)).toBeUndefined();
+  });
+
+  it("does not collide when provider IDs or review keys contain panel delimiters", () => {
+    const api = makeApi();
+    const actions = buildExtraPanelActions(makeStore(api).get);
+
+    actions.addReviewPanel("a|b", "c", "First");
+    actions.addReviewPanel("a", "b|c", "Second");
+
+    expect(api.getPanel(reviewPanelId("a|b", "c"))).toBeDefined();
+    expect(api.getPanel(reviewPanelId("a", "b|c"))).toBeDefined();
   });
 });

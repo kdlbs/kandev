@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
@@ -237,6 +238,27 @@ func (a *Adapter) sendPrompt(
 	// after `cancelActiveToolCalls` to give the Monitor card a clean terminal
 	// state when the parent prompt completes naturally.
 	a.sweepMonitorsOnPromptEnd(sessionID)
+
+	if a.agentID == codexAgentID && turn.codexCapacityFailure() {
+		const safeMessage = codexModelCapacityErrorMessage
+		a.logger.Info("codex prompt ended with model-capacity evidence",
+			zap.String("session_id", sessionID),
+			zap.Uint64("prompt_generation", promptGeneration))
+		a.cancelAsyncTurnComplete(sessionID)
+		a.sendUpdate(AgentEvent{
+			Type:             streams.EventTypeError,
+			SessionID:        sessionID,
+			PromptGeneration: promptGeneration,
+			Error:            safeMessage,
+			ProviderError: &streams.ProviderError{
+				Source:     streams.ProviderErrorSourceCodexACP,
+				ProviderID: codexAgentID,
+				Message:    safeMessage,
+				OccurredAt: time.Now().UTC(),
+			},
+		})
+		return nil
+	}
 
 	// Emit complete event via the stream, including the StopReason from the agent.
 	// This normalizes ACP behavior to match other adapters (stream-json, amp, copilot, opencode).

@@ -36,12 +36,26 @@ func TestHandleBranchSwitched_UpdatesWorktreeBranch(t *testing.T) {
 	if err := testRepo.CreateRepository(ctx, rObj); err != nil {
 		t.Fatalf("create repository: %v", err)
 	}
-	wt := &models.TaskSessionWorktree{
-		ID: "wt-s1", SessionID: "s1",
+	if err := testRepo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-s1", TaskID: "t1", ExecutorType: "worktree",
+		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("create environment: %v", err)
+	}
+	session, err := testRepo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.TaskEnvironmentID = "env-s1"
+	if err := testRepo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("link session to environment: %v", err)
+	}
+	wt := &models.TaskEnvironmentRepo{
+		ID: "wt-s1", TaskEnvironmentID: "env-s1",
 		WorktreeID: "wtree-s1", RepositoryID: "repo1",
 		WorktreeBranch: "feature/a", CreatedAt: now,
 	}
-	if err := testRepo.CreateTaskSessionWorktree(ctx, wt); err != nil {
+	if err := testRepo.CreateTaskEnvironmentRepo(ctx, wt); err != nil {
 		t.Fatalf("create worktree: %v", err)
 	}
 
@@ -84,12 +98,21 @@ func TestHandleBranchSwitched_RepositoryScopedUpdateKeepsSiblingBranch(t *testin
 	} {
 		require.NoError(t, testRepo.CreateRepository(ctx, repository))
 	}
-	require.NoError(t, testRepo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
-		ID: "wt-multi-backend", SessionID: "s-multi", WorktreeID: "worktree-backend", RepositoryID: "repo-backend",
+
+	require.NoError(t, testRepo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-multi", TaskID: "t-multi", ExecutorType: "worktree",
+		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+	}))
+	multiSession, err := testRepo.GetTaskSession(ctx, "s-multi")
+	require.NoError(t, err)
+	multiSession.TaskEnvironmentID = "env-multi"
+	require.NoError(t, testRepo.UpdateTaskSession(ctx, multiSession))
+	require.NoError(t, testRepo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		ID: "wt-multi-backend", TaskEnvironmentID: "env-multi", WorktreeID: "worktree-backend", RepositoryID: "repo-backend",
 		WorktreePath: filepath.Join(taskRoot, "backend"), WorktreeBranch: "feature/backend-old", Position: 0, CreatedAt: now,
 	}))
-	require.NoError(t, testRepo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
-		ID: "wt-multi-frontend", SessionID: "s-multi", WorktreeID: "worktree-frontend", RepositoryID: "repo-frontend",
+	require.NoError(t, testRepo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		ID: "wt-multi-frontend", TaskEnvironmentID: "env-multi", WorktreeID: "worktree-frontend", RepositoryID: "repo-frontend",
 		WorktreePath: filepath.Join(taskRoot, "frontend"), WorktreeBranch: "feature/frontend-old", Position: 1, CreatedAt: now,
 	}))
 
@@ -124,12 +147,21 @@ func TestHandleBranchSwitched_UnknownRepositoryNameDoesNotOverwriteSiblings(t *t
 	} {
 		require.NoError(t, testRepo.CreateRepository(ctx, repository))
 	}
-	require.NoError(t, testRepo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
-		ID: "wt-unknown-backend", SessionID: "s-multi-unknown", WorktreeID: "worktree-unknown-backend", RepositoryID: "repo-unknown-backend",
+
+	require.NoError(t, testRepo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-multi-unknown", TaskID: "t-multi-unknown", ExecutorType: "worktree",
+		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+	}))
+	multiUnknownSession, err := testRepo.GetTaskSession(ctx, "s-multi-unknown")
+	require.NoError(t, err)
+	multiUnknownSession.TaskEnvironmentID = "env-multi-unknown"
+	require.NoError(t, testRepo.UpdateTaskSession(ctx, multiUnknownSession))
+	require.NoError(t, testRepo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		ID: "wt-unknown-backend", TaskEnvironmentID: "env-multi-unknown", WorktreeID: "worktree-unknown-backend", RepositoryID: "repo-unknown-backend",
 		WorktreePath: filepath.Join(taskRoot, "backend"), WorktreeBranch: "feature/backend-old", Position: 0, CreatedAt: now,
 	}))
-	require.NoError(t, testRepo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
-		ID: "wt-unknown-frontend", SessionID: "s-multi-unknown", WorktreeID: "worktree-unknown-frontend", RepositoryID: "repo-unknown-frontend",
+	require.NoError(t, testRepo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		ID: "wt-unknown-frontend", TaskEnvironmentID: "env-multi-unknown", WorktreeID: "worktree-unknown-frontend", RepositoryID: "repo-unknown-frontend",
 		WorktreePath: filepath.Join(taskRoot, "frontend"), WorktreeBranch: "feature/frontend-old", Position: 1, CreatedAt: now,
 	}))
 
@@ -171,12 +203,26 @@ func TestHandleBranchSwitched_ResetsPRWatch(t *testing.T) {
 	if err := testRepo.CreateRepository(ctx, rObj); err != nil {
 		t.Fatalf("create repository: %v", err)
 	}
-	wt := &models.TaskSessionWorktree{
-		ID: "wt-s1", SessionID: "s1",
+	if err := testRepo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-s1", TaskID: "t1", ExecutorType: "worktree",
+		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("create environment: %v", err)
+	}
+	session, err := testRepo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.TaskEnvironmentID = "env-s1"
+	if err := testRepo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("link session to environment: %v", err)
+	}
+	wt := &models.TaskEnvironmentRepo{
+		ID: "wt-s1", TaskEnvironmentID: "env-s1",
 		WorktreeID: "wtree-s1", RepositoryID: "repo1",
 		WorktreeBranch: "feature/a", CreatedAt: now,
 	}
-	if err := testRepo.CreateTaskSessionWorktree(ctx, wt); err != nil {
+	if err := testRepo.CreateTaskEnvironmentRepo(ctx, wt); err != nil {
 		t.Fatalf("create worktree: %v", err)
 	}
 

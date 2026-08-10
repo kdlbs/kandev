@@ -28,7 +28,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@kandev/ui/lib/utils";
 import { useSessionGit } from "@/hooks/domains/session/use-session-git";
-import { useGitWithFeedback } from "@/hooks/use-git-with-feedback";
+import { gitOperationLabel, useGitWithFeedback } from "@/hooks/use-git-with-feedback";
 import { useVcsDialogs } from "@/components/vcs/vcs-dialogs";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { useRepoDisplayName } from "@/hooks/domains/session/use-repo-display-name";
@@ -310,47 +310,45 @@ type VcsSplitButtonProps = {
   className?: string;
 };
 
-// The `label` values below stay English on purpose. They are operation *names*
-// consumed by `useGitWithFeedback`, which concatenates them into its own English
-// toast titles (`${operationName} failed`). `hooks/use-git-with-feedback.ts` is
-// not migrated yet, so translating only this half would ship mixed-language
-// toasts. They move when that hook's messages do.
 function useGitActions(git: ReturnType<typeof useSessionGit>, baseBranch?: string) {
+  const { t } = useTranslation();
   const gitWithFeedback = useGitWithFeedback();
 
   const handlePull = useCallback(
     (repo?: string) => {
-      const label = repo ? `Pull (${repo})` : "Pull";
-      gitWithFeedback(() => git.pull(false, repo), label);
+      gitWithFeedback(() => git.pull(false, repo), gitOperationLabel(t, "common:gitOpPull", repo));
     },
-    [gitWithFeedback, git],
+    [gitWithFeedback, git, t],
   );
 
   const handlePush = useCallback(
     (force = false, repo?: string) => {
-      const baseLabel = force ? "Force Push" : "Push";
-      const label = repo ? `${baseLabel} (${repo})` : baseLabel;
-      gitWithFeedback(() => git.push({ force }, repo), label);
+      const operationKey = force ? "common:gitOpForcePush" : "common:gitOpPush";
+      gitWithFeedback(() => git.push({ force }, repo), gitOperationLabel(t, operationKey, repo));
     },
-    [gitWithFeedback, git],
+    [gitWithFeedback, git, t],
   );
 
   const handleRebase = useCallback(
     (repo?: string) => {
       const targetBranch = baseBranch?.replace(/^origin\//, "") || "main";
-      const label = repo ? `Rebase (${repo})` : "Rebase";
-      gitWithFeedback(() => git.rebase(targetBranch, repo), label);
+      gitWithFeedback(
+        () => git.rebase(targetBranch, repo),
+        gitOperationLabel(t, "common:gitOpRebase", repo),
+      );
     },
-    [gitWithFeedback, git, baseBranch],
+    [gitWithFeedback, git, baseBranch, t],
   );
 
   const handleMerge = useCallback(
     (repo?: string) => {
       const targetBranch = baseBranch?.replace(/^origin\//, "") || "main";
-      const label = repo ? `Merge (${repo})` : "Merge";
-      gitWithFeedback(() => git.merge(targetBranch, repo), label);
+      gitWithFeedback(
+        () => git.merge(targetBranch, repo),
+        gitOperationLabel(t, "common:gitOpMerge", repo),
+      );
     },
-    [gitWithFeedback, git, baseBranch],
+    [gitWithFeedback, git, baseBranch, t],
   );
 
   return { handlePull, handlePush, handleRebase, handleMerge };

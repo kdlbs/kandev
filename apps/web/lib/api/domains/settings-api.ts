@@ -19,6 +19,8 @@ import type {
   UserSettingsResponse,
   UserSettingsUpdatePayload,
   DynamicModelsResponse,
+  AgentModelConfigResponse,
+  ResolveAgentModelConfigRequest,
 } from "@/lib/types/http";
 import type {
   MessageQueueSettingsPatch,
@@ -347,6 +349,17 @@ export async function fetchDynamicModels(
   const refresh = options?.refresh ?? false;
   const url = `/api/v1/agent-models/${agentName}${refresh ? "?refresh=true" : ""}`;
   return fetchJson<DynamicModelsResponse>(url, options);
+}
+
+export async function resolveAgentModelConfig(
+  agentName: string,
+  payload: ResolveAgentModelConfigRequest,
+  options?: ApiRequestOptions,
+): Promise<AgentModelConfigResponse> {
+  return fetchJson<AgentModelConfigResponse>(`/api/v1/agent-models/${agentName}/resolve`, {
+    ...options,
+    init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+  });
 }
 
 // Editors

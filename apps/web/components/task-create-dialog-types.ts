@@ -193,6 +193,7 @@ export type StoreSelections = {
   userSettingsLoaded?: boolean;
   lastUsedAgentProfileId?: string | null;
   lastUsedExecutorProfileId?: string | null;
+  effectiveWorkflowId?: string | null;
 };
 
 export type DialogComputedValues = {
@@ -240,7 +241,15 @@ export type DialogComputedArgs = {
   workspaces: Workspace[];
   executors: Executor[];
   repositories: Repository[];
-  workflows: Array<{ id: string; agent_profile_id?: string }>;
+  workflows: Array<{
+    id: string;
+    workspaceId?: string;
+    agent_profile_id?: string;
+    hidden?: boolean;
+  }>;
+  lockedWorkflow: boolean;
+  lastUsedWorkflowIdsByWorkspace: Record<string, string>;
+  userSettingsLoaded?: boolean;
   snapshots: Record<string, WorkflowSnapshotData>;
 };
 
@@ -386,6 +395,9 @@ export type DialogFormState = {
   /** Optional host folder for repo-less tasks; empty means scratch workspace. */
   workspacePath: string;
   setWorkspacePath: (v: string) => void;
+  /** Create-mode opt-in. Autopilot is immutable after task creation. */
+  autopilot: boolean;
+  setAutopilot: (v: boolean) => void;
 };
 
 export type SubmitHandlersDeps = {
@@ -393,6 +405,8 @@ export type SubmitHandlersDeps = {
   isEditMode: boolean;
   /** Create-mode opt-in: derive a provisional title from the prompt. */
   autoTitle?: boolean;
+  /** Create-mode opt-in. The backend fixes this value at task creation. */
+  autopilot: boolean;
   isPassthroughProfile: boolean;
   taskName: string;
   workspaceId: string | null;

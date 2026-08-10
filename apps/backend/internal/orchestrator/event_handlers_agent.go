@@ -1145,8 +1145,8 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 		return
 	}
 
-	// Transient provider errors (529 Overloaded) get a paced, visible
-	// retry-with-backoff before any red banner. This is the ONLY non-terminal
+	// Short transient provider errors get a paced, visible retry-with-backoff
+	// before any red banner. This is the ONLY non-terminal
 	// failure path, so it runs before automation finalization below — otherwise
 	// a transient 529 on an automation run would mark the run failed and
 	// reap its ephemeral worktree out from under the in-flight retry.
@@ -1476,6 +1476,7 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 		Message:          errMsg,
 		OccurredAt:       time.Now().UTC(),
 		AgentExecutionID: data.AgentExecutionID,
+		RemediationURL:   providerRemediationURL(data),
 	}
 	if err := s.repo.SetSessionMetadataKey(ctx, data.SessionID, models.SessionMetaKeyLastAgentError, lastErr); err != nil {
 		s.logger.Warn("failed to persist last agent error",
@@ -1493,6 +1494,9 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 			"occurred_at":        lastErr.OccurredAt.Format(time.RFC3339Nano),
 			"stamp":              lastErr.Stamp(),
 			"agent_execution_id": lastErr.AgentExecutionID,
+		}
+		if lastErr.RemediationURL != "" {
+			eventData["remediation_url"] = lastErr.RemediationURL
 		}
 		if err := s.eventBus.Publish(ctx, events.TaskSessionErrorChanged, bus.NewEvent(
 			events.TaskSessionErrorChanged,
@@ -1559,6 +1563,17 @@ func (s *Service) clearRecoveredAgentError(ctx context.Context, taskID string, s
 	}
 }
 
+// providerRemediationURL returns the adapter-validated remediation URL from the
+// normalized provider diagnostic, or "" when the failure carried none. The URL
+// is only ever set by the adapter's allowlist validator; the orchestrator does
+// not validate or reconstruct URLs from prose.
+func providerRemediationURL(data watcher.AgentEventData) string {
+	if data.ProviderError == nil || !data.ProviderError.Valid() {
+		return ""
+	}
+	return data.ProviderError.RemediationURL
+}
+
 // createRecoveryStatusMessage builds and persists the ActionMessage shown
 // in the kanban chat surface after a recoverable agent failure. Must only
 // be called for non-office sessions (office sessions render their own error UI).
@@ -1575,13 +1590,14 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 	// Resume-corrupted failures (poisoned extended-thinking state after a
 	// session/load) can't be fixed by resuming — steer the user to a fresh
 	// session instead of dumping the raw 400.
+	classified := classifyKanbanFailure(data)
 	statusMsg := fmt.Sprintf("Agent encountered an error: %s", displayMsg)
 	if resumeCorrupted {
 		statusMsg = "This agent session can't be resumed — its saved reasoning state is corrupted. Start a fresh session to continue."
-	} else if routingerr.IsTransientProviderError(data.ErrorMessage) {
+	} else if routingerr.Decide(routingerr.ContextKanban, classified, time.Now().UTC()) == routingerr.DecisionShortRetry {
 		// Reached after the transient retry budget is exhausted — show friendly
-		// copy instead of dumping the raw 529 JSON envelope.
-		statusMsg = "The provider stayed overloaded after several retries. Resume to try again, or start a fresh session."
+		// provider-neutral copy instead of dumping raw adapter evidence.
+		statusMsg = transientFailureExhaustedMessage(classified)
 	}
 	hasResumeToken := s.wasResumeAttempt(ctx, data.SessionID)
 	meta := map[string]interface{}{
@@ -1592,6 +1608,11 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 		"has_resume_token": hasResumeToken,
 		"is_auth_error":    authErr,
 		"resume_corrupted": resumeCorrupted,
+	}
+	// The validated remediation URL is carried independently of quota
+	// classification so the generic recoverable card can still show the link.
+	if remediationURL := providerRemediationURL(data); remediationURL != "" {
+		meta["remediation_url"] = remediationURL
 	}
 	applyProviderQuotaMetadata(meta, data)
 

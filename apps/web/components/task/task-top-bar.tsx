@@ -42,8 +42,6 @@ type TaskTopBarProps = {
   issueUrl?: string;
   issueNumber?: number;
   isArchived?: boolean;
-  isRemoteExecutor?: boolean;
-  isAgentctlReady?: boolean;
   embeddedVscodeSupported?: boolean;
   remoteExecutorType?: string | null;
   officeTaskHref?: string | null;
@@ -69,8 +67,6 @@ const TaskTopBar = memo(function TaskTopBar({
   workflowId,
   workspaceId,
   isArchived,
-  isRemoteExecutor,
-  isAgentctlReady,
   embeddedVscodeSupported,
   issueUrl,
   issueNumber,
@@ -108,8 +104,6 @@ const TaskTopBar = memo(function TaskTopBar({
         onToggleDebugOverlay={onToggleDebugOverlay}
         isArchived={isArchived}
         workspaceId={workspaceId}
-        isRemoteExecutor={isRemoteExecutor}
-        isAgentctlReady={isAgentctlReady}
         embeddedVscodeSupported={embeddedVscodeSupported}
         taskTitle={taskTitle}
         issueUrl={issueUrl}
@@ -220,8 +214,6 @@ function AttentionStatusGroup({
   activeSessionId,
   isArchived,
   workspaceId,
-  isRemoteExecutor,
-  isAgentctlReady,
   taskTitle,
   issueUrl,
   issueNumber,
@@ -230,8 +222,6 @@ function AttentionStatusGroup({
   activeSessionId?: string | null;
   isArchived?: boolean;
   workspaceId?: string | null;
-  isRemoteExecutor?: boolean;
-  isAgentctlReady?: boolean;
   taskTitle?: string;
   issueUrl?: string;
   issueNumber?: number;
@@ -252,11 +242,7 @@ function AttentionStatusGroup({
       <DocumentControls activeSessionId={activeSessionId ?? null} />
       {!isArchived && (
         <>
-          <PortForwardButton
-            isRemoteExecutor={isRemoteExecutor}
-            sessionId={activeSessionId}
-            isAgentctlReady={isAgentctlReady}
-          />
+          <PortForwardButton sessionId={activeSessionId} />
           {/* PR (GitHub) and MR (GitLab) buttons each render nothing when no
               rows match, so showing both covers GitHub-only, GitLab-only, and
               multi-repo tasks without needing an explicit provider switch. */}
@@ -357,8 +343,6 @@ function TopBarRight({
   onToggleDebugOverlay,
   isArchived,
   workspaceId,
-  isRemoteExecutor,
-  isAgentctlReady,
   embeddedVscodeSupported,
   taskTitle,
   issueUrl,
@@ -372,8 +356,6 @@ function TopBarRight({
   onToggleDebugOverlay?: () => void;
   isArchived?: boolean;
   workspaceId?: string | null;
-  isRemoteExecutor?: boolean;
-  isAgentctlReady?: boolean;
   embeddedVscodeSupported?: boolean;
   taskTitle?: string;
   issueUrl?: string;
@@ -418,8 +400,6 @@ function TopBarRight({
         activeSessionId={activeSessionId}
         isArchived={isArchived}
         workspaceId={workspaceId}
-        isRemoteExecutor={isRemoteExecutor}
-        isAgentctlReady={isAgentctlReady}
         taskTitle={taskTitle}
         issueUrl={issueUrl}
         issueNumber={issueNumber}

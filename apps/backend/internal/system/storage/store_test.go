@@ -179,6 +179,45 @@ func TestStoreQuarantineTransitionsSurviveRecreation(t *testing.T) {
 	}
 }
 
+func TestStoreTemporaryArtifactLifecycleSurvivesRecreation(t *testing.T) {
+	conn := newSQLite(t)
+	pool := db.NewPool(conn, conn)
+	store := newStorageStore(t, pool)
+	ctx := context.Background()
+	createdAt := time.Date(2026, time.August, 1, 12, 0, 0, 0, time.UTC)
+	artifact := &TemporaryArtifact{
+		ID: "artifact-1", Kind: TemporaryArtifactKindImproveBundle,
+		Path: "/tmp/kandev-improve-artifact-1", MarkerToken: "marker-1",
+		State: TemporaryArtifactStateActive, OwnerPID: 1234,
+		CreatedAt: createdAt, LastHeartbeatAt: &createdAt,
+		Metadata: json.RawMessage(`{"owner":"user-1"}`),
+	}
+	if err := store.CreateTemporaryArtifact(ctx, artifact); err != nil {
+		t.Fatalf("CreateTemporaryArtifact: %v", err)
+	}
+	closedAt := createdAt.Add(time.Hour)
+	if err := store.TransitionTemporaryArtifact(
+		ctx, artifact.ID, TemporaryArtifactStateClosed, "", closedAt,
+	); err != nil {
+		t.Fatalf("close temporary artifact: %v", err)
+	}
+	if err := store.TransitionTemporaryArtifact(
+		ctx, artifact.ID, TemporaryArtifactStateActive, "", closedAt,
+	); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("closed-to-active transition error = %v, want %v", err, ErrInvalidTransition)
+	}
+
+	store = newStorageStore(t, pool)
+	got, err := store.GetTemporaryArtifact(ctx, artifact.ID)
+	if err != nil {
+		t.Fatalf("GetTemporaryArtifact after recreation: %v", err)
+	}
+	if got.State != TemporaryArtifactStateClosed || got.ClosedAt == nil ||
+		!got.ClosedAt.Equal(closedAt) || string(got.Metadata) != `{"owner":"user-1"}` {
+		t.Fatalf("temporary artifact = %#v", got)
+	}
+}
+
 func TestStoreQuarantineOriginalPathUniqueWhileActive(t *testing.T) {
 	conn := newSQLite(t)
 	store := newStorageStore(t, db.NewPool(conn, conn))

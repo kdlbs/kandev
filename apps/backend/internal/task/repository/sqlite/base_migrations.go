@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/db/dialect"
@@ -44,6 +43,9 @@ func (r *Repository) migrateSessionsAddCostColumns() {
 
 // runMigrations applies idempotent ALTER TABLE migrations for schema evolution.
 func (r *Repository) runMigrations() error {
+	if err := r.migrateTaskPriorityToTextPostgres(); err != nil {
+		return err
+	}
 	if err := r.ensureTaskWorkspaceFoldersSchema(); err != nil {
 		return err
 	}
@@ -70,8 +72,8 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("task_sessions.base_commit_sha", `ALTER TABLE task_sessions ADD COLUMN base_commit_sha TEXT DEFAULT ''`)
 	r.migrate.Apply("workspaces.default_config_agent_profile_id", `ALTER TABLE workspaces ADD COLUMN default_config_agent_profile_id TEXT DEFAULT ''`)
 	r.migrate.Apply("task_sessions.task_environment_id", `ALTER TABLE task_sessions ADD COLUMN task_environment_id TEXT DEFAULT ''`)
-	r.migrate.Apply("task_session_worktrees.branch_slug", `ALTER TABLE task_session_worktrees ADD COLUMN branch_slug TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("tasks.parent_id", `ALTER TABLE tasks ADD COLUMN parent_id TEXT DEFAULT ''`)
+	r.migrate.Apply("tasks.autopilot_enabled", `ALTER TABLE tasks ADD COLUMN autopilot_enabled INTEGER NOT NULL DEFAULT 0`)
 	// Remove FK constraint on workflow_id to allow ephemeral tasks without workflows
 	if err := r.migrateTasksRemoveWorkflowFK(); err != nil {
 		return err
@@ -166,6 +168,21 @@ func (r *Repository) runMigrations() error {
 	// Office task-handoffs phase 6 - tag tasks archived as part of a cascade so
 	// unarchive can restore exactly the descendants that cascade archived.
 	r.migrate.Apply("tasks.archived_by_cascade_id", `ALTER TABLE tasks ADD COLUMN archived_by_cascade_id TEXT DEFAULT ''`)
+
+	// Task create-idempotency (docs/specs/tasks/external-id-idempotency).
+	// external_id needs an explicit deterministic collation: SQLite TEXT
+	// columns already compare BINARY by default, but an unqualified Postgres
+	// column silently inherits the database's default collation, which may be
+	// case-insensitive or nondeterministic. The partial unique index syntax
+	// (CREATE UNIQUE INDEX ... WHERE ...) is supported identically by both
+	// dialects, so it needs no branch.
+	if dialect.IsPostgres(r.db.DriverName()) {
+		r.migrate.Apply("tasks.external_id", `ALTER TABLE tasks ADD COLUMN external_id TEXT COLLATE "C"`)
+	} else {
+		r.migrate.Apply("tasks.external_id", `ALTER TABLE tasks ADD COLUMN external_id TEXT COLLATE BINARY`)
+	}
+	r.migrate.Apply("tasks.external_id_settled_at", `ALTER TABLE tasks ADD COLUMN external_id_settled_at TIMESTAMP`)
+	r.migrate.Apply("uniq_tasks_external_id", `CREATE UNIQUE INDEX IF NOT EXISTS uniq_tasks_external_id ON tasks(workspace_id, external_id) WHERE external_id IS NOT NULL`)
 
 	// Office workspace extensions
 	r.migrate.Apply("workspaces.task_prefix", `ALTER TABLE workspaces ADD COLUMN task_prefix TEXT DEFAULT 'KAN'`)
@@ -501,13 +518,14 @@ func (r *Repository) migrateTasksRemoveWorkflowFK() error {
 			metadata TEXT DEFAULT '{}',
 			is_ephemeral INTEGER NOT NULL DEFAULT 0,
 			parent_id TEXT DEFAULT '',
+			autopilot_enabled INTEGER NOT NULL DEFAULT 0,
 			archived_at TIMESTAMP,
 			created_at TIMESTAMP NOT NULL,
 			updated_at TIMESTAMP NOT NULL
 		)`,
 		`INSERT INTO tasks_new SELECT
 			id, workspace_id, workflow_id, workflow_step_id, title, description,
-			state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, archived_at, created_at, updated_at
+			state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled, archived_at, created_at, updated_at
 		FROM tasks`,
 		`DROP TABLE tasks`,
 		`ALTER TABLE tasks_new RENAME TO tasks`,
@@ -861,145 +879,11 @@ func (r *Repository) migrateSessionsRemoveWorkflowStepID() error {
 	})
 }
 
-type backfillRow struct {
-	taskID, executorID, executorProfileID string
-	repositoryID, containerID             string
-	startedAt                             string
-}
-
-// backfillTaskEnvironments creates TaskEnvironment records for historical tasks
-// that have sessions but no environment, and links orphaned sessions.
-// Idempotent: tasks with existing environments are skipped.
-func (r *Repository) backfillTaskEnvironments() error {
-	if dialect.IsPostgres(r.db.DriverName()) {
-		return nil
-	}
-
-	orphaned, err := r.findOrphanedTasks()
-	if err != nil {
-		return err
-	}
-	if len(orphaned) == 0 {
-		return nil
-	}
-
-	tx, err := r.db.Begin()
-	if err != nil {
-		return fmt.Errorf("backfill: begin tx: %w", err)
-	}
-	defer tx.Rollback() //nolint:errcheck
-
-	for _, row := range orphaned {
-		if err := r.backfillSingleTask(tx, row); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
-}
-
-// findOrphanedTasks returns tasks that have sessions but no task_environments row.
-//
-// Pre-refactor this also read ts.container_id; that column was dropped from
-// task_sessions when executors_running became the source of truth. Historical
-// orphaned envs for already-launched sessions get container_id from the
-// executors_running row via the LEFT JOIN; sessions without a row have empty
-// container_id (they were never launched, so no container to track).
-func (r *Repository) findOrphanedTasks() ([]backfillRow, error) {
-	rows, err := r.db.Query(`
-		SELECT ts.task_id,
-		       MIN(COALESCE(ts.executor_id, '')),
-		       MIN(COALESCE(ts.executor_profile_id, '')),
-		       MIN(COALESCE(ts.repository_id, '')),
-		       MIN(COALESCE(er.container_id, '')),
-		       MIN(ts.started_at)
-		FROM task_sessions ts
-		LEFT JOIN task_environments te ON te.task_id = ts.task_id
-		LEFT JOIN executors_running er ON er.session_id = ts.id
-		WHERE te.id IS NULL
-		GROUP BY ts.task_id
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("backfill: query orphaned tasks: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	var orphaned []backfillRow
-	for rows.Next() {
-		var row backfillRow
-		if err := rows.Scan(&row.taskID, &row.executorID, &row.executorProfileID,
-			&row.repositoryID, &row.containerID, &row.startedAt); err != nil {
-			return nil, fmt.Errorf("backfill: scan: %w", err)
-		}
-		orphaned = append(orphaned, row)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("backfill: rows: %w", err)
-	}
-	return orphaned, nil
-}
-
-// healTaskEnvironmentWorkspacePaths backfills workspace_path on worktree-mode
-// envs that have a worktree_path set but an empty workspace_path. Such rows
-// trigger ErrSessionWorkspaceNotReady forever in GetOrEnsureExecutionForEnvironment
-// and leave shell terminals stuck on "Connecting terminal...".
-//
-// It also repairs rows where workspace_path was the task-root parent of
-// worktree_path — a pre-fix value left by the legacy computeWorkspacePath
-// that collapsed single-repo worktree paths via filepath.Dir. After the fix,
-// workspace_path must equal worktree_path (the agent process cwd) so ACP
-// session/load on cold start hits the same sanitized-cwd jsonl folder the
-// agent wrote on hot start. Without this repair, existing single-repo
-// Worktree tasks keep failing with -32002 after upgrade.
-//
-// Idempotent — once workspace_path == worktree_path nothing more is changed.
-func (r *Repository) healTaskEnvironmentWorkspacePaths() error {
-	// substr(...) prefix match is safer than LIKE here: paths may contain
-	// "_" or "%", both of which are LIKE wildcards in SQLite.
-	rows, err := r.db.Query(`
-		SELECT id, worktree_path
-		  FROM task_environments
-		 WHERE executor_type = 'worktree'
-		   AND COALESCE(worktree_path, '') != ''
-		   AND COALESCE(workspace_path, '') != worktree_path
-		   AND (
-		         COALESCE(workspace_path, '') = ''
-		         OR (length(workspace_path) < length(worktree_path)
-		             AND substr(worktree_path, 1, length(workspace_path)) = workspace_path)
-		       )
-	`)
-	if err != nil {
-		return fmt.Errorf("heal workspace_path: query: %w", err)
-	}
-	type healRow struct{ id, worktreePath string }
-	var pending []healRow
-	for rows.Next() {
-		var hr healRow
-		if err := rows.Scan(&hr.id, &hr.worktreePath); err != nil {
-			_ = rows.Close()
-			return fmt.Errorf("heal workspace_path: scan: %w", err)
-		}
-		pending = append(pending, hr)
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return fmt.Errorf("heal workspace_path: rows: %w", err)
-	}
-	_ = rows.Close()
-	if len(pending) == 0 {
-		return nil
-	}
-
-	for _, hr := range pending {
-		if _, err := r.db.Exec(
-			`UPDATE task_environments SET workspace_path = ?, updated_at = datetime('now') WHERE id = ?`,
-			hr.worktreePath, hr.id,
-		); err != nil {
-			return fmt.Errorf("heal workspace_path: update %s: %w", hr.id, err)
-		}
-	}
-	return nil
-}
-
+// The legacy startup heals for task environments (backfillTaskEnvironments,
+// backfillTaskEnvironmentRepos, healTaskEnvironmentWorkspacePaths) were folded
+// into the one-time worktree ownership cutover
+// (normalizeTaskWorktreeOwnership in worktree_ownership_migration.go). The
+// legacy tables and columns they read no longer exist at startup.
 // healDuplicateTaskEnvironments collapses rows where a single task has more
 // than one task_environments row (race in lazy create). Keeps the most recently
 // updated row and re-points any sessions still referring to the loser.
@@ -1117,121 +1001,6 @@ func (r *Repository) healSessionTaskEnvironmentIDs() error {
 		return fmt.Errorf("heal session env id: update: %w", err)
 	}
 	return nil
-}
-
-// backfillSingleTask creates a task_environment and links sessions for one orphaned task.
-func (r *Repository) backfillSingleTask(tx *sql.Tx, row backfillRow) error {
-	envID := uuid.New().String()
-
-	// Look up executor type from executors table. Default to "local_pc" ONLY
-	// when the executor row genuinely doesn't exist (e.g. legacy session whose
-	// executor was deleted). Any other scan error — driver failure, schema
-	// mismatch, type assertion bug — must abort the migration so the operator
-	// sees the underlying problem instead of every backfilled environment
-	// silently getting the wrong executor_type.
-	var executorType string
-	if err := tx.QueryRow(`SELECT type FROM executors WHERE id = ?`, row.executorID).Scan(&executorType); err != nil {
-		if !errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("backfill: lookup executor type for task %s: %w", row.taskID, err)
-		}
-		executorType = "local_pc"
-	}
-
-	// Look up worktree info from task_session_worktrees (best effort)
-	var wtID, wtPath, wtBranch string
-	_ = tx.QueryRow(`
-		SELECT w.worktree_id, w.worktree_path, w.worktree_branch
-		FROM task_session_worktrees w
-		JOIN task_sessions ts ON ts.id = w.session_id
-		WHERE ts.task_id = ?
-		LIMIT 1
-	`, row.taskID).Scan(&wtID, &wtPath, &wtBranch)
-
-	// Insert task_environment with status "stopped" (historical, agentctl not running).
-	// Pre-refactor this also wrote agent_execution_id; that column is gone from
-	// task_environments (executors_running is the only carrier of execution state now).
-	if _, err := tx.Exec(`
-		INSERT INTO task_environments (
-			id, task_id, repository_id, executor_type, executor_id,
-			executor_profile_id, control_port, status,
-			worktree_id, worktree_path, worktree_branch, workspace_path,
-			container_id, sandbox_id, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, 0, 'stopped', ?, ?, ?, '', ?, '', ?, datetime('now'))
-	`, envID, row.taskID, row.repositoryID, executorType, row.executorID,
-		row.executorProfileID, wtID, wtPath, wtBranch, row.containerID, row.startedAt); err != nil {
-		return fmt.Errorf("backfill: insert env for task %s: %w", row.taskID, err)
-	}
-
-	// Link all sessions for this task that lack task_environment_id
-	if _, err := tx.Exec(`
-		UPDATE task_sessions
-		SET task_environment_id = ?
-		WHERE task_id = ? AND (task_environment_id = '' OR task_environment_id IS NULL)
-	`, envID, row.taskID); err != nil {
-		return fmt.Errorf("backfill: link sessions for task %s: %w", row.taskID, err)
-	}
-	return nil
-}
-
-// backfillTaskEnvironmentRepos populates task_environment_repos from the legacy
-// single-repo fields on task_environments. One row per environment that has a
-// non-empty repository_id and no existing task_environment_repos row.
-// Idempotent.
-func (r *Repository) backfillTaskEnvironmentRepos() error {
-	rows, err := r.db.Query(`
-		SELECT te.id,
-		       te.repository_id,
-		       COALESCE(te.worktree_id, ''),
-		       COALESCE(te.worktree_path, ''),
-		       COALESCE(te.worktree_branch, ''),
-		       te.created_at
-		FROM task_environments te
-		LEFT JOIN task_environment_repos ter ON ter.task_environment_id = te.id
-		WHERE te.repository_id != '' AND ter.id IS NULL
-	`)
-	if err != nil {
-		return fmt.Errorf("backfill repos: query: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	type envRepoRow struct {
-		envID, repoID, wtID, wtPath, wtBranch, createdAt string
-	}
-	var pending []envRepoRow
-	for rows.Next() {
-		var row envRepoRow
-		if err := rows.Scan(&row.envID, &row.repoID, &row.wtID, &row.wtPath, &row.wtBranch, &row.createdAt); err != nil {
-			return fmt.Errorf("backfill repos: scan: %w", err)
-		}
-		pending = append(pending, row)
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("backfill repos: rows: %w", err)
-	}
-	if len(pending) == 0 {
-		return nil
-	}
-
-	tx, err := r.db.Begin()
-	if err != nil {
-		return fmt.Errorf("backfill repos: begin tx: %w", err)
-	}
-	defer tx.Rollback() //nolint:errcheck
-
-	for _, row := range pending {
-		if _, err := tx.Exec(`
-			INSERT INTO task_environment_repos (
-				id, task_environment_id, repository_id, branch_slug,
-				worktree_id, worktree_path, worktree_branch,
-				position, error_message, created_at, updated_at
-			) VALUES (?, ?, ?, '', ?, ?, ?, 0, '', ?, ?)
-		`, uuid.New().String(), row.envID, row.repoID,
-			row.wtID, row.wtPath, row.wtBranch,
-			row.createdAt, row.createdAt); err != nil {
-			return fmt.Errorf("backfill repos: insert env %s: %w", row.envID, err)
-		}
-	}
-	return tx.Commit()
 }
 
 // Startup healing of orphaned workflow_step_id values was removed: a raw SQL

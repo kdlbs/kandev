@@ -37,6 +37,7 @@ const (
 	rejectedFieldKey   = "rejected"
 	documentArg        = "document"
 	messageArg         = "message"
+	autopilotArg       = "autopilot"
 )
 
 func (s *Server) listWorkspacesHandler() server.ToolHandlerFunc {
@@ -173,10 +174,14 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 			"workspace_mode":      req.GetString("workspace_mode", ""),
 			"title":               title,
 			"description":         req.GetString("prompt", ""),
+			autopilotArg:          req.GetBool(autopilotArg, false),
 			"agent_profile_id":    req.GetString("agent_profile_id", ""),
 			"executor_profile_id": req.GetString("executor_profile_id", ""),
 			"source_task_id":      s.taskID,
 			"start_agent":         startAgent,
+		}
+		if externalID := req.GetString("external_id", ""); externalID != "" {
+			payload["external_id"] = externalID
 		}
 
 		// Add repository info. For subtasks an explicit repo overrides the
@@ -382,6 +387,7 @@ func (s *Server) messageTaskHandler() server.ToolHandlerFunc {
 		}
 		copyOptionalStringArg(payload, req, "delivery_mode")
 		copyOptionalStringArg(payload, req, "session_id")
+		copyOptionalStringArg(payload, req, "reply_to_question_id")
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPMessageTask, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -452,6 +458,28 @@ func (s *Server) getTaskConversationHandler() server.ToolHandlerFunc {
 
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPGetTaskConversation, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) listTaskSessionsHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := req.RequireString(mcpKeyTaskID)
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		// current_session_id comes from the session this MCP server is bound
+		// to, never from the caller, so "is_current" cannot be spoofed.
+		payload := map[string]interface{}{
+			mcpKeyTaskID:         taskID,
+			"current_session_id": s.sessionID,
+		}
+
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListTaskSessions, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -545,6 +573,27 @@ func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
 		}
 
 		return extractQuestionAnswers(result, questions), nil
+	}
+}
+
+func (s *Server) askParentQuestionHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		questions, errResult := parseQuestions(req)
+		if errResult != nil {
+			return errResult, nil
+		}
+		payload := map[string]interface{}{
+			"task_id":    s.taskID,
+			"session_id": s.sessionID,
+			questionsArg: questions,
+			"context":    req.GetString("context", ""),
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPAskParentQuestion, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
 	}
 }
 

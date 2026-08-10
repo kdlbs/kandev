@@ -1,16 +1,20 @@
 "use client";
 
-import { memo, useEffect, useState } from "react";
+import {
+  memo,
+  useEffect,
+  useState,
+  type ComponentPropsWithoutRef,
+  type MouseEvent,
+  type Ref,
+} from "react";
 import Link from "@/components/routing/app-link";
 import {
   IconBrandGitlab,
-  IconCheck,
-  IconClock,
   IconExternalLink,
   IconGitMerge,
   IconPlus,
   IconUnlink,
-  IconX,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
@@ -20,6 +24,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
+import { Popover, PopoverAnchor, PopoverContent } from "@kandev/ui/popover";
 import {
   useGitLabAvailable,
   useTaskMRs,
@@ -33,36 +38,31 @@ import type { TaskMR } from "@/lib/types/gitlab";
 import type { Repository } from "@/lib/types/http";
 import { TaskMRLinkDialog } from "./task-mr-link-dialog";
 import { MRAutomationControls } from "./mr-automation-controls";
+import { MRCIPopover } from "./mr-ci-popover";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { reviewItemId } from "@/components/task/review-selection";
 import { mrTaskKey } from "./mr-detail-panel";
 import { useTranslation } from "react-i18next";
+import { MRStatusIcon } from "./mr-task-icon";
+import { useHoverPopover } from "@/hooks/domains/github/use-hover-popover";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+
+const MR_POPOVER_OPEN_DELAY_MS = 150;
+const MR_POPOVER_CLOSE_DELAY_MS = 150;
 
 /**
- * Icon + colour for an MR's combined state. Mirrors github's pr-task-icon
- * priority order so a merged MR reads the same as a merged PR: terminal
- * states first, then pipeline failures / changes-requested, then ready-to-
- * merge, then awaiting-something, then pipeline-running.
+ * Hover-driven popover lifecycle for the single-MR case, mirroring GitHub's
+ * PRMultiButton (C7). A multi-MR aggregate popover is out of scope (§9) —
+ * hovering a 2+ MR trigger only ever opens the click-driven dropdown.
  */
-function MRStatusIcon({ mr }: { mr: TaskMR }) {
-  if (mr.state === "merged") return <IconCheck className="h-3 w-3 text-purple-500" />;
-  if (mr.state === "closed") return <IconX className="h-3 w-3 text-muted-foreground" />;
-  if (mr.pipeline_state === "failure") return <IconX className="h-3 w-3 text-red-500" />;
-  if (mr.approval_state === "approved" && mr.pipeline_state === "success" && !mr.draft) {
-    return <IconCheck className="h-3 w-3 text-emerald-400" />;
-  }
-  if (mr.approval_state === "pending") return <IconClock className="h-3 w-3 text-sky-400" />;
-  if (mr.pipeline_state === "pending") return <IconClock className="h-3 w-3 text-yellow-500" />;
-  return null;
-}
-
-function statusTextColor(mr: TaskMR): string {
-  if (mr.state === "merged") return "text-purple-500";
-  if (mr.state === "closed") return "text-muted-foreground";
-  if (mr.pipeline_state === "failure") return "text-red-500";
-  if (mr.approval_state === "approved") return "text-emerald-400";
-  if (mr.approval_state === "pending") return "text-sky-400";
-  return "text-muted-foreground";
+function useMRPopoverInteractions() {
+  const usesTouchDrawer = useTouchDrawer();
+  const hover = useHoverPopover({
+    openDelayMs: MR_POPOVER_OPEN_DELAY_MS,
+    closeDelayMs: MR_POPOVER_CLOSE_DELAY_MS,
+    disabled: usesTouchDrawer,
+  });
+  return { usesTouchDrawer, ...hover };
 }
 
 export function mrTriggerClass(compact: boolean, mobile: boolean): string {
@@ -104,9 +104,8 @@ function MRTriggerContent({
   if (single) {
     return (
       <>
-        <IconGitMerge className={`h-4 w-4 ${statusTextColor(single)}`} />
+        <MRStatusIcon mr={single} className="h-4 w-4" />
         <span className="text-xs font-medium">!{single.mr_iid}</span>
-        <MRStatusIcon mr={single} />
       </>
     );
   }
@@ -118,6 +117,170 @@ function MRTriggerContent({
       </span>
     </>
   );
+}
+
+// Bare trigger button, deliberately not wrapped in DropdownMenuTrigger here:
+// the multi-MR/touch path wraps it in one at the call site, while the
+// single-MR desktop path opens the review panel directly on click and needs
+// a plain button instead.
+function MRMenuTriggerButton({
+  single,
+  count,
+  compact,
+  mobile,
+  hoverHandlers,
+  onClick,
+  ref,
+  ...triggerProps
+}: {
+  single: TaskMR | null;
+  count: number;
+  compact: boolean;
+  mobile: boolean;
+  hoverHandlers: {
+    onTriggerEnter?: () => void;
+    onTriggerLeave?: () => void;
+  };
+  onClick?: (e: MouseEvent<HTMLButtonElement>) => void;
+  // PopoverAnchor's `asChild` clones this element to inject its own anchor
+  // ref (React 19 ref-as-prop) so floating-ui can measure the real DOM node.
+  // Without forwarding it to Button, the popover never becomes positioned
+  // and stays rendered off-screen at Radix's pre-measurement placeholder.
+  ref?: Ref<HTMLButtonElement>;
+} & ComponentPropsWithoutRef<"button">) {
+  const { t } = useTranslation();
+  return (
+    <Button
+      ref={ref}
+      {...triggerProps}
+      onClick={onClick}
+      data-testid="mr-topbar-button"
+      data-mr-iid={single?.mr_iid}
+      data-mr-state={single?.state}
+      size={compact ? "icon-sm" : "sm"}
+      variant="outline"
+      className={mrTriggerClass(compact, mobile)}
+      aria-label={
+        single
+          ? t("gitlab:gitlabMergeRequest", { mriid: single.mr_iid })
+          : t("gitlab:gitlabMergeRequests", { length: count })
+      }
+      onMouseOver={hoverHandlers.onTriggerEnter}
+      onMouseEnter={hoverHandlers.onTriggerEnter}
+      onMouseMove={hoverHandlers.onTriggerEnter}
+      onPointerOver={hoverHandlers.onTriggerEnter}
+      onPointerEnter={hoverHandlers.onTriggerEnter}
+      onPointerMove={hoverHandlers.onTriggerEnter}
+      onMouseLeave={hoverHandlers.onTriggerLeave}
+      onPointerLeave={hoverHandlers.onTriggerLeave}
+      onFocus={hoverHandlers.onTriggerEnter}
+      onBlur={hoverHandlers.onTriggerLeave}
+    >
+      <MRTriggerContent compact={compact} single={single} count={count} />
+    </Button>
+  );
+}
+
+function MRDropdownList({
+  taskId,
+  mrs,
+  single,
+  canLink,
+  onOpenReview,
+  onUnlink,
+  onLink,
+}: {
+  taskId: string;
+  mrs: TaskMR[];
+  single: TaskMR | null;
+  canLink: boolean;
+  onOpenReview: (mr: TaskMR) => void;
+  onUnlink: (associationId: string) => void;
+  onLink: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <DropdownMenuContent align="end" className="w-72">
+      {mrs.map((mr) => (
+        <div key={mr.id}>
+          <DropdownMenuItem className="cursor-pointer" onSelect={() => onOpenReview(mr)}>
+            <IconGitMerge className="h-4 w-4" />
+            <span className="min-w-0 truncate">
+              {t("gitlab:review")} {mr.project_path}!{mr.mr_iid}
+            </span>
+          </DropdownMenuItem>
+          <DropdownMenuItem asChild className="cursor-pointer">
+            <Link href={mr.mr_url} target="_blank" rel="noopener noreferrer">
+              <IconExternalLink className="h-4 w-4" /> {t("gitlab:openInGitlab")}
+            </Link>
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            className="cursor-pointer text-destructive focus:text-destructive"
+            onSelect={() => onUnlink(mr.id)}
+          >
+            <IconUnlink className="h-4 w-4" />
+            {t("gitlab:unlink")}
+            {mr.mr_iid}
+          </DropdownMenuItem>
+        </div>
+      ))}
+      <DropdownMenuSeparator />
+      <MRAutomationControls taskId={taskId} mr={single ?? undefined} />
+      {canLink ? (
+        <>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem className="cursor-pointer" onSelect={onLink}>
+            <IconPlus className="h-4 w-4" />
+            {t("gitlab:linkAnotherMergeRequest")}
+          </DropdownMenuItem>
+        </>
+      ) : null}
+    </DropdownMenuContent>
+  );
+}
+
+function useMRDesktopReviewOpener(mobile: boolean) {
+  const addMRPanel = useDockviewStore((state) => state.addMRPanel);
+  const dockviewReady = useDockviewStore((state) => state.api !== null);
+  const isRestoringLayout = useDockviewStore((state) => state.isRestoringLayout);
+  // Not restoring right now is necessary but NOT sufficient. Navigating
+  // straight to /t/:id runs dockview's `onReady` while the session→env mapping
+  // is still hydrating, so it builds a throwaway DEFAULT layout with a null env
+  // (see tryRestoreLayout) and `isRestoringLayout` is false the whole time.
+  // `switchEnvLayout` only replaces that layout wholesale via `api.fromJSON`
+  // once the env arrives, discarding any panel added in the gap — the user
+  // clicks the MR button during session load and nothing ever opens. The env
+  // being adopted is what marks the layout as actually settled.
+  const envAdopted = useDockviewStore((state) => state.currentLayoutEnvId !== null);
+  const layoutSettled = envAdopted && !isRestoringLayout;
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const setMobileSessionReview = useAppStore((state) => state.setMobileSessionReview);
+  const [pendingDesktopMR, setPendingDesktopMR] = useState<TaskMR | null>(null);
+
+  useEffect(() => {
+    if (!dockviewReady || !layoutSettled || !pendingDesktopMR) return;
+    // Only re-apply once the layout has actually settled: at that point no
+    // switchEnvLayout restore can land afterwards and discard this add. The
+    // intent is cleared here so a later user-initiated layout change (preset
+    // switch, maximize) cannot resurrect a panel the user has since closed.
+    openDesktopMRReview(addMRPanel, pendingDesktopMR);
+    setPendingDesktopMR(null);
+  }, [addMRPanel, dockviewReady, layoutSettled, pendingDesktopMR]);
+
+  return (mr: TaskMR) => {
+    if (mobile) {
+      if (activeSessionId) openMobileMRReview(setMobileSessionReview, activeSessionId, mr);
+      return;
+    }
+    // Open straight away when we can, so the panel appears on click rather
+    // than after the session finishes loading — but never into a layout that
+    // is being replaced right now. Retain the intent until dockview exists AND
+    // the env layout has settled: `currentLayoutEnvId` outlives `setApi(null)`,
+    // so a stale env id can leave `layoutSettled` true while dockview is still
+    // remounting, and dropping the intent there would lose the click entirely.
+    if (dockviewReady && !isRestoringLayout) openDesktopMRReview(addMRPanel, mr);
+    if (!dockviewReady || !layoutSettled) setPendingDesktopMR(mr);
+  };
 }
 
 function MRMenuButton({
@@ -137,87 +300,110 @@ function MRMenuButton({
   onLink: () => void;
   onUnlink: (associationId: string) => void;
 }) {
-  const { t } = useTranslation();
   const single = mrs.length === 1 ? mrs[0] : null;
-  const addMRPanel = useDockviewStore((state) => state.addMRPanel);
-  const dockviewReady = useDockviewStore((state) => state.api !== null);
-  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const setMobileSessionReview = useAppStore((state) => state.setMobileSessionReview);
-  const [pendingDesktopMR, setPendingDesktopMR] = useState<TaskMR | null>(null);
+  const openReview = useMRDesktopReviewOpener(mobile);
+  const {
+    usesTouchDrawer,
+    open: popoverOpen,
+    onOpenChange: onPopoverOpenChange,
+    onTriggerEnter,
+    onTriggerLeave,
+    onContentEnter,
+    onContentLeave,
+  } = useMRPopoverInteractions();
 
-  useEffect(() => {
-    if (!dockviewReady || !pendingDesktopMR) return;
-    openDesktopMRReview(addMRPanel, pendingDesktopMR);
-    setPendingDesktopMR(null);
-  }, [addMRPanel, dockviewReady, pendingDesktopMR]);
+  // Hover preview only makes sense for the single-MR case (MRCIPopover takes
+  // one TaskMR); a multi-MR aggregate popover is out of scope (§9). On touch
+  // there is no hover at all, so the popover apparatus is skipped entirely —
+  // that path keeps the click-driven dropdown unchanged, below.
+  const showHoverPreview = single != null && !usesTouchDrawer;
 
-  const openReview = (mr: TaskMR) => {
-    if (mobile) {
-      if (activeSessionId) openMobileMRReview(setMobileSessionReview, activeSessionId, mr);
-      return;
-    }
-    if (!dockviewReady) {
-      setPendingDesktopMR(mr);
-    } else {
-      openDesktopMRReview(addMRPanel, mr);
-    }
-  };
+  if (showHoverPreview) {
+    // Single MR, desktop: click opens the MR detail panel directly (mirrors
+    // GitHub's PRSingleButton) — no intermediate dropdown. Hovering shows a
+    // popover with everything else: link/open-in-GitLab/unlink, CI + review
+    // summary, automation controls, and a merge action when ready.
+    return (
+      <Popover open={popoverOpen} onOpenChange={onPopoverOpenChange}>
+        <PopoverAnchor asChild>
+          <MRMenuTriggerButton
+            single={single}
+            count={mrs.length}
+            compact={compact}
+            mobile={mobile}
+            hoverHandlers={{ onTriggerEnter, onTriggerLeave }}
+            onClick={() => {
+              onPopoverOpenChange(false);
+              openReview(single);
+            }}
+          />
+        </PopoverAnchor>
+        <PopoverContent
+          data-testid="mr-topbar-popover"
+          align="end"
+          sideOffset={4}
+          className="w-80"
+          onMouseEnter={onContentEnter}
+          onMouseMove={onContentEnter}
+          onMouseLeave={onContentLeave}
+          onOpenAutoFocus={(e) => e.preventDefault()}
+        >
+          <MRCIPopover
+            mr={single}
+            taskId={taskId}
+            enabled={popoverOpen}
+            canLink={canLink}
+            onOpenDetailPanel={() => openReview(single)}
+            onLink={onLink}
+            onUnlink={() => onUnlink(single.id)}
+          />
+        </PopoverContent>
+      </Popover>
+    );
+  }
+
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          data-testid="mr-topbar-button"
-          data-mr-iid={single?.mr_iid}
-          data-mr-state={single?.state}
-          size={compact ? "icon-sm" : "sm"}
-          variant="outline"
-          className={mrTriggerClass(compact, mobile)}
-          aria-label={
-            single
-              ? t("gitlab:gitlabMergeRequest", { mriid: single.mr_iid })
-              : t("gitlab:gitlabMergeRequests", { length: mrs.length })
-          }
-        >
-          <MRTriggerContent compact={compact} single={single} count={mrs.length} />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-72">
-        {mrs.map((mr) => (
-          <div key={mr.id}>
-            <DropdownMenuItem className="cursor-pointer" onSelect={() => openReview(mr)}>
-              <IconGitMerge className="h-4 w-4" />
-              <span className="min-w-0 truncate">
-                {t("gitlab:review")} {mr.project_path}!{mr.mr_iid}
-              </span>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild className="cursor-pointer">
-              <Link href={mr.mr_url} target="_blank" rel="noopener noreferrer">
-                <IconExternalLink className="h-4 w-4" /> {t("gitlab:openInGitlab")}
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className="cursor-pointer text-destructive focus:text-destructive"
-              onSelect={() => onUnlink(mr.id)}
-            >
-              <IconUnlink className="h-4 w-4" />
-              {t("gitlab:unlink")}
-              {mr.mr_iid}
-            </DropdownMenuItem>
-          </div>
-        ))}
-        <DropdownMenuSeparator />
-        <MRAutomationControls taskId={taskId} />
-        {canLink ? (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem className="cursor-pointer" onSelect={onLink}>
-              <IconPlus className="h-4 w-4" />
-              {t("gitlab:linkAnotherMergeRequest")}
-            </DropdownMenuItem>
-          </>
-        ) : null}
-      </DropdownMenuContent>
+      <MRMenuTriggerButtonInDropdown
+        single={single}
+        count={mrs.length}
+        compact={compact}
+        mobile={mobile}
+      />
+      <MRDropdownList
+        taskId={taskId}
+        mrs={mrs}
+        single={single}
+        canLink={canLink}
+        onOpenReview={openReview}
+        onUnlink={onUnlink}
+        onLink={onLink}
+      />
     </DropdownMenu>
+  );
+}
+
+function MRMenuTriggerButtonInDropdown({
+  single,
+  count,
+  compact,
+  mobile,
+}: {
+  single: TaskMR | null;
+  count: number;
+  compact: boolean;
+  mobile: boolean;
+}) {
+  return (
+    <DropdownMenuTrigger asChild>
+      <MRMenuTriggerButton
+        single={single}
+        count={count}
+        compact={compact}
+        mobile={mobile}
+        hoverHandlers={{}}
+      />
+    </DropdownMenuTrigger>
   );
 }
 

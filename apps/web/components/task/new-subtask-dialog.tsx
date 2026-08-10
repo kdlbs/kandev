@@ -422,6 +422,7 @@ function NewSubtaskForm({
     resolvePrompt: promptZone.resolvePrompt,
     title,
     autoTitle,
+    autopilot: fs.autopilot,
     setIsCreating,
     onClose,
     workspaceMode,
@@ -432,6 +433,7 @@ function NewSubtaskForm({
     title,
     setTitle,
     autoTitle,
+    autopilot: fs.autopilot,
     workspaceId,
     availableRepositories,
     parentRepositoryId,
@@ -515,6 +517,16 @@ export function NewSubtaskDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         data-testid="new-subtask-dialog"
+        onOpenAutoFocus={(event) => {
+          if (!autoTitle) return;
+          const content = event.currentTarget as HTMLElement | null;
+          const prompt = content?.querySelector<HTMLTextAreaElement>(
+            '[data-testid="subtask-prompt-input"]',
+          );
+          if (!prompt) return;
+          event.preventDefault();
+          prompt.focus();
+        }}
         className="w-full h-full min-w-0 max-w-full max-h-full overflow-hidden rounded-none sm:w-[800px] sm:h-auto sm:max-w-none sm:max-h-[85vh] sm:rounded-lg flex flex-col"
       >
         <DialogHeader>

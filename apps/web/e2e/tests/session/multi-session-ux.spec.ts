@@ -1,6 +1,12 @@
+import { existsSync } from "node:fs";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+
+const fsExists = (p: string) => existsSync(p);
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 
@@ -479,5 +485,100 @@ test.describe("Multi-session UX", () => {
     ).toBeVisible({
       timeout: 15_000,
     });
+  });
+});
+
+test.describe("Session deletion preserves the task workspace", () => {
+  test("deleting the only session keeps the worktree and a replacement session reuses it", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(180_000);
+
+    const { task, session } = await createTaskAndNavigate(
+      testPage,
+      apiClient,
+      seedData,
+      "Preserve Workspace Task",
+    );
+
+    // The worktree-mode environment exposes the on-disk workspace root.
+    await expect
+      .poll(
+        async () => {
+          const env = await apiClient.getTaskEnvironment(task.id);
+          return env?.workspace_path ?? "";
+        },
+        { timeout: 30_000, message: "Waiting for task environment workspace path" },
+      )
+      .not.toBe("");
+
+    const env = await apiClient.getTaskEnvironment(task.id);
+    const workspacePath = env?.workspace_path ?? "";
+    if (!workspacePath) throw new Error("no workspace path for the task environment");
+    const environmentId = env?.id ?? "";
+
+    // Write an uncommitted marker into the worktree.
+    const markerPath = join(workspacePath, "uncommitted-marker.txt");
+    writeFileSync(markerPath, "keep-me\n", "utf8");
+    await expect(fsExists(markerPath)).toBe(true);
+
+    const { sessions: before } = await apiClient.listTaskSessions(task.id);
+    const onlySessionId = before[0]?.id;
+    if (!onlySessionId) throw new Error("expected exactly one session");
+
+    // Delete the only session through the visible UI.
+    const tab = session.sessionTabBySessionId(onlySessionId);
+    await expect(tab).toBeVisible({ timeout: 10_000 });
+    await tab.click({ button: "right" });
+    await session.contextMenuItem("Delete").click();
+    const dialog = session.alertDialog();
+    await expect(dialog).toBeVisible({ timeout: 5_000 });
+    await expect(dialog).toContainText("task workspace and its files are kept");
+    await dialog.getByRole("button", { name: "Delete" }).click();
+
+    // The task workspace and its uncommitted marker survive session deletion.
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          return !sessions.some((s) => s.id === onlySessionId);
+        },
+        { timeout: 15_000, message: "Waiting for the only session to be deleted" },
+      )
+      .toBe(true);
+    await expect(fsExists(markerPath)).toBe(true);
+    const envAfter = await apiClient.getTaskEnvironment(task.id);
+    expect(envAfter?.id).toBe(environmentId);
+
+    // A replacement session reuses the retained workspace and observes the
+    // marker. (The task page auto-ensures a session when the task has none;
+    // the explicit dialog still runs the replacement prompt deterministically.)
+    await session.openNewSessionDialog();
+    await session.newSessionPromptInput().fill("/e2e:simple-message");
+    await session.newSessionStartButton().click();
+    await expect(session.newSessionDialog()).not.toBeVisible({ timeout: 10_000 });
+
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          return sessions.filter((s) => DONE_STATES.includes(s.state)).length;
+        },
+        { timeout: 60_000, message: "Waiting for replacement session to finish" },
+      )
+      .toBeGreaterThan(0);
+
+    await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
+      timeout: 30_000,
+    });
+
+    // The replacement session reused the retained environment, not a fresh one.
+    const { sessions: after } = await apiClient.listTaskSessions(task.id);
+    expect(after.some((s) => s.task_environment_id === environmentId)).toBe(true);
+    const envAfterReplacement = await apiClient.getTaskEnvironment(task.id);
+    expect(envAfterReplacement?.workspace_path).toBe(workspacePath);
+    await expect(fsExists(markerPath)).toBe(true);
   });
 });

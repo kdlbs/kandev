@@ -13,6 +13,7 @@ import {
   type TaskId,
   type TaskSessionState,
 } from "@/lib/types/http";
+import { t } from "@/lib/i18n";
 
 export type SessionStatus = {
   session_id: string;
@@ -95,7 +96,7 @@ function applyResumeResponse(
     return true;
   }
   setters.setResumptionState("error");
-  setters.setError(resp.error ?? "Failed to resume session");
+  setters.setError(resp.error ?? t("task:failedToResumeSession"));
   return false;
 }
 

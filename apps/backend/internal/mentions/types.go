@@ -32,6 +32,55 @@ var (
 type Status = apiv1.MentionStatus
 
 const (
+	FailureStageSearch              = "search"
+	FailureStageWorkspaceValidation = "workspace_validation"
+	FailureClassInternal            = "internal"
+	FailureClassWorkspaceLookup     = "workspace_lookup"
+)
+
+// SearchFailure carries safe classification metadata across the composition
+// boundary without requiring handlers to inspect an implementation error.
+type SearchFailure struct {
+	stage string
+	class string
+	cause error
+}
+
+func (e *SearchFailure) Error() string {
+	if e == nil || e.cause == nil {
+		return "mention search failed"
+	}
+	return e.cause.Error()
+}
+
+func (e *SearchFailure) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+
+// NewSearchFailure attaches stable, non-sensitive diagnostic classification.
+func NewSearchFailure(stage, class string, cause error) error {
+	if stage == "" {
+		stage = FailureStageSearch
+	}
+	if class == "" {
+		class = FailureClassInternal
+	}
+	return &SearchFailure{stage: stage, class: class, cause: cause}
+}
+
+// SearchFailureMetadata returns safe fields for structured HTTP diagnostics.
+func SearchFailureMetadata(err error) (stage, class string) {
+	var failure *SearchFailure
+	if errors.As(err, &failure) && failure != nil {
+		return failure.stage, failure.class
+	}
+	return FailureStageSearch, FailureClassInternal
+}
+
+const (
 	StatusOK               = apiv1.MentionStatusOK
 	StatusNotConfigured    = apiv1.MentionStatusNotConfigured
 	StatusUnauthorized     = apiv1.MentionStatusUnauthorized

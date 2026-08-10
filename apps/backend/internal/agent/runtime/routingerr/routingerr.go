@@ -21,8 +21,10 @@ const (
 	CodeSubscriptionRequired   Code = "subscription_required"
 	CodeQuotaLimited           Code = "quota_limited"
 	CodeRateLimited            Code = "rate_limited"
+	CodeNetworkUnavailable     Code = "network_unavailable"
 	CodeProviderUnavailable    Code = "provider_unavailable"
 	CodeProviderOverloaded     Code = "provider_overloaded"
+	CodeModelCapacity          Code = "model_capacity"
 	CodeModelUnavailable       Code = "model_unavailable"
 	CodeProviderNotConfigured  Code = "provider_not_configured"
 	CodeUnknownProvider        Code = "unknown_provider_error"
@@ -41,6 +43,29 @@ const (
 // clean; the agent's persisted reasoning state is corrupted and only a brand
 // new session recovers.
 const RemediationStartFreshSession = "start_fresh_session"
+
+// ModelUnavailableMessage renders the actionable user-facing message for a
+// configured model that is no longer available. Shared by the session-start
+// policy and the office post-start failure path so chat and run detail both
+// ask the user to change the model instead of silently falling back.
+func ModelUnavailableMessage(modelID string) string {
+	return fmt.Sprintf("Model unavailable: the configured model %q is no longer available. Change the model in the agent profile or configure a fallback.", modelID)
+}
+
+// IsAvailabilityCode reports whether a classified code means the provider or
+// model became unavailable (auth expired, model dropped, credentials or
+// subscription missing) — the failure class the no-silent-model-fallback
+// feature treats as "ask the user to change the model". Transient conditions
+// (rate limiting, quota) are deliberately excluded: they carry their own
+// AutoRetryable handling and must not trigger "change the model" guidance.
+func IsAvailabilityCode(code Code) bool {
+	switch code {
+	case CodeModelUnavailable, CodeAuthRequired, CodeMissingCredentials,
+		CodeSubscriptionRequired, CodeProviderUnavailable:
+		return true
+	}
+	return false
+}
 
 // Confidence reflects how strongly the classifier trusts the matched signal.
 type Confidence string
@@ -91,6 +116,7 @@ type Input struct {
 	ExitCode      *int
 	StructuredErr error
 	HTTPStatus    int
+	ResetHint     *time.Time
 	Stderr        string
 	Stdout        string
 }
@@ -108,21 +134,33 @@ func Classify(in Input) *Error {
 		return e
 	}
 	if e := classifyStructured(in, excerpt); e != nil {
+		e.ResetHint = in.ResetHint
 		return applyInvariants(e)
 	}
 	if e, ok := matchProviderRules(in.ProviderID, in.Stderr+"\n"+in.Stdout); ok {
 		e.Phase = in.Phase
 		e.ExitCode = in.ExitCode
+		e.ResetHint = in.ResetHint
+		e.RawExcerpt = excerpt
+		return applyInvariants(e)
+	}
+	if e, ok := matchProviderNeutralRules(in.Stderr + "\n" + in.Stdout); ok {
+		e.Phase = in.Phase
+		e.ExitCode = in.ExitCode
+		e.ResetHint = in.ResetHint
 		e.RawExcerpt = excerpt
 		return applyInvariants(e)
 	}
 	if e, ok := matchRuntimeEnvironmentRules(in.Stderr + "\n" + in.Stdout); ok {
 		e.Phase = in.Phase
 		e.ExitCode = in.ExitCode
+		e.ResetHint = in.ResetHint
 		e.RawExcerpt = excerpt
 		return applyInvariants(e)
 	}
-	return applyInvariants(classifyByPhase(in, excerpt))
+	e := classifyByPhase(in, excerpt)
+	e.ResetHint = in.ResetHint
+	return applyInvariants(e)
 }
 
 func classifyInjection(in Input, excerpt string) *Error {
@@ -140,6 +178,7 @@ func classifyInjection(in Input, excerpt string) *Error {
 		Phase:          in.Phase,
 		ClassifierRule: "inject.env",
 		ExitCode:       in.ExitCode,
+		ResetHint:      in.ResetHint,
 		RawExcerpt:     excerpt,
 	}
 	return applyInvariants(e)
@@ -219,7 +258,7 @@ func applyInvariants(e *Error) *Error {
 		e.UserAction = true
 		e.AutoRetryable = false
 		e.FallbackAllowed = true
-	case CodeRateLimited, CodeQuotaLimited:
+	case CodeRateLimited, CodeQuotaLimited, CodeNetworkUnavailable, CodeModelCapacity:
 		e.AutoRetryable = true
 		e.FallbackAllowed = true
 	case CodeProviderUnavailable, CodeUnknownProvider:

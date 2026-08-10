@@ -68,6 +68,11 @@ function useBrowserPanelUrl(initialUrl: string, useProxy: boolean) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [showIframe, setShowIframe] = useState(false);
 
+  useEffect(() => {
+    setUserUrl(initialUrl);
+    setUrlDraft(initialUrl);
+  }, [initialUrl]);
+
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const devProcessId = useAppStore((state) =>
     activeSessionId ? state.processes.devProcessBySessionId[activeSessionId] : undefined,
@@ -148,7 +153,7 @@ export const BrowserPanel = memo(function BrowserPanel({ params }: BrowserPanelP
   const showInspect = url.canProxy;
 
   return (
-    <PanelRoot>
+    <PanelRoot data-testid="browser-panel">
       <PanelHeaderBar>
         <Input
           value={url.displayDraft}

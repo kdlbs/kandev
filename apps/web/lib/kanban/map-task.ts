@@ -31,6 +31,7 @@ export type TaskLike = {
   workflow_step_id?: string;
   title?: string;
   description?: string | null;
+  autopilot?: boolean;
   position?: number;
   state?: TaskState;
   repositories?: Array<{
@@ -139,6 +140,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     workflowStepId: source.workflow_step_id ?? "",
     title: source.title ?? "",
     description: source.description ?? undefined,
+    autopilot: source.autopilot,
     position: source.position ?? 0,
     state: source.state,
     repositoryId: pickRepositoryId(source),
@@ -165,6 +167,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     queuedForStepId: source.queued_for_step_id,
     queuedAt: source.queued_at,
     statusSummary: source.status_summary,
+    metadata: source.metadata,
     isArchived: source.archived_at != null,
     isPRReview: isPRReviewFromMetadata(source.metadata),
     isIssueWatch: isIssueWatchFromMetadata(source.metadata),

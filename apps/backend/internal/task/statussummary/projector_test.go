@@ -1,5 +1,7 @@
 package statussummary
 
+//revive:disable:file-length-limit // Projector regression coverage is intentionally scenario-heavy.
+
 import (
 	"context"
 	"fmt"
@@ -174,6 +176,59 @@ func TestProjectorDoesNotSubscribeToRawStreamsOrStreamingMessageAppends(t *testi
 		t.Fatalf("summary updates after replay/append = %d, want 1", updates.Load())
 	}
 	_ = ctx
+}
+
+func TestProjectorRepairsStoredRunningSummaryAfterStartupRecovery(t *testing.T) {
+	store := newProjectorTestStore()
+	storedAt := time.Date(2026, 8, 1, 17, 59, 0, 0, time.UTC)
+	store.rows["task-startup-recovery"] = &StoredTaskStatusSummary{
+		TaskID:      "task-startup-recovery",
+		WorkspaceID: "workspace-1",
+		Summary: TaskStatusSummary{
+			Revision:            7,
+			UpdatedAt:           storedAt,
+			PrimarySession:      &PrimarySessionSummary{ID: "session-startup-recovery", State: "RUNNING"},
+			ForegroundActivity:  "generating",
+			ActiveSubagentCount: 2,
+		},
+	}
+
+	projector := NewProjector(ProjectorConfig{
+		Store: store,
+		ResolveWorkspace: func(context.Context, string) (string, error) {
+			return "workspace-1", nil
+		},
+		Now: func() time.Time { return storedAt.Add(time.Minute) },
+	})
+
+	if err := projector.HandleEvent(context.Background(), bus.NewEvent(events.TaskSessionStateChanged, "test", map[string]interface{}{
+		"task_id":               "task-startup-recovery",
+		"workspace_id":          "workspace-1",
+		"session_id":            "session-startup-recovery",
+		"new_state":             "WAITING_FOR_INPUT",
+		"is_primary":            true,
+		"foreground_activity":   nil,
+		"active_subagent_count": 0,
+	})); err != nil {
+		t.Fatalf("apply startup recovery event: %v", err)
+	}
+
+	got := store.summary("task-startup-recovery")
+	if got == nil || got.PrimarySession == nil {
+		t.Fatalf("repaired summary = %+v, want primary session", got)
+	}
+	if got.Revision <= 7 {
+		t.Fatalf("repaired summary revision = %d, want newer than 7", got.Revision)
+	}
+	if got.PrimarySession.State != "WAITING_FOR_INPUT" {
+		t.Errorf("primary session state = %q, want WAITING_FOR_INPUT", got.PrimarySession.State)
+	}
+	if got.ForegroundActivity != "" {
+		t.Errorf("foreground activity = %q, want empty", got.ForegroundActivity)
+	}
+	if got.ActiveSubagentCount != 0 {
+		t.Errorf("active subagent count = %d, want 0", got.ActiveSubagentCount)
+	}
 }
 
 func TestProjectorDerivesBoundedStatusAcrossSources(t *testing.T) {
@@ -635,11 +690,12 @@ func TestProjectorClearsPendingWhenRequestMessageResolves(t *testing.T) {
 	}{
 		{
 			name:        "permission approved",
-			messageType: "permission_request",
+			messageType: messageTypePermissionRequest,
 			arm: func(t *testing.T, eventBus *bus.MemoryEventBus, taskID, sessionID string) {
 				publishProjectorEvent(t, eventBus, events.PermissionRequestReceived, events.BuildPermissionRequestSubject(sessionID), map[string]interface{}{
 					"task_id":    taskID,
 					"session_id": sessionID,
+					"pending_id": "pending-1",
 				})
 			},
 			wantArmed: "permission",
@@ -647,11 +703,12 @@ func TestProjectorClearsPendingWhenRequestMessageResolves(t *testing.T) {
 		},
 		{
 			name:        "permission expired",
-			messageType: "permission_request",
+			messageType: messageTypePermissionRequest,
 			arm: func(t *testing.T, eventBus *bus.MemoryEventBus, taskID, sessionID string) {
 				publishProjectorEvent(t, eventBus, events.PermissionRequestReceived, events.BuildPermissionRequestSubject(sessionID), map[string]interface{}{
 					"task_id":    taskID,
 					"session_id": sessionID,
+					"pending_id": "pending-1",
 				})
 			},
 			wantArmed: "permission",
@@ -675,11 +732,12 @@ func TestProjectorClearsPendingWhenRequestMessageResolves(t *testing.T) {
 		},
 		{
 			name:        "permission rejected",
-			messageType: "permission_request",
+			messageType: messageTypePermissionRequest,
 			arm: func(t *testing.T, eventBus *bus.MemoryEventBus, taskID, sessionID string) {
 				publishProjectorEvent(t, eventBus, events.PermissionRequestReceived, events.BuildPermissionRequestSubject(sessionID), map[string]interface{}{
 					"task_id":    taskID,
 					"session_id": sessionID,
+					"pending_id": "pending-1",
 				})
 			},
 			wantArmed: "permission",
@@ -736,6 +794,67 @@ func TestProjectorClearsPendingWhenRequestMessageResolves(t *testing.T) {
 	}
 }
 
+func TestProjectorKeepsPendingWhenUnrelatedMessageResolves(t *testing.T) {
+	_, store, eventBus, _, _ := newProjectorTest(t)
+	const taskID = "task-pending-unrelated"
+	const sessionID = "session-pending-unrelated"
+
+	publishSessionState(t, eventBus, taskID, sessionID, nil)
+	publishProjectorEvent(t, eventBus, events.PermissionRequestReceived, events.BuildPermissionRequestSubject(sessionID), map[string]interface{}{
+		"task_id":    taskID,
+		"session_id": sessionID,
+		"pending_id": "permission-a",
+	})
+
+	publishProjectorEvent(t, eventBus, events.MessageUpdated, events.MessageUpdated, map[string]interface{}{
+		"task_id":    taskID,
+		"session_id": sessionID,
+		"type":       "tool_execute",
+		"metadata":   map[string]interface{}{"status": "completed", "pending_id": "tool-1"},
+	})
+
+	got := store.summary(taskID)
+	if got == nil || got.PendingAction != "permission" {
+		t.Fatalf("pending action after unrelated resolution = %+v, want permission", got)
+	}
+
+	publishProjectorEvent(t, eventBus, events.MessageUpdated, events.MessageUpdated, map[string]interface{}{
+		"task_id":    taskID,
+		"session_id": sessionID,
+		"type":       messageTypePermissionRequest,
+		"metadata":   map[string]interface{}{"status": "expired", "pending_id": "permission-b"},
+	})
+
+	got = store.summary(taskID)
+	if got == nil || got.PendingAction != "permission" {
+		t.Fatalf("pending action after different request resolution = %+v, want permission", got)
+	}
+
+	publishProjectorEvent(t, eventBus, events.MessageDeleted, events.MessageDeleted, map[string]interface{}{
+		"task_id":    taskID,
+		"session_id": sessionID,
+		"type":       messageTypePermissionRequest,
+		"metadata":   map[string]interface{}{"pending_id": "permission-b"},
+	})
+
+	got = store.summary(taskID)
+	if got == nil || got.PendingAction != "permission" {
+		t.Fatalf("pending action after deleting a different request = %+v, want permission", got)
+	}
+
+	publishProjectorEvent(t, eventBus, events.MessageUpdated, events.MessageUpdated, map[string]interface{}{
+		"task_id":    taskID,
+		"session_id": sessionID,
+		"type":       messageTypePermissionRequest,
+		"metadata":   map[string]interface{}{"status": "approved", "pending_id": "permission-a"},
+	})
+
+	got = store.summary(taskID)
+	if got == nil || got.PendingAction != "" {
+		t.Fatalf("pending action after request resolution = %+v, want empty", got)
+	}
+}
+
 // A detached-but-still-answerable clarification keeps status=pending, so the
 // task-list affordance must survive that update.
 func TestProjectorKeepsPendingWhenRequestStaysAnswerable(t *testing.T) {
@@ -768,5 +887,124 @@ func TestProjectorKeepsPendingWhenRequestStaysAnswerable(t *testing.T) {
 	got := store.summary(taskID)
 	if got == nil || got.PendingAction != "clarification" {
 		t.Fatalf("pending action after detach = %+v, want clarification", got)
+	}
+}
+
+// Every announced tool call is persisted with metadata.status="pending" (the raw
+// ACP tool status) before its first tool_update arrives. That is ordinary agent
+// work, not a prompt waiting on the user, so it must never arm the amber
+// permission affordance on the task row.
+func TestProjectorIgnoresPendingToolCallMessages(t *testing.T) {
+	for _, messageType := range []string{"tool_call", "tool_execute", "tool_read", "tool_edit", "tool_search"} {
+		t.Run(messageType, func(t *testing.T) {
+			_, store, eventBus, _, _ := newProjectorTest(t)
+			taskID := "task-pending-tool-" + messageType
+			sessionID := "session-pending-tool-" + messageType
+
+			publishSessionState(t, eventBus, taskID, sessionID, nil)
+			publishProjectorEvent(t, eventBus, events.MessageAdded, events.MessageAdded, map[string]interface{}{
+				"task_id":     taskID,
+				"session_id":  sessionID,
+				"author_type": "agent",
+				"type":        messageType,
+				"metadata": map[string]interface{}{
+					"status":       statusPending,
+					"tool_call_id": "tool-1",
+					"title":        "Terminal",
+				},
+			})
+
+			got := store.summary(taskID)
+			if got == nil {
+				t.Fatal("missing projected summary")
+			}
+			if got.PendingAction != "" {
+				t.Fatalf("pending action for a pending %s = %q, want empty", messageType, got.PendingAction)
+			}
+		})
+	}
+}
+
+// A message that merely carries a pending_id must not default to the permission
+// affordance either: only a real permission_request does.
+func TestProjectorDoesNotDefaultUnknownPendingMessagesToPermission(t *testing.T) {
+	_, store, eventBus, _, _ := newProjectorTest(t)
+	const taskID = "task-pending-unknown"
+	const sessionID = "session-pending-unknown"
+
+	publishSessionState(t, eventBus, taskID, sessionID, nil)
+	publishProjectorEvent(t, eventBus, events.MessageAdded, events.MessageAdded, map[string]interface{}{
+		"task_id":     taskID,
+		"session_id":  sessionID,
+		"author_type": "agent",
+		"type":        "status",
+		"metadata":    map[string]interface{}{"status": statusPending, "pending_id": "pending-1"},
+	})
+
+	got := store.summary(taskID)
+	if got == nil {
+		t.Fatal("missing projected summary")
+	}
+	if got.PendingAction != "" {
+		t.Fatalf("pending action for an untyped pending message = %q, want empty", got.PendingAction)
+	}
+}
+
+// A genuinely pending permission must survive unrelated agent traffic in the
+// same session — a background tool call completing while the foreground turn is
+// blocked on the prompt must not tear down the affordance the user still has to
+// act on.
+func TestProjectorKeepsPendingAcrossUnrelatedToolTraffic(t *testing.T) {
+	_, store, eventBus, _, _ := newProjectorTest(t)
+	const taskID = "task-pending-unrelated-tools"
+	const sessionID = "session-pending-unrelated-tools"
+
+	publishSessionState(t, eventBus, taskID, sessionID, nil)
+	publishProjectorEvent(t, eventBus, events.PermissionRequestReceived, events.BuildPermissionRequestSubject(sessionID), map[string]interface{}{
+		"task_id":    taskID,
+		"session_id": sessionID,
+	})
+	if got := store.summary(taskID); got == nil || got.PendingAction != pendingPermission {
+		t.Fatalf("pending action before tool traffic = %+v, want permission", got)
+	}
+
+	for _, status := range []string{"complete", "error", "cancelled"} {
+		publishProjectorEvent(t, eventBus, events.MessageUpdated, events.MessageUpdated, map[string]interface{}{
+			"task_id":     taskID,
+			"session_id":  sessionID,
+			"author_type": "agent",
+			"type":        "tool_execute",
+			"metadata":    map[string]interface{}{"status": status, "tool_call_id": "background-1"},
+		})
+		got := store.summary(taskID)
+		if got == nil || got.PendingAction != pendingPermission {
+			t.Fatalf("pending action after a %q tool update = %+v, want permission", status, got)
+		}
+	}
+}
+
+// The exact request type wins over the generic requests_input flag, so a
+// permission row is never classified as a clarification.
+func TestPendingActionForMessagePrefersExactRequestType(t *testing.T) {
+	cases := []struct {
+		messageType   string
+		requestsInput bool
+		want          string
+	}{
+		{messageTypePermissionRequest, false, pendingPermission},
+		{messageTypePermissionRequest, true, pendingPermission},
+		{messageTypeClarificationRequest, false, pendingClarification},
+		{messageTypeClarificationRequest, true, pendingClarification},
+		{"message", true, pendingClarification},
+		{"tool_execute", false, ""},
+		{"tool_execute", true, pendingClarification},
+		{"", false, ""},
+	}
+	for _, tc := range cases {
+		got := pendingActionForMessage(tc.messageType, tc.requestsInput)
+		if got != tc.want {
+			t.Errorf("pendingActionForMessage(%q, %t) = %q, want %q",
+				tc.messageType, tc.requestsInput, got, tc.want)
+		}
 	}
 }

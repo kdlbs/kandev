@@ -1,5 +1,6 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { pluginModalManager } from "@/lib/plugins/modal-manager";
 import { PluginModalHost } from "./plugin-modal-host";
 
@@ -79,5 +80,53 @@ describe("PluginModalHost", () => {
     });
 
     expect(screen.queryByTestId("modal-content")).toBeNull();
+  });
+});
+
+/**
+ * The host mounts as a sibling of `<AppShell/>` (src/main.tsx), so it is
+ * outside the app-wide `TooltipProvider` in app/layout.tsx. Without a
+ * provider of its own, a `Tooltip` anywhere in plugin modal content throws on
+ * render and the whole modal is lost to the error boundary.
+ *
+ * jsdom does not reliably open a Radix tooltip from synthetic hover (see
+ * apps/web/CLAUDE.md), so the open assertion goes through focus. Pointer
+ * hover is a Playwright concern.
+ */
+describe("PluginModalHost — tooltips in modal content", () => {
+  afterEach(() => {
+    cleanup();
+    cleanupModals("plugin-a");
+  });
+
+  function TooltipContentComponent() {
+    return (
+      <Tooltip>
+        <TooltipTrigger data-testid="tooltip-trigger">Trigger</TooltipTrigger>
+        <TooltipContent>Helpful hint</TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  it("renders modal content containing a Tooltip without throwing", () => {
+    pluginModalManager.openModal("plugin-a", {
+      title: "Tooltip Modal",
+      content: TooltipContentComponent,
+    });
+
+    render(<PluginModalHost />);
+
+    expect(screen.getByTestId("tooltip-trigger")).not.toBeNull();
+  });
+
+  it("opens the tooltip on focus, proving a TooltipProvider is in scope", async () => {
+    pluginModalManager.openModal("plugin-a", { content: TooltipContentComponent });
+
+    render(<PluginModalHost />);
+    fireEvent.focus(screen.getByTestId("tooltip-trigger"));
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Helpful hint").length).toBeGreaterThan(0);
+    });
   });
 });

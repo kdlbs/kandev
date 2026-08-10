@@ -5814,15 +5814,16 @@ func TestGetTaskSessionStatus_UsesTaskEnvironmentBranchForDocker(t *testing.T) {
 
 	now := time.Now().UTC()
 	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
-		ID:             "env1",
-		TaskID:         "task1",
-		ExecutorType:   string(models.ExecutorTypeLocalDocker),
-		WorktreePath:   "/workspace",
-		WorktreeBranch: "feature/test-task-abc",
-		WorkspacePath:  "/workspace",
-		Status:         models.TaskEnvironmentStatusReady,
-		CreatedAt:      now,
-		UpdatedAt:      now,
+		ID:            "env1",
+		TaskID:        "task1",
+		ExecutorType:  string(models.ExecutorTypeLocalDocker),
+		WorkspacePath: "/workspace",
+		Status:        models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{{
+			RepositoryID: "repo1", WorktreePath: "/workspace", WorktreeBranch: "feature/test-task-abc",
+		}},
+		CreatedAt: now,
+		UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("failed to create task environment: %v", err)
 	}
@@ -6716,14 +6717,20 @@ func TestGetTaskSessionStatus_NeedsWorkspaceRestore_TerminalWithWorktree(t *test
 
 	// Add worktree to session
 	now := time.Now().UTC()
-	if err := repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
-		ID:             "wt1",
-		SessionID:      "session1",
-		WorktreeID:     "wid1",
-		RepositoryID:   "repo1",
-		WorktreePath:   "/tmp/worktrees/session1",
-		WorktreeBranch: "feature/test",
-		CreatedAt:      now,
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env1", TaskID: "task1", ExecutorType: "worktree",
+		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	if err := repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		ID:                "wt1",
+		TaskEnvironmentID: "env1",
+		WorktreeID:        "wid1",
+		RepositoryID:      "repo1",
+		WorktreePath:      "/tmp/worktrees/session1",
+		WorktreeBranch:    "feature/test",
+		CreatedAt:         now,
 	}); err != nil {
 		t.Fatalf("failed to create worktree: %v", err)
 	}

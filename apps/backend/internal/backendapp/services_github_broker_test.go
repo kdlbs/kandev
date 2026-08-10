@@ -198,21 +198,21 @@ func TestGitHubBrokerScopeAuthorizerValidatesSessionOwnershipAndState(t *testing
 		session: &taskmodels.TaskSession{ID: "session-1", TaskID: "task-1", State: taskmodels.TaskSessionStateRunning},
 		repository: &taskmodels.Repository{
 			ID: "repository-1", WorkspaceID: "workspace-1", Provider: "github",
-			ProviderOwner: "kdlbs", ProviderName: "kandev",
+			ProviderOwner: "kdlbs", ProviderName: kandevName,
 		},
 		links: []*taskmodels.TaskRepository{{TaskID: "task-1", RepositoryID: "repository-1"}},
 	}
 	authorizer := &githubBrokerScopeAuthorizer{repo: repo}
 
 	if err := authorizer.AuthorizeGitHubRepository(
-		context.Background(), "workspace-1", "task-1", "session-1", "repository-1", "kdlbs", "kandev",
+		context.Background(), "workspace-1", "task-1", "session-1", "repository-1", "kdlbs", kandevName,
 	); err != nil {
 		t.Fatalf("AuthorizeGitHubRepository() error = %v", err)
 	}
 
 	repo.session.TaskID = "another-task"
 	if err := authorizer.AuthorizeGitHubRepository(
-		context.Background(), "workspace-1", "task-1", "session-1", "repository-1", "kdlbs", "kandev",
+		context.Background(), "workspace-1", "task-1", "session-1", "repository-1", "kdlbs", kandevName,
 	); err == nil || !strings.Contains(err.Error(), "session does not belong") {
 		t.Fatalf("session mismatch error = %v", err)
 	}
@@ -220,7 +220,7 @@ func TestGitHubBrokerScopeAuthorizerValidatesSessionOwnershipAndState(t *testing
 	repo.session.TaskID = "task-1"
 	repo.session.State = taskmodels.TaskSessionStateCompleted
 	if err := authorizer.AuthorizeGitHubRepository(
-		context.Background(), "workspace-1", "task-1", "session-1", "repository-1", "kdlbs", "kandev",
+		context.Background(), "workspace-1", "task-1", "session-1", "repository-1", "kdlbs", kandevName,
 	); err == nil || !strings.Contains(err.Error(), "session is terminal") {
 		t.Fatalf("terminal session error = %v", err)
 	}

@@ -39,6 +39,8 @@ import (
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/task/share"
 	userservice "github.com/kandev/kandev/internal/user/service"
+	utilitymodels "github.com/kandev/kandev/internal/utility/models"
+	"github.com/kandev/kandev/internal/utility/profilebinding"
 	utilityservice "github.com/kandev/kandev/internal/utility/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
@@ -65,6 +67,10 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	editorSvc := editorservice.NewService(repos.Editor, repos.Task, userSvc)
 	promptSvc := promptservice.NewService(repos.Prompts)
 	utilitySvc := utilityservice.NewService(repos.Utility)
+	utilitySvc.SetProfileResolver(profilebinding.New(repos.AgentSettings, func(agentID string) bool {
+		_, ok := agentRegistry.GetInferenceAgent(agentID)
+		return ok
+	}))
 	workflowSvc := workflowservice.NewService(repos.Workflow, log)
 	taskSvc := taskservice.NewService(
 		taskservice.Repos{
@@ -129,6 +135,9 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		githubSvc.SetPromptResolver(promptSvc)
 	}
 	gitlabSvc := initGitLabService(dbPool, eventBus, repos.Secrets, log)
+	if gitlabSvc != nil {
+		gitlabSvc.SetPromptResolver(promptSvc)
+	}
 	azureDevOpsSvc := initAzureDevOpsService(dbPool, eventBus, repos.Secrets, log)
 	if azureDevOpsSvc != nil {
 		azureDevOpsSvc.SetRepositoryLookup(&repositoryLookupAdapter{svc: taskSvc})
@@ -137,9 +146,14 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	jiraSvc := initJiraService(dbPool, eventBus, repos.Secrets, log)
 	linearSvc := initLinearService(dbPool, eventBus, repos.Secrets, log)
 	sentrySvc := initSentryService(dbPool, eventBus, repos.Secrets, log)
-	workflowSyncSvc := initWorkflowSyncService(dbPool, githubSvc, workflowSvc, taskSvc, log)
-	pluginsSvc := initPluginsService(cfg, dbPool, eventBus, repos.Secrets, log, version)
+	workflowSyncSvc := initWorkflowSyncService(dbPool, githubSvc, gitlabSvc, workflowSvc, taskSvc, log)
+	pluginsSvc := initPluginsService(cfg, dbPool, eventBus, repos.Secrets, log)
 	if pluginsSvc != nil {
+		// The ldflags-injected build version, so Install can enforce a
+		// package's manifest.min_kandev_version. This is the only production
+		// caller; without it the check stays a no-op. An un-stamped local
+		// build passes "dev", which the service treats as "don't enforce".
+		pluginsSvc.SetKandevVersion(version)
 		pluginsSvc.SetDataSources(taskSvc, taskSvc, workflowSvc, agentSettingsController, analyticsservice.New(repos.Analytics), taskSvc, pluginsTaskWriterAdapter{svc: taskSvc})
 	}
 	gitCredentialBroker := newGitCredentialBroker(githubSvc, pluginsSvc, repos.Task)
@@ -217,6 +231,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	mentionProviders := builtinMentionProviders(services, repos.Task)
 	reserveBuiltinMentionIdentities(pluginsSvc, mentionProviders)
 	mentionComponents, err := newMentionComponents(
+		log,
 		taskSvc,
 		taskSvc,
 		mentionProviders...,
@@ -621,15 +636,28 @@ func initAzureDevOpsService(
 	return svc
 }
 
-// initWorkflowSyncService wires the GitHub workflow-sync service. Failures
-// are non-fatal; the service is nil when GitHub is unavailable.
-func initWorkflowSyncService(dbPool *db.Pool, githubSvc *github.Service, workflowSvc *workflowservice.Service, taskSvc *taskservice.Service, log *logger.Logger) *workflowsync.Service {
-	if githubSvc == nil {
-		log.Warn("workflow sync disabled: GitHub service unavailable")
+// initWorkflowSyncService wires the workflow-sync service. Either integration
+// may be nil; a workspace configured for the unavailable one gets an
+// actionable failure at sync time rather than the service failing to boot.
+// Failures are non-fatal; the service is nil only if the store itself fails.
+func initWorkflowSyncService(
+	dbPool *db.Pool, githubSvc *github.Service, gitlabSvc *gitlab.Service,
+	workflowSvc *workflowservice.Service, taskSvc *taskservice.Service, log *logger.Logger,
+) *workflowsync.Service {
+	if githubSvc == nil && gitlabSvc == nil {
+		log.Warn("workflow sync disabled: no GitHub or GitLab service available")
 		return nil
 	}
 	workflowSvc.SetSyncWorkflowOps(taskSvc)
-	svc, _, err := workflowsync.Provide(dbPool.Writer(), dbPool.Reader(), githubSvc, workflowSvc, log)
+	var githubClients workflowsync.GitHubClientProvider
+	if githubSvc != nil {
+		githubClients = githubSvc
+	}
+	var gitlabClients workflowsync.GitLabClientProvider
+	if gitlabSvc != nil {
+		gitlabClients = gitlabSvc
+	}
+	svc, _, err := workflowsync.Provide(dbPool.Writer(), dbPool.Reader(), githubClients, gitlabClients, workflowSvc, log)
 	if err != nil {
 		log.Warn("workflow sync service initialization failed (non-fatal)", zap.Error(err))
 		return nil
@@ -698,33 +726,21 @@ func initPluginsService(
 	eventBus bus.EventBus,
 	secretsStore secrets.SecretStore,
 	log *logger.Logger,
-	version string,
 ) *plugins.Service {
 	svc, _, err := plugins.Provide(cfg, dbPool, secretadapter.New(secretsStore), eventBus, log)
 	if err != nil {
 		log.Warn("Plugins service initialization failed (non-fatal)", zap.Error(err))
 		return nil
 	}
-	// Plugin manifests use min_kandev_version to prevent a package from
-	// installing against a host that cannot satisfy its contract. The version
-	// is ldflags-injected at backend startup and is deliberately wired here,
-	// outside the plugins package, so that package remains independent of the
-	// executable build metadata.
-	svc.SetKandevVersion(version)
 	return svc
 }
 
-// pluginsHostUtilityAdapter adapts *hostutility.Manager to the plugins
-// package's utilityRunner interface (Host.InvokeUtilityAgent, ADR 0048),
-// returning just the response text. Lives here for the same cycle-avoidance
-// reason as the review adapter — internal/plugins must not import the agent
-// runtime.
 type pluginsHostUtilityAdapter struct {
 	mgr *hostutility.Manager
 }
 
-func (a pluginsHostUtilityAdapter) ExecutePrompt(ctx context.Context, agentType, model, mode, prompt string) (string, error) {
-	res, err := a.mgr.ExecutePrompt(ctx, agentType, model, mode, prompt)
+func (a pluginsHostUtilityAdapter) ExecuteProfilePrompt(ctx context.Context, profileID, prompt string) (string, error) {
+	res, err := a.mgr.ExecuteProfilePrompt(ctx, profileID, prompt)
 	if err != nil {
 		return "", err
 	}
@@ -732,7 +748,8 @@ func (a pluginsHostUtilityAdapter) ExecutePrompt(ctx context.Context, agentType,
 }
 
 type pluginsUtilityAgentAdapter struct {
-	svc *utilityservice.Service
+	svc     *utilityservice.Service
+	userSvc *userservice.Service
 }
 
 func (a pluginsUtilityAgentAdapter) GetAgentByID(ctx context.Context, id string) (*plugins.UtilityAgent, error) {
@@ -743,7 +760,14 @@ func (a pluginsUtilityAgentAdapter) GetAgentByID(ctx context.Context, id string)
 		}
 		return nil, err
 	}
-	return &plugins.UtilityAgent{Name: agent.Name, AgentID: agent.AgentID, Model: agent.Model, Enabled: agent.Enabled}, nil
+	profileID := agent.AgentProfileID
+	if profileID == "" && agent.ProfileBindingState == utilitymodels.ProfileBindingInherit && a.userSvc != nil {
+		profileID, err = a.userSvc.GetDefaultUtilityAgentProfileID(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &plugins.UtilityAgent{Name: agent.Name, AgentID: agent.AgentID, Model: agent.Model, AgentProfileID: profileID, ProfileBindingState: agent.ProfileBindingState, Enabled: agent.Enabled}, nil
 }
 
 // pluginsTaskWriterAdapter adapts the task service to the plugins package's
@@ -758,7 +782,7 @@ func (a pluginsUtilityAgentAdapter) GetAgentByID(ctx context.Context, id string)
 // adapter needs, so the adapter's field mapping + state validation are
 // unit-testable with a fake. *taskservice.Service satisfies it.
 type pluginTaskWriteService interface {
-	CreateTask(ctx context.Context, req *taskservice.CreateTaskRequest) (*taskmodels.Task, error)
+	CreateTask(ctx context.Context, req *taskservice.CreateTaskRequest) (taskservice.CreateTaskResult, error)
 	UpdateTask(ctx context.Context, id string, req *taskservice.UpdateTaskRequest) (*taskmodels.Task, error)
 	DeleteTask(ctx context.Context, id string) error
 }
@@ -776,7 +800,7 @@ func (a pluginsTaskWriterAdapter) CreateTask(ctx context.Context, in plugins.Tas
 	if err != nil {
 		return nil, err
 	}
-	return a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	result, err := a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID:    in.WorkspaceID,
 		WorkflowID:     in.WorkflowID,
 		WorkflowStepID: in.WorkflowStepID,
@@ -787,6 +811,10 @@ func (a pluginsTaskWriterAdapter) CreateTask(ctx context.Context, in plugins.Tas
 		Repositories:   repositories,
 		PlanMode:       in.PlanMode,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return result.Task, nil
 }
 
 func (a pluginsTaskWriterAdapter) DeleteTask(ctx context.Context, id string) error {

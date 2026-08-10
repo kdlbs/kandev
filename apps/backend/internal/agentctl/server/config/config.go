@@ -25,9 +25,15 @@ import (
 
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/pkg/agent"
+)
+
+const (
+	windowsOS  = "windows"
+	pathEnvKey = "PATH"
 )
 
 // Config is the agentctl configuration.
@@ -229,6 +235,9 @@ type InstanceConfig struct {
 
 	// McpProviders limits task-mode review automation tools to attached providers.
 	McpProviders []string
+
+	// McpProfile is the backend-owned typed MCP tool profile.
+	McpProfile *mcpprofile.Context
 
 	// AuthToken is a shared secret for authenticating requests.
 	// Inherited from the parent Config at instance creation time.
@@ -434,6 +443,10 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.McpProviders != nil {
 		cfg.McpProviders = mcpproviders.Normalize(overrides.McpProviders)
 	}
+	if overrides.McpProfile != nil {
+		profileContext := *overrides.McpProfile
+		cfg.McpProfile = &profileContext
+	}
 	if overrides.RequiresProcessKill {
 		cfg.RequiresProcessKill = true
 	}
@@ -487,6 +500,7 @@ type InstanceOverrides struct {
 	AssumeMcpHttp          bool
 	McpMode                string
 	McpProviders           []string
+	McpProfile             *mcpprofile.Context
 	RequiresProcessKill    bool
 	StripEnv               []string
 	BaseBranches           map[string]string
@@ -570,7 +584,7 @@ func CollectAgentEnvWithError(additional map[string]string) ([]string, error) {
 		return nil, fmt.Errorf("compose indexed Git config: %w", err)
 	}
 	if envMap[githubauth.CredentialBrokerURLEnv] != "" {
-		prependPathEntry(envMap, envMap[githubauth.CredentialCLIShimDirEnv])
+		prependPathEntry(envMap, envMap[githubauth.CredentialCLIShimDirEnv], runtime.GOOS == windowsOS)
 		configureGitHubCLIStartupEnv(envMap)
 	}
 
@@ -583,7 +597,7 @@ func CollectAgentEnvWithError(additional map[string]string) ([]string, error) {
 }
 
 func configureGitHubCLIStartupEnv(env map[string]string) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == windowsOS {
 		return
 	}
 	startupEnv := env[githubauth.CredentialCLIBashEnvEnv]
@@ -659,12 +673,13 @@ func isBashEnvNameByte(value byte, first bool) bool {
 	return letter || value == '_' || !first && value >= '0' && value <= '9'
 }
 
-func prependPathEntry(env map[string]string, entry string) {
+func prependPathEntry(env map[string]string, entry string, caseInsensitive bool) {
 	if entry == "" {
 		return
 	}
+	key := searchPathKey(env, caseInsensitive)
 	cleanEntry := filepath.Clean(entry)
-	parts := filepath.SplitList(env["PATH"])
+	parts := filepath.SplitList(env[key])
 	filtered := make([]string, 0, len(parts)+1)
 	filtered = append(filtered, entry)
 	for _, part := range parts {
@@ -672,7 +687,35 @@ func prependPathEntry(env map[string]string, entry string) {
 			filtered = append(filtered, part)
 		}
 	}
-	env["PATH"] = strings.Join(filtered, string(os.PathListSeparator))
+	env[key] = strings.Join(filtered, string(os.PathListSeparator))
+}
+
+// searchPathKey returns the key env already carries the executable search path
+// under. Windows inherits it as "Path" and matches variable names
+// case-insensitively, so writing "PATH" leaves the inherited entry in place and
+// adds a second variable holding only the shim directory. The agent is launched
+// through `cmd /c`, which then resolves against that variable alone and dies
+// with "'npx' is not recognized" — the shim dir is all it can see.
+//
+// Unix variable names are case-sensitive, so a "Path" there is a genuinely
+// different variable and must not be mistaken for the search path; the fold is
+// gated on caseInsensitive, matching how environmentValue in
+// internal/tools/installer scopes the same lookup to Windows. The flag is a
+// parameter rather than a runtime.GOOS read inside so the Windows branch stays
+// testable on every runner. An exact "PATH" always wins, so a caller-supplied
+// key still takes precedence over an inherited case variant.
+func searchPathKey(env map[string]string, caseInsensitive bool) string {
+	if _, ok := env[pathEnvKey]; ok {
+		return pathEnvKey
+	}
+	if caseInsensitive {
+		for key := range env {
+			if strings.EqualFold(key, pathEnvKey) {
+				return key
+			}
+		}
+	}
+	return pathEnvKey
 }
 
 func envBool(env []string, key string) bool {

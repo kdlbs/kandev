@@ -50,6 +50,7 @@ export type KanbanState = {
     workflowStepId: string;
     title: string;
     description?: string;
+    autopilot?: boolean;
     position: number;
     state?: TaskStatus;
     /** Primary repository id (lowest position). Kept for backwards compat. */
@@ -101,6 +102,7 @@ export type KanbanState = {
     queuedAt?: string;
     isPRReview?: boolean;
     isIssueWatch?: boolean;
+    metadata?: Record<string, unknown> | null;
     isArchived?: boolean;
     issueUrl?: string;
     issueNumber?: number;
@@ -136,6 +138,7 @@ export type WorkflowsState = {
     workspaceId: string;
     name: string;
     description?: string | null;
+    prompt?: string;
     sortOrder?: number;
     agent_profile_id?: string;
     hidden?: boolean;

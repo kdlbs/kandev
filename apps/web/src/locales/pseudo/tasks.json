@@ -10,6 +10,10 @@
   "columnWorkflow": "Ŵōŕķƒĺōŵ",
   "delete": "Ďēĺēţē",
   "deleteTask": "Ďēĺēţē ţàśķ",
+  "failedToArchiveTask": "Ƒàĩĺēď ţō àŕćĥĩvē ţàśķ",
+  "failedToDeleteTask": "Ƒàĩĺēď ţō ďēĺēţē ţàśķ",
+  "failedToLoadTasks": "Ƒàĩĺēď ţō ĺōàď ţàśķś",
+  "failedToUnarchiveTask": "Ƒàĩĺēď ţō ũńàŕćĥĩvē ţàśķ",
   "goToFirstPage": "Ĝō ţō ƒĩŕśţ ƥàĝē",
   "goToLastPage": "Ĝō ţō ĺàśţ ƥàĝē",
   "goToNextPage": "Ĝō ţō ńēxţ ƥàĝē",
@@ -39,6 +43,12 @@
   "sortTitleZA": "Ţĩţĺē Ź-À",
   "sortUpdatedNewest": "Ũƥďàţēď ńēŵēśţ",
   "sortUpdatedOldest": "Ũƥďàţēď ōĺďēśţ",
+  "taskArchived": "Ţàśķ àŕćĥĩvēď",
+  "taskArchivedDescription": "Ţĥē ţàśķ ĥàś ƀēēń àŕćĥĩvēď śũććēśśƒũĺĺŷ.",
+  "taskUnarchived": "Ţàśķ ũńàŕćĥĩvēď",
   "unarchive": "Ũńàŕćĥĩvē",
+  "unarchivedBranchesMissing_one": "Ɓŕàńćĥ {{branches}} ńō ĺōńĝēŕ ēxĩśţś ĺōćàĺĺŷ ōŕ ōń ţĥē ŕēḿōţē — ţĥē ńēxţ śēśśĩōń śţàŕţś ƒŕēśĥ ƒŕōḿ ţĥē ƀàśē ƀŕàńćĥ.",
+  "unarchivedBranchesMissing_other": "Ɓŕàńćĥēś {{branches}} ńō ĺōńĝēŕ ēxĩśţ ĺōćàĺĺŷ ōŕ ōń ţĥē ŕēḿōţē — ţĥē ńēxţ śēśśĩōń śţàŕţś ƒŕēśĥ ƒŕōḿ ţĥē ƀàśē ƀŕàńćĥ.",
+  "unarchivedTaskRestored": "Ţĥē ţàśķ ĥàś ƀēēń ŕēśţōŕēď.",
   "unarchiveTask": "Ũńàŕćĥĩvē ţàśķ"
 }

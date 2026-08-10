@@ -69,6 +69,7 @@ func BuildFromAuthoritative(input RebuildInput) TaskStatusSummary {
 	state := &projectionState{
 		sessions:           make(map[string]sessionObservation, len(input.Sessions)),
 		pending:            make(map[string]string, len(input.PendingActions)),
+		pendingRequests:    make(map[string]pendingRequestIdentity),
 		errors:             make(map[string]*ActiveErrorSummary),
 		clearedErrorStamps: make(map[string]string),
 		git:                make(map[string]GitSummary, len(input.Git)),

@@ -47,11 +47,63 @@ func TestApplySessionModel_UsesConfigOptionWhenSessionAdvertisesModelOption(t *t
 	}
 }
 
+func TestApplySessionModelWithConfigOptions_ReturnsProviderSnapshot(t *testing.T) {
+	t.Parallel()
+
+	modelCat := acp.SessionConfigOptionCategoryModel
+	effortCat := acp.SessionConfigOptionCategory("reasoning_effort")
+	configOptions := []acp.SessionConfigOption{
+		{Select: &acp.SessionConfigOptionSelect{
+			Id:       "model",
+			Category: &modelCat,
+			Type:     "select",
+		}},
+		{Select: &acp.SessionConfigOptionSelect{
+			Id:       "reasoning_effort",
+			Category: &effortCat,
+			Type:     "select",
+		}},
+	}
+	conn := &fakeModelConnWithConfig{configOptions: configOptions}
+
+	method, got, err := applySessionModelWithConfigOptions(
+		context.Background(), conn, "sess-1", "model-with-effort", []acp.SessionConfigOption{
+			{Select: &acp.SessionConfigOptionSelect{
+				Id:       "model",
+				Category: &modelCat,
+				Type:     "select",
+			}},
+		},
+	)
+
+	if err != nil {
+		t.Fatalf("applySessionModelWithConfigOptions() error = %v", err)
+	}
+	if method != "session/set_config_option" {
+		t.Fatalf("method = %q, want session/set_config_option", method)
+	}
+	if !reflect.DeepEqual(got, configOptions) {
+		t.Fatalf("config options = %#v, want %#v", got, configOptions)
+	}
+}
+
+type fakeModelConnWithConfig struct {
+	configOptions []acp.SessionConfigOption
+}
+
+func (f *fakeModelConnWithConfig) SetSessionConfigOption(_ context.Context, _ acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
+	return acp.SetSessionConfigOptionResponse{ConfigOptions: f.configOptions}, nil
+}
+
+func (f *fakeModelConnWithConfig) UnstableSetSessionModel(_ context.Context, _ acp.UnstableSetSessionModelRequest) (acp.UnstableSetSessionModelResponse, error) {
+	return acp.UnstableSetSessionModelResponse{}, nil
+}
+
 func TestApplySessionConfigOptions_SortsAndAppliesValues(t *testing.T) {
 	t.Parallel()
 
 	conn := &fakeModelConn{}
-	err := applySessionConfigOptions(context.Background(), conn, "sess-1", map[string]string{
+	_, err := applySessionConfigOptions(context.Background(), conn, "sess-1", map[string]string{
 		"fast":   "true",
 		"effort": "high",
 	})

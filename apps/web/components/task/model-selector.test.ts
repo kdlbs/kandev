@@ -4,7 +4,13 @@ import {
   type ModelSelectorOption,
   usableConfigOptions,
 } from "@/components/model-config-selector";
-import { hasCompleteDynamicConfig, requiredConfigKeys } from "@/components/task/model-selector";
+import {
+  annotateFallbackOptions,
+  buildModelOptions,
+  hasCompleteDynamicConfig,
+  requiredConfigKeys,
+} from "@/components/task/model-selector";
+import { t } from "@/lib/i18n";
 import type { Agent, TaskSession } from "@/lib/types/http";
 import type {
   ConfigOptionEntry,
@@ -277,5 +283,64 @@ describe("hasCompleteDynamicConfig", () => {
 
   it("is hydrated when there are no required config keys", () => {
     expect(hasCompleteDynamicConfig(makeSession(), undefined, noAgents)).toBe(true);
+  });
+});
+
+describe("buildModelOptions (gone current model)", () => {
+  it("keeps a configured-but-unadvertised model visible and disabled with a translated reason", () => {
+    const options = buildModelOptions([{ id: "gpt-5", name: "GPT-5" }], "claude-gone");
+    expect(options).toHaveLength(2);
+    const gone = options[0];
+    expect(gone.id).toBe("claude-gone");
+    expect(gone.disabled).toBe(true);
+    expect(gone.disabledReason).toBe(t("settings:startModelUnavailable"));
+  });
+
+  it("does not duplicate the current model when it is still advertised", () => {
+    const options = buildModelOptions([{ id: "gpt-5", name: "GPT-5" }], "gpt-5");
+    expect(options).toHaveLength(1);
+    expect(options[0].disabled).toBeUndefined();
+  });
+});
+
+describe("annotateFallbackOptions", () => {
+  const fallbackSuffix = t("settings:modelFallbackSuffix");
+  const modelId = "gpt-5";
+  const modelName = "GPT-5";
+  const fallbackId = "gpt-5-mini";
+  const fallbackName = "GPT-5-Mini";
+  const base = [
+    { id: modelId, name: modelName },
+    { id: fallbackId, name: fallbackName },
+  ];
+
+  it("returns the same array when no fallback is active (clears stale markers)", () => {
+    expect(annotateFallbackOptions(base, undefined)).toBe(base);
+    expect(annotateFallbackOptions(base, "")).toBe(base);
+  });
+
+  it("annotates only the fallback option with the localized suffix", () => {
+    const annotated = annotateFallbackOptions(base, fallbackId);
+    expect(annotated[0]).toBe(base[0]);
+    expect(annotated[1]).not.toBe(base[1]);
+    expect(annotated[1].name).toBe(`${fallbackName} ${fallbackSuffix}`);
+    expect(annotated[1].id).toBe(fallbackId);
+  });
+
+  it("preserves immutability of source options", () => {
+    const annotated = annotateFallbackOptions(base, modelId);
+    expect(base[0].name).toBe(modelName);
+    expect(annotated[0].name).toBe(`${modelName} ${fallbackSuffix}`);
+    // The source array and its objects are untouched.
+    expect(base).toEqual([
+      { id: modelId, name: modelName },
+      { id: fallbackId, name: fallbackName },
+    ]);
+  });
+
+  it("does not double-append the suffix (idempotent)", () => {
+    const once = annotateFallbackOptions(base, modelId);
+    const twice = annotateFallbackOptions(once, modelId);
+    expect(twice[0].name).toBe(`${modelName} ${fallbackSuffix}`);
   });
 });

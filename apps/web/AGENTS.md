@@ -72,9 +72,7 @@ lib/api/domains/                    # API clients
 - `tasks.activeTaskId`, `tasks.activeSessionId`, `workspaces.activeId`
 - `repositories.byWorkspace`, `repositoryBranches.byRepository`
 
-Quick Chat stores server conversations in `quickChat.sessions` and browser-local terminals in
-`quickChat.terminalTabs`; `activeKind` and terminal IDs track selection. `quick-terminal-actions.ts`
-owns lifecycle/fallback; terminal descriptors never enter conversation APIs or get lost in reconciliation.
+Quick Chat stores server conversations in `quickChat.sessions` and browser-local terminals in `quickChat.terminalTabs`; `activeKind` and terminal IDs track selection. `quick-terminal-actions.ts` owns lifecycle/fallback; terminal descriptors never enter conversation APIs or get lost in reconciliation.
 
 **Hydration:** Go injects `window.__KANDEV_BOOT_PAYLOAD__` into the SPA shell before React mounts. `lib/state/hydration/merge-strategies.ts` has `deepMerge()`, `mergeSessionMap()`, `mergeLoadingState()` to avoid overwriting live client state. Pass `activeSessionId` to protect active sessions.
 
@@ -213,8 +211,10 @@ surface.
 
 ## Internationalization (i18n)
 
-The migration is incremental, but new user-facing copy always uses `t()` or
-`<Trans>`, even in directories not fully migrated.
+**Externalization is complete.** #2367 localized `app/office`, the last
+un-migrated area. A hardcoded user-facing literal is now a regression, not
+leftover migration work. New copy must go through `t()` / `<Trans>` wherever you
+write it.
 
 Add English keys to `src/locales/en/<namespace>.json`; use `useTranslation()` in
 components and module-level `t` only inside plain helper calls. `<Trans>` is only
@@ -229,8 +229,15 @@ Use i18next `_one`/`_other` plural keys; never build English suffixes locally.
 
 Never capture `t()` in a module-level constant; it freezes the boot locale.
 
-`pnpm lint` guards paths in `i18nGuardFiles`; append coverage when migrating a
-directory and never remove entries to pass CI. Preview with `pnpm run lint:i18n`.
+`pnpm lint` fails on hardcoded UI strings (`i18next/no-literal-string` is an
+**error**), but **only on the `i18nGuardFiles` allowlist** in
+`eslint.i18n.options.mjs`, which covers every area the migration touched. It
+stays an allowlist because a repo-wide error breaks every unrelated PR that adds
+a label — what made the first attempt unmergeable. **Append a path in the same PR
+that adds it or externalizes it** (`lib/sidebar` is one still off the list).
+Never delete an entry to make a build pass; `check-guard-allowlist.mjs` rejects
+that unless the file is gone. Use `pnpm run lint:i18n <path>` to preview the
+guard on a path not yet on the list.
 
 `pnpm run i18n:ratchet` guards all new/changed lines independently of that
 allowlist; untouched literals are not reported.
@@ -277,7 +284,7 @@ plugin leaks a stale registration.
   (`session-mobile-bottom-nav.tsx`) with `presentation: "mobile"`.
 - **Kanban card contributions:** `registerTaskMenuAction({ group: "edit", ... })` turns the flat
   `Edit` item into an `Edit` submenu (`kanban-card-edit-submenu.tsx`);
-  `registerComponent("task-card-indicators", ...)` renders beside `PRTaskIcon` via `<PluginSlot/>`.
+  `registerComponent("task-card-indicators", ...)` renders beside `PRTaskIcon` via `<PluginSlot/>`; `task-card-tags` renders in its own row below the badges (for contributions too wide for the title-row indicators spot, e.g. tag chips).
 - **`host.storage`:** authenticated per-user key/value storage (`lib/plugins/host-api.ts`), backed by
   `/api/plugins/{id}/user-state/...` (`docs/decisions/2026-08-01-per-user-plugin-storage.md`).
   `subscribe` (`lib/plugins/user-state-sync.ts`) wraps `registerWsHandler` with own-plugin filtering

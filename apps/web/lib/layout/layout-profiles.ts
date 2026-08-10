@@ -16,34 +16,69 @@ export type BuiltInLayoutProfileId = Exclude<BuiltInPreset, "compact">;
 
 export type BuiltInLayoutProfileDescriptor = {
   id: BuiltInLayoutProfileId;
+  /** Canonical English; persisted into a saved override. Not for display. */
   name: string;
+  /** Catalog key the settings list renders. Absent for product names. */
+  nameKey?: string;
   description: string;
+  descriptionKey?: string;
 };
+
+/**
+ * Display name for a built-in profile, in the active locale.
+ *
+ * `descriptor.name` is the canonical English value `upsertBuiltInLayoutOverride`
+ * persists; every surface that shows the name to a user goes through here so the
+ * two cannot drift.
+ */
+export function builtInLayoutProfileName(
+  descriptor: Pick<BuiltInLayoutProfileDescriptor, "name" | "nameKey">,
+  translate: (key: string) => string,
+): string {
+  return descriptor.nameKey ? translate(descriptor.nameKey) : descriptor.name;
+}
 
 export type BuiltInLayoutProfile = BuiltInLayoutProfileDescriptor & {
   layout: LayoutState;
 };
 
+/**
+ * `name` is BOTH display copy and persisted data: `upsertBuiltInLayoutOverride`
+ * copies it into the saved record the first time a built-in is customized. It
+ * therefore stays canonical English, and `nameKey`/`descriptionKey` are what the
+ * settings list renders — the same split the dockview panel registry uses. A
+ * translated `name` here would write the current locale into a user's saved
+ * layouts and leave it there after a switch.
+ *
+ * "VS Code" is a product name and so has no `nameKey`.
+ */
 export const BUILT_IN_LAYOUT_PROFILES: readonly BuiltInLayoutProfileDescriptor[] = [
   {
     id: "default",
     name: "Default",
+    nameKey: "settings:layoutProfileDefault",
     description: "Agent with Files, Changes, and Terminal",
+    descriptionKey: "settings:layoutProfileDefaultDescription",
   },
   {
     id: "plan",
     name: "Plan Mode",
+    nameKey: "settings:layoutProfilePlanMode",
     description: "Agent and Plan side by side",
+    descriptionKey: "settings:layoutProfilePlanModeDescription",
   },
   {
     id: "preview",
     name: "Preview Mode",
+    nameKey: "settings:layoutProfilePreviewMode",
     description: "Agent and Browser side by side",
+    descriptionKey: "settings:layoutProfilePreviewModeDescription",
   },
   {
     id: "vscode",
     name: "VS Code",
     description: "Agent and VS Code side by side",
+    descriptionKey: "settings:layoutProfileVsCodeDescription",
   },
 ];
 

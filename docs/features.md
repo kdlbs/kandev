@@ -19,7 +19,7 @@ This page expands the short feature list in the README without turning the READM
 - **ACP agents:** Kandev supports ACP-native and ACP-adapter agents such as Claude Code, Codex, GitHub Copilot, Gemini CLI, Amp, Auggie, OpenCode, Cursor, Qwen, Factory Droid, iFlow, Kilocode, Pi, Kimi, Kiro, Qoder, Trae, Oh My Pi, Grok, and Hermes.
 - **Bring-your-own TUI agents:** any agent CLI can run in a PTY terminal through CLI passthrough, even without ACP support.
 - **Voice mode:** dictate chat prompts from the composer. Supported engines include browser Web Speech, local in-browser Whisper Web, and server-side Whisper. Settings include language, click-to-toggle or hold-to-talk activation, auto-send, Whisper model size, and keyboard shortcut.
-- **Utility agents:** one-shot helpers can generate or improve prompt text, branch names, commit messages, commit descriptions, PR titles, PR descriptions, and session summaries. Users can choose a default model, override models per action, and add custom utility agents.
+- **Utility agents:** one-shot helpers can generate or improve prompt text, branch names, commit messages, commit descriptions, PR titles, PR descriptions, and session summaries. Users choose a default agent profile, override profiles per action, and add custom utility agents. Profiles own launch settings and unattended permission behavior.
 - **Custom prompts:** reusable prompts can be created in settings and invoked from chat.
 - **Secrets:** named secrets can be stored once and reused by profiles or integrations without pasting values into every task.
 

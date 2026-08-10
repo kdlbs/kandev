@@ -13,6 +13,7 @@ const mockRequest = vi.fn();
 const mockRemoveTaskSession = vi.fn();
 const mockSetActiveSessionAuto = vi.fn();
 const mockClearActiveSession = vi.fn();
+const networkErrorMessage = "network down";
 
 let mockState: Record<string, unknown> = {};
 
@@ -117,7 +118,7 @@ describe("useSessionActions", () => {
   });
 
   it("remove no-ops when WS request fails (store untouched)", async () => {
-    mockRequest.mockRejectedValueOnce(new Error("network down"));
+    mockRequest.mockRejectedValueOnce(new Error(networkErrorMessage));
     const onDeleted = vi.fn();
     const { result } = renderHook(() =>
       useSessionActions({ sessionId: "s1", taskId: "t1", onDeleted }),
@@ -172,6 +173,36 @@ describe("useSessionActions", () => {
   });
 });
 
+describe("useSessionActions primary feedback", () => {
+  beforeEach(resetSessionActionMocks);
+
+  it("setPrimary succeeds without progress or success toasts", async () => {
+    const { result } = renderHook(() => useSessionActions({ sessionId: "s1", taskId: "t1" }));
+
+    const ok = await result.current.setPrimary();
+
+    expect(ok).toBe(true);
+    expect(mockToast).not.toHaveBeenCalled();
+    expect(mockUpdateToast).not.toHaveBeenCalled();
+  });
+
+  it("setPrimary shows one error toast when the request fails", async () => {
+    mockRequest.mockRejectedValueOnce(new Error(networkErrorMessage));
+    const { result } = renderHook(() => useSessionActions({ sessionId: "s1", taskId: "t1" }));
+
+    const ok = await result.current.setPrimary();
+
+    expect(ok).toBe(false);
+    expect(mockToast).toHaveBeenCalledTimes(1);
+    expect(mockToast).toHaveBeenCalledWith({
+      title: "Set primary failed",
+      description: networkErrorMessage,
+      variant: "error",
+    });
+    expect(mockUpdateToast).not.toHaveBeenCalled();
+  });
+});
+
 describe("useSessionActions inline feedback", () => {
   beforeEach(resetSessionActionMocks);
 
@@ -186,7 +217,7 @@ describe("useSessionActions inline feedback", () => {
   });
 
   it("shows one error toast when deletion fails", async () => {
-    mockRequest.mockRejectedValueOnce(new Error("network down"));
+    mockRequest.mockRejectedValueOnce(new Error(networkErrorMessage));
     const { result } = renderHook(() => useSessionActions({ sessionId: "s1", taskId: "t1" }));
 
     const ok = await result.current.remove({ feedback: "inline" });
@@ -195,7 +226,7 @@ describe("useSessionActions inline feedback", () => {
     expect(mockToast).toHaveBeenCalledTimes(1);
     expect(mockToast).toHaveBeenCalledWith({
       title: "Deleting session failed",
-      description: "network down",
+      description: networkErrorMessage,
       variant: "error",
     });
     expect(mockUpdateToast).not.toHaveBeenCalled();

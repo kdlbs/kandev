@@ -4,7 +4,6 @@ import {
   getPRAggregateStatusColor,
   areAllOpenPRsReadyToMerge,
   getPRStatusColor,
-  getPRTooltip,
   isPRAwaitingReview,
   isPRReadyToMerge,
   isPRWaitingOnBranchProtection,
@@ -655,35 +654,5 @@ describe("pickDefaultPR", () => {
     const merged = makePR({ id: "merged", state: "merged" });
     const closed = makePR({ id: "closed", state: "closed" });
     expect(pickDefaultPR([merged, closed])?.id).toBe("merged");
-  });
-});
-
-describe("getPRTooltip", () => {
-  it("includes 'Ready to merge' when ready", () => {
-    const pr = makePR({
-      state: "open",
-      review_state: "approved",
-      checks_state: "success",
-      mergeable_state: "clean",
-    });
-    expect(getPRTooltip(pr)).toContain("Ready to merge");
-  });
-
-  it("includes 'Mergeable: blocked' when blocked", () => {
-    const pr = makePR({
-      state: "open",
-      review_state: "approved",
-      checks_state: "success",
-      mergeable_state: "blocked",
-    });
-    expect(getPRTooltip(pr)).toContain("Mergeable: blocked");
-    expect(getPRTooltip(pr)).not.toContain("Ready to merge");
-  });
-
-  it("omits mergeable when state is empty or unknown", () => {
-    const empty = makePR({ state: "open", mergeable_state: "" });
-    const unknown = makePR({ state: "open", mergeable_state: "unknown" });
-    expect(getPRTooltip(empty)).not.toContain("Mergeable:");
-    expect(getPRTooltip(unknown)).not.toContain("Mergeable:");
   });
 });

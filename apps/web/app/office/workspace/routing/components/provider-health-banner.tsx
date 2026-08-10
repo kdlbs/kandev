@@ -17,6 +17,7 @@ type Props = {
 // record keys are the wire `ProviderHealth["state"]` values.
 const STATE_BADGE: Record<ProviderHealth["state"], { labelKey: string; variant: BadgeVariant }> = {
   healthy: { labelKey: "office:healthy", variant: "outline" },
+  short_retry: { labelKey: "office:shortRetry", variant: "outline" },
   degraded: { labelKey: "office:degraded", variant: "destructive" },
   user_action_required: { labelKey: "office:needsAction", variant: "destructive" },
 };

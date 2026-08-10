@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -94,6 +95,7 @@ type Server struct {
 	disableAskQuestion bool
 	mode               string // "task" (default), "task-title-pending", "config", or "office"
 	mcpProviders       []string
+	profile            mcpprofile.Context
 	mcpServer          *server.MCPServer
 	sseServer          *server.SSEServer
 	httpServer         *server.StreamableHTTPServer
@@ -117,7 +119,7 @@ func New(backend BackendClient, sessionID, taskID string, port int, log *logger.
 	if len(mcpProviders) > 0 {
 		providers = mcpProviders[0]
 	}
-	s := newServer(backend, sessionID, taskID, log, mcpLogFile, disableAskQuestion, mcpMode, providers)
+	s := newServerWithProfile(backend, sessionID, taskID, log, mcpLogFile, mcpprofile.Legacy(mcpMode, disableAskQuestion, providers))
 
 	// Create SSE server for Claude Desktop, Cursor, etc.
 	// WithBaseURL ensures the SSE endpoint event includes the full message URL
@@ -134,12 +136,30 @@ func New(backend BackendClient, sessionID, taskID string, port int, log *logger.
 	return s
 }
 
+// NewWithProfile creates an MCP server from the backend-owned typed profile.
+// The profile keeps base surfaces and additive capability groups separate so
+// callers can add or remove one context-specific group without copying a full
+// mode branch.
+func NewWithProfile(backend BackendClient, sessionID, taskID string, port int, log *logger.Logger, mcpLogFile string, disableAskQuestion bool, profileContext mcpprofile.Context) *Server {
+	if disableAskQuestion {
+		profileContext = profileContext.WithoutCapability(mcpprofile.CapabilityUserQuestion)
+	}
+	s := newServerWithProfile(backend, sessionID, taskID, log, mcpLogFile, profileContext)
+	s.sseServer = server.NewSSEServer(s.mcpServer,
+		server.WithBaseURL(fmt.Sprintf("http://localhost:%d", port)),
+	)
+	s.httpServer = server.NewStreamableHTTPServer(s.mcpServer,
+		server.WithEndpointPath("/mcp"),
+	)
+	return s
+}
+
 // NewExternal creates an MCP server for the Kandev backend's external endpoint.
 // External coding agents (Claude Code, Cursor, etc.) connect here to manage Kandev
 // configuration and create tasks. Routes are mounted under /mcp on the backend.
 func NewExternal(backend BackendClient, log *logger.Logger, mcpLogFile string) *Server {
 	// External mode has no live session, so disable ask-question and use empty IDs.
-	s := newServer(backend, "", "", log, mcpLogFile, true, ModeExternal, nil)
+	s := newServerWithProfile(backend, "", "", log, mcpLogFile, mcpprofile.Legacy(ModeExternal, true, nil))
 
 	// SSE handlers are mounted at /mcp/sse and /mcp/message — the static base path
 	// makes the SSE endpoint event emit /mcp/message. Keeping the message endpoint
@@ -162,14 +182,19 @@ func NewExternal(backend BackendClient, log *logger.Logger, mcpLogFile string) *
 // Callers are responsible for constructing sseServer and httpServer with the
 // transport configuration appropriate for their hosting environment.
 func newServer(backend BackendClient, sessionID, taskID string, log *logger.Logger, mcpLogFile string, disableAskQuestion bool, mcpMode string, mcpProviders []string) *Server {
-	mcpMode = normalizeMode(mcpMode)
+	return newServerWithProfile(backend, sessionID, taskID, log, mcpLogFile, mcpprofile.Legacy(mcpMode, disableAskQuestion, mcpProviders))
+}
+
+func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *logger.Logger, mcpLogFile string, profileContext mcpprofile.Context) *Server {
+	profileContext = mcpprofile.New(profileContext.Surface, profileContext.Capabilities, profileContext.Providers)
 	s := &Server{
 		backend:            backend,
 		sessionID:          sessionID,
 		taskID:             taskID,
-		disableAskQuestion: disableAskQuestion,
-		mode:               mcpMode,
-		mcpProviders:       mcpproviders.Normalize(mcpProviders),
+		disableAskQuestion: !profileContext.HasCapability(mcpprofile.CapabilityUserQuestion),
+		mode:               modeForProfile(profileContext),
+		mcpProviders:       mcpproviders.Normalize(profileContext.Providers),
+		profile:            profileContext,
 		logger:             log.WithFields(zap.String("component", "mcp-server")),
 		attachmentAttempts: make(map[string]streams.MCPAttachmentAttempt),
 	}
@@ -216,6 +241,24 @@ func newServer(backend BackendClient, sessionID, taskID string, log *logger.Logg
 	s.registerTools()
 	s.running = true
 	return s
+}
+
+func modeForProfile(profileContext mcpprofile.Context) string {
+	switch profileContext.Surface {
+	case mcpprofile.SurfaceConfiguration:
+		return ModeConfig
+	case mcpprofile.SurfaceExternal:
+		return ModeExternal
+	case mcpprofile.SurfaceOfficeTask:
+		return ModeOffice
+	case mcpprofile.SurfaceKanbanTask:
+		if profileContext.HasCapability(mcpprofile.CapabilityTaskTitle) {
+			return ModeTaskTitlePending
+		}
+		return ModeTask
+	default:
+		return ModeTask
+	}
 }
 
 // SetAttachmentReporter routes safe MCP observations to the instance's
@@ -439,7 +482,26 @@ func (s *Server) SetMode(mode string) {
 		return
 	}
 	s.mode = normalizedMode
+	s.profile = mcpprofile.New(surfaceForMode(normalizedMode), s.profile.Capabilities, s.mcpProviders)
+	if normalizedMode == ModeTaskTitlePending {
+		s.profile = s.profile.WithCapability(mcpprofile.CapabilityTaskTitle)
+	} else {
+		s.profile = s.profile.WithoutCapability(mcpprofile.CapabilityTaskTitle)
+	}
 	s.rebuildTools()
+}
+
+func surfaceForMode(mode string) mcpprofile.Surface {
+	switch mode {
+	case ModeConfig:
+		return mcpprofile.SurfaceConfiguration
+	case ModeExternal:
+		return mcpprofile.SurfaceExternal
+	case ModeOffice:
+		return mcpprofile.SurfaceOfficeTask
+	default:
+		return mcpprofile.SurfaceKanbanTask
+	}
 }
 
 // SetProviders replaces the provider capabilities advertised by task mode.
@@ -453,7 +515,50 @@ func (s *Server) SetProviders(providerValues []string) {
 		return
 	}
 	s.mcpProviders = normalizedProviders
+	s.profile.Providers = normalizedProviders
 	s.rebuildTools()
+}
+
+// Profile returns a copy of the effective backend-owned MCP profile.
+func (s *Server) Profile() mcpprofile.Context {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return mcpprofile.New(s.profile.Surface, s.profile.Capabilities, s.profile.Providers)
+}
+
+// SetProfile replaces the complete profile and rebuilds the tool registry in
+// one atomic operation. This is the preferred runtime update seam. Legacy
+// SetMode and SetProviders remain available for older agentctl callers.
+func (s *Server) SetProfile(profileContext mcpprofile.Context) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	profileContext = mcpprofile.New(profileContext.Surface, profileContext.Capabilities, profileContext.Providers)
+	if sameProfile(s.profile, profileContext) {
+		return
+	}
+	s.profile = profileContext
+	s.mode = modeForProfile(profileContext)
+	s.disableAskQuestion = !profileContext.HasCapability(mcpprofile.CapabilityUserQuestion)
+	s.mcpProviders = mcpproviders.Normalize(profileContext.Providers)
+	s.rebuildTools()
+}
+
+func sameProfile(left, right mcpprofile.Context) bool {
+	if left.Surface != right.Surface || len(left.Capabilities) != len(right.Capabilities) || len(left.Providers) != len(right.Providers) {
+		return false
+	}
+	for i := range left.Capabilities {
+		if left.Capabilities[i] != right.Capabilities[i] {
+			return false
+		}
+	}
+	for i := range left.Providers {
+		if left.Providers[i] != right.Providers[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) rebuildTools() {
@@ -495,109 +600,76 @@ func (s *Server) assembleTools() []server.ServerTool {
 	return tools
 }
 
-// registerTools registers MCP tools based on the server mode.
+type profileToolGroup struct {
+	name     string
+	enabled  func(mcpprofile.Context) bool
+	register func(*Server)
+}
+
+func surfaceEnabled(surface mcpprofile.Surface) func(mcpprofile.Context) bool {
+	return func(ctx mcpprofile.Context) bool { return ctx.Surface == surface }
+}
+
+func capabilityEnabled(capability mcpprofile.Capability) func(mcpprofile.Context) bool {
+	return func(ctx mcpprofile.Context) bool { return ctx.HasCapability(capability) }
+}
+
+func andProfilePredicates(predicates ...func(mcpprofile.Context) bool) func(mcpprofile.Context) bool {
+	return func(ctx mcpprofile.Context) bool {
+		for _, predicate := range predicates {
+			if !predicate(ctx) {
+				return false
+			}
+		}
+		return true
+	}
+}
+
+func (s *Server) profileToolGroups() []profileToolGroup {
+	config := surfaceEnabled(mcpprofile.SurfaceConfiguration)
+	external := surfaceEnabled(mcpprofile.SurfaceExternal)
+	office := surfaceEnabled(mcpprofile.SurfaceOfficeTask)
+	kanban := surfaceEnabled(mcpprofile.SurfaceKanbanTask)
+	return []profileToolGroup{
+		{name: "configuration-workflows", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigWorkflowTools() }},
+		{name: "configuration-agents", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigAgentTools() }},
+		{name: "configuration-mcp", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigMcpTools() }},
+		{name: "configuration-executors", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigExecutorTools() }},
+		{name: "configuration-tasks", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigTaskTools() }},
+		{name: "external-create-task", enabled: external, register: func(s *Server) { s.registerCreateTaskTool() }},
+		{name: "kanban-task", enabled: kanban, register: func(s *Server) { s.registerKanbanTools() }},
+		{name: "github-pr", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool { return mcpproviders.Contains(ctx.Providers, mcpproviders.GitHub) }), register: func(s *Server) { s.registerPRAutomationTools() }},
+		{name: "gitlab-mr", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool { return mcpproviders.Contains(ctx.Providers, mcpproviders.GitLab) }), register: func(s *Server) { s.registerMRAutomationTools() }},
+		{name: "user-question", enabled: capabilityEnabled(mcpprofile.CapabilityUserQuestion), register: func(s *Server) { s.registerInteractionTools() }},
+		{name: "parent-question", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityParentQuestion)), register: func(s *Server) { s.registerParentQuestionTool() }},
+		{name: "plan", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerPlanTools() }},
+		{name: "walkthrough", enabled: kanban, register: func(s *Server) { s.registerWalkthroughTools() }},
+		{name: "review", enabled: kanban, register: func(s *Server) { s.registerReviewTools() }},
+		{name: "related-tasks", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerRelatedTasksTool() }},
+		{name: "office-documents", enabled: office, register: func(s *Server) { s.registerTaskDocumentTools() }},
+		{name: "task-branch-sources", enabled: kanban, register: func(s *Server) {
+			s.registerAddBranchToTaskTool()
+			s.registerAddWorkspaceSourcesTool()
+			s.registerUpdateRepositoryBaseBranchTool()
+		}},
+		{name: "step-completion", enabled: kanban, register: func(s *Server) { s.registerStepCompleteTool() }},
+		{name: "task-title", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityTaskTitle)), register: func(s *Server) { s.registerSetTaskTitleTool() }},
+		{name: "diagnostics", enabled: kanban, register: func(s *Server) { s.registerDiagnosticBundleTool() }},
+	}
+}
+
+// registerTools registers MCP tools from the declarative profile registry.
+// Each group owns one additive capability or base surface. The registry is
+// backend-owned: an agent receives the result, not an arbitrary tool list.
 func (s *Server) registerTools() {
-	count := 0
-	switch s.mode {
-	case ModeConfig:
-		s.registerConfigWorkflowTools()
-		count += 12
-		s.registerConfigAgentTools()
-		count += 4
-		s.registerConfigMcpTools()
-		count += 4
-		s.registerConfigExecutorTools()
-		count += 5
-		s.registerConfigTaskTools()
-		count += 6
-		if !s.disableAskQuestion {
-			s.registerInteractionTools()
-			count++
+	for _, group := range s.profileToolGroups() {
+		if group.enabled(s.profile) {
+			group.register(s)
 		}
-	case ModeExternal:
-		// External coding agents get config tools plus create_task_kandev so
-		// they can both manage Kandev configuration and spawn new tasks.
-		// No interaction or plan tools (no live session to attach them to).
-		s.registerConfigWorkflowTools()
-		count += 12
-		s.registerConfigAgentTools()
-		count += 4
-		s.registerConfigMcpTools()
-		count += 4
-		s.registerConfigExecutorTools()
-		count += 5
-		s.registerConfigTaskTools()
-		count += 6
-		s.registerCreateTaskTool()
-		count++
-	case ModeOffice:
-		// Office agents use `agentctl kandev …` subcommands for every
-		// office mutation (create task, delegate, comment, …). The MCP
-		// surface for office mode only keeps:
-		//   - ask_user_question — interactive prompt path
-		//   - plan tools        — structured plan capture
-		//   - related-tasks     — discover parent/child/sibling IDs
-		//   - task-document tools — parent/child coordination docs
-		// delegate_task was removed in favour of
-		// `agentctl kandev tasks create --parent $KANDEV_TASK_ID …`.
-		if !s.disableAskQuestion {
-			s.registerInteractionTools()
-			count++
-		}
-		s.registerPlanTools()
-		count += 4
-		s.registerRelatedTasksTool()
-		count++
-		s.registerTaskDocumentTools()
-		count += 3
-	case ModeTask, ModeTaskTitlePending:
-		// Kanban tasks get list_related_tasks_kandev (useful for finding
-		// a sibling to message_task_kandev) but NOT the task-document
-		// tools — those are office coordination plumbing.
-		s.registerKanbanTools()
-		count += 15
-		if mcpproviders.Contains(s.mcpProviders, mcpproviders.GitHub) {
-			s.registerPRAutomationTools()
-			count += 2
-		}
-		if mcpproviders.Contains(s.mcpProviders, mcpproviders.GitLab) {
-			s.registerMRAutomationTools()
-			count += 2
-		}
-		if !s.disableAskQuestion {
-			s.registerInteractionTools()
-			count++
-		}
-		s.registerPlanTools()
-		count += 4
-		s.registerWalkthroughTools()
-		count += 3
-		s.registerReviewTools()
-		count++
-		s.registerRelatedTasksTool()
-		count++
-		// Task-mode only: requires a live session to attach the new
-		// (repository, branch) to. External mode has no such context.
-		s.registerAddBranchToTaskTool()
-		s.registerAddWorkspaceSourcesTool()
-		s.registerUpdateRepositoryBaseBranchTool()
-		count += 3
-		// Task-mode only: ADR 0015 explicit step-completion signal. The
-		// tool targets the current (task, session, step) the MCP server
-		// was bound to, so it has no meaningful semantics outside a task
-		// session.
-		s.registerStepCompleteTool()
-		count++
-		if s.mode == ModeTaskTitlePending {
-			s.registerSetTaskTitleTool()
-			count++
-		}
-		s.registerDiagnosticBundleTool()
-		count++
 	}
 	s.logger.Info("registered MCP tools",
 		zap.String("mode", s.mode),
-		zap.Int("count", count),
+		zap.Int("count", len(s.mcpServer.ListTools())),
 		zap.Bool("disable_ask_question", s.disableAskQuestion))
 	s.rebuildToolArgumentValidators()
 }
@@ -694,7 +766,7 @@ func (s *Server) registerKanbanTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("archive_task_kandev",
-			mcp.WithDescription("Archive a task. The task is hidden from active board views but kept in the database. Use to tidy up finished or abandoned tasks. Unarchiving is a user action done from the UI, not via MCP."),
+			mcp.WithDescription("Archive a task. The task is hidden from active board views but kept in the database. Use to tidy up finished or abandoned tasks. Archiving an already-archived task is a no-op that succeeds with already_archived: true. Unarchiving is a user action done from the UI, not via MCP."),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to archive")),
 		),
 		s.wrapHandler("archive_task_kandev", s.archiveTaskHandler()),
@@ -716,6 +788,10 @@ Behaviour by session state:
 - Created (not yet started): the agent is started with this message as its first prompt (delivery_mode has no effect).
 - Failed/cancelled: an error is returned (use create_task_kandev to start fresh).
 
+For an autopilot child question, pass reply_to_question_id with the question_id
+from the child message. The direct parent answer is recorded against that
+question and retries are idempotent.
+
 Returns the dispatch status: "queued", "sent", or "started".`),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The target task's full UUID (not a truncated prefix)")),
 			mcp.WithString("session_id", mcp.Description("Optional target session ID (must belong to task_id). Omit to message the task's primary session. Required when messaging a sibling session on your OWN task (task_id may then be your own task ID) — e.g. a session you spawned with spawn_session_kandev.")),
@@ -725,6 +801,7 @@ Returns the dispatch status: "queued", "sent", or "started".`),
 				mcp.DefaultString("queued"),
 				mcp.Description(`How to deliver this message if the target is currently running/starting. "queued" (default): wait for the current turn to finish, like any other peer message. "interrupt": cancel the target's current turn now and deliver this message immediately instead — only allowed when you are the target task's direct parent; requesting "interrupt" as a non-parent is rejected with an error rather than silently queued.`),
 			),
+			mcp.WithString("reply_to_question_id", mcp.Description("Optional question ID from an autopilot child. When set, the direct parent answer is recorded against that pending question and the delivery is idempotent.")),
 		),
 		s.wrapHandler("message_task_kandev", s.messageTaskHandler()),
 	)
@@ -755,6 +832,7 @@ If the child has no live execution, the call succeeds idempotently with status="
 		),
 		s.wrapHandler("get_task_conversation_kandev", s.getTaskConversationHandler()),
 	)
+	s.registerListTaskSessionsTool()
 }
 
 func (s *Server) registerPRAutomationTools() {
@@ -829,7 +907,12 @@ IMPORTANT:
 - Top-level tasks need a repository via repository_url, repository_id, or local_path
 - 'prompt' is the sub-agent's initial prompt — be specific and detailed
 - start_agent defaults to true and is what you want in nearly every case — the new task auto-launches an agent that immediately works on the prompt. Pass start_agent=false ONLY for an explicit placeholder (e.g. queuing work the user will start later, or creating a tracking task with no immediate work), and still pass agent_profile_id unless it can be inherited. When in doubt, leave it true.
-- Kanban subtasks cannot have their own subtasks (max nesting depth is 1). To break work down further, create a sibling under the same parent. (Office task trees are exempt.)`
+- Kanban subtasks cannot have their own subtasks (max nesting depth is 1). To break work down further, create a sibling under the same parent. (Office task trees are exempt.)
+
+IDEMPOTENCY (external_id):
+- Passing external_id makes this call create-if-absent, not a lookup: it creates the task when nothing holds that identity yet, and it DOES create something the first time you call it. Do not call it just to check whether an identity exists.
+- deduplicated:true in the result means a task already held that identity and nothing new was created — do not report having created a task in that case.
+- deduplicated:true together with creation_complete:false means another create claimed the identity and had not finished when observed; it may still be running. Proceed with the returned task_id or escalate to a human — never release the identity and create again, which can produce a duplicate task and a duplicate agent.`
 	parentDesc := "Parent task ID for subtasks. Use 'self' to create a subtask of your current task (RECOMMENDED for plan phases, delegated work). Omit only for unrelated top-level tasks."
 	agentProfileDesc := "Agent profile ID to use. On a workflow step, the step's launch profile (its pinned profile, or the workflow default when unpinned) outranks it; otherwise an explicit agent_profile_id wins. When both are absent, current_task inherits the current/source or parent profile before workflow/workspace defaults; workspace_default skips those task profiles, then uses workflow profiles before the target workspace default. start_agent=false still needs a resolvable profile for later manual start."
 
@@ -844,7 +927,12 @@ IMPORTANT:
 - Every created task must have a resolvable agent profile. start_agent=false still records the profile for a later manual start.
 - 'prompt' is the agent's initial prompt — be specific and detailed
 - start_agent defaults to true and is what you want in nearly every case — the new task auto-launches an agent that immediately works on the prompt. Pass start_agent=false ONLY for an explicit placeholder (e.g. queuing work the user will start later), and still pass agent_profile_id unless a default exists. When in doubt, leave it true.
-- Use parent_id only when delegating to a known existing task by its ID`
+- Use parent_id only when delegating to a known existing task by its ID
+
+IDEMPOTENCY (external_id):
+- Passing external_id makes this call create-if-absent, not a lookup: it creates the task when nothing holds that identity yet, and it DOES create something the first time you call it. Do not call it just to check whether an identity exists.
+- deduplicated:true in the result means a task already held that identity and nothing new was created — do not report having created a task in that case.
+- deduplicated:true together with creation_complete:false means another create claimed the identity and had not finished when observed; it may still be running. Proceed with the returned task_id or escalate to a human — never release the identity and create again, which can produce a duplicate task and a duplicate agent.`
 		parentDesc = "Optional parent task ID. Omit for top-level tasks; provide an existing task ID only to create a subtask of that task."
 		agentProfileDesc = "Agent profile ID to use. On a workflow step, the step's launch profile (its pinned profile, or the workflow default when unpinned) outranks it; otherwise an explicit agent_profile_id wins. When both are absent, current_task inherits a parent profile before workflow/workspace defaults; workspace_default skips the parent profile, then uses workflow profiles before the target workspace default. External mode has no current/source task. start_agent=false still needs a resolvable profile for later manual start."
 	}
@@ -859,6 +947,7 @@ IMPORTANT:
 			mcp.WithString("workspace_mode", mcp.Description("Subtask materialized-workspace mode: inherit_parent reuses the parent's worktree/materialized workspace (default for subtasks); new_workspace launches the subtask in its own workspace/worktree.")),
 			mcp.WithString("title", mcp.Required(), mcp.MaxLength(service.TaskTitleMaxLength), mcp.Description("A concise, few-word task title (maximum 60 characters).")),
 			mcp.WithString("prompt", mcp.Description("The initial prompt for the sub-agent. This is the ONLY context the agent receives when it starts — treat it as the agent's first user message. For auto-started subtasks, provide a specific and detailed prompt; omitting it starts the sub-agent without task-specific context.")),
+			mcp.WithBoolean("autopilot", mcp.Description("Start this task in autopilot mode. Default: false. The value is fixed at creation and is not inherited by subtasks. The agent does not ask the user directly; it asks its direct parent only for critical decisions.")),
 			mcp.WithString("agent_profile_id", mcp.Description(agentProfileDesc)),
 			mcp.WithString("executor_profile_id", mcp.Description("Executor profile ID to use (determines the runtime environment: local, worktree, docker, etc.). For subtasks, inherited from the parent session. For top-level tasks, ask the user which executor profile they want if not already known.")),
 			mcp.WithBoolean("start_agent", mcp.Description("Whether to auto-start an agent on the created task. Default: true — leave it true unless you specifically want a placeholder task with no agent running. Setting false leaves the task waiting for the user to click 'Start agent' in the UI; the prompt is preserved but no work happens automatically.")),
@@ -866,6 +955,7 @@ IMPORTANT:
 			mcp.WithString("local_path", mcp.Description("Local repository folder path (e.g. '/Users/me/projects/myrepo'). Will create/find the repository automatically. Preferred for local worktree flow. For subtasks: supply only when the subtask should target a different repo than the parent.")),
 			mcp.WithString("repository_url", mcp.Description("Repository URL, GitHub pull request URL, or GitLab merge request URL (for example 'https://github.com/owner/repo'). A contribution URL attaches the task to that existing contribution and prepares its source branch. For subtasks: supply only when the subtask should target a different repo than the parent.")),
 			mcp.WithString("base_branch", mcp.Description("Base branch for the repository (e.g. 'main'). Optional. Defaults: same-repo subtasks inherit the parent's base_branch; cross-repo subtasks and top-level tasks fall back to the repository's default_branch (visible via list_repositories_kandev).")),
+			mcp.WithString("external_id", mcp.Description("A stable identifier from your own system (issue key, webhook delivery ID, a UUID you generated). Creating a task twice with the same external_id in the same workspace returns the first task instead of making a duplicate — use it when a retry or restart could re-run this call. Replay the same arguments you sent the first time. This creates the task when nothing holds the identity yet — it is not a lookup.")),
 		),
 		s.wrapHandler("create_task_kandev", s.createTaskHandler()),
 	)
@@ -891,6 +981,26 @@ Returns {task_id, session_id, state}.`),
 			mcp.WithString("task_id", mcp.Description("Task to spawn the session on. Omit to use your current task.")),
 		),
 		s.wrapHandler("spawn_session_kandev", s.spawnSessionHandler()),
+	)
+}
+
+// registerListTaskSessionsTool registers list_task_sessions_kandev. It is the
+// discovery half of the session-addressing tools: get_task_conversation_kandev
+// and message_task_kandev both take an optional session_id and fall back to the
+// primary session, so without this a sibling session (one spawned with
+// spawn_session_kandev, or spawned by someone else) is unreachable unless the
+// caller happened to create it. Registered wherever those two tools are.
+func (s *Server) registerListTaskSessionsTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("list_task_sessions_kandev",
+			mcp.WithDescription(`List every agent session attached to a task, most recently started first.
+
+Use it to find the session_id to pass to get_task_conversation_kandev or message_task_kandev when a task has more than one session — for example after spawn_session_kandev, or to read a sibling session on your own task. Both of those tools default to the task's primary session when session_id is omitted, so other sessions are only reachable by ID.
+
+Each entry reports session_id, name (the session tab label, if set), state, is_primary (the session the other tools default to), is_current (true for your own session), agent_profile_id, and started/updated/completed timestamps.`),
+			mcp.WithString(mcpKeyTaskID, mcp.Required(), mcp.Description("The task ID whose sessions to list")),
+		),
+		s.wrapHandler("list_task_sessions_kandev", s.listTaskSessionsHandler()),
 	)
 }
 
@@ -1250,6 +1360,24 @@ Example rejection:
 			mcp.WithString("context", mcp.Description("Optional shared background information to help the user understand why you're asking these questions.")),
 		),
 		s.wrapHandler("ask_user_question_kandev", s.askUserQuestionHandler()),
+	)
+}
+
+func (s *Server) registerParentQuestionTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("ask_parent_question_kandev",
+			mcp.WithDescription(`Ask the direct parent task one or more questions when an autopilot task reaches a critical decision that cannot be inferred safely.
+
+This tool is available only to autopilot child tasks. It sends a durable question message to the direct parent, pauses this child turn, and returns without waiting for the answer. The parent answers with message_task_kandev using the returned question_id as reply_to_question_id. Do not use ask_user_question_kandev for this task, and do not ask unless the decision is truly blocking.`),
+			mcp.WithArray(questionsArg, mcp.Required(),
+				mcp.Description(`Array of 1-4 question objects. Each question must have a "prompt" (the question text) and an "options" array (2-6 entries with label + description). Optional fields: "id" (stable identifier), "title" (≤12 chars short label).`),
+				mcp.MinItems(1),
+				mcp.MaxItems(4),
+				mcp.Items(buildQuestionSchemaItem()),
+			),
+			mcp.WithString("context", mcp.Description("Optional shared background information for the direct parent.")),
+		),
+		s.wrapHandler("ask_parent_question_kandev", s.askParentQuestionHandler()),
 	)
 }
 

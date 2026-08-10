@@ -19,7 +19,7 @@ func TestSetSessionConfigOptionReturnsAuthoritativeState(t *testing.T) {
 		ValueId: &acp.SetSessionConfigOptionValueId{
 			SessionId: sessionID,
 			ConfigId:  "effort",
-			Value:     "low",
+			Value:     reasoningEffortLow,
 		},
 	})
 	if err != nil {
@@ -32,7 +32,7 @@ func TestSetSessionConfigOptionReturnsAuthoritativeState(t *testing.T) {
 			values[string(option.Select.Id)] = string(option.Select.CurrentValue)
 		}
 	}
-	if values["model"] != "mock-fast" || values["effort"] != "low" {
+	if values["model"] != modelFast || values["effort"] != reasoningEffortLow {
 		t.Fatalf("config values = %#v, want model=mock-fast and effort=low", values)
 	}
 }
@@ -62,8 +62,57 @@ func TestSetSessionConfigOptionRejectsUnknownValue(t *testing.T) {
 			values[string(option.Select.Id)] = string(option.Select.CurrentValue)
 		}
 	}
-	if values["effort"] != "medium" {
+	if values["effort"] != reasoningEffortMed {
 		t.Fatalf("effort = %q, want unchanged medium", values["effort"])
+	}
+}
+
+func TestSetSessionConfigOptionModelChangesAvailableOptions(t *testing.T) {
+	agent := &mockAgent{
+		sessions:        make(map[acp.SessionId]bool),
+		sessionConfig:   make(map[acp.SessionId][]acp.SessionConfigOption),
+		commandsEmitted: make(map[acp.SessionId]bool),
+	}
+	session, err := agent.NewSession(context.Background(), acp.NewSessionRequest{})
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+
+	response, err := agent.SetSessionConfigOption(context.Background(), acp.SetSessionConfigOptionRequest{
+		ValueId: &acp.SetSessionConfigOptionValueId{
+			SessionId: session.SessionId,
+			ConfigId:  "model",
+			Value:     modelSmart,
+		},
+	})
+	if err != nil {
+		t.Fatalf("set model: %v", err)
+	}
+
+	values := make(map[string]string)
+	for _, option := range response.ConfigOptions {
+		if option.Select != nil {
+			values[string(option.Select.Id)] = string(option.Select.CurrentValue)
+		}
+	}
+	if values["model"] != modelSmart {
+		t.Fatalf("model = %q, want mock-smart", values["model"])
+	}
+	if values["effort"] != reasoningEffortHigh {
+		t.Fatalf("effort = %q, want high for mock-smart", values["effort"])
+	}
+	var hasMax, hasMedium bool
+	for _, option := range response.ConfigOptions {
+		if option.Select == nil || option.Select.Id != "effort" || option.Select.Options.Ungrouped == nil {
+			continue
+		}
+		for _, choice := range *option.Select.Options.Ungrouped {
+			hasMax = hasMax || choice.Value == "max"
+			hasMedium = hasMedium || choice.Value == reasoningEffortMed
+		}
+	}
+	if !hasMax || hasMedium {
+		t.Fatalf("response = %#v, want smart-only effort choices", response.ConfigOptions)
 	}
 }
 
@@ -89,7 +138,7 @@ func TestSessionConfigIsIsolatedAcrossNewSessions(t *testing.T) {
 		ValueId: &acp.SetSessionConfigOptionValueId{
 			SessionId: first.SessionId,
 			ConfigId:  "effort",
-			Value:     "low",
+			Value:     reasoningEffortLow,
 		},
 	})
 	if err != nil {
@@ -106,7 +155,7 @@ func TestSessionConfigIsIsolatedAcrossNewSessions(t *testing.T) {
 		t.Fatalf("read second state: %v", err)
 	}
 	for _, option := range response.ConfigOptions {
-		if option.Select != nil && option.Select.Id == "effort" && option.Select.CurrentValue != "medium" {
+		if option.Select != nil && option.Select.Id == "effort" && option.Select.CurrentValue != reasoningEffortMed {
 			t.Fatalf("second effort = %q, want medium", option.Select.CurrentValue)
 		}
 	}
@@ -130,7 +179,7 @@ func TestSetSessionConfigOptionRejectsClosedSession(t *testing.T) {
 		ValueId: &acp.SetSessionConfigOptionValueId{
 			SessionId: session.SessionId,
 			ConfigId:  "effort",
-			Value:     "low",
+			Value:     reasoningEffortLow,
 		},
 	})
 	if err == nil {
@@ -139,4 +188,58 @@ func TestSetSessionConfigOptionRejectsClosedSession(t *testing.T) {
 	if _, ok := agent.sessionConfig[session.SessionId]; ok {
 		t.Fatal("SetSessionConfigOption() recreated closed session config")
 	}
+}
+
+// TestMockSessionConfigOptionsForModelAdvertisesSlowModel verifies the mock
+// agent advertises "mock-slow" in the model selector. E2E fixtures use the
+// slow tier for delay-timing assertions, and the no-silent-model-fallback
+// strict policy fails session start when the profile model is absent from the
+// advertised list — so dropping the advertisement would break both.
+func TestMockSessionConfigOptionsForModelAdvertisesSlowModel(t *testing.T) {
+	for _, model := range []string{modelFast, modelSmart, modelSlow} {
+		options := mockSessionConfigOptionsForModel(model)
+		values := make(map[string]string, len(options))
+		for _, option := range options {
+			if option.Select != nil {
+				values[string(option.Select.Id)] = string(option.Select.CurrentValue)
+			}
+		}
+		if values["model"] != model {
+			t.Errorf("mockSessionConfigOptionsForModel(%q) current model = %q, want %q", model, values["model"], model)
+		}
+	}
+
+	modelOption := findModelOption(t)
+	advertised := make([]string, 0, len(*modelOption.Select.Options.Ungrouped))
+	for _, option := range *modelOption.Select.Options.Ungrouped {
+		advertised = append(advertised, string(option.Value))
+	}
+	if !containsString(advertised, modelSlow) {
+		t.Fatalf("advertised models = %v, missing mock-slow (E2E + strict policy depend on it)", advertised)
+	}
+	for _, want := range []string{modelFast, modelSmart, modelSlow} {
+		if !containsString(advertised, want) {
+			t.Errorf("advertised models = %v, missing %s", advertised, want)
+		}
+	}
+}
+
+func findModelOption(t *testing.T) acp.SessionConfigOption {
+	t.Helper()
+	for _, option := range mockSessionConfigOptionsForModel(modelFast) {
+		if option.Select != nil && string(option.Select.Id) == "model" {
+			return option
+		}
+	}
+	t.Fatal("no model config option advertised")
+	return acp.SessionConfigOption{}
+}
+
+func containsString(values []string, want string) bool {
+	for _, v := range values {
+		if v == want {
+			return true
+		}
+	}
+	return false
 }

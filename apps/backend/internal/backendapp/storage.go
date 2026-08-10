@@ -194,6 +194,6 @@ func recordSchemaVersion(writer *sqlx.DB, _ string, version string, log *logger.
 		return
 	}
 	if log != nil {
-		log.Info("schema version recorded", zap.String("version", version))
+		log.Info("schema version recorded", zap.String(versionFieldKey, version))
 	}
 }

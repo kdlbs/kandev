@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconSelector } from "@tabler/icons-react";
+import { cn } from "@/lib/utils";
 import { Button } from "@kandev/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import {
@@ -18,11 +19,16 @@ import type { ModelEntry } from "@/lib/types/http";
 type ModelComboboxProps = {
   value: string;
   onChange: (value: string) => void;
-  models: ModelEntry[];
+  models: ModelComboboxModel[];
   currentModelId?: string;
   placeholder?: string;
   disabled?: boolean;
 };
+
+// ModelComboboxModel adds the optional unavailable ("gone") marker used by
+// profile editors to keep a configured-but-unadvertised model visible while
+// preventing its selection.
+type ModelComboboxModel = ModelEntry & { disabled?: boolean };
 
 function copilotUsage(model: ModelEntry): string | undefined {
   const raw = model.meta?.copilotUsage;
@@ -119,11 +125,16 @@ export function ModelCombobox({
                     key={model.id}
                     value={`${model.id} ${model.name}`}
                     onSelect={() => {
+                      if (model.disabled) return;
                       onChange(model.id);
                       setOpen(false);
                     }}
+                    disabled={model.disabled}
                     data-checked={effectiveValue === model.id}
-                    className="cursor-pointer"
+                    className={cn(
+                      "cursor-pointer",
+                      model.disabled && "opacity-40 cursor-not-allowed",
+                    )}
                   >
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 truncate">

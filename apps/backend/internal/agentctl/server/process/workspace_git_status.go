@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -36,10 +37,19 @@ func (wt *WorkspaceTracker) updateGitStatus(ctx context.Context) bool {
 func (wt *WorkspaceTracker) updateGitStatusClass(ctx context.Context, class subproc.GitWorkClass) bool {
 	status, err := wt.getGitStatusClass(ctx, class)
 	if err != nil {
-		wt.logger.Warn("updateGitStatus: getGitStatus failed", zap.Error(err))
+		// A cancellation is the expected outcome when the tracker is being
+		// torn down (Stop cancels cancelCtx, which kills the in-flight git
+		// command) or when the poll's admission slot is revoked. That is not a
+		// failure worth a warning — it mirrors handleGitPollFailure, which also
+		// downgrades cancellation-class errors to Debug to keep shutdown quiet.
+		if wt.isGitStatusCancellation(err) {
+			wt.logger.Debug("updateGitStatus: getGitStatus canceled", zap.Error(err))
+		} else {
+			wt.logger.Warn("updateGitStatus: getGitStatus failed", zap.Error(err))
+		}
 		return false
 	}
-	if ctx.Err() != nil || wt.cancelCtx.Err() != nil {
+	if ctx.Err() != nil || (wt.cancelCtx != nil && wt.cancelCtx.Err() != nil) {
 		return false
 	}
 
@@ -50,6 +60,17 @@ func (wt *WorkspaceTracker) updateGitStatusClass(ctx context.Context, class subp
 	// Notify workspace stream subscribers
 	wt.notifyWorkspaceStreamGitStatus(status)
 	return true
+}
+
+// isGitStatusCancellation reports whether a getGitStatus error is a benign
+// cancellation rather than a real git failure: the passed context or the
+// tracker's own shutdown context was canceled, or the background admission slot
+// was revoked. These are all expected during teardown and don't warrant a warn.
+func (wt *WorkspaceTracker) isGitStatusCancellation(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, subproc.ErrAdmissionCanceled) {
+		return true
+	}
+	return wt.cancelCtx != nil && wt.cancelCtx.Err() != nil
 }
 
 // tryUpdateGitStatus attempts a non-blocking git status update. If another

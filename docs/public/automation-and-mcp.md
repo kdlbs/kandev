@@ -165,6 +165,73 @@ Task tools use normal client discovery. When `step_complete_kandev` is required 
 
 `create_task_kandev` advertises `prompt` for instructions delivered to a newly started agent. Older callers may still send `description` when `prompt` is absent, but sending both is an error; the compatibility name is intentionally omitted from the advertised schema.
 
+### Autopilot tasks and MCP profiles
+
+Task creation accepts one optional boolean:
+
+```go
+mcp.WithBoolean(
+    "autopilot",
+    mcp.Description(
+        "Start this task in autopilot mode. Default: false. The value is fixed at creation and is not inherited by subtasks. The agent does not ask the user directly; it asks its direct parent only for critical decisions.",
+    ),
+),
+```
+
+The value defaults to `false`. It is fixed when the task is created and is not
+copied to a subtask. The task record is the source of truth after creation; a
+later task update cannot switch the prompt or MCP tools between normal and
+autopilot behavior.
+
+The top-level task dialog does not expose this option. The subtask dialog has a
+compact Autopilot switch with help text, but the value remains fixed after the
+subtask is created.
+
+Kandev builds the task MCP server from a backend-owned profile. The base
+surfaces are `kanban-task`, `office-task`, `configuration`, and `external`.
+Optional capability groups, such as task titles, provider automation, user
+questions, and parent questions, are added or removed from that base profile.
+This keeps tool discovery small and makes a context change atomic.
+
+For a Kanban task, normal sessions receive `ask_user_question_kandev`.
+An autopilot child receives `ask_parent_question_kandev` instead. An autopilot
+root receives neither question tool. Kandev never registers both question
+tools for one task session. Office sessions use their smaller skill/CLI
+surface and do not receive Kanban task-creation tools.
+
+An autopilot child should ask its parent only when a decision blocks useful
+progress. `ask_parent_question_kandev` returns a `question_id` immediately;
+the child turn then ends. The parent receives a durable question message and
+answers with `message_task_kandev` using the child task ID and
+`reply_to_question_id`. The child stays in the waiting-for-input state until
+the correlated answer arrives, so the sidebar shows the normal question
+indicator during the wait.
+
+### Create idempotency with `external_id`
+
+A caller that cannot tell whether an earlier `create_task_kandev` call (or `POST /api/v1/tasks`) actually landed — a crash before recording the response, a webhook redelivery — can pass an `external_id` and retry safely instead of guessing. `external_id` is an opaque, caller-chosen string, case-sensitive and byte-exact, unique per workspace: two workspaces can each hold their own task for the same value, but a second create for a value already held in the same workspace never makes a second task there. It is validated and trimmed like other free-text fields; a value that is empty after trimming is treated as if the field were omitted.
+
+Every create response — from both the MCP tool result and the REST response body — always carries two additional fields, whether or not the request included an `external_id`:
+
+- `deduplicated`: `true` when the returned task already existed for that identity, `false` when this call created it.
+- `creation_complete`: `false` only when the returned task is an existing one whose own create had not finished when observed and may still be running (it is not proof the other create is still alive — it may have crashed). Every other outcome reports `true`.
+
+<details>
+<summary>Reading the four outcomes</summary>
+
+| `deduplicated` | `creation_complete` | Meaning |
+| --- | --- | --- |
+| `false` | `true` | This call created the task. |
+| `true` | `true` | An earlier, finished create already holds this identity; that task is returned unchanged, with no new task, agent, or side effect of any kind. |
+| `true` | `false` | An earlier create for this identity had not finished when observed and may still be running — or may have crashed. The task is returned as-is; nothing about it is started, modified, or assumed finished. |
+| `false` | `true`, and `external_id` absent from the response | This call finished creating a task, but another actor released or reused the identity in the narrow window before settlement. The task exists and is otherwise normal; it simply is not holding that identity anymore. |
+
+</details>
+
+**Do not react to `creation_complete: false` by releasing the identity and retrying.** The other create may still be doing required work; releasing it out from under that work can produce two tasks for the same identity. `creation_complete: false` means "ask again later," not "safe to force." An operator who has independently confirmed a create is abandoned (not merely slow) can free its identity with `DELETE /api/v1/workspaces/:workspace_id/tasks/by-external-id?external_id=...`, which returns `204` and leaves the task itself untouched. `GET` the same path to look up the task currently holding an identity, including one still unsettled, without creating anything; it returns `404` when nothing holds it.
+
+Deleting or archiving the task that holds an identity does not carry the identity forward: archiving leaves it in place, but deleting the task frees the identity for reuse by a later create. `external_id` cannot be changed after creation — update requests that include it leave the task's identity untouched. The WebSocket `task.create` action and the plugin host's `Tasks().Create` do not accept `external_id`; use `create_task_kandev` or `POST /api/v1/tasks` for idempotent creates.
+
 A task session currently registers these tool groups:
 
 | Group                               | Available operations                                                                                                                                                                                                                                               |
@@ -329,14 +396,14 @@ http://127.0.0.1:<backend-port>/mcp
 
 SSE compatibility uses `/mcp/sse` with messages sent to `/mcp/message`. A reverse proxy must support long-lived streaming connections.
 
-External MCP exposes 32 tools in these groups:
+External MCP exposes 33 tools in these groups:
 
 - workspace/workflow configuration: list workspaces, workflows, repositories, and workflow steps; create, update, delete, or import workflows; create, update, delete, or reorder steps;
 - agents and profiles: list/update agents; create/delete profiles; list/update profiles; get/update profile MCP configuration;
 - executors: list executors and profiles; create, update, or delete executor profiles;
-- tasks: list, create, move, delete, archive, or update task state, and read task conversation.
+- tasks: list, create, move, delete, archive, or update task state; list a task's sessions; and read task conversation.
 
-The settings page's static **Available tools** preview currently counts 29 and omits `list_repositories_kandev`, `import_workflow_kandev`, and `get_task_conversation_kandev`. Treat the client's live `tools/list` response from the endpoint—not that preview—as authoritative.
+The settings page's static **Available tools** preview currently counts 30 and omits `list_repositories_kandev`, `import_workflow_kandev`, and `get_task_conversation_kandev`. Treat the client's live `tools/list` response from the endpoint—not that preview—as authoritative.
 
 In external mode, `create_task_kandev` has no current task and does not accept the `parent_id: "self"` shorthand. Its registered top-level contract asks for a repository ID, repository URL (including a supported GitHub pull request or GitLab merge request URL), or local path; workspace and workflow resolve automatically only when unambiguous. The current handler can nevertheless accept an omitted repository and create repo-less work, which is a contract/implementation mismatch rather than a supported equivalent of the regular UI's **None** option. Supply an explicit repository locator for portable clients. A resolvable agent profile is required even with `start_agent: false`; otherwise `start_agent` defaults to true. To create a subtask, pass the full ID of an existing parent.
 

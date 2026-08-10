@@ -148,6 +148,47 @@ test.describe("Kanban workflow filter", () => {
     });
   });
 
+  // Regression: hidden workflows (e.g. Improve Kandev, whose tasks the user
+  // creates through the Improve dialog) were excluded from the board's swimlane
+  // selection even when explicitly picked in the display dropdown — the user
+  // saw "No tasks yet" for a workflow that had tasks, and the filter reverted
+  // to All Workflows on the next navigation.
+  test("renders a hidden workflow's tasks when the user selects it", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const hiddenWorkflow = await apiClient.e2eCreateHiddenWorkflow(
+      seedData.workspaceId,
+      "Hidden Flow",
+    );
+    // The e2e hidden-workflow endpoint creates a bare workflow (no template),
+    // so seed a start step for the task to land in.
+    const startStep = await apiClient.createWorkflowStep(hiddenWorkflow.id, "Backlog", 0, {
+      is_start_step: true,
+    });
+    await apiClient.createTask(seedData.workspaceId, "Hidden flow task", {
+      workflow_id: hiddenWorkflow.id,
+      workflow_step_id: startStep.id,
+    });
+    try {
+      const kanban = new KanbanPage(testPage);
+      await kanban.goto();
+
+      // Hidden workflows stay off the All Workflows board by design...
+      await selectWorkflowFilter(testPage, "All Workflows");
+      await expect(kanban.taskCardByTitle("Hidden flow task")).not.toBeVisible();
+
+      // ...but an explicit selection renders their board.
+      await selectWorkflowFilter(testPage, "Hidden Flow");
+      await expect(kanban.taskCardByTitle("Hidden flow task")).toBeVisible({
+        timeout: TASK_VISIBLE_TIMEOUT,
+      });
+    } finally {
+      await apiClient.deleteWorkflow(hiddenWorkflow.id).catch(() => {});
+    }
+  });
+
   // Regression: SSR wrote workflows.activeId from the task's workflow_id, clobbering the "All Workflows" filter on return. Pins the cross-page flow.
   test("'All Workflows' selection survives navigating into a task and back", async ({
     testPage,

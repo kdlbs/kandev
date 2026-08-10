@@ -8,11 +8,24 @@ import { buildHostApi } from "./host-api";
 
 /** Curated primitives a plugin needs to build a full native-feeling page. */
 const EXPECTED_UI_PRIMITIVES = [
+  "Accordion",
+  "AccordionContent",
+  "AccordionItem",
+  "AccordionTrigger",
   "Alert",
   "Badge",
   "Button",
   "Card",
+  "ChartContainer",
+  "ChartLegend",
+  "ChartLegendContent",
+  "ChartStyle",
+  "ChartTooltip",
+  "ChartTooltipContent",
   "Checkbox",
+  "Collapsible",
+  "CollapsibleContent",
+  "CollapsibleTrigger",
   "Dialog",
   "Drawer",
   "DrawerClose",
@@ -25,9 +38,25 @@ const EXPECTED_UI_PRIMITIVES = [
   "DrawerTitle",
   "DrawerTrigger",
   "DropdownMenu",
+  "Empty",
+  "EmptyContent",
+  "EmptyDescription",
+  "EmptyHeader",
+  "EmptyMedia",
+  "EmptyTitle",
   "Input",
+  "Kbd",
+  "KbdGroup",
   "Label",
   "Pagination",
+  "Popover",
+  "PopoverAnchor",
+  "PopoverContent",
+  "PopoverDescription",
+  "PopoverHeader",
+  "PopoverTitle",
+  "PopoverTrigger",
+  "Progress",
   "ScrollArea",
   "Select",
   "Sheet",
@@ -44,6 +73,7 @@ const EXPECTED_UI_PRIMITIVES = [
   "Tabs",
   "Textarea",
   "Tooltip",
+  "TooltipProvider",
 ];
 
 const originalFetch = global.fetch;
@@ -59,7 +89,7 @@ describe("buildHostApi — API", () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
     global.fetch = fetchMock as unknown as typeof fetch;
 
-    const host = buildHostApi("jira", createAppStore(), "light");
+    const host = buildHostApi("jira", createAppStore());
     await host.api.fetch("/issues", { method: "POST" });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -72,7 +102,7 @@ describe("buildHostApi — API", () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
     global.fetch = fetchMock as unknown as typeof fetch;
 
-    const host = buildHostApi("jira", createAppStore(), "light");
+    const host = buildHostApi("jira", createAppStore());
     await host.api.fetch("/issues");
 
     const [, init] = fetchMock.mock.calls[0];
@@ -83,7 +113,7 @@ describe("buildHostApi — API", () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
     global.fetch = fetchMock as unknown as typeof fetch;
 
-    const host = buildHostApi("jira", createAppStore(), "light");
+    const host = buildHostApi("jira", createAppStore());
     await host.api.fetch("issues");
 
     const [url] = fetchMock.mock.calls[0];
@@ -102,7 +132,7 @@ describe("buildHostApi", () => {
       .mockResolvedValue(new Response(JSON.stringify({ connected: true }), { status: 200 }));
     global.fetch = fetchMock as unknown as typeof fetch;
 
-    const host = buildHostApi("jira", createAppStore(), "light");
+    const host = buildHostApi("jira", createAppStore());
     const controller = new AbortController();
     await expect(
       host.api.invokeAction<{ connected: boolean }>(
@@ -135,7 +165,7 @@ describe("buildHostApi", () => {
 
 describe("buildHostApi — host contract", () => {
   it("exposes the host React instance and a jsx alias for React.createElement", () => {
-    const host = buildHostApi("jira", createAppStore(), "dark");
+    const host = buildHostApi("jira", createAppStore());
 
     expect(host.React).toBe(React);
     expect(host.jsx).toBe(React.createElement);
@@ -147,7 +177,7 @@ describe("buildHostApi — host contract", () => {
     const setStateSpy = vi.spyOn(store, "setState");
     const subscribeSpy = vi.spyOn(store, "subscribe");
 
-    const host = buildHostApi("jira", store, "dark");
+    const host = buildHostApi("jira", store);
 
     expect(host.store.getState()).toBe(store.getState());
     host.store.setState({});
@@ -160,10 +190,9 @@ describe("buildHostApi — host contract", () => {
     unsubscribe();
   });
 
-  it("exposes the requested theme and a curated ui component subset", () => {
-    const host = buildHostApi("jira", createAppStore(), "dark");
+  it("exposes a curated ui component subset", () => {
+    const host = buildHostApi("jira", createAppStore());
 
-    expect(host.theme).toBe("dark");
     // Expanded primitive set for full native-feeling plugin pages.
     for (const name of EXPECTED_UI_PRIMITIVES) {
       expect(host.ui[name], `host.ui.${name}`).toBeDefined();
@@ -171,13 +200,13 @@ describe("buildHostApi — host contract", () => {
   });
 
   it("exports the supported responsive breakpoint hook", () => {
-    const host = buildHostApi("jira", createAppStore(), "dark");
+    const host = buildHostApi("jira", createAppStore());
 
     expect(host.useResponsiveBreakpoint).toBeTypeOf("function");
   });
 
   it("exposes first-party app components for native flows and page chrome", () => {
-    const host = buildHostApi("jira", createAppStore(), "light");
+    const host = buildHostApi("jira", createAppStore());
     expect(host.ui.PageTopbar).toBeDefined();
     expect(host.ui.TaskCreateDialog).toBeDefined();
     expect(host.ui.Combobox).toBeDefined();
@@ -200,7 +229,7 @@ describe("buildHostApi — host contract", () => {
 
 describe("buildHostApi — navigation and modal contract", () => {
   it("exposes navigate() that soft-navigates via history push/replace", () => {
-    const host = buildHostApi("jira", createAppStore(), "light");
+    const host = buildHostApi("jira", createAppStore());
     const pushSpy = vi.spyOn(window.history, "pushState");
     const replaceSpy = vi.spyOn(window.history, "replaceState");
 
@@ -223,18 +252,18 @@ describe("buildHostApi — navigation and modal contract", () => {
   });
 
   it("exposes the backend API origin on api.baseUrl", () => {
-    const host = buildHostApi("jira", createAppStore(), "light");
+    const host = buildHostApi("jira", createAppStore());
     expect(typeof host.api.baseUrl).toBe("string");
   });
 
   it("sets pluginId on the returned host api", () => {
-    const host = buildHostApi("jira", createAppStore(), "light");
+    const host = buildHostApi("jira", createAppStore());
     expect(host.pluginId).toBe("jira");
   });
 
   it("routes openModal to the modal manager, scoped to this plugin's id", async () => {
     const { pluginModalManager } = await import("./modal-manager");
-    const host = buildHostApi("jira", createAppStore(), "light");
+    const host = buildHostApi("jira", createAppStore());
 
     const before = pluginModalManager.getSnapshot().length;
     const handle = host.openModal({ content: () => null, title: "Test" });
@@ -252,7 +281,7 @@ describe("buildHostApi — navigation and modal contract", () => {
 
   it("opens a host-owned task link dialog instead of requiring plugin form markup", async () => {
     const { pluginModalManager } = await import("./modal-manager");
-    const host = buildHostApi("jira", createAppStore(), "light");
+    const host = buildHostApi("jira", createAppStore());
     const before = pluginModalManager.getSnapshot().length;
 
     const handle = host.openTaskLinkDialog({
@@ -284,7 +313,7 @@ describe("buildHostApi — navigation and modal contract", () => {
     const store = createAppStore();
     const addReviewPanel = vi.spyOn(useDockviewStore.getState(), "addReviewPanel");
     const setMobileSessionReview = vi.spyOn(store.getState(), "setMobileSessionReview");
-    const host = buildHostApi("bitbucket", store, "light");
+    const host = buildHostApi("bitbucket", store);
 
     host.openTaskReview({
       providerId: "bitbucket",
@@ -308,9 +337,150 @@ describe("buildHostApi — navigation and modal contract", () => {
   });
 });
 
+/**
+ * jsdom delivers MutationObserver records on a microtask, so awaiting an
+ * already-resolved promise is enough to let a pending class mutation land.
+ */
+function flushMutationObservers(): Promise<void> {
+  return Promise.resolve();
+}
+
+/**
+ * `host` is built once per plugin load, so a theme captured into it at boot
+ * can never follow a light/dark switch. These pin the live-read contract and
+ * the change notification a canvas-painting plugin needs on top of it.
+ */
+describe("buildHostApi — host.theme / host.onThemeChange", () => {
+  afterEach(() => {
+    document.documentElement.classList.remove("dark", "light");
+  });
+
+  it("reads the resolved theme live rather than freezing it at build time", () => {
+    document.documentElement.classList.remove("dark");
+    const host = buildHostApi("jira", createAppStore());
+    expect(host.theme).toBe("light");
+
+    document.documentElement.classList.add("dark");
+    expect(host.theme).toBe("dark");
+
+    document.documentElement.classList.remove("dark");
+    expect(host.theme).toBe("light");
+  });
+
+  it("notifies onThemeChange subscribers once per flip and stops after unsubscribe", async () => {
+    document.documentElement.classList.remove("dark");
+    const host = buildHostApi("jira", createAppStore());
+    const listener = vi.fn();
+    const unsubscribe = host.onThemeChange(listener);
+
+    document.documentElement.classList.add("dark");
+    await flushMutationObservers();
+    expect(listener).toHaveBeenCalledExactlyOnceWith("dark");
+
+    unsubscribe();
+    document.documentElement.classList.remove("dark");
+    await flushMutationObservers();
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  // Cross-plugin fan-out: one buggy plugin must not silently stop theme
+  // updates for every other plugin. The throwing listener is registered
+  // FIRST so an unguarded loop would abort before reaching the healthy one.
+  it("keeps notifying later listeners when an earlier one throws", async () => {
+    document.documentElement.classList.remove("dark");
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const host = buildHostApi("jira", createAppStore());
+
+    const boom = vi.fn(() => {
+      throw new Error("plugin theme listener blew up");
+    });
+    const healthy = vi.fn();
+    const unsubscribeBoom = host.onThemeChange(boom);
+    const unsubscribeHealthy = host.onThemeChange(healthy);
+
+    document.documentElement.classList.add("dark");
+    await flushMutationObservers();
+
+    expect(boom).toHaveBeenCalledTimes(1);
+    expect(healthy).toHaveBeenCalledExactlyOnceWith("dark");
+    expect(consoleError).toHaveBeenCalledWith(
+      "[plugins] theme change listener threw:",
+      expect.any(Error),
+    );
+
+    unsubscribeBoom();
+    unsubscribeHealthy();
+    consoleError.mockRestore();
+  });
+
+  it("ignores class mutations that leave the resolved theme unchanged", async () => {
+    document.documentElement.classList.add("dark");
+    const host = buildHostApi("jira", createAppStore());
+    const listener = vi.fn();
+    const unsubscribe = host.onThemeChange(listener);
+
+    // Unrelated class churn on <html> — the rendering-engine marker, a
+    // transition-suppression class, etc. — must not wake every plugin.
+    document.documentElement.classList.add("some-unrelated-class");
+    await flushMutationObservers();
+    expect(listener).not.toHaveBeenCalled();
+
+    unsubscribe();
+    document.documentElement.classList.remove("some-unrelated-class");
+  });
+});
+
+/**
+ * `toast` and `utils` are functions, so they sit beside `navigate`/`openModal`
+ * rather than in `ui`, which is a component map.
+ */
+describe("buildHostApi — host.toast / host.utils", () => {
+  it("exposes sonner's imperative toast, which needs no host rendering", () => {
+    const host = buildHostApi("jira", createAppStore());
+
+    expect(typeof host.toast).toBe("function");
+    for (const method of ["success", "error", "warning", "info", "dismiss"] as const) {
+      expect(typeof host.toast[method], `host.toast.${method}`).toBe("function");
+    }
+  });
+
+  // Scoped per plugin: an unattributed plugin error toast would land in
+  // kandev's own frontend error log as an application error.
+  it("scopes toast.error to the calling plugin rather than the app reporting seam", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const host = buildHostApi("kandev-plugin-github-status", createAppStore());
+
+    host.toast.error("Poll failed");
+
+    expect(consoleError).toHaveBeenCalledWith(
+      '[plugins] toast.error from "kandev-plugin-github-status":',
+      "Poll failed",
+    );
+    consoleError.mockRestore();
+  });
+
+  it("exposes cn, merging conflicting tailwind classes the way host components do", () => {
+    const host = buildHostApi("jira", createAppStore());
+
+    expect(typeof host.utils.cn).toBe("function");
+    // tailwind-merge semantics, not plain concatenation — the later padding wins.
+    expect(host.utils.cn("p-2", "p-4")).toBe("p-4");
+    const hidden = false;
+    expect(host.utils.cn("text-sm", hidden && "hidden", "font-bold")).toBe("text-sm font-bold");
+  });
+
+  it("exposes formatRelativeTime rather than leaving plugins to hand-roll one", () => {
+    const host = buildHostApi("jira", createAppStore());
+
+    expect(typeof host.utils.formatRelativeTime).toBe("function");
+    const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000);
+    expect(host.utils.formatRelativeTime(threeHoursAgo)).toContain("3");
+  });
+});
+
 describe("buildHostApi — ui", () => {
   it("exposes RichTextEditor/RichTextReadOnly for plugin notes-style UIs", () => {
-    const host = buildHostApi("jira", createAppStore(), "light");
+    const host = buildHostApi("jira", createAppStore());
     expect(host.ui.RichTextEditor).toBeDefined();
     expect(host.ui.RichTextReadOnly).toBeDefined();
   });
@@ -335,7 +505,7 @@ describe("buildHostApi — host.storage", () => {
       );
     global.fetch = fetchMock as unknown as typeof fetch;
 
-    const host = buildHostApi(NOTES_PLUGIN_ID, createAppStore(), "light");
+    const host = buildHostApi(NOTES_PLUGIN_ID, createAppStore());
     const entry = await host.storage.get("task", "task_1", "note");
 
     expect(entry).toEqual({ key: "note", value: "hi", updatedAt: TEST_UPDATED_AT });
@@ -348,7 +518,7 @@ describe("buildHostApi — host.storage", () => {
       .fn()
       .mockResolvedValue(new Response(null, { status: 404 })) as unknown as typeof fetch;
 
-    const host = buildHostApi(NOTES_PLUGIN_ID, createAppStore(), "light");
+    const host = buildHostApi(NOTES_PLUGIN_ID, createAppStore());
     expect(await host.storage.get("task", "task_1", "note")).toBeUndefined();
   });
 
@@ -357,7 +527,7 @@ describe("buildHostApi — host.storage", () => {
       .fn()
       .mockResolvedValue(new Response(null, { status: 500 })) as unknown as typeof fetch;
 
-    const host = buildHostApi(NOTES_PLUGIN_ID, createAppStore(), "light");
+    const host = buildHostApi(NOTES_PLUGIN_ID, createAppStore());
     await expect(host.storage.get("task", "task_1", "note")).rejects.toThrow();
   });
 });
@@ -378,7 +548,7 @@ describe("buildHostApi — host.storage set/delete/list/subscribe", () => {
       );
     global.fetch = fetchMock as unknown as typeof fetch;
 
-    const host = buildHostApi(NOTES_PLUGIN_ID, createAppStore(), "light");
+    const host = buildHostApi(NOTES_PLUGIN_ID, createAppStore());
     const result = await host.storage.set("task", "task_1", "note", "hello");
 
     expect(result).toEqual({ updatedAt: TEST_UPDATED_AT });
@@ -399,7 +569,7 @@ describe("buildHostApi — host.storage set/delete/list/subscribe", () => {
       );
     global.fetch = fetchMock as unknown as typeof fetch;
 
-    const host = buildHostApi(NOTES_PLUGIN_ID, createAppStore(), "light");
+    const host = buildHostApi(NOTES_PLUGIN_ID, createAppStore());
     await host.storage.set("task", "task_1", "note", "a");
     await host.storage.set("task", "task_1", "note", "b");
 
@@ -412,7 +582,7 @@ describe("buildHostApi — host.storage set/delete/list/subscribe", () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 409 }));
     global.fetch = fetchMock as unknown as typeof fetch;
 
-    const host = buildHostApi(NOTES_PLUGIN_ID, createAppStore(), "light");
+    const host = buildHostApi(NOTES_PLUGIN_ID, createAppStore());
     await expect(
       host.storage.set("task", "task_1", "note", "hello", { ifUnmodifiedSince: TEST_UPDATED_AT }),
     ).rejects.toThrow(/modified since/i);
@@ -425,7 +595,7 @@ describe("buildHostApi — host.storage set/delete/list/subscribe", () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
     global.fetch = fetchMock as unknown as typeof fetch;
 
-    const host = buildHostApi(NOTES_PLUGIN_ID, createAppStore(), "light");
+    const host = buildHostApi(NOTES_PLUGIN_ID, createAppStore());
     await host.storage.delete("task", "task_1", "note");
 
     const [url, init] = fetchMock.mock.calls[0];
@@ -444,13 +614,13 @@ describe("buildHostApi — host.storage set/delete/list/subscribe", () => {
         new Response(JSON.stringify({ entries }), { status: 200 }),
       ) as unknown as typeof fetch;
 
-    const host = buildHostApi(NOTES_PLUGIN_ID, createAppStore(), "light");
+    const host = buildHostApi(NOTES_PLUGIN_ID, createAppStore());
     expect(await host.storage.list("task", "task_1")).toEqual(entries);
   });
 
   it("subscribe() returns an unsubscribe function wired through the plugin registry", async () => {
     const { pluginRegistry } = await import("./registry");
-    const host = buildHostApi(NOTES_PLUGIN_ID, createAppStore(), "light");
+    const host = buildHostApi(NOTES_PLUGIN_ID, createAppStore());
 
     const before = pluginRegistry.getWsHandlers("plugin.user-state.updated").length;
     const unsubscribe = host.storage.subscribe({}, () => {});
@@ -480,7 +650,7 @@ describe("buildHostApi — host.storage writerId scoping", () => {
       );
     global.fetch = fetchMock as unknown as typeof fetch;
 
-    const host = buildHostApi(NOTES_PLUGIN_ID, createAppStore(), "light");
+    const host = buildHostApi(NOTES_PLUGIN_ID, createAppStore());
     await host.storage.set("task", "task_1", "note", "hello", { writerId: "panel-xyz" });
 
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
@@ -492,7 +662,7 @@ describe("buildHostApi — host.storage writerId scoping", () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
     global.fetch = fetchMock as unknown as typeof fetch;
 
-    const host = buildHostApi(NOTES_PLUGIN_ID, createAppStore(), "light");
+    const host = buildHostApi(NOTES_PLUGIN_ID, createAppStore());
     await host.storage.delete("task", "task_1", "note", { writerId: "panel-xyz" });
 
     const [url] = fetchMock.mock.calls[0];
@@ -531,7 +701,7 @@ describe("buildHostApi — non-secure context (http:// on a non-localhost origin
         new Response(JSON.stringify({ updatedAt: TEST_UPDATED_AT }), { status: 200 }),
       ) as unknown as typeof fetch;
 
-    const host = freshHostApi.buildHostApi(NOTES_PLUGIN_ID, freshCreateStore(), "light");
+    const host = freshHostApi.buildHostApi(NOTES_PLUGIN_ID, freshCreateStore());
     await host.storage.set("task", "task_1", "note", { body: "hi" });
 
     const body = JSON.parse(

@@ -20,11 +20,15 @@ import (
 const (
 	// queueErrorCodeEntryNotFound is surfaced when an edit/remove targets an entry
 	// that has already been drained (atomic-take won the race).
-	queueErrorCodeEntryNotFound             = "entry_not_found"
-	queueErrorCodeSessionBusy               = "session_busy"
-	queueErrorCodeNotPromptable             = "session_not_promptable"
-	queueErrorCodeSendNowQueueEmpty         = "queue_empty"
-	queueErrorCodeSendNowQueueChanged       = "queue_changed"
+	queueErrorCodeEntryNotFound       = "entry_not_found"
+	queueErrorCodeSessionBusy         = "session_busy"
+	queueErrorCodeNotPromptable       = "session_not_promptable"
+	queueErrorCodeSendNowQueueEmpty   = "queue_empty"
+	queueErrorCodeSendNowQueueChanged = "queue_changed"
+	// queueErrorCodeQueueChanged is the shared "your snapshot is stale" signal
+	// for reorder drift; the wire value matches the send-now code so clients
+	// reconcile with one handler.
+	queueErrorCodeQueueChanged              = "queue_changed"
 	queueErrorCodeSendNowConflict           = "send_now_conflict"
 	queueErrorCodeSendNowTurnChanged        = "turn_changed"
 	queueErrorCodeSendNowAttachmentOverflow = "send_now_attachment_overflow"
@@ -55,6 +59,7 @@ type QueueService interface {
 	UpdateMessageWithMetadata(ctx context.Context, sessionID, entryID, content string, attachments []messagequeue.MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string) error
 	RemoveEntry(ctx context.Context, sessionID, entryID string) error
 	MergeIntoAbove(ctx context.Context, sessionID, entryID, queuedBy string) (*messagequeue.QueuedMessage, error)
+	ReorderEntries(ctx context.Context, sessionID string, orderedIDs []string) error
 	CancelAll(ctx context.Context, sessionID string) (int, error)
 	GetStatus(ctx context.Context, sessionID string) *messagequeue.QueueStatus
 }
@@ -158,6 +163,7 @@ func (h *QueueHandlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMessageQueueSendNow, h.wsSendNow)
 	d.RegisterFunc(ws.ActionMessageQueueRemove, h.wsRemoveEntry)
 	d.RegisterFunc(ws.ActionMessageQueueMerge, h.wsMergeIntoAbove)
+	d.RegisterFunc(ws.ActionMessageQueueReorder, h.wsReorder)
 }
 
 type wsQueueMessageRequest struct {
@@ -172,6 +178,7 @@ type wsQueueMessageRequest struct {
 	UserID           string                           `json:"user_id,omitempty"`
 }
 
+// wsQueueMessage handles ActionMessageQueueAdd, appending a new entry to the session queue.
 func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req wsQueueMessageRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -248,6 +255,7 @@ type wsCancelAllRequest struct {
 	SessionID string `json:"session_id"`
 }
 
+// wsCancelAll handles ActionMessageQueueCancel, clearing every pending entry for a session.
 func (h *QueueHandlers) wsCancelAll(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req wsCancelAllRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -277,6 +285,7 @@ type wsDrainQueueRequest struct {
 	SessionID string `json:"session_id"`
 }
 
+// wsDrainQueue handles ActionMessageQueueDrain, dispatching one queued entry when the session is promptable.
 func (h *QueueHandlers) wsDrainQueue(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req wsDrainQueueRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -318,6 +327,7 @@ type wsSendNowRequest struct {
 	EntryID   string `json:"entry_id,omitempty"`
 }
 
+// wsSendNow handles ActionMessageQueueSendNow, interrupting the active turn with an exact queue selection.
 func (h *QueueHandlers) wsSendNow(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req wsSendNowRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -349,6 +359,7 @@ func (h *QueueHandlers) wsSendNow(ctx context.Context, msg *ws.Message) (*ws.Mes
 	})
 }
 
+// validateSendNowRequest validates the send-now scope and entry id combination.
 func validateSendNowRequest(req wsSendNowRequest) string {
 	switch {
 	case req.Scope != orchestrator.QueueSendNowScopeEntry && req.Scope != orchestrator.QueueSendNowScopeAll:
@@ -362,6 +373,7 @@ func validateSendNowRequest(req wsSendNowRequest) string {
 	}
 }
 
+// sendNowErrorResponse maps send-now failures to their stable websocket error codes.
 func (h *QueueHandlers) sendNowErrorResponse(msg *ws.Message, sessionID string, err error) (*ws.Message, error) {
 	switch {
 	case errors.Is(err, orchestrator.ErrSendNowEntryNotFound):
@@ -390,6 +402,7 @@ type wsGetQueueStatusRequest struct {
 	SessionID string `json:"session_id"`
 }
 
+// wsGetQueueStatus handles ActionMessageQueueGet, returning the pending list and capacity.
 func (h *QueueHandlers) wsGetQueueStatus(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req wsGetQueueStatusRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -416,6 +429,7 @@ type wsUpdateMessageRequest struct {
 	UserID           string                           `json:"user_id,omitempty"`
 }
 
+// wsUpdateMessage handles ActionMessageQueueUpdate, replacing a queued entry's content.
 func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req wsUpdateMessageRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -513,6 +527,7 @@ func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{fieldEntryID: req.EntryID})
 }
 
+// newlyAddedQueueAttachments returns attachment descriptors that were not present before.
 func newlyAddedQueueAttachments(previous, replacement []messagequeue.MessageAttachment) []messagequeue.MessageAttachment {
 	retained := make(map[string]struct{}, len(previous))
 	for _, attachment := range previous {
@@ -532,6 +547,7 @@ func newlyAddedQueueAttachments(previous, replacement []messagequeue.MessageAtta
 	return newlyAdded
 }
 
+// supersededQueueAttachments returns attachment descriptors dropped by the replacement.
 func supersededQueueAttachments(previous, replacement []messagequeue.MessageAttachment) []messagequeue.MessageAttachment {
 	retained := make(map[string]struct{}, len(replacement))
 	for _, attachment := range replacement {
@@ -551,6 +567,7 @@ func supersededQueueAttachments(previous, replacement []messagequeue.MessageAtta
 	return superseded
 }
 
+// validateSubmittedReferences runs the entity-reference submission validator when configured.
 func (h *QueueHandlers) validateSubmittedReferences(
 	ctx context.Context,
 	sessionID, taskID string,
@@ -565,6 +582,7 @@ func (h *QueueHandlers) validateSubmittedReferences(
 	return h.referenceValidator.ValidateForSubmission(ctx, sessionID, taskID, references)
 }
 
+// rollbackQueuedAttachmentClaim releases attachments claimed for a queue entry that failed to persist.
 func (h *QueueHandlers) rollbackQueuedAttachmentClaim(ctx context.Context, sessionID, entryID string) error {
 	if err := h.queueService.RemoveEntry(ctx, sessionID, entryID); err == nil {
 		return nil
@@ -580,6 +598,7 @@ func (h *QueueHandlers) rollbackQueuedAttachmentClaim(ctx context.Context, sessi
 	return err
 }
 
+// firstInvalidDeliveryMode returns the index of the first attachment with an unknown delivery mode.
 func firstInvalidDeliveryMode(attachments []messagequeue.MessageAttachment) int {
 	for i, att := range attachments {
 		if att.DeliveryMode != "" && att.DeliveryMode != "prompt" && att.DeliveryMode != "path" {
@@ -589,6 +608,7 @@ func firstInvalidDeliveryMode(attachments []messagequeue.MessageAttachment) int 
 	return -1
 }
 
+// firstInvalidAttachment returns the index of the first structurally invalid attachment.
 func firstInvalidAttachment(attachments []messagequeue.MessageAttachment) int {
 	if len(attachments) > models.MaxMessageAttachmentCount {
 		return models.MaxMessageAttachmentCount
@@ -610,6 +630,7 @@ func firstInvalidAttachment(attachments []messagequeue.MessageAttachment) int {
 	return -1
 }
 
+// attachmentPayloadBytes returns the decoded payload size and whether the base64 is valid.
 func attachmentPayloadBytes(attachment messagequeue.MessageAttachment) (int64, bool) {
 	if attachment.AttachmentID != "" {
 		if attachment.Data != "" || attachment.Name == "" || attachment.MimeType == "" {
@@ -630,6 +651,7 @@ func attachmentPayloadBytes(attachment messagequeue.MessageAttachment) (int64, b
 	return int64(len(decoded)), true
 }
 
+// queueAttachmentsToV1 converts queue attachments to the API v1 representation.
 func queueAttachmentsToV1(attachments []messagequeue.MessageAttachment) []v1.MessageAttachment {
 	if len(attachments) == 0 {
 		return nil
@@ -654,6 +676,7 @@ type wsRemoveEntryRequest struct {
 	EntryID   string `json:"entry_id"`
 }
 
+// wsRemoveEntry handles ActionMessageQueueRemove, deleting a single queued entry.
 func (h *QueueHandlers) wsRemoveEntry(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req wsRemoveEntryRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -740,6 +763,51 @@ func (h *QueueHandlers) wsMergeIntoAbove(ctx context.Context, msg *ws.Message) (
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{fieldEntryID: merged.ID})
 }
 
+// wsReorderRequest is the payload for ActionMessageQueueReorder: the session
+// whose queue is modified and the complete ordered list of visible pending
+// entry ids the caller wants as the new FIFO order.
+type wsReorderRequest struct {
+	SessionID  string   `json:"session_id"`
+	OrderedIDs []string `json:"ordered_ids"`
+}
+
+// wsReorder handles ActionMessageQueueReorder, rewriting the session's visible
+// pending order to match ordered_ids and broadcasting the updated queue. Any
+// drift from the persisted visible set (a drain/remove/merge raced the drag)
+// is rejected atomically with queue_changed so the client refetches.
+func (h *QueueHandlers) wsReorder(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsReorderRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+	if denied := h.authorizeSession(ctx, msg, req.SessionID); denied != nil {
+		return denied, nil
+	}
+	if len(req.OrderedIDs) == 0 {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "ordered_ids is required", nil)
+	}
+	if hasDuplicateIDs(req.OrderedIDs) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "ordered_ids must not contain duplicates", nil)
+	}
+
+	if err := h.queueService.ReorderEntries(ctx, req.SessionID, req.OrderedIDs); err != nil {
+		if errors.Is(err, messagequeue.ErrQueueChanged) {
+			return ws.NewError(msg.ID, msg.Action, queueErrorCodeQueueChanged, "Queue changed before the reorder could be applied", nil)
+		}
+		h.logger.Error("failed to reorder queued messages", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to reorder queued messages", nil)
+	}
+
+	h.publishStatus(ctx, req.SessionID)
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		fieldSessionID: req.SessionID,
+		"reordered":    len(req.OrderedIDs),
+	})
+}
+
 type wsAppendToQueueRequest struct {
 	SessionID string `json:"session_id"`
 	TaskID    string `json:"task_id"`
@@ -749,6 +817,7 @@ type wsAppendToQueueRequest struct {
 	UserID    string `json:"user_id,omitempty"`
 }
 
+// wsAppendToQueue handles ActionMessageQueueAppend, appending or inserting a user message.
 func (h *QueueHandlers) wsAppendToQueue(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req wsAppendToQueueRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -796,6 +865,19 @@ func (h *QueueHandlers) wsAppendToQueue(ctx context.Context, msg *ws.Message) (*
 	})
 }
 
+// hasDuplicateIDs reports whether ids contains any id more than once.
+func hasDuplicateIDs(ids []string) bool {
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if _, duplicate := seen[id]; duplicate {
+			return true
+		}
+		seen[id] = struct{}{}
+	}
+	return false
+}
+
+// reservedIdentityError builds the validation message for reserved caller identities.
 func reservedIdentityError(queuedBy string) string {
 	if queuedBy == messagequeue.QueuedByAgent {
 		return "user_id may not impersonate the agent identity"
@@ -803,6 +885,7 @@ func reservedIdentityError(queuedBy string) string {
 	return "user_id may not impersonate a reserved identity"
 }
 
+// authorizeSession denies the request when the caller cannot access the session.
 func (h *QueueHandlers) authorizeSession(ctx context.Context, msg *ws.Message, sessionID string) *ws.Message {
 	if h.accessAuthorizer == nil {
 		return queueAccessDeniedResponse(msg)
@@ -813,6 +896,7 @@ func (h *QueueHandlers) authorizeSession(ctx context.Context, msg *ws.Message, s
 	return nil
 }
 
+// authorizeTaskSession denies the request when the caller cannot access the task/session pair.
 func (h *QueueHandlers) authorizeTaskSession(
 	ctx context.Context,
 	msg *ws.Message,
@@ -827,6 +911,7 @@ func (h *QueueHandlers) authorizeTaskSession(
 	return nil
 }
 
+// queueAccessDeniedResponse builds the non-enumerating session-not-found error response.
 func queueAccessDeniedResponse(msg *ws.Message) *ws.Message {
 	response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, queueAccessDenied, nil)
 	return response

@@ -122,6 +122,7 @@ export function buildSidebarItem(
   return {
     id: task.id,
     title: task.title,
+    autopilot: task.autopilot,
     state: task.state as TaskState | undefined,
     interrupted: task.interrupted,
     ...status,

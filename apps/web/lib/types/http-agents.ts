@@ -159,6 +159,21 @@ export type DynamicModelsResponse = {
   error: string | null;
 };
 
+export type ResolveAgentModelConfigRequest = {
+  model: string;
+  mode?: string;
+  config_options?: Record<string, string>;
+  refresh?: boolean;
+};
+
+export type AgentModelConfigResponse = {
+  agent_name: string;
+  model: string;
+  status: CapabilityStatus;
+  config_options: ConfigOptionEntry[];
+  error: string | null;
+};
+
 export type PermissionSetting = {
   supported: boolean;
   default: boolean;

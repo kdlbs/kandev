@@ -14,10 +14,10 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-// transientMaxAttempts caps how many times a transient provider error (529
-// Overloaded) is auto-retried with backoff before falling through to the
-// manual recovery banner.
-const transientMaxAttempts = 3
+// transientMaxAttempts caps how many times a high-confidence short provider
+// failure is auto-retried with backoff before falling through to the manual
+// recovery banner.
+const transientMaxAttempts = 5
 
 const transientRetryStopTimeout = 30 * time.Second
 
@@ -44,11 +44,13 @@ const (
 const metaVariantWarning = "warning"
 
 // transientRetryBackoff is the per-attempt delay before re-driving a turn that
-// failed transiently. Index is attempt-1 (5s → 15s → 30s).
+// failed transiently. Index is attempt-1 (5s → 10s → 20s → 40s → 60s).
 var transientRetryBackoff = []time.Duration{
 	5 * time.Second,
-	15 * time.Second,
-	30 * time.Second,
+	10 * time.Second,
+	20 * time.Second,
+	40 * time.Second,
+	60 * time.Second,
 }
 
 // transientRetryDelay returns the backoff for a 1-based attempt, clamping to
@@ -61,6 +63,19 @@ func transientRetryDelay(attempt int) time.Duration {
 		attempt = len(transientRetryBackoff)
 	}
 	return transientRetryBackoff[attempt-1]
+}
+
+// transientRetryDelayFor honors a validated provider reset deadline when it
+// is close enough to be useful. Longer or stale hints fall back to the stable
+// local ladder so a provider cannot keep the session parked indefinitely.
+func transientRetryDelayFor(classified *routingerr.Error, attempt int, now time.Time) time.Duration {
+	if classified != nil && classified.ResetHint != nil && !classified.ResetHint.Before(now) {
+		untilReset := classified.ResetHint.Sub(now)
+		if untilReset <= time.Minute {
+			return untilReset
+		}
+	}
+	return transientRetryDelay(attempt)
 }
 
 // capturedPrompt is the minimal context needed to re-drive a failed turn.
@@ -104,13 +119,14 @@ func (s *Service) rememberTurnPrompt(sessionID, text, model string, planMode boo
 	})
 }
 
-// handleTransientFailure routes a transient provider error (529 Overloaded)
+// handleTransientFailure routes a high-confidence short provider error
 // into a paced, visible retry-with-backoff instead of the red recovery banner.
 // Returns true when it takes ownership (caller must NOT fall through to
 // handleRecoverableFailure); false for non-transient errors, office tasks,
 // or an exhausted retry budget.
 func (s *Service) handleTransientFailure(ctx context.Context, data watcher.AgentEventData) bool {
-	if data.SessionID == "" || !routingerr.IsTransientProviderError(data.ErrorMessage) {
+	classified := classifyKanbanFailure(data)
+	if data.SessionID == "" || routingerr.Decide(routingerr.ContextKanban, classified, time.Now().UTC()) != routingerr.DecisionShortRetry {
 		return false
 	}
 	// Genuine Office-owned tasks render their
@@ -131,7 +147,9 @@ func (s *Service) handleTransientFailure(ctx context.Context, data watcher.Agent
 		return false
 	}
 
-	delay := transientRetryDelay(attempt)
+	now := time.Now().UTC()
+	delay := transientRetryDelayFor(classified, attempt, now)
+	retryAt := now.Add(delay)
 	s.logger.Info("scheduling transient provider-error retry",
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
@@ -140,7 +158,7 @@ func (s *Service) handleTransientFailure(ctx context.Context, data watcher.Agent
 		zap.Duration("delay", delay))
 
 	// Emit the yellow status (against the failed turn) before completing it.
-	s.createTransientRetryStatusMessage(ctx, data, attempt, delay)
+	s.createTransientRetryStatusMessage(ctx, data, classified, attempt, delay, retryAt)
 	s.completeTurnForSession(ctx, data.SessionID)
 
 	// Park the session in WAITING_FOR_INPUT (a calm, banner-less state that
@@ -148,7 +166,15 @@ func (s *Service) handleTransientFailure(ctx context.Context, data watcher.Agent
 	// the session is RUNNING). Deliberately NOT FAILED and NOT task→REVIEW.
 	s.updateTaskSessionState(ctx, data.TaskID, data.SessionID, models.TaskSessionStateWaitingForInput, "", false)
 
-	s.scheduleTransientRetry(data.TaskID, data.SessionID, data.AgentExecutionID, attempt, delay)
+	s.scheduleTransientRetryWithMetadata(
+		data.TaskID,
+		data.SessionID,
+		data.AgentExecutionID,
+		attempt,
+		delay,
+		retryAt,
+		classified,
+	)
 	return true
 }
 
@@ -169,6 +195,16 @@ func (s *Service) nextTransientAttempt(sessionID string) int {
 
 // scheduleTransientRetry stores a fresh retry entry and arms its backoff timer.
 func (s *Service) scheduleTransientRetry(taskID, sessionID, execID string, attempt int, delay time.Duration) {
+	s.scheduleTransientRetryWithMetadata(taskID, sessionID, execID, attempt, delay, time.Now().UTC().Add(delay), nil)
+}
+
+func (s *Service) scheduleTransientRetryWithMetadata(
+	taskID, sessionID, execID string,
+	attempt int,
+	delay time.Duration,
+	retryAt time.Time,
+	classified *routingerr.Error,
+) {
 	retryCtx, cancel := context.WithCancel(context.Background())
 	entry := &transientRetryEntry{attempt: attempt, cancel: cancel}
 	s.transientRetries.Store(sessionID, entry)
@@ -219,7 +255,7 @@ func (s *Service) retryTransientPrompt(ctx context.Context, taskID, sessionID, e
 			TaskID:           taskID,
 			SessionID:        sessionID,
 			AgentExecutionID: execID,
-			ErrorMessage:     "Provider overloaded — automatic retry was not possible. Resume or start fresh to continue.",
+			ErrorMessage:     "Automatic provider retry was not possible. Resume or start fresh to continue.",
 		})
 		return
 	}
@@ -267,7 +303,7 @@ func (s *Service) retryTransientPrompt(ctx context.Context, taskID, sessionID, e
 			TaskID:           taskID,
 			SessionID:        sessionID,
 			AgentExecutionID: execID,
-			ErrorMessage:     "Provider overloaded — automatic retry could not be started. Resume or start fresh to continue.",
+			ErrorMessage:     "Automatic provider retry could not be started. Resume or start fresh to continue.",
 		})
 	}
 }
@@ -281,12 +317,20 @@ func (s *Service) stopTransientRetryExecution(ctx context.Context, executionID s
 // createTransientRetryStatusMessage emits the calm yellow "retrying" status
 // (variant=warning) with a Cancel action, driving the frontend's
 // AgentWarningStatus instead of the red AgentErrorStatus.
-func (s *Service) createTransientRetryStatusMessage(ctx context.Context, data watcher.AgentEventData, attempt int, delay time.Duration) {
+func (s *Service) createTransientRetryStatusMessage(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	classified *routingerr.Error,
+	attempt int,
+	delay time.Duration,
+	retryAt time.Time,
+) {
 	if s.messageCreator == nil {
 		return
 	}
 	secs := int(delay.Seconds())
-	content := fmt.Sprintf("Provider overloaded — retrying in %ds (attempt %d/%d)", secs, attempt, transientMaxAttempts)
+	label := transientFailureLabel(classified)
+	content := fmt.Sprintf("%s — retrying in %ds (attempt %d/%d)", label, secs, attempt, transientMaxAttempts)
 	cancelAction := wsRecoveryAction(data.TaskID, data.SessionID, recoverActionCancelRetry,
 		"Cancel", "x", "Stop retrying and choose how to recover", recoveryCancelRetryButtonTestID)
 	meta := map[string]interface{}{
@@ -295,9 +339,25 @@ func (s *Service) createTransientRetryStatusMessage(ctx context.Context, data wa
 		"attempt":          attempt,
 		"max_attempts":     transientMaxAttempts,
 		"retry_in_seconds": secs,
+		"retry_at":         retryAt.UTC().Format(time.RFC3339Nano),
 		metaKeySessionID:   data.SessionID,
 		metaKeyTaskID:      data.TaskID,
 		"actions":          []map[string]interface{}{cancelAction},
+	}
+	if classified != nil {
+		meta["failure_code"] = string(classified.Code)
+	}
+	providerID := data.AgentID
+	if providerError := data.ProviderError; providerError != nil {
+		if providerError.ProviderID != "" {
+			providerID = providerError.ProviderID
+		}
+		if modelID := routingerr.Sanitize(providerError.ModelID); modelID != "" {
+			meta["model_id"] = modelID
+		}
+	}
+	if providerID = routingerr.Sanitize(providerID); providerID != "" {
+		meta["provider_name"] = providerID
 	}
 	if err := s.messageCreator.CreateSessionMessage(
 		ctx,
@@ -313,6 +373,64 @@ func (s *Service) createTransientRetryStatusMessage(ctx context.Context, data wa
 			zap.String("task_id", data.TaskID),
 			zap.Error(err))
 	}
+}
+
+func classifyKanbanFailure(data watcher.AgentEventData) *routingerr.Error {
+	providerID := data.AgentID
+	message := data.ErrorMessage
+	var resetHint *time.Time
+	if providerError := data.ProviderError; providerError != nil {
+		if providerError.ProviderID != "" {
+			providerID = providerError.ProviderID
+		}
+		if providerError.Message != "" {
+			message = providerError.Message
+		}
+		resetHint = providerError.ResetAt
+	}
+	return routingerr.Classify(routingerr.Input{
+		Phase:      routingerr.PhasePromptSend,
+		ProviderID: providerID,
+		ResetHint:  resetHint,
+		Stderr:     message,
+	})
+}
+
+func transientFailureLabel(classified *routingerr.Error) string {
+	if classified == nil {
+		return "Provider temporarily unavailable"
+	}
+	switch classified.Code {
+	case routingerr.CodeModelCapacity:
+		return "Model at capacity"
+	case routingerr.CodeNetworkUnavailable:
+		return "Network unavailable"
+	case routingerr.CodeProviderOverloaded:
+		return "Provider overloaded"
+	case routingerr.CodeRateLimited:
+		return "Rate limited"
+	default:
+		return "Provider temporarily unavailable"
+	}
+}
+
+func transientFailureExhaustedMessage(classified *routingerr.Error) string {
+	condition := "The provider remained unavailable"
+	if classified != nil {
+		switch classified.Code {
+		case routingerr.CodeModelCapacity:
+			condition = "The selected model remained at capacity"
+		case routingerr.CodeNetworkUnavailable:
+			condition = "The network remained unavailable"
+		case routingerr.CodeProviderOverloaded:
+			condition = "The provider remained overloaded"
+		case routingerr.CodeRateLimited:
+			condition = "The rate limit remained active"
+		case routingerr.CodeProviderUnavailable:
+			condition = "The provider remained unavailable"
+		}
+	}
+	return condition + " after several retries. Resume to try again, or start a fresh session."
 }
 
 // resetTransientRetry clears a session's retry entry, cancels its timer, and
@@ -365,7 +483,7 @@ func (s *Service) CancelTransientRetry(ctx context.Context, taskID, sessionID st
 		TaskID:           taskID,
 		SessionID:        sessionID,
 		AgentExecutionID: execID,
-		ErrorMessage:     "Provider overloaded — retries cancelled. Resume or start fresh to continue.",
+		ErrorMessage:     "Automatic provider retries cancelled. Resume or start fresh to continue.",
 	})
 	return true
 }

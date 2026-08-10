@@ -27,7 +27,7 @@ import { test, expect } from "../../fixtures/test-base";
  * the env guard is gone: it now runs unconditionally in the `chromium` project
  * alongside every other spec.
  *
- *   pnpm e2e -- e2e/tests/i18n/pseudo-coverage.spec.ts
+ *   pnpm e2e:raw -- e2e/tests/i18n/pseudo-coverage.spec.ts
  *
  * WHAT IT GUARANTEES: on each screen in `SCREENS`, every rendered text node and
  * every value of a `COPY_ATTRIBUTES` attribute that the detector below can see
@@ -195,34 +195,18 @@ const SCREENS: Screen[] = [
     // run between `cc6eb4dd5` and this commit. Re-check these against
     // `BUILT_IN_LAYOUT_PROFILES` whenever a built-in name or description moves.
     //
-    // Both groups are display strings that are also PERSISTED, so translating
-    // them in place would write locale-dependent values into a user's saved
-    // layouts and leave them there after a locale switch:
-    //   - Built-in profile names/descriptions (lib/layout/layout-profiles.ts).
-    //     `upsertBuiltInLayoutOverride` copies `builtIn.name` into the saved
-    //     record the first time a built-in is customized.
-    //   - Dockview panel titles (lib/state/layout-manager/constants.ts), which
-    //     `toSerializedDockview` writes into the stored layout JSON. That path
-    //     is already in `EXCLUDED` in scripts/externalize-strings.mjs.
-    // Localizing either needs a key/persisted-value split in those modules.
-    allow: [
-      "Default",
-      "Plan Mode",
-      "Preview Mode",
-      "VS Code",
-      "Agent with Files, Changes, and Terminal",
-      "Agent and Plan side by side",
-      "Agent and Browser side by side",
-      "Agent and VS Code side by side",
-      "Agent",
-      "Plan",
-      "Changes",
-      "Files",
-      "Browser",
-      "Terminal",
-      "PR Details",
-      "Merge Request",
-    ],
+    // Both groups WERE display strings that are also persisted, and both have
+    // had the key/persisted-value split this note used to ask for:
+    //   - Built-in profile names/descriptions (lib/layout/layout-profiles.ts)
+    //     carry `nameKey`/`descriptionKey`; `name` stays canonical English
+    //     because `upsertBuiltInLayoutOverride` copies it into the saved record.
+    //   - Dockview panel titles (lib/state/layout-manager/constants.ts) carry
+    //     `titleKey`; `toSerializedDockview` writes the canonical English
+    //     `title` into the stored layout JSON, and `normalizePanel` re-resolves
+    //     the display title on restore. `panel-titles.test.ts` covers both
+    //     directions.
+    // Only the two product names are still expected to render as English.
+    allow: ["VS Code", "Agent and VS Code side by side"],
   },
   {
     name: "settings — keyboard shortcuts",
@@ -298,6 +282,23 @@ const SCREENS: Screen[] = [
   // `test-base` state and belongs with whoever owns that fixture — not an
   // allowlist entry and not a renamed screen, either of which would keep the
   // false claim alive in a new form.
+  // NOT YET: "kanban board" (`/`, anchor `[data-testid=kanban-board]`). Probed
+  // under pseudo against this fixture. The board's own chrome is clean, and the
+  // one real finding it surfaced — the built-in sidebar view's "All tasks",
+  // which `sidebar-view-builtins.ts` persists as a user-editable name — is fixed
+  // and now resolves through `sidebar:viewAllTasks`.
+  //
+  // What is left is entirely the fixture's own records: the workflow name
+  // ("E2E Workflow") and its four step names ("Backlog", "In Progress",
+  // "Review", "Done"). Those are user data on exactly the footing as the
+  // workspace and executor-profile names described above, so this entry needs
+  // the same change — `findUnlocalizedText` learning to skip user data — and not
+  // an `allow` list of fixture values, which would fix this fixture and leave
+  // every developer instance red under different workflow names.
+  //
+  // `/tasks` was probed with it and cannot be added for a different reason:
+  // `[data-testid=tasks-list]` never renders in this fixture, so there is no
+  // anchor that proves the route mounted. It needs a seeded task list first.
   {
     name: "office — inbox",
     url: "/office/inbox",

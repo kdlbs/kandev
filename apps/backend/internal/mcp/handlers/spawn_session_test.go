@@ -170,11 +170,12 @@ func TestHandleSpawnSession_CrossWorkspace_Forbidden(t *testing.T) {
 
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-2", Name: "Other"}))
 	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-2", WorkspaceID: "ws-2", Name: "Board"}))
-	other, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	otherResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: "ws-2",
 		WorkflowID:  "wf-2",
 		Title:       "Other-workspace task",
 	})
+	other := otherResult.Task
 	require.NoError(t, err)
 
 	h, orch := newMessageTaskHandler(t, svc)

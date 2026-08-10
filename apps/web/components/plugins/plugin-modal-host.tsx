@@ -14,6 +14,7 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from "@kandev/ui/drawer";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import {
   pluginModalManager,
   usePluginModals,
@@ -137,17 +138,23 @@ function PluginModalInstance({ modal }: { modal: OpenPluginModal }) {
 /**
  * Renders every open plugin modal (`host.openModal(...)`) in a `@kandev/ui`
  * `Dialog`, each isolated behind its own `PluginErrorBoundary`. Mounted once
- * inside `<AppShell/>` so plugin content inherits host theme, tooltip, and
- * toast providers.
+ * at the app root, alongside `<PluginBootBridge/>`.
+ *
+ * The `TooltipProvider` is not redundant with the app-wide one in
+ * `app/layout.tsx`: this host mounts as a *sibling* of `<AppShell/>` (see
+ * `src/main.tsx`), so it is outside that provider's subtree and a `Tooltip`
+ * inside plugin modal content would throw for want of a provider. Radix
+ * allows nesting, so this stays correct if the host is ever moved inside the
+ * shell.
  */
 export function PluginModalHost() {
   const modals = usePluginModals();
   if (modals.length === 0) return null;
   return (
-    <>
+    <TooltipProvider>
       {modals.map((modal) => (
         <PluginModalInstance key={modal.instanceId} modal={modal} />
       ))}
-    </>
+    </TooltipProvider>
   );
 }

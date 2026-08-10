@@ -60,6 +60,40 @@ async function interceptLoadFailure(testPage: import("@playwright/test").Page) {
 }
 
 test.describe("mobile GitLab MR automation options", () => {
+  test("dropdown exposes touch-sized auto-fix/auto-merge switches above Review follow-up", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const taskId = await seedTaskWithLinkedMR(apiClient, seedData, "MR automation section mobile");
+
+    await testPage.goto(`/t/${taskId}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    const mrButton = testPage.getByTestId("mr-topbar-button");
+    await expect(mrButton).toBeVisible({ timeout: 15_000 });
+    await mrButton.tap();
+
+    const controls = testPage.getByTestId("mr-automation-controls");
+    await expect(controls).toBeVisible();
+    await waitForDropdownSettled(testPage);
+
+    const autoFixSwitch = controls.getByRole("switch", {
+      name: "Auto-fix CI and address comments",
+    });
+    const autoMergeSwitch = controls.getByRole("switch", { name: "Auto-merge when ready" });
+    await expectTouchTarget(autoFixSwitch.locator(".."), "auto-fix row");
+    await expectTouchTarget(autoMergeSwitch.locator(".."), "auto-merge row");
+
+    await autoFixSwitch.tap();
+    await expect
+      .poll(async () => apiClient.getTaskMRAutomationOptions(taskId))
+      .toMatchObject({ auto_fix_enabled: true });
+
+    await assertNoDocumentHorizontalOverflow(testPage, "mobile MR automation section");
+  });
+
   test("dropdown exposes touch-sized automation controls and persists switches", async ({
     testPage,
     apiClient,

@@ -11,6 +11,7 @@ import (
 func TestBuildManifestUsesSameBinaryBackendMode(t *testing.T) {
 	env := []string{
 		"KANDEV_SERVER_PORT=1234",
+		"KANDEV_DESKTOP_HEALTH_TOKEN=health-token",
 		"KANDEV_CONSOLE_LOG_LEVEL=warn",
 		"UNRELATED=value",
 	}
@@ -30,6 +31,9 @@ func TestBuildManifestUsesSameBinaryBackendMode(t *testing.T) {
 	}
 	if manifest.Env["KANDEV_CONSOLE_LOG_LEVEL"] != "warn" {
 		t.Fatalf("KANDEV_CONSOLE_LOG_LEVEL = %q", manifest.Env["KANDEV_CONSOLE_LOG_LEVEL"])
+	}
+	if manifest.Env["KANDEV_DESKTOP_HEALTH_TOKEN"] != "health-token" {
+		t.Fatalf("KANDEV_DESKTOP_HEALTH_TOKEN = %q", manifest.Env["KANDEV_DESKTOP_HEALTH_TOKEN"])
 	}
 }
 

@@ -35,6 +35,9 @@ export async function createTaskPlan(
   }
   const response = await client.request("task.plan.create", {
     task_id: taskId,
+    // Canonical English on purpose: the backend persists this into
+    // `task_plans.title` / `task_plan_revisions.title`, so a localized default
+    // would freeze whichever locale created the plan into the stored record.
     title: title || "Plan",
     content,
     created_by: "user",

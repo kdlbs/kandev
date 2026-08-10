@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agentruntime"
 	orchmodels "github.com/kandev/kandev/internal/office/models"
+
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
@@ -311,9 +313,10 @@ func TestUnarchiveCancelsAndJoinsClaimedArchiveCleanup(t *testing.T) {
 	ctx := context.Background()
 	coordinator := activity.NewCoordinator(activity.Options{})
 	taskSvc.SetTaskResourceCleanupActivityGate(coordinatorCleanupActivityGate{coordinator: coordinator})
-	task, err := taskSvc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := taskSvc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-1", Title: "Archived task", ProjectID: "proj-1",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -410,9 +413,10 @@ func TestUnarchiveCancelsAndJoinsClaimedArchiveCleanup(t *testing.T) {
 func TestUnarchiveCancellationPreservesCleanupResourcesAfterBlockedCleaner(t *testing.T) {
 	taskSvc, repo := setupOfficeTest(t)
 	ctx := context.Background()
-	task, err := taskSvc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := taskSvc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-1", Title: "Archived task", ProjectID: "proj-1",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -529,9 +533,10 @@ func TestPerformTaskCleanup_CancellationStopsBeforeWorktreeCleanup(t *testing.T)
 func TestUnarchiveTaskTreeCancelsPendingArchiveCleanup(t *testing.T) {
 	taskSvc, repo := setupOfficeTest(t)
 	ctx := context.Background()
-	task, err := taskSvc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := taskSvc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-1", Title: "Archived task", ProjectID: "proj-1",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -611,11 +616,23 @@ func TestArchiveCleanupPreservesHistoricalWorktreeBranchMetadata(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 	seedCleanupTaskAndSession(t, repo, "task-history", "session-history")
-	if err := repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
-		ID: "session-worktree-history", SessionID: "session-history", WorktreeID: "worktree-history",
-		RepositoryID: "repo-history", WorktreePath: "/tmp/history", WorktreeBranch: "feature/history",
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-history", TaskID: "task-history", ExecutorType: "worktree",
+		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{{
+			ID: "session-worktree-history", TaskEnvironmentID: "env-history", WorktreeID: "worktree-history",
+			RepositoryID: "repo-history", WorktreePath: "/tmp/history", WorktreeBranch: "feature/history",
+		}},
 	}); err != nil {
-		t.Fatalf("CreateTaskSessionWorktree: %v", err)
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "session-history")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.TaskEnvironmentID = "env-history"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("link session to env: %v", err)
 	}
 	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
 	if err := svc.ArchiveTask(ctx, "task-history"); err != nil {
@@ -653,9 +670,10 @@ func TestArchiveFailsBeforeMutationWhenCleanupIntentCannotPersist(t *testing.T) 
 func TestCascadeArchivePersistsCleanupBeforeTaskMutation(t *testing.T) {
 	taskSvc, repo := setupOfficeTest(t)
 	ctx := context.Background()
-	task, err := taskSvc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := taskSvc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-1", Title: "Cascade archive", ProjectID: "proj-1",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -700,9 +718,10 @@ func TestWorkspaceDeletePersistsCleanupBeforeTaskCascade(t *testing.T) {
 func TestCascadeDeletePersistsCleanupBeforeTaskMutation(t *testing.T) {
 	taskSvc, repo := setupOfficeTest(t)
 	ctx := context.Background()
-	task, err := taskSvc.CreateTask(ctx, &CreateTaskRequest{
+	taskResult, err := taskSvc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-1", Title: "Cascade delete", ProjectID: "proj-1",
 	})
+	task := taskResult.Task
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -729,11 +748,12 @@ func TestDeleteInheritedSubtaskPreservesChildMaterializedWorkspaceForParent(t *t
 	ctx := context.Background()
 	seedParentChildWorkspace(t, repo, "ws-shared-delete", "wf-shared-delete", "task-parent", "task-child")
 	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
-		ID:           "env-shared",
-		TaskID:       "task-child",
-		Status:       models.TaskEnvironmentStatusReady,
-		WorktreeID:   "worktree-shared",
-		WorktreePath: "/tmp/worktree-shared",
+		ID:     "env-shared",
+		TaskID: "task-child",
+		Status: models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{
+			{RepositoryID: "repo-shared", WorktreeID: "worktree-shared", WorktreePath: "/tmp/worktree-shared"},
+		},
 	}); err != nil {
 		t.Fatalf("create child-materialized environment: %v", err)
 	}
@@ -1054,9 +1074,11 @@ func TestTaskResourceCleanupMissingResourcesSucceed(t *testing.T) {
 		destroyer   *stubDestroyer
 	}{
 		{
-			name:        "worktree",
-			environment: &models.TaskEnvironment{ID: "env-gone-worktree", WorktreeID: "worktree-gone"},
-			destroyer:   &stubDestroyer{worktreeErr: fmt.Errorf("worktree cleanup: %w", worktree.ErrWorktreeNotFound)},
+			name: "worktree",
+			environment: &models.TaskEnvironment{ID: "env-gone-worktree", Repos: []*models.TaskEnvironmentRepo{
+				{WorktreeID: "worktree-gone"},
+			}},
+			destroyer: &stubDestroyer{worktreeErr: fmt.Errorf("worktree cleanup: %w", worktree.ErrWorktreeNotFound)},
 		},
 		{
 			name:        "task environment row",
@@ -1102,6 +1124,53 @@ func TestTaskResourceCleanupMissingResourcesSucceed(t *testing.T) {
 				t.Fatalf("cleanup state = %q, want succeeded", got.State)
 			}
 		})
+	}
+}
+
+// TestTaskResourceCleanupJobSnapshotRoundTripsMultiRepoWorktrees proves that
+// the durable cleanup job preserves every task-environment repository through
+// JSON snapshot encoding and processing. A future change to the snapshot
+// shape or inventory loading must not silently drop Repos[] and skip a
+// repository's worktree teardown.
+func TestTaskResourceCleanupJobSnapshotRoundTripsMultiRepoWorktrees(t *testing.T) {
+	taskSvc, repo := setupOfficeTest(t)
+	taskSvc.StopTaskResourceCleanupWorker()
+	destroyer := &stubDestroyer{}
+	taskSvc.SetEnvironmentDestroyer(destroyer)
+
+	env := &models.TaskEnvironment{
+		ID: "env-multi-snapshot",
+		Repos: []*models.TaskEnvironmentRepo{
+			{RepositoryID: "repo-a", WorktreeID: "wt-primary"},
+			{RepositoryID: "repo-b", WorktreeID: "wt-secondary"},
+		},
+	}
+	snapshot, err := json.Marshal(taskResourceCleanupSnapshot{
+		TaskEnvironment:      env,
+		DeleteEnvironmentRow: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := &models.TaskResourceCleanupJob{
+		ID:               "multi-repo-snapshot-roundtrip",
+		OperationID:      "cascade_delete:multi-repo-snapshot:roundtrip",
+		TaskID:           "deleted-multi-repo-task",
+		Trigger:          models.TaskResourceCleanupTriggerCascadeDelete,
+		State:            models.TaskResourceCleanupStatePending,
+		ResourceSnapshot: string(snapshot),
+	}
+	if err := repo.CreateTaskResourceCleanupJob(context.Background(), job); err != nil {
+		t.Fatalf("CreateTaskResourceCleanupJob: %v", err)
+	}
+
+	if err := taskSvc.processTaskResourceCleanupJob(context.Background(), job.ID); err != nil {
+		t.Fatalf("processTaskResourceCleanupJob: %v", err)
+	}
+
+	want := []string{"wt-primary", "wt-secondary"}
+	if got := destroyer.worktreeCalls; !reflect.DeepEqual(got, want) {
+		t.Fatalf("worktree destroy calls = %v, want %v (Repos[] did not survive the snapshot round trip)", got, want)
 	}
 }
 

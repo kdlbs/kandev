@@ -488,7 +488,7 @@ export type RoutingErrorCode =
   | "subscription_required"
   | "quota_limited"
   | "rate_limited"
-  | "provider_unavailable"
+  | ("network_unavailable" | "provider_unavailable" | "provider_overloaded" | "model_capacity")
   | "model_unavailable"
   | "provider_not_configured"
   | "unknown_provider_error"
@@ -547,7 +547,7 @@ export type AgentRoutingOverrides = {
   tier_per_reason?: TierPerReason;
 };
 
-export type ProviderHealthState = "healthy" | "degraded" | "user_action_required";
+export type ProviderHealthState = "healthy" | "short_retry" | "degraded" | "user_action_required";
 export type ProviderHealthScope = "provider" | "model" | "tier";
 
 export type ProviderHealth = {
@@ -566,6 +566,7 @@ export type ProviderHealth = {
 
 export type RouteAttemptOutcome =
   | "launched"
+  | "retry_scheduled"
   | "failed_provider_unavailable"
   | "failed_other"
   | "skipped_degraded"

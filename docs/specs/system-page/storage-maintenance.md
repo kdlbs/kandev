@@ -1,7 +1,7 @@
 ---
 status: building
 created: 2026-07-14
-updated: 2026-08-02
+updated: 2026-08-08
 owner: cfl
 ---
 
@@ -15,6 +15,12 @@ normally release task resources, but interrupted cleanup and shared tool caches 
 consume the disk until an operator edits the host or runs broad commands such as
 `docker system prune -a`. Operators need an in-app, ownership-aware way to understand and
 reclaim that space without maintaining cron or systemd configuration outside Kandev.
+
+The service also creates some longer-lived temporary roots for diagnostics and host
+utilities. Operators need a way to reclaim abandoned roots created by this installation, but shared
+temporary directories also contain unrelated caches, preview/CI data, developer harnesses, and other
+Kandev installations. Cleanup must therefore prove ownership instead of treating a `/tmp` name or
+mtime as sufficient evidence.
 
 ## What
 
@@ -45,10 +51,11 @@ reclaim that space without maintaining cron or systemd configuration outside Kan
   cache, and unused Docker images.
 - Storage analysis shows a total counted size derived from the available non-overlapping top-level
   measurements: total task workspaces, quarantine, managed and distinct user Go caches,
-  Kandev-managed container writable layers, Docker image layers, and Docker build cache. Active and
-  candidate workspace bytes and unused-image bytes remain visible subset measurements and are not
-  added again. If any top-level measurement is unavailable, the total is visibly identified as
-  partial rather than presented as complete host disk usage.
+  registered temporary artifacts, Kandev-managed container writable layers, Docker image layers, and
+  Docker build cache. Active and candidate workspace/temporary-artifact bytes and unused-image bytes
+  remain visible subset measurements and are not added again. If any top-level measurement is
+  unavailable, the total is visibly identified as partial rather than presented as complete host disk
+  usage.
 - A successful storage analysis is reused for 15 minutes. Opening or refreshing the Storage page,
   saving policy settings, and adopting an external Go cache consume that cached snapshot instead of
   starting another filesystem or Docker scan. Manual **Analyze** always bypasses the cache and
@@ -78,6 +85,16 @@ reclaim that space without maintaining cron or systemd configuration outside Kan
 - The Go-cache analysis row exposes a resource-specific **Clean Go cache** action only when the
   cache is Kandev-owned and above its configured maximum. That action submits an explicit
   `go_cache` selection through the same manual-run gate.
+- Read-only analysis includes a separate **Kandev temporary artifacts** resource for exact paths
+  registered by the current Kandev service. It reports total, active, stale-candidate, skipped, and
+  unavailable bytes/counts without recursively scanning the shared operating-system temp directory.
+- The resource row exposes a manual **Clean stale artifacts** action only for registered roots that
+  are closed or abandoned, have no recent owner lease/heartbeat, and are older than a fixed 24-hour
+  stale interval. The action uses an explicit `temporary_artifacts` selection through the existing
+  activity gate and a reversible confirmation.
+- Temporary-artifact cleanup is manual-only in the first release. Scheduled maintenance and an
+  unscoped full **Run now** never delete this resource, and `storage_maintenance` gains no temp
+  toggle. A future scheduled opt-in requires a separate operational decision.
 - Manual **Analyze** is read-only, does not require the idle gate, and never changes files,
   containers, images, caches, or database rows.
 - Each cleanup resource has its own enablement and threshold. The initial defaults are:
@@ -155,7 +172,7 @@ Retention override:
 
 ### Unarchive compatibility
 
-- Storage cleanup preserves historical `task_session_worktrees` rows and branch metadata for
+- Storage cleanup preserves historical task-environment repository rows and branch metadata for
   archived tasks. A historical row is recovery metadata, not proof that its old on-disk path is
   active.
 - When an archived task is unarchived while its workspace is quarantined and the quarantine entry
@@ -213,6 +230,34 @@ Retention override:
   Operators may remove confirmed-inactive legacy data through their normal host temporary-file
   policy or a deliberate one-time maintenance procedure. See
   [ADR 0045](../../decisions/0045-install-wide-storage-maintenance.md).
+
+### Kandev-owned temporary artifacts
+
+Decision: [ADR-2026-08-08-owned-temp-artifact-cleanup](../../decisions/2026-08-08-owned-temp-artifact-cleanup.md)
+
+- A backend service component creates a temporary artifact through the storage registry. The
+  registry persists an exact absolute path, an allowlisted artifact kind, an opaque artifact ID,
+  lifecycle timestamps, owner lease/heartbeat state, a per-service-run identity, and metadata in
+  `storage_temp_artifacts`.
+- The registry writes an owner-only `.kandev-temp-artifact.json` marker atomically inside the root.
+  Analysis and cleanup require the marker's artifact ID and kind to match the durable record,
+  validate the root with `Lstat`, reject symlink/path replacement, and never follow nested symlink
+  targets while measuring or moving the root.
+- The first registered producers are long-lived backend service roots such as Improve Kandev bundle
+  directories and the host-utility parent directory. Standalone `acpdbg`/preview commands, E2E and
+  `dev-isolated` harness roots, CI/PR checkouts, package-manager and compiler caches, generic `tmp.*`
+  paths, and artifacts from another Kandev installation remain unregistered.
+- Normal producer shutdown closes and removes its artifact. After restart, a missing owner lease or
+  heartbeat, including a same-PID row from an earlier service run, can classify a registered root
+  as abandoned, but it remains protected until the fixed 24-hour stale interval. Uncertain
+  liveness, unreadable rows/markers, and missing paths are skipped and reported rather than treated
+  as ownership.
+- Explicit cleanup atomically renames an eligible root on the same filesystem into
+  `<KANDEV_HOME_DIR>/trash/temporary-artifacts/` and records a `temporary_artifact` quarantine entry.
+  A cross-device rename has no copy/delete fallback. Restore is allowed while the original path is
+  free; permanent deletion follows the existing quarantine retention and path-safety rules.
+- Existing unmarked `/tmp/kandev-agent/*` directories and arbitrary shared temp files remain host
+  policy data even when their names resemble a registered prefix.
 
 ### Docker storage
 
@@ -310,7 +355,7 @@ The UI lists the newest 20 runs. Run rows survive backend restarts.
 
 ```text
 id                string     primary key
-resource_type     enum       task_workspace | go_cache
+resource_type     enum       task_workspace | go_cache | temporary_artifact
 task_id           string     nullable, no foreign key
 workspace_id      string     nullable, no foreign key
 original_path     string     absolute, normalized, unique while active
@@ -324,6 +369,29 @@ deleted_at        timestamp  nullable
 last_error        string     default ""
 metadata          json       ownership marker and Git worktree details
 ```
+
+### `storage_temp_artifacts`
+
+```text
+id                  string     primary key; opaque artifact ID
+kind                enum       improve_bundle | host_utility
+path                string     absolute, normalized, unique while active
+marker_token        string     matches the owner-only marker in the root
+state               enum       active | closed | abandoned | quarantined | deleted | failed
+owner_pid           int        positive process ID
+created_at          timestamp
+last_heartbeat_at   timestamp  nullable
+closed_at           timestamp  nullable
+quarantined_at      timestamp  nullable
+deleted_at          timestamp  nullable
+last_error          string     default ""
+metadata            json       producer details plus the registry run identity
+```
+
+The row is the current installation's ownership record; the marker is a second path-level check.
+Unknown kinds, rows whose marker or path no longer matches, and rows whose root is missing are
+reconciled without deletion. The fixed 24-hour stale interval is not a persisted setting in this
+release.
 
 ## API surface
 
@@ -382,8 +450,16 @@ DELETE /api/v1/system/storage/quarantine
 ```
 
 `capabilities` reports the managed Go path, whether Go-cache adoption is available, Docker
-availability, configured Docker host, and whether host-global Docker cleanup is allowed. API
-responses never expose secret environment values.
+availability, configured Docker host, whether host-global Docker cleanup is allowed, and whether the
+registered temporary-artifact provider is available. API responses never expose secret environment
+values.
+
+The existing `POST /storage/run` resource selection accepts `temporary_artifacts` in addition to the
+existing provider names. It is an explicit-only selection: an empty `resources` list and scheduled
+maintenance invoke the provider's no-op path and never move temporary roots. The temporary-artifact
+summary contains `total_bytes`, `active_bytes`, `protected_bytes`, `stale_bytes`, `total_count`,
+`active_count`, `protected_count`, `stale_count`, `skipped_count`, `available`, and an optional
+`warnings` array.
 
 `GET /storage/settings` is the lightweight policy-read contract. It reads persisted settings and
 capabilities without requesting an overview snapshot or invoking filesystem, Go-cache, quarantine,
@@ -482,13 +558,28 @@ quarantined -> restored
             -> failed -> restored|deleted
 ```
 
+### Registered temporary artifact
+
+```text
+active    -> closed                 producer releases the lease normally
+          -> abandoned              restart/reconciliation finds no live lease
+closed    -> quarantined             explicit temporary_artifacts cleanup
+abandoned -> quarantined             explicit cleanup after the stale interval
+quarantined -> restored|deleted|failed
+failed      -> quarantined|deleted
+```
+
+The `active`, `closed`, and `abandoned` states are never eligible before the fixed 24-hour stale interval.
+State transitions require the matching durable row and marker; an uncertain transition leaves the
+root in place.
+
 ## Permissions
 
 Storage routes use the same install-user authorization as other System pages. Adopting an external
-Go cache, acknowledging a dedicated Docker daemon, permanently deleting one or more quarantine
-entries, and enabling host-global Docker cleanup require explicit UI confirmation and server-side
-validation. **Force clear all** uses the distinct `DELETE ALL NOW` confirmation because it removes
-the configured restore window.
+Go cache, acknowledging a dedicated Docker daemon, moving registered temporary artifacts to
+quarantine, permanently deleting one or more quarantine entries, and enabling host-global Docker
+cleanup require explicit UI confirmation and server-side validation. **Force clear all** uses the
+distinct `DELETE ALL NOW` confirmation because it removes the configured restore window.
 
 ## Failure modes
 
@@ -509,6 +600,17 @@ the configured restore window.
   warning, and does not run destructive maintenance.
 - A managed Go-cache cleanup failure leaves either the original cache or its quarantined rename
   intact; it never recursively deletes outside the configured owned path.
+- A temporary-artifact registry read, marker read, lease/heartbeat check, or ownership/path
+  validation failure keeps that root in place and records a skipped warning. There is no fallback to
+  prefix, mtime, or process-name classification.
+- A temporary-artifact rename failure, including a cross-device rename, leaves the original root
+  untouched. The provider never copies and then deletes a root as a quarantine fallback.
+- A backend crash after a temporary-artifact rename but before the lifecycle or quarantine state
+  update is reconciled from the durable row, matching marker, and trash path. An unmatched path is
+  retained rather than guessed into a quarantine entry.
+- A recent active lease or heartbeat protects a temporary artifact even when its directory is large.
+  A stale PID, absent lease, or unreadable liveness signal is not by itself permission to delete;
+  the fixed stale interval and marker/row checks must also pass.
 - Bulk quarantine deletion continues after one entry fails. Successful entries remain deleted,
   protected entries remain unchanged for eligible-only cleanup, failed entries remain visible with
   their last error, and the job finishes as failed with per-entry failure details.
@@ -537,6 +639,13 @@ the configured restore window.
   cleanup and permanent quarantine deletion do not cascade-delete that history.
 - Quarantined data remains restorable until permanent deletion succeeds. A failed permanent delete
   remains visible and retryable.
+- Temporary-artifact ownership rows and matching markers survive backend restarts. A producer's
+  normal close remains idempotent; an interrupted active row is reconciled and can become eligible
+  only after the stale interval.
+- Temporary-artifact analysis is included in the process-local 15-minute overview snapshot. A
+  successful explicit cleanup invalidates that snapshot after its provider result is persisted.
+- A temporary artifact moved to quarantine remains restorable until the existing retention deadline;
+  the temporary-artifact action itself does not purge unrelated quarantine entries.
 - Expired entries are automatically considered only by scheduled or full manual maintenance.
   Disabling scheduling prevents unattended quarantine deletion; it does not start an independent
   sweeper or remove existing entries.
@@ -634,6 +743,26 @@ the configured restore window.
 - **GIVEN** `/root/.cache/go-build` is the service user's default Go cache and is not adopted,
   **WHEN** storage analysis runs, **THEN** its path and bytes are reported read-only while cleanup
   remains unavailable for that path.
+- **GIVEN** a current-install temporary-artifact row has a matching marker and is closed or
+  abandoned beyond 24 hours, **WHEN** Storage analysis runs, **THEN** its bytes/counts appear in the
+  temporary-artifact resource as a stale candidate without changing the filesystem.
+- **GIVEN** an active or recently heartbeating registered artifact, **WHEN** Storage analysis or
+  cleanup runs, **THEN** it is reported as protected and remains untouched regardless of size.
+- **GIVEN** an unregistered `kandev-*` directory, a package/compiler cache, a preview/CI/dev-
+  isolated root, or legacy `/tmp/kandev-agent/*`, **WHEN** temporary-artifact cleanup runs, **THEN**
+  it is neither counted as owned nor modified.
+- **GIVEN** a stale registered artifact and no current activity blocker, **WHEN** the user confirms
+  **Clean stale artifacts**, **THEN** the request uses `resources: ["temporary_artifacts"]`, the root
+  moves by same-filesystem rename into quarantine, and the result appears in Quarantine.
+- **GIVEN** the user selects unscoped **Run now** or scheduled maintenance, **WHEN** a stale
+  registered temporary artifact exists, **THEN** the artifact remains in place because this provider
+  is explicit-only.
+- **GIVEN** a registered artifact has a missing/mismatched marker, a symlinked root, a path escape,
+  or a cross-device quarantine destination, **WHEN** analysis or cleanup runs, **THEN** Kandev
+  reports the safety warning and leaves the original path unchanged.
+- **GIVEN** a quarantined temporary artifact's original path is free, **WHEN** the user selects
+  **Restore**, **THEN** Kandev restores it through the existing quarantine flow before retention
+  expiry; unrelated quarantine entries are not purged by the resource-specific run.
 - **GIVEN** the Kandev service has no temporary-directory variables configured, **WHEN** two
   host-local agents start, **THEN** neither instance receives an injected `TMPDIR`, `TMP`, or `TEMP`
   value and their tools use the operating system defaults.
@@ -677,12 +806,16 @@ the configured restore window.
   worktree-pruning safety checks.
 - Age-based or name-based deletion of unmarked `/tmp/kandev-agent/*` directories.
 - A Kandev-owned general-purpose sweeper for the operating system's shared temporary directory.
+- Cleaning unregistered `kandev-*` roots from another installation or from standalone preview, CI,
+  E2E, or `dev-isolated` harnesses.
+- A persisted temporary-artifact threshold or scheduled cleanup toggle in the first release.
 - Guaranteed compatibility with tools that require a fixed, globally unique name in shared temp;
   those tools need a scoped path override when a real collision is observed.
 
 ## Implementation plan
 
 - [Original Storage maintenance implementation](../../plans/storage-maintenance/plan.md)
+- [Registered Kandev temporary-artifact cleanup](../../plans/storage-temp-artifacts/plan.md)
 - [Storage overview cache and settings follow-up](../../plans/storage-overview-cache/plan.md)
 - [Quarantine lifecycle follow-up](../../plans/quarantine-lifecycle/plan.md)
 - [Progressive Storage loading and totals](../../plans/storage-progressive-loading/plan.md)

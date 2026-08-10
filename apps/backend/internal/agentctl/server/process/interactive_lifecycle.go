@@ -3,6 +3,7 @@ package process
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"regexp"
@@ -11,14 +12,33 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/ptyexec"
 	"go.uber.org/zap"
 )
+
+// Fallback terminal dimensions used when a caller supplies none, or supplies a
+// value a PTY cannot represent.
+const (
+	defaultPTYCols = 120
+	defaultPTYRows = 40
+)
+
+// ptyDimension narrows a terminal dimension to the uint16 that pty.Winsize and
+// ptyexec.PtyHandle.Resize take. Out-of-range values fall back to the default
+// rather than silently wrapping: InteractiveStartRequest.DefaultCols/DefaultRows
+// are plain ints off the wire, so nothing upstream bounds them.
+func ptyDimension(v, fallback int) uint16 {
+	if v <= 0 || v > math.MaxUint16 {
+		return uint16(fallback)
+	}
+	return uint16(v)
+}
 
 // interactiveProcess represents a running interactive PTY process.
 type interactiveProcess struct {
 	info   InteractiveProcessInfo
 	cmd    *exec.Cmd
-	ptmx   PtyHandle // PTY handle (Unix: creack/pty, Windows: ConPTY)
+	ptmx   ptyexec.PtyHandle // PTY handle (Unix: creack/pty, Windows: ConPTY)
 	buffer *ringBuffer
 
 	// Turn detection
@@ -186,10 +206,10 @@ func (r *InteractiveRunner) immediateStartProcess(req InteractiveStartRequest, p
 	}
 
 	if cols <= 0 {
-		cols = 120
+		cols = defaultPTYCols
 	}
 	if rows <= 0 {
-		rows = 40
+		rows = defaultPTYRows
 	}
 	var startErr error
 	proc.startOnce.Do(func() {
@@ -231,7 +251,7 @@ func (r *InteractiveRunner) startProcess(proc *interactiveProcess, cols, rows in
 
 	// Start process in PTY with exact dimensions from frontend
 	// Unix: creack/pty, Windows: ConPTY
-	ptmx, err := startPTYWithSize(cmd, cols, rows)
+	ptmx, err := ptyexec.Start(cmd, ptyDimension(cols, defaultPTYCols), ptyDimension(rows, defaultPTYRows))
 	if err != nil {
 		return fmt.Errorf("failed to start pty: %w", err)
 	}
@@ -555,11 +575,7 @@ func (r *InteractiveRunner) wait(proc *interactiveProcess) {
 	// subsequent WriteStdin returns "process not found" which is logged.
 	defer proc.firstIdleOnce.Do(func() { close(proc.firstIdleCh) })
 
-	proc.mu.Lock()
-	ptyHandle := proc.ptmx
-	proc.mu.Unlock()
-
-	exitCode, signalName, err := waitPtyProcess(proc.cmd, ptyHandle)
+	exitCode, signalName, err := waitPtyProcess(proc.cmd)
 	status := types.ProcessStatusExited
 	if err != nil {
 		status = types.ProcessStatusFailed

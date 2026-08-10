@@ -231,6 +231,8 @@ vi.mock("@/components/task-create-dialog-state", () => ({
 function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
   return {
     taskName: "Task title",
+    autopilot: false,
+    setAutopilot: () => undefined,
     setTaskName: () => undefined,
     hasTitle: true,
     setHasTitle: () => undefined,
