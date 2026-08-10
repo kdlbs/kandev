@@ -111,3 +111,19 @@ func TestPATClientGetsIssue(t *testing.T) {
 		t.Fatalf("issue=%#v err=%v", issue, err)
 	}
 }
+
+func TestPATClientListsPullRequests(t *testing.T) {
+	server := newServer(t, func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/api/v1/repos/owner/repo/pulls" {
+			t.Fatalf("path=%s", request.URL.Path)
+		}
+		w.Header().Set("x-total-count", "1")
+		_, _ = w.Write([]byte(`[{"number":7,"title":"PR","state":"open","head":{"ref":"feat/a"},"base":{"ref":"main"}}]`))
+	})
+	t.Cleanup(server.Close)
+	client, _ := NewPATClient(server.URL, "token")
+	pulls, total, err := client.ListPullRequests(context.Background(), "owner", "repo", 1, 30)
+	if err != nil || total != 1 || len(pulls) != 1 || pulls[0].Head != "feat/a" {
+		t.Fatalf("pulls=%#v total=%d err=%v", pulls, total, err)
+	}
+}

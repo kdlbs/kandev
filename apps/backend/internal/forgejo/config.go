@@ -205,6 +205,14 @@ func (s *Service) ListIssues(ctx context.Context, workspaceID, owner, repo strin
 	return client.ListIssues(ctx, owner, repo, page, limit)
 }
 
+func (s *Service) ListPullRequests(ctx context.Context, workspaceID, owner, repo string, page, limit int) ([]PullRequest, int, error) {
+	client, err := s.ClientForWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, 0, err
+	}
+	return client.ListPullRequests(ctx, owner, repo, page, limit)
+}
+
 func (s *Service) AssociatePullRequest(ctx context.Context, workspaceID, taskID, repositoryID, owner, repo string, number int) (*TaskPR, error) {
 	if err := s.store.assertTaskWorkspace(ctx, workspaceID, taskID); err != nil {
 		return nil, err

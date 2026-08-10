@@ -100,6 +100,7 @@ type Client interface {
 	GetAuthenticatedUser(context.Context) (*User, error)
 	ListRepositories(context.Context, int, int) ([]Repository, int, error)
 	ListIssues(context.Context, string, string, int, int) ([]Issue, int, error)
+	ListPullRequests(context.Context, string, string, int, int) ([]PullRequest, int, error)
 	GetIssue(context.Context, string, string, int) (*Issue, error)
 	GetPullRequest(context.Context, string, string, int) (*PullRequest, error)
 	CreatePullRequest(context.Context, CreatePullRequestInput) (*PullRequest, error)
@@ -198,6 +199,22 @@ func (c *PATClient) GetIssue(ctx context.Context, owner, repo string, number int
 		return nil, err
 	}
 	return &issue, nil
+}
+
+func (c *PATClient) ListPullRequests(ctx context.Context, owner, repo string, page, limit int) ([]PullRequest, int, error) {
+	if strings.TrimSpace(owner) == "" || strings.TrimSpace(repo) == "" {
+		return nil, 0, errors.New("Forgejo owner and repository are required")
+	}
+	var raw []rawPullRequest
+	total, err := c.get(ctx, fmt.Sprintf("/repos/%s/%s/pulls", url.PathEscape(owner), url.PathEscape(repo)), pagination(page, limit), &raw)
+	if err != nil {
+		return nil, 0, err
+	}
+	pulls := make([]PullRequest, len(raw))
+	for i := range raw {
+		pulls[i] = *raw[i].pullRequest()
+	}
+	return pulls, total, nil
 }
 
 func (c *PATClient) CreatePullRequest(ctx context.Context, input CreatePullRequestInput) (*PullRequest, error) {

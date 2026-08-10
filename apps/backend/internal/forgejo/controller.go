@@ -22,10 +22,21 @@ func RegisterRoutes(router *gin.Engine, service *Service) {
 	api.DELETE("/config", controller.deleteConfig)
 	api.GET("/repositories", controller.listRepositories)
 	api.GET("/issues", controller.listIssues)
+	api.GET("/pull-requests", controller.listPullRequests)
 	api.GET("/tasks/:taskID/pull-requests", controller.listTaskPRs)
 	api.POST("/task-pull-requests", controller.associatePullRequest)
 	api.GET("/tasks/:taskID/issues", controller.listTaskIssues)
 	api.POST("/task-issues", controller.associateIssue)
+}
+
+func (c *Controller) listPullRequests(ctx *gin.Context) {
+	pulls, total, err := c.service.ListPullRequests(ctx.Request.Context(), c.workspaceID(ctx), strings.TrimSpace(ctx.Query("owner")), strings.TrimSpace(ctx.Query("repo")), queryPage(ctx), queryLimit(ctx))
+	if err != nil {
+		c.error(ctx, err)
+		return
+	}
+	ctx.Header("X-Total-Count", strconv.Itoa(total))
+	ctx.JSON(http.StatusOK, gin.H{"pull_requests": pulls, "total_count": total})
 }
 
 func (c *Controller) listTaskIssues(ctx *gin.Context) {
