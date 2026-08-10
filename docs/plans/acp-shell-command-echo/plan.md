@@ -9,7 +9,7 @@ issue: https://github.com/kdlbs/kandev/issues/2480
 
 ## Overview
 
-OMP sends the visible `$ <command>` text and the command result as adjacent ACP content items, while its structured final `rawOutput` does not expose a shell-output field recognized by Kandev. Kandev currently treats any non-nil final `rawOutput` as proof that stdout was already normalized, so it skips the final command-echo strip and persists the two content items glued together. The repair makes that state reflect whether stdout was actually recognized and adds an adapter-level regression test for OMP's exact event shape.
+OMP sends the visible `$ <command>` text and the command result as adjacent ACP content items, while its structured final `rawOutput` does not expose a stdout field recognized by Kandev. Kandev currently treats any non-nil final `rawOutput` as proof that stdout was already normalized, so it skips the final command-echo strip and persists the two content items glued together. The repair makes that state reflect whether stdout was actually recognized and adds an adapter-level regression test for OMP's exact event shape.
 
 ## Backend
 

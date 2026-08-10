@@ -256,6 +256,8 @@ func TestConvertToolCallResultUpdate_OMPStructuredFinalOutputStripsCommandConten
 	require.Equal(t, command, event.NormalizedPayload.ShellExec().Command)
 	require.Equal(t, realOutput, event.NormalizedPayload.ShellExec().Output.Stdout)
 	require.NotContains(t, event.NormalizedPayload.ShellExec().Output.Stdout, "$ "+command)
+	require.NotNil(t, event.NormalizedPayload.ShellExec().Output.ExitCode)
+	require.Equal(t, 0, *event.NormalizedPayload.ShellExec().Output.ExitCode)
 }
 
 func TestConvertToolCallResultUpdate_FinalOutputReplacesLiveWithoutDuplication(t *testing.T) {

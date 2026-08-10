@@ -23,11 +23,11 @@ Ensure a structured final ACP result marks stdout as committed only when Kandev 
 
 ## Verification
 
-Run the new regression before the production change and confirm it fails for the echoed-command mismatch. After the minimal fix, run:
+Run the new regression before the production change and confirm it fails for the echoed-command mismatch. After the minimal fix, run the focused regression and the repository backend test target:
 
 ```bash
 cd apps/backend && rtk go test ./internal/agentctl/server/adapter/transport/acp -run 'TestConvertToolCallResultUpdate_OMPStructuredFinalOutputStripsCommandContent|TestNormalizeShellToolUpdateCommitsEchoStripExactlyOnceForRawOutputOnlyResult' -count=1
-cd apps/backend && rtk go test ./internal/agentctl/server/adapter/transport/acp -count=1
+rtk make -C apps/backend test
 ```
 
 ## Files Likely Touched
