@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useToast } from "@/components/toast-provider";
 import type { PresetOption } from "./search-bar";
@@ -77,23 +77,26 @@ export function useSavedPresetActions({
     setRepoFilter("");
   };
 
-  const onToggleSavedDefault = async (preset: SavedPreset) => {
-    if (defaultMutationPendingRef.current) return;
-    defaultMutationPendingRef.current = true;
-    setDefaultMutationPending(true);
-    try {
-      await setSavedPresetDefault(preset.kind, preset.isDefault ? null : preset.id);
-      markSearchInteracted();
-    } catch {
-      toast({
-        description: t("integrations:failedToUpdateDefaultView"),
-        variant: "error",
-      });
-    } finally {
-      defaultMutationPendingRef.current = false;
-      setDefaultMutationPending(false);
-    }
-  };
+  const onToggleSavedDefault = useCallback(
+    async (preset: SavedPreset) => {
+      if (defaultMutationPendingRef.current) return;
+      defaultMutationPendingRef.current = true;
+      setDefaultMutationPending(true);
+      try {
+        await setSavedPresetDefault(preset.kind, preset.isDefault ? null : preset.id);
+        markSearchInteracted();
+      } catch {
+        toast({
+          description: t("integrations:failedToUpdateDefaultView"),
+          variant: "error",
+        });
+      } finally {
+        defaultMutationPendingRef.current = false;
+        setDefaultMutationPending(false);
+      }
+    },
+    [markSearchInteracted, setSavedPresetDefault, t, toast],
+  );
 
   return {
     savedPresets,

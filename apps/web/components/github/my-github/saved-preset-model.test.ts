@@ -37,6 +37,28 @@ describe("saved preset parsing", () => {
     expect(readSavedPresets([malformed, valid])).toEqual([valid]);
   });
 
+  it("drops entries that omit required query or timestamp fields", () => {
+    const valid = preset("valid", "pr");
+    const missingCustomQuery = {
+      id: "missing-query",
+      kind: "pr",
+      label: "Missing query",
+      repoFilter: "repo/missing-query",
+      createdAt: "2026-08-07T00:00:00Z",
+      isDefault: false,
+    };
+    const missingCreatedAt = {
+      id: "missing-created-at",
+      kind: "pr",
+      label: "Missing created at",
+      customQuery: "query:missing-created-at",
+      repoFilter: "repo/missing-created-at",
+      isDefault: false,
+    };
+
+    expect(readSavedPresets([missingCustomQuery, missingCreatedAt, valid])).toEqual([valid]);
+  });
+
   it("returns only validated saved-preset fields", () => {
     const valid = preset("valid", "pr");
 

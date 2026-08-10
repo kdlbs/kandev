@@ -192,6 +192,15 @@ describe("useSavedPresetActions query actions", () => {
 });
 
 describe("useSavedPresetActions default actions", () => {
+  it("keeps the default toggle handler stable across unchanged renders", () => {
+    const { result, rerender } = renderActions();
+    const initialToggle = result.current.onToggleSavedDefault;
+
+    rerender();
+
+    expect(result.current.onToggleSavedDefault).toBe(initialToggle);
+  });
+
   it("ignores a second default toggle while the first is pending", async () => {
     let finish!: () => void;
     const setDefault = vi.fn(
