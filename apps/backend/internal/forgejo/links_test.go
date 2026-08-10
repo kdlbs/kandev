@@ -92,3 +92,19 @@ func TestStore_GetTaskLinkIsWorkspaceScoped(t *testing.T) {
 		t.Fatalf("cross-workspace lookup=%v", err)
 	}
 }
+
+func TestStore_IssueWatchIsWorkspaceScoped(t *testing.T) {
+	store := newConfigTestStore(t)
+	ctx := context.Background()
+	watch := &IssueWatch{WorkspaceID: "workspace-a", Owner: "owner", Repo: "repo", Enabled: true}
+	if err := store.UpsertIssueWatch(ctx, watch); err != nil {
+		t.Fatal(err)
+	}
+	watches, err := store.ListIssueWatches(ctx, "workspace-a")
+	if err != nil || len(watches) != 1 || watches[0].PollIntervalSeconds != 300 {
+		t.Fatalf("watches=%#v err=%v", watches, err)
+	}
+	if err := store.DeleteIssueWatch(ctx, "workspace-b", watches[0].ID); !errors.Is(err, ErrWatchNotFound) {
+		t.Fatalf("cross-workspace delete=%v", err)
+	}
+}

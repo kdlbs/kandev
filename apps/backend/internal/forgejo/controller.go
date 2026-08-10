@@ -25,6 +25,9 @@ func RegisterRoutes(router *gin.Engine, service *Service) {
 	api.GET("/pull-requests", controller.listPullRequests)
 	api.GET("/queue", controller.listQueue)
 	api.POST("/connection/refresh", controller.refreshConnection)
+	api.GET("/issue-watches", controller.listIssueWatches)
+	api.PUT("/issue-watches", controller.saveIssueWatch)
+	api.DELETE("/issue-watches/:watchID", controller.deleteIssueWatch)
 	api.GET("/tasks/:taskID/pull-requests", controller.listTaskPRs)
 	api.POST("/task-pull-requests", controller.associatePullRequest)
 	api.POST("/task-pull-requests/create", controller.createTaskPullRequest)
@@ -34,6 +37,34 @@ func RegisterRoutes(router *gin.Engine, service *Service) {
 	api.DELETE("/task-pull-requests/:linkID", controller.unlinkTaskPullRequest)
 	api.POST("/task-issues/:linkID/refresh", controller.refreshTaskIssue)
 	api.POST("/task-pull-requests/:linkID/refresh", controller.refreshTaskPullRequest)
+}
+
+func (c *Controller) listIssueWatches(ctx *gin.Context) {
+	watches, err := c.service.ListIssueWatches(ctx.Request.Context(), c.workspaceID(ctx))
+	if err != nil {
+		c.error(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"watches": watches})
+}
+func (c *Controller) saveIssueWatch(ctx *gin.Context) {
+	var watch IssueWatch
+	if err := ctx.ShouldBindJSON(&watch); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid issue watch"})
+		return
+	}
+	if err := c.service.SaveIssueWatch(ctx.Request.Context(), c.workspaceID(ctx), &watch); err != nil {
+		c.error(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, watch)
+}
+func (c *Controller) deleteIssueWatch(ctx *gin.Context) {
+	if err := c.service.DeleteIssueWatch(ctx.Request.Context(), c.workspaceID(ctx), strings.TrimSpace(ctx.Param("watchID"))); err != nil {
+		c.error(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"deleted": true})
 }
 
 func (c *Controller) refreshTaskIssue(ctx *gin.Context) {
@@ -280,6 +311,10 @@ func (c *Controller) error(ctx *gin.Context, err error) {
 	}
 	if errors.Is(err, ErrTaskLinkNotFound) {
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "Forgejo task link not found"})
+		return
+	}
+	if errors.Is(err, ErrWatchNotFound) {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "Forgejo issue watch not found"})
 		return
 	}
 	if strings.Contains(err.Error(), "owner and repository are required") {

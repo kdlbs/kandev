@@ -115,6 +115,16 @@ func NewStore(db, ro *sqlx.DB) (*Store, error) {
 		updated_at DATETIME NOT NULL,
 		UNIQUE(task_id, repository_id, owner, repo, pr_number)
 	)`)
+	if err != nil {
+		return nil, err
+	}
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS forgejo_issue_watches (
+		id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, owner TEXT NOT NULL, repo TEXT NOT NULL,
+		labels TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1,
+		poll_interval_seconds INTEGER NOT NULL DEFAULT 300, last_polled_at DATETIME,
+		last_error TEXT NOT NULL DEFAULT '', created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL,
+		UNIQUE(workspace_id, owner, repo, labels)
+	)`)
 	return store, err
 }
 
@@ -395,6 +405,26 @@ func (s *Service) CreateTaskPullRequest(ctx context.Context, workspaceID, taskID
 
 func (s *Service) UnlinkTaskIssue(ctx context.Context, workspaceID, linkID string) error {
 	return s.store.DeleteTaskIssue(ctx, workspaceID, linkID)
+}
+
+func (s *Service) SaveIssueWatch(ctx context.Context, workspaceID string, watch *IssueWatch) error {
+	if watch == nil {
+		return errors.New("forgejo issue watch required")
+	}
+	watch.WorkspaceID = workspaceID
+	return s.store.UpsertIssueWatch(ctx, watch)
+}
+func (s *Service) ListIssueWatches(ctx context.Context, workspaceID string) ([]*IssueWatch, error) {
+	if strings.TrimSpace(workspaceID) == "" {
+		return nil, ErrWorkspaceRequired
+	}
+	return s.store.ListIssueWatches(ctx, workspaceID)
+}
+func (s *Service) DeleteIssueWatch(ctx context.Context, workspaceID, id string) error {
+	if strings.TrimSpace(workspaceID) == "" {
+		return ErrWorkspaceRequired
+	}
+	return s.store.DeleteIssueWatch(ctx, workspaceID, id)
 }
 
 func (s *Service) RefreshTaskIssue(ctx context.Context, workspaceID, linkID string) (*TaskIssue, error) {
