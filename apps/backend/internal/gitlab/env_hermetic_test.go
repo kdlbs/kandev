@@ -106,7 +106,8 @@ func TestAmbientGitLabEnvCoversEveryPackageEnvRead(t *testing.T) {
 		for _, call := range envReadCalls(file) {
 			name, resolved := resolveEnvName(call, constants)
 			if !resolved {
-				t.Errorf("%s: environment variable name is not a string literal or package constant",
+				t.Errorf("%s: environment variable name is not a string literal or a constant of this "+
+					"package; a constant imported from elsewhere needs resolveEnvName taught about it",
 					fileSet.Position(call.Pos()))
 				continue
 			}
