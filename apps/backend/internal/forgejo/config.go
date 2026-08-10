@@ -119,12 +119,22 @@ func NewStore(db, ro *sqlx.DB) (*Store, error) {
 		return nil, err
 	}
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS forgejo_issue_watches (
-		id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, owner TEXT NOT NULL, repo TEXT NOT NULL,
+		id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, workflow_id TEXT NOT NULL DEFAULT '', workflow_step_id TEXT NOT NULL DEFAULT '', repository_id TEXT NOT NULL DEFAULT '', base_branch TEXT NOT NULL DEFAULT '', prompt TEXT NOT NULL DEFAULT '', owner TEXT NOT NULL, repo TEXT NOT NULL,
 		labels TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1,
 		poll_interval_seconds INTEGER NOT NULL DEFAULT 300, last_polled_at DATETIME,
 		last_error TEXT NOT NULL DEFAULT '', created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL,
 		UNIQUE(workspace_id, owner, repo, labels)
 	)`)
+	// Forward-compatible migrations for databases created before watch task context.
+	for _, statement := range []string{
+		`ALTER TABLE forgejo_issue_watches ADD COLUMN workflow_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE forgejo_issue_watches ADD COLUMN workflow_step_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE forgejo_issue_watches ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE forgejo_issue_watches ADD COLUMN base_branch TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE forgejo_issue_watches ADD COLUMN prompt TEXT NOT NULL DEFAULT ''`,
+	} {
+		_, _ = db.Exec(statement)
+	}
 	return store, err
 }
 

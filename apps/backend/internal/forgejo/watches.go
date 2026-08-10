@@ -15,6 +15,11 @@ var ErrWatchNotFound = errors.New("forgejo: issue watch not found")
 type IssueWatch struct {
 	ID                  string     `json:"id" db:"id"`
 	WorkspaceID         string     `json:"workspace_id" db:"workspace_id"`
+	WorkflowID          string     `json:"workflow_id" db:"workflow_id"`
+	WorkflowStepID      string     `json:"workflow_step_id" db:"workflow_step_id"`
+	RepositoryID        string     `json:"repository_id" db:"repository_id"`
+	BaseBranch          string     `json:"base_branch" db:"base_branch"`
+	Prompt              string     `json:"prompt" db:"prompt"`
 	Owner               string     `json:"owner" db:"owner"`
 	Repo                string     `json:"repo" db:"repo"`
 	Labels              string     `json:"labels" db:"labels"`
@@ -41,7 +46,7 @@ func (s *Store) UpsertIssueWatch(ctx context.Context, watch *IssueWatch) error {
 		watch.CreatedAt = now
 	}
 	watch.UpdatedAt = now
-	_, err := s.db.ExecContext(ctx, `INSERT INTO forgejo_issue_watches (id, workspace_id, owner, repo, labels, enabled, poll_interval_seconds, last_polled_at, last_error, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(workspace_id, owner, repo, labels) DO UPDATE SET enabled=excluded.enabled, poll_interval_seconds=excluded.poll_interval_seconds, updated_at=excluded.updated_at`, watch.ID, watch.WorkspaceID, watch.Owner, watch.Repo, watch.Labels, watch.Enabled, watch.PollIntervalSeconds, watch.LastPolledAt, watch.LastError, watch.CreatedAt, watch.UpdatedAt)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO forgejo_issue_watches (id, workspace_id, workflow_id, workflow_step_id, repository_id, base_branch, prompt, owner, repo, labels, enabled, poll_interval_seconds, last_polled_at, last_error, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(workspace_id, owner, repo, labels) DO UPDATE SET workflow_id=excluded.workflow_id, workflow_step_id=excluded.workflow_step_id, repository_id=excluded.repository_id, base_branch=excluded.base_branch, prompt=excluded.prompt, enabled=excluded.enabled, poll_interval_seconds=excluded.poll_interval_seconds, updated_at=excluded.updated_at`, watch.ID, watch.WorkspaceID, watch.WorkflowID, watch.WorkflowStepID, watch.RepositoryID, watch.BaseBranch, watch.Prompt, watch.Owner, watch.Repo, watch.Labels, watch.Enabled, watch.PollIntervalSeconds, watch.LastPolledAt, watch.LastError, watch.CreatedAt, watch.UpdatedAt)
 	return err
 }
 
