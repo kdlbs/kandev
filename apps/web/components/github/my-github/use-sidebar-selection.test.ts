@@ -106,6 +106,32 @@ function expectConfiguredPresetFallbackOnKindSwitch() {
   expect(setRepoFilter).toHaveBeenCalledWith("");
 }
 
+function expectSameKindSentinelNoop() {
+  const setUserSelection = vi.fn();
+  const setQueryImmediate = vi.fn();
+  const setRepoFilter = vi.fn();
+  const markSearchInteracted = vi.fn();
+  const { result } = renderHook(() =>
+    useSidebarSelectionHandler({
+      currentKind: "pr",
+      savedPresets: [],
+      resolvedPrPresets: prPresets,
+      resolvedIssuePresets: issuePresets,
+      setQueryImmediate,
+      setRepoFilter,
+      setUserSelection,
+      markSearchInteracted,
+    }),
+  );
+
+  act(() => result.current({ kind: "pr", source: "preset", id: "" }));
+
+  expect(markSearchInteracted).not.toHaveBeenCalled();
+  expect(setUserSelection).not.toHaveBeenCalled();
+  expect(setQueryImmediate).not.toHaveBeenCalled();
+  expect(setRepoFilter).not.toHaveBeenCalled();
+}
+
 describe("useInitialSidebarSelection", () => {
   it("does not reapply an unchanged default when preset references change", async () => {
     const setQueryImmediate = vi.fn();
@@ -230,6 +256,8 @@ describe("useSidebarSelectionHandler", () => {
     "falls back to the first configured preset when the destination has no saved default",
     expectConfiguredPresetFallbackOnKindSwitch,
   );
+
+  it("ignores a same-kind toggle sentinel", expectSameKindSentinelNoop);
 
   it("keeps an explicit selection within the current kind", () => {
     const setUserSelection = vi.fn();

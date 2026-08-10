@@ -66,4 +66,24 @@ describe("PresetsSidebar saved defaults", () => {
 
     expect(onSelect).toHaveBeenCalledWith({ kind: "issue", source: "preset", id: "" });
   });
+
+  it("ignores reselecting the active kind", () => {
+    const onSelect = vi.fn();
+    render(
+      <PresetsSidebar
+        selected={{ kind: "pr", source: "saved", id: savedPreset.id }}
+        onSelect={onSelect}
+        savedPresets={[savedPreset]}
+        onDeleteSaved={vi.fn()}
+        canSaveCurrent={false}
+        onSaveCurrent={vi.fn()}
+        onToggleSavedDefault={vi.fn()}
+        defaultMutationPending={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Pull requests" }));
+
+    expect(onSelect).not.toHaveBeenCalled();
+  });
 });

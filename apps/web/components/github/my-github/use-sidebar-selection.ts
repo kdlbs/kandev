@@ -108,6 +108,10 @@ export function useSidebarSelectionHandler({
 }) {
   return useCallback(
     (selection: SidebarSelection) => {
+      // The empty preset id is only meaningful when the kind toggle changes kinds.
+      if (selection.kind === currentKind && selection.source === "preset" && selection.id === "") {
+        return;
+      }
       markSearchInteracted();
       // Kind-switch: always resolve from the saved default (or first configured preset),
       // not from the specific id in `selection`, which is just the kind-toggle fallback.
