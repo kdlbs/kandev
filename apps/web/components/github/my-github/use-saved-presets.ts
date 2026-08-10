@@ -133,6 +133,7 @@ function restoreSavedPreset(
     presets.some((candidate) => candidate.kind === preset.kind && candidate.isDefault)
       ? { ...preset, isDefault: false }
       : preset;
+  // Best-effort: the insertion point may shift if concurrent saves ran before rollback.
   const insertionIndex = Math.min(originalIndex, presets.length);
   return [...presets.slice(0, insertionIndex), restored, ...presets.slice(insertionIndex)];
 }

@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SavedPreset } from "./saved-preset-model";
 import { PresetsScopeBar } from "./presets-scope-bar";
@@ -15,14 +15,16 @@ const savedPreset: SavedPreset = {
 
 vi.mock("@/components/integrations/presets-scope-bar-base", () => ({
   IntegrationScopeBar: ({
+    defaultMutationPending,
     onToggleSavedDefault,
     savedPresets,
   }: {
+    defaultMutationPending?: boolean;
     onToggleSavedDefault?: (id: string) => void;
     savedPresets: Array<{ id: string }>;
   }) => {
     onToggleSavedDefault?.(savedPresets[0]?.id ?? "missing-preset");
-    return null;
+    return <div data-testid="scope-bar-default-action" aria-busy={defaultMutationPending} />;
   },
 }));
 
@@ -31,6 +33,25 @@ afterEach(() => {
 });
 
 describe("PresetsScopeBar default adapter", () => {
+  it("forwards pending state to the desktop default action", () => {
+    render(
+      <PresetsScopeBar
+        selected={{ kind: "pr", source: "saved", id: savedPreset.id }}
+        onSelect={vi.fn()}
+        savedPresets={[savedPreset]}
+        onDeleteSaved={vi.fn()}
+        canSaveCurrent={false}
+        onSaveCurrent={vi.fn()}
+        onToggleSavedDefault={vi.fn()}
+        defaultMutationPending
+        prPresets={[]}
+        issuePresets={[]}
+      />,
+    );
+
+    expect(screen.getByTestId("scope-bar-default-action").getAttribute("aria-busy")).toBe("true");
+  });
+
   it("forwards a matching saved preset to the domain callback", () => {
     const onToggleSavedDefault = vi.fn();
 
