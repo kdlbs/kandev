@@ -48,9 +48,8 @@ test.describe("Review dialog multi-PR selector on mobile", () => {
     await expect(selector).toBeVisible();
     await expect(selector).toHaveAttribute("data-pr-number", String(firstPR.number));
     await expect(session.reviewFileHeader(REVIEW_SHARED_FILE)).toBeVisible();
-    // The diff group uses the generated task-workspace scope, while PR keys
-    // use the mocked GitHub repository name. Capture the scope after seeding
-    // and assert it stays stable while switching between same-repo PRs.
+    // The initial diff group can use the generated task-workspace scope, so
+    // only require a non-empty identity before selecting the second PR.
     const repositoryGroup = session.reviewDialog().getByTestId("changes-repo-group");
     await expect(repositoryGroup).toHaveAttribute("data-repository-name", /\S+/);
     const repositoryScope = await repositoryGroup.getAttribute("data-repository-name");
@@ -92,7 +91,7 @@ test.describe("Review dialog multi-PR selector on mobile", () => {
     await expect(session.reviewDialog()).toBeVisible();
     await expect(selector).toHaveAttribute("data-pr-number", String(secondPR.number));
     await expect(session.reviewFileHeader(REVIEW_SHARED_FILE)).toBeVisible({ timeout: 20_000 });
-    await expect(repositoryGroup).toHaveAttribute("data-repository-name", repositoryScope ?? "");
+    await expect(repositoryGroup).toHaveAttribute("data-repository-name", secondPR.repositoryName);
     await expect
       .poll(() => session.reviewDiffText(), { timeout: 30_000 })
       .toContain(secondPR.marker);
