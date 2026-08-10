@@ -1,0 +1,16 @@
+import { fetchJson, type ApiRequestOptions } from "../client";
+import type { ForgejoConfig, ForgejoIssue, ForgejoPullRequest, ForgejoRepository, ForgejoTaskIssue, ForgejoTaskPR, SetForgejoConfigRequest, TestForgejoConnectionResult } from "@/lib/types/forgejo";
+
+type WorkspaceOptions = ApiRequestOptions & { workspaceId: string };
+const path = (route: string, workspaceId: string) => `${route}${route.includes("?") ? "&" : "?"}workspace_id=${encodeURIComponent(workspaceId)}`;
+const withoutWorkspace = ({ workspaceId: _workspaceId, ...options }: WorkspaceOptions) => options;
+
+export const getForgejoConfig = async (options: WorkspaceOptions) => (await fetchJson<ForgejoConfig | undefined>(path("/api/v1/forgejo/config", options.workspaceId), withoutWorkspace(options))) ?? null;
+export const setForgejoConfig = (payload: SetForgejoConfigRequest, options: WorkspaceOptions) => fetchJson<ForgejoConfig>(path("/api/v1/forgejo/config", options.workspaceId), { ...withoutWorkspace(options), init: { method: "PUT", body: JSON.stringify(payload) } });
+export const testForgejoConfig = (payload: SetForgejoConfigRequest, options: WorkspaceOptions) => fetchJson<TestForgejoConnectionResult>(path("/api/v1/forgejo/config/test", options.workspaceId), { ...withoutWorkspace(options), init: { method: "POST", body: JSON.stringify(payload) } });
+export const listForgejoRepositories = (options: WorkspaceOptions) => fetchJson<{ repositories: ForgejoRepository[]; total_count: number }>(path("/api/v1/forgejo/repositories", options.workspaceId), withoutWorkspace(options));
+export const listForgejoIssues = (owner: string, repo: string, options: WorkspaceOptions) => fetchJson<{ issues: ForgejoIssue[]; total_count: number }>(path(`/api/v1/forgejo/issues?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`, options.workspaceId), withoutWorkspace(options));
+export const listForgejoTaskIssues = (taskId: string, options: WorkspaceOptions) => fetchJson<{ issues: ForgejoTaskIssue[] }>(path(`/api/v1/forgejo/tasks/${encodeURIComponent(taskId)}/issues`, options.workspaceId), withoutWorkspace(options));
+export const listForgejoTaskPRs = (taskId: string, options: WorkspaceOptions) => fetchJson<{ pull_requests: ForgejoTaskPR[] }>(path(`/api/v1/forgejo/tasks/${encodeURIComponent(taskId)}/pull-requests`, options.workspaceId), withoutWorkspace(options));
+export const linkForgejoIssue = (body: { task_id: string; repository_id?: string; owner: string; repo: string; number: number }, options: WorkspaceOptions) => fetchJson<ForgejoTaskIssue>(path("/api/v1/forgejo/task-issues", options.workspaceId), { ...withoutWorkspace(options), init: { method: "POST", body: JSON.stringify(body) } });
+export const linkForgejoPullRequest = (body: { task_id: string; repository_id?: string; owner: string; repo: string; number: number }, options: WorkspaceOptions) => fetchJson<ForgejoTaskPR>(path("/api/v1/forgejo/task-pull-requests", options.workspaceId), { ...withoutWorkspace(options), init: { method: "POST", body: JSON.stringify(body) } });
