@@ -127,3 +127,38 @@ func TestPATClientListsPullRequests(t *testing.T) {
 		t.Fatalf("pulls=%#v total=%d err=%v", pulls, total, err)
 	}
 }
+
+func TestPATClientListsPullRequestReviewResources(t *testing.T) {
+	server := newServer(t, func(w http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/repos/owner/repo/pulls/7/commits":
+			_, _ = w.Write([]byte(`[{"sha":"abc","commit":{"message":"Fix","author":{"name":"Alice"}}}]`))
+		case "/api/v1/repos/owner/repo/pulls/7/files":
+			_, _ = w.Write([]byte(`[{"filename":"a.go","status":"modified","additions":3,"deletions":1,"changes":4}]`))
+		case "/api/v1/repos/owner/repo/pulls/7/comments":
+			_, _ = w.Write([]byte(`[{"id":2,"body":"nit","path":"a.go","user":{"login":"bob"}}]`))
+		case "/api/v1/repos/owner/repo/pulls/7/reviews":
+			_, _ = w.Write([]byte(`[{"id":3,"state":"APPROVED","body":"LGTM","user":{"login":"carol"}}]`))
+		default:
+			http.NotFound(w, request)
+		}
+	})
+	t.Cleanup(server.Close)
+	client, _ := NewPATClient(server.URL, "token")
+	commits, err := client.ListPullRequestCommits(context.Background(), "owner", "repo", 7)
+	if err != nil || len(commits) != 1 || commits[0].Author != "Alice" {
+		t.Fatalf("commits=%#v err=%v", commits, err)
+	}
+	files, err := client.ListPullRequestFiles(context.Background(), "owner", "repo", 7)
+	if err != nil || len(files) != 1 || files[0].Changes != 4 {
+		t.Fatalf("files=%#v err=%v", files, err)
+	}
+	comments, err := client.ListPullRequestComments(context.Background(), "owner", "repo", 7)
+	if err != nil || len(comments) != 1 || comments[0].Author != "bob" {
+		t.Fatalf("comments=%#v err=%v", comments, err)
+	}
+	reviews, err := client.ListPullRequestReviews(context.Background(), "owner", "repo", 7)
+	if err != nil || len(reviews) != 1 || reviews[0].State != "APPROVED" {
+		t.Fatalf("reviews=%#v err=%v", reviews, err)
+	}
+}

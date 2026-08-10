@@ -55,23 +55,53 @@ type Issue struct {
 }
 
 type PullRequest struct {
-	Number  int    `json:"number"`
-	Title   string `json:"title"`
-	State   string `json:"state"`
-	HTMLURL string `json:"html_url"`
-	Head    string `json:"head"`
-	Base    string `json:"base"`
-	Draft   bool   `json:"draft"`
+	Number         int    `json:"number"`
+	Title          string `json:"title"`
+	State          string `json:"state"`
+	HTMLURL        string `json:"html_url"`
+	Head           string `json:"head"`
+	Base           string `json:"base"`
+	Draft          bool   `json:"draft"`
+	Mergeable      bool   `json:"mergeable"`
+	MergeableState string `json:"mergeable_state"`
+}
+
+type PullRequestCommit struct{ SHA, Message, Author string }
+type PullRequestFile struct {
+	Filename, Status, PreviousFilename, Patch string
+	Additions, Deletions, Changes             int
+}
+type PullRequestComment struct {
+	ID                          int64
+	Body, Author, HTMLURL, Path string
+	CreatedAt                   time.Time
+}
+type PullRequestReview struct {
+	ID                    int64
+	State, Body, Reviewer string
+	SubmittedAt           *time.Time
+}
+
+// PullRequestDetailsClient is available when the configured Forgejo server
+// exposes the standard review endpoints. Callers may report ErrUnsupported
+// when a different client implementation does not provide it.
+type PullRequestDetailsClient interface {
+	ListPullRequestCommits(context.Context, string, string, int) ([]PullRequestCommit, error)
+	ListPullRequestFiles(context.Context, string, string, int) ([]PullRequestFile, error)
+	ListPullRequestComments(context.Context, string, string, int) ([]PullRequestComment, error)
+	ListPullRequestReviews(context.Context, string, string, int) ([]PullRequestReview, error)
 }
 
 type rawPullRequest struct {
-	Number  int    `json:"number"`
-	Title   string `json:"title"`
-	State   string `json:"state"`
-	HTMLURL string `json:"html_url"`
-	Draft   bool   `json:"draft"`
-	Merged  bool   `json:"merged"`
-	Head    struct {
+	Number         int    `json:"number"`
+	Title          string `json:"title"`
+	State          string `json:"state"`
+	HTMLURL        string `json:"html_url"`
+	Draft          bool   `json:"draft"`
+	Merged         bool   `json:"merged"`
+	Mergeable      bool   `json:"mergeable"`
+	MergeableState string `json:"mergeable_state"`
+	Head           struct {
 		Ref string `json:"ref"`
 	} `json:"head"`
 	Base struct {
@@ -84,7 +114,7 @@ func (p rawPullRequest) pullRequest() *PullRequest {
 	if p.Merged {
 		state = "merged"
 	}
-	return &PullRequest{Number: p.Number, Title: p.Title, State: state, HTMLURL: p.HTMLURL, Head: p.Head.Ref, Base: p.Base.Ref, Draft: p.Draft}
+	return &PullRequest{Number: p.Number, Title: p.Title, State: state, HTMLURL: p.HTMLURL, Head: p.Head.Ref, Base: p.Base.Ref, Draft: p.Draft, Mergeable: p.Mergeable, MergeableState: p.MergeableState}
 }
 
 type CreatePullRequestInput struct {
@@ -258,6 +288,91 @@ func (c *PATClient) GetPullRequest(ctx context.Context, owner, repo string, numb
 		return nil, err
 	}
 	return raw.pullRequest(), nil
+}
+
+func (c *PATClient) ListPullRequestCommits(ctx context.Context, owner, repo string, number int) ([]PullRequestCommit, error) {
+	var raw []struct {
+		SHA    string `json:"sha"`
+		Commit struct {
+			Message string `json:"message"`
+			Author  struct {
+				Name string `json:"name"`
+			} `json:"author"`
+		} `json:"commit"`
+	}
+	if err := c.getPullRequestResource(ctx, owner, repo, number, "commits", &raw); err != nil {
+		return nil, err
+	}
+	result := make([]PullRequestCommit, len(raw))
+	for i := range raw {
+		result[i] = PullRequestCommit{SHA: raw[i].SHA, Message: raw[i].Commit.Message, Author: raw[i].Commit.Author.Name}
+	}
+	return result, nil
+}
+
+func (c *PATClient) ListPullRequestFiles(ctx context.Context, owner, repo string, number int) ([]PullRequestFile, error) {
+	var raw []struct {
+		Filename         string `json:"filename"`
+		Status           string `json:"status"`
+		PreviousFilename string `json:"previous_filename"`
+		Patch            string `json:"patch"`
+		Additions        int    `json:"additions"`
+		Deletions        int    `json:"deletions"`
+		Changes          int    `json:"changes"`
+	}
+	if err := c.getPullRequestResource(ctx, owner, repo, number, "files", &raw); err != nil {
+		return nil, err
+	}
+	result := make([]PullRequestFile, len(raw))
+	for i := range raw {
+		result[i] = PullRequestFile{Filename: raw[i].Filename, Status: raw[i].Status, PreviousFilename: raw[i].PreviousFilename, Patch: raw[i].Patch, Additions: raw[i].Additions, Deletions: raw[i].Deletions, Changes: raw[i].Changes}
+	}
+	return result, nil
+}
+
+func (c *PATClient) ListPullRequestComments(ctx context.Context, owner, repo string, number int) ([]PullRequestComment, error) {
+	var raw []struct {
+		ID        int64     `json:"id"`
+		Body      string    `json:"body"`
+		HTMLURL   string    `json:"html_url"`
+		Path      string    `json:"path"`
+		CreatedAt time.Time `json:"created_at"`
+		User      User      `json:"user"`
+	}
+	if err := c.getPullRequestResource(ctx, owner, repo, number, "comments", &raw); err != nil {
+		return nil, err
+	}
+	result := make([]PullRequestComment, len(raw))
+	for i := range raw {
+		result[i] = PullRequestComment{ID: raw[i].ID, Body: raw[i].Body, Author: raw[i].User.Login, HTMLURL: raw[i].HTMLURL, Path: raw[i].Path, CreatedAt: raw[i].CreatedAt}
+	}
+	return result, nil
+}
+
+func (c *PATClient) ListPullRequestReviews(ctx context.Context, owner, repo string, number int) ([]PullRequestReview, error) {
+	var raw []struct {
+		ID          int64      `json:"id"`
+		State       string     `json:"state"`
+		Body        string     `json:"body"`
+		SubmittedAt *time.Time `json:"submitted_at"`
+		User        User       `json:"user"`
+	}
+	if err := c.getPullRequestResource(ctx, owner, repo, number, "reviews", &raw); err != nil {
+		return nil, err
+	}
+	result := make([]PullRequestReview, len(raw))
+	for i := range raw {
+		result[i] = PullRequestReview{ID: raw[i].ID, State: raw[i].State, Body: raw[i].Body, Reviewer: raw[i].User.Login, SubmittedAt: raw[i].SubmittedAt}
+	}
+	return result, nil
+}
+
+func (c *PATClient) getPullRequestResource(ctx context.Context, owner, repo string, number int, resource string, target any) error {
+	if strings.TrimSpace(owner) == "" || strings.TrimSpace(repo) == "" || number < 1 {
+		return errors.New("Forgejo pull request identity required")
+	}
+	_, err := c.get(ctx, fmt.Sprintf("/repos/%s/%s/pulls/%d/%s", url.PathEscape(owner), url.PathEscape(repo), number, resource), nil, target)
+	return err
 }
 
 func pagination(page, limit int) url.Values {
