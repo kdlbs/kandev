@@ -29,18 +29,43 @@ var (
 )
 
 type Settings struct {
-	MaxPerSession int `json:"max_per_session"`
+	MaxPerSession int  `json:"max_per_session"`
+	MergeEnabled  bool `json:"merge_enabled"`
+}
+
+// SettingsPatch is a partial update to Settings: a nil field means "leave
+// unchanged" rather than "reset to zero value". Without this distinction a
+// client that PATCHes only max_per_session would silently reset
+// merge_enabled to false, since Settings has no way to represent omission.
+type SettingsPatch struct {
+	MaxPerSession *int  `json:"max_per_session"`
+	MergeEnabled  *bool `json:"merge_enabled"`
+}
+
+// Apply returns base with every non-nil patch field overlaid.
+func (p SettingsPatch) Apply(base Settings) Settings {
+	if p.MaxPerSession != nil {
+		base.MaxPerSession = *p.MaxPerSession
+	}
+	if p.MergeEnabled != nil {
+		base.MergeEnabled = *p.MergeEnabled
+	}
+	return base
+}
+
+type Response struct {
+	Settings  Settings  `json:"settings"`
+	Effective Effective `json:"effective"`
 }
 
 type Effective struct {
 	MaxPerSession int    `json:"max_per_session"`
 	Source        Source `json:"source"`
 	Locked        bool   `json:"locked"`
-}
-
-type Response struct {
-	Settings  Settings  `json:"settings"`
-	Effective Effective `json:"effective"`
+	// MergeEnabled always mirrors Settings.MergeEnabled: unlike MaxPerSession
+	// it has no environment override, so there is no separate source/lock to
+	// track.
+	MergeEnabled bool `json:"merge_enabled"`
 }
 
 type Environment struct {
@@ -53,8 +78,10 @@ type Resolution struct {
 	InvalidEnvironment bool
 }
 
+// DefaultSettings returns the shipped defaults: no session-count cap and
+// merging enabled.
 func DefaultSettings() Settings {
-	return Settings{MaxPerSession: DefaultMaxPerSession}
+	return Settings{MaxPerSession: DefaultMaxPerSession, MergeEnabled: true}
 }
 
 func Validate(settings Settings) error {

@@ -137,7 +137,9 @@
   }
 
   function openCommentPopup(anchorX, anchorY, onSubmit) {
+    var keep = pendingAnnotation;
     closePopup();
+    pendingAnnotation = keep;
     popup = document.createElement('div');
     popup.style.cssText = 'position:fixed;left:' + anchorX + 'px;top:' + anchorY + 'px;z-index:' + (Z + 1) + ';'
       + 'background:#fff;border:1px solid #e5e7eb;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.15);'

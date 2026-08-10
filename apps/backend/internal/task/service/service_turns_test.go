@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/worktree"
 	"github.com/stretchr/testify/require"
 )
@@ -149,6 +150,18 @@ func (nilTaskSessionRepo) SetSessionMetadataKey(context.Context, string, string,
 	panic("SetSessionMetadataKey should not be called for a nil session")
 }
 
+// createTestEnvironment creates a task environment row for tests that seed
+// environment-repository worktrees directly.
+func createTestEnvironment(t *testing.T, repo *sqliterepo.Repository, envID, taskID string) {
+	t.Helper()
+	if err := repo.CreateTaskEnvironment(context.Background(), &models.TaskEnvironment{
+		ID: envID, TaskID: taskID, ExecutorType: "worktree",
+		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment(%s): %v", envID, err)
+	}
+}
+
 func TestGetWorkspaceInfoForSession_BasicFields(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
@@ -177,15 +190,16 @@ func TestGetWorkspaceInfoForSession_BasicFields(t *testing.T) {
 		t.Fatalf("failed to create session: %v", err)
 	}
 
-	// Add a worktree to the session
-	if err := repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
-		ID:             "wt1",
-		SessionID:      "session-1",
-		WorktreeID:     "wid1",
-		RepositoryID:   "repo1",
-		WorktreePath:   "/tmp/worktrees/session-1",
-		WorktreeBranch: "feature/test",
-		CreatedAt:      now,
+	// Add a worktree to the session's environment
+	createTestEnvironment(t, repo, "env-123", "task-123")
+	if err := repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		ID:                "wt1",
+		TaskEnvironmentID: "env-123",
+		WorktreeID:        "wid1",
+		RepositoryID:      "repo1",
+		WorktreePath:      "/tmp/worktrees/session-1",
+		WorktreeBranch:    "feature/test",
+		CreatedAt:         now,
 	}); err != nil {
 		t.Fatalf("failed to create worktree: %v", err)
 	}
@@ -266,15 +280,17 @@ func TestGetWorkspaceInfoForSession_ProjectsPersistedWorktreeIdentity(t *testing
 		t.Fatalf("CreateTaskRepository: %v", err)
 	}
 	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
-		ID: "session-recovery", TaskID: "task-123", State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now,
+		ID: "session-recovery", TaskID: "task-123", TaskEnvironmentID: "env-recovery",
+		State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("CreateTaskSession: %v", err)
 	}
-	if err := repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
-		ID: "session-worktree-recovery", SessionID: "session-recovery", WorktreeID: "worktree-recovery", RepositoryID: "repo-recovery",
+	createTestEnvironment(t, repo, "env-recovery", "task-123")
+	if err := repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		ID: "session-worktree-recovery", TaskEnvironmentID: "env-recovery", WorktreeID: "worktree-recovery", RepositoryID: "repo-recovery",
 		BranchSlug: "feature-recovery", WorktreePath: "/tasks/task-recovery/api-feature-recovery", CreatedAt: now,
 	}); err != nil {
-		t.Fatalf("CreateTaskSessionWorktree: %v", err)
+		t.Fatalf("CreateTaskEnvironmentRepo: %v", err)
 	}
 
 	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-recovery")
@@ -310,16 +326,18 @@ func TestGetWorkspaceInfoForSession_ProjectsDistinctWorktreesForSameRepositoryBr
 		}
 	}
 	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
-		ID: "session-multi-recovery", TaskID: "task-123", State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now,
+		ID: "session-multi-recovery", TaskID: "task-123", TaskEnvironmentID: "env-multi-recovery",
+		State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("CreateTaskSession: %v", err)
 	}
-	for _, worktree := range []*models.TaskSessionWorktree{
-		{ID: "session-worktree-one", SessionID: "session-multi-recovery", WorktreeID: "worktree-one", RepositoryID: "repo-multi-recovery", BranchSlug: "feature-one", CreatedAt: now},
-		{ID: "session-worktree-two", SessionID: "session-multi-recovery", WorktreeID: "worktree-two", RepositoryID: "repo-multi-recovery", BranchSlug: "feature-two", CreatedAt: now},
+	createTestEnvironment(t, repo, "env-multi-recovery", "task-123")
+	for _, worktree := range []*models.TaskEnvironmentRepo{
+		{ID: "session-worktree-one", TaskEnvironmentID: "env-multi-recovery", WorktreeID: "worktree-one", RepositoryID: "repo-multi-recovery", BranchSlug: "feature-one", CreatedAt: now},
+		{ID: "session-worktree-two", TaskEnvironmentID: "env-multi-recovery", WorktreeID: "worktree-two", RepositoryID: "repo-multi-recovery", BranchSlug: "feature-two", CreatedAt: now},
 	} {
-		if err := repo.CreateTaskSessionWorktree(ctx, worktree); err != nil {
-			t.Fatalf("CreateTaskSessionWorktree %q: %v", worktree.BranchSlug, err)
+		if err := repo.CreateTaskEnvironmentRepo(ctx, worktree); err != nil {
+			t.Fatalf("CreateTaskEnvironmentRepo %q: %v", worktree.BranchSlug, err)
 		}
 	}
 
@@ -375,11 +393,12 @@ func TestGetWorkspaceInfoForSession_UsesRepositoryDefaultBranchIdentity(t *testi
 	if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{ID: "task-repo-default-branch", TaskID: "task-123", RepositoryID: "repo-default-branch"}); err != nil {
 		t.Fatalf("CreateTaskRepository: %v", err)
 	}
-	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session-default-branch", TaskID: "task-123", State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now}); err != nil {
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session-default-branch", TaskID: "task-123", TaskEnvironmentID: "env-default-branch", State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("CreateTaskSession: %v", err)
 	}
-	if err := repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{ID: "session-worktree-default-branch", SessionID: "session-default-branch", WorktreeID: "worktree-default-branch", RepositoryID: "repo-default-branch", BranchSlug: "main", CreatedAt: now}); err != nil {
-		t.Fatalf("CreateTaskSessionWorktree: %v", err)
+	createTestEnvironment(t, repo, "env-default-branch", "task-123")
+	if err := repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{ID: "session-worktree-default-branch", TaskEnvironmentID: "env-default-branch", WorktreeID: "worktree-default-branch", RepositoryID: "repo-default-branch", BranchSlug: "main", CreatedAt: now}); err != nil {
+		t.Fatalf("CreateTaskEnvironmentRepo: %v", err)
 	}
 
 	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-default-branch")
@@ -409,19 +428,20 @@ func TestGetWorkspaceInfoForSession_UsesHashDisambiguatedBranchIdentities(t *tes
 			t.Fatalf("CreateTaskRepository %q: %v", taskRepo.ID, err)
 		}
 	}
-	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session-hash-branches", TaskID: "task-123", State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now}); err != nil {
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session-hash-branches", TaskID: "task-123", TaskEnvironmentID: "env-hash-branches", State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("CreateTaskSession: %v", err)
 	}
 	plans := worktree.BuildBranchIdentityPlans([]worktree.BranchIdentityInput{
 		{RepositoryID: "repo-hash-branches", BaseBranch: "feature/a", DefaultBranch: "main", PRNumber: 101, Position: 0},
 		{RepositoryID: "repo-hash-branches", BaseBranch: "feature-a", DefaultBranch: "main", PRNumber: 202, Position: 1},
 	})
+	createTestEnvironment(t, repo, "env-hash-branches", "task-123")
 	for index, plan := range plans {
-		if err := repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
-			ID: fmt.Sprintf("session-worktree-hash-%d", index), SessionID: "session-hash-branches", WorktreeID: fmt.Sprintf("worktree-hash-%d", index),
+		if err := repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+			ID: fmt.Sprintf("session-worktree-hash-%d", index), TaskEnvironmentID: "env-hash-branches", WorktreeID: fmt.Sprintf("worktree-hash-%d", index),
 			RepositoryID: "repo-hash-branches", BranchSlug: plan.IdentitySlug, CreatedAt: now,
 		}); err != nil {
-			t.Fatalf("CreateTaskSessionWorktree %q: %v", plan.IdentitySlug, err)
+			t.Fatalf("CreateTaskEnvironmentRepo %q: %v", plan.IdentitySlug, err)
 		}
 	}
 
@@ -459,11 +479,12 @@ func TestGetWorkspaceInfoForSession_ProjectsOnlyLifecycleValidRepositories(t *te
 			t.Fatalf("CreateTaskRepository %q: %v", repositoryID, err)
 		}
 	}
-	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session-projection-validity", TaskID: "task-123", State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now}); err != nil {
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session-projection-validity", TaskID: "task-123", TaskEnvironmentID: "env-projection-validity", State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("CreateTaskSession: %v", err)
 	}
-	if err := repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{ID: "session-worktree-projection-validity", SessionID: "session-projection-validity", WorktreeID: "worktree-projection-validity", RepositoryID: "repo-provider-recovery", BranchSlug: "main", CreatedAt: now}); err != nil {
-		t.Fatalf("CreateTaskSessionWorktree: %v", err)
+	createTestEnvironment(t, repo, "env-projection-validity", "task-123")
+	if err := repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{ID: "session-worktree-projection-validity", TaskEnvironmentID: "env-projection-validity", WorktreeID: "worktree-projection-validity", RepositoryID: "repo-provider-recovery", BranchSlug: "main", CreatedAt: now}); err != nil {
+		t.Fatalf("CreateTaskEnvironmentRepo: %v", err)
 	}
 
 	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-projection-validity")
@@ -1021,27 +1042,29 @@ func TestGetWorkspaceInfoForSession_MultiRepoReturnsTaskRoot(t *testing.T) {
 	now := time.Now().UTC()
 
 	session := &models.TaskSession{
-		ID:        "session-multi",
-		TaskID:    "task-123",
-		State:     models.TaskSessionStateCompleted,
-		StartedAt: now,
-		UpdatedAt: now,
+		ID:                "session-multi",
+		TaskID:            "task-123",
+		TaskEnvironmentID: "env-session-worktrees",
+		State:             models.TaskSessionStateCompleted,
+		StartedAt:         now,
+		UpdatedAt:         now,
 	}
 	if err := repo.CreateTaskSession(ctx, session); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
+	createTestEnvironment(t, repo, "env-session-worktrees", "task-123")
 	for i, path := range []string{
 		"/tmp/tasks/do-nothing_mvo/kandev",
 		"/tmp/tasks/do-nothing_mvo/thm",
 	} {
-		if err := repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
-			ID:           fmt.Sprintf("wt%d", i),
-			SessionID:    session.ID,
-			WorktreeID:   fmt.Sprintf("wid%d", i),
-			RepositoryID: fmt.Sprintf("repo%d", i),
-			Position:     i,
-			WorktreePath: path,
-			CreatedAt:    now,
+		if err := repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+			ID:                fmt.Sprintf("wt%d", i),
+			TaskEnvironmentID: "env-session-worktrees",
+			WorktreeID:        fmt.Sprintf("wid%d", i),
+			RepositoryID:      fmt.Sprintf("repo%d", i),
+			Position:          i,
+			WorktreePath:      path,
+			CreatedAt:         now,
 		}); err != nil {
 			t.Fatalf("create worktree %d: %v", i, err)
 		}

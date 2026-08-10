@@ -120,6 +120,7 @@ const (
 	ActionMessageQueueSendNow       = "message.queue.send_now"       // Interrupt and replace the active turn with an exact queue selection
 	ActionMessageQueueRemove        = "message.queue.remove"         // Delete a single entry by id
 	ActionMessageQueueMerge         = "message.queue.merge"          // Fold an entry into the entry above it
+	ActionMessageQueueReorder       = "message.queue.reorder"        // Rewrite the visible pending order for a session
 	ActionMessageQueueStatusChanged = "message.queue.status_changed" // Notification: queue status changed
 
 	// Workflow template/step actions
@@ -220,6 +221,7 @@ const (
 	ActionSessionModeChanged          = "session.mode_changed"
 	ActionSessionAgentCapabilities    = "session.agent_capabilities"
 	ActionSessionModelsUpdated        = "session.models_updated"
+	ActionSessionModelFallback        = "session.model_fallback"
 	ActionSessionMCPStatusUpdated     = "session.mcp_status_updated"
 	ActionSessionInfoUpdated          = "session.info_updated"
 	ActionSessionSetMode              = "session.set_mode"
@@ -335,7 +337,8 @@ const (
 	// System maintenance jobs (VACUUM, factory reset, snapshot create/restore,
 	// disk walk). Broadcast to all connected clients so the System pages can
 	// render progress.
-	ActionSystemJobUpdate = "system.job.update"
+	ActionSystemJobUpdate                 = "system.job.update"
+	ActionSystemAgentRuntimeStatusChanged = "system.agent_runtime.status_changed"
 
 	// VS Code server actions
 	ActionVscodeStart    = "vscode.start"    // Start code-server for a session
@@ -381,6 +384,7 @@ const (
 	ActionMCPUpdateRepositoryBaseBranch = "mcp.update_repository_base_branch"
 	ActionMCPStepComplete               = "mcp.step_complete" // ADR 0015: agent-emitted explicit completion signal
 	ActionMCPAskUserQuestion            = "mcp.ask_user_question"
+	ActionMCPAskParentQuestion          = "mcp.ask_parent_question"
 	ActionMCPCreateTaskPlan             = "mcp.create_task_plan"
 	ActionMCPGetTaskPlan                = "mcp.get_task_plan"
 	ActionMCPUpdateTaskPlan             = "mcp.update_task_plan"
@@ -434,6 +438,7 @@ const (
 	ActionMCPStopTask            = "mcp.stop_task"
 	ActionMCPSpawnSession        = "mcp.spawn_session"
 	ActionMCPGetTaskConversation = "mcp.get_task_conversation"
+	ActionMCPListTaskSessions    = "mcp.list_task_sessions"
 )
 
 const (

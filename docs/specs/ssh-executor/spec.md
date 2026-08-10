@@ -1,5 +1,5 @@
 ---
-status: draft
+status: implemented
 created: 2026-05-16
 owner: tbd
 ---
@@ -23,20 +23,25 @@ SSH is the lowest-common-denominator transport for reaching a remote Linux box. 
 
 A new executor type `ssh` joins `local_pc` / `local_docker` / `sprites` in the existing executor framework. From the user's perspective: configure an SSH target once in settings, then pick it as the executor for any task; tasks run on the remote box exactly as they would on a Sprite.
 
-### Remote layout: mirrors local `~/.kandev/tasks/`
+### Remote layout: one task workspace per task
 
-Kandev's local convention is one directory per task containing one or more repo worktrees:
+Kandev creates one remote workspace per task. The primary repository owns the workspace root so a
+single-repository agent starts inside a Git checkout; additional repository branches use direct
+child directories:
 
 ```
 ~/.kandev/tasks/
 ├── <task-dir-name-A>/
-│   ├── <repo-1>/           # git worktree on the task's feature branch
-│   └── <repo-2>/           # second repo worktree, same task
+│   ├── .git/               # primary repository on the task's feature branch
+│   └── <repo-2>-<branch>/  # additional repository or branch
 └── <task-dir-name-B>/
-    └── <repo-1>/
+    └── .git/               # another task's primary repository
 ```
 
-The SSH executor mirrors this exact layout on the remote host. Workspace root defaults to `~/.kandev/` on the remote and is **configurable per profile** (so one host can serve `~/.kandev-team-a/tasks/` and `~/.kandev-team-b/tasks/` for different profiles on the same SSH user). Each task gets `<workdir_root>/tasks/<task-dir-name>/<repo-name>/` cloned + worktree'd just like the local case. Concurrent sessions on the same task share this directory; concurrent tasks on the same host get different `<task-dir-name>` siblings.
+The workspace root defaults to `~/.kandev/` on the remote and is **configurable per profile** (so
+one host can serve `~/.kandev-team-a/tasks/` and `~/.kandev-team-b/tasks/` for different profiles on
+the same SSH user). Concurrent sessions on the same task share the task workspace; concurrent tasks
+on the same host get different `<task-dir-name>` siblings.
 
 ### Per-session, not per-task: agentctl process, remote port, local forward
 
@@ -74,9 +79,28 @@ Multiple sessions in the *same* task share the same worktree on disk (same files
 
 ### Workspace lifecycle on the remote
 
-- On `CreateInstance` for a task that has no existing remote task dir: SSH `mkdir -p <workdir_root>/tasks/<task-dir-name>`, then the prepare-script + scriptengine pipeline (`git clone`, worktree, checkout) runs the same way it does for Sprites.
-- On subsequent sessions for the same task on the same host: detect the existing task dir, skip clone, attach a new agentctl to it.
-- On `StopInstance` of the *last* session in a task: leave the task dir intact (so a later resume keeps history); only remove it on explicit task-level cleanup (out of scope for v1 — see below).
+- On `CreateInstance`, SSH creates `<workdir_root>/tasks/<task-dir-name>` and resolves the stored
+  profile prepare script through the same scriptengine providers used by Sprites. An empty stored
+  script falls back to the SSH default, which idempotently materializes the primary repository at
+  the task workspace root, runs the repository setup script, and selects the Kandev task branch.
+- The resolved prepare script runs on the SSH target with the selected profile shell and the
+  explicitly configured profile/repository environment. Those values are delivered without placing
+  secrets in remote process arguments or persisted metadata. It completes before the per-session
+  `agentctl` starts. A non-zero exit, timeout, missing primary checkout, or conflicting `origin`
+  fails the launch; Kandev does not
+  start `agentctl` or the agent in an empty or ambiguous workspace.
+- On subsequent sessions for the same task on the same host, the default preparation path reuses the
+  matching checkout without deleting local commits or untracked work. The profile prepare script may
+  run again because it is a per-session pre-launch hook and must therefore be idempotent when the
+  workspace is shared.
+- `agentctl` starts with the task workspace as its working directory only after preparation succeeds.
+  Additional repository sources are materialized before the agent process starts.
+- Profile cleanup scripts run on the SSH target for terminal task/session archive or deletion, with
+  the same workspace placeholders as preparation. Ordinary Stop and backend restart preserve both
+  the workspace and cleanup hook for resume. Cleanup failure is reported in logs but does not prevent
+  controller teardown.
+- The task directory remains after controller teardown so a later resume keeps history; automatic
+  task-directory deletion remains out of scope.
 
 ### agentctl binary upload with content-hash cache
 
@@ -121,7 +145,26 @@ Multiple sessions in the *same* task share the same worktree on disk (same files
 
 - **GIVEN** a user has filled the SSH executor form and clicked Test Connection, **WHEN** the test succeeds, **THEN** the host fingerprint is shown in the UI, the user must tick "Trust this host" before Save is enabled, and on Save the fingerprint is pinned to the executor — silent first-connect TOFU never happens.
 
-- **GIVEN** a user has a configured + trusted SSH executor pointed at `dev.example.com`, **WHEN** they start a task and select that executor, **THEN** kandev SSHes in (reusing any open connection for this host), uploads agentctl to `~/.kandev/bin/agentctl` if the sha256 differs, clones the repo into `<workdir_root>/tasks/<task-dir-name>/<repo-name>/`, starts a per-session agentctl on a fresh remote port with a fresh local SSH forward, and the user sees the same chat/shell/git UI as for any other executor.
+- **GIVEN** a user has a configured + trusted SSH executor and a provider-backed repository, **WHEN**
+  they start a task with the default SSH prepare script, **THEN** Kandev materializes the repository
+  at `<workdir_root>/tasks/<task-dir-name>`, checks out the task branch, runs repository setup, and
+  starts the agent there so `git rev-parse --show-toplevel` returns that remote task directory.
+
+- **GIVEN** an SSH profile has a custom prepare script, **WHEN** a task starts, **THEN** the script
+  resolves SSH-supported scriptengine placeholders and completes on the target before the
+  per-session `agentctl` starts in the prepared workspace.
+
+- **GIVEN** SSH preparation exits non-zero, times out, leaves an attached primary repository absent,
+  or finds a different `origin`, **WHEN** a task starts, **THEN** launch fails with a preparation step
+  error and neither `agentctl` nor the agent is started for that session.
+
+- **GIVEN** an SSH task already has local commits or untracked work in its remote checkout, **WHEN** a
+  later session starts for the same task, **THEN** default preparation reuses the checkout without
+  resetting or deleting that work before starting the new session controller.
+
+- **GIVEN** an SSH profile has a cleanup script and its task or session is archived or deleted,
+  **WHEN** Kandev tears down the terminal execution, **THEN** the cleanup script runs on the SSH target
+  with the task workspace as `{{workspace.path}}`; an ordinary Stop or backend restart does not run it.
 
 - **GIVEN** a user keeps their SSH key in 1Password (no key file on disk) with their agent running, **WHEN** they select "ssh-agent" as identity source, **THEN** the connection succeeds without kandev ever touching key material; passphrase-protected keys without an agent are explicitly rejected with a "load this key into ssh-agent first" message.
 
@@ -163,7 +206,8 @@ Multiple sessions in the *same* task share the same worktree on disk (same files
 - **Pooled host capacity**: configure 3 SSH hosts as a pool, kandev round-robins / load-balances tasks across them.
 - **SSH-tunneled MCP servers**: expose a user's local MCP servers to a remote-running agent via reverse forward.
 - **Orphan task-dir housekeeper** as a backend background job.
-- **Stream-richer prepare script execution** in SSHExecutor (currently delegated to the standard prepare-script pipeline; matching Sprites' inline progress output would improve the launch UX).
+- **Byte-for-byte live prepare output streaming.** SSH reports bounded preparation progress and the
+  final diagnostic tail, but matching Sprites' continuous stdout/stderr streaming can be added later.
 
 ## Open questions
 

@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   routerPush: vi.fn(),
   toggleSettingsMode: vi.fn(),
   logout: vi.fn().mockResolvedValue(undefined),
+  setImproveDialogOpen: vi.fn(),
 }));
 
 const state = {
@@ -18,7 +19,8 @@ const state = {
       { id: "office-2", name: "Office 2", office_workflow_id: "wf-office-2" },
     ],
   },
-  appSidebar: { settingsMode: false },
+  appSidebar: { settingsMode: false, improveDialogOpen: false },
+  setImproveDialogOpen: mocks.setImproveDialogOpen,
   auth: {
     mode: "disabled" as string,
     user: null as { display_name: string; email: string } | null,

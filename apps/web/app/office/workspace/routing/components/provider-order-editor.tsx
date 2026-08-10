@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { IconArrowUp, IconArrowDown, IconPlus, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import { useTranslation } from "react-i18next";
 
 type Props = {
   order: string[];
@@ -13,6 +14,7 @@ type Props = {
 };
 
 export function ProviderOrderEditor({ order, knownProviders, onChange, disabled }: Props) {
+  const { t } = useTranslation();
   const remaining = useMemo(
     () => knownProviders.filter((p) => !order.includes(p)),
     [knownProviders, order],
@@ -32,14 +34,16 @@ export function ProviderOrderEditor({ order, knownProviders, onChange, disabled 
   return (
     <div className="rounded-lg border border-border p-4 space-y-3">
       <div>
-        <p className="text-sm font-medium">Provider order</p>
+        <p className="text-sm font-medium">{t("office:providerOrder")}</p>
         <p className="text-xs text-muted-foreground mt-0.5">
-          Top-to-bottom fallback order. Agents try the first healthy provider unless they override.
+          {t("office:topToBottomFallbackOrderAgents")}
         </p>
       </div>
       <ul className="space-y-1.5" data-testid="provider-order-list">
         {order.length === 0 && (
-          <li className="text-xs text-muted-foreground italic">No providers selected.</li>
+          <li className="text-xs text-muted-foreground italic">
+            {t("office:noProvidersSelected")}
+          </li>
         )}
         {order.map((p, idx) => (
           <li
@@ -54,7 +58,7 @@ export function ProviderOrderEditor({ order, knownProviders, onChange, disabled 
               className="h-6 w-6 cursor-pointer"
               onClick={() => move(idx, -1)}
               disabled={disabled || idx === 0}
-              aria-label="Move up"
+              aria-label={t("office:moveUp")}
             >
               <IconArrowUp className="h-3.5 w-3.5" />
             </Button>
@@ -64,7 +68,7 @@ export function ProviderOrderEditor({ order, knownProviders, onChange, disabled 
               className="h-6 w-6 cursor-pointer"
               onClick={() => move(idx, 1)}
               disabled={disabled || idx === order.length - 1}
-              aria-label="Move down"
+              aria-label={t("office:moveDown")}
             >
               <IconArrowDown className="h-3.5 w-3.5" />
             </Button>
@@ -74,7 +78,7 @@ export function ProviderOrderEditor({ order, knownProviders, onChange, disabled 
               className="h-6 w-6 cursor-pointer text-destructive"
               onClick={() => remove(p)}
               disabled={disabled}
-              aria-label="Remove"
+              aria-label={t("office:remove")}
             >
               <IconX className="h-3.5 w-3.5" />
             </Button>
@@ -97,6 +101,7 @@ function AddProviderRow({
   onAdd: (id: string) => void;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-2 pt-1">
       <Select
@@ -105,7 +110,7 @@ function AddProviderRow({
         disabled={disabled || remaining.length === 0}
       >
         <SelectTrigger className="w-[220px] cursor-pointer" data-testid="provider-add-select">
-          <SelectValue placeholder="Add provider…" />
+          <SelectValue placeholder={t("office:addProvider")} />
         </SelectTrigger>
         <SelectContent>
           {remaining.map((p) => (
@@ -117,7 +122,7 @@ function AddProviderRow({
       </Select>
       <span className="text-xs text-muted-foreground">
         <IconPlus className="inline h-3 w-3 mr-0.5" />
-        Add to order
+        {t("office:addToOrder")}
       </span>
     </div>
   );

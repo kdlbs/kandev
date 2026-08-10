@@ -253,4 +253,46 @@ describe("useAllWorkflowSnapshots — snapshot mapping", () => {
       pull_from_step_id: "step-0",
     });
   });
+
+  it("preserves a cached autopilot marker when a fresh snapshot omits it", async () => {
+    mockState.kanbanMulti.snapshots = {
+      "wf-A": {
+        workflowId: "wf-A",
+        workflowName: "A",
+        isPlaceholder: true,
+        steps: [],
+        tasks: [{ id: "task-1", workflowStepId: "step-1", autopilot: true }],
+      },
+    };
+    mockFetchWorkflowSnapshot.mockResolvedValueOnce({
+      steps: [{ id: "step-1", name: "Review", position: 1 }],
+      tasks: [{ id: "task-1", workflow_step_id: "step-1", title: "Task" }],
+    });
+
+    renderHook(() => useAllWorkflowSnapshots("ws-A"));
+
+    await waitFor(() => expect(mockSetWorkflowSnapshot).toHaveBeenCalled());
+    expect(mockSetWorkflowSnapshot.mock.calls[0][1].tasks[0].autopilot).toBe(true);
+  });
+
+  it("keeps an explicit false autopilot value from the fresh snapshot", async () => {
+    mockState.kanbanMulti.snapshots = {
+      "wf-A": {
+        workflowId: "wf-A",
+        workflowName: "A",
+        isPlaceholder: true,
+        steps: [],
+        tasks: [{ id: "task-1", workflowStepId: "step-1", autopilot: true }],
+      },
+    };
+    mockFetchWorkflowSnapshot.mockResolvedValueOnce({
+      steps: [{ id: "step-1", name: "Review", position: 1 }],
+      tasks: [{ id: "task-1", workflow_step_id: "step-1", title: "Task", autopilot: false }],
+    });
+
+    renderHook(() => useAllWorkflowSnapshots("ws-A"));
+
+    await waitFor(() => expect(mockSetWorkflowSnapshot).toHaveBeenCalled());
+    expect(mockSetWorkflowSnapshot.mock.calls[0][1].tasks[0].autopilot).toBe(false);
+  });
 });

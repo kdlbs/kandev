@@ -2,13 +2,78 @@ package process
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/subproc"
+	"go.uber.org/zap/zapcore"
 )
+
+// TestUpdateGitStatus_CancellationLogsDebugNotWarn verifies that a canceled
+// observation (the expected outcome during tracker teardown) is logged at
+// Debug, while a genuine failure still warns. This keeps shutdown from
+// emitting a burst of "getGitStatus failed" warnings for context.Canceled.
+func TestUpdateGitStatus_CancellationLogsDebugNotWarn(t *testing.T) {
+	tests := []struct {
+		name        string
+		observerErr error
+		cancelWT    bool
+		wantWarn    bool
+	}{
+		{"context canceled", context.Canceled, false, false},
+		{"admission canceled", subproc.ErrAdmissionCanceled, false, false},
+		{"tracker context canceled with opaque error", errors.New("exit status 1"), true, false},
+		{"real failure", errors.New("git exploded"), false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			log, observed := newObservedTestLogger(t)
+			wt := NewWorkspaceTracker(t.TempDir(), log)
+			t.Cleanup(wt.Stop)
+			wt.gitStatusObserver = func(context.Context) (types.GitStatusUpdate, error) {
+				return types.GitStatusUpdate{}, tt.observerErr
+			}
+			if tt.cancelWT {
+				wt.cancelFunc()
+			}
+
+			if wt.updateGitStatus(context.Background()) {
+				t.Fatal("updateGitStatus returned true on error")
+			}
+
+			warns := observed.FilterMessage("updateGitStatus: getGitStatus failed").
+				FilterLevelExact(zapcore.WarnLevel).Len()
+			debugs := observed.FilterMessage("updateGitStatus: getGitStatus canceled").
+				FilterLevelExact(zapcore.DebugLevel).Len()
+
+			if tt.wantWarn {
+				if warns != 1 {
+					t.Fatalf("warn count = %d, want 1", warns)
+				}
+				if debugs != 0 {
+					t.Fatalf("debug count = %d, want 0", debugs)
+				}
+				return
+			}
+			if warns != 0 {
+				t.Fatalf("warn count = %d, want 0 for cancellation", warns)
+			}
+			if debugs != 1 {
+				t.Fatalf("debug count = %d, want 1 for cancellation", debugs)
+			}
+		})
+	}
+}
+
+func TestWorkspaceTrackerIsGitStatusCancellation_NilCancelCtx(t *testing.T) {
+	wt := &WorkspaceTracker{}
+	if wt.isGitStatusCancellation(errors.New("git exploded")) {
+		t.Fatal("isGitStatusCancellation returned true with nil cancelCtx")
+	}
+}
 
 func TestUnquoteGitPath(t *testing.T) {
 	tests := []struct {

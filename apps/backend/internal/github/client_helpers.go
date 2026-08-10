@@ -126,6 +126,20 @@ func getPRStatus(ctx context.Context, c Client, owner, repo string, number int) 
 	if checks == nil {
 		checks = []CheckRun{}
 	}
+	return newPRStatus(pr, reviews, checks), nil
+}
+
+// newPRStatus derives the PRStatus rollup from the three upstream reads every
+// REST-shaped path already makes: the PR itself, its reviews, and its check
+// runs. getPRStatus and the PR-feedback path both land here so the two cannot
+// drift — feedback fetches a strict superset (it adds comments), so the same
+// derivation is valid for both.
+//
+// Both Populated flags are set because this path genuinely counted: a zero
+// here is a real "no checks" / "no reviews" answer, not "I didn't look".
+// UnresolvedReviewThreadsPopulated stays false — neither REST caller fetches
+// review threads, so SyncTaskPR must preserve whatever the GraphQL path stored.
+func newPRStatus(pr *PR, reviews []PRReview, checks []CheckRun) *PRStatus {
 	reviewState, pendingReviewCount := deriveReviewSyncState(pr, reviews)
 	total, passing := countCheckResults(checks)
 	return &PRStatus{
@@ -146,7 +160,7 @@ func getPRStatus(ctx context.Context, c Client, owner, repo string, number int) 
 		// from the batched-GraphQL path that only carries rollup state.
 		ChecksPopulated:       true,
 		ReviewCountsPopulated: true,
-	}, nil
+	}
 }
 
 // reviewSample is a normalized review row consumed by latestReviewStateByAuthor.

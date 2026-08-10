@@ -63,6 +63,17 @@ export type AgentProfile = {
   // --- CLI subprocess config ---
   /** Model ID applied through ACP session model selection at session start. */
   model: string;
+  /**
+   * Optional single ACP model ID the runtime switches to when the start
+   * model becomes unavailable. Ignored at runtime when autoFallback is on.
+   */
+  fallbackModel?: string;
+  /**
+   * Explicit opt-in to the legacy automatic-fallback behavior (session-start
+   * best-effort, office re-dispatch to the next provider candidate). When
+   * on, the fallbackModel field is hidden/ignored.
+   */
+  autoFallback?: boolean;
   /** Optional ACP session mode applied via `session/set_mode`. */
   mode?: string;
   /** Dynamic ACP session config options applied via `session/set_config_option`. */
@@ -151,6 +162,8 @@ export type AgentProfilePayload = {
   name: string;
   agent_display_name: string;
   model: string;
+  fallback_model?: string;
+  auto_fallback?: boolean;
   mode?: string;
   config_options?: Record<string, string>;
   allow_indexing: boolean;

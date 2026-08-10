@@ -322,7 +322,6 @@ func seedMaterializerTask(t *testing.T, ctx context.Context, repo *sqliterepo.Re
 		ID: "env-1", TaskID: "task-1",
 		TaskDirName:   filepath.Base(taskRoot),
 		WorkspacePath: primaryPath,
-		WorktreePath:  primaryPath,
 		ExecutorType:  "worktree", Status: "ready",
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {

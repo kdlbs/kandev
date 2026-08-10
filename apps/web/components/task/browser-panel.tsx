@@ -12,6 +12,7 @@ import { AnnotationsPanel } from "./inspector/annotations-panel";
 import { useInspectMode } from "@/hooks/use-inspect-mode";
 import { usePreviewConsoleForwarder } from "@/hooks/use-preview-console-forwarder";
 import { openExternalLink } from "@/lib/desktop/external-links";
+import { useTranslation } from "react-i18next";
 
 function BrowserPanelContent({
   showIframeDelayed,
@@ -26,13 +27,14 @@ function BrowserPanelContent({
   iframeRef: React.RefObject<HTMLIFrameElement | null>;
   onIframeLoad: () => void;
 }) {
+  const { t } = useTranslation();
   if (showIframeDelayed) {
     return (
       <iframe
         ref={iframeRef}
         key={refreshKey}
         src={iframeSrc}
-        title="Browser Preview"
+        title={t("task:browserPreview")}
         className="h-full w-full border-0"
         sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
         referrerPolicy="no-referrer"
@@ -44,13 +46,13 @@ function BrowserPanelContent({
     return (
       <div className="h-full w-full flex flex-col items-center justify-center text-muted-foreground gap-2">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
-        <p className="text-sm">Loading preview...</p>
+        <p className="text-sm">{t("task:loadingPreview")}</p>
       </div>
     );
   }
   return (
     <div className="h-full w-full flex flex-col items-center justify-center text-muted-foreground gap-2">
-      <p className="text-sm">Enter a URL above or start the dev server</p>
+      <p className="text-sm">{t("task:enterAUrlAboveOrStart")}</p>
     </div>
   );
 }
@@ -65,6 +67,11 @@ function useBrowserPanelUrl(initialUrl: string, useProxy: boolean) {
   const [urlDraft, setUrlDraft] = useState(initialUrl);
   const [refreshKey, setRefreshKey] = useState(0);
   const [showIframe, setShowIframe] = useState(false);
+
+  useEffect(() => {
+    setUserUrl(initialUrl);
+    setUrlDraft(initialUrl);
+  }, [initialUrl]);
 
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const devProcessId = useAppStore((state) =>
@@ -136,6 +143,7 @@ function useBrowserPanelUrl(initialUrl: string, useProxy: boolean) {
 }
 
 export const BrowserPanel = memo(function BrowserPanel({ params }: BrowserPanelProps) {
+  const { t } = useTranslation();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const inspect = useInspectMode(iframeRef);
   usePreviewConsoleForwarder(iframeRef);
@@ -145,7 +153,7 @@ export const BrowserPanel = memo(function BrowserPanel({ params }: BrowserPanelP
   const showInspect = url.canProxy;
 
   return (
-    <PanelRoot>
+    <PanelRoot data-testid="browser-panel">
       <PanelHeaderBar>
         <Input
           value={url.displayDraft}
@@ -165,7 +173,7 @@ export const BrowserPanel = memo(function BrowserPanel({ params }: BrowserPanelP
           onClick={url.handleOpenInTab}
           disabled={!url.directUrl}
           className="cursor-pointer"
-          title="Open in browser tab"
+          title={t("task:openInBrowserTab")}
         >
           <IconExternalLink className="h-4 w-4" />
         </Button>
@@ -175,7 +183,7 @@ export const BrowserPanel = memo(function BrowserPanel({ params }: BrowserPanelP
           onClick={() => url.setRefreshKey((v) => v + 1)}
           disabled={!url.directUrl}
           className="cursor-pointer"
-          title="Refresh"
+          title={t("task:refresh")}
         >
           <IconRefresh className="h-4 w-4" />
         </Button>

@@ -47,6 +47,43 @@ func TestErrorsAreClassifiable(t *testing.T) {
 		}
 	})
 
+	// A browser that navigates away or unmounts a component aborts its
+	// in-flight fetches. That reaches handlers as a cancelled request context,
+	// which used to fall through to the 500 branch and log an ERROR with a
+	// full stacktrace for a response nobody was waiting on any more.
+	t.Run("client disconnect is not a server error", func(t *testing.T) {
+		gin.SetMode(gin.TestMode)
+		handlers := map[string]func(*gin.Context, error){
+			"handleNotFound": func(ctx *gin.Context, err error) {
+				handleNotFound(ctx, newTestLogger(t), err, "task sessions not found")
+			},
+			"handleSelectedMoveError": func(ctx *gin.Context, err error) {
+				handleSelectedMoveError(ctx, newTestLogger(t), err)
+			},
+		}
+		for name, handle := range handlers {
+			t.Run(name, func(t *testing.T) {
+				rec := httptest.NewRecorder()
+				ctx, _ := gin.CreateTestContext(rec)
+				handle(ctx, fmt.Errorf("list task sessions: %w", context.Canceled))
+				if rec.Code != statusClientClosedRequest {
+					t.Fatalf("status=%d, want %d", rec.Code, statusClientClosedRequest)
+				}
+			})
+		}
+	})
+
+	// Our own deadline firing is a real failure and must keep its 500.
+	t.Run("server timeout stays a server error", func(t *testing.T) {
+		gin.SetMode(gin.TestMode)
+		rec := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(rec)
+		handleNotFound(ctx, newTestLogger(t), fmt.Errorf("query: %w", context.DeadlineExceeded), "task not found")
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("status=%d, want %d", rec.Code, http.StatusInternalServerError)
+		}
+	})
+
 	t.Run("WIP limit is a conflict for task creation", func(t *testing.T) {
 		gin.SetMode(gin.TestMode)
 		rec := httptest.NewRecorder()

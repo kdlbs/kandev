@@ -15,21 +15,24 @@ import { AgentStatusDot } from "../components/agent-status-dot";
 import { AgentRoleBadge } from "../components/agent-role-badge";
 import { BudgetGauge } from "../components/budget-gauge";
 import { AgentRouteStrip } from "./components/agent-route-strip";
+import { Trans, useTranslation } from "react-i18next";
 
 type AgentDetailLayoutProps = {
   children: ReactNode;
   params: Promise<{ id: string }>;
 };
 
-const TABS: Array<{ slug: string; label: string }> = [
-  { slug: "dashboard", label: "Dashboard" },
-  { slug: "instructions", label: "Instructions" },
-  { slug: "skills", label: "Skills" },
-  { slug: "configuration", label: "Configuration" },
-  { slug: "permissions", label: "Permissions" },
-  { slug: "runs", label: "Runs" },
-  { slug: "memory", label: "Memory" },
-  { slug: "channels", label: "Channels" },
+// Catalog keys, not copy — module scope freezes a `t()` at the boot locale.
+// The `slug`s are URL segments and stay untranslated.
+const TABS: Array<{ slug: string; labelKey: string }> = [
+  { slug: "dashboard", labelKey: "office:dashboard" },
+  { slug: "instructions", labelKey: "office:tabInstructions" },
+  { slug: "skills", labelKey: "office:skills" },
+  { slug: "configuration", labelKey: "office:tabConfiguration" },
+  { slug: "permissions", labelKey: "office:tabPermissions" },
+  { slug: "runs", labelKey: "office:runs" },
+  { slug: "memory", labelKey: "office:tabMemory" },
+  { slug: "channels", labelKey: "office:tabChannels" },
 ];
 
 /**
@@ -40,6 +43,7 @@ const TABS: Array<{ slug: string; label: string }> = [
  * `<segment>/page.tsx`.
  */
 export default function AgentDetailLayout({ children, params }: AgentDetailLayoutProps) {
+  const { t } = useTranslation();
   const { id } = use(params);
   const pathname = usePathname();
   const agent = useAppStore((s) => s.office.agentProfiles.find((a) => a.id === id));
@@ -67,7 +71,7 @@ export default function AgentDetailLayout({ children, params }: AgentDetailLayou
   if (!agent) {
     return (
       <div className="p-6">
-        <p className="text-muted-foreground">Agent not found.</p>
+        <p className="text-muted-foreground">{t("office:agentNotFound")}</p>
       </div>
     );
   }
@@ -99,7 +103,7 @@ export default function AgentDetailLayout({ children, params }: AgentDetailLayou
 
         <AgentRouteStrip agentId={id} />
 
-        <nav className="flex border-b border-border gap-1" aria-label="Agent sections">
+        <nav className="flex border-b border-border gap-1" aria-label={t("office:agentSections")}>
           {TABS.map((tab) => (
             <Link
               key={tab.slug}
@@ -112,7 +116,7 @@ export default function AgentDetailLayout({ children, params }: AgentDetailLayou
                   : "border-transparent text-muted-foreground hover:text-foreground",
               )}
             >
-              {tab.label}
+              {t(tab.labelKey)}
             </Link>
           ))}
         </nav>
@@ -145,6 +149,7 @@ function activeSlugFromPath(pathname: string | null, agentId: string): string {
  * don't get this hint since they only run on assignment, not schedule.
  */
 function CoordinatorRoutineHint({ agentId, agentRole }: { agentId: string; agentRole: string }) {
+  const { t } = useTranslation();
   const routines = useAppStore((s) => s.office.routines);
   if (agentRole !== "ceo") return null;
   const hasActive = routines.some(
@@ -156,7 +161,7 @@ function CoordinatorRoutineHint({ agentId, agentRole }: { agentId: string; agent
       <TooltipTrigger asChild>
         <Link
           href="/office/routines"
-          aria-label="No scheduled wake-ups — manage routines"
+          aria-label={t("office:noScheduledWakeUpsManageRoutines")}
           className="cursor-pointer text-amber-600 dark:text-amber-400 hover:text-amber-500"
         >
           <IconInfoCircle className="h-4 w-4" />
@@ -164,20 +169,24 @@ function CoordinatorRoutineHint({ agentId, agentRole }: { agentId: string; agent
       </TooltipTrigger>
       <TooltipContent className="max-w-sm">
         <div className="space-y-2">
-          <p>
-            This coordinator has no scheduled wake-ups — it only fires on comments, errors, or
-            manual triggers.
-          </p>
-          <p className="font-medium">To set up a routine you&apos;ll need:</p>
+          <p>{t("office:thisCoordinatorHasNoScheduledWake")}</p>
+          <p className="font-medium">{t("office:toSetUpARoutineYou")}</p>
           <ol className="list-decimal list-inside space-y-0.5">
-            <li>A name (e.g. &quot;Daily standup&quot;)</li>
-            <li>A task title + description (what the agent should do each run)</li>
+            <li>{t("office:aNameEGDailyStandup")}</li>
+            <li>{t("office:aTaskTitleDescriptionWhatThe")}</li>
+            {/*
+              The cron expression is SYNTAX, not copy: it travels as a value so
+              it never reaches the catalog, and the `<code>` stays an element
+              child so a translator can move it within the sentence.
+            */}
             <li>
-              A cron schedule (e.g. <code>0 9 * * MON-FRI</code> for weekdays at 9am)
+              <Trans i18nKey="office:aCronScheduleExample" values={{ cron: "0 9 * * MON-FRI" }}>
+                A cron schedule (e.g. <code>cron</code> for weekdays at 9am)
+              </Trans>
             </li>
-            <li>This agent as the assignee</li>
+            <li>{t("office:thisAgentAsTheAssignee")}</li>
           </ol>
-          <p className="text-muted-foreground">Click to open Routines.</p>
+          <p className="text-muted-foreground">{t("office:clickToOpenRoutines")}</p>
         </div>
       </TooltipContent>
     </Tooltip>

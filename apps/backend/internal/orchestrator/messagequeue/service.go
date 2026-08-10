@@ -24,6 +24,7 @@ import (
 type Service struct {
 	repo          Repository
 	maxPerSession atomic.Int64
+	mergeEnabled  atomic.Bool
 	logger        *logger.Logger
 	admissionMu   sync.Mutex
 	admissions    map[string]*sessionAdmission
@@ -51,6 +52,7 @@ func NewService(repo Repository, maxPerSession int, log *logger.Logger) *Service
 		admissions: make(map[string]*sessionAdmission),
 	}
 	service.SetMaxPerSession(maxPerSession)
+	service.mergeEnabled.Store(true)
 	return service
 }
 
@@ -76,6 +78,17 @@ func (s *Service) SetMaxPerSession(maxPerSession int) {
 		maxPerSession = 0
 	}
 	s.maxPerSession.Store(int64(maxPerSession))
+}
+
+// MergeEnabled reports whether MergeIntoAbove is currently allowed. Enabled
+// by default; see SetMergeEnabled.
+func (s *Service) MergeEnabled() bool { return s.mergeEnabled.Load() }
+
+// SetMergeEnabled toggles whether queued messages may be folded into the
+// entry above them via MergeIntoAbove. Disabling it does not affect merges
+// already applied.
+func (s *Service) SetMergeEnabled(enabled bool) {
+	s.mergeEnabled.Store(enabled)
 }
 
 // WithSessionAdmission runs fn under the per-session queue admission lock.
@@ -133,6 +146,7 @@ func (s *Service) QueueMessageWithMetadata(ctx context.Context, sessionID, taskI
 	)
 }
 
+// queueMessageWithMetadata is the admission-checked core of QueueMessageWithMetadata.
 func (s *Service) queueMessageWithMetadata(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, maxPerSession int) (*QueuedMessage, error) {
 	var queued *QueuedMessage
 	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
@@ -145,6 +159,7 @@ func (s *Service) queueMessageWithMetadata(ctx context.Context, sessionID, taskI
 	return queued, err
 }
 
+// insertQueueMessageWithMetadata inserts a message with metadata under the per-session admission lock.
 func (s *Service) insertQueueMessageWithMetadata(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, maxPerSession int) (*QueuedMessage, error) {
 	metadataCopy := copyMessageMetadata(metadata, 0)
 	msg := &QueuedMessage{
@@ -190,6 +205,7 @@ func (s *Service) RestoreMessage(ctx context.Context, msg *QueuedMessage) (*Queu
 	return restored, err
 }
 
+// restoreMessage is the admission-checked core of RestoreMessage.
 func (s *Service) restoreMessage(ctx context.Context, msg *QueuedMessage) (*QueuedMessage, error) {
 	restored := *msg
 	restored.Metadata = copyMessageMetadata(msg.Metadata, 0)
@@ -215,6 +231,7 @@ func (s *Service) QueueMessageWithCoalesceKey(ctx context.Context, sessionID, ta
 	)
 }
 
+// queueMessageWithCoalesceKey is the admission-checked core of QueueMessageWithCoalesceKey.
 func (s *Service) queueMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert bool, maxPerSession int) (*QueuedMessage, bool, error) {
 	var queued *QueuedMessage
 	var replaced bool
@@ -229,6 +246,7 @@ func (s *Service) queueMessageWithCoalesceKey(ctx context.Context, sessionID, ta
 	return queued, replaced, err
 }
 
+// insertQueueMessageWithCoalesceKey inserts or coalesce-replaces an entry under the admission lock.
 func (s *Service) insertQueueMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert bool, maxPerSession int) (*QueuedMessage, bool, error) {
 	metadataCopy := copyMessageMetadata(metadata, 1)
 	metadataCopy[MetadataCoalesceKey] = coalesceKey
@@ -295,6 +313,7 @@ func (s *Service) RequeueLifecycleMessageWithCoalesceKey(ctx context.Context, se
 	return s.queueLifecycleMessageWithCoalesceKey(ctx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, coalesceKey, allowInsert, true)
 }
 
+// queueLifecycleMessageWithCoalesceKey is the lifecycle-guarded core of the lifecycle queue methods.
 func (s *Service) queueLifecycleMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert, isRetry bool) (*QueuedMessage, bool, bool, error) {
 	var queued *QueuedMessage
 	var replaced, accepted bool
@@ -309,6 +328,7 @@ func (s *Service) queueLifecycleMessageWithCoalesceKey(ctx context.Context, sess
 	return queued, replaced, accepted, err
 }
 
+// insertLifecycleMessageWithCoalesceKey inserts or replaces a lifecycle entry under the admission lock.
 func (s *Service) insertLifecycleMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert, isRetry bool) (*QueuedMessage, bool, bool, error) {
 	metadataCopy := clearReservedMetadata(metadata)
 	generation, err := s.repo.LifecycleGeneration(ctx, taskID)
@@ -351,6 +371,7 @@ func (s *Service) PurgeTask(ctx context.Context, taskID string) (int, error) {
 	return s.repo.PurgeTask(ctx, taskID)
 }
 
+// lifecycleGenerationFromMetadata reads the lifecycle generation captured on an entry.
 func lifecycleGenerationFromMetadata(metadata map[string]interface{}) (int64, bool) {
 	if metadata == nil {
 		return 0, false
@@ -418,6 +439,7 @@ func (s *Service) IsCurrentLifecycleReservation(ctx context.Context, msg *Queued
 	return false
 }
 
+// copyMessageMetadata clones metadata, optionally growing the map capacity.
 func copyMessageMetadata(metadata map[string]interface{}, extraCapacity int) map[string]interface{} {
 	if len(metadata) == 0 && extraCapacity == 0 {
 		return nil
@@ -600,6 +622,9 @@ func (s *Service) RemoveEntry(ctx context.Context, sessionID, entryID string) er
 // above it within the same session. See Repository.MergeIntoAbove for the merge
 // rules and error mapping (ErrEntryNotFound / ErrNoMergeTarget).
 func (s *Service) MergeIntoAbove(ctx context.Context, sessionID, entryID, queuedBy string) (*QueuedMessage, error) {
+	if !s.MergeEnabled() {
+		return nil, ErrMergeDisabled
+	}
 	merged, err := s.repo.MergeIntoAbove(ctx, sessionID, entryID, queuedBy)
 	if err != nil {
 		return nil, err
@@ -608,6 +633,24 @@ func (s *Service) MergeIntoAbove(ctx context.Context, sessionID, entryID, queued
 		zap.String("session_id", sessionID),
 		zap.String("entry_id", merged.ID))
 	return merged, nil
+}
+
+// ReorderEntries rewrites the pending FIFO order of a session's queue to
+// match orderedIDs. Returns ErrQueueChanged when the submitted order is empty,
+// contains duplicates, or does not match the current visible pending set (a
+// drain/remove/merge raced the request); callers refetch the authoritative
+// queue.
+func (s *Service) ReorderEntries(ctx context.Context, sessionID string, orderedIDs []string) error {
+	if err := validateReorderInput(orderedIDs); err != nil {
+		return err
+	}
+	if err := s.repo.ReorderEntries(ctx, sessionID, orderedIDs); err != nil {
+		return err
+	}
+	s.logger.Info("queued entries reordered",
+		zap.String("session_id", sessionID),
+		zap.Int("entry_count", len(orderedIDs)))
+	return nil
 }
 
 // CancelAll clears every queued entry for a session. Returns the number of
@@ -626,12 +669,13 @@ func (s *Service) CancelAll(ctx context.Context, sessionID string) (int, error) 
 // GetStatus returns the full pending list and capacity info for a session.
 func (s *Service) GetStatus(ctx context.Context, sessionID string) *QueueStatus {
 	maxPerSession := s.MaxPerSession()
+	mergeEnabled := s.MergeEnabled()
 	entries, err := s.repo.ListBySession(ctx, sessionID)
 	if err != nil {
 		s.logger.Error("list queued failed",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return &QueueStatus{Entries: []QueuedMessage{}, Count: 0, Max: maxPerSession}
+		return &QueueStatus{Entries: []QueuedMessage{}, Count: 0, Max: maxPerSession, MergeEnabled: mergeEnabled}
 	}
 	pending := make([]QueuedMessage, 0, len(entries))
 	for _, entry := range entries {
@@ -643,10 +687,35 @@ func (s *Service) GetStatus(ctx context.Context, sessionID string) *QueueStatus 
 		pending = append(pending, entry)
 	}
 	return &QueueStatus{
-		Entries: pending,
-		Count:   len(pending),
-		Max:     maxPerSession,
+		Entries:      pending,
+		Count:        len(pending),
+		Max:          maxPerSession,
+		MergeEnabled: mergeEnabled,
 	}
+}
+
+// CountPendingByTaskIDs returns the pending prompt count per task, keyed by
+// task_id, for every requested task. Reserved in-flight lifecycle rows are
+// excluded, matching GetStatus. Used by task-list assembly and the status
+// summary projector to render per-task queued-prompt badges.
+func (s *Service) CountPendingByTaskIDs(ctx context.Context, taskIDs []string) (map[string]int, error) {
+	counts, err := s.repo.CountPendingByTaskIDs(ctx, taskIDs)
+	if err != nil {
+		s.logger.Error("count pending by task ids failed",
+			zap.Int("task_count", len(taskIDs)),
+			zap.Error(err))
+		return nil, err
+	}
+	return counts, nil
+}
+
+// CountPendingByTask returns the pending prompt count for one task.
+func (s *Service) CountPendingByTask(ctx context.Context, taskID string) (int, error) {
+	counts, err := s.CountPendingByTaskIDs(ctx, []string{taskID})
+	if err != nil {
+		return 0, err
+	}
+	return counts[taskID], nil
 }
 
 // SnapshotSession returns the complete persisted queue state for rollback.

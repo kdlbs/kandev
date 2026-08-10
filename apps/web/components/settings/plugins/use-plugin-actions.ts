@@ -7,7 +7,6 @@ import { toast } from "@/lib/toast/sonner";
 import { t } from "@/lib/i18n";
 import type { StoreApi } from "zustand";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { useTheme } from "@/components/theme/app-theme";
 import {
   disablePlugin,
   enablePlugin,
@@ -57,7 +56,6 @@ function withStatus(plugin: PluginRecord, status: PluginStatus): PluginRecord {
 async function loadIfActive(
   record: PluginRecord,
   storeApi: StoreApi<AppState>,
-  theme: "light" | "dark",
   evictCache: boolean,
 ) {
   if (record.status !== "active") return;
@@ -68,7 +66,7 @@ async function loadIfActive(
   } else {
     unloadPlugin(record.id, { transition: "reload" });
   }
-  await loadPlugins([active], (pluginId) => buildHostApi(pluginId, storeApi, theme));
+  await loadPlugins([active], (pluginId) => buildHostApi(pluginId, storeApi));
 }
 
 /**
@@ -79,7 +77,6 @@ async function loadIfActive(
  */
 function useEnableDisableActions(upsertPlugin: (p: PluginRecord) => void) {
   const storeApi = useAppStoreApi();
-  const { resolvedTheme } = useTheme();
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const handleEnable = async (plugin: PluginRecord) => {
@@ -88,7 +85,7 @@ function useEnableDisableActions(upsertPlugin: (p: PluginRecord) => void) {
       await enablePlugin(plugin.id);
       const updated = withStatus(plugin, "active");
       upsertPlugin(updated);
-      await loadIfActive(updated, storeApi, resolvedTheme, false);
+      await loadIfActive(updated, storeApi, false);
     } catch (err) {
       try {
         const refreshed = await getPlugin(plugin.id, { cache: "no-store" });
@@ -197,7 +194,6 @@ function useUninstallAction(removePlugin: (id: string) => void) {
  */
 function useInstallAction(upsertPlugin: (p: PluginRecord) => void) {
   const storeApi = useAppStoreApi();
-  const { resolvedTheme } = useTheme();
   const [installOpen, setInstallOpenState] = useState(false);
   const [installBusy, setInstallBusy] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
@@ -212,7 +208,7 @@ function useInstallAction(upsertPlugin: (p: PluginRecord) => void) {
   // "installed" toast, so it takes priority over the success toast.
   const afterInstall = async ({ plugin, warning }: InstallResult) => {
     upsertPlugin(plugin);
-    await loadIfActive(plugin, storeApi, resolvedTheme, true);
+    await loadIfActive(plugin, storeApi, true);
     if (warning) {
       toast.warning(warning);
     } else {

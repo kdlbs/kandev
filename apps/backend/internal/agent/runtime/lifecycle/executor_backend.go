@@ -13,6 +13,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentruntime"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -359,13 +360,14 @@ type ExecutorCreateRequest struct {
 	// runtime/agentctl boundary. Keys use the same workspace subpath convention
 	// as BaseBranches; the empty key is the workspace root.
 	RemoteContributions map[string]models.RemoteContribution
-	McpServers                     []McpServerConfig
-	AgentConfig                    agents.Agent // Agent type info needed by runtimes
-	PreviousExecutionID            string       // Non-empty when reconnecting to a previous execution
-	McpMode                        string       // MCP tool mode: "task" (default), "config", or "office"
-	McpProviders                   []string     // Normalized provider capabilities attached to the task
-	AuthToken                      string       // Previously handshaken agentctl token for reconnects
-	BootstrapNonce                 string       // Stored nonce for re-handshake after container restart
+	McpServers          []McpServerConfig
+	AgentConfig         agents.Agent // Agent type info needed by runtimes
+	PreviousExecutionID string       // Non-empty when reconnecting to a previous execution
+	McpMode             string       // MCP tool mode: "task" (default), "config", or "office"
+	McpProviders        []string     // Normalized provider capabilities attached to the task
+	McpProfile          *mcpprofile.Context
+	AuthToken           string // Previously handshaken agentctl token for reconnects
+	BootstrapNonce      string // Stored nonce for re-handshake after container restart
 
 	// OnProgress is an optional callback for streaming preparation progress.
 	// Executors that perform multi-step setup (e.g. Sprites, remote Docker) can
@@ -452,7 +454,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		RuntimeName:          ri.RuntimeName,
 		Status:               v1.AgentStatusRunning,
 		StartedAt:            time.Now(),
-		Metadata:             metadata,
+		metadata:             metadata,
 		agentctl:             ri.Client,
 		standaloneInstanceID: ri.StandaloneInstanceID,
 		standalonePort:       ri.StandalonePort,

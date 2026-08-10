@@ -28,6 +28,8 @@ describe("supervisor launch manifest", () => {
       env: {
         KANDEV_HOME_DIR: home,
         KANDEV_SERVER_PORT: "38429",
+        KANDEV_DESKTOP_HEALTH_TOKEN: "health-token",
+        KANDEV_WEB_TITLE_PREFIX: "Preview",
         SECRET_TOKEN: "do-not-write",
       },
       home_dir: home,
@@ -43,6 +45,8 @@ describe("supervisor launch manifest", () => {
     expect(readLaunchManifest(target).env).toEqual({
       KANDEV_HOME_DIR: home,
       KANDEV_SERVER_PORT: "38429",
+      KANDEV_DESKTOP_HEALTH_TOKEN: "health-token",
+      KANDEV_WEB_TITLE_PREFIX: "Preview",
     });
     if (process.platform !== "win32") {
       expect((fs.statSync(target).mode & 0o777).toString(8)).toBe("600");
@@ -72,12 +76,16 @@ describe("supervisor launch manifest", () => {
       allowedEnv({
         KANDEV_HOME_DIR: "/tmp/kandev",
         KANDEV_CONSOLE_LOG_LEVEL: "warn",
+        KANDEV_DESKTOP_HEALTH_TOKEN: "health-token",
+        KANDEV_WEB_TITLE_PREFIX: "Dev",
         AWS_SECRET_ACCESS_KEY: "secret",
         GITHUB_TOKEN: "secret",
       }),
     ).toEqual({
       KANDEV_HOME_DIR: "/tmp/kandev",
       KANDEV_CONSOLE_LOG_LEVEL: "warn",
+      KANDEV_DESKTOP_HEALTH_TOKEN: "health-token",
+      KANDEV_WEB_TITLE_PREFIX: "Dev",
     });
   });
 });

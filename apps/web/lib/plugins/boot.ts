@@ -12,11 +12,6 @@ import { installPluginGlobal, loadPlugins } from "./host";
 /** Store instances that have already had `loadPlugins` triggered — boot is a one-shot per store. */
 const bootedStores = new WeakSet<StoreApi<AppState>>();
 
-/** Reads the resolved light/dark theme applied to the document by AppThemeProvider. */
-function readResolvedTheme(win: Window = window): "light" | "dark" {
-  return win.document.documentElement.classList.contains("dark") ? "dark" : "light";
-}
-
 /**
  * Installs `window.registerKandevPlugin` and loads every plugin in
  * `bootPayload.plugins`, building each one's `PluginHostApi` from `storeApi`.
@@ -35,6 +30,5 @@ export function bootPlugins(
   bootedStores.add(storeApi);
 
   installPluginGlobal();
-  const theme = readResolvedTheme();
-  void loadPlugins(bootPayload.plugins, (pluginId) => buildHostApi(pluginId, storeApi, theme));
+  void loadPlugins(bootPayload.plugins, (pluginId) => buildHostApi(pluginId, storeApi));
 }

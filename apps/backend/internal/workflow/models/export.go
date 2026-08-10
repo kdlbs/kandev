@@ -36,6 +36,7 @@ type AgentProfileMatcher func(agentName, model, mode string) string
 type WorkflowPortable struct {
 	Name         string                `json:"name" yaml:"name"`
 	Description  string                `json:"description,omitempty" yaml:"description,omitempty"`
+	Prompt       string                `json:"prompt,omitempty" yaml:"prompt,omitempty"`
 	AgentProfile *AgentProfilePortable `json:"agent_profile,omitempty" yaml:"agent_profile,omitempty"`
 	Steps        []StepPortable        `json:"steps" yaml:"steps"`
 }
@@ -108,6 +109,7 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resol
 	wp := WorkflowPortable{
 		Name:        wf.Name,
 		Description: wf.Description,
+		Prompt:      wf.Prompt,
 		Steps:       portableSteps,
 	}
 	if resolveProfile != nil && wf.AgentProfileID != "" {

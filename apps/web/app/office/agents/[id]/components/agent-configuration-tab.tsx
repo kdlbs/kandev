@@ -12,39 +12,42 @@ import { useAppStore } from "@/components/state-provider";
 import { updateAgentProfile } from "@/lib/api/domains/office-api";
 import type { AgentProfile, AgentRole } from "@/lib/state/slices/office/types";
 import { AgentRoutingCard } from "./agent-routing-card";
+import { useTranslation } from "react-i18next";
 
 type AgentConfigurationTabProps = {
   agent: AgentProfile;
 };
 
-const FALLBACK_ROLES: Array<{ id: string; label: string }> = [
-  { id: "ceo", label: "CEO" },
-  { id: "worker", label: "Worker" },
-  { id: "specialist", label: "Specialist" },
-  { id: "assistant", label: "Assistant" },
-  { id: "security", label: "Security" },
-  { id: "qa", label: "QA" },
-  { id: "devops", label: "DevOps" },
+// Catalog keys, not copy — module scope freezes a `t()` at the boot locale.
+// The record keys are wire values and stay untranslated.
+const FALLBACK_ROLES: Array<{ id: string; labelKey: string }> = [
+  { id: "ceo", labelKey: "office:roleCeo" },
+  { id: "worker", labelKey: "office:roleWorker" },
+  { id: "specialist", labelKey: "office:roleSpecialist" },
+  { id: "assistant", labelKey: "office:roleAssistant" },
+  { id: "security", labelKey: "office:roleSecurity" },
+  { id: "qa", labelKey: "office:roleQa" },
+  { id: "devops", labelKey: "office:roleDevops" },
 ];
 
-const FALLBACK_EXECUTOR_TYPES: Array<{ id: string; label: string }> = [
-  { id: "local_pc", label: "Local (standalone)" },
-  { id: "local_docker", label: "Local Docker" },
-  { id: "sprites", label: "Sprites (remote sandbox)" },
+const FALLBACK_EXECUTOR_TYPES: Array<{ id: string; labelKey: string }> = [
+  { id: "local_pc", labelKey: "office:localStandalone" },
+  { id: "local_docker", labelKey: "office:localDocker" },
+  { id: "sprites", labelKey: "office:spritesRemoteSandbox" },
 ];
 
-const CAPABILITY_LABELS: Record<string, string> = {
-  post_comment: "Post comment",
-  update_task_status: "Update task status",
-  create_subtask: "Create subtask",
-  create_agent: "Create agent",
-  request_approval: "Request approval",
-  read_memory: "Read memory",
-  write_memory: "Write memory",
-  list_skills: "List skills",
-  spawn_agent_run: "Spawn run",
-  modify_agents: "Modify agents",
-  delete_skills: "Delete skills",
+const CAPABILITY_LABEL_KEYS: Record<string, string> = {
+  post_comment: "office:capabilityPostComment",
+  update_task_status: "office:capabilityUpdateTaskStatus",
+  create_subtask: "office:capabilityCreateSubtask",
+  create_agent: "office:capabilityCreateAgent",
+  request_approval: "office:capabilityRequestApproval",
+  read_memory: "office:capabilityReadMemory",
+  write_memory: "office:capabilityWriteMemory",
+  list_skills: "office:capabilityListSkills",
+  spawn_agent_run: "office:capabilitySpawnAgentRun",
+  modify_agents: "office:capabilityModifyAgents",
+  delete_skills: "office:capabilityDeleteSkills",
 };
 
 type FormState = {
@@ -66,13 +69,17 @@ function initialForm(agent: AgentProfile): FormState {
 }
 
 export function AgentConfigurationTab({ agent }: AgentConfigurationTabProps) {
+  const { t } = useTranslation();
   const meta = useAppStore((s) => s.office.meta);
   const updateStore = useAppStore((s) => s.updateOfficeAgentProfile);
   const allOfficeAgents = useAppStore((s) => s.office.agentProfiles);
 
-  const roles = meta?.roles.map((r) => ({ id: r.id, label: r.label })) ?? FALLBACK_ROLES;
+  const roles =
+    meta?.roles.map((r) => ({ id: r.id, label: r.label })) ??
+    FALLBACK_ROLES.map((r) => ({ id: r.id, label: t(r.labelKey) }));
   const executorTypes =
-    meta?.executorTypes.map((e) => ({ id: e.id, label: e.label })) ?? FALLBACK_EXECUTOR_TYPES;
+    meta?.executorTypes.map((e) => ({ id: e.id, label: e.label })) ??
+    FALLBACK_EXECUTOR_TYPES.map((e) => ({ id: e.id, label: t(e.labelKey) }));
 
   const [form, setForm] = useState<FormState>(() => initialForm(agent));
   const [saving, setSaving] = useState(false);
@@ -102,9 +109,9 @@ export function AgentConfigurationTab({ agent }: AgentConfigurationTabProps) {
       updateStore(agent.id, saved);
       setForm(initialForm(saved));
       setDirty(false);
-      toast.success("Agent configuration updated");
+      toast.success(t("office:agentConfigurationUpdated"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to update agent");
+      toast.error(err instanceof Error ? err.message : t("office:failedToUpdateAgent"));
     } finally {
       setSaving(false);
     }
@@ -116,7 +123,7 @@ export function AgentConfigurationTab({ agent }: AgentConfigurationTabProps) {
         name={form.name}
         role={form.role}
         roles={roles}
-        reportsToName={reportsToAgent?.name ?? "None"}
+        reportsToName={reportsToAgent?.name ?? t("office:none")}
         onNameChange={(v) => patch({ name: v })}
         onRoleChange={(v) => patch({ role: v })}
       />
@@ -134,7 +141,7 @@ export function AgentConfigurationTab({ agent }: AgentConfigurationTabProps) {
       {dirty && (
         <div className="flex justify-end">
           <Button onClick={handleSave} disabled={saving} className="cursor-pointer">
-            {saving ? "Saving..." : "Save Configuration"}
+            {saving ? t("office:saving") : t("office:saveConfiguration")}
           </Button>
         </div>
       )}
@@ -143,20 +150,22 @@ export function AgentConfigurationTab({ agent }: AgentConfigurationTabProps) {
 }
 
 function CapabilityPreviewCard({ agent, role }: { agent: AgentProfile; role: AgentRole }) {
+  const { t } = useTranslation();
   const capabilities = effectiveCapabilities(agent, role);
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-sm">Runtime capabilities</CardTitle>
+        <CardTitle className="text-sm">{t("office:runtimeCapabilities")}</CardTitle>
         <p className="text-xs text-muted-foreground">
-          Effective actions this agent can request during Office runs.
+          {t("office:effectiveActionsThisAgentCanRequest")}
         </p>
       </CardHeader>
       <CardContent>
         <div className="flex flex-wrap gap-2" data-testid="agent-capability-preview">
           {capabilities.map((key) => (
             <Badge key={key} variant="secondary">
-              {CAPABILITY_LABELS[key] ?? key}
+              {/* `?? key` keeps an unmapped wire capability visible. */}
+              {CAPABILITY_LABEL_KEYS[key] ? t(CAPABILITY_LABEL_KEYS[key]) : key}
             </Badge>
           ))}
         </div>
@@ -180,7 +189,7 @@ function effectiveCapabilities(agent: AgentProfile, role: AgentRole): string[] {
   if (permissions.can_spawn_agent_run === true) allowed.add("spawn_agent_run");
   if (permissions.can_modify_agents === true) allowed.add("modify_agents");
   if (permissions.can_delete_skills === true) allowed.add("delete_skills");
-  return Object.keys(CAPABILITY_LABELS).filter((key) => allowed.has(key));
+  return Object.keys(CAPABILITY_LABEL_KEYS).filter((key) => allowed.has(key));
 }
 
 function IdentityCard({
@@ -198,17 +207,18 @@ function IdentityCard({
   onNameChange: (v: string) => void;
   onRoleChange: (v: AgentRole) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-sm">Identity</CardTitle>
+        <CardTitle className="text-sm">{t("office:identity")}</CardTitle>
         <p className="text-xs text-muted-foreground">
-          Name, role, and reporting structure for this agent.
+          {t("office:nameRoleAndReportingStructureFor")}
         </p>
       </CardHeader>
       <CardContent className="space-y-3">
         <div>
-          <Label htmlFor="cfg-name">Name</Label>
+          <Label htmlFor="cfg-name">{t("office:name")}</Label>
           <Input
             id="cfg-name"
             value={name}
@@ -218,7 +228,7 @@ function IdentityCard({
         </div>
         <div className="flex gap-4">
           <div className="flex-1">
-            <Label>Role</Label>
+            <Label>{t("office:role")}</Label>
             <Select value={role} onValueChange={(v) => onRoleChange(v as AgentRole)}>
               <SelectTrigger className="mt-1 cursor-pointer">
                 <SelectValue />
@@ -233,10 +243,10 @@ function IdentityCard({
             </Select>
           </div>
           <div className="flex-1">
-            <Label>Reports to</Label>
+            <Label>{t("office:reportsTo")}</Label>
             <Input value={reportsToName} disabled className="mt-1" />
             <p className="text-xs text-muted-foreground mt-1">
-              Edit org chart from the agents list.
+              {t("office:editOrgChartFromTheAgents")}
             </p>
           </div>
         </div>
@@ -262,18 +272,19 @@ function OrchestrationCard({
   onMaxConcurrentChange: (v: number) => void;
   onExecutorChange: (v: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-sm">Orchestration</CardTitle>
+        <CardTitle className="text-sm">{t("office:orchestration")}</CardTitle>
         <p className="text-xs text-muted-foreground">
-          Budget cap, concurrency, and execution environment.
+          {t("office:budgetCapConcurrencyAndExecutionEnvironment")}
         </p>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex gap-4">
           <div className="flex-1">
-            <Label>Monthly budget ($)</Label>
+            <Label>{t("office:monthlyBudget")}</Label>
             <Input
               type="number"
               min={0}
@@ -283,7 +294,7 @@ function OrchestrationCard({
             />
           </div>
           <div className="flex-1">
-            <Label>Max concurrent sessions</Label>
+            <Label>{t("office:maxConcurrentSessions")}</Label>
             <Input
               type="number"
               min={1}
@@ -295,17 +306,17 @@ function OrchestrationCard({
           </div>
         </div>
         <div>
-          <Label>Executor preference</Label>
+          <Label>{t("office:executorPreference")}</Label>
           <Select
             value={executorType || "__inherit__"}
             onValueChange={(v) => onExecutorChange(v === "__inherit__" ? "" : v)}
           >
             <SelectTrigger className="mt-1 cursor-pointer">
-              <SelectValue placeholder="Inherit from project/workspace" />
+              <SelectValue placeholder={t("office:inheritFromProjectWorkspace")} />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="__inherit__" className="cursor-pointer">
-                Inherit
+                {t("office:inherit")}
               </SelectItem>
               {executorTypes.map((et) => (
                 <SelectItem key={et.id} value={et.id} className="cursor-pointer">

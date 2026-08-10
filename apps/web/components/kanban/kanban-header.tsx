@@ -14,8 +14,10 @@ import {
   IconTimeline,
 } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { PageTopbar } from "@/components/page-topbar";
 import { KanbanDisplayDropdown } from "../kanban-display-dropdown";
+import { usePluginTaskFilters } from "@/hooks/use-plugin-task-filters";
 import { ReleaseNotesDialog } from "../release-notes/release-notes-dialog";
 import { HealthIndicatorButton, HealthIssuesDialog } from "../system-health/health-indicator";
 import { TaskSearchInput } from "./task-search-input";
@@ -63,13 +65,27 @@ const DESKTOP_HEADER_NARROW_PX = 800;
 function getWorkspaceLabel(
   workspaces: Array<{ id: string; name: string }>,
   activeWorkspaceId: string | null,
+  t: TFunction,
 ): string {
-  if (!activeWorkspaceId) return "All workspaces";
-  return workspaces.find((workspace) => workspace.id === activeWorkspaceId)?.name ?? "Workspace";
+  if (!activeWorkspaceId) return t("kanban:allWorkspaces");
+  return (
+    workspaces.find((workspace) => workspace.id === activeWorkspaceId)?.name ??
+    t("common:workspace")
+  );
 }
 
-function getHeaderTitle(currentPage: string): string {
-  return currentPage === "tasks" ? "Tasks" : "Home";
+/**
+ * The header title is display copy, so it must not double as the "is this the
+ * home page?" flag — `title === "Home"` was true only in English and silently
+ * picked the wrong branch in every other locale. `currentPage` is the
+ * discriminant; the title is derived from it.
+ */
+function isHomePage(currentPage: string): boolean {
+  return currentPage !== "tasks";
+}
+
+function getHeaderTitle(currentPage: string, t: TFunction): string {
+  return isHomePage(currentPage) ? t("sidebar:home") : t("sidebar:tasks");
 }
 
 function toHeaderHealthProps(health: ReturnType<typeof useSystemHealthIndicator>) {
@@ -205,7 +221,8 @@ function TabletHeader({
   hideTitle?: boolean;
 }) {
   const { t } = useTranslation();
-  const isHome = title === "Home";
+  const isHome = isHomePage(currentPage);
+  const pluginTaskFilters = usePluginTaskFilters();
 
   return (
     <PageTopbar
@@ -236,7 +253,13 @@ function TabletHeader({
           <TooltipProvider>
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
           </TooltipProvider>
-          <KanbanDisplayDropdown triggerSize="icon-lg" currentPage={currentPage} />
+          <KanbanDisplayDropdown
+            triggerSize="icon-lg"
+            currentPage={currentPage}
+            pluginFilters={pluginTaskFilters.filters}
+            pluginFilterSelections={pluginTaskFilters.selections}
+            onPluginFilterChange={pluginTaskFilters.setFilterSelection}
+          />
           <HealthIndicatorButton
             hasIssues={showHealthIndicator}
             onClick={onOpenHealthDialog}
@@ -287,6 +310,7 @@ function DesktopHeader({
   const { t } = useTranslation();
   const headerRef = useRef<HTMLElement>(null);
   const isNarrow = useIsHeaderNarrow(headerRef);
+  const pluginTaskFilters = usePluginTaskFilters();
   const searchInput = onSearchChange ? (
     <TaskSearchInput
       value={searchQuery}
@@ -296,7 +320,7 @@ function DesktopHeader({
       className={`${isNarrow ? "w-44" : "w-72 xl:w-80"} [&_input]:h-8`}
     />
   ) : null;
-  const isHome = title === "Home";
+  const isHome = isHomePage(currentPage);
   const centerSearch =
     searchInput && !isNarrow ? <div data-testid="kanban-header-search">{searchInput}</div> : null;
   const actionsSearch = isNarrow ? searchInput : null;
@@ -322,7 +346,13 @@ function DesktopHeader({
           <TooltipProvider>
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
           </TooltipProvider>
-          <KanbanDisplayDropdown triggerSize="icon-lg" currentPage={currentPage} />
+          <KanbanDisplayDropdown
+            triggerSize="icon-lg"
+            currentPage={currentPage}
+            pluginFilters={pluginTaskFilters.filters}
+            pluginFilterSelections={pluginTaskFilters.selections}
+            onPluginFilterChange={pluginTaskFilters.setFilterSelection}
+          />
           <HealthIndicatorButton
             hasIssues={showHealthIndicator}
             onClick={onOpenHealthDialog}
@@ -366,6 +396,7 @@ export function KanbanHeader({
   isSearchLoading = false,
   tasksListOptions,
 }: KanbanHeaderProps) {
+  const { t } = useTranslation();
   const { isMobile, isTablet } = useResponsiveBreakpoint();
   const isMenuOpen = useAppStore((state) => state.mobileKanban.isMenuOpen);
   const setMenuOpen = useAppStore((state) => state.setMobileKanbanMenuOpen);
@@ -376,8 +407,8 @@ export function KanbanHeader({
   const healthIndicator = useSystemHealthIndicator();
   const toggleValue = currentPage === "tasks" ? "list" : effectiveTaskListingView;
   const handleViewChange = useHeaderView(currentPage, workspaceId, workflowId, onViewModeChange);
-  const title = getHeaderTitle(currentPage);
-  const workspaceLabel = getWorkspaceLabel(workspaces, activeWorkspaceId);
+  const title = getHeaderTitle(currentPage, t);
+  const workspaceLabel = getWorkspaceLabel(workspaces, activeWorkspaceId, t);
 
   const healthProps = toHeaderHealthProps(healthIndicator);
   const sharedSearch = { searchQuery, onSearchChange, isSearchLoading };

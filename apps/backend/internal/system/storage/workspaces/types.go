@@ -40,6 +40,8 @@ type Inventory struct {
 	EnvironmentPaths []string
 	ExecutionPaths   []string
 	ScratchRoots     []ScratchRoot
+	KnownTaskIDs     map[string]struct{}
+	ArchivedTaskIDs  map[string]struct{}
 }
 
 type InventorySource interface {
@@ -72,6 +74,13 @@ type WorktreePruner interface {
 type CleanupResult struct {
 	Candidates     int      `json:"candidates"`
 	Quarantined    int      `json:"quarantined"`
+	ReclaimedBytes int64    `json:"reclaimed_bytes"`
+	Warnings       []string `json:"warnings,omitempty"`
+}
+
+type DependencyCleanupResult struct {
+	Workspaces     int      `json:"workspaces"`
+	Directories    int      `json:"directories"`
 	ReclaimedBytes int64    `json:"reclaimed_bytes"`
 	Warnings       []string `json:"warnings,omitempty"`
 }

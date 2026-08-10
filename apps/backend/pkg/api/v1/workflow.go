@@ -8,6 +8,7 @@ type Workflow struct {
 	WorkspaceID string    `json:"workspace_id"`
 	Name        string    `json:"name"`
 	Description *string   `json:"description,omitempty"`
+	Prompt      *string   `json:"prompt,omitempty"`
 	SortOrder   int       `json:"sort_order"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
@@ -17,10 +18,12 @@ type Workflow struct {
 type CreateWorkflowRequest struct {
 	Name        string  `json:"name" binding:"required,max=255"`
 	Description *string `json:"description,omitempty"`
+	Prompt      *string `json:"prompt,omitempty"`
 }
 
 // UpdateWorkflowRequest for updating a workflow
 type UpdateWorkflowRequest struct {
 	Name        *string `json:"name,omitempty" binding:"omitempty,max=255"`
 	Description *string `json:"description,omitempty"`
+	Prompt      *string `json:"prompt,omitempty"`
 }

@@ -3,6 +3,7 @@
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import type { ImportDiff, SyncDiff } from "@/lib/api/domains/office-api";
+import { useTranslation } from "react-i18next";
 
 type SyncDiffPaneProps = {
   title: string;
@@ -25,6 +26,7 @@ export function SyncDiffPane({
   applyLabel,
   onApply,
 }: SyncDiffPaneProps) {
+  const { t } = useTranslation();
   const totalChanges = diff ? countChanges(diff) : 0;
 
   return (
@@ -41,7 +43,7 @@ export function SyncDiffPane({
             disabled={applying || loading || totalChanges === 0}
             className="cursor-pointer shrink-0"
           >
-            {applying ? "Applying..." : applyLabel}
+            {applying ? t("office:applying") : applyLabel}
           </Button>
         </div>
         <p className="text-xs text-muted-foreground mt-1">{description}</p>
@@ -63,18 +65,19 @@ function DiffBody({
   loading: boolean;
   totalChanges: number;
 }) {
+  const { t } = useTranslation();
   if (loading && !diff) {
-    return <p className="text-sm text-muted-foreground">Loading...</p>;
+    return <p className="text-sm text-muted-foreground">{t("common:loadingEllipsis")}</p>;
   }
   if (!diff || totalChanges === 0) {
-    return <p className="text-sm text-muted-foreground">No changes detected.</p>;
+    return <p className="text-sm text-muted-foreground">{t("office:noChangesDetected")}</p>;
   }
   return (
     <>
-      <DiffSection label="Agents" diff={diff.preview.agents} />
-      <DiffSection label="Skills" diff={diff.preview.skills} />
-      <DiffSection label="Routines" diff={diff.preview.routines} />
-      <DiffSection label="Projects" diff={diff.preview.projects} />
+      <DiffSection label={t("office:agents")} diff={diff.preview.agents} />
+      <DiffSection label={t("office:skills")} diff={diff.preview.skills} />
+      <DiffSection label={t("office:routines")} diff={diff.preview.routines} />
+      <DiffSection label={t("office:projects")} diff={diff.preview.projects} />
     </>
   );
 }
@@ -123,10 +126,12 @@ function ParseErrorsSection({
 }: {
   errors: { workspace_id: string; file_path: string; error: string }[];
 }) {
+  const { t } = useTranslation();
   return (
     <div>
       <p className="text-xs font-medium text-destructive mb-1.5 uppercase tracking-wide">
-        Parse errors ({errors.length})
+        {t("office:parseErrors")}
+        {errors.length})
       </p>
       <ul className="space-y-1">
         {errors.map((err) => (

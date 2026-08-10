@@ -141,9 +141,10 @@ export function useWorkflowAgentProfileEffect(
     lastUsedAgentProfileId?: string | null;
     authLoaded?: boolean;
     userSettingsLoaded?: boolean;
+    effectiveWorkflowId?: string | null;
   } = {},
 ) {
-  const { lastUsedAgentProfileId, authLoaded = true } = options;
+  const { lastUsedAgentProfileId, authLoaded = true, effectiveWorkflowId } = options;
   const {
     agentProfileId,
     workflowAgentProfileId,
@@ -153,12 +154,13 @@ export function useWorkflowAgentProfileEffect(
     setWorkflowAgentProfileId,
   } = fs;
   useEffect(() => {
-    if (!selectedWorkflowId) {
+    const resolvedWorkflowId = effectiveWorkflowId ?? selectedWorkflowId;
+    if (!resolvedWorkflowId) {
       setWorkflowAgentProfileId("");
       workflowAutopickDebug("no-workflow", { cleared: "workflowAgentProfileId" });
       return;
     }
-    const workflow = workflows.find((w) => w.id === selectedWorkflowId);
+    const workflow = workflows.find((w) => w.id === resolvedWorkflowId);
     if (workflow?.agent_profile_id) {
       // Always lock the selector when the workflow specifies an agent profile.
       // This prevents the race condition where agentProfiles hasn't loaded yet.
@@ -168,12 +170,12 @@ export function useWorkflowAgentProfileEffect(
       if (profileExists) {
         setAgentProfileId(workflow.agent_profile_id);
         workflowAutopickDebug("locked", {
-          workflow: selectedWorkflowId,
+          workflow: resolvedWorkflowId,
           set_to: workflow.agent_profile_id,
         });
       } else {
         workflowAutopickDebug("locked-missing", {
-          workflow: selectedWorkflowId,
+          workflow: resolvedWorkflowId,
           missing: workflow.agent_profile_id,
         });
       }
@@ -226,6 +228,7 @@ export function useWorkflowAgentProfileEffect(
     }
   }, [
     selectedWorkflowId,
+    effectiveWorkflowId,
     agentProfileId,
     workflowAgentProfileId,
     executorProfileId,
@@ -258,8 +261,9 @@ export function useAgentProfileAutopickEffect(
     // Check synchronously whether the selected workflow has an agent override.
     // This avoids a race condition where workflowAgentProfileId state hasn't
     // been committed yet by the workflow effect running in the same cycle.
-    const workflowHasAgent = selectedWorkflowId
-      ? workflows.some((w) => w.id === selectedWorkflowId && w.agent_profile_id)
+    const resolvedWorkflowId = sel.effectiveWorkflowId ?? selectedWorkflowId;
+    const workflowHasAgent = resolvedWorkflowId
+      ? workflows.some((w) => w.id === resolvedWorkflowId && w.agent_profile_id)
       : false;
     const lastAgentProfileId = resolveLastUsedAgentProfileId(
       compatibleAgentProfiles,
@@ -286,7 +290,7 @@ export function useAgentProfileAutopickEffect(
         buildAgentAutopickDebugFields({
           decision,
           agentProfileId,
-          selectedWorkflowId,
+          selectedWorkflowId: resolvedWorkflowId,
           executorProfileId,
           agentProfiles,
           compatibleAgentProfiles,
@@ -306,6 +310,7 @@ export function useAgentProfileAutopickEffect(
     agentProfileId,
     workflowAgentProfileId,
     selectedWorkflowId,
+    sel.effectiveWorkflowId,
     workflows,
     agentProfiles,
     compatibleAgentProfiles,

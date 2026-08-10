@@ -35,6 +35,11 @@ type TaskStatusSummary struct {
 	ActiveError         *ActiveErrorSummary    `json:"active_error,omitempty"`
 	Git                 *GitSummary            `json:"git,omitempty"`
 	PullRequest         *PullRequestSummary    `json:"pull_request,omitempty"`
+	// QueuedPromptCount is the number of prompts currently en-queued for the
+	// task across all of its sessions (pending semantics identical to
+	// message.queue.get). Omitted when zero so task rows without queued work
+	// stay byte-identical to earlier builds.
+	QueuedPromptCount int `json:"queued_prompt_count,omitempty"`
 }
 
 type PrimarySessionSummary struct {
@@ -92,6 +97,9 @@ func (s TaskStatusSummary) SemanticEqual(other TaskStatusSummary) bool {
 func (s TaskStatusSummary) Validate() error {
 	if s.ActiveSubagentCount < 0 {
 		return fmt.Errorf("active subagent count cannot be negative")
+	}
+	if s.QueuedPromptCount < 0 {
+		return fmt.Errorf("queued prompt count cannot be negative")
 	}
 	if err := validatePrimarySession(s.PrimarySession); err != nil {
 		return err
@@ -185,6 +193,7 @@ func (s TaskStatusSummary) SemanticJSON() ([]byte, error) {
 		ActiveError:         s.ActiveError,
 		Git:                 s.Git,
 		PullRequest:         s.PullRequest,
+		QueuedPromptCount:   s.QueuedPromptCount,
 	})
 }
 
@@ -196,4 +205,5 @@ type semanticPayload struct {
 	ActiveError         *ActiveErrorSummary    `json:"active_error,omitempty"`
 	Git                 *GitSummary            `json:"git,omitempty"`
 	PullRequest         *PullRequestSummary    `json:"pull_request,omitempty"`
+	QueuedPromptCount   int                    `json:"queued_prompt_count,omitempty"`
 }

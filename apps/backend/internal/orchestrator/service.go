@@ -24,7 +24,6 @@ import (
 
 	"go.uber.org/zap"
 
-	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -145,12 +144,31 @@ type taskQueuePromotionPublisher interface {
 	PublishTaskQueuePromoted(ctx context.Context, task *models.Task)
 }
 
+// WorkflowMeta is the subset of workflow fields needed at step entry
+// (agent profile default + optional workflow-level prompt).
+type WorkflowMeta struct {
+	AgentProfileID string
+	Prompt         string
+}
+
 // WorkflowStepGetter retrieves workflow step information for prompt building.
 type WorkflowStepGetter interface {
 	GetStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error)
 	GetNextStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error)
 	GetPreviousStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error)
-	GetWorkflowAgentProfileID(ctx context.Context, workflowID string) (string, error)
+	// GetWorkflowMeta returns agent profile id and prompt for a workflow in one
+	// read. Step-entry paths that need both fields should call this once.
+	GetWorkflowMeta(ctx context.Context, workflowID string) (WorkflowMeta, error)
+}
+
+// AgentFamilyResolver maps a hand-written agent family reference onto the
+// canonical IDs of every agent that answers to it. Exactly one candidate
+// resolves the reference; none means it names no known agent; more than one
+// means it is ambiguous and must not be guessed. The candidates themselves —
+// not just how many there are — decide whether an ambiguous reference concerns
+// a particular session at all. Implemented by registry.Registry.
+type AgentFamilyResolver interface {
+	ResolveFamilyIDs(name string) []string
 }
 
 // PromptReferenceExpander resolves "@name" saved-prompt references embedded in
@@ -185,8 +203,7 @@ type repoStore interface {
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
 	ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error)
 	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
-	CreateTaskSessionWorktree(ctx context.Context, sessionWorktree *models.TaskSessionWorktree) error
-	ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error)
+	ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskEnvironmentRepo, error)
 	ListSessionsWithBranches(ctx context.Context) ([]models.SessionBranchInfo, error)
 	GetRepository(ctx context.Context, id string) (*models.Repository, error)
 	UpdateRepository(ctx context.Context, repository *models.Repository) error
@@ -243,6 +260,16 @@ type sessionExecutorStore interface {
 	// than an idempotent same-owner observation.
 	ClaimTaskTitleSession(ctx context.Context, taskID, sessionID string) (owned bool, newlyClaimed bool, err error)
 	UpdateTask(ctx context.Context, task *models.Task) error
+	// SetTaskMetadataKey / RemoveTaskMetadataKey are concurrent-key-safe JSON
+	// patch helpers on tasks.metadata (implemented by the sqlite/Postgres
+	// repository). Used by startup reconciliation to mark interrupted tasks
+	// and by the session-start funnel to clear the marker.
+	SetTaskMetadataKey(ctx context.Context, taskID, key string, value interface{}) error
+	// SetTaskMetadataKeyIfNotArchived writes one metadata key only when the
+	// task row still has archived_at IS NULL (single statement — the archive
+	// check and the write cannot be separated by a concurrent archive).
+	SetTaskMetadataKeyIfNotArchived(ctx context.Context, taskID, key string, value interface{}) (bool, error)
+	RemoveTaskMetadataKey(ctx context.Context, taskID, key string) (bool, error)
 	ListChildCompletionRows(ctx context.Context, parentID string) ([]models.ChildCompletionRow, error)
 	// Git snapshots and commits
 	GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error)
@@ -342,6 +369,11 @@ type Service struct {
 
 	// Workflow step getter for prompt building
 	workflowStepGetter WorkflowStepGetter
+
+	// Resolves the agent family names written in configure_session rules onto
+	// canonical agent IDs. Nil-safe: when unset, rule matching falls back to an
+	// exact string comparison.
+	agentFamilyResolver AgentFamilyResolver
 
 	// Prompt reference expander for resolving "@name" saved-prompt
 	// references in the effective workflow-step prompt. Nil-safe: when
@@ -571,6 +603,12 @@ type Service struct {
 	// The spec allows at most one in-flight steer per session; a second attempt
 	// while one is outstanding queues instead. Keyed by sessionID, cleared when
 	// the steer dispatch is accepted or fails.
+	//
+	// Also read by the non-cancelling queue-drain paths (see isSteerInFlight):
+	// SteerTask releases the per-session message-queue admission lock before
+	// its own blocking dispatch, so a message queued in that window — with the
+	// turn completing in the same window — must not let an ordinary drain
+	// dispatch it ahead of the steer that was admitted first.
 	steerInFlight sync.Map
 	// Session reset flags: sessionID -> true while resetAgentContext is restarting process.
 	// Used to suppress stale ready events and avoid draining queued prompts mid-reset.
@@ -957,6 +995,24 @@ func (s *Service) authorizeSession(ctx context.Context, sessionID string) error 
 	return s.sessionAccessCheck(ctx, sessionID)
 }
 
+// SessionTaskID returns the task that owns a session, or "" when the session
+// is unknown. Used to enrich message.queue.status_changed events with the
+// task_id so task-scoped consumers (e.g. the status summary projector) can
+// refresh per-task queued-prompt counts.
+func (s *Service) SessionTaskID(ctx context.Context, sessionID string) (string, error) {
+	if sessionID == "" || s.repo == nil {
+		return "", nil
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return "", err
+	}
+	if session == nil {
+		return "", nil
+	}
+	return session.TaskID, nil
+}
+
 // authorizeTask applies the configured per-user task check. No-op when unwired.
 func (s *Service) authorizeTask(ctx context.Context, taskID string) error {
 	if s.taskAccessCheck == nil || taskID == "" {
@@ -1107,6 +1163,16 @@ func (s *Service) WorkflowStepRequiresCompletionSignal(ctx context.Context, step
 func (s *Service) SetWorkflowStepGetter(getter WorkflowStepGetter) {
 	s.workflowStepGetter = getter
 	s.initWorkflowEngine()
+}
+
+// SetAgentFamilyResolver sets the collaborator that maps the agent family names
+// written in configure_session rules onto canonical agent IDs.
+//
+// If not set: a rule matches only when its agent_name is byte-identical to the
+// session's stored agent family, and no rule can be reported as a typo or as
+// ambiguous because nothing is knowable about an agent family without it.
+func (s *Service) SetAgentFamilyResolver(resolver AgentFamilyResolver) {
+	s.agentFamilyResolver = resolver
 }
 
 // SetPromptReferenceExpander sets the collaborator used to resolve "@name"
@@ -1671,6 +1737,7 @@ func (s *Service) reconcileSessionsOnStartup(ctx context.Context) {
 
 	s.logger.Info("reconciling sessions on startup (lazy recovery)", zap.Int("count", len(runningExecutors)))
 
+	report := newStartupCleanupReport()
 	var remoteRecords []executor.RemoteStatusPollRequest
 	for _, running := range runningExecutors {
 		if models.IsRemoteExecutorType(models.ExecutorType(running.Runtime)) {
@@ -1682,8 +1749,9 @@ func (s *Service) reconcileSessionsOnStartup(ctx context.Context) {
 				Metadata:         running.Metadata,
 			})
 		}
-		s.reconcileOneSessionOnStartup(ctx, running)
+		s.reconcileOneSessionOnStartup(ctx, running, report)
 	}
+	report.flush(s.logger)
 
 	// Pre-poll remote executor status so task lists show accurate state
 	if len(remoteRecords) > 0 && s.agentManager != nil {
@@ -1692,7 +1760,7 @@ func (s *Service) reconcileSessionsOnStartup(ctx context.Context) {
 }
 
 // reconcileOneSessionOnStartup adjusts DB state for a single session without launching agents.
-func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *models.ExecutorRunning) {
+func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *models.ExecutorRunning, report *startupCleanupReport) {
 	sessionID := running.SessionID
 	if sessionID == "" {
 		return
@@ -1701,7 +1769,7 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		if isTaskSessionNotFound(err) {
-			s.handleMissingSessionOnStartup(ctx, running)
+			s.handleMissingSessionOnStartup(ctx, running, report)
 			return
 		}
 		s.logger.Warn("failed to load session for reconciliation; preserving executor record",
@@ -1713,7 +1781,7 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 	previousState := session.State
 
 	// Handle terminal and never-started states (reuse existing cleanup logic)
-	if skip := s.handleTerminalSessionOnStartup(ctx, session, running, previousState); skip {
+	if skip := s.handleTerminalSessionOnStartup(ctx, session, running, previousState, report); skip {
 		return
 	}
 	if previousState == models.TaskSessionStateCreated {
@@ -1751,14 +1819,29 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 		return
 	}
 
+	s.reconcileActiveSessionOnStartup(ctx, running, sessionID, previousState, session)
+}
+
+func (s *Service) reconcileActiveSessionOnStartup(
+	ctx context.Context,
+	running *models.ExecutorRunning,
+	sessionID string,
+	previousState models.TaskSessionState,
+	session *models.TaskSession,
+) {
 	// Active states: STARTING, RUNNING, WAITING_FOR_INPUT
 	// Set session to WAITING_FOR_INPUT (idle, ready for lazy resume when user opens it)
 	if previousState != models.TaskSessionStateWaitingForInput {
-		if err := s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""); err != nil {
-			s.logger.Warn("failed to set session to WAITING_FOR_INPUT on startup",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-		}
+		s.updateTaskSessionStateWithHook(
+			ctx,
+			running.TaskID,
+			sessionID,
+			models.TaskSessionStateWaitingForInput,
+			"",
+			false,
+			nil,
+			session,
+		)
 	}
 	s.abandonOpenTurnsOnStartup(ctx, sessionID, "active session reconciled to waiting")
 
@@ -1790,6 +1873,21 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 		}
 	}
 
+	// Mark the task interrupted when its session was mid-turn when the backend
+	// died (STARTING/RUNNING) so task-list surfaces can show the red
+	// interruption icon. WAITING_FOR_INPUT sessions were idle, not interrupted.
+	// The write is archive-atomic (SetTaskMetadataKeyIfNotArchived), so an
+	// archive that commits after this check cannot leave a stale marker on an
+	// archived task. The marker is cleared when a session of the task next
+	// enters STARTING/RUNNING (see updateTaskSessionStateWithHook).
+	if running.TaskID != "" && (previousState == models.TaskSessionStateStarting || previousState == models.TaskSessionStateRunning) {
+		if _, setErr := s.repo.SetTaskMetadataKeyIfNotArchived(ctx, running.TaskID, models.MetaKeyInterruptedAt, time.Now().UTC().Format(time.RFC3339)); setErr != nil {
+			s.logger.Warn("failed to mark task interrupted on startup",
+				zap.String("task_id", running.TaskID),
+				zap.Error(setErr))
+		}
+	}
+
 	// PRESERVE the ExecutorRunning record — it holds the resume token and worktree info
 	// needed for lazy recovery when the user opens the session. But make the row
 	// TRUE: after a restart the spawned process is normally gone, so if the local
@@ -1809,13 +1907,19 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 		zap.Bool("has_worktree", running.WorktreePath != ""))
 }
 
-func (s *Service) handleMissingSessionOnStartup(ctx context.Context, running *models.ExecutorRunning) {
+func (s *Service) handleMissingSessionOnStartup(ctx context.Context, running *models.ExecutorRunning, report *startupCleanupReport) {
 	sessionID := running.SessionID
 	executionID := strings.TrimSpace(running.AgentExecutionID)
 	if executionID == "" || s.agentManager == nil {
-		s.logger.Warn("executor record has no session and no stoppable runtime handle; preserving record",
-			zap.String("session_id", sessionID),
-			zap.String("task_id", running.TaskID))
+		decision := startupCleanupDecision{
+			disposition:    startupCleanupDispositionPreserved,
+			liveness:       processLivenessClass(s.rowLiveness(running)),
+			stopErrorClass: "missing_stop_handle",
+			expected:       true,
+		}
+		report.recordExpected(running, decision)
+		s.logger.Debug("executor record has no stoppable runtime handle; preserving record",
+			startupCleanupFields(running, decision)...)
 		return
 	}
 	if err := s.agentManager.StopAgentWithReason(ctx, executionID, "startup missing session cleanup", true); err != nil {
@@ -1825,18 +1929,20 @@ func (s *Service) handleMissingSessionOnStartup(ctx context.Context, running *mo
 		// invariant, so the orphan row does not survive restarts forever. Any
 		// other error (alive/unknown/remote row, or a non-not-found failure) is
 		// preserved and left for a later attempt.
-		if !stopReportsRuntimeAbsent(err) || s.rowLiveness(running) != models.ProcessLivenessDead {
-			s.logger.Warn("failed to stop missing-session runtime; preserving executor record",
-				zap.String("session_id", sessionID),
-				zap.String("task_id", running.TaskID),
-				zap.String("execution_id", executionID),
-				zap.Error(err))
+		decision := classifyStartupCleanup(err, s.rowLiveness(running))
+		if !decision.proceed {
+			if decision.expected {
+				report.recordExpected(running, decision)
+				s.logger.Debug("failed to stop missing-session runtime; preserving executor record",
+					startupCleanupFields(running, decision)...)
+			} else {
+				s.logger.Warn("failed to stop missing-session runtime; preserving executor record",
+					startupCleanupFields(running, decision)...)
+			}
 			return
 		}
 		s.logger.Info("missing-session runtime already gone (confirmed dead); pruning executor record",
-			zap.String("session_id", sessionID),
-			zap.String("task_id", running.TaskID),
-			zap.String("execution_id", executionID))
+			startupCleanupFields(running, decision)...)
 		s.pruneOrRepairExecutorRow(ctx, running, models.TaskSessionStateCancelled)
 		return
 	}
@@ -1846,17 +1952,6 @@ func (s *Service) handleMissingSessionOnStartup(ctx context.Context, running *mo
 			zap.String("task_id", running.TaskID),
 			zap.Error(err))
 	}
-}
-
-// stopReportsRuntimeAbsent reports whether a stop error means the runtime is
-// already gone (a typed not-found sentinel), as opposed to a transient failure.
-// Only a typed sentinel counts — a generic store/lookup error must never be
-// reinterpreted as an absent runtime. The runtime seam (lifecycleAdapter)
-// normalizes the backend lifecycle not-found sentinel to runtimeapi.ErrNotFound,
-// so reconciliation depends only on the public runtime and executor sentinels.
-func stopReportsRuntimeAbsent(err error) bool {
-	return errors.Is(err, runtimeapi.ErrNotFound) ||
-		errors.Is(err, executor.ErrExecutionNotFound)
 }
 
 func (s *Service) abandonOpenTurnsOnStartup(ctx context.Context, sessionID, reason string) {
@@ -1878,7 +1973,7 @@ func isTaskSessionNotFound(err error) bool {
 
 // handleTerminalSessionOnStartup processes sessions in terminal states during startup.
 // Returns true if the session should be skipped (no further processing needed).
-func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *models.TaskSession, running *models.ExecutorRunning, previousState models.TaskSessionState) bool {
+func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *models.TaskSession, running *models.ExecutorRunning, previousState models.TaskSessionState, report *startupCleanupReport) bool {
 	sessionID := session.ID
 	switch previousState {
 	case models.TaskSessionStateCompleted, models.TaskSessionStateCancelled:
@@ -1887,7 +1982,7 @@ func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *m
 			zap.String("task_id", session.TaskID),
 			zap.String("state", string(previousState)))
 		s.abandonOpenTurnsOnStartup(ctx, sessionID, "terminal session cleanup")
-		if !s.stopRuntimeForStartupCleanup(ctx, running, "startup terminal session cleanup") {
+		if !s.stopRuntimeForStartupCleanup(ctx, running, "startup terminal session cleanup", report) {
 			return true
 		}
 		// Resume-safety invariant: prune the row only if it is not still resumable
@@ -1897,14 +1992,14 @@ func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *m
 		s.pruneOrRepairExecutorRow(ctx, running, previousState)
 		return true
 	case models.TaskSessionStateFailed:
-		s.handleFailedSessionOnStartup(ctx, session, running)
+		s.handleFailedSessionOnStartup(ctx, session, running, report)
 		return true
 	}
 	return false
 }
 
 // handleFailedSessionOnStartup handles a failed session during startup recovery.
-func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *models.TaskSession, running *models.ExecutorRunning) {
+func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *models.TaskSession, running *models.ExecutorRunning, report *startupCleanupReport) {
 	sessionID := session.ID
 	s.abandonOpenTurnsOnStartup(ctx, sessionID, "failed session cleanup")
 	// If session failed, ensure task is in REVIEW state (not stuck IN_PROGRESS)
@@ -1932,7 +2027,7 @@ func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *mod
 		s.logger.Info("stopping failed session runtime before cleaning up executor record",
 			zap.String("session_id", sessionID),
 			zap.String("task_id", session.TaskID))
-		if !s.stopRuntimeForStartupCleanup(ctx, running, "startup failed session cleanup") {
+		if !s.stopRuntimeForStartupCleanup(ctx, running, "startup failed session cleanup", report) {
 			return
 		}
 		// Prune only subject to the resume-safety invariant (a lingering
@@ -1948,30 +2043,50 @@ func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *mod
 // leaking stale rows: a not-found stop for a confirmed-dead LOCAL runtime means
 // the runtime is already gone and cleanup proceeds; any other error
 // (alive/unknown/remote row, or a non-not-found failure) preserves the row for a
-// later attempt. A row with no stoppable handle is already stoppable-complete.
-func (s *Service) stopRuntimeForStartupCleanup(ctx context.Context, running *models.ExecutorRunning, reason string) bool {
+// later attempt. A row with no stoppable handle proceeds only when its local
+// process liveness is confirmed dead; alive and Unknown rows remain durable.
+func (s *Service) stopRuntimeForStartupCleanup(ctx context.Context, running *models.ExecutorRunning, reason string, report *startupCleanupReport) bool {
 	executionID := strings.TrimSpace(running.AgentExecutionID)
 	if executionID == "" || s.agentManager == nil {
+		liveness := s.rowLiveness(running)
+		decision := startupCleanupDecision{
+			disposition:    startupCleanupDispositionPreserved,
+			liveness:       processLivenessClass(liveness),
+			stopErrorClass: "missing_stop_handle",
+			expected:       true,
+		}
+		if liveness == models.ProcessLivenessDead {
+			decision.disposition = startupCleanupDispositionAlreadyAbsent
+			decision.proceed = true
+			decision.expected = false
+		}
+		if !decision.proceed {
+			report.recordExpected(running, decision)
+			s.logger.Debug("session runtime has no stoppable handle; preserving executor record",
+				append(startupCleanupFields(running, decision), zap.String("reason", reason))...)
+			return false
+		}
+		s.logger.Info("session runtime is confirmed dead without a stop handle; proceeding to prune/repair",
+			append(startupCleanupFields(running, decision), zap.String("reason", reason))...)
 		return true
 	}
 	err := s.agentManager.StopAgentWithReason(ctx, executionID, reason, true)
 	if err == nil {
 		return true
 	}
-	if !stopReportsRuntimeAbsent(err) || s.rowLiveness(running) != models.ProcessLivenessDead {
-		s.logger.Warn("failed to stop session runtime during startup cleanup; preserving executor record",
-			zap.String("session_id", running.SessionID),
-			zap.String("task_id", running.TaskID),
-			zap.String("execution_id", executionID),
-			zap.String("reason", reason),
-			zap.Error(err))
+	decision := classifyStartupCleanup(err, s.rowLiveness(running))
+	if !decision.proceed {
+		fields := append(startupCleanupFields(running, decision), zap.String("reason", reason))
+		if decision.expected {
+			report.recordExpected(running, decision)
+			s.logger.Debug("failed to stop session runtime during startup cleanup; preserving executor record", fields...)
+		} else {
+			s.logger.Warn("failed to stop session runtime during startup cleanup; preserving executor record", fields...)
+		}
 		return false
 	}
 	s.logger.Info("session runtime already gone (confirmed dead) during startup cleanup; proceeding to prune/repair",
-		zap.String("session_id", running.SessionID),
-		zap.String("task_id", running.TaskID),
-		zap.String("execution_id", executionID),
-		zap.String("reason", reason))
+		append(startupCleanupFields(running, decision), zap.String("reason", reason))...)
 	return true
 }
 

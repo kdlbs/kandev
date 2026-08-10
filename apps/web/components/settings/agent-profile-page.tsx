@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
 import { useParams } from "@/lib/routing/client-router";
@@ -19,6 +19,7 @@ import { toAgentProfilePatch } from "@/app/settings/agents/[agentId]/agent-save-
 import {
   AgentProfileDeleteConfirmDialog,
   AgentProfileDeleteConflictDialog,
+  AgentProfileDisableConflictDialog,
   type AgentProfileDeleteConflict,
 } from "@/components/settings/agent-profile-delete-dialog";
 import {
@@ -48,6 +49,7 @@ import type {
   PermissionSetting,
   PassthroughConfig,
 } from "@/lib/types/http";
+import type { UtilityAgentReference } from "@/lib/types/agent-profile-errors";
 import { useAppStore } from "@/components/state-provider";
 import { AgentLogo } from "@/components/agent-logo";
 import { ProfileMcpConfigCard } from "@/app/settings/agents/[agentId]/profile-mcp-config-card";
@@ -72,6 +74,16 @@ type ProfileEditorHeaderProps = {
   enabled: boolean;
   onEnabledChange: (enabled: boolean) => void;
 };
+
+function profileSaveInvalidReason(
+  profileName: string,
+  modelConfigResolutionPending: boolean,
+  translate: (key: string) => string,
+): string | undefined {
+  if (!profileName.trim()) return translate("agents:profileNameRequired");
+  if (modelConfigResolutionPending) return translate("agents:resolvingModelOptions");
+  return undefined;
+}
 
 function ProfileEditorHeader({
   agentName,
@@ -142,6 +154,7 @@ type ProfileSettingsCardProps = {
   modelConfig: ModelConfig;
   permissionSettings: Record<string, PermissionSetting>;
   passthroughConfig: PassthroughConfig | null;
+  onModelConfigResolutionPendingChange: (pending: boolean) => void;
 };
 
 function ProfileSettingsCard({
@@ -153,6 +166,7 @@ function ProfileSettingsCard({
   modelConfig,
   permissionSettings,
   passthroughConfig,
+  onModelConfigResolutionPendingChange,
 }: ProfileSettingsCardProps) {
   const { t } = useTranslation();
   const handleFormChange = (patch: Partial<ProfileFormData>) => {
@@ -177,6 +191,8 @@ function ProfileSettingsCard({
           profile={{
             name: draft.name,
             model: draft.model,
+            fallback_model: draft.fallbackModel ?? "",
+            auto_fallback: draft.autoFallback ?? false,
             mode: draft.mode ?? "",
             config_options: draft.configOptions ?? {},
             auto_approve: permissionValues.auto_approve,
@@ -188,6 +204,8 @@ function ProfileSettingsCard({
           baselineProfile={{
             name: savedProfile.name,
             model: savedProfile.model,
+            fallback_model: savedProfile.fallbackModel ?? "",
+            auto_fallback: savedProfile.autoFallback ?? false,
             mode: savedProfile.mode ?? "",
             config_options: savedProfile.configOptions ?? {},
             auto_approve: savedPermissionValues.auto_approve,
@@ -201,6 +219,7 @@ function ProfileSettingsCard({
           permissionSettings={permissionSettings}
           passthroughConfig={passthroughConfig}
           agentName={agent.name}
+          onModelConfigResolutionPendingChange={onModelConfigResolutionPendingChange}
           lockPassthrough={Boolean(agent.tui_config)}
           hideCustomCLIFlags
         />
@@ -259,6 +278,7 @@ type ProfileEditorBodyProps = {
   secrets: { id: string; name: string }[];
   initialMcpConfig?: AgentProfileMcpConfig | null;
   onToastError: (error: unknown) => void;
+  onModelConfigResolutionPendingChange: (pending: boolean) => void;
 };
 
 function ProfileEditorBody({
@@ -273,6 +293,7 @@ function ProfileEditorBody({
   secrets,
   initialMcpConfig,
   onToastError,
+  onModelConfigResolutionPendingChange,
 }: ProfileEditorBodyProps) {
   return (
     <>
@@ -285,6 +306,7 @@ function ProfileEditorBody({
         modelConfig={modelConfig}
         permissionSettings={permissionSettings}
         passthroughConfig={passthroughConfig}
+        onModelConfigResolutionPendingChange={onModelConfigResolutionPendingChange}
       />
 
       <CustomCLIFlagsCard
@@ -326,6 +348,7 @@ function ProfileEditorBody({
   );
 }
 
+// eslint-disable-next-line max-lines-per-function
 function ProfileEditor({
   agent,
   profile,
@@ -336,11 +359,13 @@ function ProfileEditor({
 }: ProfileEditorProps) {
   const { t } = useTranslation();
   const { toast } = useToast();
+  const [modelConfigResolutionPending, setModelConfigResolutionPending] = useState(false);
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
   const syncAgentsToStore = useSyncAgentsToStore();
   const { items: secrets } = useSecrets();
   const { draft, setDraft, savedProfile, setSavedProfile, setSaveStatus, isDirty } =
     useProfileEditorState(profile, permissionSettings);
+  const [utilityConflict, setUtilityConflict] = useState<UtilityAgentReference[]>([]);
   const updateDraft = useCallback(
     (patch: Partial<AgentProfile>) => {
       setDraft((current) => {
@@ -365,25 +390,18 @@ function ProfileEditor({
     settingsAgents,
     syncAgentsToStore,
     toast,
+    onUtilityConflict: setUtilityConflict,
   });
   useSettingsSaveContributor({
     id: `agent-profile:${draft.id}`,
     revision: JSON.stringify(draft),
     isDirty,
-    canSave: Boolean(draft.name.trim()),
-    invalidReason: draft.name.trim() ? undefined : t("agents:profileNameRequired"),
-    save: handleSave,
+    canSave: Boolean(draft.name.trim()) && !modelConfigResolutionPending,
+    invalidReason: profileSaveInvalidReason(draft.name, modelConfigResolutionPending, t),
+    save: () => handleSave(),
     discard: () => setDraft(savedProfile),
   });
-  const {
-    requestDelete,
-    showDeleteConfirm,
-    setShowDeleteConfirm,
-    handleDeleteProfile,
-    conflict,
-    setConflict,
-    handleForceDelete,
-  } = useProfileDelete(agent, draft, settingsAgents, syncAgentsToStore, toast);
+  const deleteState = useProfileDelete(agent, draft, settingsAgents, syncAgentsToStore, toast);
 
   return (
     <div className="space-y-8">
@@ -415,17 +433,27 @@ function ProfileEditor({
             variant: "error",
           })
         }
+        onModelConfigResolutionPendingChange={setModelConfigResolutionPending}
       />
 
-      <DeleteProfileCard onDelete={requestDelete} />
+      <DeleteProfileCard onDelete={deleteState.requestDelete} />
+
+      <AgentProfileDisableConflictDialog
+        agents={utilityConflict}
+        onCancel={() => setUtilityConflict([])}
+        onConfirm={async () => {
+          setUtilityConflict([]);
+          await handleSave(true);
+        }}
+      />
 
       <ProfileDeleteDialogs
-        showDeleteConfirm={showDeleteConfirm}
-        setShowDeleteConfirm={setShowDeleteConfirm}
-        handleDeleteProfile={handleDeleteProfile}
-        conflict={conflict}
-        setConflict={setConflict}
-        handleForceDelete={handleForceDelete}
+        showDeleteConfirm={deleteState.showDeleteConfirm}
+        setShowDeleteConfirm={deleteState.setShowDeleteConfirm}
+        handleDeleteProfile={deleteState.handleDeleteProfile}
+        conflict={deleteState.conflict}
+        setConflict={deleteState.setConflict}
+        handleForceDelete={deleteState.handleForceDelete}
       />
     </div>
   );

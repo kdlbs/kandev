@@ -57,7 +57,16 @@ interface PluginHostApi {
     baseUrl: string;
   };
   ui: Record<string, unknown>;              // curated @kandev/ui components + app UI (see below)
-  theme: "light" | "dark";
+  // The resolved light/dark theme, read live on every access. `host` is built
+  // once per plugin load, so copying this into a variable that outlives a
+  // render freezes it; read it during render, and pair it with onThemeChange
+  // for anything that paints imperatively (canvas, inline SVG colors).
+  readonly theme: "light" | "dark";
+  // Fires on every light/dark change — the settings picker, its live preview,
+  // and an OS prefers-color-scheme flip while the app is set to "system".
+  // Returns an unsubscribe function; call it on teardown (component unmount,
+  // KandevPlugin.destroy) or the listener outlives the surface that owns it.
+  onThemeChange(listener: (theme: "light" | "dark") => void): () => void;
   // Soft SPA navigation (history push/replace + SPA re-render) — same code
   // path as the app router, so plugin pages can link into native routes
   // (e.g. /t/{taskId}) without a full reload.
@@ -66,6 +75,14 @@ interface PluginHostApi {
   // (mounted once at the app root, isolated behind its own error boundary).
   // Independent of keybindings — any plugin code path may call it.
   openModal(options: PluginModalOptions): PluginModalHandle;
+  // Sonner's imperative toast. The host mounts the single <Toaster/>, so
+  // there is nothing to render and nothing to wire — and because it is
+  // imperative rather than a component, it works from inside a plugin modal
+  // regardless of which providers that modal sits under.
+  toast: PluginToastApi;
+  // Shared helpers — plain functions, so they live here rather than in `ui`
+  // (a component map). See the "host.utils" section below.
+  utils: PluginUtilsApi;
   // Authenticated, per-user key/value storage backed by
   // /api/plugins/{id}/user-state/... — see the "host.storage" section below.
   // Requires the plugin manifest to declare capabilities.user_state: true.
@@ -153,10 +170,13 @@ interface PluginModalHandle {
 }
 ```
 
-`host.ui` contents: shadcn primitives (Alert*, Badge, Button, Card*, Checkbox,
-Dialog*, DropdownMenu*, Input, Label, Pagination*, ScrollArea, Select*,
+`host.ui` contents: shadcn primitives (Accordion*, Alert*, Badge, Button,
+Card*, Checkbox, Collapsible*, Dialog*, DropdownMenu*, Empty*, Input, Kbd,
+KbdGroup, Label, Pagination*, Popover*, Progress, ScrollArea, Select*,
 Separator, Sheet*, Skeleton, Spinner, Switch, Table*, Tabs*, Textarea,
-Tooltip*) plus first-party app UI: `PageTopbar` (the kandev title bar, for
+Tooltip*, including `TooltipProvider`), the recharts wrappers (`ChartContainer`,
+`ChartTooltip`, `ChartTooltipContent`, `ChartLegend`, `ChartLegendContent`,
+`ChartStyle`), plus first-party app UI: `PageTopbar` (the kandev title bar, for
 routes that opt out of the default chrome and own their layout),
 `TaskCreateDialog` (kandev's real create-task modal, prefilled via
 `initialValues`), `Combobox` (the app's Command+Popover picker), and
@@ -168,6 +188,62 @@ Plugins must use these host instances — bundling copies of anything
 Radix/portal/context-based would split React context across instances and
 break refs/`asChild`. Pure-React libs (e.g. `@tabler/icons-react`) bundle
 fine.
+
+The host wraps plugin routes, slots, and `openModal` content in a
+`TooltipProvider`, so a plain `Tooltip` works anywhere without one.
+`TooltipProvider` is exported for plugins that want their own
+`delayDuration`/`skipDelayDuration` over a dense cluster of tooltips; Radix
+supports nesting it.
+
+**Charts use the host's recharts.** `recharts` is already a dependency of both
+`apps/web` and `@kandev/ui`, so the `Chart*` exports add no bundle weight — and
+a plugin must never bundle its own copy. recharts drives layout through its own
+React context and portals its tooltips, so a second copy splits that context
+exactly the way a second Radix copy does: charts render at zero size, tooltips
+attach to the wrong tree, and responsive containers stop resizing. Compose the
+`Chart*` wrappers with the chart primitives they hand you rather than importing
+`recharts` in plugin code.
+
+### `host.toast` and `host.utils`
+
+```ts
+// Sonner's imperative toast — the host owns the single <Toaster/>, so there
+// is nothing to render and it works from any plugin code path, modals
+// included.
+host.toast.success("Synced 12 issues");
+host.toast.error("Sync failed");
+
+interface PluginToastApi {
+  (message: string, options?: Record<string, unknown>): string | number;
+  success(message: string, options?: Record<string, unknown>): string | number;
+  // Renders the same toast as any other variant, and additionally logs
+  // `[plugins] toast.error from "<pluginId>":` to the browser console.
+  // It does NOT file a report into kandev's frontend error log — that log is
+  // for kandev's own application errors, and a plugin toasting an expected
+  // condition (a failed poll, say) would otherwise record an Error-level
+  // entry every cycle. Console is where every plugin failure surfaces.
+  error(message: string, options?: Record<string, unknown>): string | number;
+  warning(message: string, options?: Record<string, unknown>): string | number;
+  info(message: string, options?: Record<string, unknown>): string | number;
+  // Dismisses one toast by the id a variant returned, or all of them when
+  // called with no argument.
+  dismiss(id?: string | number): unknown;
+}
+
+interface PluginUtilsApi {
+  // The host's clsx + tailwind-merge combiner, so class merging matches the
+  // components it styles.
+  cn(...inputs: unknown[]): string;
+  // Locale-aware relative time ("3 hours ago", "in 2 days", "yesterday") via
+  // Intl.RelativeTimeFormat in the user's active locale; "" for unparseable
+  // input. Prefer it over a hand-rolled ladder, which is English-only by
+  // construction and goes untranslated for every non-English user.
+  formatRelativeTime(value: string | number | Date): string;
+}
+```
+
+Both are functions, so they sit beside `navigate`/`openModal` rather than in
+`ui`, which is a component map.
 
 ### `host.ui.RichTextEditor` / `host.ui.RichTextReadOnly`
 
@@ -289,11 +365,17 @@ interface PluginRegistry {
   // <PluginSlot name="..." slotProps={...}/>. Initial slots: "task-sidebar",
   // "settings-nav", "chat-input-actions", "chat-top-bar",
   // "main-top-bar", "app-status-bar-left", "app-status-bar-right",
-  // "plugin-settings", and "task-card-indicators".
+  // "plugin-settings", "task-card-indicators", and "task-card-tags".
   // "task-card-indicators" renders a small icon/badge beside the PR status
   // icon on every kanban card and forwards
   // `{ taskId, workspaceId, workflowStepId }` as `slotProps`. Not a closed
   // union — hosts may register additional slot names.
+  // "task-card-tags" renders in its own row on every kanban card, below the
+  // badges row — for contributions too wide for the cramped title-row
+  // "task-card-indicators" spot (e.g. a row of tag chips) — and forwards the
+  // same `{ taskId: string, workspaceId: string | null, workflowStepId: string | null }`
+  // shape as `slotProps` (`workspaceId` is null with no active workspace, and
+  // `workflowStepId` is null when the task has no workflow step assigned).
   // "chat-input-actions" renders icon buttons in the chat composer toolbar
   // (beside the model picker, mic, and send) and forwards
   // `{ taskId, taskTitle, activeSessionId, sessionIds }` as `slotProps`.
@@ -347,9 +429,15 @@ interface PluginRegistry {
   // `plugin:{pluginId}:{panelKey}`. See "Task panels" below.
   registerTaskPanel(registration: TaskPanelRegistration): void;
 
-  // Contributes an item to the kanban card's Edit submenu. See
-  // "Kanban card contributions" below.
+  // Contributes an item to the kanban card's Edit submenu (group "edit") or
+  // a flat, top-level card menu item between "Move to"/"Send to workflow"
+  // and "Link" (group "primary"). See "Kanban card contributions" below.
   registerTaskMenuAction(registration: TaskMenuActionRegistration): void;
+
+  // Contributes a client-side filter section to the kanban board's display
+  // dropdown, alongside the built-in Workflow/Repository sections. See
+  // "Task filters" below.
+  registerTaskFilter(registration: TaskFilterRegistration): void;
 }
 
 type PluginPresentation = "desktop" | "mobile";
@@ -381,9 +469,31 @@ interface TaskMenuActionRegistration {
   id: string;
   label: string;
   icon?: React.ReactNode;
-  group: "edit"; // only group today — the card's Edit submenu
+  // "edit" nests the item in the card's Edit submenu; "primary" renders it
+  // as a flat, top-level item between the "Move to"/"Send to workflow"
+  // submenus and the "Link" submenu.
+  group: "edit" | "primary";
   visible?(context: PluginTaskMenuContext): boolean; // default: always visible
   run(context: PluginTaskMenuContext): void | Promise<void>; // a rejection is caught and logged
+}
+
+interface PluginTaskFilterContext {
+  taskId: string;
+}
+
+interface PluginTaskFilterOption {
+  value: string;
+  label: string;
+  color?: string; // optional swatch color rendered beside the option label
+}
+
+interface TaskFilterRegistration {
+  id: string;   // plugin-local filter id (unique within the plugin, not globally)
+  label: string; // filter section label shown in the dropdown
+  getOptions(): PluginTaskFilterOption[];
+  // Called only when `selected` is non-empty — an empty selection is
+  // implicit "All" and always matches without invoking this method.
+  matches(context: PluginTaskFilterContext, selected: string[]): boolean;
 }
 ```
 
@@ -469,9 +579,43 @@ action calls `run(context)`; a rejected promise is caught and logged to the
 console, and the menu still closes either way (Radix's own close-on-select,
 independent of the async result).
 
+Group `"primary"` renders each visible action as its own flat, top-level menu
+item instead of nesting it under `Edit` — positioned between the "Move
+to"/"Send to workflow" submenus and the "Link" submenu. Visibility filtering,
+registration order, and `run()`/error handling are identical to the `"edit"`
+group; the two groups are independent lists (an action only ever belongs to
+one).
+
 `"task-card-indicators"` (documented above with the other slots) is the
 matching read-only surface: a small icon/badge rendered beside the PR status
 icon on every card, receiving `{ taskId, workspaceId, workflowStepId }`.
+
+`"task-card-tags"` is a second, sibling read-only surface for the same
+context — same `{ taskId, workspaceId, workflowStepId }` shape — but mounted
+in its own row on the card instead of the cramped title row
+`"task-card-indicators"` shares with `PRTaskIcon`. Use it for a contribution
+that needs its own width, e.g. a row of tag chips.
+
+### Task filters
+
+`registerTaskFilter` adds one section to the kanban board's display dropdown
+(the same menu that holds the built-in Workflow and Repository filters),
+rendered below Repository and above the Preview Panel section. Each
+registration's `getOptions()` supplies the section's checkbox list; the
+plugin owns option identity, ordering, and labels — including any
+"untagged"-style sentinel, which is just a normal option value the host does
+not special-case.
+
+Selections are multi-select and purely client-side against tasks already
+loaded in the board's in-memory state: there is no backend query, pagination,
+or persistence for this filter, and selections reset on reload (unlike
+Workflow/Repository, which persist to backend user settings). An empty
+selection is implicit "All" for that section — `matches()` is only invoked
+once at least one option is selected, and multiple plugin filter sections
+combine with AND (a task must match every section with an active selection),
+mirroring how Workflow/Repository combine with the search query today. If
+`matches()` throws, the task is treated as non-matching and the error is
+logged (mirroring `TaskMenuActionRegistration.visible`'s error handling).
 
 ## Registry internals (host side)
 
@@ -509,8 +653,9 @@ defaults, or the bare component when the route opted out (`topbar: false`).
   (`components/task/chat/chat-input-toolbar-desktop.tsx` and
   `-mobile.tsx`, via `chat-input-plugin-actions.tsx`) hosts the
   `chat-input-actions` slot, passing
-  `{ taskId, taskTitle, activeSessionId, sessionIds }`. `kanban-card-content.tsx`
-  hosts `task-card-indicators` beside `PRTaskIcon`.
+  `{ taskId, taskTitle, activeSessionId, sessionIds }`. `kanban-card-plugin-slots.tsx`
+  hosts `task-card-indicators` beside `PRTaskIcon` and `task-card-tags` as its
+  own row, both mounted from `kanban-card-content.tsx`'s `KanbanCardBody`.
 - `components/task/dockview-shared.tsx` / `dockview-panel-content.tsx` /
   `dockview-desktop-layout.tsx`: the generic `"plugin-panel"` dockview
   component + `pluginPanelTab`, and `renderPanel`'s `"plugin-panel"` case

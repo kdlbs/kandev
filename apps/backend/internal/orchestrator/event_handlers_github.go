@@ -959,7 +959,7 @@ func (s *Service) resolveSessionWatchTargets(
 	return targets
 }
 
-// targetsFromMultiBranchWorktrees emits one target per task_session_worktrees
+// targetsFromMultiBranchWorktrees emits one target per environment repository
 // row, but ONLY when at least one repository has more than one worktree —
 // the multi-branch case. The worktree's actual branch (worktree_branch) is
 // the authoritative key because the worktree manager may suffix a

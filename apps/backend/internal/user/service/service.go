@@ -57,6 +57,7 @@ type UpdateUserSettingsRequest struct {
 	ShowScrollToLastPrompt          *bool
 	ShowScrollToStart               *bool
 	ShowTranscriptAutoScrollControl *bool
+	ShowTodoListPanel               *bool
 	ShowReleaseNotification         *bool
 	ReleaseNotesLastSeenVersion     *string
 	LspAutoStartLanguages           *[]string
@@ -77,6 +78,7 @@ type UpdateUserSettingsRequest struct {
 	AzureDevOpsBrowsePreferences    **json.RawMessage
 	DefaultUtilityAgentID           *string
 	DefaultUtilityModel             *string
+	DefaultUtilityAgentProfileID    *string
 	KeyboardShortcuts               *map[string]interface{}
 	TerminalLinkBehavior            *string
 	TerminalFontFamily              *string
@@ -132,6 +134,15 @@ func (s *Service) GetDefaultUtilitySettings(ctx context.Context) (agentID, model
 		return "", "", err
 	}
 	return settings.DefaultUtilityAgentID, settings.DefaultUtilityModel, nil
+}
+
+// GetDefaultUtilityAgentProfileID returns the profile used by new built-in utility actions.
+func (s *Service) GetDefaultUtilityAgentProfileID(ctx context.Context) (string, error) {
+	settings, err := s.repo.GetUserSettings(ctx, s.defaultUser)
+	if err != nil {
+		return "", err
+	}
+	return settings.DefaultUtilityAgentProfileID, nil
 }
 
 func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSettingsRequest) (*models.UserSettings, error) {
@@ -196,7 +207,8 @@ func taskCreateLastUsedPatchEmpty(patch models.TaskCreateLastUsed) bool {
 	return patch.RepositoryID == "" &&
 		patch.Branch == "" &&
 		patch.AgentProfileID == "" &&
-		patch.ExecutorProfileID == ""
+		patch.ExecutorProfileID == "" &&
+		len(patch.WorkflowIDsByWorkspace) == 0
 }
 
 // applyBasicSettings copies simple (non-validated) fields from req to settings.
@@ -306,6 +318,9 @@ func applyTaskActionPreferences(settings *models.UserSettings, req *UpdateUserSe
 	if req.ShowTranscriptAutoScrollControl != nil {
 		settings.ShowTranscriptAutoScrollControl = *req.ShowTranscriptAutoScrollControl
 	}
+	if req.ShowTodoListPanel != nil {
+		settings.ShowTodoListPanel = *req.ShowTodoListPanel
+	}
 	if req.ShowReleaseNotification != nil {
 		settings.ShowReleaseNotification = *req.ShowReleaseNotification
 	}
@@ -321,6 +336,9 @@ func applyUtilityPreferences(settings *models.UserSettings, req *UpdateUserSetti
 	}
 	if req.DefaultUtilityModel != nil {
 		settings.DefaultUtilityModel = strings.TrimSpace(*req.DefaultUtilityModel)
+	}
+	if req.DefaultUtilityAgentProfileID != nil {
+		settings.DefaultUtilityAgentProfileID = strings.TrimSpace(*req.DefaultUtilityAgentProfileID)
 	}
 }
 
@@ -711,6 +729,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"show_scroll_to_last_prompt":          settings.ShowScrollToLastPrompt,
 		"show_scroll_to_start":                settings.ShowScrollToStart,
 		"show_transcript_auto_scroll_control": settings.ShowTranscriptAutoScrollControl,
+		"show_todo_list_panel":                settings.ShowTodoListPanel,
 		"show_release_notification":           settings.ShowReleaseNotification,
 		"release_notes_last_seen_version":     settings.ReleaseNotesLastSeenVersion,
 		"lsp_auto_start_languages":            settings.LspAutoStartLanguages,
@@ -731,6 +750,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"azure_devops_browse_preferences":     settings.AzureDevOpsBrowsePreferences,
 		"default_utility_agent_id":            settings.DefaultUtilityAgentID,
 		"default_utility_model":               settings.DefaultUtilityModel,
+		"default_utility_agent_profile_id":    settings.DefaultUtilityAgentProfileID,
 		"keyboard_shortcuts":                  settings.KeyboardShortcuts,
 		"terminal_link_behavior":              settings.TerminalLinkBehavior,
 		"terminal_font_family":                settings.TerminalFontFamily,

@@ -213,6 +213,25 @@ describe("aggregateSidebarTasks active precedence", () => {
       git: { additions: 3, deletions: 0 },
     });
   });
+
+  it("preserves autopilot from the projection when the active task is partial", () => {
+    const projected = makeTask("t1", "s1", {
+      autopilot: true,
+      statusSummary: { revision: 1, updated_at: "2026-08-03T00:00:00Z" },
+    });
+    const result = aggregateSidebarTasks(
+      { "wf-1": makeSnapshot([makeStep("s1", 0)], [projected]) },
+      "wf-1",
+      [
+        makeTask("t1", "s1", {
+          statusSummary: { revision: 2, updated_at: "2026-08-03T00:00:01Z" },
+        }),
+      ],
+      [makeStep("s1", 0)],
+    );
+
+    expect(result.allTasks[0].autopilot).toBe(true);
+  });
 });
 
 describe("buildPendingFlags / readTaskPendingFlags", () => {

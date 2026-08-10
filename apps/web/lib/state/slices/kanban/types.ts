@@ -50,6 +50,7 @@ export type KanbanState = {
     workflowStepId: string;
     title: string;
     description?: string;
+    autopilot?: boolean;
     position: number;
     state?: TaskStatus;
     /** Primary repository id (lowest position). Kept for backwards compat. */
@@ -82,6 +83,8 @@ export type KanbanState = {
      * list background-running affordance.
      */
     foregroundActivity?: ForegroundActivity | null;
+    /** True when the task's session was mid-turn when the backend died. */
+    interrupted?: boolean;
     /** Live subagents across this task's sessions; drives the board count chip. */
     activeSubagentCount?: number;
     sessionCount?: number | null;
@@ -99,6 +102,7 @@ export type KanbanState = {
     queuedAt?: string;
     isPRReview?: boolean;
     isIssueWatch?: boolean;
+    metadata?: Record<string, unknown> | null;
     isArchived?: boolean;
     issueUrl?: string;
     issueNumber?: number;
@@ -134,6 +138,7 @@ export type WorkflowsState = {
     workspaceId: string;
     name: string;
     description?: string | null;
+    prompt?: string;
     sortOrder?: number;
     agent_profile_id?: string;
     hidden?: boolean;

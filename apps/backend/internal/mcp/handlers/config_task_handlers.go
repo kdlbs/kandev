@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -335,6 +336,16 @@ func (h *Handlers) handleArchiveTask(ctx context.Context, msg *ws.Message) (*ws.
 	}
 
 	if err := h.taskSvc.ArchiveTask(ctx, taskID); err != nil {
+		// Archiving is a goal-state operation: a task that is already archived
+		// is in the requested state, so report success instead of an opaque
+		// internal error. The flag lets the caller tell a no-op from a real
+		// state change.
+		if errors.Is(err, service.ErrTaskAlreadyArchived) {
+			return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+				"success":          true,
+				"already_archived": true,
+			})
+		}
 		h.logger.Error("failed to archive task", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to archive task", nil)
 	}

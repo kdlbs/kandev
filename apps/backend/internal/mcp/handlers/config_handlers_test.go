@@ -364,11 +364,12 @@ func TestLookupSession_NoPrimarySession_ReturnsNilNil(t *testing.T) {
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
 	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
 	// Task created without an agent → no primary session row.
-	task, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-1",
 		Title:       "Sessionless task",
 	})
+	task := taskResult.Task
 	require.NoError(t, err)
 
 	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
@@ -513,6 +514,46 @@ func TestHandleArchiveTask_InvalidPayload(t *testing.T) {
 	resp, err := h.handleArchiveTask(context.Background(), msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeBadRequest)
+}
+
+// TestHandleArchiveTask_AlreadyArchived_IsIdempotent pins that re-archiving a
+// task the caller already archived reports success rather than surfacing the
+// ErrTaskAlreadyArchived sentinel as an opaque INTERNAL ERROR. Archiving is a
+// goal-state operation, so the requested state already holding is not a
+// failure — but the response flags it so the caller can tell the two apart.
+func TestHandleArchiveTask_AlreadyArchived_IsIdempotent(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
+	taskResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		WorkflowID:  "wf-1",
+		Title:       "Archive me",
+	})
+	task := taskResult.Task
+	require.NoError(t, err)
+
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+	msg := makeWSMessage(t, ws.ActionMCPArchiveTask, map[string]string{"task_id": task.ID})
+
+	resp, err := h.handleArchiveTask(ctx, msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	var first map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &first))
+	assert.Equal(t, true, first["success"])
+	assert.NotContains(t, first, "already_archived", "first archive is a real state change")
+
+	resp2, err := h.handleArchiveTask(ctx, msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp2)
+	require.Equal(t, ws.MessageTypeResponse, resp2.Type, "re-archiving must not surface as an error")
+	var second map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp2.Payload, &second))
+	assert.Equal(t, true, second["success"])
+	assert.Equal(t, true, second["already_archived"])
 }
 
 func TestHandleUpdateTaskState_MissingTaskID(t *testing.T) {

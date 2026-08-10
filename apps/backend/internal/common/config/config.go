@@ -133,6 +133,10 @@ type ServerConfig struct {
 	ReadTimeout    int      `mapstructure:"readTimeout"`  // in seconds
 	WriteTimeout   int      `mapstructure:"writeTimeout"` // in seconds
 	WebInternalURL string   `mapstructure:"webInternalUrl"`
+	// WebTitlePrefix prefixes the browser tab title as "<prefix> Kandev" (for
+	// example "TEST") so several Kandev instances are distinguishable in
+	// adjacent browser tabs. Empty keeps the plain "Kandev" title.
+	WebTitlePrefix string `mapstructure:"webTitlePrefix"`
 }
 
 // splitHosts splits a comma-separated host string, trimming whitespace and
@@ -515,6 +519,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.readTimeout", 30)
 	v.SetDefault("server.writeTimeout", 30)
 	v.SetDefault("server.webInternalUrl", "")
+	v.SetDefault("server.webTitlePrefix", "")
 
 	// HomeDir default — empty means resolve from KANDEV_HOME_DIR env or ~/.kandev
 	v.SetDefault("homeDir", "")
@@ -670,6 +675,7 @@ func LoadWithPath(configPath string) (*Config, error) {
 	_ = v.BindEnv("agent.standalonePort", "AGENTCTL_PORT", "KANDEV_AGENT_STANDALONE_PORT")
 	_ = v.BindEnv("agent.standaloneHost", "KANDEV_AGENT_STANDALONE_HOST")
 	_ = v.BindEnv("server.webInternalUrl", "KANDEV_WEB_INTERNAL_URL")
+	_ = v.BindEnv("server.webTitlePrefix", "KANDEV_WEB_TITLE_PREFIX")
 	_ = v.BindEnv("homeDir", "KANDEV_HOME_DIR")
 	_ = v.BindEnv("logging.level", "KANDEV_LOG_LEVEL")
 	_ = v.BindEnv("events.namespace", "KANDEV_EVENTS_NAMESPACE")

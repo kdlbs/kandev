@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"sync"
 	"time"
 
@@ -55,7 +56,7 @@ type WorkspaceGroupRepo interface {
 // the sqlite task repository.
 type SessionWorktreeReader interface {
 	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
-	ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error)
+	ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskEnvironmentRepo, error)
 	GetTask(ctx context.Context, id string) (*models.Task, error)
 	// HasExecutorRunningRow tells cleanup whether a session still has
 	// an executors_running row — i.e. an agent is (or recently was)
@@ -121,6 +122,23 @@ func (p WorkspacePolicy) MetadataBlock() map[string]interface{} {
 		return nil
 	}
 	return map[string]interface{}{"workspace": ws}
+}
+
+// MergeMetadataBlock folds MetadataBlock into caller-supplied task metadata,
+// allocating base only when there is something to write. The policy block wins
+// for the keys it owns, so a caller cannot inject conflicting policy through
+// raw metadata. Both task-create surfaces (HTTP and MCP) go through here, which
+// is what keeps their metadata precedence identical.
+func (p WorkspacePolicy) MergeMetadataBlock(base map[string]interface{}) map[string]interface{} {
+	block := p.MetadataBlock()
+	if len(block) == 0 {
+		return base
+	}
+	if base == nil {
+		base = map[string]interface{}{}
+	}
+	maps.Copy(base, block)
+	return base
 }
 
 // NeedsAttachment returns true when AttachWorkspacePolicy has work to do

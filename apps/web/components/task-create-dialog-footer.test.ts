@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   computeDisabledReason,
+  resolveDisabledReason,
+  REASON_NO_COMPATIBLE_AGENT,
   REASON_TITLE,
   REASON_REPO,
   REASON_BRANCH,
@@ -10,6 +12,7 @@ import {
   REASON_DESCRIPTION,
   REASON_PROMPT,
 } from "./task-create-dialog-footer";
+import { t } from "@/lib/i18n";
 import type { ButtonKind, TaskCreateDialogFooterProps } from "./task-create-dialog-footer";
 
 const KIND_START: ButtonKind = "start-task";
@@ -125,8 +128,25 @@ describe("computeDisabledReason (start-task)", () => {
       }),
       KIND_START,
     );
-    expect(reason).toContain("Docker (sandbox)");
-    expect(reason).toContain("credentials");
+    expect(reason).toBe(REASON_NO_COMPATIBLE_AGENT);
+  });
+
+  // `computeDisabledReason` is pure and returns catalog keys, so the executor
+  // profile name only reaches the copy once the component resolves it.
+  it("resolves the no-compatible-agent key with the executor profile name", () => {
+    const text = resolveDisabledReason(t, REASON_NO_COMPATIBLE_AGENT, "Docker (sandbox)");
+    expect(text).toContain("Docker (sandbox)");
+    expect(text).toContain("credentials");
+  });
+
+  it("falls back to a generic target when no executor profile is named", () => {
+    expect(resolveDisabledReason(t, REASON_NO_COMPATIBLE_AGENT, null)).toContain("this executor");
+  });
+
+  it("passes caller-supplied blocked reasons through untranslated", () => {
+    expect(resolveDisabledReason(t, "Uploads still in progress", null)).toBe(
+      "Uploads still in progress",
+    );
   });
 });
 

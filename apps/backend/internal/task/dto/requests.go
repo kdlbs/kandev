@@ -45,6 +45,7 @@ type CreateWorkflowRequest struct {
 	WorkspaceID        string
 	Name               string
 	Description        string
+	Prompt             string
 	WorkflowTemplateID *string
 }
 
@@ -52,6 +53,7 @@ type UpdateWorkflowRequest struct {
 	ID          string
 	Name        *string
 	Description *string
+	Prompt      *string
 }
 
 type DeleteWorkflowRequest struct {
@@ -285,6 +287,7 @@ type CreateTaskRequest struct {
 	Labels                 string
 	ParentID               string
 	BlockedBy              []string
+	Autopilot              bool
 }
 
 type UpdateTaskRequest struct {

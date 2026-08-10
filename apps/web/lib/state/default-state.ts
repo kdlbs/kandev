@@ -18,6 +18,7 @@ import {
   defaultReviewState,
 } from "./slices";
 import { applyStoredQuickChatNames } from "@/lib/state/slices/ui/quick-chat-sync";
+import type { AgentRuntimeAvailability } from "@/lib/types/agent-runtime";
 import type { HydrationState } from "./store";
 import { migrateSidebarViewDraft, migrateView } from "./slices/ui/ui-slice";
 
@@ -104,6 +105,7 @@ export const defaultState = {
   automations: defaultAutomationsState.automations,
   automationRuns: defaultAutomationsState.automationRuns,
   system: defaultSystemState.system,
+  agentRuntime: null as AgentRuntimeAvailability | null,
   previewPanel: defaultUIState.previewPanel,
   rightPanel: defaultUIState.rightPanel,
   diffs: defaultUIState.diffs,

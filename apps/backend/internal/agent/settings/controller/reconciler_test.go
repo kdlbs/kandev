@@ -310,16 +310,20 @@ func TestProfileReconciler_DoesNotReseedAfterUserDelete(t *testing.T) {
 	}
 }
 
-func TestProfileReconciler_HealsStaleModel(t *testing.T) {
+// TestProfileReconciler_KeepsGoneModel verifies the reconciler keeps a gone start model instead of healing it.
+
+func TestProfileReconciler_KeepsGoneModel(t *testing.T) {
 	st := newFakeStore()
-	// Seed an existing DB agent and profile with a stale model.
+	// Seed an existing DB agent and profile whose model is no longer
+	// advertised (e.g. provider auth expired). The reconciler must NOT
+	// silently replace it — no implicit model fallback.
 	dbAgent := &models.Agent{Name: "claude-acp"}
 	_ = st.CreateAgent(context.Background(), dbAgent)
 	existing := &models.AgentProfile{
 		AgentID: dbAgent.ID,
 		Name:    "Claude",
 		Model:   "claude-gone",
-		Mode:    "",
+		Mode:    "default",
 	}
 	_ = st.CreateAgentProfile(context.Background(), existing)
 
@@ -340,15 +344,93 @@ func TestProfileReconciler_HealsStaleModel(t *testing.T) {
 	if err := r.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
+	// No update: the gone model is kept, not overwritten.
+	if len(st.updated) != 0 {
+		t.Fatalf("expected no profile update, got %d: %+v", len(st.updated), st.updated)
+	}
+	live, err := st.GetAgentProfile(context.Background(), existing.ID)
+	if err != nil {
+		t.Fatalf("get profile: %v", err)
+	}
+	if live.Model != "claude-gone" {
+		t.Errorf("model = %q, want claude-gone (kept, not healed)", live.Model)
+	}
+}
+
+// TestProfileReconciler_SeedsEmptyModel verifies the reconciler still seeds an empty model from the probe.
+
+func TestProfileReconciler_SeedsEmptyModel(t *testing.T) {
+	st := newFakeStore()
+	dbAgent := &models.Agent{Name: "claude-acp"}
+	_ = st.CreateAgent(context.Background(), dbAgent)
+	existing := &models.AgentProfile{
+		AgentID: dbAgent.ID,
+		Name:    "Claude",
+		Model:   "",
+	}
+	_ = st.CreateAgentProfile(context.Background(), existing)
+
+	ag := &mockInferenceAgent{id: "claude-acp", displayName: "Claude", enabled: true}
+	caps := &fakeCapReader{
+		caps: map[string]hostutility.AgentCapabilities{
+			"claude-acp": {
+				AgentType:      "claude-acp",
+				Status:         hostutility.StatusOK,
+				Models:         []hostutility.Model{{ID: "claude-sonnet", Name: "Sonnet"}},
+				CurrentModelID: "claude-sonnet",
+			},
+		},
+	}
+	r := newReconciler(t, st, caps, ag)
+	if err := r.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
 	if len(st.updated) != 1 {
 		t.Fatalf("expected 1 updated profile, got %d", len(st.updated))
 	}
-	updated := st.updated[0]
-	if updated.Model != "claude-new" {
-		t.Errorf("healed model = %q, want claude-new", updated.Model)
+	if updated := st.updated[0]; updated.Model != "claude-sonnet" {
+		t.Errorf("seeded model = %q, want claude-sonnet", updated.Model)
 	}
-	if updated.Mode != "default" {
-		t.Errorf("backfilled mode = %q, want default", updated.Mode)
+}
+
+// TestProfileReconciler_KeepsGoneFallbackModel verifies a gone fallback model is kept, not healed.
+
+func TestProfileReconciler_KeepsGoneFallbackModel(t *testing.T) {
+	st := newFakeStore()
+	dbAgent := &models.Agent{Name: "omp-acp"}
+	_ = st.CreateAgent(context.Background(), dbAgent)
+	existing := &models.AgentProfile{
+		AgentID:       dbAgent.ID,
+		Name:          "Hybrid",
+		Model:         "claude-sonnet",
+		FallbackModel: "gpt-gone",
+	}
+	_ = st.CreateAgentProfile(context.Background(), existing)
+
+	ag := &mockInferenceAgent{id: "omp-acp", displayName: "OMP", enabled: true}
+	caps := &fakeCapReader{
+		caps: map[string]hostutility.AgentCapabilities{
+			"omp-acp": {
+				AgentType:      "omp-acp",
+				Status:         hostutility.StatusOK,
+				Models:         []hostutility.Model{{ID: "claude-sonnet", Name: "Sonnet"}},
+				CurrentModelID: "claude-sonnet",
+			},
+		},
+	}
+	r := newReconciler(t, st, caps, ag)
+	if err := r.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(st.updated) != 0 {
+		t.Fatalf("expected no profile update, got %d: %+v", len(st.updated), st.updated)
+	}
+	live, err := st.GetAgentProfile(context.Background(), existing.ID)
+	if err != nil {
+		t.Fatalf("get profile: %v", err)
+	}
+	if live.FallbackModel != "gpt-gone" {
+		t.Errorf("fallback_model = %q, want gpt-gone (kept, not healed)", live.FallbackModel)
 	}
 }
 

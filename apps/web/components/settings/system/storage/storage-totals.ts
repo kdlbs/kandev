@@ -27,6 +27,10 @@ export function storageAnalysisTotal(summary: StorageSummary): StorageAnalysisTo
   if (summary.go_cache.unmanaged_path) {
     addMeasurement(summary.go_cache.unmanaged_size_bytes);
   }
+  addMeasurement(
+    summary.temporary_artifacts.total_bytes,
+    summary.temporary_artifacts.available !== false,
+  );
 
   if (summary.docker.available) {
     addMeasurement(summary.docker.managed_container_bytes);

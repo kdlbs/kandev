@@ -87,6 +87,13 @@ func (s *Service) publishQueueStatusEvent(ctx context.Context, sessionID string)
 		"count":      queueStatus.Count,
 		"max":        queueStatus.Max,
 	}
+	if taskID, err := s.SessionTaskID(ctx, sessionID); err != nil {
+		s.logger.Warn("resolve session task for queue status event",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	} else if taskID != "" {
+		eventData["task_id"] = taskID
+	}
 
 	s.logger.Debug("publishing queue status changed event",
 		zap.String("session_id", sessionID),
@@ -1047,6 +1054,10 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 	s.scheduler.HandleTaskCompleted(data.TaskID, true)
 	s.scheduler.RemoveTask(data.TaskID)
 
+	// The agent finished a turn, so any stored failure no longer describes the
+	// session. `session` was read above, so the guard costs nothing.
+	s.clearRecoveredAgentError(context.WithoutCancel(ctx), data.TaskID, session)
+
 	s.completeTurnForSession(context.WithoutCancel(ctx), data.SessionID)
 
 	if s.sessionHasPendingClarification(ctx, data.SessionID) {
@@ -1134,8 +1145,8 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 		return
 	}
 
-	// Transient provider errors (529 Overloaded) get a paced, visible
-	// retry-with-backoff before any red banner. This is the ONLY non-terminal
+	// Short transient provider errors get a paced, visible retry-with-backoff
+	// before any red banner. This is the ONLY non-terminal
 	// failure path, so it runs before automation finalization below — otherwise
 	// a transient 529 on an automation run would mark the run failed and
 	// reap its ephemeral worktree out from under the in-flight retry.
@@ -1465,6 +1476,7 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 		Message:          errMsg,
 		OccurredAt:       time.Now().UTC(),
 		AgentExecutionID: data.AgentExecutionID,
+		RemediationURL:   providerRemediationURL(data),
 	}
 	if err := s.repo.SetSessionMetadataKey(ctx, data.SessionID, models.SessionMetaKeyLastAgentError, lastErr); err != nil {
 		s.logger.Warn("failed to persist last agent error",
@@ -1483,6 +1495,9 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 			"stamp":              lastErr.Stamp(),
 			"agent_execution_id": lastErr.AgentExecutionID,
 		}
+		if lastErr.RemediationURL != "" {
+			eventData["remediation_url"] = lastErr.RemediationURL
+		}
 		if err := s.eventBus.Publish(ctx, events.TaskSessionErrorChanged, bus.NewEvent(
 			events.TaskSessionErrorChanged,
 			"orchestrator",
@@ -1494,6 +1509,69 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 				zap.Error(err))
 		}
 	}
+}
+
+// clearRecoveredAgentError drops a session's stored agent failure once the agent
+// completes a turn, and publishes the inactive error event so open clients drop
+// the red error affordance.
+//
+// persistLastAgentError deliberately keeps the record across a successful turn
+// as an investigation breadcrumb, but nothing ever retired it, so a failure the
+// agent recovered from weeks ago still read as live: every path that re-derives
+// task status from session metadata (a status-summary rebuild, a backend
+// restart, a later session event) put it straight back. The failure also lands
+// in the transcript as a recovery message, which is where an investigation
+// actually looks, so the metadata copy is not the durable record.
+//
+// Writes JSON null rather than a delete: LoadLastAgentError already treats that
+// as absent, so no new repository surface is needed.
+func (s *Service) clearRecoveredAgentError(ctx context.Context, taskID string, session *models.TaskSession) {
+	if session == nil || session.ID == "" {
+		return
+	}
+	if _, ok := models.LoadLastAgentError(session.Metadata); !ok {
+		return
+	}
+	if err := s.repo.SetSessionMetadataKey(
+		ctx, session.ID, models.SessionMetaKeyLastAgentError, nil,
+	); err != nil {
+		s.logger.Warn("failed to clear recovered agent error",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+		return
+	}
+	// Keep the in-memory copy in step: the session-state publish below reads
+	// its `session_metadata` straight off this object.
+	delete(session.Metadata, models.SessionMetaKeyLastAgentError)
+	if s.eventBus == nil {
+		return
+	}
+	if err := s.eventBus.Publish(ctx, events.TaskSessionErrorChanged, bus.NewEvent(
+		events.TaskSessionErrorChanged,
+		"orchestrator",
+		map[string]interface{}{
+			"task_id":    taskID,
+			"session_id": session.ID,
+			"active":     false,
+		},
+	)); err != nil {
+		s.logger.Warn("failed to publish recovered task session error event",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+	}
+}
+
+// providerRemediationURL returns the adapter-validated remediation URL from the
+// normalized provider diagnostic, or "" when the failure carried none. The URL
+// is only ever set by the adapter's allowlist validator; the orchestrator does
+// not validate or reconstruct URLs from prose.
+func providerRemediationURL(data watcher.AgentEventData) string {
+	if data.ProviderError == nil || !data.ProviderError.Valid() {
+		return ""
+	}
+	return data.ProviderError.RemediationURL
 }
 
 // createRecoveryStatusMessage builds and persists the ActionMessage shown
@@ -1512,13 +1590,14 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 	// Resume-corrupted failures (poisoned extended-thinking state after a
 	// session/load) can't be fixed by resuming — steer the user to a fresh
 	// session instead of dumping the raw 400.
+	classified := classifyKanbanFailure(data)
 	statusMsg := fmt.Sprintf("Agent encountered an error: %s", displayMsg)
 	if resumeCorrupted {
 		statusMsg = "This agent session can't be resumed — its saved reasoning state is corrupted. Start a fresh session to continue."
-	} else if routingerr.IsTransientProviderError(data.ErrorMessage) {
+	} else if routingerr.Decide(routingerr.ContextKanban, classified, time.Now().UTC()) == routingerr.DecisionShortRetry {
 		// Reached after the transient retry budget is exhausted — show friendly
-		// copy instead of dumping the raw 529 JSON envelope.
-		statusMsg = "The provider stayed overloaded after several retries. Resume to try again, or start a fresh session."
+		// provider-neutral copy instead of dumping raw adapter evidence.
+		statusMsg = transientFailureExhaustedMessage(classified)
 	}
 	hasResumeToken := s.wasResumeAttempt(ctx, data.SessionID)
 	meta := map[string]interface{}{
@@ -1529,6 +1608,11 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 		"has_resume_token": hasResumeToken,
 		"is_auth_error":    authErr,
 		"resume_corrupted": resumeCorrupted,
+	}
+	// The validated remediation URL is carried independently of quota
+	// classification so the generic recoverable card can still show the link.
+	if remediationURL := providerRemediationURL(data); remediationURL != "" {
+		meta["remediation_url"] = remediationURL
 	}
 	applyProviderQuotaMetadata(meta, data)
 

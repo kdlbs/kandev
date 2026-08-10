@@ -46,7 +46,9 @@ type MonitorViewModel = {
 
 function pluralizeEventCount(n: number): string {
   if (n <= 0) return "";
-  return ` · ${n} event${n === 1 ? "" : "s"}`;
+  // The leading separator stays in code — it is layout punctuation between the
+  // title and the count, not copy a translator should have to reproduce.
+  return ` · ${t("task:eventCount", { count: n })}`;
 }
 
 function buildMonitorViewModel(comment: Message): MonitorViewModel {

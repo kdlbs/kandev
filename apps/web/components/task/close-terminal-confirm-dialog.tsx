@@ -10,6 +10,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@kandev/ui/alert-dialog";
+import { useTranslation } from "react-i18next";
 
 /**
  * Shared "Close terminal?" confirmation. Rendered before a destroy-on-close
@@ -28,17 +29,18 @@ export function CloseTerminalConfirmDialog({
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void | Promise<void>;
 }) {
+  const { t } = useTranslation();
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Close terminal?</AlertDialogTitle>
+          <AlertDialogTitle>{t("task:closeTerminal")}</AlertDialogTitle>
           <AlertDialogDescription>
-            {`This stops the “${terminalName}” shell and any command it's running.`}
+            {t("task:thisStopsTheShellAndAny", { terminalName })}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+          <AlertDialogCancel className="cursor-pointer">{t("common:cancel")}</AlertDialogCancel>
           <AlertDialogAction
             onClick={(event) => {
               event.preventDefault();
@@ -46,7 +48,7 @@ export function CloseTerminalConfirmDialog({
             }}
             className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
-            Close terminal
+            {t("task:closeTerminal2")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

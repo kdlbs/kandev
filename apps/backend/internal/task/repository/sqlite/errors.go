@@ -29,6 +29,13 @@ var ErrTaskEnvironmentNotFound = repoerrors.ErrTaskEnvironmentNotFound
 // "not found" case from genuine backend/DB errors.
 var ErrNoPrimarySession = errors.New("no primary session")
 
+// ErrExternalIDConflict is returned by CreateTask (and its
+// admission/capacity variants) when the insert violates
+// uniq_tasks_external_id — the TOCTOU backstop for the create sequence's
+// step-3 lookup. Callers should re-read by (workspace_id, external_id) and
+// return the winner rather than treating this as a hard failure.
+var ErrExternalIDConflict = repoerrors.ErrExternalIDConflict
+
 // ErrOfficeSessionRaceConflict is returned by CreateTaskSession when the
 // insert violates the uniq_office_task_session partial unique index — i.e.
 // two callers raced past their SELECT-then-INSERT for the same

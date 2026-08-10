@@ -5,9 +5,41 @@ import (
 	"database/sql"
 	"testing"
 
+	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/utility/models"
 	"github.com/kandev/kandev/internal/utility/template"
 )
+
+type fakeProfileResolver struct {
+	profile *agentsettingsmodels.AgentProfile
+	err     error
+}
+
+func (r fakeProfileResolver) Resolve(context.Context, string) (*agentsettingsmodels.AgentProfile, error) {
+	return r.profile, r.err
+}
+func (r fakeProfileResolver) MatchLegacy(context.Context, string, string) (*agentsettingsmodels.AgentProfile, error) {
+	return r.profile, r.err
+}
+
+func TestMigrateLegacyBindingsUpdatesOnlyUnambiguousRows(t *testing.T) {
+	repo := &fakeRepository{agents: map[string]*models.UtilityAgent{
+		"legacy":  {ID: "legacy", AgentID: "codex-acp", Model: "gpt-5", ProfileBindingState: models.ProfileBindingExplicit},
+		"inherit": {ID: "inherit", ProfileBindingState: models.ProfileBindingInherit},
+	}}
+	svc := NewService(repo)
+	svc.SetProfileResolver(fakeProfileResolver{profile: &agentsettingsmodels.AgentProfile{ID: "profile-1"}})
+	updated, err := svc.MigrateLegacyBindings(context.Background())
+	if err != nil || updated != 1 {
+		t.Fatalf("MigrateLegacyBindings() = (%d, %v), want (1, nil)", updated, err)
+	}
+	if repo.agents["legacy"].AgentProfileID != "profile-1" || repo.agents["legacy"].ProfileBindingState != models.ProfileBindingExplicit {
+		t.Fatalf("legacy row was not migrated: %#v", repo.agents["legacy"])
+	}
+	if repo.agents["inherit"].ProfileBindingState != models.ProfileBindingInherit {
+		t.Fatalf("inherit row changed: %#v", repo.agents["inherit"])
+	}
+}
 
 type fakeRepository struct {
 	agents map[string]*models.UtilityAgent

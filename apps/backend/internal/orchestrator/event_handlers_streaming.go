@@ -125,6 +125,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	case "session_models":
 		s.handleSessionModelsEvent(ctx, payload)
 
+	case "session_model_fallback":
+		s.handleSessionModelFallbackEvent(ctx, payload)
+
 	case streams.EventTypeMCPAttachment:
 		s.handleSessionMCPAttachmentEvent(ctx, payload)
 
@@ -836,6 +839,12 @@ func (s *Service) updateTaskSessionStateWithHook(
 	if onChanged != nil {
 		onChanged()
 	}
+	// Work has resumed: a session entering STARTING/RUNNING clears the
+	// startup interruption marker and republishes the task so open clients
+	// drop the red interruption icon. No-op when the marker is absent.
+	if nextState == models.TaskSessionStateStarting || nextState == models.TaskSessionStateRunning {
+		s.clearTaskInterruptedMarker(ctx, taskID)
+	}
 	if authoritativeUpdatedAt == nil {
 		s.logger.Warn("skipping session state_changed publish; could not read authoritative updated_at",
 			zap.String("task_id", taskID),
@@ -1412,10 +1421,44 @@ func (s *Service) setSessionStarting(
 		s.writeTaskInProgressForRuntime(ctx, taskID, session.ID)
 	}
 
+	// The launch path moves a session to STARTING without going through
+	// updateTaskSessionStateWithHook, so clear the interruption marker here
+	// too (no-op when absent).
+	s.clearTaskInterruptedMarker(ctx, taskID)
+
 	if publishSession != nil {
 		s.publishTaskSessionStateChanged(ctx, taskID, session.ID, oldState, session.State, session.ErrorMessage, stateUpdatedAt, publishSession)
 	}
 	return nil
+}
+
+// clearTaskInterruptedMarker removes the startup interruption marker from a
+// task and republishes task.updated when it was actually present, so open
+// clients drop the red interruption icon. Called from the session-start
+// funnel when a session enters STARTING/RUNNING — work has resumed, so the
+// task is no longer interrupted. No-op when the marker is absent.
+func (s *Service) clearTaskInterruptedMarker(ctx context.Context, taskID string) {
+	if taskID == "" {
+		return
+	}
+	removed, err := s.repo.RemoveTaskMetadataKey(ctx, taskID, models.MetaKeyInterruptedAt)
+	if err != nil {
+		s.logger.Warn("failed to clear interrupted marker",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+	if !removed {
+		return
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		s.logger.Warn("failed to load task for interrupted-clear publish",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+	s.publishTaskUpdated(ctx, task)
 }
 
 func (s *Service) persistFullTaskSessionIfCurrent(
@@ -2465,6 +2508,37 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 	)
 	subject := events.BuildSessionModelsSubject(sessionID)
 	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionModelsUpdated, "orchestrator", eventPayload))
+}
+
+// handleSessionModelFallbackEvent broadcasts session_model_fallback events to
+// the WebSocket so the UI can surface why the session is not on the
+// configured start model (the profile's fallback was applied because the
+// start model is unavailable).
+func (s *Service) handleSessionModelFallbackEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	sessionID := payload.SessionID
+	// The fallback event fires during session init, before the execution's
+	// task-session id is always linked. Resolve it from the task when the
+	// payload carries no session id so the note is not dropped.
+	if sessionID == "" && payload.TaskID != "" && s.repo != nil {
+		if sess, err := s.repo.GetActiveTaskSessionByTaskID(ctx, payload.TaskID); err == nil && sess != nil {
+			sessionID = sess.ID
+		}
+	}
+	if sessionID == "" || s.eventBus == nil || payload.Data == nil {
+		return
+	}
+	eventPayload := lifecycle.SessionModelFallbackEventPayload{
+		TaskID:        payload.TaskID,
+		SessionID:     sessionID,
+		AgentID:       payload.AgentID,
+		FallbackModel: payload.Data.FallbackModel,
+		Timestamp:     time.Now().UTC().Format(time.RFC3339),
+	}
+	s.logger.Info("publishing session_model_fallback event to WS",
+		zap.String("session_id", sessionID),
+		zap.String("fallback_model", eventPayload.FallbackModel))
+	subject := events.BuildSessionModelFallbackSubject(sessionID)
+	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionModelFallbackUpdated, "orchestrator", eventPayload))
 }
 
 func workflowSessionConfigFailures(raw any) []string {

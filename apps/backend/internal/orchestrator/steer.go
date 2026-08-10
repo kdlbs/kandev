@@ -170,3 +170,21 @@ func (s *Service) SteerTask(
 		AgentMessage: result.AgentMessage,
 	}, nil
 }
+
+// isSteerInFlight reports whether sessionID has a steer admitted but not yet
+// dispatched (see steerInFlight's field doc comment). The non-cancelling
+// queue-drain paths — drainQueuedMessageForPromptableSessionLocked and
+// takeIfPromptableLocked — must back off while this is true, the same way
+// they already back off on isQueuedDispatchInFlight: SteerTask releases the
+// message-queue admission lock before its blocking dispatch, so between
+// admission and dispatch a message can be queued and the turn can complete,
+// and without this check an ordinary drain would dispatch that later message
+// ahead of the steer that was admitted first — reopening the ordering gap
+// WithSessionAdmission's shared lock was meant to close.
+func (s *Service) isSteerInFlight(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	_, ok := s.steerInFlight.Load(sessionID)
+	return ok
+}

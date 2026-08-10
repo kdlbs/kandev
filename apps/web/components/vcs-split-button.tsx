@@ -1,6 +1,8 @@
 "use client";
 
 import { memo, useCallback, type ComponentProps, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import {
   IconGitCommit,
   IconGitPullRequest,
@@ -26,7 +28,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@kandev/ui/lib/utils";
 import { useSessionGit } from "@/hooks/domains/session/use-session-git";
-import { useGitWithFeedback } from "@/hooks/use-git-with-feedback";
+import { gitOperationLabel, useGitWithFeedback } from "@/hooks/use-git-with-feedback";
 import { useVcsDialogs } from "@/components/vcs/vcs-dialogs";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { useRepoDisplayName } from "@/hooks/domains/session/use-repo-display-name";
@@ -55,57 +57,75 @@ type PrimaryButtonConfig = {
   onClick: () => void;
 };
 
+// The count-bearing tooltips go through `count` + `_one`/`_other` rather than a
+// concatenated `commit${n !== 1 ? "s" : ""}`: an English morpheme appended here
+// puts the plural rule at the call site, where no other locale can reach it.
 function buildCommitConfig(
+  t: TFunction,
   uncommittedFileCount: number,
   openCommitDialog: () => void,
 ): PrimaryButtonConfig {
   return {
     icon: <IconGitCommit className="h-4 w-4" />,
-    label: "Commit",
+    label: t("integrations:commit"),
     badge: uncommittedFileCount > 0 ? uncommittedFileCount : null,
     tooltip:
       uncommittedFileCount > 0
-        ? `Commit ${uncommittedFileCount} changed file${uncommittedFileCount !== 1 ? "s" : ""}`
-        : "No changes to commit",
+        ? t("integrations:commitChangedFiles", { count: uncommittedFileCount })
+        : t("integrations:noChangesToCommit"),
     onClick: openCommitDialog,
   };
 }
 
-function buildPrConfig(aheadCount: number, openPRDialog: () => void): PrimaryButtonConfig {
+function buildPrConfig(
+  t: TFunction,
+  aheadCount: number,
+  openPRDialog: () => void,
+): PrimaryButtonConfig {
   return {
     icon: <IconGitPullRequest className="h-4 w-4" />,
-    label: "Create PR",
+    label: t("integrations:createPr"),
     badge: null,
-    tooltip: `Create PR (${aheadCount} commit${aheadCount !== 1 ? "s" : ""} ahead)`,
+    tooltip: t("integrations:createPrCommitsAhead", { count: aheadCount }),
     onClick: openPRDialog,
   };
 }
 
-function buildPushConfig(aheadCount: number, handlePush: () => void): PrimaryButtonConfig {
+function buildPushConfig(
+  t: TFunction,
+  aheadCount: number,
+  handlePush: () => void,
+): PrimaryButtonConfig {
   return {
     icon: <IconCloudUpload className="h-4 w-4" />,
-    label: "Push",
+    label: t("integrations:push"),
     badge: null,
-    tooltip: `Push ${aheadCount} commit${aheadCount !== 1 ? "s" : ""} to remote`,
+    tooltip: t("integrations:pushCommitsToRemote", { count: aheadCount }),
     onClick: handlePush,
   };
 }
 
 function buildRebaseConfig(
+  t: TFunction,
   behindCount: number,
   baseBranch: string | undefined,
   handleRebase: () => void,
 ): PrimaryButtonConfig {
   return {
     icon: <IconGitCherryPick className="h-4 w-4" />,
-    label: "Rebase",
+    label: t("integrations:rebase"),
     badge: behindCount > 0 ? behindCount : null,
-    tooltip: `Rebase onto ${baseBranch || DEFAULT_BASE_BRANCH} (${behindCount} behind)`,
+    // `branch` is a git ref — data, interpolated rather than translated.
+    tooltip: t("integrations:rebaseOntoBranchBehind", {
+      branch: baseBranch || DEFAULT_BASE_BRANCH,
+      behind: behindCount,
+    }),
     onClick: handleRebase,
   };
 }
 
 type PrimaryConfigArgs = {
+  t: TFunction;
   primaryAction: "commit" | "push" | "pr" | "rebase";
   uncommittedFileCount: number;
   aheadCount: number;
@@ -118,6 +138,7 @@ type PrimaryConfigArgs = {
 };
 
 function buildPrimaryButtonConfig({
+  t,
   primaryAction,
   uncommittedFileCount,
   aheadCount,
@@ -128,10 +149,11 @@ function buildPrimaryButtonConfig({
   handlePush,
   handleRebase,
 }: PrimaryConfigArgs): PrimaryButtonConfig {
-  if (primaryAction === "push") return buildPushConfig(aheadCount, handlePush);
-  if (primaryAction === "pr") return buildPrConfig(aheadCount, openPRDialog);
-  if (primaryAction === "rebase") return buildRebaseConfig(behindCount, baseBranch, handleRebase);
-  return buildCommitConfig(uncommittedFileCount, openCommitDialog);
+  if (primaryAction === "push") return buildPushConfig(t, aheadCount, handlePush);
+  if (primaryAction === "pr") return buildPrConfig(t, aheadCount, openPRDialog);
+  if (primaryAction === "rebase")
+    return buildRebaseConfig(t, behindCount, baseBranch, handleRebase);
+  return buildCommitConfig(t, uncommittedFileCount, openCommitDialog);
 }
 
 type DivergenceTone = "ahead" | "behind";
@@ -144,17 +166,17 @@ const divergenceToneClass: Record<DivergenceTone, string> = {
 function DivergencePill({
   tone,
   value,
-  label,
+  ariaLabel,
 }: {
   tone: DivergenceTone;
   value: number;
-  label: string;
+  ariaLabel: string;
 }) {
   if (value <= 0) return null;
 
   return (
     <span
-      aria-label={`${value} ${label}`}
+      aria-label={ariaLabel}
       className={cn(
         "inline-flex h-5 items-center rounded-md border px-1.5 text-[11px] font-semibold leading-none tabular-nums",
         divergenceToneClass[tone],
@@ -167,12 +189,24 @@ function DivergencePill({
 }
 
 function GitDivergencePills({ ahead, behind }: { ahead: number; behind: number }) {
+  const { t } = useTranslation();
   if (ahead <= 0 && behind <= 0) return null;
 
+  // `{{value}}`, not `{{count}}`: the shipped English is count-invariant
+  // ("1 commits ahead"), and switching to a plural here would change the
+  // accessible name that E2E specs query by.
   return (
     <span className="ml-1 inline-flex items-center gap-1">
-      <DivergencePill tone="ahead" value={ahead} label="commits ahead" />
-      <DivergencePill tone="behind" value={behind} label="commits behind" />
+      <DivergencePill
+        tone="ahead"
+        value={ahead}
+        ariaLabel={t("integrations:commitsAheadAriaLabel", { value: ahead })}
+      />
+      <DivergencePill
+        tone="behind"
+        value={behind}
+        ariaLabel={t("integrations:commitsBehindAriaLabel", { value: behind })}
+      />
     </span>
   );
 }
@@ -202,16 +236,17 @@ function VcsDropdownItems({
   onRebase,
   onMerge,
 }: VcsDropdownItemsProps) {
+  const { t } = useTranslation();
   return (
     <DropdownMenuContent align="end" className="w-56">
       <DropdownMenuItem className="cursor-pointer gap-3" onClick={onPR} disabled={disabled}>
         <IconGitPullRequest className="h-4 w-4 text-muted-foreground" />
-        <span className="flex-1">Create PR</span>
+        <span className="flex-1">{t("integrations:createPr")}</span>
       </DropdownMenuItem>
       <DropdownMenuSeparator />
       <DropdownMenuItem className="cursor-pointer gap-3" onClick={onPull} disabled={disabled}>
         <IconCloudDownload className="h-4 w-4 text-muted-foreground" />
-        <span className="flex-1">Pull</span>
+        <span className="flex-1">{t("integrations:pull")}</span>
         {hasMatchingUpstream && behindCount > 0 && (
           <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
             ↓{behindCount}
@@ -221,7 +256,7 @@ function VcsDropdownItems({
       <DropdownMenuSub>
         <DropdownMenuSubTrigger className="cursor-pointer gap-3" disabled={disabled}>
           <IconCloudUpload className="h-4 w-4 text-muted-foreground" />
-          <span className="flex-1">Push</span>
+          <span className="flex-1">{t("integrations:push")}</span>
           {hasMatchingUpstream && aheadCount > 0 && (
             <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
               ↑{aheadCount}
@@ -235,7 +270,7 @@ function VcsDropdownItems({
             disabled={disabled}
           >
             <IconCloudUpload className="h-4 w-4 text-muted-foreground" />
-            <span>Push</span>
+            <span>{t("integrations:push")}</span>
           </DropdownMenuItem>
           <DropdownMenuItem
             className="cursor-pointer gap-3"
@@ -243,23 +278,25 @@ function VcsDropdownItems({
             disabled={disabled}
           >
             <IconAlertTriangle className="h-4 w-4 text-muted-foreground" />
-            <span>Force Push</span>
+            <span>{t("integrations:forcePush")}</span>
           </DropdownMenuItem>
         </DropdownMenuSubContent>
       </DropdownMenuSub>
       <DropdownMenuSeparator />
       <DropdownMenuItem className="cursor-pointer gap-3" onClick={onRebase} disabled={disabled}>
         <IconGitCherryPick className="h-4 w-4 text-muted-foreground" />
-        <span className="flex-1">Rebase</span>
+        <span className="flex-1">{t("integrations:rebase")}</span>
+        {/* The branch is a git ref — data. One message with the ref
+            interpolated, not an "onto" stem concatenated onto it. */}
         <span className="text-xs text-muted-foreground">
-          onto {baseBranch || DEFAULT_BASE_BRANCH}
+          {t("integrations:ontoBranch", { branch: baseBranch || DEFAULT_BASE_BRANCH })}
         </span>
       </DropdownMenuItem>
       <DropdownMenuItem className="cursor-pointer gap-3" onClick={onMerge} disabled={disabled}>
         <IconGitMerge className="h-4 w-4 text-muted-foreground" />
-        <span className="flex-1">Merge</span>
+        <span className="flex-1">{t("integrations:merge")}</span>
         <span className="text-xs text-muted-foreground">
-          from {baseBranch || DEFAULT_BASE_BRANCH}
+          {t("integrations:fromBranch", { branch: baseBranch || DEFAULT_BASE_BRANCH })}
         </span>
       </DropdownMenuItem>
     </DropdownMenuContent>
@@ -274,41 +311,44 @@ type VcsSplitButtonProps = {
 };
 
 function useGitActions(git: ReturnType<typeof useSessionGit>, baseBranch?: string) {
+  const { t } = useTranslation();
   const gitWithFeedback = useGitWithFeedback();
 
   const handlePull = useCallback(
     (repo?: string) => {
-      const label = repo ? `Pull (${repo})` : "Pull";
-      gitWithFeedback(() => git.pull(false, repo), label);
+      gitWithFeedback(() => git.pull(false, repo), gitOperationLabel(t, "common:gitOpPull", repo));
     },
-    [gitWithFeedback, git],
+    [gitWithFeedback, git, t],
   );
 
   const handlePush = useCallback(
     (force = false, repo?: string) => {
-      const baseLabel = force ? "Force Push" : "Push";
-      const label = repo ? `${baseLabel} (${repo})` : baseLabel;
-      gitWithFeedback(() => git.push({ force }, repo), label);
+      const operationKey = force ? "common:gitOpForcePush" : "common:gitOpPush";
+      gitWithFeedback(() => git.push({ force }, repo), gitOperationLabel(t, operationKey, repo));
     },
-    [gitWithFeedback, git],
+    [gitWithFeedback, git, t],
   );
 
   const handleRebase = useCallback(
     (repo?: string) => {
       const targetBranch = baseBranch?.replace(/^origin\//, "") || "main";
-      const label = repo ? `Rebase (${repo})` : "Rebase";
-      gitWithFeedback(() => git.rebase(targetBranch, repo), label);
+      gitWithFeedback(
+        () => git.rebase(targetBranch, repo),
+        gitOperationLabel(t, "common:gitOpRebase", repo),
+      );
     },
-    [gitWithFeedback, git, baseBranch],
+    [gitWithFeedback, git, baseBranch, t],
   );
 
   const handleMerge = useCallback(
     (repo?: string) => {
       const targetBranch = baseBranch?.replace(/^origin\//, "") || "main";
-      const label = repo ? `Merge (${repo})` : "Merge";
-      gitWithFeedback(() => git.merge(targetBranch, repo), label);
+      gitWithFeedback(
+        () => git.merge(targetBranch, repo),
+        gitOperationLabel(t, "common:gitOpMerge", repo),
+      );
     },
-    [gitWithFeedback, git, baseBranch],
+    [gitWithFeedback, git, baseBranch, t],
   );
 
   return { handlePull, handlePush, handleRebase, handleMerge };
@@ -320,6 +360,7 @@ const VcsSplitButton = memo(function VcsSplitButton({
   buttonSize = "sm",
   className,
 }: VcsSplitButtonProps) {
+  const { t } = useTranslation();
   const git = useSessionGit(sessionId);
   const { openCommitDialog, openPRDialog } = useVcsDialogs();
   const activePR = useActiveTaskPR();
@@ -347,6 +388,7 @@ const VcsSplitButton = memo(function VcsSplitButton({
     hasOpenPR,
   );
   const primaryButtonConfig = buildPrimaryButtonConfig({
+    t,
     primaryAction,
     uncommittedFileCount,
     aheadCount,
@@ -439,6 +481,7 @@ function SingleRepoVcsButton({
   buttonSize?: ComponentProps<typeof Button>["size"];
   showDivergencePills?: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <div className={cn("inline-flex", className)}>
       <Tooltip>
@@ -469,7 +512,7 @@ function SingleRepoVcsButton({
             size={buttonSize}
             variant="outline"
             className="-ml-px rounded-l-none px-2 cursor-pointer"
-            aria-label="Open VCS options"
+            aria-label={t("integrations:openVcsOptions")}
             disabled={isDisabled}
           >
             {isGitLoading ? (

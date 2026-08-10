@@ -19,6 +19,7 @@ import { useOpenSessionFolder } from "@/hooks/use-open-session-folder";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useToast } from "@/components/toast-provider";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useMultiSelect } from "@/hooks/use-multi-select";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
@@ -156,7 +157,11 @@ type MoveFilesParams = {
   onRenameFile: (oldPath: string, newPath: string) => Promise<boolean>;
 };
 
-function executeMoveFiles(params: MoveFilesParams, toast: ReturnType<typeof useToast>["toast"]) {
+function executeMoveFiles(
+  params: MoveFilesParams,
+  toast: ReturnType<typeof useToast>["toast"],
+  t: TFunction,
+) {
   const { sources, targetPath, treeState, setSelectedPaths, onRenameFile } = params;
   const snapshot = treeState.tree;
 
@@ -172,8 +177,8 @@ function executeMoveFiles(params: MoveFilesParams, toast: ReturnType<typeof useT
       if (results.some((ok) => !ok)) {
         treeState.setTree(snapshot);
         toast({
-          title: "Move failed",
-          description: "Some files could not be moved",
+          title: t("task:moveFailed"),
+          description: t("task:moveFailedFiles"),
           variant: "error",
         });
       }
@@ -181,8 +186,8 @@ function executeMoveFiles(params: MoveFilesParams, toast: ReturnType<typeof useT
     .catch(() => {
       treeState.setTree(snapshot);
       toast({
-        title: "Move failed",
-        description: "An error occurred while moving files",
+        title: t("task:moveFailed"),
+        description: t("task:moveFailedUnexpected"),
         variant: "error",
       });
     });
@@ -194,6 +199,7 @@ function useDragAndDrop(
   setSelectedPaths: (paths: Set<string>) => void,
   onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>,
 ) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const [isDragging, setIsDragging] = useState(false);
   const [dragOverPath, setDragOverPath] = useState<string | null>(null);
@@ -257,9 +263,13 @@ function useDragAndDrop(
       if (!onRenameFile) return;
       const sources = dragPathsRef.current;
       if (sources.length === 0 || isDropInvalid(sources, targetPath)) return;
-      executeMoveFiles({ sources, targetPath, treeState, setSelectedPaths, onRenameFile }, toast);
+      executeMoveFiles(
+        { sources, targetPath, treeState, setSelectedPaths, onRenameFile },
+        toast,
+        t,
+      );
     },
-    [onRenameFile, treeState, setSelectedPaths, toast],
+    [onRenameFile, treeState, setSelectedPaths, t, toast],
   );
 
   return {

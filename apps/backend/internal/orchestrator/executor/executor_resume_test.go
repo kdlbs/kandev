@@ -1304,11 +1304,10 @@ func TestResumeSession_RefreshesStaleEnvironmentRow(t *testing.T) {
 	// LaunchAgent fails before persistTaskEnvironment writes the worktree
 	// fields back.
 	repo.taskEnvironments["env-stale"] = &models.TaskEnvironment{
-		ID:           "env-stale",
-		TaskID:       taskID,
-		Status:       models.TaskEnvironmentStatusStopped,
-		WorktreePath: "",
-		TaskDirName:  "",
+		ID:          "env-stale",
+		TaskID:      taskID,
+		Status:      models.TaskEnvironmentStatusStopped,
+		TaskDirName: "",
 	}
 
 	const newWorktreePath = "/home/u/.kandev/tasks/resume-after-failure_abc/my-repo"
@@ -1334,11 +1333,12 @@ func TestResumeSession_RefreshesStaleEnvironmentRow(t *testing.T) {
 		t.Errorf("env.Status = %q, want %q — without the refresh the frontend keeps showing the executor as unavailable",
 			env.Status, models.TaskEnvironmentStatusReady)
 	}
-	if env.WorktreePath != newWorktreePath {
-		t.Errorf("env.WorktreePath = %q, want %q", env.WorktreePath, newWorktreePath)
+	envRepos := repo.taskEnvironmentRepos["env-stale"]
+	if len(envRepos) != 1 || envRepos[0].WorktreePath != newWorktreePath {
+		t.Errorf("env repos = %+v, want one row with path %q", envRepos, newWorktreePath)
 	}
-	if env.WorktreeID != "wt-new" {
-		t.Errorf("env.WorktreeID = %q, want %q", env.WorktreeID, "wt-new")
+	if len(envRepos) != 1 || envRepos[0].WorktreeID != "wt-new" {
+		t.Errorf("env repos = %+v, want worktree id %q", envRepos, "wt-new")
 	}
 	if env.TaskDirName == "" {
 		t.Error("env.TaskDirName must not be empty after resume; the worktree manager needs it for the on-disk task root")

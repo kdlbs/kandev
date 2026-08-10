@@ -14,6 +14,7 @@ type WorkflowDTO struct {
 	WorkspaceID    string  `json:"workspace_id"`
 	Name           string  `json:"name"`
 	Description    *string `json:"description,omitempty"`
+	Prompt         *string `json:"prompt,omitempty"`
 	AgentProfileID string  `json:"agent_profile_id,omitempty"`
 	SortOrder      int     `json:"sort_order"`
 	Hidden         bool    `json:"hidden,omitempty"`
@@ -177,10 +178,15 @@ type TaskDTO struct {
 	ActiveSubagentCount int                    `json:"active_subagent_count"`
 	IsRemoteExecutor    bool                   `json:"is_remote_executor,omitempty"`
 	ParentID            string                 `json:"parent_id,omitempty"`
+	Autopilot           bool                   `json:"autopilot"`
 	ArchivedAt          *time.Time             `json:"archived_at,omitempty"`
 	CreatedAt           time.Time              `json:"created_at"`
 	UpdatedAt           time.Time              `json:"updated_at"`
 	Metadata            map[string]interface{} `json:"metadata,omitempty"`
+	// Interrupted reports that the task's session was mid-turn when the backend
+	// died and has not been resumed since. Derived from the interrupted_at
+	// metadata key at DTO conversion time (see FromTaskWithSessionInfo).
+	Interrupted bool `json:"interrupted,omitempty"`
 
 	// Office extensions
 	AssigneeAgentProfileID string `json:"assignee_agent_profile_id,omitempty"`
@@ -188,6 +194,10 @@ type TaskDTO struct {
 	ProjectID              string `json:"project_id,omitempty"`
 	Labels                 string `json:"labels,omitempty"`
 	Identifier             string `json:"identifier,omitempty"`
+	// ExternalID is a caller-supplied identity used for task create-
+	// idempotency (docs/specs/tasks/external-id-idempotency/spec.md). Omitted
+	// when the task holds none.
+	ExternalID string `json:"external_id,omitempty"`
 	// IsFromOffice is the authoritative "this task is owned by office"
 	// flag. Computed by the task repo at read time as
 	// (project_id != '' OR workflow_id == workspace.office_workflow_id).
@@ -253,19 +263,20 @@ type TaskSessionDTO struct {
 	// WorktreePath remains the flattened primary repository path.
 	WorkspacePath string `json:"workspace_path,omitempty"`
 	// Worktrees lists all session worktrees (one per repo on multi-repo tasks);
-	// the flattened Worktree* fields above carry only the first for
-	// backward compatibility.
-	Worktrees            []*models.TaskSessionWorktree `json:"worktrees,omitempty"`
-	State                models.TaskSessionState       `json:"state"`
-	ErrorMessage         string                        `json:"error_message,omitempty"`
-	Metadata             map[string]interface{}        `json:"metadata,omitempty"`
-	AgentProfileSnapshot map[string]interface{}        `json:"agent_profile_snapshot,omitempty"`
-	ExecutorSnapshot     map[string]interface{}        `json:"executor_snapshot,omitempty"`
-	EnvironmentSnapshot  map[string]interface{}        `json:"environment_snapshot,omitempty"`
-	RepositorySnapshot   map[string]interface{}        `json:"repository_snapshot,omitempty"`
-	StartedAt            time.Time                     `json:"started_at"`
-	CompletedAt          *time.Time                    `json:"completed_at,omitempty"`
-	UpdatedAt            time.Time                     `json:"updated_at"`
+	// the flattened Worktree* fields above carry only the first for backward
+	// compatibility. Entries use the stable session-worktree wire shape
+	// (session_id + worktree identity) shared with TaskSession.ToAPI.
+	Worktrees            []map[string]interface{} `json:"worktrees,omitempty"`
+	State                models.TaskSessionState  `json:"state"`
+	ErrorMessage         string                   `json:"error_message,omitempty"`
+	Metadata             map[string]interface{}   `json:"metadata,omitempty"`
+	AgentProfileSnapshot map[string]interface{}   `json:"agent_profile_snapshot,omitempty"`
+	ExecutorSnapshot     map[string]interface{}   `json:"executor_snapshot,omitempty"`
+	EnvironmentSnapshot  map[string]interface{}   `json:"environment_snapshot,omitempty"`
+	RepositorySnapshot   map[string]interface{}   `json:"repository_snapshot,omitempty"`
+	StartedAt            time.Time                `json:"started_at"`
+	CompletedAt          *time.Time               `json:"completed_at,omitempty"`
+	UpdatedAt            time.Time                `json:"updated_at"`
 	// Workflow fields
 	IsPrimary         bool                `json:"is_primary"`
 	IsPassthrough     bool                `json:"is_passthrough"`
@@ -325,19 +336,19 @@ type TaskSessionSummaryDTO struct {
 	// WorktreePath remains the flattened primary repository path.
 	WorkspacePath string `json:"workspace_path,omitempty"`
 	// Worktrees lists all session worktrees (one per repo on multi-repo tasks);
-	// the flattened Worktree* fields above carry only the first for
-	// backward compatibility.
-	Worktrees         []*models.TaskSessionWorktree `json:"worktrees,omitempty"`
-	State             models.TaskSessionState       `json:"state"`
-	ErrorMessage      string                        `json:"error_message,omitempty"`
-	Metadata          map[string]interface{}        `json:"metadata,omitempty"`
-	StartedAt         time.Time                     `json:"started_at"`
-	CompletedAt       *time.Time                    `json:"completed_at,omitempty"`
-	UpdatedAt         time.Time                     `json:"updated_at"`
-	IsPrimary         bool                          `json:"is_primary"`
-	IsPassthrough     bool                          `json:"is_passthrough"`
-	ReviewStatus      models.ReviewStatus           `json:"review_status,omitempty"`
-	TaskEnvironmentID string                        `json:"task_environment_id,omitempty"`
+	// the flattened Worktree* fields above carry only the first for backward
+	// compatibility. Entries use the stable session-worktree wire shape.
+	Worktrees         []map[string]interface{} `json:"worktrees,omitempty"`
+	State             models.TaskSessionState  `json:"state"`
+	ErrorMessage      string                   `json:"error_message,omitempty"`
+	Metadata          map[string]interface{}   `json:"metadata,omitempty"`
+	StartedAt         time.Time                `json:"started_at"`
+	CompletedAt       *time.Time               `json:"completed_at,omitempty"`
+	UpdatedAt         time.Time                `json:"updated_at"`
+	IsPrimary         bool                     `json:"is_primary"`
+	IsPassthrough     bool                     `json:"is_passthrough"`
+	ReviewStatus      models.ReviewStatus      `json:"review_status,omitempty"`
+	TaskEnvironmentID string                   `json:"task_environment_id,omitempty"`
 	// ForegroundActivity mirrors the in-memory fine-grained busy substate
 	// (ADR-0049); see TaskSessionDTO.
 	ForegroundActivity v1.ForegroundActivity `json:"foreground_activity,omitempty"`
@@ -523,12 +534,17 @@ func FromWorkflow(workflow *models.Workflow) WorkflowDTO {
 	if workflow.Description != "" {
 		description = &workflow.Description
 	}
+	var prompt *string
+	if workflow.Prompt != "" {
+		prompt = &workflow.Prompt
+	}
 
 	return WorkflowDTO{
 		ID:             workflow.ID,
 		WorkspaceID:    workflow.WorkspaceID,
 		Name:           workflow.Name,
 		Description:    description,
+		Prompt:         prompt,
 		AgentProfileID: workflow.AgentProfileID,
 		SortOrder:      workflow.SortOrder,
 		Hidden:         workflow.Hidden,
@@ -747,10 +763,12 @@ func FromTaskWithSessionInfo(
 		PrimarySessionPendingAction: primarySessionPendingAction,
 		IsRemoteExecutor:            primaryExecutorType != nil && models.IsRemoteExecutorType(models.ExecutorType(*primaryExecutorType)),
 		ParentID:                    task.ParentID,
+		Autopilot:                   task.Autopilot,
 		ArchivedAt:                  task.ArchivedAt,
 		CreatedAt:                   task.CreatedAt,
 		UpdatedAt:                   task.UpdatedAt,
 		Metadata:                    task.Metadata,
+		Interrupted:                 task.Metadata[models.MetaKeyInterruptedAt] != nil,
 		// Office extensions. AssigneeAgentProfileID is a read-time
 		// projection from workflow_step_participants (ADR 0005 Wave F);
 		// the repo's task SELECTs hydrate it via a correlated subquery.
@@ -759,6 +777,7 @@ func FromTaskWithSessionInfo(
 		ProjectID:              task.ProjectID,
 		Labels:                 task.Labels,
 		Identifier:             task.Identifier,
+		ExternalID:             task.ExternalID,
 		IsFromOffice:           task.IsFromOffice,
 	}
 }
@@ -791,11 +810,11 @@ func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 		TaskEnvironmentID: session.TaskEnvironmentID,
 		LastReadMessageID: session.LastReadMessageID,
 	}
-	if len(session.Worktrees) > 0 {
+	if worktrees := session.WorktreesAPI(); len(worktrees) > 0 {
 		result.WorktreeID = session.Worktrees[0].WorktreeID
 		result.WorktreePath = session.Worktrees[0].WorktreePath
 		result.WorktreeBranch = session.Worktrees[0].WorktreeBranch
-		result.Worktrees = session.Worktrees
+		result.Worktrees = worktrees
 	}
 	return result
 }
@@ -832,11 +851,11 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 		TaskEnvironmentID: session.TaskEnvironmentID,
 		LastReadMessageID: session.LastReadMessageID,
 	}
-	if len(session.Worktrees) > 0 {
+	if worktrees := session.WorktreesAPI(); len(worktrees) > 0 {
 		result.WorktreeID = session.Worktrees[0].WorktreeID
 		result.WorktreePath = session.Worktrees[0].WorktreePath
 		result.WorktreeBranch = session.Worktrees[0].WorktreeBranch
-		result.Worktrees = session.Worktrees
+		result.Worktrees = worktrees
 	}
 	return result
 }

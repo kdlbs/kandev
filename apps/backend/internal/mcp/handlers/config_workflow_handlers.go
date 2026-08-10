@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 
 	"github.com/kandev/kandev/internal/events"
-	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/service"
 	workflowctrl "github.com/kandev/kandev/internal/workflow/controller"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	"github.com/kandev/kandev/internal/workflow/stepevents"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
@@ -279,44 +279,24 @@ func (h *Handlers) handleReorderWorkflowSteps(ctx context.Context, msg *ws.Messa
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"success": true})
 }
 
+// workflowStepEventSource labels workflow-step events published by this surface.
+const workflowStepEventSource = "mcp-handlers"
+
+// workflowStepEvents returns the shared workflow-step publisher for this
+// surface. Unlike the REST handlers, this Handlers value is assembled field by
+// field — NewHandlers plus the Set* wiring, and tests build it as a struct
+// literal — so eventBus is not final at construction. Building the publisher
+// at publish time reads whatever bus is actually wired; the allocation is
+// negligible next to the bus dispatch.
+func (h *Handlers) workflowStepEvents() *stepevents.Publisher {
+	return stepevents.NewPublisher(h.eventBus, workflowStepEventSource, h.logger)
+}
+
 // publishWorkflowStepEvent publishes a workflow step event to the event bus.
 func (h *Handlers) publishWorkflowStepEvent(ctx context.Context, eventType string, step *wfmodels.WorkflowStep) {
-	if h.eventBus == nil || step == nil {
-		return
-	}
-	data := map[string]interface{}{
-		"step": map[string]interface{}{
-			"id":                            step.ID,
-			"workflow_id":                   step.WorkflowID,
-			"name":                          step.Name,
-			"position":                      step.Position,
-			"color":                         step.Color,
-			"prompt":                        step.Prompt,
-			"events":                        step.Events,
-			"show_in_command_panel":         step.ShowInCommandPanel,
-			"allow_manual_move":             step.AllowManualMove,
-			"is_start_step":                 step.IsStartStep,
-			"auto_archive_after_hours":      step.AutoArchiveAfterHours,
-			"wip_limit":                     step.WIPLimit,
-			"pull_from_step_id":             step.PullFromStepID,
-			"agent_profile_id":              step.AgentProfileID,
-			"stage_type":                    string(step.StageType),
-			"auto_advance_requires_signal":  step.AutoAdvanceRequiresSignal,
-			"cancel_triggers_turn_complete": step.CancelTriggersTurnComplete,
-			"created_at":                    step.CreatedAt,
-			"updated_at":                    step.UpdatedAt,
-		},
-	}
-	if err := h.eventBus.Publish(ctx, eventType, bus.NewEvent(eventType, "mcp-handlers", data)); err != nil {
-		h.logger.Error("failed to publish workflow step event",
-			zap.String("event_type", eventType),
-			zap.String("step_id", step.ID),
-			zap.Error(err))
-	}
+	h.workflowStepEvents().Publish(ctx, eventType, step)
 }
 
 func (h *Handlers) publishWorkflowStepEvents(ctx context.Context, eventType string, steps []*wfmodels.WorkflowStep) {
-	for _, step := range steps {
-		h.publishWorkflowStepEvent(ctx, eventType, step)
-	}
+	h.workflowStepEvents().PublishAll(ctx, eventType, steps)
 }

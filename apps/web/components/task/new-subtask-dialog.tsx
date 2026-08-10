@@ -32,6 +32,7 @@ import { applySummarizeSessionResult, type SummaryToastFn } from "./session-cont
 import { useSubtaskPromptZone, useSubtaskSubmit } from "./use-subtask-submit";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { Message, TaskSession } from "@/lib/types/http";
+import { useTranslation } from "react-i18next";
 
 type NewSubtaskDialogProps = {
   open: boolean;
@@ -421,6 +422,7 @@ function NewSubtaskForm({
     resolvePrompt: promptZone.resolvePrompt,
     title,
     autoTitle,
+    autopilot: fs.autopilot,
     setIsCreating,
     onClose,
     workspaceMode,
@@ -431,6 +433,7 @@ function NewSubtaskForm({
     title,
     setTitle,
     autoTitle,
+    autopilot: fs.autopilot,
     workspaceId,
     availableRepositories,
     parentRepositoryId,
@@ -481,6 +484,7 @@ export function NewSubtaskDialog({
   parentTaskId,
   parentTaskTitle,
 }: NewSubtaskDialogProps) {
+  const { t } = useTranslation();
   const { sessions: parentSessions } = useTaskSessions(parentTaskId);
   const {
     agentProfiles,
@@ -505,7 +509,7 @@ export function NewSubtaskDialog({
   const autoTitle = useAppStore((s) => s.userSettings.agentGeneratedTaskTitles);
 
   const defaultTitle = useMemo(
-    () => `${parentTaskTitle} / Subtask ${siblingCount + 1}`,
+    () => t("task:defaultSubtaskTitle", { parent: parentTaskTitle, index: siblingCount + 1 }),
     [parentTaskTitle, siblingCount],
   );
 
@@ -513,11 +517,21 @@ export function NewSubtaskDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         data-testid="new-subtask-dialog"
+        onOpenAutoFocus={(event) => {
+          if (!autoTitle) return;
+          const content = event.currentTarget as HTMLElement | null;
+          const prompt = content?.querySelector<HTMLTextAreaElement>(
+            '[data-testid="subtask-prompt-input"]',
+          );
+          if (!prompt) return;
+          event.preventDefault();
+          prompt.focus();
+        }}
         className="w-full h-full min-w-0 max-w-full max-h-full overflow-hidden rounded-none sm:w-[800px] sm:h-auto sm:max-w-none sm:max-h-[85vh] sm:rounded-lg flex flex-col"
       >
         <DialogHeader>
           <DialogTitle className="min-w-0 wrap-break-word pr-6 text-sm font-medium">
-            New subtask for <span className="text-foreground">{parentTaskTitle}</span>
+            {t("task:newSubtaskFor")} <span className="text-foreground">{parentTaskTitle}</span>
           </DialogTitle>
         </DialogHeader>
         <NewSubtaskForm

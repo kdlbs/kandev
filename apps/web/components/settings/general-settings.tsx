@@ -11,6 +11,7 @@ import {
   IconGitBranch,
   IconArchive,
   IconArrowBackUp,
+  IconListCheck,
   IconHome,
 } from "@tabler/icons-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -32,6 +33,7 @@ import { MCPTaskAgentProfileDefaultSettings } from "@/components/settings/mcp-ta
 import { UnreadDividerSettings } from "@/components/settings/unread-divider-settings";
 import { AgentGeneratedTaskTitleSettings } from "@/components/settings/agent-generated-task-title-settings";
 import { AnchoredPromptBarSettings } from "@/components/settings/anchored-prompt-bar-settings";
+import { TodoListPanelSettings } from "@/components/settings/todo-list-panel-settings";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import type { StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides";
 import { buildPluginShortcutEntries } from "@/lib/keyboard/plugin-shortcuts";
@@ -279,6 +281,16 @@ export function TaskActionsSettings() {
         description={t("settings:chooseWhichTranscriptNavigationControls")}
       >
         <AnchoredPromptBarSettings />
+      </SettingsSection>
+
+      <Separator />
+
+      <SettingsSection
+        icon={<IconListCheck className="h-5 w-5" />}
+        title={t("settings:todoListPanel")}
+        description={t("settings:pinTheAgentsLiveTodoChecklistAs")}
+      >
+        <TodoListPanelSettings />
       </SettingsSection>
     </div>
   );

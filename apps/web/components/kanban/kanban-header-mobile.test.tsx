@@ -61,11 +61,22 @@ afterEach(() => {
   statusDrawerState.issueSeverity = "none";
 });
 
-function renderHeader(title: string, workspaceId?: string, onSearchChange?: () => void) {
+/**
+ * `currentPage` — not the title text — decides whether this is the Home header.
+ * The component used to derive that from `title === "Home"`, which was true only
+ * in English, so these tests pass the discriminant explicitly now.
+ */
+function renderHeader(
+  title: string,
+  workspaceId?: string,
+  onSearchChange?: () => void,
+  currentPage: "kanban" | "tasks" = "kanban",
+) {
   return render(
     <StateProvider>
       <KanbanHeaderMobile
         title={title}
+        currentPage={currentPage}
         workspaceId={workspaceId}
         onSearchChange={onSearchChange}
         workspaceLabel="/root/kandev"
@@ -87,7 +98,7 @@ describe("KanbanHeaderMobile", () => {
   });
 
   it("renders page title and workspace label for non-Home pages", () => {
-    renderHeader("Tasks");
+    renderHeader("Tasks", undefined, undefined, "tasks");
 
     const leftActions = screen.getByTestId(LEFT_ACTIONS_TEST_ID);
     expect(leftActions.textContent).toContain("Tasks");

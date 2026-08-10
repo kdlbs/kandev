@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useRouter, usePathname } from "@/lib/routing/client-router";
 import {
@@ -185,6 +184,31 @@ function SidebarFooterDialogs({
   );
 }
 
+function InsightFooterButtons({
+  destinations,
+  collapsed,
+  router,
+}: {
+  destinations: ReturnType<typeof useStaticDestinations>;
+  collapsed: boolean;
+  router: ReturnType<typeof useRouter>;
+}) {
+  return (
+    <>
+      {destinations.map((destination) => (
+        <FooterIconButton
+          key={destination.id}
+          icon={destination.icon}
+          label={destination.label}
+          collapsed={collapsed}
+          onClick={() => router.push(destination.href)}
+          testId={`sidebar-${destination.id}-button`}
+        />
+      ))}
+    </>
+  );
+}
+
 export function AppSidebarFooter({ collapsed, onToggleSettingsMode }: AppSidebarFooterProps) {
   const { t } = useTranslation();
   const router = useRouter();
@@ -198,11 +222,7 @@ export function AppSidebarFooter({ collapsed, onToggleSettingsMode }: AppSidebar
     : resolveLastOfficeWorkspace(workspaces.items);
   const settingsMode = useAppStore((s) => s.appSidebar.settingsMode);
   const enterSettings = () => {
-    // The gear only swaps the sidebar's own content; without also
-    // navigating, the main panel keeps showing whatever the user was on
-    // (e.g. a task session), so the first click looks like a no-op and a
-    // second click (on a tree leaf) is what actually reaches Settings.
-    // Match the Stats/Office buttons: one click gets you there.
+    // One click navigates to Settings (like the Stats/Office buttons).
     if (!settingsMode && !isSettingsRoute(pathname)) {
       router.push("/settings");
     }
@@ -210,12 +230,10 @@ export function AppSidebarFooter({ collapsed, onToggleSettingsMode }: AppSidebar
   };
   const officeEnabled = useFeature("office");
   const appStatusBarEnabled = useFeature("appStatusBar");
-  // Stats today, and anything else the manifest adds to the insights section.
-  // The gear below stays bespoke: it toggles the sidebar's settings takeover as
-  // well as navigating, so it is an action, not a plain destination.
   const insightDestinations = useStaticDestinations("sidebar", "insights");
   const releaseNotes = useReleaseNotes();
-  const [improveOpen, setImproveOpen] = useState(false);
+  const improveOpen = useAppStore((s) => s.appSidebar.improveDialogOpen);
+  const setImproveOpen = useAppStore((s) => s.setImproveDialogOpen);
   const authMode = useAppStore((s) => s.auth.mode);
   const authUser = useAppStore((s) => s.auth.user);
   const showCurrentUser = authMode === "enabled" && authUser !== null;
@@ -235,16 +253,11 @@ export function AppSidebarFooter({ collapsed, onToggleSettingsMode }: AppSidebar
         active={settingsMode}
         testId="sidebar-settings-gear"
       />
-      {insightDestinations.map((destination) => (
-        <FooterIconButton
-          key={destination.id}
-          icon={destination.icon}
-          label={destination.label}
-          collapsed={collapsed}
-          onClick={() => router.push(destination.href)}
-          testId={`sidebar-${destination.id}-button`}
-        />
-      ))}
+      <InsightFooterButtons
+        destinations={insightDestinations}
+        collapsed={collapsed}
+        router={router}
+      />
       <FooterIconButton
         icon={IconStethoscope}
         label={t("sidebar:improveKandev")}

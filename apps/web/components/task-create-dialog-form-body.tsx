@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useState } from "react";
+import { memo } from "react";
 import Link from "@/components/routing/app-link";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
@@ -13,6 +13,7 @@ import { TaskFormInputs } from "@/components/task-create-dialog-selectors";
 import { PromptResultRecovery } from "@/components/prompt-result-recovery";
 import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
+import { useTranslation } from "react-i18next";
 
 type SelectorOption = {
   value: string;
@@ -81,6 +82,7 @@ function NoCompatibleAgentState({
   executorProfileName: string | null;
   executorProfileId: string;
 }) {
+  const { t } = useTranslation();
   const target = executorProfileName ? `“${executorProfileName}”` : "this executor";
   const href = executorProfileId
     ? `/settings/executors/${executorProfileId}`
@@ -90,9 +92,9 @@ function NoCompatibleAgentState({
       className="flex h-auto min-h-7 items-center justify-between gap-3 rounded-sm border border-input px-3 py-1.5 text-xs text-muted-foreground"
       data-testid="agent-profile-empty-state"
     >
-      <span>No compatible agent profiles for {target}.</span>
+      <span>{t("task:noCompatibleAgentProfilesFor", { target })}</span>
       <Link href={href} className="shrink-0 cursor-pointer text-primary hover:underline">
-        Configure credentials
+        {t("task:configureCredentials")}
       </Link>
     </div>
   );
@@ -111,15 +113,16 @@ function AgentColumn({
   executorProfileName,
   executorProfileId,
 }: AgentColumnProps) {
+  const { t } = useTranslation();
   if (agentProfiles.length === 0 && !agentProfilesLoading) {
     return (
       <div
         className="flex h-7 items-center justify-center gap-2 rounded-sm border border-input px-3 text-xs text-muted-foreground"
         data-testid="agent-profile-empty-state"
       >
-        <span>No agents found.</span>
+        <span>{t("task:noAgentsFound")}</span>
         <Link href="/settings/agents" className="cursor-pointer text-primary hover:underline">
-          Add agent
+          {t("task:addAgent")}
         </Link>
       </div>
     );
@@ -132,7 +135,7 @@ function AgentColumn({
       />
     );
   }
-  const placeholder = agentProfilesLoading ? "Loading agents..." : "Select agent";
+  const placeholder = agentProfilesLoading ? t("task:loadingAgents") : t("task:selectAgent");
   return (
     <>
       <AgentSelectorComponent
@@ -144,7 +147,7 @@ function AgentColumn({
         popoverPortal
       />
       {workflowAgentLocked && (
-        <p className="text-[11px] text-muted-foreground mt-1">Agent set by workflow</p>
+        <p className="text-[11px] text-muted-foreground mt-1">{t("task:agentSetByWorkflow")}</p>
       )}
     </>
   );
@@ -153,6 +156,7 @@ function AgentColumn({
 export const CreateEditSelectors = memo(function CreateEditSelectors(
   props: CreateEditSelectorsProps,
 ) {
+  const { t } = useTranslation();
   if (props.isTaskStarted) return null;
   const {
     executorProfileOptions,
@@ -175,7 +179,7 @@ export const CreateEditSelectors = memo(function CreateEditSelectors(
           options={executorProfileOptions}
           value={executorProfileId}
           onValueChange={onExecutorProfileChange}
-          placeholder={executorsLoading ? "Loading profiles..." : "Select profile"}
+          placeholder={executorsLoading ? t("task:loadingProfiles") : t("task:selectProfile")}
           disabled={executorsLoading}
           popoverPortal
         />
@@ -231,13 +235,16 @@ export const SessionSelectors = memo(function SessionSelectors({
   AgentSelectorComponent,
   ExecutorProfileSelectorComponent,
 }: SessionSelectorsProps) {
+  const { t } = useTranslation();
   return (
     <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
       <AgentSelectorComponent
         options={agentProfileOptions}
         value={agentProfileId}
         onValueChange={onAgentProfileChange}
-        placeholder={agentProfilesLoading ? "Loading agent profiles..." : "Select agent profile"}
+        placeholder={
+          agentProfilesLoading ? t("task:loadingAgentProfiles") : t("task:selectAgentProfile")
+        }
         disabled={agentProfilesLoading || isCreatingSession}
         popoverPortal
       />
@@ -245,7 +252,7 @@ export const SessionSelectors = memo(function SessionSelectors({
         options={executorProfileOptions}
         value={executorProfileId}
         onValueChange={onExecutorProfileChange}
-        placeholder={executorsLoading ? "Loading profiles..." : "Select profile"}
+        placeholder={executorsLoading ? t("task:loadingProfiles") : t("task:selectProfile")}
         disabled={executorsLoading || isCreatingSession}
         popoverPortal
       />
@@ -286,19 +293,9 @@ export const WorkflowSection = memo(function WorkflowSection({
   agentProfiles,
   workflowLocked,
 }: WorkflowSectionProps) {
-  const [lastUsedWorkflowId, setLastUsedWorkflowId] = useState<string | null>(null);
-
   // Hidden workflows (e.g. improve-kandev) are excluded from the picker; they
   // remain reachable via their dedicated entry point.
   const workflows = allWorkflows.filter((w) => !w.hidden);
-
-  const handleWorkflowChange = useCallback(
-    (workflowId: string) => {
-      setLastUsedWorkflowId(workflowId);
-      onWorkflowChange(workflowId);
-    },
-    [onWorkflowChange],
-  );
 
   if (!isCreateMode || isTaskStarted) return null;
   if (workflowLocked) return null;
@@ -309,8 +306,7 @@ export const WorkflowSection = memo(function WorkflowSection({
         workflows={workflows}
         snapshots={snapshots}
         selectedWorkflowId={effectiveWorkflowId ?? null}
-        onWorkflowChange={handleWorkflowChange}
-        lastUsedWorkflowId={lastUsedWorkflowId}
+        onWorkflowChange={onWorkflowChange}
         agentProfiles={agentProfiles}
       />
     );

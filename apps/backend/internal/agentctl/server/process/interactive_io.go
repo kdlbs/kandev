@@ -3,6 +3,7 @@ package process
 import (
 	"time"
 
+	"github.com/kandev/kandev/internal/common/ptyexec"
 	"go.uber.org/zap"
 )
 
@@ -53,7 +54,7 @@ func (r *InteractiveRunner) readOutput(proc *interactiveProcess) {
 
 // respondToTerminalQueries sends synthetic terminal responses (DSR/DA1) to the PTY
 // when no direct output writer (real terminal) is connected yet.
-func (r *InteractiveRunner) respondToTerminalQueries(proc *interactiveProcess, ptyInstance PtyHandle, data []byte) {
+func (r *InteractiveRunner) respondToTerminalQueries(proc *interactiveProcess, ptyInstance ptyexec.PtyHandle, data []byte) {
 	if containsDSRQuery(data) {
 		response := "\x1b[1;1R"
 		if _, err := ptyInstance.Write([]byte(response)); err != nil {
@@ -79,7 +80,7 @@ func (r *InteractiveRunner) respondToTerminalQueries(proc *interactiveProcess, p
 // It responds to terminal queries, feeds the status tracker, buffers the output,
 // routes it to the direct writer or event bus, and manages the prompt-pattern window.
 // Returns the updated recentOutput string.
-func (r *InteractiveRunner) processOutputData(proc *interactiveProcess, ptyInstance PtyHandle, data []byte, recentOutput string) string {
+func (r *InteractiveRunner) processOutputData(proc *interactiveProcess, ptyInstance ptyexec.PtyHandle, data []byte, recentOutput string) string {
 	dataStr := string(data)
 
 	// Respond to cursor position queries (DSR) if no terminal is connected yet.

@@ -62,6 +62,7 @@ export function useTaskSubmitHandlers({
   isSessionMode,
   isEditMode,
   autoTitle = false,
+  autopilot = false,
   isPassthroughProfile,
   taskName,
   workspaceId,
@@ -386,6 +387,7 @@ export function useTaskSubmitHandlers({
           // case and keeps "no path provided" semantically distinct from
           // "empty path string" on the wire.
           workspacePath: noRepository ? workspacePath.trim() || undefined : undefined,
+          autopilot,
         });
         submittedPayload = payload;
         return payload;
@@ -422,6 +424,7 @@ export function useTaskSubmitHandlers({
       executorProfileId,
       isPassthroughProfile,
       parentTaskId,
+      autopilot,
       noRepository,
       workspacePath,
       onSuccess,
@@ -647,6 +650,7 @@ export function useTaskSubmitHandlers({
           withAgent: false,
           attachments,
           workspacePath: noRepository ? workspacePath.trim() || undefined : undefined,
+          autopilot,
         });
         p.workflow_step_id = requirements.workflowStepId;
         submittedPayload = p;
@@ -679,6 +683,7 @@ export function useTaskSubmitHandlers({
     executorId,
     executorProfileId,
     noRepository,
+    autopilot,
     workspacePath,
     validateForCreate,
     checkRemoteDuplicates,

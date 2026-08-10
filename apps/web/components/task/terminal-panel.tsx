@@ -7,6 +7,7 @@ import { ShellTerminal } from "./shell-terminal";
 import { useAppStore } from "@/components/state-provider";
 import { useIsTaskArchived, ArchivedPanelPlaceholder } from "./task-archived-context";
 import { useEnvironmentId } from "@/hooks/use-environment-session-id";
+import { useTranslation } from "react-i18next";
 
 type TerminalPanelProps = {
   panelId: string;
@@ -14,6 +15,7 @@ type TerminalPanelProps = {
 };
 
 export const TerminalPanel = memo(function TerminalPanel({ params }: TerminalPanelProps) {
+  const { t } = useTranslation();
   const terminalId = params.terminalId as string;
   const type = (params.type as string) ?? "shell";
   const processId = params.processId as string | undefined;
@@ -30,7 +32,7 @@ export const TerminalPanel = memo(function TerminalPanel({ params }: TerminalPan
   const isArchived = useIsTaskArchived();
 
   if (isArchived)
-    return <ArchivedPanelPlaceholder message="Terminal not available — this task is archived" />;
+    return <ArchivedPanelPlaceholder message={t("task:terminalNotAvailableThisTaskIs")} />;
 
   if (type === "dev-server" && processId) {
     return (

@@ -5,12 +5,16 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
 const createMRAutomationTablesSQL = `
 	CREATE TABLE IF NOT EXISTS gitlab_task_mr_options (
 		task_id TEXT PRIMARY KEY,
+		auto_fix_enabled BOOLEAN NOT NULL DEFAULT 0,
+		auto_merge_enabled BOOLEAN NOT NULL DEFAULT 0,
+		auto_fix_prompt_override TEXT,
 		prompt_on_review_requested BOOLEAN NOT NULL DEFAULT 0,
 		prompt_on_merged BOOLEAN NOT NULL DEFAULT 0,
 		prompt_on_closed BOOLEAN NOT NULL DEFAULT 0,
@@ -33,6 +37,14 @@ const createMRAutomationTablesSQL = `
 		last_lifecycle_session_id TEXT,
 		last_error TEXT,
 		last_sync_error TEXT,
+		last_fix_signature TEXT NOT NULL DEFAULT '',
+		last_fix_checkpoint_json TEXT NOT NULL DEFAULT '',
+		last_fix_enqueued_at DATETIME,
+		last_fix_session_id TEXT,
+		auto_fix_round_count INTEGER NOT NULL DEFAULT 0,
+		auto_fix_exhausted_at DATETIME,
+		last_merge_signature TEXT NOT NULL DEFAULT '',
+		last_merge_attempt_at DATETIME,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
 		PRIMARY KEY (task_id, repository_id, project_path, mr_iid),
@@ -40,13 +52,57 @@ const createMRAutomationTablesSQL = `
 	);
 `
 
-// createMRAutomationTables is called from Store.createTables. Both tables are
-// new (no pre-existing rows anywhere), so per apps/backend/AGENTS.md's
-// migration rule they are defined directly in CREATE TABLE IF NOT EXISTS
-// rather than through an ALTER TABLE migration step.
+// createMRAutomationTables is called from Store.createTables. On a fresh DB
+// the CREATE TABLE IF NOT EXISTS above already includes every column,
+// including the auto-fix/auto-merge ones this task added. On a DB created
+// between #2125 merging and this task landing, both tables already exist
+// without those columns — CREATE TABLE IF NOT EXISTS is a no-op there, so
+// migrateMRAutomationAutomationColumns (called from Store.createTables
+// after this) adds them via idempotent ALTER TABLE.
 func (s *Store) createMRAutomationTables() error {
 	_, err := s.db.Exec(createMRAutomationTablesSQL)
 	return err
+}
+
+// migrateMRAutomationAutomationColumns adds the auto-fix/auto-merge columns
+// (C9) to gitlab_task_mr_options and gitlab_task_mr_state for databases
+// that already have those tables from before this task.
+func (s *Store) migrateMRAutomationAutomationColumns() error {
+	optionsColumns := []struct{ name, ddl string }{
+		{"auto_fix_enabled", "BOOLEAN NOT NULL DEFAULT 0"},
+		{"auto_merge_enabled", "BOOLEAN NOT NULL DEFAULT 0"},
+		{"auto_fix_prompt_override", "TEXT"},
+	}
+	if err := addMissingColumns(s, "gitlab_task_mr_options", optionsColumns); err != nil {
+		return err
+	}
+	stateColumns := []struct{ name, ddl string }{
+		{"last_fix_signature", "TEXT NOT NULL DEFAULT ''"},
+		{"last_fix_checkpoint_json", "TEXT NOT NULL DEFAULT ''"},
+		{"last_fix_enqueued_at", "DATETIME"},
+		{"last_fix_session_id", "TEXT"},
+		{"auto_fix_round_count", "INTEGER NOT NULL DEFAULT 0"},
+		{"auto_fix_exhausted_at", "DATETIME"},
+		{"last_merge_signature", "TEXT NOT NULL DEFAULT ''"},
+		{"last_merge_attempt_at", "DATETIME"},
+	}
+	return addMissingColumns(s, "gitlab_task_mr_state", stateColumns)
+}
+
+func addMissingColumns(s *Store, table string, columns []struct{ name, ddl string }) error {
+	existing, err := s.tableColumns(table)
+	if err != nil {
+		return err
+	}
+	for _, column := range columns {
+		if _, ok := existing[column.name]; ok {
+			continue
+		}
+		if _, err := s.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column.name, column.ddl)); err != nil {
+			return fmt.Errorf("migrate %s.%s: %w", table, column.name, err)
+		}
+	}
+	return nil
 }
 
 // execContext is satisfied by *sqlx.Tx (and *sqlx.DB), narrowed to the one
@@ -56,13 +112,16 @@ type execContext interface {
 	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
 }
 
+const mrAutomationOptionsSelectCols = `task_id, auto_fix_enabled, auto_merge_enabled, auto_fix_prompt_override,
+	prompt_on_review_requested, prompt_on_merged, prompt_on_closed,
+	review_reviewer_username, created_at, updated_at`
+
 // GetTaskMRAutomationOptions returns a task's MR automation options, or an
 // implicit all-false default when no row has been persisted yet (AC1).
 func (s *Store) GetTaskMRAutomationOptions(ctx context.Context, taskID string) (*TaskMRAutomationOptions, error) {
 	var row TaskMRAutomationOptions
 	err := s.ro.GetContext(ctx, &row, `
-		SELECT task_id, prompt_on_review_requested, prompt_on_merged, prompt_on_closed,
-			review_reviewer_username, created_at, updated_at
+		SELECT `+mrAutomationOptionsSelectCols+`
 		FROM gitlab_task_mr_options WHERE task_id = ?`, taskID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return &TaskMRAutomationOptions{TaskID: taskID}, nil
@@ -115,8 +174,7 @@ func (s *Store) UpdateTaskMRAutomationOptions(
 	}
 	var previous TaskMRAutomationOptions
 	if err := tx.GetContext(ctx, &previous,
-		`SELECT task_id, prompt_on_review_requested, prompt_on_merged, prompt_on_closed,
-			review_reviewer_username, created_at, updated_at
+		`SELECT `+mrAutomationOptionsSelectCols+`
 		 FROM gitlab_task_mr_options WHERE task_id = ?`, taskID); err != nil {
 		return nil, err
 	}
@@ -124,12 +182,17 @@ func (s *Store) UpdateTaskMRAutomationOptions(
 	fields := mrAutomationPatchFields(patch, reviewerUsername)
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE gitlab_task_mr_options SET
+			auto_fix_enabled = CASE WHEN ? THEN ? ELSE auto_fix_enabled END,
+			auto_merge_enabled = CASE WHEN ? THEN ? ELSE auto_merge_enabled END,
+			auto_fix_prompt_override = CASE WHEN ? THEN ? ELSE auto_fix_prompt_override END,
 			prompt_on_review_requested = CASE WHEN ? THEN ? ELSE prompt_on_review_requested END,
 			prompt_on_merged = CASE WHEN ? THEN ? ELSE prompt_on_merged END,
 			prompt_on_closed = CASE WHEN ? THEN ? ELSE prompt_on_closed END,
 			review_reviewer_username = CASE WHEN ? THEN ? ELSE review_reviewer_username END,
 			updated_at = ?
 		WHERE task_id = ?`,
+		fields.autoFixSet, fields.autoFixValue, fields.autoMergeSet, fields.autoMergeValue,
+		fields.promptSet, fields.promptValue,
 		fields.reviewSet, fields.reviewValue, fields.mergedSet, fields.mergedValue,
 		fields.closedSet, fields.closedValue, fields.reviewerSet, fields.reviewerValue,
 		now, taskID); err != nil {
@@ -148,14 +211,20 @@ func (s *Store) UpdateTaskMRAutomationOptions(
 // server-resolved reviewer username) into the "was this field present, what
 // value" pairs both the atomic UPDATE and the reset-decision logic need.
 type mrAutomationOptionsPatchFields struct {
-	reviewSet, reviewValue bool
-	mergedSet, mergedValue bool
-	closedSet, closedValue bool
-	reviewerSet            bool
-	reviewerValue          string
+	autoFixSet, autoFixValue     bool
+	autoMergeSet, autoMergeValue bool
+	promptSet                    bool
+	promptValue                  *string
+	reviewSet, reviewValue       bool
+	mergedSet, mergedValue       bool
+	closedSet, closedValue       bool
+	reviewerSet                  bool
+	reviewerValue                string
 }
 
 func mrAutomationPatchFields(patch TaskMRAutomationPatch, reviewerUsername *string) mrAutomationOptionsPatchFields {
+	autoFixSet, autoFixValue := boolPatchValue(patch.AutoFixEnabled)
+	autoMergeSet, autoMergeValue := boolPatchValue(patch.AutoMergeEnabled)
 	reviewSet, reviewValue := boolPatchValue(patch.PromptOnReviewRequested)
 	mergedSet, mergedValue := boolPatchValue(patch.PromptOnMerged)
 	closedSet, closedValue := boolPatchValue(patch.PromptOnClosed)
@@ -164,6 +233,9 @@ func mrAutomationPatchFields(patch TaskMRAutomationPatch, reviewerUsername *stri
 		reviewerValue = *reviewerUsername
 	}
 	return mrAutomationOptionsPatchFields{
+		autoFixSet: autoFixSet, autoFixValue: autoFixValue,
+		autoMergeSet: autoMergeSet, autoMergeValue: autoMergeValue,
+		promptSet: patch.AutoFixPromptOverride != nil, promptValue: normalizedMRPromptOverride(patch.AutoFixPromptOverride),
 		reviewSet: reviewSet, reviewValue: reviewValue,
 		mergedSet: mergedSet, mergedValue: mergedValue,
 		closedSet: closedSet, closedValue: closedValue,
@@ -171,9 +243,20 @@ func mrAutomationPatchFields(patch TaskMRAutomationPatch, reviewerUsername *stri
 	}
 }
 
-// applyMRAutomationOptionResets resets the review-request baseline and/or a
-// terminal event's checkpoint when the corresponding switch actually changed
-// value against the pre-patch row. Mirrors GitHub's applyTaskCIOptionResets.
+// normalizedMRPromptOverride turns an explicit empty-string override into a
+// NULL column value (restoring the default prompt), matching GitHub's
+// normalizedPromptOverride.
+func normalizedMRPromptOverride(override *string) *string {
+	if override == nil || *override == "" {
+		return nil
+	}
+	return override
+}
+
+// applyMRAutomationOptionResets resets the review-request baseline, a
+// terminal event's checkpoint, or the auto-fix round-cap state when the
+// corresponding switch actually changed value against the pre-patch row.
+// Mirrors GitHub's applyTaskCIOptionResets.
 func applyMRAutomationOptionResets(
 	ctx context.Context, tx execContext, taskID string, now time.Time,
 	previous TaskMRAutomationOptions, fields mrAutomationOptionsPatchFields,
@@ -193,9 +276,29 @@ func applyMRAutomationOptionResets(
 			return err
 		}
 	}
-	// Re-enabling a terminal-event switch (merged/closed) must not stay
-	// permanently suppressed for an MR already checkpointed in that state —
-	// mirrors GitHub's shouldResetTerminalPrompt/resetTaskCITerminalCheckpoint.
+	if err := resetMRTerminalCheckpointsOnReenable(ctx, tx, taskID, now, previous, fields); err != nil {
+		return err
+	}
+	// Re-enabling auto-fix after it was off must clear the round cap and
+	// exhaustion so a fresh evaluation pass can dispatch again (AC11).
+	if fields.autoFixSet && fields.autoFixValue && !previous.AutoFixEnabled {
+		if err := resetMRAutoFixState(ctx, tx, taskID, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// resetMRTerminalCheckpointsOnReenable resets a terminal event's (merged or
+// closed) checkpoint when its switch flips from off to on, so an MR already
+// checkpointed in that state can fire again — mirrors GitHub's
+// shouldResetTerminalPrompt/resetTaskCITerminalCheckpoint. Split out of
+// applyMRAutomationOptionResets to keep that function under the cyclomatic
+// complexity limit.
+func resetMRTerminalCheckpointsOnReenable(
+	ctx context.Context, tx execContext, taskID string, now time.Time,
+	previous TaskMRAutomationOptions, fields mrAutomationOptionsPatchFields,
+) error {
 	if fields.mergedSet && fields.mergedValue && !previous.PromptOnMerged {
 		if err := resetMRTerminalCheckpoint(ctx, tx, taskID, gitlabStateMerged, now); err != nil {
 			return err
@@ -209,10 +312,32 @@ func applyMRAutomationOptionResets(
 	return nil
 }
 
+// resetMRAutoFixState clears every MR auto-fix round-cap/checkpoint column
+// for a task, mirroring GitHub's resetTaskCIAutoFixState. A previously
+// recorded exhaustion error is cleared along with it; any other kind of
+// error (sync, merge) is left untouched.
+func resetMRAutoFixState(ctx context.Context, exec execContext, taskID string, now time.Time) error {
+	_, err := exec.ExecContext(ctx, `
+		UPDATE gitlab_task_mr_state
+		SET auto_fix_round_count = 0,
+		    last_fix_signature = '',
+		    last_fix_checkpoint_json = '',
+		    last_fix_enqueued_at = NULL,
+		    last_fix_session_id = NULL,
+		    last_error = CASE WHEN auto_fix_exhausted_at IS NOT NULL THEN NULL ELSE last_error END,
+		    auto_fix_exhausted_at = NULL,
+		    updated_at = ?
+		WHERE task_id = ?`, now, taskID)
+	return err
+}
+
 const mrLifecycleStateSelectCols = `task_id, repository_id, project_path, mr_iid,
 	review_request_initialized, last_review_requested, last_observed_state,
 	last_lifecycle_event, last_lifecycle_prompt_at, last_lifecycle_session_id,
-	last_error, last_sync_error, created_at, updated_at`
+	last_error, last_sync_error,
+	last_fix_signature, last_fix_checkpoint_json, last_fix_enqueued_at, last_fix_session_id,
+	auto_fix_round_count, auto_fix_exhausted_at, last_merge_signature, last_merge_attempt_at,
+	created_at, updated_at`
 
 // GetTaskMRLifecycleState returns the checkpoint row for one linked MR, or
 // nil when no evaluation has run yet (silent-baseline case, AC10).
@@ -454,15 +579,18 @@ func resetMRTerminalCheckpoint(ctx context.Context, exec execContext, taskID, st
 	return err
 }
 
-// ListLifecycleSubscribedTaskMRs returns every linked MR (gitlab_task_mrs
-// row) whose task has at least one lifecycle switch enabled. Drives the
-// poller's lifecycle sync pass (AC22).
-func (s *Store) ListLifecycleSubscribedTaskMRs(ctx context.Context) ([]*TaskMR, error) {
+// ListAutomationSubscribedTaskMRs returns every linked MR (gitlab_task_mrs
+// row) whose task has at least one lifecycle switch OR auto-fix OR
+// auto-merge enabled. Drives the poller's sync pass (AC22); widened from
+// the #2125 lifecycle-only ListLifecycleSubscribedTaskMRs so auto-fix and
+// auto-merge get evaluated on the same poll without a second query.
+func (s *Store) ListAutomationSubscribedTaskMRs(ctx context.Context) ([]*TaskMR, error) {
 	var mrs []TaskMR
 	if err := s.ro.SelectContext(ctx, &mrs, `
 		SELECT `+taskMRSelectColsQualified+` FROM gitlab_task_mrs gtm
 		INNER JOIN gitlab_task_mr_options o ON o.task_id = gtm.task_id
 		WHERE o.prompt_on_review_requested = 1 OR o.prompt_on_merged = 1 OR o.prompt_on_closed = 1
+			OR o.auto_fix_enabled = 1 OR o.auto_merge_enabled = 1
 		ORDER BY gtm.created_at ASC`); err != nil {
 		return nil, err
 	}
@@ -471,6 +599,110 @@ func (s *Store) ListLifecycleSubscribedTaskMRs(ctx context.Context) ([]*TaskMR, 
 		out = append(out, &mrs[i])
 	}
 	return out, nil
+}
+
+// RecordTaskMRFixAttempt persists an auto-fix prompt dispatch: the new
+// feedback checkpoint/signature, the session it was sent to, and (when
+// IncrementRound) one added round toward the per-MR cap. Mirrors GitHub's
+// RecordTaskCIFixAttempt.
+func (s *Store) RecordTaskMRFixAttempt(ctx context.Context, attempt TaskMRFixAttempt) error {
+	ctx = context.WithoutCancel(ctx)
+	when := attempt.EnqueuedAt
+	if when.IsZero() {
+		when = time.Now().UTC()
+	}
+	now := time.Now().UTC()
+	roundCount := 0
+	if attempt.IncrementRound {
+		roundCount = 1
+	}
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO gitlab_task_mr_state (
+			task_id, repository_id, project_path, mr_iid, last_fix_signature, last_fix_checkpoint_json,
+			last_fix_enqueued_at, last_fix_session_id, auto_fix_round_count, auto_fix_exhausted_at,
+			created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+		ON CONFLICT(task_id, repository_id, project_path, mr_iid) DO UPDATE SET
+			last_fix_signature = excluded.last_fix_signature,
+			last_fix_checkpoint_json = excluded.last_fix_checkpoint_json,
+			last_fix_enqueued_at = excluded.last_fix_enqueued_at,
+			last_fix_session_id = excluded.last_fix_session_id,
+			auto_fix_round_count = gitlab_task_mr_state.auto_fix_round_count + excluded.auto_fix_round_count,
+			last_error = NULL,
+			updated_at = excluded.updated_at`,
+		attempt.TaskID, attempt.RepositoryID, attempt.ProjectPath, attempt.MRIID, attempt.Signature,
+		attempt.CheckpointJSON, when, nullableString(attempt.SessionID), roundCount, now, now)
+	return err
+}
+
+// RefreshTaskMRFixCheckpoint updates the current feedback checkpoint
+// without recording a new prompt dispatch (the empty-delta path — AC7).
+// Mirrors GitHub's RefreshTaskCIFixCheckpoint.
+func (s *Store) RefreshTaskMRFixCheckpoint(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int, signature, checkpointJSON string) error {
+	ctx = context.WithoutCancel(ctx)
+	now := time.Now().UTC()
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO gitlab_task_mr_state (
+			task_id, repository_id, project_path, mr_iid, last_fix_signature, last_fix_checkpoint_json, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(task_id, repository_id, project_path, mr_iid) DO UPDATE SET
+			last_fix_signature = excluded.last_fix_signature,
+			last_fix_checkpoint_json = excluded.last_fix_checkpoint_json,
+			last_fix_enqueued_at = NULL,
+			last_fix_session_id = NULL,
+			last_error = NULL,
+			updated_at = excluded.updated_at`,
+		taskID, repositoryID, projectPath, mrIID, signature, checkpointJSON, now, now)
+	return err
+}
+
+// MarkTaskMRAutoFixExhausted records that auto-fix reached its per-MR round
+// cap (AC10). Mirrors GitHub's MarkTaskCIAutoFixExhausted.
+func (s *Store) MarkTaskMRAutoFixExhausted(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int, message string) error {
+	ctx = context.WithoutCancel(ctx)
+	now := time.Now().UTC()
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO gitlab_task_mr_state (
+			task_id, repository_id, project_path, mr_iid, auto_fix_exhausted_at, last_error, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(task_id, repository_id, project_path, mr_iid) DO UPDATE SET
+			auto_fix_exhausted_at = excluded.auto_fix_exhausted_at,
+			last_error = excluded.last_error,
+			updated_at = excluded.updated_at`,
+		taskID, repositoryID, projectPath, mrIID, now, strings.TrimSpace(message), now, now)
+	return err
+}
+
+// RecordTaskMRMergeAttempt records an auto-merge attempt signature (AC13),
+// clearing any previous automation error. Mirrors GitHub's
+// RecordTaskCIMergeAttempt.
+func (s *Store) RecordTaskMRMergeAttempt(ctx context.Context, attempt TaskMRMergeAttempt) error {
+	ctx = context.WithoutCancel(ctx)
+	when := attempt.AttemptedAt
+	if when.IsZero() {
+		when = time.Now().UTC()
+	}
+	now := time.Now().UTC()
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO gitlab_task_mr_state (
+			task_id, repository_id, project_path, mr_iid, last_merge_signature, last_merge_attempt_at, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(task_id, repository_id, project_path, mr_iid) DO UPDATE SET
+			last_merge_signature = excluded.last_merge_signature,
+			last_merge_attempt_at = excluded.last_merge_attempt_at,
+			last_error = NULL,
+			updated_at = excluded.updated_at`,
+		attempt.TaskID, attempt.RepositoryID, attempt.ProjectPath, attempt.MRIID, attempt.Signature, when, now, now)
+	return err
+}
+
+// nullableString converts an empty string to a nil driver value so the
+// column stores SQL NULL rather than "" when no session ID is known.
+func nullableString(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
 }
 
 // deleteMRAutomationForWorkspace removes MR automation rows scoped to a

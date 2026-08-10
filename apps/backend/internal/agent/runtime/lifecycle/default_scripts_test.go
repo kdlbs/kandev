@@ -212,3 +212,26 @@ func TestDefaultPrepareScripts_NoInlineFeatureBranchCheckout(t *testing.T) {
 		})
 	}
 }
+
+func TestDefaultPrepareScript_SSHMaterializesPrimaryWorkspace(t *testing.T) {
+	script := DefaultPrepareScript("ssh")
+	if script == "" {
+		t.Fatal("DefaultPrepareScript(\"ssh\") returned empty")
+	}
+	for _, want := range []string{
+		"{{workspace.path}}",
+		"{{repository.clone_url}}",
+		"{{repository.branch}}",
+		"{{repository.setup_script}}",
+		"git init",
+		"fetch --no-tags",
+		"remote.origin.url",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("SSH default prepare script missing %q", want)
+		}
+	}
+	if strings.Contains(script, "git checkout -B {{worktree.branch}} origin/{{worktree.branch}}") {
+		t.Fatal("SSH default prepare script must leave feature-branch selection to the postlude")
+	}
+}

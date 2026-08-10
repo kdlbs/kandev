@@ -9,7 +9,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	apiv1 "github.com/kandev/kandev/pkg/api/v1"
+	"go.uber.org/zap"
 )
 
 const errorResponseField = "error"
@@ -22,10 +24,11 @@ type Searcher interface {
 // Handler exposes mention search over HTTP.
 type Handler struct {
 	searcher Searcher
+	log      *logger.Logger
 }
 
-func NewHandler(searcher Searcher) *Handler {
-	return &Handler{searcher: searcher}
+func NewHandler(searcher Searcher, log *logger.Logger) *Handler {
+	return &Handler{searcher: searcher, log: log}
 }
 
 func (h *Handler) RegisterRoutes(router gin.IRoutes) {
@@ -35,7 +38,7 @@ func (h *Handler) RegisterRoutes(router gin.IRoutes) {
 func (h *Handler) search(c *gin.Context) {
 	limit, err := parseLimit(c.Query("limit"))
 	if err != nil {
-		writeSearchError(c, ErrInvalidRequest)
+		h.writeSearchError(c, ErrInvalidRequest)
 		return
 	}
 	response, err := h.searcher.Search(c.Request.Context(), SearchRequest{
@@ -44,7 +47,7 @@ func (h *Handler) search(c *gin.Context) {
 		Limit:       limit,
 	})
 	if err != nil {
-		writeSearchError(c, err)
+		h.writeSearchError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, response)
@@ -68,13 +71,29 @@ func parseLimit(rawLimit string) (int, error) {
 	return limit, nil
 }
 
-func writeSearchError(c *gin.Context, err error) {
+func (h *Handler) writeSearchError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, ErrInvalidRequest):
 		c.JSON(http.StatusBadRequest, gin.H{errorResponseField: "invalid mention search request"})
 	case errors.Is(err, ErrWorkspaceNotFound):
 		c.JSON(http.StatusNotFound, gin.H{errorResponseField: "mention search workspace not found"})
+	case errors.Is(err, context.Canceled):
+		c.JSON(499, gin.H{errorResponseField: "mention search request canceled"})
 	default:
+		h.logUnexpectedFailure(c, err)
 		c.JSON(http.StatusInternalServerError, gin.H{errorResponseField: "mention search failed"})
 	}
+}
+
+func (h *Handler) logUnexpectedFailure(c *gin.Context, err error) {
+	if h.log == nil {
+		return
+	}
+	stage, class := SearchFailureMetadata(err)
+	h.log.Error(
+		"mention search failed",
+		zap.String("workspace_id", c.Param("id")),
+		zap.String("failure_stage", stage),
+		zap.String("failure_class", class),
+	)
 }

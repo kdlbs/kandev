@@ -95,6 +95,12 @@ async function isPortAvailable(port: number): Promise<boolean> {
   return canBindPort(port, "127.0.0.1");
 }
 
+export async function assertPortAvailable(port: number, source?: string): Promise<void> {
+  if (await isPortAvailable(port)) return;
+  const sourceSuffix = source ? ` from ${source}` : "";
+  throw new Error(`Backend port ${port}${sourceSuffix} is already in use`);
+}
+
 async function reserveSpecificPort(port: number, host = "127.0.0.1"): Promise<net.Server | null> {
   return new Promise((resolve) => {
     const server = net.createServer();
@@ -103,16 +109,17 @@ async function reserveSpecificPort(port: number, host = "127.0.0.1"): Promise<ne
   });
 }
 
-export async function pickAvailablePort(
+export async function pickAvailablePortExcluding(
   preferred: number,
+  excludedPorts: ReadonlySet<number>,
   retries = RANDOM_PORT_RETRIES,
 ): Promise<number> {
-  if (await isPortAvailable(preferred)) {
+  if (!excludedPorts.has(preferred) && (await isPortAvailable(preferred))) {
     return preferred;
   }
   for (let i = 0; i < retries; i += 1) {
     const candidate = crypto.randomInt(RANDOM_PORT_MIN, RANDOM_PORT_MAX + 1);
-    if (await isPortAvailable(candidate)) {
+    if (!excludedPorts.has(candidate) && (await isPortAvailable(candidate))) {
       return candidate;
     }
   }

@@ -36,6 +36,26 @@ func (r *Repository) CreateTaskResourceCleanupJob(ctx context.Context, job *mode
 	return err
 }
 
+// UpdateTaskResourceCleanupSnapshot writes the resource inventory captured
+// after the prepared barrier was reserved. The barrier row exists before the
+// inventory query so concurrent session/worktree creation is rejected while
+// the snapshot is being assembled.
+func (r *Repository) UpdateTaskResourceCleanupSnapshot(ctx context.Context, operationID, snapshot string) error {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_resource_cleanup_jobs
+		SET resource_snapshot = ?, updated_at = ?
+		WHERE operation_id = ? AND state = ?
+	`), snapshot, time.Now().UTC(), operationID, models.TaskResourceCleanupStatePrepared)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("task resource cleanup job %s not found or not prepared", operationID)
+	}
+	return nil
+}
+
 // HasActiveTaskResourceCleanupJob reports whether teardown has been admitted
 // for a task. The prepared state is included because the cleanup intent is
 // persisted before task deletion and before the worker is allowed to run.

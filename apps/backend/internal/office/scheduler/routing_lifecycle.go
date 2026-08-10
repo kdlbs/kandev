@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/office/models"
 	sqliterepo "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/routing"
@@ -24,6 +25,7 @@ import (
 // path took over (caller should NOT run the legacy failure escalation).
 func (ss *SchedulerService) HandlePostStartFailure(
 	ctx context.Context, run *models.Run, agent *models.AgentInstance, errorMessage string,
+	providerError *streams.ProviderError,
 ) (bool, error) {
 	if ss.resolver == nil || run == nil || agent == nil {
 		return false, nil
@@ -35,18 +37,145 @@ func (ss *SchedulerService) HandlePostStartFailure(
 	if err != nil {
 		return false, err
 	}
+	message := errorMessage
+	var resetHint *time.Time
+	if providerError != nil {
+		if providerError.Message != "" {
+			message = providerError.Message
+		}
+		resetHint = providerError.ResetAt
+	}
 	classified := routingerr.Classify(routingerr.Input{
 		Phase:      routingerr.PhaseStreaming,
 		ProviderID: string(candidate.ProviderID),
-		Stderr:     errorMessage,
+		Stderr:     message,
+		ResetHint:  resetHint,
 	})
 	if !classified.FallbackAllowed {
 		return false, nil
+	}
+	if routingerr.Decide(routingerr.ContextOffice, classified, time.Now().UTC()) == routingerr.DecisionShortRetry {
+		retryCount, err := ss.shortRouteRetryCount(ctx, run, candidate)
+		if err != nil {
+			return false, err
+		}
+		if retryCount < officeShortRetryMaxAttempts {
+			if err := ss.applyShortRouteRetry(ctx, run, agent, candidate, classified, retryCount+1); err != nil {
+				return false, err
+			}
+			return true, nil
+		}
 	}
 	if err := ss.applyPostStartFallback(ctx, run, agent, candidate, classified); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+const officeShortRetryMaxAttempts = 3
+
+var officeShortRetryBackoff = []time.Duration{
+	5 * time.Second,
+	10 * time.Second,
+	20 * time.Second,
+}
+
+func officeShortRetryDelay(attempt int, e *routingerr.Error, now time.Time) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	if attempt > len(officeShortRetryBackoff) {
+		attempt = len(officeShortRetryBackoff)
+	}
+	base := officeShortRetryBackoff[attempt-1]
+	if e != nil && e.ResetHint != nil {
+		untilReset := e.ResetHint.Sub(now)
+		if untilReset > 0 && untilReset <= time.Minute {
+			if untilReset < officeShortRetryBackoff[0] {
+				return officeShortRetryBackoff[0]
+			}
+			return untilReset
+		}
+	}
+	return base
+}
+
+func (ss *SchedulerService) shortRouteRetryCount(
+	ctx context.Context, run *models.Run, candidate routing.Candidate,
+) (int, error) {
+	attempts, err := ss.repo.ListRouteAttempts(ctx, run.ID)
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, attempt := range attempts {
+		if attempt.Seq <= run.RouteCycleBaselineSeq ||
+			attempt.ProviderID != string(candidate.ProviderID) ||
+			attempt.Outcome != models.RouteAttemptOutcomeRetryScheduled {
+			continue
+		}
+		count++
+	}
+	return count, nil
+}
+
+func (ss *SchedulerService) applyShortRouteRetry(
+	ctx context.Context,
+	run *models.Run,
+	agent *models.AgentInstance,
+	candidate routing.Candidate,
+	classified *routingerr.Error,
+	attempt int,
+) error {
+	now := time.Now().UTC()
+	delay := officeShortRetryDelay(attempt, classified, now)
+	retryAt := now.Add(delay)
+	if err := ss.markShortProviderCooldown(ctx, agent.WorkspaceID, candidate, classified, retryAt); err != nil {
+		return err
+	}
+	if err := ss.finishAttempt(ctx, run.ID, run.CurrentRouteAttemptSeq,
+		string(models.RouteAttemptOutcomeRetryScheduled), classified, now); err != nil {
+		return err
+	}
+	if err := ss.repo.ParkRunForProviderCapacity(ctx, run.ID,
+		routing.StatusWaitingForCapacity, retryAt); err != nil {
+		return err
+	}
+	ss.logger.Info("office short provider retry scheduled",
+		zap.String("run_id", run.ID),
+		zap.String("provider_id", string(candidate.ProviderID)),
+		zap.String("error_code", string(classified.Code)),
+		zap.Int("attempt", attempt),
+		zap.Duration("delay", delay))
+	ss.recordRouteParked(agent.WorkspaceID, run.ID, routing.StatusWaitingForCapacity)
+	return nil
+}
+
+func (ss *SchedulerService) markShortProviderCooldown(
+	ctx context.Context,
+	workspaceID string,
+	candidate routing.Candidate,
+	e *routingerr.Error,
+	retryAt time.Time,
+) error {
+	scope, scopeValue := sqliterepo.ScopeFromCode(string(e.Code), candidate.Model, candidate.Tier)
+	row := models.ProviderHealth{
+		WorkspaceID: workspaceID,
+		ProviderID:  string(candidate.ProviderID),
+		Scope:       models.ProviderHealthScope(scope),
+		ScopeValue:  scopeValue,
+		State:       models.ProviderHealthState(sqliterepo.HealthStateShortRetry),
+		ErrorCode:   string(e.Code),
+		RetryAt:     &retryAt,
+		LastFailure: timePtrIfNonZero(time.Now().UTC()),
+		RawExcerpt:  e.RawExcerpt,
+	}
+	if err := ss.repo.MarkProviderDegraded(ctx, row); err != nil {
+		return err
+	}
+	ss.publishProviderHealthChanged(ctx, row)
+	recordProviderDegraded(ss.logger, workspaceID, string(candidate.ProviderID), string(e.Code))
+	return nil
 }
 
 // inflightCandidate returns the provider/model/tier for the run's
@@ -223,10 +352,10 @@ func (ss *SchedulerService) redispatchWaitingRuns(
 
 // LiftParkedRuns clears routing-block status on runs whose earliest_retry_at
 // has passed so the next scheduler tick re-dispatches them. Called from
-// the scheduler tick loop. Bumps each lifted run's route-cycle baseline
-// so the previous cycle's exclusion list does not carry over — without
-// this the dispatcher would re-see the same failed providers and
-// immediately re-park the run.
+// the scheduler tick loop. A completed short same-route retry phase starts a
+// fresh route cycle only after its retry_scheduled attempt has been replaced
+// by a normal launch/failure outcome; otherwise the short-retry budget would
+// reset every time the run wakes and the same provider could loop forever.
 func (ss *SchedulerService) LiftParkedRuns(ctx context.Context, now time.Time) (int, error) {
 	runs, err := ss.repo.ListPendingProviderCapacityRuns(ctx, now)
 	if err != nil {
@@ -239,6 +368,16 @@ func (ss *SchedulerService) LiftParkedRuns(ctx context.Context, now time.Time) (
 				zap.String("run_id", run.ID), zap.Error(err))
 			continue
 		}
+		preserveShortPhase, err := ss.hasPendingShortRetryPhase(ctx, run)
+		if err != nil {
+			ss.logger.Warn("inspect short retry phase failed",
+				zap.String("run_id", run.ID), zap.Error(err))
+			continue
+		}
+		if preserveShortPhase {
+			lifted++
+			continue
+		}
 		if err := ss.repo.BumpRouteCycleBaseline(ctx, run.ID); err != nil {
 			ss.logger.Warn("bump route cycle baseline failed",
 				zap.String("run_id", run.ID), zap.Error(err))
@@ -246,6 +385,25 @@ func (ss *SchedulerService) LiftParkedRuns(ctx context.Context, now time.Time) (
 		lifted++
 	}
 	return lifted, nil
+}
+
+// hasPendingShortRetryPhase reports whether the latest route attempt is the
+// durable marker for a short same-provider retry. The marker survives the
+// parked-run wake-up, while a later launch/failure outcome permits the next
+// deliberate route cycle to reset its baseline.
+func (ss *SchedulerService) hasPendingShortRetryPhase(
+	ctx context.Context, run models.Run,
+) (bool, error) {
+	attempts, err := ss.repo.ListRouteAttempts(ctx, run.ID)
+	if err != nil {
+		return false, err
+	}
+	if len(attempts) == 0 {
+		return false, nil
+	}
+	latest := attempts[len(attempts)-1]
+	return latest.Seq == run.CurrentRouteAttemptSeq &&
+		latest.Outcome == models.RouteAttemptOutcomeRetryScheduled, nil
 }
 
 // ErrInflightNotFound is returned by inflightCandidate when the

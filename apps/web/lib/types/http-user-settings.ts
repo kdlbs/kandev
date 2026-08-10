@@ -40,6 +40,7 @@ export type TaskCreateLastUsedApi = {
   branch?: string;
   agent_profile_id?: string;
   executor_profile_id?: string;
+  workflow_ids_by_workspace?: Record<string, string>;
 };
 
 export type AppStatusBarOrderApi = {
@@ -66,6 +67,7 @@ export type UserSettings = {
   show_scroll_to_last_prompt?: boolean;
   show_scroll_to_start?: boolean;
   show_transcript_auto_scroll_control?: boolean;
+  show_todo_list_panel?: boolean;
   review_auto_mark_on_scroll?: boolean;
   confirm_task_archive?: boolean;
   unread_divider?: boolean;
@@ -91,6 +93,7 @@ export type UserSettings = {
   azure_devops_browse_preferences?: unknown;
   default_utility_agent_id?: string;
   default_utility_model?: string;
+  default_utility_agent_profile_id?: string;
   keyboard_shortcuts?: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
   terminal_link_behavior?: string;
   terminal_font_family?: string;
@@ -124,6 +127,7 @@ export type UserSettingsUpdatePayload = {
   show_scroll_to_last_prompt?: boolean;
   show_scroll_to_start?: boolean;
   show_transcript_auto_scroll_control?: boolean;
+  show_todo_list_panel?: boolean;
   review_auto_mark_on_scroll?: boolean;
   confirm_task_archive?: boolean;
   unread_divider?: boolean;
@@ -149,6 +153,7 @@ export type UserSettingsUpdatePayload = {
   azure_devops_browse_preferences?: object | null;
   default_utility_agent_id?: string;
   default_utility_model?: string;
+  default_utility_agent_profile_id?: string;
   keyboard_shortcuts?: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
   terminal_link_behavior?: "new_tab" | "browser_panel";
   terminal_font_family?: string;

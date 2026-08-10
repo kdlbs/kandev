@@ -110,7 +110,7 @@ make dev
 - the Vite development server, preferring port `37429`;
 - standalone `agentctl`, preferring port `39429` when needed.
 
-Occupied preferred ports are replaced with available random ports. Read the `[kandev] url:` line rather than assuming `38429`. Open or forward the **backend** URL: it proxies the Vite page and carries the same-origin HTTP and WebSocket traffic. The Vite port is internal development plumbing and normally does not need a provider public-port rule.
+When no port is explicitly selected, occupied preferred ports are replaced with available random ports. Explicitly selected occupied ports are rejected before readiness and are never silently replaced. Read the `[kandev] url:` line rather than assuming `38429`. Open or forward the **backend** URL: it proxies the Vite page and carries the same-origin HTTP and WebSocket traffic. The Vite port is internal development plumbing and normally does not need a provider public-port rule.
 
 To request fixed preferred ports:
 

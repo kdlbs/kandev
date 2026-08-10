@@ -12,6 +12,7 @@ import {
   CARD_W,
   CARD_H,
 } from "./org-tree-layout";
+import { useTranslation } from "react-i18next";
 
 type OrgChartCanvasProps = {
   agents: AgentProfile[];
@@ -23,11 +24,12 @@ const ZOOM_MAX = 2.0;
 const PADDING = 40;
 
 function EmptyOrgState() {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-col items-center justify-center py-16 text-center">
-      <p className="text-sm text-muted-foreground">No agents to display.</p>
+      <p className="text-sm text-muted-foreground">{t("office:noAgentsToDisplay")}</p>
       <p className="text-xs text-muted-foreground mt-1">
-        Create agents and set their reporting structure to see the org chart.
+        {t("office:createAgentsAndSetTheirReporting")}
       </p>
     </div>
   );

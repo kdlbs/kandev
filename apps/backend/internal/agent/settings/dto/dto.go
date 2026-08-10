@@ -7,18 +7,25 @@ import (
 )
 
 type AgentProfileDTO struct {
-	ID               string             `json:"id"`
-	AgentID          string             `json:"agent_id"`
-	Name             string             `json:"name"`
-	AgentDisplayName string             `json:"agent_display_name"`
-	Model            string             `json:"model"`
-	Mode             string             `json:"mode,omitempty"`
-	ConfigOptions    map[string]string  `json:"config_options,omitempty"`
-	AllowIndexing    bool               `json:"allow_indexing"` // Deprecated: use CLIFlags. Retained for legacy clients.
-	AutoApprove      bool               `json:"auto_approve"`
-	CLIFlags         []CLIFlagDTO       `json:"cli_flags"`
-	EnvVars          []ProfileEnvVarDTO `json:"env_vars,omitempty"`
-	CLIPassthrough   bool               `json:"cli_passthrough"`
+	ID               string `json:"id"`
+	AgentID          string `json:"agent_id"`
+	Name             string `json:"name"`
+	AgentDisplayName string `json:"agent_display_name"`
+	Model            string `json:"model"`
+	Mode             string `json:"mode,omitempty"`
+	// FallbackModel is the optional single ACP model ID the runtime switches
+	// to when the start model becomes unavailable. Ignored when
+	// auto_fallback is true.
+	FallbackModel string `json:"fallback_model,omitempty"`
+	// AutoFallback opts the profile into the legacy automatic-fallback
+	// behavior (session-start best-effort, office re-dispatch).
+	AutoFallback   bool               `json:"auto_fallback"`
+	ConfigOptions  map[string]string  `json:"config_options,omitempty"`
+	AllowIndexing  bool               `json:"allow_indexing"` // Deprecated: use CLIFlags. Retained for legacy clients.
+	AutoApprove    bool               `json:"auto_approve"`
+	CLIFlags       []CLIFlagDTO       `json:"cli_flags"`
+	EnvVars        []ProfileEnvVarDTO `json:"env_vars,omitempty"`
+	CLIPassthrough bool               `json:"cli_passthrough"`
 	// Enabled gates the profile from new-work selection. When false the
 	// profile is hidden from task/session creation pickers but still serves
 	// existing sessions and remains editable in settings.
@@ -336,6 +343,24 @@ type DynamicModelsResponse struct {
 	CurrentModeID  string            `json:"current_mode_id,omitempty"`
 	Commands       []CommandEntryDTO `json:"commands,omitempty"`
 	Error          *string           `json:"error"`
+}
+
+// ResolveAgentModelConfigRequest selects the provider context to resolve.
+type ResolveAgentModelConfigRequest struct {
+	Model         string            `json:"model"`
+	Mode          string            `json:"mode,omitempty"`
+	ConfigOptions map[string]string `json:"config_options,omitempty"`
+	Refresh       bool              `json:"refresh,omitempty"`
+}
+
+// AgentModelConfigResponse is the complete provider option snapshot for one
+// selected model.
+type AgentModelConfigResponse struct {
+	AgentName     string            `json:"agent_name"`
+	Model         string            `json:"model"`
+	Status        string            `json:"status"`
+	ConfigOptions []ConfigOptionDTO `json:"config_options"`
+	Error         *string           `json:"error"`
 }
 
 // ModeEntryDTO is a single ACP session mode advertised by an agent.

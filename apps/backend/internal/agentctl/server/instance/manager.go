@@ -10,13 +10,13 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/netutil"
 	"github.com/kandev/kandev/pkg/agent"
 	"go.uber.org/zap"
 )
@@ -176,6 +176,7 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		AssumeMcpHttp:          req.AssumeMcpHttp,
 		McpMode:                req.McpMode,
 		McpProviders:           req.McpProviders,
+		McpProfile:             req.McpProfile,
 		RequiresProcessKill:    req.RequiresProcessKill,
 		StripEnv:               req.StripEnv,
 		BaseBranches:           req.BaseBranches,
@@ -303,7 +304,7 @@ func (m *Manager) allocatePortAndListener(id string) (int, net.Listener, error) 
 		// all interfaces so Docker/remote executors can reach the instance.
 		ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", m.config.ListenHost(), allocated))
 		if err != nil {
-			if errors.Is(err, syscall.EADDRINUSE) || strings.Contains(err.Error(), "address already in use") {
+			if netutil.IsAddrInUse(err) {
 				m.portAlloc.MarkUnavailable(allocated)
 				m.logger.Warn("port already in use; retrying",
 					zap.String("instance_id", id),

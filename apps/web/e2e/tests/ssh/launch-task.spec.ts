@@ -39,6 +39,112 @@ test.describe("ssh executor — task launch", () => {
     const env = await apiClient.getTaskEnvironment(task.id);
     expect(env).not.toBeNull();
     expect(env!.executor_type).toBe("ssh");
+
+    const row = (await apiClient.listSSHSessions(seedData.sshExecutorId)).find(
+      (session) => session.task_id === task.id,
+    );
+    expect(row?.remote_task_dir).toBeTruthy();
+    const workspace = row!.remote_task_dir!;
+    expect(
+      execInContainer(seedData.sshTarget, [
+        "git",
+        "-c",
+        "safe.directory=*",
+        "-C",
+        workspace,
+        "rev-parse",
+        "--show-toplevel",
+      ]).trim(),
+    ).toBe(workspace);
+    expect(
+      execInContainer(seedData.sshTarget, [
+        "git",
+        "-c",
+        "safe.directory=*",
+        "-C",
+        workspace,
+        "branch",
+        "--show-current",
+      ]).trim(),
+    ).not.toBe("main");
+    expect(readRemoteFile(seedData.sshTarget, `${workspace}/remote-source.txt`)).toBe(
+      "e2e-ssh fixture\n",
+    );
+  });
+
+  test("runs custom prepare and terminal cleanup hooks on the remote workspace", async ({
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(180_000);
+    const profile = await apiClient.createExecutorProfile(seedData.sshExecutorId, {
+      name: "E2E SSH hooks",
+      config: {},
+      prepare_script: `#!/bin/bash
+set -euo pipefail
+workspace={{workspace.path}}
+repository_url={{repository.clone_url}}
+repository_branch={{repository.branch}}
+git init -q "$workspace"
+git -C "$workspace" remote add origin "$repository_url"
+git -C "$workspace" fetch --no-tags origin "+refs/heads/$repository_branch:refs/remotes/origin/$repository_branch"
+git -C "$workspace" checkout -b "$repository_branch" "origin/$repository_branch"
+printf 'prepared\\n' > "$workspace/custom-prepare-marker"
+`,
+      cleanup_script: "printf 'cleaned\\n' > {{workspace.path}}/custom-cleanup-marker",
+      env_vars: [],
+    });
+
+    try {
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        "SSH custom hooks",
+        seedData.agentProfileId,
+        {
+          description: 'e2e:delay(30000)\ne2e:message("still running")',
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+          executor_profile_id: profile.id,
+        },
+      );
+      let workspace = "";
+      await expect
+        .poll(
+          async () => {
+            const row = (await apiClient.listSSHSessions(seedData.sshExecutorId)).find(
+              (session) => session.task_id === task.id,
+            );
+            workspace = row?.remote_task_dir ?? "";
+            return (
+              workspace !== "" &&
+              (row?.remote_agentctl_port ?? 0) > 0 &&
+              (await apiClient.getTask(task.id)).state === "IN_PROGRESS" &&
+              readRemoteFile(seedData.sshTarget, `${workspace}/custom-prepare-marker`) ===
+                "prepared\n"
+            );
+          },
+          {
+            timeout: 60_000,
+            message: "Wait for custom SSH prepare hook",
+          },
+        )
+        .toBe(true);
+      expect(remotePathExists(seedData.sshTarget, `${workspace}/custom-cleanup-marker`)).toBe(
+        false,
+      );
+
+      await apiClient.archiveTask(task.id);
+      await expect
+        .poll(() => remotePathExists(seedData.sshTarget, `${workspace}/custom-cleanup-marker`), {
+          timeout: 30_000,
+          message: "Wait for terminal SSH cleanup hook",
+        })
+        .toBe(true);
+      expect(remotePathExists(seedData.sshTarget, workspace)).toBe(true);
+    } finally {
+      await apiClient.deleteExecutorProfile(profile.id).catch(() => undefined);
+    }
   });
 
   test("agentctl is uploaded on first launch and sha256 sidecar lands", async ({

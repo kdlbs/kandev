@@ -84,6 +84,26 @@ func TestUnavailableManagedAgentOmitsRuntimeMetadata(t *testing.T) {
 	}
 }
 
+func TestAvailableACPInferenceAgentIsDynamicBeforeProbeSnapshot(t *testing.T) {
+	ag := agents.NewMockAgent()
+	ag.SetEnabled(true)
+	ctrl := newTestController(map[string]agents.Agent{ag.ID(): ag})
+
+	item := ctrl.buildAvailableAgentDTO(
+		context.Background(),
+		ag,
+		discovery.Availability{Name: ag.ID(), Available: true},
+		time.Now(),
+	)
+
+	if !item.ModelConfig.SupportsDynamicModels {
+		t.Fatal("supports_dynamic_models = false, want true before the probe snapshot is cached")
+	}
+	if item.ModelConfig.Status != "not_configured" {
+		t.Fatalf("status = %q, want not_configured without a host utility", item.ModelConfig.Status)
+	}
+}
+
 func TestConfigOptionDTOsPreserveDescriptions(t *testing.T) {
 	dtos := configOptionDTOs([]hostutility.ConfigOption{{
 		Type:         "select",
@@ -112,5 +132,24 @@ func TestConfigOptionDTOsPreserveDescriptions(t *testing.T) {
 	values := payload[0]["options"].([]any)
 	if got := values[0].(map[string]any)["description"]; got != "More thorough reasoning." {
 		t.Errorf("value description = %#v, want provider description", got)
+	}
+}
+
+// TestResolveDefaultModel_MockAgentSeedsAdvertisedModel pins the mock agent's
+// seeded default profile model to one the mock agent actually advertises
+// (mock-fast). The no-silent-model-fallback policy fails session start
+// explicitly when the profile model is absent from the advertised list, so a
+// sentinel like "mock-default" would break every default-profile session in
+// the E2E environment.
+func TestResolveDefaultModel_MockAgentSeedsAdvertisedModel(t *testing.T) {
+	model, isPassthroughOnly, err := resolveDefaultModel(agents.NewMockAgent(), "")
+	if err != nil {
+		t.Fatalf("resolveDefaultModel: %v", err)
+	}
+	if isPassthroughOnly {
+		t.Fatal("mock agent must not be seeded as passthrough-only")
+	}
+	if model != "mock-fast" {
+		t.Fatalf("mock default profile model = %q, want %q (an advertised model)", model, "mock-fast")
 	}
 }

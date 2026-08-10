@@ -39,6 +39,7 @@ import (
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/ports"
+	"github.com/kandev/kandev/internal/db"
 	debughandlers "github.com/kandev/kandev/internal/debug"
 	editorcontroller "github.com/kandev/kandev/internal/editors/controller"
 	editorhandlers "github.com/kandev/kandev/internal/editors/handlers"
@@ -51,6 +52,7 @@ import (
 	"github.com/kandev/kandev/internal/health/oslimits"
 	"github.com/kandev/kandev/internal/i18n"
 	"github.com/kandev/kandev/internal/improvekandev"
+	"github.com/kandev/kandev/internal/integrations/workspacescope"
 	"github.com/kandev/kandev/internal/jira"
 	"github.com/kandev/kandev/internal/linear"
 	lspinstaller "github.com/kandev/kandev/internal/lsp/installer"
@@ -74,10 +76,10 @@ import (
 	"github.com/kandev/kandev/internal/runtimeflags"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/sentry"
-	"github.com/kandev/kandev/internal/slack"
 	spriteshandlers "github.com/kandev/kandev/internal/sprites"
 	sshhandlers "github.com/kandev/kandev/internal/ssh"
 	systemsvc "github.com/kandev/kandev/internal/system"
+	"github.com/kandev/kandev/internal/system/storage/tempartifacts"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	"github.com/kandev/kandev/internal/task/models"
@@ -526,7 +528,9 @@ type routeParams struct {
 	services                      *Services
 	systemSvc                     *systemsvc.Service
 	workspaceRestorer             taskhandlers.WorkspaceQuarantineRestorer
+	temporaryArtifacts            *tempartifacts.Registry
 	runtimeFlagsSvc               *runtimeflags.Service
+	dbPool                        *db.Pool
 	agentSettingsController       *agentsettingscontroller.Controller
 	agentSettingsRepo             settingsstore.Repository
 	agentList                     taskhandlers.AgentLister
@@ -541,10 +545,12 @@ type routeParams struct {
 	secretStore                   secrets.SecretStore
 	mcpConfigSvc                  *mcpconfig.Service
 	authSvc                       *auth.Service
+	agentRuntimeAvailability      *client.Availability
 	addCleanup                    func(func() error)
 	repoCloner                    *repoclone.Cloner
 	version                       string
 	webInternalURL                string
+	webTitlePrefix                string
 	devMode                       bool
 	httpPort                      int
 	features                      config.FeaturesConfig
@@ -642,9 +648,6 @@ func registerRoutes(p routeParams) {
 		p.services.Linear.SetRepositoryLookup(repoLookup)
 		p.services.Linear.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
 	}
-	if p.services.Slack != nil {
-		p.services.Slack.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
-	}
 	if p.services.Sentry != nil {
 		p.services.Sentry.SetTaskDeleter(handoffSvc)
 		p.services.Sentry.SetRepositoryLookup(repoLookup)
@@ -676,16 +679,7 @@ func registerRoutes(p routeParams) {
 	// Before that, return 503 so callers (including the e2e fixture's
 	// waitForHealth) keep polling instead of racing ahead and hitting
 	// 404s on routes that aren't wired yet.
-	p.router.GET("/health", func(c *gin.Context) {
-		if !ready.Load() {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "starting", "service": "kandev"})
-			return
-		}
-		if token := desktopHealthToken(); token != "" {
-			c.Header(desktopHealthTokenHeader, token)
-		}
-		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "kandev", "mode": "websocket+http"})
-	})
+	p.router.GET("/health", healthHandler(p))
 
 	// /api/v1/features is a public, unauthenticated read of the runtime
 	// feature-flag map. The frontend SSR-fetches it once per page render to
@@ -705,7 +699,6 @@ func registerRoutes(p routeParams) {
 		payload := bootPayload(c.Request.Context(), c.Request, p, route)
 		c.JSON(http.StatusOK, payload)
 	})
-
 	if p.webInternalURL == "" {
 		if handler, distDir, ok := newWebAppHandler(p); ok {
 			p.router.NoRoute(func(c *gin.Context) {
@@ -747,6 +740,42 @@ func registerRoutes(p routeParams) {
 	}
 }
 
+// healthHandler serves GET /health. The response always carries the
+// process's running version — in both the ready and not-ready bodies — so an
+// operator can identify the build of a backend that is stuck starting, and so
+// a monitor never needs a credential to read it (see docs/specs/
+// health-endpoint-version/spec.md).
+func healthHandler(p routeParams) gin.HandlerFunc {
+	// p.version is normally the package-level Version wired in by run()'s
+	// registerRoutes call. Falling back here keeps the never-empty guarantee
+	// (AC-11) true regardless of that call-site wiring, since standing up
+	// run()'s full DI graph in a test just to exercise that one field
+	// assignment is out of proportion to this change.
+	version := p.version
+	if version == "" {
+		version = Version
+	}
+	return func(c *gin.Context) {
+		if !ready.Load() {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"status":  "starting",
+				"service": "kandev",
+				"version": version,
+			})
+			return
+		}
+		if token := desktopHealthToken(); token != "" {
+			c.Header(desktopHealthTokenHeader, token)
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "ok",
+			"service": "kandev",
+			"mode":    "websocket+http",
+			"version": version,
+		})
+	}
+}
+
 func desktopHealthToken() string {
 	return strings.TrimSpace(os.Getenv(desktopHealthTokenEnv))
 }
@@ -775,7 +804,7 @@ func webAppHandlerOptions(p routeParams) []webapp.HandlerOption {
 // webRuntimeConfig builds the SPA's runtime block. `req` supplies the active
 // locale (from the kandev_locale cookie) so the shell can set <html lang> and the
 // client can activate the right catalog before first paint.
-func webRuntimeConfig(debug bool, req *http.Request) webapp.RuntimeConfig {
+func webRuntimeConfig(debug bool, titlePrefix string, req *http.Request) webapp.RuntimeConfig {
 	return webapp.RuntimeConfig{
 		APIPrefix:                         "/api/v1",
 		WebSocketPath:                     "/ws",
@@ -786,6 +815,7 @@ func webRuntimeConfig(debug bool, req *http.Request) webapp.RuntimeConfig {
 		// this from its own build mode.
 		NonProduction: profiles.DetectEnvironment() != profiles.EnvProd,
 		Locale:        i18n.FromRequest(req),
+		TitlePrefix:   strings.TrimSpace(titlePrefix),
 	}
 }
 
@@ -797,7 +827,7 @@ func bootPayload(ctx context.Context, req *http.Request, p routeParams, route we
 	}
 	payload := webapp.NewBootPayload(
 		route,
-		webRuntimeConfig(p.devMode, req),
+		webRuntimeConfig(p.devMode, p.webTitlePrefix, req),
 		initialState,
 	)
 	payload.RouteData = routeData
@@ -1052,7 +1082,14 @@ func registerSecondaryRoutes(
 	// Login PTY: spawns agent login commands under a PTY on the kandev host
 	// (claude auth login, auggie login, ...). The manager is shared with Quick
 	// Terminal so descriptor lifecycle callbacks observe the same sessions.
-	loginpty.NewHandlers(p.loginMgr, p.agentRegistry, p.log.Zap(), nil).RegisterRoutes(p.router)
+	loginHandlers := loginpty.NewHandlers(p.loginMgr, p.agentRegistry, p.log.Zap(), nil)
+	if p.quickTerminalSvc != nil {
+		// Guard the assignment: passing a nil *quickterminal.Service straight
+		// into the interface would create a typed-nil binder that is non-nil to
+		// the handler's nil check but panics when invoked.
+		loginHandlers.SetHostShellSessionBinder(p.quickTerminalSvc)
+	}
+	loginHandlers.RegisterRoutes(p.router)
 	if p.quickTerminalSvc != nil {
 		p.quickTerminalSvc.RegisterRoutes(p.router)
 	}
@@ -1143,11 +1180,6 @@ func registerSecondaryRoutes(
 		p.log.Debug("Registered Sentry handlers (HTTP)")
 	}
 
-	if p.services.Slack != nil {
-		slack.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Slack, p.log)
-		p.log.Debug("Registered Slack handlers (HTTP + WebSocket)")
-	}
-
 	if p.services.WorkflowSync != nil {
 		workflowsync.RegisterRoutes(p.router, p.services.WorkflowSync, p.log)
 		p.log.Debug("Registered workflow sync handlers (HTTP)")
@@ -1179,14 +1211,20 @@ func registerSecondaryRoutes(
 	}
 
 	if p.repoCloner != nil {
-		ikHandler := improvekandev.NewHandler(p.taskSvc, p.repoCloner, p.version, p.log)
+		var ghCopier improvekandev.GitHubWorkspaceCopier
+		var resolveDefaultWorkspace improvekandev.DefaultWorkspaceResolver
+		if p.services.GitHub != nil && p.dbPool != nil {
+			ghCopier = p.services.GitHub
+			resolveDefaultWorkspace = func(context.Context) (string, error) {
+				return workspacescope.ResolveMigrationTarget(p.dbPool.Reader())
+			}
+		}
+		ikHandler := improvekandev.NewHandler(p.taskSvc, p.repoCloner, ghCopier, resolveDefaultWorkspace, p.version, p.log)
+		ikHandler.SetTemporaryArtifactRegistry(p.temporaryArtifacts)
 		if p.systemSvc != nil {
 			ikHandler.SetLogBundles(p.systemSvc.LogBundles)
 		}
 		improvekandev.RegisterRoutes(p.router, ikHandler)
-		improvekandev.CleanupStaleBundles(func(path string, err error) {
-			p.log.Warn("Improve Kandev: failed to clean stale bundle", zap.String("path", path), zap.Error(err))
-		})
 		p.log.Debug("Registered Improve Kandev handlers (HTTP)")
 	}
 
@@ -1265,7 +1303,7 @@ func officeWorkspaceScopeMiddleware(authSvc *auth.Service, taskSvc *taskservice.
 // gitlab) with no per-user gate of their own, so this global middleware
 // authorizes ownership for them when auth is enabled.
 var integrationWorkspacePrefixes = []string{
-	"/api/v1/jira/", "/api/v1/linear/", "/api/v1/sentry/", "/api/v1/slack/",
+	"/api/v1/jira/", "/api/v1/linear/", "/api/v1/sentry/",
 	"/api/v1/azure-devops/", "/api/v1/gitlab/", "/api/v1/github/", "/api/v1/workflow-sync/",
 }
 

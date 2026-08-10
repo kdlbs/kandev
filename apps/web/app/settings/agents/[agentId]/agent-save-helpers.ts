@@ -35,6 +35,8 @@ export function toAgentProfilePatch(patch: Partial<ProfileFormData>): Partial<Ag
   const next: Partial<AgentProfile> = {};
   if (patch.name !== undefined) next.name = patch.name;
   if (patch.model !== undefined) next.model = patch.model;
+  if (patch.fallback_model !== undefined) next.fallbackModel = patch.fallback_model;
+  if (patch.auto_fallback !== undefined) next.autoFallback = patch.auto_fallback;
   if (patch.mode !== undefined) next.mode = patch.mode;
   if (patch.config_options !== undefined) next.configOptions = patch.config_options;
   if (patch.allow_indexing !== undefined) next.allowIndexing = patch.allow_indexing;
@@ -210,6 +212,8 @@ export async function saveNewAgent(draftAgent: DraftAgent, callbacks: SaveAgentC
     profiles: draftAgent.profiles.map((profile) => ({
       name: profile.name,
       model: profile.model,
+      fallback_model: profile.fallbackModel ?? "",
+      auto_fallback: profile.autoFallback ?? false,
       mode: profile.mode,
       config_options: profile.configOptions ?? {},
       ...permissionsToProfilePatch(profile),
@@ -286,6 +290,8 @@ async function savePersistedProfile(
     return updateAgentProfileAction(profile.id, {
       name: profile.name,
       model: profile.model,
+      fallback_model: profile.fallbackModel ?? "",
+      auto_fallback: profile.autoFallback ?? false,
       mode: profile.mode,
       config_options: profile.configOptions ?? {},
       ...permissionsToProfilePatch(profile),
@@ -318,6 +324,8 @@ async function saveExistingProfiles(
         const createdProfile = await createAgentProfileAction(savedAgent.id, {
           name: profile.name,
           model: profile.model,
+          fallback_model: profile.fallbackModel ?? "",
+          auto_fallback: profile.autoFallback ?? false,
           mode: profile.mode,
           config_options: profile.configOptions ?? {},
           ...permissionsToProfilePatch(profile),
@@ -505,6 +513,8 @@ export function isProfileDirty(draft: DraftProfile, saved?: AgentProfile): boole
     draft.name !== saved.name ||
     draft.model !== saved.model ||
     (draft.mode ?? "") !== (saved.mode ?? "") ||
+    (draft.fallbackModel ?? "") !== (saved.fallbackModel ?? "") ||
+    (draft.autoFallback ?? false) !== (saved.autoFallback ?? false) ||
     !areConfigOptionsEqual(draft.configOptions, saved.configOptions) ||
     arePermissionsDirty(draft, saved) ||
     isProfileCliConfigDirty(draft, saved)

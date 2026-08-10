@@ -266,7 +266,7 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     placeholder,
     isAgentBusy,
     hasAgentCommands,
-    steerPlaceholder: supportsSteering ? t("composerSteerPlaceholder") : undefined,
+    steerPlaceholder: supportsSteering ? t("chat:composerSteerPlaceholder") : undefined,
   });
 
   return {

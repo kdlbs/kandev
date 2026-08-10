@@ -23,6 +23,14 @@ function syncState(config: WorkflowSyncConfig): SyncState {
   return config.last_ok ? "ok" : "failed";
 }
 
+// syncSourceLabel is the human-readable sync source: "owner/repo" for GitHub,
+// the namespace path (already "group/project" shaped) for GitLab.
+function syncSourceLabel(config: WorkflowSyncConfig): string {
+  return config.provider === "gitlab"
+    ? config.project_path
+    : `${config.repo_owner}/${config.repo_name}`;
+}
+
 function StateIcon({ state }: { state: SyncState }) {
   if (state === "ok") return <IconCheck className="h-4 w-4 text-green-600 dark:text-green-400" />;
   if (state === "failed") return <IconAlertTriangle className="h-4 w-4 text-destructive" />;
@@ -106,7 +114,7 @@ export function WorkflowSyncStatusCard({
           <span>
             <Trans
               i18nKey="workflows:syncingFromRepository"
-              values={{ repository: `${config.repo_owner}/${config.repo_name}` }}
+              values={{ repository: syncSourceLabel(config) }}
             >
               Syncing from <span className="font-semibold" />
             </Trans>

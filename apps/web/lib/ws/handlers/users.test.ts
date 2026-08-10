@@ -184,6 +184,20 @@ describe("user settings websocket transcript navigation", () => {
   });
 });
 
+describe("todo list panel websocket sync", () => {
+  it("syncs the todo list panel preference and preserves it when omitted", () => {
+    const store = makeStore();
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({ show_todo_list_panel: true }),
+    );
+    expect(store.getState().userSettings.showTodoListPanel).toBe(true);
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
+    expect(store.getState().userSettings.showTodoListPanel).toBe(true);
+  });
+});
+
 describe("user settings websocket partial updates", () => {
   it("preserves normalized preferences omitted from a partial live update", () => {
     const store = makeStore();
@@ -285,6 +299,7 @@ describe("user settings websocket task-create last-used", () => {
       branch: null,
       agentProfileId: null,
       executorProfileId: null,
+      workflowIdsByWorkspace: {},
       synced: false,
     });
   });
@@ -302,6 +317,25 @@ describe("user settings websocket task-create last-used", () => {
     });
   });
 
+  it("maps workspace-scoped workflow history from broadcasts", () => {
+    const store = makeStore();
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        task_create_last_used: {
+          workflow_ids_by_workspace: {
+            "workspace-1": "workflow-1",
+          },
+        },
+      }),
+    );
+
+    expect(store.getState().userSettings.taskCreateLastUsed).toMatchObject({
+      workflowIdsByWorkspace: { "workspace-1": "workflow-1" },
+      synced: true,
+    });
+  });
+
   it("preserves task-create last-used state when broadcasts omit it", () => {
     const store = makeStore();
     store.setState((state) => ({
@@ -313,6 +347,7 @@ describe("user settings websocket task-create last-used", () => {
           branch: "main",
           agentProfileId: "agent-1",
           executorProfileId: "exec-1",
+          workflowIdsByWorkspace: {},
           synced: true,
         },
       },
@@ -327,6 +362,7 @@ describe("user settings websocket task-create last-used", () => {
       branch: "main",
       agentProfileId: "agent-1",
       executorProfileId: "exec-1",
+      workflowIdsByWorkspace: {},
       synced: true,
     });
   });

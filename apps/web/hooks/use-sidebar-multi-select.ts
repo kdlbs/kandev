@@ -11,6 +11,7 @@ import { useTaskRemoval } from "./use-task-removal";
 import { useTaskWorkflowMove } from "./use-task-workflow-move";
 import { useToast } from "@/components/toast-provider";
 import { useAppStoreApi } from "@/components/state-provider";
+import { useTranslation } from "react-i18next";
 
 type BulkOpts = { cascade?: boolean };
 
@@ -31,6 +32,7 @@ function useSidebarBulkActions(
   const { getWorkflowIdForTask, removeTasksFromStore } = useTaskMultiSelectStore();
   const moveTasks = useTaskWorkflowMove();
   const { toast } = useToast();
+  const { t } = useTranslation();
   const [isArchiving, setIsArchiving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -40,7 +42,7 @@ function useSidebarBulkActions(
       per: (id: string) => Promise<void>,
       handleActive: (id: string) => Promise<void>,
       setBusy: (v: boolean) => void,
-      noun: string,
+      failureKey: string,
     ) => {
       if (ids.length === 0) return;
       const activeId = store.getState().tasks.activeTaskId;
@@ -63,7 +65,7 @@ function useSidebarBulkActions(
           // Keep the failed ids selected so the user can retry, and surface it.
           dispatch({ type: "set_selected", ids: new Set(failed) });
           toast({
-            title: `Failed to ${noun} ${failed.length} task${failed.length === 1 ? "" : "s"}`,
+            title: t(failureKey, { count: failed.length }),
             variant: "error",
           });
           return;
@@ -73,7 +75,7 @@ function useSidebarBulkActions(
         setBusy(false);
       }
     },
-    [store, removeTasksFromStore, dispatch, toast, clearSelection],
+    [store, removeTasksFromStore, dispatch, toast, clearSelection, t],
   );
 
   const bulkArchive = useCallback(
@@ -83,7 +85,7 @@ function useSidebarBulkActions(
         (id) => archiveTaskById(id, opts),
         (id) => archiveAndSwitch(id, opts),
         setIsArchiving,
-        "archive",
+        "sidebar:bulkArchiveFailed",
       ),
     [runBulkRemoval, archiveTaskById, archiveAndSwitch],
   );
@@ -102,7 +104,7 @@ function useSidebarBulkActions(
           });
         },
         setIsDeleting,
-        "delete",
+        "sidebar:bulkDeleteFailed",
       ),
     [runBulkRemoval, deleteTaskById, removeTaskFromBoard, store],
   );

@@ -79,6 +79,44 @@ message_task_kandev(
 
 There is no persistent channel or shared socket between tasks. Each `message_task_kandev` call is discrete. The conversation thread is implicit — both tasks can recover context by reading back the relevant messages (see [Reading the thread](#reading-the-thread) below).
 
+## Autopilot parent questions
+
+An autopilot child does not call `ask_user_question_kandev`. If it reaches a
+critical decision, it calls `ask_parent_question_kandev`:
+
+```json
+{
+  "questions": [
+    {"id": "database", "prompt": "Which database should I use?", "options": ["SQLite", "Postgres"]}
+  ],
+  "context": "The migration needs a database choice before implementation."
+}
+```
+
+The tool creates a durable pending question for the direct parent and returns
+without waiting. The child must end its turn after the call. The question
+message contains a `question_id`, the child task ID, and the question data.
+Only that direct parent may answer it. A parent sends the answer to the child
+with `message_task_kandev`:
+
+```json
+{
+  "task_id": "<child task UUID>",
+  "prompt": "Use Postgres. Keep the migration reversible.",
+  "reply_to_question_id": "<question_id from the child message>"
+}
+```
+
+The answer is correlated by `reply_to_question_id` and is idempotent. A repeat
+answer, an answer from another task, or an answer after reparenting is rejected
+or reported as already answered; it never starts a second child turn. The
+child leaves the waiting state only after the accepted correlated answer is
+delivered. The existing primary question icon shows this wait in the sidebar.
+
+An autopilot root has no parent, so its task MCP profile contains no question
+tool. It must continue without asking the operator. A normal task keeps the
+operator-facing `ask_user_question_kandev` flow.
+
 ## Reading the thread
 
 `get_task_conversation_kandev(task_id)` returns the message history for any task you know the ID of. Use it to:
@@ -86,6 +124,8 @@ There is no persistent channel or shared socket between tasks. Each `message_tas
 - verify what the other task agreed to, before starting implementation;
 - resume context after a long pause;
 - audit what was actually communicated.
+
+By default this reads the task's **primary** session. A task can have several sessions — `spawn_session_kandev` adds one, and each runs its own conversation — and one call never merges them. Pass `session_id` to read a specific one, and use `list_task_sessions_kandev(task_id)` to discover the IDs: it returns every session newest-first with `session_id`, `name`, `state`, `is_primary` (the one both this tool and `message_task_kandev` default to) and `is_current` (your own session). The same `session_id` addresses a sibling session with `message_task_kandev`.
 
 Pagination and filtering are available via `limit`, `before`, `after`, `sort`, and `message_types` parameters. `message_types=["message"]` returns every regular chat/prompt row — the same `message` type covers ordinary user turns and cross-task deliveries alike, so this filter alone does not isolate coordination traffic. To identify a message that arrived via `message_task_kandev`, check the returned message's `metadata.sender_task_id` (and `sender_task_title`): messages sent within the same task have no `sender_task_id`. Include `"tool_call"` in `message_types` to see tool outputs too.
 
@@ -195,7 +235,8 @@ These tools complement cross-task communication for common coordination patterns
 | Tool | Use for |
 |---|---|
 | `message_task_kandev` | Send a prompt to any task by UUID |
-| `get_task_conversation_kandev` | Read a task's message history (pagination, type filters) |
+| `get_task_conversation_kandev` | Read a task's message history (pagination, type filters); defaults to the primary session |
+| `list_task_sessions_kandev` | List a task's sessions to find the `session_id` for the two tools above |
 | `list_related_tasks_kandev` | Discover parent / child / sibling / blocker task IDs |
 | `create_task_kandev` | Delegate work to a new subtask; returns the new task's ID |
 | `spawn_session_kandev` | Start another session on an existing task; returns `{task_id, session_id, state}` — use the `session_id` field to message the new session directly |

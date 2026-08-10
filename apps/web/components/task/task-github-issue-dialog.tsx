@@ -15,6 +15,11 @@ import { Label } from "@kandev/ui/label";
 import { useToast } from "@/components/toast-provider";
 import { linkTaskIssue, unlinkTaskIssue } from "@/lib/api/domains/github-api";
 import type { Repository } from "@/lib/types/http";
+import { useTranslation } from "react-i18next";
+
+/** URL shape the user types verbatim — protocol, not copy. Passed into the
+ * placeholder message as an interpolation value so it survives translation. */
+const GITHUB_ISSUE_URL_EXAMPLE = "github.com/owner/repo/issues/1470";
 
 type TaskIssue = {
   id: string;
@@ -82,12 +87,13 @@ function TaskGitHubIssueFields({
   submitting,
   error,
 }: DialogFieldsProps) {
+  const { t } = useTranslation();
   const placeholder = inferredRepo
-    ? "#1470 or github.com/owner/repo/issues/1470"
-    : "github.com/owner/repo/issues/1470";
+    ? t("task:githubIssueRefPlaceholder", { example: GITHUB_ISSUE_URL_EXAMPLE })
+    : GITHUB_ISSUE_URL_EXAMPLE;
   return (
     <div className="space-y-2">
-      <Label htmlFor="task-github-issue-input">Issue</Label>
+      <Label htmlFor="task-github-issue-input">{t("task:issue")}</Label>
       <Input
         id="task-github-issue-input"
         data-testid="task-github-issue-input"
@@ -112,6 +118,7 @@ function TaskGitHubIssueActions({
   onSubmit,
   onUnlink,
 }: DialogActionsProps) {
+  const { t } = useTranslation();
   return (
     <DialogFooter className="gap-2 sm:justify-between">
       {currentLabel ? (
@@ -122,7 +129,7 @@ function TaskGitHubIssueActions({
           onClick={onUnlink}
           disabled={submitting}
         >
-          Unlink
+          {t("task:unlink")}
         </Button>
       ) : (
         <span />
@@ -135,7 +142,7 @@ function TaskGitHubIssueActions({
           onClick={onCancel}
           disabled={submitting}
         >
-          Cancel
+          {t("common:cancel")}
         </Button>
         <Button
           type="button"
@@ -144,7 +151,7 @@ function TaskGitHubIssueActions({
           disabled={submitting}
           data-testid="task-github-issue-submit"
         >
-          {submitting ? "Saving" : "Save"}
+          {submitting ? t("task:saving") : t("common:save")}
         </Button>
       </div>
     </DialogFooter>
@@ -157,6 +164,7 @@ export function TaskGitHubIssueDialog({
   task,
   repositories,
 }: TaskGitHubIssueDialogProps) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const [input, setInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -165,7 +173,7 @@ export function TaskGitHubIssueDialog({
   if (task.issueNumber) {
     currentLabel = `#${task.issueNumber}`;
   } else if (task.issueUrl) {
-    currentLabel = "Linked issue";
+    currentLabel = t("task:linkedIssue");
   }
   const githubRepos = useMemo(() => githubReposForTask(task, repositories), [task, repositories]);
   const inferredRepo = githubRepos.length === 1 ? githubRepos[0] : null;
@@ -179,17 +187,17 @@ export function TaskGitHubIssueDialog({
 
   const submit = async () => {
     if (!input.trim()) {
-      setError("Enter a GitHub issue URL or number.");
+      setError(t("task:enterGithubIssueUrlOrNumber"));
       return;
     }
     setSubmitting(true);
     setError(null);
     try {
       await linkTaskIssue(task.id, issuePayload(input, inferredRepo));
-      toast({ description: "GitHub issue linked", variant: "success" });
+      toast({ description: t("task:githubIssueLinked"), variant: "success" });
       onOpenChange(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to link GitHub issue.");
+      setError(err instanceof Error ? err.message : t("task:failedToLinkGithubIssue"));
     } finally {
       setSubmitting(false);
     }
@@ -200,10 +208,10 @@ export function TaskGitHubIssueDialog({
     setError(null);
     try {
       await unlinkTaskIssue(task.id);
-      toast({ description: "GitHub issue unlinked", variant: "success" });
+      toast({ description: t("task:githubIssueUnlinked"), variant: "success" });
       onOpenChange(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to unlink GitHub issue.");
+      setError(err instanceof Error ? err.message : t("task:failedToUnlinkGithubIssue"));
     } finally {
       setSubmitting(false);
     }
@@ -213,11 +221,13 @@ export function TaskGitHubIssueDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{currentLabel ? "Change GitHub issue" : "Link GitHub issue"}</DialogTitle>
+          <DialogTitle>
+            {currentLabel ? t("task:changeGithubIssue") : t("task:linkGithubIssue")}
+          </DialogTitle>
           <DialogDescription>
             {inferredRepo
-              ? `Use a full issue URL or number for ${inferredRepo.owner}/${inferredRepo.repo}.`
-              : "Use a full GitHub issue URL for this task."}
+              ? t("task:useAFullIssueUrlOr", { owner: inferredRepo.owner, repo: inferredRepo.repo })
+              : t("task:useAFullGithubIssueUrl")}
           </DialogDescription>
         </DialogHeader>
         <TaskGitHubIssueFields

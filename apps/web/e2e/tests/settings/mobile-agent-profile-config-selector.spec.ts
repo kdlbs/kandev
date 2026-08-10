@@ -35,12 +35,26 @@ test.describe("Mobile agent profile config selector", () => {
       await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
       const selector = testPage.getByRole("button", { name: "Profile start model settings" });
       await expect(selector).toBeVisible({ timeout: 15_000 });
+      await expect(testPage.getByTestId("model-config-resolution-loading")).toBeHidden({
+        timeout: 15_000,
+      });
+      await expect(testPage.getByTestId("profile-refresh-capabilities")).toBeEnabled({
+        timeout: 15_000,
+      });
       await selector.click();
+      await testPage.getByRole("option", { name: /Mock Smart/ }).tap();
+      await expect(testPage.getByTestId("model-config-resolution-loading")).toBeHidden({
+        timeout: 15_000,
+      });
+      await expect(selector).toContainText("Mock Smart", { timeout: 10_000 });
       const effortTrigger = testPage.getByTestId("config-option-trigger-effort");
       await expect(effortTrigger).toBeVisible();
       await effortTrigger.click();
-      await testPage.getByRole("button", { name: "High", exact: true }).click();
-      await expect(selector).toContainText("High");
+      await expect(testPage.getByRole("button", { name: "Max", exact: true })).toBeVisible({
+        timeout: 10_000,
+      });
+      await testPage.getByRole("button", { name: "Max", exact: true }).tap();
+      await expect(selector).toHaveText("Mock Smart / Max");
     } finally {
       await apiClient.deleteAgentProfile(profile.id, true);
     }

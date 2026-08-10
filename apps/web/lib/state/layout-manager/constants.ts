@@ -28,6 +28,7 @@ export const REUSABLE_PANEL_IDS = [
   "plan",
   "browser",
   "vscode",
+  "todos",
 ] as const;
 export type ReusablePanelId = (typeof REUSABLE_PANEL_IDS)[number];
 
@@ -42,6 +43,7 @@ export const KNOWN_PANEL_IDS = new Set([
   "files",
   "pr-detail",
   "mr-detail",
+  "todos",
 ]);
 
 /** Components whose panels are structural and should survive filterEphemeral,
@@ -62,13 +64,48 @@ export const STRUCTURAL_COMPONENTS = new Set([
   "plugin-panel",
 ]);
 
-/** Default panel configurations for known panels. */
-export const PANEL_REGISTRY: Record<string, Omit<LayoutPanel, "id">> = {
-  chat: { component: "chat", title: "Agent", tabComponent: "permanentTab" },
-  plan: { component: "plan", title: "Plan", tabComponent: "planTab" },
-  changes: { component: "changes", title: "Changes", tabComponent: "changesTab" },
-  files: { component: "files", title: "Files" },
-  browser: { component: "browser", title: "Browser", params: { url: "" } },
+/**
+ * Default panel configurations for known panels.
+ *
+ * `title` and `titleKey` are deliberately two different things:
+ *
+ *   - `title` is the CANONICAL, always-English value. `toSerializedDockview`
+ *     writes it into the stored layout JSON, so it has to be locale-independent
+ *     — otherwise the locale a layout happened to be saved in is frozen into it
+ *     and survives every later switch.
+ *   - `titleKey` is what the user reads. `panelTitle()` resolves it whenever a
+ *     panel is built or a saved layout is restored, so the tab always shows the
+ *     ACTIVE locale regardless of which one wrote the layout.
+ *
+ * This is the key/persisted-value split docs/i18n.md prescribes for a display
+ * string that is also stored. Before it, two of these titles were translated at
+ * creation (`t("task:browser")`, `t("common:todos")`) and the rest were not, so
+ * the tab bar was half-translated AND persisted whichever locale created it.
+ *
+ * `vscode` has no `titleKey` on purpose: "VS Code" is a product name, and
+ * `panelTitle()` falls back to `title` when a key is absent.
+ */
+export const PANEL_REGISTRY: Record<string, Omit<LayoutPanel, "id"> & { titleKey?: string }> = {
+  chat: {
+    component: "chat",
+    title: "Agent",
+    titleKey: "task:panelAgent",
+    tabComponent: "permanentTab",
+  },
+  plan: { component: "plan", title: "Plan", titleKey: "task:panelPlan", tabComponent: "planTab" },
+  changes: {
+    component: "changes",
+    title: "Changes",
+    titleKey: "task:panelChanges",
+    tabComponent: "changesTab",
+  },
+  files: { component: "files", title: "Files", titleKey: "task:panelFiles" },
+  browser: {
+    component: "browser",
+    title: "Browser",
+    titleKey: "task:browser",
+    params: { url: "" },
+  },
   vscode: { component: "vscode", title: "VS Code" },
   [TERMINAL_DEFAULT_ID]: {
     component: "terminal",
@@ -79,17 +116,58 @@ export const PANEL_REGISTRY: Record<string, Omit<LayoutPanel, "id">> = {
     // session-page mount so the badge logic has a seq to display.
     tabComponent: "terminalTab",
     title: "Terminal",
+    titleKey: "task:panelTerminal",
     params: { terminalId: "shell-default" },
   },
-  "pr-detail": { component: "pr-detail", title: "PR Details" },
-  "mr-detail": { component: "mr-detail", title: "Merge Request" },
+  "pr-detail": { component: "pr-detail", title: "PR Details", titleKey: "task:panelPrDetails" },
+  "mr-detail": {
+    component: "mr-detail",
+    title: "Merge Request",
+    titleKey: "task:panelMergeRequest",
+  },
+  todos: { component: "todos", title: "Todos", titleKey: "common:todos" },
 };
 
-/** Create a LayoutPanel from the registry by ID. */
+/**
+ * `panelTitle()` — the locale-resolved counterpart of `canonicalPanelTitle()` —
+ * lives in `./panel-title.ts`. It needs `@/lib/i18n`, and this module must stay
+ * loadable from plain Node because e2e specs import constants from it; see that
+ * file's comment.
+ */
+
+/**
+ * Registry entry for a panel.
+ *
+ * Falls back to the COMPONENT when the id is not an exact key, because several
+ * panel families mint dynamic ids from their component — `browser:<url>`,
+ * `pr-detail|<key>`, `mr-detail|<key>`. Matching on the id alone left those
+ * outside the canonical/localized split entirely: they were created with a
+ * localized title, captured verbatim into the saved layout, and then could not
+ * be re-localized on restore, so the layout showed whichever locale created it.
+ */
+export function panelRegistryEntry(
+  id: string,
+  component?: string,
+): (typeof PANEL_REGISTRY)[string] | undefined {
+  return PANEL_REGISTRY[id] ?? (component ? PANEL_REGISTRY[component] : undefined);
+}
+
+/** The canonical English title stored in a saved layout, if the panel is known. */
+export function canonicalPanelTitle(id: string, component?: string): string | undefined {
+  return panelRegistryEntry(id, component)?.title;
+}
+
+/**
+ * Create a LayoutPanel from the registry by ID.
+ *
+ * The title is canonical English: a `LayoutPanel` is the shape that gets
+ * persisted, and `toSerializedDockview` localizes it when it reaches dockview.
+ */
 export function panel(id: string): LayoutPanel {
   const config = PANEL_REGISTRY[id];
   if (!config) throw new Error(`Unknown panel: ${id}`);
-  return { id, ...config };
+  const { titleKey: _titleKey, ...rest } = config;
+  return { id, ...rest };
 }
 
 /** Generate panel config for a session tab. */

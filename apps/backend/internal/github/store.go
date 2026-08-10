@@ -1690,6 +1690,31 @@ func (s *Store) ListTaskIDsByPRNumber(ctx context.Context, workspaceID string, p
 	return ids, nil
 }
 
+// ListTaskPRsByPRNumber returns the non-detached PR associations in a workspace
+// that point at one exact (owner, repo, pr_number). Workspace-scoped via the
+// JOIN on tasks — the same guard ListTaskIDsByPRNumber uses — so a PR number
+// shared across workspaces never reaches a caller holding only one workspace's
+// credentials. More than one row is normal: several tasks in a workspace can
+// legitimately link the same PR.
+func (s *Store) ListTaskPRsByPRNumber(
+	ctx context.Context, workspaceID, owner, repo string, prNumber int,
+) ([]*TaskPR, error) {
+	var prs []TaskPR
+	if err := s.ro.SelectContext(ctx, &prs,
+		`SELECT `+taskPRColumnsQualified+` FROM github_task_prs gtp
+		 INNER JOIN tasks t ON gtp.task_id = t.id
+		 WHERE t.workspace_id = ? AND gtp.owner = ? AND gtp.repo = ? AND gtp.pr_number = ?
+			 AND gtp.detached_at IS NULL
+		 ORDER BY gtp.created_at ASC`, workspaceID, owner, repo, prNumber); err != nil {
+		return nil, err
+	}
+	out := make([]*TaskPR, 0, len(prs))
+	for i := range prs {
+		out = append(out, &prs[i])
+	}
+	return out, nil
+}
+
 func groupTaskPRsByTask(prs []TaskPR) map[string][]*TaskPR {
 	result := make(map[string][]*TaskPR)
 	for i := range prs {

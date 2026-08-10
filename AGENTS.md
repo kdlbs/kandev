@@ -20,7 +20,7 @@ apps/
 - **Frontend**: Vite/React SPA (`cd apps && pnpm --filter @kandev/web dev|build:vite|lint`; for direct web typecheck use `cd apps/web && pnpm run typecheck`)
 - **Desktop**: Tauri shell (`cd apps && pnpm --filter @kandev/desktop build|e2e`; Rust tests from `apps/desktop/src-tauri`)
 - **UI**: Shadcn components via `@kandev/ui`
-- **E2E**: Playwright (`cd apps/web && pnpm e2e`). The `containers` project (gated on `KANDEV_E2E_CONTAINERS=1`, formerly `docker`) covers both the Docker executor and the SSH executor — anything that needs a real Docker daemon on the host lives there. See `apps/web/e2e/README.md`.
+- **E2E**: Playwright (`cd apps/web && pnpm e2e:raw`). The `containers` project (gated on `KANDEV_E2E_CONTAINERS=1`, formerly `docker`) covers both the Docker executor and the SSH executor — anything that needs a real Docker daemon on the host lives there. See `apps/web/e2e/README.md`.
 - **GitHub repo**: `https://github.com/kdlbs/kandev`
 - **Container image**: `ghcr.io/kdlbs/kandev` (GitHub Container Registry)
 
@@ -44,6 +44,15 @@ Architecture notes and per-area conventions live alongside the code they describ
 ---
 
 ## Best Practices
+
+### Engineering Principles
+
+- Choose the simplest implementation that fully meets the current requirements. Avoid speculative abstractions, configuration, and indirection.
+- Grow the system in layers. Start from the smallest version that works end to end, and add each new capability on top of a product that already works. Never trade a working product for unfinished complexity.
+- Keep components modular and concerns clearly separated.
+- Prefer established, well-maintained libraries when they reduce overall complexity or improve reliability. Do not reimplement common functionality without a clear reason.
+- Lean on the dependencies already in the project before writing your own implementation or adding packages. Do not assume a library lacks a capability without checking its documentation and types.
+- Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
 
 ### Commit Conventions (enforced by CI)
 
@@ -80,11 +89,11 @@ This is enforced, not just requested. Two ratchets, both of which only tighten:
   hardcoded string in a file you added, or on a line you changed, regardless of
   directory. Untouched lines are never judged, so you are never asked to migrate
   code you did not write.
-- **Migrated paths, whole file** — `i18next/no-literal-string` is a lint error for
+- **Listed paths, whole file** — `i18next/no-literal-string` is a lint error for
   the paths in `i18nGuardFiles` (`apps/web/eslint.i18n.options.mjs`). The
-  migration of existing strings proceeds **one directory per PR**: when you
-  migrate one, append it to that list in the same PR. Never remove an entry to
-  make a build pass — a check rejects that.
+  migration of existing strings is **complete**, and the list covers every area it
+  touched; append a path in the same PR that adds it or externalizes one still
+  off the list. Never remove an entry to make a build pass — a check rejects that.
 
 Three rules that cause silent, hard-to-find bugs when broken: never translate a
 string compared with `===` (type-to-confirm tokens become impossible to type);
@@ -210,7 +219,3 @@ When a change is scoped to a single subtree, update the scoped `AGENTS.md` inste
 ## Remote cloud environment
 
 For developing in ephemeral cloud VMs (Cursor Cloud, Codex, GitHub Codespaces, etc.), see [`docs/remote-cloud-environment.md`](docs/remote-cloud-environment.md) — covers runtime requirements, generated-file gotchas, dev-mode setup, key commands, and Firecracker-specific caveats.
-
----
-
-**Last Updated**: 2026-08-02

@@ -68,7 +68,7 @@ func TestRenameBranchForSessionUsesRepositoryScopedAgentctlOperation(t *testing.
 	execution := &AgentExecution{
 		ID:        "execution-1",
 		SessionID: "session-1",
-		Metadata:  map[string]interface{}{MetadataKeyWorktreeBranch: "feature/provisional-abc"},
+		metadata:  map[string]interface{}{MetadataKeyWorktreeBranch: "feature/provisional-abc"},
 		agentctl:  agentctlclient.NewClient(parsed.Hostname(), port, newTestLogger()),
 	}
 	store := NewExecutionStore()
@@ -87,7 +87,7 @@ func TestRenameBranchForSessionUsesRepositoryScopedAgentctlOperation(t *testing.
 	if got.NewName != "feature/final-title-abc" || got.Repo != "backend" {
 		t.Fatalf("request = %#v, want final branch and backend repo", got)
 	}
-	if gotBranch, _ := execution.Metadata[MetadataKeyWorktreeBranch].(string); gotBranch != "feature/provisional-abc" {
+	if gotBranch := execution.metadataString(MetadataKeyWorktreeBranch); gotBranch != "feature/provisional-abc" {
 		t.Fatalf("non-primary metadata branch = %q, want unchanged", gotBranch)
 	}
 }
@@ -108,7 +108,7 @@ func TestRenameBranchForSessionUpdatesPrimaryExecutionMetadata(t *testing.T) {
 	execution := &AgentExecution{
 		ID:        "execution-1",
 		SessionID: "session-1",
-		Metadata:  map[string]interface{}{MetadataKeyWorktreeBranch: "feature/provisional-abc"},
+		metadata:  map[string]interface{}{MetadataKeyWorktreeBranch: "feature/provisional-abc"},
 		agentctl:  agentctlclient.NewClient(parsed.Hostname(), port, newTestLogger()),
 	}
 	store := NewExecutionStore()
@@ -123,7 +123,7 @@ func TestRenameBranchForSessionUpdatesPrimaryExecutionMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenameBranchForSession returned error: %v", err)
 	}
-	if got, _ := execution.Metadata[MetadataKeyWorktreeBranch].(string); got != "feature/final-title-abc" {
+	if got := execution.metadataString(MetadataKeyWorktreeBranch); got != "feature/final-title-abc" {
 		t.Fatalf("primary metadata branch = %q, want final branch", got)
 	}
 	if writer.branch != "feature/final-title-abc" {
@@ -150,7 +150,7 @@ func TestRenameBranchForSessionReportsPrimarySnapshotFailure(t *testing.T) {
 	execution := &AgentExecution{
 		ID:        "execution-rotated",
 		SessionID: "session-rotated",
-		Metadata:  map[string]interface{}{MetadataKeyWorktreeBranch: "feature/provisional-abc"},
+		metadata:  map[string]interface{}{MetadataKeyWorktreeBranch: "feature/provisional-abc"},
 		agentctl:  agentctlclient.NewClient(parsed.Hostname(), port, newTestLogger()),
 	}
 	store := NewExecutionStore()
@@ -180,7 +180,7 @@ func TestRenameBranchForSessionReportsPrimarySnapshotFailure(t *testing.T) {
 	if result == nil || !result.Success {
 		t.Fatalf("result = %#v, want successful Git result", result)
 	}
-	if got, _ := execution.Metadata[MetadataKeyWorktreeBranch].(string); got != "feature/final-title-abc" {
+	if got := execution.metadataString(MetadataKeyWorktreeBranch); got != "feature/final-title-abc" {
 		t.Fatalf("primary metadata branch = %q, want final branch", got)
 	}
 }

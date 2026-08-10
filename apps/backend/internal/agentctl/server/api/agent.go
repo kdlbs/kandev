@@ -562,11 +562,22 @@ func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Messag
 					zap.Error(err))
 				return
 			}
-			s.logger.Error("async prompt failed", zap.Error(err))
+			providerError := acptransport.ProviderErrorFromError(err)
+			// The raw error string is only safe for the correlated stderr
+			// diagnostic (its Error() is the sanitized message). A structured
+			// ACP RequestError serializes its Data — including action_url and
+			// any other raw provider fields — into Error(), so when a safe
+			// provider diagnostic exists it must win for both the event and
+			// the log; never let the raw error cross the boundary.
+			message := err.Error()
+			if providerError != nil {
+				message = providerError.Message
+			}
+			s.logger.Error("async prompt failed", zap.String("error_message", message))
 			s.procMgr.SendErrorEventWithProviderError(
-				err.Error(),
+				message,
 				req.PromptGeneration,
-				acptransport.ProviderErrorFromError(err),
+				providerError,
 			)
 		}
 	}()

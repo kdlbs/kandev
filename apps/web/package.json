@@ -8,6 +8,7 @@
     "prebuild": "node scripts/generate-release-notes.mjs && node scripts/generate-changelog.mjs",
     "build": "vite build",
     "build:vite": "vite build",
+    "build:e2e": "cross-env KANDEV_I18N_BUNDLE_PSEUDO=1 pnpm run build",
     "start": "vite preview --host 0.0.0.0",
     "lint": "eslint --max-warnings 0",
     "lint:i18n": "eslint --config eslint.i18n.config.mjs",
@@ -15,7 +16,7 @@
     "typecheck": "tsc --noEmit",
     "pretest": "node scripts/generate-release-notes.mjs && node scripts/generate-changelog.mjs",
     "test": "vitest run",
-    "e2e": "playwright test --config e2e/playwright.config.ts",
+    "e2e:raw": "playwright test --config e2e/playwright.config.ts",
     "e2e:run": "e2e/scripts/run-e2e.sh",
     "e2e:docker": "e2e/scripts/run-e2e.sh --docker",
     "e2e:clean": "e2e/scripts/run-e2e.sh clean",
@@ -27,7 +28,8 @@
     "i18n:check": "node scripts/check-i18n-keys.mjs && node scripts/check-trans-indices.mjs && node scripts/check-inline-plurals.mjs && node scripts/check-module-scope-t.mjs",
     "i18n:ratchet": "node scripts/run-i18n-ratchet.mjs",
     "i18n:removed": "node scripts/check-removed-literals.mjs",
-    "i18n:sweep": "node scripts/i18n-sweep.mjs"
+    "i18n:sweep": "node scripts/i18n-sweep.mjs",
+    "i18n:parity": "node scripts/i18n-parity.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.0.0",

@@ -157,6 +157,7 @@ func provideGateway(
 		log,
 		orchestratorSvc,
 		taskSvc,
+		orchestratorSvc.SessionTaskID,
 		referenceValidator,
 	)
 	queueHandlers.SetAttachmentClaimer(taskSvc)
@@ -293,6 +294,9 @@ func provideGateway(
 					return "", fmt.Errorf("task %q not found", taskID)
 				}
 				return task.WorkspaceID, nil
+			},
+			CountQueuedPrompts: func(ctx context.Context, taskID string) (int, error) {
+				return orchestratorSvc.GetMessageQueue().CountPendingByTask(ctx, taskID)
 			},
 			Logger: log,
 		})

@@ -9,6 +9,7 @@ import {
   ContextMenuTrigger,
 } from "@kandev/ui/context-menu";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
+import { useTranslation } from "react-i18next";
 
 /** An item in the tab right-click context menu.
  *  Items are ephemeral — not serialized to the saved layout. */
@@ -27,6 +28,7 @@ export type TabContextMenuParams = {
  *  Always provides "Close Others". Panels may inject additional items via
  *  props.params.contextMenuItems. */
 export function ContextMenuTab(props: IDockviewPanelHeaderProps) {
+  const { t } = useTranslation();
   const { api, containerApi } = props;
   const onDoubleClick = useTabMaximizeOnDoubleClick(api);
 
@@ -54,7 +56,7 @@ export function ContextMenuTab(props: IDockviewPanelHeaderProps) {
             {item.label}
           </ContextMenuItem>
         ))}
-        <ContextMenuItem onSelect={handleCloseOthers}>Close Others</ContextMenuItem>
+        <ContextMenuItem onSelect={handleCloseOthers}>{t("task:closeOthers")}</ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
   );

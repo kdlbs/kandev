@@ -2,6 +2,22 @@ import { describe, expect, it } from "vitest";
 import { createAppStore, type AppState } from "./store";
 
 describe("createAppStore", () => {
+  it("hydrates and replaces the full agent runtime availability snapshot", () => {
+    const unavailable = {
+      status: "unavailable" as const,
+      reason: "agentctl_exited" as const,
+      occurred_at: "2026-08-08T14:22:52Z",
+    };
+    const available = { status: "available" as const };
+    const store = createAppStore({ agentRuntime: unavailable });
+
+    expect(store.getState().agentRuntime).toEqual(unavailable);
+
+    store.getState().setAgentRuntime(available);
+
+    expect(store.getState().agentRuntime).toEqual(available);
+  });
+
   it("retains sidebar boot settings after slice initialization", () => {
     const store = createAppStore({
       userSettings: {

@@ -10,6 +10,8 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/costs"
@@ -107,10 +109,11 @@ type TaskStatusChangedData struct {
 // taskless lifecycle events; the field is reserved for PR 2 of
 // office-heartbeat-rework.
 type AgentLifecycleData struct {
-	TaskID       string `json:"task_id"`
-	AgentID      string `json:"agent_id"`
-	SessionID    string `json:"session_id"`
-	ErrorMessage string `json:"error_message"`
+	TaskID        string                 `json:"task_id"`
+	AgentID       string                 `json:"agent_id"`
+	SessionID     string                 `json:"session_id"`
+	ErrorMessage  string                 `json:"error_message"`
+	ProviderError *streams.ProviderError `json:"provider_error,omitempty"`
 }
 
 type PromptUsageData struct {
@@ -454,14 +457,38 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 		"session_id":    data.SessionID,
 		"error_message": data.ErrorMessage,
 	})
-	if s.tryPostStartFallback(ctx, run, data.ErrorMessage) {
+	if s.tryPostStartFallback(ctx, run, data.ErrorMessage, data.ProviderError) {
 		return nil
 	}
 	// Office failure path (v1): every agent error is terminal. The
 	// retry-by-classifier path lives behind HandleRunFailure for
 	// rate-limit-retry callers; we deliberately do NOT call into it
 	// here. See docs/specs/office-agent-error-handling.
-	return s.HandleAgentFailure(ctx, run, data.ErrorMessage)
+	return s.HandleAgentFailure(ctx, run, enrichModelFailureMessage(run, data.ErrorMessage))
+}
+
+// enrichModelFailureMessage prepends the actionable "change the model" copy
+// when a run fails with a provider/model availability error in strict mode
+// (no auto-fallback toggle, no fallback model — the routing dispatcher
+// escalates instead of re-dispatching). The raw agent error is preserved
+// after the hint so the run detail and chat still show the original cause.
+func enrichModelFailureMessage(run *models.Run, message string) string {
+	if run == nil || run.ResolvedModel == nil || *run.ResolvedModel == "" || message == "" {
+		return message
+	}
+	provider := ""
+	if run.ResolvedProviderID != nil {
+		provider = *run.ResolvedProviderID
+	}
+	classified := routingerr.Classify(routingerr.Input{
+		Phase:      routingerr.PhaseStreaming,
+		ProviderID: provider,
+		Stderr:     message,
+	})
+	if !routingerr.IsAvailabilityCode(classified.Code) {
+		return message
+	}
+	return routingerr.ModelUnavailableMessage(*run.ResolvedModel) + "\n\n" + message
 }
 
 // tryPostStartFallback delegates to the routing dispatcher when one is
@@ -469,6 +496,7 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 // dispatcher requeued the run; the caller should NOT escalate.
 func (s *Service) tryPostStartFallback(
 	ctx context.Context, run *models.Run, errorMessage string,
+	providerError *streams.ProviderError,
 ) bool {
 	rd := s.routingDispatcher
 	if rd == nil {
@@ -483,7 +511,7 @@ func (s *Service) tryPostStartFallback(
 			zap.String("run_id", run.ID), zap.Error(err))
 		return false
 	}
-	handled, err := rd.HandlePostStartFailure(ctx, run, agent, errorMessage)
+	handled, err := rd.HandlePostStartFailure(ctx, run, agent, errorMessage, providerError)
 	if err != nil {
 		s.logger.Warn("post-start fallback failed",
 			zap.String("run_id", run.ID), zap.Error(err))

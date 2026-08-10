@@ -87,6 +87,7 @@ type UserSettings struct {
 	ShowScrollToLastPrompt          bool                              `json:"show_scroll_to_last_prompt"`
 	ShowScrollToStart               bool                              `json:"show_scroll_to_start"`
 	ShowTranscriptAutoScrollControl bool                              `json:"show_transcript_auto_scroll_control"`
+	ShowTodoListPanel               bool                              `json:"show_todo_list_panel"`
 	ShowReleaseNotification         bool                              `json:"show_release_notification"`
 	ReleaseNotesLastSeenVersion     string                            `json:"release_notes_last_seen_version"`
 	LspAutoStartLanguages           []string                          `json:"lsp_auto_start_languages"`
@@ -107,8 +108,9 @@ type UserSettings struct {
 	AzureDevOpsBrowsePreferences    json.RawMessage                   `json:"azure_devops_browse_preferences"`
 	DefaultUtilityAgentID           string                            `json:"default_utility_agent_id"` // Default inference agent for utility agents
 	DefaultUtilityModel             string                            `json:"default_utility_model"`    // Default model for utility agents
-	KeyboardShortcuts               map[string]interface{}            `json:"keyboard_shortcuts"`       // User-configured keyboard shortcut overrides
-	TerminalLinkBehavior            string                            `json:"terminal_link_behavior"`   // "new_tab" | "browser_panel"
+	DefaultUtilityAgentProfileID    string                            `json:"default_utility_agent_profile_id"`
+	KeyboardShortcuts               map[string]interface{}            `json:"keyboard_shortcuts"`     // User-configured keyboard shortcut overrides
+	TerminalLinkBehavior            string                            `json:"terminal_link_behavior"` // "new_tab" | "browser_panel"
 	TerminalFontFamily              string                            `json:"terminal_font_family"`
 	TerminalFontSize                int                               `json:"terminal_font_size"`
 	ChangesPanelLayout              string                            `json:"changes_panel_layout"` // "flat" | "tree"
@@ -201,8 +203,9 @@ type SidebarTaskPrefs struct {
 }
 
 type TaskCreateLastUsed struct {
-	RepositoryID      string `json:"repository_id"`
-	Branch            string `json:"branch"`
-	AgentProfileID    string `json:"agent_profile_id"`
-	ExecutorProfileID string `json:"executor_profile_id"`
+	RepositoryID           string            `json:"repository_id"`
+	Branch                 string            `json:"branch"`
+	AgentProfileID         string            `json:"agent_profile_id"`
+	ExecutorProfileID      string            `json:"executor_profile_id"`
+	WorkflowIDsByWorkspace map[string]string `json:"workflow_ids_by_workspace"`
 }

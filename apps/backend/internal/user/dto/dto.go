@@ -38,6 +38,7 @@ type UserSettingsDTO struct {
 	ShowScrollToLastPrompt          bool                                `json:"show_scroll_to_last_prompt"`
 	ShowScrollToStart               bool                                `json:"show_scroll_to_start"`
 	ShowTranscriptAutoScrollControl bool                                `json:"show_transcript_auto_scroll_control"`
+	ShowTodoListPanel               bool                                `json:"show_todo_list_panel"`
 	ShowReleaseNotification         bool                                `json:"show_release_notification"`
 	ReleaseNotesLastSeenVersion     string                              `json:"release_notes_last_seen_version"`
 	LspAutoStartLanguages           []string                            `json:"lsp_auto_start_languages"`
@@ -58,6 +59,7 @@ type UserSettingsDTO struct {
 	AzureDevOpsBrowsePreferences    json.RawMessage                     `json:"azure_devops_browse_preferences,omitempty"`
 	DefaultUtilityAgentID           string                              `json:"default_utility_agent_id"`
 	DefaultUtilityModel             string                              `json:"default_utility_model"`
+	DefaultUtilityAgentProfileID    string                              `json:"default_utility_agent_profile_id"`
 	KeyboardShortcuts               map[string]interface{}              `json:"keyboard_shortcuts,omitempty"`
 	TerminalLinkBehavior            string                              `json:"terminal_link_behavior"`
 	TerminalFontFamily              string                              `json:"terminal_font_family"`
@@ -107,6 +109,7 @@ type UpdateUserSettingsRequest struct {
 	ShowScrollToLastPrompt          *bool                              `json:"show_scroll_to_last_prompt,omitempty"`
 	ShowScrollToStart               *bool                              `json:"show_scroll_to_start,omitempty"`
 	ShowTranscriptAutoScrollControl *bool                              `json:"show_transcript_auto_scroll_control,omitempty"`
+	ShowTodoListPanel               *bool                              `json:"show_todo_list_panel,omitempty"`
 	ShowReleaseNotification         *bool                              `json:"show_release_notification,omitempty"`
 	ReleaseNotesLastSeenVersion     *string                            `json:"release_notes_last_seen_version,omitempty"`
 	LspAutoStartLanguages           *[]string                          `json:"lsp_auto_start_languages,omitempty"`
@@ -127,6 +130,7 @@ type UpdateUserSettingsRequest struct {
 	AzureDevOpsBrowsePreferences    NullableRawMessage                 `json:"azure_devops_browse_preferences,omitempty"`
 	DefaultUtilityAgentID           *string                            `json:"default_utility_agent_id,omitempty"`
 	DefaultUtilityModel             *string                            `json:"default_utility_model,omitempty"`
+	DefaultUtilityAgentProfileID    *string                            `json:"default_utility_agent_profile_id,omitempty"`
 	KeyboardShortcuts               *map[string]interface{}            `json:"keyboard_shortcuts,omitempty"`
 	TerminalLinkBehavior            *string                            `json:"terminal_link_behavior,omitempty"`
 	TerminalFontFamily              *string                            `json:"terminal_font_family,omitempty"`
@@ -237,6 +241,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		ShowScrollToLastPrompt:          settings.ShowScrollToLastPrompt,
 		ShowScrollToStart:               settings.ShowScrollToStart,
 		ShowTranscriptAutoScrollControl: settings.ShowTranscriptAutoScrollControl,
+		ShowTodoListPanel:               settings.ShowTodoListPanel,
 		ShowReleaseNotification:         settings.ShowReleaseNotification,
 		ReleaseNotesLastSeenVersion:     settings.ReleaseNotesLastSeenVersion,
 		LspAutoStartLanguages:           settings.LspAutoStartLanguages,
@@ -257,6 +262,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		AzureDevOpsBrowsePreferences:    settings.AzureDevOpsBrowsePreferences,
 		DefaultUtilityAgentID:           settings.DefaultUtilityAgentID,
 		DefaultUtilityModel:             settings.DefaultUtilityModel,
+		DefaultUtilityAgentProfileID:    settings.DefaultUtilityAgentProfileID,
 		KeyboardShortcuts:               settings.KeyboardShortcuts,
 		TerminalLinkBehavior:            settings.TerminalLinkBehavior,
 		TerminalFontFamily:              settings.TerminalFontFamily,

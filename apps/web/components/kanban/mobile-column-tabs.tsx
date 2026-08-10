@@ -212,7 +212,7 @@ export function MobileColumnTabs({
     workflowNavigation?.workflows.find(
       (workflow) => workflow.id === workflowNavigation.activeWorkflowId,
     ) ?? workflowNavigation?.workflows[0];
-  const stepLabel = activeStep?.title ?? "No steps configured";
+  const stepLabel = activeStep?.title ?? t("task:noStepsConfigured");
 
   const selectStep = (index: number) => {
     onColumnChange(index);

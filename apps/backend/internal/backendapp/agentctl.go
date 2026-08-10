@@ -22,14 +22,21 @@ type agentctlLauncherResult struct {
 // for agent execution on the host machine.
 // If the configured port is unavailable, the launcher may fall back to an OS-assigned
 // port. In that case, cfg.Agent.StandalonePort is updated to reflect the actual port.
-func provideAgentctlLauncher(ctx context.Context, cfg *config.Config, log *logger.Logger) (*agentctlLauncherResult, error) {
+func provideAgentctlLauncher(
+	ctx context.Context,
+	cfg *config.Config,
+	log *logger.Logger,
+	availability *agentctlclient.Availability,
+) (*agentctlLauncherResult, error) {
 	l, cleanup, err := launcher.Provide(ctx, launcher.Config{
-		Host: cfg.Agent.StandaloneHost,
-		Port: cfg.Agent.StandalonePort,
+		Host:             cfg.Agent.StandaloneHost,
+		Port:             cfg.Agent.StandalonePort,
+		OnUnexpectedExit: availability.MarkUnavailable,
 	}, log)
 	if err != nil {
 		return nil, err
 	}
+	availability.MarkAvailable()
 	// Update config with the actual port (may differ if fallback was used)
 	if actualPort := l.Port(); actualPort != cfg.Agent.StandalonePort {
 		log.Info("agentctl port changed from configured value",

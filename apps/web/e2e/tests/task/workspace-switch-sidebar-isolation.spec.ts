@@ -116,7 +116,14 @@ test.describe("Sidebar — cross-workspace isolation", () => {
       timeout: 10_000,
     });
     await expect(session.sidebar.getByText("Workspace A Task", { exact: true })).toHaveCount(0);
-    await expect(session.sidebar.getByTestId("sidebar-repo-group-Unassigned")).toHaveCount(0);
+    // `sidebar-repo-group-Unassigned` was never a real testid, so this assertion
+    // was passing on nothing. The group header carries `data-group-key`, the
+    // untranslated identity — the label beside it is catalog-backed.
+    await expect(
+      session.sidebar.locator(
+        "[data-testid='sidebar-group-header'][data-group-key='__unassigned__']",
+      ),
+    ).toHaveCount(0);
 
     await gotoTaskList(testPage);
     await expect(taskInList(testPage, "Workspace B Task")).toBeVisible({ timeout: 10_000 });

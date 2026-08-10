@@ -7,7 +7,7 @@ import { transformPathsInText } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
 import { ShellOutputDisclosure } from "./shell-output-disclosure";
 import { normalizeToolCallStatus } from "./tool-status";
-import type { ToolCallMetadata } from "../types";
+import { hasProjectedShellOutput, type ToolCallMetadata } from "../types";
 import { useTranslation } from "react-i18next";
 
 type ToolExecuteMessageProps = {
@@ -89,12 +89,14 @@ export const ToolExecuteMessage = memo(function ToolExecuteMessage({
             </span>
           </div>
         )}
-        <ShellOutputDisclosure
-          sessionId={comment.session_id}
-          messageId={comment.id}
-          messageStatus={status}
-          summary={shellExec?.output}
-        />
+        {hasProjectedShellOutput(shellExec?.output) && (
+          <ShellOutputDisclosure
+            sessionId={comment.session_id}
+            messageId={comment.id}
+            messageStatus={status}
+            summary={shellExec?.output}
+          />
+        )}
       </div>
     </div>
   );

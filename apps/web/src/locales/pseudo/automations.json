@@ -104,7 +104,7 @@
   "prTriggerRepositoryHelp": "ƤŔ ţŕĩĝĝēŕś àĺŵàŷś ũśē ţĥē ƤŔ'ś ōŵń ŕēƥōśĩţōŕŷ.",
   "pushTriggerHelp": "Ţŕĩĝĝēŕś ŵĥēń ćōďē ĩś ƥũśĥēď ţō ḿàţćĥĩńĝ ƀŕàńćĥēś",
   "recentRuns": "Ŕēćēńţ ŕũńś",
-  "recentRuns_one": "Ŕēćēńţ Ŕũńś ({{count}})",
+  "recentRuns_one": "Ŕēćēńţ Ŕũń ({{count}})",
   "recentRuns_other": "Ŕēćēńţ Ŕũńś ({{count}})",
   "refresh": "Ŕēƒŕēśĥ",
   "removeRepository": "Ŕēḿōvē ŕēƥōśĩţōŕŷ",

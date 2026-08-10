@@ -379,6 +379,7 @@ export function hydrateState(
   // subset they fetched, so use the same leaf-level deepMerge as the other
   // multi-field slices above rather than overwriting the whole object.
   if (state.system) deepMerge(draft.system, state.system);
+  if (state.agentRuntime !== undefined) draft.agentRuntime = state.agentRuntime;
 }
 
 /** Hydrate GitHub slices, preserving loading states. */

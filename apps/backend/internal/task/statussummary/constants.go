@@ -6,6 +6,9 @@ const (
 	pendingPermission    = "permission"
 	pendingClarification = "clarification"
 
+	messageTypeClarificationRequest = "clarification_request"
+	messageTypePermissionRequest    = "permission_request"
+
 	activityBackground = "background"
 	activityGenerating = "generating"
 

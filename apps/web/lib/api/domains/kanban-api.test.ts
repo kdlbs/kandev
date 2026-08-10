@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { attachTaskWorkspaceSources, detachTask, listTasksByWorkspace } from "./kanban-api";
+import {
+  attachTaskWorkspaceSources,
+  detachTask,
+  listTasksByWorkspace,
+  updateTaskPortForwarding,
+} from "./kanban-api";
 
 const fetchSpy = vi.fn<typeof fetch>();
 const API_BASE_URL = "http://api.test";
@@ -27,6 +32,33 @@ describe("detachTask", () => {
     expect(url).toBe(`${API_BASE_URL}/api/v1/tasks/child-1/detach`);
     expect(init?.method).toBe("POST");
     expect(init?.body).toBeUndefined();
+  });
+});
+
+describe("updateTaskPortForwarding", () => {
+  it("patches only the task-scoped preference endpoint", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ id: "task-1", metadata: { port_forwarding_enabled: true } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await expect(
+      updateTaskPortForwarding("task-1", true, { baseUrl: API_BASE_URL }),
+    ).resolves.toMatchObject({
+      id: "task-1",
+      metadata: { port_forwarding_enabled: true },
+    });
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe(`${API_BASE_URL}/api/v1/tasks/task-1/port-forwarding`);
+    expect(init).toMatchObject({
+      method: "PATCH",
+      body: JSON.stringify({ enabled: true }),
+    });
+    expect(new Headers(init?.headers).get("Content-Type")).toBe("application/json");
   });
 });
 

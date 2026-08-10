@@ -823,7 +823,7 @@ func (s *Service) updateBranchSwitchWorktreeSnapshot(ctx context.Context, sessio
 	return s.persistBranchSwitchWorktrees(ctx, scoped, sessionID, branch, matched)
 }
 
-func matchingBranchSwitchWorktrees(worktrees []*models.TaskSessionWorktree, repositoryName string) map[string]string {
+func matchingBranchSwitchWorktrees(worktrees []*models.TaskEnvironmentRepo, repositoryName string) map[string]string {
 	matched := make(map[string]string)
 	for _, worktree := range worktrees {
 		if worktree == nil || worktree.RepositoryID == "" {

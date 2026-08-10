@@ -38,7 +38,7 @@ test.describe("Workflow settings on mobile", () => {
     await settings.tap();
     await testPage.getByText("Mock Smart", { exact: true }).tap();
     await testPage.getByTestId("config-option-trigger-effort").tap();
-    await testPage.getByRole("button", { name: "High", exact: true }).tap();
+    await testPage.getByRole("button", { name: "Max", exact: true }).tap();
     await testPage.keyboard.press("Escape");
     await prCapture.screenshot("mobile-original-session-editor", {
       caption: "Mobile workflow step editor with touch-sized original-session controls.",
@@ -65,7 +65,7 @@ test.describe("Workflow settings on mobile", () => {
           {
             operation: "set",
             model: "mock-smart",
-            config_options: { effort: "high" },
+            config_options: { effort: "max" },
           },
         ],
       },

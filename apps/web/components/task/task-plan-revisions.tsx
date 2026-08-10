@@ -20,6 +20,8 @@ import { AgentLogo } from "@/components/agent-logo";
 import { useAppStore } from "@/components/state-provider";
 import { PlanRevisionPreviewDialog } from "./task-plan-preview-dialog";
 import { PlanRevisionDiffDialog } from "./task-plan-diff-dialog";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 type ComparePair = [string | null, string | null];
 
@@ -45,7 +47,8 @@ type TaskPlanRevisionsProps = {
 
 /** Label rendered in the UI for any user-authored revision. Display-only —
  * the backend still stamps its own author_name on the row. */
-const USER_DISPLAY_NAME = "You";
+/** Catalog key, not copy — resolving at module scope freezes the locale. */
+const USER_DISPLAY_NAME_KEY = "common:you";
 
 export function TaskPlanRevisions(props: TaskPlanRevisionsProps) {
   const [open, setOpen] = useState(false);
@@ -128,6 +131,7 @@ function RevisionsPopover({
   agentName: string | null;
   confirmTargetSetter: (rev: TaskPlanRevision | null) => void;
 }) {
+  const { t } = useTranslation();
   const hasRevisions = revisions.length > 0;
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
@@ -138,7 +142,7 @@ function RevisionsPopover({
           className="h-7 w-7 cursor-pointer"
           disabled={disabled || !hasRevisions}
           data-testid="plan-rewind-button"
-          title="View plan history"
+          title={t("task:viewPlanHistory")}
         >
           <IconHistory className="h-4 w-4" />
         </Button>
@@ -151,7 +155,7 @@ function RevisionsPopover({
         data-testid="plan-revisions-popover"
       >
         <div className="flex items-center justify-between px-3 py-2 border-b">
-          <span className="text-sm font-medium">Plan history</span>
+          <span className="text-sm font-medium">{t("task:planHistory")}</span>
           {isLoading && <IconLoader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
         </div>
         {/* Plain overflow-y-auto is more reliable than ScrollArea inside a Popover
@@ -206,6 +210,7 @@ function RevisionsDialogStack({
   toggleCompareSelection,
   closePopover,
 }: DialogStackProps) {
+  const { t } = useTranslation();
   const isPreviewCurrent = previewRevision !== null && previewRevision.id === headRevision?.id;
   const previousRevision = useMemo(() => {
     if (!previewRevision) return null;
@@ -219,7 +224,7 @@ function RevisionsDialogStack({
       try {
         const result = await onRevert(revision.id);
         if (result) {
-          toast.success(`Plan restored to v${revision.revision_number}`);
+          toast.success(t("task:planRestoredToV", { revisionnumber: revision.revision_number }));
           closePopover();
           setPreviewRevision(null);
           setDiffOpen(false);
@@ -227,10 +232,10 @@ function RevisionsDialogStack({
           // `revertTo` (the hook impl) swallows errors and returns null, so
           // we surface the failure here too — without this branch the dialog
           // closes silently on failure and the user has no feedback.
-          toast.error("Failed to restore plan");
+          toast.error(t("task:failedToRestorePlan"));
         }
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to restore plan");
+        toast.error(err instanceof Error ? err.message : t("task:failedToRestorePlan"));
       }
     },
     [onRevert, setPreviewRevision, setDiffOpen, closePopover],
@@ -264,7 +269,7 @@ function RevisionsDialogStack({
         // Remount on revision change so loader state resets without setState-in-effect.
         key={`preview-${previewRevision?.id ?? "none"}`}
         revision={previewRevision}
-        authorLabel={previewRevision ? authorLabel(previewRevision) : ""}
+        authorLabel={previewRevision ? authorLabel(previewRevision, t) : ""}
         loadContent={loadRevisionContent}
         onClose={() => setPreviewRevision(null)}
         onRestore={() => {
@@ -304,9 +309,9 @@ function RevisionsDialogStack({
 
 /** Display label for an author. User revisions always render as "You";
  * agent revisions use the stored author_name (the agent profile display name). */
-function authorLabel(revision: TaskPlanRevision): string {
-  if (revision.author_kind === "user") return USER_DISPLAY_NAME;
-  return revision.author_name || "Agent";
+function authorLabel(revision: TaskPlanRevision, t: TFunction): string {
+  if (revision.author_kind === "user") return t(USER_DISPLAY_NAME_KEY);
+  return revision.author_name || t("common:agent");
 }
 
 /** Resolve the active session's agent backend name (e.g. "claude", "codex") so
@@ -336,10 +341,11 @@ function RevisionList({
   onRevertClick: (rev: TaskPlanRevision) => void;
   onRowClick: (rev: TaskPlanRevision) => void;
 }) {
+  const { t } = useTranslation();
   if (revisions.length === 0 && !isLoading) {
     return (
       <div className="px-3 py-6 text-xs text-muted-foreground text-center">
-        No revisions yet. Edits will appear here.
+        {t("task:noRevisionsYetEditsWillAppear")}
       </div>
     );
   }
@@ -366,6 +372,7 @@ function RevisionAuthor({
   revision: TaskPlanRevision;
   agentName: string | null;
 }) {
+  const { t } = useTranslation();
   if (revision.author_kind === "agent") {
     return (
       <>
@@ -380,7 +387,7 @@ function RevisionAuthor({
     <>
       <IconUser className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
       <span className="text-xs text-foreground truncate" data-testid="plan-revision-author">
-        {USER_DISPLAY_NAME}
+        {t(USER_DISPLAY_NAME_KEY)}
       </span>
     </>
   );
@@ -399,6 +406,7 @@ function RevisionRow({
   onRevertClick: (rev: TaskPlanRevision) => void;
   onRowClick: (rev: TaskPlanRevision) => void;
 }) {
+  const { t } = useTranslation();
   // Force re-render every 30s so the precise timestamp ("5m ago", "Today,
   // 14:32", …) refreshes as the revision ages — `formatPreciseTime` derives
   // from `revision.updated_at` on every render.
@@ -434,7 +442,7 @@ function RevisionRow({
               className="h-4 text-[10px] px-1.5"
               data-testid="plan-revision-current-badge"
             >
-              current
+              {t("task:current")}
             </Badge>
           )}
         </div>
@@ -447,7 +455,7 @@ function RevisionRow({
             data-testid="plan-revision-revert-marker"
           >
             <IconRestore className="h-3 w-3" />
-            restored from earlier version
+            {t("task:restoredFromEarlierVersion")}
           </div>
         )}
       </button>
@@ -463,7 +471,7 @@ function RevisionRow({
           data-testid="plan-revision-revert-button"
         >
           <IconRestore className="h-3.5 w-3.5" />
-          Restore
+          {t("task:restore")}
         </Button>
       )}
     </li>
@@ -481,6 +489,7 @@ function RevertConfirmDialog({
   onCancel: () => void;
   onConfirm: () => void | Promise<void>;
 }): ReactNode {
+  const { t } = useTranslation();
   const open = target !== null;
   return (
     <Dialog
@@ -491,10 +500,11 @@ function RevertConfirmDialog({
     >
       <DialogContent data-testid="plan-revert-confirm-dialog">
         <DialogHeader>
-          <DialogTitle>Restore to version {target?.revision_number}?</DialogTitle>
+          <DialogTitle>
+            {t("task:restoreToVersionConfirm", { version: target?.revision_number })}
+          </DialogTitle>
           <DialogDescription>
-            This creates a new version with v{target?.revision_number}&#39;s content. Nothing is
-            lost; the current version stays in history.
+            {t("task:restoreToVersionDescription", { version: target?.revision_number })}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
@@ -505,7 +515,7 @@ function RevertConfirmDialog({
             className="cursor-pointer"
             data-testid="plan-revert-confirm-cancel"
           >
-            Cancel
+            {t("common:cancel")}
           </Button>
           <Button
             onClick={onConfirm}
@@ -513,7 +523,7 @@ function RevertConfirmDialog({
             className="cursor-pointer"
             data-testid="plan-revert-confirm-ok"
           >
-            {isSaving ? "Restoring..." : "Restore"}
+            {isSaving ? t("task:restoring") : t("task:restore")}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -464,6 +464,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"showScrollToLastPrompt":          settings.ShowScrollToLastPrompt,
 		"showScrollToStart":               settings.ShowScrollToStart,
 		"showTranscriptAutoScrollControl": settings.ShowTranscriptAutoScrollControl,
+		"showTodoListPanel":               settings.ShowTodoListPanel,
 		"showReleaseNotification":         settings.ShowReleaseNotification,
 		"releaseNotesLastSeenVersion":     nullString(settings.ReleaseNotesLastSeenVersion),
 		"lspAutoStartLanguages":           stringSlice(settings.LspAutoStartLanguages),
@@ -572,6 +573,7 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 		"primarySessionState":         task.PrimarySessionState,
 		"primarySessionPendingAction": task.PrimarySessionPendingAction,
 		"taskPendingAction":           task.TaskPendingAction,
+		"interrupted":                 task.Interrupted,
 		"statusSummary":               task.StatusSummary,
 		"sessionCount":                task.SessionCount,
 		"reviewStatus":                nullString(string(task.ReviewStatus)),
@@ -627,12 +629,18 @@ func mapAppStatusBarOrder(order usermodels.AppStatusBarOrder) map[string]any {
 }
 
 func mapTaskCreateLastUsed(value usermodels.TaskCreateLastUsed) map[string]any {
+	workflowIDsByWorkspace := value.WorkflowIDsByWorkspace
+	if workflowIDsByWorkspace == nil {
+		workflowIDsByWorkspace = map[string]string{}
+	}
 	return map[string]any{
-		"repositoryId":      nullString(value.RepositoryID),
-		"branch":            nullString(value.Branch),
-		"agentProfileId":    nullString(value.AgentProfileID),
-		"executorProfileId": nullString(value.ExecutorProfileID),
-		"synced":            value.RepositoryID != "" || value.Branch != "" || value.AgentProfileID != "" || value.ExecutorProfileID != "",
+		"repositoryId":           nullString(value.RepositoryID),
+		"branch":                 nullString(value.Branch),
+		"agentProfileId":         nullString(value.AgentProfileID),
+		"executorProfileId":      nullString(value.ExecutorProfileID),
+		"workflowIdsByWorkspace": workflowIDsByWorkspace,
+		"synced": value.RepositoryID != "" || value.Branch != "" || value.AgentProfileID != "" ||
+			value.ExecutorProfileID != "" || len(workflowIDsByWorkspace) > 0,
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -79,6 +80,38 @@ func TestHandleTransientFailure_SchedulesRetryAndEmitsWarning(t *testing.T) {
 	actions, ok := msg.metadata["actions"].([]map[string]interface{})
 	if !ok || actionByTestID(actions, recoveryCancelRetryButtonTestID) == nil {
 		t.Errorf("expected a cancel action with test_id %q, got %v", recoveryCancelRetryButtonTestID, msg.metadata["actions"])
+	}
+}
+
+func TestHandleTransientFailure_ModelCapacityUsesProviderNeutralPolicy(t *testing.T) {
+	svc, mc := newTransientTestService(t)
+	t.Cleanup(svc.cancelAllTransientRetries)
+
+	took := svc.handleTransientFailure(context.Background(), watcher.AgentEventData{
+		TaskID:       "t1",
+		SessionID:    "s1",
+		AgentID:      "codex-acp",
+		ErrorMessage: "Selected model is at capacity. Please try a different model.",
+	})
+	if !took {
+		t.Fatal("model-capacity failure was not owned by the Kanban short-retry policy")
+	}
+	if len(mc.sessionMessages) != 1 {
+		t.Fatalf("status messages = %d, want 1", len(mc.sessionMessages))
+	}
+	meta := mc.sessionMessages[0].metadata
+	if meta["failure_code"] != "model_capacity" {
+		t.Fatalf("failure_code = %v, want model_capacity", meta["failure_code"])
+	}
+	retryAt, ok := meta["retry_at"].(string)
+	if !ok || retryAt == "" {
+		t.Fatalf("retry_at = %v, want absolute retry deadline", meta["retry_at"])
+	}
+	if _, err := time.Parse(time.RFC3339Nano, retryAt); err != nil {
+		t.Fatalf("retry_at = %q is not RFC3339Nano: %v", retryAt, err)
+	}
+	if strings.Contains(mc.sessionMessages[0].content, "Selected model") {
+		t.Fatal("status content must not copy raw provider evidence")
 	}
 }
 
@@ -485,14 +518,33 @@ func TestTransientRetryDelay(t *testing.T) {
 	}{
 		{0, 5 * time.Second}, // clamps up
 		{1, 5 * time.Second},
-		{2, 15 * time.Second},
-		{3, 30 * time.Second},
-		{4, 30 * time.Second}, // clamps to last
+		{2, 10 * time.Second},
+		{3, 20 * time.Second},
+		{4, 40 * time.Second},
+		{5, 60 * time.Second},
+		{6, 60 * time.Second}, // clamps to last
 	}
 	for _, tc := range cases {
 		if got := transientRetryDelay(tc.attempt); got != tc.want {
 			t.Errorf("transientRetryDelay(%d) = %v, want %v", tc.attempt, got, tc.want)
 		}
+	}
+}
+
+func TestTransientRetryDelayHonorsShortProviderReset(t *testing.T) {
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	resetAt := now.Add(17 * time.Second)
+	classified := &routingerr.Error{
+		Code:      routingerr.CodeRateLimited,
+		ResetHint: &resetAt,
+	}
+	if got := transientRetryDelayFor(classified, 1, now); got != 17*time.Second {
+		t.Fatalf("delay = %v, want provider reset delay", got)
+	}
+	longReset := now.Add(2 * time.Minute)
+	classified.ResetHint = &longReset
+	if got := transientRetryDelayFor(classified, 2, now); got != 10*time.Second {
+		t.Fatalf("delay with long reset = %v, want local ladder", got)
 	}
 }
 

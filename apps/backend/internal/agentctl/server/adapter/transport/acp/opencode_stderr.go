@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"go.uber.org/zap"
 )
@@ -40,13 +41,52 @@ func (e *providerPromptError) Error() string {
 
 // ProviderErrorFromError extracts the safe provider diagnostic from a prompt
 // error without exposing the provider-specific wrapper to lifecycle callers.
+// It first unwraps the correlated stderr diagnostic; for a structured ACP
+// service-failure it reads only the explicit `action_url` field and the safe
+// message — never the raw error string.
 func ProviderErrorFromError(err error) *streams.ProviderError {
 	var providerErr *providerPromptError
-	if !errors.As(err, &providerErr) || providerErr == nil || !providerErr.ProviderError.Valid() {
+	if errors.As(err, &providerErr) && providerErr != nil && providerErr.ProviderError.Valid() {
+		copy := providerErr.ProviderError
+		return &copy
+	}
+	return providerErrorFromACPActionURL(err)
+}
+
+// providerErrorFromACPActionURL projects a future ACP service-failure
+// response that carries a structured `action_url` into a provider diagnostic.
+// The URL must pass the shared allowlist; the message runs through the same
+// sanitizer as stderr so it stays URL-free and identifier-redacted.
+//
+// The contract is intentionally URL-gated: a message-only ACP error (no
+// valid `action_url`) falls through to the generic error path rather than
+// surfacing an unsanitized ACP message, matching the stderr diagnostic's
+// bounded-message rule. OpenCode's current ACP failures therefore keep the
+// existing short-error fallback.
+func providerErrorFromACPActionURL(err error) *streams.ProviderError {
+	var reqErr *acp.RequestError
+	if !errors.As(err, &reqErr) || reqErr == nil {
 		return nil
 	}
-	copy := providerErr.ProviderError
-	return &copy
+	data, ok := reqErr.Data.(map[string]any)
+	if !ok {
+		return nil
+	}
+	rawURL, _ := data["action_url"].(string)
+	remediationURL := NormalizeOpenCodeActionURL(rawURL)
+	if remediationURL == "" {
+		return nil
+	}
+	message := sanitizeOpenCodeMessage(reqErr.Message)
+	if message == "" {
+		return nil
+	}
+	return &streams.ProviderError{
+		Source:         streams.ProviderErrorSourceOpenCodeACP,
+		Message:        message,
+		RemediationURL: remediationURL,
+		OccurredAt:     time.Now(),
+	}
 }
 
 // ConsumeStderrLine implements adapter.StderrLineConsumer. OpenCode's
@@ -98,6 +138,14 @@ func parseOpenCodeStderrLine(line string) (openCodeStderrDiagnostic, bool) {
 	if !safeOpenCodeIdentifier(sessionID, "ses_") {
 		return openCodeStderrDiagnostic{}, false
 	}
+	// Capture the allowlisted remediation URL before sanitization. OpenCode may
+	// carry it in a dedicated `action_url` field or inline in the provider
+	// error text; either way only the shared validator accepts it, and the
+	// sanitized message never contains the URL or workspace identifier.
+	remediationURL := NormalizeOpenCodeActionURL(fields["action_url"])
+	if remediationURL == "" {
+		remediationURL = extractOpenCodeActionURL(fields["error.error"])
+	}
 	message := sanitizeOpenCodeMessage(fields["error.error"])
 	if message == "" {
 		return openCodeStderrDiagnostic{}, false
@@ -108,11 +156,12 @@ func parseOpenCodeStderrLine(line string) (openCodeStderrDiagnostic, bool) {
 	}
 
 	providerError := streams.ProviderError{
-		Source:     streams.ProviderErrorSourceOpenCodeStderr,
-		ProviderID: safeOpenCodeField(fields["providerID"]),
-		ModelID:    safeOpenCodeField(fields["modelID"]),
-		Message:    message,
-		OccurredAt: occurredAt,
+		Source:         streams.ProviderErrorSourceOpenCodeStderr,
+		ProviderID:     safeOpenCodeField(fields["providerID"]),
+		ModelID:        safeOpenCodeField(fields["modelID"]),
+		Message:        message,
+		RemediationURL: remediationURL,
+		OccurredAt:     occurredAt,
 	}
 	if resetAt := openCodeResetAt(message, occurredAt); resetAt != nil {
 		providerError.ResetAt = resetAt

@@ -39,6 +39,18 @@ func (statusSummaryRebuildActivityProvider) ForegroundActivity(string) v1.Foregr
 
 func (statusSummaryRebuildActivityProvider) ActiveSubagentCount(string) int { return 3 }
 
+type statusSummaryQueuedPromptCounter struct {
+	counts map[string]int
+}
+
+func (c statusSummaryQueuedPromptCounter) CountPendingByTaskIDs(_ context.Context, taskIDs []string) (map[string]int, error) {
+	out := make(map[string]int, len(taskIDs))
+	for _, id := range taskIDs {
+		out[id] = c.counts[id]
+	}
+	return out, nil
+}
+
 func TestHydrateMissingTaskStatusSummariesRepairsExistingTaskOnce(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
@@ -84,6 +96,7 @@ func TestHydrateMissingTaskStatusSummariesRepairsExistingTaskOnce(t *testing.T) 
 	svc.SetForegroundActivityProvider(statusSummaryRebuildActivityProvider{})
 	prReader := &statusSummaryRebuildPRReader{}
 	svc.SetTaskStatusSummaryPRReader(prReader)
+	svc.SetQueuedPromptCounter(statusSummaryQueuedPromptCounter{counts: map[string]int{"task-1": 2}})
 	task := &models.Task{ID: "task-1", WorkspaceID: "ws-1"}
 	sessions := map[string][]*models.TaskSession{task.ID: {session}}
 	pending := map[string]models.TaskPendingAction{session.ID: models.TaskPendingActionPermission}
@@ -116,6 +129,9 @@ func TestHydrateMissingTaskStatusSummariesRepairsExistingTaskOnce(t *testing.T) 
 	if summary.PullRequest == nil || summary.PullRequest.Number != 42 || summary.PullRequest.AggregateState != "ready" {
 		t.Fatalf("pull request summary = %+v", summary.PullRequest)
 	}
+	if summary.QueuedPromptCount != 2 {
+		t.Fatalf("queued prompt count = %d, want 2 from the queued counter", summary.QueuedPromptCount)
+	}
 	if prReader.calls != 1 {
 		t.Fatalf("PR reader calls = %d, want one batch read", prReader.calls)
 	}
@@ -133,5 +149,52 @@ func TestHydrateMissingTaskStatusSummariesRepairsExistingTaskOnce(t *testing.T) 
 	}
 	if prReader.calls != 1 {
 		t.Fatalf("PR reader calls after existing summary = %d, want one", prReader.calls)
+	}
+}
+
+// The rebuild path is what runs after a restart, so it is where a stale record
+// used to come back. A session whose error was cleared must rebuild clean.
+func TestHydrateMissingTaskStatusSummariesSkipsClearedAgentErrors(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+
+	session := &models.TaskSession{
+		ID:        "session-1",
+		TaskID:    "task-1",
+		State:     models.TaskSessionStateWaitingForInput,
+		IsPrimary: true,
+	}
+	if err := repo.CreateTaskSession(ctx, session); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	// The orchestrator writes JSON null on turn completion rather than deleting
+	// the key, so the rebuild must treat that as "no failure".
+	if err := repo.SetSessionMetadataKey(ctx, session.ID, models.SessionMetaKeyLastAgentError, nil); err != nil {
+		t.Fatalf("clear last agent error: %v", err)
+	}
+	stored, err := repo.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+
+	svc.statusSummaries = repo
+	task := &models.Task{ID: "task-1", WorkspaceID: "ws-1"}
+	got, err := svc.HydrateMissingTaskStatusSummaries(
+		ctx,
+		[]*models.Task{task},
+		map[string][]*models.TaskSession{task.ID: {stored}},
+		map[string]models.TaskPendingAction{},
+		map[string]*statussummary.TaskStatusSummary{},
+	)
+	if err != nil {
+		t.Fatalf("HydrateMissingTaskStatusSummaries: %v", err)
+	}
+	summary := got[task.ID]
+	if summary == nil {
+		t.Fatal("repaired summary missing from returned map")
+	}
+	if summary.ActiveError != nil {
+		t.Fatalf("active error = %+v, want a cleared record to stay invisible", summary.ActiveError)
 	}
 }

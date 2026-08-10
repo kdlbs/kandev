@@ -444,6 +444,7 @@ func spriteCreateInstanceRequest(req *ExecutorCreateRequest) agentctl.CreateInst
 		McpServers:          req.McpServers,
 		McpMode:             req.McpMode,
 		McpProviders:        req.McpProviders,
+		McpProfile:          req.McpProfile,
 		RequiresProcessKill: requiresProcessKillFromReq(req),
 		StripEnv:            stripEnvFromReq(req),
 		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),

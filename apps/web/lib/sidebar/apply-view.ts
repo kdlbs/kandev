@@ -1,6 +1,7 @@
 import { classifyTask, type TaskBucket } from "@/components/task/task-classify";
 import type { TaskSwitcherItem } from "@/components/task/task-switcher";
 import { getExecutorLabel } from "@/lib/executor-icons";
+import { t } from "@/lib/i18n";
 import { formatTaskStateLabel } from "@/lib/ui/state-labels";
 import type {
   FilterClause,
@@ -183,8 +184,21 @@ export function applySort(
   return withIndex.map((x) => x.t);
 }
 
-const UNASSIGNED_LABEL = "Unassigned";
-const MULTI_REPO_LABEL = "Multi-repo";
+/**
+ * Catalog keys, not resolved labels: a `t()` at module scope would freeze at the
+ * boot locale. `applyGroup` runs inside its callers' render, so it resolves
+ * through the module-level `t` at call time — both `useGroupedSidebarView` and
+ * the mobile task-switcher sheet already carry `i18n.language` in their memo
+ * deps for the same reason.
+ *
+ * Only `label` is copy. The group `key`s below (`__multi__`, `__unassigned__`,
+ * `__all__`, `__not_started__`) are identity: they are compared in
+ * `mergeSingleRepoUnassigned` / `sortRepoGroups`, index `STATE_GROUP_ORDER`, and
+ * are persisted in the view's `collapsedGroups`. They are never translated.
+ */
+const UNASSIGNED_LABEL_KEY = "sidebar:groupUnassigned";
+const MULTI_REPO_LABEL_KEY = "sidebar:groupMultiRepo";
+const ALL_GROUP_LABEL_KEY = "sidebar:groupAll";
 const NOT_STARTED_STATE_GROUP_KEY = "__not_started__";
 
 const STATE_GROUP_ORDER: Record<string, number> = {
@@ -255,28 +269,33 @@ function getEffectiveStateGroup(
 }
 
 const groupExtractors: Record<Exclude<GroupKey, "none">, GroupExtractor> = {
-  repository: (t) => {
-    if (t.repositories && t.repositories.length > 1) {
-      return { key: "__multi__", label: MULTI_REPO_LABEL };
+  // Parameter named `task`, not `t`: this file's other extractors and loops use
+  // `t` for a task, which shadows the imported translator. These four resolve
+  // copy, so they must not. Rename the parameter before adding a `t()` call to
+  // any of the others.
+  repository: (task) => {
+    if (task.repositories && task.repositories.length > 1) {
+      return { key: "__multi__", label: t(MULTI_REPO_LABEL_KEY) };
     }
-    if (t.repositoryPath) return { key: t.repositoryPath, label: t.repositoryPath };
-    return { key: "__unassigned__", label: UNASSIGNED_LABEL };
+    if (task.repositoryPath) return { key: task.repositoryPath, label: task.repositoryPath };
+    return { key: "__unassigned__", label: t(UNASSIGNED_LABEL_KEY) };
   },
-  workflow: (t) => {
-    if (t.workflowId) return { key: t.workflowId, label: t.workflowName ?? t.workflowId };
-    return { key: "__unassigned__", label: UNASSIGNED_LABEL };
+  workflow: (task) => {
+    if (task.workflowId)
+      return { key: task.workflowId, label: task.workflowName ?? task.workflowId };
+    return { key: "__unassigned__", label: t(UNASSIGNED_LABEL_KEY) };
   },
-  workflowStep: (t) => {
-    if (t.workflowStepId) {
-      return { key: t.workflowStepId, label: t.workflowStepTitle ?? t.workflowStepId };
+  workflowStep: (task) => {
+    if (task.workflowStepId) {
+      return { key: task.workflowStepId, label: task.workflowStepTitle ?? task.workflowStepId };
     }
-    return { key: "__unassigned__", label: UNASSIGNED_LABEL };
+    return { key: "__unassigned__", label: t(UNASSIGNED_LABEL_KEY) };
   },
-  executorType: (t) => {
-    if (t.remoteExecutorType) {
-      return { key: t.remoteExecutorType, label: getExecutorLabel(t.remoteExecutorType) };
+  executorType: (task) => {
+    if (task.remoteExecutorType) {
+      return { key: task.remoteExecutorType, label: getExecutorLabel(task.remoteExecutorType) };
     }
-    return { key: "__unassigned__", label: UNASSIGNED_LABEL };
+    return { key: "__unassigned__", label: t(UNASSIGNED_LABEL_KEY) };
   },
   // State groups use persisted task states so headings match task status labels.
   state: getTaskStateGroup,
@@ -310,7 +329,7 @@ export function applyGroup(
 
   if (groupKey === "none") {
     return {
-      groups: [{ key: "__all__", label: "All", tasks: rootTasks }],
+      groups: [{ key: "__all__", label: t(ALL_GROUP_LABEL_KEY), tasks: rootTasks }],
       subTasksByParentId,
     };
   }

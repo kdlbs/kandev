@@ -31,6 +31,7 @@ vi.mock("@/hooks/domains/github/use-pr-ci-popover", () => ({
   usePRCIPopover: () => ({
     feedback: null,
     isFetching: false,
+    isRefreshing: false,
     lastUpdatedAt: null,
     refetch: vi.fn(),
   }),

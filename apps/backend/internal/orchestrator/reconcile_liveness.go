@@ -3,9 +3,13 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"go.uber.org/zap"
 
+	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -18,6 +22,114 @@ import (
 // and its many test mocks don't have to grow a method just for reconciliation.
 type rowLivenessProber interface {
 	RowLiveness(row *models.ExecutorRunning) models.ProcessLiveness
+}
+
+type startupCleanupDisposition string
+
+const (
+	startupCleanupDispositionStopped       startupCleanupDisposition = "stopped"
+	startupCleanupDispositionAlreadyAbsent startupCleanupDisposition = "already_absent"
+	startupCleanupDispositionPreserved     startupCleanupDisposition = "preserved"
+)
+
+type startupCleanupDecision struct {
+	disposition    startupCleanupDisposition
+	liveness       string
+	stopErrorClass string
+	proceed        bool
+	expected       bool
+}
+
+// classifyStartupCleanup is the single decision matrix for startup stop
+// results. Only a typed runtime absence plus confirmed-dead local liveness
+// permits cleanup to continue; every uncertain result remains preserved.
+func classifyStartupCleanup(err error, liveness models.ProcessLiveness) startupCleanupDecision {
+	decision := startupCleanupDecision{
+		disposition:    startupCleanupDispositionPreserved,
+		liveness:       processLivenessClass(liveness),
+		stopErrorClass: "none",
+	}
+	if err == nil {
+		decision.disposition = startupCleanupDispositionStopped
+		decision.proceed = true
+		return decision
+	}
+	if stopReportsRuntimeAbsent(err) {
+		decision.stopErrorClass = "runtime_not_found"
+		if liveness == models.ProcessLivenessDead {
+			decision.disposition = startupCleanupDispositionAlreadyAbsent
+			decision.proceed = true
+			return decision
+		}
+		decision.expected = true
+		return decision
+	}
+	decision.stopErrorClass = "unexpected"
+	return decision
+}
+
+func processLivenessClass(liveness models.ProcessLiveness) string {
+	switch liveness {
+	case models.ProcessLivenessAlive:
+		return "alive"
+	case models.ProcessLivenessDead:
+		return "dead"
+	default:
+		return "unknown"
+	}
+}
+
+type startupCleanupReport struct {
+	expectedPreservedCount int
+	expectedOutcomes       map[string]int
+}
+
+func newStartupCleanupReport() *startupCleanupReport {
+	return &startupCleanupReport{expectedOutcomes: make(map[string]int)}
+}
+
+func (r *startupCleanupReport) recordExpected(running *models.ExecutorRunning, decision startupCleanupDecision) {
+	if r == nil {
+		return
+	}
+	key := fmt.Sprintf("disposition=%s,liveness=%s,stop_error=%s,local_pid=%t",
+		decision.disposition, decision.liveness, decision.stopErrorClass,
+		running != nil && running.LocalPID > 0)
+	r.expectedPreservedCount++
+	r.expectedOutcomes[key]++
+}
+
+func (r *startupCleanupReport) flush(log *logger.Logger) {
+	if r == nil || r.expectedPreservedCount == 0 {
+		return
+	}
+	log.Warn("startup runtime cleanup summary",
+		zap.Int("expected_preserved_count", r.expectedPreservedCount),
+		zap.Any("expected_preserved_outcomes", r.expectedOutcomes))
+}
+
+func startupCleanupFields(running *models.ExecutorRunning, decision startupCleanupDecision) []zap.Field {
+	fields := []zap.Field{
+		zap.String("liveness", decision.liveness),
+		zap.String("stop_error_class", decision.stopErrorClass),
+		zap.String("disposition", string(decision.disposition)),
+		zap.Bool("local_pid_present", running != nil && running.LocalPID > 0),
+	}
+	if running == nil {
+		return fields
+	}
+	return append(fields,
+		zap.String("session_id", running.SessionID),
+		zap.String("task_id", running.TaskID),
+		zap.String("execution_id", running.AgentExecutionID),
+	)
+}
+
+// stopReportsRuntimeAbsent accepts only typed runtime/executor absence
+// sentinels. Generic lookup errors remain retryable failures.
+func stopReportsRuntimeAbsent(err error) bool {
+	return errors.Is(err, runtimeapi.ErrNotFound) ||
+		errors.Is(err, executor.ErrExecutionNotFound)
 }
 
 // rowLiveness classifies a row's backing-process liveness, returning Unknown when

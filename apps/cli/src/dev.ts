@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import type { BackendPortSource } from "./args";
 import { backupProductionDb, isProductionDb } from "./backup";
 import { devKandevHome, HEALTH_TIMEOUT_MS_DEV } from "./constants";
 import { resolveHealthTimeoutMs, waitForHealth, waitForUrlReady } from "./health";
@@ -20,11 +21,17 @@ import { launchWebApp, openBrowser } from "./web";
 export type DevOptions = {
   repoRoot: string;
   backendPort?: number;
+  backendPortSource?: BackendPortSource;
   webPort?: number;
 };
 
-export async function runDev({ repoRoot, backendPort, webPort }: DevOptions): Promise<void> {
-  const ports = await pickPorts(backendPort, webPort);
+export async function runDev({
+  repoRoot,
+  backendPort,
+  backendPortSource,
+  webPort,
+}: DevOptions): Promise<void> {
+  const ports = await pickPorts({ backendPort, backendPortSource, webPort });
   const { dbPath, extra } = resolveDevBackendEnv(repoRoot);
 
   if (isProductionDb(dbPath)) {
@@ -86,13 +93,19 @@ export async function runDev({ repoRoot, backendPort, webPort }: DevOptions): Pr
 
   const healthTimeoutMs = resolveHealthTimeoutMs(HEALTH_TIMEOUT_MS_DEV);
   console.log("[kandev] starting backend...");
-  await waitForHealth(ports.backendUrl, backend.proc, healthTimeoutMs, () => {
-    const buffered = output.read();
-    if (buffered.trim().length === 0) return;
-    console.error("[kandev] --- backend stdout (last captured output) ---");
-    console.error(buffered.trimEnd());
-    console.error("[kandev] --- end backend stdout ---");
-  });
+  await waitForHealth(
+    ports.backendUrl,
+    backend.proc,
+    healthTimeoutMs,
+    backendEnv.KANDEV_DESKTOP_HEALTH_TOKEN,
+    () => {
+      const buffered = output.read();
+      if (buffered.trim().length === 0) return;
+      console.error("[kandev] --- backend stdout (last captured output) ---");
+      console.error(buffered.trimEnd());
+      console.error("[kandev] --- end backend stdout ---");
+    },
+  );
   console.log(`[kandev] backend ready at ${ports.backendUrl}`);
 
   console.log("[kandev] starting web...");

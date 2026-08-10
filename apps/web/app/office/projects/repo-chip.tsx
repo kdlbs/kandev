@@ -4,6 +4,7 @@ import { IconCode, IconWorld, IconX } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { formatUserHomePath } from "@/lib/utils";
 import type { Repository } from "@/lib/types/http";
+import { useTranslation } from "react-i18next";
 
 /**
  * A single attached repository, rendered as a chip with friendly label
@@ -19,6 +20,7 @@ export function RepoChip({
   workspaceRepos: Repository[];
   onRemove: () => void;
 }) {
+  const { t } = useTranslation();
   const matched = workspaceRepos.find((r) => r.local_path === value);
   const isUrl = looksLikeUrl(value);
   const label = matched?.name ?? (isUrl ? value : leafSegment(value));
@@ -42,7 +44,7 @@ export function RepoChip({
           <button
             type="button"
             onClick={onRemove}
-            aria-label="Remove repository"
+            aria-label={t("office:removeRepository")}
             className="h-6 w-6 inline-flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-muted/60 cursor-pointer"
             data-testid="project-repo-chip-remove"
           >

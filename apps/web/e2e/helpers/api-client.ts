@@ -24,6 +24,7 @@ import type {
   GitLabMRDiscussion,
   GitLabMRFile,
   GitLabPipeline,
+  GitLabPipelineJob,
   GitLabProjectMember,
   Issue as MockGitLabIssue,
   MR as MockGitLabMR,
@@ -145,7 +146,16 @@ export type MockGitHubAppRegistration = {
   app_id: number;
 };
 
-export type MockGitLabMRSeed = Pick<MockGitLabMR, "iid" | "title"> & Partial<MockGitLabMR>;
+// GitLab 15.6+'s server-side merge-readiness verdict and the
+// project-scoped "blocking discussions resolved" flag exist on the
+// backend's MR struct (mr_auto_fix/mr_auto_merge readiness, Q3) but are
+// deliberately absent from the frontend MR type — nothing in the app
+// renders them today. Carried here only so e2e specs can seed them.
+export type MockGitLabMRSeed = Pick<MockGitLabMR, "iid" | "title"> &
+  Partial<MockGitLabMR> & {
+    detailed_merge_status?: string;
+    blocking_discussions_resolved?: boolean;
+  };
 export type MockGitLabIssueSeed = Pick<MockGitLabIssue, "iid" | "title"> & Partial<MockGitLabIssue>;
 
 function setIf(body: Record<string, unknown>, key: string, value: unknown) {
@@ -161,6 +171,7 @@ type CreateTaskOpts = {
   repository_ids?: string[];
   repositories?: TaskRepositoryInput[];
   plan_mode?: boolean;
+  autopilot?: boolean;
   metadata?: Record<string, unknown>;
   parent_id?: string;
   workspace_mode?: "inherit_parent" | "new_workspace" | "shared_group";
@@ -211,6 +222,7 @@ function buildCreateTaskBody(
   );
   setIf(body, "attachments", options.attachments);
   if (options.plan_mode) body.plan_mode = true;
+  if (options.autopilot) body.autopilot = true;
   setIf(body, "parent_id", options.parent_id);
   setIf(body, "workspace_mode", options.workspace_mode);
   setIf(body, "workspace_group_id", options.workspace_group_id);
@@ -235,6 +247,7 @@ type OptionalAgentTaskOpts = {
   metadata?: Record<string, unknown>;
   parent_id?: string;
   workspace_mode?: "inherit_parent" | "new_workspace" | "shared_group";
+  autopilot?: boolean;
   attachments?: MessageAttachmentInput[];
 };
 
@@ -258,6 +271,7 @@ function buildOptionalAgentTaskFields(opts?: OptionalAgentTaskOpts): Record<stri
   setIf(fields, "metadata", opts.metadata);
   setIf(fields, "parent_id", opts.parent_id);
   setIf(fields, "workspace_mode", opts.workspace_mode);
+  if (opts.autopilot) fields.autopilot = true;
   setIf(fields, "attachments", opts.attachments);
   return fields;
 }
@@ -420,6 +434,8 @@ export class ApiClient {
       repositories?: TaskRepositoryInput[];
       /** When true, task is placed at position 0 regardless of is_start_step. */
       plan_mode?: boolean;
+      /** Start the task with the immutable autopilot MCP/prompt contract. */
+      autopilot?: boolean;
       /** Extra metadata to store on the task. */
       metadata?: Record<string, unknown>;
       /** Parent task ID for subtasks. */
@@ -538,6 +554,8 @@ export class ApiClient {
     name: string,
     opts: {
       model: string;
+      fallback_model?: string;
+      auto_fallback?: boolean;
       mode?: string;
       config_options?: Record<string, string>;
       cli_passthrough?: boolean;
@@ -549,6 +567,8 @@ export class ApiClient {
     const response = await this.request<unknown>("POST", `/api/v1/agents/${agentId}/profiles`, {
       name,
       model: opts.model,
+      fallback_model: opts.fallback_model,
+      auto_fallback: opts.auto_fallback,
       mode: opts.mode,
       config_options: opts.config_options,
       cli_passthrough: opts.cli_passthrough ?? false,
@@ -632,6 +652,8 @@ export class ApiClient {
       parent_id?: string;
       /** Workspace behavior for a child task. */
       workspace_mode?: "inherit_parent" | "new_workspace" | "shared_group";
+      /** Start the task with the immutable autopilot MCP/prompt contract. */
+      autopilot?: boolean;
       attachments?: MessageAttachmentInput[];
     },
   ): Promise<CreateTaskResponse> {
@@ -807,6 +829,7 @@ export class ApiClient {
   async updateWorkspace(
     workspaceId: string,
     updates: {
+      name?: string;
       default_executor_id?: string;
       default_agent_profile_id?: string;
       default_config_agent_profile_id?: string;
@@ -892,6 +915,7 @@ export class ApiClient {
       mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
       tasks_list_show_details?: boolean;
       show_transcript_auto_scroll_control?: boolean;
+      show_todo_list_panel?: boolean;
       agent_generated_task_titles?: boolean;
       [key: string]: unknown;
     };
@@ -920,7 +944,10 @@ export class ApiClient {
     keyboard_shortcuts?: Record<string, unknown>;
     default_utility_agent_id?: string;
     default_utility_model?: string;
+    default_utility_agent_profile_id?: string;
     sidebar_views?: unknown[];
+    sidebar_active_view_id?: string;
+    sidebar_draft?: unknown;
     saved_layouts?: unknown[];
     lsp_auto_start_languages?: string[];
     lsp_auto_install_languages?: string[];
@@ -945,7 +972,7 @@ export class ApiClient {
 
   async updateWorkflow(
     workflowId: string,
-    updates: { name?: string; description?: string; agent_profile_id?: string },
+    updates: { name?: string; description?: string; prompt?: string; agent_profile_id?: string },
   ): Promise<Workflow> {
     return this.request("PATCH", `/api/v1/workflows/${workflowId}`, updates);
   }
@@ -1651,6 +1678,18 @@ export class ApiClient {
     );
   }
 
+  async mockGitLabAddPipelineJobs(
+    workspaceId: string,
+    pipelineId: number,
+    jobs: GitLabPipelineJob[],
+  ): Promise<void> {
+    await this.request(
+      "POST",
+      this.gitLabWorkspacePath("/api/v1/gitlab/mock/pipeline-jobs", workspaceId),
+      { pipeline_id: pipelineId, jobs },
+    );
+  }
+
   async mockGitLabAddDiscussions(
     workspaceId: string,
     project: string,
@@ -1713,6 +1752,22 @@ export class ApiClient {
       iid,
       files,
     });
+  }
+
+  // mockGitLabAddRepoFiles seeds repository content (as opposed to
+  // mockGitLabAddFiles, which seeds files changed on a merge request) — used
+  // by workflow sync e2e specs to seed the directory the sync reads.
+  async mockGitLabAddRepoFiles(
+    workspaceId: string,
+    project: string,
+    ref: string,
+    files: Array<{ path: string; content: string }>,
+  ): Promise<void> {
+    await this.request(
+      "POST",
+      this.gitLabWorkspacePath("/api/v1/gitlab/mock/repo-files", workspaceId),
+      { project, ref, files },
+    );
   }
 
   async mockGitLabAddCommits(
@@ -1853,6 +1908,7 @@ export class ApiClient {
     tasks: Array<{
       id: string;
       title: string;
+      autopilot?: boolean;
       workflow_step_id?: string;
       status_summary?: TaskStatusSummary | null;
     }>;
@@ -1891,6 +1947,7 @@ export class ApiClient {
   async getTask(taskId: string): Promise<{
     id: string;
     title: string;
+    autopilot?: boolean;
     primary_session_id?: string | null;
     state?: string;
     workflow_step_id?: string;
@@ -2021,6 +2078,13 @@ export class ApiClient {
     worktree_path?: string;
     workspace_path?: string;
     status: string;
+    repos?: Array<{
+      repository_id?: string;
+      worktree_id?: string;
+      worktree_path?: string;
+      worktree_branch?: string;
+      status?: string;
+    }>;
   } | null> {
     const res = await this.rawRequest("GET", `/api/v1/tasks/${taskId}/environment`);
     if (res.status === 404) return null;
@@ -2139,6 +2203,11 @@ export class ApiClient {
       content,
       attachments,
     });
+  }
+
+  /** Removes every pending queued message for a session (message.queue.cancel). */
+  async clearQueue(sessionId: string): Promise<void> {
+    await this.wsRequest("message.queue.cancel", { session_id: sessionId });
   }
 
   // --- Integration config seeding (real API, not mock) ---
