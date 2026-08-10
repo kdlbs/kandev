@@ -108,3 +108,14 @@ func TestStore_IssueWatchIsWorkspaceScoped(t *testing.T) {
 		t.Fatalf("cross-workspace delete=%v", err)
 	}
 }
+
+func TestFilterWatchedIssues(t *testing.T) {
+	issues := []Issue{{Number: 1, Labels: []string{"bug"}}, {Number: 2, Labels: []string{"feature"}}, {Number: 3, Labels: []string{"bug", "urgent"}}}
+	filtered := filterWatchedIssues(issues, "bug, urgent")
+	if len(filtered) != 2 || filtered[0].Number != 1 || filtered[1].Number != 3 {
+		t.Fatalf("filtered=%#v", filtered)
+	}
+	if all := filterWatchedIssues(issues, ""); len(all) != 3 {
+		t.Fatalf("unfiltered=%#v", all)
+	}
+}
