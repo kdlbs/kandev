@@ -72,6 +72,49 @@ func NewStore(db, ro *sqlx.DB) (*Store, error) {
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
 	)`)
+	if err != nil {
+		return nil, err
+	}
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS forgejo_task_issues (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		repository_id TEXT NOT NULL DEFAULT '',
+		origin TEXT NOT NULL,
+		owner TEXT NOT NULL,
+		repo TEXT NOT NULL,
+		issue_number INTEGER NOT NULL,
+		issue_url TEXT NOT NULL,
+		title TEXT NOT NULL,
+		state TEXT NOT NULL,
+		last_synced_at DATETIME,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL,
+		UNIQUE(task_id, repository_id, owner, repo, issue_number)
+	)`)
+	if err != nil {
+		return nil, err
+	}
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS forgejo_task_prs (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		repository_id TEXT NOT NULL DEFAULT '',
+		origin TEXT NOT NULL,
+		owner TEXT NOT NULL,
+		repo TEXT NOT NULL,
+		pr_number INTEGER NOT NULL,
+		pr_url TEXT NOT NULL,
+		pr_title TEXT NOT NULL,
+		head_branch TEXT NOT NULL,
+		base_branch TEXT NOT NULL,
+		state TEXT NOT NULL,
+		draft INTEGER NOT NULL DEFAULT 0,
+		mergeable INTEGER NOT NULL DEFAULT 0,
+		ci_state TEXT NOT NULL DEFAULT '',
+		last_synced_at DATETIME,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL,
+		UNIQUE(task_id, repository_id, owner, repo, pr_number)
+	)`)
 	return store, err
 }
 

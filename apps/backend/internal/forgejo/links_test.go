@@ -1,0 +1,54 @@
+package forgejo
+
+import (
+	"context"
+	"errors"
+	"testing"
+)
+
+func createLinkTestTask(t *testing.T, store *Store, workspaceID, taskID string) {
+	t.Helper()
+	if _, err := store.db.Exec(`CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL)`); err != nil {
+		t.Fatalf("create tasks table: %v", err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO tasks (id, workspace_id) VALUES (?, ?)`, taskID, workspaceID); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+}
+
+func TestStore_TaskLinksAreScopedAndUpserted(t *testing.T) {
+	store := newConfigTestStore(t)
+	createLinkTestTask(t, store, "workspace-a", "task-a")
+	ctx := context.Background()
+	if err := store.UpsertTaskIssue(ctx, &TaskIssue{TaskID: "task-a", Origin: "https://forgejo.example", Owner: "owner", Repo: "repo", IssueNumber: 7, IssueURL: "https://forgejo.example/owner/repo/issues/7", Title: "Original", State: "open"}); err != nil {
+		t.Fatalf("upsert issue: %v", err)
+	}
+	if err := store.UpsertTaskIssue(ctx, &TaskIssue{TaskID: "task-a", Origin: "https://forgejo.example", Owner: "owner", Repo: "repo", IssueNumber: 7, IssueURL: "https://forgejo.example/owner/repo/issues/7", Title: "Updated", State: "closed"}); err != nil {
+		t.Fatalf("update issue: %v", err)
+	}
+	issues, err := store.ListTaskIssues(ctx, "workspace-a", "task-a")
+	if err != nil || len(issues) != 1 || issues[0].Title != "Updated" || issues[0].State != "closed" {
+		t.Fatalf("issues = %#v, %v", issues, err)
+	}
+	if _, err := store.ListTaskIssues(ctx, "workspace-b", "task-a"); !errors.Is(err, ErrTaskLinkNotFound) {
+		t.Fatalf("cross-workspace error = %v, want ErrTaskLinkNotFound", err)
+	}
+}
+
+func TestStore_TaskPRLinksAreScopedAndUpserted(t *testing.T) {
+	store := newConfigTestStore(t)
+	createLinkTestTask(t, store, "workspace-a", "task-a")
+	ctx := context.Background()
+	pr := &TaskPR{TaskID: "task-a", Origin: "https://forgejo.example", Owner: "owner", Repo: "repo", PRNumber: 8, PRURL: "https://forgejo.example/owner/repo/pulls/8", PRTitle: "Initial", HeadBranch: "feature/a", BaseBranch: "main", State: "open"}
+	if err := store.UpsertTaskPR(ctx, pr); err != nil {
+		t.Fatalf("upsert PR: %v", err)
+	}
+	pr.PRTitle, pr.State = "Updated", "merged"
+	if err := store.UpsertTaskPR(ctx, pr); err != nil {
+		t.Fatalf("update PR: %v", err)
+	}
+	prs, err := store.ListTaskPRs(ctx, "workspace-a", "task-a")
+	if err != nil || len(prs) != 1 || prs[0].PRTitle != "Updated" || prs[0].State != "merged" {
+		t.Fatalf("PRs = %#v, %v", prs, err)
+	}
+}
