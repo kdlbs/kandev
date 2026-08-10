@@ -45,7 +45,13 @@ export function PresetsScopeBar({
       savedPresets={savedPresets}
       onToggleSavedDefault={(id) => {
         const preset = savedPresets.find((candidate) => candidate.id === id);
-        if (preset) void onToggleSavedDefault(preset);
+        if (!preset) {
+          if (process.env.NODE_ENV !== "production") {
+            console.warn("[github:presets] default toggle target missing", { id });
+          }
+          return;
+        }
+        void onToggleSavedDefault(preset);
       }}
       testId="github-presets-scope-bar"
       savedMenuTestId="github-saved-queries-menu"

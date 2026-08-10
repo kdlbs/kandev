@@ -37,7 +37,6 @@
   "creatingEllipsis": "A criar...",
   "creatingFrom": "A criar o {{shortName}} a partir de <4>{{displayBranch}}</4>",
   "creatingFromInto": "A criar o {{shortName}} a partir de <4>{{displayBranch}}</4> → <6>{{baseBranch}}</6>",
-  "deleteSavedQuery": "Eliminar a consulta guardada",
   "describeYourChanges": "Descreva as suas alterações...",
   "description": "Descrição",
   "draftCreated": "Rascunho de {{shortName}} criado",

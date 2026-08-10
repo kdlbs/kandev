@@ -37,7 +37,6 @@
   "creatingEllipsis": "Creating...",
   "creatingFrom": "Creating {{shortName}} from <4>{{displayBranch}}</4>",
   "creatingFromInto": "Creating {{shortName}} from <4>{{displayBranch}}</4> → <6>{{baseBranch}}</6>",
-  "deleteSavedQuery": "Delete saved query",
   "deleteSavedQueryNamed": "Delete {{label}} saved query",
   "describeYourChanges": "Describe your changes...",
   "description": "Description",

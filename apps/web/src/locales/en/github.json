@@ -138,7 +138,6 @@
   "defaultQueriesSaved": "Default queries saved",
   "defaultRepository": "Default repository",
   "delete": "Delete",
-  "deleteSavedQuery": "Delete saved query",
   "deletedTasks_one": "Deleted {{count}} task",
   "deletedTasks_other": "Deleted {{count}} tasks",
   "description": "Description",

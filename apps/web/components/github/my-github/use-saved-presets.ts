@@ -46,6 +46,8 @@ const syncServer = createQueuedUserSettingsSync<SavedPreset[]>((next) => ({
   github_saved_presets: next,
 }));
 
+// Shared across hook instances so all workspace API writes stay ordered. The
+// per-hook mutation queue below only coordinates that instance's optimistic state.
 let workspaceSyncQueue = Promise.resolve();
 
 function syncWorkspaceSavedPresets(workspaceId: string, next: SavedPreset[]): Promise<void> {

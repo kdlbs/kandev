@@ -37,7 +37,6 @@
   "creatingEllipsis": "正在创建…",
   "creatingFrom": "正在从 <4>{{displayBranch}}</4> 创建 {{shortName}}",
   "creatingFromInto": "正在从 <4>{{displayBranch}}</4> → <6>{{baseBranch}}</6> 创建 {{shortName}}",
-  "deleteSavedQuery": "删除已保存的查询",
   "describeYourChanges": "描述你的更改…",
   "description": "描述",
   "draftCreated": "草稿 {{shortName}} 已创建",
