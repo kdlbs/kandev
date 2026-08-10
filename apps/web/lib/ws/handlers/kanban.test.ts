@@ -258,6 +258,9 @@ describe("kanban.update handler — foregroundActivity preservation", () => {
   });
 });
 
+// parkedOnBackgroundWork preservation (AC-58a) has its own sibling test file,
+// kanban-parked.test.ts, to keep this file under the line-count lint limit.
+
 describe("kanban.update handler — taskPendingAction preservation", () => {
   it("preserves taskPendingAction from existing tasks", () => {
     const store = makeStore({

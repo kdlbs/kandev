@@ -266,3 +266,22 @@ describe("toKanbanTask — state normalization", () => {
     expect(detached.workspaceMode).toBe("shared_group");
   });
 });
+
+describe("toKanbanTask — parked-on-background-work (docs/specs/parked-board-mvp/spec.md)", () => {
+  it("carries parked_on_background_work=true straight through, both HTTP and WS shapes", () => {
+    expect(toKanbanTask(httpDTO({ parked_on_background_work: true })).parkedOnBackgroundWork).toBe(
+      true,
+    );
+    expect(
+      toKanbanTask(wsPayload({ parked_on_background_work: true })).parkedOnBackgroundWork,
+    ).toBe(true);
+  });
+
+  it("leaves parkedOnBackgroundWork undefined (not coerced to false) when the field is absent", () => {
+    // AC-58a: an absent field must be distinguishable from an explicit false
+    // so kanban.ts's preserveIfUndefined discipline can tell "not carried on
+    // this update" apart from "explicitly cleared".
+    const { parked_on_background_work: _omit, ...withoutField } = httpDTO();
+    expect(toKanbanTask(withoutField as TaskLike).parkedOnBackgroundWork).toBeUndefined();
+  });
+});

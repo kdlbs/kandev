@@ -13,6 +13,7 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import {
+  BackgroundWorkTaskIcon,
   getSessionStateIcon,
   getTaskStateIcon,
   isTaskInFlight,
@@ -265,6 +266,77 @@ describe("getTaskStateIcon — task-level activity tri-state", () => {
     expect(background).toContain("text-violet-500");
     expect(background).not.toBe(generating);
     expect(background).not.toBe(done);
+  });
+});
+
+describe("getTaskStateIcon — parked on background work (docs/specs/parked-board-mvp/spec.md)", () => {
+  it("renders the accessible parked icon with the tooltip label", () => {
+    const { container } = render(
+      <TooltipProvider>
+        {getTaskStateIcon("REVIEW", undefined, { parkedOnBackgroundWork: true })}
+      </TooltipProvider>,
+    );
+    const icon = container.querySelector('[data-testid="task-state-background-running"]');
+    expect(icon).not.toBeNull();
+    expect(icon?.className).toContain("text-violet-500");
+    expect(container.querySelector('[aria-label="Background work is running"]')).not.toBeNull();
+    expect(icon?.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("lets parked win over the coarse WAITING_FOR_INPUT state (AC-58: that IS the feature)", () => {
+    expect(
+      iconType(getTaskStateIcon("WAITING_FOR_INPUT", undefined, { parkedOnBackgroundWork: true })),
+    ).toBe(BackgroundWorkTaskIcon);
+  });
+
+  it("lets an actively generating session outrank a merely parked one (§7.4 order)", () => {
+    expect(
+      iconType(
+        getTaskStateIcon("REVIEW", undefined, {
+          foregroundActivity: "generating",
+          parkedOnBackgroundWork: true,
+        }),
+      ),
+    ).toBe(IconLoader2);
+  });
+
+  it("lets background foreground activity outrank a merely parked one (§7.4 order)", () => {
+    expect(
+      iconType(
+        getTaskStateIcon("REVIEW", undefined, {
+          foregroundActivity: "background",
+          parkedOnBackgroundWork: true,
+        }),
+      ),
+    ).toBe(IconLoader);
+  });
+
+  it("lets a pending clarification win over parked — an actionable question is never hidden (AC-58b)", () => {
+    expect(
+      iconType(
+        getTaskStateIcon("WAITING_FOR_INPUT", undefined, {
+          hasPendingClarification: true,
+          parkedOnBackgroundWork: true,
+        }),
+      ),
+    ).toBe(IconMessageQuestion);
+  });
+
+  it("lets a pending permission win over parked — an actionable question is never hidden (AC-58b)", () => {
+    expect(
+      iconType(
+        getTaskStateIcon("WAITING_FOR_INPUT", undefined, {
+          hasPendingPermission: true,
+          parkedOnBackgroundWork: true,
+        }),
+      ),
+    ).toBe(IconShieldQuestion);
+  });
+
+  it("pins parked=false to today's rendering (AC-59 extension)", () => {
+    expect(
+      iconType(getTaskStateIcon("WAITING_FOR_INPUT", undefined, { parkedOnBackgroundWork: false })),
+    ).toBe(IconMessageQuestion);
   });
 });
 

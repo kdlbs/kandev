@@ -352,6 +352,12 @@ export type Task = ActiveSubagentCountFields & {
    * corresponding sum of live subagents.
    */
   foreground_activity?: ForegroundActivity | null;
+  /**
+   * Task-level OR of its sessions' parked-on-background-work projections
+   * (docs/specs/parked-board-mvp/spec.md). Runtime-only; absent is read as
+   * false, never as unknown.
+   */
+  parked_on_background_work?: boolean;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   primary_executor_id?: string | null;
@@ -456,6 +462,12 @@ export type TaskSession = ActiveSubagentCountFields & {
   cancellation_revision?: number;
   /** Fine-grained busy substate; background may outlive the foreground turn (ADR-0049). */
   foreground_activity?: ForegroundActivity | null;
+  /**
+   * True when this session settled to WAITING_FOR_INPUT while a detached
+   * background shell it launched is still alive (docs/specs/parked-board-mvp/spec.md).
+   * Runtime-only; absent is read as false, never as unknown.
+   */
+  parked_on_background_work?: boolean;
   /**
    * True when a send right now would be delivered into the still-generating turn
    * (mid-turn steering) rather than blocked/queued. Live, derived from the

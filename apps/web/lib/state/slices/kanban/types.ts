@@ -83,6 +83,14 @@ export type KanbanState = {
      * list background-running affordance.
      */
     foregroundActivity?: ForegroundActivity | null;
+    /**
+     * True when the task's session settled to WAITING_FOR_INPUT while a
+     * detached background shell it launched is still alive (runtime-only
+     * projection; docs/specs/parked-board-mvp/spec.md). Optional so a
+     * `kanban.update` that omits it (AC-58a) preserves the last-known value
+     * via kanban.ts's existing preserveIfUndefined discipline.
+     */
+    parkedOnBackgroundWork?: boolean;
     /** True when the task's session was mid-turn when the backend died. */
     interrupted?: boolean;
     /** Live subagents across this task's sessions; drives the board count chip. */

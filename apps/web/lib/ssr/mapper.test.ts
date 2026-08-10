@@ -84,6 +84,24 @@ describe("snapshotToState", () => {
     expect(state.kanban?.tasks[0]?.activeSubagentCount).toBe(expected);
   });
 
+  // AC-84: a task carrying parked_on_background_work: true on the boot
+  // snapshot must render the affordance on first paint, before any
+  // kanban.update has arrived — this is the fourth, independent producer
+  // (snapshotToState hand-builds KanbanTask and does not route through
+  // toKanbanTask).
+  it.each([
+    [true, true],
+    [false, false],
+    [undefined, undefined],
+  ])("maps parked_on_background_work %s", (wireValue, expected) => {
+    const snapshot = snapshotWithPendingAction(undefined);
+    snapshot.tasks[0].parked_on_background_work = wireValue;
+
+    const state = snapshotToState(snapshot);
+
+    expect(state.kanban?.tasks[0]?.parkedOnBackgroundWork).toBe(expected);
+  });
+
   it("preserves workflow step WIP fields", () => {
     const state = snapshotToState({
       workflow: {

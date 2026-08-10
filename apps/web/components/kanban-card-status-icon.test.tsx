@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { isValidElement, type ReactNode } from "react";
+import { render } from "@testing-library/react";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import {
   IconCheck,
   IconLoader,
@@ -61,6 +63,86 @@ describe("renderTaskStatusIcon — task-level activity aggregate", () => {
       false,
     );
     expect(iconType(node)).toBe(IconLoader2);
+  });
+});
+
+describe("renderTaskStatusIcon — parked on background work", () => {
+  // AC-58: a parked task at REVIEW with no pending input, no foreground_activity
+  // and not interrupted must show the affordance against BOTH early returns —
+  // the `return null` short-circuit (no activity/spinner/needsMe/interrupted)
+  // and the bare-IconLoader2 launch-spinner short-circuit.
+  it("renders the background-running affordance instead of null (first early return)", () => {
+    const node = renderTaskStatusIcon(
+      task({ state: "REVIEW", parkedOnBackgroundWork: true }),
+      false,
+      false,
+      false,
+    );
+    expect(node).not.toBeNull();
+    const { container } = render(<TooltipProvider>{node}</TooltipProvider>);
+    expect(container.querySelector('[data-testid="task-state-background-running"]')).not.toBeNull();
+  });
+
+  it("renders the background-running affordance instead of the bare launch spinner (second early return)", () => {
+    const node = renderTaskStatusIcon(
+      task({ state: "IN_PROGRESS", primarySessionState: "RUNNING", parkedOnBackgroundWork: true }),
+      true,
+      false,
+      false,
+    );
+    const { container } = render(<TooltipProvider>{node}</TooltipProvider>);
+    expect(container.querySelector('[data-testid="task-state-background-running"]')).not.toBeNull();
+  });
+
+  it("AC-58b: a pending clarification wins over parked — the question is never hidden", () => {
+    const node = renderTaskStatusIcon(
+      task({ state: "WAITING_FOR_INPUT", parkedOnBackgroundWork: true }),
+      false,
+      true,
+      false,
+    );
+    expect(iconType(node)).toBe(IconMessageQuestion);
+  });
+
+  it("AC-58b: a pending permission wins over parked — the question is never hidden", () => {
+    const node = renderTaskStatusIcon(
+      task({ state: "WAITING_FOR_INPUT", parkedOnBackgroundWork: true }),
+      false,
+      false,
+      true,
+    );
+    expect(iconType(node)).toBe(IconShieldQuestion);
+  });
+
+  it("§7.4: a generating session outranks a merely parked one", () => {
+    const node = renderTaskStatusIcon(
+      task({ state: "REVIEW", foregroundActivity: "generating", parkedOnBackgroundWork: true }),
+      false,
+      false,
+      false,
+    );
+    expect(iconType(node)).toBe(IconLoader2);
+  });
+
+  it("§7.4: background foreground activity outranks a merely parked one", () => {
+    const node = renderTaskStatusIcon(
+      task({ state: "REVIEW", foregroundActivity: "background", parkedOnBackgroundWork: true }),
+      false,
+      false,
+      false,
+    );
+    expect(iconType(node)).toBe(IconLoader);
+  });
+
+  it("AC-59: parked=false renders exactly as today (null for a resting task)", () => {
+    expect(
+      renderTaskStatusIcon(
+        task({ state: "REVIEW", parkedOnBackgroundWork: false }),
+        false,
+        false,
+        false,
+      ),
+    ).toBeNull();
   });
 });
 
