@@ -11,7 +11,7 @@ import {
   type ShardManifest,
 } from "./plan-shards";
 
-function readManifest(filePath: string): ShardManifest {
+export function readManifest(filePath: string): ShardManifest {
   if (!fs.existsSync(filePath)) throw new Error(`Shard manifest does not exist: ${filePath}`);
   const manifest = JSON.parse(fs.readFileSync(filePath, "utf8")) as ShardManifest;
   if (
@@ -32,8 +32,11 @@ function readManifest(filePath: string): ShardManifest {
   return manifest;
 }
 
-function resolveShard(manifest: ShardManifest): Shard {
-  const requested = Number(process.env.E2E_SHARD ?? path.basename(process.cwd()));
+export function resolveShard(
+  manifest: ShardManifest,
+  requestedValue = process.env.E2E_SHARD,
+): Shard {
+  const requested = Number(requestedValue ?? path.basename(process.cwd()));
   if (Number.isInteger(requested) && requested > 0) {
     const shard = manifest.shards.find((candidate) => candidate.index === requested);
     if (shard) return shard;
@@ -42,13 +45,13 @@ function resolveShard(manifest: ShardManifest): Shard {
   throw new Error("E2E_SHARD must identify one shard in a multi-shard manifest");
 }
 
-function writeShardMetadata(
+export function writeShardMetadata(
   manifest: ShardManifest,
   shard: Shard,
   startedAt: string,
   exitCode: number,
+  outputDir = path.resolve("e2e/blob-report"),
 ) {
-  const outputDir = path.resolve("e2e/blob-report");
   fs.mkdirSync(outputDir, { recursive: true });
   const metadata = {
     cohort: manifest.cohort,
@@ -66,33 +69,53 @@ function writeShardMetadata(
   );
 }
 
-function run(): void {
-  const manifestPath = process.argv[process.argv.indexOf("--manifest") + 1] ?? process.argv[2];
-  if (!manifestPath) throw new Error("Usage: run-planned-shard.ts --manifest <manifest.json>");
-  const manifest = readManifest(path.resolve(manifestPath));
-  const shard = resolveShard(manifest);
-  const startedAt = new Date().toISOString();
-
-  if (shard.files.length === 0) {
-    writeShardMetadata(manifest, shard, startedAt, 0);
-    console.log(`planned shard ${shard.index}: no tests assigned`);
-    return;
-  }
-
-  const args = [
+export function buildPlaywrightArgs(
+  manifest: ShardManifest,
+  shard: Shard,
+  extraArgs: string[] = [],
+): string[] {
+  return [
     "playwright",
     "test",
     "--config",
     "e2e/playwright.config.ts",
     ...manifest.projects.map((project) => `--project=${project}`),
     ...shard.files,
+    ...extraArgs,
   ];
-  const result = spawnSync("pnpm", ["exec", ...args], {
+}
+
+export function executeShard(
+  manifest: ShardManifest,
+  shard: Shard,
+  spawn = spawnSync,
+  outputDir = path.resolve("e2e/blob-report"),
+  extraArgs: string[] = [],
+): number {
+  const startedAt = new Date().toISOString();
+  const result = spawn("pnpm", ["exec", ...buildPlaywrightArgs(manifest, shard, extraArgs)], {
     stdio: "inherit",
     env: { ...process.env, E2E_PLANNED_SHARD: String(shard.index) },
   });
   const exitCode = result.status ?? 1;
-  writeShardMetadata(manifest, shard, startedAt, exitCode);
+  writeShardMetadata(manifest, shard, startedAt, exitCode, outputDir);
+  return exitCode;
+}
+
+function run(): void {
+  const manifestPath = process.argv[process.argv.indexOf("--manifest") + 1] ?? process.argv[2];
+  if (!manifestPath) throw new Error("Usage: run-planned-shard.ts --manifest <manifest.json>");
+  const manifest = readManifest(path.resolve(manifestPath));
+  const shard = resolveShard(manifest);
+  if (shard.files.length === 0) {
+    writeShardMetadata(manifest, shard, new Date().toISOString(), 0);
+    console.log(`planned shard ${shard.index}: no tests assigned`);
+    return;
+  }
+
+  const separator = process.argv.indexOf("--");
+  const extraArgs = separator >= 0 ? process.argv.slice(separator + 1) : [];
+  const exitCode = executeShard(manifest, shard, spawnSync, undefined, extraArgs);
   process.exitCode = exitCode;
 }
 

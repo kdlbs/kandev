@@ -1,10 +1,16 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   buildTimingProfile,
   collectEligibleSamples,
+  hasCompleteShardSet,
   normalizeReportPath,
   parseBlobReportJsonl,
   quantile,
+  readTimingProfile,
+  type ShardMetadata,
   type TimingObservation,
   type TimingProfile,
 } from "./e2e-timings";
@@ -88,6 +94,39 @@ describe("e2e timing collection", () => {
     expect(quantile([1, 2, 3, 4], 0.5)).toBe(2.5);
     expect(quantile([1, 2, 3, 4], 0.75)).toBe(3.25);
     expect(quantile([], 0.75)).toBe(0);
+  });
+
+  it.each([
+    ["missing percentile", { p75Seconds: undefined }],
+    ["non-numeric percentile", { p75Seconds: "slow" }],
+    ["non-finite sample", { samples: [{ durationSeconds: null }] }],
+  ])("rejects a malformed timing profile with %s", (_name, override) => {
+    const webRoot = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-profile-"));
+    const filePath = path.join(webRoot, "timing-profile.json");
+    const entry = { ...previousTimingEntry(), ...override };
+    fs.writeFileSync(filePath, JSON.stringify({ ...previousTimingProfile(), entries: [entry] }));
+
+    expect(() => readTimingProfile(filePath)).toThrow(/Unsupported timing profile version/);
+  });
+
+  it("only treats a complete normal and container shard set as a deletion catalog", () => {
+    const metadata = (cohort: string, shard: number, shardCount: number): ShardMetadata => ({
+      cohort,
+      shard,
+      shardCount,
+      startedAt: "2026-08-10T10:00:00.000Z",
+      finishedAt: "2026-08-10T10:00:01.000Z",
+      exitCode: 0,
+      predictedSeconds: 1,
+      unitIds: [],
+    });
+    const complete = [
+      ...Array.from({ length: 14 }, (_, index) => metadata("normal", index + 1, 14)),
+      ...Array.from({ length: 6 }, (_, index) => metadata("containers", index + 1, 6)),
+    ];
+
+    expect(hasCompleteShardSet(complete)).toBe(true);
+    expect(hasCompleteShardSet(complete.slice(0, -1))).toBe(false);
   });
 
   it("merges and bounds timing history", () => {

@@ -15,6 +15,9 @@ func TestScopedDockerLabelsAddsOnlyTheE2EScope(t *testing.T) {
 	if got["kandev.e2e.run"] != "e2e-test-scope" {
 		t.Fatalf("scope label = %q, want e2e-test-scope", got["kandev.e2e.run"])
 	}
+	if got["kandev.managed"] != "true" {
+		t.Fatalf("managed label = %q, want true", got["kandev.managed"])
+	}
 	if _, ok := input["kandev.e2e.run"]; ok {
 		t.Fatal("scoping must not mutate the caller's label map")
 	}

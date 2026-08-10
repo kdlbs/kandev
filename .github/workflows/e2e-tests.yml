@@ -168,19 +168,19 @@ jobs:
           retention-days: 3
 
       - name: Generate duration-aware E2E shard manifests
-        working-directory: apps
+        working-directory: apps/web
         run: |
           set -euo pipefail
           rm -rf "$GITHUB_WORKSPACE/e2e-manifests"
           if [[ -f "$GITHUB_WORKSPACE/e2e/previous-profile/timing-profile.json" ]]; then
             echo "Planning from the latest successful main timing profile."
-            pnpm exec tsx web/e2e/scripts/plan-shards.ts \
+            pnpm exec tsx e2e/scripts/plan-shards.ts \
               --web-root "$GITHUB_WORKSPACE/apps/web" \
               --output-dir "$GITHUB_WORKSPACE/e2e-manifests" \
               --profile "$GITHUB_WORKSPACE/e2e/previous-profile/timing-profile.json"
           else
             echo "Planning with deterministic count fallback; no usable main timing profile was downloaded."
-            pnpm exec tsx web/e2e/scripts/plan-shards.ts \
+            pnpm exec tsx e2e/scripts/plan-shards.ts \
               --web-root "$GITHUB_WORKSPACE/apps/web" \
               --output-dir "$GITHUB_WORKSPACE/e2e-manifests"
           fi
@@ -729,6 +729,7 @@ jobs:
           retention-days: 14
 
       - name: Merge reports
+        if: hashFiles('apps/web/e2e/blob-reports/**/*.zip') != ''
         working-directory: apps/web
         # `-c e2e/playwright.config.ts` is required because the blobs come from
         # two different absolute checkout paths: the containerized `e2e` shards

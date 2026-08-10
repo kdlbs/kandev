@@ -1,7 +1,7 @@
 ---
 spec: ../../specs/e2e-duration-aware-sharding/spec.md
 created: 2026-08-10
-status: complete
+status: in_progress
 ---
 
 # Implementation Plan: Duration-aware E2E sharding and CI reliability
@@ -221,7 +221,7 @@ Depends on Tasks 01 and 02.
 Wave 4 — reliability signal and measurement:
 
 - [x] [Task 07: Surface retry and timing evidence](task-07-retry-observability.md)
-- [x] [Task 08: Run concurrency and setup experiments](task-08-performance-experiments.md)
+- [ ] [Task 08: Run concurrency and setup experiments](task-08-performance-experiments.md)
 
 Both depend on Task 03. Task 08 also consumes the repaired container behavior
 from Task 06.
@@ -236,7 +236,8 @@ Depends on Tasks 03, 06, and 07 so the README describes the final contracts.
 
 Implemented and verified in the working tree:
 
-- Timing, planner, and retry-summary unit tests: 3 files, 15 tests passed.
+- Timing, planner, retry-summary, runner, and helper tests: 5 files, 26 tests
+  passed.
 - Backend Docker-scope tests: `go test ./internal/agent/runtime/lifecycle
 ./internal/backendapp` passed, 1,456 tests across 2 packages.
 - Web typecheck and focused ESLint passed; Prettier check and `git diff --check`

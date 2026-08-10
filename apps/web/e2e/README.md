@@ -190,6 +190,10 @@ Workers run in parallel across CI manifest shards; within a worker, tests run
 serially because the `testPage` fixture calls `e2eReset` on the shared backend
 before each test.
 
+Docker image usage remains daemon-wide because images and their layers are
+shared across shards; only container records, cleanup, and container-based
+storage reporting are filtered by the process-scoped ownership label.
+
 ## Mocked vs real
 
 - **Mocked**: Azure DevOps (`KANDEV_MOCK_AZURE_DEVOPS=true`), Jira (`KANDEV_MOCK_JIRA=true`), Linear (`KANDEV_MOCK_LINEAR=true`), GitHub (`KANDEV_MOCK_GITHUB=true`), and the agent process itself (`KANDEV_MOCK_AGENT=only`). These are third-party services or external processes we don't want CI to depend on.
@@ -231,12 +235,13 @@ change the checked-in default:
 
 ```bash
 cd apps/web
-/usr/bin/time -v pnpm exec playwright test --config e2e/playwright.config.ts \
-  --project=chromium --workers=1 tests/chat/unread-divider.spec.ts
-/usr/bin/time -v pnpm exec playwright test --config e2e/playwright.config.ts \
-  --project=chromium --workers=2 tests/chat/unread-divider.spec.ts
+E2E_SHARD=2 /usr/bin/time -v bash e2e/scripts/run-planned-shard.sh \
+  e2e/manifests/normal/2.json -- --workers=1
+E2E_SHARD=2 /usr/bin/time -v bash e2e/scripts/run-planned-shard.sh \
+  e2e/manifests/normal/2.json -- --workers=2
 ```
 
 Record results as `{ "workers": 2, "wall_seconds": 0, "max_rss_kb": 0,
 "retries": 0, "backend_errors": 0 }`. Compare at least three repetitions
-with the same build and profile before considering a default change.
+with the same build, duration-aware manifest, and profile before considering a
+default change.

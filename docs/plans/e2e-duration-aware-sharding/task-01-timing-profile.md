@@ -67,4 +67,4 @@ rejected by the planner.
 Implemented `e2e-timings.ts` with versioned profiles, bounded 20-sample
 histories, p50/p75 quantiles, stable project/file/title keys, source hashing,
 and malformed-blob tolerance. The focused timing/planner/retry suite passed
-15 tests across 3 files; web typecheck also passed.
+26 tests across 5 files; web typecheck also passed.

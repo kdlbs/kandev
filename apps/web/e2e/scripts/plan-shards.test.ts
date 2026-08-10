@@ -62,6 +62,7 @@ describe("duration-aware shard planning", () => {
         "  test.beforeEach(async () => {});",
         '  test("works", async () => {});',
         '  test.skip("skipped", async () => {});',
+        '  test.each([[1]])("parameterized", async () => {});',
         "});",
       ].join("\n"),
     );
@@ -70,7 +71,7 @@ describe("duration-aware shard planning", () => {
       expect.objectContaining({
         project: "chromium",
         file: "tests/chat/example.spec.ts",
-        testCount: 2,
+        testCount: 3,
         fileHash: expect.stringMatching(/^[a-f0-9]{64}$/),
       }),
     ]);
@@ -109,6 +110,35 @@ describe("duration-aware shard planning", () => {
     const duplicate = structuredClone(plan);
     duplicate.shards[1]?.units.push(plan.shards[0]!.units[0]!);
     expect(() => validateShardManifest(duplicate, units)).toThrow(/duplicate/i);
+  });
+
+  it("rejects units whose immutable catalog fields were changed", () => {
+    const plan = createShardPlan(units, {
+      cohort: "normal",
+      shardCount: 2,
+      generatedAt: "2026-08-10T00:00:00.000Z",
+    });
+    const tampered = structuredClone(plan);
+    const unit = tampered.shards.find((shard) => shard.units.length > 0)?.units[0];
+    expect(unit).toBeDefined();
+    unit!.fileHash = "tampered";
+
+    expect(() => validateShardManifest(tampered, units)).toThrow(/catalog fields/i);
+  });
+
+  it("rejects duplicate and out-of-range shard indexes", () => {
+    const plan = createShardPlan(units, {
+      cohort: "normal",
+      shardCount: 2,
+      generatedAt: "2026-08-10T00:00:00.000Z",
+    });
+    const duplicate = structuredClone(plan);
+    duplicate.shards[1]!.index = duplicate.shards[0]!.index;
+    expect(() => validateShardManifest(duplicate, units)).toThrow(/shard index/i);
+
+    const outOfRange = structuredClone(plan);
+    outOfRange.shards[0]!.index = plan.shardCount + 1;
+    expect(() => validateShardManifest(outOfRange, units)).toThrow(/shard index/i);
   });
 
   it("uses count-based estimates when no profile exists", () => {

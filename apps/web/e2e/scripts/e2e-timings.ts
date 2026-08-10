@@ -105,6 +105,10 @@ function asNumber(value: unknown, fallback = 0): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
+function isFiniteDuration(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
 export function normalizeReportPath(file: string): string {
   const normalized = file.replaceAll("\\", "/").replace(/^\.\//, "");
   const testsIndex = normalized.indexOf("tests/");
@@ -373,7 +377,27 @@ export function buildTimingProfile(
 export function readTimingProfile(filePath: string): TimingProfile | undefined {
   if (!fs.existsSync(filePath)) return undefined;
   const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as Partial<TimingProfile>;
-  if (parsed.version !== TIMING_PROFILE_VERSION || !Array.isArray(parsed.entries)) {
+  const entries = Array.isArray(parsed.entries) ? parsed.entries : [];
+  const validEntries = entries.every((rawEntry) => {
+    const entry = asRecord(rawEntry);
+    if (
+      !entry ||
+      !isFiniteDuration(entry.p50Seconds) ||
+      !isFiniteDuration(entry.p75Seconds) ||
+      !Array.isArray(entry.samples)
+    ) {
+      return false;
+    }
+    return entry.samples.every((rawSample) => {
+      const sample = asRecord(rawSample);
+      return Boolean(sample && isFiniteDuration(sample.durationSeconds));
+    });
+  });
+  if (
+    parsed.version !== TIMING_PROFILE_VERSION ||
+    !Array.isArray(parsed.entries) ||
+    !validEntries
+  ) {
     throw new Error(`Unsupported timing profile version in ${filePath}`);
   }
   return parsed as TimingProfile;
@@ -449,6 +473,30 @@ export function readShardMetadata(inputPath: string): ShardMetadata[] {
   });
 }
 
+export function hasCompleteShardSet(metadata: ShardMetadata[]): boolean {
+  const expected = new Map([
+    ["normal", 14],
+    ["containers", 6],
+  ]);
+  const seen = new Set<string>();
+  for (const shard of metadata) {
+    const shardCount = expected.get(shard.cohort);
+    if (
+      shardCount === undefined ||
+      shard.shardCount !== shardCount ||
+      !Number.isInteger(shard.shard) ||
+      shard.shard < 1 ||
+      shard.shard > shardCount
+    ) {
+      return false;
+    }
+    const key = `${shard.cohort}:${shard.shard}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+  }
+  return seen.size === 20;
+}
+
 export function readBlobReportJsonl(filePath: string): string {
   if (filePath.endsWith(".jsonl")) return fs.readFileSync(filePath, "utf8");
   const entries = execFileSync("unzip", ["-Z1", filePath], { encoding: "utf8" })
@@ -497,16 +545,16 @@ function runCli(): void {
     ]),
   );
   const previous = args.previous ? readTimingProfile(args.previous) : undefined;
+  const completeShardSet = hasCompleteShardSet(readShardMetadata(input));
   const profile = buildTimingProfile(previous, observations, {
     branch: args.branch ?? process.env.GITHUB_REF_NAME ?? "unknown",
     sha: args.sha ?? process.env.GITHUB_SHA ?? "unknown",
     runId: args["run-id"] ?? process.env.GITHUB_RUN_ID ?? "unknown",
     generatedAt: args.generated ?? new Date().toISOString(),
     fileHashes,
-    knownKeys:
-      observations.length > 0
-        ? new Set(observations.map((observation) => observation.key))
-        : undefined,
+    knownKeys: completeShardSet
+      ? new Set(observations.map((observation) => observation.key))
+      : undefined,
   });
   fs.mkdirSync(path.dirname(path.resolve(output)), { recursive: true });
   fs.writeFileSync(output, `${JSON.stringify(profile, null, 2)}\n`);

@@ -1,7 +1,7 @@
 ---
 id: "08-performance-experiments"
 title: "Run concurrency and setup experiments"
-status: completed
+status: in_progress
 wave: 4
 depends_on:
   - "03-ci-manifest-lifecycle"
@@ -29,13 +29,17 @@ spec: "../../specs/e2e-duration-aware-sharding/spec.md"
 
 ```sh
 cd apps/web
-pnpm exec playwright test --config e2e/playwright.config.ts --project=chromium --workers=2 --shard=2/14
-pnpm exec playwright test --config e2e/playwright.config.ts --project=chromium --workers=1 --shard=2/14
+E2E_SHARD=2 /usr/bin/time -v bash e2e/scripts/run-planned-shard.sh \
+  e2e/manifests/normal/2.json -- --workers=2
+E2E_SHARD=2 /usr/bin/time -v bash e2e/scripts/run-planned-shard.sh \
+  e2e/manifests/normal/2.json -- --workers=1
 ```
 
-Run the paired commands on the same runner class and record results in the
-experiment report. Use the generated duration-aware manifests for matrix
-comparisons after Task 03; do not compare unrelated ordinal assignments.
+Generate `e2e/manifests/normal/2.json` with the Task 03 planner first. Run the
+paired commands on the same runner class and record results in the experiment
+report. The runner forwards the worker override after `--`, so both commands
+execute the exact same duration-aware file selection. Do not compare unrelated
+ordinal assignments.
 
 ## Files likely touched
 
@@ -68,7 +72,8 @@ unchanged.
 ## Implementation result
 
 The README now contains the controlled experiment procedure and result format.
-A local four-test probe passed with workers=1 in 35.5s and workers=2 in 29.2s;
-both had zero retries and backend errors. This single probe is diagnostic only,
-so the CI default remains `workers: 1` and the three-repeat rollout check is
-still required before changing it.
+The runner now supports forwarding worker overrides for paired manifest-based
+measurements. A local four-test probe passed with workers=1 in 35.5s and
+workers=2 in 29.2s; both had zero retries and backend errors. This single probe
+is diagnostic only, so the CI default remains `workers: 1` and the three-repeat
+rollout check is still required before changing it.

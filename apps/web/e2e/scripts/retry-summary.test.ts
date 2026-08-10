@@ -41,12 +41,19 @@ describe("retry summary", () => {
         status: "timedOut",
         errors: [{ message: "Timeout 60000ms exceeded" }],
       }),
+      observation({
+        key: "chromium::tests/terminal.spec.ts::terminal",
+        title: "terminal",
+        status: "failed",
+        errors: [{ message: "terminal failure" }],
+        attachments: [{ name: "trace", path: "test-results/trace.zip" }],
+      }),
     ]);
 
     expect(summary.counts).toEqual({
       passedFirstAttempt: 1,
       passedAfterRetry: 1,
-      failed: 0,
+      failed: 1,
       timedOut: 1,
       skipped: 0,
     });
@@ -56,6 +63,12 @@ describe("retry summary", () => {
         expect.objectContaining({
           key: "chromium::tests/slow.spec.ts::slow",
           finalStatus: "timedOut",
+        }),
+        expect.objectContaining({
+          key: "chromium::tests/terminal.spec.ts::terminal",
+          finalStatus: "failed",
+          errorCategory: "failure",
+          attachments: [{ name: "trace", path: "test-results/trace.zip" }],
         }),
       ]),
     );

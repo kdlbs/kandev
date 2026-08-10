@@ -88,8 +88,9 @@ function relativeTestFile(webRoot: string, filePath: string): string {
 }
 
 function countTestDeclarations(contents: string): number {
-  const matches = contents.match(/\btest(?:\.(?:only|skip|fixme|fail))?\s*\(\s*["'`]/g);
-  return Math.max(1, matches?.length ?? 0);
+  const directMatches = contents.match(/\btest(?:\.(?:only|skip|fixme|fail))?\s*\(\s*["'`]/g);
+  const parameterizedMatches = contents.match(/\btest\.each\s*\([\s\S]*?\)\s*\(\s*["'`]/g);
+  return Math.max(1, (directMatches?.length ?? 0) + (parameterizedMatches?.length ?? 0));
 }
 
 function isMobileFile(file: string): boolean {
@@ -294,6 +295,52 @@ export function createShardPlan(
   };
 }
 
+function validateShardIndexes(shards: Shard[], shardCount: number): void {
+  const seen = new Set<number>();
+  for (const shard of shards) {
+    const invalid =
+      !Number.isInteger(shard.index) ||
+      shard.index < 1 ||
+      shard.index > shardCount ||
+      seen.has(shard.index);
+    if (invalid) throw new Error(`Invalid or duplicate shard index: ${shard.index}`);
+    seen.add(shard.index);
+  }
+}
+
+function validatePlannedUnit(
+  unit: PlannedUnit,
+  expected: Map<string, CatalogUnit>,
+  seen: Set<string>,
+): void {
+  const catalogUnit = expected.get(unit.id);
+  if (!catalogUnit) throw new Error(`Unit is outside the catalog: ${unit.id}`);
+  const matchesCatalog =
+    unit.project === catalogUnit.project &&
+    unit.file === catalogUnit.file &&
+    unit.fileHash === catalogUnit.fileHash &&
+    unit.testCount === catalogUnit.testCount;
+  if (!matchesCatalog) throw new Error(`Unit catalog fields do not match: ${unit.id}`);
+  if (seen.has(unit.id)) throw new Error(`Duplicate unit assignment: ${unit.id}`);
+  seen.add(unit.id);
+}
+
+function validateShardContents(
+  shard: Shard,
+  expected: Map<string, CatalogUnit>,
+  seen: Set<string>,
+): void {
+  for (const unit of shard.units) validatePlannedUnit(unit, expected, seen);
+  const predicted = shard.units.reduce((total, unit) => total + unit.estimatedSeconds, 0);
+  if (Math.abs(predicted - shard.predictedSeconds) > 0.000001) {
+    throw new Error(`Shard ${shard.index} predicted duration does not match its units`);
+  }
+  const files = new Set(shard.units.map((unit) => unit.file));
+  const filesMatch =
+    files.size === shard.files.length && [...files].every((file) => shard.files.includes(file));
+  if (!filesMatch) throw new Error(`Shard ${shard.index} file selections do not match its units`);
+}
+
 export function validateShardManifest(manifest: ShardManifest, catalog: CatalogUnit[]): void {
   if (manifest.version !== SHARD_MANIFEST_VERSION) {
     throw new Error(`Unsupported shard manifest version: ${manifest.version}`);
@@ -301,26 +348,10 @@ export function validateShardManifest(manifest: ShardManifest, catalog: CatalogU
   if (manifest.shardCount !== manifest.shards.length) {
     throw new Error("Shard manifest count does not match its shard entries");
   }
+  validateShardIndexes(manifest.shards, manifest.shardCount);
   const expected = new Map(catalog.map((unit) => [unitId(unit), unit]));
   const seen = new Set<string>();
-  for (const shard of manifest.shards) {
-    for (const unit of shard.units) {
-      if (!expected.has(unit.id)) throw new Error(`Unit is outside the catalog: ${unit.id}`);
-      if (seen.has(unit.id)) throw new Error(`Duplicate unit assignment: ${unit.id}`);
-      seen.add(unit.id);
-    }
-    const predicted = shard.units.reduce((total, unit) => total + unit.estimatedSeconds, 0);
-    if (Math.abs(predicted - shard.predictedSeconds) > 0.000001) {
-      throw new Error(`Shard ${shard.index} predicted duration does not match its units`);
-    }
-    const files = new Set(shard.units.map((unit) => unit.file));
-    if (
-      files.size !== shard.files.length ||
-      [...files].some((file) => !shard.files.includes(file))
-    ) {
-      throw new Error(`Shard ${shard.index} file selections do not match its units`);
-    }
-  }
+  for (const shard of manifest.shards) validateShardContents(shard, expected, seen);
   const missing = [...expected.keys()].filter((id) => !seen.has(id));
   if (missing.length > 0) throw new Error(`Missing catalog units: ${missing.join(", ")}`);
   if (manifest.catalog.unitCount !== catalog.length) {

@@ -47,7 +47,7 @@ without a hand-edited shard file.
 The profile is an artifact, not a checked-in source file. Its stable test key
 is:
 
-```
+```text
 <playwright project> + <repository-relative spec path> + <full test title>
 ```
 
