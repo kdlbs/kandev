@@ -147,6 +147,61 @@ form.
 
 ## Implementation sequence
 
+## Completion execution plan
+
+The existing GitLab integration is the parity reference. Each item below is a
+separate reviewable commit series; do not call the provider complete until all
+items and their tests are present.
+
+1. **Finish the watch execution path**
+   - Extend the Forgejo issue-watch model/UI with workflow, workflow-step,
+     repository/base branch, prompt, agent profile, executor profile, cleanup,
+     and inflight-limit fields.
+   - Wire `PollIssueWatch` to the normal task service. Create one task per
+     claimed external issue with provider metadata and a durable dedupe record.
+   - Add a scheduler that polls enabled watches on their interval, records
+     errors, respects inflight capacity, and publishes task/watch updates.
+   - Tests: task creation, repeated/concurrent polls, disabled watches,
+     failures, workspace isolation, cleanup, and scheduler lifecycle.
+
+2. **Bring PR/review capability to Forgejo parity**
+   - Expand the REST client for PR status, commits, changed files, comments,
+     reviews/approvals, subscriptions, mergeability, and Forgejo Actions
+     check-rollups where the server exposes them.
+   - Persist task-PR status and review-watch state; implement refresh, manual
+     link/create/unlink, reviewer/comment actions, and clear unsupported
+     responses for Forgejo APIs without an equivalent.
+   - Add review watches and action presets using the GitLab ownership/reset
+     patterns.
+   - Tests: client contract fixtures, persistence migrations, state refresh,
+     cross-workspace authorization, and action error mapping.
+
+3. **Events and resilience**
+   - Add a provider poller lifecycle in backend startup and workspace health
+     reporting. Publish Kandev events for config, watch, issue, and PR changes.
+   - Implement signed Forgejo webhook verification/delivery deduplication as
+     an acceleration path; polling remains the correctness fallback.
+   - Tests: HMAC verification, replay protection, poll/webhook convergence,
+     cancellation, and restart recovery.
+
+4. **Dedicated web experience**
+   - Replace the compact settings-only surface with a Forgejo queue page,
+     task-detail links/actions, watch management, PR feedback panels, and
+     saved presets following the GitLab route/store/hook patterns.
+   - Add a Forgejo state slice, API hooks, WebSocket handlers, loading/error
+     states, accessible controls, and mobile drawer/navigation behavior.
+   - Tests: API/hook/component units plus desktop and mobile Playwright flows
+     for connect, queue, watch-to-task, task links, PR creation, refresh, and
+     disconnect.
+
+5. **Validation and PR maintenance**
+   - Run focused Forgejo/backend tests, backend application tests, frontend
+     typecheck/lint/unit tests, and Forgejo desktop/mobile E2E tests.
+   - Push each commit to `botwork123:feat/forgejo-integration-plan`, monitor
+     PR #2479 checks/review, and keep the PR description/checklist current.
+   - Before declaring parity, audit the GitLab backend/web route and behavior
+     inventory against Forgejo, documenting intentional Forgejo API gaps.
+
 1. **Foundation and connection**
    - Define models, origin normalization, PAT secret key, store migration, and
      mock/noop/PAT clients.
