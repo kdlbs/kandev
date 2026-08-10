@@ -368,7 +368,9 @@ func TestWaitAgentctlHealthyFailsOnNonSuccessStatus(t *testing.T) {
 	}
 	defer func() { _ = fwd.Close() }()
 
-	err = waitAgentctlHealthy(context.Background(), fwd.LocalPort(), 300*time.Millisecond)
+	// waitAgentctlHealthy sleeps 200ms between attempts, so the deadline has to
+	// span at least two windows for the retry loop itself to be exercised.
+	err = waitAgentctlHealthy(context.Background(), fwd.LocalPort(), 600*time.Millisecond)
 	if err == nil || !strings.Contains(err.Error(), "not reachable") {
 		t.Fatalf("error = %v, want unreachable after the deadline", err)
 	}

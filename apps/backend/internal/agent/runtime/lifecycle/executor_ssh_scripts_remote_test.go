@@ -241,13 +241,9 @@ func TestSSHExecutorRunPrepareScript(t *testing.T) {
 		}
 	})
 
-	t.Run("no script configured is a no-op", func(t *testing.T) {
+	t.Run("an unresolvable placeholder aborts before any SSH work", func(t *testing.T) {
 		server := newFakeSSHServer(t, nil)
 		exec := &SSHExecutor{logger: newTestLogger()}
-		// An explicit empty setup script plus an empty default yields nothing
-		// to run only when the default is empty too, so instead assert the
-		// resolver's contract: an unresolvable placeholder aborts before any
-		// remote work happens.
 		err := exec.runPrepareScript(context.Background(), server.dial(t), "/remote/task",
 			&ExecutorCreateRequest{Metadata: map[string]interface{}{
 				MetadataKeySetupScript: "echo {{unknown.placeholder}}",

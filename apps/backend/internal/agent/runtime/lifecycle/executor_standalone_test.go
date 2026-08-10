@@ -239,7 +239,9 @@ func TestStandaloneExecutorCreateInstanceSurfacesControlFailure(t *testing.T) {
 
 func TestStandaloneExecutorCreateInstanceFailsWhenAgentctlNeverBecomesReady(t *testing.T) {
 	control := newStandaloneControlServer(t, false)
-	ctx, cancel := context.WithTimeout(context.Background(), 750*time.Millisecond)
+	// waitForReady polls every 500ms; give the deadline a wide enough margin
+	// that a loaded CI runner still observes several retries.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	_, err := control.executor(t).CreateInstance(ctx, &ExecutorCreateRequest{InstanceID: "instance-1"})

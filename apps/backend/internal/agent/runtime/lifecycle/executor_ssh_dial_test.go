@@ -450,7 +450,7 @@ func TestDialSSHConnectsAndEnforcesThePinnedFingerprint(t *testing.T) {
 }
 
 func TestDialViaJumpTunnelsThroughTheBastion(t *testing.T) {
-	home := newTestHomeDir(t)
+	newTestHomeDir(t)
 	identity := writeTestIdentityFile(t)
 
 	final := newFakeSSHServer(t, func(string, string) sshExecResult { return sshOut("behind-the-bastion\n") })
@@ -478,7 +478,6 @@ func TestDialViaJumpTunnelsThroughTheBastion(t *testing.T) {
 	if out != "behind-the-bastion\n" {
 		t.Fatalf("stdout = %q, want the final host's output", out)
 	}
-	_ = home
 }
 
 func TestDialViaJumpFailsWhenTheBastionIsUnreachable(t *testing.T) {

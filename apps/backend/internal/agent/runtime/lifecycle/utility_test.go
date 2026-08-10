@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -78,8 +79,18 @@ func (r *stubProfileResolver) ResolveProfile(context.Context, string) (*AgentPro
 // inferenceHarness wires a Manager whose execution for "session-1" points at an
 // in-process agentctl serving /api/v1/inference/prompt.
 type inferenceHarness struct {
-	manager  *Manager
+	manager *Manager
+
+	mu       sync.Mutex
 	requests []utility.PromptRequest
+}
+
+// recorded returns a copy of the prompt requests the fake agentctl saw. The
+// handler appends from a server goroutine, so every read goes through the lock.
+func (h *inferenceHarness) recorded() []utility.PromptRequest {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]utility.PromptRequest(nil), h.requests...)
 }
 
 func newInferenceHarness(t *testing.T, resolver ProfileResolver, registered ...agents.Agent) *inferenceHarness {
@@ -95,7 +106,9 @@ func newInferenceHarness(t *testing.T, resolver ProfileResolver, registered ...a
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
+		h.mu.Lock()
 		h.requests = append(h.requests, req)
+		h.mu.Unlock()
 		_ = json.NewEncoder(w).Encode(utility.PromptResponse{
 			Success:  true,
 			Response: "answer for " + req.Prompt,
@@ -199,10 +212,11 @@ func TestManagerExecuteInferencePromptSendsTheAgentInferenceConfig(t *testing.T)
 	if !resp.Success || resp.Response != "answer for summarise this" {
 		t.Fatalf("response = %+v", resp)
 	}
-	if len(harness.requests) != 1 {
-		t.Fatalf("agentctl calls = %d, want 1", len(harness.requests))
+	recorded := harness.recorded()
+	if len(recorded) != 1 {
+		t.Fatalf("agentctl calls = %d, want 1", len(recorded))
 	}
-	got := harness.requests[0]
+	got := recorded[0]
 	if got.Prompt != "summarise this" || got.AgentID != "inference-ok" || got.Model != "claude-haiku-4-5" {
 		t.Fatalf("request = %+v", got)
 	}
@@ -312,10 +326,11 @@ func TestManagerExecuteInferenceProfilePrompt(t *testing.T) {
 		if resp.Response != "answer for hello" {
 			t.Fatalf("response = %+v", resp)
 		}
-		if len(harness.requests) != 1 {
-			t.Fatalf("agentctl calls = %d", len(harness.requests))
+		recorded := harness.recorded()
+		if len(recorded) != 1 {
+			t.Fatalf("agentctl calls = %d", len(recorded))
 		}
-		got := harness.requests[0]
+		got := recorded[0]
 		if got.AgentID != "inference-ok" || got.Model != "claude-haiku-4-5" || got.Mode != "plan" {
 			t.Fatalf("request = %+v", got)
 		}
