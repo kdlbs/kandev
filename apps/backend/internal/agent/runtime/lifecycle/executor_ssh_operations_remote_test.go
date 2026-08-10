@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -274,15 +275,78 @@ func TestRunSSHCommandStdinFeedsRemoteStdin(t *testing.T) {
 	}
 }
 
-// NOTE: the context-cancellation arm of runSSHCommandStdin's select is
-// deliberately NOT covered here. Reaching it requires the remote command to
-// still be running when the context is cancelled, and on that path the
-// function reads outBuf/errBuf while golang.org/x/crypto/ssh's stdout/stderr
-// copier goroutines are still writing into them — a data race that `go test
-// -race` reports against the production code, not against the test. Covering
-// it would mean shipping a test that fails under -race. See the PR discussion;
-// once the buffers are made race-safe, add a test that holds the remote
-// command open, cancels, and asserts errors.Is(err, context.Canceled).
+func TestRunSSHCommandAbandonsARunningCommandOnCancellation(t *testing.T) {
+	// The remote command is held open across the cancellation for two reasons:
+	// it makes the select land on ctx.Done() deterministically (cancelling up
+	// front leaves both arms ready, and Go picks a ready arm at random), and it
+	// keeps x/crypto/ssh's stdout/stderr copier goroutines writing while the
+	// buffers are read — so under -race this doubles as the regression test for
+	// the syncBuffer guarding those buffers.
+	started := make(chan struct{})
+	release := make(chan struct{})
+	finished := make(chan struct{})
+	var releaseOnce, startOnce sync.Once
+	releaseRemote := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(releaseRemote)
+
+	server := newFakeSSHServer(t, func(string, string) sshExecResult {
+		startOnce.Do(func() { close(started) })
+		<-release
+		close(finished)
+		return sshOut("output produced after the caller gave up")
+	})
+	client := server.dial(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		<-started
+		cancel()
+	}()
+
+	_, _, err := runSSHCommand(ctx, client, "sleep 60")
+
+	// Returning while the command is still running is the whole point: the
+	// caller must not be pinned to a remote command that outlives its context.
+	select {
+	case <-finished:
+		t.Fatal("runSSHCommand waited for the remote command instead of abandoning it")
+	default:
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+
+	// Let the remote command finish and drain the server handler before the
+	// test returns, so goleak sees no stragglers.
+	releaseRemote()
+	<-finished
+}
+
+func TestSyncBufferSnapshotsConcurrentWrites(t *testing.T) {
+	var buf syncBuffer
+	const writers, perWriter = 8, 50
+
+	var wg sync.WaitGroup
+	wg.Add(writers)
+	for range writers {
+		go func() {
+			defer wg.Done()
+			for range perWriter {
+				_, _ = buf.Write([]byte("x"))
+			}
+		}()
+	}
+	// Read concurrently with the writes; under -race this is the assertion.
+	for range 100 {
+		_ = buf.String()
+	}
+	wg.Wait()
+
+	if got := len(buf.String()); got != writers*perWriter {
+		t.Fatalf("buffered bytes = %d, want %d", got, writers*perWriter)
+	}
+}
 
 func TestRunSSHCommandSurfacesRemoteExitStatus(t *testing.T) {
 	server := newFakeSSHServer(t, func(string, string) sshExecResult {
