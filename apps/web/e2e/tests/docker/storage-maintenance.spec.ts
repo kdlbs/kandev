@@ -14,7 +14,23 @@ function createStoppedContainer(labels: string[]): string {
 }
 
 async function openStorageSettings(page: Page): Promise<void> {
-  await page.goto("/settings/system/storage");
+  // The Go-served SPA can keep a navigation waiting for the browser's `load`
+  // event while a dynamic Settings chunk is still resolving. Use
+  // `domcontentloaded` so the visibility assertion below owns readiness, and
+  // keep the navigation itself bounded so the fallback can recover a stalled
+  // document request.
+  try {
+    await page.goto("/settings/system/storage", {
+      waitUntil: "domcontentloaded",
+      timeout: 30_000,
+    });
+  } catch (error) {
+    try {
+      await page.reload({ waitUntil: "domcontentloaded", timeout: 30_000 });
+    } catch {
+      throw error;
+    }
+  }
   const storagePage = page.getByTestId("storage-settings-page");
 
   try {
@@ -30,9 +46,24 @@ async function openStorageSettings(page: Page): Promise<void> {
     // A slow or interrupted dynamic Settings chunk can leave the SPA in its
     // loading fallback. One fresh document request is the same recovery path
     // used by the app for a failed chunk and keeps this test bounded.
-    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.reload({ waitUntil: "domcontentloaded", timeout: 30_000 });
     await expect(storagePage).toBeVisible({ timeout: 60_000 });
   }
+}
+
+async function refreshStorageOverview(page: Page): Promise<void> {
+  const analyze = page.getByTestId("storage-analyze");
+  const managedContainers = page.getByTestId("storage-resource-managed-containers-trigger");
+  await analyze.click();
+  await expect(analyze).toHaveAttribute("data-job-state", "succeeded", {
+    timeout: 60_000,
+  });
+  // The terminal job state arrives before the overview reload completes. Give
+  // the hook's bounded refresh retries time to replace a transient unavailable
+  // snapshot before asserting the Docker measurement.
+  await expect(managedContainers).toContainText("Kandev containers<0.01 GB", {
+    timeout: 60_000,
+  });
 }
 
 test("removes only stopped Kandev-labeled containers and gates daemon-wide cleanup", async ({
@@ -60,10 +91,11 @@ test("removes only stopped Kandev-labeled containers and gates daemon-wide clean
   const unrelated = createStoppedContainer(["e2e.storage=unrelated"]);
   try {
     await openStorageSettings(testPage);
+    // The first overview can race Docker client startup and cache an
+    // unavailable result. Analyze after creating the fixtures so this test
+    // observes the current daemon state instead of that transient snapshot.
+    await refreshStorageOverview(testPage);
     await expect(testPage.getByTestId("storage-docker-build-cache")).toBeDisabled();
-    await expect(testPage.getByTestId("storage-resource-managed-containers-trigger")).toContainText(
-      "Kandev containers<0.01 GB",
-    );
     await testPage.getByTestId("storage-resource-managed-containers-trigger").click();
     await expect(testPage.getByTestId("storage-resource-managed-containers")).toContainText(
       "2 managed containers",
