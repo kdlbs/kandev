@@ -101,7 +101,7 @@ func TestStartProcessMergesManagedGoCacheAndReleasesTerminalLease(t *testing.T) 
 	manager.SetActivityCoordinator(coordinator)
 	execution := &AgentExecution{
 		ID: "exec-1", SessionID: "session-1", agentctl: client,
-		Metadata: map[string]interface{}{managedGoCacheMetadataKey: "/managed/go-cache"},
+		metadata: map[string]interface{}{managedGoCacheMetadataKey: "/managed/go-cache"},
 	}
 	if err := manager.executionStore.Add(execution); err != nil {
 		t.Fatal(err)

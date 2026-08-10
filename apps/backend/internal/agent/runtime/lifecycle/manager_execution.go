@@ -879,10 +879,7 @@ func (m *Manager) persistRuntimeSecret(
 		return
 	}
 
-	if execution.Metadata == nil {
-		execution.Metadata = make(map[string]interface{})
-	}
-	execution.Metadata[metadataKey] = secret.ID
+	execution.setMetadataValue(metadataKey, secret.ID)
 
 	m.logger.Debug("persisted runtime secret in secret store",
 		zap.String("instance_id", instance.InstanceID),

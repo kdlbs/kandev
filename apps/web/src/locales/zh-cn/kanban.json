@@ -4,6 +4,7 @@
   "allRepositories": "全部仓库",
   "allWorkflows": "全部工作流",
   "allWorkflowsTitleCase": "全部工作流",
+  "allWorkspaces": "所有工作区",
   "approvalRequired": "需要审批",
   "archive": "归档",
   "archiveCount_one": "归档 {{count}} 项",

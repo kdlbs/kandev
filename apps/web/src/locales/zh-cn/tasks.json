@@ -10,6 +10,10 @@
   "columnWorkflow": "工作流",
   "delete": "删除",
   "deleteTask": "删除任务",
+  "failedToArchiveTask": "无法归档任务",
+  "failedToDeleteTask": "无法删除任务",
+  "failedToLoadTasks": "无法加载任务",
+  "failedToUnarchiveTask": "无法取消归档任务",
   "goToFirstPage": "转到第一页",
   "goToLastPage": "转到最后一页",
   "goToNextPage": "转到下一页",
@@ -39,6 +43,12 @@
   "sortTitleZA": "标题 Z-A",
   "sortUpdatedNewest": "更新时间（最新）",
   "sortUpdatedOldest": "更新时间（最早）",
+  "taskArchived": "任务已归档",
+  "taskArchivedDescription": "任务已成功归档。",
+  "taskUnarchived": "任务已取消归档",
   "unarchive": "取消归档",
+  "unarchivedBranchesMissing_one": "分支 {{branches}} 在本地和远程都已不存在。下一个会话将从基础分支重新开始。",
+  "unarchivedBranchesMissing_other": "分支 {{branches}} 在本地和远程都已不存在。下一个会话将从基础分支重新开始。",
+  "unarchivedTaskRestored": "任务已恢复。",
   "unarchiveTask": "取消归档任务"
 }

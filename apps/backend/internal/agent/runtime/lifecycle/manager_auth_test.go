@@ -127,7 +127,7 @@ func TestPersistAuthToken(t *testing.T) {
 			AuthToken:  "handshake-token-abc",
 		}
 		execution := &AgentExecution{
-			Metadata: make(map[string]interface{}),
+			metadata: make(map[string]interface{}),
 		}
 
 		m.persistAuthToken(context.Background(), instance, execution)
@@ -138,9 +138,10 @@ func TestPersistAuthToken(t *testing.T) {
 		}
 
 		// Verify metadata has the secret ID
-		secretID, ok := execution.Metadata[MetadataKeyAuthTokenSecret].(string)
+		raw, _ := execution.metadataValue(MetadataKeyAuthTokenSecret)
+		secretID, ok := raw.(string)
 		if !ok || secretID == "" {
-			t.Fatalf("expected secret ID in metadata, got %v", execution.Metadata[MetadataKeyAuthTokenSecret])
+			t.Fatalf("expected secret ID in metadata, got %v", raw)
 		}
 
 		// Verify we can retrieve the token
@@ -158,14 +159,14 @@ func TestPersistAuthToken(t *testing.T) {
 		m := &Manager{logger: log, secretStore: store}
 
 		instance := &ExecutorInstance{InstanceID: "exec-123456789012"}
-		execution := &AgentExecution{Metadata: make(map[string]interface{})}
+		execution := &AgentExecution{metadata: make(map[string]interface{})}
 
 		m.persistAuthToken(context.Background(), instance, execution)
 
 		if len(store.store) != 0 {
 			t.Fatal("expected no secrets stored")
 		}
-		if _, ok := execution.Metadata[MetadataKeyAuthTokenSecret]; ok {
+		if _, ok := execution.metadataValue(MetadataKeyAuthTokenSecret); ok {
 			t.Fatal("expected no metadata key")
 		}
 	})
@@ -177,7 +178,7 @@ func TestPersistAuthToken(t *testing.T) {
 			InstanceID: "exec-123456789012",
 			AuthToken:  "some-token",
 		}
-		execution := &AgentExecution{Metadata: make(map[string]interface{})}
+		execution := &AgentExecution{metadata: make(map[string]interface{})}
 
 		// Should not panic
 		m.persistAuthToken(context.Background(), instance, execution)
@@ -195,10 +196,7 @@ func TestPersistAuthToken(t *testing.T) {
 
 		m.persistAuthToken(context.Background(), instance, execution)
 
-		if execution.Metadata == nil {
-			t.Fatal("expected metadata to be initialized")
-		}
-		if _, ok := execution.Metadata[MetadataKeyAuthTokenSecret]; !ok {
+		if _, ok := execution.metadataValue(MetadataKeyAuthTokenSecret); !ok {
 			t.Fatal("expected secret ID in metadata")
 		}
 	})
@@ -214,23 +212,25 @@ func TestPersistRuntimeSecrets(t *testing.T) {
 		AuthToken:      "agentctl-token",
 		BootstrapNonce: "bootstrap-nonce",
 	}
-	execution := &AgentExecution{Metadata: make(map[string]interface{})}
+	execution := &AgentExecution{metadata: make(map[string]interface{})}
 
 	m.persistRuntimeSecrets(context.Background(), instance, execution)
 
-	authSecretID, ok := execution.Metadata[MetadataKeyAuthTokenSecret].(string)
+	rawAuth, _ := execution.metadataValue(MetadataKeyAuthTokenSecret)
+	authSecretID, ok := rawAuth.(string)
 	if !ok || authSecretID == "" {
-		t.Fatalf("expected auth token secret ID, got %v", execution.Metadata[MetadataKeyAuthTokenSecret])
+		t.Fatalf("expected auth token secret ID, got %v", rawAuth)
 	}
-	nonceSecretID, ok := execution.Metadata[MetadataKeyBootstrapNonceSecret].(string)
+	rawNonce, _ := execution.metadataValue(MetadataKeyBootstrapNonceSecret)
+	nonceSecretID, ok := rawNonce.(string)
 	if !ok || nonceSecretID == "" {
-		t.Fatalf("expected bootstrap nonce secret ID, got %v", execution.Metadata[MetadataKeyBootstrapNonceSecret])
+		t.Fatalf("expected bootstrap nonce secret ID, got %v", rawNonce)
 	}
 
-	if got := m.revealRuntimeSecret(context.Background(), execution.Metadata, MetadataKeyAuthTokenSecret); got != "agentctl-token" {
+	if got := m.revealRuntimeSecret(context.Background(), execution.MetadataSnapshot(), MetadataKeyAuthTokenSecret); got != "agentctl-token" {
 		t.Fatalf("revealed auth token = %q, want agentctl-token", got)
 	}
-	if got := m.revealRuntimeSecret(context.Background(), execution.Metadata, MetadataKeyBootstrapNonceSecret); got != "bootstrap-nonce" {
+	if got := m.revealRuntimeSecret(context.Background(), execution.MetadataSnapshot(), MetadataKeyBootstrapNonceSecret); got != "bootstrap-nonce" {
 		t.Fatalf("revealed bootstrap nonce = %q, want bootstrap-nonce", got)
 	}
 }

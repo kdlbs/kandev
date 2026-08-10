@@ -266,19 +266,23 @@ func (r *Repository) validateCutover(c *worktreeCutover, tx *sqlx.Tx) error {
 	}
 
 	// Every session that referenced a worktree must resolve to an
-	// environment that owns that worktree.
+	// environment that owns that worktree. The owning environment can belong
+	// to another task when the session borrows a shared workspace.
 	for _, wt := range c.sessionWts {
-		if c.isSupersededHistoricalWorktree(wt) {
+		if c.isSupersededSessionWorktree(wt) {
 			continue
 		}
 		envID := c.sessionEnvIDs[wt.sessionID]
 		if envID == "" {
 			return fmt.Errorf("cutover: session %s lost its environment", wt.sessionID)
 		}
-		targets, ok := c.tasks[c.sessionTasks[wt.sessionID]]
+		ownerTaskID := c.sessionOwnerTaskID(wt.sessionID)
+		targets, ok := c.tasks[ownerTaskID]
 		if !ok || targets.envID != envID || !targets.ownsWorktree(wt.worktreeID) {
-			return fmt.Errorf("cutover: session %s worktree %s has no environment-repository owner",
-				wt.sessionID, wt.worktreeID)
+			return fmt.Errorf(
+				"cutover: session %s worktree %s has no environment-repository owner "+
+					"(session task %s, environment %s owned by task %s)",
+				wt.sessionID, wt.worktreeID, c.sessionTasks[wt.sessionID], envID, ownerTaskID)
 		}
 	}
 
@@ -333,7 +337,7 @@ func (c *worktreeCutover) legacyWorktreeInventory() map[string]bool {
 		}
 	}
 	for _, wt := range c.sessionWts {
-		if wt.worktreeID == "" || c.isSupersededHistoricalWorktree(wt) {
+		if wt.worktreeID == "" || c.isSupersededSessionWorktree(wt) {
 			continue
 		}
 		inventory[worktreeInventoryKey(wt.worktreeID, wt.worktreePath, wt.worktreeBranch)] = true

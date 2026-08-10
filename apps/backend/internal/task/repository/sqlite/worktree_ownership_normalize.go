@@ -14,19 +14,20 @@ import (
 
 // worktreeCutover holds the legacy inventory and the normalized result.
 type worktreeCutover struct {
-	envs                         map[string]*legacyEnv
-	taskEnvs                     map[string][]*legacyEnv
-	sessions                     map[string]*legacySession
-	sessionTasks                 map[string]string
-	sessionEnvIDs                map[string]string
-	historicalWorktreeSuperseded map[string]bool
-	envRepos                     []legacyEnvRepo
-	sessionWts                   []legacySessionWorktree
-	tasks                        map[string]*taskWorktreeTargets
-	taskEnvIDs                   map[string]string
-	loserEnvIDs                  map[string]bool
-	executorTypes                map[string]string
-	conflicts                    []string
+	envs                      map[string]*legacyEnv
+	taskEnvs                  map[string][]*legacyEnv
+	sessions                  map[string]*legacySession
+	sessionTasks              map[string]string
+	sessionEnvIDs             map[string]string
+	sessionWorktreeSuperseded map[string]bool
+	authoritativeWorktreeIDs  map[string]bool
+	envRepos                  []legacyEnvRepo
+	sessionWts                []legacySessionWorktree
+	tasks                     map[string]*taskWorktreeTargets
+	taskEnvIDs                map[string]string
+	loserEnvIDs               map[string]bool
+	executorTypes             map[string]string
+	conflicts                 []string
 }
 
 type legacyEnv struct {
@@ -247,10 +248,13 @@ func (c *worktreeCutover) normalize(tx *sqlx.Tx) error {
 	if err := c.backfillMissingEnvironments(tx); err != nil {
 		return err
 	}
+	// Sessions are linked before session worktrees are merged: a session's
+	// worktree belongs to the environment the session resolves to, which is
+	// not always an environment owned by the session's own task.
+	c.linkSessions()
 	c.mergeSessionWorktrees()
 	c.registerWorktreeIdentities()
 	c.bindTargetsToEnvironments()
-	c.linkSessions()
 
 	if len(c.conflicts) > 0 {
 		return fmt.Errorf("cutover: %d conflicting legacy ownership row(s):\n- %s",
@@ -300,7 +304,9 @@ func (c *worktreeCutover) mergeLegacyEnvRepoRows() {
 		targets := c.targetsForTask(env.taskID)
 		if err := targets.mergeLegacyEnvRepo(row); err != nil {
 			c.conflicts = append(c.conflicts, fmt.Sprintf("environment %s repository row: %v", row.envID, err))
+			continue
 		}
+		c.recordAuthoritativeWorktree(env.taskID, row.worktreeID)
 	}
 }
 
@@ -314,20 +320,21 @@ func (c *worktreeCutover) mergeFlatEnvironmentFields() {
 		targets := c.targetsForTask(env.taskID)
 		if err := targets.mergeFlatEnv(env); err != nil {
 			c.conflicts = append(c.conflicts, fmt.Sprintf("environment %s flat worktree fields: %v", env.id, err))
+			continue
 		}
+		c.recordAuthoritativeWorktree(env.taskID, env.worktreeID)
 	}
 }
 
 // mergeSessionWorktrees folds every legacy session-worktree row into the
-// session's task targets.
+// targets of the task that owns the session's environment.
 func (c *worktreeCutover) mergeSessionWorktrees() {
 	for _, wt := range c.sessionWts {
-		session, ok := c.sessions[wt.sessionID]
-		if !ok {
+		if _, ok := c.sessions[wt.sessionID]; !ok {
 			continue // already reported in load
 		}
-		targets := c.targetsForTask(session.taskID)
-		if err := targets.mergeSessionWorktree(wt, c.isSupersededHistoricalWorktree(wt)); err != nil {
+		targets := c.targetsForTask(c.sessionOwnerTaskID(wt.sessionID))
+		if err := targets.mergeSessionWorktree(wt, c.isSupersededSessionWorktree(wt)); err != nil {
 			c.conflicts = append(c.conflicts, fmt.Sprintf(
 				"session %s worktree %s: %v", wt.sessionID, wt.worktreeID, err))
 		}
@@ -353,6 +360,9 @@ func isLegacyHistoricalSession(state string) bool {
 // environment.
 func (c *worktreeCutover) bindTargetsToEnvironments() {
 	for taskID, targets := range c.tasks {
+		if len(targets.ordering) == 0 {
+			continue // nothing to home
+		}
 		envID := c.taskEnvIDs[taskID]
 		if envID == "" {
 			c.conflicts = append(c.conflicts, fmt.Sprintf(
@@ -377,14 +387,20 @@ func (c *worktreeCutover) targetsForTask(taskID string) *taskWorktreeTargets {
 
 // backfillMissingEnvironments creates a normalized environment for every task
 // that has sessions but no environment, mirroring the legacy startup backfill
-// (now folded into this one-time cutover).
+// (now folded into this one-time cutover). Sessions that borrow a surviving
+// environment from another task are skipped: fabricating an environment for
+// the borrowing task would duplicate the shared workspace.
 func (c *worktreeCutover) backfillMissingEnvironments(tx *sqlx.Tx) error {
 	tasksWithSessions := make(map[string]*legacySession)
 	for _, s := range c.sessions {
-		if _, ok := c.taskEnvIDs[s.taskID]; !ok {
-			if _, seen := tasksWithSessions[s.taskID]; !seen {
-				tasksWithSessions[s.taskID] = s
-			}
+		if _, ok := c.taskEnvIDs[s.taskID]; ok {
+			continue
+		}
+		if c.hasSurvivingEnvironmentRef(s.id) {
+			continue
+		}
+		if _, seen := tasksWithSessions[s.taskID]; !seen {
+			tasksWithSessions[s.taskID] = s
 		}
 	}
 	for taskID, sample := range tasksWithSessions {
@@ -455,23 +471,29 @@ func (c *worktreeCutover) linkSessions() {
 	}
 }
 
-// isSupersededHistoricalWorktree reports whether a legacy row is no longer an
-// ownership source because a canonical repository row already represents the
-// same task/repository slot. A historical row with no canonical replacement
-// remains eligible for backfill.
-func (c *worktreeCutover) isSupersededHistoricalWorktree(wt legacySessionWorktree) bool {
+// isSupersededSessionWorktree reports whether a legacy session row is no
+// longer an ownership source. Repository rows and the surviving flat
+// environment take precedence for the same physical identity regardless of
+// session state. Historical rows with no authoritative replacement remain
+// eligible for backfill.
+func (c *worktreeCutover) isSupersededSessionWorktree(wt legacySessionWorktree) bool {
 	cacheKey := wt.sessionID + "\x00" + wt.worktreeID
-	if superseded, ok := c.historicalWorktreeSuperseded[cacheKey]; ok {
+	if superseded, ok := c.sessionWorktreeSuperseded[cacheKey]; ok {
 		return superseded
 	}
 
+	session, hasSession := c.sessions[wt.sessionID]
+	ownerTaskID := c.sessionOwnerTaskID(wt.sessionID)
 	superseded := false
-	if isLegacyDeletedWorktree(wt) {
+	switch {
+	case isLegacyDeletedWorktree(wt):
 		superseded = true
-	} else if session, ok := c.sessions[wt.sessionID]; ok && isLegacyHistoricalSession(session.state) {
+	case hasSession && c.authoritativeWorktreeIDs[authoritativeWorktreeKey(ownerTaskID, wt.worktreeID)]:
+		superseded = true
+	case hasSession && isLegacyHistoricalSession(session.state):
 		for _, row := range c.envRepos {
 			env, ok := c.envs[row.envID]
-			if !ok || env.taskID != session.taskID || row.worktreeID == "" {
+			if !ok || env.taskID != ownerTaskID || row.worktreeID == "" {
 				continue
 			}
 			if row.repositoryID == wt.repositoryID && row.branchSlug == wt.branchSlug {
@@ -480,8 +502,47 @@ func (c *worktreeCutover) isSupersededHistoricalWorktree(wt legacySessionWorktre
 			}
 		}
 	}
-	c.historicalWorktreeSuperseded[cacheKey] = superseded
+	c.sessionWorktreeSuperseded[cacheKey] = superseded
 	return superseded
+}
+
+// sessionOwnerTaskID returns the task that owns the environment a session
+// resolves to. A session does not always run in an environment owned by its
+// own task: workspace-group members, subtasks inheriting their parent's
+// workspace, and tasks that received a shared environment through ownership
+// handoff all borrow another task's environment. The physical worktree such a
+// session used belongs to that environment, so its normalized repository row
+// must be homed on the owning task — homing it on the borrowing task would
+// give one worktree two owners.
+//
+// Only valid after linkSessions has settled every session's environment.
+func (c *worktreeCutover) sessionOwnerTaskID(sessionID string) string {
+	if env, ok := c.envs[c.sessionEnvIDs[sessionID]]; ok && env.taskID != "" {
+		return env.taskID
+	}
+	return c.sessionTasks[sessionID]
+}
+
+// hasSurvivingEnvironmentRef reports whether a session already points at an
+// environment that survives the cutover (its own task's or a borrowed one).
+func (c *worktreeCutover) hasSurvivingEnvironmentRef(sessionID string) bool {
+	envID := c.sessionEnvIDs[sessionID]
+	if envID == "" || c.loserEnvIDs[envID] {
+		return false
+	}
+	_, ok := c.envs[envID]
+	return ok
+}
+
+func (c *worktreeCutover) recordAuthoritativeWorktree(taskID, worktreeID string) {
+	if worktreeID == "" {
+		return
+	}
+	c.authoritativeWorktreeIDs[authoritativeWorktreeKey(taskID, worktreeID)] = true
+}
+
+func authoritativeWorktreeKey(taskID, worktreeID string) string {
+	return taskID + "\x00" + worktreeID
 }
 
 // registerWorktreeIdentities ensures every physical worktree is owned by

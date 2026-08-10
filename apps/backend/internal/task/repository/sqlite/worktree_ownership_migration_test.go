@@ -569,6 +569,68 @@ func TestCutover_CanonicalRepoWinsOverStaleFlatMetadata(t *testing.T) {
 	}
 }
 
+// TestCutover_PrefersCanonicalMetadataForResumableSession proves that stale
+// session metadata cannot override a canonical row for the same worktree.
+func TestCutover_PrefersCanonicalMetadataForResumableSession(t *testing.T) {
+	db := openLegacyDB(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	seed := legacySeed{envID: "env-resumable", taskID: "task-resumable", repoID: "repo-resumable", sessionID: "sess-resumable"}
+	seedLegacyTask(t, db, seed, now)
+	if _, err := db.Exec(db.Rebind(`UPDATE task_sessions SET state = 'WAITING_FOR_INPUT' WHERE id = ?`), seed.sessionID); err != nil {
+		t.Fatalf("set session state: %v", err)
+	}
+	seedLegacyFlatEnv(t, db, seed, "wt-resumable", "/tasks/resumable/repo", "feature/current", now)
+	seedLegacyEnvRepo(t, db, "env-repo-resumable", seed.envID, seed.repoID, "wt-resumable", "/tasks/resumable/repo", "feature/current", now)
+	seedLegacySessionWorktree(t, db, seed.sessionID, "wt-resumable", seed.repoID, "", "/tasks/resumable/repo", "feature/stale-session", "active", now)
+
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("cutover: %v", err)
+	}
+	env, err := repo.GetTaskEnvironment(context.Background(), seed.envID)
+	if err != nil {
+		t.Fatalf("get task environment: %v", err)
+	}
+	session, err := repo.GetTaskSession(context.Background(), seed.sessionID)
+	if err != nil {
+		t.Fatalf("get task session: %v", err)
+	}
+	if len(env.Repos) != 1 || env.Repos[0].WorktreeBranch != "feature/current" ||
+		session.State != "WAITING_FOR_INPUT" {
+		t.Fatalf("normalized environment = %+v, session state = %q", env.Repos, session.State)
+	}
+}
+
+// TestCutover_PrefersFlatMetadataForSameWorktree proves that the surviving
+// flat environment beats stale session metadata when no canonical row exists.
+func TestCutover_PrefersFlatMetadataForSameWorktree(t *testing.T) {
+	for _, state := range []string{"RUNNING", "WAITING_FOR_INPUT", "CANCELLED"} {
+		t.Run(state, func(t *testing.T) {
+			db := openLegacyDB(t)
+			now := time.Now().UTC().Truncate(time.Second)
+			seed := legacySeed{envID: "env-flat", taskID: "task-flat", repoID: "repo-flat", sessionID: "sess-flat"}
+			seedLegacyTask(t, db, seed, now)
+			if _, err := db.Exec(db.Rebind(`UPDATE task_sessions SET state = ? WHERE id = ?`), state, seed.sessionID); err != nil {
+				t.Fatalf("set session state: %v", err)
+			}
+			seedLegacyFlatEnv(t, db, seed, "wt-flat", "/tasks/flat/repo", "feature/current", now)
+			seedLegacySessionWorktree(t, db, seed.sessionID, "wt-flat", seed.repoID, "", "/tasks/flat/repo", "feature/stale-session", "active", now)
+
+			repo, err := NewWithDB(db, db, nil)
+			if err != nil {
+				t.Fatalf("cutover: %v", err)
+			}
+			env, err := repo.GetTaskEnvironment(context.Background(), seed.envID)
+			if err != nil {
+				t.Fatalf("get task environment: %v", err)
+			}
+			if len(env.Repos) != 1 || env.Repos[0].WorktreeBranch != "feature/current" {
+				t.Fatalf("normalized environment = %+v", env.Repos)
+			}
+		})
+	}
+}
+
 // TestCutover_IgnoresDeletedHistoricalSessionConflict proves that a deleted
 // session reference cannot override an existing task-owned repository row.
 func TestCutover_IgnoresDeletedHistoricalSessionConflict(t *testing.T) {
@@ -647,6 +709,146 @@ func TestCutover_PreservesCreatedSessionWorktreeWithoutCanonicalOwner(t *testing
 	}
 	if len(env.Repos) != 1 || env.Repos[0].WorktreeID != "wt-created" {
 		t.Fatalf("created session worktree = %+v", env.Repos)
+	}
+}
+
+// TestCutover_SharedEnvironmentAcrossTasks proves that a session bound to
+// another task's environment (workspace-group sharing / subtask inheritance)
+// normalizes onto the owning task's environment instead of failing the
+// cutover or fabricating a duplicate worktree owner.
+func TestCutover_SharedEnvironmentAcrossTasks(t *testing.T) {
+	db := openLegacyDB(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	owner := legacySeed{envID: "env-shared", taskID: "task-owner", repoID: "repo-shared", sessionID: "sess-owner"}
+	seedLegacyTask(t, db, owner, now)
+	seedSharedMemberTask(t, db, "task-member", "sess-member", "env-shared", now)
+	linkSessionEnvironment(t, db, "sess-owner", "env-shared")
+
+	seedLegacyFlatEnv(t, db, owner, "wt-shared", "/tasks/shared/kandev", "feature/shared", now)
+	seedLegacyEnvRepo(t, db, "env-repo-shared", "env-shared", "repo-shared", "wt-shared", "/tasks/shared/kandev", "feature/shared", now)
+	seedLegacySessionWorktree(t, db, "sess-owner", "wt-shared", "repo-shared", "", "/tasks/shared/kandev", "feature/shared", "active", now)
+	seedLegacySessionWorktree(t, db, "sess-member", "wt-shared", "repo-shared", "", "/tasks/shared/kandev", "feature/shared", "active", now)
+
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("cutover: %v", err)
+	}
+	ctx := context.Background()
+
+	env, err := repo.GetTaskEnvironment(ctx, "env-shared")
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	if len(env.Repos) != 1 || env.Repos[0].WorktreeID != "wt-shared" {
+		t.Fatalf("shared environment repos = %+v, want one wt-shared row", env.Repos)
+	}
+	for _, sessionID := range []string{"sess-owner", "sess-member"} {
+		session, err := repo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			t.Fatalf("GetTaskSession(%s): %v", sessionID, err)
+		}
+		if session.TaskEnvironmentID != "env-shared" {
+			t.Fatalf("session %s env = %q, want env-shared", sessionID, session.TaskEnvironmentID)
+		}
+	}
+	// The borrowing task must not gain an environment of its own: the
+	// physical worktree has exactly one owner.
+	memberEnv, err := repo.GetTaskEnvironmentByTaskID(ctx, "task-member")
+	if err != nil {
+		t.Fatalf("GetTaskEnvironmentByTaskID(task-member): %v", err)
+	}
+	if memberEnv != nil {
+		t.Fatalf("borrowing task gained environment %s with repos %+v", memberEnv.ID, memberEnv.Repos)
+	}
+	var owners int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM task_environment_repos WHERE worktree_id = 'wt-shared'`).Scan(&owners); err != nil {
+		t.Fatalf("count worktree owners: %v", err)
+	}
+	if owners != 1 {
+		t.Fatalf("worktree owner rows = %d, want 1", owners)
+	}
+}
+
+// TestCutover_SharedEnvironmentWithoutCanonicalRepoRow covers the same
+// borrowed-environment shape when only the member session carries the
+// worktree metadata: it must land on the environment's owning task.
+func TestCutover_SharedEnvironmentWithoutCanonicalRepoRow(t *testing.T) {
+	db := openLegacyDB(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	owner := legacySeed{envID: "env-borrow", taskID: "task-lender", repoID: "", sessionID: "sess-lender"}
+	seedLegacyTask(t, db, owner, now)
+	seedSharedMemberTask(t, db, "task-borrower", "sess-borrower", "env-borrow", now)
+	linkSessionEnvironment(t, db, "sess-lender", "env-borrow")
+	seedLegacyFlatEnv(t, db, owner, "", "", "", now)
+	seedLegacySessionWorktree(t, db, "sess-borrower", "wt-borrow", "repo-borrow", "", "/tasks/borrow/kandev", "feature/borrow", "active", now)
+
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("cutover: %v", err)
+	}
+	env, err := repo.GetTaskEnvironment(context.Background(), "env-borrow")
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	if len(env.Repos) != 1 || env.Repos[0].WorktreeID != "wt-borrow" ||
+		env.Repos[0].WorktreePath != "/tasks/borrow/kandev" {
+		t.Fatalf("borrowed worktree row = %+v, want wt-borrow on the lending environment", env.Repos)
+	}
+}
+
+// TestCutover_SharedEnvironmentIgnoresStaleMemberMetadata proves that stale
+// worktree metadata on a borrowing session cannot conflict with the canonical
+// row owned by the lending task's environment.
+func TestCutover_SharedEnvironmentIgnoresStaleMemberMetadata(t *testing.T) {
+	db := openLegacyDB(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	owner := legacySeed{envID: "env-stale", taskID: "task-stale-owner", repoID: "repo-stale", sessionID: "sess-stale-owner"}
+	seedLegacyTask(t, db, owner, now)
+	seedSharedMemberTask(t, db, "task-stale-member", "sess-stale-member", "env-stale", now)
+	linkSessionEnvironment(t, db, "sess-stale-owner", "env-stale")
+	if _, err := db.Exec(db.Rebind(
+		`UPDATE task_sessions SET state = 'WAITING_FOR_INPUT' WHERE id = ?`), "sess-stale-member"); err != nil {
+		t.Fatalf("set member session state: %v", err)
+	}
+	seedLegacyFlatEnv(t, db, owner, "wt-stale", "/tasks/stale/kandev", "feature/current", now)
+	seedLegacyEnvRepo(t, db, "env-repo-stale", "env-stale", "repo-stale", "wt-stale", "/tasks/stale/kandev", "feature/current", now)
+	seedLegacySessionWorktree(t, db, "sess-stale-member", "wt-stale", "repo-stale", "", "/tasks/stale/kandev", "feature/stale", "active", now)
+
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("cutover: %v", err)
+	}
+	env, err := repo.GetTaskEnvironment(context.Background(), "env-stale")
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	if len(env.Repos) != 1 || env.Repos[0].WorktreeBranch != "feature/current" {
+		t.Fatalf("shared environment repos = %+v, want the canonical feature/current row", env.Repos)
+	}
+}
+
+// seedSharedMemberTask seeds a task whose only session borrows another
+// task's environment.
+func seedSharedMemberTask(t *testing.T, db *sqlx.DB, taskID, sessionID, envID string, startedAt time.Time) {
+	t.Helper()
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
+		VALUES (?, 'ws-1', 'shared member', ?, ?)`), taskID, startedAt, startedAt); err != nil {
+		t.Fatalf("seed member task: %v", err)
+	}
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_sessions (id, task_id, state, task_environment_id, started_at, updated_at)
+		VALUES (?, ?, 'COMPLETED', ?, ?, ?)`), sessionID, taskID, envID, startedAt, startedAt); err != nil {
+		t.Fatalf("seed member session: %v", err)
+	}
+}
+
+func linkSessionEnvironment(t *testing.T, db *sqlx.DB, sessionID, envID string) {
+	t.Helper()
+	if _, err := db.Exec(db.Rebind(
+		`UPDATE task_sessions SET task_environment_id = ? WHERE id = ?`), envID, sessionID); err != nil {
+		t.Fatalf("link session environment: %v", err)
 	}
 }
 

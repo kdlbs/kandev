@@ -10,6 +10,10 @@
   "columnWorkflow": "Fluxo de trabalho",
   "delete": "Eliminar",
   "deleteTask": "Eliminar tarefa",
+  "failedToArchiveTask": "Não foi possível arquivar a tarefa",
+  "failedToDeleteTask": "Não foi possível eliminar a tarefa",
+  "failedToLoadTasks": "Não foi possível carregar as tarefas",
+  "failedToUnarchiveTask": "Não foi possível desarquivar a tarefa",
   "goToFirstPage": "Ir para a primeira página",
   "goToLastPage": "Ir para a última página",
   "goToNextPage": "Ir para a página seguinte",
@@ -39,6 +43,12 @@
   "sortTitleZA": "Título Z-A",
   "sortUpdatedNewest": "Atualizadas mais recentes",
   "sortUpdatedOldest": "Atualizadas mais antigas",
+  "taskArchived": "Tarefa arquivada",
+  "taskArchivedDescription": "A tarefa foi arquivada com êxito.",
+  "taskUnarchived": "Tarefa desarquivada",
   "unarchive": "Desarquivar",
+  "unarchivedBranchesMissing_one": "O ramo {{branches}} já não existe localmente nem no remoto; a próxima sessão começa de novo a partir do ramo base.",
+  "unarchivedBranchesMissing_other": "Os ramos {{branches}} já não existem localmente nem no remoto; a próxima sessão começa de novo a partir do ramo base.",
+  "unarchivedTaskRestored": "A tarefa foi restaurada.",
   "unarchiveTask": "Desarquivar tarefa"
 }

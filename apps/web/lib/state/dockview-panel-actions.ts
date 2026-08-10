@@ -2,6 +2,8 @@ import type { DockviewApi, DockviewGroupPanel } from "dockview-react";
 import type { CommitDetailTarget } from "@/components/task/changes-diff-target";
 import { t } from "@/lib/i18n";
 import { focusOrAddPanel } from "./dockview-layout-builders";
+import { TERMINAL_DEFAULT_ID } from "./layout-manager/constants";
+import { panelTitle } from "./layout-manager/panel-title";
 import {
   parsePluginPanelId,
   pluginPanelId,
@@ -365,7 +367,7 @@ function buildFileDiffAction(get: StoreGet) {
       api,
       type: "file-diff",
       itemId,
-      title: `Diff [${getFileName(path)}]`,
+      title: t("task:panelFileDiff", { file: getFileName(path) }),
       params: {
         kind: "file",
         path,
@@ -439,7 +441,7 @@ export function buildPanelActions(set: StoreSet, get: StoreGet) {
         id: "chat",
         component: "chat",
         tabComponent: "permanentTab",
-        title: "Agent",
+        title: panelTitle("chat"),
         position: { referenceGroup: centerGroupId },
       });
     },
@@ -449,7 +451,7 @@ export function buildPanelActions(set: StoreSet, get: StoreGet) {
       addSimplePanel(api, groupId ?? rightTopGroupId, {
         id: "changes",
         component: "changes",
-        title: "Changes",
+        title: panelTitle("changes"),
         tabComponent: "changesTab",
       });
     },
@@ -459,7 +461,7 @@ export function buildPanelActions(set: StoreSet, get: StoreGet) {
       addSimplePanel(api, groupId ?? rightTopGroupId, {
         id: "files",
         component: "files",
-        title: "Files",
+        title: panelTitle("files"),
       });
     },
     addDiffViewerPanel: (path?: string, content?: string, groupId?: string) => {
@@ -469,7 +471,7 @@ export function buildPanelActions(set: StoreSet, get: StoreGet) {
       addSimplePanel(api, groupId ?? centerGroupId, {
         id: "diff-viewer",
         component: "diff-viewer",
-        title: "Diff Viewer",
+        title: t("task:panelDiffViewer"),
         params: { kind: "all" },
       });
     },
@@ -483,7 +485,7 @@ export function buildPanelActions(set: StoreSet, get: StoreGet) {
       addSimplePanel(api, groupId ?? centerGroupId, {
         id: browserId,
         component: "browser",
-        title: t("task:browser"),
+        title: panelTitle("browser"),
         params: { url: url ?? "" },
       });
     },
@@ -549,7 +551,7 @@ function buildReviewPanelActions(get: StoreGet) {
       focusOrAddPanel(api, {
         id,
         component: "pr-detail",
-        title: prKey ? "Pull Request" : "PR Details",
+        title: prKey ? t("task:panelPullRequest") : panelTitle("pr-detail"),
         position: { referenceGroup: targetGroupId },
         params: prKey ? { prKey } : undefined,
       });
@@ -572,7 +574,7 @@ function buildReviewPanelActions(get: StoreGet) {
       focusOrAddPanel(api, {
         id,
         component: "mr-detail",
-        title: "Merge Request",
+        title: panelTitle("mr-detail"),
         position: { referenceGroup: canonical?.group.id ?? centerGroupId },
         params: { mrKey },
       });
@@ -588,7 +590,7 @@ export function buildExtraPanelActions(get: StoreGet) {
       focusOrAddPanel(api, {
         id: "vscode",
         component: "vscode",
-        title: "VS Code",
+        title: panelTitle("vscode"),
         position: { referenceGroup: centerGroupId },
       });
     },
@@ -603,7 +605,7 @@ export function buildExtraPanelActions(get: StoreGet) {
       focusOrAddPanel(api, {
         id: "vscode",
         component: "vscode",
-        title: "VS Code",
+        title: panelTitle("vscode"),
         position: { referenceGroup: centerGroupId },
       });
     },
@@ -613,7 +615,7 @@ export function buildExtraPanelActions(get: StoreGet) {
       addSidePanel(
         api,
         centerGroupId,
-        { id: "plan", component: "plan", title: "Plan", tabComponent: "planTab" },
+        { id: "plan", component: "plan", title: panelTitle("plan"), tabComponent: "planTab" },
         opts,
       );
     },
@@ -646,7 +648,7 @@ export function buildExtraPanelActions(get: StoreGet) {
       addSidePanel(
         api,
         centerGroupId,
-        { id: "todos", component: "todos", title: t("common:todos") },
+        { id: "todos", component: "todos", title: panelTitle("todos") },
         opts,
       );
     },
@@ -673,7 +675,7 @@ export function buildExtraPanelActions(get: StoreGet) {
         // when there's more than one ordinary terminal in the task and
         // exposes a context menu for rename / park / destroy.
         tabComponent: "terminalTab",
-        title: title ?? "Terminal",
+        title: title ?? panelTitle(TERMINAL_DEFAULT_ID),
         params: { terminalId: id, environmentId, taskID },
       });
     },

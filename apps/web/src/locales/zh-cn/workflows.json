@@ -184,6 +184,8 @@
   "startStepHelp": "新任务从此步骤开始。每个工作流只能有一个起始步骤。",
   "stepIsPartOfReplayCycle": "{{stepName}} 属于回放循环",
   "stepNamePlaceholder": "步骤名称",
+  "workflowDescription": "描述",
+  "workflowDescriptionPlaceholder": "可选描述",
   "workflowPrompt": "工作流提示词",
   "workflowPromptHelp": "可选说明，会在每一步进入时、步骤提示词之前加入。支持 {task_id} 与 @saved-prompt 引用（展开方式与步骤提示词相同）。{{taskPrompt}} 仅用于步骤。留空即禁用。对代理可见，并在聊天中折叠显示。",
   "workflowPromptPlaceholder": "若 PR 已合并或关闭，将任务移至 Done。\n若需要创建多个拉取请求，优先通过子任务编排。",

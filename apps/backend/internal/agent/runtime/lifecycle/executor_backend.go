@@ -454,7 +454,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		RuntimeName:          ri.RuntimeName,
 		Status:               v1.AgentStatusRunning,
 		StartedAt:            time.Now(),
-		Metadata:             metadata,
+		metadata:             metadata,
 		agentctl:             ri.Client,
 		standaloneInstanceID: ri.StandaloneInstanceID,
 		standalonePort:       ri.StandalonePort,

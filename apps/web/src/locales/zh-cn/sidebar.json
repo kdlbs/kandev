@@ -1,6 +1,9 @@
 {
   "account": "账户",
   "archivedLoadFailed": "无法加载已归档任务",
+  "groupAll": "全部",
+  "groupMultiRepo": "多仓库",
+  "groupUnassigned": "未分配",
   "retry": "重试",
   "activeWorkspaceBadge": "活动",
   "activity": "活动",
@@ -98,6 +101,7 @@
   "toggleTheme": "切换主题",
   "unsavedFilterChanges": "未保存的筛选更改",
   "viewAll": "全部",
+  "viewAllTasks": "所有任务",
   "viewLabel": "视图：{{name}}",
   "whatsNew": "新功能",
   "work": "工作",
