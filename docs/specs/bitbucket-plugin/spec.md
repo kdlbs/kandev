@@ -46,6 +46,13 @@ and reference work, while remaining independently releasable as an official plug
   tasks from pull requests, link/unlink existing tasks, and create pull requests from
   a task checkout branch. Remote descriptors preserve the exact credential-free clone
   URL, including Data Center context paths.
+- Native **Create PR** remains conditional on a task checkout containing commits and
+  having no linked change request. For a registered provider, Kandev keeps the shared
+  dialog, pushes the verified checkout branch through its normal Git path, and then
+  invokes the provider's authenticated create callback. Unsupported provider options,
+  such as draft creation, are hidden rather than silently ignored. This boundary is
+  recorded in
+  [ADR-2026-08-10-plugin-change-request-mutations](../../decisions/2026-08-10-plugin-change-request-mutations.md).
 - Plugin task actions appear in native task surfaces. Inside the existing **Link**
   submenu, the required entry is named **Bitbucket Pull Request**; it never repeats the
   parent verb as “Link Bitbucket Pull Request.” Selecting it opens the same host-owned
@@ -62,6 +69,12 @@ and reference work, while remaining independently releasable as an official plug
   sections, action placement, loading/error anatomy, scrolling, and responsive behavior.
   Unsupported Cloud/Data Center capabilities are omitted or explained without changing
   the shared layout.
+- Linked Bitbucket pull requests expose host-owned unlink controls in shared desktop
+  popovers/review anatomy and touch-sized mobile surfaces. Unlink removes only the
+  selected task association, refreshes review/status data, and immediately removes the
+  corresponding task indicator without deleting the remote pull request. An explicit
+  unlink suppresses source-branch auto-link for that task/pull-request pair until a
+  manual relink and detaches watch ownership without deleting the task.
 - Composer `#` search consumes the plugin's dynamically registered
   `bitbucket`/`pull_request` reference source. Kandev constructs canonical reference
   identity, and every selected reference is reauthorized by the live plugin at message
@@ -82,6 +95,10 @@ and reference work, while remaining independently releasable as an official plug
   copies. Review remains in normal linked-task desktop/mobile review surfaces.
   The preset menu uses the exact first-party glyphs: eye for **Review**, message for
   **Address feedback**, and tool for **Fix CI**.
+  Committed custom queries and repository filters can be named, saved, selected, and
+  deleted with the same scope-bar workflow as GitHub/GitLab. Saved queries are
+  per-user, per-workspace plugin state through `host.storage`; saving commits and stores
+  the visible query draft even when the user has not pressed Enter first.
   Existing workspace repositories use the dialog's normal REST create path. First-use
   Bitbucket repositories use the dialog's optional create transport through the
   authenticated `tasks.launch` action; the server resolves the repository descriptor
@@ -120,6 +137,9 @@ and reference work, while remaining independently releasable as an official plug
   around every 90 seconds, and clicking through opens the registered Bitbucket Review
   surface. Cloud Pipelines and Data Center build statuses are normalized from the pull
   request's source/head commit, never its destination commit.
+- The review provider exposes one bounded workspace association snapshot. Kandev uses
+  it to render its semantic pull-request glyph beside linked tasks in task switcher,
+  Kanban, and rich task-list rows, without issuing one provider request per task.
 - Clone, fetch, and push resolve through the provider-neutral short-lived credential
   broker. Secrets never appear in clone URLs, task metadata/state, environment
   variables, command arguments, logs, or executor payloads.
@@ -257,6 +277,10 @@ for its declared provider; exact repository path matching remains case-sensitive
   the dashboard or opens task Review, **THEN** the row exposes the native linked-task
   indicator and review opens through the registered task review provider; there is no
   dashboard Review button or intermediate launch dialog on desktop or mobile.
+- **GIVEN** a committed custom query or repository filter differs from a built-in
+  preset, **WHEN** the user saves and names it, **THEN** it appears in the shared saved
+  menu, survives reload for that user/workspace, restores the displayed query and
+  repository filter when selected, and can be deleted.
 - **GIVEN** a pull request repository is not yet persisted in the workspace, **WHEN**
   the native task dialog submits or retries, **THEN** the authenticated plugin action
   creates from the server-resolved source repository exactly once for that dialog
@@ -278,6 +302,15 @@ for its declared provider; exact repository path matching remains case-sensitive
   returned or the task is reopened, **THEN** the new pull request is already associated
   with that task; a later association-state failure is reported without inviting a
   retry that could create a duplicate remote pull request.
+- **GIVEN** an eligible Bitbucket task has commits and no linked pull request, **WHEN**
+  the user submits native **Create PR**, **THEN** Kandev pushes the selected checkout
+  branch, invokes the active provider callback, associates the created pull request,
+  and reports a post-push create failure as retryable without adding Bitbucket logic to
+  `agentctl`.
+- **GIVEN** one or more Bitbucket pull requests are linked to a task, **WHEN** association
+  data loads or one link is removed, **THEN** the native task-row/card glyph count and
+  shared unlink controls update reactively on desktop and mobile while other links
+  remain intact.
 - **GIVEN** an agent or user creates an open Bitbucket pull request externally from a
   task's checkout branch, **WHEN** that task refreshes, **THEN** the plugin discovers
   the exact source-branch match from host-verified repository data and links it without

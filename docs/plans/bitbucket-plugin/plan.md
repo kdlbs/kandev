@@ -118,13 +118,18 @@ Wave 3g (after 12e and 12f):
 
 - [x] [task 12g — Bitbucket adapters and live parity acceptance](task-12g-bitbucket-status-detail-adapters.md)
 
+Wave 3h (corrective native workflow pass after final manual evaluation):
+
+- [ ] [task 12h — native create, unlink, task indicators, and saved queries](task-12h-native-create-unlink-indicators-saved-queries.md)
+
 Wave 4:
 
 - [ ] [task 13 — contract E2E, release, and marketplace](task-13-contract-e2e-release-marketplace.md)
 
 ## Current status
 
-Tasks 01–12g are implemented. Task 13 remains the release/marketplace gate.
+Tasks 01–12g are implemented. Task 12h is in progress; Task 13 remains the
+release/marketplace gate.
 Live Cloud evaluation showed that task 12's permanent
 desktop queue/review split diverged from the first-party `/github` page despite being
 functionally complete; task 12b replaced it with the approved list-first parity model

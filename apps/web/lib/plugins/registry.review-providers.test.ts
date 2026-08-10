@@ -7,6 +7,7 @@ const SECONDARY_PLUGIN_ID = "plugin-b";
 const SOURCE_CONTROL_PROVIDER_ID = "source-control";
 const CHANGE_URL = "https://example.test/changes/1";
 const REPOSITORY_ID = "repository-a";
+const WORKSPACE_ID = "workspace-a";
 
 function reviewProvider(
   id: string,
@@ -164,6 +165,52 @@ describe("pluginRegistry — review provider contracts", () => {
     expect(
       pluginRegistry.getReviewProvider(SOURCE_CONTROL_PROVIDER_ID)?.getSnapshot("task-a"),
     ).toEqual(normalizedStatusSnapshot());
+  });
+});
+
+describe("pluginRegistry — review provider associations", () => {
+  afterEach(() => {
+    pluginRegistry.unregisterPlugin(PRIMARY_PLUGIN_ID);
+    pluginRegistry.unregisterPlugin(SECONDARY_PLUGIN_ID);
+  });
+
+  it("normalizes association snapshots and lifecycle-wraps association refresh and unlink", async () => {
+    const refresh = vi.fn(async () => undefined);
+    const unlink = vi.fn(async () => undefined);
+    const subscribe = vi.fn(() => () => undefined);
+    pluginRegistry.forPlugin(PRIMARY_PLUGIN_ID).registerReviewProvider(
+      reviewProvider(SOURCE_CONTROL_PROVIDER_ID, {
+        getAssociationSnapshot: () => [
+          {
+            providerId: "spoofed",
+            taskId: "task-a",
+            reviewKey: "change-1",
+            providerPayload: "discard",
+          },
+          { providerId: "spoofed", taskId: "", reviewKey: "invalid" },
+        ],
+        subscribeAssociations: subscribe,
+        refreshAssociations: refresh,
+        unlink,
+      }),
+    );
+    const registration = pluginRegistry.getReviewProvider(SOURCE_CONTROL_PROVIDER_ID)!;
+
+    expect(registration.getAssociationSnapshot?.(WORKSPACE_ID)).toEqual([
+      { providerId: SOURCE_CONTROL_PROVIDER_ID, taskId: "task-a", reviewKey: "change-1" },
+    ]);
+    registration.subscribeAssociations?.(WORKSPACE_ID, () => undefined);
+    await registration.refreshAssociations?.(WORKSPACE_ID, new AbortController().signal);
+    await registration.unlink?.({
+      workspaceId: WORKSPACE_ID,
+      taskId: "task-a",
+      reviewKey: "change-1",
+      signal: new AbortController().signal,
+    });
+
+    expect(subscribe).toHaveBeenCalledOnce();
+    expect(refresh).toHaveBeenCalledWith(WORKSPACE_ID, expect.any(AbortSignal));
+    expect(unlink).toHaveBeenCalledWith(expect.objectContaining({ taskId: "task-a" }));
   });
 
   it("rejects a review provider claimed by another active plugin", () => {

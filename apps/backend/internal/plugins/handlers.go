@@ -538,8 +538,8 @@ func (c *Controller) verifyWorkspaceAction(
 func (c *Controller) verifyTaskAction(
 	ctx *gin.Context, verified pluginsdk.VerifiedActionContext, envelope actionHTTPEnvelope,
 ) (pluginsdk.VerifiedActionContext, bool) {
-	if envelope.TaskID == "" || envelope.RepositoryID != "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "task action requires taskId only"})
+	if envelope.TaskID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "task action requires taskId"})
 		return pluginsdk.VerifiedActionContext{}, false
 	}
 	task, err := c.svc.taskData.GetTask(ctx.Request.Context(), envelope.TaskID)
@@ -553,7 +553,23 @@ func (c *Controller) verifyTaskAction(
 	}
 	verified.WorkspaceID = task.WorkspaceID
 	verified.TaskID = task.ID
+	if envelope.RepositoryID != "" {
+		if !taskContainsRepository(task, envelope.RepositoryID) {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "repository not found"})
+			return pluginsdk.VerifiedActionContext{}, false
+		}
+		verified.RepositoryID = envelope.RepositoryID
+	}
 	return verified, true
+}
+
+func taskContainsRepository(task *taskmodels.Task, repositoryID string) bool {
+	for _, repository := range task.Repositories {
+		if repository != nil && repository.RepositoryID == repositoryID {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Controller) verifyRepositoryAction(

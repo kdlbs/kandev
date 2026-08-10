@@ -11,6 +11,7 @@ import {
   IconLoader2,
   IconMessageCircle,
   IconPlus,
+  IconUnlink,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { openExternalLink } from "@/lib/desktop/external-links";
@@ -40,6 +41,8 @@ export function ChangeRequestPopoverHeader({
   title,
   url,
   onOpenReview,
+  onUnlink,
+  mobile = false,
   externalLabel,
   openDetailsLabel,
 }: {
@@ -47,10 +50,22 @@ export function ChangeRequestPopoverHeader({
   title: string;
   url?: string;
   onOpenReview?: () => void;
+  onUnlink?: () => void | Promise<void>;
+  mobile?: boolean;
   externalLabel?: string;
   openDetailsLabel?: string;
 }) {
+  const [unlinking, setUnlinking] = useState(false);
   const displayTitle = `#${number} ${title || t("integrations:untitledPullRequest")}`;
+  const unlink = async () => {
+    if (!onUnlink || unlinking) return;
+    setUnlinking(true);
+    try {
+      await onUnlink();
+    } finally {
+      setUnlinking(false);
+    }
+  };
   return (
     <div
       data-testid="pr-popover-header"
@@ -76,19 +91,41 @@ export function ChangeRequestPopoverHeader({
           {displayTitle}
         </span>
       )}
-      {url ? (
-        <a
-          data-testid="pr-popover-pr-link"
-          href={url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="cursor-pointer text-muted-foreground hover:text-foreground"
-          aria-label={externalLabel ?? t("integrations:viewPullRequestExternally", { number })}
-          onClick={(event) => event.stopPropagation()}
-        >
-          <IconGitPullRequest className="h-3.5 w-3.5" />
-        </a>
-      ) : null}
+      <div className="flex shrink-0 items-center gap-0.5">
+        {url ? (
+          <a
+            data-testid="pr-popover-pr-link"
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="cursor-pointer text-muted-foreground hover:text-foreground"
+            aria-label={externalLabel ?? t("integrations:viewPullRequestExternally", { number })}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <IconGitPullRequest className="h-3.5 w-3.5" />
+          </a>
+        ) : null}
+        {onUnlink ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className={`${mobile ? "h-11 w-11" : "h-6 w-6"} cursor-pointer text-muted-foreground hover:text-destructive`}
+            aria-label={t("integrations:unlinkPullRequestNumber", { number })}
+            disabled={unlinking}
+            onClick={(event) => {
+              event.stopPropagation();
+              void unlink();
+            }}
+          >
+            {unlinking ? (
+              <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <IconUnlink className="h-3.5 w-3.5" />
+            )}
+          </Button>
+        ) : null}
+      </div>
     </div>
   );
 }

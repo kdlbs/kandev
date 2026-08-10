@@ -175,6 +175,27 @@ export interface RepositoryInspection {
   };
 }
 
+/** Host context passed to a registered provider after the checkout branch is pushed. */
+export interface RepositoryChangeRequestCreateContext {
+  workspaceId: string;
+  taskId: string;
+  repositoryId: string;
+  /** Persisted host repository; provider callbacks must not treat browser fields as authority. */
+  repository: unknown;
+  title: string;
+  body: string;
+  baseBranch?: string;
+  draft: boolean;
+  signal: AbortSignal;
+}
+
+/** Minimal result adapted back into Kandev's native create-change-request feedback. */
+export interface RepositoryChangeRequestCreateResult {
+  url: string;
+  provider?: string;
+  output?: string;
+}
+
 /** Repository-provider functions receive a host-managed cancellation signal. */
 export interface RepositoryProviderRegistration {
   id: string;
@@ -192,6 +213,12 @@ export interface RepositoryProviderRegistration {
     url: string;
     signal: AbortSignal;
   }): Promise<RepositoryInspection | null>;
+  /** False hides the native draft checkbox and forces `draft: false`. Default: true. */
+  supportsDraft?: boolean;
+  /** Called only after Kandev successfully pushes the verified checkout branch. */
+  createChangeRequest?(
+    context: RepositoryChangeRequestCreateContext,
+  ): Promise<RepositoryChangeRequestCreateResult>;
 }
 
 /** Immutable current-task context supplied when a plugin action runs. */
@@ -261,6 +288,21 @@ export interface ReviewItemSummary {
   taskStatus?: ReviewTaskStatus;
 }
 
+/** Lightweight workspace link used by task lists without fetching every review. */
+export interface ReviewTaskAssociation {
+  providerId: string;
+  taskId: string;
+  reviewKey: string;
+}
+
+/** Verified UI context for removing one task-to-change-request association. */
+export interface ReviewUnlinkContext {
+  workspaceId: string;
+  taskId: string;
+  reviewKey: string;
+  signal: AbortSignal;
+}
+
 /** Props supplied to a provider-owned panel inside the host review surface. */
 export interface PluginReviewPanelProps {
   panelId: string;
@@ -281,6 +323,12 @@ export interface ReviewProviderRegistration {
   getSnapshot(taskId: string): readonly ReviewItemSummary[];
   subscribe(taskId: string, listener: () => void): () => void;
   refresh(taskId: string, signal: AbortSignal): Promise<void>;
+  /** Optional bounded workspace association source for native task indicators. */
+  getAssociationSnapshot?(workspaceId: string): readonly ReviewTaskAssociation[];
+  subscribeAssociations?(workspaceId: string, listener: () => void): () => void;
+  refreshAssociations?(workspaceId: string, signal: AbortSignal): Promise<void>;
+  /** Removes only the selected task association; never deletes the remote review. */
+  unlink?(context: ReviewUnlinkContext): Promise<void>;
   ReviewPanel: ReactType.ComponentType<PluginReviewPanelProps>;
   Selector?: ReactType.ComponentType;
   EmptyState?: ReactType.ComponentType;

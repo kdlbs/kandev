@@ -73,7 +73,7 @@ export function IntegrationChangeRequestStatusContent({
   mobile: boolean;
   contained?: boolean;
 }) {
-  const content = <StatusFrame item={item} />;
+  const content = <StatusFrame item={item} mobile={mobile} />;
   if (!contained) return content;
   return (
     <div
@@ -86,7 +86,13 @@ export function IntegrationChangeRequestStatusContent({
   );
 }
 
-function StatusFrame({ item }: { item: IntegrationChangeRequestStatusItem }) {
+function StatusFrame({
+  item,
+  mobile = false,
+}: {
+  item: IntegrationChangeRequestStatusItem;
+  mobile?: boolean;
+}) {
   return (
     <ChangeRequestCIPopoverFrame>
       <ChangeRequestPopoverHeader
@@ -94,6 +100,8 @@ function StatusFrame({ item }: { item: IntegrationChangeRequestStatusItem }) {
         title={item.title}
         url={item.url}
         onOpenReview={item.onOpenReview}
+        onUnlink={item.onUnlink}
+        mobile={mobile}
       />
       <StatusBody item={item} />
       {item.review || item.unresolvedComments ? (
@@ -134,6 +142,8 @@ export function IntegrationChangeRequestMultiStatusContent({
               title={item.title}
               url={item.url}
               onOpenReview={item.onOpenReview}
+              onUnlink={item.onUnlink}
+              mobile={mobile}
             />
             <StatusBody item={item} />
             {item.review || item.unresolvedComments ? (

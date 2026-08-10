@@ -31,6 +31,7 @@ export type IntegrationChangeRequestStatusItem = {
   updatedAt?: number;
   onRefresh?: () => void | Promise<void>;
   onOpenReview: () => void;
+  onUnlink?: () => void | Promise<void>;
 };
 
 export type IntegrationChangeRequestStatusProps = {

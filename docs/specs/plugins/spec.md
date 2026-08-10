@@ -312,6 +312,9 @@ workspace relation server-side, passes verified actor/resource context separatel
 bounded untrusted JSON, invokes `Plugin.HandleAction` with a hard timeout and
 cancellation, and relays only an allowlisted response-header set. Provider callback
 routes under `/webhooks/` stay public and must not serve authenticated browser actions.
+Task-scoped actions require a verified task and may optionally select one persisted
+repository attached to that task; Kandev rejects unattached repository IDs and passes
+the accepted repository separately in `VerifiedActionContext`.
 The manifest's canonical action field is `scope`; `resource_scope` remains a read-only
 compatibility alias for packages produced during the prerelease contract rollout.
 

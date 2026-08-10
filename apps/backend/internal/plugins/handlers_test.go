@@ -627,6 +627,49 @@ func TestActionHandlerDerivesTaskWorkspaceAndRejectsMismatch(t *testing.T) {
 	}
 }
 
+func TestActionHandlerVerifiesOptionalTaskRepository(t *testing.T) {
+	invoker := &recordingActionInvoker{response: &pluginsdk.PluginActionResponse{Body: []byte(`{}`)}}
+	router, svc := newActionTestRouter(t, invoker)
+	svc.taskData = &fakeTaskDataSource{
+		tasksByID: map[string]*taskmodels.Task{
+			"task-1": {
+				ID:          "task-1",
+				WorkspaceID: "workspace-1",
+				Repositories: []*taskmodels.TaskRepository{
+					{RepositoryID: "repository-1"},
+				},
+			},
+		},
+	}
+	if _, err := svc.Install(t.Context(), actionPackage(t, "kandev-plugin-actions", "create-review", "task", 128)); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	valid := doAuthenticatedActionRequest(
+		router,
+		"/api/plugins/kandev-plugin-actions/actions/create-review",
+		`{"workspaceId":"workspace-1","taskId":"task-1","repositoryId":"repository-1","body":{}}`,
+	)
+	if valid.Code != http.StatusOK {
+		t.Fatalf("task repository status = %d, want 200, body=%s", valid.Code, valid.Body.String())
+	}
+	if got := invoker.request.Context; got.WorkspaceID != "workspace-1" || got.TaskID != "task-1" || got.RepositoryID != "repository-1" {
+		t.Fatalf("verified task repository context = %+v", got)
+	}
+
+	unattached := doAuthenticatedActionRequest(
+		router,
+		"/api/plugins/kandev-plugin-actions/actions/create-review",
+		`{"workspaceId":"workspace-1","taskId":"task-1","repositoryId":"repository-2","body":{}}`,
+	)
+	if unattached.Code != http.StatusNotFound {
+		t.Fatalf("unattached repository status = %d, want 404, body=%s", unattached.Code, unattached.Body.String())
+	}
+	if invoker.calls != 1 {
+		t.Fatalf("action invocations = %d, want 1", invoker.calls)
+	}
+}
+
 func TestActionHandlerVerifiesRepositoryScope(t *testing.T) {
 	invoker := &recordingActionInvoker{response: &pluginsdk.PluginActionResponse{Body: []byte(`{}`)}}
 	router, svc := newActionTestRouter(t, invoker)

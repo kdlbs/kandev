@@ -540,7 +540,8 @@ const result = await host.api.invokeAction("pullrequests.link", {
 The JSON envelope uses camelCase resource selectors:
 `{ workspaceId?, taskId?, repositoryId?, body? }`. It is not a source of
 authority. A `workspace` action requires only `workspaceId`; a `task` action
-requires `taskId` (an optional matching `workspaceId` is checked); a
+requires `taskId` (an optional matching `workspaceId` is checked) and may include
+`repositoryId` only when that persisted repository is attached to the task; a
 `repository` action requires `workspaceId` and `repositoryId`. The plugin gets
 only host-verified `actorID`, `workspaceID`, `taskID`, and `repositoryID` plus
 the bounded JSON `Body`. Unknown actions return 404; bad envelopes and
@@ -853,7 +854,8 @@ here for routes that opt out and render their own chrome), and
 create-task flow (repo/branch/agent pickers, validation) instead of POSTing
 directly. Code-host plugins also receive `ChangeRequestList`,
 `ChangeRequestRow`, `ChangeRequestDetail`, `IntegrationListToolbar`, `IntegrationScopeBar`,
-`IntegrationStartTaskMenu`, `IntegrationIcon`, and `TaskRowIndicator`. These are the same
+`IntegrationSaveQueryDialog`, `IntegrationStartTaskMenu`, `IntegrationIcon`, and
+`TaskRowIndicator`. These are the same
 provider-neutral dashboard components used by Kandev's GitHub and GitLab
 pages. Supply normalized data and callbacks instead of cloning their markup:
 the shared **Task** preset menu opens `TaskCreateDialog` directly, while review
@@ -862,6 +864,20 @@ semantic names (`pull-request`, `pull-request-closed`, `merged`, and `filter`) s
 code-host plugins use the host's exact glyphs instead of copying SVG paths. Runtime
 components remain host-owned; do not move or duplicate them in a plugin UI package. See
 `apps/web/lib/plugins/host-api.ts` for the exact current list.
+
+A repository provider may implement `createChangeRequest`. Kandev keeps the native
+Create PR dialog and Git eligibility rules, pushes the selected checkout through the
+executor, and only then invokes the provider with the host-verified task and persisted
+repository. Set `supportsDraft: false` when the provider cannot create drafts. Do not
+add a second plugin-owned create button or send provider creation through agentctl.
+An open registered review participates in the same native action eligibility, so the
+primary action stops offering Create PR once that change request is linked.
+
+A review provider can implement the workspace association snapshot/subscription/refresh
+trio plus `unlink`. Kandev then owns sidebar/Kanban/list PR indicators and the shared
+desktop/mobile unlink control. `unlink` removes only the selected task association and
+must not delete the remote change request. After it resolves, Kandev refreshes both the
+task review snapshot and the workspace association snapshot.
 
 Registered review panels use `host.ui.ChangeRequestDetail`, the same detail
 component consumed by GitHub. Supply provider-neutral identity, state, branches,

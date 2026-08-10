@@ -27,11 +27,11 @@ import type {
   WsHandler,
 } from "./types";
 import type { ComponentType } from "react";
+import { pluginSlotOrderingId, taskActionKey } from "./registry-normalization";
 import {
-  normalizeReviewItems,
-  pluginSlotOrderingId,
-  taskActionKey,
-} from "./registry-normalization";
+  wrapRepositoryProviderLifecycle,
+  wrapReviewProviderLifecycle,
+} from "./registry-provider-lifecycle";
 
 interface Owned<T> {
   pluginId: string;
@@ -614,37 +614,20 @@ class PluginRegistryStore {
     pluginId: string,
     provider: RepositoryProviderRegistration,
   ): RepositoryProviderRegistration {
-    return {
-      ...provider,
-      listRepositories: ({ workspaceId, signal }) =>
-        this.runAbortable(pluginId, signal, (lifecycleSignal) =>
-          provider.listRepositories({ workspaceId, signal: lifecycleSignal }),
-        ),
-      listBranches: ({ workspaceId, repository, signal }) =>
-        this.runAbortable(pluginId, signal, (lifecycleSignal) =>
-          provider.listBranches({ workspaceId, repository, signal: lifecycleSignal }),
-        ),
-      inspectURL: ({ workspaceId, url, signal }) =>
-        this.runAbortable(pluginId, signal, (lifecycleSignal) =>
-          provider.inspectURL({ workspaceId, url, signal: lifecycleSignal }),
-        ),
-    };
+    return wrapRepositoryProviderLifecycle(provider, (signal, operation) =>
+      this.runAbortable(pluginId, signal, operation),
+    );
   }
 
   private withReviewProviderLifecycle(
     pluginId: string,
     provider: ReviewProviderRegistration,
   ): ReviewProviderRegistration {
-    return {
-      ...provider,
-      getSnapshot: (taskId) => normalizeReviewItems(provider.id, provider.getSnapshot(taskId)),
-      subscribe: (taskId, listener) =>
-        this.trackReviewSubscription(pluginId, provider.subscribe(taskId, listener)),
-      refresh: (taskId, signal) =>
-        this.runAbortable(pluginId, signal, (lifecycleSignal) =>
-          provider.refresh(taskId, lifecycleSignal),
-        ),
-    };
+    return wrapReviewProviderLifecycle(
+      provider,
+      (signal, operation) => this.runAbortable(pluginId, signal, operation),
+      (unsubscribe) => this.trackReviewSubscription(pluginId, unsubscribe),
+    );
   }
 
   private runAbortable<T>(

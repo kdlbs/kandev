@@ -33,8 +33,23 @@ import { useVcsDialogs } from "@/components/vcs/vcs-dialogs";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { useRepoDisplayName } from "@/hooks/domains/session/use-repo-display-name";
 import { MultiRepoVcsButton } from "@/components/vcs-multi-repo-menu";
+import { useAppStore } from "@/components/state-provider";
+import { useNormalizedTaskReviewsState } from "@/components/task/review-panel-provider";
+import type { ReviewItemSummary } from "@/lib/plugins/types";
 
 const DEFAULT_BASE_BRANCH = "origin/main";
+
+export function hasOpenChangeRequest(
+  firstPartyState: string | null | undefined,
+  reviews: readonly ReviewItemSummary[],
+): boolean {
+  const isOpen = (state: string | undefined) =>
+    state ? ["open", "opened", "draft"].includes(state.toLowerCase()) : false;
+  return (
+    isOpen(firstPartyState ?? undefined) ||
+    reviews.some((review) => isOpen(review.taskStatus?.state ?? review.state))
+  );
+}
 
 function determinePrimaryAction(
   uncommittedFileCount: number,
@@ -364,7 +379,9 @@ const VcsSplitButton = memo(function VcsSplitButton({
   const git = useSessionGit(sessionId);
   const { openCommitDialog, openPRDialog } = useVcsDialogs();
   const activePR = useActiveTaskPR();
-  const hasOpenPR = activePR?.state === "open";
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const { reviews } = useNormalizedTaskReviewsState(activeTaskId);
+  const hasOpenPR = hasOpenChangeRequest(activePR?.state, reviews);
   const { handlePull, handlePush, handleRebase, handleMerge } = useGitActions(git, baseBranch);
   const repoDisplayName = useRepoDisplayName(sessionId);
 

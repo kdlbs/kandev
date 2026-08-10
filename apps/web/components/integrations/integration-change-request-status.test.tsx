@@ -22,6 +22,7 @@ afterEach(() => {
 function statusItem(overrides: Partial<IntegrationChangeRequestStatusItem> = {}) {
   const onRefresh = vi.fn();
   const onOpenReview = vi.fn();
+  const onUnlink = vi.fn(async () => undefined);
   return {
     item: {
       id: "change-42",
@@ -49,10 +50,12 @@ function statusItem(overrides: Partial<IntegrationChangeRequestStatusItem> = {})
       ],
       onRefresh,
       onOpenReview,
+      onUnlink,
       ...overrides,
     } satisfies IntegrationChangeRequestStatusItem,
     onRefresh,
     onOpenReview,
+    onUnlink,
   };
 }
 
@@ -135,6 +138,19 @@ describe("IntegrationChangeRequestStatus", () => {
     act(() => vi.advanceTimersByTime(150));
     expect(screen.queryByTestId(STATUS_POPOVER_TEST_ID)).toBeNull();
   });
+
+  it("exposes a shared unlink control in the desktop status popover", async () => {
+    vi.useFakeTimers();
+    const { onUnlink } = renderStatus();
+    const trigger = screen.getByRole("button", { name: /#42 Provider-neutral change/ });
+    fireEvent.mouseEnter(trigger);
+    act(() => vi.advanceTimersByTime(150));
+
+    fireEvent.click(screen.getByRole("button", { name: "Unlink pull request #42" }));
+    await act(async () => Promise.resolve());
+
+    expect(onUnlink).toHaveBeenCalledOnce();
+  });
 });
 
 describe("IntegrationChangeRequestStatus touch and multi-review parity", () => {
@@ -182,6 +198,20 @@ describe("IntegrationChangeRequestStatus touch and multi-review parity", () => {
     fireEvent.click(review);
     expect(onRefresh).toHaveBeenCalledOnce();
     expect(onOpenReview).toHaveBeenCalledOnce();
+  });
+
+  it("keeps unlink touch-sized inside the mobile status drawer", async () => {
+    mocks.touch = true;
+    const { onUnlink } = renderComposerStatus();
+    fireEvent.click(screen.getByRole("button", { name: /#42 Provider-neutral change/ }));
+    await screen.findByTestId("integration-change-request-status-drawer");
+
+    const unlink = screen.getByRole("button", { name: "Unlink pull request #42" });
+    expect(unlink.className).toContain("h-11");
+    fireEvent.click(unlink);
+    await act(async () => Promise.resolve());
+
+    expect(onUnlink).toHaveBeenCalledOnce();
   });
 
   it("renders one aggregate control and dropdown for multiple linked changes", async () => {

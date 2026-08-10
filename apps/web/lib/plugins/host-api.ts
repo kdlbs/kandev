@@ -116,6 +116,7 @@ import { ChangeRequestDetail } from "@/components/integrations/change-request-de
 import { IntegrationStartTaskMenu } from "@/components/integrations/integration-start-task-menu";
 import { IntegrationListToolbar } from "@/components/integrations/integration-list-toolbar";
 import { IntegrationScopeBar } from "@/components/integrations/presets-scope-bar-base";
+import { IntegrationSaveQueryDialog } from "@/components/integrations/integration-save-query-dialog";
 import { TaskRowIndicator } from "@/components/integrations/task-row-indicator";
 import { IntegrationChangeRequestStatus } from "@/components/integrations/integration-change-request-status";
 import { IntegrationIcon } from "@/components/integrations/integration-icon";
@@ -295,6 +296,7 @@ const PLUGIN_UI: Record<string, unknown> = {
   IntegrationListToolbar,
   IntegrationChangeRequestStatus,
   IntegrationScopeBar,
+  IntegrationSaveQueryDialog,
   IntegrationIcon,
   TaskRowIndicator,
   // - RichTextEditor / RichTextReadOnly: narrow wrappers over the Plan

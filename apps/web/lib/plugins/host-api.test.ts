@@ -217,6 +217,7 @@ describe("buildHostApi — host contract", () => {
     expect(host.ui.IntegrationChangeRequestStatus).toBeDefined();
     expect(host.ui.ChangeRequestDetail).toBeTypeOf("function");
     expect(host.ui.IntegrationScopeBar).toBeDefined();
+    expect(host.ui.IntegrationSaveQueryDialog).toBeDefined();
     const IntegrationIcon = host.ui.IntegrationIcon as React.ComponentType<{
       name: string;
     }>;

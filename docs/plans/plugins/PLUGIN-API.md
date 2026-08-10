@@ -254,6 +254,12 @@ interface PluginTaskReviewOptions {
 }
 ```
 
+For `host.api.invokeAction`, workspace-scoped actions accept only `workspaceId`;
+repository-scoped actions accept `workspaceId` plus `repositoryId`; task-scoped
+actions require `taskId`, may include a matching `workspaceId`, and may include
+`repositoryId` only when that persisted repository is attached to the verified task.
+Resource selectors never become part of the untrusted action body.
+
 `host.ui` contents: shadcn primitives (Accordion*, Alert*, Badge, Button,
 Card*, Checkbox, Collapsible*, Dialog*, DropdownMenu*, Empty*, Input, Kbd,
 KbdGroup, Label, Pagination*, Popover*, Progress, ScrollArea, Select*,
@@ -266,6 +272,7 @@ routes that opt out of the default chrome and own their layout),
 `initialValues`), `Combobox` (the app's Command+Popover picker), and the
 provider-neutral code-host dashboard set: `ChangeRequestList`,
 `ChangeRequestRow`, `ChangeRequestDetail`, `IntegrationListToolbar`, `IntegrationScopeBar`,
+`IntegrationSaveQueryDialog`,
 `IntegrationStartTaskMenu`, `IntegrationIcon`, `IntegrationChangeRequestStatus`, and
 `TaskRowIndicator`. The authoritative list is
 `apps/web/lib/plugins/host-api.ts` (`PLUGIN_UI`).
@@ -675,6 +682,19 @@ interface RepositoryProviderRegistration {
     url: string;
     signal: AbortSignal;
   }): Promise<RepositoryInspection | null>;
+  supportsDraft?: boolean; // default true; false hides the native draft option
+  // Kandev pushes the verified checkout branch before invoking this callback.
+  createChangeRequest?(context: {
+    workspaceId: string;
+    taskId: string;
+    repositoryId: string;
+    repository: unknown; // persisted host repository, not browser authority
+    title: string;
+    body: string;
+    baseBranch?: string;
+    draft: boolean;
+    signal: AbortSignal;
+  }): Promise<{ url: string; provider?: string; output?: string }>;
 }
 interface RepositoryInspection {
   providerId: string;
@@ -714,9 +734,26 @@ interface ReviewProviderRegistration {
   getSnapshot(taskId: string): readonly ReviewItemSummary[];
   subscribe(taskId: string, listener: () => void): () => void;
   refresh(taskId: string, signal: AbortSignal): Promise<void>;
+  // Implement all three association callbacks together. The host performs one
+  // workspace-bounded refresh and renders native task-list/card indicators.
+  getAssociationSnapshot?(workspaceId: string): readonly ReviewTaskAssociation[];
+  subscribeAssociations?(workspaceId: string, listener: () => void): () => void;
+  refreshAssociations?(workspaceId: string, signal: AbortSignal): Promise<void>;
+  // Removes only this task link; it never deletes the remote change request.
+  unlink?(context: {
+    workspaceId: string;
+    taskId: string;
+    reviewKey: string;
+    signal: AbortSignal;
+  }): Promise<void>;
   ReviewPanel: React.ComponentType<PluginReviewPanelProps>;
   Selector?: React.ComponentType;
   EmptyState?: React.ComponentType;
+}
+interface ReviewTaskAssociation {
+  providerId: string;
+  taskId: string;
+  reviewKey: string;
 }
 interface ReviewItemSummary {
   providerId: string;
@@ -724,6 +761,7 @@ interface ReviewItemSummary {
   title: string;
   url: string;
   repositoryId: string;
+  // open/opened/draft participates in native Create PR eligibility.
   state: string;
   statusBadge?: { label: string; tone?: string };
   taskStatus?: ReviewTaskStatus;

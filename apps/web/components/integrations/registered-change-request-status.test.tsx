@@ -7,6 +7,10 @@ const PLUGIN_ID = "registered-status-test";
 const refresh = vi.fn(async () => undefined);
 const openDesktop = vi.fn();
 const openMobile = vi.fn();
+const unlink = vi.fn(async () => undefined);
+const toast = vi.fn();
+
+vi.mock("@/components/toast-provider", () => ({ useToast: () => ({ toast }) }));
 
 vi.mock("@/lib/state/dockview-store", () => ({
   useDockviewStore: (selector: (state: { addReviewPanel: typeof openDesktop }) => unknown) =>
@@ -52,6 +56,7 @@ function registerProvider() {
     ],
     subscribe: () => () => undefined,
     refresh,
+    unlink,
     ReviewPanel: () => null,
   });
 }
@@ -62,6 +67,8 @@ afterEach(() => {
   refresh.mockClear();
   openDesktop.mockClear();
   openMobile.mockClear();
+  unlink.mockClear();
+  toast.mockClear();
   vi.useRealTimers();
 });
 
@@ -99,6 +106,26 @@ describe("RegisteredChangeRequestStatus", () => {
     act(() => pluginRegistry.unregisterPlugin(PLUGIN_ID));
     rerender(<RegisteredChangeRequestStatus taskId="task-a" surface="composer" />);
     expect(screen.queryByTestId("integration-change-request-status-chip")).toBeNull();
+  });
+
+  it("routes shared unlink through the registered provider with verified UI context", async () => {
+    vi.useFakeTimers();
+    registerProvider();
+    render(<RegisteredChangeRequestStatus taskId="task-a" surface="topbar" />);
+    const trigger = screen.getByRole("button", { name: /#42 Fix shared status/ });
+    fireEvent.mouseEnter(trigger);
+    act(() => vi.advanceTimersByTime(150));
+
+    fireEvent.click(screen.getByRole("button", { name: "Unlink pull request #42" }));
+    await act(async () => Promise.resolve());
+
+    expect(unlink).toHaveBeenCalledWith({
+      workspaceId: "workspace-a",
+      taskId: "task-a",
+      reviewKey: "workspace/repo/42",
+      signal: expect.any(AbortSignal),
+    });
+    expect(refresh).toHaveBeenCalled();
   });
 
   it("deduplicates the 90 second poll across mounted status surfaces", async () => {

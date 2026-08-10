@@ -26,7 +26,6 @@ import {
   getChangeRequestTerminology,
   resolveChangeRequestTerminology,
   useChangeRequestTerminology,
-  useGitOperations,
 } from "@/hooks/use-git-operations";
 import { useAppStore } from "@/components/state-provider";
 import { gitOperationLabel, useGitWithFeedback } from "@/hooks/use-git-with-feedback";
@@ -37,6 +36,9 @@ import { openExternalLink } from "@/lib/desktop/external-links";
 import type { FileInfo } from "@/lib/state/slices";
 import { getChangeRequestFailureFeedback } from "./change-request-feedback";
 import { Trans, useTranslation } from "react-i18next";
+import { createChangeRequestWithProvider } from "@/lib/plugins/change-request-creation";
+import type { PRCreateResult } from "@/hooks/use-git-operations";
+import { useChangeRequestProviderTarget } from "@/hooks/use-change-request-provider-target";
 
 type VcsDialogsContextValue = {
   /** When `repo` is provided, the commit is scoped to that repo only. */
@@ -383,13 +385,32 @@ export function pickRepoLabel(
   return resolveDisplayName("") || t("integrations:repository");
 }
 
-function useCreatePRHandler(
-  ps: UsePRDialogReturn,
-  baseBranch: string | undefined,
-  createPR: ReturnType<typeof useGitOperations>["createPR"],
-  toast: ReturnType<typeof useToast>["toast"],
-  defaultTerminology: ReturnType<typeof getChangeRequestTerminology>,
-) {
+type CreateChangeRequestInput = {
+  title: string;
+  body: string;
+  baseBranch?: string;
+  draft: boolean;
+  repositoryScope?: string;
+  branchAlreadyPushed: boolean;
+};
+
+type CreateChangeRequest = (input: CreateChangeRequestInput) => Promise<PRCreateResult>;
+
+function useCreatePRHandler({
+  ps,
+  baseBranch,
+  createPR,
+  toast,
+  defaultTerminology,
+  supportsDraft,
+}: {
+  ps: UsePRDialogReturn;
+  baseBranch: string | undefined;
+  createPR: CreateChangeRequest;
+  toast: ReturnType<typeof useToast>["toast"];
+  defaultTerminology: ReturnType<typeof getChangeRequestTerminology>;
+  supportsDraft: boolean;
+}) {
   const { t } = useTranslation();
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const setPendingPrUrlForTask = useAppStore((state) => state.setPendingPrUrlForTask);
@@ -397,10 +418,18 @@ function useCreatePRHandler(
     if (!ps.title.trim()) return;
     ps.setOpen(false);
     try {
-      const result = await createPR(ps.title.trim(), ps.body.trim(), baseBranch, ps.draft, ps.repo);
+      const effectiveDraft = supportsDraft && ps.draft;
+      const result = await createPR({
+        title: ps.title.trim(),
+        body: ps.body.trim(),
+        baseBranch,
+        draft: effectiveDraft,
+        repositoryScope: ps.repo,
+        branchAlreadyPushed: ps.branchPushed,
+      });
       if (result.success) {
         const terms = resolveChangeRequestTerminology(result.provider, defaultTerminology);
-        const title = ps.draft
+        const title = effectiveDraft
           ? t("integrations:draftCreated", { shortName: terms.shortName })
           : t("integrations:shortNameCreated", { shortName: terms.shortName });
         toast({
@@ -440,6 +469,7 @@ function useCreatePRHandler(
     createPR,
     toast,
     defaultTerminology,
+    supportsDraft,
     activeTaskId,
     setPendingPrUrlForTask,
     t,
@@ -461,7 +491,39 @@ function useVcsDialogsState(
   // Use SessionGit so commit fans out per-repo for multi-repo workspaces.
   // useGitOperations.commit hits the workspace root, which fails for multi-repo
   // tasks because the task root isn't itself a git repo (exit 1).
-  const { commit, createPR, repoNames, isLoading: isGitLoading } = useSessionGit(sessionId);
+  const {
+    commit,
+    createPR: createBuiltInPR,
+    push,
+    repoNames,
+    isLoading: isGitLoading,
+  } = useSessionGit(sessionId);
+  const registeredCreateTarget = useChangeRequestProviderTarget(sessionId, ps.repo);
+  const createPR = useCallback(
+    (input: CreateChangeRequestInput) => {
+      if (!registeredCreateTarget) {
+        return createBuiltInPR(
+          input.title,
+          input.body,
+          input.baseBranch,
+          input.draft,
+          input.repositoryScope,
+        );
+      }
+      return createChangeRequestWithProvider({
+        target: registeredCreateTarget,
+        push,
+        repositoryScope: input.repositoryScope,
+        title: input.title,
+        body: input.body,
+        baseBranch: input.baseBranch,
+        draft: input.draft,
+        branchAlreadyPushed: input.branchAlreadyPushed,
+      });
+    },
+    [createBuiltInPR, push, registeredCreateTarget],
+  );
+  const supportsDraft = registeredCreateTarget?.provider.supportsDraft !== false;
   const repoDisplayName = useRepoDisplayName(sessionId);
   const isMultiRepo = repoNames.length > 1;
   const changeRequestTerminology = useChangeRequestTerminology(sessionId, ps.repo);
@@ -484,13 +546,14 @@ function useVcsDialogsState(
     cs.setBody("");
     cs.setRepo(undefined);
   }, [cs, gitWithFeedback, commit, t]);
-  const handleCreatePR = useCreatePRHandler(
+  const handleCreatePR = useCreatePRHandler({
     ps,
     baseBranch,
     createPR,
     toast,
-    changeRequestTerminology,
-  );
+    defaultTerminology: changeRequestTerminology,
+    supportsDraft,
+  });
   const contextValue = useMemo(
     () => ({
       openCommitDialog: cs.openDialog,
@@ -509,6 +572,7 @@ function useVcsDialogsState(
     repoDisplayName,
     isMultiRepo,
     changeRequestTerminology,
+    supportsDraft,
   };
 }
 
@@ -570,6 +634,7 @@ export function VcsDialogsProvider({
         onBodyChange={ps.setBody}
         draft={ps.draft}
         onDraftChange={ps.setDraft}
+        supportsDraft={state.supportsDraft}
         loading={isGitLoading}
         branchPushed={ps.branchPushed}
         onCreate={handleCreatePR}

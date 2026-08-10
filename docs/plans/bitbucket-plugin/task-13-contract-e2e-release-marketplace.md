@@ -3,7 +3,7 @@ id: "13-contract-e2e-release-marketplace"
 title: "Cross-repository contract E2E, release, and marketplace"
 status: in_progress
 wave: 4
-depends_on: ["03-protocol-manifest-actions", "04-frontend-plugin-registry", "05-dynamic-composer-reference-sources", "06-plugin-owned-task-lifecycle", "07-provider-neutral-git-credentials", "08-native-repository-provider", "09-native-link-review-surfaces", "10-cloud-dc-domain-auth", "11-plugin-workflows-watches", "12-plugin-ui-native-registrations", "12b-github-parity-page", "12c-exact-code-host-ui-parity", "12d-host-native-task-link-parity"]
+depends_on: ["03-protocol-manifest-actions", "04-frontend-plugin-registry", "05-dynamic-composer-reference-sources", "06-plugin-owned-task-lifecycle", "07-provider-neutral-git-credentials", "08-native-repository-provider", "09-native-link-review-surfaces", "10-cloud-dc-domain-auth", "11-plugin-workflows-watches", "12-plugin-ui-native-registrations", "12b-github-parity-page", "12c-exact-code-host-ui-parity", "12d-host-native-task-link-parity", "12h-native-create-unlink-indicators-saved-queries"]
 plan: "plan.md"
 spec: "../../specs/bitbucket-plugin/spec.md"
 ---

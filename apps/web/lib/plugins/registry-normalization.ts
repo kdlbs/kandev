@@ -1,4 +1,9 @@
-import type { ReviewItemSummary, ReviewTaskPipelineState, ReviewTaskStatus } from "./types";
+import type {
+  ReviewItemSummary,
+  ReviewTaskAssociation,
+  ReviewTaskPipelineState,
+  ReviewTaskStatus,
+} from "./types";
 
 export function taskActionKey(pluginId: string, actionId: string): string {
   return `${pluginId}:${actionId}`;
@@ -38,6 +43,20 @@ export function normalizeReviewItems(
         ...(taskStatus ? { taskStatus } : {}),
       },
     ];
+  });
+}
+
+export function normalizeReviewAssociations(
+  providerId: string,
+  associations: readonly ReviewTaskAssociation[],
+): readonly ReviewTaskAssociation[] {
+  const seen = new Set<string>();
+  return associations.flatMap((association) => {
+    if (!association.taskId || !association.reviewKey) return [];
+    const key = `${association.taskId}\u0000${association.reviewKey}`;
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [{ providerId, taskId: association.taskId, reviewKey: association.reviewKey }];
   });
 }
 

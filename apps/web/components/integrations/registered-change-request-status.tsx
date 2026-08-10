@@ -9,32 +9,27 @@ import {
 import { reviewItemId } from "@/components/task/review-selection";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { usePluginRegistry } from "@/lib/plugins/registry";
+import type { PluginReviewProviderRegistration } from "@/lib/plugins/registry";
+import type { ReviewItemSummary } from "@/lib/plugins/types";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { useToast } from "@/components/toast-provider";
+import { t } from "@/lib/i18n";
 import { IntegrationChangeRequestStatus } from "./integration-change-request-status";
 import type { IntegrationChangeRequestStatusItem } from "./integration-change-request-status-types";
 
 const STATUS_REFRESH_INTERVAL_MS = 90_000;
 
-export function RegisteredChangeRequestStatus({
-  taskId,
-  sessionId,
-  surface,
-}: {
+type RegisteredChangeRequestStatusProps = {
   taskId: string | null;
   sessionId?: string | null;
   surface: "topbar" | "composer";
-}) {
-  const registry = usePluginRegistry();
-  const { reviews, loading } = useNormalizedTaskReviewsState(taskId);
-  const usesTouchDrawer = useTouchDrawer();
-  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const setMobileSessionReview = useAppStore((state) => state.setMobileSessionReview);
-  const addReviewPanel = useDockviewStore((state) => state.addReviewPanel);
-  const statusReviews = useMemo(() => reviews.filter((review) => review.taskStatus), [reviews]);
+};
 
+function usePeriodicStatusRefresh(taskId: string | null, reviews: readonly ReviewItemSummary[]) {
+  const registry = usePluginRegistry();
   useEffect(() => {
-    if (!taskId || statusReviews.length === 0) return;
-    const providerIds = Array.from(new Set(statusReviews.map((review) => review.providerId)));
+    if (!taskId || reviews.length === 0) return;
+    const providerIds = Array.from(new Set(reviews.map((review) => review.providerId)));
     const interval = setInterval(() => {
       providerIds.forEach((providerId) => {
         const provider = registry.getReviewProvider(providerId);
@@ -42,13 +37,78 @@ export function RegisteredChangeRequestStatus({
       });
     }, STATUS_REFRESH_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [registry, statusReviews, taskId]);
+  }, [registry, reviews, taskId]);
+}
 
-  const items = useMemo<IntegrationChangeRequestStatusItem[]>(
+function createUnlinkHandler({
+  provider,
+  workspaceId,
+  taskId,
+  reviewKey,
+  toast,
+}: {
+  provider: PluginReviewProviderRegistration;
+  workspaceId: string;
+  taskId: string;
+  reviewKey: string;
+  toast: ReturnType<typeof useToast>["toast"];
+}) {
+  if (!provider.unlink) return undefined;
+  return async () => {
+    try {
+      await provider.unlink!({
+        workspaceId,
+        taskId,
+        reviewKey,
+        signal: new AbortController().signal,
+      });
+      await Promise.all([
+        refreshReviewProvider(provider, taskId),
+        provider.refreshAssociations?.(workspaceId, new AbortController().signal),
+      ]);
+      toast({ title: t("integrations:pullRequestUnlinked"), variant: "success" });
+    } catch (error) {
+      toast({
+        title: t("integrations:failedToUnlinkPullRequest"),
+        description: error instanceof Error ? error.message : t("integrations:unknownError"),
+        variant: "error",
+      });
+    }
+  };
+}
+
+function useRegisteredStatusItems({
+  taskId,
+  sessionId,
+  reviews,
+  loading,
+}: Pick<RegisteredChangeRequestStatusProps, "taskId" | "sessionId"> & {
+  reviews: readonly ReviewItemSummary[];
+  loading: boolean;
+}) {
+  const registry = usePluginRegistry();
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const { toast } = useToast();
+  const usesTouchDrawer = useTouchDrawer();
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const setMobileSessionReview = useAppStore((state) => state.setMobileSessionReview);
+  const addReviewPanel = useDockviewStore((state) => state.addReviewPanel);
+  return useMemo<IntegrationChangeRequestStatusItem[]>(
     () =>
-      statusReviews.flatMap((review) => {
+      reviews.flatMap((review) => {
         const status = review.taskStatus;
         if (!status) return [];
+        const provider = registry.getReviewProvider(review.providerId);
+        const onUnlink =
+          provider && workspaceId && taskId
+            ? createUnlinkHandler({
+                provider,
+                workspaceId,
+                taskId,
+                reviewKey: review.reviewKey,
+                toast,
+              })
+            : undefined;
         return [
           {
             id: `${review.providerId}:${review.reviewKey}`,
@@ -69,6 +129,7 @@ export function RegisteredChangeRequestStatus({
               const provider = registry.getReviewProvider(review.providerId);
               if (provider) await refreshReviewProvider(provider, taskId);
             },
+            ...(onUnlink ? { onUnlink } : {}),
             onOpenReview: () => {
               const mobileSessionId = sessionId ?? activeSessionId;
               if (usesTouchDrawer && mobileSessionId) {
@@ -93,11 +154,23 @@ export function RegisteredChangeRequestStatus({
       registry,
       sessionId,
       setMobileSessionReview,
-      statusReviews,
+      reviews,
       taskId,
+      toast,
       usesTouchDrawer,
+      workspaceId,
     ],
   );
+}
 
+export function RegisteredChangeRequestStatus({
+  taskId,
+  sessionId,
+  surface,
+}: RegisteredChangeRequestStatusProps) {
+  const { reviews, loading } = useNormalizedTaskReviewsState(taskId);
+  const statusReviews = useMemo(() => reviews.filter((review) => review.taskStatus), [reviews]);
+  usePeriodicStatusRefresh(taskId, statusReviews);
+  const items = useRegisteredStatusItems({ taskId, sessionId, reviews: statusReviews, loading });
   return <IntegrationChangeRequestStatus items={items} surface={surface} />;
 }
