@@ -65,16 +65,25 @@ test.describe("Configuration Chat", () => {
 
       const floatingSave = testPage.getByTestId("settings-floating-save");
       const saveButton = floatingSave.getByRole("button", { name: "Save changes" });
+      const resetButton = floatingSave.getByRole("button", { name: "Reset" });
       const surface = floatingSave.getByTestId("settings-floating-save-surface");
       const contentArea = testPage.getByTestId("settings-scroll-container");
       const configChatButton = testPage.getByRole("button", { name: "Configuration Chat" });
-      const [closedSurfaceBox, contentBox] = await Promise.all([
+      const [closedSurfaceBox, contentBox, configChatBox, resetBox, saveBox] = await Promise.all([
         surface.boundingBox(),
         contentArea.boundingBox(),
+        configChatButton.boundingBox(),
+        resetButton.boundingBox(),
+        saveButton.boundingBox(),
       ]);
       expect(closedSurfaceBox).not.toBeNull();
       expect(contentBox).not.toBeNull();
+      expect(configChatBox).not.toBeNull();
+      expect(resetBox).not.toBeNull();
+      expect(saveBox).not.toBeNull();
       expect(closedSurfaceBox!.height).toBeLessThanOrEqual(48);
+      expect(resetBox!.height).toBeLessThanOrEqual(36);
+      expect(saveBox!.height).toBeLessThanOrEqual(36);
       expect(
         Math.abs(
           closedSurfaceBox!.x +
@@ -86,7 +95,7 @@ test.describe("Configuration Chat", () => {
         Math.abs(
           closedSurfaceBox!.y +
             closedSurfaceBox!.height -
-            (contentBox!.y + contentBox!.height - 20),
+            (configChatBox!.y + configChatBox!.height),
         ),
       ).toBeLessThanOrEqual(2);
       await expect(saveButton).toHaveClass(/bg-success/);
@@ -108,6 +117,12 @@ test.describe("Configuration Chat", () => {
       expect(
         Math.abs(surfaceBox!.x + surfaceBox!.width / 2 - (popoverBox!.x + popoverBox!.width / 2)),
       ).toBeLessThanOrEqual(2);
+      const leftParentGap = surfaceBox!.x - popoverBox!.x;
+      const rightParentGap =
+        popoverBox!.x + popoverBox!.width - (surfaceBox!.x + surfaceBox!.width);
+      expect(leftParentGap).toBeGreaterThanOrEqual(8);
+      expect(rightParentGap).toBeGreaterThanOrEqual(8);
+      expect(Math.abs(leftParentGap - rightParentGap)).toBeLessThanOrEqual(2);
     } finally {
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
         changes_panel_layout: initialLayout,

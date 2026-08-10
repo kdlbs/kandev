@@ -135,7 +135,7 @@ function ConfigChatFloatingActionsHost({
   return (
     <div
       ref={setHost}
-      className="pointer-events-none absolute inset-x-0 bottom-[calc(100%+0.75rem)] z-10 flex w-full justify-center px-[calc(0.5rem+_env(safe-area-inset-left))] max-w-[calc(100vw_-_2rem_-_env(safe-area-inset-left)_-_env(safe-area-inset-right))]"
+      className="pointer-events-none absolute inset-x-0 bottom-[calc(100%+0.75rem)] z-10 flex w-full max-w-[calc(100vw_-_2rem_-_env(safe-area-inset-left)_-_env(safe-area-inset-right))] justify-center pl-[calc(0.75rem+_env(safe-area-inset-left))] pr-[calc(0.75rem+_env(safe-area-inset-right))]"
       data-testid="config-chat-floating-actions"
     />
   );
