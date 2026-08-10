@@ -101,14 +101,17 @@ Three further narrowings, each with the acceptance named in-spec:
 3. **Claude-only inline recogniser.** V1 registers Claude through the seam's *shape* but defers
    the public registry + vendor-neutrality tests (AC-69/69a) to the seam slice.
 
-**Turn-stamp bypass hazard (name it in V1, don't discover it).** V1 keeps the turn-start *stamp*
-while deferring the `turn_started` event. On the branch the stamp fires inside the ACP adapter's
-`syncNotifQueueThen` callback, fused with the (deferred) `turn_started` emission, and the
-synthetic `ScheduleWakeup`/`fireWakeup` dispatch path can bypass a naive stamp. A wakeup-dispatched
-turn that skips the stamp leaves a **stale (older) threshold**, biasing toward `live` — cheap per
-the parent, but it can render a **spuriously parked card**, i.e. a wrong showcase. V1 must either
-require the stamp on **all** dispatch paths (including `fireWakeup`) or record stale-stamp-on-
-wakeup as an explicit accepted V1 limitation.
+**Turn-stamp bypass hazard (named here, resolved in the frozen spec's D-1).** V1 keeps the
+turn-start *stamp* while deferring the `turn_started` event. On the branch the stamp fires inside
+the ACP adapter's `syncNotifQueueThen` callback, fused with the (deferred) `turn_started`
+emission, and the synthetic `ScheduleWakeup`/`fireWakeup` dispatch path can bypass a naive stamp. A
+wakeup-dispatched turn that skips the stamp leaves a **stale (older) threshold**, biasing toward
+`live` — cheap per the parent, but it can render a **spuriously parked card**, i.e. a wrong
+showcase. **Resolved** (frozen spec §5, D-1): the stamp is placed in `sendPrompt`, unconditionally,
+after `beginPromptTurn(sessionID)`, so all three dispatch callers (`Prompt`, `PromptSteer`,
+`fireWakeup`) stamp on every non-dropped dispatch. The alternative — recording stale-stamp-on-
+wakeup as an accepted V1 limitation — was considered and rejected, because a false park is the one
+failure that discredits the whole showcase.
 
 ### V1 acceptance criteria
 
