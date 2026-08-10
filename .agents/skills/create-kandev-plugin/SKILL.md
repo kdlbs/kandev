@@ -169,11 +169,12 @@ for later. In the same change:
    `node scripts/validate-public-docs.mjs`, and a stale-reference search. Report
    the exact commands and results.
 
-A hook absent from the frontend/backend matrix and `types.ts` does not exist
-yet; point the author at the nearest supported recipe instead of publishing a
-speculative signature, and do not record the gap as a durable list entry in
-this skill or an `AGENTS.md` — the matrix and the contract sources are the
-only place absence or presence is tracked. If the hook is implemented but the
+A hook absent from the relevant frontend/backend matrix and its corresponding
+authoritative contract source does not exist yet; point the author at the
+nearest supported recipe instead of publishing a speculative signature, and
+do not record the gap as a durable list entry in this skill or an
+`AGENTS.md` — the matrix and the contract sources are the only place
+absence or presence is tracked. If the hook is implemented but the
 matrix, recipe, fixture, or authoritative contract is missing, the plugin
 change is not documentation complete.
 
