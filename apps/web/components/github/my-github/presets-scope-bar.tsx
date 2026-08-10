@@ -36,6 +36,7 @@ export function PresetsScopeBar({
   prPresets = PR_PRESETS,
   issuePresets = ISSUE_PRESETS,
   savedPresets,
+  selected,
   onSelect,
   onToggleSavedDefault,
   ...props
@@ -57,12 +58,15 @@ export function PresetsScopeBar({
     [onToggleSavedDefault],
   );
   const handleKindChange = useCallback(
-    (kind: SidebarSelection["kind"]) => onSelect({ kind, source: "kind-switch" }),
-    [onSelect],
+    (kind: SidebarSelection["kind"]) => {
+      if (kind !== selected.kind) onSelect({ kind, source: "kind-switch" });
+    },
+    [onSelect, selected.kind],
   );
   return (
     <IntegrationScopeBar
       {...props}
+      selected={selected}
       onSelect={onSelect}
       onKindChange={handleKindChange}
       savedPresets={savedPresets}

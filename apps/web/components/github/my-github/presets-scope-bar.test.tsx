@@ -44,6 +44,11 @@ vi.mock("@/components/integrations/presets-scope-bar-base", () => ({
           data-testid="scope-bar-kind-switch"
           onClick={() => onKindChange?.("issue")}
         />
+        <button
+          type="button"
+          data-testid="scope-bar-active-kind"
+          onClick={() => onKindChange?.("pr")}
+        />
       </div>
     );
   },
@@ -76,8 +81,32 @@ function expectExplicitKindSwitchRequest() {
   expect(onSelect).toHaveBeenCalledWith({ kind: "issue", source: "kind-switch" });
 }
 
+function expectActiveKindRequestIgnored() {
+  const onSelect = vi.fn();
+
+  render(
+    <PresetsScopeBar
+      selected={{ kind: "pr", source: "preset", id: "review" }}
+      onSelect={onSelect}
+      savedPresets={[]}
+      onDeleteSaved={vi.fn()}
+      canSaveCurrent={false}
+      onSaveCurrent={vi.fn()}
+      onToggleSavedDefault={vi.fn()}
+      defaultMutationPendingId={null}
+      prPresets={[]}
+      issuePresets={[]}
+    />,
+  );
+
+  fireEvent.click(screen.getByTestId("scope-bar-active-kind"));
+  expect(onSelect).not.toHaveBeenCalled();
+}
+
 describe("PresetsScopeBar default adapter", () => {
   it("emits an explicit kind-switch request", expectExplicitKindSwitchRequest);
+
+  it("ignores an active-kind request at the wrapper boundary", expectActiveKindRequestIgnored);
 
   it("forwards pending state to the desktop default action", () => {
     render(
