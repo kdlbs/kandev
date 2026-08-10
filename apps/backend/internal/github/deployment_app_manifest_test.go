@@ -38,8 +38,8 @@ func TestDeploymentAppManifestExactPolicyAndURLs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildDeploymentAppManifest() error = %v", err)
 	}
-	if submission.Revision != DeploymentAppManifestRevision {
-		t.Fatalf("Revision = %d, want %d", submission.Revision, DeploymentAppManifestRevision)
+	if submission.Revision != 2 {
+		t.Fatalf("Revision = %d, want 2", submission.Revision)
 	}
 	if submission.RegistrationURL != "https://github.com/settings/apps/new" {
 		t.Fatalf("RegistrationURL = %q", submission.RegistrationURL)
@@ -77,9 +77,7 @@ func TestDeploymentAppManifestExactPolicyAndURLs(t *testing.T) {
 	if !reflect.DeepEqual(manifest.DefaultPermissions, wantPermissions) {
 		t.Fatalf("DefaultPermissions = %#v, want %#v", manifest.DefaultPermissions, wantPermissions)
 	}
-	wantEvents := []string{
-		"installation", "installation_repositories", "github_app_authorization", "push", "check_run",
-	}
+	wantEvents := []string{"push", "check_run"}
 	if !reflect.DeepEqual(manifest.DefaultEvents, wantEvents) {
 		t.Fatalf("DefaultEvents = %#v, want %#v", manifest.DefaultEvents, wantEvents)
 	}

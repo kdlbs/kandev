@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"net/url"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -131,6 +133,20 @@ func TestHTTPAppRegistrationManifestIsRouteBoundAndReturnsToWorkspace(t *testing
 	var started AppRegistrationManifestStart
 	if err := json.Unmarshal(start.Body.Bytes(), &started); err != nil || started.RegistrationID == "" {
 		t.Fatalf("start response = %s, error = %v", start.Body.String(), err)
+	}
+	registrationURL, err := url.Parse(started.RegistrationURL)
+	if err != nil {
+		t.Fatalf("registration URL = %q: %v", started.RegistrationURL, err)
+	}
+	if registrationURL.Query().Get("state") != started.State {
+		t.Fatalf("registration URL state = %q, want %q", registrationURL.Query().Get("state"), started.State)
+	}
+	redirectURL, err := url.Parse(started.Manifest.RedirectURL)
+	if err != nil {
+		t.Fatalf("manifest redirect URL = %q: %v", started.Manifest.RedirectURL, err)
+	}
+	if redirectURL.RawQuery != "" {
+		t.Fatalf("manifest redirect URL query = %q, want empty", redirectURL.RawQuery)
 	}
 
 	wrong := httptest.NewRecorder()
@@ -496,7 +512,8 @@ func TestHTTPAppRegistrationImportPreparationIsSingleUse(t *testing.T) {
 		preparation.InstallCallbackURL != base+"/install/callback" ||
 		preparation.PersonalCallbackURL != base+"/personal/callback" ||
 		preparation.WebhookURL != base+"/webhook" || preparation.SetupURL != preparation.InstallCallbackURL ||
-		preparation.Permissions["contents"] != "write" || !containsString(preparation.Events, "installation") {
+		preparation.Permissions["contents"] != "write" ||
+		!reflect.DeepEqual(preparation.Events, []string{"push", "check_run"}) {
 		t.Fatalf("preparation = %+v", preparation)
 	}
 	_, privateKey := testAppPrivateKey(t)
