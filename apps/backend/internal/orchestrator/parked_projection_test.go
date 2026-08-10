@@ -129,13 +129,21 @@ func TestParked_FlagOff_NoProbeIssued(t *testing.T) {
 }
 
 // TestParked_NoRecogniserMatch verifies AC-37: a background tool call whose
-// kind is NOT shell (here: a subagent) never attests, so a later settle
-// issues zero probes and never parks — even though IsDetachedBackgroundLaunch
-// alone cannot tell the two kinds apart, the explicit Kind==shell filter can.
+// kind is NOT shell (here: a subagent, built via attestedDetachedSubagentPayload
+// with Detached=true — matching the real stampSubagentBackgroundWork producer
+// AC-37's second GIVEN names) never attests, so a later settle issues zero
+// probes and never parks. The IsDetachedBackgroundLaunch precondition below
+// makes sure this test actually exercises the Kind==shell filter: without
+// Detached=true, IsDetachedBackgroundLaunch is already false and the
+// assertions below would hold regardless of whether the filter exists.
 func TestParked_NoRecogniserMatch(t *testing.T) {
 	ctx := context.Background()
 	probe := &fakeBackgroundProbe{result: probeResultLive}
 	svc := parkedTestService(t, "t1", "s1", probe)
+
+	payload := attestedDetachedSubagentPayload("desc", "prompt", "general")
+	require.True(t, payload.IsDetachedBackgroundLaunch(),
+		"precondition: payload must be ambiguous to IsDetachedBackgroundLaunch so the Kind==shell filter is what's under test")
 
 	svc.handleToolCallEvent(ctx, &lifecycle.AgentStreamEventPayload{
 		TaskID:    "t1",
@@ -143,7 +151,7 @@ func TestParked_NoRecogniserMatch(t *testing.T) {
 		Data: &lifecycle.AgentStreamEventData{
 			ToolCallID: "tc-subagent-1",
 			ToolStatus: "running",
-			Normalized: attestedSubagentPayload("desc", "prompt", "general"),
+			Normalized: payload,
 		},
 	})
 
