@@ -1,8 +1,10 @@
 "use client";
 
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { useRouter } from "@/lib/routing/client-router";
 import { IconLayoutKanban, IconGitBranch, IconList, IconPlus } from "@tabler/icons-react";
+import { searchKeywords } from "@/lib/commands/search-keywords";
 import { useRegisterCommands } from "@/hooks/use-register-commands";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { linkToTaskOverview, linkToTasks } from "@/lib/links";
@@ -16,6 +18,7 @@ type HomepageCommandsProps = {
 };
 
 export function HomepageCommands({ onCreateTask }: HomepageCommandsProps) {
+  const { t } = useTranslation();
   const router = useRouter();
   const { onViewModeChange } = useKanbanDisplaySettings();
   const { isMobile } = useResponsiveBreakpoint();
@@ -33,20 +36,20 @@ export function HomepageCommands({ onCreateTask }: HomepageCommandsProps) {
     const items: CommandItem[] = [
       {
         id: "task-create",
-        label: "Create New Task",
-        group: "Tasks",
+        label: t("common:commandCreateNewTask"),
+        group: t("common:commandGroupTasks"),
         icon: <IconPlus className="size-3.5" />,
         shortcut: newTaskShortcut,
-        keywords: ["new", "create", "task", "add"],
+        keywords: searchKeywords(t, "common:commandCreateNewTaskKeywords"),
         action: onCreateTask,
         priority: 0,
       },
       {
         id: "view-kanban",
-        label: "Switch to Kanban View",
-        group: "View",
+        label: t("common:commandSwitchToKanbanView"),
+        group: t("common:commandGroupView"),
         icon: <IconLayoutKanban className="size-3.5" />,
-        keywords: ["kanban", "board", "view"],
+        keywords: searchKeywords(t, "common:commandSwitchToKanbanViewKeywords"),
         priority: 0,
         action: () => {
           router.push(taskOverviewHref);
@@ -58,10 +61,10 @@ export function HomepageCommands({ onCreateTask }: HomepageCommandsProps) {
     if (!isMobile) {
       items.push({
         id: "view-pipeline",
-        label: "Switch to Pipeline View",
-        group: "View",
+        label: t("common:commandSwitchToPipelineView"),
+        group: t("common:commandGroupView"),
         icon: <IconGitBranch className="size-3.5" />,
-        keywords: ["pipeline", "graph", "view"],
+        keywords: searchKeywords(t, "common:commandSwitchToPipelineViewKeywords"),
         priority: 0,
         action: () => {
           router.push(taskOverviewHref);
@@ -72,10 +75,10 @@ export function HomepageCommands({ onCreateTask }: HomepageCommandsProps) {
 
     items.push({
       id: "view-list",
-      label: "Switch to List View",
-      group: "View",
+      label: t("common:commandSwitchToListView"),
+      group: t("common:commandGroupView"),
       icon: <IconList className="size-3.5" />,
-      keywords: ["list", "table", "view"],
+      keywords: searchKeywords(t, "common:commandSwitchToListViewKeywords"),
       priority: 0,
       action: () => router.push(tasksHref),
     });
@@ -89,6 +92,7 @@ export function HomepageCommands({ onCreateTask }: HomepageCommandsProps) {
     isMobile,
     taskOverviewHref,
     tasksHref,
+    t,
   ]);
 
   useRegisterCommands(commands);

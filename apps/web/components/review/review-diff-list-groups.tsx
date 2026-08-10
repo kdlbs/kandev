@@ -21,7 +21,7 @@ export function RepoGroupHeader({
   const { t } = useTranslation();
   // The empty-name group ("uncategorised" — no repository_name on its files)
   // gets a generic label so the user understands what they're looking at.
-  const label = name || "Other changes";
+  const label = name || t("task:otherChanges");
   return (
     <div
       className="sticky top-0 z-20 flex items-center gap-2 px-4 py-1.5 bg-muted/40 backdrop-blur-sm border-y border-border/60 text-xs font-medium text-foreground"

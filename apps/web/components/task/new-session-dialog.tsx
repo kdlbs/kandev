@@ -49,6 +49,7 @@ function agentProfileDisplayLabel(profile: AgentProfileOption): string {
 }
 
 function useNewSessionDialogState(taskId: string) {
+  const { t } = useTranslation();
   const resolvedWorkspaceId = useAppStore((state) =>
     resolveComposerWorkspaceId({
       sessionId: null,
@@ -61,8 +62,8 @@ function useNewSessionDialogState(taskId: string) {
     }),
   );
   const taskTitle = useAppStore((state) => {
-    const task = state.kanban.tasks.find((t: { id: string }) => t.id === taskId);
-    return task?.title ?? "Task";
+    const task = state.kanban.tasks.find((entry: { id: string }) => entry.id === taskId);
+    return task?.title ?? t("common:task");
   });
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);

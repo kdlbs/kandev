@@ -649,7 +649,7 @@ func (s *Store) ListEnabledTriggersByType(ctx context.Context, triggerType Trigg
 		SELECT t.* FROM automation_triggers t
 		JOIN automations a ON a.id = t.automation_id
 		WHERE t.type = ? AND t.enabled = 1 AND a.enabled = 1
-		ORDER BY t.created_at`, string(triggerType))
+		ORDER BY t.created_at ASC, t.id ASC`, string(triggerType))
 	hydrateTriggers(triggers)
 	return triggers, err
 }

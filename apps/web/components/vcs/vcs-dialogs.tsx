@@ -29,7 +29,7 @@ import {
   useGitOperations,
 } from "@/hooks/use-git-operations";
 import { useAppStore } from "@/components/state-provider";
-import { useGitWithFeedback } from "@/hooks/use-git-with-feedback";
+import { gitOperationLabel, useGitWithFeedback } from "@/hooks/use-git-with-feedback";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { useToast } from "@/components/toast-provider";
@@ -451,6 +451,7 @@ function useVcsDialogsState(
   taskTitle: string | undefined,
   baseBranch: string | undefined,
 ) {
+  const { t } = useTranslation();
   const cs = useCommitDialogState();
   const ps = usePRDialogState();
   const { toast } = useToast();
@@ -477,16 +478,12 @@ function useVcsDialogsState(
     const title = cs.message.trim();
     const body = cs.body.trim();
     const fullMessage = body ? `${title}\n\n${body}` : title;
-    // Deliberately English: `useGitWithFeedback` composes this into
-    // "<label>...", "<label> successful" and "<label> failed" itself, and that
-    // hook is not migrated. Translating only the label would produce a
-    // half-translated toast.
-    const label = cs.repo ? `Commit (${cs.repo})` : "Commit";
+    const label = gitOperationLabel(t, "common:gitOpCommit", cs.repo);
     await gitWithFeedback(() => commit(fullMessage, cs.stageAll, false, cs.repo), label);
     cs.setMessage("");
     cs.setBody("");
     cs.setRepo(undefined);
-  }, [cs, gitWithFeedback, commit]);
+  }, [cs, gitWithFeedback, commit, t]);
   const handleCreatePR = useCreatePRHandler(
     ps,
     baseBranch,

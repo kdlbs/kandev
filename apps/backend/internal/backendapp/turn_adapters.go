@@ -6,9 +6,12 @@ import (
 	"errors"
 	"fmt"
 
+	"go.uber.org/zap"
+
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/azuredevops"
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -188,6 +191,36 @@ func (a *automationTaskDeleterAdapter) DeleteTask(ctx context.Context, taskID st
 		return fmt.Errorf("%w: %w", automation.ErrTaskNotFound, err)
 	}
 	return err
+}
+
+// taskOriginGetter is the minimal read interface automationTaskOriginLookupAdapter
+// needs from the task service — extracted so the adapter is testable without a
+// full service instance.
+type taskOriginGetter interface {
+	GetTask(ctx context.Context, id string) (*models.Task, error)
+}
+
+// automationTaskOriginLookupAdapter satisfies automation.TaskOriginLookup.
+// It resolves a task's workspace and whether it was created by an automation
+// run so the github_pr_merged subscriber can skip automation-spawned tasks
+// (loop-guard) and scope workspace matching without importing the task service
+// into the automation package.
+type automationTaskOriginLookupAdapter struct {
+	svc taskOriginGetter
+	log *logger.Logger
+}
+
+func (a *automationTaskOriginLookupAdapter) TaskWorkspaceAndAutomationOrigin(ctx context.Context, taskID string) (string, bool, bool) {
+	task, err := a.svc.GetTask(ctx, taskID)
+	if err != nil {
+		a.log.Warn("task origin lookup failed", zap.String("task_id", taskID), zap.Error(err))
+		return "", false, false
+	}
+	if task == nil {
+		a.log.Debug("task not found for origin lookup", zap.String("task_id", taskID))
+		return "", false, false
+	}
+	return task.WorkspaceID, task.Origin == models.TaskOriginAutomationRun, true
 }
 
 // repositoryLookupAdapter satisfies the linear/jira/sentry RepositoryLookup

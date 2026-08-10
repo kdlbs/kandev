@@ -225,10 +225,10 @@ Client (WS) ← Orchestrator ← Lifecycle Manager ←──── stream update
   - **Path/security tests:** Avoid using the real filesystem root as a fixture root. Build fake absolute roots under `t.TempDir()` with `filepath.Join`; this keeps tests portable across Windows, POSIX, and privileged cloud executors.
   - **Filesystem permission tests:** Assert permission-denied behavior only after probing that the current executor enforces the permission bit change. Root-like Sprite executors may bypass `chmod` restrictions.
   - **Filesystem safety checks:** Carry the original `os.Lstat` `FileInfo` (or opened handle) through every decision; do not re-stat a validated path, which reopens a TOCTOU window before side effects. Test mismatches before writes or manager commands.
-  - **Git indexed-environment tests:** When a test supplies `GIT_CONFIG_COUNT`,
-    `GIT_CONFIG_KEY_n`, and `GIT_CONFIG_VALUE_n`, clear every inherited indexed
-    key first and restore it with `t.Cleanup`. Changing only the count can leave
-    higher parent indexes behind and create a malformed Git config block.
+  - **Git indexed-environment tests:** When a test supplies `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_n`,
+    and `GIT_CONFIG_VALUE_n`, clear every inherited indexed key first and restore it with
+    `t.Cleanup`. `internal/gitconfigenv` ignores indexes past the count the way Git does, so an
+    uncleared parent silently changes what the block contains instead of failing loudly.
   - **Full test output:** For local full-suite pass/fail validation, prefer plain `go test -race ./...`. `go test -json ./...` can emit very large JSONL streams; if a wrapper or tracing tool truncates the stream mid-record, downstream JSON parsing may fail even when Go tests passed. Use JSON output mainly for CI artifacts or test-report tooling that explicitly requires it.
   - **Private executable helpers:** When library code starts `os.Executable()` in
     a private helper mode, do not rely only on a command package's dispatch or

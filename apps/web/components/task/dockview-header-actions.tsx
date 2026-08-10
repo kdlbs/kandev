@@ -156,7 +156,7 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
       if (!environmentId) return;
       try {
         const result = await createUserShell(environmentId, { scriptId });
-        const title = result.label ?? "Script";
+        const title = result.label ?? t("common:script");
         addTerminalPanel(result.terminalId, group.id, environmentId, undefined, title);
       } catch (error) {
         console.error("Failed to run script:", error);
@@ -491,7 +491,7 @@ function TerminalScriptsDropdown({
           rightBottomGroupId ?? undefined,
           environmentId,
           undefined,
-          result.label ?? "Script",
+          result.label ?? t("common:script"),
         );
       } catch (error) {
         console.error("Failed to run script:", error);
@@ -574,7 +574,7 @@ function TerminalDevPreviewButton({
     }
     try {
       const shell = await createUserShell(environmentId, { taskId: taskID ?? undefined });
-      const title = shell.displayName ?? shell.label ?? "Terminal";
+      const title = shell.displayName ?? shell.label ?? t("common:terminal");
       addTerminalPanel(
         shell.terminalId,
         rightBottomGroupId ?? undefined,

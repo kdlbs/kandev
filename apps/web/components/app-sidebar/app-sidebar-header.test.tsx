@@ -2,6 +2,8 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const setWorkspacePickerOpen = vi.fn();
+
 const state = {
   workspaces: {
     activeId: "kanban-1" as string | null,
@@ -10,6 +12,8 @@ const state = {
       { id: "office-1", name: "Office", office_workflow_id: "wf-office" },
     ],
   },
+  appSidebar: { workspacePickerOpen: false },
+  setWorkspacePickerOpen,
 };
 
 vi.mock("@/components/state-provider", () => ({
@@ -17,7 +21,20 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 vi.mock("./app-sidebar-workspace-picker", () => ({
-  AppSidebarWorkspacePicker: () => <div data-testid="workspace-picker" />,
+  AppSidebarWorkspacePicker: ({
+    open,
+    onOpenChange,
+  }: {
+    open?: boolean;
+    onOpenChange?: (open: boolean) => void;
+  }) => (
+    <button
+      type="button"
+      data-testid="workspace-picker"
+      data-open={String(open)}
+      onClick={() => onOpenChange?.(false)}
+    />
+  ),
 }));
 
 import { AppSidebarHeader } from "./app-sidebar-header";
@@ -33,6 +50,8 @@ function renderHeader(collapsed = false) {
 describe("AppSidebarHeader", () => {
   beforeEach(() => {
     state.workspaces.activeId = "kanban-1";
+    state.appSidebar.workspacePickerOpen = false;
+    setWorkspacePickerOpen.mockClear();
   });
 
   afterEach(() => cleanup());
@@ -53,5 +72,22 @@ describe("AppSidebarHeader", () => {
     expect(screen.getByRole("link", { name: "Kandev home" }).getAttribute("href")).toBe(
       "/office?workspaceId=office-1",
     );
+  });
+
+  it("drives the workspace picker from the store flag", () => {
+    state.appSidebar.workspacePickerOpen = true;
+
+    renderHeader();
+
+    expect(screen.getByTestId("workspace-picker").getAttribute("data-open")).toBe("true");
+  });
+
+  it("writes the picker's dismissal back to the store", () => {
+    state.appSidebar.workspacePickerOpen = true;
+
+    renderHeader();
+    screen.getByTestId("workspace-picker").click();
+
+    expect(setWorkspacePickerOpen).toHaveBeenCalledWith(false);
   });
 });

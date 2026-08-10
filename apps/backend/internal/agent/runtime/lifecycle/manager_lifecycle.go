@@ -59,7 +59,7 @@ func (m *Manager) Start(ctx context.Context) error {
 				RuntimeName:          ri.RuntimeName,
 				Status:               v1.AgentStatusRunning,
 				StartedAt:            time.Now(),
-				Metadata:             ri.Metadata,
+				metadata:             ri.Metadata,
 				agentctl:             ri.Client,
 				standaloneInstanceID: ri.StandaloneInstanceID,
 				standalonePort:       ri.StandalonePort,

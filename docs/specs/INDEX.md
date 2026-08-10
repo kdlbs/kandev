@@ -155,6 +155,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 |---|---|
 | [ci-pr-automation](ui/ci-pr-automation.md) | building |
 | [github-pr-review-actions](ui/github-pr-review-actions.md) | shipped |
+| [pr-task-status-summary](ui/pr-task-status-summary.md) | shipped |
 | [comment-markdown](ui/comment-markdown.md) | shipped |
 | [resizable-markdown-tables](ui/resizable-markdown-tables.md) | building |
 | [transcript-auto-scroll](ui/transcript-auto-scroll.md) | building |
@@ -252,6 +253,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [native-code-review](native-code-review/spec.md) | building |
 | [missing-task-route-recovery](missing-task-route-recovery/spec.md) | draft |
 | [browser-inspect-annotations-save](browser-inspect-annotations-save/spec.md) | shipped |
+| [automations-pr-merged-trigger](automations-pr-merged-trigger/spec.md) | draft |
 | [no-silent-model-fallback](no-silent-model-fallback/spec.md) | approved |
 
 ---

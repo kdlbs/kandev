@@ -108,3 +108,19 @@ function subscribeBreakpoint(callback: () => void): () => void {
 export function useResponsiveBreakpoint(): ResponsiveBreakpoint {
   return React.useSyncExternalStore(subscribeBreakpoint, getClientSnapshot, () => SERVER_SNAPSHOT);
 }
+
+/**
+ * One-shot check for code that cannot subscribe to the hook — a global keydown
+ * dispatcher reads it inside the event handler rather than at render.
+ *
+ * Answers "is the AppSidebar rendered?": it uses the same `md`/768px boundary
+ * as `isMobile` and as the sidebar's own `hidden md:block`, so a shortcut that
+ * targets a sidebar-only surface can bail where that surface is `display:none`.
+ * Defaults to true without `matchMedia`, matching the desktop server snapshot.
+ */
+export function isAppSidebarViewport(): boolean {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return true;
+  }
+  return window.matchMedia(`(min-width: ${MOBILE_BREAKPOINT}px)`).matches;
+}
