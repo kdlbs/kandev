@@ -124,10 +124,11 @@ interaction test is required.
 
 ## Verification Results
 
-- `cd apps/backend && go test ./internal/profiles` — passed (11 tests).
-- `cd apps/backend && go test ./internal/launcher` — passed (133 tests).
+- `make test-backend` — passed (full backend test suite).
+- `make lint-backend` — passed (0 issues).
+- `make build-backend` — passed (backend binaries built).
 - `cd apps/backend && make check-make-shells` — passed for Unix, native
-  Windows, and Git Bash/MSYS dispatch.
+  Windows, and Git Bash/MSYS dispatch, including explicit prefixes with spaces.
 - `cd apps/web && pnpm e2e:run --project chromium tests/system/title-prefix.spec.ts`
   — passed (3 tests).
 - `node --test scripts/validate-public-docs.test.mjs` — passed (58 tests).

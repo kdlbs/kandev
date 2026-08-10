@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"strings"
 )
 
 const healthTokenBytes = 32
@@ -38,7 +39,7 @@ func backendEnv(ports portConfig, logLevel, consoleLogLevel string, debug bool, 
 func upsertEnv(env []string, key, value string) []string {
 	prefix := key + "="
 	for i, item := range env {
-		if len(item) >= len(prefix) && item[:len(prefix)] == prefix {
+		if strings.HasPrefix(item, prefix) {
 			env[i] = prefix + value
 			return env
 		}
@@ -49,7 +50,7 @@ func upsertEnv(env []string, key, value string) []string {
 func setEnvIfUnset(env []string, key, value string) []string {
 	prefix := key + "="
 	for _, item := range env {
-		if len(item) >= len(prefix) && item[:len(prefix)] == prefix {
+		if strings.HasPrefix(item, prefix) {
 			return env
 		}
 	}

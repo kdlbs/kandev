@@ -11,6 +11,12 @@ LDFLAGS := -s -w
 # environment or command-line value still wins through Make's `?=` semantics.
 KANDEV_WEB_TITLE_PREFIX ?= Debug
 
+# Quote the debug title prefix for the POSIX recipe. The replacement keeps
+# embedded single quotes safe while preserving spaces and shell metacharacters.
+single_quote := '
+single_quote_escape := '\''
+shell_quote = $(single_quote)$(subst $(single_quote),$(single_quote_escape),$(1))$(single_quote)
+
 # Cross-platform commands
 #
 # Two independent axes decide these variables; conflating them breaks Git
@@ -55,7 +61,7 @@ ifeq ($(OS)$(MSYSTEM),Windows_NT)
   # Run-target env prefixes and binary invocation. cmd.exe has no `NAME=VAL cmd`
   # syntax (use `set NAME=VAL&`) and no `exec`; the binary path needs backslashes.
   DEV_ENV = set KANDEV_DEBUG_DEV_MODE=true&
-  DEBUG_ENV = set KANDEV_DEBUG_PPROF_ENABLED=true& set KANDEV_LOG_LEVEL=debug& set KANDEV_WEB_TITLE_PREFIX=$(KANDEV_WEB_TITLE_PREFIX)&
+  DEBUG_ENV = set KANDEV_DEBUG_PPROF_ENABLED=true& set KANDEV_LOG_LEVEL=debug& set "KANDEV_WEB_TITLE_PREFIX=$(KANDEV_WEB_TITLE_PREFIX)"&
   EXEC =
   RUN_BIN = "$(subst /,\,$(BUILD_DIR)/$(BINARY_NAME)$(EXE))"
   # check-make-shells is a bash script; native cmd.exe can't run its shebang, so
@@ -80,7 +86,7 @@ else
   GO_DARWIN_ARM64 = CGO_ENABLED=0 GOOS=darwin GOARCH=arm64
   GO_DARWIN_AMD64 = CGO_ENABLED=0 GOOS=darwin GOARCH=amd64
   DEV_ENV = KANDEV_DEBUG_DEV_MODE=true
-  DEBUG_ENV = KANDEV_DEBUG_PPROF_ENABLED=true KANDEV_LOG_LEVEL=debug KANDEV_WEB_TITLE_PREFIX=$(KANDEV_WEB_TITLE_PREFIX)
+  DEBUG_ENV = KANDEV_DEBUG_PPROF_ENABLED=true KANDEV_LOG_LEVEL=debug KANDEV_WEB_TITLE_PREFIX=$(call shell_quote,$(KANDEV_WEB_TITLE_PREFIX))
   EXEC = exec
   RUN_BIN = ./$(BUILD_DIR)/$(BINARY_NAME)$(EXE)
   CHECK_SHELLS = @../../scripts/check-make-shells

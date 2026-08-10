@@ -29,7 +29,7 @@ status=0
 
 # expect <label> <OS> <MSYSTEM> <target> <expected recipe tail>
 expect() {
-	local label=$1 os=$2 msys=$3 target=$4 want=$5 marker=${6:-__backend} got
+	local label=$1 os=$2 msys=$3 target=$4 want=$5 marker=${6:-__backend} title_prefix=${7:-} got
 	# The OS=/MSYSTEM= overrides only steer which branch the Makefile picks;
 	# $(shell ...) still runs under this harness's POSIX shell, and it expands
 	# even under `make -n`. So neutralise the build-stamp probes rather than let
@@ -38,10 +38,17 @@ expect() {
 	# NULL_REDIR (rather than passing /dev/null) also dodges Git Bash rewriting
 	# a /dev/null argument to `nul` on its way to native make. None of this
 	# affects the run/dev/start-debug recipes under assertion.
-	got=$(env -u KANDEV_WEB_TITLE_PREFIX make -C "$backend_dir" OS="$os" MSYSTEM="$msys" NULL_REDIR= BUILD_TIME=simulated -n "$target" 2>/dev/null \
-		| grep -F "$marker" \
-		| sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s/[[:space:]]\{1,\}/ /g' \
-		|| true)
+	if [ -n "$title_prefix" ]; then
+		got=$(KANDEV_WEB_TITLE_PREFIX="$title_prefix" make -C "$backend_dir" OS="$os" MSYSTEM="$msys" NULL_REDIR= BUILD_TIME=simulated -n "$target" 2>/dev/null \
+			| grep -F "$marker" \
+			| sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s/[[:space:]]\{1,\}/ /g' \
+			|| true)
+	else
+		got=$(env -u KANDEV_WEB_TITLE_PREFIX make -C "$backend_dir" OS="$os" MSYSTEM="$msys" NULL_REDIR= BUILD_TIME=simulated -n "$target" 2>/dev/null \
+			| grep -F "$marker" \
+			| sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s/[[:space:]]\{1,\}/ /g' \
+			|| true)
+	fi
 	if [ "$got" = "$want" ]; then
 		printf 'ok    %-16s %-12s %s\n' "$label" "$target" "$got"
 	else
@@ -54,17 +61,23 @@ expect() {
 # Unix — no .exe, POSIX env-prefix + exec.
 expect unix '' '' run         './bin/kandev __backend'
 expect unix '' '' dev         'KANDEV_DEBUG_DEV_MODE=true exec ./bin/kandev __backend'
-expect unix '' '' start-debug 'KANDEV_DEBUG_PPROF_ENABLED=true KANDEV_LOG_LEVEL=debug KANDEV_WEB_TITLE_PREFIX=Debug exec ./bin/kandev __backend'
+expect unix '' '' start-debug "KANDEV_DEBUG_PPROF_ENABLED=true KANDEV_LOG_LEVEL=debug KANDEV_WEB_TITLE_PREFIX='Debug' exec ./bin/kandev __backend"
+expect unix '' '' start-debug "KANDEV_DEBUG_PPROF_ENABLED=true KANDEV_LOG_LEVEL=debug KANDEV_WEB_TITLE_PREFIX='Preview' exec ./bin/kandev __backend" __backend Preview
+expect unix '' '' start-debug "KANDEV_DEBUG_PPROF_ENABLED=true KANDEV_LOG_LEVEL=debug KANDEV_WEB_TITLE_PREFIX='QA Debug' exec ./bin/kandev __backend" __backend "QA Debug"
 
 # Native Windows (cmd/PowerShell) — .exe, `set VAR=VAL&`, backslash path, no exec.
 expect windows-native Windows_NT '' run         '"bin\kandev.exe" __backend'
 expect windows-native Windows_NT '' dev         'set KANDEV_DEBUG_DEV_MODE=true& "bin\kandev.exe" __backend'
-expect windows-native Windows_NT '' start-debug 'set KANDEV_DEBUG_PPROF_ENABLED=true& set KANDEV_LOG_LEVEL=debug& set KANDEV_WEB_TITLE_PREFIX=Debug& "bin\kandev.exe" __backend'
+expect windows-native Windows_NT '' start-debug 'set KANDEV_DEBUG_PPROF_ENABLED=true& set KANDEV_LOG_LEVEL=debug& set "KANDEV_WEB_TITLE_PREFIX=Debug"& "bin\kandev.exe" __backend'
+expect windows-native Windows_NT '' start-debug 'set KANDEV_DEBUG_PPROF_ENABLED=true& set KANDEV_LOG_LEVEL=debug& set "KANDEV_WEB_TITLE_PREFIX=Preview"& "bin\kandev.exe" __backend' __backend Preview
+expect windows-native Windows_NT '' start-debug 'set KANDEV_DEBUG_PPROF_ENABLED=true& set KANDEV_LOG_LEVEL=debug& set "KANDEV_WEB_TITLE_PREFIX=QA Debug"& "bin\kandev.exe" __backend' __backend "QA Debug"
 
 # Git Bash/MSYS — .exe suffix but POSIX syntax (recipes run through sh).
 expect git-bash Windows_NT MINGW64 run         './bin/kandev.exe __backend'
 expect git-bash Windows_NT MINGW64 dev         'KANDEV_DEBUG_DEV_MODE=true exec ./bin/kandev.exe __backend'
-expect git-bash Windows_NT MINGW64 start-debug 'KANDEV_DEBUG_PPROF_ENABLED=true KANDEV_LOG_LEVEL=debug KANDEV_WEB_TITLE_PREFIX=Debug exec ./bin/kandev.exe __backend'
+expect git-bash Windows_NT MINGW64 start-debug "KANDEV_DEBUG_PPROF_ENABLED=true KANDEV_LOG_LEVEL=debug KANDEV_WEB_TITLE_PREFIX='Debug' exec ./bin/kandev.exe __backend"
+expect git-bash Windows_NT MINGW64 start-debug "KANDEV_DEBUG_PPROF_ENABLED=true KANDEV_LOG_LEVEL=debug KANDEV_WEB_TITLE_PREFIX='Preview' exec ./bin/kandev.exe __backend" __backend Preview
+expect git-bash Windows_NT MINGW64 start-debug "KANDEV_DEBUG_PPROF_ENABLED=true KANDEV_LOG_LEVEL=debug KANDEV_WEB_TITLE_PREFIX='QA Debug' exec ./bin/kandev.exe __backend" __backend "QA Debug"
 
 # deadcode — the analyzer is invoked through the same shell-specific env-prefix
 # mechanism, but its command has no __backend marker, so match its module path.

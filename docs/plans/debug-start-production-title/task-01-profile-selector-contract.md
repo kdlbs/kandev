@@ -25,8 +25,9 @@ spec: "../../specs/dev-preview-title-prefixes/spec.md"
 
 ## Verification
 
-- `cd apps/backend && go test ./internal/profiles`
-- `cd apps/backend && go test ./internal/launcher`
+- `make test-backend`
+- `make lint-backend`
+- `make build-backend`
 - `make check-make-shells`
 - `git diff --check`
 
@@ -68,8 +69,9 @@ task to a subagent without explicit user authorization.
 
 ## Results
 
-- `cd apps/backend && go test ./internal/profiles` — passed (11 tests).
-- `cd apps/backend && go test ./internal/launcher` — passed (133 tests).
-- `cd apps/backend && make check-make-shells` — passed (Unix, native Windows,
-  and Git Bash/MSYS dispatch).
+- `make test-backend` — passed (full backend test suite).
+- `make lint-backend` — passed (0 issues).
+- `make build-backend` — passed (backend binaries built).
+- `make check-make-shells` — passed (Unix, native Windows, and Git Bash/MSYS
+  dispatch, including explicit prefixes with spaces).
 - `git diff --check` — passed.
