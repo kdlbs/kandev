@@ -15,6 +15,7 @@ import ExternalMcpPage from "@/app/settings/external-mcp/page";
 import IntegrationsIndexPage from "@/app/settings/integrations/page";
 import IntegrationsAzureDevOpsPage from "@/app/settings/integrations/azure-devops/page";
 import IntegrationsGitLabPage from "@/app/settings/integrations/gitlab/page";
+import IntegrationsForgejoPage from "@/app/settings/integrations/forgejo/page";
 import IntegrationsJiraPage from "@/app/settings/integrations/jira/page";
 import IntegrationsLinearPage from "@/app/settings/integrations/linear/page";
 import IntegrationsSentryPage from "@/app/settings/integrations/sentry/page";
@@ -158,6 +159,7 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   "/settings/integrations/azure-devops": () => renderIntegrationSettingsRoute("azure-devops"),
   "/settings/integrations/github": () => renderIntegrationSettingsRoute("github"),
   "/settings/integrations/gitlab": () => renderIntegrationSettingsRoute("gitlab"),
+  "/settings/integrations/forgejo": () => renderIntegrationSettingsRoute("forgejo"),
   "/settings/integrations/jira": () => renderIntegrationSettingsRoute("jira"),
   "/settings/integrations/linear": () => renderIntegrationSettingsRoute("linear"),
   "/settings/integrations/sentry": () => renderIntegrationSettingsRoute("sentry"),
@@ -408,6 +410,8 @@ function renderIntegrationSettingsRoute(section: string | null, workspaceId?: st
       return <GitHubIntegrationPage workspaceId={workspaceId} />;
     case "gitlab":
       return <IntegrationsGitLabPage workspaceId={workspaceId} />;
+    case "forgejo":
+      return <IntegrationsForgejoPage workspaceId={workspaceId} />;
     case "jira":
       return <IntegrationsJiraPage workspaceId={workspaceId} />;
     case "linear":
