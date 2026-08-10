@@ -95,6 +95,9 @@ describe("IntegrationScopeBar saved defaults", () => {
 
   it("disables every default action while a mutation is pending", () => {
     renderBar({ defaultMutationPending: true });
+    const currentDelete = screen.getByRole("button", {
+      name: "Delete Current default saved query",
+    }) as HTMLButtonElement;
 
     expect(
       (
@@ -110,13 +113,8 @@ describe("IntegrationScopeBar saved defaults", () => {
         }) as HTMLButtonElement
       ).disabled,
     ).toBe(true);
-    expect(
-      (
-        screen.getByRole("button", {
-          name: "Delete Current default saved query",
-        }) as HTMLButtonElement
-      ).disabled,
-    ).toBe(true);
+    expect(currentDelete.disabled).toBe(true);
+    expect(currentDelete.className).toContain("group-hover/saved:disabled:opacity-50");
     expect(
       (
         screen.getByRole("button", {

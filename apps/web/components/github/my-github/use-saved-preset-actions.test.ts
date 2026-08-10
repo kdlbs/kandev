@@ -177,13 +177,20 @@ describe("useSavedPresetActions query actions", () => {
 
   it("deletes an inactive saved query without changing the active search", () => {
     const remove = vi.fn();
-    const { result, setProgrammaticSelection, setQueryImmediate, setRepoFilter } = renderActions(
+    const {
+      result,
+      setProgrammaticSelection,
+      setQueryImmediate,
+      setRepoFilter,
+      markSearchInteracted,
+    } = renderActions(
       { selection: { kind: "issue", source: "saved", id: "saved-active" } },
       makeStore({ presets: [savedPreset], remove }),
     );
 
     act(() => result.current.onDeleteSaved(savedPreset.id));
 
+    expect(markSearchInteracted).toHaveBeenCalledOnce();
     expect(remove).toHaveBeenCalledWith(savedPreset.id);
     expect(setProgrammaticSelection).not.toHaveBeenCalled();
     expect(setQueryImmediate).not.toHaveBeenCalled();
@@ -195,13 +202,20 @@ describe("useSavedPresetActions default deletion", () => {
   it("deletes an inactive default without changing the active search", () => {
     const inactiveDefault = { ...savedPreset, isDefault: true };
     const remove = vi.fn();
-    const { result, setProgrammaticSelection, setQueryImmediate, setRepoFilter } = renderActions(
+    const {
+      result,
+      setProgrammaticSelection,
+      setQueryImmediate,
+      setRepoFilter,
+      markSearchInteracted,
+    } = renderActions(
       { selection: { kind: "issue", source: "saved", id: "saved-active" } },
       makeStore({ presets: [inactiveDefault], remove }),
     );
 
     act(() => result.current.onDeleteSaved(inactiveDefault.id));
 
+    expect(markSearchInteracted).toHaveBeenCalledOnce();
     expect(remove).toHaveBeenCalledWith(inactiveDefault.id);
     expect(setProgrammaticSelection).not.toHaveBeenCalled();
     expect(setQueryImmediate).not.toHaveBeenCalled();

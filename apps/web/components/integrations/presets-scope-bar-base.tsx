@@ -176,7 +176,7 @@ function SavedMenu<K extends string>({
                   e.stopPropagation();
                   onDeleteSaved(s.id);
                 }}
-                className="pointer-events-none cursor-pointer text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/saved:pointer-events-auto group-hover/saved:opacity-100 disabled:cursor-wait disabled:opacity-50"
+                className="pointer-events-none cursor-pointer text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/saved:pointer-events-auto group-hover/saved:opacity-100 disabled:cursor-wait disabled:opacity-50 group-hover/saved:disabled:opacity-50"
                 title={t("integrations:deleteSavedQueryNamed", { label: s.label })}
                 aria-label={t("integrations:deleteSavedQueryNamed", { label: s.label })}
               >
