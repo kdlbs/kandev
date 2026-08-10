@@ -32,6 +32,26 @@ func RegisterRoutes(router *gin.Engine, service *Service) {
 	api.POST("/task-issues", controller.associateIssue)
 	api.DELETE("/task-issues/:linkID", controller.unlinkTaskIssue)
 	api.DELETE("/task-pull-requests/:linkID", controller.unlinkTaskPullRequest)
+	api.POST("/task-issues/:linkID/refresh", controller.refreshTaskIssue)
+	api.POST("/task-pull-requests/:linkID/refresh", controller.refreshTaskPullRequest)
+}
+
+func (c *Controller) refreshTaskIssue(ctx *gin.Context) {
+	link, err := c.service.RefreshTaskIssue(ctx.Request.Context(), c.workspaceID(ctx), strings.TrimSpace(ctx.Param("linkID")))
+	if err != nil {
+		c.error(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, link)
+}
+
+func (c *Controller) refreshTaskPullRequest(ctx *gin.Context) {
+	link, err := c.service.RefreshTaskPullRequest(ctx.Request.Context(), c.workspaceID(ctx), strings.TrimSpace(ctx.Param("linkID")))
+	if err != nil {
+		c.error(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, link)
 }
 
 func (c *Controller) refreshConnection(ctx *gin.Context) {

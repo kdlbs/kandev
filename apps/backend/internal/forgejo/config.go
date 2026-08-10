@@ -397,6 +397,22 @@ func (s *Service) CreateTaskPullRequest(ctx context.Context, workspaceID, taskID
 func (s *Service) UnlinkTaskIssue(ctx context.Context, workspaceID, linkID string) error {
 	return s.store.DeleteTaskIssue(ctx, workspaceID, linkID)
 }
+
+func (s *Service) RefreshTaskIssue(ctx context.Context, workspaceID, linkID string) (*TaskIssue, error) {
+	link, err := s.store.GetTaskIssueLink(ctx, workspaceID, linkID)
+	if err != nil {
+		return nil, err
+	}
+	return s.AssociateIssue(ctx, workspaceID, link.TaskID, link.RepositoryID, link.Owner, link.Repo, link.IssueNumber)
+}
+
+func (s *Service) RefreshTaskPullRequest(ctx context.Context, workspaceID, linkID string) (*TaskPR, error) {
+	link, err := s.store.GetTaskPRLink(ctx, workspaceID, linkID)
+	if err != nil {
+		return nil, err
+	}
+	return s.AssociatePullRequest(ctx, workspaceID, link.TaskID, link.RepositoryID, link.Owner, link.Repo, link.PRNumber)
+}
 func (s *Service) UnlinkTaskPullRequest(ctx context.Context, workspaceID, linkID string) error {
 	return s.store.DeleteTaskPR(ctx, workspaceID, linkID)
 }

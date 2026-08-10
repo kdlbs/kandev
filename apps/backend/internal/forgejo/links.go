@@ -135,6 +135,18 @@ func (s *Store) DeleteTaskIssue(ctx context.Context, workspaceID, linkID string)
 	return nil
 }
 
+func (s *Store) GetTaskIssueLink(ctx context.Context, workspaceID, linkID string) (*TaskIssue, error) {
+	var link TaskIssue
+	err := s.ro.GetContext(ctx, &link, `SELECT f.* FROM forgejo_task_issues f JOIN tasks t ON t.id = f.task_id WHERE f.id = ? AND t.workspace_id = ?`, linkID, workspaceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrTaskLinkNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &link, nil
+}
+
 func (s *Store) DeleteTaskPR(ctx context.Context, workspaceID, linkID string) error {
 	result, err := s.db.ExecContext(ctx, `DELETE FROM forgejo_task_prs WHERE id = ? AND task_id IN (SELECT id FROM tasks WHERE workspace_id = ?)`, linkID, workspaceID)
 	if err != nil {
@@ -148,6 +160,18 @@ func (s *Store) DeleteTaskPR(ctx context.Context, workspaceID, linkID string) er
 		return ErrTaskLinkNotFound
 	}
 	return nil
+}
+
+func (s *Store) GetTaskPRLink(ctx context.Context, workspaceID, linkID string) (*TaskPR, error) {
+	var link TaskPR
+	err := s.ro.GetContext(ctx, &link, `SELECT f.* FROM forgejo_task_prs f JOIN tasks t ON t.id = f.task_id WHERE f.id = ? AND t.workspace_id = ?`, linkID, workspaceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrTaskLinkNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &link, nil
 }
 
 func (s *Store) assertTaskWorkspace(ctx context.Context, workspaceID, taskID string) error {
