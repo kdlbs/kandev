@@ -73,6 +73,9 @@ func TestFireTrigger_SkippedForConcurrencyCap_UpdatesLastEvaluatedAt(t *testing.
 	for _, r := range runs {
 		if r.Status == RunStatusSkipped {
 			skipped++
+			if r.DedupKey != "scheduled:trig:1" {
+				t.Errorf("scheduled cap skip dedup key = %q, want original key", r.DedupKey)
+			}
 		}
 	}
 	if skipped != 1 {
@@ -88,6 +91,58 @@ func TestFireTrigger_SkippedForConcurrencyCap_UpdatesLastEvaluatedAt(t *testing.
 	}
 	if triggers[0].LastEvaluatedAt == nil {
 		t.Fatal("expected LastEvaluatedAt to be set after a concurrency-cap skip, got nil")
+	}
+}
+
+func TestFireTrigger_MergedPRConcurrencySkipLeavesDedupKeyEmpty(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	a := &Automation{
+		WorkspaceID: "ws-merged-cap", Name: "Merged cleanup", WorkflowID: "wf-1", WorkflowStepID: "s-1",
+		Enabled: true, MaxConcurrentRuns: 1,
+	}
+	if err := svc.store.CreateAutomation(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	trig := &AutomationTrigger{
+		AutomationID: a.ID, Type: TriggerTypeGitHubPRMerged,
+		Config: json.RawMessage(`{"all_repos":true}`), Enabled: true,
+	}
+	if err := svc.store.CreateTrigger(ctx, trig); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.store.CreateRun(ctx, &AutomationRun{
+		AutomationID: a.ID, TriggerID: trig.ID, TriggerType: TriggerTypeGitHubPRMerged,
+		Status: RunStatusTaskCreated, DedupKey: "active", TriggerData: json.RawMessage(`{}`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	const dedupKey = "pr_merged:task-1:acme/api#7"
+	result, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeGitHubPRMerged, json.RawMessage(`{}`), dedupKey)
+	if err != nil {
+		t.Fatalf("FireTrigger returned error: %v", err)
+	}
+	if !result.Skipped {
+		t.Fatal("expected merged-PR trigger to be skipped at the cap")
+	}
+
+	runs, err := svc.store.ListRuns(ctx, a.ID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var skipped *AutomationRun
+	for _, run := range runs {
+		if run.Status == RunStatusSkipped {
+			skipped = run
+			break
+		}
+	}
+	if skipped == nil {
+		t.Fatalf("expected a skipped run, got %+v", runs)
+	}
+	if skipped.DedupKey != "" {
+		t.Fatalf("merged-PR cap skip dedup key = %q, want empty", skipped.DedupKey)
 	}
 }
 

@@ -186,4 +186,13 @@ export const SHORTCUTS = {
     key: KEYS.G,
     modifiers: { ctrlOrCmd: true, shift: true },
   },
+  // Cmd+E opens the sidebar-header workspace picker with focus inside the
+  // menu, so a workspace can be switched with arrows + Enter alone. Cmd+Shift+
+  // Space (the natural pairing with TASK_SWITCHER) is taken by
+  // TASK_SWITCHER_REVERSE; the browser defaults on Cmd/Ctrl+E (omnibox search,
+  // macOS find-selection) all yield to preventDefault.
+  WORKSPACE_PICKER: {
+    key: KEYS.E,
+    modifiers: { ctrlOrCmd: true },
+  },
 } as const;
