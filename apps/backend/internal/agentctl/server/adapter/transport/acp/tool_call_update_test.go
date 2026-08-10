@@ -225,6 +225,39 @@ func TestConvertToolCallResultUpdate_ReplacesCumulativeContent(t *testing.T) {
 	require.Equal(t, "first\nsecond\n", payload.ShellExec().Output.Stdout)
 }
 
+func TestConvertToolCallResultUpdate_OMPStructuredFinalOutputStripsCommandContent(t *testing.T) {
+	a := newTestAdapter()
+	seedExecuteToolCall(t, a, "tc-omp")
+
+	command := "/usr/bin/gh pr view --json files --jq .files[]"
+	realOutput := "README.md\nsrc/main.go\n"
+	completed := acp.ToolCallStatus("completed")
+	event := a.convertToolCallResultUpdate("session-1", &acp.SessionToolCallUpdate{
+		ToolCallId: "tc-omp",
+		Title:      &command,
+		Status:     &completed,
+		RawInput:   map[string]any{"command": command},
+		Content: []acp.ToolCallContent{
+			{Content: &acp.ToolCallContentContent{
+				Content: acp.TextBlock("$ " + command),
+				Type:    "content",
+			}},
+			{Content: &acp.ToolCallContentContent{
+				Content: acp.TextBlock(realOutput),
+				Type:    "content",
+			}},
+		},
+		RawOutput: map[string]any{
+			"metadata": map[string]any{"exit": float64(0)},
+		},
+	})
+
+	require.NotNil(t, event)
+	require.Equal(t, command, event.NormalizedPayload.ShellExec().Command)
+	require.Equal(t, realOutput, event.NormalizedPayload.ShellExec().Output.Stdout)
+	require.NotContains(t, event.NormalizedPayload.ShellExec().Output.Stdout, "$ "+command)
+}
+
 func TestConvertToolCallResultUpdate_FinalOutputReplacesLiveWithoutDuplication(t *testing.T) {
 	a := newTestAdapter()
 	seedExecuteToolCall(t, a, "tc-final")
