@@ -14,6 +14,7 @@ spec: "../../specs/session-delete-resource-cleanup/spec.md"
 
 - Terminal session history cannot override the surviving flat environment for
   the same repository and empty branch slot.
+- Terminal history for a different repository or non-empty branch slot remains.
 - `RUNNING` and `WAITING_FOR_INPUT` sessions with different physical worktree
   IDs still stop the cutover and preserve the legacy database.
 - Merge, inventory, rollback, and replay tests pass with one shared
@@ -22,9 +23,9 @@ spec: "../../specs/session-delete-resource-cleanup/spec.md"
 ## Verification
 
 ```bash
-cd apps/backend && go test ./internal/task/repository/sqlite -run 'TestCutover_(IgnoresTerminalWorktreeDifferentFromFlatOwner|RejectsLiveWorktreeDifferentFromFlatOwner|ConflictingWorktreesFailClosed)' -count=1
-cd apps/backend && go test ./internal/task/repository/sqlite -run 'TestCutover' -count=1
-cd apps/backend && go test ./internal/task/repository/sqlite -count=1
+make -C apps/backend test GOFLAGS="-v -run=TestCutover_(IgnoresTerminalWorktreeDifferentFromFlatOwner|PreservesTerminalWorktreeOutsideFlatOwnerSlot|RejectsLiveWorktreeDifferentFromFlatOwner|ConflictingWorktreesFailClosed) -count=1"
+make -C apps/backend test GOFLAGS="-v -run=TestCutover -count=1"
+make -C apps/backend test GOFLAGS="-v -count=1"
 ```
 
 ## Files Likely Touched
@@ -67,19 +68,17 @@ conversation.
   failed for all three terminal states with `worktree wt-flat-old conflicts
   with wt-flat-current`.
 - **Implementation:** extended `isSupersededSessionWorktree` with a shared
-  flat-environment source-precedence helper. It requires a surviving
-  task-owned flat environment, matching repository ID, the legacy empty branch
-  slot, a non-empty flat worktree ID, and a terminal session state. Canonical
-  repository-row precedence and live-session fail-closed behavior remain
-  unchanged.
+  flat-environment source-precedence helper. The helper uses the task's direct
+  environment lookup. It requires a matching repository ID, the legacy empty
+  branch slot, a non-empty flat worktree ID, and a terminal session state.
+  Canonical repository-row precedence and live-session fail-closed behavior
+  remain unchanged.
 - **Focused regressions:**
-  `go test ./internal/task/repository/sqlite -run
-  'TestCutover_(IgnoresTerminalWorktreeDifferentFromFlatOwner|RejectsLiveWorktreeDifferentFromFlatOwner|ConflictingWorktreesFailClosed)' -count=1`
-  passed with `8 passed`.
+  `make -C apps/backend test GOFLAGS="-v -run=TestCutover_(IgnoresTerminalWorktreeDifferentFromFlatOwner|PreservesTerminalWorktreeOutsideFlatOwnerSlot|RejectsLiveWorktreeDifferentFromFlatOwner|ConflictingWorktreesFailClosed) -count=1"`
+  passed with `11 passed`.
 - **Cutover suite:**
-  `go test ./internal/task/repository/sqlite -run 'TestCutover' -count=1`
-  passed with `41 passed`.
-- **Package suite:** `go test ./internal/task/repository/sqlite -count=1`
-  passed with `385 passed`.
-- **Hygiene:** `git diff --check` passed. No temporary reproduction files were
-  created during implementation.
+  `make -C apps/backend test GOFLAGS="-v -run=TestCutover -count=1"` passed
+  with `44 passed`.
+- **Backend suite:** `make -C apps/backend test GOFLAGS="-v -count=1"` passed.
+- **Hygiene:** `git diff --check` passed. The temporary reproduction test in
+  `plan.md` was removed. No temporary reproduction files remain.

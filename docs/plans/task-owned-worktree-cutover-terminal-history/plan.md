@@ -40,7 +40,8 @@ of these conditions are true:
 - The session state is `COMPLETED`, `FAILED`, or `CANCELLED`.
 - The flat environment belongs to the task that owns the session environment.
 - The repository ID matches the session row.
-- Both rows use the legacy empty branch slot.
+- The legacy session row uses an empty `branchSlug`. The flat environment has
+  no `branchSlug` field.
 - The flat environment has a non-empty worktree ID.
 
 Keep the current canonical repository-row rule. Keep deleted-row handling and
@@ -63,6 +64,10 @@ and owner validation. Therefore, merge and validation will use the same rule.
   **File:** the same migration test file.
   **How:** Seed `RUNNING` and `WAITING_FOR_INPUT` states against a flat owner.
   Assert the conflict and the complete legacy rollback.
+- **What:** Terminal history outside the flat repository slot remains.
+  **File:** the same migration test file.
+  **How:** Use a different repository ID or a non-empty `branchSlug`. Assert
+  that the migration retains both worktrees.
 - **What:** Existing cutover precedence, inventory, rollback, and replay
   behavior remains valid.
   **File:** the existing SQLite repository test package.

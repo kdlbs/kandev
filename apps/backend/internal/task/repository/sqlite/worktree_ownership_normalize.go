@@ -519,14 +519,12 @@ func (c *worktreeCutover) flatEnvironmentSupersedesSessionWorktree(
 	if !isLegacyHistoricalSession(session.state) || wt.branchSlug != "" {
 		return false
 	}
-	for _, env := range c.envs {
-		if c.taskEnvIDs[env.taskID] != env.id || env.taskID != ownerTaskID ||
-			env.repositoryID != wt.repositoryID || env.worktreeID == "" {
-			continue
-		}
-		return true
+	envID, ok := c.taskEnvIDs[ownerTaskID]
+	if !ok {
+		return false
 	}
-	return false
+	env, ok := c.envs[envID]
+	return ok && env.taskID == ownerTaskID && env.repositoryID == wt.repositoryID && env.worktreeID != ""
 }
 
 // sessionOwnerTaskID returns the task that owns the environment a session
