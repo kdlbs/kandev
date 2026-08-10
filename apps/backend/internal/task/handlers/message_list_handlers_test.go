@@ -211,6 +211,14 @@ func TestHTTPListMessagesSurfacesRepositoryFailure(t *testing.T) {
 
 // TestHTTPListMessagesDeniesForeignSession covers the transcript read, which
 // carries the full agent conversation.
+//
+// The denial itself is sound — AuthorizeSessionAccess refuses before any
+// repository call — but it surfaces as 500 rather than the 404 every other
+// session route answers, because httpListMessages funnels every fetchMessages
+// error into one generic branch without separating the authorization sentinel
+// from a storage failure. The status is asserted as-is so the behavior is
+// pinned; the inconsistency is reported separately rather than treated here as
+// if it were intended.
 func TestHTTPListMessagesDeniesForeignSession(t *testing.T) {
 	repo := &messageListRepo{}
 	h := newMessageListHandlers(t, repo)

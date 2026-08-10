@@ -151,6 +151,12 @@ func TestWSTaskReadsDenyForeignTask(t *testing.T) {
 // task.state and task.move are deliberately absent — their service methods
 // take no authorization step at all, and the two are reported separately
 // rather than pinned here as if the current behavior were intended.
+//
+// Note the error code: these mutations answer InternalError where the read
+// surface above answers NotFound for the very same denial, so a client cannot
+// tell "refused" from "server broke". The refusal is what matters and is what
+// this test guards; the code mismatch is asserted as-is and reported
+// separately rather than endorsed here.
 func TestWSTaskMutationsDenyForeignTask(t *testing.T) {
 	for name, tc := range map[string]struct {
 		call    func(*TaskHandlers, context.Context) (*ws.Message, error)

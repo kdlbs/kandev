@@ -136,9 +136,11 @@ func TestHTTPListTasksReturnsNotFoundForUnknownWorkflow(t *testing.T) {
 	require.JSONEq(t, `{"error":"tasks not found"}`, rec.Body.String())
 }
 
-// TestHTTPListTasksByWorkspaceClampsPaging pins the query-parameter parsing:
-// page and page_size fall back to their defaults for anything non-positive,
-// out of range, or unparseable, and page_size is capped at 100.
+// TestHTTPListTasksByWorkspaceClampsPaging pins the query-parameter parsing.
+// page must be a positive integer and page_size must land in [1, 100];
+// anything else — non-positive, out of range, or unparseable — falls back to
+// the default rather than to the nearest bound, so page_size=500 yields 50,
+// not 100.
 func TestHTTPListTasksByWorkspaceClampsPaging(t *testing.T) {
 	for name, tc := range map[string]struct {
 		query        string
