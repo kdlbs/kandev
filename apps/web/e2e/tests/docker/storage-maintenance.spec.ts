@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/docker-test-base";
 import { E2E_IMAGE_TAG, removeKandevContainers } from "../../fixtures/docker-probe";
 import { dockerInspectExists, dockerRemove } from "../../helpers/docker";
@@ -10,6 +11,28 @@ function createStoppedContainer(labels: string[]): string {
   const id = execFileSync("docker", args, { encoding: "utf8" }).trim();
   execFileSync("docker", ["start", "-a", id]);
   return id;
+}
+
+async function openStorageSettings(page: Page): Promise<void> {
+  await page.goto("/settings/system/storage");
+  const storagePage = page.getByTestId("storage-settings-page");
+
+  try {
+    await expect(storagePage).toBeVisible({ timeout: 30_000 });
+  } catch (error) {
+    const routeStillLoading = await page
+      .getByRole("status")
+      .filter({ hasText: "Loading Settings…" })
+      .isVisible()
+      .catch(() => false);
+    if (!routeStillLoading) throw error;
+
+    // A slow or interrupted dynamic Settings chunk can leave the SPA in its
+    // loading fallback. One fresh document request is the same recovery path
+    // used by the app for a failed chunk and keeps this test bounded.
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(storagePage).toBeVisible({ timeout: 60_000 });
+  }
 }
 
 test("removes only stopped Kandev-labeled containers and gates daemon-wide cleanup", async ({
@@ -36,7 +59,7 @@ test("removes only stopped Kandev-labeled containers and gates daemon-wide clean
   const active = createStoppedContainer(["kandev.managed=true", `kandev.task_id=${activeTask.id}`]);
   const unrelated = createStoppedContainer(["e2e.storage=unrelated"]);
   try {
-    await testPage.goto("/settings/system/storage");
+    await openStorageSettings(testPage);
     await expect(testPage.getByTestId("storage-docker-build-cache")).toBeDisabled();
     await expect(testPage.getByTestId("storage-resource-managed-containers-trigger")).toContainText(
       "Kandev containers<0.01 GB",

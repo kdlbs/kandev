@@ -111,6 +111,7 @@ export const dockerTest = backendFixture.extend<
   ],
 
   testPage: async ({ browser, backend, apiClient, seedData }, use) => {
+    await backend.ensureReady();
     await apiClient.saveUserSettings({
       workspace_id: seedData.workspaceId,
       workflow_filter_id: seedData.workflowId,
