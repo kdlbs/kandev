@@ -168,6 +168,10 @@ func NewStore(db, ro *sqlx.DB) (*Store, error) {
 		return nil, err
 	}
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS forgejo_review_watch_tasks (watch_id TEXT NOT NULL, owner TEXT NOT NULL, repo TEXT NOT NULL, pr_number INTEGER NOT NULL, task_id TEXT NOT NULL DEFAULT '', created_at DATETIME NOT NULL, PRIMARY KEY(watch_id, owner, repo, pr_number))`)
+	if err != nil {
+		return nil, err
+	}
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS forgejo_action_presets (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, kind TEXT NOT NULL, name TEXT NOT NULL, instructions TEXT NOT NULL DEFAULT '', created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL, UNIQUE(workspace_id, kind, name))`)
 	return store, err
 }
 

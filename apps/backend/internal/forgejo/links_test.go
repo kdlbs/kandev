@@ -152,3 +152,18 @@ func TestStore_CountsOnlyActiveWatchTasks(t *testing.T) {
 		t.Fatalf("count=%d err=%v", count, err)
 	}
 }
+
+func TestStore_StoresWorkspaceScopedActionPresets(t *testing.T) {
+	store := newConfigTestStore(t)
+	ctx := context.Background()
+	if err := store.UpsertActionPreset(ctx, &ActionPreset{WorkspaceID: "a", Kind: "review", Name: "approve", Instructions: "Approve when tests pass"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertActionPreset(ctx, &ActionPreset{WorkspaceID: "b", Kind: "review", Name: "approve", Instructions: "Other"}); err != nil {
+		t.Fatal(err)
+	}
+	presets, err := store.ListActionPresets(ctx, "a")
+	if err != nil || len(presets) != 1 || presets[0].Instructions != "Approve when tests pass" {
+		t.Fatalf("presets=%#v err=%v", presets, err)
+	}
+}
