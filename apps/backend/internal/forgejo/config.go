@@ -308,6 +308,8 @@ func (s *Service) ListPullRequests(ctx context.Context, workspaceID, owner, repo
 }
 
 type PullRequestDetails struct {
+	Owner       string               `json:"owner"`
+	Repo        string               `json:"repo"`
 	PullRequest *PullRequest         `json:"pull_request"`
 	Commits     []PullRequestCommit  `json:"commits"`
 	Files       []PullRequestFile    `json:"files"`
@@ -352,7 +354,7 @@ func (s *Service) GetPullRequestDetails(ctx context.Context, workspaceID, owner,
 			return nil, err
 		}
 	}
-	return &PullRequestDetails{PullRequest: pull, Commits: commits, Files: files, Comments: comments, Reviews: reviews, ActionRuns: filterActionRunsForBranch(runs, pull.Head)}, nil
+	return &PullRequestDetails{Owner: owner, Repo: repo, PullRequest: pull, Commits: commits, Files: files, Comments: comments, Reviews: reviews, ActionRuns: filterActionRunsForBranch(runs, pull.Head)}, nil
 }
 
 func filterActionRunsForBranch(runs []ActionRun, branch string) []ActionRun {
