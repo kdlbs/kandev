@@ -64,15 +64,12 @@ Push the already committed branch to its remote.
    git push "https://github.com/<head-owner>/<head-repository>.git" "HEAD:refs/heads/<head-ref>"
    ```
    If that push fails with `git repository does not match any credential lease
-   scope`, use a one-shot HTTPS Basic auth header instead of changing the
-   remote or persisting credentials:
-   ```bash
-   token=$(gh auth token)
-   auth=$(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n')
-   git -c credential.helper= -c "http.extraheader=Authorization: Basic $auth" push "https://github.com/<head-owner>/<head-repository>.git" "HEAD:refs/heads/<head-ref>"
-   ```
-   Never embed the token in a remote URL or persist it. Re-fetch the PR and
-   require its `headRefOid` to equal local `HEAD` afterward.
+   scope`, do not put a token in command arguments or logs. Retry after
+   `gh auth setup-git`; if HTTPS still rejects the contributor-fork push, use
+   the SSH fallback below or report the authentication/scope blocker.
+   Never embed the token in a remote URL, command argument, log, or persisted
+   credential. Re-fetch the PR and require its `headRefOid` to equal local
+   `HEAD` afterward.
    If HTTPS still rejects a contributor-fork push and SSH authentication is
    available, verify the exact target with
    `git ls-remote git@github.com:<head-owner>/<head-repository>.git`, then retry

@@ -125,10 +125,9 @@ qualifies as a successful hook receipt.
    If a formatter changes files and prevents the commit, review and re-stage
    those files, then create a new commit attempt; do not use `--amend`.
    When editing harness files such as `AGENTS.md`, `CLAUDE.md`, or skills, run
-   `python3 scripts/lint-harness-files.test.py` and
-   `python3 .github/scripts/lint-harness-files.py --all` before committing;
-   also run `git diff --check` and inspect `wc -l` for changed harness files so
-   line-limit failures are caught before the hook.
+   the shared validation in
+   `.agents/skills/harness-improvement/references/validation.md` before
+   committing.
    If a JSX layout-only edit touches an element containing an existing
    hardcoded user-facing literal, `i18n-new-code` may classify that literal as
    changed copy and fail. Localize it and add matching `en`/`pseudo` catalog

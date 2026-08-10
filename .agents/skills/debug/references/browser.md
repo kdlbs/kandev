@@ -6,7 +6,7 @@ Use this only for UI, layout, focus, WS-driven, console, or click-flow bugs that
 
 - Use an isolated instance from `references/instance.md`.
 - Never drive a browser against the user's live instance.
-- Use the exact `playwright-cli` dependency from `apps/` via
+- Use the exact `@playwright/cli` dependency from the workspace via
   `pnpm --dir apps exec playwright-cli`; do not fetch a CLI dynamically.
 - Reuse an existing browser session when possible.
 

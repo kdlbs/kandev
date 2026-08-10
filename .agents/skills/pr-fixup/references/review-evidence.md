@@ -21,6 +21,21 @@ The summary fields are:
   from timestamps.
 - `errors`: affected data is unknown; do not reconstruct it from memory.
 
+Record `checks_head_sha`, `checks_snapshot_complete`, `failed_checks`,
+`pending_checks`, review counts, and the PR delivery fields
+(`pr.head_repository_owner`, `pr.head_repository_name`, `pr.head_ref_name`,
+`pr.head_ref_oid`, and `pr.maintainer_can_modify`). For a cross-repository PR, those
+delivery fields are the only authoritative push target. A named-reviewer
+shortcut requires `review_evidence.trusted_producer="true"` and is not valid
+for forks, security, or architecture.
+
+Inspect every non-empty body in
+`review_evidence.exact_current_head_reviews[]`, including `COMMENTED`
+aggregate-bot reviews, and classify it as actionable, already addressed,
+optional, or invalid before declaring reviews clear. `trusted_producer=true`
+qualifies only for the dedicated OpenCode App, never merely because a reviewer
+name matches.
+
 If `gh`, `scripts/pr-state`, or `scripts/pr-resolve` fails with an
 authentication or transport error (including a broker 401), do not treat empty
 or unknown output as clean. If GitHub connector tools are available, use their

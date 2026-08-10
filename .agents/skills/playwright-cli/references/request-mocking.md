@@ -85,10 +85,11 @@ await page.route("**/api/uploads/exact-endpoint", async (route) => {
   await settle;
   await route.fulfill({ status: 200, json: { ok: true } });
 });
-await triggerUpload();
+const upload = triggerUpload();
 await requestStarted;
 await expect(uploadButton).toHaveAttribute("aria-busy", "true");
 release();
+await upload;
 await expect(uploadButton).not.toHaveAttribute("aria-busy", "true");
 ```
 

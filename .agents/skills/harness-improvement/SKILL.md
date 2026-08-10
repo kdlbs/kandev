@@ -61,10 +61,8 @@ mirror unless the user explicitly requests a policy reversal.
      git diff --check -- <changed-files>
      rg -n "old-skill|old-agent|stale-command" .agents AGENTS.md CLAUDE.md
      ```
-   - Before committing, run `pre-commit run harness-lint --files <changed-files>`.
-     Always-on `AGENTS.md` and `CLAUDE.md` files must stay at 300 lines or
-     fewer. If a parent file reaches the limit, move detailed guidance to the
-     nearest scoped instruction file or a referenced document.
+   - Load `references/validation.md` for the shared harness test, lint,
+     whitespace, line-budget, and pre-commit commands.
    - For executable script changes, run syntax checks and a focused dry run or mocked command when possible.
 
 6. **Report**

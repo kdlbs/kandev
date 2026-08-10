@@ -17,12 +17,10 @@ agentctl exposes these route groups (see `server/api/`):
 
 ## Multi-repository Git and review payloads
 
-Aggregate multi-repository Git/review results must carry `repository_name` on
-every entry, including commits, files, and errors. Preserve explicit
-`base_ref` and `is_submodule` metadata from each repository; do not infer or
-overwrite it while merging results. For nested submodule diffs, anchor the
-child comparison to the parent repository's gitlink. Test root and child
-repositories, including identical relative paths across repository scopes.
+Preserve the repository-scoped fields `repository_name`, `base_ref`, and
+`is_submodule` in aggregate results; nested submodule comparisons stay anchored
+to the parent gitlink. The focused contract tests are in
+`server/api/git_multi_repo_review_test.go`.
 
 ## Pull request creation (`server/process/git_pr_providers.go`)
 

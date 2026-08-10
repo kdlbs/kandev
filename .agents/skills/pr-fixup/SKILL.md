@@ -36,30 +36,13 @@ the environment requires. If access is denied, cancelled, or interrupted, stop
 the workflow permanently; retry only transient fetch failures after access is
 approved.
 
-Run `scripts/pr-state --summary <PR>` once. Record `checks_head_sha`,
-`checks_snapshot_complete`, `failed_checks`, `pending_checks`, and the PR
-head delivery fields (`pr.head_repository_owner`, `pr.head_repository_name`,
-`pr.head_ref_name`, `pr.head_ref_oid`, and `pr.maintainer_can_modify`). For a
-cross-repository PR, those fields are the only authoritative push target; do
-not infer it from a local remote named `fork`, `contributor`, or similar.
-Linked worktrees share Git configuration and such remotes may belong to an
-unrelated task.
-Record `unresolved_review_thread_count`, `filtered_review_thread_count`,
-`hidden_unresolved_threads`, and
-`actionable_issue_comment_count`. Inspect mergeability separately through
-`references/merge-conflicts.md`; it is not a `pr-state --summary` field. If a
-named reviewer is the semantic evidence source, use `--trusted-reviewer` only
-when `review_evidence.trusted_producer` is `"true"`; never use that shortcut
-for forks, security, or architecture. Also inspect every non-empty body in
-`review_evidence.exact_current_head_reviews[]`, including `COMMENTED`
-aggregate-bot reviews: `scripts/pr-resolve list` can be empty while an
-exact-head review body still contains actionable findings. Classify each body
-as actionable, already addressed, optional, or invalid and record a concrete
-skip reason for anything not acted on before declaring reviews clear.
-Treat `trusted_producer=true` as qualifying provenance only for the dedicated OpenCode App, never merely because a reviewer name matches.
-If `hidden_unresolved_threads` is non-empty, immediately run
-`scripts/pr-resolve list <PR>` and triage its output. A zero current-head
-unresolved count does not make hidden threads clean.
+Run `scripts/pr-state --summary <PR>` once. Record the current-head check,
+review, and PR-delivery fields described in
+`references/review-evidence.md`. For a cross-repository PR, use only the
+reported delivery fields as the push target; do not infer it from a local
+`fork` or `contributor` remote. Load that reference for exact-head review
+classification, authentication fallbacks, and hidden-thread handling. Inspect
+mergeability separately through `references/merge-conflicts.md`.
 
 If the fresh mergeability query reports `mergeable=CONFLICTING` or
 `mergeStateStatus=DIRTY`, stop CI and review triage. Load
@@ -222,10 +205,8 @@ command and any package-level gate required by whole-file rules (for example
 max-lines). Then rerun `scripts/pr-resolve list <PR>` and `scripts/pr-state --summary <PR>`; distinguish stale/current
 failures and report pending checks separately. Use `--force-with-lease`, never an unconditional force-push.
 If the rebase or conflict resolution touched `AGENTS.md`, `CLAUDE.md`, or a
-skill/reference file, also run `python3 scripts/lint-harness-files.test.py` and
-`python3 .github/scripts/lint-harness-files.py --all` before pushing. Run
-`git diff --check` and inspect `wc -l` for each changed harness file so upstream
-additions cannot push a file past its line budget.
+skill/reference file, run the shared harness validation in
+`.agents/skills/harness-improvement/references/validation.md` before pushing.
 
 ## 5. Re-check
 

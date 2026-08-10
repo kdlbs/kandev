@@ -1,7 +1,7 @@
 ---
 name: debug
 description: Diagnose Kandev bugs, running-instance issues, UI/browser failures, and runtime behavior. Use when the user reports unexpected behavior, asks to investigate, asks to add logs/instrumentation, or when a fix needs root-cause evidence before implementing. Triage first, gather evidence safely, then hand off to /fix for code changes.
-allowed-tools: Bash(curl:*) Bash(jq:*) Bash(mktemp:*) Bash(unzip:*) Bash(scripts/kandev-instances:*) Bash(scripts/kandev-logs:*) Bash(scripts/dev-isolated:*) Bash(scripts/kandev-kill:*) Bash(go:*) Bash(rg:*) Bash(grep:*)
+allowed-tools: Bash(curl:*) Bash(jq:*) Bash(mktemp:*) Bash(unzip:*) Bash(pnpm:*) Bash(scripts/kandev-instances:*) Bash(scripts/kandev-logs:*) Bash(scripts/dev-isolated:*) Bash(scripts/kandev-kill:*) Bash(go:*) Bash(rg:*) Bash(grep:*)
 ---
 
 # Debug
@@ -102,7 +102,7 @@ Load only the reference needed for the selected path:
 
 - `references/backend-repro.md` - targeted Go repro tests and backend-first debugging.
 - `references/instance.md` - instance discovery, isolated launch, logs/export, and teardown.
-- `references/browser.md` - pinned `playwright-cli` browser debugging against isolated instances.
+- `references/browser.md` - workspace-pinned `playwright-cli` browser debugging against isolated instances.
 - `references/instrumentation.md` - temporary vs persistent frontend/backend logging rules.
 
 ## When To Use Instrumentation
