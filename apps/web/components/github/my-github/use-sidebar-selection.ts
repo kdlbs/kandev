@@ -45,7 +45,7 @@ export function useInitialSidebarSelection({
   const userSelectedRef = useRef(false);
   const resetWorkspaceIdRef = useRef<string | null | undefined>(undefined);
   const lastAppliedTargetRef = useRef<AppliedSidebarTarget | null>(null);
-  const savedPrDefault = findDefaultSavedPreset(savedPresets, "pr");
+  const savedPrDefault = useMemo(() => findDefaultSavedPreset(savedPresets, "pr"), [savedPresets]);
   const resolvedPrTarget = useMemo(
     () =>
       resolveDefaultSidebarTarget("pr", savedPrDefault ? [savedPrDefault] : [], resolvedPrPresets),

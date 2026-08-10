@@ -28,6 +28,33 @@ vi.mock("@kandev/ui/dropdown-menu", () => ({
       {children}
     </div>
   ),
+  DropdownMenuCheckboxItem: ({
+    children,
+    checked,
+    disabled,
+    onCheckedChange,
+    onSelect,
+    ...props
+  }: React.HTMLAttributes<HTMLDivElement> & {
+    checked?: boolean;
+    disabled?: boolean;
+    onCheckedChange?: (checked: boolean) => void;
+    onSelect?: (event: Event) => void;
+  }) => (
+    <div
+      {...props}
+      role="menuitemcheckbox"
+      aria-checked={checked}
+      aria-disabled={disabled}
+      onClick={() => {
+        if (disabled) return;
+        onSelect?.(new Event("select", { cancelable: true }));
+        onCheckedChange?.(!checked);
+      }}
+    >
+      {children}
+    </div>
+  ),
   DropdownMenuSeparator: () => <hr />,
 }));
 
@@ -35,6 +62,7 @@ afterEach(cleanup);
 
 type Kind = "pr" | "issue";
 type Props = IntegrationScopeBarProps<Kind>;
+const ARIA_DISABLED_ATTRIBUTE = "aria-disabled";
 
 function renderBar(overrides: Partial<Props> = {}) {
   const onSelect = vi.fn();
@@ -76,17 +104,16 @@ function renderBar(overrides: Partial<Props> = {}) {
 describe("IntegrationScopeBar saved defaults", () => {
   it("renders set and clear markers without selecting the saved query", () => {
     const { onSelect, onToggleSavedDefault } = renderBar();
-    const clear = screen.getByRole("button", {
+    const clear = screen.getByRole("menuitemcheckbox", {
       name: "Clear Current default as default view",
     });
-    const set = screen.getByRole("button", {
+    const set = screen.getByRole("menuitemcheckbox", {
       name: "Set Future default as default view",
     });
 
-    expect(clear.getAttribute("aria-pressed")).toBe("true");
-    expect(set.getAttribute("aria-pressed")).toBe("false");
-    fireEvent.pointerDown(set);
-    fireEvent.pointerUp(set);
+    expect(clear.getAttribute("aria-checked")).toBe("true");
+    expect(set.getAttribute("aria-checked")).toBe("false");
+    expect(set.parentElement?.getAttribute("role")).toBe("none");
     fireEvent.click(set);
 
     expect(onToggleSavedDefault).toHaveBeenCalledWith("saved-b");
@@ -95,39 +122,39 @@ describe("IntegrationScopeBar saved defaults", () => {
 
   it("disables every default action while a mutation is pending", () => {
     renderBar({ defaultMutationPending: true });
-    const currentDelete = screen.getByRole("button", {
+    const currentDelete = screen.getByRole("menuitem", {
       name: "Delete Current default saved query",
-    }) as HTMLButtonElement;
+    });
 
     expect(
-      (
-        screen.getByRole("button", {
+      screen
+        .getByRole("menuitemcheckbox", {
           name: "Clear Current default as default view",
-        }) as HTMLButtonElement
-      ).disabled,
-    ).toBe(true);
+        })
+        .getAttribute(ARIA_DISABLED_ATTRIBUTE),
+    ).toBe("true");
     expect(
-      (
-        screen.getByRole("button", {
+      screen
+        .getByRole("menuitemcheckbox", {
           name: "Set Future default as default view",
-        }) as HTMLButtonElement
-      ).disabled,
-    ).toBe(true);
-    expect(currentDelete.disabled).toBe(true);
-    expect(currentDelete.className).toContain("group-hover/saved:disabled:opacity-50");
+        })
+        .getAttribute(ARIA_DISABLED_ATTRIBUTE),
+    ).toBe("true");
+    expect(currentDelete.getAttribute(ARIA_DISABLED_ATTRIBUTE)).toBe("true");
+    expect(currentDelete.className).toContain("group-hover/saved:data-[disabled]:opacity-50");
     expect(
-      (
-        screen.getByRole("button", {
+      screen
+        .getByRole("menuitem", {
           name: "Delete Future default saved query",
-        }) as HTMLButtonElement
-      ).disabled,
-    ).toBe(true);
+        })
+        .getAttribute(ARIA_DISABLED_ATTRIBUTE),
+    ).toBe("true");
   });
 
   it("renders no default actions when an integration omits the optional contract", () => {
     renderBar({ onToggleSavedDefault: undefined });
 
-    expect(screen.queryByRole("button", { name: /as default view/ })).toBeNull();
+    expect(screen.queryByRole("menuitemcheckbox", { name: /as default view/ })).toBeNull();
   });
 
   it("names each delete action for its saved query", () => {
@@ -135,12 +162,12 @@ describe("IntegrationScopeBar saved defaults", () => {
 
     expect(
       screen
-        .getByRole("button", { name: "Delete Current default saved query" })
+        .getByRole("menuitem", { name: "Delete Current default saved query" })
         .getAttribute("title"),
     ).toBe("Delete Current default saved query");
     expect(
       screen
-        .getByRole("button", { name: "Delete Future default saved query" })
+        .getByRole("menuitem", { name: "Delete Future default saved query" })
         .getAttribute("title"),
     ).toBe("Delete Future default saved query");
   });

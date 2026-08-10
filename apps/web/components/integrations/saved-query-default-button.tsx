@@ -1,6 +1,7 @@
 "use client";
 
 import { IconStar } from "@tabler/icons-react";
+import { DropdownMenuCheckboxItem } from "@kandev/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 
@@ -28,8 +29,23 @@ export function SavedQueryDefaultButton({
       : "integrations:setSavedQueryAsDefaultView",
     { label },
   );
-  // Desktop instances sit inside a Radix menu item, so stop the complete pointer sequence;
-  // the same handlers are harmless for the standalone mobile-sidebar button.
+  if (size === "desktop") {
+    return (
+      <DropdownMenuCheckboxItem
+        checked={isDefault}
+        disabled={disabled}
+        aria-label={accessibleLabel}
+        title={accessibleLabel}
+        data-testid={testId}
+        onSelect={(event) => event.preventDefault()}
+        onCheckedChange={onToggle}
+        className="h-7 min-h-7 w-7 shrink-0 cursor-pointer justify-center p-0 text-muted-foreground hover:text-foreground [&_[data-slot=dropdown-menu-checkbox-item-indicator]]:hidden"
+      >
+        <IconStar className={cn("h-4 w-4", isDefault && "fill-amber-500 text-amber-500")} />
+      </DropdownMenuCheckboxItem>
+    );
+  }
+
   return (
     <button
       type="button"
@@ -38,15 +54,10 @@ export function SavedQueryDefaultButton({
       title={accessibleLabel}
       disabled={disabled}
       data-testid={testId}
-      onPointerDown={(event) => event.stopPropagation()}
-      onPointerUp={(event) => event.stopPropagation()}
-      onClick={(event) => {
-        event.stopPropagation();
-        onToggle();
-      }}
+      onClick={onToggle}
       className={cn(
         "flex shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-wait disabled:opacity-50",
-        size === "mobile" ? "h-11 w-11" : "h-6 w-6",
+        "h-11 w-11",
       )}
     >
       <IconStar className={cn("h-4 w-4", isDefault && "fill-amber-500 text-amber-500")} />

@@ -148,13 +148,14 @@ function SavedMenu<K extends string>({
           <DropdownMenuItem disabled>{t("integrations:noSavedQueriesYet")}</DropdownMenuItem>
         ) : (
           saved.map((s) => (
-            <DropdownMenuItem
-              key={s.id}
-              onSelect={() => onSelect({ kind: s.kind, source: "saved", id: s.id })}
-              className="group/saved cursor-pointer gap-2"
-            >
-              <IconBookmark className="h-3.5 w-3.5 shrink-0" />
-              <span className="flex-1 truncate">{s.label}</span>
+            <div key={s.id} role="none" className="group/saved flex items-center gap-0.5">
+              <DropdownMenuItem
+                onSelect={() => onSelect({ kind: s.kind, source: "saved", id: s.id })}
+                className="min-w-0 flex-1 cursor-pointer gap-2"
+              >
+                <IconBookmark className="h-3.5 w-3.5 shrink-0" />
+                <span className="flex-1 truncate">{s.label}</span>
+              </DropdownMenuItem>
               {onToggleSavedDefault && (
                 <SavedQueryDefaultButton
                   label={s.label}
@@ -165,24 +166,19 @@ function SavedMenu<K extends string>({
                   onToggle={() => onToggleSavedDefault(s.id)}
                 />
               )}
-              <button
-                type="button"
+              <DropdownMenuItem
                 disabled={defaultMutationPending}
-                // Stop both pointer phases so Radix doesn't synthesize a row
-                // select for the (about-to-be-deleted) saved query.
-                onPointerDown={(e) => e.stopPropagation()}
-                onPointerUp={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
+                onSelect={(event) => {
+                  event.preventDefault();
                   onDeleteSaved(s.id);
                 }}
-                className="pointer-events-none cursor-pointer text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/saved:pointer-events-auto group-hover/saved:opacity-100 disabled:cursor-wait disabled:opacity-50 group-hover/saved:disabled:opacity-50"
+                className="h-7 min-h-7 w-7 shrink-0 cursor-pointer justify-center p-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus:opacity-100 group-hover/saved:opacity-100 data-[disabled]:cursor-wait data-[disabled]:opacity-50 group-hover/saved:data-[disabled]:opacity-50"
                 title={t("integrations:deleteSavedQueryNamed", { label: s.label })}
                 aria-label={t("integrations:deleteSavedQueryNamed", { label: s.label })}
               >
                 <IconX className="h-3.5 w-3.5" />
-              </button>
-            </DropdownMenuItem>
+              </DropdownMenuItem>
+            </div>
           ))
         )}
         <DropdownMenuSeparator />

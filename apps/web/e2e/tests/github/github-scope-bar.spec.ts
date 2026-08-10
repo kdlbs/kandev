@@ -105,23 +105,31 @@ test.describe("Desktop /github scope bar", () => {
       await expect(title).toContainText("Assigned");
       await expect(repoFilter).toContainText("All repos");
 
-      await savedMenu.click();
-      const setIssueDefault = testPage.getByRole("button", {
+      await savedMenu.focus();
+      await savedMenu.press("Enter");
+      const issueSavedQuery = testPage.getByRole("menuitem", {
+        name: issueDefaultLabel,
+        exact: true,
+      });
+      const setIssueDefault = testPage.getByRole("menuitemcheckbox", {
         name: `Set ${issueDefaultLabel} as default view`,
       });
+      await expect(issueSavedQuery).toBeFocused();
+      await testPage.keyboard.press("ArrowDown");
+      await expect(setIssueDefault).toBeFocused();
       const setResponse = testPage.waitForResponse(
         (response) =>
           response.url().includes("/api/v1/github/workspace-settings") &&
           response.request().method() === "PUT" &&
           response.status() === 200,
       );
-      await setIssueDefault.click();
+      await testPage.keyboard.press("Enter");
       await setResponse;
-      const setMarker = testPage.getByRole("button", {
+      const setMarker = testPage.getByRole("menuitemcheckbox", {
         name: `Clear ${issueDefaultLabel} as default view`,
       });
       await expect(setMarker).toBeVisible();
-      await expect(setMarker).toHaveAttribute("aria-pressed", "true");
+      await expect(setMarker).toHaveAttribute("aria-checked", "true");
       await expect(title).toContainText("Assigned");
       await expect(repoFilter).toContainText("All repos");
 
@@ -134,7 +142,7 @@ test.describe("Desktop /github scope bar", () => {
       await expect(issueRow(testPage, OTHER_REPO_ISSUE)).toHaveCount(0);
 
       await savedMenu.click();
-      const clearIssueDefault = testPage.getByRole("button", {
+      const clearIssueDefault = testPage.getByRole("menuitemcheckbox", {
         name: `Clear ${issueDefaultLabel} as default view`,
       });
       const clearResponse = testPage.waitForResponse(
