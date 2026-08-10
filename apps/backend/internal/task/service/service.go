@@ -312,12 +312,17 @@ type Service struct {
 	// session (satisfied by the orchestrator). Used to compute the task-level
 	// MOST-ACTIVE-WINS activity aggregate carried on task.updated events. Optional.
 	foregroundActivity ForegroundActivityProvider
+	// taskParked resolves the task-level parked-on-background-work OR
+	// projection (satisfied by the orchestrator). Optional; nil leaves the
+	// field false on every event (docs/specs/parked-board-mvp/spec.md).
+	taskParked TaskParkedProvider
 	// taskActivityMu guards lastTaskActivity, the last task-level activity aggregate
 	// emitted per task. It bounds live-propagation task.updated emissions to an
 	// actual change of the aggregated three-state value.
 	taskActivityMu        sync.Mutex
 	lastTaskActivity      map[string]v1.ForegroundActivity
 	lastTaskSubagentCount map[string]int
+	lastTaskParked        map[string]bool
 	// taskPublicationMu guards the per-task FIFO dispatchers. It is held only
 	// while enqueueing/dequeueing; repository reads and synchronous EventBus
 	// delivery always happen after it is released.
@@ -400,6 +405,7 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		branchFetcher:         newBranchFetcher(log.Zap()),
 		lastTaskActivity:      make(map[string]v1.ForegroundActivity),
 		lastTaskSubagentCount: make(map[string]int),
+		lastTaskParked:        make(map[string]bool),
 	}
 }
 

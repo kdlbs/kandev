@@ -79,6 +79,8 @@ func provideOrchestrator(
 		cfg != nil && cfg.Features.ClaudeBackgroundPromptHandoff
 	serviceCfg.ClaudeMidTurnSteering =
 		cfg != nil && cfg.Features.ClaudeMidTurnSteering
+	serviceCfg.ParkedOnBackgroundWork =
+		cfg != nil && cfg.Features.ParkedOnBackgroundWork
 	namespace := resolveEventNamespace(cfg)
 	serviceCfg.QueueGroup = "orchestrator." + namespace
 	busMode := "memory"
@@ -113,6 +115,9 @@ func provideOrchestrator(
 	}
 
 	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, agentManagerClient, taskRepoAdapter, taskRepo, userSvc, secretStore, msgQueue, log)
+	// The probe port is always injected, even when the flag is off (§7.5) —
+	// nothing is gated at construction time, only at the settle hook.
+	orchestratorSvc.SetBackgroundProbe(lifecycleMgr)
 	orchestratorSvc.SetAttachmentReader(taskSvc.AttachmentService())
 	orchestratorSvc.SetTitleBranchRuntime(lifecycleMgr)
 	if githubSvc != nil {
@@ -147,6 +152,10 @@ func provideOrchestrator(
 	// compute the task-level MOST-ACTIVE-WINS activity aggregate carried on the
 	// boot payload and task.updated events.
 	taskSvc.SetForegroundActivityProvider(orchestratorSvc)
+
+	// Let the task service read the task-level parked-on-background-work OR
+	// so it can carry it on task.updated events.
+	taskSvc.SetTaskParkedProvider(orchestratorSvc)
 
 	// Let the task service stamp status_summary.queued_prompt_count on task
 	// list/snapshot payloads (initial-load backstop for the sidebar badge; the

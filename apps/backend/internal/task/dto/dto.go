@@ -174,15 +174,21 @@ type TaskDTO struct {
 	// surfaces fall through to the coarse task state (done / waiting / failed).
 	// Computed on the backend and carried on the task record so every task-level
 	// surface reads one authoritative value; stamped by EnrichTaskForegroundActivity.
-	ForegroundActivity  v1.ForegroundActivity  `json:"foreground_activity,omitempty"`
-	ActiveSubagentCount int                    `json:"active_subagent_count"`
-	IsRemoteExecutor    bool                   `json:"is_remote_executor,omitempty"`
-	ParentID            string                 `json:"parent_id,omitempty"`
-	Autopilot           bool                   `json:"autopilot"`
-	ArchivedAt          *time.Time             `json:"archived_at,omitempty"`
-	CreatedAt           time.Time              `json:"created_at"`
-	UpdatedAt           time.Time              `json:"updated_at"`
-	Metadata            map[string]interface{} `json:"metadata,omitempty"`
+	ForegroundActivity  v1.ForegroundActivity `json:"foreground_activity,omitempty"`
+	ActiveSubagentCount int                   `json:"active_subagent_count"`
+	// ParkedOnBackgroundWork is the task-level OR of its sessions' parked
+	// projections (docs/specs/parked-board-mvp/spec.md). Runtime-only,
+	// boolean-only wire (D-2 — no epoch, no revision). Not persisted;
+	// stamped at the serialization boundary by EnrichTaskParked. A nil
+	// provider (projection not wired) leaves this false.
+	ParkedOnBackgroundWork bool                   `json:"parked_on_background_work,omitempty"`
+	IsRemoteExecutor       bool                   `json:"is_remote_executor,omitempty"`
+	ParentID               string                 `json:"parent_id,omitempty"`
+	Autopilot              bool                   `json:"autopilot"`
+	ArchivedAt             *time.Time             `json:"archived_at,omitempty"`
+	CreatedAt              time.Time              `json:"created_at"`
+	UpdatedAt              time.Time              `json:"updated_at"`
+	Metadata               map[string]interface{} `json:"metadata,omitempty"`
 	// Interrupted reports that the task's session was mid-turn when the backend
 	// died and has not been resumed since. Derived from the interrupted_at
 	// metadata key at DTO conversion time (see FromTaskWithSessionInfo).
@@ -289,6 +295,11 @@ type TaskSessionDTO struct {
 	// Not persisted — populated at the serialization boundary by
 	// EnrichForegroundActivity, never by FromTaskSession.
 	ForegroundActivity v1.ForegroundActivity `json:"foreground_activity,omitempty"`
+	// ParkedOnBackgroundWork mirrors the orchestrator's runtime
+	// parked-on-background-work projection (docs/specs/parked-board-mvp/spec.md).
+	// Boolean-only wire (D-2). Not persisted; stamped at the serialization
+	// boundary by EnrichParked. A nil provider leaves this false.
+	ParkedOnBackgroundWork bool `json:"parked_on_background_work,omitempty"`
 	// CancellationPending mirrors the orchestrator's runtime cancellation
 	// projection. It is always serialized so false clears stale client state.
 	CancellationPending bool `json:"cancellation_pending"`
@@ -352,6 +363,9 @@ type TaskSessionSummaryDTO struct {
 	// ForegroundActivity mirrors the in-memory fine-grained busy substate
 	// (ADR-0049); see TaskSessionDTO.
 	ForegroundActivity v1.ForegroundActivity `json:"foreground_activity,omitempty"`
+	// ParkedOnBackgroundWork mirrors TaskSessionDTO.ParkedOnBackgroundWork for
+	// list endpoints.
+	ParkedOnBackgroundWork bool `json:"parked_on_background_work,omitempty"`
 	// CancellationPending mirrors the runtime cancellation projection and is
 	// always serialized so false clears stale client state.
 	CancellationPending bool `json:"cancellation_pending"`

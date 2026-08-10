@@ -35,6 +35,8 @@ type TaskHandlers struct {
 	orchestrator               OrchestratorStarter
 	foregroundActivity         dto.ForegroundActivityProvider
 	cancellationPending        dto.CancellationPendingProvider
+	parkedProjection           dto.ParkedProjectionProvider
+	taskParked                 dto.TaskParkedProjectionProvider
 	repo                       handlerRepo
 	planService                *service.PlanService
 	handoffSvc                 *service.HandoffService
@@ -111,6 +113,15 @@ func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, rep
 	}
 	if cancellation, ok := orchestrator.(dto.CancellationPendingProvider); ok {
 		h.cancellationPending = cancellation
+	}
+	// The orchestrator also surfaces the runtime parked-on-background-work
+	// projection (docs/specs/parked-board-mvp/spec.md). Nil (e.g. in tests)
+	// simply omits the field.
+	if parked, ok := orchestrator.(dto.ParkedProjectionProvider); ok {
+		h.parkedProjection = parked
+	}
+	if taskParked, ok := orchestrator.(dto.TaskParkedProjectionProvider); ok {
+		h.taskParked = taskParked
 	}
 	return h
 }
