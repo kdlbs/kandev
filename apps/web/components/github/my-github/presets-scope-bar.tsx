@@ -1,10 +1,11 @@
 "use client";
 
+import { useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { IntegrationScopeBar } from "@/components/integrations/presets-scope-bar-base";
 import { PR_PRESETS, ISSUE_PRESETS, type PresetOption } from "./search-bar";
 import type { SavedPreset } from "./saved-preset-model";
 import type { SidebarSelection } from "./presets-sidebar";
-import { useTranslation } from "react-i18next";
 
 type PresetsScopeBarProps = {
   className?: string;
@@ -39,20 +40,24 @@ export function PresetsScopeBar({
   ...props
 }: PresetsScopeBarProps) {
   const { t } = useTranslation();
+  const handleToggleSavedDefault = useCallback(
+    (id: string) => {
+      const preset = savedPresets.find((candidate) => candidate.id === id);
+      if (!preset) {
+        if (process.env.NODE_ENV !== "production") {
+          console.warn("[github:presets] default toggle target missing", { id });
+        }
+        return;
+      }
+      void onToggleSavedDefault(preset);
+    },
+    [onToggleSavedDefault, savedPresets],
+  );
   return (
     <IntegrationScopeBar
       {...props}
       savedPresets={savedPresets}
-      onToggleSavedDefault={(id) => {
-        const preset = savedPresets.find((candidate) => candidate.id === id);
-        if (!preset) {
-          if (process.env.NODE_ENV !== "production") {
-            console.warn("[github:presets] default toggle target missing", { id });
-          }
-          return;
-        }
-        void onToggleSavedDefault(preset);
-      }}
+      onToggleSavedDefault={handleToggleSavedDefault}
       testId="github-presets-scope-bar"
       savedMenuTestId="github-saved-queries-menu"
       kinds={KINDS.map(({ value, labelKey }) => ({ value, label: t(labelKey) }))}

@@ -225,6 +225,8 @@ export function PresetsSidebar({
   const presets = selected.kind === "pr" ? prPresets : issuePresets;
   const saved = savedPresets.filter((p) => p.kind === selected.kind);
   const onKindChange = (kind: "pr" | "issue") => {
+    // id is a sentinel; the selection handler resolves the destination's saved default
+    // or first configured preset when it sees the kind change.
     onSelect({ kind, source: "preset", id: "" });
   };
   return (

@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SavedPreset } from "./saved-preset-model";
 import { PresetsScopeBar } from "./presets-scope-bar";
@@ -23,8 +24,13 @@ vi.mock("@/components/integrations/presets-scope-bar-base", () => ({
     onToggleSavedDefault?: (id: string) => void;
     savedPresets: Array<{ id: string }>;
   }) => {
+    const initialDefaultAction = useRef(onToggleSavedDefault);
     return (
-      <div data-testid="scope-bar-default-action" data-pending={defaultMutationPending}>
+      <div
+        data-testid="scope-bar-default-action"
+        data-pending={defaultMutationPending}
+        data-callback-stable={initialDefaultAction.current === onToggleSavedDefault}
+      >
         <button
           type="button"
           data-testid="scope-bar-default-toggle"
@@ -82,6 +88,29 @@ describe("PresetsScopeBar default adapter", () => {
 
     fireEvent.click(screen.getByTestId("scope-bar-default-toggle"));
     expect(onToggleSavedDefault).toHaveBeenCalledWith(savedPreset);
+  });
+
+  it("keeps the default adapter stable across unchanged renders", () => {
+    const savedPresets = [savedPreset];
+    const props = {
+      selected: { kind: "pr", source: "saved", id: savedPreset.id } as const,
+      onSelect: vi.fn(),
+      savedPresets,
+      onDeleteSaved: vi.fn(),
+      canSaveCurrent: false,
+      onSaveCurrent: vi.fn(),
+      onToggleSavedDefault: vi.fn(),
+      defaultMutationPending: false,
+      prPresets: [],
+      issuePresets: [],
+    };
+    const { rerender } = render(<PresetsScopeBar {...props} />);
+
+    rerender(<PresetsScopeBar {...props} />);
+
+    expect(
+      screen.getByTestId("scope-bar-default-action").getAttribute("data-callback-stable"),
+    ).toBe("true");
   });
 
   it("warns in development when a stale default target is requested", () => {
