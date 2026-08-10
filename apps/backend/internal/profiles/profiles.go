@@ -69,7 +69,7 @@ func DetectEnvironment() Environment {
 	if isTruthy(os.Getenv("KANDEV_E2E_MOCK")) {
 		return EnvE2E
 	}
-	if isTruthy(os.Getenv("KANDEV_DEBUG_DEV_MODE")) || isTruthy(os.Getenv("KANDEV_DEBUG_PPROF_ENABLED")) {
+	if isTruthy(os.Getenv("KANDEV_DEBUG_DEV_MODE")) {
 		return EnvDev
 	}
 	return EnvProd
