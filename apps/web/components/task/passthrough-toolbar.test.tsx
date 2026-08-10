@@ -293,6 +293,14 @@ describe("PassthroughToolbar – default state", () => {
     const toggle = screen.getByTestId(TID_TOGGLE_COMMENTS) as HTMLButtonElement;
     expect(toggle.disabled).toBe(true);
   });
+
+  it("allows the status row and right-side controls to wrap as complete items", () => {
+    renderToolbar();
+
+    const row = screen.getByTestId("passthrough-status-row");
+    expect(row.className).toContain("flex-wrap");
+    expect(row.lastElementChild?.className).toContain("flex-wrap");
+  });
 });
 
 // ---------------------------------------------------------------------------

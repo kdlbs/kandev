@@ -787,6 +787,7 @@ export class ApiClient {
     repositoryId: string,
     updates: {
       provider?: string;
+      provider_repo_id?: string;
       provider_host?: string;
       provider_owner?: string;
       provider_name?: string;
@@ -2321,6 +2322,19 @@ export class ApiClient {
       "POST",
       `/api/v1/azure-devops/config?workspace_id=${encodeURIComponent(workspaceId)}`,
       { ...payload, authMethod: "pat" },
+    );
+  }
+
+  async associateAzureDevOpsTaskPR(
+    workspaceId: string,
+    taskId: string,
+    repositoryId: string,
+    pullRequestId: number,
+  ): Promise<void> {
+    await this.request(
+      "POST",
+      `/api/v1/azure-devops/tasks/${encodeURIComponent(taskId)}/pull-requests?workspace_id=${encodeURIComponent(workspaceId)}`,
+      { repositoryId, pullRequestId },
     );
   }
 

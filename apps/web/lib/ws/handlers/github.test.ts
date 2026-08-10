@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createAppStore } from "@/lib/state/store";
-import type { GitHubStatus } from "@/lib/types/github";
+import type { GitHubStatus, TaskCIAutomationOptions } from "@/lib/types/github";
 import { registerGitHubHandlers } from "./github";
 
 const baseStatus: GitHubStatus = {
@@ -12,6 +12,26 @@ const baseStatus: GitHubStatus = {
 };
 
 describe("registerGitHubHandlers", () => {
+  it("does not let a delayed CI-options event replace newer state", () => {
+    const store = createAppStore();
+    const handler = registerGitHubHandlers(store)["github.task_ci_options.updated"]!;
+    const options = (updatedAt: string, enabled: boolean): TaskCIAutomationOptions => ({
+      task_id: "task-1",
+      auto_fix_enabled: enabled,
+      auto_merge_enabled: false,
+      auto_fix_prompt_override: null,
+      effective_auto_fix_prompt: "Default prompt",
+      using_default_prompt: true,
+      updated_at: updatedAt,
+      pr_states: [],
+    });
+
+    handler({ payload: options("2026-08-11T10:01:00Z", true) } as Parameters<typeof handler>[0]);
+    handler({ payload: options("2026-08-11T10:00:00Z", false) } as Parameters<typeof handler>[0]);
+
+    expect(store.getState().taskCIAutomation.byTaskId["task-1"]?.auto_fix_enabled).toBe(true);
+  });
+
   it("removes the detached PR association without touching sibling PRs", () => {
     const store = createAppStore();
     const first = {

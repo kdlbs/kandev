@@ -282,11 +282,11 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 		// session page after task creation.
 		b.hub.BroadcastToWorkspace(workspaceID, msg)
 		return nil
-	case ws.ActionGitLabTaskMRUpdated, ws.ActionGitLabTaskMRAutomationUpdated:
-		// These payloads carry per-task MR link/lifecycle state. Fail closed
+	case ws.ActionGitHubTaskCIOptionsUpdated, ws.ActionGitLabTaskMRUpdated, ws.ActionGitLabTaskMRAutomationUpdated:
+		// These payloads carry per-task PR/MR automation and lifecycle state. Fail closed
 		// (drop, don't fall back to a global broadcast) when workspace
 		// resolution came back empty and auth is enforced — an unattributed
-		// GitLab MR update must never cross workspace boundaries.
+		// GitHub PR or GitLab MR update must never cross workspace boundaries.
 		b.hub.BroadcastToWorkspaceOrDrop(workspaceID, msg)
 		return nil
 	}
