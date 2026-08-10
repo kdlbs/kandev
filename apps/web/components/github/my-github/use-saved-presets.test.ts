@@ -55,8 +55,30 @@ function workspaceSettings(
   } as Awaited<ReturnType<typeof fetchGitHubWorkspaceSettings>>;
 }
 
+async function expectRandomUuidPresetId() {
+  const uuid = "123e4567-e89b-42d3-a456-426614174000";
+  vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(uuid);
+  vi.mocked(fetchGitHubWorkspaceSettings).mockResolvedValue(workspaceSettings());
+  vi.mocked(updateGitHubWorkspaceSettings).mockResolvedValue(workspaceSettings());
+  const { result } = renderHook(() => useSavedPresets(WORKSPACE_ID));
+  await waitFor(() => expect(result.current.presets).toEqual([]));
+
+  let created: SavedPreset | null = null;
+  await act(async () => {
+    created = await result.current.save({
+      kind: "pr",
+      label: "UUID preset",
+      customQuery: "is:open",
+      repoFilter: "",
+    });
+  });
+
+  expect((created as SavedPreset | null)?.id).toBe(`p_${uuid}`);
+}
+
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
 });
 
 describe("useSavedPresets", () => {
@@ -107,6 +129,8 @@ describe("useSavedPresets workspace sync", () => {
     await waitFor(() => expect(result.current.presets).toEqual([server]));
     expect(updateGitHubWorkspaceSettings).not.toHaveBeenCalled();
   });
+
+  it("uses a random UUID for new preset ids", expectRandomUuidPresetId);
 
   it("does not save while workspace presets are still loading", async () => {
     vi.mocked(fetchGitHubWorkspaceSettings).mockReturnValue(new Promise(() => {}));

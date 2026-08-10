@@ -470,6 +470,7 @@ describe("useSavedPresetActions default actions", () => {
     });
 
     expect(markSearchInteracted).not.toHaveBeenCalled();
+    expect(result.current.defaultMutationPendingId).toBeNull();
   });
 
   it("ignores a second default toggle while the first is pending", async () => {

@@ -237,7 +237,7 @@ export function useSavedPresets(workspaceId: string | null = null) {
       const context = mutationContextRef.current;
       const preset: SavedPreset = {
         ...input,
-        id: `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+        id: `p_${crypto.randomUUID()}`,
         createdAt: new Date().toISOString(),
         isDefault: false,
       };

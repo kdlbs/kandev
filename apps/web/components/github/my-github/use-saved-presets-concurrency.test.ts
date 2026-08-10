@@ -331,6 +331,42 @@ async function expectPortableDefaultsAcrossHookInstances() {
   expect(second.result.current.presets).toEqual(expected);
 }
 
+async function expectPortableDefaultLastWriteWins() {
+  const prA = { ...valid, isDefault: false };
+  const prB = { ...valid, id: "pr-b", label: "PR B", isDefault: false };
+  const resolveFirst = deferFirstPersistence(PORTABLE_USER_MODE);
+  mockHydration(PORTABLE_USER_MODE, [prA, prB]);
+  const first = renderHook(() => useSavedPresets());
+  const second = renderHook(() => useSavedPresets());
+  await waitFor(() => expect(first.result.current.presets).toEqual([prA, prB]));
+  await waitFor(() => expect(second.result.current.presets).toEqual([prA, prB]));
+
+  let firstMutation!: Promise<boolean>;
+  act(() => {
+    firstMutation = first.result.current.setDefault("pr", prA.id);
+  });
+  await waitFor(() => expectPersistenceCalls(PORTABLE_USER_MODE, 1));
+
+  let secondMutation!: Promise<boolean>;
+  act(() => {
+    secondMutation = second.result.current.setDefault("pr", prB.id);
+  });
+
+  await act(async () => {
+    resolveFirst();
+    await Promise.all([firstMutation, secondMutation]);
+  });
+  await waitFor(() => expectPersistenceCalls(PORTABLE_USER_MODE, 2));
+
+  const expected = [
+    { ...prA, isDefault: false },
+    { ...prB, isDefault: true },
+  ];
+  expectLastPersisted(PORTABLE_USER_MODE, expected);
+  expect(first.result.current.presets).toEqual(expected);
+  expect(second.result.current.presets).toEqual(expected);
+}
+
 function resetMutationTestState() {
   __resetSnapshotForTests();
   vi.mocked(fetchUserSettings).mockReset();
@@ -411,6 +447,8 @@ describe("useSavedPresets mutation ordering", () => {
     "serializes portable defaults across hook instances",
     expectPortableDefaultsAcrossHookInstances,
   );
+
+  it("last portable default wins across hook instances", expectPortableDefaultLastWriteWins);
 
   it.each(MODES)("removes a pending %s default target", expectPendingDefaultTargetRemoval);
 
