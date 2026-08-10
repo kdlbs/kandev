@@ -101,6 +101,12 @@ describe("saved preset defaults", () => {
     expect(setSavedPresetDefault(initial, "pr", "missing")).toBe(initial);
   });
 
+  it("returns the original list when the target is already the default", () => {
+    const initial = [preset("pr-a", "pr", true), preset("pr-b", "pr")];
+
+    expect(setSavedPresetDefault(initial, "pr", "pr-a")).toBe(initial);
+  });
+
   it("finds the effective default for a result kind", () => {
     const issueDefault = preset("issue-a", "issue", true);
 
