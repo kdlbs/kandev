@@ -271,10 +271,14 @@ has an external Kandev plan, call `get_task_plan_kandev` before fixup and
 exact-head check counts, resolved-thread state, and mergeability. Without that
 authorization, report the plan update as pending and do not invoke Kandev task
 or session APIs. Batch plan/task synchronization into the final documentation
-commit. For tracked `docs/plans/**` artifacts, keep prose head-agnostic and record
-remediation scope/local verification before that commit; a later metadata commit
-creates a new head and requires a fresh PR-state check. Mark prior current-head
-claims historical/superseded when a new head replaces them; report only the latest head's SHA, CI/review counts, and mergeability. Do not leave planned verification marked unstarted after it has run.
+commit. Record the prior head's fixup evidence before a plan commit/push: that
+push restarts CI and invalidates the snapshot. For tracked `docs/plans/**`
+artifacts, keep prose head-agnostic and record remediation scope/local
+verification before that commit; then rerun `scripts/pr-state --summary` and
+`scripts/pr-resolve list` for the new head and report its pending checks
+separately. Mark prior current-head claims historical/superseded when a new
+head replaces them; report only the latest head's SHA, CI/review counts, and
+mergeability. Do not leave planned verification marked unstarted after it has run.
 
 Before declaring fixup complete, verify `git status --short` is clean,
 `git rev-parse HEAD` equals `git rev-parse @{upstream}`, the PR head equals
