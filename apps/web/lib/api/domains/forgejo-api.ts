@@ -1,5 +1,5 @@
 import { fetchJson, type ApiRequestOptions } from "../client";
-import type { ForgejoConfig, ForgejoIssue, ForgejoPullRequest, ForgejoRepository, ForgejoTaskIssue, ForgejoTaskPR, SetForgejoConfigRequest, TestForgejoConnectionResult } from "@/lib/types/forgejo";
+import type { ForgejoConfig, ForgejoIssue, ForgejoIssueWatch, ForgejoPullRequest, ForgejoRepository, ForgejoTaskIssue, ForgejoTaskPR, SetForgejoConfigRequest, TestForgejoConnectionResult } from "@/lib/types/forgejo";
 
 type WorkspaceOptions = ApiRequestOptions & { workspaceId: string };
 const path = (route: string, workspaceId: string) => `${route}${route.includes("?") ? "&" : "?"}workspace_id=${encodeURIComponent(workspaceId)}`;
@@ -22,3 +22,7 @@ export const unlinkForgejoIssue = (linkId: string, options: WorkspaceOptions) =>
 export const unlinkForgejoPullRequest = (linkId: string, options: WorkspaceOptions) => fetchJson<{ deleted: boolean }>(path(`/api/v1/forgejo/task-pull-requests/${encodeURIComponent(linkId)}`, options.workspaceId), { ...withoutWorkspace(options), init: { method: "DELETE" } });
 export const refreshForgejoTaskIssue = (linkId: string, options: WorkspaceOptions) => fetchJson<ForgejoTaskIssue>(path(`/api/v1/forgejo/task-issues/${encodeURIComponent(linkId)}/refresh`, options.workspaceId), { ...withoutWorkspace(options), init: { method: "POST" } });
 export const refreshForgejoTaskPullRequest = (linkId: string, options: WorkspaceOptions) => fetchJson<ForgejoTaskPR>(path(`/api/v1/forgejo/task-pull-requests/${encodeURIComponent(linkId)}/refresh`, options.workspaceId), { ...withoutWorkspace(options), init: { method: "POST" } });
+export const listForgejoIssueWatches = (options: WorkspaceOptions) => fetchJson<{ watches: ForgejoIssueWatch[] }>(path("/api/v1/forgejo/issue-watches", options.workspaceId), withoutWorkspace(options));
+export const saveForgejoIssueWatch = (watch: Partial<ForgejoIssueWatch> & { owner: string; repo: string }, options: WorkspaceOptions) => fetchJson<ForgejoIssueWatch>(path("/api/v1/forgejo/issue-watches", options.workspaceId), { ...withoutWorkspace(options), init: { method: "PUT", body: JSON.stringify(watch) } });
+export const deleteForgejoIssueWatch = (watchId: string, options: WorkspaceOptions) => fetchJson<{ deleted: boolean }>(path(`/api/v1/forgejo/issue-watches/${encodeURIComponent(watchId)}`, options.workspaceId), { ...withoutWorkspace(options), init: { method: "DELETE" } });
+export const pollForgejoIssueWatch = (watchId: string, options: WorkspaceOptions) => fetchJson<{ issues: ForgejoIssue[] }>(path(`/api/v1/forgejo/issue-watches/${encodeURIComponent(watchId)}/poll`, options.workspaceId), { ...withoutWorkspace(options), init: { method: "POST" } });
