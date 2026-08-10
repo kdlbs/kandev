@@ -20,6 +20,10 @@ type IssueWatch struct {
 	RepositoryID        string     `json:"repository_id" db:"repository_id"`
 	BaseBranch          string     `json:"base_branch" db:"base_branch"`
 	Prompt              string     `json:"prompt" db:"prompt"`
+	AgentProfileID      string     `json:"agent_profile_id" db:"agent_profile_id"`
+	ExecutorProfileID   string     `json:"executor_profile_id" db:"executor_profile_id"`
+	CleanupPolicy       string     `json:"cleanup_policy" db:"cleanup_policy"`
+	InflightLimit       int        `json:"inflight_limit" db:"inflight_limit"`
 	Owner               string     `json:"owner" db:"owner"`
 	Repo                string     `json:"repo" db:"repo"`
 	Labels              string     `json:"labels" db:"labels"`
@@ -46,7 +50,10 @@ func (s *Store) UpsertIssueWatch(ctx context.Context, watch *IssueWatch) error {
 		watch.CreatedAt = now
 	}
 	watch.UpdatedAt = now
-	_, err := s.db.ExecContext(ctx, `INSERT INTO forgejo_issue_watches (id, workspace_id, workflow_id, workflow_step_id, repository_id, base_branch, prompt, owner, repo, labels, enabled, poll_interval_seconds, last_polled_at, last_error, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(workspace_id, owner, repo, labels) DO UPDATE SET workflow_id=excluded.workflow_id, workflow_step_id=excluded.workflow_step_id, repository_id=excluded.repository_id, base_branch=excluded.base_branch, prompt=excluded.prompt, enabled=excluded.enabled, poll_interval_seconds=excluded.poll_interval_seconds, updated_at=excluded.updated_at`, watch.ID, watch.WorkspaceID, watch.WorkflowID, watch.WorkflowStepID, watch.RepositoryID, watch.BaseBranch, watch.Prompt, watch.Owner, watch.Repo, watch.Labels, watch.Enabled, watch.PollIntervalSeconds, watch.LastPolledAt, watch.LastError, watch.CreatedAt, watch.UpdatedAt)
+	if watch.CleanupPolicy == "" {
+		watch.CleanupPolicy = "auto"
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO forgejo_issue_watches (id, workspace_id, workflow_id, workflow_step_id, repository_id, base_branch, prompt, agent_profile_id, executor_profile_id, cleanup_policy, inflight_limit, owner, repo, labels, enabled, poll_interval_seconds, last_polled_at, last_error, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(workspace_id, owner, repo, labels) DO UPDATE SET workflow_id=excluded.workflow_id, workflow_step_id=excluded.workflow_step_id, repository_id=excluded.repository_id, base_branch=excluded.base_branch, prompt=excluded.prompt, agent_profile_id=excluded.agent_profile_id, executor_profile_id=excluded.executor_profile_id, cleanup_policy=excluded.cleanup_policy, inflight_limit=excluded.inflight_limit, enabled=excluded.enabled, poll_interval_seconds=excluded.poll_interval_seconds, updated_at=excluded.updated_at`, watch.ID, watch.WorkspaceID, watch.WorkflowID, watch.WorkflowStepID, watch.RepositoryID, watch.BaseBranch, watch.Prompt, watch.AgentProfileID, watch.ExecutorProfileID, watch.CleanupPolicy, watch.InflightLimit, watch.Owner, watch.Repo, watch.Labels, watch.Enabled, watch.PollIntervalSeconds, watch.LastPolledAt, watch.LastError, watch.CreatedAt, watch.UpdatedAt)
 	return err
 }
 

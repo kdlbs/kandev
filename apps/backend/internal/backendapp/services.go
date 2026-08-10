@@ -129,8 +129,9 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			task, err := taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 				WorkspaceID: watch.WorkspaceID, WorkflowID: watch.WorkflowID, WorkflowStepID: watch.WorkflowStepID,
 				Title: issue.Title, Description: description, Priority: "medium",
-				Repositories: []taskservice.TaskRepositoryInput{{RepositoryID: watch.RepositoryID, BaseBranch: watch.BaseBranch}},
-				Metadata:     map[string]interface{}{"forgejo_issue": map[string]interface{}{"owner": watch.Owner, "repo": watch.Repo, "number": issue.Number, "url": issue.HTMLURL}},
+				Repositories:           []taskservice.TaskRepositoryInput{{RepositoryID: watch.RepositoryID, BaseBranch: watch.BaseBranch}},
+				Metadata:               map[string]interface{}{"forgejo_issue": map[string]interface{}{"owner": watch.Owner, "repo": watch.Repo, "number": issue.Number, "url": issue.HTMLURL}},
+				AssigneeAgentProfileID: watch.AgentProfileID,
 			})
 			if err != nil {
 				return "", err

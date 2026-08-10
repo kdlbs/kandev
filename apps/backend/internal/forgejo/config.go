@@ -126,7 +126,7 @@ func NewStore(db, ro *sqlx.DB) (*Store, error) {
 		return nil, err
 	}
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS forgejo_issue_watches (
-		id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, workflow_id TEXT NOT NULL DEFAULT '', workflow_step_id TEXT NOT NULL DEFAULT '', repository_id TEXT NOT NULL DEFAULT '', base_branch TEXT NOT NULL DEFAULT '', prompt TEXT NOT NULL DEFAULT '', owner TEXT NOT NULL, repo TEXT NOT NULL,
+		id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, workflow_id TEXT NOT NULL DEFAULT '', workflow_step_id TEXT NOT NULL DEFAULT '', repository_id TEXT NOT NULL DEFAULT '', base_branch TEXT NOT NULL DEFAULT '', prompt TEXT NOT NULL DEFAULT '', agent_profile_id TEXT NOT NULL DEFAULT '', executor_profile_id TEXT NOT NULL DEFAULT '', cleanup_policy TEXT NOT NULL DEFAULT 'auto', inflight_limit INTEGER NOT NULL DEFAULT 0, owner TEXT NOT NULL, repo TEXT NOT NULL,
 		labels TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1,
 		poll_interval_seconds INTEGER NOT NULL DEFAULT 300, last_polled_at DATETIME,
 		last_error TEXT NOT NULL DEFAULT '', created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL,
@@ -139,6 +139,10 @@ func NewStore(db, ro *sqlx.DB) (*Store, error) {
 		`ALTER TABLE forgejo_issue_watches ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE forgejo_issue_watches ADD COLUMN base_branch TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE forgejo_issue_watches ADD COLUMN prompt TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE forgejo_issue_watches ADD COLUMN agent_profile_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE forgejo_issue_watches ADD COLUMN executor_profile_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE forgejo_issue_watches ADD COLUMN cleanup_policy TEXT NOT NULL DEFAULT 'auto'`,
+		`ALTER TABLE forgejo_issue_watches ADD COLUMN inflight_limit INTEGER NOT NULL DEFAULT 0`,
 	} {
 		_, _ = db.Exec(statement)
 	}
