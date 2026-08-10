@@ -158,6 +158,11 @@ qualifies as a successful hook receipt.
    code for this transient lock; verify the retry has a normal hook receipt and
    a clean worktree.
 
+   If a hook fails with `ENOSPC`, load `/verify`'s Disk-constrained runners
+   guidance: inspect `df`, preserve managed caches, relocate only the affected
+   cache to an explicit persistent agent-owned path, and never bypass hooks or
+   blindly delete shared caches.
+
 6. **Return a hook receipt:** After a successful commit, report:
    ```text
    parent_sha: <pre-commit HEAD>

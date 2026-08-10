@@ -101,6 +101,12 @@ is usually a superseded GitHub run, not a code failure. Confirm the
 non-cancelled run for the same head SHA passed, then trigger one clean run
 (rebase onto main + force-push, or `gh run rerun <id>`).
 
+**Required job timeout cancellation:** If a required job is cancelled at its
+configured `timeout-minutes`, inspect its concrete steps and logs. When the
+race/test step has no assertion failure and one rerun repeats the same timeout,
+classify it as CI infrastructure, stop rerunning, and report the exact check,
+timeout, and pending-state evidence.
+
 **Manual-review event provenance:** For an unexpected zero-duration or no-op
 manual bot-mention run, inspect the workflow at the repository default branch
 and the event payload before assuming the PR is behind `main`. Privileged

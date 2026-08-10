@@ -205,6 +205,10 @@ Client (WS) ← Orchestrator ← Lifecycle Manager ←──── stream update
 
 **Executor default scripts:** Default prepare scripts are in `internal/agent/runtime/lifecycle/default_scripts.go`; `internal/scriptengine/` handles placeholder resolution.
 
+- **Launcher quoting:** Quote interpolated environment values for POSIX/Git Bash
+  versus native Windows; when launch recipes change, extend
+  `scripts/check-make-shells` with default, spaced, and quote-containing values.
+
 ## Conventions
 
 - Provider pattern for DI; stderr for logs, stdout for ACP only.
@@ -223,19 +227,14 @@ Client (WS) ← Orchestrator ← Lifecycle Manager ←──── stream update
 - **Testing:** Prefer `testing/synctest` (Go 1.24+) over `time.Sleep` for time-dependent tests. Use `synctest.Test` to wrap tests with tickers or timeouts — it advances fake time instantly when all goroutines are idle. When `synctest` is not feasible (e.g., tests spawning external processes like `git`), use channel-based synchronization (`<-started`, non-blocking `select`) instead of sleep-based waits. Reserve `time.Sleep` only for integration tests that need real subprocess execution time.
   - **Test cleanup:** Register `t.Cleanup` immediately after creating resources that need teardown (adapters, `io.Pipe` writers, background goroutines) — before any `t.Fatal`/`t.Fatalf` path. Late cleanup registration leaks pipes and goroutines on early failure.
   - **Joining production goroutines in tests:** When code spawns untracked goroutines (e.g. `fireWakeup`), don't rely on arbitrary sleeps. Join via an observable side effect — e.g. block on `EventTypeComplete` from `a.updatesCh` after unblocking the fake agent. Use short timeouts (~100ms) for in-process negative assertions; reserve multi-second waits for subprocess/integration tests only.
-  - **Path/security tests:** Avoid using the real filesystem root as a fixture root. Build fake absolute roots under `t.TempDir()` with `filepath.Join`; this keeps tests portable across Windows, POSIX, and privileged cloud executors.
-    For error assertions, do not compare raw `%q`/escaped strings with native `filepath` values; assert typed fields or normalize both sides with `filepath.Clean`/`filepath.FromSlash`.
+  - **Path/security tests:** Avoid using the real filesystem root as a fixture root. Build fake absolute roots under `t.TempDir()` with `filepath.Join`; this keeps tests portable across Windows, POSIX, and privileged cloud executors. For error assertions, do not compare raw `%q`/escaped strings with native `filepath` values; assert typed fields or normalize both sides with `filepath.Clean`/`filepath.FromSlash`.
   - **Filesystem permission tests:** Assert permission-denied behavior only after probing that the current executor enforces the permission bit change. Root-like Sprite executors may bypass `chmod` restrictions.
   - **Filesystem safety checks:** Carry the original `os.Lstat` `FileInfo` (or opened handle) through every decision; do not re-stat a validated path, which reopens a TOCTOU window before side effects. Test mismatches before writes or manager commands.
-  - **Git indexed-environment tests:** When a test supplies `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_n`, and `GIT_CONFIG_VALUE_n`, clear every inherited indexed key first and restore it with `t.Cleanup`.
-    `internal/gitconfigenv` ignores indexes past the count; uncleared parent indexes silently alter the block instead of failing loudly.
+  - **Git indexed-environment tests:** When a test supplies `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_n`, and `GIT_CONFIG_VALUE_n`, clear every inherited indexed key first and restore it with `t.Cleanup`. `internal/gitconfigenv` ignores indexes past the count; uncleared parent indexes silently alter the block instead of failing loudly.
   - **Derived environment contracts:** Drive derived values through the production producer/wiring seam instead of manually seeding keys; pair consumer/process coverage with a producer-boundary assertion so missing publication fails.
   - **Full test output:** For local full-suite pass/fail validation, prefer plain `go test -race ./...`. `go test -json ./...` can emit very large JSONL streams; if a wrapper or tracing tool truncates the stream mid-record, downstream JSON parsing may fail even when Go tests passed. Use JSON output mainly for CI artifacts or test-report tooling that explicitly requires it.
-  - **Private executable helpers:** When library code starts `os.Executable()` in a private helper mode, do not rely only on a command package's dispatch or package-specific `TestMain`: an importing package's test binary can be the
-    executable and recursively run tests. Use either an explicitly marked private
-    env-and-argument trampoline that runs before normal test entry, or inject a
-    dedicated helper executable. Cover it from a different importing package,
-    not only the helper package.
+  - **Private executable helpers:** When library code starts `os.Executable()` in a private helper mode, do not rely only on a command package's dispatch or package-specific `TestMain`: an importing package's test binary can be the executable and recursively run tests.
+    Use either an explicitly marked private env-and-argument trampoline before normal test entry, or inject a dedicated helper executable. Cover it from a different importing package, not only the helper package.
 
 ### Goroutine ownership and leak testing
 
