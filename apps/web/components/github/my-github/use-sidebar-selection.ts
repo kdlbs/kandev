@@ -108,6 +108,8 @@ export function useSidebarSelectionHandler({
   return useCallback(
     (selection: SidebarSelection) => {
       markSearchInteracted();
+      // Kind-switch: always resolve from the saved default (or first configured preset),
+      // not from the specific id in `selection`, which is just the kind-toggle fallback.
       if (selection.kind !== currentKind) {
         const target = resolveDefaultSidebarTarget(
           selection.kind,

@@ -231,8 +231,10 @@ export function useSavedPresets(workspaceId: string | null = null) {
         if (next === activePresetsRef.current) return;
         await persist(next);
         persisted = true;
-        // A sibling hook can update the shared portable snapshot while persistence is in flight.
-        // Reapply the default to that latest state before publishing this mutation.
+        // `setDefault` publishes only after persistence succeeds (no optimistic update).
+        // Re-read activePresetsRef.current so that concurrent mutations applied
+        // during the await (e.g. sibling-hook writes for portable user settings)
+        // are merged in before publishing the new default state.
         const latest = activePresetsRef.current;
         const remerged = setSavedPresetDefault(latest, kind, id);
         if (remerged !== latest) applyLocal(remerged);
