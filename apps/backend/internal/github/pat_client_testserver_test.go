@@ -1,0 +1,109 @@
+package github
+
+import (
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strconv"
+	"sync"
+	"testing"
+)
+
+// patRequest records what a PATClient actually put on the wire so a test can
+// assert method, path, query, headers and body rather than only the decoded
+// result.
+type patRequest struct {
+	Method string
+	Path   string
+	Query  string
+	Header http.Header
+	Body   string
+}
+
+// newRecordingPATServer serves the given path→body map and records every
+// request. Any path outside the map returns 404 with a JSON body, which the
+// PATClient decode helpers surface as *GitHubAPIError.
+func newRecordingPATServer(t *testing.T, routes map[string]string) (*PATClient, *[]patRequest) {
+	t.Helper()
+	return newRecordingPATServerFunc(t, func(r *http.Request) (int, string) {
+		body, ok := routes[r.URL.Path]
+		if !ok {
+			return http.StatusNotFound, `{"message":"Not Found"}`
+		}
+		return http.StatusOK, body
+	})
+}
+
+// newRecordingPATServerFunc is the general form: respond decides the status
+// and body per request, and every request is still recorded. Assertions run in
+// the calling goroutine off the returned slice — a handler goroutine must
+// never call t.Fatal.
+func newRecordingPATServerFunc(
+	t *testing.T, respond func(*http.Request) (int, string),
+) (*PATClient, *[]patRequest) {
+	t.Helper()
+	var recorded []patRequest
+	// GetPRFeedback fans its three upstream reads out concurrently, so the
+	// recording slice is written from several handler goroutines at once.
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		recorded = append(recorded, patRequest{
+			Method: r.Method,
+			Path:   r.URL.Path,
+			Query:  r.URL.RawQuery,
+			Header: r.Header.Clone(),
+			Body:   string(body),
+		})
+		mu.Unlock()
+		status, respBody := respond(r)
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(respBody))
+	}))
+	t.Cleanup(srv.Close)
+	return newPATClientPointingAt(t, srv.URL), &recorded
+}
+
+// newLinkPaginatedPATServer serves `pages` in order from a single endpoint,
+// advertising the next page through a GitHub-shaped `Link: <...>; rel="next"`
+// header on every response but the last. It exercises getPaginated's
+// follow-the-link loop.
+func newLinkPaginatedPATServer(
+	t *testing.T, path string, pages []string,
+) (*PATClient, *[]patRequest) {
+	t.Helper()
+	var recorded []patRequest
+	served := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		recorded = append(recorded, patRequest{
+			Method: r.Method, Path: r.URL.Path, Query: r.URL.RawQuery, Header: r.Header.Clone(),
+		})
+		if r.URL.Path != path || served >= len(pages) {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"Not Found"}`))
+			return
+		}
+		index := served
+		served++
+		if index < len(pages)-1 {
+			next := githubAPIBase + path + "?per_page=100&page=" + strconv.Itoa(index+2)
+			w.Header().Set("Link", "<"+next+`>; rel="next"`)
+		}
+		_, _ = w.Write([]byte(pages[index]))
+	}))
+	t.Cleanup(srv.Close)
+	return newPATClientPointingAt(t, srv.URL), &recorded
+}
+
+// parseQueryValues decodes a raw query string, failing the test on malformed
+// input so callers can assert on individual parameters.
+func parseQueryValues(t *testing.T, rawQuery string) url.Values {
+	t.Helper()
+	values, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		t.Fatalf("parse query %q: %v", rawQuery, err)
+	}
+	return values
+}
