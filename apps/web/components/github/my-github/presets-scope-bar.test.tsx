@@ -24,7 +24,7 @@ vi.mock("@/components/integrations/presets-scope-bar-base", () => ({
     savedPresets: Array<{ id: string }>;
   }) => {
     return (
-      <div data-testid="scope-bar-default-action" aria-busy={defaultMutationPending}>
+      <div data-testid="scope-bar-default-action" data-pending={defaultMutationPending}>
         <button
           type="button"
           data-testid="scope-bar-default-toggle"
@@ -57,7 +57,9 @@ describe("PresetsScopeBar default adapter", () => {
       />,
     );
 
-    expect(screen.getByTestId("scope-bar-default-action").getAttribute("aria-busy")).toBe("true");
+    expect(screen.getByTestId("scope-bar-default-action").getAttribute("data-pending")).toBe(
+      "true",
+    );
   });
 
   it("forwards a matching saved preset to the domain callback", () => {

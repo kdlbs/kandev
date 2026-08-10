@@ -123,19 +123,19 @@ describe("IntegrationScopeBar saved defaults", () => {
   it("disables every default action while a mutation is pending", () => {
     renderBar({ defaultMutationPending: true });
     const currentDefault = screen.getByRole("menuitemcheckbox", {
-      name: "Clear Current default as default view",
+      name: "Updating default view… Clear Current default as default view",
     });
     const currentDelete = screen.getByRole("menuitem", {
       name: "Delete Current default saved query",
     });
 
     expect(currentDefault.getAttribute(ARIA_DISABLED_ATTRIBUTE)).toBe("true");
-    expect(currentDefault.getAttribute("aria-busy")).toBe("true");
+    expect(currentDefault.getAttribute("aria-busy")).toBeNull();
     expect(currentDefault.querySelector("svg")?.getAttribute("class")).toContain("animate-pulse");
     expect(
       screen
         .getByRole("menuitemcheckbox", {
-          name: "Set Future default as default view",
+          name: "Updating default view… Set Future default as default view",
         })
         .getAttribute(ARIA_DISABLED_ATTRIBUTE),
     ).toBe("true");

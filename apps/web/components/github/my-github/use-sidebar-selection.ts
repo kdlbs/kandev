@@ -60,6 +60,7 @@ export function useInitialSidebarSelection({
     if (resetWorkspaceIdRef.current !== workspaceId) {
       resetWorkspaceIdRef.current = workspaceId;
       userSelectedRef.current = false;
+      // Re-enable default selection for the new workspace even after prior interaction.
       autoResetSearchRef.current = true;
     }
     if (userSelectedRef.current || !autoResetSearchRef.current) return;

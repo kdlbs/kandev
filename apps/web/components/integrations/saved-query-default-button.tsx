@@ -23,12 +23,15 @@ export function SavedQueryDefaultButton({
   onToggle,
 }: SavedQueryDefaultButtonProps) {
   const { t } = useTranslation();
-  const accessibleLabel = t(
+  const actionLabel = t(
     isDefault
       ? "integrations:clearSavedQueryAsDefaultView"
       : "integrations:setSavedQueryAsDefaultView",
     { label },
   );
+  const accessibleLabel = disabled
+    ? t("integrations:savedQueryDefaultUpdateInProgress", { action: actionLabel })
+    : actionLabel;
   const iconClassName = cn(
     "h-4 w-4",
     isDefault && "fill-amber-500 text-amber-500",
@@ -40,7 +43,6 @@ export function SavedQueryDefaultButton({
         checked={isDefault}
         disabled={disabled}
         aria-label={accessibleLabel}
-        aria-busy={disabled}
         title={accessibleLabel}
         data-testid={testId}
         onSelect={(event) => event.preventDefault()}
@@ -57,7 +59,6 @@ export function SavedQueryDefaultButton({
       type="button"
       aria-label={accessibleLabel}
       aria-pressed={isDefault}
-      aria-busy={disabled}
       title={accessibleLabel}
       disabled={disabled}
       data-testid={testId}

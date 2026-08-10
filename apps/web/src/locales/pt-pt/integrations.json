@@ -79,6 +79,7 @@
   "retryShortName": "Repetir o {{shortName}}",
   "saveCurrentQuery": "Guardar a consulta atual",
   "savedQueries": "Guardadas",
+  "savedQueryDefaultUpdateInProgress": "A atualizar a vista pré-definida… {{action}}",
   "setSavedQueryAsDefaultView": "Definir {{label}} como vista pré-definida",
   "clearSavedQueryAsDefaultView": "Remover {{label}} como vista pré-definida",
   "selectAWorkspace": "Selecione uma área de trabalho…",

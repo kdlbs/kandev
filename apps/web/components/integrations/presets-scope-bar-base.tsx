@@ -170,11 +170,7 @@ function SavedMenu<K extends string>({
                   and focus opacity reveals it without pointer hover. */}
               <DropdownMenuItem
                 disabled={defaultMutationPending}
-                onSelect={(event) => {
-                  // Keep the menu open so the user can delete or mark additional queries.
-                  event.preventDefault();
-                  onDeleteSaved(s.id);
-                }}
+                onSelect={() => onDeleteSaved(s.id)}
                 className="h-7 min-h-7 w-7 shrink-0 cursor-pointer justify-center p-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus:opacity-100 group-hover/saved:opacity-100 data-[disabled]:cursor-wait data-[disabled]:opacity-50 group-hover/saved:data-[disabled]:opacity-50"
                 title={t("integrations:deleteSavedQueryNamed", { label: s.label })}
                 aria-label={t("integrations:deleteSavedQueryNamed", { label: s.label })}

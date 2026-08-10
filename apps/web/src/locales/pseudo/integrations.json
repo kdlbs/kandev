@@ -79,6 +79,7 @@
   "retryShortName": "Ŕēţŕŷ {{shortName}}",
   "saveCurrentQuery": "Śàvē ćũŕŕēńţ qũēŕŷ",
   "savedQueries": "Śàvēď",
+  "savedQueryDefaultUpdateInProgress": "Ũƥďàţĩńĝ ďēƒàũĺţ vĩēŵ… {{action}}",
   "setSavedQueryAsDefaultView": "Śēţ {{label}} àś ďēƒàũĺţ vĩēŵ",
   "clearSavedQueryAsDefaultView": "Ćĺēàŕ {{label}} àś ďēƒàũĺţ vĩēŵ",
   "selectAWorkspace": "Śēĺēćţ à ŵōŕķśƥàćē…",

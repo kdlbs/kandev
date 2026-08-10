@@ -79,6 +79,7 @@
   "retryShortName": "Retry {{shortName}}",
   "saveCurrentQuery": "Save current query",
   "savedQueries": "Saved",
+  "savedQueryDefaultUpdateInProgress": "Updating default view… {{action}}",
   "setSavedQueryAsDefaultView": "Set {{label}} as default view",
   "clearSavedQueryAsDefaultView": "Clear {{label}} as default view",
   "selectAWorkspace": "Select a workspace…",

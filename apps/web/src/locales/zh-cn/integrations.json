@@ -79,6 +79,7 @@
   "retryShortName": "重试 {{shortName}}",
   "saveCurrentQuery": "保存当前查询",
   "savedQueries": "已保存",
+  "savedQueryDefaultUpdateInProgress": "正在更新默认视图…{{action}}",
   "setSavedQueryAsDefaultView": "将 {{label}} 设为默认视图",
   "clearSavedQueryAsDefaultView": "取消将 {{label}} 设为默认视图",
   "selectAWorkspace": "选择工作区…",
