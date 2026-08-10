@@ -163,7 +163,7 @@ describe("useSavedPresets workspace sync", () => {
 
     const { result } = renderHook(() => useSavedPresets(WORKSPACE_ID));
 
-    await expect(result.current.setDefault("pr", "p_1")).resolves.toBeUndefined();
+    await expect(result.current.setDefault("pr", "p_1")).resolves.toBe(false);
     expect(updateGitHubWorkspaceSettings).not.toHaveBeenCalled();
   });
 
@@ -307,17 +307,19 @@ describe("useSavedPresets default persistence", () => {
     const { result } = renderHook(() => useSavedPresets(WORKSPACE_ID));
     await waitFor(() => expect(result.current.presets).toHaveLength(3));
 
-    let mutation!: Promise<void>;
+    let mutation!: Promise<boolean>;
     act(() => {
       mutation = result.current.setDefault("pr", "pr-b");
     });
     expect(result.current.presets.map((preset) => preset.isDefault)).toEqual([true, false, true]);
 
+    let persisted!: boolean;
     await act(async () => {
       resolveUpdate(workspaceSettings());
-      await mutation;
+      persisted = await mutation;
     });
 
+    expect(persisted).toBe(true);
     expect(updateGitHubWorkspaceSettings).toHaveBeenCalledWith({
       workspace_id: WORKSPACE_ID,
       saved_presets: [{ ...prA, isDefault: false }, { ...prB, isDefault: true }, issue],

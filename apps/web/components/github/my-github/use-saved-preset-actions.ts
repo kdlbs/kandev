@@ -34,8 +34,8 @@ function firstPresetSelection(
 export function useSavedPresetActions({
   selection,
   customQuery,
-  resolvedPrPresets,
-  resolvedIssuePresets,
+  resolvedPrPresets: prPresets,
+  resolvedIssuePresets: issuePresets,
   setProgrammaticSelection,
   setQueryImmediate,
   setRepoFilter,
@@ -53,29 +53,54 @@ export function useSavedPresetActions({
     setDefault: setSavedPresetDefault,
   } = savedPresetStore;
 
-  const onConfirmSave = (label: string, defaultRepoFilter: string) => {
-    markSearchInteracted();
-    const created = saveSavedPreset({
-      kind: selection.kind,
-      label,
+  const onConfirmSave = useCallback(
+    (label: string, defaultRepoFilter: string) => {
+      markSearchInteracted();
+      const created = saveSavedPreset({
+        kind: selection.kind,
+        label,
+        customQuery,
+        repoFilter: defaultRepoFilter,
+      });
+      if (!created) return;
+      setProgrammaticSelection({ kind: selection.kind, source: "saved", id: created.id });
+      setQueryImmediate(customQuery);
+      setRepoFilter(defaultRepoFilter);
+    },
+    [
       customQuery,
-      repoFilter: defaultRepoFilter,
-    });
-    if (!created) return;
-    setProgrammaticSelection({ kind: selection.kind, source: "saved", id: created.id });
-    setQueryImmediate(customQuery);
-    setRepoFilter(defaultRepoFilter);
-  };
+      markSearchInteracted,
+      saveSavedPreset,
+      selection.kind,
+      setProgrammaticSelection,
+      setQueryImmediate,
+      setRepoFilter,
+    ],
+  );
 
-  const onDeleteSaved = (id: string) => {
-    markSearchInteracted();
-    removeSavedPreset(id);
-    if (selection.source !== "saved" || selection.id !== id) return;
-    const fallback = firstPresetSelection(selection.kind, resolvedPrPresets, resolvedIssuePresets);
-    setProgrammaticSelection(fallback.selection);
-    setQueryImmediate(fallback.filter);
-    setRepoFilter("");
-  };
+  const onDeleteSaved = useCallback(
+    (id: string) => {
+      markSearchInteracted();
+      removeSavedPreset(id);
+      if (selection.source !== "saved" || selection.id !== id) return;
+      const fallback = firstPresetSelection(selection.kind, prPresets, issuePresets);
+      setProgrammaticSelection(fallback.selection);
+      setQueryImmediate(fallback.filter);
+      setRepoFilter("");
+    },
+    [
+      markSearchInteracted,
+      removeSavedPreset,
+      issuePresets,
+      prPresets,
+      selection.id,
+      selection.kind,
+      selection.source,
+      setProgrammaticSelection,
+      setQueryImmediate,
+      setRepoFilter,
+    ],
+  );
 
   const onToggleSavedDefault = useCallback(
     async (preset: SavedPreset) => {
@@ -83,8 +108,9 @@ export function useSavedPresetActions({
       defaultMutationPendingRef.current = true;
       setDefaultMutationPending(true);
       try {
-        await setSavedPresetDefault(preset.kind, preset.isDefault ? null : preset.id);
-        markSearchInteracted();
+        const defaultId = preset.isDefault ? null : preset.id;
+        const persisted = await setSavedPresetDefault(preset.kind, defaultId);
+        if (persisted) markSearchInteracted();
       } catch {
         toast({
           description: t("integrations:failedToUpdateDefaultView"),

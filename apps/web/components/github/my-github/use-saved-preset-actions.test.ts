@@ -52,7 +52,7 @@ function makeStore(overrides: Partial<SavedPresetStore> = {}): SavedPresetStore 
     presets: [],
     save: vi.fn(() => null),
     remove: vi.fn(),
-    setDefault: vi.fn(async () => undefined),
+    setDefault: vi.fn(async () => false),
     ...overrides,
   } as SavedPresetStore;
 }
@@ -191,22 +191,54 @@ describe("useSavedPresetActions query actions", () => {
   });
 });
 
+describe("useSavedPresetActions default deletion", () => {
+  it("deletes an inactive default without changing the active search", () => {
+    const inactiveDefault = { ...savedPreset, isDefault: true };
+    const remove = vi.fn();
+    const { result, setProgrammaticSelection, setQueryImmediate, setRepoFilter } = renderActions(
+      { selection: { kind: "issue", source: "saved", id: "saved-active" } },
+      makeStore({ presets: [inactiveDefault], remove }),
+    );
+
+    act(() => result.current.onDeleteSaved(inactiveDefault.id));
+
+    expect(remove).toHaveBeenCalledWith(inactiveDefault.id);
+    expect(setProgrammaticSelection).not.toHaveBeenCalled();
+    expect(setQueryImmediate).not.toHaveBeenCalled();
+    expect(setRepoFilter).not.toHaveBeenCalled();
+  });
+});
+
 describe("useSavedPresetActions default actions", () => {
-  it("keeps the default toggle handler stable across unchanged renders", () => {
+  it("keeps action handlers stable across unchanged renders", () => {
     const { result, rerender } = renderActions();
+    const initialConfirm = result.current.onConfirmSave;
+    const initialDelete = result.current.onDeleteSaved;
     const initialToggle = result.current.onToggleSavedDefault;
 
     rerender();
 
+    expect(result.current.onConfirmSave).toBe(initialConfirm);
+    expect(result.current.onDeleteSaved).toBe(initialDelete);
     expect(result.current.onToggleSavedDefault).toBe(initialToggle);
+  });
+
+  it("does not mark search interaction when the default mutation is unavailable", async () => {
+    const { result, markSearchInteracted } = renderActions();
+
+    await act(async () => {
+      await result.current.onToggleSavedDefault(savedPreset);
+    });
+
+    expect(markSearchInteracted).not.toHaveBeenCalled();
   });
 
   it("ignores a second default toggle while the first is pending", async () => {
     let finish!: () => void;
     const setDefault = vi.fn(
       () =>
-        new Promise<void>((resolve) => {
-          finish = resolve;
+        new Promise<boolean>((resolve) => {
+          finish = () => resolve(true);
         }),
     );
     const { result } = renderActions({}, makeStore({ presets: [savedPreset], setDefault }));
@@ -231,8 +263,8 @@ describe("useSavedPresetActions default actions", () => {
     let finish!: () => void;
     const setDefault = vi.fn(
       () =>
-        new Promise<void>((resolve) => {
-          finish = resolve;
+        new Promise<boolean>((resolve) => {
+          finish = () => resolve(true);
         }),
     );
     const store = makeStore({ presets: [savedPreset], setDefault });

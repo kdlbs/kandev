@@ -118,7 +118,7 @@ async function expectPendingDefaultTargetRemoval(mode: PersistenceMode) {
   const resolveDefault = deferFirstPersistence(mode);
   const { result } = await renderLoaded(mode, [prA, prB]);
 
-  let defaultMutation!: Promise<void>;
+  let defaultMutation!: Promise<boolean>;
   act(() => {
     defaultMutation = result.current.setDefault("pr", "pr-b");
   });
@@ -154,7 +154,7 @@ describe("useSavedPresets mutation ordering", () => {
     const resolveDefault = deferFirstPersistence(mode);
     const { result } = await renderLoaded(mode, [prA, prB]);
 
-    let defaultMutation!: Promise<void>;
+    let defaultMutation!: Promise<boolean>;
     act(() => {
       defaultMutation = result.current.setDefault("pr", "pr-b");
     });
@@ -188,7 +188,7 @@ describe("useSavedPresets mutation ordering", () => {
     const resolveDefault = deferFirstPersistence(mode);
     const { result } = await renderLoaded(mode, [prA, prB]);
 
-    let defaultMutation!: Promise<void>;
+    let defaultMutation!: Promise<boolean>;
     act(() => {
       defaultMutation = result.current.setDefault("pr", "pr-b");
     });

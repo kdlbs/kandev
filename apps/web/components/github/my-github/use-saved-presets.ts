@@ -187,17 +187,20 @@ export function useSavedPresets(workspaceId: string | null = null) {
 
   const setDefault = useCallback(
     async (kind: SavedPresetKind, id: string | null) => {
-      if (workspaceId && workspacePresets === undefined) return;
+      if (workspaceId && workspacePresets === undefined) return false;
+      let persisted = false;
       await queueMutation(async () => {
         const next = setSavedPresetDefault(activePresetsRef.current, kind, id);
         if (next === activePresetsRef.current) return;
         await persist(next);
+        persisted = true;
         // Concurrent save/remove calls can update local state while persistence is in flight.
         // Reapply the default to that latest snapshot; its queued write persists the merged list.
         const latest = activePresetsRef.current;
         const remerged = setSavedPresetDefault(latest, kind, id);
         if (remerged !== latest) applyLocal(remerged);
       });
+      return persisted;
     },
     [applyLocal, persist, queueMutation, workspaceId, workspacePresets],
   );
