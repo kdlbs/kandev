@@ -9,7 +9,9 @@ import { __resetSnapshotForTests, useSavedPresets, type SavedPreset } from "./us
 
 const WORKSPACE_ID = "ws-1";
 const SETTINGS_TIMESTAMP = "2026-01-01T00:00:00Z";
-const MODES = ["workspace", "portable user"] as const;
+const WORKSPACE_MODE = "workspace";
+const PORTABLE_USER_MODE = "portable user";
+const MODES = [WORKSPACE_MODE, PORTABLE_USER_MODE] as const;
 
 type PersistenceMode = (typeof MODES)[number];
 
@@ -63,7 +65,7 @@ function requirePreset(value: SavedPreset | null): SavedPreset {
 }
 
 function mockHydration(mode: PersistenceMode, presets: SavedPreset[]) {
-  if (mode === "workspace") {
+  if (mode === WORKSPACE_MODE) {
     vi.mocked(fetchGitHubWorkspaceSettings).mockResolvedValue(workspaceSettings(presets));
     return;
   }
@@ -73,7 +75,7 @@ function mockHydration(mode: PersistenceMode, presets: SavedPreset[]) {
 }
 
 function deferFirstPersistence(mode: PersistenceMode): () => void {
-  if (mode === "workspace") {
+  if (mode === WORKSPACE_MODE) {
     const first = deferred<Awaited<ReturnType<typeof updateGitHubWorkspaceSettings>>>();
     vi.mocked(updateGitHubWorkspaceSettings)
       .mockReturnValueOnce(first.promise)
@@ -87,7 +89,7 @@ function deferFirstPersistence(mode: PersistenceMode): () => void {
 }
 
 function expectPersistenceCalls(mode: PersistenceMode, count: number) {
-  if (mode === "workspace") {
+  if (mode === WORKSPACE_MODE) {
     expect(updateGitHubWorkspaceSettings).toHaveBeenCalledTimes(count);
   } else {
     expect(updateUserSettings).toHaveBeenCalledTimes(count);
@@ -95,7 +97,7 @@ function expectPersistenceCalls(mode: PersistenceMode, count: number) {
 }
 
 function expectLastPersisted(mode: PersistenceMode, presets: SavedPreset[]) {
-  if (mode === "workspace") {
+  if (mode === WORKSPACE_MODE) {
     expect(updateGitHubWorkspaceSettings).toHaveBeenLastCalledWith({
       workspace_id: WORKSPACE_ID,
       saved_presets: presets,
@@ -107,7 +109,7 @@ function expectLastPersisted(mode: PersistenceMode, presets: SavedPreset[]) {
 
 async function renderLoaded(mode: PersistenceMode, presets: SavedPreset[]) {
   mockHydration(mode, presets);
-  const hook = renderHook(() => useSavedPresets(mode === "workspace" ? WORKSPACE_ID : null));
+  const hook = renderHook(() => useSavedPresets(mode === WORKSPACE_MODE ? WORKSPACE_ID : null));
   await waitFor(() => expect(hook.result.current.presets).toEqual(presets));
   return hook;
 }
@@ -259,14 +261,86 @@ async function expectQueuedWorkspaceSaveIsolation() {
   expect(result.current.presets).toEqual([secondWorkspacePreset]);
 }
 
-describe("useSavedPresets mutation ordering", () => {
-  beforeEach(() => {
-    __resetSnapshotForTests();
-    vi.mocked(fetchUserSettings).mockReset();
-    vi.mocked(updateUserSettings).mockReset();
-    vi.mocked(fetchGitHubWorkspaceSettings).mockReset();
-    vi.mocked(updateGitHubWorkspaceSettings).mockReset();
+async function expectSaveThenRemove(mode: PersistenceMode) {
+  const resolveSave = deferFirstPersistence(mode);
+  const { result } = await renderLoaded(mode, [valid]);
+
+  let saveMutation!: Promise<SavedPreset | null>;
+  act(() => {
+    saveMutation = result.current.save({
+      kind: "pr",
+      label: "Saved while deleting",
+      customQuery: "is:open",
+      repoFilter: "",
+    });
   });
+  await waitFor(() => expectPersistenceCalls(mode, 1));
+
+  let removeMutation!: Promise<boolean>;
+  act(() => {
+    removeMutation = result.current.remove(valid.id);
+  });
+
+  let created: SavedPreset | null = null;
+  let removed = false;
+  await act(async () => {
+    resolveSave();
+    [created, removed] = await Promise.all([saveMutation, removeMutation]);
+  });
+  await waitFor(() => expectPersistenceCalls(mode, 2));
+
+  const expected = [requirePreset(created)];
+  expect(removed).toBe(true);
+  expect(result.current.presets).toEqual(expected);
+  expectLastPersisted(mode, expected);
+}
+
+async function expectPortableDefaultsAcrossHookInstances() {
+  const pr = { ...valid, isDefault: false };
+  const issue = { ...valid, id: "issue-a", kind: "issue" as const, isDefault: false };
+  const resolveFirst = deferFirstPersistence(PORTABLE_USER_MODE);
+  mockHydration(PORTABLE_USER_MODE, [pr, issue]);
+  const first = renderHook(() => useSavedPresets());
+  const second = renderHook(() => useSavedPresets());
+  await waitFor(() => expect(first.result.current.presets).toEqual([pr, issue]));
+  await waitFor(() => expect(second.result.current.presets).toEqual([pr, issue]));
+
+  let firstMutation!: Promise<boolean>;
+  act(() => {
+    firstMutation = first.result.current.setDefault("pr", pr.id);
+  });
+  await waitFor(() => expectPersistenceCalls(PORTABLE_USER_MODE, 1));
+
+  let secondMutation!: Promise<boolean>;
+  act(() => {
+    secondMutation = second.result.current.setDefault("issue", issue.id);
+  });
+
+  await act(async () => {
+    resolveFirst();
+    await Promise.all([firstMutation, secondMutation]);
+  });
+  await waitFor(() => expectPersistenceCalls(PORTABLE_USER_MODE, 2));
+
+  const expected = [
+    { ...pr, isDefault: true },
+    { ...issue, isDefault: true },
+  ];
+  expectLastPersisted(PORTABLE_USER_MODE, expected);
+  expect(first.result.current.presets).toEqual(expected);
+  expect(second.result.current.presets).toEqual(expected);
+}
+
+function resetMutationTestState() {
+  __resetSnapshotForTests();
+  vi.mocked(fetchUserSettings).mockReset();
+  vi.mocked(updateUserSettings).mockReset();
+  vi.mocked(fetchGitHubWorkspaceSettings).mockReset();
+  vi.mocked(updateGitHubWorkspaceSettings).mockReset();
+}
+
+describe("useSavedPresets mutation ordering", () => {
+  beforeEach(resetMutationTestState);
 
   it.each(MODES)("preserves a %s save while a default update is pending", async (mode) => {
     const prA = { ...valid, isDefault: true };
@@ -331,6 +405,13 @@ describe("useSavedPresets mutation ordering", () => {
     expectLastPersisted(mode, expected);
   });
 
+  it.each(MODES)("applies a %s delete while a save is pending", expectSaveThenRemove);
+
+  it(
+    "serializes portable defaults across hook instances",
+    expectPortableDefaultsAcrossHookInstances,
+  );
+
   it.each(MODES)("removes a pending %s default target", expectPendingDefaultTargetRemoval);
 
   it("persists different workspaces independently", expectIndependentWorkspacePersistence);
@@ -342,7 +423,7 @@ describe("useSavedPresets mutation ordering", () => {
     vi.mocked(updateGitHubWorkspaceSettings)
       .mockReturnValueOnce(firstWrite.promise)
       .mockResolvedValue(workspaceSettings());
-    const firstHook = await renderLoaded("workspace", [valid]);
+    const firstHook = await renderLoaded(WORKSPACE_MODE, [valid]);
 
     let firstSave!: Promise<SavedPreset | null>;
     act(() => {
@@ -357,7 +438,7 @@ describe("useSavedPresets mutation ordering", () => {
     firstHook.unmount();
 
     __resetSnapshotForTests();
-    const secondHook = await renderLoaded("workspace", [valid]);
+    const secondHook = await renderLoaded(WORKSPACE_MODE, [valid]);
     let secondSave!: Promise<SavedPreset | null>;
     act(() => {
       secondSave = secondHook.result.current.save({
