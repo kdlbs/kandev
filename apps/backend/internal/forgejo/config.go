@@ -473,21 +473,27 @@ func (s *Service) ListWorkspaceQueue(ctx context.Context, workspaceID string) ([
 	if err != nil {
 		return nil, nil, err
 	}
-	repositories, _, err := client.ListRepositories(ctx, 1, 100)
+	pageLimit := 30
+	if limits, ok := client.(APILimitsClient); ok {
+		if configuredLimit, limitErr := limits.GetAPIMaxResponseItems(ctx); limitErr == nil {
+			pageLimit = configuredLimit
+		}
+	}
+	repositories, _, err := client.ListRepositories(ctx, 1, pageLimit)
 	if err != nil {
 		return nil, nil, err
 	}
 	issues := make([]QueueIssue, 0)
 	pulls := make([]QueuePullRequest, 0)
 	for _, repository := range repositories {
-		repositoryIssues, _, issueErr := client.ListIssues(ctx, repository.Owner, repository.Name, 1, 100)
+		repositoryIssues, _, issueErr := client.ListIssues(ctx, repository.Owner, repository.Name, 1, pageLimit)
 		if issueErr != nil {
 			return nil, nil, fmt.Errorf("list queue issues for %s: %w", repository.FullName, issueErr)
 		}
 		for _, issue := range repositoryIssues {
 			issues = append(issues, QueueIssue{Repository: repository, Issue: issue})
 		}
-		repositoryPulls, _, pullErr := client.ListPullRequests(ctx, repository.Owner, repository.Name, 1, 100)
+		repositoryPulls, _, pullErr := client.ListPullRequests(ctx, repository.Owner, repository.Name, 1, pageLimit)
 		if pullErr != nil {
 			return nil, nil, fmt.Errorf("list queue pull requests for %s: %w", repository.FullName, pullErr)
 		}

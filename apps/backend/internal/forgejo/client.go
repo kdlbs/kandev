@@ -132,6 +132,13 @@ type ServerVersionClient interface {
 	GetServerVersion(context.Context) (string, error)
 }
 
+// APILimitsClient reports the configured per-response maximum. Forgejo
+// instances may set this below the public default, so callers must not assume
+// that a request for 100 entries is always accepted.
+type APILimitsClient interface {
+	GetAPIMaxResponseItems(context.Context) (int, error)
+}
+
 type rawPullRequest struct {
 	Number         int    `json:"number"`
 	Title          string `json:"title"`
@@ -225,11 +232,26 @@ func (c *PATClient) GetServerVersion(ctx context.Context) (string, error) {
 	}
 	version := strings.TrimSpace(response.Version)
 	majorText := strings.SplitN(strings.TrimPrefix(version, "v"), ".", 2)[0]
-	major, err := strconv.Atoi(majorText)
-	if err != nil || major != 1 {
-		return "", fmt.Errorf("%w: Forgejo REST v1 required, server reported %q", ErrUnsupportedServerVersion, version)
+	if _, err := strconv.Atoi(majorText); err != nil {
+		return "", fmt.Errorf("%w: invalid server version %q", ErrUnsupportedServerVersion, version)
 	}
+	// This successful request is itself the compatibility proof: `/api/v1` is
+	// the API major Kandev implements. Forgejo's *release* major changes over
+	// time (for example 1.x, 7.x, 15.x) and must not be compared with API v1.
 	return version, nil
+}
+
+func (c *PATClient) GetAPIMaxResponseItems(ctx context.Context) (int, error) {
+	var response struct {
+		MaxResponseItems int `json:"max_response_items"`
+	}
+	if _, err := c.get(ctx, "/settings/api", nil, &response); err != nil {
+		return 0, err
+	}
+	if response.MaxResponseItems < 1 {
+		return 0, fmt.Errorf("%w: invalid max_response_items %d", ErrUnsupportedServerVersion, response.MaxResponseItems)
+	}
+	return response.MaxResponseItems, nil
 }
 
 func (c *PATClient) ListRepositories(ctx context.Context, page, limit int) ([]Repository, int, error) {

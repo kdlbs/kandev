@@ -322,7 +322,7 @@ function ForgejoRepositoryIssueBrowser({
 
   useEffect(() => {
     let active = true;
-    void listForgejoRepositories({ workspaceId, limit: 100 })
+    void listForgejoRepositories({ workspaceId, limit: 30 })
       .then((result) => {
         if (!active) return;
         setRepositories(result.repositories);

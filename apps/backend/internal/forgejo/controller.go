@@ -450,9 +450,6 @@ func queryLimit(ctx *gin.Context) int {
 	if limit < 1 {
 		return 30
 	}
-	if limit > 100 {
-		return 100
-	}
 	return limit
 }
 

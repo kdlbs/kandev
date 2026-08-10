@@ -3,7 +3,6 @@ package forgejo
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -53,14 +52,28 @@ func TestPATClientValidatesForgejoRESTV1Version(t *testing.T) {
 	}
 }
 
-func TestPATClientRejectsUnsupportedForgejoAPIVersion(t *testing.T) {
+func TestPATClientAcceptsModernForgejoReleaseVersionsOnRESTV1(t *testing.T) {
 	server := newServer(t, func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]string{"version": "2.0.0"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"version": "15.0.0"})
 	})
 	t.Cleanup(server.Close)
 	client, _ := NewPATClient(server.URL, "token")
-	if _, err := client.GetServerVersion(context.Background()); !errors.Is(err, ErrUnsupportedServerVersion) {
-		t.Fatalf("version error=%v, want ErrUnsupportedServerVersion", err)
+	if version, err := client.GetServerVersion(context.Background()); err != nil || version != "15.0.0" {
+		t.Fatalf("version=%q err=%v", version, err)
+	}
+}
+
+func TestPATClientReadsConfiguredAPILimit(t *testing.T) {
+	server := newServer(t, func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/api/v1/settings/api" {
+			t.Fatalf("path=%s", request.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"max_response_items":17}`))
+	})
+	t.Cleanup(server.Close)
+	client, _ := NewPATClient(server.URL, "token")
+	if limit, err := client.GetAPIMaxResponseItems(context.Background()); err != nil || limit != 17 {
+		t.Fatalf("limit=%d err=%v", limit, err)
 	}
 }
 
