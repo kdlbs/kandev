@@ -192,6 +192,8 @@ export function useSavedPresetActions({
       try {
         const defaultId = preset.isDefault ? null : preset.id;
         const persisted = await setSavedPresetDefault(preset.kind, defaultId);
+        // Mark interaction so the initial-selection effect does not switch the
+        // active view to the newly set default on the same render cycle.
         if (persisted) markSearchInteracted();
       } catch {
         toast({
