@@ -33,6 +33,7 @@ import (
 
 	// GitHub integration
 	azuredevopspkg "github.com/kandev/kandev/internal/azuredevops"
+	forgejopkg "github.com/kandev/kandev/internal/forgejo"
 	githubpkg "github.com/kandev/kandev/internal/github"
 	gitlabpkg "github.com/kandev/kandev/internal/gitlab"
 
@@ -552,6 +553,12 @@ func startAgentInfrastructure(
 		glPoller.Start(ctx)
 		addCleanup(func() error { glPoller.Stop(); return nil })
 		log.Info("GitLab poller started")
+	}
+	if services.Forgejo != nil {
+		forgejoPoller := forgejopkg.NewPoller(services.Forgejo, log)
+		forgejoPoller.Start(ctx)
+		addCleanup(func() error { forgejoPoller.Stop(); return nil })
+		log.Info("Forgejo issue-watch poller started")
 	}
 	// Bind only the path-returning orchestrator seam after its clone pipeline
 	// and workspace-scoped GitLab credential resolver are both configured.

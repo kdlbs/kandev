@@ -62,6 +62,18 @@ func (s *Store) ListIssueWatches(ctx context.Context, workspaceID string) ([]*Is
 	return result, nil
 }
 
+func (s *Store) ListAllIssueWatches(ctx context.Context) ([]*IssueWatch, error) {
+	var watches []IssueWatch
+	if err := s.ro.SelectContext(ctx, &watches, `SELECT * FROM forgejo_issue_watches ORDER BY created_at`); err != nil {
+		return nil, err
+	}
+	result := make([]*IssueWatch, len(watches))
+	for i := range watches {
+		result[i] = &watches[i]
+	}
+	return result, nil
+}
+
 func (s *Store) DeleteIssueWatch(ctx context.Context, workspaceID, id string) error {
 	result, err := s.db.ExecContext(ctx, `DELETE FROM forgejo_issue_watches WHERE id = ? AND workspace_id = ?`, id, workspaceID)
 	if err != nil {

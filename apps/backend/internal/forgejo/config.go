@@ -444,6 +444,10 @@ func (s *Service) ListIssueWatches(ctx context.Context, workspaceID string) ([]*
 	}
 	return s.store.ListIssueWatches(ctx, workspaceID)
 }
+
+func (s *Service) ListAllIssueWatches(ctx context.Context) ([]*IssueWatch, error) {
+	return s.store.ListAllIssueWatches(ctx)
+}
 func (s *Service) DeleteIssueWatch(ctx context.Context, workspaceID, id string) error {
 	if strings.TrimSpace(workspaceID) == "" {
 		return ErrWorkspaceRequired
