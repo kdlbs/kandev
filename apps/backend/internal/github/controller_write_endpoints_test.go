@@ -306,27 +306,35 @@ func TestController_ActionPresets_Validation(t *testing.T) {
 	}
 }
 
-// The watch is seeded through the store rather than POSTed, deliberately.
-// POST /watches/issue hands the very *IssueWatch it renders to a background
-// initialIssueCheck goroutine that writes watch.LastPolledAt, so exercising the
-// create handler here trips a real (pre-existing) data race under -race. See
-// the note in the PR description; httpCreateIssueWatch is covered only up to
-// its validation boundary below.
 func TestController_IssueWatchCRUD(t *testing.T) {
-	router, store := setupControllerStoreTest(t)
-	watch := &IssueWatch{
-		WorkspaceID:         "ws-1",
-		WorkflowID:          "wf-1",
-		WorkflowStepID:      "step-1",
-		Repos:               []RepoFilter{{Owner: "acme", Name: "widget"}},
-		Prompt:              "fix it",
-		Labels:              []string{"bug"},
-		CustomQuery:         "is:open",
-		Enabled:             true,
-		PollIntervalSeconds: 300,
+	router, _ := setupControllerStoreTest(t)
+	created := doControllerJSON(t, router, http.MethodPost, "/api/v1/github/watches/issue",
+		CreateIssueWatchRequest{
+			WorkspaceID:         "ws-1",
+			WorkflowID:          "wf-1",
+			WorkflowStepID:      "step-1",
+			Repos:               []RepoFilter{{Owner: "acme", Name: "widget"}},
+			Prompt:              "fix it",
+			Labels:              []string{"bug"},
+			CustomQuery:         "is:open",
+			PollIntervalSeconds: 300,
+		})
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want 201; body = %s", created.Code, created.Body)
 	}
-	if err := store.CreateIssueWatch(context.Background(), watch); err != nil {
-		t.Fatalf("seed issue watch: %v", err)
+	var watch IssueWatch
+	decodeControllerBody(t, created, &watch)
+	if watch.ID == "" {
+		t.Fatal("created watch has no ID")
+	}
+	if watch.WorkspaceID != "ws-1" || watch.Prompt != "fix it" || watch.CustomQuery != "is:open" {
+		t.Errorf("created watch = %#v", watch)
+	}
+	if len(watch.Repos) != 1 || watch.Repos[0].Owner != "acme" || watch.Repos[0].Name != "widget" {
+		t.Errorf("created repos = %#v", watch.Repos)
+	}
+	if watch.PollIntervalSeconds != 300 {
+		t.Errorf("poll interval = %d, want 300", watch.PollIntervalSeconds)
 	}
 
 	t.Run("list returns the stored watch", func(t *testing.T) {
@@ -412,6 +420,31 @@ func TestController_IssueWatch_MalformedPayloadIs400(t *testing.T) {
 	decodeControllerBody(t, response, &body)
 	if body.Error != "invalid payload" {
 		t.Errorf("error = %q", body.Error)
+	}
+}
+
+func TestController_CreateReviewWatch(t *testing.T) {
+	router, _ := setupControllerStoreTest(t)
+	response := doControllerJSON(t, router, http.MethodPost, "/api/v1/github/watches/review",
+		CreateReviewWatchRequest{
+			WorkspaceID:    "ws-1",
+			WorkflowID:     "wf-1",
+			WorkflowStepID: "step-1",
+			Repos:          []RepoFilter{{Owner: "acme", Name: "widget"}},
+		})
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body = %s", response.Code, response.Body)
+	}
+	var watch ReviewWatch
+	decodeControllerBody(t, response, &watch)
+	if watch.ID == "" {
+		t.Fatal("created watch has no ID")
+	}
+	if watch.WorkspaceID != "ws-1" || watch.WorkflowID != "wf-1" {
+		t.Errorf("created watch = %#v", watch)
+	}
+	if len(watch.Repos) != 1 || watch.Repos[0].Owner != "acme" || watch.Repos[0].Name != "widget" {
+		t.Errorf("created repos = %#v", watch.Repos)
 	}
 }
 
