@@ -112,7 +112,7 @@ function useWorkspaceSavedPresets(workspaceId: string | null) {
         setWorkspacePresets(serverPresets);
       })
       .catch(() => {
-        if (!cancelled) setWorkspacePresets(undefined);
+        if (!cancelled && seq === writeSeq.current) setWorkspacePresets(undefined);
       });
     return () => {
       cancelled = true;
