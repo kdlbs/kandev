@@ -9,6 +9,7 @@ type SavedQueryDefaultButtonProps = {
   label: string;
   isDefault: boolean;
   disabled?: boolean;
+  /** `desktop` must render inside Radix `DropdownMenuContent`; `mobile` is a plain button. */
   size: "desktop" | "mobile";
   testId?: string;
   onToggle: () => void;

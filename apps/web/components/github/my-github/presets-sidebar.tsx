@@ -16,6 +16,7 @@ export type SidebarSelection = {
 
 type PresetsSidebarProps = {
   selected: SidebarSelection;
+  /** Kind switches use `id: ""`; the handler must resolve the destination default or fallback. */
   onSelect: (s: SidebarSelection) => void;
   savedPresets: SavedPreset[];
   onDeleteSaved: (id: string) => void;
