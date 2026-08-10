@@ -7,7 +7,6 @@ import {
 } from "@/lib/api/domains/github-api";
 import { __resetSnapshotForTests, useSavedPresets, type SavedPreset } from "./use-saved-presets";
 
-const STORAGE_KEY = "kandev:github-presets:v1";
 const WORKSPACE_ID = "ws-1";
 const SETTINGS_TIMESTAMP = "2026-01-01T00:00:00Z";
 const SETTINGS_DOWN = "settings down";
@@ -22,11 +21,6 @@ vi.mock("@/lib/api/domains/github-api", () => ({
   updateGitHubWorkspaceSettings: vi.fn(),
 }));
 
-function set(raw: string | null) {
-  if (raw === null) window.localStorage.removeItem(STORAGE_KEY);
-  else window.localStorage.setItem(STORAGE_KEY, raw);
-}
-
 const legacyValid = {
   id: "p_1",
   kind: "pr" as const,
@@ -39,7 +33,6 @@ const legacyValid = {
 const valid: SavedPreset = { ...legacyValid, isDefault: false };
 
 function resetTestState() {
-  window.localStorage.clear();
   __resetSnapshotForTests();
   vi.mocked(fetchUserSettings).mockReset();
   vi.mocked(updateUserSettings).mockReset();
@@ -67,8 +60,7 @@ describe("useSavedPresets", () => {
     resetTestState();
   });
 
-  it("ignores stale local presets when backend settings are empty", async () => {
-    set(JSON.stringify([valid]));
+  it("uses empty backend settings without writing", async () => {
     vi.mocked(fetchUserSettings).mockResolvedValue({
       settings: { github_saved_presets: [] },
     } as Awaited<ReturnType<typeof fetchUserSettings>>);
@@ -85,8 +77,7 @@ describe("useSavedPresets workspace sync", () => {
     resetTestState();
   });
 
-  it("ignores stale local presets when workspace settings are empty", async () => {
-    set(JSON.stringify([valid]));
+  it("uses empty workspace settings without writing", async () => {
     vi.mocked(fetchGitHubWorkspaceSettings).mockResolvedValue(workspaceSettings());
 
     const { result } = renderHook(() => useSavedPresets(WORKSPACE_ID));
@@ -95,9 +86,8 @@ describe("useSavedPresets workspace sync", () => {
     expect(updateGitHubWorkspaceSettings).not.toHaveBeenCalled();
   });
 
-  it("does not migrate local presets over existing workspace presets", async () => {
+  it("uses existing workspace presets without writing", async () => {
     const server = { ...valid, id: "p_server", label: "Server" };
-    set(JSON.stringify([valid]));
     vi.mocked(fetchGitHubWorkspaceSettings).mockResolvedValue(workspaceSettings([server]));
 
     const { result } = renderHook(() => useSavedPresets(WORKSPACE_ID));
