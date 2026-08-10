@@ -427,6 +427,27 @@ func (s *Service) DeleteIssueWatch(ctx context.Context, workspaceID, id string) 
 	return s.store.DeleteIssueWatch(ctx, workspaceID, id)
 }
 
+func (s *Service) PollIssueWatch(ctx context.Context, workspaceID, watchID string) ([]Issue, error) {
+	watch, err := s.store.GetIssueWatch(ctx, workspaceID, watchID)
+	if err != nil {
+		return nil, err
+	}
+	client, err := s.ClientForWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	issues, _, err := client.ListIssues(ctx, watch.Owner, watch.Repo, 1, 100)
+	now := time.Now().UTC()
+	if err != nil {
+		_ = s.store.MarkIssueWatchPolled(ctx, watch.ID, now, "Forgejo issue watch poll failed")
+		return nil, err
+	}
+	if err := s.store.MarkIssueWatchPolled(ctx, watch.ID, now, ""); err != nil {
+		return nil, err
+	}
+	return filterWatchedIssues(issues, watch.Labels), nil
+}
+
 func (s *Service) RefreshTaskIssue(ctx context.Context, workspaceID, linkID string) (*TaskIssue, error) {
 	link, err := s.store.GetTaskIssueLink(ctx, workspaceID, linkID)
 	if err != nil {

@@ -77,6 +77,39 @@ func (s *Store) MarkIssueWatchPolled(ctx context.Context, id string, pollTime ti
 	return err
 }
 
+func (s *Store) GetIssueWatch(ctx context.Context, workspaceID, id string) (*IssueWatch, error) {
+	var watch IssueWatch
+	err := s.ro.GetContext(ctx, &watch, `SELECT * FROM forgejo_issue_watches WHERE id = ? AND workspace_id = ?`, id, workspaceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrWatchNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &watch, nil
+}
+
+func filterWatchedIssues(issues []Issue, labels string) []Issue {
+	labels = strings.TrimSpace(labels)
+	if labels == "" {
+		return issues
+	}
+	wanted := map[string]bool{}
+	for _, label := range strings.Split(labels, ",") {
+		wanted[strings.TrimSpace(label)] = true
+	}
+	result := make([]Issue, 0)
+	for _, issue := range issues {
+		for _, label := range issue.Labels {
+			if wanted[label] {
+				result = append(result, issue)
+				break
+			}
+		}
+	}
+	return result
+}
+
 func isMissingWatch(err error) bool {
 	return errors.Is(err, sql.ErrNoRows) || errors.Is(err, ErrWatchNotFound)
 }

@@ -28,6 +28,7 @@ func RegisterRoutes(router *gin.Engine, service *Service) {
 	api.GET("/issue-watches", controller.listIssueWatches)
 	api.PUT("/issue-watches", controller.saveIssueWatch)
 	api.DELETE("/issue-watches/:watchID", controller.deleteIssueWatch)
+	api.POST("/issue-watches/:watchID/poll", controller.pollIssueWatch)
 	api.GET("/tasks/:taskID/pull-requests", controller.listTaskPRs)
 	api.POST("/task-pull-requests", controller.associatePullRequest)
 	api.POST("/task-pull-requests/create", controller.createTaskPullRequest)
@@ -65,6 +66,14 @@ func (c *Controller) deleteIssueWatch(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"deleted": true})
+}
+func (c *Controller) pollIssueWatch(ctx *gin.Context) {
+	issues, err := c.service.PollIssueWatch(ctx.Request.Context(), c.workspaceID(ctx), strings.TrimSpace(ctx.Param("watchID")))
+	if err != nil {
+		c.error(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"issues": issues})
 }
 
 func (c *Controller) refreshTaskIssue(ctx *gin.Context) {

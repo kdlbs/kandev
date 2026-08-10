@@ -46,11 +46,12 @@ type Repository struct {
 }
 
 type Issue struct {
-	Number  int    `json:"number"`
-	Title   string `json:"title"`
-	State   string `json:"state"`
-	HTMLURL string `json:"html_url"`
-	Body    string `json:"body"`
+	Number  int      `json:"number"`
+	Title   string   `json:"title"`
+	State   string   `json:"state"`
+	HTMLURL string   `json:"html_url"`
+	Body    string   `json:"body"`
+	Labels  []string `json:"labels"`
 }
 
 type PullRequest struct {
@@ -169,11 +170,14 @@ func (c *PATClient) ListIssues(ctx context.Context, owner, repo string, page, li
 		return nil, 0, errors.New("Forgejo owner and repository are required")
 	}
 	var raw []struct {
-		Number      int             `json:"number"`
-		Title       string          `json:"title"`
-		State       string          `json:"state"`
-		HTMLURL     string          `json:"html_url"`
-		Body        string          `json:"body"`
+		Number  int    `json:"number"`
+		Title   string `json:"title"`
+		State   string `json:"state"`
+		HTMLURL string `json:"html_url"`
+		Body    string `json:"body"`
+		Labels  []struct {
+			Name string `json:"name"`
+		} `json:"labels"`
 		PullRequest json.RawMessage `json:"pull_request"`
 	}
 	total, err := c.get(ctx, fmt.Sprintf("/repos/%s/%s/issues", url.PathEscape(owner), url.PathEscape(repo)), pagination(page, limit), &raw)
@@ -185,7 +189,11 @@ func (c *PATClient) ListIssues(ctx context.Context, owner, repo string, page, li
 		if len(issue.PullRequest) != 0 && string(issue.PullRequest) != "null" {
 			continue
 		}
-		issues = append(issues, Issue{Number: issue.Number, Title: issue.Title, State: issue.State, HTMLURL: issue.HTMLURL, Body: issue.Body})
+		labels := make([]string, len(issue.Labels))
+		for i := range issue.Labels {
+			labels[i] = issue.Labels[i].Name
+		}
+		issues = append(issues, Issue{Number: issue.Number, Title: issue.Title, State: issue.State, HTMLURL: issue.HTMLURL, Body: issue.Body, Labels: labels})
 	}
 	return issues, total, nil
 }
@@ -194,11 +202,24 @@ func (c *PATClient) GetIssue(ctx context.Context, owner, repo string, number int
 	if strings.TrimSpace(owner) == "" || strings.TrimSpace(repo) == "" || number < 1 {
 		return nil, errors.New("Forgejo issue identity required")
 	}
-	var issue Issue
-	if _, err := c.get(ctx, fmt.Sprintf("/repos/%s/%s/issues/%d", url.PathEscape(owner), url.PathEscape(repo), number), nil, &issue); err != nil {
+	var raw struct {
+		Number  int    `json:"number"`
+		Title   string `json:"title"`
+		State   string `json:"state"`
+		HTMLURL string `json:"html_url"`
+		Body    string `json:"body"`
+		Labels  []struct {
+			Name string `json:"name"`
+		} `json:"labels"`
+	}
+	if _, err := c.get(ctx, fmt.Sprintf("/repos/%s/%s/issues/%d", url.PathEscape(owner), url.PathEscape(repo), number), nil, &raw); err != nil {
 		return nil, err
 	}
-	return &issue, nil
+	labels := make([]string, len(raw.Labels))
+	for i := range raw.Labels {
+		labels[i] = raw.Labels[i].Name
+	}
+	return &Issue{Number: raw.Number, Title: raw.Title, State: raw.State, HTMLURL: raw.HTMLURL, Body: raw.Body, Labels: labels}, nil
 }
 
 func (c *PATClient) ListPullRequests(ctx context.Context, owner, repo string, page, limit int) ([]PullRequest, int, error) {
