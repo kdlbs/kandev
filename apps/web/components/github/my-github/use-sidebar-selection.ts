@@ -43,18 +43,18 @@ export function useInitialSidebarSelection({
   savedPresets = [],
 }: InitialSidebarSelectionOptions) {
   const userSelectedRef = useRef(false);
+  const resetWorkspaceIdRef = useRef<string | null | undefined>(undefined);
   const lastAppliedTargetRef = useRef<AppliedSidebarTarget | null>(null);
   const [selection, setSelection] = useState<SidebarSelection>(
     () => resolveDefaultSidebarTarget("pr", savedPresets, resolvedPrPresets).selection,
   );
 
   useEffect(() => {
-    userSelectedRef.current = false;
-    autoResetSearchRef.current = true;
-  }, [workspaceId]);
-
-  // The workspace reset effect above must run first when workspaceId changes.
-  useEffect(() => {
+    if (resetWorkspaceIdRef.current !== workspaceId) {
+      resetWorkspaceIdRef.current = workspaceId;
+      userSelectedRef.current = false;
+      autoResetSearchRef.current = true;
+    }
     if (userSelectedRef.current || !autoResetSearchRef.current) return;
     const target = resolveDefaultSidebarTarget("pr", savedPresets, resolvedPrPresets);
     const appliedTarget = { workspaceId, ...target };

@@ -194,7 +194,9 @@ export function useSavedPresets(workspaceId: string | null = null) {
         await persist(next);
         // Concurrent save/remove calls can update local state while persistence is in flight.
         // Reapply the default to that latest snapshot; its queued write persists the merged list.
-        applyLocal(setSavedPresetDefault(activePresetsRef.current, kind, id));
+        const latest = activePresetsRef.current;
+        const remerged = setSavedPresetDefault(latest, kind, id);
+        if (remerged !== latest) applyLocal(remerged);
       });
     },
     [applyLocal, persist, queueMutation, workspaceId, workspacePresets],

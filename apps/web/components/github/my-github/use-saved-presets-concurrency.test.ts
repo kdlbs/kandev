@@ -112,6 +112,33 @@ async function renderLoaded(mode: PersistenceMode, presets: SavedPreset[]) {
   return hook;
 }
 
+async function expectPendingDefaultTargetRemoval(mode: PersistenceMode) {
+  const prA = { ...valid, isDefault: true };
+  const prB = { ...valid, id: "pr-b", label: "PR B" };
+  const resolveDefault = deferFirstPersistence(mode);
+  const { result } = await renderLoaded(mode, [prA, prB]);
+
+  let defaultMutation!: Promise<void>;
+  act(() => {
+    defaultMutation = result.current.setDefault("pr", "pr-b");
+  });
+  await waitFor(() => expectPersistenceCalls(mode, 1));
+
+  act(() => {
+    result.current.remove("pr-b");
+  });
+
+  await act(async () => {
+    resolveDefault();
+    await defaultMutation;
+  });
+  await waitFor(() => expectPersistenceCalls(mode, 2));
+
+  const expected = [prA];
+  expect(result.current.presets).toEqual(expected);
+  expectLastPersisted(mode, expected);
+}
+
 describe("useSavedPresets mutation ordering", () => {
   beforeEach(() => {
     __resetSnapshotForTests();
@@ -181,6 +208,11 @@ describe("useSavedPresets mutation ordering", () => {
     expect(result.current.presets).toEqual(expected);
     expectLastPersisted(mode, expected);
   });
+
+  it.each(MODES)(
+    "preserves removal of a %s default target while it is pending",
+    expectPendingDefaultTargetRemoval,
+  );
 
   it("detaches future workspace writes from a stale test queue", async () => {
     const firstWrite = deferred<Awaited<ReturnType<typeof updateGitHubWorkspaceSettings>>>();

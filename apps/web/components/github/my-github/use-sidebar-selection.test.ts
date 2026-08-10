@@ -24,6 +24,7 @@ const issuePreset: PresetOption = {
 
 const prPresets = [prPreset];
 const issuePresets = [issuePreset];
+const WORKSPACE_ID = "workspace-1";
 
 const prDefault: SavedPreset = {
   id: "saved-pr",
@@ -43,6 +44,40 @@ const issueDefault: SavedPreset = {
   customQuery: "assignee:@me label:bug",
 };
 
+async function expectNewWorkspaceDefaultAfterManualSelection() {
+  const setQueryImmediate = vi.fn();
+  const setRepoFilter = vi.fn();
+  const autoResetSearchRef = { current: true };
+  const { result, rerender } = renderHook(
+    ({ workspaceId, savedPresets }) =>
+      useInitialSidebarSelection({
+        workspaceId,
+        resolvedPrPresets: prPresets,
+        autoResetSearchRef,
+        setQueryImmediate,
+        setRepoFilter,
+        savedPresets,
+      }),
+    {
+      initialProps: {
+        workspaceId: WORKSPACE_ID,
+        savedPresets: [] as SavedPreset[],
+      },
+    },
+  );
+  const manual: SidebarSelection = { kind: "pr", source: "preset", id: "manual" };
+  act(() => {
+    result.current.setUserSelection(manual);
+    autoResetSearchRef.current = false;
+  });
+
+  rerender({ workspaceId: "workspace-2", savedPresets: [prDefault] });
+
+  await waitFor(() => expect(result.current.selection.id).toBe(prDefault.id));
+  expect(setQueryImmediate).toHaveBeenLastCalledWith(prDefault.customQuery);
+  expect(setRepoFilter).toHaveBeenLastCalledWith(prDefault.repoFilter);
+}
+
 describe("useInitialSidebarSelection", () => {
   it("does not reapply an unchanged default when preset references change", async () => {
     const setQueryImmediate = vi.fn();
@@ -51,7 +86,7 @@ describe("useInitialSidebarSelection", () => {
     const { rerender } = renderHook(
       ({ savedPresets }) =>
         useInitialSidebarSelection({
-          workspaceId: "workspace-1",
+          workspaceId: WORKSPACE_ID,
           resolvedPrPresets: prPresets,
           autoResetSearchRef,
           setQueryImmediate,
@@ -75,7 +110,7 @@ describe("useInitialSidebarSelection", () => {
     const { result, rerender } = renderHook(
       ({ savedPresets }) =>
         useInitialSidebarSelection({
-          workspaceId: "workspace-1",
+          workspaceId: WORKSPACE_ID,
           resolvedPrPresets: prPresets,
           autoResetSearchRef,
           setQueryImmediate,
@@ -106,7 +141,7 @@ describe("useInitialSidebarSelection", () => {
     const { result, rerender } = renderHook(
       ({ savedPresets }) =>
         useInitialSidebarSelection({
-          workspaceId: "workspace-1",
+          workspaceId: WORKSPACE_ID,
           resolvedPrPresets: prPresets,
           autoResetSearchRef,
           setQueryImmediate,
@@ -125,6 +160,10 @@ describe("useInitialSidebarSelection", () => {
     expect(result.current.selection).toEqual(manual);
     expect(setQueryImmediate).not.toHaveBeenCalled();
     expect(setRepoFilter).not.toHaveBeenCalled();
+  });
+
+  it("resets manual selection before applying a new workspace default", async () => {
+    await expectNewWorkspaceDefaultAfterManualSelection();
   });
 });
 

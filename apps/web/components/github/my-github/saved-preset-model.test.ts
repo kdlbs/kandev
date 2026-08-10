@@ -130,4 +130,12 @@ describe("saved preset defaults", () => {
       repoFilter: "",
     });
   });
+
+  it("falls back to an empty query when no query is configured", () => {
+    expect(resolveDefaultSidebarTarget("issue", [], [])).toEqual({
+      selection: { kind: "issue", source: "preset", id: "" },
+      query: "",
+      repoFilter: "",
+    });
+  });
 });
