@@ -258,6 +258,10 @@ export function useSavedPresets(workspaceId: string | null = null) {
     [applyLocal, queueMutation, workspaceId, workspacePresets],
   );
 
+  /**
+   * @returns Whether a changed default was persisted; loading and unchanged targets return false.
+   * @throws The persistence error when the settings update fails.
+   */
   const setDefault = useCallback(
     async (kind: SavedPresetKind, id: string | null) => {
       if (workspaceId && workspacePresets === undefined) return false;

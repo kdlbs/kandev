@@ -2,6 +2,7 @@
 
 import { IconX, IconDeviceFloppy, IconBookmark } from "@tabler/icons-react";
 import type { Icon } from "@tabler/icons-react";
+import { useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { PR_PRESETS, ISSUE_PRESETS, type PresetOption, type PresetGroup } from "./search-bar";
 import type { SavedPreset } from "./saved-preset-model";
@@ -228,10 +229,13 @@ export function PresetsSidebar({
 }: PresetsSidebarProps) {
   const presets = selected.kind === "pr" ? prPresets : issuePresets;
   const saved = savedPresets.filter((p) => p.kind === selected.kind);
-  const onKindChange = (kind: "pr" | "issue") => {
-    if (kind === selected.kind) return;
-    onSelect({ kind, source: "kind-switch" });
-  };
+  const onKindChange = useCallback(
+    (kind: "pr" | "issue") => {
+      if (kind === selected.kind) return;
+      onSelect({ kind, source: "kind-switch" });
+    },
+    [onSelect, selected.kind],
+  );
   return (
     <nav className="flex w-full min-w-0 flex-col overflow-x-hidden py-3">
       <KindToggle kind={selected.kind} onChange={onKindChange} />

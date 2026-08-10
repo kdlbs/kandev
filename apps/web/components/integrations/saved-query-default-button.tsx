@@ -48,7 +48,8 @@ export function SavedQueryDefaultButton({
         data-testid={testId}
         onSelect={(event) => event.preventDefault()}
         onCheckedChange={() => onToggle()}
-        className="h-7 min-h-7 w-7 shrink-0 cursor-pointer justify-center p-0 text-muted-foreground hover:text-foreground [&_[data-slot=dropdown-menu-checkbox-item-indicator]]:hidden"
+        showIndicator={false}
+        className="h-7 min-h-7 w-7 shrink-0 cursor-pointer justify-center p-0 text-muted-foreground hover:text-foreground"
       >
         <IconStar className={iconClassName} />
       </DropdownMenuCheckboxItem>
