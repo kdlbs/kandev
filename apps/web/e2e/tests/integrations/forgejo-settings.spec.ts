@@ -53,12 +53,33 @@ test.describe("Forgejo settings", () => {
     await testPage.route("**/api/v1/forgejo/config?*", (route) =>
       route.fulfill({ contentType: "application/json", body: JSON.stringify(config) }),
     );
+    await testPage.route("**/api/v1/forgejo/repositories?*", (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          repositories: [
+            {
+              owner: "acme",
+              name: "app",
+              full_name: "acme/app",
+              default_branch: "main",
+              html_url: "https://forgejo.example/acme/app",
+            },
+          ],
+          total_count: 1,
+        }),
+      }),
+    );
     await testPage.route("**/api/v1/forgejo/issue-watches?*", async (route) => {
       if (route.request().method() === "PUT") {
         savedWatch = route.request().postDataJSON() as Record<string, unknown>;
         await route.fulfill({
           contentType: "application/json",
-          body: JSON.stringify({ id: "watch-e2e", ...savedWatch, workspace_id: seedData.workspaceId }),
+          body: JSON.stringify({
+            id: "watch-e2e",
+            ...savedWatch,
+            workspace_id: seedData.workspaceId,
+          }),
         });
         return;
       }
@@ -73,29 +94,37 @@ test.describe("Forgejo settings", () => {
     });
     await testPage.route("**/api/v1/forgejo/issue-watches/watch-e2e/poll?*", (route) => {
       pollCalled = true;
-      return route.fulfill({ contentType: "application/json", body: JSON.stringify({ issues: [] }) });
+      return route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ issues: [] }),
+      });
     });
 
     await gotoForgejoSettings(testPage);
-    await testPage.getByPlaceholder("Owner").first().fill("acme");
-    await testPage.getByPlaceholder("Repository").first().fill("app");
+    await testPage.getByRole("button", { name: "Load repositories" }).click();
+    await testPage.getByRole("button", { name: "Use for watch" }).click();
+    await expect(testPage.getByPlaceholder("Owner").first()).toHaveValue("acme");
+    await expect(testPage.getByPlaceholder("Repository").first()).toHaveValue("app");
     await testPage.getByPlaceholder("Workflow ID").first().fill(seedData.workflowId);
     await testPage.getByPlaceholder("Workflow step ID, optional").fill(seedData.startStepId);
-    await testPage.getByPlaceholder("Base branch, optional").first().fill("main");
+    await expect(testPage.getByPlaceholder("Base branch, optional").first()).toHaveValue("main");
     await testPage.getByPlaceholder("Task instructions, optional").fill("Fix the issue");
     await testPage.getByRole("button", { name: "Save watch" }).click();
 
-    await expect.poll(() => savedWatch).toMatchObject({
-      owner: "acme",
-      repo: "app",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      base_branch: "main",
-      prompt: "Fix the issue",
-      enabled: true,
-    });
-    await expect(testPage.getByText("acme/app")).toBeVisible();
-    await testPage.getByRole("button", { name: "Poll" }).first().click();
+    await expect
+      .poll(() => savedWatch)
+      .toMatchObject({
+        owner: "acme",
+        repo: "app",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        base_branch: "main",
+        prompt: "Fix the issue",
+        enabled: true,
+      });
+    const pollButton = testPage.getByRole("button", { name: "Poll" }).first();
+    await expect(pollButton).toBeVisible();
+    await pollButton.click();
     await expect.poll(() => pollCalled).toBe(true);
     await expect(testPage.getByText("Watch found 0 matching issues")).toBeVisible();
   });

@@ -199,6 +199,14 @@ function ForgejoConnection({ workspaceId }: { workspaceId: string }) {
   const deletePreset = async (preset: ForgejoActionPreset) => {
     await removePreset(preset.id);
   };
+  const useRepositoryForWatch = (repository: ForgejoRepository) => {
+    setWatchOwner(repository.owner);
+    setWatchRepo(repository.name);
+    setWatchBaseBranch(repository.default_branch);
+    setReviewOwner(repository.owner);
+    setReviewRepo(repository.name);
+    setMessage(`Selected ${repository.full_name} for a Forgejo watch.`);
+  };
 
   const validOrigin = (() => {
     try {
@@ -324,11 +332,35 @@ function ForgejoConnection({ workspaceId }: { workspaceId: string }) {
           </p>
         ) : null}
         {repositories.length ? (
-          <ul className="text-sm space-y-1">
-            {repositories.map((repository) => (
-              <li key={repository.full_name}>{repository.full_name}</li>
-            ))}
-          </ul>
+          <div className="space-y-2">
+            <p className="font-medium text-sm">Accessible repositories</p>
+            <ul className="space-y-1 text-sm">
+              {repositories.map((repository) => (
+                <li
+                  className="flex flex-wrap items-center justify-between gap-2"
+                  key={repository.full_name}
+                >
+                  <a
+                    className="hover:underline"
+                    href={repository.html_url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {repository.full_name}
+                  </a>
+                  <Button
+                    className="cursor-pointer"
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                    onClick={() => useRepositoryForWatch(repository)}
+                  >
+                    Use for watch
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </div>
         ) : null}
         {queue ? (
           <div className="space-y-3 text-sm">
