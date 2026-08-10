@@ -79,6 +79,9 @@ function syncWorkspaceSavedPresets(workspaceId: string, next: SavedPreset[]): Pr
 }
 
 export function __resetSnapshotForTests() {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("__resetSnapshotForTests must not be called in production");
+  }
   snapshot = [];
   snapshotVersion = 0;
   portableMutationQueue = Promise.resolve();

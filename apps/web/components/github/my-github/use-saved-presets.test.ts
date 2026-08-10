@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
 import {
@@ -55,6 +55,10 @@ function workspaceSettings(
   } as Awaited<ReturnType<typeof fetchGitHubWorkspaceSettings>>;
 }
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe("useSavedPresets", () => {
   beforeEach(() => {
     resetTestState();
@@ -69,6 +73,14 @@ describe("useSavedPresets", () => {
 
     await waitFor(() => expect(result.current.presets).toEqual([]));
     expect(updateUserSettings).not.toHaveBeenCalled();
+  });
+
+  it("rejects the test reset in production", () => {
+    vi.stubEnv("NODE_ENV", "production");
+
+    expect(() => __resetSnapshotForTests()).toThrow(
+      "__resetSnapshotForTests must not be called in production",
+    );
   });
 });
 
