@@ -59,6 +59,8 @@ function updateState(overrides: Partial<PluginRowUpdateState> = {}): PluginRowUp
 const noop = () => undefined;
 const UPDATE_BUTTON_TESTID = "plugin-update-acme";
 const LATEST_VERSION_TESTID = "plugin-latest-version-acme";
+const UPDATE_BADGE_TESTID = "plugin-update-available-acme";
+const NOT_IN_MARKETPLACE_TESTID = "plugin-not-in-marketplace-acme";
 
 // baseProps carries the always-required callbacks/flags so each test only
 // spells out the props it is actually asserting on.
@@ -130,7 +132,7 @@ describe("PluginRow latest version info", () => {
   it("shows the latest version and an update-available badge when a newer version exists", () => {
     render(<PluginRow {...baseProps} plugin={plugin()} update={updateState()} onUpdate={noop} />);
     expect(screen.getByTestId(LATEST_VERSION_TESTID).textContent).toContain("Latest v2.0.0");
-    expect(screen.getByTestId("plugin-update-available-acme").textContent).toContain(
+    expect(screen.getByTestId(UPDATE_BADGE_TESTID).textContent).toContain(
       "Update available: v2.0.0",
     );
   });
@@ -147,7 +149,7 @@ describe("PluginRow latest version info", () => {
       />,
     );
     expect(screen.getByTestId(LATEST_VERSION_TESTID).textContent).toContain("Latest v1.0.0");
-    expect(screen.queryByTestId("plugin-update-available-acme")).toBeNull();
+    expect(screen.queryByTestId(UPDATE_BADGE_TESTID)).toBeNull();
     expect(screen.queryByTestId(UPDATE_BUTTON_TESTID)).toBeNull();
   });
 
@@ -159,8 +161,40 @@ describe("PluginRow latest version info", () => {
         update={updateState({ latest: undefined, hasUpdate: false, checked: true })}
       />,
     );
-    expect(screen.getByTestId("plugin-not-in-marketplace-acme")).toBeTruthy();
+    expect(screen.getByTestId(NOT_IN_MARKETPLACE_TESTID)).toBeTruthy();
     expect(screen.queryByTestId(LATEST_VERSION_TESTID)).toBeNull();
+  });
+
+  // Regression: a plugin carried only by a source that failed this check is
+  // unknown, not delisted — claiming "Not in the marketplace" reads as removal.
+  it("withholds the not-in-marketplace hint when the check only reached some sources", () => {
+    render(
+      <PluginRow
+        {...baseProps}
+        plugin={plugin()}
+        update={updateState({
+          latest: undefined,
+          hasUpdate: false,
+          checked: true,
+          sourcesDegraded: true,
+        })}
+      />,
+    );
+    expect(screen.queryByTestId(NOT_IN_MARKETPLACE_TESTID)).toBeNull();
+    expect(screen.queryByTestId(LATEST_VERSION_TESTID)).toBeNull();
+  });
+
+  it("still shows a known latest version when some other source is degraded", () => {
+    render(
+      <PluginRow
+        {...baseProps}
+        plugin={plugin()}
+        update={updateState({ sourcesDegraded: true })}
+        onUpdate={noop}
+      />,
+    );
+    expect(screen.getByTestId(LATEST_VERSION_TESTID).textContent).toContain("Latest v2.0.0");
+    expect(screen.getByTestId(UPDATE_BADGE_TESTID)).toBeTruthy();
   });
 
   it("shows neither the latest version nor the not-in-marketplace hint before the first successful check", () => {
@@ -172,14 +206,14 @@ describe("PluginRow latest version info", () => {
       />,
     );
     expect(screen.queryByTestId(LATEST_VERSION_TESTID)).toBeNull();
-    expect(screen.queryByTestId("plugin-not-in-marketplace-acme")).toBeNull();
+    expect(screen.queryByTestId(NOT_IN_MARKETPLACE_TESTID)).toBeNull();
   });
 
   it("renders nothing update-related when no update prop is passed at all", () => {
     render(<PluginRow {...baseProps} plugin={plugin()} />);
     expect(screen.queryByTestId(LATEST_VERSION_TESTID)).toBeNull();
-    expect(screen.queryByTestId("plugin-not-in-marketplace-acme")).toBeNull();
-    expect(screen.queryByTestId("plugin-update-available-acme")).toBeNull();
+    expect(screen.queryByTestId(NOT_IN_MARKETPLACE_TESTID)).toBeNull();
+    expect(screen.queryByTestId(UPDATE_BADGE_TESTID)).toBeNull();
   });
 });
 

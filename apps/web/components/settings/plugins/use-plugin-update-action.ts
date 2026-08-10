@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { t } from "@/lib/i18n";
 import type { MarketplaceEntry } from "@/lib/types/plugins";
 
@@ -13,13 +13,31 @@ import type { MarketplaceEntry } from "@/lib/types/plugins";
  * `install_state` comparison), and always re-checks the catalog afterward so
  * a resolved update's row converges within one round-trip whether the
  * install succeeded or failed.
+ *
+ * `installedIds` is the id set of what is currently installed. A failure is a
+ * fact about one installed copy of a plugin, so it is dropped as soon as that
+ * plugin leaves the list — otherwise uninstalling a plugin whose update failed
+ * and installing it again (same id, no page reload) would surface the previous
+ * copy's error on the new, perfectly healthy row.
  */
 export function usePluginUpdateAction(
   marketplaceInstall: (url: string) => Promise<{ ok: boolean; error?: string }>,
   reloadUpdates: () => void,
+  installedIds: ReadonlySet<string>,
 ) {
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [errorsById, setErrorsById] = useState<Map<string, string>>(new Map());
+
+  useEffect(() => {
+    setErrorsById((prev) => {
+      if (prev.size === 0) return prev;
+      const next = new Map(prev);
+      for (const id of prev.keys()) {
+        if (!installedIds.has(id)) next.delete(id);
+      }
+      return next.size === prev.size ? prev : next;
+    });
+  }, [installedIds]);
 
   const clearError = useCallback((id: string) => {
     setErrorsById((prev) => {

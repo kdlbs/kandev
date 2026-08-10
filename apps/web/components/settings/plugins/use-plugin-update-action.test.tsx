@@ -30,6 +30,9 @@ function entry(overrides: Partial<MarketplaceEntry> = {}): MarketplaceEntry {
 
 type MarketplaceInstall = (url: string) => Promise<{ ok: boolean; error?: string }>;
 
+// Every id these tests act on is installed unless a case says otherwise.
+const INSTALLED: ReadonlySet<string> = new Set([ENTRY_ID, "a", "b"]);
+
 describe("usePluginUpdateAction", () => {
   let marketplaceInstall: ReturnType<typeof vi.fn<MarketplaceInstall>>;
   let reloadUpdates: ReturnType<typeof vi.fn<() => void>>;
@@ -46,7 +49,9 @@ describe("usePluginUpdateAction", () => {
         resolveInstall = resolve;
       }),
     );
-    const { result } = renderHook(() => usePluginUpdateAction(marketplaceInstall, reloadUpdates));
+    const { result } = renderHook(() =>
+      usePluginUpdateAction(marketplaceInstall, reloadUpdates, INSTALLED),
+    );
 
     let runPromise!: Promise<void>;
     act(() => {
@@ -66,7 +71,9 @@ describe("usePluginUpdateAction", () => {
 
   it("records a per-row error on failure without throwing, and still re-checks the catalog", async () => {
     marketplaceInstall.mockResolvedValue({ ok: false, error: CHECKSUM_ERROR });
-    const { result } = renderHook(() => usePluginUpdateAction(marketplaceInstall, reloadUpdates));
+    const { result } = renderHook(() =>
+      usePluginUpdateAction(marketplaceInstall, reloadUpdates, INSTALLED),
+    );
 
     await act(async () => {
       await result.current.runUpdate(entry());
@@ -79,7 +86,9 @@ describe("usePluginUpdateAction", () => {
 
   it("clears a previous error at the start of a retry", async () => {
     marketplaceInstall.mockResolvedValueOnce({ ok: false, error: CHECKSUM_ERROR });
-    const { result } = renderHook(() => usePluginUpdateAction(marketplaceInstall, reloadUpdates));
+    const { result } = renderHook(() =>
+      usePluginUpdateAction(marketplaceInstall, reloadUpdates, INSTALLED),
+    );
 
     await act(async () => {
       await result.current.runUpdate(entry());
@@ -108,7 +117,9 @@ describe("usePluginUpdateAction", () => {
 
   it("tracks each plugin's update independently", async () => {
     marketplaceInstall.mockResolvedValue({ ok: false, error: "boom" });
-    const { result } = renderHook(() => usePluginUpdateAction(marketplaceInstall, reloadUpdates));
+    const { result } = renderHook(() =>
+      usePluginUpdateAction(marketplaceInstall, reloadUpdates, INSTALLED),
+    );
 
     await act(async () => {
       await result.current.runUpdate(entry({ id: "a", package_url: "https://ex/a.tar.gz" }));
@@ -119,5 +130,57 @@ describe("usePluginUpdateAction", () => {
 
     expect(result.current.errorsById.get("a")).toBe("boom");
     expect(result.current.errorsById.get("b")).toBe("boom");
+  });
+});
+
+describe("usePluginUpdateAction — error lifetime", () => {
+  let marketplaceInstall: ReturnType<typeof vi.fn<MarketplaceInstall>>;
+  let reloadUpdates: ReturnType<typeof vi.fn<() => void>>;
+
+  beforeEach(() => {
+    marketplaceInstall = vi.fn<MarketplaceInstall>();
+    reloadUpdates = vi.fn<() => void>();
+  });
+
+  // Regression: uninstalling a plugin whose update failed and installing it
+  // again (same id, no page reload) used to resurface the previous copy's
+  // error on the new row, reporting a failure for an install that succeeded.
+  it("drops a plugin's error once it is no longer installed, and does not resurface it on reinstall", async () => {
+    marketplaceInstall.mockResolvedValue({ ok: false, error: CHECKSUM_ERROR });
+    const { result, rerender } = renderHook(
+      ({ installed }: { installed: ReadonlySet<string> }) =>
+        usePluginUpdateAction(marketplaceInstall, reloadUpdates, installed),
+      { initialProps: { installed: INSTALLED } },
+    );
+
+    await act(async () => {
+      await result.current.runUpdate(entry());
+    });
+    expect(result.current.errorsById.get(ENTRY_ID)).toBe(CHECKSUM_ERROR);
+
+    // Uninstalled: the id leaves the installed set.
+    rerender({ installed: new Set<string>() });
+    expect(result.current.errorsById.has(ENTRY_ID)).toBe(false);
+
+    // Reinstalled under the same id: still clean.
+    rerender({ installed: new Set([ENTRY_ID]) });
+    expect(result.current.errorsById.has(ENTRY_ID)).toBe(false);
+  });
+
+  it("keeps errors for plugins that are still installed", async () => {
+    marketplaceInstall.mockResolvedValue({ ok: false, error: CHECKSUM_ERROR });
+    const { result, rerender } = renderHook(
+      ({ installed }: { installed: ReadonlySet<string> }) =>
+        usePluginUpdateAction(marketplaceInstall, reloadUpdates, installed),
+      { initialProps: { installed: INSTALLED } },
+    );
+
+    await act(async () => {
+      await result.current.runUpdate(entry());
+    });
+
+    // A new Set with the same members must not drop a live error.
+    rerender({ installed: new Set([ENTRY_ID, "a", "b"]) });
+    expect(result.current.errorsById.get(ENTRY_ID)).toBe(CHECKSUM_ERROR);
   });
 });

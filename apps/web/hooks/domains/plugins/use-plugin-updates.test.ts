@@ -120,6 +120,36 @@ describe("usePluginUpdates — failure isolation", () => {
     await waitFor(() => expect(result.current.error).toBe("timeout"));
   });
 
+  // Regression: the backend omits a failing source's entries entirely, which is
+  // indistinguishable from "this plugin was delisted" unless the partial result
+  // is flagged. Without `sourcesDegraded` the row claimed "not in the
+  // marketplace" for a plugin whose only source was merely unreachable.
+  it("flags a partially degraded catalog, keeps the healthy sources' entries, and reports the reason", async () => {
+    getMarketplaceCatalog.mockResolvedValue({
+      plugins: [entry("a", "installed", "1.0.0")],
+      sources: [source(), source({ id: "local", healthy: false, error: "connection refused" })],
+    });
+    const { result } = renderHook(() => usePluginUpdates());
+
+    await waitFor(() => expect(result.current.checked).toBe(true));
+    expect(result.current.sourcesDegraded).toBe(true);
+    expect(result.current.error).toBe("connection refused");
+    expect(result.current.latestById.has("a")).toBe(true);
+    expect(result.current.lastCheckedAt).not.toBeNull();
+  });
+
+  it("does not flag degradation when every enabled source is healthy", async () => {
+    getMarketplaceCatalog.mockResolvedValue({
+      plugins: [],
+      sources: [source(), source({ id: "local", enabled: false })],
+    });
+    const { result } = renderHook(() => usePluginUpdates());
+
+    await waitFor(() => expect(result.current.checked).toBe(true));
+    expect(result.current.sourcesDegraded).toBe(false);
+    expect(result.current.error).toBeNull();
+  });
+
   it("clears a previous error once a later check succeeds", async () => {
     getMarketplaceCatalog.mockRejectedValueOnce(new Error("offline"));
     getMarketplaceCatalog.mockResolvedValueOnce({ plugins: [], sources: [] });

@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -28,7 +29,12 @@ export function PluginsSettings() {
   const actions = usePluginActions();
   const autoUpdate = useAutoUpdateSettings();
   const updates = usePluginUpdates();
-  const updateAction = usePluginUpdateAction(actions.marketplaceInstall, updates.reload);
+  const installedIds = useMemo(() => new Set(list.items.map((p) => p.id)), [list.items]);
+  const updateAction = usePluginUpdateAction(
+    actions.marketplaceInstall,
+    updates.reload,
+    installedIds,
+  );
 
   // Sync scans the local plugins folder; it never touches the marketplace on
   // its own. Chaining a catalog check after it is what makes the button's
@@ -254,6 +260,7 @@ function PluginList({ list, actions, autoUpdateDefault, updates, updateAction }:
           latest: updates.latestById.get(plugin.id),
           hasUpdate: updates.updates.has(plugin.id),
           checked: updates.checked,
+          sourcesDegraded: updates.sourcesDegraded,
           busy: updateAction.updatingId === plugin.id,
           error: updateAction.errorsById.get(plugin.id),
         };

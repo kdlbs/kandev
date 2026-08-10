@@ -6,6 +6,15 @@ import { t } from "@/lib/i18n";
 import type { MarketplaceCatalog, MarketplaceEntry } from "@/lib/types/plugins";
 
 /**
+ * The message shown when a check couldn't complete: the thrown error's own text
+ * when there is one, otherwise the generic fallback. A function, not a module
+ * constant — `t()` at module scope would freeze at the boot locale.
+ */
+function checkFailedMessage(err?: unknown): string {
+  return err instanceof Error ? err.message : t("plugins:updateCheckFailed");
+}
+
+/**
  * Cross-references installed plugins against the marketplace catalog: which
  * ones have a catalog entry at all (`latestById`), and which of those are
  * strictly newer than the installed version (`updates`, the `latestById`
@@ -29,15 +38,17 @@ export function usePluginUpdates() {
   const [checked, setChecked] = useState(false);
   const [lastCheckedAt, setLastCheckedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [sourcesDegraded, setSourcesDegraded] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
   const applyCatalog = useCallback((catalog: MarketplaceCatalog) => {
     const enabledSources = catalog.sources.filter((source) => source.enabled);
-    const allUnhealthy =
-      enabledSources.length > 0 && enabledSources.every((source) => source.healthy === false);
-    if (allUnhealthy) {
-      const reason = enabledSources.find((source) => source.error)?.error;
-      setError(reason ?? t("plugins:updateCheckFailed"));
+    const unhealthy = enabledSources.filter((source) => source.healthy === false);
+    // A degraded source may not carry an error string; fall back to the generic
+    // message so the strip never renders an empty explanation.
+    const reason = () => unhealthy.find((source) => source.error)?.error ?? checkFailedMessage();
+    if (enabledSources.length > 0 && unhealthy.length === enabledSources.length) {
+      setError(reason());
       return;
     }
 
@@ -48,7 +59,14 @@ export function usePluginUpdates() {
       }
     }
     setLatestById(next);
-    setError(null);
+    // A partially degraded catalog is a success for the sources that answered
+    // and a non-answer for the ones that didn't. Report the degraded source so
+    // the operator knows the picture is incomplete, and set `sourcesDegraded`
+    // so a row missing from this response is shown as unknown rather than as
+    // "not in the marketplace" — the backend omits a failing source's entries
+    // entirely, which is indistinguishable from delisting without this flag.
+    setSourcesDegraded(unhealthy.length > 0);
+    setError(unhealthy.length > 0 ? reason() : null);
     setChecked(true);
     setLastCheckedAt(new Date().toISOString());
   }, []);
@@ -60,8 +78,7 @@ export function usePluginUpdates() {
         if (!cancelled) applyCatalog(catalog);
       })
       .catch((err) => {
-        if (!cancelled)
-          setError(err instanceof Error ? err.message : t("plugins:updateCheckFailed"));
+        if (!cancelled) setError(checkFailedMessage(err));
       });
     return () => {
       cancelled = true;
@@ -77,7 +94,7 @@ export function usePluginUpdates() {
       const catalog = await getMarketplaceCatalog();
       applyCatalog(catalog);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("plugins:updateCheckFailed"));
+      setError(checkFailedMessage(err));
     } finally {
       setChecking(false);
     }
@@ -91,5 +108,15 @@ export function usePluginUpdates() {
     return next;
   }, [latestById]);
 
-  return { latestById, updates, checking, checked, lastCheckedAt, error, reload, checkForUpdates };
+  return {
+    latestById,
+    updates,
+    checking,
+    checked,
+    sourcesDegraded,
+    lastCheckedAt,
+    error,
+    reload,
+    checkForUpdates,
+  };
 }

@@ -26,6 +26,12 @@ export type PluginRowUpdateState = {
   hasUpdate: boolean;
   /** True once a successful catalog check has completed at least once. */
   checked: boolean;
+  /**
+   * True when the last check reached some sources but not all of them. A
+   * plugin absent from a partial catalog is unknown, not delisted, so the
+   * not-in-marketplace hint is withheld.
+   */
+  sourcesDegraded?: boolean;
   /** True while a manual update for this plugin is in flight. */
   busy: boolean;
   /** Set when the last manual update attempt for this plugin failed. */
@@ -157,7 +163,9 @@ export function PluginRow({
  * badge when it's newer than the installed version, or a not-in-marketplace
  * hint when no source carries this plugin id at all. Renders nothing before
  * the first successful check — a stale "not in marketplace" flash would be
- * actively misleading while the marketplace hasn't been queried yet.
+ * actively misleading while the marketplace hasn't been queried yet — and
+ * likewise nothing when the check only reached some sources, since a plugin
+ * carried solely by the source that failed is unknown, not delisted.
  */
 function PluginUpdateInfo({
   pluginId,
@@ -170,6 +178,7 @@ function PluginUpdateInfo({
   if (!update?.checked) return null;
 
   if (!update.latest) {
+    if (update.sourcesDegraded) return null;
     return (
       <span data-testid={`plugin-not-in-marketplace-${pluginId}`}>
         {t("plugins:notInMarketplace")}
