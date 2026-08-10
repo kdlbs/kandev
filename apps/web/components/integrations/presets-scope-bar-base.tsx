@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback } from "react";
 import { IconBookmark, IconChevronDown, IconDeviceFloppy, IconX } from "@tabler/icons-react";
 import type { Icon } from "@tabler/icons-react";
 import {
@@ -252,14 +253,17 @@ export function IntegrationScopeBar<K extends string>({
   const inbox = presets.filter((p) => p.group === "inbox");
   const created = presets.filter((p) => p.group === "created");
 
-  const handleKindChange = (kind: K) => {
-    if (kind === selected.kind) return;
-    if (onKindChange) {
-      onKindChange(kind);
-      return;
-    }
-    onSelect({ kind, source: "preset", id: presetsByKind(kind)[0]?.value ?? "" });
-  };
+  const handleKindChange = useCallback(
+    (kind: K) => {
+      if (kind === selected.kind) return;
+      if (onKindChange) {
+        onKindChange(kind);
+        return;
+      }
+      onSelect({ kind, source: "preset", id: presetsByKind(kind)[0]?.value ?? "" });
+    },
+    [onKindChange, onSelect, presetsByKind, selected.kind],
+  );
 
   const renderPill = (p: ScopePreset) => (
     <PresetPill

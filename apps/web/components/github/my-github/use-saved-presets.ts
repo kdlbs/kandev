@@ -48,9 +48,16 @@ const syncServer = createQueuedUserSettingsSync<SavedPreset[]>((next) => ({
 // Portable presets use a module snapshot shared by every hook instance, so queue the
 // complete read/persist/publish mutation rather than only its already-built payload.
 let portableMutationQueue = Promise.resolve();
+let portableMutationGeneration = 0;
 
 function queuePortableMutation(mutation: () => Promise<void>): Promise<void> {
-  const queued = portableMutationQueue.catch(() => undefined).then(mutation);
+  const generation = portableMutationGeneration;
+  const queued = portableMutationQueue
+    .catch(() => undefined)
+    .then(() => {
+      if (generation !== portableMutationGeneration) return;
+      return mutation();
+    });
   portableMutationQueue = queued;
   return queued;
 }
@@ -84,6 +91,7 @@ export function __resetSnapshotForTests() {
   }
   snapshot = [];
   snapshotVersion = 0;
+  portableMutationGeneration += 1;
   portableMutationQueue = Promise.resolve();
   workspaceSyncQueues.clear();
   for (const l of listeners) l();
@@ -161,6 +169,7 @@ function restoreSavedPreset(
 type SavedPresetMutationContext = {
   workspaceId: string | null;
   presets: SavedPreset[];
+  portableGeneration: number;
 };
 
 function readMutationPresets(context: SavedPresetMutationContext): SavedPreset[] {
@@ -185,14 +194,28 @@ function useSavedPresetMutationContext(
   const mutationContextRef = useRef<SavedPresetMutationContext>({
     workspaceId,
     presets: activePresets,
+    portableGeneration: portableMutationGeneration,
   });
-  if (mutationContextRef.current.workspaceId !== workspaceId) {
-    mutationContextRef.current = { workspaceId, presets: activePresets };
+  if (
+    mutationContextRef.current.workspaceId !== workspaceId ||
+    mutationContextRef.current.portableGeneration !== portableMutationGeneration
+  ) {
+    mutationContextRef.current = {
+      workspaceId,
+      presets: activePresets,
+      portableGeneration: portableMutationGeneration,
+    };
   } else {
     mutationContextRef.current.presets = activePresets;
   }
   const applyLocal = useCallback(
     (context: SavedPresetMutationContext, next: SavedPreset[]) => {
+      if (
+        context.workspaceId === null &&
+        context.portableGeneration !== portableMutationGeneration
+      ) {
+        return;
+      }
       context.presets = next;
       if (mutationContextRef.current !== context) return;
       if (context.workspaceId !== null) setWorkspacePresets(next);
@@ -266,7 +289,7 @@ export function useSavedPresets(workspaceId: string | null = null) {
 
   /**
    * @returns Whether an existing preset was removed.
-   * @throws The persistence error after rolling back the optimistic update.
+   * @throws The persistence error; the removed preset is restored before rejection.
    */
   const remove = useCallback(
     async (id: string) => {
@@ -296,6 +319,7 @@ export function useSavedPresets(workspaceId: string | null = null) {
 
   /**
    * @returns Whether a changed default was persisted; loading and unchanged targets return false.
+   * @remarks Queued same-kind calls run in invocation order, so the last changed target wins.
    * @throws The persistence error when the settings update fails.
    */
   const setDefault = useCallback(

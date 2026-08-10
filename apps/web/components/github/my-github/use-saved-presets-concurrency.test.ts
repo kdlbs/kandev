@@ -426,6 +426,67 @@ async function expectPortableDefaultLastWriteWins() {
   expect(second.result.current.presets).toEqual(expected);
 }
 
+async function expectWorkspaceResetDetachesStaleMutation() {
+  const firstWrite = deferred<Awaited<ReturnType<typeof updateGitHubWorkspaceSettings>>>();
+  vi.mocked(updateGitHubWorkspaceSettings)
+    .mockReturnValueOnce(firstWrite.promise)
+    .mockResolvedValue(workspaceSettings());
+  const firstHook = await renderLoaded(WORKSPACE_MODE, [valid]);
+
+  let firstSave!: Promise<SavedPreset | null>;
+  act(() => {
+    firstSave = firstHook.result.current.save({
+      kind: "pr",
+      label: "First write",
+      customQuery: "is:open",
+      repoFilter: "",
+    });
+  });
+  await waitFor(() => expect(updateGitHubWorkspaceSettings).toHaveBeenCalledTimes(1));
+  firstHook.unmount();
+
+  __resetSnapshotForTests();
+  const secondHook = await renderLoaded(WORKSPACE_MODE, [valid]);
+  let secondSave!: Promise<SavedPreset | null>;
+  act(() => {
+    secondSave = secondHook.result.current.save({
+      kind: "pr",
+      label: "Second write",
+      customQuery: "is:closed",
+      repoFilter: "",
+    });
+  });
+
+  await waitFor(() => expect(updateGitHubWorkspaceSettings).toHaveBeenCalledTimes(2));
+  await act(async () => {
+    firstWrite.resolve(workspaceSettings());
+    await Promise.all([firstSave, secondSave]);
+  });
+}
+
+async function expectPortableResetDetachesStaleMutation() {
+  const resolveFirst = deferFirstPersistence(PORTABLE_USER_MODE);
+  const firstHook = await renderLoaded(PORTABLE_USER_MODE, [valid]);
+
+  let firstDefault!: Promise<boolean>;
+  act(() => {
+    firstDefault = firstHook.result.current.setDefault("pr", valid.id);
+  });
+  await waitFor(() => expectPersistenceCalls(PORTABLE_USER_MODE, 1));
+  firstHook.unmount();
+
+  __resetSnapshotForTests();
+  const freshPreset = { ...valid, label: "Fresh test state" };
+  const secondHook = await renderLoaded(PORTABLE_USER_MODE, [freshPreset]);
+
+  await act(async () => {
+    resolveFirst();
+    await firstDefault;
+  });
+
+  expect(secondHook.result.current.presets).toEqual([freshPreset]);
+}
+
 function resetMutationTestState() {
   __resetSnapshotForTests();
   vi.mocked(fetchUserSettings).mockReset();
@@ -517,41 +578,13 @@ describe("useSavedPresets mutation ordering", () => {
 
   it("new workspace skips the old mutation queue", expectWorkspaceNavigationUnblocksNewMutations);
 
-  it("detaches future workspace writes from a stale test queue", async () => {
-    const firstWrite = deferred<Awaited<ReturnType<typeof updateGitHubWorkspaceSettings>>>();
-    vi.mocked(updateGitHubWorkspaceSettings)
-      .mockReturnValueOnce(firstWrite.promise)
-      .mockResolvedValue(workspaceSettings());
-    const firstHook = await renderLoaded(WORKSPACE_MODE, [valid]);
+  it(
+    "detaches future workspace writes from a stale test queue",
+    expectWorkspaceResetDetachesStaleMutation,
+  );
 
-    let firstSave!: Promise<SavedPreset | null>;
-    act(() => {
-      firstSave = firstHook.result.current.save({
-        kind: "pr",
-        label: "First write",
-        customQuery: "is:open",
-        repoFilter: "",
-      });
-    });
-    await waitFor(() => expect(updateGitHubWorkspaceSettings).toHaveBeenCalledTimes(1));
-    firstHook.unmount();
-
-    __resetSnapshotForTests();
-    const secondHook = await renderLoaded(WORKSPACE_MODE, [valid]);
-    let secondSave!: Promise<SavedPreset | null>;
-    act(() => {
-      secondSave = secondHook.result.current.save({
-        kind: "pr",
-        label: "Second write",
-        customQuery: "is:closed",
-        repoFilter: "",
-      });
-    });
-
-    await waitFor(() => expect(updateGitHubWorkspaceSettings).toHaveBeenCalledTimes(2));
-    await act(async () => {
-      firstWrite.resolve(workspaceSettings());
-      await Promise.all([firstSave, secondSave]);
-    });
-  });
+  it(
+    "ignores stale portable outcomes after a test reset",
+    expectPortableResetDetachesStaleMutation,
+  );
 });
