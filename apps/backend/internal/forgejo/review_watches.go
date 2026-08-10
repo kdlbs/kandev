@@ -46,6 +46,38 @@ func (s *Store) ListAllReviewWatches(ctx context.Context) ([]*ReviewWatch, error
 	}
 	return result, nil
 }
+func (s *Store) ListReviewWatches(ctx context.Context, workspaceID string) ([]*ReviewWatch, error) {
+	var watches []ReviewWatch
+	if err := s.ro.SelectContext(ctx, &watches, `SELECT * FROM forgejo_review_watches WHERE workspace_id=? ORDER BY created_at`, workspaceID); err != nil {
+		return nil, err
+	}
+	result := make([]*ReviewWatch, len(watches))
+	for i := range watches {
+		result[i] = &watches[i]
+	}
+	return result, nil
+}
+func (s *Store) GetReviewWatch(ctx context.Context, workspaceID, id string) (*ReviewWatch, error) {
+	var watch ReviewWatch
+	if err := s.ro.GetContext(ctx, &watch, `SELECT * FROM forgejo_review_watches WHERE workspace_id=? AND id=?`, workspaceID, id); err != nil {
+		return nil, err
+	}
+	return &watch, nil
+}
+func (s *Store) DeleteReviewWatch(ctx context.Context, workspaceID, id string) error {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM forgejo_review_watches WHERE workspace_id=? AND id=?`, workspaceID, id)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrWatchNotFound
+	}
+	return nil
+}
 func (s *Store) MarkReviewWatchPolled(ctx context.Context, id string, now time.Time, message string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE forgejo_review_watches SET last_polled_at=?,last_error=?,updated_at=? WHERE id=?`, now, message, now, id)
 	return err
@@ -71,6 +103,25 @@ func (s *Service) SaveReviewWatch(ctx context.Context, workspaceID string, watch
 }
 func (s *Service) ListAllReviewWatches(ctx context.Context) ([]*ReviewWatch, error) {
 	return s.store.ListAllReviewWatches(ctx)
+}
+func (s *Service) ListReviewWatches(ctx context.Context, workspaceID string) ([]*ReviewWatch, error) {
+	if strings.TrimSpace(workspaceID) == "" {
+		return nil, ErrWorkspaceRequired
+	}
+	return s.store.ListReviewWatches(ctx, workspaceID)
+}
+func (s *Service) DeleteReviewWatch(ctx context.Context, workspaceID, id string) error {
+	if strings.TrimSpace(workspaceID) == "" {
+		return ErrWorkspaceRequired
+	}
+	return s.store.DeleteReviewWatch(ctx, workspaceID, id)
+}
+func (s *Service) PollReviewWatchByID(ctx context.Context, workspaceID, id string) ([]PullRequest, error) {
+	watch, err := s.store.GetReviewWatch(ctx, workspaceID, id)
+	if err != nil {
+		return nil, err
+	}
+	return s.PollReviewWatch(ctx, watch)
 }
 func (s *Service) PollReviewWatch(ctx context.Context, watch *ReviewWatch) ([]PullRequest, error) {
 	client, err := s.ClientForWorkspace(ctx, watch.WorkspaceID)

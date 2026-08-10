@@ -34,6 +34,10 @@ func RegisterRoutes(router *gin.Engine, service *Service) {
 	api.PUT("/issue-watches", controller.saveIssueWatch)
 	api.DELETE("/issue-watches/:watchID", controller.deleteIssueWatch)
 	api.POST("/issue-watches/:watchID/poll", controller.pollIssueWatch)
+	api.GET("/review-watches", controller.listReviewWatches)
+	api.PUT("/review-watches", controller.saveReviewWatch)
+	api.DELETE("/review-watches/:watchID", controller.deleteReviewWatch)
+	api.POST("/review-watches/:watchID/poll", controller.pollReviewWatch)
 	api.GET("/tasks/:taskID/pull-requests", controller.listTaskPRs)
 	api.POST("/task-pull-requests", controller.associatePullRequest)
 	api.POST("/task-pull-requests/create", controller.createTaskPullRequest)
@@ -100,6 +104,42 @@ func (c *Controller) pollIssueWatch(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"issues": issues})
+}
+
+func (c *Controller) listReviewWatches(ctx *gin.Context) {
+	watches, err := c.service.ListReviewWatches(ctx.Request.Context(), c.workspaceID(ctx))
+	if err != nil {
+		c.error(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"watches": watches})
+}
+func (c *Controller) saveReviewWatch(ctx *gin.Context) {
+	var watch ReviewWatch
+	if err := ctx.ShouldBindJSON(&watch); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid review watch"})
+		return
+	}
+	if err := c.service.SaveReviewWatch(ctx.Request.Context(), c.workspaceID(ctx), &watch); err != nil {
+		c.error(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, watch)
+}
+func (c *Controller) deleteReviewWatch(ctx *gin.Context) {
+	if err := c.service.DeleteReviewWatch(ctx.Request.Context(), c.workspaceID(ctx), strings.TrimSpace(ctx.Param("watchID"))); err != nil {
+		c.error(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"deleted": true})
+}
+func (c *Controller) pollReviewWatch(ctx *gin.Context) {
+	pulls, err := c.service.PollReviewWatchByID(ctx.Request.Context(), c.workspaceID(ctx), strings.TrimSpace(ctx.Param("watchID")))
+	if err != nil {
+		c.error(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"pull_requests": pulls})
 }
 
 func (c *Controller) refreshTaskIssue(ctx *gin.Context) {
