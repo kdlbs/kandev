@@ -6,8 +6,8 @@ import { CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/
 import { Input } from "@kandev/ui/input";
 import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
 import { SettingsCard } from "@/components/settings/settings-card";
-import { deleteForgejoConfig, getForgejoConfig, listForgejoQueue, listForgejoRepositories, refreshForgejoConnection, setForgejoConfig, testForgejoConfig } from "@/lib/api/domains/forgejo-api";
-import type { ForgejoConfig, ForgejoRepository } from "@/lib/types/forgejo";
+import { deleteForgejoConfig, deleteForgejoIssueWatch, getForgejoConfig, listForgejoIssueWatches, listForgejoQueue, listForgejoRepositories, pollForgejoIssueWatch, refreshForgejoConnection, saveForgejoIssueWatch, setForgejoConfig, testForgejoConfig } from "@/lib/api/domains/forgejo-api";
+import type { ForgejoConfig, ForgejoIssueWatch, ForgejoRepository } from "@/lib/types/forgejo";
 
 function ForgejoConnection({ workspaceId }: { workspaceId: string }) {
   const [config, setConfig] = useState<ForgejoConfig | null>(null);
@@ -15,6 +15,10 @@ function ForgejoConnection({ workspaceId }: { workspaceId: string }) {
   const [token, setToken] = useState("");
   const [repositories, setRepositories] = useState<ForgejoRepository[]>([]);
 	const [queue, setQueue] = useState<{ issues: { repository: ForgejoRepository; issue: { number: number; title: string } }[]; pull_requests: { repository: ForgejoRepository; pull_request: { number: number; title: string } }[] } | null>(null);
+	const [watches, setWatches] = useState<ForgejoIssueWatch[]>([]);
+	const [watchOwner, setWatchOwner] = useState("");
+	const [watchRepo, setWatchRepo] = useState("");
+	const [watchLabels, setWatchLabels] = useState("");
   const [message, setMessage] = useState("");
 
   useEffect(() => { void getForgejoConfig({ workspaceId }).then((value) => { setConfig(value); setOrigin(value?.origin ?? ""); }); }, [workspaceId]);
@@ -25,6 +29,10 @@ function ForgejoConnection({ workspaceId }: { workspaceId: string }) {
   const loadQueue = async () => { setQueue(await listForgejoQueue(options)); };
 	const refresh = async () => { const next = await refreshForgejoConnection(options); setConfig(next); setMessage(next.last_ok ? "Connection is healthy" : next.last_error || "Connection check failed"); };
 	const disconnect = async () => { await deleteForgejoConfig(options); setConfig(null); setToken(""); setRepositories([]); setQueue(null); setMessage("Forgejo disconnected from this workspace"); };
+	const loadWatches = async () => { const result = await listForgejoIssueWatches(options); setWatches(result.watches); };
+	const saveWatch = async () => { await saveForgejoIssueWatch({ owner: watchOwner, repo: watchRepo, labels: watchLabels, enabled: true }, options); await loadWatches(); setWatchOwner(""); setWatchRepo(""); setWatchLabels(""); };
+	const pollWatch = async (watch: ForgejoIssueWatch) => { const result = await pollForgejoIssueWatch(watch.id, options); setMessage(`Watch found ${result.issues.length} matching issue${result.issues.length === 1 ? "" : "s"}`); await loadWatches(); };
+	const deleteWatch = async (watch: ForgejoIssueWatch) => { await deleteForgejoIssueWatch(watch.id, options); await loadWatches(); };
 
   return <SettingsCard>
     <CardHeader><CardTitle>Forgejo</CardTitle><CardDescription>Connect this workspace to a Forgejo server. The token is stored in Kandev’s secret store and is never made available to agents.</CardDescription></CardHeader>
@@ -35,6 +43,7 @@ function ForgejoConnection({ workspaceId }: { workspaceId: string }) {
       {message ? <p role="status" className="text-sm text-muted-foreground">{message}</p> : null}
       {repositories.length ? <ul className="text-sm space-y-1">{repositories.map((repository) => <li key={repository.full_name}>{repository.full_name}</li>)}</ul> : null}
 		{queue ? <div className="space-y-3 text-sm"><div><p className="font-medium">Open issues</p><ul className="space-y-1">{queue.issues.map(({ repository, issue }) => <li key={`${repository.full_name}-${issue.number}`}>{repository.full_name} #{issue.number}: {issue.title}</li>)}</ul></div><div><p className="font-medium">Open pull requests</p><ul className="space-y-1">{queue.pull_requests.map(({ repository, pull_request: pull }) => <li key={`${repository.full_name}-${pull.number}`}>{repository.full_name} #{pull.number}: {pull.title}</li>)}</ul></div></div> : null}
+		{config?.has_secret ? <div className="space-y-2 border-t pt-3"><p className="font-medium text-sm">Issue watches</p><div className="grid gap-2 sm:grid-cols-3"><Input placeholder="Owner" value={watchOwner} onChange={(event) => setWatchOwner(event.target.value)} /><Input placeholder="Repository" value={watchRepo} onChange={(event) => setWatchRepo(event.target.value)} /><Input placeholder="Labels, optional" value={watchLabels} onChange={(event) => setWatchLabels(event.target.value)} /></div><div className="flex flex-wrap gap-2"><Button className="cursor-pointer" type="button" disabled={!watchOwner || !watchRepo} onClick={() => void saveWatch()}>Save watch</Button><Button className="cursor-pointer" variant="outline" type="button" onClick={() => void loadWatches()}>Load watches</Button></div><ul className="space-y-1 text-sm">{watches.map((watch) => <li className="flex flex-wrap items-center gap-2" key={watch.id}><span>{watch.owner}/{watch.repo}{watch.labels ? ` · ${watch.labels}` : ""}</span><Button className="cursor-pointer" size="sm" variant="outline" type="button" onClick={() => void pollWatch(watch)}>Poll</Button><Button className="cursor-pointer" size="sm" variant="destructive" type="button" onClick={() => void deleteWatch(watch)}>Delete</Button></li>)}</ul></div> : null}
     </CardContent>
   </SettingsCard>;
 }
