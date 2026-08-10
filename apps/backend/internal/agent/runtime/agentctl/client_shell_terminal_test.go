@@ -10,7 +10,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -47,9 +49,11 @@ func TestStartShellTerminal_PostsTerminalGeometry(t *testing.T) {
 }
 
 func TestStartShellTerminal_FailsOnNonOKStatusWithoutRetrying(t *testing.T) {
-	var attempts int
+	// The handler runs on the server's goroutine while the test goroutine reads
+	// the counter, so the count is atomic rather than a plain int.
+	var attempts atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		attempts++
+		attempts.Add(1)
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	t.Cleanup(srv.Close)
@@ -60,14 +64,21 @@ func TestStartShellTerminal_FailsOnNonOKStatusWithoutRetrying(t *testing.T) {
 	}
 	// A status error means agentctl answered — retrying would just repeat a
 	// deterministic rejection, so the client must give up immediately.
-	if attempts != 1 {
-		t.Errorf("attempts = %d, want 1 — status errors must not be retried", attempts)
+	if n := attempts.Load(); n != 1 {
+		t.Errorf("attempts = %d, want 1 — status errors must not be retried", n)
 	}
 }
 
 // flakyTransport fails the first `failures` round trips with `err`, then
 // delegates to base. It stands in for the Sprites proxy tunnel dropping the
 // first connection attempt.
+//
+// Note: the retry tests install this as the client's whole Transport, which
+// replaces anything WithAuthToken/WithExecutionID would have chained on.
+// newHTTPOnlyClient sets no auth options, so these tests are correctly
+// isolated — but if a future test builds its client through NewClient with auth
+// options, it must wrap the existing c.httpClient.Transport as `base` instead
+// of overwriting it, or the retried request will silently lose its headers.
 type flakyTransport struct {
 	mu       sync.Mutex
 	failures int
@@ -140,6 +151,75 @@ func TestStartShellTerminal_DoesNotRetryNonTransientErrors(t *testing.T) {
 	}
 	if transport.attemptCount() != 1 {
 		t.Errorf("attempts = %d, want 1 — a TLS failure is not transient", transport.attemptCount())
+	}
+}
+
+// signallingTransport fails its first round trip with a transient error and
+// announces it on `first`, then delegates every later attempt to base so the
+// real transport can observe the request context.
+type signallingTransport struct {
+	mu       sync.Mutex
+	attempts int
+	first    chan struct{}
+	once     sync.Once
+	base     http.RoundTripper
+}
+
+func (t *signallingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.mu.Lock()
+	t.attempts++
+	isFirst := t.attempts == 1
+	t.mu.Unlock()
+	if isFirst {
+		t.once.Do(func() { close(t.first) })
+		return nil, errors.New("read tcp 127.0.0.1:1: connection reset by peer")
+	}
+	return t.base.RoundTrip(req)
+}
+
+// StartShellTerminal's retry loop sleeps with time.Sleep rather than a
+// context-aware timer, so cancelling mid-backoff does not shorten the wait —
+// the call still burns the full 200ms before the next attempt notices. This
+// pins that observable behaviour; if the production loop is changed to
+// `time.NewTimer` + `select` on ctx.Done() (the convention in
+// apps/backend/CLAUDE.md), this test should be inverted to assert a prompt
+// return instead.
+func TestStartShellTerminal_RetryBackoffIsNotInterruptedByCancellation(t *testing.T) {
+	srv, _ := captureServer(t, jsonResponder(http.StatusOK, `{}`))
+
+	c := newHTTPOnlyClient(srv.URL)
+	transport := &signallingTransport{first: make(chan struct{}), base: http.DefaultTransport}
+	c.httpClient.Transport = transport
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Cancel as soon as the first attempt has failed, i.e. while the client is
+	// inside its 200ms backoff sleep.
+	go func() {
+		<-transport.first
+		cancel()
+	}()
+
+	start := time.Now()
+	err := c.StartShellTerminal(ctx, "term-1", 80, 24)
+	elapsed := time.Since(start)
+
+	// The second attempt reaches the real transport with a cancelled context.
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled once the retry re-dials", err)
+	}
+	// A context-aware backoff would return in ~0ms; the fixed sleep means the
+	// caller waits the whole 200ms after cancellation.
+	if elapsed < 150*time.Millisecond {
+		t.Errorf("elapsed = %v, want >=150ms — the backoff is a plain time.Sleep, "+
+			"so cancellation cannot cut it short", elapsed)
+	}
+	transport.mu.Lock()
+	attempts := transport.attempts
+	transport.mu.Unlock()
+	if attempts != 2 {
+		t.Errorf("attempts = %d, want 2 — one transient failure then a cancelled re-dial", attempts)
 	}
 }
 

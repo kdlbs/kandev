@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -250,7 +252,7 @@ func TestGetStatus_FailureModes(t *testing.T) {
 	}
 }
 
-func TestConfigureAgent_SendsEnvApprovalPolicyAndFailsOnUnsuccessfulBody(t *testing.T) {
+func TestConfigureAgent_SendsCommandEnvAndApprovalPolicy(t *testing.T) {
 	srv, got := captureServer(t, jsonResponder(http.StatusOK, `{"success":true}`))
 
 	err := newHTTPOnlyClient(srv.URL).ConfigureAgent(
@@ -461,10 +463,11 @@ func TestStop_FailureModes(t *testing.T) {
 }
 
 func TestWaitForReady_ReturnsOnceHealthSucceeds(t *testing.T) {
-	var probes int
+	// The handler runs on the server's goroutine while the test goroutine reads
+	// the counter, so the count is atomic rather than a plain int.
+	var probes atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		probes++
-		if probes < 2 {
+		if probes.Add(1) < 2 {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
@@ -475,8 +478,8 @@ func TestWaitForReady_ReturnsOnceHealthSucceeds(t *testing.T) {
 	if err := newHTTPOnlyClient(srv.URL).WaitForReady(context.Background(), 5*time.Second); err != nil {
 		t.Fatalf("WaitForReady: %v", err)
 	}
-	if probes < 2 {
-		t.Errorf("probes = %d, want the poll loop to retry past the first failure", probes)
+	if n := probes.Load(); n < 2 {
+		t.Errorf("probes = %d, want the poll loop to retry past the first failure", n)
 	}
 }
 
@@ -500,13 +503,18 @@ func TestWaitForReady_TimesOutWhenNeverHealthy(t *testing.T) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	t.Cleanup(srv.Close)
+	client := newHTTPOnlyClient(srv.URL)
 
-	// The deadline is checked on the first 500ms tick, so a zero timeout
-	// expires on that tick rather than spinning.
-	err := newHTTPOnlyClient(srv.URL).WaitForReady(context.Background(), 0)
-	if err == nil || !strings.Contains(err.Error(), "timeout waiting for agentctl to be ready") {
-		t.Fatalf("error = %v, want the ready timeout", err)
-	}
+	// The deadline is only checked on a 500ms tick, so a zero timeout still
+	// waits one full tick before expiring. synctest advances that fake tick
+	// instantly once the poll loop is durably blocked — with a zero timeout the
+	// loop never reaches Health, so nothing inside the bubble does real I/O.
+	synctest.Test(t, func(t *testing.T) {
+		err := client.WaitForReady(context.Background(), 0)
+		if err == nil || !strings.Contains(err.Error(), "timeout waiting for agentctl to be ready") {
+			t.Fatalf("error = %v, want the ready timeout", err)
+		}
+	})
 }
 
 func TestStartVscode_PostsThemeAndDecodesResponse(t *testing.T) {
