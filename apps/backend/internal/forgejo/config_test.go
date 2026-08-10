@@ -201,3 +201,30 @@ func TestService_ClientForWorkspaceUsesWorkspaceSecret(t *testing.T) {
 		t.Fatalf("list repositories = %#v, %v", repositories, err)
 	}
 }
+
+func TestService_ListsWorkspaceQueue(t *testing.T) {
+	service, secrets := newConfigTestService(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/user/repos":
+			_, _ = w.Write([]byte(`[{"name":"repo","full_name":"owner/repo","owner":{"login":"owner"}}]`))
+		case "/api/v1/repos/owner/repo/issues":
+			_, _ = w.Write([]byte(`[{"number":1,"title":"Issue","state":"open"}]`))
+		case "/api/v1/repos/owner/repo/pulls":
+			_, _ = w.Write([]byte(`[{"number":2,"title":"PR","state":"open","head":{"ref":"feature"},"base":{"ref":"main"}}]`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	if err := service.store.SaveConfig(context.Background(), &Config{WorkspaceID: "workspace-a", Origin: server.URL}); err != nil {
+		t.Fatal(err)
+	}
+	if err := secrets.Set(context.Background(), SecretKeyForWorkspace("workspace-a"), "Forgejo token", "token"); err != nil {
+		t.Fatal(err)
+	}
+	issues, pulls, err := service.ListWorkspaceQueue(context.Background(), "workspace-a")
+	if err != nil || len(issues) != 1 || len(pulls) != 1 || pulls[0].PullRequest.Number != 2 {
+		t.Fatalf("issues=%#v pulls=%#v err=%v", issues, pulls, err)
+	}
+}

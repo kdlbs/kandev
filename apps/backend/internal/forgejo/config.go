@@ -213,6 +213,49 @@ func (s *Service) ListPullRequests(ctx context.Context, workspaceID, owner, repo
 	return client.ListPullRequests(ctx, owner, repo, page, limit)
 }
 
+type QueueIssue struct {
+	Repository Repository `json:"repository"`
+	Issue      Issue      `json:"issue"`
+}
+type QueuePullRequest struct {
+	Repository  Repository  `json:"repository"`
+	PullRequest PullRequest `json:"pull_request"`
+}
+
+// ListWorkspaceQueue provides the personal Forgejo queue for a workspace by
+// collecting open issues and pull requests from every repository visible to
+// the configured token. It is deliberately bounded to one server-sized page
+// per repository; future saved watches provide narrower, persistent scopes.
+func (s *Service) ListWorkspaceQueue(ctx context.Context, workspaceID string) ([]QueueIssue, []QueuePullRequest, error) {
+	client, err := s.ClientForWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, nil, err
+	}
+	repositories, _, err := client.ListRepositories(ctx, 1, 100)
+	if err != nil {
+		return nil, nil, err
+	}
+	issues := make([]QueueIssue, 0)
+	pulls := make([]QueuePullRequest, 0)
+	for _, repository := range repositories {
+		repositoryIssues, _, issueErr := client.ListIssues(ctx, repository.Owner, repository.Name, 1, 100)
+		if issueErr != nil {
+			return nil, nil, fmt.Errorf("list queue issues for %s: %w", repository.FullName, issueErr)
+		}
+		for _, issue := range repositoryIssues {
+			issues = append(issues, QueueIssue{Repository: repository, Issue: issue})
+		}
+		repositoryPulls, _, pullErr := client.ListPullRequests(ctx, repository.Owner, repository.Name, 1, 100)
+		if pullErr != nil {
+			return nil, nil, fmt.Errorf("list queue pull requests for %s: %w", repository.FullName, pullErr)
+		}
+		for _, pull := range repositoryPulls {
+			pulls = append(pulls, QueuePullRequest{Repository: repository, PullRequest: pull})
+		}
+	}
+	return issues, pulls, nil
+}
+
 func (s *Service) AssociatePullRequest(ctx context.Context, workspaceID, taskID, repositoryID, owner, repo string, number int) (*TaskPR, error) {
 	if err := s.store.assertTaskWorkspace(ctx, workspaceID, taskID); err != nil {
 		return nil, err

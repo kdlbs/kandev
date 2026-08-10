@@ -23,6 +23,7 @@ func RegisterRoutes(router *gin.Engine, service *Service) {
 	api.GET("/repositories", controller.listRepositories)
 	api.GET("/issues", controller.listIssues)
 	api.GET("/pull-requests", controller.listPullRequests)
+	api.GET("/queue", controller.listQueue)
 	api.GET("/tasks/:taskID/pull-requests", controller.listTaskPRs)
 	api.POST("/task-pull-requests", controller.associatePullRequest)
 	api.POST("/task-pull-requests/create", controller.createTaskPullRequest)
@@ -30,6 +31,15 @@ func RegisterRoutes(router *gin.Engine, service *Service) {
 	api.POST("/task-issues", controller.associateIssue)
 	api.DELETE("/task-issues/:linkID", controller.unlinkTaskIssue)
 	api.DELETE("/task-pull-requests/:linkID", controller.unlinkTaskPullRequest)
+}
+
+func (c *Controller) listQueue(ctx *gin.Context) {
+	issues, pulls, err := c.service.ListWorkspaceQueue(ctx.Request.Context(), c.workspaceID(ctx))
+	if err != nil {
+		c.error(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"issues": issues, "pull_requests": pulls})
 }
 
 func (c *Controller) unlinkTaskIssue(ctx *gin.Context) {
