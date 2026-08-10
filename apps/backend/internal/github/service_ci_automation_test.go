@@ -314,8 +314,15 @@ func TestServiceUpdateTaskCIOptionsResolvesReviewerForWorkspacelessTaskPR(t *tes
 	if err != nil {
 		t.Fatalf("get options: %v", err)
 	}
-	if !options.PromptOnReviewRequested || options.ReviewReviewerLogin != "reviewer-a" {
-		t.Fatalf("options = %+v, want review prompt bound to reviewer-a", options)
+	if options.ReviewReviewerLogin != "reviewer-a" {
+		t.Fatalf("options = %+v, want reviewer login reviewer-a", options)
+	}
+	prOptions, err := store.GetTaskPRAutomationOptions(ctx, "task-1", "repo-1", 42)
+	if err != nil {
+		t.Fatalf("get PR options: %v", err)
+	}
+	if !prOptions.PromptOnReviewRequested {
+		t.Fatalf("PR options = %+v, want prompt_on_review_requested=true", prOptions)
 	}
 }
 
@@ -450,10 +457,13 @@ func TestServiceTerminalWatchReenableKeepsOtherEventAccepted(t *testing.T) {
 	ctx := context.Background()
 	enabled := true
 	disabled := false
-	if _, err := store.UpdateTaskCIOptions(ctx, "task-1", TaskCIOptionsPatch{
-		PromptOnMerged: &enabled, PromptOnClosed: &enabled,
-	}); err != nil {
-		t.Fatalf("enable terminal prompts: %v", err)
+	if _, err := store.UpdateTaskPRAutomationOptions(ctx, "task-1", "repo-merged", 1,
+		TaskPRAutomationOptionsPatch{PromptOnMerged: &enabled}, false); err != nil {
+		t.Fatalf("enable merged prompt: %v", err)
+	}
+	if _, err := store.UpdateTaskPRAutomationOptions(ctx, "task-1", "repo-closed", 2,
+		TaskPRAutomationOptionsPatch{PromptOnClosed: &enabled}, false); err != nil {
+		t.Fatalf("enable closed prompt: %v", err)
 	}
 	for _, prompt := range []TaskPRLifecyclePrompt{
 		{TaskID: "task-1", RepositoryID: "repo-merged", PRNumber: 1, Event: "merged", ObservedState: prStateMerged},
@@ -463,10 +473,12 @@ func TestServiceTerminalWatchReenableKeepsOtherEventAccepted(t *testing.T) {
 			t.Fatalf("record terminal prompt: %v", err)
 		}
 	}
-	if _, err := store.UpdateTaskCIOptions(ctx, "task-1", TaskCIOptionsPatch{PromptOnMerged: &disabled}); err != nil {
+	if _, err := store.UpdateTaskPRAutomationOptions(ctx, "task-1", "repo-merged", 1,
+		TaskPRAutomationOptionsPatch{PromptOnMerged: &disabled}, false); err != nil {
 		t.Fatalf("disable merged prompt: %v", err)
 	}
-	if _, err := store.UpdateTaskCIOptions(ctx, "task-1", TaskCIOptionsPatch{PromptOnMerged: &enabled}); err != nil {
+	if _, err := store.UpdateTaskPRAutomationOptions(ctx, "task-1", "repo-merged", 1,
+		TaskPRAutomationOptionsPatch{PromptOnMerged: &enabled}, false); err != nil {
 		t.Fatalf("re-enable merged prompt: %v", err)
 	}
 

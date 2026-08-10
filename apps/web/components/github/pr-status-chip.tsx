@@ -39,7 +39,11 @@ import {
   pickDefaultPR,
 } from "@/components/github/pr-task-icon";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
-import { autoFixRoundForState, findCIAutomationStateForPR } from "@/lib/github/ci-automation";
+import {
+  autoFixRoundForState,
+  findCIAutomationStateForPR,
+  findPRAutomationOptionsForPR,
+} from "@/lib/github/ci-automation";
 import type { AutoFixRoundInfo } from "@/lib/github/ci-automation";
 import type { TaskCIAutomationOptions, TaskPR } from "@/lib/types/github";
 import { useTranslation } from "react-i18next";
@@ -227,17 +231,22 @@ export function PRStatusChip({ taskId }: { taskId: string | null }) {
   );
 }
 
+// The five switches are per-PR (see findPRAutomationOptionsForPR); the
+// aggregated top-level booleans on TaskCIAutomationOptions only report
+// "every linked PR has this on" and would misrepresent one specific PR's
+// state when the task has other PRs configured differently.
 function automationForPR(
   options: TaskCIAutomationOptions | null | undefined,
   pr: TaskPR,
 ): AutomationFlags {
+  const prOptions = findPRAutomationOptionsForPR(options?.pr_options, pr);
   return {
-    autoFix: Boolean(options?.auto_fix_enabled),
-    autoMerge: Boolean(options?.auto_merge_enabled),
-    autoFixRound: options?.auto_fix_enabled
+    autoFix: prOptions.auto_fix_enabled,
+    autoMerge: prOptions.auto_merge_enabled,
+    autoFixRound: prOptions.auto_fix_enabled
       ? autoFixRoundForState(
-          findCIAutomationStateForPR(options.pr_states, pr),
-          options.auto_fix_max_rounds,
+          findCIAutomationStateForPR(options?.pr_states, pr),
+          options?.auto_fix_max_rounds,
         )
       : null,
   };
@@ -247,17 +256,18 @@ function automationForPRs(
   options: TaskCIAutomationOptions | null | undefined,
   prs: TaskPR[],
 ): AutomationFlags {
-  const roundInfos = options?.auto_fix_enabled
-    ? prs.map((pr) =>
-        autoFixRoundForState(
-          findCIAutomationStateForPR(options.pr_states, pr),
-          options.auto_fix_max_rounds,
-        ),
-      )
-    : [];
+  const perPR = prs.map((pr) => findPRAutomationOptionsForPR(options?.pr_options, pr));
+  const roundInfos = prs
+    .filter((_, index) => perPR[index].auto_fix_enabled)
+    .map((pr) =>
+      autoFixRoundForState(
+        findCIAutomationStateForPR(options?.pr_states, pr),
+        options?.auto_fix_max_rounds,
+      ),
+    );
   return {
-    autoFix: Boolean(options?.auto_fix_enabled),
-    autoMerge: Boolean(options?.auto_merge_enabled),
+    autoFix: perPR.some((opt) => opt.auto_fix_enabled),
+    autoMerge: perPR.some((opt) => opt.auto_merge_enabled),
     autoFixRound: pickAttentionRound(roundInfos),
   };
 }

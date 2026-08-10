@@ -50,6 +50,7 @@
   "automaticallyCreateTasksWhenNewGithub": "Automatically create tasks when new GitHub issues match your criteria.",
   "automaticallyCreateTasksWhenNewPull": "Automatically create tasks when new pull requests need your review.",
   "automation": "Automation",
+  "automationForPr": "Applies to PR #{{number}} only",
   "available": "Available",
   "availablePlaceholders": "Available placeholders:",
   "avgTimeToMerge": "Avg Time to Merge",

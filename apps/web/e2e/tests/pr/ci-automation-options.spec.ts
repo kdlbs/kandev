@@ -195,6 +195,89 @@ test.describe("PR CI automation options", () => {
     ).toBeChecked();
   });
 
+  test("desktop popover keeps two linked PRs' automation switches independent", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const taskId = await seedTaskWithPR(apiClient, seedData, "CI automation independence");
+    const secondPRNumber = PR_NUMBER + 1;
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: taskId,
+      workspace_id: seedData.workspaceId,
+      owner: OWNER,
+      repo: REPO,
+      pr_number: secondPRNumber,
+      pr_url: `https://github.com/${OWNER}/${REPO}/pull/${secondPRNumber}`,
+      pr_title: "Second PR",
+      head_branch: "feat/second",
+      base_branch: "main",
+      author_login: "test-user",
+      state: "open",
+      review_state: "approved",
+      checks_state: "success",
+    });
+
+    const session = await openTask(testPage, taskId);
+    const popover = session.prTopbarPopover();
+
+    // Pin the tab to PR #144 explicitly: the default tab tracks live
+    // "worst status" data and can otherwise flip between clicks as
+    // background PR sync updates check status.
+    await popover.getByRole("tab", { name: `${REPO} #${PR_NUMBER}` }).click();
+    await expect(
+      popover.getByRole("switch", { name: "Auto-fix CI and address comments" }),
+    ).toBeVisible();
+    await popover.getByRole("switch", { name: "Auto-fix CI and address comments" }).click();
+    await popover.getByRole("switch", { name: "Auto-merge when ready" }).click();
+
+    await expect
+      .poll(async () => apiClient.getTaskCIAutomationOptions(taskId))
+      .toMatchObject({
+        pr_options: expect.arrayContaining([
+          expect.objectContaining({
+            pr_number: PR_NUMBER,
+            auto_fix_enabled: true,
+            auto_merge_enabled: true,
+          }),
+          expect.objectContaining({
+            pr_number: secondPRNumber,
+            auto_fix_enabled: false,
+            auto_merge_enabled: false,
+          }),
+        ]),
+      });
+
+    // The second PR's tab must show its own, independently off, state.
+    await popover.getByRole("tab", { name: `${REPO} #${secondPRNumber}` }).click();
+    await expect(
+      popover.getByRole("switch", { name: "Auto-fix CI and address comments" }),
+    ).not.toBeChecked();
+    await expect(popover.getByRole("switch", { name: "Auto-merge when ready" })).not.toBeChecked();
+
+    // Reload: independence must persist across a full page load. Select each
+    // tab explicitly — the default tab tracks live "worst status" data (real
+    // CI automation may have altered it), so it is not a stable signal here.
+    await testPage.reload();
+    const reloaded = await openTask(testPage, taskId);
+    const reloadedPopover = reloaded.prTopbarPopover();
+    await reloadedPopover.getByRole("tab", { name: `${REPO} #${PR_NUMBER}` }).click();
+    await expect(
+      reloadedPopover.getByRole("switch", { name: "Auto-fix CI and address comments" }),
+    ).toBeChecked();
+    await expect(
+      reloadedPopover.getByRole("switch", { name: "Auto-merge when ready" }),
+    ).toBeChecked();
+    await reloadedPopover.getByRole("tab", { name: `${REPO} #${secondPRNumber}` }).click();
+    await expect(
+      reloadedPopover.getByRole("switch", { name: "Auto-fix CI and address comments" }),
+    ).not.toBeChecked();
+    await expect(
+      reloadedPopover.getByRole("switch", { name: "Auto-merge when ready" }),
+    ).not.toBeChecked();
+  });
+
   test("desktop popover shows the selected PR lifecycle delivery error", async ({
     testPage,
     apiClient,

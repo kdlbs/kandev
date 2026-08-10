@@ -50,6 +50,7 @@
   "automaticallyCreateTasksWhenNewGithub": "Àũţōḿàţĩćàĺĺŷ ćŕēàţē ţàśķś ŵĥēń ńēŵ ĜĩţĤũƀ ĩśśũēś ḿàţćĥ ŷōũŕ ćŕĩţēŕĩà.",
   "automaticallyCreateTasksWhenNewPull": "Àũţōḿàţĩćàĺĺŷ ćŕēàţē ţàśķś ŵĥēń ńēŵ ƥũĺĺ ŕēqũēśţś ńēēď ŷōũŕ ŕēvĩēŵ.",
   "automation": "Àũţōḿàţĩōń",
+  "automationForPr": "Àƥƥĺĩēś ţō ƤŔ #{{number}} ōńĺŷ",
   "available": "Àvàĩĺàƀĺē",
   "availablePlaceholders": "Àvàĩĺàƀĺē ƥĺàćēĥōĺďēŕś:",
   "avgTimeToMerge": "Àvĝ Ţĩḿē ţō Ḿēŕĝē",

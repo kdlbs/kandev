@@ -201,9 +201,7 @@ func (s *Service) handleTaskPRUpdated(ctx context.Context, event *bus.Event) err
 func (s *Service) handleTaskCIOptionsUpdated(ctx context.Context, event *bus.Event) error {
 	options, ok := event.Data.(*github.TaskCIOptionsResponse)
 	if !ok || options == nil || event.Source == ciAutomationStateEventSource ||
-		(!options.AutoFixEnabled && !options.AutoMergeEnabled &&
-			!options.PromptOnReviewRequested && !options.PromptOnMerged && !options.PromptOnClosed) ||
-		s.githubService == nil {
+		!anyTaskPRAutomationEnabled(options) || s.githubService == nil {
 		return nil
 	}
 	detachedCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ciAutomationDetachedTimeout)
@@ -217,6 +215,31 @@ func (s *Service) handleTaskCIOptionsUpdated(ctx context.Context, event *bus.Eve
 		s.startTaskPRCIAutomationWithoutRefresh(ctx, pr)
 	}
 	return nil
+}
+
+// anyTaskPRAutomationEnabled reports whether any linked PR has at least one
+// automation switch on. Per-PR scoping means the task-wide aggregate on
+// options can be false (mixed configuration across PRs) while individual
+// PRs still need this update's PR sync — so this checks the per-PR array
+// rather than the aggregated top-level booleans. Falls back to the top-level
+// booleans when PROptions is empty (e.g. a caller that built the response by
+// hand without per-PR data), matching resolvePRScopedCIOptions's same
+// graceful-degradation pattern rather than silently swallowing the event.
+func anyTaskPRAutomationEnabled(options *github.TaskCIOptionsResponse) bool {
+	if len(options.PROptions) == 0 {
+		return options.AutoFixEnabled || options.AutoMergeEnabled ||
+			options.PromptOnReviewRequested || options.PromptOnMerged || options.PromptOnClosed
+	}
+	for _, opt := range options.PROptions {
+		if opt == nil {
+			continue
+		}
+		if opt.AutoFixEnabled || opt.AutoMergeEnabled ||
+			opt.PromptOnReviewRequested || opt.PromptOnMerged || opt.PromptOnClosed {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) recordTaskCIOptionsSyncError(ctx context.Context, taskID string, synced []*github.TaskPR, syncErr error) {

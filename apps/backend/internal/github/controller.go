@@ -384,6 +384,10 @@ func (c *Controller) httpPatchTaskCIOptions(ctx *gin.Context) {
 	}
 	resp, err := c.service.UpdateTaskCIOptions(ctx.Request.Context(), ctx.Param("taskId"), patch)
 	if err != nil {
+		if errors.Is(err, ErrTaskPRNotLinked) {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		c.logger.Error("update task CI options failed", zap.String("task_id", ctx.Param("taskId")), zap.Error(err))
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update CI automation options"})
 		return
@@ -406,6 +410,18 @@ func parseTaskCIOptionsPatch(ctx *gin.Context) (TaskCIOptionsPatch, error) {
 	var patch TaskCIOptionsPatch
 	for key, value := range raw {
 		switch key {
+		case "repository_id":
+			var repositoryID string
+			if err := json.Unmarshal(value, &repositoryID); err != nil {
+				return TaskCIOptionsPatch{}, err
+			}
+			patch.RepositoryID = &repositoryID
+		case "pr_number":
+			var prNumber int
+			if err := json.Unmarshal(value, &prNumber); err != nil {
+				return TaskCIOptionsPatch{}, err
+			}
+			patch.PRNumber = &prNumber
 		case "auto_fix_enabled":
 			var enabled bool
 			if err := json.Unmarshal(value, &enabled); err != nil {

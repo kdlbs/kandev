@@ -367,8 +367,27 @@ const createTablesSQL = `
 		review_prompt_override TEXT,
 		merged_prompt_override TEXT,
 		closed_prompt_override TEXT,
+		pr_scope_migrated_at DATETIME,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
+	);
+
+	-- Per-PR automation switches. Source of truth for the five automation
+	-- switches (AutoFixEnabled, AutoMergeEnabled, PromptOnReviewRequested,
+	-- PromptOnMerged, PromptOnClosed) formerly stored task-wide on
+	-- github_task_ci_options. See migrateTaskCIOptionsToPRScope.
+	CREATE TABLE IF NOT EXISTS github_task_pr_automation_options (
+		task_id TEXT NOT NULL,
+		repository_id TEXT NOT NULL DEFAULT '',
+		pr_number INTEGER NOT NULL,
+		auto_fix_enabled BOOLEAN NOT NULL DEFAULT 0,
+		auto_merge_enabled BOOLEAN NOT NULL DEFAULT 0,
+		prompt_on_review_requested BOOLEAN NOT NULL DEFAULT 0,
+		prompt_on_merged BOOLEAN NOT NULL DEFAULT 0,
+		prompt_on_closed BOOLEAN NOT NULL DEFAULT 0,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL,
+		PRIMARY KEY (task_id, repository_id, pr_number)
 	);
 
 	CREATE TABLE IF NOT EXISTS github_task_ci_pr_state (
@@ -526,6 +545,9 @@ func (s *Store) initSchemaUpgrades() error {
 	if err := s.addTaskPRAgentAutomationColumns(); err != nil {
 		return err
 	}
+	if err := s.addPRScopeMigrationColumn(); err != nil {
+		return err
+	}
 	if err := s.addGitHubAuthFlowExpectationColumns(); err != nil {
 		return err
 	}
@@ -565,6 +587,9 @@ func (s *Store) initSchemaData(legacyUpgrade bool) error {
 	if err := s.backfillPRWatchesRepositoryID(); err != nil {
 		return fmt.Errorf("backfill github_pr_watches.repository_id: %w", err)
 	}
+	if err := s.migrateTaskCIOptionsToPRScope(); err != nil {
+		return fmt.Errorf("migrate task CI options to PR scope: %w", err)
+	}
 	if err := s.backfillGitHubWorkspaceOwnership(); err != nil {
 		return err
 	}
@@ -574,6 +599,83 @@ func (s *Store) initSchemaData(legacyUpgrade bool) error {
 		}
 	}
 	return nil
+}
+
+// migrateTaskCIOptionsToPRScope seeds github_task_pr_automation_options rows
+// from each pre-upgrade github_task_ci_options row's legacy booleans, fanning
+// each task's values out onto every github_task_prs row currently linked to
+// it. Guarded by pr_scope_migrated_at, stamped in the same transaction as the
+// fan-out insert: without the marker, replaying this on every boot would
+// re-enable a switch a user has since turned off for one PR (R2), and a PR
+// linked to the task after migration would incorrectly inherit the legacy
+// value instead of starting all-off (AC17) via ON CONFLICT DO NOTHING alone.
+func (s *Store) migrateTaskCIOptionsToPRScope() error {
+	type legacyOptions struct {
+		taskID                                                       string
+		autoFix, autoMerge, promptReview, promptMerged, promptClosed bool
+	}
+	rows, err := s.db.Query(`
+		SELECT task_id, auto_fix_enabled, auto_merge_enabled, prompt_on_review_requested,
+			prompt_on_merged, prompt_on_closed
+		FROM github_task_ci_options
+		WHERE pr_scope_migrated_at IS NULL`)
+	if err != nil {
+		return fmt.Errorf("list unmigrated task CI options: %w", err)
+	}
+	var legacy []legacyOptions
+	for rows.Next() {
+		var row legacyOptions
+		if err := rows.Scan(
+			&row.taskID, &row.autoFix, &row.autoMerge, &row.promptReview, &row.promptMerged, &row.promptClosed,
+		); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("scan unmigrated task CI options: %w", err)
+		}
+		legacy = append(legacy, row)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate unmigrated task CI options: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close unmigrated task CI options rows: %w", err)
+	}
+	for _, row := range legacy {
+		if err := s.fanOutTaskCIOptionsToPRScope(
+			row.taskID, row.autoFix, row.autoMerge, row.promptReview, row.promptMerged, row.promptClosed,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) fanOutTaskCIOptionsToPRScope(
+	taskID string, autoFix, autoMerge, promptReview, promptMerged, promptClosed bool,
+) error {
+	tx, err := s.db.Beginx()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := time.Now().UTC()
+	if _, err := tx.Exec(`
+		INSERT INTO github_task_pr_automation_options (
+			task_id, repository_id, pr_number, auto_fix_enabled, auto_merge_enabled,
+			prompt_on_review_requested, prompt_on_merged, prompt_on_closed, created_at, updated_at
+		)
+		SELECT task_id, repository_id, pr_number, ?, ?, ?, ?, ?, ?, ?
+		FROM github_task_prs
+		WHERE task_id = ?
+		ON CONFLICT(task_id, repository_id, pr_number) DO NOTHING`,
+		autoFix, autoMerge, promptReview, promptMerged, promptClosed, now, now, taskID); err != nil {
+		return fmt.Errorf("fan out task CI options for %s: %w", taskID, err)
+	}
+	if _, err := tx.Exec(
+		`UPDATE github_task_ci_options SET pr_scope_migrated_at = ? WHERE task_id = ?`, now, taskID,
+	); err != nil {
+		return fmt.Errorf("stamp pr_scope_migrated_at for %s: %w", taskID, err)
+	}
+	return tx.Commit()
 }
 
 func (s *Store) clearLifecyclePromptOverrides() error {
@@ -1019,6 +1121,24 @@ func (s *Store) addTaskCIRoundColumns() error {
 		if _, err := s.db.Exec("ALTER TABLE github_task_ci_pr_state ADD COLUMN auto_fix_exhausted_at DATETIME"); err != nil {
 			return fmt.Errorf("add github_task_ci_pr_state.auto_fix_exhausted_at: %w", err)
 		}
+	}
+	return nil
+}
+
+// addPRScopeMigrationColumn adds the marker column that guards the one-time
+// fan-out of legacy task-level automation switches onto per-PR rows (see
+// migrateTaskCIOptionsToPRScope). Column-precheck idiom, mirroring
+// addTaskCIRoundColumns.
+func (s *Store) addPRScopeMigrationColumn() error {
+	cols, err := s.tableColumns("github_task_ci_options")
+	if err != nil {
+		return fmt.Errorf("read github_task_ci_options columns: %w", err)
+	}
+	if _, ok := cols["pr_scope_migrated_at"]; ok {
+		return nil
+	}
+	if _, err := s.db.Exec(`ALTER TABLE github_task_ci_options ADD COLUMN pr_scope_migrated_at DATETIME`); err != nil {
+		return fmt.Errorf("add github_task_ci_options.pr_scope_migrated_at: %w", err)
 	}
 	return nil
 }
@@ -1809,7 +1929,9 @@ func (s *Store) GetTaskCIOptions(ctx context.Context, taskID string) (*TaskCIOpt
 	return &opts, err
 }
 
-// UpdateTaskCIOptions applies a partial update to task CI automation options.
+// UpdateTaskCIOptions applies a partial update to the task-level CI
+// automation fields (AutoFixPromptOverride, ReviewReviewerLogin). The five
+// automation switches are per-PR — see UpdateTaskPRAutomationOptions.
 func (s *Store) UpdateTaskCIOptions(ctx context.Context, taskID string, patch TaskCIOptionsPatch) (*TaskCIOptions, error) {
 	writeCtx := context.WithoutCancel(ctx)
 	now := time.Now().UTC()
@@ -1826,41 +1948,17 @@ func (s *Store) UpdateTaskCIOptions(ctx context.Context, taskID string, patch Ta
 		taskID, now, now); err != nil {
 		return nil, err
 	}
-	var previous TaskCIOptions
-	if err := tx.GetContext(writeCtx, &previous, `SELECT * FROM github_task_ci_options WHERE task_id = ?`, taskID); err != nil {
-		return nil, err
-	}
-	autoFixSet, autoFixValue := boolPatchValue(patch.AutoFixEnabled)
-	autoMergeSet, autoMergeValue := boolPatchValue(patch.AutoMergeEnabled)
-	reviewSet, reviewValue := boolPatchValue(patch.PromptOnReviewRequested)
-	mergedSet, mergedValue := boolPatchValue(patch.PromptOnMerged)
-	closedSet, closedValue := boolPatchValue(patch.PromptOnClosed)
 	promptSet := patch.AutoFixPromptOverride != nil
 	promptValue := normalizedPromptOverride(patch.AutoFixPromptOverride)
 	reviewerLoginSet := patch.ReviewReviewerLogin != nil
-	reviewerChanged := reviewerLoginSet && !strings.EqualFold(
-		previous.ReviewReviewerLogin, normalizedString(patch.ReviewReviewerLogin),
-	)
 	if _, err := tx.ExecContext(writeCtx, `
 		UPDATE github_task_ci_options SET
-			auto_fix_enabled = CASE WHEN ? THEN ? ELSE auto_fix_enabled END,
-			auto_merge_enabled = CASE WHEN ? THEN ? ELSE auto_merge_enabled END,
 			auto_fix_prompt_override = CASE WHEN ? THEN ? ELSE auto_fix_prompt_override END,
-			prompt_on_review_requested = CASE WHEN ? THEN ? ELSE prompt_on_review_requested END,
-			prompt_on_merged = CASE WHEN ? THEN ? ELSE prompt_on_merged END,
-			prompt_on_closed = CASE WHEN ? THEN ? ELSE prompt_on_closed END,
 			review_reviewer_login = CASE WHEN ? THEN ? ELSE review_reviewer_login END,
 			updated_at = ?
 		WHERE task_id = ?`,
-		autoFixSet, autoFixValue, autoMergeSet, autoMergeValue, promptSet, promptValue,
-		reviewSet, reviewValue, mergedSet, mergedValue, closedSet, closedValue,
-		reviewerLoginSet, normalizedString(patch.ReviewReviewerLogin),
+		promptSet, promptValue, reviewerLoginSet, normalizedString(patch.ReviewReviewerLogin),
 		now, taskID); err != nil {
-		return nil, err
-	}
-	if err := applyTaskCIOptionResets(
-		writeCtx, tx, taskID, now, previous, patch, reviewerChanged,
-	); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -1869,17 +1967,114 @@ func (s *Store) UpdateTaskCIOptions(ctx context.Context, taskID string, patch Ta
 	return s.GetTaskCIOptions(writeCtx, taskID)
 }
 
-func applyTaskCIOptionResets(
+// GetTaskPRAutomationOptions returns one PR's automation switches, or disabled defaults.
+func (s *Store) GetTaskPRAutomationOptions(
+	ctx context.Context, taskID, repositoryID string, prNumber int,
+) (*TaskPRAutomationOptions, error) {
+	var opts TaskPRAutomationOptions
+	err := s.ro.GetContext(ctx, &opts,
+		`SELECT * FROM github_task_pr_automation_options WHERE task_id = ? AND repository_id = ? AND pr_number = ?`,
+		taskID, repositoryID, prNumber)
+	if errors.Is(err, sql.ErrNoRows) {
+		now := time.Now().UTC()
+		return &TaskPRAutomationOptions{
+			TaskID: taskID, RepositoryID: repositoryID, PRNumber: prNumber,
+			CreatedAt: now, UpdatedAt: now,
+		}, nil
+	}
+	return &opts, err
+}
+
+// ListTaskPRAutomationOptions returns every stored per-PR automation row for a task.
+func (s *Store) ListTaskPRAutomationOptions(ctx context.Context, taskID string) ([]*TaskPRAutomationOptions, error) {
+	var rows []TaskPRAutomationOptions
+	if err := s.ro.SelectContext(ctx, &rows,
+		`SELECT * FROM github_task_pr_automation_options WHERE task_id = ? ORDER BY repository_id ASC, pr_number ASC`,
+		taskID); err != nil {
+		return nil, err
+	}
+	out := make([]*TaskPRAutomationOptions, 0, len(rows))
+	for i := range rows {
+		out = append(out, &rows[i])
+	}
+	return out, nil
+}
+
+// UpdateTaskPRAutomationOptions applies a partial update to one PR's
+// automation switches, upserting the row if absent. reviewerChanged mirrors
+// the task-wide reviewer rebind: the caller resolves it once (comparing the
+// patch's task-level ReviewReviewerLogin against the previously stored
+// value) and passes it into every PR targeted by the same update, so a
+// changed connected account re-baselines the review-request checkpoint even
+// when the switch itself did not change value.
+func (s *Store) UpdateTaskPRAutomationOptions(
+	ctx context.Context, taskID, repositoryID string, prNumber int,
+	patch TaskPRAutomationOptionsPatch, reviewerChanged bool,
+) (*TaskPRAutomationOptions, error) {
+	writeCtx := context.WithoutCancel(ctx)
+	now := time.Now().UTC()
+	tx, err := s.db.BeginTxx(writeCtx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(writeCtx, `
+		INSERT INTO github_task_pr_automation_options (
+			task_id, repository_id, pr_number, auto_fix_enabled, auto_merge_enabled,
+			prompt_on_review_requested, prompt_on_merged, prompt_on_closed, created_at, updated_at
+		) VALUES (?, ?, ?, 0, 0, 0, 0, 0, ?, ?)
+		ON CONFLICT(task_id, repository_id, pr_number) DO NOTHING`,
+		taskID, repositoryID, prNumber, now, now); err != nil {
+		return nil, err
+	}
+	var previous TaskPRAutomationOptions
+	if err := tx.GetContext(writeCtx, &previous,
+		`SELECT * FROM github_task_pr_automation_options WHERE task_id = ? AND repository_id = ? AND pr_number = ?`,
+		taskID, repositoryID, prNumber); err != nil {
+		return nil, err
+	}
+	autoFixSet, autoFixValue := boolPatchValue(patch.AutoFixEnabled)
+	autoMergeSet, autoMergeValue := boolPatchValue(patch.AutoMergeEnabled)
+	reviewSet, reviewValue := boolPatchValue(patch.PromptOnReviewRequested)
+	mergedSet, mergedValue := boolPatchValue(patch.PromptOnMerged)
+	closedSet, closedValue := boolPatchValue(patch.PromptOnClosed)
+	if _, err := tx.ExecContext(writeCtx, `
+		UPDATE github_task_pr_automation_options SET
+			auto_fix_enabled = CASE WHEN ? THEN ? ELSE auto_fix_enabled END,
+			auto_merge_enabled = CASE WHEN ? THEN ? ELSE auto_merge_enabled END,
+			prompt_on_review_requested = CASE WHEN ? THEN ? ELSE prompt_on_review_requested END,
+			prompt_on_merged = CASE WHEN ? THEN ? ELSE prompt_on_merged END,
+			prompt_on_closed = CASE WHEN ? THEN ? ELSE prompt_on_closed END,
+			updated_at = ?
+		WHERE task_id = ? AND repository_id = ? AND pr_number = ?`,
+		autoFixSet, autoFixValue, autoMergeSet, autoMergeValue,
+		reviewSet, reviewValue, mergedSet, mergedValue, closedSet, closedValue,
+		now, taskID, repositoryID, prNumber); err != nil {
+		return nil, err
+	}
+	if err := applyTaskPRAutomationOptionResets(
+		writeCtx, tx, taskID, repositoryID, prNumber, now, previous, patch, reviewerChanged,
+	); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return s.GetTaskPRAutomationOptions(writeCtx, taskID, repositoryID, prNumber)
+}
+
+func applyTaskPRAutomationOptionResets(
 	ctx context.Context,
 	tx *sqlx.Tx,
-	taskID string,
+	taskID, repositoryID string,
+	prNumber int,
 	now time.Time,
-	previous TaskCIOptions,
-	patch TaskCIOptionsPatch,
+	previous TaskPRAutomationOptions,
+	patch TaskPRAutomationOptionsPatch,
 	reviewerChanged bool,
 ) error {
 	if shouldResetAutoFix(patch.AutoFixEnabled, previous.AutoFixEnabled) {
-		if err := resetTaskCIAutoFixState(ctx, tx, taskID, now); err != nil {
+		if err := resetTaskCIAutoFixState(ctx, tx, taskID, repositoryID, prNumber, now); err != nil {
 			return err
 		}
 	}
@@ -1889,17 +2084,18 @@ func applyTaskCIOptionResets(
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE github_task_ci_pr_state
 			SET review_request_initialized = 0, last_review_requested = 0, updated_at = ?
-			WHERE task_id = ?`, now, taskID); err != nil {
+			WHERE task_id = ? AND repository_id = ? AND pr_number = ?`,
+			now, taskID, repositoryID, prNumber); err != nil {
 			return err
 		}
 	}
 	if shouldResetTerminalPrompt(patch.PromptOnMerged, previous.PromptOnMerged) {
-		if err := resetTaskCITerminalCheckpoint(ctx, tx, taskID, "merged", now); err != nil {
+		if err := resetTaskCITerminalCheckpoint(ctx, tx, taskID, repositoryID, prNumber, "merged", now); err != nil {
 			return err
 		}
 	}
 	if shouldResetTerminalPrompt(patch.PromptOnClosed, previous.PromptOnClosed) {
-		return resetTaskCITerminalCheckpoint(ctx, tx, taskID, "closed", now)
+		return resetTaskCITerminalCheckpoint(ctx, tx, taskID, repositoryID, prNumber, "closed", now)
 	}
 	return nil
 }
@@ -1919,7 +2115,8 @@ func shouldResetTerminalPrompt(patchValue *bool, wasEnabled bool) bool {
 func resetTaskCIAutoFixState(
 	ctx context.Context,
 	tx *sqlx.Tx,
-	taskID string,
+	taskID, repositoryID string,
+	prNumber int,
 	now time.Time,
 ) error {
 	_, err := tx.ExecContext(ctx, `
@@ -1932,14 +2129,16 @@ func resetTaskCIAutoFixState(
 		    last_error = CASE WHEN auto_fix_exhausted_at IS NOT NULL THEN NULL ELSE last_error END,
 		    auto_fix_exhausted_at = NULL,
 		    updated_at = ?
-		WHERE task_id = ?`, now, taskID)
+		WHERE task_id = ? AND repository_id = ? AND pr_number = ?`, now, taskID, repositoryID, prNumber)
 	return err
 }
 
 func resetTaskCITerminalCheckpoint(
 	ctx context.Context,
 	tx *sqlx.Tx,
-	taskID, state string,
+	taskID, repositoryID string,
+	prNumber int,
+	state string,
 	now time.Time,
 ) error {
 	_, err := tx.ExecContext(ctx, `
@@ -1949,8 +2148,9 @@ func resetTaskCITerminalCheckpoint(
 		    last_lifecycle_prompt_at = NULL,
 		    last_lifecycle_session_id = NULL,
 		    updated_at = ?
-		WHERE task_id = ? AND (last_observed_pr_state = ? OR last_lifecycle_event = ?)`,
-		now, taskID, state, state)
+		WHERE task_id = ? AND repository_id = ? AND pr_number = ?
+		  AND (last_observed_pr_state = ? OR last_lifecycle_event = ?)`,
+		now, taskID, repositoryID, prNumber, state, state)
 	return err
 }
 

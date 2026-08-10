@@ -1419,6 +1419,8 @@ export const i18nGuardFiles = [
   "components/github/my-github/use-pr-statuses.ts",
   "components/github/pr-checks-section.tsx",
   "components/github/pr-ci-automation-controls.tsx",
+  "components/github/pr-ci-automation-prompt-dialog.tsx",
+  "components/github/pr-ci-automation-rows.tsx",
   "components/github/pr-ci-popover.tsx",
   "components/github/pr-comments-section.tsx",
   "components/github/pr-detail-panel.tsx",

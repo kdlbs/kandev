@@ -447,26 +447,46 @@ type TaskPR struct {
 }
 
 // TaskCIOptions stores task-level PR automation preferences.
+//
+// The five automation switches below (AutoFixEnabled, AutoMergeEnabled,
+// PromptOnReviewRequested, PromptOnMerged, PromptOnClosed) are legacy: they
+// are no longer written by UpdateTaskCIOptions and are read only by the
+// one-time pr_scope_migrated_at fan-out migration
+// (migrateTaskCIOptionsToPRScope). The per-PR source of truth is
+// TaskPRAutomationOptions / github_task_pr_automation_options. Genuinely
+// task-level fields (AutoFixPromptOverride, ReviewReviewerLogin) remain here.
 type TaskCIOptions struct {
 	TaskID                  string  `json:"task_id" db:"task_id"`
-	AutoFixEnabled          bool    `json:"auto_fix_enabled" db:"auto_fix_enabled"`
-	AutoMergeEnabled        bool    `json:"auto_merge_enabled" db:"auto_merge_enabled"`
+	AutoFixEnabled          bool    `json:"-" db:"auto_fix_enabled"`
+	AutoMergeEnabled        bool    `json:"-" db:"auto_merge_enabled"`
 	AutoFixPromptOverride   *string `json:"auto_fix_prompt_override,omitempty" db:"auto_fix_prompt_override"`
-	PromptOnReviewRequested bool    `json:"prompt_on_review_requested" db:"prompt_on_review_requested"`
-	PromptOnMerged          bool    `json:"prompt_on_merged" db:"prompt_on_merged"`
-	PromptOnClosed          bool    `json:"prompt_on_closed" db:"prompt_on_closed"`
+	PromptOnReviewRequested bool    `json:"-" db:"prompt_on_review_requested"`
+	PromptOnMerged          bool    `json:"-" db:"prompt_on_merged"`
+	PromptOnClosed          bool    `json:"-" db:"prompt_on_closed"`
 	ReviewReviewerLogin     string  `json:"review_reviewer_login" db:"review_reviewer_login"`
 	// Lifecycle override columns remain only to read and clear legacy rows during
 	// the additive schema migration. They are not part of the update or API model.
-	ReviewPromptOverride *string   `json:"-" db:"review_prompt_override"`
-	MergedPromptOverride *string   `json:"-" db:"merged_prompt_override"`
-	ClosedPromptOverride *string   `json:"-" db:"closed_prompt_override"`
-	CreatedAt            time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt            time.Time `json:"updated_at" db:"updated_at"`
+	ReviewPromptOverride *string `json:"-" db:"review_prompt_override"`
+	MergedPromptOverride *string `json:"-" db:"merged_prompt_override"`
+	ClosedPromptOverride *string `json:"-" db:"closed_prompt_override"`
+	// PRScopeMigratedAt guards the one-time fan-out of the legacy booleans
+	// above onto github_task_pr_automation_options. Nil means "not yet
+	// migrated"; non-nil means the fan-out already ran for this task and
+	// must never re-run (it would silently re-enable a switch a user has
+	// since turned off for a specific PR).
+	PRScopeMigratedAt *time.Time `json:"-" db:"pr_scope_migrated_at"`
+	CreatedAt         time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at" db:"updated_at"`
 }
 
 // TaskCIOptionsPatch is a partial update for task CI automation options.
+// RepositoryID/PRNumber optionally target one linked PR for the five
+// automation switches; when both are nil the switches fan out to every PR
+// currently linked to the task. AutoFixPromptOverride and ReviewReviewerLogin
+// are always task-level regardless of PR identity.
 type TaskCIOptionsPatch struct {
+	RepositoryID            *string
+	PRNumber                *int
 	AutoFixEnabled          *bool
 	AutoMergeEnabled        *bool
 	AutoFixPromptOverride   *string
@@ -483,7 +503,53 @@ func (p TaskCIOptionsPatch) HasAny() bool {
 		p.ReviewReviewerLogin != nil
 }
 
+// PRAutomationPatch extracts the per-PR automation switch fields.
+func (p TaskCIOptionsPatch) PRAutomationPatch() TaskPRAutomationOptionsPatch {
+	return TaskPRAutomationOptionsPatch{
+		AutoFixEnabled:          p.AutoFixEnabled,
+		AutoMergeEnabled:        p.AutoMergeEnabled,
+		PromptOnReviewRequested: p.PromptOnReviewRequested,
+		PromptOnMerged:          p.PromptOnMerged,
+		PromptOnClosed:          p.PromptOnClosed,
+	}
+}
+
+// TaskPRAutomationOptions stores per-PR automation switches, keyed by
+// (task_id, repository_id, pr_number). This is the source of truth for the
+// five CI/lifecycle automation switches; TaskCIOptions keeps only the
+// genuinely task-level fields (prompt override, reviewer login).
+type TaskPRAutomationOptions struct {
+	TaskID                  string    `json:"task_id" db:"task_id"`
+	RepositoryID            string    `json:"repository_id" db:"repository_id"`
+	PRNumber                int       `json:"pr_number" db:"pr_number"`
+	AutoFixEnabled          bool      `json:"auto_fix_enabled" db:"auto_fix_enabled"`
+	AutoMergeEnabled        bool      `json:"auto_merge_enabled" db:"auto_merge_enabled"`
+	PromptOnReviewRequested bool      `json:"prompt_on_review_requested" db:"prompt_on_review_requested"`
+	PromptOnMerged          bool      `json:"prompt_on_merged" db:"prompt_on_merged"`
+	PromptOnClosed          bool      `json:"prompt_on_closed" db:"prompt_on_closed"`
+	CreatedAt               time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt               time.Time `json:"updated_at" db:"updated_at"`
+}
+
+// TaskPRAutomationOptionsPatch is a partial update for one PR's automation switches.
+type TaskPRAutomationOptionsPatch struct {
+	AutoFixEnabled          *bool
+	AutoMergeEnabled        *bool
+	PromptOnReviewRequested *bool
+	PromptOnMerged          *bool
+	PromptOnClosed          *bool
+}
+
+// HasAny reports whether the patch contains at least one requested field change.
+func (p TaskPRAutomationOptionsPatch) HasAny() bool {
+	return p.AutoFixEnabled != nil || p.AutoMergeEnabled != nil ||
+		p.PromptOnReviewRequested != nil || p.PromptOnMerged != nil || p.PromptOnClosed != nil
+}
+
 // TaskCIOptionsResponse is the HTTP shape for task CI automation options.
+// The top-level automation booleans are an aggregate over PROptions ("every
+// linked PR has this switch enabled, and at least one PR is linked") kept for
+// MCP/API read compatibility; PROptions is the per-PR source of truth.
 type TaskCIOptionsResponse struct {
 	TaskID                  string                     `json:"task_id"`
 	AutoFixEnabled          bool                       `json:"auto_fix_enabled"`
@@ -501,6 +567,7 @@ type TaskCIOptionsResponse struct {
 	EffectiveClosedPrompt   string                     `json:"-"`
 	UpdatedAt               time.Time                  `json:"updated_at"`
 	PRStates                []*TaskCIPRAutomationState `json:"pr_states"`
+	PROptions               []*TaskPRAutomationOptions `json:"pr_options"`
 }
 
 // TaskCIPRAutomationState stores per-PR dedupe and error state for CI automation.
