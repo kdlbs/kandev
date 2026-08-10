@@ -386,6 +386,7 @@ func serveInstalledFile(ctx *gin.Context, root, relPath, contentType string) {
 type actionHTTPEnvelope struct {
 	WorkspaceID  string          `json:"workspaceId"`
 	TaskID       string          `json:"taskId"`
+	SessionID    string          `json:"sessionId"`
 	RepositoryID string          `json:"repositoryId"`
 	Body         json.RawMessage `json:"body"`
 }
@@ -522,7 +523,7 @@ func (c *Controller) verifyActionContext(
 func (c *Controller) verifyWorkspaceAction(
 	ctx *gin.Context, verified pluginsdk.VerifiedActionContext, envelope actionHTTPEnvelope,
 ) (pluginsdk.VerifiedActionContext, bool) {
-	if envelope.WorkspaceID == "" || envelope.TaskID != "" || envelope.RepositoryID != "" {
+	if envelope.WorkspaceID == "" || envelope.TaskID != "" || envelope.SessionID != "" || envelope.RepositoryID != "" {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace action requires only workspaceId"})
 		return pluginsdk.VerifiedActionContext{}, false
 	}
@@ -560,7 +561,60 @@ func (c *Controller) verifyTaskAction(
 		}
 		verified.RepositoryID = envelope.RepositoryID
 	}
+	if envelope.SessionID == "" {
+		return verified, true
+	}
+	sessionID, headBranch, ok := c.verifyTaskSessionAction(
+		ctx, task, envelope.SessionID, verified.RepositoryID,
+	)
+	if !ok {
+		return pluginsdk.VerifiedActionContext{}, false
+	}
+	verified.SessionID = sessionID
+	verified.HeadBranch = headBranch
 	return verified, true
+}
+
+func (c *Controller) verifyTaskSessionAction(
+	ctx *gin.Context, task *taskmodels.Task, sessionID, repositoryID string,
+) (string, string, bool) {
+	sessions, err := c.svc.taskData.ListTaskSessions(ctx.Request.Context(), task.ID)
+	if err != nil {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return "", "", false
+	}
+	session := findTaskSession(sessions, task.ID, sessionID)
+	if session == nil {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return "", "", false
+	}
+	if repositoryID == "" {
+		return session.ID, "", true
+	}
+	headBranch := sessionRepositoryBranch(session, repositoryID)
+	if headBranch == "" {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "session repository checkout not found"})
+		return "", "", false
+	}
+	return session.ID, headBranch, true
+}
+
+func findTaskSession(sessions []*taskmodels.TaskSession, taskID, sessionID string) *taskmodels.TaskSession {
+	for _, session := range sessions {
+		if session != nil && session.ID == sessionID && session.TaskID == taskID {
+			return session
+		}
+	}
+	return nil
+}
+
+func sessionRepositoryBranch(session *taskmodels.TaskSession, repositoryID string) string {
+	for _, worktree := range session.Worktrees {
+		if worktree != nil && worktree.RepositoryID == repositoryID {
+			return strings.TrimSpace(worktree.WorktreeBranch)
+		}
+	}
+	return ""
 }
 
 func taskContainsRepository(task *taskmodels.Task, repositoryID string) bool {
@@ -575,7 +629,7 @@ func taskContainsRepository(task *taskmodels.Task, repositoryID string) bool {
 func (c *Controller) verifyRepositoryAction(
 	ctx *gin.Context, verified pluginsdk.VerifiedActionContext, envelope actionHTTPEnvelope,
 ) (pluginsdk.VerifiedActionContext, bool) {
-	if envelope.WorkspaceID == "" || envelope.RepositoryID == "" || envelope.TaskID != "" {
+	if envelope.WorkspaceID == "" || envelope.RepositoryID == "" || envelope.TaskID != "" || envelope.SessionID != "" {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "repository action requires workspaceId and repositoryId"})
 		return pluginsdk.VerifiedActionContext{}, false
 	}

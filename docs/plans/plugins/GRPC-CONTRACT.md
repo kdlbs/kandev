@@ -138,6 +138,8 @@ message VerifiedActionContext {
   string workspace_id = 2;
   string task_id = 3;
   string repository_id = 4;
+  string session_id = 5;
+  string head_branch = 6;
 }
 message PluginActionResponse { bytes body = 1; map<string, string> headers = 2; }
 
@@ -357,7 +359,10 @@ type GitCredentialBinder interface {
 ```
 
 `HandleAction` receives host-verified actor/resource context and bounded untrusted body
-separately. `SearchEntityReferences` candidates are untrusted: the host injects
+separately. For task actions, an optional session selector is verified against the task;
+when paired with a verified repository selector, `head_branch` is resolved from that
+session's exact repository worktree. Browser body JSON cannot select or override it.
+`SearchEntityReferences` candidates are untrusted: the host injects
 descriptor identity and constructs canonical reference fields. `AuthorizeEntityReference`
 runs for search and submission. `ResolveGitCredential` receives an exact host-verified
 scope for both initial host materialization and helper-lease redemption, and returns

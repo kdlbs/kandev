@@ -123,6 +123,8 @@ type VerifiedActionContext struct {
 	WorkspaceID  string
 	TaskID       string
 	RepositoryID string
+	SessionID    string
+	HeadBranch   string
 }
 
 func (c VerifiedActionContext) toProto() *pluginv1.VerifiedActionContext {
@@ -131,6 +133,8 @@ func (c VerifiedActionContext) toProto() *pluginv1.VerifiedActionContext {
 		WorkspaceId:  c.WorkspaceID,
 		TaskId:       c.TaskID,
 		RepositoryId: c.RepositoryID,
+		SessionId:    c.SessionID,
+		HeadBranch:   c.HeadBranch,
 	}
 }
 
@@ -143,6 +147,8 @@ func verifiedActionContextFromProto(p *pluginv1.VerifiedActionContext) VerifiedA
 		WorkspaceID:  p.GetWorkspaceId(),
 		TaskID:       p.GetTaskId(),
 		RepositoryID: p.GetRepositoryId(),
+		SessionID:    p.GetSessionId(),
+		HeadBranch:   p.GetHeadBranch(),
 	}
 }
 

@@ -640,6 +640,16 @@ func TestActionHandlerVerifiesOptionalTaskRepository(t *testing.T) {
 				},
 			},
 		},
+		sessionsByTask: map[string][]*taskmodels.TaskSession{
+			"task-1": {{
+				ID:     "session-1",
+				TaskID: "task-1",
+				Worktrees: []*taskmodels.TaskEnvironmentRepo{{
+					RepositoryID:   "repository-1",
+					WorktreeBranch: "feature/native-create",
+				}},
+			}},
+		},
 	}
 	if _, err := svc.Install(t.Context(), actionPackage(t, "kandev-plugin-actions", "create-review", "task", 128)); err != nil {
 		t.Fatalf("Install: %v", err)
@@ -648,13 +658,28 @@ func TestActionHandlerVerifiesOptionalTaskRepository(t *testing.T) {
 	valid := doAuthenticatedActionRequest(
 		router,
 		"/api/plugins/kandev-plugin-actions/actions/create-review",
-		`{"workspaceId":"workspace-1","taskId":"task-1","repositoryId":"repository-1","body":{}}`,
+		`{"workspaceId":"workspace-1","taskId":"task-1","sessionId":"session-1","repositoryId":"repository-1","body":{}}`,
 	)
 	if valid.Code != http.StatusOK {
 		t.Fatalf("task repository status = %d, want 200, body=%s", valid.Code, valid.Body.String())
 	}
 	if got := invoker.request.Context; got.WorkspaceID != "workspace-1" || got.TaskID != "task-1" || got.RepositoryID != "repository-1" {
 		t.Fatalf("verified task repository context = %+v", got)
+	}
+	if got := invoker.request.Context.SessionID; got != "session-1" {
+		t.Fatalf("verified session = %q, want session-1", got)
+	}
+	if got := invoker.request.Context.HeadBranch; got != "feature/native-create" {
+		t.Fatalf("verified head branch = %q, want feature/native-create", got)
+	}
+
+	unverifiedSession := doAuthenticatedActionRequest(
+		router,
+		"/api/plugins/kandev-plugin-actions/actions/create-review",
+		`{"workspaceId":"workspace-1","taskId":"task-1","sessionId":"session-not-on-task","repositoryId":"repository-1","body":{}}`,
+	)
+	if unverifiedSession.Code != http.StatusNotFound {
+		t.Fatalf("unverified session status = %d, want 404, body=%s", unverifiedSession.Code, unverifiedSession.Body.String())
 	}
 
 	unattached := doAuthenticatedActionRequest(

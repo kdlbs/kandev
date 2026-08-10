@@ -346,6 +346,8 @@ type VerifiedActionContext struct {
 	WorkspaceId   string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
 	TaskId        string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
 	RepositoryId  string                 `protobuf:"bytes,4,opt,name=repository_id,json=repositoryId,proto3" json:"repository_id,omitempty"`
+	SessionId     string                 `protobuf:"bytes,5,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	HeadBranch    string                 `protobuf:"bytes,6,opt,name=head_branch,json=headBranch,proto3" json:"head_branch,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -404,6 +406,20 @@ func (x *VerifiedActionContext) GetTaskId() string {
 func (x *VerifiedActionContext) GetRepositoryId() string {
 	if x != nil {
 		return x.RepositoryId
+	}
+	return ""
+}
+
+func (x *VerifiedActionContext) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *VerifiedActionContext) GetHeadBranch() string {
+	if x != nil {
+		return x.HeadBranch
 	}
 	return ""
 }
@@ -5508,12 +5524,16 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\n" +
 	"action_key\x18\x01 \x01(\tR\tactionKey\x12A\n" +
 	"\acontext\x18\x02 \x01(\v2'.kandev.plugin.v1.VerifiedActionContextR\acontext\x12\x12\n" +
-	"\x04body\x18\x03 \x01(\fR\x04body\"\x93\x01\n" +
+	"\x04body\x18\x03 \x01(\fR\x04body\"\xd3\x01\n" +
 	"\x15VerifiedActionContext\x12\x19\n" +
 	"\bactor_id\x18\x01 \x01(\tR\aactorId\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12#\n" +
-	"\rrepository_id\x18\x04 \x01(\tR\frepositoryId\"\xb5\x01\n" +
+	"\rrepository_id\x18\x04 \x01(\tR\frepositoryId\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x05 \x01(\tR\tsessionId\x12\x1f\n" +
+	"\vhead_branch\x18\x06 \x01(\tR\n" +
+	"headBranch\"\xb5\x01\n" +
 	"\x14PluginActionResponse\x12\x12\n" +
 	"\x04body\x18\x01 \x01(\fR\x04body\x12M\n" +
 	"\aheaders\x18\x02 \x03(\v23.kandev.plugin.v1.PluginActionResponse.HeadersEntryR\aheaders\x1a:\n" +

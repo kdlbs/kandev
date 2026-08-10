@@ -53,7 +53,7 @@ export function resolveChangeRequestProviderTarget({
       (!repository.workspace_id || repository.workspace_id === workspaceId),
   );
   const matches =
-    repositoryScope === undefined
+    repositoryScope === undefined || repositoryScope === ""
       ? linked.filter((repository) => repository.id === links[0]?.repository_id)
       : linked.filter((repository) => repository.name === repositoryScope);
   if (matches.length !== 1) return null;
@@ -88,6 +88,7 @@ export async function createChangeRequestWithProvider({
   baseBranch,
   draft,
   branchAlreadyPushed,
+  sessionId,
 }: {
   target: ChangeRequestProviderTarget;
   push(options: { setUpstream: boolean }, repositoryScope?: string): Promise<PushResult>;
@@ -97,6 +98,7 @@ export async function createChangeRequestWithProvider({
   baseBranch?: string;
   draft: boolean;
   branchAlreadyPushed: boolean;
+  sessionId: string;
 }): Promise<NativeCreateResult> {
   let pushOutput = "";
   if (!branchAlreadyPushed) {
@@ -115,6 +117,7 @@ export async function createChangeRequestWithProvider({
     const created = await target.provider.createChangeRequest!({
       workspaceId: target.workspaceId,
       taskId: target.taskId,
+      sessionId,
       repositoryId: target.repositoryId,
       repository: target.repository,
       title,

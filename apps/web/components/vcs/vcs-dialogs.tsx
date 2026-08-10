@@ -501,7 +501,7 @@ function useVcsDialogsState(
   const registeredCreateTarget = useChangeRequestProviderTarget(sessionId, ps.repo);
   const createPR = useCallback(
     (input: CreateChangeRequestInput) => {
-      if (!registeredCreateTarget) {
+      if (!registeredCreateTarget || !sessionId) {
         return createBuiltInPR(
           input.title,
           input.body,
@@ -519,9 +519,10 @@ function useVcsDialogsState(
         baseBranch: input.baseBranch,
         draft: input.draft,
         branchAlreadyPushed: input.branchAlreadyPushed,
+        sessionId,
       });
     },
-    [createBuiltInPR, push, registeredCreateTarget],
+    [createBuiltInPR, push, registeredCreateTarget, sessionId],
   );
   const supportsDraft = registeredCreateTarget?.provider.supportsDraft !== false;
   const repoDisplayName = useRepoDisplayName(sessionId);

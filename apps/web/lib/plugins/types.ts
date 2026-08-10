@@ -149,6 +149,8 @@ export type WsHandler = (payload: unknown) => void;
 export interface PluginActionInput {
   workspaceId?: string;
   taskId?: string;
+  /** Optional task session selector; host verifies task ownership before forwarding it. */
+  sessionId?: string;
   repositoryId?: string;
   body?: unknown;
 }
@@ -179,6 +181,8 @@ export interface RepositoryInspection {
 export interface RepositoryChangeRequestCreateContext {
   workspaceId: string;
   taskId: string;
+  /** Session whose checkout Kandev pushed before invoking the provider. */
+  sessionId: string;
   repositoryId: string;
   /** Persisted host repository; provider callbacks must not treat browser fields as authority. */
   repository: unknown;

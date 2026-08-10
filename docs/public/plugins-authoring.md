@@ -186,12 +186,16 @@ bookkeeping is host-internal; plugins do not call lifecycle methods.
 | registerComponent | registerComponent(slot, Component); component receives { slotProps?: unknown } | Active ui.bundle | Every registration is owner-tracked, error-isolated, and bulk-revoked | registry.registerComponent("task-sidebar", Panel) |
 | registerWsHandler | registerWsHandler(action, handler(payload)); receives actions bridged from lib/ws | Active ui.bundle | Handler is removed on disable/uninstall; tolerate duplicate/replayed actions | registry.registerWsHandler("acme.updated", renderUpdate) |
 | registerKeybinding | registerKeybinding(id, handler(event)); id must be declared in ui.keybindings; users can override the effective combo | ui.bundle and ui.keybindings[] | Handler is removed on disable/uninstall; editable targets/core shortcuts win | registry.registerKeybinding("open-panel", () => host.openModal(...)) |
+| registerRepositoryProvider | Provider-owned repository list/match/branches/inspect functions plus optional native `createChangeRequest` transport | ui.bundle and matching `repository_providers[]` id | Registration and in-flight callbacks are revoked on unload; host owns native task and Create PR UI | registry.registerRepositoryProvider({ id: "acme", ...provider }) |
+| registerTaskAction | Child action inside the task menu's native Link section | Active ui.bundle | Action is revoked on unload; host supplies current task/workspace and desktop/mobile presentation | registry.registerTaskAction({ id: "link-pr", placement: "link", ... }) |
+| registerReviewProvider | Normalized task reviews, workspace associations, unlink, and shared Review panel | ui.bundle and matching `repository_providers[]` id | Snapshots/subscriptions are owner-scoped and revoked on unload; host owns status chrome, indicators, unlink UI, and responsive Review placement | registry.registerReviewProvider({ id: "acme", ...reviews }) |
 | registerTaskPanel | { id, title, icon?, Component, mobileEnabled? }; adds a row to the task workspace's "+" (add panel) menu; Component receives { panelId, taskId, sessionId, presentation } | Active ui.bundle | Panel renders behind its own error boundary; slow/failed reloads preserve it, a ready generation missing it closes it, and disable/uninstall closes every owned instance | registry.registerTaskPanel({ id: "notes", title: "Notes", Component: NotesPanel }) |
 | registerTaskMenuAction | { id, label, icon?, group: "edit" \| "primary", visible?(context), run(context) }; "edit" nests inside the card's Edit submenu, "primary" renders as a flat top-level item between "Move to"/"Send to workflow" and "Link" | Active ui.bundle | Action is revoked on disable/uninstall; a throwing/rejecting run is caught and logged | registry.registerTaskMenuAction({ id: "enhance", label: "Enhance", group: "edit", run: doEnhance }) |
 | registerTaskFilter | { id, label, getOptions(), matches(context, selected) }; adds a client-side, multi-select filter section to the kanban board's display dropdown, alongside Workflow/Repository | Active ui.bundle | Filter is revoked on disable/uninstall; selections are ephemeral (not persisted); matches is only called for a non-empty selection, and a throw is caught, logged, and treated as non-matching | registry.registerTaskFilter({ id: "tags", label: "Tags", getOptions: listTagOptions, matches: taskHasSelectedTag }) |
 | host.React / host.jsx | Shared React instance and React.createElement alias | Active ui.bundle | No cleanup; never bundle a second React/Radix runtime | const h = host.jsx |
 | host.store | Curated Zustand { getState, setState, subscribe } for the live app store | Active ui.bundle | Unsubscribe in destroy; setState mutates the whole SPA and is not a plugin database | const stop = host.store.subscribe(render) |
 | host.api.fetch / baseUrl | fetch(path, init?) is scoped to /api/plugins/<id>/...; baseUrl is the backend origin for split-origin deployments | Active ui.bundle; backend path must be a declared webhook when relayed | Abort/ignore requests after destroy; do not assume a webhook authenticates callers | host.api.fetch("webhooks/inbound", { method: "POST" }) |
+| host.api.invokeAction | Authenticated call to a declared action with host-verified workspace/task/session/repository selectors and bounded untrusted body | Matching manifest `actions[]` key/scope | Browser abort cancels the bounded plugin RPC; selectors are verified per call | host.api.invokeAction("reviews.get", { taskId }, { signal }) |
 | host.storage | Authenticated, per-user key/value storage: get(scope, scopeId, key)/set(scope, scopeId, key, value, options?)/delete(scope, scopeId, key)/list(scope, scopeId) plus subscribe(filter, handler); no plugin backend required | capabilities.user_state: true | set/delete accept an optional writerId (appended to the host's per-tab id, not a replacement) for echo suppression; list returns every entry under the scope pair, unpaginated | host.storage.set("task", taskId, "note", value, { writerId: panelId }) |
 | host.ui | Curated host instances: Alert*, Badge, Button, Card*, Checkbox, Dialog*, DropdownMenu*, Input, Label, Pagination*, ScrollArea, Select*, Separator, Sheet*, Skeleton, Spinner, Switch, Table*, Tabs*, Textarea, Tooltip*, RichTextEditor, RichTextReadOnly, plus Combobox, PageTopbar, TaskCreateDialog | Active ui.bundle | Host owns contexts/portals; render with host React and let modal/slot cleanup run | const Button = host.ui.Button |
 | host.theme | Current "light" or "dark" theme | Active ui.bundle | Read during render; subscribe through host/app patterns if theme-sensitive | host.theme === "dark" |
@@ -538,12 +542,15 @@ const result = await host.api.invokeAction("pullrequests.link", {
 ```
 
 The JSON envelope uses camelCase resource selectors:
-`{ workspaceId?, taskId?, repositoryId?, body? }`. It is not a source of
+`{ workspaceId?, taskId?, sessionId?, repositoryId?, body? }`. It is not a source of
 authority. A `workspace` action requires only `workspaceId`; a `task` action
 requires `taskId` (an optional matching `workspaceId` is checked) and may include
-`repositoryId` only when that persisted repository is attached to the task; a
+`repositoryId` only when that persisted repository is attached to the task. It may
+include `sessionId` only when that session belongs to the task. When both are present,
+Kandev verifies the repository worktree and derives its non-empty head branch; a
 `repository` action requires `workspaceId` and `repositoryId`. The plugin gets
-only host-verified `actorID`, `workspaceID`, `taskID`, and `repositoryID` plus
+only host-verified `actorID`, `workspaceID`, `taskID`, `sessionID`, `repositoryID`,
+and derived `headBranch` plus
 the bounded JSON `Body`. Unknown actions return 404; bad envelopes and
 scope-selector combinations return 400; unauthenticated calls return 401.
 
@@ -798,6 +805,15 @@ interface PluginHostApi {
   api: {
     // fetch scoped to /api/plugins/{id}/...; relayed to your webhook handler.
     fetch(path: string, init?: RequestInit): Promise<Response>;
+    // Authenticated manifest action. Selectors are verified by Kandev and
+    // delivered separately from the untrusted body.
+    invokeAction<T>(key: string, input?: {
+      workspaceId?: string;
+      taskId?: string;
+      sessionId?: string;
+      repositoryId?: string;
+      body?: unknown;
+    }, options?: { signal?: AbortSignal }): Promise<T>;
     // Backend API origin ("" when the SPA and API share an origin) — lets a
     // plugin reach first-party kandev REST endpoints directly.
     baseUrl: string;
@@ -868,7 +884,11 @@ components remain host-owned; do not move or duplicate them in a plugin UI packa
 A repository provider may implement `createChangeRequest`. Kandev keeps the native
 Create PR dialog and Git eligibility rules, pushes the selected checkout through the
 executor, and only then invokes the provider with the host-verified task and persisted
-repository. Set `supportsDraft: false` when the provider cannot create drafts. Do not
+repository plus the session whose checkout was pushed. The provider should forward
+that `sessionId` as an authenticated task-action selector; Kandev derives the exact
+head branch from its session worktree and the plugin uses `VerifiedActionContext.HeadBranch`.
+Never send or trust a browser body `source` branch. Set `supportsDraft: false` when the
+provider cannot create drafts. Do not
 add a second plugin-owned create button or send provider creation through agentctl.
 An open registered review participates in the same native action eligibility, so the
 primary action stops offering Create PR once that change request is linked.

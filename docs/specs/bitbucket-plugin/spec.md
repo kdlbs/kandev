@@ -304,9 +304,10 @@ for its declared provider; exact repository path matching remains case-sensitive
   retry that could create a duplicate remote pull request.
 - **GIVEN** an eligible Bitbucket task has commits and no linked pull request, **WHEN**
   the user submits native **Create PR**, **THEN** Kandev pushes the selected checkout
-  branch, invokes the active provider callback, associates the created pull request,
-  and reports a post-push create failure as retryable without adding Bitbucket logic to
-  `agentctl`.
+  branch, verifies the selected session/repository worktree and passes its server-derived
+  head branch to the active provider, associates the created pull request, and reports a
+  post-push create failure as retryable without trusting a browser source branch or
+  adding Bitbucket logic to `agentctl`.
 - **GIVEN** one or more Bitbucket pull requests are linked to a task, **WHEN** association
   data loads or one link is removed, **THEN** the native task-row/card glyph count and
   shared unlink controls update reactively on desktop and mobile while other links

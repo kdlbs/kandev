@@ -110,10 +110,9 @@ surface.
   change-request lists, rows, toolbars, scope controls, task preset menus, and
   linked-task indicators. Use the shared semantic `IntegrationIcon` glyphs instead of
   copying first-party SVG paths. Keep provider API/state logic in adapters; do not fork row
-  anatomy or add dashboard review/launch flows outside the native task dialog
-  and registered task review surface. A plugin may override create-mode transport only
-  to route the unchanged native task payload through an authenticated plugin action;
-  that server action, not the browser, resolves the trusted repository descriptor.
+  anatomy or add dashboard review/launch flows outside the native task dialog and
+  registered review surface. Plugins may override create transport only through an
+  authenticated action; host verifies repository, session, and worktree branch authority.
 - **Code-host task status:** registered review providers publish normalized
   `ReviewItemSummary.taskStatus`. Host task chrome automatically renders the shared
   topbar button, composer CI chip, desktop popover/mobile drawer, and 90-second

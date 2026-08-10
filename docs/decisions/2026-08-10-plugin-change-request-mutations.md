@@ -18,17 +18,22 @@ change requests.
 `RepositoryProviderRegistration` gains an optional provider-neutral change-request
 creation callback. Kandev keeps the native create dialog and performs the ordinary Git
 push first through the existing executor path. Only after that push succeeds does the
-host call the active repository provider with the current workspace, task, persisted
-repository, title, description, destination branch, and supported options. Plugin
-callbacks must cross the authenticated action boundary; plugin servers rederive
-repository and checkout authority from the verified task/repository context.
+host call the active repository provider with the current workspace, task, session,
+persisted repository, title, description, destination branch, and supported options.
+Plugin callbacks must cross the authenticated action boundary. The callback forwards
+the session only as a selector: Kandev verifies that it belongs to the task, resolves
+the selected repository's exact worktree branch server-side, and adds that branch to
+`VerifiedActionContext`. Plugin servers use this verified head branch and repository;
+browser body fields never select the source branch.
 Normalized open reviews from registered providers also participate in the native VCS
 action state, so an already-linked plugin change request suppresses the primary
 **Create PR** action exactly like a built-in pull request.
-For a task-scoped action, the browser may include an optional `repositoryId`.
-Kandev accepts it only when that persisted repository is attached to the verified
-task, then supplies both IDs in `VerifiedActionContext`; omitting it preserves the
-existing task-only action behavior.
+For a task-scoped action, the browser may include optional `repositoryId` and
+`sessionId` selectors. Kandev accepts the repository only when it is attached to the
+verified task and accepts the session only when it belongs to that task. When both
+selectors are present, the repository must have a worktree in that session and Kandev
+supplies its non-empty branch as `headBranch`; omitting selectors preserves existing
+task-only action behavior.
 
 `ReviewProviderRegistration` gains optional unlink and workspace-association external-
 store methods. Kandev renders unlink controls and task-row/card change-request glyphs
@@ -50,6 +55,8 @@ workflows without provider-specific host branches. Creation now has a deliberate
 two-stage failure model: a successful push followed by a failed remote create reopens
 the native dialog in retry state and does not push again unnecessarily. Provider
 implementations must truthfully declare option support and make create retries safe.
+Normal Kandev tasks need not copy session worktree branches into task-repository
+metadata merely to authorize a plugin create operation.
 
 ## Alternatives Considered
 

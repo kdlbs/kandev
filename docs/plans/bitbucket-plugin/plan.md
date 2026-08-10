@@ -120,7 +120,7 @@ Wave 3g (after 12e and 12f):
 
 Wave 3h (corrective native workflow pass after final manual evaluation):
 
-- [ ] [task 12h — native create, unlink, task indicators, and saved queries](task-12h-native-create-unlink-indicators-saved-queries.md)
+- [x] [task 12h — native create, unlink, task indicators, and saved queries](task-12h-native-create-unlink-indicators-saved-queries.md)
 
 Wave 4:
 
@@ -128,8 +128,7 @@ Wave 4:
 
 ## Current status
 
-Tasks 01–12g are implemented. Task 12h is in progress; Task 13 remains the
-release/marketplace gate.
+Tasks 01–12h are implemented. Task 13 remains the release/marketplace gate.
 Live Cloud evaluation showed that task 12's permanent
 desktop queue/review split diverged from the first-party `/github` page despite being
 functionally complete; task 12b replaced it with the approved list-first parity model
@@ -160,6 +159,11 @@ used by GitHub itself. Package 0.1.10 passed desktop/touch live acceptance: the 
 topbar/composer anatomy, shared review detail, manual linking, exact-branch auto-link,
 and a real `SUCCESSFUL -> INPROGRESS -> FAILED -> SUCCESSFUL` pipeline cycle all passed;
 the fixture was restored.
+Task 12h closed the final manual-evaluation gaps. Package 0.1.12 proved native Create PR
+through the registered provider after a real Git push, shared unlink with reload-safe
+detachment, workspace-hydrated sidebar indicators, and saved-query persistence and
+restoration. The native Create PR control remains Kandev's existing Changes-panel
+control; no duplicate plugin-specific create button was added.
 The packaged generic host contract passes on desktop and
 mobile. The actual package passes its unconfigured action, disable/re-enable, desktop,
 and mobile lifecycle checks; its canonical composer reference now rehydrates the

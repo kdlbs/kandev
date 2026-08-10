@@ -72,6 +72,7 @@ interface PluginHostApi {
       input?: {
         workspaceId?: string;
         taskId?: string;
+        sessionId?: string;
         repositoryId?: string;
         body?: unknown;
       },
@@ -258,6 +259,9 @@ For `host.api.invokeAction`, workspace-scoped actions accept only `workspaceId`;
 repository-scoped actions accept `workspaceId` plus `repositoryId`; task-scoped
 actions require `taskId`, may include a matching `workspaceId`, and may include
 `repositoryId` only when that persisted repository is attached to the verified task.
+A task action may also include `sessionId`; the host verifies it belongs to that task.
+When both session and repository selectors are present, the host resolves the exact
+non-empty worktree branch and exposes it only in the backend verified action context.
 Resource selectors never become part of the untrusted action body.
 
 `host.ui` contents: shadcn primitives (Accordion*, Alert*, Badge, Button,
@@ -687,6 +691,7 @@ interface RepositoryProviderRegistration {
   createChangeRequest?(context: {
     workspaceId: string;
     taskId: string;
+    sessionId: string; // session whose checkout Kandev pushed
     repositoryId: string;
     repository: unknown; // persisted host repository, not browser authority
     title: string;

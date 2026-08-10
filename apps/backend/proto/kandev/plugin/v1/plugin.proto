@@ -156,6 +156,8 @@ message VerifiedActionContext {
   string workspace_id = 2;
   string task_id = 3;
   string repository_id = 4;
+  string session_id = 5;
+  string head_branch = 6;
 }
 message PluginActionResponse {
   bytes body = 1;

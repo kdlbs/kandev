@@ -17,7 +17,8 @@ import (
 // pair with a real GRPCBroker, matching production transport behavior).
 type fakeAuthorPlugin struct {
 	UnimplementedPlugin
-	events []*Event
+	events  []*Event
+	actions []*PluginActionRequest
 }
 
 func (p *fakeAuthorPlugin) OnEvent(_ context.Context, e *Event) error {
@@ -29,7 +30,8 @@ func (p *fakeAuthorPlugin) HandleWebhook(_ context.Context, req *WebhookRequest)
 	return &WebhookResponse{Status: 200, Body: append([]byte("got:"), req.Body...)}, nil
 }
 
-func (*fakeAuthorPlugin) HandleAction(_ context.Context, req *PluginActionRequest) (*PluginActionResponse, error) {
+func (p *fakeAuthorPlugin) HandleAction(_ context.Context, req *PluginActionRequest) (*PluginActionResponse, error) {
+	p.actions = append(p.actions, req)
 	return &PluginActionResponse{Body: append([]byte(req.Context.ActorID+":"), req.Body...), Headers: map[string]string{"Content-Type": "application/json"}}, nil
 }
 
@@ -105,12 +107,17 @@ func TestServe_EndToEnd(t *testing.T) {
 	t.Run("OptionalPluginExtensions", func(t *testing.T) {
 		action, err := remote.HandleAction(context.Background(), &PluginActionRequest{
 			ActionKey: "connection.get",
-			Context:   VerifiedActionContext{ActorID: "user-1", WorkspaceID: "ws-1"},
-			Body:      []byte(`{"connected":true}`),
+			Context: VerifiedActionContext{
+				ActorID: "user-1", WorkspaceID: "ws-1", TaskID: "task-1",
+				RepositoryID: "repository-1", SessionID: "session-1", HeadBranch: "feature/native-create",
+			},
+			Body: []byte(`{"connected":true}`),
 		})
 		require.NoError(t, err)
 		require.Equal(t, []byte(`user-1:{"connected":true}`), action.Body)
 		require.Equal(t, "application/json", action.Headers["Content-Type"])
+		require.Equal(t, "session-1", author.actions[0].Context.SessionID)
+		require.Equal(t, "feature/native-create", author.actions[0].Context.HeadBranch)
 
 		search, err := remote.SearchEntityReferences(context.Background(), &SearchEntityReferencesRequest{Source: "bitbucket", WorkspaceID: "ws-1", Query: "build", Limit: 5})
 		require.NoError(t, err)

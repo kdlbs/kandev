@@ -140,6 +140,7 @@ describe("buildHostApi", () => {
         {
           workspaceId: "workspace-a",
           taskId: "task-a",
+          sessionId: "session-a",
           repositoryId: "repository-a",
           body: { token: "redacted" },
         },
@@ -157,6 +158,7 @@ describe("buildHostApi", () => {
     expect(JSON.parse(init.body)).toEqual({
       workspaceId: "workspace-a",
       taskId: "task-a",
+      sessionId: "session-a",
       repositoryId: "repository-a",
       body: { token: "redacted" },
     });

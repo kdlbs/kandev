@@ -514,6 +514,7 @@ function invokePluginAction<TResponse>(
   const payload = {
     ...(input?.workspaceId ? { workspaceId: input.workspaceId } : {}),
     ...(input?.taskId ? { taskId: input.taskId } : {}),
+    ...(input?.sessionId ? { sessionId: input.sessionId } : {}),
     ...(input?.repositoryId ? { repositoryId: input.repositoryId } : {}),
     ...(input && "body" in input ? { body: input.body } : {}),
   };

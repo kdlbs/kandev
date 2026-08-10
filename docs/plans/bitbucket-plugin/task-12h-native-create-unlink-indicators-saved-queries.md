@@ -1,7 +1,7 @@
 ---
 id: "12h-native-create-unlink-indicators-saved-queries"
 title: "Close native create, unlink, task-indicator, and saved-query gaps"
-status: in_progress
+status: completed
 wave: 3h
 depends_on: ["12g-bitbucket-status-detail-adapters"]
 plan: "plan.md"
@@ -69,3 +69,18 @@ dashboard saved queries with GitHub/GitLab interaction parity.
   per-task provider polling is not acceptable.
 - `host.storage` is permission-gated; upgrade failure must remain visible and must not
   corrupt in-memory saved-query state.
+
+## Completion evidence
+
+- Native **Create PR** pushed the verified session checkout, dispatched
+  `pullrequests.create` through the registered Bitbucket provider, received HTTP 201,
+  and linked the returned pull request without adding Bitbucket logic to agentctl.
+- Shared desktop status hover exposed unlink; unlink removed topbar/composer status and
+  sidebar indicator immediately and remained detached after a full reload.
+- Workspace association hydration rendered linked pull-request indicators across the
+  sidebar from one provider snapshot.
+- A changed dashboard query enabled **Save current query**; the shared host dialog saved
+  it, reload retained it, and selecting it restored the exact query.
+- Host focused frontend tests (100), typecheck, ESLint, backend plugin/SDK tests, Go
+  lint, plugin UI tests (44), plugin Go race tests, vet, package verification, and public
+  docs validation all passed.

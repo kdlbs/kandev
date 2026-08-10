@@ -66,6 +66,18 @@ describe("resolveChangeRequestProviderTarget", () => {
     expect(target?.repositoryId).toBe("repo-a");
   });
 
+  it("uses the primary repository for the empty scope emitted by single-repo Git UI", () => {
+    const registration = provider();
+    const target = resolveChangeRequestProviderTarget({
+      task,
+      repositories,
+      repositoryScope: "",
+      getProvider: () => registration,
+    });
+
+    expect(target?.repositoryId).toBe("repo-a");
+  });
+
   it("falls back to the built-in flow when provider create is absent or scope is ambiguous", () => {
     expect(
       resolveChangeRequestProviderTarget({
@@ -116,6 +128,7 @@ describe("createChangeRequestWithProvider", () => {
       baseBranch: "main",
       draft: false,
       branchAlreadyPushed: false,
+      sessionId: "session-a",
     });
 
     expect(order).toEqual(["push", "create"]);
@@ -124,6 +137,7 @@ describe("createChangeRequestWithProvider", () => {
       expect.objectContaining({
         workspaceId: WORKSPACE_ID,
         taskId: "task-a",
+        sessionId: "session-a",
         repositoryId: "repo-a",
         title: "Create plugin PR",
         body: "Body",
@@ -156,6 +170,7 @@ describe("createChangeRequestWithProvider", () => {
       body: "",
       draft: false,
       branchAlreadyPushed: false,
+      sessionId: "session-a",
     });
 
     expect(createChangeRequest).not.toHaveBeenCalled();
@@ -180,6 +195,7 @@ describe("createChangeRequestWithProvider", () => {
       body: "",
       draft: false,
       branchAlreadyPushed: true,
+      sessionId: "session-a",
     });
 
     expect(push).not.toHaveBeenCalled();

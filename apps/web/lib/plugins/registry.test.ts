@@ -656,6 +656,7 @@ describe("pluginRegistry — repository change-request lifecycle", () => {
     const request = provider.createChangeRequest!({
       workspaceId: WORKSPACE_ID,
       taskId: "task-a",
+      sessionId: "session-a",
       repositoryId: "repo-a",
       repository: {},
       title: "Title",
