@@ -2,6 +2,7 @@ package sqlite_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
@@ -225,7 +226,14 @@ func TestListTasksFiltered_AssigneeAndProjectFilters(t *testing.T) {
 		t.Fatalf("seed runners: %v", err)
 	}
 
-	page, err := repo.ListTasksFiltered(ctx, "ws-1", sqlite.ListTasksOptions{AssigneeID: "agent-x"})
+	// The sort is stated explicitly rather than relying on the zero-value
+	// default, so a change of default surfaces as a sort failure elsewhere
+	// instead of a confusing "wrong ids" failure here.
+	ascByUpdated := sqlite.ListTasksOptions{SortField: sqlite.TaskSortUpdatedAt, SortDesc: false}
+
+	opts := ascByUpdated
+	opts.AssigneeID = "agent-x"
+	page, err := repo.ListTasksFiltered(ctx, "ws-1", opts)
 	if err != nil {
 		t.Fatalf("filter by assignee: %v", err)
 	}
@@ -236,7 +244,9 @@ func TestListTasksFiltered_AssigneeAndProjectFilters(t *testing.T) {
 		t.Errorf("assignee = %q, want agent-x projected onto the row", page.Tasks[0].AssigneeAgentProfileID)
 	}
 
-	page, err = repo.ListTasksFiltered(ctx, "ws-1", sqlite.ListTasksOptions{ProjectID: "proj-a"})
+	opts = ascByUpdated
+	opts.ProjectID = "proj-a"
+	page, err = repo.ListTasksFiltered(ctx, "ws-1", opts)
 	if err != nil {
 		t.Fatalf("filter by project: %v", err)
 	}
@@ -244,9 +254,10 @@ func TestListTasksFiltered_AssigneeAndProjectFilters(t *testing.T) {
 		t.Fatalf("project filter = %v, want [af-1 af-2]", got)
 	}
 
-	page, err = repo.ListTasksFiltered(ctx, "ws-1", sqlite.ListTasksOptions{
-		AssigneeID: "agent-x", ProjectID: "proj-b",
-	})
+	opts = ascByUpdated
+	opts.AssigneeID = "agent-x"
+	opts.ProjectID = "proj-b"
+	page, err = repo.ListTasksFiltered(ctx, "ws-1", opts)
 	if err != nil {
 		t.Fatalf("combined filter: %v", err)
 	}
@@ -328,25 +339,45 @@ func TestListTasksFiltered_CursorPerSortField(t *testing.T) {
 	}
 }
 
-// An out-of-range limit is clamped to 100 rather than rejected.
+// An out-of-range limit is clamped to 100 rather than rejected. Seeding 101
+// rows is what makes the clamp observable: with fewer rows than the clamp,
+// every limit ≥ the row count returns the same page and the assertion would
+// hold no matter what resolveListTasksOptions did.
 func TestListTasksFiltered_ClampsLimit(t *testing.T) {
 	repo := newTestRepo(t)
 	ensureTasksTable(t, repo)
 	ctx := context.Background()
 
-	insertTaskRow(t, repo, "cl-1", "ws-1", "TODO", "medium", "2026-04-01T12:00:00Z")
+	for i := 0; i < 101; i++ {
+		insertTaskRow(t, repo,
+			fmt.Sprintf("cl-%03d", i), "ws-1", "TODO", "medium",
+			fmt.Sprintf("2026-04-01T12:%02d:00Z", i%60))
+	}
 
 	for _, limit := range []int{0, -5, 501} {
 		page, err := repo.ListTasksFiltered(ctx, "ws-1", sqlite.ListTasksOptions{Limit: limit})
 		if err != nil {
 			t.Fatalf("limit %d: %v", limit, err)
 		}
-		if len(page.Tasks) != 1 {
-			t.Errorf("limit %d returned %d rows, want 1", limit, len(page.Tasks))
+		if len(page.Tasks) != 100 {
+			t.Errorf("limit %d returned %d rows, want the clamped 100", limit, len(page.Tasks))
 		}
-		if page.NextCursor != "" {
-			t.Errorf("limit %d NextCursor = %q, want empty", limit, page.NextCursor)
+		// 101 rows against a clamp of 100 means there is a next page.
+		if page.NextCursor == "" {
+			t.Errorf("limit %d NextCursor is empty, want the 101st row to be reachable", limit)
 		}
+		if page.NextID == "" {
+			t.Errorf("limit %d NextID is empty, want the tail row id", limit)
+		}
+	}
+
+	// An in-range limit is honoured verbatim, so the clamp is not blanket.
+	page, err := repo.ListTasksFiltered(ctx, "ws-1", sqlite.ListTasksOptions{Limit: 7})
+	if err != nil {
+		t.Fatalf("limit 7: %v", err)
+	}
+	if len(page.Tasks) != 7 {
+		t.Errorf("limit 7 returned %d rows, want 7", len(page.Tasks))
 	}
 }
 

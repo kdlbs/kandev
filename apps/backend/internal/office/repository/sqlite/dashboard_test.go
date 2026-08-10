@@ -41,23 +41,28 @@ func ensureSessionTables(t *testing.T, repo *sqlite.Repository) {
 	}
 }
 
-// dayStamp renders a SQLite-storable timestamp `offsetDays` before today,
+// dayStamp renders a SQLite-storable timestamp `offsetDays` before `base`,
 // at the given hour. Returned in the format mattn/go-sqlite3 parses back
 // into a UTC time.Time.
-func dayStamp(offsetDays, hour int) string {
-	d := time.Now().UTC().AddDate(0, 0, -offsetDays)
+//
+// The base time is passed in rather than read here so a test's seed rows and
+// its assertions come from one clock read: these queries bucket by calendar
+// day, so a UTC midnight crossing between seeding and asserting would
+// otherwise name a different day and fail with no code defect.
+func dayStamp(base time.Time, offsetDays, hour int) string {
+	d := base.AddDate(0, 0, -offsetDays)
 	return fmt.Sprintf("%s %02d:00:00", d.Format("2006-01-02"), hour)
 }
 
-func dayDate(offsetDays int) string {
-	return time.Now().UTC().AddDate(0, 0, -offsetDays).Format("2006-01-02")
+func dayDate(base time.Time, offsetDays int) string {
+	return base.AddDate(0, 0, -offsetDays).Format("2006-01-02")
 }
 
 func TestQueryRunActivity_BucketsOutcomesPerDay(t *testing.T) {
 	repo := newSearchTestRepo(t)
 	ensureSessionTables(t, repo)
 	ctx := context.Background()
-
+	base := time.Now().UTC()
 	if _, err := repo.ExecRaw(ctx, `
 		INSERT INTO tasks (id, workspace_id, title, is_ephemeral, origin, created_at, updated_at) VALUES
 			('t-main',  'ws-1', 'main',  0, 'manual',         datetime('now'), datetime('now')),
@@ -78,14 +83,14 @@ func TestQueryRunActivity_BucketsOutcomesPerDay(t *testing.T) {
 			('s-auto',        't-auto',  'COMPLETED', ?, ?),
 			('s-otherws',     't-other', 'COMPLETED', ?, ?)
 	`,
-		dayStamp(0, 10), dayStamp(0, 10),
-		dayStamp(0, 11), dayStamp(0, 11),
-		dayStamp(0, 12), dayStamp(0, 12),
-		dayStamp(1, 9), dayStamp(1, 9),
-		dayStamp(60, 9), dayStamp(60, 9),
-		dayStamp(0, 13), dayStamp(0, 13),
-		dayStamp(0, 14), dayStamp(0, 14),
-		dayStamp(0, 15), dayStamp(0, 15),
+		dayStamp(base, 0, 10), dayStamp(base, 0, 10),
+		dayStamp(base, 0, 11), dayStamp(base, 0, 11),
+		dayStamp(base, 0, 12), dayStamp(base, 0, 12),
+		dayStamp(base, 1, 9), dayStamp(base, 1, 9),
+		dayStamp(base, 60, 9), dayStamp(base, 60, 9),
+		dayStamp(base, 0, 13), dayStamp(base, 0, 13),
+		dayStamp(base, 0, 14), dayStamp(base, 0, 14),
+		dayStamp(base, 0, 15), dayStamp(base, 0, 15),
 	); err != nil {
 		t.Fatalf("seed sessions: %v", err)
 	}
@@ -98,13 +103,13 @@ func TestQueryRunActivity_BucketsOutcomesPerDay(t *testing.T) {
 		t.Fatalf("rows = %d, want 2 (today + yesterday): %+v", len(rows), rows)
 	}
 	// ORDER BY date — oldest first.
-	if rows[0].Date != dayDate(1) {
-		t.Errorf("rows[0].Date = %q, want yesterday %q (ascending order)", rows[0].Date, dayDate(1))
+	if rows[0].Date != dayDate(base, 1) {
+		t.Errorf("rows[0].Date = %q, want yesterday %q (ascending order)", rows[0].Date, dayDate(base, 1))
 	}
-	if rows[0] != (sqlite.RunActivityRow{Date: dayDate(1), Succeeded: 1}) {
+	if rows[0] != (sqlite.RunActivityRow{Date: dayDate(base, 1), Succeeded: 1}) {
 		t.Errorf("yesterday = %+v, want 1 succeeded only", rows[0])
 	}
-	want := sqlite.RunActivityRow{Date: dayDate(0), Succeeded: 1, Failed: 1, Other: 1}
+	want := sqlite.RunActivityRow{Date: dayDate(base, 0), Succeeded: 1, Failed: 1, Other: 1}
 	if rows[1] != want {
 		t.Errorf("today = %+v, want %+v", rows[1], want)
 	}

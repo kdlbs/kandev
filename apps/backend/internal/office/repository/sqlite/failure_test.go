@@ -95,8 +95,12 @@ func TestIncrementAgentConsecutiveFailures_MissingAgent(t *testing.T) {
 	repo, _ := newTestRepoWithDB(t)
 
 	// The UPDATE matches nothing, so the follow-up SELECT has no row.
-	if _, err := repo.IncrementAgentConsecutiveFailures(context.Background(), "ghost"); err == nil {
+	_, err := repo.IncrementAgentConsecutiveFailures(context.Background(), "ghost")
+	if err == nil {
 		t.Fatal("increment on a missing agent = nil error, want sql.ErrNoRows")
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("error = %v, want sql.ErrNoRows", err)
 	}
 }
 
@@ -151,6 +155,8 @@ func TestGetEffectiveFailureThreshold_PrecedenceChain(t *testing.T) {
 
 	if _, err := repo.GetEffectiveFailureThreshold(ctx, "ghost"); err == nil {
 		t.Error("threshold for a missing agent = nil error, want sql.ErrNoRows")
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("error = %v, want sql.ErrNoRows", err)
 	}
 }
 

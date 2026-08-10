@@ -3,6 +3,7 @@ package sqlite_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 )
@@ -66,8 +67,9 @@ func seedActivity(t *testing.T, repo *sqlite.Repository, id, actorID, targetType
 func TestRunCountsByDayForAgent_BucketsStatuses(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
+	base := time.Now().UTC()
 
-	today, yday, ancient := dayStamp(0, 10), dayStamp(1, 10), dayStamp(60, 10)
+	today, yday, ancient := dayStamp(base, 0, 10), dayStamp(base, 1, 10), dayStamp(base, 60, 10)
 	seedSummaryRun(t, repo, "r-fin", "agent-a", "finished", today, "", "", "")
 	seedSummaryRun(t, repo, "r-fail", "agent-a", "failed", today, "", "", "")
 	seedSummaryRun(t, repo, "r-timeout", "agent-a", "timed_out", today, "", "", "")
@@ -85,13 +87,13 @@ func TestRunCountsByDayForAgent_BucketsStatuses(t *testing.T) {
 		t.Fatalf("rows = %d, want 2 (today + yesterday, the 60-day-old row is past the cutoff): %+v",
 			len(rows), rows)
 	}
-	if rows[0].Date != dayDate(1) {
-		t.Errorf("rows[0].Date = %q, want %q (ORDER BY date ascending)", rows[0].Date, dayDate(1))
+	if rows[0].Date != dayDate(base, 1) {
+		t.Errorf("rows[0].Date = %q, want %q (ORDER BY date ascending)", rows[0].Date, dayDate(base, 1))
 	}
-	if want := (sqlite.AgentRunDayRow{Date: dayDate(1), Succeeded: 1}); rows[0] != want {
+	if want := (sqlite.AgentRunDayRow{Date: dayDate(base, 1), Succeeded: 1}); rows[0] != want {
 		t.Errorf("yesterday = %+v, want %+v", rows[0], want)
 	}
-	want := sqlite.AgentRunDayRow{Date: dayDate(0), Succeeded: 1, Failed: 2, Other: 2}
+	want := sqlite.AgentRunDayRow{Date: dayDate(base, 0), Succeeded: 1, Failed: 2, Other: 2}
 	if rows[1] != want {
 		t.Errorf("today = %+v, want %+v (timed_out counts as failed; queued+cancelled as other)", rows[1], want)
 	}
@@ -100,9 +102,10 @@ func TestRunCountsByDayForAgent_BucketsStatuses(t *testing.T) {
 func TestRunCountsByDayForAgent_NonPositiveDaysDefaultsTo14(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
+	base := time.Now().UTC()
 
-	seedSummaryRun(t, repo, "r-in", "agent-a", "finished", dayStamp(10, 10), "", "", "")
-	seedSummaryRun(t, repo, "r-out", "agent-a", "finished", dayStamp(20, 10), "", "", "")
+	seedSummaryRun(t, repo, "r-in", "agent-a", "finished", dayStamp(base, 10, 10), "", "", "")
+	seedSummaryRun(t, repo, "r-out", "agent-a", "finished", dayStamp(base, 20, 10), "", "", "")
 
 	rows, err := repo.RunCountsByDayForAgent(ctx, "agent-a", 0)
 	if err != nil {
@@ -111,14 +114,15 @@ func TestRunCountsByDayForAgent_NonPositiveDaysDefaultsTo14(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("rows = %d, want 1 (14-day default window): %+v", len(rows), rows)
 	}
-	if rows[0].Date != dayDate(10) {
-		t.Errorf("date = %q, want %q", rows[0].Date, dayDate(10))
+	if rows[0].Date != dayDate(base, 10) {
+		t.Errorf("date = %q, want %q", rows[0].Date, dayDate(base, 10))
 	}
 }
 
 func TestTasksByPriorityByDayForAgent(t *testing.T) {
 	repo := newSearchTestRepo(t)
 	ctx := context.Background()
+	base := time.Now().UTC()
 
 	if _, err := repo.ExecRaw(ctx, `
 		INSERT INTO tasks (id, workspace_id, title, priority, created_at, updated_at) VALUES
@@ -129,10 +133,10 @@ func TestTasksByPriorityByDayForAgent(t *testing.T) {
 	`); err != nil {
 		t.Fatalf("seed tasks: %v", err)
 	}
-	today, yday := dayStamp(0, 10), dayStamp(1, 10)
+	today, yday := dayStamp(base, 0, 10), dayStamp(base, 1, 10)
 	// Two activity rows on the same (day, task) must collapse to one count.
 	seedActivity(t, repo, "a-1", "agent-a", "task", "pt-crit", today)
-	seedActivity(t, repo, "a-2", "agent-a", "task", "pt-crit", dayStamp(0, 14))
+	seedActivity(t, repo, "a-2", "agent-a", "task", "pt-crit", dayStamp(base, 0, 14))
 	seedActivity(t, repo, "a-3", "agent-a", "task", "pt-high", today)
 	seedActivity(t, repo, "a-4", "agent-a", "task", "pt-med", yday)
 	seedActivity(t, repo, "a-5", "agent-a", "task", "pt-low", yday)
@@ -149,11 +153,11 @@ func TestTasksByPriorityByDayForAgent(t *testing.T) {
 	if len(rows) != 2 {
 		t.Fatalf("rows = %d, want 2 days: %+v", len(rows), rows)
 	}
-	wantYday := sqlite.AgentTaskPriorityDayRow{Date: dayDate(1), Medium: 1, Low: 1}
+	wantYday := sqlite.AgentTaskPriorityDayRow{Date: dayDate(base, 1), Medium: 1, Low: 1}
 	if rows[0] != wantYday {
 		t.Errorf("yesterday = %+v, want %+v", rows[0], wantYday)
 	}
-	wantToday := sqlite.AgentTaskPriorityDayRow{Date: dayDate(0), Critical: 1, High: 1}
+	wantToday := sqlite.AgentTaskPriorityDayRow{Date: dayDate(base, 0), Critical: 1, High: 1}
 	if rows[1] != wantToday {
 		t.Errorf("today = %+v, want %+v (two activity rows on one task count once)", rows[1], wantToday)
 	}
@@ -162,6 +166,7 @@ func TestTasksByPriorityByDayForAgent(t *testing.T) {
 func TestTasksByStatusByDayForAgent(t *testing.T) {
 	repo := newSearchTestRepo(t)
 	ctx := context.Background()
+	base := time.Now().UTC()
 
 	if _, err := repo.ExecRaw(ctx, `
 		INSERT INTO tasks (id, workspace_id, title, state, created_at, updated_at) VALUES
@@ -175,7 +180,7 @@ func TestTasksByStatusByDayForAgent(t *testing.T) {
 	`); err != nil {
 		t.Fatalf("seed tasks: %v", err)
 	}
-	today := dayStamp(0, 10)
+	today := dayStamp(base, 0, 10)
 	for i, id := range []string{
 		"st-todo", "st-prog", "st-review", "st-done", "st-block", "st-cancel", "st-backlog",
 	} {
@@ -191,7 +196,7 @@ func TestTasksByStatusByDayForAgent(t *testing.T) {
 		t.Fatalf("rows = %d, want 1 day: %+v", len(rows), rows)
 	}
 	want := sqlite.AgentTaskStatusDayRow{
-		Date: dayDate(0), Todo: 1, InProgress: 1, InReview: 1,
+		Date: dayDate(base, 0), Todo: 1, InProgress: 1, InReview: 1,
 		Done: 1, Blocked: 1, Cancelled: 1, Backlog: 1,
 	}
 	if rows[0] != want {
@@ -249,6 +254,7 @@ func TestRecentTasksForAgent(t *testing.T) {
 func TestRecentTasksForAgent_NonPositiveLimitDefaultsTo10(t *testing.T) {
 	repo := newSearchTestRepo(t)
 	ctx := context.Background()
+	base := time.Now().UTC()
 
 	for i := 0; i < 12; i++ {
 		id := string(rune('a' + i))
@@ -258,7 +264,7 @@ func TestRecentTasksForAgent_NonPositiveLimitDefaultsTo10(t *testing.T) {
 		`, id); err != nil {
 			t.Fatalf("seed task %s: %v", id, err)
 		}
-		seedActivity(t, repo, "act-"+id, "agent-a", "task", id, dayStamp(i, 10))
+		seedActivity(t, repo, "act-"+id, "agent-a", "task", id, dayStamp(base, i, 10))
 	}
 
 	rows, err := repo.RecentTasksForAgent(ctx, "agent-a", 0)

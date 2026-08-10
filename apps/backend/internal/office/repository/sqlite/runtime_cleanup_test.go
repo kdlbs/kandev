@@ -137,8 +137,10 @@ func TestDeleteBudgetPoliciesForRemovedScopes(t *testing.T) {
 	if removed != 2 {
 		t.Errorf("rows affected = %d, want 2", removed)
 	}
-	if n := countRows(t, repo, `SELECT COUNT(*) FROM office_budget_policies WHERE scope_type = 'agent'`); n != 1 {
-		t.Errorf("agent policies = %d, want 1", n)
+	// Assert identity, not just the count: deleting the wrong two rows
+	// leaves the same total behind.
+	if got := scopeIDs(t, repo, "agent"); strings.Join(got, ",") != "agent-live" {
+		t.Errorf("surviving agent scopes = %v, want only agent-live", got)
 	}
 	// A different scope_type is out of scope for this call.
 	if n := countRows(t, repo, `SELECT COUNT(*) FROM office_budget_policies WHERE scope_type = 'project'`); n != 1 {
@@ -196,8 +198,10 @@ func TestDeleteChannelsForRemovedAgents(t *testing.T) {
 	if removed != 1 {
 		t.Errorf("rows affected = %d, want 1", removed)
 	}
-	if n := countRows(t, repo, `SELECT COUNT(*) FROM office_channels`); n != 2 {
-		t.Errorf("channels = %d, want 2", n)
+	// Both of the live agent's channels must survive and the removed
+	// agent's must be gone — a count of 2 alone does not say which.
+	if got := channelIDs(t, repo); strings.Join(got, ",") != "ch-live,ch-live-2" {
+		t.Errorf("surviving channels = %v, want ch-live,ch-live-2", got)
 	}
 
 	// Nothing left to remove.
@@ -220,6 +224,30 @@ func TestDeleteChannelsForRemovedAgents(t *testing.T) {
 	if n := countRows(t, repo, `SELECT COUNT(*) FROM office_channels`); n != 0 {
 		t.Errorf("channels = %d, want 0", n)
 	}
+}
+
+// scopeIDs returns the surviving budget-policy scope ids for a scope type,
+// sorted, so tests can assert which rows a cleanup preserved.
+func scopeIDs(t *testing.T, repo *sqlite.Repository, scopeType string) []string {
+	t.Helper()
+	var ids []string
+	if err := repo.ReaderDB().Select(&ids,
+		`SELECT scope_id FROM office_budget_policies WHERE scope_type = ? ORDER BY scope_id`,
+		scopeType); err != nil {
+		t.Fatalf("select scope ids: %v", err)
+	}
+	return ids
+}
+
+// channelIDs returns the surviving channel ids, sorted.
+func channelIDs(t *testing.T, repo *sqlite.Repository) []string {
+	t.Helper()
+	var ids []string
+	if err := repo.ReaderDB().Select(&ids,
+		`SELECT id FROM office_channels ORDER BY id`); err != nil {
+		t.Fatalf("select channel ids: %v", err)
+	}
+	return ids
 }
 
 func countRows(t *testing.T, repo *sqlite.Repository, query string) int {
