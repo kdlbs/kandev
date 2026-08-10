@@ -62,6 +62,7 @@ describe("resolveSpaRoute", () => {
     expect(resolveSpaRoute("/tasks", new URLSearchParams())).toEqual({ kind: "tasks" });
     expect(resolveSpaRoute("/github", new URLSearchParams())).toEqual({ kind: "github" });
     expect(resolveSpaRoute("/gitlab", new URLSearchParams())).toEqual({ kind: "gitlab" });
+    expect(resolveSpaRoute("/forgejo", new URLSearchParams())).toEqual({ kind: "forgejo" });
     expect(resolveSpaRoute("/jira", new URLSearchParams())).toEqual({ kind: "jira" });
     expect(resolveSpaRoute("/linear", new URLSearchParams())).toEqual({ kind: "linear" });
   });

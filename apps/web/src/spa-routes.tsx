@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { GitHubPageClient } from "@/app/github/github-page-client";
 import { GitLabPageClient } from "@/app/gitlab/gitlab-page-client";
+import { ForgejoPageClient } from "@/app/forgejo/forgejo-page-client";
 import { AzureDevOpsPageClient } from "@/app/azure-devops/azure-devops-page-client";
 import { JiraPageClient } from "@/app/jira/jira-page-client";
 import { LinearPageClient } from "@/app/linear/linear-page-client";
@@ -68,6 +69,7 @@ type SpaRoute =
   | { kind: "tasks" }
   | { kind: "github" }
   | { kind: "gitlab" }
+  | { kind: "forgejo" }
   | { kind: "azure-devops" }
   | { kind: "jira" }
   | { kind: "linear" }
@@ -136,6 +138,8 @@ function resolveTopLevelRoute(normalized: string, searchParams: URLSearchParams)
       return { kind: "github" };
     case "/gitlab":
       return { kind: "gitlab" };
+    case "/forgejo":
+      return { kind: "forgejo" };
     case "/azure-devops":
       return { kind: "azure-devops" };
     case "/jira":
@@ -444,6 +448,8 @@ function ExternalDataRoute({
           repositories={data.repositories}
         />
       );
+    case "forgejo":
+      return <ForgejoPageClient workspaceId={workspaceId} />;
     case "azure-devops":
       return (
         <AzureDevOpsPageClient
