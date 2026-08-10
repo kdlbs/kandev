@@ -489,7 +489,8 @@ func (wt *WorkspaceTracker) getRemoteAheadBehindCounts(ctx context.Context, upda
 		carryRemoteSnapshot(update, prior)
 		return
 	}
-	countOut, err := wt.runGitOutput(ctx, "rev-list", "--left-right", "--count", "HEAD..."+update.RemoteBranch)
+	remoteHead := strings.TrimSpace(string(remoteHeadOut))
+	countOut, err := wt.runGitOutput(ctx, "rev-list", "--left-right", "--count", "HEAD..."+remoteHead)
 	if err != nil {
 		wt.logger.Debug("getRemoteAheadBehindCounts: rev-list failed, carrying forward", zap.Error(err))
 		carryRemoteSnapshot(update, prior)
@@ -500,7 +501,7 @@ func (wt *WorkspaceTracker) getRemoteAheadBehindCounts(ctx context.Context, upda
 		carryRemoteSnapshot(update, prior)
 		return
 	}
-	update.RemoteHeadCommit = strings.TrimSpace(string(remoteHeadOut))
+	update.RemoteHeadCommit = remoteHead
 	update.RemoteAhead, _ = strconv.Atoi(parts[0])
 	update.RemoteBehind, _ = strconv.Atoi(parts[1])
 }
