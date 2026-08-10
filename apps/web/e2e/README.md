@@ -100,6 +100,54 @@ This project used to be named `docker`. It was renamed to `containers` once SSH 
 
 Common flags: `--shard=1/4`, `-g "fragment of test name"`, `--repeat-each=3` (flake hunting).
 
+### Duration-aware CI sharding
+
+CI creates an ephemeral manifest for each cohort from the current test catalog.
+The normal cohort has 14 shards and runs `chromium` plus `mobile-chrome`; the
+container cohort has 6 shards and runs `containers`. The manifest assigns
+project/file units with a deterministic longest-processing-time planner. Matrix
+jobs pass the assigned files to `run-planned-shard.sh`; they do not use ordinal
+Playwright `--shard` selection.
+
+Successful `main` runs publish `e2e-timing-profile`, which stores bounded
+first-attempt passing samples keyed by project, file, and full test title. The
+next planning job downloads that artifact when available. New files use the
+count fallback, and changed files are marked warm and receive the conservative
+multiplier. If the artifact is missing, the planner records
+`profile.mode=count-fallback` and still validates complete catalog coverage.
+
+The runner validates the manifest against the checkout before launching
+Playwright. A missing, stale, overlapping, or incomplete manifest is a hard
+failure; it cannot silently fall back to ordinal sharding.
+
+To dry-run the planner locally:
+
+```bash
+cd apps
+pnpm exec tsx web/e2e/scripts/plan-shards.ts \
+  --web-root "$PWD/web" \
+  --output-dir "$PWD/web/e2e/manifests"
+```
+
+To execute one generated shard locally, set `E2E_SHARD` and pass its manifest:
+
+```bash
+cd apps/web
+E2E_SHARD=1 bash e2e/scripts/run-planned-shard.sh e2e/manifests/normal/1.json
+```
+
+The report job publishes `e2e-retry-summary` and `e2e-timing-diagnostics`.
+The summary includes first-attempt passes, passed-after-retry tests, final
+failures, timeouts, skipped tests, predicted/actual shard duration deltas, and
+unknown/warm/stale/fallback planning counters. The profile candidate is uploaded on
+every report, but only a successful `main` workflow run is eligible to seed a
+future plan. Manifests are retained for 3 days; timing profiles for 30 days;
+retry diagnostics for 14 days.
+
+Dispatch the workflow with `fail_on_flaky=true` to set
+`failOnFlakyTests: true` for a diagnostic run. Normal PR runs retain the
+existing two-retry policy while the summary makes retry groups visible.
+
 ### `pnpm e2e:run` — the managed runner (build + run + teardown)
 
 `e2e/scripts/run-e2e.sh` (aliased as `pnpm e2e:run`) handles the build, the run, and cleanup so you don't have to assemble the steps by hand. It **auto-selects docker vs host**, runs **N shards concurrently**, enforces strict WS accounting by default (`KANDEV_E2E_WS_ASSERT=1`, matching CI), and never leaves root-owned artifacts behind.
@@ -133,8 +181,14 @@ Every Playwright worker gets:
 - A fresh tmpdir (`HOME`, `KANDEV_HOME_DIR`, worktree base, repo clone base — all under that tmpdir).
 - A unique agentctl instance port range (`30001 + E2E_PORT_OFFSET * 1000 + workerIndex * 200`).
 - Its own SQLite DB.
+- A process-scoped Docker ownership label for backend-created E2E containers
+  and test-created SSH/storage fixtures. Cleanup and storage reporting filter
+  by that label and never sweep another shard's `kandev.managed=true`
+  containers.
 
-Workers run in parallel across CI shards (`--shard=N/M`); within a worker, tests run serially because the `testPage` fixture calls `e2eReset` on the shared backend before each test.
+Workers run in parallel across CI manifest shards; within a worker, tests run
+serially because the `testPage` fixture calls `e2eReset` on the shared backend
+before each test.
 
 ## Mocked vs real
 
@@ -155,9 +209,34 @@ The SSH executor specifically has no mock controller. Tests use a real Docker-ho
 
 ## CI
 
-`.github/workflows/e2e-tests.yml` defines two jobs:
+`.github/workflows/e2e-tests.yml` defines two test cohorts and a report job:
 
-- `e2e` — matrixed `chromium` + `mobile-chrome` shards.
-- `e2e-containers` — single job, runs `--project=containers`, needs Docker.
+- `e2e` — a 14-entry matrix executing the generated normal manifests.
+- `e2e-containers` — a 6-entry matrix executing the generated container
+  manifests and requiring Docker.
+- `e2e-report` — merges blob reports and publishes timing/retry artifacts.
 
-Both upload blob reports that `e2e-report` merges into a single HTML artifact.
+The build job uploads `e2e-shard-manifests` for the current run. Both cohorts
+upload blob reports that `e2e-report` merges into a single HTML artifact.
+
+Keep the default at `workers: 1` until the controlled worker-concurrency
+experiment shows a repeatable wall-time improvement without retries. Record
+worker count, shard wall time, CPU/memory pressure, setup time, and retry count
+for comparisons. Measure package install, runtime image startup, and browser
+extraction separately from test-work balance before changing the CI matrix.
+
+For a local worker experiment, run the same selected heavy files twice and
+save the command output. The second command is diagnostic only; it does not
+change the checked-in default:
+
+```bash
+cd apps/web
+/usr/bin/time -v pnpm exec playwright test --config e2e/playwright.config.ts \
+  --project=chromium --workers=1 tests/chat/unread-divider.spec.ts
+/usr/bin/time -v pnpm exec playwright test --config e2e/playwright.config.ts \
+  --project=chromium --workers=2 tests/chat/unread-divider.spec.ts
+```
+
+Record results as `{ "workers": 2, "wall_seconds": 0, "max_rss_kb": 0,
+"retries": 0, "backend_errors": 0 }`. Compare at least three repetitions
+with the same build and profile before considering a default change.

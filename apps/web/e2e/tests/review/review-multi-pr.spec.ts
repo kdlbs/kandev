@@ -2,20 +2,20 @@ import { test, expect } from "../../fixtures/test-base";
 import {
   REVIEW_OWNER,
   REVIEW_PRS,
-  REVIEW_REPO,
   REVIEW_SHARED_FILE,
+  reviewRepositoryName,
   seedMultiPRReviewTask,
 } from "../../helpers/multi-pr-review";
 import { SessionPage } from "../../pages/session-page";
 
-async function openDesktopReview(session: SessionPage) {
+async function openDesktopReview(session: SessionPage, repositoryName: string) {
   await session.clickTab("Changes");
   const prFiles = session.prFilesSection();
   await expect(prFiles).toBeVisible({ timeout: 20_000 });
   for (const pr of REVIEW_PRS) {
     await expect(
       prFiles.locator(
-        `[data-changes-file=${JSON.stringify(REVIEW_SHARED_FILE)}][data-pr-key="${REVIEW_OWNER}/${REVIEW_REPO}/${pr.number}"]`,
+        `[data-changes-file=${JSON.stringify(REVIEW_SHARED_FILE)}][data-pr-key="${REVIEW_OWNER}/${repositoryName}/${pr.number}"]`,
       ),
     ).toBeVisible();
   }
@@ -32,12 +32,13 @@ test.describe("Review dialog multi-PR selector", () => {
     seedData,
   }) => {
     const task = await seedMultiPRReviewTask(apiClient, seedData, "Multi-PR Review E2E");
+    const repositoryName = reviewRepositoryName(seedData);
     await testPage.goto(`/t/${task.id}`);
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle();
-    await openDesktopReview(session);
+    await openDesktopReview(session, repositoryName);
 
     const [firstPR, secondPR] = REVIEW_PRS;
     const selector = session.reviewPRSelectorTrigger();
@@ -55,7 +56,7 @@ test.describe("Review dialog multi-PR selector", () => {
     await selector.click();
     const menu = session.reviewPRSelectorMenu();
     await expect(menu).toBeVisible();
-    await session.reviewPRSelectorItem(REVIEW_OWNER, REVIEW_REPO, secondPR.number).click();
+    await session.reviewPRSelectorItem(REVIEW_OWNER, repositoryName, secondPR.number).click();
 
     await expect(menu).toBeHidden();
     await expect(session.reviewDialog()).toBeVisible();

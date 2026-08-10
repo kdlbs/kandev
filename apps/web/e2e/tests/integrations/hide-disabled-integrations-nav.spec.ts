@@ -44,9 +44,11 @@ test.describe("hide disabled integrations from left panel navigation", () => {
     const workspaceId = workspaces[0].id;
     await testPage.goto(`/settings/workspace/${workspaceId}/integrations`);
     const settingsTree = testPage.getByTestId("app-sidebar-settings-mode");
-    await expect(settingsTree.getByRole("link", { name: /GitHub/ })).toBeVisible({
-      timeout: 10_000,
-    });
+    const githubSettingsLink = settingsTree.locator(
+      `a[href="/settings/workspace/${workspaceId}/integrations/github"]`,
+    );
+    await expect(githubSettingsLink).toHaveCount(1);
+    await expect(githubSettingsLink).toBeVisible({ timeout: 10_000 });
 
     // Turn "hide disabled" on.
     await testPage.goto("/settings/integrations");
@@ -67,7 +69,9 @@ test.describe("hide disabled integrations from left panel navigation", () => {
 
     // The Settings left-panel Integrations tree hides it as well.
     await testPage.goto(`/settings/workspace/${workspaceId}/integrations`);
-    await expect(settingsTree.getByRole("link", { name: /GitHub/ })).not.toBeVisible();
+    await expect(
+      settingsTree.locator(`a[href="/settings/workspace/${workspaceId}/integrations/github"]`),
+    ).not.toBeVisible();
     await expect(settingsTree.getByRole("link", { name: /Azure DevOps/ })).toBeVisible({
       timeout: 10_000,
     });

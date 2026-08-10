@@ -252,6 +252,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [missing-task-route-recovery](missing-task-route-recovery/spec.md) | draft |
 | [browser-inspect-annotations-save](browser-inspect-annotations-save/spec.md) | shipped |
 | [no-silent-model-fallback](no-silent-model-fallback/spec.md) | approved |
+| [e2e-duration-aware-sharding](e2e-duration-aware-sharding/spec.md) | implemented |
 
 ---
 

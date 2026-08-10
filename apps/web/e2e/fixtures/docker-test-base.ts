@@ -3,7 +3,12 @@ import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { backendFixture, type BackendContext } from "./backend";
-import { buildE2EImage, E2E_IMAGE_TAG, hasDocker, removeKandevContainers } from "./docker-probe";
+import {
+  buildE2EImage,
+  E2E_IMAGE_TAG,
+  hasDocker,
+  removeScopedKandevContainers,
+} from "./docker-probe";
 import { ApiClient } from "../helpers/api-client";
 import { makeGitEnv } from "../helpers/git-helper";
 import type { WorkflowStep } from "../../lib/types/http";
@@ -104,7 +109,9 @@ export const dockerTest = backendFixture.extend<
           dockerExecutorProfileId: dockerProfile.id,
         });
       } finally {
-        removeKandevContainers();
+        // The backend owns containers created by the test task. Do not sweep
+        // the daemon here: another E2E shard may be using it concurrently.
+        removeScopedKandevContainers();
       }
     },
     { scope: "worker", timeout: 120_000 },
@@ -144,12 +151,10 @@ export const dockerTest = backendFixture.extend<
 // apiClient/seedData to leave tasks and containers behind for the next test.
 dockerTest.beforeEach(async ({ apiClient, seedData }) => {
   await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
-  removeKandevContainers();
 });
 
 dockerTest.afterEach(async ({ apiClient, seedData }) => {
   await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
-  removeKandevContainers();
 });
 
 export { expect } from "@playwright/test";

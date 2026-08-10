@@ -88,6 +88,17 @@ test.describe("Mobile task autopilot", () => {
       hasText: "Mobile Autopilot Child",
     });
     await expect(childRow).toBeVisible({ timeout: 30_000 });
+    // The API state can settle before the sidebar's WS-backed task row has
+    // hydrated. Gate on both rendered state markers instead of asserting the
+    // first render, which was the source of the intermittent missing-icon
+    // failure.
+    await expect
+      .poll(
+        async () =>
+          `${await childRow.getByTestId("task-autopilot-icon").count()}:${await childRow.getByTestId("task-state-waiting-for-input").count()}`,
+        { timeout: 30_000, message: "autopilot waiting state should reach the task switcher" },
+      )
+      .toBe("1:1");
     await expect(childRow.getByTestId("task-autopilot-icon")).toBeVisible();
     await expect(childRow.getByTestId("task-state-waiting-for-input")).toBeVisible({
       timeout: 15_000,

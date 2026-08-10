@@ -141,3 +141,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-08-owned-temp-artifact-cleanup | [Clean only registered Kandev temporary artifacts](2026-08-08-owned-temp-artifact-cleanup.md) | accepted | backend, frontend, infra, security | 2026-08-08 |
 | 2026-08-08-task-owned-worktree-lifetime | [Keep Worktree Ownership at the Task Lifecycle](2026-08-08-task-owned-worktree-lifetime.md) | accepted | backend, frontend | 2026-08-08 |
 | 2026-08-09-exclusive-runtime-state-ownership | [Lock Runtime State Before Backend Startup](2026-08-09-exclusive-runtime-state-ownership.md) | accepted | backend, infra | 2026-08-09 |
+| 2026-08-10-duration-aware-e2e-sharding | [Duration-aware E2E sharding uses rolling `main` timings](2026-08-10-duration-aware-e2e-sharding.md) | accepted | infra, workflow | 2026-08-10 |
