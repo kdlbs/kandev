@@ -6,10 +6,11 @@ import { CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/
 import { Input } from "@kandev/ui/input";
 import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
 import { SettingsCard } from "@/components/settings/settings-card";
-import { deleteForgejoActionPreset, deleteForgejoIssueWatch, deleteForgejoReviewWatch, listForgejoActionPresets, listForgejoIssueWatches, listForgejoQueue, listForgejoRepositories, listForgejoReviewWatches, pollForgejoIssueWatch, pollForgejoReviewWatch, saveForgejoActionPreset, saveForgejoIssueWatch, saveForgejoReviewWatch, testForgejoConfig } from "@/lib/api/domains/forgejo-api";
+import { deleteForgejoActionPreset, deleteForgejoReviewWatch, listForgejoActionPresets, listForgejoQueue, listForgejoRepositories, listForgejoReviewWatches, pollForgejoReviewWatch, saveForgejoActionPreset, saveForgejoReviewWatch, testForgejoConfig } from "@/lib/api/domains/forgejo-api";
 import type { ForgejoActionPreset, ForgejoIssueWatch, ForgejoRepository, ForgejoReviewWatch } from "@/lib/types/forgejo";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { useForgejoConfig } from "@/hooks/domains/forgejo/use-forgejo-config";
+import { useForgejoIssueWatches } from "@/hooks/domains/forgejo/use-forgejo-issue-watches";
 
 // The remaining watch/preset sections are deliberately kept together until their
 // dedicated components land; the connection state itself is now delegated to a hook.
@@ -22,7 +23,7 @@ function ForgejoConnection({ workspaceId }: { workspaceId: string }) {
   const [webhookSecret, setWebhookSecret] = useState("");
   const [repositories, setRepositories] = useState<ForgejoRepository[]>([]);
 	const [queue, setQueue] = useState<{ issues: { repository: ForgejoRepository; issue: { number: number; title: string } }[]; pull_requests: { repository: ForgejoRepository; pull_request: { number: number; title: string } }[] } | null>(null);
-	const [watches, setWatches] = useState<ForgejoIssueWatch[]>([]);
+	const { watches, load: loadWatches, save: persistWatch, remove: removeWatch, poll: runWatchPoll } = useForgejoIssueWatches(workspaceId);
 	const [watchOwner, setWatchOwner] = useState("");
 	const [watchRepo, setWatchRepo] = useState("");
 	const [watchLabels, setWatchLabels] = useState("");
@@ -52,10 +53,9 @@ function ForgejoConnection({ workspaceId }: { workspaceId: string }) {
   const loadQueue = async () => { setQueue(await listForgejoQueue(options)); };
 	const refresh = async () => { const next = await refreshConfig(); setSavedOrigin(next.origin); setMessage(next.last_ok ? "Connection is healthy" : next.last_error || "Connection check failed"); };
 	const disconnect = async () => { await disconnectConfig(); setSavedOrigin(""); setOrigin(""); setToken(""); setRepositories([]); setQueue(null); setMessage("Forgejo disconnected from this workspace"); };
-	const loadWatches = async () => { const result = await listForgejoIssueWatches(options); setWatches(result.watches); };
-	const saveWatch = async () => { await saveForgejoIssueWatch({ owner: watchOwner, repo: watchRepo, labels: watchLabels, workflow_id: watchWorkflow, workflow_step_id: watchStep, repository_id: watchRepository, base_branch: watchBaseBranch, prompt: watchPrompt, agent_profile_id: watchAgentProfile, executor_profile_id: watchExecutorProfile, poll_interval_seconds: Number(watchInterval) || 300, inflight_limit: Number(watchInflightLimit) || 0, cleanup_policy: "auto", enabled: true }, options); await loadWatches(); setWatchOwner(""); setWatchRepo(""); setWatchLabels(""); setWatchWorkflow(""); setWatchStep(""); setWatchRepository(""); setWatchBaseBranch(""); setWatchPrompt(""); setWatchAgentProfile(""); setWatchExecutorProfile(""); setWatchInterval("300"); setWatchInflightLimit("0"); };
-	const pollWatch = async (watch: ForgejoIssueWatch) => { const result = await pollForgejoIssueWatch(watch.id, options); setMessage(`Watch found ${result.issues.length} matching issue${result.issues.length === 1 ? "" : "s"}`); await loadWatches(); };
-	const deleteWatch = async (watch: ForgejoIssueWatch) => { await deleteForgejoIssueWatch(watch.id, options); await loadWatches(); };
+	const saveWatch = async () => { await persistWatch({ owner: watchOwner, repo: watchRepo, labels: watchLabels, workflow_id: watchWorkflow, workflow_step_id: watchStep, repository_id: watchRepository, base_branch: watchBaseBranch, prompt: watchPrompt, agent_profile_id: watchAgentProfile, executor_profile_id: watchExecutorProfile, poll_interval_seconds: Number(watchInterval) || 300, inflight_limit: Number(watchInflightLimit) || 0, cleanup_policy: "auto", enabled: true }); setWatchOwner(""); setWatchRepo(""); setWatchLabels(""); setWatchWorkflow(""); setWatchStep(""); setWatchRepository(""); setWatchBaseBranch(""); setWatchPrompt(""); setWatchAgentProfile(""); setWatchExecutorProfile(""); setWatchInterval("300"); setWatchInflightLimit("0"); };
+	const pollWatch = async (watch: ForgejoIssueWatch) => { const result = await runWatchPoll(watch.id); setMessage(`Watch found ${result.issues.length} matching issue${result.issues.length === 1 ? "" : "s"}`); };
+	const deleteWatch = async (watch: ForgejoIssueWatch) => { await removeWatch(watch.id); };
 	const loadReviewWatches = async () => { const result = await listForgejoReviewWatches(options); setReviewWatches(result.watches); };
 	const saveReviewWatch = async () => { await saveForgejoReviewWatch({ owner: reviewOwner, repo: reviewRepo, workflow_id: reviewWorkflow, enabled: true }, options); await loadReviewWatches(); setReviewOwner(""); setReviewRepo(""); setReviewWorkflow(""); };
 	const deleteReviewWatch = async (watch: ForgejoReviewWatch) => { await deleteForgejoReviewWatch(watch.id, options); await loadReviewWatches(); };
