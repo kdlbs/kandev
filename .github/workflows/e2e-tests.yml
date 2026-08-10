@@ -605,6 +605,16 @@ jobs:
         working-directory: apps
         run: pnpm install --frozen-lockfile
 
+      # The published runtime image may predate the report-tool dependency;
+      # keep older images usable while the image rebuild adds unzip permanently.
+      - name: Ensure timing report tools are installed
+        run: |
+          if ! command -v unzip >/dev/null 2>&1; then
+            apt-get update
+            apt-get install -y --no-install-recommends unzip
+            rm -rf /var/lib/apt/lists/*
+          fi
+
       - name: Download blob reports
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
