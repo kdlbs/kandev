@@ -656,6 +656,10 @@ export type BackendMessageMap = OfficeBackendMessageMap &
       "forgejo.task_links.updated",
       { workspace_id: string; task_id: string }
     >;
+    "forgejo.workspace_data.updated": BackendMessage<
+      "forgejo.workspace_data.updated",
+      { workspace_id: string }
+    >;
     "run.event.appended": BackendMessage<"run.event.appended", RunEventAppendedPayload>;
   };
 

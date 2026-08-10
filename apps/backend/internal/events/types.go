@@ -277,8 +277,9 @@ const (
 
 // Event types for Forgejo integration.
 const (
-	ForgejoConfigUpdated    = "forgejo.config.updated"     // Workspace connection changed
-	ForgejoTaskLinksUpdated = "forgejo.task_links.updated" // Task issue/PR links changed
+	ForgejoConfigUpdated        = "forgejo.config.updated"         // Workspace connection changed
+	ForgejoTaskLinksUpdated     = "forgejo.task_links.updated"     // Task issue/PR links changed
+	ForgejoWorkspaceDataUpdated = "forgejo.workspace_data.updated" // Watches, queue, or presets changed
 )
 
 // Event types for Jira integration

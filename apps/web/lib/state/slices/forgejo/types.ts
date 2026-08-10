@@ -22,6 +22,7 @@ export type ForgejoSliceState = {
   forgejoReviewWatches: Record<string, Loadable<ForgejoReviewWatch[]>>;
   forgejoActionPresets: Record<string, Loadable<ForgejoActionPreset[]>>;
   forgejoTaskLinkRevisions: Record<string, Record<string, number>>;
+  forgejoWorkspaceDataRevisions: Record<string, number>;
 };
 
 export type ForgejoSliceActions = {
@@ -56,6 +57,7 @@ export type ForgejoSliceActions = {
   ) => void;
   setForgejoActionPresetsLoading: (workspaceId: string, loading: boolean) => void;
   markForgejoTaskLinksUpdated: (workspaceId: string, taskId: string) => void;
+  markForgejoWorkspaceDataUpdated: (workspaceId: string) => void;
   resetForgejoWorkspaceState: (workspaceId: string) => void;
 };
 

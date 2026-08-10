@@ -114,7 +114,11 @@ func (s *Service) SaveReviewWatch(ctx context.Context, workspaceID string, watch
 		return errors.New("forgejo review watch required")
 	}
 	watch.WorkspaceID = workspaceID
-	return s.store.UpsertReviewWatch(ctx, watch)
+	err := s.store.UpsertReviewWatch(ctx, watch)
+	if err == nil {
+		s.publishWorkspaceDataUpdated(ctx, workspaceID)
+	}
+	return err
 }
 func (s *Service) ListAllReviewWatches(ctx context.Context) ([]*ReviewWatch, error) {
 	return s.store.ListAllReviewWatches(ctx)
@@ -129,7 +133,11 @@ func (s *Service) DeleteReviewWatch(ctx context.Context, workspaceID, id string)
 	if strings.TrimSpace(workspaceID) == "" {
 		return ErrWorkspaceRequired
 	}
-	return s.store.DeleteReviewWatch(ctx, workspaceID, id)
+	err := s.store.DeleteReviewWatch(ctx, workspaceID, id)
+	if err == nil {
+		s.publishWorkspaceDataUpdated(ctx, workspaceID)
+	}
+	return err
 }
 func (s *Service) PollReviewWatchByID(ctx context.Context, workspaceID, id string) ([]PullRequest, error) {
 	watch, err := s.store.GetReviewWatch(ctx, workspaceID, id)
@@ -139,6 +147,7 @@ func (s *Service) PollReviewWatchByID(ctx context.Context, workspaceID, id strin
 	return s.PollReviewWatch(ctx, watch)
 }
 func (s *Service) PollReviewWatch(ctx context.Context, watch *ReviewWatch) ([]PullRequest, error) {
+	defer s.publishWorkspaceDataUpdated(ctx, watch.WorkspaceID)
 	client, err := s.ClientForWorkspace(ctx, watch.WorkspaceID)
 	if err != nil {
 		return nil, err

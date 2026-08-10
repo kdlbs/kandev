@@ -8,6 +8,9 @@ import { useAppStore } from "@/components/state-provider";
 import type { ForgejoActionPreset } from "@/lib/types/forgejo";
 
 export function useForgejoActionPresets(workspaceId: string | undefined) {
+  const revision = useAppStore((app) =>
+    workspaceId ? (app.forgejoWorkspaceDataRevisions[workspaceId] ?? 0) : 0,
+  );
   const state = useAppStore((app) =>
     workspaceId ? app.forgejoActionPresets[workspaceId] : undefined,
   );
@@ -33,7 +36,7 @@ export function useForgejoActionPresets(workspaceId: string | undefined) {
   }, [setLoading, setPresets, workspaceId]);
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, revision]);
   const save = useCallback(
     async (preset: Partial<ForgejoActionPreset> & { kind: string; name: string }) => {
       if (!workspaceId) throw new Error("workspaceId required");

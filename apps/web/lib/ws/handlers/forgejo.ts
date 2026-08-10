@@ -21,5 +21,11 @@ export function registerForgejoHandlers(store: StoreApi<AppState>): WsHandlers {
         return;
       store.getState().markForgejoTaskLinksUpdated(payload.workspace_id, payload.task_id);
     },
+    "forgejo.workspace_data.updated": (message) => {
+      const payload = message.payload as { workspace_id?: string };
+      if (!payload.workspace_id || store.getState().workspaces.activeId !== payload.workspace_id)
+        return;
+      store.getState().markForgejoWorkspaceDataUpdated(payload.workspace_id);
+    },
   };
 }

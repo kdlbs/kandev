@@ -263,6 +263,14 @@ func (s *Service) publishTaskLinksUpdated(ctx context.Context, workspaceID, task
 	_ = s.eventBus.Publish(ctx, events.ForgejoTaskLinksUpdated, event)
 }
 
+func (s *Service) publishWorkspaceDataUpdated(ctx context.Context, workspaceID string) {
+	if s.eventBus == nil || workspaceID == "" {
+		return
+	}
+	event := bus.NewEvent(events.ForgejoWorkspaceDataUpdated, "forgejo", map[string]string{"workspace_id": workspaceID})
+	_ = s.eventBus.Publish(ctx, events.ForgejoWorkspaceDataUpdated, event)
+}
+
 func (s *Service) GetConfig(ctx context.Context, workspaceID string) (*Config, error) {
 	if strings.TrimSpace(workspaceID) == "" {
 		return nil, ErrWorkspaceRequired
@@ -632,7 +640,11 @@ func (s *Service) SaveIssueWatch(ctx context.Context, workspaceID string, watch 
 		return errors.New("forgejo issue watch required")
 	}
 	watch.WorkspaceID = workspaceID
-	return s.store.UpsertIssueWatch(ctx, watch)
+	err := s.store.UpsertIssueWatch(ctx, watch)
+	if err == nil {
+		s.publishWorkspaceDataUpdated(ctx, workspaceID)
+	}
+	return err
 }
 func (s *Service) ListIssueWatches(ctx context.Context, workspaceID string) ([]*IssueWatch, error) {
 	if strings.TrimSpace(workspaceID) == "" {
@@ -648,7 +660,11 @@ func (s *Service) DeleteIssueWatch(ctx context.Context, workspaceID, id string) 
 	if strings.TrimSpace(workspaceID) == "" {
 		return ErrWorkspaceRequired
 	}
-	return s.store.DeleteIssueWatch(ctx, workspaceID, id)
+	err := s.store.DeleteIssueWatch(ctx, workspaceID, id)
+	if err == nil {
+		s.publishWorkspaceDataUpdated(ctx, workspaceID)
+	}
+	return err
 }
 
 func (s *Service) PollIssueWatch(ctx context.Context, workspaceID, watchID string) ([]Issue, error) {
@@ -656,6 +672,7 @@ func (s *Service) PollIssueWatch(ctx context.Context, workspaceID, watchID strin
 	if err != nil {
 		return nil, err
 	}
+	defer s.publishWorkspaceDataUpdated(ctx, workspaceID)
 	client, err := s.ClientForWorkspace(ctx, workspaceID)
 	if err != nil {
 		return nil, err

@@ -67,7 +67,11 @@ func (s *Service) SaveActionPreset(ctx context.Context, workspaceID string, p *A
 		return errors.New("forgejo action preset required")
 	}
 	p.WorkspaceID = workspaceID
-	return s.store.UpsertActionPreset(ctx, p)
+	err := s.store.UpsertActionPreset(ctx, p)
+	if err == nil {
+		s.publishWorkspaceDataUpdated(ctx, workspaceID)
+	}
+	return err
 }
 func (s *Service) ListActionPresets(ctx context.Context, workspaceID string) ([]*ActionPreset, error) {
 	if strings.TrimSpace(workspaceID) == "" {
@@ -79,5 +83,9 @@ func (s *Service) DeleteActionPreset(ctx context.Context, workspaceID, id string
 	if strings.TrimSpace(workspaceID) == "" {
 		return ErrWorkspaceRequired
 	}
-	return s.store.DeleteActionPreset(ctx, workspaceID, id)
+	err := s.store.DeleteActionPreset(ctx, workspaceID, id)
+	if err == nil {
+		s.publishWorkspaceDataUpdated(ctx, workspaceID)
+	}
+	return err
 }

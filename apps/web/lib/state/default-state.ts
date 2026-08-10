@@ -94,6 +94,7 @@ export const defaultState = {
   forgejoConfig: defaultForgejoState.forgejoConfig,
   forgejoQueue: defaultForgejoState.forgejoQueue,
   forgejoTaskLinkRevisions: defaultForgejoState.forgejoTaskLinkRevisions,
+  forgejoWorkspaceDataRevisions: defaultForgejoState.forgejoWorkspaceDataRevisions,
   forgejoIssueWatches: defaultForgejoState.forgejoIssueWatches,
   forgejoReviewWatches: defaultForgejoState.forgejoReviewWatches,
   forgejoActionPresets: defaultForgejoState.forgejoActionPresets,

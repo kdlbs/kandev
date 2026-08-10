@@ -9,9 +9,10 @@ export type ForgejoQueue = {
 };
 
 export function useForgejoQueue(workspaceId: string | undefined) {
-  const state = useAppStore((app) =>
-    workspaceId ? app.forgejoQueue[workspaceId] : undefined,
+  const revision = useAppStore((app) =>
+    workspaceId ? (app.forgejoWorkspaceDataRevisions[workspaceId] ?? 0) : 0,
   );
+  const state = useAppStore((app) => (workspaceId ? app.forgejoQueue[workspaceId] : undefined));
   const setQueue = useAppStore((app) => app.setForgejoQueueState);
   const setLoading = useAppStore((app) => app.setForgejoQueueLoading);
 
@@ -31,7 +32,9 @@ export function useForgejoQueue(workspaceId: string | undefined) {
     }
   }, [setLoading, setQueue, workspaceId]);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    void refresh();
+  }, [refresh, revision]);
   return {
     queue: state?.data ?? null,
     loading: state?.loading ?? false,

@@ -17,14 +17,17 @@ const config = {
 function makeStore(activeId: string | null) {
   const setForgejoConfigState = vi.fn();
   const markForgejoTaskLinksUpdated = vi.fn();
+  const markForgejoWorkspaceDataUpdated = vi.fn();
   return {
     setForgejoConfigState,
     markForgejoTaskLinksUpdated,
+    markForgejoWorkspaceDataUpdated,
     store: {
       getState: () => ({
         workspaces: { activeId },
         setForgejoConfigState,
         markForgejoTaskLinksUpdated,
+        markForgejoWorkspaceDataUpdated,
       }),
     } as unknown as StoreApi<AppState>,
   };
@@ -72,5 +75,15 @@ describe("Forgejo WebSocket handlers", () => {
       payload: { workspace_id: "ws-a", task_id: "task-7" },
     });
     expect(markForgejoTaskLinksUpdated).not.toHaveBeenCalled();
+  });
+
+  it("marks active workspace watch data stale", () => {
+    const { store, markForgejoWorkspaceDataUpdated } = makeStore("ws-a");
+    registerForgejoHandlers(store)["forgejo.workspace_data.updated"]!({
+      type: "notification",
+      action: "forgejo.workspace_data.updated",
+      payload: { workspace_id: "ws-a" },
+    });
+    expect(markForgejoWorkspaceDataUpdated).toHaveBeenCalledWith("ws-a");
   });
 });

@@ -465,27 +465,28 @@ const (
 
 // GitLab integration actions
 const (
-	ActionGitLabStatus            = "gitlab.status"
-	ActionGitLabTaskMRsList       = "gitlab.task_mrs.list"
-	ActionGitLabTaskMRGet         = "gitlab.task_mr.get"
-	ActionGitLabMRFeedbackGet     = "gitlab.mr_feedback.get"
-	ActionGitLabReviewWatchesList = "gitlab.review_watches.list"
-	ActionGitLabReviewWatchCreate = "gitlab.review_watches.create"
-	ActionGitLabReviewWatchUpdate = "gitlab.review_watches.update"
-	ActionGitLabReviewWatchDelete = "gitlab.review_watches.delete"
-	ActionGitLabReviewTrigger     = "gitlab.review_watches.trigger"
-	ActionGitLabReviewTriggerAll  = "gitlab.review_watches.trigger_all"
-	ActionGitLabMRWatchesList     = "gitlab.mr_watches.list"
-	ActionGitLabMRWatchDelete     = "gitlab.mr_watches.delete"
-	ActionGitLabMRFilesGet        = "gitlab.mr_files.get"
-	ActionGitLabMRCommitsGet      = "gitlab.mr_commits.get"
-	ActionGitLabTaskMRUpdated     = "gitlab.task_mr.updated"      // Notification
-	ActionForgejoConfigUpdated    = "forgejo.config.updated"      // Notification
-	ActionForgejoTaskLinksUpdated = "forgejo.task_links.updated"  // Notification
-	ActionGitLabMRFeedbackNotify  = "gitlab.mr_feedback.notify"   // Notification
-	ActionGitLabNewReviewMRNotify = "gitlab.new_review_mr.notify" // Notification
-	ActionGitLabTaskMRSync        = "gitlab.task_mr.sync"
-	ActionGitLabStats             = "gitlab.stats"
+	ActionGitLabStatus                = "gitlab.status"
+	ActionGitLabTaskMRsList           = "gitlab.task_mrs.list"
+	ActionGitLabTaskMRGet             = "gitlab.task_mr.get"
+	ActionGitLabMRFeedbackGet         = "gitlab.mr_feedback.get"
+	ActionGitLabReviewWatchesList     = "gitlab.review_watches.list"
+	ActionGitLabReviewWatchCreate     = "gitlab.review_watches.create"
+	ActionGitLabReviewWatchUpdate     = "gitlab.review_watches.update"
+	ActionGitLabReviewWatchDelete     = "gitlab.review_watches.delete"
+	ActionGitLabReviewTrigger         = "gitlab.review_watches.trigger"
+	ActionGitLabReviewTriggerAll      = "gitlab.review_watches.trigger_all"
+	ActionGitLabMRWatchesList         = "gitlab.mr_watches.list"
+	ActionGitLabMRWatchDelete         = "gitlab.mr_watches.delete"
+	ActionGitLabMRFilesGet            = "gitlab.mr_files.get"
+	ActionGitLabMRCommitsGet          = "gitlab.mr_commits.get"
+	ActionGitLabTaskMRUpdated         = "gitlab.task_mr.updated"         // Notification
+	ActionForgejoConfigUpdated        = "forgejo.config.updated"         // Notification
+	ActionForgejoTaskLinksUpdated     = "forgejo.task_links.updated"     // Notification
+	ActionForgejoWorkspaceDataUpdated = "forgejo.workspace_data.updated" // Notification
+	ActionGitLabMRFeedbackNotify      = "gitlab.mr_feedback.notify"      // Notification
+	ActionGitLabNewReviewMRNotify     = "gitlab.new_review_mr.notify"    // Notification
+	ActionGitLabTaskMRSync            = "gitlab.task_mr.sync"
+	ActionGitLabStats                 = "gitlab.stats"
 
 	ActionGitLabMRMerge                = "gitlab.mr.merge"
 	ActionGitLabMRApprove              = "gitlab.mr.approve"

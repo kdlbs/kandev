@@ -9,6 +9,9 @@ import { useAppStore } from "@/components/state-provider";
 import type { ForgejoReviewWatch } from "@/lib/types/forgejo";
 
 export function useForgejoReviewWatches(workspaceId: string | undefined) {
+  const revision = useAppStore((app) =>
+    workspaceId ? (app.forgejoWorkspaceDataRevisions[workspaceId] ?? 0) : 0,
+  );
   const state = useAppStore((app) =>
     workspaceId ? app.forgejoReviewWatches[workspaceId] : undefined,
   );
@@ -34,7 +37,7 @@ export function useForgejoReviewWatches(workspaceId: string | undefined) {
   }, [setLoading, setWatches, workspaceId]);
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, revision]);
   const save = useCallback(
     async (watch: Partial<ForgejoReviewWatch> & { owner: string; repo: string }) => {
       if (!workspaceId) throw new Error("workspaceId required");

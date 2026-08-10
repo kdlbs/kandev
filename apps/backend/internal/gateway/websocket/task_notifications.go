@@ -88,6 +88,7 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.GitLabTaskMRUpdated, ws.ActionGitLabTaskMRUpdated)
 	b.subscribe(eventBus, events.ForgejoConfigUpdated, ws.ActionForgejoConfigUpdated)
 	b.subscribe(eventBus, events.ForgejoTaskLinksUpdated, ws.ActionForgejoTaskLinksUpdated)
+	b.subscribe(eventBus, events.ForgejoWorkspaceDataUpdated, ws.ActionForgejoWorkspaceDataUpdated)
 
 	go func() {
 		<-ctx.Done()

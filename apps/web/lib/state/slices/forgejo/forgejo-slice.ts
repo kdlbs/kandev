@@ -10,6 +10,7 @@ export const defaultForgejoState: ForgejoSliceState = {
   forgejoReviewWatches: {},
   forgejoActionPresets: {},
   forgejoTaskLinkRevisions: {},
+  forgejoWorkspaceDataRevisions: {},
 };
 
 type ImmerSet = Parameters<
@@ -80,6 +81,11 @@ export const createForgejoSlice: ForgejoSliceCreator = (set: ImmerSet) => ({
       revisions[taskId] = (revisions[taskId] ?? 0) + 1;
       state.forgejoTaskLinkRevisions[workspaceId] = revisions;
     }),
+  markForgejoWorkspaceDataUpdated: (workspaceId) =>
+    set((state) => {
+      state.forgejoWorkspaceDataRevisions[workspaceId] =
+        (state.forgejoWorkspaceDataRevisions[workspaceId] ?? 0) + 1;
+    }),
   resetForgejoWorkspaceState: (workspaceId) =>
     set((state) => {
       delete state.forgejoConfig[workspaceId];
@@ -88,5 +94,6 @@ export const createForgejoSlice: ForgejoSliceCreator = (set: ImmerSet) => ({
       delete state.forgejoReviewWatches[workspaceId];
       delete state.forgejoActionPresets[workspaceId];
       delete state.forgejoTaskLinkRevisions[workspaceId];
+      delete state.forgejoWorkspaceDataRevisions[workspaceId];
     }),
 });
