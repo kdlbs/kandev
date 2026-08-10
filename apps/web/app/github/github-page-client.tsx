@@ -292,6 +292,7 @@ function useGitHubPageState(workspaceId: string | null, enabled: boolean) {
     onToggleSavedDefault,
     defaultMutationPending,
   } = useSavedPresetActions({
+    workspaceId,
     selection,
     customQuery,
     resolvedPrPresets,
@@ -302,7 +303,6 @@ function useGitHubPageState(workspaceId: string | null, enabled: boolean) {
     savedPresetStore,
     markSearchInteracted,
   });
-
   const search = useGitHubSearch<GitHubPR | GitHubIssue>({
     enabled,
     kind: selection.kind,
@@ -312,13 +312,7 @@ function useGitHubPageState(workspaceId: string | null, enabled: boolean) {
     repoFilter,
     workspaceId,
   });
-  const repoOptions = useRepoOptions(
-    workspaceId,
-    selection,
-    committedQuery,
-    search.items,
-    repoFilter,
-  );
+  const repos = useRepoOptions(workspaceId, selection, committedQuery, search.items, repoFilter);
   const title = useMemo(
     () => resolveTitle(selection, savedPresets, resolvedPrPresets, resolvedIssuePresets, t),
     [selection, savedPresets, resolvedPrPresets, resolvedIssuePresets, t],
@@ -349,7 +343,7 @@ function useGitHubPageState(workspaceId: string | null, enabled: boolean) {
     setRepoFilter,
     savedPresets,
     search,
-    repoOptions,
+    repoOptions: repos,
     title,
     onSelect,
     canSaveCurrent,

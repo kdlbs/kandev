@@ -17,6 +17,8 @@ vi.mock("@/components/toast-provider", () => ({
 
 const QUERY = "assignee:@me is:open";
 const REPO = "kdlbs/kandev";
+const FIRST_WORKSPACE_ID = "workspace-1";
+const SECOND_WORKSPACE_ID = "workspace-2";
 
 const savedPreset: SavedPreset = {
   id: "saved-1",
@@ -66,6 +68,7 @@ function renderActions(
   const setRepoFilter = vi.fn();
   const markSearchInteracted = vi.fn();
   const options: Options = {
+    workspaceId: FIRST_WORKSPACE_ID,
     selection: { kind: "issue", source: "saved", id: savedPreset.id },
     customQuery: QUERY,
     resolvedPrPresets: [prPreset],
@@ -129,12 +132,103 @@ async function expectLatestPresetCatalogAfterDelete() {
   expect(setQueryImmediate).toHaveBeenCalledWith(refreshedIssuePreset.filter);
 }
 
+async function expectStaleSaveOutcomeIgnored() {
+  let finishSave!: () => void;
+  const save = vi.fn(
+    () =>
+      new Promise<SavedPreset>((resolve) => {
+        finishSave = () => resolve(savedPreset);
+      }),
+  );
+  const {
+    result,
+    rerender,
+    markSearchInteracted,
+    setProgrammaticSelection,
+    setQueryImmediate,
+    setRepoFilter,
+  } = renderActions({}, makeStore({ save }));
+
+  let mutation!: Promise<void>;
+  act(() => {
+    mutation = result.current.onConfirmSave(savedPreset.label, savedPreset.repoFilter);
+  });
+  rerender({ workspaceId: SECOND_WORKSPACE_ID });
+  await act(async () => {
+    finishSave();
+    await mutation;
+  });
+
+  expect(markSearchInteracted).not.toHaveBeenCalled();
+  expect(setProgrammaticSelection).not.toHaveBeenCalled();
+  expect(setQueryImmediate).not.toHaveBeenCalled();
+  expect(setRepoFilter).not.toHaveBeenCalled();
+}
+
+async function expectStaleDeleteOutcomeIgnored() {
+  let finishRemove!: () => void;
+  const remove = vi.fn(
+    () =>
+      new Promise<boolean>((resolve) => {
+        finishRemove = () => resolve(true);
+      }),
+  );
+  const {
+    result,
+    rerender,
+    markSearchInteracted,
+    setProgrammaticSelection,
+    setQueryImmediate,
+    setRepoFilter,
+  } = renderActions({}, makeStore({ remove }));
+
+  let mutation!: Promise<void>;
+  act(() => {
+    mutation = result.current.onDeleteSaved(savedPreset.id);
+  });
+  rerender({ workspaceId: SECOND_WORKSPACE_ID });
+  await act(async () => {
+    finishRemove();
+    await mutation;
+  });
+
+  expect(markSearchInteracted).not.toHaveBeenCalled();
+  expect(setProgrammaticSelection).not.toHaveBeenCalled();
+  expect(setQueryImmediate).not.toHaveBeenCalled();
+  expect(setRepoFilter).not.toHaveBeenCalled();
+}
+
+async function expectStaleDefaultOutcomeIgnored() {
+  let finishDefault!: () => void;
+  const setDefault = vi.fn(
+    () =>
+      new Promise<boolean>((resolve) => {
+        finishDefault = () => resolve(true);
+      }),
+  );
+  const { result, rerender, markSearchInteracted } = renderActions({}, makeStore({ setDefault }));
+
+  let mutation!: Promise<void>;
+  act(() => {
+    mutation = result.current.onToggleSavedDefault(savedPreset);
+  });
+  rerender({ workspaceId: SECOND_WORKSPACE_ID });
+  await act(async () => {
+    finishDefault();
+    await mutation;
+  });
+
+  expect(markSearchInteracted).not.toHaveBeenCalled();
+}
+
 beforeEach(() => {
   vi.mocked(useSavedPresets).mockReset();
   mockToast.mockReset();
 });
 
 describe("useSavedPresetActions save actions", () => {
+  it("ignores a completed save after changing workspace", expectStaleSaveOutcomeIgnored);
+
   it("saves the current query, commits it, selects it, and applies its repository", async () => {
     const save = vi.fn(async () => savedPreset);
     const store = makeStore({ presets: [savedPreset], save });
@@ -214,6 +308,8 @@ describe("useSavedPresetActions save actions", () => {
 });
 
 describe("useSavedPresetActions delete actions", () => {
+  it("ignores a completed delete after changing workspace", expectStaleDeleteOutcomeIgnored);
+
   it("deletes the active saved query and selects the first same-kind preset", async () => {
     const remove = vi.fn(async () => true);
     const {
@@ -329,6 +425,11 @@ describe("useSavedPresetActions default deletion", () => {
 });
 
 describe("useSavedPresetActions default actions", () => {
+  it(
+    "ignores a completed default toggle after changing workspace",
+    expectStaleDefaultOutcomeIgnored,
+  );
+
   it("keeps action handlers stable across unchanged renders", () => {
     const { result, rerender } = renderActions();
     const initialConfirm = result.current.onConfirmSave;

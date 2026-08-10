@@ -9,8 +9,11 @@ import type { SavedPreset } from "./saved-preset-model";
 import type { useSavedPresets } from "./use-saved-presets";
 
 type SavedPresetStore = ReturnType<typeof useSavedPresets>;
+type WorkspaceId = string | null;
+type IsCurrentWorkspace = (workspaceId: WorkspaceId) => boolean;
 
 type SavedPresetActionsOptions = {
+  workspaceId: string | null;
   selection: SidebarSelection;
   customQuery: string;
   resolvedPrPresets: PresetOption[];
@@ -34,7 +37,14 @@ function firstPresetSelection(
   };
 }
 
+function useIsCurrentWorkspace(workspaceId: WorkspaceId): IsCurrentWorkspace {
+  const workspaceIdRef = useRef(workspaceId);
+  workspaceIdRef.current = workspaceId;
+  return useCallback((candidate) => workspaceIdRef.current === candidate, []);
+}
+
 function useConfirmSave({
+  workspaceId,
   kind,
   customQuery,
   save,
@@ -43,7 +53,9 @@ function useConfirmSave({
   setQueryImmediate,
   setRepoFilter,
   reportError,
+  isCurrentWorkspace,
 }: {
+  workspaceId: WorkspaceId;
   kind: SidebarSelection["kind"];
   customQuery: string;
   save: SavedPresetStore["save"];
@@ -52,6 +64,7 @@ function useConfirmSave({
   setQueryImmediate: (query: string) => void;
   setRepoFilter: (repo: string) => void;
   reportError: () => void;
+  isCurrentWorkspace: IsCurrentWorkspace;
 }) {
   return useCallback(
     async (label: string, defaultRepoFilter: string) => {
@@ -59,6 +72,7 @@ function useConfirmSave({
         const created = await save({ kind, label, customQuery, repoFilter: defaultRepoFilter });
         // No persistence started when workspace presets are not available yet.
         if (!created) return;
+        if (!isCurrentWorkspace(workspaceId)) return;
         markSearchInteracted();
         setProgrammaticSelection({ kind, source: "saved", id: created.id });
         setQueryImmediate(customQuery);
@@ -69,6 +83,7 @@ function useConfirmSave({
     },
     [
       customQuery,
+      isCurrentWorkspace,
       kind,
       markSearchInteracted,
       reportError,
@@ -76,11 +91,13 @@ function useConfirmSave({
       setProgrammaticSelection,
       setQueryImmediate,
       setRepoFilter,
+      workspaceId,
     ],
   );
 }
 
 function useDeleteSaved({
+  workspaceId,
   selection,
   prPresets,
   issuePresets,
@@ -90,7 +107,9 @@ function useDeleteSaved({
   setQueryImmediate,
   setRepoFilter,
   reportError,
+  isCurrentWorkspace,
 }: {
+  workspaceId: WorkspaceId;
   selection: SidebarSelection;
   prPresets: PresetOption[];
   issuePresets: PresetOption[];
@@ -100,6 +119,7 @@ function useDeleteSaved({
   setQueryImmediate: (query: string) => void;
   setRepoFilter: (repo: string) => void;
   reportError: () => void;
+  isCurrentWorkspace: IsCurrentWorkspace;
 }) {
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
@@ -111,6 +131,7 @@ function useDeleteSaved({
         const removed = await remove(id);
         // Loading or a stale target is a no-op, not a persistence failure.
         if (!removed) return;
+        if (!isCurrentWorkspace(workspaceId)) return;
         markSearchInteracted();
         const currentSelection = selectionRef.current;
         if (currentSelection.source === "saved" && currentSelection.id === id) {
@@ -128,17 +149,20 @@ function useDeleteSaved({
       }
     },
     [
+      isCurrentWorkspace,
       markSearchInteracted,
       remove,
       reportError,
       setProgrammaticSelection,
       setQueryImmediate,
       setRepoFilter,
+      workspaceId,
     ],
   );
 }
 
 export function useSavedPresetActions({
+  workspaceId,
   selection,
   customQuery,
   resolvedPrPresets: prPresets,
@@ -153,6 +177,7 @@ export function useSavedPresetActions({
   const { toast } = useToast();
   const [defaultMutationPending, setDefaultMutationPending] = useState(false);
   const defaultMutationPendingRef = useRef(false);
+  const isCurrentWorkspace = useIsCurrentWorkspace(workspaceId);
   const {
     presets: savedPresets,
     save: saveSavedPreset,
@@ -169,6 +194,7 @@ export function useSavedPresetActions({
     [t, toast],
   );
   const onConfirmSave = useConfirmSave({
+    workspaceId,
     kind: selection.kind,
     customQuery,
     save: saveSavedPreset,
@@ -177,8 +203,10 @@ export function useSavedPresetActions({
     setQueryImmediate,
     setRepoFilter,
     reportError: reportSaveError,
+    isCurrentWorkspace,
   });
   const onDeleteSaved = useDeleteSaved({
+    workspaceId,
     selection,
     prPresets,
     issuePresets,
@@ -188,6 +216,7 @@ export function useSavedPresetActions({
     setQueryImmediate,
     setRepoFilter,
     reportError: reportDeleteError,
+    isCurrentWorkspace,
   });
 
   const onToggleSavedDefault = useCallback(
@@ -200,6 +229,7 @@ export function useSavedPresetActions({
         const persisted = await setSavedPresetDefault(preset.kind, defaultId);
         // Loading or an already-matching default is a no-op, not a persistence failure.
         if (!persisted) return;
+        if (!isCurrentWorkspace(workspaceId)) return;
         // Mark interaction so the initial-selection effect does not switch the
         // active view to the newly set default on the same render cycle.
         markSearchInteracted();
@@ -213,7 +243,7 @@ export function useSavedPresetActions({
         setDefaultMutationPending(false);
       }
     },
-    [markSearchInteracted, setSavedPresetDefault, t, toast],
+    [isCurrentWorkspace, markSearchInteracted, setSavedPresetDefault, t, toast, workspaceId],
   );
 
   return {
