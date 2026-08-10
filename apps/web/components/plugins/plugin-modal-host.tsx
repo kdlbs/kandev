@@ -138,14 +138,10 @@ function PluginModalInstance({ modal }: { modal: OpenPluginModal }) {
 /**
  * Renders every open plugin modal (`host.openModal(...)`) in a `@kandev/ui`
  * `Dialog`, each isolated behind its own `PluginErrorBoundary`. Mounted once
- * at the app root, alongside `<PluginBootBridge/>`.
+ * inside `<AppShell/>`, where plugin-owned forms inherit the app providers.
  *
- * The `TooltipProvider` is not redundant with the app-wide one in
- * `app/layout.tsx`: this host mounts as a *sibling* of `<AppShell/>` (see
- * `src/main.tsx`), so it is outside that provider's subtree and a `Tooltip`
- * inside plugin modal content would throw for want of a provider. Radix
- * allows nesting, so this stays correct if the host is ever moved inside the
- * shell.
+ * Keep the local `TooltipProvider` so this host is also safe in isolated
+ * mounts and tests. Radix supports nesting it under AppShell's provider.
  */
 export function PluginModalHost() {
   const modals = usePluginModals();

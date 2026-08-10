@@ -484,9 +484,9 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await expect(modal).not.toBeVisible();
   });
 
-  // `PluginModalHost` mounts as a sibling of `<AppShell>` (src/main.tsx), so it
-  // is outside the app-wide TooltipProvider in app/layout.tsx and needs its
-  // own. The unit test for this asserts via focus, because jsdom does not
+  // `PluginModalHost` owns a TooltipProvider so plugin modal content remains
+  // safe in both AppShell and isolated mounts. The unit test for this asserts
+  // via focus, because jsdom does not
   // reliably open a Radix tooltip from synthetic hover (apps/web/CLAUDE.md) —
   // real pointer hover, and the portaled role="tooltip" it produces, are only
   // assertable in a browser.

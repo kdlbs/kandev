@@ -269,11 +269,9 @@ const PLUGIN_UI: Record<string, unknown> = {
   Textarea,
   Tooltip,
   TooltipContent,
-  // A plain Tooltip works everywhere a plugin renders, but from two different
-  // providers: routes and slots render inside AppShell and inherit the
-  // app-wide TooltipProvider in app/layout.tsx, while `openModal` content
-  // mounts *outside* AppShell and gets its own from PluginModalHost. This is
-  // exported for plugins that want their own `delayDuration`/
+  // A plain Tooltip works everywhere a plugin renders through AppShell's
+  // provider; PluginModalHost also keeps a local provider so isolated host
+  // mounts stay safe. This is exported for plugins that want their own `delayDuration`/
   // `skipDelayDuration` for a dense cluster of tooltips — nesting a provider
   // is supported by Radix.
   TooltipProvider,
@@ -389,10 +387,9 @@ export function buildHostApi(pluginId: string, storeApi: StoreApi<AppState>): Pl
     openModal: (options) => pluginModalManager.openModal(pluginId, options),
     openTaskLinkDialog: (options) => openTaskLinkDialog(pluginId, options),
     openTaskReview: (options) => openTaskReview(storeApi, options),
-    // Sonner's imperative global. The app mounts <Toaster/> once in
-    // app/layout.tsx, so this needs no host wiring and — unlike a rendered
-    // component — works from a plugin modal regardless of which providers
-    // that modal sits under. Scoped per plugin so `.error` logs with
+    // Sonner's imperative global. AppShell mounts <Toaster/> once, so this
+    // needs no host wiring and works from plugin modal content. Scoped per
+    // plugin so `.error` logs with
     // attribution rather than filing a kandev frontend error report; see
     // createPluginToast.
     toast: createPluginToast(pluginId),
