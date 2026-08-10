@@ -46,9 +46,10 @@ func TestBuildLifecycleLaunchRequestForwardsRemoteContributions(t *testing.T) {
 	}
 }
 
-// distinctFiller populates struct fields with values unique to each field, so
-// a mapper that drops a field (or crosswires two of the same type) produces an
-// observable difference rather than two matching zero values.
+// distinctFiller populates struct fields with non-zero values that are unique
+// per field, so a mapper that drops a field (or crosswires two of the same
+// type) produces an observable difference rather than two matching zero
+// values. Bool is the documented exception — see fill.
 type distinctFiller struct{ n int }
 
 // fillStruct populates every exported field of the struct pointed at by ptr.
@@ -72,10 +73,19 @@ func (f *distinctFiller) fill(t *testing.T, v reflect.Value, name string) {
 	case reflect.String:
 		v.SetString(fmt.Sprintf("%s-%d", name, f.n))
 	case reflect.Bool:
+		// Always true, never counter-derived: bool has only two values and one
+		// of them is the zero value, so distinctness across several bool fields
+		// and drop-detection are mutually exclusive. Drop-detection wins —
+		// a field left unmapped reads back false and fails. The cost is that
+		// two crosswired bool fields would still compare equal.
 		v.SetBool(true)
 	case reflect.Int, reflect.Int64:
 		v.SetInt(int64(f.n))
 	case reflect.Pointer:
+		// Deliberately shallow: a zero-value allocation is enough to catch a
+		// dropped pointer field (nil != non-nil). It does not catch a mapper
+		// that substitutes a freshly allocated zero value of the same type,
+		// since reflect.DeepEqual compares pointees rather than addresses.
 		v.Set(reflect.New(v.Type().Elem()))
 	case reflect.Slice:
 		slice := reflect.MakeSlice(v.Type(), 1, 1)

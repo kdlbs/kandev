@@ -72,6 +72,9 @@ func TestRequireConnectionAuth(t *testing.T) {
 	tokenIdentity := authn.Identity{UserID: "user-pat", Role: authn.RoleMember, TokenID: "tok-1"}
 
 	enforced := func() bool { return true }
+	// resolvedToken is shared by the ResolveToken stubs below and reset at the
+	// top of every subtest, so these subtests must stay sequential — do not add
+	// t.Parallel() here without giving each case its own capture.
 	var resolvedToken string
 	resolveValid := func(_ context.Context, token string) (authn.Identity, bool) {
 		resolvedToken = token
@@ -117,6 +120,20 @@ func TestRequireConnectionAuth(t *testing.T) {
 			wantStatus: http.StatusOK,
 			wantNext:   true,
 			wantUserID: sessionIdentity.UserID,
+		},
+		{
+			// Branch order matters: an established identity must win over a
+			// query credential. Resolving ?token= first would let any caller
+			// overwrite the identity the HTTP auth middleware already
+			// authenticated — wantToken "" pins that ResolveToken never runs.
+			name:       "enforced with an identity present ignores the query token",
+			policy:     AuthPolicy{Enforced: enforced, ResolveToken: resolveValid},
+			query:      "?token=" + patToken,
+			preset:     &sessionIdentity,
+			wantStatus: http.StatusOK,
+			wantNext:   true,
+			wantUserID: sessionIdentity.UserID,
+			wantToken:  "",
 		},
 		{
 			name:       "enforced with a valid query token passes through and sets the identity",
