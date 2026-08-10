@@ -118,10 +118,12 @@ export function useSidebarSelectionHandler({
   savedPresetsRef.current = savedPresets;
   const resolvedPresetsRef = useRef({ pr: resolvedPrPresets, issue: resolvedIssuePresets });
   resolvedPresetsRef.current = { pr: resolvedPrPresets, issue: resolvedIssuePresets };
+  const currentKindRef = useRef(currentKind);
+  currentKindRef.current = currentKind;
   return useCallback(
     (selection: SidebarSelectionRequest) => {
       if (selection.source === "kind-switch") {
-        if (selection.kind === currentKind) return;
+        if (selection.kind === currentKindRef.current) return;
         markSearchInteracted();
         const target = resolveDefaultSidebarTarget(
           selection.kind,
@@ -147,6 +149,6 @@ export function useSidebarSelectionHandler({
       setQueryImmediate(preset?.filter ?? "");
       setRepoFilter("");
     },
-    [setQueryImmediate, setUserSelection, markSearchInteracted, setRepoFilter, currentKind],
+    [setQueryImmediate, setUserSelection, markSearchInteracted, setRepoFilter],
   );
 }

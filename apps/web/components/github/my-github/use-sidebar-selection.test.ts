@@ -27,6 +27,13 @@ const issuePresets = [issuePreset];
 const WORKSPACE_ID = "workspace-1";
 const KIND_SWITCH = "kind-switch" as const;
 
+type HandlerRenderProps = {
+  savedPresets: SavedPreset[];
+  currentPrPresets: PresetOption[];
+  currentIssuePresets: PresetOption[];
+  currentKind: SidebarSelection["kind"];
+};
+
 const prDefault: SavedPreset = {
   id: "saved-pr",
   kind: "pr",
@@ -155,9 +162,9 @@ function expectStableHandlerWithRefreshedPresetCatalogs() {
   const setRepoFilter = vi.fn();
   const markSearchInteracted = vi.fn();
   const { result, rerender } = renderHook(
-    ({ savedPresets, currentPrPresets, currentIssuePresets }) =>
+    ({ savedPresets, currentPrPresets, currentIssuePresets, currentKind }: HandlerRenderProps) =>
       useSidebarSelectionHandler({
-        currentKind: "pr",
+        currentKind,
         savedPresets,
         resolvedPrPresets: currentPrPresets,
         resolvedIssuePresets: currentIssuePresets,
@@ -171,6 +178,7 @@ function expectStableHandlerWithRefreshedPresetCatalogs() {
         savedPresets: [prDefault],
         currentPrPresets: prPresets,
         currentIssuePresets: issuePresets,
+        currentKind: "pr",
       },
     },
   );
@@ -180,6 +188,7 @@ function expectStableHandlerWithRefreshedPresetCatalogs() {
     savedPresets: [prDefault, issueDefault],
     currentPrPresets: [...prPresets],
     currentIssuePresets: [...issuePresets],
+    currentKind: "pr",
   });
 
   expect(result.current).toBe(initialHandler);
@@ -204,6 +213,7 @@ function expectStableHandlerWithRefreshedPresetCatalogs() {
     savedPresets: [prDefault],
     currentPrPresets: [...prPresets],
     currentIssuePresets: [refreshedIssuePreset],
+    currentKind: "pr",
   });
   expect(result.current).toBe(initialHandler);
   act(() => initialHandler({ kind: "issue", source: KIND_SWITCH }));
@@ -214,6 +224,23 @@ function expectStableHandlerWithRefreshedPresetCatalogs() {
   });
   expect(setQueryImmediate).toHaveBeenCalledWith(refreshedIssuePreset.filter);
   expect(setRepoFilter).toHaveBeenCalledWith("");
+
+  markSearchInteracted.mockClear();
+  setUserSelection.mockClear();
+  setQueryImmediate.mockClear();
+  setRepoFilter.mockClear();
+  rerender({
+    savedPresets: [prDefault],
+    currentPrPresets: [...prPresets],
+    currentIssuePresets: [refreshedIssuePreset],
+    currentKind: "issue",
+  });
+  expect(result.current).toBe(initialHandler);
+  act(() => initialHandler({ kind: "issue", source: KIND_SWITCH }));
+  expect(markSearchInteracted).not.toHaveBeenCalled();
+  expect(setUserSelection).not.toHaveBeenCalled();
+  expect(setQueryImmediate).not.toHaveBeenCalled();
+  expect(setRepoFilter).not.toHaveBeenCalled();
 }
 
 describe("useInitialSidebarSelection", () => {
@@ -347,7 +374,7 @@ describe("useSidebarSelectionHandler", () => {
   it("ignores a same-kind toggle sentinel", expectSameKindSentinelNoop);
 
   it(
-    "keeps the handler stable while using refreshed preset catalogs",
+    "keeps the handler stable while using refreshed catalogs and current kind",
     expectStableHandlerWithRefreshedPresetCatalogs,
   );
 
