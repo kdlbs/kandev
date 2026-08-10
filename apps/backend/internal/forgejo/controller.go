@@ -3,6 +3,7 @@ package forgejo
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -19,6 +20,8 @@ func RegisterRoutes(router *gin.Engine, service *Service) {
 	api.PUT("/config", controller.setConfig)
 	api.POST("/config/test", controller.testConfig)
 	api.DELETE("/config", controller.deleteConfig)
+	api.GET("/repositories", controller.listRepositories)
+	api.GET("/issues", controller.listIssues)
 }
 
 func (c *Controller) workspaceID(ctx *gin.Context) string {
@@ -69,9 +72,58 @@ func (c *Controller) deleteConfig(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"deleted": true})
 }
 
+func (c *Controller) listRepositories(ctx *gin.Context) {
+	repositories, total, err := c.service.ListRepositories(ctx.Request.Context(), c.workspaceID(ctx), queryPage(ctx), queryLimit(ctx))
+	if err != nil {
+		c.error(ctx, err)
+		return
+	}
+	ctx.Header("X-Total-Count", strconv.Itoa(total))
+	ctx.JSON(http.StatusOK, gin.H{"repositories": repositories, "total_count": total})
+}
+
+func (c *Controller) listIssues(ctx *gin.Context) {
+	issues, total, err := c.service.ListIssues(
+		ctx.Request.Context(), c.workspaceID(ctx), strings.TrimSpace(ctx.Query("owner")), strings.TrimSpace(ctx.Query("repo")), queryPage(ctx), queryLimit(ctx),
+	)
+	if err != nil {
+		c.error(ctx, err)
+		return
+	}
+	ctx.Header("X-Total-Count", strconv.Itoa(total))
+	ctx.JSON(http.StatusOK, gin.H{"issues": issues, "total_count": total})
+}
+
+func queryPage(ctx *gin.Context) int {
+	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
+	if page < 1 {
+		return 1
+	}
+	return page
+}
+
+func queryLimit(ctx *gin.Context) int {
+	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "30"))
+	if limit < 1 {
+		return 30
+	}
+	if limit > 100 {
+		return 100
+	}
+	return limit
+}
+
 func (c *Controller) error(ctx *gin.Context, err error) {
 	if errors.Is(err, ErrWorkspaceRequired) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id query parameter required"})
+		return
+	}
+	if errors.Is(err, ErrNotConfigured) {
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "Forgejo workspace is not configured"})
+		return
+	}
+	if strings.Contains(err.Error(), "owner and repository are required") {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "owner and repo query parameters required"})
 		return
 	}
 	ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Forgejo connection operation failed"})

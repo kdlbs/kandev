@@ -122,6 +122,46 @@ func (s *Service) GetConfig(ctx context.Context, workspaceID string) (*Config, e
 	return config, err
 }
 
+// ClientForWorkspace resolves a Forgejo client using only workspace-owned
+// metadata and the workspace secret store. The PAT never leaves this package
+// through an HTTP response or agent environment.
+func (s *Service) ClientForWorkspace(ctx context.Context, workspaceID string) (Client, error) {
+	if strings.TrimSpace(workspaceID) == "" {
+		return nil, ErrWorkspaceRequired
+	}
+	if s.secrets == nil {
+		return nil, errors.New("Forgejo secret store unavailable")
+	}
+	config, err := s.store.GetConfig(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if config == nil {
+		return nil, ErrNotConfigured
+	}
+	token, err := s.secrets.Reveal(ctx, SecretKeyForWorkspace(workspaceID))
+	if err != nil || strings.TrimSpace(token) == "" {
+		return nil, ErrNotConfigured
+	}
+	return NewPATClient(config.Origin, token)
+}
+
+func (s *Service) ListRepositories(ctx context.Context, workspaceID string, page, limit int) ([]Repository, int, error) {
+	client, err := s.ClientForWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, 0, err
+	}
+	return client.ListRepositories(ctx, page, limit)
+}
+
+func (s *Service) ListIssues(ctx context.Context, workspaceID, owner, repo string, page, limit int) ([]Issue, int, error) {
+	client, err := s.ClientForWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, 0, err
+	}
+	return client.ListIssues(ctx, owner, repo, page, limit)
+}
+
 func (s *Service) SetConfig(ctx context.Context, workspaceID string, request *SetConfigRequest) (*Config, error) {
 	if strings.TrimSpace(workspaceID) == "" {
 		return nil, ErrWorkspaceRequired

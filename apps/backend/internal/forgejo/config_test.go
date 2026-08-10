@@ -179,3 +179,25 @@ func TestController_RequiresWorkspaceAndReportsUnconfigured(t *testing.T) {
 		t.Fatalf("unconfigured status = %d, want %d", unconfigured.Code, http.StatusNoContent)
 	}
 }
+
+func TestService_ClientForWorkspaceUsesWorkspaceSecret(t *testing.T) {
+	service, secrets := newConfigTestService(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "token workspace-token" {
+			t.Fatalf("authorization = %q", got)
+		}
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	t.Cleanup(server.Close)
+	if err := service.store.SaveConfig(context.Background(), &Config{WorkspaceID: "workspace-a", Origin: server.URL}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	if err := secrets.Set(context.Background(), SecretKeyForWorkspace("workspace-a"), "Forgejo token", "workspace-token"); err != nil {
+		t.Fatalf("set token: %v", err)
+	}
+
+	repositories, _, err := service.ListRepositories(context.Background(), "workspace-a", 1, 30)
+	if err != nil || len(repositories) != 0 {
+		t.Fatalf("list repositories = %#v, %v", repositories, err)
+	}
+}
