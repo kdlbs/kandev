@@ -132,28 +132,38 @@ function expectSameKindSentinelNoop() {
   expect(setRepoFilter).not.toHaveBeenCalled();
 }
 
-function expectStableHandlerWithRefreshedSavedPresets() {
+function expectStableHandlerWithRefreshedPresetCatalogs() {
   const setUserSelection = vi.fn();
   const setQueryImmediate = vi.fn();
   const setRepoFilter = vi.fn();
   const markSearchInteracted = vi.fn();
   const { result, rerender } = renderHook(
-    ({ savedPresets }) =>
+    ({ savedPresets, currentPrPresets, currentIssuePresets }) =>
       useSidebarSelectionHandler({
         currentKind: "pr",
         savedPresets,
-        resolvedPrPresets: prPresets,
-        resolvedIssuePresets: issuePresets,
+        resolvedPrPresets: currentPrPresets,
+        resolvedIssuePresets: currentIssuePresets,
         setQueryImmediate,
         setRepoFilter,
         setUserSelection,
         markSearchInteracted,
       }),
-    { initialProps: { savedPresets: [prDefault] } },
+    {
+      initialProps: {
+        savedPresets: [prDefault],
+        currentPrPresets: prPresets,
+        currentIssuePresets: issuePresets,
+      },
+    },
   );
   const initialHandler = result.current;
 
-  rerender({ savedPresets: [prDefault, issueDefault] });
+  rerender({
+    savedPresets: [prDefault, issueDefault],
+    currentPrPresets: [...prPresets],
+    currentIssuePresets: [...issuePresets],
+  });
 
   expect(result.current).toBe(initialHandler);
   act(() => initialHandler({ kind: "issue", source: "preset", id: "" }));
@@ -164,6 +174,29 @@ function expectStableHandlerWithRefreshedSavedPresets() {
   });
   expect(setQueryImmediate).toHaveBeenCalledWith(issueDefault.customQuery);
   expect(setRepoFilter).toHaveBeenCalledWith(issueDefault.repoFilter);
+
+  const refreshedIssuePreset = {
+    ...issuePreset,
+    value: "mentioned",
+    filter: "mentions:@me is:open",
+  };
+  setUserSelection.mockClear();
+  setQueryImmediate.mockClear();
+  setRepoFilter.mockClear();
+  rerender({
+    savedPresets: [prDefault],
+    currentPrPresets: [...prPresets],
+    currentIssuePresets: [refreshedIssuePreset],
+  });
+  expect(result.current).toBe(initialHandler);
+  act(() => initialHandler({ kind: "issue", source: "preset", id: "" }));
+  expect(setUserSelection).toHaveBeenCalledWith({
+    kind: "issue",
+    source: "preset",
+    id: refreshedIssuePreset.value,
+  });
+  expect(setQueryImmediate).toHaveBeenCalledWith(refreshedIssuePreset.filter);
+  expect(setRepoFilter).toHaveBeenCalledWith("");
 }
 
 describe("useInitialSidebarSelection", () => {
@@ -294,8 +327,8 @@ describe("useSidebarSelectionHandler", () => {
   it("ignores a same-kind toggle sentinel", expectSameKindSentinelNoop);
 
   it(
-    "keeps the handler stable while using refreshed saved presets",
-    expectStableHandlerWithRefreshedSavedPresets,
+    "keeps the handler stable while using refreshed preset catalogs",
+    expectStableHandlerWithRefreshedPresetCatalogs,
   );
 
   it("keeps an explicit selection within the current kind", () => {

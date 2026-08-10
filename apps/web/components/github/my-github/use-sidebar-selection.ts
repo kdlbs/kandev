@@ -108,6 +108,8 @@ export function useSidebarSelectionHandler({
 }) {
   const savedPresetsRef = useRef(savedPresets);
   savedPresetsRef.current = savedPresets;
+  const resolvedPresetsRef = useRef({ pr: resolvedPrPresets, issue: resolvedIssuePresets });
+  resolvedPresetsRef.current = { pr: resolvedPrPresets, issue: resolvedIssuePresets };
   return useCallback(
     (selection: SidebarSelection) => {
       // The empty preset id is only meaningful when the kind toggle changes kinds.
@@ -121,7 +123,7 @@ export function useSidebarSelectionHandler({
         const target = resolveDefaultSidebarTarget(
           selection.kind,
           savedPresetsRef.current,
-          selection.kind === "pr" ? resolvedPrPresets : resolvedIssuePresets,
+          resolvedPresetsRef.current[selection.kind],
         );
         setUserSelection(target.selection);
         setQueryImmediate(target.query);
@@ -135,20 +137,12 @@ export function useSidebarSelectionHandler({
         setRepoFilter(found?.repoFilter ?? "");
         return;
       }
-      const preset = (selection.kind === "pr" ? resolvedPrPresets : resolvedIssuePresets).find(
+      const preset = resolvedPresetsRef.current[selection.kind].find(
         (candidate) => candidate.value === selection.id,
       );
       setQueryImmediate(preset?.filter ?? "");
       setRepoFilter("");
     },
-    [
-      setQueryImmediate,
-      resolvedPrPresets,
-      resolvedIssuePresets,
-      setUserSelection,
-      markSearchInteracted,
-      setRepoFilter,
-      currentKind,
-    ],
+    [setQueryImmediate, setUserSelection, markSearchInteracted, setRepoFilter, currentKind],
   );
 }
