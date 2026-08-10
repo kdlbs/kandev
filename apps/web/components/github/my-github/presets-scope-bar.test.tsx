@@ -1,14 +1,27 @@
 import { render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { SavedPreset } from "./saved-preset-model";
 import { PresetsScopeBar } from "./presets-scope-bar";
+
+const savedPreset: SavedPreset = {
+  id: "saved-pr",
+  kind: "pr",
+  label: "Needs review",
+  customQuery: "review-requested:@me is:open",
+  repoFilter: "kdlbs/kandev",
+  createdAt: "2026-08-10T00:00:00Z",
+  isDefault: false,
+};
 
 vi.mock("@/components/integrations/presets-scope-bar-base", () => ({
   IntegrationScopeBar: ({
     onToggleSavedDefault,
+    savedPresets,
   }: {
     onToggleSavedDefault?: (id: string) => void;
+    savedPresets: Array<{ id: string }>;
   }) => {
-    onToggleSavedDefault?.("missing-preset");
+    onToggleSavedDefault?.(savedPresets[0]?.id ?? "missing-preset");
     return null;
   },
 }));
@@ -18,6 +31,27 @@ afterEach(() => {
 });
 
 describe("PresetsScopeBar default adapter", () => {
+  it("forwards a matching saved preset to the domain callback", () => {
+    const onToggleSavedDefault = vi.fn();
+
+    render(
+      <PresetsScopeBar
+        selected={{ kind: "pr", source: "saved", id: savedPreset.id }}
+        onSelect={vi.fn()}
+        savedPresets={[savedPreset]}
+        onDeleteSaved={vi.fn()}
+        canSaveCurrent={false}
+        onSaveCurrent={vi.fn()}
+        onToggleSavedDefault={onToggleSavedDefault}
+        defaultMutationPending={false}
+        prPresets={[]}
+        issuePresets={[]}
+      />,
+    );
+
+    expect(onToggleSavedDefault).toHaveBeenCalledWith(savedPreset);
+  });
+
   it("warns in development when a stale default target is requested", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const onToggleSavedDefault = vi.fn();

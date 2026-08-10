@@ -77,8 +77,6 @@ function renderActions(
     markSearchInteracted,
     ...overrides,
   };
-  vi.mocked(useSavedPresets).mockReturnValue(options.savedPresetStore);
-
   return {
     ...renderHook(() => useSavedPresetActions(options)),
     setProgrammaticSelection,
