@@ -244,3 +244,24 @@ func TestService_RefreshConnectionPersistsHealth(t *testing.T) {
 		t.Fatalf("config=%#v err=%v", config, err)
 	}
 }
+
+func TestService_RefreshConnectionPersistsFailureWithoutDeletingConfig(t *testing.T) {
+	service, secrets := newConfigTestService(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(server.Close)
+	if err := service.store.SaveConfig(context.Background(), &Config{WorkspaceID: "workspace-a", Origin: server.URL, Username: "alice", LastOK: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := secrets.Set(context.Background(), SecretKeyForWorkspace("workspace-a"), "Forgejo token", "token"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RefreshConnection(context.Background(), "workspace-a"); err == nil {
+		t.Fatal("refresh succeeded")
+	}
+	config, err := service.GetConfig(context.Background(), "workspace-a")
+	if err != nil || config == nil || config.LastOK || config.LastError == "" || !config.HasSecret {
+		t.Fatalf("config=%#v err=%v", config, err)
+	}
+}
