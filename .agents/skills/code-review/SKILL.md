@@ -50,7 +50,7 @@ create a temporary worktree from that base, merge the head with `git merge
 --no-commit --no-ff <head-sha>`, and run focused verification in the merged tree
 before removing the worktree. GitHub's `mergeable: MERGEABLE` status proves
 conflict compatibility, not that the merged result was tested. If an older
-`pr-state` helper does not expose the base fields, resolve the current base
+`pr-state` helper lacks the base fields, resolve the current base
 head only as a fallback with `gh api
 repos/{owner}/{repo}/git/ref/heads/{base}` and derive/record the merge base
 before making the same decision; do not try the unsupported
