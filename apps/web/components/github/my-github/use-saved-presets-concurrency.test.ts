@@ -200,6 +200,65 @@ async function expectIndependentWorkspacePersistence() {
   }
 }
 
+async function expectQueuedWorkspaceSaveIsolation() {
+  const firstWorkspaceId = "ws-first";
+  const secondWorkspaceId = "ws-second";
+  const firstWorkspacePreset = { ...valid, label: "Workspace A" };
+  const secondWorkspacePreset = { ...valid, id: "pr-b", label: "Workspace B" };
+  const firstWrite = deferred<Awaited<ReturnType<typeof updateGitHubWorkspaceSettings>>>();
+  vi.mocked(fetchGitHubWorkspaceSettings).mockImplementation(async (workspaceId) => ({
+    ...workspaceSettings(
+      workspaceId === firstWorkspaceId ? [firstWorkspacePreset] : [secondWorkspacePreset],
+    ),
+    workspace_id: workspaceId,
+  }));
+  vi.mocked(updateGitHubWorkspaceSettings)
+    .mockReturnValueOnce(firstWrite.promise)
+    .mockResolvedValueOnce({ ...workspaceSettings(), workspace_id: firstWorkspaceId });
+  const { result, rerender } = renderHook(({ workspaceId }) => useSavedPresets(workspaceId), {
+    initialProps: { workspaceId: firstWorkspaceId },
+  });
+  await waitFor(() => expect(result.current.presets).toEqual([firstWorkspacePreset]));
+
+  let firstSave!: Promise<SavedPreset | null>;
+  act(() => {
+    firstSave = result.current.save({
+      kind: "pr",
+      label: "First queued",
+      customQuery: "is:open",
+      repoFilter: "",
+    });
+  });
+  await waitFor(() => expect(updateGitHubWorkspaceSettings).toHaveBeenCalledTimes(1));
+
+  let secondSave!: Promise<SavedPreset | null>;
+  act(() => {
+    secondSave = result.current.save({
+      kind: "pr",
+      label: "Second queued",
+      customQuery: "is:closed",
+      repoFilter: "",
+    });
+  });
+  rerender({ workspaceId: secondWorkspaceId });
+  await waitFor(() => expect(result.current.presets).toEqual([secondWorkspacePreset]));
+
+  await act(async () => {
+    firstWrite.resolve({ ...workspaceSettings(), workspace_id: firstWorkspaceId });
+    await Promise.all([firstSave, secondSave]);
+  });
+  await waitFor(() => expect(updateGitHubWorkspaceSettings).toHaveBeenCalledTimes(2));
+
+  const secondPayload = vi.mocked(updateGitHubWorkspaceSettings).mock.calls[1]?.[0];
+  expect(secondPayload?.workspace_id).toBe(firstWorkspaceId);
+  expect((secondPayload?.saved_presets as SavedPreset[]).map((preset) => preset.label)).toEqual([
+    "Workspace A",
+    "First queued",
+    "Second queued",
+  ]);
+  expect(result.current.presets).toEqual([secondWorkspacePreset]);
+}
+
 describe("useSavedPresets mutation ordering", () => {
   beforeEach(() => {
     __resetSnapshotForTests();
@@ -275,6 +334,8 @@ describe("useSavedPresets mutation ordering", () => {
   it.each(MODES)("removes a pending %s default target", expectPendingDefaultTargetRemoval);
 
   it("persists different workspaces independently", expectIndependentWorkspacePersistence);
+
+  it("keeps queued saves scoped across workspace navigation", expectQueuedWorkspaceSaveIsolation);
 
   it("detaches future workspace writes from a stale test queue", async () => {
     const firstWrite = deferred<Awaited<ReturnType<typeof updateGitHubWorkspaceSettings>>>();
