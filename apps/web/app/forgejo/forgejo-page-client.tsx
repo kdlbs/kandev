@@ -3,12 +3,13 @@
 import { useState, type ReactNode } from "react";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
+import { Input } from "@kandev/ui/input";
 import Link from "@/components/routing/app-link";
 import { useAppStore } from "@/components/state-provider";
 import { useForgejoQueue } from "@/hooks/domains/forgejo/use-forgejo-queue";
 import { useForgejoPullRequestDetails } from "@/hooks/domains/forgejo/use-forgejo-pull-request-details";
 import { createTask } from "@/lib/api/domains/kanban-api";
-import { linkForgejoIssue } from "@/lib/api/domains/forgejo-api";
+import { linkForgejoIssue, linkForgejoPullRequest } from "@/lib/api/domains/forgejo-api";
 
 export function ForgejoPageClient({ workspaceId }: { workspaceId?: string }) {
   const { queue, loading, error, refresh } = useForgejoQueue(workspaceId);
@@ -48,6 +49,8 @@ function ForgejoPage({
   );
   const [taskMessage, setTaskMessage] = useState<string | null>(null);
   const [creatingIssueKey, setCreatingIssueKey] = useState<string | null>(null);
+  const [existingTaskID, setExistingTaskID] = useState("");
+  const [linkingKey, setLinkingKey] = useState<string | null>(null);
   const createIssueTask = async (entry: NonNullable<typeof queue>["issues"][number]) => {
     if (!workflowId || !startStepId) {
       setTaskMessage("Select a workflow with a start step before creating a Forgejo task.");
@@ -95,6 +98,34 @@ function ForgejoPage({
       setCreatingIssueKey(null);
     }
   };
+  const linkExisting = async (
+    kind: "issue" | "pull_request",
+    owner: string,
+    repo: string,
+    number: number,
+  ) => {
+    const taskID = existingTaskID.trim();
+    if (!taskID) return;
+    const key = `${kind}:${owner}/${repo}#${number}`;
+    setLinkingKey(key);
+    setTaskMessage(null);
+    try {
+      if (kind === "issue")
+        await linkForgejoIssue({ task_id: taskID, owner, repo, number }, { workspaceId });
+      else await linkForgejoPullRequest({ task_id: taskID, owner, repo, number }, { workspaceId });
+      setTaskMessage(
+        `Linked Forgejo ${kind === "issue" ? "issue" : "pull request"} #${number} to Kandev task ${taskID}.`,
+      );
+    } catch (cause) {
+      setTaskMessage(
+        cause instanceof Error
+          ? cause.message
+          : "Could not link the Forgejo item to this Kandev task.",
+      );
+    } finally {
+      setLinkingKey(null);
+    }
+  };
   return (
     <main className="mx-auto max-w-5xl space-y-6 p-4 sm:p-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
@@ -120,6 +151,22 @@ function ForgejoPage({
       </header>
       {error ? <ForgejoQueueMessage message={error} /> : null}
       {taskMessage ? <ForgejoQueueMessage message={taskMessage} /> : null}
+      <Card>
+        <CardHeader>
+          <CardTitle>Link to an existing Kandev task</CardTitle>
+          <CardDescription>
+            Enter the task ID, then choose Link existing task below.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Input
+            aria-label="Existing Kandev task ID"
+            placeholder="Kandev task ID"
+            value={existingTaskID}
+            onChange={(event) => setExistingTaskID(event.target.value)}
+          />
+        </CardContent>
+      </Card>
       {!error &&
       !loading &&
       queue &&
@@ -152,6 +199,22 @@ function ForgejoPage({
               >
                 {creatingIssueKey === key ? "Creating…" : "Create Kandev task"}
               </Button>
+              <Button
+                className="cursor-pointer"
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  void linkExisting(
+                    "issue",
+                    entry.repository.owner,
+                    entry.repository.name,
+                    entry.issue.number,
+                  )
+                }
+                disabled={!existingTaskID.trim() || linkingKey === `issue:${key}`}
+              >
+                {linkingKey === `issue:${key}` ? "Linking…" : "Link existing task"}
+              </Button>
             </span>
           );
         }}
@@ -183,6 +246,29 @@ function ForgejoPage({
               }
             >
               Details
+            </Button>
+            <Button
+              className="cursor-pointer"
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                void linkExisting(
+                  "pull_request",
+                  entry.repository.owner,
+                  entry.repository.name,
+                  entry.pull_request.number,
+                )
+              }
+              disabled={
+                !existingTaskID.trim() ||
+                linkingKey ===
+                  `pull_request:${entry.repository.owner}/${entry.repository.name}#${entry.pull_request.number}`
+              }
+            >
+              {linkingKey ===
+              `pull_request:${entry.repository.owner}/${entry.repository.name}#${entry.pull_request.number}`
+                ? "Linking…"
+                : "Link existing task"}
             </Button>
           </span>
         )}

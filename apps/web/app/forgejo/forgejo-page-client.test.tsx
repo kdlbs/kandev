@@ -2,14 +2,21 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ForgejoPageClient } from "./forgejo-page-client";
 
-const api = vi.hoisted(() => ({ createTask: vi.fn(), linkIssue: vi.fn() }));
+const api = vi.hoisted(() => ({
+  createTask: vi.fn(),
+  linkIssue: vi.fn(),
+  linkPullRequest: vi.fn(),
+}));
 const hooks = vi.hoisted(() => ({
   queue: vi.fn(),
   details: vi.fn(),
   appStore: vi.fn(),
 }));
 vi.mock("@/lib/api/domains/kanban-api", () => ({ createTask: api.createTask }));
-vi.mock("@/lib/api/domains/forgejo-api", () => ({ linkForgejoIssue: api.linkIssue }));
+vi.mock("@/lib/api/domains/forgejo-api", () => ({
+  linkForgejoIssue: api.linkIssue,
+  linkForgejoPullRequest: api.linkPullRequest,
+}));
 vi.mock("@/hooks/domains/forgejo/use-forgejo-queue", () => ({ useForgejoQueue: hooks.queue }));
 vi.mock("@/hooks/domains/forgejo/use-forgejo-pull-request-details", () => ({
   useForgejoPullRequestDetails: hooks.details,
@@ -73,5 +80,19 @@ describe("ForgejoPageClient", () => {
       { workspaceId: "ws-a" },
     );
     expect(await screen.findByText(/Created Kandev task/)).toBeTruthy();
+  });
+
+  it("links a queued issue to an existing Kandev task", async () => {
+    render(<ForgejoPageClient workspaceId="ws-a" />);
+    fireEvent.change(screen.getAllByRole("textbox", { name: "Existing Kandev task ID" }).at(-1)!, {
+      target: { value: "task-existing" },
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Link existing task" }).at(-1)!);
+    await waitFor(() =>
+      expect(api.linkIssue).toHaveBeenCalledWith(
+        { task_id: "task-existing", owner: "acme", repo: "app", number: 7 },
+        { workspaceId: "ws-a" },
+      ),
+    );
   });
 });
