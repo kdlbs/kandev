@@ -244,8 +244,8 @@ func TestUpdateDocumentWritesEveryMutableFieldAndReportsMissing(t *testing.T) {
 	if !got.CreatedAt.Equal(createdAt) {
 		t.Errorf("CreatedAt = %v, want it preserved at %v across the update", got.CreatedAt, createdAt)
 	}
-	if !got.UpdatedAt.After(createdAt) && !got.UpdatedAt.Equal(doc.UpdatedAt) {
-		t.Errorf("UpdatedAt = %v, want the refreshed %v", got.UpdatedAt, doc.UpdatedAt)
+	if !got.UpdatedAt.After(createdAt) {
+		t.Errorf("UpdatedAt = %v, want it bumped past CreatedAt %v", got.UpdatedAt, createdAt)
 	}
 
 	missing := &models.TaskDocument{TaskID: "task-doc-update", Key: "nope"}

@@ -1988,7 +1988,12 @@ func TestCompleteTurnStampsNowAndAbandonTurnCollapsesToStartedAt(t *testing.T) {
 
 	// AbandonTurn must not rewrite a turn that is already closed.
 	closedAt := startedAt.Add(90 * time.Minute)
-	if err := repo.UpdateTurn(ctx, &models.Turn{ID: "turn-already-closed", CompletedAt: &closedAt}); err != nil {
+	alreadyClosed, err := repo.GetTurn(ctx, "turn-already-closed")
+	if err != nil {
+		t.Fatalf("GetTurn(turn-already-closed): %v", err)
+	}
+	alreadyClosed.CompletedAt = &closedAt
+	if err := repo.UpdateTurn(ctx, alreadyClosed); err != nil {
 		t.Fatalf("UpdateTurn: %v", err)
 	}
 	if err := repo.AbandonTurn(ctx, "turn-already-closed"); err != nil {
@@ -2305,5 +2310,65 @@ func TestGetTaskSessionByTaskIDReturnsNewestWhileActiveVariantFiltersState(t *te
 	_, err = repo.GetTaskSessionByTaskID(ctx, "task-batch-missing")
 	if !errors.Is(err, models.ErrTaskSessionNotFound) {
 		t.Errorf("GetTaskSessionByTaskID(missing) error = %v, want ErrTaskSessionNotFound", err)
+	}
+}
+
+// TestHasActiveTaskSessionsByEnvironmentKeysOffEnvironmentIDNotTaskEnvironmentID
+// discriminates the two columns. The shared batch fixture sets environment_id
+// and task_environment_id to the same value, so on its own it cannot tell
+// which column the guard reads — swapping them there would go unnoticed.
+func TestHasActiveTaskSessionsByEnvironmentKeysOffEnvironmentIDNotTaskEnvironmentID(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-envcol", Title: "env column"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-col-taskenv", TaskID: "task-envcol",
+		ExecutorType: string(models.ExecutorTypeLocal), Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	// Active, but only task_environment_id points at env-col-taskenv;
+	// environment_id is left empty.
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-envcol-taskenv-only", TaskID: "task-envcol",
+		State: models.TaskSessionStateRunning, TaskEnvironmentID: "env-col-taskenv",
+	}); err != nil {
+		t.Fatalf("CreateTaskSession(task-env only): %v", err)
+	}
+
+	hasActive, err := repo.HasActiveTaskSessionsByEnvironment(ctx, "env-col-taskenv")
+	if err != nil {
+		t.Fatalf("HasActiveTaskSessionsByEnvironment: %v", err)
+	}
+	if hasActive {
+		t.Error("HasActiveTaskSessionsByEnvironment = true for a value only present in task_environment_id; " +
+			"the guard must key off environment_id")
+	}
+	// The task-environment guard does see the same row, which is what makes
+	// the negative above meaningful rather than an empty-table artifact.
+	borrowed, err := repo.HasActiveTaskSessionsByTaskEnvironmentExcludingTask(ctx, "env-col-taskenv", "task-other")
+	if err != nil {
+		t.Fatalf("HasActiveTaskSessionsByTaskEnvironmentExcludingTask: %v", err)
+	}
+	if !borrowed {
+		t.Fatal("task-environment guard = false; the fixture row is not visible, so the negative above proves nothing")
+	}
+
+	// Now a session whose environment_id carries the value: the guard fires.
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-envcol-envid", TaskID: "task-envcol",
+		State: models.TaskSessionStateRunning, EnvironmentID: "env-col-envid",
+	}); err != nil {
+		t.Fatalf("CreateTaskSession(environment_id): %v", err)
+	}
+	hasActive, err = repo.HasActiveTaskSessionsByEnvironment(ctx, "env-col-envid")
+	if err != nil {
+		t.Fatalf("HasActiveTaskSessionsByEnvironment(environment_id): %v", err)
+	}
+	if !hasActive {
+		t.Error("HasActiveTaskSessionsByEnvironment = false for a value present in environment_id, want true")
 	}
 }

@@ -323,6 +323,14 @@ func TestListAllExecutorProfilesOrdersByExecutorThenName(t *testing.T) {
 	seedExecutorForProfiles(t, repo, "executor-all-2")
 	seedExecutorForProfiles(t, repo, "executor-all-1")
 
+	// The repository seeds default profiles at init; measure that baseline
+	// rather than hardcoding today's count.
+	baseline, err := repo.ListAllExecutorProfiles(ctx)
+	if err != nil {
+		t.Fatalf("ListAllExecutorProfiles(baseline): %v", err)
+	}
+	seeded := len(baseline)
+
 	rows := []struct {
 		id, executorID, name string
 	}{
@@ -344,9 +352,13 @@ func TestListAllExecutorProfilesOrdersByExecutorThenName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListAllExecutorProfiles: %v", err)
 	}
+	if len(listed) != seeded+len(rows) {
+		t.Errorf("ListAllExecutorProfiles returned %d rows, want %d seeded + %d owned — ListAll must not filter",
+			len(listed), seeded, len(rows))
+	}
 
-	// The repository seeds two default profiles at init; assert on the
-	// relative order of the four rows this test owns.
+	// Assert on the relative order of the rows this test owns; the seeded
+	// defaults are interleaved by executor id.
 	ordered := make([]string, 0, len(rows))
 	for _, profile := range listed {
 		if strings.HasPrefix(profile.ID, "profile-all-") {
@@ -366,11 +378,6 @@ func TestListAllExecutorProfilesOrdersByExecutorThenName(t *testing.T) {
 		}
 	}
 
-	// The two seeded defaults are still there — ListAll must not filter.
-	if len(listed) != len(rows)+2 {
-		t.Errorf("ListAllExecutorProfiles returned %d rows, want %d (4 owned + 2 seeded defaults)",
-			len(listed), len(rows)+2)
-	}
 }
 
 func TestExecutorProfileEnvVarsSurviveListPaths(t *testing.T) {
