@@ -80,9 +80,6 @@
   "showTaskDetails": "Show task details",
   "sort": "Sort",
   "step": "Step",
-  "steps": "Steps",
-  "stepsSectionDescription": "Uncheck a step to hide its column and tasks on this board. It also stops appearing as a move destination on the card menu and bulk-move toolbar for that workflow — re-check it to move tasks there again.",
-  "stepsShownOfTotal": "{{shown}} of {{total}} shown",
   "subtaskOf": "Subtask of",
   "taskList": "Task list",
   "tasksOverWipLimit": "{{label}} tasks, over WIP limit",
@@ -92,5 +89,7 @@
   "whenEnabledClickingATaskOpens": "When enabled, clicking a task opens the preview panel. When disabled, clicking navigates directly to the session.",
   "wipTaskCount": "{{label}} tasks",
   "workflow": "Workflow",
-  "workflowStepFallback": "workflow step {{stepId}}"
+  "workflowStepFallback": "workflow step {{stepId}}",
+  "columns": "Columns",
+  "columnsForWorkflow": "Columns for {{name}}"
 }

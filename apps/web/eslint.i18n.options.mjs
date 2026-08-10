@@ -1581,7 +1581,7 @@ export const i18nGuardFiles = [
   "components/kanban/swimlane-graph2-content.tsx",
   "components/kanban/swimlane-header.tsx",
   "components/kanban/swimlane-kanban-content.tsx",
-  "components/kanban/steps-visibility-section.tsx",
+  "components/kanban/columns-menu.tsx",
   "components/kanban/task-multi-select-toolbar.tsx",
   // Kanban board: loose card/column/dropdown components on the same namespace.
   "components/kanban-board.tsx",

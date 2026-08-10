@@ -80,9 +80,6 @@
   "showTaskDetails": "Śĥōŵ ţàśķ ďēţàĩĺś",
   "sort": "Śōŕţ",
   "step": "Śţēƥ",
-  "steps": "Śţēƥś",
-  "stepsSectionDescription": "Ũńćĥēćķ à śţēƥ ţō ĥĩďē ĩţś ćōĺũḿń àńď ţàśķś ōń ţĥĩś ƀōàŕď. Ĩţ àĺśō śţōƥś àƥƥēàŕĩńĝ àś à ḿōvē ďēśţĩńàţĩōń ōń ţĥē ćàŕď ḿēńũ àńď ƀũĺķ-ḿōvē ţōōĺƀàŕ ƒōŕ ţĥàţ ŵōŕķƒĺōŵ — ŕē-ćĥēćķ ĩţ ţō ḿōvē ţàśķś ţĥēŕē àĝàĩń.",
-  "stepsShownOfTotal": "{{shown}} ōƒ {{total}} śĥōŵń",
   "subtaskOf": "Śũƀţàśķ ōƒ",
   "taskList": "Ţàśķ ĺĩśţ",
   "tasksOverWipLimit": "{{label}} ţàśķś, ōvēŕ ŴĨƤ ĺĩḿĩţ",
@@ -92,5 +89,7 @@
   "whenEnabledClickingATaskOpens": "Ŵĥēń ēńàƀĺēď, ćĺĩćķĩńĝ à ţàśķ ōƥēńś ţĥē ƥŕēvĩēŵ ƥàńēĺ. Ŵĥēń ďĩśàƀĺēď, ćĺĩćķĩńĝ ńàvĩĝàţēś ďĩŕēćţĺŷ ţō ţĥē śēśśĩōń.",
   "wipTaskCount": "{{label}} ţàśķś",
   "workflow": "Ŵōŕķƒĺōŵ",
-  "workflowStepFallback": "ŵōŕķƒĺōŵ śţēƥ {{stepId}}"
+  "workflowStepFallback": "ŵōŕķƒĺōŵ śţēƥ {{stepId}}",
+  "columns": "Ćōĺũḿńś",
+  "columnsForWorkflow": "Ćōĺũḿńś ƒōŕ {{name}}"
 }

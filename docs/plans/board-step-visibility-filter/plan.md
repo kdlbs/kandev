@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/board-step-visibility-filter/spec.md
 created: 2026-08-10
-status: pending
+status: implemented
 ---
 
 # Implementation Plan: Per-workflow column visibility (R2 relocation)
@@ -183,9 +183,33 @@ stay green without any edit.
 - **i18n key removal** — deleting `"steps"` without checking every reference will
   fail `i18n:check`. Grep before deleting.
 
+## Deviations from this plan
+
+- **`getVisibleWorkflows` was replaced, not amended.** It moved to
+  `lib/kanban/workflow-swimlanes.ts` as `selectVisibleWorkflows`, joining the
+  selectors the layering commit put there, and takes `hasTasks` /
+  `hasLiveHiddenSteps` predicates instead of `getFilteredTasks`. Adding a new
+  exported pure selector to the component module would have contradicted the
+  commit directly below this work on the PR.
+- **The phone's focused workflow needed shared state.** It lived in local
+  `useState` inside `kanban-board.tsx`, unreachable from the drawer, so
+  `mobileKanban.focusedWorkflowId` was added to the ui slice and
+  `SwimlaneContainer` publishes to it. Deriving focus a second way in the drawer
+  would have let it configure a workflow the user was not looking at.
+- **`ColumnsMenu` gained a `touchTargets` prop.** Content is identical on both
+  homes; the flag only relaxes menu density so phone rows clear 44px without
+  making desktop menu rows 44px tall.
+- **`mobile-step-visibility-filter.spec.ts` already existed** (added by the
+  commit this revision reverts) and was rewritten rather than created. Its
+  disclosure-only scenarios are gone; a focused-workflow isolation scenario
+  replaces them.
+- **AC-08's desktop E2E scenario was inverted, not just re-selected.** It
+  asserted the workflow disappears when every step is hidden — the exact
+  behaviour the retention rule reverses.
+
 ## Tasks
 
-- [ ] task-01 — Shared Columns menu on the swimlane header; remove the dropdown section
-- [ ] task-02 — Retain lanes with a non-empty live hidden set
-- [ ] task-03 — Phone home in the mobile menu drawer
-- [ ] task-04 — E2E retarget, retention scenario, mobile spec
+- [x] task-01 — Shared Columns menu on the swimlane header; remove the dropdown section
+- [x] task-02 — Retain lanes with a non-empty live hidden set
+- [x] task-03 — Phone home in the mobile menu drawer
+- [x] task-04 — E2E retarget, retention scenario, mobile spec

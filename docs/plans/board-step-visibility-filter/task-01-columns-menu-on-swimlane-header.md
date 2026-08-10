@@ -1,7 +1,7 @@
 ---
 id: "01-columns-menu-on-swimlane-header"
 title: "Move the step list to a per-lane Columns menu"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"

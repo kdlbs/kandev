@@ -1,12 +1,20 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import type { ComponentProps, HTMLAttributes, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MobileMenuSheet } from "./mobile-menu-sheet";
 
-const { useKanbanDisplaySettingsMock, breakpointMocks } = vi.hoisted(() => ({
+const { useKanbanDisplaySettingsMock, breakpointMocks, storeMocks } = vi.hoisted(() => ({
   useKanbanDisplaySettingsMock: vi.fn(),
   breakpointMocks: { isMobile: true, isTablet: false, breakpoint: "mobile" as string },
+  storeMocks: { focusedWorkflowId: null as string | null },
 }));
+
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (selector: (state: unknown) => unknown) =>
+    selector({ mobileKanban: { focusedWorkflowId: storeMocks.focusedWorkflowId } }),
+}));
+
+afterEach(cleanup);
 
 vi.mock("@/hooks/use-kanban-display-settings", () => ({
   useKanbanDisplaySettings: useKanbanDisplaySettingsMock,
@@ -56,9 +64,6 @@ vi.mock("@kandev/ui/sheet", () => ({
   SheetTitle: ({ children }: { children: ReactNode }) => <h2>{children}</h2>,
 }));
 
-const WF_A = { id: "wf-a", name: "Workflow A" };
-const WF_B = { id: "wf-b", name: "Workflow B" };
-
 function defaultDisplaySettings() {
   return {
     workflows: [],
@@ -95,134 +100,66 @@ function renderSheet(props: Partial<ComponentProps<typeof MobileMenuSheet>> = {}
   );
 }
 
-const TWO_WORKFLOW_SNAPSHOTS = {
-  [WF_A.id]: { steps: [{ id: "a1", title: "Step A1", position: 0 }] },
-  [WF_B.id]: { steps: [{ id: "b1", title: "Step B1", position: 0 }] },
-} as never;
-
 beforeEach(() => {
   useKanbanDisplaySettingsMock.mockReturnValue(defaultDisplaySettings());
   breakpointMocks.isMobile = true;
   breakpointMocks.isTablet = false;
   breakpointMocks.breakpoint = "mobile";
+  storeMocks.focusedWorkflowId = null;
+});
+describe("MobileMenuSheet — no Steps section (relocated to the lane)", () => {
+  it("renders no step control on the phone kanban page", () => {
+    // The dropdown-era Steps section is gone; the phone regains column
+    // visibility as a focused-workflow block in task-03.
+    renderSheet();
+
+    expect(screen.queryByTestId(/steps-filter-/)).toBeNull();
+    expect(screen.queryByTestId("steps-filter-section")).toBeNull();
+  });
 });
 
-afterEach(cleanup);
+const WF_A = { id: "wf-a", name: "Workflow A" };
+const WF_B = { id: "wf-b", name: "Workflow B" };
+const TWO_WORKFLOWS = {
+  eligibleWorkflows: [WF_A, WF_B],
+  snapshots: {
+    [WF_A.id]: { steps: [{ id: "a1", title: "Step A1", position: 0 }] },
+    [WF_B.id]: { steps: [{ id: "b1", title: "Step B1", position: 0 }] },
+  },
+};
 
-describe("MobileMenuSheet — Steps section surface exclusivity (item 2, F25)", () => {
-  it("renders the Steps section on a phone kanban page", () => {
-    useKanbanDisplaySettingsMock.mockReturnValue({
-      ...defaultDisplaySettings(),
-      eligibleWorkflows: [WF_A],
-      snapshots: { [WF_A.id]: { steps: [{ id: "s1", title: "Step 1", position: 0 }] } },
-    });
+describe("MobileMenuSheet — Columns control for the focused workflow", () => {
+  it("renders the Columns menu for the focused workflow only", () => {
+    useKanbanDisplaySettingsMock.mockReturnValue({ ...defaultDisplaySettings(), ...TWO_WORKFLOWS });
+    storeMocks.focusedWorkflowId = WF_A.id;
     renderSheet();
-    expect(screen.getByTestId(`steps-filter-group-${WF_A.id}`)).not.toBeNull();
+
+    expect(screen.getByTestId(`columns-menu-${WF_A.id}`)).toBeTruthy();
+    expect(screen.queryByTestId(`columns-menu-${WF_B.id}`)).toBeNull();
   });
 
-  it("does not render the Steps section on a tablet viewport — the drawer subtree holds zero steps-filter-* testids", () => {
+  it("renders nothing when the board has reported no focused workflow", () => {
+    useKanbanDisplaySettingsMock.mockReturnValue({ ...defaultDisplaySettings(), ...TWO_WORKFLOWS });
+    storeMocks.focusedWorkflowId = null;
+    renderSheet();
+
+    expect(screen.queryByTestId(/columns-menu-/)).toBeNull();
+  });
+
+  it("renders nothing off the phone, where the lane header owns the control", () => {
+    useKanbanDisplaySettingsMock.mockReturnValue({ ...defaultDisplaySettings(), ...TWO_WORKFLOWS });
+    storeMocks.focusedWorkflowId = WF_A.id;
     breakpointMocks.isMobile = false;
-    breakpointMocks.isTablet = true;
-    breakpointMocks.breakpoint = "tablet";
-    useKanbanDisplaySettingsMock.mockReturnValue({
-      ...defaultDisplaySettings(),
-      eligibleWorkflows: [WF_A],
-      snapshots: { [WF_A.id]: { steps: [{ id: "s1", title: "Step 1", position: 0 }] } },
-    });
     renderSheet();
-    expect(screen.queryByTestId(/^steps-filter-/)).toBeNull();
+
+    expect(screen.queryByTestId(/columns-menu-/)).toBeNull();
   });
 
-  it("does not render the Steps section on the tasks page on a phone viewport (F25)", () => {
-    useKanbanDisplaySettingsMock.mockReturnValue({
-      ...defaultDisplaySettings(),
-      eligibleWorkflows: [WF_A],
-      snapshots: { [WF_A.id]: { steps: [{ id: "s1", title: "Step 1", position: 0 }] } },
-    });
+  it("renders nothing on the tasks page", () => {
+    useKanbanDisplaySettingsMock.mockReturnValue({ ...defaultDisplaySettings(), ...TWO_WORKFLOWS });
+    storeMocks.focusedWorkflowId = WF_A.id;
     renderSheet({ currentPage: "tasks" });
-    expect(screen.queryByTestId(/^steps-filter-/)).toBeNull();
-  });
-});
 
-describe("MobileMenuSheet — Steps section wiring", () => {
-  it("toggling a step checkbox invokes onToggleStepVisibility with workflow and step id", () => {
-    const onToggleStepVisibility = vi.fn();
-    useKanbanDisplaySettingsMock.mockReturnValue({
-      ...defaultDisplaySettings(),
-      eligibleWorkflows: [WF_A],
-      snapshots: { [WF_A.id]: { steps: [{ id: "s1", title: "Step 1", position: 0 }] } },
-      onToggleStepVisibility,
-    });
-    renderSheet();
-    fireEvent.click(screen.getByTestId("steps-filter-step-s1"));
-    expect(onToggleStepVisibility).toHaveBeenCalledWith(WF_A.id, "s1");
-  });
-});
-
-describe("MobileMenuSheet — override-reset rule for the held-open breakpoint crossing (item 6)", () => {
-  it("clears a disclosure override after mobile -> tablet -> mobile with the drawer held open throughout", () => {
-    useKanbanDisplaySettingsMock.mockReturnValue({
-      ...defaultDisplaySettings(),
-      eligibleWorkflows: [WF_A, WF_B],
-      snapshots: TWO_WORKFLOW_SNAPSHOTS,
-    });
-    const { rerender } = renderSheet();
-    const rerenderSheet = () =>
-      rerender(
-        <MobileMenuSheet
-          open
-          onOpenChange={vi.fn()}
-          currentPage="kanban"
-          showHealthIndicator={false}
-          onOpenHealthDialog={vi.fn()}
-        />,
-      );
-
-    // Explicitly expand A's group (collapsed by default; nothing hidden).
-    fireEvent.click(screen.getByTestId(`steps-filter-group-toggle-${WF_A.id}`));
-    expect(
-      screen.getByTestId(`steps-filter-group-toggle-${WF_A.id}`).getAttribute("aria-expanded"),
-    ).toBe("true");
-
-    // Widen into the tablet range — the drawer's `open` prop stays true throughout.
-    breakpointMocks.isMobile = false;
-    breakpointMocks.isTablet = true;
-    breakpointMocks.breakpoint = "tablet";
-    rerenderSheet();
-
-    // Narrow back below 768px, still held open.
-    breakpointMocks.isMobile = true;
-    breakpointMocks.isTablet = false;
-    breakpointMocks.breakpoint = "mobile";
-    rerenderSheet();
-
-    expect(
-      screen.getByTestId(`steps-filter-group-toggle-${WF_A.id}`).getAttribute("aria-expanded"),
-    ).toBe("false");
-    expect(screen.queryByTestId("steps-filter-step-a1")).toBeNull();
-  });
-
-  it("does NOT reset the override while the drawer stays on the mobile surface with no crossing", () => {
-    useKanbanDisplaySettingsMock.mockReturnValue({
-      ...defaultDisplaySettings(),
-      eligibleWorkflows: [WF_A, WF_B],
-      snapshots: TWO_WORKFLOW_SNAPSHOTS,
-    });
-    const { rerender } = renderSheet();
-    fireEvent.click(screen.getByTestId(`steps-filter-group-toggle-${WF_A.id}`));
-
-    rerender(
-      <MobileMenuSheet
-        open
-        onOpenChange={vi.fn()}
-        currentPage="kanban"
-        showHealthIndicator={false}
-        onOpenHealthDialog={vi.fn()}
-      />,
-    );
-
-    expect(
-      screen.getByTestId(`steps-filter-group-toggle-${WF_A.id}`).getAttribute("aria-expanded"),
-    ).toBe("true");
+    expect(screen.queryByTestId(/columns-menu-/)).toBeNull();
   });
 });

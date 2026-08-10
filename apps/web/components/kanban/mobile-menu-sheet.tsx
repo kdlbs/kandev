@@ -22,11 +22,8 @@ import { ImproveKandevDialog } from "@/components/improve-kandev-dialog";
 import { useTranslation } from "react-i18next";
 import { getRepositoryPlaceholderKey } from "@/lib/kanban/repository-placeholder";
 import { MobileUtilityActions } from "./mobile-menu-utility-actions";
-import {
-  StepsVisibilitySection,
-  type StepsVisibilitySectionProps,
-} from "./steps-visibility-section";
 import { useMobileMenuSheetState } from "@/hooks/use-mobile-menu-sheet-state";
+import { ColumnsMenu, type ColumnsMenuStep } from "./columns-menu";
 import {
   mobileControlClass,
   mobileControlIconClass,
@@ -63,7 +60,19 @@ export type MobileDisplayOptionsProps = {
   showTaskDetails: boolean;
   showWorkflow: boolean;
   tasksListOptions?: TasksListDisplayOptions;
-  stepsSection: StepsVisibilitySectionProps | null;
+  /**
+   * Column visibility for the workflow the phone board is focused on. Null off
+   * the phone kanban, where the lane header owns the control instead.
+   */
+  columnsSection: MobileColumnsSection | null;
+};
+
+export type MobileColumnsSection = {
+  workflowId: string;
+  workflowName: string;
+  steps: ColumnsMenuStep[];
+  hiddenStepIds: string[];
+  onToggle: (workflowId: string, stepId: string) => void;
 };
 
 function MobileDisplaySelects({
@@ -83,7 +92,7 @@ function MobileDisplaySelects({
   | "onToggleTasksListShowDetails"
   | "showTaskDetails"
   | "tasksListOptions"
-  | "stepsSection"
+  | "columnsSection"
 >) {
   const { t } = useTranslation();
   return (
@@ -147,14 +156,19 @@ function MobileDisplayOptions(props: MobileDisplayOptionsProps) {
     onToggleTasksListShowDetails,
     showTaskDetails,
     tasksListOptions,
-    stepsSection,
+    columnsSection,
     ...selectProps
   } = props;
   return (
     <div className="space-y-4">
       <label className={mobileSectionTitleClass}>{t("kanban:displayOptions")}</label>
       <MobileDisplaySelects {...selectProps} />
-      {stepsSection && <StepsVisibilitySection {...stepsSection} />}
+      {columnsSection && (
+        <div className={mobileFieldClass}>
+          <label className={mobileFieldLabelClass}>{t("kanban:columns")}</label>
+          <ColumnsMenu {...columnsSection} touchTargets />
+        </div>
+      )}
       <div className={mobileFieldClass}>
         <label className={mobileFieldLabelClass}>{t("kanban:previewPanel")}</label>
         <label className="flex h-10 cursor-pointer items-center gap-3 rounded-md px-0 text-sm font-medium">

@@ -167,186 +167,30 @@ describe("KanbanDisplayDropdown — plugin task filter identities", () => {
     expect(getOptions).toHaveBeenCalledTimes(1);
   });
 });
-
-const STEPS_WF_A_ID = "wf-a";
-const STEPS_WF_B_ID = "wf-b";
-const STEPS_WF_A = { id: STEPS_WF_A_ID, name: "Workflow A" };
-const STEPS_WF_B = { id: STEPS_WF_B_ID, name: "Workflow B" };
-
-describe("KanbanDisplayDropdown — Steps section", () => {
-  it("lists a workflow's steps in position order, tiebreaking by id", () => {
-    useKanbanDisplaySettingsMock.mockReturnValue({
-      ...defaultMockSettings(),
-      eligibleWorkflows: [STEPS_WF_A],
-      snapshots: {
-        [STEPS_WF_A_ID]: {
-          steps: [
-            { id: "step-z", title: "Z step", position: 1 },
-            { id: "step-a", title: "A step", position: 0 },
-            { id: "step-b-tie", title: "B tie", position: 1 },
-          ],
-        },
-      },
-    });
-    render(<KanbanDisplayDropdown />);
+describe("KanbanDisplayDropdown — no Steps section (relocated to the lane)", () => {
+  it("renders no Steps section, group, or step control on the kanban page", () => {
+    useKanbanDisplaySettingsMock.mockReturnValue(defaultMockSettings());
+    render(<KanbanDisplayDropdown currentPage="kanban" />);
     openDropdown();
 
-    const group = screen.getByTestId(`steps-filter-group-${STEPS_WF_A_ID}`);
-    const labels = Array.from(group.querySelectorAll("span.text-sm")).map((el) => el.textContent);
-    // position 0 first; the two position-1 steps tiebreak ascending by id
-    // ("step-b-tie" < "step-z" lexicographically).
-    expect(labels).toEqual(["A step", "B tie", "Z step"]);
-  });
-
-  it("shows workflow name labels only when more than one workflow group has steps", () => {
-    useKanbanDisplaySettingsMock.mockReturnValue({
-      ...defaultMockSettings(),
-      eligibleWorkflows: [STEPS_WF_A],
-      snapshots: {
-        [STEPS_WF_A_ID]: { steps: [{ id: "step-1", title: "Step 1", position: 0 }] },
-      },
-    });
-    const { unmount } = render(<KanbanDisplayDropdown />);
-    openDropdown();
-    expect(screen.queryByText("Workflow A")).toBeNull();
-    unmount();
-
-    useKanbanDisplaySettingsMock.mockReturnValue({
-      ...defaultMockSettings(),
-      eligibleWorkflows: [STEPS_WF_A, STEPS_WF_B],
-      snapshots: {
-        [STEPS_WF_A_ID]: { steps: [{ id: "step-1", title: "Step 1", position: 0 }] },
-        [STEPS_WF_B_ID]: { steps: [{ id: "step-2", title: "Step 2", position: 0 }] },
-      },
-    });
-    render(<KanbanDisplayDropdown />);
-    openDropdown();
-    expect(screen.getByText("Workflow A")).not.toBeNull();
-    expect(screen.getByText("Workflow B")).not.toBeNull();
-  });
-
-  it("still renders a group for an eligible workflow whose snapshot has zero steps", () => {
-    // Spec's Steps-section scope is "one group per workflow with a loaded
-    // snapshot" — a workflow with literally zero steps is not carved out, so
-    // it still gets a group (with no checkboxes inside) rather than being
-    // silently dropped from the filter surface.
-    useKanbanDisplaySettingsMock.mockReturnValue({
-      ...defaultMockSettings(),
-      eligibleWorkflows: [STEPS_WF_A, STEPS_WF_B],
-      snapshots: {
-        [STEPS_WF_A_ID]: { steps: [{ id: "step-1", title: "Step 1", position: 0 }] },
-        [STEPS_WF_B_ID]: { steps: [] },
-      },
-    });
-    render(<KanbanDisplayDropdown />);
-    openDropdown();
-
-    expect(screen.getByTestId(`steps-filter-group-${STEPS_WF_A_ID}`)).not.toBeNull();
-    const groupB = screen.getByTestId(`steps-filter-group-${STEPS_WF_B_ID}`);
-    expect(groupB).not.toBeNull();
-    expect(groupB.querySelectorAll('[data-testid^="steps-filter-step-"]')).toHaveLength(0);
-  });
-
-  it("renders nothing when there are no eligible workflows at all", () => {
-    useKanbanDisplaySettingsMock.mockReturnValue({
-      ...defaultMockSettings(),
-      eligibleWorkflows: [],
-      snapshots: {},
-    });
-    render(<KanbanDisplayDropdown />);
-    openDropdown();
-
-    // StepsSection returns null entirely only when there is no eligible
-    // workflow group to show at all — a workflow with zero steps still gets
-    // an (empty) group, per the test above.
+    // Column visibility moved to the swimlane header's ColumnsMenu; the
+    // dropdown keeps only Workflow, Repository, plugin filters and Preview.
     expect(screen.queryByText("kanban:steps")).toBeNull();
-    expect(screen.queryByTestId(/steps-filter-group-/)).toBeNull();
+    expect(screen.queryByTestId(/steps-filter-/)).toBeNull();
+    expect(screen.queryByTestId(/columns-menu/)).toBeNull();
   });
 
-  // The dropdown half of the tablet-exclusivity criterion (item 2): once
-  // expanded, exactly one steps-filter-step-<stepId> exists per step of the
-  // expanded group — a duplication check paired with an expected-count
-  // assertion so it cannot pass vacuously.
-  it("holds exactly one steps-filter-step-<stepId> per step of an expanded group, no duplication", () => {
+  it("renders no step control even when workflows have snapshots with steps", () => {
     useKanbanDisplaySettingsMock.mockReturnValue({
       ...defaultMockSettings(),
-      eligibleWorkflows: [STEPS_WF_A, STEPS_WF_B],
-      snapshots: {
-        [STEPS_WF_A_ID]: {
-          steps: [
-            { id: "step-1", title: "Step 1", position: 0 },
-            { id: "step-2", title: "Step 2", position: 1 },
-          ],
-        },
-        [STEPS_WF_B_ID]: { steps: [{ id: "step-3", title: "Step 3", position: 0 }] },
-      },
+      eligibleWorkflows: [{ id: "wf-a", name: "Workflow A" }],
+      snapshots: { "wf-a": { steps: [{ id: "step-1", title: "Step 1", position: 0 }] } },
+      hiddenWorkflowStepIds: { "wf-a": ["step-1"] },
     });
-    render(<KanbanDisplayDropdown />);
+    render(<KanbanDisplayDropdown currentPage="kanban" />);
     openDropdown();
 
-    fireEvent.click(screen.getByTestId(`steps-filter-group-toggle-${STEPS_WF_A_ID}`));
-
-    expect(screen.getAllByTestId("steps-filter-step-step-1")).toHaveLength(1);
-    expect(screen.getAllByTestId("steps-filter-step-step-2")).toHaveLength(1);
-    expect(screen.queryByTestId("steps-filter-step-step-3")).toBeNull();
-  });
-});
-
-describe("KanbanDisplayDropdown — Steps section checkbox interaction", () => {
-  it("reflects checked/unchecked state from hiddenWorkflowStepIds", () => {
-    useKanbanDisplaySettingsMock.mockReturnValue({
-      ...defaultMockSettings(),
-      eligibleWorkflows: [STEPS_WF_A],
-      snapshots: {
-        [STEPS_WF_A_ID]: {
-          steps: [
-            { id: "step-shown", title: "Shown", position: 0 },
-            { id: "step-hidden", title: "Hidden", position: 1 },
-          ],
-        },
-      },
-      hiddenWorkflowStepIds: { [STEPS_WF_A_ID]: ["step-hidden"] },
-    });
-    render(<KanbanDisplayDropdown />);
-    openDropdown();
-
-    expect(screen.getByTestId("steps-filter-step-step-shown").getAttribute("data-state")).toBe(
-      "checked",
-    );
-    expect(screen.getByTestId("steps-filter-step-step-hidden").getAttribute("data-state")).toBe(
-      "unchecked",
-    );
-  });
-
-  it("calls onToggleStepVisibility with the workflow and step id on click", () => {
-    const onToggleStepVisibility = vi.fn();
-    useKanbanDisplaySettingsMock.mockReturnValue({
-      ...defaultMockSettings(),
-      eligibleWorkflows: [STEPS_WF_A],
-      snapshots: {
-        [STEPS_WF_A_ID]: { steps: [{ id: "step-1", title: "Step 1", position: 0 }] },
-      },
-      onToggleStepVisibility,
-    });
-    render(<KanbanDisplayDropdown />);
-    openDropdown();
-
-    fireEvent.click(screen.getByTestId("steps-filter-step-step-1"));
-
-    expect(onToggleStepVisibility).toHaveBeenCalledWith(STEPS_WF_A_ID, "step-1");
-  });
-
-  it("does not render the Steps section on the tasks page", () => {
-    useKanbanDisplaySettingsMock.mockReturnValue({
-      ...defaultMockSettings(),
-      eligibleWorkflows: [STEPS_WF_A],
-      snapshots: {
-        [STEPS_WF_A_ID]: { steps: [{ id: "step-1", title: "Step 1", position: 0 }] },
-      },
-    });
-    render(<KanbanDisplayDropdown currentPage="tasks" />);
-    openDropdown();
-
-    expect(screen.queryByTestId(`steps-filter-group-${STEPS_WF_A_ID}`)).toBeNull();
+    expect(screen.queryByTestId("steps-filter-step-step-1")).toBeNull();
+    expect(screen.queryByTestId("columns-menu-step-step-1")).toBeNull();
   });
 });

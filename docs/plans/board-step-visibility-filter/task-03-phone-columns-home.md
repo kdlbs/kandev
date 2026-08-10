@@ -1,7 +1,7 @@
 ---
 id: "03-phone-columns-home"
 title: "Render the Columns menu in the phone drawer for the focused workflow"
-status: pending
+status: done
 wave: 2
 depends_on: ["01-columns-menu-on-swimlane-header"]
 plan: "plan.md"

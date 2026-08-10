@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { selectMobileNavigatorWorkflows, selectWorkflowSwimlanes } from "./workflow-swimlanes";
+import {
+  selectMobileNavigatorWorkflows,
+  selectWorkflowSwimlanes,
+  selectVisibleWorkflows,
+} from "./workflow-swimlanes";
 
 const IMPROVE_WORKFLOW_NAME = "Improve Kandev";
 
@@ -77,5 +81,86 @@ describe("selectMobileNavigatorWorkflows — mobile board navigator options", ()
     expect(
       selectMobileNavigatorWorkflows(both, workflows, withTasks).map((entry) => entry.workflow.id),
     ).toEqual(["dev", "improve", "report"]);
+  });
+});
+
+describe("selectVisibleWorkflows — lane retention for hidden columns", () => {
+  const WF_A = { id: "wf-a", name: "A" };
+  const WF_B = { id: "wf-b", name: "B" };
+  const ordered = [WF_A, WF_B];
+  const noneHidden = () => false;
+
+  it("drops a task-less workflow whose hidden set is empty, as before the feature", () => {
+    const result = selectVisibleWorkflows({
+      workflowFilter: null,
+      orderedWorkflows: ordered,
+      hasTasks: (id) => id === WF_B.id,
+      hasLiveHiddenSteps: noneHidden,
+      showEmptyBoard: false,
+    });
+
+    expect(result.map((w) => w.id)).toEqual([WF_B.id]);
+  });
+
+  it("retains a task-less workflow that has a live hidden step, so its menu stays reachable", () => {
+    const result = selectVisibleWorkflows({
+      workflowFilter: null,
+      orderedWorkflows: ordered,
+      hasTasks: (id) => id === WF_B.id,
+      hasLiveHiddenSteps: (id) => id === WF_A.id,
+      showEmptyBoard: false,
+    });
+
+    expect(result.map((w) => w.id)).toEqual([WF_A.id, WF_B.id]);
+  });
+
+  it("preserves the board's workflow order when retaining", () => {
+    const result = selectVisibleWorkflows({
+      workflowFilter: null,
+      orderedWorkflows: ordered,
+      hasTasks: () => false,
+      hasLiveHiddenSteps: () => true,
+      showEmptyBoard: false,
+    });
+
+    expect(result.map((w) => w.id)).toEqual([WF_A.id, WF_B.id]);
+  });
+
+  it("does not retain on a stale hidden id — the predicate is the live intersection", () => {
+    // `hasLiveHiddenSteps` is defined as H ∩ liveStepIds, so a hidden set made
+    // only of deleted step ids reports false and cannot hold a lane open.
+    const result = selectVisibleWorkflows({
+      workflowFilter: null,
+      orderedWorkflows: ordered,
+      hasTasks: (id) => id === WF_B.id,
+      hasLiveHiddenSteps: noneHidden,
+      showEmptyBoard: false,
+    });
+
+    expect(result.map((w) => w.id)).toEqual([WF_B.id]);
+  });
+
+  it("returns every workflow when an explicit workflow filter is set", () => {
+    const result = selectVisibleWorkflows({
+      workflowFilter: WF_A.id,
+      orderedWorkflows: ordered,
+      hasTasks: () => false,
+      hasLiveHiddenSteps: noneHidden,
+      showEmptyBoard: false,
+    });
+
+    expect(result.map((w) => w.id)).toEqual([WF_A.id, WF_B.id]);
+  });
+
+  it("falls back to every workflow on an empty mobile board", () => {
+    const result = selectVisibleWorkflows({
+      workflowFilter: null,
+      orderedWorkflows: ordered,
+      hasTasks: () => false,
+      hasLiveHiddenSteps: noneHidden,
+      showEmptyBoard: true,
+    });
+
+    expect(result.map((w) => w.id)).toEqual([WF_A.id, WF_B.id]);
   });
 });

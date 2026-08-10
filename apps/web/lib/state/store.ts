@@ -332,6 +332,7 @@ export type AppState = KanbanSlice & {
   setMobileKanbanActiveStep: (workflowId: string, stepId: string) => void;
   setMobileKanbanMenuOpen: (open: boolean) => void;
   setMobileKanbanSearchOpen: (open: boolean) => void;
+  setMobileKanbanFocusedWorkflow: (workflowId: string | null) => void;
   setMobileSessionPanel: (sessionId: string, panel: UISliceTypes.MobileSessionPanel) => void;
   setMobileSessionReview: (sessionId: string, mrKey: string | null) => void;
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;

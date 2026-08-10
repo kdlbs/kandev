@@ -14,12 +14,6 @@ const TASK_B = "Task in workflow B";
 // the synthetic "Needs Reassignment" column a hidden step's task must NOT resurface in.
 const ORPHAN_STEP_ID = "__kandev_orphan__";
 
-async function openDisplayDropdown(kanban: KanbanPage) {
-  const trigger = kanban.page.getByTestId("display-button");
-  await trigger.click();
-  await expect(trigger).toHaveAttribute("data-state", "open");
-}
-
 async function closeDisplayDropdown(kanban: KanbanPage) {
   const trigger = kanban.page.getByTestId("display-button");
   if ((await trigger.getAttribute("data-state")) === "open") {
@@ -28,17 +22,39 @@ async function closeDisplayDropdown(kanban: KanbanPage) {
   await expect(trigger).not.toHaveAttribute("data-state", "open");
 }
 
-// R2: with a second workflow seeded, the Steps section now shows a disclosure
-// header per workflow group and starts collapsed by default (nothing hidden
-// yet) — a checked-state assertion or a checkbox click against a collapsed
-// group's steps matches nothing and passes vacuously, so every such
-// interaction gains this expand step first.
-async function expandStepsGroup(kanban: KanbanPage, workflowId: string) {
-  const toggle = kanban.page.getByTestId(`steps-filter-group-toggle-${workflowId}`);
-  if ((await toggle.getAttribute("aria-expanded")) !== "true") {
-    await toggle.click();
+// Column visibility lives on the swimlane header of the workflow it
+// configures, so there is no group to expand and no eligibility set to reason
+// about — the lane already answers "which workflow is this?".
+// Opening is retried until the menu is actually open. The Display dropdown
+// that these scenarios close just beforehand keeps a dismissable layer alive
+// for a frame or two, and a click landing in that window is swallowed — the
+// trigger stays `data-state="closed"`. The asserted end state is unchanged.
+async function openColumnsMenu(kanban: KanbanPage, workflowId: string) {
+  const trigger = kanban.page.getByTestId(`columns-menu-${workflowId}`);
+  await expect(async () => {
+    if ((await trigger.getAttribute("data-state")) !== "open") {
+      await trigger.click();
+    }
+    await expect(trigger).toHaveAttribute("data-state", "open", { timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
+}
+
+async function closeColumnsMenu(kanban: KanbanPage, workflowId: string) {
+  const trigger = kanban.page.getByTestId(`columns-menu-${workflowId}`);
+  if ((await trigger.getAttribute("data-state")) === "open") {
+    await kanban.page.keyboard.press("Escape");
   }
-  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await expect(trigger).not.toHaveAttribute("data-state", "open");
+}
+
+// The menu deliberately stays open across item clicks, so several columns can
+// be flipped in one visit.
+async function toggleColumns(kanban: KanbanPage, workflowId: string, stepIds: string[]) {
+  await openColumnsMenu(kanban, workflowId);
+  for (const stepId of stepIds) {
+    await kanban.page.getByTestId(`columns-menu-step-${stepId}`).click();
+  }
+  await closeColumnsMenu(kanban, workflowId);
 }
 
 test.describe("Kanban step visibility filter", () => {
@@ -129,10 +145,7 @@ test.describe("Kanban step visibility filter", () => {
 
     // Hide the start step of workflow A
     if (!workflowAId) throw new Error("workflowAId not set");
-    await openDisplayDropdown(kanban);
-    await expandStepsGroup(kanban, workflowAId);
-    await testPage.getByTestId(`steps-filter-step-${startStepAId}`).click();
-    await closeDisplayDropdown(kanban);
+    await toggleColumns(kanban, workflowAId, [startStepAId]);
 
     // Task A is now hidden; column for step A is collapsed (removed, not
     // merely emptied) — but workflow A's OTHER step/task survive, proving
@@ -156,9 +169,7 @@ test.describe("Kanban step visibility filter", () => {
     await expect(kanban.taskCardByTitle(TASK_B)).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
 
     // Re-show the step — task A and its column reappear
-    await openDisplayDropdown(kanban);
-    await testPage.getByTestId(`steps-filter-step-${startStepAId}`).click();
-    await closeDisplayDropdown(kanban);
+    await toggleColumns(kanban, workflowAId, [startStepAId]);
 
     await expect(kanban.columnByStepId(startStepAId)).toBeVisible({
       timeout: TASK_VISIBLE_TIMEOUT,
@@ -167,7 +178,7 @@ test.describe("Kanban step visibility filter", () => {
   });
 
   test("hidden step selection persists across page reload", async ({ testPage }) => {
-    if (!startStepAId) throw new Error("startStepAId not set");
+    if (!startStepAId || !workflowAId) throw new Error("startStepAId/workflowAId not set");
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -178,9 +189,7 @@ test.describe("Kanban step visibility filter", () => {
     // WS/REST persist — rather than seeding via the API. Seeding only proves
     // hydration reads the field back; it never exercises the outbound write
     // path, so a broken/renamed wire key would go undetected.
-    await openDisplayDropdown(kanban);
-    await testPage.getByTestId(`steps-filter-step-${startStepAId}`).click();
-    await closeDisplayDropdown(kanban);
+    await toggleColumns(kanban, workflowAId, [startStepAId]);
 
     await expect(kanban.taskCardByTitle(TASK_A)).not.toBeVisible();
     await expect(kanban.columnByStepId(startStepAId)).not.toBeVisible();
@@ -194,11 +203,11 @@ test.describe("Kanban step visibility filter", () => {
     // Task A must not resurface as an orphan either.
     await expect(kanban.columnByStepId(ORPHAN_STEP_ID)).toHaveCount(0);
 
-    // The checkbox should reflect the persisted state
-    await openDisplayDropdown(kanban);
-    const checkbox = testPage.getByTestId(`steps-filter-step-${startStepAId}`);
-    await expect(checkbox).not.toBeChecked();
-    await closeDisplayDropdown(kanban);
+    // The menu item should reflect the persisted state
+    await openColumnsMenu(kanban, workflowAId);
+    const item = testPage.getByTestId(`columns-menu-step-${startStepAId}`);
+    await expect(item).toHaveAttribute("aria-checked", "false");
+    await closeColumnsMenu(kanban, workflowAId);
   });
 
   test("step filter is scoped per workflow — hiding a step in A does not hide the same-named step in B", async ({
@@ -223,16 +232,15 @@ test.describe("Kanban step visibility filter", () => {
     await expect(kanban.taskCardByTitle(TASK_B)).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
 
     // Hide the start step of workflow A only
-    await openDisplayDropdown(kanban);
-    await expandStepsGroup(kanban, workflowAId);
-    await testPage.getByTestId(`steps-filter-step-${startStepAId}`).click();
+    await toggleColumns(kanban, workflowAId, [startStepAId]);
 
-    // Workflow B's start step checkbox must remain checked
-    await expandStepsGroup(kanban, workflowBId);
-    const checkboxB = testPage.getByTestId(`steps-filter-step-${startStepBId}`);
-    await expect(checkboxB).toHaveCount(1);
-    await expect(checkboxB).toBeChecked();
-    await closeDisplayDropdown(kanban);
+    // Workflow B's own lane menu must still show its start step ticked —
+    // isolation is by construction, since B's menu only ever lists B's steps.
+    await openColumnsMenu(kanban, workflowBId);
+    const itemB = testPage.getByTestId(`columns-menu-step-${startStepBId}`);
+    await expect(itemB).toHaveCount(1);
+    await expect(itemB).toHaveAttribute("aria-checked", "true");
+    await closeColumnsMenu(kanban, workflowBId);
 
     // Task B remains visible; workflow B column is unaffected — isolation confirmed
     await expect(kanban.taskCardByTitle(TASK_B)).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
@@ -253,7 +261,7 @@ test.describe("Kanban step visibility filter", () => {
     });
   });
 
-  test("AC-08: a workflow whose every step is hidden disappears from All Workflows view while others are unaffected", async ({
+  test("AC-08 (R2): a workflow whose every step is hidden keeps its lane so the hide is reversible", async ({
     testPage,
   }) => {
     if (!workflowAId || !startStepAId || !secondStepAId || !startStepBId) {
@@ -278,35 +286,42 @@ test.describe("Kanban step visibility filter", () => {
     await expect(kanban.taskCardByTitle(TASK_B)).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
 
     // Hide BOTH of workflow A's steps — every step of A is now unticked.
-    // Expanding once is enough: an explicit disclosure choice wins over the
-    // recomputed default for the rest of this visit, so A stays expanded
-    // across both step toggles below.
-    await openDisplayDropdown(kanban);
-    await expandStepsGroup(kanban, workflowAId);
-    await testPage.getByTestId(`steps-filter-step-${startStepAId}`).click();
-    await testPage.getByTestId(`steps-filter-step-${secondStepAId}`).click();
-    await closeDisplayDropdown(kanban);
+    await toggleColumns(kanban, workflowAId, [startStepAId, secondStepAId]);
 
-    // Workflow A now has zero visible tasks and is dropped from the swimlane
-    // list entirely by the pre-existing getVisibleWorkflows logic — this is
-    // the exact path round 1's phantom-green E2E incidentally covered before
-    // it was fixed to genuinely exercise per-step column collapse instead.
+    // Workflow A has zero visible tasks. Before R2 it was dropped from the
+    // swimlane list by getVisibleWorkflows — which also removed the only
+    // control that could undo the hide. Its lane is now RETAINED because its
+    // live hidden set is non-empty: the columns and tasks are gone, the lane
+    // and its Columns trigger are not.
     await expect(kanban.taskCardByTitle(TASK_A)).not.toBeVisible();
     await expect(kanban.taskCardByTitle(TASK_A_OTHER_STEP)).not.toBeVisible();
     await expect(kanban.columnByStepId(startStepAId)).not.toBeVisible();
     await expect(kanban.columnByStepId(secondStepAId)).not.toBeVisible();
+    await expect(testPage.getByTestId(`columns-menu-${workflowAId}`)).toBeVisible({
+      timeout: TASK_VISIBLE_TIMEOUT,
+    });
 
     // Workflow B renders the same columns and tasks it did before, unaffected
     await expect(kanban.taskCardByTitle(TASK_B)).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
     await expect(kanban.columnByStepId(startStepBId)).toBeVisible({
       timeout: TASK_VISIBLE_TIMEOUT,
     });
+
+    // The reversibility half of the rule: re-ticking from that retained lane
+    // brings the column and its task back.
+    await toggleColumns(kanban, workflowAId, [startStepAId]);
+    await expect(kanban.columnByStepId(startStepAId)).toBeVisible({
+      timeout: TASK_VISIBLE_TIMEOUT,
+    });
+    await expect(kanban.taskCardByTitle(TASK_A)).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
   });
 
   test("AC-09: hiding every step of the selected single workflow renders zero columns without the empty-state message", async ({
     testPage,
   }) => {
-    if (!startStepAId || !secondStepAId) throw new Error("workflow A step ids not set");
+    if (!startStepAId || !secondStepAId || !workflowAId) {
+      throw new Error("workflow A step ids not set");
+    }
 
     const kanban = new KanbanPage(testPage);
     // Workflow filter defaults to the single seeded workflow (workflow A) —
@@ -319,14 +334,20 @@ test.describe("Kanban step visibility filter", () => {
     });
 
     // Hide both of workflow A's steps
-    await openDisplayDropdown(kanban);
-    await testPage.getByTestId(`steps-filter-step-${startStepAId}`).click();
-    await testPage.getByTestId(`steps-filter-step-${secondStepAId}`).click();
+    await openColumnsMenu(kanban, workflowAId);
+    await testPage.getByTestId(`columns-menu-step-${startStepAId}`).click();
+    await testPage.getByTestId(`columns-menu-step-${secondStepAId}`).click();
 
-    // The Steps section still lists both steps, both unticked, so they can be re-ticked
-    await expect(testPage.getByTestId(`steps-filter-step-${startStepAId}`)).not.toBeChecked();
-    await expect(testPage.getByTestId(`steps-filter-step-${secondStepAId}`)).not.toBeChecked();
-    await closeDisplayDropdown(kanban);
+    // The lane menu still lists both steps, both unticked, so they can be re-ticked
+    await expect(testPage.getByTestId(`columns-menu-step-${startStepAId}`)).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    await expect(testPage.getByTestId(`columns-menu-step-${secondStepAId}`)).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    await closeColumnsMenu(kanban, workflowAId);
 
     // Zero columns for this workflow, and — the load-bearing half of this AC —
     // NOT the "No tasks yet" empty state. That fallback only fires when every

@@ -1,7 +1,7 @@
 ---
 id: "02-retain-lanes-with-hidden-steps"
 title: "Retain lanes whose live hidden set is non-empty"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"

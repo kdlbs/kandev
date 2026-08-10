@@ -12,14 +12,12 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { IconAdjustmentsHorizontal } from "@tabler/icons-react";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
-import { useStepsDisclosureOverrides } from "@/hooks/use-steps-disclosure-overrides";
 import {
   pluginTaskFilterRegistrationKey,
   type PluginTaskFilterRegistration,
 } from "@/lib/plugins/registry";
 import type { Repository } from "@/lib/types/http";
 import type { WorkflowsState } from "@/lib/state/slices";
-import { StepsVisibilitySection } from "@/components/kanban/steps-visibility-section";
 import { useMemo, useRef, useState, type ComponentProps } from "react";
 import { useTranslation } from "react-i18next";
 import { getRepositoryPlaceholderKey } from "@/lib/kanban/repository-placeholder";
@@ -149,27 +147,6 @@ function PluginFilterSection({
   );
 }
 
-function StepsSection(
-  props: Omit<
-    ComponentProps<typeof StepsVisibilitySection>,
-    "overrides" | "onToggleGroupDisclosure"
-  > & { open: boolean },
-) {
-  const { open, ...sectionProps } = props;
-  const { overrides, toggleDisclosure } = useStepsDisclosureOverrides(open, "dropdown");
-  if (sectionProps.eligibleWorkflows.length === 0) return null;
-  return (
-    <>
-      <DropdownMenuSeparator />
-      <StepsVisibilitySection
-        {...sectionProps}
-        overrides={overrides}
-        onToggleGroupDisclosure={toggleDisclosure}
-      />
-    </>
-  );
-}
-
 function PreviewPanelSection({
   enablePreviewOnClick,
   onTogglePreviewOnClick,
@@ -245,14 +222,10 @@ export function KanbanDisplayDropdown({
     selectedRepositoryId,
     enablePreviewOnClick,
     tasksListShowDetails,
-    eligibleWorkflows,
-    snapshots,
-    hiddenWorkflowStepIds,
     onWorkflowChange,
     onRepositoryChange,
     onTogglePreviewOnClick,
     onToggleTasksListShowDetails,
-    onToggleStepVisibility,
   } = useKanbanDisplaySettings();
 
   const repositoryValue = allRepositoriesSelected ? "all" : (selectedRepositoryId ?? "all");
@@ -306,15 +279,6 @@ export function KanbanDisplayDropdown({
               </div>
             );
           })}
-          {currentPage === "kanban" && (
-            <StepsSection
-              open={open}
-              eligibleWorkflows={eligibleWorkflows}
-              snapshots={snapshots}
-              hiddenWorkflowStepIds={hiddenWorkflowStepIds}
-              onToggleStepVisibility={onToggleStepVisibility}
-            />
-          )}
           <DropdownMenuSeparator />
           <PreviewPanelSection
             enablePreviewOnClick={enablePreviewOnClick}

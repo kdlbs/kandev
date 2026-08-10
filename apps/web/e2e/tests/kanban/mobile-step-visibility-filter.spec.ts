@@ -16,43 +16,64 @@ async function openMobileMenu(testPage: Page) {
   await testPage.getByTestId("mobile-home-menu-card").waitFor({ state: "visible" });
 }
 
+// Escape is retried: closing the Columns dropdown and closing the drawer are
+// two dismissals, and the second key press can land while the first layer is
+// still tearing down, leaving the drawer open.
 async function closeMobileMenu(testPage: Page) {
-  await testPage.keyboard.press("Escape");
-  await expect(testPage.getByTestId("mobile-home-menu-card")).toHaveCount(0);
+  const card = testPage.getByTestId("mobile-home-menu-card");
+  await expect(async () => {
+    if ((await card.count()) > 0) {
+      await testPage.keyboard.press("Escape");
+    }
+    await expect(card).toHaveCount(0, { timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
 }
 
-// R2: with a second workflow seeded, the Steps section shows a disclosure
-// header per workflow group and starts collapsed by default (nothing hidden
-// yet) — interacting with a collapsed group's steps matches nothing and
-// passes vacuously, so scenarios expand first.
-async function expandStepsGroup(testPage: Page, workflowId: string) {
-  const toggle = testPage.getByTestId(`steps-filter-group-toggle-${workflowId}`);
-  if ((await toggle.getAttribute("aria-expanded")) !== "true") {
-    await toggle.click();
+// The phone's Columns control is scoped to the workflow the board is focused
+// on, so there is no group, no disclosure, and no eligibility set here — just
+// one workflow's steps.
+// See the desktop spec: a click landing while another dismissable layer is
+// still tearing down is swallowed, so opening is retried to the same end state.
+async function openColumnsMenu(testPage: Page, workflowId: string) {
+  const trigger = testPage.getByTestId(`columns-menu-${workflowId}`);
+  await expect(async () => {
+    if ((await trigger.getAttribute("data-state")) !== "open") {
+      await trigger.click();
+    }
+    await expect(trigger).toHaveAttribute("data-state", "open", { timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
+}
+
+async function closeColumnsMenu(testPage: Page, workflowId: string) {
+  const trigger = testPage.getByTestId(`columns-menu-${workflowId}`);
+  if ((await trigger.getAttribute("data-state")) === "open") {
+    await testPage.keyboard.press("Escape");
   }
-  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await expect(trigger).not.toHaveAttribute("data-state", "open");
 }
 
+async function toggleColumnsFromDrawer(testPage: Page, workflowId: string, stepIds: string[]) {
+  await openMobileMenu(testPage);
+  await openColumnsMenu(testPage, workflowId);
+  for (const stepId of stepIds) {
+    await testPage.getByTestId(`columns-menu-step-${stepId}`).click();
+  }
+  await closeColumnsMenu(testPage, workflowId);
+  await closeMobileMenu(testPage);
+}
+
+// Retried until the box settles. Radix opens menu content with a
+// `zoom-in-95` transform, so a box measured mid-animation reports ~95% of the
+// laid-out height (44px reads as ~41.9) — a false negative about the element,
+// not a real touch-target miss. The asserted end state is unchanged.
 async function expectMinTouchTarget(locators: Locator[]) {
   for (const locator of locators) {
-    const box = await locator.boundingBox();
-    expect(box).not.toBeNull();
-    if (!box) throw new Error("touch target is not laid out");
-    expect(box.height).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET_PX);
-  }
-}
-
-/** Document-order check via `compareDocumentPosition`, per the R2 placement AC. */
-async function isBefore(first: Locator, second: Locator): Promise<boolean> {
-  const secondHandle = await second.elementHandle();
-  if (!secondHandle) throw new Error("second locator did not resolve to an element");
-  try {
-    return await first.evaluate((firstEl, secondEl) => {
-      const position = firstEl.compareDocumentPosition(secondEl as Node);
-      return (position & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
-    }, secondHandle);
-  } finally {
-    await secondHandle.dispose();
+    await expect(async () => {
+      const box = await locator.boundingBox();
+      expect(box).not.toBeNull();
+      if (!box) throw new Error("touch target is not laid out");
+      expect(box.height).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET_PX);
+    }).toPass({ timeout: 5_000 });
   }
 }
 
@@ -67,7 +88,6 @@ test.describe("Mobile Steps visibility filter", () => {
   // hardcoded count/order, since the template's step count is not this
   // spec's concern to assume.
   let workflowASteps: WorkflowStep[] = [];
-  let workflowBSteps: WorkflowStep[] = [];
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   test.beforeEach(async ({ apiClient, seedData, testPage }) => {
@@ -97,9 +117,6 @@ test.describe("Mobile Steps visibility filter", () => {
     const stepsB = (await apiClient.listWorkflowSteps(workflowB.id)).steps;
     const startB = stepsB.find((s) => s.is_start_step) ?? stepsB[0];
     stepB1Id = startB.id;
-    workflowBSteps = [...stepsB].sort(
-      (a, b) => a.position - b.position || a.id.localeCompare(b.id),
-    );
 
     // "All Workflows" — the Steps section's eligible-workflow set follows the
     // same active Workflow filter as the board, and the default seeded
@@ -137,7 +154,6 @@ test.describe("Mobile Steps visibility filter", () => {
     stepA1Id = null;
     stepB1Id = null;
     workflowASteps = [];
-    workflowBSteps = [];
     // Clear hidden step IDs and restore the default (single-workflow) filter
     // — the phone board navigator is not exercised by these scenarios, but
     // resetting the workflow filter here keeps this suite's state hygiene
@@ -149,213 +165,118 @@ test.describe("Mobile Steps visibility filter", () => {
       kanban_hidden_step_ids: {},
     });
   });
-
-  test("1. reachable from the topbar menu; toggling a step hides its column and task, and re-ticking restores them", async ({
+  test("1. reachable from the topbar menu; toggling a column hides it and its task, and re-ticking restores them", async ({
     testPage,
-    seedData,
   }) => {
-    if (!workflowAId || !stepA1Id) throw new Error("fixture not set");
-    const startStep = seedData.steps.find((s) => s.id === stepA1Id);
-    if (!startStep) throw new Error("seeded start step not found");
+    if (!workflowAId || !stepA1Id || !stepA2Id) throw new Error("workflow A ids not set");
 
-    const mobile = new MobileKanbanPage(testPage);
-    await mobile.goto();
+    const kanban = new MobileKanbanPage(testPage);
+    await kanban.goto();
+    await expect(testPage.getByTestId(`kanban-column-${stepA1Id}`)).toHaveCount(1);
 
-    await openMobileMenu(testPage);
-    const menu = testPage.getByTestId("mobile-home-menu-card");
+    await toggleColumnsFromDrawer(testPage, workflowAId, [stepA1Id]);
 
-    // R2 placement AC: the Steps section sits after Repository and before
-    // the Preview-panel field, mirroring the dropdown's own field order.
-    const repositoryLabel = menu.getByText("Repository", { exact: true });
-    const previewLabel = menu.getByText("Preview Panel", { exact: true });
-    const stepsSection = menu.getByTestId("steps-filter-section");
-    await expect(stepsSection).toBeVisible();
-    expect(await isBefore(repositoryLabel, stepsSection)).toBe(true);
-    expect(await isBefore(stepsSection, previewLabel)).toBe(true);
-
-    await expandStepsGroup(testPage, workflowAId);
-    await testPage.getByTestId(`steps-filter-step-${stepA1Id}`).click();
-    await closeMobileMenu(testPage);
-
+    // Every column is mounted inside SwipeableColumns and revealed one at a
+    // time, so conformance is judged on COUNT, never on visibility.
     await expect(testPage.getByTestId(`kanban-column-${stepA1Id}`)).toHaveCount(0);
-    await expect(mobile.taskCardByTitle(TASK_A1)).toHaveCount(0);
-    await expect(mobile.taskCardByTitle(TASK_A2)).toBeVisible();
+    await expect(testPage.getByTestId(`kanban-column-${stepA2Id}`)).toHaveCount(1);
     await expect(testPage.getByTestId(`kanban-column-${ORPHAN_STEP_ID}`)).toHaveCount(0);
 
-    // The mobile board navigator no longer lists the hidden step by title.
-    await mobile.boardNavigator.click();
-    const navigatorDrawer = testPage.getByTestId("mobile-board-navigator-drawer");
-    await expect(navigatorDrawer.getByText(startStep.name, { exact: true })).toHaveCount(0);
-    await testPage.keyboard.press("Escape");
-    await expect(navigatorDrawer).toHaveCount(0);
-
-    // Re-ticking restores the column and its task. The group auto-expands
-    // this visit because workflow A now holds a live hidden step.
-    await openMobileMenu(testPage);
-    await expandStepsGroup(testPage, workflowAId);
-    await testPage.getByTestId(`steps-filter-step-${stepA1Id}`).click();
-    await closeMobileMenu(testPage);
-
-    await expect(testPage.getByTestId(`kanban-column-${stepA1Id}`)).toBeVisible();
-    await expect(mobile.taskCardByTitle(TASK_A1)).toBeVisible();
+    await toggleColumnsFromDrawer(testPage, workflowAId, [stepA1Id]);
+    await expect(testPage.getByTestId(`kanban-column-${stepA1Id}`)).toHaveCount(1);
   });
 
   test("2. persists across reload, driven through the real UI", async ({ testPage }) => {
-    if (!workflowAId || !stepA1Id) throw new Error("fixture not set");
+    if (!workflowAId || !stepA1Id) throw new Error("workflow A ids not set");
 
-    const mobile = new MobileKanbanPage(testPage);
-    await mobile.goto();
+    const kanban = new MobileKanbanPage(testPage);
+    await kanban.goto();
 
-    // Untick through the real UI — checkbox click -> normalize -> WS/REST
-    // persist — rather than seeding via the API, so the outbound write path
-    // is exercised.
-    await openMobileMenu(testPage);
-    await expandStepsGroup(testPage, workflowAId);
-    await testPage.getByTestId(`steps-filter-step-${stepA1Id}`).click();
-    await closeMobileMenu(testPage);
-
+    // Toggled through the UI rather than seeded: seeding only proves hydration
+    // reads the field back, never that the outbound write path works.
+    await toggleColumnsFromDrawer(testPage, workflowAId, [stepA1Id]);
     await expect(testPage.getByTestId(`kanban-column-${stepA1Id}`)).toHaveCount(0);
 
     await testPage.reload();
-    await mobile.board.waitFor({ state: "visible" });
     await testPage.getByTestId("mobile-kanban-layout").waitFor({ state: "visible" });
 
     await expect(testPage.getByTestId(`kanban-column-${stepA1Id}`)).toHaveCount(0);
     await expect(testPage.getByTestId(`kanban-column-${ORPHAN_STEP_ID}`)).toHaveCount(0);
 
     await openMobileMenu(testPage);
-    await expandStepsGroup(testPage, workflowAId);
-    await expect(testPage.getByTestId(`steps-filter-step-${stepA1Id}`)).not.toBeChecked();
-    await closeMobileMenu(testPage);
-  });
-
-  test("3. every interactive row measures at least 44 CSS px — the group toggle and, after expanding, the step row", async ({
-    testPage,
-  }) => {
-    if (!workflowAId) throw new Error("fixture not set");
-
-    const mobile = new MobileKanbanPage(testPage);
-    await mobile.goto();
-    await openMobileMenu(testPage);
-
-    const toggles = testPage.locator('[data-testid^="steps-filter-group-toggle-"]');
-    await expect(toggles).toHaveCount(2);
-    await expectMinTouchTarget(await toggles.all());
-
-    await expandStepsGroup(testPage, workflowAId);
-    const rows = testPage.locator('[data-testid^="steps-filter-step-row-"]');
-    // Only workflow A is expanded — exactly its steps are revealed.
-    await expect(rows).toHaveCount(workflowASteps.length);
-    await expectMinTouchTarget(await rows.all());
-  });
-
-  test("4. the drawer with the Steps section open causes no document-level horizontal overflow", async ({
-    testPage,
-  }) => {
-    if (!workflowAId) throw new Error("fixture not set");
-
-    const mobile = new MobileKanbanPage(testPage);
-    await mobile.goto();
-    await openMobileMenu(testPage);
-    await expandStepsGroup(testPage, workflowAId);
-
-    const scrollWidth = await testPage.evaluate(() => document.documentElement.scrollWidth);
-    const clientWidth = await testPage.evaluate(() => document.documentElement.clientWidth);
-    expect(scrollWidth).toBeLessThanOrEqual(clientWidth);
-  });
-
-  test("5. a collapsed group hides its checkboxes but keeps its container and toggle present; expanding reveals its steps in position order", async ({
-    testPage,
-  }) => {
-    if (!workflowAId || !stepA1Id || !stepA2Id) throw new Error("fixture not set");
-
-    const mobile = new MobileKanbanPage(testPage);
-    await mobile.goto();
-    await openMobileMenu(testPage);
-
-    // Nothing hidden yet — both groups start collapsed.
-    await expect(testPage.getByTestId(`steps-filter-group-${workflowAId}`)).toBeVisible();
-    await expect(testPage.getByTestId(`steps-filter-group-toggle-${workflowAId}`)).toHaveAttribute(
-      "aria-expanded",
+    await openColumnsMenu(testPage, workflowAId);
+    await expect(testPage.getByTestId(`columns-menu-step-${stepA1Id}`)).toHaveAttribute(
+      "aria-checked",
       "false",
     );
-    await expect(testPage.getByTestId(`steps-filter-step-${stepA1Id}`)).toHaveCount(0);
-    await expect(testPage.getByTestId(`steps-filter-step-${stepA2Id}`)).toHaveCount(0);
-
-    await expandStepsGroup(testPage, workflowAId);
-
-    const group = testPage.getByTestId(`steps-filter-group-${workflowAId}`);
-    const rows = group.locator('[data-testid^="steps-filter-step-row-"]');
-    await expect(rows).toHaveCount(workflowASteps.length);
-    for (const [index, step] of workflowASteps.entries()) {
-      await expect(rows.nth(index)).toHaveAttribute(
-        "data-testid",
-        `steps-filter-step-row-${step.id}`,
-      );
-    }
+    await closeColumnsMenu(testPage, workflowAId);
+    await closeMobileMenu(testPage);
   });
 
-  test("6. hiding every step of every seeded workflow renders zero columns on the phone board, no error and no empty-state message; re-ticking restores a column", async ({
+  test("3. the drawer trigger and every menu item clear the 44 CSS px touch target", async ({
     testPage,
   }) => {
-    if (!workflowAId || !workflowBId || !stepA1Id || !stepA2Id || !stepB1Id) {
-      throw new Error("fixture not set");
-    }
+    if (!workflowAId) throw new Error("workflowAId not set");
 
-    const mobile = new MobileKanbanPage(testPage);
-    await mobile.goto();
-
+    const kanban = new MobileKanbanPage(testPage);
+    await kanban.goto();
     await openMobileMenu(testPage);
-    await expandStepsGroup(testPage, workflowAId);
+
+    const trigger = testPage.getByTestId(`columns-menu-${workflowAId}`);
+    await expect(trigger).toBeVisible();
+    await expectMinTouchTarget([trigger]);
+
+    await openColumnsMenu(testPage, workflowAId);
+    const items = testPage.locator('[data-testid^="columns-menu-step-"]');
+    const count = await items.count();
+    expect(count).toBeGreaterThan(0);
+    await expectMinTouchTarget(Array.from({ length: count }, (_unused, index) => items.nth(index)));
+
+    await closeColumnsMenu(testPage, workflowAId);
+    await closeMobileMenu(testPage);
+  });
+
+  test("4. the drawer with the Columns menu open causes no document-level horizontal overflow", async ({
+    testPage,
+  }) => {
+    if (!workflowAId) throw new Error("workflowAId not set");
+
+    const kanban = new MobileKanbanPage(testPage);
+    await kanban.goto();
+    await openMobileMenu(testPage);
+    await openColumnsMenu(testPage, workflowAId);
+
+    const overflow = await testPage.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }));
+    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+
+    await closeColumnsMenu(testPage, workflowAId);
+    await closeMobileMenu(testPage);
+  });
+
+  test("5. the drawer offers the focused workflow's steps only, never another workflow's", async ({
+    testPage,
+  }) => {
+    if (!workflowAId || !workflowBId || !stepB1Id) throw new Error("workflow ids not set");
+
+    const kanban = new MobileKanbanPage(testPage);
+    await kanban.goto();
+    await openMobileMenu(testPage);
+
+    // One control, for the board actually on screen. Workflow B has its own
+    // steps and its own hidden set, and neither is reachable from here.
+    await expect(testPage.getByTestId(`columns-menu-${workflowAId}`)).toBeVisible();
+    await expect(testPage.getByTestId(`columns-menu-${workflowBId}`)).toHaveCount(0);
+
+    await openColumnsMenu(testPage, workflowAId);
+    await expect(testPage.getByTestId(`columns-menu-step-${stepB1Id}`)).toHaveCount(0);
     for (const step of workflowASteps) {
-      await testPage.getByTestId(`steps-filter-step-${step.id}`).click();
+      await expect(testPage.getByTestId(`columns-menu-step-${step.id}`)).toHaveCount(1);
     }
+
+    await closeColumnsMenu(testPage, workflowAId);
     await closeMobileMenu(testPage);
-
-    // Intermediate state: A now has zero visible tasks but B still holds one.
-    // `getVisibleWorkflows` (swimlane-container.tsx) filters a zero-task
-    // workflow OUT of the "All Workflows" swimlane list whenever some other
-    // workflow still has visible tasks — `showEmptyBoard` only changes that
-    // behaviour when EVERY workflow is empty — so A is dropped entirely
-    // rather than rendered with zero columns. A's columns are absent either
-    // way, but this intermediate step is NOT yet the scenario under test:
-    // dropping a workflow never reaches `SwipeableColumns` with a zero-length
-    // `steps` array, so it can't exercise the crash-class risk below.
-    for (const step of workflowASteps) {
-      await expect(testPage.getByTestId(`kanban-column-${step.id}`)).toHaveCount(0);
-    }
-    await expect(testPage.getByTestId(`kanban-column-${stepB1Id}`)).toBeVisible();
-    await expect(mobile.taskCardByTitle(TASK_B1)).toBeVisible();
-
-    // Genuinely globally empty: hiding B's steps too is what actually flips
-    // `getVisibleWorkflows`'s all-empty branch, which on mobile kanban
-    // (`showEmptyBoard=true`) falls back to rendering a focused workflow with
-    // its own (now zero-length) collapsed `steps` array — the one
-    // crash-class risk (`SwipeableColumns` / `mobile-column-tabs` receiving a
-    // zero-length array) that only the phone can hit and that no desktop spec
-    // can observe. Keeping B populated would never reach this branch, since a
-    // workflow with visible tasks elsewhere makes `getVisibleWorkflows` drop
-    // the empty one instead of rendering it — a different, already
-    // desktop-covered code path.
-    await openMobileMenu(testPage);
-    await expandStepsGroup(testPage, workflowBId);
-    for (const step of workflowBSteps) {
-      await testPage.getByTestId(`steps-filter-step-${step.id}`).click();
-    }
-    await closeMobileMenu(testPage);
-
-    await expect(testPage.locator('[data-testid^="kanban-column-"]')).toHaveCount(0);
-    await expect(testPage.getByText("No tasks yet")).toHaveCount(0);
-    // No crash — the mobile layout is still rendered, not an error boundary.
-    await expect(testPage.getByTestId("mobile-kanban-layout")).toBeVisible();
-
-    // Re-ticking restores a column. The group auto-expands this visit
-    // because workflow A now holds live hidden steps.
-    await openMobileMenu(testPage);
-    await expandStepsGroup(testPage, workflowAId);
-    await testPage.getByTestId(`steps-filter-step-${stepA1Id}`).click();
-    await closeMobileMenu(testPage);
-
-    await expect(testPage.getByTestId(`kanban-column-${stepA1Id}`)).toBeVisible();
   });
 });

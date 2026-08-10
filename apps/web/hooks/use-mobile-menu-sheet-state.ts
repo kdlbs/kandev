@@ -3,10 +3,11 @@
 import { useRef, useState } from "react";
 import { useRouter } from "@/lib/routing/client-router";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
-import { useMobileStepsSection } from "@/hooks/use-mobile-steps-section";
+import { useAppStore } from "@/components/state-provider";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { linkToTaskOverview, linkToTasks } from "@/lib/links";
 import type {
+  MobileColumnsSection,
   MobileDisplayOptionsProps,
   MobileMenuSheetProps,
 } from "@/components/kanban/mobile-menu-sheet";
@@ -53,7 +54,7 @@ function buildMobileMenuViewChange({
 
 type BuildMobileDisplayOptionsInput = Omit<
   MobileDisplayOptionsProps,
-  "showTaskDetails" | "showWorkflow" | "tasksListOptions"
+  "showTaskDetails" | "showWorkflow" | "tasksListOptions" | "columnsSection"
 > & {
   currentPage: "kanban" | "tasks";
   isMobile: boolean;
@@ -64,19 +65,56 @@ function buildMobileDisplayOptions({
   currentPage,
   isMobile,
   tasksListOptions,
+  columnsSection,
   ...rest
-}: BuildMobileDisplayOptionsInput): MobileDisplayOptionsProps {
+}: BuildMobileDisplayOptionsInput & {
+  columnsSection: MobileColumnsSection | null;
+}): MobileDisplayOptionsProps {
   return {
     ...rest,
     showTaskDetails: currentPage === "tasks",
     showWorkflow: !isMobile || currentPage !== "kanban",
     tasksListOptions: isMobile && currentPage === "tasks" ? tasksListOptions : undefined,
+    columnsSection,
   };
 }
 
-/** All of `MobileMenuSheet`'s data wiring — settings, view-change routing, and the phone Steps section — kept out of the component so its own body stays render-only. */
+/**
+ * The phone's Columns block, scoped to the workflow the board reported as
+ * focused. Off the phone kanban it is null — there the swimlane header owns
+ * the control, and rendering both would duplicate its testids.
+ */
+function buildColumnsSection({
+  isMobile,
+  currentPage,
+  focusedWorkflowId,
+  eligibleWorkflows,
+  snapshots,
+  hiddenWorkflowStepIds,
+  onToggleStepVisibility,
+}: {
+  isMobile: boolean;
+  currentPage: "kanban" | "tasks";
+  focusedWorkflowId: string | null;
+  eligibleWorkflows: Array<{ id: string; name: string }>;
+  snapshots: Record<string, { steps?: Array<{ id: string; title: string; position: number }> }>;
+  hiddenWorkflowStepIds: Record<string, string[]>;
+  onToggleStepVisibility: (workflowId: string, stepId: string) => void;
+}): MobileColumnsSection | null {
+  if (!isMobile || currentPage !== "kanban" || !focusedWorkflowId) return null;
+  const workflow = eligibleWorkflows.find((item) => item.id === focusedWorkflowId);
+  if (!workflow) return null;
+  return {
+    workflowId: workflow.id,
+    workflowName: workflow.name,
+    steps: snapshots[workflow.id]?.steps ?? [],
+    hiddenStepIds: hiddenWorkflowStepIds[workflow.id] ?? [],
+    onToggle: onToggleStepVisibility,
+  };
+}
+
+/** All of `MobileMenuSheet`'s data wiring — settings, view-change routing — kept out of the component so its own body stays render-only. */
 export function useMobileMenuSheetState({
-  open,
   onOpenChange,
   workspaceId,
   currentPage,
@@ -88,7 +126,7 @@ export function useMobileMenuSheetState({
   const contentRef = useRef<HTMLDivElement | null>(null);
   const router = useRouter();
   const [improveOpen, setImproveOpen] = useState(false);
-  const { isMobile, breakpoint } = useResponsiveBreakpoint();
+  const { isMobile } = useResponsiveBreakpoint();
   const {
     workflows,
     activeWorkflowId,
@@ -98,22 +136,22 @@ export function useMobileMenuSheetState({
     selectedRepositoryId,
     enablePreviewOnClick,
     tasksListShowDetails,
-    eligibleWorkflows,
-    snapshots,
-    hiddenWorkflowStepIds,
     onWorkflowChange,
     onRepositoryChange,
     onTogglePreviewOnClick,
     onToggleTasksListShowDetails,
-    onToggleStepVisibility,
     effectiveTaskListingView,
     onViewModeChange,
+    eligibleWorkflows,
+    snapshots,
+    hiddenWorkflowStepIds,
+    onToggleStepVisibility,
   } = useKanbanDisplaySettings();
-  const stepsSection = useMobileStepsSection({
-    open,
-    breakpoint,
+  const focusedWorkflowId = useAppStore((state) => state.mobileKanban.focusedWorkflowId);
+  const columnsSection = buildColumnsSection({
     isMobile,
     currentPage: currentPage ?? "kanban",
+    focusedWorkflowId,
     eligibleWorkflows,
     snapshots,
     hiddenWorkflowStepIds,
@@ -142,9 +180,9 @@ export function useMobileMenuSheetState({
     onTogglePreviewOnClick,
     tasksListShowDetails,
     onToggleTasksListShowDetails,
-    stepsSection,
     currentPage: currentPage ?? "kanban",
     isMobile,
+    columnsSection,
     tasksListOptions,
   });
   const focusMenu = (event: Event) => {
