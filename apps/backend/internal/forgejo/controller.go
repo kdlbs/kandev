@@ -22,6 +22,37 @@ func RegisterRoutes(router *gin.Engine, service *Service) {
 	api.DELETE("/config", controller.deleteConfig)
 	api.GET("/repositories", controller.listRepositories)
 	api.GET("/issues", controller.listIssues)
+	api.GET("/tasks/:taskID/pull-requests", controller.listTaskPRs)
+	api.POST("/task-pull-requests", controller.associatePullRequest)
+}
+
+func (c *Controller) listTaskPRs(ctx *gin.Context) {
+	prs, err := c.service.store.ListTaskPRs(ctx.Request.Context(), c.workspaceID(ctx), ctx.Param("taskID"))
+	if err != nil {
+		c.error(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"pull_requests": prs})
+}
+
+func (c *Controller) associatePullRequest(ctx *gin.Context) {
+	var request struct {
+		TaskID       string `json:"task_id"`
+		RepositoryID string `json:"repository_id"`
+		Owner        string `json:"owner"`
+		Repo         string `json:"repo"`
+		Number       int    `json:"number"`
+	}
+	if err := ctx.ShouldBindJSON(&request); err != nil || strings.TrimSpace(request.TaskID) == "" || strings.TrimSpace(request.Owner) == "" || strings.TrimSpace(request.Repo) == "" || request.Number < 1 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "task_id, owner, repo, and number are required"})
+		return
+	}
+	pr, err := c.service.AssociatePullRequest(ctx.Request.Context(), c.workspaceID(ctx), request.TaskID, request.RepositoryID, request.Owner, request.Repo, request.Number)
+	if err != nil {
+		c.error(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, pr)
 }
 
 func (c *Controller) workspaceID(ctx *gin.Context) string {

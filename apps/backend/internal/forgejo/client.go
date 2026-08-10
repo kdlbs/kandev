@@ -63,6 +63,29 @@ type PullRequest struct {
 	Draft   bool   `json:"draft"`
 }
 
+type rawPullRequest struct {
+	Number  int    `json:"number"`
+	Title   string `json:"title"`
+	State   string `json:"state"`
+	HTMLURL string `json:"html_url"`
+	Draft   bool   `json:"draft"`
+	Merged  bool   `json:"merged"`
+	Head    struct {
+		Ref string `json:"ref"`
+	} `json:"head"`
+	Base struct {
+		Ref string `json:"ref"`
+	} `json:"base"`
+}
+
+func (p rawPullRequest) pullRequest() *PullRequest {
+	state := p.State
+	if p.Merged {
+		state = "merged"
+	}
+	return &PullRequest{Number: p.Number, Title: p.Title, State: state, HTMLURL: p.HTMLURL, Head: p.Head.Ref, Base: p.Base.Ref, Draft: p.Draft}
+}
+
 type CreatePullRequestInput struct {
 	Owner string
 	Repo  string
@@ -77,6 +100,7 @@ type Client interface {
 	GetAuthenticatedUser(context.Context) (*User, error)
 	ListRepositories(context.Context, int, int) ([]Repository, int, error)
 	ListIssues(context.Context, string, string, int, int) ([]Issue, int, error)
+	GetPullRequest(context.Context, string, string, int) (*PullRequest, error)
 	CreatePullRequest(context.Context, CreatePullRequestInput) (*PullRequest, error)
 }
 
@@ -168,11 +192,22 @@ func (c *PATClient) CreatePullRequest(ctx context.Context, input CreatePullReque
 	if strings.TrimSpace(input.Owner) == "" || strings.TrimSpace(input.Repo) == "" || strings.TrimSpace(input.Title) == "" || strings.TrimSpace(input.Head) == "" || strings.TrimSpace(input.Base) == "" {
 		return nil, errors.New("Forgejo pull request owner, repository, title, head, and base are required")
 	}
-	var pull PullRequest
-	if err := c.post(ctx, fmt.Sprintf("/repos/%s/%s/pulls", url.PathEscape(input.Owner), url.PathEscape(input.Repo)), map[string]any{"title": input.Title, "body": input.Body, "head": input.Head, "base": input.Base, "draft": input.Draft}, &pull); err != nil {
+	var raw rawPullRequest
+	if err := c.post(ctx, fmt.Sprintf("/repos/%s/%s/pulls", url.PathEscape(input.Owner), url.PathEscape(input.Repo)), map[string]any{"title": input.Title, "body": input.Body, "head": input.Head, "base": input.Base, "draft": input.Draft}, &raw); err != nil {
 		return nil, err
 	}
-	return &pull, nil
+	return raw.pullRequest(), nil
+}
+
+func (c *PATClient) GetPullRequest(ctx context.Context, owner, repo string, number int) (*PullRequest, error) {
+	if strings.TrimSpace(owner) == "" || strings.TrimSpace(repo) == "" || number < 1 {
+		return nil, errors.New("Forgejo pull request identity required")
+	}
+	var raw rawPullRequest
+	if _, err := c.get(ctx, fmt.Sprintf("/repos/%s/%s/pulls/%d", url.PathEscape(owner), url.PathEscape(repo), number), nil, &raw); err != nil {
+		return nil, err
+	}
+	return raw.pullRequest(), nil
 }
 
 func pagination(page, limit int) url.Values {
