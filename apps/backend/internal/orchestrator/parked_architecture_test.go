@@ -16,11 +16,18 @@ import (
 
 // parkedFeatureSourceFiles lists the source files (excluding tests) this
 // slice introduces end to end: the parked projection, its accessors, the
-// probe port, and the settle hook. AC-35 narrows the parent monolith's list
-// to these two — V1 ships no sampling loop or recogniser registry (D-5, D-7).
+// probe port and its production implementation, and the settle hook. AC-35's
+// own text names all four; the last three files here are cross-package (the
+// `../../` prefix mirrors the pattern
+// notifications/service/parked_independence_test.go already uses for the
+// same kind of cross-package architecture guard) — V1 ships no sampling loop
+// or recogniser registry (D-5, D-7).
 var parkedFeatureSourceFiles = []string{
 	"parked_state.go",
 	"parked_projection.go",
+	"../agent/runtime/lifecycle/manager_probe.go",
+	"../agent/runtime/agentctl/client_probe.go",
+	"../agentctl/server/api/agent_probe.go",
 }
 
 // parkedFeatureForbiddenIdentifiers are the flag key, config field, and
