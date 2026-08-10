@@ -240,7 +240,7 @@ func TestService_RefreshConnectionPersistsHealth(t *testing.T) {
 		t.Fatal(err)
 	}
 	config, err := service.RefreshConnection(context.Background(), "workspace-a")
-	if err != nil || !config.LastOK || config.LastCheckedAt == nil {
+	if err != nil || !config.LastOK || config.LastCheckedAt == nil || config.Username != "alice" {
 		t.Fatalf("config=%#v err=%v", config, err)
 	}
 }

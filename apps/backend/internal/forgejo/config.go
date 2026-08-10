@@ -144,8 +144,8 @@ func (s *Store) DeleteConfig(ctx context.Context, workspaceID string) error {
 	return err
 }
 
-func (s *Store) UpdateHealth(ctx context.Context, workspaceID string, ok bool, message string, checkedAt time.Time) error {
-	result, err := s.db.ExecContext(ctx, `UPDATE forgejo_configs SET last_ok = ?, last_error = ?, last_checked_at = ?, revision = revision + 1, updated_at = ? WHERE workspace_id = ?`, ok, message, checkedAt, checkedAt, workspaceID)
+func (s *Store) UpdateHealth(ctx context.Context, workspaceID string, ok bool, message, username string, checkedAt time.Time) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE forgejo_configs SET last_ok = ?, last_error = ?, username = CASE WHEN ? <> '' THEN ? ELSE username END, last_checked_at = ?, revision = revision + 1, updated_at = ? WHERE workspace_id = ?`, ok, message, username, username, checkedAt, checkedAt, workspaceID)
 	if err != nil {
 		return err
 	}
@@ -214,17 +214,16 @@ func (s *Service) RefreshConnection(ctx context.Context, workspaceID string) (*C
 	}
 	user, err := client.GetAuthenticatedUser(ctx)
 	if err != nil {
-		_ = s.store.UpdateHealth(ctx, workspaceID, false, "Forgejo connection check failed", checkedAt)
+		_ = s.store.UpdateHealth(ctx, workspaceID, false, "Forgejo connection check failed", "", checkedAt)
 		return nil, err
 	}
-	if err := s.store.UpdateHealth(ctx, workspaceID, true, "", checkedAt); err != nil {
+	if err := s.store.UpdateHealth(ctx, workspaceID, true, "", user.Login, checkedAt); err != nil {
 		return nil, err
 	}
 	config, err := s.GetConfig(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
-	config.Username = user.Login
 	return config, nil
 }
 
