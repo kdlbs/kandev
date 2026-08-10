@@ -171,6 +171,7 @@ function SavedMenu<K extends string>({
               <DropdownMenuItem
                 disabled={defaultMutationPending}
                 onSelect={(event) => {
+                  // Keep the menu open so the user can delete or mark additional queries.
                   event.preventDefault();
                   onDeleteSaved(s.id);
                 }}

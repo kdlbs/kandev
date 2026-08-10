@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SavedPreset } from "./saved-preset-model";
 import { PresetsScopeBar } from "./presets-scope-bar";
@@ -23,12 +23,20 @@ vi.mock("@/components/integrations/presets-scope-bar-base", () => ({
     onToggleSavedDefault?: (id: string) => void;
     savedPresets: Array<{ id: string }>;
   }) => {
-    onToggleSavedDefault?.(savedPresets[0]?.id ?? "missing-preset");
-    return <div data-testid="scope-bar-default-action" aria-busy={defaultMutationPending} />;
+    return (
+      <div data-testid="scope-bar-default-action" aria-busy={defaultMutationPending}>
+        <button
+          type="button"
+          data-testid="scope-bar-default-toggle"
+          onClick={() => onToggleSavedDefault?.(savedPresets[0]?.id ?? "missing-preset")}
+        />
+      </div>
+    );
   },
 }));
 
 afterEach(() => {
+  cleanup();
   vi.restoreAllMocks();
 });
 
@@ -70,6 +78,7 @@ describe("PresetsScopeBar default adapter", () => {
       />,
     );
 
+    fireEvent.click(screen.getByTestId("scope-bar-default-toggle"));
     expect(onToggleSavedDefault).toHaveBeenCalledWith(savedPreset);
   });
 
@@ -92,6 +101,7 @@ describe("PresetsScopeBar default adapter", () => {
       />,
     );
 
+    fireEvent.click(screen.getByTestId("scope-bar-default-toggle"));
     expect(warn).toHaveBeenCalledWith("[github:presets] default toggle target missing", {
       id: "missing-preset",
     });
