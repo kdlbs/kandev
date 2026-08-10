@@ -476,6 +476,8 @@ export type AppState = KanbanSlice & {
       models: SessionModelEntry[];
       configOptions: ConfigOptionEntry[];
       configBaseline?: Record<string, string>;
+      /** Set when the session started on the profile's fallback model. */
+      fallbackModel?: string;
     },
   ) => void;
   // Prompt usage actions
@@ -522,6 +524,7 @@ export type AppState = KanbanSlice & {
   setAppSidebarSettingsMode: UIA["setAppSidebarSettingsMode"];
   toggleAppSidebarSettingsMode: UIA["toggleAppSidebarSettingsMode"];
   setImproveDialogOpen: UIA["setImproveDialogOpen"];
+  setWorkspacePickerOpen: UIA["setWorkspacePickerOpen"];
   acknowledgeAgentErrors: UIA["acknowledgeAgentErrors"];
   dismissAgentError: UIA["dismissAgentError"];
 } & GitHubSliceActions &

@@ -18,6 +18,7 @@ import type {
   AutomationReference,
   RoutingTierReference,
   WatcherReference,
+  UtilityAgentReference,
 } from "@/lib/types/agent-profile-errors";
 
 // The watcher `kind` values are the wire enum and are never translated; only
@@ -64,6 +65,46 @@ export function AgentProfileDeleteConfirmDialog({
   );
 }
 
+export function AgentProfileDisableConflictDialog({
+  agents,
+  onCancel,
+  onConfirm,
+}: {
+  agents: UtilityAgentReference[];
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <AlertDialog
+      open={agents.length > 0}
+      onOpenChange={(open) => {
+        if (!open) onCancel();
+      }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t("agents:disableProfile")}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t("agents:disableProfileUtilityWarning")}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <ul className="list-disc list-inside max-h-40 overflow-y-auto">
+          {agents.map((agent) => (
+            <li key={agent.id}>{agent.name || agent.id}</li>
+          ))}
+        </ul>
+        <AlertDialogFooter>
+          <AlertDialogCancel className="cursor-pointer">{t("common:cancel")}</AlertDialogCancel>
+          <AlertDialogAction onClick={onConfirm} className="cursor-pointer">
+            {t("agents:disableProfileAnyway")}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 // AgentProfileDeleteConflict carries the structured 409 payload from the
 // backend. `open` is separate from the lists so a watcher-only conflict
 // (no active sessions) still pops the dialog.
@@ -72,6 +113,7 @@ export type AgentProfileDeleteConflict = {
   watchers: WatcherReference[];
   routingTiers: RoutingTierReference[];
   automations: AutomationReference[];
+  utilityAgents?: UtilityAgentReference[];
 };
 
 type AgentProfileDeleteConflictDialogProps = {
@@ -80,6 +122,7 @@ type AgentProfileDeleteConflictDialogProps = {
   onConfirm: () => void;
 };
 
+// eslint-disable-next-line complexity
 export function AgentProfileDeleteConflictDialog({
   conflict,
   onOpenChange,
@@ -91,6 +134,7 @@ export function AgentProfileDeleteConflictDialog({
   const watchers = conflict?.watchers ?? [];
   const routingTiers = conflict?.routingTiers ?? [];
   const automations = conflict?.automations ?? [];
+  const utilityAgents = conflict?.utilityAgents ?? [];
   const hasHardBlockers = routingTiers.length > 0;
   const watchersByKind = groupWatchersByKind(watchers);
   const workspaces = useAppStore((s) => s.workspaces.items);
@@ -128,6 +172,7 @@ export function AgentProfileDeleteConflictDialog({
                 automations={automations}
                 workspaceLabels={new Map(workspaces.map((w) => [w.id, w.name]))}
               />
+              <UtilityAgentConflictSection utilityAgents={utilityAgents} />
               {hasHardBlockers ? (
                 <p className="mt-2">{t("agents:changeTierMappingsFirst")}</p>
               ) : (
@@ -149,6 +194,27 @@ export function AgentProfileDeleteConflictDialog({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  );
+}
+
+function UtilityAgentConflictSection({
+  utilityAgents,
+}: {
+  utilityAgents: UtilityAgentReference[];
+}) {
+  const { t } = useTranslation();
+  if (utilityAgents.length === 0) return null;
+  return (
+    <div className="mt-2" data-testid="profile-conflict-utility-agents">
+      <p className="font-medium text-sm">{t("agents:conflictUtilityAgentsTitle")}</p>
+      <ul className="list-disc list-inside mt-1 space-y-0.5">
+        {utilityAgents.map((agent) => (
+          <li key={agent.id} className="text-sm">
+            {agent.name || agent.id}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

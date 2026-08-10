@@ -25,6 +25,7 @@ import (
 	"go.uber.org/zap"
 
 	// Common packages
+	"github.com/kandev/kandev/internal/backendapp/ownershiplock"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 
@@ -52,6 +53,7 @@ import (
 	runtimeskill "github.com/kandev/kandev/internal/agent/runtime/lifecycle/skill"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
+	"github.com/kandev/kandev/internal/utility/profilebinding"
 
 	// WebSocket gateway
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
@@ -60,6 +62,7 @@ import (
 	notificationcontroller "github.com/kandev/kandev/internal/notifications/controller"
 	promptcontroller "github.com/kandev/kandev/internal/prompts/controller"
 	usercontroller "github.com/kandev/kandev/internal/user/controller"
+	userservice "github.com/kandev/kandev/internal/user/service"
 	userstore "github.com/kandev/kandev/internal/user/store"
 	utilitycontroller "github.com/kandev/kandev/internal/utility/controller"
 
@@ -206,7 +209,23 @@ func Run(args []string, build BuildInfo) int {
 		cfg.Logging.Level = parsedFlags.LogLevel
 	}
 
-	// 2. Initialize logger
+	// Acquire runtime-state ownership before any shared-state initialization.
+	// The lock remains held through logger and service cleanup, so a second
+	// backend cannot reconcile or migrate the live home before its bind fails.
+	owner, err := acquireRuntimeStateOwnership(cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr,
+			"Failed to acquire backend runtime-state ownership: %v; use a separate KANDEV_HOME_DIR for an intentional second instance\n",
+			err)
+		return 1
+	}
+	defer func() {
+		if closeErr := owner.Close(); closeErr != nil {
+			fmt.Fprintf(os.Stderr, "Failed to release backend runtime-state ownership: %v\n", closeErr)
+		}
+	}()
+
+	// Initialize logger only after runtime-state ownership is secured.
 	log, err := logger.NewBackendLogger(logger.BackendLoggingConfig{
 		HomeDir:      cfg.ResolvedHomeDir(),
 		Level:        cfg.Logging.Level,
@@ -248,6 +267,14 @@ func Run(args []string, build BuildInfo) int {
 		return 1
 	}
 	return 0
+}
+
+func acquireRuntimeStateOwnership(cfg *config.Config) (*ownershiplock.Owner, error) {
+	targets, err := ownershiplock.Targets(cfg.ResolvedHomeDir(), cfg.Database.Driver, cfg.Database.Path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve backend runtime-state ownership: %w", err)
+	}
+	return ownershiplock.Acquire(targets)
 }
 
 func setBuildInfo(build BuildInfo) {
@@ -525,6 +552,7 @@ func startAgentInfrastructure(
 		github: services.GitHub,
 		log:    log,
 	})
+	agentSettingsController.SetUtilityDependencyChecker(&utilityDepsAdapter{svc: services.Utility, userSvc: services.User})
 	agentSettingsController.SetRoutingTierDependencyChecker(&routingTierDepsAdapter{
 		repo: repos.Office,
 	})
@@ -538,6 +566,16 @@ func startAgentInfrastructure(
 		})
 	}
 
+	// Wire automation service into orchestrator for trigger-based task creation.
+	// The service is constructed and wired here, but starts after the orchestrator
+	// has subscribed to automation.triggered in startGatewayAndServe.
+	// The Automation subsystem is independent of the Office feature flag — it
+	// has its own cron scheduler, GitHub poller, webhook handler, and creates
+	// tasks via the task service directly.
+	if services.Automation != nil {
+		orchestratorSvc.SetAutomationService(services.Automation.Service)
+	}
+
 	// Wire GitHub service into orchestrator for PR auto-detection on push
 	if services.GitHub != nil {
 		orchestratorSvc.SetGitHubService(services.GitHub)
@@ -546,12 +584,6 @@ func startAgentInfrastructure(
 		services.GitHub.SetTaskSessionChecker(&taskSessionCheckerAdapter{repo: repos.Task})
 		log.Info("GitHub service configured for orchestrator (PR auto-detection enabled)")
 
-		// Start GitHub background poller
-		ghPoller := githubpkg.NewPoller(services.GitHub, eventBus, log)
-		ghPoller.SetTaskBranchProvider(orchestratorSvc)
-		ghPoller.Start(ctx)
-		addCleanup(func() error { ghPoller.Stop(); return nil })
-		log.Info("GitHub poller started")
 	}
 
 	// Start GitLab background poller + wire the service into the
@@ -637,19 +669,24 @@ func startAgentInfrastructure(
 		startPluginsSubsystems(ctx, services.Plugins, eventBus, log, addCleanup)
 	}
 
-	// Wire automation service into orchestrator for trigger-based task creation.
-	// The Automation subsystem is independent of the Office feature flag — it
-	// has its own cron scheduler, GitHub poller, and webhook handler, and
-	// creates tasks via the task service directly.
-	if services.Automation != nil {
-		orchestratorSvc.SetAutomationService(services.Automation.Service)
-		services.Automation.Start(ctx)
-		addCleanup(func() error { services.Automation.Stop(); return nil })
-		log.Info("Automation scheduler and evaluator started")
-	}
-
 	return startGatewayAndServe(ctx, cfg, log, eventBus, agentRuntimeAvailability, dbPool, repos, services,
 		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, repoCloner, agentctlBinaryPath, addCleanup, runCleanups)
+}
+
+// startOrchestratorAndAutomationConsumers establishes the event-consumer
+// chain in dependency order. The GitHub poller performs an immediate sweep on
+// start, so both downstream consumers must be ready before it is started.
+func startOrchestratorAndAutomationConsumers(
+	startOrchestrator func() error,
+	startAutomation func(),
+	startGitHubPoller func(),
+) error {
+	if err := startOrchestrator(); err != nil {
+		return err
+	}
+	startAutomation()
+	startGitHubPoller()
+	return nil
 }
 
 // startGatewayAndServe sets up the WebSocket gateway, HTTP routes, starts the server,
@@ -721,20 +758,67 @@ func startGatewayAndServe(
 		agentctlclient.WithControlAuthToken(cfg.Agent.StandaloneAuthToken))
 	hostUtilityMgr := hostutility.NewManager(agentRegistry, cfg.Agent.StandaloneHost, cfg.Agent.StandalonePort, hostControlClient, log)
 	hostUtilityMgr.SetAuthToken(cfg.Agent.StandaloneAuthToken)
+	hostUtilityMgr.SetProfileResolver(profilebinding.New(repos.AgentSettings, func(agentID string) bool {
+		_, ok := agentRegistry.GetInferenceAgent(agentID)
+		return ok
+	}))
 	// Wire the host utility manager into the settings controller so
 	// /api/v1/agent-models/:agentName reads live capability data.
 	agentSettingsController.SetHostUtility(hostUtilityMgr)
 	profileReconciler := agentsettingscontroller.NewProfileReconciler(hostUtilityMgr, agentRegistry, repos.AgentSettings, log)
+	go func() {
+		if err := hostUtilityMgr.Start(ctx); err != nil {
+			log.Warn("host utility manager bootstrap error", zap.Error(err))
+		}
+		// Reconcile profiles against fresh probe results — seeds defaults for
+		// newly probed agents, heals stale profile models/modes, cleans up
+		// orphans referencing removed agents.
+		if err := profileReconciler.Run(ctx); err != nil {
+			log.Warn("profile reconciler error", zap.Error(err))
+		}
+		if migrated, err := services.Utility.MigrateLegacyBindings(ctx); err != nil {
+			log.Warn("utility profile migration failed", zap.Error(err))
+		} else if migrated > 0 {
+			log.Info("migrated utility profile bindings", zap.Int("updated", migrated))
+		}
+		migrateDefaultUtilityProfile(ctx, services.User, repos.AgentSettings, agentRegistry, log)
+	}()
+	addCleanup(func() error {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		hostUtilityMgr.Stop(stopCtx)
+		return nil
+	})
 
 	// Wire Host.InvokeUtilityAgent (ADR 0048): plugins delegate one-shot LLM
 	// calls to the utility agent selected in each plugin's configuration and
 	// runs them through the sessionless host-utility tier, at the first point
 	// where hostUtilityMgr is live.
 	if services.Plugins != nil && services.Utility != nil {
-		services.Plugins.SetUtilityAgent(pluginsUtilityAgentAdapter{svc: services.Utility}, pluginsHostUtilityAdapter{mgr: hostUtilityMgr})
+		services.Plugins.SetUtilityAgent(pluginsUtilityAgentAdapter{svc: services.Utility, userSvc: services.User}, pluginsHostUtilityAdapter{mgr: hostUtilityMgr})
 	}
 
-	if err := orchestratorSvc.Start(ctx); err != nil {
+	if err := startOrchestratorAndAutomationConsumers(
+		func() error { return orchestratorSvc.Start(ctx) },
+		func() {
+			if services.Automation == nil {
+				return
+			}
+			services.Automation.Start(ctx)
+			addCleanup(func() error { services.Automation.Stop(); return nil })
+			log.Info("Automation scheduler and evaluator started")
+		},
+		func() {
+			if services.GitHub == nil {
+				return
+			}
+			ghPoller := githubpkg.NewPoller(services.GitHub, eventBus, log)
+			ghPoller.SetTaskBranchProvider(orchestratorSvc)
+			ghPoller.Start(ctx)
+			addCleanup(func() error { ghPoller.Stop(); return nil })
+			log.Info("GitHub poller started")
+		},
+	); err != nil {
 		log.Error("Failed to start orchestrator", zap.Error(err))
 		return false
 	}
@@ -1909,4 +1993,32 @@ func awaitShutdown(
 		zap.String("signal", sig.String()),
 		zap.Int("pid", os.Getpid()))
 	runGracefulShutdown(server, listeners, scheduling, orchestratorSvc, lifecycleMgr, runCleanups, log)
+}
+
+// migrateDefaultUtilityProfile upgrades the portable user's legacy default
+// pair only when it identifies one eligible profile. Ambiguous and missing
+// values remain untouched for a later retry or user repair.
+func migrateDefaultUtilityProfile(
+	ctx context.Context,
+	userSvc *userservice.Service,
+	profiles settingsstore.Repository,
+	agentRegistry *registry.Registry,
+	log *logger.Logger,
+) {
+	settings, err := userSvc.GetUserSettings(ctx)
+	if err != nil || settings.DefaultUtilityAgentProfileID != "" || (settings.DefaultUtilityAgentID == "" && settings.DefaultUtilityModel == "") {
+		return
+	}
+	resolver := profilebinding.New(profiles, func(agentID string) bool {
+		_, ok := agentRegistry.GetInferenceAgent(agentID)
+		return ok
+	})
+	profile, err := resolver.MatchLegacy(ctx, settings.DefaultUtilityAgentID, settings.DefaultUtilityModel)
+	if err != nil || profile == nil {
+		return
+	}
+	profileID := profile.ID
+	if _, err := userSvc.UpdateUserSettings(ctx, &userservice.UpdateUserSettingsRequest{DefaultUtilityAgentProfileID: &profileID}); err != nil {
+		log.Warn("failed to persist migrated default utility profile", zap.Error(err))
+	}
 }

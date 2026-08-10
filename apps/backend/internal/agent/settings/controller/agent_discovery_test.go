@@ -134,3 +134,22 @@ func TestConfigOptionDTOsPreserveDescriptions(t *testing.T) {
 		t.Errorf("value description = %#v, want provider description", got)
 	}
 }
+
+// TestResolveDefaultModel_MockAgentSeedsAdvertisedModel pins the mock agent's
+// seeded default profile model to one the mock agent actually advertises
+// (mock-fast). The no-silent-model-fallback policy fails session start
+// explicitly when the profile model is absent from the advertised list, so a
+// sentinel like "mock-default" would break every default-profile session in
+// the E2E environment.
+func TestResolveDefaultModel_MockAgentSeedsAdvertisedModel(t *testing.T) {
+	model, isPassthroughOnly, err := resolveDefaultModel(agents.NewMockAgent(), "")
+	if err != nil {
+		t.Fatalf("resolveDefaultModel: %v", err)
+	}
+	if isPassthroughOnly {
+		t.Fatal("mock agent must not be seeded as passthrough-only")
+	}
+	if model != "mock-fast" {
+		t.Fatalf("mock default profile model = %q, want %q (an advertised model)", model, "mock-fast")
+	}
+}

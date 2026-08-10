@@ -27,6 +27,7 @@ type UseSubtaskSubmitOpts = {
   resolvePrompt: () => string;
   title: string;
   autoTitle?: boolean;
+  autopilot?: boolean;
   setIsCreating: (v: boolean) => void;
   onClose: () => void;
   /** Workspace mode for the new subtask (handoffs phase 5). */
@@ -44,6 +45,7 @@ type CreateSubtaskArgs = {
   trimmedTitle: string;
   prompt: string;
   autoTitle: boolean;
+  autopilot: boolean;
   workspaceMode: SubtaskWorkspaceMode;
   setActiveTask: (taskId: string) => void;
   setActiveSession: (taskId: string, sessionId: string) => void;
@@ -60,6 +62,7 @@ async function createSubtask({
   trimmedTitle,
   prompt,
   autoTitle,
+  autopilot,
   workspaceMode,
   setActiveTask,
   setActiveSession,
@@ -88,6 +91,7 @@ async function createSubtask({
     parent_id: parentTaskId,
     attachments: toMessageAttachments(attachments),
     workspace_mode: workspaceMode,
+    autopilot: autopilot || undefined,
   });
   const newSessionId = response.session_id ?? response.primary_session_id ?? null;
   if (newSessionId) {
@@ -114,6 +118,7 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
     resolvePrompt,
     title,
     autoTitle = false,
+    autopilot = false,
     setIsCreating,
     onClose,
     workspaceMode,
@@ -149,6 +154,7 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
           trimmedTitle,
           prompt,
           autoTitle,
+          autopilot,
           workspaceMode,
           setActiveTask,
           setActiveSession,
@@ -168,6 +174,7 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
     [
       title,
       autoTitle,
+      autopilot,
       workspaceId,
       workflowId,
       resolvePrompt,

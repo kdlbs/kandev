@@ -21,6 +21,8 @@ type CreateProfileRequest struct {
 	AgentID        string
 	Name           string
 	Model          string
+	FallbackModel  string
+	AutoFallback   bool
 	Mode           string
 	ConfigOptions  map[string]string
 	AllowIndexing  bool
@@ -73,6 +75,8 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		Name:             req.Name,
 		AgentDisplayName: displayName,
 		Model:            req.Model,
+		FallbackModel:    strings.TrimSpace(req.FallbackModel),
+		AutoFallback:     req.AutoFallback,
 		Mode:             req.Mode,
 		ConfigOptions:    profileconfig.SanitizeConfigOptions(req.ConfigOptions),
 		AllowIndexing:    req.AllowIndexing,
@@ -134,6 +138,8 @@ type UpdateProfileRequest struct {
 	ID             string
 	Name           *string
 	Model          *string
+	FallbackModel  *string
+	AutoFallback   *bool
 	Mode           *string
 	ConfigOptions  *map[string]string
 	AllowIndexing  *bool
@@ -149,10 +155,12 @@ type UpdateProfileRequest struct {
 	// CommandPrefix replaces the value when non-nil. Nil means "leave
 	// unchanged" — the UI always sends the desired value on save.
 	CommandPrefix *string
+	Force         bool
 }
 
 func enabledOnlyUpdate(req UpdateProfileRequest) bool {
-	return req.Enabled != nil && req.Name == nil && req.Model == nil && req.Mode == nil &&
+	return req.Enabled != nil && req.Name == nil && req.Model == nil &&
+		req.FallbackModel == nil && req.AutoFallback == nil && req.Mode == nil &&
 		req.ConfigOptions == nil && req.AllowIndexing == nil && req.AutoApprove == nil &&
 		req.CLIPassthrough == nil && req.CLIFlags == nil && req.EnvVars == nil &&
 		req.CommandPrefix == nil
@@ -174,6 +182,12 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 			}
 		}
 	}
+	if req.FallbackModel != nil {
+		profile.FallbackModel = strings.TrimSpace(*req.FallbackModel)
+	}
+	if req.AutoFallback != nil {
+		profile.AutoFallback = *req.AutoFallback
+	}
 	if req.Mode != nil {
 		profile.Mode = *req.Mode
 	}
@@ -190,6 +204,15 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		profile.CLIPassthrough = *req.CLIPassthrough
 	}
 	if req.Enabled != nil {
+		if !*req.Enabled && !req.Force && c.utilityDeps != nil {
+			refs, err := c.utilityDeps.ListUtilityAgentsByAgentProfile(ctx, req.ID)
+			if err != nil {
+				return nil, fmt.Errorf("check utility agents using this profile: %w", err)
+			}
+			if len(refs) > 0 {
+				return nil, &ErrProfileInUseDetail{UtilityAgents: refs}
+			}
+		}
 		profile.Enabled = *req.Enabled
 	}
 	if enabledOnlyUpdate(req) {
@@ -318,6 +341,11 @@ func (c *Controller) DeleteProfile(ctx context.Context, id string, force bool) (
 	// it. Automations have no such preflight, which is the whole reason they
 	// are handled above instead of here.
 	if force {
+		if c.utilityDeps != nil {
+			if err := c.utilityDeps.ClearUtilityAgentProfileBindings(ctx, id); err != nil {
+				return nil, fmt.Errorf("clear utility agents using this profile: %w", err)
+			}
+		}
 		c.disableReferencingWatchers(ctx, id, profile.Name)
 	}
 	result := toProfileDTO(profile)
@@ -340,7 +368,18 @@ func (c *Controller) prepareProfileDeletion(ctx context.Context, profileID strin
 	if len(routingTierRefs) > 0 {
 		return &ErrProfileInUseDetail{RoutingTiers: routingTierRefs}
 	}
+	var utilityRefs []UtilityAgentReference
+	if c.utilityDeps != nil {
+		refs, err := c.utilityDeps.ListUtilityAgentsByAgentProfile(ctx, profileID)
+		if err != nil {
+			return fmt.Errorf("check utility agents using this profile: %w", err)
+		}
+		utilityRefs = refs
+	}
 	if c.sessionChecker == nil {
+		if !force && len(utilityRefs) > 0 {
+			return &ErrProfileInUseDetail{UtilityAgents: utilityRefs}
+		}
 		return nil
 	}
 	if !force {
@@ -375,11 +414,12 @@ func (c *Controller) prepareProfileDeletion(ctx context.Context, profileID strin
 		// profile. Nothing is running, so it never appears in the active-session
 		// list, but its next firing would go looking for a profile that is gone —
 		// and a schedule fails quietly, hours later, with nobody watching.
-		if len(activeTasks) > 0 || len(watcherRefs) > 0 || len(automationRefs) > 0 {
+		if len(activeTasks) > 0 || len(watcherRefs) > 0 || len(automationRefs) > 0 || len(utilityRefs) > 0 {
 			return &ErrProfileInUseDetail{
 				ActiveSessions: activeTasks,
 				Watchers:       watcherRefs,
 				Automations:    automationRefs,
+				UtilityAgents:  utilityRefs,
 			}
 		}
 	}
@@ -546,6 +586,8 @@ func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 		Name:             profile.Name,
 		AgentDisplayName: profile.AgentDisplayName,
 		Model:            profile.Model,
+		FallbackModel:    profile.FallbackModel,
+		AutoFallback:     profile.AutoFallback,
 		Mode:             profile.Mode,
 		ConfigOptions:    profileconfig.SanitizeConfigOptions(profile.ConfigOptions),
 		AllowIndexing:    profile.AllowIndexing,

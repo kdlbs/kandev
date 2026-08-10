@@ -380,6 +380,7 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 		"created_at":       task.CreatedAt.Format(time.RFC3339),
 		"updated_at":       task.UpdatedAt.Format(time.RFC3339),
 		"is_ephemeral":     task.IsEphemeral,
+		"autopilot":        task.Autopilot,
 		// Consumers that restore quick-chat tabs filter on origin, so it has to
 		// travel with the event and not just the HTTP DTO.
 		"origin": task.Origin,

@@ -316,7 +316,6 @@
   "mrAutomationExplainAutoFixRounds": "Explain auto-fix rounds",
   "mrAutomationAutoFixPromptSaveFailed": "Failed to save auto-fix prompt.",
   "mrAutomationAutoFixPromptResetFailed": "Failed to reset auto-fix prompt.",
-  "mrPopoverOpenDetail": "Open merge request detail",
   "mrPopoverOpenInGitlab": "Open !{{mriid}} in GitLab",
   "mrPopoverUnlink": "Unlink !{{mriid}}",
   "mrPopoverPassRate": "Pass rate",

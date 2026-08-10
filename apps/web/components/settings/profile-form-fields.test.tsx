@@ -108,6 +108,10 @@ function renderStatefulForm(
   );
 }
 
+function expandFallbackSettings() {
+  fireEvent.click(screen.getByTestId("profile-fallback-settings-trigger"));
+}
+
 describe("ProfileFormFields command prefix visibility", () => {
   it("shows the command prefix field for an ACP (non-passthrough) profile", () => {
     renderForm(formData({ cli_passthrough: false }));
@@ -119,6 +123,62 @@ describe("ProfileFormFields command prefix visibility", () => {
     renderForm(formData({ cli_passthrough: true, command_prefix: "greywall --" }));
 
     expect(screen.queryByTestId("command-prefix-input")).toBeNull();
+  });
+});
+
+describe("ProfileFormFields no-silent-model-fallback rows", () => {
+  it("renders the start model trigger red when the configured model is gone", () => {
+    renderForm(formData({ model: "claude-gone" }));
+
+    const trigger = screen.getByRole("button", { name: profileStartModelSettingsLabel });
+    expect(trigger.className).toContain("text-destructive");
+    expect(trigger.textContent).toContain("claude-gone");
+  });
+
+  it("shows the agent fallback row when auto-fallback is off", () => {
+    renderForm(formData({ auto_fallback: false }));
+    expandFallbackSettings();
+    expect(screen.queryByTestId("profile-fallback-model-field")).not.toBeNull();
+  });
+
+  it("keeps the agent fallback row visible but disabled when auto-fallback is on", () => {
+    renderForm(formData({ auto_fallback: true }));
+    expandFallbackSettings();
+    expect(screen.queryByTestId("profile-fallback-model-field")).not.toBeNull();
+    expect(screen.getByRole("switch", { name: "Agent fallback" })).toHaveProperty("disabled", true);
+    expect(screen.queryByTestId("profile-auto-fallback-field")).not.toBeNull();
+  });
+
+  it("marks a gone fallback model red in its picker", () => {
+    renderForm(formData({ fallback_model: "gpt-gone" }));
+    expandFallbackSettings();
+    const trigger = screen.getByRole("button", { name: "Agent fallback model settings" });
+    expect(trigger.className).toContain("text-destructive");
+    expect(trigger.textContent).toContain("gpt-gone");
+  });
+
+  it("hides the fallback selector until its attached switch is on", () => {
+    renderForm(formData({ auto_fallback: false }));
+    expandFallbackSettings();
+    // The optional fallback row renders its label + switch, but the model
+    // selector only appears once the user opts in via the attached switch.
+    expect(screen.queryByTestId("profile-fallback-model-field")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Agent fallback model settings" })).toBeNull();
+  });
+
+  it("shows the fallback selector when a fallback model is configured", () => {
+    renderForm(formData({ fallback_model: "mock-fast" }));
+    expandFallbackSettings();
+    expect(screen.getByRole("button", { name: "Agent fallback model settings" })).not.toBeNull();
+  });
+
+  it("clears the fallback model when its attached switch is turned off", () => {
+    const onChange = vi.fn();
+    renderForm(formData({ fallback_model: "mock-fast" }), modelConfig, onChange);
+    expandFallbackSettings();
+    const fallbackToggle = screen.getByRole("switch", { name: "Agent fallback" });
+    fallbackToggle.click();
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ fallback_model: "" }));
   });
 });
 

@@ -705,6 +705,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		PreviousExecutionID:            reqWithWorktree.PreviousExecutionID,
 		McpMode:                        reqWithWorktree.McpMode,
 		McpProviders:                   reqWithWorktree.McpProviders,
+		McpProfile:                     reqWithWorktree.McpProfile,
 		AuthToken:                      m.revealRuntimeSecret(ctx, metadata, MetadataKeyAuthTokenSecret),
 		BootstrapNonce:                 m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret),
 		OnProgress:                     onProgress,
@@ -1047,7 +1048,7 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		if !agentConfig.Enabled() {
 			return nil, fmt.Errorf("agent type %q is disabled", agentTypeName)
 		}
-		preferNative := m.preferNativeBinary(agentConfig, execution.RuntimeName, execution.Metadata)
+		preferNative := m.preferNativeBinary(agentConfig, execution.RuntimeName, execution.MetadataSnapshot())
 		cmds, err := m.buildAgentCommand(req, profileInfo, agentConfig, preferNative)
 		if err != nil {
 			return nil, err
@@ -1553,10 +1554,7 @@ func (m *Manager) SetExecutionDescription(_ context.Context, executionID string,
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
-	if execution.Metadata == nil {
-		execution.Metadata = make(map[string]interface{})
-	}
-	execution.Metadata["task_description"] = description
+	execution.setMetadataValue("task_description", description)
 	return nil
 }
 
@@ -1566,10 +1564,7 @@ func (m *Manager) SetExecutionEnv(_ context.Context, executionID string, env map
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
-	if execution.Metadata == nil {
-		execution.Metadata = make(map[string]interface{})
-	}
-	execution.Metadata["runtime_env"] = cloneStringMap(env)
+	execution.setMetadataValue("runtime_env", cloneStringMap(env))
 	return nil
 }
 
@@ -1682,31 +1677,20 @@ func (m *Manager) createBootMessage(ctx context.Context, execution *AgentExecuti
 
 // getTaskDescriptionFromMetadata extracts the task description string from execution metadata.
 func getTaskDescriptionFromMetadata(execution *AgentExecution) string {
-	if execution.Metadata == nil {
-		return ""
-	}
-	if desc, ok := execution.Metadata["task_description"].(string); ok {
-		return desc
-	}
-	return ""
+	return execution.metadataString("task_description")
 }
 
 // getAttachmentsFromMetadata extracts attachments from execution metadata.
 func getAttachmentsFromMetadata(execution *AgentExecution) []MessageAttachment {
-	if execution.Metadata == nil {
-		return nil
-	}
-	attachments, ok := execution.Metadata["attachments"].([]MessageAttachment)
-	if ok {
-		return attachments
-	}
-	return nil
+	value, _ := execution.metadataValue("attachments")
+	attachments, _ := value.([]MessageAttachment)
+	return attachments
 }
 
 // configureAndStartAgent configures the agent command and starts the agent subprocess.
 // Returns the effective boot command (full command with adapter args, or base command).
 func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentExecution, approvalPolicy string) (string, error) {
-	env := runtimeEnvFromMetadata(execution.Metadata)
+	env := runtimeEnvFromMetadata(execution.MetadataSnapshot())
 	m.mergeAgentProfileEnvForExecution(ctx, execution, env)
 	if err := spillLargeWakePayloadEnv(env, execution.WorkspacePath, m.logger.Zap()); err != nil {
 		m.updateExecutionError(execution.ID, "failed to prepare agent env: "+err.Error())

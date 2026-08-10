@@ -4,25 +4,41 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
+	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/utility/models"
+	"github.com/kandev/kandev/internal/utility/profilebinding"
 	"github.com/kandev/kandev/internal/utility/store"
 	"github.com/kandev/kandev/internal/utility/template"
 )
 
 var (
-	ErrAgentNotFound = errors.New("utility agent not found")
-	ErrInvalidAgent  = errors.New("invalid utility agent")
-	ErrCallNotFound  = errors.New("utility agent call not found")
-	ErrBuiltinAgent  = errors.New("cannot modify built-in agent")
+	ErrAgentNotFound       = errors.New("utility agent not found")
+	ErrInvalidAgent        = errors.New("invalid utility agent")
+	ErrCallNotFound        = errors.New("utility agent call not found")
+	ErrBuiltinAgent        = errors.New("cannot modify built-in agent")
+	ErrProfileRequired     = errors.New("utility agent profile is required")
+	ErrProfileUnconfigured = errors.New("utility agent profile is not configured")
 )
+
+type ProfileResolver interface {
+	Resolve(ctx context.Context, id string) (*agentsettingsmodels.AgentProfile, error)
+	MatchLegacy(ctx context.Context, agentID, model string) (*agentsettingsmodels.AgentProfile, error)
+}
 
 // Service provides business logic for utility agents.
 type Service struct {
-	repo           store.Repository
-	templateEngine *template.Engine
+	repo            store.Repository
+	templateEngine  *template.Engine
+	profileResolver ProfileResolver
+}
+
+// SetProfileResolver wires the operator-owned profile eligibility boundary.
+func (s *Service) SetProfileResolver(resolver ProfileResolver) {
+	s.profileResolver = resolver
 }
 
 // NewService creates a new utility agents service.
@@ -36,6 +52,83 @@ func NewService(repo store.Repository) *Service {
 // ListAgents returns all utility agents.
 func (s *Service) ListAgents(ctx context.Context) ([]*models.UtilityAgent, error) {
 	return s.repo.ListAgents(ctx)
+}
+
+// ClearAgentProfileBindings marks utility agents that reference a deleted
+// profile as unconfigured. This keeps forced profile deletion fail-closed.
+func (s *Service) ClearAgentProfileBindings(ctx context.Context, profileID string) error {
+	agents, err := s.repo.ListAgents(ctx)
+	if err != nil {
+		return err
+	}
+	for _, agent := range agents {
+		if agent == nil || agent.AgentProfileID != profileID {
+			continue
+		}
+		agent.AgentProfileID = ""
+		agent.ProfileBindingState = models.ProfileBindingUnconfigured
+		if err := s.repo.UpdateAgent(ctx, agent); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ClearInheritedProfileBindings marks built-in agents that inherit a deleted
+// default profile as unconfigured.
+func (s *Service) ClearInheritedProfileBindings(ctx context.Context) error {
+	agents, err := s.repo.ListAgents(ctx)
+	if err != nil {
+		return err
+	}
+	for _, agent := range agents {
+		if agent == nil || agent.ProfileBindingState != models.ProfileBindingInherit {
+			continue
+		}
+		agent.ProfileBindingState = models.ProfileBindingUnconfigured
+		if err := s.repo.UpdateAgent(ctx, agent); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// MigrateLegacyBindings upgrades old agent/model selections after profile
+// reconciliation. The operation is idempotent and leaves explicit bindings
+// untouched. A built-in row with inherit state is also left untouched.
+func (s *Service) MigrateLegacyBindings(ctx context.Context) (int, error) {
+	if s.profileResolver == nil {
+		return 0, nil
+	}
+	agents, err := s.repo.ListAgents(ctx)
+	if err != nil {
+		return 0, err
+	}
+	updated := 0
+	for _, agent := range agents {
+		if agent == nil || agent.AgentProfileID != "" ||
+			agent.ProfileBindingState == models.ProfileBindingInherit ||
+			agent.ProfileBindingState == models.ProfileBindingUnconfigured {
+			continue
+		}
+		profile, matchErr := s.profileResolver.MatchLegacy(ctx, agent.AgentID, agent.Model)
+		switch {
+		case matchErr == nil && profile != nil:
+			agent.AgentProfileID = profile.ID
+			agent.ProfileBindingState = models.ProfileBindingExplicit
+		case errors.Is(matchErr, profilebinding.ErrLegacyBindingAmbiguous):
+			agent.ProfileBindingState = models.ProfileBindingUnconfigured
+		case matchErr != nil:
+			return updated, matchErr
+		default:
+			agent.ProfileBindingState = models.ProfileBindingUnconfigured
+		}
+		if err := s.repo.UpdateAgent(ctx, agent); err != nil {
+			return updated, err
+		}
+		updated++
+	}
+	return updated, nil
 }
 
 // GetAgentByID returns a utility agent by ID.
@@ -63,23 +156,38 @@ func (s *Service) GetAgentByName(ctx context.Context, name string) (*models.Util
 }
 
 // CreateAgent creates a new utility agent.
-func (s *Service) CreateAgent(ctx context.Context, name, description, prompt, agentID, model string) (*models.UtilityAgent, error) {
+func (s *Service) CreateAgent(ctx context.Context, name, description, prompt, agentID, model, profileID, bindingState string) (*models.UtilityAgent, error) {
 	name = strings.TrimSpace(name)
 	prompt = strings.TrimSpace(prompt)
 	agentID = strings.TrimSpace(agentID)
 	model = strings.TrimSpace(model)
 
-	if name == "" || prompt == "" || agentID == "" || model == "" {
+	profileID = strings.TrimSpace(profileID)
+	bindingState = strings.TrimSpace(bindingState)
+	if name == "" || prompt == "" {
+		return nil, ErrInvalidAgent
+	}
+	if s.profileResolver != nil {
+		if profileID == "" {
+			return nil, ErrProfileRequired
+		}
+		if _, err := s.profileResolver.Resolve(ctx, profileID); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidAgent, err)
+		}
+		bindingState = models.ProfileBindingExplicit
+	} else if agentID == "" || model == "" {
 		return nil, ErrInvalidAgent
 	}
 
 	agent := &models.UtilityAgent{
-		Name:        name,
-		Description: description,
-		Prompt:      prompt,
-		AgentID:     agentID,
-		Model:       model,
-		Builtin:     false,
+		Name:                name,
+		Description:         description,
+		Prompt:              prompt,
+		AgentID:             agentID,
+		Model:               model,
+		AgentProfileID:      profileID,
+		ProfileBindingState: bindingState,
+		Builtin:             false,
 		// Custom agents validate agent_id + model above, so they're always
 		// configured and ready to run at creation time. The DB's NOT NULL
 		// column persists the field value (not the schema default), so we
@@ -95,7 +203,9 @@ func (s *Service) CreateAgent(ctx context.Context, name, description, prompt, ag
 }
 
 // UpdateAgent updates an existing utility agent.
-func (s *Service) UpdateAgent(ctx context.Context, id string, name, description, prompt, agentID, model *string, enabled *bool) (*models.UtilityAgent, error) {
+//
+//nolint:cyclop // each optional update field has independent validation.
+func (s *Service) UpdateAgent(ctx context.Context, id string, name, description, prompt, agentID, model, profileID, bindingState *string, enabled *bool) (*models.UtilityAgent, error) {
 	agent, err := s.repo.GetAgentByID(ctx, id)
 	if err != nil {
 		return nil, ErrAgentNotFound
@@ -124,10 +234,27 @@ func (s *Service) UpdateAgent(ctx context.Context, id string, name, description,
 	if model != nil {
 		agent.Model = strings.TrimSpace(*model)
 	}
+	if profileID != nil {
+		agent.AgentProfileID = strings.TrimSpace(*profileID)
+	}
+	if bindingState != nil {
+		agent.ProfileBindingState = strings.TrimSpace(*bindingState)
+	}
+	if s.profileResolver != nil {
+		if agent.Builtin && agent.ProfileBindingState == models.ProfileBindingInherit {
+			agent.AgentProfileID = ""
+		} else if agent.AgentProfileID == "" {
+			return nil, ErrProfileRequired
+		} else if _, err := s.profileResolver.Resolve(ctx, agent.AgentProfileID); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidAgent, err)
+		} else {
+			agent.ProfileBindingState = models.ProfileBindingExplicit
+		}
+	}
 	if enabled != nil {
 		// Allow enabling even with empty agent_id/model - defaults can be used at execution time.
 		// For custom (non-builtin) agents, we still require agent_id and model.
-		if *enabled && !agent.Builtin && (agent.AgentID == "" || agent.Model == "") {
+		if *enabled && !agent.Builtin && s.profileResolver == nil && (agent.AgentID == "" || agent.Model == "") {
 			return nil, ErrInvalidAgent
 		}
 		agent.Enabled = *enabled
@@ -167,8 +294,9 @@ func (s *Service) GetAvailableVariables() []template.VariableInfo {
 
 // DefaultUtilitySettings contains the user's default utility agent/model settings.
 type DefaultUtilitySettings struct {
-	AgentID string
-	Model   string
+	AgentID   string
+	Model     string
+	ProfileID string
 }
 
 // PreparePromptRequest prepares a prompt request by resolving the template.
@@ -187,6 +315,34 @@ func (s *Service) PreparePromptRequest(ctx context.Context, utilityID string, tm
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	if s.profileResolver != nil {
+		var profileID string
+		switch agent.ProfileBindingState {
+		case models.ProfileBindingUnconfigured:
+			return nil, ErrProfileUnconfigured
+		case models.ProfileBindingInherit:
+			if defaults != nil {
+				profileID = defaults.ProfileID
+			}
+		default:
+			profileID = agent.AgentProfileID
+		}
+		if profileID == "" {
+			return nil, ErrProfileRequired
+		}
+		profile, err := s.profileResolver.Resolve(ctx, profileID)
+		if err != nil {
+			return nil, err
+		}
+		return &PromptRequest{
+			UtilityID:      utilityID,
+			ResolvedPrompt: resolvedPrompt,
+			AgentCLI:       profile.AgentID,
+			Model:          profile.Model,
+			AgentProfileID: profile.ID,
+		}, nil
 	}
 
 	// Use agent-specific values when fully configured. If the model is empty,
@@ -217,10 +373,11 @@ type PromptRequest struct {
 	ResolvedPrompt string
 	AgentCLI       string // The inference agent ID (e.g., "claude-acp", "amp")
 	Model          string // The model to use
+	AgentProfileID string
 }
 
 // CreateCall creates a new call record (for tracking history).
-func (s *Service) CreateCall(ctx context.Context, utilityID, sessionID, resolvedPrompt, model string) (*models.UtilityAgentCall, error) {
+func (s *Service) CreateCall(ctx context.Context, utilityID, sessionID, resolvedPrompt, model string, profileID ...string) (*models.UtilityAgentCall, error) {
 	call := &models.UtilityAgentCall{
 		UtilityID:      utilityID,
 		SessionID:      sessionID,
@@ -228,6 +385,9 @@ func (s *Service) CreateCall(ctx context.Context, utilityID, sessionID, resolved
 		Model:          model,
 		Status:         "pending",
 		CreatedAt:      time.Now().UTC(),
+	}
+	if len(profileID) > 0 {
+		call.AgentProfileID = profileID[0]
 	}
 	if err := s.repo.CreateCall(ctx, call); err != nil {
 		return nil, err

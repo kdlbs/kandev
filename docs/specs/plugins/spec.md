@@ -401,7 +401,10 @@ service Host {
   workspace — so a plugin can delegate a lightweight LLM step without holding a
   provider API key. Returns gRPC `FailedPrecondition` when no utility agent is
   configured, selected agent was deleted, or it is disabled. See
-  [ADR 0048](../../decisions/0048-plugin-host-utility-agent-invoke.md).
+  [ADR 0048](../../decisions/0048-plugin-host-utility-agent-invoke.md). The plugin does not select
+  an execution profile directly; the selected utility agent resolves its effective profile and
+  complete launch/permission policy according to
+  [Profile-backed Utility Agents](../agents/utility-agent-profiles.md).
 
 Every Host RPC is capability-gated: `GetState`/`SetState`/`DeleteState`/`ListState`
 check `capabilities.state`, `RevealSecret` checks `capabilities.secrets`,

@@ -86,6 +86,38 @@ func TestCreateTaskAutoTitlePersistsPendingMarker(t *testing.T) {
 	}
 }
 
+func TestCreateTaskPersistsAutopilot(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-autopilot-service", Name: "Workspace"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-autopilot-service", WorkspaceID: "ws-autopilot-service", Name: "Workflow"}); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-autopilot-service",
+		WorkflowID:  "wf-autopilot-service",
+		Title:       "Autopilot service task",
+		Autopilot:   true,
+	})
+	if err != nil {
+		t.Fatalf("create autopilot task: %v", err)
+	}
+	task := taskResult.Task
+	if !task.Autopilot {
+		t.Fatal("created autopilot = false, want true")
+	}
+	reloaded, err := svc.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("reload autopilot task: %v", err)
+	}
+	if !reloaded.Autopilot {
+		t.Fatal("reloaded autopilot = false, want true")
+	}
+}
+
 func TestCreateTaskAutoTitleSupportsSubtasks(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

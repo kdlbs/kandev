@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/system/storage"
@@ -37,12 +38,15 @@ import (
 //   - RefreshAgent: re-runs the probe against the existing instance.
 //   - Stop(ctx): deletes each instance from agentctl and removes the tmp parent.
 type Manager struct {
-	registry      *registry.Registry
-	controlHost   string
-	controlPort   int
-	controlClient *agentctlclient.ControlClient
-	authToken     string // per-launch auth token for instance clients
-	log           *logger.Logger
+	registry        *registry.Registry
+	controlHost     string
+	controlPort     int
+	controlClient   *agentctlclient.ControlClient
+	authToken       string // per-launch auth token for instance clients
+	log             *logger.Logger
+	profileResolver interface {
+		Resolve(context.Context, string) (*settingsmodels.AgentProfile, error)
+	}
 
 	parentTmpDir  string
 	tempArtifacts *tempartifacts.Registry
@@ -58,6 +62,13 @@ type Manager struct {
 	modelGenerations  map[string]uint64
 	startCancel       context.CancelFunc
 	stopped           bool
+}
+
+// SetProfileResolver wires the profile eligibility and launch-policy reader.
+func (m *Manager) SetProfileResolver(resolver interface {
+	Resolve(context.Context, string) (*settingsmodels.AgentProfile, error)
+}) {
+	m.profileResolver = resolver
 }
 
 // instance is a single warm agentctl instance bound to an agent type.

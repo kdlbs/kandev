@@ -4,6 +4,7 @@
   "allRepositories": "Todos os repositórios",
   "allWorkflows": "Todos os fluxos de trabalho",
   "allWorkflowsTitleCase": "Todos os fluxos de trabalho",
+  "allWorkspaces": "Todos os workspaces",
   "approvalRequired": "Aprovação necessária",
   "archive": "Arquivar",
   "archiveCount_one": "Arquivar {{count}}",

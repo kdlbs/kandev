@@ -108,8 +108,9 @@ type UserSettings struct {
 	AzureDevOpsBrowsePreferences    json.RawMessage                   `json:"azure_devops_browse_preferences"`
 	DefaultUtilityAgentID           string                            `json:"default_utility_agent_id"` // Default inference agent for utility agents
 	DefaultUtilityModel             string                            `json:"default_utility_model"`    // Default model for utility agents
-	KeyboardShortcuts               map[string]interface{}            `json:"keyboard_shortcuts"`       // User-configured keyboard shortcut overrides
-	TerminalLinkBehavior            string                            `json:"terminal_link_behavior"`   // "new_tab" | "browser_panel"
+	DefaultUtilityAgentProfileID    string                            `json:"default_utility_agent_profile_id"`
+	KeyboardShortcuts               map[string]interface{}            `json:"keyboard_shortcuts"`     // User-configured keyboard shortcut overrides
+	TerminalLinkBehavior            string                            `json:"terminal_link_behavior"` // "new_tab" | "browser_panel"
 	TerminalFontFamily              string                            `json:"terminal_font_family"`
 	TerminalFontSize                int                               `json:"terminal_font_size"`
 	ChangesPanelLayout              string                            `json:"changes_panel_layout"` // "flat" | "tree"

@@ -20,6 +20,10 @@ const COLLAPSE_BUTTON_CLASS = "h-7 w-7 shrink-0 cursor-pointer";
 export function AppSidebarHeader({ collapsed, onToggleCollapse }: AppSidebarHeaderProps) {
   const { t } = useTranslation();
   const workspaces = useAppStore((s) => s.workspaces);
+  // The global WORKSPACE_PICKER shortcut opens this instance (and only this
+  // one) through the store; the mobile sheet keeps its own local open state.
+  const pickerOpen = useAppStore((s) => s.appSidebar.workspacePickerOpen);
+  const setPickerOpen = useAppStore((s) => s.setWorkspacePickerOpen);
   const activeWorkspace = workspaces.items.find(
     (workspace) => workspace.id === workspaces.activeId,
   );
@@ -82,7 +86,7 @@ export function AppSidebarHeader({ collapsed, onToggleCollapse }: AppSidebarHead
       <span aria-hidden className="shrink-0 select-none text-muted-foreground/30">
         /
       </span>
-      <AppSidebarWorkspacePicker />
+      <AppSidebarWorkspacePicker open={pickerOpen} onOpenChange={setPickerOpen} />
       <Tooltip>
         <TooltipTrigger asChild>
           <Button

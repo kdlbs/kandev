@@ -606,6 +606,50 @@ func TestSetSessionRunning_PublishesTaskStateBeforeSession(t *testing.T) {
 	assert.Equal(t, v1.TaskStateInProgress, task.State)
 }
 
+func TestSetSessionWaitingForInput_PublishesPendingActionBeforeSession(t *testing.T) {
+	svc, repo, eventBus := newTestTaskServiceWithEventBus(t)
+	const taskID = "task-clarification-waiting-order"
+	const sessionID = "session-clarification-waiting-order"
+	seedMCPHandlerSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+
+	_, err := svc.CreateMessage(context.Background(), &service.CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TaskID:        taskID,
+		Content:       "Need a parent decision",
+		AuthorType:    "agent",
+		Type:          string(models.MessageTypeClarificationRequest),
+		Metadata:      map[string]interface{}{"status": "pending"},
+		RequestsInput: true,
+	})
+	require.NoError(t, err)
+
+	var published []*bus.Event
+	sub, err := eventBus.Subscribe(">", func(_ context.Context, event *bus.Event) error {
+		if event.Type == events.TaskStateChanged || event.Type == events.TaskSessionStateChanged {
+			published = append(published, event)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+
+	h := &Handlers{
+		taskSvc:     svc,
+		sessionRepo: repo,
+		taskRepo:    repo,
+		eventBus:    eventBus,
+		logger:      testLogger(t).WithFields(),
+	}
+	h.setSessionWaitingForInput(context.Background(), taskID, sessionID)
+
+	require.Len(t, published, 2)
+	assert.Equal(t, events.TaskStateChanged, published[0].Type)
+	data, ok := published[0].Data.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, string(models.TaskPendingActionClarification), data["task_pending_action"])
+	assert.Equal(t, events.TaskSessionStateChanged, published[1].Type)
+}
+
 type failingClarificationTaskRepository struct {
 	repository.TaskRepository
 	err error

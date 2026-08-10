@@ -34,6 +34,7 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         workflowStepId,
         title: task.title,
         description: task.description ?? undefined,
+        autopilot: task.autopilot ?? false,
         position: task.position ?? 0,
         state: task.state,
         repositoryId: primary?.repository_id ?? undefined,

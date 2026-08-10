@@ -83,6 +83,11 @@ Choose a workspace mode:
 
 The context choices are **Blank**, **Copy initial prompt**, and, when a utility agent is configured, **Summarize session**. Context supplies background; it does not create a shared conversation. Attachments and prompt enhancement are also available.
 
+The subtask dialog includes an optional **Autopilot** switch. Use the info control
+beside it for help: the child works independently and asks its parent only when a
+critical decision blocks progress. The top-level task dialog does not show this
+switch; use `create_task_kandev` when you need an autopilot root task.
+
 The subtask dialog currently does not enforce agent/executor credential compatibility. For an isolated multi-repository subtask, choose **Worktree**, **Local Docker**, **SSH**, or **Sprites**; Local/Local PC creation remains gated and Remote Docker is not implemented. For every subtask, choose an agent profile configured on the inherited or selected executor; otherwise creation can succeed while agent launch or repository materialization fails.
 
 Regular Kanban allows one subtask level: a root task can have children, but a child cannot have another child. Split further work into sibling subtasks, additional sessions, or a separate top-level task. Arbitrary-depth trees belong to the in-progress Office surface.
@@ -98,6 +103,7 @@ Detaching changes task hierarchy only. An inherited workspace remains shared wit
 Call `create_task_kandev` with `parent_id: "self"`. `workspace_mode` defaults to `inherit_parent`; set it to `new_workspace` for isolated materialization.
 
 - `start_agent` defaults to `true`. Supply a detailed `prompt` when it is true; if omitted, Kandev still starts the agent without task-specific instructions. Set it to `false` for a placeholder task.
+- `autopilot` defaults to `false`. Set it to `true` to start an autonomous task. This choice is immutable and is not inherited by subtasks. An autopilot child receives `ask_parent_question_kandev` instead of `ask_user_question_kandev`; an autopilot root receives neither question tool. See [Agent Communication](agent-communication.md#autopilot-parent-questions) for the answer protocol.
 - The tool inherits the parent workspace, workflow, profile, executor, repositories, and base branches unless overridden.
 - Inherited repository attachments deliberately do not copy an explicit checkout branch.
 - An explicit same-repository child uses the inherited base branch. An explicit cross-repository child defaults to that repository's default branch unless `base_branch` is supplied.

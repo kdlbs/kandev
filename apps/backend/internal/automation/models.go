@@ -15,11 +15,12 @@ import (
 type TriggerType string
 
 const (
-	TriggerTypeScheduled  TriggerType = "scheduled"
-	TriggerTypeGitHubPR   TriggerType = "github_pr"
-	TriggerTypeGitHubPush TriggerType = "github_push"
-	TriggerTypeGitHubCI   TriggerType = "github_ci"
-	TriggerTypeWebhook    TriggerType = "webhook"
+	TriggerTypeScheduled      TriggerType = "scheduled"
+	TriggerTypeGitHubPR       TriggerType = "github_pr"
+	TriggerTypeGitHubPRMerged TriggerType = "github_pr_merged"
+	TriggerTypeGitHubPush     TriggerType = "github_push"
+	TriggerTypeGitHubCI       TriggerType = "github_ci"
+	TriggerTypeWebhook        TriggerType = "webhook"
 )
 
 const (
@@ -202,9 +203,28 @@ type GitHubCITriggerConfig struct {
 	Branches    []string            `json:"branches,omitempty"` // head-branch glob filter; empty = all
 }
 
+// GitHubPRMergedTriggerConfig filters PR-merged events.
+// all_repos: true = every repository matches; false + non-empty repos = those entries only;
+// false + empty repos = matches nothing (the fail-closed default).
+type GitHubPRMergedTriggerConfig struct {
+	AllRepos     bool                `json:"all_repos"`
+	Repos        []github.RepoFilter `json:"repos"`
+	BaseBranches []string            `json:"base_branches"`
+}
+
 // WebhookTriggerConfig holds configuration for webhook triggers.
 type WebhookTriggerConfig struct {
 	FilterExpression string `json:"filter_expression,omitempty"`
+}
+
+// TaskOriginLookup answers the two facts a merged-PR event needs about the
+// task its PR was linked to. ok=false means the task could not be resolved
+// (absent or query error — the adapter collapses both into ok=false and logs
+// at the appropriate level).
+type TaskOriginLookup interface {
+	TaskWorkspaceAndAutomationOrigin(ctx context.Context, taskID string) (
+		workspaceID string, isAutomationRun bool, ok bool,
+	)
 }
 
 // --- Request/response DTOs ---

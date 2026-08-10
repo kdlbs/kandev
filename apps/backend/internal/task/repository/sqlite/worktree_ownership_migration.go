@@ -111,16 +111,17 @@ func (r *Repository) normalizeTaskWorktreeOwnership() error {
 		return err
 	}
 	cut := &worktreeCutover{
-		envs:                         make(map[string]*legacyEnv),
-		taskEnvs:                     make(map[string][]*legacyEnv),
-		sessions:                     make(map[string]*legacySession),
-		sessionTasks:                 make(map[string]string),
-		sessionEnvIDs:                make(map[string]string),
-		historicalWorktreeSuperseded: make(map[string]bool),
-		tasks:                        make(map[string]*taskWorktreeTargets),
-		taskEnvIDs:                   make(map[string]string),
-		loserEnvIDs:                  make(map[string]bool),
-		executorTypes:                make(map[string]string),
+		envs:                      make(map[string]*legacyEnv),
+		taskEnvs:                  make(map[string][]*legacyEnv),
+		sessions:                  make(map[string]*legacySession),
+		sessionTasks:              make(map[string]string),
+		sessionEnvIDs:             make(map[string]string),
+		sessionWorktreeSuperseded: make(map[string]bool),
+		authoritativeWorktreeIDs:  make(map[string]bool),
+		tasks:                     make(map[string]*taskWorktreeTargets),
+		taskEnvIDs:                make(map[string]string),
+		loserEnvIDs:               make(map[string]bool),
+		executorTypes:             make(map[string]string),
 	}
 	if err := cut.loadLegacy(tx); err != nil {
 		return err

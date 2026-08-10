@@ -25,6 +25,7 @@ import (
 
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/pkg/agent"
@@ -230,6 +231,9 @@ type InstanceConfig struct {
 	// McpProviders limits task-mode review automation tools to attached providers.
 	McpProviders []string
 
+	// McpProfile is the backend-owned typed MCP tool profile.
+	McpProfile *mcpprofile.Context
+
 	// AuthToken is a shared secret for authenticating requests.
 	// Inherited from the parent Config at instance creation time.
 	AuthToken string
@@ -434,6 +438,10 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.McpProviders != nil {
 		cfg.McpProviders = mcpproviders.Normalize(overrides.McpProviders)
 	}
+	if overrides.McpProfile != nil {
+		profileContext := *overrides.McpProfile
+		cfg.McpProfile = &profileContext
+	}
 	if overrides.RequiresProcessKill {
 		cfg.RequiresProcessKill = true
 	}
@@ -487,6 +495,7 @@ type InstanceOverrides struct {
 	AssumeMcpHttp          bool
 	McpMode                string
 	McpProviders           []string
+	McpProfile             *mcpprofile.Context
 	RequiresProcessKill    bool
 	StripEnv               []string
 	BaseBranches           map[string]string

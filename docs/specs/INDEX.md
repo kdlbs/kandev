@@ -94,6 +94,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [external-id-idempotency](tasks/external-id-idempotency/spec.md) | draft |
 | [prompt-attachments](tasks/prompt-attachments.md) | draft |
 | [sidebar-task-edit](tasks/sidebar-task-edit.md) | approved |
+| [autopilot-mode](tasks/autopilot-mode.md) | draft |
 | [explicit-completion-signal](workflow/explicit-completion-signal/spec.md) | shipped |
 | [cancelled-turn-completion](workflow/cancelled-turn-completion/spec.md) | building |
 | [conditional-session-settings](workflow-session-settings/spec.md) | approved |
@@ -107,6 +108,7 @@ Roles, governance gates, and granular permissions that apply across human users 
 | [runtime-updates](agents/runtime-updates.md) | approved |
 | [profile-disable](agents/profile-disable.md) | draft |
 | [dynamic-provider-options](agents/dynamic-provider-options.md) | shipped |
+| [utility-agent-profiles](agents/utility-agent-profiles.md) | approved |
 | [roles](agents/roles.md) | shipped |
 | [governance](agents/governance.md) | shipped |
 | [granular-permissions](agents/granular-permissions.md) | draft |
@@ -152,6 +154,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 |---|---|
 | [ci-pr-automation](ui/ci-pr-automation.md) | building |
 | [github-pr-review-actions](ui/github-pr-review-actions.md) | shipped |
+| [pr-task-status-summary](ui/pr-task-status-summary.md) | shipped |
 | [comment-markdown](ui/comment-markdown.md) | shipped |
 | [resizable-markdown-tables](ui/resizable-markdown-tables.md) | building |
 | [transcript-auto-scroll](ui/transcript-auto-scroll.md) | building |
@@ -249,6 +252,8 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [native-code-review](native-code-review/spec.md) | building |
 | [missing-task-route-recovery](missing-task-route-recovery/spec.md) | draft |
 | [browser-inspect-annotations-save](browser-inspect-annotations-save/spec.md) | shipped |
+| [automations-pr-merged-trigger](automations-pr-merged-trigger/spec.md) | draft |
+| [no-silent-model-fallback](no-silent-model-fallback/spec.md) | approved |
 
 ---
 

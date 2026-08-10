@@ -184,6 +184,8 @@
   "startStepHelp": "As novas tarefas começam neste passo. Só um passo por fluxo de trabalho pode ser o passo inicial.",
   "stepIsPartOfReplayCycle": "{{stepName}} faz parte de um ciclo de repetição",
   "stepNamePlaceholder": "Nome do passo",
+  "workflowDescription": "Descrição",
+  "workflowDescriptionPlaceholder": "Descrição opcional",
   "workflowPrompt": "Prompt do fluxo de trabalho",
   "workflowPromptHelp": "Instruções opcionais incluídas na entrada de cada passo, antes do prompt do passo. Suporta referências {task_id} e @prompt-guardado (a mesma expansão dos prompts de passo). {{taskPrompt}} só existe nos passos. Deixe vazio para desativar. Visível para o agente e mostrado recolhido no chat.",
   "workflowPromptPlaceholder": "Se o PR estiver integrado ou fechado, mova a tarefa para Concluída.\nSe precisar de criar vários pull requests, prefira orquestrar subtarefas.",

@@ -381,8 +381,28 @@ test.describe("Mobile sidebar task actions", () => {
 
     const dialog = testPage.getByTestId("new-subtask-dialog");
     await expect(dialog).toBeVisible();
+    await expect(testPage.locator('[data-slot="tooltip-content"][data-state="open"]')).toHaveCount(
+      0,
+    );
     await expect(testPage.getByTestId("subtask-title-input")).toHaveValue(
       /Mobile create subtask parent \/ Subtask 1/,
+    );
+    await expect(testPage.getByTestId("subtask-context-autopilot-row")).toBeVisible();
+    const contextTrigger = testPage
+      .getByTestId("subtask-context-autopilot-row")
+      .locator('[data-slot="select-trigger"]');
+    const contextHeight = await contextTrigger.evaluate((element) =>
+      Math.round(element.getBoundingClientRect().height),
+    );
+    const autopilotHeight = await testPage
+      .getByTestId("autopilot-toggle-row")
+      .evaluate((element) => Math.round(element.getBoundingClientRect().height));
+    expect(autopilotHeight).toBe(contextHeight);
+    await expect(dialog.getByTestId("autopilot-toggle-row")).toBeVisible();
+    await dialog.getByRole("switch", { name: "Autopilot" }).tap();
+    await expect(dialog.getByRole("switch", { name: "Autopilot" })).toHaveAttribute(
+      "aria-checked",
+      "true",
     );
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(dialog).toBeHidden();

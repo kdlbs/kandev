@@ -3,6 +3,8 @@ package backendapp
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -13,6 +15,8 @@ import (
 
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/gitlab"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -33,6 +37,7 @@ func registerE2EResetRoutes(
 	automationSvc *automation.Service,
 	githubSvc *github.Service,
 	gitlabSvc *gitlab.Service,
+	eventBus bus.EventBus,
 	log *logger.Logger,
 ) {
 	mockMode := os.Getenv("KANDEV_MOCK_AGENT")
@@ -51,6 +56,14 @@ func registerE2EResetRoutes(
 	if automationSvc != nil {
 		api.POST("/automations", handleE2ECreateAutomation(automationSvc, repo, log))
 		api.POST("/automation-runs", handleE2ECreateAutomationRun(automationSvc, log))
+		api.POST("/automation-triggers", handleE2EAddTrigger(automationSvc, log))
+		// Fire a fake github_pr_merged event into the in-process event bus so
+		// E2E tests can exercise the automation subscriber without real GitHub
+		// polling. Returns the run task id once the run record appears.
+		api.POST("/github/fire-pr-merged", handleE2EFirePRMerged(automationSvc, eventBus, log))
+		// Fire a manual automation trigger, mirroring the "Run" button path,
+		// and return the run task id once the run record appears.
+		api.POST("/automations/:id/trigger", handleE2EAutomationManualTrigger(automationSvc, log))
 	}
 	// Seeds a task_sessions row directly (e.g. a CANCELLED primary session)
 	// so tests can assert on session-state-derived behavior without a full
@@ -336,6 +349,13 @@ type e2eCreateAutomationRequest struct {
 	// view only renders the instruction card when there is one, so a spec
 	// asserting on where that card lives has to seed it.
 	Prompt string `json:"prompt"`
+	// AgentProfileID and ExecutorProfileID mirror the fields a UI-created
+	// automation carries. Without them autoStartAutomationTask calls StartTask
+	// with empty profile IDs and the lifecycle layer fails to resolve the agent,
+	// so tests that need the automation to actually launch an agent must supply
+	// these (typically seedData.agentProfileId / seedData.worktreeExecutorProfileId).
+	AgentProfileID    string `json:"agent_profile_id"`
+	ExecutorProfileID string `json:"executor_profile_id"`
 	// LegacyBoardCard rewrites the row's execution_mode to 'task' after
 	// creation, reproducing on disk exactly what an install that predates the
 	// withdrawal of execution modes carries. There is no input path to this:
@@ -368,6 +388,8 @@ func handleE2ECreateAutomation(
 			WorkflowID:        body.WorkflowID,
 			WorkflowStepID:    body.WorkflowStepID,
 			Prompt:            body.Prompt,
+			AgentProfileID:    body.AgentProfileID,
+			ExecutorProfileID: body.ExecutorProfileID,
 			MaxConcurrentRuns: 10,
 		})
 		if err != nil {
@@ -551,6 +573,145 @@ func handleE2ESetTaskOrigin(repo *sqliterepo.Repository, log *logger.Logger) gin
 	}
 }
 
+type e2eFirePRMergedRequest struct {
+	TaskID       string `json:"task_id"`
+	AutomationID string `json:"automation_id"`
+	Owner        string `json:"owner"`
+	Repo         string `json:"repo"`
+	PRNumber     int    `json:"pr_number"`
+	BaseBranch   string `json:"base_branch"`
+}
+
+// handleE2EFirePRMerged publishes a fake events.GitHubTaskPRUpdated event with
+// State="merged" directly into the in-process event bus. The subscriber picks it
+// up synchronously (memory bus), triggers the matching automations, and spawns a
+// goroutine to create the run task. The handler then polls until the run record
+// appears in the DB and returns its task id.
+//
+// This endpoint exists only in E2E / mock-agent mode. It does NOT call GitHub or
+// add webhook subscriptions — it fires the internal event bus only.
+func handleE2EFirePRMerged(svc *automation.Service, eventBus bus.EventBus, log *logger.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var body e2eFirePRMergedRequest
+		if err := c.ShouldBindJSON(&body); err != nil ||
+			body.TaskID == "" || body.AutomationID == "" || body.Owner == "" || body.Repo == "" {
+			c.JSON(http.StatusBadRequest, gin.H{errKey: "task_id, automation_id, owner, and repo are required"})
+			return
+		}
+		if body.PRNumber <= 0 {
+			body.PRNumber = 1
+		}
+
+		ctx := c.Request.Context()
+
+		// Snapshot the latest run id before firing so we can detect the new one.
+		beforeID := ""
+		existing, _ := svc.ListRuns(ctx, body.AutomationID, 1)
+		if len(existing) > 0 {
+			beforeID = existing[0].ID
+		}
+
+		// Build a fake TaskPR and publish the event.
+		now := time.Now().UTC()
+		prURL := fmt.Sprintf("https://github.com/%s/%s/pull/%d", body.Owner, body.Repo, body.PRNumber)
+		pr := &github.TaskPR{
+			TaskID:     body.TaskID,
+			Owner:      body.Owner,
+			Repo:       body.Repo,
+			PRNumber:   body.PRNumber,
+			PRURL:      prURL,
+			BaseBranch: body.BaseBranch,
+			State:      "merged",
+			MergedAt:   &now,
+		}
+		evt := bus.NewEvent(events.GitHubTaskPRUpdated, "e2e", pr)
+		if err := eventBus.Publish(ctx, events.GitHubTaskPRUpdated, evt); err != nil {
+			log.Error("e2e: failed to publish GitHubTaskPRUpdated event", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+			return
+		}
+
+		taskID, err := e2ePollNewRun(ctx, svc, body.AutomationID, beforeID)
+		if err != nil {
+			log.Warn("e2e: timed out waiting for automation run after PR merged event",
+				zap.String("automation_id", body.AutomationID))
+			c.JSON(http.StatusGatewayTimeout, gin.H{errKey: "timeout waiting for automation run to be created"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"run_task_id": taskID})
+	}
+}
+
+// handleE2EAutomationManualTrigger fires a manual automation trigger (mirroring
+// the "Run" button path) and polls for the resulting run task id.
+func handleE2EAutomationManualTrigger(svc *automation.Service, log *logger.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		automationID := c.Param("id")
+		if automationID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{errKey: "automation id is required"})
+			return
+		}
+
+		ctx := c.Request.Context()
+
+		a, err := svc.GetAutomation(ctx, automationID)
+		if err != nil || a == nil {
+			c.JSON(http.StatusNotFound, gin.H{errKey: "automation not found"})
+			return
+		}
+
+		// Snapshot the latest run before firing.
+		beforeID := ""
+		existing, _ := svc.ListRuns(ctx, automationID, 1)
+		if len(existing) > 0 {
+			beforeID = existing[0].ID
+		}
+
+		// Build manual trigger data matching the production path.
+		data, _ := json.Marshal(map[string]string{"source": "manual"})
+		triggerID := ""
+		if len(a.Triggers) > 0 {
+			triggerID = a.Triggers[0].ID
+		}
+		result, fireErr := svc.FireTrigger(ctx, automationID, triggerID, "manual", data, "")
+		if fireErr != nil {
+			log.Error("e2e: manual trigger failed", zap.String("automation_id", automationID), zap.Error(fireErr))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: fireErr.Error()})
+			return
+		}
+		if result.Skipped {
+			c.JSON(http.StatusOK, gin.H{"skipped": true, "reason": result.Reason})
+			return
+		}
+
+		taskID, err := e2ePollNewRun(ctx, svc, automationID, beforeID)
+		if err != nil {
+			log.Warn("e2e: timed out waiting for automation run after manual trigger",
+				zap.String("automation_id", automationID))
+			c.JSON(http.StatusGatewayTimeout, gin.H{errKey: "timeout waiting for automation run to be created"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"run_task_id": taskID})
+	}
+}
+
+// e2ePollNewRun blocks until a new run (with a different id than beforeID) appears
+// for automationID, or until 5 seconds elapse. Returns the new run's TaskID.
+func e2ePollNewRun(ctx context.Context, svc *automation.Service, automationID, beforeID string) (string, error) {
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(100 * time.Millisecond)
+		runs, err := svc.ListRuns(ctx, automationID, 1)
+		if err != nil || len(runs) == 0 {
+			continue
+		}
+		if runs[0].ID != beforeID {
+			return runs[0].TaskID, nil
+		}
+	}
+	return "", fmt.Errorf("timeout")
+}
+
 func handleE2ESetSessionReadCursor(repo *sqliterepo.Repository, log *logger.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		sessionID := c.Param("id")
@@ -566,6 +727,31 @@ func handleE2ESetSessionReadCursor(repo *sqliterepo.Repository, log *logger.Logg
 			subject:     "session",
 			responseKey: "last_read_message_id",
 			failLog:     "failed to force-set session read cursor",
+		})
+	}
+}
+
+// handleE2EAddTrigger seeds an automation trigger via HTTP for E2E tests that
+// need a pre-existing trigger without driving the WS API (which requires a
+// global WebSocket unavailable in Node 20).
+func handleE2EAddTrigger(svc *automation.Service, log *logger.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req automation.AddTriggerRequest
+		if err := c.ShouldBindJSON(&req); err != nil || req.AutomationID == "" || req.Type == "" {
+			c.JSON(http.StatusBadRequest, gin.H{errKey: "automation_id and type are required"})
+			return
+		}
+		t, err := svc.AddTrigger(c.Request.Context(), &req)
+		if err != nil {
+			log.Error("e2e: failed to add trigger", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+			return
+		}
+		c.JSON(http.StatusCreated, gin.H{
+			"id":            t.ID,
+			"automation_id": t.AutomationID,
+			"type":          t.Type,
+			"enabled":       t.Enabled,
 		})
 	}
 }

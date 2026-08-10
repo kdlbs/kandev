@@ -107,6 +107,7 @@ export function toSheetItem(
   return {
     id: task.id,
     title: task.title,
+    autopilot: task.autopilot,
     // Carry the parent link so the mobile task switcher nests subtasks the same
     // way the desktop sidebar does (applyView/TaskSwitcher read parentTaskId).
     parentTaskId: task.parentTaskId ?? undefined,

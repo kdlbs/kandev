@@ -10,6 +10,10 @@
   "columnWorkflow": "Workflow",
   "delete": "Delete",
   "deleteTask": "Delete task",
+  "failedToArchiveTask": "Failed to archive task",
+  "failedToDeleteTask": "Failed to delete task",
+  "failedToLoadTasks": "Failed to load tasks",
+  "failedToUnarchiveTask": "Failed to unarchive task",
   "goToFirstPage": "Go to first page",
   "goToLastPage": "Go to last page",
   "goToNextPage": "Go to next page",
@@ -39,6 +43,12 @@
   "sortTitleZA": "Title Z-A",
   "sortUpdatedNewest": "Updated newest",
   "sortUpdatedOldest": "Updated oldest",
+  "taskArchived": "Task archived",
+  "taskArchivedDescription": "The task has been archived successfully.",
+  "taskUnarchived": "Task unarchived",
   "unarchive": "Unarchive",
+  "unarchivedBranchesMissing_one": "Branch {{branches}} no longer exists locally or on the remote — the next session starts fresh from the base branch.",
+  "unarchivedBranchesMissing_other": "Branches {{branches}} no longer exist locally or on the remote — the next session starts fresh from the base branch.",
+  "unarchivedTaskRestored": "The task has been restored.",
   "unarchiveTask": "Unarchive task"
 }

@@ -23,6 +23,7 @@ import type { UserShellInfo } from "@/lib/state/slices/session-runtime/types";
 import type { RepositoryScript } from "@/lib/types/http";
 import type { Dispatch, SetStateAction, MouseEvent } from "react";
 import type { PreviewStage } from "@/lib/state/slices";
+import { t } from "@/lib/i18n";
 
 export type { Terminal, TerminalType };
 
@@ -168,7 +169,7 @@ function useAddTerminal({
       const newTerm: Terminal = {
         id: result.terminalId,
         type: "shell",
-        label: result.displayName ?? result.label ?? "Terminal",
+        label: result.displayName ?? result.label ?? t("common:terminal"),
         closable: true,
         kind: ordinary ? "ordinary" : result.kind,
         seq: result.seq,
@@ -440,7 +441,7 @@ function useTerminalActions({
         const newTerm: Terminal = {
           id: result.terminalId,
           type: "script",
-          label: result.label ?? script.name ?? "Script",
+          label: result.label ?? script.name ?? t("common:script"),
           closable: true,
           kind: "script",
         };

@@ -855,6 +855,12 @@ func (e *Executor) buildResumeRequestAtCredentialBoundary(
 	if err != nil {
 		return nil, "", execConfig, nil, nil, err
 	}
+	profileContext, err := e.resolveTaskSessionMCPProfile(ctx, task.ID, session, true)
+	if err != nil {
+		return nil, "", execConfig, nil, nil, err
+	}
+	profileContext.Providers = req.McpProviders
+	req.McpProfile = &profileContext
 
 	existingRunning := e.applyRunningRecordToResumeRequest(ctx, req, task, session, startAgent)
 	if err := e.applyResumeWorkspaceFolders(ctx, task.ID, req); err != nil {

@@ -287,6 +287,7 @@ type CreateTaskRequest struct {
 	Labels                 string
 	ParentID               string
 	BlockedBy              []string
+	Autopilot              bool
 }
 
 type UpdateTaskRequest struct {

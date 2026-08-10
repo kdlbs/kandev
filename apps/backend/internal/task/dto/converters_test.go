@@ -62,6 +62,24 @@ func TestFromTaskSerializesWorkspaceFolders(t *testing.T) {
 	}
 }
 
+func TestFromTaskSerializesAutopilot(t *testing.T) {
+	got := FromTask(&models.Task{ID: "task-autopilot", Autopilot: true})
+	if !got.Autopilot {
+		t.Fatal("Autopilot = false, want true")
+	}
+	payload, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal task DTO: %v", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		t.Fatalf("decode task DTO: %v", err)
+	}
+	if raw, ok := fields["autopilot"]; !ok || string(raw) != "true" {
+		t.Fatalf("autopilot field = %s, want true", raw)
+	}
+}
+
 func TestFromWorkflowStep_PreservesWIPFields(t *testing.T) {
 	step := &wfmodels.WorkflowStep{
 		ID:             "step-1",

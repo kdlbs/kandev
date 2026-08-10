@@ -634,6 +634,7 @@ func (s *Service) buildTask(req *CreateTaskRequest, workflowStepID string) *mode
 		Metadata:               metadata,
 		IsEphemeral:            req.IsEphemeral,
 		ParentID:               req.ParentID,
+		Autopilot:              req.Autopilot,
 		AssigneeAgentProfileID: req.AssigneeAgentProfileID,
 		Origin:                 origin,
 		ProjectID:              req.ProjectID,

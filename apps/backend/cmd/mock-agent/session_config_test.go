@@ -189,3 +189,57 @@ func TestSetSessionConfigOptionRejectsClosedSession(t *testing.T) {
 		t.Fatal("SetSessionConfigOption() recreated closed session config")
 	}
 }
+
+// TestMockSessionConfigOptionsForModelAdvertisesSlowModel verifies the mock
+// agent advertises "mock-slow" in the model selector. E2E fixtures use the
+// slow tier for delay-timing assertions, and the no-silent-model-fallback
+// strict policy fails session start when the profile model is absent from the
+// advertised list — so dropping the advertisement would break both.
+func TestMockSessionConfigOptionsForModelAdvertisesSlowModel(t *testing.T) {
+	for _, model := range []string{modelFast, modelSmart, modelSlow} {
+		options := mockSessionConfigOptionsForModel(model)
+		values := make(map[string]string, len(options))
+		for _, option := range options {
+			if option.Select != nil {
+				values[string(option.Select.Id)] = string(option.Select.CurrentValue)
+			}
+		}
+		if values["model"] != model {
+			t.Errorf("mockSessionConfigOptionsForModel(%q) current model = %q, want %q", model, values["model"], model)
+		}
+	}
+
+	modelOption := findModelOption(t)
+	advertised := make([]string, 0, len(*modelOption.Select.Options.Ungrouped))
+	for _, option := range *modelOption.Select.Options.Ungrouped {
+		advertised = append(advertised, string(option.Value))
+	}
+	if !containsString(advertised, modelSlow) {
+		t.Fatalf("advertised models = %v, missing mock-slow (E2E + strict policy depend on it)", advertised)
+	}
+	for _, want := range []string{modelFast, modelSmart, modelSlow} {
+		if !containsString(advertised, want) {
+			t.Errorf("advertised models = %v, missing %s", advertised, want)
+		}
+	}
+}
+
+func findModelOption(t *testing.T) acp.SessionConfigOption {
+	t.Helper()
+	for _, option := range mockSessionConfigOptionsForModel(modelFast) {
+		if option.Select != nil && string(option.Select.Id) == "model" {
+			return option
+		}
+	}
+	t.Fatal("no model config option advertised")
+	return acp.SessionConfigOption{}
+}
+
+func containsString(values []string, want string) bool {
+	for _, v := range values {
+		if v == want {
+			return true
+		}
+	}
+	return false
+}

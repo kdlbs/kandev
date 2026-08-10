@@ -125,6 +125,19 @@ const (
 	// MetaKeyPortForwardingEnabled controls whether a task exposes its
 	// session port-forwarding controls in the task UI.
 	MetaKeyPortForwardingEnabled = "port_forwarding_enabled"
+	// MetaKeyAutomationTargetTaskID binds a merged-PR automation run to the
+	// task selected by its event. The archive handler enforces this value.
+	MetaKeyAutomationTargetTaskID = "automation_target_task_id"
+	// Parent-question message metadata is durable state for an autopilot child
+	// waiting for a decision from its direct parent. The question ID is also
+	// the child clarification message ID, so a parent reply can be idempotent
+	// without a second persistence table.
+	MetaKeyParentQuestionID       = "parent_question_id"
+	MetaKeyParentQuestion         = "parent_question"
+	MetaKeyParentQuestionParentID = "parent_task_id"
+	MetaKeyParentQuestionChildID  = "child_task_id"
+	MetaKeyParentQuestionStatus   = "parent_question_status"
+	MetaKeyParentQuestionResponse = "parent_question_response"
 )
 
 // IsAgentTitlePending reports whether task metadata contains the durable
@@ -576,6 +589,7 @@ type Task struct {
 	WorkspaceFolders []*TaskWorkspaceFolder `json:"workspace_folders,omitempty"`
 	IsEphemeral      bool                   `json:"is_ephemeral"`        // Ephemeral tasks are not shown in kanban, used for quick chat
 	ParentID         string                 `json:"parent_id,omitempty"` // FK to parent task for subtasks
+	Autopilot        bool                   `json:"autopilot"`           // Fixed at task creation
 	ArchivedAt       *time.Time             `json:"archived_at,omitempty"`
 	// ArchivedByCascadeID is set when the task was archived as part of an
 	// office task-handoffs cascade (phase 6). UnarchiveTaskByCascade uses
@@ -1861,6 +1875,7 @@ func (t *Task) ToAPI() *v1.Task {
 		Interrupted:  t.Metadata[MetaKeyInterruptedAt] != nil,
 		IsEphemeral:  t.IsEphemeral,
 		ParentID:     t.ParentID,
+		Autopilot:    t.Autopilot,
 	}
 	if t.Identifier != "" {
 		result.Identifier = t.Identifier

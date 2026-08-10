@@ -1824,4 +1824,94 @@ export const i18nGuardFiles = [
   // chips, routing cards and activity rows all resolve through, so the same
   // vocabulary cannot drift apart across surfaces.
   "app/office/**/*.{ts,tsx}",
+  // The command palette's two un-migrated producers. `global-commands.tsx` was
+  // already listed and already resolved everything through the catalog, so ⌘K
+  // rendered a translated Navigation group above English Git/Panels rows; these
+  // two are what made the same list half-English. Their labels are `label:`
+  // object properties rather than JSX, which is why the guard reported them
+  // clean the whole time — see the note on `mode: "jsx-only"` above.
+  "components/homepage-commands.tsx",
+  "components/session-commands.tsx",
+  // `use-git-with-feedback.ts` composed its own English around the operation
+  // name ("Push failed"), which is why `vcs-split-button.tsx`, `vcs-dialogs.tsx`
+  // and the palette all passed it a deliberately English label. It interpolates
+  // catalog messages now, so those three no longer have to.
+  "hooks/use-git-with-feedback.ts",
+  // Toast and feedback copy. None of it is JSX — it is `title:`/`description:`
+  // object properties and `toast.error("…")` arguments — so `mode: "jsx-only"`
+  // never inspected any of these files and they read as clean for the whole
+  // migration. Listing them records that they are done; only the pseudo-locale
+  // can prove they stay that way.
+  //
+  // `changes-panel-hooks.ts` carried the multi-repo half of the same
+  // concatenated-English problem as `use-git-with-feedback.ts`
+  // (`${operationName} partially succeeded`), including two per-repo counts that
+  // now use `count` with `_one`/`_other` instead of a bare "repos".
+  //
+  // `unarchive-feedback.ts` inflected its own sentence
+  // (`${plural ? "Branches" : "Branch"} … no longer ${plural ? "exist" : "exists"}`),
+  // which is the inline-plural shape docs/i18n.md rules out; the plural rule
+  // lives in the catalog now. `check-inline-plurals.mjs` does not see this
+  // form — it is two independent ternaries, not a `+ "s"`.
+  "app/tasks/tasks-page-client.tsx",
+  "components/azure-devops/azure-devops-task-launcher.tsx",
+  "components/github/use-pr-scoped-review-request.ts",
+  "components/task/changes-panel-hooks.ts",
+  "components/task/task-center-panel-restoration.ts",
+  "components/task/use-tunnel-actions.ts",
+  "hooks/domains/comments/use-markdown-preview-comments.ts",
+  "hooks/domains/session/use-task-environment.ts",
+  "hooks/use-file-save-delete.ts",
+  "hooks/use-utility-agent-generator.ts",
+  "lib/tasks/unarchive-feedback.ts",
+  // Dockview panel titles. These are display copy that is ALSO persisted —
+  // `toSerializedDockview` writes the title into the stored layout JSON — so
+  // they now carry a `titleKey` beside a canonical English `title`, the split
+  // the note on the layouts screen in `e2e/tests/i18n/pseudo-coverage.spec.ts`
+  // said they needed. `constants.ts` deliberately still holds English `title:`
+  // values; they are storage, not copy, and `panel-titles.test.ts` asserts the
+  // two stay apart.
+  "lib/state/dockview-panel-actions.ts",
+  "lib/state/layout-manager/constants.ts",
+  "lib/state/layout-manager/serializer.ts",
+  // Built-in layout profile names and descriptions, the other half of the same
+  // problem: `upsertBuiltInLayoutOverride` copies `name` into a saved override,
+  // so `name`/`description` stay canonical English and the settings list renders
+  // `nameKey`/`descriptionKey`.
+  "lib/layout/layout-profiles.ts",
+  // English `??` / `||` fallbacks — "Agent", "Terminal", "Repository",
+  // "Untitled task", "An error occurred". They render whenever the real value
+  // is absent, which is a normal path rather than an edge case, and none of
+  // them is a JSX literal, so the guard never saw them. Values that are
+  // PERSISTED or sent to an agent verbatim ("New Repository", the quick-chat
+  // session name, `use-plan-actions`' default prompt) are deliberately still
+  // English and stay off this list.
+  "components/review/review-diff-list-groups.tsx",
+  "components/review/review-dialog.tsx",
+  "components/task/changes-git-credential-display.ts",
+  "components/task/task-session-sidebar-archived-item.ts",
+  "hooks/domains/session/use-session-resumption.ts",
+  "hooks/domains/session/use-terminals.ts",
+  "hooks/domains/session/use-user-shells.ts",
+  "hooks/use-editor-keybinds.ts",
+  "hooks/use-summarize-session.ts",
+  "hooks/use-update-available-toast.ts",
+  "lib/agent-runtime-update.ts",
+  "lib/api/domains/plan-api.ts",
+  "lib/capability-warning.ts",
+  "lib/github-auth.ts",
+  "lib/recent-tasks.ts",
+  "lib/state/slices/comments/format.ts",
+  "lib/utils/file-diff.ts",
+  // The built-in sidebar view's name, the third persisted-and-displayed string
+  // in this change. `SidebarView.name` is user-editable and synced, so the
+  // built-in keeps a canonical English `name` and every surface resolves
+  // `sidebarViewName()` instead. Found by the pseudo oracle, not by lint: it is
+  // a `.ts` constant, which `mode: "jsx-only"` never inspects.
+  "lib/state/slices/ui/sidebar-view-builtins.ts",
+  // The last English row in the palette. Its `group` was already translated —
+  // it has to be, since the palette groups by the resolved value — and a
+  // comment deferred the `label`/`keywords` to "the components/task migration".
+  // Both are palette copy and belong with the rest of it.
+  "components/task/recent-task-switcher-hooks.ts",
 ];

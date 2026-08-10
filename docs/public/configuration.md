@@ -81,6 +81,8 @@ SQLite is the supported default and enables WAL mode. PostgreSQL deployments mus
 
 `database.path` is an advanced override. Persistence honors it, but the current **Settings → System → Database** and **Backups** services derive their displayed path, WAL files, backup source, and restore destination from `<home>/data/kandev.db`. Those UI operations are therefore not reliable for a custom SQLite location. Use operator-managed backup/restore for a custom path and verify the actual database path printed at startup.
 
+One backend owns a Kandev home at a time. When SQLite uses a custom path outside that home, the backend also owns that database path, so separate homes alone do not permit concurrent backends against one SQLite file. Use a separate home and database for an intentional second instance. Ownership is released when the backend exits.
+
 Database-only snapshots also omit `<home>/data/master.key`, the AES-256 key used to decrypt stored secrets. Preserve that owner-only key with an independently secured home/data backup; restoring the database without its matching key leaves encrypted credentials unreadable. See [Operations](./operations.md).
 
 ### Event bus and NATS
