@@ -353,6 +353,42 @@ func TestService_PollReviewWatchCreatesTaskOnce(t *testing.T) {
 	}
 }
 
+func TestService_PollReviewWatchReleasesFailedTaskClaim(t *testing.T) {
+	service, secrets := newConfigTestService(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"number":8,"title":"Review","state":"open","head":{"ref":"feature"},"base":{"ref":"main"}}]`))
+	}))
+	t.Cleanup(server.Close)
+	ctx := context.Background()
+	if err := service.store.SaveConfig(ctx, &Config{WorkspaceID: "workspace-a", Origin: server.URL}); err != nil {
+		t.Fatal(err)
+	}
+	if err := secrets.Set(ctx, SecretKeyForWorkspace("workspace-a"), "token", "token"); err != nil {
+		t.Fatal(err)
+	}
+	watch := &ReviewWatch{WorkspaceID: "workspace-a", WorkflowID: "workflow", Owner: "owner", Repo: "repo", Enabled: true}
+	if err := service.SaveReviewWatch(ctx, "workspace-a", watch); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	service.SetReviewTaskCreator(func(context.Context, *ReviewWatch, PullRequest) (string, error) {
+		calls++
+		if calls == 1 {
+			return "", errors.New("temporary")
+		}
+		return "task-8", nil
+	})
+	if _, err := service.PollReviewWatch(ctx, watch); err == nil {
+		t.Fatal("first poll succeeded")
+	}
+	if _, err := service.PollReviewWatch(ctx, watch); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("calls=%d", calls)
+	}
+}
+
 func TestController_MapsUnsupportedCapability(t *testing.T) {
 	service, _ := newConfigTestService(t)
 	router := gin.New()

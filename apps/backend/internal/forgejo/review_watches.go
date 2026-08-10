@@ -105,6 +105,10 @@ func (s *Store) CompleteReviewWatchTask(ctx context.Context, w *ReviewWatch, num
 	_, err := s.db.ExecContext(ctx, `UPDATE forgejo_review_watch_tasks SET task_id=? WHERE watch_id=? AND owner=? AND repo=? AND pr_number=?`, taskID, w.ID, w.Owner, w.Repo, number)
 	return err
 }
+func (s *Store) ReleaseReviewWatchTask(ctx context.Context, w *ReviewWatch, number int) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM forgejo_review_watch_tasks WHERE watch_id=? AND owner=? AND repo=? AND pr_number=? AND task_id=''`, w.ID, w.Owner, w.Repo, number)
+	return err
+}
 func (s *Service) SaveReviewWatch(ctx context.Context, workspaceID string, watch *ReviewWatch) error {
 	if watch == nil {
 		return errors.New("forgejo review watch required")
@@ -158,6 +162,8 @@ func (s *Service) PollReviewWatch(ctx context.Context, watch *ReviewWatch) ([]Pu
 		}
 		taskID, err := s.reviewTaskCreator(ctx, watch, pull)
 		if err != nil {
+			_ = s.store.ReleaseReviewWatchTask(ctx, watch, pull.Number)
+			_ = s.store.MarkReviewWatchPolled(ctx, watch.ID, now, "Forgejo review watch task creation failed")
 			return nil, err
 		}
 		if err := s.store.CompleteReviewWatchTask(ctx, watch, pull.Number, taskID); err != nil {
