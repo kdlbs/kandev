@@ -265,7 +265,7 @@ function useEffectiveWorkflowContext({
 }) {
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
   const hiddenWorkflowStepIds = useAppStore((state) => state.userSettings.hiddenWorkflowStepIds);
-  const [mobileWorkflowFocusId, setMobileWorkflowFocusId] = useState<string | null>(null);
+  const mobileWorkflowFocusId = useAppStore((state) => state.mobileKanban.focusedWorkflowId);
   const effectiveWorkflowId = resolveBoardWorkflowId({
     isMobile,
     selectedWorkflowId,
@@ -295,7 +295,6 @@ function useEffectiveWorkflowContext({
     effectiveSteps,
     multiSelect,
     ...selection,
-    setMobileWorkflowFocusId,
   };
 }
 
@@ -344,7 +343,6 @@ function useKanbanBoardSetup(
     multiSelect,
     isMixedWorkflowSelection,
     multiSelectSteps,
-    setMobileWorkflowFocusId,
   } = useEffectiveWorkflowContext({
     isMobile,
     selectedWorkflowId: workflowsState.activeId,
@@ -394,7 +392,6 @@ function useKanbanBoardSetup(
     multiSelectSteps,
     effectiveWorkflowId,
     effectiveSteps,
-    setMobileWorkflowFocusId,
     refresh,
   };
 }
@@ -475,7 +472,6 @@ export function KanbanBoard({ onPreviewTask, onOpenTask, onBeforeEdit }: KanbanB
         isMultiSelectMode={s.multiSelect.isMultiSelectMode}
         onToggleMultiSelect={s.multiSelect.toggleMultiSelect}
         onWorkflowChange={s.handleWorkflowChange}
-        onMobileWorkflowFocusChange={s.setMobileWorkflowFocusId}
         isMobile={s.isMobile}
         onRefresh={s.refresh}
       />

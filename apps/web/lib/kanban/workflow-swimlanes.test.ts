@@ -63,6 +63,29 @@ describe("selectMobileNavigatorWorkflows — mobile board navigator options", ()
     ).toEqual(["dev"]);
   });
 
+  it("keeps a hidden workflow whose live steps are all hidden", () => {
+    type NavigatorSelectorWithHiddenSteps = (
+      visibleWorkflows: typeof visibleOrdered,
+      allWorkflows: typeof workflows,
+      getTasks: (workflowId: string) => unknown[],
+      hasLiveHiddenSteps: (workflowId: string) => boolean,
+    ) => Array<{ workflow: (typeof workflows)[number]; tasks: unknown[] }>;
+
+    // The fourth argument is the regression contract. The cast keeps this
+    // test executable before the implementation grows that argument, so the
+    // red phase fails on the assertion rather than on TypeScript arity.
+    const selectWithHiddenSteps =
+      selectMobileNavigatorWorkflows as unknown as NavigatorSelectorWithHiddenSteps;
+    const entries = selectWithHiddenSteps(
+      visibleOrdered,
+      workflows,
+      noTasks,
+      (workflowId) => workflowId === "improve",
+    );
+
+    expect(entries.map((entry) => entry.workflow.id)).toEqual(["dev", "improve"]);
+  });
+
   it("returns the filtered tasks alongside each workflow so callers reuse the result", () => {
     const entries = selectMobileNavigatorWorkflows(visibleOrdered, workflows, tasks);
     expect(entries.find((entry) => entry.workflow.id === "improve")?.tasks).toEqual([{ id: "t1" }]);

@@ -161,8 +161,9 @@ presentational component, and neither ever shows more than one workflow.
 ### Exactly one home at a time
 At most one of the two renders the control at any breakpoint, by construction: the
 lane header is suppressed exactly where the drawer takes over. Build SHALL NOT render
-both, and SHALL NOT introduce shared state between them — the control is stateless
-apart from the persisted hidden set, so there is nothing to hand over.
+both. The control is stateless apart from the persisted hidden set; the phone lane
+focus is published through the existing global mobile-kanban focus bridge so the
+drawer and board address the same workflow without maintaining a second local copy.
 
 ## Lane reachability (the recoverability rule)
 Because the control lives on the lane, the lane must survive the state the control
@@ -170,7 +171,7 @@ creates. R1 solved this by making the global list offer *eligible* rather than
 *rendered* workflows; R2 solves it at the render seam instead, with one rule:
 
 - **A workflow with a non-empty live hidden set SHALL NOT be dropped from the board.**
-  `getVisibleWorkflows` (`apps/web/components/kanban/swimlane-container.tsx:389`)
+  `selectVisibleWorkflows` (`apps/web/lib/kanban/workflow-swimlanes.ts`)
   currently drops, in All-Workflows view, every workflow whose filtered task list is
   empty. It SHALL additionally retain any workflow for which
   `hiddenWorkflowStepIds[workflowId] ∩ liveStepIds` is non-empty, so that workflow's
@@ -423,11 +424,12 @@ task-switcher menu.
   includes it replaces it wholesale. This matches how the Repository and Workflow
   filters already behave. No merge of individual step ids across concurrent
   writers is attempted.
-- The two homes cannot race: at most one renders at any breakpoint, and neither holds
-  state. IF the viewport crosses the 768px boundary while a toggle's persist request is
-  in flight, THEN the request completes normally — it is owned by
-  `useUserDisplaySettings`, not by either home — and the newly mounted home renders from
-  the store. No debounce, no cancellation, no new state.
+- The two homes cannot race: at most one renders at any breakpoint, and the only
+  transient coordination value is the shared mobile-kanban focus. IF the viewport
+  crosses the 768px boundary while a toggle's persist request is in flight, THEN the
+  request completes normally — it is owned by `useUserDisplaySettings`, not by either
+  home — and the newly mounted home renders from the store. No debounce and no
+  cancellation are introduced.
 
 ## Nil / empty / error / defaults / boundary
 - **Default (fresh user, no map):** `hiddenWorkflowStepIds` is `{}`; the board is
@@ -443,7 +445,7 @@ task-switcher menu.
   the same rule, each rendering a header and zero columns. The board is visibly empty of
   cards but every Columns menu is present, so the state is fully reversible. The
   pre-existing "No tasks yet" empty state is NOT shown in this case, because
-  `getVisibleWorkflows` returned a non-empty list.
+  `selectVisibleWorkflows` returned a non-empty list.
 - **Workflow with zero visible tasks and an EMPTY hidden set:** dropped in
   All-Workflows view exactly as today. Unchanged by this feature.
 - **Orphan tasks interacting with the hidden set:** a task whose `workflowStepId`
@@ -574,7 +576,7 @@ focused workflow, verify the phone board result, and assert row height ≥ 44px 
 
 Vitest coverage SHALL include: the hidden-set normalisation in
 `use-user-display-settings.test.ts`, the retention rule in
-`swimlane-container.test.ts` (or the file that owns `getVisibleWorkflows` after any
+`workflow-swimlanes.test.ts` (or the file that owns `selectVisibleWorkflows` after any
 move), the bulk-move filter, and the shared menu component's ordering and checked
 state.
 

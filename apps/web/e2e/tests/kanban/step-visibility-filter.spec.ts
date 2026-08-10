@@ -73,7 +73,7 @@ test.describe("Kanban step visibility filter", () => {
     // Workflow A needs a SECOND step holding a second task so that hiding the
     // start step does not zero out workflow A's whole task count — otherwise
     // the pre-existing "drop workflows with zero visible tasks" logic in
-    // getVisibleWorkflows would remove the entire swimlane, and the test
+    // selectVisibleWorkflows would remove the entire swimlane, and the test
     // could not tell that apart from the per-step column-collapse code
     // actually working (see spec.md's dual-filter contract).
     const secondStepA = await apiClient.createWorkflowStep(seedData.workflowId, "Doing (A)", 1);
@@ -289,7 +289,7 @@ test.describe("Kanban step visibility filter", () => {
     await toggleColumns(kanban, workflowAId, [startStepAId, secondStepAId]);
 
     // Workflow A has zero visible tasks. Before R2 it was dropped from the
-    // swimlane list by getVisibleWorkflows — which also removed the only
+    // swimlane list by selectVisibleWorkflows — which also removed the only
     // control that could undo the hide. Its lane is now RETAINED because its
     // live hidden set is non-empty: the columns and tasks are gone, the lane
     // and its Columns trigger are not.
@@ -314,6 +314,40 @@ test.describe("Kanban step visibility filter", () => {
       timeout: TASK_VISIBLE_TIMEOUT,
     });
     await expect(kanban.taskCardByTitle(TASK_A)).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
+  });
+
+  test("AC-08b: All Workflows keeps retained lanes when every visible task is hidden", async ({
+    testPage,
+  }) => {
+    if (!workflowAId || !workflowBId || !startStepAId || !secondStepAId || !startStepBId) {
+      throw new Error("step IDs not set");
+    }
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    // Switch to All Workflows so both retained lanes are eligible for the
+    // empty-state decision.
+    await testPage.getByTestId("display-button").click();
+    await testPage.getByTestId("display-workflow-filter").click();
+    const listbox = testPage.getByRole("listbox");
+    await listbox.getByRole("option", { name: "All Workflows", exact: true }).click();
+    await expect(listbox).toHaveCount(0);
+    await closeDisplayDropdown(kanban);
+
+    // Hide every live column in both workflows. The board still needs to
+    // render both lane headers, because each Columns menu is the only route
+    // back to the hidden steps.
+    await toggleColumns(kanban, workflowAId, [startStepAId, secondStepAId]);
+    await toggleColumns(kanban, workflowBId, [startStepBId]);
+
+    await expect(kanban.board.getByText("No tasks yet")).toHaveCount(0);
+    await expect(testPage.getByTestId(`columns-menu-${workflowAId}`)).toBeVisible({
+      timeout: TASK_VISIBLE_TIMEOUT,
+    });
+    await expect(testPage.getByTestId(`columns-menu-${workflowBId}`)).toBeVisible({
+      timeout: TASK_VISIBLE_TIMEOUT,
+    });
   });
 
   test("AC-09: hiding every step of the selected single workflow renders zero columns without the empty-state message", async ({

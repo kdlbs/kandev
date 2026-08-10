@@ -28,13 +28,15 @@ export function selectWorkflowSwimlanes(
  * the only workflow switcher on the mobile kanban page (the display menu hides
  * its workflow select there), so hidden workflows with tasks — e.g. Improve
  * Kandev, whose tasks land in a hidden workflow — must be reachable, mirroring
- * the sidebar which already aggregates their snapshots. Empty hidden system
- * workflows stay out.
+ * the sidebar which already aggregates their snapshots. A hidden workflow with
+ * live hidden columns must also stay reachable so its columns can be restored.
+ * Empty hidden system workflows stay out.
  */
 export function selectMobileNavigatorWorkflows(
   visibleOrdered: WorkflowLike[],
   workflows: WorkflowLike[],
   getFilteredTasks: (workflowId: string) => unknown[],
+  hasLiveHiddenSteps: (workflowId: string) => boolean = () => false,
 ): Array<{ workflow: WorkflowLike; tasks: unknown[] }> {
   const visibleIds = new Set(visibleOrdered.map((workflow) => workflow.id));
   const entries: Array<{ workflow: WorkflowLike; tasks: unknown[] }> = [];
@@ -44,7 +46,9 @@ export function selectMobileNavigatorWorkflows(
   for (const workflow of workflows) {
     if (!workflow.hidden || visibleIds.has(workflow.id)) continue;
     const tasks = getFilteredTasks(workflow.id);
-    if (tasks.length > 0) entries.push({ workflow, tasks });
+    if (tasks.length > 0 || hasLiveHiddenSteps(workflow.id)) {
+      entries.push({ workflow, tasks });
+    }
   }
   return entries;
 }
