@@ -273,12 +273,14 @@ export async function openDesktopFile(
   // Git status updates can auto-activate the Changes panel just after the
   // file tree renders. Re-select Files and click only while the row is still
   // visible so a late panel switch cannot turn a successful visibility check
-  // into a 180-second click timeout.
+  // into a 180-second click timeout. Executor startup toasts can cover the
+  // dockview tab, so force that tab activation and keep the file-row click
+  // user-facing and actionability checked.
   await expect
     .poll(
       async () => {
         try {
-          await session.clickTab("Files");
+          await session.clickTab("Files", { force: true });
           if (!(await fileNode.isVisible())) return false;
           await fileNode.click({ timeout: 2_000 });
           return true;

@@ -901,13 +901,13 @@ export class SessionPage {
   }
 
   /** Click a dockview tab by its visible label (e.g. "Changes", "Files", "Terminal"). */
-  async clickTab(label: string): Promise<void> {
+  async clickTab(label: string, options: { force?: boolean } = {}): Promise<void> {
     const tab = this.page
       .locator(".dv-default-tab:visible")
       .filter({ hasText: new RegExp(`^${escapeRegExp(label)}(?: \\(\\d+\\))?$`) })
       .first();
     await expect(tab).toBeVisible();
-    await tab.click();
+    await tab.click(options);
   }
 
   /**

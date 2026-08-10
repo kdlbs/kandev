@@ -25,6 +25,14 @@ test.describe("Mobile config chat popover", () => {
       const surface = floatingSave.getByTestId("settings-floating-save-surface");
       const configChatPopover = testPage.getByTestId("config-chat-popover");
       await expect(configChatPopover).toBeVisible();
+      // The save action is portaled into the popover, whose open animation can
+      // temporarily scale its descendants below the 44px touch target.
+      await expect
+        .poll(async () => (await saveButton.boundingBox())?.height ?? 0, {
+          timeout: 10_000,
+          intervals: [100, 250, 500],
+        })
+        .toBeGreaterThanOrEqual(44);
 
       const [saveBox, chatBox, surfaceBox] = await Promise.all([
         saveButton.boundingBox(),
