@@ -34,6 +34,77 @@ test.describe("Forgejo settings", () => {
     await assertNoDocumentHorizontalOverflow(testPage, "mobile Forgejo settings");
   });
 
+  test("connects and disconnects a workspace-scoped Forgejo configuration", async ({
+    testPage,
+    seedData,
+  }) => {
+    let saved = false;
+    let savedPayload: Record<string, unknown> | null = null;
+    await testPage.route("**/api/v1/forgejo/config?*", async (route) => {
+      switch (route.request().method()) {
+        case "PUT":
+          savedPayload = route.request().postDataJSON() as Record<string, unknown>;
+          saved = true;
+          await route.fulfill({
+            contentType: "application/json",
+            body: JSON.stringify({
+              workspace_id: seedData.workspaceId,
+              origin: savedPayload.origin,
+              username: "alice",
+              has_secret: true,
+              has_webhook_secret: false,
+              last_ok: true,
+              created_at: "",
+              updated_at: "",
+            }),
+          });
+          return;
+        case "DELETE":
+          saved = false;
+          await route.fulfill({
+            contentType: "application/json",
+            body: JSON.stringify({ deleted: true }),
+          });
+          return;
+        default:
+          if (!saved) {
+            await route.fulfill({ status: 204 });
+            return;
+          }
+          await route.fulfill({
+            contentType: "application/json",
+            body: JSON.stringify({
+              workspace_id: seedData.workspaceId,
+              origin: "https://forgejo.example",
+              username: "alice",
+              has_secret: true,
+              has_webhook_secret: false,
+              last_ok: true,
+              created_at: "",
+              updated_at: "",
+            }),
+          });
+      }
+    });
+
+    await gotoForgejoSettings(testPage);
+    await testPage.getByTestId("forgejo-origin-input").fill("https://forgejo.example");
+    await testPage.getByTestId("forgejo-token-input").fill("forgejo-token");
+    await testPage.getByRole("button", { name: "Save connection" }).click();
+    await expect
+      .poll(() => savedPayload)
+      .toMatchObject({
+        origin: "https://forgejo.example",
+        token: "forgejo-token",
+      });
+    await expect(testPage.getByText("Saved connection for alice")).toBeVisible();
+    await expect(testPage.getByRole("button", { name: "Disconnect" })).toBeVisible();
+
+    await testPage.getByRole("button", { name: "Disconnect" }).click();
+    await expect(testPage.getByText("Forgejo disconnected from this workspace")).toBeVisible();
+    await expect(testPage.getByRole("button", { name: "Disconnect" })).not.toBeVisible();
+  });
+
   test("saves and polls an issue watch with task workflow context", async ({
     testPage,
     seedData,
@@ -202,6 +273,7 @@ test.describe("Forgejo task links", () => {
     apiClient,
     seedData,
   }) => {
+    let createPayload: Record<string, unknown> | null = null;
     const task = await apiClient.createTask(seedData.workspaceId, "Forgejo task PR", {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
@@ -235,6 +307,29 @@ test.describe("Forgejo task links", () => {
         body: JSON.stringify({ pull_requests: [] }),
       }),
     );
+    await testPage.route("**/api/v1/forgejo/task-pull-requests/create?*", async (route) => {
+      createPayload = route.request().postDataJSON() as Record<string, unknown>;
+      await route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({
+          id: "pr-link-e2e",
+          task_id: task.id,
+          origin: "https://forgejo.example",
+          owner: "acme",
+          repo: "app",
+          pr_number: 9,
+          pr_url: "https://forgejo.example/acme/app/pulls/9",
+          pr_title: "Forgejo task PR",
+          head_branch: "feat/forgejo-e2e",
+          base_branch: "main",
+          state: "open",
+          draft: false,
+          mergeable: true,
+          ci_state: "",
+        }),
+      });
+    });
 
     await testPage.goto(`/t/${task.id}`);
     await expect(testPage.getByTestId("forgejo-task-links-button")).toBeVisible();
@@ -245,5 +340,17 @@ test.describe("Forgejo task links", () => {
     await expect(dialog).toBeVisible();
     await expect(dialog.getByLabel("Source branch")).toHaveValue("feat/forgejo-e2e");
     await expect(dialog.getByLabel("Base branch")).toHaveValue("main");
+    await dialog.getByLabel("Owner").fill("acme");
+    await dialog.getByLabel("Repository").fill("app");
+    await dialog.getByRole("button", { name: "Create pull request" }).click();
+    await expect
+      .poll(() => createPayload)
+      .toMatchObject({
+        task_id: task.id,
+        owner: "acme",
+        repo: "app",
+        head: "feat/forgejo-e2e",
+        base: "main",
+      });
   });
 });
