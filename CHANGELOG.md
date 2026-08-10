@@ -2,6 +2,29 @@
 
 All notable changes to Kandev.
 
+## 0.86.1 - 2026-08-10
+
+### Features
+
+- move make dev to the native Go launcher ([#2411](https://github.com/kdlbs/kandev/pull/2411))
+
+### Bug Fixes
+
+- preserve flat owner over terminal history ([#2505](https://github.com/kdlbs/kandev/pull/2505)) ([#2506](https://github.com/kdlbs/kandev/pull/2506))
+- keep a PR watch per branch so multi-branch automation works ([#2504](https://github.com/kdlbs/kandev/pull/2504))
+- scope task state, move and delete to the calling user ([#2503](https://github.com/kdlbs/kandev/pull/2503))
+- serialize workspace stream websocket writes ([#2502](https://github.com/kdlbs/kandev/pull/2502))
+- allow git pull --rebase past the flag allowlist ([#2501](https://github.com/kdlbs/kandev/pull/2501))
+- copy the watch handed to the initial-check goroutine ([#2492](https://github.com/kdlbs/kandev/pull/2492))
+- separate debug and development launch profiles ([#2487](https://github.com/kdlbs/kandev/pull/2487))
+- normalize OMP shell command output ([#2480](https://github.com/kdlbs/kandev/pull/2480)) ([#2486](https://github.com/kdlbs/kandev/pull/2486))
+- preserve Homebrew formula version ([#2488](https://github.com/kdlbs/kandev/pull/2488))
+- re-run bootstrap when the dialog reopens ([#2484](https://github.com/kdlbs/kandev/pull/2484)) by @Fclem
+
+### Refactoring
+
+- split execution creation ([#2382](https://github.com/kdlbs/kandev/pull/2382)) ([#2485](https://github.com/kdlbs/kandev/pull/2485))
+
 ## 0.86.0 - 2026-08-10
 
 ### Features
