@@ -5,26 +5,21 @@ import { DropdownMenuCheckboxItem } from "@kandev/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 
-type SavedQueryDefaultButtonProps = {
+type SavedQueryDefaultControlProps = {
   label: string;
   isDefault: boolean;
   disabled?: boolean;
   pending?: boolean;
-  /** `dropdown-item` must render inside Radix `DropdownMenuContent`. */
-  variant: "dropdown-item" | "button";
   testId?: string;
   onToggle: () => void;
 };
 
-export function SavedQueryDefaultButton({
-  label,
-  isDefault,
-  disabled = false,
-  pending = false,
-  variant,
-  testId,
-  onToggle,
-}: SavedQueryDefaultButtonProps) {
+function useSavedQueryDefaultPresentation(
+  label: string,
+  isDefault: boolean,
+  disabled: boolean,
+  pending: boolean,
+) {
   const { t } = useTranslation();
   const actionLabel = t(
     isDefault
@@ -32,33 +27,64 @@ export function SavedQueryDefaultButton({
       : "integrations:setSavedQueryAsDefaultView",
     { label },
   );
-  const accessibleLabel = disabled
-    ? t("integrations:savedQueryDefaultUpdateInProgress", { action: actionLabel })
-    : actionLabel;
-  const iconClassName = cn(
-    "h-4 w-4",
-    isDefault && "fill-amber-500 text-amber-500",
-    pending && !isDefault && "fill-amber-500 text-amber-500 opacity-60",
-    pending && "animate-pulse motion-reduce:animate-none",
-  );
-  if (variant === "dropdown-item") {
-    return (
-      <DropdownMenuCheckboxItem
-        checked={isDefault}
-        disabled={disabled}
-        aria-label={accessibleLabel}
-        title={accessibleLabel}
-        data-testid={testId}
-        onSelect={(event) => event.preventDefault()}
-        onCheckedChange={() => onToggle()}
-        showIndicator={false}
-        className="h-7 min-h-7 w-7 shrink-0 cursor-pointer justify-center p-0 text-muted-foreground hover:text-foreground"
-      >
-        <IconStar className={iconClassName} />
-      </DropdownMenuCheckboxItem>
-    );
-  }
+  return {
+    accessibleLabel: disabled
+      ? t("integrations:savedQueryDefaultUpdateInProgress", { action: actionLabel })
+      : actionLabel,
+    iconClassName: cn(
+      "h-4 w-4",
+      isDefault && "fill-amber-500 text-amber-500",
+      pending && !isDefault && "fill-amber-500 text-amber-500 opacity-60",
+      pending && "animate-pulse motion-reduce:animate-none",
+    ),
+  };
+}
 
+export function SavedQueryDefaultDropdownItem({
+  label,
+  isDefault,
+  disabled = false,
+  pending = false,
+  testId,
+  onToggle,
+}: SavedQueryDefaultControlProps) {
+  const { accessibleLabel, iconClassName } = useSavedQueryDefaultPresentation(
+    label,
+    isDefault,
+    disabled,
+    pending,
+  );
+  return (
+    <DropdownMenuCheckboxItem
+      checked={isDefault}
+      disabled={disabled}
+      aria-label={accessibleLabel}
+      title={accessibleLabel}
+      data-testid={testId}
+      onSelect={(event) => event.preventDefault()}
+      onCheckedChange={() => onToggle()}
+      showIndicator={false}
+      className="h-7 min-h-7 w-7 shrink-0 cursor-pointer justify-center p-0 text-muted-foreground hover:text-foreground"
+    >
+      <IconStar className={iconClassName} />
+    </DropdownMenuCheckboxItem>
+  );
+}
+
+export function SavedQueryDefaultButton({
+  label,
+  isDefault,
+  disabled = false,
+  pending = false,
+  testId,
+  onToggle,
+}: SavedQueryDefaultControlProps) {
+  const { accessibleLabel, iconClassName } = useSavedQueryDefaultPresentation(
+    label,
+    isDefault,
+    disabled,
+    pending,
+  );
   return (
     <button
       type="button"

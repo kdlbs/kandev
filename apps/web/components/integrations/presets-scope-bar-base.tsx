@@ -11,7 +11,7 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
-import { SavedQueryDefaultButton } from "./saved-query-default-button";
+import { SavedQueryDefaultDropdownItem } from "./saved-query-default-button";
 
 /**
  * Shared, domain-agnostic scope bar for the integration dashboards (/github,
@@ -158,12 +158,11 @@ function SavedMenu<K extends string>({
                 <span className="flex-1 truncate">{s.label}</span>
               </DropdownMenuItem>
               {onToggleSavedDefault && (
-                <SavedQueryDefaultButton
+                <SavedQueryDefaultDropdownItem
                   label={s.label}
                   isDefault={s.isDefault === true}
                   disabled={defaultMutationPending}
                   pending={defaultMutationPendingId === s.id}
-                  variant="dropdown-item"
                   testId={`saved-query-default-${s.id}`}
                   onToggle={() => onToggleSavedDefault(s.id)}
                 />

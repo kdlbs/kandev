@@ -180,7 +180,6 @@ function SavedSection({
                 isDefault={s.isDefault}
                 disabled={defaultMutationPending}
                 pending={defaultMutationPendingId === s.id}
-                variant="button"
                 testId={`github-saved-query-default-${s.id}`}
                 onToggle={() => void onToggleSavedDefault(s)}
               />
