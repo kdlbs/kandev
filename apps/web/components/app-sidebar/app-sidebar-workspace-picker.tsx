@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  forwardRef,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type ComponentPropsWithoutRef,
-} from "react";
+import { forwardRef, useCallback, useState, type ComponentPropsWithoutRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useRouter } from "@/lib/routing/client-router";
 import {
@@ -119,17 +112,15 @@ function useMenuOpenState(controlledOpen?: boolean, onOpenChange?: (open: boolea
 }
 
 function useProgrammaticMenuFocus(open: boolean | undefined) {
-  const contentRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const frame = window.requestAnimationFrame(() => {
-      contentRef.current?.focus({ preventScroll: true });
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [open]);
-
-  return contentRef;
+  return useCallback(
+    (content: HTMLDivElement | null) => {
+      if (!open || !content) return;
+      window.requestAnimationFrame(() => {
+        if (content.isConnected) content.focus({ preventScroll: true });
+      });
+    },
+    [open],
+  );
 }
 
 function workspaceType(workspace: WorkspaceItem | undefined): WorkspaceType {
