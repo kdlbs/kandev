@@ -23,6 +23,7 @@ func RegisterRoutes(router *gin.Engine, service *Service) {
 	api.GET("/repositories", controller.listRepositories)
 	api.GET("/issues", controller.listIssues)
 	api.GET("/pull-requests", controller.listPullRequests)
+	api.GET("/pull-request-details", controller.getPullRequestDetails)
 	api.GET("/queue", controller.listQueue)
 	api.POST("/connection/refresh", controller.refreshConnection)
 	api.GET("/issue-watches", controller.listIssueWatches)
@@ -160,6 +161,20 @@ func (c *Controller) listPullRequests(ctx *gin.Context) {
 	}
 	ctx.Header("X-Total-Count", strconv.Itoa(total))
 	ctx.JSON(http.StatusOK, gin.H{"pull_requests": pulls, "total_count": total})
+}
+
+func (c *Controller) getPullRequestDetails(ctx *gin.Context) {
+	number, err := strconv.Atoi(ctx.Query("number"))
+	if err != nil || number < 1 || strings.TrimSpace(ctx.Query("owner")) == "" || strings.TrimSpace(ctx.Query("repo")) == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "owner, repo, and positive number are required"})
+		return
+	}
+	details, err := c.service.GetPullRequestDetails(ctx.Request.Context(), c.workspaceID(ctx), strings.TrimSpace(ctx.Query("owner")), strings.TrimSpace(ctx.Query("repo")), number)
+	if err != nil {
+		c.error(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, details)
 }
 
 func (c *Controller) listTaskIssues(ctx *gin.Context) {

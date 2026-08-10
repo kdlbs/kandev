@@ -14,6 +14,7 @@ import (
 var (
 	ErrWorkspaceRequired = errors.New("forgejo: workspace_id required")
 	ErrNotConfigured     = errors.New("forgejo: workspace not configured")
+	ErrUnsupported       = errors.New("forgejo: capability unavailable on this Forgejo client")
 )
 
 type Config struct {
@@ -283,6 +284,46 @@ func (s *Service) ListPullRequests(ctx context.Context, workspaceID, owner, repo
 		return nil, 0, err
 	}
 	return client.ListPullRequests(ctx, owner, repo, page, limit)
+}
+
+type PullRequestDetails struct {
+	PullRequest *PullRequest         `json:"pull_request"`
+	Commits     []PullRequestCommit  `json:"commits"`
+	Files       []PullRequestFile    `json:"files"`
+	Comments    []PullRequestComment `json:"comments"`
+	Reviews     []PullRequestReview  `json:"reviews"`
+}
+
+func (s *Service) GetPullRequestDetails(ctx context.Context, workspaceID, owner, repo string, number int) (*PullRequestDetails, error) {
+	client, err := s.ClientForWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	detailsClient, ok := client.(PullRequestDetailsClient)
+	if !ok {
+		return nil, ErrUnsupported
+	}
+	pull, err := client.GetPullRequest(ctx, owner, repo, number)
+	if err != nil {
+		return nil, err
+	}
+	commits, err := detailsClient.ListPullRequestCommits(ctx, owner, repo, number)
+	if err != nil {
+		return nil, err
+	}
+	files, err := detailsClient.ListPullRequestFiles(ctx, owner, repo, number)
+	if err != nil {
+		return nil, err
+	}
+	comments, err := detailsClient.ListPullRequestComments(ctx, owner, repo, number)
+	if err != nil {
+		return nil, err
+	}
+	reviews, err := detailsClient.ListPullRequestReviews(ctx, owner, repo, number)
+	if err != nil {
+		return nil, err
+	}
+	return &PullRequestDetails{PullRequest: pull, Commits: commits, Files: files, Comments: comments, Reviews: reviews}, nil
 }
 
 type QueueIssue struct {
