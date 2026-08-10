@@ -198,27 +198,48 @@ async function expectStaleDeleteOutcomeIgnored() {
   expect(setRepoFilter).not.toHaveBeenCalled();
 }
 
-async function expectStaleDefaultOutcomeIgnored() {
-  let finishDefault!: () => void;
+async function expectDefaultPendingScopedToWorkspace() {
+  let finishFirst!: () => void;
+  let finishSecond!: () => void;
   const setDefault = vi.fn(
     () =>
       new Promise<boolean>((resolve) => {
-        finishDefault = () => resolve(true);
+        const finish = () => resolve(true);
+        if (setDefault.mock.calls.length === 1) finishFirst = finish;
+        else finishSecond = finish;
       }),
   );
   const { result, rerender, markSearchInteracted } = renderActions({}, makeStore({ setDefault }));
 
-  let mutation!: Promise<void>;
+  let firstMutation!: Promise<void>;
   act(() => {
-    mutation = result.current.onToggleSavedDefault(savedPreset);
+    firstMutation = result.current.onToggleSavedDefault(savedPreset);
   });
-  rerender({ workspaceId: SECOND_WORKSPACE_ID });
-  await act(async () => {
-    finishDefault();
-    await mutation;
-  });
+  expect(result.current.defaultMutationPending).toBe(true);
 
+  rerender({ workspaceId: SECOND_WORKSPACE_ID });
+  expect(result.current.defaultMutationPending).toBe(false);
+
+  let secondMutation!: Promise<void>;
+  act(() => {
+    secondMutation = result.current.onToggleSavedDefault(savedPreset);
+  });
+  expect(setDefault).toHaveBeenCalledTimes(2);
+  expect(result.current.defaultMutationPending).toBe(true);
+
+  await act(async () => {
+    finishFirst();
+    await firstMutation;
+  });
   expect(markSearchInteracted).not.toHaveBeenCalled();
+  expect(result.current.defaultMutationPending).toBe(true);
+
+  await act(async () => {
+    finishSecond();
+    await secondMutation;
+  });
+  expect(markSearchInteracted).toHaveBeenCalledOnce();
+  expect(result.current.defaultMutationPending).toBe(false);
 }
 
 beforeEach(() => {
@@ -425,10 +446,7 @@ describe("useSavedPresetActions default deletion", () => {
 });
 
 describe("useSavedPresetActions default actions", () => {
-  it(
-    "ignores a completed default toggle after changing workspace",
-    expectStaleDefaultOutcomeIgnored,
-  );
+  it("scopes pending default toggles to their workspace", expectDefaultPendingScopedToWorkspace);
 
   it("keeps action handlers stable across unchanged renders", () => {
     const { result, rerender } = renderActions();

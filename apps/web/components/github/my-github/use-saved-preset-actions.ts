@@ -175,9 +175,10 @@ export function useSavedPresetActions({
 }: SavedPresetActionsOptions) {
   const { t } = useTranslation();
   const { toast } = useToast();
-  const [defaultMutationPending, setDefaultMutationPending] = useState(false);
-  const defaultMutationPendingRef = useRef(false);
+  const [, setDefaultMutationVersion] = useState(0);
+  const pendingDefaultMutationsRef = useRef(new Map<WorkspaceId, symbol>());
   const isCurrentWorkspace = useIsCurrentWorkspace(workspaceId);
+  const defaultMutationPending = pendingDefaultMutationsRef.current.has(workspaceId);
   const {
     presets: savedPresets,
     save: saveSavedPreset,
@@ -221,9 +222,11 @@ export function useSavedPresetActions({
 
   const onToggleSavedDefault = useCallback(
     async (preset: SavedPreset) => {
-      if (defaultMutationPendingRef.current) return;
-      defaultMutationPendingRef.current = true;
-      setDefaultMutationPending(true);
+      const pendingMutations = pendingDefaultMutationsRef.current;
+      if (pendingMutations.has(workspaceId)) return;
+      const mutationToken = Symbol();
+      pendingMutations.set(workspaceId, mutationToken);
+      setDefaultMutationVersion((version) => version + 1);
       try {
         const defaultId = preset.isDefault ? null : preset.id;
         const persisted = await setSavedPresetDefault(preset.kind, defaultId);
@@ -239,8 +242,12 @@ export function useSavedPresetActions({
           variant: "error",
         });
       } finally {
-        defaultMutationPendingRef.current = false;
-        setDefaultMutationPending(false);
+        if (pendingMutations.get(workspaceId) === mutationToken) {
+          pendingMutations.delete(workspaceId);
+          if (isCurrentWorkspace(workspaceId)) {
+            setDefaultMutationVersion((version) => version + 1);
+          }
+        }
       }
     },
     [isCurrentWorkspace, markSearchInteracted, setSavedPresetDefault, t, toast, workspaceId],
