@@ -1,5 +1,7 @@
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -73,61 +75,92 @@ export type ShardManifest = {
   shards: Shard[];
 };
 
-const SPEC_FILE = /\.spec\.ts$/;
+type PlaywrightListTest = { projectName?: unknown };
+type PlaywrightListSpec = { file?: unknown; tests?: unknown };
+type PlaywrightListSuite = { file?: unknown; specs?: unknown; suites?: unknown };
+type PlaywrightListReport = { suites: PlaywrightListSuite[] };
 
-function listFiles(root: string): string[] {
-  if (!fs.existsSync(root)) return [];
-  return fs.readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
-    const child = path.join(root, entry.name);
-    return entry.isDirectory() ? listFiles(child) : [child];
-  });
+const playwrightReportCache = new Map<string, PlaywrightListReport>();
+
+function asSuites(value: unknown): PlaywrightListSuite[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is PlaywrightListSuite =>
+        Boolean(entry && typeof entry === "object"),
+      )
+    : [];
 }
 
-function relativeTestFile(webRoot: string, filePath: string): string {
-  return normalizeReportPath(path.relative(webRoot, filePath));
-}
+function readPlaywrightListReport(webRoot: string): PlaywrightListReport {
+  const resolvedRoot = path.resolve(webRoot);
+  const cached = playwrightReportCache.get(resolvedRoot);
+  if (cached) return cached;
 
-function countTestDeclarations(contents: string): number {
-  const directMatches = contents.match(/\btest(?:\.(?:only|skip|fixme|fail))?\s*\(\s*["'`]/g);
-  const parameterizedMatches = contents.match(/\btest\.each\s*\([\s\S]*?\)\s*\(\s*["'`]/g);
-  return Math.max(1, (directMatches?.length ?? 0) + (parameterizedMatches?.length ?? 0));
-}
-
-function isMobileFile(file: string): boolean {
-  return /(^|\/)mobile-[^/]+\.spec\.ts$/.test(file);
-}
-
-function isContainerFile(file: string): boolean {
-  return /^(tests\/(docker|ssh)\/)/.test(file);
-}
-
-function isExcludedFromNormalChromium(file: string): boolean {
-  return (
-    isMobileFile(file) ||
-    isContainerFile(file) ||
-    /(^|\/)office-routing-[^/]+\.spec\.ts$/.test(file) ||
-    /^tests\/auth\//.test(file)
+  const playwrightCli = createRequire(import.meta.url).resolve("@playwright/test/cli");
+  const output = execFileSync(
+    process.execPath,
+    [
+      playwrightCli,
+      "test",
+      "--config",
+      path.join(resolvedRoot, "e2e", "playwright.config.ts"),
+      "--project=chromium",
+      "--project=mobile-chrome",
+      "--project=containers",
+      "--list",
+      "--reporter=json",
+    ],
+    { cwd: resolvedRoot, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
   );
+  const parsed = JSON.parse(output) as { suites?: unknown };
+  const report = { suites: asSuites(parsed.suites) };
+  playwrightReportCache.set(resolvedRoot, report);
+  return report;
 }
 
-export function projectFilesForCohort(file: string, cohort: Cohort): string[] {
-  if (cohort === "containers") return isContainerFile(file) ? ["containers"] : [];
-  if (isMobileFile(file)) return ["mobile-chrome"];
-  return isExcludedFromNormalChromium(file) ? [] : ["chromium"];
+function collectSpecCounts(
+  specs: unknown,
+  suiteFile: unknown,
+  allowedProjects: ReadonlySet<string>,
+  counts: Map<string, { project: string; file: string; testCount: number }>,
+): void {
+  if (!Array.isArray(specs)) return;
+  for (const rawSpec of specs) {
+    if (!rawSpec || typeof rawSpec !== "object") continue;
+    const spec = rawSpec as PlaywrightListSpec;
+    const fileValue = typeof spec.file === "string" ? spec.file : suiteFile;
+    if (typeof fileValue !== "string") continue;
+    const file = normalizeReportPath(fileValue);
+    const tests = Array.isArray(spec.tests) ? spec.tests : [];
+    for (const rawTest of tests) {
+      if (!rawTest || typeof rawTest !== "object") continue;
+      const project = (rawTest as PlaywrightListTest).projectName;
+      if (typeof project !== "string" || !allowedProjects.has(project)) continue;
+      const id = `${project}::${file}`;
+      const current = counts.get(id);
+      counts.set(id, { project, file, testCount: (current?.testCount ?? 0) + 1 });
+    }
+  }
+}
+
+function collectPlaywrightCounts(
+  suites: PlaywrightListSuite[],
+  allowedProjects: ReadonlySet<string>,
+  counts: Map<string, { project: string; file: string; testCount: number }>,
+): void {
+  for (const suite of suites) {
+    collectSpecCounts(suite.specs, suite.file, allowedProjects, counts);
+    collectPlaywrightCounts(asSuites(suite.suites), allowedProjects, counts);
+  }
 }
 
 export function discoverTestCatalog(webRoot: string, cohort: Cohort): CatalogUnit[] {
-  const testsRoot = path.join(webRoot, "e2e", "tests");
-  return listFiles(testsRoot)
-    .filter((filePath) => SPEC_FILE.test(filePath))
-    .flatMap((filePath) => {
-      const file = relativeTestFile(webRoot, filePath);
-      const projects = projectFilesForCohort(file, cohort);
-      if (projects.length === 0) return [];
-      const testCount = countTestDeclarations(fs.readFileSync(filePath, "utf8"));
-      const fileHash = hashSourceFile(webRoot, file);
-      return projects.map((project) => ({ project, file, fileHash, testCount }));
-    })
+  const allowedProjects = new Set(
+    cohort === "containers" ? ["containers"] : ["chromium", "mobile-chrome"],
+  );
+  const counts = new Map<string, { project: string; file: string; testCount: number }>();
+  collectPlaywrightCounts(readPlaywrightListReport(webRoot).suites, allowedProjects, counts);
+  return [...counts.values()]
+    .map((unit) => ({ ...unit, fileHash: hashSourceFile(webRoot, unit.file) }))
     .sort((left, right) =>
       `${left.project}::${left.file}`.localeCompare(`${right.project}::${right.file}`),
     );
@@ -401,20 +434,22 @@ function runCli(): void {
   const outputDir = path.resolve(args["output-dir"] ?? path.join(webRoot, "e2e", "manifests"));
   const profile = args.profile ? readTimingProfile(path.resolve(args.profile)) : undefined;
   const generatedAt = args.generated ?? new Date().toISOString();
-  const normal = createShardPlan(discoverTestCatalog(webRoot, "normal"), {
+  const normalCatalog = discoverTestCatalog(webRoot, "normal");
+  const containerCatalog = discoverTestCatalog(webRoot, "containers");
+  const normal = createShardPlan(normalCatalog, {
     cohort: "normal",
     shardCount: NORMAL_SHARD_COUNT,
     profile,
     generatedAt,
   });
-  const containers = createShardPlan(discoverTestCatalog(webRoot, "containers"), {
+  const containers = createShardPlan(containerCatalog, {
     cohort: "containers",
     shardCount: CONTAINER_SHARD_COUNT,
     profile,
     generatedAt,
   });
-  validateShardManifest(normal, discoverTestCatalog(webRoot, "normal"));
-  validateShardManifest(containers, discoverTestCatalog(webRoot, "containers"));
+  validateShardManifest(normal, normalCatalog);
+  validateShardManifest(containers, containerCatalog);
   writePlans(outputDir, [normal, containers]);
   console.log(
     JSON.stringify(

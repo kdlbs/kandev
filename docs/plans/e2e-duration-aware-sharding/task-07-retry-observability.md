@@ -68,3 +68,6 @@ and predicted-versus-actual shard deltas. The report job uploads the retry and
 timing diagnostics and supports `fail_on_flaky=true` without changing normal
 PR retries. The focused retry-summary tests passed as part of the 15-test
 tooling run.
+Review remediation copies blob-internal retry resources into the retained
+diagnostics artifact, records the artifact name and run URL, and renders
+per-test retry/failure links in the GitHub job summary.

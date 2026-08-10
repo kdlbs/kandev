@@ -71,3 +71,6 @@ local dry-run produced 14 normal and 6 container manifests with complete
 catalog coverage; the containers cohort reported the Docker launch file as a
 dominant indivisible unit at 240 predicted seconds and 63.2% of its shard.
 The focused planner tests passed as part of the 15-test tooling run.
+Review remediation replaced source-regex counting with Playwright's discovered
+project/test catalog. The planner now matches all 2,103 discovered tests (1,989
+normal and 114 container tests after the new cleanup regression cases).

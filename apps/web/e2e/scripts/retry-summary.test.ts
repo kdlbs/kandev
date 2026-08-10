@@ -20,35 +20,46 @@ function observation(overrides: Partial<TimingObservation>): TimingObservation {
 
 describe("retry summary", () => {
   it("distinguishes first-attempt passes, passed retries, and failures", () => {
-    const summary = summarizeObservations([
-      observation({}),
-      observation({
-        key: "chromium::tests/flaky.spec.ts::flaky",
-        title: "flaky",
-        status: "failed",
-      }),
-      observation({
-        key: "chromium::tests/flaky.spec.ts::flaky",
-        title: "flaky",
-        retry: 1,
-        status: "passed",
-        durationSeconds: 2,
-        errors: [{ message: "temporary failure" }],
-      }),
-      observation({
-        key: "chromium::tests/slow.spec.ts::slow",
-        title: "slow",
-        status: "timedOut",
-        errors: [{ message: "Timeout 60000ms exceeded" }],
-      }),
-      observation({
-        key: "chromium::tests/terminal.spec.ts::terminal",
-        title: "terminal",
-        status: "failed",
-        errors: [{ message: "terminal failure" }],
-        attachments: [{ name: "trace", path: "test-results/trace.zip" }],
-      }),
-    ]);
+    const summary = summarizeObservations(
+      [
+        observation({}),
+        observation({
+          key: "chromium::tests/flaky.spec.ts::flaky",
+          title: "flaky",
+          status: "failed",
+        }),
+        observation({
+          key: "chromium::tests/flaky.spec.ts::flaky",
+          title: "flaky",
+          retry: 1,
+          status: "passed",
+          durationSeconds: 2,
+          errors: [{ message: "temporary failure" }],
+        }),
+        observation({
+          key: "chromium::tests/slow.spec.ts::slow",
+          title: "slow",
+          status: "timedOut",
+          errors: [{ message: "Timeout 60000ms exceeded" }],
+        }),
+        observation({
+          key: "chromium::tests/terminal.spec.ts::terminal",
+          title: "terminal",
+          status: "failed",
+          errors: [{ message: "terminal failure" }],
+          attachments: [{ name: "trace", path: "resources/trace.zip" }],
+        }),
+      ],
+      "2026-08-10T10:02:00.000Z",
+      {
+        attachmentArtifact: {
+          name: "e2e-timing-diagnostics",
+          url: "https://github.com/kdlbs/kandev/actions/runs/42#artifacts",
+          pathPrefix: "retry-artifacts",
+          availablePaths: new Set(["resources/trace.zip"]),
+        },
+      },
+    );
 
     expect(summary.counts).toEqual({
       passedFirstAttempt: 1,
@@ -68,7 +79,14 @@ describe("retry summary", () => {
           key: "chromium::tests/terminal.spec.ts::terminal",
           finalStatus: "failed",
           errorCategory: "failure",
-          attachments: [{ name: "trace", path: "test-results/trace.zip" }],
+          attachments: [
+            {
+              name: "trace",
+              path: "retry-artifacts/trace.zip",
+              artifactName: "e2e-timing-diagnostics",
+              artifactUrl: "https://github.com/kdlbs/kandev/actions/runs/42#artifacts",
+            },
+          ],
         }),
       ]),
     );

@@ -12,6 +12,29 @@ function createStoppedContainer(labels: string[]): string {
   return id;
 }
 
+test.describe.serial("process-scoped container cleanup", () => {
+  let previousTestContainer = "";
+
+  test.afterAll(() => {
+    if (previousTestContainer && dockerInspectExists(previousTestContainer)) {
+      dockerRemove(previousTestContainer);
+    }
+  });
+
+  test("allows a test to leave a process-owned container", () => {
+    previousTestContainer = createStoppedContainer([
+      "kandev.managed=true",
+      `kandev.e2e.run=${E2E_DOCKER_SCOPE}`,
+      "kandev.task_id=e2e-cleanup-boundary",
+    ]);
+    expect(dockerInspectExists(previousTestContainer)).toBe(true);
+  });
+
+  test("starts the next test without the previous process-owned container", () => {
+    expect(dockerInspectExists(previousTestContainer)).toBe(false);
+  });
+});
+
 test("removes only stopped Kandev-labeled containers and gates daemon-wide cleanup", async ({
   testPage,
   apiClient,

@@ -54,6 +54,21 @@ describe("duration-aware shard planning", () => {
     const webRoot = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-planner-"));
     const testDir = path.join(webRoot, "e2e", "tests", "chat");
     fs.mkdirSync(testDir, { recursive: true });
+    fs.symlinkSync(path.resolve("node_modules"), path.join(webRoot, "node_modules"), "dir");
+    fs.writeFileSync(
+      path.join(webRoot, "e2e", "playwright.config.ts"),
+      [
+        'import { defineConfig } from "@playwright/test";',
+        "export default defineConfig({",
+        '  testDir: "./tests",',
+        "  projects: [",
+        '    { name: "chromium", testIgnore: [/mobile-.*\\.spec\\.ts$/, /tests\\/(docker|ssh)\\//] },',
+        '    { name: "mobile-chrome", testMatch: /mobile-.*\\.spec\\.ts$/ },',
+        '    { name: "containers", testMatch: /tests\\/(docker|ssh)\\/.*\\.spec\\.ts$/ },',
+        "  ],",
+        "});",
+      ].join("\n"),
+    );
     fs.writeFileSync(
       path.join(testDir, "example.spec.ts"),
       [
@@ -62,7 +77,9 @@ describe("duration-aware shard planning", () => {
         "  test.beforeEach(async () => {});",
         '  test("works", async () => {});',
         '  test.skip("skipped", async () => {});',
-        '  test.each([[1]])("parameterized", async () => {});',
+        '  for (const name of ["generated one", "generated two"]) {',
+        "    test(name, async () => {});",
+        "  }",
         "});",
       ].join("\n"),
     );
@@ -71,7 +88,7 @@ describe("duration-aware shard planning", () => {
       expect.objectContaining({
         project: "chromium",
         file: "tests/chat/example.spec.ts",
-        testCount: 3,
+        testCount: 4,
         fileHash: expect.stringMatching(/^[a-f0-9]{64}$/),
       }),
     ]);

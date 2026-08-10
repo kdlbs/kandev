@@ -150,11 +150,19 @@ export const dockerTest = backendFixture.extend<
 // lazy fixture, so keeping reset there allowed tests that only request
 // apiClient/seedData to leave tasks and containers behind for the next test.
 dockerTest.beforeEach(async ({ apiClient, seedData }) => {
-  await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
+  try {
+    await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
+  } finally {
+    removeScopedKandevContainers();
+  }
 });
 
 dockerTest.afterEach(async ({ apiClient, seedData }) => {
-  await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
+  try {
+    await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
+  } finally {
+    removeScopedKandevContainers();
+  }
 });
 
 export { expect } from "@playwright/test";

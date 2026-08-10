@@ -1,8 +1,10 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   parseBlobReports,
+  findBlobReportFiles,
   readShardMetadata,
   type ShardMetadata,
   type TimingAttachment,
@@ -10,6 +12,11 @@ import {
   type TimingObservation,
   type TimingStatus,
 } from "./e2e-timings";
+
+export type RetryAttachment = TimingAttachment & {
+  artifactName?: string;
+  artifactUrl?: string;
+};
 
 export type RetryTestSummary = {
   key: string;
@@ -22,7 +29,7 @@ export type RetryTestSummary = {
   finalDurationSeconds: number;
   errorCategory: "none" | "failure" | "timeout" | "interrupted";
   errors: TimingError[];
-  attachments: TimingAttachment[];
+  attachments: RetryAttachment[];
 };
 
 export type RetrySummary = {
@@ -66,7 +73,29 @@ export type PlanSummaryInput = {
 export type RetrySummaryOptions = {
   shardMetadata?: ShardMetadata[];
   planSummaries?: PlanSummaryInput[];
+  attachmentArtifact?: {
+    name: string;
+    url: string;
+    pathPrefix: string;
+    availablePaths: ReadonlySet<string>;
+  };
 };
+
+function retryAttachment(
+  attachment: TimingAttachment,
+  artifact: RetrySummaryOptions["attachmentArtifact"],
+): RetryAttachment {
+  const resourcePath = attachment.path?.replaceAll("\\", "/");
+  if (!artifact || !resourcePath || !artifact.availablePaths.has(resourcePath)) {
+    return attachment;
+  }
+  return {
+    ...attachment,
+    path: `${artifact.pathPrefix}/${path.posix.basename(resourcePath)}`,
+    artifactName: artifact.name,
+    artifactUrl: artifact.url,
+  };
+}
 
 function planMode(planModes: PlanSummaryInput["profileMode"][]): RetrySummary["planning"]["mode"] {
   if (planModes.length === 0) return "unknown";
@@ -114,7 +143,11 @@ export function summarizeObservations(
         finalDurationSeconds: finalAttempt.durationSeconds,
         errorCategory: errorCategory(finalAttempt.status, errors),
         errors,
-        attachments: ordered.flatMap((attempt) => attempt.attachments),
+        attachments: ordered.flatMap((attempt) =>
+          attempt.attachments.map((attachment) =>
+            retryAttachment(attachment, options.attachmentArtifact),
+          ),
+        ),
       } satisfies RetryTestSummary;
     })
     .sort((left, right) => left.key.localeCompare(right.key));
@@ -212,14 +245,73 @@ function parseArguments(argv: string[]): Record<string, string> {
   return args;
 }
 
+function blobResourceLocations(inputPath: string): Map<string, string> {
+  const locations = new Map<string, string>();
+  for (const filePath of findBlobReportFiles(inputPath).filter((file) => file.endsWith(".zip"))) {
+    const entries = execFileSync("unzip", ["-Z1", filePath], { encoding: "utf8" })
+      .split(/\r?\n/)
+      .filter((entry) => /^resources\/[A-Za-z0-9._-]+$/.test(entry));
+    for (const entry of entries) {
+      if (!locations.has(entry)) locations.set(entry, filePath);
+    }
+  }
+  return locations;
+}
+
+export function materializeRetryArtifacts(
+  inputPath: string,
+  outputDir: string,
+  resourcePaths: Iterable<string>,
+): Set<string> {
+  const locations = blobResourceLocations(inputPath);
+  const available = new Set<string>();
+  for (const resourcePath of new Set(resourcePaths)) {
+    const sourceZip = locations.get(resourcePath);
+    if (!sourceZip) continue;
+    fs.mkdirSync(outputDir, { recursive: true });
+    const outputPath = path.join(outputDir, path.posix.basename(resourcePath));
+    const outputFd = fs.openSync(outputPath, "w");
+    try {
+      execFileSync("unzip", ["-p", sourceZip, resourcePath], {
+        stdio: ["ignore", outputFd, "pipe"],
+      });
+      available.add(resourcePath);
+    } finally {
+      fs.closeSync(outputFd);
+    }
+  }
+  return available;
+}
+
 function runCli(): void {
   const args = parseArguments(process.argv.slice(2));
   if (!args.input || !args.output) {
     throw new Error("Usage: retry-summary.ts --input <blob-dir> --output <summary.json>");
   }
-  const summary = summarizeObservations(parseBlobReports(args.input), new Date().toISOString(), {
+  const observations = parseBlobReports(args.input);
+  const attachmentOutput = args["attachment-output"];
+  const availablePaths = attachmentOutput
+    ? materializeRetryArtifacts(
+        args.input,
+        path.resolve(attachmentOutput),
+        observations.flatMap((observation) =>
+          observation.attachments.flatMap((attachment) => attachment.path ?? []),
+        ),
+      )
+    : new Set<string>();
+  const attachmentArtifact =
+    args["artifact-name"] && args["artifact-url"] && attachmentOutput
+      ? {
+          name: args["artifact-name"],
+          url: args["artifact-url"],
+          pathPrefix: path.basename(path.resolve(attachmentOutput)),
+          availablePaths,
+        }
+      : undefined;
+  const summary = summarizeObservations(observations, new Date().toISOString(), {
     shardMetadata: readShardMetadata(args.input),
     planSummaries: args["manifest-dir"] ? readPlanSummaries(args["manifest-dir"]!) : [],
+    attachmentArtifact,
   });
   fs.mkdirSync(path.dirname(path.resolve(args.output)), { recursive: true });
   fs.writeFileSync(args.output, `${JSON.stringify(summary, null, 2)}\n`);

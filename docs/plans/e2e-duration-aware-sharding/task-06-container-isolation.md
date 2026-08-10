@@ -67,3 +67,6 @@ Docker ownership now propagates from the E2E process into backend-created
 containers and storage accounting. The storage-maintenance test passed once
 and in two concurrent container processes; no managed containers remained
 afterward. Backend lifecycle/storage tests passed in the focused Go packages.
+Review remediation now runs process-scoped container removal after every API
+reset. A serial regression proves the following test cannot observe a scoped
+container left by its predecessor; all three storage-maintenance tests passed.

@@ -662,7 +662,10 @@ jobs:
           pnpm exec tsx e2e/scripts/retry-summary.ts \
             --input e2e/blob-reports \
             --output e2e/retry-summary.json \
-            --manifest-dir "$GITHUB_WORKSPACE/e2e-manifests"
+            --manifest-dir "$GITHUB_WORKSPACE/e2e-manifests" \
+            --attachment-output e2e/retry-artifacts \
+            --artifact-name e2e-timing-diagnostics \
+            --artifact-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID#artifacts"
 
       - name: Write E2E timing summary
         if: always()
@@ -674,6 +677,10 @@ jobs:
           if (!fs.existsSync(summaryPath)) process.exit(0);
           const summary = JSON.parse(fs.readFileSync(summaryPath, "utf8"));
           const counts = summary.counts;
+          const diagnosticTests = summary.tests.filter(
+            (test) => test.attempts > 1 || !["passed", "skipped"].includes(test.finalStatus),
+          );
+          const markdown = (value) => String(value).replaceAll("|", "\\|").replace(/\s+/g, " ");
           const lines = [
             "## E2E timing and retry summary",
             "",
@@ -705,6 +712,39 @@ jobs:
                 " |",
             ),
           ];
+          if (diagnosticTests.length > 0) {
+            lines.push(
+              "",
+              "### Retry and failure details",
+              "",
+              "| Test | Attempts | Final status | Error | Artifacts |",
+              "| --- | ---: | --- | --- | --- |",
+              ...diagnosticTests.map((test) => {
+                const links = test.attachments
+                  .map((attachment) =>
+                    attachment.artifactUrl
+                      ? "[" + markdown(attachment.name + " — " + attachment.path) + "](" +
+                        attachment.artifactUrl +
+                        ")"
+                      : markdown(attachment.name),
+                  )
+                  .join(", ");
+                return (
+                  "| `" +
+                  markdown(test.key) +
+                  "` | " +
+                  test.attempts +
+                  " | " +
+                  test.finalStatus +
+                  " | " +
+                  test.errorCategory +
+                  " | " +
+                  (links || "Not captured") +
+                  " |"
+                );
+              }),
+            );
+          }
           fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join("\n") + "\n");
           NODE
 
@@ -734,6 +774,7 @@ jobs:
           path: |
             apps/web/e2e/timing-profile.json
             apps/web/e2e/retry-summary.json
+            apps/web/e2e/retry-artifacts/
             apps/web/e2e/blob-reports/*metadata.json
           if-no-files-found: ignore
           retention-days: 14
