@@ -10,15 +10,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// mcpClarificationGuardedSourceFiles is the file that implements the MCP
+// mcpClarificationGuardedSourceFiles are the files that implement the MCP
 // clarification settle path AC-40b excludes: Handlers.setSessionWaitingForInput
 // and its callees (updateSessionWaitingForClarification,
 // updateClarificationSessionState), which write session state via the raw
 // repository interface and never enter package orchestrator's
 // updateTaskSessionStateWithHook — the one seam the parked-on-background-work
-// settle hook hangs off (docs/specs/parked-board-mvp/spec.md §7.2).
+// settle hook hangs off (docs/specs/parked-board-mvp/spec.md §7.2). Both of
+// spec §3's named callers of setSessionWaitingForInput are listed
+// (handlers.go:3296 and parent_question.go:158) — Review round 2 should-fix:
+// the guard originally scanned only handlers.go, leaving the second caller
+// unchecked.
 var mcpClarificationGuardedSourceFiles = []string{
 	"handlers.go",
+	"parent_question.go",
 }
 
 // TestMCPClarificationPathNeverReferencesParkedProjection is AC-40b's

@@ -366,3 +366,37 @@ func TestManager_ProbeProcessTree_BudgetElapsedResolvesToUnknown(t *testing.T) {
 	assert.Equal(t, probeResultUnknown, result, "an already-elapsed budget must resolve to unknown")
 	assert.Less(t, elapsed, 2*time.Second, "the probe must not block beyond a reasonable margin over its 1ns budget")
 }
+
+// TestManager_ProbeProcessTree_NoTurnStartRecordedResolvesToUnknown closes
+// V1-05's test debt (Review round 2 should-fix item 2): a session for which
+// RecordTurnStart has never been called (no prompt dispatched yet, so the
+// marker is turnStartMarker{}.isZero()) must resolve to "unknown" — never
+// "settled", and critically never "live". This is the one guard in
+// ProbeProcessTree that is load-bearing on Darwin specifically: Darwin
+// compares in the wall-clock domain, so a zero (unset) wallTime threshold
+// would make every real descendant's start time look ">= threshold" and
+// flip a never-armed probe to falsely "live" — the one outcome spec §10.4
+// says an error must never produce. Mirrors
+// TestManager_ProbeProcessTree_BudgetElapsedResolvesToUnknown's setup but
+// deliberately omits the RecordTurnStart call.
+func TestManager_ProbeProcessTree_NoTurnStartRecordedResolvesToUnknown(t *testing.T) {
+	const acpSessionID = "acp-session-no-turn-start"
+	cmd := exec.Command("/bin/sh", "-c", "sleep 30")
+	require.NoError(t, cmd.Start())
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+
+	root, ok := captureRootIdentity(cmd.Process.Pid)
+	require.True(t, ok, "expected to capture root identity for the running process")
+
+	m := &Manager{cmd: cmd, adapter: &fakeSessionAdapter{sessionID: acpSessionID}}
+	m.agentRootIdentity.Store(root)
+	// Deliberately no m.RecordTurnStart call — the marker stays zero.
+
+	result := m.ProbeProcessTree(context.Background(), acpSessionID)
+
+	assert.Equal(t, probeResultUnknown, result,
+		"a probe taken before any turn was ever recorded must resolve to unknown, never live or settled (V1-05)")
+}
