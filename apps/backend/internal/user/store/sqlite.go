@@ -569,6 +569,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"system_metrics_display":              settings.SystemMetricsDisplay,
 		"app_status_bar_order":                normalizeAppStatusBarOrder(settings.AppStatusBarOrder),
 		"voice_mode":                          settings.VoiceMode,
+		"kanban_hidden_step_ids":              settings.KanbanHiddenStepIDs,
 	})
 }
 
@@ -679,6 +680,7 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		SidebarTaskPrefs:                normalizeSidebarTaskPrefs(models.SidebarTaskPrefs{}),
 		AppStatusBarOrder:               normalizeAppStatusBarOrder(models.AppStatusBarOrder{}),
 		VoiceMode:                       defaultVoiceModeSettings(),
+		KanbanHiddenStepIDs:             map[string][]string{},
 	}
 }
 
@@ -755,6 +757,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		SystemMetricsDisplay            models.SystemMetricsDisplaySettings `json:"system_metrics_display"`
 		AppStatusBarOrder               models.AppStatusBarOrder            `json:"app_status_bar_order"`
 		VoiceMode                       *storedVoiceMode                    `json:"voice_mode"`
+		KanbanHiddenStepIDs             json.RawMessage                     `json:"kanban_hidden_step_ids"`
 	}
 	if err := json.Unmarshal([]byte(settingsRaw), &payload); err != nil {
 		return nil, err
@@ -876,7 +879,26 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	} else {
 		settings.ChangesPanelLayout = defaultChangesPanelLayout
 	}
+	settings.KanbanHiddenStepIDs = decodeKanbanHiddenStepIDs(payload.KanbanHiddenStepIDs)
 	return settings, nil
+}
+
+// decodeKanbanHiddenStepIDs parses the persisted per-workflow hidden-step-id
+// map, defaulting to an empty map on a missing or malformed value instead of
+// failing the whole settings read. Unlike most structured settings fields,
+// this one is decoded as json.RawMessage in the payload struct specifically
+// so a corrupt value here can't block every other setting from loading — the
+// spec requires this field to fall back to "nothing hidden" on corruption,
+// not to take the rest of the user's settings down with it.
+func decodeKanbanHiddenStepIDs(raw json.RawMessage) map[string][]string {
+	if len(raw) == 0 {
+		return map[string][]string{}
+	}
+	var decoded map[string][]string
+	if err := json.Unmarshal(raw, &decoded); err != nil || decoded == nil {
+		return map[string][]string{}
+	}
+	return decoded
 }
 
 func normalizeSidebarTaskPrefs(prefs models.SidebarTaskPrefs) models.SidebarTaskPrefs {

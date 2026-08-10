@@ -488,9 +488,10 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 			"showInTopbar": settings.SystemMetricsDisplay.ShowInTopbar,
 			"simplified":   settings.SystemMetricsDisplay.Simplified,
 		},
-		"appStatusBarOrder": mapAppStatusBarOrder(settings.AppStatusBarOrder),
-		"voiceMode":         mapVoiceMode(settings.VoiceMode),
-		"loaded":            true,
+		"appStatusBarOrder":     mapAppStatusBarOrder(settings.AppStatusBarOrder),
+		"voiceMode":             mapVoiceMode(settings.VoiceMode),
+		"hiddenWorkflowStepIds": stringSliceMap(settings.KanbanHiddenStepIDs),
+		"loaded":                true,
 	}
 }
 

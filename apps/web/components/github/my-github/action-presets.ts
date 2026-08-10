@@ -89,7 +89,7 @@ export const DEFAULT_PR_PRESETS: GitHubActionPreset[] = [
     hint: "Apply review comments",
     icon: "message",
     prompt_template:
-      "Review the feedback on the pull request at {{url}}. Evaluate each comment critically — apply changes that improve the code, push back on suggestions that are unnecessary or harmful, and explain your reasoning. Push the changes when done.",
+      "Review the feedback on the pull request at {{url}}. Evaluate each comment critically - apply changes that improve the code, push back on suggestions that are unnecessary or harmful, and explain your reasoning. Push the changes when done.",
   },
   {
     id: "fix_ci",

@@ -220,6 +220,9 @@ locale is active, and never updates on a switch — and the pseudo-locale cannot
 see it, because the text _is_ translated, just frozen. Store the key and resolve
 at render, or make the value a component. `check-module-scope-t.mjs` enforces it.
 
+UI punctuation: avoid Unicode em dash (U+2014) in user-facing copy and locale values.
+`pnpm run i18n:check` enforces periods, colons, commas, semicolons, and parentheses.
+
 `pnpm lint` fails on hardcoded UI strings (`i18next/no-literal-string` is an
 **error**), but **only on the `i18nGuardFiles` allowlist** in
 `eslint.i18n.options.mjs`, which covers every area the migration touched. It
@@ -236,16 +239,13 @@ and a file you modified is judged on the lines you touched. Untouched literals a
 never reported, so it cannot ask you to migrate code you did not write — the same
 contract as `golangci-lint --new-from-rev` for Go.
 
-The rule **only sees literals in JSX** — `confirm()` arguments and copy in plain
-`.ts` helpers are invisible to it — and it **skips anything assigned to a
-SCREAMING_CASE identifier**, so `const ROWS = [{ label: "Disk usage" }]` passes
-silently. A clean lint is not proof a file is done. `pnpm run i18n:check` gates key/catalog
-drift, `<Trans>` tag indices, inline plurals and module-scope `t()`, and the
-**pseudo-locale** (Settings → General → Appearance, dev/e2e) is the completeness
-check — any plain-English text under it was never externalized. The tooling
-needs **Node 24**; run web-only i18n scripts from `apps/web`. After conflict
-resolution, parse locale/structured JSON and check for duplicate keys before
-testing. Full guide: [`docs/i18n.md`](../../docs/i18n.md); spec: [`docs/specs/platform/i18n.md`](../../docs/specs/platform/i18n.md).
+The rule sees JSX literals but misses `confirm()` and plain `.ts` helper copy; it
+also skips SCREAMING_CASE constants, so review config tables by eye. `i18n:check`
+gates key/catalog drift, `<Trans>` indices, inline plurals, module-scope `t()`, and
+the **pseudo-locale** (Settings → General → Appearance) completeness check. It
+needs **Node 24**. Full guide:
+[`docs/i18n.md`](../../docs/i18n.md); spec:
+[`docs/specs/platform/i18n.md`](../../docs/specs/platform/i18n.md).
 
 ## Markdown safety
 
@@ -293,8 +293,7 @@ plugin leaks a stale registration.
 
 ## Testing notes
 
-- jsdom drops `secure` cookies over `http`, so `document.cookie` reads back empty. To assert a cookie write in a Vitest unit test, intercept the setter with `Object.defineProperty(document, "cookie", { set: ... })` and restore it after. This setup does not provide jest-dom matchers such as `toBeDisabled`/`toBeEnabled`; assert native properties/attributes such as `HTMLButtonElement.disabled` and `aria-busy` unless the test setup is intentionally expanded.
-- jsdom synthetic mouse events do not reliably open Radix Tooltip. In component tests, use
-  `TooltipProvider` and assert keyboard focus; cover pointer hover in Playwright with `locator.hover()`
-  and a visible `role="tooltip"`, keeping regressions that jsdom cannot exercise.
-- In Playwright tests, avoid strict locators that assume only one `terminal-panel` or `.xterm` exists. Mobile and dockview layouts can mount multiple terminal instances; scope to the active panel or use `.first()` / `.last()` deliberately with a comment or helper. Shared E2E helpers that inspect mounted React/DOM internals must also be scoped to the active panel/container, not global selectors, because hidden or stale mounted panels can coexist in dock/mobile layouts.
+- jsdom secure cookies need cookie-setter interception; Radix Tooltip tests use
+  keyboard focus, while Playwright covers pointer hover with `locator.hover()`.
+- Scope terminal selectors to the active panel/container; mobile and dockview may
+  mount multiple instances, so shared helpers must not use global selectors.

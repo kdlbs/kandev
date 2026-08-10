@@ -125,6 +125,46 @@ test.describe("Settings manual save", () => {
         initial.settings.changes_panel_layout,
       );
 
+      const surface = floatingSave.getByTestId("settings-floating-save-surface");
+      const contentArea = testPage.getByTestId("settings-scroll-container");
+      const configChatButton = testPage.getByRole("button", { name: "Configuration Chat" });
+      const [surfaceBox, contentBox, configChatBox] = await Promise.all([
+        surface.boundingBox(),
+        contentArea.boundingBox(),
+        configChatButton.boundingBox(),
+      ]);
+      expect(surfaceBox).not.toBeNull();
+      expect(contentBox).not.toBeNull();
+      expect(configChatBox).not.toBeNull();
+      expect(surfaceBox!.height).toBeLessThanOrEqual(48);
+      expect(
+        Math.abs(surfaceBox!.x + surfaceBox!.width / 2 - (contentBox!.x + contentBox!.width / 2)),
+      ).toBeLessThanOrEqual(2);
+      expect(
+        Math.abs(
+          surfaceBox!.y + surfaceBox!.height / 2 - (configChatBox!.y + configChatBox!.height / 2),
+        ),
+      ).toBeLessThanOrEqual(2);
+      await expect(floatingSave).not.toHaveClass(/bg-success/);
+      await expect(floatingSave.getByRole("button", { name: "Save changes" })).toHaveClass(
+        /bg-success/,
+      );
+
+      await floatingSave.getByRole("button", { name: "Reset" }).click();
+      await expect(floatingSave).not.toBeVisible();
+      await expect(testPage.getByTestId("changes-panel-layout-card")).toHaveAttribute(
+        "data-settings-dirty",
+        "false",
+      );
+      expect((await apiClient.getUserSettings()).settings.changes_panel_layout).toBe(
+        initial.settings.changes_panel_layout,
+      );
+
+      await layout.click();
+      await testPage
+        .getByRole("option", { name: nextLayout === "tree" ? "Tree" : "Flat list" })
+        .click();
+
       await testPage.getByRole("link", { name: "Terminal", exact: true }).first().click();
       const navigationDialog = testPage.getByRole("alertdialog", {
         name: "Save changes before leaving?",

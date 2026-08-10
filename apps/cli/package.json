@@ -1,6 +1,6 @@
 {
   "name": "kandev",
-  "version": "0.85.0",
+  "version": "0.86.1",
   "private": false,
   "description": "Launcher for Kandev — manage tasks, orchestrate agents, review changes, and ship value",
   "license": "AGPL-3.0-only",
@@ -28,21 +28,9 @@
     "@kdlbs/runtime-darwin-arm64": "0.0.0-bootstrap",
     "@kdlbs/runtime-win32-x64": "0.0.0-bootstrap"
   },
-  "devDependencies": {
-    "@types/node": "^20",
-    "esbuild": "^0.27.0",
-    "tar": "^7.5.19",
-    "tree-kill": "^1.2.2",
-    "tsx": "^4.15.7",
-    "typescript": "^5",
-    "vitest": "^4.1.10"
-  },
   "scripts": {
-    "dev": "tsx src/cli.ts",
     "build": "node -c bin/cli.js && node -c bin/native-shim.js",
-    "bundle": "pnpm build",
-    "start": "node bin/cli.js",
-    "test": "vitest run",
+    "test": "node --test \"bin/*.test.mjs\"",
     "prepublishOnly": "pnpm build"
   }
 }

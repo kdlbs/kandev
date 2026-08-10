@@ -88,11 +88,11 @@ Desktop signing is automatic. Complete macOS/Windows signing and notarization se
 
 ## Runtime resolution
 
-In `apps/cli/src/runtime.ts`, the CLI locates its bundled runtime via:
+The published npm shim (`apps/cli/bin/native-shim.js`) locates its bundled runtime via:
 
 1. `KANDEV_BUNDLE_DIR` env var (set by Homebrew wrapper, used by tests).
 2. Installed `@kdlbs/runtime-{platform}` npm package via `require.resolve()`.
-3. `--runtime-version <tag>` cache fallback (debug only — downloads from GitHub).
+3. The Homebrew/manual install path execs `bin/kandev` directly. (`--runtime-version` is rejected by the native launcher.)
 
 ## Runtime helper binary checklist
 

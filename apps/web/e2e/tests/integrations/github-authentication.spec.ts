@@ -248,10 +248,11 @@ test.describe("GitHub workspace authentication", () => {
     await testPage.getByTestId("github-scope-mode").click();
     await testPage.getByRole("option", { name: "Organizations" }).click();
     const floatingSave = testPage.getByTestId("settings-floating-save");
+    const floatingSaveSurface = floatingSave.getByTestId("settings-floating-save-surface");
     await expect(floatingSave).toBeVisible();
 
     await expectElementsNotToIntersect(
-      floatingSave,
+      floatingSaveSurface,
       testPage.getByRole("button", { name: "Configuration Chat" }),
     );
 

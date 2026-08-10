@@ -79,7 +79,7 @@ describe("PrepareProgress", () => {
         name: "Reconnecting cloud sandbox",
         status: "skipped",
         warning:
-          "Previous sandbox is no longer available — provisioning a fresh one for this branch.",
+          "Previous sandbox is no longer available; provisioning a fresh one for this branch.",
         warningDetail: "Old sandbox could not be reached.",
         output: "Old sandbox: kandev-old\nNew sandbox: kandev-new\nBranch: feature/foo",
       },
@@ -90,7 +90,7 @@ describe("PrepareProgress", () => {
     expect(screen.getByText("Reconnecting cloud sandbox")).toBeTruthy();
     expect(
       screen.getByText(
-        "Previous sandbox is no longer available — provisioning a fresh one for this branch.",
+        "Previous sandbox is no longer available; provisioning a fresh one for this branch.",
       ),
     ).toBeTruthy();
   });
@@ -103,7 +103,7 @@ describe("PrepareProgress", () => {
         name: "Reconnecting cloud sandbox",
         status: "skipped",
         warning:
-          "Previous sandbox is no longer available — provisioning a fresh one for this branch.",
+          "Previous sandbox is no longer available; provisioning a fresh one for this branch.",
       },
       { name: "Creating cloud sandbox", status: "completed" },
       { name: "Waiting for agent controller", status: "completed" },

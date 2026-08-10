@@ -65,9 +65,22 @@ func (h *Handlers) httpGetUserSettings(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// maxUpdateUserSettingsBodyBytes bounds the update-settings request body via
+// http.MaxBytesReader, writing the 413 response below when exceeded. The
+// settings payload can legitimately carry several capped-but-large fields
+// (saved layouts, sidebar views, preference blobs, kanban_hidden_step_ids),
+// so the limit is generous relative to those per-field caps rather than tight.
+const maxUpdateUserSettingsBodyBytes = 2 * 1024 * 1024
+
 func (h *Handlers) httpUpdateUserSettings(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUpdateUserSettingsBodyBytes)
 	var req dto.UpdateUserSettingsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		var maxBytesError *http.MaxBytesError
+		if errors.As(err, &maxBytesError) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}

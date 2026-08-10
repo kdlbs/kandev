@@ -51,6 +51,19 @@ the local single-user install with a login screen it never asked for.
   from another user's workspace does not grant access. Admins do NOT see other
   users' workspaces (hard privacy; admin is a management role, not a
   visibility role). Pre-auth data is claimed by the admin at setup.
+- **Task lifecycle mutations are ownership-checked at the service layer.**
+  Changing a task's state, moving it between workflows/steps, updating a task
+  repository's base branch, and archiving or deleting a task (including the
+  cascade that walks its subtree) all refuse a foreign task before any read or
+  write reaches the repository. This holds on every transport — HTTP, WebSocket
+  and MCP — because the check lives below them, and it holds for long-running
+  deletes, which detach from request cancellation but keep the caller identity.
+- **The WebSocket backstop reads `id` on top-level `task.*` actions.** In
+  addition to `task_id` / `session_id` / `task_environment_id`, an action named
+  `task.<verb>` (exactly two segments — `task.state`, `task.move`, `task.get`, …)
+  has its payload `id` treated as a task ID. Deeper namespaces (`task.plan.*`,
+  `task.review.*`) are untouched: their `id` names a plan, revision or finding,
+  not a task.
 - **Shared surfaces (instance-global by design).** Executors, executor
   profiles, environment definitions, agent profiles/agents, editors, prompts,
   sprites, voice, notification providers, and system pages remain shared
@@ -99,6 +112,15 @@ the local single-user install with a login screen it never asked for.
 
 ## Scenarios
 
+- **GIVEN** two users A and B and a task owned by B, **WHEN** A sends
+  `task.state` or `task.move` over the WebSocket naming that task by `id`,
+  **THEN** the call is refused, B's task DTO is not serialized into the
+  response, and no state, position or workflow write reaches the repository.
+- **GIVEN** the same pair, **WHEN** A sends `DELETE /api/v1/tasks/{B's task}`
+  or `POST /api/v1/tasks/{B's task}/archive`, **THEN** the response is 404 and
+  no task row, subtree row, or workspace-group membership is touched — while
+  the owner's own delete still runs to completion if the owner's browser
+  disconnects mid-request.
 - **GIVEN** an authenticated Kandev browser session, **WHEN** a protected API
   request receives a Kandev session challenge, **THEN** the browser clears the
   stale Kandev identity and navigates to `/login`.

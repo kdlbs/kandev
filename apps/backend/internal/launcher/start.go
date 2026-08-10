@@ -97,10 +97,18 @@ func runManagedApp(ctx context.Context, cfg managedAppConfig) int {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}
-	env := backendEnv(cfg.Ports, cfg.LogLevel, resolveConsoleLogLevel(cfg.Opts), cfg.Opts.Debug, healthToken)
-	backend, dumpLogs, err := launchBackendFn(
-		cfg.Backend, []string{"__backend"}, cfg.BackendCWD, env, false, cfg.Ports, cfg.Mode, supervisor,
-	)
+	env := backendEnv(cfg.Ports, cfg.LogLevel, resolveConsoleLogLevel(cfg.Opts), cfg.Opts.Debug, healthToken, nil)
+	backend, dumpLogs, err := launchBackendFn(backendLaunchConfig{
+		Command:    cfg.Backend,
+		Args:       []string{"__backend"},
+		CWD:        cfg.BackendCWD,
+		Env:        env,
+		Quiet:      false,
+		Ports:      cfg.Ports,
+		Mode:       cfg.Mode,
+		HomeDir:    resolveHomeDir(),
+		Supervisor: supervisor,
+	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
@@ -142,7 +150,7 @@ func openBrowser(url string) {
 	var cmd *exec.Cmd
 	switch {
 	case os.Getenv("OS") == "Windows_NT":
-		cmd = exec.Command("cmd.exe", "/c", "start", "", url)
+		cmd = exec.Command(cmdExe, "/c", "start", "", url)
 	case runtime.GOOS == "darwin":
 		cmd = exec.Command("open", url)
 	default:

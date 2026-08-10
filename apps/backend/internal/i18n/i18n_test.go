@@ -67,7 +67,7 @@ func TestTf(t *testing.T) {
 		want   string
 	}{
 		{"interpolates a placeholder", "en", "share.pageTitle",
-			map[string]any{"title": "Fix the flake"}, "Fix the flake — kandev share"},
+			map[string]any{"title": "Fix the flake"}, "Fix the flake; kandev share"},
 		{"count of one selects the singular", "en", "share.messageCount",
 			map[string]any{"count": 1}, "1 message"},
 		{"count of zero selects the plural", "en", "share.messageCount",
@@ -94,7 +94,7 @@ func TestTf(t *testing.T) {
 		// A placeholder with no value stays visible; a silent hole in a
 		// sentence is much harder to notice in review than "{{title}}".
 		{"missing var leaves the placeholder", "en", "share.pageTitle",
-			nil, "{{title}} — kandev share"},
+			nil, "{{title}}; kandev share"},
 		{"unsupported locale falls back to en", "klingon", "share.messageCount",
 			map[string]any{"count": 2}, "2 messages"},
 		{"non-numeric count is ignored", "en", "share.untitledTask",

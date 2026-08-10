@@ -6,6 +6,8 @@ owner: Kandev
 
 # Environment-specific browser tab title prefixes
 
+The profile-selection boundary follows [ADR-2026-08-10-debug-launcher-profile-selection](../../decisions/2026-08-10-debug-launcher-profile-selection.md).
+
 ## Why
 
 Developers often keep a local development instance and one or more pull-request
@@ -24,6 +26,9 @@ easy to use the wrong instance.
   contract.
 - A normal production/start launch with no explicit prefix keeps the plain
   `Kandev` title.
+- A debug start (`make start-debug`) can enable pprof and debug logging without
+  selecting the development profile. It uses the explicit prefix `Debug` by
+  default, so its title is `Debug Kandev`.
 - The prefix is present both on the initial server-rendered page and after a
   client boot from `/api/v1/app-state`, using the title behavior delivered by
   PR #2459.
@@ -37,6 +42,7 @@ The existing environment contract remains the public configuration surface:
 |---|---|---|
 | Development profile (`make dev`) | `Dev` by default | `Dev Kandev` |
 | PR preview launcher | `Preview` | `Preview Kandev` |
+| Debug start (`make start-debug`) | `Debug` by default | `Debug Kandev` |
 | Normal start with no override | unset | `Kandev` |
 | Any launch with an explicit override | caller value | `<value> Kandev` |
 
@@ -46,6 +52,9 @@ not changed from the Kandev UI.
 ## Failure modes
 
 - If the prefix is unset or blank, the title remains `Kandev`.
+- `KANDEV_DEBUG_PPROF_ENABLED=true` enables legacy pprof behavior but does not
+  select the development profile or add the `Dev` prefix. The debug launcher
+  supplies the `Debug` prefix unless the caller supplies another prefix.
 - If the preview launcher cannot set the environment variable, the preview
   falls back to the existing plain-title behavior rather than failing startup.
 - If a supervised restart occurs, the launcher preserves the allowlisted prefix
@@ -69,11 +78,14 @@ caller supplies the same environment or profile again.
   the backend starts, **THEN** the browser title is `Custom Kandev`.
 - **GIVEN** a normal start with no title-prefix environment variable, **WHEN**
   the user opens Kandev, **THEN** the browser title is `Kandev`.
+- **GIVEN** a debug start with pprof and debug logging enabled but without the
+  development-profile selector, **WHEN** the user opens Kandev, **THEN** the
+  browser title is `Debug Kandev`.
 - **GIVEN** a preview or development backend with a configured prefix, **WHEN**
   its supervisor restarts the backend, **THEN** the browser title retains the
   same prefix.
 - **GIVEN** a phone-sized browser viewport, **WHEN** either environment is
-  opened, **THEN** the same title is shown; no viewport-specific interaction is
+  opened, **THEN** the same title is shown. No viewport-specific interaction is
   required.
 
 ## Out of scope

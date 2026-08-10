@@ -123,7 +123,9 @@ func runSSHCommandStdin(ctx context.Context, client *ssh.Client, cmd string, std
 	}
 	defer func() { _ = session.Close() }()
 
-	var outBuf, errBuf bytes.Buffer
+	// Synchronized because the cancellation path below reads these while
+	// session.Run is still going — see syncBuffer.
+	var outBuf, errBuf syncBuffer
 	session.Stdout = &outBuf
 	session.Stderr = &errBuf
 	if stdin != nil {
@@ -141,6 +143,34 @@ func runSSHCommandStdin(ctx context.Context, client *ssh.Client, cmd string, std
 	case err := <-done:
 		return outBuf.String(), errBuf.String(), err
 	}
+}
+
+// syncBuffer is a bytes.Buffer safe for concurrent use by one writer and one
+// reader. It exists for runSSHCommandStdin's cancellation path: that path
+// returns while session.Run is still executing, so golang.org/x/crypto/ssh's
+// stdout/stderr copier goroutines are still writing into these buffers when we
+// read them — a data race on a plain bytes.Buffer, and one that outlives the
+// call, since the copiers keep writing until the remote command actually ends.
+//
+// Deliberately not an io.ReaderFrom: bytes.Buffer implements ReadFrom, and
+// io.Copy prefers it, which would let the copier reach the underlying buffer
+// without taking the lock. Exposing only Write keeps every mutation guarded.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+// String returns a consistent snapshot of whatever the remote has sent so far.
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 // detectRemoteInfo runs a tiny probe to learn about the host. The support gate

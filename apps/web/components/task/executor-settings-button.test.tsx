@@ -142,7 +142,7 @@ describe("ExecutorSettingsButton prepare status", () => {
           name: "Reconnecting cloud sandbox",
           status: "skipped",
           warning:
-            "Previous sandbox is no longer available — provisioning a fresh one for this branch.",
+            "Previous sandbox is no longer available; provisioning a fresh one for this branch.",
         },
         { name: STEP_CREATE_SANDBOX, status: "running" },
       ],

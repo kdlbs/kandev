@@ -34,13 +34,31 @@ async function waitForState(apiClient: ApiClient, taskId: string, state: string)
     .toBe(state);
 }
 
+async function waitForParentQuestion(apiClient: ApiClient, parentTaskID: string): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const parentSessions = await apiClient.listTaskSessions(parentTaskID);
+        const parentMessages = await apiClient.listSessionMessages(parentSessions.sessions[0].id);
+        const questions = parentMessages.messages.filter(
+          (message) =>
+            message.metadata?.parent_question === true &&
+            typeof message.metadata.parent_question_id === "string",
+        );
+        return questions.length === 1 ? String(questions[0].metadata?.parent_question_id) : "";
+      },
+      { timeout: 60_000, message: "one durable parent question should be delivered" },
+    )
+    .not.toBe("");
+}
+
 test.describe("Mobile task autopilot", () => {
   test("keeps the control, chip, and waiting indicators inside the viewport", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
 
     const mobile = new MobileKanbanPage(testPage);
     await mobile.goto();
@@ -94,9 +112,10 @@ test.describe("Mobile task autopilot", () => {
     });
     await assertNoDocumentHorizontalOverflow(testPage, "mobile autopilot task switcher");
 
+    await waitForParentQuestion(apiClient, parent.id);
     await expect
       .poll(async () => (await apiClient.listTaskSessions(child.id)).sessions[0]?.state ?? "", {
-        timeout: 30_000,
+        timeout: 60_000,
         message: "the parent answer should resume the mobile child",
       })
       .not.toBe("WAITING_FOR_INPUT");

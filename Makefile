@@ -18,9 +18,13 @@ MAKE := make
 ifeq ($(OS),Windows_NT)
   RM = cmd /c del /s /q
   RMDIR = cmd /c rmdir /s /q
+  # Go emits a `.exe` for GOOS=windows regardless of the calling shell, so
+  # native cmd/PowerShell AND Git Bash both need it (mirrors apps/backend/Makefile).
+  EXE = .exe
 else
   RM = rm -f
   RMDIR = rm -rf
+  EXE =
 endif
 
 # stderr redirect for $(shell ...) probes. Keyed on $(OS)$(MSYSTEM) rather than
@@ -89,9 +93,9 @@ help:
 	@echo "Development Commands:"
 	@echo "  bootstrap        Install mise tools, workspace deps, and git hooks"
 	@echo "  bootstrap-e2e    Bootstrap plus Playwright browser/system deps"
-	@echo "  dev              Run backend + web via local CLI (auto ports)"
+	@echo "  dev              Run backend + web via the native Go launcher (auto ports)"
 	@echo "  dev PORT=38430 WEB_PORT=37430   PORT beats KANDEV_BACKEND_PORT/KANDEV_PORT, WEB_PORT beats KANDEV_WEB_PORT"
-	@echo "  dev DEV_ARGS='--verbose'        Pass extra flags through to the dev CLI"
+	@echo "  dev DEV_ARGS='--verbose'        Pass extra flags through to the native launcher"
 	@echo "  dev-prod-db      Run dev mode against the production db at ~/.kandev"
 	@echo "  dev-backend      Run backend in development mode (port 38429)"
 	@echo "  dev-web          Run web app in development mode (port 37429)"
@@ -189,14 +193,12 @@ endif
 
 .PHONY: dev
 dev: doctor
-	@echo "Building remote agentctl helpers..."
-	@$(MAKE) -C $(BACKEND_DIR) build-agentctl-remote
-ifeq ($(OS),Windows_NT)
-	@echo "Building winjob (Ctrl-C-safe wrapper for Windows)..."
-	@$(MAKE) -C $(BACKEND_DIR) build-winjob
-endif
-	@echo "Launching via CLI$(if $(DEV_FLAGS_DISPLAY), ($(DEV_FLAGS_DISPLAY)), (auto ports))..."
-	@cd $(APPS_DIR) && $(PNPM) -C cli dev -- dev $(DEV_FLAGS)
+	# POSIX-only (cp/exec): on Windows run from Git Bash/MSYS, like `make start`.
+	@echo "Building dev launcher..."
+	@$(MAKE) -C $(BACKEND_DIR) build-kandev
+	@cp $(BACKEND_DIR)/bin/kandev$(EXE) $(BACKEND_DIR)/bin/kandev-launcher$(EXE)
+	@echo "Launching via native Go launcher$(if $(DEV_FLAGS_DISPLAY), ($(DEV_FLAGS_DISPLAY)), (auto ports))..."
+	@exec $(BACKEND_DIR)/bin/kandev-launcher$(EXE) dev $(DEV_FLAGS)
 
 .PHONY: dev-prod-db
 dev-prod-db: export KANDEV_DATABASE_PATH := $(HOME)/.kandev/data/kandev.db
@@ -655,7 +657,9 @@ typecheck-web:
 .PHONY: typecheck
 typecheck:
 	@printf "$(CYAN)Type-checking all apps...$(RESET)\n"
-	@cd $(APPS_DIR) && $(PNPM) -r exec tsc -p tsconfig.json --noEmit
+	# apps/cli has no tsconfig (publish-only shim), so the workspace must be
+	# listed explicitly — add new TypeScript packages here.
+	@cd $(APPS_DIR) && $(PNPM) -r --filter @kandev/web --filter @kandev/desktop --filter @kandev/theme --filter @kandev/types --filter @kandev/ui exec tsc -p tsconfig.json --noEmit
 
 #
 # Cleanup

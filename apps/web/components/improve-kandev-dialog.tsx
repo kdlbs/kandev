@@ -62,11 +62,20 @@ export function ImproveKandevDialog(props: ImproveKandevDialogProps) {
   );
 
   // When the dedicated workspace exists, bootstrap proceeds immediately.
+  // Keyed on `open` too: useResetOnClose clears the confirmation on close, and
+  // without this the effect only re-ran when improveWorkspaceMissing changed —
+  // a re-open with the workspace already known would sit forever at the idle
+  // "Preparing kandev repository" banner with submit blocked.
+  //
+  // The re-probe on every open is intentional: bootstrap is idempotent
+  // (backend reuses the existing workspace/workflow/repo) and re-checks the
+  // user's fork/write access, which can change between opens. Do not
+  // short-circuit it on a previously-successful result.
   useEffect(() => {
-    if (!improveWorkspaceMissing) {
+    if (open && !improveWorkspaceMissing) {
       setWorkspaceChoiceConfirmed(true);
     }
-  }, [improveWorkspaceMissing]);
+  }, [improveWorkspaceMissing, open]);
 
   useResetOnClose(open, {
     setMode,

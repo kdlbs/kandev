@@ -42,7 +42,12 @@ func TestResolveLogThresholdsByMode(t *testing.T) {
 }
 
 func TestBackendEnvCarriesIndependentThresholds(t *testing.T) {
-	env := backendEnv(portConfig{BackendPort: 1234, AgentctlPort: 5678}, "debug", "warn", true, "health-token")
+	// The surrounding task environment may set dev-mode selectors. start/run
+	// inherit the ambient env untouched (matching the TypeScript process.env
+	// spread) but must never introduce their own selectors or a web URL.
+	t.Setenv("KANDEV_DEBUG_DEV_MODE", "true")
+	t.Setenv("KANDEV_WEB_INTERNAL_URL", "http://localhost:9999")
+	env := backendEnv(portConfig{BackendPort: 1234, AgentctlPort: 5678}, "debug", "warn", true, "health-token", nil)
 	joined := strings.Join(env, "\n")
 	for _, expected := range []string{
 		"KANDEV_LOG_LEVEL=debug",
@@ -53,6 +58,49 @@ func TestBackendEnvCarriesIndependentThresholds(t *testing.T) {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("backend environment missing %q", expected)
 		}
+	}
+	// Inherited selectors pass through unchanged, but no web port is present
+	// so backendEnv must not synthesize a URL for it.
+	if !strings.Contains(joined, "KANDEV_WEB_INTERNAL_URL=http://localhost:9999") {
+		t.Fatalf("backend environment dropped an inherited selector:\n%s", joined)
+	}
+	if strings.Contains(joined, "KANDEV_WEB_INTERNAL_URL=http://localhost:5678") {
+		t.Fatal("backend environment introduced a web internal URL without a web port")
+	}
+}
+
+func TestBackendEnvEmitsWebInternalURLForDevPorts(t *testing.T) {
+	env := backendEnv(portConfig{BackendPort: 1234, WebPort: 5678, AgentctlPort: 9876}, "info", "warn", false, "token", []string{"KANDEV_DEBUG_DEV_MODE=true", "KANDEV_HOME_DIR=/dev/home"})
+	joined := strings.Join(env, "\n")
+	for _, expected := range []string{
+		"KANDEV_WEB_INTERNAL_URL=http://localhost:5678",
+		"KANDEV_DEBUG_DEV_MODE=true",
+		"KANDEV_HOME_DIR=/dev/home",
+	} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("backend environment missing %q", expected)
+		}
+	}
+	if strings.Contains(joined, "KANDEV_WEB_INTERNAL_URL=http://localhost:0") {
+		t.Fatalf("backend environment emitted an empty web internal URL:\n%s", joined)
+	}
+}
+
+func TestBackendEnvDebugDefaultsToDebugTitle(t *testing.T) {
+	unsetEnvForTest(t, "KANDEV_WEB_TITLE_PREFIX")
+
+	env := backendEnv(portConfig{BackendPort: 1234, AgentctlPort: 5678}, "debug", "warn", true, "health-token", nil)
+	if got := envValue(env, "KANDEV_WEB_TITLE_PREFIX"); got != "Debug" {
+		t.Fatalf("KANDEV_WEB_TITLE_PREFIX = %q for debug launch; want %q", got, "Debug")
+	}
+}
+
+func TestBackendEnvDebugPreservesExplicitTitle(t *testing.T) {
+	t.Setenv("KANDEV_WEB_TITLE_PREFIX", "Custom")
+
+	env := backendEnv(portConfig{BackendPort: 1234, AgentctlPort: 5678}, "debug", "warn", true, "health-token", nil)
+	if got := envValue(env, "KANDEV_WEB_TITLE_PREFIX"); got != "Custom" {
+		t.Fatalf("KANDEV_WEB_TITLE_PREFIX = %q for explicit debug launch; want %q", got, "Custom")
 	}
 }
 
@@ -131,23 +179,16 @@ func TestRunManagedAppAttachesSignalsBeforeBackendLaunch(t *testing.T) {
 	var events []string
 	var launchedQuiet bool
 	var launchedHealthToken string
+	var launchedHomeDir string
 	var waitedHealthToken string
 	newSupervisorFn = func() *processSupervisor {
 		events = append(events, "new-supervisor")
 		return newSupervisor()
 	}
-	launchBackendFn = func(
-		_ string,
-		_ []string,
-		_ string,
-		env []string,
-		quiet bool,
-		_ portConfig,
-		_ string,
-		_ *processSupervisor,
-	) (*restartableBackend, func(), error) {
-		launchedQuiet = quiet
-		for _, item := range env {
+	launchBackendFn = func(cfg backendLaunchConfig) (*restartableBackend, func(), error) {
+		launchedQuiet = cfg.Quiet
+		launchedHomeDir = cfg.HomeDir
+		for _, item := range cfg.Env {
 			if strings.HasPrefix(item, "KANDEV_DESKTOP_HEALTH_TOKEN=") {
 				launchedHealthToken = strings.TrimPrefix(item, "KANDEV_DESKTOP_HEALTH_TOKEN=")
 			}
@@ -188,7 +229,35 @@ func TestRunManagedAppAttachesSignalsBeforeBackendLaunch(t *testing.T) {
 	if launchedQuiet {
 		t.Fatal("backend stdout was not forwarded")
 	}
+	if launchedHomeDir != os.Getenv("KANDEV_HOME_DIR") {
+		t.Fatalf("supervisor home dir = %q, want the resolved home %q", launchedHomeDir, os.Getenv("KANDEV_HOME_DIR"))
+	}
 	if launchedHealthToken == "" || launchedHealthToken != waitedHealthToken {
 		t.Fatalf("health token launched=%q waited=%q, want one shared non-empty token", launchedHealthToken, waitedHealthToken)
 	}
+}
+
+func envValue(env []string, key string) string {
+	prefix := key + "="
+	for _, item := range env {
+		if strings.HasPrefix(item, prefix) {
+			return strings.TrimPrefix(item, prefix)
+		}
+	}
+	return ""
+}
+
+func unsetEnvForTest(t *testing.T, key string) {
+	t.Helper()
+	value, wasSet := os.LookupEnv(key)
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatalf("unset %s: %v", key, err)
+	}
+	t.Cleanup(func() {
+		if wasSet {
+			_ = os.Setenv(key, value)
+			return
+		}
+		_ = os.Unsetenv(key)
+	})
 }

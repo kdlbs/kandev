@@ -17,12 +17,12 @@ Kandev is currently installable via `brew install kdlbs/kandev/kandev` from the 
 ## What
 
 - Add a package-manager build contract that produces the native runtime bundle from an already-installed source checkout. It builds the Vite SPA, syncs it into the Go embed input, compiles the host `kandev` and `agentctl` binaries, and cross-compiles the four Linux/macOS remote `agentctl` helpers.
-- Keep package-manager dependency installation outside that contract. Homebrew declares Go, Node 24, and pnpm as build dependencies and Git as a runtime facility.
+- Keep package-manager dependency installation outside that contract. Homebrew declares Go, Node 24, and pnpm 10 as build dependencies. Git is part of Homebrew's standard environment and is not declared as a formula dependency.
 - Compile only the host `kandev` binary with cgo and the `fts5` tag. `mattn/go-sqlite3` supplies the SQLite amalgamation, so the formula does not declare an external SQLite dependency unless build or linkage evidence requires it.
 - Merge and publish the source-build contract in a Stable Kandev release before authoring the Core formula. Core must consume the immutable GitHub tag archive for that release, never a branch or unreleased commit.
 - Install the bundle under `libexec/bin` and expose one `bin/kandev` wrapper produced by `write_env_script`. The wrapper sets `KANDEV_BUNDLE_DIR=<libexec>` and `KANDEV_VERSION=<version>`.
 - Use stable numeric tags for `livecheck`; prerelease and Nightly npm versions are not Homebrew channels.
-- Keep `kdlbs/homebrew-kandev` as the upstream binary fast path alongside Homebrew Core's source-built bottles. The shared release-bundle validator must run before those binary archives are published, and the generated tap formula must smoke-test its version, readiness endpoint, and embedded SPA.
+- Keep `kdlbs/homebrew-kandev` as the upstream binary fast path alongside Homebrew Core's source-built bottles. The generated tap formula must set the Stable SemVer explicitly because platform archive names end in architecture tokens such as `x64`, and it must smoke-test its version, readiness endpoint, and embedded SPA. The shared release-bundle validator runs before those binary archives are published.
 - Preserve all four remote `agentctl` helpers in custom-tap installations. The tap must use an exact-path Homebrew mismatched-binary audit allowlist rather than pruning helpers, so Docker and SSH targets can differ from the Homebrew host. Decision: [ADR-2026-08-05-homebrew-remote-helper-audit](../../decisions/2026-08-05-homebrew-remote-helper-audit.md).
 
 The runtime bundle contains exactly:
@@ -44,6 +44,7 @@ The Darwin arm64 helper must carry a Mach-O code signature so Apple Silicon can 
 - **GIVEN** a new kandev release `vX.Y.Z` is tagged, **WHEN** Homebrew's auto-bump worker runs, **THEN** `livecheck` resolves the new tag from GitHub Releases and a bump PR is opened against the formula.
 - **GIVEN** a maintainer reviews the PR, **WHEN** they run `brew install --build-from-source kandev` locally, **THEN** the build completes without network or sandbox failures and `brew test kandev` passes.
 - **GIVEN** a Stable release updates `kdlbs/homebrew-kandev`, **WHEN** its platform archive is built and the tap formula is tested, **THEN** the archive contains the complete executable runtime and the installed launcher serves both `/health` and the embedded Kandev page.
+- **GIVEN** a Stable release updates `kdlbs/homebrew-kandev`, **WHEN** Homebrew evaluates a platform archive URL ending in `x64` or `arm64`, **THEN** the generated formula's explicit version keeps the Cellar path and `version` value at `X.Y.Z` rather than the architecture suffix.
 - **GIVEN** a tap archive contains remote helpers for CPU architectures other than the Homebrew host, **WHEN** Homebrew audits the installed formula on macOS or Linux, **THEN** only the four declared remote-helper paths are exempted and the complete runtime remains installed.
 
 ## Out of scope

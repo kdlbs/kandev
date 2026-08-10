@@ -176,6 +176,9 @@ type CascadeOutcome struct {
 //     archived, stamping the cascade ID on the released row.
 //  5. Evaluate cleanup once per affected group.
 func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string, cascade bool) (*CascadeOutcome, error) {
+	if err := s.authorizeTask(ctx, rootID); err != nil {
+		return nil, err
+	}
 	if rootID == "" {
 		return nil, errors.New("rootID is required")
 	}
@@ -278,6 +281,9 @@ func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string, cas
 // because deletion is unconditional; the cascade ID is stamped only
 // for symmetry with archive.
 func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string, cascade bool) (*CascadeOutcome, error) {
+	if err := s.authorizeTask(ctx, rootID); err != nil {
+		return nil, err
+	}
 	if rootID == "" {
 		return nil, errors.New("rootID is required")
 	}
@@ -628,6 +634,9 @@ func (s *HandoffService) cancelActiveRuns(ctx context.Context, taskIDs []string,
 // archived (empty cascade id) or that belong to an earlier cascade are
 // left archived — fixing the resurrection bug from the original review.
 func (s *HandoffService) UnarchiveTaskTree(ctx context.Context, rootID string) (*CascadeOutcome, error) {
+	if err := s.authorizeTask(ctx, rootID); err != nil {
+		return nil, err
+	}
 	if rootID == "" {
 		return nil, errors.New("rootID is required")
 	}
