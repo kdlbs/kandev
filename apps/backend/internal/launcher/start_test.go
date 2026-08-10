@@ -86,6 +86,24 @@ func TestBackendEnvEmitsWebInternalURLForDevPorts(t *testing.T) {
 	}
 }
 
+func TestBackendEnvDebugDefaultsToDebugTitle(t *testing.T) {
+	unsetEnvForTest(t, "KANDEV_WEB_TITLE_PREFIX")
+
+	env := backendEnv(portConfig{BackendPort: 1234, AgentctlPort: 5678}, "debug", "warn", true, "health-token", nil)
+	if got := envValue(env, "KANDEV_WEB_TITLE_PREFIX"); got != "Debug" {
+		t.Fatalf("KANDEV_WEB_TITLE_PREFIX = %q for debug launch; want %q", got, "Debug")
+	}
+}
+
+func TestBackendEnvDebugPreservesExplicitTitle(t *testing.T) {
+	t.Setenv("KANDEV_WEB_TITLE_PREFIX", "Custom")
+
+	env := backendEnv(portConfig{BackendPort: 1234, AgentctlPort: 5678}, "debug", "warn", true, "health-token", nil)
+	if got := envValue(env, "KANDEV_WEB_TITLE_PREFIX"); got != "Custom" {
+		t.Fatalf("KANDEV_WEB_TITLE_PREFIX = %q for explicit debug launch; want %q", got, "Custom")
+	}
+}
+
 func TestNewHealthTokenIsFreshAndOpaque(t *testing.T) {
 	first, err := newHealthToken()
 	if err != nil {
@@ -217,4 +235,29 @@ func TestRunManagedAppAttachesSignalsBeforeBackendLaunch(t *testing.T) {
 	if launchedHealthToken == "" || launchedHealthToken != waitedHealthToken {
 		t.Fatalf("health token launched=%q waited=%q, want one shared non-empty token", launchedHealthToken, waitedHealthToken)
 	}
+}
+
+func envValue(env []string, key string) string {
+	prefix := key + "="
+	for _, item := range env {
+		if strings.HasPrefix(item, prefix) {
+			return strings.TrimPrefix(item, prefix)
+		}
+	}
+	return ""
+}
+
+func unsetEnvForTest(t *testing.T, key string) {
+	t.Helper()
+	value, wasSet := os.LookupEnv(key)
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatalf("unset %s: %v", key, err)
+	}
+	t.Cleanup(func() {
+		if wasSet {
+			_ = os.Setenv(key, value)
+			return
+		}
+		_ = os.Unsetenv(key)
+	})
 }

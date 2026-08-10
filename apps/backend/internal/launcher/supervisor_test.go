@@ -13,6 +13,7 @@ func TestBuildManifestUsesSameBinaryBackendMode(t *testing.T) {
 		"KANDEV_SERVER_PORT=1234",
 		"KANDEV_DESKTOP_HEALTH_TOKEN=health-token",
 		"KANDEV_CONSOLE_LOG_LEVEL=warn",
+		"KANDEV_WEB_TITLE_PREFIX=Debug",
 		"UNRELATED=value",
 	}
 	manifest := buildManifest("/opt/kandev/bin/kandev", []string{"__backend"}, "/opt/kandev/bin", env, "/tmp/home", 1234, "run")
@@ -34,6 +35,9 @@ func TestBuildManifestUsesSameBinaryBackendMode(t *testing.T) {
 	}
 	if manifest.Env["KANDEV_DESKTOP_HEALTH_TOKEN"] != "health-token" {
 		t.Fatalf("KANDEV_DESKTOP_HEALTH_TOKEN = %q", manifest.Env["KANDEV_DESKTOP_HEALTH_TOKEN"])
+	}
+	if manifest.Env["KANDEV_WEB_TITLE_PREFIX"] != "Debug" {
+		t.Fatalf("KANDEV_WEB_TITLE_PREFIX = %q", manifest.Env["KANDEV_WEB_TITLE_PREFIX"])
 	}
 }
 

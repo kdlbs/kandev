@@ -143,6 +143,13 @@ the user's own agent picks up immediately — turning every report into a contri
   called again, **THEN** the same workspace (and the same hidden workflow
   instances) are reused and the response's `workspace_id` is unchanged.
 
+- **GIVEN** the dedicated `Improve Kandev` workspace already exists and the
+  intro has been dismissed, **WHEN** the user closes the Improve Kandev dialog
+  and reopens it to file another report, **THEN** the bootstrap probe runs
+  again automatically and the submit button becomes enabled once it completes —
+  the dialog never stays stuck at the "Preparing kandev repository in
+  background" banner with submission blocked.
+
 - **GIVEN** the user's active workspace is not the dedicated workspace,
   **WHEN** the dialog submits a task, **THEN** the task appears in the
   dedicated workspace and no task is created in the active workspace.

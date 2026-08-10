@@ -94,6 +94,26 @@ func TestApplyProfile_DevUsesDevelopmentDefaults(t *testing.T) {
 	}
 }
 
+func TestApplyProfile_PprofDebugKeepsProductionProfile(t *testing.T) {
+	clearProfileSelectors(t)
+	clearProfilesYAMLVars(t)
+	t.Setenv("KANDEV_DEBUG_PPROF_ENABLED", "true")
+
+	_, env, err := ApplyProfile()
+	if err != nil {
+		t.Fatalf("ApplyProfile: %v", err)
+	}
+	if env != EnvProd {
+		t.Fatalf("env = %q with pprof-only debug; want %q", env, EnvProd)
+	}
+	if v := os.Getenv("KANDEV_FEATURES_OFFICE"); v != "false" {
+		t.Errorf("KANDEV_FEATURES_OFFICE = %q with pprof-only debug; want %q", v, "false")
+	}
+	if _, ok := os.LookupEnv("KANDEV_WEB_TITLE_PREFIX"); ok {
+		t.Error("KANDEV_WEB_TITLE_PREFIX was set by the production profile; want it unset")
+	}
+}
+
 func TestApplyProfile_ExplicitTitlePrefixWinsInDev(t *testing.T) {
 	clearProfileSelectors(t)
 	clearProfilesYAMLVars(t)
