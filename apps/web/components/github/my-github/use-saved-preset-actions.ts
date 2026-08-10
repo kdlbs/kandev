@@ -57,6 +57,7 @@ function useConfirmSave({
     async (label: string, defaultRepoFilter: string) => {
       try {
         const created = await save({ kind, label, customQuery, repoFilter: defaultRepoFilter });
+        // No persistence started when workspace presets are not available yet.
         if (!created) return;
         markSearchInteracted();
         setProgrammaticSelection({ kind, source: "saved", id: created.id });
@@ -106,6 +107,7 @@ function useDeleteSaved({
     async (id: string) => {
       try {
         const removed = await remove(id);
+        // Loading or a stale target is a no-op, not a persistence failure.
         if (!removed) return;
         markSearchInteracted();
         const currentSelection = selectionRef.current;
@@ -192,9 +194,11 @@ export function useSavedPresetActions({
       try {
         const defaultId = preset.isDefault ? null : preset.id;
         const persisted = await setSavedPresetDefault(preset.kind, defaultId);
+        // Loading or an already-matching default is a no-op, not a persistence failure.
+        if (!persisted) return;
         // Mark interaction so the initial-selection effect does not switch the
         // active view to the newly set default on the same render cycle.
-        if (persisted) markSearchInteracted();
+        markSearchInteracted();
       } catch {
         toast({
           description: t("integrations:failedToUpdateDefaultView"),

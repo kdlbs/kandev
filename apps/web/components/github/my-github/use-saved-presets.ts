@@ -46,12 +46,13 @@ const syncServer = createQueuedUserSettingsSync<SavedPreset[]>((next) => ({
   github_saved_presets: next,
 }));
 
-// Shared across hook instances so all workspace API writes stay ordered. The
-// per-hook mutation queue below only coordinates that instance's optimistic state.
-let workspaceSyncQueue = Promise.resolve();
+// Shared across hook instances so writes for the same workspace stay ordered.
+// Separate workspaces remain independent during navigation between them.
+const workspaceSyncQueues = new Map<string, Promise<void>>();
 
 function syncWorkspaceSavedPresets(workspaceId: string, next: SavedPreset[]): Promise<void> {
-  workspaceSyncQueue = workspaceSyncQueue
+  const previous = workspaceSyncQueues.get(workspaceId) ?? Promise.resolve();
+  const queued = previous
     .catch(() => undefined)
     .then(() =>
       updateGitHubWorkspaceSettings({
@@ -59,13 +60,19 @@ function syncWorkspaceSavedPresets(workspaceId: string, next: SavedPreset[]): Pr
         saved_presets: next,
       }).then(() => undefined),
     );
-  return workspaceSyncQueue;
+  workspaceSyncQueues.set(workspaceId, queued);
+  void queued
+    .finally(() => {
+      if (workspaceSyncQueues.get(workspaceId) === queued) workspaceSyncQueues.delete(workspaceId);
+    })
+    .catch(() => undefined);
+  return queued;
 }
 
 export function __resetSnapshotForTests() {
   snapshot = [];
   snapshotVersion = 0;
-  workspaceSyncQueue = Promise.resolve();
+  workspaceSyncQueues.clear();
   for (const l of listeners) l();
 }
 

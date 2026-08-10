@@ -140,6 +140,66 @@ async function expectPendingDefaultTargetRemoval(mode: PersistenceMode) {
   expectLastPersisted(mode, expected);
 }
 
+async function expectIndependentWorkspacePersistence() {
+  const firstWorkspaceId = "ws-first";
+  const secondWorkspaceId = "ws-second";
+  const firstWrite = deferred<Awaited<ReturnType<typeof updateGitHubWorkspaceSettings>>>();
+  vi.mocked(fetchGitHubWorkspaceSettings).mockImplementation(async (workspaceId) => ({
+    ...workspaceSettings([valid]),
+    workspace_id: workspaceId,
+  }));
+  vi.mocked(updateGitHubWorkspaceSettings).mockImplementation((settings) => {
+    const response = { ...workspaceSettings(), workspace_id: settings.workspace_id };
+    return settings.workspace_id === firstWorkspaceId
+      ? firstWrite.promise
+      : Promise.resolve(response);
+  });
+  const firstHook = renderHook(() => useSavedPresets(firstWorkspaceId));
+  const secondHook = renderHook(() => useSavedPresets(secondWorkspaceId));
+  await waitFor(() => expect(firstHook.result.current.presets).toEqual([valid]));
+  await waitFor(() => expect(secondHook.result.current.presets).toEqual([valid]));
+
+  let firstSave!: Promise<SavedPreset | null>;
+  act(() => {
+    firstSave = firstHook.result.current.save({
+      kind: "pr",
+      label: "First workspace",
+      customQuery: "is:open",
+      repoFilter: "",
+    });
+  });
+  await waitFor(() =>
+    expect(updateGitHubWorkspaceSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ workspace_id: firstWorkspaceId }),
+    ),
+  );
+
+  let secondSave!: Promise<SavedPreset | null>;
+  act(() => {
+    secondSave = secondHook.result.current.save({
+      kind: "pr",
+      label: "Second workspace",
+      customQuery: "is:closed",
+      repoFilter: "",
+    });
+  });
+
+  try {
+    await waitFor(
+      () =>
+        expect(updateGitHubWorkspaceSettings).toHaveBeenCalledWith(
+          expect.objectContaining({ workspace_id: secondWorkspaceId }),
+        ),
+      { timeout: 250 },
+    );
+  } finally {
+    await act(async () => {
+      firstWrite.resolve({ ...workspaceSettings(), workspace_id: firstWorkspaceId });
+      await Promise.all([firstSave, secondSave]);
+    });
+  }
+}
+
 describe("useSavedPresets mutation ordering", () => {
   beforeEach(() => {
     __resetSnapshotForTests();
@@ -212,10 +272,9 @@ describe("useSavedPresets mutation ordering", () => {
     expectLastPersisted(mode, expected);
   });
 
-  it.each(MODES)(
-    "preserves removal of a %s default target while it is pending",
-    expectPendingDefaultTargetRemoval,
-  );
+  it.each(MODES)("removes a pending %s default target", expectPendingDefaultTargetRemoval);
+
+  it("persists different workspaces independently", expectIndependentWorkspacePersistence);
 
   it("detaches future workspace writes from a stale test queue", async () => {
     const firstWrite = deferred<Awaited<ReturnType<typeof updateGitHubWorkspaceSettings>>>();
