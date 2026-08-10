@@ -46,10 +46,9 @@ test.describe("Workspace picker shortcut (global)", () => {
     expect(workspaceIds).toContain(second.id);
     expect(workspaceIds.length).toBeGreaterThanOrEqual(2);
 
-    // The controlled store update renders the menu before Radix's focus
-    // effect runs. Wait for the menu to own focus before sending navigation
-    // keys, otherwise the first ArrowDown can land on the document body on a
-    // busy CI runner.
+    // The shortcut opens a controlled menu. Wait for Radix's focus handoff
+    // before sending navigation keys, otherwise the first ArrowDown can land
+    // on the document body on a busy CI runner.
     await expect(testPage.getByRole("menu")).toBeFocused();
 
     // Focus lands on the menu itself, so the first ArrowDown moves to item 1
