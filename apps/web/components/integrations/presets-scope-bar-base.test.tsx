@@ -75,8 +75,18 @@ afterEach(() => {
 
 type Kind = "pr" | "issue";
 type Props = IntegrationScopeBarProps<Kind>;
+type DefaultActions<T> = T extends {
+  onToggleSavedDefault?: ((id: string) => void) | undefined;
+  defaultMutationPendingId?: string | null | undefined;
+}
+  ? Pick<T, "onToggleSavedDefault" | "defaultMutationPendingId">
+  : never;
 const ARIA_DISABLED_ATTRIBUTE = "aria-disabled";
 const FUTURE_DELETE_LABEL = "Delete Future default saved query";
+
+function acceptDefaultActions(actions: DefaultActions<Props>) {
+  return actions;
+}
 
 function renderBar(overrides: Partial<Props> = {}) {
   const onSelect = vi.fn();
@@ -107,6 +117,7 @@ function renderBar(overrides: Partial<Props> = {}) {
     canSaveCurrent: false,
     onSaveCurrent: vi.fn(),
     onToggleSavedDefault,
+    defaultMutationPendingId: null,
     ...overrides,
   };
   return {
@@ -126,6 +137,11 @@ function expectActiveKindReselectionNoop() {
 }
 
 describe("IntegrationScopeBar saved defaults", () => {
+  it("requires pending default state to include its callback", () => {
+    // @ts-expect-error A pending id without its mutation callback is an invalid contract.
+    expect(acceptDefaultActions({ defaultMutationPendingId: "saved-b" })).toBeDefined();
+  });
+
   it("ignores reselecting the active kind", expectActiveKindReselectionNoop);
 
   it("delegates kind changes to the explicit callback when provided", () => {

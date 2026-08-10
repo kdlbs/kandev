@@ -198,6 +198,33 @@ async function expectStaleDeleteOutcomeIgnored() {
   expect(setRepoFilter).not.toHaveBeenCalled();
 }
 
+async function expectStaleToggleDefaultOutcomeIgnored() {
+  let finishSetDefault!: () => void;
+  const setDefault = vi.fn(
+    () =>
+      new Promise<boolean>((resolve) => {
+        finishSetDefault = () => resolve(true);
+      }),
+  );
+  const { result, rerender, markSearchInteracted } = renderActions(
+    {},
+    makeStore({ presets: [savedPreset], setDefault }),
+  );
+
+  let mutation!: Promise<void>;
+  act(() => {
+    mutation = result.current.onToggleSavedDefault(savedPreset);
+  });
+  rerender({ workspaceId: SECOND_WORKSPACE_ID });
+  await act(async () => {
+    finishSetDefault();
+    await mutation;
+  });
+
+  expect(markSearchInteracted).not.toHaveBeenCalled();
+  expect(result.current.defaultMutationPendingId).toBeNull();
+}
+
 async function expectDefaultPendingScopedToWorkspace() {
   let finishFirst!: () => void;
   let finishSecond!: () => void;
@@ -448,6 +475,11 @@ describe("useSavedPresetActions default deletion", () => {
 
 describe("useSavedPresetActions default actions", () => {
   it("scopes pending default toggles to their workspace", expectDefaultPendingScopedToWorkspace);
+
+  it(
+    "ignores a completed default toggle after changing workspace",
+    expectStaleToggleDefaultOutcomeIgnored,
+  );
 
   it("keeps action handlers stable across unchanged renders", () => {
     const { result, rerender } = renderActions();

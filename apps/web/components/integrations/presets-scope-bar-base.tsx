@@ -204,6 +204,17 @@ function SavedMenu<K extends string>({
   );
 }
 
+type SavedDefaultActionProps =
+  | {
+      /** Emits only the stable id; domain wrappers own richer saved-query data. */
+      onToggleSavedDefault: (id: string) => void;
+      defaultMutationPendingId: string | null;
+    }
+  | {
+      onToggleSavedDefault?: never;
+      defaultMutationPendingId?: never;
+    };
+
 export type IntegrationScopeBarProps<K extends string> = {
   className?: string;
   testId: string;
@@ -218,10 +229,7 @@ export type IntegrationScopeBarProps<K extends string> = {
   onDeleteSaved: (id: string) => void;
   canSaveCurrent: boolean;
   onSaveCurrent: () => void;
-  /** Emits only the stable id; domain wrappers own richer saved-query data. */
-  onToggleSavedDefault?: (id: string) => void;
-  defaultMutationPendingId?: string | null;
-};
+} & SavedDefaultActionProps;
 
 export function IntegrationScopeBar<K extends string>({
   className,
