@@ -23,35 +23,33 @@ import (
 // falls toward "live". This drives the real walkProcessTree path against a
 // genuine /proc-backed descendant, not a stub.
 //
-// turnRef is placed one nanosecond before the end of childStart's own tick
-// bucket rather than at a fixed small offset from childStart: linuxBootTime
-// reads time.Now() with full nanosecond jitter, so childStart is not itself
-// tick-aligned to the truncation boundary (unlike Darwin's kinfo_proc
-// start time, which is already microsecond-quantized) — a fixed offset
-// could occasionally cross into the next tick and flake.
+// The marker is built directly in the tick domain — bootTicks: childTicks —
+// rather than round-tripped through a wall-clock turnRef and
+// newTurnStartMarker's own linuxBootTime() call. /proc/uptime is quantized to
+// the same ~10ms as one tick, so two independent linuxBootTime() reads (one
+// here, one inside newTurnStartMarker) can disagree by a full tick and flip
+// this exact boundary — confirmed in CI, not theoretical. Setting
+// bootTicks == childTicks reproduces the same claim AC-80 makes (a same-tick
+// descendant counts as live under the inclusive >= comparison) without a
+// second boot-time read; newTurnStartMarker's own truncation arithmetic has
+// its own dedicated, single-read coverage in
+// TestNewTurnStartMarker_ComputesBootTicksOnce below.
 func TestWalkProcessTree_LinuxStartTimeSource(t *testing.T) {
 	parentPID := spawnSleepChild(t)
 	root, ok := captureRootIdentity(parentPID)
 	require.True(t, ok, "expected to capture the spawned parent's root identity")
 
-	// A single linuxBootTime() anchor converts childTicks into turnRef, so
-	// the two independent /proc/uptime reads a wall-clock round trip would
-	// need can never disagree by a sub-millisecond delta and shift the
-	// boundary this test is specifically pinning.
-	bootTime, ok := linuxBootTime()
-	require.True(t, ok, "expected /proc/uptime to be readable in CI")
-
 	childTicks, ok := linuxChildStartTime(parentPID)
 	require.True(t, ok, "expected to find the spawned descendant under /proc")
 
-	turnRef := bootTime.Add(time.Duration(childTicks+1)*linuxProcStatResolution - time.Nanosecond)
+	marker := turnStartMarker{bootTicks: childTicks, hasBootTicks: true}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	result := walkProcessTree(ctx, root, newTurnStartMarker(turnRef))
+	result := walkProcessTree(ctx, root, marker)
 	assert.Equal(t, probeResultLive, result,
-		"a descendant in the same tick as turnRef, but numerically earlier before truncation, must report live")
+		"a descendant whose ticks equal the recorded turn-start ticks must report live (inclusive >=)")
 }
 
 // TestNewTurnStartMarker_ComputesBootTicksOnce is the regression guard for
@@ -86,10 +84,10 @@ func TestNewTurnStartMarker_ComputesBootTicksOnce(t *testing.T) {
 }
 
 // linuxChildStartTime finds the direct child of parentPID under /proc and
-// returns its raw ticks-since-boot start time. Callers that need a wall-clock
-// value convert it themselves against their own single linuxBootTime()
-// anchor, so a boundary test never round-trips through two independent
-// /proc/uptime reads.
+// returns its raw ticks-since-boot start time. Returning raw ticks rather
+// than a wall-clock time.Time lets callers build a turnStartMarker directly
+// in the tick domain, with no linuxBootTime() call (and no boundary-flipping
+// double-read risk) needed at all.
 func linuxChildStartTime(parentPID int) (int64, bool) {
 	entries, err := os.ReadDir("/proc")
 	if err != nil {

@@ -8,6 +8,11 @@ import (
 	"go.uber.org/zap"
 )
 
+// unknownProbeResult is the fail-closed background-probe result (AC-46):
+// every unparseable request, panic, or recovered error resolves to this
+// value rather than a live/settled guess.
+const unknownProbeResult = "unknown"
+
 // handleWSBackgroundProbe handles the agent.background.probe WS action.
 // It walks the agent's process tree and reports whether any descendant process
 // born at or after the most recent turn start is still alive.
@@ -16,7 +21,7 @@ func (s *Server) handleWSBackgroundProbe(ctx context.Context, msg *ws.Message) *
 		SessionID string `json:"session_id"`
 	}
 	if err := msg.ParsePayload(&req); err != nil {
-		resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]any{"result": "unknown"})
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]any{"result": unknownProbeResult})
 		return resp
 	}
 	result := probeProcessTreeRecovered(s.logger, func() string {
@@ -38,14 +43,14 @@ func (s *Server) handleWSBackgroundProbe(ctx context.Context, msg *ws.Message) *
 // intends. Mirrors the recover pattern already used in port_proxy.go and
 // vscode_proxy.go in this same package (Review round 2 MUST-FIX 2).
 func probeProcessTreeRecovered(log *logger.Logger, fn func() string) (result string) {
-	result = "unknown"
+	result = unknownProbeResult
 	defer func() {
 		if r := recover(); r != nil {
 			if log != nil {
 				log.Warn("background probe process-tree walk panicked, treating as unknown",
 					zap.Any("panic", r))
 			}
-			result = "unknown"
+			result = unknownProbeResult
 		}
 	}()
 	return fn()
