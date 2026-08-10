@@ -362,6 +362,7 @@ describe("release desktop artifacts", () => {
 
   it("keeps the generated tap formula on the installed runtime smoke contract", () => {
     const formula = readRepoFile("scripts/release/kandev.rb");
+    const updater = readRepoFile("scripts/release/update-homebrew-tap.sh");
 
     expect(formula).toContain(
       'assert_equal "v#{version}", shell_output("#{bin}/kandev --version").strip',
@@ -370,7 +371,10 @@ describe("release desktop artifacts", () => {
     expect(formula).toContain("/health");
     expect(formula).toContain('"status":"ok"');
     expect(formula).toContain("<title>Kandev</title>");
-    expect(formula).not.toContain('version "__VERSION__"');
+    expect(formula.indexOf('version "__VERSION__"')).toBeLessThan(
+      formula.indexOf('license "AGPL-3.0-only"'),
+    );
+    expect(updater).toContain('-e "s|__VERSION__|$VERSION|g"');
   });
 
   it("bumps desktop package and Tauri versions during release preparation", () => {
