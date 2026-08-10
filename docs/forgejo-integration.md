@@ -4,6 +4,10 @@ Kandev connects to a Forgejo server per workspace through its REST v1 API.
 Configure the server origin and a scoped personal access token at **Settings →
 Integrations → Forgejo**.
 
+Connection testing verifies the authenticated identity and the server's REST
+API v1 version before Kandev stores the workspace configuration. A server that
+does not report a compatible v1 API is rejected without saving the token.
+
 ## Token permissions
 
 Use a token with `read:repository` and `read:issue` for repository discovery,
