@@ -132,13 +132,22 @@ describe("StepsVisibilitySection — multi-workflow disclosure headers and defau
 
   it("expanding a group reveals exactly that workflow's steps in position order and toggles disclosure only for that workflow", () => {
     const onToggleGroupDisclosure = vi.fn();
+    const onToggleStepVisibility = vi.fn();
     render(
       <StepsVisibilitySection
-        {...baseProps({ eligibleWorkflows: [WF_A, WF_B], snapshots, onToggleGroupDisclosure })}
+        {...baseProps({
+          eligibleWorkflows: [WF_A, WF_B],
+          snapshots,
+          onToggleGroupDisclosure,
+          onToggleStepVisibility,
+        })}
       />,
     );
     fireEvent.click(groupToggle(WF_A.id));
     expect(onToggleGroupDisclosure).toHaveBeenCalledWith(WF_A.id, false);
+    // Expanding or collapsing a group SHALL have no effect on
+    // hiddenWorkflowStepIds — no settings write is issued.
+    expect(onToggleStepVisibility).not.toHaveBeenCalled();
   });
 
   it("clicking a step checkbox calls onToggleStepVisibility with the workflow and step id", () => {
@@ -154,6 +163,30 @@ describe("StepsVisibilitySection — multi-workflow disclosure headers and defau
       />,
     );
     fireEvent.click(screen.getByTestId(STEP_A1_TESTID));
+    expect(onToggleStepVisibility).toHaveBeenCalledWith(WF_A.id, "a1");
+  });
+
+  it("clicking the row's title text (away from the checkbox control) also toggles the step, because the row is the checkbox's label", () => {
+    const onToggleStepVisibility = vi.fn();
+    render(
+      <StepsVisibilitySection
+        {...baseProps({
+          eligibleWorkflows: [WF_A, WF_B],
+          snapshots,
+          hiddenWorkflowStepIds: { [WF_A.id]: ["a1"] },
+          onToggleStepVisibility,
+        })}
+      />,
+    );
+    const row = screen.getByTestId(`steps-filter-step-row-a1`);
+    const titleSpan = row.querySelector("span[title]");
+    expect(titleSpan).not.toBeNull();
+    // Never click the nested checkbox control itself here — that is the
+    // already-covered case above. This asserts the native <label>-forwards-
+    // to-nested-<button role="checkbox"> behaviour the row testid exists to
+    // guarantee (spec: "Build SHALL emit both; clicking either toggles the
+    // step, because the row is the checkbox's label").
+    fireEvent.click(titleSpan as Element);
     expect(onToggleStepVisibility).toHaveBeenCalledWith(WF_A.id, "a1");
   });
 });
@@ -346,5 +379,24 @@ describe("StepsVisibilitySection — step toggle vs disclosure coupling", () => 
 
     expectExpanded(WF_A.id, true);
     expect(screen.getByTestId(STEP_A1_TESTID)).not.toBeNull();
+  });
+
+  it("explicitly collapsing a hidden-bearing group is honoured — checkboxes leave the DOM but the container and shown-count summary remain, still reporting the hidden step", () => {
+    render(<Harness />);
+    // A starts expanded by default (a1 is hidden).
+    expectExpanded(WF_A.id, true);
+    expect(screen.getByTestId(STEP_A1_TESTID)).not.toBeNull();
+
+    // Explicitly collapse it — nothing auto-reopens a collapse on a
+    // hidden-bearing group, even though it still holds a live hidden step.
+    fireEvent.click(groupToggle(WF_A.id));
+
+    expectExpanded(WF_A.id, false);
+    expect(screen.queryByTestId(STEP_A1_TESTID)).toBeNull();
+    expect(screen.queryByTestId("steps-filter-step-row-a1")).toBeNull();
+    expect(screen.getByTestId(`steps-filter-group-${WF_A.id}`)).not.toBeNull();
+    // The shown-count summary is the discoverability affordance in the
+    // collapsed state — it still reports the hidden step (0 of 1 shown).
+    expect(groupToggle(WF_A.id).textContent).toContain("0 of 1 shown");
   });
 });

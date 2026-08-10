@@ -305,15 +305,39 @@ test.describe("Mobile Steps visibility filter", () => {
     const mobile = new MobileKanbanPage(testPage);
     await mobile.goto();
 
-    // Genuinely globally empty (F24): every step of BOTH seeded workflows is
-    // hidden, so `getVisibleWorkflows`'s every-workflow-empty branch fires
-    // regardless of which workflow the mobile navigator currently focuses —
-    // independent of whether the navigator itself writes the workflow filter.
     await openMobileMenu(testPage);
     await expandStepsGroup(testPage, workflowAId);
     for (const step of workflowASteps) {
       await testPage.getByTestId(`steps-filter-step-${step.id}`).click();
     }
+    await closeMobileMenu(testPage);
+
+    // Intermediate state: A now has zero visible tasks but B still holds one.
+    // `getVisibleWorkflows` (swimlane-container.tsx) filters a zero-task
+    // workflow OUT of the "All Workflows" swimlane list whenever some other
+    // workflow still has visible tasks — `showEmptyBoard` only changes that
+    // behaviour when EVERY workflow is empty — so A is dropped entirely
+    // rather than rendered with zero columns. A's columns are absent either
+    // way, but this intermediate step is NOT yet the scenario under test:
+    // dropping a workflow never reaches `SwipeableColumns` with a zero-length
+    // `steps` array, so it can't exercise the crash-class risk below.
+    for (const step of workflowASteps) {
+      await expect(testPage.getByTestId(`kanban-column-${step.id}`)).toHaveCount(0);
+    }
+    await expect(testPage.getByTestId(`kanban-column-${stepB1Id}`)).toBeVisible();
+    await expect(mobile.taskCardByTitle(TASK_B1)).toBeVisible();
+
+    // Genuinely globally empty: hiding B's steps too is what actually flips
+    // `getVisibleWorkflows`'s all-empty branch, which on mobile kanban
+    // (`showEmptyBoard=true`) falls back to rendering a focused workflow with
+    // its own (now zero-length) collapsed `steps` array — the one
+    // crash-class risk (`SwipeableColumns` / `mobile-column-tabs` receiving a
+    // zero-length array) that only the phone can hit and that no desktop spec
+    // can observe. Keeping B populated would never reach this branch, since a
+    // workflow with visible tasks elsewhere makes `getVisibleWorkflows` drop
+    // the empty one instead of rendering it — a different, already
+    // desktop-covered code path.
+    await openMobileMenu(testPage);
     await expandStepsGroup(testPage, workflowBId);
     for (const step of workflowBSteps) {
       await testPage.getByTestId(`steps-filter-step-${step.id}`).click();

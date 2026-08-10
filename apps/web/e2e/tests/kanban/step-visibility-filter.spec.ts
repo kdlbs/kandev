@@ -230,6 +230,7 @@ test.describe("Kanban step visibility filter", () => {
     // Workflow B's start step checkbox must remain checked
     await expandStepsGroup(kanban, workflowBId);
     const checkboxB = testPage.getByTestId(`steps-filter-step-${startStepBId}`);
+    await expect(checkboxB).toHaveCount(1);
     await expect(checkboxB).toBeChecked();
     await closeDisplayDropdown(kanban);
 
