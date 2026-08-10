@@ -261,6 +261,65 @@ async function expectQueuedWorkspaceSaveIsolation() {
   expect(result.current.presets).toEqual([secondWorkspacePreset]);
 }
 
+async function expectWorkspaceNavigationUnblocksNewMutations() {
+  const firstWorkspaceId = "ws-first";
+  const secondWorkspaceId = "ws-second";
+  const firstWorkspacePreset = { ...valid, label: "Workspace A" };
+  const secondWorkspacePreset = { ...valid, id: "pr-b", label: "Workspace B" };
+  const firstWrite = deferred<Awaited<ReturnType<typeof updateGitHubWorkspaceSettings>>>();
+  vi.mocked(fetchGitHubWorkspaceSettings).mockImplementation(async (workspaceId) => ({
+    ...workspaceSettings(
+      workspaceId === firstWorkspaceId ? [firstWorkspacePreset] : [secondWorkspacePreset],
+    ),
+    workspace_id: workspaceId,
+  }));
+  vi.mocked(updateGitHubWorkspaceSettings)
+    .mockReturnValueOnce(firstWrite.promise)
+    .mockResolvedValue(workspaceSettings());
+  const { result, rerender } = renderHook(({ workspaceId }) => useSavedPresets(workspaceId), {
+    initialProps: { workspaceId: firstWorkspaceId },
+  });
+  await waitFor(() => expect(result.current.presets).toEqual([firstWorkspacePreset]));
+
+  let firstSave!: Promise<SavedPreset | null>;
+  act(() => {
+    firstSave = result.current.save({
+      kind: "pr",
+      label: "First pending",
+      customQuery: "is:open",
+      repoFilter: "",
+    });
+  });
+  await waitFor(() => expect(updateGitHubWorkspaceSettings).toHaveBeenCalledTimes(1));
+
+  rerender({ workspaceId: secondWorkspaceId });
+  await waitFor(() => expect(result.current.presets).toEqual([secondWorkspacePreset]));
+  let secondSave!: Promise<SavedPreset | null>;
+  act(() => {
+    secondSave = result.current.save({
+      kind: "pr",
+      label: "Second immediate",
+      customQuery: "is:closed",
+      repoFilter: "",
+    });
+  });
+
+  try {
+    await waitFor(
+      () =>
+        expect(updateGitHubWorkspaceSettings).toHaveBeenCalledWith(
+          expect.objectContaining({ workspace_id: secondWorkspaceId }),
+        ),
+      { timeout: 250 },
+    );
+  } finally {
+    await act(async () => {
+      firstWrite.resolve(workspaceSettings());
+      await Promise.all([firstSave, secondSave]);
+    });
+  }
+}
+
 async function expectSaveThenRemove(mode: PersistenceMode) {
   const resolveSave = deferFirstPersistence(mode);
   const { result } = await renderLoaded(mode, [valid]);
@@ -455,6 +514,8 @@ describe("useSavedPresets mutation ordering", () => {
   it("persists different workspaces independently", expectIndependentWorkspacePersistence);
 
   it("keeps queued saves scoped across workspace navigation", expectQueuedWorkspaceSaveIsolation);
+
+  it("new workspace skips the old mutation queue", expectWorkspaceNavigationUnblocksNewMutations);
 
   it("detaches future workspace writes from a stale test queue", async () => {
     const firstWrite = deferred<Awaited<ReturnType<typeof updateGitHubWorkspaceSettings>>>();

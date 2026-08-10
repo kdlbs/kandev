@@ -216,6 +216,11 @@ export function useSavedPresets(workspaceId: string | null = null) {
     setWorkspacePresets,
   );
   const mutationQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const previousWorkspaceIdRef = useRef(workspaceId);
+  if (previousWorkspaceIdRef.current !== workspaceId) {
+    previousWorkspaceIdRef.current = workspaceId;
+    mutationQueueRef.current = Promise.resolve();
+  }
 
   const queueMutation = useCallback(
     (mutation: () => Promise<void>) => {
