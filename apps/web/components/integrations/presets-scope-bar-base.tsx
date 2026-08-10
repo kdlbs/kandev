@@ -166,6 +166,8 @@ function SavedMenu<K extends string>({
                   onToggle={() => onToggleSavedDefault(s.id)}
                 />
               )}
+              {/* A peer Radix item is intentional: arrow navigation reaches delete,
+                  and focus opacity reveals it without pointer hover. */}
               <DropdownMenuItem
                 disabled={defaultMutationPending}
                 onSelect={(event) => {

@@ -113,6 +113,9 @@ describe("useSavedPresetActions save actions", () => {
       customQuery: QUERY,
       repoFilter: REPO,
     });
+    expect(save.mock.invocationCallOrder[0]).toBeLessThan(
+      markSearchInteracted.mock.invocationCallOrder[0],
+    );
     expect(setProgrammaticSelection).toHaveBeenCalledWith({
       kind: "issue",
       source: "saved",
@@ -135,7 +138,7 @@ describe("useSavedPresetActions save actions", () => {
 
     await act(async () => result.current.onConfirmSave("Unavailable", REPO));
 
-    expect(markSearchInteracted).toHaveBeenCalledOnce();
+    expect(markSearchInteracted).not.toHaveBeenCalled();
     expect(save).toHaveBeenCalledWith({
       kind: "issue",
       label: "Unavailable",
@@ -151,7 +154,10 @@ describe("useSavedPresetActions save actions", () => {
     const failure = Promise.reject(new Error("settings down"));
     void failure.catch(() => undefined);
     const save = vi.fn(() => failure);
-    const { result, setProgrammaticSelection } = renderActions({}, makeStore({ save }));
+    const { result, setProgrammaticSelection, markSearchInteracted } = renderActions(
+      {},
+      makeStore({ save }),
+    );
 
     await act(async () => result.current.onConfirmSave("Unavailable", REPO));
 
@@ -160,6 +166,7 @@ describe("useSavedPresetActions save actions", () => {
       variant: "error",
     });
     expect(setProgrammaticSelection).not.toHaveBeenCalled();
+    expect(markSearchInteracted).not.toHaveBeenCalled();
   });
 });
 
@@ -178,6 +185,9 @@ describe("useSavedPresetActions delete actions", () => {
 
     expect(markSearchInteracted).toHaveBeenCalledOnce();
     expect(remove).toHaveBeenCalledWith(savedPreset.id);
+    expect(remove.mock.invocationCallOrder[0]).toBeLessThan(
+      markSearchInteracted.mock.invocationCallOrder[0],
+    );
     expect(remove.mock.invocationCallOrder[0]).toBeLessThan(
       setProgrammaticSelection.mock.invocationCallOrder[0],
     );
@@ -212,14 +222,26 @@ describe("useSavedPresetActions delete actions", () => {
     expect(setRepoFilter).not.toHaveBeenCalled();
   });
 
+  it("does not mark search interaction when the saved query no longer exists", async () => {
+    const remove = vi.fn(async () => false);
+    const { result, markSearchInteracted } = renderActions({}, makeStore({ remove }));
+
+    await act(async () => result.current.onDeleteSaved(savedPreset.id));
+
+    expect(markSearchInteracted).not.toHaveBeenCalled();
+  });
+
   it("reports a delete persistence failure", async () => {
     const failure = Promise.reject(new Error("settings down"));
     void failure.catch(() => undefined);
     const remove = vi.fn(() => failure);
-    const { result, setProgrammaticSelection, setQueryImmediate, setRepoFilter } = renderActions(
-      {},
-      makeStore({ remove }),
-    );
+    const {
+      result,
+      setProgrammaticSelection,
+      setQueryImmediate,
+      setRepoFilter,
+      markSearchInteracted,
+    } = renderActions({}, makeStore({ remove }));
 
     await act(async () => result.current.onDeleteSaved(savedPreset.id));
 
@@ -230,6 +252,7 @@ describe("useSavedPresetActions delete actions", () => {
     expect(setProgrammaticSelection).not.toHaveBeenCalled();
     expect(setQueryImmediate).not.toHaveBeenCalled();
     expect(setRepoFilter).not.toHaveBeenCalled();
+    expect(markSearchInteracted).not.toHaveBeenCalled();
   });
 });
 

@@ -117,6 +117,13 @@ test.describe("Desktop /github scope bar", () => {
       await expect(issueSavedQuery).toBeFocused();
       await testPage.keyboard.press("ArrowDown");
       await expect(setIssueDefault).toBeFocused();
+      const deleteIssueSavedQuery = testPage.getByRole("menuitem", {
+        name: `Delete ${issueDefaultLabel} saved query`,
+      });
+      await testPage.keyboard.press("ArrowDown");
+      await expect(deleteIssueSavedQuery).toBeFocused();
+      await testPage.keyboard.press("ArrowUp");
+      await expect(setIssueDefault).toBeFocused();
       const setResponse = testPage.waitForResponse(
         (response) =>
           response.url().includes("/api/v1/github/workspace-settings") &&

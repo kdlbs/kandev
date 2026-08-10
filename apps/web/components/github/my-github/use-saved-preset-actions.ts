@@ -55,10 +55,10 @@ function useConfirmSave({
 }) {
   return useCallback(
     async (label: string, defaultRepoFilter: string) => {
-      markSearchInteracted();
       try {
         const created = await save({ kind, label, customQuery, repoFilter: defaultRepoFilter });
         if (!created) return;
+        markSearchInteracted();
         setProgrammaticSelection({ kind, source: "saved", id: created.id });
         setQueryImmediate(customQuery);
         setRepoFilter(defaultRepoFilter);
@@ -104,11 +104,12 @@ function useDeleteSaved({
   selectionRef.current = selection;
   return useCallback(
     async (id: string) => {
-      markSearchInteracted();
       try {
         const removed = await remove(id);
+        if (!removed) return;
+        markSearchInteracted();
         const currentSelection = selectionRef.current;
-        if (removed && currentSelection.source === "saved" && currentSelection.id === id) {
+        if (currentSelection.source === "saved" && currentSelection.id === id) {
           const fallback = firstPresetSelection(currentSelection.kind, prPresets, issuePresets);
           setProgrammaticSelection(fallback.selection);
           setQueryImmediate(fallback.filter);
