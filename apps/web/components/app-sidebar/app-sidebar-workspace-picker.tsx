@@ -1,6 +1,13 @@
 "use client";
 
-import { forwardRef, useCallback, useState, type ComponentPropsWithoutRef } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ComponentPropsWithoutRef,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { useRouter } from "@/lib/routing/client-router";
 import {
@@ -109,6 +116,20 @@ function useMenuOpenState(controlledOpen?: boolean, onOpenChange?: (open: boolea
     [isControlled, onOpenChange],
   );
   return { open: isControlled ? controlledOpen : uncontrolledOpen, setOpen };
+}
+
+function useProgrammaticMenuFocus(open: boolean | undefined) {
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const frame = window.requestAnimationFrame(() => {
+      contentRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [open]);
+
+  return contentRef;
 }
 
 function workspaceType(workspace: WorkspaceItem | undefined): WorkspaceType {
@@ -260,6 +281,7 @@ export function AppSidebarWorkspacePicker({
   const activeWorkspace = workspaces.items.find((w) => w.id === workspaces.activeId);
   const activeId = activeWorkspace?.id ?? null;
   const activeName = activeWorkspace?.name ?? t("sidebar:workspaceFallback");
+  const contentRef = useProgrammaticMenuFocus(open);
 
   const handleSelect = useCallback(
     (workspace: WorkspaceItem) => {
@@ -320,7 +342,11 @@ export function AppSidebarWorkspacePicker({
           className={triggerClassName}
         />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align={contentAlign} className={cn("w-72", contentClassName)}>
+      <DropdownMenuContent
+        ref={contentRef}
+        align={contentAlign}
+        className={cn("w-72", contentClassName)}
+      >
         <WorkspacePickerContent
           workspaces={workspaces.items}
           activeId={activeId}
