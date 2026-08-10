@@ -125,4 +125,19 @@ describe("IntegrationScopeBar saved defaults", () => {
 
     expect(screen.queryByRole("button", { name: /as default view/ })).toBeNull();
   });
+
+  it("names each delete action for its saved query", () => {
+    renderBar();
+
+    expect(
+      screen
+        .getByRole("button", { name: "Delete Current default saved query" })
+        .getAttribute("title"),
+    ).toBe("Delete Current default saved query");
+    expect(
+      screen
+        .getByRole("button", { name: "Delete Future default saved query" })
+        .getAttribute("title"),
+    ).toBe("Delete Future default saved query");
+  });
 });

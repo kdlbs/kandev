@@ -176,7 +176,8 @@ function SavedMenu<K extends string>({
                   onDeleteSaved(s.id);
                 }}
                 className="pointer-events-none cursor-pointer text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/saved:pointer-events-auto group-hover/saved:opacity-100"
-                title={t("integrations:deleteSavedQuery")}
+                title={t("integrations:deleteSavedQueryNamed", { label: s.label })}
+                aria-label={t("integrations:deleteSavedQueryNamed", { label: s.label })}
               >
                 <IconX className="h-3.5 w-3.5" />
               </button>
