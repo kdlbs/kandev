@@ -63,6 +63,7 @@ function syncWorkspaceSavedPresets(workspaceId: string, next: SavedPreset[]): Pr
 export function __resetSnapshotForTests() {
   snapshot = [];
   snapshotVersion = 0;
+  workspaceSyncQueue = Promise.resolve();
   for (const l of listeners) l();
 }
 

@@ -53,6 +53,7 @@ export function useInitialSidebarSelection({
     autoResetSearchRef.current = true;
   }, [workspaceId]);
 
+  // The workspace reset effect above must run first when workspaceId changes.
   useEffect(() => {
     if (userSelectedRef.current || !autoResetSearchRef.current) return;
     const target = resolveDefaultSidebarTarget("pr", savedPresets, resolvedPrPresets);

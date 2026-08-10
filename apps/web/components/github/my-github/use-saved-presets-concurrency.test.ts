@@ -181,4 +181,37 @@ describe("useSavedPresets mutation ordering", () => {
     expect(result.current.presets).toEqual(expected);
     expectLastPersisted(mode, expected);
   });
+
+  it("detaches future workspace writes from a stale test queue", async () => {
+    const firstWrite = deferred<Awaited<ReturnType<typeof updateGitHubWorkspaceSettings>>>();
+    vi.mocked(updateGitHubWorkspaceSettings)
+      .mockReturnValueOnce(firstWrite.promise)
+      .mockResolvedValue(workspaceSettings());
+    const firstHook = await renderLoaded("workspace", [valid]);
+
+    act(() => {
+      firstHook.result.current.save({
+        kind: "pr",
+        label: "First write",
+        customQuery: "is:open",
+        repoFilter: "",
+      });
+    });
+    await waitFor(() => expect(updateGitHubWorkspaceSettings).toHaveBeenCalledTimes(1));
+    firstHook.unmount();
+
+    __resetSnapshotForTests();
+    const secondHook = await renderLoaded("workspace", [valid]);
+    act(() => {
+      secondHook.result.current.save({
+        kind: "pr",
+        label: "Second write",
+        customQuery: "is:closed",
+        repoFilter: "",
+      });
+    });
+
+    await waitFor(() => expect(updateGitHubWorkspaceSettings).toHaveBeenCalledTimes(2));
+    firstWrite.resolve(workspaceSettings());
+  });
 });
