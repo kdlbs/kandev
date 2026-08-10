@@ -63,7 +63,11 @@ func (c *Controller) handleWebhook(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "webhook delivery ID required"})
 		return
 	}
-	if err := c.service.HandleWebhook(ctx.Request.Context(), c.workspaceID(ctx), deliveryID, ctx.GetHeader("X-Gitea-Signature"), payload); err != nil {
+	signature := ctx.GetHeader("X-Forgejo-Signature")
+	if signature == "" {
+		signature = ctx.GetHeader("X-Gitea-Signature")
+	}
+	if err := c.service.HandleWebhook(ctx.Request.Context(), c.workspaceID(ctx), deliveryID, signature, payload); err != nil {
 		c.error(ctx, err)
 		return
 	}
