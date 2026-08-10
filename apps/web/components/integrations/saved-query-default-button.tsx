@@ -36,6 +36,7 @@ export function SavedQueryDefaultButton({
   const iconClassName = cn(
     "h-4 w-4",
     isDefault && "fill-amber-500 text-amber-500",
+    disabled && !isDefault && "fill-amber-500 text-amber-500 opacity-60",
     disabled && "animate-pulse motion-reduce:animate-none",
   );
   if (variant === "dropdown-item") {
