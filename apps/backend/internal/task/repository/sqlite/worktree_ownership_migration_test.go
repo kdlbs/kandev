@@ -10,6 +10,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	dbutil "github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/testutil"
 )
 
@@ -237,9 +238,22 @@ func TestCutover_HybridNormalizedEnvironmentWithLegacySessionWorktrees(t *testin
 	if _, err := NewWithDB(db, db, nil); err != nil {
 		t.Fatalf("seed final schema: %v", err)
 	}
+	seed := seedHybridCutoverState(t, db, "sqlite")
 
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("upgrade hybrid schema: %v", err)
+	}
+	assertHybridCutoverResult(t, repo, seed)
+}
+
+func seedHybridCutoverState(t *testing.T, db *sqlx.DB, suffix string) legacySeed {
+	t.Helper()
 	now := time.Now().UTC().Truncate(time.Second)
-	seed := legacySeed{envID: "env-hybrid", taskID: "task-hybrid", repoID: "repo-hybrid", sessionID: "sess-hybrid"}
+	seed := legacySeed{
+		envID: "env-hybrid-" + suffix, taskID: "task-hybrid-" + suffix,
+		repoID: "repo-hybrid-" + suffix, sessionID: "sess-hybrid-" + suffix,
+	}
 	seedLegacyTask(t, db, seed, now)
 	if _, err := db.Exec(db.Rebind(`
 		INSERT INTO task_environments (
@@ -253,22 +267,40 @@ func TestCutover_HybridNormalizedEnvironmentWithLegacySessionWorktrees(t *testin
 	if _, err := db.Exec(legacySessionWorktreeDDL); err != nil {
 		t.Fatalf("recreate stale legacy table: %v", err)
 	}
-	seedLegacySessionWorktree(t, db, seed.sessionID, "wt-hybrid", seed.repoID, "",
-		"/tasks/hybrid/repo", "feature/hybrid", "active", now)
+	seedLegacySessionWorktree(t, db, seed.sessionID, "wt-session-only", seed.repoID+"-session-only", "",
+		"/tasks/hybrid/session-only", "feature/session-only", "active", now)
+	return seed
+}
 
-	repo, err := NewWithDB(db, db, nil)
+func assertHybridCutoverResult(t *testing.T, repo *Repository, seed legacySeed) {
+	t.Helper()
+	exists, err := repo.tableExists("task_session_worktrees")
 	if err != nil {
-		t.Fatalf("upgrade hybrid schema: %v", err)
+		t.Fatalf("probe stale legacy table: %v", err)
 	}
-	if legacyTableExists(t, db, "task_session_worktrees") {
+	if exists {
 		t.Fatal("stale legacy table must be removed")
 	}
 	env, err := repo.GetTaskEnvironment(context.Background(), seed.envID)
 	if err != nil {
 		t.Fatalf("get normalized environment: %v", err)
 	}
-	if len(env.Repos) != 1 || env.Repos[0].WorktreeID != "wt-hybrid" {
+	if len(env.Repos) != 2 {
 		t.Fatalf("normalized repositories = %+v", env.Repos)
+	}
+	got := make(map[string]*models.TaskEnvironmentRepo, len(env.Repos))
+	for _, envRepo := range env.Repos {
+		got[envRepo.RepositoryID] = envRepo
+	}
+	assertHybridWorktree(t, got[seed.repoID], "wt-hybrid", "/tasks/hybrid/repo", "feature/hybrid")
+	assertHybridWorktree(t, got[seed.repoID+"-session-only"], "wt-session-only",
+		"/tasks/hybrid/session-only", "feature/session-only")
+}
+
+func assertHybridWorktree(t *testing.T, got *models.TaskEnvironmentRepo, worktreeID, path, branch string) {
+	t.Helper()
+	if got == nil || got.WorktreeID != worktreeID || got.WorktreePath != path || got.WorktreeBranch != branch {
+		t.Fatalf("normalized worktree = %+v, want id=%q path=%q branch=%q", got, worktreeID, path, branch)
 	}
 }
 

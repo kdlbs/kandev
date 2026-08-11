@@ -47,6 +47,11 @@ sentinel table behind, causing startup to fail before normalization.
 - **What:** Fully legacy, final, rollback, and conflict fixtures remain valid.
   **File:** same migration test file.
   **How:** Run all `TestCutover` tests and the complete repository package.
+- **What:** PostgreSQL uses the same hybrid-schema recovery behavior through
+  its `information_schema` column probes.
+  **File:** `apps/backend/internal/task/repository/sqlite/postgres_schema_test.go`.
+  **How:** Run the environment-gated PostgreSQL counterpart locally when
+  `KANDEV_TEST_POSTGRES_DSN` is available and in the Backend Postgres CI job.
 
 ## Implementation Waves And Parallel Candidates
 
@@ -73,4 +78,9 @@ parallel-safe.
 - GREEN: the same focused command passed after the repair.
 - `go test ./internal/task/repository/sqlite -run TestCutover -count=1` passed.
 - `go test ./internal/task/repository/sqlite -count=1` passed.
+- `go test ./internal/task/repository/sqlite -run
+  TestPostgresCutoverHybridNormalizedEnvironmentWithLegacySessionWorktrees
+  -count=1 -v` compiled and skipped locally because
+  `KANDEV_TEST_POSTGRES_DSN` is unset; the Backend Postgres CI job owns the live
+  dialect execution.
 - `git diff --check` passed.
