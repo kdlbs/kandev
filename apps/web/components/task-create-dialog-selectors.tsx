@@ -361,7 +361,7 @@ type TaskFormInputsProps = {
    * when the user has voice auto-send enabled. The dialog wires this to a
    * programmatic form submit so dictation can create the task hands-free.
    */
-  onVoiceAutoSend?: () => void;
+  onVoiceAutoSend?: () => boolean | Promise<boolean>;
 };
 
 // eslint-disable-next-line max-lines-per-function
@@ -780,7 +780,7 @@ function useCreationComposerPluginActions(args: {
   description: string;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   insertAtCursor: (text: string) => void;
-  submit?: () => void;
+  submit?: () => boolean | Promise<boolean>;
 }) {
   const { isMobile } = useResponsiveBreakpoint();
   const handle = useMemo(
@@ -797,8 +797,7 @@ function useCreationComposerPluginActions(args: {
         },
         submit: async () => {
           if (args.disabled || !args.description.trim() || !args.submit) return false;
-          args.submit();
-          return true;
+          return await args.submit();
         },
       }),
     [args],

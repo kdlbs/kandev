@@ -401,6 +401,9 @@ func (m *Manifest) validateWebhooks() []error {
 		if wh.MaxBodyBytes < 0 || wh.MaxBodyBytes > MaximumWebhookMaxBodyBytes {
 			errs = append(errs, fmt.Errorf("webhook %q max_body_bytes must be between 1 and %d when set", wh.Key, MaximumWebhookMaxBodyBytes))
 		}
+		if wh.EffectiveAccess() == WebhookAccessPublic && wh.MaxBodyBytes > DefaultWebhookMaxBodyBytes {
+			errs = append(errs, fmt.Errorf("webhook %q must use authenticated access when max_body_bytes exceeds %d", wh.Key, DefaultWebhookMaxBodyBytes))
+		}
 		if seen[wh.Key] {
 			errs = append(errs, fmt.Errorf("duplicate webhook key %q", wh.Key))
 			continue

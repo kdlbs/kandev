@@ -39,8 +39,9 @@ Decision: [ADR-2026-08-11-composer-access-authenticated-webhooks](../../decision
 - A webhook declaration chooses `access: public` or `access: authenticated`. Existing declarations
   default to `public`; authenticated webhooks require the current Kandev user and same-origin browser
   request checks before the existing plugin webhook RPC runs.
-- A webhook declaration may lower or raise its request cap through `max_body_bytes`, up to a host
-  ceiling of 16 MiB. Existing declarations default to 4 MiB. Voice transcription declares an
+- A webhook declaration may lower its request cap through `max_body_bytes`. Only authenticated
+  webhooks may raise it above the existing 4 MiB public ceiling, up to a host ceiling of 16 MiB.
+  Voice transcription declares an
   authenticated webhook with a limit of at least 10 MiB.
 - The Voice plugin's OpenAI key belongs to its existing plugin settings and secret storage. Kandev
   relays the request but does not own, expose, or select that key.
@@ -57,7 +58,11 @@ Decision: [ADR-2026-08-11-composer-access-authenticated-webhooks](../../decision
 ### Composer slots
 
 ```ts
-type PluginComposerSurface = "task-chat" | "quick-chat" | "task-create" | "new-session";
+type PluginComposerSurface =
+  | "task-chat"
+  | "quick-chat"
+  | "task-create"
+  | "new-session";
 type PluginPresentation = "desktop" | "mobile";
 
 type PluginComposerSubmitResult =

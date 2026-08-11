@@ -476,6 +476,27 @@ func TestReadCappedWebhookBodyUsesDeclaredLimit(t *testing.T) {
 	}
 }
 
+func TestWebhookRelayHeadersStripHostCredentials(t *testing.T) {
+	headers := http.Header{
+		"Authorization": []string{"Bearer kandev-pat"},
+		"Cookie":        []string{"kandev_session=secret"},
+		"Content-Type":  []string{"audio/webm"},
+		"X-Plugin-Key":  []string{"plugin-secret"},
+	}
+
+	got := flattenWebhookHeaders(headers)
+
+	if _, ok := got["Authorization"]; ok {
+		t.Fatal("Authorization header was forwarded to plugin")
+	}
+	if _, ok := got["Cookie"]; ok {
+		t.Fatal("Cookie header was forwarded to plugin")
+	}
+	if got["Content-Type"] != "audio/webm" || got["X-Plugin-Key"] != "plugin-secret" {
+		t.Fatalf("relay-safe headers = %#v", got)
+	}
+}
+
 func TestWebhookHandlerNotRunningReturns503(t *testing.T) {
 	router, svc := newTestRouter(t)
 	if _, err := svc.Install(t.Context(), webhookPackage(t, "kandev-plugin-slack", "key1")); err != nil {

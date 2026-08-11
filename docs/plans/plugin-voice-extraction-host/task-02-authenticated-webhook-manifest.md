@@ -14,8 +14,8 @@ spec: "../../specs/plugins/voice-extraction-host.md"
 
 - Manifest webhooks support optional `access: public|authenticated` and `max_body_bytes`, with legacy
   declarations resolving to public access and a 4 MiB limit.
-- Validation rejects unknown access modes and limits outside `(0, 16 MiB]`, while preserving existing
-  key uniqueness and method behavior.
+- Validation rejects unknown access modes, public limits above 4 MiB, and authenticated limits above
+  16 MiB, while preserving existing key uniqueness and method behavior.
 - Install, registry, and JSON/YAML round-trip tests preserve the new fields. Protobuf and the Go plugin
   SDK remain unchanged.
 

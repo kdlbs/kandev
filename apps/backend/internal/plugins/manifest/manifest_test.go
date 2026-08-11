@@ -463,6 +463,7 @@ func TestWebhookAccessAndBodyLimitValidation(t *testing.T) {
 	}{
 		{name: "legacy defaults", webhook: Webhook{Key: "transcribe"}},
 		{name: "authenticated 16 MiB", webhook: Webhook{Key: "transcribe", Access: "authenticated", MaxBodyBytes: 16 << 20}},
+		{name: "public over default ceiling", webhook: Webhook{Key: "transcribe", Access: "public", MaxBodyBytes: (4 << 20) + 1}, wantErr: "authenticated"},
 		{name: "unknown access", webhook: Webhook{Key: "transcribe", Access: "private"}, wantErr: "access"},
 		{name: "over host ceiling", webhook: Webhook{Key: "transcribe", MaxBodyBytes: (16 << 20) + 1}, wantErr: "max_body_bytes"},
 	}

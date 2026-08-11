@@ -722,8 +722,10 @@ defaults, or the bare component when the route opted out (`topbar: false`).
   The chat composer toolbar
   (`components/task/chat/chat-input-toolbar-desktop.tsx` and
   `-mobile.tsx`, via `chat-input-plugin-actions.tsx`) hosts the
-  `chat-input-actions` slot, passing
-  `{ taskId, taskTitle, activeSessionId, sessionIds }`. `kanban-card-plugin-slots.tsx`
+  `chat-input-actions` slot for task and Quick Chat, passing the typed
+  `PluginComposerSlotProps`. Task creation and new-session creation mount
+  `task-create-input-actions` and `new-session-input-actions` with the same
+  capability contract. `kanban-card-plugin-slots.tsx`
   hosts `task-card-indicators` beside `PRTaskIcon` and `task-card-tags` as its
   own row, both mounted from `kanban-card-content.tsx`'s `KanbanCardBody`.
 - `components/task/dockview-shared.tsx` / `dockview-panel-content.tsx` /

@@ -395,7 +395,7 @@ func (c *Controller) webhook(ctx *gin.Context) {
 		WebhookKey: key,
 		Method:     ctx.Request.Method,
 		Query:      ctx.Request.URL.RawQuery,
-		Headers:    flattenHeaders(ctx.Request.Header),
+		Headers:    flattenWebhookHeaders(ctx.Request.Header),
 		Body:       body,
 	}
 
@@ -534,4 +534,11 @@ func flattenHeaders(h http.Header) map[string]string {
 		out[k] = strings.Join(v, ", ")
 	}
 	return out
+}
+
+func flattenWebhookHeaders(h http.Header) map[string]string {
+	safe := h.Clone()
+	safe.Del("Authorization")
+	safe.Del("Cookie")
+	return flattenHeaders(safe)
 }

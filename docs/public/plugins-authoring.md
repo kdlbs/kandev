@@ -116,9 +116,10 @@ curated React, UI, and app-store surface.
   capabilities.events controls event delivery.
 - GetConfig and EmitEvent are ungated. GetConfig returns this plugin's own
   config, including cleartext secret fields, so do not log or commit it.
-- Declared webhook keys are routable, but Kandev does not authenticate callers
-  or enforce webhooks[].method. Validate the method, provider signature, and
-  replay/timestamp rules inside the plugin before side effects.
+- Declared webhook keys default to public. Set `webhooks[].access: authenticated`
+  for browser UI and billable operations. Kandev does not enforce
+  `webhooks[].method`; public integrations must still validate the provider
+  signature and replay/timestamp rules before side effects.
 - capabilities.auth is the highest-risk capability. A webhook response may
   assert a verified external identity with X-Kandev-Auth-Login; only assert an
   email the IdP verified as owned by the subject. See [ADR 0050](../decisions/0050-plugin-external-auth-capability.md).
@@ -203,24 +204,32 @@ bookkeeping is host-internal; plugins do not call lifecycle methods.
 registerComponent currently has these mounted slots. The source type is open
 to strings, but an unmounted name renders nowhere.
 
-| Slot                 | Mounted location                                         | slotProps                                                        |
-| -------------------- | -------------------------------------------------------- | ---------------------------------------------------------------- |
-| task-sidebar         | Bottom of task-detail sidebar                            | none                                                             |
-| settings-nav         | Settings navigation tree                                 | none                                                             |
-| chat-input-actions   | Chat composer toolbar                                    | { taskId, taskTitle?, activeSessionId, sessionIds }              |
-| chat-top-bar         | Session top bar                                          | { taskId, taskTitle?, workspaceId, activeSessionId, sessionIds } |
-| main-top-bar         | Home/Kanban/Tasks top bar                                | { workspaceId, workspaceLabel?, currentPage }                    |
-| app-status-bar-left  | Left side of desktop status bar or mobile status drawer  | AppStatusBarSlotProps                                            |
-| app-status-bar-right | Right side of desktop status bar or mobile status drawer | AppStatusBarSlotProps                                            |
-| plugin-settings      | Top of this plugin's Settings > Plugins page             | { pluginId, status }; owner-scoped to the plugin being viewed    |
-| task-card-indicators | Kanban card, beside the PR status icon                   | { taskId, workspaceId, workflowStepId }                          |
-| task-card-tags       | Kanban card, its own row below the badges row            | { taskId, workspaceId, workflowStepId }                          |
+| Slot                      | Mounted location                                         | slotProps                                                        |
+| ------------------------- | -------------------------------------------------------- | ---------------------------------------------------------------- |
+| task-sidebar              | Bottom of task-detail sidebar                            | none                                                             |
+| settings-nav              | Settings navigation tree                                 | none                                                             |
+| chat-input-actions        | Task or Quick Chat composer toolbar                      | PluginComposerSlotProps                                          |
+| task-create-input-actions | Task creation composer toolbar                           | PluginComposerSlotProps                                          |
+| new-session-input-actions | New-session composer toolbar                             | PluginComposerSlotProps                                          |
+| chat-top-bar              | Session top bar                                          | { taskId, taskTitle?, workspaceId, activeSessionId, sessionIds } |
+| main-top-bar              | Home/Kanban/Tasks top bar                                | { workspaceId, workspaceLabel?, currentPage }                    |
+| app-status-bar-left       | Left side of desktop status bar or mobile status drawer  | AppStatusBarSlotProps                                            |
+| app-status-bar-right      | Right side of desktop status bar or mobile status drawer | AppStatusBarSlotProps                                            |
+| plugin-settings           | Top of this plugin's Settings > Plugins page             | { pluginId, status }; owner-scoped to the plugin being viewed    |
+| task-card-indicators      | Kanban card, beside the PR status icon                   | { taskId, workspaceId, workflowStepId }                          |
+| task-card-tags            | Kanban card, its own row below the badges row            | { taskId, workspaceId, workflowStepId }                          |
 
 AppStatusBarSlotProps is { placement, presentation, density, pathname,
 activeWorkspaceId, activeTaskId, activeSessionId }. Desktop presentation is a
 compact 24px bar; mobile presentation is an in-flow drawer, so render a
 touch-usable row. Status items can be reordered by the host; plugins do not get
 an ordering API.
+
+`PluginComposerSlotProps` is `{ surface, presentation, taskId, taskTitle?,
+activeSessionId, sessionIds, disabled, submittable, disabledReason?, composer }`.
+The `composer` capability provides `insertText`, `focus`, and asynchronous
+`submit`; submit returns `submitted` only when the native composer accepts the
+operation, otherwise `blocked` or `unavailable`.
 
 ## Backend contract
 
@@ -638,8 +647,10 @@ task, not for an unbounded per-item collection.
 ### 4. Webhook receiver
 
 Declare the route, validate the method and provider signature inside the
-backend, and return a bounded status/body. Kandev caps incoming bodies at 4 MiB
-but does not authenticate the caller.
+backend, and return a bounded status/body. Public webhooks are capped at 4 MiB.
+For plugin-UI operations, declare `access: authenticated`; those routes may
+raise `max_body_bytes` to 16 MiB. Kandev verifies the current user but strips
+its session cookie and PAT before relaying the remaining headers.
 
 ```yaml
 webhooks:
@@ -843,8 +854,8 @@ repackaging.
   uninstall.
 - **Importing direct DB/internal packages:** use apps/backend/pkg/pluginsdk and
   typed Host methods. Direct database access is outside the plugin contract.
-- **Trusting webhook metadata:** webhooks[].method is informational and the route
-  is not authenticated by Kandev. Validate method, signature, timestamp, replay
+- **Trusting webhook metadata:** `webhooks[].method` is informational. Public
+  routes are not authenticated by Kandev, so validate method, signature, timestamp, replay
   protection, and body before side effects.
 - **Bundling React:** use host.React, host.jsx, and host.ui; a second React or
   Radix copy breaks shared contexts and portals.

@@ -357,6 +357,12 @@ function computeFooterState(props: TaskCreateDialogFooterProps) {
   return { showStartTask, splitDisabled, altDisabled, defaultDisabled, disabledReason };
 }
 
+export function isNativeSubmitDisabled(props: TaskCreateDialogFooterProps): boolean {
+  const { showStartTask, splitDisabled, defaultDisabled } = computeFooterState(props);
+  if (props.isTaskStarted) return props.isCreatingTask || !props.hasTitle;
+  return showStartTask ? splitDisabled : defaultDisabled;
+}
+
 export const TaskCreateDialogFooter = memo(function TaskCreateDialogFooter(
   props: TaskCreateDialogFooterProps,
 ) {
