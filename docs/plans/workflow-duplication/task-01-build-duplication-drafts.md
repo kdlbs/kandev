@@ -13,7 +13,7 @@ spec: "../../specs/workflow-duplication/spec.md"
 ## Acceptance
 
 - A pure constructor creates an independent temporary workflow and step graph with the next collision-free copy name and no source/template/sync identity.
-- Nested transition references and pull-from relationships resolve only to copied step IDs, while every editable workflow and step setting remains equal to the source.
+- Nested transition references and pull-from relationships resolve only to copied step IDs, while every editable workflow setting except the generated workflow `name`, and every editable step setting, remains equal to the source.
 - A persisted semantic step type is carried through the existing list, create, and update transport so draft save does not reset it to `custom`.
 - `useWorkflowCreation` inserts the draft directly after the source and registers its initial steps without issuing a persistence request.
 
@@ -66,9 +66,9 @@ Report the naming rules, copied/omitted fields, reference-remapping behavior, fi
 - Added route-local insertion after the source and initial-step registration in
   `useWorkflowCreation`.
 - Checks passed:
-  - `rtk pnpm --filter @kandev/web test -- --run app/settings/workspace/workflow-duplication.test.ts app/settings/workspace/use-workflow-creation.test.ts`
+  - `cd apps && pnpm --filter @kandev/web test -- --run app/settings/workspace/workflow-duplication.test.ts app/settings/workspace/use-workflow-creation.test.ts`
     (2 files, 11 tests).
-  - `rtk pnpm --filter @kandev/web test -- --run app/actions/workspaces.test.ts app/settings/workspace/use-workflow-duplication.test.ts app/settings/workspace/workflow-duplication.test.ts components/settings/workflow-card-actions.test.ts`
+  - `cd apps && pnpm --filter @kandev/web test -- --run app/actions/workspaces.test.ts app/settings/workspace/use-workflow-duplication.test.ts app/settings/workspace/workflow-duplication.test.ts components/settings/workflow-card-actions.test.ts`
     (4 files, 41 tests after review fixes).
-  - `rtk go test ./internal/workflow/handlers -run 'TestHTTP(UpdateStepPublishesUpdatedEvent|CreateStepPublishesCreatedEvent)' -count=1`.
-  - `rtk pnpm run typecheck` from `apps/web`.
+  - `cd apps/backend && go test ./internal/workflow/handlers -run 'TestHTTP(UpdateStepPublishesUpdatedEvent|CreateStepPublishesCreatedEvent)' -count=1`.
+  - `cd apps/web && pnpm run typecheck`.

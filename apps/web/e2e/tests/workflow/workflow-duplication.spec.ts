@@ -59,9 +59,10 @@ test.describe("workflow duplication", () => {
 
     const copiedSteps = await apiClient.listWorkflowSteps(copy!.id);
     expect(copiedSteps.steps).toHaveLength(sourceStepsBefore.steps.length);
-    expect(copiedSteps.steps.map((step) => step.id)).not.toEqual(
-      expect.arrayContaining(sourceStepsBefore.steps.map((step) => step.id)),
-    );
+    const copiedStepIds = copiedSteps.steps.map((step) => step.id);
+    for (const sourceStep of sourceStepsBefore.steps) {
+      expect(copiedStepIds).not.toContain(sourceStep.id);
+    }
     const copiedReview = copiedSteps.steps.find((step) => step.name === "Review");
     const copiedDone = copiedSteps.steps.find((step) => step.name === "Done");
     expect(copiedReview).toBeDefined();

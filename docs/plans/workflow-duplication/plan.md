@@ -91,13 +91,13 @@ The draft-save pipeline creates only a workflow and its steps. As a result, it e
 Passed:
 
 - `cd apps && pnpm install --frozen-lockfile` completed successfully.
-- `cd apps/web && pnpm --filter @kandev/web test -- --run components/settings/workflow-card-header-actions.test.tsx app/settings/workspace/workflow-duplication.test.ts app/settings/workspace/use-workflow-creation.test.ts app/settings/workspace/use-workflow-duplication.test.ts` passed 4 files and 18 tests.
+- `cd apps && pnpm --filter @kandev/web test -- --run components/settings/workflow-card-header-actions.test.tsx app/settings/workspace/workflow-duplication.test.ts app/settings/workspace/use-workflow-creation.test.ts app/settings/workspace/use-workflow-duplication.test.ts` passed 4 files and 20 tests.
 - `cd apps/web && pnpm --filter @kandev/web test -- --run app/actions/workspaces.test.ts app/settings/workspace/use-workflow-duplication.test.ts app/settings/workspace/workflow-duplication.test.ts components/settings/workflow-card-actions.test.ts` passed 4 files and 41 tests after the review fixes.
 - `cd apps/backend && go test ./internal/workflow/handlers -run 'TestHTTP(UpdateStepPublishesUpdatedEvent|CreateStepPublishesCreatedEvent)' -count=1` passed.
 - `cd apps/web && pnpm run typecheck` passed.
-- `cd apps/web && pnpm exec eslint --max-warnings 0 ...` passed for all changed frontend, E2E, and test files.
+- `cd apps && pnpm --filter @kandev/web lint` passed for all changed frontend, E2E, and test files.
 - `cd apps/web && pnpm run i18n:check && pnpm run i18n:ratchet` passed. Existing real-locale parity warnings remain advisory; the pseudo catalog and new-code ratchet are clean.
-- `node --test scripts/validate-public-docs.test.mjs && node scripts/validate-public-docs.mjs` passed 58 tests and validated 41 published docs pages.
+- `node --test scripts/validate-public-docs.test.mjs && node scripts/validate-public-docs.mjs` passed 59 tests and validated 41 published docs pages.
 - `git diff --check` passed.
 - `cd apps/web && pnpm e2e:run tests/workflow/workflow-duplication.spec.ts` passed 1 desktop test.
 - `cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/workflow/mobile-workflow-duplication.spec.ts` passed 1 mobile test after the shared card finder was made timing-safe.

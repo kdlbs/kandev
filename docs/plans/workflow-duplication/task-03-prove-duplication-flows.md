@@ -59,6 +59,6 @@ Report desktop/mobile scenarios, discovered test counts, exact managed-runner re
 - Added disposable desktop and mobile Playwright scenarios with a shared API seed helper. The scenarios verify no pre-save workflow write, copied metadata, remapped transition and pull-from references, source-task preservation, post-save reload, touch reachability, and no mobile horizontal overflow.
 - Updated `WorkflowSettingsPage.findWorkflowCard` to poll for route-local drafts. This prevents a container timing race after touch duplication from snapshotting the card list before React inserts the draft.
 - Checks passed:
-  - `rtk pnpm e2e:run tests/workflow/workflow-duplication.spec.ts` (1 desktop test passed).
-  - `rtk pnpm e2e:run --no-build --project mobile-chrome tests/workflow/mobile-workflow-duplication.spec.ts` (1 mobile test passed).
+  - `cd apps/web && pnpm e2e:run tests/workflow/workflow-duplication.spec.ts` (1 desktop test passed).
+  - `cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/workflow/mobile-workflow-duplication.spec.ts` (1 mobile test passed).
   - The managed runner cleaned its test-results, blob-report, PR asset, and temporary shard-log locations. No E2E artifacts remain in the worktree.

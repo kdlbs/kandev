@@ -37,6 +37,8 @@ export function WorkflowCardHeaderActions({
   readOnly,
 }: WorkflowCardHeaderActionsProps) {
   const { t } = useTranslation();
+  const duplicateTooltip =
+    duplicateDisabledReason ?? (duplicateLoading ? t("workflows:duplicatingWorkflow") : undefined);
   return (
     <div className="flex flex-wrap justify-end gap-2">
       <Tooltip>
@@ -66,7 +68,7 @@ export function WorkflowCardHeaderActions({
           <span
             tabIndex={duplicateDisabled ? 0 : -1}
             className="inline-flex"
-            aria-label={duplicateDisabledReason}
+            aria-label={duplicateTooltip}
           >
             <Button
               type="button"
@@ -83,7 +85,7 @@ export function WorkflowCardHeaderActions({
             </Button>
           </span>
         </TooltipTrigger>
-        {duplicateDisabledReason && <TooltipContent>{duplicateDisabledReason}</TooltipContent>}
+        {duplicateTooltip && <TooltipContent>{duplicateTooltip}</TooltipContent>}
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>

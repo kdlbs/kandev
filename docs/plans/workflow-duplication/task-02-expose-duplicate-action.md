@@ -62,8 +62,8 @@ Report desktop/mobile entry points, disabled/error behavior, translations, publi
 - Kept the request and disabled-state logic in `use-workflow-duplication.ts` and moved dialog composition into `workflow-card-dialogs-content.tsx` to keep the main workflow card below the configured size limit.
 - Added English and pseudo-locale strings and documented the save-first flow, numbered names, copied settings, and task/history exclusions in `docs/public/workflow-tips.md`.
 - Checks passed:
-  - `rtk pnpm --filter @kandev/web test -- --run components/settings/workflow-card-header-actions.test.tsx app/settings/workspace/workflow-duplication.test.ts app/settings/workspace/use-workflow-creation.test.ts app/settings/workspace/use-workflow-duplication.test.ts` (4 files, 19 tests including same-render double activation coverage).
-  - `rtk pnpm run typecheck` from `apps/web`.
-  - Targeted ESLint with `--max-warnings 0` on all changed frontend and E2E files.
-  - `rtk pnpm run i18n:check && rtk pnpm run i18n:ratchet`.
-  - Public docs validation: 58 tests passed and 41 docs pages validated.
+  - `cd apps && pnpm --filter @kandev/web test -- --run components/settings/workflow-card-header-actions.test.tsx app/settings/workspace/workflow-duplication.test.ts app/settings/workspace/use-workflow-creation.test.ts app/settings/workspace/use-workflow-duplication.test.ts` (4 files, 20 tests including same-render double activation and loading-label coverage).
+  - `cd apps/web && pnpm run typecheck`.
+  - `cd apps && pnpm --filter @kandev/web lint` passed.
+  - `cd apps/web && pnpm run i18n:check && pnpm run i18n:ratchet`.
+  - `node --test scripts/validate-public-docs.test.mjs && node scripts/validate-public-docs.mjs` passed 59 tests and validated 41 docs pages.
