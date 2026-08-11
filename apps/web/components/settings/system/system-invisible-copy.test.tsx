@@ -4,7 +4,10 @@ import { activateLocale, t } from "@/lib/i18n";
 import type { HealthCheckSummary, HealthIssue } from "@/lib/types/health";
 import { HealthIssuesCard } from "./health-issues-card";
 import { JobProgressIndicator } from "./job-progress-indicator";
-import { SystemGroup } from "@/components/app-sidebar/sections/settings/system-group";
+import { SETTINGS_MENU_SECTIONS } from "@/components/app-sidebar/sections/settings/settings-tree";
+
+const SYSTEM_MENU_ITEMS =
+  SETTINGS_MENU_SECTIONS.find((section) => section.id === "system")?.items ?? [];
 
 afterEach(cleanup);
 
@@ -107,28 +110,16 @@ describe("HealthIssuesCard issue count", () => {
 });
 
 /**
- * `BASE_ITEMS` / `AUTH_ITEMS` are SCREAMING_CASE, which the guard skips
- * entirely: it reported one finding here (`label="System"`) while ten nav
- * labels sat in those two tables. They now resolve at render from `labelKey`.
+ * `BASE_ITEMS` / `AUTH_ITEMS` were SCREAMING_CASE, which the guard skips
+ * entirely. The menu config still is, so the same check applies: every System
+ * row label must resolve through the catalog.
  */
-describe("SystemGroup nav labels", () => {
-  it("renders every System route label through the catalog", () => {
-    render(<SystemGroup pathname="/settings/system/status" expanded />);
-    const labels = [
-      "Status",
-      "Feature Toggles",
-      "Database",
-      "Backups",
-      "Storage",
-      "Logs",
-      "Updates",
-      "About",
-      "Licenses",
-      "Users",
-    ];
-    for (const label of labels) {
-      expect(screen.getByText(label)).toBeTruthy();
-    }
+describe("System menu labels", () => {
+  it("renders every System row label through the catalog", () => {
+    const labels = SYSTEM_MENU_ITEMS.map((item) => t(item.labelKey));
+    expect(labels).toEqual(
+      expect.arrayContaining(["Status", "Data & Logs", "Feature Toggles", "Updates", "About"]),
+    );
   });
 });
 
@@ -178,12 +169,10 @@ describe("copy the guard cannot see, under the pseudo-locale", () => {
     expect(description).toMatch(ACCENTED);
   });
 
-  it("accents every System nav label", () => {
-    render(<SystemGroup pathname="/settings/system/status" expanded />);
-    const leaves = document.querySelectorAll("a");
-    expect(leaves.length).toBeGreaterThan(0);
-    for (const leaf of leaves) {
-      expect(leaf.textContent ?? "").toMatch(ACCENTED);
+  it("accents every System menu label", () => {
+    expect(SYSTEM_MENU_ITEMS.length).toBeGreaterThan(0);
+    for (const item of SYSTEM_MENU_ITEMS) {
+      expect(t(item.labelKey)).toMatch(ACCENTED);
     }
   });
 });

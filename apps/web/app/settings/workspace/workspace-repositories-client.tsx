@@ -1,13 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { WorkspaceSettingsHeader } from "@/app/settings/workspace/workspace-settings-header";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useRouter } from "@/lib/routing/client-router";
 import { IconGitBranch } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { Separator } from "@kandev/ui/separator";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { RepositoryCard } from "@/components/settings/repository-card";
 import { generateUUID } from "@/lib/utils";
@@ -523,9 +521,6 @@ export function WorkspaceRepositoriesClient({
   isImproveWorkspace = false,
 }: WorkspaceRepositoriesClientProps) {
   const { t } = useTranslation();
-  const pageDescription = isImproveWorkspace
-    ? t("workspaces:repositoriesReadOnlyImprove")
-    : t("workspaces:manageRepositoriesConnected");
   const state = useWorkspaceRepositoriesPage(workspace, repositories);
   const {
     router,
@@ -556,16 +551,22 @@ export function WorkspaceRepositoriesClient({
   } = state;
 
   if (!workspace)
-    return <WorkspaceNotFoundCard onBack={() => router.push("/settings/workspace")} />;
+    return <WorkspaceNotFoundCard onBack={() => router.push("/settings/workspaces")} />;
 
   return (
     <div className="space-y-8">
-      <WorkspaceSettingsHeader workspace={workspace} description={pageDescription} />
-      <Separator />
+      {/* No section header: the Repositories section below already carries the
+          name, mark and description, and the tab strip above says which tab you
+          are on. A second copy of all three read as the page repeating itself. */}
       <SettingsSection
+        divided
         icon={<IconGitBranch className="h-5 w-5" />}
         title={t("workspaces:repositories")}
-        description={t("workspaces:repositoriesInThisWorkspace")}
+        description={
+          isImproveWorkspace
+            ? t("workspaces:repositoriesReadOnlyImprove")
+            : t("workspaces:repositoriesInThisWorkspace")
+        }
         action={
           isImproveWorkspace ? undefined : (
             <Button size="sm" className="cursor-pointer" onClick={openDialog}>

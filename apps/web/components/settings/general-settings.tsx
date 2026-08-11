@@ -1,10 +1,10 @@
 "use client";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import Link from "@/components/routing/app-link";
 import { useTheme } from "@/components/theme/app-theme";
 import {
   IconActivity,
+  IconBinaryTree,
   IconCommand,
   IconPalette,
   IconKeyboard,
@@ -14,7 +14,7 @@ import {
   IconListCheck,
   IconHome,
 } from "@tabler/icons-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Separator } from "@kandev/ui/separator";
@@ -22,7 +22,6 @@ import { SettingsSection } from "@/components/settings/settings-section";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { KeyboardShortcutsCard } from "@/components/settings/keyboard-shortcuts-card";
 import { SystemMetricsSettingsCard } from "@/components/settings/system-metrics-settings-card";
-import { useGeneralNavItems } from "@/components/settings/general-nav";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import type { Theme } from "@/lib/settings/types";
@@ -39,8 +38,20 @@ import type { StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides"
 import { buildPluginShortcutEntries } from "@/lib/keyboard/plugin-shortcuts";
 import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
 import { StartupPageSettingsCard } from "@/components/settings/startup-page-settings-card";
-import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/general";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 import { SleepInhibitionSettings } from "@/components/settings/sleep-inhibition-settings";
+import { AppStatusBarSettingsCard } from "@/components/settings/app-status-bar-settings-card";
+import { SettingsMenuModeCard } from "@/components/settings/settings-menu-mode-card";
+import type { SettingsMenuMode } from "@/lib/settings/settings-menu-mode";
+import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
+import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
+import {
+  appearanceRevision,
+  buildAppearanceUserSettingsPatch,
+  createAppearanceSavedState,
+  rebaseAppearanceDraft,
+  type AppearanceState,
+} from "@/components/settings/appearance-settings-state";
 
 function ThemeSettingsCard({
   theme,
@@ -166,22 +177,6 @@ function ChangesPanelLayoutCard({
   );
 }
 
-function createAppearanceSavedState(
-  theme: Theme,
-  userSettings: Pick<
-    UserSettingsState,
-    "changesPanelLayout" | "startupPage" | "systemMetricsDisplay"
-  >,
-) {
-  return {
-    theme,
-    changesPanelLayout: userSettings.changesPanelLayout,
-    startupPage: userSettings.startupPage,
-    showMetrics: userSettings.systemMetricsDisplay.showInTopbar,
-    simplifiedMetrics: userSettings.systemMetricsDisplay.simplified,
-  };
-}
-
 function StartupPageSettingsSection({
   value,
   isDirty,
@@ -209,6 +204,31 @@ function StartupPageSettingsSection({
   );
 }
 
+function SettingsMenuModeSection({
+  value,
+  isDirty,
+  onChange,
+}: {
+  value: SettingsMenuMode;
+  isDirty: boolean;
+  onChange: (mode: SettingsMenuMode) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <Separator />
+
+      <SettingsSection
+        icon={<IconBinaryTree className="h-5 w-5" />}
+        title={t("settings:settingsMenu")}
+        description={t("settings:chooseHowDeepTheSettingsMenuGoes")}
+      >
+        <SettingsMenuModeCard value={value} isDirty={isDirty} onChange={onChange} />
+      </SettingsSection>
+    </>
+  );
+}
+
 function AppearanceThemeSection({
   theme,
   isDirty,
@@ -230,28 +250,27 @@ function AppearanceThemeSection({
   );
 }
 
-export function GeneralSettings() {
-  const navItems = useGeneralNavItems();
+function AppStatusBarSettingsSection({
+  enabled,
+  isDirty,
+  onChange,
+}: {
+  enabled: boolean;
+  isDirty: boolean;
+  onChange: (enabled: boolean) => void;
+}) {
+  const { t } = useTranslation();
   return (
-    <div className="space-y-8">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {navItems.map(({ href, label, description, icon: Icon }) => (
-          <Link key={href} href={href} className="cursor-pointer">
-            <Card className="h-full transition-colors hover:bg-muted/40">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Icon className="h-4 w-4 text-muted-foreground" />
-                  {label}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground">{description}</p>
-              </CardContent>
-            </Card>
-          </Link>
-        ))}
-      </div>
-    </div>
+    <>
+      <Separator />
+      <SettingsSection
+        icon={<IconActivity className="h-5 w-5" />}
+        title={t("settings:statusBar")}
+        description={t("settings:configureStatusBarVisibility")}
+      >
+        <AppStatusBarSettingsCard enabled={enabled} isDirty={isDirty} onChange={onChange} />
+      </SettingsSection>
+    </>
   );
 }
 
@@ -296,62 +315,161 @@ export function TaskActionsSettings() {
   );
 }
 
-export function AppearanceSettings() {
-  const { t } = useTranslation();
-  const userSettings = useAppStore((state) => state.userSettings);
+/**
+ * Register the Appearance page with the shared save coordinator.
+ *
+ * Split out of `AppearanceSettings` for length. It is also where the page's two
+ * kinds of setting meet: the account-level ones go out in one
+ * `updateUserSettings` call, while the theme and the settings menu shape are
+ * per-device and commit through their own preview/commit/restore pairs — one
+ * Save changes control over both.
+ */
+function useAppearanceSaveContributor({
+  draft,
+  draftRef,
+  editedDuringSaveRef,
+  saved,
+  setSaved,
+  setDraft,
+}: {
+  draft: AppearanceState;
+  draftRef: { current: AppearanceState };
+  editedDuringSaveRef: { current: Set<keyof AppearanceState> | null };
+  saved: AppearanceState;
+  setSaved: (next: AppearanceState) => void;
+  setDraft: (next: AppearanceState) => void;
+}) {
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const storeApi = useAppStoreApi();
-  const { savedTheme, previewTheme, commitTheme, restoreTheme } = useTheme();
-  const [saved, setSaved] = useState(() => createAppearanceSavedState(savedTheme, userSettings));
-  const [draft, setDraft] = useState(saved);
-  const draftRef = useRef(draft);
-  draftRef.current = draft;
-  const revision = JSON.stringify(draft);
-  const isDirty = revision !== JSON.stringify(saved);
+  const { previewTheme, commitTheme, restoreTheme } = useTheme();
+  const previewMenuMode = useAppStore((state) => state.previewSettingsMenuMode);
+  const commitMenuMode = useAppStore((state) => state.commitSettingsMenuMode);
+  const restoreMenuMode = useAppStore((state) => state.restoreSettingsMenuMode);
+  const revision = appearanceRevision(draft);
 
   useSettingsSaveContributor({
     id: "general-appearance",
     order: 10,
     revision,
-    isDirty,
+    isDirty: revision !== appearanceRevision(saved),
     save: async () => {
       const submitted = draft;
-      const current = storeApi.getState().userSettings;
-      await updateUserSettings({
-        workspace_id: current.workspaceId || "",
-        repository_ids: current.repositoryIds || [],
-        startup_page: submitted.startupPage,
-        changes_panel_layout: submitted.changesPanelLayout,
-        system_metrics_display: {
-          show_in_topbar: submitted.showMetrics,
-          simplified: submitted.simplifiedMetrics,
-        },
-      });
-      commitTheme(submitted.theme);
-      if (draftRef.current.theme !== submitted.theme) {
-        previewTheme(draftRef.current.theme);
+      const patch = buildAppearanceUserSettingsPatch(submitted, saved);
+      const settingsAtSubmit = storeApi.getState().userSettings;
+      const editedDuringSave = new Set<keyof AppearanceState>();
+      editedDuringSaveRef.current = editedDuringSave;
+      try {
+        const response = Object.keys(patch).length > 0 ? await updateUserSettings(patch) : null;
+        commitTheme(submitted.theme);
+        commitMenuMode(submitted.settingsMenuMode);
+        // A draft edited while the save was in flight keeps its preview: what was
+        // submitted is now persisted, but the screen should still show what the
+        // user is currently looking at.
+        if (draftRef.current.theme !== submitted.theme) {
+          previewTheme(draftRef.current.theme);
+        }
+        if (draftRef.current.settingsMenuMode !== submitted.settingsMenuMode) {
+          previewMenuMode(draftRef.current.settingsMenuMode);
+        }
+        const latestUserSettings = storeApi.getState().userSettings;
+        let responseIsCurrent = false;
+        if (response) {
+          const responseOrder = compareUserSettingsRevisions(
+            response.settings.revision,
+            latestUserSettings.revision,
+          );
+          responseIsCurrent =
+            responseOrder === null ? latestUserSettings === settingsAtSubmit : responseOrder >= 0;
+        }
+        const nextUserSettings =
+          response && responseIsCurrent
+            ? mapUserSettingsResponse(response, latestUserSettings)
+            : latestUserSettings;
+        const confirmed = createAppearanceSavedState(
+          submitted.theme,
+          submitted.settingsMenuMode,
+          nextUserSettings,
+        );
+        setSaved(confirmed);
+        setDraft(rebaseAppearanceDraft(draftRef.current, submitted, confirmed, editedDuringSave));
+        if (response) setUserSettings(nextUserSettings);
+      } finally {
+        if (editedDuringSaveRef.current === editedDuringSave) {
+          editedDuringSaveRef.current = null;
+        }
       }
-      setSaved(submitted);
-      setUserSettings({
-        ...storeApi.getState().userSettings,
-        changesPanelLayout: submitted.changesPanelLayout,
-        startupPage: submitted.startupPage,
-        systemMetricsDisplay: {
-          showInTopbar: submitted.showMetrics,
-          simplified: submitted.simplifiedMetrics,
-        },
-      });
     },
     discard: () => {
       setDraft(saved);
       restoreTheme();
+      restoreMenuMode();
     },
   });
+}
 
-  const updateDraft = useCallback(
-    (patch: Partial<typeof draft>) => setDraft((current) => ({ ...current, ...patch })),
-    [],
+function useAppearanceDraftUpdater(
+  setDraft: (update: (current: AppearanceState) => AppearanceState) => void,
+  editedDuringSaveRef: { current: Set<keyof AppearanceState> | null },
+) {
+  return useCallback(
+    (patch: Partial<AppearanceState>) =>
+      setDraft((current) => {
+        const next = { ...current, ...patch };
+        for (const field of Object.keys(patch) as Array<keyof AppearanceState>) {
+          if (current[field] !== next[field]) {
+            editedDuringSaveRef.current?.add(field);
+          }
+        }
+        return next;
+      }),
+    [editedDuringSaveRef, setDraft],
   );
+}
+
+export function AppearanceSettings() {
+  const { t } = useTranslation();
+  const userSettings = useAppStore((state) => state.userSettings);
+  const { savedTheme, previewTheme } = useTheme();
+  const savedMenuMode = useAppStore((state) => state.settingsMenu.savedMode);
+  const previewMenuMode = useAppStore((state) => state.previewSettingsMenuMode);
+  const [saved, setSaved] = useState(() =>
+    createAppearanceSavedState(savedTheme, savedMenuMode, userSettings),
+  );
+  const [draft, setDraft] = useState(saved);
+  const draftRef = useRef(draft);
+  const savedRef = useRef(saved);
+  const editedDuringSaveRef = useRef<Set<keyof AppearanceState> | null>(null);
+  draftRef.current = draft;
+  savedRef.current = saved;
+
+  useEffect(() => {
+    const previousSaved = savedRef.current;
+    const nextSaved = createAppearanceSavedState(
+      previousSaved.theme,
+      previousSaved.settingsMenuMode,
+      userSettings,
+    );
+    setDraft(
+      rebaseAppearanceDraft(
+        draftRef.current,
+        previousSaved,
+        nextSaved,
+        editedDuringSaveRef.current ?? undefined,
+      ),
+    );
+    setSaved(nextSaved);
+  }, [userSettings]);
+
+  useAppearanceSaveContributor({
+    draft,
+    draftRef,
+    editedDuringSaveRef,
+    saved,
+    setSaved,
+    setDraft,
+  });
+
+  const updateDraft = useAppearanceDraftUpdater(setDraft, editedDuringSaveRef);
 
   return (
     <div className="space-y-8">
@@ -364,6 +482,17 @@ export function AppearanceSettings() {
         }}
       />
 
+      <SettingsMenuModeSection
+        value={draft.settingsMenuMode}
+        isDirty={draft.settingsMenuMode !== saved.settingsMenuMode}
+        onChange={(settingsMenuMode) => {
+          updateDraft({ settingsMenuMode });
+          // The settings menu is on screen beside this page, so previewing is
+          // the whole point: you see the shape you are choosing.
+          previewMenuMode(settingsMenuMode);
+        }}
+      />
+
       <StartupPageSettingsSection
         value={draft.startupPage}
         isDirty={draft.startupPage !== saved.startupPage}
@@ -371,6 +500,12 @@ export function AppearanceSettings() {
       />
 
       <LanguageSettings />
+
+      <AppStatusBarSettingsSection
+        enabled={draft.appStatusBarEnabled}
+        isDirty={draft.appStatusBarEnabled !== saved.appStatusBarEnabled}
+        onChange={(appStatusBarEnabled) => updateDraft({ appStatusBarEnabled })}
+      />
 
       <Separator />
 

@@ -31,6 +31,8 @@ This spec consolidates the office task surface: lifecycle, parent/child handoffs
 - A parent task defines a default child ordering policy: children are created with dependency edges (sequential) or without (parallel).
 - Each child task can override the parent workspace policy and run in the parent workspace, a new workspace, or an explicit shared workspace group.
 - When a user creates a subtask from a Kanban task detail dialog, the dialog lets them choose to inherit the parent materialized workspace or create a new workspace from repositories, local folders, or remote URLs.
+- When the user chooses to inherit the parent workspace, the dialog can identify the parent session branch because the child shares that worktree and file state.
+- When the user chooses a new workspace, the dialog shows only the selected source and base-branch controls. It does not present the parent session branch as the branch of the isolated child workspace.
 - When an agent creates a subtask through `create_task_kandev`, the MCP surface mirrors that choice: subtasks inherit the parent materialized workspace by default, and `workspace_mode="new_workspace"` requests a fresh materialized workspace/worktree.
 - Subtasks inheriting a parent materialized workspace are represented through the same **shared workspace group** model used by Office-created tasks.
 - Shared workspaces are visible in the UI: source task, member tasks, materialized path/environment, and whether tasks are ordered by dependencies.
@@ -346,6 +348,8 @@ An agent's run JWT also pins an `AllowedTaskIDs` scope. The runtime rejects muta
 - **GIVEN** a parent policy says children inherit the parent workspace and run sequentially, **WHEN** the coordinator creates child tasks, **THEN** the children reuse the parent materialized workspace and receive dependency edges that order their execution.
 - **GIVEN** a child task inherits a parent materialized workspace, **WHEN** the child is archived or deleted, **THEN** the inherited parent workspace remains available to the parent and any other active child that still references it.
 - **GIVEN** a user opens a Kanban task detail page, **WHEN** they create a subtask, **THEN** they can choose to inherit the parent task workspace or create a new workspace by selecting repositories, local folders, or a remote URL.
+- **GIVEN** a parent session has an active worktree branch, **WHEN** the user selects **Inherit parent workspace** in the subtask dialog, **THEN** the dialog identifies the parent branch as shared with the child.
+- **GIVEN** a parent session has an active worktree branch, **WHEN** the user selects **Create new workspace** in the subtask dialog, **THEN** the parent branch indicator is absent and the selected source's base-branch control is the only branch context shown for the child.
 - **GIVEN** an agent creates a subtask via MCP, **WHEN** it omits `workspace_mode`, **THEN** the subtask inherits the parent materialized workspace; **WHEN** it sets `workspace_mode="new_workspace"`, **THEN** the subtask launches in its own materialized workspace/worktree.
 - **GIVEN** two tasks share a workspace group without dependency edges, **WHEN** the scheduler starts both, **THEN** they may run concurrently in the same materialized workspace.
 - **GIVEN** a parent task has descendant tasks, **WHEN** the user deletes the parent, **THEN** Kandev cancels active descendant runs, deletes every descendant, releases their workspace memberships, and runs cleanup.
@@ -423,6 +427,7 @@ An agent's run JWT also pins an `AllowedTaskIDs` scope. The runtime rejects muta
 - Approval expiry / TTL ("approval valid for 7 days"). Rework still clears decisions.
 - Reviewer role gating completion - reviewers stay advisory. Use approvers for a hard gate.
 - Preventing parallel editing of the same dirty workspace; workspace locks; active-holder recovery.
+- Changing workspace-mode defaults, repository seeding, base-branch selection, generated task-branch naming, or whether uncommitted parent changes enter an isolated workspace.
 - Automatic guessing between task documents and repo files.
 - Replacing the existing task documents or task plans implementations.
 - Detecting blocker cycles on parent / child relationships - that's a separate domain.

@@ -12,6 +12,14 @@ import {
 type SettingsPageTemplateProps = {
   title: string;
   description?: string;
+  /**
+   * Replaces the default title/description block. For a page that is a *section*
+   * of a larger one rather than a page in its own right — the workspace Secrets
+   * tab, which heads itself like its five sibling tabs instead of like a
+   * top-level settings page. `title` is still required: it names the save
+   * contributor.
+   */
+  header?: React.ReactNode;
   isDirty: boolean;
   cardIsDirty?: boolean;
   saveStatus: "idle" | "loading" | "success" | "error";
@@ -29,6 +37,7 @@ type SettingsPageTemplateProps = {
 export function SettingsPageTemplate({
   title,
   description,
+  header,
   isDirty,
   cardIsDirty = isDirty,
   onSave,
@@ -55,12 +64,12 @@ export function SettingsPageTemplate({
 
   return (
     <div className="space-y-8">
-      <div>
+      {header ?? (
         <div>
           <h2 className="text-2xl font-bold">{title}</h2>
           {description && <p className="text-sm text-muted-foreground mt-1">{description}</p>}
         </div>
-      </div>
+      )}
 
       <Separator />
 

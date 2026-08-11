@@ -137,7 +137,6 @@
   "defaultQueriesSaved": "默认查询已保存",
   "defaultRepository": "默认仓库",
   "delete": "删除",
-  "deleteSavedQuery": "删除已保存查询",
   "deletedTasks_one": "已删除 {{count}} 个任务",
   "deletedTasks_other": "已删除 {{count}} 个任务",
   "description": "描述",

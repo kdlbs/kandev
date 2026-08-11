@@ -2,7 +2,6 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StateProvider } from "@/components/state-provider";
-import { defaultFeaturesState } from "@/lib/state/slices/features/features-slice";
 import { defaultSettingsState } from "@/lib/state/slices/settings/settings-slice";
 import { useDockviewStore, type FileEditorState } from "@/lib/state/dockview-store";
 import { buildRepoScopedItemId } from "@/lib/state/dockview-panel-actions";
@@ -83,9 +82,9 @@ function renderBar(location: "toolbar" | "status_bar") {
   return render(
     <StateProvider
       initialState={{
-        features: { ...defaultFeaturesState.features, appStatusBar: true },
         userSettings: {
           ...defaultSettingsState.userSettings,
+          appStatusBarEnabled: true,
           lspStatusLocation: location,
         },
       }}

@@ -8,8 +8,8 @@ import { SessionPage } from "../../pages/session-page";
 // the `mobile-chrome` Playwright project picks it up.
 //
 // Two assertions:
-// 1. The Voice Mode settings page renders all cards at mobile width when
-//    navigated to directly — guards against the "setting missing" symptom.
+// 1. The Task Behavior page renders the Voice Mode section and all cards at mobile width when
+//    reached through the settings index — guards against the "setting missing" symptom.
 // 2. The mic button mounts on the mobile chat composer with the coarse-pointer
 //    override: a user with stored `voiceMode.mode = "hold"` gets toggle
 //    behaviour (data-effective-mode = "toggle") and a 40px touch target.
@@ -26,12 +26,17 @@ async function seedTask(apiClient: ApiClient, seedData: SeedData, title: string)
 test.describe("Mobile voice mode", () => {
   test.describe.configure({ retries: 1, timeout: 60_000 });
 
-  test("Voice Mode settings page renders every card at mobile width", async ({ testPage }) => {
-    await testPage.goto("/settings/voice-mode");
+  test("Voice Mode settings section renders every card at mobile width", async ({
+    testPage,
+    prCapture,
+  }) => {
+    await testPage.goto("/settings");
+    const index = testPage.getByTestId("settings-index");
+    await index.getByRole("link", { name: /^Task Behavior/ }).click();
+    await expect(testPage).toHaveURL(/\/settings\/preferences\/task-behavior$/);
 
-    // Page header confirms route resolved to the right shell. The page title
-    // is rendered by SettingsSection — match the heading text exactly so we
-    // don't pick up the sidebar entry that shares the label.
+    // The merged page keeps the Voice Mode section heading visible at the
+    // same route as the other task behavior settings.
     await expect(testPage.getByRole("heading", { name: "Voice Mode", exact: true })).toBeVisible({
       timeout: 15_000,
     });
@@ -39,9 +44,20 @@ test.describe("Mobile voice mode", () => {
     // The five cards rendered by `voice-mode-settings.tsx` at mobile width.
     await expect(testPage.getByText("Enable Voice Input")).toBeVisible();
     await expect(testPage.getByText("Transcription Engine")).toBeVisible();
-    await expect(testPage.getByText("Behavior")).toBeVisible();
+    // Exact: the settings menu's "Task Behavior" row is mounted (display-hidden)
+    // at this width, and a substring match would collide with it.
+    await expect(testPage.getByText("Behavior", { exact: true })).toBeVisible();
     await expect(testPage.getByText("Whisper Web Model")).toBeVisible();
     await expect(testPage.getByText(/Shortcut$/)).toBeVisible();
+    expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBe(
+      await testPage.evaluate(() => document.documentElement.clientWidth),
+    );
+    await testPage
+      .getByRole("heading", { name: "Voice Mode", exact: true })
+      .scrollIntoViewIfNeeded();
+    await prCapture.screenshot("task-behavior-voice-mode-mobile", {
+      caption: "Mobile Task Behavior page with Voice Mode settings",
+    });
     // (The legacy `button[data-sidebar="trigger"]` mobile settings-sidebar
     // trigger was removed by the unified-AppSidebar overhaul — settings nav is
     // now the footer-gear takeover, and the global rail is hidden on mobile.)

@@ -44,6 +44,65 @@ describe("startup page websocket sync", () => {
   });
 });
 
+describe("status bar visibility websocket sync", () => {
+  it("updates status bar visibility and preserves it when omitted", () => {
+    const store = makeStore();
+
+    expect(
+      (store.getState().userSettings as unknown as Record<string, unknown>).appStatusBarEnabled,
+    ).toBe(false);
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        app_status_bar_enabled: true,
+      } as unknown as Partial<BackendMessageMap["user.settings.updated"]["payload"]>),
+    );
+    expect(
+      (store.getState().userSettings as unknown as Record<string, unknown>).appStatusBarEnabled,
+    ).toBe(true);
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
+    expect(
+      (store.getState().userSettings as unknown as Record<string, unknown>).appStatusBarEnabled,
+    ).toBe(true);
+  });
+
+  it("ignores older settings revisions and accepts newer ones", () => {
+    const store = makeStore();
+    store.setState((state) => ({
+      ...state,
+      userSettings: {
+        ...state.userSettings,
+        appStatusBarEnabled: false,
+        revision: 2,
+      },
+    }));
+    const handler = registerUsersHandlers(store)["user.settings.updated"];
+
+    handler?.(
+      userSettingsMessage({
+        app_status_bar_enabled: true,
+        revision: 1,
+      }),
+    );
+    expect(store.getState().userSettings).toMatchObject({
+      appStatusBarEnabled: false,
+      revision: 2,
+    });
+
+    handler?.(
+      userSettingsMessage({
+        app_status_bar_enabled: true,
+        revision: 3,
+      }),
+    );
+    expect(store.getState().userSettings).toMatchObject({
+      appStatusBarEnabled: true,
+      revision: 3,
+    });
+  });
+});
+
 describe("user settings websocket handler", () => {
   it("updates LSP status location, normalizes unknown values, and preserves omissions", () => {
     const store = makeStore();

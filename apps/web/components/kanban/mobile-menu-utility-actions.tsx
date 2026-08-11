@@ -1,6 +1,12 @@
 "use client";
 
-import { IconActivity, IconAlertTriangle, IconStethoscope } from "@tabler/icons-react";
+import {
+  IconActivity,
+  IconAlertTriangle,
+  IconMoon,
+  IconStethoscope,
+  IconSun,
+} from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
 import { DestinationRows } from "@/components/navigation/destination-rows";
@@ -8,6 +14,8 @@ import { useStaticDestinations } from "@/hooks/use-app-destinations";
 import { MOBILE_MENU_UTILITY_SECTIONS } from "@/lib/navigation/surface-policy";
 import { useAppStatusDrawer } from "@/components/app-status-bar/app-status-surface-provider";
 import { useConnectionIssueCopy } from "@/components/app-status-bar/connection-status-item";
+import { useTheme } from "@/components/theme/app-theme";
+import { getThemeToggleLabelKey, getThemeToggleTarget } from "@/components/theme/theme-toggle";
 import { cn } from "@/lib/utils";
 import {
   mobileControlClass,
@@ -29,6 +37,8 @@ export function MobileUtilityActions({
   const { t } = useTranslation();
   const { enabled: statusDrawerEnabled, issueSeverity, openStatusDrawer } = useAppStatusDrawer();
   const issueDetails = useConnectionIssueCopy(issueSeverity);
+  const { resolvedTheme, setTheme } = useTheme();
+  const themeToggleTarget = getThemeToggleTarget(resolvedTheme);
   // Stats, Settings, and anything else added to the manifest's insight/utility
   // sections. Before the manifest, this block hardcoded a Settings link and
   // Stats had no phone entry point at all.
@@ -70,6 +80,22 @@ export function MobileUtilityActions({
           )}
         </Button>
       )}
+      <Button
+        type="button"
+        variant="outline"
+        className={cn(mobileControlClass, "h-11 cursor-pointer justify-start gap-3")}
+        onClick={() => setTheme(themeToggleTarget)}
+        data-testid="mobile-theme-toggle-button"
+        aria-label={t(getThemeToggleLabelKey(resolvedTheme))}
+        aria-pressed={resolvedTheme === "dark"}
+      >
+        {resolvedTheme === "dark" ? (
+          <IconSun className={mobileControlIconClass} />
+        ) : (
+          <IconMoon className={mobileControlIconClass} />
+        )}
+        {t("sidebar:toggleTheme")}
+      </Button>
       <DestinationRows
         destinations={destinations}
         onNavigate={closeSheet}

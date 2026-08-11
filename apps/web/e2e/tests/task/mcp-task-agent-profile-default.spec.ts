@@ -27,7 +27,7 @@ test.describe("MCP-created task agent profile default", () => {
       default_agent_profile_id: workspaceProfile.id,
     });
 
-    await testPage.goto("/settings/general/task-actions");
+    await testPage.goto("/settings/preferences/task-behavior");
     await expect(testPage.getByText("create_task_kandev", { exact: true })).toBeVisible();
     await expect(testPage.getByText("spawn_session_kandev", { exact: true })).toBeVisible();
     const mcpToolHelp = testPage.getByRole("button", {

@@ -31,7 +31,7 @@ import {
   TERMINAL_FONT_FAMILY_TARGET,
   TERMINAL_FONT_SIZE_TARGET,
   TERMINAL_LINKS_TARGET,
-} from "@/lib/settings-discovery/catalog/general";
+} from "@/lib/settings-discovery/catalog/preferences";
 
 const CUSTOM_VALUE = "__custom__";
 /**

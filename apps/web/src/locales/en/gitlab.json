@@ -331,5 +331,21 @@
   "mrTooltipState": "State: {{state}}",
   "mrTooltipReview": "Review: {{state}}",
   "mrTooltipPipeline": "Pipeline: {{state}}",
-  "mrTooltipReadyToMerge": "Ready to merge"
+  "mrTooltipReadyToMerge": "Ready to merge",
+  "mrChipAriaLabelSingle": "Merge request !{{mriid}}, {{status}}",
+  "mrChipAriaLabelMulti_one": "{{count}} merge request, {{status}}",
+  "mrChipAriaLabelMulti_other": "{{count}} merge requests, {{status}}",
+  "mrChipStatusMerged": "merged",
+  "mrChipStatusClosed": "closed",
+  "mrChipStatusFailed": "pipeline failed",
+  "mrChipStatusDraft": "draft",
+  "mrChipStatusReady": "ready to merge",
+  "mrChipStatusAwaitingApproval": "awaiting approval",
+  "mrChipStatusRunning": "pipeline running",
+  "mrChipStatusNeutral": "no pipeline",
+  "mrChipAutoFix": "Auto-fix",
+  "mrChipAutoMerge": "Auto-merge",
+  "mrChipDrawerTitle": "Merge request !{{mriid}}",
+  "mrChipDrawerDescription": "Pipeline status, review status, and merge request actions.",
+  "mrChipDrawerClose": "Close merge request status"
 }

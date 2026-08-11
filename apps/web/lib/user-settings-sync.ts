@@ -5,14 +5,13 @@ import type { UserSettingsUpdatePayload } from "@/lib/types/http-user-settings";
 const MAX_SYNC_ATTEMPTS = 3;
 const BASE_SYNC_RETRY_DELAY_MS = 100;
 
-export async function updateUserSettingsWithRetry(
+async function requestUserSettingsUpdateWithRetry(
   payload: UserSettingsUpdatePayload,
-): Promise<void> {
+): Promise<Awaited<ReturnType<typeof updateUserSettings>>> {
   let lastError: unknown;
   for (let attempt = 0; attempt < MAX_SYNC_ATTEMPTS; attempt += 1) {
     try {
-      await updateUserSettings(payload);
-      return;
+      return await updateUserSettings(payload);
     } catch (error) {
       if (error instanceof ApiError) throw error;
       lastError = error;
@@ -26,13 +25,31 @@ export async function updateUserSettingsWithRetry(
   throw lastError;
 }
 
+export async function updateUserSettingsWithRetry(
+  payload: UserSettingsUpdatePayload,
+): Promise<void> {
+  await requestUserSettingsUpdateWithRetry(payload);
+}
+
+export function createQueuedUserSettingsSyncWithResponse<T>(
+  buildPayload: (value: T) => UserSettingsUpdatePayload,
+): (value: T) => ReturnType<typeof updateUserSettings> {
+  let queue: Promise<unknown> = Promise.resolve();
+  return (value: T) => {
+    const payload = buildPayload(value);
+    const response = queue
+      .catch(() => undefined)
+      .then(() => requestUserSettingsUpdateWithRetry(payload));
+    queue = response;
+    return response;
+  };
+}
+
 export function createQueuedUserSettingsSync<T>(
   buildPayload: (value: T) => UserSettingsUpdatePayload,
 ): (value: T) => Promise<void> {
-  let queue = Promise.resolve();
-  return (value: T) => {
-    const payload = buildPayload(value);
-    queue = queue.catch(() => undefined).then(() => updateUserSettingsWithRetry(payload));
-    return queue;
+  const syncWithResponse = createQueuedUserSettingsSyncWithResponse(buildPayload);
+  return async (value: T) => {
+    await syncWithResponse(value);
   };
 }
