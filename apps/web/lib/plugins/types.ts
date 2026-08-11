@@ -157,6 +157,16 @@ export interface TaskPanelRegistration {
 
 /** Read-only context passed to `TaskMenuActionRegistration.visible`/`run`. */
 export interface PluginTaskMenuContext {
+  /**
+   * The active workspace id, or `""` when no workspace is active (e.g. the
+   * Home / all-workspaces board, or a render before workspace hydration
+   * completes) — the host always passes a string, never `null`/`undefined`,
+   * so a plugin using this value as a `host.storage` scopeId must check for
+   * `""` itself before calling `storage.get`/`set` (an empty scopeId fails
+   * the backend's scopeId validation). This mirrors `TaskCardTagsSlotProps
+   * .workspaceId`, which is `string | null` instead — a plugin reading both
+   * shapes needs the same "no active workspace" guard for each.
+   */
   workspaceId: string;
   taskId: string;
   taskTitle: string;
@@ -211,6 +221,15 @@ export interface TaskFilterRegistration {
   /** Filter section label shown in the dropdown. */
   label: string;
   /**
+   * Omit this filter's section from the host's built-in display/filter
+   * dropdown — for a plugin driving its own dedicated filter UI (e.g. a
+   * top-bar dropdown) instead. The filter still gates cards exactly as
+   * before via `matches`/`host.taskFilters`; only where its controls render
+   * changes. Default: false (shown in the built-in dropdown, today's
+   * behavior).
+   */
+  hidden?: boolean;
+  /**
    * Options offered by this filter's multi-select, e.g. tag values. An
    * empty selection means "All" (no filtering applied) — the plugin decides
    * how to represent a sentinel like "untagged" as a normal option value; the
@@ -260,6 +279,13 @@ export interface PluginStorageSetOptions {
 /** Per-user plugin storage scope — mirrors the backend's user-state routes. */
 export type PluginStorageScope = "instance" | "workspace" | "task" | "session" | "repository";
 
+/** One entry returned by `host.storage.listByKey`, scanning across every scopeId for a fixed key. */
+export interface PluginStorageScopeEntry {
+  scopeId: string;
+  value: unknown;
+  updatedAt: string;
+}
+
 /**
  * `host.storage` — authenticated, per-user key/value storage backed by
  * `/api/plugins/{id}/user-state/...`. Every read/write is scoped to the
@@ -288,6 +314,18 @@ export interface PluginStorageApi {
   ): Promise<void>;
   /** Every entry under (scope, scopeId), ordered by key. Not paginated. */
   list(scope: PluginStorageScope, scopeId: string): Promise<PluginStorageEntry[]>;
+  /**
+   * Every entry across every scopeId for a fixed (scope, key), ordered by
+   * scopeId — e.g. every task carrying a given tag id. Backed by the
+   * cross-scope scan route; capped server-side (`options.limit` requests a
+   * smaller cap, never a larger one). `truncated` is true when more entries
+   * exist than were returned.
+   */
+  listByKey(
+    scope: PluginStorageScope,
+    key: string,
+    options?: { limit?: number },
+  ): Promise<{ entries: PluginStorageScopeEntry[]; truncated: boolean }>;
   /**
    * Subscribes to live updates for this plugin's own storage made from
    * another tab, device, or surface (approach F1) — e.g. the kanban `Edit`
@@ -417,6 +455,28 @@ export interface PluginHostApi {
   utils: PluginUtilsApi;
   /** Authenticated, per-user key/value storage. See `PluginStorageApi`. */
   storage: PluginStorageApi;
+  /**
+   * Drives the selection for this plugin's own `registerTaskFilter`
+   * registrations (typically paired with `hidden: true`, when the plugin
+   * renders its own filter UI instead of the built-in dropdown section).
+   * Namespaced internally to `${pluginId}:${id}` so a plugin can only ever
+   * read/write its own filters' selections, never another plugin's.
+   */
+  taskFilters: PluginTaskFilterSelectionApi;
+}
+
+/**
+ * `host.taskFilters` — lets a plugin's own UI (e.g. a top-bar dropdown) set
+ * and observe the selection for its `registerTaskFilter` registrations,
+ * the same selection state the built-in display/filter dropdown reads.
+ */
+export interface PluginTaskFilterSelectionApi {
+  /** Current selected option values for this plugin's filter `id`, or `[]` if unset. */
+  getSelection(id: string): string[];
+  /** Empty `values` clears the selection (equivalent to "All"). */
+  setSelection(id: string, values: string[]): void;
+  /** Notified on any change to any of this plugin's filter selections. */
+  subscribe(listener: () => void): () => void;
 }
 
 /**

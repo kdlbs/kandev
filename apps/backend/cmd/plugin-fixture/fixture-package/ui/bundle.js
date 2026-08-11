@@ -291,6 +291,40 @@
       },
       });
 
+      // Exercises hidden (AC12: no built-in dropdown section for this
+      // filter), host.taskFilters (a plugin-owned selection, namespaced to
+      // this plugin), and host.storage.listByKey (cross-scope scan) end to
+      // end, without a bespoke fixture-only host API.
+      if (typeof registry.registerTaskFilter === "function") {
+        registry.registerTaskFilter({
+          id: "e2e-hidden-filter",
+          label: "E2E Hidden Filter",
+          hidden: true,
+          getOptions: function () {
+            return [{ value: "flagged", label: "Flagged" }];
+          },
+          matches: function (context, selected) {
+            return (
+              selected.indexOf("flagged") === -1 ||
+              host.taskFilters.getSelection("e2e-hidden-filter").indexOf(context.taskId) !== -1
+            );
+          },
+        });
+      }
+      registry.registerComponent(
+        "main-top-bar",
+        function E2EHiddenFilterListByKeyProbe() {
+          React.useEffect(function () {
+            if (host.storage.listByKey) {
+              host.storage.listByKey("task", "note", { limit: 10 }).then(function (result) {
+                host.storage.set("instance", "e2e-fixture", "listByKey-probe", result);
+              });
+            }
+          }, []);
+          return null;
+        },
+      );
+
       registry.registerKeybinding("open-demo", function () {
         function DemoModalContent() {
           // The Tooltip is the point of this modal in e2e: PluginModalHost

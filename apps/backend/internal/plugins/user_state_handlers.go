@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -27,6 +28,11 @@ import (
 // docs/decisions/2026-08-01-per-user-plugin-storage.md) while bounding
 // worst-case memory per request.
 const maxUserStateBodyBytes = 256 << 10 // 256 KiB
+
+// maxUserStateScanEntries is the default and hard cap on the cross-scope
+// scan (Approach 3.1): without one, a board with thousands of tagged tasks
+// could force an unbounded payload onto the wire on every dropdown open.
+const maxUserStateScanEntries = 1000
 
 // userStateSegmentPattern validates the :scopeId and :key path segments of
 // the per-user storage routes (AC18): non-empty, alphanumeric plus a small
@@ -49,6 +55,12 @@ var userStateScopes = map[string]bool{
 // sub-paths of /:id that must not be shadowed by a broader wildcard
 // registered first.
 func registerUserStateRoutes(api *gin.RouterGroup, ctrl *Controller) {
+	// Registered first: attaches directly to the existing :scope param node
+	// alongside its :scopeId child (a param node with both a handler and
+	// children is supported by gin's radix tree — the level below already
+	// proves it). Order among these four doesn't affect matching, but this
+	// mirrors the route's read-only, least-specific-path role.
+	api.GET("/:id/user-state/:scope", ctrl.userStateScan)
 	api.GET("/:id/user-state/:scope/:scopeId", ctrl.userStateList)
 	api.GET("/:id/user-state/:scope/:scopeId/:key", ctrl.userStateGet)
 	api.PUT("/:id/user-state/:scope/:scopeId/:key", ctrl.userStateSet)
@@ -168,6 +180,53 @@ func (c *Controller) userStateList(ctx *gin.Context) {
 		entries = []state.UserStateEntry{}
 	}
 	ctx.JSON(http.StatusOK, gin.H{"entries": entries})
+}
+
+// userStateScan serves GET /api/plugins/:id/user-state/:scope?key=<key>&limit=<n>
+// (Approach 3.1): every entry across every scopeId for a fixed key, e.g.
+// every task carrying a given tag id. `key` is required and validated
+// against userStateSegmentPattern; `limit` defaults to and is capped at
+// maxUserStateScanEntries.
+func (c *Controller) userStateScan(ctx *gin.Context) {
+	userID, record, scope, ok := c.userStateIdentity(ctx)
+	if !ok {
+		return
+	}
+
+	key := ctx.Query("key")
+	if !userStateSegmentPattern.MatchString(key) {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid or missing key"})
+		return
+	}
+
+	limit := maxUserStateScanEntries
+	if raw := ctx.Query("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid limit"})
+			return
+		}
+		if parsed < limit {
+			limit = parsed
+		}
+	}
+
+	// Fetch one extra row so truncation is detectable without a second
+	// COUNT query.
+	entries, err := c.svc.UserState().ListByKey(ctx.Request.Context(), record.ID, userID, scope, key, limit+1)
+	if err != nil {
+		c.log.Warn("plugin user-state scan error", zap.Error(err))
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	truncated := len(entries) > limit
+	if truncated {
+		entries = entries[:limit]
+	}
+	if entries == nil {
+		entries = []state.UserStateScopeEntry{}
+	}
+	ctx.JSON(http.StatusOK, gin.H{"entries": entries, "truncated": truncated})
 }
 
 // userStateGet serves GET /api/plugins/:id/user-state/:scope/:scopeId/:key

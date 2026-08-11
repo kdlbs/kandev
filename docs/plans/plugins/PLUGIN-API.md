@@ -87,6 +87,9 @@ interface PluginHostApi {
   // /api/plugins/{id}/user-state/... — see the "host.storage" section below.
   // Requires the plugin manifest to declare capabilities.user_state: true.
   storage: PluginStorageApi;
+  // Drives the selection for this plugin's own registerTaskFilter
+  // registrations — see "Task filters" below.
+  taskFilters: PluginTaskFilterSelectionApi;
 }
 
 interface PluginStorageEntry { key: string; value: unknown; updatedAt: string; }
@@ -129,6 +132,14 @@ interface PluginStorageApi {
   ): Promise<void>;
   // Every entry under (scope, scopeId), ordered by key. Not paginated.
   list(scope: PluginStorageScope, scopeId: string): Promise<PluginStorageEntry[]>;
+  // Every entry across every scopeId for a fixed (scope, key), ordered by
+  // scopeId — e.g. every task carrying a given tag id. Backed by the
+  // cross-scope scan route; server-side capped (options.limit requests a
+  // smaller cap, never a larger one). truncated is true when more entries
+  // exist than were returned.
+  listByKey(
+    scope: PluginStorageScope, key: string, options?: { limit?: number },
+  ): Promise<{ entries: PluginStorageScopeEntry[]; truncated: boolean }>;
   // Subscribes to live updates for this plugin's own storage made from
   // another tab, device, or surface — e.g. the kanban Edit modal and the
   // task panel both editing the same document. filter.scope/scopeId/key
@@ -156,6 +167,19 @@ interface PluginUserStateChange {
   key: string;
   updatedAt: string;
   deleted?: boolean; // true when the change was a delete rather than a set
+}
+
+interface PluginStorageScopeEntry { scopeId: string; value: unknown; updatedAt: string; }
+
+// Lets a plugin's own UI (e.g. a top-bar dropdown) set and observe the
+// selection for its registerTaskFilter registrations — the same selection
+// state the built-in display/filter dropdown reads. Every id is namespaced
+// internally to `${pluginId}:${id}`, so a plugin can only ever read/write
+// its own filters, never another plugin's.
+interface PluginTaskFilterSelectionApi {
+  getSelection(id: string): string[]; // current selection for this plugin's filter id, or [] if unset
+  setSelection(id: string, values: string[]): void; // empty values clears (equivalent to "All")
+  subscribe(listener: () => void): () => void; // notified on any change to any of this plugin's filters
 }
 
 interface PluginModalOptions {
@@ -458,6 +482,11 @@ interface TaskPanelRegistration {
 }
 
 interface PluginTaskMenuContext {
+  // "" when no workspace is active (Home/all-workspaces board, or a render
+  // before workspace hydration completes) — never null/undefined. A plugin
+  // using this as a host.storage scopeId must guard "" itself (an empty
+  // scopeId fails the backend's validation). TaskCardTagsSlotProps
+  // .workspaceId is string | null instead — guard both shapes the same way.
   workspaceId: string;
   taskId: string;
   taskTitle: string;
@@ -490,6 +519,12 @@ interface PluginTaskFilterOption {
 interface TaskFilterRegistration {
   id: string;   // plugin-local filter id (unique within the plugin, not globally)
   label: string; // filter section label shown in the dropdown
+  // Omit this filter's section from the built-in display/filter dropdown —
+  // for a plugin driving its own dedicated filter UI (e.g. a top-bar
+  // dropdown) via host.taskFilters instead. The filter still gates cards
+  // exactly as before via matches(); only where its controls render
+  // changes. Default: false (shown in the built-in dropdown).
+  hidden?: boolean;
   getOptions(): PluginTaskFilterOption[];
   // Called only when `selected` is non-empty — an empty selection is
   // implicit "All" and always matches without invoking this method.
@@ -616,6 +651,14 @@ combine with AND (a task must match every section with an active selection),
 mirroring how Workflow/Repository combine with the search query today. If
 `matches()` throws, the task is treated as non-matching and the error is
 logged (mirroring `TaskMenuActionRegistration.visible`'s error handling).
+
+Setting `hidden: true` removes a registration's section from the built-in
+dropdown without touching gating: `matches()` is still called exactly as
+above. A plugin doing this owns rendering its own filter UI elsewhere (e.g. a
+`main-top-bar` slot dropdown) and drives the shared selection through
+`host.taskFilters.getSelection`/`setSelection`/`subscribe` — the same
+selection state the built-in dropdown reads, namespaced to
+`${pluginId}:${id}` so one plugin can never read or set another's.
 
 ## Registry internals (host side)
 
