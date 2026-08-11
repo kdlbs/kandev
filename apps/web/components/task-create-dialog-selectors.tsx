@@ -37,7 +37,7 @@ import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
 import { useTaskCreatePromptMention } from "@/hooks/use-task-create-prompt-mention";
 import { cn } from "@/lib/utils";
-import { clampTaskTitleInput } from "@/lib/task-title";
+import { useTaskTitleSelectionRestore } from "@/hooks/use-task-title-selection-restore";
 import { deleteAttachment, uploadAttachment } from "@/lib/api/domains/attachment-api";
 import { ApiError } from "@/lib/api/client";
 import { useTranslation } from "react-i18next";
@@ -303,7 +303,7 @@ export const InlineTaskName = memo(function InlineTaskName({
   autoFocus,
 }: InlineTaskNameProps) {
   const { t } = useTranslation();
-  const inputRef = useRef<HTMLInputElement>(null);
+  const { inputRef, clampChange } = useTaskTitleSelectionRestore(value);
   const hasFocusedRef = useRef(false);
 
   useEffect(() => {
@@ -319,7 +319,7 @@ export const InlineTaskName = memo(function InlineTaskName({
       ref={inputRef}
       type="text"
       value={value}
-      onChange={(e) => onChange(clampTaskTitleInput(e.target.value))}
+      onChange={(e) => onChange(clampChange(e))}
       placeholder={t("task:taskName")}
       data-testid="task-title-input"
       className="w-full min-w-0 max-w-full border border-input bg-input/20 dark:bg-input/30 text-sm font-medium rounded-md px-3 py-2 placeholder:text-muted-foreground/70 outline-none focus-visible:border-ring transition-colors"

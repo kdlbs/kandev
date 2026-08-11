@@ -7,21 +7,21 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import { IconLayoutKanban, IconList, IconTimeline } from "@tabler/icons-react";
 import { AppSidebarWorkspacePicker } from "@/components/app-sidebar/app-sidebar-workspace-picker";
-import { MobileIntegrationsSection } from "@/components/integrations/integrations-menu";
-import { MobilePluginNavSection } from "@/components/plugins/mobile-plugin-nav-section";
+import {
+  AppNavSections,
+  useAppNavDialogs,
+  type AppNavDialogControls,
+} from "@/components/navigation/app-nav-sections";
 import { TaskSearchInput } from "./task-search-input";
 import {
   MobileTasksListOptions,
   type TasksListDisplayOptions,
 } from "./mobile-menu-task-list-options";
-import { linkToTask } from "@/lib/links";
 import { cn } from "@/lib/utils";
-import type { Repository, Task } from "@/lib/types/http";
+import type { Repository } from "@/lib/types/http";
 import type { WorkflowsState } from "@/lib/state/slices";
-import { ImproveKandevDialog } from "@/components/improve-kandev-dialog";
 import { useTranslation } from "react-i18next";
 import { getRepositoryPlaceholderKey } from "@/lib/kanban/repository-placeholder";
-import { MobileUtilityActions } from "./mobile-menu-utility-actions";
 import { useMobileMenuSheetState } from "@/hooks/use-mobile-menu-sheet-state";
 import { ColumnsMenu, type ColumnsMenuStep } from "./columns-menu";
 import {
@@ -41,8 +41,6 @@ export type MobileMenuSheetProps = {
   onSearchChange?: (query: string) => void;
   isSearchLoading?: boolean;
   tasksListOptions?: TasksListDisplayOptions;
-  showHealthIndicator: boolean;
-  onOpenHealthDialog: () => void;
 };
 
 export type MobileDisplayOptionsProps = {
@@ -361,23 +359,16 @@ function MobileMenuContent({
   onViewChange,
   showPipeline,
   displayOptions,
-  showHealthIndicator,
-  onOpenHealthDialog,
-  onOpenImproveKandev,
+  navControls,
 }: Pick<
   MobileMenuSheetProps,
-  | "searchQuery"
-  | "onSearchChange"
-  | "isSearchLoading"
-  | "onOpenChange"
-  | "showHealthIndicator"
-  | "onOpenHealthDialog"
+  "searchQuery" | "onSearchChange" | "isSearchLoading" | "onOpenChange"
 > & {
   viewValue: string;
   onViewChange: (value: string) => void;
   showPipeline: boolean;
   displayOptions: MobileDisplayOptionsProps;
-  onOpenImproveKandev: () => void;
+  navControls: AppNavDialogControls;
 }) {
   return (
     <div className="flex min-h-full flex-col gap-6 p-4">
@@ -393,13 +384,13 @@ function MobileMenuContent({
         showPipeline={showPipeline}
       />
       <MobileDisplayOptions {...displayOptions} />
-      <MobilePluginNavSection onNavigate={() => onOpenChange(false)} />
-      <MobileIntegrationsSection onNavigate={() => onOpenChange(false)} />
-      <MobileUtilityActions
-        showHealthIndicator={showHealthIndicator}
-        onOpenHealthDialog={onOpenHealthDialog}
-        onOpenImproveKandev={onOpenImproveKandev}
-        onOpenChange={onOpenChange}
+      {/* Home and Tasks are omitted here on purpose: the mobile header's brand
+          link is this surface's home affordance and the View toggle above
+          switches between Kanban and List. */}
+      <AppNavSections
+        onNavigate={() => onOpenChange(false)}
+        omitSections={["primary"]}
+        controls={navControls}
       />
     </div>
   );
@@ -414,21 +405,10 @@ export function MobileMenuSheet({
   onSearchChange,
   isSearchLoading = false,
   tasksListOptions,
-  showHealthIndicator,
-  onOpenHealthDialog,
 }: MobileMenuSheetProps) {
-  const {
-    contentRef,
-    router,
-    improveOpen,
-    setImproveOpen,
-    isMobile,
-    viewValue,
-    handleViewChange,
-    displayOptions,
-    focusMenu,
-    openImproveKandev,
-  } = useMobileMenuSheetState({ open, onOpenChange, workspaceId, currentPage, tasksListOptions });
+  const navControls = useAppNavDialogs(() => onOpenChange(false));
+  const { contentRef, isMobile, viewValue, handleViewChange, displayOptions, focusMenu } =
+    useMobileMenuSheetState({ open, onOpenChange, workspaceId, currentPage, tasksListOptions });
 
   return (
     <MobileMenuRender
@@ -443,13 +423,7 @@ export function MobileMenuSheet({
       viewValue={viewValue}
       onViewChange={handleViewChange}
       displayOptions={displayOptions}
-      showHealthIndicator={showHealthIndicator}
-      onOpenHealthDialog={onOpenHealthDialog}
-      onOpenImproveKandev={openImproveKandev}
-      improveOpen={improveOpen}
-      onImproveOpenChange={setImproveOpen}
-      workspaceId={workspaceId ?? null}
-      onTaskCreated={(task) => router.push(linkToTask(task.id))}
+      navControls={navControls}
     />
   );
 }
@@ -457,13 +431,7 @@ export function MobileMenuSheet({
 function MobileMenuRender(
   props: Pick<
     MobileMenuSheetProps,
-    | "open"
-    | "onOpenChange"
-    | "searchQuery"
-    | "onSearchChange"
-    | "isSearchLoading"
-    | "showHealthIndicator"
-    | "onOpenHealthDialog"
+    "open" | "onOpenChange" | "searchQuery" | "onSearchChange" | "isSearchLoading"
   > & {
     isMobile: boolean;
     contentRef: RefObject<HTMLDivElement | null>;
@@ -471,25 +439,16 @@ function MobileMenuRender(
     viewValue: string;
     onViewChange: (value: string) => void;
     displayOptions: MobileDisplayOptionsProps;
-    onOpenImproveKandev: () => void;
-    improveOpen: boolean;
-    onImproveOpenChange: (open: boolean) => void;
-    workspaceId: string | null;
-    onTaskCreated: (task: Task) => void;
+    navControls: AppNavDialogControls;
   },
 ) {
-  const { isMobile, improveOpen, onImproveOpenChange, workspaceId, onTaskCreated } = props;
+  const { isMobile, navControls } = props;
   return (
     <>
       <ResponsiveMenuSurface {...props} isMobile={isMobile}>
         <MobileMenuContent {...props} showPipeline={!isMobile} />
       </ResponsiveMenuSurface>
-      <ImproveKandevDialog
-        open={improveOpen}
-        onOpenChange={onImproveOpenChange}
-        workspaceId={workspaceId}
-        onSuccess={onTaskCreated}
-      />
+      {navControls.dialogs}
     </>
   );
 }

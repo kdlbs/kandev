@@ -8,10 +8,10 @@ vi.mock("@/components/app-status-bar/app-status-surface-provider", () => ({
 
 const PHONE_HOME = "topbar-phone-home";
 
-describe("PageTopbar phone home crumb", () => {
+describe("PageTopbar home crumb", () => {
   afterEach(cleanup);
 
-  it("renders a phone-only home crumb for a root-level page with no nav of its own", () => {
+  it("renders a phone-only home crumb by default", () => {
     render(<PageTopbar title="Hello E2E" />);
 
     const home = screen.getByTestId(PHONE_HOME);
@@ -21,10 +21,31 @@ describe("PageTopbar phone home crumb", () => {
     expect(home.querySelector("a")?.getAttribute("href")).toBe("/?home=overview");
   });
 
-  it("omits it when the page supplies its own leading nav", () => {
-    render(<PageTopbar title="Plugins" leading={<button type="button">Open menu</button>} />);
+  it("keeps the crumb visible at every width for homeAffordance=always", () => {
+    render(<PageTopbar title="Settings" homeAffordance="always" />);
+
+    const home = screen.getByTestId(PHONE_HOME);
+    expect(home.className).not.toContain("md:hidden");
+  });
+
+  it("suppresses the crumb for homeAffordance=none", () => {
+    render(<PageTopbar title="Board" homeAffordance="none" />);
 
     expect(screen.queryByTestId(PHONE_HOME)).toBeNull();
+  });
+
+  it("points the crumb at homeHref when provided", () => {
+    render(<PageTopbar title="Office" homeHref="/office" />);
+
+    const home = screen.getByTestId(PHONE_HOME);
+    expect(home.querySelector("a")?.getAttribute("href")).toBe("/office");
+  });
+
+  it("still renders the crumb when the page supplies leading content", () => {
+    // The crumb used to be tied to `leading`; the affordance prop owns it now.
+    render(<PageTopbar title="Plugins" leading={<button type="button">Open menu</button>} />);
+
+    expect(screen.getByTestId(PHONE_HOME)).not.toBeNull();
   });
 
   it("omits it when the page already shows a real back link", () => {
@@ -38,5 +59,52 @@ describe("PageTopbar phone home crumb", () => {
     render(<PageTopbar title="Home" variant="root" backLabel="Kandev" />);
 
     expect(screen.queryByTestId(PHONE_HOME)).toBeNull();
+  });
+});
+
+describe("PageTopbar parent crumbs", () => {
+  afterEach(cleanup);
+
+  const parents = [
+    { label: "Settings", href: "/settings", phoneOnlyLink: true },
+    { label: "Workspaces", href: "/settings/workspaces" },
+    { label: "Kanban1", href: "/settings/workspaces/ws-1" },
+  ];
+
+  it("collapses all but the last parent into a phone-only overflow menu", () => {
+    render(<PageTopbar title="Integrations" parents={parents} />);
+
+    // Last parent stays visible at every width.
+    const lastParent = screen.getByRole("link", { name: "Kanban1" });
+    expect(lastParent.closest("li")?.className).not.toContain("max-md:hidden");
+
+    // Earlier crumbs render for md+ only…
+    const middle = screen.getByRole("link", { name: "Workspaces" });
+    expect(middle.closest("li")?.className).toContain("max-md:hidden");
+
+    // …and reappear inside the phone-only "…" dropdown trigger.
+    const overflow = screen.getByTestId("topbar-crumb-overflow");
+    expect(overflow.closest("li")?.className).toContain("md:hidden");
+  });
+
+  it("names the overflow trigger for assistive technology", () => {
+    // `BreadcrumbEllipsis` marks itself `aria-hidden`, so its own sr-only text
+    // never reaches the accessibility tree — the trigger has to be named here
+    // or it announces as a bare "button".
+    render(<PageTopbar title="Integrations" parents={parents} />);
+
+    expect(screen.getByRole("button", { name: "Show more breadcrumbs" })).toBe(
+      screen.getByTestId("topbar-crumb-overflow"),
+    );
+  });
+
+  it("renders no overflow menu for a single parent", () => {
+    render(<PageTopbar title="Workspaces" parents={[parents[0]]} />);
+
+    expect(screen.queryByTestId("topbar-crumb-overflow")).toBeNull();
+    // The lone parent is not collapsed away.
+    expect(screen.getByRole("link", { name: "Settings" }).closest("li")?.className).not.toContain(
+      "max-md:hidden",
+    );
   });
 });

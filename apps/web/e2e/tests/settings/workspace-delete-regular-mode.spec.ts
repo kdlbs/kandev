@@ -16,8 +16,11 @@ test.describe("Workspace settings without the office feature", () => {
     const workspaceName = `Regular Delete ${suffix}`;
     const workspace = await apiClient.createWorkspace(workspaceName);
 
+    // The singular prefix is the legacy URL and redirects to `/settings/workspaces`;
+    // keeping it here covers that redirect as well as the deletion flow. The
+    // workspace name heads the page through the switcher trigger, not a heading.
     await testPage.goto(`/settings/workspace/${workspace.id}`);
-    await expect(testPage.getByRole("heading", { name: workspaceName })).toBeVisible({
+    await expect(testPage.getByTestId("workspace-settings-switcher")).toHaveText(workspaceName, {
       timeout: 15_000,
     });
 
@@ -43,7 +46,7 @@ test.describe("Workspace settings without the office feature", () => {
     await confirmButton.click();
     expect((await deleteRequest).ok()).toBe(true);
 
-    await expect(testPage).toHaveURL(/\/settings\/workspace$/, { timeout: 10_000 });
+    await expect(testPage).toHaveURL(/\/settings\/workspaces$/, { timeout: 10_000 });
 
     const { workspaces } = await apiClient.listWorkspaces();
     expect(workspaces.some((item) => item.id === workspace.id)).toBe(false);
