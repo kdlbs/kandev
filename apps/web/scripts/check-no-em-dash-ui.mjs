@@ -3,9 +3,9 @@
  * Fail when user-visible UI copy contains a Unicode em dash.
  *
  * The check covers locale values, rendered web source strings, backend mock-agent
- * response strings, and backend shared page catalogs. Historical changelog
- * content is intentionally excluded because the changelog is generated release
- * history and must remain immutable.
+ * response strings, backend shared page catalogs, and published Markdown. Historical
+ * changelog content is intentionally excluded because the changelog is generated
+ * release history and must remain immutable.
  * Comments are ignored in source files so this remains a copy check rather than
  * a style check for developer prose.
  */
@@ -19,6 +19,7 @@ const WEB_ROOT = path.resolve(import.meta.dirname, "..");
 const REPO_ROOT = path.resolve(WEB_ROOT, "..", "..");
 const SOURCE_EXTENSIONS = new Set([".js", ".jsx", ".ts", ".tsx"]);
 const BACKEND_SOURCE_EXTENSIONS = new Set([".go"]);
+const PUBLIC_DOC_EXTENSIONS = new Set([".md", ".mdx"]);
 const IGNORED_DIRECTORIES = new Set(["dist", "e2e", "node_modules"]);
 const CODE_STATE = "code";
 const LINE_COMMENT_STATE = "line-comment";
@@ -194,6 +195,16 @@ export function findSourceViolations(source, file, root) {
     );
 }
 
+export function findPublicDocViolations(source, file, root) {
+  return source
+    .split("\n")
+    .flatMap((line, index) =>
+      containsEmDash(line)
+        ? [{ kind: "public-doc", file: relativePath(file, root), line: index + 1 }]
+        : [],
+    );
+}
+
 function listFiles(directory, predicate, files = []) {
   if (!fs.existsSync(directory)) return files;
 
@@ -245,6 +256,19 @@ function scanCatalogDirectory(directory, root, violations) {
   }
 }
 
+export function scanPublicDocsEmDashViolations({
+  docsRoot = path.join(REPO_ROOT, "docs", "public"),
+  root = REPO_ROOT,
+} = {}) {
+  const violations = [];
+  for (const file of listFiles(docsRoot, (candidate) =>
+    PUBLIC_DOC_EXTENSIONS.has(path.extname(candidate).toLowerCase()),
+  )) {
+    violations.push(...findPublicDocViolations(fs.readFileSync(file, "utf8"), file, root));
+  }
+  return violations;
+}
+
 export function scanUiEmDashViolations({ repoRoot = REPO_ROOT, webRoot = WEB_ROOT } = {}) {
   const violations = [];
   const sourceRoots = ["components", "app", "src", "hooks", "lib"].map((directory) =>
@@ -277,6 +301,13 @@ export function scanUiEmDashViolations({ repoRoot = REPO_ROOT, webRoot = WEB_ROO
     }
   }
 
+  violations.push(
+    ...scanPublicDocsEmDashViolations({
+      docsRoot: path.join(repoRoot, "docs", "public"),
+      root: repoRoot,
+    }),
+  );
+
   return violations;
 }
 
@@ -290,14 +321,14 @@ function formatViolation(violation) {
 function main() {
   const violations = scanUiEmDashViolations();
   if (violations.length > 0) {
-    console.error(`✗ ${violations.length} UI em dash violation(s):\n`);
+    console.error(`✗ ${violations.length} public-copy em dash violation(s):\n`);
     for (const violation of violations) console.error(formatViolation(violation));
     console.error("\nUse a period, colon, comma, semicolon, or parentheses in user-facing copy.");
     process.exitCode = 1;
     return;
   }
 
-  console.log("✓ no em dashes in UI strings or locale values.");
+  console.log("✓ no em dashes in public copy or locale values.");
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

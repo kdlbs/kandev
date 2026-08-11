@@ -6,7 +6,7 @@ status: experimental
 
 # Plugin Manifest Reference
 
-`manifest.yaml` is the authoritative description of a plugin — identity,
+`manifest.yaml` is the authoritative description of a plugin; identity,
 runtime executables, capabilities, webhooks, config schema, and
 optional UI bundle. Kandev parses and validates it **before any plugin code
 runs**. See [Authoring a plugin](plugins-authoring.md) for the build
@@ -50,7 +50,7 @@ capabilities:
   state: true
   secrets: true
   agent_invoke: true                         # gates Host.InvokeUtilityAgent
-  auth: true                                 # gates external (OIDC/SAML) login — see ADR 0050
+  auth: true                                 # gates external (OIDC/SAML) login, see ADR 0050
   user_state: true                           # gates host.storage (per-user browser storage)
 
 webhooks:
@@ -99,21 +99,21 @@ ui:                                           # optional native frontend plugin
 | `categories` | no | string[] | Each entry must be one of `connector`, `automation`, `tools`, `analytics`. Unknown values are rejected. |
 | `icon` | no | string | Package-relative path (e.g. `icon.svg`) to an image the package ships, rendered on the [marketplace](plugins-marketplace.md) card and in plugin lists. The registry index-build resolves it to an absolute `icon_url`; for an installed plugin it is served from the extracted package. Omit it and the card falls back to a letter tile. |
 | `repo_url` | no | string | Absolute `http(s)` URL to the plugin's source repository. Rendered as a "Repo" link in Settings > Plugins (both the installed list and the plugin detail). Any other scheme (e.g. `javascript:`) is rejected at registration. Distinct from the marketplace card's `repo_url`, which the registry derives from `plugins.yaml`; declare this in the manifest so sideloaded and directly-installed plugins also carry the link. |
-| `runtime.type` | conditionally | string | `"binary"` is the only supported value. Setting it (vs. leaving it empty) makes the manifest **runtime-managed** — see "Managed vs. legacy" below. |
+| `runtime.type` | conditionally | string | `"binary"` is the only supported value. Setting it (vs. leaving it empty) makes the manifest **runtime-managed**: see "Managed vs. legacy" below. |
 | `runtime.executables` | required when `runtime.type: binary` | map\<string,string\> | Key is `<goos>-<goarch>` (e.g. `linux-amd64`, `darwin-arm64`, `windows-amd64`); value is a clean, package-relative path under `server/` (no leading `/`, no `..` segments). At least one entry required; the running host's key must be present at install time. Windows values end in `.exe`. |
-| `min_kandev_version` | no | string | Lowest Kandev version this plugin supports. Enforced at **install time**: installing onto an older Kandev fails with `requires kandev >= <version>, running <version>` and nothing is registered. Already-installed plugins are never re-checked at load or start. A Kandev built from source reports the version `dev` and skips the check entirely, so local development is unaffected. Compare as dotted numeric segments (`0.78.0`) — a `v` prefix does not parse as a number and falls back to a string comparison. |
+| `min_kandev_version` | no | string | Lowest Kandev version this plugin supports. Enforced at **install time**: installing onto an older Kandev fails with `requires kandev >= <version>, running <version>` and nothing is registered. Already-installed plugins are never re-checked at load or start. A Kandev built from source reports the version `dev` and skips the check entirely, so local development is unaffected. Compare as dotted numeric segments (`0.78.0`); a `v` prefix does not parse as a number and falls back to a string comparison. |
 | `capabilities.events` | no | string[] | Bus subjects (or wildcard patterns) this plugin subscribes to. See "Event subscription vocabulary" below. |
 | `capabilities.api_read` | no | string[] | Gates the Host data API's read-only accessors. Each entry is a resource name: `tasks`, `sessions`, `messages`, `workspaces`, `workflows`, `agent_profiles`, `repositories`. Calling the matching `Host` accessor (e.g. `Tasks()`) without its resource declared returns gRPC `PermissionDenied`. See "Host data API resource vocabulary" below. |
 | `capabilities.api_write` | no | string[] | Gates Host data writes. Current resources are `tasks` (`Tasks().Create/Update`) and `messages` (`Messages().Send`); reads and writes are gated independently. |
 | `capabilities.state` | no | bool | Gates `Host.GetState`/`SetState`/`DeleteState`/`ListState`. Calling any of them without this set to `true` returns gRPC `PermissionDenied`. |
 | `capabilities.secrets` | no | bool | Gates `Host.RevealSecret`/`GetSecret`/`SetSecret`/`DeleteSecret`. Calling any of them without this set to `true` returns gRPC `PermissionDenied`. |
-| `capabilities.agent_invoke` | no | bool | Gates `Host.InvokeUtilityAgent` — a one-shot completion run by the utility agent selected for this plugin. Declare a `utility_agent` config property with `type: string` and `format: utility-agent`; Settings > Plugins renders the picker. The selected utility agent resolves its own enabled ACP profile. Calling without this capability returns gRPC `PermissionDenied`; calling without a valid profile-backed selection returns gRPC `FailedPrecondition`. See ADR 0048. |
-| `capabilities.auth` | no | bool | Lets the plugin log a visitor in against an external IdP (OIDC/SAML). Its webhook validates the token, then asserts the identity to Kandev via the `X-Kandev-Auth-Login` response header (`{provider, subject, email, display_name}`); Kandev mints the session and sets the cookie — the plugin never sees the token. Requires authentication enabled; new users are provisioned as members, and Kandev never creates an admin nor auto-links to an existing admin account. **You MUST only assert an email the IdP verified as owned by the subject — a spoofed email claim is account takeover.** Highest-privilege capability; grant only to trusted plugins. See ADR 0050. |
-| `capabilities.user_state` | no | bool | Gates `host.storage` (`get`/`set`/`delete`/`list`/`subscribe`), the authenticated per-user browser storage surface at `/api/plugins/{id}/user-state/...`. Unlike `capabilities.state` (the gRPC `Host.SetState` family, written by the plugin's own backend), this is reachable directly from the plugin's frontend bundle with no Go backend required — every read/write is scoped to the calling user. Calling the route without this capability returns `403`. See [Authoring a plugin](plugins-authoring.md) and the per-user-plugin-storage decision record. |
+| `capabilities.agent_invoke` | no | bool | Gates `Host.InvokeUtilityAgent`; a one-shot completion run by the utility agent selected for this plugin. Declare a `utility_agent` config property with `type: string` and `format: utility-agent`; Settings > Plugins renders the picker. The selected utility agent resolves its own enabled ACP profile. Calling without this capability returns gRPC `PermissionDenied`; calling without a valid profile-backed selection returns gRPC `FailedPrecondition`. See ADR 0048. |
+| `capabilities.auth` | no | bool | Lets the plugin log a visitor in against an external IdP (OIDC/SAML). Its webhook validates the token, then asserts the identity to Kandev via the `X-Kandev-Auth-Login` response header (`{provider, subject, email, display_name}`); Kandev mints the session and sets the cookie; the plugin never sees the token. Requires authentication enabled; new users are provisioned as members, and Kandev never creates an admin nor auto-links to an existing admin account. **You MUST only assert an email the IdP verified as owned by the subject; a spoofed email claim is account takeover.** Highest-privilege capability; grant only to trusted plugins. See ADR 0050. |
+| `capabilities.user_state` | no | bool | Gates `host.storage` (`get`/`set`/`delete`/`list`/`subscribe`), the authenticated per-user browser storage surface at `/api/plugins/{id}/user-state/...`. Unlike `capabilities.state` (the gRPC `Host.SetState` family, written by the plugin's own backend), this is reachable directly from the plugin's frontend bundle with no Go backend required; every read/write is scoped to the calling user. Calling the route without this capability returns `403`. See [Authoring a plugin](plugins-authoring.md) and the per-user-plugin-storage decision record. |
 | `webhooks[].key` | yes | string | Must be unique within the manifest. Used in the relay path `POST /api/plugins/{id}/webhooks/{key}`. |
 | `webhooks[].description` | no | string | Free-form. |
-| `webhooks[].method` | no | string | **Informational only** — kandev does not validate or enforce the inbound HTTP method against this value. |
-| `auth_providers[]` | no | object[] | Login buttons this plugin contributes to the pre-auth login screen (needs `capabilities.auth`). Each is `{ id, display_name, initiate }`, where `initiate` names one of the plugin's `webhooks[].key` values — the button navigates to that webhook, which 302-redirects to the IdP. Surfaced anonymously in the boot payload as `auth.ssoProviders`. |
+| `webhooks[].method` | no | string | **Informational only**: kandev does not validate or enforce the inbound HTTP method against this value. |
+| `auth_providers[]` | no | object[] | Login buttons this plugin contributes to the pre-auth login screen (needs `capabilities.auth`). Each is `{ id, display_name, initiate }`, where `initiate` names one of the plugin's `webhooks[].key` values: the button navigates to that webhook, which 302-redirects to the IdP. Surfaced anonymously in the boot payload as `auth.ssoProviders`. |
 | `config_schema` | no | object | JSON-Schema-like object driving the settings form at **Settings > Plugins > `<plugin>`** (`GET /api/plugins/{id}/config` and `PATCH /api/plugins/{id}`). See "Config schema validation and secret fields" below. |
 | `ui.bundle` | no | string | Root-relative path (must start with `/`, e.g. `/ui/bundle.js`) to the plugin's native UI ES module, served at `GET /api/plugins/{id}/bundle`. |
 | `ui.styles` | no | string[] | Root-relative CSS paths (each must start with `/`), served at `GET /api/plugins/{id}/ui/*` and injected as `<link>` tags on load. |
@@ -123,28 +123,28 @@ ui:                                           # optional native frontend plugin
 | `ui.pages[].path` | yes* | string | Route path for the page. |
 | `ui.pages[].surface` | yes* | string | Metadata enum (`settings` · `task-panel` · `main-nav`) validated by the manifest parser. It is not a current frontend mount; use the registry hooks in the authoring guide. |
 | `ui.keybindings` | no | object[] | Declares plugin keybindings bound at runtime via `registerKeybinding`. Requires `ui.bundle`. |
-| `ui.keybindings[].id` | yes* | string | Stable, plugin-local slug (*required when a keybinding entry is present). Must match `^[a-z0-9][a-z0-9-]*$` and be unique within this plugin's own `ui.keybindings` list — not globally; the effective shortcut is namespaced `plugin:{pluginId}:{id}`. |
-| `ui.keybindings[].default` | yes* | string | Default combo string. `+`-separated tokens: zero or more modifiers from `mod`, `ctrl`, `cmd`, `meta`, `alt`, `option`, `shift` (`mod` = ⌘ on macOS, Ctrl elsewhere) plus exactly one non-modifier key. `shift` may not combine with a digit or symbol key — the browser reports the shifted glyph for those keys, so the combo could never match. |
+| `ui.keybindings[].id` | yes* | string | Stable, plugin-local slug (*required when a keybinding entry is present). Must match `^[a-z0-9][a-z0-9-]*$` and be unique within this plugin's own `ui.keybindings` list, not globally; the effective shortcut is namespaced `plugin:{pluginId}:{id}`. |
+| `ui.keybindings[].default` | yes* | string | Default combo string. `+`-separated tokens: zero or more modifiers from `mod`, `ctrl`, `cmd`, `meta`, `alt`, `option`, `shift` (`mod` = ⌘ on macOS, Ctrl elsewhere) plus exactly one non-modifier key. `shift` may not combine with a digit or symbol key; the browser reports the shifted glyph for those keys, so the combo could never match. |
 | `ui.keybindings[].description` | yes* | string | Non-empty, human-readable label shown in **Settings > Keyboard Shortcuts**. |
 
 `ui.pages` is declarative manifest metadata only and is not currently rendered
 by the frontend. A native bundle's runtime nav items, icons, routes, named
 slots, and per-route title-bar chrome (`registerNavItem`, `registerRoute`, and
 `registerComponent`) are the supported JS SDK surface with no corresponding
-`manifest.yaml` field — see [Authoring a plugin](plugins-authoring.md).
+`manifest.yaml` field, see [Authoring a plugin](plugins-authoring.md).
 
 ## Managed vs. legacy manifests
 
 Setting `runtime.type: binary` makes a manifest **runtime-managed**: kandev
 spawns and supervises the declared executable itself. A managed manifest
 must **not** set `base_url` or an `endpoints` block (`health`/`events`/
-`webhooks` paths on a remote service) — those describe the old
+`webhooks` paths on a remote service); those describe the old
 remote/operator-hosted tier, and validation rejects a managed manifest that
 sets them.
 
 A manifest with an empty `runtime.type` still *parses* as a legacy remote
 manifest (with `base_url`/`endpoints` instead) and passes
-`manifest.Validate()` on its own — but the **installer** rejects it: `pkgtar
+`manifest.Validate()` on its own, but the **installer** rejects it: `pkgtar
 .Install` requires `manifest.IsManaged()` to be true (`runtime.type:
 binary`), so a legacy manifest can never actually be installed via `POST
 /api/plugins/install` or a filesystem sideload. The remote tier is
@@ -158,7 +158,7 @@ ADR 0047): each entry must be one of `tasks`, `sessions`, `messages`,
 `workspaces`, `workflows`, `agent_profiles`, `repositories`. Declaring a
 resource grants the matching `Host` accessor (`Tasks()`, `Sessions()`,
 `Messages()`, `Workspaces()`, `Workflows()`, `AgentProfiles()`,
-`Repositories()` — see [Authoring a plugin](plugins-authoring.md)); calling an
+`Repositories()`, see [Authoring a plugin](plugins-authoring.md)); calling an
 accessor for an undeclared resource returns gRPC `PermissionDenied`.
 `capabilities.api_write` gates the current Host data writes: `tasks` gates
 `Tasks().Create`/`Update`, and `messages` gates `Messages().Send`. A plugin may
@@ -169,18 +169,18 @@ write without the matching declaration returns gRPC `PermissionDenied`.
 one user/agent message per row (`id`, `session_id`, `task_id`, `turn_id`,
 `author_type`, `content`, `type`, `created_at`), filterable by session ids,
 task ids, a `created_at` time range (`since` inclusive / `until` exclusive,
-RFC3339), and message `types`. Content is sanitized — kandev-injected
+RFC3339), and message `types`. Content is sanitized; kandev-injected
 `<kandev-system>` blocks are stripped, exactly like the `message.added` bus
 event, so raw system prompts are never exposed. `author_type` is `user` or
 `agent` (there is no `system` author).
 
 ## Config schema validation and secret fields
 
-`config_schema` is not an arbitrary, purely descriptive JSON Schema — kandev
+`config_schema` is not an arbitrary, purely descriptive JSON Schema; kandev
 validates submitted config against a specific subset of it before
 persisting:
 
-- `required` (an array of property names) is enforced — a `PATCH` missing a
+- `required` (an array of property names) is enforced; a `PATCH` missing a
   required property is rejected.
 - `type` (`string`, `boolean`, `number`, or `integer`) is checked against
   the submitted value.
@@ -191,7 +191,7 @@ persisting:
   when the plugin must always have a selection; optional fields include a
   **Not set** choice.
 - A property with `secret: true`, or `format: "password"`, is treated as a
-  **secret field** and must be `type: string` (or untyped) — a non-string
+  **secret field** and must be `type: string` (or untyped); a non-string
   secret is rejected. Secret values are moved into kandev's encrypted vault;
   `GET /api/plugins/{id}/config` returns the literal mask `"********"` in
   their place, and resubmitting that mask unchanged is treated as "keep the
@@ -201,7 +201,7 @@ persisting:
   backend validation effect.
 
 The plugin process itself always sees real, unmasked values (secrets
-included) via the `GetConfig` Host RPC — masking only applies to the
+included) via the `GetConfig` Host RPC; masking only applies to the
 operator-facing API/UI.
 
 ## Event subscription vocabulary
@@ -213,18 +213,18 @@ one subject segment; every other segment must match literally; and the
 **pattern and subject must have the same number of dot-separated segments**
 to match at all. `task.*` matches `task.created` (2 segments each) but does
 **not** match a three-segment subject such as `shell.output.<sessionId>`
-(`shell.*` would not match it either — 2 vs. 3 segments).
+(`shell.*` would not match it either; 2 vs. 3 segments).
 
 Any subject kandev publishes on its internal event bus is a valid
-subscription target — this is not a closed list scoped to any one feature
+subscription target; this is not a closed list scoped to any one feature
 area. The table below groups every subject defined in
 `internal/events/types.go` by domain (some are further suffixed per-session,
-e.g. `shell.output.<sessionId>`, `git.event.<sessionId>` — subscribe to the
+e.g. `shell.output.<sessionId>`, `git.event.<sessionId>`; subscribe to the
 literal wildcard segment count that matches, e.g. `shell.output.*`).
 
 A delivered event's `event_type` (`pluginsdk.Event.EventType`) is the
 **concrete subject it was published on**, i.e. the same string your pattern
-matched — so a plugin subscribed to `shell.output.*` reads the session id off
+matched, so a plugin subscribed to `shell.output.*` reads the session id off
 `event_type` as its last segment. For an unsuffixed subject that string is
 just the subject itself (`task.created`).
 
@@ -260,7 +260,7 @@ just the subject itself (`task.created`).
 | Linear | `linear.new_issue` |
 | Sentry | `sentry.new_issue` |
 | Office (autonomous agents) | `office.agent.created`, `office.agent.updated`, `office.agent.status_changed`, `office.skill.created`, `office.skill.updated`, `office.project.created`, `office.project.updated`, `office.approval.created`, `office.approval.resolved`, `office.comment.created`, `office.cost.recorded`, `office.run.queued`, `office.run.processed`, `office.run.event_appended` (per-run), `office.routine.triggered`, `office.inbox.item`, `office.task.status_changed`, `office.task.updated`, `office.task.decision_recorded`, `office.task.review_requested`, `office.provider.health_changed`, `office.route_attempt.appended`, `office.routing.settings_updated` |
-| Cross-plugin | `plugin.<plugin_id>.<name>` — published by `Host.EmitEvent`; subscribe with `plugin.<other-plugin-id>.*` to react to another plugin's events. |
+| Cross-plugin | `plugin.<plugin_id>.<name>`; published by `Host.EmitEvent`; subscribe with `plugin.<other-plugin-id>.*` to react to another plugin's events. |
 
 > Event list current as of 2026-07-16; regenerate from
 > `apps/backend/internal/events/types.go` if this page drifts from the code.
@@ -269,7 +269,7 @@ just the subject itself (`task.created`).
 
 Once installed, kandev writes several fields onto the stored record
 alongside the parsed manifest. These are **kandev-owned runtime state, not
-author-supplied manifest fields** — do not include them in `manifest.yaml`;
+author-supplied manifest fields**: do not include them in `manifest.yaml`;
 they have no effect there and are overwritten on install:
 
 | Field | Meaning |

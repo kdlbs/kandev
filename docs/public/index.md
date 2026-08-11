@@ -9,10 +9,10 @@ Kandev lets you assign repository work to coding agents, review the result, and 
 
 ## Start here
 
-1. [Get started](use-kandev.md) — install Kandev, add a repository, and run a first task.
-2. [Tasks and workflows](tasks-and-workflows.md) — create work, choose a workflow, and use plans.
-3. [Sessions and review](sessions-and-review.md) — supervise an agent, inspect changes, and finish safely.
-4. [Security and trust](security.md) — choose an appropriate access boundary before sharing Kandev with others.
+1. [Get started](use-kandev.md); install Kandev, add a repository, and run a first task.
+2. [Tasks and workflows](tasks-and-workflows.md); create work, choose a workflow, and use plans.
+3. [Sessions and review](sessions-and-review.md); supervise an agent, inspect changes, and finish safely.
+4. [Security and trust](security.md); choose an appropriate access boundary before sharing Kandev with others.
 
 <details>
 <summary>More guides for running work</summary>

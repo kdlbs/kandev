@@ -70,7 +70,7 @@ After startup it returns HTTP 200 with:
 {"status":"ok","service":"kandev","mode":"websocket+http","version":"1.2.3"}
 ```
 
-It returns HTTP 503 with `status: "starting"` (plus the same `version`) until routes, the agent registry, and the listener are ready. The supplied Kubernetes probes use this endpoint. `/health` is unauthenticated even when auth is enabled, so it's also the credential-free way for monitoring to read the running version — no need to authenticate to **System > About** just to check what build is deployed.
+It returns HTTP 503 with `status: "starting"` (plus the same `version`) until routes, the agent registry, and the listener are ready. The supplied Kubernetes probes use this endpoint. `/health` is unauthenticated even when auth is enabled, so it's also the credential-free way for monitoring to read the running version; there is no need to authenticate to **System > About** just to check what build is deployed.
 
 For application diagnostics, open **Settings > System > Status** or request:
 
@@ -144,7 +144,7 @@ Scheduled cleanup is disabled by default and runs only after the configured reso
 period. Orphaned task workspaces and rotated Go caches move into Kandev's quarantine before
 permanent deletion. Each entry shows its `delete_after` retention deadline: **Delete** and
 **Clear eligible** cannot remove it before that time. The deadline is the earliest safe deletion
-time, not an exact promise—the first successful scheduled or full manual maintenance run after the
+time, not an exact promise, the first successful scheduled or full manual maintenance run after the
 deadline performs the purge, subject to the idle gate and any preemption.
 
 Use **Clear eligible** to remove only entries whose deadlines have passed. It reports protected
@@ -251,7 +251,7 @@ authoritative. Do not delete ownership rows by hand. Start a compatible
 pre-cutover binary to restore service, or deploy the migration hotfix and retry
 the upgrade against the unchanged database.
 
-The normalized schema is intentionally incompatible with older binaries. To downgrade, stop all instances and restore the pre-upgrade backup — never start an older binary against a post-cutover database. SQLite restores from its automatic pre-migration snapshot; PostgreSQL restores your verified `pg_dump` backup.
+The normalized schema is intentionally incompatible with older binaries. To downgrade, stop all instances and restore the pre-upgrade backup; never start an older binary against a post-cutover database. SQLite restores from its automatic pre-migration snapshot; PostgreSQL restores your verified `pg_dump` backup.
 
 Switching `database.driver` does not migrate data. PostgreSQL and shared NATS remove two single-process data constraints, but they do not make Kandev horizontally scalable: WebSocket subscriptions, execution lifecycle/control state, and task workspaces remain process- or filesystem-local. The current product and supplied deployment validate one backend replica only; do not add replicas based on the database and event bus alone.
 
@@ -442,10 +442,11 @@ Kandev warns when its live WebSocket connection has not recovered for three seco
 
 **Settings > System > Feature Toggles** currently exposes:
 
-- **Office mode** — experimental, medium risk, and off in the production profile by default.
-- **Claude background prompt handoff** — experimental, high risk, and off in every profile by default. Enabling it lets Claude Code accept another prompt after its foreground yields while recognized async subagent, `run_in_background` shell, or Monitor work remains active. ACP lifecycle gaps can misclassify activity or overlap prompts; use it only for controlled testing.
-- **Unread divider** — a per-user setting at **Settings > General > Task Actions**. It defaults off, takes effect immediately, and controls both the Slack-style **New** divider and read-cursor updates while that user's transcript view is visible.
-- **Debug mode** — high risk; enables diagnostic endpoints and agent-message logging that can contain sensitive content.
+- **Office mode**: experimental, medium risk, and off in the production profile by default.
+- **App status bar**: stable, low risk, and off in the production profile by default. Enabling it adds the desktop/tablet bar and phone Status entry after restart; disabling it again does not stop connections, metrics collection requested by other clients, or plugins. Urgent WebSocket connectivity warnings still remain visible while the feature is off.
+- **Claude background prompt handoff**: experimental, high risk, and off in every profile by default. Enabling it lets Claude Code accept another prompt after its foreground yields while recognized async subagent, `run_in_background` shell, or Monitor work remains active. ACP lifecycle gaps can misclassify activity or overlap prompts; use it only for controlled testing.
+- **Unread divider**: a per-user setting at **Settings > General > Task Actions**. It defaults off, takes effect immediately, and controls both the Slack-style **New** divider and read-cursor updates while that user's transcript view is visible.
+- **Debug mode**: high risk; enables diagnostic endpoints and agent-message logging that can contain sensitive content.
 
 Each feature toggle requires restart. A value supplied explicitly by its environment variable locks the UI control; the debug toggle is also locked by explicit legacy/debug-message environment variables. Otherwise the UI stores an override in the database. The page can request restart only when the native local supervisor is available. A normal Unix `kandev` terminal launch is supervised; Desktop, a service, a container, a directly started backend, a deploy preview, or Windows requires a manual application restart.
 
@@ -476,8 +477,8 @@ drawer mirrors it as the saved left sequence followed by the saved right sequenc
 
 ## Related pages
 
-- [Configuration](configuration.md) — paths, database, logging, NATS, Docker, and security-sensitive environment variables
-- [Executors](executors.md) — runtime lifecycle, credentials, cleanup, and isolation boundaries
-- [Git operations](git-operations.md) — branches, worktrees, push, and pull-request behavior
-- [Automation and MCP](automation-and-mcp.md) — external MCP routes and their current unauthenticated trust boundary
-- [Windows support](windows-support.md) — Windows-native limitations and supported alternatives
+- [Configuration](configuration.md); paths, database, logging, NATS, Docker, and security-sensitive environment variables
+- [Executors](executors.md); runtime lifecycle, credentials, cleanup, and isolation boundaries
+- [Git operations](git-operations.md); branches, worktrees, push, and pull-request behavior
+- [Automation and MCP](automation-and-mcp.md); external MCP routes and their current unauthenticated trust boundary
+- [Windows support](windows-support.md); Windows-native limitations and supported alternatives

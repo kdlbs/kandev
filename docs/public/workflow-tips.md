@@ -163,9 +163,9 @@ Cancellation policy is deliberately narrow: it is evaluated only for the visible
 
 A step's Prompt field accepts `@name` references to [saved prompts](developer-tools.md#saved-prompts) (**Settings > Prompts**), the same way task chat does. Type `@` and select a prompt, or type the name directly.
 
-- The reference is resolved when the step prompt runs, not when it is saved. Editing the saved prompt's content later automatically changes what every step referencing it sends next time — there is nothing to update on the step itself.
+- The reference is resolved when the step prompt runs, not when it is saved. Editing the saved prompt's content later automatically changes what every step referencing it sends next time: there is nothing to update on the step itself.
 - The `@name` mention stays visible in the prompt/chat. Kandev attaches the referenced prompt's content as hidden context for the agent; it is not shown as part of the visible conversation.
-- `{{task_prompt}}` is only interpolated in the step prompt field itself. If a referenced saved prompt's content contains `{{task_prompt}}`, it is **not** expanded — it is sent to the agent as literal text.
+- `{{task_prompt}}` is only interpolated in the step prompt field itself. If a referenced saved prompt's content contains `{{task_prompt}}`, it is **not** expanded; it is sent to the agent as literal text.
 
 The same `@name` syntax and resolution apply to a GitHub Review Watch's prompt field. See [Integrations](integrations.md#configure-and-use-the-workspace).
 
