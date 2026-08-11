@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { StateProvider } from "@/components/state-provider";
+import { pluginRegistry } from "@/lib/plugins/registry";
 import { TaskItem } from "./task-item";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 
@@ -488,5 +489,73 @@ describe("TaskItem queued prompt count badge", () => {
     expect(screen.getByTestId(QUEUED_BADGE_TEST_ID).getAttribute("aria-label")).toContain(
       "queued prompt",
     );
+  });
+});
+
+describe("TaskItem — task-row-tags slot", () => {
+  const PLUGIN_ID = "kandev-plugin-tags";
+  const TAGS_TEST_ID = "plugin-row-tags";
+  const SLOT = "task-row-tags";
+
+  function SlotPropsProbe({ slotProps }: { slotProps?: unknown }) {
+    const props = slotProps as {
+      taskId: string;
+      workspaceId: string | null;
+      workflowStepId: string | null;
+      surface: string;
+    };
+    return (
+      <span data-testid={TAGS_TEST_ID}>
+        {props.taskId}|{props.workspaceId}|{props.workflowStepId}|{props.surface}
+      </span>
+    );
+  }
+
+  afterEach(() => {
+    pluginRegistry.unregisterPlugin(PLUGIN_ID);
+  });
+
+  it("renders the slot with taskId/workspaceId/workflowStepId/surface: 'sidebar'", () => {
+    pluginRegistry.forPlugin(PLUGIN_ID).registerComponent(SLOT, SlotPropsProbe);
+
+    render(
+      <StateProvider initialState={{ workspaces: { items: [], activeId: "ws-1" } }}>
+        <TooltipProvider>
+          <TaskItem title="Needs answer" state="REVIEW" taskId="task-1" workflowStepId="step-1" />
+        </TooltipProvider>
+      </StateProvider>,
+    );
+
+    expect(screen.getByTestId(TAGS_TEST_ID).textContent).toBe("task-1|ws-1|step-1|sidebar");
+  });
+
+  it("renders nothing when no plugin is registered for the slot", () => {
+    renderTaskItem({ taskId: "task-1", workflowStepId: "step-1" });
+
+    expect(screen.queryByTestId(TAGS_TEST_ID)).toBeNull();
+  });
+
+  it("renders nothing for a row with no taskId, even with a plugin registered", () => {
+    pluginRegistry.forPlugin(PLUGIN_ID).registerComponent(SLOT, SlotPropsProbe);
+
+    renderTaskItem({});
+
+    expect(screen.queryByTestId(TAGS_TEST_ID)).toBeNull();
+  });
+
+  it("isolates a throwing slot component so the rest of the row still renders", () => {
+    function ThrowingTags(): never {
+      throw new Error("boom");
+    }
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      pluginRegistry.forPlugin(PLUGIN_ID).registerComponent(SLOT, ThrowingTags);
+
+      renderTaskItem({ taskId: "task-1", workflowStepId: "step-1" });
+
+      expect(screen.getByText("Needs answer")).not.toBeNull();
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 });

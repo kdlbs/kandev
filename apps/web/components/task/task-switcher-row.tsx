@@ -150,6 +150,7 @@ function TaskRowItem({
       remoteExecutorType={task.remoteExecutorType}
       remoteExecutorName={task.remoteExecutorName}
       taskId={task.id}
+      workflowStepId={task.workflowStepId}
       primarySessionId={task.primarySessionId ?? null}
       hasPendingClarification={task.hasPendingClarification}
       hasPendingPermission={task.hasPendingPermission}

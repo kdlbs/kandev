@@ -90,11 +90,14 @@ export interface PluginRouteOptions {
  * another plugin's page and authors don't gate on the current id themselves.
  * "task-card-indicators" (small icon/badge rendered beside the PR status icon
  * on every kanban card — receives `{ taskId, workspaceId, workflowStepId }`
- * as `slotProps`), and "task-card-tags" (its own row on every kanban card,
+ * as `slotProps`), "task-card-tags" (its own row on every kanban card,
  * rendered below the badges row — for contributions too wide for the cramped
  * title-row `task-card-indicators` spot, e.g. a row of tag chips — receives
- * `TaskCardTagsSlotProps` as `slotProps`). Not a closed union — hosts may
- * register additional slot names.
+ * `TaskCardTagsSlotProps` as `slotProps`), and "task-row-tags" (a denser
+ * counterpart to "task-card-tags" for compact task-listing rows — the
+ * sidebar task tree and the `/tasks` list — receiving `TaskRowTagsSlotProps`
+ * as `slotProps`). Not a closed union — hosts may register additional slot
+ * names.
  */
 export type PluginSlotName = string;
 
@@ -117,6 +120,19 @@ export type TaskCardTagsSlotProps = {
   taskId: string;
   workspaceId: string | null;
   workflowStepId: string | null;
+};
+
+/**
+ * Context the host passes to the `task-row-tags` slot on a compact
+ * task-listing row. `surface` distinguishes the sidebar task tree from the
+ * `/tasks` list so a plugin can adapt density if it needs to, though most
+ * contributions render the same chip row either way.
+ */
+export type TaskRowTagsSlotProps = {
+  taskId: string;
+  workspaceId: string | null;
+  workflowStepId: string | null;
+  surface: "sidebar" | "task-list";
 };
 
 /** Component registered for a named slot; receives host-provided `slotProps`. */
@@ -168,8 +184,12 @@ export interface PluginTaskMenuContext {
  * Registration accepted by `PluginRegistry.registerTaskMenuAction`:
  * contributes an item to the kanban card context/dropdown menu. Group
  * "edit" nests the item inside the card's `Edit` submenu; group "primary"
- * renders it as a flat, top-level menu item, positioned between the "Move
- * to"/"Send to workflow" submenus and the "Link" submenu.
+ * renders it as a flat, top-level menu item. It renders in two surfaces —
+ * the kanban card menu and the sidebar task row's context menu — and the
+ * exact neighbouring items are surface-specific: in the card menu it sits
+ * between the "Move to"/"Send to workflow" submenus and the "Link" submenu;
+ * in the sidebar menu it sits immediately before "Link" (there is no "Move
+ * to"/"Send to workflow" submenu ahead of it there).
  */
 export interface TaskMenuActionRegistration {
   id: string;

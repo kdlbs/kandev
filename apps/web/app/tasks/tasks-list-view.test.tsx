@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
+import { pluginRegistry } from "@/lib/plugins/registry";
 import { DEFAULT_TASKS_LIST_GROUP, DEFAULT_TASKS_LIST_SORT } from "@/lib/tasks/tasks-list-options";
 import {
   sessionId as toSessionId,
@@ -126,5 +127,64 @@ describe("TasksListView row — destructive-action guard", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Delete task" }));
     expect(screen.queryByTestId("still-working-warning")).not.toBeNull();
+  });
+});
+
+describe("TasksListView row — task-row-tags slot", () => {
+  const PLUGIN_ID = "kandev-plugin-tags";
+  const TAGS_TEST_ID = "plugin-row-tags";
+  const SLOT = "task-row-tags";
+
+  function SlotPropsProbe({ slotProps }: { slotProps?: unknown }) {
+    const p = slotProps as {
+      taskId: string;
+      workspaceId: string | null;
+      workflowStepId: string | null;
+      surface: string;
+    };
+    return (
+      <span data-testid={TAGS_TEST_ID}>
+        {p.taskId}|{p.workspaceId}|{p.workflowStepId}|{p.surface}
+      </span>
+    );
+  }
+
+  afterEach(() => {
+    pluginRegistry.unregisterPlugin(PLUGIN_ID);
+  });
+
+  function renderWithWorkspace(showTaskDetails: boolean) {
+    return render(
+      <StateProvider initialState={{ workspaces: { items: [], activeId: "ws-1" } }}>
+        <TooltipProvider>
+          <TasksListView {...props([makeTask({})])} showTaskDetails={showTaskDetails} />
+        </TooltipProvider>
+      </StateProvider>,
+    );
+  }
+
+  it("renders the slot with surface: 'task-list' in the rich row variant", () => {
+    pluginRegistry.forPlugin(PLUGIN_ID).registerComponent(SLOT, SlotPropsProbe);
+
+    renderWithWorkspace(true);
+
+    expect(screen.getByTestId(TAGS_TEST_ID).textContent).toBe("task-1|ws-1|step-1|task-list");
+  });
+
+  it("renders the slot with surface: 'task-list' in the compact row variant", () => {
+    pluginRegistry.forPlugin(PLUGIN_ID).registerComponent(SLOT, SlotPropsProbe);
+
+    renderWithWorkspace(false);
+
+    expect(screen.getByTestId(TAGS_TEST_ID).textContent).toBe("task-1|ws-1|step-1|task-list");
+  });
+
+  it("renders nothing in either variant when no plugin is registered", () => {
+    renderWithWorkspace(true);
+    expect(screen.queryByTestId(TAGS_TEST_ID)).toBeNull();
+    cleanup();
+
+    renderWithWorkspace(false);
+    expect(screen.queryByTestId(TAGS_TEST_ID)).toBeNull();
   });
 });
