@@ -68,5 +68,10 @@ and synchronized task/plan status.
   while preserving caller cleanup after successful setup. The focused regression
   failed RED with one leaked directory, then passed GREEN; the command-palette
   happy path also passed with retries disabled.
+- PR CI remediation made workspace-picker workspaces disposable, aligned its
+  focus assertion with Radix's initial item focus, and made office deletion
+  accept any remaining kanban workspace. Both specs passed together (5 tests),
+  then exact Chromium/mobile shard 4/14 passed 137 tests with 7 intentional
+  skips and retries disabled.
 - No production UI or mobile composition changed; both use the same corrected
   backend response.

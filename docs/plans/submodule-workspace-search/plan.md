@@ -85,6 +85,10 @@ passed. Task 02 passed 1 Chromium test after its RED run showed the original
 bug's 2 groups instead of the expected root plus 2 submodules. Review
 remediation added and passed setup-failure cleanup coverage for the shared E2E
 fixture, then revalidated the command-palette happy path with retries disabled.
+PR CI remediation also removed workspace-picker fixture leakage and corrected
+two order-dependent E2E expectations. The two affected specs passed together
+with one worker, and exact Chromium/mobile shard 4/14 passed 137 tests with 7
+intentional skips and retries disabled.
 
 ## Implementation Waves And Parallel Candidates
 
