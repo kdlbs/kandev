@@ -385,11 +385,6 @@ type FeaturesConfig struct {
 	// HTTP/WS route registration, and frontend nav/route visibility.
 	Office bool `mapstructure:"office" json:"office"`
 
-	// AppStatusBar gates the global status bar on tablet/desktop and the
-	// corresponding Status drawer on phones. The snake_case mapstructure key
-	// keeps the config and KANDEV_FEATURES_APP_STATUS_BAR environment name aligned.
-	AppStatusBar bool `mapstructure:"app_status_bar" json:"appStatusBar"`
-
 	// Auth is the on/off switch for opt-in authentication and per-user
 	// workspaces. When on, every visitor must sign in (the first becomes the
 	// admin via a setup wizard) and workspaces are private per user; the

@@ -225,6 +225,7 @@ export const i18nGuardFiles = [
   "lib/i18n/**/*.{ts,tsx}",
   // Settings → Preferences — Appearance, Notifications, Terminal & Editors and
   // friends render straight from components/settings via the SPA route table.
+  "components/settings/app-status-bar-settings-card.tsx",
   "components/settings/general-settings.tsx",
   "components/settings/language-settings.tsx",
   "components/settings/notification-events-table.tsx",

@@ -20,6 +20,7 @@ export const GENERAL_SETTINGS_TARGETS = {
   settingsMenuMode: "setting-settings-menu-mode",
   startupPage: "setting-startup-page",
   displayLanguage: "setting-display-language",
+  appStatusBar: "setting-status-bar",
   changesPanelLayout: "setting-changes-panel-layout",
   resourceMetrics: "setting-resource-metrics",
   layoutProfiles: "setting-layout-profiles",
@@ -101,6 +102,17 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     order: 14,
   },
   {
+    id: "appearance-status-bar",
+    kind: "control",
+    labelKey: "settings:showStatusBar",
+    aliasesKey: "settings:discoveryAliasesStatusBar",
+    parentId: APPEARANCE_ID,
+    groupId: "preferences",
+    href: APPEARANCE_SETTINGS_HREF,
+    targetId: GENERAL_SETTINGS_TARGETS.appStatusBar,
+    order: 15,
+  },
+  {
     id: "appearance-changes-panel-layout",
     kind: "control",
     labelKey: "settings:changesPanelLayout",
@@ -108,7 +120,7 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     groupId: "preferences",
     href: APPEARANCE_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.changesPanelLayout,
-    order: 15,
+    order: 16,
   },
   {
     id: "appearance-resource-metrics",
@@ -119,7 +131,7 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     groupId: "preferences",
     href: APPEARANCE_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.resourceMetrics,
-    order: 16,
+    order: 17,
   },
   {
     id: "preferences-layouts",

@@ -42,7 +42,6 @@ async function createDocs(files, meta) {
 async function createCoverageRepo({
   coverage,
   settingsRoutes = ["/settings", "/settings/general"],
-  settingsRoutesAfterTable = "\n\nexport function SettingsRoutes() {}",
   mcpTools = ["list_workspaces_kandev"],
   omitFiles = [],
 } = {}) {
@@ -55,7 +54,7 @@ async function createCoverageRepo({
     "docs/public/index.md": validPage,
     "apps/web/src/settings-routes.tsx": `const SETTINGS_ROUTES = {\n${settingsRoutes
       .map((route) => `  "${route}": () => null,`)
-      .join("\n")}\n};${settingsRoutesAfterTable}`,
+      .join("\n")}\n};\n\nexport const SETTINGS_ROUTE_PATHS = new Set(Object.keys(SETTINGS_ROUTES));\n\nexport function SettingsRoutes() {}`,
     "apps/web/src/settings-routes.test.ts": "// settings route coverage",
     "apps/backend/internal/mcp/server/server.go": mcpTools
       .map((tool) => `mcp.NewTool("${tool}")`)
@@ -882,15 +881,6 @@ test("rejects coverage entries that cite missing evidence", async () => {
     validateCoverageInventory(fixture),
     /workspace-control cites missing test: apps\/web\/src\/settings-routes\.test\.ts/,
   );
-});
-
-test("accepts settings routes followed by an exported route-path set", async () => {
-  const fixture = await createCoverageRepo({
-    settingsRoutesAfterTable:
-      "\n\nexport const SETTINGS_ROUTE_PATHS = new Set(Object.keys(SETTINGS_ROUTES));\n\nexport function SettingsRoutes() {}",
-  });
-
-  await assert.doesNotReject(validateCoverageInventory(fixture));
 });
 
 test("rejects coverage evidence that points to a directory", async () => {
