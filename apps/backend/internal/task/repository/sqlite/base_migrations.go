@@ -79,7 +79,20 @@ func (r *Repository) officeCostEventsTableExists() (bool, error) {
 // and event_subscribers.go only logs a Warn when the rollup write fails
 // while the ledger insert has already committed. A "skip if nonzero"
 // guard would make exactly that drift permanent instead of self-healing
-// it on the next boot.
+// it on the next boot. (If the ledger for a session was deleted separately
+// from the session row itself - see the two-transaction delete in
+// workspace_deletion.go - this recompute correctly zeroes that session's
+// tokens_cached_in, since an empty ledger sums to zero; the rollup's only
+// contract is to equal the ledger sum.)
+//
+// The UPDATE runs unconditionally on every boot (runMigrations has no
+// run-once tracking - see MigrateLogger.Apply), so office_cost_events(session_id)
+// must be indexed before the backfill runs: the correlated subquery below
+// joins on session_id, and office_cost_events otherwise only indexes
+// agent_profile_id, occurred_at, and task_id. Without this index SQLite
+// falls back to a full table scan per task_sessions row, which is quadratic
+// in (sessions x ledger rows) and measured at 76.72s at a modest 4,000
+// sessions / 80,000 events - with the index, 0.17s for the same data.
 func (r *Repository) backfillSessionTokensCachedIn() error {
 	exists, err := r.officeCostEventsTableExists()
 	if err != nil {
@@ -88,6 +101,8 @@ func (r *Repository) backfillSessionTokensCachedIn() error {
 	if !exists {
 		return nil
 	}
+	r.migrate.Apply("office_cost_events.session_id.idx",
+		`CREATE INDEX IF NOT EXISTS idx_office_cost_events_session_id ON office_cost_events(session_id)`)
 	r.migrate.Apply("task_sessions.tokens_cached_in.backfill", `
 		UPDATE task_sessions
 		   SET tokens_cached_in = COALESCE(

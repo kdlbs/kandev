@@ -76,6 +76,30 @@ func insertOfficeCostEvent(t *testing.T, repo *Repository, id, sessionID string,
 	}
 }
 
+// TestBackfillSessionTokensCachedIn_CreatesSessionIDIndex guards the
+// backfill's boot-time cost: without an index on
+// office_cost_events(session_id), the correlated subquery in the backfill's
+// UPDATE falls back to a full table scan per task_sessions row (a measured
+// ~450x slowdown at 4,000 sessions / 80,000 events - 76.72s vs 0.17s). The
+// backfill runs unconditionally on every boot (see runMigrations), so a
+// missing index is a startup-latency regression, not just a slow query.
+func TestBackfillSessionTokensCachedIn_CreatesSessionIDIndex(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	createOfficeCostEventsTable(t, repo)
+
+	if err := repo.backfillSessionTokensCachedIn(); err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+
+	var name string
+	err := repo.db.QueryRow(
+		`SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'office_cost_events' AND sql LIKE '%session_id%'`,
+	).Scan(&name)
+	if err != nil {
+		t.Fatalf("expected an index on office_cost_events(session_id) to exist after the backfill runs, got: %v", err)
+	}
+}
+
 // TestBackfillSessionTokensCachedIn_SumsLedger proves the backfill invariant
 // directly: task_sessions.tokens_cached_in must equal the sum of
 // office_cost_events.tokens_cached_in for that session. This is the
@@ -192,6 +216,42 @@ func TestBackfillSessionTokensCachedIn_NoOpWithoutLedgerTable(t *testing.T) {
 	}
 	if got != 0 {
 		t.Errorf("tokens_cached_in = %d, want 0 (no ledger to backfill from)", got)
+	}
+}
+
+// TestBackfillSessionTokensCachedIn_ZeroesRollupWithNoMatchingLedgerRows pins
+// the behaviour when the ledger table exists but has no rows for a session
+// whose rollup is already nonzero (e.g. the ledger rows for that session were
+// deleted separately from the session itself - see workspace_deletion.go,
+// which deletes office_cost_events before the task-side workspace in two
+// separate transactions). The unconditional recompute is a COALESCE(...,0),
+// so it deliberately zeroes tokens_cached_in in this case rather than leaving
+// the stale value: the rollup is supposed to always equal the ledger sum for
+// that session, and an empty ledger sums to zero.
+func TestBackfillSessionTokensCachedIn_ZeroesRollupWithNoMatchingLedgerRows(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-orphaned", "sess-orphaned", "turn-orphaned")
+	createOfficeCostEventsTable(t, repo)
+
+	// Rollup already holds a nonzero value, but no office_cost_events rows
+	// exist for this session (simulates the ledger having been deleted).
+	if err := repo.IncrementTaskSessionUsage(ctx, "sess-orphaned", 0, 12_345, 0, 0); err != nil {
+		t.Fatalf("seed rollup: %v", err)
+	}
+
+	if err := repo.backfillSessionTokensCachedIn(); err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+
+	var got int64
+	if err := repo.ro.QueryRowx(repo.ro.Rebind(
+		`SELECT tokens_cached_in FROM task_sessions WHERE id = ?`), "sess-orphaned",
+	).Scan(&got); err != nil {
+		t.Fatalf("read row: %v", err)
+	}
+	if got != 0 {
+		t.Errorf("tokens_cached_in = %d, want 0 (no matching ledger rows sums to zero)", got)
 	}
 }
 
