@@ -11,7 +11,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/pkgtar"
 	"github.com/kandev/kandev/internal/plugins/store"
 	"github.com/kandev/kandev/pkg/pluginsdk"
@@ -24,7 +26,7 @@ import (
 // use to exhaust backend memory. 4 MiB comfortably covers realistic webhook
 // payloads (GitHub/Slack/Jira event bodies are KB-sized) while bounding
 // worst-case memory use per request.
-const maxWebhookBodyBytes = 4 << 20 // 4 MiB
+const maxWebhookBodyBytes = manifest.DefaultWebhookMaxBodyBytes
 
 // Controller holds the plugin HTTP handlers: operator-facing management
 // (install/list/get/config/uninstall/enable/disable), the bundle/UI
@@ -372,12 +374,19 @@ func (c *Controller) webhook(ctx *gin.Context) {
 	}
 
 	key := ctx.Param("key")
-	if !manifestDeclaresWebhookKey(record, key) {
+	declaration, ok := findWebhookDeclaration(record, key)
+	if !ok {
 		ctx.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("plugin %q has no webhook %q", id, key)})
 		return
 	}
+	if declaration.EffectiveAccess() == manifest.WebhookAccessAuthenticated {
+		if _, authenticated := authn.FromGin(ctx); !authenticated {
+			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+			return
+		}
+	}
 
-	body, err := readCappedWebhookBody(ctx)
+	body, err := readCappedWebhookBody(ctx, declaration.EffectiveMaxBodyBytes())
 	if err != nil {
 		return // readCappedWebhookBody already wrote the error response
 	}
@@ -479,13 +488,18 @@ func (c *Controller) applyAuthLogin(ctx *gin.Context, record *store.Record, raw 
 
 // manifestDeclaresWebhookKey reports whether record's manifest declares a
 // webhooks[] entry with the given key.
-func manifestDeclaresWebhookKey(record *store.Record, key string) bool {
+func findWebhookDeclaration(record *store.Record, key string) (manifest.Webhook, bool) {
 	for _, wh := range record.Webhooks {
 		if wh.Key == key {
-			return true
+			return wh, true
 		}
 	}
-	return false
+	return manifest.Webhook{}, false
+}
+
+func manifestDeclaresWebhookKey(record *store.Record, key string) bool {
+	_, ok := findWebhookDeclaration(record, key)
+	return ok
 }
 
 // readCappedWebhookBody reads ctx.Request.Body bounded at
@@ -493,14 +507,14 @@ func manifestDeclaresWebhookKey(record *store.Record, key string) bool {
 // itself (and returning a non-nil error as a sentinel to the caller) when
 // the body exceeds the cap, so a single external webhook POST cannot
 // exhaust backend memory via an unbounded io.ReadAll.
-func readCappedWebhookBody(ctx *gin.Context) ([]byte, error) {
-	ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, maxWebhookBodyBytes)
+func readCappedWebhookBody(ctx *gin.Context, maxBytes int64) ([]byte, error) {
+	ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, maxBytes)
 	body, err := io.ReadAll(ctx.Request.Body)
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
 			ctx.JSON(http.StatusRequestEntityTooLarge, gin.H{
-				"error": fmt.Sprintf("webhook body exceeds max size of %d bytes", maxWebhookBodyBytes),
+				"error": fmt.Sprintf("webhook body exceeds max size of %d bytes", maxBytes),
 			})
 			return nil, err
 		}

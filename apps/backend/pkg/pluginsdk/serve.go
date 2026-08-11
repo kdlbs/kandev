@@ -247,6 +247,9 @@ func Serve(p Plugin, opts ...Option) {
 	hcplugin.Serve(&hcplugin.ServeConfig{
 		HandshakeConfig: Handshake,
 		Plugins:         map[string]hcplugin.Plugin{PluginMapKey: gp},
-		GRPCServer:      hcplugin.DefaultGRPCServer,
+		GRPCServer: func(options []grpc.ServerOption) *grpc.Server {
+			// The webhook HTTP body may be 16 MiB; leave room for protobuf metadata.
+			return grpc.NewServer(append(options, grpc.MaxRecvMsgSize(17<<20))...)
+		},
 	})
 }

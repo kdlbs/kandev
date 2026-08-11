@@ -40,9 +40,10 @@ they must use `host.React` (NOT bundle their own React) to share the host instan
 ```ts
 interface PluginHostApi {
   pluginId: string;
-  React: typeof import("react");            // host React instance (shared)
-  jsx: typeof React.createElement;          // convenience alias (h)
-  store: {                                   // kandev app store (zustand StoreApi)
+  React: typeof import("react"); // host React instance (shared)
+  jsx: typeof React.createElement; // convenience alias (h)
+  store: {
+    // kandev app store (zustand StoreApi)
     getState(): AppState;
     setState(partial): void;
     subscribe(listener): () => void;
@@ -56,7 +57,7 @@ interface PluginHostApi {
     // dev/desktop base URL from window internals.
     baseUrl: string;
   };
-  ui: Record<string, unknown>;              // curated @kandev/ui components + app UI (see below)
+  ui: Record<string, unknown>; // curated @kandev/ui components + app UI (see below)
   // The resolved light/dark theme, read live on every access. `host` is built
   // once per plugin load, so copying this into a variable that outlives a
   // render freezes it; read it during render, and pair it with onThemeChange
@@ -89,7 +90,11 @@ interface PluginHostApi {
   storage: PluginStorageApi;
 }
 
-interface PluginStorageEntry { key: string; value: unknown; updatedAt: string; }
+interface PluginStorageEntry {
+  key: string;
+  value: unknown;
+  updatedAt: string;
+}
 
 interface PluginStorageSetOptions {
   // Optimistic-concurrency guard: the updatedAt the caller last read. The
@@ -115,20 +120,37 @@ interface PluginStorageSetOptions {
 }
 
 // Mirrors the backend's user-state route scopes.
-type PluginStorageScope = "instance" | "workspace" | "task" | "session" | "repository";
+type PluginStorageScope =
+  | "instance"
+  | "workspace"
+  | "task"
+  | "session"
+  | "repository";
 
 interface PluginStorageApi {
-  get(scope: PluginStorageScope, scopeId: string, key: string): Promise<PluginStorageEntry | undefined>;
+  get(
+    scope: PluginStorageScope,
+    scopeId: string,
+    key: string,
+  ): Promise<PluginStorageEntry | undefined>;
   set(
-    scope: PluginStorageScope, scopeId: string, key: string, value: unknown,
+    scope: PluginStorageScope,
+    scopeId: string,
+    key: string,
+    value: unknown,
     options?: PluginStorageSetOptions,
   ): Promise<{ updatedAt: string }>;
   delete(
-    scope: PluginStorageScope, scopeId: string, key: string,
+    scope: PluginStorageScope,
+    scopeId: string,
+    key: string,
     options?: Pick<PluginStorageSetOptions, "writerId">,
   ): Promise<void>;
   // Every entry under (scope, scopeId), ordered by key. Not paginated.
-  list(scope: PluginStorageScope, scopeId: string): Promise<PluginStorageEntry[]>;
+  list(
+    scope: PluginStorageScope,
+    scopeId: string,
+  ): Promise<PluginStorageEntry[]>;
   // Subscribes to live updates for this plugin's own storage made from
   // another tab, device, or surface — e.g. the kanban Edit modal and the
   // task panel both editing the same document. filter.scope/scopeId/key
@@ -145,7 +167,12 @@ interface PluginStorageApi {
   // it would incorrectly suppress each other's legitimate writes as if they
   // were one surface's own echo.
   subscribe(
-    filter: { scope?: PluginStorageScope; scopeId?: string; key?: string; writerId?: string },
+    filter: {
+      scope?: PluginStorageScope;
+      scopeId?: string;
+      key?: string;
+      writerId?: string;
+    },
     handler: (change: PluginUserStateChange) => void,
   ): () => void;
 }
@@ -159,10 +186,10 @@ interface PluginUserStateChange {
 }
 
 interface PluginModalOptions {
-  title?: string;                          // rendered in a DialogHeader/DialogTitle; omit for no header title
+  title?: string; // rendered in a DialogHeader/DialogTitle; omit for no header title
   content: React.ComponentType<{ slotProps?: unknown }>; // reuses the slot-component contract
-  size?: "sm" | "md" | "lg" | "xl";         // maps to the host's Dialog width classes; default "md"
-  dismissible?: boolean;                    // overlay click / Escape close the modal; default true
+  size?: "sm" | "md" | "lg" | "xl"; // maps to the host's Dialog width classes; default "md"
+  dismissible?: boolean; // overlay click / Escape close the modal; default true
 }
 
 interface PluginModalHandle {
@@ -261,7 +288,11 @@ interface RichTextEditorProps {
   testId?: string;
 }
 // RichTextReadOnly: renders markdown read-only, no taskId dependency.
-interface RichTextReadOnlyProps { value: string; className?: string; testId?: string; }
+interface RichTextReadOnlyProps {
+  value: string;
+  className?: string;
+  testId?: string;
+}
 ```
 
 Deliberately narrow — not the plan editor's `comments`, `onSelectionChange`,
@@ -324,16 +355,22 @@ own write).
 // "integrations" renders inside the sidebar's Integrations section alongside
 // the first-party integration links (GitHub, Jira, ...). Hosts predating a
 // section value simply don't render items targeting it (additive change).
-interface NavItem { id: string; label: string; path: string; icon?: string; section?: "main" | "settings" | "integrations"; }
+interface NavItem {
+  id: string;
+  label: string;
+  path: string;
+  icon?: string;
+  section?: "main" | "settings" | "integrations";
+}
 
 // Configuration for the kandev-style title bar the host renders above a plugin
 // route. All fields optional; defaults are derived (see registerRoute below).
 interface PluginPageChrome {
-  title?: string;      // default: nav-item label for the same path, else plugin name
-  subtitle?: string;   // muted text next to the title
-  icon?: string;       // curated icon name; default: matching nav item's icon
-  backHref?: string;   // back-link target (host default "/")
-  backLabel?: string;  // back-link label (host default "Kandev")
+  title?: string; // default: nav-item label for the same path, else plugin name
+  subtitle?: string; // muted text next to the title
+  icon?: string; // curated icon name; default: matching nav item's icon
+  backHref?: string; // back-link target (host default "/")
+  backLabel?: string; // back-link label (host default "Kandev")
   actions?: React.ComponentType; // rendered on the right side of the topbar
 }
 
@@ -349,7 +386,11 @@ interface PluginRegistry {
   // required for v1 — exact + startsWith("/plugins/{id}") allowed). The host wraps the
   // page in kandev chrome (PageTopbar + scrollable content area) by default —
   // configure or opt out via options.topbar.
-  registerRoute(path: string, Component: React.ComponentType, options?: PluginRouteOptions): void;
+  registerRoute(
+    path: string,
+    Component: React.ComponentType,
+    options?: PluginRouteOptions,
+  ): void;
 
   // Sidebar/main nav entry. Rendered by <PluginNavItems/> in the app sidebar,
   // and by <MobilePluginNavSection/> in the phone menu sheet (the sidebar is
@@ -398,7 +439,10 @@ interface PluginRegistry {
   // registered by the plugin currently being viewed, so your card appears on
   // your own settings page and never on another plugin's — no per-id gating
   // needed in your component.
-  registerComponent(slot: string, Component: React.ComponentType<{ slotProps?: unknown }>): void;
+  registerComponent(
+    slot: string,
+    Component: React.ComponentType<{ slotProps?: unknown }>,
+  ): void;
 
   // WS action handler. Bridged into the existing lib/ws dispatch; called with the
   // decoded message payload for that action string.
@@ -442,6 +486,32 @@ interface PluginRegistry {
 
 type PluginPresentation = "desktop" | "mobile";
 
+type PluginComposerSurface =
+  | "task-chat"
+  | "quick-chat"
+  | "task-create"
+  | "new-session";
+interface PluginComposerCapability {
+  insertText(text: string): { status: "inserted" | "ignored" | "unavailable" };
+  focus(): { status: "focused" | "unavailable" };
+  submit(): Promise<{
+    status: "submitted" | "blocked" | "unavailable";
+    reason?: string;
+  }>;
+}
+interface PluginComposerSlotProps {
+  surface: PluginComposerSurface;
+  presentation: PluginPresentation;
+  taskId: string | null;
+  taskTitle?: string;
+  activeSessionId: string | null;
+  sessionIds: string[];
+  disabled: boolean;
+  submittable: boolean;
+  disabledReason?: string;
+  composer: PluginComposerCapability;
+}
+
 interface PluginTaskPanelProps {
   panelId: string; // this registration's panel id, so one Component can back multiple panels
   taskId: string;
@@ -450,9 +520,9 @@ interface PluginTaskPanelProps {
 }
 
 interface TaskPanelRegistration {
-  id: string;          // plugin-local panel id (unique within the plugin, not globally)
-  title: string;        // add-panel-menu row label and dockview tab title
-  icon?: string;         // curated icon name (apps/web/lib/plugins/icons.ts)
+  id: string; // plugin-local panel id (unique within the plugin, not globally)
+  title: string; // add-panel-menu row label and dockview tab title
+  icon?: string; // curated icon name (apps/web/lib/plugins/icons.ts)
   Component: React.ComponentType<PluginTaskPanelProps>; // wrapped in a PluginErrorBoundary
   mobileEnabled?: boolean; // include in the phone's grouped Panels picker. Default: false.
 }
@@ -488,7 +558,7 @@ interface PluginTaskFilterOption {
 }
 
 interface TaskFilterRegistration {
-  id: string;   // plugin-local filter id (unique within the plugin, not globally)
+  id: string; // plugin-local filter id (unique within the plugin, not globally)
   label: string; // filter section label shown in the dropdown
   getOptions(): PluginTaskFilterOption[];
   // Called only when `selected` is non-empty — an empty selection is

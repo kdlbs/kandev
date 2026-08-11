@@ -46,6 +46,7 @@ Product-wide capabilities that are not tied to a single feature area.
 | [plugins](plugins/spec.md) | draft |
 | [plugins — authoring experience](plugins/authoring-experience.md) | draft |
 | [plugins — marketplace](plugins/marketplace.md) | building |
+| [plugins — Voice extraction host prerequisites](plugins/voice-extraction-host.md) | draft |
 | [semantic-notifications](platform/notifications.md) | shipped |
 | [workspace-git-status](platform/workspace-git-status.md) | shipped |
 | [git-subprocess-admission](platform/git-subprocess-admission.md) | building |

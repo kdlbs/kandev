@@ -107,6 +107,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-01-share-artifact-locale | [Shared-Task Artifacts Render in the Creator's Locale](2026-08-01-share-artifact-locale.md) | accepted | backend | 2026-08-01 |
 | 2026-08-01-gitlab-mr-lifecycle-notifications | [GitLab MR Lifecycle Notifications](2026-08-01-gitlab-mr-lifecycle-notifications.md) | accepted | backend, frontend | 2026-08-01 |
 | 2026-08-01-per-user-plugin-storage | [Host-Provided Per-User Plugin Storage](2026-08-01-per-user-plugin-storage.md) | accepted | backend, frontend, security | 2026-08-01 |
+| 2026-08-11-composer-access-authenticated-webhooks | [Composer Access and Authenticated Webhooks](2026-08-11-composer-access-authenticated-webhooks.md) | accepted | frontend, backend, protocol, security | 2026-08-11 |
 | 2026-08-01-plugin-task-panel-contributions | [Plugin Task Panel, Kanban Menu Action, and Card Indicator Contributions](2026-08-01-plugin-task-panel-contributions.md) | accepted | frontend | 2026-08-01 |
 | 2026-08-02-new-workspace-github-access-defaults | [Bootstrap New Workspaces From Host GitHub Access](2026-08-02-new-workspace-github-access-defaults.md) | accepted | backend, frontend, security | 2026-08-02 |
 | 2026-08-02-explicit-user-cancel-completion | [Explicit User Cancellation May Complete a Workflow Step](2026-08-02-explicit-user-cancel-completion.md) | accepted | workflow | 2026-08-02 |

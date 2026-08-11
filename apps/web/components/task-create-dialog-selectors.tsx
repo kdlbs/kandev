@@ -42,6 +42,9 @@ import { deleteAttachment, uploadAttachment } from "@/lib/api/domains/attachment
 import { ApiError } from "@/lib/api/client";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
+import { PluginSlot } from "@/components/plugins/plugin-slot";
+import { createPluginComposerCapability } from "@/lib/plugins/composer-capability";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 const CURSOR_POINTER_CLASS = "cursor-pointer";
 
@@ -330,6 +333,7 @@ export const InlineTaskName = memo(function InlineTaskName({
 // Memoized description input to prevent re-rendering the entire dialog on every keystroke
 type TaskFormInputsProps = {
   isSessionMode: boolean;
+  taskId?: string | null;
   workspaceId?: string | null;
   autoFocus?: boolean;
   initialDescription: string;
@@ -697,6 +701,7 @@ type FormInputsToolbarProps = {
     onTranscript: (text: string) => void;
     onAutoSend?: () => void;
   };
+  pluginActions?: React.ReactNode;
 };
 
 function FormInputsToolbar({
@@ -708,6 +713,7 @@ function FormInputsToolbar({
   jiraImport,
   linearImport,
   voice,
+  pluginActions,
 }: FormInputsToolbarProps) {
   return (
     <div className="flex items-center px-1 pb-1">
@@ -733,6 +739,7 @@ function FormInputsToolbar({
           onImport={linearImport.onImport}
         />
       )}
+      {pluginActions}
       {voice && (
         <div className="ml-auto flex items-center">
           <VoiceInputButton
@@ -762,6 +769,54 @@ function PromptMentionPopover({
       onSelect={mention.handleSelect}
       onClose={mention.closeMenu}
       setSelectedIndex={mention.setSelectedIndex}
+    />
+  );
+}
+
+function useCreationComposerPluginActions(args: {
+  isSessionMode: boolean;
+  taskId: string | null;
+  disabled: boolean;
+  description: string;
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  insertAtCursor: (text: string) => void;
+  submit?: () => void;
+}) {
+  const { isMobile } = useResponsiveBreakpoint();
+  const handle = useMemo(
+    () =>
+      createPluginComposerCapability({
+        insertText: (text) => {
+          args.insertAtCursor(text);
+          return true;
+        },
+        focus: () => {
+          if (!args.textareaRef.current) return false;
+          args.textareaRef.current.focus();
+          return true;
+        },
+        submit: async () => {
+          if (args.disabled || !args.description.trim() || !args.submit) return false;
+          args.submit();
+          return true;
+        },
+      }),
+    [args],
+  );
+  useEffect(() => () => handle.revoke(), [handle]);
+  return (
+    <PluginSlot
+      name={args.isSessionMode ? "new-session-input-actions" : "task-create-input-actions"}
+      slotProps={{
+        surface: args.isSessionMode ? "new-session" : "task-create",
+        presentation: isMobile ? "mobile" : "desktop",
+        taskId: args.taskId,
+        activeSessionId: null,
+        sessionIds: [],
+        disabled: args.disabled,
+        submittable: !args.disabled && args.description.trim().length > 0,
+        composer: handle.api,
+      }}
     />
   );
 }
@@ -830,6 +885,8 @@ function DraggingOverlay({ isDragging }: { isDragging: boolean }) {
   );
 }
 
+// The input coordinates existing attachment, mention, voice, and plugin controls in one field.
+// eslint-disable-next-line max-lines-per-function
 export const TaskFormInputs = memo(function TaskFormInputs({
   workspaceId,
   isSessionMode,
@@ -847,6 +904,7 @@ export const TaskFormInputs = memo(function TaskFormInputs({
   jiraImport,
   linearImport,
   onVoiceAutoSend,
+  taskId = null,
 }: TaskFormInputsProps) {
   const { t } = useTranslation();
   const {
@@ -884,6 +942,15 @@ export const TaskFormInputs = memo(function TaskFormInputs({
     () => ({ onTranscript: insertAtCursor, onAutoSend: onVoiceAutoSend }),
     [insertAtCursor, onVoiceAutoSend],
   );
+  const pluginActions = useCreationComposerPluginActions({
+    isSessionMode,
+    taskId,
+    disabled: Boolean(disabled),
+    description,
+    textareaRef,
+    insertAtCursor,
+    submit: onVoiceAutoSend,
+  });
 
   return (
     <div
@@ -923,6 +990,7 @@ export const TaskFormInputs = memo(function TaskFormInputs({
           jiraImport={jiraImport}
           linearImport={linearImport}
           voice={voiceBinding}
+          pluginActions={pluginActions}
         />
         <HiddenFileInput inputRef={fileInputRef} onChange={handleFileInputChange} />
       </div>

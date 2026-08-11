@@ -444,6 +444,7 @@ function NewSessionForm({
       />
       <TaskFormInputs
         isSessionMode
+        taskId={taskId}
         workspaceId={workspaceId}
         autoFocus
         initialDescription=""

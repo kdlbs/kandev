@@ -395,6 +395,12 @@ func (m *Manifest) validateWebhooks() []error {
 	seen := make(map[string]bool, len(m.Webhooks))
 	var errs []error
 	for _, wh := range m.Webhooks {
+		if access := wh.EffectiveAccess(); access != WebhookAccessPublic && access != WebhookAccessAuthenticated {
+			errs = append(errs, fmt.Errorf("webhook %q access %q is invalid", wh.Key, wh.Access))
+		}
+		if wh.MaxBodyBytes < 0 || wh.MaxBodyBytes > MaximumWebhookMaxBodyBytes {
+			errs = append(errs, fmt.Errorf("webhook %q max_body_bytes must be between 1 and %d when set", wh.Key, MaximumWebhookMaxBodyBytes))
+		}
 		if seen[wh.Key] {
 			errs = append(errs, fmt.Errorf("duplicate webhook key %q", wh.Key))
 			continue
