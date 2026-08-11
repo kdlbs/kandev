@@ -273,8 +273,7 @@
         "/settings/general/sprites",
         "/settings/general/task-actions",
         "/settings/general/terminal",
-        "/settings/secrets",
-        "/settings/voice-mode"
+        "/settings/secrets"
       ]
     },
     {
@@ -323,8 +322,8 @@
         "/settings/general/message-queue",
         "/settings/system/about",
         "/settings/system/backups",
-        "/settings/system/database",
         "/settings/system/data-storage",
+        "/settings/system/database",
         "/settings/system/feature-toggles",
         "/settings/system/licenses",
         "/settings/system/logs",

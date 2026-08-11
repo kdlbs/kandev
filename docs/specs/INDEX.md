@@ -187,6 +187,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [executor-settings-card-spacing](ui/executor-settings-card-spacing.md) | shipped |
 | [quick-chat-elevation](ui/quick-chat-elevation.md) | building |
 | [transcript-navigation-settings](ui/transcript-navigation-settings.md) | shipped |
+| [voice-mode-task-behavior](ui/voice-mode-task-behavior.md) | shipped |
 | [app-status-bar](ui/app-status-bar.md) | shipped |
 | [quick-terminal](quick-terminal/spec.md) | shipped |
 | [mobile-task-navigation](ui/mobile-task-navigation.md) | shipped |
