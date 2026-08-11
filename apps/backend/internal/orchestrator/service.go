@@ -162,9 +162,9 @@ type WorkflowStepGetter interface {
 }
 
 // StepHistoryRecorder persists an ADR 0015 session-step transition audit
-// row. Optional — when unset, the auto-advance transition paths record
-// nothing. Errors are logged and swallowed by the caller: the audit trail
-// must never fail the transition it is recording.
+// row. Optional — when unset, the auto-advance and deferred move_task_kandev
+// transition paths record nothing. Errors are logged and swallowed by the
+// caller: the audit trail must never fail the transition it is recording.
 type StepHistoryRecorder interface {
 	CreateStepTransition(ctx context.Context, sessionID, fromStepID, toStepID string, trigger wfmodels.StepTransitionTrigger, actorID *string, metadata map[string]interface{}) error
 }
@@ -378,8 +378,10 @@ type Service struct {
 	// Workflow step getter for prompt building
 	workflowStepGetter WorkflowStepGetter
 
-	// stepHistoryRecorder persists the ADR 0015 audit row for auto-advance
-	// (StepTransitionTriggerAutoComplete) step transitions. Optional.
+	// stepHistoryRecorder persists the ADR 0015 audit row for orchestrator
+	// step transitions: auto-advance (StepTransitionTriggerAutoComplete) and
+	// the deferred move_task_kandev path (StepTransitionTriggerManual).
+	// Optional.
 	stepHistoryRecorder StepHistoryRecorder
 
 	// Resolves the agent family names written in configure_session rules onto
@@ -1178,8 +1180,8 @@ func (s *Service) SetWorkflowStepGetter(getter WorkflowStepGetter) {
 }
 
 // SetStepHistoryRecorder wires the ADR 0015 audit-trail writer for
-// auto-advance step transitions (engine and legacy on_turn_complete paths).
-// Optional.
+// auto-advance step transitions (engine and legacy on_turn_complete paths)
+// and the deferred move_task_kandev path (applyPendingMove). Optional.
 func (s *Service) SetStepHistoryRecorder(recorder StepHistoryRecorder) {
 	s.stepHistoryRecorder = recorder
 }

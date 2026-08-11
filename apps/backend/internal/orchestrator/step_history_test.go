@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
@@ -179,6 +180,8 @@ func TestApplyEngineTransition_RecordsConsumedSignalMetadata(t *testing.T) {
 	svc.SetWorkflowStepGetter(sg)
 	recorder := &fakeStepHistoryRecorder{}
 	svc.stepHistoryRecorder = recorder
+	onEnterDone := make(chan struct{})
+	svc.onProcessOnEnterComplete = func() { close(onEnterDone) }
 
 	signal := models.PendingStepCompletionSignal{
 		StepID:  "step1",
@@ -197,6 +200,11 @@ func TestApplyEngineTransition_RecordsConsumedSignalMetadata(t *testing.T) {
 	transitioned := svc.applyEngineTransition(ctx, "t1", session, result, engine.TriggerOnTurnComplete, "desc", true)
 	if !transitioned {
 		t.Fatalf("expected transition to apply")
+	}
+	select {
+	case <-onEnterDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for on_enter processing")
 	}
 
 	calls := recorder.Calls()
@@ -265,6 +273,8 @@ func TestApplyEngineTransition_ChildrenCompletedRecordsNoSignalMetadata(t *testi
 	svc.SetWorkflowStepGetter(sg)
 	recorder := &fakeStepHistoryRecorder{}
 	svc.stepHistoryRecorder = recorder
+	onEnterDone := make(chan struct{})
+	svc.onProcessOnEnterComplete = func() { close(onEnterDone) }
 
 	session, err := repo.GetTaskSession(ctx, "s1")
 	if err != nil {
@@ -275,6 +285,11 @@ func TestApplyEngineTransition_ChildrenCompletedRecordsNoSignalMetadata(t *testi
 	transitioned := svc.applyEngineTransition(ctx, "t1", session, result, engine.TriggerOnChildrenCompleted, "desc", true)
 	if !transitioned {
 		t.Fatalf("expected transition to apply")
+	}
+	select {
+	case <-onEnterDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for on_enter processing")
 	}
 
 	calls := recorder.Calls()
