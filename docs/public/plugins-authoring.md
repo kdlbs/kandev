@@ -186,6 +186,7 @@ bookkeeping is host-internal; plugins do not call lifecycle methods.
 | registerComponent | registerComponent(slot, Component); component receives { slotProps?: unknown } | Active ui.bundle | Every registration is owner-tracked, error-isolated, and bulk-revoked | registry.registerComponent("task-sidebar", Panel) |
 | registerWsHandler | registerWsHandler(action, handler(payload)); receives actions bridged from lib/ws | Active ui.bundle | Handler is removed on disable/uninstall; tolerate duplicate/replayed actions | registry.registerWsHandler("acme.updated", renderUpdate) |
 | registerKeybinding | registerKeybinding(id, handler(event)); id must be declared in ui.keybindings; users can override the effective combo | ui.bundle and ui.keybindings[] | Handler is removed on disable/uninstall; editable targets/core shortcuts win | registry.registerKeybinding("open-panel", () => host.openModal(...)) |
+| registerIntegrationSettings | One provider-owned settings component mounted inside Settings > Integrations | Active ui.bundle | Registration is exclusive by id and revoked on unload; host owns workspace selection and settings navigation | registry.registerIntegrationSettings({ id: "acme", ... }) |
 | registerRepositoryProvider | Provider-owned repository list/match/branches/inspect functions plus optional native `createChangeRequest` transport | ui.bundle and matching `repository_providers[]` id | Registration and in-flight callbacks are revoked on unload; host owns native task and Create PR UI | registry.registerRepositoryProvider({ id: "acme", ...provider }) |
 | registerTaskAction | Child action inside the task menu's native Link section | Active ui.bundle | Action is revoked on unload; host supplies current task/workspace and desktop/mobile presentation | registry.registerTaskAction({ id: "link-pr", placement: "link", ... }) |
 | registerReviewProvider | Normalized task reviews, workspace associations, unlink, and shared Review panel | ui.bundle and matching `repository_providers[]` id | Snapshots/subscriptions are owner-scoped and revoked on unload; host owns status chrome, indicators, unlink UI, and responsive Review placement | registry.registerReviewProvider({ id: "acme", ...reviews }) |
@@ -201,6 +202,70 @@ bookkeeping is host-internal; plugins do not call lifecycle methods.
 | host.theme | Current "light" or "dark" theme | Active ui.bundle | Read during render; subscribe through host/app patterns if theme-sensitive | host.theme === "dark" |
 | host.navigate | Soft SPA navigation navigate(href, { replace? }) | Active ui.bundle | No registry cleanup; avoid navigating to undeclared external origins | host.navigate("/t/" + taskId) |
 | host.openModal | Host-owned modal: { title?, content, size?, dismissible? } -> { close() } | Active ui.bundle | Modal auto-closes on disable/uninstall; close handles are idempotent | const modal = host.openModal({ content: Panel }) |
+
+### Code-host integration surface map
+
+A code-host plugin should be a normalized provider adapter, not a parallel copy
+of Kandev's GitHub UI. The plugin owns remote API calls, authentication,
+provider identifiers, and normalized snapshots. Kandev owns the interaction
+patterns, responsive layout, status colors, dialogs, menus, and review chrome.
+
+| User-facing result                     | Plugin hook                                                                            | Plugin supplies                                                                                  | Kandev supplies                                                                                                         |
+| -------------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| Provider workbench                     | `registerRoute`, `registerNavItem`, and host dashboard primitives                      | Query state, normalized rows, refresh and launch callbacks                                       | Page chrome, filters, saved-query dialog, list rows, task preset menu, desktop/mobile primitives                        |
+| Workspace connection settings          | `registerIntegrationSettings`                                                          | Provider-specific fields, health checks, connect/disconnect behavior                             | Settings navigation, active workspace, lifecycle and error boundary                                                     |
+| Native repository and branch selection | `registerRepositoryProvider` plus declared branch action                               | Credential-free repositories, branches, URL inspection, optional `createChangeRequest` transport | Existing task dialog, provider picker, branch picker, push-before-create flow                                           |
+| Task-to-review linking                 | `registerTaskAction` and `host.openTaskLinkDialog`                                     | Provider label/icon, accepted reference syntax, authenticated link callback                      | Existing **Link** submenu, dialog validation, submit state, toast and desktop/mobile presentation                       |
+| Task indicators, CI, unlink and review | `registerReviewProvider`                                                               | Association snapshots, semantic `taskStatus`, normalized review detail, refresh/unlink callbacks | Sidebar/Kanban indicators, status palette, 90-second refresh, topbar/composer status, unlink UI and shared Review panel |
+| Composer `#` search                    | Manifest `reference_sources`, `SearchEntityReferences`, and `AuthorizeEntityReference` | Display candidates and a fresh provider authorization at submission                              | Source menu, chips, canonical metadata and fail-closed submission                                                       |
+| Authenticated browser operations       | Manifest `actions` and `host.api.invokeAction`                                         | Bounded action handler using verified context                                                    | Actor/resource authorization, selector stripping, timeout, cancellation and response limits                             |
+
+The task indicator uses the same semantic precedence as first-party providers:
+failures and requested changes are red, pending checks yellow, an outstanding
+review with passing checks sky blue, passing checks green, merged reviews
+purple, and neutral or draft reviews muted. Publish semantic state only; never
+send CSS classes or provider-selected colors.
+
+The examples below were captured from an isolated packaged-plugin run. The
+provider data is fictional; the surrounding controls are the production
+host-owned components.
+
+#### Provider dashboard and repository picker
+
+The plugin route composes the shared dashboard primitives, while the declared
+repository provider appears inside Kandev's existing task dialog.
+
+![A plugin-provided pull-request dashboard using Kandev's shared scope tabs, repository filter, query field, saved-query control, refresh action, and change-request row.](../screenshots/plugin-code-host-dashboard.png)
+
+![Kandev's native task dialog showing a repository supplied by a plugin repository provider in the Remote picker.](../screenshots/plugin-code-host-repository-picker.png)
+
+#### Link a pull request from a task
+
+`registerTaskAction` contributes only the provider entry. The host owns the
+parent **Link** menu and the link dialog.
+
+![A task context menu with its Link submenu open, showing GitHub, GitLab, and Bitbucket targets using host icons and labels.](../screenshots/plugin-code-host-link-menu.png)
+
+![The host-owned Link Bitbucket pull request dialog with provider copy, one reference field, and the standard Cancel and Save actions.](../screenshots/plugin-code-host-link-dialog.png)
+
+#### Task status, CI, and review
+
+Association and review snapshots drive every surface. In this example, passing
+CI plus one outstanding reviewer makes the task icon sky blue; hovering it
+shows the same normalized summary used by first-party providers.
+
+![A sky-blue pull-request icon beside a task and its hover summary showing PR number, title, approved review, and passing CI.](../screenshots/plugin-code-host-sidebar-status.png)
+
+![The host-owned composer CI popover showing two passing checks, review state, an unresolved comment, and refresh and unlink controls.](../screenshots/plugin-code-host-ci-popover.png)
+
+![The shared Review panel rendering normalized pull-request metadata, review state, CI checks, threaded comments, and provider-advertised actions.](../screenshots/plugin-code-host-review-panel.png)
+
+#### Composer reference search
+
+Dynamic `reference_sources` appear beside built-in sources. A selected result is
+display-only until Kandev calls the plugin again to authorize it for submission.
+
+![The composer reference picker showing a Bitbucket pull-request result for a hash search query.](../screenshots/plugin-code-host-reference-search.png)
 
 ### Supported named slots
 

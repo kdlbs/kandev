@@ -80,3 +80,6 @@ provider's existing task review snapshot, so it cannot supply title/review/CI de
   Focused regression coverage now proves normalized provider detail drives the same
   host-owned semantic status colors as first-party pull requests; the muted association-
   only fallback remains until lazy detail arrives.
+- The packaged-provider desktop E2E now asserts the resolved semantic color, and the
+  public plugin-authoring reference maps every code-host hook to its host-owned result
+  with eight focused screenshots from an isolated packaged-plugin run.

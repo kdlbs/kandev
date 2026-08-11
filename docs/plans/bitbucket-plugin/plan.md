@@ -175,7 +175,9 @@ when the desktop indicator opens; the existing mobile Status/Review surfaces rem
 touch path. A manual follow-up also moved task-indicator color derivation into the shared
 provider-neutral status palette, so normalized pipeline/review state changes the glyph
 without provider CSS tokens. Unit, packaged-plugin desktop E2E, mobile contract E2E,
-typecheck, and lint pass.
+typecheck, and lint pass. The public authoring reference now includes a code-host hook
+surface map and focused captures of the shared dashboard, repository picker, Link flow,
+task status, CI, Review, and composer reference search.
 The packaged generic host contract passes on desktop and
 mobile. The actual package passes its unconfigured action, disable/re-enable, desktop,
 and mobile lifecycle checks; its canonical composer reference now rehydrates the

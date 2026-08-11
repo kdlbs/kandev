@@ -360,5 +360,6 @@ test.describe("Bitbucket packaged plugin", () => {
     );
     await expect(summary.getByTestId("pr-task-status-review")).toContainText("Approved");
     await expect(summary.getByTestId("pr-task-status-ci")).toContainText("Passed");
+    await expect(icon).toHaveClass(/text-green-500/);
   });
 });
