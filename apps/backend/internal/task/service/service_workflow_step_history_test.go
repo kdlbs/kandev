@@ -118,6 +118,39 @@ func TestService_MoveTaskWithoutSessionDoesNotRecordOrFail(t *testing.T) {
 	}
 }
 
+func TestService_ApproveSessionRecordsApprovalStepHistoryNotManual(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+	getter := svc.workflowStepGetter.(*fakeWorkflowStepGetter)
+	getter.steps["step-done"] = &wfmodels.WorkflowStep{
+		ID: "step-done", WorkflowID: "wf-source", Name: "Approved", Position: 2,
+	}
+	recorder := &fakeStepHistoryRecorder{}
+	svc.SetStepHistoryRecorder(recorder)
+
+	createMoveTask(t, ctx, repo, "task-approval-history", "wf-source", "step-review-target", nil)
+	createMoveSession(t, ctx, repo, "session-approval-history", "task-approval-history",
+		models.TaskSessionStateWaitingForInput, models.ReviewStatusPending)
+
+	if _, err := svc.ApproveSession(ctx, "session-approval-history"); err != nil {
+		t.Fatalf("ApproveSession: %v", err)
+	}
+
+	calls := recorder.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 recorded transition, got %d", len(calls))
+	}
+	got := calls[0]
+	if got.sessionID != "session-approval-history" || got.fromStepID != "step-review-target" || got.toStepID != "step-done" {
+		t.Errorf("unexpected call: %+v", got)
+	}
+	if got.trigger != wfmodels.StepTransitionTriggerApproval {
+		t.Errorf("trigger = %q, want approval (not manual)", got.trigger)
+	}
+}
+
 func TestService_MoveTaskHistoryWriteFailureDoesNotFailMove(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

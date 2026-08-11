@@ -5,6 +5,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -280,5 +281,101 @@ func TestApplyEngineTransition_ChildrenCompletedRecordsNoSignalMetadata(t *testi
 	}
 	if calls[0].metadata != nil {
 		t.Errorf("metadata = %v, want nil (on_children_completed never consumes a signal)", calls[0].metadata)
+	}
+}
+
+// --- Deferred move_task_kandev path (applyPendingMove) ---
+
+// TestApplyPendingMove_RecordsManualStepHistory covers the agent half of
+// StepTransitionTriggerManual: a move_task_kandev call that couldn't apply
+// inline because the calling session was RUNNING, deferred via
+// messagequeue.PendingMove, and applied here at turn end. Before this test
+// the identical tool call from an IDLE session recorded a row (through
+// task/service.MoveTaskWithOptions) but this path recorded nothing —
+// Review round 1 flagged the trail as silently non-deterministic.
+func TestApplyPendingMove_RecordsManualStepHistory(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	recorder := &fakeStepHistoryRecorder{}
+	sc.svc.stepHistoryRecorder = recorder
+
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatalf("load review session: %v", err)
+	}
+	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, &messagequeue.PendingMove{
+		TaskID:         "task-1",
+		WorkflowID:     "wf1",
+		WorkflowStepID: stepInProgressID,
+	})
+
+	calls := recorder.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 recorded transition, got %d", len(calls))
+	}
+	got := calls[0]
+	if got.sessionID != sc.reviewSessionID || got.fromStepID != stepInReviewID || got.toStepID != stepInProgressID {
+		t.Errorf("unexpected call: %+v", got)
+	}
+	if got.trigger != wfmodels.StepTransitionTriggerManual {
+		t.Errorf("trigger = %q, want manual", got.trigger)
+	}
+	if got.metadata != nil {
+		t.Errorf("metadata = %v, want nil", got.metadata)
+	}
+}
+
+// TestApplyPendingMove_HistoryWriteFailureDoesNotBlockTransition mirrors the
+// failure-isolation coverage of the other two funnels: an audit-write error
+// must never block the transition it is recording.
+func TestApplyPendingMove_HistoryWriteFailureDoesNotBlockTransition(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	sc.svc.stepHistoryRecorder = &fakeStepHistoryRecorder{err: context.DeadlineExceeded}
+
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatalf("load review session: %v", err)
+	}
+	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, &messagequeue.PendingMove{
+		TaskID:         "task-1",
+		WorkflowID:     "wf1",
+		WorkflowStepID: stepInProgressID,
+	})
+
+	task, err := sc.repo.GetTask(sc.ctx, "task-1")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if task.WorkflowStepID != stepInProgressID {
+		t.Fatalf("expected transition to still apply despite audit failure, got step %q", task.WorkflowStepID)
+	}
+}
+
+// TestApplyPendingMove_ForeignWorkflowMismatchRecordsNoHistory extends
+// TestPendingMove_DropsForeignWorkflowStepWithoutMovingTask's scenario: a
+// pending move whose target step belongs to a different workflow is dropped
+// before ApplyTransition ever runs, so it must not write a phantom audit row.
+func TestApplyPendingMove_ForeignWorkflowMismatchRecordsNoHistory(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	sc.stepGetter.steps["foreign-step"] = &wfmodels.WorkflowStep{
+		ID:         "foreign-step",
+		WorkflowID: "wf-other",
+		Name:       "Foreign",
+		Position:   1,
+	}
+	recorder := &fakeStepHistoryRecorder{}
+	sc.svc.stepHistoryRecorder = recorder
+
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatalf("load review session: %v", err)
+	}
+	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, &messagequeue.PendingMove{
+		TaskID:         "task-1",
+		WorkflowID:     "wf1",
+		WorkflowStepID: "foreign-step",
+	})
+
+	if calls := recorder.Calls(); len(calls) != 0 {
+		t.Fatalf("expected no recorded transitions for a dropped foreign-workflow move, got %d", len(calls))
 	}
 }

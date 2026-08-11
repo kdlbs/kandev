@@ -95,6 +95,28 @@ func (s *Service) recordAutoStepTransition(ctx context.Context, sessionID, fromS
 	}
 }
 
+// recordManualStepTransition writes the ADR 0015 audit row for an
+// agent-initiated move_task_kandev call that could not apply inline because
+// the calling session was still RUNNING/STARTING (applyPendingMove, deferred
+// via messagequeue.PendingMove). This is the agent half of
+// StepTransitionTriggerManual — the user/HTTP half is recorded by
+// task/service.MoveTaskWithOptions. Nil-safe and failure-swallowing, same as
+// recordAutoStepTransition.
+func (s *Service) recordManualStepTransition(ctx context.Context, sessionID, fromStepID, toStepID string) {
+	if s.stepHistoryRecorder == nil || sessionID == "" {
+		return
+	}
+	if err := s.stepHistoryRecorder.CreateStepTransition(
+		ctx, sessionID, fromStepID, toStepID, wfmodels.StepTransitionTriggerManual, nil, nil,
+	); err != nil {
+		s.logger.Warn("failed to record manual step transition",
+			zap.String("session_id", sessionID),
+			zap.String("from_step_id", fromStepID),
+			zap.String("to_step_id", toStepID),
+			zap.Error(err))
+	}
+}
+
 // onStepCompletionSignaled subscribes to events.WorkflowStepCompletionSignaled
 // to handle the case where the agent's `step_complete_kandev` call lands
 // AFTER the turn already ended — at that point processOnTurnCompleteViaEngine

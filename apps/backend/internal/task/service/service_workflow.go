@@ -89,7 +89,8 @@ func (s *Service) applyApprovalStepTransition(ctx context.Context, sessionID str
 		return nil
 	}
 
-	moved, err := s.MoveTask(ctx, result.Session.TaskID, step.WorkflowID, newStepID, 0)
+	moved, err := s.MoveTaskWithOptions(ctx, result.Session.TaskID, step.WorkflowID, newStepID, 0,
+		MoveTaskOptions{StepHistoryTrigger: wfmodels.StepTransitionTriggerApproval})
 	if err != nil {
 		return fmt.Errorf("failed to move task to next step after approval: %w", err)
 	}
@@ -389,6 +390,11 @@ type MoveTaskOptions struct {
 	// PreserveDeferredLaunch keeps the deferred launch intent when an internal
 	// queue promotion changes workflow steps. Manual moves still clear it.
 	PreserveDeferredLaunch bool
+	// StepHistoryTrigger overrides the ADR 0015 audit-row trigger recorded for
+	// this move. Zero value defaults to StepTransitionTriggerManual — callers
+	// driving an approval-gated transition (ApproveSession) set
+	// StepTransitionTriggerApproval instead.
+	StepHistoryTrigger wfmodels.StepTransitionTrigger
 }
 
 type workflowMoveLimitsRepository interface {
@@ -488,7 +494,7 @@ func (s *Service) MoveTaskWithOptions(
 	if stepChanged {
 		s.publishTaskMovedEvent(ctx, task, oldWorkflowID, oldStepID, workflowStepID, sessionID)
 		s.pullNextTaskOnVacate(ctx, oldStepID, task.ID)
-		s.recordManualStepTransition(ctx, sessionID, oldStepID, workflowStepID)
+		s.recordManualStepTransition(ctx, sessionID, oldStepID, workflowStepID, opts.StepHistoryTrigger)
 	}
 
 	s.logger.Info("task moved",
@@ -920,13 +926,15 @@ func (s *Service) resolvePrimaryOrActiveSession(ctx context.Context, taskID stri
 }
 
 // recordManualStepTransition writes the ADR 0015 audit row for a
-// user/agent-initiated move (StepTransitionTriggerManual). It is a no-op
-// when no recorder is wired or when the task has no session to record
+// user/agent-initiated move. trigger is normally StepTransitionTriggerManual;
+// callers driving an approval-gated transition (ApproveSession) pass
+// StepTransitionTriggerApproval — a zero value defaults to Manual. It is a
+// no-op when no recorder is wired or when the task has no session to record
 // against — session_step_history.session_id is a NOT NULL FK to
 // task_sessions, so a session-less move cannot be recorded without a
 // schema change. Failures are logged and swallowed: the audit trail must
 // never fail the move it is recording.
-func (s *Service) recordManualStepTransition(ctx context.Context, sessionID, fromStepID, toStepID string) {
+func (s *Service) recordManualStepTransition(ctx context.Context, sessionID, fromStepID, toStepID string, trigger wfmodels.StepTransitionTrigger) {
 	if s.stepHistoryRecorder == nil {
 		return
 	}
@@ -936,12 +944,15 @@ func (s *Service) recordManualStepTransition(ctx context.Context, sessionID, fro
 			zap.String("to_step_id", toStepID))
 		return
 	}
+	if trigger == "" {
+		trigger = wfmodels.StepTransitionTriggerManual
+	}
 	var actorID *string
 	if identity, ok := authn.IdentityFromContext(ctx); ok && identity.UserID != "" {
 		actorID = &identity.UserID
 	}
 	if err := s.stepHistoryRecorder.CreateStepTransition(
-		ctx, sessionID, fromStepID, toStepID, wfmodels.StepTransitionTriggerManual, actorID, nil,
+		ctx, sessionID, fromStepID, toStepID, trigger, actorID, nil,
 	); err != nil {
 		s.logger.Warn("failed to record manual step transition",
 			zap.String("session_id", sessionID),

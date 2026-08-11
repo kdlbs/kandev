@@ -1352,6 +1352,13 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		return
 	}
 
+	// ADR 0015 — record the audit row now that the transition is durably
+	// persisted. This is the agent-initiated move_task_kandev path (the move
+	// couldn't apply inline because the calling session was still
+	// RUNNING/STARTING); the idle-session path records through
+	// task/service.MoveTaskWithOptions instead.
+	s.recordManualStepTransition(ctx, sessionID, fromStepID, move.WorkflowStepID)
+
 	s.logger.Info("applying pending move",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
