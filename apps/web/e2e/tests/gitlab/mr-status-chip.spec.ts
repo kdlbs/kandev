@@ -1,9 +1,31 @@
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
-import { seedGitLabReview, GITLAB_HOST, GITLAB_PROJECT } from "../../helpers/gitlab";
+import { GITLAB_HOST, GITLAB_PROJECT } from "../../helpers/gitlab";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
+
+/**
+ * Seeds one open MR with a successful pipeline and 0/1 approvals
+ * (-> awaiting_approval per the chip's state machine). Deliberately does NOT
+ * reuse the shared seedGitLabReview helper (e2e/helpers/gitlab.ts): that
+ * helper seeds GitLab's raw wording state: "opened", which MRTopbarButton
+ * doesn't care about (it renders on mrs.length > 0 regardless of state) but
+ * the chip's spec-mandated `state === "open"` exact-equality filter does not
+ * match. The mock provider never normalizes "opened" -> "open" (only the
+ * real GitLab HTTP client's convertRawMR does that), so a chip-focused test
+ * must seed the already-normalized value directly — the same convention
+ * mr-task-card-badge.spec.ts's local seedMR helper already uses for the same
+ * reason.
+ */
+async function seedChipMR(apiClient: ApiClient, workspaceId: string, iid: number, title: string) {
+  await apiClient.configureGitLab(workspaceId, GITLAB_HOST);
+  await apiClient.mockGitLabAddMRs(workspaceId, GITLAB_PROJECT, [mrSeed(iid, title)]);
+  await apiClient.mockGitLabAddPipelines(workspaceId, GITLAB_PROJECT, [
+    pipelineSeed(iid, "success"),
+  ]);
+  await apiClient.mockGitLabAddApprovals(workspaceId, GITLAB_PROJECT, iid, [], 1);
+}
 
 /** Create a passthrough agent profile, mirroring cli-mode/passthrough-toolbar.spec.ts. */
 async function createPassthroughProfile(apiClient: ApiClient, name: string): Promise<string> {
@@ -57,7 +79,7 @@ test.describe("GitLab MR status chip", () => {
   }) => {
     test.setTimeout(120_000);
     const MR_IID = 401;
-    await seedGitLabReview(apiClient, seedData.workspaceId, MR_IID, "Chip render MR");
+    await seedChipMR(apiClient, seedData.workspaceId, MR_IID, "Chip render MR");
     const task = await createTask(apiClient, seedData, "MR chip render");
     await linkMR(apiClient, seedData, task.id, MR_IID);
 
@@ -66,7 +88,7 @@ test.describe("GitLab MR status chip", () => {
 
     const chip = session.mrStatusChip();
     await expect(chip).toBeVisible({ timeout: 15_000 });
-    // seedGitLabReview: pipeline succeeds, approvals 0/1 -> awaiting_approval.
+    // seedChipMR: pipeline succeeds, approvals 0/1 -> awaiting_approval.
     await expect(chip).toHaveAttribute("data-status", "awaiting_approval");
     await expect(chip).toHaveAttribute("data-mr-count", "1");
     await expect(chip).toHaveAttribute("data-mr-iid", String(MR_IID));
@@ -135,7 +157,7 @@ test.describe("GitLab MR status chip", () => {
   }) => {
     test.setTimeout(120_000);
     const MR_IID = 404;
-    await seedGitLabReview(apiClient, seedData.workspaceId, MR_IID, "Unlink MR");
+    await seedChipMR(apiClient, seedData.workspaceId, MR_IID, "Unlink MR");
     const task = await createTask(apiClient, seedData, "MR chip unlink");
     await linkMR(apiClient, seedData, task.id, MR_IID);
 
@@ -159,7 +181,7 @@ test.describe("GitLab MR status chip", () => {
   }) => {
     test.setTimeout(120_000);
     const MR_IID = 405;
-    await seedGitLabReview(apiClient, seedData.workspaceId, MR_IID, "Link another MR");
+    await seedChipMR(apiClient, seedData.workspaceId, MR_IID, "Link another MR");
     const task = await createTask(apiClient, seedData, "MR chip link another");
     await linkMR(apiClient, seedData, task.id, MR_IID);
 
@@ -184,7 +206,7 @@ test.describe("GitLab MR status chip", () => {
   }) => {
     test.setTimeout(120_000);
     const MR_IID = 406;
-    await seedGitLabReview(apiClient, seedData.workspaceId, MR_IID, "Automation badges MR");
+    await seedChipMR(apiClient, seedData.workspaceId, MR_IID, "Automation badges MR");
     const task = await createTask(apiClient, seedData, "MR chip automation badges");
     await linkMR(apiClient, seedData, task.id, MR_IID);
     await apiClient.updateTaskMRAutomationOptions(task.id, {
@@ -211,7 +233,7 @@ test.describe("GitLab MR status chip", () => {
   }) => {
     test.setTimeout(120_000);
     const MR_IID = 407;
-    await seedGitLabReview(apiClient, seedData.workspaceId, MR_IID, "Dual chip MR");
+    await seedChipMR(apiClient, seedData.workspaceId, MR_IID, "Dual chip MR");
     const task = await createTask(apiClient, seedData, "MR chip DOM order");
     await linkMR(apiClient, seedData, task.id, MR_IID);
     await apiClient.mockGitHubAssociateTaskPR({
@@ -250,7 +272,7 @@ test.describe("GitLab MR status chip", () => {
   }) => {
     test.setTimeout(120_000);
     const MR_IID = 408;
-    await seedGitLabReview(apiClient, seedData.workspaceId, MR_IID, "Passthrough chip MR");
+    await seedChipMR(apiClient, seedData.workspaceId, MR_IID, "Passthrough chip MR");
     await apiClient.updateRepository(seedData.repositoryId, {
       provider: "gitlab",
       provider_host: GITLAB_HOST,
@@ -297,7 +319,7 @@ function mrSeed(iid: number, title: string) {
     title,
     url: `${GITLAB_HOST}/${GITLAB_PROJECT}/-/merge_requests/${iid}`,
     web_url: `${GITLAB_HOST}/${GITLAB_PROJECT}/-/merge_requests/${iid}`,
-    state: "opened",
+    state: "open",
     head_branch: `feature/${iid}`,
     head_sha: `sha-${iid}`,
     base_branch: "main",
