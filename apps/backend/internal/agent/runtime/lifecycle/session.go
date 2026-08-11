@@ -832,9 +832,20 @@ func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *
 			defer cancel()
 			_, err := sm.SendPrompt(promptCtx, execution, effectivePrompt, false, acpAttachments, false)
 			if err != nil {
-				sm.logger.Error("initial prompt failed",
-					zap.String("execution_id", execution.ID),
-					zap.Error(err))
+				// During graceful shutdown the agent subprocess is terminated,
+				// so an in-flight initial prompt fails with a transport death
+				// or context cancellation. That is an expected teardown race,
+				// not a fault: log WARN without a stack trace so it does not
+				// masquerade as a crash.
+				if sm.stopChClosed() || isTransportDeadErr(err) {
+					sm.logger.Warn("initial prompt aborted during shutdown",
+						zap.String("execution_id", execution.ID),
+						zap.String("error", err.Error()))
+				} else {
+					sm.logger.Error("initial prompt failed",
+						zap.String("execution_id", execution.ID),
+						zap.Error(err))
+				}
 				if sm.initialPromptFailure != nil {
 					sm.initialPromptFailure(execution.ID)
 				}
@@ -916,9 +927,19 @@ func (sm *SessionManager) waitForPromptDone(
 				continue
 			}
 			if signal.IsError {
-				sm.logger.Error("prompt completed with error",
-					zap.String("execution_id", execution.ID),
-					zap.String("error", signal.Error))
+				// A transport death or cancel-release during shutdown is a
+				// benign teardown race, not an agent fault. Log WARN (no stack
+				// trace) for those; keep ERROR for genuine agent failures on an
+				// active session.
+				if isBenignPromptTeardown(signal.Error) || sm.stopChClosed() {
+					sm.logger.Warn("prompt aborted during shutdown",
+						zap.String("execution_id", execution.ID),
+						zap.String("error", signal.Error))
+				} else {
+					sm.logger.Error("prompt completed with error",
+						zap.String("execution_id", execution.ID),
+						zap.String("error", signal.Error))
+				}
 				// Wrap cancel-release sentinels so PromptTask can identify them and
 				// skip the REVIEW task-state transition — the user is cancelling, not
 				// hitting a real agent failure.
@@ -976,6 +997,40 @@ func (sm *SessionManager) waitForPromptDone(
 func isCancelReleaseError(msg string) bool {
 	return strings.HasPrefix(msg, "cancel escalated") ||
 		strings.Contains(msg, "prompt abandoned after cancel")
+}
+
+// stopChClosed reports whether graceful shutdown has already been signalled.
+// A closed stopCh means an in-flight prompt failure is a teardown race rather
+// than a fault. A nil stopCh (e.g. tests that don't wire shutdown) is treated
+// as not shutting down.
+func (sm *SessionManager) stopChClosed() bool {
+	if sm.stopCh == nil {
+		return false
+	}
+	select {
+	case <-sm.stopCh:
+		return true
+	default:
+		return false
+	}
+}
+
+// isBenignPromptTeardown reports whether a prompt-completion error string is a
+// benign teardown race: an ACP transport death (the agent subprocess was
+// terminated mid-prompt during shutdown) or a cancel-release sentinel. The
+// prompt-completion signal carries the error as a string, so this matches the
+// same phrases isTransportDeadErr matches on an error value.
+func isBenignPromptTeardown(msg string) bool {
+	if msg == "" {
+		return false
+	}
+	if isCancelReleaseError(msg) {
+		return true
+	}
+	return strings.Contains(msg, "peer disconnected") ||
+		strings.Contains(msg, "connection closed") ||
+		strings.Contains(msg, "notification queue overflow") ||
+		strings.Contains(msg, context.Canceled.Error())
 }
 
 // SendPrompt sends a prompt to an agent execution and waits for completion.
