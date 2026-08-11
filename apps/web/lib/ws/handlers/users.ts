@@ -12,7 +12,7 @@ export function registerUsersHandlers(store: StoreApi<AppState>): WsHandlers {
     "user.settings.updated": (message) => {
       store.setState((state) => {
         const order = compareUserSettingsRevisions(
-          message.payload.updated_at,
+          message.payload.revision,
           state.userSettings.revision,
         );
         if (order !== null && order <= 0) return state;

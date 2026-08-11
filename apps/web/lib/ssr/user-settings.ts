@@ -276,7 +276,7 @@ export function buildCoreFields(
   current: UserSettingsState = createDefaultUserSettings(),
 ) {
   return {
-    revision: s.updated_at ?? current.revision,
+    revision: s.revision ?? current.revision,
     ...buildIdentityFields(s, current),
     ...buildBehaviorFields(s, current),
     savedLayouts: s.saved_layouts ?? current.savedLayouts,

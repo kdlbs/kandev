@@ -74,7 +74,7 @@ describe("status bar visibility websocket sync", () => {
       userSettings: {
         ...state.userSettings,
         appStatusBarEnabled: false,
-        revision: "2026-01-01T00:00:00.000000002Z",
+        revision: 2,
       },
     }));
     const handler = registerUsersHandlers(store)["user.settings.updated"];
@@ -82,23 +82,23 @@ describe("status bar visibility websocket sync", () => {
     handler?.(
       userSettingsMessage({
         app_status_bar_enabled: true,
-        updated_at: "2026-01-01T00:00:00.000000001Z",
+        revision: 1,
       }),
     );
     expect(store.getState().userSettings).toMatchObject({
       appStatusBarEnabled: false,
-      revision: "2026-01-01T00:00:00.000000002Z",
+      revision: 2,
     });
 
     handler?.(
       userSettingsMessage({
         app_status_bar_enabled: true,
-        updated_at: "2026-01-01T00:00:00.000000003Z",
+        revision: 3,
       }),
     );
     expect(store.getState().userSettings).toMatchObject({
       appStatusBarEnabled: true,
-      revision: "2026-01-01T00:00:00.000000003Z",
+      revision: 3,
     });
   });
 });

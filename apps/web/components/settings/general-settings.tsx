@@ -359,7 +359,7 @@ function useAppearanceSaveContributor({
       const editedDuringSave = new Set<keyof AppearanceState>();
       editedDuringSaveRef.current = editedDuringSave;
       try {
-        const response = await updateUserSettings(patch);
+        const response = Object.keys(patch).length > 0 ? await updateUserSettings(patch) : null;
         commitTheme(submitted.theme);
         commitMenuMode(submitted.settingsMenuMode);
         // A draft edited while the save was in flight keeps its preview: what was
@@ -372,15 +372,19 @@ function useAppearanceSaveContributor({
           previewMenuMode(draftRef.current.settingsMenuMode);
         }
         const latestUserSettings = storeApi.getState().userSettings;
-        const responseOrder = compareUserSettingsRevisions(
-          response.settings.updated_at,
-          latestUserSettings.revision,
-        );
-        const responseIsCurrent =
-          responseOrder === null ? latestUserSettings === settingsAtSubmit : responseOrder >= 0;
-        const nextUserSettings = responseIsCurrent
-          ? mapUserSettingsResponse(response, latestUserSettings)
-          : latestUserSettings;
+        let responseIsCurrent = false;
+        if (response) {
+          const responseOrder = compareUserSettingsRevisions(
+            response.settings.revision,
+            latestUserSettings.revision,
+          );
+          responseIsCurrent =
+            responseOrder === null ? latestUserSettings === settingsAtSubmit : responseOrder >= 0;
+        }
+        const nextUserSettings =
+          response && responseIsCurrent
+            ? mapUserSettingsResponse(response, latestUserSettings)
+            : latestUserSettings;
         const confirmed = createAppearanceSavedState(
           submitted.theme,
           submitted.settingsMenuMode,
@@ -388,7 +392,7 @@ function useAppearanceSaveContributor({
         );
         setSaved(confirmed);
         setDraft(rebaseAppearanceDraft(draftRef.current, submitted, confirmed, editedDuringSave));
-        setUserSettings(nextUserSettings);
+        if (response) setUserSettings(nextUserSettings);
       } finally {
         if (editedDuringSaveRef.current === editedDuringSave) {
           editedDuringSaveRef.current = null;

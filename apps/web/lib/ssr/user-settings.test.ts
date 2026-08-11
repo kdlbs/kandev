@@ -15,23 +15,19 @@ const UPDATED_AT = "2026-01-01T00:00:00Z";
 const DEFAULT_USER_ID = "default-user";
 
 describe("user settings revision ordering", () => {
-  it("orders nanosecond timestamps and hydrates the current revision", () => {
-    expect(
-      compareUserSettingsRevisions(
-        "2026-01-01T00:00:00.123456789Z",
-        "2026-01-01T00:00:00.123456788Z",
-      ),
-    ).toBe(1);
+  it("orders atomic revisions and hydrates the current revision", () => {
+    expect(compareUserSettingsRevisions(3, 2)).toBe(1);
     expect(
       mapUserSettingsResponse({
         settings: {
           user_id: DEFAULT_USER_ID,
           workspace_id: toWorkspaceId(""),
           repository_ids: [],
+          revision: 42,
           updated_at: UPDATED_AT,
         },
       }).revision,
-    ).toBe(UPDATED_AT);
+    ).toBe(42);
   });
 });
 

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -57,6 +58,7 @@ func (r *sqliteRepository) initSchema() error {
 		role TEXT NOT NULL DEFAULT 'admin',
 		status TEXT NOT NULL DEFAULT 'active',
 		settings TEXT NOT NULL DEFAULT '{}',
+		settings_revision BIGINT NOT NULL DEFAULT 0,
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);
@@ -79,6 +81,7 @@ func (r *sqliteRepository) runMigrations() {
 	// when authentication is enabled. Explicit CreateUser calls always set role.
 	m.Apply("users.role", "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'")
 	m.Apply("users.status", "ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
+	m.Apply("users.settings_revision", "ALTER TABLE users ADD COLUMN settings_revision BIGINT NOT NULL DEFAULT 0")
 	// Safe pre-auth: the table only ever held the single default-user row.
 	m.Apply("users.email_unique", "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)")
 }
@@ -219,13 +222,17 @@ func checkUserRowsAffected(result sqlResult, userID string) error {
 	return nil
 }
 
+type sqlResult interface {
+	RowsAffected() (int64, error)
+}
+
 func (r *sqliteRepository) GetUserSettings(ctx context.Context, userID string) (*models.UserSettings, error) {
 	return r.getUserSettings(ctx, r.ro, userID)
 }
 
 func (r *sqliteRepository) getUserSettings(ctx context.Context, conn *sqlx.DB, userID string) (*models.UserSettings, error) {
 	row := conn.QueryRowContext(ctx, conn.Rebind(`
-		SELECT settings, updated_at
+		SELECT settings, updated_at, settings_revision
 		FROM users WHERE id = ?
 	`), userID)
 	settings, err := scanUserSettings(row, userID)
@@ -270,18 +277,15 @@ func (r *sqliteRepository) UpsertUserSettingsPreservingTaskCreateLastUsed(
 	}
 	query := fmt.Sprintf(`
 		UPDATE users
-		SET settings = %s, updated_at = ?
+		SET settings = %s, updated_at = ?, settings_revision = settings_revision + 1
 		WHERE id = ?
+		RETURNING settings, updated_at, settings_revision
 	`, settingsExpr)
 	args = append(args, settings.UpdatedAt, settings.UserID)
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
-	if err != nil {
-		return nil, err
-	}
-	if err := checkUserSettingsRowsAffected(result, settings.UserID); err != nil {
-		return nil, err
-	}
-	return r.getUserSettings(ctx, r.db, settings.UserID)
+	return scanUpdatedUserSettings(
+		r.db.QueryRowContext(ctx, r.db.Rebind(query), args...),
+		settings.UserID,
+	)
 }
 
 func (r *sqliteRepository) upsertUserSettingsPreservingTaskCreateLastUsedPostgres(
@@ -293,14 +297,10 @@ func (r *sqliteRepository) upsertUserSettingsPreservingTaskCreateLastUsedPostgre
 	query, patchArgs := buildPostgresUserSettingsPreservingTaskCreateLastUsedUpdate(patch)
 	args := append([]any{string(settingsPayload)}, patchArgs...)
 	args = append(args, settings.UpdatedAt, settings.UserID)
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
-	if err != nil {
-		return nil, err
-	}
-	if err := checkUserSettingsRowsAffected(result, settings.UserID); err != nil {
-		return nil, err
-	}
-	return r.getUserSettings(ctx, r.db, settings.UserID)
+	return scanUpdatedUserSettings(
+		r.db.QueryRowContext(ctx, r.db.Rebind(query), args...),
+		settings.UserID,
+	)
 }
 
 func (r *sqliteRepository) UpdateTaskCreateLastUsed(ctx context.Context, userID string, patch models.TaskCreateLastUsed) (*models.UserSettings, error) {
@@ -321,20 +321,17 @@ func (r *sqliteRepository) UpdateTaskCreateLastUsed(ctx context.Context, userID 
 	settingsExpr = fmt.Sprintf("json_set(%s, %s)", settingsExpr, placeholders)
 	query := `
 		UPDATE users
-		SET settings = %s, updated_at = ?
+		SET settings = %s, updated_at = ?, settings_revision = settings_revision + 1
 		WHERE id = ?
+		RETURNING settings, updated_at, settings_revision
 	`
 	now := time.Now().UTC()
 	args := append([]any{}, patchArgs...)
 	args = append(args, now, userID)
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(fmt.Sprintf(query, settingsExpr)), args...)
-	if err != nil {
-		return nil, err
-	}
-	if err := checkUserSettingsRowsAffected(result, userID); err != nil {
-		return nil, err
-	}
-	return r.getUserSettings(ctx, r.db, userID)
+	return scanUpdatedUserSettings(
+		r.db.QueryRowContext(ctx, r.db.Rebind(fmt.Sprintf(query, settingsExpr)), args...),
+		userID,
+	)
 }
 
 func (r *sqliteRepository) updateTaskCreateLastUsedPostgres(ctx context.Context, userID string, patch models.TaskCreateLastUsed) (*models.UserSettings, error) {
@@ -344,14 +341,10 @@ func (r *sqliteRepository) updateTaskCreateLastUsedPostgres(ctx context.Context,
 	}
 	now := time.Now().UTC()
 	args = append(args, now, userID)
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
-	if err != nil {
-		return nil, err
-	}
-	if err := checkUserSettingsRowsAffected(result, userID); err != nil {
-		return nil, err
-	}
-	return r.getUserSettings(ctx, r.db, userID)
+	return scanUpdatedUserSettings(
+		r.db.QueryRowContext(ctx, r.db.Rebind(query), args...),
+		userID,
+	)
 }
 
 func makeTaskCreateLastUsedJSONSetArgs(patch models.TaskCreateLastUsed) []any {
@@ -416,8 +409,9 @@ func buildPostgresTaskCreateLastUsedUpdate(patch models.TaskCreateLastUsed) (str
 	expr, args = applyPostgresTaskCreateLastUsedPatch(expr, patch, args)
 	query := fmt.Sprintf(`
 		UPDATE users
-		SET settings = %s::text, updated_at = ?
+		SET settings = %s::text, updated_at = ?, settings_revision = settings_revision + 1
 		WHERE id = ?
+		RETURNING settings, updated_at, settings_revision
 	`, expr)
 	return query, args
 }
@@ -434,8 +428,9 @@ func buildPostgresUserSettingsPreservingTaskCreateLastUsedUpdate(patch *models.T
 	}
 	query := fmt.Sprintf(`
 		UPDATE users
-		SET settings = %s::text, updated_at = ?
+		SET settings = %s::text, updated_at = ?, settings_revision = settings_revision + 1
 		WHERE id = ?
+		RETURNING settings, updated_at, settings_revision
 	`, expr)
 	return query, args
 }
@@ -574,19 +569,12 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 	})
 }
 
-func checkUserSettingsRowsAffected(result sqlResult, userID string) error {
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to check rows affected: %w", err)
+func scanUpdatedUserSettings(scanner interface{ Scan(dest ...any) error }, userID string) (*models.UserSettings, error) {
+	settings, err := scanUserSettings(scanner, userID)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("user not found: %s", userID)
 	}
-	if rows == 0 {
-		return fmt.Errorf("user not found: %s", userID)
-	}
-	return nil
-}
-
-type sqlResult interface {
-	RowsAffected() (int64, error)
+	return settings, err
 }
 
 func scanUser(scanner interface{ Scan(dest ...any) error }) (*models.User, error) {
@@ -700,7 +688,7 @@ func DefaultSidebarViews() []models.SidebarView {
 func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID string) (*models.UserSettings, error) {
 	settings := defaultUserSettings(userID)
 	var settingsRaw string
-	if err := scanner.Scan(&settingsRaw, &settings.UpdatedAt); err != nil {
+	if err := scanner.Scan(&settingsRaw, &settings.UpdatedAt, &settings.Revision); err != nil {
 		return nil, err
 	}
 	if settingsRaw == "" || settingsRaw == "{}" {

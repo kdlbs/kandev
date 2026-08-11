@@ -70,6 +70,7 @@ type UserSettingsDTO struct {
 	AppStatusBarOrder               models.AppStatusBarOrder            `json:"app_status_bar_order"`
 	VoiceMode                       models.VoiceModeSettings            `json:"voice_mode"`
 	KanbanHiddenStepIDs             map[string][]string                 `json:"kanban_hidden_step_ids"`
+	Revision                        int64                               `json:"revision"`
 	UpdatedAt                       string                              `json:"updated_at"`
 }
 
@@ -277,6 +278,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		AppStatusBarOrder:               settings.AppStatusBarOrder,
 		VoiceMode:                       settings.VoiceMode,
 		KanbanHiddenStepIDs:             settings.KanbanHiddenStepIDs,
-		UpdatedAt:                       settings.UpdatedAt.Format(time.RFC3339Nano),
+		Revision:                        settings.Revision,
+		UpdatedAt:                       settings.UpdatedAt.Format(time.RFC3339),
 	}
 }

@@ -35,17 +35,21 @@ Backend-owned user settings become the sole durable owner of a top-level
 - boot hydration, PATCH responses, and `user.settings.updated` events carry the
   effective value to every client.
 
-User-settings responses and events serialize `updated_at` with the stored
-subsecond precision. The frontend retains that value as the settings revision:
-it rejects an older live event, applies a newer successful PATCH response, and
-keeps a newer live value when it overtakes an in-flight response. Object
-identity is not an ordering signal.
+Each user row owns an atomic, monotonically increasing `settings_revision`.
+Every user-settings mutation increments it in the same database statement and
+returns the resulting settings snapshot and revision. Boot hydration, PATCH
+responses, and events carry that numeric revision. The frontend uses one
+revision comparison for all three ingestion paths: it rejects older snapshots,
+applies newer snapshots, and keeps a newer live value when it overtakes an
+in-flight response. Wall-clock timestamps and object identity are not ordering
+signals.
 
 Settings > Preferences > Appearance exposes the preference as **Show status bar**
 through the existing shared save coordinator. A successful save changes the
 active responsive presentation without restarting Kandev. Desktop and tablet
 show or hide the bottom bar; phone shows or hides ordinary Status entry points
-and the general Status drawer.
+and the general Status drawer. Appearance saves containing only local theme or
+menu changes do not send an empty user-settings PATCH.
 
 The preference gates only ordinary status surfaces. An active WebSocket
 connectivity warning still bypasses the visibility choice through its
@@ -69,9 +73,9 @@ production and development default; users explicitly opt in portably.
   override.
 - Existing runtime override rows need no destructive cleanup and cannot affect
   the new preference.
-- No relational migration, endpoint, or new WebSocket action is required
-  because user settings already live in a JSON blob with PATCH and event
-  delivery.
+- One relational migration adds the per-user revision counter. No endpoint or
+  new WebSocket action is required because user settings already use the
+  existing PATCH and event delivery paths.
 - Visibility, metrics inclusion, metrics style, item order, and LSP preferred
   location remain separate settings with separate responsibilities.
 

@@ -205,7 +205,7 @@ export type SleepInhibitionStoreState = {
 };
 
 export type UserSettingsState = {
-  revision: string | null;
+  revision: number | null;
   workspaceId: string | null;
   kanbanViewMode: string | null;
   startupPage: StartupPage;

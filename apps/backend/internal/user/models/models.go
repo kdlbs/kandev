@@ -119,6 +119,7 @@ type UserSettings struct {
 	AppStatusBarOrder               AppStatusBarOrder                 `json:"app_status_bar_order"`
 	VoiceMode                       VoiceModeSettings                 `json:"voice_mode"`
 	KanbanHiddenStepIDs             map[string][]string               `json:"kanban_hidden_step_ids"`
+	Revision                        int64                             `json:"revision"`
 	CreatedAt                       time.Time                         `json:"created_at"`
 	UpdatedAt                       time.Time                         `json:"updated_at"`
 }

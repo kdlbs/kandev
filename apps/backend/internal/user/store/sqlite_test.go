@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,7 +18,8 @@ import (
 )
 
 type settingsScanner struct {
-	raw string
+	raw      string
+	revision int64
 }
 
 func upsertUserSettingsForTest(t *testing.T, repo *sqliteRepository, ctx context.Context, settings *models.UserSettings) {
@@ -33,7 +36,72 @@ func upsertUserSettingsForTest(t *testing.T, repo *sqliteRepository, ctx context
 func (s settingsScanner) Scan(dest ...any) error {
 	*(dest[0].(*string)) = s.raw
 	*(dest[1].(*time.Time)) = time.Time{}
+	*(dest[2].(*int64)) = s.revision
 	return nil
+}
+
+func TestSQLiteRepositoryAssignsUniqueAtomicSettingsRevisions(t *testing.T) {
+	conn, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	conn.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = conn.Close() })
+	repo, err := newSQLiteRepositoryWithDB(conn, conn)
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+
+	ctx := context.Background()
+	settings, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get defaults: %v", err)
+	}
+	first := *settings
+	second := *settings
+	first.AppStatusBarEnabled = true
+	second.ChangesPanelLayout = "flat"
+
+	start := make(chan struct{})
+	revisions := make(chan int64, 2)
+	errors := make(chan error, 2)
+	var workers sync.WaitGroup
+	for _, candidate := range []*models.UserSettings{&first, &second} {
+		workers.Add(1)
+		go func(candidate *models.UserSettings) {
+			defer workers.Done()
+			<-start
+			updated, updateErr := repo.UpsertUserSettingsPreservingTaskCreateLastUsed(ctx, candidate, nil)
+			if updateErr != nil {
+				errors <- updateErr
+				return
+			}
+			revisions <- updated.Revision
+		}(candidate)
+	}
+	close(start)
+	workers.Wait()
+	close(errors)
+	close(revisions)
+	for updateErr := range errors {
+		t.Fatalf("concurrent update: %v", updateErr)
+	}
+
+	got := make([]int64, 0, 2)
+	for revision := range revisions {
+		got = append(got, revision)
+	}
+	sort.Slice(got, func(i, j int) bool { return got[i] < got[j] })
+	if !reflect.DeepEqual(got, []int64{1, 2}) {
+		t.Fatalf("revisions = %v, want unique commit order [1 2]", got)
+	}
+	final, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get final settings: %v", err)
+	}
+	if final.Revision != 2 {
+		t.Fatalf("final revision = %d, want 2", final.Revision)
+	}
 }
 
 func TestScanUserSettingsStartupPage(t *testing.T) {
@@ -924,6 +992,10 @@ func TestBuildPostgresTaskCreateLastUsedUpdatePatchesNonEmptyFields(t *testing.T
 	if !strings.Contains(query, "jsonb_set") {
 		t.Fatalf("postgres update should use jsonb_set: %s", query)
 	}
+	if !strings.Contains(query, "settings_revision = settings_revision + 1") ||
+		!strings.Contains(query, "RETURNING settings, updated_at, settings_revision") {
+		t.Fatalf("postgres update should atomically return its settings revision: %s", query)
+	}
 	if !strings.Contains(query, "{task_create_last_used,repository_id}") ||
 		!strings.Contains(query, "{task_create_last_used,branch}") ||
 		!strings.Contains(query, "{task_create_last_used,agent_profile_id}") ||
@@ -1011,6 +1083,10 @@ func TestBuildPostgresUserSettingsPreservingTaskCreateLastUsedUpdateUsesJSONB(t 
 	if !strings.Contains(query, "?::jsonb") || !strings.Contains(query, "jsonb_set") {
 		t.Fatalf("postgres update should merge payload with jsonb_set: %s", query)
 	}
+	if !strings.Contains(query, "settings_revision = settings_revision + 1") ||
+		!strings.Contains(query, "RETURNING settings, updated_at, settings_revision") {
+		t.Fatalf("postgres update should atomically return its settings revision: %s", query)
+	}
 	if !strings.Contains(query, "{task_create_last_used,repository_id}") ||
 		!strings.Contains(query, "{task_create_last_used,branch}") ||
 		!strings.Contains(query, "{task_create_last_used,agent_profile_id}") ||
@@ -1060,6 +1136,10 @@ func TestPostgresRepositoryTaskCreateLastUsedRoundTrip(t *testing.T) {
 		got.TaskCreateLastUsed.ExecutorProfileID != "exec-before" {
 		t.Fatalf("postgres task-create update mismatch: %+v", got.TaskCreateLastUsed)
 	}
+	if got.Revision < 2 {
+		t.Fatalf("postgres settings revision = %d, want at least 2", got.Revision)
+	}
+	firstRevision := got.Revision
 
 	staleSettings.SidebarActiveViewID = "view-after"
 	staleSettings.TaskCreateLastUsed = models.TaskCreateLastUsed{
@@ -1078,6 +1158,9 @@ func TestPostgresRepositoryTaskCreateLastUsedRoundTrip(t *testing.T) {
 		got.TaskCreateLastUsed.AgentProfileID != "agent-after" ||
 		got.TaskCreateLastUsed.ExecutorProfileID != "exec-before" {
 		t.Fatalf("postgres preserving upsert should keep current task-create values: %+v", got.TaskCreateLastUsed)
+	}
+	if got.Revision != firstRevision+1 {
+		t.Fatalf("postgres settings revision = %d, want %d", got.Revision, firstRevision+1)
 	}
 }
 

@@ -1467,7 +1467,8 @@ func TestRecordTaskCreateLastUsed(t *testing.T) {
 		}
 		updatedSettings := &models.UserSettings{
 			UserID:    store.DefaultUserID,
-			UpdatedAt: time.Unix(123, 456789123).UTC(),
+			Revision:  42,
+			UpdatedAt: time.Unix(123, 0).UTC(),
 			TaskCreateLastUsed: models.TaskCreateLastUsed{
 				RepositoryID: "repo-1",
 				Branch:       "feature",
@@ -1506,8 +1507,8 @@ func TestRecordTaskCreateLastUsed(t *testing.T) {
 		if !reflect.DeepEqual(data["task_create_last_used"], updatedSettings.TaskCreateLastUsed) {
 			t.Fatalf("expected event task-create state %+v, got %+v", updatedSettings.TaskCreateLastUsed, data["task_create_last_used"])
 		}
-		if got := data["updated_at"]; got != "1970-01-01T00:02:03.456789123Z" {
-			t.Fatalf("updated_at = %q, want nanosecond-precision revision", got)
+		if got := data["revision"]; got != int64(42) {
+			t.Fatalf("revision = %#v, want 42", got)
 		}
 	})
 

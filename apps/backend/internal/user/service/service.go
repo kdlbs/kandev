@@ -823,7 +823,8 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"app_status_bar_order":                settings.AppStatusBarOrder,
 		"voice_mode":                          settings.VoiceMode,
 		"kanban_hidden_step_ids":              settings.KanbanHiddenStepIDs,
-		"updated_at":                          settings.UpdatedAt.Format(time.RFC3339Nano),
+		"revision":                            settings.Revision,
+		"updated_at":                          settings.UpdatedAt.Format(time.RFC3339),
 	}
 	if err := s.eventBus.Publish(ctx, events.UserSettingsUpdated, bus.NewEvent(events.UserSettingsUpdated, "user-service", data)); err != nil {
 		s.logger.Error("failed to publish user settings event", zap.Error(err))

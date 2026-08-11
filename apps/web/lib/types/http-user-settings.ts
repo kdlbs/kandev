@@ -104,6 +104,7 @@ export type UserSettings = {
   app_status_bar_order?: AppStatusBarOrderApi;
   voice_mode?: VoiceModeSettings;
   kanban_hidden_step_ids?: Record<string, string[]>;
+  revision?: number;
   updated_at: string;
 };
 

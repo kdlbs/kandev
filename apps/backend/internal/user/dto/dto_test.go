@@ -4,16 +4,14 @@ import (
 	"encoding/json"
 	"reflect"
 	"testing"
-	"time"
 
 	"github.com/kandev/kandev/internal/user/models"
 )
 
-func TestFromUserSettingsPreservesRevisionPrecision(t *testing.T) {
-	updatedAt := time.Date(2026, time.August, 11, 20, 0, 0, 123456789, time.UTC)
-	got := FromUserSettings(&models.UserSettings{UpdatedAt: updatedAt}).UpdatedAt
-	if got != "2026-08-11T20:00:00.123456789Z" {
-		t.Fatalf("UpdatedAt = %q, want nanosecond-precision revision", got)
+func TestFromUserSettingsIncludesAtomicRevision(t *testing.T) {
+	got := FromUserSettings(&models.UserSettings{Revision: 42}).Revision
+	if got != 42 {
+		t.Fatalf("Revision = %d, want 42", got)
 	}
 }
 

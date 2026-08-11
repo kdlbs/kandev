@@ -9,9 +9,9 @@ const SHOW_STATUS_BAR_LABEL = "Show status bar";
 const SAVE_CHANGES_LABEL = "Save changes";
 const CHECKED_STATE = "checked";
 const DATA_STATE_ATTRIBUTE = "data-state";
-const INITIAL_REVISION = "2026-08-11T20:00:00.000000001Z";
-const OLDER_LIVE_REVISION = "2026-08-11T20:00:00.000000002Z";
-const SAVED_REVISION = "2026-08-11T20:00:00.000000003Z";
+const INITIAL_REVISION = 1;
+const OLDER_LIVE_REVISION = 2;
+const SAVED_REVISION = 3;
 const themeMocks = vi.hoisted(() => ({
   previewTheme: vi.fn(),
   commitTheme: vi.fn(),
@@ -141,7 +141,7 @@ async function verifyNewerLiveUpdateWinsOverOlderSaveResponse() {
   resolveSave(
     appearanceSettingsResponse({
       app_status_bar_enabled: false,
-      updated_at: OLDER_LIVE_REVISION,
+      revision: OLDER_LIVE_REVISION,
     }),
   );
 
@@ -222,7 +222,7 @@ async function verifyNewerSaveResponseWinsOverOlderLiveUpdate() {
   resolveSave(
     appearanceSettingsResponse({
       app_status_bar_enabled: false,
-      updated_at: SAVED_REVISION,
+      revision: SAVED_REVISION,
     }),
   );
 
@@ -257,6 +257,24 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("AppearanceSettings status bar preference", () => {
+  it("saves local-only Appearance changes without a user-settings request", async () => {
+    renderAppearance();
+
+    fireEvent.click(screen.getByTestId("settings-menu-mode-accordion"));
+    fireEvent.click(await screen.findByRole("button", { name: SAVE_CHANGES_LABEL }));
+
+    await waitFor(() =>
+      expect(storeMocks.commitSettingsMenuMode).toHaveBeenCalledWith("accordion"),
+    );
+    expect(apiMocks.updateUserSettings).not.toHaveBeenCalled();
+    expect(storeMocks.setUserSettings).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(screen.getByTestId("settings-floating-save").getAttribute("data-status")).toBe(
+        "saved",
+      ),
+    );
+  });
+
   it("saves through the shared appearance action without optimistic store mutation", async () => {
     apiMocks.updateUserSettings.mockResolvedValue(
       appearanceSettingsResponse({ app_status_bar_enabled: false }),
