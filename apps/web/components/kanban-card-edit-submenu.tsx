@@ -3,10 +3,7 @@
 import { IconPencil } from "@tabler/icons-react";
 import { t } from "@/lib/i18n";
 import type { PluginTaskMenuContext } from "@/lib/plugins/types";
-import {
-  runnablePluginMenuEntry,
-  visiblePluginMenuActions,
-} from "./kanban-card-plugin-menu-actions";
+import { runnablePluginMenuEntry, visiblePluginMenuActions } from "./plugins/task-menu-actions";
 import type { KanbanCardMenuEntry } from "./kanban-card-menu-items";
 
 /**

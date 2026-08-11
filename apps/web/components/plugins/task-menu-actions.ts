@@ -1,6 +1,6 @@
 import { pluginRegistry } from "@/lib/plugins/registry";
 import type { PluginTaskMenuContext } from "@/lib/plugins/types";
-import type { KanbanCardMenuEntry } from "./kanban-card-menu-items";
+import type { KanbanCardMenuEntry } from "../kanban-card-menu-items";
 type PluginTaskMenuAction = ReturnType<typeof pluginRegistry.getTaskMenuActions>[number];
 
 /**
