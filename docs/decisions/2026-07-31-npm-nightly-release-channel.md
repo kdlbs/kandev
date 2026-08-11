@@ -1,14 +1,15 @@
 # ADR-2026-07-31-npm-nightly-release-channel: Publish deterministic npm-only nightlies
 
-**Status:** accepted (amended 2026-08-03)
+**Status:** accepted (amended 2026-08-11)
 **Date:** 2026-07-31
 **Area:** workflow, backend, frontend, cli
 
 ## Context
 
-Kandev's stable release workflow intentionally gives npm, Homebrew, GitHub Releases, Desktop, and
-containers one shared `X.Y.Z`. Users also need prerelease access to current `main`, but Homebrew
-and Desktop require separate mutable-feed and signing designs. npm already has six coordinated
+Kandev's stable release workflow intentionally gives npm, Homebrew, Scoop, GitHub Releases, Desktop,
+and containers one shared `X.Y.Z`. Users also need prerelease access to current `main`, but Homebrew
+and Scoop require separate mutable-feed and signing designs, while Desktop has its own update feed
+and signing design. npm already has six coordinated
 packages, trusted publishing bound to `.github/workflows/release.yml`, and native dist-tags.
 
 A commit-derived prerelease must be deterministic for retries and valid even when the abbreviated
@@ -38,7 +39,7 @@ rejected instead of silently changing the requested operation.
 Nightlies publish all five runtime packages before the launcher with
 `npm publish --tag nightly`; stable `latest` tags remain untouched. The publisher and Nightly
 preflight load one shared package inventory. Nightly jobs do not enter the Git tag, GitHub Release,
-Desktop, container, or Homebrew graph. Stable and Nightly workflow runs share one non-cancelling
+Desktop, container, Homebrew, or Scoop graph. Stable and Nightly workflow runs share one non-cancelling
 concurrency group from start through publication.
 This release-wide lock is required because Stable pushes its Git tag before its npm publish job is
 ready; locking only the two npm jobs leaves a window where Nightly can derive from the previous npm
@@ -50,6 +51,8 @@ target is incomplete and needs repair. An older partial runtime publication is r
 when its embedded commit is an ancestor of current `main`. Divergent or newer partial tags fail
 closed. Before publishing, both the Stable baseline and previously observed Nightly tag must still
 match.
+
+Scoop remains Stable-only: Nightly never changes `kdlbs/scoop-kandev`.
 
 The backend owns an install-wide Stable/Nightly preference. Stable remains the default and resolves
 GitHub Releases. Nightly resolves npm's `kandev@nightly` target and is selectable only for verified
@@ -66,7 +69,7 @@ observable. A collision in the accepted 12-hex namespace blocks automatic public
 maintainer resolution. Publishing six packages can still fail partially, so
 runtime-first/main-last order and tag-consistency checks are required.
 
-npm accumulates immutable nightly versions. Homebrew and Desktop users do not receive channel
+npm accumulates immutable nightly versions. Homebrew, Scoop, and Desktop users do not receive channel
 parity in this iteration. The release workflow must explicitly gate every stable-only job when
 handling Nightly events. The shared dispatch form still displays Stable-only inputs for a manual
 Nightly, so validation and input descriptions must keep their meaning explicit. A manual Stable

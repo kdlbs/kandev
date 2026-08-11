@@ -12,6 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "release.yml"
 DIAGNOSTICS_PATH = REPO_ROOT / ".github" / "scripts" / "collect-macos-desktop-diagnostics.sh"
 PUBLISH_NPM_PATH = REPO_ROOT / "scripts" / "release" / "publish-npm.sh"
+UPDATE_SCOOP_BUCKET_PATH = REPO_ROOT / "scripts" / "release" / "update-scoop-bucket.sh"
 NPM_PACKAGES_PATH = REPO_ROOT / "scripts" / "release" / "npm-packages.sh"
 PUBLIC_KEY_PATH = REPO_ROOT / ".github" / "release-signing-key.asc"
 RELEASE_PROCESS_PATH = REPO_ROOT / "docs" / "public" / "release-process.md"
@@ -19,6 +20,7 @@ LINT_WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "lint-action-pinning.
 WORKFLOW = WORKFLOW_PATH.read_text()
 DIAGNOSTICS = DIAGNOSTICS_PATH.read_text()
 PUBLISH_NPM = PUBLISH_NPM_PATH.read_text()
+UPDATE_SCOOP_BUCKET = UPDATE_SCOOP_BUCKET_PATH.read_text()
 NPM_PACKAGES = NPM_PACKAGES_PATH.read_text()
 RELEASE_PROCESS = RELEASE_PROCESS_PATH.read_text()
 LINT_WORKFLOW = LINT_WORKFLOW_PATH.read_text()
@@ -152,6 +154,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             "publish-release",
             "publish-npm",
             "update-homebrew-tap",
+            "update-scoop-bucket",
         ):
             block = job_block(name)
             self.assertIn("github.event_name == 'workflow_dispatch'", block)
@@ -192,6 +195,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             ),
             "publish-npm": ("prepare", "publish-release"),
             "update-homebrew-tap": ("prepare", "publish-release"),
+            "update-scoop-bucket": ("prepare", "publish-release"),
         }
 
         for name, dependencies in direct_dependencies.items():
@@ -250,6 +254,30 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn('bash "$ROOT_DIR/scripts/release/npm-view-version.sh"', PUBLISH_NPM)
         self.assertIn('CLI_PACKAGE_BACKUP="$WORK_DIR/cli-package.json"', PUBLISH_NPM)
         self.assertIn('cp "$CLI_PACKAGE_BACKUP" "$CLI_PACKAGE_JSON"', PUBLISH_NPM)
+
+    def test_scoop_publication_uses_current_control_revision_and_deploy_key(self) -> None:
+        scoop = job_block("update-scoop-bucket")
+        self.assertIn("needs: [prepare, publish-release]", scoop)
+        self.assertIn("ref: ${{ github.workflow_sha }}", scoop)
+        self.assertIn("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}", scoop)
+        self.assertIn(
+            "SCOOP_BUCKET_DEPLOY_KEY: ${{ secrets.SCOOP_BUCKET_DEPLOY_KEY }}",
+            scoop,
+        )
+        self.assertIn("bash scripts/release/update-scoop-bucket.sh", scoop)
+        self.assertIn('"${{ needs.prepare.outputs.version }}"', scoop)
+        self.assertIn('"${{ needs.prepare.outputs.tag }}"', scoop)
+        self.assertIn("!inputs.dry_run", scoop)
+        self.assertIn("!inputs.desktop_validation_only", scoop)
+        self.assertNotIn("inputs.backfill_tag == ''", scoop)
+
+        preflight = step_block("Require Scoop bucket deploy key")
+        self.assertIn('if [ -z "$SCOOP_BUCKET_DEPLOY_KEY" ]', preflight)
+        self.assertIn("SCOOP_BUCKET_DEPLOY_KEY is required", preflight)
+
+        self.assertIn("SCOOP_BUCKET_DEPLOY_KEY", UPDATE_SCOOP_BUCKET)
+        self.assertIn("git push origin HEAD:main", UPDATE_SCOOP_BUCKET)
+        self.assertIn('CHECKSUM_NAME="${ARCHIVE_NAME}.sha256"', UPDATE_SCOOP_BUCKET)
 
     def test_publish_npm_rejects_version_dist_tag_mismatches(self) -> None:
         cases = (
@@ -450,6 +478,11 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             self.assertIn('"scripts/release/package-npm-runtime.sh"', trigger_block.group(0))
             self.assertIn('"scripts/release/publish-npm.sh"', trigger_block.group(0))
             self.assertIn('"scripts/release/publish-npm.test.mjs"', trigger_block.group(0))
+            self.assertIn('"scripts/release/update-scoop-bucket.sh"', trigger_block.group(0))
+            self.assertIn(
+                '"scripts/release/update-scoop-bucket.test.mjs"',
+                trigger_block.group(0),
+            )
             self.assertIn('"scripts/release/npm-packages.sh"', trigger_block.group(0))
             self.assertIn('"scripts/release/npm-view-version.sh"', trigger_block.group(0))
             self.assertIn('"scripts/release/npm-view-version.test.mjs"', trigger_block.group(0))
@@ -487,7 +520,8 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             "node --test scripts/release/nightly-version.test.mjs "
             "scripts/release/nightly-release.test.mjs "
             "scripts/release/npm-view-version.test.mjs "
-            "scripts/release/publish-npm.test.mjs",
+            "scripts/release/publish-npm.test.mjs "
+            "scripts/release/update-scoop-bucket.test.mjs",
             LINT_WORKFLOW,
         )
 
@@ -561,6 +595,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             "publish-release",
             "publish-npm",
             "update-homebrew-tap",
+            "update-scoop-bucket",
         ):
             block = job_block(name)
             self.assertRegex(

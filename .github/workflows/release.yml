@@ -19,6 +19,7 @@ name: release
 #   9. publish-release   — create GH release with runtime + desktop assets and release notes
 #  10. publish-npm       — publish kandev@X.Y.Z + @kdlbs/runtime-*@X.Y.Z to npmjs
 #  11. update-homebrew-tap — push updated Formula/kandev.rb to kdlbs/homebrew-kandev
+#  12. update-scoop-bucket — push updated bucket/kandev.json to kdlbs/scoop-kandev
 #
 # npm publishing uses Trusted Publishers (OIDC) — no NPM_TOKEN required.
 # Each package (kandev + 5 @kdlbs/runtime-* packages) must have this workflow
@@ -26,6 +27,7 @@ name: release
 #
 # Required repository secret for public releases:
 #   HOMEBREW_TAP_DEPLOY_KEY — SSH private key for kdlbs/homebrew-kandev deploy key
+#   SCOOP_BUCKET_DEPLOY_KEY — SSH private key for kdlbs/scoop-kandev deploy key
 # Required configuration in the `release` environment:
 #   RELEASE_GPG_PRIVATE_KEY — secret containing the ASCII-armored release tag signing key
 #   RELEASE_GPG_FINGERPRINT — variable containing the key's full fingerprint
@@ -2079,5 +2081,47 @@ jobs:
           HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
         run: |
           bash scripts/release/update-homebrew-tap.sh \
+            "${{ needs.prepare.outputs.version }}" \
+            "${{ needs.prepare.outputs.tag }}"
+
+  update-scoop-bucket:
+    name: Update Scoop bucket
+    needs: [prepare, publish-release]
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.publish-release.result == 'success'
+      }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          # Backfill application artifacts come from the selected tag, but the
+          # publication helper must come from the current workflow revision.
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+
+      - name: Require Scoop bucket deploy key
+        env:
+          SCOOP_BUCKET_DEPLOY_KEY: ${{ secrets.SCOOP_BUCKET_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$SCOOP_BUCKET_DEPLOY_KEY" ]; then
+            echo "::error::SCOOP_BUCKET_DEPLOY_KEY is required to publish the Scoop bucket." >&2
+            exit 1
+          fi
+
+      - name: Update Scoop bucket
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SCOOP_BUCKET_DEPLOY_KEY: ${{ secrets.SCOOP_BUCKET_DEPLOY_KEY }}
+        run: |
+          bash scripts/release/update-scoop-bucket.sh \
             "${{ needs.prepare.outputs.version }}" \
             "${{ needs.prepare.outputs.tag }}"
