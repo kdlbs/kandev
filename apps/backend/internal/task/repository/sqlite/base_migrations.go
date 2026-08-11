@@ -39,6 +39,53 @@ func (r *Repository) migrateSessionsAddCostColumns() {
 	r.migrate.Apply("task_sessions.cost_subcents", `ALTER TABLE task_sessions ADD COLUMN cost_subcents INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("task_sessions.tokens_in", `ALTER TABLE task_sessions ADD COLUMN tokens_in INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("task_sessions.tokens_out", `ALTER TABLE task_sessions ADD COLUMN tokens_out INTEGER NOT NULL DEFAULT 0`)
+	r.migrate.Apply("task_sessions.tokens_cached_in", `ALTER TABLE task_sessions ADD COLUMN tokens_cached_in INTEGER NOT NULL DEFAULT 0`)
+}
+
+// officeCostEventsTableExists reports whether the office cost ledger has
+// been created yet. The task repository and the office repository share one
+// database but initialize independently, and on a fresh boot this
+// repository's migrations run first (internal/backendapp/storage.go) — so
+// "absent" is the normal fresh-install case, not an error. Mirrors
+// secretsTableExists in slack_retirement.go.
+func (r *Repository) officeCostEventsTableExists() (bool, error) {
+	query := `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'office_cost_events'`
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = `SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'office_cost_events'`
+	}
+	var count int
+	if err := r.db.QueryRow(query).Scan(&count); err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+// backfillSessionTokensCachedIn recomputes task_sessions.tokens_cached_in
+// from the office_cost_events ledger for rows that predate the column (or
+// whose cached total is still its zero default). The rollup is purely
+// derived from the ledger, so recomputing from it is restoring data, not
+// inventing it. Guarded on the ledger table existing: on a genuinely fresh
+// database office_cost_events has not been created yet (see
+// officeCostEventsTableExists), and there is nothing to backfill on a fresh
+// install anyway. An unguarded UPDATE would hit a missing-table error that
+// MigrateLogger.Apply only warns on, silently no-op-ing every boot.
+//
+// The WHERE clause makes this cheap after the first pass, matching the
+// repositories.provider_host.github_backfill pattern: once a session's
+// cached total is nonzero (backfilled, or accumulated live via
+// IncrementTaskSessionUsage after this fix ships) it is skipped on
+// subsequent boots.
+func (r *Repository) backfillSessionTokensCachedIn() {
+	exists, err := r.officeCostEventsTableExists()
+	if err != nil || !exists {
+		return
+	}
+	r.migrate.Apply("task_sessions.tokens_cached_in.backfill", `
+		UPDATE task_sessions
+		   SET tokens_cached_in = COALESCE(
+		       (SELECT SUM(e.tokens_cached_in) FROM office_cost_events e
+		         WHERE e.session_id = task_sessions.id), 0)
+		 WHERE tokens_cached_in = 0`)
 }
 
 // runMigrations applies idempotent ALTER TABLE migrations for schema evolution.
@@ -154,6 +201,10 @@ func (r *Repository) runMigrations() error {
 	// task_sessions rebuilds above so it repairs legacy DBs whose schema can no
 	// longer trigger a rebuild (see migrateSessionsAddCostColumns).
 	r.migrateSessionsAddCostColumns()
+	// Recompute tokens_cached_in from the office cost ledger for any rows
+	// that predate the column above. No-ops on a fresh install where the
+	// ledger table doesn't exist yet.
+	r.backfillSessionTokensCachedIn()
 
 	// Office task extensions - net-new columns on existing main tables.
 	// Idempotent ALTERs; main upgrades pick them up at first boot.
@@ -191,9 +242,9 @@ func (r *Repository) runMigrations() error {
 
 	// Office session cost tracking extensions are declared in
 	// initSessionWorktreeSchema's CREATE TABLE (cost_subcents, tokens_in,
-	// tokens_out). task_sessions.agent_profile_id existed on main as
-	// NOT NULL; migrateSessionsRemoveAgentExecutionID rebuilds the table
-	// with the column nullable and the cost columns added.
+	// tokens_cached_in, tokens_out). task_sessions.agent_profile_id existed
+	// on main as NOT NULL; migrateSessionsRemoveAgentExecutionID rebuilds the
+	// table with the column nullable and the cost columns added.
 
 	r.migrate.Apply("workflows.is_system", `ALTER TABLE workflows ADD COLUMN is_system INTEGER DEFAULT 0`)
 
@@ -631,6 +682,7 @@ func (r *Repository) migrateSessionsRemoveAgentExecutionID() error {
 			task_environment_id TEXT DEFAULT '',
 			cost_subcents INTEGER NOT NULL DEFAULT 0,
 			tokens_in INTEGER NOT NULL DEFAULT 0,
+			tokens_cached_in INTEGER NOT NULL DEFAULT 0,
 			tokens_out INTEGER NOT NULL DEFAULT 0,
 			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 		)`,
@@ -641,7 +693,7 @@ func (r *Repository) migrateSessionsRemoveAgentExecutionID() error {
 			state, error_message, metadata, started_at, completed_at, updated_at,
 			is_primary, is_passthrough, review_status,
 			COALESCE(base_commit_sha, ''), COALESCE(task_environment_id, ''),
-			0, 0, 0
+			0, 0, 0, 0
 		FROM task_sessions`,
 		`DROP TABLE task_sessions`,
 		`ALTER TABLE task_sessions_new RENAME TO task_sessions`,
