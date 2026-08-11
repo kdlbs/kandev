@@ -89,7 +89,9 @@ func TestBackfillSessionTokensCachedIn_SumsLedger(t *testing.T) {
 	// A row for a different session must not leak into this session's total.
 	insertOfficeCostEvent(t, repo, "cost-other", "sess-other", 555)
 
-	repo.backfillSessionTokensCachedIn()
+	if err := repo.backfillSessionTokensCachedIn(); err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
 
 	var got int64
 	if err := repo.ro.QueryRowx(repo.ro.Rebind(
@@ -101,9 +103,11 @@ func TestBackfillSessionTokensCachedIn_SumsLedger(t *testing.T) {
 		t.Errorf("tokens_cached_in = %d, want 100000000 (sum of office_cost_events for this session)", got)
 	}
 
-	// Idempotent: re-running after a session has already been backfilled
-	// (tokens_cached_in now nonzero) must not double-count.
-	repo.backfillSessionTokensCachedIn()
+	// Idempotent: re-running against an unchanged ledger must not
+	// double-count the already-correct total.
+	if err := repo.backfillSessionTokensCachedIn(); err != nil {
+		t.Fatalf("second backfill: %v", err)
+	}
 	if err := repo.ro.QueryRowx(repo.ro.Rebind(
 		`SELECT tokens_cached_in FROM task_sessions WHERE id = ?`), "sess-backfill",
 	).Scan(&got); err != nil {
@@ -111,6 +115,57 @@ func TestBackfillSessionTokensCachedIn_SumsLedger(t *testing.T) {
 	}
 	if got != 100_000_000 {
 		t.Errorf("tokens_cached_in after second backfill pass = %d, want unchanged 100000000", got)
+	}
+}
+
+// TestBackfillSessionTokensCachedIn_CorrectsDriftedRollup covers the case an
+// unconditional recompute exists to repair: a session whose rollup went out
+// of sync with the ledger without ever erroring. IncrementTaskSessionUsage
+// is a best-effort `UPDATE ... WHERE id = ?` that silently matches zero rows
+// if the session row doesn't exist yet (see
+// TestIncrementTaskSessionUsage_UnknownSessionNoError), and the office
+// subscriber only logs a Warn when that write fails while the ledger insert
+// has already committed (event_subscribers.go handlePromptUsage). A backfill
+// gated on "already nonzero" would treat this drifted-but-nonzero row as
+// already correct and skip it forever; the unconditional recompute must
+// instead overwrite it with the true ledger sum.
+func TestBackfillSessionTokensCachedIn_CorrectsDriftedRollup(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-drifted", "sess-drifted", "turn-drifted")
+	createOfficeCostEventsTable(t, repo)
+	insertOfficeCostEvent(t, repo, "cost-1", "sess-drifted", 98_805_109)
+	insertOfficeCostEvent(t, repo, "cost-2", "sess-drifted", 1_194_891)
+
+	// Simulate the drift directly: the rollup already holds a nonzero but
+	// wrong value, as it would after a missed increment.
+	if err := repo.IncrementTaskSessionUsage(ctx, "sess-drifted", 0, 2_000, 0, 0); err != nil {
+		t.Fatalf("seed drifted rollup: %v", err)
+	}
+
+	var before int64
+	if err := repo.ro.QueryRowx(repo.ro.Rebind(
+		`SELECT tokens_cached_in FROM task_sessions WHERE id = ?`), "sess-drifted",
+	).Scan(&before); err != nil {
+		t.Fatalf("read row before backfill: %v", err)
+	}
+	if before != 2_000 {
+		t.Fatalf("test setup bug: rollup = %d, want the drifted seed value 2000", before)
+	}
+
+	if err := repo.backfillSessionTokensCachedIn(); err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+
+	var got int64
+	if err := repo.ro.QueryRowx(repo.ro.Rebind(
+		`SELECT tokens_cached_in FROM task_sessions WHERE id = ?`), "sess-drifted",
+	).Scan(&got); err != nil {
+		t.Fatalf("read row after backfill: %v", err)
+	}
+	if got != 100_000_000 {
+		t.Errorf("tokens_cached_in after backfill = %d, want 100000000 (the drifted 2000 must be "+
+			"overwritten with the full ledger sum, not skipped as already-nonzero)", got)
 	}
 }
 
@@ -125,7 +180,9 @@ func TestBackfillSessionTokensCachedIn_NoOpWithoutLedgerTable(t *testing.T) {
 
 	// office_cost_events was never created in this repo — simulates a fresh
 	// boot where the task repo's migrations run first.
-	repo.backfillSessionTokensCachedIn()
+	if err := repo.backfillSessionTokensCachedIn(); err != nil {
+		t.Fatalf("backfill without ledger table should not error: %v", err)
+	}
 
 	var got int64
 	if err := repo.ro.QueryRowx(repo.ro.Rebind(

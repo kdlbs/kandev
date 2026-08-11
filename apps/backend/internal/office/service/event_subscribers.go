@@ -534,9 +534,9 @@ func (s *Service) tryPostStartFallback(
 //     normalize the model id and look up pricing. On miss the row
 //     records cost_subcents=0 with estimated=true.
 //
-// After insert the session totals (tokens_in / tokens_out / cost_subcents)
-// are incremented on task_sessions, and any applicable budget policy is
-// evaluated. Estimated rows count toward budget totals at face value.
+// After insert the session totals (tokens_in / tokens_cached_in / tokens_out /
+// cost_subcents) are incremented on task_sessions, and any applicable budget
+// policy is evaluated. Estimated rows count toward budget totals at face value.
 func (s *Service) handlePromptUsage(ctx context.Context, event *bus.Event) error {
 	data, err := decodeEventData[PromptUsageData](event)
 	if err != nil || data.TaskID == "" || data.SessionID == "" {

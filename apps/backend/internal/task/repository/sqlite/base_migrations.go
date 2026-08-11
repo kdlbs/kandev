@@ -61,31 +61,39 @@ func (r *Repository) officeCostEventsTableExists() (bool, error) {
 }
 
 // backfillSessionTokensCachedIn recomputes task_sessions.tokens_cached_in
-// from the office_cost_events ledger for rows that predate the column (or
-// whose cached total is still its zero default). The rollup is purely
-// derived from the ledger, so recomputing from it is restoring data, not
-// inventing it. Guarded on the ledger table existing: on a genuinely fresh
-// database office_cost_events has not been created yet (see
-// officeCostEventsTableExists), and there is nothing to backfill on a fresh
-// install anyway. An unguarded UPDATE would hit a missing-table error that
-// MigrateLogger.Apply only warns on, silently no-op-ing every boot.
+// from the office_cost_events ledger for every session. The rollup is
+// purely derived from the ledger, so recomputing from it is restoring
+// data, not inventing it. Guarded on the ledger table existing: on a
+// genuinely fresh database office_cost_events has not been created yet
+// (see officeCostEventsTableExists), and there is nothing to backfill on a
+// fresh install anyway. An unguarded UPDATE would hit a missing-table
+// error that MigrateLogger.Apply only warns on, silently no-op-ing every
+// boot.
 //
-// The WHERE clause makes this cheap after the first pass, matching the
-// repositories.provider_host.github_backfill pattern: once a session's
-// cached total is nonzero (backfilled, or accumulated live via
-// IncrementTaskSessionUsage after this fix ships) it is skipped on
-// subsequent boots.
-func (r *Repository) backfillSessionTokensCachedIn() {
+// Deliberately unconditional (assignment, not increment, so it is
+// idempotent across replays) rather than gated on "already nonzero": the
+// rollup can go out of sync with the ledger without erroring — a live
+// IncrementTaskSessionUsage call is a best-effort UPDATE ... WHERE id = ?
+// that silently matches zero rows if the session row doesn't exist yet
+// (see the "missing row" case in TestIncrementTaskSessionUsage_UnknownSessionNoError),
+// and event_subscribers.go only logs a Warn when the rollup write fails
+// while the ledger insert has already committed. A "skip if nonzero"
+// guard would make exactly that drift permanent instead of self-healing
+// it on the next boot.
+func (r *Repository) backfillSessionTokensCachedIn() error {
 	exists, err := r.officeCostEventsTableExists()
-	if err != nil || !exists {
-		return
+	if err != nil {
+		return fmt.Errorf("check office_cost_events existence: %w", err)
+	}
+	if !exists {
+		return nil
 	}
 	r.migrate.Apply("task_sessions.tokens_cached_in.backfill", `
 		UPDATE task_sessions
 		   SET tokens_cached_in = COALESCE(
 		       (SELECT SUM(e.tokens_cached_in) FROM office_cost_events e
-		         WHERE e.session_id = task_sessions.id), 0)
-		 WHERE tokens_cached_in = 0`)
+		         WHERE e.session_id = task_sessions.id), 0)`)
+	return nil
 }
 
 // runMigrations applies idempotent ALTER TABLE migrations for schema evolution.
@@ -204,7 +212,9 @@ func (r *Repository) runMigrations() error {
 	// Recompute tokens_cached_in from the office cost ledger for any rows
 	// that predate the column above. No-ops on a fresh install where the
 	// ledger table doesn't exist yet.
-	r.backfillSessionTokensCachedIn()
+	if err := r.backfillSessionTokensCachedIn(); err != nil {
+		return fmt.Errorf("backfill task_sessions.tokens_cached_in: %w", err)
+	}
 
 	// Office task extensions - net-new columns on existing main tables.
 	// Idempotent ALTERs; main upgrades pick them up at first boot.
