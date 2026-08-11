@@ -36,6 +36,11 @@ repositories.
   paths so same-named files remain distinguishable and open in the correct
   repository. The palette groups those matches by repository and shows paths
   relative to each group.
+- For both **Files** and **Contents**, a Git workspace root remains searchable
+  when initialized submodules add named repository scopes. Root matches retain
+  the empty repository identity while child matches retain their task-root-relative
+  scope names. A bare task directory containing sibling repositories is not
+  treated as an additional repository.
 - Search covers every repository materialized for the active task session.
   Tracked files and untracked, non-ignored files are eligible; ignored files,
   directories, and workspace metadata are not.
@@ -135,6 +140,15 @@ repositories without parsing path strings.
 - **GIVEN** a task with two repositories containing matching file names,
   **WHEN** the user searches in **Files** mode, **THEN** matching paths from both
   repositories appear with their repository prefixes.
+- **GIVEN** a Git workspace root and an initialized submodule both contain
+  matching file names, **WHEN** the user searches in **Files** mode, **THEN**
+  matches from the root and submodule appear in separate repository groups.
+- **GIVEN** a Git workspace root and an initialized submodule both contain a
+  matching text query, **WHEN** the user searches in **Contents** mode,
+  **THEN** results from both repository scopes appear.
+- **GIVEN** a bare task directory contains multiple sibling repositories,
+  **WHEN** the user searches in **Files** or **Contents** mode, **THEN** only
+  those repositories contribute results and no duplicate task-root group appears.
 - **GIVEN** two repositories with the same relative path, **WHEN** the user
   selects the result from the second repository, **THEN** Kandev opens the
   second repository's file at the returned line and column.

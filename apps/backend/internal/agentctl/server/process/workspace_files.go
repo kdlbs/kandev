@@ -1010,7 +1010,7 @@ func (m *Manager) SearchWorkspaceFileResults(query string, limit int) []types.Fi
 	}
 
 	candidates := make([]fileSearchCandidate, 0)
-	if root != nil && root.RepositoryName() != "" {
+	if root != nil && root.gitIndexPath != "" {
 		candidates = appendTrackerFileSearchCandidates(candidates, root)
 	}
 	for _, tracker := range repositories {
