@@ -299,8 +299,19 @@ describe("mrChipStatus", () => {
       running: makeMR({ pipeline_state: "pending" }),
       neutral: makeMR(),
     };
+    const expectedColor: Record<MRChipStatus, string> = {
+      merged: PURPLE,
+      closed: MUTED,
+      failed: RED,
+      draft: MUTED,
+      ready: "text-emerald-400",
+      awaiting_approval: "text-sky-400",
+      running: YELLOW,
+      neutral: MUTED,
+    };
     for (const status of statuses) {
       expect(mrChipStatus(fixtures[status])).toBe(status);
+      expect(getMRStatusColor(fixtures[status])).toBe(expectedColor[status]);
     }
   });
 });
