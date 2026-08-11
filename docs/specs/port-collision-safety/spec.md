@@ -1,7 +1,7 @@
 ---
 status: building
 created: 2026-08-07
-updated: 2026-08-09
+updated: 2026-08-11
 ---
 
 # Port collision and backend ownership safety
@@ -45,6 +45,33 @@ starting their backend child:
   selection remains unchanged.
 - The preflight is a race-reduction measure, not the ownership proof: a port can still be taken
   between the probe and the child bind. Readiness ownership below closes that remaining race.
+
+### Port-availability probe detects wildcard listeners
+
+Wherever a launcher decides whether a port is free, whether it is preflighting an explicit
+backend or web port, or selecting a preferred-then-random automatic port, the probe must treat a
+port as available only when both of these hold:
+
+- Nothing answers a loopback connect on either the IPv4 (127.0.0.1) or the IPv6 (::1) loopback
+  address.
+- A fresh loopback bind on that port succeeds.
+
+The connect probe is required because a running Kandev backend binds the wildcard address
+(0.0.0.0 and [::]), and a specific-address bind check alone reports that port as free. On
+BSD-derived systems including macOS, and because the bind probe itself sets SO_REUSEADDR, a
+loopback bind against an already-active wildcard listener succeeds, so a bind-only check falsely
+reports the busy port as available. Probing both loopback families is required because the
+existing backend may hold only the IPv6 wildcard socket. The bind probe is retained because it
+catches reservations a connect probe misses, such as Windows phantom port reservations and ports
+in TIME_WAIT.
+
+Each connect probe is bounded by a short timeout so a silently dropped SYN, for example under
+WSL2 mirrored networking to an unbound loopback port, cannot hang port selection. A timed-out or
+refused connect means nothing is listening.
+
+This restores the dual connect-and-bind, dual-stack behavior the TypeScript launcher had before
+`make dev` moved to the native Go launcher (PR #2411), where the Go probe was bind-only on the
+IPv4 loopback. The contract is not English error-text matching on socket errors.
 
 ### Backend readiness ownership
 
@@ -113,6 +140,19 @@ not part of this contract.
    includes the port and source.
 3. Given no explicit backend port and the preferred port is occupied, when the launcher starts,
    then it chooses an available fallback as it does today.
+
+### Wildcard-listener port availability
+
+1. Given a running backend holds the preferred port through a wildcard bind (0.0.0.0 and [::]),
+   when the launcher selects an automatic port with no explicit port configured, then the
+   availability probe reports the preferred port as busy and the launcher falls back to a free
+   random port instead of choosing the occupied preferred port.
+2. Given a wildcard listener holds an explicitly requested backend or web port, when the launcher
+   preflights that port, then it reports the port as busy and exits with the existing hard error
+   naming the port and its source.
+3. Given nothing is listening on a candidate port but a loopback connect to an unbound port is
+   silently dropped, when the availability probe runs, then the bounded connect timeout elapses,
+   the fresh bind succeeds, and the port is reported available.
 
 ### Issue #2372: readiness from the wrong process
 
