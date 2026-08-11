@@ -18,8 +18,8 @@ func TestMessageCRUDPaginationSearchAndMetadataLookups(t *testing.T) {
 	base := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
 	messages := []*models.Message{
 		{ID: "message-a", TaskSessionID: "session-message-crud", TaskID: "task-message-crud", TurnID: "turn-message-crud", Content: "literal 100% ready", CreatedAt: base, Metadata: map[string]any{"pending_id": "pending-shared", "question_id": "question-a", "status": "pending"}, Type: models.MessageTypeClarificationRequest, RequestsInput: true},
-		{ID: "message-b", TaskSessionID: "session-message-crud", TaskID: "task-message-crud", TurnID: "turn-message-crud", Content: "literal under_score", CreatedAt: base, Metadata: map[string]any{"pending_id": "pending-shared", "question_id": "question-b", "tool_call_id": "tool-1", "status": "running"}, Type: models.MessageTypeToolCall},
-		{ID: "message-c", TaskSessionID: "session-message-crud", TaskID: "task-message-crud", TurnID: "turn-message-crud", Content: "ordinary tail", CreatedAt: base.Add(time.Second), Metadata: map[string]any{"tool_call_id": "tool-1", "status": "pending"}, Type: models.MessageTypePermissionRequest},
+		{ID: "message-b", TaskSessionID: "session-message-crud", TaskID: "task-message-crud", TurnID: "turn-message-crud", Content: "literal under_score", CreatedAt: base.Add(time.Second), Metadata: map[string]any{"pending_id": "pending-shared", "question_id": "question-b", "tool_call_id": "tool-1", "status": "running"}, Type: models.MessageTypeToolCall},
+		{ID: "message-c", TaskSessionID: "session-message-crud", TaskID: "task-message-crud", TurnID: "turn-message-crud", Content: "ordinary tail", CreatedAt: base.Add(2 * time.Second), Metadata: map[string]any{"tool_call_id": "tool-1", "status": "pending"}, Type: models.MessageTypePermissionRequest},
 	}
 	for _, message := range messages {
 		if err := repo.CreateMessage(ctx, message); err != nil {
