@@ -12,6 +12,10 @@ import {
 } from "./check-no-em-dash-ui.mjs";
 
 const temporaryDirectories: string[] = [];
+const TEST_REPO_ROOT = "/repo";
+const PUBLIC_DOC_FILE = `${TEST_REPO_ROOT}/docs/public/guide.md`;
+const PUBLIC_DOC_RELATIVE_FILE = "docs/public/guide.md";
+const PUBLIC_DOC_KIND = "public-doc";
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
@@ -47,8 +51,32 @@ describe("check-no-em-dash-ui", () => {
       `Visible ${EM_DASH} copy`,
     ].join("\n");
 
-    expect(findPublicDocViolations(source, "/repo/docs/public/guide.md", "/repo")).toEqual([
-      { kind: "public-doc", file: "docs/public/guide.md", line: 7 },
+    expect(findPublicDocViolations(source, PUBLIC_DOC_FILE, TEST_REPO_ROOT)).toEqual([
+      { kind: PUBLIC_DOC_KIND, file: PUBLIC_DOC_RELATIVE_FILE, line: 7 },
+    ]);
+  });
+
+  it("checks actual em dashes instead of source escapes in public docs", () => {
+    const source = ["JSON escape \\u2014 stays literal.", `Visible ${EM_DASH} copy`].join("\n");
+
+    expect(findPublicDocViolations(source, PUBLIC_DOC_FILE, TEST_REPO_ROOT)).toEqual([
+      { kind: PUBLIC_DOC_KIND, file: PUBLIC_DOC_RELATIVE_FILE, line: 2 },
+    ]);
+  });
+
+  it("does not treat comment markers in Markdown code as comments", () => {
+    const source = [
+      "Inline code `<!-- comment syntax` remains code.",
+      "Inline MDX `{/* comment syntax` remains code.",
+      "```md",
+      "<!-- comment syntax",
+      "{/* comment syntax",
+      "```",
+      `Visible ${EM_DASH} copy`,
+    ].join("\n");
+
+    expect(findPublicDocViolations(source, PUBLIC_DOC_FILE, TEST_REPO_ROOT)).toEqual([
+      { kind: PUBLIC_DOC_KIND, file: PUBLIC_DOC_RELATIVE_FILE, line: 7 },
     ]);
   });
 
@@ -87,13 +115,18 @@ describe("check-no-em-dash-ui", () => {
       `package main\n// ignored ${EM_DASH}\nconst copy = "Bad ${EM_DASH} copy"\n`,
     );
     writeFileSync(path.join(repoRoot, "docs", "public", "guide.md"), `# Public ${EM_DASH} guide\n`);
+    writeFileSync(
+      path.join(repoRoot, "docs", "public", "guide.mdx"),
+      `# Public ${EM_DASH} MDX guide\n`,
+    );
     writeFileSync(path.join(repoRoot, "CHANGELOG.md"), `- Bad ${EM_DASH} release note\n`);
 
     expect(scanUiEmDashViolations({ repoRoot, webRoot })).toEqual([
       { kind: "catalog", file: "apps/web/src/locales/en/settings.json", key: "label" },
       { kind: "source", file: "apps/web/components/settings.tsx", line: 1 },
       { kind: "source", file: "apps/backend/cmd/mock-agent/handler.go", line: 3 },
-      { kind: "public-doc", file: "docs/public/guide.md", line: 1 },
+      { kind: PUBLIC_DOC_KIND, file: "docs/public/guide.md", line: 1 },
+      { kind: PUBLIC_DOC_KIND, file: "docs/public/guide.mdx", line: 1 },
     ]);
   });
 });

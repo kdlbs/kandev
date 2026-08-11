@@ -195,37 +195,145 @@ export function findSourceViolations(source, file, root) {
     );
 }
 
-function maskDelimitedCommentsPreservingLines(source, startMarker, endMarker) {
+const PUBLIC_DOC_COMMENT_MARKERS = [
+  { start: "<!--", end: "-->" },
+  { start: "{/*", end: "*/" },
+];
+
+function readBacktickRun(source, index) {
+  let end = index;
+  while (source[end] === "`") end += 1;
+  return source.slice(index, end);
+}
+
+function findBacktickRun(source, run, start) {
+  let cursor = source.indexOf(run, start);
+  while (cursor >= 0) {
+    const before = source[cursor - 1];
+    const after = source[cursor + run.length];
+    if (before !== "`" && after !== "`") return cursor;
+    cursor = source.indexOf(run, cursor + 1);
+  }
+  return -1;
+}
+
+function readFence(line) {
+  const match = /^( {0,3})(`{3,}|~{3,})(.*)$/.exec(line);
+  if (!match || (match[2][0] === "`" && match[3].includes("`"))) return null;
+  return { marker: match[2][0], length: match[2].length };
+}
+
+function isClosingFence(line, fence) {
+  const match = /^( {0,3})(`{3,}|~{3,})\s*$/.exec(line);
+  return Boolean(match && match[2][0] === fence.marker && match[2].length >= fence.length);
+}
+
+function findPublicDocComment(line, index) {
+  return PUBLIC_DOC_COMMENT_MARKERS.find(({ start }) => line.startsWith(start, index));
+}
+
+function maskPublicDocLine(line, state) {
   let output = "";
   let cursor = 0;
+  let commentEnd = state.commentEnd;
+  let inlineCodeRun = state.inlineCodeRun;
 
-  while (cursor < source.length) {
-    const start = source.indexOf(startMarker, cursor);
-    if (start < 0) {
-      output += source.slice(cursor);
-      break;
+  while (cursor < line.length) {
+    if (commentEnd) {
+      const end = line.indexOf(commentEnd, cursor);
+      if (end < 0) {
+        output += line.slice(cursor).replace(/[^\n]/g, " ");
+        return { output, commentEnd, inlineCodeRun: null };
+      }
+      const endExclusive = end + commentEnd.length;
+      output += line.slice(cursor, endExclusive).replace(/[^\n]/g, " ");
+      cursor = endExclusive;
+      commentEnd = null;
+      continue;
     }
 
-    output += source.slice(cursor, start);
-    const endMarkerStart = source.indexOf(endMarker, start + startMarker.length);
-    const end = endMarkerStart < 0 ? source.length : endMarkerStart + endMarker.length;
-    output += source.slice(start, end).replace(/[^\n]/g, " ");
-    cursor = end;
+    if (inlineCodeRun) {
+      const end = findBacktickRun(line, inlineCodeRun, cursor);
+      if (end < 0) {
+        output += line.slice(cursor);
+        return { output, commentEnd: null, inlineCodeRun };
+      }
+      const endExclusive = end + inlineCodeRun.length;
+      output += line.slice(cursor, endExclusive);
+      cursor = endExclusive;
+      inlineCodeRun = null;
+      continue;
+    }
+
+    if (line[cursor] === "`") {
+      const run = readBacktickRun(line, cursor);
+      const end = findBacktickRun(line, run, cursor + run.length);
+      if (end < 0) {
+        output += line.slice(cursor);
+        return { output, commentEnd: null, inlineCodeRun: run };
+      }
+      const endExclusive = end + run.length;
+      output += line.slice(cursor, endExclusive);
+      cursor = endExclusive;
+      continue;
+    }
+
+    const comment = findPublicDocComment(line, cursor);
+    if (comment) {
+      const end = line.indexOf(comment.end, cursor + comment.start.length);
+      if (end < 0) {
+        output += line.slice(cursor).replace(/[^\n]/g, " ");
+        return { output, commentEnd: comment.end, inlineCodeRun: null };
+      }
+      const endExclusive = end + comment.end.length;
+      output += line.slice(cursor, endExclusive).replace(/[^\n]/g, " ");
+      cursor = endExclusive;
+      continue;
+    }
+
+    output += line[cursor];
+    cursor += 1;
   }
 
-  return output;
+  return { output, commentEnd, inlineCodeRun };
 }
 
 function stripPublicDocCommentsPreservingLines(source) {
-  const withoutHtmlComments = maskDelimitedCommentsPreservingLines(source, "<!--", "-->");
-  return maskDelimitedCommentsPreservingLines(withoutHtmlComments, "{/*", "*/");
+  let output = "";
+  let fence = null;
+  let state = { commentEnd: null, inlineCodeRun: null };
+
+  for (const line of source.split("\n")) {
+    if (fence) {
+      output += line;
+      if (isClosingFence(line, fence)) fence = null;
+    } else {
+      const openingFence = state.commentEnd || state.inlineCodeRun ? null : readFence(line);
+      if (openingFence) {
+        output += line;
+        fence = openingFence;
+        state = { commentEnd: null, inlineCodeRun: null };
+      } else {
+        const masked = maskPublicDocLine(line, state);
+        output += masked.output;
+        state = masked;
+      }
+    }
+    output += "\n";
+  }
+
+  return output.slice(0, -1);
+}
+
+function containsPublicDocEmDash(value) {
+  return value.includes(EM_DASH);
 }
 
 export function findPublicDocViolations(source, file, root) {
   return stripPublicDocCommentsPreservingLines(source)
     .split("\n")
     .flatMap((line, index) =>
-      containsEmDash(line)
+      containsPublicDocEmDash(line)
         ? [{ kind: "public-doc", file: relativePath(file, root), line: index + 1 }]
         : [],
     );

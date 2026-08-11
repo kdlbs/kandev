@@ -220,7 +220,10 @@ test("rejects public pages that contain an em dash", async () => {
     { pages: ["index"] },
   );
 
-  await assert.rejects(validatePublicDocs(dir), /em dash/i);
+  await assert.rejects(
+    validatePublicDocs(dir),
+    /public docs contain em dash \(U\+2014\): index\.md:8/,
+  );
 });
 
 test("rejects published pages omitted from meta.json", async () => {
