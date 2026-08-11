@@ -1,7 +1,7 @@
 import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 
-const APPEARANCE_PATH = "/settings/general/appearance";
+const APPEARANCE_PATH = "/settings/preferences/appearance";
 
 function settingsSidebar(page: Page) {
   return page.getByTestId("app-sidebar-settings-mode");
@@ -67,11 +67,13 @@ test.describe("Settings discovery", () => {
     await search.fill("terminal font size");
     const result = settingsResult(sidebar, "Terminal Font Size");
     await expect(result).toBeVisible();
-    await expect(result).toContainText("General › Terminal");
+    await expect(result).toContainText("Terminal & Editors");
     await expect(sidebar.getByRole("link", { name: "Appearance" })).toHaveCount(0);
     await result.click();
 
-    await expect(testPage).toHaveURL(/\/settings\/general\/terminal#setting-terminal-font-size$/);
+    await expect(testPage).toHaveURL(
+      /\/settings\/preferences\/terminal-editors#setting-terminal-font-size$/,
+    );
     const target = testPage.locator('[data-settings-target="setting-terminal-font-size"]');
     await expect(target).toHaveAttribute("data-settings-target-highlight", "true");
     await expect(testPage.getByTestId("terminal-font-size-input")).toBeFocused();
@@ -98,7 +100,9 @@ test.describe("Settings discovery", () => {
     await sidebar.getByRole("searchbox", { name: "Search settings" }).fill("resource metrics");
     await settingsResult(sidebar, "Resource Metrics").click();
 
-    await expect(testPage).toHaveURL(/\/settings\/general\/appearance#setting-resource-metrics$/);
+    await expect(testPage).toHaveURL(
+      /\/settings\/preferences\/appearance#setting-resource-metrics$/,
+    );
     await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
     const target = testPage.locator('[data-settings-target="setting-resource-metrics"]');
     await expect(target).toHaveAttribute("data-settings-target-highlight", "true");

@@ -120,6 +120,10 @@ vi.mock("@/components/github/pr-status-chip", () => ({
   PRStatusChip: () => null,
 }));
 
+vi.mock("@/components/gitlab/mr-status-chip", () => ({
+  MRStatusChip: () => null,
+}));
+
 vi.mock("@/components/azure-devops/azure-devops-task-pull-request-chip", () => ({
   AzureDevOpsTaskPullRequestChip: () => null,
 }));

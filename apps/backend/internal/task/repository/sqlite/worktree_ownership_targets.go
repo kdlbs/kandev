@@ -13,10 +13,16 @@ import (
 	"github.com/kandev/kandev/internal/db/dialect"
 )
 
+// envRepoKey is the normalized repository-slot key: one row per
+// (repository, branch slug) pair within a task environment.
+func envRepoKey(repositoryID, branchSlug string) string {
+	return repositoryID + "\x00" + branchSlug
+}
+
 // rowForKey returns (creating if needed) the normalized repo target for a
 // (repository, branch slug) key in this task.
 func (t *taskWorktreeTargets) rowForKey(repositoryID, branchSlug string) *envRepoTarget {
-	key := repositoryID + "\x00" + branchSlug
+	key := envRepoKey(repositoryID, branchSlug)
 	if target, ok := t.byKey[key]; ok {
 		return target
 	}
@@ -52,9 +58,11 @@ func (t *taskWorktreeTargets) targetForWorktree(worktreeID string) *envRepoTarge
 // physical-worktree identity, which must agree everywhere).
 func (t *taskWorktreeTargets) mergeLegacyEnvRepo(row legacyEnvRepo) error {
 	target := t.rowForKey(row.repositoryID, row.branchSlug)
-	if err := target.claimWorktree(row.worktreeID, row.worktreePath, row.worktreeBranch, row.position, row.errorMessage, row.createdAt, row.updatedAt, worktreeRepoStatusActive); err != nil {
+	if err := target.claimWorktree(row.worktreeID, row.worktreePath, row.worktreeBranch, row.position, row.errorMessage, row.createdAt, row.updatedAt, row.status); err != nil {
 		return err
 	}
+	target.mergedAt = row.mergedAt
+	target.deletedAt = row.deletedAt
 	return target.mergeCreation(row.createdAt, row.updatedAt)
 }
 
@@ -343,7 +351,7 @@ func (c *worktreeCutover) legacyWorktreeInventory() map[string]bool {
 		inventory[worktreeInventoryKey(wt.worktreeID, wt.worktreePath, wt.worktreeBranch)] = true
 	}
 	for _, row := range c.envRepos {
-		if row.worktreeID == "" {
+		if row.worktreeID == "" || row.status == worktreeRepoStatusDeleted || row.deletedAt != nil {
 			continue
 		}
 		inventory[worktreeInventoryKey(row.worktreeID, row.worktreePath, row.worktreeBranch)] = true

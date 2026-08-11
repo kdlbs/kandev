@@ -1,89 +1,196 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  IconKey,
-  IconMessageCircle,
-  IconMicrophone,
-  IconPlugConnected,
-  IconPuzzle,
-  IconWand,
-} from "@tabler/icons-react";
 import { PluginSlot } from "@/components/plugins/plugin-slot";
 import { useAppStore } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
+import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
+import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import { useSettingsDiscovery } from "@/hooks/domains/settings/use-settings-discovery";
-import {
-  EXTERNAL_MCP_SETTINGS_HREF,
-  PLUGINS_SETTINGS_HREF,
-  PROMPTS_SETTINGS_HREF,
-  UTILITY_AGENTS_SETTINGS_HREF,
-  VOICE_MODE_SETTINGS_HREF,
-} from "@/lib/settings-discovery/catalog/standalone";
-import { AccountGroup } from "./account-group";
-import { AgentsGroup } from "./agents-group";
-import { ExecutorsGroup } from "./executors-group";
-import { GeneralGroup } from "./general-group";
-import { SettingsLeaf } from "./settings-nav-primitives";
+import { BUILT_IN_LAYOUT_PROFILES, isBuiltInLayoutOverride } from "@/lib/layout/layout-profiles";
+import { SettingsBranch, SettingsLeaf, SettingsSectionHeader } from "./settings-nav-primitives";
 import { SettingsSearch } from "./settings-search";
-import { SystemGroup } from "./system-group";
-import { WorkspacesGroup } from "./workspaces-group";
+import { SettingsMenuNodeRow } from "./settings-menu-node";
+import type { SettingsMenuNode } from "./settings-menu-branches";
+import { useSettingsMenuBranches, useSettingsMenuForest } from "./use-settings-menu-branches";
+import {
+  useSettingsMenuExpansion,
+  type SettingsMenuExpansion,
+} from "./use-settings-menu-expansion";
+import {
+  SETTINGS_MENU_SECTIONS,
+  settingsMenuItemIsActive,
+  type SettingsMenuCountKey,
+  type SettingsMenuItem,
+} from "./settings-menu-sections";
 
-const SECRETS_HREF = "/settings/general/secrets";
-const INTEGRATIONS_SETTINGS_HREF = "/settings/integrations";
-const DEFAULT_OPEN_GROUP = "workspaces";
+// The menu itself is data — see `settings-menu-sections.ts`, which the settings
+// breadcrumb reads too. Re-exported here so existing callers keep one import.
+export {
+  SETTINGS_MENU_SECTIONS,
+  settingsMenuItemIsActive,
+  settingsMenuOwnerOf,
+  type SettingsMenuItem,
+  type SettingsMenuSection,
+} from "./settings-menu-sections";
 
-// Single-open accordion: each top-level group owns a route prefix. The group
-// whose prefix matches the current path is the open one. Prefixes are disjoint,
-// so first match wins and ordering is irrelevant.
-const GROUP_ROUTES = [
-  { id: "general", prefix: "/settings/general" },
-  { id: "workspaces", prefix: "/settings/workspace" },
-  { id: "agents", prefix: "/settings/agents" },
-  { id: "executors", prefix: "/settings/executors" },
-  { id: "system", prefix: "/settings/system" },
-  { id: "account", prefix: "/settings/account" },
-] as const;
-
-/** The settings accordion group that owns `pathname`, or null for a standalone leaf. */
-export function settingsGroupIdForPath(pathname: string): string | null {
-  return GROUP_ROUTES.find((g) => pathname.startsWith(g.prefix))?.id ?? null;
-}
-
-export function settingsOpenGroupIdForPath(pathname: string): string {
-  return settingsGroupIdForPath(pathname) ?? DEFAULT_OPEN_GROUP;
+/** null user (disabled/synthetic single-user mode) counts as admin for gating. */
+function useIsAdmin(): boolean {
+  const role = useAppStore((s) => s.auth.user?.role);
+  return role === undefined || role === "admin";
 }
 
 /**
- * The settings nav tree. Top-level groups behave as a single-open accordion:
- * opening one closes the others and reveals its subsections. Routes without a
- * top-level group open Workspaces so the active workspace settings stay visible.
- *
- * Rendered both inside the collapsible "Settings" sidebar section and, when the
- * footer gear is active, as the full-height sidebar takeover.
+ * Item counts for rows whose page owns a list. `undefined` until the backing
+ * data is loaded, so rows never flash a wrong zero. Secrets and plugins load
+ * through their store-backed hooks; the rest is already hydrated by the
+ * settings bootstrap.
  */
-export function SettingsTree({ pathname }: { pathname: string }) {
+function useSettingsMenuCounts(): Partial<Record<SettingsMenuCountKey, number>> {
+  const hydrated = useAppStore((s) => s.settingsData.executorsLoaded);
+  const workspaceCount = useAppStore((s) => s.workspaces.items.length);
+  const agentProfileCount = useAppStore((s) =>
+    s.settingsAgents.items.reduce((sum, agent) => sum + agent.profiles.length, 0),
+  );
+  const executorProfileCount = useAppStore((s) =>
+    s.executors.items.reduce((sum, executor) => sum + (executor.profiles?.length ?? 0), 0),
+  );
+  const userSettingsLoaded = useAppStore((s) => s.userSettings.loaded);
+  // Built-ins always exist; overrides replace a built-in, so only customs add.
+  const layoutCount = useAppStore(
+    (s) =>
+      BUILT_IN_LAYOUT_PROFILES.length +
+      s.userSettings.savedLayouts.filter((layout) => !isBuiltInLayoutOverride(layout)).length,
+  );
+  const secrets = useSecrets();
+  const plugins = usePlugins();
+
+  return {
+    ...(hydrated
+      ? {
+          workspaces: workspaceCount,
+          agents: agentProfileCount,
+          executors: executorProfileCount,
+        }
+      : {}),
+    ...(userSettingsLoaded ? { layouts: layoutCount } : {}),
+    ...(secrets.loaded ? { secrets: secrets.items.length } : {}),
+    ...(plugins.loaded ? { plugins: plugins.items.length } : {}),
+  };
+}
+
+function MenuCountBadge({ count }: { count: number }) {
+  return (
+    <span className="shrink-0 text-[11px] leading-none text-muted-foreground/70 tabular-nums">
+      {count}
+    </span>
+  );
+}
+
+/**
+ * One menu row: a plain link, or — in a tree mode, for a row whose page owns
+ * records — a disclosure holding them.
+ *
+ * The active rule is what keeps the two shapes honest. `settingsMenuItemIsActive`
+ * marks a row for its own page *and* everything under it, which is right when
+ * the sub-page has no row of its own. Once a branch renders that sub-page as a
+ * row, the deeper row is the page you are on and the ancestor is merely the way
+ * there — so the row defers whenever a node claims the route, and exactly one
+ * row in the menu carries `data-active` in every mode.
+ */
+function SettingsMenuRow({
+  item,
+  pathname,
+  count,
+  branch,
+  expansion,
+}: {
+  item: SettingsMenuItem;
+  pathname: string;
+  count: number | undefined;
+  branch: SettingsMenuNode | undefined;
+  expansion: SettingsMenuExpansion;
+}) {
+  const { t } = useTranslation();
+  const label = t(item.labelKey);
+  const labelSuffix = count !== undefined ? <MenuCountBadge count={count} /> : undefined;
+
+  if (!branch) {
+    return (
+      <SettingsLeaf
+        href={item.href}
+        label={label}
+        icon={item.icon}
+        isActive={settingsMenuItemIsActive(item, pathname) && expansion.activeKey === null}
+        labelSuffix={labelSuffix}
+      />
+    );
+  }
+
+  return (
+    <SettingsBranch
+      label={label}
+      icon={item.icon}
+      labelSuffix={labelSuffix}
+      href={item.href}
+      isActive={expansion.activeKey === branch.key}
+      expanded={expansion.isExpanded(branch.key)}
+      onToggle={() => expansion.toggle(branch.key)}
+    >
+      {(branch.children ?? []).map((node) => (
+        <SettingsMenuNodeRow
+          key={node.key}
+          node={node}
+          depth={1}
+          activeKey={expansion.activeKey}
+          expansion={expansion}
+        />
+      ))}
+    </SettingsBranch>
+  );
+}
+
+/**
+ * The settings nav. Group labels are static section headers — not clickable, no
+ * expand/collapse — and every row is a page.
+ *
+ * How deep it goes is a per-device preference (Settings → Appearance):
+ * `flat` is the fixed two-level menu and the default; `accordion` and
+ * `persistent` additionally grow the Workspaces, Agents and Executors rows into
+ * their records, differing only in whether opening one branch closes the others.
+ * See `settings-menu-branches.ts` for what those branches contain.
+ *
+ * Rendered both inside the sidebar settings takeover and, on a phone, as the
+ * `/settings` index page body.
+ */
+export function SettingsTree({
+  pathname,
+  searchLayout,
+}: {
+  pathname: string;
+  /** `floating` pins the search field in thumb reach — see `SettingsSearch`. */
+  searchLayout?: "inline" | "floating";
+}) {
   const { t } = useTranslation();
   const authEnabled = useFeature("auth");
   const authMode = useAppStore((s) => s.auth.mode);
-  const showAccountGroup = authEnabled && authMode === "enabled";
+  const isAdmin = useIsAdmin();
+  const showAccountItems = authEnabled && authMode === "enabled";
+  const showUsersItem = authEnabled && isAdmin;
   const discoveryItems = useSettingsDiscovery();
+  const counts = useSettingsMenuCounts();
   const [query, setQuery] = useState("");
-  const [openGroup, setOpenGroup] = useState<string | null>(() =>
-    settingsOpenGroupIdForPath(pathname),
-  );
+  const mode = useAppStore((s) => s.settingsMenu.mode);
+  const branches = useSettingsMenuBranches(mode);
+  const forest = useSettingsMenuForest(branches);
+  const expansion = useSettingsMenuExpansion(mode, forest, pathname);
 
-  // Re-sync when navigation lands on a different section so the open group
-  // always reflects the current page (a leaf with no owning group → all closed).
-  useEffect(() => {
-    setOpenGroup(settingsOpenGroupIdForPath(pathname));
-  }, [pathname]);
-
-  const groupProps = (id: string) => ({
-    expanded: openGroup === id,
-    onToggle: () => setOpenGroup((prev) => (prev === id ? null : id)),
-  });
+  const itemVisible = (item: SettingsMenuItem) => {
+    if (item.requires === "account") return showAccountItems;
+    if (item.requires === "users") return showUsersItem;
+    return true;
+  };
 
   return (
     <>
@@ -92,59 +199,31 @@ export function SettingsTree({ pathname }: { pathname: string }) {
         query={query}
         onQueryChange={setQuery}
         onSelect={() => setQuery("")}
+        {...(searchLayout ? { layout: searchLayout } : {})}
       />
       {query.trim() ? null : (
         <>
-          <GeneralGroup pathname={pathname} {...groupProps("general")} />
-          <WorkspacesGroup pathname={pathname} {...groupProps("workspaces")} />
-          <AgentsGroup pathname={pathname} {...groupProps("agents")} />
-          <SettingsLeaf
-            href={PROMPTS_SETTINGS_HREF}
-            label={t("common:prompts")}
-            icon={IconMessageCircle}
-            isActive={pathname === PROMPTS_SETTINGS_HREF}
-          />
-          <SettingsLeaf
-            href={VOICE_MODE_SETTINGS_HREF}
-            label={t("settings:voiceMode")}
-            icon={IconMicrophone}
-            isActive={pathname === VOICE_MODE_SETTINGS_HREF}
-          />
-          <SettingsLeaf
-            href={UTILITY_AGENTS_SETTINGS_HREF}
-            label={t("settings:utilityAgents")}
-            icon={IconWand}
-            isActive={pathname === UTILITY_AGENTS_SETTINGS_HREF}
-          />
-          <ExecutorsGroup pathname={pathname} {...groupProps("executors")} />
-          {/* Editors lives under General (see GeneralGroup) — no duplicate top-level leaf. */}
-          <SettingsLeaf
-            href={SECRETS_HREF}
-            label={t("settings:secrets")}
-            icon={IconKey}
-            isActive={pathname === SECRETS_HREF}
-          />
-          <SettingsLeaf
-            href={EXTERNAL_MCP_SETTINGS_HREF}
-            label={t("common:externalMcp")}
-            icon={IconPlugConnected}
-            isActive={pathname === EXTERNAL_MCP_SETTINGS_HREF}
-          />
-          <SettingsLeaf
-            href={INTEGRATIONS_SETTINGS_HREF}
-            label={t("common:integrations")}
-            icon={IconPlugConnected}
-            isActive={pathname === INTEGRATIONS_SETTINGS_HREF}
-          />
-          <PluginSlot name="settings-nav" />
-          <SettingsLeaf
-            href={PLUGINS_SETTINGS_HREF}
-            label={t("common:plugins")}
-            icon={IconPuzzle}
-            isActive={pathname === PLUGINS_SETTINGS_HREF}
-          />
-          <SystemGroup pathname={pathname} {...groupProps("system")} />
-          {showAccountGroup && <AccountGroup pathname={pathname} {...groupProps("account")} />}
+          {SETTINGS_MENU_SECTIONS.map((section) => {
+            const items = section.items.filter(itemVisible);
+            if (items.length === 0) return null;
+            return (
+              <div key={section.id} className="flex flex-col gap-0.5">
+                <SettingsSectionHeader label={t(section.labelKey)} />
+                {items.map((item) => (
+                  <SettingsMenuRow
+                    key={item.href}
+                    item={item}
+                    pathname={pathname}
+                    count={item.countKey ? counts[item.countKey] : undefined}
+                    branch={branches[item.href]}
+                    expansion={expansion}
+                  />
+                ))}
+                {/* Plugins may add rows here, directly below the Plugins page. */}
+                {section.id === "workspaces" && <PluginSlot name="settings-nav" />}
+              </div>
+            );
+          })}
         </>
       )}
     </>

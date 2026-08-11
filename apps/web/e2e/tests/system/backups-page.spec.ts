@@ -29,8 +29,8 @@ test.describe("System Backups page", () => {
   }) => {
     test.setTimeout(60_000);
 
-    await testPage.goto("/settings/system/backups");
-    await expect(testPage.getByTestId("system-page-title")).toHaveText("Backups");
+    await testPage.goto("/settings/system/data-storage");
+    await expect(testPage.getByTestId("system-page-title")).toHaveText("Data & Logs");
     await expect(testPage.getByTestId("system-backups-card")).toBeVisible();
 
     // Empty state shows initially (no auto snapshots exist on this fresh boot path).

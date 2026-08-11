@@ -18,7 +18,7 @@ import {
   EMPTY_STAGES,
   type StagesDraft,
 } from "./new-task-stages";
-import { clampTaskTitleInput } from "@/lib/task-title";
+import { useTaskTitleSelectionRestore } from "@/hooks/use-task-title-selection-restore";
 import { useTranslation } from "react-i18next";
 
 function buildMetadata(draft: IssueDraft): Record<string, unknown> | undefined {
@@ -131,6 +131,7 @@ function NewIssueDialogBody({
   onCreate: () => void;
 }) {
   const { t } = useTranslation();
+  const { inputRef, clampChange } = useTaskTitleSelectionRestore<HTMLTextAreaElement>(draft.title);
   return (
     <>
       <DialogHeader>
@@ -150,9 +151,10 @@ function NewIssueDialogBody({
 
       <div className="space-y-4">
         <Textarea
+          ref={inputRef}
           placeholder={t("office:taskTitle")}
           value={draft.title}
-          onChange={(e) => updateDraft({ title: clampTaskTitleInput(e.target.value) })}
+          onChange={(e) => updateDraft({ title: clampChange(e) })}
           className="text-lg font-medium border-0 resize-none focus-visible:ring-0 min-h-[40px]"
           rows={1}
           autoFocus

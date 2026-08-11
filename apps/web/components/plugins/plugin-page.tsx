@@ -1,7 +1,7 @@
 "use client";
 
 import type { ComponentType, ReactNode } from "react";
-import { PageTopbar } from "@/components/page-topbar";
+import { PageShell } from "@/components/page-shell";
 import { lookupPluginIcon } from "@/lib/plugins/icons";
 import { pluginRegistry } from "@/lib/plugins/registry";
 import type { PluginRouteRegistration } from "@/lib/plugins/registry";
@@ -49,8 +49,8 @@ type PluginPageFrameProps = {
 };
 
 /**
- * Wraps a plugin-registered route in the same page shell first-party pages
- * use: a `PageTopbar` title bar above a scrollable content area. Renders the
+ * Wraps a plugin-registered route in the shared `PageShell` (topbar + nav
+ * trigger + scrollable content), matching first-party pages. Renders the
  * children bare (full-bleed) when the registration opted out via
  * `topbar: false`.
  */
@@ -65,16 +65,16 @@ export function PluginPageFrame({ registration, children }: PluginPageFrameProps
   const Icon = lookupPluginIcon(chrome.icon);
   const Actions = chrome.Actions;
   return (
-    <div className="flex h-full min-h-0 w-full flex-col bg-background">
-      <PageTopbar
-        title={chrome.title}
-        subtitle={chrome.subtitle}
-        icon={Icon ? <Icon className="h-4 w-4" /> : undefined}
-        backHref={chrome.backHref}
-        backLabel={chrome.backLabel}
-        actions={Actions ? <Actions /> : undefined}
-      />
-      <div className="min-h-0 flex-1 overflow-auto">{children}</div>
-    </div>
+    <PageShell
+      title={chrome.title}
+      subtitle={chrome.subtitle}
+      icon={Icon ? <Icon className="h-4 w-4" /> : undefined}
+      backHref={chrome.backHref}
+      backLabel={chrome.backLabel}
+      actions={Actions ? <Actions /> : undefined}
+      contentClassName="bg-background"
+    >
+      {children}
+    </PageShell>
   );
 }

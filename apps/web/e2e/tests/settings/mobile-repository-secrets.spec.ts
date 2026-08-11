@@ -11,14 +11,15 @@ test.describe("Mobile repository secrets", () => {
     prCapture,
   }) => {
     await testPage.setViewportSize({ width: 390, height: 844 });
-    await testPage.goto(`/settings/workspace/${seedData.workspaceId}`);
+    await testPage.goto(`/settings/workspaces/${seedData.workspaceId}`);
 
-    await testPage.getByTestId("settings-mobile-menu-button").click();
-    const menu = testPage.getByTestId("settings-mobile-menu");
-    await expect(menu).toBeVisible();
-    await menu.locator(`a[href="/settings/workspace/${seedData.workspaceId}/secrets"]`).click();
+    // Workspace sections are reached through the shell's tab strip. Settings
+    // renders no nav sheet, so there is no menu button to open here.
+    const tabs = testPage.getByTestId("workspace-settings-tabs");
+    await expect(tabs).toBeVisible();
+    await tabs.getByRole("link", { name: "Secrets", exact: true }).click();
     await expect(testPage).toHaveURL(
-      new RegExp(`/settings/workspace/${seedData.workspaceId}/secrets$`),
+      new RegExp(`/settings/workspaces/${seedData.workspaceId}/secrets$`),
     );
 
     await testPage.getByRole("button", { name: "Add secret", exact: true }).click();
@@ -44,13 +45,12 @@ test.describe("Mobile repository secrets", () => {
     if (!workspaceSecret) throw new Error("mobile workspace secret was not persisted");
 
     try {
-      await testPage.getByTestId("settings-mobile-menu-button").click();
       await testPage
-        .getByTestId("settings-mobile-menu")
+        .getByTestId("workspace-settings-tabs")
         .getByRole("link", { name: "Repositories", exact: true })
         .click();
       await expect(testPage).toHaveURL(
-        new RegExp(`/settings/workspace/${seedData.workspaceId}/repositories$`),
+        new RegExp(`/settings/workspaces/${seedData.workspaceId}/repositories$`),
       );
       await testPage.getByRole("heading", { name: "E2E Repo", exact: true }).click();
 

@@ -111,23 +111,15 @@ test.describe("Clarification flow", () => {
     );
     if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
-    // The mock agent reaches the clarification call asynchronously. Wait for
-    // the owning session to park before opening the page, then explicitly
-    // establish the Review state that the answer should move it out of.
-    await waitForSessionState(apiClient, {
-      taskId: task.id,
-      sessionId: task.session_id,
-      expectedState: "WAITING_FOR_INPUT",
-      message: "clarification session must park before the Review-state transition",
-      timeout: 30_000,
-    });
-    await apiClient.updateTaskState(task.id, "REVIEW");
-    await expect.poll(async () => (await apiClient.getTask(task.id)).state).toBe("REVIEW");
-
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    // The pending overlay is durable while the session may legitimately stay
+    // RUNNING when the primary MCP response path remains connected.
+    await apiClient.updateTaskState(task.id, "REVIEW");
+    await expect.poll(async () => (await apiClient.getTask(task.id)).state).toBe("REVIEW");
 
     const filters = new SidebarFilterPopoverPage(testPage);
     await filters.open();

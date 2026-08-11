@@ -20,7 +20,7 @@ export class WorkflowSettingsPage {
   }
 
   async goto(workspaceId: string) {
-    await this.page.goto(`/settings/workspace/${workspaceId}/workflows`);
+    await this.page.goto(`/settings/workspaces/${workspaceId}/workflows`);
     // Wait for a client-rendered element to confirm hydration is complete
     // (networkidle is unreliable with persistent WebSocket connections)
     await expect(this.addWorkflowButton).toBeVisible();

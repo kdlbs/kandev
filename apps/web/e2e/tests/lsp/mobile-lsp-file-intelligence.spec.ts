@@ -165,7 +165,7 @@ test.describe("Mobile LSP boundaries", () => {
         lsp_auto_start_languages: [],
         lsp_status_location: "toolbar",
       });
-      await testPage.goto("/settings/general/editors");
+      await testPage.goto("/settings/preferences/terminal-editors");
       await expect(testPage.getByRole("heading", { name: "Editors", exact: true })).toBeVisible();
 
       const kotlinCard = testPage.getByTestId("lsp-language-card-kotlin");

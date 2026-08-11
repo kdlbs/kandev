@@ -29,7 +29,7 @@ export class LinearSettingsPage {
   }
 
   async gotoWorkspace(workspaceId: string) {
-    await this.page.goto(`/settings/workspace/${workspaceId}/integrations/linear`);
+    await this.page.goto(`/settings/workspaces/${workspaceId}/integrations/linear`);
     await this.secretInput.waitFor({ state: "visible" });
   }
 }

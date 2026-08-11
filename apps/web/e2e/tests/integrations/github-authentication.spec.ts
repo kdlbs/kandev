@@ -3,7 +3,7 @@ import { expectElementsNotToIntersect } from "../../helpers/layout-assertions";
 import { GitHubAuthSettingsPage } from "../../pages/github-auth-settings-page";
 
 const settingsPath = (workspaceId: string) =>
-  `/settings/workspace/${workspaceId}/integrations/github`;
+  `/settings/workspaces/${workspaceId}/integrations/github`;
 
 test.describe("GitHub workspace authentication", () => {
   test("keeps actors isolated while switching workspaces and lists named CLI accounts", async ({

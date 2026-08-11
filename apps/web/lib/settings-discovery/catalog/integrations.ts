@@ -18,43 +18,8 @@ export const INTEGRATION_SETTINGS_TARGETS = {
   sentry: "setting-integration-sentry-connection",
 } as const;
 
-export const INTEGRATION_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = [
-  {
-    id: "integrations",
-    kind: "page",
-    labelKey: "common:integrations",
-    parentId: "workspaces",
-    groupId: "workspaces",
-    href: "/settings/integrations",
-    order: 220,
-  },
-  ...INTEGRATIONS.flatMap(([slug, label], index): SettingsDiscoveryDefinition[] => {
-    const id = `integration-${slug}`;
-    const href = `/settings/integrations/${slug}`;
-    const order = 221 + index * 10;
-    return [
-      {
-        id,
-        kind: "page",
-        label,
-        parentId: "integrations",
-        groupId: "workspaces",
-        href,
-        order,
-      },
-      {
-        id: `${id}-connection`,
-        kind: "section",
-        labelKey: "settings:connection",
-        parentId: id,
-        groupId: "workspaces",
-        href,
-        targetId: INTEGRATION_SETTINGS_TARGETS[slug],
-        order: order + 1,
-        requires: "workspace",
-      },
-    ];
-  }),
-];
+// Integrations are workspace-scoped: their discovery entries are generated per
+// workspace in resolve.ts, so search results read "<workspace> › Integrations › …".
+export const INTEGRATION_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = [];
 
 export const WORKSPACE_INTEGRATIONS = INTEGRATIONS;

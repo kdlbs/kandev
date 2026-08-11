@@ -1,7 +1,8 @@
 import { test, expect } from "../../fixtures/test-base";
+import { expectElementsNotToIntersect } from "../../helpers/layout-assertions";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 
-test("mobile navigation reaches Message Queue with touch-safe shared settings layout", async ({
+test("mobile navigation reaches the Message Queue section with touch-safe shared settings layout", async ({
   testPage,
 }) => {
   const mobile = new MobileKanbanPage(testPage);
@@ -9,16 +10,14 @@ test("mobile navigation reaches Message Queue with touch-safe shared settings la
   await mobile.mobileMenuButton.click();
   const homeMenu = testPage.getByTestId("mobile-home-menu-card");
   await homeMenu.getByRole("link", { name: "Settings" }).click();
-  await testPage.getByTestId("settings-mobile-menu-button").click();
-
-  const menu = testPage.getByTestId("settings-mobile-menu");
-  await menu.getByRole("button", { name: "Expand General" }).click();
-  await menu.getByRole("link", { name: "Message Queue" }).click();
+  // Settings lands on the /settings index; the queue lives on Task behavior.
+  const index = testPage.getByTestId("settings-index");
+  await index.getByRole("link", { name: /^Task Behavior/ }).click();
 
   await expect(testPage).toHaveURL(
-    (url) => new URL(url).pathname === "/settings/general/message-queue",
+    (url) => new URL(url).pathname === "/settings/preferences/task-behavior",
   );
-  await expect(testPage.getByTestId("system-page-title")).toHaveText("Message Queue");
+  await expect(testPage.getByText("Message Queue").first()).toBeVisible();
 
   const input = testPage.getByTestId("message-queue-max-per-session");
   await expect(input).toBeVisible();
@@ -43,8 +42,5 @@ test("mobile navigation reaches Message Queue with touch-safe shared settings la
   await input.fill(current === "23" ? "24" : "23");
   const saveBar = testPage.getByTestId("settings-floating-save");
   await expect(saveBar).toBeVisible();
-  const [inputAfterEdit, saveBox] = await Promise.all([input.boundingBox(), saveBar.boundingBox()]);
-  expect(inputAfterEdit).not.toBeNull();
-  expect(saveBox).not.toBeNull();
-  expect(inputAfterEdit!.y + inputAfterEdit!.height).toBeLessThan(saveBox!.y);
+  await expectElementsNotToIntersect(input, saveBar);
 });
