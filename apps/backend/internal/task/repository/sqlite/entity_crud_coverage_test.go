@@ -110,6 +110,43 @@ func TestRepositoryScriptsOrderUpdateDeleteAndConstraints(t *testing.T) {
 	}
 }
 
+func TestRepositoryLocalPathAndAtomicBindingReplacement(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "workspace-bindings")
+	repository := &models.Repository{ID: "repository-bindings", WorkspaceID: "workspace-bindings", Name: "Before", LocalPath: "/tmp/repository-bindings"}
+	bindings := []models.RepositorySecretBinding{{Key: "TOKEN", SecretID: "secret-one"}, {Key: "SSH_KEY", SecretID: "secret-two"}}
+	if err := repo.CreateRepositoryWithSecretBindings(ctx, repository, bindings); err != nil {
+		t.Fatalf("CreateRepositoryWithSecretBindings: %v", err)
+	}
+	got, err := repo.GetRepositoryByLocalPath(ctx, "workspace-bindings", "/tmp/repository-bindings")
+	if err != nil || got == nil || got.ID != repository.ID || len(got.SecretBindings) != 2 {
+		t.Fatalf("GetRepositoryByLocalPath = %+v, %v", got, err)
+	}
+	missing, err := repo.GetRepositoryByLocalPath(ctx, "workspace-bindings", "")
+	if err != nil || missing != nil {
+		t.Fatalf("GetRepositoryByLocalPath(empty) = %+v, %v", missing, err)
+	}
+	repository.Name = "After"
+	replacement := []models.RepositorySecretBinding{{Key: "TOKEN", SecretID: "secret-three"}}
+	if err := repo.UpdateRepositoryWithSecretBindings(ctx, repository, replacement); err != nil {
+		t.Fatalf("UpdateRepositoryWithSecretBindings: %v", err)
+	}
+	got, err = repo.GetRepository(ctx, repository.ID)
+	if err != nil || got.Name != "After" || len(got.SecretBindings) != 1 || got.SecretBindings[0].SecretID != "secret-three" {
+		t.Fatalf("updated repository = %+v, %v", got, err)
+	}
+	duplicateKeys := []models.RepositorySecretBinding{{Key: "DUP", SecretID: "one"}, {Key: "DUP", SecretID: "two"}}
+	repository.Name = "Must Roll Back"
+	if err := repo.UpdateRepositoryWithSecretBindings(ctx, repository, duplicateKeys); err == nil {
+		t.Fatal("duplicate binding keys were accepted")
+	}
+	got, err = repo.GetRepository(ctx, repository.ID)
+	if err != nil || got.Name != "After" || len(got.SecretBindings) != 1 || got.SecretBindings[0].SecretID != "secret-three" {
+		t.Fatalf("failed binding replacement was not atomic: %+v, %v", got, err)
+	}
+}
+
 func repositoryScriptIDs(scripts []*models.RepositoryScript) []string {
 	ids := make([]string, 0, len(scripts))
 	for _, script := range scripts {

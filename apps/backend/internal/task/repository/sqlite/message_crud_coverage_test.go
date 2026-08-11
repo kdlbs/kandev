@@ -78,6 +78,18 @@ func TestMessageCRUDPaginationSearchAndMetadataLookups(t *testing.T) {
 	if err != nil || strings.Join(messageIDs(pending), ",") != "message-a,message-b" {
 		t.Fatalf("FindMessagesByPendingID = %v, %v", messageIDs(pending), err)
 	}
+	bySessionPending, err := repo.GetMessageByPendingID(ctx, "session-message-crud", "pending-shared")
+	if err != nil || bySessionPending.ID != "message-a" {
+		t.Fatalf("GetMessageByPendingID = %+v, %v", bySessionPending, err)
+	}
+	latestPending, err := repo.FindMessageByPendingID(ctx, "pending-shared")
+	if err != nil || latestPending.ID != "message-b" {
+		t.Fatalf("FindMessageByPendingID = %+v, %v", latestPending, err)
+	}
+	pendingClarifications, err := repo.FindPendingClarificationMessagesBySessionID(ctx, "session-message-crud")
+	if err != nil || strings.Join(messageIDs(pendingClarifications), ",") != "message-a" {
+		t.Fatalf("FindPendingClarificationMessagesBySessionID = %v, %v", messageIDs(pendingClarifications), err)
+	}
 	question, err := repo.FindMessageByPendingIDAndQuestion(ctx, "session-message-crud", "pending-shared", "question-b")
 	if err != nil || question.ID != "message-b" {
 		t.Fatalf("FindMessageByPendingIDAndQuestion = %+v, %v", question, err)

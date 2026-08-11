@@ -53,6 +53,14 @@ func TestExecutorRunningCASStatusAndDeleteLifecycle(t *testing.T) {
 	if err := repo.UpdateResumeToken(ctx, "session-running", "execution-one", "new", "message-uuid"); err != nil {
 		t.Fatalf("UpdateResumeToken: %v", err)
 	}
+	wroteACP, err := repo.SetSessionACPSessionID(ctx, "session-running", "new")
+	if err != nil || !wroteACP {
+		t.Fatalf("SetSessionACPSessionID = %v, %v", wroteACP, err)
+	}
+	wroteACP, err = repo.SetSessionACPSessionID(ctx, "session-running", "new")
+	if err != nil || wroteACP {
+		t.Fatalf("idempotent SetSessionACPSessionID = %v, %v", wroteACP, err)
+	}
 	if err := repo.UpdateResumeToken(ctx, "session-running", "rotated", "bad", "bad"); !errors.Is(err, models.ErrExecutionRotated) {
 		t.Fatalf("rotated UpdateResumeToken error = %v", err)
 	}
@@ -110,5 +118,71 @@ func TestSessionStateGuardedMetadataReviewAndBatchLookup(t *testing.T) {
 	empty, err := repo.BatchGetSessionsByTaskIDs(ctx, nil)
 	if err != nil || len(empty) != 0 {
 		t.Fatalf("BatchGetSessionsByTaskIDs(nil) = %+v, %v", empty, err)
+	}
+}
+
+func TestHasActiveTaskSessionsByExecutor(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-executor-active", "session-executor-active", "turn-executor-active")
+	if _, err := repo.db.Exec(`UPDATE task_sessions SET executor_id = ?, state = ? WHERE id = ?`, "executor-active", models.TaskSessionStateRunning, "session-executor-active"); err != nil {
+		t.Fatal(err)
+	}
+	active, err := repo.HasActiveTaskSessionsByExecutor(ctx, "executor-active")
+	if err != nil || !active {
+		t.Fatalf("HasActiveTaskSessionsByExecutor = %v, %v", active, err)
+	}
+	if _, err := repo.db.Exec(`UPDATE task_sessions SET state = ? WHERE id = ?`, models.TaskSessionStateCompleted, "session-executor-active"); err != nil {
+		t.Fatal(err)
+	}
+	active, err = repo.HasActiveTaskSessionsByExecutor(ctx, "executor-active")
+	if err != nil || active {
+		t.Fatalf("HasActiveTaskSessionsByExecutor(completed) = %v, %v", active, err)
+	}
+}
+
+func TestSessionAgentSnapshotNonTerminalFilterAndEphemeralCleanup(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	for _, fixture := range []struct {
+		taskID, sessionID string
+		ephemeral         bool
+		state             models.TaskSessionState
+	}{
+		{"task-agent-live", "session-agent-live", false, models.TaskSessionStateRunning},
+		{"task-agent-done", "session-agent-done", false, models.TaskSessionStateCompleted},
+		{"task-agent-ephemeral", "session-agent-ephemeral", true, models.TaskSessionStateCreated},
+	} {
+		seedForMsgTest(t, repo, fixture.taskID, fixture.sessionID, "turn-"+fixture.sessionID)
+		if _, err := repo.db.Exec(`UPDATE tasks SET is_ephemeral = ? WHERE id = ?`, fixture.ephemeral, fixture.taskID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repo.db.Exec(`UPDATE task_sessions SET agent_profile_id = ?, state = ? WHERE id = ?`, "agent-profile", fixture.state, fixture.sessionID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := repo.UpdateTaskSessionAgentProfileSnapshot(ctx, "session-agent-live", map[string]any{"model": "gpt-test", "nested": map[string]any{"enabled": true}}); err != nil {
+		t.Fatalf("UpdateTaskSessionAgentProfileSnapshot: %v", err)
+	}
+	if err := repo.UpdateTaskSessionAgentProfileSnapshot(ctx, "missing", nil); !errors.Is(err, models.ErrTaskSessionNotFound) {
+		t.Fatalf("missing profile snapshot error = %v", err)
+	}
+	live, err := repo.ListNonTerminalSessionsByAgentInstance(ctx, "agent-profile")
+	if err != nil || len(live) != 2 {
+		t.Fatalf("ListNonTerminalSessionsByAgentInstance = %d, %v", len(live), err)
+	}
+	empty, err := repo.ListNonTerminalSessionsByAgentInstance(ctx, "")
+	if err != nil || empty != nil {
+		t.Fatalf("ListNonTerminalSessionsByAgentInstance(empty) = %+v, %v", empty, err)
+	}
+	deleted, err := repo.DeleteEphemeralTasksByAgentProfile(ctx, "agent-profile")
+	if err != nil || deleted != 1 {
+		t.Fatalf("DeleteEphemeralTasksByAgentProfile = %d, %v", deleted, err)
+	}
+	if _, err := repo.GetTask(ctx, "task-agent-ephemeral"); err == nil {
+		t.Fatal("ephemeral task remains after profile cleanup")
+	}
+	if _, err := repo.GetTask(ctx, "task-agent-live"); err != nil {
+		t.Fatalf("non-ephemeral task removed: %v", err)
 	}
 }
