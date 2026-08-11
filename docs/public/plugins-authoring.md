@@ -50,7 +50,10 @@ subprocess. On disable or uninstall, the host calls destroy when present and
 bulk-revokes registrations, styles, routes, handlers, and navigation. Reloads and
 updates are generation-safe: a slow or failed initialization is not treated as a
 definitive revocation, while a successfully ready generation can remove panels it
-no longer registers.
+no longer registers. Each attempted generation owns its requests, subscriptions,
+modals, task-link dialogs, toasts, and review surfaces. Timeout, failure, reload,
+disable, or uninstall aborts and cleans those resources before calling `destroy`
+exactly once; late callbacks from an expired generation are fenced from host state.
 
 ## Package and data layout
 
@@ -197,7 +200,7 @@ bookkeeping is host-internal; plugins do not call lifecycle methods.
 | host.store | Curated Zustand { getState, setState, subscribe } for the live app store | Active ui.bundle | Unsubscribe in destroy; setState mutates the whole SPA and is not a plugin database | const stop = host.store.subscribe(render) |
 | host.api.fetch / baseUrl | fetch(path, init?) is scoped to /api/plugins/<id>/...; baseUrl is the backend origin for split-origin deployments | Active ui.bundle; backend path must be a declared webhook when relayed | Abort/ignore requests after destroy; do not assume a webhook authenticates callers | host.api.fetch("webhooks/inbound", { method: "POST" }) |
 | host.api.invokeAction | Authenticated call to a declared action with host-verified workspace/task/session/repository selectors and bounded untrusted body | Matching manifest `actions[]` key/scope | Browser abort cancels the bounded plugin RPC; selectors are verified per call | host.api.invokeAction("reviews.get", { taskId }, { signal }) |
-| host.storage | Authenticated, per-user key/value storage: get(scope, scopeId, key)/set(scope, scopeId, key, value, options?)/delete(scope, scopeId, key)/list(scope, scopeId) plus subscribe(filter, handler); no plugin backend required | capabilities.user_state: true | set/delete accept an optional writerId (appended to the host's per-tab id, not a replacement) for echo suppression; list returns every entry under the scope pair, unpaginated | host.storage.set("task", taskId, "note", value, { writerId: panelId }) |
+| host.storage | Authenticated, per-user key/value storage: get(scope, scopeId, key, options?)/set(scope, scopeId, key, value, options?)/delete(scope, scopeId, key, options?)/list(scope, scopeId, options?) plus subscribe(filter, handler); no plugin backend required | capabilities.user_state: true | Reads and writes accept an AbortSignal; set/delete also accept writerId (appended to the host's per-tab id, not a replacement) for echo suppression; list returns every entry under the scope pair, unpaginated | host.storage.set("task", taskId, "note", value, { writerId: panelId, signal }) |
 | host.ui | Curated host instances: Alert*, Badge, Button, Card*, Checkbox, Dialog*, DropdownMenu*, Input, Label, Pagination*, ScrollArea, Select*, Separator, Sheet*, Skeleton, Spinner, Switch, Table*, Tabs*, Textarea, Tooltip*, RichTextEditor, RichTextReadOnly, plus Combobox, PageTopbar, TaskCreateDialog | Active ui.bundle | Host owns contexts/portals; render with host React and let modal/slot cleanup run | const Button = host.ui.Button |
 | host.theme | Current "light" or "dark" theme | Active ui.bundle | Read during render; subscribe through host/app patterns if theme-sensitive | host.theme === "dark" |
 | host.navigate | Soft SPA navigation navigate(href, { replace? }) | Active ui.bundle | No registry cleanup; avoid navigating to undeclared external origins | host.navigate("/t/" + taskId) |
@@ -634,8 +637,13 @@ submenu with
 `registerReviewProvider(...)`. These registrations are revoked automatically
 when the plugin disables or uninstalls. Repository and review providers are
 exclusive by provider id; declare the id in `repository_providers` before
-registering it. Provider callbacks receive an `AbortSignal` and must cancel
+registering it. Provider IDs must already be canonical lowercase identifiers;
+the manifest and runtime registry reject case variants instead of treating them
+as separate owners. Provider callbacks receive an `AbortSignal` and must cancel
 fetches rather than publishing results after their host surface has gone away.
+Kandev overwrites `RepositoryInspection.providerId` with the owning registration
+ID for both listing and URL inspection, so result data cannot claim another
+provider's namespace.
 
 A code-host review provider may publish normalized task chrome on each snapshot:
 
@@ -674,9 +682,10 @@ interface ReviewItemSummary {
 
 Kandev automatically renders `taskStatus` in the same task-topbar button,
 composer CI chip, desktop hover popover, and mobile drawer used by first-party
-code hosts. It refreshes through the registered provider on mount/open and every
-90 seconds. Do not register `chat-top-bar`/composer lookalikes or run another
-status poller in the plugin.
+code hosts. A rendered linked-task row acquires a deduplicated initial provider
+refresh, so its semantic icon color updates before hover; hover/focus can refresh
+again. Active topbar/composer status refreshes every 90 seconds. Do not register
+`chat-top-bar`/composer lookalikes or run another status poller in the plugin.
 
 If persisted repositories from your provider should populate Kandev's native task
 branch picker, also declare a workspace-scoped `repositories.branches` action. Kandev
@@ -913,7 +922,7 @@ interface PluginTaskLinkDialogOptions {
   inputTestId?: string;
   errorTestId?: string;
   submitTestId?: string;
-  onSubmit(reference: string): Promise<void>;
+  onSubmit(reference: string, signal: AbortSignal): Promise<void>;
 }
 
 interface PluginModalHandle {
@@ -955,6 +964,12 @@ head branch from its session worktree and the plugin uses `VerifiedActionContext
 Never send or trust a browser body `source` branch. Set `supportsDraft: false` when the
 provider cannot create drafts. Do not
 add a second plugin-owned create button or send provider creation through agentctl.
+Return `{ url, provider?, output?, linked?, associationError? }`. When the remote change
+request exists but task association failed, return `linked: false` plus a safe
+`associationError`; Kandev warns the user to retry only the **Link** action and never
+offers to repeat remote creation. Respect the supplied `AbortSignal`: cancellation
+stops host feedback, but it cannot make an already-created remote change request safe
+to create again.
 An open registered review participates in the same native action eligibility, so the
 primary action stops offering Create PR once that change request is linked.
 
@@ -963,11 +978,13 @@ trio plus `unlink`. Kandev then owns sidebar/Kanban/list PR indicators and the s
 desktop/mobile unlink control. `unlink` removes only the selected task association and
 must not delete the remote change request. After it resolves, Kandev refreshes both the
 task review snapshot and the workspace association snapshot. On desktop, hovering or
-keyboard-focusing an association indicator lazily refreshes the matching task review and
-renders the same structured pull-request summary used by first-party providers. Publish
-`ReviewItemSummary.taskStatus` to supply state, review, and CI rows; do not poll every
-sidebar task on mount. Mobile exposes the same review data through the native Status and
-Review surfaces because it has no hover interaction.
+keyboard-focusing an association indicator refreshes the matching task review and renders
+the same structured pull-request summary used by first-party providers. The host also
+leases one initial refresh for each rendered linked task, deduplicated with any topbar or
+panel consumer, so status color does not depend on first opening the popover. Publish
+`ReviewItemSummary.taskStatus` to supply state, review, and CI rows; do not add a plugin
+poller. Mobile exposes the same review data through the native Status and Review surfaces
+because it has no hover interaction.
 
 Registered review panels use `host.ui.ChangeRequestDetail`, the same detail
 component consumed by GitHub. Supply provider-neutral identity, state, branches,

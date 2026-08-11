@@ -23,6 +23,8 @@ import type { RepositoryInspection } from "@/lib/plugins/types";
 afterEach(() => {
   cleanup();
   pluginRegistry.unregisterPlugin(PROVIDER_PLUGIN_ID);
+  pluginRegistry.unregisterPlugin("test-coarse-provider");
+  pluginRegistry.unregisterPlugin("test-exact-provider");
   fetchRepoBranchesMock.mockReset();
   listProjectBranchesMock.mockReset();
   listAzureDevOpsBranchesMock.mockReset();
@@ -137,6 +139,47 @@ describe("useBranchesByURL built-in provider routing", () => {
 });
 
 describe("useBranchesByURL registered provider routing", () => {
+  it("lists branches from the one provider whose structured inspection succeeds", async () => {
+    const url = "https://code.example.test/projects/PLATFORM/repos/web";
+    const exactInspection: RepositoryInspection = {
+      providerId: "exact",
+      providerHost: "https://code.example.test",
+      ownerOrProject: "PLATFORM",
+      repositoryId: "web-42",
+      repositoryName: "web",
+      cloneUrl: "https://code.example.test/scm/PLATFORM/web.git",
+    };
+    const coarseListBranches = vi.fn().mockResolvedValue([{ name: "wrong" }]);
+    const exactListBranches = vi.fn().mockResolvedValue([{ name: "trunk" }]);
+    pluginRegistry.forPlugin("test-coarse-provider").registerRepositoryProvider({
+      id: "coarse",
+      label: "Coarse",
+      listRepositories: async () => [],
+      matchesURL: () => true,
+      inspectURL: async () => null,
+      listBranches: coarseListBranches,
+    });
+    pluginRegistry.forPlugin("test-exact-provider").registerRepositoryProvider({
+      id: "exact",
+      label: "Exact",
+      listRepositories: async () => [],
+      matchesURL: () => true,
+      inspectURL: async () => exactInspection,
+      listBranches: exactListBranches,
+    });
+    const { result } = renderHook(() => useBranchesByURL(WORKSPACE_ID));
+
+    act(() => result.current.ensure(url));
+
+    await waitFor(() =>
+      expect(result.current.branches(url)).toEqual([{ name: "trunk", type: "remote" }]),
+    );
+    expect(coarseListBranches).not.toHaveBeenCalled();
+    expect(exactListBranches).toHaveBeenCalledWith(
+      expect.objectContaining({ repository: exactInspection }),
+    );
+  });
+
   it("retries an unsupported URL after its provider registers", async () => {
     const url = "https://bitbucket.example.test/projects/PLATFORM/repos/web";
     const { result } = renderHook(() => useBranchesByURL(WORKSPACE_ID));
@@ -169,7 +212,9 @@ describe("useBranchesByURL registered provider routing", () => {
     );
     expect(listBranches).toHaveBeenCalledOnce();
   });
+});
 
+describe("useBranchesByURL registered provider URL forms", () => {
   it("uses a registered provider descriptor for a Data Center context path", async () => {
     const url =
       "https://bitbucket.example.test/bitbucket/projects/PLATFORM/repos/web/pull-requests/42";

@@ -177,6 +177,26 @@ export interface RepositoryInspection {
   };
 }
 
+/** Stable read-only subset of a repository persisted by the Kandev host. */
+export interface PluginHostRepository {
+  id: string;
+  workspace_id: string;
+  name: string;
+  provider: string;
+  source_type?: string;
+  provider_repo_id?: string;
+  provider_host?: string;
+  provider_owner?: string;
+  provider_name?: string;
+  remote_url?: string;
+  default_branch?: string;
+}
+
+/** Provider-neutral branch descriptor consumed by Kandev's branch picker. */
+export interface RepositoryProviderBranch {
+  name: string;
+}
+
 /** Host context passed to a registered provider after the checkout branch is pushed. */
 export interface RepositoryChangeRequestCreateContext {
   workspaceId: string;
@@ -185,7 +205,7 @@ export interface RepositoryChangeRequestCreateContext {
   sessionId: string;
   repositoryId: string;
   /** Persisted host repository; provider callbacks must not treat browser fields as authority. */
-  repository: unknown;
+  repository: PluginHostRepository;
   title: string;
   body: string;
   baseBranch?: string;
@@ -198,6 +218,10 @@ export interface RepositoryChangeRequestCreateResult {
   url: string;
   provider?: string;
   output?: string;
+  /** False means the remote change request exists but task association failed. */
+  linked?: boolean;
+  /** Safe, user-facing association failure detail. Creation must not be retried. */
+  associationError?: string;
 }
 
 /** Repository-provider functions receive a host-managed cancellation signal. */
@@ -205,13 +229,16 @@ export interface RepositoryProviderRegistration {
   id: string;
   label: string;
   icon?: string;
-  listRepositories(context: { workspaceId: string; signal: AbortSignal }): Promise<unknown[]>;
+  listRepositories(context: {
+    workspaceId: string;
+    signal: AbortSignal;
+  }): Promise<RepositoryInspection[]>;
   matchesURL(url: string): boolean;
   listBranches(context: {
     workspaceId: string;
-    repository: unknown;
+    repository: RepositoryInspection;
     signal: AbortSignal;
-  }): Promise<unknown[]>;
+  }): Promise<RepositoryProviderBranch[]>;
   inspectURL(context: {
     workspaceId: string;
     url: string;
@@ -229,7 +256,7 @@ export interface RepositoryProviderRegistration {
 export interface PluginTaskActionContext {
   workspaceId: string;
   taskId: string;
-  repositories: readonly unknown[];
+  repositories: readonly PluginHostRepository[];
   pathname: string;
   presentation: "desktop" | "mobile";
 }
@@ -292,7 +319,7 @@ export interface ReviewItemSummary {
   taskStatus?: ReviewTaskStatus;
 }
 
-/** Lightweight workspace link used by task lists without fetching every review. */
+/** Lightweight workspace link; rendered linked rows acquire a shared review-summary refresh. */
 export interface ReviewTaskAssociation {
   providerId: string;
   taskId: string;
@@ -447,6 +474,8 @@ export interface PluginStorageEntry {
 
 /** Options accepted by `host.storage.set`/`delete`. */
 export interface PluginStorageSetOptions {
+  /** Cancels the request when the owning surface or plugin generation ends. */
+  signal?: AbortSignal;
   /**
    * Optimistic-concurrency guard (approach H1): the `updatedAt` the caller
    * last read. The write is rejected (the returned promise rejects with a
@@ -485,6 +514,7 @@ export interface PluginStorageApi {
     scope: PluginStorageScope,
     scopeId: string,
     key: string,
+    options?: { signal?: AbortSignal },
   ): Promise<PluginStorageEntry | undefined>;
   set(
     scope: PluginStorageScope,
@@ -497,10 +527,14 @@ export interface PluginStorageApi {
     scope: PluginStorageScope,
     scopeId: string,
     key: string,
-    options?: Pick<PluginStorageSetOptions, "writerId">,
+    options?: Pick<PluginStorageSetOptions, "writerId" | "signal">,
   ): Promise<void>;
   /** Every entry under (scope, scopeId), ordered by key. Not paginated. */
-  list(scope: PluginStorageScope, scopeId: string): Promise<PluginStorageEntry[]>;
+  list(
+    scope: PluginStorageScope,
+    scopeId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<PluginStorageEntry[]>;
   /**
    * Subscribes to live updates for this plugin's own storage made from
    * another tab, device, or surface (approach F1) — e.g. the kanban `Edit`
@@ -576,7 +610,7 @@ export interface PluginTaskLinkDialogOptions {
   inputTestId?: string;
   errorTestId?: string;
   submitTestId?: string;
-  onSubmit(reference: string): Promise<void>;
+  onSubmit(reference: string, signal: AbortSignal): Promise<void>;
 }
 
 type PluginTaskReviewBaseOptions = {
@@ -691,6 +725,8 @@ export type PluginToastApi = {
 export interface PluginUtilsApi {
   /** The host's `clsx` + `tailwind-merge` class combiner. */
   cn(...inputs: unknown[]): string;
+  /** Non-security UUID with a fallback for supported insecure HTTP origins. */
+  generateUUID(): string;
   /**
    * Locale-aware relative time ("3 hours ago", "in 2 days", "yesterday") via
    * `Intl.RelativeTimeFormat` in the user's active locale. Returns "" for

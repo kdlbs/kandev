@@ -67,7 +67,7 @@ export function TaskPluginLinkMenu({
   closeMenu: () => void;
   linkActions: ReturnType<typeof selectTaskLinkActions>;
 }) {
-  const pluginLinkActions = useTaskPluginLinkActions(task.id, task.repositories ?? []);
+  const pluginLinkActions = useTaskPluginLinkActions(task.id, task.repositoryLinks ?? []);
   return (
     <TaskLinkMenu
       disabled={disabled}

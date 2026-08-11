@@ -116,6 +116,7 @@ const CORE_INTEGRATION_SETTINGS_IDS = new Set([
   "slack",
 ]);
 const INTEGRATION_SETTINGS_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const REPOSITORY_PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
 const CORE_REPOSITORY_PROVIDER_IDS = new Set(["github", "gitlab", "azure_devops"]);
 
 /** Task panel registration plus the owning pluginId — what `getTaskPanels()` returns. */
@@ -594,6 +595,11 @@ class PluginRegistryStore {
   }
 
   private claimProvider(pluginId: string, providerId: string): void {
+    if (!REPOSITORY_PROVIDER_ID_PATTERN.test(providerId)) {
+      throw new Error(
+        `[plugins] provider "${providerId}" must be a canonical lowercase identifier`,
+      );
+    }
     if (CORE_REPOSITORY_PROVIDER_IDS.has(providerId.trim().toLowerCase())) {
       throw new Error(`[plugins] provider "${providerId}" is reserved by the host`);
     }

@@ -6,6 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import {
   refreshReviewProvider,
+  useReviewProviderRefreshes,
   useReviewProviderUpdates,
 } from "@/components/task/review-panel-provider";
 import {
@@ -168,6 +169,7 @@ export function RegisteredChangeRequestTaskIcon({ taskId }: { taskId: string }) 
     () => Array.from(new Set(associations.map(({ provider }) => provider))),
     [associations],
   );
+  useReviewProviderRefreshes(taskId, providers);
   const reviewVersion = useReviewProviderUpdates(taskId, providers);
   const matchingReviews = useMemo(() => {
     const keysByProvider = new Map<string, Set<string>>();

@@ -1,4 +1,8 @@
-import type { RepositoryProviderRegistration, ReviewProviderRegistration } from "./types";
+import type {
+  RepositoryInspection,
+  RepositoryProviderRegistration,
+  ReviewProviderRegistration,
+} from "./types";
 import { normalizeReviewAssociations, normalizeReviewItems } from "./registry-normalization";
 
 type RunAbortable = <T>(
@@ -15,6 +19,8 @@ export function wrapRepositoryProviderLifecycle(
     listRepositories: ({ workspaceId, signal }) =>
       runAbortable(signal, (lifecycleSignal) =>
         provider.listRepositories({ workspaceId, signal: lifecycleSignal }),
+      ).then((repositories) =>
+        repositories.map((repository) => bindRepositoryProvider(provider.id, repository)),
       ),
     listBranches: ({ workspaceId, repository, signal }) =>
       runAbortable(signal, (lifecycleSignal) =>
@@ -23,7 +29,7 @@ export function wrapRepositoryProviderLifecycle(
     inspectURL: ({ workspaceId, url, signal }) =>
       runAbortable(signal, (lifecycleSignal) =>
         provider.inspectURL({ workspaceId, url, signal: lifecycleSignal }),
-      ),
+      ).then((repository) => (repository ? bindRepositoryProvider(provider.id, repository) : null)),
   };
   if (provider.createChangeRequest) {
     const createChangeRequest = provider.createChangeRequest;
@@ -33,6 +39,14 @@ export function wrapRepositoryProviderLifecycle(
       );
   }
   return wrapped;
+}
+
+/** Provider identity is registration-owned, never trusted from plugin result data. */
+function bindRepositoryProvider(
+  providerId: string,
+  repository: RepositoryInspection,
+): RepositoryInspection {
+  return { ...repository, providerId };
 }
 
 export function wrapReviewProviderLifecycle(

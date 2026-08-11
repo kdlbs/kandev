@@ -638,3 +638,9 @@ message DeletePluginOwnedTaskTreeRequest {
 message DeletePluginOwnedTaskTreeResponse {
   repeated string deleted_task_ids = 1;
 }
+// Attached to a non-OK DeletePluginOwnedTaskTree gRPC status when one or more
+// descendants were already deleted. Callers must reconcile these ids before
+// retrying the remaining idempotent cleanup.
+message DeletePluginOwnedTaskTreeProgress {
+  repeated string deleted_task_ids = 1;
+}

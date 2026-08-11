@@ -8,7 +8,6 @@ const APP_STATUS_LEFT_SLOT = "app-status-bar-left";
 const PRIMARY_PLUGIN_ID = "plugin-a";
 const SECONDARY_PLUGIN_ID = "plugin-b";
 const SOURCE_CONTROL_PROVIDER_ID = "source-control";
-const WORKSPACE_ID = "workspace-a";
 function cleanup(...pluginIds: string[]) {
   pluginIds.forEach((id) => pluginRegistry.unregisterPlugin(id));
 }
@@ -538,138 +537,13 @@ describe("pluginRegistry — repository provider contracts", () => {
         .registerRepositoryProvider(repositoryProvider("github")),
     ).toThrow('provider "github" is reserved by the host');
   });
-});
 
-describe("pluginRegistry — repository provider lifecycle", () => {
-  afterEach(cleanupProviderContracts);
-
-  it("aborts in-flight repository work when its owner unloads", async () => {
-    const aborted = vi.fn();
-    let markStarted: () => void;
-    const started = new Promise<void>((resolve) => {
-      markStarted = resolve;
-    });
-    const provider = repositoryProvider(SOURCE_CONTROL_PROVIDER_ID, {
-      listRepositories: ({ signal }) =>
-        new Promise((_, reject) => {
-          markStarted();
-          signal.addEventListener(
-            "abort",
-            () => {
-              aborted();
-              reject(new Error("provider request aborted"));
-            },
-            { once: true },
-          );
-        }),
-    });
-    pluginRegistry.forPlugin(PRIMARY_PLUGIN_ID).registerRepositoryProvider(provider);
-
-    const request = pluginRegistry
-      .getRepositoryProvider(SOURCE_CONTROL_PROVIDER_ID)
-      ?.listRepositories({ workspaceId: WORKSPACE_ID, signal: new AbortController().signal });
-    await started;
-    pluginRegistry.unregisterPlugin(PRIMARY_PLUGIN_ID);
-
-    await expect(request).rejects.toThrow("provider request aborted");
-    expect(aborted).toHaveBeenCalledOnce();
-  });
-
-  it("keeps re-enabled provider work tracked after an older request settles", async () => {
-    let rejectFirst!: (error: Error) => void;
-    let markFirstStarted!: () => void;
-    const firstStarted = new Promise<void>((resolve) => {
-      markFirstStarted = resolve;
-    });
-    const first = repositoryProvider(SOURCE_CONTROL_PROVIDER_ID, {
-      listRepositories: () =>
-        new Promise((_, reject) => {
-          rejectFirst = reject;
-          markFirstStarted();
-        }),
-    });
-    pluginRegistry.forPlugin(PRIMARY_PLUGIN_ID).registerRepositoryProvider(first);
-    const firstRequest = pluginRegistry
-      .getRepositoryProvider(SOURCE_CONTROL_PROVIDER_ID)!
-      .listRepositories({ workspaceId: WORKSPACE_ID, signal: new AbortController().signal });
-    await firstStarted;
-
-    pluginRegistry.unregisterPlugin(PRIMARY_PLUGIN_ID);
-    const secondAborted = vi.fn();
-    let markSecondStarted!: () => void;
-    const secondStarted = new Promise<void>((resolve) => {
-      markSecondStarted = resolve;
-    });
-    const second = repositoryProvider(SOURCE_CONTROL_PROVIDER_ID, {
-      listRepositories: ({ signal }) =>
-        new Promise((_, reject) => {
-          markSecondStarted();
-          signal.addEventListener(
-            "abort",
-            () => {
-              secondAborted();
-              reject(new Error("second provider request aborted"));
-            },
-            { once: true },
-          );
-        }),
-    });
-    pluginRegistry.forPlugin(PRIMARY_PLUGIN_ID).registerRepositoryProvider(second);
-    const secondRequest = pluginRegistry
-      .getRepositoryProvider(SOURCE_CONTROL_PROVIDER_ID)!
-      .listRepositories({ workspaceId: WORKSPACE_ID, signal: new AbortController().signal });
-    await secondStarted;
-    rejectFirst(new Error("first provider request stopped"));
-    await expect(firstRequest).rejects.toThrow();
-
-    pluginRegistry.unregisterPlugin(PRIMARY_PLUGIN_ID);
-
-    await expect(secondRequest).rejects.toThrow("second provider request aborted");
-    expect(secondAborted).toHaveBeenCalledOnce();
-  });
-});
-
-describe("pluginRegistry — repository change-request lifecycle", () => {
-  afterEach(cleanupProviderContracts);
-
-  it("aborts provider change-request creation when its owner unloads", async () => {
-    let markStarted!: () => void;
-    const started = new Promise<void>((resolve) => (markStarted = resolve));
-    const aborted = vi.fn();
-    pluginRegistry.forPlugin(PRIMARY_PLUGIN_ID).registerRepositoryProvider(
-      repositoryProvider(SOURCE_CONTROL_PROVIDER_ID, {
-        createChangeRequest: ({ signal }) =>
-          new Promise((_, reject) => {
-            markStarted();
-            signal.addEventListener(
-              "abort",
-              () => {
-                aborted();
-                reject(new Error("create aborted"));
-              },
-              { once: true },
-            );
-          }),
-      }),
-    );
-    const provider = pluginRegistry.getRepositoryProvider(SOURCE_CONTROL_PROVIDER_ID)!;
-    const request = provider.createChangeRequest!({
-      workspaceId: WORKSPACE_ID,
-      taskId: "task-a",
-      sessionId: "session-a",
-      repositoryId: "repo-a",
-      repository: {},
-      title: "Title",
-      body: "",
-      draft: false,
-      signal: new AbortController().signal,
-    });
-    await started;
-
-    pluginRegistry.unregisterPlugin(PRIMARY_PLUGIN_ID);
-
-    await expect(request).rejects.toThrow("create aborted");
-    expect(aborted).toHaveBeenCalledOnce();
+  it("rejects non-canonical provider IDs", () => {
+    expect(() =>
+      pluginRegistry
+        .forPlugin(PRIMARY_PLUGIN_ID)
+        .registerRepositoryProvider(repositoryProvider("Bitbucket")),
+    ).toThrow('provider "Bitbucket" must be a canonical lowercase identifier');
   });
 });
 

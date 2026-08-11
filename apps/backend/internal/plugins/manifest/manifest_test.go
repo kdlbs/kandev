@@ -216,6 +216,19 @@ repository_providers: [Bitbucket, bitbucket]
 	}
 }
 
+func TestValidate_RejectsNonCanonicalRepositoryProviderID(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+repository_providers: [Bitbucket]
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "lowercase") {
+		t.Fatalf("Validate() error = %v, want canonical lowercase provider rejection", err)
+	}
+}
+
 func TestValidate_RejectsRepositoryProviderWithSurroundingWhitespace(t *testing.T) {
 	m, err := Parse([]byte(validManifestYAML + `
 repository_providers: [" bitbucket "]

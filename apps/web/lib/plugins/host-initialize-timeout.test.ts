@@ -43,7 +43,7 @@ function makeHostFactory(pluginId: string): PluginHostApi {
     openTaskLinkDialog: () => ({ close: () => {} }),
     openTaskReview: () => {},
     toast: NOOP_TOAST,
-    utils: { cn: () => "", formatRelativeTime: () => "" },
+    utils: { cn: () => "", generateUUID: () => "uuid", formatRelativeTime: () => "" },
     storage: {
       get: async () => undefined,
       set: async () => ({ updatedAt: "" }),
@@ -147,6 +147,116 @@ describe("loadPlugins — initialize() timeout isolation", () => {
 });
 
 describe("loadPlugins — timed-out host mutation isolation", () => {
+  it("closes UI resources opened before initialize times out", async () => {
+    const modalClose = vi.fn();
+    const taskLinkClose = vi.fn();
+    const storeUnsubscribe = vi.fn();
+    const toastDismiss = vi.fn();
+    const toast = vi.fn(() => "owned-toast") as unknown as PluginHostApi["toast"];
+    toast.dismiss = toastDismiss;
+    const importer = fakeImporterFor({
+      "/owned-ui-resources.js": (win) =>
+        (win as unknown as FakeWindow).registerKandevPlugin(PLUGIN_HANG_A_ID, {
+          initialize: (_registry: PluginRegistry, host: PluginHostApi) => {
+            host.store.subscribe(() => {});
+            host.openModal({ title: "Owned modal", content: () => null });
+            host.openTaskLinkDialog({
+              title: "Owned task link",
+              description: "Link a change request",
+              inputLabel: "URL",
+              placeholder: "https://example.test/pull-requests/1",
+              emptyError: "Required",
+              failureMessage: "Failed",
+              successMessage: "Linked",
+              onSubmit: async () => {},
+            });
+            host.toast("Owned toast");
+            return new Promise<void>(() => {});
+          },
+        }),
+    });
+    const hostFactory = (pluginId: string): PluginHostApi => ({
+      ...makeHostFactory(pluginId),
+      store: {
+        ...makeHostFactory(pluginId).store,
+        subscribe: () => storeUnsubscribe,
+      },
+      openModal: () => ({ close: modalClose }),
+      openTaskLinkDialog: () => ({ close: taskLinkClose }),
+      toast,
+    });
+
+    await loadPlugins(
+      [activePlugin({ id: PLUGIN_HANG_A_ID, bundleUrl: "/owned-ui-resources.js" })],
+      hostFactory,
+      importer,
+      window,
+      10,
+    );
+
+    expect(storeUnsubscribe).toHaveBeenCalledOnce();
+    expect(modalClose).toHaveBeenCalledOnce();
+    expect(taskLinkClose).toHaveBeenCalledOnce();
+    expect(toastDismiss).toHaveBeenCalledWith("owned-toast");
+  });
+});
+
+describe("loadPlugins — timed-out subscription isolation", () => {
+  it("revokes subscriptions and requests and calls destroy after initialize times out", async () => {
+    const themeUnsubscribe = vi.fn();
+    const storageUnsubscribe = vi.fn();
+    let requestSignal: AbortSignal | undefined;
+    const destroy = vi.fn();
+    const importer = fakeImporterFor({
+      "/owned-resources.js": (win) =>
+        (win as unknown as FakeWindow).registerKandevPlugin(PLUGIN_HANG_A_ID, {
+          initialize: (_registry: PluginRegistry, host: PluginHostApi) => {
+            host.onThemeChange(() => {});
+            host.storage.subscribe({ scope: "instance" }, () => {});
+            void host.api.fetch("/slow").catch(() => undefined);
+            return new Promise<void>(() => {});
+          },
+          destroy,
+        }),
+    });
+    const hostFactory = (pluginId: string): PluginHostApi => ({
+      ...makeHostFactory(pluginId),
+      onThemeChange: () => themeUnsubscribe,
+      api: {
+        ...makeHostFactory(pluginId).api,
+        fetch: async (_path, init) => {
+          requestSignal = init?.signal ?? undefined;
+          return await new Promise<Response>((_resolve, reject) => {
+            requestSignal?.addEventListener(
+              "abort",
+              () => reject(new DOMException("aborted", "AbortError")),
+              { once: true },
+            );
+          });
+        },
+      },
+      storage: {
+        ...makeHostFactory(pluginId).storage,
+        subscribe: () => storageUnsubscribe,
+      },
+    });
+
+    await loadPlugins(
+      [activePlugin({ id: PLUGIN_HANG_A_ID, bundleUrl: "/owned-resources.js" })],
+      hostFactory,
+      importer,
+      window,
+      10,
+    );
+
+    expect(requestSignal?.aborted).toBe(true);
+    expect(themeUnsubscribe).toHaveBeenCalledOnce();
+    expect(storageUnsubscribe).toHaveBeenCalledOnce();
+    expect(destroy).toHaveBeenCalledOnce();
+  });
+});
+
+describe("loadPlugins — late host mutation isolation", () => {
   it("fences host mutations that arrive after initialize times out", async () => {
     let finishInitialize!: () => void;
     const initializeFinished = new Promise<void>((resolve) => {
@@ -155,6 +265,9 @@ describe("loadPlugins — timed-out host mutation isolation", () => {
     const openModal = vi.fn(() => ({ close: () => {} }));
     const openTaskLinkDialog = vi.fn(() => ({ close: () => {} }));
     const navigate = vi.fn();
+    const openTaskReview = vi.fn();
+    const storageSet = vi.fn().mockResolvedValue({ updatedAt: "now" });
+    const toast = vi.fn() as unknown as PluginHostApi["toast"];
     const setState = vi.fn();
     const importer = fakeImporterFor({
       "/late-host-mutation.js": (win) =>
@@ -174,6 +287,14 @@ describe("loadPlugins — timed-out host mutation isolation", () => {
             });
             host.navigate("/late");
             host.store.setState({} as never);
+            host.openTaskReview({
+              providerId: "late",
+              reviewKey: "late-review",
+              title: "Late review",
+              presentation: "desktop",
+            });
+            host.toast("Late toast");
+            await host.storage.set("instance", "user", "late", true);
           },
         }),
     });
@@ -182,6 +303,12 @@ describe("loadPlugins — timed-out host mutation isolation", () => {
       openModal,
       openTaskLinkDialog,
       navigate,
+      openTaskReview,
+      toast,
+      storage: {
+        ...makeHostFactory(pluginId).storage,
+        set: storageSet,
+      },
       store: {
         ...makeHostFactory(pluginId).store,
         setState,
@@ -202,5 +329,8 @@ describe("loadPlugins — timed-out host mutation isolation", () => {
     expect(openTaskLinkDialog).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalled();
     expect(setState).not.toHaveBeenCalled();
+    expect(openTaskReview).not.toHaveBeenCalled();
+    expect(toast).not.toHaveBeenCalled();
+    expect(storageSet).not.toHaveBeenCalled();
   });
 });

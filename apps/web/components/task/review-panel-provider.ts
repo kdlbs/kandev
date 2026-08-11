@@ -130,6 +130,22 @@ export async function refreshReviewProvider(
   }
 }
 
+/**
+ * Hydrates registered review summaries while a host surface needs them. The
+ * shared lease keeps duplicate sidebar, topbar, and panel consumers on one
+ * provider request and aborts it when the final consumer disappears.
+ */
+export function useReviewProviderRefreshes(
+  taskId: string | null,
+  providers: PluginReviewProviderRegistration[],
+): void {
+  useEffect(() => {
+    if (!taskId || providers.length === 0) return;
+    const leases = providers.map((provider) => acquireProviderRefresh(provider, taskId));
+    return () => leases.forEach((lease) => lease.release());
+  }, [providers, taskId]);
+}
+
 function combineUnsubscribers(unsubscribers: Array<() => void>): () => void {
   return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
 }

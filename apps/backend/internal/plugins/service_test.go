@@ -339,14 +339,10 @@ func TestServiceRejectsActiveRepositoryProviderOwnerCollision(t *testing.T) {
 	}
 }
 
-func TestServiceRejectsCaseInsensitiveRepositoryProviderOwnerCollision(t *testing.T) {
+func TestServiceRejectsNoncanonicalRepositoryProviderOwner(t *testing.T) {
 	svc, _, _ := newTestService(t)
-	if _, err := svc.Install(t.Context(), testPackageWithRepositoryProvider(t, "kandev-plugin-first", "Bitbucket")); err != nil {
-		t.Fatalf("install first provider owner: %v", err)
-	}
-
-	if _, err := svc.Install(t.Context(), testPackageWithRepositoryProvider(t, "kandev-plugin-second", "bitbucket")); err == nil {
-		t.Fatal("Install() expected case-insensitive repository provider ownership collision, got nil")
+	if _, err := svc.Install(t.Context(), testPackageWithRepositoryProvider(t, "kandev-plugin-first", "Bitbucket")); err == nil {
+		t.Fatal("Install() expected non-canonical repository provider rejection, got nil")
 	}
 }
 

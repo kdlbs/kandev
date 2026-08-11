@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
+import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import { resolveChangeRequestProviderTarget } from "@/lib/plugins/change-request-creation";
 import { usePluginRegistry } from "@/lib/plugins/registry";
 import type { Repository } from "@/lib/types/http";
@@ -16,7 +17,11 @@ export function useChangeRequestProviderTarget(sessionId: string | null, reposit
     sessionId ? state.taskSessions.items[sessionId]?.task_id : state.tasks.activeTaskId,
   );
   const task = useAppStore((state) =>
-    taskId ? state.kanban.tasks.find((candidate) => candidate.id === taskId) : undefined,
+    taskId
+      ? (state.kanban.tasks.find((candidate) => candidate.id === taskId) ??
+        findTaskInSnapshots(taskId, state.kanbanMulti.snapshots) ??
+        undefined)
+      : undefined,
   );
   const workspaceId = task?.workspaceId ?? activeWorkspaceId ?? undefined;
   const repositories = useAppStore((state) =>

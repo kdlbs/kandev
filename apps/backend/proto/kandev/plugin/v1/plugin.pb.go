@@ -5487,6 +5487,53 @@ func (x *DeletePluginOwnedTaskTreeResponse) GetDeletedTaskIds() []string {
 	return nil
 }
 
+// Attached to a non-OK DeletePluginOwnedTaskTree gRPC status when one or more
+// descendants were already deleted. Callers must reconcile these ids before
+// retrying the remaining idempotent cleanup.
+type DeletePluginOwnedTaskTreeProgress struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	DeletedTaskIds []string               `protobuf:"bytes,1,rep,name=deleted_task_ids,json=deletedTaskIds,proto3" json:"deleted_task_ids,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *DeletePluginOwnedTaskTreeProgress) Reset() {
+	*x = DeletePluginOwnedTaskTreeProgress{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[90]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeletePluginOwnedTaskTreeProgress) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeletePluginOwnedTaskTreeProgress) ProtoMessage() {}
+
+func (x *DeletePluginOwnedTaskTreeProgress) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[90]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeletePluginOwnedTaskTreeProgress.ProtoReflect.Descriptor instead.
+func (*DeletePluginOwnedTaskTreeProgress) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{90}
+}
+
+func (x *DeletePluginOwnedTaskTreeProgress) GetDeletedTaskIds() []string {
+	if x != nil {
+		return x.DeletedTaskIds
+	}
+	return nil
+}
+
 var File_kandev_plugin_v1_plugin_proto protoreflect.FileDescriptor
 
 const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
@@ -5962,6 +6009,8 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\froot_task_id\x18\x01 \x01(\tR\n" +
 	"rootTaskId\"M\n" +
 	"!DeletePluginOwnedTaskTreeResponse\x12(\n" +
+	"\x10deleted_task_ids\x18\x01 \x03(\tR\x0edeletedTaskIds\"M\n" +
+	"!DeletePluginOwnedTaskTreeProgress\x12(\n" +
 	"\x10deleted_task_ids\x18\x01 \x03(\tR\x0edeletedTaskIds2\xf4\x05\n" +
 	"\x06Plugin\x12C\n" +
 	"\fDeliverEvent\x12\x17.kandev.plugin.v1.Event\x1a\x1a.kandev.plugin.v1.EventAck\x12T\n" +
@@ -6014,7 +6063,7 @@ func file_kandev_plugin_v1_plugin_proto_rawDescGZIP() []byte {
 	return file_kandev_plugin_v1_plugin_proto_rawDescData
 }
 
-var file_kandev_plugin_v1_plugin_proto_msgTypes = make([]protoimpl.MessageInfo, 93)
+var file_kandev_plugin_v1_plugin_proto_msgTypes = make([]protoimpl.MessageInfo, 94)
 var file_kandev_plugin_v1_plugin_proto_goTypes = []any{
 	(*Event)(nil),                              // 0: kandev.plugin.v1.Event
 	(*EventAck)(nil),                           // 1: kandev.plugin.v1.EventAck
@@ -6106,28 +6155,29 @@ var file_kandev_plugin_v1_plugin_proto_goTypes = []any{
 	(*PreviewPluginOwnedTaskTreeResponse)(nil), // 87: kandev.plugin.v1.PreviewPluginOwnedTaskTreeResponse
 	(*DeletePluginOwnedTaskTreeRequest)(nil),   // 88: kandev.plugin.v1.DeletePluginOwnedTaskTreeRequest
 	(*DeletePluginOwnedTaskTreeResponse)(nil),  // 89: kandev.plugin.v1.DeletePluginOwnedTaskTreeResponse
-	nil,                     // 90: kandev.plugin.v1.WebhookRequest.HeadersEntry
-	nil,                     // 91: kandev.plugin.v1.WebhookResponse.HeadersEntry
-	nil,                     // 92: kandev.plugin.v1.PluginActionResponse.HeadersEntry
-	(*structpb.Struct)(nil), // 93: google.protobuf.Struct
+	(*DeletePluginOwnedTaskTreeProgress)(nil),  // 90: kandev.plugin.v1.DeletePluginOwnedTaskTreeProgress
+	nil,                     // 91: kandev.plugin.v1.WebhookRequest.HeadersEntry
+	nil,                     // 92: kandev.plugin.v1.WebhookResponse.HeadersEntry
+	nil,                     // 93: kandev.plugin.v1.PluginActionResponse.HeadersEntry
+	(*structpb.Struct)(nil), // 94: google.protobuf.Struct
 }
 var file_kandev_plugin_v1_plugin_proto_depIdxs = []int32{
-	93, // 0: kandev.plugin.v1.Event.payload:type_name -> google.protobuf.Struct
-	90, // 1: kandev.plugin.v1.WebhookRequest.headers:type_name -> kandev.plugin.v1.WebhookRequest.HeadersEntry
-	91, // 2: kandev.plugin.v1.WebhookResponse.headers:type_name -> kandev.plugin.v1.WebhookResponse.HeadersEntry
+	94, // 0: kandev.plugin.v1.Event.payload:type_name -> google.protobuf.Struct
+	91, // 1: kandev.plugin.v1.WebhookRequest.headers:type_name -> kandev.plugin.v1.WebhookRequest.HeadersEntry
+	92, // 2: kandev.plugin.v1.WebhookResponse.headers:type_name -> kandev.plugin.v1.WebhookResponse.HeadersEntry
 	5,  // 3: kandev.plugin.v1.PluginActionRequest.context:type_name -> kandev.plugin.v1.VerifiedActionContext
-	92, // 4: kandev.plugin.v1.PluginActionResponse.headers:type_name -> kandev.plugin.v1.PluginActionResponse.HeadersEntry
+	93, // 4: kandev.plugin.v1.PluginActionResponse.headers:type_name -> kandev.plugin.v1.PluginActionResponse.HeadersEntry
 	9,  // 5: kandev.plugin.v1.SearchEntityReferencesResponse.candidates:type_name -> kandev.plugin.v1.EntityReferenceCandidate
-	93, // 6: kandev.plugin.v1.EntityReferenceCandidate.attributes:type_name -> google.protobuf.Struct
-	93, // 7: kandev.plugin.v1.AuthorizeEntityReferenceRequest.reference:type_name -> google.protobuf.Struct
-	93, // 8: kandev.plugin.v1.GetStateResponse.value:type_name -> google.protobuf.Struct
-	93, // 9: kandev.plugin.v1.SetStateRequest.value:type_name -> google.protobuf.Struct
+	94, // 6: kandev.plugin.v1.EntityReferenceCandidate.attributes:type_name -> google.protobuf.Struct
+	94, // 7: kandev.plugin.v1.AuthorizeEntityReferenceRequest.reference:type_name -> google.protobuf.Struct
+	94, // 8: kandev.plugin.v1.GetStateResponse.value:type_name -> google.protobuf.Struct
+	94, // 9: kandev.plugin.v1.SetStateRequest.value:type_name -> google.protobuf.Struct
 	24, // 10: kandev.plugin.v1.ListStateResponse.entries:type_name -> kandev.plugin.v1.StateEntry
-	93, // 11: kandev.plugin.v1.StateEntry.value:type_name -> google.protobuf.Struct
-	93, // 12: kandev.plugin.v1.GetConfigResponse.config:type_name -> google.protobuf.Struct
-	93, // 13: kandev.plugin.v1.EmitEventRequest.payload:type_name -> google.protobuf.Struct
+	94, // 11: kandev.plugin.v1.StateEntry.value:type_name -> google.protobuf.Struct
+	94, // 12: kandev.plugin.v1.GetConfigResponse.config:type_name -> google.protobuf.Struct
+	94, // 13: kandev.plugin.v1.EmitEventRequest.payload:type_name -> google.protobuf.Struct
 	40, // 14: kandev.plugin.v1.Task.repositories:type_name -> kandev.plugin.v1.TaskRepository
-	93, // 15: kandev.plugin.v1.Task.metadata:type_name -> google.protobuf.Struct
+	94, // 15: kandev.plugin.v1.Task.metadata:type_name -> google.protobuf.Struct
 	41, // 16: kandev.plugin.v1.ListTasksRequest.filter:type_name -> kandev.plugin.v1.TaskFilter
 	37, // 17: kandev.plugin.v1.ListTasksRequest.page:type_name -> kandev.plugin.v1.Page
 	39, // 18: kandev.plugin.v1.ListTasksResponse.tasks:type_name -> kandev.plugin.v1.Task
@@ -6163,7 +6213,7 @@ var file_kandev_plugin_v1_plugin_proto_depIdxs = []int32{
 	38, // 48: kandev.plugin.v1.ListMessagesResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
 	78, // 49: kandev.plugin.v1.CreateTaskRequest.repositories:type_name -> kandev.plugin.v1.PluginTaskRepository
 	80, // 50: kandev.plugin.v1.CreateTaskRequest.launch:type_name -> kandev.plugin.v1.PluginTaskLaunchOptions
-	93, // 51: kandev.plugin.v1.CreateTaskRequest.metadata:type_name -> google.protobuf.Struct
+	94, // 51: kandev.plugin.v1.CreateTaskRequest.metadata:type_name -> google.protobuf.Struct
 	79, // 52: kandev.plugin.v1.PluginTaskRepository.remote:type_name -> kandev.plugin.v1.RemoteRepositoryDescriptor
 	39, // 53: kandev.plugin.v1.CreateTaskResponse.task:type_name -> kandev.plugin.v1.Task
 	39, // 54: kandev.plugin.v1.UpdateTaskResponse.task:type_name -> kandev.plugin.v1.Task
@@ -6266,7 +6316,7 @@ func file_kandev_plugin_v1_plugin_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kandev_plugin_v1_plugin_proto_rawDesc), len(file_kandev_plugin_v1_plugin_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   93,
+			NumMessages:   94,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

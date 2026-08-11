@@ -504,6 +504,13 @@ describe("buildHostApi — host.toast / host.utils", () => {
     const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000);
     expect(host.utils.formatRelativeTime(threeHoursAgo)).toContain("3");
   });
+
+  it("exposes the host UUID fallback for plugins on insecure origins", () => {
+    const host = buildHostApi("jira", createAppStore());
+    const utils = host.utils as unknown as Record<string, unknown>;
+
+    expect(utils.generateUUID).toBeTypeOf("function");
+  });
 });
 
 describe("buildHostApi — ui", () => {

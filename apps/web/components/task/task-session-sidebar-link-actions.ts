@@ -5,8 +5,9 @@ import type { ReactNode } from "react";
 import type { KanbanState } from "@/lib/state/slices";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import { usePluginRegistry } from "@/lib/plugins/registry";
-import type { PluginTaskActionContext } from "@/lib/plugins/types";
+import type { PluginHostRepository, PluginTaskActionContext } from "@/lib/plugins/types";
 import type { PluginTaskActionRegistration } from "@/lib/plugins/registry";
+import type { Repository } from "@/lib/types/http";
 import { useAppStore } from "@/components/state-provider";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { usePathname } from "@/lib/routing/client-router";
@@ -18,6 +19,8 @@ type StoreApi = {
     kanban: { tasks: KanbanState["tasks"] };
   };
 };
+
+const EMPTY_REPOSITORIES: Repository[] = [];
 
 export type SidebarLinkTarget = {
   id: string;
@@ -85,7 +88,7 @@ export function immutablePluginTaskActionContext(
 ): PluginTaskActionContext {
   return Object.freeze({
     ...context,
-    repositories: readonlyClone(context.repositories) as readonly unknown[],
+    repositories: readonlyClone(context.repositories) as readonly PluginHostRepository[],
   });
 }
 
@@ -128,11 +131,54 @@ export function usePluginTaskLinkActions(
   }, [beforePluginRun, context, registry]);
 }
 
+function pluginHostRepository(repository: Repository): PluginHostRepository {
+  return {
+    id: repository.id,
+    workspace_id: repository.workspace_id,
+    name: repository.name,
+    provider: repository.provider,
+    source_type: repository.source_type,
+    provider_repo_id: repository.provider_repo_id,
+    ...(repository.provider_host ? { provider_host: repository.provider_host } : {}),
+    ...(repository.provider_owner ? { provider_owner: repository.provider_owner } : {}),
+    ...(repository.provider_name ? { provider_name: repository.provider_name } : {}),
+    ...(repository.remote_url ? { remote_url: repository.remote_url } : {}),
+    ...(repository.default_branch ? { default_branch: repository.default_branch } : {}),
+  };
+}
+
+export function pluginTaskRepositories(
+  workspaceRepositories: readonly Repository[],
+  repositoryLinks: readonly { repository_id: string; position?: number }[],
+): PluginHostRepository[] {
+  const byId = new Map(
+    workspaceRepositories.map((repository) => [String(repository.id), repository]),
+  );
+  return [...repositoryLinks]
+    .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+    .flatMap((link) => {
+      const repository = byId.get(link.repository_id);
+      return repository ? [pluginHostRepository(repository)] : [];
+    });
+}
+
 /** Builds the immutable action context shared by task-card and task-row menus. */
-export function useTaskPluginLinkActions(taskId: string, repositories: readonly unknown[] = []) {
+export function useTaskPluginLinkActions(
+  taskId: string,
+  repositoryLinks: readonly { repository_id: string; position?: number }[] = [],
+) {
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const workspaceRepositories = useAppStore((state) =>
+    workspaceId
+      ? (state.repositories.itemsByWorkspaceId[workspaceId] ?? EMPTY_REPOSITORIES)
+      : EMPTY_REPOSITORIES,
+  );
   const pathname = usePathname() ?? "";
   const { isMobile } = useResponsiveBreakpoint();
+  const repositories = useMemo(
+    () => pluginTaskRepositories(workspaceRepositories, repositoryLinks),
+    [repositoryLinks, workspaceRepositories],
+  );
   return usePluginTaskLinkActions(
     workspaceId
       ? {

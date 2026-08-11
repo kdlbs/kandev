@@ -49,7 +49,9 @@ describe("TaskChangeRequestLinkForm", () => {
 
     fireEvent.submit(screen.getByRole("button", { name: "Save" }).closest("form")!);
 
-    await waitFor(() => expect(props.onSubmit).toHaveBeenCalledWith(pullRequestReference));
+    await waitFor(() =>
+      expect(props.onSubmit).toHaveBeenCalledWith(pullRequestReference, expect.any(AbortSignal)),
+    );
     await waitFor(() => expect(props.onSuccess).toHaveBeenCalledTimes(1));
     expect(screen.getByText("Bitbucket pull request linked")).not.toBeNull();
   });
@@ -71,7 +73,7 @@ describe("TaskChangeRequestLinkForm", () => {
     );
   });
 
-  it("disables both footer actions while saving", async () => {
+  it("disables duplicate submission but keeps cancel available while saving", async () => {
     let resolveSubmit!: () => void;
     const pending = new Promise<void>((resolve) => {
       resolveSubmit = resolve;
@@ -87,8 +89,29 @@ describe("TaskChangeRequestLinkForm", () => {
       ((await screen.findByRole("button", { name: "Saving" })) as HTMLButtonElement).disabled,
     ).toBe(true);
     expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(
-      true,
+      false,
     );
     resolveSubmit();
+  });
+
+  it("aborts an in-flight provider mutation when cancelled", async () => {
+    let submittedSignal!: AbortSignal;
+    const onSubmit = vi.fn((_reference: string, signal: AbortSignal) => {
+      submittedSignal = signal;
+      return new Promise<void>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    });
+    const props = renderForm({ onSubmit });
+    fireEvent.change(screen.getByLabelText(pullRequestLabel), {
+      target: { value: pullRequestReference },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(submittedSignal.aborted).toBe(true);
+    expect(props.onCancel).toHaveBeenCalledOnce();
   });
 });

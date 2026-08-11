@@ -1067,6 +1067,8 @@
   "reviewTheseChangesBeforeAddingSources": "Reveja estas alterações antes de adicionar fontes. A tarefa tem de permanecer inativa até a operação terminar.",
   "reviewed": "Revistos",
   "reviewers": "Revisores",
+  "reviewsCount_one": "Revisão ({{count}})",
+  "reviewsCount_other": "Revisões ({{count}})",
   "revoke": "Revogar",
   "revokeShare": "Revogar a partilha",
   "revoking": "A revogar…",

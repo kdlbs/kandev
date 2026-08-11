@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "@kandev/ui/button";
 import { DialogFooter } from "@kandev/ui/dialog";
 import { Input } from "@kandev/ui/input";
@@ -18,10 +18,37 @@ export type TaskChangeRequestLinkFormProps = {
   errorTestId?: string;
   submitTestId?: string;
   resetKey?: unknown;
-  onSubmit(reference: string): Promise<void>;
+  onSubmit(reference: string, signal: AbortSignal): Promise<void>;
   onCancel(): void;
   onSuccess(): void;
 };
+
+function LinkFormFooter({
+  submitting,
+  submitTestId,
+  onCancel,
+}: {
+  submitting: boolean;
+  submitTestId?: string;
+  onCancel(): void;
+}) {
+  return (
+    <DialogFooter className="gap-2">
+      <Button type="button" variant="outline" className="cursor-pointer" onClick={onCancel}>
+        {t("common:cancel")}
+      </Button>
+      <Button
+        type="submit"
+        className="cursor-pointer"
+        disabled={submitting}
+        data-testid={submitTestId}
+        data-dialog-default-action
+      >
+        {submitting ? t("integrations:saving") : t("common:save")}
+      </Button>
+    </DialogFooter>
+  );
+}
 
 /**
  * Host-owned body for task change-request linking. Provider integrations own
@@ -46,10 +73,22 @@ export function TaskChangeRequestLinkForm({
   const [input, setInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const submitController = useRef<AbortController | null>(null);
+
+  useEffect(
+    () => () => {
+      submitController.current?.abort();
+      submitController.current = null;
+    },
+    [],
+  );
 
   useEffect(() => {
+    submitController.current?.abort();
+    submitController.current = null;
     setInput("");
     setError(null);
+    setSubmitting(false);
   }, [resetKey]);
 
   const submit = async () => {
@@ -58,17 +97,32 @@ export function TaskChangeRequestLinkForm({
       setError(emptyError);
       return;
     }
+    submitController.current?.abort();
+    const controller = new AbortController();
+    submitController.current = controller;
     setSubmitting(true);
     setError(null);
     try {
-      await onSubmit(reference);
+      await onSubmit(reference, controller.signal);
+      if (controller.signal.aborted) return;
       toast({ description: successMessage, variant: "success" });
       onSuccess();
     } catch (err) {
+      if (controller.signal.aborted) return;
       setError(err instanceof Error ? err.message : failureMessage);
     } finally {
-      setSubmitting(false);
+      if (submitController.current === controller) {
+        submitController.current = null;
+        if (!controller.signal.aborted) setSubmitting(false);
+      }
     }
+  };
+
+  const cancel = () => {
+    submitController.current?.abort();
+    submitController.current = null;
+    setSubmitting(false);
+    onCancel();
   };
 
   return (
@@ -96,26 +150,7 @@ export function TaskChangeRequestLinkForm({
           </p>
         )}
       </div>
-      <DialogFooter className="gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          className="cursor-pointer"
-          onClick={onCancel}
-          disabled={submitting}
-        >
-          {t("common:cancel")}
-        </Button>
-        <Button
-          type="submit"
-          className="cursor-pointer"
-          disabled={submitting}
-          data-testid={submitTestId}
-          data-dialog-default-action
-        >
-          {submitting ? t("integrations:saving") : t("common:save")}
-        </Button>
-      </DialogFooter>
+      <LinkFormFooter submitting={submitting} submitTestId={submitTestId} onCancel={cancel} />
     </form>
   );
 }

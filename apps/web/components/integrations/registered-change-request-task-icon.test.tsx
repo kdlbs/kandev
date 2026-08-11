@@ -1,7 +1,8 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { pluginRegistry } from "@/lib/plugins/registry";
+import type { ReviewItemSummary } from "@/lib/plugins/types";
 import { RegisteredChangeRequestTaskIcon } from "./registered-change-request-task-icon";
 
 const PLUGIN_ID = "task-indicator-test";
@@ -77,7 +78,7 @@ describe("RegisteredChangeRequestTaskIcon", () => {
     expect(refreshAssociations).toHaveBeenCalledOnce();
   });
 
-  it("shows the shared structured pull-request summary without eager task refresh", async () => {
+  it("eagerly hydrates linked-task status and shows the shared structured summary", async () => {
     registerProvider();
     render(
       <TooltipProvider>
@@ -86,7 +87,8 @@ describe("RegisteredChangeRequestTaskIcon", () => {
     );
     await act(async () => Promise.resolve());
 
-    expect(refreshReview).not.toHaveBeenCalled();
+    expect(refreshReview).toHaveBeenCalledOnce();
+    refreshReview.mockClear();
     fireEvent.pointerEnter(screen.getByTestId(TASK_ICON_TEST_ID), {
       pointerType: "mouse",
     });
@@ -153,5 +155,63 @@ describe("RegisteredChangeRequestTaskIcon", () => {
     await act(async () => Promise.resolve());
 
     expect(refreshAssociations).toHaveBeenCalledOnce();
+  });
+});
+
+describe("RegisteredChangeRequestTaskIcon status hydration", () => {
+  it("changes from neutral to the published provider status", async () => {
+    let publish!: () => void;
+    let snapshot: readonly ReviewItemSummary[] = [];
+    const listeners = new Set<() => void>();
+    pluginRegistry.forPlugin(PLUGIN_ID).registerReviewProvider({
+      id: "bitbucket",
+      label: "Bitbucket",
+      changeRequestNoun: "pull request",
+      order: 50,
+      getSnapshot: () => snapshot,
+      subscribe: (_taskId, listener) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      refresh: () =>
+        new Promise<void>((resolve) => {
+          publish = () => {
+            snapshot = [
+              {
+                providerId: "bitbucket",
+                reviewKey: "repo#1",
+                title: "Failing build",
+                url: "https://bitbucket.example.test/workspace/repo/pull-requests/1",
+                repositoryId: "workspace/repo",
+                state: "OPEN",
+                taskStatus: {
+                  number: 1,
+                  state: "open",
+                  pipelineState: "failure",
+                  checks: [{ id: "build", label: "Build", state: "failure" }],
+                },
+              },
+            ];
+            listeners.forEach((listener) => listener());
+            resolve();
+          };
+        }),
+      getAssociationSnapshot: () => [
+        { providerId: "bitbucket", taskId: TASK_ID, reviewKey: "repo#1" },
+      ],
+      subscribeAssociations: () => () => undefined,
+      refreshAssociations: async () => undefined,
+      ReviewPanel: () => null,
+    });
+    render(
+      <TooltipProvider>
+        <RegisteredChangeRequestTaskIcon taskId={TASK_ID} />
+      </TooltipProvider>,
+    );
+    await waitFor(() => expect(publish).toBeTypeOf("function"));
+
+    expect(screen.getByTestId(TASK_ICON_TEST_ID).className).toContain("text-muted-foreground");
+    await act(async () => publish());
+    expect(screen.getByTestId(TASK_ICON_TEST_ID).className).toContain("text-red-500");
   });
 });

@@ -3,8 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchIssueInfo, fetchPRInfo } from "@/lib/api/domains/github-api";
 import { parseGitHubRepoUrl } from "@/lib/github/parse-url";
-import { pluginRegistry, usePluginRegistry } from "@/lib/plugins/registry";
-import type { RepositoryInspection, RepositoryProviderRegistration } from "@/lib/plugins/types";
+import { usePluginRegistry } from "@/lib/plugins/registry";
+import {
+  hasRegisteredRepositoryProviderCandidate,
+  inspectRegisteredRepositoryURL,
+} from "@/lib/plugins/repository-provider-url-resolution";
+import type { RepositoryInspection } from "@/lib/plugins/types";
 
 /**
  * Per-URL PR-info loader for GitHub PR URLs. Mirrors the shape of
@@ -258,10 +262,6 @@ function runGitHubInfoRequest(args: {
     .finally(() => finalizeRequest(refs, url, request));
 }
 
-function registeredProviderForURL(url: string): RepositoryProviderRegistration | undefined {
-  return pluginRegistry.getRepositoryProviders().find((provider) => provider.matchesURL(url));
-}
-
 function providerPRInfo(inspection: RepositoryInspection | null): PRInfo | undefined {
   const pullRequest = inspection?.pullRequest;
   if (!pullRequest) return undefined;
@@ -275,29 +275,48 @@ function providerPRInfo(inspection: RepositoryInspection | null): PRInfo | undef
 
 function runRegisteredProviderInfoRequest(args: {
   workspaceId: string;
-  provider: RepositoryProviderRegistration;
   refs: Refs;
   setState: SetState;
   url: string;
   request: RequestIdentity;
   signal: AbortSignal;
+  pr: NonNullable<ReturnType<typeof parseGitHubPrUrl>> | null;
+  issue: ReturnType<typeof parseGitHubIssueUrl>;
 }): void {
-  const { workspaceId, provider, refs, setState, url, request, signal } = args;
-  provider
-    .inspectURL({ workspaceId, url, signal })
-    .then((inspection) =>
+  const { workspaceId, refs, setState, url, request, signal, pr, issue } = args;
+  let delegatedToBuiltIn = false;
+  inspectRegisteredRepositoryURL({ workspaceId, url, signal })
+    .then((match) => {
+      if (!match) {
+        if (pr || issue) {
+          delegatedToBuiltIn = true;
+          runGitHubInfoRequest({ workspaceId, refs, setState, url, request, signal, pr, issue });
+        } else {
+          handleSuccess({
+            refs,
+            setState,
+            url,
+            request,
+            value: null,
+            buildInfo: providerPRInfo,
+          });
+        }
+        return;
+      }
       handleSuccess({
         refs,
         setState,
         url,
         request,
-        value: inspection,
+        value: match.inspection,
         buildInfo: providerPRInfo,
-        inspection: inspection ?? undefined,
-      }),
-    )
+        inspection: match.inspection,
+      });
+    })
     .catch((error) => handleFailure(refs, setState, url, request, error))
-    .finally(() => finalizeRequest(refs, url, request));
+    .finally(() => {
+      if (!delegatedToBuiltIn) finalizeRequest(refs, url, request);
+    });
 }
 
 function useWorkspaceScope(workspaceId: string | null, refs: Refs, setState: SetState): void {
@@ -386,23 +405,23 @@ export function usePRInfoByURL(workspaceId: string | null): UsePRInfoByURLResult
         loadedRef.current.delete(url);
       }
       if (inFlightRef.current.has(url) || loadedRef.current.has(url)) return;
-      const registeredProvider = registeredProviderForURL(url);
-      if (registeredProvider) {
+      const pr = parseGitHubPrUrl(url);
+      const issue = pr ? null : parseGitHubIssueUrl(url);
+      if (hasRegisteredRepositoryProviderCandidate(url)) {
         const refs = refsRef.current;
         const { request: requestIdentity, signal } = initRequest(refs, setState, url);
         runRegisteredProviderInfoRequest({
           workspaceId,
-          provider: registeredProvider,
           refs,
           setState,
           url,
           request: requestIdentity,
           signal,
+          pr,
+          issue,
         });
         return;
       }
-      const pr = parseGitHubPrUrl(url);
-      const issue = pr ? null : parseGitHubIssueUrl(url);
       if (!pr && !issue) {
         // Non-PR URLs (plain repo, invalid) are recorded as "loaded with no
         // info" so subsequent ensure() calls for the same URL no-op instead

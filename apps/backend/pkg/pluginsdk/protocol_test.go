@@ -23,6 +23,7 @@ func TestProtocolDeclaresAdditivePluginAndHostMethods(t *testing.T) {
 	assertMessageOmitsFields(t, "Repository", "local_path", "setup_script", "cleanup_script", "dev_script", "copy_files")
 	assertMessageFields(t, "CreateTaskRequest", "repositories", "launch", "metadata")
 	assertMessageFields(t, "RemoteRepositoryDescriptor", "provider_id", "provider_host", "owner_or_project", "provider_repository_id", "name", "clone_url")
+	assertMessageFields(t, "DeletePluginOwnedTaskTreeProgress", "deleted_task_ids")
 }
 
 func assertServiceMethods(t *testing.T, service protoreflect.ServiceDescriptor, methods ...protoreflect.Name) {

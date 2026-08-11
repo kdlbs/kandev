@@ -17,6 +17,8 @@ import type { RepositoryInspection } from "@/lib/plugins/types";
 afterEach(() => {
   cleanup();
   pluginRegistry.unregisterPlugin("test-bitbucket-provider");
+  pluginRegistry.unregisterPlugin("test-coarse-provider");
+  pluginRegistry.unregisterPlugin("test-exact-provider");
   fetchPRInfoMock.mockReset();
   fetchIssueInfoMock.mockReset();
   vi.useRealTimers();
@@ -112,6 +114,47 @@ describe("parseGitHubIssueUrl", () => {
 });
 
 describe("usePRInfoByURL", () => {
+  it("inspects every coarse URL match and selects the one exact provider", async () => {
+    const url = "https://code.example.test/projects/PLATFORM/repos/web/pull-requests/42";
+    const coarseInspect = vi.fn().mockResolvedValue(null);
+    const exactInspect = vi.fn().mockResolvedValue({
+      providerId: "exact",
+      providerHost: "https://code.example.test",
+      ownerOrProject: "PLATFORM",
+      repositoryId: "web-42",
+      repositoryName: "web",
+      cloneUrl: "https://code.example.test/scm/PLATFORM/web.git",
+      baseBranch: "main",
+      headBranch: "feature/exact",
+      pullRequest: { number: 42, title: "Exact provider" },
+    });
+    pluginRegistry.forPlugin("test-coarse-provider").registerRepositoryProvider({
+      id: "coarse",
+      label: "Coarse",
+      listRepositories: async () => [],
+      matchesURL: () => true,
+      listBranches: async () => [],
+      inspectURL: coarseInspect,
+    });
+    pluginRegistry.forPlugin("test-exact-provider").registerRepositoryProvider({
+      id: "exact",
+      label: "Exact",
+      listRepositories: async () => [],
+      matchesURL: () => true,
+      listBranches: async () => [],
+      inspectURL: exactInspect,
+    });
+    const { result } = renderHook(() => usePRInfoByURL(WORKSPACE_ID));
+
+    act(() => result.current.ensure(url));
+
+    await waitFor(() => expect(result.current.info(url)?.prHeadBranch).toBe("feature/exact"));
+    expect(coarseInspect).toHaveBeenCalledOnce();
+    expect(exactInspect).toHaveBeenCalledOnce();
+  });
+});
+
+describe("usePRInfoByURL registered provider metadata", () => {
   it("imports pull-request metadata from a registered provider inspection", async () => {
     const url =
       "https://bitbucket.example.test/bitbucket/projects/PLATFORM/repos/web/pull-requests/42";

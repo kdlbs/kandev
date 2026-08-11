@@ -1,4 +1,5 @@
 import type { PluginRepositoryProviderRegistration } from "./registry";
+import type { PluginHostRepository } from "./types";
 
 type TaskRepositoryLink = { repository_id: string; position?: number };
 type CreationTask = {
@@ -8,19 +9,15 @@ type CreationTask = {
   repositoryId?: string | null;
   repositories?: readonly TaskRepositoryLink[];
 };
-type CreationRepository = {
-  id: string;
-  workspace_id?: string;
-  name: string;
-  provider: string;
-};
+type CreationRepository = Pick<PluginHostRepository, "id" | "name" | "provider"> &
+  Partial<Pick<PluginHostRepository, "workspace_id">>;
 
 export type ChangeRequestProviderTarget = {
   provider: PluginRepositoryProviderRegistration;
   workspaceId: string;
   taskId: string;
   repositoryId: string;
-  repository: unknown;
+  repository: PluginHostRepository;
 };
 
 function taskRepositoryLinks(task: CreationTask): readonly TaskRepositoryLink[] {
@@ -65,7 +62,10 @@ export function resolveChangeRequestProviderTarget({
     workspaceId,
     taskId: task.id,
     repositoryId: repository.id,
-    repository,
+    repository: {
+      ...repository,
+      workspace_id: repository.workspace_id ?? workspaceId,
+    },
   };
 }
 
@@ -77,6 +77,8 @@ type NativeCreateResult = {
   provider?: string;
   output?: string;
   error?: string;
+  linked?: boolean;
+  association_error?: string;
 };
 
 export async function createChangeRequestWithProvider({
@@ -89,6 +91,7 @@ export async function createChangeRequestWithProvider({
   draft,
   branchAlreadyPushed,
   sessionId,
+  signal,
 }: {
   target: ChangeRequestProviderTarget;
   push(options: { setUpstream: boolean }, repositoryScope?: string): Promise<PushResult>;
@@ -99,6 +102,7 @@ export async function createChangeRequestWithProvider({
   draft: boolean;
   branchAlreadyPushed: boolean;
   sessionId: string;
+  signal: AbortSignal;
 }): Promise<NativeCreateResult> {
   let pushOutput = "";
   if (!branchAlreadyPushed) {
@@ -124,7 +128,7 @@ export async function createChangeRequestWithProvider({
       body,
       ...(baseBranch ? { baseBranch } : {}),
       draft: target.provider.supportsDraft === false ? false : draft,
-      signal: new AbortController().signal,
+      signal,
     });
     return {
       success: true,
@@ -132,6 +136,8 @@ export async function createChangeRequestWithProvider({
       pr_url: created.url,
       provider: created.provider ?? target.provider.id,
       output: created.output ?? pushOutput,
+      ...(created.linked === undefined ? {} : { linked: created.linked }),
+      ...(created.associationError ? { association_error: created.associationError } : {}),
     };
   } catch (error) {
     return {

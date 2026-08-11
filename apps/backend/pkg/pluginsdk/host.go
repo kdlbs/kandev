@@ -229,6 +229,9 @@ type PluginOwnedTaskTreeHost interface {
 
 type PluginOwnedTaskTreeManager interface {
 	Preview(ctx context.Context, rootTaskID string) ([]Task, error)
+	// Delete removes descendants before their parent. A non-nil error may be
+	// accompanied by deleted task ids when the backing store failed part-way;
+	// callers must reconcile those ids before retrying the remaining cleanup.
 	Delete(ctx context.Context, rootTaskID string) ([]string, error)
 }
 
@@ -548,9 +551,18 @@ func (m grpcPluginOwnedTaskTreeManager) Preview(ctx context.Context, rootTaskID 
 func (m grpcPluginOwnedTaskTreeManager) Delete(ctx context.Context, rootTaskID string) ([]string, error) {
 	resp, err := m.client.DeletePluginOwnedTaskTree(ctx, &pluginv1.DeletePluginOwnedTaskTreeRequest{RootTaskId: rootTaskID})
 	if err != nil {
-		return nil, err
+		return deletedTaskIDsFromStatus(err), err
 	}
 	return resp.GetDeletedTaskIds(), nil
+}
+
+func deletedTaskIDsFromStatus(err error) []string {
+	for _, detail := range status.Convert(err).Details() {
+		if progress, ok := detail.(*pluginv1.DeletePluginOwnedTaskTreeProgress); ok {
+			return append([]string(nil), progress.GetDeletedTaskIds()...)
+		}
+	}
+	return nil
 }
 
 func (r grpcMessageReader) List(ctx context.Context, filter MessageFilter, page Page) ([]Message, *PageInfo, error) {
@@ -902,7 +914,16 @@ func (s *grpcHostServer) DeletePluginOwnedTaskTree(ctx context.Context, req *plu
 	}
 	deletedTaskIDs, err := provider.PluginOwnedTaskTrees().Delete(ctx, req.GetRootTaskId())
 	if err != nil {
-		return nil, err
+		if len(deletedTaskIDs) == 0 {
+			return nil, err
+		}
+		detailed, detailErr := status.Convert(err).WithDetails(
+			&pluginv1.DeletePluginOwnedTaskTreeProgress{DeletedTaskIds: deletedTaskIDs},
+		)
+		if detailErr != nil {
+			return nil, err
+		}
+		return nil, detailed.Err()
 	}
 	return &pluginv1.DeletePluginOwnedTaskTreeResponse{DeletedTaskIds: deletedTaskIDs}, nil
 }

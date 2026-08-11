@@ -1067,6 +1067,8 @@
   "reviewTheseChangesBeforeAddingSources": "Ŕēvĩēŵ ţĥēśē ćĥàńĝēś ƀēƒōŕē àďďĩńĝ śōũŕćēś. Ţĥē ţàśķ ḿũśţ ŕēḿàĩń ĩďĺē ũńţĩĺ ţĥē ōƥēŕàţĩōń ƒĩńĩśĥēś.",
   "reviewed": "Ŕēvĩēŵēď",
   "reviewers": "Ŕēvĩēŵēŕś",
+  "reviewsCount_one": "Ŕēvĩēŵ ({{count}})",
+  "reviewsCount_other": "Ŕēvĩēŵś ({{count}})",
   "revoke": "Ŕēvōķē",
   "revokeShare": "Ŕēvōķē śĥàŕē",
   "revoking": "Ŕēvōķĩńĝ…",

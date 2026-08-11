@@ -6,6 +6,7 @@ import {
 import type { RepositoryProviderRegistration } from "./types";
 
 const WORKSPACE_ID = "workspace-a";
+const CREATED_PR_URL = "https://bitbucket.test/pr/42";
 
 function provider(
   overrides: Partial<RepositoryProviderRegistration> = {},
@@ -110,9 +111,10 @@ describe("createChangeRequestWithProvider", () => {
     });
     const createChangeRequest = vi.fn(async () => {
       order.push("create");
-      return { url: "https://bitbucket.test/pr/42", provider: "bitbucket" };
+      return { url: CREATED_PR_URL, provider: "bitbucket" };
     });
 
+    const signal = new AbortController().signal;
     const result = await createChangeRequestWithProvider({
       target: {
         provider: provider({ createChangeRequest }),
@@ -129,6 +131,7 @@ describe("createChangeRequestWithProvider", () => {
       draft: false,
       branchAlreadyPushed: false,
       sessionId: "session-a",
+      signal,
     });
 
     expect(order).toEqual(["push", "create"]);
@@ -143,18 +146,54 @@ describe("createChangeRequestWithProvider", () => {
         body: "Body",
         baseBranch: "main",
         draft: false,
-        signal: expect.any(AbortSignal),
+        signal,
       }),
     );
     expect(result).toEqual({
       success: true,
       branch_pushed: true,
-      pr_url: "https://bitbucket.test/pr/42",
+      pr_url: CREATED_PR_URL,
       provider: "bitbucket",
       output: "pushed",
     });
   });
 
+  it("preserves successful remote creation when task association fails", async () => {
+    const createChangeRequest = vi.fn(async () => ({
+      url: CREATED_PR_URL,
+      provider: "bitbucket",
+      linked: false,
+      associationError: "Task association could not be saved",
+    }));
+
+    const result = await createChangeRequestWithProvider({
+      target: {
+        provider: provider({ createChangeRequest }),
+        workspaceId: WORKSPACE_ID,
+        taskId: "task-a",
+        repositoryId: "repo-a",
+        repository: repositories[0],
+      },
+      push: vi.fn(),
+      title: "Title",
+      body: "",
+      draft: false,
+      branchAlreadyPushed: true,
+      sessionId: "session-a",
+      signal: new AbortController().signal,
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      branch_pushed: true,
+      pr_url: CREATED_PR_URL,
+      linked: false,
+      association_error: "Task association could not be saved",
+    });
+  });
+});
+
+describe("createChangeRequestWithProvider retry behavior", () => {
   it("does not invoke provider create when push fails", async () => {
     const createChangeRequest = vi.fn();
     const result = await createChangeRequestWithProvider({
@@ -171,6 +210,7 @@ describe("createChangeRequestWithProvider", () => {
       draft: false,
       branchAlreadyPushed: false,
       sessionId: "session-a",
+      signal: new AbortController().signal,
     });
 
     expect(createChangeRequest).not.toHaveBeenCalled();
@@ -196,6 +236,7 @@ describe("createChangeRequestWithProvider", () => {
       draft: false,
       branchAlreadyPushed: true,
       sessionId: "session-a",
+      signal: new AbortController().signal,
     });
 
     expect(push).not.toHaveBeenCalled();

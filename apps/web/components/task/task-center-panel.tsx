@@ -283,10 +283,10 @@ function useTaskReview(taskId: string | null) {
 
 function reviewLabelForReviews(
   reviews: readonly { providerId: string }[],
-  t: (key: string) => string,
+  t: (key: string, options?: { count: number }) => string,
 ): string | null {
   if (reviews.length === 0) return null;
-  if (reviews.length > 1) return `Reviews (${reviews.length})`;
+  if (reviews.length > 1) return t("task:reviewsCount", { count: reviews.length });
   const providerId = reviews[0]?.providerId;
   if (providerId === "github") return t("task:pullRequest2");
   if (providerId === "gitlab") return t("task:mergeRequestLabel");

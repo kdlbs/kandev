@@ -18,6 +18,7 @@
 import { getBackendConfig } from "@/lib/config";
 import { pluginModalManager } from "./modal-manager";
 import { pluginRegistry } from "./registry";
+import { generationFencedHost, PluginLoadResources } from "./host-runtime-resources";
 import type { ActivePlugin, KandevPlugin, PluginHostApi, PluginRegistry } from "./types";
 
 /** Builds the per-plugin `PluginHostApi` for a given pluginId. */
@@ -87,6 +88,15 @@ const registeredPlugins = new Map<string, KandevPlugin>();
  */
 const loadGenerations = new Map<string, number>();
 
+type ActivePluginRuntime = {
+  generation: number;
+  plugin: KandevPlugin;
+  resources: PluginLoadResources;
+};
+
+/** Currently initialized (or initializing) runtime per plugin id. */
+const activePluginRuntimes = new Map<string, ActivePluginRuntime>();
+
 /** Claims and returns a new, strictly-increasing load generation for `id`. */
 function claimLoadGeneration(id: string): number {
   const next = (loadGenerations.get(id) ?? 0) + 1;
@@ -123,55 +133,6 @@ function generationFencedRegistry(
         : value;
   }
   return fenced as unknown as PluginRegistry;
-}
-
-/**
- * Fences host-side effects from a superseded or timed-out initializer. The
- * registry alone is not enough: delayed plugin code can otherwise still open
- * dialogs, navigate, mutate app state, or invoke authenticated actions after
- * its registrations were revoked.
- */
-function generationFencedHost(host: PluginHostApi, isCurrent: () => boolean): PluginHostApi {
-  const staleError = (): DOMException =>
-    new DOMException("Plugin load is no longer active", "AbortError");
-  const inertHandle = (): ReturnType<PluginHostApi["openModal"]> => ({ close: () => {} });
-  const setState = ((...args: unknown[]) => {
-    if (isCurrent()) {
-      (host.store.setState as unknown as (...forwarded: unknown[]) => void)(...args);
-    }
-  }) as PluginHostApi["store"]["setState"];
-  const subscribe: PluginHostApi["store"]["subscribe"] = (listener) => {
-    if (!isCurrent()) return () => {};
-    return host.store.subscribe((state, previousState) => {
-      if (isCurrent()) listener(state, previousState);
-    });
-  };
-  const fetch: PluginHostApi["api"]["fetch"] = (path, init) => {
-    if (!isCurrent()) return Promise.reject(staleError());
-    return host.api.fetch(path, init);
-  };
-  const invokeAction: PluginHostApi["api"]["invokeAction"] = (key, input, options) => {
-    if (!isCurrent()) return Promise.reject(staleError());
-    return host.api.invokeAction(key, input, options);
-  };
-
-  return {
-    ...host,
-    store: { ...host.store, setState, subscribe },
-    api: {
-      fetch,
-      invokeAction,
-      get baseUrl() {
-        return host.api.baseUrl;
-      },
-    },
-    navigate: (...args) => {
-      if (isCurrent()) host.navigate(...args);
-    },
-    openModal: (options) => (isCurrent() ? host.openModal(options) : inertHandle()),
-    openTaskLinkDialog: (options) =>
-      isCurrent() ? host.openTaskLinkDialog(options) : inertHandle(),
-  };
 }
 
 /** Defines `window.registerKandevPlugin` before any bundle loads. Idempotent. */
@@ -214,6 +175,10 @@ async function loadPlugin(
   // Claim a generation before the (awaited) import so entry order — not
   // import-resolve order — decides which load owns the registry.
   const generation = claimLoadGeneration(plugin.id);
+  // A replacement generation owns the id immediately. Abort and destroy the
+  // prior runtime before loading new code so its requests/listeners cannot run
+  // concurrently with the successor.
+  deactivatePluginRuntime(plugin.id);
   pluginRegistry.markPluginLoading(plugin.id, generation);
   let generationOpen = true;
   const isActiveGeneration = () => generationOpen && isCurrentLoad(plugin.id, generation);
@@ -225,6 +190,7 @@ async function loadPlugin(
       generationOpen = false;
       if (isCurrentLoad(plugin.id, generation)) {
         pluginRegistry.markPluginFailed(plugin.id, generation);
+        revokeFailedLoad(plugin.id, generation);
       }
       return;
     }
@@ -236,8 +202,12 @@ async function loadPlugin(
       generationOpen = false;
       return;
     }
-    const host = generationFencedHost(hostFactory(plugin.id), () =>
-      isCurrentLoad(plugin.id, generation),
+    const resources = new PluginLoadResources(plugin.id);
+    activePluginRuntimes.set(plugin.id, { generation, plugin: registered, resources });
+    const host = generationFencedHost(
+      hostFactory(plugin.id),
+      () => isCurrentLoad(plugin.id, generation),
+      resources,
     );
     // Idempotent (re)load. The nav/route/slot registry is append-only, so
     // running a plugin's initialize() a second time while its previous
@@ -298,11 +268,30 @@ async function loadPlugin(
 /** Removes a failed generation without disturbing a newer concurrent load. */
 function revokeFailedLoad(pluginId: string, generation: number): void {
   if (!isCurrentLoad(pluginId, generation)) return;
+  deactivatePluginRuntime(pluginId, generation);
+  // Fence delayed registrations from an initializer that timed out.
+  claimLoadGeneration(pluginId);
+}
+
+/** Revokes one active runtime without changing its published lifecycle state. */
+function deactivatePluginRuntime(pluginId: string, expectedGeneration?: number): void {
+  if (expectedGeneration !== undefined && !isCurrentLoad(pluginId, expectedGeneration)) return;
+  const runtime = activePluginRuntimes.get(pluginId);
+  if (runtime && expectedGeneration !== undefined && runtime.generation !== expectedGeneration) {
+    return;
+  }
+  if (runtime) {
+    activePluginRuntimes.delete(pluginId);
+    runtime.resources.revoke();
+    try {
+      runtime.plugin.destroy?.();
+    } catch (error) {
+      console.error(`[plugins] error destroying plugin "${pluginId}"`, error);
+    }
+  }
   pluginRegistry.unregisterPlugin(pluginId);
   pluginModalManager.closeAllForPlugin(pluginId);
   removeStyles(pluginId);
-  // Fence delayed registrations from an initializer that timed out.
-  claimLoadGeneration(pluginId);
 }
 
 /**
@@ -366,25 +355,16 @@ export function unloadPlugin(
   id: string,
   options?: { evictCache?: boolean; transition?: "reload" | "removed" },
 ): void {
-  const plugin = registeredPlugins.get(id);
   const generation = claimLoadGeneration(id);
   if (options?.transition === "reload") {
     pluginRegistry.markPluginLoading(id, generation);
   } else {
     pluginRegistry.markPluginRemoved(id, generation);
   }
-  try {
-    plugin?.destroy?.();
-  } catch (error) {
-    console.error(`[plugins] error destroying plugin "${id}"`, error);
-  } finally {
-    // Supersede any in-flight load so a plugin whose initialize() is still
-    // awaiting can't re-register after we've disabled/uninstalled it.
-    pluginRegistry.unregisterPlugin(id);
-    pluginModalManager.closeAllForPlugin(id);
-    removeStyles(id);
-    if (options?.evictCache) {
-      registeredPlugins.delete(id);
-    }
+  // Supersede any in-flight load so a plugin whose initialize() is still
+  // awaiting can't re-register after we've disabled/uninstalled it.
+  deactivatePluginRuntime(id);
+  if (options?.evictCache) {
+    registeredPlugins.delete(id);
   }
 }

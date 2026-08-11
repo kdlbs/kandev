@@ -39,7 +39,7 @@ function makeHostFactory(pluginId: string): PluginHostApi {
     openTaskLinkDialog: () => ({ close: () => {} }),
     openTaskReview: () => {},
     toast: NOOP_TOAST,
-    utils: { cn: () => "", formatRelativeTime: () => "" },
+    utils: { cn: () => "", generateUUID: () => "uuid", formatRelativeTime: () => "" },
     storage: {
       get: async () => undefined,
       set: async () => ({ updatedAt: "" }),

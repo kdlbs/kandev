@@ -337,12 +337,14 @@ const PLUGIN_UI: Record<string, unknown> = {
  * map). Shared rather than reimplemented per plugin: `cn` must be the host's
  * so Tailwind class merging matches the components it styles, and
  * `formatRelativeTime` must be the host's so a plugin's timestamps follow the
- * user's locale instead of the hand-rolled English-only ladders several
- * published plugins ship today.
+ * user's locale instead of hand-rolled English-only ladders. `generateUUID`
+ * keeps non-security identifiers working when secure-context crypto APIs are
+ * unavailable on a supported HTTP deployment.
  */
 const PLUGIN_UTILS = {
   cn,
   formatRelativeTime,
+  generateUUID,
 };
 
 /**
@@ -491,8 +493,10 @@ function userStatePath(scope: PluginStorageScope, scopeId: string, key?: string)
 /** Builds `host.storage` (`PluginStorageApi`), scoped to `pluginId`. */
 function buildStorageApi(pluginId: string): PluginStorageApi {
   return {
-    async get(scope, scopeId, key) {
-      const res = await fetchPluginApi(pluginId, userStatePath(scope, scopeId, key));
+    async get(scope, scopeId, key, options) {
+      const res = await fetchPluginApi(pluginId, userStatePath(scope, scopeId, key), {
+        signal: options?.signal,
+      });
       if (res.status === 404) return undefined;
       if (!res.ok) throw new Error(`plugin storage: get failed with status ${res.status}`);
       const body = (await res.json()) as { value: unknown; updatedAt: string };
@@ -507,6 +511,7 @@ function buildStorageApi(pluginId: string): PluginStorageApi {
           writerId: effectiveWriterId(options?.writerId),
           ifUnmodifiedSince: options?.ifUnmodifiedSince,
         }),
+        signal: options?.signal,
       });
       if (res.status === 409) throw new PluginStorageConflictError();
       if (!res.ok) throw new Error(`plugin storage: set failed with status ${res.status}`);
@@ -516,11 +521,16 @@ function buildStorageApi(pluginId: string): PluginStorageApi {
     async delete(scope, scopeId, key, options) {
       const writerId = effectiveWriterId(options?.writerId);
       const path = `${userStatePath(scope, scopeId, key)}?writerId=${encodeURIComponent(writerId)}`;
-      const res = await fetchPluginApi(pluginId, path, { method: "DELETE" });
+      const res = await fetchPluginApi(pluginId, path, {
+        method: "DELETE",
+        signal: options?.signal,
+      });
       if (!res.ok) throw new Error(`plugin storage: delete failed with status ${res.status}`);
     },
-    async list(scope, scopeId) {
-      const res = await fetchPluginApi(pluginId, userStatePath(scope, scopeId));
+    async list(scope, scopeId, options) {
+      const res = await fetchPluginApi(pluginId, userStatePath(scope, scopeId), {
+        signal: options?.signal,
+      });
       if (!res.ok) throw new Error(`plugin storage: list failed with status ${res.status}`);
       const body = (await res.json()) as { entries: PluginStorageEntry[] };
       return body.entries;

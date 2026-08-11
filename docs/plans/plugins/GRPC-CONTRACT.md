@@ -187,6 +187,13 @@ Notes: scope ∈ instance|workspace|task|agent (empty scope_id for instance —
 matches the state store). The plugin never passes its own id; the Host service
 instance is bound to the plugin's record at spawn time.
 
+`DeletePluginOwnedTaskTree` is partial-progress aware. A successful response
+carries every deleted task ID. If deletion stops after removing descendants,
+the non-OK status includes a `DeletePluginOwnedTaskTreeProgress` detail with
+those IDs. The Go SDK preserves them in the returned `([]string, error)` so a
+plugin can reconcile completed deletions before retrying idempotent cleanup;
+callers must not discard progress merely because the error is non-nil.
+
 ### 3a. Host data API (ADR 0043)
 
 Read/write RPCs let plugins read and write kandev's own domain data —

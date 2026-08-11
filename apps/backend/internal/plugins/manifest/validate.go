@@ -451,6 +451,13 @@ func (m *Manifest) validateRepositoryProviders() []error {
 			errs = append(errs, fmt.Errorf("repository provider %q must not contain surrounding whitespace", provider))
 			continue
 		}
+		if provider != normalized || !idPattern.MatchString(provider) {
+			errs = append(errs, fmt.Errorf(
+				"repository provider %q must be a lowercase identifier matching %s",
+				provider, idPattern.String(),
+			))
+			continue
+		}
 		if seen[normalized] {
 			errs = append(errs, fmt.Errorf("duplicate repository provider %q", provider))
 			continue

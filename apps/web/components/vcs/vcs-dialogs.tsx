@@ -22,23 +22,18 @@ import {
 } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionGit } from "@/hooks/domains/session/use-session-git";
 import { useRepoDisplayName } from "@/hooks/domains/session/use-repo-display-name";
-import {
-  getChangeRequestTerminology,
-  resolveChangeRequestTerminology,
-  useChangeRequestTerminology,
-} from "@/hooks/use-git-operations";
-import { useAppStore } from "@/components/state-provider";
+import { useChangeRequestTerminology } from "@/hooks/use-git-operations";
 import { gitOperationLabel, useGitWithFeedback } from "@/hooks/use-git-with-feedback";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
-import { useToast } from "@/components/toast-provider";
-import { openExternalLink } from "@/lib/desktop/external-links";
 import type { FileInfo } from "@/lib/state/slices";
-import { getChangeRequestFailureFeedback } from "./change-request-feedback";
 import { Trans, useTranslation } from "react-i18next";
 import { createChangeRequestWithProvider } from "@/lib/plugins/change-request-creation";
-import type { PRCreateResult } from "@/hooks/use-git-operations";
 import { useChangeRequestProviderTarget } from "@/hooks/use-change-request-provider-target";
+import {
+  useCreateChangeRequestHandler,
+  type CreateChangeRequestInput,
+} from "./use-create-change-request-handler";
 
 type VcsDialogsContextValue = {
   /** When `repo` is provided, the commit is scoped to that repo only. */
@@ -385,97 +380,6 @@ export function pickRepoLabel(
   return resolveDisplayName("") || t("integrations:repository");
 }
 
-type CreateChangeRequestInput = {
-  title: string;
-  body: string;
-  baseBranch?: string;
-  draft: boolean;
-  repositoryScope?: string;
-  branchAlreadyPushed: boolean;
-};
-
-type CreateChangeRequest = (input: CreateChangeRequestInput) => Promise<PRCreateResult>;
-
-function useCreatePRHandler({
-  ps,
-  baseBranch,
-  createPR,
-  toast,
-  defaultTerminology,
-  supportsDraft,
-}: {
-  ps: UsePRDialogReturn;
-  baseBranch: string | undefined;
-  createPR: CreateChangeRequest;
-  toast: ReturnType<typeof useToast>["toast"];
-  defaultTerminology: ReturnType<typeof getChangeRequestTerminology>;
-  supportsDraft: boolean;
-}) {
-  const { t } = useTranslation();
-  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
-  const setPendingPrUrlForTask = useAppStore((state) => state.setPendingPrUrlForTask);
-  return useCallback(async () => {
-    if (!ps.title.trim()) return;
-    ps.setOpen(false);
-    try {
-      const effectiveDraft = supportsDraft && ps.draft;
-      const result = await createPR({
-        title: ps.title.trim(),
-        body: ps.body.trim(),
-        baseBranch,
-        draft: effectiveDraft,
-        repositoryScope: ps.repo,
-        branchAlreadyPushed: ps.branchPushed,
-      });
-      if (result.success) {
-        const terms = resolveChangeRequestTerminology(result.provider, defaultTerminology);
-        const title = effectiveDraft
-          ? t("integrations:draftCreated", { shortName: terms.shortName })
-          : t("integrations:shortNameCreated", { shortName: terms.shortName });
-        toast({
-          title,
-          description:
-            result.pr_url || t("integrations:createdSuccessfully", { longName: terms.longName }),
-          variant: "success",
-        });
-        if (result.pr_url) {
-          if (activeTaskId) {
-            setPendingPrUrlForTask(activeTaskId, ps.repo || "", result.pr_url);
-          }
-          void openExternalLink(result.pr_url).catch(() => undefined);
-        }
-      } else {
-        const feedback = getChangeRequestFailureFeedback(result, defaultTerminology);
-        toast(feedback);
-        if (result.branch_pushed) {
-          ps.setBranchPushed(true);
-          ps.setOpen(true);
-          return;
-        }
-      }
-    } catch (e) {
-      toast({
-        title: t("integrations:createFailed", { shortName: defaultTerminology.shortName }),
-        description: e instanceof Error ? e.message : t("integrations:anErrorOccurred"),
-        variant: "error",
-      });
-    }
-    ps.setTitle("");
-    ps.setBody("");
-    ps.setBranchPushed(false);
-  }, [
-    ps,
-    baseBranch,
-    createPR,
-    toast,
-    defaultTerminology,
-    supportsDraft,
-    activeTaskId,
-    setPendingPrUrlForTask,
-    t,
-  ]);
-}
-
 function useVcsDialogsState(
   sessionId: string | null,
   taskTitle: string | undefined,
@@ -484,7 +388,6 @@ function useVcsDialogsState(
   const { t } = useTranslation();
   const cs = useCommitDialogState();
   const ps = usePRDialogState();
-  const { toast } = useToast();
   const gitWithFeedback = useGitWithFeedback();
   const gitStatus = useSessionGitStatus(sessionId);
   const statusByRepo = useSessionGitStatusByRepo(sessionId);
@@ -520,6 +423,7 @@ function useVcsDialogsState(
         draft: input.draft,
         branchAlreadyPushed: input.branchAlreadyPushed,
         sessionId,
+        signal: input.signal,
       });
     },
     [createBuiltInPR, push, registeredCreateTarget, sessionId],
@@ -547,11 +451,10 @@ function useVcsDialogsState(
     cs.setBody("");
     cs.setRepo(undefined);
   }, [cs, gitWithFeedback, commit, t]);
-  const handleCreatePR = useCreatePRHandler({
-    ps,
+  const handleCreatePR = useCreateChangeRequestHandler({
+    dialog: ps,
     baseBranch,
-    createPR,
-    toast,
+    createChangeRequest: createPR,
     defaultTerminology: changeRequestTerminology,
     supportsDraft,
   });

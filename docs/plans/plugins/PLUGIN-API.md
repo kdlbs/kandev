@@ -23,7 +23,9 @@ repositoryProviderIds?: string[] }`. `repositoryProviderIds` is JSON
    registry (for example `setDeclaredRepositoryProviderIds(pluginId, ids)`). The scoped
    registry then rejects `registerRepositoryProvider` or `registerReviewProvider` IDs
    outside that declared set. An omitted field preserves older-host compatibility;
-   it does not invent provider ownership.
+   it does not invent provider ownership. Provider IDs are canonical lowercase
+   identifiers: the manifest validator and frontend registry reject uppercase or
+   otherwise non-canonical variants instead of creating case-dependent ownership.
 3. Each bundle, when evaluated, calls the global:
    ```ts
    window.registerKandevPlugin(pluginId, {
@@ -39,7 +41,10 @@ repositoryProviderIds?: string[] }`. `repositoryProviderIds` is JSON
    `destroy?.()`, removes the plugin's registrations, and closes its panels.
    Each initialization attempt is transactional: failure or timeout unregisters
    its partial contributions, aborts plugin-owned work, and fences callbacks from
-   the expired generation.
+   the expired generation. The same generation owns host-created subscriptions,
+   modal and task-link handles, toasts, and review surfaces; the loader closes or
+   unsubscribes them before calling `destroy` exactly once. Requests and callbacks
+   from an expired generation cannot mutate the replacement generation.
 
 ## Global entry point
 
@@ -131,6 +136,8 @@ interface PluginStorageEntry {
 }
 
 interface PluginStorageSetOptions {
+  // Abort the request when the owning surface or plugin generation ends.
+  signal?: AbortSignal;
   // Optimistic-concurrency guard: the updatedAt the caller last read. The
   // write is rejected (the returned promise rejects with a
   // PluginStorageConflictError) if the stored row was modified after this
@@ -166,6 +173,7 @@ interface PluginStorageApi {
     scope: PluginStorageScope,
     scopeId: string,
     key: string,
+    options?: { signal?: AbortSignal },
   ): Promise<PluginStorageEntry | undefined>;
   set(
     scope: PluginStorageScope,
@@ -178,12 +186,13 @@ interface PluginStorageApi {
     scope: PluginStorageScope,
     scopeId: string,
     key: string,
-    options?: Pick<PluginStorageSetOptions, "writerId">,
+    options?: Pick<PluginStorageSetOptions, "writerId" | "signal">,
   ): Promise<void>;
   // Every entry under (scope, scopeId), ordered by key. Not paginated.
   list(
     scope: PluginStorageScope,
     scopeId: string,
+    options?: { signal?: AbortSignal },
   ): Promise<PluginStorageEntry[]>;
   // Subscribes to live updates for this plugin's own storage made from
   // another tab, device, or surface — e.g. the kanban Edit modal and the
@@ -243,7 +252,8 @@ interface PluginTaskLinkDialogOptions {
   inputTestId?: string;
   errorTestId?: string;
   submitTestId?: string;
-  onSubmit(reference: string): Promise<void>;
+  // The host aborts this signal when the user cancels or closes the dialog.
+  onSubmit(reference: string, signal: AbortSignal): Promise<void>;
 }
 
 interface PluginTaskReviewOptions {
@@ -313,13 +323,15 @@ A task preset may provide a semantic `iconName`; the host maps `eye`, `message`,
 `tool` to the exact first-party **Review**, **Address feedback**, and **Fix CI** icons.
 `ReviewItemSummary.taskStatus` is the normal code-host status integration. Once a
 registered review provider publishes it, Kandev automatically mounts the exact shared
-topbar button, composer CI chip, desktop hover popover, and mobile drawer; Kandev also
-leases one provider refresh on mount/open and every 90 seconds. Plugins must not register
+topbar button, composer CI chip, desktop hover popover, and mobile drawer. Each rendered
+linked-task row acquires one deduplicated provider refresh so its indicator color is live
+before hover; hover/focus can refresh again, while active topbar/composer status refreshes
+every 90 seconds. Plugins must not register
 a visual slot or a second poller for these surfaces. Linked-task indicators also derive
 the same semantic color hierarchy from normalized state, review, and pipeline fields;
-providers do not send CSS classes or provider-specific color tokens. Until task detail is
-available, the indicator remains muted and the desktop hover/focus refresh updates both
-its summary and color. `IntegrationChangeRequestStatus` remains exposed for non-review-
+providers do not send CSS classes or provider-specific color tokens. While the initial
+task detail request is pending, the indicator remains muted; publishing the snapshot
+updates both its summary and color. `IntegrationChangeRequestStatus` remains exposed for non-review-
 provider composition only.
 
 `ChangeRequestDetail` is the exact provider-neutral detail component consumed by
@@ -419,6 +431,8 @@ interface PluginUtilsApi {
   // The host's clsx + tailwind-merge combiner, so class merging matches the
   // components it styles.
   cn(...inputs: unknown[]): string;
+  // Non-security UUID with a fallback for supported insecure HTTP origins.
+  generateUUID(): string;
   // Locale-aware relative time ("3 hours ago", "in 2 days", "yesterday") via
   // Intl.RelativeTimeFormat in the user's active locale; "" for unparseable
   // input. Prefer it over a hand-rolled ladder, which is English-only by
@@ -427,7 +441,7 @@ interface PluginUtilsApi {
 }
 ```
 
-Both are functions, so they sit beside `navigate`/`openModal` rather than in
+These are functions, so they sit beside `navigate`/`openModal` rather than in
 `ui`, which is a component map.
 
 ### `host.ui.RichTextEditor` / `host.ui.RichTextReadOnly`
@@ -678,13 +692,13 @@ interface RepositoryProviderRegistration {
   listRepositories(context: {
     workspaceId: string;
     signal: AbortSignal;
-  }): Promise<unknown[]>;
+  }): Promise<RepositoryInspection[]>;
   matchesURL(url: string): boolean;
   listBranches(context: {
     workspaceId: string;
-    repository: unknown;
+    repository: RepositoryInspection;
     signal: AbortSignal;
-  }): Promise<unknown[]>;
+  }): Promise<RepositoryProviderBranch[]>;
   inspectURL(context: {
     workspaceId: string;
     url: string;
@@ -697,13 +711,41 @@ interface RepositoryProviderRegistration {
     taskId: string;
     sessionId: string; // session whose checkout Kandev pushed
     repositoryId: string;
-    repository: unknown; // persisted host repository, not browser authority
+    repository: PluginHostRepository; // persisted host repository, not browser authority
     title: string;
     body: string;
     baseBranch?: string;
     draft: boolean;
     signal: AbortSignal;
-  }): Promise<{ url: string; provider?: string; output?: string }>;
+  }): Promise<RepositoryChangeRequestCreateResult>;
+}
+
+// The host binds every returned RepositoryInspection.providerId to the
+// registration's manifest-owned id; result data cannot spoof another namespace.
+interface PluginHostRepository {
+  id: string;
+  workspace_id: string;
+  name: string;
+  provider: string;
+  source_type?: string;
+  provider_repo_id?: string;
+  provider_host?: string;
+  provider_owner?: string;
+  provider_name?: string;
+  remote_url?: string;
+  default_branch?: string;
+}
+interface RepositoryProviderBranch {
+  name: string;
+}
+interface RepositoryChangeRequestCreateResult {
+  url: string;
+  provider?: string;
+  output?: string;
+  // False means remote creation succeeded but task association did not.
+  linked?: boolean;
+  // Safe detail shown with recovery guidance. Never retry remote creation.
+  associationError?: string;
 }
 interface RepositoryInspection {
   providerId: string;
@@ -730,7 +772,7 @@ interface TaskActionRegistration {
 interface PluginTaskActionContext {
   workspaceId: string;
   taskId: string;
-  repositories: readonly unknown[];
+  repositories: readonly PluginHostRepository[];
   pathname: string;
   presentation: "desktop" | "mobile";
 }
@@ -744,9 +786,9 @@ interface ReviewProviderRegistration {
   subscribe(taskId: string, listener: () => void): () => void;
   refresh(taskId: string, signal: AbortSignal): Promise<void>;
   // Implement all three association callbacks together. The host performs one
-  // workspace-bounded refresh and renders native task-list/card indicators.
-  // Hover/focus lazily calls refresh(taskId), then renders taskStatus through
-  // the same host-owned structured summary used by first-party providers.
+  // workspace-bounded association refresh and renders native task-list/card
+  // indicators. Each rendered linked task leases refresh(taskId), deduplicated
+  // with topbar/panel consumers; hover/focus may refresh it again.
   getAssociationSnapshot?(workspaceId: string): readonly ReviewTaskAssociation[];
   subscribeAssociations?(workspaceId: string, listener: () => void): () => void;
   refreshAssociations?(workspaceId: string, signal: AbortSignal): Promise<void>;
