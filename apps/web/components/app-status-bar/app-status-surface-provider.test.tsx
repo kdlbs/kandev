@@ -22,6 +22,7 @@ const restartState = vi.hoisted(() => ({
 const STATUS_BAR_TEST_ID = "app-status-bar";
 const STATUS_DRAWER_TEST_ID = "app-status-drawer";
 const STATUS_DRAWER_TRIGGER_TEST_ID = "app-status-drawer-trigger";
+const STATUS_BAR_VISIBLE_ATTRIBUTE = "data-app-status-bar-visible";
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({
@@ -95,20 +96,24 @@ function ConnectionIssueControls() {
   );
 }
 
+function verifyDesktopStatusBarSurface() {
+  renderSurface();
+
+  expect(screen.getByTestId(STATUS_BAR_TEST_ID)).toBeTruthy();
+  expect(screen.queryByTestId(STATUS_DRAWER_TEST_ID)).toBeNull();
+  expect(document.documentElement.getAttribute(STATUS_BAR_VISIBLE_ATTRIBUTE)).toBe("true");
+}
+
 describe("AppStatusSurfaceProvider", () => {
   beforeEach(() => {
     responsiveState.breakpoint = "desktop";
     appStatusBarEnabled = true;
+    document.documentElement.removeAttribute(STATUS_BAR_VISIBLE_ATTRIBUTE);
   });
 
   afterEach(cleanup);
 
-  it("mounts only desktop status bar outside phone breakpoint", () => {
-    renderSurface();
-
-    expect(screen.getByTestId(STATUS_BAR_TEST_ID)).toBeTruthy();
-    expect(screen.queryByTestId(STATUS_DRAWER_TEST_ID)).toBeNull();
-  });
+  it("mounts only desktop status bar outside phone breakpoint", verifyDesktopStatusBarSurface);
 
   it("mounts only phone drawer and opens it from native trigger", () => {
     responsiveState.breakpoint = "mobile";
@@ -116,6 +121,7 @@ describe("AppStatusSurfaceProvider", () => {
 
     expect(screen.queryByTestId(STATUS_BAR_TEST_ID)).toBeNull();
     expect(screen.getByTestId(STATUS_DRAWER_TEST_ID).textContent).toBe("false");
+    expect(document.documentElement.hasAttribute(STATUS_BAR_VISIBLE_ATTRIBUTE)).toBe(false);
 
     fireEvent.click(screen.getByRole("button", { name: "Open status" }));
     expect(screen.getByTestId(STATUS_DRAWER_TEST_ID).textContent).toBe("true");
@@ -141,6 +147,7 @@ describe("AppStatusSurfaceProvider", () => {
     expect(screen.queryByTestId(STATUS_BAR_TEST_ID)).toBeNull();
     expect(screen.queryByTestId(STATUS_DRAWER_TEST_ID)).toBeNull();
     expect(screen.queryByTestId(STATUS_DRAWER_TRIGGER_TEST_ID)).toBeNull();
+    expect(document.documentElement.hasAttribute(STATUS_BAR_VISIBLE_ATTRIBUTE)).toBe(false);
   });
 
   it("keeps the runtime alert visible when the status bar preference is disabled", () => {

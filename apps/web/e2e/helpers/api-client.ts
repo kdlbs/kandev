@@ -949,6 +949,7 @@ export class ApiClient {
     sidebar_active_view_id?: string;
     sidebar_draft?: unknown;
     saved_layouts?: unknown[];
+    app_status_bar_enabled?: boolean;
     lsp_auto_start_languages?: string[];
     lsp_auto_install_languages?: string[];
     lsp_server_configs?: Record<string, Record<string, unknown>>;

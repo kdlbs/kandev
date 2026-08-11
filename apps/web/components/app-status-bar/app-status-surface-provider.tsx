@@ -4,6 +4,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
   type ComponentProps,
@@ -32,6 +33,7 @@ type AppStatusDrawerContextValue = {
 };
 
 const AppStatusDrawerContext = createContext<AppStatusDrawerContextValue | null>(null);
+const STATUS_BAR_VISIBLE_ATTRIBUTE = "data-app-status-bar-visible";
 const unavailableDrawer: AppStatusDrawerContextValue = {
   enabled: false,
   issueSeverity: "none",
@@ -120,6 +122,17 @@ export function AppStatusSurfaceProvider({ children }: { children: ReactNode }) 
   const connectionOnly = !appStatusBarEnabled && issueSeverity !== "none";
   const useDrawerSurface = isMobile || (isTablet && connectionOnly);
   const drawerEnabled = useDrawerSurface && (appStatusBarEnabled || connectionOnly);
+  const inlineStatusBarVisible = !useDrawerSurface && appStatusBarEnabled;
+
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    if (inlineStatusBarVisible) {
+      root.setAttribute(STATUS_BAR_VISIBLE_ATTRIBUTE, "true");
+    } else {
+      root.removeAttribute(STATUS_BAR_VISIBLE_ATTRIBUTE);
+    }
+    return () => root.removeAttribute(STATUS_BAR_VISIBLE_ATTRIBUTE);
+  }, [inlineStatusBarVisible]);
 
   useEffect(() => {
     if (!drawerEnabled) setStatusDrawerOpen(false);
@@ -150,7 +163,7 @@ export function AppStatusSurfaceProvider({ children }: { children: ReactNode }) 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <AgentRuntimeUnavailableAlert />
         {children}
-        {(useDrawerSurface ? drawerEnabled : appStatusBarEnabled) &&
+        {(useDrawerSurface ? drawerEnabled : inlineStatusBarVisible) &&
           (useDrawerSurface ? (
             <AppStatusDrawer
               {...surfaceProps}
