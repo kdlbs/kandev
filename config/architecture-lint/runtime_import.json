@@ -20,19 +20,11 @@
     },
     {
       "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
-      "path": "apps/backend/internal/agent/handlers/port_handlers.go"
-    },
-    {
-      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
       "path": "apps/backend/internal/agent/handlers/review_change_source.go"
     },
     {
       "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
       "path": "apps/backend/internal/agent/handlers/shell_handlers.go"
-    },
-    {
-      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
-      "path": "apps/backend/internal/agent/handlers/vscode_handlers.go"
     },
     {
       "import": "github.com/kandev/kandev/internal/agent/runtime/agentctl",

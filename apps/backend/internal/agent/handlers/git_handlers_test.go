@@ -119,6 +119,9 @@ func TestGitMutationHandlersForwardRequestsAndReturnResults(t *testing.T) {
 		invoke     func(*GitHandlers, context.Context, *ws.Message) (*ws.Message, error)
 		assertBody func(*testing.T, map[string]any)
 	}{
+		{name: "pull", path: "/api/v1/git/pull", request: GitPullRequest{SessionID: "s", Rebase: true, Repo: "repo"}, invoke: (*GitHandlers).wsPull, assertBody: expectGitBody("rebase", true)},
+		{name: "push", path: "/api/v1/git/push", request: GitPushRequest{SessionID: "s", Force: true, SetUpstream: true, Repo: "repo"}, invoke: (*GitHandlers).wsPush, assertBody: expectGitBody("force", true)},
+		{name: "commit", path: "/api/v1/git/commit", request: GitCommitRequest{SessionID: "s", Message: "message", StageAll: true, Repo: "repo"}, invoke: (*GitHandlers).wsCommit, assertBody: expectGitBody("message", "message")},
 		{name: "rebase", path: "/api/v1/git/rebase", request: GitRebaseRequest{SessionID: "s", BaseBranch: "main", Repo: "repo"}, invoke: (*GitHandlers).wsRebase, assertBody: expectGitBody("base_branch", "main")},
 		{name: "merge", path: "/api/v1/git/merge", request: GitMergeRequest{SessionID: "s", BaseBranch: "main", Repo: "repo"}, invoke: (*GitHandlers).wsMerge, assertBody: expectGitBody("base_branch", "main")},
 		{name: "abort", path: "/api/v1/git/abort", request: GitAbortRequest{SessionID: "s", Operation: "rebase", Repo: "repo"}, invoke: (*GitHandlers).wsAbort, assertBody: expectGitBody("operation", "rebase")},
@@ -250,6 +253,9 @@ func TestGitMutationHandlersMapHTTPFailures(t *testing.T) {
 		want    string
 	}{
 		{name: "rebase", request: GitRebaseRequest{SessionID: "s", BaseBranch: "main"}, invoke: (*GitHandlers).wsRebase, want: "rebase failed"},
+		{name: "pull", request: GitPullRequest{SessionID: "s"}, invoke: (*GitHandlers).wsPull, want: "pull failed"},
+		{name: "push", request: GitPushRequest{SessionID: "s"}, invoke: (*GitHandlers).wsPush, want: "push failed"},
+		{name: "commit", request: GitCommitRequest{SessionID: "s", Message: "message"}, invoke: (*GitHandlers).wsCommit, want: "commit failed"},
 		{name: "merge", request: GitMergeRequest{SessionID: "s", BaseBranch: "main"}, invoke: (*GitHandlers).wsMerge, want: "merge failed"},
 		{name: "abort", request: GitAbortRequest{SessionID: "s", Operation: "merge"}, invoke: (*GitHandlers).wsAbort, want: "abort failed"},
 		{name: "rename", request: GitRenameBranchRequest{SessionID: "s", NewName: "new"}, invoke: (*GitHandlers).wsRenameBranch, want: "rename branch failed"},
@@ -266,6 +272,53 @@ func TestGitMutationHandlersMapHTTPFailures(t *testing.T) {
 			defer server.Close()
 			msg, _ := ws.NewRequest("id", "action", tt.request)
 			_, err := tt.invoke(h, context.Background(), msg)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestGitMutationHandlersRejectInvalidRequestsBeforeLookup(t *testing.T) {
+	h := NewGitHandlers(nil, nil, newTestLogger())
+	tests := []struct {
+		name   string
+		action string
+		body   any
+		invoke func(*GitHandlers, context.Context, *ws.Message) (*ws.Message, error)
+		want   string
+	}{
+		{name: "pull malformed", action: ws.ActionWorktreePull, body: json.RawMessage(`{invalid`), invoke: (*GitHandlers).wsPull, want: "invalid payload"},
+		{name: "rebase malformed", action: ws.ActionWorktreeRebase, body: json.RawMessage(`{invalid`), invoke: (*GitHandlers).wsRebase, want: "invalid payload"},
+		{name: "merge malformed", action: ws.ActionWorktreeMerge, body: json.RawMessage(`{invalid`), invoke: (*GitHandlers).wsMerge, want: "invalid payload"},
+		{name: "abort malformed", action: ws.ActionWorktreeAbort, body: json.RawMessage(`{invalid`), invoke: (*GitHandlers).wsAbort, want: "invalid payload"},
+		{name: "reset malformed", action: ws.ActionWorktreeReset, body: json.RawMessage(`{invalid`), invoke: (*GitHandlers).wsReset, want: "invalid payload"},
+		{name: "stage malformed", action: ws.ActionWorktreeStage, body: json.RawMessage(`{invalid`), invoke: (*GitHandlers).wsStage, want: "invalid payload"},
+		{name: "discard malformed", action: ws.ActionWorktreeDiscard, body: json.RawMessage(`{invalid`), invoke: (*GitHandlers).wsDiscard, want: "invalid payload"},
+		{name: "diff malformed", action: ws.ActionSessionCommitDiff, body: json.RawMessage(`{invalid`), invoke: (*GitHandlers).wsCommitDiff, want: "invalid payload"},
+		{name: "push session", action: ws.ActionWorktreePush, body: GitPushRequest{}, invoke: (*GitHandlers).wsPush, want: "session_id is required"},
+		{name: "rebase base", action: ws.ActionWorktreeRebase, body: GitRebaseRequest{SessionID: "s"}, invoke: (*GitHandlers).wsRebase, want: "base_branch is required"},
+		{name: "merge base", action: ws.ActionWorktreeMerge, body: GitMergeRequest{SessionID: "s"}, invoke: (*GitHandlers).wsMerge, want: "base_branch is required"},
+		{name: "abort operation", action: ws.ActionWorktreeAbort, body: GitAbortRequest{SessionID: "s", Operation: "cherry-pick"}, invoke: (*GitHandlers).wsAbort, want: "operation must be"},
+		{name: "commit session", action: ws.ActionWorktreeCommit, body: GitCommitRequest{Message: "message"}, invoke: (*GitHandlers).wsCommit, want: "session_id is required"},
+		{name: "rename name", action: ws.ActionWorktreeRenameBranch, body: GitRenameBranchRequest{SessionID: "s"}, invoke: (*GitHandlers).wsRenameBranch, want: "new_name is required"},
+		{name: "reset sha", action: ws.ActionWorktreeReset, body: GitResetRequest{SessionID: "s"}, invoke: (*GitHandlers).wsReset, want: "commit_sha is required"},
+		{name: "reset mode", action: ws.ActionWorktreeReset, body: GitResetRequest{SessionID: "s", CommitSHA: "abc", Mode: "invalid"}, invoke: (*GitHandlers).wsReset, want: "invalid reset mode"},
+		{name: "stage session", action: ws.ActionWorktreeStage, body: GitStageRequest{}, invoke: (*GitHandlers).wsStage, want: "session_id is required"},
+		{name: "unstage session", action: ws.ActionWorktreeUnstage, body: GitUnstageRequest{}, invoke: (*GitHandlers).wsUnstage, want: "session_id is required"},
+		{name: "discard paths", action: ws.ActionWorktreeDiscard, body: GitDiscardRequest{SessionID: "s"}, invoke: (*GitHandlers).wsDiscard, want: "paths are required"},
+		{name: "revert sha", action: ws.ActionWorktreeRevertCommit, body: GitRevertCommitRequest{SessionID: "s"}, invoke: (*GitHandlers).wsRevertCommit, want: "commit_sha is required"},
+		{name: "diff sha", action: ws.ActionSessionCommitDiff, body: GitShowCommitRequest{SessionID: "s"}, invoke: (*GitHandlers).wsCommitDiff, want: "commit_sha is required"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var message *ws.Message
+			if raw, ok := tt.body.(json.RawMessage); ok {
+				message = &ws.Message{ID: "id", Action: tt.action, Payload: raw}
+			} else {
+				message, _ = ws.NewRequest("id", tt.action, tt.body)
+			}
+			_, err := tt.invoke(h, context.Background(), message)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("error = %v, want containing %q", err, tt.want)
 			}

@@ -4,8 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"testing"
 
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -49,6 +55,77 @@ func TestPortHandlersRegistrationDependsOnTunnelController(t *testing.T) {
 		if !dispatcher.HasHandler(action) {
 			t.Fatalf("handler %s was not registered", action)
 		}
+	}
+}
+
+func TestPortListSuccessAndErrors(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		statusCode int
+		body       string
+		wantCode   string
+	}{
+		{name: "success", statusCode: http.StatusOK, body: `{"ports":[{"port":3000,"address":"127.0.0.1","protocol":"tcp","process":"vite"}]}`},
+		{name: "dependency failure", statusCode: http.StatusBadGateway, body: `failure`, wantCode: ws.ErrorCodeInternalError},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/v1/ports" {
+					t.Errorf("path = %s", r.URL.Path)
+				}
+				w.WriteHeader(tt.statusCode)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+			u, _ := url.Parse(server.URL)
+			port, _ := strconv.Atoi(u.Port())
+			client := agentctl.NewClient(u.Hostname(), port, newTestLogger())
+			execution := &lifecycle.AgentExecution{SessionID: "s"}
+			execution.SetAgentCtlClientForTesting(client)
+			h := NewPortHandlers(&mockExecutionLookup{executions: map[string]*lifecycle.AgentExecution{"s": execution}}, nil, newTestLogger())
+			msg, _ := ws.NewRequest("id", ws.ActionPortList, map[string]any{"session_id": "s"})
+			response, err := h.wsPortList(context.Background(), msg)
+			if err != nil {
+				t.Fatalf("wsPortList: %v", err)
+			}
+			if tt.wantCode != "" {
+				assertWSErrorCode(t, response, tt.wantCode)
+				return
+			}
+			var payload struct {
+				Ports []struct {
+					Port int `json:"port"`
+				} `json:"ports"`
+			}
+			decodeHandlerPayload(t, response, &payload)
+			if len(payload.Ports) != 1 || payload.Ports[0].Port != 3000 {
+				t.Fatalf("payload = %#v", payload)
+			}
+		})
+	}
+}
+
+func TestPortListValidationAndExecutionErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		message *ws.Message
+		lookup  ExecutionLookup
+		code    string
+	}{
+		{name: "malformed", message: &ws.Message{ID: "id", Action: ws.ActionPortList, Payload: json.RawMessage(`{invalid`)}, code: ws.ErrorCodeBadRequest},
+		{name: "session required", message: tunnelTestMessage(ws.ActionPortList, map[string]any{}), code: ws.ErrorCodeValidation},
+		{name: "execution missing", message: tunnelTestMessage(ws.ActionPortList, map[string]any{"session_id": "s"}), lookup: &mockExecutionLookup{}, code: ws.ErrorCodeNotFound},
+		{name: "client missing", message: tunnelTestMessage(ws.ActionPortList, map[string]any{"session_id": "s"}), lookup: &mockExecutionLookup{executions: map[string]*lifecycle.AgentExecution{"s": {}}}, code: ws.ErrorCodeInternalError},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := NewPortHandlers(tt.lookup, nil, newTestLogger())
+			response, err := h.wsPortList(context.Background(), tt.message)
+			if err != nil {
+				t.Fatalf("wsPortList: %v", err)
+			}
+			assertWSErrorCode(t, response, tt.code)
+		})
 	}
 }
 
