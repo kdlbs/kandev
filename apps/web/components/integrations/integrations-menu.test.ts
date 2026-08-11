@@ -15,6 +15,7 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 
 const useGitHubStatusMock = vi.hoisted(() => vi.fn());
 const useGitLabAvailableMock = vi.hoisted(() => vi.fn());
+const useForgejoConfigMock = vi.hoisted(() => vi.fn());
 const useJiraAvailableMock = vi.hoisted(() => vi.fn());
 const useLinearAvailableMock = vi.hoisted(() => vi.fn());
 const useFeatureMock = vi.hoisted(() => vi.fn());
@@ -29,6 +30,10 @@ vi.mock("@/hooks/domains/github/use-github-status", () => ({
 
 vi.mock("@/hooks/domains/gitlab/use-task-mr", () => ({
   useGitLabAvailable: useGitLabAvailableMock,
+}));
+
+vi.mock("@/hooks/domains/forgejo/use-forgejo-config", () => ({
+  useForgejoConfig: useForgejoConfigMock,
 }));
 
 vi.mock("@/hooks/domains/jira/use-jira-availability", () => ({
@@ -68,11 +73,13 @@ function status(overrides: Partial<GitHubStatus>): GitHubStatus {
 function mockAvailability({
   githubReady,
   gitlabReady = false,
+  forgejoReady = false,
   jiraAvailable,
   linearAvailable,
 }: {
   githubReady: boolean;
   gitlabReady?: boolean;
+  forgejoReady?: boolean;
   jiraAvailable: boolean;
   linearAvailable: boolean;
 }) {
@@ -81,6 +88,9 @@ function mockAvailability({
     loading: false,
   });
   useGitLabAvailableMock.mockReturnValue(gitlabReady);
+  useForgejoConfigMock.mockReturnValue({
+    config: forgejoReady ? { has_secret: true } : null,
+  });
   useJiraAvailableMock.mockReturnValue(jiraAvailable);
   useLinearAvailableMock.mockReturnValue(linearAvailable);
 }
@@ -126,6 +136,7 @@ describe("getAvailableIntegrationLinks", () => {
   it("returns only configured integration destinations", () => {
     expect(
       getAvailableIntegrationLinks({
+        forgejoReady: false,
         githubReady: true,
         gitlabReady: false,
         jiraAvailable: false,
@@ -140,12 +151,25 @@ describe("getAvailableIntegrationLinks", () => {
   it("returns no setup destinations when integrations are unavailable", () => {
     expect(
       getAvailableIntegrationLinks({
+        forgejoReady: false,
         githubReady: false,
         gitlabReady: false,
         jiraAvailable: false,
         linearAvailable: false,
       }),
     ).toEqual([]);
+  });
+
+  it("includes Forgejo when the active workspace has a saved token", () => {
+    expect(
+      getAvailableIntegrationLinks({
+        forgejoReady: true,
+        githubReady: false,
+        gitlabReady: false,
+        jiraAvailable: false,
+        linearAvailable: false,
+      }),
+    ).toEqual([{ id: "forgejo", label: "Forgejo", href: "/forgejo" }]);
   });
 });
 

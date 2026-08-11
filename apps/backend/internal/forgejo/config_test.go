@@ -236,6 +236,36 @@ func TestService_ListsWorkspaceQueue(t *testing.T) {
 	}
 }
 
+func TestService_ListsWorkspaceQueueSkipsInaccessibleRepository(t *testing.T) {
+	service, secrets := newConfigTestService(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/user/repos":
+			_, _ = w.Write([]byte(`[{"name":"broken","full_name":"owner/broken","owner":{"login":"owner"}},{"name":"working","full_name":"owner/working","owner":{"login":"owner"}}]`))
+		case "/api/v1/repos/owner/broken/issues":
+			http.NotFound(w, r)
+		case "/api/v1/repos/owner/working/issues":
+			_, _ = w.Write([]byte(`[{"number":1,"title":"Issue","state":"open"}]`))
+		case "/api/v1/repos/owner/working/pulls":
+			_, _ = w.Write([]byte(`[{"number":2,"title":"PR","state":"open","head":{"ref":"feature"},"base":{"ref":"main"}}]`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	if err := service.store.SaveConfig(context.Background(), &Config{WorkspaceID: "workspace-a", Origin: server.URL}); err != nil {
+		t.Fatal(err)
+	}
+	if err := secrets.Set(context.Background(), SecretKeyForWorkspace("workspace-a"), "Forgejo token", "token"); err != nil {
+		t.Fatal(err)
+	}
+
+	issues, pulls, err := service.ListWorkspaceQueue(context.Background(), "workspace-a")
+	if err != nil || len(issues) != 1 || len(pulls) != 1 || issues[0].Repository.Name != "working" || pulls[0].Repository.Name != "working" {
+		t.Fatalf("issues=%#v pulls=%#v err=%v", issues, pulls, err)
+	}
+}
+
 func TestService_RefreshConnectionPersistsHealth(t *testing.T) {
 	service, secrets := newConfigTestService(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(`{"login":"alice"}`)) }))

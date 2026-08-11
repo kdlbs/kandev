@@ -14,6 +14,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
   IconBrandGithub,
   IconBrandGitlab,
+  IconGitBranch,
   IconHexagon,
   IconPlugConnected,
   IconTicket,
@@ -23,6 +24,7 @@ import { useLinearAvailable } from "@/hooks/domains/linear/use-linear-availabili
 import { useAzureDevOpsAvailable } from "@/hooks/domains/azure-devops/use-azure-devops-availability";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { useGitLabAvailable } from "@/hooks/domains/gitlab/use-task-mr";
+import { useForgejoConfig } from "@/hooks/domains/forgejo/use-forgejo-config";
 import { useAppStore } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { resolvePluginIcon } from "@/lib/plugins/icons";
@@ -34,7 +36,7 @@ type MobileIntegrationsSectionProps = {
   onNavigate: () => void;
 };
 
-type IntegrationId = "azure-devops" | "github" | "gitlab" | "jira" | "linear";
+type IntegrationId = "azure-devops" | "forgejo" | "github" | "gitlab" | "jira" | "linear";
 
 type IntegrationLink = {
   id: IntegrationId;
@@ -44,6 +46,7 @@ type IntegrationLink = {
 
 type IntegrationAvailability = {
   azureDevOpsAvailable?: boolean;
+  forgejoReady: boolean;
   githubReady: boolean;
   gitlabReady: boolean;
   jiraAvailable: boolean;
@@ -52,6 +55,7 @@ type IntegrationAvailability = {
 
 const INTEGRATION_LINKS: IntegrationLink[] = [
   { id: "azure-devops", label: "Azure DevOps", href: "/azure-devops" },
+  { id: "forgejo", label: "Forgejo", href: "/forgejo" },
   { id: "github", label: "GitHub", href: "/github" },
   { id: "gitlab", label: "GitLab", href: "/gitlab" },
   { id: "jira", label: "Jira", href: "/jira" },
@@ -60,6 +64,7 @@ const INTEGRATION_LINKS: IntegrationLink[] = [
 
 const INTEGRATION_ICONS = {
   "azure-devops": AzureDevOpsIcon,
+  forgejo: IconGitBranch,
   github: IconBrandGithub,
   gitlab: IconBrandGitlab,
   jira: IconTicket,
@@ -70,6 +75,7 @@ const HOVER_CLOSE_DELAY_MS = 180;
 
 export function getAvailableIntegrationLinks({
   azureDevOpsAvailable,
+  forgejoReady,
   githubReady,
   gitlabReady,
   jiraAvailable,
@@ -77,6 +83,7 @@ export function getAvailableIntegrationLinks({
 }: IntegrationAvailability): IntegrationLink[] {
   return INTEGRATION_LINKS.filter((link) => {
     if (link.id === "azure-devops") return !!azureDevOpsAvailable;
+    if (link.id === "forgejo") return forgejoReady;
     if (link.id === "github") return githubReady;
     if (link.id === "gitlab") return gitlabReady;
     if (link.id === "jira") return jiraAvailable;
@@ -112,6 +119,7 @@ export function useConfiguredIntegrationLinks(): IntegrationLink[] {
   const scopedWorkspaceId = activeWorkspaceExists ? activeWorkspaceId : null;
   const { status, loading } = useGitHubStatus();
   const gitlabAvailable = useGitLabAvailable();
+  const { config: forgejoConfig } = useForgejoConfig(scopedWorkspaceId ?? undefined);
   const jiraAvailable = useJiraAvailable(scopedWorkspaceId);
   const linearAvailable = useLinearAvailable(scopedWorkspaceId);
   const azureDevOpsAvailable = useAzureDevOpsAvailable(scopedWorkspaceId);
@@ -119,6 +127,7 @@ export function useConfiguredIntegrationLinks(): IntegrationLink[] {
 
   return getAvailableIntegrationLinks({
     azureDevOpsAvailable,
+    forgejoReady: !!forgejoConfig?.has_secret,
     githubReady: githubStatus.ready,
     gitlabReady: gitlabAvailable,
     jiraAvailable,

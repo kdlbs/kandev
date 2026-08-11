@@ -19,6 +19,7 @@ import { AzureDevOpsIcon } from "@/components/icons/azure-devops-icon";
 import { useAzureDevOpsAvailable } from "@/hooks/domains/azure-devops/use-azure-devops-availability";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { useGitLabAvailable } from "@/hooks/domains/gitlab/use-task-mr";
+import { useForgejoConfig } from "@/hooks/domains/forgejo/use-forgejo-config";
 import { useJiraAuthed } from "@/hooks/domains/jira/use-jira-availability";
 import { useLinearAuthed } from "@/hooks/domains/linear/use-linear-availability";
 import { useSentryAvailable } from "@/hooks/domains/sentry/use-sentry-availability";
@@ -31,6 +32,7 @@ type IntegrationIcon = ComponentType<{ className?: string }>;
 
 const INTEGRATIONS: Array<{ slug: string; label: string; icon: IntegrationIcon }> = [
   { slug: "azure-devops", label: "Azure DevOps", icon: AzureDevOpsIcon },
+  { slug: "forgejo", label: "Forgejo", icon: IconGitBranch },
   { slug: "github", label: "GitHub", icon: IconBrandGithub },
   { slug: "gitlab", label: "GitLab", icon: IconBrandGitlab },
   { slug: "jira", label: "Jira", icon: IconTicket },
@@ -63,6 +65,7 @@ function WorkspaceIntegrationItems({
   const azureDevOps = useAzureDevOpsAvailable(workspaceId);
   const { status: githubStatus } = useGitHubStatus(workspaceId);
   const gitlab = useGitLabAvailable();
+  const { config: forgejoConfig } = useForgejoConfig(workspaceId);
   const jira = useJiraAuthed(workspaceId);
   const linear = useLinearAuthed(workspaceId);
   const sentry = useSentryAvailable(workspaceId);
@@ -71,6 +74,7 @@ function WorkspaceIntegrationItems({
     ...(azureDevOps ? ["azure-devops"] : []),
     ...(githubStatus?.authenticated || githubStatus?.token_configured ? ["github"] : []),
     ...(gitlab ? ["gitlab"] : []),
+    ...(forgejoConfig?.has_secret ? ["forgejo"] : []),
     ...(jira ? ["jira"] : []),
     ...(linear ? ["linear"] : []),
     ...(sentry ? ["sentry"] : []),

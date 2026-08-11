@@ -34,6 +34,7 @@ const state = {
 const integrationAvailability = vi.hoisted(() => ({
   azureDevOps: true,
   github: false,
+  forgejo: false,
   gitlab: false,
   jira: false,
   linear: false,
@@ -60,6 +61,9 @@ vi.mock("@/hooks/domains/github/use-github-status", () => ({
 }));
 vi.mock("@/hooks/domains/gitlab/use-task-mr", () => ({
   useGitLabAvailable: () => integrationAvailability.gitlab,
+}));
+vi.mock("@/hooks/domains/forgejo/use-forgejo-config", () => ({
+  useForgejoConfig: () => ({ config: integrationAvailability.forgejo ? { has_secret: true } : null }),
 }));
 vi.mock("@/hooks/domains/jira/use-jira-availability", () => ({
   useJiraAuthed: () => integrationAvailability.jira,
@@ -99,6 +103,7 @@ describe("SettingsTree rendering", () => {
     state.executors.items = [];
     integrationAvailability.azureDevOps = true;
     integrationAvailability.github = false;
+    integrationAvailability.forgejo = false;
     integrationAvailability.gitlab = false;
     integrationAvailability.jira = false;
     integrationAvailability.linear = false;

@@ -488,14 +488,19 @@ func (s *Service) ListWorkspaceQueue(ctx context.Context, workspaceID string) ([
 	for _, repository := range repositories {
 		repositoryIssues, _, issueErr := client.ListIssues(ctx, repository.Owner, repository.Name, 1, pageLimit)
 		if issueErr != nil {
-			return nil, nil, fmt.Errorf("list queue issues for %s: %w", repository.FullName, issueErr)
+			// Repository listings can briefly include an inaccessible or deleted
+			// repository. A personal queue should remain useful for every other
+			// visible repository instead of failing as one aggregate request.
+			continue
 		}
 		for _, issue := range repositoryIssues {
 			issues = append(issues, QueueIssue{Repository: repository, Issue: issue})
 		}
 		repositoryPulls, _, pullErr := client.ListPullRequests(ctx, repository.Owner, repository.Name, 1, pageLimit)
 		if pullErr != nil {
-			return nil, nil, fmt.Errorf("list queue pull requests for %s: %w", repository.FullName, pullErr)
+			// See the issue-read case above. Do not let one stale/inaccessible
+			// repository hide the remainder of the workspace queue.
+			continue
 		}
 		for _, pull := range repositoryPulls {
 			pulls = append(pulls, QueuePullRequest{Repository: repository, PullRequest: pull})

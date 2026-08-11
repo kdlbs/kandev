@@ -6,6 +6,7 @@ import type { ComponentType } from "react";
 import {
   IconBrandGithub,
   IconBrandGitlab,
+  IconGitBranch,
   IconHexagon,
   IconPlugConnected,
   IconTicket,
@@ -32,6 +33,7 @@ type IntegrationIcon = ComponentType<{ className?: string }>;
 
 const INTEGRATION_ICONS: Record<string, IntegrationIcon> = {
   "azure-devops": AzureDevOpsIcon,
+  forgejo: IconGitBranch,
   github: IconBrandGithub,
   gitlab: IconBrandGitlab,
   jira: IconTicket,
