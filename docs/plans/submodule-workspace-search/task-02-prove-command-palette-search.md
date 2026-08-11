@@ -23,6 +23,7 @@ spec: "../../specs/ui/task-workspace-content-search.md"
 ```bash
 cd apps && pnpm install --frozen-lockfile
 cd apps/web && pnpm e2e:run tests/command-panel.spec.ts -- --grep 'finds root and submodule files'
+cd apps/web && pnpm e2e:run --no-build tests/review/submodule-review.spec.ts -- --grep 'cleans source repositories when setup fails' --retries=0
 ```
 
 ## Files likely touched
@@ -63,6 +64,9 @@ and synchronized task/plan status.
   `pnpm e2e:run tests/command-panel.spec.ts -- --grep 'finds root and submodule files'`
   passed 1 Chromium test. It asserted the unnamed root, `vendor/outer`, and
   `vendor/outer/vendor/inner` groups.
-- The established fixture cleans its disposable source tree in `finally`.
+- Review remediation moved setup-failure cleanup into the shared fixture helper
+  while preserving caller cleanup after successful setup. The focused regression
+  failed RED with one leaked directory, then passed GREEN; the command-palette
+  happy path also passed with retries disabled.
 - No production UI or mobile composition changed; both use the same corrected
   backend response.

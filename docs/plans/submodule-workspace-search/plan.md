@@ -82,7 +82,9 @@ Task 01 passed its focused gate: 3 process tests and 1 API test. Both new
 regressions failed for the expected child-only result before their production
 changes, then passed; the final full run of both touched backend packages also
 passed. Task 02 passed 1 Chromium test after its RED run showed the original
-bug's 2 groups instead of the expected root plus 2 submodules.
+bug's 2 groups instead of the expected root plus 2 submodules. Review
+remediation added and passed setup-failure cleanup coverage for the shared E2E
+fixture, then revalidated the command-palette happy path with retries disabled.
 
 ## Implementation Waves And Parallel Candidates
 
