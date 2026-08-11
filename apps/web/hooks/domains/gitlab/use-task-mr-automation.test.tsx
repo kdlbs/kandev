@@ -2,7 +2,7 @@ import { createElement, type ReactNode } from "react";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StateProvider, useAppStore } from "@/components/state-provider";
-import type { TaskMRAutomationOptions } from "@/lib/types/gitlab";
+import type { TaskMRAutomationOptions, TaskMRAutomationOptionsForMR } from "@/lib/types/gitlab";
 
 const api = vi.hoisted(() => ({
   getTaskMRAutomation: vi.fn(),
@@ -15,6 +15,25 @@ import { useTaskMRAutomationOptions } from "./use-task-mr-automation";
 
 function wrapper({ children }: { children: ReactNode }) {
   return createElement(StateProvider, null, children);
+}
+
+function defaultMROption(
+  overrides: Partial<TaskMRAutomationOptionsForMR> = {},
+): TaskMRAutomationOptionsForMR {
+  return {
+    task_id: "task-1",
+    repository_id: "",
+    project_path: "group/project",
+    mr_iid: 7,
+    auto_fix_enabled: false,
+    auto_merge_enabled: false,
+    prompt_on_review_requested: false,
+    prompt_on_merged: false,
+    prompt_on_closed: false,
+    created_at: "",
+    updated_at: "",
+    ...overrides,
+  };
 }
 
 function baseOptions(overrides: Partial<TaskMRAutomationOptions> = {}): TaskMRAutomationOptions {
@@ -31,6 +50,7 @@ function baseOptions(overrides: Partial<TaskMRAutomationOptions> = {}): TaskMRAu
     review_reviewer_username: "",
     updated_at: "2026-01-01T00:00:00Z",
     mr_states: [],
+    mr_options: [defaultMROption()],
     ...overrides,
   };
 }
@@ -94,6 +114,30 @@ describe("useTaskMRAutomationOptions fetching", () => {
     });
     expect(api.getTaskMRAutomation).toHaveBeenCalledTimes(1);
   });
+
+  it("issues one fetch when several instances mount together for the same task", async () => {
+    // The switches are per-MR, so a task with N linked MRs mounts N copies of
+    // MRAutomationControls — each with its own useTaskMRAutomationOptions.
+    // They all read the same store slot, so they must not each fire a GET.
+    const pending = deferred<TaskMRAutomationOptions>();
+    api.getTaskMRAutomation.mockReturnValue(pending.promise);
+    const { result } = renderHook(
+      () => {
+        useTaskMRAutomationOptions("task-1");
+        useTaskMRAutomationOptions("task-1");
+        return useTaskMRAutomationOptions("task-1");
+      },
+      { wrapper },
+    );
+
+    await waitFor(() => expect(api.getTaskMRAutomation).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      pending.resolve(baseOptions({ prompt_on_merged: true }));
+      await pending.promise;
+    });
+    await waitFor(() => expect(result.current.options?.prompt_on_merged).toBe(true));
+    expect(api.getTaskMRAutomation).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("useTaskMRAutomationOptions optimistic updates", () => {
@@ -108,16 +152,20 @@ describe("useTaskMRAutomationOptions optimistic updates", () => {
       void result.current.update({ prompt_on_merged: true });
     });
 
-    // Optimistic reflect happens synchronously within the update call.
-    await waitFor(() => expect(result.current.options?.prompt_on_merged).toBe(true));
+    // Optimistic reflect happens synchronously within the update call, into
+    // the targeted MR's entry in mr_options (the per-MR source of truth) —
+    // not the task-level aggregate, which is server-computed.
+    await waitFor(() =>
+      expect(result.current.options?.mr_options?.[0]?.prompt_on_merged).toBe(true),
+    );
     expect(result.current.saving).toBe(true);
 
     await act(async () => {
-      update.resolve(baseOptions({ prompt_on_merged: true }));
+      update.resolve(baseOptions({ mr_options: [defaultMROption({ prompt_on_merged: true })] }));
     });
 
     await waitFor(() => expect(result.current.saving).toBe(false));
-    expect(result.current.options?.prompt_on_merged).toBe(true);
+    expect(result.current.options?.mr_options?.[0]?.prompt_on_merged).toBe(true);
     expect(result.current.error).toBeNull();
   });
 
@@ -420,13 +468,15 @@ describe("useTaskMRAutomationOptions refresh/save interaction", () => {
     // The refresh's pre-patch response resolves while the save is still
     // pending — it must not flip the optimistic switch back off.
     await act(async () => {
-      refreshCall.resolve(baseOptions({ prompt_on_merged: false }));
+      refreshCall.resolve(
+        baseOptions({ mr_options: [defaultMROption({ prompt_on_merged: false })] }),
+      );
     });
-    expect(result.current.options?.prompt_on_merged).toBe(true);
+    expect(result.current.options?.mr_options?.[0]?.prompt_on_merged).toBe(true);
 
     await act(async () => {
-      update.resolve(baseOptions({ prompt_on_merged: true }));
+      update.resolve(baseOptions({ mr_options: [defaultMROption({ prompt_on_merged: true })] }));
     });
-    expect(result.current.options?.prompt_on_merged).toBe(true);
+    expect(result.current.options?.mr_options?.[0]?.prompt_on_merged).toBe(true);
   });
 });

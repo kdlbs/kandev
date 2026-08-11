@@ -1,6 +1,11 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
-import { seedGitLabReview, GITLAB_HOST, GITLAB_PROJECT } from "../../helpers/gitlab";
+import {
+  seedGitLabReview,
+  seedGitLabMRData,
+  GITLAB_HOST,
+  GITLAB_PROJECT,
+} from "../../helpers/gitlab";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 
@@ -30,6 +35,54 @@ async function seedTaskWithLinkedMR(apiClient: ApiClient, seedData: SeedData, ti
     repository_id: seedData.repositoryId,
     mr_url: `${GITLAB_HOST}/${GITLAB_PROJECT}/-/merge_requests/${MR_IID}`,
   });
+  return task.id;
+}
+
+// Two-MR seed for the multi-MR dropdown independence spec (AC1-AC3, AC26):
+// links `iids` to one task so each renders its own MRAutomationControls
+// block in the dropdown instead of the single-MR hover popover.
+async function seedTaskWithLinkedMRs(
+  apiClient: ApiClient,
+  seedData: SeedData,
+  title: string,
+  iids: number[],
+) {
+  // Configure the GitLab connection once — each call invalidates and
+  // rebuilds the workspace's cached mock client, discarding any MRs already
+  // seeded on it (see seedGitLabMRData's doc comment).
+  await apiClient.configureGitLab(seedData.workspaceId, GITLAB_HOST);
+  for (const iid of iids) {
+    await seedGitLabMRData(
+      apiClient,
+      seedData.workspaceId,
+      iid,
+      `MR automation independence ${iid}`,
+    );
+  }
+  await apiClient.updateRepository(seedData.repositoryId, {
+    provider: "gitlab",
+    provider_host: GITLAB_HOST,
+    provider_owner: "platform",
+    provider_name: "kandev",
+  });
+  const task = await apiClient.createTaskWithAgent(
+    seedData.workspaceId,
+    title,
+    seedData.agentProfileId,
+    {
+      description: "/e2e:simple-message",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    },
+  );
+  for (const iid of iids) {
+    await apiClient.linkTaskGitLabMR(seedData.workspaceId, {
+      task_id: task.id,
+      repository_id: seedData.repositoryId,
+      mr_url: `${GITLAB_HOST}/${GITLAB_PROJECT}/-/merge_requests/${iid}`,
+    });
+  }
   return task.id;
 }
 
@@ -228,6 +281,120 @@ test.describe("GitLab MR automation options", () => {
     await reviewFollowUp.click();
     await expect(
       controls.getByRole("switch", { name: "Your review is requested" }),
+    ).not.toBeChecked();
+  });
+});
+
+test.describe("GitLab MR automation — multi-MR independence (AC1-AC3, AC26)", () => {
+  test("toggling one linked MR's switches does not affect a second linked MR, and survives reload", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const iidA = 220;
+    const iidB = 221;
+    const taskId = await seedTaskWithLinkedMRs(apiClient, seedData, "MR automation independence", [
+      iidA,
+      iidB,
+    ]);
+    await openTask(testPage, taskId);
+
+    // 2+ linked MRs always render the click-only dropdown — never the
+    // single-MR hover popover — with one attributed Automation block per MR.
+    await testPage.getByTestId("mr-topbar-button").click();
+    const controlsA = testPage.locator(
+      `[data-testid="mr-automation-controls"][data-mr-iid="${iidA}"]`,
+    );
+    const controlsB = testPage.locator(
+      `[data-testid="mr-automation-controls"][data-mr-iid="${iidB}"]`,
+    );
+    await expect(controlsA).toBeVisible();
+    await expect(controlsB).toBeVisible();
+
+    // AC25: each block states which MR it applies to.
+    await expect(controlsA.getByTestId("mr-automation-scope-label")).toHaveText(
+      `Applies to !${iidA}`,
+    );
+    await expect(controlsB.getByTestId("mr-automation-scope-label")).toHaveText(
+      `Applies to !${iidB}`,
+    );
+
+    const autoFixA = controlsA.getByRole("switch", { name: "Auto-fix CI and address comments" });
+    const autoFixB = controlsB.getByRole("switch", { name: "Auto-fix CI and address comments" });
+    await expect(autoFixA).not.toBeChecked();
+    await expect(autoFixB).not.toBeChecked();
+
+    // AC27: unique element ids per MR, not duplicated across simultaneously
+    // mounted blocks.
+    const autoFixAID = await autoFixA.getAttribute("id");
+    const autoFixBID = await autoFixB.getAttribute("id");
+    expect(autoFixAID).not.toBeNull();
+    expect(autoFixAID).not.toBe(autoFixBID);
+
+    // AC1: enabling MR A's auto-fix switch does not enable MR B's.
+    await autoFixA.click();
+    await expect
+      .poll(async () => {
+        const options = await apiClient.getTaskMRAutomationOptions(taskId);
+        return options.mr_options?.find((o) => o.mr_iid === iidA)?.auto_fix_enabled;
+      })
+      .toBe(true);
+    const midOptions = await apiClient.getTaskMRAutomationOptions(taskId);
+    expect(midOptions.mr_options?.find((o) => o.mr_iid === iidB)?.auto_fix_enabled).toBe(false);
+    await expect(autoFixB).not.toBeChecked();
+
+    // AC2: same independence for auto-merge.
+    const autoMergeA = controlsA.getByRole("switch", { name: "Auto-merge when ready" });
+    const autoMergeB = controlsB.getByRole("switch", { name: "Auto-merge when ready" });
+    await autoMergeA.click();
+    await expect
+      .poll(async () => {
+        const options = await apiClient.getTaskMRAutomationOptions(taskId);
+        return options.mr_options?.find((o) => o.mr_iid === iidA)?.auto_merge_enabled;
+      })
+      .toBe(true);
+    const afterMergeOptions = await apiClient.getTaskMRAutomationOptions(taskId);
+    expect(afterMergeOptions.mr_options?.find((o) => o.mr_iid === iidB)?.auto_merge_enabled).toBe(
+      false,
+    );
+    await expect(autoMergeB).not.toBeChecked();
+
+    // AC3: same independence for the three Review follow-up switches — MR A only.
+    await controlsA.getByTestId("mr-review-follow-up-trigger").click();
+    await controlsA.getByRole("switch", { name: "Your review is requested" }).click();
+    await expect
+      .poll(async () => {
+        const options = await apiClient.getTaskMRAutomationOptions(taskId);
+        return options.mr_options?.find((o) => o.mr_iid === iidA)?.prompt_on_review_requested;
+      })
+      .toBe(true);
+    const afterReviewOptions = await apiClient.getTaskMRAutomationOptions(taskId);
+    expect(
+      afterReviewOptions.mr_options?.find((o) => o.mr_iid === iidB)?.prompt_on_review_requested,
+    ).toBe(false);
+
+    // AC1 (reload): !A stays on, !B stays off after a fresh mount.
+    await testPage.reload();
+    await expect(testPage.getByTestId("mr-topbar-button")).toBeVisible({ timeout: 15_000 });
+    await testPage.getByTestId("mr-topbar-button").click();
+    const reloadedControlsA = testPage.locator(
+      `[data-testid="mr-automation-controls"][data-mr-iid="${iidA}"]`,
+    );
+    const reloadedControlsB = testPage.locator(
+      `[data-testid="mr-automation-controls"][data-mr-iid="${iidB}"]`,
+    );
+    await expect(
+      reloadedControlsA.getByRole("switch", { name: "Auto-fix CI and address comments" }),
+    ).toBeChecked();
+    await expect(
+      reloadedControlsA.getByRole("switch", { name: "Auto-merge when ready" }),
+    ).toBeChecked();
+    await expect(
+      reloadedControlsB.getByRole("switch", { name: "Auto-fix CI and address comments" }),
+    ).not.toBeChecked();
+    await expect(
+      reloadedControlsB.getByRole("switch", { name: "Auto-merge when ready" }),
     ).not.toBeChecked();
   });
 });

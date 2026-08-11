@@ -46,6 +46,23 @@ export async function seedGitLabReview(
   host = GITLAB_HOST,
 ): Promise<void> {
   await apiClient.configureGitLab(workspaceId, host);
+  await seedGitLabMRData(apiClient, workspaceId, iid, title, host);
+}
+
+// The MR-data half of seedGitLabReview, without the `configureGitLab` call.
+// Configuring the connection invalidates and rebuilds the workspace's cached
+// GitLab client (SetConfigForWorkspace -> invalidateWorkspaceClient), which
+// discards the in-memory MockClient's previously seeded state — so seeding
+// two-or-more MRs on one workspace must configure once, then call this for
+// each MR, rather than calling seedGitLabReview (and its configureGitLab)
+// per MR.
+export async function seedGitLabMRData(
+  apiClient: ApiClient,
+  workspaceId: string,
+  iid: number,
+  title: string,
+  host = GITLAB_HOST,
+): Promise<void> {
   const mr = gitLabMR(iid, title, {
     url: `${host}/${GITLAB_PROJECT}/-/merge_requests/${iid}`,
     web_url: `${host}/${GITLAB_PROJECT}/-/merge_requests/${iid}`,
