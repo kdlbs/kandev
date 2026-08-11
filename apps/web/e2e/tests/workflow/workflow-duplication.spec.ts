@@ -24,7 +24,9 @@ test.describe("workflow duplication", () => {
     await expect(settings.duplicateWorkflowButton(sourceCard)).toBeEnabled();
 
     await settings.duplicateWorkflow(sourceCard);
-    const copyCard = await settings.findWorkflowCard("Duplication Source (copy)");
+    const copyCard = await settings.findWorkflowCard("Duplication Source (copy)", {
+      waitForName: true,
+    });
     await expect(copyCard).toBeVisible();
     await expect(copyCard.getByTestId("workflow-description-input")).toHaveValue(
       "Copied workflow description",
@@ -76,7 +78,9 @@ test.describe("workflow duplication", () => {
     expect(copiedSteps.steps.map((step) => step.id)).not.toContain(sourceTask?.workflow_step_id);
 
     await testPage.reload();
-    const reloadedCopy = await settings.findWorkflowCard("Duplication Source (copy)");
+    const reloadedCopy = await settings.findWorkflowCard("Duplication Source (copy)", {
+      waitForName: true,
+    });
     await expect(reloadedCopy).toBeVisible();
     await expect(reloadedCopy.getByTestId("workflow-description-input")).toHaveValue(
       "Copied workflow description",

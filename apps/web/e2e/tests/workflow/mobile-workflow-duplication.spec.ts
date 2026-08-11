@@ -30,7 +30,9 @@ test.describe("mobile: workflow duplication", () => {
     expect(duplicateBox!.height).toBeGreaterThanOrEqual(44);
 
     await settings.duplicateWorkflow(sourceCard, true);
-    const copyCard = await settings.findWorkflowCard("Mobile Duplication Source (copy)");
+    const copyCard = await settings.findWorkflowCard("Mobile Duplication Source (copy)", {
+      waitForName: true,
+    });
     await expect(copyCard).toBeVisible();
     await expect(settings.floatingSave).toBeVisible();
     await assertNoDocumentHorizontalOverflow(testPage);
@@ -40,7 +42,9 @@ test.describe("mobile: workflow duplication", () => {
 
     await settings.saveChanges(true);
     await testPage.reload();
-    const reloadedCopy = await settings.findWorkflowCard("Mobile Duplication Source (copy)");
+    const reloadedCopy = await settings.findWorkflowCard("Mobile Duplication Source (copy)", {
+      waitForName: true,
+    });
     await expect(reloadedCopy).toBeVisible();
 
     const afterSave = await apiClient.listWorkflows(seedData.workspaceId);
