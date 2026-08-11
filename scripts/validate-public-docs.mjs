@@ -658,12 +658,12 @@ async function collectSettingsRoutes(root) {
     path.join(root, "apps/web/src/settings-routes.tsx"),
     "utf8",
   );
-  const routeTable = source.match(
-    /const SETTINGS_ROUTES[\s\S]*?\n};\s*\n\s*export function SettingsRoutes/,
-  )?.[0];
-  if (!routeTable) {
+  const tableStart = source.indexOf("const SETTINGS_ROUTES");
+  const tableEnd = tableStart >= 0 ? source.indexOf("\n};", tableStart) : -1;
+  if (tableStart < 0 || tableEnd < 0) {
     throw new Error("could not locate SETTINGS_ROUTES in settings-routes.tsx");
   }
+  const routeTable = source.slice(tableStart, tableEnd + 3);
   return new Set(
     [...routeTable.matchAll(/^\s*"(\/settings(?:\/[^"]*)?)":/gm)].map(
       (match) => match[1],
