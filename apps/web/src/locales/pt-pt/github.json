@@ -137,7 +137,6 @@
   "defaultQueriesSaved": "Consultas pré-definidas guardadas",
   "defaultRepository": "Repositório pré-definido",
   "delete": "Eliminar",
-  "deleteSavedQuery": "Eliminar a consulta guardada",
   "deletedTasks_one": "{{count}} tarefa eliminada",
   "deletedTasks_other": "{{count}} tarefas eliminadas",
   "description": "Descrição",

@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback } from "react";
 import { IconBookmark, IconChevronDown, IconDeviceFloppy, IconX } from "@tabler/icons-react";
 import type { Icon } from "@tabler/icons-react";
 import {
@@ -12,6 +13,7 @@ import {
 import { cn } from "@/lib/utils";
 import { IntegrationIcon, type IntegrationIconName } from "./integration-icon";
 import { useTranslation } from "react-i18next";
+import { SavedQueryDefaultDropdownItem } from "./saved-query-default-button";
 
 /**
  * Shared, domain-agnostic scope bar for the integration dashboards (/github,
@@ -41,6 +43,7 @@ export type ScopeSavedPreset<K extends string> = {
   id: string;
   kind: K;
   label: string;
+  isDefault?: boolean;
 };
 
 const PILL_BASE =
@@ -118,6 +121,8 @@ function SavedMenu<K extends string>({
   onDeleteSaved,
   canSaveCurrent,
   onSaveCurrent,
+  onToggleSavedDefault,
+  defaultMutationPendingId,
 }: {
   testId: string;
   selected: ScopeSelection<K>;
@@ -126,8 +131,11 @@ function SavedMenu<K extends string>({
   onDeleteSaved: (id: string) => void;
   canSaveCurrent: boolean;
   onSaveCurrent: () => void;
+  onToggleSavedDefault?: (id: string) => void;
+  defaultMutationPendingId: string | null;
 }) {
   const { t } = useTranslation();
+  const defaultMutationPending = defaultMutationPendingId !== null;
   const activeSaved = selected.source === "saved";
   const activeLabel = activeSaved ? saved.find((s) => s.id === selected.id)?.label : null;
   return (
@@ -149,30 +157,47 @@ function SavedMenu<K extends string>({
         {saved.length === 0 ? (
           <DropdownMenuItem disabled>{t("integrations:noSavedQueriesYet")}</DropdownMenuItem>
         ) : (
-          saved.map((s) => (
-            <DropdownMenuItem
-              key={s.id}
-              onSelect={() => onSelect({ kind: s.kind, source: "saved", id: s.id })}
-              className="group/saved cursor-pointer gap-2"
-            >
-              <IconBookmark className="h-3.5 w-3.5 shrink-0" />
-              <span className="flex-1 truncate">{s.label}</span>
-              <button
-                type="button"
-                // Stop the pointerdown so Radix doesn't treat the delete click
-                // as a select of the (about-to-be-deleted) saved query.
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDeleteSaved(s.id);
-                }}
-                className="pointer-events-none cursor-pointer text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/saved:pointer-events-auto group-hover/saved:opacity-100"
-                title={t("integrations:deleteSavedQuery")}
-              >
-                <IconX className="h-3.5 w-3.5" />
-              </button>
-            </DropdownMenuItem>
-          ))
+          saved.map((s) => {
+            const deleteLabel = t("integrations:deleteSavedQueryNamed", { label: s.label });
+            const accessibleDeleteLabel = defaultMutationPending
+              ? t("integrations:savedQueryDefaultUpdateInProgress", { action: deleteLabel })
+              : deleteLabel;
+            return (
+              <div key={s.id} role="none" className="group/saved flex items-center gap-0.5">
+                <DropdownMenuItem
+                  onSelect={() => onSelect({ kind: s.kind, source: "saved", id: s.id })}
+                  className="min-w-0 flex-1 cursor-pointer gap-2"
+                >
+                  <IconBookmark className="h-3.5 w-3.5 shrink-0" />
+                  <span className="flex-1 truncate">{s.label}</span>
+                </DropdownMenuItem>
+                {onToggleSavedDefault && (
+                  <SavedQueryDefaultDropdownItem
+                    label={s.label}
+                    isDefault={s.isDefault === true}
+                    disabled={defaultMutationPending}
+                    pending={defaultMutationPendingId === s.id}
+                    testId={`saved-query-default-${s.id}`}
+                    onToggle={() => onToggleSavedDefault(s.id)}
+                  />
+                )}
+                {/* A peer Radix item is intentional: arrow navigation reaches delete,
+                  and focus opacity reveals it without pointer hover. */}
+                <DropdownMenuItem
+                  disabled={defaultMutationPending}
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    onDeleteSaved(s.id);
+                  }}
+                  className="h-7 min-h-7 w-7 shrink-0 cursor-pointer justify-center p-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus:opacity-100 group-hover/saved:opacity-100 data-[disabled]:cursor-wait data-[disabled]:opacity-50 group-hover/saved:data-[disabled]:opacity-50"
+                  title={accessibleDeleteLabel}
+                  aria-label={accessibleDeleteLabel}
+                >
+                  <IconX className="h-3.5 w-3.5" />
+                </DropdownMenuItem>
+              </div>
+            );
+          })
         )}
         <DropdownMenuSeparator />
         <DropdownMenuItem
@@ -188,6 +213,17 @@ function SavedMenu<K extends string>({
   );
 }
 
+type SavedDefaultActionProps =
+  | {
+      /** Emits only the stable id; domain wrappers own richer saved-query data. */
+      onToggleSavedDefault: (id: string) => void;
+      defaultMutationPendingId: string | null;
+    }
+  | {
+      onToggleSavedDefault?: never;
+      defaultMutationPendingId?: never;
+    };
+
 export type IntegrationScopeBarProps<K extends string> = {
   className?: string;
   testId: string;
@@ -195,12 +231,14 @@ export type IntegrationScopeBarProps<K extends string> = {
   kinds: ReadonlyArray<{ value: K; label: string }>;
   selected: ScopeSelection<K>;
   onSelect: (s: ScopeSelection<K>) => void;
+  /** Overrides the default first-preset selection when the active kind changes. */
+  onKindChange?: (kind: K) => void;
   presetsByKind: (kind: K) => ScopePreset[];
   savedPresets: ScopeSavedPreset<K>[];
   onDeleteSaved: (id: string) => void;
   canSaveCurrent: boolean;
   onSaveCurrent: () => void;
-};
+} & SavedDefaultActionProps;
 
 export function IntegrationScopeBar<K extends string>({
   className,
@@ -209,20 +247,31 @@ export function IntegrationScopeBar<K extends string>({
   kinds,
   selected,
   onSelect,
+  onKindChange,
   presetsByKind,
   savedPresets,
   onDeleteSaved,
   canSaveCurrent,
   onSaveCurrent,
+  onToggleSavedDefault,
+  defaultMutationPendingId = null,
 }: IntegrationScopeBarProps<K>) {
   const presets = presetsByKind(selected.kind);
   const saved = savedPresets.filter((p) => p.kind === selected.kind);
   const inbox = presets.filter((p) => p.group === "inbox");
   const created = presets.filter((p) => p.group === "created");
 
-  const onKindChange = (kind: K) => {
-    onSelect({ kind, source: "preset", id: presetsByKind(kind)[0]?.value ?? "" });
-  };
+  const handleKindChange = useCallback(
+    (kind: K) => {
+      if (kind === selected.kind) return;
+      if (onKindChange) {
+        onKindChange(kind);
+        return;
+      }
+      onSelect({ kind, source: "preset", id: presetsByKind(kind)[0]?.value ?? "" });
+    },
+    [onKindChange, onSelect, presetsByKind, selected.kind],
+  );
 
   const renderPill = (p: ScopePreset) => (
     <PresetPill
@@ -240,7 +289,7 @@ export function IntegrationScopeBar<K extends string>({
       className={cn("flex items-center gap-1.5 overflow-x-auto px-4 py-2 sm:px-6", className)}
       data-testid={testId}
     >
-      <KindSegment kinds={kinds} active={selected.kind} onChange={onKindChange} />
+      <KindSegment kinds={kinds} active={selected.kind} onChange={handleKindChange} />
       <Divider />
       {inbox.map(renderPill)}
       {inbox.length > 0 && created.length > 0 && <Divider />}
@@ -254,6 +303,8 @@ export function IntegrationScopeBar<K extends string>({
           onDeleteSaved={onDeleteSaved}
           canSaveCurrent={canSaveCurrent}
           onSaveCurrent={onSaveCurrent}
+          onToggleSavedDefault={onToggleSavedDefault}
+          defaultMutationPendingId={defaultMutationPendingId}
         />
       </div>
     </div>
