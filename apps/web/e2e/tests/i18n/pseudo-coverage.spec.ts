@@ -272,6 +272,10 @@ const SCREENS: Screen[] = [
     name: "settings — task behavior",
     url: "/settings/preferences/task-behavior",
     anchor: "[data-testid=archive-confirmation-card]",
+    // Voice Mode reuses the shared keyboard shortcut registry. Its persisted
+    // shortcut label and rendered key chord are intentionally ASCII values,
+    // not translatable Task Behavior copy.
+    allow: ["Voice Input", "Ctrl+Shift+M"],
   },
   {
     name: "settings — plugins",
