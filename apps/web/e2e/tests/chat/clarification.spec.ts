@@ -111,16 +111,25 @@ test.describe("Clarification flow", () => {
     );
     if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
-    // The mock agent reaches the clarification call asynchronously. Wait for
-    // the owning session to park before opening the page, then explicitly
-    // establish the Review state that the answer should move it out of.
-    await waitForSessionState(apiClient, {
-      taskId: task.id,
-      sessionId: task.session_id,
-      expectedState: "WAITING_FOR_INPUT",
-      message: "clarification session must park before the Review-state transition",
-      timeout: 30_000,
-    });
+    // The primary MCP path can keep the session RUNNING while the durable
+    // clarification request is already available. Wait for that request—the
+    // actual UI precondition—before establishing the Review state.
+    await expect
+      .poll(
+        async () => {
+          const { messages } = await apiClient.listSessionMessages(task.session_id);
+          return messages.some(
+            (message) =>
+              message.type === "clarification_request" &&
+              (!message.metadata?.status || message.metadata.status === "pending"),
+          );
+        },
+        {
+          timeout: 30_000,
+          message: "clarification request must be durable before the Review-state transition",
+        },
+      )
+      .toBe(true);
     await apiClient.updateTaskState(task.id, "REVIEW");
     await expect.poll(async () => (await apiClient.getTask(task.id)).state).toBe("REVIEW");
 
