@@ -678,10 +678,12 @@ read-only contribution again, this time for the sidebar task tree and
 for `task-card-tags`, `task-row-tags`, and menu group `"primary"` together to
 keep it visible everywhere the same task appears, not just on the board.
 Both `visible(context)` and `run(context)` receive the actual `presentation`:
-`"desktop"` on the desktop kanban, `"mobile"` on the phone kanban, and always
-`"desktop"` from the sidebar menu (there is no separate mobile sidebar menu
-surface). Use it when an action needs to choose responsive behavior; the host
-supplies it through the card/row composition.
+`"desktop"` on the desktop kanban and `"mobile"` on the phone kanban. The
+sidebar task row's menu reports `"mobile"` too once the viewport crosses the
+768px boundary where the desktop sidebar gives way to the phone session
+task-switcher sheet, since one row component backs both. Use it when an action
+needs to choose responsive behavior; the host supplies it through the card/row
+composition.
 
 ```js
 registry.registerTaskMenuAction({

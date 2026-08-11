@@ -472,7 +472,11 @@ interface PluginTaskMenuContext {
   taskId: string;
   taskTitle: string;
   workflowStepId: string | null;
-  presentation: PluginPresentation; // the actual kanban layout: desktop or mobile
+  // The actual layout the menu was opened from: desktop or mobile. On the
+  // kanban card that is the board's own layout; on the sidebar task row it
+  // follows the 768px boundary where the phone session task-switcher sheet
+  // replaces the desktop sidebar.
+  presentation: PluginPresentation;
 }
 
 interface TaskMenuActionRegistration {

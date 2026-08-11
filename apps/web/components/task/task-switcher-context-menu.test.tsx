@@ -59,9 +59,17 @@ function registerPrimaryAction(
   });
 }
 
+const DEFAULT_VIEWPORT_WIDTH = window.innerWidth;
+
+/** `useResponsiveBreakpoint` reads `window.innerWidth` on every snapshot. */
+function setViewportWidth(width: number) {
+  Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: width });
+}
+
 afterEach(() => {
   cleanup();
   pluginRegistry.unregisterPlugin(PLUGIN_ID);
+  setViewportWidth(DEFAULT_VIEWPORT_WIDTH);
 });
 
 describe("TaskItemWithContextMenu — plugin 'primary' menu actions", () => {
@@ -138,6 +146,22 @@ describe("TaskItemWithContextMenu — plugin 'primary' menu actions", () => {
       workflowStepId: TASK.workflowStepId,
       presentation: "desktop",
     });
+  });
+
+  it('reports presentation "mobile" when this row renders in the phone task-switcher sheet', async () => {
+    const run = vi.fn().mockResolvedValue(undefined);
+    registerPrimaryAction({ run });
+    // Same component, same menu — the phone sheet swaps in for the sidebar at
+    // useResponsiveBreakpoint's 768px mobile boundary, so the viewport is what
+    // tells the plugin which surface it was opened from.
+    setViewportWidth(500);
+
+    renderMenu({ onLinkPullRequest: vi.fn() });
+    fireEvent.contextMenu(screen.getByText(TASK.title));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Quick tag" }));
+
+    await Promise.resolve();
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ presentation: "mobile" }));
   });
 });
 

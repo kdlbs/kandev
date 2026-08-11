@@ -27,6 +27,7 @@ import { KanbanCardContextMenuItems } from "@/components/kanban-card-menu-items"
 import { buildPrimaryPluginEntries } from "@/components/plugins/task-menu-actions";
 import type { PluginTaskMenuContext } from "@/lib/plugins/types";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { TaskColorMenu } from "./task-switcher-color-menu";
 import { TaskLinkMenu } from "./task-switcher-link-menu";
 import {
@@ -298,6 +299,13 @@ function TaskContextMenuItems(props: TaskContextMenuItemsProps) {
  * appears in both surfaces. `PluginTaskMenuContext.workspaceId` is typed
  * non-nullable, so with no active workspace this renders nothing rather than
  * passing an empty-string placeholder.
+ *
+ * `presentation` is derived from the viewport rather than passed in, because
+ * this one row component backs both surfaces that render it: the desktop
+ * sidebar and the phone session task-switcher sheet, which swap at the very
+ * `useResponsiveBreakpoint` mobile boundary (768px) the sidebar itself uses.
+ * The kanban card threads the value as a prop instead only because its mobile
+ * board is a separate component tree.
  */
 function TaskPluginPrimaryMenuItems({
   task,
@@ -307,6 +315,7 @@ function TaskPluginPrimaryMenuItems({
   disabled?: boolean;
 }) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const { isMobile } = useResponsiveBreakpoint();
   if (!workspaceId) return null;
 
   const context: PluginTaskMenuContext = {
@@ -314,7 +323,7 @@ function TaskPluginPrimaryMenuItems({
     taskId: task.id,
     taskTitle: task.title,
     workflowStepId: task.workflowStepId ?? null,
-    presentation: "desktop",
+    presentation: isMobile ? "mobile" : "desktop",
   };
   return <KanbanCardContextMenuItems entries={buildPrimaryPluginEntries({ disabled, context })} />;
 }

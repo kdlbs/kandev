@@ -639,7 +639,10 @@ Mattermost-webapp model), not iframes. The full contract lives in
   row's context menu (immediately before "Link", which has no "Move
   to"/"Send to workflow" submenu ahead of it there); visibility filtering,
   registration order, and `run()`/error handling are identical across both
-  surfaces, and the sidebar menu passes `presentation: "desktop"`.
+  surfaces. The sidebar menu derives `presentation` from the viewport
+  (`"mobile"` below the 768px boundary where the phone session task-switcher
+  sheet replaces the desktop sidebar, `"desktop"` above it), since the same
+  row component backs both surfaces.
   `registerComponent("task-card-indicators",
   C)` renders `C` beside the PR status icon on every kanban card, receiving
   `{ taskId, workspaceId, workflowStepId }` as `slotProps`.
