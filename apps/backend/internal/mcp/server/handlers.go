@@ -366,6 +366,25 @@ func (s *Server) getTaskMRAutomationHandler() server.ToolHandlerFunc {
 	}
 }
 
+// copyMRIdentityArgs copies the optional repository_id/project_path/mr_iid
+// triple that scopes a patch to one linked MR. repository_id is frequently
+// an empty string on self-managed hosts without a numeric project ID (R6),
+// so presence in args — not non-emptiness — is what marks it as sent;
+// copyOptionalStringArg's "empty means absent" rule would silently turn a
+// complete-but-empty identity into a partial one and get it rejected.
+func copyMRIdentityArgs(payload, args map[string]interface{}) {
+	for _, key := range []string{"repository_id", "project_path"} {
+		if value, ok := args[key]; ok {
+			if s, ok := value.(string); ok {
+				payload[key] = s
+			}
+		}
+	}
+	if value, ok := args["mr_iid"].(float64); ok {
+		payload["mr_iid"] = int(value)
+	}
+}
+
 func (s *Server) updateTaskMRAutomationHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		payload := map[string]interface{}{"task_id": s.taskID}
@@ -373,12 +392,22 @@ func (s *Server) updateTaskMRAutomationHandler() server.ToolHandlerFunc {
 		if hasLifecyclePromptOverrideArgument(args) {
 			return mcp.NewToolResultError("lifecycle prompt overrides are not supported"), nil
 		}
-		for _, key := range []string{"prompt_on_review_requested", "prompt_on_merged", "prompt_on_closed"} {
+		copyMRIdentityArgs(payload, args)
+		fieldCount := 0
+		for _, key := range []string{
+			"auto_fix_enabled", "auto_merge_enabled",
+			"prompt_on_review_requested", "prompt_on_merged", "prompt_on_closed",
+		} {
 			if value, ok := args[key].(bool); ok {
 				payload[key] = value
+				fieldCount++
 			}
 		}
-		if len(payload) == 1 {
+		if value, ok := args["auto_fix_prompt_override"].(string); ok {
+			payload["auto_fix_prompt_override"] = value
+			fieldCount++
+		}
+		if fieldCount == 0 {
 			return mcp.NewToolResultError("at least one MR automation option is required"), nil
 		}
 		var result map[string]interface{}

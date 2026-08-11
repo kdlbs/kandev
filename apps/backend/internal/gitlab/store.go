@@ -223,6 +223,11 @@ func (s *Store) createTables() error {
 	if err := s.migrateMRAutomationAutomationColumns(); err != nil {
 		return err
 	}
+	// Must follow migrateMRAutomationAutomationColumns, which adds the
+	// mr_scope_migrated_at column this migration is guarded by.
+	if err := s.migrateTaskMROptionsToMRScope(); err != nil {
+		return err
+	}
 	if err := s.migrateConfigRevision(); err != nil {
 		return err
 	}

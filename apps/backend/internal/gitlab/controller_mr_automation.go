@@ -74,6 +74,12 @@ func (c *Controller) httpPatchTaskMRAutomation(ctx *gin.Context) {
 		if writeMRAutomationTaskNotFound(ctx, err) {
 			return
 		}
+		// A patch naming an MR that isn't linked (or naming one only
+		// partially) is a caller mistake, not a server fault.
+		if errors.Is(err, ErrTaskMRNotLinked) {
+			ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: err.Error()})
+			return
+		}
 		c.logger.Error("update task MR automation failed", zap.String("task_id", ctx.Param("taskID")), zap.Error(err))
 		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: "failed to update MR automation options"})
 		return
@@ -150,6 +156,12 @@ func applyMRAutomationPatchField(patch *TaskMRAutomationPatch, key string, value
 		return decodeMRAutomationSwitch(value, &patch.PromptOnMerged)
 	case "prompt_on_closed":
 		return decodeMRAutomationSwitch(value, &patch.PromptOnClosed)
+	case "repository_id":
+		return json.Unmarshal(value, &patch.RepositoryID)
+	case "project_path":
+		return json.Unmarshal(value, &patch.ProjectPath)
+	case "mr_iid":
+		return json.Unmarshal(value, &patch.MRIID)
 	case "review_prompt_override", "merged_prompt_override", "closed_prompt_override":
 		return errLifecyclePromptOverridesUnsupported
 	default:

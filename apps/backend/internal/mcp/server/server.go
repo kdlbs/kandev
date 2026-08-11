@@ -1136,7 +1136,17 @@ func (s *Server) registerMRAutomationTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("update_task_mr_automation_kandev",
-			mcp.WithDescription("Update this task's GitLab merge request lifecycle notification switches."),
+			mcp.WithDescription("Update this task's GitLab merge request automation options (auto-fix, auto-merge, "+
+				"and lifecycle notifications). The five switches are per merge request: pass repository_id, "+
+				"project_path and mr_iid together to target one linked MR, or omit all three to apply them to "+
+				"every MR linked to this task. auto_fix_prompt_override applies to every linked MR regardless "+
+				"of MR identity."),
+			mcp.WithString("repository_id", mcp.Description("Repository ID of the linked MR to target (omit to target every linked MR)")),
+			mcp.WithString("project_path", mcp.Description("Project path of the linked MR to target, e.g. group/project")),
+			mcp.WithNumber("mr_iid", mcp.Description("IID of the linked MR to target")),
+			mcp.WithBoolean("auto_fix_enabled", mcp.Description("Enable or disable auto-fix when the linked MR's pipeline fails")),
+			mcp.WithBoolean("auto_merge_enabled", mcp.Description("Enable or disable auto-merge when the linked MR is ready")),
+			mcp.WithString("auto_fix_prompt_override", mcp.Description("Custom prompt for auto-fix (empty string clears the override)")),
 			mcp.WithBoolean("prompt_on_review_requested", mcp.Description("Prompt this task's agent when a review is requested for the authenticated user")),
 			mcp.WithBoolean("prompt_on_merged", mcp.Description("Prompt this task's agent once when the linked MR becomes merged")),
 			mcp.WithBoolean("prompt_on_closed", mcp.Description("Prompt this task's agent once when the linked MR becomes closed without merge")),
