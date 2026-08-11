@@ -289,7 +289,7 @@ test.describe("Workspace GitHub App onboarding", () => {
     await testPage.evaluate((path) => {
       window.history.pushState({}, "", path);
       window.dispatchEvent(new Event("kandev:navigation"));
-    }, `/settings/workspace/${otherWorkspace.id}/integrations/github`);
+    }, `/settings/workspaces/${otherWorkspace.id}/integrations/github`);
     await expect(settings.automation().getByText("home-user", { exact: true })).toBeVisible({
       timeout: 15_000,
     });

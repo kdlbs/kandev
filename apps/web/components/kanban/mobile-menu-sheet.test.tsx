@@ -31,17 +31,16 @@ vi.mock("@/lib/routing/client-router", () => ({
 vi.mock("@/components/app-sidebar/app-sidebar-workspace-picker", () => ({
   AppSidebarWorkspacePicker: () => null,
 }));
-vi.mock("@/components/integrations/integrations-menu", () => ({
-  MobileIntegrationsSection: () => null,
-}));
-vi.mock("@/components/plugins/mobile-plugin-nav-section", () => ({
-  MobilePluginNavSection: () => null,
-}));
-vi.mock("./mobile-menu-utility-actions", () => ({
-  MobileUtilityActions: () => null,
-}));
-vi.mock("@/components/improve-kandev-dialog", () => ({
-  ImproveKandevDialog: () => null,
+// Plugins, integrations and the utility tail now come from the one shared nav
+// block, which reaches the store and the health poller — out of scope here.
+vi.mock("@/components/navigation/app-nav-sections", () => ({
+  AppNavSections: () => null,
+  useAppNavDialogs: () => ({
+    showHealthRow: false,
+    openImproveKandev: vi.fn(),
+    openHealthDialog: vi.fn(),
+    dialogs: null,
+  }),
 }));
 vi.mock("./task-search-input", () => ({
   TaskSearchInput: () => null,
@@ -88,16 +87,7 @@ function defaultDisplaySettings() {
 }
 
 function renderSheet(props: Partial<ComponentProps<typeof MobileMenuSheet>> = {}) {
-  return render(
-    <MobileMenuSheet
-      open
-      onOpenChange={vi.fn()}
-      currentPage="kanban"
-      showHealthIndicator={false}
-      onOpenHealthDialog={vi.fn()}
-      {...props}
-    />,
-  );
+  return render(<MobileMenuSheet open onOpenChange={vi.fn()} currentPage="kanban" {...props} />);
 }
 
 beforeEach(() => {

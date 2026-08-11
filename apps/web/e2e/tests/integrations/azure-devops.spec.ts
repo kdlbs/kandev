@@ -163,7 +163,7 @@ test("connects and browses Azure work items, PRs, and feedback", async ({
 }) => {
   await apiClient.mockAzureDevOpsSeed(MOCK_STATE);
   await testPage.goto(
-    `/settings/workspace/${encodeURIComponent(seedData.workspaceId)}/integrations/azure-devops`,
+    `/settings/workspaces/${encodeURIComponent(seedData.workspaceId)}/integrations/azure-devops`,
   );
 
   const projectInput = testPage.locator("#azure-devops-project");
@@ -277,7 +277,7 @@ test("connects and browses Azure work items, PRs, and feedback", async ({
   await expect(testPage.getByTestId("azure-devops-feedback-detail")).toContainText("Build");
 
   await testPage.goto(
-    `/settings/workspace/${encodeURIComponent(seedData.workspaceId)}/integrations/azure-devops`,
+    `/settings/workspaces/${encodeURIComponent(seedData.workspaceId)}/integrations/azure-devops`,
   );
   await expect(testPage.getByTestId("azure-devops-watch-settings")).toBeVisible();
   await testPage.getByTestId("azure-add-work-item-watch").click();

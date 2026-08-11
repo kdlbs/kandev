@@ -111,32 +111,15 @@ test.describe("Clarification flow", () => {
     );
     if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
-    // The primary MCP path can keep the session RUNNING while the durable
-    // clarification request is already available. Wait for that request—the
-    // actual UI precondition—before establishing the Review state.
-    await expect
-      .poll(
-        async () => {
-          const { messages } = await apiClient.listSessionMessages(task.session_id);
-          return messages.some(
-            (message) =>
-              message.type === "clarification_request" &&
-              (!message.metadata?.status || message.metadata.status === "pending"),
-          );
-        },
-        {
-          timeout: 30_000,
-          message: "clarification request must be durable before the Review-state transition",
-        },
-      )
-      .toBe(true);
-    await apiClient.updateTaskState(task.id, "REVIEW");
-    await expect.poll(async () => (await apiClient.getTask(task.id)).state).toBe("REVIEW");
-
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    // The pending overlay is durable while the session may legitimately stay
+    // RUNNING when the primary MCP response path remains connected.
+    await apiClient.updateTaskState(task.id, "REVIEW");
+    await expect.poll(async () => (await apiClient.getTask(task.id)).state).toBe("REVIEW");
 
     const filters = new SidebarFilterPopoverPage(testPage);
     await filters.open();

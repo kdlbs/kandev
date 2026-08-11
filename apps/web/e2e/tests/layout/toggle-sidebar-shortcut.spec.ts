@@ -205,7 +205,8 @@ test.describe("Toggle sidebar shortcut (global)", () => {
 
   test("toggles the AppSidebar on a Settings page", async ({ testPage, apiClient, seedData }) => {
     await bindToggleSidebar(apiClient, seedData);
-    await testPage.goto("/settings/general");
+    // A leaf, not the `/settings/preferences` prefix, which only redirects here.
+    await testPage.goto("/settings/preferences/appearance");
     await expectShortcutTogglesSidebar(testPage, testPage.getByTestId("app-sidebar"));
   });
 

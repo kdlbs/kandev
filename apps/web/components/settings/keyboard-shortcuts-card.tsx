@@ -25,7 +25,7 @@ import {
   type ShortcutConflictGroup,
 } from "@/lib/keyboard/shortcut-conflicts";
 import { SettingsCard } from "./settings-card";
-import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/general";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 import { useTranslation } from "react-i18next";
 
 type ShortcutRecorderProps = {

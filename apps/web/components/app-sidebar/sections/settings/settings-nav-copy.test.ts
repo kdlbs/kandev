@@ -17,10 +17,16 @@ import sidebarCatalog from "@/src/locales/en/sidebar.json";
  * diff, kept.
  */
 const NAV_LABELS: Array<[key: string, english: string]> = [
+  ["settings:preferences", "Preferences"],
+  ["settings:workspacesAndAccess", "Workspaces & Access"],
+  ["settings:accessControl", "Access Control"],
+  ["settings:terminalAndEditors", "Terminal & Editors"],
+  ["settings:taskBehavior", "Task Behavior"],
+  ["system:navDataStorage", "Data & Logs"],
   ["common:prompts", "Prompts"],
   ["settings:voiceMode", "Voice Mode"],
   ["settings:utilityAgents", "Utility Agents"],
-  ["settings:secrets", "Secrets"],
+  ["settings:globalSecrets", "Global Secrets"],
   ["common:externalMcp", "External MCP"],
   ["common:plugins", "Plugins"],
   ["common:workspaces", "Workspaces"],
@@ -31,14 +37,16 @@ const NAV_LABELS: Array<[key: string, english: string]> = [
   ["common:executors", "Executors"],
   ["common:agents", "Agents"],
   ["common:settings", "Settings"],
-  ["sidebar:account", "Account"],
+  // No `sidebar:account`: the restructure folded those rows into the
+  // "Access Control" section, pinned above as `settings:accessControl`. The key
+  // and its label are gone, so pinning them here pinned nothing.
   ["sidebar:profileAndPassword", "Profile & Password"],
   ["sidebar:apiTokens", "API Tokens"],
 ];
 
 /**
  * Labels that also exist as a route page title, keyed by
- * `SEGMENT_LABEL_KEYS` in components/settings/settings-layout-client.tsx. The
+ * `SEGMENT_LABEL_KEYS` in components/settings/settings-breadcrumb-labels.ts. The
  * nav and the title are the same words for the same destination and the user
  * sees both at once (nav on the left, title above), so they must resolve
  * through ONE key. Two keys with identical English today is a translator's
@@ -51,7 +59,7 @@ const OWNED_BY_ANOTHER_NAMESPACE = [
   "Prompts",
   "Voice Mode",
   "Utility Agents",
-  "Secrets",
+  "Global Secrets",
   "External MCP",
   "Plugins",
   "Executors",
