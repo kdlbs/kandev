@@ -34,6 +34,7 @@ import (
 	workflowctrl "github.com/kandev/kandev/internal/workflow/controller"
 	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowsvc "github.com/kandev/kandev/internal/workflow/service"
+	"github.com/kandev/kandev/internal/workflow/signalmetrics"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -1921,6 +1922,8 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 	if errMsg, err := h.publishStepCompletionEvent(ctx, msg, req.TaskID, req.SessionID, task.WorkflowStepID, signal); errMsg != nil {
 		return errMsg, err
 	}
+
+	signalmetrics.RecordSignalReceived(signal.Source, session.AgentProfileID)
 
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"accepted":    true,

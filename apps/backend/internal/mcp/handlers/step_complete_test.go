@@ -3,6 +3,9 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"expvar"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +19,30 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
+
+// readSignalReceivedCounter sums every entry in the ADR 0015
+// workflow_step_completion_signal_received_total expvar map whose key has
+// the given prefix. A prefix match (rather than an exact-value read) keeps
+// the assertion robust against process-wide test pollution — other cases in
+// this file publish under the same "source=agent;agent_profile=" label
+// since none of them set TaskSession.AgentProfileID.
+func readSignalReceivedCounter(t *testing.T, prefix string) int64 {
+	t.Helper()
+	v := expvar.Get("workflow_step_completion_signal_received_total")
+	require.NotNil(t, v, "workflow_step_completion_signal_received_total must be published")
+	m, ok := v.(*expvar.Map)
+	require.True(t, ok, "workflow_step_completion_signal_received_total must be an expvar.Map")
+	var total int64
+	m.Do(func(kv expvar.KeyValue) {
+		if !strings.HasPrefix(kv.Key, prefix) {
+			return
+		}
+		n, err := strconv.ParseInt(kv.Value.String(), 10, 64)
+		require.NoError(t, err, "counter %q value not int: %s", kv.Key, kv.Value.String())
+		total += n
+	})
+	return total
+}
 
 // seedStepCompleteTarget seeds a workspace, task (with WorkflowStepID), and
 // session in the requested state. Used by every TestHandleStepComplete_* case
@@ -152,6 +179,9 @@ func TestHandleStepComplete_FirstCallAccepted(t *testing.T) {
 	bus := &mcpRecordingEventBus{}
 	h := newStepCompleteHandler(t, svc, repo, bus)
 
+	const counterPrefix = "source=agent;agent_profile="
+	before := readSignalReceivedCounter(t, counterPrefix)
+
 	msg := makeWSMessage(t, ws.ActionMCPStepComplete, map[string]interface{}{
 		"task_id":    "task-first",
 		"session_id": "session-first",
@@ -197,6 +227,9 @@ func TestHandleStepComplete_FirstCallAccepted(t *testing.T) {
 	assert.Equal(t, "implementation finished", data["summary"])
 	_, hasHandoff := data["handoff"]
 	assert.False(t, hasHandoff, "handoff is bag-only, not on the wire")
+
+	after := readSignalReceivedCounter(t, counterPrefix)
+	assert.Equal(t, int64(1), after-before, "accepted signal must increment workflow_step_completion_signal_received_total")
 }
 
 // TestHandleStepComplete_DedupRunningNoRepublish covers the
@@ -217,6 +250,9 @@ func TestHandleStepComplete_DedupRunningNoRepublish(t *testing.T) {
 	bus := &mcpRecordingEventBus{}
 	h := newStepCompleteHandler(t, svc, repo, bus)
 
+	const counterPrefix = "source=agent;agent_profile="
+	before := readSignalReceivedCounter(t, counterPrefix)
+
 	msg := makeWSMessage(t, ws.ActionMCPStepComplete, map[string]interface{}{
 		"task_id":    "task-dup",
 		"session_id": "session-dup",
@@ -233,6 +269,9 @@ func TestHandleStepComplete_DedupRunningNoRepublish(t *testing.T) {
 	assert.Equal(t, "already_signaled", payload["reason"])
 
 	assert.Empty(t, bus.events, "RUNNING dedup path must not re-publish (inline turn-end will consume the bag)")
+
+	after := readSignalReceivedCounter(t, counterPrefix)
+	assert.Equal(t, before, after, "already_signaled dedup must not increment workflow_step_completion_signal_received_total")
 }
 
 // TestHandleStepComplete_DedupWaitingRepublishes covers the retry-after-
