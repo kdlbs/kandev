@@ -430,7 +430,7 @@ These metrics are lightweight UI observability. Set alerts, retention, CPU/memor
 
 ## Status bar visibility
 
-The status surface is on by default for each user. Open **Settings > General > Appearance > Status Bar**, change **Show status bar**, and use the page's shared **Save changes** action. The portable preference applies immediately without restarting Kandev. It shows a 24 px bottom bar on desktop and fine-pointer tablets; phones use native Status controls and an inset Status drawer.
+The status surface is off by default for each user. Open **Settings > General > Appearance > Status Bar**, enable **Show status bar**, and use the page's shared **Save changes** action. The portable preference applies immediately without restarting Kandev. It shows a 24 px bottom bar on desktop and fine-pointer tablets; phones use native Status controls and an inset Status drawer.
 
 Turning it off removes ordinary status chrome. Host metrics remain controlled separately by **Show host metrics in status bar** and move to the existing top-bar fallback when enabled. A saved language-server **Status location** also falls back to the editor toolbar when the status surface is unavailable. Active WebSocket connectivity warnings remain reachable through the warning-only fallbacks described below.
 

@@ -71,13 +71,17 @@ describe("agent-generated task title defaults", () => {
 });
 
 describe("app status bar visibility hydration", () => {
-  it("defaults missing values to enabled and preserves explicit false", () => {
+  it("defaults missing values to disabled and preserves explicit values", () => {
     const defaults = buildCoreFields({}) as Record<string, unknown>;
+    const enabled = buildCoreFields({
+      app_status_bar_enabled: true,
+    } as unknown as Parameters<typeof buildCoreFields>[0]) as Record<string, unknown>;
     const disabled = buildCoreFields({
       app_status_bar_enabled: false,
     } as unknown as Parameters<typeof buildCoreFields>[0]) as Record<string, unknown>;
 
-    expect(defaults.appStatusBarEnabled).toBe(true);
+    expect(defaults.appStatusBarEnabled).toBe(false);
+    expect(enabled.appStatusBarEnabled).toBe(true);
     expect(disabled.appStatusBarEnabled).toBe(false);
   });
 

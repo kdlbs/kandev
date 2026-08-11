@@ -679,7 +679,7 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		SidebarViews:                    DefaultSidebarViews(),
 		SidebarActiveViewID:             DefaultSidebarViewID,
 		SidebarTaskPrefs:                normalizeSidebarTaskPrefs(models.SidebarTaskPrefs{}),
-		AppStatusBarEnabled:             true,
+		AppStatusBarEnabled:             false,
 		AppStatusBarOrder:               normalizeAppStatusBarOrder(models.AppStatusBarOrder{}),
 		VoiceMode:                       defaultVoiceModeSettings(),
 		KanbanHiddenStepIDs:             map[string][]string{},

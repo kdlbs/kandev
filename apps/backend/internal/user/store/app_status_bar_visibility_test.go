@@ -6,13 +6,14 @@ import (
 )
 
 func TestScanUserSettingsAppStatusBarVisibilityDefaultsAndRoundTrips(t *testing.T) {
-	t.Setenv("KANDEV_FEATURES_APP_STATUS_BAR", "false")
+	t.Setenv("KANDEV_FEATURES_APP_STATUS_BAR", "true")
 	tests := []struct {
 		name string
 		raw  string
 		want bool
 	}{
-		{name: "missing defaults to enabled", raw: `{}`, want: true},
+		{name: "missing defaults to disabled", raw: `{}`, want: false},
+		{name: "explicit true is preserved", raw: `{"app_status_bar_enabled":true}`, want: true},
 		{name: "explicit false is preserved", raw: `{"app_status_bar_enabled":false}`, want: false},
 	}
 

@@ -80,7 +80,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     terminalFontSize: null,
     changesPanelLayout: "tree",
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
-    appStatusBarEnabled: true,
+    appStatusBarEnabled: false,
     appStatusBarOrder: { leftItemIds: [], rightItemIds: [] },
     voiceMode: { ...DEFAULT_VOICE_MODE_STATE },
     hiddenWorkflowStepIds: {},

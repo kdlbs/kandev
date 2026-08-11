@@ -19,9 +19,9 @@ backend-owned portable settings, the new visibility ADR, and the existing
 
 ## TDD sequence
 
-1. Add failing backend tests for missing-value default true, explicit-false
-   round trip, PATCH omission versus false, event data, and boot mapping.
-2. Add failing frontend mapper/handler tests for default true, explicit false,
+1. Add failing backend tests for missing-value default false, explicit-true
+   round trip, PATCH omission versus explicit values, event data, and boot mapping.
+2. Add failing frontend mapper/handler tests for default false, explicit true,
    and omission preserving current state.
 3. Add the smallest model, DTO, service, storage, boot, HTTP type, state, and
    mapper changes that make those tests pass.
@@ -40,7 +40,7 @@ backend-owned portable settings, the new visibility ADR, and the existing
 - Apply an explicit value only when the pointer is non-nil. Publish
   `app_status_bar_enabled` in the complete `user.settings.updated` event.
 - In `apps/backend/internal/user/store/sqlite.go`:
-  - set `AppStatusBarEnabled: true` in `defaultUserSettings`;
+  - set `AppStatusBarEnabled: false` in `defaultUserSettings`;
   - include the field in JSON writes;
   - decode it as `*bool`;
   - overwrite the default only when the stored pointer is present.
@@ -50,7 +50,7 @@ backend-owned portable settings, the new visibility ADR, and the existing
   `apps/web/lib/types/http-user-settings.ts`.
 - Add `appStatusBarEnabled: boolean` to
   `apps/web/lib/state/slices/settings/types.ts`.
-- Initialize it to true and map it through the shared paths in
+- Initialize it to false and map it through the shared paths in
   `apps/web/lib/ssr/user-settings.ts`. The common mapper must preserve the
   current value for partial updates.
 - Update the existing user WebSocket handler and ensure-user-settings fixtures
@@ -80,8 +80,8 @@ No SQL migration or browser storage is allowed.
 ## Acceptance
 
 1. A new user, an old settings JSON object with no visibility field, and an
-   initial compatibility payload that omits it all resolve to true.
-2. Stored and PATCHed false remains false through repository read, DTO response,
+   initial compatibility payload that omits it all resolve to false.
+2. Stored and PATCHed true remains true through repository read, DTO response,
    boot state, frontend mapping, reload, and event mapping.
 3. An omitted PATCH field leaves the existing setting unchanged.
 4. A partial WebSocket payload without the field preserves the current
@@ -104,7 +104,8 @@ None. This task creates the portable contract consumed by Task 02.
 
 ## Risks
 
-- Decoding directly into `bool` cannot distinguish old JSON from explicit false.
+- A default that remains true in either mapper would enable the surface for old
+  rows that have no preference.
 - Defaulting independently inside several frontend consumers can make boot and
   live updates disagree. Use the shared mapper.
 - A complete event map can silently omit the new field even when HTTP works.

@@ -15,7 +15,7 @@ export async function captureAppStatusBarSettings(
 ): Promise<AppStatusBarSettingsBaseline> {
   const { settings } = await apiClient.getUserSettings();
   return {
-    enabled: settings.app_status_bar_enabled !== false,
+    enabled: settings.app_status_bar_enabled === true,
     order: settings.app_status_bar_order as AppStatusBarOrderApi | undefined,
   };
 }

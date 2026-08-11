@@ -50,21 +50,21 @@ describe("status bar visibility websocket sync", () => {
 
     expect(
       (store.getState().userSettings as unknown as Record<string, unknown>).appStatusBarEnabled,
-    ).toBe(true);
+    ).toBe(false);
 
     registerUsersHandlers(store)["user.settings.updated"]?.(
       userSettingsMessage({
-        app_status_bar_enabled: false,
+        app_status_bar_enabled: true,
       } as unknown as Partial<BackendMessageMap["user.settings.updated"]["payload"]>),
     );
     expect(
       (store.getState().userSettings as unknown as Record<string, unknown>).appStatusBarEnabled,
-    ).toBe(false);
+    ).toBe(true);
 
     registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
     expect(
       (store.getState().userSettings as unknown as Record<string, unknown>).appStatusBarEnabled,
-    ).toBe(false);
+    ).toBe(true);
   });
 });
 

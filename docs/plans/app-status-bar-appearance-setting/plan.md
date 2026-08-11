@@ -9,8 +9,8 @@ status: done
 
 ## Outcome
 
-Graduate the stable App status bar out of runtime feature flags. Make it visible
-by default and give each user a portable **Show status bar** preference under
+Graduate the stable App status bar out of runtime feature flags. Keep ordinary
+status chrome off by default and give each user a portable **Show status bar** preference under
 Settings > General > Appearance. A successful Appearance save changes the
 desktop/tablet bar or ordinary phone Status paths without restarting Kandev.
 
@@ -23,9 +23,9 @@ location preferences remain independent.
 - The wire field is the top-level user setting
   `app_status_bar_enabled: boolean`; frontend state uses
   `appStatusBarEnabled`.
-- Missing stored values and initial compatibility payloads default to `true`.
-  PATCH and partial-live-update omission preserve the current value, while
-  explicit `false` is durable.
+- Missing stored values and initial compatibility payloads default to `false`.
+  PATCH and partial-live-update omission preserve the current value, while an
+  explicit boolean is durable.
 - The former `features.appStatusBar` and
   `KANDEV_FEATURES_APP_STATUS_BAR` identities are retired, never reused, and not
   migrated into user settings. Unknown persisted runtime override rows remain
@@ -53,9 +53,9 @@ location preferences remain independent.
 - Add `AppStatusBarEnabled *bool` to PATCH DTO, controller/service request
   mapping, and basic settings application so omitted and explicit false remain
   distinct.
-- Set the canonical default to `true` in `defaultUserSettings`.
+- Set the canonical default to `false` in `defaultUserSettings`.
 - Decode the stored JSON through a `*bool` field and overlay it only when
-  present. This preserves explicit false while treating old rows as enabled.
+  present. This preserves explicit values while treating old rows as disabled.
 - Include `app_status_bar_enabled` in JSON persistence and the
   `user.settings.updated` event.
 - Add `appStatusBarEnabled` to the Go boot-state mapping.
@@ -83,10 +83,10 @@ schema migration.
 - Add optional `app_status_bar_enabled` fields to HTTP user-settings response
   and PATCH types.
 - Add `appStatusBarEnabled` to `UserSettingsState`, with a frontend placeholder
-  default of `true`.
+  default of `false`.
 - Extend the shared wire mapper so boot hydration, PATCH responses, and
   `user.settings.updated` all apply the field. An absent field preserves the
-  current mapped value; the initial current value is the default-true state.
+  current mapped value; the initial current value is the default-false state.
 - Keep backend defaults authoritative. Do not add localStorage, cookies, or a
   second compatibility mapper.
 
@@ -159,7 +159,7 @@ fixtures must stop mutating the frontend feature slice for this behavior.
 
 ### Backend unit and integration tests
 
-- Store tests prove old/missing JSON defaults true, explicit false survives a
+- Store tests prove old/missing JSON defaults false, explicit true survives a
   repository round trip, and encoding emits the complete field.
 - DTO tests prove response mapping plus PATCH omission versus explicit false.
 - Service tests prove apply semantics and exact event payload.
@@ -169,7 +169,7 @@ fixtures must stop mutating the frontend feature slice for this behavior.
 
 ### Frontend unit and component tests
 
-- Shared settings mapper tests prove default true, explicit false, and partial
+- Shared settings mapper tests prove default false, explicit true, and partial
   update preservation across boot and WebSocket paths.
 - Appearance tests prove the controlled switch's accessible copy, dirty state,
   discard, PATCH payload, and post-save store update.
@@ -209,7 +209,7 @@ Implementation updates these shipped-behavior pages in the same change:
 - `docs/public/agents-and-profiles.md`,
   `docs/public/developer-tools.md`, and
   `docs/public/sessions-and-review.md`: replace feature-gated wording with the
-  default-on user preference and responsive surface behavior.
+  default-off user preference and responsive surface behavior.
 
 No new public page or navigation entry is needed.
 
@@ -219,7 +219,7 @@ Execution is sequential in the primary conversation.
 
 | Wave | Task | Status | Gate |
 |---|---|---|---|
-| 1 | [01 portable visibility contract](task-01-portable-visibility-contract.md) | Done | Default-true backend/frontend setting round trips without changing live gates. |
+| 1 | [01 portable visibility contract](task-01-portable-visibility-contract.md) | Done | Default-false backend/frontend setting round trips without changing live gates. |
 | 2 | [02 Appearance control and surface gates](task-02-appearance-control-and-surface-gates.md) | Done | UI saves the portable preference and every surface consumes it. |
 | 3 | [03 retire runtime flag](task-03-retire-runtime-flag.md) | Done | Flag/config/profile identities are removed from active contracts and retired permanently. |
 | 4 | [04 E2E, public docs, and verification](task-04-e2e-public-docs-and-verification.md) | Done | Desktop/mobile persistence, fallbacks, docs, and final checks pass. |
@@ -261,17 +261,17 @@ same final tree.
 - Frontend typecheck, lint, i18n check, and i18n ratchet passed. The i18n check
   reported only its advisory real-locale parity backlog.
 - Public-doc tests passed: 58 tests; validation passed for 41 pages.
-- Production-build desktop App status bar E2E passed: 4 tests.
-- Desktop warning and agent-runtime fallback E2E passed: 4 tests.
+- Production-build desktop status bar, warning, agent-runtime fallback, and
+  resource-metrics E2E passed: 9 tests.
 - Mobile status bar, warning, and resource-metrics E2E passed: 4 tests.
+- Older status-surface consumers now opt in explicitly; their desktop suite
+  passed 16 tests and their mobile suite passed 29 tests.
 - `git diff --check` passed.
 
 ## Risks
 
-- A plain Go `bool` in the stored JSON decoder would collapse missing and
-  explicit false, accidentally re-enabling users who opted out.
-- A frontend fallback of false would preserve the old rollout behavior for old
-  rows and conflict with backend ownership.
+- A backend or frontend fallback that remains true would enable ordinary status
+  chrome for users who never opted in.
 - Updating only `AppStatusSurfaceProvider` would leave sidebar warnings,
   top-bar metrics, or LSP placement bound to a removed feature key.
 - Removing the runtime registration without retiring its identity would permit

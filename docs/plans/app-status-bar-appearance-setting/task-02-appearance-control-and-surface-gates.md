@@ -13,7 +13,7 @@ decision: docs/decisions/2026-08-11-user-owned-status-bar-visibility.md
 
 ## Inputs
 
-Task 01's default-true portable setting, the existing General Appearance shared
+Task 01's default-false portable setting, the existing General Appearance shared
 save coordinator, `SystemMetricsSettingsCard`, `AppStatusSurfaceProvider`, and
 the warning/LSP fallback contracts in the linked specs.
 
@@ -106,7 +106,7 @@ the warning/LSP fallback contracts in the linked specs.
 
 Tests must prove:
 
-1. Default true mounts the ordinary responsive status surface.
+1. Explicit true mounts the ordinary responsive status surface.
 2. False removes ordinary bar/drawer access.
 3. False plus an active connectivity issue mounts only warning fallback.
 4. Metrics and LSP fall back to their old non-bar locations without overwriting

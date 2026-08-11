@@ -87,7 +87,7 @@ Update:
 - `docs/public/agents-and-profiles.md`
 - `docs/public/developer-tools.md`
 - `docs/public/sessions-and-review.md`
-  - replace feature-gated wording with the default-on portable preference and
+  - replace feature-gated wording with the default-off portable preference and
     the desktop/tablet versus phone presentation.
 
 Review all changed user-facing copy through i18n rules. Public Markdown does not
@@ -147,7 +147,7 @@ not the transitional state where the runtime flag still exists.
 
 ## Risks
 
-- Settings persist across E2E tests; missing cleanup can make default-on tests
+- Settings persist across E2E tests; missing cleanup can make explicit-on tests
   order-dependent.
 - Saving off from the Appearance route changes shell height immediately. Await
   surface and save-state locators instead of using delays.

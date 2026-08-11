@@ -28,7 +28,7 @@ contract test.
    state or an `appStatusBar` field in the serialized feature response.
 3. Add failing user-store regressions that run with the retired environment
    variable present and prove missing `app_status_bar_enabled` still defaults
-   to true while a stored false remains false.
+   to false while a stored true remains true.
 4. Update feature/profile contract tests to expect no App status bar field or
    profile key, then remove the active configuration and frontend fields.
 5. Run focused Go and frontend contract tests before lint/typecheck.
@@ -103,9 +103,9 @@ ignored, and retaining the retired identity prevents reinterpretation.
    variable and retaining an old override produces neither an active runtime
    state nor an `appStatusBar` feature-response field.
 6. Focused user-store regressions prove `app_status_bar_enabled` retains stored
-   false and defaults to true when absent, even when the retired environment
+   true and defaults to false when absent, even when the retired environment
    variable is present.
-7. Status surfaces remain controlled by the default-true user setting from
+7. Status surfaces remain controlled by the default-false user setting from
    Tasks 01 and 02.
 
 ## Verification
