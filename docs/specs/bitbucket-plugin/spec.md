@@ -242,6 +242,10 @@ for its declared provider; exact repository path matching remains case-sensitive
   Bitbucket repository in native task creation, **THEN** Kandev persists the complete
   plugin-inspected descriptor and exact credential-free clone URL without host-side
   Bitbucket URL parsing.
+- **GIVEN** two Data Center connections share one authority but use different context
+  roots, **WHEN** either imports the same project/repository slug, **THEN** Kandev keeps
+  distinct rows and managed clones using the plugin's connection scope and immutable
+  repository ID; it never adopts the other root or a legacy unscoped row.
 - **GIVEN** a persisted Bitbucket repository is materialized for a task session,
   **WHEN** Kandev requests the initial HTTPS clone credential, **THEN** the plugin
   receives the host-derived workspace, task, session, repository, exact-host, and
@@ -273,6 +277,10 @@ for its declared provider; exact repository path matching remains case-sensitive
   **THEN** the page uses the same list-first hierarchy, density, toolbar geometry,
   row anatomy, and restrained loading/error/empty treatment as `/github` and
   `/gitlab`; the host renders shared primitives rather than plugin-cloned markup.
+- **GIVEN** more than one provider page of repositories or pull requests, **WHEN** the
+  user searches the repository filter or changes result pages, **THEN** the dashboard
+  consumes opaque cursors, exposes every repository, and keeps a deterministic
+  provider-neutral queue order without truncating before pagination.
 - **GIVEN** a pull request in that list, **WHEN** the user opens its **Task** menu,
   **THEN** the same compact preset menu as GitHub/GitLab appears and the chosen preset
   opens Kandev's native task dialog directly with repository, source branch, title,

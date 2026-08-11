@@ -524,6 +524,7 @@ type RemoteBranchSource struct {
 	WorkspaceID          string
 	Provider             string
 	ProviderHost         string
+	ProviderScope        string
 	ProviderRepositoryID string
 	Owner                string
 	Name                 string

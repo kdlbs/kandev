@@ -34,6 +34,8 @@ var ErrWorkspaceConfirmNameMismatch = errors.New("confirm_name does not match wo
 
 const maxRepositorySecretBindings = 100
 
+const maxProviderScopeBytes = 512
+
 var repositorySecretKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 func normalizeProviderHost(provider, raw string) string {
@@ -56,6 +58,17 @@ func normalizeProviderHost(provider, raw string) string {
 		return ""
 	}
 	return scheme + "://" + strings.ToLower(parsed.Host)
+}
+
+func validateProviderScope(raw string) (string, error) {
+	scope := strings.TrimSpace(raw)
+	if scope == "" {
+		return "", nil
+	}
+	if len(scope) > maxProviderScopeBytes || strings.ContainsRune(scope, '\x00') {
+		return "", fmt.Errorf("%w: provider_scope is invalid", ErrInvalidRepositorySettings)
+	}
+	return scope, nil
 }
 
 type workspaceDeleteTaskCleanup struct {
@@ -769,6 +782,10 @@ func (s *Service) createRepository(
 	if err != nil {
 		return nil, err
 	}
+	providerScope, err := validateProviderScope(req.ProviderScope)
+	if err != nil {
+		return nil, err
+	}
 	repository := &models.Repository{
 		ID:                     uuid.New().String(),
 		WorkspaceID:            req.WorkspaceID,
@@ -778,6 +795,7 @@ func (s *Service) createRepository(
 		Provider:               req.Provider,
 		ProviderRepoID:         req.ProviderRepoID,
 		ProviderHost:           normalizeProviderHost(req.Provider, req.ProviderHost),
+		ProviderScope:          providerScope,
 		ProviderOwner:          req.ProviderOwner,
 		ProviderName:           req.ProviderName,
 		RemoteURL:              req.RemoteURL,
@@ -885,14 +903,10 @@ func (s *Service) GetRepository(ctx context.Context, id string) (*models.Reposit
 func (s *Service) GetRepositoryByProviderInfo(ctx context.Context, workspaceID, provider, host, owner, name string) (*models.Repository, error) {
 	workspaceID = strings.TrimSpace(workspaceID)
 	provider = strings.TrimSpace(provider)
-	return s.repoEntities.GetRepositoryByProviderInfo(
-		ctx,
-		workspaceID,
-		provider,
-		normalizeProviderHost(provider, host),
-		strings.TrimSpace(owner),
-		strings.TrimSpace(name),
-	)
+	return s.repoEntities.GetRepositoryByProviderIdentity(ctx, models.ProviderRepositoryIdentity{
+		WorkspaceID: workspaceID, Provider: provider,
+		Host: normalizeProviderHost(provider, host), Owner: strings.TrimSpace(owner), Name: strings.TrimSpace(name),
+	})
 }
 
 // FindOrCreateRepository looks up a repository by provider info, creating one if not found.
@@ -910,13 +924,19 @@ func (s *Service) FindOrCreateRepository(ctx context.Context, req *FindOrCreateR
 	req.WorkspaceID = strings.TrimSpace(req.WorkspaceID)
 	req.Provider = strings.TrimSpace(req.Provider)
 	req.ProviderRepoID = strings.TrimSpace(req.ProviderRepoID)
+	providerScope, err := validateProviderScope(req.ProviderScope)
+	if err != nil {
+		return nil, false, err
+	}
+	req.ProviderScope = providerScope
 	req.ProviderOwner = strings.TrimSpace(req.ProviderOwner)
 	req.ProviderName = strings.TrimSpace(req.ProviderName)
 	req.RemoteURL = strings.TrimSpace(req.RemoteURL)
 	req.ProviderHost = normalizeProviderHost(req.Provider, req.ProviderHost)
-	existing, err := s.repoEntities.GetRepositoryByProviderInfo(
-		ctx, req.WorkspaceID, req.Provider, req.ProviderHost, req.ProviderOwner, req.ProviderName,
-	)
+	existing, err := s.repoEntities.GetRepositoryByProviderIdentity(ctx, models.ProviderRepositoryIdentity{
+		WorkspaceID: req.WorkspaceID, Provider: req.Provider, Scope: req.ProviderScope,
+		RepositoryID: req.ProviderRepoID, Host: req.ProviderHost, Owner: req.ProviderOwner, Name: req.ProviderName,
+	})
 	if err != nil {
 		return nil, false, fmt.Errorf("lookup repository: %w", err)
 	}
@@ -937,6 +957,10 @@ func (s *Service) FindOrCreateRepository(ctx context.Context, req *FindOrCreateR
 		}
 		if existing.ProviderHost == "" && req.ProviderHost != "" {
 			existing.ProviderHost = normalizeProviderHost(req.Provider, req.ProviderHost)
+			dirty = true
+		}
+		if existing.ProviderScope == "" && req.ProviderScope != "" {
+			existing.ProviderScope = req.ProviderScope
 			dirty = true
 		}
 		// Backfill default_branch when the caller carries one and the existing
@@ -973,6 +997,7 @@ func (s *Service) FindOrCreateRepository(ctx context.Context, req *FindOrCreateR
 		Provider:       req.Provider,
 		ProviderRepoID: req.ProviderRepoID,
 		ProviderHost:   req.ProviderHost,
+		ProviderScope:  req.ProviderScope,
 		ProviderOwner:  req.ProviderOwner,
 		ProviderName:   req.ProviderName,
 		RemoteURL:      req.RemoteURL,
@@ -1142,6 +1167,13 @@ func applyRepositoryUpdates(repository *models.Repository, req *UpdateRepository
 	if req.ProviderHost != nil {
 		repository.ProviderHost = normalizeProviderHost(repository.Provider, *req.ProviderHost)
 	}
+	if req.ProviderScope != nil {
+		providerScope, err := validateProviderScope(*req.ProviderScope)
+		if err != nil {
+			return err
+		}
+		repository.ProviderScope = providerScope
+	}
 	if req.ProviderOwner != nil {
 		repository.ProviderOwner = *req.ProviderOwner
 	}
@@ -1278,6 +1310,9 @@ func (s *Service) ListRepositories(ctx context.Context, workspaceID string) ([]*
 func repositoryIdentityKey(repo *models.Repository) string {
 	if repo.LocalPath != "" {
 		return "local\x00" + repo.LocalPath
+	}
+	if repo.Provider != "" && repo.ProviderScope != "" && repo.ProviderRepoID != "" {
+		return "provider-scope\x00" + repo.Provider + "\x00" + repo.ProviderScope + "\x00" + repo.ProviderRepoID
 	}
 	if repo.Provider != "" && repo.ProviderHost != "" && repo.ProviderOwner != "" && repo.ProviderName != "" {
 		return "provider\x00" + repo.Provider + "\x00" + repo.ProviderHost + "\x00" + repo.ProviderOwner + "\x00" + repo.ProviderName

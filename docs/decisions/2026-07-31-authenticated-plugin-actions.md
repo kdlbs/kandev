@@ -41,6 +41,13 @@ failures. `Retry-After` joins the response-header allowlist for throttling respo
 Invalid statuses fail closed as `502`, while plugin transport/runtime failures remain
 `503` and do not expose internal error text.
 
+The Go SDK defines stable typed action categories (`ActionErrorCode`) and shared HTTP
+projection (`ActionErrorHTTPStatus`). Plugins preserve causes with
+`CategorizeActionError`/`CategorizeActionErrorWithRetry` and map only typed provider or
+domain failures. Message-substring classification is outside the contract because it
+changes under wrapping/localization and can misreport authorization, conflict, or
+retry behavior.
+
 `/api/plugins/:id/webhooks/:key` remains public only for provider callbacks/events.
 OAuth callbacks use signed, expiring, single-use state and PKCE.
 

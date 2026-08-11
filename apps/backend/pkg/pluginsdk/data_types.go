@@ -527,6 +527,7 @@ type Repository struct {
 	ProviderID           string
 	ProviderRepositoryID string
 	ProviderHost         string
+	ProviderScope        string
 	OwnerOrProject       string
 	ProviderName         string
 	RemoteURL            string
@@ -542,6 +543,7 @@ func (r Repository) toProto() *pluginv1.Repository {
 		ProviderId:           r.ProviderID,
 		ProviderRepositoryId: r.ProviderRepositoryID,
 		ProviderHost:         r.ProviderHost,
+		ProviderScope:        r.ProviderScope,
 		OwnerOrProject:       r.OwnerOrProject,
 		ProviderName:         r.ProviderName,
 		RemoteUrl:            r.RemoteURL,
@@ -561,6 +563,7 @@ func repositoryFromProto(p *pluginv1.Repository) Repository {
 		ProviderID:           p.GetProviderId(),
 		ProviderRepositoryID: p.GetProviderRepositoryId(),
 		ProviderHost:         p.GetProviderHost(),
+		ProviderScope:        p.GetProviderScope(),
 		OwnerOrProject:       p.GetOwnerOrProject(),
 		ProviderName:         p.GetProviderName(),
 		RemoteURL:            p.GetRemoteUrl(),
@@ -914,6 +917,7 @@ func createTaskInputFromProto(p *pluginv1.CreateTaskRequest) (CreateTaskInput, e
 type RemoteRepositoryDescriptor struct {
 	ProviderID           string
 	ProviderHost         string
+	ProviderScope        string
 	OwnerOrProject       string
 	ProviderRepositoryID string
 	Name                 string
@@ -929,7 +933,7 @@ func (d *RemoteRepositoryDescriptor) toProto() *pluginv1.RemoteRepositoryDescrip
 		return nil
 	}
 	return &pluginv1.RemoteRepositoryDescriptor{
-		ProviderId: d.ProviderID, ProviderHost: d.ProviderHost, OwnerOrProject: d.OwnerOrProject,
+		ProviderId: d.ProviderID, ProviderHost: d.ProviderHost, ProviderScope: d.ProviderScope, OwnerOrProject: d.OwnerOrProject,
 		ProviderRepositoryId: d.ProviderRepositoryID, Name: d.Name, CloneUrl: d.CloneURL,
 		DefaultBranch: d.DefaultBranch, BaseBranch: d.BaseBranch, HeadBranch: d.HeadBranch, PullRequestNumber: d.PullRequestNumber,
 	}
@@ -940,7 +944,7 @@ func remoteRepositoryDescriptorFromProto(p *pluginv1.RemoteRepositoryDescriptor)
 		return nil
 	}
 	return &RemoteRepositoryDescriptor{
-		ProviderID: p.GetProviderId(), ProviderHost: p.GetProviderHost(), OwnerOrProject: p.GetOwnerOrProject(),
+		ProviderID: p.GetProviderId(), ProviderHost: p.GetProviderHost(), ProviderScope: p.GetProviderScope(), OwnerOrProject: p.GetOwnerOrProject(),
 		ProviderRepositoryID: p.GetProviderRepositoryId(), Name: p.GetName(), CloneURL: p.GetCloneUrl(),
 		DefaultBranch: p.DefaultBranch, BaseBranch: p.BaseBranch, HeadBranch: p.HeadBranch, PullRequestNumber: p.PullRequestNumber,
 	}

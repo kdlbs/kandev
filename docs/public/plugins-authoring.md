@@ -215,7 +215,7 @@ patterns, responsive layout, status colors, dialogs, menus, and review chrome.
 
 | User-facing result                     | Plugin hook                                                                            | Plugin supplies                                                                                  | Kandev supplies                                                                                                         |
 | -------------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
-| Provider workbench                     | `registerRoute`, `registerNavItem`, and host dashboard primitives                      | Query state, normalized rows, refresh and launch callbacks                                       | Page chrome, filters, saved-query dialog, list rows, task preset menu, desktop/mobile primitives                        |
+| Provider workbench                     | `registerRoute`, `registerNavItem`, and host dashboard primitives                      | Query state, normalized rows, opaque cursors, refresh and launch callbacks                       | Page chrome, searchable repository filter, cursor pagination, saved-query dialog, list rows, task preset menu, desktop/mobile primitives |
 | Workspace connection settings          | `registerIntegrationSettings`                                                          | Provider-specific fields, health checks, connect/disconnect behavior                             | Settings navigation, active workspace, lifecycle and error boundary                                                     |
 | Native repository and branch selection | `registerRepositoryProvider` plus declared branch action                               | Credential-free repositories, branches, URL inspection, optional `createChangeRequest` transport | Existing task dialog, provider picker, branch picker, push-before-create flow                                           |
 | Task-to-review linking                 | `registerTaskAction` and `host.openTaskLinkDialog`                                     | Provider label/icon, accepted reference syntax, authenticated link callback                      | Existing **Link** submenu, dialog validation, submit state, toast and desktop/mobile presentation                       |
@@ -234,6 +234,11 @@ Repository listing callbacks receive optional `query`, opaque `cursor`, `limit`,
 remains compatible for small or older providers. Treat cursors as provider-owned opaque
 values, bind them to the original query, and stop emitting `nextCursor` when exhausted.
 Kandev follows pages and fails a repeated cursor instead of looping forever.
+
+For a plugin-owned workbench, use `host.ui.IntegrationRepositoryFilter` and
+`host.ui.IntegrationCursorPagination`; they preserve the same searchable picker,
+pagination geometry, touch targets, and responsive behavior as first-party code-host
+pages without requiring a plugin to copy their markup.
 
 The examples below were captured from an isolated packaged-plugin run. The
 provider data is fictional; the surrounding controls are the production
@@ -637,6 +642,15 @@ The response may set only `Content-Type`, `Cache-Control`, `ETag`, or `Retry-Aft
 the host rejects invalid statuses, redirects, cookies, arbitrary headers, and
 unexpected internal error text.
 
+Use `pluginsdk.CategorizeActionError` or
+`pluginsdk.CategorizeActionErrorWithRetry` inside the backend instead of classifying
+`err.Error()` text. The stable categories are `invalid_argument`,
+`unauthenticated`, `permission_denied`, `not_found`, `conflict`, `rate_limited`,
+`unavailable`, and `upstream`; `pluginsdk.ActionErrorHTTPStatus` projects their
+shared HTTP status. Preserve wrapped causes for `errors.Is`/`errors.As`, but return a
+sanitized response message. A retry hint belongs in the typed error and the allowed
+`Retry-After` header, never in string parsing.
+
 ## Provider, task, review, and reference registrations
 
 A native bundle can register a manifest-owned repository provider with
@@ -953,8 +967,9 @@ here for routes that opt out and render their own chrome), and
 create-task flow (repo/branch/agent pickers, validation) instead of POSTing
 directly. Code-host plugins also receive `ChangeRequestList`,
 `ChangeRequestRow`, `ChangeRequestDetail`, `IntegrationListToolbar`, `IntegrationScopeBar`,
-`IntegrationSaveQueryDialog`, `IntegrationStartTaskMenu`, `IntegrationIcon`, and
-`TaskRowIndicator`. These are the same
+`IntegrationSaveQueryDialog`, `IntegrationStartTaskMenu`, `IntegrationIcon`,
+`TaskRowIndicator`, `IntegrationRepositoryFilter`, and
+`IntegrationCursorPagination`. These are the same
 provider-neutral dashboard components used by Kandev's GitHub and GitLab
 pages. Supply normalized data and callbacks instead of cloning their markup:
 the shared **Task** preset menu opens `TaskCreateDialog` directly, while review
@@ -1019,6 +1034,15 @@ provider repository and branch again inside the authenticated plugin action; nev
 accept a browser-supplied repository descriptor as authority. Reuse the identifier for
 retries of one submission, but generate a new one when the user opens a new launch so
 one change request can have multiple tasks.
+
+Repository identity is not a display slug. `RepositoryInspection.repositoryId` must
+be the provider's immutable repository identifier. Self-managed providers also set
+`providerScope` to an opaque, credential-free connection identity that distinguishes
+instances sharing one authority (for example, two Data Center context roots).
+Kandev persists this as `provider_scope` and keys provider rows and managed clone
+paths by workspace + provider + scope + immutable repository ID. `providerHost`,
+owner, name, and clone URL remain routing/display data; reconnecting must not silently
+reinterpret an older unscoped row.
 
 ### Modal windows
 

@@ -186,5 +186,7 @@
   "queryName": "Name",
   "queryNamePlaceholder": "e.g. Needs my review",
   "saveQuery": "Save query",
-  "waitingForTheNextBackendHealth": "Waiting for the next backend health check…"
+  "waitingForTheNextBackendHealth": "Waiting for the next backend health check…",
+  "cursorPaginationSummary_one": "Page {{page}} · {{count}} result",
+  "cursorPaginationSummary_other": "Page {{page}} · {{count}} results"
 }

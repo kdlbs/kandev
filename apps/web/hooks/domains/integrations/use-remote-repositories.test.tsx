@@ -121,7 +121,11 @@ describe("useRemoteRepositories registered providers", () => {
     const { result } = renderHook(() => useRemoteRepositories(WORKSPACE_ID));
 
     await waitFor(() => expect(result.current.repos).toHaveLength(2));
-    act(() => result.current.search("two"));
+    act(() => {
+      result.current.search("t");
+      result.current.search("tw");
+      result.current.search("two");
+    });
     await waitFor(() =>
       expect(listRepositories).toHaveBeenCalledWith(
         expect.objectContaining({ query: "two", limit: 100 }),
@@ -130,6 +134,11 @@ describe("useRemoteRepositories registered providers", () => {
     expect(listRepositories).toHaveBeenCalledWith(
       expect.objectContaining({ cursor: "page-2", query: "two" }),
     );
+    expect(listRepositories).not.toHaveBeenCalledWith(expect.objectContaining({ query: "t" }));
+    expect(listRepositories).not.toHaveBeenCalledWith(expect.objectContaining({ query: "tw" }));
+    expect(mocks.fetchAccessibleRepos).toHaveBeenCalledTimes(1);
+    expect(mocks.listUserProjects).toHaveBeenCalledTimes(1);
+    expect(mocks.listAzureDevOpsProjects).toHaveBeenCalledTimes(1);
   });
 });
 

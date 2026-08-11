@@ -103,5 +103,7 @@
   "queryName": "Nome",
   "queryNamePlaceholder": "por ex., Precisa da minha revisão",
   "saveQuery": "Guardar consulta",
-  "waitingForTheNextBackendHealth": "A aguardar a próxima verificação de saúde do backend…"
+  "waitingForTheNextBackendHealth": "A aguardar a próxima verificação de saúde do backend…",
+  "cursorPaginationSummary_one": "Página {{page}} · {{count}} resultado",
+  "cursorPaginationSummary_other": "Página {{page}} · {{count}} resultados"
 }

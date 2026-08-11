@@ -876,6 +876,7 @@ func pluginTaskRepositoryInput(repository pluginsdk.PluginTaskRepository) (tasks
 		RemoteURL:                 remote.CloneURL,
 		Provider:                  remote.ProviderID,
 		ProviderHost:              remote.ProviderHost,
+		ProviderScope:             remote.ProviderScope,
 		ProviderRepoID:            remote.ProviderRepositoryID,
 		ProviderOwner:             remote.OwnerOrProject,
 		ProviderName:              remote.Name,
@@ -1067,6 +1068,7 @@ func (a codeHostBranchListerAdapter) ListRepoBranches(
 	remote, err := a.plugins.ListRepositoryProviderBranches(ctx, source.WorkspaceID, plugins.RepositoryProviderSource{
 		Provider:             source.Provider,
 		ProviderHost:         source.ProviderHost,
+		ProviderScope:        source.ProviderScope,
 		ProviderRepositoryID: source.ProviderRepositoryID,
 		OwnerOrProject:       source.Owner,
 		Name:                 source.Name,

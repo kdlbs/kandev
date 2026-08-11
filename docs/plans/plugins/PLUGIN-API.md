@@ -292,7 +292,7 @@ routes that opt out of the default chrome and own their layout),
 `initialValues`), `Combobox` (the app's Command+Popover picker), and the
 provider-neutral code-host dashboard set: `ChangeRequestList`,
 `ChangeRequestRow`, `ChangeRequestDetail`, `IntegrationListToolbar`, `IntegrationScopeBar`,
-`IntegrationSaveQueryDialog`,
+`IntegrationSaveQueryDialog`, `IntegrationRepositoryFilter`, `IntegrationCursorPagination`,
 `IntegrationStartTaskMenu`, `IntegrationIcon`, `IntegrationChangeRequestStatus`, and
 `TaskRowIndicator`. The authoritative list is
 `apps/web/lib/plugins/host-api.ts` (`PLUGIN_UI`).
@@ -376,6 +376,7 @@ workspace context plus this snake-case body:
   "repository": {
     "provider_id": "example-provider",
     "provider_host": "https://code.example.com",
+    "provider_scope": "https://code.example.com/context-a",
     "provider_repository_id": "owner/repository",
     "owner_or_project": "owner",
     "name": "repository",
@@ -749,6 +750,7 @@ interface PluginHostRepository {
   source_type?: string;
   provider_repo_id?: string;
   provider_host?: string;
+  provider_scope?: string;
   provider_owner?: string;
   provider_name?: string;
   remote_url?: string;
@@ -769,6 +771,9 @@ interface RepositoryChangeRequestCreateResult {
 interface RepositoryInspection {
   providerId: string;
   providerHost: string;
+  // Opaque, credential-free connection identity. Required when one authority
+  // can host multiple independent provider roots.
+  providerScope?: string;
   ownerOrProject: string;
   repositoryId: string;
   repositoryName: string;

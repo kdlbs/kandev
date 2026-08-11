@@ -117,6 +117,8 @@ import { IntegrationStartTaskMenu } from "@/components/integrations/integration-
 import { IntegrationListToolbar } from "@/components/integrations/integration-list-toolbar";
 import { IntegrationScopeBar } from "@/components/integrations/presets-scope-bar-base";
 import { IntegrationSaveQueryDialog } from "@/components/integrations/integration-save-query-dialog";
+import { IntegrationRepositoryFilter } from "@/components/integrations/integration-repository-filter";
+import { IntegrationCursorPagination } from "@/components/integrations/integration-cursor-pagination";
 import { TaskRowIndicator } from "@/components/integrations/task-row-indicator";
 import { IntegrationChangeRequestStatus } from "@/components/integrations/integration-change-request-status";
 import { IntegrationIcon } from "@/components/integrations/integration-icon";
@@ -323,6 +325,10 @@ const PLUGIN_UI: Record<string, unknown> = {
   IntegrationChangeRequestStatus,
   IntegrationScopeBar,
   IntegrationSaveQueryDialog,
+  // - IntegrationRepositoryFilter / IntegrationCursorPagination: the shared
+  //   searchable provider filter and opaque-cursor footer for code-host pages.
+  IntegrationRepositoryFilter,
+  IntegrationCursorPagination,
   IntegrationIcon,
   TaskRowIndicator,
   // - RichTextEditor / RichTextReadOnly: narrow wrappers over the Plan

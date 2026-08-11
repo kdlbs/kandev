@@ -177,6 +177,9 @@ message Repository {
   string owner_or_project = 9;
   string provider_name = 10;
   string remote_url = 11;
+  // Opaque provider-defined connection scope. Together with the immutable
+  // provider_repository_id, this is the durable upstream identity.
+  string provider_scope = 12;
 }
 message ListRepositoriesRequest { string workspace_id = 1; Page page = 2; }
 message ListRepositoriesResponse { repeated Repository repositories = 1; PageInfo page_info = 2; }
@@ -250,6 +253,7 @@ message RemoteRepositoryDescriptor {
   optional string base_branch = 8;
   optional string head_branch = 9;
   optional int64 pull_request_number = 10;
+  string provider_scope = 11; // credential-free configured provider instance
 }
 message PluginTaskLaunchOptions {
   optional string agent_profile_id = 1;

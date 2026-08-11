@@ -452,6 +452,10 @@ message Repository {
   string owner_or_project = 9;
   string provider_name = 10;
   string remote_url = 11;
+  // Opaque provider-defined connection scope. Together with
+  // provider_repository_id this is the durable upstream identity; the host
+  // never derives it from provider_host or clone_url.
+  string provider_scope = 12;
 }
 message ListRepositoriesRequest {
   string workspace_id = 1;
@@ -592,6 +596,9 @@ message RemoteRepositoryDescriptor {
   optional string base_branch = 8;
   optional string head_branch = 9;
   optional int64 pull_request_number = 10;
+  // Opaque provider-defined connection scope. It must be stable for one
+  // configured provider instance and contain no credentials.
+  string provider_scope = 11;
 }
 message PluginTaskLaunchOptions {
   optional string agent_profile_id = 1;

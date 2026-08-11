@@ -353,6 +353,7 @@ func (s *Service) listRemoteBranchesIfApplicable(ctx context.Context, repoID str
 		WorkspaceID:          repo.WorkspaceID,
 		Provider:             repo.Provider,
 		ProviderHost:         repo.ProviderHost,
+		ProviderScope:        repo.ProviderScope,
 		ProviderRepositoryID: repo.ProviderRepoID,
 		Owner:                repo.ProviderOwner,
 		Name:                 repo.ProviderName,

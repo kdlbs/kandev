@@ -3594,8 +3594,12 @@ type Repository struct {
 	OwnerOrProject       string `protobuf:"bytes,9,opt,name=owner_or_project,json=ownerOrProject,proto3" json:"owner_or_project,omitempty"`
 	ProviderName         string `protobuf:"bytes,10,opt,name=provider_name,json=providerName,proto3" json:"provider_name,omitempty"`
 	RemoteUrl            string `protobuf:"bytes,11,opt,name=remote_url,json=remoteUrl,proto3" json:"remote_url,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// Opaque provider-defined connection scope. Together with
+	// provider_repository_id this is the durable upstream identity; the host
+	// never derives it from provider_host or clone_url.
+	ProviderScope string `protobuf:"bytes,12,opt,name=provider_scope,json=providerScope,proto3" json:"provider_scope,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Repository) Reset() {
@@ -3701,6 +3705,13 @@ func (x *Repository) GetProviderName() string {
 func (x *Repository) GetRemoteUrl() string {
 	if x != nil {
 		return x.RemoteUrl
+	}
+	return ""
+}
+
+func (x *Repository) GetProviderScope() string {
+	if x != nil {
+		return x.ProviderScope
 	}
 	return ""
 }
@@ -4866,8 +4877,11 @@ type RemoteRepositoryDescriptor struct {
 	BaseBranch           *string                `protobuf:"bytes,8,opt,name=base_branch,json=baseBranch,proto3,oneof" json:"base_branch,omitempty"`
 	HeadBranch           *string                `protobuf:"bytes,9,opt,name=head_branch,json=headBranch,proto3,oneof" json:"head_branch,omitempty"`
 	PullRequestNumber    *int64                 `protobuf:"varint,10,opt,name=pull_request_number,json=pullRequestNumber,proto3,oneof" json:"pull_request_number,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// Opaque provider-defined connection scope. It must be stable for one
+	// configured provider instance and contain no credentials.
+	ProviderScope string `protobuf:"bytes,11,opt,name=provider_scope,json=providerScope,proto3" json:"provider_scope,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RemoteRepositoryDescriptor) Reset() {
@@ -4968,6 +4982,13 @@ func (x *RemoteRepositoryDescriptor) GetPullRequestNumber() int64 {
 		return *x.PullRequestNumber
 	}
 	return 0
+}
+
+func (x *RemoteRepositoryDescriptor) GetProviderScope() string {
+	if x != nil {
+		return x.ProviderScope
+	}
+	return ""
 }
 
 type PluginTaskLaunchOptions struct {
@@ -5836,7 +5857,7 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\x04page\x18\x01 \x01(\v2\x16.kandev.plugin.v1.PageR\x04page\"\x96\x01\n" +
 	"\x1cListExecutorProfilesResponse\x12=\n" +
 	"\bprofiles\x18\x01 \x03(\v2!.kandev.plugin.v1.ExecutorProfileR\bprofiles\x127\n" +
-	"\tpage_info\x18\x02 \x01(\v2\x1a.kandev.plugin.v1.PageInfoR\bpageInfo\"\x9d\x03\n" +
+	"\tpage_info\x18\x02 \x01(\v2\x1a.kandev.plugin.v1.PageInfoR\bpageInfo\"\xc4\x03\n" +
 	"\n" +
 	"Repository\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
@@ -5853,7 +5874,8 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\rprovider_name\x18\n" +
 	" \x01(\tR\fproviderName\x12\x1d\n" +
 	"\n" +
-	"remote_url\x18\v \x01(\tR\tremoteUrlB\x11\n" +
+	"remote_url\x18\v \x01(\tR\tremoteUrl\x12%\n" +
+	"\x0eprovider_scope\x18\f \x01(\tR\rproviderScopeB\x11\n" +
 	"\x0f_default_branch\"h\n" +
 	"\x17ListRepositoriesRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12*\n" +
@@ -5957,7 +5979,7 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\a_remoteB\x0e\n" +
 	"\f_base_branchB\x12\n" +
 	"\x10_checkout_branchB\x16\n" +
-	"\x14_pull_request_number\"\xeb\x03\n" +
+	"\x14_pull_request_number\"\x92\x04\n" +
 	"\x1aRemoteRepositoryDescriptor\x12\x1f\n" +
 	"\vprovider_id\x18\x01 \x01(\tR\n" +
 	"providerId\x12#\n" +
@@ -5972,7 +5994,8 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\vhead_branch\x18\t \x01(\tH\x02R\n" +
 	"headBranch\x88\x01\x01\x123\n" +
 	"\x13pull_request_number\x18\n" +
-	" \x01(\x03H\x03R\x11pullRequestNumber\x88\x01\x01B\x11\n" +
+	" \x01(\x03H\x03R\x11pullRequestNumber\x88\x01\x01\x12%\n" +
+	"\x0eprovider_scope\x18\v \x01(\tR\rproviderScopeB\x11\n" +
 	"\x0f_default_branchB\x0e\n" +
 	"\f_base_branchB\x0e\n" +
 	"\f_head_branchB\x16\n" +

@@ -103,5 +103,7 @@
   "queryName": "名称",
   "queryNamePlaceholder": "例如：需要我的审查",
   "saveQuery": "保存查询",
-  "waitingForTheNextBackendHealth": "正在等待下一次后端健康检查…"
+  "waitingForTheNextBackendHealth": "正在等待下一次后端健康检查…",
+  "cursorPaginationSummary_one": "第 {{page}} 页 · {{count}} 个结果",
+  "cursorPaginationSummary_other": "第 {{page}} 页 · {{count}} 个结果"
 }

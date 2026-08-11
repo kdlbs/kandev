@@ -186,5 +186,7 @@
   "queryName": "Ńàḿē",
   "queryNamePlaceholder": "ē.ĝ. Ńēēďś ḿŷ ŕēvĩēŵ",
   "saveQuery": "Śàvē qũēŕŷ",
-  "waitingForTheNextBackendHealth": "Ŵàĩţĩńĝ ƒōŕ ţĥē ńēxţ ƀàćķēńď ĥēàĺţĥ ćĥēćķ…"
+  "waitingForTheNextBackendHealth": "Ŵàĩţĩńĝ ƒōŕ ţĥē ńēxţ ƀàćķēńď ĥēàĺţĥ ćĥēćķ…",
+  "cursorPaginationSummary_one": "Ƥàĝē {{page}} · {{count}} ŕēśũļţ",
+  "cursorPaginationSummary_other": "Ƥàĝē {{page}} · {{count}} ŕēśũļţś"
 }

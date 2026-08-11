@@ -438,6 +438,7 @@ function remoteRepositoryLocator(
   | "remote_url"
   | "provider"
   | "provider_host"
+  | "provider_scope"
   | "provider_repo_id"
   | "provider_owner"
   | "provider_name"
@@ -449,6 +450,7 @@ function remoteRepositoryLocator(
     remote_url: row.remoteUrl?.trim() || url,
     provider: row.provider,
     provider_host: row.providerHost,
+    provider_scope: row.providerScope,
     provider_repo_id: row.providerRepoId,
     provider_owner: row.providerOwner,
     provider_name: row.providerName,

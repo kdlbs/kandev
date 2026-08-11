@@ -1205,6 +1205,7 @@ type Repository struct {
 	Provider               string                    `json:"provider"`
 	ProviderRepoID         string                    `json:"provider_repo_id"`
 	ProviderHost           string                    `json:"provider_host"`
+	ProviderScope          string                    `json:"provider_scope"`
 	ProviderOwner          string                    `json:"provider_owner"`
 	ProviderName           string                    `json:"provider_name"`
 	RemoteURL              string                    `json:"remote_url"`
@@ -1220,6 +1221,18 @@ type Repository struct {
 	CreatedAt              time.Time                 `json:"created_at"`
 	UpdatedAt              time.Time                 `json:"updated_at"`
 	DeletedAt              *time.Time                `json:"deleted_at,omitempty"`
+}
+
+// ProviderRepositoryIdentity is the durable provider lookup key. New plugin
+// providers supply Scope + RepositoryID; legacy built-ins use Host/Owner/Name.
+type ProviderRepositoryIdentity struct {
+	WorkspaceID  string
+	Provider     string
+	Scope        string
+	RepositoryID string
+	Host         string
+	Owner        string
+	Name         string
 }
 
 // RepositorySecretBinding maps an environment key to a secret reference. The

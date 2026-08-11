@@ -25,6 +25,7 @@ const (
 type RepositoryProviderSource struct {
 	Provider             string
 	ProviderHost         string
+	ProviderScope        string
 	ProviderRepositoryID string
 	OwnerOrProject       string
 	Name                 string
@@ -71,6 +72,7 @@ func (s *Service) listRepositoryProviderBranches(
 	body, err := json.Marshal(map[string]any{repositoryActionBodyKey: map[string]any{
 		"provider_id":            source.Provider,
 		"provider_host":          source.ProviderHost,
+		"provider_scope":         source.ProviderScope,
 		"provider_repository_id": source.ProviderRepositoryID,
 		"owner_or_project":       source.OwnerOrProject,
 		"name":                   source.Name,

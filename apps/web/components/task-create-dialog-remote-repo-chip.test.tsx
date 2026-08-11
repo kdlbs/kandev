@@ -18,7 +18,9 @@ const INPUT_TID = "remote-repo-input";
 const ALREADY_ADDED_MARKER = "already-added-repository-marker";
 const FULL_NAME = "acme/site";
 const URL_ACME_SITE = "https://github.com/acme/site";
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+});
 describe("RemoteRepoChip — write paths", () => {
   it("keeps the committed URL visible and exposes an actionable resolution retry", () => {
     const onRetry = vi.fn();

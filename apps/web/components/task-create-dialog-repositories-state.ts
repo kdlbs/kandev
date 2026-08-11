@@ -99,6 +99,7 @@ function applyRemoteRepoPatch(
     remoteUrl: undefined,
     provider: undefined,
     providerHost: undefined,
+    providerScope: undefined,
     providerRepoId: undefined,
     providerOwner: undefined,
     providerName: undefined,

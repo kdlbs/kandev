@@ -128,6 +128,7 @@ export type TaskRemoteRepoRow = {
   // Optional metadata when source === "picker":
   provider?: string;
   providerHost?: string;
+  providerScope?: string;
   providerRepoId?: string;
   providerOwner?: string;
   providerName?: string;

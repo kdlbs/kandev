@@ -574,7 +574,7 @@ func TestRepositoryMutationsRejectedInImproveKandevWorkspace(t *testing.T) {
 	require.Equal(t, http.StatusConflict, res2.Code, res2.Body.String())
 
 	// A normal workspace keeps working (initialize-local succeeds).
-	okPath := t.TempDir()
+	okPath := trustedRepositoryParent(t)
 	body3 := strings.NewReader(`{"name":"ok-repo","parent_path":` + strconv.Quote(okPath) + `}`)
 	req3 := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/ws-1/repositories/initialize-local", body3)
 	req3.Header.Set("Content-Type", "application/json")

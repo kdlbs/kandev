@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchAccessibleRepos } from "@/lib/api/domains/github-api";
 import { listUserProjects } from "@/lib/api/domains/gitlab-api";
 import {
@@ -23,6 +23,7 @@ export type RemoteRepository = {
   fullName: string;
   url: string;
   providerHost?: string;
+  providerScope?: string;
   defaultBranch: string;
   private: boolean;
 };
@@ -69,12 +70,7 @@ type RepositoryRequest = {
   load: Promise<RemoteRepository[]>;
 };
 
-async function loadRemoteRepositories(
-  workspaceId: string,
-  pluginProviders: PluginRepositoryProviderRegistration[],
-  signal: AbortSignal,
-  query: string,
-): Promise<RemoteRepositoryLoad> {
+async function loadBuiltInRepositories(workspaceId: string): Promise<RemoteRepositoryLoad> {
   const githubRequest = workspaceId
     ? fetchAccessibleRepos({ workspaceId, limit: 100 })
     : Promise.reject(new Error("workspace is required for GitHub repositories"));
@@ -116,13 +112,28 @@ async function loadRemoteRepositories(
       ),
     },
     { provider: "azure_devops", load: azureRequest },
-    ...(workspaceId
-      ? pluginProviders.map((provider) => ({
-          provider: provider.id,
-          load: listAllPluginRepositories(provider, workspaceId, query, signal),
-        }))
-      : []),
   ];
+  return settleRepositoryRequests(requests);
+}
+
+async function loadPluginRepositories(
+  workspaceId: string,
+  pluginProviders: PluginRepositoryProviderRegistration[],
+  query: string,
+  signal: AbortSignal,
+): Promise<RemoteRepositoryLoad> {
+  if (!workspaceId) return { repos: [], availableProviders: [] };
+  return settleRepositoryRequests(
+    pluginProviders.map((provider) => ({
+      provider: provider.id,
+      load: listAllPluginRepositories(provider, workspaceId, query, signal),
+    })),
+  );
+}
+
+async function settleRepositoryRequests(
+  requests: RepositoryRequest[],
+): Promise<RemoteRepositoryLoad> {
   const results = await Promise.allSettled(requests.map((request) => request.load));
   const availableProviders = results.flatMap((result, index) =>
     result.status === "fulfilled" ? [requests[index]!.provider] : [],
@@ -181,6 +192,7 @@ function toRemoteRepository(provider: string, value: unknown): RemoteRepository[
       fullName: readString(repository.fullName) ?? `${owner}/${name}`,
       url,
       providerHost: readString(repository.providerHost),
+      providerScope: readString(repository.providerScope),
       defaultBranch: readString(repository.defaultBranch) ?? "",
       private: repository.private === true,
     },
@@ -192,11 +204,16 @@ function readString(value: unknown): string | undefined {
 }
 
 export function useRemoteRepositories(workspaceId: string): UseRemoteRepositoriesResult {
-  const [allRepos, setAllRepos] = useState<RemoteRepository[]>([]);
+  const [builtInRepos, setBuiltInRepos] = useState<RemoteRepository[]>([]);
+  const [pluginRepos, setPluginRepos] = useState<RemoteRepository[]>([]);
   const [query, setQuery] = useState("");
-  const [loading, setLoading] = useState(true);
+  const debouncedQuery = useDebouncedValue(query, 250);
+  const [builtInsLoading, setBuiltInsLoading] = useState(true);
+  const [pluginsLoading, setPluginsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
-  const [availableProviders, setAvailableProviders] = useState<RemoteRepositoryProvider[]>([]);
+  const [builtInProviders, setBuiltInProviders] = useState<RemoteRepositoryProvider[]>([]);
+  const [pluginProviderIds, setPluginProviderIds] = useState<RemoteRepositoryProvider[]>([]);
+  const pluginGeneration = useRef(0);
   const registry = usePluginRegistry();
   const registryVersion = registry.getVersion();
   const pluginProviders = useMemo(
@@ -206,34 +223,63 @@ export function useRemoteRepositories(workspaceId: string): UseRemoteRepositorie
 
   useEffect(() => {
     let cancelled = false;
-    setAllRepos([]);
-    setAvailableProviders([]);
+    setBuiltInRepos([]);
+    setBuiltInProviders([]);
     setError(null);
-    setLoading(true);
-    const controller = new AbortController();
-    loadRemoteRepositories(workspaceId, pluginProviders, controller.signal, query)
+    setBuiltInsLoading(true);
+    loadBuiltInRepositories(workspaceId)
       .then((result) => {
         if (cancelled) return;
-        setAllRepos(result.repos);
-        setAvailableProviders(result.availableProviders);
+        setBuiltInRepos(result.repos);
+        setBuiltInProviders(result.availableProviders);
       })
       .catch((cause) => {
         if (!cancelled) setError(cause instanceof Error ? cause : new Error(String(cause)));
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setBuiltInsLoading(false);
       });
     return () => {
       cancelled = true;
-      controller.abort();
     };
-  }, [workspaceId, pluginProviders, query]);
+  }, [workspaceId]);
+
+  useEffect(() => {
+    setPluginRepos([]);
+    setPluginProviderIds([]);
+  }, [workspaceId, pluginProviders]);
+
+  useEffect(() => {
+    const generation = ++pluginGeneration.current;
+    const controller = new AbortController();
+    setPluginsLoading(true);
+    loadPluginRepositories(workspaceId, pluginProviders, debouncedQuery, controller.signal)
+      .then((result) => {
+        if (generation !== pluginGeneration.current) return;
+        setPluginRepos(result.repos);
+        setPluginProviderIds(result.availableProviders);
+      })
+      .catch((cause) => {
+        if (generation !== pluginGeneration.current || controller.signal.aborted) return;
+        setError(cause instanceof Error ? cause : new Error(String(cause)));
+      })
+      .finally(() => {
+        if (generation === pluginGeneration.current) setPluginsLoading(false);
+      });
+    return () => controller.abort();
+  }, [workspaceId, pluginProviders, debouncedQuery]);
 
   const repos = useMemo(() => {
     const needle = query.trim().toLowerCase();
+    const allRepos = [...builtInRepos, ...pluginRepos];
     if (!needle) return allRepos;
     return allRepos.filter((repo) => repo.fullName.toLowerCase().includes(needle));
-  }, [allRepos, query]);
+  }, [builtInRepos, pluginRepos, query]);
+  const availableProviders = useMemo(
+    () => [...builtInProviders, ...pluginProviderIds],
+    [builtInProviders, pluginProviderIds],
+  );
+  const loading = builtInsLoading || pluginsLoading;
   const search = useCallback((value: string) => setQuery(value), []);
   const matchesURL = useCallback(
     (url: string) =>
@@ -250,4 +296,13 @@ export function useRemoteRepositories(workspaceId: string): UseRemoteRepositorie
     search,
     matchesURL,
   };
+}
+
+function useDebouncedValue<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(value), delay);
+    return () => window.clearTimeout(timer);
+  }, [delay, value]);
+  return debounced;
 }

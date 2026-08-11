@@ -1006,6 +1006,7 @@ func repositoryModelToDTO(r *taskmodels.Repository) pluginsdk.Repository {
 		ProviderID:           r.Provider,
 		ProviderRepositoryID: r.ProviderRepoID,
 		ProviderHost:         r.ProviderHost,
+		ProviderScope:        r.ProviderScope,
 		OwnerOrProject:       r.ProviderOwner,
 		ProviderName:         r.ProviderName,
 		RemoteURL:            credentialFreeRepositoryURL(r.RemoteURL),

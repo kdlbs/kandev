@@ -164,6 +164,8 @@ export interface PluginActionOptions {
 export interface RepositoryInspection {
   providerId: string;
   providerHost: string;
+  /** Opaque provider-defined connection scope used with repositoryId. */
+  providerScope?: string;
   ownerOrProject: string;
   repositoryId: string;
   repositoryName: string;
@@ -186,6 +188,7 @@ export interface PluginHostRepository {
   source_type?: string;
   provider_repo_id?: string;
   provider_host?: string;
+  provider_scope?: string;
   provider_owner?: string;
   provider_name?: string;
   remote_url?: string;

@@ -2,14 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "@/components/routing/app-link";
-import {
-  IconBrandGithub,
-  IconBrandGitlab,
-  IconCheck,
-  IconGitBranch,
-  IconLink,
-  IconX,
-} from "@tabler/icons-react";
+import { IconCheck, IconGitBranch, IconLink, IconX } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import type { Branch } from "@/lib/types/http";
 import { Badge } from "@kandev/ui/badge";
@@ -29,7 +22,6 @@ import type {
   RemoteRepositoryProvider,
   UseRemoteRepositoriesResult,
 } from "@/hooks/domains/integrations/use-remote-repositories";
-import { AzureDevOpsIcon } from "@/components/icons/azure-devops-icon";
 import { parseGitHubAnyUrl, type PRInfo } from "@/hooks/domains/github/use-pr-info-by-url";
 import type { TaskRemoteRepoRow } from "@/components/task-create-dialog-types";
 import { useTaskCreateDialogPopoverContainer } from "@/hooks/use-task-create-dialog-popover-container";
@@ -67,6 +59,7 @@ export type RemoteRepoChipProps = {
       defaultBranch: string;
       remoteUrl?: string;
       providerHost?: string;
+      providerScope?: string;
       providerRepoId?: string;
       providerOwner?: string;
       providerName?: string;
@@ -276,6 +269,7 @@ function RemoteRepoPill({
               defaultBranch: repo.defaultBranch,
               ...(repo.provider === "github" ? {} : { remoteUrl: repo.url }),
               ...(repo.providerHost ? { providerHost: repo.providerHost } : {}),
+              ...(repo.providerScope ? { providerScope: repo.providerScope } : {}),
               providerRepoId: repo.id,
               providerOwner: repo.owner,
               providerName: repo.name,
@@ -293,14 +287,8 @@ function RemoteRepoPill({
 }
 
 function RepoTriggerIcon({ row }: { row: TaskRemoteRepoRow }) {
-  if (row.source === "picker" && row.provider === "github") {
-    return <IconBrandGithub className="h-3 w-3 shrink-0 text-muted-foreground" />;
-  }
-  if (row.source === "picker" && row.provider === "gitlab") {
-    return <IconBrandGitlab className="h-3 w-3 shrink-0 text-muted-foreground" />;
-  }
-  if (row.source === "picker" && row.provider === "azure_devops") {
-    return <AzureDevOpsIcon className="h-3 w-3 shrink-0 text-muted-foreground" />;
+  if (row.source === "picker" && row.provider) {
+    return <RemoteRepositoryProviderIcon provider={row.provider} />;
   }
   return <IconLink className="h-3 w-3 shrink-0 text-muted-foreground" />;
 }

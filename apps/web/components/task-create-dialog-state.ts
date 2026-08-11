@@ -248,6 +248,7 @@ function seededRemoteRepositories(iv?: TaskCreateDialogInitialValues): TaskRemot
       remoteUrl: repository.cloneUrl,
       provider: repository.providerId,
       providerHost: repository.providerHost,
+      providerScope: repository.providerScope,
       providerRepoId: repository.repositoryId,
       providerOwner: repository.ownerOrProject,
       providerName: repository.repositoryName,

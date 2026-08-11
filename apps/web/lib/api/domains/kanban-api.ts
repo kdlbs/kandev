@@ -76,6 +76,7 @@ export async function createTask(
       remote_url?: string;
       provider?: string;
       provider_host?: string;
+      provider_scope?: string;
       provider_repo_id?: string;
       provider_owner?: string;
       provider_name?: string;

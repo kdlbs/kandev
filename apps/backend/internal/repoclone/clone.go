@@ -3,6 +3,8 @@ package repoclone
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/url"
@@ -38,6 +40,7 @@ const (
 var (
 	ErrWorkspaceCredentialUnavailable = errors.New("workspace Git credential is unavailable")
 	ErrRepositoryOwnershipMismatch    = errors.New("managed repository ownership mismatch")
+	ErrManagedCloneOriginMismatch     = errors.New("managed repository origin does not match requested clone URL")
 	gitURLUserInfoPattern             = regexp.MustCompile(`(?i)(https?://)[^/\s@]+@`)
 	gitCredentialPattern              = regexp.MustCompile(`(?i)\b(password|token|secret|authorization)(\s*[:=]\s*)[^\r\n]+`)
 )
@@ -70,15 +73,17 @@ type GitCredentialProvider interface {
 // separate so resolvers can enforce same-origin routing before returning a
 // transient secret.
 type GitCredentialRequest struct {
-	WorkspaceID  string
-	TaskID       string
-	SessionID    string
-	RepositoryID string
-	Provider     string
-	ProviderHost string
-	CloneURL     string
-	Owner        string
-	Name         string
+	WorkspaceID          string
+	TaskID               string
+	SessionID            string
+	RepositoryID         string
+	Provider             string
+	ProviderHost         string
+	ProviderScope        string
+	ProviderRepositoryID string
+	CloneURL             string
+	Owner                string
+	Name                 string
 }
 
 // NewCloner creates a new Cloner with the given configuration.
@@ -165,6 +170,15 @@ func (c *Cloner) WorkspaceRepoPath(workspaceID, provider, owner, name string) (s
 func (c *Cloner) WorkspaceProviderRepoPath(
 	workspaceID, provider, providerHost, owner, name string,
 ) (string, error) {
+	return c.WorkspaceProviderRepositoryPath(workspaceID, provider, providerHost, "", "", owner, name)
+}
+
+// WorkspaceProviderRepositoryPath isolates managed clones using the provider's
+// opaque connection scope and immutable repository ID. Legacy callers that do
+// not yet carry both fields retain the origin/owner/name layout.
+func (c *Cloner) WorkspaceProviderRepositoryPath(
+	workspaceID, provider, providerHost, providerScope, providerRepositoryID, owner, name string,
+) (string, error) {
 	basePath, err := c.ExpandedBasePath()
 	if err != nil {
 		return "", err
@@ -173,10 +187,22 @@ func (c *Cloner) WorkspaceProviderRepoPath(
 	if provider == "" {
 		provider = githubProvider
 	}
-	for _, segment := range []string{workspaceID, provider, name} {
+	for _, segment := range []string{workspaceID, provider} {
 		if err := validatePathSegment(segment); err != nil {
 			return "", err
 		}
+	}
+	if providerScope != "" || providerRepositoryID != "" {
+		if strings.TrimSpace(providerScope) == "" || strings.TrimSpace(providerRepositoryID) == "" {
+			return "", errors.New("provider scope and repository ID must be supplied together")
+		}
+		return filepath.Join(
+			basePath, managedWorkspacesDir, workspaceID, provider, "_scopes",
+			stableIdentitySegment(providerScope), stableIdentitySegment(providerRepositoryID),
+		), nil
+	}
+	if err := validatePathSegment(name); err != nil {
+		return "", err
 	}
 	if err := validateOwnerPath(owner); err != nil {
 		return "", err
@@ -187,6 +213,11 @@ func (c *Cloner) WorkspaceProviderRepoPath(
 	}
 	parts = append(parts, filepath.FromSlash(owner), name)
 	return filepath.Join(parts...), nil
+}
+
+func stableIdentitySegment(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
 }
 
 func nonDefaultProviderHostSegment(provider, providerHost string) string {
@@ -347,8 +378,9 @@ func (c *Cloner) EnsureWorkspaceClonedForProvider(
 func (c *Cloner) EnsureWorkspaceClonedWithCredentialRequest(
 	ctx context.Context, request GitCredentialRequest, credentialOrigin, token string,
 ) (string, error) {
-	targetPath, err := c.WorkspaceProviderRepoPath(
-		request.WorkspaceID, request.Provider, request.ProviderHost, request.Owner, request.Name,
+	targetPath, err := c.WorkspaceProviderRepositoryPath(
+		request.WorkspaceID, request.Provider, request.ProviderHost, request.ProviderScope,
+		request.ProviderRepositoryID, request.Owner, request.Name,
 	)
 	if err != nil {
 		return "", err
@@ -357,7 +389,9 @@ func (c *Cloner) EnsureWorkspaceClonedWithCredentialRequest(
 	if err != nil {
 		return "", err
 	}
-	return c.ensureClonedAtPath(ctx, cloneURL, targetPath, auth)
+	return c.ensureClonedAtPathWithOriginVerification(
+		ctx, cloneURL, targetPath, auth, request.ProviderScope != "" && request.ProviderRepositoryID != "",
+	)
 }
 
 // RefreshWorkspaceRepositoryWithCredentialRequest strictly refreshes one
@@ -368,8 +402,9 @@ func (c *Cloner) EnsureWorkspaceClonedWithCredentialRequest(
 func (c *Cloner) RefreshWorkspaceRepositoryWithCredentialRequest(
 	ctx context.Context, request GitCredentialRequest, repositoryPath, credentialOrigin, token string,
 ) error {
-	targetPath, err := c.WorkspaceProviderRepoPath(
-		request.WorkspaceID, request.Provider, request.ProviderHost, request.Owner, request.Name,
+	targetPath, err := c.WorkspaceProviderRepositoryPath(
+		request.WorkspaceID, request.Provider, request.ProviderHost, request.ProviderScope,
+		request.ProviderRepositoryID, request.Owner, request.Name,
 	)
 	if err != nil {
 		return err
@@ -427,25 +462,16 @@ func (c *Cloner) SetOriginURL(ctx context.Context, repositoryPath, originURL str
 }
 
 func (c *Cloner) setOriginURLLocked(ctx context.Context, repositoryPath, originURL string) error {
-	// `git remote get-url` expands url.*.insteadOf rules before returning the
-	// value. Read the local config so canonical origins do not get rewritten on
-	// every launch or resume.
-	cmd := subproc.NewGitCommand(ctx, "-C", repositoryPath, "config", "--local", "--get", "remote.origin.url")
-	cleanup, err := configureGitCommand(cmd, nil)
+	current, err := c.originURLLocked(ctx, repositoryPath)
 	if err != nil {
 		return err
 	}
-	currentOutput, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd)
-	cleanup()
-	if err != nil {
-		return fmt.Errorf("inspect repository origin: %w", formatGitOriginError(repositoryPath, currentOutput, err))
-	}
-	if strings.TrimSpace(string(currentOutput)) == strings.TrimSpace(originURL) {
+	if current == strings.TrimSpace(originURL) {
 		return nil
 	}
 
-	cmd = subproc.NewGitCommand(ctx, "-C", repositoryPath, "remote", "set-url", "origin", "--", originURL)
-	cleanup, err = configureGitCommand(cmd, nil)
+	cmd := subproc.NewGitCommand(ctx, "-C", repositoryPath, "remote", "set-url", "origin", "--", originURL)
+	cleanup, err := configureGitCommand(cmd, nil)
 	if err != nil {
 		return err
 	}
@@ -455,6 +481,34 @@ func (c *Cloner) setOriginURLLocked(ctx context.Context, repositoryPath, originU
 		return fmt.Errorf("set repository origin: %w", formatGitOriginError(repositoryPath, output, err))
 	}
 	return nil
+}
+
+func (c *Cloner) verifyOriginURLLocked(ctx context.Context, repositoryPath, originURL string) error {
+	current, err := c.originURLLocked(ctx, repositoryPath)
+	if err != nil {
+		return err
+	}
+	if current != strings.TrimSpace(originURL) {
+		return fmt.Errorf("%w: checkout %q", ErrManagedCloneOriginMismatch, repositoryPath)
+	}
+	return nil
+}
+
+func (c *Cloner) originURLLocked(ctx context.Context, repositoryPath string) (string, error) {
+	// `git remote get-url` expands url.*.insteadOf rules before returning the
+	// value. Read the local config so canonical origins do not get rewritten on
+	// every launch or resume.
+	cmd := subproc.NewGitCommand(ctx, "-C", repositoryPath, "config", "--local", "--get", "remote.origin.url")
+	cleanup, err := configureGitCommand(cmd, nil)
+	if err != nil {
+		return "", err
+	}
+	currentOutput, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd)
+	cleanup()
+	if err != nil {
+		return "", fmt.Errorf("inspect repository origin: %w", formatGitOriginError(repositoryPath, currentOutput, err))
+	}
+	return strings.TrimSpace(string(currentOutput)), nil
 }
 
 func formatGitOriginError(repositoryPath string, output []byte, err error) error {
@@ -561,12 +615,23 @@ func credentialAuth(cloneURL, credentialOrigin, token string) (*cloneAuth, error
 func (c *Cloner) ensureClonedAtPath(
 	ctx context.Context, cloneURL, targetPath string, auth *cloneAuth,
 ) (string, error) {
+	return c.ensureClonedAtPathWithOriginVerification(ctx, cloneURL, targetPath, auth, false)
+}
+
+func (c *Cloner) ensureClonedAtPathWithOriginVerification(
+	ctx context.Context, cloneURL, targetPath string, auth *cloneAuth, verifyExistingOrigin bool,
+) (string, error) {
 	mu := c.repoMu(targetPath)
 	mu.Lock()
 	defer mu.Unlock()
 
 	gitDir := filepath.Join(targetPath, ".git")
 	if info, statErr := os.Stat(gitDir); statErr == nil && info.IsDir() {
+		if verifyExistingOrigin {
+			if err := c.verifyOriginURLLocked(ctx, targetPath, cloneURL); err != nil {
+				return targetPath, err
+			}
+		}
 		c.fetch(ctx, targetPath, auth)
 		return targetPath, nil
 	}
@@ -611,6 +676,9 @@ func (c *Cloner) ensureClonedWithBasicAuth(
 	auth := &cloneAuth{origin: origin, username: username, password: password}
 	gitDir := filepath.Join(targetPath, ".git")
 	if info, statErr := os.Stat(gitDir); statErr == nil && info.IsDir() {
+		if err := c.verifyOriginURLLocked(ctx, targetPath, cloneURL); err != nil {
+			return targetPath, err
+		}
 		c.fetch(ctx, targetPath, auth)
 		return targetPath, nil
 	}

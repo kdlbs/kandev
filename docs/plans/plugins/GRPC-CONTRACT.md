@@ -441,9 +441,14 @@ Go names for the proto's snake_case fields, `*string` for `optional string`) —
 authors never see the generated `pluginv1.*` types.
 
 `Repository` additionally carries credential-free provider origin identity:
-`source_type`, `provider_id`, `provider_repository_id`, `provider_host`,
+`source_type`, `provider_id`, `provider_repository_id`, `provider_host`, `provider_scope`,
 `owner_or_project`, `provider_name`, and `remote_url`. The Host never exposes a
 local checkout path, scripts, or credentials through this DTO.
+
+`provider_scope` is opaque and credential-free. For provider-backed repositories,
+the strong identity is workspace + provider + scope + immutable provider repository
+ID. Host/name/owner fields remain routing and display metadata; scoped descriptors do
+not adopt legacy unscoped rows.
 
 **Authoring example** — a plugin declaring `api_read: ["sessions"]` and reading
 computed per-session code stats instead of opening the kandev database:

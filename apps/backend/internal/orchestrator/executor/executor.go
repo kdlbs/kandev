@@ -848,6 +848,7 @@ func repositoryGitCredentialRequest(
 	return repoclone.GitCredentialRequest{
 		WorkspaceID: repo.WorkspaceID, TaskID: taskID, SessionID: sessionID,
 		RepositoryID: repo.ID, Provider: repo.Provider, ProviderHost: repo.ProviderHost,
+		ProviderScope: repo.ProviderScope, ProviderRepositoryID: repo.ProviderRepoID,
 		CloneURL: cloneURL, Owner: repo.ProviderOwner, Name: repo.ProviderName,
 	}
 }

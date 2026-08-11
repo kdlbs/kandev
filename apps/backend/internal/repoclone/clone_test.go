@@ -18,7 +18,7 @@ func TestGitCredentialRequestCarriesExactTaskScope(t *testing.T) {
 	t.Parallel()
 
 	requestType := reflect.TypeOf(GitCredentialRequest{})
-	for _, field := range []string{"TaskID", "SessionID", "RepositoryID"} {
+	for _, field := range []string{"TaskID", "SessionID", "RepositoryID", "ProviderScope", "ProviderRepositoryID"} {
 		if _, found := requestType.FieldByName(field); !found {
 			t.Errorf("GitCredentialRequest is missing %s", field)
 		}
@@ -298,6 +298,91 @@ func TestWorkspaceProviderRepoPathSeparatesSelfManagedOrigins(t *testing.T) {
 	wantDefault := filepath.Join(basePath, "workspaces", "workspace-a", "gitlab", "acme", "api")
 	if defaultOrigin != wantDefault {
 		t.Fatalf("default origin path = %q, want %q", defaultOrigin, wantDefault)
+	}
+}
+
+func TestWorkspaceProviderRepositoryPathSeparatesOpaqueScopesAndImmutableIDs(t *testing.T) {
+	t.Parallel()
+	cloner := NewCloner(Config{BasePath: t.TempDir()}, ProtocolHTTPS, "", nil)
+
+	first, err := cloner.WorkspaceProviderRepositoryPath(
+		"workspace-1", "bitbucket", "https://forge.example.test",
+		"https://forge.example.test/dc-a", "repository-42", "TEAM", "widgets",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherScope, err := cloner.WorkspaceProviderRepositoryPath(
+		"workspace-1", "bitbucket", "https://forge.example.test",
+		"https://forge.example.test/dc-b", "repository-42", "TEAM", "widgets",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherRepository, err := cloner.WorkspaceProviderRepositoryPath(
+		"workspace-1", "bitbucket", "https://forge.example.test",
+		"https://forge.example.test/dc-a", "repository-99", "RENAMED", "renamed",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	renamed, err := cloner.WorkspaceProviderRepositoryPath(
+		"workspace-1", "bitbucket", "https://forge.example.test",
+		"https://forge.example.test/dc-a", "repository-42", "RENAMED", "renamed",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == otherScope || first == otherRepository {
+		t.Fatalf("scoped clone paths collided: first=%q scope=%q repository=%q", first, otherScope, otherRepository)
+	}
+	if renamed != first {
+		t.Fatalf("mutable owner/name changed immutable clone path: first=%q renamed=%q", first, renamed)
+	}
+	opaqueVariant, err := cloner.WorkspaceProviderRepositoryPath(
+		"workspace-1", "bitbucket", "https://forge.example.test",
+		"https://forge.example.test/dc-a", " repository-42 ", "TEAM", "widgets",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opaqueVariant == first {
+		t.Fatal("opaque provider repository IDs must not be trimmed before hashing")
+	}
+}
+
+func TestEnsureClonedAtPathRejectsExistingCheckoutWithDifferentOrigin(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	target := filepath.Join(root, "checkout")
+	runGit(t, root, "init", target)
+	runGit(t, target, "remote", "add", "origin", "https://forge.example.test/dc-a/scm/TEAM/widgets.git")
+
+	cloner := NewCloner(Config{BasePath: root}, ProtocolHTTPS, "", nil)
+	_, err := cloner.ensureClonedAtPathWithOriginVerification(
+		context.Background(), "https://forge.example.test/dc-b/scm/TEAM/widgets.git", target, nil, true,
+	)
+	if !errors.Is(err, ErrManagedCloneOriginMismatch) {
+		t.Fatalf("ensureClonedAtPath error = %v, want ErrManagedCloneOriginMismatch", err)
+	}
+}
+
+func TestEnsureClonedAtPathOriginMismatchDoesNotExposeConfiguredCredentials(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	target := filepath.Join(root, "checkout")
+	runGit(t, root, "init", target)
+	runGit(t, target, "remote", "add", "origin", "https://user:secret-token@forge.example.test/scm/TEAM/widgets.git")
+
+	cloner := NewCloner(Config{BasePath: root}, ProtocolHTTPS, "", nil)
+	_, err := cloner.ensureClonedAtPathWithOriginVerification(
+		context.Background(), "https://forge.example.test/scm/TEAM/widgets.git", target, nil, true,
+	)
+	if !errors.Is(err, ErrManagedCloneOriginMismatch) {
+		t.Fatalf("ensureClonedAtPath error = %v, want ErrManagedCloneOriginMismatch", err)
+	}
+	if strings.Contains(err.Error(), "secret-token") || strings.Contains(err.Error(), "user:") {
+		t.Fatalf("origin mismatch exposed credentials: %v", err)
 	}
 }
 
