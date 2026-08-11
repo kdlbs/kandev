@@ -22,6 +22,16 @@ func (s *Service) detectPushAndAssociateMR(
 	if s.gitlabMRLinkService == nil {
 		return
 	}
+	identity := s.resolvePushRepositoryIdentity(ctx, sessionID, taskID, repositoryName)
+	s.detectPushAndAssociateMRWithIdentity(ctx, sessionID, taskID, repositoryName, branch, identity)
+}
+
+func (s *Service) detectPushAndAssociateMRWithIdentity(
+	ctx context.Context, sessionID, taskID, repositoryName, branch string, identity pushRepositoryIdentity,
+) {
+	if s.gitlabMRLinkService == nil {
+		return
+	}
 	// An empty branch must never reach FindMRByBranch: it builds
 	// `?source_branch=&state=opened&per_page=1`, which carries no effective
 	// source-branch filter, so GitLab answers with an arbitrary open MR of the
@@ -37,10 +47,11 @@ func (s *Service) detectPushAndAssociateMR(
 	if workspaceID == "" {
 		return
 	}
-	projectPath, repositoryID := s.resolveGitLabPushProject(ctx, sessionID, taskID, repositoryName)
-	if projectPath == "" || repositoryID == "" {
+	if identity.projectPath == "" || identity.repositoryID == "" {
 		return
 	}
+	projectPath := identity.projectPath
+	repositoryID := identity.repositoryID
 
 	// Already linked for this (task, repository, branch) — don't re-link, but
 	// still make sure the refresh watch exists. AssociateExistingMRByURL (the
@@ -203,11 +214,12 @@ func (s *Service) CheckSessionMR(ctx context.Context, taskID, sessionID string) 
 	// gitlab.check_session_mr for a GitHub-backed session would install a
 	// bogus GitLab watch keyed off the GitHub repository's owner/name before
 	// AutoLinkMRForBranch's own identity check ever runs.
-	if s.resolvePushRepositoryProvider(ctx, sessionID, taskID, "") != gitlabProviderName {
+	identity := s.resolvePushRepositoryIdentity(ctx, sessionID, taskID, "")
+	if identity.provider != gitlabProviderName {
 		return false, nil
 	}
 
-	projectPath, repositoryID := s.resolveGitLabPushProject(ctx, sessionID, taskID, "")
+	projectPath, repositoryID := identity.projectPath, identity.repositoryID
 	if projectPath == "" || repositoryID == "" {
 		return false, nil
 	}
@@ -267,51 +279,4 @@ func (s *Service) CheckSessionMR(ctx context.Context, taskID, sessionID string) 
 func gitLabProjectPathFromRemoteURL(remoteURL string) string {
 	_, projectPath := service.ParseGitRemoteIdentity(remoteURL)
 	return projectPath
-}
-
-// resolveGitLabPushProject returns (projectPath, repositoryID) for the
-// GitLab push-detection and on-demand-check paths. resolvePushRepo alone is
-// not enough here: it is shared with the GitHub path and only recognizes a
-// durable provider_owner/provider_name, which self-managed GitLab
-// repositories never get (only github.com/gitlab.com are tagged at
-// discovery time — see resolvePushRepositoryProvider's doc comment in
-// event_handlers_git.go). When that owner/name is empty, fall back to the
-// repository row's remote_url and finally to the local checkout, mirroring
-// the fallback ValidateTaskMRRepositoryIdentity already applies when
-// validating a manually-linked MR (internal/gitlab/store_task_mr_link.go).
-// Resolves in-memory only on every call and never writes provider columns:
-// per AGENTS.md "Repository provider identity", a row with no provider_host
-// has unknown identity and must fail closed for provider writes, so
-// persisting a provider_owner/provider_name here without provider_host would
-// manufacture exactly that ambiguous shape. A wrong guess here cannot link
-// the wrong MR either way — AutoLinkMRForBranch's
-// ValidateTaskMRRepositoryIdentity independently checks the resolved project
-// path against the workspace's configured GitLab host before persisting.
-func (s *Service) resolveGitLabPushProject(
-	ctx context.Context, sessionID, taskID, repositoryName string,
-) (projectPath, repositoryID string) {
-	owner, name, repositoryID := s.resolvePushRepo(ctx, sessionID, taskID, repositoryName)
-	if repositoryID == "" {
-		return "", ""
-	}
-	if owner != "" && name != "" {
-		return owner + "/" + name, repositoryID
-	}
-	store, ok := s.repo.(repoStore)
-	if !ok {
-		return "", repositoryID
-	}
-	repoObj, err := store.GetRepository(ctx, repositoryID)
-	if err != nil || repoObj == nil {
-		return "", repositoryID
-	}
-	if p := gitLabProjectPathFromRemoteURL(repoObj.RemoteURL); p != "" {
-		return p, repositoryID
-	}
-	if repoObj.LocalPath != "" {
-		if _, localOwner, localName := service.ResolveGitRemoteIdentity(repoObj.LocalPath); localOwner != "" && localName != "" {
-			return localOwner + "/" + localName, repositoryID
-		}
-	}
-	return "", repositoryID
 }

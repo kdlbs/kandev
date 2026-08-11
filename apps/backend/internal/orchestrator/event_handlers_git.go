@@ -284,15 +284,113 @@ func (s *Service) trackPushAndAssociatePR(ctx context.Context, data watcher.GitE
 // provider's association logic, so the two providers' code paths issue zero
 // calls into each other's client. GitHub's proven detectPushAndAssociatePR is
 // called verbatim for every non-GitLab (including unknown/legacy-empty
-// provider) repository — this wraps it, it does not replace it. Extracted
-// from trackPushAndAssociatePR to keep that function inside the statement
-// budget.
+// provider) repository — this passes the shared repository identity into the
+// existing provider-specific path. Extracted from trackPushAndAssociatePR to
+// keep that function inside the statement budget.
 func (s *Service) dispatchPushDetection(ctx context.Context, sessionID, taskID, repositoryName, branch string) {
-	if s.resolvePushRepositoryProvider(ctx, sessionID, taskID, repositoryName) == gitlabProviderName {
-		s.detectPushAndAssociateMR(ctx, sessionID, taskID, repositoryName, branch)
+	identity := s.resolvePushRepositoryIdentity(ctx, sessionID, taskID, repositoryName)
+	if identity.provider == gitlabProviderName {
+		s.detectPushAndAssociateMRWithIdentity(ctx, sessionID, taskID, repositoryName, branch, identity)
 		return
 	}
-	s.detectPushAndAssociatePR(ctx, sessionID, taskID, repositoryName, branch)
+	if s.githubService == nil {
+		return
+	}
+	s.detectPushAndAssociatePRWithIdentity(ctx, sessionID, taskID, repositoryName, branch, identity)
+}
+
+type pushRepositoryIdentity struct {
+	owner        string
+	name         string
+	repositoryID string
+	provider     string
+	projectPath  string
+}
+
+// resolvePushRepositoryIdentity resolves the repository, provider, and full
+// project path from one repository snapshot. Local checkout fallbacks are
+// shared by routing and association so a legacy row cannot be routed from one
+// identity while its provider-specific lookup uses another.
+func (s *Service) resolvePushRepositoryIdentity(
+	ctx context.Context, sessionID, taskID, repositoryName string,
+) pushRepositoryIdentity {
+	owner, name, repositoryID := s.resolvePushRepo(ctx, sessionID, taskID, repositoryName)
+	identity := pushRepositoryIdentity{
+		owner:        owner,
+		name:         name,
+		repositoryID: repositoryID,
+	}
+	if owner != "" && name != "" {
+		identity.projectPath = owner + "/" + name
+	}
+	if repositoryID == "" {
+		return identity
+	}
+	repoObj := s.getPushRepository(ctx, repositoryID)
+	if repoObj == nil {
+		return identity
+	}
+	remoteURL := s.enrichPushRepositoryIdentity(&identity, repoObj)
+	if identity.projectPath == "" {
+		identity.projectPath = gitLabProjectPathFromRemoteURL(remoteURL)
+	}
+	if identity.provider == "" {
+		identity.provider = s.resolveConfiguredGitLabProvider(ctx, taskID, remoteURL)
+	}
+	return identity
+}
+
+func (s *Service) getPushRepository(ctx context.Context, repositoryID string) *models.Repository {
+	store, ok := s.repo.(repoStore)
+	if !ok {
+		return nil
+	}
+	repoObj, err := store.GetRepository(ctx, repositoryID)
+	if err != nil {
+		return nil
+	}
+	return repoObj
+}
+
+func (s *Service) enrichPushRepositoryIdentity(
+	identity *pushRepositoryIdentity, repoObj *models.Repository,
+) string {
+	identity.provider = repoObj.Provider
+	if identity.provider == "" && repoObj.LocalPath != "" {
+		if provider, _, localOwner, localName := service.ResolveGitRemoteProviderIdentity(repoObj.LocalPath); provider != "" && localOwner != "" {
+			identity.provider = provider
+			if identity.owner == "" && localName != "" {
+				identity.owner = localOwner
+				identity.name = localName
+				identity.projectPath = localOwner + "/" + localName
+			}
+		}
+	}
+
+	remoteURL := repoObj.RemoteURL
+	if remoteURL == "" && repoObj.LocalPath != "" {
+		if origin, localOwner, localName := service.ResolveGitRemoteIdentity(repoObj.LocalPath); origin != "" && localOwner != "" && localName != "" {
+			remoteURL = origin + "/" + localOwner + "/" + localName
+			if identity.projectPath == "" {
+				identity.projectPath = localOwner + "/" + localName
+			}
+		}
+	}
+	return remoteURL
+}
+
+func (s *Service) resolveConfiguredGitLabProvider(ctx context.Context, taskID, remoteURL string) string {
+	if s.gitlabMRLinkService == nil || remoteURL == "" {
+		return ""
+	}
+	workspaceID := s.taskWorkspaceID(ctx, taskID)
+	if workspaceID == "" {
+		return ""
+	}
+	if s.gitlabMRLinkService.IsConfiguredGitLabHost(ctx, workspaceID, remoteURL) {
+		return gitlabProviderName
+	}
+	return ""
 }
 
 // resolvePushRepositoryProvider looks up the provider ("github", "gitlab", or
@@ -300,65 +398,7 @@ func (s *Service) dispatchPushDetection(ctx context.Context, sessionID, taskID, 
 // resolvePushRepo's owner/name matching rather than re-deriving it, so
 // dispatchPushDetection can route without duplicating that logic.
 func (s *Service) resolvePushRepositoryProvider(ctx context.Context, sessionID, taskID, repositoryName string) string {
-	_, _, repositoryID := s.resolvePushRepo(ctx, sessionID, taskID, repositoryName)
-	if repositoryID == "" {
-		return ""
-	}
-	store, ok := s.repo.(repoStore)
-	if !ok {
-		return ""
-	}
-	repoObj, err := store.GetRepository(ctx, repositoryID)
-	if err != nil || repoObj == nil {
-		return ""
-	}
-	if repoObj.Provider != "" {
-		return repoObj.Provider
-	}
-	// The row may not yet reflect a provider resolvePushRepo's own call just
-	// derived from the local git remote: matchPushRepo/resolveSessionRepo
-	// compute it in-memory and persist it via a detached backfill goroutine,
-	// so this read can race ahead of that write on the very first push from a
-	// repository with no durable provider yet. Recompute live from the same
-	// local checkout instead of trusting a possibly-stale empty column.
-	// ResolveGitRemoteProviderIdentity recognizes both github.com and
-	// gitlab.com remotes (the same helper resolveRepositoryProviderIdentity
-	// uses to backfill Repository rows in production), so this closes the
-	// race for either provider rather than only GitHub.
-	if repoObj.LocalPath != "" {
-		if provider, _, owner, _ := service.ResolveGitRemoteProviderIdentity(repoObj.LocalPath); provider != "" && owner != "" {
-			return provider
-		}
-	}
-	// Self-managed GitLab instances never get a durable "gitlab" Provider tag
-	// at all — resolveRepositoryProviderIdentity only recognizes github.com
-	// and gitlab.com at discovery time, so the well-known-host fallback above
-	// can never resolve them either; this is a permanent gap for self-managed
-	// repositories, not just a narrow backfill race. remote_url is their
-	// primary durable identity signal (still populated by the same
-	// production backfill), so compare it against the workspace's own
-	// configured GitLab connection instead of a hostname allowlist. A row
-	// whose remote_url backfill hasn't landed yet (or predates it) falls back
-	// to a live read of the same local checkout resolveGitLabPushProject
-	// already reads for the project path (event_handlers_gitlab_mr.go), so
-	// routing and project-path resolution agree on the same repository
-	// shape instead of routing bailing before that fallback ever runs.
-	if s.gitlabMRLinkService == nil {
-		return ""
-	}
-	remoteURL := repoObj.RemoteURL
-	if remoteURL == "" && repoObj.LocalPath != "" {
-		if origin, owner, name := service.ResolveGitRemoteIdentity(repoObj.LocalPath); origin != "" && owner != "" && name != "" {
-			remoteURL = origin + "/" + owner + "/" + name
-		}
-	}
-	if remoteURL != "" {
-		if workspaceID := s.taskWorkspaceID(ctx, taskID); workspaceID != "" &&
-			s.gitlabMRLinkService.IsConfiguredGitLabHost(ctx, workspaceID, remoteURL) {
-			return gitlabProviderName
-		}
-	}
-	return ""
+	return s.resolvePushRepositoryIdentity(ctx, sessionID, taskID, repositoryName).provider
 }
 
 // shouldFirePushDetection decides whether to kick off PR association for one

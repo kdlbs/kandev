@@ -50,7 +50,8 @@ func seedUnbackfilledRepoForProviderTest(t *testing.T, remoteURL string) *Servic
 	}
 	if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{
 		ID: "tr1", TaskID: "t1", RepositoryID: "repo1",
-		CreatedAt: now, UpdatedAt: now,
+		CheckoutBranch: "feat/a",
+		CreatedAt:      now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("create task repository: %v", err)
 	}
@@ -102,8 +103,8 @@ func TestResolvePushRepositoryProvider_LiveFallbackForUnbackfilledGitLabRepo(t *
 // self-managed-host check only ever compared repoObj.RemoteURL —  never a
 // live read of LocalPath — against the workspace's configured GitLab host.
 // dispatchPushDetection therefore sent the push down the GitHub detection
-// path, and resolveGitLabPushProject's own local-checkout fallback
-// (event_handlers_gitlab_mr.go) never got a chance to run because routing
+// path, and the shared identity resolver's local-checkout fallback
+// (event_handlers_git.go) never got a chance to run because routing
 // bailed one step earlier than that fallback.
 func TestResolvePushRepositoryProvider_LiveFallbackForUnbackfilledSelfManagedGitLabRepo(t *testing.T) {
 	const selfManagedRemote = "https://gitlab.internal.example.com/group/subgroup/widgets"
@@ -121,5 +122,74 @@ func TestResolvePushRepositoryProvider_LiveFallbackForUnbackfilledSelfManagedGit
 	}
 	if fake.isConfiguredGitLabHostCalls != 1 {
 		t.Fatalf("expected IsConfiguredGitLabHost to be consulted exactly once, got %d", fake.isConfiguredGitLabHostCalls)
+	}
+}
+
+// TestDispatchPushDetection_LiveFallbackForUnbackfilledSelfManagedGitLabRepo
+// covers the complete push path for a legacy row whose only repository
+// identity is the local checkout's origin. Provider routing and project-path
+// resolution must agree so the push reaches GitLab rather than falling back to
+// GitHub or being dropped before the MR lookup.
+func TestDispatchPushDetection_LiveFallbackForUnbackfilledSelfManagedGitLabRepo(t *testing.T) {
+	const selfManagedRemote = "https://gitlab.internal.example.com/group/subgroup/widgets"
+	svc := seedUnbackfilledRepoForProviderTest(t, selfManagedRemote)
+
+	fake := &fakeGitLabMRLinkService{taskMRs: make(map[string][]*gitlab.TaskMR)}
+	fake.isConfiguredGitLabHostFunc = func(_ context.Context, workspaceID, remoteURL string) bool {
+		return workspaceID == "ws1" && remoteURL == selfManagedRemote
+	}
+	var gotProjectPath string
+	fake.autoLinkFunc = func(_ context.Context, _, _, _, repositoryID, projectPath, branch string) (*gitlab.TaskMR, error) {
+		gotProjectPath = projectPath
+		return &gitlab.TaskMR{TaskID: "t1", RepositoryID: repositoryID, ProjectPath: projectPath, MRIID: 5, HeadBranch: branch}, nil
+	}
+	svc.SetGitLabMRLinkService(fake)
+	ghSvc := &mockGitHubService{}
+	svc.SetGitHubService(ghSvc)
+
+	svc.dispatchPushDetection(context.Background(), "s1", "t1", "", "feat/a")
+
+	if fake.autoLinkCalls != 1 {
+		t.Fatalf("expected one GitLab auto-link call, got %d", fake.autoLinkCalls)
+	}
+	if gotProjectPath != "group/subgroup/widgets" {
+		t.Fatalf("projectPath = %q, want %q", gotProjectPath, "group/subgroup/widgets")
+	}
+	if fake.lastAutoLinkRepositoryID != "repo1" {
+		t.Fatalf("repositoryID = %q, want repo1", fake.lastAutoLinkRepositoryID)
+	}
+	if ghSvc.getPRWatchBySessionRepoAndBranchCalls != 0 {
+		t.Fatalf("expected zero GitHub lookups for a self-managed GitLab repository, got %d", ghSvc.getPRWatchBySessionRepoAndBranchCalls)
+	}
+}
+
+// TestCheckSessionMR_LiveFallbackForUnbackfilledSelfManagedGitLabRepo covers
+// the on-demand path for the same local-only repository shape. It must apply
+// the provider guard and pass the local checkout's full nested project path to
+// GitLab before creating the association.
+func TestCheckSessionMR_LiveFallbackForUnbackfilledSelfManagedGitLabRepo(t *testing.T) {
+	const selfManagedRemote = "https://gitlab.internal.example.com/group/subgroup/widgets"
+	svc := seedUnbackfilledRepoForProviderTest(t, selfManagedRemote)
+
+	fake := &fakeGitLabMRLinkService{taskMRs: make(map[string][]*gitlab.TaskMR)}
+	fake.isConfiguredGitLabHostFunc = func(_ context.Context, workspaceID, remoteURL string) bool {
+		return workspaceID == "ws1" && remoteURL == selfManagedRemote
+	}
+	var gotProjectPath string
+	fake.autoLinkFunc = func(_ context.Context, _, _, _, repositoryID, projectPath, branch string) (*gitlab.TaskMR, error) {
+		gotProjectPath = projectPath
+		return &gitlab.TaskMR{TaskID: "t1", RepositoryID: repositoryID, ProjectPath: projectPath, MRIID: 5, HeadBranch: branch}, nil
+	}
+	svc.SetGitLabMRLinkService(fake)
+
+	found, err := svc.CheckSessionMR(context.Background(), "t1", "s1")
+	if err != nil {
+		t.Fatalf("CheckSessionMR: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true for a self-managed GitLab repository with only a local origin")
+	}
+	if gotProjectPath != "group/subgroup/widgets" {
+		t.Fatalf("projectPath = %q, want %q", gotProjectPath, "group/subgroup/widgets")
 	}
 }

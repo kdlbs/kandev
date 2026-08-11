@@ -558,7 +558,7 @@ func seedSelfManagedGitLabSessionWithRepo(t *testing.T) (*Service, *fakeGitLabMR
 // any repo added before self-managed hosts got a discovery-time tag) must
 // still reach AutoLinkMRForBranch, deriving the project path from remote_url
 // instead of the never-populated provider_owner/provider_name. Before the
-// resolveGitLabPushProject fallback this failed with 0 AutoLinkMRForBranch
+// shared identity resolver fallback this failed with 0 AutoLinkMRForBranch
 // calls, because resolvePushRepo alone returns empty owner/name for any
 // non-github.com, non-provider-tagged repository.
 func TestDetectPushAndAssociateMR_SelfManagedGitLabResolvesProjectFromRemoteURL(t *testing.T) {
@@ -609,7 +609,7 @@ func TestCheckSessionMR_SelfManagedGitLabResolvesProjectFromRemoteURL(t *testing
 // "do not widen the shared helper" decision behind the self-managed-GitLab
 // auto-link fix: resolvePushRepo (shared with the GitHub path) must keep
 // returning empty owner/name for a non-github.com remote even though
-// resolveGitLabPushProject now has its own remote_url fallback on the
+// shared identity resolver now has its own remote_url fallback on the
 // GitLab-only path. If a future refactor widened resolvePushRepo instead,
 // this repository would start reaching the GitHub API with a GitLab
 // owner/name whenever routing ever misfired (e.g. no GitLab connection
