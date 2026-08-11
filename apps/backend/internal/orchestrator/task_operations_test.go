@@ -4292,6 +4292,9 @@ type mockMessageCreator struct {
 	toolCallWrites     int
 	toolUpdateWrites   int
 	userMessageErr     error
+	permissionClaimFn  func(context.Context, models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
+	permissionFinishFn func(context.Context, models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error)
+	permissionAuditFn  func(context.Context, string, string, string, string) (*models.PermissionResolutionAudit, error)
 }
 
 type mockUserMessage struct {
@@ -4354,12 +4357,33 @@ func (m *mockMessageCreator) CreateSessionMessage(_ context.Context, taskID, con
 	return nil
 }
 
-func (m *mockMessageCreator) CreatePermissionRequestMessage(context.Context, string, string, string, string, string, string, []map[string]interface{}, string, map[string]interface{}) (string, error) {
+func (m *mockMessageCreator) CreatePermissionRequestMessage(context.Context, string, string, string, string, string, string, string, []map[string]interface{}, string, map[string]interface{}) (string, error) {
 	return "", nil
 }
 
 func (m *mockMessageCreator) UpdatePermissionMessage(context.Context, string, string, models.PermissionStatus) error {
 	return nil
+}
+
+func (m *mockMessageCreator) ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error) {
+	if m.permissionClaimFn != nil {
+		return m.permissionClaimFn(ctx, request)
+	}
+	return &models.PermissionResolutionClaimResult{Outcome: models.PermissionClaimed}, nil
+}
+
+func (m *mockMessageCreator) FinalizePermissionResolution(ctx context.Context, request models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error) {
+	if m.permissionFinishFn != nil {
+		return m.permissionFinishFn(ctx, request)
+	}
+	return &models.PermissionResolutionFinalizeResult{Outcome: models.PermissionFinalized}, nil
+}
+
+func (m *mockMessageCreator) GetPermissionResolutionAudit(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.PermissionResolutionAudit, error) {
+	if m.permissionAuditFn != nil {
+		return m.permissionAuditFn(ctx, taskID, sessionID, requestID, pendingID)
+	}
+	return nil, nil
 }
 
 func (m *mockMessageCreator) CreateAgentMessageStreaming(context.Context, string, string, string, string, string) error {

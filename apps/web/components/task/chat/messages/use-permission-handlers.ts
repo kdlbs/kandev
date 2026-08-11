@@ -26,6 +26,7 @@ export type PermissionActionDetails = {
 };
 
 export type PermissionRequestMetadata = {
+  request_id?: string;
   pending_id: string;
   tool_call_id: string;
   options: PermissionOption[];
@@ -61,7 +62,7 @@ export function usePermissionResponseHandlers({
 
   const handleRespond = useCallback(
     async (optionId: string, cancelled: boolean = false, rejected: boolean = false) => {
-      if (!permissionMetadata || !permissionMessage) return;
+      if (!permissionMetadata?.request_id || !permissionMessage) return;
       const client = getWebSocketClient();
       if (!client) {
         console.error("WebSocket client not available");
@@ -70,7 +71,9 @@ export function usePermissionResponseHandlers({
       setIsResponding(true);
       try {
         await client.request("permission.respond", {
+          task_id: permissionMessage.task_id,
           session_id: permissionMessage.session_id,
+          request_id: permissionMetadata.request_id,
           pending_id: permissionMetadata.pending_id,
           option_id: cancelled ? undefined : optionId,
           cancelled,

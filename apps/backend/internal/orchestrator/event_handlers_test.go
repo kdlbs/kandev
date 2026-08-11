@@ -325,6 +325,9 @@ type mockAgentManager struct {
 	// that accepted work uses a detached context.
 	cancelAgentContextErr error
 	cancelAgentFunc       func(context.Context, string) error
+	listPermissionsFunc   func(context.Context, string) ([]streams.PendingAgentPermission, error)
+	resolvePermissionFunc func(context.Context, string, string, string, string) (*streams.PermissionResolveResponse, error)
+	cancelPermissionFunc  func(context.Context, string, string, string) (*streams.PermissionCancelResponse, error)
 	// cancelAgentErr, when set, is returned by CancelAgent instead of nil —
 	// lets tests exercise callers that must react to a genuine cancel
 	// failure (as opposed to the tolerated ErrNoExecutionForSession /
@@ -497,6 +500,24 @@ func (m *mockAgentManager) CancelAgent(ctx context.Context, sessionID string) er
 }
 func (m *mockAgentManager) RespondToPermissionBySessionID(_ context.Context, _, _, _ string, _ bool) error {
 	return nil
+}
+func (m *mockAgentManager) ListPendingPermissionsBySessionID(ctx context.Context, sessionID string) ([]streams.PendingAgentPermission, error) {
+	if m.listPermissionsFunc != nil {
+		return m.listPermissionsFunc(ctx, sessionID)
+	}
+	return nil, nil
+}
+func (m *mockAgentManager) ResolvePermissionBySessionID(ctx context.Context, sessionID, requestID, pendingID, optionID string) (*streams.PermissionResolveResponse, error) {
+	if m.resolvePermissionFunc != nil {
+		return m.resolvePermissionFunc(ctx, sessionID, requestID, pendingID, optionID)
+	}
+	return nil, nil
+}
+func (m *mockAgentManager) CancelPermissionBySessionID(ctx context.Context, sessionID, requestID, pendingID string) (*streams.PermissionCancelResponse, error) {
+	if m.cancelPermissionFunc != nil {
+		return m.cancelPermissionFunc(ctx, sessionID, requestID, pendingID)
+	}
+	return nil, nil
 }
 func (m *mockAgentManager) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
 	if m.isAgentRunningFn != nil {

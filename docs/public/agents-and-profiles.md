@@ -174,6 +174,13 @@ Literal values remain in profile configuration. A secret reference avoids copyin
 
 In a structured ACP session, the agent can present a permission request and its available responses. With **Auto-approve all permissions** disabled, a person chooses a response in the session. With it enabled, the runtime selects the first allow-once or allow-always response without waiting. If the agent supplies no allow response, Kandev selects its first response even when that response is not approval; with no responses, it cancels.
 
+An external MCP client can also list live pending requests for an authorized task and submit one
+exact option originally offered by the agent. The request-generation ID prevents an old approval
+from targeting a replacement prompt that reused a provider pending ID. Kandev records who selected
+which option before delivery and rejects concurrent or replayed answers. It does not expose hidden
+environment values, headers, raw MCP arguments, or option metadata. See
+[Resolve a live agent permission request](automation-and-mcp.md#resolve-a-live-agent-permission-request).
+
 Auto approval can authorize shell commands, file changes, network calls, or any other capability exposed by that agent. Agent-specific flags that suppress permission prompts can be broader still. Use either only with a constrained executor, repository, environment, and credential set.
 
 Workspace automation selectors do not offer passthrough agent profiles or Local executor profiles. **Run**-mode automations also cannot wait for a permission response: an unanswered request is rejected and the run fails. Use **Task** mode when a person must approve agent actions, or use a profile whose safe work does not prompt. See [Automation and MCP](automation-and-mcp.md).

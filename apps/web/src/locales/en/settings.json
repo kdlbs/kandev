@@ -743,5 +743,7 @@
   "voiceWhisperTinyHint": "Fastest, lower accuracy",
   "vsCodeRemoteSsh": "VS Code Remote SSH",
   "whenEnabledInstallYourProjectS": "When enabled, install your project's dependencies (e.g. <2>{{command}}</2> via repository setup scripts) to avoid missing type errors.",
-  "externalMcpToolListTaskSessions": "List every agent session on a task, newest first, so another tool can address one by ID."
+  "externalMcpToolListTaskSessions": "List every agent session on a task, newest first, so another tool can address one by ID.",
+  "externalMcpToolListPendingAgentPermissions": "List live command and tool permission requests for a task, including safe action details and the agent's exact choices.",
+  "externalMcpToolResolveAgentPermission": "Resolve one live permission request by selecting an exact option returned by the list tool."
 }

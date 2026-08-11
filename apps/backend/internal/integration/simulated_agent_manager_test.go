@@ -26,17 +26,19 @@ import (
 // SimulatedAgentManagerClient simulates agent container behavior for testing.
 // It publishes realistic agent events (started, ACP messages, completion) to the event bus.
 type SimulatedAgentManagerClient struct {
-	eventBus      bus.EventBus
-	logger        *logger.Logger
-	mu            sync.Mutex
-	instances     map[string]*simulatedInstance
-	launchDelay   time.Duration
-	executionTime time.Duration
-	shouldFail    bool
-	failAfter     int // Fail after N successful launches
-	launchCount   int32
-	acpMessageFn  func(taskID, executionID string) []protocol.Message // Custom ACP messages
-	stopCh        chan struct{}
+	eventBus            bus.EventBus
+	logger              *logger.Logger
+	mu                  sync.Mutex
+	instances           map[string]*simulatedInstance
+	permissions         map[string][]streams.PendingAgentPermission
+	permissionResponses int
+	launchDelay         time.Duration
+	executionTime       time.Duration
+	shouldFail          bool
+	failAfter           int // Fail after N successful launches
+	launchCount         int32
+	acpMessageFn        func(taskID, executionID string) []protocol.Message // Custom ACP messages
+	stopCh              chan struct{}
 }
 
 // simulatedInstance tracks a simulated agent instance
@@ -59,6 +61,7 @@ func NewSimulatedAgentManager(eventBus bus.EventBus, log *logger.Logger) *Simula
 		eventBus:      eventBus,
 		logger:        log,
 		instances:     make(map[string]*simulatedInstance),
+		permissions:   make(map[string][]streams.PendingAgentPermission),
 		launchDelay:   50 * time.Millisecond,
 		executionTime: 200 * time.Millisecond,
 		stopCh:        make(chan struct{}),
@@ -346,6 +349,50 @@ func (s *SimulatedAgentManagerClient) RespondToPermissionBySessionID(ctx context
 		zap.String("option_id", optionID),
 		zap.Bool("cancelled", cancelled))
 	return nil
+}
+
+func (s *SimulatedAgentManagerClient) SetPendingPermissions(sessionID string, permissions []streams.PendingAgentPermission) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.permissions[sessionID] = append([]streams.PendingAgentPermission(nil), permissions...)
+}
+
+func (s *SimulatedAgentManagerClient) PermissionResponseCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.permissionResponses
+}
+
+func (s *SimulatedAgentManagerClient) ListPendingPermissionsBySessionID(_ context.Context, sessionID string) ([]streams.PendingAgentPermission, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]streams.PendingAgentPermission(nil), s.permissions[sessionID]...), nil
+}
+
+func (s *SimulatedAgentManagerClient) ResolvePermissionBySessionID(_ context.Context, sessionID, requestID, pendingID, optionID string) (*streams.PermissionResolveResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for permissionIndex, permission := range s.permissions[sessionID] {
+		if permission.RequestID != requestID || permission.PendingID != pendingID {
+			continue
+		}
+		for _, option := range permission.Options {
+			if option.OptionID != optionID {
+				continue
+			}
+			s.permissions[sessionID] = append(s.permissions[sessionID][:permissionIndex], s.permissions[sessionID][permissionIndex+1:]...)
+			s.permissionResponses++
+			return &streams.PermissionResolveResponse{
+				RequestID: requestID, PendingID: pendingID, OptionID: optionID,
+				OptionKind: option.Kind, Status: "resolved",
+			}, nil
+		}
+	}
+	return nil, fmt.Errorf("permission no longer pending")
+}
+
+func (s *SimulatedAgentManagerClient) CancelPermissionBySessionID(_ context.Context, _, requestID, pendingID string) (*streams.PermissionCancelResponse, error) {
+	return &streams.PermissionCancelResponse{RequestID: requestID, PendingID: pendingID, Status: "cancelled"}, nil
 }
 
 // CompleteAgent marks an agent as completed

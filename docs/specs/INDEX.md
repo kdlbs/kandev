@@ -113,6 +113,7 @@ Roles, governance gates, and granular permissions that apply across human users 
 | [roles](agents/roles.md) | shipped |
 | [governance](agents/governance.md) | shipped |
 | [granular-permissions](agents/granular-permissions.md) | draft |
+| [external-permission-resolution](agents/external-permission-resolution.md) | draft |
 
 ## integrations/ — external service integrations
 

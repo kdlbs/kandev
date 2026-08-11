@@ -392,6 +392,7 @@ type PermissionRequestEventPayload struct {
 	AgentID       string                 `json:"agent_id"`
 	TaskID        string                 `json:"task_id"`
 	SessionID     string                 `json:"session_id"`
+	RequestID     string                 `json:"request_id"`
 	PendingID     string                 `json:"pending_id"`
 	ToolCallID    string                 `json:"tool_call_id"`
 	Title         string                 `json:"title"`

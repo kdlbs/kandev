@@ -1796,6 +1796,7 @@ Agents may request user permission for certain operations. The permission flow u
   "action": "permission.requested",
   "payload": {
     "task_id": "task-uuid",
+    "request_id": "kandev-request-uuid",
     "pending_id": "pending-request-uuid",
     "instance_id": "agent-instance-uuid",
     "session_id": "acp-session-uuid",
@@ -1828,9 +1829,10 @@ Agents may request user permission for certain operations. The permission flow u
 | Payload Field | Type | Description |
 |--------------|------|-------------|
 | `task_id` | string | Task the agent is working on |
+| `request_id` | string | Kandev request-generation ID; changes when a provider request is replaced |
 | `pending_id` | string | Unique ID for this pending request |
 | `instance_id` | string | Agent instance ID |
-| `session_id` | string | ACP session ID |
+| `session_id` | string | Kandev task session ID |
 | `tool_call_id` | string | Tool call requesting permission |
 | `title` | string | Human-readable title |
 | `description` | string | Additional context |
@@ -1854,6 +1856,8 @@ Agents may request user permission for certain operations. The permission flow u
   "action": "permission.respond",
   "payload": {
     "task_id": "task-uuid",
+    "session_id": "task-session-uuid",
+    "request_id": "kandev-request-uuid",
     "pending_id": "pending-request-uuid",
     "option_id": "allow-once"
   }
@@ -1863,9 +1867,12 @@ Agents may request user permission for certain operations. The permission flow u
 | Payload Field | Type | Required | Description |
 |--------------|------|----------|-------------|
 | `task_id` | string | ✅ | Task ID |
+| `session_id` | string | ✅ | Kandev task session ID belonging to the task |
+| `request_id` | string | ✅ | Exact request-generation ID from the permission message |
 | `pending_id` | string | ✅ | Pending request ID from notification |
 | `option_id` | string | ❌ | Selected option ID (required if not cancelled) |
 | `cancelled` | boolean | ❌ | True to cancel the request |
+| `rejected` | boolean | ❌ | Compatibility status hint; the selected provider option kind remains authoritative |
 
 **Response:**
 ```json
@@ -1874,20 +1881,22 @@ Agents may request user permission for certain operations. The permission flow u
   "type": "response",
   "action": "permission.respond",
   "payload": {
-    "success": true
+    "success": true,
+    "session_id": "task-session-uuid",
+    "pending_id": "pending-request-uuid"
   }
 }
 ```
 
-**Error Response (no pending request):**
+**Error Response (stale or replaced request):**
 ```json
 {
   "id": "uuid",
   "type": "error",
   "action": "permission.respond",
   "payload": {
-    "code": "NOT_FOUND",
-    "message": "No pending permission request for this task"
+    "code": "INTERNAL_ERROR",
+    "message": "Failed to respond to permission: permission_stale"
   }
 }
 ```

@@ -418,14 +418,61 @@ http://127.0.0.1:<backend-port>/mcp
 
 SSE compatibility uses `/mcp/sse` with messages sent to `/mcp/message`. A reverse proxy must support long-lived streaming connections.
 
-External MCP exposes 33 tools in these groups:
+External MCP exposes 35 tools in these groups:
 
 - workspace/workflow configuration: list workspaces, workflows, repositories, and workflow steps; create, update, delete, or import workflows; create, update, delete, or reorder steps;
 - agents and profiles: list/update agents; create/delete profiles; list/update profiles; get/update profile MCP configuration;
 - executors: list executors and profiles; create, update, or delete executor profiles;
-- tasks: list, create, move, delete, archive, or update task state; list a task's sessions; and read task conversation.
+- tasks: list, create, move, delete, archive, or update task state; list a task's sessions; read task conversation; and discover or resolve live agent permission requests.
 
-The settings page's static **Available tools** preview currently counts 30 and omits `list_repositories_kandev`, `import_workflow_kandev`, and `get_task_conversation_kandev`. Treat the client's live `tools/list` response from the endpoint—not that preview—as authoritative.
+The settings page's static **Available tools** preview currently counts 32 and omits `list_repositories_kandev`, `import_workflow_kandev`, and `get_task_conversation_kandev`. Treat the client's live `tools/list` response from the endpoint, not that preview, as authoritative.
+
+### Resolve a live agent permission request
+
+Use `list_pending_agent_permissions_kandev` when an external client needs to show a person the
+permission prompts currently blocking a task. `task_id` is required; `session_id` is optional and
+must belong to that task. An authorized task with no live request returns an empty list. Each item
+contains the exact task, session, request-generation, provider-pending, and tool-call identities;
+creation time and status; an allowlisted action projection; and the provider's ordered option IDs,
+names, and kinds.
+
+```json
+{
+  "task_id": "task-uuid",
+  "session_id": "optional-session-uuid"
+}
+```
+
+Command text and working directory are included when safe. File contents, diffs, environment
+values, headers, raw MCP arguments, provider-specific fields, and option metadata are omitted.
+Credential-like values in presentation text are redacted, and the action reports whether its
+returned text changed.
+
+After the person chooses one listed option, pass the returned identities unchanged to
+`resolve_agent_permission_kandev`:
+
+```json
+{
+  "task_id": "task-uuid",
+  "session_id": "session-uuid",
+  "request_id": "kandev-request-uuid",
+  "pending_id": "provider-pending-id",
+  "option_id": "allow-once"
+}
+```
+
+The mutation cannot accept a command, edited tool arguments, cancellation flag, or synthesized
+option. To deny an action, select an original `reject_once` or `reject_always` option. Kandev
+authorizes the task/session pair, records a durable audit claim, and only then delivers that exact
+option to the current live provider request. A concurrent, replayed, withdrawn, expired, or
+replaced request fails with a stable permission error and never acts on a newer request. The audit
+records the resolving user, actor kind, source, option identity, time, and result, but never the PAT
+record ID, credential, command environment, headers, or raw MCP arguments.
+
+Live agentctl state is authoritative for whether a request can still be answered. Persisted message
+audit is authoritative for history and replay prevention, but Kandev never reconstructs an
+actionable request from message history after its execution is gone. These tools cover structured
+agent command/tool permission prompts, not Office approvals or clarification questions.
 
 In external mode, `create_task_kandev` has no current task and does not accept the `parent_id: "self"` shorthand. Its registered top-level contract asks for a repository ID, repository URL (including a supported GitHub pull request or GitLab merge request URL), or local path; workspace and workflow resolve automatically only when unambiguous. The current handler can nevertheless accept an omitted repository and create repo-less work, which is a contract/implementation mismatch rather than a supported equivalent of the regular UI's **None** option. Supply an explicit repository locator for portable clients. A resolvable agent profile is required even with `start_agent: false`; otherwise `start_agent` defaults to true. To create a subtask, pass the full ID of an existing parent.
 
@@ -443,6 +490,10 @@ the current single-user behavior. When authentication is enabled, external
 clients must provide a personal access token; an already-authenticated browser
 session may also pass the same middleware. This is separate from task-mode MCP,
 which runs inside the agentctl session boundary.
+
+Permission discovery and resolution use the same task ownership checks as other task reads. A PAT
+has only its owning user's scope; administrator role does not grant access to another user's
+workspace. Unknown and unauthorized task/session IDs return the same not-found result.
 
 - Bind the backend to loopback for a local single-user install.
 - For remote use, place the whole backend behind a VPN, firewall, or authenticated TLS reverse proxy.

@@ -708,6 +708,49 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendin
 	return nil
 }
 
+// ClaimPermissionResolution durably serializes the first resolver before any
+// option is delivered to the live agent process.
+func (s *Service) ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error) {
+	result, err := s.messages.ClaimPermissionResolution(ctx, request)
+	if err != nil {
+		s.logger.Error("failed to claim permission resolution",
+			zap.String("task_id", request.TaskID),
+			zap.String("session_id", request.SessionID),
+			zap.String("request_id", request.Audit.RequestID),
+			zap.String("pending_id", request.Audit.PendingID),
+			zap.Error(err))
+		return nil, err
+	}
+	if result.Outcome == models.PermissionClaimed && result.Message != nil {
+		s.publishMessageEvent(ctx, events.MessageUpdated, result.Message)
+	}
+	return result, nil
+}
+
+// FinalizePermissionResolution records the outcome for the exact durable
+// claim. Only successful writes publish the existing message update event.
+func (s *Service) FinalizePermissionResolution(ctx context.Context, request models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error) {
+	result, err := s.messages.FinalizePermissionResolution(ctx, request)
+	if err != nil {
+		s.logger.Error("failed to finalize permission resolution",
+			zap.String("task_id", request.TaskID),
+			zap.String("session_id", request.SessionID),
+			zap.String("request_id", request.RequestID),
+			zap.String("pending_id", request.PendingID),
+			zap.String("result", string(request.Result)),
+			zap.Error(err))
+		return nil, err
+	}
+	if result.Outcome == models.PermissionFinalized && result.Message != nil {
+		s.publishMessageEvent(ctx, events.MessageUpdated, result.Message)
+	}
+	return result, nil
+}
+
+func (s *Service) GetPermissionResolutionAudit(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.PermissionResolutionAudit, error) {
+	return s.messages.GetPermissionResolutionAudit(ctx, taskID, sessionID, requestID, pendingID)
+}
+
 // UpdateClarificationMessageForQuestion updates a single clarification message
 // (identified by pending_id + question_id) with the new status and the answer
 // payload. Used by both single- and multi-question clarification bundles since

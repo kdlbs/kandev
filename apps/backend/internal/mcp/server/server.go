@@ -637,6 +637,7 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "configuration-executors", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigExecutorTools() }},
 		{name: "configuration-tasks", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigTaskTools() }},
 		{name: "external-create-task", enabled: external, register: func(s *Server) { s.registerCreateTaskTool() }},
+		{name: "external-agent-permissions", enabled: external, register: func(s *Server) { s.registerAgentPermissionTools() }},
 		{name: "kanban-task", enabled: kanban, register: func(s *Server) { s.registerKanbanTools() }},
 		{name: "github-pr", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool { return mcpproviders.Contains(ctx.Providers, mcpproviders.GitHub) }), register: func(s *Server) { s.registerPRAutomationTools() }},
 		{name: "gitlab-mr", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool { return mcpproviders.Contains(ctx.Providers, mcpproviders.GitLab) }), register: func(s *Server) { s.registerMRAutomationTools() }},
@@ -656,6 +657,28 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "task-title", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityTaskTitle)), register: func(s *Server) { s.registerSetTaskTitleTool() }},
 		{name: "diagnostics", enabled: kanban, register: func(s *Server) { s.registerDiagnosticBundleTool() }},
 	}
+}
+
+func (s *Server) registerAgentPermissionTools() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("list_pending_agent_permissions_kandev",
+			mcp.WithDescription("List live pending agent command and tool permission requests for an authorized task, optionally limited to one session. Returns safe action details and the exact immutable provider-offered option IDs and kinds needed for resolution."),
+			mcp.WithString(mcpKeyTaskID, mcp.Required(), mcp.Description("The task ID whose live permission requests to list")),
+			mcp.WithString("session_id", mcp.Description("Optional session ID, which must belong to task_id")),
+		),
+		s.wrapHandler("list_pending_agent_permissions_kandev", s.listPendingAgentPermissionsHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("resolve_agent_permission_kandev",
+			mcp.WithDescription("Resolve one exact live agent permission request by selecting one option the provider originally offered. First call list_pending_agent_permissions_kandev and submit the returned task, session, request, pending, and option IDs unchanged. Reject choices are selected by their offered option ID; cancellation and caller-authored commands or options are not accepted."),
+			mcp.WithString(mcpKeyTaskID, mcp.Required(), mcp.Description("The task ID returned by permission discovery")),
+			mcp.WithString("session_id", mcp.Required(), mcp.Description("The session ID returned by permission discovery")),
+			mcp.WithString("request_id", mcp.Required(), mcp.Description("The immutable Kandev request generation ID")),
+			mcp.WithString("pending_id", mcp.Required(), mcp.Description("The provider pending request ID")),
+			mcp.WithString("option_id", mcp.Required(), mcp.Description("One exact option ID returned for this request")),
+		),
+		s.wrapHandler("resolve_agent_permission_kandev", s.resolveAgentPermissionHandler()),
+	)
 }
 
 // registerTools registers MCP tools from the declarative profile registry.

@@ -28,6 +28,7 @@ const ALLOW_ALWAYS: PermissionOption = {
 
 function makePermissionMessage(options: PermissionOption[] = [ALLOW_ONCE, REJECT_ONCE]): Message {
   const meta: PermissionRequestMetadata = {
+    request_id: "req-1",
     pending_id: "pend-1",
     tool_call_id: "tc-1",
     action_type: "mcp_tool",
@@ -70,6 +71,10 @@ describe("handleApprove", () => {
 
     expect(requestMock).toHaveBeenCalledOnce();
     expect(firstPayload().option_id).toBe("allow");
+    expect(firstPayload().task_id).toBe("task-1");
+    expect(firstPayload().session_id).toBe("sess-1");
+    expect(firstPayload().request_id).toBe("req-1");
+    expect(firstPayload().pending_id).toBe("pend-1");
     expect(firstPayload().cancelled).toBeFalsy();
     expect(firstPayload().rejected).toBeFalsy();
   });
@@ -91,6 +96,20 @@ describe("handleApprove", () => {
     });
 
     expect(firstPayload().option_id).toBe("always");
+  });
+});
+
+describe("request identity", () => {
+  it("does not answer a cached pre-generation request", async () => {
+    const message = makePermissionMessage();
+    delete (message.metadata as PermissionRequestMetadata).request_id;
+    const result = renderHandlers(message);
+
+    await act(async () => {
+      result.current.handleApprove();
+    });
+
+    expect(requestMock).not.toHaveBeenCalled();
   });
 });
 

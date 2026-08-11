@@ -420,6 +420,7 @@ func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, eve
 		AgentID:       execution.ID,
 		TaskID:        execution.TaskID,
 		SessionID:     execution.SessionID,
+		RequestID:     event.RequestID,
 		PendingID:     event.PendingID,
 		ToolCallID:    event.ToolCallID,
 		Title:         event.PermissionTitle,

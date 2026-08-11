@@ -274,6 +274,8 @@
   "externalMcpToolListExecutorProfiles": "Listar os perfis de um executor.",
   "externalMcpToolListExecutors": "Listar todos os executores.",
   "externalMcpToolListTaskSessions": "Listar todas as sessões de agente de uma tarefa, da mais recente para a mais antiga, para que outra ferramenta as possa identificar pelo ID.",
+  "externalMcpToolListPendingAgentPermissions": "Listar pedidos ativos de permissão para comandos e ferramentas de uma tarefa, incluindo detalhes seguros da ação e as opções exatas do agente.",
+  "externalMcpToolResolveAgentPermission": "Resolver um pedido de permissão ativo ao selecionar uma opção exata devolvida pela ferramenta de listagem.",
   "externalMcpToolListTasks": "Listar as tarefas de um fluxo de trabalho.",
   "externalMcpToolListWorkflowSteps": "Listar todos os passos de um fluxo de trabalho.",
   "externalMcpToolListWorkflows": "Listar os fluxos de trabalho de uma área de trabalho.",
