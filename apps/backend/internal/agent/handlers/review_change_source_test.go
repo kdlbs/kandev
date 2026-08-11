@@ -49,14 +49,13 @@ func TestReviewChangeSourceUncommittedFiles(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			source, server := reviewSourceServer(t, func(w http.ResponseWriter, r *http.Request) {
+			source := reviewSourceServer(t, func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path != "/api/v1/git/status" {
 					t.Errorf("path = %s", r.URL.Path)
 				}
 				w.WriteHeader(tt.statusCode)
 				_, _ = w.Write([]byte(tt.body))
 			})
-			defer server.Close()
 			got, err := source.UncommittedFiles(context.Background(), "s")
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
@@ -76,11 +75,10 @@ func TestReviewChangeSourceUncommittedFiles(t *testing.T) {
 
 func TestReviewChangeSourceCommittedFilesUsesSessionBase(t *testing.T) {
 	var query url.Values
-	source, server := reviewSourceServer(t, func(w http.ResponseWriter, r *http.Request) {
+	source := reviewSourceServer(t, func(w http.ResponseWriter, r *http.Request) {
 		query = r.URL.Query()
 		_, _ = w.Write([]byte(`{"files":{"a.go":{"additions":3}}}`))
 	})
-	defer server.Close()
 	source.sessionReader = &mockSessionReader{baseCommits: map[string]string{"s": "abc123"}, baseBranches: map[string]string{"s": "main"}}
 
 	files, err := source.CommittedFiles(context.Background(), "s")
@@ -97,7 +95,7 @@ func TestReviewChangeSourceCommittedFilesUsesSessionBase(t *testing.T) {
 
 func TestReviewChangeSourceCommittedFilesFallsBackToStatusBase(t *testing.T) {
 	requests := 0
-	source, server := reviewSourceServer(t, func(w http.ResponseWriter, r *http.Request) {
+	source := reviewSourceServer(t, func(w http.ResponseWriter, r *http.Request) {
 		requests++
 		switch r.URL.Path {
 		case "/api/v1/git/status":
@@ -111,8 +109,6 @@ func TestReviewChangeSourceCommittedFilesFallsBackToStatusBase(t *testing.T) {
 			t.Errorf("unexpected path %s", r.URL.Path)
 		}
 	})
-	defer server.Close()
-
 	files, err := source.CommittedFiles(context.Background(), "s")
 	if err != nil || files != nil || requests != 2 {
 		t.Fatalf("CommittedFiles = (%#v, %v), requests=%d", files, err, requests)
@@ -122,13 +118,12 @@ func TestReviewChangeSourceCommittedFilesFallsBackToStatusBase(t *testing.T) {
 func TestReviewChangeSourceCommittedFilesReturnsEmptyWithoutBase(t *testing.T) {
 	for _, body := range []string{`null`, `{}`, `broken`} {
 		t.Run(body, func(t *testing.T) {
-			source, server := reviewSourceServer(t, func(w http.ResponseWriter, _ *http.Request) {
+			source := reviewSourceServer(t, func(w http.ResponseWriter, _ *http.Request) {
 				if body == "broken" {
 					w.WriteHeader(http.StatusInternalServerError)
 				}
 				_, _ = w.Write([]byte(body))
 			})
-			defer server.Close()
 			files, err := source.CommittedFiles(context.Background(), "s")
 			if err != nil || files != nil {
 				t.Fatalf("CommittedFiles = (%#v, %v)", files, err)
@@ -138,11 +133,10 @@ func TestReviewChangeSourceCommittedFilesReturnsEmptyWithoutBase(t *testing.T) {
 }
 
 func TestReviewChangeSourceCommittedFilesWrapsDiffFailure(t *testing.T) {
-	source, server := reviewSourceServer(t, func(w http.ResponseWriter, _ *http.Request) {
+	source := reviewSourceServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 		_, _ = w.Write([]byte("broken"))
 	})
-	defer server.Close()
 	source.sessionReader = &mockSessionReader{baseCommits: map[string]string{"s": "base"}}
 	_, err := source.CommittedFiles(context.Background(), "s")
 	if err == nil || !strings.Contains(err.Error(), "cumulative diff for session s:") {
@@ -150,9 +144,10 @@ func TestReviewChangeSourceCommittedFilesWrapsDiffFailure(t *testing.T) {
 	}
 }
 
-func reviewSourceServer(t *testing.T, handler http.HandlerFunc) (*ReviewChangeSource, *httptest.Server) {
+func reviewSourceServer(t *testing.T, handler http.HandlerFunc) *ReviewChangeSource {
 	t.Helper()
 	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
 	u, err := url.Parse(server.URL)
 	if err != nil {
 		t.Fatal(err)
@@ -165,7 +160,7 @@ func reviewSourceServer(t *testing.T, handler http.HandlerFunc) (*ReviewChangeSo
 	execution := &lifecycle.AgentExecution{SessionID: "s"}
 	execution.SetAgentCtlClientForTesting(client)
 	lookup := &mockExecutionLookup{executions: map[string]*lifecycle.AgentExecution{"s": execution}}
-	return NewReviewChangeSource(lookup, nil), server
+	return NewReviewChangeSource(lookup, nil)
 }
 
 func deepEqualJSON(got, want any) bool {

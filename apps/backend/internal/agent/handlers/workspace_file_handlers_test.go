@@ -68,14 +68,13 @@ func TestWorkspaceFileHandlersSuccessContracts(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h, server := workspaceHandlerServer(t, func(w http.ResponseWriter, r *http.Request) {
+			h := workspaceHandlerServer(t, func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path != tt.path || r.Method != tt.method {
 					t.Errorf("request = %s %s, want %s %s", r.Method, r.URL.Path, tt.method, tt.path)
 				}
 				tt.assertReq(t, r)
 				_, _ = w.Write([]byte(`{"success":true,"path":"a.go","content":"body","results":[],"matches":[]}`))
 			})
-			defer server.Close()
 			msg, _ := ws.NewRequest("id", tt.action, tt.payload)
 			response, err := tt.invoke(h, context.Background(), msg)
 			if err != nil || response == nil {
@@ -104,11 +103,10 @@ func TestWorkspaceFileHandlersMapDependencyFailures(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h, server := workspaceHandlerServer(t, func(w http.ResponseWriter, _ *http.Request) {
+			h := workspaceHandlerServer(t, func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusBadGateway)
 				_, _ = w.Write([]byte(`{"error":"dependency failed"}`))
 			})
-			defer server.Close()
 			msg, _ := ws.NewRequest("id", tt.action, tt.payload)
 			response, err := tt.invoke(h, context.Background(), msg)
 			if err != nil || response == nil {
@@ -119,16 +117,17 @@ func TestWorkspaceFileHandlersMapDependencyFailures(t *testing.T) {
 	}
 }
 
-func workspaceHandlerServer(t *testing.T, handler http.HandlerFunc) (*WorkspaceFileHandlers, *httptest.Server) {
+func workspaceHandlerServer(t *testing.T, handler http.HandlerFunc) *WorkspaceFileHandlers {
 	t.Helper()
 	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
 	u, _ := url.Parse(server.URL)
 	port, _ := strconv.Atoi(u.Port())
 	client := agentctl.NewClient(u.Hostname(), port, newTestLogger())
 	execution := &lifecycle.AgentExecution{SessionID: "s"}
 	execution.SetAgentCtlClientForTesting(client)
 	lookup := &mockExecutionLookup{executions: map[string]*lifecycle.AgentExecution{"s": execution}}
-	return NewWorkspaceFileHandlers(lookup, newTestLogger()), server
+	return NewWorkspaceFileHandlers(lookup, newTestLogger())
 }
 
 func expectWorkspaceQuery(key, want string) func(*testing.T, *http.Request) {
