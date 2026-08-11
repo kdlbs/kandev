@@ -221,7 +221,7 @@ Depends on Tasks 01 and 02.
 Wave 4 — reliability signal and measurement:
 
 - [x] [Task 07: Surface retry and timing evidence](task-07-retry-observability.md)
-- [ ] [Task 08: Run concurrency and setup experiments](task-08-performance-experiments.md)
+- [x] [Task 08: Run concurrency and setup experiments](task-08-performance-experiments.md)
 
 Both depend on Task 03. Task 08 also consumes the repaired container behavior
 from Task 06.
@@ -252,12 +252,25 @@ Implemented and verified in the working tree:
 - Reliability groups passed: normal Chromium 5/5, config-management 21/21,
   mobile 3/3, containers 1/1. Two concurrent container runs also passed 1/1
   each, and no managed containers remained afterward.
-- The local four-test concurrency probe passed with workers=1 in 35.5s and
-  workers=2 in 29.2s. This is diagnostic only; three repeated runs and the
-  full CI matrix are still required before changing the `workers: 1` default.
+- Task 08 completed its controlled local experiment on the rebuilt merged
+  checkout. The heavy normal shard passed 191/191 three times with workers=1
+  (median 458.237s, CV 0.014%). A workers=2 run was 268.715s but produced two
+  flaky tests and exited 1 under `E2E_FAIL_ON_FLAKY=1`, so workers=2 is rejected.
+- The unified-vs-mobile split simulation predicted 611.1s for the current
+  unified shape versus 653.7s for the best separate allocation before setup
+  overhead. Normal 14/container 6 remains the measured shape. CI setup was
+  separately recorded: 13s install, 4m44s backend/web build, 33s browser
+  extraction; cold-cache measurements remain a follow-up.
+- The latest PR run [31469837346](https://github.com/kdlbs/kandev/actions/runs/31469837346)
+  passed 42 checks at merged head `d150554a5` and reduced full workflow wall
+  time from 28m30s on main run [31423650879](https://github.com/kdlbs/kandev/actions/runs/31423650879)
+  to 22m39s (20.5%). Both runs used count fallback because the latest main
+  run has no timing-profile artifact; the first post-merge main run remains
+  the profile bootstrap check.
 
-The three-successful-main-run balance criterion remains an operational rollout
-check after merge, not a local implementation gate.
+The three-successful-main-run balance criterion and cold-cache setup comparison
+remain operational rollout checks after merge, not reasons to change the
+shipping defaults now.
 
 ## Open Questions
 
