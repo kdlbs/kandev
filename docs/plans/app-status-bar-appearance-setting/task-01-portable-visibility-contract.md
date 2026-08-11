@@ -20,7 +20,8 @@ backend-owned portable settings, the new visibility ADR, and the existing
 ## TDD sequence
 
 1. Add failing backend tests for missing-value default false, explicit-true
-   round trip, PATCH omission versus explicit values, event data, and boot mapping.
+   round trip, PATCH omission versus explicit values, event data, boot mapping,
+   atomic revisions, and legacy-schema migration.
 2. Add failing frontend mapper/handler tests for default false, explicit true,
    and omission preserving current state.
 3. Add the smallest model, DTO, service, storage, boot, HTTP type, state, and
@@ -43,9 +44,13 @@ backend-owned portable settings, the new visibility ADR, and the existing
   - set `AppStatusBarEnabled: false` in `defaultUserSettings`;
   - include the field in JSON writes;
   - decode it as `*bool`;
-  - overwrite the default only when the stored pointer is present.
+  - overwrite the default only when the stored pointer is present;
+  - migrate a `settings_revision` column and atomically increment and return it
+    with every settings mutation.
 - Add `appStatusBarEnabled` to
   `apps/backend/internal/backendapp/boot_state_routes.go`.
+- Carry the numeric revision through the response DTO, boot state, and complete
+  settings event so clients can order snapshots without timestamps.
 - Add `app_status_bar_enabled?: boolean` to response and PATCH shapes in
   `apps/web/lib/types/http-user-settings.ts`.
 - Add `appStatusBarEnabled: boolean` to
@@ -55,8 +60,11 @@ backend-owned portable settings, the new visibility ADR, and the existing
   current value for partial updates.
 - Update the existing user WebSocket handler and ensure-user-settings fixtures
   through their shared mapper; do not add a second field-specific handler.
+- Apply one revision comparison at boot, HTTP, and WebSocket ingestion points;
+  reject older snapshots without assigning them a newer local revision.
 
-No SQL migration or browser storage is allowed.
+The only SQL migration adds the per-user settings revision counter. No browser
+storage is allowed.
 
 ## Files likely touched
 
@@ -88,7 +96,9 @@ No SQL migration or browser storage is allowed.
    frontend value.
 5. The backend emits `app_status_bar_enabled` in the complete user-settings
    event and `appStatusBarEnabled` in boot state.
-6. Runtime feature behavior remains intact until Tasks 02 and 03.
+6. Concurrent settings writes receive distinct increasing revisions, and an
+   existing database without the revision column upgrades cleanly.
+7. Runtime feature behavior remains intact until Tasks 02 and 03.
 
 ## Verification
 

@@ -29,6 +29,23 @@ describe("user settings revision ordering", () => {
       }).revision,
     ).toBe(42);
   });
+
+  it("does not assign a newer local revision to an unversioned HTTP response", () => {
+    const current = { ...mapUserSettingsResponse(null), revision: 3 };
+    const result = mapUserSettingsResponse(
+      {
+        settings: {
+          user_id: DEFAULT_USER_ID,
+          workspace_id: toWorkspaceId(""),
+          repository_ids: [],
+          updated_at: UPDATED_AT,
+        },
+      },
+      current,
+    );
+
+    expect(result.revision).toBeNull();
+  });
 });
 
 describe("startup page user settings", () => {

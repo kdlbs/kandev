@@ -374,6 +374,7 @@ export function mapUserSettingsResponse(
   }
   return {
     ...mapUserSettingsData(s, current),
+    revision: s.revision ?? null,
     shellOptions,
   };
 }

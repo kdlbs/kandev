@@ -45,6 +45,8 @@ the warning/LSP fallback contracts in the linked specs.
   post-save `setUserSettings` call with `appStatusBarEnabled`.
 - Keep one shared **Save changes** action. Do not save on switch activation and
   do not add optimistic durable state before the API succeeds.
+- Do not send an empty user-settings PATCH when the save contains only local
+  theme or menu changes.
 - Add `GENERAL_SETTINGS_TARGETS.appStatusBar` and a discovery control in
   `apps/web/lib/settings-discovery/catalog/preferences.ts`, under the
   Preferences Appearance page.
@@ -112,6 +114,8 @@ Tests must prove:
    their own saved settings.
 5. Failed save leaves the confirmed Zustand value active and the Appearance
    draft dirty/retryable.
+6. A delayed status-order PATCH response cannot replace a newer settings
+   revision that arrived through another ingestion path.
 
 ## Verification
 

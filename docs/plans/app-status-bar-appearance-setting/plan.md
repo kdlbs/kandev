@@ -42,8 +42,9 @@ location preferences remain independent.
 - `system_metrics_display.show_in_topbar`,
   `system_metrics_display.simplified`, `app_status_bar_order`, and
   `lsp_status_location` keep their existing meanings.
-- No relational migration, endpoint, WebSocket action, plugin contract, or
-  status-bar layout change is introduced.
+- One relational migration adds an atomic per-user settings revision. No new
+  endpoint, WebSocket action, plugin contract, or status-bar layout change is
+  introduced.
 
 ## Backend
 
@@ -59,9 +60,13 @@ location preferences remain independent.
 - Include `app_status_bar_enabled` in JSON persistence and the
   `user.settings.updated` event.
 - Add `appStatusBarEnabled` to the Go boot-state mapping.
+- Add a `settings_revision` column that every settings mutation increments and
+  returns atomically. Include the revision in boot state, PATCH responses, and
+  `user.settings.updated` events.
 
-The existing `users.settings` JSON blob carries the field, so there is no SQL
-schema migration.
+The existing `users.settings` JSON blob carries the visibility field. The SQL
+migration is limited to the independent revision counter used to order complete
+settings snapshots.
 
 ### Runtime flag retirement
 
@@ -87,6 +92,9 @@ schema migration.
 - Extend the shared wire mapper so boot hydration, PATCH responses, and
   `user.settings.updated` all apply the field. An absent field preserves the
   current mapped value; the initial current value is the default-false state.
+- Compare the atomic numeric revision at every boot, HTTP, and WebSocket
+  ingestion path. Older snapshots cannot replace newer state, including when a
+  queued status-order PATCH finishes after a newer live update.
 - Keep backend defaults authoritative. Do not add localStorage, cookies, or a
   second compatibility mapper.
 
@@ -103,6 +111,8 @@ schema migration.
 - Extend `createAppearanceSavedState`, the Appearance draft, the shared save
   PATCH, discard behavior, and post-save Zustand update with
   `appStatusBarEnabled`.
+- Skip the backend PATCH when an Appearance save contains only local theme or
+  menu changes.
 - Add a settings-discovery target and aliases for status bar, status drawer,
   bottom bar, and appearance under the Preferences group.
 - Add English locale keys and regenerate the pseudo locale. Do not hand-edit
@@ -159,7 +169,8 @@ fixtures must stop mutating the frontend feature slice for this behavior.
 ### Backend unit and integration tests
 
 - Store tests prove old/missing JSON defaults false, explicit true survives a
-  repository round trip, and encoding emits the complete field.
+  repository round trip, encoding emits the complete field, legacy schemas gain
+  the revision column, and concurrent writes receive distinct revisions.
 - DTO tests prove response mapping plus PATCH omission versus explicit false.
 - Service tests prove apply semantics and exact event payload.
 - Boot-state tests prove `appStatusBarEnabled` is present and preserves false.
@@ -169,7 +180,10 @@ fixtures must stop mutating the frontend feature slice for this behavior.
 ### Frontend unit and component tests
 
 - Shared settings mapper tests prove default false, explicit true, and partial
-  update preservation across boot and WebSocket paths.
+  update preservation plus revision ordering across boot, HTTP, and WebSocket
+  paths.
+- Status-order tests prove a delayed older PATCH response cannot inherit a
+  newer store revision or replace that newer snapshot.
 - Appearance tests prove the controlled switch's accessible copy, dirty state,
   discard, PATCH payload, and post-save store update.
 - Status surface provider tests prove on/off responsive mounting and

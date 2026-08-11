@@ -40,6 +40,68 @@ func (s settingsScanner) Scan(dest ...any) error {
 	return nil
 }
 
+func TestSQLiteRepositoryMigratesLegacySettingsRevision(t *testing.T) {
+	conn, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	conn.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = conn.Close() })
+	assertLegacySettingsRevisionMigration(t, conn)
+}
+
+func TestPostgresRepositoryMigratesLegacySettingsRevision(t *testing.T) {
+	conn := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	assertLegacySettingsRevisionMigration(t, conn)
+}
+
+func assertLegacySettingsRevisionMigration(t *testing.T, conn *sqlx.DB) {
+	t.Helper()
+	now := time.Now().UTC()
+	if _, err := conn.Exec(`
+		CREATE TABLE users (
+			id TEXT PRIMARY KEY,
+			email TEXT NOT NULL,
+			settings TEXT NOT NULL DEFAULT '{}',
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL
+		)
+	`); err != nil {
+		t.Fatalf("create legacy users table: %v", err)
+	}
+	if _, err := conn.Exec(
+		conn.Rebind(`INSERT INTO users (id, email, settings, created_at, updated_at) VALUES (?, ?, '{}', ?, ?)`),
+		DefaultUserID,
+		DefaultUserEmail,
+		now,
+		now,
+	); err != nil {
+		t.Fatalf("insert legacy user: %v", err)
+	}
+
+	repo, err := newSQLiteRepositoryWithDB(conn, conn)
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+	ctx := context.Background()
+	settings, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("read migrated settings: %v", err)
+	}
+	if settings.Revision != 0 {
+		t.Fatalf("migrated revision = %d, want 0", settings.Revision)
+	}
+	settings.AppStatusBarEnabled = true
+	settings.UpdatedAt = now.Add(time.Second)
+	updated, err := repo.UpsertUserSettingsPreservingTaskCreateLastUsed(ctx, settings, nil)
+	if err != nil {
+		t.Fatalf("write migrated settings: %v", err)
+	}
+	if updated.Revision != 1 {
+		t.Fatalf("updated revision = %d, want 1", updated.Revision)
+	}
+}
+
 func TestSQLiteRepositoryAssignsUniqueAtomicSettingsRevisions(t *testing.T) {
 	conn, err := sqlx.Open("sqlite3", ":memory:")
 	if err != nil {
