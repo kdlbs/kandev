@@ -16,6 +16,8 @@ import {
 import { usePluginRegistry, type PluginReviewProviderRegistration } from "@/lib/plugins/registry";
 import type { ReviewItemSummary, ReviewTaskStatus } from "@/lib/plugins/types";
 import { useTranslation } from "react-i18next";
+import { cn } from "@/lib/utils";
+import { aggregateReviewTaskStatusColor } from "./change-request-task-status-color";
 import { useChangeRequestTaskTooltipState } from "./use-change-request-task-tooltip-state";
 
 type AssociationRefresh = NonNullable<PluginReviewProviderRegistration["refreshAssociations"]>;
@@ -167,7 +169,7 @@ export function RegisteredChangeRequestTaskIcon({ taskId }: { taskId: string }) 
     [associations],
   );
   const reviewVersion = useReviewProviderUpdates(taskId, providers);
-  const summaries = useMemo(() => {
+  const matchingReviews = useMemo(() => {
     const keysByProvider = new Map<string, Set<string>>();
     associations.forEach(({ association, provider }) => {
       const keys = keysByProvider.get(provider.id) ?? new Set<string>();
@@ -177,15 +179,18 @@ export function RegisteredChangeRequestTaskIcon({ taskId }: { taskId: string }) 
     return providers.flatMap((provider) => {
       const keys = keysByProvider.get(provider.id);
       if (!keys) return [];
-      return provider
-        .getSnapshot(taskId)
-        .filter((review) => keys.has(review.reviewKey))
-        .flatMap((review) => {
-          const summary = taskStatusSummary(review);
-          return summary ? [summary] : [];
-        });
+      return provider.getSnapshot(taskId).filter((review) => keys.has(review.reviewKey));
     });
   }, [associations, providers, reviewVersion, taskId]);
+  const summaries = useMemo(
+    () => matchingReviews.flatMap((review) => taskStatusSummary(review) ?? []),
+    [matchingReviews],
+  );
+  const statusColor = useMemo(
+    () =>
+      aggregateReviewTaskStatusColor(matchingReviews.flatMap((review) => review.taskStatus ?? [])),
+    [matchingReviews],
+  );
   const refreshDetails = useCallback(() => {
     providers.forEach((provider) => void refreshReviewProvider(provider, taskId));
   }, [providers, taskId]);
@@ -207,11 +212,11 @@ export function RegisteredChangeRequestTaskIcon({ taskId }: { taskId: string }) 
           onPointerLeave={tooltip.onPointerLeave}
           onFocus={tooltip.onFocus}
           onBlur={tooltip.onBlur}
-          className="inline-flex shrink-0 items-center gap-0.5 text-muted-foreground"
+          className={cn("inline-flex shrink-0 items-center gap-0.5", statusColor)}
         >
           <IconGitPullRequest aria-hidden="true" className="h-3.5 w-3.5" />
           {count > 1 ? (
-            <span className="text-[9px] font-semibold leading-none">{count}</span>
+            <span className="text-[9px] font-semibold leading-none tabular-nums">{count}</span>
           ) : null}
         </span>
       </TooltipTrigger>

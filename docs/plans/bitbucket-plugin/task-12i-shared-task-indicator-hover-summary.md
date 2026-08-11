@@ -76,3 +76,7 @@ provider's existing task review snapshot, so it cannot supply title/review/CI de
 - Mobile plugin contract E2E passed on `mobile-chrome`, preserving the touch Review path.
 - The isolated seed rendered the correctly embedded production bundle and the same
   structured summary; `apps/web/.pr-assets/bitbucket-sidebar-pr-summary.png` records it.
+- Follow-up manual acceptance found the registered glyph remained hard-coded muted.
+  Focused regression coverage now proves normalized provider detail drives the same
+  host-owned semantic status colors as first-party pull requests; the muted association-
+  only fallback remains until lazy detail arrives.

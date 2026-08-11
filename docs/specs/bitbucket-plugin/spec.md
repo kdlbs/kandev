@@ -282,6 +282,10 @@ for its declared provider; exact repository path matching remains case-sensitive
   the dashboard or opens task Review, **THEN** the row exposes the native linked-task
   indicator and review opens through the registered task review provider; there is no
   dashboard Review button or intermediate launch dialog on desktop or mobile.
+- **GIVEN** a linked Bitbucket pull request has normalized task status, **WHEN** its
+  task-list indicator renders or its lazy desktop refresh completes, **THEN** the glyph
+  uses the same failure, pending, review-wait, passing, merged, and muted color hierarchy
+  as first-party code hosts without accepting provider CSS or Bitbucket-specific tones.
 - **GIVEN** a committed custom query or repository filter differs from a built-in
   preset, **WHEN** the user saves and names it, **THEN** it appears in the shared saved
   menu, survives reload for that user/workspace, restores the displayed query and

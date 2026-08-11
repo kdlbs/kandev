@@ -315,8 +315,12 @@ A task preset may provide a semantic `iconName`; the host maps `eye`, `message`,
 registered review provider publishes it, Kandev automatically mounts the exact shared
 topbar button, composer CI chip, desktop hover popover, and mobile drawer; Kandev also
 leases one provider refresh on mount/open and every 90 seconds. Plugins must not register
-a visual slot or a second poller for these surfaces. `IntegrationChangeRequestStatus`
-remains exposed for non-review-provider composition only.
+a visual slot or a second poller for these surfaces. Linked-task indicators also derive
+the same semantic color hierarchy from normalized state, review, and pipeline fields;
+providers do not send CSS classes or provider-specific color tokens. Until task detail is
+available, the indicator remains muted and the desktop hover/focus refresh updates both
+its summary and color. `IntegrationChangeRequestStatus` remains exposed for non-review-
+provider composition only.
 
 `ChangeRequestDetail` is the exact provider-neutral detail component consumed by
 Kandev's GitHub panel. A review provider supplies its normalized model and advertised

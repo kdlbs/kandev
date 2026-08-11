@@ -5,6 +5,8 @@ import { pluginRegistry } from "@/lib/plugins/registry";
 import { RegisteredChangeRequestTaskIcon } from "./registered-change-request-task-icon";
 
 const PLUGIN_ID = "task-indicator-test";
+const TASK_ID = "task-a";
+const TASK_ICON_TEST_ID = "registered-change-request-task-icon-task-a";
 const refreshAssociations = vi.fn(async () => undefined);
 const refreshReview = vi.fn(async () => undefined);
 
@@ -20,7 +22,7 @@ function registerProvider() {
     changeRequestNoun: "pull request",
     order: 50,
     getSnapshot: (taskId) =>
-      taskId === "task-a"
+      taskId === TASK_ID
         ? [
             {
               providerId: "bitbucket",
@@ -42,8 +44,8 @@ function registerProvider() {
     subscribe: () => () => undefined,
     refresh: refreshReview,
     getAssociationSnapshot: () => [
-      { providerId: "bitbucket", taskId: "task-a", reviewKey: "repo#1" },
-      { providerId: "bitbucket", taskId: "task-a", reviewKey: "repo#2" },
+      { providerId: "bitbucket", taskId: TASK_ID, reviewKey: "repo#1" },
+      { providerId: "bitbucket", taskId: TASK_ID, reviewKey: "repo#2" },
       { providerId: "bitbucket", taskId: "task-b", reviewKey: "repo#3" },
     ],
     subscribeAssociations: () => () => undefined,
@@ -64,12 +66,12 @@ describe("RegisteredChangeRequestTaskIcon", () => {
     registerProvider();
     render(
       <TooltipProvider>
-        <RegisteredChangeRequestTaskIcon taskId="task-a" />
+        <RegisteredChangeRequestTaskIcon taskId={TASK_ID} />
       </TooltipProvider>,
     );
     await act(async () => Promise.resolve());
 
-    const icon = screen.getByTestId("registered-change-request-task-icon-task-a");
+    const icon = screen.getByTestId(TASK_ICON_TEST_ID);
     expect(icon.getAttribute("aria-label")).toBe("2 Bitbucket pull requests linked");
     expect(icon.textContent).toContain("2");
     expect(refreshAssociations).toHaveBeenCalledOnce();
@@ -79,13 +81,13 @@ describe("RegisteredChangeRequestTaskIcon", () => {
     registerProvider();
     render(
       <TooltipProvider>
-        <RegisteredChangeRequestTaskIcon taskId="task-a" />
+        <RegisteredChangeRequestTaskIcon taskId={TASK_ID} />
       </TooltipProvider>,
     );
     await act(async () => Promise.resolve());
 
     expect(refreshReview).not.toHaveBeenCalled();
-    fireEvent.pointerEnter(screen.getByTestId("registered-change-request-task-icon-task-a"), {
+    fireEvent.pointerEnter(screen.getByTestId(TASK_ICON_TEST_ID), {
       pointerType: "mouse",
     });
     await act(async () => Promise.resolve());
@@ -100,11 +102,23 @@ describe("RegisteredChangeRequestTaskIcon", () => {
     expect(refreshReview).toHaveBeenCalledOnce();
   });
 
+  it("uses the shared semantic status color when provider detail is available", async () => {
+    registerProvider();
+    render(
+      <TooltipProvider>
+        <RegisteredChangeRequestTaskIcon taskId={TASK_ID} />
+      </TooltipProvider>,
+    );
+    await act(async () => Promise.resolve());
+
+    expect(screen.getByTestId(TASK_ICON_TEST_ID).className).toContain("text-green-500");
+  });
+
   it("deduplicates one workspace refresh across many task rows and unloads reactively", async () => {
     registerProvider();
     const view = render(
       <TooltipProvider>
-        <RegisteredChangeRequestTaskIcon taskId="task-a" />
+        <RegisteredChangeRequestTaskIcon taskId={TASK_ID} />
         <RegisteredChangeRequestTaskIcon taskId="task-b" />
       </TooltipProvider>,
     );
@@ -115,18 +129,18 @@ describe("RegisteredChangeRequestTaskIcon", () => {
     act(() => pluginRegistry.unregisterPlugin(PLUGIN_ID));
     view.rerender(
       <TooltipProvider>
-        <RegisteredChangeRequestTaskIcon taskId="task-a" />
+        <RegisteredChangeRequestTaskIcon taskId={TASK_ID} />
         <RegisteredChangeRequestTaskIcon taskId="task-b" />
       </TooltipProvider>,
     );
-    expect(screen.queryByTestId("registered-change-request-task-icon-task-a")).toBeNull();
+    expect(screen.queryByTestId(TASK_ICON_TEST_ID)).toBeNull();
   });
 
   it("reuses a settled workspace refresh when task rows mount sequentially", async () => {
     registerProvider();
     const first = render(
       <TooltipProvider>
-        <RegisteredChangeRequestTaskIcon taskId="task-a" />
+        <RegisteredChangeRequestTaskIcon taskId={TASK_ID} />
       </TooltipProvider>,
     );
     await act(async () => Promise.resolve());

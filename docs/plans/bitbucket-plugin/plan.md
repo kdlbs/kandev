@@ -172,8 +172,10 @@ control; no duplicate plugin-specific create button was added.
 Task 12i removed the association indicator's count-only tooltip. Registered providers
 now reuse GitHub's host-owned structured pull-request summary and load task detail only
 when the desktop indicator opens; the existing mobile Status/Review surfaces remain the
-touch path. Unit, packaged-plugin desktop E2E, mobile contract E2E, typecheck, and lint
-pass.
+touch path. A manual follow-up also moved task-indicator color derivation into the shared
+provider-neutral status palette, so normalized pipeline/review state changes the glyph
+without provider CSS tokens. Unit, packaged-plugin desktop E2E, mobile contract E2E,
+typecheck, and lint pass.
 The packaged generic host contract passes on desktop and
 mobile. The actual package passes its unconfigured action, disable/re-enable, desktop,
 and mobile lifecycle checks; its canonical composer reference now rehydrates the

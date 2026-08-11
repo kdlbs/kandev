@@ -114,9 +114,9 @@ surface.
   registered review surface. Plugins may override create transport only through an
   authenticated action; host verifies repository, session, and worktree branch authority.
 - **Code-host task status:** registered providers publish `ReviewItemSummary.taskStatus`.
-  Host chrome renders shared topbar, composer, popover/drawer, and lazy hover/focus
-  summaries with deduplicated discovery/status refreshes. Do not add visual slots or
-  provider pollers; use the shared `components/integrations/change-request-*` anatomy.
+  Host chrome renders shared topbar, composer, popover/drawer, lazy hover/focus summaries,
+  and semantic indicator colors from normalized state. Do not add provider color fields,
+  visual slots, or pollers; use `components/integrations/change-request-*` anatomy.
 - **Code-host review detail:** GitHub and compatible review providers render
   `components/integrations/change-request-detail.tsx` (also exposed as
   `host.ui.ChangeRequestDetail`). Providers own normalized data/capabilities/actions,
