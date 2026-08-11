@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { createAppStore } from "@/lib/state/store";
-import type { GitHubStatus, TaskCIAutomationOptions } from "@/lib/types/github";
+import type {
+  GitHubStatus,
+  TaskCIAutomationOptions,
+  TaskCIPRAutomationState,
+} from "@/lib/types/github";
 import { registerGitHubHandlers } from "./github";
 
 const baseStatus: GitHubStatus = {
@@ -11,49 +15,107 @@ const baseStatus: GitHubStatus = {
   required_scopes: ["repo"],
 };
 
-describe("registerGitHubHandlers", () => {
+const DEFAULT_CI_AUTO_FIX_PROMPT = "Default prompt";
+const TASK_ID = "task-1";
+const INITIAL_UPDATED_AT = "2026-08-11T10:00:00Z";
+const NEWER_UPDATED_AT = "2026-08-11T10:01:00Z";
+
+describe("registerGitHubHandlers CI options", () => {
   it("does not let a delayed CI-options event replace newer state", () => {
     const store = createAppStore();
     const handler = registerGitHubHandlers(store)["github.task_ci_options.updated"]!;
-    const options = (updatedAt: string, enabled: boolean): TaskCIAutomationOptions => ({
-      task_id: "task-1",
+    const options = (
+      updatedAt: string,
+      enabled: boolean,
+      prStates: TaskCIPRAutomationState[] = [],
+    ): TaskCIAutomationOptions => ({
+      task_id: TASK_ID,
       auto_fix_enabled: enabled,
       auto_merge_enabled: false,
       auto_fix_prompt_override: null,
-      effective_auto_fix_prompt: "Default prompt",
+      effective_auto_fix_prompt: DEFAULT_CI_AUTO_FIX_PROMPT,
       using_default_prompt: true,
       updated_at: updatedAt,
-      pr_states: [],
+      pr_states: prStates,
     });
 
-    handler({ payload: options("2026-08-11T10:01:00Z", true) } as Parameters<typeof handler>[0]);
-    handler({ payload: options("2026-08-11T10:00:00Z", false) } as Parameters<typeof handler>[0]);
+    handler({ payload: options(NEWER_UPDATED_AT, true) } as Parameters<typeof handler>[0]);
+    handler({ payload: options(INITIAL_UPDATED_AT, false) } as Parameters<typeof handler>[0]);
 
-    expect(store.getState().taskCIAutomation.byTaskId["task-1"]?.auto_fix_enabled).toBe(true);
+    expect(store.getState().taskCIAutomation.byTaskId[TASK_ID]?.auto_fix_enabled).toBe(true);
   });
 
+  it("applies a newer CI state event when task options are unchanged", () => {
+    const store = createAppStore();
+    const handler = registerGitHubHandlers(store)["github.task_ci_options.updated"]!;
+    const prState: TaskCIPRAutomationState = {
+      task_id: TASK_ID,
+      repository_id: "repo-1",
+      pr_number: 42,
+      last_fix_signature: "check-failure",
+      last_fix_checkpoint_json: "{}",
+      last_fix_enqueued_at: NEWER_UPDATED_AT,
+      last_fix_session_id: "session-1",
+      auto_fix_round_count: 1,
+      auto_fix_exhausted_at: null,
+      last_merge_signature: "",
+      last_merge_attempt_at: null,
+      review_request_initialized: false,
+      last_review_requested: false,
+      last_observed_pr_state: "open",
+      last_lifecycle_event: "",
+      last_lifecycle_prompt_at: null,
+      last_lifecycle_session_id: null,
+      last_error: "Tests are failing",
+      created_at: NEWER_UPDATED_AT,
+      updated_at: NEWER_UPDATED_AT,
+    };
+    const initial: TaskCIAutomationOptions = {
+      task_id: TASK_ID,
+      auto_fix_enabled: true,
+      auto_merge_enabled: false,
+      auto_fix_prompt_override: null,
+      effective_auto_fix_prompt: DEFAULT_CI_AUTO_FIX_PROMPT,
+      using_default_prompt: true,
+      updated_at: INITIAL_UPDATED_AT,
+      pr_states: [],
+    };
+    const updated: TaskCIAutomationOptions = {
+      ...initial,
+      updated_at: NEWER_UPDATED_AT,
+      pr_states: [prState],
+    };
+
+    handler({ payload: initial } as Parameters<typeof handler>[0]);
+    handler({ payload: updated } as Parameters<typeof handler>[0]);
+
+    expect(store.getState().taskCIAutomation.byTaskId[TASK_ID]).toEqual(updated);
+  });
+});
+
+describe("registerGitHubHandlers", () => {
   it("removes the detached PR association without touching sibling PRs", () => {
     const store = createAppStore();
     const first = {
       id: "association-1",
-      task_id: "task-1",
+      task_id: TASK_ID,
       owner: "acme",
       repo: "kandev",
       pr_number: 1,
     };
     const sibling = { ...first, id: "association-2", pr_number: 2 };
-    store.getState().setTaskPRs({ "task-1": [first as never, sibling as never] });
+    store.getState().setTaskPRs({ [TASK_ID]: [first as never, sibling as never] });
 
     const handler = registerGitHubHandlers(store)["github.task_pr.deleted"]!;
     handler({
       payload: {
         workspace_id: "workspace-1",
-        task_id: "task-1",
+        task_id: TASK_ID,
         association_id: "association-1",
       },
     } as Parameters<typeof handler>[0]);
 
-    expect(store.getState().taskPRs.byTaskId["task-1"]?.map((pr) => pr.id)).toEqual([
+    expect(store.getState().taskPRs.byTaskId[TASK_ID]?.map((pr) => pr.id)).toEqual([
       "association-2",
     ]);
   });

@@ -311,7 +311,8 @@ Optional websocket notification:
 
 - `github.task_ci_options.updated`
 - Payload: the same options response shape.
-- The event is emitted after a successful options update so other open tabs refresh immediately and the backend can evaluate any currently linked PRs when automation is enabled.
+- `updated_at` is a task-wide, monotonic version of the complete payload. It advances atomically when task options or any per-PR automation state changes, so clients can discard equal or older events without losing current PR-state badges or errors.
+- The event is emitted after a successful options or per-PR automation-state update so other open tabs refresh immediately and the backend can evaluate any currently linked PRs when automation is enabled.
 
 ## State machine
 
