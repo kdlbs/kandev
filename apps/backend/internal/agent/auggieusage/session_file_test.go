@@ -92,6 +92,20 @@ func TestSessionPath(t *testing.T) {
 
 	_, err = SessionPath("/tmp/home", "")
 	require.Error(t, err)
+
+	// Path traversal / multi-segment ids must not join under sessions/.
+	for _, bad := range []string{
+		"../escape",
+		"..",
+		".",
+		"a/b",
+		`a\b`,
+		"/abs",
+		"foo/../bar",
+	} {
+		_, err = SessionPath("/tmp/home", bad)
+		require.Error(t, err, "id %q", bad)
+	}
 }
 
 // Ensure returned structs have no string content fields beyond model id.

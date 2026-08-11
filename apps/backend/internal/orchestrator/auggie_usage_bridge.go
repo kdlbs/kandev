@@ -29,7 +29,9 @@ func (s *Service) publishPromptUsageFromWireOrDisk(
 		return
 	}
 	if payload.Data != nil && payload.Data.Usage != nil {
-		s.emitPromptUsage(ctx, payload, session, payload.Data.Usage)
+		if !s.emitPromptUsage(ctx, payload, session, payload.Data.Usage) {
+			return
+		}
 		// Wire wins for publish; still advance the disk watermark when possible
 		// so a later nil-wire complete does not re-emit the same exchanges.
 		if isAuggieSession(session) {
@@ -100,8 +102,10 @@ func (s *Service) publishAuggieDiskPromptUsage(
 		dataCopy.CurrentModelID = model
 		emitPayload.Data = &dataCopy
 	}
-	s.emitPromptUsage(ctx, &emitPayload, session, usage)
-	// Advance only after publish so a failed bus publish can retry next complete.
+	// Advance only after a successful publish so a failed bus write can retry.
+	if !s.emitPromptUsage(ctx, &emitPayload, session, usage) {
+		return
+	}
 	s.persistAuggieUsageSeq(ctx, payload.SessionID, maxSeq)
 }
 
@@ -162,15 +166,10 @@ func acpSessionIDFromTaskMetadata(metadata map[string]interface{}) string {
 	if metadata == nil {
 		return ""
 	}
-	acp, ok := metadata["acp"].(map[string]interface{})
+	// map[string]interface{} and map[string]any are the same type in Go.
+	acp, ok := metadata["acp"].(map[string]any)
 	if !ok {
-		// JSON round-trip may yield map[string]any — same under Go 1.x.
-		acpAny, okAny := metadata["acp"].(map[string]any)
-		if !okAny {
-			return ""
-		}
-		id, _ := acpAny["session_id"].(string)
-		return id
+		return ""
 	}
 	id, _ := acp["session_id"].(string)
 	return id
@@ -217,14 +216,16 @@ func (s *Service) persistAuggieUsageSeq(ctx context.Context, sessionID string, m
 	}
 }
 
+// emitPromptUsage publishes one session_prompt_usage event. Returns true when
+// the bus accepted the event so callers can advance the disk watermark safely.
 func (s *Service) emitPromptUsage(
 	ctx context.Context,
 	payload *lifecycle.AgentStreamEventPayload,
 	session *models.TaskSession,
 	usage *streams.PromptUsage,
-) {
+) bool {
 	if usage == nil || payload == nil || payload.SessionID == "" || s.eventBus == nil {
-		return
+		return false
 	}
 	model, agentType := resolvePromptUsageLabels(payload, session)
 	eventPayload := lifecycle.SessionPromptUsageEventPayload{
@@ -237,7 +238,15 @@ func (s *Service) emitPromptUsage(
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
 	subject := events.BuildSessionPromptUsageSubject(payload.SessionID)
-	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionPromptUsageUpdated, "orchestrator", eventPayload))
+	if err := s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionPromptUsageUpdated, "orchestrator", eventPayload)); err != nil {
+		if s.logger != nil {
+			s.logger.Warn("failed to publish session prompt usage",
+				zap.String("session_id", payload.SessionID),
+				zap.Error(err))
+		}
+		return false
+	}
+	return true
 }
 
 // scheduleAuggieUsageReread attempts one deferred read if the session file was
@@ -248,49 +257,78 @@ func (s *Service) scheduleAuggieUsageReread(sessionID, taskID, agentID, acpID st
 	}
 	// Capture service pointer; fire-and-forget short delay.
 	time.AfterFunc(400*time.Millisecond, func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		path, err := auggieusage.SessionPath("", acpID)
-		if err != nil {
-			return
-		}
-		exchanges, err := auggieusage.ReadNewExchangeUsages(path, after)
-		if err != nil || len(exchanges) == 0 {
-			return
-		}
-		usage, maxSeq, model := promptUsageFromAuggieExchanges(exchanges)
-		if usage == nil {
-			return
-		}
-		// Reload session for labels + avoid clobbering a newer watermark.
-		var session *models.TaskSession
-		if s.repo != nil {
-			session, _ = s.repo.GetTaskSession(ctx, sessionID)
-			if session != nil {
-				cur := auggieUsageSeqFromMetadata(session)
-				if cur >= maxSeq {
-					return
-				}
-				// Re-filter against live watermark if it moved.
-				if cur > after {
-					exchanges, err = auggieusage.ReadNewExchangeUsages(path, cur)
-					if err != nil || len(exchanges) == 0 {
-						return
-					}
-					usage, maxSeq, model = promptUsageFromAuggieExchanges(exchanges)
-				}
-			}
-		}
-		payload := &lifecycle.AgentStreamEventPayload{
-			TaskID:    taskID,
-			SessionID: sessionID,
-			AgentID:   agentID,
-			Data: &lifecycle.AgentStreamEventData{
-				CurrentModelID: model,
-				ACPSessionID:   acpID,
-			},
-		}
-		s.emitPromptUsage(ctx, payload, session, usage)
-		s.persistAuggieUsageSeq(ctx, sessionID, maxSeq)
+		s.runAuggieUsageReread(sessionID, taskID, agentID, acpID, after)
 	})
+}
+
+func (s *Service) runAuggieUsageReread(sessionID, taskID, agentID, acpID string, after int) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	path, err := auggieusage.SessionPath("", acpID)
+	if err != nil {
+		return
+	}
+	exchanges, err := auggieusage.ReadNewExchangeUsages(path, after)
+	if err != nil || len(exchanges) == 0 {
+		return
+	}
+	usage, maxSeq, model := promptUsageFromAuggieExchanges(exchanges)
+	if usage == nil {
+		// Match the sync path: advance past zero-token completed exchanges.
+		if maxSeq > after {
+			s.persistAuggieUsageSeq(ctx, sessionID, maxSeq)
+		}
+		return
+	}
+	session, usage, maxSeq, model, ok := s.reconcileAuggieReread(ctx, sessionID, path, after, usage, maxSeq, model)
+	if !ok {
+		return
+	}
+	payload := &lifecycle.AgentStreamEventPayload{
+		TaskID:    taskID,
+		SessionID: sessionID,
+		AgentID:   agentID,
+		Data: &lifecycle.AgentStreamEventData{
+			CurrentModelID: model,
+			ACPSessionID:   acpID,
+		},
+	}
+	if !s.emitPromptUsage(ctx, payload, session, usage) {
+		return
+	}
+	s.persistAuggieUsageSeq(ctx, sessionID, maxSeq)
+}
+
+func (s *Service) reconcileAuggieReread(
+	ctx context.Context,
+	sessionID, path string,
+	after int,
+	usage *streams.PromptUsage,
+	maxSeq int,
+	model string,
+) (*models.TaskSession, *streams.PromptUsage, int, string, bool) {
+	if s.repo == nil {
+		return nil, usage, maxSeq, model, true
+	}
+	session, _ := s.repo.GetTaskSession(ctx, sessionID)
+	if session == nil {
+		return nil, usage, maxSeq, model, true
+	}
+	cur := auggieUsageSeqFromMetadata(session)
+	if cur >= maxSeq {
+		return session, nil, maxSeq, model, false
+	}
+	if cur <= after {
+		return session, usage, maxSeq, model, true
+	}
+	// Watermark moved since schedule; re-filter so we do not double-count.
+	exchanges, err := auggieusage.ReadNewExchangeUsages(path, cur)
+	if err != nil || len(exchanges) == 0 {
+		return session, nil, maxSeq, model, false
+	}
+	usage, maxSeq, model = promptUsageFromAuggieExchanges(exchanges)
+	if usage == nil {
+		return session, nil, maxSeq, model, false
+	}
+	return session, usage, maxSeq, model, true
 }

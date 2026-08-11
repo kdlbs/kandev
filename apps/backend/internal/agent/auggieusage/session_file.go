@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -27,9 +28,10 @@ type ExchangeUsage struct {
 
 // SessionPath returns ~/.augment/sessions/<acpSessionID>.json for homeDir.
 // homeDir should be the user home (empty uses os.UserHomeDir).
+// acpSessionID must be a single path segment (no separators or "..").
 func SessionPath(homeDir, acpSessionID string) (string, error) {
-	if acpSessionID == "" {
-		return "", errors.New("auggieusage: empty ACP session id")
+	if err := validateACPSessionID(acpSessionID); err != nil {
+		return "", err
 	}
 	if homeDir == "" {
 		var err error
@@ -39,6 +41,23 @@ func SessionPath(homeDir, acpSessionID string) (string, error) {
 		}
 	}
 	return filepath.Join(homeDir, ".augment", "sessions", acpSessionID+".json"), nil
+}
+
+func validateACPSessionID(acpSessionID string) error {
+	if acpSessionID == "" {
+		return errors.New("auggieusage: empty ACP session id")
+	}
+	// ACP ids are file-stem join keys. Reject anything that could escape
+	// ~/.augment/sessions when joined (separators, parent refs, unclean forms).
+	if acpSessionID != filepath.Base(acpSessionID) ||
+		acpSessionID == "." ||
+		acpSessionID == ".." ||
+		strings.Contains(acpSessionID, string(os.PathSeparator)) ||
+		strings.Contains(acpSessionID, "/") ||
+		strings.Contains(acpSessionID, "\\") {
+		return errors.New("auggieusage: invalid ACP session id")
+	}
+	return nil
 }
 
 // ReadNewExchangeUsages loads sessionFile and returns completed exchanges with
