@@ -10,6 +10,7 @@ import (
 
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -487,6 +488,7 @@ func (s *Service) MoveTaskWithOptions(
 	if stepChanged {
 		s.publishTaskMovedEvent(ctx, task, oldWorkflowID, oldStepID, workflowStepID, sessionID)
 		s.pullNextTaskOnVacate(ctx, oldStepID, task.ID)
+		s.recordManualStepTransition(ctx, sessionID, oldStepID, workflowStepID)
 	}
 
 	s.logger.Info("task moved",
@@ -915,6 +917,38 @@ func (s *Service) resolvePrimaryOrActiveSession(ctx context.Context, taskID stri
 		return nil
 	}
 	return active
+}
+
+// recordManualStepTransition writes the ADR 0015 audit row for a
+// user/agent-initiated move (StepTransitionTriggerManual). It is a no-op
+// when no recorder is wired or when the task has no session to record
+// against — session_step_history.session_id is a NOT NULL FK to
+// task_sessions, so a session-less move cannot be recorded without a
+// schema change. Failures are logged and swallowed: the audit trail must
+// never fail the move it is recording.
+func (s *Service) recordManualStepTransition(ctx context.Context, sessionID, fromStepID, toStepID string) {
+	if s.stepHistoryRecorder == nil {
+		return
+	}
+	if sessionID == "" {
+		s.logger.Debug("skipping manual step transition audit: task has no session",
+			zap.String("from_step_id", fromStepID),
+			zap.String("to_step_id", toStepID))
+		return
+	}
+	var actorID *string
+	if identity, ok := authn.IdentityFromContext(ctx); ok && identity.UserID != "" {
+		actorID = &identity.UserID
+	}
+	if err := s.stepHistoryRecorder.CreateStepTransition(
+		ctx, sessionID, fromStepID, toStepID, wfmodels.StepTransitionTriggerManual, actorID, nil,
+	); err != nil {
+		s.logger.Warn("failed to record manual step transition",
+			zap.String("session_id", sessionID),
+			zap.String("from_step_id", fromStepID),
+			zap.String("to_step_id", toStepID),
+			zap.Error(err))
+	}
 }
 
 func isSessionActive(state models.TaskSessionState) bool {

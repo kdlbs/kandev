@@ -175,6 +175,11 @@ func provideOrchestrator(
 	// Wire workflow step getter for prompt building
 	if workflowSvc != nil {
 		orchestratorSvc.SetWorkflowStepGetter(&orchestratorWorkflowStepGetterAdapter{svc: workflowSvc})
+		// Wire the ADR 0015 audit-trail writer for auto-advance step
+		// transitions. workflowSvc.CreateStepTransition already matches
+		// orchestrator.StepHistoryRecorder structurally, so no adapter is
+		// needed.
+		orchestratorSvc.SetStepHistoryRecorder(workflowSvc)
 	}
 
 	// Wire agent family resolution so configure_session rules can name an agent

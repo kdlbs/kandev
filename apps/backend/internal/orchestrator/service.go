@@ -161,6 +161,14 @@ type WorkflowStepGetter interface {
 	GetWorkflowMeta(ctx context.Context, workflowID string) (WorkflowMeta, error)
 }
 
+// StepHistoryRecorder persists an ADR 0015 session-step transition audit
+// row. Optional — when unset, the auto-advance transition paths record
+// nothing. Errors are logged and swallowed by the caller: the audit trail
+// must never fail the transition it is recording.
+type StepHistoryRecorder interface {
+	CreateStepTransition(ctx context.Context, sessionID, fromStepID, toStepID string, trigger wfmodels.StepTransitionTrigger, actorID *string, metadata map[string]interface{}) error
+}
+
 // AgentFamilyResolver maps a hand-written agent family reference onto the
 // canonical IDs of every agent that answers to it. Exactly one candidate
 // resolves the reference; none means it names no known agent; more than one
@@ -369,6 +377,10 @@ type Service struct {
 
 	// Workflow step getter for prompt building
 	workflowStepGetter WorkflowStepGetter
+
+	// stepHistoryRecorder persists the ADR 0015 audit row for auto-advance
+	// (StepTransitionTriggerAutoComplete) step transitions. Optional.
+	stepHistoryRecorder StepHistoryRecorder
 
 	// Resolves the agent family names written in configure_session rules onto
 	// canonical agent IDs. Nil-safe: when unset, rule matching falls back to an
@@ -1163,6 +1175,13 @@ func (s *Service) WorkflowStepRequiresCompletionSignal(ctx context.Context, step
 func (s *Service) SetWorkflowStepGetter(getter WorkflowStepGetter) {
 	s.workflowStepGetter = getter
 	s.initWorkflowEngine()
+}
+
+// SetStepHistoryRecorder wires the ADR 0015 audit-trail writer for
+// auto-advance step transitions (engine and legacy on_turn_complete paths).
+// Optional.
+func (s *Service) SetStepHistoryRecorder(recorder StepHistoryRecorder) {
+	s.stepHistoryRecorder = recorder
 }
 
 // SetAgentFamilyResolver sets the collaborator that maps the agent family names

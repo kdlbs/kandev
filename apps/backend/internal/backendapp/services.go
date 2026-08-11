@@ -114,6 +114,11 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	// Wire start step resolver to task service for CreateTask
 	taskSvc.SetStartStepResolver(&startStepResolverAdapter{svc: workflowSvc})
 
+	// Wire the ADR 0015 audit-trail writer for manual step transitions.
+	// workflowSvc.CreateStepTransition already matches
+	// taskservice.StepHistoryRecorder structurally, so no adapter is needed.
+	taskSvc.SetStepHistoryRecorder(workflowSvc)
+
 	// Wire workflow provider to workflow service for export/import
 	workflowSvc.SetWorkflowProvider(&workflowProviderAdapter{svc: taskSvc})
 	// Wire workspace provider for the read-only guard (Improve Kandev workspace)

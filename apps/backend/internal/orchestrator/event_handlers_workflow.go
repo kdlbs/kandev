@@ -353,6 +353,18 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		s.workflowStore.pullNextTaskOnVacate(ctx, fromStep.ID, taskID)
 	}
 
+	// ADR 0015 — record the audit row before the pending signal (if any)
+	// is cleared below. Only the triggerOnEnter=true (legacy
+	// on_turn_complete) branch could have consumed a signal; the
+	// on_turn_start branch records with no signal metadata.
+	var consumedSignal *models.PendingStepCompletionSignal
+	if triggerOnEnter && exitSession != nil {
+		if signal, has := models.LoadPendingStepSignal(exitSession.Metadata); has && signal.StepID == fromStep.ID {
+			consumedSignal = &signal
+		}
+	}
+	s.recordAutoStepTransition(ctx, sessionID, fromStep.ID, toStepID, consumedSignal)
+
 	if triggerOnEnter {
 		// ADR 0015 — clear any pending completion-signal bag for the
 		// step we just left. Only on_turn_complete transitions trigger
@@ -2747,6 +2759,18 @@ func (s *Service) applyEngineTransition(
 		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
 		return false
 	}
+
+	// ADR 0015 — record the audit row before the pending signal (if any) is
+	// cleared. Only an on_turn_complete transition can have consumed a
+	// signal; on_turn_start and on_children_completed transitions record
+	// with no signal metadata.
+	var consumedSignal *models.PendingStepCompletionSignal
+	if trigger == engine.TriggerOnTurnComplete {
+		if signal, has := models.LoadPendingStepSignal(session.Metadata); has && signal.StepID == result.FromStepID {
+			consumedSignal = &signal
+		}
+	}
+	s.recordAutoStepTransition(ctx, session.ID, result.FromStepID, result.ToStepID, consumedSignal)
 
 	// ADR 0015 — a successful on_turn_complete transition consumes any
 	// pending step-completion signal for the source step. The bag must be

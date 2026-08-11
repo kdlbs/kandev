@@ -8,6 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 // subscribeStepCompletionEvents wires the ADR 0015 out-of-band subscriber
@@ -56,6 +57,41 @@ func (s *Service) clearPendingStepSignalByID(ctx context.Context, sessionID stri
 	if err := s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyPendingStepCompletion, nil); err != nil {
 		s.logger.Debug("clearPendingStepSignal: failed to persist nil bag entry",
 			zap.String("session_id", sessionID), zap.Error(err))
+	}
+}
+
+// recordAutoStepTransition writes the ADR 0015 audit row for an
+// orchestrator-driven (non-manual) step transition — shared by the engine
+// path (applyEngineTransition, covering on_turn_complete, on_turn_start,
+// and on_children_completed) and the legacy on_turn_complete/on_turn_start
+// path (executeStepTransition), so the two funnels cannot drift apart.
+// There is no dedicated trigger enum value for on_turn_start or
+// on_children_completed — the three-value trigger enum
+// (manual/auto_complete/approval) is the specification — so every
+// orchestrator-driven transition is recorded as auto_complete; only a
+// consumed step-completion signal (turn-complete only) attaches metadata.
+// Nil-safe: no recorder wired, or no session to record against, is a
+// no-op. Failures are logged and swallowed — the audit trail must never
+// fail the transition it is recording.
+func (s *Service) recordAutoStepTransition(ctx context.Context, sessionID, fromStepID, toStepID string, signal *models.PendingStepCompletionSignal) {
+	if s.stepHistoryRecorder == nil || sessionID == "" {
+		return
+	}
+	var metadata map[string]interface{}
+	if signal != nil {
+		metadata = map[string]interface{}{
+			"signal_source":  signal.Source,
+			"signal_summary": signal.Summary,
+		}
+	}
+	if err := s.stepHistoryRecorder.CreateStepTransition(
+		ctx, sessionID, fromStepID, toStepID, wfmodels.StepTransitionTriggerAutoComplete, nil, metadata,
+	); err != nil {
+		s.logger.Warn("failed to record auto step transition",
+			zap.String("session_id", sessionID),
+			zap.String("from_step_id", fromStepID),
+			zap.String("to_step_id", toStepID),
+			zap.Error(err))
 	}
 }
 
