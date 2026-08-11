@@ -250,10 +250,24 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 	if state.workspaceID == "" && p.resolveWorkspace != nil {
 		state.workspaceID, err = p.resolveWorkspace(ctx, taskID)
 		if err != nil {
+			// Lifecycle purge publishes queue-status after DeleteTask commits.
+			// The task row is already gone, so workspace resolution fails. Clients
+			// drop the row via task.deleted; ERROR would only noise the bus log.
+			if event.Type == events.MessageQueueStatusChanged {
+				p.logger.Debug("skipping queue status projection for missing task",
+					zap.String("task_id", taskID),
+					zap.Error(err))
+				return nil
+			}
 			return fmt.Errorf("resolve task workspace %q: %w", taskID, err)
 		}
 	}
 	if state.workspaceID == "" {
+		if event.Type == events.MessageQueueStatusChanged {
+			p.logger.Debug("skipping queue status projection without workspace",
+				zap.String("task_id", taskID))
+			return nil
+		}
 		return fmt.Errorf("task status summary %q has no workspace", taskID)
 	}
 
@@ -295,6 +309,18 @@ func (p *Projector) applyQueueStatusEvent(ctx context.Context, state *projection
 		state.queuedCount = count
 		accepted, err := p.persistAndPublishLocked(ctx, taskID, state)
 		if err != nil {
+			// Delete cascades the summary row and the tasks FK before the
+			// post-commit queue-status event runs. With a warm in-memory
+			// state (workspace already known) the recount hits this path
+			// rather than resolveWorkspace. Clients already drop the row
+			// on task.deleted; when pending is already 0 there is nothing
+			// left to project.
+			if count == 0 {
+				p.logger.Debug("skipping queue status persist for gone task",
+					zap.String("task_id", taskID),
+					zap.Error(err))
+				return nil
+			}
 			return err
 		}
 		if accepted {
