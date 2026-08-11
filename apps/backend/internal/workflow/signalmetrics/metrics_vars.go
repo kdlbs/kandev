@@ -48,9 +48,12 @@ func metricLabel(pairs ...string) string {
 // ADR's manual fallback affordance (§ Decision ¶6) has no call site yet.
 // `agentType` is the bounded agent-type dimension the ADR's ratio threshold
 // ("fallback-used / received <= 10% per agent type") is expressed against —
-// e.g. AgentProfile.AgentID ("claude", "codex") — not a per-user profile ID,
-// which never shrinks in the expvar map and cannot be joined back to a type
-// once the profile is deleted.
+// e.g. AgentProfile.AgentName ("claude", "codex"), the registry-facing type
+// (internal/agent/runtime/lifecycle/manager_profile.go keys the agent
+// registry on it) — not AgentProfile.AgentID, which is the store's
+// auto-generated UUID for the agent row
+// (internal/agent/settings/store/sqlite.go CreateAgent) and is therefore
+// unique per install and per agent re-creation, not a bounded type.
 func RecordSignalReceived(source, agentType string) {
 	workflowStepSignalReceived.Add(
 		metricLabel("source", source, "agent_type", agentType), 1)

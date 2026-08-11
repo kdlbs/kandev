@@ -43,13 +43,20 @@ func readSignalReceivedCounterExact(t *testing.T, key string) int64 {
 	return total
 }
 
-// seedAgentProfileSnapshot writes an AgentProfileSnapshot carrying the given
-// agent_id onto the session, matching the shape
-// executor.resolveAgentProfileSnapshot produces in production.
-func seedAgentProfileSnapshot(t *testing.T, repo *sqliterepo.Repository, sessionID, agentID string) {
+// seedAgentProfileSnapshot writes an AgentProfileSnapshot onto the session
+// with distinct agent_id and agent_name values, matching the shape
+// executor.resolveAgentProfileSnapshot produces in production: agent_id is
+// the store's auto-generated UUID for the agent row
+// (internal/agent/settings/store/sqlite.go CreateAgent), agent_name is the
+// registry-facing type like "claude"/"codex"
+// (internal/agent/settings/controller/reconciler.go ensureDBAgent). Seeding
+// them with different values means a test asserting on agentName fails if
+// the handler is ever switched back to reading agent_id.
+func seedAgentProfileSnapshot(t *testing.T, repo *sqliterepo.Repository, sessionID, agentName string) {
 	t.Helper()
 	require.NoError(t, repo.UpdateTaskSessionAgentProfileSnapshot(context.Background(), sessionID, map[string]interface{}{
-		"agent_id": agentID,
+		"agent_id":   "decoy-uuid-" + agentName,
+		"agent_name": agentName,
 	}))
 }
 

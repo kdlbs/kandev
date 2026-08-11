@@ -1923,7 +1923,13 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 	// below: publish is a delivery concern, and a publish failure sends the agent
 	// down the already_signaled dedup retry path, which never reaches this call
 	// again for the same signal.
-	agentType, _ := session.AgentProfileSnapshot["agent_id"].(string)
+	//
+	// agent_name, not agent_id: agent_id is the store's auto-generated UUID for
+	// the agent row (internal/agent/settings/store/sqlite.go CreateAgent), unique
+	// per install and per re-creation. agent_name is the registry-facing type
+	// ("claude", "codex") that internal/agent/runtime/lifecycle/manager_profile.go
+	// keys the agent registry on.
+	agentType, _ := session.AgentProfileSnapshot["agent_name"].(string)
 	signalmetrics.RecordSignalReceived(signal.Source, agentType)
 
 	if errMsg, err := h.publishStepCompletionEvent(ctx, msg, req.TaskID, req.SessionID, task.WorkflowStepID, signal); errMsg != nil {
