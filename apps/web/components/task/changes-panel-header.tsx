@@ -336,7 +336,7 @@ function PullTriggerContent({
   );
 }
 
-function PullDropdown({
+export function PullDropdown({
   behindCount,
   pullDisabled,
   isLoading,
@@ -371,23 +371,35 @@ function PullDropdown({
     perRepoStatus.length > 0
       ? Math.max(behindCount, ...perRepoStatus.map((s) => s.pullBehind ?? 0))
       : behindCount;
+  const pullButton = (
+    <Button
+      size="sm"
+      variant="ghost"
+      className="h-5 text-[11px] px-1.5 gap-1 cursor-pointer"
+      disabled={isLoading || pullDisabled}
+    >
+      <PullTriggerContent
+        behindCount={triggerBehind}
+        isPulling={isPulling}
+        isRebasing={isRebasing}
+      />
+    </Button>
+  );
+  if (pullDisabled) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span tabIndex={0} className="inline-flex">
+            {pullButton}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>{t("task:remoteActionsDisabledHistoryChanged")}</TooltipContent>
+      </Tooltip>
+    );
+  }
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-5 text-[11px] px-1.5 gap-1 cursor-pointer"
-          disabled={isLoading || pullDisabled}
-          title={pullDisabled ? t("task:remoteActionsDisabledHistoryChanged") : undefined}
-        >
-          <PullTriggerContent
-            behindCount={triggerBehind}
-            isPulling={isPulling}
-            isRebasing={isRebasing}
-          />
-        </Button>
-      </DropdownMenuTrigger>
+      <DropdownMenuTrigger asChild>{pullButton}</DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         <PerRepoPullMenu
           repoNames={repoNames}

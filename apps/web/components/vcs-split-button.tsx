@@ -382,7 +382,7 @@ const VcsSplitButton = memo(function VcsSplitButton({
   const git = useSessionGit(sessionId);
   const { openCommitDialog, openPRDialog } = useVcsDialogs();
   const activePR = useActiveTaskPR();
-  const { relation } = useRemoteContributionRelation(sessionId);
+  const { relation, repositoryName } = useRemoteContributionRelation(sessionId);
   const remoteActionPolicy = remoteContributionActionPolicy(relation);
   const hasOpenPR = activePR?.state === "open";
   const { handlePull, handlePush, handleRebase, handleMerge } = useGitActions(git, baseBranch);
@@ -432,6 +432,7 @@ const VcsSplitButton = memo(function VcsSplitButton({
         perRepoStatus={git.perRepoStatus}
         pushDisabled={remoteActionPolicy.pushDisabled}
         pullDisabled={remoteActionPolicy.pullDisabled}
+        blockedRepositoryName={repositoryName}
         repoDisplayName={repoDisplayName}
         callbacks={{
           onCommit: (repo) => openCommitDialog(repo),

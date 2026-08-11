@@ -14,6 +14,7 @@ import {
 
 export type RemoteContributionRelationState = {
   selectedPR: TaskPR | null;
+  repositoryName: string | undefined;
   commits: PRCommitInfo[];
   loading: boolean;
   error: string | null;
@@ -78,6 +79,7 @@ export function useRemoteContributionRelation(
 
   return {
     selectedPR,
+    repositoryName,
     commits: commitsState.commits,
     loading: commitsState.loading,
     error: commitsState.error,

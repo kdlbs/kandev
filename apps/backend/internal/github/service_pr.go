@@ -546,6 +546,24 @@ func (s *Service) GetPRCommits(ctx context.Context, owner, repo string, number i
 	return s.client.ListPRCommits(ctx, owner, repo, number)
 }
 
+// GitHub's pull-request commit endpoint returns at most 250 commits, even
+// when pagination has been requested. Treat a response at that limit as
+// incomplete because the missing older ancestry can change a safe relation
+// into an apparent divergence.
+const githubPRCommitHistoryLimit = 250
+
+func completePRCommitHistory(headSHA string, commits []PRCommitInfo) bool {
+	if headSHA == "" || len(commits) == 0 || len(commits) >= githubPRCommitHistoryLimit {
+		return false
+	}
+	for _, commit := range commits {
+		if commit.SHA == "" {
+			return false
+		}
+	}
+	return commits[len(commits)-1].SHA == headSHA
+}
+
 func (s *Service) GetPRCommitsForWorkspace(
 	ctx context.Context, workspaceID, userID, owner, repo string, number int,
 ) (PRCommitsResult, error) {
@@ -570,7 +588,7 @@ func (s *Service) GetPRCommitsForWorkspace(
 	return PRCommitsResult{
 		Commits:  commits,
 		HeadSHA:  pr.HeadSHA,
-		Complete: pr.HeadSHA != "",
+		Complete: completePRCommitHistory(pr.HeadSHA, commits),
 	}, nil
 }
 

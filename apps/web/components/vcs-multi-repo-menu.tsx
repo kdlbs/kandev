@@ -72,10 +72,23 @@ const PICK_REPOSITORY_KEYS: Record<"commit" | "push" | "pr" | "rebase", string> 
 const ITEM_CLASS = "cursor-pointer gap-3";
 const ICON_CLASS = "h-4 w-4 text-muted-foreground";
 
-type ActionKey = "commit" | "push" | "pr" | "pull" | "rebase" | "merge" | "force-push";
+export type VcsActionKey = "commit" | "push" | "pr" | "pull" | "rebase" | "merge" | "force-push";
+
+export function isRemoteActionBlockedForRepository(
+  action: VcsActionKey,
+  repositoryName: string,
+  blockedRepositoryName: string | undefined,
+  pushDisabled: boolean,
+  pullDisabled: boolean,
+): boolean {
+  const actionBlocked =
+    (action === "push" || action === "force-push" ? pushDisabled : false) ||
+    (action === "pull" ? pullDisabled : false);
+  return actionBlocked && (!blockedRepositoryName || repositoryName === blockedRepositoryName);
+}
 
 type ActionDef = {
-  key: ActionKey;
+  key: VcsActionKey;
   /** Catalog key, resolved at render: `t()` here would freeze at the boot locale. */
   labelKey: string;
   icon: ReactNode;
@@ -147,6 +160,7 @@ function PerRepoActionSub({
   disabled,
   pushDisabled,
   pullDisabled,
+  blockedRepositoryName,
   repoNames,
   perRepoStatus,
   repoDisplayName,
@@ -156,6 +170,7 @@ function PerRepoActionSub({
   disabled: boolean;
   pushDisabled: boolean;
   pullDisabled: boolean;
+  blockedRepositoryName: string | undefined;
   repoNames: string[];
   perRepoStatus: PerRepoStatus[];
   repoDisplayName: (repositoryName: string) => string | undefined;
@@ -163,17 +178,9 @@ function PerRepoActionSub({
 }) {
   const { t } = useTranslation();
   const statusByName = new Map(perRepoStatus.map((s) => [s.repository_name, s]));
-  const actionBlocked =
-    (action.key === "push" || action.key === "force-push" ? pushDisabled : false) ||
-    (action.key === "pull" ? pullDisabled : false);
-  const blockedTitle = actionBlocked ? t("task:remoteActionsDisabledHistoryChanged") : undefined;
   return (
     <DropdownMenuSub>
-      <DropdownMenuSubTrigger
-        className={ITEM_CLASS}
-        disabled={disabled || actionBlocked}
-        title={blockedTitle}
-      >
+      <DropdownMenuSubTrigger className={ITEM_CLASS} disabled={disabled}>
         {action.icon}
         <span className="flex-1">{t(action.labelKey)}</span>
       </DropdownMenuSubTrigger>
@@ -183,6 +190,16 @@ function PerRepoActionSub({
           const ahead = status?.pushAhead ?? 0;
           const behind = status?.pullBehind ?? 0;
           const label = repoDisplayName(repo) || repo || t("integrations:repository");
+          const actionBlocked = isRemoteActionBlockedForRepository(
+            action.key,
+            repo,
+            blockedRepositoryName,
+            pushDisabled,
+            pullDisabled,
+          );
+          const blockedTitle = actionBlocked
+            ? t("task:remoteActionsDisabledHistoryChanged")
+            : undefined;
           return (
             <DropdownMenuItem
               key={repo || "__no_repo__"}
@@ -219,6 +236,7 @@ function MultiRepoVcsDropdown({
   perRepoStatus,
   pushDisabled,
   pullDisabled,
+  blockedRepositoryName,
   repoDisplayName,
   callbacks,
 }: {
@@ -228,6 +246,7 @@ function MultiRepoVcsDropdown({
   perRepoStatus: PerRepoStatus[];
   pushDisabled: boolean;
   pullDisabled: boolean;
+  blockedRepositoryName: string | undefined;
   repoDisplayName: (repositoryName: string) => string | undefined;
   callbacks: PerRepoCallbacks;
 }) {
@@ -247,6 +266,7 @@ function MultiRepoVcsDropdown({
             disabled={disabled}
             pushDisabled={pushDisabled}
             pullDisabled={pullDisabled}
+            blockedRepositoryName={blockedRepositoryName}
             repoNames={repoNames}
             perRepoStatus={perRepoStatus}
             repoDisplayName={repoDisplayName}
@@ -291,6 +311,7 @@ export function MultiRepoVcsButton({
   perRepoStatus,
   pushDisabled,
   pullDisabled,
+  blockedRepositoryName,
   repoDisplayName,
   callbacks,
 }: {
@@ -303,6 +324,7 @@ export function MultiRepoVcsButton({
   perRepoStatus: PerRepoStatus[];
   pushDisabled: boolean;
   pullDisabled: boolean;
+  blockedRepositoryName?: string;
   repoDisplayName: (repositoryName: string) => string | undefined;
   callbacks: PerRepoCallbacks;
 }) {
@@ -341,6 +363,7 @@ export function MultiRepoVcsButton({
               perRepoStatus={perRepoStatus}
               pushDisabled={pushDisabled}
               pullDisabled={pullDisabled}
+              blockedRepositoryName={blockedRepositoryName}
               repoDisplayName={repoDisplayName}
               callbacks={callbacks}
             />
