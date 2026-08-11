@@ -106,6 +106,7 @@ test.describe("Mobile rewritten contribution history", () => {
         author_login: "mobile-remote-contributor",
         repo_owner: "testorg",
         repo_name: "testrepo",
+        head_sha: providerCommits[providerCommits.length - 1].sha,
       },
     ]);
     await apiClient.mockGitHubAddPRCommits("testorg", "testrepo", 902, providerCommits);

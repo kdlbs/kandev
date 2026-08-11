@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   statuses: [] as Array<{ repository_name: string; status: GitStatusEntry }>,
   selectedPR: null as TaskPR | null,
   providerHead: "provider-head",
+  repositoryName: "frontend",
 }));
 
 vi.mock("@/components/state-provider", () => ({
@@ -30,7 +31,7 @@ vi.mock("@/hooks/domains/github/use-pr-commits", () => ({
 }));
 
 vi.mock("@/hooks/domains/github/use-pr-review-repository-identity", () => ({
-  usePRReviewRepositoryIdentity: () => "frontend",
+  usePRReviewRepositoryIdentity: () => mocks.repositoryName,
 }));
 
 vi.mock("./use-session-git-status", () => ({
@@ -78,6 +79,7 @@ describe("useRemoteContributionRelation repository scoping", () => {
   beforeEach(() => {
     mocks.selectedPR = selectedPR;
     mocks.statuses = [];
+    mocks.repositoryName = "frontend";
   });
 
   it.each([
@@ -94,6 +96,19 @@ describe("useRemoteContributionRelation repository scoping", () => {
     mocks.statuses = eventOrder.map(
       (repositoryName) => statuses[repositoryName as keyof typeof statuses],
     );
+
+    const { result } = renderHook(() => useRemoteContributionRelation("session-1"));
+
+    expect(result.current.relation).toMatchObject({
+      kind: "aligned",
+      canPush: false,
+      canPull: false,
+      remoteMutationBlocked: false,
+    });
+  });
+
+  it("uses the empty-key status for a single-repository session", () => {
+    mocks.statuses = [status("", mocks.providerHead, mocks.providerHead)];
 
     const { result } = renderHook(() => useRemoteContributionRelation("session-1"));
 

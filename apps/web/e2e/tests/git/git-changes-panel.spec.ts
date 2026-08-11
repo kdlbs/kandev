@@ -1598,6 +1598,7 @@ test.describe("Git Changes Panel", () => {
         author_login: "remote-contributor",
         repo_owner: "testorg",
         repo_name: "testrepo",
+        head_sha: providerCommits[providerCommits.length - 1].sha,
       },
     ]);
     await apiClient.mockGitHubAddPRCommits("testorg", "testrepo", 901, providerCommits);

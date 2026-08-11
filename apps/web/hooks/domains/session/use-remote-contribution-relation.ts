@@ -34,10 +34,19 @@ export function useRemoteContributionRelation(
   const repositoryName = usePRReviewRepositoryIdentity(activeTaskId, sessionId, selectedPR);
   const statusByRepo = useSessionGitStatusByRepo(sessionId ?? null);
   const gitStatus = useMemo(() => {
-    if (repositoryName) {
-      return statusByRepo.find((entry) => entry.repository_name === repositoryName)?.status;
-    }
-    return statusByRepo.length === 1 ? statusByRepo[0].status : undefined;
+    const matchingStatus = repositoryName
+      ? statusByRepo.find((entry) => entry.repository_name === repositoryName)?.status
+      : undefined;
+    if (matchingStatus) return matchingStatus;
+
+    // Single-repository sessions keep the legacy empty repository key even
+    // when the selected PR resolves to the workspace repository name. A lone
+    // empty-key entry is therefore the selected repository, while a lone
+    // named entry is only a safe fallback when no identity was resolved.
+    if (statusByRepo.length !== 1) return undefined;
+    const onlyStatus = statusByRepo[0];
+    if (onlyStatus.repository_name === "" || !repositoryName) return onlyStatus.status;
+    return undefined;
   }, [repositoryName, statusByRepo]);
 
   const relation = useMemo(
