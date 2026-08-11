@@ -72,8 +72,15 @@ export function aggregateReviewTaskStatusColor(statuses: readonly ReviewTaskStat
   if (statuses.length === 0) return CHANGE_REQUEST_STATUS_COLORS.muted;
   const active = statuses.filter((status) => status.state === "open" || status.state === "draft");
   const target = active.length > 0 ? active : statuses;
-  return target.reduce((best, status) => {
+  let bestColor: string = CHANGE_REQUEST_STATUS_COLORS.muted;
+  let bestRank = -1;
+  for (const status of target) {
     const color = getReviewTaskStatusColor(status);
-    return CHANGE_REQUEST_STATUS_RANK[color] > CHANGE_REQUEST_STATUS_RANK[best] ? color : best;
-  }, CHANGE_REQUEST_STATUS_COLORS.muted as string);
+    const rank = CHANGE_REQUEST_STATUS_RANK[color] ?? 0;
+    if (rank > bestRank) {
+      bestRank = rank;
+      bestColor = color;
+    }
+  }
+  return bestColor;
 }
