@@ -48,6 +48,9 @@ fi
 if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   die "tag must be a v-prefixed three-part SemVer value: $TAG"
 fi
+if [[ "$TAG" != "v$VERSION" ]]; then
+  die "tag must match version: expected v$VERSION, got $TAG"
+fi
 
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/kandev-scoop.XXXXXX")"
 BUCKET_DIR="$WORK_DIR/bucket"

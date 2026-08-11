@@ -135,8 +135,13 @@ exit 2
   };
 }
 
-function runPublisher(fixture, checksumMode = "valid") {
-  return spawnSync("bash", [publisherPath, "1.2.3", "v1.2.3"], {
+function runPublisher(
+  fixture,
+  checksumMode = "valid",
+  version = "1.2.3",
+  tag = "v1.2.3",
+) {
+  return spawnSync("bash", [publisherPath, version, tag], {
     cwd: sourceRoot,
     encoding: "utf8",
     env: {
@@ -235,4 +240,20 @@ test("rejects an absent or malformed checksum before changing the bucket", async
     assert.match(result.stderr, /checksum/i);
     assert.equal(remoteHead(fixture), originalHead);
   }
+});
+
+test("rejects mismatched version and tag before changing the bucket", async (t) => {
+  const fixture = await createFixture();
+  t.after(async () => rm(fixture.root, { recursive: true, force: true }));
+
+  const originalHead = remoteHead(fixture);
+  const result = runPublisher(fixture, "valid", "1.2.3", "v1.2.4");
+
+  assert.notEqual(
+    result.status,
+    0,
+    "mismatched version and tag unexpectedly passed",
+  );
+  assert.match(result.stderr, /tag must match version/i);
+  assert.equal(remoteHead(fixture), originalHead);
 });
