@@ -149,7 +149,7 @@ describe("pluginRegistry — review provider contracts", () => {
 
     pluginRegistry.unregisterPlugin(PRIMARY_PLUGIN_ID);
 
-    await expect(refresh).rejects.toThrow("review refresh aborted");
+    await expect(refresh).rejects.toMatchObject({ name: "AbortError" });
     expect(unsubscribe).toHaveBeenCalledOnce();
     expect(refreshAborted).toHaveBeenCalledOnce();
     expect(pluginRegistry.getReviewProvider(SOURCE_CONTROL_PROVIDER_ID)).toBeUndefined();
