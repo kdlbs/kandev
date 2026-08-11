@@ -596,6 +596,7 @@ function VoiceModeSettingsContent() {
       icon={<IconMicrophone className="h-5 w-5" />}
       title={t("settings:voiceMode")}
       description={t("settings:voiceModePageDescription")}
+      discoveryTargetId={GENERAL_SETTINGS_TARGETS.voiceMode}
     >
       <div className="space-y-4">
         <EnableCard />

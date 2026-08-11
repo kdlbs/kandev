@@ -77,6 +77,9 @@ describe("settings discovery catalog invariants", () => {
       new Set(["/settings/preferences/task-behavior"]),
     );
     expect(new Set(voiceEntries.map((entry) => entry.groupId))).toEqual(new Set(["preferences"]));
+    expect(voiceEntries.find((entry) => entry.id === "voice-mode")?.targetId).toBe(
+      "setting-voice-mode",
+    );
   });
 
   it("indexes stable system and account sections", () => {

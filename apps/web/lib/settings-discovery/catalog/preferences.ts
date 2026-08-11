@@ -37,6 +37,7 @@ export const GENERAL_SETTINGS_TARGETS = {
   unreadMessages: "setting-unread-messages",
   transcriptNavigation: "setting-transcript-navigation",
   messageQueue: "setting-message-queue",
+  voiceMode: "setting-voice-mode",
   voiceEnable: "setting-voice-enable",
   voiceEngine: "setting-voice-engine",
   voiceBehavior: "setting-voice-behavior",
@@ -360,6 +361,7 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     parentId: TASK_BEHAVIOR_ID,
     groupId: "preferences",
     href: TASK_BEHAVIOR_SETTINGS_HREF,
+    targetId: GENERAL_SETTINGS_TARGETS.voiceMode,
     order: 67,
   },
   {
