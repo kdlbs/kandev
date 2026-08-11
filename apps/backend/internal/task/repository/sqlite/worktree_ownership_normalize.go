@@ -20,6 +20,8 @@ type worktreeCutover struct {
 	sessionTasks              map[string]string
 	sessionEnvIDs             map[string]string
 	sessionWorktreeSuperseded map[string]bool
+	demotedWorktrees          map[string]bool
+	demotions                 []string
 	authoritativeWorktreeIDs  map[string]bool
 	envRepos                  []legacyEnvRepo
 	sessionWts                []legacySessionWorktree
@@ -252,6 +254,7 @@ func (c *worktreeCutover) normalize(tx *sqlx.Tx) error {
 	// worktree belongs to the environment the session resolves to, which is
 	// not always an environment owned by the session's own task.
 	c.linkSessions()
+	c.electSlotWorktreeOwners()
 	c.mergeSessionWorktrees()
 	c.registerWorktreeIdentities()
 	c.bindTargetsToEnvironments()
@@ -326,12 +329,141 @@ func (c *worktreeCutover) mergeFlatEnvironmentFields() {
 	}
 }
 
+// worktreeSlot is one normalized repository slot — a (repository, branch
+// slug) pair of a single task — plus the legacy session rows competing to own
+// it.
+type worktreeSlot struct {
+	targets *taskWorktreeTargets
+	key     string
+	rows    []legacySessionWorktree
+}
+
+// electSlotWorktreeOwners resolves the one legacy shape the task-owned model
+// cannot represent: several distinct physical worktrees claiming the same
+// (repository, branch slug) slot of one task. The per-session model produced
+// these routinely — a handoff, a re-materialized workspace, or a second
+// session each minted their own worktree for the same repository — so failing
+// the upgrade would strand those databases on the previous binary.
+//
+// A canonical repository row or the surviving flat environment owns the slot
+// outright; otherwise the newest live session worktree wins. Every other row
+// is demoted to historical evidence: the migration touches no filesystem, so
+// the demoted directory and branch stay on disk, but the normalized schema
+// records exactly one owner per slot.
+func (c *worktreeCutover) electSlotWorktreeOwners() {
+	slots, order := c.collectSlotContenders()
+	for _, id := range order {
+		slot := slots[id]
+		winner := slot.currentOwner()
+		if winner == "" {
+			winner = c.bestSlotOwner(slot.rows)
+		}
+		for _, row := range slot.rows {
+			if row.worktreeID == winner {
+				continue
+			}
+			c.demoteSessionWorktree(row, winner)
+		}
+	}
+}
+
+// collectSlotContenders groups every legacy session worktree that still needs
+// a home by the slot it would claim, preserving row order so the election is
+// deterministic.
+func (c *worktreeCutover) collectSlotContenders() (map[string]*worktreeSlot, []string) {
+	slots := make(map[string]*worktreeSlot)
+	var order []string
+	for _, wt := range c.sessionWts {
+		if wt.worktreeID == "" || isLegacyDeletedWorktree(wt) {
+			continue
+		}
+		taskID := c.sessionOwnerTaskID(wt.sessionID)
+		targets := c.targetsForTask(taskID)
+		if targets.targetForWorktree(wt.worktreeID) != nil {
+			continue // a canonical source already owns this physical worktree
+		}
+		key := envRepoKey(wt.repositoryID, wt.branchSlug)
+		id := taskID + "\x00" + key
+		slot, ok := slots[id]
+		if !ok {
+			slot = &worktreeSlot{targets: targets, key: key}
+			slots[id] = slot
+			order = append(order, id)
+		}
+		slot.rows = append(slot.rows, wt)
+	}
+	return slots, order
+}
+
+// currentOwner returns the physical worktree a canonical source already
+// homed on this slot, or "" when the slot is still unclaimed.
+func (s *worktreeSlot) currentOwner() string {
+	target, ok := s.targets.byKey[s.key]
+	if !ok {
+		return ""
+	}
+	return target.worktreeID
+}
+
+// bestSlotOwner picks the worktree that keeps an otherwise unclaimed slot.
+func (c *worktreeCutover) bestSlotOwner(rows []legacySessionWorktree) string {
+	best := rows[0]
+	for _, row := range rows[1:] {
+		if c.outranksSlotOwner(row, best) {
+			best = row
+		}
+	}
+	return best.worktreeID
+}
+
+// outranksSlotOwner orders two competing rows: a live session's worktree
+// beats a terminal session's, then the most recently updated row wins, with
+// creation time and identity as stable tie-breakers.
+func (c *worktreeCutover) outranksSlotOwner(candidate, best legacySessionWorktree) bool {
+	candidateHistorical := c.isHistoricalSessionRow(candidate)
+	bestHistorical := c.isHistoricalSessionRow(best)
+	if candidateHistorical != bestHistorical {
+		return bestHistorical
+	}
+	if !candidate.updatedAt.Equal(best.updatedAt) {
+		return candidate.updatedAt.After(best.updatedAt)
+	}
+	if !candidate.createdAt.Equal(best.createdAt) {
+		return candidate.createdAt.After(best.createdAt)
+	}
+	return candidate.worktreeID > best.worktreeID
+}
+
+// isHistoricalSessionRow reports whether the row's session is terminal (or
+// gone), which makes its worktree the weaker claim on a contested slot.
+func (c *worktreeCutover) isHistoricalSessionRow(wt legacySessionWorktree) bool {
+	session, ok := c.sessions[wt.sessionID]
+	return !ok || isLegacyHistoricalSession(session.state)
+}
+
+// demoteSessionWorktree records a legacy row as historical evidence for a
+// slot another worktree owns, and keeps a human-readable line so the losing
+// directory can still be found on disk.
+func (c *worktreeCutover) demoteSessionWorktree(wt legacySessionWorktree, winner string) {
+	key := sessionWorktreeKey(wt.sessionID, wt.worktreeID)
+	if c.demotedWorktrees[key] {
+		return
+	}
+	c.demotedWorktrees[key] = true
+	c.demotions = append(c.demotions, fmt.Sprintf(
+		"session %s worktree %s (repository %s, path %q, branch %q) superseded by worktree %s",
+		wt.sessionID, wt.worktreeID, wt.repositoryID, wt.worktreePath, wt.worktreeBranch, winner))
+}
+
 // mergeSessionWorktrees folds every legacy session-worktree row into the
 // targets of the task that owns the session's environment.
 func (c *worktreeCutover) mergeSessionWorktrees() {
 	for _, wt := range c.sessionWts {
 		if _, ok := c.sessions[wt.sessionID]; !ok {
 			continue // already reported in load
+		}
+		if c.demotedWorktrees[sessionWorktreeKey(wt.sessionID, wt.worktreeID)] {
+			continue // another physical worktree owns this repository slot
 		}
 		targets := c.targetsForTask(c.sessionOwnerTaskID(wt.sessionID))
 		if err := targets.mergeSessionWorktree(wt, c.isSupersededSessionWorktree(wt)); err != nil {
@@ -472,12 +604,15 @@ func (c *worktreeCutover) linkSessions() {
 }
 
 // isSupersededSessionWorktree reports whether a legacy session row is no
-// longer an ownership source. Repository rows and the surviving flat
-// environment take precedence for the same physical identity regardless of
-// session state. Historical rows with no authoritative replacement remain
-// eligible for backfill.
+// longer an ownership source. Rows demoted by the slot election, repository
+// rows, and the surviving flat environment take precedence for the same
+// physical identity regardless of session state. Historical rows with no
+// authoritative replacement remain eligible for backfill.
 func (c *worktreeCutover) isSupersededSessionWorktree(wt legacySessionWorktree) bool {
-	cacheKey := wt.sessionID + "\x00" + wt.worktreeID
+	cacheKey := sessionWorktreeKey(wt.sessionID, wt.worktreeID)
+	if c.demotedWorktrees[cacheKey] {
+		return true
+	}
 	if superseded, ok := c.sessionWorktreeSuperseded[cacheKey]; ok {
 		return superseded
 	}
@@ -543,6 +678,11 @@ func (c *worktreeCutover) recordAuthoritativeWorktree(taskID, worktreeID string)
 
 func authoritativeWorktreeKey(taskID, worktreeID string) string {
 	return taskID + "\x00" + worktreeID
+}
+
+// sessionWorktreeKey identifies one legacy session-worktree row.
+func sessionWorktreeKey(sessionID, worktreeID string) string {
+	return sessionID + "\x00" + worktreeID
 }
 
 // registerWorktreeIdentities ensures every physical worktree is owned by
