@@ -12,6 +12,8 @@ import {
   buildAppSidebarActions,
   loadAppSidebarState,
 } from "./app-sidebar-actions";
+import { buildSettingsMenuActions, loadSettingsMenuState } from "./settings-menu-actions";
+import { DEFAULT_SETTINGS_MENU_MODE } from "@/lib/settings/settings-menu-mode";
 import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/components/app-sidebar/app-sidebar-constants";
 import { buildSidebarTaskPrefsActions } from "./sidebar-task-prefs-actions";
 import { buildSidebarViewActions } from "./sidebar-view-actions";
@@ -142,6 +144,11 @@ export const defaultUIState: UISliceState = {
     settingsMode: false,
     improveDialogOpen: false,
     workspacePickerOpen: false,
+  },
+  settingsMenu: {
+    mode: DEFAULT_SETTINGS_MENU_MODE,
+    savedMode: DEFAULT_SETTINGS_MENU_MODE,
+    expandedKeys: [],
   },
   acknowledgedAgentErrors: {},
   dismissedAgentErrors: {},
@@ -495,7 +502,9 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   collapsedSubtaskParents: getStoredCollapsedSubtaskParents(),
   sidebarTaskPrefs: { pinnedTaskIds: [], orderedTaskIds: [], subtaskOrderByParentId: {} },
   appSidebar: loadAppSidebarState(),
+  settingsMenu: loadSettingsMenuState(),
   ...buildAppSidebarActions(set),
+  ...buildSettingsMenuActions(set),
   ...buildPreviewActions(set),
   ...buildMobileActions(set),
   ...buildBottomTerminalActions(set),

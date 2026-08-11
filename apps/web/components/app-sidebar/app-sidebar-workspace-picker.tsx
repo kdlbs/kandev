@@ -1,25 +1,18 @@
 "use client";
 
-import { forwardRef, useCallback, useRef, useState, type ComponentPropsWithoutRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useRouter } from "@/lib/routing/client-router";
-import {
-  IconBriefcase,
-  IconCheck,
-  IconChevronDown,
-  IconLayoutKanban,
-  IconPlus,
-} from "@tabler/icons-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@kandev/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
 import { useAppStore } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { cn } from "@/lib/utils";
+import {
+  WorkspacePickerContent,
+  WorkspaceTrigger,
+  workspaceType,
+  type WorkspaceItem,
+} from "@/components/workspaces/workspace-picker-content";
 import {
   rememberLastOfficeWorkspace,
   rememberLastKanbanWorkspace,
@@ -32,42 +25,10 @@ import {
  * workspace name truncates with a small chevron hinting the dropdown. Only
  * rendered while the sidebar is expanded — the collapsed rail omits it.
  *
- * forwardRef + prop spread so `DropdownMenuTrigger asChild` can wire the trigger
- * (ref, onClick, aria-*, data-state) onto the underlying button.
+ * The trigger and the rows come from `workspace-picker-content`, shared with
+ * the workspace settings switcher; only the selection behaviour below is this
+ * surface's own.
  */
-const WorkspaceTrigger = forwardRef<
-  HTMLButtonElement,
-  ComponentPropsWithoutRef<"button"> & { activeName: string; chevronTestId: string }
->(function WorkspaceTrigger({ activeName, chevronTestId, className, ...props }, ref) {
-  const { t } = useTranslation();
-  return (
-    <button
-      ref={ref}
-      type="button"
-      data-testid="sidebar-workspace-trigger"
-      aria-label={t("sidebar:switchWorkspace")}
-      className={cn(
-        "group/ws flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md border border-border/70 bg-background px-2.5 text-sm font-medium text-foreground shadow-sm cursor-pointer transition-colors hover:border-border hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
-        className,
-      )}
-      {...props}
-    >
-      <span className="min-w-0 flex-1 truncate text-left sidebar-fade-in">{activeName}</span>
-      <IconChevronDown
-        data-testid={chevronTestId}
-        className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-colors group-hover/ws:text-foreground/80"
-      />
-    </button>
-  );
-});
-
-type WorkspaceType = "kanban" | "office";
-
-type WorkspaceItem = {
-  id: string;
-  name: string;
-  office_workflow_id?: string | null;
-};
 
 type WorkspacePickerProps = {
   triggerClassName?: string;
@@ -127,23 +88,11 @@ function useControlledMenuFocus(controlledOpen: boolean | undefined) {
     },
     [controlledOpen],
   );
-  return { contentRef, handleOpenAutoFocus, handleEntryFocus };
-}
-
-function workspaceType(workspace: WorkspaceItem | undefined): WorkspaceType {
-  return workspace?.office_workflow_id ? "office" : "kanban";
-}
-
-/** Returns a catalog key, not copy: this is a plain function with no hook. */
-function workspaceTypeLabelKey(type: WorkspaceType) {
-  return type === "office" ? "sidebar:office" : "sidebar:kanban";
-}
-
-function WorkspaceTypeIcon({ type, className }: { type: WorkspaceType; className: string }) {
-  if (type === "office") {
-    return <IconBriefcase className={className} />;
-  }
-  return <IconLayoutKanban className={className} />;
+  return {
+    ref: contentRef,
+    onOpenAutoFocus: handleOpenAutoFocus,
+    onEntryFocus: handleEntryFocus,
+  };
 }
 
 function rememberSelectedWorkspace(workspace: WorkspaceItem) {
@@ -152,108 +101,6 @@ function rememberSelectedWorkspace(workspace: WorkspaceItem) {
   } else {
     rememberLastKanbanWorkspace(workspace);
   }
-}
-
-type WorkspacePickerContentProps = {
-  workspaces: WorkspaceItem[];
-  activeId: string | null;
-  itemTestIdPrefix: string;
-  officeEnabled: boolean;
-  onWorkspaceSelect: (workspace: WorkspaceItem) => void;
-  onNavigate: (href: string) => void;
-};
-
-function WorkspacePickerContent({
-  workspaces,
-  activeId,
-  itemTestIdPrefix,
-  officeEnabled,
-  onWorkspaceSelect,
-  onNavigate,
-}: WorkspacePickerContentProps) {
-  return (
-    <>
-      <WorkspaceList
-        workspaces={workspaces}
-        activeId={activeId}
-        itemTestIdPrefix={itemTestIdPrefix}
-        onWorkspaceSelect={onWorkspaceSelect}
-      />
-      <DropdownMenuSeparator />
-      <WorkspaceCreateItems officeEnabled={officeEnabled} onNavigate={onNavigate} />
-    </>
-  );
-}
-
-function WorkspaceList({
-  workspaces,
-  activeId,
-  itemTestIdPrefix,
-  onWorkspaceSelect,
-}: Pick<
-  WorkspacePickerContentProps,
-  "workspaces" | "activeId" | "itemTestIdPrefix" | "onWorkspaceSelect"
->) {
-  const { t } = useTranslation();
-  if (workspaces.length === 0) {
-    return <DropdownMenuItem disabled>{t("sidebar:noWorkspaces")}</DropdownMenuItem>;
-  }
-
-  return workspaces.map((ws) => {
-    const type = workspaceType(ws);
-    return (
-      <DropdownMenuItem
-        key={ws.id}
-        data-testid={`${itemTestIdPrefix}-${ws.id}`}
-        onSelect={() => onWorkspaceSelect(ws)}
-        className="cursor-pointer gap-2"
-      >
-        <WorkspaceTypeIcon type={type} className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <span className="min-w-0 flex-1 truncate">{ws.name}</span>
-        <span className="shrink-0 rounded border border-border/60 px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground">
-          {t(workspaceTypeLabelKey(type))}
-        </span>
-        {ws.id === activeId && <IconCheck className="h-3.5 w-3.5 shrink-0" />}
-      </DropdownMenuItem>
-    );
-  });
-}
-
-function WorkspaceCreateItems({
-  officeEnabled,
-  onNavigate,
-}: Pick<WorkspacePickerContentProps, "officeEnabled" | "onNavigate">) {
-  const { t } = useTranslation();
-  if (!officeEnabled) {
-    return (
-      <DropdownMenuItem
-        className="cursor-pointer gap-2"
-        onSelect={() => onNavigate("/settings/workspace")}
-      >
-        <IconPlus className="h-3.5 w-3.5" />
-        <span>{t("sidebar:addWorkspace")}</span>
-      </DropdownMenuItem>
-    );
-  }
-
-  return (
-    <>
-      <DropdownMenuItem
-        className="cursor-pointer gap-2"
-        onSelect={() => onNavigate("/settings/workspace")}
-      >
-        <IconLayoutKanban className="h-3.5 w-3.5" />
-        <span>{t("sidebar:newKanbanWorkspace")}</span>
-      </DropdownMenuItem>
-      <DropdownMenuItem
-        className="cursor-pointer gap-2"
-        onSelect={() => onNavigate("/office/setup?mode=new")}
-      >
-        <IconBriefcase className="h-3.5 w-3.5" />
-        <span>{t("sidebar:newOfficeWorkspace")}</span>
-      </DropdownMenuItem>
-    </>
-  );
 }
 
 export function AppSidebarWorkspacePicker({
@@ -336,14 +183,15 @@ export function AppSidebarWorkspacePicker({
         <WorkspaceTrigger
           activeName={activeName}
           chevronTestId={chevronTestId}
+          // The name fades in with the sidebar's expand animation; the shared
+          // trigger stays animation-free for surfaces that never collapse.
+          nameClassName="sidebar-fade-in"
           data-testid={triggerTestId}
           className={triggerClassName}
         />
       </DropdownMenuTrigger>
       <DropdownMenuContent
-        ref={menuFocus.contentRef}
-        onEntryFocus={menuFocus.handleEntryFocus}
-        onOpenAutoFocus={menuFocus.handleOpenAutoFocus}
+        {...menuFocus}
         align={contentAlign}
         className={cn("w-72", contentClassName)}
       >

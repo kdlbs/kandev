@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { SETTINGS_TAKEOVER_TESTID, setSettingsMenuMode } from "../../helpers/settings-menu";
 
 // Covers docs/specs/integrations/enable-disable-toggle.md's nav-visibility
 // scenarios: with "Hide disabled integrations from left panel navigation"
@@ -40,15 +41,20 @@ test.describe("hide disabled integrations from left panel navigation", () => {
     // The Settings left panel's per-workspace Integrations tree is also part
     // of left-panel navigation: with "hide disabled" off (default) the
     // disabled-but-configured GitHub entry must stay listed there too.
+    // The tree is opt-in — `flat`, the default menu mode, renders no branches
+    // at all — so choose a tree mode before asserting on its rows.
+    await setSettingsMenuMode(testPage, "accordion");
     const { workspaces } = await apiClient.listWorkspaces();
     const workspaceId = workspaces[0].id;
-    await testPage.goto(`/settings/workspace/${workspaceId}/integrations`);
-    const settingsTree = testPage.getByTestId("app-sidebar-settings-mode");
-    const githubSettingsLink = settingsTree.locator(
-      `a[href="/settings/workspace/${workspaceId}/integrations/github"]`,
-    );
-    await expect(githubSettingsLink).toHaveCount(1);
-    await expect(githubSettingsLink).toBeVisible({ timeout: 10_000 });
+    const integrationsPath = `/settings/workspaces/${workspaceId}/integrations`;
+    await testPage.goto(integrationsPath);
+    const settingsTree = testPage.getByTestId(SETTINGS_TAKEOVER_TESTID);
+    // By href, not by name: a workspace another spec created can itself be
+    // called "GitHub", and the row's own name gains a badge once the
+    // integration reports connected — neither of which changes its route.
+    const githubTreeRow = settingsTree.locator(`a[href="${integrationsPath}/github"]`);
+    const azureTreeRow = settingsTree.locator(`a[href="${integrationsPath}/azure-devops"]`);
+    await expect(githubTreeRow).toBeVisible({ timeout: 10_000 });
 
     // Turn "hide disabled" on.
     await testPage.goto("/settings/integrations");
@@ -68,13 +74,9 @@ test.describe("hide disabled integrations from left panel navigation", () => {
     await expect(testPage.getByRole("link", { name: "GitHub", exact: true })).not.toBeVisible();
 
     // The Settings left-panel Integrations tree hides it as well.
-    await testPage.goto(`/settings/workspace/${workspaceId}/integrations`);
-    await expect(
-      settingsTree.locator(`a[href="/settings/workspace/${workspaceId}/integrations/github"]`),
-    ).not.toBeVisible();
-    await expect(settingsTree.getByRole("link", { name: /Azure DevOps/ })).toBeVisible({
-      timeout: 10_000,
-    });
+    await testPage.goto(integrationsPath);
+    await expect(azureTreeRow).toBeVisible({ timeout: 10_000 });
+    await expect(githubTreeRow).toHaveCount(0);
 
     // Re-enabling GitHub reveals it again even with "hide disabled" still on.
     await testPage.goto("/settings/integrations");

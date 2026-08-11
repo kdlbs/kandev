@@ -96,11 +96,23 @@ describe("resolveDestinations", () => {
 
   it("applies palette overrides for id, copy and href", () => {
     const resolved = resolveDestinations({ surface: "palette", ctx: KANBAN });
+    const home = resolved.find((destination) => destination.id === "home");
+
+    // The palette's Home command has always gone to the workspace-less overview,
+    // while the row href follows the active workspace.
+    expect(home?.href).toBe("/?home=overview");
+    expect(home?.label).toBe("common:commandGoToHome");
+    expect(home?.palette?.id).toBe("nav-home");
+  });
+
+  it("falls back to the row href when the palette entry sets none", () => {
+    const resolved = resolveDestinations({ surface: "palette", ctx: KANBAN });
     const settings = resolved.find((destination) => destination.id === "settings");
 
-    expect(settings?.href).toBe("/settings/general");
+    // `/settings` resolves per surface (see `SettingsIndex`), so the command has
+    // no reason to name a page itself.
+    expect(settings?.href).toBe("/settings");
     expect(settings?.label).toBe("common:commandGoToSettings");
-    expect(settings?.palette?.id).toBe("nav-settings");
   });
 
   it("keeps the surface-agnostic href outside the palette", () => {
