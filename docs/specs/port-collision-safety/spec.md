@@ -1,7 +1,7 @@
 ---
 status: building
 created: 2026-08-07
-updated: 2026-08-09
+updated: 2026-08-11
 ---
 
 # Port collision and backend ownership safety
@@ -48,10 +48,19 @@ starting their backend child:
 
 ### Backend readiness ownership
 
-Every TypeScript or native Go launcher invocation must create a fresh opaque health token before
-starting its backend. It passes the token to the child through the existing
-KANDEV_DESKTOP_HEALTH_TOKEN environment variable and retains it for supervisor-managed backend
-restarts.
+The process that owns user-visible readiness must create one fresh opaque health token for the
+launch. An ordinary TypeScript or native Go launcher invocation owns readiness, creates the token,
+passes it to the backend through the existing KANDEV_DESKTOP_HEALTH_TOKEN environment variable,
+and retains it for supervisor-managed backend restarts.
+
+The Tauri desktop shell is a nested-launch exception because it owns the outer readiness check and
+WebView navigation. It creates the token before invoking `kandev --headless`, identifies the launch
+as desktop-owned with `KANDEV_DESKTOP_NATIVE_NOTIFICATIONS=true`, and passes the token to the native
+launcher. When both the desktop-owned marker and a non-empty token are present, the native launcher
+must preserve that exact token for its backend child and its own health poll. It must not replace the
+desktop-owned token with a second generated value. Without that marker, the native launcher must
+replace any ambient KANDEV_DESKTOP_HEALTH_TOKEN with a fresh token so a stale shell environment
+cannot claim readiness ownership.
 
 The launcher health poll succeeds only when the response is a 2xx response and its
 X-Kandev-Desktop-Health-Token response header exactly matches the token generated for that
@@ -124,6 +133,12 @@ not part of this contract.
    health, then it announces readiness exactly once.
 4. Given the supervisor restarts the backend for the same launcher invocation, when the restarted
    backend responds with the retained token, then health succeeds without accepting a stranger.
+5. Given the Tauri shell marks a launch as desktop-owned and supplies a non-empty token, when the
+   nested native launcher starts and polls the backend, then the backend and both readiness checks
+   use that same token and the WebView can navigate without waiting for the startup timeout.
+6. Given an ordinary CLI launch inherits a stale health token without the desktop-owned marker,
+   when the native launcher starts, then it replaces the stale value with a fresh token for the
+   backend and its own health poll.
 
 ### Issue #2371: Windows allocator retry
 

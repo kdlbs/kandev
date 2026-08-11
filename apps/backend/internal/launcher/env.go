@@ -18,6 +18,15 @@ func newHealthToken() (string, error) {
 	return hex.EncodeToString(token), nil
 }
 
+func launchHealthToken() (string, error) {
+	if os.Getenv("KANDEV_DESKTOP_NATIVE_NOTIFICATIONS") == "true" {
+		if token := os.Getenv("KANDEV_DESKTOP_HEALTH_TOKEN"); token != "" {
+			return token, nil
+		}
+	}
+	return newHealthToken()
+}
+
 func backendEnv(ports portConfig, logLevel, consoleLogLevel string, debug bool, healthToken string, extra []string) []string {
 	env := os.Environ()
 	env = upsertEnv(env, "KANDEV_SERVER_PORT", fmt.Sprint(ports.BackendPort))
