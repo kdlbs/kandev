@@ -30,6 +30,15 @@ func TestNewVscodeHandlers(t *testing.T) {
 	}
 }
 
+func TestBuildVscodeProxyURL(t *testing.T) {
+	if got := buildVscodeProxyURL("session", ""); got != "/vscode/session/" {
+		t.Fatalf("URL = %q", got)
+	}
+	if got := buildVscodeProxyURL("session", "/work/my repo"); got != "/vscode/session/?folder=%2Fwork%2Fmy+repo" {
+		t.Fatalf("URL = %q", got)
+	}
+}
+
 func TestRegisterVscodeHandlers(t *testing.T) {
 	log := newTestLogger()
 	h := NewVscodeHandlers(nil, nil, log)

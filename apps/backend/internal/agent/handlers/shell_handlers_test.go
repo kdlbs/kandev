@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
+	terminalservice "github.com/kandev/kandev/internal/terminal/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -94,6 +95,17 @@ func TestNewShellHandlers(t *testing.T) {
 		if handlers.logger == nil {
 			t.Error("expected non-nil logger")
 		}
+	}
+}
+
+func TestShellPresentationHelpers(t *testing.T) {
+	for id, want := range map[string]string{terminalservice.BottomPanelID: "fixed", "custom": "script"} {
+		if got := kindForUnmanaged(id); got != want {
+			t.Fatalf("kindForUnmanaged(%q) = %q, want %q", id, got, want)
+		}
+	}
+	if ptyStatusFromRunning(true) != terminalservice.PTYStatusRunning || ptyStatusFromRunning(false) != terminalservice.PTYStatusStopped {
+		t.Fatal("unexpected PTY status mapping")
 	}
 }
 
