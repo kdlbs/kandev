@@ -570,10 +570,16 @@ func (c *PATClient) ListPRFiles(ctx context.Context, owner, repo string, number 
 }
 
 func (c *PATClient) ListPRCommits(ctx context.Context, owner, repo string, number int) ([]PRCommitInfo, error) {
-	var raw []ghPRCommit
 	endpoint := fmt.Sprintf("/repos/%s/%s/pulls/%d/commits?per_page=100", owner, repo, number)
-	if err := c.get(ctx, endpoint, &raw); err != nil {
-		return nil, fmt.Errorf("list PR commits: %w", err)
+	var raw []ghPRCommit
+	for endpoint != "" {
+		var page []ghPRCommit
+		next, err := c.getPaginated(ctx, endpoint, &page)
+		if err != nil {
+			return nil, fmt.Errorf("list PR commits: %w", err)
+		}
+		raw = append(raw, page...)
+		endpoint = next
 	}
 	return convertRawPRCommits(raw), nil
 }

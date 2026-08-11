@@ -548,15 +548,30 @@ func (s *Service) GetPRCommits(ctx context.Context, owner, repo string, number i
 
 func (s *Service) GetPRCommitsForWorkspace(
 	ctx context.Context, workspaceID, userID, owner, repo string, number int,
-) ([]PRCommitInfo, error) {
+) (PRCommitsResult, error) {
 	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
-		return nil, err
+		return PRCommitsResult{}, err
 	}
 	resolved, err := s.resolvePersonalReadClient(ctx, workspaceID, userID, owner, repo)
 	if err != nil {
-		return nil, err
+		return PRCommitsResult{}, err
 	}
-	return resolved.Client.ListPRCommits(ctx, owner, repo, number)
+	pr, err := resolved.Client.GetPR(ctx, owner, repo, number)
+	if err != nil {
+		return PRCommitsResult{}, fmt.Errorf("get PR #%d for commit history: %w", number, err)
+	}
+	if pr == nil {
+		return PRCommitsResult{}, fmt.Errorf("get PR #%d for commit history: empty response", number)
+	}
+	commits, err := resolved.Client.ListPRCommits(ctx, owner, repo, number)
+	if err != nil {
+		return PRCommitsResult{}, fmt.Errorf("list PR #%d commits: %w", number, err)
+	}
+	return PRCommitsResult{
+		Commits:  commits,
+		HeadSHA:  pr.HeadSHA,
+		Complete: pr.HeadSHA != "",
+	}, nil
 }
 
 // GetPRCommitDetailForWorkspace fetches one commit through the workspace's

@@ -14,6 +14,8 @@ const REWRITTEN_HEAD = "rewritten-head";
 const baseInput: RemoteContributionRelationInput = {
   hasSelectedPR: true,
   providerCommits: [{ sha: PROVIDER_BASE }, { sha: PROVIDER_HEAD }],
+  providerHead: PROVIDER_HEAD,
+  providerCommitsComplete: true,
   providerLoading: false,
   providerError: null,
   localHead: LOCAL_HEAD,
@@ -139,6 +141,42 @@ describe("classifyRemoteContribution", () => {
         input({ upstreamHead: "unrelated-upstream", remoteAhead: 3, remoteBehind: 0 }),
       ),
     ).toMatchObject({ kind: "diverged", canPush: false, remoteMutationBlocked: true });
+  });
+
+  it("uses the explicit provider head instead of the last listed commit", () => {
+    const providerHeadInput = {
+      ...input({
+        providerCommits: [{ sha: PROVIDER_BASE }],
+        localHead: PROVIDER_HEAD,
+        upstreamHead: PROVIDER_HEAD,
+      }),
+      providerHead: PROVIDER_HEAD,
+      providerCommitsComplete: true,
+    };
+
+    expect(classifyRemoteContribution(providerHeadInput)).toMatchObject({
+      kind: "aligned",
+      providerHead: PROVIDER_HEAD,
+    });
+  });
+
+  it("returns unknown when provider ancestry data is incomplete", () => {
+    const incompleteInput = {
+      ...input({
+        providerCommits: [{ sha: REWRITTEN_BASE }, { sha: REWRITTEN_HEAD }],
+        upstreamHead: REWRITTEN_HEAD,
+        remoteAhead: 2,
+        remoteBehind: 2,
+      }),
+      providerHead: REWRITTEN_HEAD,
+      providerCommitsComplete: false,
+    };
+
+    expect(classifyRemoteContribution(incompleteInput)).toMatchObject({
+      kind: "unknown",
+      providerHead: REWRITTEN_HEAD,
+      remoteMutationBlocked: false,
+    });
   });
 });
 

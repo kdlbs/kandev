@@ -50,12 +50,16 @@ describe("usePRCommits request ownership", () => {
     const staleState: KeyedPRCommitsState = {
       sourceKey: "workspace-1/acme/app/1/old-refresh",
       commits: [commit("first-sha")],
+      providerHead: "first-sha",
+      providerCommitsComplete: true,
       loading: false,
       error: null,
     };
 
     expect(resolvePRCommitsView(staleState, "workspace-1/acme/other-app/2/new-refresh")).toEqual({
       commits: [],
+      providerHead: null,
+      providerCommitsComplete: false,
       loading: true,
       error: null,
     });
@@ -89,5 +93,18 @@ describe("usePRCommits request ownership", () => {
     });
 
     expect(result.current.commits[0]?.sha).toBe("second-sha");
+  });
+
+  it("exposes the provider head and commit-list completeness", async () => {
+    requestMock.mockResolvedValue({
+      commits: [commit("provider-head")],
+      head_sha: "provider-head",
+      complete: true,
+    });
+
+    const { result } = renderHook(() => usePRCommits("acme", "app", 1, "synced"), { wrapper });
+
+    await waitFor(() => expect(result.current.providerHead).toBe("provider-head"));
+    expect(result.current.providerCommitsComplete).toBe(true);
   });
 });

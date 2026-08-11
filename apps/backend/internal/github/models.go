@@ -830,6 +830,15 @@ type PRCommitInfo struct {
 	StatsAvailable bool   `json:"stats_available"`
 }
 
+// PRCommitsResult contains the current provider head and the ancestry data
+// used to classify a contribution checkout. Complete is true only when the
+// provider client finished loading the full PR commit list.
+type PRCommitsResult struct {
+	Commits  []PRCommitInfo `json:"commits"`
+	HeadSHA  string         `json:"head_sha"`
+	Complete bool           `json:"complete"`
+}
+
 // PRCommitDetail represents the metadata and changed files for one GitHub
 // commit. Unlike PRCommitInfo, its statistics come from GitHub's individual
 // commit endpoint and are always measured.

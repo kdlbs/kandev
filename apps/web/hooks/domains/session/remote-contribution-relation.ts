@@ -11,6 +11,8 @@ export type RemoteContributionPresentation = "unified" | "separate";
 export type RemoteContributionRelationInput = {
   hasSelectedPR: boolean;
   providerCommits: ReadonlyArray<{ sha: string }>;
+  providerHead: string | null | undefined;
+  providerCommitsComplete: boolean;
   providerLoading: boolean;
   providerError: string | null;
   localHead: string | null | undefined;
@@ -93,10 +95,13 @@ export function classifyRemoteContribution(
     return result("not_applicable", null, fallback);
   }
 
-  const providerHead = input.providerCommits.at(-1)?.sha ?? null;
+  // The provider API supplies the head separately because a commit page can
+  // be incomplete or ordered independently from the live branch head.
+  const providerHead = input.providerHead ?? null;
   const evidenceUnavailable =
     input.providerLoading ||
     Boolean(input.providerError) ||
+    !input.providerCommitsComplete ||
     input.providerCommits.length === 0 ||
     !providerHead ||
     !input.localHead ||
