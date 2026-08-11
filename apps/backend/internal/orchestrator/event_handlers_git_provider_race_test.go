@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/gitlab"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -91,5 +92,34 @@ func TestResolvePushRepositoryProvider_LiveFallbackForUnbackfilledGitLabRepo(t *
 	provider := svc.resolvePushRepositoryProvider(context.Background(), "s1", "t1", "")
 	if provider != gitlabProviderName {
 		t.Fatalf("provider = %q, want %q (resolved live from the local checkout, not a possibly-stale DB column)", provider, gitlabProviderName)
+	}
+}
+
+// TestResolvePushRepositoryProvider_LiveFallbackForUnbackfilledSelfManagedGitLabRepo
+// closes the routing gap CodeRabbit flagged on PR #2515: a self-managed
+// GitLab repository whose remote_url column hasn't been backfilled yet
+// (LocalPath is the only signal) previously routed nowhere, because the
+// self-managed-host check only ever compared repoObj.RemoteURL —  never a
+// live read of LocalPath — against the workspace's configured GitLab host.
+// dispatchPushDetection therefore sent the push down the GitHub detection
+// path, and resolveGitLabPushProject's own local-checkout fallback
+// (event_handlers_gitlab_mr.go) never got a chance to run because routing
+// bailed one step earlier than that fallback.
+func TestResolvePushRepositoryProvider_LiveFallbackForUnbackfilledSelfManagedGitLabRepo(t *testing.T) {
+	const selfManagedRemote = "https://gitlab.internal.example.com/group/subgroup/widgets"
+	svc := seedUnbackfilledRepoForProviderTest(t, selfManagedRemote)
+
+	fake := &fakeGitLabMRLinkService{taskMRs: make(map[string][]*gitlab.TaskMR)}
+	fake.isConfiguredGitLabHostFunc = func(_ context.Context, workspaceID, remoteURL string) bool {
+		return workspaceID == "ws1" && remoteURL == selfManagedRemote
+	}
+	svc.SetGitLabMRLinkService(fake)
+
+	provider := svc.resolvePushRepositoryProvider(context.Background(), "s1", "t1", "")
+	if provider != gitlabProviderName {
+		t.Fatalf("provider = %q, want %q (resolved live from the local checkout's remote, not requiring a persisted remote_url)", provider, gitlabProviderName)
+	}
+	if fake.isConfiguredGitLabHostCalls != 1 {
+		t.Fatalf("expected IsConfiguredGitLabHost to be consulted exactly once, got %d", fake.isConfiguredGitLabHostCalls)
 	}
 }

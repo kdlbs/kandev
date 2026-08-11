@@ -334,17 +334,27 @@ func (s *Service) resolvePushRepositoryProvider(ctx context.Context, sessionID, 
 	// at all — resolveRepositoryProviderIdentity only recognizes github.com
 	// and gitlab.com at discovery time, so the well-known-host fallback above
 	// can never resolve them either; this is a permanent gap for self-managed
-	// repositories, not just a narrow backfill race. remote_url is their only
-	// durable identity signal (still populated by the same production
-	// backfill), so compare it against the workspace's own configured GitLab
-	// connection instead of a hostname allowlist. This gap is scoped to the
-	// Provider tag only: the project path (owner/name) these repositories
-	// need for MR auto-linking has its own remote_url/local-checkout fallback
-	// in resolveGitLabPushProject (event_handlers_gitlab_mr.go), so a missing
-	// tag here does not by itself block auto-link.
-	if s.gitlabMRLinkService != nil && repoObj.RemoteURL != "" {
+	// repositories, not just a narrow backfill race. remote_url is their
+	// primary durable identity signal (still populated by the same
+	// production backfill), so compare it against the workspace's own
+	// configured GitLab connection instead of a hostname allowlist. A row
+	// whose remote_url backfill hasn't landed yet (or predates it) falls back
+	// to a live read of the same local checkout resolveGitLabPushProject
+	// already reads for the project path (event_handlers_gitlab_mr.go), so
+	// routing and project-path resolution agree on the same repository
+	// shape instead of routing bailing before that fallback ever runs.
+	if s.gitlabMRLinkService == nil {
+		return ""
+	}
+	remoteURL := repoObj.RemoteURL
+	if remoteURL == "" && repoObj.LocalPath != "" {
+		if origin, owner, name := service.ResolveGitRemoteIdentity(repoObj.LocalPath); origin != "" && owner != "" && name != "" {
+			remoteURL = origin + "/" + owner + "/" + name
+		}
+	}
+	if remoteURL != "" {
 		if workspaceID := s.taskWorkspaceID(ctx, taskID); workspaceID != "" &&
-			s.gitlabMRLinkService.IsConfiguredGitLabHost(ctx, workspaceID, repoObj.RemoteURL) {
+			s.gitlabMRLinkService.IsConfiguredGitLabHost(ctx, workspaceID, remoteURL) {
 			return gitlabProviderName
 		}
 	}
