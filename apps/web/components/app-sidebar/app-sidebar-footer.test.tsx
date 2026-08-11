@@ -26,10 +26,10 @@ const state = {
     user: null as { display_name: string; email: string } | null,
   },
   connection: { issueSeverity: "none" as "none" | "unstable" | "lost" },
+  userSettings: { appStatusBarEnabled: true },
 };
 
 let officeEnabled = false;
-let appStatusBarEnabled = true;
 const DEFAULT_PATHNAME = "/tasks/session-1";
 let pathname = DEFAULT_PATHNAME;
 
@@ -43,7 +43,7 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 vi.mock("@/hooks/domains/features/use-feature", () => ({
-  useFeature: (name: string) => (name === "office" ? officeEnabled : appStatusBarEnabled),
+  useFeature: () => officeEnabled,
 }));
 
 // The footer renders its insight buttons from the navigation manifest; the
@@ -134,7 +134,7 @@ describe("AppSidebarFooter", () => {
     state.appSidebar.settingsMode = false;
     state.auth = { mode: "disabled", user: null };
     state.connection.issueSeverity = "none";
-    appStatusBarEnabled = true;
+    state.userSettings.appStatusBarEnabled = true;
     window.localStorage.clear();
     document.cookie = "office-active-workspace=; path=/; max-age=0";
     mocks.routerPush.mockClear();
@@ -255,14 +255,14 @@ describe("AppSidebarFooter", () => {
 
 describe("AppSidebarFooter connection fallback", () => {
   beforeEach(() => {
-    appStatusBarEnabled = true;
+    state.userSettings.appStatusBarEnabled = true;
     state.connection.issueSeverity = "none";
   });
 
   afterEach(cleanup);
 
   it("shows the connection fallback immediately after the theme control during an outage", () => {
-    appStatusBarEnabled = false;
+    state.userSettings.appStatusBarEnabled = false;
     state.connection.issueSeverity = "unstable";
 
     renderFooter();

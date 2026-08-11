@@ -1,7 +1,7 @@
 ---
 id: app-status-bar-appearance-01
 title: Portable status bar visibility contract
-status: todo
+status: done
 wave: 1
 depends_on: []
 plan: docs/plans/app-status-bar-appearance-setting/plan.md

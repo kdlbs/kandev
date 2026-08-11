@@ -1,7 +1,7 @@
 ---
 id: app-status-bar-appearance-04
 title: Status bar E2E docs and verification
-status: todo
+status: done
 wave: 4
 depends_on: [app-status-bar-appearance-03]
 plan: docs/plans/app-status-bar-appearance-setting/plan.md

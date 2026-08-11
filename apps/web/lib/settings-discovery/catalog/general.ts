@@ -16,6 +16,7 @@ export const GENERAL_SETTINGS_TARGETS = {
   colorTheme: "setting-color-theme",
   startupPage: "setting-startup-page",
   displayLanguage: "setting-display-language",
+  appStatusBar: "setting-status-bar",
   changesPanelLayout: "setting-changes-panel-layout",
   resourceMetrics: "setting-resource-metrics",
   layoutProfiles: "setting-layout-profiles",
@@ -88,6 +89,17 @@ export const GENERAL_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = [
     order: 13,
   },
   {
+    id: "appearance-status-bar",
+    kind: "control",
+    labelKey: "settings:showStatusBar",
+    aliasesKey: "settings:discoveryAliasesStatusBar",
+    parentId: GENERAL_APPEARANCE_ID,
+    groupId: "general",
+    href: GENERAL_APPEARANCE_HREF,
+    targetId: GENERAL_SETTINGS_TARGETS.appStatusBar,
+    order: 14,
+  },
+  {
     id: "appearance-changes-panel-layout",
     kind: "control",
     labelKey: "settings:changesPanelLayout",
@@ -95,7 +107,7 @@ export const GENERAL_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = [
     groupId: "general",
     href: GENERAL_APPEARANCE_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.changesPanelLayout,
-    order: 14,
+    order: 15,
   },
   {
     id: "appearance-resource-metrics",
@@ -106,7 +118,7 @@ export const GENERAL_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = [
     groupId: "general",
     href: GENERAL_APPEARANCE_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.resourceMetrics,
-    order: 15,
+    order: 16,
   },
   {
     id: "general-layouts",

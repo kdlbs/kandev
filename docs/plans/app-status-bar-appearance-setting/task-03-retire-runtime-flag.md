@@ -1,7 +1,7 @@
 ---
 id: app-status-bar-appearance-03
 title: Retire App status bar runtime flag
-status: todo
+status: done
 wave: 3
 depends_on: [app-status-bar-appearance-02]
 plan: docs/plans/app-status-bar-appearance-setting/plan.md
@@ -150,3 +150,16 @@ before the portable preference is wired.
 Report the retired identity proof, reduced API/frontend feature shape, profile
 removal, search results, exact commands, and blockers. Mark this task done only
 when no active runtime path can observe the former flag.
+
+## Validation results
+
+- RED: active registry/config/profile/frontend tests exposed the old key,
+  environment variable, response field, and frontend feature name.
+- GREEN: full runtime flag, common config, profile, and user-store packages
+  passed; the reduced frontend feature contract/action/surface suite passed 43
+  tests.
+- `pnpm run typecheck` and `pnpm run lint` passed. Focused Go lint passed after
+  the retired key/environment pair was named once and reused by package tests.
+- Searches now find the former identities only in retirement assertions,
+  historical artifacts, public docs awaiting Task 04, and E2E fixtures awaiting
+  their portable-settings conversion.

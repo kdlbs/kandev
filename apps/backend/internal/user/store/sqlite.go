@@ -567,6 +567,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"terminal_font_size":                  settings.TerminalFontSize,
 		"changes_panel_layout":                settings.ChangesPanelLayout,
 		"system_metrics_display":              settings.SystemMetricsDisplay,
+		"app_status_bar_enabled":              settings.AppStatusBarEnabled,
 		"app_status_bar_order":                normalizeAppStatusBarOrder(settings.AppStatusBarOrder),
 		"voice_mode":                          settings.VoiceMode,
 		"kanban_hidden_step_ids":              settings.KanbanHiddenStepIDs,
@@ -678,6 +679,7 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		SidebarViews:                    DefaultSidebarViews(),
 		SidebarActiveViewID:             DefaultSidebarViewID,
 		SidebarTaskPrefs:                normalizeSidebarTaskPrefs(models.SidebarTaskPrefs{}),
+		AppStatusBarEnabled:             true,
 		AppStatusBarOrder:               normalizeAppStatusBarOrder(models.AppStatusBarOrder{}),
 		VoiceMode:                       defaultVoiceModeSettings(),
 		KanbanHiddenStepIDs:             map[string][]string{},
@@ -755,6 +757,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		TerminalFontSize                int                                 `json:"terminal_font_size"`
 		ChangesPanelLayout              string                              `json:"changes_panel_layout"`
 		SystemMetricsDisplay            models.SystemMetricsDisplaySettings `json:"system_metrics_display"`
+		AppStatusBarEnabled             *bool                               `json:"app_status_bar_enabled"`
 		AppStatusBarOrder               models.AppStatusBarOrder            `json:"app_status_bar_order"`
 		VoiceMode                       *storedVoiceMode                    `json:"voice_mode"`
 		KanbanHiddenStepIDs             json.RawMessage                     `json:"kanban_hidden_step_ids"`
@@ -873,6 +876,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.TerminalFontSize = payload.TerminalFontSize
 	settings.VoiceMode = mergeVoiceModeDefaults(payload.VoiceMode)
 	settings.SystemMetricsDisplay = payload.SystemMetricsDisplay
+	if payload.AppStatusBarEnabled != nil {
+		settings.AppStatusBarEnabled = *payload.AppStatusBarEnabled
+	}
 	settings.AppStatusBarOrder = normalizeAppStatusBarOrder(payload.AppStatusBarOrder)
 	if payload.ChangesPanelLayout == "flat" {
 		settings.ChangesPanelLayout = "flat"

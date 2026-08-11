@@ -1,13 +1,14 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
+import { defaultSettingsState } from "@/lib/state/slices/settings/settings-slice";
 import type { AppState } from "@/lib/state/store";
 import { AppStatusDrawerTrigger, AppStatusSurfaceProvider } from "./app-status-surface-provider";
 
 const responsiveState = vi.hoisted(() => ({
   breakpoint: "desktop" as "mobile" | "tablet" | "desktop",
 }));
-const featureState = vi.hoisted(() => ({ appStatusBar: true }));
+let appStatusBarEnabled = true;
 const restartState = vi.hoisted(() => ({
   capability: { status: "resolved", capability: { supported: false, mode: "manual" } },
   restart: {
@@ -35,10 +36,6 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   }),
 }));
 
-vi.mock("@/hooks/domains/features/use-feature", () => ({
-  useFeature: (name: string) => (name === "appStatusBar" ? featureState.appStatusBar : true),
-}));
-
 vi.mock("@/hooks/domains/system/use-restart-capability", () => ({
   useRestartCapability: () => restartState.capability,
 }));
@@ -61,7 +58,16 @@ vi.mock("./app-status-drawer", () => ({
 
 function renderSurface(initialState?: Partial<AppState>, children = <AppStatusDrawerTrigger />) {
   return render(
-    <StateProvider initialState={initialState}>
+    <StateProvider
+      initialState={{
+        ...initialState,
+        userSettings: {
+          ...defaultSettingsState.userSettings,
+          ...initialState?.userSettings,
+          appStatusBarEnabled,
+        },
+      }}
+    >
       <AppStatusSurfaceProvider>{children}</AppStatusSurfaceProvider>
     </StateProvider>,
   );
@@ -92,7 +98,7 @@ function ConnectionIssueControls() {
 describe("AppStatusSurfaceProvider", () => {
   beforeEach(() => {
     responsiveState.breakpoint = "desktop";
-    featureState.appStatusBar = true;
+    appStatusBarEnabled = true;
   });
 
   afterEach(cleanup);
@@ -127,9 +133,9 @@ describe("AppStatusSurfaceProvider", () => {
     expect(trigger.className).not.toContain("sm:hidden");
   });
 
-  it("hides both presentations when the app-status-bar feature is disabled", () => {
+  it("hides both presentations when the status bar preference is disabled", () => {
     responsiveState.breakpoint = "mobile";
-    featureState.appStatusBar = false;
+    appStatusBarEnabled = false;
     renderSurface();
 
     expect(screen.queryByTestId(STATUS_BAR_TEST_ID)).toBeNull();
@@ -137,8 +143,8 @@ describe("AppStatusSurfaceProvider", () => {
     expect(screen.queryByTestId(STATUS_DRAWER_TRIGGER_TEST_ID)).toBeNull();
   });
 
-  it("keeps the runtime alert visible when the app-status-bar feature is disabled", () => {
-    featureState.appStatusBar = false;
+  it("keeps the runtime alert visible when the status bar preference is disabled", () => {
+    appStatusBarEnabled = false;
     renderSurface({
       agentRuntime: {
         status: "unavailable",
@@ -154,7 +160,7 @@ describe("AppStatusSurfaceProvider", () => {
 
   it("exposes a connection-only Status drawer for an active phone warning when disabled", () => {
     responsiveState.breakpoint = "mobile";
-    featureState.appStatusBar = false;
+    appStatusBarEnabled = false;
     renderSurface({
       connection: { status: "reconnecting", error: null, issueSeverity: "unstable" },
     });
@@ -181,7 +187,7 @@ describe("AppStatusSurfaceProvider", () => {
 
   it("keeps an active connection warning reachable at the tablet breakpoint", () => {
     responsiveState.breakpoint = "tablet";
-    featureState.appStatusBar = false;
+    appStatusBarEnabled = false;
     renderSurface({
       connection: { status: "reconnecting", error: null, issueSeverity: "unstable" },
     });
@@ -196,7 +202,7 @@ describe("AppStatusSurfaceProvider", () => {
 
   it("closes a connection-only drawer when the warning recovers", () => {
     responsiveState.breakpoint = "mobile";
-    featureState.appStatusBar = false;
+    appStatusBarEnabled = false;
     renderSurface(
       { connection: { status: "reconnecting", error: null, issueSeverity: "unstable" } },
       <>

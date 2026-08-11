@@ -2,7 +2,7 @@
 spec: docs/specs/ui/app-status-bar.md
 decision: docs/decisions/2026-08-11-user-owned-status-bar-visibility.md
 created: 2026-08-11
-status: draft
+status: done
 ---
 
 # Implementation Plan: Status Bar Appearance Setting
@@ -217,12 +217,12 @@ No new public page or navigation entry is needed.
 
 Execution is sequential in the primary conversation.
 
-| Wave | Task | Gate |
-|---|---|---|
-| 1 | [01 portable visibility contract](task-01-portable-visibility-contract.md) | Default-true backend/frontend setting round trips without changing live gates. |
-| 2 | [02 Appearance control and surface gates](task-02-appearance-control-and-surface-gates.md) | UI saves the portable preference and every surface consumes it. |
-| 3 | [03 retire runtime flag](task-03-retire-runtime-flag.md) | Flag/config/profile identities are removed from active contracts and retired permanently. |
-| 4 | [04 E2E, public docs, and verification](task-04-e2e-public-docs-and-verification.md) | Desktop/mobile persistence, fallbacks, docs, and final checks pass. |
+| Wave | Task | Status | Gate |
+|---|---|---|---|
+| 1 | [01 portable visibility contract](task-01-portable-visibility-contract.md) | Done | Default-true backend/frontend setting round trips without changing live gates. |
+| 2 | [02 Appearance control and surface gates](task-02-appearance-control-and-surface-gates.md) | Done | UI saves the portable preference and every surface consumes it. |
+| 3 | [03 retire runtime flag](task-03-retire-runtime-flag.md) | Done | Flag/config/profile identities are removed from active contracts and retired permanently. |
+| 4 | [04 E2E, public docs, and verification](task-04-e2e-public-docs-and-verification.md) | Done | Desktop/mobile persistence, fallbacks, docs, and final checks pass. |
 
 Tasks share settings and feature contracts, so none are parallel-safe.
 
@@ -253,6 +253,18 @@ git diff --check
 The managed E2E runner must rebuild production assets for the first run. The
 second project may use `--no-build` only when the first build completed from the
 same final tree.
+
+## Validation results
+
+- Backend focused tests and lint passed.
+- Frontend focused tests passed: 12 files and 114 tests.
+- Frontend typecheck, lint, i18n check, and i18n ratchet passed. The i18n check
+  reported only its advisory real-locale parity backlog.
+- Public-doc tests passed: 58 tests; validation passed for 41 pages.
+- Production-build desktop App status bar E2E passed: 4 tests.
+- Desktop warning and agent-runtime fallback E2E passed: 4 tests.
+- Mobile status bar, warning, and resource-metrics E2E passed: 4 tests.
+- `git diff --check` passed.
 
 ## Risks
 

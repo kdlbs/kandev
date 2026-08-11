@@ -253,6 +253,7 @@ export type UserSettingsState = {
   terminalFontSize: number | null;
   changesPanelLayout: "flat" | "tree";
   systemMetricsDisplay: { showInTopbar: boolean; simplified: boolean };
+  appStatusBarEnabled: boolean;
   appStatusBarOrder: AppStatusBarOrderState;
   voiceMode: VoiceModeState;
   hiddenWorkflowStepIds: Record<string, string[]>;

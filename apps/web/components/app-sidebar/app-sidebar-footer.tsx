@@ -229,7 +229,7 @@ export function AppSidebarFooter({ collapsed, onToggleSettingsMode }: AppSidebar
     onToggleSettingsMode();
   };
   const officeEnabled = useFeature("office");
-  const appStatusBarEnabled = useFeature("appStatusBar");
+  const appStatusBarEnabled = useAppStore((s) => s.userSettings.appStatusBarEnabled);
   const insightDestinations = useStaticDestinations("sidebar", "insights");
   const releaseNotes = useReleaseNotes();
   const improveOpen = useAppStore((s) => s.appSidebar.improveDialogOpen);

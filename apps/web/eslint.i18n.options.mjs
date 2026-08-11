@@ -235,6 +235,7 @@ export const i18nGuardFiles = [
   // the page that owns it, not here.
   "app/settings/general/terminal/**/*.{ts,tsx}",
   "components/app-sidebar/sections/settings/general-group.tsx",
+  "components/settings/app-status-bar-settings-card.tsx",
   "components/settings/general-settings.tsx",
   "components/settings/general-nav.ts",
   "components/settings/language-settings.tsx",

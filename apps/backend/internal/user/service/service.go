@@ -85,6 +85,7 @@ type UpdateUserSettingsRequest struct {
 	TerminalFontSize                *int
 	ChangesPanelLayout              *string
 	SystemMetricsDisplay            *SystemMetricsDisplaySettingsPatch
+	AppStatusBarEnabled             *bool
 	AppStatusBarOrder               *models.AppStatusBarOrder
 	VoiceMode                       *models.VoiceModeSettings
 	KanbanHiddenStepIDs             *map[string][]string
@@ -231,6 +232,9 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 		return err
 	}
 	applySystemMetricsDisplay(settings, req.SystemMetricsDisplay)
+	if req.AppStatusBarEnabled != nil {
+		settings.AppStatusBarEnabled = *req.AppStatusBarEnabled
+	}
 	if req.AppStatusBarOrder != nil {
 		settings.AppStatusBarOrder = *req.AppStatusBarOrder
 	}
@@ -806,6 +810,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"terminal_font_size":                  settings.TerminalFontSize,
 		"changes_panel_layout":                settings.ChangesPanelLayout,
 		"system_metrics_display":              settings.SystemMetricsDisplay,
+		"app_status_bar_enabled":              settings.AppStatusBarEnabled,
 		"app_status_bar_order":                settings.AppStatusBarOrder,
 		"voice_mode":                          settings.VoiceMode,
 		"kanban_hidden_step_ids":              settings.KanbanHiddenStepIDs,

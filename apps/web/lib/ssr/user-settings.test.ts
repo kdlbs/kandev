@@ -70,6 +70,29 @@ describe("agent-generated task title defaults", () => {
   });
 });
 
+describe("app status bar visibility hydration", () => {
+  it("defaults missing values to enabled and preserves explicit false", () => {
+    const defaults = buildCoreFields({}) as Record<string, unknown>;
+    const disabled = buildCoreFields({
+      app_status_bar_enabled: false,
+    } as unknown as Parameters<typeof buildCoreFields>[0]) as Record<string, unknown>;
+
+    expect(defaults.appStatusBarEnabled).toBe(true);
+    expect(disabled.appStatusBarEnabled).toBe(false);
+  });
+
+  it("preserves the current value when a partial update omits the field", () => {
+    const current = {
+      ...mapUserSettingsResponse(null),
+      appStatusBarEnabled: false,
+    } as Parameters<typeof buildCoreFields>[1];
+
+    expect((buildCoreFields({}, current) as Record<string, unknown>).appStatusBarEnabled).toBe(
+      false,
+    );
+  });
+});
+
 describe("buildCoreFields", () => {
   it("normalizes the simplified metrics preference and defaults old rows to detailed", () => {
     expect(parseSystemMetricsDisplay({ show_in_topbar: true, simplified: true } as never)).toEqual({

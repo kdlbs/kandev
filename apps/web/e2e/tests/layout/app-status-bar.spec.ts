@@ -1,5 +1,11 @@
 import { expect, test } from "../../fixtures/test-base";
 import type { Page } from "@playwright/test";
+import {
+  captureAppStatusBarSettings,
+  restoreAppStatusBarSettings,
+  setAppStatusBarEnabled,
+  type AppStatusBarSettingsBaseline,
+} from "../../helpers/app-status-bar-settings";
 
 const PIXEL_TOLERANCE = 1;
 
@@ -27,6 +33,56 @@ async function expectStatusBarAfterSidebar(page: Page) {
 }
 
 test.describe("App status bar", () => {
+  let baseline: AppStatusBarSettingsBaseline | undefined;
+
+  test.beforeEach(async ({ apiClient }) => {
+    baseline = await captureAppStatusBarSettings(apiClient);
+    await setAppStatusBarEnabled(apiClient, true);
+  });
+
+  test.afterEach(async ({ apiClient }) => {
+    await restoreAppStatusBarSettings(apiClient, baseline);
+  });
+
+  test("persists the Appearance preference without a restart", async ({
+    testPage,
+    apiClient,
+    prCapture,
+  }) => {
+    await testPage.goto("/settings/general/appearance");
+    const toggle = testPage.getByRole("switch", { name: "Show status bar" });
+    const toggleRow = testPage.getByTestId("app-status-bar-toggle-row");
+    const floatingSave = testPage.getByTestId("settings-floating-save");
+    const bar = testPage.getByTestId("app-status-bar");
+
+    await expect(toggle).toHaveAttribute("aria-checked", "true");
+    expect((await toggleRow.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    await expect(bar).toBeVisible();
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("data-settings-dirty", "true");
+    await floatingSave.getByRole("button", { name: "Save changes" }).click();
+    await expect(bar).toHaveCount(0);
+    await expect
+      .poll(async () => (await apiClient.getUserSettings()).settings.app_status_bar_enabled)
+      .toBe(false);
+    await prCapture.screenshot("status-bar-appearance-desktop", {
+      caption: "Desktop Appearance setting with the status bar disabled",
+    });
+
+    await testPage.reload();
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    await expect(bar).toHaveCount(0);
+
+    await toggle.click();
+    await floatingSave.getByRole("button", { name: "Save changes" }).click();
+    await expect(bar).toBeVisible();
+    expect((await bar.boundingBox())?.height).toBe(24);
+    await expect
+      .poll(async () => (await apiClient.getUserSettings()).settings.app_status_bar_enabled)
+      .toBe(true);
+  });
+
   test("starts after sidebar and tracks its layout width", async ({ testPage }) => {
     await testPage.setViewportSize({ width: 1600, height: 900 });
     await testPage.goto("/");

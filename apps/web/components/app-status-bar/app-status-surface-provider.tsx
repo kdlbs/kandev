@@ -14,7 +14,6 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { cn } from "@kandev/ui/lib/utils";
 import { useAppStore } from "@/components/state-provider";
-import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { usePathname } from "@/lib/routing/client-router";
 import { AppStatusBar } from "./app-status-bar";
@@ -116,7 +115,7 @@ export function AppStatusSurfaceProvider({ children }: { children: ReactNode }) 
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const issueSeverity = useAppStore((state) => state.connection.issueSeverity);
-  const appStatusBarEnabled = useFeature("appStatusBar");
+  const appStatusBarEnabled = useAppStore((state) => state.userSettings.appStatusBarEnabled);
   const { isMobile, isTablet, isFullDesktop } = useResponsiveBreakpoint();
   const connectionOnly = !appStatusBarEnabled && issueSeverity !== "none";
   const useDrawerSurface = isMobile || (isTablet && connectionOnly);

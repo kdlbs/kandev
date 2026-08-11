@@ -44,6 +44,30 @@ describe("startup page websocket sync", () => {
   });
 });
 
+describe("status bar visibility websocket sync", () => {
+  it("updates status bar visibility and preserves it when omitted", () => {
+    const store = makeStore();
+
+    expect(
+      (store.getState().userSettings as unknown as Record<string, unknown>).appStatusBarEnabled,
+    ).toBe(true);
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        app_status_bar_enabled: false,
+      } as unknown as Partial<BackendMessageMap["user.settings.updated"]["payload"]>),
+    );
+    expect(
+      (store.getState().userSettings as unknown as Record<string, unknown>).appStatusBarEnabled,
+    ).toBe(false);
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
+    expect(
+      (store.getState().userSettings as unknown as Record<string, unknown>).appStatusBarEnabled,
+    ).toBe(false);
+  });
+});
+
 describe("user settings websocket handler", () => {
   it("updates LSP status location, normalizes unknown values, and preserves omissions", () => {
     const store = makeStore();

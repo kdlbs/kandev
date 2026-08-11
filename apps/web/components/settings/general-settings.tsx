@@ -41,6 +41,7 @@ import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
 import { StartupPageSettingsCard } from "@/components/settings/startup-page-settings-card";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/general";
 import { SleepInhibitionSettings } from "@/components/settings/sleep-inhibition-settings";
+import { AppStatusBarSettingsCard } from "@/components/settings/app-status-bar-settings-card";
 
 function ThemeSettingsCard({
   theme,
@@ -170,11 +171,12 @@ function createAppearanceSavedState(
   theme: Theme,
   userSettings: Pick<
     UserSettingsState,
-    "changesPanelLayout" | "startupPage" | "systemMetricsDisplay"
+    "appStatusBarEnabled" | "changesPanelLayout" | "startupPage" | "systemMetricsDisplay"
   >,
 ) {
   return {
     theme,
+    appStatusBarEnabled: userSettings.appStatusBarEnabled,
     changesPanelLayout: userSettings.changesPanelLayout,
     startupPage: userSettings.startupPage,
     showMetrics: userSettings.systemMetricsDisplay.showInTopbar,
@@ -227,6 +229,87 @@ function AppearanceThemeSection({
     >
       <ThemeSettingsCard theme={theme} isDirty={isDirty} onChange={onChange} />
     </SettingsSection>
+  );
+}
+
+type AppearanceSavedState = ReturnType<typeof createAppearanceSavedState>;
+
+function AppearanceSettingsSections({
+  draft,
+  saved,
+  updateDraft,
+  previewTheme,
+}: {
+  draft: AppearanceSavedState;
+  saved: AppearanceSavedState;
+  updateDraft: (patch: Partial<AppearanceSavedState>) => void;
+  previewTheme: (theme: Theme) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-8">
+      <AppearanceThemeSection
+        theme={draft.theme}
+        isDirty={draft.theme !== saved.theme}
+        onChange={(theme) => {
+          updateDraft({ theme });
+          previewTheme(theme);
+        }}
+      />
+
+      <StartupPageSettingsSection
+        value={draft.startupPage}
+        isDirty={draft.startupPage !== saved.startupPage}
+        onChange={(startupPage) => updateDraft({ startupPage })}
+      />
+
+      <LanguageSettings />
+
+      <Separator />
+
+      <SettingsSection
+        icon={<IconActivity className="h-5 w-5" />}
+        title={t("settings:statusBar")}
+        description={t("settings:configureStatusBarVisibility")}
+      >
+        <AppStatusBarSettingsCard
+          enabled={draft.appStatusBarEnabled}
+          isDirty={draft.appStatusBarEnabled !== saved.appStatusBarEnabled}
+          onChange={(appStatusBarEnabled) => updateDraft({ appStatusBarEnabled })}
+        />
+      </SettingsSection>
+
+      <Separator />
+
+      <SettingsSection
+        icon={<IconGitBranch className="h-5 w-5" />}
+        title={t("settings:changesPanel")}
+        description={t("settings:customizeHowChangedFilesAreDisplayed")}
+      >
+        <ChangesPanelLayoutCard
+          value={draft.changesPanelLayout}
+          isDirty={draft.changesPanelLayout !== saved.changesPanelLayout}
+          onChange={(changesPanelLayout) => updateDraft({ changesPanelLayout })}
+        />
+      </SettingsSection>
+
+      <Separator />
+
+      <SettingsSection
+        icon={<IconActivity className="h-5 w-5" />}
+        title={t("settings:resourceMetrics")}
+        description={t("settings:configureBackendAndExecutionResourceSampling")}
+      >
+        <SystemMetricsSettingsCard
+          showInTopbar={draft.showMetrics}
+          isShowInTopbarDirty={draft.showMetrics !== saved.showMetrics}
+          onShowInTopbarChange={(showMetrics) => updateDraft({ showMetrics })}
+          simplified={draft.simplifiedMetrics}
+          isSimplifiedDirty={draft.simplifiedMetrics !== saved.simplifiedMetrics}
+          onSimplifiedChange={(simplifiedMetrics) => updateDraft({ simplifiedMetrics })}
+        />
+      </SettingsSection>
+    </div>
   );
 }
 
@@ -297,7 +380,6 @@ export function TaskActionsSettings() {
 }
 
 export function AppearanceSettings() {
-  const { t } = useTranslation();
   const userSettings = useAppStore((state) => state.userSettings);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const storeApi = useAppStoreApi();
@@ -322,6 +404,7 @@ export function AppearanceSettings() {
         repository_ids: current.repositoryIds || [],
         startup_page: submitted.startupPage,
         changes_panel_layout: submitted.changesPanelLayout,
+        app_status_bar_enabled: submitted.appStatusBarEnabled,
         system_metrics_display: {
           show_in_topbar: submitted.showMetrics,
           simplified: submitted.simplifiedMetrics,
@@ -335,6 +418,7 @@ export function AppearanceSettings() {
       setUserSettings({
         ...storeApi.getState().userSettings,
         changesPanelLayout: submitted.changesPanelLayout,
+        appStatusBarEnabled: submitted.appStatusBarEnabled,
         startupPage: submitted.startupPage,
         systemMetricsDisplay: {
           showInTopbar: submitted.showMetrics,
@@ -354,55 +438,12 @@ export function AppearanceSettings() {
   );
 
   return (
-    <div className="space-y-8">
-      <AppearanceThemeSection
-        theme={draft.theme}
-        isDirty={draft.theme !== saved.theme}
-        onChange={(theme) => {
-          updateDraft({ theme });
-          previewTheme(theme);
-        }}
-      />
-
-      <StartupPageSettingsSection
-        value={draft.startupPage}
-        isDirty={draft.startupPage !== saved.startupPage}
-        onChange={(startupPage) => updateDraft({ startupPage })}
-      />
-
-      <LanguageSettings />
-
-      <Separator />
-
-      <SettingsSection
-        icon={<IconGitBranch className="h-5 w-5" />}
-        title={t("settings:changesPanel")}
-        description={t("settings:customizeHowChangedFilesAreDisplayed")}
-      >
-        <ChangesPanelLayoutCard
-          value={draft.changesPanelLayout}
-          isDirty={draft.changesPanelLayout !== saved.changesPanelLayout}
-          onChange={(changesPanelLayout) => updateDraft({ changesPanelLayout })}
-        />
-      </SettingsSection>
-
-      <Separator />
-
-      <SettingsSection
-        icon={<IconActivity className="h-5 w-5" />}
-        title={t("settings:resourceMetrics")}
-        description={t("settings:configureBackendAndExecutionResourceSampling")}
-      >
-        <SystemMetricsSettingsCard
-          showInTopbar={draft.showMetrics}
-          isShowInTopbarDirty={draft.showMetrics !== saved.showMetrics}
-          onShowInTopbarChange={(showMetrics) => updateDraft({ showMetrics })}
-          simplified={draft.simplifiedMetrics}
-          isSimplifiedDirty={draft.simplifiedMetrics !== saved.simplifiedMetrics}
-          onSimplifiedChange={(simplifiedMetrics) => updateDraft({ simplifiedMetrics })}
-        />
-      </SettingsSection>
-    </div>
+    <AppearanceSettingsSections
+      draft={draft}
+      saved={saved}
+      updateDraft={updateDraft}
+      previewTheme={previewTheme}
+    />
   );
 }
 

@@ -1,7 +1,7 @@
 ---
 id: app-status-bar-appearance-02
 title: Appearance control and surface gates
-status: todo
+status: done
 wave: 2
 depends_on: [app-status-bar-appearance-01]
 plan: docs/plans/app-status-bar-appearance-setting/plan.md
@@ -148,3 +148,13 @@ Report the Appearance payload and failure behavior, responsive gate results,
 fallback coverage, generated locale changes, exact commands, and blockers. Mark
 this task done only after every live consumer reads user settings and the flag
 has no UI consumers.
+
+## Validation results
+
+- RED: preference-backed fixtures failed against the former feature selectors;
+  the Appearance integration could not find **Show status bar**.
+- GREEN: focused Vitest run passed 43 tests across the Appearance control,
+  responsive surfaces, warning fallback, metrics fallback, and LSP placement.
+- `pnpm run i18n:check`, `pnpm run i18n:ratchet`, and `pnpm run typecheck`
+  passed. Focused ESLint passed after extracting the Appearance section body
+  and the added WebSocket case to respect repository size limits.
