@@ -4,6 +4,9 @@ import { useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { resolveChangeRequestProviderTarget } from "@/lib/plugins/change-request-creation";
 import { usePluginRegistry } from "@/lib/plugins/registry";
+import type { Repository } from "@/lib/types/http";
+
+const EMPTY_REPOSITORIES: readonly Repository[] = [];
 
 export function useChangeRequestProviderTarget(sessionId: string | null, repositoryScope?: string) {
   const registry = usePluginRegistry();
@@ -17,7 +20,9 @@ export function useChangeRequestProviderTarget(sessionId: string | null, reposit
   );
   const workspaceId = task?.workspaceId ?? activeWorkspaceId ?? undefined;
   const repositories = useAppStore((state) =>
-    workspaceId ? (state.repositories.itemsByWorkspaceId[workspaceId] ?? []) : [],
+    workspaceId
+      ? (state.repositories.itemsByWorkspaceId[workspaceId] ?? EMPTY_REPOSITORIES)
+      : EMPTY_REPOSITORIES,
   );
   const taskWithWorkspace = useMemo(
     () => (task && workspaceId ? { ...task, workspaceId } : task),

@@ -112,7 +112,7 @@ import { RichTextEditor, RichTextReadOnly } from "@/components/editors/tiptap/ri
 import { PageTopbar } from "@/components/page-topbar";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { ChangeRequestList, ChangeRequestRow } from "@/components/integrations/change-request-list";
-import { ChangeRequestDetail } from "@/components/integrations/change-request-detail";
+import type { ChangeRequestDetailProps } from "@/components/integrations/change-request-detail";
 import { IntegrationStartTaskMenu } from "@/components/integrations/integration-start-task-menu";
 import { IntegrationListToolbar } from "@/components/integrations/integration-list-toolbar";
 import { IntegrationScopeBar } from "@/components/integrations/presets-scope-bar-base";
@@ -148,6 +148,29 @@ import {
   type PluginStorageEntry,
   type PluginStorageScope,
 } from "./types";
+
+const LazyChangeRequestDetail = React.lazy(async () => {
+  const module = await import("@/components/integrations/change-request-detail");
+  return { default: module.ChangeRequestDetail };
+});
+
+/**
+ * Keep Monaco and the markdown editor graph off the plugin boot path. The
+ * shared detail view loads only when a plugin actually renders a review.
+ */
+function PluginChangeRequestDetail(props: ChangeRequestDetailProps) {
+  return React.createElement(
+    React.Suspense,
+    {
+      fallback: React.createElement(
+        "div",
+        { className: "flex h-full items-center justify-center py-8" },
+        React.createElement(Spinner, { "aria-label": "Loading change request" }),
+      ),
+    },
+    React.createElement(LazyChangeRequestDetail, props),
+  );
+}
 
 /**
  * Curated `@kandev/ui` subset exposed on `host.ui`, plus a handful of
@@ -291,7 +314,7 @@ const PLUGIN_UI: Record<string, unknown> = {
   TaskCreateDialog,
   ChangeRequestList,
   ChangeRequestRow,
-  ChangeRequestDetail,
+  ChangeRequestDetail: PluginChangeRequestDetail,
   IntegrationStartTaskMenu,
   IntegrationListToolbar,
   IntegrationChangeRequestStatus,

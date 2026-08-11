@@ -6,6 +6,15 @@ import { useDockviewStore } from "@/lib/state/dockview-store";
 import { reviewItemId } from "@/components/task/review-selection";
 import { buildHostApi } from "./host-api";
 
+const { changeRequestDetailModuleLoaded } = vi.hoisted(() => ({
+  changeRequestDetailModuleLoaded: vi.fn(),
+}));
+
+vi.mock("@/components/integrations/change-request-detail", () => {
+  changeRequestDetailModuleLoaded();
+  return { ChangeRequestDetail: () => null };
+});
+
 /** Curated primitives a plugin needs to build a full native-feeling page. */
 const EXPECTED_UI_PRIMITIVES = [
   "Accordion",
@@ -218,6 +227,7 @@ describe("buildHostApi — host contract", () => {
     expect(host.ui.IntegrationListToolbar).toBeDefined();
     expect(host.ui.IntegrationChangeRequestStatus).toBeDefined();
     expect(host.ui.ChangeRequestDetail).toBeTypeOf("function");
+    expect(changeRequestDetailModuleLoaded).not.toHaveBeenCalled();
     expect(host.ui.IntegrationScopeBar).toBeDefined();
     expect(host.ui.IntegrationSaveQueryDialog).toBeDefined();
     const IntegrationIcon = host.ui.IntegrationIcon as React.ComponentType<{
