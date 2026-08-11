@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   EM_DASH,
   containsEmDash,
+  findPublicDocViolations,
   findSourceViolations,
   scanUiEmDashViolations,
   stripCommentsPreservingStrings,
@@ -33,6 +34,22 @@ describe("check-no-em-dash-ui", () => {
 
   it("recognizes escaped em dashes that render from source literals", () => {
     expect(containsEmDash(String.raw`visible \u2014 copy`)).toBe(true);
+  });
+
+  it("ignores non-rendered Markdown and MDX comments", () => {
+    const source = [
+      `<!-- hidden ${EM_DASH} HTML comment -->`,
+      "<!-- hidden",
+      `${EM_DASH} multiline HTML comment`,
+      "-->",
+      "Visible copy",
+      `{/* hidden ${EM_DASH} MDX comment */}`,
+      `Visible ${EM_DASH} copy`,
+    ].join("\n");
+
+    expect(findPublicDocViolations(source, "/repo/docs/public/guide.md", "/repo")).toEqual([
+      { kind: "public-doc", file: "docs/public/guide.md", line: 7 },
+    ]);
   });
 
   it("ignores regex literals while stripping comments", () => {

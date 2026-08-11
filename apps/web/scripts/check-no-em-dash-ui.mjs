@@ -195,8 +195,34 @@ export function findSourceViolations(source, file, root) {
     );
 }
 
+function maskDelimitedCommentsPreservingLines(source, startMarker, endMarker) {
+  let output = "";
+  let cursor = 0;
+
+  while (cursor < source.length) {
+    const start = source.indexOf(startMarker, cursor);
+    if (start < 0) {
+      output += source.slice(cursor);
+      break;
+    }
+
+    output += source.slice(cursor, start);
+    const endMarkerStart = source.indexOf(endMarker, start + startMarker.length);
+    const end = endMarkerStart < 0 ? source.length : endMarkerStart + endMarker.length;
+    output += source.slice(start, end).replace(/[^\n]/g, " ");
+    cursor = end;
+  }
+
+  return output;
+}
+
+function stripPublicDocCommentsPreservingLines(source) {
+  const withoutHtmlComments = maskDelimitedCommentsPreservingLines(source, "<!--", "-->");
+  return maskDelimitedCommentsPreservingLines(withoutHtmlComments, "{/*", "*/");
+}
+
 export function findPublicDocViolations(source, file, root) {
-  return source
+  return stripPublicDocCommentsPreservingLines(source)
     .split("\n")
     .flatMap((line, index) =>
       containsEmDash(line)
