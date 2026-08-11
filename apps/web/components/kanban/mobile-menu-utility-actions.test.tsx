@@ -85,4 +85,22 @@ describe("MobileUtilityActions", () => {
     fireEvent.click(screen.getByTestId(THEME_TOGGLE_TEST_ID));
     expect(mocks.setTheme).toHaveBeenCalledWith("dark");
   });
+
+  it("exposes the target theme and current state to assistive technology", () => {
+    renderComponent();
+
+    const toggle = screen.getByTestId(THEME_TOGGLE_TEST_ID);
+    expect(toggle.getAttribute("aria-label")).toBe("Switch to Dark Mode");
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("updates the accessible target and pressed state for a resolved dark theme", () => {
+    mocks.theme = "system";
+    mocks.resolvedTheme = "dark";
+    renderComponent();
+
+    const toggle = screen.getByTestId(THEME_TOGGLE_TEST_ID);
+    expect(toggle.getAttribute("aria-label")).toBe("Switch to Light Mode");
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+  });
 });

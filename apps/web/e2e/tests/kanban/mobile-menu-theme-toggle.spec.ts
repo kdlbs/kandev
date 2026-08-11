@@ -48,26 +48,32 @@ test.describe("Theme toggle on mobile", () => {
     const html = testPage.locator("html");
     await expect(html).toHaveClass(/(^|\s)light(\s|$)/);
 
-    await kanban.mobileMenuButton.click();
+    await kanban.mobileMenuButton.tap();
 
     const sheet = testPage.getByRole("dialog");
     const themeToggle = sheet.getByTestId("mobile-theme-toggle-button");
     await expect(themeToggle).toBeVisible({ timeout: 10_000 });
+    await expect(themeToggle).toHaveAttribute("aria-label", "Switch to Dark Mode");
+    await expect(themeToggle).toHaveAttribute("aria-pressed", "false");
 
-    await themeToggle.click();
+    await themeToggle.tap();
 
     // The real downstream effect: AppThemeProvider re-applies the resolved
     // theme class on <html>, not just local component state.
     await expect(html).toHaveClass(/(^|\s)dark(\s|$)/);
     await expect(html).not.toHaveClass(/(^|\s)light(\s|$)/);
+    await expect(themeToggle).toHaveAttribute("aria-label", "Switch to Light Mode");
+    await expect(themeToggle).toHaveAttribute("aria-pressed", "true");
 
     // The sheet stays open (unlike the navigation rows above it, this is a
     // persistent toggle, not a navigate-and-close action).
     await expect(sheet).toBeVisible();
 
-    await themeToggle.click();
+    await themeToggle.tap();
     await expect(html).toHaveClass(/(^|\s)light(\s|$)/);
     await expect(html).not.toHaveClass(/(^|\s)dark(\s|$)/);
+    await expect(themeToggle).toHaveAttribute("aria-label", "Switch to Dark Mode");
+    await expect(themeToggle).toHaveAttribute("aria-pressed", "false");
   });
 
   test("flips out of dark mode on the first tap when the OS already prefers dark", async ({
@@ -88,18 +94,22 @@ test.describe("Theme toggle on mobile", () => {
       const html = page.locator("html");
       await expect(html).toHaveClass(/(^|\s)dark(\s|$)/);
 
-      await kanban.mobileMenuButton.click();
+      await kanban.mobileMenuButton.tap();
       const sheet = page.getByRole("dialog");
       const themeToggle = sheet.getByTestId("mobile-theme-toggle-button");
       await expect(themeToggle).toBeVisible({ timeout: 10_000 });
+      await expect(themeToggle).toHaveAttribute("aria-label", "Switch to Light Mode");
+      await expect(themeToggle).toHaveAttribute("aria-pressed", "true");
 
-      await themeToggle.click();
+      await themeToggle.tap();
 
       // One tap must be enough to leave dark mode. A toggle keyed off the raw
       // `theme` value ("system") instead of `resolvedTheme` ("dark") would
       // call setTheme("dark") here and this assertion would time out.
       await expect(html).toHaveClass(/(^|\s)light(\s|$)/);
       await expect(html).not.toHaveClass(/(^|\s)dark(\s|$)/);
+      await expect(themeToggle).toHaveAttribute("aria-label", "Switch to Dark Mode");
+      await expect(themeToggle).toHaveAttribute("aria-pressed", "false");
     } finally {
       await context.close();
     }
