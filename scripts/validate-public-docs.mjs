@@ -284,14 +284,16 @@ function assertFeatureClipShape(clip) {
       "filenames",
       Boolean(
         clip.filenames &&
-          typeof clip.filenames === "object" &&
-          !Array.isArray(clip.filenames),
+        typeof clip.filenames === "object" &&
+        !Array.isArray(clip.filenames),
       ),
     ],
     [
       "files",
       Boolean(
-        clip.files && typeof clip.files === "object" && !Array.isArray(clip.files),
+        clip.files &&
+        typeof clip.files === "object" &&
+        !Array.isArray(clip.files),
       ),
     ],
   ];
@@ -321,10 +323,7 @@ function hasCompleteFeatureMediaEmbed(markdown, filenames) {
         ...match[0].matchAll(
           /\b(webm|mp4|poster)\s*=\s*(?:"([^"]*)"|'([^']*)')/g,
         ),
-      ].map((attribute) => [
-        attribute[1],
-        attribute[2] ?? attribute[3],
-      ]),
+      ].map((attribute) => [attribute[1], attribute[2] ?? attribute[3]]),
     );
 
     return Object.entries(filenames).every(
@@ -658,12 +657,12 @@ async function collectSettingsRoutes(root) {
     path.join(root, "apps/web/src/settings-routes.tsx"),
     "utf8",
   );
-  const tableStart = source.indexOf("const SETTINGS_ROUTES");
-  const tableEnd = tableStart >= 0 ? source.indexOf("\n};", tableStart) : -1;
-  if (tableStart < 0 || tableEnd < 0) {
+  const routeTable = source.match(
+    /const SETTINGS_ROUTES[\s\S]*?\n};(?=[\s\S]*?\nexport (?:const SETTINGS_ROUTE_PATHS|function SettingsRoutes))/,
+  )?.[0];
+  if (!routeTable) {
     throw new Error("could not locate SETTINGS_ROUTES in settings-routes.tsx");
   }
-  const routeTable = source.slice(tableStart, tableEnd + 3);
   return new Set(
     [...routeTable.matchAll(/^\s*"(\/settings(?:\/[^"]*)?)":/gm)].map(
       (match) => match[1],
@@ -724,7 +723,9 @@ async function collectFilesWithExtension(dir, extension) {
 function assertCompleteSurfaceCoverage(shipped, covered, excluded, label) {
   for (const value of covered) {
     if (excluded.has(value)) {
-      throw new Error(`coverage.json both covers and excludes ${label}: ${value}`);
+      throw new Error(
+        `coverage.json both covers and excludes ${label}: ${value}`,
+      );
     }
   }
   for (const value of shipped) {
@@ -857,9 +858,7 @@ function assertExperimentalCalloutPlacement(file, markdown) {
     const heading = headings[headingIndex];
     if (
       !heading ||
-      source
-        .slice(heading.index + heading[0].length, callout.index)
-        .trim()
+      source.slice(heading.index + heading[0].length, callout.index).trim()
     ) {
       throw new Error(
         `${file} experimental callouts must immediately follow a descriptive heading`,
@@ -874,9 +873,7 @@ function assertExperimentalCalloutPlacement(file, markdown) {
     const sectionEnd = nextHeading?.index ?? source.length;
     const calloutBlock = source
       .slice(callout.index)
-      .match(
-        /^>\s*\[!EXPERIMENTAL\]\s*\r?\n(?:^>.*(?:\r?\n|$))*/im,
-      )?.[0];
+      .match(/^>\s*\[!EXPERIMENTAL\]\s*\r?\n(?:^>.*(?:\r?\n|$))*/im)?.[0];
     const sectionContent = source
       .slice(
         callout.index + (calloutBlock?.length ?? callout[0].length),

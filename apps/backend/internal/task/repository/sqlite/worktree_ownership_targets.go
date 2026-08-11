@@ -69,9 +69,11 @@ func (t *taskWorktreeTargets) targetForWorktree(worktreeID string) *envRepoTarge
 // physical-worktree identity, which must agree everywhere).
 func (t *taskWorktreeTargets) mergeLegacyEnvRepo(row legacyEnvRepo) error {
 	target := t.rowForKey(row.repositoryID, row.branchSlug)
-	if err := target.claimWorktree(row.worktreeID, row.worktreePath, row.worktreeBranch, row.position, row.errorMessage, row.createdAt, row.updatedAt, worktreeRepoStatusActive); err != nil {
+	if err := target.claimWorktree(row.worktreeID, row.worktreePath, row.worktreeBranch, row.position, row.errorMessage, row.createdAt, row.updatedAt, row.status); err != nil {
 		return err
 	}
+	target.mergedAt = row.mergedAt
+	target.deletedAt = row.deletedAt
 	return target.mergeCreation(row.createdAt, row.updatedAt)
 }
 
@@ -360,7 +362,7 @@ func (c *worktreeCutover) legacyWorktreeInventory() map[string]bool {
 		inventory[worktreeInventoryKey(wt.worktreeID, wt.worktreePath, wt.worktreeBranch)] = true
 	}
 	for _, row := range c.envRepos {
-		if row.worktreeID == "" {
+		if row.worktreeID == "" || row.status == worktreeRepoStatusDeleted || row.deletedAt != nil {
 			continue
 		}
 		inventory[worktreeInventoryKey(row.worktreeID, row.worktreePath, row.worktreeBranch)] = true

@@ -1,7 +1,7 @@
 ---
 status: building
 created: 2026-08-07
-updated: 2026-08-09
+updated: 2026-08-11
 ---
 
 # Port collision and backend ownership safety
@@ -46,12 +46,48 @@ starting their backend child:
 - The preflight is a race-reduction measure, not the ownership proof: a port can still be taken
   between the probe and the child bind. Readiness ownership below closes that remaining race.
 
+### Port-availability probe detects wildcard listeners
+
+Wherever a launcher decides whether a port is free, whether it is preflighting an explicit
+backend or web port, or selecting a preferred-then-random automatic port, the probe must treat a
+port as available only when both of these hold:
+
+- Nothing answers a loopback connect on either the IPv4 (127.0.0.1) or the IPv6 (::1) loopback
+  address.
+- A fresh loopback bind on that port succeeds.
+
+The connect probe is required because a running Kandev backend binds the wildcard address
+(0.0.0.0 and [::]), and a specific-address bind check alone reports that port as free. On
+BSD-derived systems including macOS, and because the bind probe itself sets SO_REUSEADDR, a
+loopback bind against an already-active wildcard listener succeeds, so a bind-only check falsely
+reports the busy port as available. Probing both loopback families is required because the
+existing backend may hold only the IPv6 wildcard socket. The bind probe is retained because it
+catches reservations a connect probe misses, such as Windows phantom port reservations and ports
+in TIME_WAIT.
+
+Each connect probe is bounded by a short timeout so a silently dropped SYN, for example under
+WSL2 mirrored networking to an unbound loopback port, cannot hang port selection. A timed-out or
+refused connect means nothing is listening.
+
+This restores the dual connect-and-bind, dual-stack behavior the TypeScript launcher had before
+`make dev` moved to the native Go launcher (PR #2411), where the Go probe was bind-only on the
+IPv4 loopback. The contract is not English error-text matching on socket errors.
+
 ### Backend readiness ownership
 
-Every TypeScript or native Go launcher invocation must create a fresh opaque health token before
-starting its backend. It passes the token to the child through the existing
-KANDEV_DESKTOP_HEALTH_TOKEN environment variable and retains it for supervisor-managed backend
-restarts.
+The process that owns user-visible readiness must create one fresh opaque health token for the
+launch. An ordinary TypeScript or native Go launcher invocation owns readiness, creates the token,
+passes it to the backend through the existing KANDEV_DESKTOP_HEALTH_TOKEN environment variable,
+and retains it for supervisor-managed backend restarts.
+
+The Tauri desktop shell is a nested-launch exception because it owns the outer readiness check and
+WebView navigation. It creates the token before invoking `kandev --headless`, identifies the launch
+as desktop-owned with `KANDEV_DESKTOP_NATIVE_NOTIFICATIONS=true`, and passes the token to the native
+launcher. When both the desktop-owned marker and a non-empty token are present, the native launcher
+must preserve that exact token for its backend child and its own health poll. It must not replace the
+desktop-owned token with a second generated value. Without that marker, the native launcher must
+replace any ambient KANDEV_DESKTOP_HEALTH_TOKEN with a fresh token so a stale shell environment
+cannot claim readiness ownership.
 
 The launcher health poll succeeds only when the response is a 2xx response and its
 X-Kandev-Desktop-Health-Token response header exactly matches the token generated for that
@@ -114,6 +150,19 @@ not part of this contract.
 3. Given no explicit backend port and the preferred port is occupied, when the launcher starts,
    then it chooses an available fallback as it does today.
 
+### Wildcard-listener port availability
+
+1. Given a running backend holds the preferred port through a wildcard bind (0.0.0.0 and [::]),
+   when the launcher selects an automatic port with no explicit port configured, then the
+   availability probe reports the preferred port as busy and the launcher falls back to a free
+   random port instead of choosing the occupied preferred port.
+2. Given a wildcard listener holds an explicitly requested backend or web port, when the launcher
+   preflights that port, then it reports the port as busy and exits with the existing hard error
+   naming the port and its source.
+3. Given nothing is listening on a candidate port but a loopback connect to an unbound port is
+   silently dropped, when the availability probe runs, then the bounded connect timeout elapses,
+   the fresh bind succeeds, and the port is reported available.
+
 ### Issue #2372: readiness from the wrong process
 
 1. Given a stranger responds 2xx without the expected token, when the launcher polls health, then
@@ -124,6 +173,12 @@ not part of this contract.
    health, then it announces readiness exactly once.
 4. Given the supervisor restarts the backend for the same launcher invocation, when the restarted
    backend responds with the retained token, then health succeeds without accepting a stranger.
+5. Given the Tauri shell marks a launch as desktop-owned and supplies a non-empty token, when the
+   nested native launcher starts and polls the backend, then the backend and both readiness checks
+   use that same token and the WebView can navigate without waiting for the startup timeout.
+6. Given an ordinary CLI launch inherits a stale health token without the desktop-owned marker,
+   when the native launcher starts, then it replaces the stale value with a fresh token for the
+   backend and its own health poll.
 
 ### Issue #2371: Windows allocator retry
 

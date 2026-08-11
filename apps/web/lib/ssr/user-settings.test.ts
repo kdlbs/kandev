@@ -8,10 +8,45 @@ import {
   parseSystemMetricsDisplay,
   parseVoiceMode,
 } from "./user-settings";
+import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
 import { workspaceId as toWorkspaceId } from "@/lib/types/ids";
 
 const UPDATED_AT = "2026-01-01T00:00:00Z";
 const DEFAULT_USER_ID = "default-user";
+
+describe("user settings revision ordering", () => {
+  it("orders atomic revisions and hydrates the current revision", () => {
+    expect(compareUserSettingsRevisions(3, 2)).toBe(1);
+    expect(
+      mapUserSettingsResponse({
+        settings: {
+          user_id: DEFAULT_USER_ID,
+          workspace_id: toWorkspaceId(""),
+          repository_ids: [],
+          revision: 42,
+          updated_at: UPDATED_AT,
+        },
+      }).revision,
+    ).toBe(42);
+  });
+
+  it("does not assign a newer local revision to an unversioned HTTP response", () => {
+    const current = { ...mapUserSettingsResponse(null), revision: 3 };
+    const result = mapUserSettingsResponse(
+      {
+        settings: {
+          user_id: DEFAULT_USER_ID,
+          workspace_id: toWorkspaceId(""),
+          repository_ids: [],
+          updated_at: UPDATED_AT,
+        },
+      },
+      current,
+    );
+
+    expect(result.revision).toBeNull();
+  });
+});
 
 describe("startup page user settings", () => {
   it("normalizes startup page preferences", () => {
@@ -65,6 +100,33 @@ describe("agent-generated task title defaults", () => {
 
   it("preserves an explicit disabled preference", () => {
     expect(buildCoreFields({ agent_generated_task_titles: false }).agentGeneratedTaskTitles).toBe(
+      false,
+    );
+  });
+});
+
+describe("app status bar visibility hydration", () => {
+  it("defaults missing values to disabled and preserves explicit values", () => {
+    const defaults = buildCoreFields({}) as Record<string, unknown>;
+    const enabled = buildCoreFields({
+      app_status_bar_enabled: true,
+    } as unknown as Parameters<typeof buildCoreFields>[0]) as Record<string, unknown>;
+    const disabled = buildCoreFields({
+      app_status_bar_enabled: false,
+    } as unknown as Parameters<typeof buildCoreFields>[0]) as Record<string, unknown>;
+
+    expect(defaults.appStatusBarEnabled).toBe(false);
+    expect(enabled.appStatusBarEnabled).toBe(true);
+    expect(disabled.appStatusBarEnabled).toBe(false);
+  });
+
+  it("preserves the current value when a partial update omits the field", () => {
+    const current = {
+      ...mapUserSettingsResponse(null),
+      appStatusBarEnabled: false,
+    } as Parameters<typeof buildCoreFields>[1];
+
+    expect((buildCoreFields({}, current) as Record<string, unknown>).appStatusBarEnabled).toBe(
       false,
     );
   });

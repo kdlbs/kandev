@@ -37,7 +37,7 @@ import type {
 } from "@/lib/types/http-voice";
 import { useSettingsSaveContributor } from "./settings-save-provider";
 import { SettingsCard } from "./settings-card";
-import { STANDALONE_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/standalone";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 
 const VOICE_SECURE_SCHEME = "HTTPS";
 const VOICE_LOCALHOST_HOST = "localhost";
@@ -267,7 +267,7 @@ function EngineCard({ caps }: { caps: VoiceCapabilities }) {
   return (
     <SettingsCard
       isDirty={voiceMode.engine !== savedVoiceMode.engine}
-      discoveryTargetId={STANDALONE_SETTINGS_TARGETS.voiceEngine}
+      discoveryTargetId={GENERAL_SETTINGS_TARGETS.voiceEngine}
     >
       <CardHeader>
         <CardTitle className="text-base">{t("settings:voiceEngineTitle")}</CardTitle>
@@ -405,7 +405,7 @@ function BehaviorCard() {
     voiceMode.mode !== savedVoiceMode.mode ||
     voiceMode.autoSend !== savedVoiceMode.autoSend;
   return (
-    <SettingsCard isDirty={isDirty} discoveryTargetId={STANDALONE_SETTINGS_TARGETS.voiceBehavior}>
+    <SettingsCard isDirty={isDirty} discoveryTargetId={GENERAL_SETTINGS_TARGETS.voiceBehavior}>
       <CardHeader>
         <CardTitle className="text-base">{t("settings:voiceBehavior")}</CardTitle>
       </CardHeader>
@@ -428,7 +428,7 @@ function WhisperModelCard() {
   return (
     <SettingsCard
       isDirty={voiceMode.whisperWebModel !== savedVoiceMode.whisperWebModel}
-      discoveryTargetId={STANDALONE_SETTINGS_TARGETS.voiceModel}
+      discoveryTargetId={GENERAL_SETTINGS_TARGETS.voiceModel}
     >
       <CardHeader>
         <CardTitle className="text-base">{t("settings:voiceWhisperModelTitle")}</CardTitle>
@@ -476,7 +476,7 @@ function EnableCard() {
   return (
     <SettingsCard
       isDirty={voiceMode.enabled !== savedVoiceMode.enabled}
-      discoveryTargetId={STANDALONE_SETTINGS_TARGETS.voiceEnable}
+      discoveryTargetId={GENERAL_SETTINGS_TARGETS.voiceEnable}
       data-testid="voice-enable-card"
     >
       <CardHeader>
@@ -558,7 +558,7 @@ function VoiceShortcutCard() {
   }, [overrides, persist]);
 
   return (
-    <SettingsCard isDirty={isDirty} discoveryTargetId={STANDALONE_SETTINGS_TARGETS.voiceShortcut}>
+    <SettingsCard isDirty={isDirty} discoveryTargetId={GENERAL_SETTINGS_TARGETS.voiceShortcut}>
       <CardHeader>
         <CardTitle className="text-base">
           {/* The shortcut's own label comes from the shared keyboard registry,
@@ -596,6 +596,7 @@ function VoiceModeSettingsContent() {
       icon={<IconMicrophone className="h-5 w-5" />}
       title={t("settings:voiceMode")}
       description={t("settings:voiceModePageDescription")}
+      discoveryTargetId={GENERAL_SETTINGS_TARGETS.voiceMode}
     >
       <div className="space-y-4">
         <EnableCard />

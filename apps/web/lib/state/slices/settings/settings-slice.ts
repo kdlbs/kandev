@@ -1,5 +1,6 @@
 import type { StateCreator } from "zustand";
 import { createDefaultUserSettings } from "@/lib/ssr/user-settings";
+import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
 import type { SettingsSlice, SettingsSliceState } from "./types";
 
 export const defaultSettingsState: SettingsSliceState = {
@@ -243,6 +244,8 @@ function createCoreActions(
       }),
     setUserSettings: (settings) =>
       set((draft) => {
+        const order = compareUserSettingsRevisions(settings.revision, draft.userSettings.revision);
+        if (order !== null && order < 0) return;
         draft.userSettings = settings;
       }),
     bumpAgentProfilesVersion: () =>

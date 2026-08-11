@@ -326,6 +326,8 @@
   "integrationDescriptionJira": "Atlassian Cloud 凭据与 JQL 议题监控。",
   "integrationDescriptionLinear": "个人 API 密钥与团队默认值。",
   "integrationDescriptionSentry": "认证令牌、组织/项目默认值与议题浏览。",
+  "hideDisabledAgentProfilesFromNav": "在左侧导航中隐藏已禁用的代理配置",
+  "hideDisabledAgentProfilesFromNavDescription": "开启后，即使配置文件仍已配置，已禁用的代理配置也会从左侧导航中移除。",
   "hideDisabledIntegrationsFromNav": "在左侧导航中隐藏已禁用的集成",
   "hideDisabledIntegrationsFromNavDescription": "开启后，即使集成仍已配置，已禁用的集成也会从侧边栏和移动菜单中移除。",
   "invalidJson": "无效 JSON",

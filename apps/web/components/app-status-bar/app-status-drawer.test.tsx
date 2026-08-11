@@ -2,7 +2,6 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StateProvider } from "@/components/state-provider";
-import { defaultFeaturesState } from "@/lib/state/slices/features/features-slice";
 import { defaultSettingsState } from "@/lib/state/slices/settings/settings-slice";
 import { pluginRegistry } from "@/lib/plugins/registry";
 import { useDockviewStore } from "@/lib/state/dockview-store";
@@ -64,9 +63,9 @@ function renderPhoneLspDrawer() {
   render(
     <StateProvider
       initialState={{
-        features: { ...defaultFeaturesState.features, appStatusBar: true },
         userSettings: {
           ...defaultSettingsState.userSettings,
+          appStatusBarEnabled: true,
           lspStatusLocation: "status_bar",
         },
       }}

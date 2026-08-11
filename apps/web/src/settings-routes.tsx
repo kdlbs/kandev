@@ -50,7 +50,6 @@ import { SystemRouteShell } from "@/components/settings/system/system-route-shel
 import { UIStateCard } from "@/components/settings/system/ui-state-card";
 import { UpdatesCard } from "@/components/settings/system/updates-card";
 import { VersionSummaryCard } from "@/components/settings/system/version-summary-card";
-import { VoiceModeSettings } from "@/components/settings/voice-mode-settings";
 import {
   WorkspaceSettingsShell,
   type WorkspaceSettingsTab,
@@ -160,7 +159,6 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   "/settings/utility-agents": () => <UtilityAgentsSettingsPage />,
   "/settings/external-mcp": () => <ExternalMcpPage />,
   "/settings/prompts": () => <PromptsSettings />,
-  "/settings/voice-mode": () => <VoiceModeSettings />,
   "/settings/plugins": () => <PluginsSettingsPage />,
   // Integrations are per-workspace pages now; the old install-level paths
   // forward into the active workspace's Integrations tab.

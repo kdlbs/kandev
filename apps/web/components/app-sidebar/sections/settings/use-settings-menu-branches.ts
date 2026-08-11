@@ -7,6 +7,7 @@ import { useAzureDevOpsEnabled } from "@/hooks/domains/azure-devops/use-azure-de
 import { useGitHubEnabled } from "@/hooks/domains/github/use-github-enabled";
 import { useGitLabEnabled } from "@/hooks/domains/gitlab/use-gitlab-enabled";
 import { useHideDisabledIntegrationsInNav } from "@/hooks/domains/integrations/use-hide-disabled-integrations-in-nav";
+import { useHideDisabledAgentProfilesInNav } from "@/hooks/domains/settings/use-hide-disabled-agent-profiles-in-nav";
 import { useJiraEnabled } from "@/hooks/domains/jira/use-jira-enabled";
 import { useLinearEnabled } from "@/hooks/domains/linear/use-linear-enabled";
 import { useSentryEnabled } from "@/hooks/domains/sentry/use-sentry-enabled";
@@ -68,6 +69,7 @@ export function useSettingsMenuBranches(mode: SettingsMenuMode): SettingsMenuBra
     label: integration.label,
     icon: resolvePluginIcon(integration.icon),
   }));
+  const { hideDisabled: hideDisabledAgentProfiles } = useHideDisabledAgentProfilesInNav();
 
   return useMemo(() => {
     if (!isTree) return NO_BRANCHES;
@@ -87,7 +89,10 @@ export function useSettingsMenuBranches(mode: SettingsMenuMode): SettingsMenuBra
           integrationContributions,
         ),
       ),
-      ...branchEntry(AGENTS_SETTINGS_HREF, buildAgentsBranch(orderedAgents, detectedNames)),
+      ...branchEntry(
+        AGENTS_SETTINGS_HREF,
+        buildAgentsBranch(orderedAgents, detectedNames, hideDisabledAgentProfiles),
+      ),
       ...branchEntry(EXECUTORS_SETTINGS_HREF, buildExecutorsBranch(executors)),
     };
   }, [
@@ -100,6 +105,7 @@ export function useSettingsMenuBranches(mode: SettingsMenuMode): SettingsMenuBra
     discoveryLoaded,
     visibleIntegrations,
     integrationContributions,
+    hideDisabledAgentProfiles,
   ]);
 }
 

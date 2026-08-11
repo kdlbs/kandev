@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -12,6 +13,14 @@ import (
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+// sessionTerminalErrText mirrors lifecycle.ErrSessionTerminal's message. It is
+// duplicated as a string rather than imported so this higher-level orchestrator
+// file does not take a direct dependency on internal/agent/runtime/lifecycle
+// (ARCH-RUNTIME-IMPORT): the launch failures reach here only as wrapped-error
+// strings or a stringified persisted session error, so a string match is both
+// sufficient and required (see IsBenignLaunchTeardownErr).
+const sessionTerminalErrText = "session is terminal"
 
 // SessionIntent represents the type of session operation requested.
 type SessionIntent string
@@ -97,6 +106,33 @@ func ResolveIntent(req *LaunchSessionRequest) SessionIntent {
 		return IntentPrepare
 	}
 	return IntentStart
+}
+
+// IsBenignLaunchTeardownErr reports whether a session-launch failure is an
+// expected graceful-shutdown teardown race rather than a genuine fault. During
+// shutdown the root context is cancelled and terminal sessions reject launches,
+// so an in-flight session.launch fails predictably; those should log WARN
+// without a stack trace, not ERROR.
+//
+// Two shapes reach the launch handler on shutdown:
+//   - restore_workspace wraps lifecycle.ErrSessionTerminal with %w and the
+//     cancelled root context surfaces context.Canceled, so errors.Is matches
+//     the context sentinel.
+//   - resume stringifies a persisted session error (task_operations.go uses %s
+//     on sess.ErrorMessage), destroying any sentinel, so a bounded string
+//     fallback for "context canceled"/"session is terminal" is required. The
+//     terminal-session text is matched as a string (not errors.Is) to avoid a
+//     higher-level import of the runtime/lifecycle seam.
+func IsBenignLaunchTeardownErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, context.Canceled.Error()) ||
+		strings.Contains(msg, sessionTerminalErrText)
 }
 
 // LaunchSession is the unified entry point for all session operations.

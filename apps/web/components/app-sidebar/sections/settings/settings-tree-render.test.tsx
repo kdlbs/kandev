@@ -8,8 +8,8 @@ const MAIN_WORKSPACE_NAME = "Main Workspace";
 // The active workspace carries a badge, so its row's accessible name is the
 // name plus that badge — match on the name rather than the whole string.
 const WORKSPACE_ROW = new RegExp(MAIN_WORKSPACE_NAME);
-const VOICE_MODE_LABEL = "Voice Mode";
 const SEARCH_LABEL = "Search settings";
+const VOICE_MODE_LABEL = "Voice Mode";
 const WORKSPACES_ROW_KEY = "row:/settings/workspaces";
 const AGENTS_ROW_KEY = "row:/settings/agents";
 const WORKSPACE_KEY = `workspace:${MAIN_WORKSPACE_ID}`;
@@ -18,6 +18,10 @@ const AGENT_LABEL = "Claude Code";
 // Anchored: the caret beside the row is labelled "Expand/Collapse Claude Code",
 // and a badge can extend the row's own name past an exact match.
 const AGENT_ROW = /^Claude Code/;
+// The hide-disabled setting's storage key, used to flip the real hook in the
+// tree tests. Hoisted to a constant so the sonar duplicate-literal rule stays
+// quiet.
+const HIDE_DISABLED_AGENT_KEY = "kandev:agents:hideDisabledInNav:v1";
 // Which integrations the probe reports as connected, per test.
 const integrationsEnabled = new Set<string>();
 
@@ -188,12 +192,13 @@ describe("SettingsTree static menu", () => {
     expect(screen.queryByRole("link", { name: "API Tokens" })).toBeNull();
   });
 
-  it("keeps Voice Mode as a page row under Agents", () => {
-    render(<SettingsTree pathname="/settings/voice-mode" />);
+  it("keeps Voice Mode inside Task Behavior instead of as a page row", () => {
+    render(<SettingsTree pathname="/settings/preferences/task-behavior" />);
 
-    const link = screen.getByRole("link", { name: VOICE_MODE_LABEL });
-    expect(link.getAttribute("href")).toBe("/settings/voice-mode");
-    expect(link.getAttribute("data-active")).toBe("true");
+    expect(screen.queryByRole("link", { name: VOICE_MODE_LABEL })).toBeNull();
+    expect(screen.getByRole("link", { name: "Task Behavior" }).getAttribute("data-active")).toBe(
+      "true",
+    );
   });
 
   it("puts the count straight after the title, not out at the row's edge", () => {
@@ -406,10 +411,12 @@ describe("SettingsTree badges", () => {
     state.agentDiscovery.items = [];
     state.agentDiscovery.loaded = false;
     integrationsEnabled.clear();
+    window.localStorage.removeItem(HIDE_DISABLED_AGENT_KEY);
   });
 
   afterEach(() => {
     setMenuMode("flat");
+    window.localStorage.removeItem(HIDE_DISABLED_AGENT_KEY);
     cleanup();
   });
 
@@ -422,6 +429,28 @@ describe("SettingsTree badges", () => {
     // but stays here, so the menu has to say why it looks inert.
     expect(screen.getByRole("link", { name: /Retired/ }).textContent).toContain("Disabled");
     expect(screen.getByRole("link", { name: "Default" }).textContent).not.toContain("Disabled");
+  });
+
+  it("hides a disabled profile from the tree when the hide setting is on", () => {
+    window.localStorage.setItem(HIDE_DISABLED_AGENT_KEY, "true");
+    setMenuMode("persistent", [AGENTS_ROW_KEY, AGENT_KEY]);
+    render(<SettingsTree pathname="/settings/preferences/appearance" />);
+
+    expect(screen.queryByRole("link", { name: /Retired/ })).toBeNull();
+    expect(screen.getByRole("link", { name: "Default" })).toBeTruthy();
+  });
+
+  it("reveals a disabled profile again once the hide setting is turned back off", () => {
+    window.localStorage.setItem(HIDE_DISABLED_AGENT_KEY, "true");
+    setMenuMode("persistent", [AGENTS_ROW_KEY, AGENT_KEY]);
+    const { rerender } = render(<SettingsTree pathname="/settings/preferences/appearance" />);
+    expect(screen.queryByRole("link", { name: /Retired/ })).toBeNull();
+
+    window.localStorage.removeItem(HIDE_DISABLED_AGENT_KEY);
+    window.dispatchEvent(new Event("kandev:agents:hide-disabled-in-nav-changed"));
+    rerender(<SettingsTree pathname="/settings/preferences/appearance" />);
+
+    expect(screen.getByRole("link", { name: /Retired/ }).textContent).toContain("Disabled");
   });
 
   it("badges the active workspace, the way its own list does", () => {
@@ -487,7 +516,7 @@ describe("SettingsTree search", () => {
     render(<SettingsTree pathname="/settings" />);
 
     const search = screen.getByRole("searchbox", { name: SEARCH_LABEL });
-    expect(screen.getByRole("link", { name: VOICE_MODE_LABEL })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: VOICE_MODE_LABEL })).toBeNull();
 
     fireEvent.change(search, { target: { value: "font size" } });
 
@@ -521,7 +550,7 @@ describe("SettingsTree search", () => {
     fireEvent.keyDown(search, { key: "Escape" });
 
     expect((search as HTMLInputElement).value).toBe("");
-    expect(screen.getByRole("link", { name: VOICE_MODE_LABEL })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: VOICE_MODE_LABEL })).toBeNull();
   });
 
   it("announces an empty result without rendering the normal menu", () => {
@@ -532,6 +561,6 @@ describe("SettingsTree search", () => {
     });
 
     expect(screen.getByText("No matching settings")).toBeTruthy();
-    expect(screen.queryByRole("link", { name: VOICE_MODE_LABEL })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Voice Mode" })).toBeNull();
   });
 });

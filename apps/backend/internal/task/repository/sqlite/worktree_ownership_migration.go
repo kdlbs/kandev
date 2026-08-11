@@ -111,6 +111,14 @@ func (r *Repository) normalizeTaskWorktreeOwnership() error {
 	if err := r.cutoverEnsureLegacyBranchSlug(tx); err != nil {
 		return err
 	}
+	legacyEnvColumns, err := r.cutoverLegacyEnvironmentColumns(tx)
+	if err != nil {
+		return err
+	}
+	legacyRepoColumns, err := r.tableColumns(tx, "task_environment_repos")
+	if err != nil {
+		return err
+	}
 	cut := &worktreeCutover{
 		envs:                      make(map[string]*legacyEnv),
 		taskEnvs:                  make(map[string][]*legacyEnv),
@@ -125,7 +133,7 @@ func (r *Repository) normalizeTaskWorktreeOwnership() error {
 		loserEnvIDs:               make(map[string]bool),
 		executorTypes:             make(map[string]string),
 	}
-	if err := cut.loadLegacy(tx); err != nil {
+	if err := cut.loadLegacy(tx, legacyEnvColumns, legacyRepoColumns); err != nil {
 		return err
 	}
 	if err := cut.normalize(tx); err != nil {
@@ -154,6 +162,18 @@ func (r *Repository) normalizeTaskWorktreeOwnership() error {
 	}
 	r.logCutoverDemotions(cut)
 	return nil
+}
+
+func (r *Repository) cutoverLegacyEnvironmentColumns(tx *sqlx.Tx) (map[string]bool, error) {
+	columns := make(map[string]bool, 4)
+	for _, column := range []string{"repository_id", "worktree_id", "worktree_path", "worktree_branch"} {
+		has, err := r.columnExists(tx, "task_environments", column)
+		if err != nil {
+			return nil, err
+		}
+		columns[column] = has
+	}
+	return columns, nil
 }
 
 // logCutoverDemotions reports every legacy worktree that lost a contested

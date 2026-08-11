@@ -21,6 +21,7 @@ import { Button } from "@kandev/ui/button";
 import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { PRStatusChip } from "@/components/github/pr-status-chip";
+import { MRStatusChip } from "@/components/gitlab/mr-status-chip";
 import { AzureDevOpsTaskPullRequestChip } from "@/components/azure-devops/azure-devops-task-pull-request-chip";
 import { RegisteredChangeRequestStatus } from "@/components/integrations/registered-change-request-status";
 import { PRMergedBanner } from "./chat/pr-archive-banners";
@@ -539,6 +540,7 @@ function PassthroughStatusRow({
 
       <div className="ml-auto flex items-center gap-1.5">
         <PRStatusChip taskId={taskId} />
+        <MRStatusChip taskId={taskId} />
         <AzureDevOpsTaskPullRequestChip taskId={taskId} />
         <RegisteredChangeRequestStatus taskId={taskId} sessionId={sessionId} surface="composer" />
         {taskId && <PRMergedBanner key={taskId} taskId={taskId} />}

@@ -24,6 +24,7 @@ vi.mock("@/components/state-provider", () => ({
 vi.mock("@/hooks/domains/gitlab/use-task-mr", () => ({
   useGitLabAvailable: () => true,
   useTaskMRs: () => gitlabMocks.mrs,
+  useUnlinkTaskMR: () => vi.fn(async () => {}),
   useWorkspaceMRs: vi.fn(),
 }));
 

@@ -8,6 +8,7 @@ import { TodoIndicator } from "./todo-indicator";
 import { AutoScrollToggleButton } from "./auto-scroll-toggle-button";
 import { PRMergedBanner, PRClosedBanner } from "./pr-archive-banners";
 import { PRStatusChip } from "@/components/github/pr-status-chip";
+import { MRStatusChip } from "@/components/gitlab/mr-status-chip";
 import { AzureDevOpsTaskPullRequestChip } from "@/components/azure-devops/azure-devops-task-pull-request-chip";
 import { RegisteredChangeRequestStatus } from "@/components/integrations/registered-change-request-status";
 import { shareableSessionStateClient } from "@/components/task/share/share-button";
@@ -430,6 +431,7 @@ function ChatStatusBar({
       {showTodos && <TodoIndicator todos={todoItems} />}
       {autopilot && <AutopilotChatChip />}
       <PRStatusChip taskId={taskId} />
+      <MRStatusChip taskId={taskId} />
       <AzureDevOpsTaskPullRequestChip taskId={taskId} />
       <RegisteredChangeRequestStatus taskId={taskId} sessionId={sessionId} surface="composer" />
       {queueChip}

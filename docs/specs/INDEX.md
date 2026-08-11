@@ -128,6 +128,7 @@ Per-workspace credentials and triage triggers for external services.
 | [provider-aware-review-automation](integrations/provider-aware-review-automation.md) | approved |
 | [github-authentication](integrations/github-authentication.md) | draft |
 | [gitlab-integration](gitlab-integration/spec.md) | shipped |
+| [gitlab-mr-status-chip](gitlab-mr-status-chip/spec.md) | draft |
 | [gitlab-workflow-sync](gitlab-workflow-sync/spec.md) | shipped |
 | [jira-status-filter](jira-status-filter/spec.md) | shipped |
 | [enable-disable-toggle](integrations/enable-disable-toggle.md) | shipped |
@@ -154,6 +155,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 
 | Spec | Status |
 |---|---|
+| [available-to-install-collapsible](ui/available-to-install-collapsible.md) | shipped |
 | [ci-pr-automation](ui/ci-pr-automation.md) | building |
 | [github-pr-review-actions](ui/github-pr-review-actions.md) | shipped |
 | [github-saved-query-defaults](ui/github-saved-query-defaults.md) | shipped |
@@ -188,6 +190,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [executor-settings-card-spacing](ui/executor-settings-card-spacing.md) | shipped |
 | [quick-chat-elevation](ui/quick-chat-elevation.md) | building |
 | [transcript-navigation-settings](ui/transcript-navigation-settings.md) | shipped |
+| [voice-mode-task-behavior](ui/voice-mode-task-behavior.md) | shipped |
 | [app-status-bar](ui/app-status-bar.md) | shipped |
 | [quick-terminal](quick-terminal/spec.md) | shipped |
 | [mobile-task-navigation](ui/mobile-task-navigation.md) | shipped |

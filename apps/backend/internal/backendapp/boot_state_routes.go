@@ -442,6 +442,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		effectiveWorkspaceID = workspaceID
 	}
 	return map[string]any{
+		"revision":                        settings.Revision,
 		"workspaceId":                     effectiveWorkspaceID,
 		"kanbanViewMode":                  nullString(settings.KanbanViewMode),
 		"startupPage":                     usermodels.NormalizeStartupPage(settings.StartupPage),
@@ -488,6 +489,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 			"showInTopbar": settings.SystemMetricsDisplay.ShowInTopbar,
 			"simplified":   settings.SystemMetricsDisplay.Simplified,
 		},
+		"appStatusBarEnabled":   settings.AppStatusBarEnabled,
 		"appStatusBarOrder":     mapAppStatusBarOrder(settings.AppStatusBarOrder),
 		"voiceMode":             mapVoiceMode(settings.VoiceMode),
 		"hiddenWorkflowStepIds": stringSliceMap(settings.KanbanHiddenStepIDs),

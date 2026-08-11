@@ -111,11 +111,11 @@ credentials.
 For account-wide provider usage across supported providers, install the
 [Provider Usage plugin](https://github.com/kdlbs/kandev-plugin-provider-usage).
 It adds a provider pill to the session top bar and can add a compact display to
-the global status bar. The optional status-bar display requires **App status
-bar** to be enabled under **Settings > System > Feature Toggles**; enable it
-and restart Kandev for the change to take effect. If it remains disabled, the
-session top-bar pill remains available; enabling it also adds the global
-status-bar and phone Status drawer display. Configure the plugin under
+the global status surface. That surface is off by default and follows the
+portable **Show status bar** preference under **Settings > Preferences >
+Appearance > Status Bar**; saving applies without a restart. If it is off, the
+session top-bar pill remains available. When it is on, the plugin can also
+appear in the desktop/tablet bottom bar or phone Status drawer. Configure the plugin under
 **Settings > Plugins > Provider Usage**. These usage surfaces are operational
 signals, not a billing ledger or a guarantee that the next request will be
 accepted; provider availability, account policy, and concurrent usage still
