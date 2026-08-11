@@ -122,3 +122,57 @@ func TestDeleteSessionCancelsQueuedPromptsAndPublishesStatus(t *testing.T) {
 	}
 
 }
+
+
+func TestQueueStatusNotifyUsesDetachedContext(t *testing.T) {
+	// Production: ArchiveTask commits then calls notify with the request ctx.
+	// A cancelled request must not starve the badge-zero publish/handler work.
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-notify-detach", "session-notify-detach", models.TaskSessionStateIdle)
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	eventBus := bus.NewMemoryEventBus(testLogger())
+	svc.eventBus = eventBus
+
+	var saw atomic.Int32
+	var handlerSawCancelled atomic.Bool
+	if _, err := eventBus.Subscribe(events.MessageQueueStatusChanged, func(handlerCtx context.Context, event *bus.Event) error {
+		if handlerCtx.Err() != nil {
+			handlerSawCancelled.Store(true)
+		}
+		data, _ := event.Data.(map[string]interface{})
+		if taskID, _ := data["task_id"].(string); taskID == "task-notify-detach" {
+			saw.Add(1)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+
+	// Replace notifier with one that forces a cancelled ctx into publish,
+	// simulating client disconnect between commit and notify.
+	repo.SetTaskQueuePurgeNotifier(func(_ context.Context, taskID string) {
+		cancelled, cancel := context.WithCancel(context.Background())
+		cancel()
+		svc.publishTaskQueueStatusEvent(cancelled, taskID, "")
+	})
+
+	if _, err := svc.messageQueue.QueueMessage(ctx, "session-notify-detach", "task-notify-detach", "queued", "", "user", false, nil); err != nil {
+		t.Fatalf("QueueMessage: %v", err)
+	}
+	if err := repo.ArchiveTask(ctx, "task-notify-detach"); err != nil {
+		t.Fatalf("ArchiveTask: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for saw.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if saw.Load() == 0 {
+		t.Fatal("expected message.queue.status_changed when notify publish uses cancelled ctx")
+	}
+	if handlerSawCancelled.Load() {
+		t.Fatal("handler received cancelled context; publishTaskQueueStatusEvent must detach")
+	}
+}

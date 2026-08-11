@@ -115,6 +115,10 @@ func (s *Service) publishTaskQueueStatusEvent(ctx context.Context, taskID, sessi
 	if s.eventBus == nil || taskID == "" {
 		return
 	}
+	// Lifecycle purge notifies after Archive/Delete commit on the request ctx.
+	// Detach so a client disconnect cannot cancel projector recount (which would
+	// leave queued_prompt_count stale on every live sidebar).
+	ctx = context.WithoutCancel(ctx)
 	eventData := map[string]interface{}{
 		"task_id": taskID,
 	}
