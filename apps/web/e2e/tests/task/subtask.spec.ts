@@ -73,6 +73,7 @@ test.describe("Subtask basics", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     // Create a task with an agent so we have a session to navigate to
     const task = await apiClient.createTaskWithAgent(
@@ -83,6 +84,7 @@ test.describe("Subtask basics", () => {
         description: "/e2e:simple-message",
         workflow_id: seedData.workflowId,
         repository_ids: [seedData.repositoryId],
+        executor_profile_id: seedData.worktreeExecutorProfileId,
       },
     );
 
@@ -115,6 +117,23 @@ test.describe("Subtask basics", () => {
     const titleInput = testPage.getByTestId("subtask-title-input");
     await expect(titleInput).toBeVisible({ timeout: 5_000 });
     await expect(titleInput).toHaveValue(/Subtask Parent \/ Subtask \d+/);
+
+    const parentBranchBadge = dialog.getByText("Same branch as current session", { exact: true });
+    await expect(parentBranchBadge).toBeVisible();
+    await expect(dialog.getByTestId("subtask-workspace-mode-inherit")).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    await dialog.getByTestId("subtask-workspace-mode-new").click();
+    await expect(parentBranchBadge).toHaveCount(0);
+    await expect(dialog.getByTestId("repo-chip-trigger")).toBeVisible();
+    await expect(dialog.getByTestId("branch-chip-trigger")).toBeVisible();
+    await testPage.mouse.move(0, 0);
+    await dialog.getByTestId("subtask-title-input").click();
+    await expect(testPage.getByRole("tooltip")).toHaveCount(0);
+    await prCapture.screenshot("desktop-subtask-isolated-workspace", {
+      caption: "Desktop New Subtask dialog with isolated workspace controls",
+    });
 
     // Fill prompt and submit
     const promptInput = testPage.getByTestId("subtask-prompt-input");
