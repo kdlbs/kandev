@@ -1,6 +1,7 @@
 ---
 status: approved
 created: 2026-07-21
+updated: 2026-08-11
 owner: kandev
 ---
 
@@ -14,7 +15,7 @@ Kandev has useful app-wide state, but it is scattered through route headers. A s
 
 - Non-phone viewports render one persistent **24 px**, in-flow bottom status bar in the route-content column. Where the global sidebar is visible, the bar begins at the sidebar's right edge and tracks its expanded, collapsed, and resized width; the sidebar itself continues to the bottom of the viewport. Where the sidebar is hidden, the bar fills the available app width. Desktop uses `full` density; tablet uses `compact` density.
 - Phone renders no persistent second bottom bar. Native route controls open one global **Status** inset bottom drawer, so it does not collide with task bottom navigation. The drawer mirrors the saved bar order vertically (saved left sequence, then saved right sequence), has a fixed header, one internal scroll body, safe-area clearance, 44 px action rows, and returns focus to its trigger.
-- The production-default-off `features.appStatusBar` runtime toggle controls both general-purpose presentations. When disabled, neither the desktop/tablet bar nor ordinary phone Status entry points render. An active [WebSocket connectivity warning](ws-connectivity-warning.md) is the sole exception: it uses problem-only fallback chrome and a connection-only phone drawer without mounting the bar, metrics, or plugin contributions. Enabling or disabling the toggle requires a Kandev restart. It changes visibility only; it does not stop connections, metrics collection requested by other clients, or plugin execution.
+- The portable **Show status bar** preference in Settings > General > Appearance controls both general-purpose presentations and defaults on. Turning it off removes the desktop/tablet bar and ordinary phone Status entry points as soon as the shared Appearance save succeeds; no Kandev restart is required. An active [WebSocket connectivity warning](ws-connectivity-warning.md) is the sole visibility exception: it uses problem-only fallback chrome and a connection-only phone drawer without mounting the bar, metrics, or plugin contributions. The preference changes visibility only; it does not stop connections, metrics collection requested by other clients, or plugin execution.
 - Built-ins are limited to Kandev-owned state:
   - Canonical connection state and error from `state.connection.status` / `state.connection.error`, with a restrained semantic dot, the connected detail **Connected to Kandev**, accessible text, and readable failure detail.
   - Existing Kandev-host CPU/memory metrics, preserving enabled-metric order, formatting, thresholds, limits, and tooltips. The built-in surface does not render active-task, active-session, or executor metrics.
@@ -32,7 +33,7 @@ Kandev has useful app-wide state, but it is scattered through route headers. A s
 - `AppShell` owns viewport geometry: an `h-dvh` row with the sidebar beside a `min-w-0 flex-1` route/status column. That column contains a `min-h-0 flex-1` route region followed by the status surface. Shell-owned route roots use parent height and explicit local overflow rather than adding a second viewport height.
 - The status bar's left edge equals the sidebar layout edge after expand/collapse settles and throughout direct resize updates. Its top separator begins at that same edge; no status-bar strip or empty footer is rendered beneath the sidebar. When responsive CSS hides the sidebar, the route/status column occupies the full viewport width.
 - `--app-status-bar-height` is `1.5rem` on tablet/desktop and `0` on phone. It offsets only audited desktop `position: fixed` overlays; it is not global content padding. Phone bottom navigation and phone drop targets retain `bottom: 0`.
-- Exactly one general-purpose presentation mounts at once: bar on tablet/desktop, drawer contents only while the phone drawer is open. This prevents duplicate plugin effects and metrics subscriptions at breakpoints. Disabling `features.appStatusBar` mounts neither general-purpose presentation; a connection-only warning drawer may mount under the exception above.
+- Exactly one general-purpose presentation mounts at once: bar on tablet/desktop, drawer contents only while the phone drawer is open. This prevents duplicate plugin effects and metrics subscriptions at breakpoints. Turning off **Show status bar** mounts neither general-purpose presentation; a connection-only warning drawer may mount under the exception above.
 - Standard mobile headers, Home utility menu, task bottom navigation, Settings mobile menu, and Office topbar expose Status. A full-bleed plugin route (`topbar: false`) owns its chrome and must mount `AppStatusDrawerTrigger` if it wants status access.
 
 ## Plugin slots
@@ -59,9 +60,9 @@ The existing setting is the first gate. If disabled, no status-surface metrics s
 
 ## Data, API, and persistence
 
-The surface reads existing Zustand connection, active-context, user-settings, system-metrics, and feature state. `features.appStatusBar` is a default-off, restart-required runtime flag exposed through the existing Feature Toggles page; `KANDEV_FEATURES_APP_STATUS_BAR` takes precedence and locks the control when set explicitly. The E2E profile enables it only for browser coverage. The phone drawer's open state is presentation-local and is not persisted. Existing `show_in_topbar` user-setting persistence remains authoritative.
+The surface reads existing Zustand connection, active-context, user-settings, and system-metrics state. The backend-owned user settings JSON is authoritative for the portable top-level `app_status_bar_enabled` field. Settings > General > Appearance exposes it as **Show status bar**. An absent stored value or an initial compatibility payload that omits the field means `true`; omission in a PATCH or partial live update leaves the current value unchanged, and an explicit `false` is preserved. The phone drawer's open state is presentation-local and is not persisted. Existing `show_in_topbar` user-setting persistence remains authoritative for metrics visibility.
 
-The existing backend-owned user settings JSON stores the metrics display preference and portable layout:
+The existing backend-owned user settings JSON stores visibility, the metrics display preference, and the portable layout:
 
 ```ts
 type SystemMetricsDisplay = {
@@ -73,11 +74,19 @@ type AppStatusBarOrder = {
   left_item_ids: string[];
   right_item_ids: string[];
 };
+
+type UserSettingsStatusSurface = {
+  app_status_bar_enabled: boolean;
+  system_metrics_display: SystemMetricsDisplay;
+  app_status_bar_order: AppStatusBarOrder;
+};
 ```
 
-The metrics field remains `system_metrics_display`; an absent `simplified` value means `false` so existing users retain the detailed presentation. The layout field name is `app_status_bar_order`. Omission keeps the existing value and an absent value uses the default order: connection plus left-slot registrations, flexible spacer, metrics plus right-slot registrations. Built-ins have reserved stable identities. A plugin identity is derived from its plugin ID, original slot, and zero-based registration ordinal within that plugin and slot; the serialized ID is host-owned and opaque to plugins. Temporarily unavailable identities remain stored but are not rendered, so a disabled plugin or hidden metrics cluster returns to its saved position. A newly seen identity appends to its default side. Successful PATCHes survive frontend/backend restarts and propagate through `user.settings.updated`; last successful write wins across clients. See [ADR-2026-07-21-portable-status-bar-order](../../decisions/2026-07-21-portable-status-bar-order.md).
+The visibility field name is `app_status_bar_enabled` and defaults to `true` when absent so promotion makes the shipped surface available to existing and new users. The metrics field remains `system_metrics_display`; an absent `simplified` value means `false` so existing users retain the detailed presentation. The layout field name is `app_status_bar_order`. Omission keeps each existing value, and an absent order uses the default order: connection plus left-slot registrations, flexible spacer, metrics plus right-slot registrations. Built-ins have reserved stable identities. A plugin identity is derived from its plugin ID, original slot, and zero-based registration ordinal within that plugin and slot; the serialized ID is host-owned and opaque to plugins. Temporarily unavailable identities remain stored but are not rendered, so a disabled plugin or hidden metrics cluster returns to its saved position. A newly seen identity appends to its default side. Successful PATCHes survive frontend/backend restarts and propagate through `user.settings.updated`; last successful write wins across clients. See [ADR-2026-07-21-portable-status-bar-order](../../decisions/2026-07-21-portable-status-bar-order.md) and [ADR-2026-08-11-user-owned-status-bar-visibility](../../decisions/2026-08-11-user-owned-status-bar-visibility.md).
 
-No new relational schema, endpoint, WebSocket action, plugin manifest field, or plugin protocol is added. The existing user-settings PATCH/event contracts carry the order, and the existing runtime-flags persistence and `/api/v1/features` response carry the visibility setting.
+The former runtime identities `features.appStatusBar` and `KANDEV_FEATURES_APP_STATUS_BAR` are retired and never reused. Existing unknown override rows remain inert; no install-wide value is migrated into a per-user preference, and the retired environment variable has no effect. The `/api/v1/features` response no longer includes `appStatusBar`.
+
+No new relational schema, endpoint, WebSocket action, plugin manifest field, or plugin protocol is added. The existing user-settings PATCH, boot payload, and `user.settings.updated` event carry visibility and order.
 
 The only public API addition is `registerComponent("app-status-bar-left" | "app-status-bar-right", Component)` with the exact slot props above. Plugin registration ownership, enable/disable lifecycle, and error isolation reuse the existing registry.
 
@@ -90,6 +99,7 @@ The only public API addition is `registerComponent("app-status-bar-left" | "app-
 - If Status drawer closes during a metrics update or breakpoint changes, the inactive presentation unmounts and releases only its own ref-counted subscription.
 - Invalid, duplicate, or temporarily unavailable saved item identities never mount duplicate UI. The host normalizes active items once and retains unavailable identities for later plugin re-enable.
 - If an order write fails after the standard user-settings retries, the UI restores the last confirmed order and reports the save failure; it does not create a browser-storage fallback.
+- If a visibility save fails, the last confirmed surface remains active and Appearance stays dirty and retryable; the frontend does not invent a browser-storage fallback.
 
 ## Accessibility
 
@@ -105,7 +115,7 @@ Visual interaction is a clean Kandev adaptation of Orca's public status-bar idea
 
 ## Scenarios
 
-- **GIVEN** the feature is enabled where the global sidebar is visible, **WHEN** a route opens or the sidebar finishes expanding or collapsing, **THEN** one 24 px app status bar begins at the sidebar's right edge, ends at the viewport's right edge, and the sidebar continues to the viewport bottom without a new page scrollbar.
+- **GIVEN** **Show status bar** is on or has never been stored where the global sidebar is visible, **WHEN** a route opens or the sidebar finishes expanding or collapsing, **THEN** one 24 px app status bar begins at the sidebar's right edge, ends at the viewport's right edge, and the sidebar continues to the viewport bottom without a new page scrollbar.
 - **GIVEN** an expanded sidebar and visible status bar, **WHEN** the user resizes the sidebar, **THEN** the bar's left edge follows the sidebar layout edge while its right edge remains at the viewport edge.
 - **GIVEN** a non-phone viewport where responsive layout hides the global sidebar, **WHEN** the route opens, **THEN** the 24 px status bar spans the available viewport width.
 - **GIVEN** metrics preference enabled, **WHEN** a desktop/tablet status bar mounts, **THEN** existing Kandev-host metrics appear there, task/session/executor metrics do not, and no route header still renders metrics.
@@ -114,9 +124,10 @@ Visual interaction is a clean Kandev adaptation of Orca's public status-bar idea
 - **GIVEN** the user selects **Simplified metrics** and saves Appearance settings, **WHEN** host metrics render in the desktop/tablet status bar or pre-status-bar topbar fallback, **THEN** each enabled metric shows its icon and formatted value without a host marker or percentage meter bar, and the choice survives reload.
 - **GIVEN** the simplified metrics preference, **WHEN** a phone user opens Status, **THEN** the metrics row shows the same icon-and-value presentation without a host marker or percentage meter bar.
 - **GIVEN** metrics preference disabled, or a phone Status drawer closed, **WHEN** the app runs, **THEN** no system-metrics WebSocket subscription is held by this feature.
-- **GIVEN** the feature is enabled for a phone user, **WHEN** they choose Status from a native entry point, **THEN** the drawer shows the same built-ins and plugin regions; dismissing it restores focus and leaves no persistent status bar.
-- **GIVEN** an administrator disables **App status bar** in Feature Toggles and restarts Kandev, **WHEN** a route renders without a WebSocket warning, **THEN** the bar/drawer and native Status triggers are absent while the rest of the shell remains available.
-- **GIVEN** App status bar is disabled, **WHEN** a WebSocket warning becomes active, **THEN** only the problem-only fallback defined by [WebSocket connectivity warning](ws-connectivity-warning.md) appears; metrics and plugin contributions remain unmounted.
+- **GIVEN** **Show status bar** is on for a phone user, **WHEN** they choose Status from a native entry point, **THEN** the drawer shows the same built-ins and plugin regions; dismissing it restores focus and leaves no persistent status bar.
+- **GIVEN** a user turns off **Show status bar** and saves Appearance, **WHEN** the save succeeds, **THEN** the bar/drawer and ordinary native Status triggers disappear immediately, remain absent after reload and on another client, and no restart is required.
+- **GIVEN** **Show status bar** is off, **WHEN** the user turns it on and saves, **THEN** the correct responsive presentation becomes available immediately without changing metrics or saved item order.
+- **GIVEN** **Show status bar** is off, **WHEN** a WebSocket warning becomes active, **THEN** only the problem-only fallback defined by [WebSocket connectivity warning](ws-connectivity-warning.md) appears; metrics and plugin contributions remain unmounted.
 - **GIVEN** a plugin registered for either status slot, **WHEN** it enables or disables, **THEN** its contribution appears or disappears without reload in the active presentation. A failed contribution does not suppress a following healthy one after registrations change.
 - **GIVEN** a desktop/tablet bar, **WHEN** the user holds Cmd/Ctrl and mouse-drags a built-in or plugin contribution across another item or the spacer, **THEN** the item moves horizontally, normal click activation is suppressed only after a drag begins, and the new side/order survives reload and backend restart.
 - **GIVEN** a modified mouse press begins on status text, **WHEN** the pointer crosses the drag threshold, **THEN** the item enters its dragging state without selecting text in the bar.
@@ -132,7 +143,9 @@ Visual interaction is a clean Kandev adaptation of Orca's public status-bar idea
 - Per-metric label controls, per-breakpoint metrics styles, or changes to which metrics are collected.
 - Broad global fixed-position padding; only audited desktop overlays receive the height offset.
 - Changing the sidebar's existing snap-and-overlay animation behavior or adding a second sidebar-width state source.
+- An install-wide status-bar kill switch, runtime feature toggle, environment override, or migration from the former install-wide value into individual user preferences.
 
-## Implementation plan
+## Implementation plans
 
-[App status bar plan](../../plans/app-status-bar/plan.md)
+- [Original App status bar plan](../../plans/app-status-bar/plan.md)
+- [Status bar Appearance setting promotion plan](../../plans/app-status-bar-appearance-setting/plan.md)
