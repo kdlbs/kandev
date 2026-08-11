@@ -630,15 +630,27 @@ Mattermost-webapp model), not iframes. The full contract lives in
 - **Kanban card contributions:** `registerTaskMenuAction({ id, label, icon?,
   group: "edit", visible?, run })` adds an item to the kanban card's `Edit`
   submenu (the flat `Edit` item becomes `Edit > Edit task` once any plugin
-  registers one); `run(context)` receives `{ workspaceId, taskId, taskTitle,
-  workflowStepId, presentation }`, and a rejected `run` is caught and logged
-  without blocking the menu from closing. `registerComponent("task-card-indicators",
+  registers one; the sidebar task row's context menu has no `Edit` submenu, so
+  group `"edit"` only ever renders on the card); `run(context)` receives
+  `{ workspaceId, taskId, taskTitle, workflowStepId, presentation }`, and a
+  rejected `run` is caught and logged without blocking the menu from closing.
+  Group `"primary"` renders as a flat, top-level item in both the kanban card
+  menu (between "Move to"/"Send to workflow" and "Link") and the sidebar task
+  row's context menu (immediately before "Link", which has no "Move
+  to"/"Send to workflow" submenu ahead of it there); visibility filtering,
+  registration order, and `run()`/error handling are identical across both
+  surfaces, and the sidebar menu passes `presentation: "desktop"`.
+  `registerComponent("task-card-indicators",
   C)` renders `C` beside the PR status icon on every kanban card, receiving
   `{ taskId, workspaceId, workflowStepId }` as `slotProps`.
   `registerComponent("task-card-tags", C)` renders `C` in its own row on every
   kanban card (below the badges row), receiving the same
   `{ taskId, workspaceId, workflowStepId }` shape — for a contribution too wide
   for the cramped title-row `task-card-indicators` spot, e.g. a row of tag chips.
+  `registerComponent("task-row-tags", C)` renders `C` on the sidebar task row
+  and the `/tasks` list row — the same read-only contribution for the
+  listing surfaces a kanban card never reaches — receiving
+  `{ taskId, workspaceId, workflowStepId, surface: "sidebar" | "task-list" }`.
 - **`host.storage`:** authenticated, per-user key/value storage
   (`get`/`set`/`delete`/`list`/`subscribe`), backed by the `plugin_user_state`
   table (separate from the plugin-backend-only `plugin_state` table — no gRPC/proto
@@ -941,6 +953,27 @@ complete.
   render, **WHEN** that card renders, **THEN** the card's title and its other
   slot components (e.g. `"task-card-indicators"`) still render, isolated by
   the existing per-registration error boundary.
+
+- **GIVEN** a plugin registers a component for `"task-row-tags"`, **WHEN** a
+  sidebar task row or `/tasks` list row renders, **THEN** that component
+  mounts on the row, receiving
+  `{ taskId, workspaceId, workflowStepId, surface }` with `surface` set to
+  `"sidebar"` or `"task-list"` to match the listing it renders in. **GIVEN**
+  no plugin is registered for the slot, **WHEN** a row renders, **THEN** no
+  extra DOM node appears. **GIVEN** a `"task-row-tags"` component throws
+  during render, **WHEN** that row renders, **THEN** the rest of the row
+  still renders, isolated by the existing per-registration error boundary.
+
+- **GIVEN** a plugin registers a `registerTaskMenuAction` with
+  `group: "primary"`, **WHEN** a user opens the sidebar task row's context
+  menu for a single (non-bulk-selected) task, **THEN** the action renders as
+  a flat item immediately before "Link", using the same visibility filtering
+  and `run()`/error handling as the kanban card menu's `"primary"` group.
+  **GIVEN** the same registration, **WHEN** the context menu opens for a
+  multi-task selection, **THEN** the action does not render (single-task
+  actions are hidden in the bulk menu). **GIVEN** no active workspace,
+  **WHEN** the sidebar context menu opens, **THEN** no `"primary"` group
+  entries render, since `PluginTaskMenuContext.workspaceId` is non-nullable.
 
 ## Out of scope
 

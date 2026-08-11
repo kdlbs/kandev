@@ -215,6 +215,7 @@ to strings, but an unmounted name renders nowhere.
 | plugin-settings | Top of this plugin's Settings > Plugins page | { pluginId, status }; owner-scoped to the plugin being viewed |
 | task-card-indicators | Kanban card, beside the PR status icon | { taskId, workspaceId, workflowStepId } |
 | task-card-tags | Kanban card, its own row below the badges row | { taskId, workspaceId, workflowStepId } |
+| task-row-tags | Sidebar task row and `/tasks` list row (the task-card-tags counterpart for compact listings) | { taskId, workspaceId, workflowStepId, surface: "sidebar" \| "task-list" } |
 
 AppStatusBarSlotProps is { placement, presentation, density, pathname,
 activeWorkspaceId, activeTaskId, activeSessionId }. Desktop presentation is a
@@ -660,18 +661,27 @@ Host reader because event queues are bounded and delivery is best-effort.
 ### 6. Kanban-aware contribution
 
 `registerTaskMenuAction` adds an item to the kanban card's context/dropdown
-menu — group `"edit"` nests it inside the `Edit` submenu, group `"primary"`
-renders it as a flat, top-level item positioned between the "Move
-to"/"Send to workflow" submenus and the "Link" submenu.
-`task-card-indicators` (see the named slots table) is the matching read-only
-surface, rendered beside the PR status icon on every card. `task-card-tags`
-is a sibling read-only surface with the same `slotProps` shape, mounted in its
-own row instead of that cramped title-row spot — reach for it when a
-contribution (e.g. a row of tag chips) needs its own width. Both
-`visible(context)` and `run(context)` receive the card's actual `presentation`:
-`"desktop"` on the desktop kanban and `"mobile"` on the phone kanban. Use it
-when an action needs to choose responsive behavior; the host supplies it
-through the card composition.
+menu and the sidebar task row's context menu — group `"edit"` nests it inside
+the card menu's `Edit` submenu (the sidebar menu has no `Edit` submenu), group
+`"primary"` renders it as a flat, top-level item in both surfaces: positioned
+between the "Move to"/"Send to workflow" submenus and the "Link" submenu on
+the card menu, and immediately before "Link" on the sidebar menu (which has
+no "Move to"/"Send to workflow" submenu ahead of it). `task-card-indicators`
+(see the named slots table) is the matching read-only surface, rendered
+beside the PR status icon on every card. `task-card-tags` is a sibling
+read-only surface with the same `slotProps` shape, mounted in its own row
+instead of that cramped title-row spot — reach for it when a contribution
+(e.g. a row of tag chips) needs its own width. `task-row-tags` is the same
+read-only contribution again, this time for the sidebar task tree and
+`/tasks` list rows where no kanban card renders at all; its `slotProps` add a
+`surface: "sidebar" | "task-list"` field. Register a tag-style contribution
+for `task-card-tags`, `task-row-tags`, and menu group `"primary"` together to
+keep it visible everywhere the same task appears, not just on the board.
+Both `visible(context)` and `run(context)` receive the actual `presentation`:
+`"desktop"` on the desktop kanban, `"mobile"` on the phone kanban, and always
+`"desktop"` from the sidebar menu (there is no separate mobile sidebar menu
+surface). Use it when an action needs to choose responsive behavior; the host
+supplies it through the card/row composition.
 
 ```js
 registry.registerTaskMenuAction({

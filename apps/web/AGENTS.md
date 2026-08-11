@@ -282,9 +282,9 @@ plugin leaks a stale registration.
   switches). `PluginTaskPanel` (`components/task/`) resolves the registration behind a
   `PluginErrorBoundary`; `mobileEnabled: true` also renders it via the phone bottom nav
   (`session-mobile-bottom-nav.tsx`) with `presentation: "mobile"`.
-- **Kanban card contributions:** `registerTaskMenuAction({ group: "edit", ... })` turns the flat
-  `Edit` item into an `Edit` submenu (`kanban-card-edit-submenu.tsx`);
-  `registerComponent("task-card-indicators", ...)` renders beside `PRTaskIcon` via `<PluginSlot/>`; `task-card-tags` renders in its own row below the badges (for contributions too wide for the title-row indicators spot, e.g. tag chips).
+- **Task contributions (kanban card, sidebar row, `/tasks` row):** `registerTaskMenuAction({ group: "edit", ... })` turns the flat
+  `Edit` item into an `Edit` submenu on the kanban card menu only (`kanban-card-edit-submenu.tsx`; the sidebar row's context menu has no `Edit` submenu). Group `"primary"` renders as a flat item in both the card menu (`kanban-card-menu-items.tsx`) and the sidebar row's context menu (`task-switcher-context-menu.tsx`), built by the shared `components/plugins/task-menu-actions.ts` helpers.
+  `registerComponent("task-card-indicators", ...)` renders beside `PRTaskIcon` via `<PluginSlot/>`; `task-card-tags` renders in its own row below the badges (for contributions too wide for the title-row indicators spot, e.g. tag chips) — mounted from `kanban-card-plugin-slots.tsx`. `task-row-tags` is the same read-only contribution for the denser sidebar task tree and `/tasks` list rows (`components/task/task-row-plugin-slots.tsx`), receiving an extra `surface: "sidebar" | "task-list"` field.
 - **`host.storage`:** authenticated per-user key/value storage (`lib/plugins/host-api.ts`), backed by
   `/api/plugins/{id}/user-state/...` (`docs/decisions/2026-08-01-per-user-plugin-storage.md`).
   `subscribe` (`lib/plugins/user-state-sync.ts`) wraps `registerWsHandler` with own-plugin filtering

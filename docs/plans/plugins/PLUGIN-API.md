@@ -365,7 +365,8 @@ interface PluginRegistry {
   // <PluginSlot name="..." slotProps={...}/>. Initial slots: "task-sidebar",
   // "settings-nav", "chat-input-actions", "chat-top-bar",
   // "main-top-bar", "app-status-bar-left", "app-status-bar-right",
-  // "plugin-settings", "task-card-indicators", and "task-card-tags".
+  // "plugin-settings", "task-card-indicators", "task-card-tags", and
+  // "task-row-tags".
   // "task-card-indicators" renders a small icon/badge beside the PR status
   // icon on every kanban card and forwards
   // `{ taskId, workspaceId, workflowStepId }` as `slotProps`. Not a closed
@@ -376,6 +377,12 @@ interface PluginRegistry {
   // same `{ taskId: string, workspaceId: string | null, workflowStepId: string | null }`
   // shape as `slotProps` (`workspaceId` is null with no active workspace, and
   // `workflowStepId` is null when the task has no workflow step assigned).
+  // "task-row-tags" is the same read-only contribution mounted on the
+  // denser task-listing rows instead of the kanban card — the sidebar task
+  // tree and the `/tasks` list. It forwards
+  // `{ taskId: string, workspaceId: string | null, workflowStepId: string | null, surface: "sidebar" | "task-list" }`
+  // as `slotProps`, where `surface` tells the component which listing it is
+  // rendering in.
   // "chat-input-actions" renders icon buttons in the chat composer toolbar
   // (beside the model picker, mic, and send) and forwards
   // `{ taskId, taskTitle, activeSessionId, sessionIds }` as `slotProps`.
@@ -430,8 +437,11 @@ interface PluginRegistry {
   registerTaskPanel(registration: TaskPanelRegistration): void;
 
   // Contributes an item to the kanban card's Edit submenu (group "edit") or
-  // a flat, top-level card menu item between "Move to"/"Send to workflow"
-  // and "Link" (group "primary"). See "Kanban card contributions" below.
+  // a flat, top-level menu item (group "primary"). Group "primary" renders
+  // in two surfaces: the kanban card menu, between "Move to"/"Send to
+  // workflow" and "Link"; and the sidebar task row's context menu,
+  // immediately before "Link" (that menu has no "Move to"/"Send to
+  // workflow" submenu ahead of it). See "Kanban card contributions" below.
   registerTaskMenuAction(registration: TaskMenuActionRegistration): void;
 
   // Contributes a client-side filter section to the kanban board's display
@@ -580,11 +590,14 @@ console, and the menu still closes either way (Radix's own close-on-select,
 independent of the async result).
 
 Group `"primary"` renders each visible action as its own flat, top-level menu
-item instead of nesting it under `Edit` — positioned between the "Move
-to"/"Send to workflow" submenus and the "Link" submenu. Visibility filtering,
-registration order, and `run()`/error handling are identical to the `"edit"`
-group; the two groups are independent lists (an action only ever belongs to
-one).
+item instead of nesting it under `Edit`. It renders in two surfaces: the
+kanban card menu, positioned between the "Move to"/"Send to workflow"
+submenus and the "Link" submenu; and the sidebar task row's context menu,
+positioned immediately before "Link" (that menu has no "Move to"/"Send to
+workflow" submenu ahead of it). Visibility filtering, registration order, and
+`run()`/error handling are identical to the `"edit"` group and identical
+across both surfaces; the two groups are independent lists (an action only
+ever belongs to one).
 
 `"task-card-indicators"` (documented above with the other slots) is the
 matching read-only surface: a small icon/badge rendered beside the PR status
@@ -595,6 +608,16 @@ context — same `{ taskId, workspaceId, workflowStepId }` shape — but mounted
 in its own row on the card instead of the cramped title row
 `"task-card-indicators"` shares with `PRTaskIcon`. Use it for a contribution
 that needs its own width, e.g. a row of tag chips.
+
+`"task-row-tags"` is the row-level counterpart to `"task-card-tags"` for the
+denser task-listing surfaces — the sidebar task tree and the `/tasks` list —
+where a kanban card doesn't render at all. It receives
+`{ taskId, workspaceId, workflowStepId, surface }`, where `surface` is
+`"sidebar"` or `"task-list"` so a component can adapt density if it needs to,
+though most contributions render the same chips either way. Register once for
+`"task-card-tags"` and `"task-row-tags"` (and once for `registerTaskMenuAction`
+group `"primary"`) to keep a tag-style contribution visible everywhere the
+same task appears, not just on the board.
 
 ### Task filters
 
@@ -656,6 +679,10 @@ defaults, or the bare component when the route opted out (`topbar: false`).
   `{ taskId, taskTitle, activeSessionId, sessionIds }`. `kanban-card-plugin-slots.tsx`
   hosts `task-card-indicators` beside `PRTaskIcon` and `task-card-tags` as its
   own row, both mounted from `kanban-card-content.tsx`'s `KanbanCardBody`.
+  `components/task/task-row-plugin-slots.tsx` hosts `task-row-tags` (the
+  `task-card-tags` counterpart for compact listing rows), mounted from
+  `task-item.tsx` (sidebar, `surface: "sidebar"`) and `rich-task-list-row.tsx`
+  (`/tasks`, `surface: "task-list"`, both the rich and compact row variants).
 - `components/task/dockview-shared.tsx` / `dockview-panel-content.tsx` /
   `dockview-desktop-layout.tsx`: the generic `"plugin-panel"` dockview
   component + `pluginPanelTab`, and `renderPanel`'s `"plugin-panel"` case
