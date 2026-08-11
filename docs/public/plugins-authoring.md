@@ -190,7 +190,7 @@ bookkeeping is host-internal; plugins do not call lifecycle methods.
 | registerWsHandler | registerWsHandler(action, handler(payload)); receives actions bridged from lib/ws | Active ui.bundle | Handler is removed on disable/uninstall; tolerate duplicate/replayed actions | registry.registerWsHandler("acme.updated", renderUpdate) |
 | registerKeybinding | registerKeybinding(id, handler(event)); id must be declared in ui.keybindings; users can override the effective combo | ui.bundle and ui.keybindings[] | Handler is removed on disable/uninstall; editable targets/core shortcuts win | registry.registerKeybinding("open-panel", () => host.openModal(...)) |
 | registerIntegrationSettings | One provider-owned settings component mounted inside Settings > Integrations | Active ui.bundle | Registration is exclusive by id and revoked on unload; host owns workspace selection and settings navigation | registry.registerIntegrationSettings({ id: "acme", ... }) |
-| registerRepositoryProvider | Provider-owned repository list/match/branches/inspect functions plus optional native `createChangeRequest` transport | ui.bundle and matching `repository_providers[]` id | Registration and in-flight callbacks are revoked on unload; host owns native task and Create PR UI | registry.registerRepositoryProvider({ id: "acme", ...provider }) |
+| registerRepositoryProvider | Provider-owned paged/searchable repository list, URL match/inspect, branches, and optional native `createChangeRequest` transport | ui.bundle and matching `repository_providers[]` id | Registration and in-flight callbacks are result-fenced on unload; host owns native task and Create PR UI | registry.registerRepositoryProvider({ id: "acme", ...provider }) |
 | registerTaskAction | Child action inside the task menu's native Link section | Active ui.bundle | Action is revoked on unload; host supplies current task/workspace and desktop/mobile presentation | registry.registerTaskAction({ id: "link-pr", placement: "link", ... }) |
 | registerReviewProvider | Normalized task reviews, workspace associations, unlink, and shared Review panel | ui.bundle and matching `repository_providers[]` id | Snapshots/subscriptions are owner-scoped and revoked on unload; host owns status chrome, indicators, unlink UI, and responsive Review placement | registry.registerReviewProvider({ id: "acme", ...reviews }) |
 | registerTaskPanel | { id, title, icon?, Component, mobileEnabled? }; adds a row to the task workspace's "+" (add panel) menu; Component receives { panelId, taskId, sessionId, presentation } | Active ui.bundle | Panel renders behind its own error boundary; slow/failed reloads preserve it, a ready generation missing it closes it, and disable/uninstall closes every owned instance | registry.registerTaskPanel({ id: "notes", title: "Notes", Component: NotesPanel }) |
@@ -199,7 +199,7 @@ bookkeeping is host-internal; plugins do not call lifecycle methods.
 | host.React / host.jsx | Shared React instance and React.createElement alias | Active ui.bundle | No cleanup; never bundle a second React/Radix runtime | const h = host.jsx |
 | host.store | Curated Zustand { getState, setState, subscribe } for the live app store | Active ui.bundle | Unsubscribe in destroy; setState mutates the whole SPA and is not a plugin database | const stop = host.store.subscribe(render) |
 | host.api.fetch / baseUrl | fetch(path, init?) is scoped to /api/plugins/<id>/...; baseUrl is the backend origin for split-origin deployments | Active ui.bundle; backend path must be a declared webhook when relayed | Abort/ignore requests after destroy; do not assume a webhook authenticates callers | host.api.fetch("webhooks/inbound", { method: "POST" }) |
-| host.api.invokeAction | Authenticated call to a declared action with host-verified workspace/task/session/repository selectors and bounded untrusted body | Matching manifest `actions[]` key/scope | Browser abort cancels the bounded plugin RPC; selectors are verified per call | host.api.invokeAction("reviews.get", { taskId }, { signal }) |
+| host.api.invokeAction | Authenticated call to a declared action with host-verified workspace/task/session/repository selectors and bounded untrusted body | Matching manifest `actions[]` key/scope | Browser abort cancels the bounded plugin RPC; safe domain statuses and `Retry-After` may be returned | host.api.invokeAction("reviews.get", { taskId }, { signal }) |
 | host.storage | Authenticated, per-user key/value storage: get(scope, scopeId, key, options?)/set(scope, scopeId, key, value, options?)/delete(scope, scopeId, key, options?)/list(scope, scopeId, options?) plus subscribe(filter, handler); no plugin backend required | capabilities.user_state: true | Reads and writes accept an AbortSignal; set/delete also accept writerId (appended to the host's per-tab id, not a replacement) for echo suppression; list returns every entry under the scope pair, unpaginated | host.storage.set("task", taskId, "note", value, { writerId: panelId, signal }) |
 | host.ui | Curated host instances: Alert*, Badge, Button, Card*, Checkbox, Dialog*, DropdownMenu*, Input, Label, Pagination*, ScrollArea, Select*, Separator, Sheet*, Skeleton, Spinner, Switch, Table*, Tabs*, Textarea, Tooltip*, RichTextEditor, RichTextReadOnly, plus Combobox, PageTopbar, TaskCreateDialog | Active ui.bundle | Host owns contexts/portals; render with host React and let modal/slot cleanup run | const Button = host.ui.Button |
 | host.theme | Current "light" or "dark" theme | Active ui.bundle | Read during render; subscribe through host/app patterns if theme-sensitive | host.theme === "dark" |
@@ -228,6 +228,12 @@ failures and requested changes are red, pending checks yellow, an outstanding
 review with passing checks sky blue, passing checks green, merged reviews
 purple, and neutral or draft reviews muted. Publish semantic state only; never
 send CSS classes or provider-selected colors.
+
+Repository listing callbacks receive optional `query`, opaque `cursor`, `limit`, and
+`signal` fields. Return `{ repositories, nextCursor }` for a page; returning an array
+remains compatible for small or older providers. Treat cursors as provider-owned opaque
+values, bind them to the original query, and stop emitting `nextCursor` when exhausted.
+Kandev follows pages and fails a repeated cursor instead of looping forever.
 
 The examples below were captured from an isolated packaged-plugin run. The
 provider data is fictional; the surrounding controls are the production
@@ -625,8 +631,11 @@ scope-selector combinations return 400; unauthenticated calls return 401.
 The host gives each action 15 seconds and cancels its RPC when the browser
 abandons the request. Pass the `AbortSignal` supplied to your UI calls, and in
 the backend check `ctx.Done()` before and during provider I/O. An action reply
-is capped at 1 MiB and may set only `Content-Type`, `Cache-Control`, or `ETag`;
-the host rejects redirects, cookies, and arbitrary response headers.
+is capped at 1 MiB. A zero response status means 200; explicit statuses from 200
+through 599 let the plugin report safe domain failures such as 400, 409, or 429.
+The response may set only `Content-Type`, `Cache-Control`, `ETag`, or `Retry-After`;
+the host rejects invalid statuses, redirects, cookies, arbitrary headers, and
+unexpected internal error text.
 
 ## Provider, task, review, and reference registrations
 

@@ -1,5 +1,7 @@
 import type {
   RepositoryInspection,
+  RepositoryProviderListResult,
+  RepositoryProviderPage,
   RepositoryProviderRegistration,
   ReviewProviderRegistration,
 } from "./types";
@@ -16,12 +18,16 @@ export function wrapRepositoryProviderLifecycle(
 ): RepositoryProviderRegistration {
   const wrapped: RepositoryProviderRegistration = {
     ...provider,
-    listRepositories: ({ workspaceId, signal }) =>
+    listRepositories: ({ workspaceId, query, cursor, limit, signal }) =>
       runAbortable(signal, (lifecycleSignal) =>
-        provider.listRepositories({ workspaceId, signal: lifecycleSignal }),
-      ).then((repositories) =>
-        repositories.map((repository) => bindRepositoryProvider(provider.id, repository)),
-      ),
+        provider.listRepositories({
+          workspaceId,
+          query,
+          cursor,
+          limit,
+          signal: lifecycleSignal,
+        }),
+      ).then((result) => bindRepositoryListResult(provider.id, result)),
     listBranches: ({ workspaceId, repository, signal }) =>
       runAbortable(signal, (lifecycleSignal) =>
         provider.listBranches({ workspaceId, repository, signal: lifecycleSignal }),
@@ -39,6 +45,21 @@ export function wrapRepositoryProviderLifecycle(
       );
   }
   return wrapped;
+}
+
+function bindRepositoryListResult(
+  providerId: string,
+  result: RepositoryProviderListResult,
+): RepositoryProviderPage | RepositoryInspection[] {
+  if (Array.isArray(result)) {
+    return result.map((repository) => bindRepositoryProvider(providerId, repository));
+  }
+  return {
+    ...result,
+    repositories: result.repositories.map((repository) =>
+      bindRepositoryProvider(providerId, repository),
+    ),
+  };
 }
 
 /** Provider identity is registration-owned, never trusted from plugin result data. */

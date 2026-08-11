@@ -12,6 +12,7 @@ func TestProtocolDeclaresAdditivePluginAndHostMethods(t *testing.T) {
 	assertServiceMethods(t, services.ByName("Plugin"), "HandleAction", "SearchEntityReferences", "AuthorizeEntityReference", "ResolveGitCredential", "GetGitCredentialBinding")
 	assertServiceMethods(t, services.ByName("Host"), "ListExecutorProfiles", "PreviewPluginOwnedTaskTree", "DeletePluginOwnedTaskTree")
 	assertMessageFields(t, "PluginActionRequest", "action_key", "context", "body")
+	assertMessageFields(t, "PluginActionResponse", "body", "headers", "status")
 	assertMessageFields(t, "VerifiedActionContext", "actor_id", "workspace_id", "task_id", "repository_id", "session_id", "head_branch")
 	assertMessageFields(t, "SearchEntityReferencesRequest", "source", "workspace_id", "query", "limit")
 	assertMessageFields(t, "AuthorizeEntityReferenceRequest", "source", "workspace_id", "purpose", "reference")

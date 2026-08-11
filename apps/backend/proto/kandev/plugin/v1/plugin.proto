@@ -162,6 +162,8 @@ message VerifiedActionContext {
 message PluginActionResponse {
   bytes body = 1;
   map<string, string> headers = 2;
+  // Final HTTP status. Zero preserves compatibility and means 200.
+  int32 status = 3;
 }
 
 message SearchEntityReferencesRequest {

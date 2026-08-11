@@ -229,7 +229,8 @@ type PluginOwnedTaskTreeHost interface {
 
 type PluginOwnedTaskTreeManager interface {
 	Preview(ctx context.Context, rootTaskID string) ([]Task, error)
-	// Delete removes descendants before their parent. A non-nil error may be
+	// Delete removes descendants before their parent and treats an absent root
+	// as an idempotent success. A non-nil error may be
 	// accompanied by deleted task ids when the backing store failed part-way;
 	// callers must reconcile those ids before retrying the remaining cleanup.
 	Delete(ctx context.Context, rootTaskID string) ([]string, error)

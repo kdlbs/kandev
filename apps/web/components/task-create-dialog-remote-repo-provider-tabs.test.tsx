@@ -7,6 +7,8 @@ import type {
   UseRemoteRepositoriesResult,
 } from "@/hooks/domains/integrations/use-remote-repositories";
 import { RemoteRepoChip } from "./task-create-dialog-remote-repo-chip";
+import { RemoteRepositoryProviderIcon } from "./task-create-dialog-remote-repo-provider-tabs";
+import { pluginRegistry } from "@/lib/plugins/registry";
 
 const AZURE_PROVIDER = "azure_devops" as const;
 const AZURE_PROVIDER_LABEL = "Azure DevOps";
@@ -57,7 +59,10 @@ const BITBUCKET_REPO: RemoteRepository = {
   private: true,
 };
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  pluginRegistry.unregisterPlugin("bitbucket-plugin");
+});
 
 function accessibleRepos(
   repos: RemoteRepository[],
@@ -95,6 +100,24 @@ function activateProvider(name: string) {
 }
 
 describe("RemoteRepoChip provider tabs", () => {
+  it("uses a registered provider icon in native repository surfaces", () => {
+    pluginRegistry.forPlugin("bitbucket-plugin").registerRepositoryProvider({
+      id: "bitbucket",
+      label: "Bitbucket",
+      icon: "bitbucket",
+      listRepositories: async () => [],
+      matchesURL: () => false,
+      listBranches: async () => [],
+      inspectURL: async () => null,
+    });
+
+    const { container } = render(<RemoteRepositoryProviderIcon provider="bitbucket" />);
+
+    expect(container.querySelector("svg")?.classList.contains("tabler-icon-brand-bitbucket")).toBe(
+      true,
+    );
+  });
+
   it("renders a registered-provider-style tab without requiring a built-in union member", () => {
     renderPicker(accessibleRepos([GITHUB_REPO, BITBUCKET_REPO], ["github", "bitbucket"]));
 

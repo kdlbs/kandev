@@ -33,6 +33,14 @@ documented camelCase JSON envelope (`workspaceId`, `taskId`, `repositoryId`). Ca
 may pass an `AbortSignal`; registry/provider teardown propagates it through the browser
 request and backend context.
 
+`PluginActionResponse.status` is an optional HTTP status projection. Zero keeps the
+legacy `200 OK`; otherwise the host accepts statuses from 200 through 599. This lets
+provider-neutral adapters preserve safe domain outcomes such as invalid input,
+authentication expiry, conflicts, and rate limits without turning them into transport
+failures. `Retry-After` joins the response-header allowlist for throttling responses.
+Invalid statuses fail closed as `502`, while plugin transport/runtime failures remain
+`503` and do not expose internal error text.
+
 `/api/plugins/:id/webhooks/:key` remains public only for provider callbacks/events.
 OAuth callbacks use signed, expiring, single-use state and PKCE.
 
@@ -42,6 +50,8 @@ Future plugins gain one reusable browser-to-plugin RPC seam without Kandev learn
 provider endpoints or payloads. Plugin authors declare each action up front and must
 design against explicit resource scope and bounded input/output. The host gains a
 security-critical authorization boundary, but no provider-specific handler branch.
+Callers can distinguish retryable and user-correctable domain outcomes while the host
+continues to redact unexpected implementation failures.
 
 ## Alternatives Considered
 

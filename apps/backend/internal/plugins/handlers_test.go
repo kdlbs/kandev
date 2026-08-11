@@ -791,6 +791,47 @@ func TestActionHandlerEnforcesBodyResponseAndHeaderLimits(t *testing.T) {
 	}
 }
 
+func TestActionHandlerPreservesValidatedDomainStatusAndRetryHeader(t *testing.T) {
+	invoker := &recordingActionInvoker{response: &pluginsdk.PluginActionResponse{
+		Status: http.StatusTooManyRequests,
+		Headers: map[string]string{
+			"Content-Type": "application/json",
+			"ETag":         `"review-42"`,
+			"Retry-After":  "30",
+		},
+		Body: []byte(`{"error":"rate_limited"}`),
+	}}
+	router, svc := newActionTestRouter(t, invoker)
+	if _, err := svc.Install(t.Context(), actionPackage(t, "kandev-plugin-actions", "declared", "workspace", 16)); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	response := doAuthenticatedActionRequest(
+		router,
+		"/api/plugins/kandev-plugin-actions/actions/declared",
+		`{"workspaceId":"workspace-1","body":{}}`,
+	)
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429, body=%s", response.Code, response.Body.String())
+	}
+	if got := response.Header().Get("Retry-After"); got != "30" {
+		t.Fatalf("Retry-After = %q, want 30", got)
+	}
+	if got := response.Header().Get("ETag"); got != `"review-42"` {
+		t.Fatalf("ETag = %q, want review-42", got)
+	}
+
+	invoker.response.Status = http.StatusContinue
+	invalid := doAuthenticatedActionRequest(
+		router,
+		"/api/plugins/kandev-plugin-actions/actions/declared",
+		`{"workspaceId":"workspace-1","body":{}}`,
+	)
+	if invalid.Code != http.StatusBadGateway {
+		t.Fatalf("invalid plugin status = %d, want 502, body=%s", invalid.Code, invalid.Body.String())
+	}
+}
+
 func TestActionHandlerTimeoutCancelsPluginCallAndLifecycleRevokesAccess(t *testing.T) {
 	invoker := &recordingActionInvoker{}
 	router, svc := newActionTestRouter(t, invoker)

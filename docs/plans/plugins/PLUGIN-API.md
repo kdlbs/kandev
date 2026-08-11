@@ -274,6 +274,12 @@ When both session and repository selectors are present, the host resolves the ex
 non-empty worktree branch and exposes it only in the backend verified action context.
 Resource selectors never become part of the untrusted action body.
 
+An action handler may return an HTTP status from 200 through 599; zero preserves the
+legacy 200 response. The host forwards only safe response headers (`Content-Type`,
+`Cache-Control`, `ETag`, and `Retry-After`). Invalid statuses become 502, while
+transport/runtime errors become 503 without exposing internal error text. Plugins
+should use explicit statuses only for safe domain outcomes that callers can act on.
+
 `host.ui` contents: shadcn primitives (Accordion*, Alert*, Badge, Button,
 Card*, Checkbox, Collapsible*, Dialog*, DropdownMenu*, Empty*, Input, Kbd,
 KbdGroup, Label, Pagination*, Popover*, Progress, ScrollArea, Select*,
@@ -691,8 +697,14 @@ interface RepositoryProviderRegistration {
   icon?: string;
   listRepositories(context: {
     workspaceId: string;
+    /** Optional server-side search text. */
+    query?: string;
+    /** Opaque cursor returned by this provider for the same query. */
+    cursor?: string;
+    /** Requested page size; a provider may return fewer items. */
+    limit?: number;
     signal: AbortSignal;
-  }): Promise<RepositoryInspection[]>;
+  }): Promise<RepositoryInspection[] | RepositoryProviderPage>;
   matchesURL(url: string): boolean;
   listBranches(context: {
     workspaceId: string;
@@ -720,8 +732,15 @@ interface RepositoryProviderRegistration {
   }): Promise<RepositoryChangeRequestCreateResult>;
 }
 
+interface RepositoryProviderPage {
+  repositories: RepositoryInspection[];
+  nextCursor?: string;
+}
+
 // The host binds every returned RepositoryInspection.providerId to the
 // registration's manifest-owned id; result data cannot spoof another namespace.
+// Legacy arrays remain valid. The host follows page cursors and rejects a cursor
+// repeated by a broken provider instead of looping forever.
 interface PluginHostRepository {
   id: string;
   workspace_id: string;

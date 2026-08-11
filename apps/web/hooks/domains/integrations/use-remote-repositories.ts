@@ -73,6 +73,7 @@ async function loadRemoteRepositories(
   workspaceId: string,
   pluginProviders: PluginRepositoryProviderRegistration[],
   signal: AbortSignal,
+  query: string,
 ): Promise<RemoteRepositoryLoad> {
   const githubRequest = workspaceId
     ? fetchAccessibleRepos({ workspaceId, limit: 100 })
@@ -118,11 +119,7 @@ async function loadRemoteRepositories(
     ...(workspaceId
       ? pluginProviders.map((provider) => ({
           provider: provider.id,
-          load: provider
-            .listRepositories({ workspaceId, signal })
-            .then((repositories) =>
-              repositories.flatMap((repository) => toRemoteRepository(provider.id, repository)),
-            ),
+          load: listAllPluginRepositories(provider, workspaceId, query, signal),
         }))
       : []),
   ];
@@ -134,6 +131,37 @@ async function loadRemoteRepositories(
     repos: results.flatMap((result) => (result.status === "fulfilled" ? result.value : [])),
     availableProviders,
   };
+}
+
+async function listAllPluginRepositories(
+  provider: PluginRepositoryProviderRegistration,
+  workspaceId: string,
+  query: string,
+  signal: AbortSignal,
+): Promise<RemoteRepository[]> {
+  const repositories: RemoteRepository[] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | undefined;
+  do {
+    const result = await provider.listRepositories({
+      workspaceId,
+      query,
+      cursor,
+      limit: 100,
+      signal,
+    });
+    const page = Array.isArray(result) ? { repositories: result } : result;
+    repositories.push(
+      ...page.repositories.flatMap((repository) => toRemoteRepository(provider.id, repository)),
+    );
+    cursor = page.nextCursor;
+    if (cursor) {
+      if (seenCursors.has(cursor))
+        throw new Error("Repository provider pagination did not advance");
+      seenCursors.add(cursor);
+    }
+  } while (cursor);
+  return repositories;
 }
 
 function toRemoteRepository(provider: string, value: unknown): RemoteRepository[] {
@@ -183,7 +211,7 @@ export function useRemoteRepositories(workspaceId: string): UseRemoteRepositorie
     setError(null);
     setLoading(true);
     const controller = new AbortController();
-    loadRemoteRepositories(workspaceId, pluginProviders, controller.signal)
+    loadRemoteRepositories(workspaceId, pluginProviders, controller.signal, query)
       .then((result) => {
         if (cancelled) return;
         setAllRepos(result.repos);
@@ -199,7 +227,7 @@ export function useRemoteRepositories(workspaceId: string): UseRemoteRepositorie
       cancelled = true;
       controller.abort();
     };
-  }, [workspaceId, pluginProviders]);
+  }, [workspaceId, pluginProviders, query]);
 
   const repos = useMemo(() => {
     const needle = query.trim().toLowerCase();

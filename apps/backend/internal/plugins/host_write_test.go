@@ -287,6 +287,20 @@ func TestPluginHost_PluginOwnedTaskTreeRejectsUserOwnedRoot(t *testing.T) {
 	}
 }
 
+func TestPluginHost_PluginOwnedTaskTreeDeleteIsIdempotentAfterRootDeletion(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+	d.tasks.tasksByID = map[string]*taskmodels.Task{}
+
+	deleted, err := d.host.PluginOwnedTaskTrees().Delete(context.Background(), "already-deleted")
+
+	if err != nil {
+		t.Fatalf("Delete() unexpected error for an absent root: %v", err)
+	}
+	if len(deleted) != 0 || len(d.taskWriter.deletedIDs) != 0 {
+		t.Fatalf("Delete() = %v, writer deleted=%v, want idempotent no-op", deleted, d.taskWriter.deletedIDs)
+	}
+}
+
 func TestPluginHost_PluginOwnedTaskTreeRejectsDeleteWithAdoptedDescendants(t *testing.T) {
 	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
 	root := &taskmodels.Task{ID: "root", WorkspaceID: "ws-1", Metadata: map[string]any{taskSourceMetadataKey: "plugin:p1"}}

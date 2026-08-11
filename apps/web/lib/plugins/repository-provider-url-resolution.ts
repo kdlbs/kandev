@@ -52,5 +52,12 @@ export async function inspectRegisteredRepositoryURL(context: {
         .join(", ")}`,
     );
   }
-  return matches[0] ?? null;
+  if (matches[0]) return matches[0];
+  const failure = inspected.find(
+    (result): result is PromiseRejectedResult => result.status === "rejected",
+  );
+  if (failure) {
+    throw failure.reason instanceof Error ? failure.reason : new Error(String(failure.reason));
+  }
+  return null;
 }

@@ -15,7 +15,6 @@ import type {
   NavItem,
   IntegrationSettingsRegistration,
   PluginRegistry,
-  PluginTaskFilterRegistrationKey,
   PluginRouteOptions,
   RepositoryProviderRegistration,
   ReviewProviderRegistration,
@@ -32,72 +31,35 @@ import {
   wrapRepositoryProviderLifecycle,
   wrapReviewProviderLifecycle,
 } from "./registry-provider-lifecycle";
+import { PluginWorkLifecycle } from "./registry-work-lifecycle";
+import { PluginProviderOwnership } from "./registry-provider-ownership";
+import type {
+  PluginIntegrationSettingsRegistration,
+  PluginKeybindingHandler,
+  PluginLifecycleSnapshot,
+  PluginLifecycleStatus,
+  PluginNavRegistration,
+  PluginRepositoryProviderRegistration,
+  PluginReviewProviderRegistration,
+  PluginRouteRegistration,
+  PluginSlotRegistration,
+  PluginTaskActionRegistration,
+  PluginTaskFilterRegistration,
+  PluginTaskMenuActionRegistration,
+  PluginTaskPanelRegistration,
+  RouteRegistration,
+} from "./registry-registration-types";
+export * from "./registry-registration-types";
 
 interface Owned<T> {
   pluginId: string;
   value: T;
 }
 
-/** A handler bound via `PluginRegistry.registerKeybinding`. */
-export interface PluginKeybindingHandler {
-  /** Plugin-local keybinding id (matches `ui.keybindings[].id`). */
-  id: string;
-  handler: (event: KeyboardEvent) => void;
-}
-
-export interface RouteRegistration {
-  path: string;
-  Component: ComponentType;
-  options?: PluginRouteOptions;
-}
-
-/** Route registration plus the owning pluginId — what `getRoutes()` returns. */
-export interface PluginRouteRegistration extends RouteRegistration {
-  pluginId: string;
-}
-
-/** A repository provider paired with the plugin that currently owns it. */
-export interface PluginRepositoryProviderRegistration extends RepositoryProviderRegistration {
-  pluginId: string;
-}
-
-/** A task action paired with the plugin that registered it. */
-export interface PluginTaskActionRegistration extends TaskActionRegistration {
-  pluginId: string;
-}
-
-/** A review provider paired with the plugin that currently owns it. */
-export interface PluginReviewProviderRegistration extends ReviewProviderRegistration {
-  pluginId: string;
-}
-
-/** Integration settings contribution paired with its active plugin owner. */
-export interface PluginIntegrationSettingsRegistration extends IntegrationSettingsRegistration {
-  pluginId: string;
-}
-
-/**
- * Nav item plus the owning pluginId — what `getNavRegistrations()` returns.
- * Navigation needs the owner because `NavItem.id` is plugin-local: two plugins
- * may register the same id, and the navigation manifest builds its React keys
- * from it (`lib/navigation/plugin-destinations.ts`).
- */
-export interface PluginNavRegistration extends NavItem {
-  pluginId: string;
-}
-
 interface SlotRegistration {
   registrationId: string;
   orderingId: string;
   slot: string;
-  Component: SlotComponent;
-}
-
-/** Slot component plus its stable registry identity and owning plugin. */
-export interface PluginSlotRegistration {
-  registrationId: string;
-  orderingId: string;
-  pluginId: string;
   Component: SlotComponent;
 }
 
@@ -116,40 +78,6 @@ const CORE_INTEGRATION_SETTINGS_IDS = new Set([
   "slack",
 ]);
 const INTEGRATION_SETTINGS_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const REPOSITORY_PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
-const CORE_REPOSITORY_PROVIDER_IDS = new Set(["github", "gitlab", "azure_devops"]);
-
-/** Task panel registration plus the owning pluginId — what `getTaskPanels()` returns. */
-export interface PluginTaskPanelRegistration extends TaskPanelRegistration {
-  pluginId: string;
-}
-
-/** Task menu action registration plus the owning pluginId. */
-export interface PluginTaskMenuActionRegistration extends TaskMenuActionRegistration {
-  pluginId: string;
-}
-
-/** Task filter registration plus the owning pluginId. */
-export interface PluginTaskFilterRegistration extends TaskFilterRegistration {
-  pluginId: string;
-}
-
-/** Stable UI/state identity for plugin-local task filter ids. */
-export function pluginTaskFilterRegistrationKey(
-  registration: Pick<PluginTaskFilterRegistration, "pluginId" | "id">,
-): PluginTaskFilterRegistrationKey {
-  return `${registration.pluginId}:${registration.id}`;
-}
-
-/** Host-owned lifecycle states used to reconcile registrations with UI state. */
-export type PluginLifecycleStatus = "loading" | "ready" | "failed" | "removed";
-
-/** A generation-fenced lifecycle snapshot; never exposed through PluginRegistry. */
-export interface PluginLifecycleSnapshot {
-  status: PluginLifecycleStatus;
-  generation: number;
-}
-
 function removeByPlugin<T>(list: Owned<T>[], pluginId: string): Owned<T>[] {
   return list.filter((entry) => entry.pluginId !== pluginId);
 }
@@ -165,12 +93,8 @@ class PluginRegistryStore {
   private repositoryProviders = new Map<string, Owned<RepositoryProviderRegistration>>();
   private taskActions = new Map<string, Owned<TaskActionRegistration>>();
   private reviewProviders = new Map<string, Owned<ReviewProviderRegistration>>();
-  /** One live plugin owns each provider ID across repository and review registrations. */
-  private providerOwners = new Map<string, string>();
-  /** Present only after the host has supplied manifest-declared provider IDs. */
-  private declaredRepositoryProviderIds = new Map<string, Set<string>>();
-  private abortControllersByPlugin = new Map<string, Set<AbortController>>();
-  private reviewUnsubscribersByPlugin = new Map<string, Set<() => void>>();
+  private providerOwnership = new PluginProviderOwnership();
+  private workLifecycle = new PluginWorkLifecycle();
   private taskPanels: Owned<TaskPanelRegistration>[] = [];
   private taskMenuActions: Owned<TaskMenuActionRegistration>[] = [];
   private taskFilters: Owned<TaskFilterRegistration>[] = [];
@@ -348,11 +272,11 @@ class PluginRegistryStore {
    * additive contract rollout.
    */
   setDeclaredRepositoryProviderIds(pluginId: string, ids: string[]): void {
-    this.declaredRepositoryProviderIds.set(pluginId, new Set(ids));
+    this.providerOwnership.setDeclarations(pluginId, ids);
   }
 
   registerRepositoryProvider(pluginId: string, provider: RepositoryProviderRegistration): void {
-    this.claimProvider(pluginId, provider.id);
+    this.providerOwnership.claim(pluginId, provider.id);
     if (this.repositoryProviders.has(provider.id)) {
       throw new Error(`[plugins] repository provider "${provider.id}" is already registered`);
     }
@@ -375,7 +299,7 @@ class PluginRegistryStore {
   }
 
   registerReviewProvider(pluginId: string, provider: ReviewProviderRegistration): void {
-    this.claimProvider(pluginId, provider.id);
+    this.providerOwnership.claim(pluginId, provider.id);
     if (this.reviewProviders.has(provider.id)) {
       throw new Error(`[plugins] review provider "${provider.id}" is already registered`);
     }
@@ -408,15 +332,12 @@ class PluginRegistryStore {
       if (entry.pluginId === pluginId) this.reviewProviders.delete(id);
     });
     this.abortPluginWork(pluginId);
-    this.providerOwners.forEach((owner, providerId) => {
-      if (owner === pluginId) this.providerOwners.delete(providerId);
-    });
+    this.providerOwnership.releasePlugin(pluginId);
     this.taskPanels = removeByPlugin(this.taskPanels, pluginId);
     this.taskMenuActions = removeByPlugin(this.taskMenuActions, pluginId);
     this.taskFilters = removeByPlugin(this.taskFilters, pluginId);
     this.pluginNames.delete(pluginId);
     this.declaredKeybindingIds.delete(pluginId);
-    this.declaredRepositoryProviderIds.delete(pluginId);
     if (this.totalCount() !== before) this.notify();
   }
 
@@ -594,34 +515,12 @@ class PluginRegistryStore {
     };
   }
 
-  private claimProvider(pluginId: string, providerId: string): void {
-    if (!REPOSITORY_PROVIDER_ID_PATTERN.test(providerId)) {
-      throw new Error(
-        `[plugins] provider "${providerId}" must be a canonical lowercase identifier`,
-      );
-    }
-    if (CORE_REPOSITORY_PROVIDER_IDS.has(providerId.trim().toLowerCase())) {
-      throw new Error(`[plugins] provider "${providerId}" is reserved by the host`);
-    }
-    const declared = this.declaredRepositoryProviderIds.get(pluginId);
-    if (declared && !declared.has(providerId)) {
-      throw new Error(
-        `[plugins] "${pluginId}" does not declare repository provider "${providerId}"`,
-      );
-    }
-    const owner = this.providerOwners.get(providerId);
-    if (owner && owner !== pluginId) {
-      throw new Error(`[plugins] provider "${providerId}" is already owned by "${owner}"`);
-    }
-    this.providerOwners.set(providerId, pluginId);
-  }
-
   private withRepositoryProviderLifecycle(
     pluginId: string,
     provider: RepositoryProviderRegistration,
   ): RepositoryProviderRegistration {
     return wrapRepositoryProviderLifecycle(provider, (signal, operation) =>
-      this.runAbortable(pluginId, signal, operation),
+      this.workLifecycle.run(pluginId, signal, operation),
     );
   }
 
@@ -631,58 +530,13 @@ class PluginRegistryStore {
   ): ReviewProviderRegistration {
     return wrapReviewProviderLifecycle(
       provider,
-      (signal, operation) => this.runAbortable(pluginId, signal, operation),
-      (unsubscribe) => this.trackReviewSubscription(pluginId, unsubscribe),
+      (signal, operation) => this.workLifecycle.run(pluginId, signal, operation),
+      (unsubscribe) => this.workLifecycle.trackSubscription(pluginId, unsubscribe),
     );
   }
 
-  private runAbortable<T>(
-    pluginId: string,
-    sourceSignal: AbortSignal,
-    operation: (signal: AbortSignal) => Promise<T>,
-  ): Promise<T> {
-    const controller = new AbortController();
-    const controllers = this.abortControllersByPlugin.get(pluginId) ?? new Set<AbortController>();
-    this.abortControllersByPlugin.set(pluginId, controllers);
-    controllers.add(controller);
-    const forwardAbort = () => controller.abort();
-    if (sourceSignal.aborted) {
-      forwardAbort();
-    } else {
-      sourceSignal.addEventListener("abort", forwardAbort, { once: true });
-    }
-
-    return Promise.resolve()
-      .then(() => operation(controller.signal))
-      .finally(() => {
-        sourceSignal.removeEventListener("abort", forwardAbort);
-        controllers.delete(controller);
-        if (controllers.size === 0 && this.abortControllersByPlugin.get(pluginId) === controllers) {
-          this.abortControllersByPlugin.delete(pluginId);
-        }
-      });
-  }
-
-  private trackReviewSubscription(pluginId: string, unsubscribe: () => void): () => void {
-    const unsubscribers = this.reviewUnsubscribersByPlugin.get(pluginId) ?? new Set<() => void>();
-    this.reviewUnsubscribersByPlugin.set(pluginId, unsubscribers);
-    let closed = false;
-    const trackedUnsubscribe = () => {
-      if (closed) return;
-      closed = true;
-      unsubscribers.delete(trackedUnsubscribe);
-      if (unsubscribers.size === 0) this.reviewUnsubscribersByPlugin.delete(pluginId);
-      unsubscribe();
-    };
-    unsubscribers.add(trackedUnsubscribe);
-    return trackedUnsubscribe;
-  }
-
   private abortPluginWork(pluginId: string): void {
-    this.abortControllersByPlugin.get(pluginId)?.forEach((controller) => controller.abort());
-    this.abortControllersByPlugin.delete(pluginId);
-    this.reviewUnsubscribersByPlugin.get(pluginId)?.forEach((unsubscribe) => unsubscribe());
-    this.reviewUnsubscribersByPlugin.delete(pluginId);
+    this.workLifecycle.abort(pluginId);
   }
 
   private totalCount(): number {

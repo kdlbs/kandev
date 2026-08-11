@@ -446,6 +446,11 @@ func (m pluginOwnedTaskTreeManager) Preview(ctx context.Context, rootTaskID stri
 func (m pluginOwnedTaskTreeManager) Delete(ctx context.Context, rootTaskID string) ([]string, error) {
 	tasks, err := m.host.pluginOwnedTaskTree(ctx, rootTaskID)
 	if err != nil {
+		// Deletion is a retry boundary. A prior attempt may have removed the
+		// root before its caller persisted progress, so absence is success.
+		if status.Code(err) == codes.NotFound {
+			return []string{}, nil
+		}
 		return nil, err
 	}
 	if m.host.taskWriter == nil {

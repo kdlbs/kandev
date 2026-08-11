@@ -425,9 +425,11 @@ func (x *VerifiedActionContext) GetHeadBranch() string {
 }
 
 type PluginActionResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Body          []byte                 `protobuf:"bytes,1,opt,name=body,proto3" json:"body,omitempty"`
-	Headers       map[string]string      `protobuf:"bytes,2,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Body    []byte                 `protobuf:"bytes,1,opt,name=body,proto3" json:"body,omitempty"`
+	Headers map[string]string      `protobuf:"bytes,2,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Final HTTP status. Zero preserves compatibility and means 200.
+	Status        int32 `protobuf:"varint,3,opt,name=status,proto3" json:"status,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -474,6 +476,13 @@ func (x *PluginActionResponse) GetHeaders() map[string]string {
 		return x.Headers
 	}
 	return nil
+}
+
+func (x *PluginActionResponse) GetStatus() int32 {
+	if x != nil {
+		return x.Status
+	}
+	return 0
 }
 
 type SearchEntityReferencesRequest struct {
@@ -5580,10 +5589,11 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\n" +
 	"session_id\x18\x05 \x01(\tR\tsessionId\x12\x1f\n" +
 	"\vhead_branch\x18\x06 \x01(\tR\n" +
-	"headBranch\"\xb5\x01\n" +
+	"headBranch\"\xcd\x01\n" +
 	"\x14PluginActionResponse\x12\x12\n" +
 	"\x04body\x18\x01 \x01(\fR\x04body\x12M\n" +
-	"\aheaders\x18\x02 \x03(\v23.kandev.plugin.v1.PluginActionResponse.HeadersEntryR\aheaders\x1a:\n" +
+	"\aheaders\x18\x02 \x03(\v23.kandev.plugin.v1.PluginActionResponse.HeadersEntryR\aheaders\x12\x16\n" +
+	"\x06status\x18\x03 \x01(\x05R\x06status\x1a:\n" +
 	"\fHeadersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x86\x01\n" +

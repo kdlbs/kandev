@@ -110,6 +110,14 @@ storage, provider data, and capability handling. Shared host components own pres
 and interaction geometry; they accept normalized data and callbacks and contain no
 GitHub, GitLab, or Bitbucket API logic.
 
+Repository discovery is a provider-neutral, server-searchable paged contract. The host
+passes optional `query`, opaque `cursor`, and requested `limit` fields; providers return
+either the legacy repository array or `{ repositories, nextCursor }`. The host follows
+pages, rejects repeated cursors, and always binds returned provider identities to the
+manifest owner. Registered provider icons are used in native repository controls rather
+than a generic branch glyph. These rules keep large installations usable without adding
+provider-specific search or pagination branches to Kandev.
+
 Pipeline/build status is read from the pull request's source (head) commit. The
 destination commit describes the merge target and cannot represent the CI result for
 the proposed change.

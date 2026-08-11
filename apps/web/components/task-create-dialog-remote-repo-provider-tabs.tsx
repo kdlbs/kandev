@@ -6,6 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { AzureDevOpsIcon } from "@/components/icons/azure-devops-icon";
 import type { RemoteRepositoryProvider } from "@/hooks/domains/integrations/use-remote-repositories";
 import { pluginRegistry } from "@/lib/plugins/registry";
+import { resolvePluginIcon } from "@/lib/plugins/icons";
 import { cn } from "@/lib/utils";
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -18,7 +19,9 @@ export function RemoteRepositoryProviderIcon({ provider }: { provider: RemoteRep
   if (provider === "github") return <IconBrandGithub className="size-3.5 shrink-0" />;
   if (provider === "gitlab") return <IconBrandGitlab className="size-3.5 shrink-0" />;
   if (provider === "azure_devops") return <AzureDevOpsIcon className="size-3.5 shrink-0" />;
-  return <IconGitBranch className="size-3.5 shrink-0" />;
+  const registration = pluginRegistry.getRepositoryProvider(provider);
+  const Icon = registration ? resolvePluginIcon(registration.icon) : IconGitBranch;
+  return <Icon className="size-3.5 shrink-0" />;
 }
 
 function providerLabel(provider: RemoteRepositoryProvider): string {

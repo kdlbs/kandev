@@ -21,10 +21,11 @@ import { useRemoteRepositories } from "./use-remote-repositories";
 import { pluginRegistry } from "@/lib/plugins/registry";
 
 const WORKSPACE_ID = "workspace-1";
+const PLUGIN_ID = "test-bitbucket-provider";
 
 afterEach(() => {
   cleanup();
-  pluginRegistry.unregisterPlugin("test-bitbucket-provider");
+  pluginRegistry.unregisterPlugin(PLUGIN_ID);
   vi.resetAllMocks();
 });
 
@@ -42,7 +43,7 @@ function expectWorkspaceScopedGitHubRequest() {
 
 describe("useRemoteRepositories registered providers", () => {
   it("lists registered provider repositories with their exact clone URL", async () => {
-    pluginRegistry.forPlugin("test-bitbucket-provider").registerRepositoryProvider({
+    pluginRegistry.forPlugin(PLUGIN_ID).registerRepositoryProvider({
       id: "bitbucket",
       label: "Bitbucket",
       matchesURL: () => false,
@@ -75,6 +76,60 @@ describe("useRemoteRepositories registered providers", () => {
       }),
     ]);
     expect(result.current.availableProviders).toEqual(["bitbucket"]);
+  });
+
+  it("follows provider cursors and forwards server-side search", async () => {
+    const listRepositories = vi.fn(
+      async ({ cursor, query: _query }: { cursor?: string; query?: string }) =>
+        cursor === "page-2"
+          ? {
+              repositories: [
+                {
+                  providerId: "bitbucket",
+                  providerHost: "https://bitbucket.org",
+                  ownerOrProject: "acme",
+                  repositoryId: "two",
+                  repositoryName: "two",
+                  cloneUrl: "https://bitbucket.org/acme/two.git",
+                },
+              ],
+            }
+          : {
+              repositories: [
+                {
+                  providerId: "bitbucket",
+                  providerHost: "https://bitbucket.org",
+                  ownerOrProject: "acme",
+                  repositoryId: "one",
+                  repositoryName: "one",
+                  cloneUrl: "https://bitbucket.org/acme/one.git",
+                },
+              ],
+              nextCursor: "page-2",
+            },
+    );
+    pluginRegistry.forPlugin(PLUGIN_ID).registerRepositoryProvider({
+      id: "bitbucket",
+      label: "Bitbucket",
+      matchesURL: () => false,
+      listBranches: async () => [],
+      inspectURL: async () => null,
+      listRepositories,
+    });
+    mocks.fetchAccessibleRepos.mockRejectedValue(new Error("GitHub not configured"));
+    rejectUnavailableProviders();
+    const { result } = renderHook(() => useRemoteRepositories(WORKSPACE_ID));
+
+    await waitFor(() => expect(result.current.repos).toHaveLength(2));
+    act(() => result.current.search("two"));
+    await waitFor(() =>
+      expect(listRepositories).toHaveBeenCalledWith(
+        expect.objectContaining({ query: "two", limit: 100 }),
+      ),
+    );
+    expect(listRepositories).toHaveBeenCalledWith(
+      expect.objectContaining({ cursor: "page-2", query: "two" }),
+    );
   });
 });
 
@@ -154,7 +209,7 @@ describe("useRemoteRepositories provider results", () => {
 describe("useRemoteRepositories workspace scope", () => {
   it("does not invoke plugin providers without an active workspace", async () => {
     const listRepositories = vi.fn().mockResolvedValue([]);
-    pluginRegistry.forPlugin("test-bitbucket-provider").registerRepositoryProvider({
+    pluginRegistry.forPlugin(PLUGIN_ID).registerRepositoryProvider({
       id: "bitbucket",
       label: "Bitbucket",
       matchesURL: () => false,

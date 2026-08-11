@@ -224,6 +224,14 @@ export interface RepositoryChangeRequestCreateResult {
   associationError?: string;
 }
 
+export interface RepositoryProviderPage {
+  repositories: RepositoryInspection[];
+  /** Opaque provider cursor. Omit when the query is exhausted. */
+  nextCursor?: string;
+}
+
+export type RepositoryProviderListResult = RepositoryInspection[] | RepositoryProviderPage;
+
 /** Repository-provider functions receive a host-managed cancellation signal. */
 export interface RepositoryProviderRegistration {
   id: string;
@@ -231,8 +239,14 @@ export interface RepositoryProviderRegistration {
   icon?: string;
   listRepositories(context: {
     workspaceId: string;
+    /** Server-side search. Omitted for compatibility with older callers. */
+    query?: string;
+    /** Opaque cursor returned by the same provider for the same query. */
+    cursor?: string;
+    /** Requested page size; providers may return fewer items. */
+    limit?: number;
     signal: AbortSignal;
-  }): Promise<RepositoryInspection[]>;
+  }): Promise<RepositoryProviderListResult>;
   matchesURL(url: string): boolean;
   listBranches(context: {
     workspaceId: string;

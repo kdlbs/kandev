@@ -7,6 +7,7 @@ const PLUGINS = ["url-owner-a", "url-owner-b"];
 const URL = "https://code.example.test/projects/TEAM/repos/app";
 const WORKSPACE_ID = "workspace-1";
 const PROVIDER_B_ID = "provider-b";
+const PROVIDER_A_ID = "provider-a";
 
 function provider(
   id: string,
@@ -41,7 +42,7 @@ describe("inspectRegisteredRepositoryURL", () => {
   it("rejects ambiguous structured ownership instead of using registration order", async () => {
     pluginRegistry
       .forPlugin(PLUGINS[0]!)
-      .registerRepositoryProvider(provider("provider-a", async () => inspection("provider-a")));
+      .registerRepositoryProvider(provider(PROVIDER_A_ID, async () => inspection(PROVIDER_A_ID)));
     pluginRegistry
       .forPlugin(PLUGINS[1]!)
       .registerRepositoryProvider(provider(PROVIDER_B_ID, async () => inspection(PROVIDER_B_ID)));
@@ -57,7 +58,7 @@ describe("inspectRegisteredRepositoryURL", () => {
 
   it("keeps one exact match when another coarse candidate fails inspection", async () => {
     pluginRegistry.forPlugin(PLUGINS[0]!).registerRepositoryProvider(
-      provider("provider-a", async () => {
+      provider(PROVIDER_A_ID, async () => {
         throw new Error("candidate unavailable");
       }),
     );
@@ -72,5 +73,24 @@ describe("inspectRegisteredRepositoryURL", () => {
         signal: new AbortController().signal,
       }),
     ).resolves.toMatchObject({ provider: { id: PROVIDER_B_ID } });
+  });
+
+  it("surfaces inspection failure when no provider can establish ownership", async () => {
+    pluginRegistry.forPlugin(PLUGINS[0]!).registerRepositoryProvider(
+      provider(PROVIDER_A_ID, async () => {
+        throw new Error("provider inspection unavailable");
+      }),
+    );
+    pluginRegistry
+      .forPlugin(PLUGINS[1]!)
+      .registerRepositoryProvider(provider(PROVIDER_B_ID, async () => null));
+
+    await expect(
+      inspectRegisteredRepositoryURL({
+        workspaceId: WORKSPACE_ID,
+        url: URL,
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow("provider inspection unavailable");
   });
 });

@@ -141,7 +141,9 @@ message VerifiedActionContext {
   string session_id = 5;
   string head_branch = 6;
 }
-message PluginActionResponse { bytes body = 1; map<string, string> headers = 2; }
+// status=0 preserves legacy 200. Otherwise the host accepts 200..599 and
+// projects the status after filtering headers and enforcing the body limit.
+message PluginActionResponse { bytes body = 1; map<string, string> headers = 2; int32 status = 3; }
 
 message SearchEntityReferencesRequest { string source = 1; string workspace_id = 2; string query = 3; int32 limit = 4; }
 message SearchEntityReferencesResponse { repeated EntityReferenceCandidate candidates = 1; }
@@ -192,7 +194,9 @@ carries every deleted task ID. If deletion stops after removing descendants,
 the non-OK status includes a `DeletePluginOwnedTaskTreeProgress` detail with
 those IDs. The Go SDK preserves them in the returned `([]string, error)` so a
 plugin can reconcile completed deletions before retrying idempotent cleanup;
-callers must not discard progress merely because the error is non-nil.
+callers must not discard progress merely because the error is non-nil. An absent root
+is a successful no-op, so a retry after a completed or externally removed tree remains
+safe.
 
 ### 3a. Host data API (ADR 0043)
 

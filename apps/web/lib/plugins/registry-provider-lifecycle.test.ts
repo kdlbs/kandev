@@ -79,8 +79,43 @@ describe("pluginRegistry — repository provider result lifecycle", () => {
     await started;
     pluginRegistry.unregisterPlugin(PRIMARY_PLUGIN_ID);
 
-    await expect(request).rejects.toThrow("provider request aborted");
+    await expect(request).rejects.toMatchObject({ name: "AbortError" });
     expect(aborted).toHaveBeenCalledOnce();
+  });
+
+  it("rejects stale results from a provider that ignores cancellation", async () => {
+    let resolveRequest!: (
+      value: Awaited<ReturnType<RepositoryProviderRegistration["listRepositories"]>>,
+    ) => void;
+    const provider = repositoryProvider({
+      listRepositories: () => new Promise((resolve) => (resolveRequest = resolve)),
+    });
+    pluginRegistry.forPlugin(PRIMARY_PLUGIN_ID).registerRepositoryProvider(provider);
+
+    const request = pluginRegistry
+      .getRepositoryProvider(SOURCE_CONTROL_PROVIDER_ID)!
+      .listRepositories({ workspaceId: WORKSPACE_ID, signal: new AbortController().signal });
+    await Promise.resolve();
+    pluginRegistry.unregisterPlugin(PRIMARY_PLUGIN_ID);
+    resolveRequest([]);
+
+    await expect(request).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("does not start provider work for an already-aborted request", async () => {
+    const listRepositories = vi.fn(async () => []);
+    pluginRegistry
+      .forPlugin(PRIMARY_PLUGIN_ID)
+      .registerRepositoryProvider(repositoryProvider({ listRepositories }));
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      pluginRegistry
+        .getRepositoryProvider(SOURCE_CONTROL_PROVIDER_ID)!
+        .listRepositories({ workspaceId: WORKSPACE_ID, signal: controller.signal }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(listRepositories).not.toHaveBeenCalled();
   });
 });
 
@@ -134,7 +169,7 @@ describe("pluginRegistry — repository provider reload lifecycle", () => {
 
     pluginRegistry.unregisterPlugin(PRIMARY_PLUGIN_ID);
 
-    await expect(secondRequest).rejects.toThrow("second provider request aborted");
+    await expect(secondRequest).rejects.toMatchObject({ name: "AbortError" });
     expect(secondAborted).toHaveBeenCalledOnce();
   });
 });
@@ -181,7 +216,7 @@ describe("pluginRegistry — repository change-request lifecycle", () => {
 
     pluginRegistry.unregisterPlugin(PRIMARY_PLUGIN_ID);
 
-    await expect(request).rejects.toThrow("create aborted");
+    await expect(request).rejects.toMatchObject({ name: "AbortError" });
     expect(aborted).toHaveBeenCalledOnce();
   });
 });

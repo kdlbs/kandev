@@ -175,17 +175,20 @@ func pluginActionRequestFromProto(p *pluginv1.PluginActionRequest) *PluginAction
 type PluginActionResponse struct {
 	Body    []byte
 	Headers map[string]string
+	// Status is a final HTTP status in [200, 599]. Zero means 200 for
+	// compatibility with plugins built before domain responses were added.
+	Status int
 }
 
 func (r *PluginActionResponse) toProto() *pluginv1.PluginActionResponse {
-	return &pluginv1.PluginActionResponse{Body: r.Body, Headers: r.Headers}
+	return &pluginv1.PluginActionResponse{Body: r.Body, Headers: r.Headers, Status: int32(r.Status)}
 }
 
 func pluginActionResponseFromProto(p *pluginv1.PluginActionResponse) *PluginActionResponse {
 	if p == nil {
 		return &PluginActionResponse{}
 	}
-	return &PluginActionResponse{Body: p.GetBody(), Headers: p.GetHeaders()}
+	return &PluginActionResponse{Body: p.GetBody(), Headers: p.GetHeaders(), Status: int(p.GetStatus())}
 }
 
 // SearchEntityReferencesRequest is a host-verified workspace search request.
