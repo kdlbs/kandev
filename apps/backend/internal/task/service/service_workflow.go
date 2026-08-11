@@ -11,6 +11,7 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 
 	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -90,7 +91,10 @@ func (s *Service) applyApprovalStepTransition(ctx context.Context, sessionID str
 	}
 
 	moved, err := s.MoveTaskWithOptions(ctx, result.Session.TaskID, step.WorkflowID, newStepID, 0,
-		MoveTaskOptions{StepHistoryTrigger: wfmodels.StepTransitionTriggerApproval})
+		MoveTaskOptions{
+			StepHistoryTrigger:   wfmodels.StepTransitionTriggerApproval,
+			StepHistorySessionID: sessionID,
+		})
 	if err != nil {
 		return fmt.Errorf("failed to move task to next step after approval: %w", err)
 	}
@@ -395,6 +399,13 @@ type MoveTaskOptions struct {
 	// driving an approval-gated transition (ApproveSession) set
 	// StepTransitionTriggerApproval instead.
 	StepHistoryTrigger wfmodels.StepTransitionTrigger
+	// StepHistorySessionID pins the ADR 0015 audit-row session_id to a
+	// specific session, overriding the primary/active-session resolution
+	// MoveTaskWithOptions otherwise uses. ApproveSession sets this to the
+	// session it is actually approving — on a task with more than one
+	// active session, resolvePrimaryOrActiveSession can pick a different
+	// (primary) session than the one being approved.
+	StepHistorySessionID string
 }
 
 type workflowMoveLimitsRepository interface {
@@ -494,7 +505,11 @@ func (s *Service) MoveTaskWithOptions(
 	if stepChanged {
 		s.publishTaskMovedEvent(ctx, task, oldWorkflowID, oldStepID, workflowStepID, sessionID)
 		s.pullNextTaskOnVacate(ctx, oldStepID, task.ID)
-		s.recordManualStepTransition(ctx, sessionID, oldStepID, workflowStepID, opts.StepHistoryTrigger)
+		historySessionID := opts.StepHistorySessionID
+		if historySessionID == "" {
+			historySessionID = sessionID
+		}
+		s.recordManualStepTransition(ctx, historySessionID, oldStepID, workflowStepID, opts.StepHistoryTrigger)
 	}
 
 	s.logger.Info("task moved",
@@ -951,8 +966,14 @@ func (s *Service) recordManualStepTransition(ctx context.Context, sessionID, fro
 	if identity, ok := authn.IdentityFromContext(ctx); ok && identity.UserID != "" {
 		actorID = &identity.UserID
 	}
+	// The step change is already durably persisted by the time this runs.
+	// Use a detached, bounded context so a cancelled request context (client
+	// disconnect, turn-end) cannot drop the audit row for a transition that
+	// already committed.
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.StepHistoryWriteTimeout)
+	defer cancel()
 	if err := s.stepHistoryRecorder.CreateStepTransition(
-		ctx, sessionID, fromStepID, toStepID, trigger, actorID, nil,
+		writeCtx, sessionID, fromStepID, toStepID, trigger, actorID, nil,
 	); err != nil {
 		s.logger.Warn("failed to record manual step transition",
 			zap.String("session_id", sessionID),

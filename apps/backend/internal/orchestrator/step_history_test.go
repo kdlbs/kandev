@@ -24,14 +24,19 @@ type recordedStepTransition struct {
 	trigger              wfmodels.StepTransitionTrigger
 	actorID              *string
 	metadata             map[string]interface{}
+	// ctxErr captures ctx.Err() at call time — used to prove the recorder
+	// received a live (non-cancelled) context even when the caller's parent
+	// context was cancelled before the record* helper ran.
+	ctxErr error
 }
 
-func (f *fakeStepHistoryRecorder) CreateStepTransition(_ context.Context, sessionID, fromStepID, toStepID string, trigger wfmodels.StepTransitionTrigger, actorID *string, metadata map[string]interface{}) error {
+func (f *fakeStepHistoryRecorder) CreateStepTransition(ctx context.Context, sessionID, fromStepID, toStepID string, trigger wfmodels.StepTransitionTrigger, actorID *string, metadata map[string]interface{}) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, recordedStepTransition{
 		sessionID: sessionID, fromStepID: fromStepID, toStepID: toStepID,
 		trigger: trigger, actorID: actorID, metadata: metadata,
+		ctxErr: ctx.Err(),
 	})
 	return f.err
 }
@@ -377,5 +382,59 @@ func TestApplyPendingMove_ForeignWorkflowMismatchRecordsNoHistory(t *testing.T) 
 
 	if calls := recorder.Calls(); len(calls) != 0 {
 		t.Fatalf("expected no recorded transitions for a dropped foreign-workflow move, got %d", len(calls))
+	}
+}
+
+// --- Detached context coverage ---
+
+// TestRecordAutoStepTransition_SurvivesCancelledParentContext covers Review
+// round 3's finding: the audit insert previously ran on the caller's ctx
+// after the step change already committed, so a cancelled parent context
+// (turn-end, request cancellation) could silently drop the row. The recorder
+// must see a live context even when the caller passes a cancelled one.
+func TestRecordAutoStepTransition_SurvivesCancelledParentContext(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	sg := twoStepGetter()
+	svc := createTestService(repo, sg, newMockTaskRepo())
+	recorder := &fakeStepHistoryRecorder{}
+	svc.stepHistoryRecorder = recorder
+
+	cancelledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	svc.recordAutoStepTransition(cancelledCtx, "s1", "step1", "step2", nil)
+
+	calls := recorder.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 recorded transition, got %d", len(calls))
+	}
+	if calls[0].ctxErr != nil {
+		t.Errorf("recorder received a cancelled context: %v", calls[0].ctxErr)
+	}
+}
+
+// TestRecordManualStepTransition_SurvivesCancelledParentContext mirrors
+// TestRecordAutoStepTransition_SurvivesCancelledParentContext for the
+// applyPendingMove funnel's manual-trigger helper.
+func TestRecordManualStepTransition_SurvivesCancelledParentContext(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	sg := twoStepGetter()
+	svc := createTestService(repo, sg, newMockTaskRepo())
+	recorder := &fakeStepHistoryRecorder{}
+	svc.stepHistoryRecorder = recorder
+
+	cancelledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	svc.recordManualStepTransition(cancelledCtx, "s1", "step1", "step2")
+
+	calls := recorder.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 recorded transition, got %d", len(calls))
+	}
+	if calls[0].ctxErr != nil {
+		t.Errorf("recorder received a cancelled context: %v", calls[0].ctxErr)
 	}
 }

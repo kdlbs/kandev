@@ -22,14 +22,19 @@ type recordedTransition struct {
 	trigger              wfmodels.StepTransitionTrigger
 	actorID              *string
 	metadata             map[string]interface{}
+	// ctxErr captures ctx.Err() at call time — used to prove the recorder
+	// received a live (non-cancelled) context even when the caller's parent
+	// context was cancelled before the record* helper ran.
+	ctxErr error
 }
 
-func (f *fakeStepHistoryRecorder) CreateStepTransition(_ context.Context, sessionID, fromStepID, toStepID string, trigger wfmodels.StepTransitionTrigger, actorID *string, metadata map[string]interface{}) error {
+func (f *fakeStepHistoryRecorder) CreateStepTransition(ctx context.Context, sessionID, fromStepID, toStepID string, trigger wfmodels.StepTransitionTrigger, actorID *string, metadata map[string]interface{}) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, recordedTransition{
 		sessionID: sessionID, fromStepID: fromStepID, toStepID: toStepID,
 		trigger: trigger, actorID: actorID, metadata: metadata,
+		ctxErr: ctx.Err(),
 	})
 	return f.err
 }
@@ -151,6 +156,53 @@ func TestService_ApproveSessionRecordsApprovalStepHistoryNotManual(t *testing.T)
 	}
 }
 
+// TestService_ApproveSessionRecordsApprovalStepHistoryForApprovedSessionNotPrimary
+// covers a task with two active sessions where the primary session is NOT the
+// one being approved. Review round 3 flagged that MoveTaskWithOptions re-derives
+// the audit-row session via resolvePrimaryOrActiveSession instead of using the
+// session ApproveSession actually approved, so the row was attributed to the
+// primary session instead of the approved one.
+func TestService_ApproveSessionRecordsApprovalStepHistoryForApprovedSessionNotPrimary(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+	getter := svc.workflowStepGetter.(*fakeWorkflowStepGetter)
+	getter.steps["step-done"] = &wfmodels.WorkflowStep{
+		ID: "step-done", WorkflowID: "wf-source", Name: "Approved", Position: 2,
+	}
+	recorder := &fakeStepHistoryRecorder{}
+	svc.SetStepHistoryRecorder(recorder)
+
+	createMoveTask(t, ctx, repo, "task-multi-session", "wf-source", "step-review-target", nil)
+	must(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:        "session-primary",
+		TaskID:    "task-multi-session",
+		State:     models.TaskSessionStateWaitingForInput,
+		IsPrimary: true,
+	}))
+	must(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:           "session-review",
+		TaskID:       "task-multi-session",
+		State:        models.TaskSessionStateWaitingForInput,
+		IsPrimary:    false,
+		ReviewStatus: models.ReviewStatusPending,
+	}))
+
+	if _, err := svc.ApproveSession(ctx, "session-review"); err != nil {
+		t.Fatalf("ApproveSession: %v", err)
+	}
+
+	calls := recorder.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 recorded transition, got %d", len(calls))
+	}
+	got := calls[0]
+	if got.sessionID != "session-review" {
+		t.Errorf("sessionID = %q, want session-review (the approved session, not the primary)", got.sessionID)
+	}
+}
+
 func TestService_MoveTaskHistoryWriteFailureDoesNotFailMove(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
@@ -168,5 +220,30 @@ func TestService_MoveTaskHistoryWriteFailureDoesNotFailMove(t *testing.T) {
 	}
 	if moved.Task.WorkflowStepID != "step-review-target" {
 		t.Fatalf("expected task to still move to step-review-target, got %s", moved.Task.WorkflowStepID)
+	}
+}
+
+// TestService_RecordManualStepTransitionSurvivesCancelledParentContext covers
+// Review round 3's finding: the audit insert previously ran on the caller's
+// ctx after the step change already committed, so a cancelled parent context
+// (client disconnect on httpMoveTask) could silently drop the row. The
+// recorder must see a live context even when the caller passes a cancelled
+// one.
+func TestService_RecordManualStepTransitionSurvivesCancelledParentContext(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	recorder := &fakeStepHistoryRecorder{}
+	svc.SetStepHistoryRecorder(recorder)
+
+	cancelledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	svc.recordManualStepTransition(cancelledCtx, "session-x", "step-a", "step-b", wfmodels.StepTransitionTriggerManual)
+
+	calls := recorder.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 recorded transition, got %d", len(calls))
+	}
+	if calls[0].ctxErr != nil {
+		t.Errorf("recorder received a cancelled context: %v", calls[0].ctxErr)
 	}
 }

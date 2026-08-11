@@ -5,6 +5,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
@@ -84,8 +85,13 @@ func (s *Service) recordAutoStepTransition(ctx context.Context, sessionID, fromS
 			"signal_summary": signal.Summary,
 		}
 	}
+	// The step change is already durably persisted by the time this runs.
+	// Use a detached, bounded context so a cancelled parent context cannot
+	// drop the audit row for a transition that already committed.
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.StepHistoryWriteTimeout)
+	defer cancel()
 	if err := s.stepHistoryRecorder.CreateStepTransition(
-		ctx, sessionID, fromStepID, toStepID, wfmodels.StepTransitionTriggerAutoComplete, nil, metadata,
+		writeCtx, sessionID, fromStepID, toStepID, wfmodels.StepTransitionTriggerAutoComplete, nil, metadata,
 	); err != nil {
 		s.logger.Warn("failed to record auto step transition",
 			zap.String("session_id", sessionID),
@@ -106,8 +112,13 @@ func (s *Service) recordManualStepTransition(ctx context.Context, sessionID, fro
 	if s.stepHistoryRecorder == nil || sessionID == "" {
 		return
 	}
+	// The step change is already durably persisted by the time this runs.
+	// Use a detached, bounded context so a cancelled parent context cannot
+	// drop the audit row for a transition that already committed.
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.StepHistoryWriteTimeout)
+	defer cancel()
 	if err := s.stepHistoryRecorder.CreateStepTransition(
-		ctx, sessionID, fromStepID, toStepID, wfmodels.StepTransitionTriggerManual, nil, nil,
+		writeCtx, sessionID, fromStepID, toStepID, wfmodels.StepTransitionTriggerManual, nil, nil,
 	); err != nil {
 		s.logger.Warn("failed to record manual step transition",
 			zap.String("session_id", sessionID),
