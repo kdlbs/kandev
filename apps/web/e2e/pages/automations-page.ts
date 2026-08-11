@@ -43,12 +43,12 @@ export class AutomationsPage {
   }
 
   async goto() {
-    await this.page.goto(`/settings/workspace/${this.workspaceId}/automations`);
+    await this.page.goto(`/settings/workspaces/${this.workspaceId}/automations`);
     await this.listPage.waitFor({ state: "visible", timeout: 15_000 });
   }
 
   async gotoNew() {
-    await this.page.goto(`/settings/workspace/${this.workspaceId}/automations/new`);
+    await this.page.goto(`/settings/workspaces/${this.workspaceId}/automations/new`);
     await this.editor.waitFor({ state: "visible", timeout: 15_000 });
   }
 

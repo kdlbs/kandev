@@ -130,11 +130,11 @@ count approximate. For account-wide
 provider usage, install the [Provider Usage
 plugin](https://github.com/kdlbs/kandev-plugin-provider-usage), which adds a
 provider pill to the session top bar and can add a compact display to the global
-status bar. The optional status-bar display requires **App status bar** to be
-enabled under **Settings > System > Feature Toggles**; enable it and restart
-Kandev for the change to take effect. The session top-bar pill remains available
-on its own, while enabling App status bar also adds the global status-bar and
-phone Status drawer display. Configure the plugin under **Settings > Plugins >
+status surface. That surface is off by default and follows the portable **Show
+status bar** preference under **Settings > Preferences > Appearance > Status Bar**;
+saving applies without a restart. The session top-bar pill remains available on
+its own when the preference is off. When it is on, the plugin can also appear in
+the desktop/tablet bottom bar or phone Status drawer. Configure the plugin under **Settings > Plugins >
 Provider Usage**. Kandev hides the context ring rather than presenting
 impossible data when reported use exceeds the reported window.
 

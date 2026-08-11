@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { BackendFixtureEnvOverrides, createScopedEnvUse } from "./backend-env";
+import { E2E_DOCKER_SCOPE } from "./docker-probe";
 
 const BACKEND_DIR = path.resolve(__dirname, "../../../../apps/backend");
 const WEB_DIR = path.resolve(__dirname, "../..");
@@ -425,6 +426,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           // binaries the test runner pre-built, so containers can bind-mount them.
           ...(dockerEnabled
             ? {
+                KANDEV_E2E_DOCKER_SCOPE: E2E_DOCKER_SCOPE,
                 KANDEV_AGENTCTL_LINUX_BINARY: agentctlLinuxBinary,
                 KANDEV_MOCK_AGENT_LINUX_BINARY: mockAgentLinuxBinary,
               }

@@ -1,6 +1,7 @@
 {
-  "account": "Account",
   "archivedLoadFailed": "Archived tasks could not be loaded",
+  "collapseAllBranches": "Collapse all",
+  "orgChart": "Org Chart",
   "retry": "Retry",
   "activeWorkspaceBadge": "Active",
   "activity": "Activity",

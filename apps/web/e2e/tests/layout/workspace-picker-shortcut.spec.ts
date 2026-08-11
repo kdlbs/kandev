@@ -60,8 +60,14 @@ test.describe("Workspace picker shortcut (global)", () => {
       expect(workspaceIds).toContain(second.id);
       expect(workspaceIds.length).toBeGreaterThanOrEqual(2);
 
-      // Opening places focus on the first item. ArrowDown advances to the
-      // next workspace, so the picker remains fully keyboard-operable.
+      // The shortcut opens a controlled menu. Wait for Radix's focus handoff
+      // before sending navigation keys, otherwise the first ArrowDown can land
+      // on the document body on a busy CI runner.
+      await expect(testPage.getByRole("menu")).toBeFocused();
+
+      // Focus lands on the menu itself, so the first ArrowDown moves to item 1
+      // and the second to item 2, with no mouse needed at any point.
+      await testPage.keyboard.press("ArrowDown");
       await expect(testPage.getByTestId(`sidebar-workspace-item-${workspaceIds[0]}`)).toBeFocused();
       await testPage.keyboard.press("ArrowDown");
       await expect(testPage.getByTestId(`sidebar-workspace-item-${workspaceIds[1]}`)).toBeFocused();

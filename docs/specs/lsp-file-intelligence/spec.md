@@ -1,6 +1,7 @@
 ---
 status: building
 created: 2026-07-09
+updated: 2026-08-11
 owner: tbd
 ---
 
@@ -30,8 +31,8 @@ Users inspect and edit code inside Kandev task file tabs, but code navigation an
   - when the server reports no work progress, it says so instead of inventing an indexing state, percentage, or time remaining.
 - The LSP status location is a portable editor preference:
   - `toolbar` is the default and keeps the control beside the current Monaco editor's actions;
-  - `status_bar` moves the active Monaco editor's control and live summary into the application status bar when that feature is enabled on a fine-pointer layout;
-  - if the application status bar is disabled or the layout uses a coarse pointer, Kandev falls back to the editor toolbar without overwriting the saved preference;
+  - `status_bar` moves the active Monaco editor's control and live summary into the application status bar when **Show status bar** is on for a fine-pointer layout;
+  - if **Show status bar** is off or the layout uses a coarse pointer, Kandev falls back to the editor toolbar without overwriting the saved preference;
   - the status-bar item follows only an active, mounted Monaco text editor's session and language and is not a global dashboard of every live server; loading, binary/static, diff, CodeMirror, unsupported, and non-file panels do not expose it.
 - The effective status control remains disclosure-first:
   - fine-pointer toolbar and status-bar controls open the same anchored progress popover;
@@ -233,8 +234,8 @@ No backend or task-host payload transforms are required: both WebSocket proxy ho
 - **GIVEN** initialize has completed and no work item is active, **WHEN** cross-file references are still missing, **THEN** the UI says the server has not reported ongoing analysis rather than labeling the condition as indexing.
 - **GIVEN** a fine-pointer Monaco editor, **WHEN** the user opens the LSP status control, **THEN** an anchored popover presents connection readiness, project progress, and the available lifecycle action.
 - **GIVEN** an LSP server reports a project-progress title or message containing a long URL, path, or identifier without ordinary break points, **WHEN** the user opens either desktop progress popover or the coarse-pointer tablet drawer, **THEN** the full text wraps within that surface without clipping, truncation, or horizontal overflow.
-- **GIVEN** the saved LSP status location is `status_bar`, the application status bar is enabled, and a supported Monaco file is active on a fine-pointer layout, **WHEN** the editor renders, **THEN** the toolbar control is absent and one reorderable status-bar item shows that active file's language and live LSP summary.
-- **GIVEN** the saved LSP status location is `status_bar`, **WHEN** the application status bar is disabled or the current Monaco layout uses a coarse pointer, **THEN** the toolbar control remains available and the saved `status_bar` preference is unchanged.
+- **GIVEN** the saved LSP status location is `status_bar`, **Show status bar** is on, and a supported Monaco file is active on a fine-pointer layout, **WHEN** the editor renders, **THEN** the toolbar control is absent and one reorderable status-bar item shows that active file's language and live LSP summary.
+- **GIVEN** the saved LSP status location is `status_bar`, **WHEN** **Show status bar** is off or the current Monaco layout uses a coarse pointer, **THEN** the toolbar control remains available and the saved `status_bar` preference is unchanged.
 - **GIVEN** the active panel changes from a supported Monaco file to a non-file panel or unsupported file, **WHEN** the status bar is the preferred location, **THEN** the LSP status-bar item hides rather than showing another session or language.
 - **GIVEN** a supported filename is routed to a loading, binary/static, diff, or CodeMirror surface, **WHEN** the status bar is the preferred location, **THEN** no LSP status-bar item or inert Start/Retry action is exposed until an actual Monaco text editor mounts.
 - **GIVEN** a coarse-pointer tablet Monaco editor, **WHEN** the user taps the LSP status control, **THEN** an inset bottom drawer presents the same progress and lifecycle action with a touch-sized trigger and no document-level horizontal overflow.

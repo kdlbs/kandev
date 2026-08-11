@@ -43,10 +43,12 @@ this spec was written and is out of scope.)
   integrations from left panel navigation"**, disabled (off) by default.
 - When that setting is **off** (default), a disabled-but-configured
   integration MUST still appear in the left panel navigation (the sidebar's
-  Integrations section, its mobile-menu equivalent, and the Settings left
-  panel's per-workspace Integrations list under Settings → Workspaces →
-  <workspace>) exactly as it does today for an enabled integration — only
-  credential/health status controls nav visibility.
+  Integrations section, its mobile-menu equivalent, and — whenever a tree
+  menu mode renders it; the default flat menu lists no per-workspace rows at
+  all — the Settings left panel's per-workspace Integrations list under
+  Settings → Workspaces → <workspace>) exactly as it does today for an
+  enabled integration — only credential/health status controls nav
+  visibility.
 - When that setting is **on**, a disabled integration MUST be hidden from all
   of those left-panel surfaces regardless of its credential/health status. An
   enabled, healthy integration is unaffected. Only integrations whose
@@ -150,8 +152,10 @@ toggle).
 - No integration ever hides from a *settings* page based on the new nav
   setting — `hideDisabled` affects only left-panel navigation surfaces
   (`useNavAvailability`'s output for the main sidebar and mobile menu, and
-  `WorkspaceIntegrationItems`' filter for the Settings left panel's
-  per-workspace Integrations tree), never a settings route's reachability.
+  the settings menu's visible-slug filter — `useVisibleIntegrationSlugs` in
+  `use-settings-menu-branches.ts` feeding `integrationNodes` — for the
+  Settings left panel's per-workspace Integrations branch), never a settings
+  route's reachability.
   A user can always reach a disabled integration's own settings page
   directly (by URL, from the index page, or from the sidebar's Settings
   section) and re-enable it even while the left-panel nav entry is hidden.

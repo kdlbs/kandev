@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { listWorkspaceTaskMRs } from "@/lib/api/domains/gitlab-api";
+import { useCallback, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
+import { deleteTaskMR, listWorkspaceTaskMRs } from "@/lib/api/domains/gitlab-api";
 import { useAppStore } from "@/components/state-provider";
+import { useToast } from "@/components/toast-provider";
 import type { TaskMR } from "@/lib/types/gitlab";
 import { useGitLabStatus } from "./use-gitlab-status";
 
@@ -74,4 +76,40 @@ export function useTaskMRs(taskId: string | null, requestedWorkspaceId?: string 
 export function useGitLabAvailable(): boolean {
   const { status } = useGitLabStatus();
   return Boolean(status?.authenticated || status?.token_configured);
+}
+
+/**
+ * Unlink closure shared by MRTopbarButton and MRStatusChip so the two
+ * surfaces can never disagree on unlink behaviour (extracted rather than
+ * duplicated — apps/web/eslint.config.mjs forbids identical functions and
+ * 4+ duplicated strings, so a second copy would be a lint failure).
+ * `workspaceId` may be null across the hook's unconditional call in a
+ * component that only invokes the returned closure once a workspace is
+ * known, mirroring how MRTopbarButton already calls its hooks before its
+ * own `!workspaceId` early return.
+ */
+export function useUnlinkTaskMR(
+  workspaceId: string | null,
+): (associationId: string) => Promise<void> {
+  const { t } = useTranslation();
+  const removeTaskMR = useAppStore((state) => state.removeTaskMR);
+  const { toast } = useToast();
+
+  return useCallback(
+    async (associationId: string) => {
+      if (!workspaceId) return;
+      try {
+        await deleteTaskMR(associationId, workspaceId);
+        removeTaskMR(workspaceId, associationId);
+      } catch (error) {
+        toast({
+          title: t("gitlab:failedToUnlinkMergeRequest"),
+          description:
+            error instanceof Error ? error.message : t("gitlab:theMergeRequestIsStillLinked"),
+          variant: "error",
+        });
+      }
+    },
+    [workspaceId, removeTaskMR, toast, t],
+  );
 }

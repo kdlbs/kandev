@@ -13,7 +13,7 @@ test.describe("Agent-generated task titles", () => {
     const initialEnabled = Boolean(initial.settings.agent_generated_task_titles);
 
     try {
-      await testPage.goto("/settings/general/task-actions");
+      await testPage.goto("/settings/preferences/task-behavior");
       const toggle = testPage.getByRole("switch", { name: "Use the agent for new task titles" });
       if (!(await toggle.isChecked())) await toggle.click();
       await testPage
