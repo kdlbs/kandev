@@ -10,6 +10,7 @@ import {
   DrawerDescription,
   DrawerHeader,
   DrawerTitle,
+  DrawerTrigger,
 } from "@kandev/ui/drawer";
 import { Button } from "@kandev/ui/button";
 import { MRCIPopover } from "./mr-ci-popover";
@@ -59,19 +60,20 @@ export function MRStatusChipDrawer({
 
   return (
     <Drawer open={open} onOpenChange={setOpen}>
-      <button
-        type="button"
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        onClick={() => setOpen(true)}
-        {...attrs}
-      >
-        <MRStatusChipTriggerContent
-          openCount={openCount}
-          liveStatus={liveStatus}
-          automation={automation}
-        />
-      </button>
+      {/* asChild registers this button as Radix's Dialog trigger ref, which its
+          default onCloseAutoFocus reads to restore focus on close — an
+          untracked plain button leaves nothing to focus and it falls back to
+          document.body (spec: Accessibility, "closing the drawer returns
+          focus to the chip trigger"). */}
+      <DrawerTrigger asChild>
+        <button type="button" aria-haspopup="dialog" aria-expanded={open} {...attrs}>
+          <MRStatusChipTriggerContent
+            openCount={openCount}
+            liveStatus={liveStatus}
+            automation={automation}
+          />
+        </button>
+      </DrawerTrigger>
       <DrawerContent data-testid="mr-status-chip-drawer" className="max-h-[80vh] flex flex-col">
         <DrawerHeader className="flex flex-row items-center justify-between border-b py-2">
           <DrawerTitle className="text-sm">
