@@ -365,7 +365,8 @@ interface PluginRegistry {
   // <PluginSlot name="..." slotProps={...}/>. Initial slots: "task-sidebar",
   // "settings-nav", "chat-input-actions", "chat-top-bar",
   // "main-top-bar", "app-status-bar-left", "app-status-bar-right",
-  // "plugin-settings", "task-card-indicators", and "task-card-tags".
+  // "plugin-settings", "task-card-indicators", "task-card-tags", and
+  // "sidebar-workspace-actions".
   // "task-card-indicators" renders a small icon/badge beside the PR status
   // icon on every kanban card and forwards
   // `{ taskId, workspaceId, workflowStepId }` as `slotProps`. Not a closed
@@ -388,6 +389,12 @@ interface PluginRegistry {
   // controls) and forwards `{ workspaceId, workspaceLabel, currentPage }`. It is
   // the app-wide, task-agnostic counterpart to "chat-top-bar", so it carries no
   // task/session ids.
+  // "sidebar-workspace-actions" renders icon buttons in the sidebar's New Task
+  // row, after the built-in Quick Terminal and Quick Chat actions, and forwards
+  // `{ workspaceId: string | null, workspaceLabel?: string }` as `slotProps`.
+  // Hidden together with the built-in actions when the sidebar rail is
+  // collapsed or no workspace is active — a registered component never
+  // receives a null workspaceId from a mounted instance of this slot.
   // Resolving a session id to an agent/ACP transcript id (e.g. to key
   // tokscale cost data on a session) is the plugin's job, done server-side in
   // the plugin backend via the Host data API; the host only propagates ids.

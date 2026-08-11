@@ -90,11 +90,15 @@ export interface PluginRouteOptions {
  * another plugin's page and authors don't gate on the current id themselves.
  * "task-card-indicators" (small icon/badge rendered beside the PR status icon
  * on every kanban card — receives `{ taskId, workspaceId, workflowStepId }`
- * as `slotProps`), and "task-card-tags" (its own row on every kanban card,
+ * as `slotProps`), "task-card-tags" (its own row on every kanban card,
  * rendered below the badges row — for contributions too wide for the cramped
  * title-row `task-card-indicators` spot, e.g. a row of tag chips — receives
- * `TaskCardTagsSlotProps` as `slotProps`). Not a closed union — hosts may
- * register additional slot names.
+ * `TaskCardTagsSlotProps` as `slotProps`), and "sidebar-workspace-actions"
+ * (icon-button cluster in the sidebar's New Task row, after the built-in
+ * Quick Terminal and Quick Chat actions — hidden together with them when the
+ * sidebar is collapsed or no workspace is active — receives
+ * `SidebarWorkspaceActionsSlotProps` as `slotProps`). Not a closed union —
+ * hosts may register additional slot names.
  */
 export type PluginSlotName = string;
 

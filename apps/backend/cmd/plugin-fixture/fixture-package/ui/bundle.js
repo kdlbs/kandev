@@ -21,8 +21,8 @@
  * round-trips a single per-user document through host.storage
  * (get on mount, debounced set, subscribe to pick up a write from another
  * tab/surface), a task-card-indicators slot component, a task-card-tags slot
- * component, and a registerTaskMenuAction under the kanban card's "edit"
- * group.
+ * component, a sidebar-workspace-actions slot component, and a
+ * registerTaskMenuAction under the kanban card's "edit" group.
  *
  * The task-created counter lives in module scope (not component state) with
  * a tiny listener set, so it survives across route navigations (the page
@@ -234,6 +234,20 @@
         );
       }
 
+      function WorkspaceActionsSlot(props) {
+        var slotProps = props.slotProps || {};
+        return jsx(
+          "button",
+          {
+            type: "button",
+            "data-testid": "e2e-sidebar-workspace-actions",
+            "data-workspace-id": slotProps.workspaceId,
+            "data-workspace-label": slotProps.workspaceLabel || "",
+          },
+          "W",
+        );
+      }
+
       function StatusSlot(props) {
         var slotProps = props.slotProps || {};
         var id = slotProps.placement === "left" ? "hello-status-left" : "hello-status-right";
@@ -271,6 +285,7 @@
       });
       registry.registerComponent("task-card-indicators", CardIndicator);
       registry.registerComponent("task-card-tags", CardTags);
+      registry.registerComponent("sidebar-workspace-actions", WorkspaceActionsSlot);
       registry.registerTaskMenuAction({
         id: "enhance-notes",
         label: "Enhance notes",

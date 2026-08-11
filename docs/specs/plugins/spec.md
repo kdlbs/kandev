@@ -639,6 +639,12 @@ Mattermost-webapp model), not iframes. The full contract lives in
   kanban card (below the badges row), receiving the same
   `{ taskId, workspaceId, workflowStepId }` shape — for a contribution too wide
   for the cramped title-row `task-card-indicators` spot, e.g. a row of tag chips.
+- **Sidebar workspace actions:** `registerComponent("sidebar-workspace-actions", C)`
+  renders `C` in the sidebar's New Task row action cluster, after the built-in
+  Quick Terminal and Quick Chat icons, receiving
+  `{ workspaceId: string | null, workspaceLabel?: string }` as `slotProps`. Hidden
+  together with the built-in actions when the sidebar is collapsed or no
+  workspace is active, so a mounted instance's `workspaceId` is never null.
 - **`host.storage`:** authenticated, per-user key/value storage
   (`get`/`set`/`delete`/`list`/`subscribe`), backed by the `plugin_user_state`
   table (separate from the plugin-backend-only `plugin_state` table — no gRPC/proto
@@ -941,6 +947,21 @@ complete.
   render, **WHEN** that card renders, **THEN** the card's title and its other
   slot components (e.g. `"task-card-indicators"`) still render, isolated by
   the existing per-registration error boundary.
+
+- **GIVEN** a plugin registers a component for `"sidebar-workspace-actions"`,
+  **WHEN** the sidebar's New Task row renders with the rail expanded and a
+  workspace active, **THEN** that component mounts in the row's action
+  cluster after the built-in Quick Terminal and Quick Chat icons, receiving
+  `{ workspaceId, workspaceLabel }` for the active workspace, and the row's
+  reserved inset widens so the new icon never overlaps the "New Task" label.
+  **GIVEN** no plugin is registered for the slot, **WHEN** the row renders,
+  **THEN** the inset matches its pre-existing two-icon width. **GIVEN** the
+  rail is collapsed or no workspace is active, **WHEN** the row renders,
+  **THEN** no `"sidebar-workspace-actions"` markup renders, matching the
+  built-in icons' own visibility. **GIVEN** a `"sidebar-workspace-actions"`
+  component throws during render, **WHEN** the row renders, **THEN** Quick
+  Terminal and Quick Chat still render and function, isolated by the existing
+  per-registration error boundary.
 
 ## Out of scope
 

@@ -215,6 +215,7 @@ to strings, but an unmounted name renders nowhere.
 | plugin-settings | Top of this plugin's Settings > Plugins page | { pluginId, status }; owner-scoped to the plugin being viewed |
 | task-card-indicators | Kanban card, beside the PR status icon | { taskId, workspaceId, workflowStepId } |
 | task-card-tags | Kanban card, its own row below the badges row | { taskId, workspaceId, workflowStepId } |
+| sidebar-workspace-actions | Sidebar New Task row, after Quick Terminal and Quick Chat | { workspaceId, workspaceLabel? } |
 
 AppStatusBarSlotProps is { placement, presentation, density, pathname,
 activeWorkspaceId, activeTaskId, activeSessionId }. Desktop presentation is a

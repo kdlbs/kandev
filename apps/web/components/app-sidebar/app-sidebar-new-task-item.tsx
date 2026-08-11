@@ -16,6 +16,8 @@ import { IMPROVE_KANDEV_WORKSPACE_NAME } from "@/components/improve-kandev-dialo
 import { linkToTask } from "@/lib/links";
 import type { Task } from "@/lib/types/http";
 import { subscribeNewTaskCreationRequests } from "@/lib/desktop/new-task-request";
+import { usePluginRegistry } from "@/lib/plugins/registry";
+import { AppSidebarWorkspaceActions } from "./app-sidebar-workspace-actions";
 
 // The Office "New issue" dialog only renders on `/office` routes, but this item
 // lives in the global sidebar (every page). Lazy-load it so its office-only
@@ -38,6 +40,19 @@ function useNewTaskCreationRequest(workspaceId: string | null, openDialog: () =>
 }
 
 const ROW_ACTION_INSET_CLASS = "pr-16";
+// Reserved inset once a plugin registers for "sidebar-workspace-actions"
+// (A3) — pr-16 only has room for the two built-in icons (Quick Terminal,
+// Quick Chat); a third 24px icon needs more space so it never overlaps the
+// "New Task" label. A static class (not an interpolated string) because
+// Tailwind's JIT can't see class names built at runtime.
+const ROW_ACTION_INSET_CLASS_WITH_PLUGIN_SLOT = "pr-20";
+
+function resolveActionInsetClass(canOpenRowActions: boolean, hasPluginSlotRegistration: boolean) {
+  if (!canOpenRowActions) return undefined;
+  return hasPluginSlotRegistration
+    ? ROW_ACTION_INSET_CLASS_WITH_PLUGIN_SLOT
+    : ROW_ACTION_INSET_CLASS;
+}
 type RowActionButtonProps = {
   icon: TablerIcon;
   label: string;
@@ -179,8 +194,14 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
   }, [isImproveWorkspace, setImproveDialogOpen]);
   useNewTaskCreationRequest(workspaceId, handleOpenNewTask);
 
+  const workspaceActionsSlotCount = usePluginRegistry().getSlotRegistrations(
+    "sidebar-workspace-actions",
+  ).length;
   const canOpenRowActions = !collapsed && !!workspaceId;
-  const actionInsetClass = canOpenRowActions ? ROW_ACTION_INSET_CLASS : undefined;
+  const actionInsetClass = resolveActionInsetClass(
+    canOpenRowActions,
+    workspaceActionsSlotCount > 0,
+  );
   const handleRegularTaskCreated = useCallback(
     (
       task: Task,
@@ -224,6 +245,10 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
               label={t("sidebar:quickChat")}
               testId="sidebar-quick-chat-shortcut"
               onClick={handleOpenQuickChat}
+            />
+            <AppSidebarWorkspaceActions
+              workspaceId={workspaceId}
+              workspaceLabel={activeWorkspace?.name}
             />
           </div>
         )}
