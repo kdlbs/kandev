@@ -480,3 +480,168 @@ func TestCheckSessionMRDeniesOwnSessionPairedWithForeignTask(t *testing.T) {
 		t.Error("found = true; an owned session must not unlock another user's task")
 	}
 }
+
+// TestGitLabProjectPathFromRemoteURL covers the remote-URL shapes a
+// self-managed GitLab (or a gitlab.com repo added as source_type: local)
+// must resolve a project path from, including nested subgroups, since
+// detectPushAndAssociateMR reassembles owner+"/"+repoName into the project
+// path it sends to the GitLab API.
+func TestGitLabProjectPathFromRemoteURL(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+		want string
+	}{
+		{"self-managed ssh nested subgroup", "ssh://gitlab.example.com/group/subgroup/project", "group/subgroup/project"},
+		{"self-managed https with .git", "https://gitlab.example.com/group/project.git", "group/project"},
+		{"self-managed scp-style", "git@gitlab.example.com:group/subgroup/project.git", "group/subgroup/project"},
+		{"gitlab.com", "https://gitlab.com/owner/repo", "owner/repo"},
+		{"empty", "", ""},
+		{"malformed", "not-a-url", ""},
+		{"no project segment", "https://gitlab.example.com/onlyowner", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := gitLabProjectPathFromRemoteURL(tt.url)
+			if got != tt.want {
+				t.Errorf("gitLabProjectPathFromRemoteURL(%q) = %q, want %q", tt.url, got, tt.want)
+			}
+		})
+	}
+}
+
+// seedSelfManagedGitLabSessionWithRepo mirrors seedGitLabSessionWithRepo but
+// reproduces the live-instance row shape for a self-managed GitLab
+// repository: all four provider columns (provider, provider_host,
+// provider_owner, provider_name) are empty, and remote_url is the only
+// identity signal — source_type: local repos, and any repo added before
+// self-managed hosts got a discovery-time provider tag, look exactly like
+// this.
+func seedSelfManagedGitLabSessionWithRepo(t *testing.T) (*Service, *fakeGitLabMRLinkService) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	repoObj := &models.Repository{
+		ID: "repo1", WorkspaceID: "ws1", Name: "forge",
+		SourceType: "local",
+		RemoteURL:  "ssh://gitlab.example.com/group/subgroup/project",
+		CreatedAt:  now, UpdatedAt: now,
+	}
+	if err := repo.CreateRepository(ctx, repoObj); err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
+	if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID: "tr1", TaskID: "t1", RepositoryID: "repo1", CheckoutBranch: "feat/a",
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create task repository: %v", err)
+	}
+	session, _ := repo.GetTaskSession(ctx, "s1")
+	session.RepositoryID = "repo1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	fake := &fakeGitLabMRLinkService{taskMRs: make(map[string][]*gitlab.TaskMR)}
+	fake.isConfiguredGitLabHostFunc = func(_ context.Context, _, _ string) bool { return true }
+	svc.SetGitLabMRLinkService(fake)
+	return svc, fake
+}
+
+// TestDetectPushAndAssociateMR_SelfManagedGitLabResolvesProjectFromRemoteURL
+// is the regression test for the self-managed-GitLab auto-link gap: a
+// repository row with every provider column empty (source_type: local, or
+// any repo added before self-managed hosts got a discovery-time tag) must
+// still reach AutoLinkMRForBranch, deriving the project path from remote_url
+// instead of the never-populated provider_owner/provider_name. Before the
+// resolveGitLabPushProject fallback this failed with 0 AutoLinkMRForBranch
+// calls, because resolvePushRepo alone returns empty owner/name for any
+// non-github.com, non-provider-tagged repository.
+func TestDetectPushAndAssociateMR_SelfManagedGitLabResolvesProjectFromRemoteURL(t *testing.T) {
+	svc, fake := seedSelfManagedGitLabSessionWithRepo(t)
+	var gotProjectPath string
+	fake.autoLinkFunc = func(_ context.Context, _, _, _, repositoryID, projectPath, branch string) (*gitlab.TaskMR, error) {
+		gotProjectPath = projectPath
+		return &gitlab.TaskMR{TaskID: "t1", RepositoryID: repositoryID, ProjectPath: projectPath, MRIID: 5, HeadBranch: branch}, nil
+	}
+
+	svc.detectPushAndAssociateMR(context.Background(), "s1", "t1", "", "feat/a")
+
+	if fake.autoLinkCalls != 1 {
+		t.Fatalf("expected 1 AutoLinkMRForBranch call for a self-managed GitLab repo with empty provider columns, got %d", fake.autoLinkCalls)
+	}
+	if gotProjectPath != "group/subgroup/project" {
+		t.Fatalf("projectPath = %q, want %q (nested subgroup must survive)", gotProjectPath, "group/subgroup/project")
+	}
+	if fake.lastAutoLinkRepositoryID != "repo1" {
+		t.Fatalf("repositoryID = %q, want repo1", fake.lastAutoLinkRepositoryID)
+	}
+}
+
+// TestCheckSessionMR_SelfManagedGitLabResolvesProjectFromRemoteURL is the
+// on-demand-check twin of the push-detection regression test above.
+func TestCheckSessionMR_SelfManagedGitLabResolvesProjectFromRemoteURL(t *testing.T) {
+	svc, fake := seedSelfManagedGitLabSessionWithRepo(t)
+	var gotProjectPath string
+	fake.autoLinkFunc = func(_ context.Context, _, _, _, repositoryID, projectPath, branch string) (*gitlab.TaskMR, error) {
+		gotProjectPath = projectPath
+		return &gitlab.TaskMR{TaskID: "t1", RepositoryID: repositoryID, ProjectPath: projectPath, MRIID: 5, HeadBranch: branch}, nil
+	}
+
+	found, err := svc.CheckSessionMR(context.Background(), "t1", "s1")
+
+	if err != nil {
+		t.Fatalf("CheckSessionMR: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true for a self-managed GitLab repo with empty provider columns")
+	}
+	if gotProjectPath != "group/subgroup/project" {
+		t.Fatalf("projectPath = %q, want %q (nested subgroup must survive)", gotProjectPath, "group/subgroup/project")
+	}
+}
+
+// TestDetectPushAndAssociatePR_SelfManagedGitLabRemoteStillBails pins the
+// "do not widen the shared helper" decision behind the self-managed-GitLab
+// auto-link fix: resolvePushRepo (shared with the GitHub path) must keep
+// returning empty owner/name for a non-github.com remote even though
+// resolveGitLabPushProject now has its own remote_url fallback on the
+// GitLab-only path. If a future refactor widened resolvePushRepo instead,
+// this repository would start reaching the GitHub API with a GitLab
+// owner/name whenever routing ever misfired (e.g. no GitLab connection
+// configured for the workspace).
+func TestDetectPushAndAssociatePR_SelfManagedGitLabRemoteStillBails(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	repoObj := &models.Repository{
+		ID: "repo1", WorkspaceID: "ws1", Name: "forge",
+		SourceType: "local",
+		RemoteURL:  "ssh://gitlab.example.com/group/subgroup/project",
+		CreatedAt:  now, UpdatedAt: now,
+	}
+	if err := repo.CreateRepository(ctx, repoObj); err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
+	session, _ := repo.GetTaskSession(ctx, "s1")
+	session.RepositoryID = "repo1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	ghSvc := &mockGitHubService{}
+	svc.SetGitHubService(ghSvc)
+
+	svc.detectPushAndAssociatePR(ctx, "s1", "t1", "", "feat/a")
+
+	if ghSvc.getPRWatchBySessionRepoAndBranchCalls != 0 {
+		t.Fatalf("expected detectPushAndAssociatePR to bail before any GitHub lookup for a GitLab remote (resolvePushRepo must still return empty owner/name), got %d watch lookups",
+			ghSvc.getPRWatchBySessionRepoAndBranchCalls)
+	}
+}

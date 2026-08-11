@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/gitlab"
+	"github.com/kandev/kandev/internal/task/service"
 )
 
 // detectPushAndAssociateMR is the GitLab twin of detectPushAndAssociatePR: on
@@ -36,11 +37,10 @@ func (s *Service) detectPushAndAssociateMR(
 	if workspaceID == "" {
 		return
 	}
-	owner, repoName, repositoryID := s.resolvePushRepo(ctx, sessionID, taskID, repositoryName)
-	if owner == "" || repoName == "" || repositoryID == "" {
+	projectPath, repositoryID := s.resolveGitLabPushProject(ctx, sessionID, taskID, repositoryName)
+	if projectPath == "" || repositoryID == "" {
 		return
 	}
-	projectPath := owner + "/" + repoName
 
 	// Already linked for this (task, repository, branch) — don't re-link, but
 	// still make sure the refresh watch exists. AssociateExistingMRByURL (the
@@ -207,15 +207,14 @@ func (s *Service) CheckSessionMR(ctx context.Context, taskID, sessionID string) 
 		return false, nil
 	}
 
-	owner, repoName, repositoryID := s.resolvePushRepo(ctx, sessionID, taskID, "")
-	if owner == "" || repoName == "" || repositoryID == "" {
+	projectPath, repositoryID := s.resolveGitLabPushProject(ctx, sessionID, taskID, "")
+	if projectPath == "" || repositoryID == "" {
 		return false, nil
 	}
 	branch := strings.TrimSpace(s.resolvePRWatchBranch(ctx, taskID, sessionID, ""))
 	if branch == "" {
 		return false, nil
 	}
-	projectPath := owner + "/" + repoName
 
 	// Already associated for this exact (repository, branch) — ensure its
 	// watch exists (Create-MR action / manual URL linking writes
@@ -257,4 +256,62 @@ func (s *Service) CheckSessionMR(ctx context.Context, taskID, sessionID string) 
 		return false, nil
 	}
 	return true, nil
+}
+
+// gitLabProjectPathFromRemoteURL derives a GitLab project path
+// ("group/subgroup/project") from a raw git remote URL, reusing
+// service.ParseGitRemoteIdentity so nested subgroups and every ssh/https/scp
+// remote shape stay in sync with the rest of the codebase's identity
+// parsing. Returns "" when the URL is empty, malformed, or has no project
+// segment.
+func gitLabProjectPathFromRemoteURL(remoteURL string) string {
+	_, projectPath := service.ParseGitRemoteIdentity(remoteURL)
+	return projectPath
+}
+
+// resolveGitLabPushProject returns (projectPath, repositoryID) for the
+// GitLab push-detection and on-demand-check paths. resolvePushRepo alone is
+// not enough here: it is shared with the GitHub path and only recognizes a
+// durable provider_owner/provider_name, which self-managed GitLab
+// repositories never get (only github.com/gitlab.com are tagged at
+// discovery time — see resolvePushRepositoryProvider's doc comment in
+// event_handlers_git.go). When that owner/name is empty, fall back to the
+// repository row's remote_url and finally to the local checkout, mirroring
+// the fallback ValidateTaskMRRepositoryIdentity already applies when
+// validating a manually-linked MR (internal/gitlab/store_task_mr_link.go).
+// Resolves in-memory only on every call and never writes provider columns:
+// per AGENTS.md "Repository provider identity", a row with no provider_host
+// has unknown identity and must fail closed for provider writes, so
+// persisting a provider_owner/provider_name here without provider_host would
+// manufacture exactly that ambiguous shape. A wrong guess here cannot link
+// the wrong MR either way — AutoLinkMRForBranch's
+// ValidateTaskMRRepositoryIdentity independently checks the resolved project
+// path against the workspace's configured GitLab host before persisting.
+func (s *Service) resolveGitLabPushProject(
+	ctx context.Context, sessionID, taskID, repositoryName string,
+) (projectPath, repositoryID string) {
+	owner, name, repositoryID := s.resolvePushRepo(ctx, sessionID, taskID, repositoryName)
+	if repositoryID == "" {
+		return "", ""
+	}
+	if owner != "" && name != "" {
+		return owner + "/" + name, repositoryID
+	}
+	store, ok := s.repo.(repoStore)
+	if !ok {
+		return "", repositoryID
+	}
+	repoObj, err := store.GetRepository(ctx, repositoryID)
+	if err != nil || repoObj == nil {
+		return "", repositoryID
+	}
+	if p := gitLabProjectPathFromRemoteURL(repoObj.RemoteURL); p != "" {
+		return p, repositoryID
+	}
+	if repoObj.LocalPath != "" {
+		if _, localOwner, localName := service.ResolveGitRemoteIdentity(repoObj.LocalPath); localOwner != "" && localName != "" {
+			return localOwner + "/" + localName, repositoryID
+		}
+	}
+	return "", repositoryID
 }

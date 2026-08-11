@@ -337,7 +337,11 @@ func (s *Service) resolvePushRepositoryProvider(ctx context.Context, sessionID, 
 	// repositories, not just a narrow backfill race. remote_url is their only
 	// durable identity signal (still populated by the same production
 	// backfill), so compare it against the workspace's own configured GitLab
-	// connection instead of a hostname allowlist.
+	// connection instead of a hostname allowlist. This gap is scoped to the
+	// Provider tag only: the project path (owner/name) these repositories
+	// need for MR auto-linking has its own remote_url/local-checkout fallback
+	// in resolveGitLabPushProject (event_handlers_gitlab_mr.go), so a missing
+	// tag here does not by itself block auto-link.
 	if s.gitlabMRLinkService != nil && repoObj.RemoteURL != "" {
 		if workspaceID := s.taskWorkspaceID(ctx, taskID); workspaceID != "" &&
 			s.gitlabMRLinkService.IsConfiguredGitLabHost(ctx, workspaceID, repoObj.RemoteURL) {
