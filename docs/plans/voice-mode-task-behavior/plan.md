@@ -92,7 +92,9 @@ coverage before capturing both affected viewports and publishing those screensho
 Implemented. Focused unit coverage passes 95 tests across the Voice Mode component, settings menu,
 discovery catalog, and route registry. Typecheck, i18n checks, i18n ratchet, formatting, public-doc
 tests, desktop E2E, and mobile E2E all pass. Desktop and Pixel 5 screenshots are captured in the
-ignored `.pr-assets` directory and will be published through the PR media branch.
+ignored `.pr-assets` directory and published through the PR media branch. The ready PR is
+[#2534](https://github.com/kdlbs/kandev/pull/2534); media is on
+`media/pr-2534-screenshots` at commit `d8e82197519c4ef6b2bb311eb7ee8e7224d166b1`.
 
 ## Implementation Waves And Parallel Candidates
 

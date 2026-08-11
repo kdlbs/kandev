@@ -69,4 +69,7 @@ horizontally. Capture the native mobile page rather than cropping a desktop imag
 - Mobile E2E passes both the merged Settings page and the mobile chat mic behavior.
 - Fresh synthetic desktop and Pixel 5 screenshots are captured and inspected in the ignored
   `.pr-assets` directory; the manifest contains both assets.
-- Public-doc tests and `git diff --check` pass. PR publication is completed after commit and push.
+- Public-doc tests and `git diff --check` pass.
+- Ready PR: https://github.com/kdlbs/kandev/pull/2534. Screenshot media is published at commit
+  `d8e82197519c4ef6b2bb311eb7ee8e7224d166b1` on `media/pr-2534-screenshots`; no screenshot
+  binaries were added to the feature branch.
