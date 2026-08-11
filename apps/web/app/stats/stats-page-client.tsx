@@ -10,7 +10,7 @@ import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import { IconChartBar } from "@tabler/icons-react";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import type {
-  AgentUsageDTO,
+  ModelUsageDTO,
   CompletedTaskActivityDTO,
   DailyActivityDTO,
   GitStatsDTO,
@@ -27,7 +27,7 @@ import {
 } from "./stats-sections";
 import {
   ActivityHeatmap,
-  AgentUsageList,
+  ModelUsageList,
   CompletedTasksChart,
   MostProductiveSummary,
 } from "./stats-charts";
@@ -251,11 +251,11 @@ function CompletedPanel({ status }: { status: SectionStatus<CompletedTaskActivit
 
 function ActivityPanel({
   daily,
-  agents,
+  models,
   rangeLabel,
 }: {
   daily: SectionStatus<DailyActivityDTO[]>;
-  agents: SectionStatus<AgentUsageDTO[]>;
+  models: SectionStatus<ModelUsageDTO[]>;
   rangeLabel: string;
 }) {
   const { t } = useTranslation();
@@ -277,18 +277,18 @@ function ActivityPanel({
           </Card>
         ),
       })}
-      {renderSection(agents, {
+      {renderSection(models, {
         skeleton: <ActivitySkeleton />,
-        errorTitle: t("stats:topAgents"),
+        errorTitle: t("stats:topModels"),
         ready: (data) => (
           <Card className="rounded-sm">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                {t("stats:topAgents")}
+                {t("stats:topModels")}
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <AgentUsageList agentUsage={data} />
+              <ModelUsageList modelUsage={data} />
             </CardContent>
           </Card>
         ),
@@ -384,7 +384,7 @@ function StatsContent({
           <OverviewPanel global={sections.global} git={sections.git} />
           <SectionDivider id="telemetry" label={t("stats:telemetry")} />
           <CompletedPanel status={sections.completed} />
-          <ActivityPanel daily={sections.daily} agents={sections.agents} rangeLabel={rangeLabel} />
+          <ActivityPanel daily={sections.daily} models={sections.models} rangeLabel={rangeLabel} />
           <RepositoryActivityPanel status={sections.repos} />
           <TopRepositoriesPanel status={sections.repos} />
           <RepoLeadersPanel status={sections.repos} />

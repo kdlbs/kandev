@@ -53,14 +53,18 @@ type CompletedTaskActivity struct {
 	CompletedTasks int    `json:"completed_tasks"`
 }
 
-// AgentUsage represents usage statistics for a single agent profile
-type AgentUsage struct {
-	AgentProfileID   string `json:"agent_profile_id"`
-	AgentProfileName string `json:"agent_profile_name"`
-	AgentModel       string `json:"agent_model"`
-	SessionCount     int    `json:"session_count"`
-	TurnCount        int    `json:"turn_count"`
-	TotalDurationMs  int64  `json:"total_duration_ms"`
+// ModelUsage represents usage statistics for a single model.
+//
+// Usage is keyed by model rather than by agent profile because a profile is
+// mutable: it gets renamed and repointed at other models, so its sessions carry
+// several different snapshots and no single one of them describes the group.
+// A model string never changes meaning, so every row is exactly true and a
+// short range's counts are always contained in the longer range around it.
+type ModelUsage struct {
+	Model           string `json:"model"`
+	SessionCount    int    `json:"session_count"`
+	TurnCount       int    `json:"turn_count"`
+	TotalDurationMs int64  `json:"total_duration_ms"`
 }
 
 // RepositoryStats represents aggregated statistics for a repository in a workspace

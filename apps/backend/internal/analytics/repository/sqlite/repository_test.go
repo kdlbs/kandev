@@ -691,7 +691,7 @@ func TestGetCompletedTaskActivity_ExcludesEphemeralTasks(t *testing.T) {
 	}
 }
 
-func TestGetAgentUsage_ExcludesEphemeralTasks(t *testing.T) {
+func TestGetModelUsage_ExcludesEphemeralTasks(t *testing.T) {
 	dbConn := createTestDB(t)
 	repo, err := NewWithDB(dbConn, dbConn)
 	if err != nil {
@@ -708,12 +708,12 @@ func TestGetAgentUsage_ExcludesEphemeralTasks(t *testing.T) {
 	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES ('task-regular', 'ws-1', 'board-1', '', 'Regular', 0, ?, ?)`, nowStr, nowStr)
 	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES ('task-ephemeral', 'ws-1', 'board-1', '', 'Quick Chat', 1, ?, ?)`, nowStr, nowStr)
 
-	execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, agent_profile_snapshot, state, started_at, updated_at) VALUES ('sess-regular', 'task-regular', 'agent-1', '{"name":"Agent"}', 'COMPLETED', ?, ?)`, nowStr, nowStr)
-	execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, agent_profile_snapshot, state, started_at, updated_at) VALUES ('sess-ephemeral', 'task-ephemeral', 'agent-1', '{"name":"Agent"}', 'COMPLETED', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, agent_profile_snapshot, state, started_at, updated_at) VALUES ('sess-regular', 'task-regular', 'agent-1', '{"name":"Agent","model":"opus"}', 'COMPLETED', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, agent_profile_snapshot, state, started_at, updated_at) VALUES ('sess-ephemeral', 'task-ephemeral', 'agent-1', '{"name":"Agent","model":"opus"}', 'COMPLETED', ?, ?)`, nowStr, nowStr)
 
-	results, err := repo.GetAgentUsage(ctx, "ws-1", 5, nil)
+	results, err := repo.GetModelUsage(ctx, "ws-1", 5, nil)
 	if err != nil {
-		t.Fatalf("GetAgentUsage failed: %v", err)
+		t.Fatalf("GetModelUsage failed: %v", err)
 	}
 
 	totalSessions := 0
@@ -723,6 +723,258 @@ func TestGetAgentUsage_ExcludesEphemeralTasks(t *testing.T) {
 	if totalSessions != 1 {
 		t.Errorf("expected 1 session (ephemeral excluded), got %d", totalSessions)
 	}
+}
+
+// The reported bug: a shorter range advertised a model that the longer range
+// containing it never mentioned, because usage was keyed by the agent profile
+// and each range labelled the group from whichever session row it happened to
+// read. Keyed by model, a range's rows are always a subset of the wider range's
+// rows and every count only grows.
+func TestGetModelUsage_CountsNestAcrossRanges(t *testing.T) {
+	dbConn := createTestDB(t)
+	repo, err := NewWithDB(dbConn, dbConn)
+	if err != nil {
+		t.Fatalf("NewWithDB failed: %v", err)
+	}
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	nowStr := now.Format(time.RFC3339)
+
+	execOrFatal(t, dbConn, `INSERT INTO workspaces (id, name, created_at, updated_at) VALUES ('ws-1', 'Test', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO boards (id, workspace_id, name, created_at, updated_at) VALUES ('board-1', 'ws-1', 'Board', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES ('task-1', 'ws-1', 'board-1', '', 'Task', 0, ?, ?)`, nowStr, nowStr)
+
+	// One profile, repointed at a different model twice over the period.
+	sessions := []struct {
+		id       string
+		snapshot string
+		age      time.Duration
+	}{
+		{"sess-recent-a", `{"name":"Default (recommended)","model":"opus[1m]"}`, 24 * time.Hour},
+		{"sess-recent-b", `{"name":"Default (recommended)","model":"opus[1m]"}`, 3 * 24 * time.Hour},
+		{"sess-mid", `{"name":"Default (recommended)","model":"claude-fable-5[1m]"}`, 12 * 24 * time.Hour},
+		{"sess-old", `{"name":"Default","model":"sonnet"}`, 40 * 24 * time.Hour},
+	}
+	for _, s := range sessions {
+		startedAt := now.Add(-s.age).Format(time.RFC3339)
+		execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, agent_profile_snapshot, state, started_at, updated_at) VALUES (?, 'task-1', 'agent-1', ?, 'COMPLETED', ?, ?)`,
+			s.id, s.snapshot, startedAt, startedAt)
+	}
+
+	weekStart := now.Add(-7 * 24 * time.Hour)
+	monthStart := now.Add(-30 * 24 * time.Hour)
+
+	cases := []struct {
+		name  string
+		start *time.Time
+		want  map[string]int
+	}{
+		{"last week", &weekStart, map[string]int{"opus[1m]": 2}},
+		{"last month", &monthStart, map[string]int{"opus[1m]": 2, "claude-fable-5[1m]": 1}},
+		{"all time", nil, map[string]int{"opus[1m]": 2, "claude-fable-5[1m]": 1, "sonnet": 1}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			results, err := repo.GetModelUsage(ctx, "ws-1", 5, tc.start)
+			if err != nil {
+				t.Fatalf("GetModelUsage failed: %v", err)
+			}
+			got := map[string]int{}
+			for _, r := range results {
+				got[r.Model] = r.SessionCount
+			}
+			if fmt.Sprint(got) != fmt.Sprint(tc.want) {
+				t.Errorf("expected %v, got %v", tc.want, got)
+			}
+		})
+	}
+}
+
+// Two profiles pointed at the same model are one line of usage, not two rows
+// disagreeing about what ran.
+func TestGetModelUsage_MergesProfilesSharingAModel(t *testing.T) {
+	dbConn := createTestDB(t)
+	repo, err := NewWithDB(dbConn, dbConn)
+	if err != nil {
+		t.Fatalf("NewWithDB failed: %v", err)
+	}
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	nowStr := now.Format(time.RFC3339)
+
+	execOrFatal(t, dbConn, `INSERT INTO workspaces (id, name, created_at, updated_at) VALUES ('ws-1', 'Test', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO boards (id, workspace_id, name, created_at, updated_at) VALUES ('board-1', 'ws-1', 'Board', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES ('task-1', 'ws-1', 'board-1', '', 'Task', 0, ?, ?)`, nowStr, nowStr)
+
+	sessions := []struct{ id, profile, snapshot string }{
+		{"sess-a", "agent-default", `{"name":"Default (recommended)","model":"opus[1m]"}`},
+		{"sess-b", "agent-sonnet", `{"name":"Sonnet","model":"opus[1m]"}`},
+		// model_name and llm are the fallback snapshot keys for the same field.
+		{"sess-c", "agent-alt", `{"name":"Alt","model_name":"opus[1m]"}`},
+		{"sess-d", "agent-legacy", `{"name":"Legacy","llm":"opus[1m]"}`},
+		// No model recorded at all: counted nowhere rather than under a blank label.
+		{"sess-e", "agent-unknown", `{"name":"Unknown"}`},
+	}
+	for _, s := range sessions {
+		execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, agent_profile_snapshot, state, started_at, updated_at) VALUES (?, 'task-1', ?, ?, 'COMPLETED', ?, ?)`,
+			s.id, s.profile, s.snapshot, nowStr, nowStr)
+	}
+
+	results, err := repo.GetModelUsage(ctx, "ws-1", 5, nil)
+	if err != nil {
+		t.Fatalf("GetModelUsage failed: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 model row, got %d: %+v", len(results), results)
+	}
+	if results[0].Model != "opus[1m]" || results[0].SessionCount != 4 {
+		t.Errorf("expected opus[1m] with 4 sessions, got %q with %d", results[0].Model, results[0].SessionCount)
+	}
+}
+
+// Rows tied on session count must come back in a stable order rather than
+// shuffling between reloads of the same stats page.
+func TestGetModelUsage_OrdersTiesDeterministically(t *testing.T) {
+	dbConn := createTestDB(t)
+	repo, err := NewWithDB(dbConn, dbConn)
+	if err != nil {
+		t.Fatalf("NewWithDB failed: %v", err)
+	}
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	nowStr := now.Format(time.RFC3339)
+
+	execOrFatal(t, dbConn, `INSERT INTO workspaces (id, name, created_at, updated_at) VALUES ('ws-1', 'Test', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO boards (id, workspace_id, name, created_at, updated_at) VALUES ('board-1', 'ws-1', 'Board', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES ('task-1', 'ws-1', 'board-1', '', 'Task', 0, ?, ?)`, nowStr, nowStr)
+
+	for _, model := range []string{"zeta", "alpha", "mu"} {
+		execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, agent_profile_snapshot, state, started_at, updated_at) VALUES (?, 'task-1', 'agent-1', ?, 'COMPLETED', ?, ?)`,
+			"sess-"+model, fmt.Sprintf(`{"name":"Agent","model":%q}`, model), nowStr, nowStr)
+	}
+
+	want := []string{"alpha", "mu", "zeta"}
+	for attempt := 0; attempt < 3; attempt++ {
+		results, err := repo.GetModelUsage(ctx, "ws-1", 5, nil)
+		if err != nil {
+			t.Fatalf("GetModelUsage failed: %v", err)
+		}
+		got := make([]string, 0, len(results))
+		for _, r := range results {
+			got = append(got, r.Model)
+		}
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Fatalf("attempt %d: expected %v, got %v", attempt, want, got)
+		}
+	}
+}
+
+// Rows dated on the range's first day used to be dropped wholesale: the
+// boundary was bound as an RFC3339 string whose "T" separator sorts above the
+// space in the layout SQLite actually stores, and the TIMESTAMP columns' NUMERIC
+// affinity leaves a text parameter uncoerced, so ">=" was comparing strings.
+// "Last 7 days" was really the last 6 days plus today.
+//
+// Every timestamp here is written the way production writes it — by handing the
+// driver a time.Time — because the other tests in this file insert preformatted
+// RFC3339 strings, which is exactly why none of them saw this.
+func TestRangeStart_IncludesRowsLaterOnTheBoundaryDay(t *testing.T) {
+	dbConn := createTestDB(t)
+	repo, err := NewWithDB(dbConn, dbConn)
+	if err != nil {
+		t.Fatalf("NewWithDB failed: %v", err)
+	}
+
+	ctx := context.Background()
+	// Fixed clock: the boundary and both rows share one calendar day, so the
+	// separator mismatch is what decides the result, not the wall clock.
+	threshold := time.Date(2026, 3, 4, 12, 0, 0, 0, time.UTC)
+	before := threshold.Add(-6 * time.Hour)
+	after := threshold.Add(6 * time.Hour)
+
+	execOrFatal(t, dbConn, `INSERT INTO workspaces (id, name, created_at, updated_at) VALUES ('ws-1', 'Test', ?, ?)`, before, before)
+	execOrFatal(t, dbConn, `INSERT INTO boards (id, workspace_id, name, created_at, updated_at) VALUES ('board-1', 'ws-1', 'Board', ?, ?)`, before, before)
+	execOrFatal(t, dbConn, `INSERT INTO repositories (id, workspace_id, name, created_at, updated_at) VALUES ('repo-1', 'ws-1', 'Repo', ?, ?)`, before, before)
+
+	for _, row := range []struct {
+		suffix string
+		at     time.Time
+	}{{"before", before}, {"after", after}} {
+		execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES (?, 'ws-1', 'board-1', '', 'Task', 0, ?, ?)`,
+			"task-"+row.suffix, row.at, row.at)
+		execOrFatal(t, dbConn, `INSERT INTO task_repositories (id, task_id, repository_id, created_at, updated_at) VALUES (?, ?, 'repo-1', ?, ?)`,
+			"task-repo-"+row.suffix, "task-"+row.suffix, row.at, row.at)
+		execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, agent_profile_snapshot, repository_id, state, started_at, updated_at) VALUES (?, ?, 'agent-1', '{"name":"Agent","model":"opus"}', 'repo-1', 'COMPLETED', ?, ?)`,
+			"sess-"+row.suffix, "task-"+row.suffix, row.at, row.at)
+		execOrFatal(t, dbConn, `INSERT INTO task_session_commits (id, session_id, commit_sha, committed_at, files_changed, insertions, deletions, created_at) VALUES (?, ?, ?, ?, 1, 1, 0, ?)`,
+			"commit-"+row.suffix, "sess-"+row.suffix, "sha-"+row.suffix, row.at, row.at)
+	}
+
+	t.Run("model usage", func(t *testing.T) {
+		usage, err := repo.GetModelUsage(ctx, "ws-1", 5, &threshold)
+		if err != nil {
+			t.Fatalf("GetModelUsage failed: %v", err)
+		}
+		if len(usage) != 1 || usage[0].SessionCount != 1 {
+			t.Fatalf("expected the one session started after the boundary, got %+v", usage)
+		}
+	})
+
+	t.Run("global stats", func(t *testing.T) {
+		stats, err := repo.GetGlobalStats(ctx, "ws-1", &threshold)
+		if err != nil {
+			t.Fatalf("GetGlobalStats failed: %v", err)
+		}
+		if stats.TotalTasks != 1 {
+			t.Errorf("expected 1 task created after the boundary, got %d", stats.TotalTasks)
+		}
+		if stats.TotalSessions != 1 {
+			t.Errorf("expected 1 session started after the boundary, got %d", stats.TotalSessions)
+		}
+	})
+
+	t.Run("task stats", func(t *testing.T) {
+		stats, err := repo.GetTaskStats(ctx, "ws-1", &threshold, 10)
+		if err != nil {
+			t.Fatalf("GetTaskStats failed: %v", err)
+		}
+		if len(stats) != 1 || stats[0].TaskID != "task-after" || stats[0].SessionCount != 1 {
+			t.Fatalf("expected only the task created after the boundary, got %+v", stats)
+		}
+	})
+
+	t.Run("repository stats", func(t *testing.T) {
+		stats, err := repo.GetRepositoryStats(ctx, "ws-1", &threshold)
+		if err != nil {
+			t.Fatalf("GetRepositoryStats failed: %v", err)
+		}
+		if len(stats) != 1 || stats[0].TotalTasks != 1 || stats[0].SessionCount != 1 || stats[0].TotalCommits != 1 {
+			t.Fatalf("expected only boundary-day repository activity, got %+v", stats)
+		}
+	})
+
+	t.Run("git stats", func(t *testing.T) {
+		stats, err := repo.GetGitStats(ctx, "ws-1", &threshold)
+		if err != nil {
+			t.Fatalf("GetGitStats failed: %v", err)
+		}
+		if stats.TotalCommits != 1 {
+			t.Errorf("expected 1 commit made after the boundary, got %d", stats.TotalCommits)
+		}
+	})
+
+	t.Run("open ended range keeps both", func(t *testing.T) {
+		stats, err := repo.GetGlobalStats(ctx, "ws-1", nil)
+		if err != nil {
+			t.Fatalf("GetGlobalStats failed: %v", err)
+		}
+		if stats.TotalTasks != 2 || stats.TotalSessions != 2 {
+			t.Errorf("expected both rows with no range, got %d tasks / %d sessions", stats.TotalTasks, stats.TotalSessions)
+		}
+	})
 }
 
 func TestGetGitStats_ExcludesEphemeralTasks(t *testing.T) {

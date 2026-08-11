@@ -12,7 +12,6 @@ import {
   IconKey,
   IconLayoutDashboard,
   IconMessageCircle,
-  IconMicrophone,
   IconPalette,
   IconPlugConnected,
   IconPuzzle,
@@ -42,7 +41,6 @@ import {
   TASK_BEHAVIOR_SETTINGS_HREF,
   TERMINAL_EDITORS_SETTINGS_HREF,
   UTILITY_AGENTS_SETTINGS_HREF,
-  VOICE_MODE_SETTINGS_HREF,
   WORKSPACES_SETTINGS_HREF,
 } from "@/lib/settings-discovery/catalog";
 
@@ -162,7 +160,6 @@ export const SETTINGS_MENU_SECTIONS: SettingsMenuSection[] = [
       },
       { href: PROMPTS_SETTINGS_HREF, labelKey: "common:prompts", icon: IconMessageCircle },
       { href: UTILITY_AGENTS_SETTINGS_HREF, labelKey: "settings:utilityAgents", icon: IconWand },
-      { href: VOICE_MODE_SETTINGS_HREF, labelKey: "settings:voiceMode", icon: IconMicrophone },
     ],
   },
   // Only rendered when the auth feature exposes at least one of its rows.

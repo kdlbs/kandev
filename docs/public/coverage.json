@@ -262,6 +262,7 @@
       "tests": ["apps/web/src/settings-routes.test.ts", "apps/web/components/settings/settings-index.test.tsx", "apps/web/components/settings/terminal-settings.test.ts", "apps/web/lib/layout/layout-profiles.test.ts"],
       "settingsRoutes": [
         "/settings",
+        "/settings/preferences",
         "/settings/preferences/appearance",
         "/settings/preferences/keyboard-shortcuts",
         "/settings/preferences/layouts",
@@ -278,8 +279,7 @@
         "/settings/general/secrets",
         "/settings/general/sprites",
         "/settings/general/task-actions",
-        "/settings/general/terminal",
-        "/settings/voice-mode"
+        "/settings/general/terminal"
       ]
     },
     {
@@ -328,8 +328,8 @@
         "/settings/general/message-queue",
         "/settings/system/about",
         "/settings/system/backups",
-        "/settings/system/database",
         "/settings/system/data-storage",
+        "/settings/system/database",
         "/settings/system/feature-toggles",
         "/settings/system/licenses",
         "/settings/system/logs",
@@ -391,7 +391,6 @@
   "exclusions": {
     "settingsRoutes": [
       { "route": "/settings/changelog", "reason": "Redirect to System updates." },
-      { "route": "/settings/preferences", "reason": "Redirect to Preferences Appearance." },
       { "route": "/settings/general/changes-panel", "reason": "Legacy redirect to Appearance." },
       { "route": "/settings/general/chat-input", "reason": "Legacy redirect to Keyboard Shortcuts." },
       { "route": "/settings/general/resource-metrics", "reason": "Legacy redirect to Appearance." },

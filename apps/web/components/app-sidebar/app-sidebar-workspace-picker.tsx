@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useRouter } from "@/lib/routing/client-router";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
@@ -72,6 +72,29 @@ function useMenuOpenState(controlledOpen?: boolean, onOpenChange?: (open: boolea
   return { open: isControlled ? controlledOpen : uncontrolledOpen, setOpen };
 }
 
+function useControlledMenuFocus(controlledOpen: boolean | undefined) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const handleOpenAutoFocus = useCallback(
+    (event: Event) => {
+      if (controlledOpen === undefined) return;
+      event.preventDefault();
+      contentRef.current?.focus({ preventScroll: true });
+    },
+    [controlledOpen],
+  );
+  const handleEntryFocus = useCallback(
+    (event: Event) => {
+      if (controlledOpen !== undefined) event.preventDefault();
+    },
+    [controlledOpen],
+  );
+  return {
+    ref: contentRef,
+    onOpenAutoFocus: handleOpenAutoFocus,
+    onEntryFocus: handleEntryFocus,
+  };
+}
+
 function rememberSelectedWorkspace(workspace: WorkspaceItem) {
   if (workspaceType(workspace) === "office") {
     rememberLastOfficeWorkspace(workspace);
@@ -103,6 +126,7 @@ export function AppSidebarWorkspacePicker({
   const activeWorkspace = workspaces.items.find((w) => w.id === workspaces.activeId);
   const activeId = activeWorkspace?.id ?? null;
   const activeName = activeWorkspace?.name ?? t("sidebar:workspaceFallback");
+  const menuFocus = useControlledMenuFocus(controlledOpen);
 
   const handleSelect = useCallback(
     (workspace: WorkspaceItem) => {
@@ -166,7 +190,11 @@ export function AppSidebarWorkspacePicker({
           className={triggerClassName}
         />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align={contentAlign} className={cn("w-72", contentClassName)}>
+      <DropdownMenuContent
+        {...menuFocus}
+        align={contentAlign}
+        className={cn("w-72", contentClassName)}
+      >
         <WorkspacePickerContent
           workspaces={workspaces.items}
           activeId={activeId}

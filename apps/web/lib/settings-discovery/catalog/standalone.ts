@@ -1,19 +1,12 @@
 import type { SettingsDiscoveryDefinition } from "../types";
 
 export const PROMPTS_SETTINGS_HREF = "/settings/prompts";
-export const VOICE_MODE_SETTINGS_HREF = "/settings/voice-mode";
 export const UTILITY_AGENTS_SETTINGS_HREF = "/settings/utility-agents";
 export const EXTERNAL_MCP_SETTINGS_HREF = "/settings/external-mcp";
 export const PLUGINS_SETTINGS_HREF = "/settings/plugins";
 export const SECRETS_SETTINGS_HREF = "/settings/secrets";
-const VOICE_MODE_DISCOVERY_ID = "voice-mode";
 const UTILITY_AGENTS_DISCOVERY_ID = "utility-agents";
-export const STANDALONE_SETTINGS_TARGETS = {
-  voiceEnable: "setting-voice-enable",
-  voiceEngine: "setting-voice-engine",
-  voiceBehavior: "setting-voice-behavior",
-  voiceModel: "setting-voice-model",
-  voiceShortcut: "setting-voice-shortcut",
+export const SETTINGS_TARGETS = {
   utilityDefaultModel: "setting-utility-default-model",
   utilityActions: "setting-utility-actions",
   utilityCustomAgents: "setting-utility-custom-agents",
@@ -32,68 +25,6 @@ export const STANDALONE_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = [
     order: 500,
   },
   {
-    id: VOICE_MODE_DISCOVERY_ID,
-    kind: "page",
-    labelKey: "settings:voiceMode",
-    groupId: "agents",
-    href: VOICE_MODE_SETTINGS_HREF,
-    order: 510,
-  },
-  {
-    id: "voice-enable",
-    kind: "control",
-    labelKey: "settings:voiceEnableTitle",
-    aliasesKey: "settings:discoveryAliasesVoiceEnable",
-    parentId: VOICE_MODE_DISCOVERY_ID,
-    groupId: "agents",
-    href: VOICE_MODE_SETTINGS_HREF,
-    targetId: STANDALONE_SETTINGS_TARGETS.voiceEnable,
-    order: 511,
-  },
-  {
-    id: "voice-engine",
-    kind: "control",
-    labelKey: "settings:voiceEngineTitle",
-    aliasesKey: "settings:discoveryAliasesVoiceEngine",
-    parentId: VOICE_MODE_DISCOVERY_ID,
-    groupId: "agents",
-    href: VOICE_MODE_SETTINGS_HREF,
-    targetId: STANDALONE_SETTINGS_TARGETS.voiceEngine,
-    order: 512,
-  },
-  {
-    id: "voice-behavior",
-    kind: "control",
-    labelKey: "settings:voiceBehavior",
-    aliasesKey: "settings:discoveryAliasesVoiceBehavior",
-    parentId: VOICE_MODE_DISCOVERY_ID,
-    groupId: "agents",
-    href: VOICE_MODE_SETTINGS_HREF,
-    targetId: STANDALONE_SETTINGS_TARGETS.voiceBehavior,
-    order: 513,
-  },
-  {
-    id: "voice-model",
-    kind: "control",
-    labelKey: "settings:voiceWhisperModelTitle",
-    parentId: VOICE_MODE_DISCOVERY_ID,
-    groupId: "agents",
-    href: VOICE_MODE_SETTINGS_HREF,
-    targetId: STANDALONE_SETTINGS_TARGETS.voiceModel,
-    order: 514,
-  },
-  {
-    id: "voice-shortcut",
-    kind: "control",
-    labelKey: "settings:discoveryVoiceShortcut",
-    aliasesKey: "settings:discoveryAliasesVoiceShortcut",
-    parentId: VOICE_MODE_DISCOVERY_ID,
-    groupId: "agents",
-    href: VOICE_MODE_SETTINGS_HREF,
-    targetId: STANDALONE_SETTINGS_TARGETS.voiceShortcut,
-    order: 515,
-  },
-  {
     id: UTILITY_AGENTS_DISCOVERY_ID,
     kind: "page",
     labelKey: "settings:utilityAgents",
@@ -109,7 +40,7 @@ export const STANDALONE_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = [
     parentId: UTILITY_AGENTS_DISCOVERY_ID,
     groupId: "agents",
     href: UTILITY_AGENTS_SETTINGS_HREF,
-    targetId: STANDALONE_SETTINGS_TARGETS.utilityDefaultModel,
+    targetId: SETTINGS_TARGETS.utilityDefaultModel,
     order: 521,
   },
   {
@@ -120,7 +51,7 @@ export const STANDALONE_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = [
     parentId: UTILITY_AGENTS_DISCOVERY_ID,
     groupId: "agents",
     href: UTILITY_AGENTS_SETTINGS_HREF,
-    targetId: STANDALONE_SETTINGS_TARGETS.utilityActions,
+    targetId: SETTINGS_TARGETS.utilityActions,
     order: 522,
   },
   {
@@ -130,7 +61,7 @@ export const STANDALONE_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = [
     parentId: UTILITY_AGENTS_DISCOVERY_ID,
     groupId: "agents",
     href: UTILITY_AGENTS_SETTINGS_HREF,
-    targetId: STANDALONE_SETTINGS_TARGETS.utilityCustomAgents,
+    targetId: SETTINGS_TARGETS.utilityCustomAgents,
     order: 523,
   },
   {
@@ -157,7 +88,7 @@ export const STANDALONE_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = [
     parentId: "external-mcp",
     groupId: "workspaces",
     href: EXTERNAL_MCP_SETTINGS_HREF,
-    targetId: STANDALONE_SETTINGS_TARGETS.externalMcpEndpoints,
+    targetId: SETTINGS_TARGETS.externalMcpEndpoints,
     order: 531,
   },
   {
@@ -167,7 +98,7 @@ export const STANDALONE_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = [
     parentId: "external-mcp",
     groupId: "workspaces",
     href: EXTERNAL_MCP_SETTINGS_HREF,
-    targetId: STANDALONE_SETTINGS_TARGETS.externalMcpSnippets,
+    targetId: SETTINGS_TARGETS.externalMcpSnippets,
     order: 532,
   },
   {
