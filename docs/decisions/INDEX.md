@@ -23,7 +23,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 0015 | [Explicit completion signal for auto-advance](0015-explicit-completion-signal-for-auto-advance.md)                                  | proposed   | backend, frontend           | 2026-06-04 |
 | 0016 | [Read-only absolute file paths](0016-observed-external-file-reads.md)                                                               | accepted   | backend                     | 2026-06-14 |
 | 0017 | [Resource metrics sampling](0017-resource-metrics-sampling.md)                                                                      | accepted   | backend, frontend, protocol | 2026-06-14 |
-| 0018 | [Runtime settings overrides](0018-runtime-settings-overrides.md)                                                                    | accepted   | backend, frontend, cli      | 2026-06-14 |
+| 0018 | [Runtime settings overrides](0018-runtime-settings-overrides.md)                                                                    | accepted (amended 2026-08-11) | backend, frontend, cli | 2026-06-14 |
 | 0019 | [Restart supervisor owns backend restarts](0019-restart-supervisor.md)                                                              | accepted   | backend, frontend, cli      | 2026-06-14 |
 | 0020 | [Pi project MCP config injection](0020-pi-project-mcp-config-injection.md)                                                          | accepted   | backend                     | 2026-06-16 |
 | 0021 | [Go-served SPA with boot state](0021-go-served-spa-with-boot-state.md)                                                              | accepted   | backend, frontend, cli      | 2026-06-15 |
@@ -143,5 +143,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-08-go-launcher-owns-all-launch-modes | [The Go Launcher Owns Every Entrypoint; apps/cli Is a Publish-Only Shim](2026-08-08-go-launcher-owns-all-launch-modes.md) | accepted | backend, cli, infra | 2026-08-08 |
 | 2026-08-09-bind-automation-mutations-to-event-targets | [Bind Automation Mutations to Event Targets](2026-08-09-bind-automation-mutations-to-event-targets.md) | accepted | backend, agentctl, protocol, security, workflow | 2026-08-09 |
 | 2026-08-09-exclusive-runtime-state-ownership | [Lock Runtime State Before Backend Startup](2026-08-09-exclusive-runtime-state-ownership.md) | accepted | backend, infra | 2026-08-09 |
+| 2026-08-10-duration-aware-e2e-sharding | [Duration-aware E2E sharding uses rolling `main` timings](2026-08-10-duration-aware-e2e-sharding.md) | accepted | infra, workflow | 2026-08-10 |
 | 2026-08-10-debug-launcher-profile-selection | [Keep Debug Launches on the Production Profile](2026-08-10-debug-launcher-profile-selection.md) | accepted | backend, frontend, cli | 2026-08-10 |
 | 2026-08-10-remote-contribution-head-drift | [Separate Current Contribution and Local Checkout Histories](2026-08-10-remote-contribution-head-drift.md) | accepted | backend, frontend, protocol, GitHub, GitLab | 2026-08-10 |
+| 2026-08-11-user-owned-status-bar-visibility | [Make Status Bar Visibility a Portable User Preference](2026-08-11-user-owned-status-bar-visibility.md) | accepted | backend, frontend, protocol | 2026-08-11 |
