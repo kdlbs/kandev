@@ -156,7 +156,7 @@ describe("resumeWithSilentFallback", () => {
     expect(mockRequest).toHaveBeenCalledTimes(2);
     expect(calls.resumptionStates.at(-1)).toBe("error");
     expect(calls.errors.at(-1)).toBe(
-      "Failed to resume session — workspace restore also unavailable",
+      "Failed to resume session - workspace restore also unavailable",
     );
   });
 
@@ -171,7 +171,7 @@ describe("resumeWithSilentFallback", () => {
     expect(mockRequest).toHaveBeenCalledTimes(2);
     expect(calls.resumptionStates.at(-1)).toBe("error");
     expect(calls.errors.at(-1)).toBe(
-      "Failed to resume session — workspace restore also unavailable",
+      "Failed to resume session - workspace restore also unavailable",
     );
   });
 

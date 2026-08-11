@@ -60,7 +60,7 @@ test.describe("Mobile repository secrets", () => {
       await editor.getByTestId("repository-secret-select-0").click();
       await testPage
         .getByRole("option", {
-          name: "E2E Mobile Workspace Secret — Workspace",
+          name: "E2E Mobile Workspace Secret - Workspace",
           exact: true,
         })
         .click();

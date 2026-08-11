@@ -98,8 +98,8 @@ describe("TokenUsageDisplay", () => {
 
     expect(getByTestId(TOOLTIP_ROOT_TESTID).getAttribute("data-open")).toBe("true");
     const usage = getByTestId("context-window-usage");
-    expect(usage.textContent).toContain("—%");
-    expect(usage.textContent).toContain("— of 200.0K tokens");
+    expect(usage.textContent).toContain("N/A%");
+    expect(usage.textContent).toContain("N/A of 200.0K tokens");
     expect(usage.textContent).toContain("Usage data appears after the first completed turn.");
     expect(usage.textContent).not.toContain("0%");
     expect(usage.textContent).not.toContain("0 of");

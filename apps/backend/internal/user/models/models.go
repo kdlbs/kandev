@@ -117,6 +117,7 @@ type UserSettings struct {
 	SystemMetricsDisplay            SystemMetricsDisplaySettings      `json:"system_metrics_display"`
 	AppStatusBarOrder               AppStatusBarOrder                 `json:"app_status_bar_order"`
 	VoiceMode                       VoiceModeSettings                 `json:"voice_mode"`
+	KanbanHiddenStepIDs             map[string][]string               `json:"kanban_hidden_step_ids"`
 	CreatedAt                       time.Time                         `json:"created_at"`
 	UpdatedAt                       time.Time                         `json:"updated_at"`
 }

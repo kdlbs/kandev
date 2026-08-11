@@ -24,7 +24,7 @@ export function useArchivedTaskState() {
 }
 
 export const ArchivedPanelPlaceholder = memo(function ArchivedPanelPlaceholder({
-  message = "Workspace not available — this task is archived",
+  message = "Workspace not available - this task is archived",
 }: {
   message?: string;
 }) {

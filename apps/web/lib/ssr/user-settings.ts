@@ -82,6 +82,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
     appStatusBarOrder: { leftItemIds: [], rightItemIds: [] },
     voiceMode: { ...DEFAULT_VOICE_MODE_STATE },
+    hiddenWorkflowStepIds: {},
     loaded: false,
   };
 }
@@ -320,6 +321,7 @@ export function buildCoreFields(
       current.appStatusBarOrder,
       parseAppStatusBarOrder,
     ),
+    hiddenWorkflowStepIds: s.kanban_hidden_step_ids ?? current.hiddenWorkflowStepIds,
     ...buildTerminalFields(s, current),
     ...buildSystemMetricsDisplayFields(s, current),
     ...buildVoiceModeFields(s, current),

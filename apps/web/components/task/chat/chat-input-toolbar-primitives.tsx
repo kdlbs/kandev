@@ -190,8 +190,8 @@ export function PlanToggleButton({
   const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
   const planModeShortcutLabel = formatShortcut(getShortcut("TOGGLE_PLAN_MODE", keyboardShortcuts));
   const tooltip = planModeAvailable
-    ? `Toggle plan mode (${planModeShortcutLabel}) — Agent collaborates on the plan without implementing changes`
-    : `Toggle plan layout (${planModeShortcutLabel}) — View and edit the plan (agent cannot read/write it without MCP)`;
+    ? `Toggle plan mode (${planModeShortcutLabel}) - Agent collaborates on the plan without implementing changes`
+    : `Toggle plan layout (${planModeShortcutLabel}) - View and edit the plan (agent cannot read/write it without MCP)`;
 
   return (
     <Tooltip>
@@ -230,7 +230,7 @@ const mcpStatusColor: Record<string, string> = {
 const mcpStatusLabel: Record<string, string> = {
   active: "Active",
   connected: "Connected",
-  delivered: "Delivered — connection unverified",
+  delivered: "Delivered - connection unverified",
   failed: "Failed",
   filtered: "Filtered",
   unavailable: "Unavailable",

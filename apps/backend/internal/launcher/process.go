@@ -414,10 +414,30 @@ func waitForManagedProcessKillDone(done <-chan struct{}, timeout time.Duration) 
 	}
 }
 
-func waitForAppExit(supervisor *processSupervisor, backend *restartableBackend) int {
-	code := <-backend.exitCh
-	supervisor.shutdown("backend exit")
-	return code
+// waitForAppExit blocks until the backend (or, in dev, any extra supervised
+// child such as the Vite dev server) exits, then shuts the whole tree down
+// and returns that child's exit code — a dead frontend must take the launcher
+// down with it, matching the spec's "if either child exits" contract. Codes
+// below zero mean the child was killed by a signal; treat those as 0 like the
+// TypeScript launcher's `signal ? 0 : code`.
+func waitForAppExit(supervisor *processSupervisor, backend *restartableBackend, extra ...*managedProcess) int {
+	if len(extra) == 0 {
+		code := <-backend.exitCh
+		supervisor.shutdown("backend exit")
+		return code
+	}
+	select {
+	case code := <-backend.exitCh:
+		supervisor.shutdown("backend exit")
+		return code
+	case <-extra[0].done:
+		_, code := extra[0].Exited()
+		supervisor.shutdown(extra[0].label + " exit")
+		if code < 0 {
+			return 0
+		}
+		return code
+	}
 }
 
 func logForcedShutdownComplete(duration time.Duration, results []managedProcessShutdownResult) {

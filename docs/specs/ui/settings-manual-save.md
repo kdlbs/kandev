@@ -1,7 +1,7 @@
 ---
 status: shipped
 created: 2026-07-14
-updated: 2026-07-29
+updated: 2026-08-09
 owner: kandev
 supersedes: docs/specs/workflow-settings-autosave/spec.md
 ---
@@ -15,7 +15,7 @@ Settings pages currently mix immediate persistence, section-level Save buttons, 
 ## What
 
 - Editing a persistent configuration value under `/settings` changes a local draft and does not call a persistence API until the user explicitly saves.
-- A subtle fixed action appears at the bottom-right of the viewport whenever the current settings route has at least one dirty draft. It remains reachable while the page scrolls and saves every dirty contributor on that route.
+- A compact fixed save surface appears centered along the lower edge of the viewport whenever the current settings route has at least one dirty draft. It remains reachable while the page scrolls, clearly identifies the unsaved state, offers a local Reset action, and saves every dirty contributor on that route.
 - The action reports `Save changes`, `Saving...`, `Saved`, or `Couldn't save`. It prevents duplicate submissions, remains visible after a failure, and retries contributors that are still dirty.
 - A successful contributor becomes clean only for the exact draft revision that was submitted. Edits made while a save is in flight remain dirty and require another Save.
 - When several cards or sections are dirty, one Save attempts all of them in a stable order. Successful contributors become clean even if another contributor fails; failed and newly edited contributors remain dirty.
@@ -24,7 +24,8 @@ Settings pages currently mix immediate persistence, section-level Save buttons, 
 - A visual preview may react immediately when that is the purpose of the setting, such as changing the color theme, but the durable value is not updated until Save. Reloading or discarding before Save restores the saved value.
 - Controls remain interactive while dirty. Persistence latency begins only after Save, so experimenting with toggles and selectors does not block further editing.
 - Each draftable control whose value differs from its saved baseline uses the shared success-green border and subtle ring so the user can identify the unsaved fields. Its nested containers and nearest owning card use progressively quieter success-green borders without additional glow whenever a descendant is dirty. The markers clear when the value returns to its baseline, is discarded, or saves successfully; settings dirty state never uses warning-yellow styling.
-- On settings routes, the floating action uses the success-green treatment and does not overlap the Configuration Chat trigger or its open popover. While the popover is open, the action sits immediately above it and remains reachable within desktop and mobile viewports.
+- On settings routes, the floating save surface uses a restrained neutral card treatment with success-green emphasis reserved for the primary Save changes action. With Configuration Chat closed, it is centered in the viewport and does not overlap the chat trigger. While the popover is open, the surface is rendered in the chat action host immediately above the popover, centered within that safe width, and remains reachable within desktop and mobile viewports.
+- Reset restores every dirty contributor on the current route to its saved baseline without calling a persistence API. The surface disappears when all contributors are clean.
 
 ### Workflow settings
 
@@ -112,8 +113,10 @@ Route navigation with dirty contributors opens an in-app confirmation with `Save
 - **GIVEN** one or more changed settings fields inside a card or framed settings group, **WHEN** any descendant differs from its saved baseline, **THEN** the changed controls use the strongest green marker, nested containers and their owning card use quieter green borders without stacked glow, and no settings dirty marker uses yellow.
 - **GIVEN** a new workflow or workflow step draft, **WHEN** it has not been saved yet, **THEN** the new item, its owning workflow card, and its changed controls are marked dirty until Save succeeds.
 - **GIVEN** a dirty settings route, **WHEN** the user navigates elsewhere, **THEN** an in-app confirmation offers Save and leave, Discard and leave, or Continue editing.
+- **GIVEN** a dirty settings route, **WHEN** the route is displayed, **THEN** a centered save surface shows the unsaved-state label, Reset, and Save changes without rendering a full-width green rectangle.
+- **GIVEN** one or more dirty contributors, **WHEN** the user presses Reset, **THEN** every route-local draft returns to its saved baseline, no persistence request is sent, and the centered save surface disappears.
 - **GIVEN** a persisted workflow step with tasks, **WHEN** the user confirms migration and deletion, **THEN** the destructive operation runs immediately without waiting for the floating Save action.
-- **GIVEN** a long settings page on desktop or a 390px mobile viewport, **WHEN** any field becomes dirty, **THEN** the floating action is fully visible, keyboard/touch reachable, clear of safe-area insets, and does not cover the last editable control.
+- **GIVEN** a long settings page on desktop or a 390px mobile viewport, **WHEN** any field becomes dirty, **THEN** the centered save surface is fully visible, its primary controls meet the touch-target requirement, it is clear of safe-area insets, and it does not cover the last editable control.
 - **GIVEN** Configuration Chat is open on a dirty settings route, **WHEN** the floating action is shown, **THEN** the Save action sits above the popover without intersecting it, remains inside the viewport, and can save without closing the chat.
 - **GIVEN** a clean settings route, **WHEN** it is displayed, **THEN** no floating save action occupies the viewport.
 
@@ -127,4 +130,4 @@ Route navigation with dirty contributors opens an in-app confirmation with `Save
 
 ## Implementation Plan
 
-See [the implementation plan](../../plans/settings-manual-save/plan.md).
+The original rollout is documented in [the implementation plan](../../plans/settings-manual-save/plan.md). The centered save-surface refinement is documented in [its follow-up plan](../../plans/settings-save-action-redesign/plan.md).

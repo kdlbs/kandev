@@ -1,6 +1,7 @@
 import { expect, test } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { useRegularMode } from "../../helpers/regular-mode";
+import { waitForSessionState } from "../../helpers/session";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
@@ -32,22 +33,6 @@ function parentQuestionScript(): string {
   return `e2e:mcp:kandev:ask_parent_question_kandev(${args})`;
 }
 
-async function waitForSessionState(
-  apiClient: ApiClient,
-  taskId: string,
-  state: string,
-): Promise<void> {
-  await expect
-    .poll(
-      async () => {
-        const { sessions } = await apiClient.listTaskSessions(taskId);
-        return sessions[0]?.state ?? "";
-      },
-      { timeout: 60_000, message: `task ${taskId} should reach ${state}` },
-    )
-    .toBe(state);
-}
-
 async function waitForParentQuestion(apiClient: ApiClient, parentTaskID: string): Promise<string> {
   let questionID = "";
   await expect
@@ -76,7 +61,7 @@ test.describe("Task autopilot", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -111,13 +96,22 @@ test.describe("Task autopilot", () => {
       },
     );
 
+    const childSessionId = child.session_id;
+    if (!childSessionId) throw new Error("autopilot child did not return a session ID");
+
     const childTask = await apiClient.getTask(child.id);
     expect(childTask.autopilot).toBe(true);
 
     await testPage.goto(`/t/${parent.id}`);
     const parentSession = new SessionPage(testPage);
     await parentSession.waitForLoad();
-    await waitForSessionState(apiClient, child.id, "WAITING_FOR_INPUT");
+    await waitForSessionState(apiClient, {
+      taskId: child.id,
+      sessionId: childSessionId,
+      expectedState: "WAITING_FOR_INPUT",
+      message: `task ${child.id} should reach WAITING_FOR_INPUT`,
+      timeout: 60_000,
+    });
     const childRow = parentSession.sidebarTaskItem("Autopilot Child");
     await expect(childRow).toBeVisible({ timeout: 30_000 });
     await expect(childRow.getByTestId("task-autopilot-icon")).toBeVisible();
@@ -133,7 +127,7 @@ test.describe("Task autopilot", () => {
           const { sessions } = await apiClient.listTaskSessions(child.id);
           return sessions[0]?.state ?? "";
         },
-        { timeout: 30_000, message: "parent answer should resume the child" },
+        { timeout: 60_000, message: "parent answer should resume the child" },
       )
       .not.toBe("WAITING_FOR_INPUT");
 

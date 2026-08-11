@@ -13,7 +13,12 @@ import {
 } from "react";
 
 import { setNavigationBlocker, type NavigationIntent } from "@/lib/routing/navigation-guard";
-import { SettingsFloatingSave, type SettingsSaveStatus } from "./settings-floating-save";
+import {
+  SettingsFloatingSave,
+  type SettingsSaveErrorKind,
+  type SettingsSavePlacement,
+  type SettingsSaveStatus,
+} from "./settings-floating-save";
 
 export type SettingsSaveRevision = string | number;
 
@@ -32,7 +37,7 @@ export type SettingsSaveContributor = {
   canSave?: boolean;
   invalidReason?: string;
   save: (revision: SettingsSaveRevision) => Promise<void> | void;
-  discard: () => Promise<void> | void;
+  discard: (revision?: SettingsSaveRevision) => Promise<void> | void;
 };
 
 type RegisteredContributor = {
@@ -58,9 +63,15 @@ type SaveResult = {
 const SettingsSaveRegistryContext = createContext<Registry | null>(null);
 const SettingsDirtyScopeContext = createContext<DirtyScopeRegistry | null>(null);
 
-export function SettingsSaveProvider({ children }: { children: ReactNode }) {
+export function SettingsSaveProvider({
+  children,
+  placement = "viewport",
+}: {
+  children: ReactNode;
+  placement?: SettingsSavePlacement;
+}) {
   const { contributors, registry, dirtyContributors, refreshRegistry } = useContributorRegistry();
-  const { status, saveAll, clearSavedStatus, markError } = useSaveCoordinator(
+  const { status, errorKind, saveAll, clearSavedStatus, markError } = useSaveCoordinator(
     contributors,
     refreshRegistry,
   );
@@ -81,35 +92,42 @@ export function SettingsSaveProvider({ children }: { children: ReactNode }) {
 
   const handleSave = useCallback(async (): Promise<boolean> => {
     const result = await saveAll();
-    if (!result.canLeave || !pendingNavigationRef.current) return result.canLeave;
-
-    const intent = pendingNavigationRef.current;
-    pendingNavigationRef.current = null;
-    setPendingNavigation(null);
-    intent.proceed();
+    if (!result.canLeave) return false;
+    settlePendingNavigation(pendingNavigationRef, setPendingNavigation);
     return true;
   }, [saveAll]);
 
-  const discardAndLeave = useCallback(async () => {
-    if (discardingRef.current) return;
+  const discardDirtyContributors = useCallback(async (): Promise<boolean> => {
+    if (discardingRef.current) return false;
     discardingRef.current = true;
     setIsDiscarding(true);
+    const submitted = snapshotDirtyContributors(contributors);
+    let hasNewerChanges = false;
     try {
-      for (const { contributor } of getDirtyContributors(contributors)) {
-        await contributor.discard();
+      for (const { contributor } of submitted) {
+        if (!isCurrentRevision(contributors, contributor)) {
+          hasNewerChanges = true;
+          continue;
+        }
+        await contributor.discard(contributor.revision);
+        hasNewerChanges ||= hasNewerRevision(contributors, contributor);
       }
+      refreshRegistry();
+      if (hasNewerChanges) return false;
+      settlePendingNavigation(pendingNavigationRef, setPendingNavigation);
+      return true;
     } catch {
-      markError();
-      return;
+      markError("reset");
+      return false;
     } finally {
       discardingRef.current = false;
       setIsDiscarding(false);
     }
-    const intent = pendingNavigationRef.current;
-    pendingNavigationRef.current = null;
-    setPendingNavigation(null);
-    intent?.proceed();
-  }, [contributors, markError]);
+  }, [contributors, markError, refreshRegistry]);
+
+  const discardAndLeave = useCallback(async () => {
+    await discardDirtyContributors();
+  }, [discardDirtyContributors]);
 
   const continueEditing = useCallback(() => {
     const intent = pendingNavigationRef.current;
@@ -127,15 +145,7 @@ export function SettingsSaveProvider({ children }: { children: ReactNode }) {
     });
   }, [hasDirty]);
 
-  useEffect(() => {
-    if (!hasDirty) return;
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [hasDirty]);
+  useSettingsBeforeUnloadGuard(hasDirty);
 
   return (
     <SettingsSaveRegistryContext.Provider value={registry}>
@@ -143,17 +153,42 @@ export function SettingsSaveProvider({ children }: { children: ReactNode }) {
       {(hasDirty || status === "saved") && (
         <SettingsFloatingSave
           status={displayStatus}
+          placement={placement}
+          errorKind={errorKind}
           dirtyContributorIds={dirtyContributors.map(({ contributor }) => contributor.id).join(",")}
           invalidReason={invalidReason}
           navigationIntent={pendingNavigation}
           isDiscarding={isDiscarding}
           onSave={handleSave}
+          onReset={discardDirtyContributors}
           onDiscardAndLeave={discardAndLeave}
           onContinueEditing={continueEditing}
         />
       )}
     </SettingsSaveRegistryContext.Provider>
   );
+}
+
+function useSettingsBeforeUnloadGuard(enabled: boolean) {
+  useEffect(() => {
+    if (!enabled) return;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [enabled]);
+}
+
+function settlePendingNavigation(
+  pendingNavigationRef: { current: NavigationIntent | null },
+  setPendingNavigation: (intent: NavigationIntent | null) => void,
+) {
+  const intent = pendingNavigationRef.current;
+  pendingNavigationRef.current = null;
+  setPendingNavigation(null);
+  intent?.proceed();
 }
 
 export function SettingsSaveDirtyScope({
@@ -229,8 +264,15 @@ function useSaveCoordinator(
 ) {
   const savingRef = useRef(false);
   const [status, setStatus] = useState<SettingsSaveStatus>("dirty");
-  const clearSavedStatus = useCallback(() => setStatus("dirty"), []);
-  const markError = useCallback(() => setStatus("error"), []);
+  const [errorKind, setErrorKind] = useState<SettingsSaveErrorKind | null>(null);
+  const clearSavedStatus = useCallback(() => {
+    setErrorKind(null);
+    setStatus("dirty");
+  }, []);
+  const markError = useCallback((kind: SettingsSaveErrorKind) => {
+    setErrorKind(kind);
+    setStatus("error");
+  }, []);
   const saveAll = useCallback(async (): Promise<SaveResult> => {
     if (savingRef.current) return { canLeave: false, failedIds: new Set() };
     const submitted = snapshotDirtyContributors(contributors);
@@ -239,6 +281,7 @@ function useSaveCoordinator(
     }
 
     savingRef.current = true;
+    setErrorKind(null);
     setStatus("saving");
     const failedIds = new Set<string>();
     let hasNewerChanges = false;
@@ -256,12 +299,14 @@ function useSaveCoordinator(
     }
 
     savingRef.current = false;
-    setStatus(saveCompletionStatus(failedIds, hasNewerChanges));
+    const completionStatus = saveCompletionStatus(failedIds, hasNewerChanges);
+    setErrorKind(completionStatus === "error" ? "save" : null);
+    setStatus(completionStatus);
     refreshRegistry();
     return { canLeave: failedIds.size === 0 && !hasNewerChanges, failedIds };
   }, [contributors, refreshRegistry]);
 
-  return { status, saveAll, clearSavedStatus, markError };
+  return { status, errorKind, saveAll, clearSavedStatus, markError };
 }
 
 function saveCompletionStatus(
@@ -310,6 +355,14 @@ function hasNewerRevision(
 ): boolean {
   const current = contributors.get(submitted.id)?.contributor;
   return Boolean(current && current.isDirty && !Object.is(current.revision, submitted.revision));
+}
+
+function isCurrentRevision(
+  contributors: Map<string, RegisteredContributor>,
+  submitted: SettingsSaveContributor,
+): boolean {
+  const current = contributors.get(submitted.id)?.contributor;
+  return Boolean(current && Object.is(current.revision, submitted.revision));
 }
 
 function compareContributors(left: RegisteredContributor, right: RegisteredContributor): number {
