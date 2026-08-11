@@ -3,17 +3,11 @@
 import { cloneElement, isValidElement, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  IconBrandGitlab,
-  IconBrandSentry,
   IconCopy,
-  IconCircleDot,
   IconEdit,
-  IconGitPullRequest,
-  IconLink,
   IconPencil,
   IconPin,
   IconPinFilled,
-  IconTicket,
   IconTrash,
 } from "@tabler/icons-react";
 import {
@@ -21,18 +15,20 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@kandev/ui/context-menu";
+import { useAppStore } from "@/components/state-provider";
 import {
   TaskMoveContextMenuItems,
   type TaskMoveWorkflow,
 } from "@/components/task/task-move-context-menu";
 import { TaskNestContextMenuItems } from "@/components/task/task-nest-context-menu";
+import { KanbanCardContextMenuItems } from "@/components/kanban-card-menu-items";
+import { buildPrimaryPluginEntries } from "@/components/plugins/task-menu-actions";
+import type { PluginTaskMenuContext } from "@/lib/plugins/types";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
 import { TaskColorMenu } from "./task-switcher-color-menu";
+import { TaskLinkMenu } from "./task-switcher-link-menu";
 import {
   TaskArchiveItem,
   TaskCreateSubtaskItem,
@@ -163,6 +159,48 @@ type TaskContextMenuItemsProps = Omit<ContextMenuProps, "children"> & {
   moveTasks: ReturnType<typeof useTaskWorkflowMove>;
 };
 
+// With several tasks selected, only actions that make sense for all of them
+// are offered (Pin / Move / Archive / Delete) — the single-task actions
+// (Rename, Color, Link, Duplicate) are hidden.
+function renderBulkSelectionMenu(
+  props: TaskContextMenuItemsProps,
+  actingOnSelection: boolean,
+  actingIds: string[],
+  moveTasks: ReturnType<typeof useTaskWorkflowMove>,
+): React.ReactNode | null {
+  if (!actingOnSelection || actingIds.length <= 1) return null;
+  const {
+    task,
+    workflows,
+    stepsByWorkflowId,
+    steps,
+    isMixedWorkflowSelection,
+    pinnedTaskIds,
+    onBulkPin,
+    onBulkArchive,
+    onBulkDelete,
+    onBulkMove,
+    closeMenu,
+  } = props;
+  return (
+    <BulkSelectionMenuItems
+      task={task}
+      actingIds={actingIds}
+      workflows={workflows}
+      stepsByWorkflowId={stepsByWorkflowId}
+      steps={steps}
+      isMixedWorkflowSelection={isMixedWorkflowSelection}
+      pinnedTaskIds={pinnedTaskIds}
+      onBulkPin={onBulkPin}
+      onBulkArchive={onBulkArchive}
+      onBulkDelete={onBulkDelete}
+      onBulkMove={onBulkMove}
+      closeMenu={closeMenu}
+      moveTasks={moveTasks}
+    />
+  );
+}
+
 function TaskContextMenuItems(props: TaskContextMenuItemsProps) {
   const { t } = useTranslation();
   const {
@@ -179,12 +217,9 @@ function TaskContextMenuItems(props: TaskContextMenuItemsProps) {
     onMoveToStep,
     onTogglePin,
     isPinned,
-    pinnedTaskIds,
     isDeleting,
     selectedTaskIds,
     onBulkArchive,
-    onBulkDelete,
-    onBulkPin,
     onBulkMove,
     onClearSelection,
     isMixedWorkflowSelection,
@@ -197,28 +232,8 @@ function TaskContextMenuItems(props: TaskContextMenuItemsProps) {
   const actingOnSelection = !!selectedTaskIds?.has(task.id);
   const actingIds = actingOnSelection ? [...selectedTaskIds!] : [task.id];
 
-  // With several tasks selected, only actions that make sense for all of them
-  // are offered (Pin / Move / Archive / Delete) — the single-task actions
-  // (Rename, Color, Link, Duplicate) are hidden.
-  if (actingOnSelection && actingIds.length > 1) {
-    return (
-      <BulkSelectionMenuItems
-        task={task}
-        actingIds={actingIds}
-        workflows={workflows}
-        stepsByWorkflowId={stepsByWorkflowId}
-        steps={steps}
-        isMixedWorkflowSelection={isMixedWorkflowSelection}
-        pinnedTaskIds={pinnedTaskIds}
-        onBulkPin={onBulkPin}
-        onBulkArchive={onBulkArchive}
-        onBulkDelete={onBulkDelete}
-        onBulkMove={onBulkMove}
-        closeMenu={closeMenu}
-        moveTasks={moveTasks}
-      />
-    );
-  }
+  const bulkMenu = renderBulkSelectionMenu(props, actingOnSelection, actingIds, moveTasks);
+  if (bulkMenu) return bulkMenu;
 
   // Acting on a lone selected row (Pin / Delete) must drop it from the selection
   // so later plain clicks navigate instead of toggling.
@@ -251,6 +266,7 @@ function TaskContextMenuItems(props: TaskContextMenuItemsProps) {
       />
       {!task.isArchived && <TaskColorMenu taskId={task.id} disabled={isDeleting} />}
       <TaskNestContextMenuItems task={task} disabled={isDeleting} />
+      <TaskPluginPrimaryMenuItems task={task} disabled={isDeleting} />
       <TaskLinkMenu disabled={isDeleting} {...selectTaskLinkActions(task, closeMenu, props)} />
       {!task.isArchived && (
         <TaskMoveItems
@@ -272,6 +288,35 @@ function TaskContextMenuItems(props: TaskContextMenuItemsProps) {
       <TaskDeleteItem taskId={task.id} isDeleting={isDeleting} onDeleteTask={onDelete} />
     </>
   );
+}
+
+/**
+ * Group "primary" plugin task-menu actions (e.g. the tags plugin's "Add
+ * tag..." item), rendered as flat items immediately before the sidebar
+ * menu's "Link" submenu — the same entries the kanban card menu already
+ * renders via `buildPrimaryPluginEntries`, so a plugin registers once and
+ * appears in both surfaces. `PluginTaskMenuContext.workspaceId` is typed
+ * non-nullable, so with no active workspace this renders nothing rather than
+ * passing an empty-string placeholder.
+ */
+function TaskPluginPrimaryMenuItems({
+  task,
+  disabled,
+}: {
+  task: TaskSwitcherItem;
+  disabled?: boolean;
+}) {
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  if (!workspaceId) return null;
+
+  const context: PluginTaskMenuContext = {
+    workspaceId,
+    taskId: task.id,
+    taskTitle: task.title,
+    workflowStepId: task.workflowStepId ?? null,
+    presentation: "desktop",
+  };
+  return <KanbanCardContextMenuItems entries={buildPrimaryPluginEntries({ disabled, context })} />;
 }
 
 function withSelectionClear(
@@ -550,85 +595,5 @@ function TaskMoveItems({
         });
       }}
     />
-  );
-}
-
-function TaskLinkMenu({
-  disabled,
-  onLinkPullRequest,
-  onLinkIssue,
-  onLinkMergeRequest,
-  onLinkJiraTicket,
-  onLinkLinearIssue,
-  onLinkSentryIssue,
-}: {
-  disabled?: boolean;
-  onLinkPullRequest?: () => void;
-  onLinkIssue?: () => void;
-  onLinkMergeRequest?: () => void;
-  onLinkJiraTicket?: () => void;
-  onLinkLinearIssue?: () => void;
-  onLinkSentryIssue?: () => void;
-}) {
-  const { t } = useTranslation();
-  if (
-    !onLinkPullRequest &&
-    !onLinkIssue &&
-    !onLinkMergeRequest &&
-    !onLinkJiraTicket &&
-    !onLinkLinearIssue &&
-    !onLinkSentryIssue
-  ) {
-    return null;
-  }
-  return (
-    <ContextMenuSub>
-      <ContextMenuSubTrigger disabled={disabled}>
-        <IconLink className="mr-2 h-4 w-4" />
-        {t("task:link")}
-      </ContextMenuSubTrigger>
-      <ContextMenuSubContent className="w-56">
-        {onLinkPullRequest && (
-          <ContextMenuItem disabled={disabled} onSelect={onLinkPullRequest}>
-            <IconGitPullRequest className="mr-2 h-4 w-4" />
-            {t("task:githubPullRequest")}
-          </ContextMenuItem>
-        )}
-        {onLinkIssue && (
-          <ContextMenuItem disabled={disabled} onSelect={onLinkIssue}>
-            <IconCircleDot className="mr-2 h-4 w-4" />
-            {t("task:githubIssue")}
-          </ContextMenuItem>
-        )}
-        {onLinkMergeRequest && (
-          <ContextMenuItem
-            className="min-h-12! sm:min-h-7!"
-            disabled={disabled}
-            onSelect={onLinkMergeRequest}
-          >
-            <IconBrandGitlab className="mr-2 h-4 w-4" />
-            {t("task:gitlabMergeRequest")}
-          </ContextMenuItem>
-        )}
-        {onLinkJiraTicket && (
-          <ContextMenuItem disabled={disabled} onSelect={onLinkJiraTicket}>
-            <IconTicket className="mr-2 h-4 w-4" />
-            {t("task:jiraTicket")}
-          </ContextMenuItem>
-        )}
-        {onLinkLinearIssue && (
-          <ContextMenuItem disabled={disabled} onSelect={onLinkLinearIssue}>
-            <IconCircleDot className="mr-2 h-4 w-4" />
-            {t("task:linearIssue")}
-          </ContextMenuItem>
-        )}
-        {onLinkSentryIssue && (
-          <ContextMenuItem disabled={disabled} onSelect={onLinkSentryIssue}>
-            <IconBrandSentry className="mr-2 h-4 w-4" />
-            {t("task:sentryIssue")}
-          </ContextMenuItem>
-        )}
-      </ContextMenuSubContent>
-    </ContextMenuSub>
   );
 }
