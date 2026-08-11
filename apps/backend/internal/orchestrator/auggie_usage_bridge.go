@@ -66,47 +66,119 @@ func (s *Service) publishAuggieDiskPromptUsage(
 	if err != nil {
 		return
 	}
-	after := auggieUsageSeqFromMetadata(session)
+	// Prefer the persisted watermark over any stale in-memory session.Metadata
+	// (deferred re-read vs second complete, or callers holding an old snapshot).
+	after := s.liveAuggieUsageSeq(ctx, payload.SessionID, session)
 	exchanges, err := auggieusage.ReadNewExchangeUsages(path, after)
 	if err != nil {
-		if !os.IsNotExist(err) && s.logger != nil {
-			s.logger.Debug("auggie usage disk read failed",
-				zap.String("session_id", payload.SessionID),
-				zap.Error(err))
-		}
-		// Optional short deferred re-read if file not flushed yet.
-		if os.IsNotExist(err) {
-			s.scheduleAuggieUsageReread(payload.SessionID, payload.TaskID, payload.AgentID, acpID, after)
-		}
+		s.handleAuggieDiskReadError(payload, acpID, after, err)
 		return
 	}
-	if len(exchanges) == 0 {
+	usage, maxSeq, model, ok := s.usageDeltaFromExchanges(ctx, payload.SessionID, path, after, exchanges)
+	if !ok {
 		return
 	}
-	usage, maxSeq, model := promptUsageFromAuggieExchanges(exchanges)
-	if usage == nil {
-		// Zero-token completed exchanges: advance watermark without publishing
-		// empty piles so we do not re-walk them forever.
-		if maxSeq > after {
-			s.persistAuggieUsageSeq(ctx, payload.SessionID, maxSeq)
-		}
-		return
-	}
-	// Prefer disk model when present so piles key on the exchange model.
-	emitPayload := *payload
-	if model != "" {
-		dataCopy := lifecycle.AgentStreamEventData{}
-		if emitPayload.Data != nil {
-			dataCopy = *emitPayload.Data
-		}
-		dataCopy.CurrentModelID = model
-		emitPayload.Data = &dataCopy
-	}
+	emitPayload := withCurrentModel(payload, model)
 	// Advance only after a successful publish so a failed bus write can retry.
-	if !s.emitPromptUsage(ctx, &emitPayload, session, usage) {
+	if !s.emitPromptUsage(ctx, emitPayload, session, usage) {
 		return
 	}
 	s.persistAuggieUsageSeq(ctx, payload.SessionID, maxSeq)
+}
+
+func (s *Service) handleAuggieDiskReadError(
+	payload *lifecycle.AgentStreamEventPayload,
+	acpID string,
+	after int,
+	err error,
+) {
+	if payload == nil {
+		return
+	}
+	if !os.IsNotExist(err) && s.logger != nil {
+		s.logger.Debug("auggie usage disk read failed",
+			zap.String("session_id", payload.SessionID),
+			zap.Error(err))
+	}
+	// Optional short deferred re-read if file not flushed yet.
+	if os.IsNotExist(err) {
+		s.scheduleAuggieUsageReread(payload.SessionID, payload.TaskID, payload.AgentID, acpID, after)
+	}
+}
+
+// usageDeltaFromExchanges sums disk exchanges and re-filters against the live
+// watermark so a parallel complete/re-read cannot double-publish the same seqs.
+func (s *Service) usageDeltaFromExchanges(
+	ctx context.Context,
+	sessionID, path string,
+	after int,
+	exchanges []auggieusage.ExchangeUsage,
+) (*streams.PromptUsage, int, string, bool) {
+	if len(exchanges) == 0 {
+		return nil, 0, "", false
+	}
+	usage, maxSeq, model := promptUsageFromAuggieExchanges(exchanges)
+	if usage == nil {
+		// Zero-token completed exchanges: advance watermark without publishing.
+		if maxSeq > after {
+			s.persistAuggieUsageSeq(ctx, sessionID, maxSeq)
+		}
+		return nil, maxSeq, model, false
+	}
+	cur := s.liveAuggieUsageSeq(ctx, sessionID, nil)
+	if cur >= maxSeq {
+		return nil, maxSeq, model, false
+	}
+	if cur <= after {
+		return usage, maxSeq, model, true
+	}
+	// Watermark moved; re-sum only still-new exchanges.
+	exchanges, err := auggieusage.ReadNewExchangeUsages(path, cur)
+	if err != nil || len(exchanges) == 0 {
+		return nil, maxSeq, model, false
+	}
+	usage, maxSeq, model = promptUsageFromAuggieExchanges(exchanges)
+	if usage == nil {
+		if maxSeq > cur {
+			s.persistAuggieUsageSeq(ctx, sessionID, maxSeq)
+		}
+		return nil, maxSeq, model, false
+	}
+	return usage, maxSeq, model, true
+}
+
+func withCurrentModel(payload *lifecycle.AgentStreamEventPayload, model string) *lifecycle.AgentStreamEventPayload {
+	if payload == nil {
+		return nil
+	}
+	emit := *payload
+	if model == "" {
+		return &emit
+	}
+	dataCopy := lifecycle.AgentStreamEventData{}
+	if emit.Data != nil {
+		dataCopy = *emit.Data
+	}
+	dataCopy.CurrentModelID = model
+	emit.Data = &dataCopy
+	return &emit
+}
+
+// liveAuggieUsageSeq returns the max of the in-memory session watermark and the
+// value currently stored on the task_sessions row (when the repo is available).
+func (s *Service) liveAuggieUsageSeq(ctx context.Context, sessionID string, session *models.TaskSession) int {
+	after := auggieUsageSeqFromMetadata(session)
+	if s == nil || s.repo == nil || sessionID == "" {
+		return after
+	}
+	row, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || row == nil {
+		return after
+	}
+	if cur := auggieUsageSeqFromMetadata(row); cur > after {
+		return cur
+	}
+	return after
 }
 
 func promptUsageFromAuggieExchanges(exchanges []auggieusage.ExchangeUsage) (*streams.PromptUsage, int, string) {
@@ -139,7 +211,7 @@ func (s *Service) advanceAuggieUsageWatermark(
 	if err != nil {
 		return
 	}
-	after := auggieUsageSeqFromMetadata(session)
+	after := s.liveAuggieUsageSeq(ctx, payload.SessionID, session)
 	exchanges, err := auggieusage.ReadNewExchangeUsages(path, after)
 	if err != nil || len(exchanges) == 0 {
 		return
