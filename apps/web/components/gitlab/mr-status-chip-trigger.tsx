@@ -10,7 +10,7 @@ import {
 } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
-import { isMRReadyToMerge } from "./mr-task-icon";
+import { isMRReadyToMerge, mrChipStatus } from "./mr-task-icon";
 import type { MRChipStatus } from "./mr-task-icon";
 import type { ChipAutomation } from "./mr-status-chip-selection";
 import type { TaskMR } from "@/lib/types/gitlab";
@@ -71,9 +71,16 @@ export function MRStatusChipGlyph({ status }: { status: MRChipStatus }) {
   }
 }
 
-function useMRChipAriaLabel(openCount: number, liveStatus: MRChipStatus, actedOnMR: TaskMR) {
+// The aria-label describes the acted-on MR, so its status word is the
+// acted-on MR's OWN status (mrChipStatus(actedOnMR)) — it deliberately does
+// NOT read the live-tracking `liveStatus` that drives `data-status` and the
+// glyph. Diverging on that point would rename the label mid-interaction to a
+// status that belongs to a different MR than the one the disclosure is
+// actually showing/acting on (spec: Accessibility, "The aria-label describes
+// the acted-on MR").
+function useMRChipAriaLabel(openCount: number, actedOnMR: TaskMR) {
   const { t } = useTranslation();
-  const status = t(STATUS_LABEL_KEY[liveStatus]);
+  const status = t(STATUS_LABEL_KEY[mrChipStatus(actedOnMR)]);
   if (openCount > 1) return t("gitlab:mrChipAriaLabelMulti", { count: openCount, status });
   return t("gitlab:mrChipAriaLabelSingle", { mriid: actedOnMR.mr_iid, status });
 }
@@ -109,7 +116,7 @@ export function useMRChipTriggerAttrs({
     "data-mr-state": actedOnMR.state,
     "data-mr-ready-to-merge": isMRReadyToMerge(actedOnMR) ? "true" : "false",
     "data-selection-frozen": frozen ? "true" : "false",
-    "aria-label": useMRChipAriaLabel(openCount, liveStatus, actedOnMR),
+    "aria-label": useMRChipAriaLabel(openCount, actedOnMR),
     className: MR_CHIP_TRIGGER_CLASS,
   };
 }

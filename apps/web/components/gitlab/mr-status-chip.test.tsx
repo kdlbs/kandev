@@ -7,6 +7,7 @@ import type { TaskMR, TaskMRAutomationOptions } from "@/lib/types/gitlab";
 
 const OPEN_DELAY_MS = 150;
 const CHIP_TESTID = "mr-status-chip";
+const DATA_MR_IID = "data-mr-iid";
 const POPOVER_STUB_TESTID = "mr-ci-popover-stub";
 
 const gitlabMocks = vi.hoisted(() => ({ mrs: [] as TaskMR[] }));
@@ -162,7 +163,7 @@ describe("MRStatusChip rendering and selection", () => {
     const trigger = screen.getByTestId(CHIP_TESTID);
     expect(trigger.getAttribute("data-status")).toBe("failed");
     expect(trigger.getAttribute("data-mr-count")).toBe("1");
-    expect(trigger.getAttribute("data-mr-iid")).toBe("81");
+    expect(trigger.getAttribute(DATA_MR_IID)).toBe("81");
     expect(trigger.getAttribute("data-mr-state")).toBe("open");
     expect(trigger.getAttribute("data-mr-ready-to-merge")).toBe("false");
     expect(trigger.getAttribute("data-selection-frozen")).toBe("false");
@@ -177,7 +178,7 @@ describe("MRStatusChip rendering and selection", () => {
     render(createElement(MRStatusChip, { taskId: "task-1" }));
     const trigger = screen.getByTestId(CHIP_TESTID);
     expect(trigger.getAttribute("data-status")).toBe("failed");
-    expect(trigger.getAttribute("data-mr-iid")).toBe("2");
+    expect(trigger.getAttribute(DATA_MR_IID)).toBe("2");
     // Terminal MR is not counted toward data-mr-count.
     expect(trigger.getAttribute("data-mr-count")).toBe("2");
   });
@@ -224,7 +225,7 @@ describe("MRStatusChip disclosure interactions", () => {
 
     expect(screen.getByTestId(POPOVER_STUB_TESTID).textContent).toContain("!2");
     expect(trigger.getAttribute("data-selection-frozen")).toBe("true");
-    expect(trigger.getAttribute("data-mr-iid")).toBe("2");
+    expect(trigger.getAttribute(DATA_MR_IID)).toBe("2");
 
     // Store update makes MR "a" the new live selection while the popover
     // stays open on "b": data-status tracks the live selection, data-mr-iid
@@ -235,6 +236,44 @@ describe("MRStatusChip disclosure interactions", () => {
         makeMR({ id: "b", mr_iid: 2, pipeline_state: "failure" }),
       ];
     });
+  });
+
+  it("keeps the aria-label naming the acted-on MR's own status while frozen, not the live selection's", () => {
+    gitlabMocks.mrs = [
+      makeMR({ id: "a", mr_iid: 1, pipeline_state: "pending" }), // running, rank 4
+      makeMR({ id: "b", mr_iid: 2, pipeline_state: "failure" }), // failed, rank 5
+    ];
+    const { rerender } = render(createElement(MRStatusChip, { taskId: "task-1" }));
+    const trigger = screen.getByTestId(CHIP_TESTID);
+
+    act(() => {
+      fireEvent.mouseEnter(trigger);
+      vi.advanceTimersByTime(OPEN_DELAY_MS);
+    });
+
+    // Frozen on MR "b" (failed) — live and acted-on agree here, a sanity check.
+    expect(trigger.getAttribute(DATA_MR_IID)).toBe("2");
+    expect(trigger.getAttribute("aria-label")).toContain("pipeline failed");
+
+    // MR "b" (the frozen, acted-on MR) becomes ready; MR "a" is unchanged and
+    // now outranks it, so the LIVE selection flips to "a" (still running).
+    // data-mr-iid stays on "b" (still open, so the freeze holds), and
+    // data-status tracks the live selection ("running") by design — but the
+    // aria-label describes the acted-on MR, so it must say "ready to merge"
+    // (b's own status), never "pipeline running" (spec: Accessibility, "does
+    // NOT follow data-status's live tracking").
+    gitlabMocks.mrs = [
+      makeMR({ id: "a", mr_iid: 1, pipeline_state: "pending" }),
+      makeMR({ id: "b", mr_iid: 2, approval_state: "approved", pipeline_state: "success" }),
+    ];
+    act(() => {
+      rerender(createElement(MRStatusChip, { taskId: "task-1" }));
+    });
+
+    expect(trigger.getAttribute(DATA_MR_IID)).toBe("2");
+    expect(trigger.getAttribute("data-status")).toBe("running");
+    expect(trigger.getAttribute("aria-label")).toContain("ready to merge");
+    expect(trigger.getAttribute("aria-label")).not.toContain("pipeline running");
   });
 
   it("calls the unlink hook with the acted-on MR's association id", () => {
