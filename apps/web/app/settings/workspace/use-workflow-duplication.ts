@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { listWorkflowStepsAction } from "@/app/actions/workspaces";
 import type { Workflow, WorkflowStep } from "@/lib/types/http";
@@ -25,6 +25,7 @@ export function useWorkflowDuplication({
 }: UseWorkflowDuplicationArgs) {
   const { t } = useTranslation();
   const [duplicateLoading, setDuplicateLoading] = useState(false);
+  const duplicateLoadingRef = useRef(false);
   let duplicateDisabledReason: string | undefined;
 
   if (isImproveWorkspace) {
@@ -38,7 +39,8 @@ export function useWorkflowDuplication({
   const duplicateDisabled = duplicateLoading || duplicateDisabledReason !== undefined;
 
   const handleDuplicateWorkflow = async () => {
-    if (duplicateDisabled) return;
+    if (duplicateLoadingRef.current || duplicateDisabled) return;
+    duplicateLoadingRef.current = true;
     setDuplicateLoading(true);
     try {
       const result = await listWorkflowStepsAction(workflow.id);
@@ -50,6 +52,7 @@ export function useWorkflowDuplication({
         variant: "error",
       });
     } finally {
+      duplicateLoadingRef.current = false;
       setDuplicateLoading(false);
     }
   };

@@ -96,4 +96,30 @@ describe("useWorkflowDuplication", () => {
     });
     expect(result.current.duplicateLoading).toBe(false);
   });
+
+  it("ignores a second activation while the saved steps are loading", async () => {
+    let resolveSteps!: (value: { steps: WorkflowStep[]; total: number }) => void;
+    vi.mocked(listWorkflowStepsAction).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveSteps = resolve;
+      }),
+    );
+    const { result, onDuplicateWorkflow } = renderDuplicationHook();
+
+    let firstRequest: Promise<void>;
+    let secondRequest: Promise<void>;
+    await act(async () => {
+      firstRequest = result.current.handleDuplicateWorkflow();
+      secondRequest = result.current.handleDuplicateWorkflow();
+      await Promise.resolve();
+    });
+
+    expect(listWorkflowStepsAction).toHaveBeenCalledOnce();
+    resolveSteps({ steps, total: steps.length });
+    await act(async () => {
+      await Promise.all([firstRequest!, secondRequest!]);
+    });
+
+    expect(onDuplicateWorkflow).toHaveBeenCalledOnce();
+  });
 });

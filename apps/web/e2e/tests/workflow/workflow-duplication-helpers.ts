@@ -26,6 +26,7 @@ export async function seedWorkflowDuplication(
   });
   await apiClient.updateWorkflowStep(review.id, {
     prompt: "Review step prompt",
+    stage_type: "review",
     events: {
       on_turn_complete: [{ type: "move_to_step", config: { step_id: done.id } }],
     },

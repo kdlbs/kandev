@@ -36,6 +36,7 @@ function sourceSteps(): WorkflowStep[] {
       position: 0,
       color: "bg-purple-500",
       prompt: "Review this task",
+      stage_type: "review",
       events: {
         on_turn_complete: [
           { type: "move_to_step", config: { step_id: DONE_STEP_ID, requires_approval: true } },
@@ -146,6 +147,7 @@ describe("createWorkflowDuplication", () => {
       position: 0,
       color: "bg-purple-500",
       prompt: "Review this task",
+      stage_type: "review",
       allow_manual_move: false,
       is_start_step: true,
       show_in_command_panel: true,

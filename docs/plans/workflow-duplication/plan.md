@@ -16,7 +16,7 @@ This order preserves the no-write-before-save behavior. It also reuses the curre
 
 ## Backend
 
-No backend schema, service, handler, DTO, or route changes are required. The saved duplicate uses the current workflow and step endpoints.
+No new duplication endpoint, schema, service, or route is required. The existing workflow-step controller and frontend adapter must carry the persisted `stage_type` field through create, update, and list operations so the current save endpoints preserve semantic step configuration.
 
 The draft-save pipeline creates only a workflow and its steps. As a result, it excludes tasks and history.
 
@@ -29,7 +29,7 @@ The draft-save pipeline creates only a workflow and its steps. As a result, it e
   - allocate a temporary workflow ID and one temporary ID per source step with `generateUUID()`.
   - copy only editable workflow metadata: `description`, `prompt`, and `agent_profile_id`.
   - omit `workflow_template_id`, `source`, `source_path`, timestamps, and server identity.
-  - clone all persisted editable step fields.
+  - clone all persisted editable step fields, including `stage_type`.
   - remap nested `step_id` values in events and remap `pull_from_step_id`.
   - clear timestamps and return an independent object graph.
 - Extend `useWorkflowCreation` in `apps/web/app/settings/workspace/use-workflow-creation.ts` with `handleDuplicateWorkflow(source, sourceSteps)`. It stores the copied steps in `initialStepsByWorkflowId` and inserts the draft immediately after the source in `workflowItems`.
@@ -69,10 +69,12 @@ The draft-save pipeline creates only a workflow and its steps. As a result, it e
 - **What:** the creation hook inserts the duplicate after its source and registers copied initial steps without persistence.
   **File:** `apps/web/app/settings/workspace/use-workflow-creation.test.ts`.
   **How:** hook test with mocked state setter and deterministic UUIDs.
-- **What:** the action invokes duplication, exposes loading/error-safe disabled states, and explains why an unsaved source cannot be copied.
+- **What:** the action invokes duplication, exposes loading/error-safe disabled states, prevents same-render duplicate requests, and explains why an unsaved source cannot be copied.
   **File:** `apps/web/components/settings/workflow-card-header-actions.test.tsx` and, if needed for card request wiring, a focused `workflow-card` test.
   **How:** Testing Library interaction and accessibility assertions.
-- No Go handler-to-repository test is added because the feature introduces no backend behavior or contract. The desktop Playwright test exercises the existing workflow and step HTTP paths against the real E2E database as the integration proof.
+- **What:** the existing workflow-step transport preserves a non-custom stage type through list, create, update, and draft save.
+  **Files:** `apps/web/app/actions/workspaces.test.ts`, `apps/backend/internal/workflow/handlers/step_events_test.go`, and `apps/web/e2e/tests/workflow/workflow-duplication.spec.ts`.
+  **How:** assert frontend DTO and request bodies, assert the backend update event payload, and assert a persisted `review` step remains `review` after duplication.
 
 ## E2E Tests
 
@@ -90,6 +92,8 @@ Passed:
 
 - `cd apps && pnpm install --frozen-lockfile` completed successfully.
 - `cd apps/web && pnpm --filter @kandev/web test -- --run components/settings/workflow-card-header-actions.test.tsx app/settings/workspace/workflow-duplication.test.ts app/settings/workspace/use-workflow-creation.test.ts app/settings/workspace/use-workflow-duplication.test.ts` passed 4 files and 18 tests.
+- `cd apps/web && pnpm --filter @kandev/web test -- --run app/actions/workspaces.test.ts app/settings/workspace/use-workflow-duplication.test.ts app/settings/workspace/workflow-duplication.test.ts components/settings/workflow-card-actions.test.ts` passed 4 files and 41 tests after the review fixes.
+- `cd apps/backend && go test ./internal/workflow/handlers -run 'TestHTTP(UpdateStepPublishesUpdatedEvent|CreateStepPublishesCreatedEvent)' -count=1` passed.
 - `cd apps/web && pnpm run typecheck` passed.
 - `cd apps/web && pnpm exec eslint --max-warnings 0 ...` passed for all changed frontend, E2E, and test files.
 - `cd apps/web && pnpm run i18n:check && pnpm run i18n:ratchet` passed. Existing real-locale parity warnings remain advisory; the pseudo catalog and new-code ratchet are clean.

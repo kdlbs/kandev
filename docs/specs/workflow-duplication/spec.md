@@ -16,6 +16,7 @@ Workflow authors often need a new pipeline that differs only slightly from an ex
 - Duplicate reads the source's saved configuration and creates a route-local, unsaved workflow draft directly after the source card. It does not persist a workflow until the user presses the route-level **Save changes** action.
 - The draft copies the source description, workflow prompt, default agent profile, and all persisted step configuration.
 - Copied step configuration includes prompts, colors, order, transitions, and start-step state.
+- It preserves each step's semantic stage type, including `work`, `review`, `approval`, and `custom`.
 - It also includes command-panel visibility, manual-move policy, auto-archive policy, and step agent profiles.
 - It also includes completion-signal policy, cancellation policy, WIP limits, and pull-from relationships.
 - The copy receives new workflow and step identities. Every transition or relationship that referred to a source step refers to the corresponding copied step in the draft.

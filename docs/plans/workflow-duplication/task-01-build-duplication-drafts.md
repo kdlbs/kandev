@@ -14,6 +14,7 @@ spec: "../../specs/workflow-duplication/spec.md"
 
 - A pure constructor creates an independent temporary workflow and step graph with the next collision-free copy name and no source/template/sync identity.
 - Nested transition references and pull-from relationships resolve only to copied step IDs, while every editable workflow and step setting remains equal to the source.
+- A persisted semantic step type is carried through the existing list, create, and update transport so draft save does not reset it to `custom`.
 - `useWorkflowCreation` inserts the draft directly after the source and registers its initial steps without issuing a persistence request.
 
 ## Verification
@@ -29,6 +30,10 @@ cd apps && pnpm install --frozen-lockfile && pnpm --filter @kandev/web test -- -
 - `apps/web/app/settings/workspace/use-workflow-creation.ts`
 - `apps/web/app/settings/workspace/use-workflow-creation.test.ts`
 - `apps/web/app/settings/workspace/workspace-workflows-client.tsx`
+- `apps/web/app/actions/workspaces.ts`
+- `apps/web/app/actions/workspaces.test.ts`
+- `apps/backend/internal/workflow/controller/controller.go`
+- `apps/backend/internal/workflow/handlers/step_events_test.go`
 
 ## Dependencies
 
@@ -63,5 +68,7 @@ Report the naming rules, copied/omitted fields, reference-remapping behavior, fi
 - Checks passed:
   - `rtk pnpm --filter @kandev/web test -- --run app/settings/workspace/workflow-duplication.test.ts app/settings/workspace/use-workflow-creation.test.ts`
     (2 files, 11 tests).
+  - `rtk pnpm --filter @kandev/web test -- --run app/actions/workspaces.test.ts app/settings/workspace/use-workflow-duplication.test.ts app/settings/workspace/workflow-duplication.test.ts components/settings/workflow-card-actions.test.ts`
+    (4 files, 41 tests after review fixes).
+  - `rtk go test ./internal/workflow/handlers -run 'TestHTTP(UpdateStepPublishesUpdatedEvent|CreateStepPublishesCreatedEvent)' -count=1`.
   - `rtk pnpm run typecheck` from `apps/web`.
-- No backend changes were required by the plan.

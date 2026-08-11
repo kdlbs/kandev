@@ -64,6 +64,7 @@ test.describe("workflow duplication", () => {
     const copiedDone = copiedSteps.steps.find((step) => step.name === "Done");
     expect(copiedReview).toBeDefined();
     expect(copiedDone).toBeDefined();
+    expect(copiedReview?.stage_type).toBe("review");
     expect(copiedReview?.events?.on_turn_complete).toEqual([
       { type: "move_to_step", config: { step_id: copiedDone!.id } },
     ]);

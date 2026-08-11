@@ -58,11 +58,11 @@ Report desktop/mobile entry points, disabled/error behavior, translations, publi
 ## Results
 
 - Added the localized Duplicate action between Export and Delete with a 44px phone hitbox, loading state, stable test ID, and disabled explanations for Improve Kandev, unsaved sources, and pending mutations.
-- Added authoritative saved-step loading with error toast handling. Sync-managed sources remain copyable because the new draft is manual and independent.
+- Added authoritative saved-step loading with error toast handling and a ref-backed same-render request gate. Sync-managed sources remain copyable because the new draft is manual and independent.
 - Kept the request and disabled-state logic in `use-workflow-duplication.ts` and moved dialog composition into `workflow-card-dialogs-content.tsx` to keep the main workflow card below the configured size limit.
 - Added English and pseudo-locale strings and documented the save-first flow, numbered names, copied settings, and task/history exclusions in `docs/public/workflow-tips.md`.
 - Checks passed:
-  - `rtk pnpm --filter @kandev/web test -- --run components/settings/workflow-card-header-actions.test.tsx app/settings/workspace/workflow-duplication.test.ts app/settings/workspace/use-workflow-creation.test.ts app/settings/workspace/use-workflow-duplication.test.ts` (4 files, 18 tests).
+  - `rtk pnpm --filter @kandev/web test -- --run components/settings/workflow-card-header-actions.test.tsx app/settings/workspace/workflow-duplication.test.ts app/settings/workspace/use-workflow-creation.test.ts app/settings/workspace/use-workflow-duplication.test.ts` (4 files, 19 tests including same-render double activation coverage).
   - `rtk pnpm run typecheck` from `apps/web`.
   - Targeted ESLint with `--max-warnings 0` on all changed frontend and E2E files.
   - `rtk pnpm run i18n:check && rtk pnpm run i18n:ratchet`.
