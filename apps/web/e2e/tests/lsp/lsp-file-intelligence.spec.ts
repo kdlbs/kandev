@@ -26,7 +26,7 @@ import {
   removeFakeKotlinLsp,
 } from "./lsp-e2e-helpers";
 
-const EDITORS_SETTINGS_PATH = "/settings/general/editors";
+const EDITORS_SETTINGS_PATH = "/settings/preferences/terminal-editors";
 const RESERVED_SOURCE_PATH = "Main # query? 100%.kt";
 const DEFINITION_PARENT_PATH = "nested/references";
 const DEFINITION_TARGET_PATH = `${DEFINITION_PARENT_PATH}/Definition Target # query? 100%.kt`;

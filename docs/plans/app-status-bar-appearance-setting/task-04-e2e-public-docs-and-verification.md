@@ -43,7 +43,7 @@ configuration/operations documentation.
 
 ### Desktop and tablet
 
-- On `/settings/general/appearance`, verify **Show status bar** starts from the
+- On `/settings/preferences/appearance`, verify **Show status bar** starts from the
   backend value.
 - Turn it off, confirm dirty state, save through the floating **Save changes**
   action, and wait for the ordinary bar to disappear without a restart.
@@ -80,7 +80,7 @@ Update:
     `KANDEV_FEATURES_APP_STATUS_BAR`, and profile-default rows;
   - do not replace them with a config key.
 - `docs/public/operations.md`
-  - point users to Settings > General > Appearance > **Show status bar**;
+  - point users to Settings > Preferences > Appearance > **Show status bar**;
   - state that saves apply without restart;
   - explain that host metrics remain separately controlled and urgent
     connection warnings remain visible while ordinary status chrome is off.

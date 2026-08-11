@@ -35,7 +35,7 @@ Backend-owned user settings become the sole durable owner of a top-level
 - boot hydration, PATCH responses, and `user.settings.updated` events carry the
   effective value to every client.
 
-Settings > General > Appearance exposes the preference as **Show status bar**
+Settings > Preferences > Appearance exposes the preference as **Show status bar**
 through the existing shared save coordinator. A successful save changes the
 active responsive presentation without restarting Kandev. Desktop and tablet
 show or hide the bottom bar; phone shows or hides ordinary Status entry points

@@ -11,7 +11,7 @@ status: done
 
 Graduate the stable App status bar out of runtime feature flags. Keep ordinary
 status chrome off by default and give each user a portable **Show status bar** preference under
-Settings > General > Appearance. A successful Appearance save changes the
+Settings > Preferences > Appearance. A successful Appearance save changes the
 desktop/tablet bar or ordinary phone Status paths without restarting Kandev.
 
 The WebSocket connectivity warning remains visible through its problem-only
@@ -30,7 +30,7 @@ location preferences remain independent.
   `KANDEV_FEATURES_APP_STATUS_BAR` identities are retired, never reused, and not
   migrated into user settings. Unknown persisted runtime override rows remain
   inert.
-- The new control participates in the existing General Appearance saved/draft
+- The new control participates in the existing Appearance-page saved/draft
   model and shared **Save changes** coordinator. It does not create an
   independent save button or browser-storage fallback.
 - Turning the preference off hides the ordinary desktop/tablet bar and phone
@@ -92,7 +92,7 @@ schema migration.
 
 ### Appearance control
 
-- Add a controlled `AppStatusBarSettingsCard` under General > Appearance.
+- Add a controlled `AppStatusBarSettingsCard` under Preferences > Appearance.
 - Use localized copy:
   - label: **Show status bar**
   - explanation: the preference shows connection, optional host metrics, and
@@ -104,8 +104,7 @@ schema migration.
   PATCH, discard behavior, and post-save Zustand update with
   `appStatusBarEnabled`.
 - Add a settings-discovery target and aliases for status bar, status drawer,
-  bottom bar, and appearance. Update the General Appearance navigation
-  description to mention the status bar.
+  bottom bar, and appearance under the Preferences group.
 - Add English locale keys and regenerate the pseudo locale. Do not hand-edit
   generated pseudo output.
 

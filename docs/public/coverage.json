@@ -24,7 +24,7 @@
       "docs": ["use-kandev", "tasks-and-workflows", "configuration"],
       "sources": ["apps/backend/internal/task/handlers/workspace_handlers.go", "apps/web/components/app-sidebar/app-sidebar-workspace-picker.tsx"],
       "tests": ["apps/backend/internal/task/handlers/workspace_handlers_test.go", "apps/web/components/app-sidebar/app-sidebar-workspace-picker.test.tsx"],
-      "settingsRoutes": ["/settings/workspace"],
+      "settingsRoutes": ["/settings/workspace", "/settings/workspaces"],
       "mcpTools": ["list_repositories_kandev", "list_workspaces_kandev"]
     },
     {
@@ -189,7 +189,12 @@
         "apps/web/components/settings/agent-profile-page.test.tsx",
         "apps/web/hooks/domains/settings/use-dynamic-models.test.ts"
       ],
-      "settingsRoutes": ["/settings/agents", "/settings/prompts", "/settings/utility-agents"],
+      "settingsRoutes": [
+        "/settings/agents",
+        "/settings/agents/browse",
+        "/settings/prompts",
+        "/settings/utility-agents"
+      ],
       "mcpTools": [
         "create_agent_profile_kandev",
         "delete_agent_profile_kandev",
@@ -253,9 +258,17 @@
       "audiences": ["user"],
       "stability": "stable",
       "docs": ["security", "configuration", "developer-tools", "operations", "sessions-and-review"],
-      "sources": ["apps/web/src/settings-routes.tsx", "apps/web/components/settings/general-settings.tsx", "apps/web/components/settings/layouts/layout-settings.tsx"],
-      "tests": ["apps/web/src/settings-routes.test.ts", "apps/web/components/settings/terminal-settings.test.ts", "apps/web/lib/layout/layout-profiles.test.ts"],
+      "sources": ["apps/web/src/settings-routes.tsx", "apps/web/components/settings/settings-index.tsx", "apps/web/components/settings/general-settings.tsx", "apps/web/components/settings/layouts/layout-settings.tsx"],
+      "tests": ["apps/web/src/settings-routes.test.ts", "apps/web/components/settings/settings-index.test.tsx", "apps/web/components/settings/terminal-settings.test.ts", "apps/web/lib/layout/layout-profiles.test.ts"],
       "settingsRoutes": [
+        "/settings",
+        "/settings/preferences/appearance",
+        "/settings/preferences/keyboard-shortcuts",
+        "/settings/preferences/layouts",
+        "/settings/preferences/notifications",
+        "/settings/preferences/task-behavior",
+        "/settings/preferences/terminal-editors",
+        "/settings/secrets",
         "/settings/general",
         "/settings/general/appearance",
         "/settings/general/editors",
@@ -316,6 +329,7 @@
         "/settings/system/about",
         "/settings/system/backups",
         "/settings/system/database",
+        "/settings/system/data-storage",
         "/settings/system/feature-toggles",
         "/settings/system/licenses",
         "/settings/system/logs",
@@ -376,8 +390,8 @@
   ],
   "exclusions": {
     "settingsRoutes": [
-      { "route": "/settings", "reason": "Alias for General settings." },
       { "route": "/settings/changelog", "reason": "Redirect to System updates." },
+      { "route": "/settings/preferences", "reason": "Redirect to Preferences Appearance." },
       { "route": "/settings/general/changes-panel", "reason": "Legacy redirect to Appearance." },
       { "route": "/settings/general/chat-input", "reason": "Legacy redirect to Keyboard Shortcuts." },
       { "route": "/settings/general/resource-metrics", "reason": "Legacy redirect to Appearance." },

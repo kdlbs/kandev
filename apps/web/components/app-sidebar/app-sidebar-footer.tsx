@@ -209,10 +209,48 @@ function InsightFooterButtons({
   );
 }
 
+/**
+ * The gear both navigates and swaps the sidebar's content, in both directions.
+ *
+ * Entering: without the navigation the main panel keeps showing whatever the
+ * user was on (e.g. a task session), so the first click looks like a no-op and a
+ * second click on a tree leaf is what actually reaches Settings. Match the
+ * Stats/Office buttons — one click gets you there.
+ *
+ * Leaving: swapping the sidebar back while the main panel stayed on a settings
+ * page left the two disagreeing — kanban navigation beside an open settings
+ * page, with no route back to the tree except the gear that had just closed it.
+ *
+ * Either way the swap waits for the navigation to commit. A settings page with
+ * unsaved edits blocks the push, and "Continue editing" cancels it: toggling
+ * regardless left the URL in Settings with the sidebar already back on kanban
+ * navigation — the same disagreement, reached from the other side.
+ */
+function useSettingsGearToggle(
+  settingsMode: boolean,
+  activeWorkspace: Parameters<typeof workspaceHomeHref>[0],
+  onToggleSettingsMode: () => void,
+) {
+  const router = useRouter();
+  const pathname = usePathname();
+
+  return () => {
+    const onSettingsRoute = isSettingsRoute(pathname);
+    if (!settingsMode && !onSettingsRoute) {
+      router.push("/settings", { onNavigated: onToggleSettingsMode });
+      return;
+    }
+    if (settingsMode && onSettingsRoute) {
+      router.push(workspaceHomeHref(activeWorkspace), { onNavigated: onToggleSettingsMode });
+      return;
+    }
+    onToggleSettingsMode();
+  };
+}
+
 export function AppSidebarFooter({ collapsed, onToggleSettingsMode }: AppSidebarFooterProps) {
   const { t } = useTranslation();
   const router = useRouter();
-  const pathname = usePathname();
   const workspaces = useAppStore((s) => s.workspaces);
   const workspaceId = workspaces.activeId;
   const activeWorkspace = workspaces.items.find((workspace) => workspace.id === workspaceId);
@@ -221,13 +259,7 @@ export function AppSidebarFooter({ collapsed, onToggleSettingsMode }: AppSidebar
     ? resolveLastKanbanWorkspace(workspaces.items)
     : resolveLastOfficeWorkspace(workspaces.items);
   const settingsMode = useAppStore((s) => s.appSidebar.settingsMode);
-  const enterSettings = () => {
-    // One click navigates to Settings (like the Stats/Office buttons).
-    if (!settingsMode && !isSettingsRoute(pathname)) {
-      router.push("/settings");
-    }
-    onToggleSettingsMode();
-  };
+  const toggleSettings = useSettingsGearToggle(settingsMode, activeWorkspace, onToggleSettingsMode);
   const officeEnabled = useFeature("office");
   const appStatusBarEnabled = useAppStore((s) => s.userSettings.appStatusBarEnabled);
   const insightDestinations = useStaticDestinations("sidebar", "insights");
@@ -249,7 +281,7 @@ export function AppSidebarFooter({ collapsed, onToggleSettingsMode }: AppSidebar
         icon={IconSettings}
         label={settingsMode ? t("sidebar:closeSettings") : t("common:settings")}
         collapsed={collapsed}
-        onClick={enterSettings}
+        onClick={toggleSettings}
         active={settingsMode}
         testId="sidebar-settings-gear"
       />

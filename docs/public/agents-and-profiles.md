@@ -112,7 +112,7 @@ For account-wide provider usage across supported providers, install the
 [Provider Usage plugin](https://github.com/kdlbs/kandev-plugin-provider-usage).
 It adds a provider pill to the session top bar and can add a compact display to
 the global status surface. That surface is off by default and follows the
-portable **Show status bar** preference under **Settings > General >
+portable **Show status bar** preference under **Settings > Preferences >
 Appearance > Status Bar**; saving applies without a restart. If it is off, the
 session top-bar pill remains available. When it is on, the plugin can also
 appear in the desktop/tablet bottom bar or phone Status drawer. Configure the plugin under

@@ -11,7 +11,7 @@ import { test, expect } from "../../fixtures/test-base";
  * See docs/specs/platform/i18n.md and docs/i18n.md.
  */
 
-const APPEARANCE_URL = "/settings/general/appearance";
+const APPEARANCE_URL = "/settings/preferences/appearance";
 
 /** Latin letters carrying diacritics, as produced by scripts/generate-pseudo-locale.mjs. */
 const ACCENTED = /[À-ɏ]/;

@@ -49,7 +49,7 @@ test.describe("App status bar", () => {
     apiClient,
     prCapture,
   }) => {
-    await testPage.goto("/settings/general/appearance");
+    await testPage.goto("/settings/preferences/appearance");
     const toggle = testPage.getByRole("switch", { name: "Show status bar" });
     const toggleRow = testPage.getByTestId("app-status-bar-toggle-row");
     const floatingSave = testPage.getByTestId("settings-floating-save");

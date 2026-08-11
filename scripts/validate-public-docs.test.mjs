@@ -54,7 +54,7 @@ async function createCoverageRepo({
     "docs/public/index.md": validPage,
     "apps/web/src/settings-routes.tsx": `const SETTINGS_ROUTES = {\n${settingsRoutes
       .map((route) => `  "${route}": () => null,`)
-      .join("\n")}\n};\n\nexport function SettingsRoutes() {}`,
+      .join("\n")}\n};\n\nexport const SETTINGS_ROUTE_PATHS = new Set(Object.keys(SETTINGS_ROUTES));\n\nexport function SettingsRoutes() {}`,
     "apps/web/src/settings-routes.test.ts": "// settings route coverage",
     "apps/backend/internal/mcp/server/server.go": mcpTools
       .map((tool) => `mcp.NewTool("${tool}")`)

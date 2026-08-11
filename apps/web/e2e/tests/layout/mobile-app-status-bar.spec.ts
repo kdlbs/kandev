@@ -23,12 +23,8 @@ test.describe("Mobile App status bar preference", () => {
     apiClient,
     prCapture,
   }) => {
-    await testPage.goto("/settings/general/terminal");
-    await testPage.getByTestId("settings-mobile-menu-button").tap();
-    await testPage
-      .getByTestId("settings-mobile-menu")
-      .getByRole("link", { name: "Appearance" })
-      .tap();
+    await testPage.goto("/settings");
+    await testPage.getByTestId("settings-index").getByRole("link", { name: "Appearance" }).tap();
 
     const toggle = testPage.getByRole("switch", { name: "Show status bar" });
     const toggleRow = testPage.getByTestId("app-status-bar-toggle-row");
@@ -43,15 +39,16 @@ test.describe("Mobile App status bar preference", () => {
       .poll(async () => (await apiClient.getUserSettings()).settings.app_status_bar_enabled)
       .toBe(false);
 
-    await testPage.getByTestId("settings-mobile-menu-button").tap();
-    await expect(testPage.getByTestId("settings-mobile-status-button")).toHaveCount(0);
+    await testPage.goto("/");
+    await testPage.getByRole("button", { name: "Open menu" }).tap();
+    await expect(testPage.getByTestId("mobile-home-status-button")).toHaveCount(0);
     await testPage.keyboard.press("Escape");
     await testPage.goto("/stats");
     await expect(testPage.getByTestId("app-status-drawer-trigger")).toHaveCount(0);
     await testPage.reload();
     await expect(testPage.getByTestId("app-status-drawer-trigger")).toHaveCount(0);
 
-    await testPage.goto("/settings/general/appearance");
+    await testPage.goto("/settings/preferences/appearance");
     await expect(toggle).toHaveAttribute("aria-checked", "false");
     await toggle.tap();
     await floatingSave.getByRole("button", { name: "Save changes" }).tap();

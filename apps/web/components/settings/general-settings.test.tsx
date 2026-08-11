@@ -13,6 +13,9 @@ const themeMocks = vi.hoisted(() => ({
 const storeMocks = vi.hoisted(() => ({
   state: {} as Record<string, unknown>,
   setUserSettings: vi.fn(),
+  previewSettingsMenuMode: vi.fn(),
+  commitSettingsMenuMode: vi.fn(),
+  restoreSettingsMenuMode: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -56,12 +59,19 @@ beforeEach(() => {
   themeMocks.previewTheme.mockReset();
   themeMocks.commitTheme.mockReset();
   themeMocks.restoreTheme.mockReset();
+  storeMocks.previewSettingsMenuMode.mockReset();
+  storeMocks.commitSettingsMenuMode.mockReset();
+  storeMocks.restoreSettingsMenuMode.mockReset();
   storeMocks.state = {
     userSettings: {
       ...defaultSettingsState.userSettings,
       appStatusBarEnabled: true,
     },
+    settingsMenu: { savedMode: "flat" },
     setUserSettings: storeMocks.setUserSettings,
+    previewSettingsMenuMode: storeMocks.previewSettingsMenuMode,
+    commitSettingsMenuMode: storeMocks.commitSettingsMenuMode,
+    restoreSettingsMenuMode: storeMocks.restoreSettingsMenuMode,
   };
 });
 

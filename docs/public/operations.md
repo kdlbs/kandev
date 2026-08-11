@@ -422,7 +422,7 @@ After restart, verify `/health`, **System > About**, **System > Status**, the da
 
 ## Resource metrics
 
-Configure sampling at **Settings > General > Appearance > Resource Metrics**. Defaults are CPU, memory, and disk percentage every five seconds, backend disk path `/`, and execution-environment collection off. Valid intervals are 1–300 seconds; at least one of CPU, memory, disk, CPU temperature, or 1-minute system load remains selected. System load is the average number of tasks running or waiting for CPU during the last minute; compare it with the host's CPU core count. Enable **Simplified metrics** to show only each metric icon and value in the status bar, fallback top bar, or phone Status drawer, without the Host marker or percentage progress bars.
+Configure sampling at **Settings > Preferences > Appearance > Resource Metrics**. Defaults are CPU, memory, and disk percentage every five seconds, backend disk path `/`, and execution-environment collection off. Valid intervals are 1–300 seconds; at least one of CPU, memory, disk, CPU temperature, or 1-minute system load remains selected. System load is the average number of tasks running or waiting for CPU during the last minute; compare it with the host's CPU core count. Enable **Simplified metrics** to show only each metric icon and value in the status bar, fallback top bar, or phone Status drawer, without the Host marker or percentage progress bars.
 
 Collection starts only while at least one connected client displays metrics in the status bar, fallback top bar, or an open phone Status drawer. Phone clients subscribe only while their Status drawer is open. The built-in status surface renders the Kandev host source only. Enabling execution metrics also adds active Docker, SSH, and Sprites `agentctl` sources to the metrics stream for separately owned consumers such as plugins; execution disk sampling uses `/`. A provider hook also exists for remote Docker, but creating that runtime currently returns a not-implemented error. Missing platform APIs, container permissions, an invalid disk path, a disconnected executor, macOS/Windows temperature support, or Windows load-average support produce unavailable samples rather than quotas.
 
@@ -430,7 +430,7 @@ These metrics are lightweight UI observability. Set alerts, retention, CPU/memor
 
 ## Status bar visibility
 
-The status surface is off by default for each user. Open **Settings > General > Appearance > Status Bar**, enable **Show status bar**, and use the page's shared **Save changes** action. The portable preference applies immediately without restarting Kandev. It shows a 24 px bottom bar on desktop and fine-pointer tablets; phones use native Status controls and an inset Status drawer.
+The status surface is off by default for each user. Open **Settings > Preferences > Appearance > Status Bar**, enable **Show status bar**, and use the page's shared **Save changes** action. The portable preference applies immediately without restarting Kandev. It shows a 24 px bottom bar on desktop and fine-pointer tablets; phones use native Status controls and an inset Status drawer.
 
 Turning it off removes ordinary status chrome. Host metrics remain controlled separately by **Show host metrics in status bar** and move to the existing top-bar fallback when enabled. A saved language-server **Status location** also falls back to the editor toolbar when the status surface is unavailable. Active WebSocket connectivity warnings remain reachable through the warning-only fallbacks described below.
 

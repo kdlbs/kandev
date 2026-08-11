@@ -80,8 +80,6 @@ function renderHeader(
         workspaceId={workspaceId}
         onSearchChange={onSearchChange}
         workspaceLabel="/root/kandev"
-        showHealthIndicator={false}
-        onOpenHealthDialog={() => undefined}
       />
     </StateProvider>,
   );

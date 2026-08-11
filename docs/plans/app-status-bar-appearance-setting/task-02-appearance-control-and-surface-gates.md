@@ -13,7 +13,7 @@ decision: docs/decisions/2026-08-11-user-owned-status-bar-visibility.md
 
 ## Inputs
 
-Task 01's default-false portable setting, the existing General Appearance shared
+Task 01's default-false portable setting, the existing Appearance-page shared
 save coordinator, `SystemMetricsSettingsCard`, `AppStatusSurfaceProvider`, and
 the warning/LSP fallback contracts in the linked specs.
 
@@ -46,9 +46,8 @@ the warning/LSP fallback contracts in the linked specs.
 - Keep one shared **Save changes** action. Do not save on switch activation and
   do not add optimistic durable state before the API succeeds.
 - Add `GENERAL_SETTINGS_TARGETS.appStatusBar` and a discovery control in
-  `apps/web/lib/settings-discovery/catalog/general.ts`.
-- Update `apps/web/components/settings/general-nav.ts` copy to include the
-  status bar.
+  `apps/web/lib/settings-discovery/catalog/preferences.ts`, under the
+  Preferences Appearance page.
 - Add English keys in `apps/web/src/locales/en/settings.json` and run
   `pnpm run i18n:pseudo`.
 

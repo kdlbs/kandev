@@ -34,7 +34,16 @@ const DEFAULT_PATHNAME = "/tasks/session-1";
 let pathname = DEFAULT_PATHNAME;
 
 vi.mock("@/lib/routing/client-router", () => ({
-  useRouter: () => ({ push: mocks.routerPush }),
+  useRouter: () => ({
+    push: (...args: [string, { onNavigated?: () => void }?]) => {
+      // Forward verbatim so callers passing no options still assert as a
+      // single-argument call.
+      mocks.routerPush(...args);
+      // The real router runs onNavigated only once the push commits; the
+      // unsaved-changes guard can cancel it, which `blockNavigation` models.
+      if (!blockNavigation) args[1]?.onNavigated?.();
+    },
+  }),
   usePathname: () => pathname,
 }));
 
@@ -121,25 +130,33 @@ function renderFooter() {
   );
 }
 
+function resetFooterState() {
+  officeEnabled = false;
+  blockNavigation = false;
+  pathname = DEFAULT_PATHNAME;
+  state.workspaces.activeId = "kanban-1";
+  state.workspaces.items = [
+    { id: "kanban-1", name: "Kanban", office_workflow_id: "" },
+    { id: "office-1", name: "Office", office_workflow_id: "wf-office" },
+    { id: "office-2", name: "Office 2", office_workflow_id: "wf-office-2" },
+  ];
+  state.appSidebar.settingsMode = false;
+  state.auth = { mode: "disabled", user: null };
+  state.connection.issueSeverity = "none";
+  state.userSettings.appStatusBarEnabled = true;
+  window.localStorage.clear();
+  document.cookie = "office-active-workspace=; path=/; max-age=0";
+  mocks.routerPush.mockClear();
+  mocks.toggleSettingsMode.mockClear();
+}
+
+const KANBAN_HOME_HREF = "/?home=overview&workspaceId=kanban-1";
+let blockNavigation = false;
+
+const GEAR_TEST_ID = "sidebar-settings-gear";
+
 describe("AppSidebarFooter", () => {
-  beforeEach(() => {
-    officeEnabled = false;
-    pathname = DEFAULT_PATHNAME;
-    state.workspaces.activeId = "kanban-1";
-    state.workspaces.items = [
-      { id: "kanban-1", name: "Kanban", office_workflow_id: "" },
-      { id: "office-1", name: "Office", office_workflow_id: "wf-office" },
-      { id: "office-2", name: "Office 2", office_workflow_id: "wf-office-2" },
-    ];
-    state.appSidebar.settingsMode = false;
-    state.auth = { mode: "disabled", user: null };
-    state.connection.issueSeverity = "none";
-    state.userSettings.appStatusBarEnabled = true;
-    window.localStorage.clear();
-    document.cookie = "office-active-workspace=; path=/; max-age=0";
-    mocks.routerPush.mockClear();
-    mocks.toggleSettingsMode.mockClear();
-  });
+  beforeEach(resetFooterState);
 
   afterEach(() => cleanup());
 
@@ -204,7 +221,7 @@ describe("AppSidebarFooter", () => {
     expect(screen.queryByRole("button", { name: "Office" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Kanban" }));
 
-    expect(mocks.routerPush).toHaveBeenCalledWith("/?home=overview&workspaceId=kanban-1");
+    expect(mocks.routerPush).toHaveBeenCalledWith(KANBAN_HOME_HREF);
   });
 
   it("remembers the current office workspace when toggling back to kanban", () => {
@@ -217,16 +234,22 @@ describe("AppSidebarFooter", () => {
     fireEvent.click(screen.getByRole("button", { name: "Kanban" }));
 
     expect(document.cookie).toContain("office-active-workspace=office-2");
-    expect(mocks.routerPush).toHaveBeenCalledWith("/?home=overview&workspaceId=kanban-1");
+    expect(mocks.routerPush).toHaveBeenCalledWith(KANBAN_HOME_HREF);
   });
+});
+
+describe("AppSidebarFooter settings gear", () => {
+  beforeEach(resetFooterState);
+  afterEach(() => cleanup());
+
   it("navigates to /settings when the gear opens settings mode from a non-settings route", () => {
     pathname = DEFAULT_PATHNAME;
     state.appSidebar.settingsMode = false;
 
     renderFooter();
-    fireEvent.click(screen.getByTestId("sidebar-settings-gear"));
+    fireEvent.click(screen.getByTestId(GEAR_TEST_ID));
 
-    expect(mocks.routerPush).toHaveBeenCalledWith("/settings");
+    expect(mocks.routerPush).toHaveBeenCalledWith("/settings", expect.anything());
     expect(mocks.toggleSettingsMode).toHaveBeenCalledOnce();
   });
 
@@ -235,18 +258,58 @@ describe("AppSidebarFooter", () => {
     state.appSidebar.settingsMode = false;
 
     renderFooter();
-    fireEvent.click(screen.getByTestId("sidebar-settings-gear"));
+    fireEvent.click(screen.getByTestId(GEAR_TEST_ID));
 
     expect(mocks.routerPush).not.toHaveBeenCalled();
     expect(mocks.toggleSettingsMode).toHaveBeenCalledOnce();
   });
 
-  it("does not navigate when the gear closes an already-open settings mode", () => {
-    pathname = "/settings";
+  it("leaves the settings surface when the gear closes an open settings mode", () => {
+    pathname = "/settings/general/appearance";
     state.appSidebar.settingsMode = true;
 
     renderFooter();
-    fireEvent.click(screen.getByTestId("sidebar-settings-gear"));
+    fireEvent.click(screen.getByTestId(GEAR_TEST_ID));
+
+    // Swapping the sidebar back while the main panel stayed on a settings page
+    // left kanban navigation beside an open settings page.
+    expect(mocks.routerPush).toHaveBeenCalledWith(KANBAN_HOME_HREF, expect.anything());
+    expect(mocks.toggleSettingsMode).toHaveBeenCalledOnce();
+  });
+
+  // The unsaved-changes guard cancels the push when the user picks "Continue
+  // editing". Toggling anyway left the URL in Settings with the sidebar already
+  // back on kanban navigation.
+  it("keeps the sidebar in settings mode when the guard cancels the navigation", () => {
+    pathname = "/settings/general/appearance";
+    state.appSidebar.settingsMode = true;
+    blockNavigation = true;
+
+    renderFooter();
+    fireEvent.click(screen.getByTestId(GEAR_TEST_ID));
+
+    expect(mocks.routerPush).toHaveBeenCalledWith(KANBAN_HOME_HREF, expect.anything());
+    expect(mocks.toggleSettingsMode).not.toHaveBeenCalled();
+  });
+
+  it("does not open settings mode when the guard cancels the way in", () => {
+    pathname = DEFAULT_PATHNAME;
+    state.appSidebar.settingsMode = false;
+    blockNavigation = true;
+
+    renderFooter();
+    fireEvent.click(screen.getByTestId(GEAR_TEST_ID));
+
+    expect(mocks.routerPush).toHaveBeenCalledWith("/settings", expect.anything());
+    expect(mocks.toggleSettingsMode).not.toHaveBeenCalled();
+  });
+
+  it("does not navigate when the gear closes settings mode off a settings route", () => {
+    pathname = "/tasks";
+    state.appSidebar.settingsMode = true;
+
+    renderFooter();
+    fireEvent.click(screen.getByTestId(GEAR_TEST_ID));
 
     expect(mocks.routerPush).not.toHaveBeenCalled();
     expect(mocks.toggleSettingsMode).toHaveBeenCalledOnce();

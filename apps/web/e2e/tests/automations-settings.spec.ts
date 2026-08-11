@@ -309,7 +309,9 @@ test.describe("Automations settings page", () => {
     await apiClient.seedAutomationRun(automation.id, "skipped");
 
     // Navigate to the editor page for this automation.
-    await testPage.goto(`/settings/workspace/${seedData.workspaceId}/automations/${automation.id}`);
+    await testPage.goto(
+      `/settings/workspaces/${seedData.workspaceId}/automations/${automation.id}`,
+    );
     await testPage.getByTestId("automation-editor").waitFor({ state: "visible", timeout: 15_000 });
 
     // Scroll to the bottom to ensure Recent Runs is visible.
@@ -400,7 +402,9 @@ test.describe("Automations settings page", () => {
     await apiClient.archiveTask(archivedTask.id);
     await apiClient.seedAutomationTaskSession(cancelledTask.id, "CANCELLED");
 
-    await testPage.goto(`/settings/workspace/${seedData.workspaceId}/automations/${automation.id}`);
+    await testPage.goto(
+      `/settings/workspaces/${seedData.workspaceId}/automations/${automation.id}`,
+    );
     await testPage.getByTestId("automation-editor").waitFor({ state: "visible", timeout: 15_000 });
 
     const scrollContainer = testPage.getByTestId("settings-scroll-container");

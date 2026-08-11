@@ -34,7 +34,7 @@ test.describe("Resource metrics display", () => {
   });
 
   test("renders simplified metrics in the status bar", async ({ testPage }) => {
-    await testPage.goto("/settings/general/appearance");
+    await testPage.goto("/settings/preferences/appearance");
     const showMetrics = testPage.getByRole("switch", { name: "Show host metrics in status bar" });
     const simplified = testPage.getByRole("switch", { name: "Simplified metrics" });
     if ((await showMetrics.getAttribute("aria-checked")) !== "true") await showMetrics.click();

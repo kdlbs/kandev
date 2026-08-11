@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
-import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/general";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 import { SettingsCard } from "./settings-card";
 
 export function AppStatusBarSettingsCard({
