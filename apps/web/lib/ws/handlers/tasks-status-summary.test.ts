@@ -106,6 +106,49 @@ describe("task.status_summary.updated monotonicity", () => {
   });
 });
 
+describe("task.status_summary.updated archived cache", () => {
+  it("zeros queued_prompt_count on matching sidebarArchivedTasks rows", () => {
+    const store = makeStore({
+      kanban: { workflowId: WORKFLOW_ID, steps: [], tasks: [] },
+      kanbanMulti: { isLoading: false, snapshots: {} },
+      sidebarArchivedTasks: {
+        itemsByWorkspaceId: {
+          "workspace-1": [
+            {
+              id: TASK_ID,
+              workflowStepId: STEP_ID,
+              title: "Archived task",
+              isArchived: true,
+              statusSummary: {
+                revision: 5,
+                updated_at: UPDATED_AT,
+                queued_prompt_count: 11,
+              },
+            },
+          ],
+        },
+        loadedByWorkspaceId: { "workspace-1": true },
+        loadingByWorkspaceId: {},
+        errorByWorkspaceId: {},
+        revisionByWorkspaceId: { "workspace-1": 1 },
+      },
+    } as never);
+
+    registerTasksHandlers(store)["task.status_summary.updated"]!(
+      summaryMessage({
+        revision: 6,
+        updated_at: "2026-08-01T18:01:00Z",
+        // omit queued_prompt_count (backend omitempty for 0)
+      }),
+    );
+
+    const archived =
+      store.getState().sidebarArchivedTasks.itemsByWorkspaceId["workspace-1"]?.[0];
+    expect(archived?.statusSummary).toMatchObject({ revision: 6 });
+    expect(archived?.statusSummary?.queued_prompt_count).toBeUndefined();
+  });
+});
+
 describe("task.updated summary preservation", () => {
   it("keeps the cached summary when a lightweight task update omits it", () => {
     const store = makeStore({

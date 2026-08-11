@@ -809,6 +809,17 @@ func NewService(
 		sendNowCtx:                   sendNowCtx,
 		sendNowCancel:                sendNowCancel,
 	}
+	// Always publish queue-status after a task-scoped queue purge so the
+	// status-summary projector zeros queued_prompt_count. Unlike the
+	// ephemeral purger above, this must never call PurgeTask on the SQLite
+	// queue — the rows are already gone in-transaction.
+	if registrar, ok := repo.(interface {
+		SetTaskQueuePurgeNotifier(func(context.Context, string))
+	}); ok {
+		registrar.SetTaskQueuePurgeNotifier(func(ctx context.Context, taskID string) {
+			s.publishTaskQueueStatusEvent(ctx, taskID, "")
+		})
+	}
 	exec.SetOnContextWindowReset(s.clearContextWindowForReset)
 
 	// Wire executor state changes through the orchestrator so events are published
