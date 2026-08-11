@@ -143,6 +143,10 @@ repositories without parsing path strings.
 - **GIVEN** a Git workspace root and an initialized submodule both contain
   matching file names, **WHEN** the user searches in **Files** mode, **THEN**
   matches from the root and submodule appear in separate repository groups.
+- **GIVEN** an initialized submodule path matches a file-search query, **WHEN**
+  the user searches in **Files** mode, **THEN** the parent repository's Gitlink
+  path is not returned as a file and real files inside the child scope remain
+  searchable.
 - **GIVEN** a Git workspace root and an initialized submodule both contain a
   matching text query, **WHEN** the user searches in **Contents** mode,
   **THEN** results from both repository scopes appear.

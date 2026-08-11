@@ -22,6 +22,11 @@ submodule changes both searches from root-only to child-only. The correct
 distinction is whether the root owns Git metadata, which `RepositoryScopes`
 already represents with `gitIndexPath != ""`.
 
+Retaining the root exposed a second file-enumeration defect: the root's
+`git ls-files --cached --others --exclude-standard` output includes mode-160000
+submodule Gitlinks, but every output line was classified as a file. Searching
+the submodule directory name could therefore return a directory as a root file.
+
 ---
 
 ## Backend
@@ -36,6 +41,8 @@ already represents with `gitIndexPath != ""`.
   paths, repository identities, ordering, limits, or fuzzy scoring.
 - Use the same real-Git-root predicate as `Manager.RepositoryScopes`; do not
   infer repository ownership from the display/transport name.
+- Preserve tracked Git modes while enumerating files and exclude mode-160000
+  Gitlinks. Continue including untracked, non-ignored files.
 
 ## Frontend
 
@@ -61,6 +68,11 @@ the unnamed root, and content search already groups the same empty root identity
   **Files:** Existing `workspace_file_search_test.go` and
   `workspace_content_search_test.go` coverage.
   **How:** Rerun the existing multi-repository tests beside the new regressions.
+- **What:** Searching the exact submodule directory name does not return the
+  parent Gitlink as a file, while the child tracker's real files remain eligible.
+  **File:** `apps/backend/internal/agentctl/server/process/workspace_search_submodule_test.go`.
+  **How:** Search the real initialized fixture for `lib`, reject the root
+  `vendor/lib` pseudo-file, and retain the existing child-file assertion.
 
 ## E2E Tests
 
@@ -89,6 +101,11 @@ PR CI remediation also removed workspace-picker fixture leakage and corrected
 two order-dependent E2E expectations. The two affected specs passed together
 with one worker, and exact Chromium/mobile shard 4/14 passed 137 tests with 7
 intentional skips and retries disabled.
+Independent review then found that retaining the root also exposed its
+mode-160000 Gitlink as a pseudo-file. A focused regression failed on
+`vendor/lib`, passed after mode-aware enumeration excluded Gitlinks, and the
+four-test behavior gate, both touched backend packages, and CI-style
+changed-file lint all passed.
 
 ## Implementation Waves And Parallel Candidates
 

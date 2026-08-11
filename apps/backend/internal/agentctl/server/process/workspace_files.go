@@ -81,8 +81,9 @@ func (wt *WorkspaceTracker) getFileListClass(ctx context.Context, class subproc.
 	// --cached: include tracked files
 	// --others: include untracked files
 	// --exclude-standard: respect .gitignore
+	// --stage: expose tracked file modes so submodule Gitlinks can be excluded
 	out, runErr, execCtxErr := subproc.RunGitOutputAfterAcquire(ctx, class, gitCommandTimeout, func(execCtx context.Context) *exec.Cmd {
-		cmd := subproc.NewGitCommand(execCtx, "ls-files", "--cached", "--others", "--exclude-standard")
+		cmd := subproc.NewGitCommand(execCtx, "ls-files", "--cached", "--others", "--exclude-standard", "--stage")
 		cmd.Dir = wt.workDir
 		return cmd
 	})
@@ -94,6 +95,12 @@ func (wt *WorkspaceTracker) getFileListClass(ctx context.Context, class subproc.
 	lines := strings.Split(string(out), "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
+		if metadata, path, tracked := strings.Cut(line, "\t"); tracked {
+			if strings.HasPrefix(metadata, "160000 ") {
+				continue
+			}
+			line = strings.TrimSpace(path)
+		}
 		if line == "" || isRootOwnershipMarkerPath(line) {
 			continue
 		}

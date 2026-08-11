@@ -16,13 +16,15 @@ spec: "../../specs/ui/task-workspace-content-search.md"
   mixed unnamed-root/named-child tracker graph.
 - Bare task roots with named sibling repositories remain excluded, with no
   duplicate results or search failure.
+- Parent repository Gitlinks are excluded from file results; real files owned
+  by initialized child trackers remain searchable.
 - Response identities, paths, ranking, limits, and existing single/multi-repo
   behavior remain unchanged.
 
 ## Verification
 
 ```bash
-cd apps/backend && go test ./internal/agentctl/server/process ./internal/agentctl/server/api -run '^(TestManagerSearchWorkspaceFileResultsIncludesRootAndSubmodule|TestManagerSearchWorkspaceContentIncludesRootAndSubmodule|TestManagerSearchWorkspaceContentGroupsResultsByRepository|TestHandleFileSearchIncludesEveryTaskRepository)$' -count=1 -v
+cd apps/backend && go test ./internal/agentctl/server/process ./internal/agentctl/server/api -run '^(TestManagerSearchWorkspaceFileResultsIncludesRootAndSubmodule|TestManagerSearchWorkspaceFileResultsExcludesSubmoduleGitlink|TestManagerSearchWorkspaceContentIncludesRootAndSubmodule|TestManagerSearchWorkspaceContentGroupsResultsByRepository|TestGetFileList_HidesOnlyRootOwnershipMarker|TestHandleFileSearchIncludesEveryTaskRepository)$' -count=1 -v
 ```
 
 ## Files likely touched
@@ -79,6 +81,16 @@ GREEN:
 - Final package audit:
   `go test ./internal/agentctl/server/process ./internal/agentctl/server/api -count=1`
   passed both touched packages.
+- Independent-review remediation RED:
+  `go test ./internal/agentctl/server/process -run '^TestManagerSearchWorkspaceFileResultsExcludesSubmoduleGitlink$' -count=1 -v`
+  failed because root search returned `{Path:vendor/lib}` as a file.
+- Independent-review remediation GREEN: the same focused regression passed
+  after file enumeration retained tracked modes and excluded mode-160000
+  Gitlinks. The four-test behavior gate passed, including tracked root/child,
+  content-search, and untracked-file coverage. Both touched packages passed
+  again, and the CI-style changed-file lint reported 0 issues against base
+  `66eb87ac307db76b8cb3ba5fcfae73ff6d7d3e6c`.
 
-Files changed match **Files likely touched**. Temporary artifacts: none.
+Production and regression files match **Files likely touched**; the spec and
+plan were synchronized with the remediation. Temporary artifacts: none.
 Blockers/remaining Task 01 risks: none.

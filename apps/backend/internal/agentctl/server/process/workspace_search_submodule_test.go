@@ -10,11 +10,7 @@ import (
 
 func TestManagerSearchWorkspaceFileResultsIncludesRootAndSubmodule(t *testing.T) {
 	mgr := setupWorkspaceSearchSubmoduleGraph(t)
-	root, repositories := mgr.snapshotTrackers()
-	root.updateFiles(context.Background())
-	for _, tracker := range repositories {
-		tracker.updateFiles(context.Background())
-	}
+	updateWorkspaceSearchFileLists(mgr)
 
 	results := mgr.SearchWorkspaceFileResults("search-target", 20)
 	got := make([]string, 0, len(results))
@@ -27,6 +23,28 @@ func TestManagerSearchWorkspaceFileResultsIncludesRootAndSubmodule(t *testing.T)
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("search results = %v, want %v", got, want)
+	}
+}
+
+func TestManagerSearchWorkspaceFileResultsExcludesSubmoduleGitlink(t *testing.T) {
+	mgr := setupWorkspaceSearchSubmoduleGraph(t)
+	updateWorkspaceSearchFileLists(mgr)
+
+	for _, result := range mgr.SearchWorkspaceFileResults("lib", 20) {
+		if result.RepositoryName == "" && result.Path == "vendor/lib" {
+			t.Fatalf("root search returned submodule Gitlink as a file: %+v", result)
+		}
+	}
+
+	childFound := false
+	for _, result := range mgr.SearchWorkspaceFileResults("child-search-target", 20) {
+		if result.RepositoryName == "vendor/lib" && result.Path == "vendor/lib/child-search-target.txt" {
+			childFound = true
+			break
+		}
+	}
+	if !childFound {
+		t.Fatal("real file inside child scope was not searchable")
 	}
 }
 
@@ -69,4 +87,12 @@ func setupWorkspaceSearchSubmoduleGraph(t *testing.T) *Manager {
 	mgr := NewManager(&config.InstanceConfig{WorkDir: parent}, newTestLogger(t))
 	t.Cleanup(mgr.stopWorkspaceTrackers)
 	return mgr
+}
+
+func updateWorkspaceSearchFileLists(mgr *Manager) {
+	root, repositories := mgr.snapshotTrackers()
+	root.updateFiles(context.Background())
+	for _, tracker := range repositories {
+		tracker.updateFiles(context.Background())
+	}
 }
