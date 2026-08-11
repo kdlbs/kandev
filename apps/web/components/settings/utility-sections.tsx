@@ -8,7 +8,7 @@ import { Label } from "@kandev/ui/label";
 import type { UtilityAgent } from "@/lib/api/domains/utility-api";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 import { SettingsCard } from "@/components/settings/settings-card";
-import { STANDALONE_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/standalone";
+import { SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/standalone";
 import { isUtilityAgentDirty } from "@/components/settings/utility-dirty";
 import {
   UtilityAgentProfilePicker,
@@ -35,7 +35,7 @@ export function DefaultModelSection({
   return (
     <SettingsCard
       isDirty={isDirty}
-      discoveryTargetId={STANDALONE_SETTINGS_TARGETS.utilityDefaultModel}
+      discoveryTargetId={SETTINGS_TARGETS.utilityDefaultModel}
       data-testid="utility-default-model-card"
     >
       <CardHeader>
@@ -152,7 +152,7 @@ export function PerActionOverridesSection({
           savedBuiltins.find((saved) => saved.id === agent.id),
         ),
       )}
-      discoveryTargetId={STANDALONE_SETTINGS_TARGETS.utilityActions}
+      discoveryTargetId={SETTINGS_TARGETS.utilityActions}
       data-testid="utility-actions-card"
     >
       <CardHeader>
@@ -243,7 +243,7 @@ export function CustomAgentsSection({
   const { t } = useTranslation();
   return (
     <SettingsCard
-      discoveryTargetId={STANDALONE_SETTINGS_TARGETS.utilityCustomAgents}
+      discoveryTargetId={SETTINGS_TARGETS.utilityCustomAgents}
       data-testid="utility-custom-agents-card"
     >
       <CardHeader>

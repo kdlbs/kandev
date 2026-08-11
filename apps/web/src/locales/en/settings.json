@@ -327,6 +327,8 @@
   "integrationDescriptionJira": "Atlassian Cloud credentials and JQL issue watchers.",
   "integrationDescriptionLinear": "Personal API key and team defaults.",
   "integrationDescriptionSentry": "Auth token, org/project defaults, and issue browsing.",
+  "hideDisabledAgentProfilesFromNav": "Hide disabled agent profiles from left panel navigation",
+  "hideDisabledAgentProfilesFromNavDescription": "When on, a disabled agent profile is removed from the left panel navigation even if it's still configured.",
   "hideDisabledIntegrationsFromNav": "Hide disabled integrations from left panel navigation",
   "hideDisabledIntegrationsFromNavDescription": "When on, a disabled integration is removed from the sidebar and mobile menu even if it's still configured.",
   "invalidJson": "Invalid JSON",

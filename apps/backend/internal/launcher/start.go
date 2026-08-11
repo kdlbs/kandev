@@ -92,7 +92,7 @@ func runManagedApp(ctx context.Context, cfg managedAppConfig) int {
 	supervisor := newSupervisorFn()
 	attachSignalsFn(supervisor)
 	shutdownDebugf("runManagedApp signal handler attached")
-	healthToken, err := newHealthToken()
+	healthToken, err := launchHealthToken()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1

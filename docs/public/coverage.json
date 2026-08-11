@@ -278,8 +278,7 @@
         "/settings/preferences/notifications",
         "/settings/preferences/task-behavior",
         "/settings/preferences/terminal-editors",
-        "/settings/secrets",
-        "/settings/voice-mode"
+        "/settings/secrets"
       ]
     },
     {
@@ -328,8 +327,8 @@
         "/settings/general/message-queue",
         "/settings/system/about",
         "/settings/system/backups",
-        "/settings/system/database",
         "/settings/system/data-storage",
+        "/settings/system/database",
         "/settings/system/feature-toggles",
         "/settings/system/licenses",
         "/settings/system/logs",

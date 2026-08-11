@@ -171,6 +171,15 @@ describe("message queue settings route", () => {
   });
 });
 
+describe("settings route ownership", () => {
+  it("does not register the removed standalone Voice Mode route", () => {
+    expect(SETTINGS_ROUTE_PATHS).not.toContain("/settings/voice-mode");
+    const route = renderSettingsRoute("/settings/voice-mode");
+    expect(isValidElement(route)).toBe(true);
+    expect(((route as ReactElement).type as { name?: string }).name).toBe("SettingsRouteFallback");
+  });
+});
+
 describe("renderSettingsRoute", () => {
   it("directs update notification settings to Notifications", () => {
     render(renderSettingsRoute("/settings/system/updates"));

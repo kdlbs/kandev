@@ -327,6 +327,8 @@
   "integrationDescriptionJira": "Àţĺàśśĩàń Ćĺōũď ćŕēďēńţĩàĺś àńď ĴQĹ ĩśśũē ŵàţćĥēŕś.",
   "integrationDescriptionLinear": "Ƥēŕśōńàĺ ÀƤĨ ķēŷ àńď ţēàḿ ďēƒàũĺţś.",
   "integrationDescriptionSentry": "Àũţĥ ţōķēń, ōŕĝ/ƥŕōĵēćţ ďēƒàũĺţś, àńď ĩśśũē ƀŕōŵśĩńĝ.",
+  "hideDisabledAgentProfilesFromNav": "Ĥĩďē ďĩśàƀĺēď àĝēńţ ƥŕōƒĩĺēś ƒŕōḿ ĺēƒţ ƥàńēĺ ńàvĩĝàţĩōń",
+  "hideDisabledAgentProfilesFromNavDescription": "Ŵĥēń ōń, à ďĩśàƀĺēď àĝēńţ ƥŕōƒĩĺē ĩś ŕēḿōvēď ƒŕōḿ ţĥē ĺēƒţ ƥàńēĺ ńàvĩĝàţĩōń ēvēń ĩƒ ĩţ'ś śţĩĺĺ ćōńƒĩĝũŕēď.",
   "hideDisabledIntegrationsFromNav": "Ĥĩďē ďĩśàƀĺēď ĩńţēĝŕàţĩōńś ƒŕōḿ ĺēƒţ ƥàńēĺ ńàvĩĝàţĩōń",
   "hideDisabledIntegrationsFromNavDescription": "Ŵĥēń ōń, à ďĩśàƀĺēď ĩńţēĝŕàţĩōń ĩś ŕēḿōvēď ƒŕōḿ ţĥē śĩďēƀàŕ àńď ḿōƀĩĺē ḿēńũ ēvēń ĩƒ ĩţ'ś śţĩĺĺ ćōńƒĩĝũŕēď.",
   "invalidJson": "Ĩńvàĺĩď ĴŚŌŃ",

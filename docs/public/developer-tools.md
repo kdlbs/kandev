@@ -116,7 +116,8 @@ A saved prompt is an instruction, not an authorization or policy boundary. Execu
 <details>
 <summary>Voice details</summary>
 
-Open **Settings > Voice Mode** (`/settings/voice-mode`). Voice Mode inserts a transcript at the cursor in the active chat composer.
+Open **Settings > Task Behavior** (`/settings/preferences/task-behavior`) and expand the Voice Mode
+section. Voice Mode inserts a transcript at the cursor in the active chat composer.
 
 Defaults are:
 
