@@ -93,14 +93,23 @@ export function MRStatusChipPopover({
         onPointerDownOutside={onPointerDownOutside}
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
-        <MRCIPopover
-          mr={actedOnMR}
-          taskId={taskId}
-          enabled={open}
-          canLink={canLink}
-          onLink={handleLink}
-          onUnlink={() => onUnlink(actedOnMR.id)}
-        />
+        {/* shouldForceClose fires the same render `actedOnMR` falls back
+            from the vanished frozen MR to the new live selection — before
+            the effect below has a chance to close the disclosure. Skipping
+            the render here for that one commit means the popover is never
+            shown with merge/unlink controls wired to a swapped-in MR the
+            user did not open it on (spec: "an action target that swaps
+            under the pointer mid-interaction is a hazard"). */}
+        {!shouldForceClose && (
+          <MRCIPopover
+            mr={actedOnMR}
+            taskId={taskId}
+            enabled={open}
+            canLink={canLink}
+            onLink={handleLink}
+            onUnlink={() => onUnlink(actedOnMR.id)}
+          />
+        )}
       </PopoverContent>
     </Popover>
   );

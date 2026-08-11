@@ -95,14 +95,20 @@ export function MRStatusChipDrawer({
           </DrawerClose>
         </DrawerHeader>
         <div className="flex-1 min-h-0 overflow-y-auto p-3" data-vaul-no-drag>
-          <MRCIPopover
-            mr={actedOnMR}
-            taskId={taskId}
-            enabled={open}
-            canLink={canLink}
-            onLink={handleLink}
-            onUnlink={() => onUnlink(actedOnMR.id)}
-          />
+          {/* See mr-status-chip-popover.tsx for why shouldForceClose gates
+              this render: actedOnMR falls back to the new live selection in
+              the same commit the frozen MR vanishes, before the closing
+              effect below fires. */}
+          {!shouldForceClose && (
+            <MRCIPopover
+              mr={actedOnMR}
+              taskId={taskId}
+              enabled={open}
+              canLink={canLink}
+              onLink={handleLink}
+              onUnlink={() => onUnlink(actedOnMR.id)}
+            />
+          )}
         </div>
       </DrawerContent>
     </Drawer>
