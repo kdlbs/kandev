@@ -123,6 +123,7 @@ import { IntegrationIcon } from "@/components/integrations/integration-icon";
 import { TaskChangeRequestLinkForm } from "@/components/integrations/task-change-request-link-form";
 import { getBackendConfig } from "@/lib/config";
 import { fetchJson } from "@/lib/api/client";
+import { t } from "@/lib/i18n";
 import { formatRelativeTime } from "@/lib/i18n/formats";
 import { createPluginToast } from "@/lib/toast/sonner";
 import { generateUUID } from "@/lib/utils";
@@ -165,7 +166,9 @@ function PluginChangeRequestDetail(props: ChangeRequestDetailProps) {
       fallback: React.createElement(
         "div",
         { className: "flex h-full items-center justify-center py-8" },
-        React.createElement(Spinner, { "aria-label": "Loading change request" }),
+        React.createElement(Spinner, {
+          "aria-label": t("integrations:loadingChangeRequest"),
+        }),
       ),
     },
     React.createElement(LazyChangeRequestDetail, props),

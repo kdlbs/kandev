@@ -6,8 +6,14 @@ import { useDockviewStore } from "@/lib/state/dockview-store";
 import { reviewItemId } from "@/components/task/review-selection";
 import { buildHostApi } from "./host-api";
 
-const { changeRequestDetailModuleLoaded } = vi.hoisted(() => ({
+const { changeRequestDetailModuleLoaded, translate } = vi.hoisted(() => ({
   changeRequestDetailModuleLoaded: vi.fn(),
+  translate: vi.fn((key: string) => `translated:${key}`),
+}));
+
+vi.mock("@/lib/i18n", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/i18n")>()),
+  t: translate,
 }));
 
 vi.mock("@/components/integrations/change-request-detail", () => {
@@ -237,6 +243,15 @@ describe("buildHostApi — host contract", () => {
     const rendered = render(React.createElement(IntegrationIcon, { name: "merged" }));
     expect(rendered.container.querySelector('[data-integration-icon="merged"]')).not.toBeNull();
     expect(host.ui.TaskRowIndicator).toBeDefined();
+  });
+
+  it("localizes the lazy change-request loading state", () => {
+    const host = buildHostApi("jira", createAppStore());
+    const ChangeRequestDetail = host.ui.ChangeRequestDetail as React.ComponentType<object>;
+
+    const rendered = render(React.createElement(ChangeRequestDetail, {}));
+
+    expect(rendered.getByLabelText("translated:integrations:loadingChangeRequest")).toBeTruthy();
   });
 });
 
