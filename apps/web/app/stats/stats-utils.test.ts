@@ -9,6 +9,7 @@ import {
   statsReducer,
   toPanelState,
 } from "./stats-utils";
+import { composeStatsResponse, type StatsSections } from "./stats-data";
 
 const emptyGlobal: StatsResponse["global"] = {
   total_tasks: 0,
@@ -67,6 +68,40 @@ const sampleStats: StatsResponse = {
     total_deletions: 800,
   },
 };
+
+function readySections(modelUsage: StatsResponse["model_usage"]): StatsSections {
+  return {
+    global: { kind: "ready", data: sampleStats.global },
+    tasks: {
+      kind: "ready",
+      data: { task_stats: sampleStats.task_stats, task_stats_has_more: false },
+    },
+    daily: { kind: "ready", data: sampleStats.daily_activity },
+    completed: { kind: "ready", data: sampleStats.completed_activity },
+    models: { kind: "ready", data: modelUsage },
+    repos: { kind: "ready", data: sampleStats.repository_stats },
+    git: { kind: "ready", data: sampleStats.git_stats },
+  };
+}
+
+describe("composeStatsResponse", () => {
+  it("waits for model usage before composing the response", () => {
+    const sections = readySections([]);
+    sections.models = { kind: "loading" };
+
+    expect(composeStatsResponse(sections)).toBeNull();
+  });
+
+  it("maps model usage into the composed response", () => {
+    const modelUsage = [{ model: "opus", session_count: 2, turn_count: 4, total_duration_ms: 100 }];
+
+    expect(composeStatsResponse(readySections(modelUsage))?.model_usage).toEqual(modelUsage);
+  });
+
+  it("preserves an empty model usage response", () => {
+    expect(composeStatsResponse(readySections([]))?.model_usage).toEqual([]);
+  });
+});
 
 describe("isRangeKey", () => {
   it("accepts the three valid keys", () => {

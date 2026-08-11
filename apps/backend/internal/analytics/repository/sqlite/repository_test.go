@@ -897,6 +897,7 @@ func TestRangeStart_IncludesRowsLaterOnTheBoundaryDay(t *testing.T) {
 
 	execOrFatal(t, dbConn, `INSERT INTO workspaces (id, name, created_at, updated_at) VALUES ('ws-1', 'Test', ?, ?)`, before, before)
 	execOrFatal(t, dbConn, `INSERT INTO boards (id, workspace_id, name, created_at, updated_at) VALUES ('board-1', 'ws-1', 'Board', ?, ?)`, before, before)
+	execOrFatal(t, dbConn, `INSERT INTO repositories (id, workspace_id, name, created_at, updated_at) VALUES ('repo-1', 'ws-1', 'Repo', ?, ?)`, before, before)
 
 	for _, row := range []struct {
 		suffix string
@@ -904,7 +905,9 @@ func TestRangeStart_IncludesRowsLaterOnTheBoundaryDay(t *testing.T) {
 	}{{"before", before}, {"after", after}} {
 		execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES (?, 'ws-1', 'board-1', '', 'Task', 0, ?, ?)`,
 			"task-"+row.suffix, row.at, row.at)
-		execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, agent_profile_snapshot, state, started_at, updated_at) VALUES (?, ?, 'agent-1', '{"name":"Agent","model":"opus"}', 'COMPLETED', ?, ?)`,
+		execOrFatal(t, dbConn, `INSERT INTO task_repositories (id, task_id, repository_id, created_at, updated_at) VALUES (?, ?, 'repo-1', ?, ?)`,
+			"task-repo-"+row.suffix, "task-"+row.suffix, row.at, row.at)
+		execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, agent_profile_snapshot, repository_id, state, started_at, updated_at) VALUES (?, ?, 'agent-1', '{"name":"Agent","model":"opus"}', 'repo-1', 'COMPLETED', ?, ?)`,
 			"sess-"+row.suffix, "task-"+row.suffix, row.at, row.at)
 		execOrFatal(t, dbConn, `INSERT INTO task_session_commits (id, session_id, commit_sha, committed_at, files_changed, insertions, deletions, created_at) VALUES (?, ?, ?, ?, 1, 1, 0, ?)`,
 			"commit-"+row.suffix, "sess-"+row.suffix, "sha-"+row.suffix, row.at, row.at)
@@ -930,6 +933,26 @@ func TestRangeStart_IncludesRowsLaterOnTheBoundaryDay(t *testing.T) {
 		}
 		if stats.TotalSessions != 1 {
 			t.Errorf("expected 1 session started after the boundary, got %d", stats.TotalSessions)
+		}
+	})
+
+	t.Run("task stats", func(t *testing.T) {
+		stats, err := repo.GetTaskStats(ctx, "ws-1", &threshold, 10)
+		if err != nil {
+			t.Fatalf("GetTaskStats failed: %v", err)
+		}
+		if len(stats) != 1 || stats[0].TaskID != "task-after" || stats[0].SessionCount != 1 {
+			t.Fatalf("expected only the task created after the boundary, got %+v", stats)
+		}
+	})
+
+	t.Run("repository stats", func(t *testing.T) {
+		stats, err := repo.GetRepositoryStats(ctx, "ws-1", &threshold)
+		if err != nil {
+			t.Fatalf("GetRepositoryStats failed: %v", err)
+		}
+		if len(stats) != 1 || stats[0].TotalTasks != 1 || stats[0].SessionCount != 1 || stats[0].TotalCommits != 1 {
+			t.Fatalf("expected only boundary-day repository activity, got %+v", stats)
 		}
 	})
 
