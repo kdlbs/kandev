@@ -104,7 +104,7 @@ use runtime translation, but it must use current terms and no Unicode em dash.
 5. Agent-runtime availability remains visible regardless of the preference.
 6. E2E tests restore persisted baselines and pass from one shared worker state.
 7. Public docs contain no live App status bar runtime flag/env instructions.
-8. Backend tests/lint, frontend focused tests/lint/typecheck/i18n, public docs
+8. Backend tests/lint, frontend-focused tests/lint/typecheck/i18n, public docs
    validation, and production-build desktop/mobile E2E all pass.
 
 ## Verification

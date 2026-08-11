@@ -7,7 +7,7 @@
 ## Context
 
 The App status bar shipped behind the install-wide `features.appStatusBar`
-runtime flag. That flag was appropriate while the surface needed staged
+runtime flag. That flag was appropriate while the surface needed a staged
 rollout, but it gives an administrator one restart-required choice for every
 user and client. Whether to show ordinary status chrome is now a personal
 appearance choice. Kandev already treats status item order and other portable

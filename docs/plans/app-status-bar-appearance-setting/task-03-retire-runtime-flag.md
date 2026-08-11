@@ -22,10 +22,16 @@ contract test.
 1. Replace the registry inclusion test with failing assertions that
    `features.appStatusBar` is absent from active definitions and its exact key
    and env variable are retired.
-2. Update feature/profile contract tests to expect no App status bar field or
-   profile key.
-3. Remove the active configuration and frontend feature fields.
-4. Run focused Go and frontend contract tests before lint/typecheck.
+2. Add a failing runtime-service regression that seeds both a stale
+   `features.appStatusBar` override and explicit
+   `KANDEV_FEATURES_APP_STATUS_BAR`, then proves neither produces an active
+   state or an `appStatusBar` field in the serialized feature response.
+3. Add failing user-store regressions that run with the retired environment
+   variable present and prove missing `app_status_bar_enabled` still defaults
+   to true while a stored false remains false.
+4. Update feature/profile contract tests to expect no App status bar field or
+   profile key, then remove the active configuration and frontend fields.
+5. Run focused Go and frontend contract tests before lint/typecheck.
 
 ## Implementation
 
@@ -38,11 +44,19 @@ contract test.
 - In `apps/backend/internal/runtimeflags/registry_test.go`, replace metadata
   inclusion coverage with explicit active-exclusion and retired-identity
   coverage.
-- Remove App status bar cases from
-  `apps/backend/internal/runtimeflags/config_test.go`.
+- In `apps/backend/internal/runtimeflags/service_test.go`, add a retirement
+  boundary test that seeds the former override key and environment variable,
+  calls `ListStates`, applies the returned states to config, and serializes
+  `FeaturesConfig` exactly as `/api/v1/features` does. Assert the retired key
+  is absent from both active states and response JSON.
+- Replace App status bar inclusion cases in
+  `apps/backend/internal/runtimeflags/config_test.go` with an explicit check
+  that `OptionsFromConfig` ignores `KANDEV_FEATURES_APP_STATUS_BAR` even when it
+  is set.
 - Remove `FeaturesConfig.AppStatusBar` from
   `apps/backend/internal/common/config/config.go` and its env/default tests from
-  `config_test.go`.
+  `config_test.go`. Keep `TestFeaturesConfig_JSONShape` as the API wire oracle
+  and add an explicit `appStatusBar` absence assertion.
 - Remove `KANDEV_FEATURES_APP_STATUS_BAR` from
   `apps/backend/internal/profiles/profiles.yaml` and all profile tests that
   require, apply, or derive `app_status_bar`.
@@ -52,6 +66,10 @@ contract test.
   fixtures. Keep
   `apps/web/lib/state/slices/features/features-contract.test.ts` green against
   the reduced backend JSON shape.
+- In `apps/backend/internal/user/store/sqlite_test.go`, run the missing-field
+  default and explicit-false round-trip cases with the retired environment
+  variable set. These tests must prove user visibility remains owned only by
+  `app_status_bar_enabled` after flag retirement.
 - Search active source and public runtime configuration for stale identities.
   Public docs are changed in Task 04; historical plans and the new retirement
   ADR may retain the names.
@@ -63,9 +81,11 @@ ignored, and retaining the retired identity prevents reinterpretation.
 
 - `apps/backend/internal/runtimeflags/registry.go`
 - `apps/backend/internal/runtimeflags/registry_test.go`
+- `apps/backend/internal/runtimeflags/service_test.go`
 - `apps/backend/internal/runtimeflags/config_test.go`
 - `apps/backend/internal/common/config/config.go`
 - `apps/backend/internal/common/config/config_test.go`
+- `apps/backend/internal/user/store/sqlite_test.go`
 - `apps/backend/internal/profiles/profiles.yaml`
 - `apps/backend/internal/profiles/profiles_test.go`
 - `apps/web/lib/state/slices/features/types.ts`
@@ -79,15 +99,19 @@ ignored, and retaining the retired identity prevents reinterpretation.
 3. No shipped profile sets `KANDEV_FEATURES_APP_STATUS_BAR`.
 4. The exact former key and environment variable exist in the append-only
    retired identity list and fail generic active-reuse checks.
-5. Setting the retired environment variable or retaining an old override cannot
-   affect config or user visibility.
-6. Status surfaces remain controlled by the default-true user setting from
+5. A focused runtime regression proves that setting the retired environment
+   variable and retaining an old override produces neither an active runtime
+   state nor an `appStatusBar` feature-response field.
+6. Focused user-store regressions prove `app_status_bar_enabled` retains stored
+   false and defaults to true when absent, even when the retired environment
+   variable is present.
+7. Status surfaces remain controlled by the default-true user setting from
    Tasks 01 and 02.
 
 ## Verification
 
 ```sh
-(cd apps/backend && go test ./internal/runtimeflags ./internal/common/config ./internal/profiles)
+(cd apps/backend && go test ./internal/runtimeflags ./internal/common/config ./internal/profiles ./internal/user/store)
 (cd apps && pnpm --filter @kandev/web exec vitest run lib/state/slices/features/features-contract.test.ts app/actions/features.test.ts)
 make -C apps/backend lint
 (cd apps/web && pnpm run typecheck)
