@@ -91,6 +91,12 @@ export function automationAriaSuffix(automation: AutomationFlags, t: TFunction):
 function autoFixAriaLabel(automation: AutomationFlags, t: TFunction): string | null {
   if (!automation.autoFix) return null;
   if (!automation.autoFixRound) return t("github:autoFixEnabledAria");
+  if (automation.autoFixRound.exhausted) {
+    return t("github:autoFixExhaustedAria", {
+      current: automation.autoFixRound.current,
+      max: automation.autoFixRound.max,
+    });
+  }
   return t("github:autoFixEnabledWithRoundsAria", {
     current: automation.autoFixRound.current,
     max: automation.autoFixRound.max,
@@ -115,7 +121,8 @@ export function AutomationFlagBadges({ automation }: { automation: AutomationFla
               : "bg-emerald-500/15 text-emerald-500"
           }`}
         >
-          {t("github:autoFix")} {autoFixRound.current}/{autoFixRound.max}
+          {t(autoFixRound.exhausted ? "github:autoFixExhausted" : "github:autoFix")}{" "}
+          {autoFixRound.current}/{autoFixRound.max}
         </span>
       )}
       {automation.autoMerge && (

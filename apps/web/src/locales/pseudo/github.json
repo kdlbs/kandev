@@ -41,6 +41,8 @@
   "autoFix": "Àũţō-ƒĩx",
   "autoFixEnabledAria": "àũţō-ƒĩx ēńàƀĺēď",
   "autoFixEnabledWithRoundsAria": "àũţō-ƒĩx ēńàƀĺēď {{current}} ōƒ {{max}} ŕōũńďś ũśēď",
+  "autoFixExhausted": "Àũţō-ƒĩx ƥàũśēď",
+  "autoFixExhaustedAria": "àũţō-ƒĩx ƥàũśēď àƒţēŕ ŕēàćĥĩńĝ {{current}} ōƒ {{max}} ŕōũńďś",
   "autoFixCiAndAddressComments": "Àũţō-ƒĩx ĆĨ àńď àďďŕēśś ćōḿḿēńţś",
   "autoFixPrompt": "Àũţō-ƒĩx ƥŕōḿƥţ",
   "autoFixPromptDescription": "Ţĥĩś ƥŕōḿƥţ ĩś ũśēď ōńĺŷ ƒōŕ ţĥĩś ţàśķ. Ĺēàvē ĩţ ƀĺàńķ ţō ũśē ţĥē ďēƒàũĺţ ƥŕōḿƥţ. Àďď <0>{{placeholder}}</0> ŵĥēń ŷōũ ŵàńţ Ķàńďēv ţō ĩńćĺũďē ĩţś ƤŔ ƒēēďƀàćķ śńàƥśĥōţ.",

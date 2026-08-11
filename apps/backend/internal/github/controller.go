@@ -390,7 +390,9 @@ func (c *Controller) httpPatchTaskCIOptions(ctx *gin.Context) {
 }
 
 func (c *Controller) writeTaskCIOptionsError(ctx *gin.Context, err error, operation, message string) {
-	if errors.Is(err, ErrTaskNotFound) || errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+	if errors.Is(err, ErrTaskNotFound) ||
+		errors.Is(err, repoerrors.ErrWorkspaceNotFound) ||
+		errors.Is(err, ErrGitHubWorkspaceRequired) {
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
 		return
 	}

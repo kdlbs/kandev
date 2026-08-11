@@ -67,6 +67,20 @@ describe("AutomationFlagBadges", () => {
     },
   );
 
+  it("announces and labels exhausted auto-fix rounds", () => {
+    const automation = flags({
+      autoFix: true,
+      autoFixRound: { current: 10, max: 10, exhausted: true },
+    });
+
+    render(<AutomationFlagBadges automation={automation} />);
+
+    expect(screen.getByTestId("pr-status-auto-fix-chip").textContent).toBe("Auto-fix paused 10/10");
+    expect(automationAriaSuffix(automation, i18n.t)).toBe(
+      ", auto-fix paused after reaching 10 of 10 rounds",
+    );
+  });
+
   it("derives the same task-wide PR events for single and multiple PR chips", () => {
     const options = makeOptions({
       prompt_on_review_requested: true,

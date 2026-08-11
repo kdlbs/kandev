@@ -39,6 +39,8 @@
   "authenticationUnavailable": "Autenticação indisponível",
   "auto": "Automático",
   "autoFix": "Correção automática",
+  "autoFixExhausted": "Correção automática pausada",
+  "autoFixExhaustedAria": "correção automática pausada após atingir {{current}} de {{max}} rondas",
   "autoFixCiAndAddressComments": "Corrigir automaticamente o CI e responder aos comentários",
   "autoFixPrompt": "Prompt da correção automática",
   "autoFixPromptDescription": "Este prompt é usado apenas nesta tarefa. Deixe-o em branco para usar o prompt pré-definido. Adicione <0>{{placeholder}}</0> quando quiser que o Kandev inclua o seu instantâneo do feedback do PR.",

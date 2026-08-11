@@ -52,8 +52,9 @@ cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/pr/mobile-p
 ```
 
 Confirm Playwright discovers both intended scenarios. The managed E2E runner
-must rebuild the production frontend; do not substitute `--no-build` after the
-UI changes.
+must run the desktop scenario first to rebuild the production frontend. After
+that successful build, the mobile scenario may use `--no-build` to reuse the
+verified production build.
 
 ## Files likely touched
 
@@ -82,7 +83,7 @@ one focused vertical slice.
 ## Inputs
 
 - Spec: `What`, the lifecycle badge and narrow-tray `Scenarios`, and `Out of
-  scope` in `../../specs/ui/ci-pr-automation.md`.
+scope` in `../../specs/ui/ci-pr-automation.md`.
 - Plan: `Composer tray automation summary`, `Tests`, `E2E Tests`, and `Risks`
   in `plan.md`.
 - Patterns: `AutomationFlagBadges`, `automationForPR`, and
@@ -129,7 +130,7 @@ conversation.
   containment, a real center-point hit target, and zero document overflow.
 - Red evidence: the component suite failed on the missing PR events badge; both
   new browser scenarios failed because the tray computed to `flex-wrap:
-  nowrap`.
+nowrap`.
 - Green evidence: 47 focused Vitest tests passed in 3 files; i18n check and
   ratchet passed; targeted ESLint passed with zero findings; isolated TypeScript
   checking passed with a 4 GB heap; 1 compact desktop Chromium test and 1 Pixel
@@ -138,5 +139,5 @@ conversation.
   `libnspr4` and `libnss3` into a task-local `/tmp` runtime. No host packages
   were changed. The runtime and ignored screenshot artifacts were removed after
   verification.
-- Residual risk: none specific to the terminology rename; the existing advisory
-  locale backlog remains outside this task.
+- Residual risk: the existing advisory locale backlog remains outside this task;
+  the grouped badge and responsive tray behavior passed the recorded checks.

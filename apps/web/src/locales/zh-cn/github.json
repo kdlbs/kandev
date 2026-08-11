@@ -39,6 +39,8 @@
   "authenticationUnavailable": "认证不可用",
   "auto": "自动",
   "autoFix": "自动修复",
+  "autoFixExhausted": "自动修复已暂停",
+  "autoFixExhaustedAria": "达到 {{current}} / {{max}} 轮后，自动修复已暂停",
   "autoFixCiAndAddressComments": "自动修复 CI 并处理评论",
   "autoFixPrompt": "自动修复提示词",
   "autoFixPromptDescription": "此提示词仅用于本任务。留空则使用默认提示词。若希望 Kandev 附上 PR 反馈快照，请添加 <0>{{placeholder}}</0>。",

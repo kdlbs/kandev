@@ -41,6 +41,8 @@
   "autoFix": "Auto-fix",
   "autoFixEnabledAria": "auto-fix enabled",
   "autoFixEnabledWithRoundsAria": "auto-fix enabled {{current}} of {{max}} rounds used",
+  "autoFixExhausted": "Auto-fix paused",
+  "autoFixExhaustedAria": "auto-fix paused after reaching {{current}} of {{max}} rounds",
   "autoFixCiAndAddressComments": "Auto-fix CI and address comments",
   "autoFixPrompt": "Auto-fix prompt",
   "autoFixPromptDescription": "This prompt is used only for this task. Leave it blank to use the default prompt. Add <0>{{placeholder}}</0> when you want Kandev to include its PR feedback snapshot.",
