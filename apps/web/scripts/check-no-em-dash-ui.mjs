@@ -232,70 +232,104 @@ function findPublicDocComment(line, index) {
   return PUBLIC_DOC_COMMENT_MARKERS.find(({ start }) => line.startsWith(start, index));
 }
 
+function maskPublicDocComment(line, index, endMarker) {
+  const end = line.indexOf(endMarker, index);
+  if (end < 0) {
+    return {
+      output: line.slice(index).replace(/[^\n]/g, " "),
+      nextIndex: line.length,
+      commentEnd: endMarker,
+      closed: false,
+    };
+  }
+
+  const endExclusive = end + endMarker.length;
+  return {
+    output: line.slice(index, endExclusive).replace(/[^\n]/g, " "),
+    nextIndex: endExclusive,
+    commentEnd: null,
+    closed: true,
+  };
+}
+
+function copyInlineCode(line, index, run) {
+  const end = findBacktickRun(line, run, index);
+  if (end < 0) {
+    return { output: line.slice(index), nextIndex: line.length, closed: false };
+  }
+
+  const endExclusive = end + run.length;
+  return { output: line.slice(index, endExclusive), nextIndex: endExclusive, closed: true };
+}
+
+function consumePublicDocToken(line, index, state) {
+  if (state.commentEnd) {
+    const consumed = maskPublicDocComment(line, index, state.commentEnd);
+    return {
+      ...consumed,
+      inlineCodeRun: null,
+      done: !consumed.closed,
+    };
+  }
+
+  if (state.inlineCodeRun) {
+    const consumed = copyInlineCode(line, index, state.inlineCodeRun);
+    return {
+      ...consumed,
+      commentEnd: null,
+      inlineCodeRun: consumed.closed ? null : state.inlineCodeRun,
+      done: !consumed.closed,
+    };
+  }
+
+  if (line[index] === "`") {
+    const run = readBacktickRun(line, index);
+    const consumed = copyInlineCode(line, index + run.length, run);
+    return {
+      output: line.slice(index, index + run.length) + consumed.output,
+      nextIndex: consumed.nextIndex,
+      commentEnd: null,
+      inlineCodeRun: consumed.closed ? null : run,
+      done: !consumed.closed,
+    };
+  }
+
+  const comment = findPublicDocComment(line, index);
+  if (comment) {
+    const consumed = maskPublicDocComment(line, index, comment.end);
+    return {
+      ...consumed,
+      inlineCodeRun: null,
+      done: !consumed.closed,
+    };
+  }
+
+  return {
+    output: line[index],
+    nextIndex: index + 1,
+    commentEnd: null,
+    inlineCodeRun: null,
+    done: false,
+  };
+}
+
 function maskPublicDocLine(line, state) {
   let output = "";
   let cursor = 0;
-  let commentEnd = state.commentEnd;
-  let inlineCodeRun = state.inlineCodeRun;
+  let currentState = state;
 
   while (cursor < line.length) {
-    if (commentEnd) {
-      const end = line.indexOf(commentEnd, cursor);
-      if (end < 0) {
-        output += line.slice(cursor).replace(/[^\n]/g, " ");
-        return { output, commentEnd, inlineCodeRun: null };
-      }
-      const endExclusive = end + commentEnd.length;
-      output += line.slice(cursor, endExclusive).replace(/[^\n]/g, " ");
-      cursor = endExclusive;
-      commentEnd = null;
-      continue;
-    }
-
-    if (inlineCodeRun) {
-      const end = findBacktickRun(line, inlineCodeRun, cursor);
-      if (end < 0) {
-        output += line.slice(cursor);
-        return { output, commentEnd: null, inlineCodeRun };
-      }
-      const endExclusive = end + inlineCodeRun.length;
-      output += line.slice(cursor, endExclusive);
-      cursor = endExclusive;
-      inlineCodeRun = null;
-      continue;
-    }
-
-    if (line[cursor] === "`") {
-      const run = readBacktickRun(line, cursor);
-      const end = findBacktickRun(line, run, cursor + run.length);
-      if (end < 0) {
-        output += line.slice(cursor);
-        return { output, commentEnd: null, inlineCodeRun: run };
-      }
-      const endExclusive = end + run.length;
-      output += line.slice(cursor, endExclusive);
-      cursor = endExclusive;
-      continue;
-    }
-
-    const comment = findPublicDocComment(line, cursor);
-    if (comment) {
-      const end = line.indexOf(comment.end, cursor + comment.start.length);
-      if (end < 0) {
-        output += line.slice(cursor).replace(/[^\n]/g, " ");
-        return { output, commentEnd: comment.end, inlineCodeRun: null };
-      }
-      const endExclusive = end + comment.end.length;
-      output += line.slice(cursor, endExclusive).replace(/[^\n]/g, " ");
-      cursor = endExclusive;
-      continue;
-    }
-
-    output += line[cursor];
-    cursor += 1;
+    const consumed = consumePublicDocToken(line, cursor, currentState);
+    output += consumed.output;
+    currentState = {
+      commentEnd: consumed.commentEnd,
+      inlineCodeRun: consumed.inlineCodeRun,
+    };
+    if (consumed.done) return { output, ...currentState };
+    cursor = consumed.nextIndex;
   }
 
-  return { output, commentEnd, inlineCodeRun };
+  return { output, ...currentState };
 }
 
 function stripPublicDocCommentsPreservingLines(source) {
@@ -316,7 +350,7 @@ function stripPublicDocCommentsPreservingLines(source) {
       } else {
         const masked = maskPublicDocLine(line, state);
         output += masked.output;
-        state = masked;
+        state = { commentEnd: masked.commentEnd, inlineCodeRun: masked.inlineCodeRun };
       }
     }
     output += "\n";
