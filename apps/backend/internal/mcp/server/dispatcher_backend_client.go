@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/common/logger"
+	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -21,8 +22,17 @@ type Dispatcher interface {
 // in-process — no channels, no WebSocket round-trip. Used by the backend's
 // external MCP endpoint where handlers and MCP server live in the same process.
 type DispatcherBackendClient struct {
-	dispatcher Dispatcher
-	logger     *logger.Logger
+	dispatcher               Dispatcher
+	logger                   *logger.Logger
+	trustedExternalTransport bool
+}
+
+// NewExternalDispatcherBackendClient creates the trusted bridge used only by
+// the authenticated external MCP endpoint.
+func NewExternalDispatcherBackendClient(d Dispatcher, log *logger.Logger) *DispatcherBackendClient {
+	client := NewDispatcherBackendClient(d, log)
+	client.trustedExternalTransport = true
+	return client
 }
 
 // NewDispatcherBackendClient creates a BackendClient backed by a ws.Dispatcher.
@@ -39,6 +49,9 @@ func NewDispatcherBackendClient(d Dispatcher, log *logger.Logger) *DispatcherBac
 
 // RequestPayload dispatches the request to the in-process handler and unmarshals the response.
 func (c *DispatcherBackendClient) RequestPayload(ctx context.Context, action string, payload, result interface{}) error {
+	if c.trustedExternalTransport {
+		ctx = mcporigin.WithTrustedExternalTransport(ctx)
+	}
 	id := uuid.New().String()
 	msg, err := ws.NewRequest(id, action, payload)
 	if err != nil {

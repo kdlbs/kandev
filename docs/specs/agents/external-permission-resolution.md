@@ -193,6 +193,9 @@ Stable failure codes are:
   only its owning user's scope.
 - Agent-provided task, session, or user IDs are never trusted. Task/session identity comes from
   Kandev records and the owning live execution.
+- The `external_mcp` audit source is derived only from the process-local transport attestation set
+  by the authenticated external `/mcp` bridge. Shared in-session dispatcher calls and raw
+  WebSocket traffic cannot supply or forge that source.
 - Unauthorized and nonexistent task/session identities use the same not-found result.
 
 ## Failure modes

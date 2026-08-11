@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -74,7 +75,7 @@ func TestHandleResolveAgentPermissionForwardsOnlyExactIdentity(t *testing.T) {
 	}}
 	h := &Handlers{agentPermissionSvc: stub, logger: testLogger(t).WithFields()}
 
-	resp, err := h.handleResolveAgentPermission(context.Background(), makeWSMessage(t, ws.ActionMCPResolveAgentPermission, map[string]any{
+	resp, err := h.handleResolveAgentPermission(mcporigin.WithTrustedExternalTransport(context.Background()), makeWSMessage(t, ws.ActionMCPResolveAgentPermission, map[string]any{
 		"task_id": "task-1", "session_id": "session-1", "request_id": "request-1",
 		"pending_id": "pending-1", "option_id": "allow-once",
 	}))
@@ -85,6 +86,20 @@ func TestHandleResolveAgentPermissionForwardsOnlyExactIdentity(t *testing.T) {
 		OptionID: "allow-once", Source: models.PermissionSourceExternalMCP,
 	}, stub.resolved)
 	assert.Contains(t, string(resp.Payload), `"status":"resolved"`)
+}
+
+func TestHandleResolveAgentPermissionRejectsUntrustedTransport(t *testing.T) {
+	stub := &permissionServiceStub{resolve: &orchestrator.ResolveAgentPermissionResult{Status: "resolved"}}
+	h := &Handlers{agentPermissionSvc: stub, logger: testLogger(t).WithFields()}
+
+	resp, err := h.handleResolveAgentPermission(context.Background(), makeWSMessage(t, ws.ActionMCPResolveAgentPermission, map[string]any{
+		"task_id": "task-1", "session_id": "session-1", "request_id": "request-1",
+		"pending_id": "pending-1", "option_id": "allow-once",
+	}))
+	require.NoError(t, err)
+	assert.Equal(t, ws.MessageTypeError, resp.Type)
+	assert.Contains(t, string(resp.Payload), ws.ErrorCodeForbidden)
+	assert.Empty(t, stub.resolved.TaskID, "untrusted dispatch must not reach the permission service")
 }
 
 func TestAgentPermissionHandlersValidateRequiredIdentity(t *testing.T) {
@@ -118,7 +133,7 @@ func TestAgentPermissionHandlersPreserveStableDomainFailures(t *testing.T) {
 		t.Run(domainErr.Error(), func(t *testing.T) {
 			stub := &permissionServiceStub{resolveErr: domainErr}
 			h := &Handlers{agentPermissionSvc: stub, logger: testLogger(t).WithFields()}
-			resp, err := h.handleResolveAgentPermission(context.Background(), makeWSMessage(t, ws.ActionMCPResolveAgentPermission, map[string]any{
+			resp, err := h.handleResolveAgentPermission(mcporigin.WithTrustedExternalTransport(context.Background()), makeWSMessage(t, ws.ActionMCPResolveAgentPermission, map[string]any{
 				"task_id": "task-1", "session_id": "session-1", "request_id": "request-1",
 				"pending_id": "pending-1", "option_id": "allow-once",
 			}))

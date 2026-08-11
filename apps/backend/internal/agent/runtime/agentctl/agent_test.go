@@ -693,7 +693,7 @@ func TestRespondToPermission_NotFound(t *testing.T) {
 func TestListPendingPermissions(t *testing.T) {
 	c, ts := newTestClientWithStream(t, func(msg ws.Message) *ws.Message {
 		if msg.Action != "agent.permissions.list" {
-			t.Fatalf("action = %q, want agent.permissions.list", msg.Action)
+			t.Errorf("action = %q, want agent.permissions.list", msg.Action)
 		}
 		resp, _ := ws.NewResponse(msg.ID, msg.Action, streams.PermissionListResponse{
 			Permissions: []streams.PendingAgentPermission{{
@@ -720,14 +720,14 @@ func TestListPendingPermissions(t *testing.T) {
 func TestResolvePermissionPreservesStableErrorCode(t *testing.T) {
 	c, ts := newTestClientWithStream(t, func(msg ws.Message) *ws.Message {
 		if msg.Action != "agent.permissions.resolve" {
-			t.Fatalf("action = %q, want agent.permissions.resolve", msg.Action)
+			t.Errorf("action = %q, want agent.permissions.resolve", msg.Action)
 		}
 		var request streams.PermissionResolveRequest
 		if err := msg.ParsePayload(&request); err != nil {
-			t.Fatal(err)
+			t.Error(err)
 		}
 		if request.RequestID != "request-1" || request.PendingID != "pending-1" || request.OptionID != "unknown" {
-			t.Fatalf("unexpected request: %+v", request)
+			t.Errorf("unexpected request: %+v", request)
 		}
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, streams.PermissionErrorOptionNotOffered, map[string]any{
 			"permission_code": streams.PermissionErrorOptionNotOffered,
@@ -750,14 +750,14 @@ func TestResolvePermissionPreservesStableErrorCode(t *testing.T) {
 func TestCancelPermissionSendsExactGeneration(t *testing.T) {
 	c, ts := newTestClientWithStream(t, func(msg ws.Message) *ws.Message {
 		if msg.Action != "agent.permissions.cancel" {
-			t.Fatalf("action = %q, want agent.permissions.cancel", msg.Action)
+			t.Errorf("action = %q, want agent.permissions.cancel", msg.Action)
 		}
 		var request streams.PermissionCancelRequest
 		if err := msg.ParsePayload(&request); err != nil {
-			t.Fatal(err)
+			t.Error(err)
 		}
 		if request.RequestID != "request-1" || request.PendingID != "pending-1" {
-			t.Fatalf("unexpected cancellation tuple: %+v", request)
+			t.Errorf("unexpected cancellation tuple: %+v", request)
 		}
 		resp, _ := ws.NewResponse(msg.ID, msg.Action, streams.PermissionCancelResponse{
 			RequestID: request.RequestID, PendingID: request.PendingID, Status: "cancelled",

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 
+	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -63,6 +64,9 @@ func (h *Handlers) handleResolveAgentPermission(ctx context.Context, msg *ws.Mes
 		if required.value == "" {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, required.field+" is required", nil)
 		}
+	}
+	if !mcporigin.IsTrustedExternalTransport(ctx) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "Agent permission resolution requires external MCP", nil)
 	}
 	if h.agentPermissionSvc == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Agent permission service is not available", nil)

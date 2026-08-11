@@ -123,6 +123,26 @@ func TestPermissionResolutionPostgresExpressionsUseJSONB(t *testing.T) {
 			t.Fatalf("%s expression does not use PostgreSQL JSONB: %s", name, expression)
 		}
 	}
+	extract := permissionJSONExtract("pgx", "metadata", "permission_resolution", "claim_id")
+	if !strings.Contains(extract, "COALESCE(NULLIF(metadata, ''), '{}')::jsonb") {
+		t.Fatalf("extract expression does not guard empty metadata: %s", extract)
+	}
+}
+
+func TestGetPermissionResolutionAuditMissingReturnsNil(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	seedForMsgTest(t, repo, "task-permission-audit-missing", "session-permission-audit-missing", "turn-permission-audit-missing")
+
+	audit, err := repo.GetPermissionResolutionAudit(
+		context.Background(),
+		"task-permission-audit-missing",
+		"session-permission-audit-missing",
+		"request-missing",
+		"pending-missing",
+	)
+	if err != nil || audit != nil {
+		t.Fatalf("audit=%+v err=%v, want nil, nil for a missing permission row", audit, err)
+	}
 }
 
 func TestPermissionResolutionConcurrentClaimsHaveOneWinner(t *testing.T) {

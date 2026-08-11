@@ -1799,7 +1799,7 @@ Agents may request user permission for certain operations. The permission flow u
     "request_id": "kandev-request-uuid",
     "pending_id": "pending-request-uuid",
     "instance_id": "agent-instance-uuid",
-    "session_id": "acp-session-uuid",
+    "session_id": "task-session-uuid",
     "tool_call_id": "tool-call-uuid",
     "title": "Execute shell command",
     "description": "Agent wants to run: npm install express",

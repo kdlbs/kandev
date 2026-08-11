@@ -213,6 +213,58 @@ func TestResolveAgentPermissionAuditFailurePreventsDelivery(t *testing.T) {
 	}
 }
 
+func TestResolveAgentPermissionNilClaimFailsClosed(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-nil-claim", "session-nil-claim", "")
+	deliveries := 0
+	manager := permissionResolvingManager(t, "session-nil-claim", nil)
+	manager.resolvePermissionFunc = func(context.Context, string, string, string, string) (*streams.PermissionResolveResponse, error) {
+		deliveries++
+		return nil, nil
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), manager)
+	svc.messageCreator = &mockMessageCreator{permissionClaimFn: func(context.Context, models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error) {
+		return nil, nil
+	}}
+
+	_, err := svc.ResolveAgentPermission(context.Background(), ResolveAgentPermissionRequest{
+		TaskID: "task-nil-claim", SessionID: "session-nil-claim", RequestID: "request-1",
+		PendingID: "pending-1", OptionID: "allow-once", Source: models.PermissionSourceExternalMCP,
+	})
+	if !errors.Is(err, ErrPermissionAuditFailed) || deliveries != 0 {
+		t.Fatalf("error=%v deliveries=%d, want audit failure before delivery", err, deliveries)
+	}
+}
+
+func TestCancelAgentPermissionNilClaimFailsClosed(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-nil-cancel-claim", "session-nil-cancel-claim", "")
+	cancellations := 0
+	manager := permissionResolvingManager(t, "session-nil-cancel-claim", nil)
+	manager.cancelPermissionFunc = func(context.Context, string, string, string) (*streams.PermissionCancelResponse, error) {
+		cancellations++
+		return nil, nil
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), manager)
+	svc.messageCreator = &mockMessageCreator{permissionClaimFn: func(context.Context, models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error) {
+		return nil, nil
+	}}
+
+	err := svc.RespondToPermission(
+		context.Background(),
+		"task-nil-cancel-claim",
+		"session-nil-cancel-claim",
+		"request-1",
+		"pending-1",
+		"",
+		true,
+		true,
+	)
+	if !errors.Is(err, ErrPermissionAuditFailed) || cancellations != 0 {
+		t.Fatalf("error=%v cancellations=%d, want audit failure before cancellation", err, cancellations)
+	}
+}
+
 func TestResolveAgentPermissionFinalizesStaleDelivery(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "task-stale", "session-stale", "")

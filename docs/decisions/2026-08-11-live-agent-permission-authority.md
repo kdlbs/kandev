@@ -30,6 +30,12 @@ on that message serializes concurrent resolvers and records actor, source, reque
 option identity, timestamps, and result without persisting credentials or raw environment
 values.
 
+`external_mcp` is a transport-attested audit source, not a caller-authored field. The backend's
+external MCP dispatcher bridge adds a process-local context marker only after the request enters
+through the external `/mcp` transport. The shared dispatcher handler requires that marker before
+assigning the source, so raw WebSocket and in-session MCP dispatch cannot forge external-MCP
+attribution.
+
 The transcript remains the durable audit projection, not a source of live permission
 authority. Listing returns only requests still pending in agentctl. A historical message can
 explain an already-resolved or expired request, but it can never make a request actionable.
@@ -48,6 +54,8 @@ explain an already-resolved or expired request, but it can never make a request 
   silently guessing.
 - External presentation cannot reuse raw `action_details`; adding a new provider action shape
   requires an explicit safe projection.
+- Adding another trusted external transport requires an explicit in-process attestation at its
+  boundary; registering the shared dispatcher action or accepting a wire field is insufficient.
 
 ## Alternatives Considered
 

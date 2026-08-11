@@ -69,8 +69,10 @@ changed, blockers/risks, then update this task and the plan checkbox/results.
   finalization is another conditional update and never reopens a dispatching claim.
 - Repository tests cover first claim, concurrent competition, in-progress, terminal replay, wrong
   identities, wrong-claim finalization, accepted finalization, redaction shape, and PostgreSQL JSONB
-  expression selection. Task-service tests confirm only successful writes publish
-  `message.updated`.
+  expression selection. Empty metadata is guarded before PostgreSQL `jsonb` casts, with an
+  always-on expression regression and an environment-gated real PostgreSQL behavior test.
+  Missing audit rows return the stable domain representation `(nil, nil)`. Task-service tests
+  confirm only successful writes publish `message.updated`.
 - `request_id` now flows from agentctl events into the durable permission message metadata.
 - Passed: full `./internal/task/repository/sqlite`, full `./internal/backendapp`, and targeted
   `./internal/task/service -run TestPermissionResolutionServicePublishesOnlySuccessfulWrites`.

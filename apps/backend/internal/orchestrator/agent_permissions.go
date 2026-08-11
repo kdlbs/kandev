@@ -220,7 +220,7 @@ func (s *Service) cancelAgentPermission(ctx context.Context, request ResolveAgen
 			SelectedAt:  time.Now().UTC(),
 		},
 	})
-	if err != nil {
+	if err != nil || claim == nil {
 		return ErrPermissionAuditFailed
 	}
 	switch claim.Outcome {
@@ -318,7 +318,7 @@ func (s *Service) claimPermissionWithRetry(ctx context.Context, request models.P
 	const attempts = 5
 	for attempt := 0; attempt < attempts; attempt++ {
 		claim, err := s.messageCreator.ClaimPermissionResolution(ctx, request)
-		if err != nil || claim.Outcome != models.PermissionClaimNotFound || attempt == attempts-1 {
+		if err != nil || claim == nil || claim.Outcome != models.PermissionClaimNotFound || attempt == attempts-1 {
 			return claim, err
 		}
 		timer := time.NewTimer(100 * time.Millisecond)

@@ -756,7 +756,7 @@ func permissionFinalizeJSONExpression(driver string) string {
 
 func permissionJSONExtract(driver, column string, path ...string) string {
 	if dialect.IsPostgres(driver) {
-		return fmt.Sprintf("%s::jsonb#>>'{%s}'", column, strings.Join(path, ","))
+		return fmt.Sprintf("COALESCE(NULLIF(%s, ''), '{}')::jsonb#>>'{%s}'", column, strings.Join(path, ","))
 	}
 	return fmt.Sprintf("json_extract(%s, '$.%s')", column, strings.Join(path, "."))
 }
@@ -812,6 +812,9 @@ func permissionAuditFromMetadata(metadata map[string]any) (models.PermissionReso
 func (r *Repository) GetPermissionResolutionAudit(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.PermissionResolutionAudit, error) {
 	message, err := r.getPermissionMessageByIdentity(ctx, taskID, sessionID, requestID, pendingID)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	audit, ok := permissionAuditFromMetadata(message.Metadata)

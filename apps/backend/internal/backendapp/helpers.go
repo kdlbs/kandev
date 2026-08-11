@@ -1619,7 +1619,7 @@ func registerExternalMCP(p routeParams) {
 	}
 	baseURL := fmt.Sprintf("http://localhost:%d", port)
 
-	backendClient := mcpserver.NewDispatcherBackendClient(p.gateway.Dispatcher, p.log)
+	backendClient := mcpserver.NewExternalDispatcherBackendClient(p.gateway.Dispatcher, p.log)
 	srv := mcpserver.NewExternal(backendClient, p.log, "")
 	mcpGroup := p.router.Group("", externalMCPAuthMiddleware(p.authSvc))
 	srv.RegisterBackendRoutes(mcpGroup)
