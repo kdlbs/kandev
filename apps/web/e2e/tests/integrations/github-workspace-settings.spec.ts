@@ -124,6 +124,14 @@ test.describe("GitHub workspace settings", () => {
 
     await automation.getByRole("button", { name: "Change connection" }).click();
     const dialog = testPage.getByRole("dialog", { name: "Change GitHub connection" });
+    await expect(dialog).toBeVisible();
+    await dialog.evaluate(async (element) => {
+      await Promise.all(
+        element
+          .getAnimations({ subtree: true })
+          .map((animation) => animation.finished.catch(() => undefined)),
+      );
+    });
     const dialogBox = await dialog.boundingBox();
     expect(dialogBox).not.toBeNull();
     expect(dialogBox!.width).toBeGreaterThanOrEqual(800);
@@ -134,6 +142,23 @@ test.describe("GitHub workspace settings", () => {
     const footer = dialog.getByTestId("github-connection-footer");
     const fixedSaveButton = footer.getByRole("button", { name: "Save changes" });
     await expect(fixedSaveButton).toBeVisible();
+    await expect
+      .poll(
+        async () => {
+          const [currentScrollBox, currentFadeBox] = await Promise.all([
+            scrollBody.boundingBox(),
+            scrollFade.boundingBox(),
+          ]);
+          if (!currentScrollBox || !currentFadeBox) return Number.POSITIVE_INFINITY;
+          return Math.abs(
+            currentFadeBox.y +
+              currentFadeBox.height -
+              (currentScrollBox.y + currentScrollBox.height),
+          );
+        },
+        { timeout: 10_000 },
+      )
+      .toBeLessThanOrEqual(2);
     const [scrollBox, fadeBox, footerBox, initialSaveBox] = await Promise.all([
       scrollBody.boundingBox(),
       scrollFade.boundingBox(),
@@ -293,7 +318,10 @@ test.describe("GitHub workspace settings", () => {
     await testPage.getByTestId("github-scope-mode").click();
     await testPage.getByRole("option", { name: "Selected repositories" }).click();
     await testPage.getByTestId("github-scope-repos-input").fill("kdlbs/kandev");
-    await testPage.getByTestId("settings-floating-save").getByRole("button").click();
+    await testPage
+      .getByTestId("settings-floating-save")
+      .getByRole("button", { name: "Save changes" })
+      .click();
     await expect(testPage.getByText("GitHub workspace settings saved").last()).toBeVisible({
       timeout: 10_000,
     });
@@ -339,7 +367,10 @@ test.describe("GitHub workspace settings", () => {
     await testPage.getByTestId("github-scope-mode").click();
     await testPage.getByRole("option", { name: "Organizations" }).click();
     await testPage.getByTestId("github-scope-orgs-input").fill("kdlbs");
-    await testPage.getByTestId("settings-floating-save").getByRole("button").click();
+    await testPage
+      .getByTestId("settings-floating-save")
+      .getByRole("button", { name: "Save changes" })
+      .click();
     await expect(testPage.getByText("GitHub workspace settings saved").last()).toBeVisible({
       timeout: 10_000,
     });
@@ -363,7 +394,10 @@ test.describe("GitHub workspace settings", () => {
     await testPage.getByTestId("github-scope-repos-input").fill("not-a-repo");
     await testPage.getByTestId("github-scope-mode").click();
     await testPage.getByRole("option", { name: "Organizations" }).click();
-    await testPage.getByTestId("settings-floating-save").getByRole("button").click();
+    await testPage
+      .getByTestId("settings-floating-save")
+      .getByRole("button", { name: "Save changes" })
+      .click();
     await expect(testPage.getByText("GitHub workspace settings saved").last()).toBeVisible({
       timeout: 10_000,
     });

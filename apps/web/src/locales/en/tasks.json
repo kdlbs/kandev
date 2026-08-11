@@ -47,8 +47,8 @@
   "taskArchivedDescription": "The task has been archived successfully.",
   "taskUnarchived": "Task unarchived",
   "unarchive": "Unarchive",
-  "unarchivedBranchesMissing_one": "Branch {{branches}} no longer exists locally or on the remote — the next session starts fresh from the base branch.",
-  "unarchivedBranchesMissing_other": "Branches {{branches}} no longer exist locally or on the remote — the next session starts fresh from the base branch.",
+  "unarchivedBranchesMissing_one": "Branch {{branches}} no longer exists locally or on the remote. The next session starts fresh from the base branch.",
+  "unarchivedBranchesMissing_other": "Branches {{branches}} no longer exist locally or on the remote. The next session starts fresh from the base branch.",
   "unarchivedTaskRestored": "The task has been restored.",
   "unarchiveTask": "Unarchive task"
 }

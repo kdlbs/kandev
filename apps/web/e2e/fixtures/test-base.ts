@@ -179,6 +179,7 @@ export const test = backendFixture.extend<
   // SSR always resolves to the correct workspace regardless of what commitSettings
   // may have written during previous tests.
   testPage: async ({ browser, backend, apiClient, seedData }, use) => {
+    await backend.ensureReady();
     // Clean up tasks, test-created workflows, and extra agent profiles from
     // previous tests in this worker. Keep the seeded workflow and the seed
     // agent profile so the worker-scoped seedData fixture remains valid.

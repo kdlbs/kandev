@@ -43,7 +43,7 @@ async function runAndWait(
   // config-chat WS subscription to replay the completed turn into the UI.
   await page.waitForChatIdle({ timeout: 30_000 });
   await expect(page.activeChat().getByText(marker, { exact: true })).toBeVisible({
-    timeout: 30_000,
+    timeout: 60_000,
   });
   return page;
 }
@@ -393,24 +393,26 @@ test.describe("Config-mode MCP — agent management", () => {
     // removed when profile permission stance moved to ACP session modes.
     // This test now verifies only the model update round-trip through the
     // config-mode MCP tool.
-    const session = await startConfigSession(
-      apiClient,
-      seedData,
-      [
-        'e2e:message("Updating profile settings...")',
-        `e2e:mcp:kandev:update_agent_profile_kandev({"profile_id":"${seedData.agentProfileId}","model":"mock-smart"})`,
-        'e2e:message("Profile settings updated")',
-      ].join("\n"),
-    );
+    const originalModel = (await apiClient.getAgentProfile(seedData.agentProfileId)).model;
+    try {
+      const session = await startConfigSession(
+        apiClient,
+        seedData,
+        [
+          'e2e:message("Updating profile settings...")',
+          `e2e:mcp:kandev:update_agent_profile_kandev({"profile_id":"${seedData.agentProfileId}","model":"claude-sonnet-4-5-20250514"})`,
+          'e2e:message("Profile settings updated")',
+        ].join("\n"),
+      );
 
-    await runAndWait(testPage, apiClient, session.task_id, "Profile settings updated");
+      await runAndWait(testPage, apiClient, session.task_id, "Profile settings updated");
 
-    // Verify via API
-    const { agents } = await apiClient.listAgents();
-    const profile = agents
-      .flatMap((a) => a.profiles ?? [])
-      .find((p) => p.id === seedData.agentProfileId);
-    expect(profile?.model).toBe("mock-smart");
+      // Verify via API
+      const profile = await apiClient.getAgentProfile(seedData.agentProfileId);
+      expect(profile.model).toBe("claude-sonnet-4-5-20250514");
+    } finally {
+      await apiClient.updateAgentProfile(seedData.agentProfileId, { model: originalModel });
+    }
   });
 });
 

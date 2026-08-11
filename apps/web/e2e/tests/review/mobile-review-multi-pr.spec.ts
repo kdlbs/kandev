@@ -51,7 +51,9 @@ test.describe("Review dialog multi-PR selector on mobile", () => {
     // The initial diff group can use the generated task-workspace scope, so
     // only require a non-empty identity before selecting the second PR.
     const repositoryGroup = session.reviewDialog().getByTestId("changes-repo-group");
-    await expect(repositoryGroup).toHaveAttribute("data-repository-name", /\S+/);
+    await expect(repositoryGroup).toHaveAttribute("data-repository-name", /\S+/, {
+      timeout: 30_000,
+    });
     const repositoryScope = await repositoryGroup.getAttribute("data-repository-name");
     expect(repositoryScope).toBeTruthy();
     await expect
@@ -91,7 +93,9 @@ test.describe("Review dialog multi-PR selector on mobile", () => {
     await expect(session.reviewDialog()).toBeVisible();
     await expect(selector).toHaveAttribute("data-pr-number", String(secondPR.number));
     await expect(session.reviewFileHeader(REVIEW_SHARED_FILE)).toBeVisible({ timeout: 20_000 });
-    await expect(repositoryGroup).toHaveAttribute("data-repository-name", secondPR.repositoryName);
+    await expect(repositoryGroup).toHaveAttribute("data-repository-name", secondPR.repositoryName, {
+      timeout: 30_000,
+    });
     await expect
       .poll(() => session.reviewDiffText(), { timeout: 30_000 })
       .toContain(secondPR.marker);

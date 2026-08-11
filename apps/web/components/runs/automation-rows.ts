@@ -16,8 +16,8 @@ export type AutomationActivityState = "running" | "idle" | "paused";
  */
 export type NextFiring = { kind: "time"; text: string } | { kind: "reason"; text: string };
 
-export const AUTOMATION_OFF_REASON = "Switched off — it will not fire";
-export const NO_SCHEDULE_REASON = "No schedule — only runs when you trigger it";
+export const AUTOMATION_OFF_REASON = "Switched off - it will not fire";
+export const NO_SCHEDULE_REASON = "No schedule - only runs when you trigger it";
 export const SCHEDULE_OFF_REASON = "Schedule trigger is switched off";
 
 /**
@@ -25,7 +25,7 @@ export const SCHEDULE_OFF_REASON = "Schedule trigger is switched off";
  * the user did; naming the cap points at the setting that would change it.
  */
 export function concurrencyReason(maxConcurrentRuns: number): string {
-  return `Paused — a run is still open (max ${Math.max(1, maxConcurrentRuns)} at a time)`;
+  return `Paused - a run is still open (max ${Math.max(1, maxConcurrentRuns)} at a time)`;
 }
 
 export const STATE_DOT_CLASS: Record<AutomationActivityState, string> = {

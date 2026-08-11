@@ -8,7 +8,7 @@ export type CleanupSummary = {
 type KnownExecutor = "local" | "worktree" | "local_docker" | "remote_docker" | "sprites" | "ssh";
 
 const SINGLE: Record<KnownExecutor, string> = {
-  local: "The agent ran directly in your repo — your files, branch, and folder are not touched.",
+  local: "The agent ran directly in your repo - your files, branch, and folder are not touched.",
   worktree:
     "The task's git worktree and its branch will be deleted. Your main repo and other branches are not affected.",
   local_docker:
@@ -36,7 +36,7 @@ export function getCleanupSummary(executorType: string | null | undefined): Clea
 }
 
 const PLURAL: Partial<Record<KnownExecutor, (n: number) => string>> = {
-  local: (n) => `${n} local ${pl(n, "task", "tasks")} — your repo folders won't be touched.`,
+  local: (n) => `${n} local ${pl(n, "task", "tasks")} - your repo folders won't be touched.`,
   worktree: (n) =>
     `${n} ${pl(n, "worktree", "worktrees")} and ${pl(n, "its branch", "their branches")} will be deleted.`,
   local_docker: (n) => `${n} Docker ${pl(n, "container", "containers")} will be removed.`,

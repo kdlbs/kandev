@@ -36,14 +36,25 @@ the current PR.
 Record the base and head SHA for each review round. A new contributor push starts
 a new round: reassess prior findings and the verdict against the new head, and
 verify checks or workflow results for that head rather than relying on a PR
-number or author summary.
+number or author summary. From `scripts/pr-state --summary`, also record
+`pr.base_ref_name`, `pr.base_head_oid`, `pr.merge_base_oid`, and
+`pr.base_advanced_since_head` when available.
 
-When the base branch advanced after the reviewed head's CI run, validate the
-actual merge result before declaring the PR ready. Record the latest base and
-immutable head SHAs, create a temporary worktree from that base, merge the head
-with `git merge --no-commit --no-ff <head-sha>`, and run focused verification in
-the merged tree before removing the worktree. GitHub's `mergeable: MERGEABLE`
-status proves conflict compatibility, not that the merged result was tested.
+For a follow-up round, inspect `<previous-reviewed-head>..<current-head>` first
+to isolate the author's response, then re-evaluate `<base>...<current-head>` for
+complete PR coverage. Record both immutable heads.
+
+When `pr.base_advanced_since_head` is `true`, validate the actual merge result
+before declaring the PR ready. Record the latest base and immutable head SHAs,
+create a temporary worktree from that base, merge the head with `git merge
+--no-commit --no-ff <head-sha>`, and run focused verification in the merged tree
+before removing the worktree. GitHub's `mergeable: MERGEABLE` status proves
+conflict compatibility, not that the merged result was tested. If an older
+`pr-state` helper lacks the base fields, resolve the current base
+head only as a fallback with `gh api
+repos/{owner}/{repo}/git/ref/heads/{base}` and derive/record the merge base
+before making the same decision; do not try the unsupported
+`gh pr view --json baseRefOid` field.
 
 For an existing GitHub PR, inspect both `scripts/pr-state --summary <PR>` and
 `scripts/pr-resolve list <PR>` before treating review feedback as clean. Read
@@ -176,6 +187,7 @@ Check every changed file for the following layers. Skip layers that don't apply 
 **Testing (blocker if missing):**
 - Backend (Go): new or changed functions/methods must have corresponding `*_test.go` tests
 - Frontend: new utilities, hooks, API clients, and store slices must have focused tests. Pure React markup may skip a unit test, but behavior-bearing components (conditional status, accessibility, store-derived state, or responsive/mobile variants) need focused `*.test.tsx` coverage and/or E2E. Route responsive user-facing changes through `/mobile-parity`.
+- Async UI lifecycle: loading/busy state must clear through `finally` or equivalent terminal cleanup for success, error, cancellation, and early/no-op returns; require focused tests for those terminal paths.
 - Exceptions: config files, generated code, and pure React component markup
 - Missing tests for new or changed logic is a **blocker** — suggest what tests to add and recommend `/tdd`
 
@@ -194,6 +206,13 @@ review; preserve all pre-existing user changes.
 
 Report findings with a concrete suggested fix. Do not edit the checkout during
 a review-only request; otherwise remediate in the same primary conversation.
+
+Before drafting or posting a copyable PR comment, map each proposed point against
+exact-current-head review bodies, top-level discussion comments, and all
+unresolved or hidden threads. If a point is already raised, omit it from the
+author-facing comment but retain it in the private review summary; repeat it
+only when the user explicitly asks for reinforcement. Re-fetch immediately
+before posting and start a new review round if `headRefOid` changed.
 
 ### 5. Output
 

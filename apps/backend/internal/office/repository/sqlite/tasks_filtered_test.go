@@ -2,6 +2,7 @@ package sqlite_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
@@ -197,6 +198,186 @@ func TestListTasksFiltered_RejectsInvalidSort(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for invalid sort field")
+	}
+}
+
+func TestListTasksFiltered_AssigneeAndProjectFilters(t *testing.T) {
+	repo := newTestRepo(t)
+	ensureTasksTable(t, repo)
+	ctx := context.Background()
+
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO tasks
+			(id, workspace_id, workflow_step_id, project_id, title, state, priority, created_at, updated_at)
+		VALUES
+			('af-1', 'ws-1', 'step-1', 'proj-a', 'One',   'TODO', 'medium', '2026-04-01T12:00:00Z', '2026-04-01T12:00:00Z'),
+			('af-2', 'ws-1', 'step-2', 'proj-a', 'Two',   'TODO', 'medium', '2026-04-02T12:00:00Z', '2026-04-02T12:00:00Z'),
+			('af-3', 'ws-1', 'step-3', 'proj-b', 'Three', 'TODO', 'medium', '2026-04-03T12:00:00Z', '2026-04-03T12:00:00Z')
+	`); err != nil {
+		t.Fatalf("seed tasks: %v", err)
+	}
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO workflow_step_participants (id, step_id, task_id, role, agent_profile_id, position)
+		VALUES
+			('p-1', 'step-1', 'af-1', 'runner', 'agent-x', 0),
+			('p-2', 'step-2', 'af-2', 'runner', 'agent-y', 0),
+			('p-3', 'step-3', 'af-3', 'runner', 'agent-x', 0)
+	`); err != nil {
+		t.Fatalf("seed runners: %v", err)
+	}
+
+	// The sort is stated explicitly rather than relying on the zero-value
+	// default, so a change of default surfaces as a sort failure elsewhere
+	// instead of a confusing "wrong ids" failure here.
+	ascByUpdated := sqlite.ListTasksOptions{SortField: sqlite.TaskSortUpdatedAt, SortDesc: false}
+
+	opts := ascByUpdated
+	opts.AssigneeID = "agent-x"
+	page, err := repo.ListTasksFiltered(ctx, "ws-1", opts)
+	if err != nil {
+		t.Fatalf("filter by assignee: %v", err)
+	}
+	if got := taskIDs(page.Tasks); len(got) != 2 || got[0] != "af-1" || got[1] != "af-3" {
+		t.Fatalf("assignee filter = %v, want [af-1 af-3]", got)
+	}
+	if page.Tasks[0].AssigneeAgentProfileID != "agent-x" {
+		t.Errorf("assignee = %q, want agent-x projected onto the row", page.Tasks[0].AssigneeAgentProfileID)
+	}
+
+	opts = ascByUpdated
+	opts.ProjectID = "proj-a"
+	page, err = repo.ListTasksFiltered(ctx, "ws-1", opts)
+	if err != nil {
+		t.Fatalf("filter by project: %v", err)
+	}
+	if got := taskIDs(page.Tasks); len(got) != 2 || got[0] != "af-1" || got[1] != "af-2" {
+		t.Fatalf("project filter = %v, want [af-1 af-2]", got)
+	}
+
+	opts = ascByUpdated
+	opts.AssigneeID = "agent-x"
+	opts.ProjectID = "proj-b"
+	page, err = repo.ListTasksFiltered(ctx, "ws-1", opts)
+	if err != nil {
+		t.Fatalf("combined filter: %v", err)
+	}
+	if got := taskIDs(page.Tasks); len(got) != 1 || got[0] != "af-3" {
+		t.Fatalf("combined filter = %v, want [af-3]", got)
+	}
+}
+
+// The cursor value is read off the sort column, so each sort field needs
+// its own round-trip: a created_at cursor fed into a priority sort would
+// silently return the wrong page.
+func TestListTasksFiltered_CursorPerSortField(t *testing.T) {
+	repo := newTestRepo(t)
+	ensureTasksTable(t, repo)
+	ctx := context.Background()
+
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO tasks (id, workspace_id, title, state, priority, created_at, updated_at) VALUES
+			('cs-crit', 'ws-1', 'a', 'TODO', 'critical', '2026-04-03T12:00:00Z', '2026-04-01T12:00:00Z'),
+			('cs-high', 'ws-1', 'b', 'TODO', 'high',     '2026-04-02T12:00:00Z', '2026-04-02T12:00:00Z'),
+			('cs-low',  'ws-1', 'c', 'TODO', 'low',      '2026-04-01T12:00:00Z', '2026-04-03T12:00:00Z')
+	`); err != nil {
+		t.Fatalf("seed tasks: %v", err)
+	}
+
+	// created_at DESC is the reverse of updated_at DESC for this fixture,
+	// so a wrong sort column would be visible.
+	page, err := repo.ListTasksFiltered(ctx, "ws-1", sqlite.ListTasksOptions{
+		SortField: sqlite.TaskSortCreatedAt, SortDesc: true, Limit: 2,
+	})
+	if err != nil {
+		t.Fatalf("created_at page 1: %v", err)
+	}
+	if got := taskIDs(page.Tasks); len(got) != 2 || got[0] != "cs-crit" || got[1] != "cs-high" {
+		t.Fatalf("created_at page 1 = %v, want [cs-crit cs-high]", got)
+	}
+	if page.NextCursor != page.Tasks[1].CreatedAt {
+		t.Errorf("NextCursor = %q, want the tail row's created_at %q", page.NextCursor, page.Tasks[1].CreatedAt)
+	}
+	if page.NextID != "cs-high" {
+		t.Errorf("NextID = %q, want cs-high", page.NextID)
+	}
+	page2, err := repo.ListTasksFiltered(ctx, "ws-1", sqlite.ListTasksOptions{
+		SortField: sqlite.TaskSortCreatedAt, SortDesc: true, Limit: 2,
+		CursorValue: page.NextCursor, CursorID: page.NextID,
+	})
+	if err != nil {
+		t.Fatalf("created_at page 2: %v", err)
+	}
+	if got := taskIDs(page2.Tasks); len(got) != 1 || got[0] != "cs-low" {
+		t.Fatalf("created_at page 2 = %v, want [cs-low]", got)
+	}
+
+	// priority sorts lexically on the column value: critical < high < low.
+	page, err = repo.ListTasksFiltered(ctx, "ws-1", sqlite.ListTasksOptions{
+		SortField: sqlite.TaskSortPriority, Limit: 2,
+	})
+	if err != nil {
+		t.Fatalf("priority page 1: %v", err)
+	}
+	if got := taskIDs(page.Tasks); len(got) != 2 || got[0] != "cs-crit" || got[1] != "cs-high" {
+		t.Fatalf("priority page 1 = %v, want [cs-crit cs-high] ascending", got)
+	}
+	if page.NextCursor != "high" {
+		t.Errorf("NextCursor = %q, want the tail row's priority 'high'", page.NextCursor)
+	}
+	page2, err = repo.ListTasksFiltered(ctx, "ws-1", sqlite.ListTasksOptions{
+		SortField: sqlite.TaskSortPriority, Limit: 2,
+		CursorValue: page.NextCursor, CursorID: page.NextID,
+	})
+	if err != nil {
+		t.Fatalf("priority page 2: %v", err)
+	}
+	if got := taskIDs(page2.Tasks); len(got) != 1 || got[0] != "cs-low" {
+		t.Fatalf("priority page 2 = %v, want [cs-low]", got)
+	}
+	if page2.NextCursor != "" {
+		t.Errorf("NextCursor = %q, want empty on the final page", page2.NextCursor)
+	}
+}
+
+// An out-of-range limit is clamped to 100 rather than rejected. Seeding 101
+// rows is what makes the clamp observable: with fewer rows than the clamp,
+// every limit ≥ the row count returns the same page and the assertion would
+// hold no matter what resolveListTasksOptions did.
+func TestListTasksFiltered_ClampsLimit(t *testing.T) {
+	repo := newTestRepo(t)
+	ensureTasksTable(t, repo)
+	ctx := context.Background()
+
+	for i := 0; i < 101; i++ {
+		insertTaskRow(t, repo,
+			fmt.Sprintf("cl-%03d", i), "ws-1", "TODO", "medium",
+			fmt.Sprintf("2026-04-01T12:%02d:00Z", i%60))
+	}
+
+	for _, limit := range []int{0, -5, 501} {
+		page, err := repo.ListTasksFiltered(ctx, "ws-1", sqlite.ListTasksOptions{Limit: limit})
+		if err != nil {
+			t.Fatalf("limit %d: %v", limit, err)
+		}
+		if len(page.Tasks) != 100 {
+			t.Errorf("limit %d returned %d rows, want the clamped 100", limit, len(page.Tasks))
+		}
+		// 101 rows against a clamp of 100 means there is a next page.
+		if page.NextCursor == "" {
+			t.Errorf("limit %d NextCursor is empty, want the 101st row to be reachable", limit)
+		}
+		if page.NextID == "" {
+			t.Errorf("limit %d NextID is empty, want the tail row id", limit)
+		}
+	}
+
+	// An in-range limit is honoured verbatim, so the clamp is not blanket.
+	page, err := repo.ListTasksFiltered(ctx, "ws-1", sqlite.ListTasksOptions{Limit: 7})
+	if err != nil {
+		t.Fatalf("limit 7: %v", err)
+	}
+	if len(page.Tasks) != 7 {
+		t.Errorf("limit 7 returned %d rows, want 7", len(page.Tasks))
 	}
 }
 

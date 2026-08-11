@@ -28,10 +28,11 @@ export function ModelConfigResolutionStatus({
 
   return (
     <div
-      className="flex flex-wrap items-center gap-2 text-xs text-destructive"
+      className="flex min-w-0 items-start gap-2 text-xs text-destructive"
+      aria-live="polite"
       data-testid="model-config-resolution-error"
     >
-      <span>
+      <span className="min-w-0 flex-1">
         {status === "auth_required"
           ? t("agents:modelOptionsAuthenticationRequired")
           : t("agents:modelOptionsResolutionFailed")}
@@ -40,7 +41,7 @@ export function ModelConfigResolutionStatus({
         type="button"
         variant="ghost"
         size="sm"
-        className="min-h-10 px-2"
+        className="min-h-11 shrink-0 px-2 md:min-h-8"
         onClick={() => void onRetry()}
       >
         {t("agents:retryModelOptions")}

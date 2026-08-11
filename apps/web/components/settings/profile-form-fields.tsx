@@ -3,6 +3,7 @@
 import { useEffect, useId } from "react";
 import { useTranslation } from "react-i18next";
 import { IconAlertTriangle } from "@tabler/icons-react";
+import type { SelectConfigOption } from "@/components/model-config-selector";
 import { NoAuthPanel, ProbingPanel } from "@/components/settings/profile-status-panels";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
@@ -17,7 +18,7 @@ import {
   type PermissionKey,
 } from "@/lib/agent-permissions";
 import { CLIFlagsField } from "@/components/settings/cli-flags-field";
-import { CommandPrefixField } from "@/components/settings/command-prefix-field";
+import { ProfileAdvancedOptions } from "@/components/settings/profile-advanced-options";
 import { ModelConfigResolutionStatus } from "@/components/settings/model-config-resolution-status";
 import {
   CapabilityStatusMessage,
@@ -39,12 +40,13 @@ import type {
   CLIFlag,
   CommandEntry,
   ModelConfig,
-  ConfigOptionEntry,
   ModeEntry,
   ModelEntry,
   PermissionSetting,
   PassthroughConfig,
 } from "@/lib/types/http";
+
+const MUTED_TEXT_CLASS = "text-xs text-muted-foreground";
 
 export type ProfileFormData = {
   name: string;
@@ -138,11 +140,7 @@ function PermissionToggleRow({
           {setting.label}
         </Label>
         <p
-          className={
-            compact
-              ? "text-[10px] text-muted-foreground leading-tight"
-              : "text-xs text-muted-foreground"
-          }
+          className={compact ? "text-[10px] text-muted-foreground leading-tight" : MUTED_TEXT_CLASS}
         >
           {setting.description}
         </p>
@@ -237,7 +235,7 @@ function PermissionToggles({
         <div className="flex items-center justify-between rounded-md border p-3">
           <div className="space-y-1">
             <Label>{passthroughConfig.label}</Label>
-            <p className="text-xs text-muted-foreground">{passthroughConfig.description}</p>
+            <p className={MUTED_TEXT_CLASS}>{passthroughConfig.description}</p>
           </div>
           <Switch
             checked={profile.cli_passthrough}
@@ -268,7 +266,7 @@ type CapabilitiesRowProps = {
   onRefresh: () => Promise<void>;
   error: string | null;
   modelConfig: ModelConfig;
-  resolvedConfigOptions?: ConfigOptionEntry[];
+  configOptions: SelectConfigOption[];
   configStatus: ModelConfig["status"];
   configError: string | null;
   configIsLoading: boolean;
@@ -284,7 +282,7 @@ function CapabilitiesRow(props: CapabilitiesRowProps) {
   if (props.isLoading && props.models.length === 0) {
     return (
       <div className={gapCls}>
-        <Label className={props.isCompact ? "text-xs text-muted-foreground" : undefined}>
+        <Label className={props.isCompact ? MUTED_TEXT_CLASS : undefined}>
           {t("agents:startModel")}
         </Label>
         <Skeleton className="h-7 w-full" />
@@ -324,8 +322,7 @@ function CapabilitiesRowContent({
   isLoading,
   onRefresh,
   error,
-  modelConfig,
-  resolvedConfigOptions,
+  configOptions,
   configStatus,
   configError,
   configIsLoading,
@@ -334,16 +331,13 @@ function CapabilitiesRowContent({
 }: CapabilitiesRowProps) {
   const { t } = useTranslation();
   const hasModes = modes.length > 0;
-  const configOptions = modelConfigOptions(
-    resolvedConfigOptions ? { ...modelConfig, config_options: resolvedConfigOptions } : modelConfig,
-  );
   const activeMode = findActiveMode(modes, profile.mode, currentModeId);
-  const labelCls = isCompact ? "text-xs text-muted-foreground" : undefined;
+  const labelCls = isCompact ? MUTED_TEXT_CLASS : undefined;
   const gapCls = isCompact ? "space-y-1.5" : "space-y-2";
 
   return (
     <div className={gapCls}>
-      <div className="flex items-end gap-2">
+      <div className="flex items-end gap-2" data-testid="profile-capabilities-model-row">
         <div
           className={`flex-1 min-w-0 ${gapCls}`}
           data-settings-dirty={profileModelIsDirty(profile, baselineProfile)}
@@ -358,12 +352,6 @@ function CapabilitiesRowContent({
             onChange={onChange}
             ariaLabel={t("settings:startModelAria")}
             goneModelLabel={t("settings:startModelUnavailable")}
-          />
-          <ModelConfigResolutionStatus
-            status={configStatus}
-            error={configError}
-            isLoading={configIsLoading}
-            onRetry={onRetryConfig}
           />
         </div>
         {hasModes && (
@@ -384,18 +372,13 @@ function CapabilitiesRowContent({
         )}
         <RefreshCapabilitiesButton onRefresh={onRefresh} isLoading={isLoading} error={error} />
       </div>
-      {activeMode?.description && (
-        <p className="text-xs text-muted-foreground">{activeMode.description}</p>
-      )}
-      <ModelFallbackSection
-        profile={profile}
-        models={models}
-        configOptions={configOptions}
-        baselineProfile={baselineProfile}
-        labelCls={labelCls}
-        gapCls={gapCls}
-        onChange={onChange}
+      <ModelConfigResolutionStatus
+        status={configStatus}
+        error={configError}
+        isLoading={configIsLoading}
+        onRetry={onRetryConfig}
       />
+      {activeMode?.description && <p className={MUTED_TEXT_CLASS}>{activeMode.description}</p>}
       {commands.length > 0 && <CommandsButton commands={commands} />}
       <CapabilityStatusMessage status={status} />
     </div>
@@ -464,6 +447,9 @@ export function ProfileFormFields({
     refreshModelConfig,
     refresh,
   } = useProfileModelCapabilities(agentName, profile, modelConfig, onChange);
+  const configOptions = modelConfigOptions(
+    resolvedConfigOptions ? { ...modelConfig, config_options: resolvedConfigOptions } : modelConfig,
+  );
 
   useEffect(() => {
     onModelConfigResolutionPendingChange?.(isConfigResolutionPending);
@@ -496,7 +482,7 @@ export function ProfileFormFields({
         onRefresh={refresh}
         error={caps.error}
         modelConfig={modelConfig}
-        resolvedConfigOptions={resolvedConfigOptions}
+        configOptions={configOptions}
         configStatus={configStatus}
         configError={configError}
         configIsLoading={configIsLoading}
@@ -514,6 +500,44 @@ export function ProfileFormFields({
         baselineProfile={baselineProfile}
       />
 
+      <ProfileFormFooter
+        profile={profile}
+        baselineProfile={baselineProfile}
+        onChange={onChange}
+        permissionSettings={permissionSettings}
+        variant={variant}
+        hideCustomCLIFlags={hideCustomCLIFlags}
+        models={caps.models}
+        configOptions={configOptions}
+        isCompact={isCompact}
+      />
+    </div>
+  );
+}
+
+function ProfileFormFooter({
+  profile,
+  baselineProfile,
+  onChange,
+  permissionSettings,
+  variant,
+  hideCustomCLIFlags,
+  models,
+  configOptions,
+  isCompact,
+}: {
+  profile: ProfileFormData;
+  baselineProfile?: ProfileFormData;
+  onChange: (patch: Partial<ProfileFormData>) => void;
+  permissionSettings: Record<string, PermissionSetting>;
+  variant: "default" | "compact";
+  hideCustomCLIFlags: boolean;
+  models: ModelEntry[];
+  configOptions: SelectConfigOption[];
+  isCompact: boolean;
+}) {
+  return (
+    <>
       <div
         data-settings-dirty={
           Boolean(baselineProfile) &&
@@ -530,13 +554,25 @@ export function ProfileFormFields({
         />
       </div>
 
-      {!profile.cli_passthrough && (
-        <CommandPrefixField
+      <div className="space-y-1" data-testid="profile-disclosure-stack">
+        <ModelFallbackSection
           profile={profile}
+          models={models}
+          configOptions={configOptions}
           baselineProfile={baselineProfile}
+          labelCls={isCompact ? MUTED_TEXT_CLASS : undefined}
+          gapCls={isCompact ? "space-y-1.5" : "space-y-2"}
           onChange={onChange}
         />
-      )}
-    </div>
+
+        {!profile.cli_passthrough && (
+          <ProfileAdvancedOptions
+            profile={profile}
+            baselineProfile={baselineProfile}
+            onChange={onChange}
+          />
+        )}
+      </div>
+    </>
   );
 }

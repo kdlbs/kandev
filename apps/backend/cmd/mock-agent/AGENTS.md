@@ -8,7 +8,13 @@ Scoped guidance for `apps/backend/cmd/mock-agent/`. The mock agent satisfies the
 
 `handler.go` routes any prompt starting with `/e2e:` to `emitPredefinedScenario(e, name)`, which looks `name` up in `scenarioRegistry` (`scenarios.go`). The registry is the single source of truth for scenario names — to add a scenario, add one map entry and one `scenario<Name>(e *emitter)` function.
 
-Friendly aliases live in `handler.go` next to the dispatcher: `/ask-single`, `/ask-multiple`, `/crash`, `/todo`, `/mermaid`, `/markdown`, `/sleep [n]`, `/tool:<name>`, `/subagent`, `/subtask`, `/bulk[:N]`, `/background [n]`, `/detached-background [n]`, `/async-subagent-lifecycle [n]`, `/async-subagent-teardown`.
+Friendly aliases live in `handler.go` next to the dispatcher: `/ask-single`, `/ask-multiple`, `/crash`, `/todo`, `/mermaid`, `/markdown`, `/sleep [n]`, `/slow [duration]`, `/tool:<name>`, `/subagent`, `/subtask`, `/bulk[:N]`, `/background [n]`, `/detached-background [n]`, `/async-subagent-lifecycle [n]`, `/async-subagent-teardown`.
+
+`/slow [duration]` uses seconds for positive bare numbers and accepts explicit
+Go duration units. Omitted, invalid, or non-positive values use the 5-second
+fallback. Handler-path tests should use a short explicit duration such as
+`50ms`; parser tests should cover long bare values without making the handler
+wait for seconds.
 
 The four `background`/`async-subagent` aliases emit the foreground-yield and detached-workload frame shapes behind the fine-grained busy signal (ADR-0049): `/background` spawns a subagent while the foreground goes idle, `/detached-background` launches work that outlives the turn, and the `async-subagent-*` pair replays Claude's async Agent lifecycle with and without its completion frame.
 

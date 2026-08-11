@@ -33,6 +33,10 @@ describe("ModelConfigResolutionStatus", () => {
     expect(screen.getByTestId("model-config-resolution-error")).toBeTruthy();
     expect(screen.getByText("Model options could not be loaded.")).toBeTruthy();
     expect(screen.queryByText("raw provider stderr")).toBeNull();
+    expect(screen.getByTestId("model-config-resolution-error").className).not.toContain(
+      "flex-wrap",
+    );
+    expect(screen.getByRole("button", { name: "Retry" }).className).toContain("shrink-0");
 
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(onRetry).toHaveBeenCalledOnce();

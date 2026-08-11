@@ -248,6 +248,18 @@ func (r staticPromptResolver) ResolvePromptContent(context.Context, string, stri
 
 func setupControllerStoreTest(t *testing.T) (*gin.Engine, *Store) {
 	t.Helper()
+	svc, store := setupWatchServiceTest(t)
+	ctrl := NewController(svc, newControllerTestLogger())
+	router := gin.New()
+	useControllerTestWorkspace(router)
+	ctrl.RegisterHTTPRoutes(router)
+	return router, store
+}
+
+// setupWatchServiceTest builds a Service backed by a real SQLite store and the
+// stub client, with the ws-1 workspace connected so watch checks resolve.
+func setupWatchServiceTest(t *testing.T) (*Service, *Store) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	tmp := t.TempDir()
 	dbConn, err := db.OpenSQLite(filepath.Join(tmp, "github.db"))
@@ -289,11 +301,7 @@ func setupControllerStoreTest(t *testing.T) (*gin.Engine, *Store) {
 		return svc.client, AuthMethodPAT, nil
 	})
 	svc.SetPromptResolver(staticPromptResolver{content: "resolved default prompt"})
-	ctrl := NewController(svc, log)
-	router := gin.New()
-	useControllerTestWorkspace(router)
-	ctrl.RegisterHTTPRoutes(router)
-	return router, store
+	return svc, store
 }
 
 func TestCredentialBrokerReadinessUsesExactResolveRoute(t *testing.T) {
