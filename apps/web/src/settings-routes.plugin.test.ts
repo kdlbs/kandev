@@ -1,8 +1,12 @@
-import { isValidElement, type ReactElement } from "react";
+import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { pluginRegistry } from "@/lib/plugins/registry";
 import { renderSettingsRoute } from "./settings-routes";
+
+vi.mock("@/components/settings/workspaces/workspace-settings-shell", () => ({
+  WorkspaceSettingsShell: ({ children }: { children: ReactNode }) => children,
+}));
 
 const PLUGIN_ID = "plugin-a";
 const PLUGIN_SETTINGS_PATH = "/settings/plugins/plugin-a/config";
@@ -66,7 +70,8 @@ describe("renderSettingsRoute — plugin fallthrough", () => {
 
     const route = renderSettingsRoute("/settings/general");
 
-    // "/settings/general" is a real static route (GeneralSettings), not the plugin's.
+    // "/settings/general" is a first-party route (a redirect to its first page),
+    // not the plugin's.
     expect((route as ReactElement).type).not.toBe(ShouldNotMatch);
   });
 });
@@ -106,7 +111,7 @@ describe("renderSettingsRoute — plugin integration settings", () => {
 
     render(
       renderSettingsRoute(
-        `/settings/workspace/workspace%20one/integrations/${PLUGIN_INTEGRATION_ID}`,
+        `/settings/workspaces/workspace%20one/integrations/${PLUGIN_INTEGRATION_ID}`,
       ) as ReactElement,
     );
 

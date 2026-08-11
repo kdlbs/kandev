@@ -113,8 +113,10 @@ describe("IntegrationsIndexPage", () => {
   it("keeps workspace-scoped integration links on the workspace route", () => {
     renderPage("ws-1");
 
+    // Plural: the restructure serves workspace settings from
+    // /settings/workspaces/<id>, with the singular path kept as a redirect.
     expect(screen.getByRole("link", { name: "Azure DevOps" }).getAttribute("href")).toBe(
-      "/settings/workspace/ws-1/integrations/azure-devops",
+      "/settings/workspaces/ws-1/integrations/azure-devops",
     );
   });
 
@@ -147,7 +149,7 @@ describe("IntegrationsIndexPage plugin contributions", () => {
     renderPage("workspace one");
 
     expect(screen.getByRole("link", { name: /source control/i }).getAttribute("href")).toBe(
-      "/settings/workspace/workspace%20one/integrations/source-control",
+      "/settings/workspaces/workspace%20one/integrations/source-control",
     );
   });
 

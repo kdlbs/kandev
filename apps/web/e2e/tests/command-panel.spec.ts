@@ -129,12 +129,14 @@ test.describe("Command Panel", () => {
     await expect(dialog.locator("[cmdk-group-heading]")).toHaveText(["Settings"]);
     const option = commandOption(testPage, "Terminal Font Size");
     await expect(option).toBeVisible();
-    await expect(option.getByText("Settings › General › Terminal", { exact: true })).toBeVisible();
+    await expect(option.getByText("Settings › Terminal & Editors", { exact: true })).toBeVisible();
     await expect(option).toHaveAttribute("data-selected", "true");
     await input.press("Enter");
 
     await expect(dialog).not.toBeVisible();
-    await expect(testPage).toHaveURL(/\/settings\/general\/terminal#setting-terminal-font-size$/);
+    await expect(testPage).toHaveURL(
+      /\/settings\/preferences\/terminal-editors#setting-terminal-font-size$/,
+    );
     const target = testPage.locator('[data-settings-target="setting-terminal-font-size"]');
     await expect(target).toHaveAttribute("data-settings-target-highlight", "true");
     await expect(testPage.getByTestId("terminal-font-size-input")).toBeFocused();

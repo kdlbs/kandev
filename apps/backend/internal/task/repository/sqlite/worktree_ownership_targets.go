@@ -24,10 +24,16 @@ const (
 	tableTaskEnvRepos    = "task_environment_repos"
 )
 
+// envRepoKey is the normalized repository-slot key: one row per
+// (repository, branch slug) pair within a task environment.
+func envRepoKey(repositoryID, branchSlug string) string {
+	return repositoryID + "\x00" + branchSlug
+}
+
 // rowForKey returns (creating if needed) the normalized repo target for a
 // (repository, branch slug) key in this task.
 func (t *taskWorktreeTargets) rowForKey(repositoryID, branchSlug string) *envRepoTarget {
-	key := repositoryID + "\x00" + branchSlug
+	key := envRepoKey(repositoryID, branchSlug)
 	if target, ok := t.byKey[key]; ok {
 		return target
 	}

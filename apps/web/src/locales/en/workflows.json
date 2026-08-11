@@ -99,7 +99,6 @@
   "lastAttempt": "last attempt {{when}}",
   "lastSynced": "last synced {{when}}",
   "loadingWorkflowSteps": "Loading workflow steps...",
-  "manageWorkflowsForThisWorkspace": "Manage workflows for this workspace.",
   "migrateAndDelete": "Migrate & Delete",
   "migrateAndDeleteStep": "Migrate & Delete Step",
   "migrating": "Migrating...",
@@ -255,6 +254,5 @@
   "workflows": "Workflows",
   "workflowsSectionDescription": "Create autonomous pipelines with automated transitions or manual workflows where you move tasks yourself",
   "workflowSteps": "Workflow Steps",
-  "workflowSyncCompleted": "Workflow sync completed",
-  "workspaceSettings": "Workspace settings"
+  "workflowSyncCompleted": "Workflow sync completed"
 }

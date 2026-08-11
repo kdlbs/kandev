@@ -25,7 +25,8 @@ test.describe("managed agent runtime updates", () => {
     expect(profileActionBox).not.toBeNull();
     expect(triggerBox).not.toBeNull();
     expect(Math.abs(profileActionBox!.y - triggerBox!.y)).toBeLessThanOrEqual(8);
-    expect(triggerBox!.x).toBeGreaterThan(profileActionBox!.x);
+    // The update trigger leads the row; "Setup Profile" follows it.
+    expect(triggerBox!.x).toBeLessThan(profileActionBox!.x);
     expect(profileActionBox!.height).toBe(28);
     expect(triggerBox!.height).toBe(profileActionBox!.height);
 
