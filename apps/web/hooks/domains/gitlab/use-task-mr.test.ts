@@ -401,6 +401,11 @@ describe("useUnlinkTaskMR", () => {
 
     expect(deleteTaskMRMock).toHaveBeenCalledWith("assoc-1", "ws-1");
     expect(toastMock).not.toHaveBeenCalled();
+    // The whole point of this test: the association actually left the
+    // store. Asserting only pre-unlink state (as this test previously did)
+    // is phantom-green — deleting the removeTaskMR call from the hook still
+    // leaves that assertion passing.
+    expect(result.current.mrs).toEqual([]);
   });
 
   it("toasts an error and leaves the association in the store on failure", async () => {
@@ -423,7 +428,13 @@ describe("useUnlinkTaskMR", () => {
       await result.current.unlink("assoc-1");
     });
 
+    // spec.md:1026-1029 names the specific title key (gitlab:failedToUnlinkMergeRequest)
+    // both surfaces must use; assert its resolved English text since i18next
+    // is the real instance in this test environment, not a raw-key stub.
     expect(toastMock).toHaveBeenCalledTimes(1);
+    expect(toastMock).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Failed to unlink merge request" }),
+    );
     expect(result.current.mrs).toEqual([mr]);
   });
 });

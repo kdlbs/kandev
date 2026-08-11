@@ -42,7 +42,10 @@ function isBadgeMRBetter(
  * and frozen selections, and deliberately never frozen (spec: "The
  * automation badges do NOT freeze").
  */
-function selectBadgeMR(openMRs: TaskMR[], options: TaskMRAutomationOptions | null): TaskMR | null {
+export function selectBadgeMR(
+  openMRs: TaskMR[],
+  options: TaskMRAutomationOptions | null,
+): TaskMR | null {
   if (!options?.auto_fix_enabled) return null;
   let best: TaskMR | null = null;
   let bestRound: AutoFixRoundInfo | null = null;

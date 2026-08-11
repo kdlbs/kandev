@@ -8,6 +8,9 @@ import type { TaskMR, TaskMRAutomationOptions } from "@/lib/types/gitlab";
 const OPEN_DELAY_MS = 150;
 const CHIP_TESTID = "mr-status-chip";
 const DATA_MR_IID = "data-mr-iid";
+const DATA_SELECTION_FROZEN = "data-selection-frozen";
+const DATA_MR_COUNT = "data-mr-count";
+const DATA_STATUS = "data-status";
 const POPOVER_STUB_TESTID = "mr-ci-popover-stub";
 
 const gitlabMocks = vi.hoisted(() => ({ mrs: [] as TaskMR[] }));
@@ -17,6 +20,7 @@ const automationMocks = vi.hoisted(() => ({
 }));
 const dialogMocks = vi.hoisted(() => ({ lastProps: null as { open: boolean } | null }));
 const unlinkMock = vi.hoisted(() => vi.fn(async () => {}));
+const popoverRenderMRIIDs = vi.hoisted(() => [] as number[]);
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
@@ -60,17 +64,20 @@ vi.mock("./mr-ci-popover", () => ({
     mr: TaskMR;
     onLink: () => void;
     onUnlink: () => void;
-  }) => (
-    <div data-testid={POPOVER_STUB_TESTID}>
-      popover for !{mr.mr_iid}
-      <button type="button" onClick={onLink}>
-        link another
-      </button>
-      <button type="button" onClick={onUnlink}>
-        unlink
-      </button>
-    </div>
-  ),
+  }) => {
+    popoverRenderMRIIDs.push(mr.mr_iid);
+    return (
+      <div data-testid={POPOVER_STUB_TESTID}>
+        popover for !{mr.mr_iid}
+        <button type="button" onClick={onLink}>
+          link another
+        </button>
+        <button type="button" onClick={onUnlink}>
+          unlink
+        </button>
+      </div>
+    );
+  },
 }));
 
 vi.mock("./mr-topbar-button", () => ({
@@ -134,6 +141,7 @@ function resetChipMocks() {
   automationMocks.options = null;
   dialogMocks.lastProps = null;
   unlinkMock.mockClear();
+  popoverRenderMRIIDs.length = 0;
 }
 
 function teardownChipMocks() {
@@ -161,12 +169,12 @@ describe("MRStatusChip rendering and selection", () => {
     gitlabMocks.mrs = [makeMR({ pipeline_state: "failure" })];
     render(createElement(MRStatusChip, { taskId: "task-1" }));
     const trigger = screen.getByTestId(CHIP_TESTID);
-    expect(trigger.getAttribute("data-status")).toBe("failed");
-    expect(trigger.getAttribute("data-mr-count")).toBe("1");
+    expect(trigger.getAttribute(DATA_STATUS)).toBe("failed");
+    expect(trigger.getAttribute(DATA_MR_COUNT)).toBe("1");
     expect(trigger.getAttribute(DATA_MR_IID)).toBe("81");
     expect(trigger.getAttribute("data-mr-state")).toBe("open");
     expect(trigger.getAttribute("data-mr-ready-to-merge")).toBe("false");
-    expect(trigger.getAttribute("data-selection-frozen")).toBe("false");
+    expect(trigger.getAttribute(DATA_SELECTION_FROZEN)).toBe("false");
   });
 
   it("selects the highest-ranked open MR and reports the total open count", () => {
@@ -177,10 +185,10 @@ describe("MRStatusChip rendering and selection", () => {
     ];
     render(createElement(MRStatusChip, { taskId: "task-1" }));
     const trigger = screen.getByTestId(CHIP_TESTID);
-    expect(trigger.getAttribute("data-status")).toBe("failed");
+    expect(trigger.getAttribute(DATA_STATUS)).toBe("failed");
     expect(trigger.getAttribute(DATA_MR_IID)).toBe("2");
     // Terminal MR is not counted toward data-mr-count.
-    expect(trigger.getAttribute("data-mr-count")).toBe("2");
+    expect(trigger.getAttribute(DATA_MR_COUNT)).toBe("2");
   });
 
   it("renders the auto-fix badge at round 0 with no lifecycle state, and the auto-merge badge", () => {
@@ -215,7 +223,7 @@ describe("MRStatusChip disclosure interactions", () => {
       makeMR({ id: "a", mr_iid: 1, pipeline_state: "pending" }),
       makeMR({ id: "b", mr_iid: 2, pipeline_state: "failure" }),
     ];
-    render(createElement(MRStatusChip, { taskId: "task-1" }));
+    const { rerender } = render(createElement(MRStatusChip, { taskId: "task-1" }));
     const trigger = screen.getByTestId(CHIP_TESTID);
 
     act(() => {
@@ -224,18 +232,26 @@ describe("MRStatusChip disclosure interactions", () => {
     });
 
     expect(screen.getByTestId(POPOVER_STUB_TESTID).textContent).toContain("!2");
-    expect(trigger.getAttribute("data-selection-frozen")).toBe("true");
+    expect(trigger.getAttribute(DATA_SELECTION_FROZEN)).toBe("true");
     expect(trigger.getAttribute(DATA_MR_IID)).toBe("2");
 
-    // Store update makes MR "a" the new live selection while the popover
-    // stays open on "b": data-status tracks the live selection, data-mr-iid
-    // stays frozen (spec: Selection - freezing while the disclosure is open).
+    // Store update makes MR "a" the new live selection (now also failed,
+    // and it outranks "b" by the mr_iid tiebreak) while the popover stays
+    // open on "b": data-status tracks the live selection, data-mr-iid and
+    // data-selection-frozen stay frozen on "b" (spec: Selection - freezing
+    // while the disclosure is open). A `rerender()` is required — mutating
+    // the hoisted mock array alone does not re-render the component.
+    gitlabMocks.mrs = [
+      makeMR({ id: "a", mr_iid: 1, pipeline_state: "failure" }),
+      makeMR({ id: "b", mr_iid: 2, pipeline_state: "failure" }),
+    ];
     act(() => {
-      gitlabMocks.mrs = [
-        makeMR({ id: "a", mr_iid: 1, pipeline_state: "failure" }),
-        makeMR({ id: "b", mr_iid: 2, pipeline_state: "failure" }),
-      ];
+      rerender(createElement(MRStatusChip, { taskId: "task-1" }));
     });
+
+    expect(trigger.getAttribute(DATA_MR_IID)).toBe("2");
+    expect(trigger.getAttribute(DATA_SELECTION_FROZEN)).toBe("true");
+    expect(trigger.getAttribute(DATA_STATUS)).toBe("failed");
   });
 
   it("keeps the aria-label naming the acted-on MR's own status while frozen, not the live selection's", () => {
@@ -271,7 +287,7 @@ describe("MRStatusChip disclosure interactions", () => {
     });
 
     expect(trigger.getAttribute(DATA_MR_IID)).toBe("2");
-    expect(trigger.getAttribute("data-status")).toBe("running");
+    expect(trigger.getAttribute(DATA_STATUS)).toBe("running");
     expect(trigger.getAttribute("aria-label")).toContain("ready to merge");
     expect(trigger.getAttribute("aria-label")).not.toContain("pipeline running");
   });
@@ -302,6 +318,86 @@ describe("MRStatusChip disclosure interactions", () => {
 
     expect(screen.queryByTestId(POPOVER_STUB_TESTID)).toBeNull();
     expect(dialogMocks.lastProps?.open).toBe(true);
+  });
+});
+
+describe("MRStatusChip freeze and forced close", () => {
+  beforeEach(resetChipMocks);
+  afterEach(teardownChipMocks);
+
+  // spec: Failure modes / Idempotency and re-render — "if the transitioned MR
+  // is the frozen one, the popover or drawer closes; if another open MR
+  // remains the trigger re-selects it." Exercises useFrozenChipSelection's
+  // shouldForceClose path (mr-status-chip-selection.ts:98), which previously
+  // had zero coverage (Review round 1 finding #4).
+  it("force-closes the popover and re-selects the remaining open MR when the frozen MR goes terminal", () => {
+    gitlabMocks.mrs = [
+      makeMR({ id: "a", mr_iid: 1, pipeline_state: "pending" }), // running, rank 4
+      makeMR({ id: "b", mr_iid: 2, pipeline_state: "failure" }), // failed, rank 5 — gets frozen
+    ];
+    const { rerender } = render(createElement(MRStatusChip, { taskId: "task-1" }));
+    const trigger = screen.getByTestId(CHIP_TESTID);
+
+    act(() => {
+      fireEvent.mouseEnter(trigger);
+      vi.advanceTimersByTime(OPEN_DELAY_MS);
+    });
+
+    expect(screen.getByTestId(POPOVER_STUB_TESTID)).toBeTruthy();
+    expect(trigger.getAttribute(DATA_MR_IID)).toBe("2");
+    expect(trigger.getAttribute(DATA_SELECTION_FROZEN)).toBe("true");
+
+    // The frozen MR ("b") merges elsewhere while the popover is open; "a"
+    // remains the task's only open MR.
+    gitlabMocks.mrs = [
+      makeMR({ id: "a", mr_iid: 1, pipeline_state: "pending" }),
+      makeMR({ id: "b", mr_iid: 2, state: "merged" }),
+    ];
+    act(() => {
+      rerender(createElement(MRStatusChip, { taskId: "task-1" }));
+    });
+
+    expect(screen.queryByTestId(POPOVER_STUB_TESTID)).toBeNull();
+    expect(trigger.getAttribute(DATA_MR_COUNT)).toBe("1");
+    expect(trigger.getAttribute(DATA_MR_IID)).toBe("1");
+    expect(trigger.getAttribute(DATA_SELECTION_FROZEN)).toBe("false");
+  });
+
+  // Review round 1 finding #6 (codex): shouldForceClose and actedOnMR's
+  // fallback to the live selection are computed synchronously in the same
+  // render as the store update, but closing the disclosure is a `useEffect`
+  // that only fires after that render commits. Without the `!shouldForceClose`
+  // guard in MRStatusChipPopover/Drawer, MRCIPopover renders — with active
+  // merge/unlink controls — for the swapped-in MR ("a") for one commit before
+  // the effect closes the popover. Tracking every mr_iid MRCIPopover was ever
+  // rendered with (not just the final settled DOM, which act() would show as
+  // already-closed either way) is what actually catches this.
+  it("never renders MRCIPopover for the swapped-in MR during the forced-close transition", () => {
+    gitlabMocks.mrs = [
+      makeMR({ id: "a", mr_iid: 1, pipeline_state: "pending" }),
+      makeMR({ id: "b", mr_iid: 2, pipeline_state: "failure" }), // frozen
+    ];
+    const { rerender } = render(createElement(MRStatusChip, { taskId: "task-1" }));
+    const trigger = screen.getByTestId(CHIP_TESTID);
+
+    act(() => {
+      fireEvent.mouseEnter(trigger);
+      vi.advanceTimersByTime(OPEN_DELAY_MS);
+    });
+    expect(popoverRenderMRIIDs).toEqual([2]);
+
+    gitlabMocks.mrs = [
+      makeMR({ id: "a", mr_iid: 1, pipeline_state: "pending" }),
+      makeMR({ id: "b", mr_iid: 2, state: "merged" }),
+    ];
+    act(() => {
+      rerender(createElement(MRStatusChip, { taskId: "task-1" }));
+    });
+
+    // Across the whole transition (freeze open -> b vanishes -> popover
+    // closes), MRCIPopover is only ever rendered for "b" (the MR the user
+    // opened the popover on) — never for "a" (the swapped-in live MR).
+    expect(popoverRenderMRIIDs).not.toContain(1);
   });
 });
 

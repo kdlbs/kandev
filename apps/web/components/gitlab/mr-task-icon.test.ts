@@ -374,17 +374,54 @@ describe("aggregateMRChipStatus", () => {
     expect(aggregateMRChipStatus([makeMR({ state: "merged" })])).toBe("neutral");
   });
 
-  it("is order-independent over shuffled input", () => {
+  // spec.md:931-934: "A property test SHALL assert this over shuffled input
+  // orders." Enumerates every permutation of a small fixed list (no external
+  // property-testing dependency exists in this repo) and asserts the actual
+  // spec equality — aggregateMRChipStatus(mrs) === mrChipStatus(selectChipMR(mrs))
+  // or "neutral" when selectChipMR is null — for EVERY order, not one
+  // hand-picked shuffle compared only to itself.
+  it("equals mrChipStatus(selectChipMR(mrs)), or neutral when null, over every permutation of a mixed list", () => {
     const mrs = [
-      makeMR({ id: "a", mr_iid: 3 }),
-      makeMR({ id: "b", mr_iid: 9, draft: true }),
-      makeMR({ id: "c", mr_iid: 1, pipeline_state: "failure" }),
+      makeMR({ id: "a", mr_iid: 3 }), // rank 0 (neutral)
+      makeMR({ id: "b", mr_iid: 9, draft: true }), // rank 0 (draft)
+      makeMR({ id: "c", mr_iid: 1, pipeline_state: "failure" }), // rank 5 (failed) — the winner
+      makeMR({ id: "d", mr_iid: 5, state: "merged" }), // terminal, excluded from selection
+      makeMR({ id: "e", mr_iid: 12, pipeline_state: "pending" }), // rank 4 (running)
     ];
-    const shuffled = [mrs[2], mrs[0], mrs[1]];
-    expect(aggregateMRChipStatus(mrs)).toBe(aggregateMRChipStatus(shuffled));
-    expect(aggregateMRChipStatus(mrs)).toBe("failed");
+
+    for (const permutation of permutationsOf(mrs)) {
+      const selected = selectChipMR(permutation);
+      const expected = selected ? mrChipStatus(selected) : "neutral";
+      expect(aggregateMRChipStatus(permutation)).toBe(expected);
+    }
+  });
+
+  it("equals neutral over every permutation of an all-terminal list", () => {
+    const mrs = [
+      makeMR({ id: "a", state: "merged" }),
+      makeMR({ id: "b", state: "closed" }),
+      makeMR({ id: "c", state: "locked" }),
+    ];
+
+    for (const permutation of permutationsOf(mrs)) {
+      expect(selectChipMR(permutation)).toBeNull();
+      expect(aggregateMRChipStatus(permutation)).toBe("neutral");
+    }
   });
 });
+
+/** All permutations of a small array (n! — keep n <= ~6 to stay fast). */
+function permutationsOf<T>(items: T[]): T[][] {
+  if (items.length <= 1) return [items];
+  const result: T[][] = [];
+  for (let i = 0; i < items.length; i++) {
+    const rest = [...items.slice(0, i), ...items.slice(i + 1)];
+    for (const permutation of permutationsOf(rest)) {
+      result.push([items[i], ...permutation]);
+    }
+  }
+  return result;
+}
 
 // spec: State machine, "Rank, and why aggregation has no tiebreak of its
 // own" — MR_CHIP_STATUS_RANK and STATUS_RANK are two separate tables keyed
