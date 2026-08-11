@@ -34,8 +34,8 @@ func TestMetricLabel(t *testing.T) {
 		want  string
 	}{
 		{"single_pair", []string{"source", "agent"}, "source=agent"},
-		{"empty_agent_profile", []string{"source", "agent", "agent_profile", ""},
-			"source=agent;agent_profile="},
+		{"empty_agent_type", []string{"source", "agent", "agent_type", ""},
+			"source=agent;agent_type="},
 		{"odd_args_returns_empty", []string{"source"}, ""},
 	}
 	for _, tc := range cases {
@@ -48,10 +48,10 @@ func TestMetricLabel(t *testing.T) {
 }
 
 func TestRecordSignalReceived(t *testing.T) {
-	label := metricLabel("source", "agent", "agent_profile", "profile-metrics-test")
+	label := metricLabel("source", "agent", "agent_type", "claude-metrics-test")
 
 	before := readCounter(t, workflowStepSignalReceived, label)
-	RecordSignalReceived("agent", "profile-metrics-test")
+	RecordSignalReceived("agent", "claude-metrics-test")
 	after := readCounter(t, workflowStepSignalReceived, label)
 
 	if after-before != 1 {
@@ -65,10 +65,10 @@ func TestRecordSignalReceived_ManualFallbackSourceIsLabelled(t *testing.T) {
 	// assume "agent" — the moment that path exists it drives the ADR's
 	// fallback-used/received ratio through this same source label with no
 	// second counter.
-	label := metricLabel("source", "manual_fallback", "agent_profile", "profile-fallback-test")
+	label := metricLabel("source", "manual_fallback", "agent_type", "claude-fallback-test")
 
 	before := readCounter(t, workflowStepSignalReceived, label)
-	RecordSignalReceived("manual_fallback", "profile-fallback-test")
+	RecordSignalReceived("manual_fallback", "claude-fallback-test")
 	after := readCounter(t, workflowStepSignalReceived, label)
 
 	if after-before != 1 {

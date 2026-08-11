@@ -10,7 +10,7 @@ import (
 )
 
 // workflowStepSignalReceived counts accepted `step_complete_kandev` signals
-// (ADR 0015), labelled by source and agent profile. It is the ADR's
+// (ADR 0015), labelled by source and agent type. It is the ADR's
 // `step_completion_signal_received_total` counter. The ADR also specifies a
 // companion `step_completion_signal_fallback_used_total` counter, but that
 // counter's only production increment site is the manual "Mark complete &
@@ -46,7 +46,12 @@ func metricLabel(pairs ...string) string {
 // is one of models.StepCompletionSource* — today only
 // models.StepCompletionSourceAgent is reachable in production, since the
 // ADR's manual fallback affordance (§ Decision ¶6) has no call site yet.
-func RecordSignalReceived(source, agentProfileID string) {
+// `agentType` is the bounded agent-type dimension the ADR's ratio threshold
+// ("fallback-used / received <= 10% per agent type") is expressed against —
+// e.g. AgentProfile.AgentID ("claude", "codex") — not a per-user profile ID,
+// which never shrinks in the expvar map and cannot be joined back to a type
+// once the profile is deleted.
+func RecordSignalReceived(source, agentType string) {
 	workflowStepSignalReceived.Add(
-		metricLabel("source", source, "agent_profile", agentProfileID), 1)
+		metricLabel("source", source, "agent_type", agentType), 1)
 }

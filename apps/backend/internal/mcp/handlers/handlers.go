@@ -1919,11 +1919,16 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record signal", nil)
 	}
 
+	// Counted here, at the durable bag write, not after publishStepCompletionEvent
+	// below: publish is a delivery concern, and a publish failure sends the agent
+	// down the already_signaled dedup retry path, which never reaches this call
+	// again for the same signal.
+	agentType, _ := session.AgentProfileSnapshot["agent_id"].(string)
+	signalmetrics.RecordSignalReceived(signal.Source, agentType)
+
 	if errMsg, err := h.publishStepCompletionEvent(ctx, msg, req.TaskID, req.SessionID, task.WorkflowStepID, signal); errMsg != nil {
 		return errMsg, err
 	}
-
-	signalmetrics.RecordSignalReceived(signal.Source, session.AgentProfileID)
 
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"accepted":    true,

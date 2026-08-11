@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"expvar"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -20,13 +19,13 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
-// readSignalReceivedCounter sums every entry in the ADR 0015
-// workflow_step_completion_signal_received_total expvar map whose key has
-// the given prefix. A prefix match (rather than an exact-value read) keeps
-// the assertion robust against process-wide test pollution — other cases in
-// this file publish under the same "source=agent;agent_profile=" label
-// since none of them set TaskSession.AgentProfileID.
-func readSignalReceivedCounter(t *testing.T, prefix string) int64 {
+// readSignalReceivedCounterExact reads the exact-match entry in the ADR 0015
+// workflow_step_completion_signal_received_total expvar map for the given
+// key, verifying the label the handler actually wrote rather than a prefix
+// that would also match a wrong or empty value. Callers seed a distinct
+// agent_id per test (see seedAgentProfileSnapshot) so the exact key is also
+// unique across this file's process-wide expvar state.
+func readSignalReceivedCounterExact(t *testing.T, key string) int64 {
 	t.Helper()
 	v := expvar.Get("workflow_step_completion_signal_received_total")
 	require.NotNil(t, v, "workflow_step_completion_signal_received_total must be published")
@@ -34,7 +33,7 @@ func readSignalReceivedCounter(t *testing.T, prefix string) int64 {
 	require.True(t, ok, "workflow_step_completion_signal_received_total must be an expvar.Map")
 	var total int64
 	m.Do(func(kv expvar.KeyValue) {
-		if !strings.HasPrefix(kv.Key, prefix) {
+		if kv.Key != key {
 			return
 		}
 		n, err := strconv.ParseInt(kv.Value.String(), 10, 64)
@@ -42,6 +41,16 @@ func readSignalReceivedCounter(t *testing.T, prefix string) int64 {
 		total += n
 	})
 	return total
+}
+
+// seedAgentProfileSnapshot writes an AgentProfileSnapshot carrying the given
+// agent_id onto the session, matching the shape
+// executor.resolveAgentProfileSnapshot produces in production.
+func seedAgentProfileSnapshot(t *testing.T, repo *sqliterepo.Repository, sessionID, agentID string) {
+	t.Helper()
+	require.NoError(t, repo.UpdateTaskSessionAgentProfileSnapshot(context.Background(), sessionID, map[string]interface{}{
+		"agent_id": agentID,
+	}))
 }
 
 // seedStepCompleteTarget seeds a workspace, task (with WorkflowStepID), and
@@ -176,11 +185,12 @@ func TestHandleStepComplete_TerminalSessionRejected(t *testing.T) {
 func TestHandleStepComplete_FirstCallAccepted(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	seedStepCompleteTarget(t, repo, "task-first", "session-first", "step-1", models.TaskSessionStateRunning)
+	seedAgentProfileSnapshot(t, repo, "session-first", "claude-first-call")
 	bus := &mcpRecordingEventBus{}
 	h := newStepCompleteHandler(t, svc, repo, bus)
 
-	const counterPrefix = "source=agent;agent_profile="
-	before := readSignalReceivedCounter(t, counterPrefix)
+	const counterKey = "source=agent;agent_type=claude-first-call"
+	before := readSignalReceivedCounterExact(t, counterKey)
 
 	msg := makeWSMessage(t, ws.ActionMCPStepComplete, map[string]interface{}{
 		"task_id":    "task-first",
@@ -228,7 +238,7 @@ func TestHandleStepComplete_FirstCallAccepted(t *testing.T) {
 	_, hasHandoff := data["handoff"]
 	assert.False(t, hasHandoff, "handoff is bag-only, not on the wire")
 
-	after := readSignalReceivedCounter(t, counterPrefix)
+	after := readSignalReceivedCounterExact(t, counterKey)
 	assert.Equal(t, int64(1), after-before, "accepted signal must increment workflow_step_completion_signal_received_total")
 }
 
@@ -247,11 +257,12 @@ func TestHandleStepComplete_DedupRunningNoRepublish(t *testing.T) {
 		Summary:    "first call",
 		SignaledAt: time.Now().UTC(),
 	}))
+	seedAgentProfileSnapshot(t, repo, "session-dup", "claude-dup-call")
 	bus := &mcpRecordingEventBus{}
 	h := newStepCompleteHandler(t, svc, repo, bus)
 
-	const counterPrefix = "source=agent;agent_profile="
-	before := readSignalReceivedCounter(t, counterPrefix)
+	const counterKey = "source=agent;agent_type=claude-dup-call"
+	before := readSignalReceivedCounterExact(t, counterKey)
 
 	msg := makeWSMessage(t, ws.ActionMCPStepComplete, map[string]interface{}{
 		"task_id":    "task-dup",
@@ -270,7 +281,7 @@ func TestHandleStepComplete_DedupRunningNoRepublish(t *testing.T) {
 
 	assert.Empty(t, bus.events, "RUNNING dedup path must not re-publish (inline turn-end will consume the bag)")
 
-	after := readSignalReceivedCounter(t, counterPrefix)
+	after := readSignalReceivedCounterExact(t, counterKey)
 	assert.Equal(t, before, after, "already_signaled dedup must not increment workflow_step_completion_signal_received_total")
 }
 
