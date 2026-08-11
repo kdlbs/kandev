@@ -39,7 +39,15 @@ func (r *Repository) migrateSessionsAddCostColumns() {
 	r.migrate.Apply("task_sessions.cost_subcents", `ALTER TABLE task_sessions ADD COLUMN cost_subcents INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("task_sessions.tokens_in", `ALTER TABLE task_sessions ADD COLUMN tokens_in INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("task_sessions.tokens_out", `ALTER TABLE task_sessions ADD COLUMN tokens_out INTEGER NOT NULL DEFAULT 0`)
-	r.migrate.Apply("task_sessions.tokens_cached_in", `ALTER TABLE task_sessions ADD COLUMN tokens_cached_in INTEGER NOT NULL DEFAULT 0`)
+	// BIGINT, not INTEGER: office_cost_events.tokens_cached_in routinely
+	// accumulates well past int4's 2,147,483,647 ceiling over a long-running
+	// session (the reported bug measured up to 98,805,109 on one already-
+	// completed task). SQLite's INTEGER is 64-bit regardless, but on Postgres
+	// INTEGER is int4 - an overflowing session would abort the single
+	// multi-column UPDATE in IncrementTaskSessionUsage and the single
+	// table-wide UPDATE in backfillSessionTokensCachedIn, silently taking
+	// tokens_in/tokens_out/cost_subcents down with it for that session.
+	r.migrate.Apply("task_sessions.tokens_cached_in", `ALTER TABLE task_sessions ADD COLUMN tokens_cached_in BIGINT NOT NULL DEFAULT 0`)
 }
 
 // officeCostEventsTableExists reports whether the office cost ledger has
@@ -707,7 +715,7 @@ func (r *Repository) migrateSessionsRemoveAgentExecutionID() error {
 			task_environment_id TEXT DEFAULT '',
 			cost_subcents INTEGER NOT NULL DEFAULT 0,
 			tokens_in INTEGER NOT NULL DEFAULT 0,
-			tokens_cached_in INTEGER NOT NULL DEFAULT 0,
+			tokens_cached_in BIGINT NOT NULL DEFAULT 0,
 			tokens_out INTEGER NOT NULL DEFAULT 0,
 			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 		)`,
