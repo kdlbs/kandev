@@ -25,7 +25,7 @@ test.describe("GitHub workspace settings", () => {
     );
 
     try {
-      await testPage.goto(`/settings/workspace/${seedData.workspaceId}/integrations/github`);
+      await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/integrations/github`);
       const row = testPage.getByRole("row").filter({ hasText: "All repositories" });
       await expect(row).toBeVisible();
 
@@ -84,7 +84,7 @@ test.describe("GitHub workspace settings", () => {
       { host: "github.com", login: "workspace-cli", active: true, state: "active" },
     ]);
     await stubGitHubRateLimits(testPage, workspaceId);
-    await testPage.goto(`/settings/workspace/${workspaceId}/integrations/github`);
+    await testPage.goto(`/settings/workspaces/${workspaceId}/integrations/github`);
     const automation = testPage.getByTestId("github-workspace-automation");
     await expect(automation.getByTestId("github-task-access-summary")).toContainText(
       "Inherit executor Git credentials",
@@ -294,7 +294,7 @@ test.describe("GitHub workspace settings", () => {
       },
     ]);
 
-    await testPage.goto(`/settings/workspace/${seedData.workspaceId}/integrations/github`);
+    await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/integrations/github`);
     await expect(testPage.getByTestId("github-integration-heading")).toBeVisible();
 
     const issueWatchesHeading = testPage.getByRole("heading", { name: "Issue Watches" });
@@ -358,7 +358,10 @@ test.describe("GitHub workspace settings", () => {
     await apiClient.mockGitHubReset();
     await apiClient.mockGitHubSetUser("test-user");
 
-    await testPage.goto("/settings/integrations/github");
+    // Pin the seed workspace in the URL: the install-level path redirects to
+    // the active workspace, which may be one another test created — the API
+    // assertions below read seedData.workspaceId.
+    await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/integrations/github`);
     await expect(testPage.getByTestId("github-integration-heading")).toBeVisible();
 
     await testPage.getByTestId("github-scope-mode").click();

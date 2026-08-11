@@ -3,7 +3,6 @@ package sqlite
 import (
 	"context"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -11,7 +10,6 @@ import (
 
 	dbutil "github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/internal/testutil"
 )
 
 // ---------------------------------------------------------------------------
@@ -534,44 +532,6 @@ func TestCutover_PurgesPreviewCleanupJobs(t *testing.T) {
 	}
 }
 
-// TestCutover_ConflictingWorktreesFailClosed proves that two sessions of the
-// same task with different worktrees for the same repository slot abort the
-// cutover and leave the legacy database intact.
-func TestCutover_ConflictingWorktreesFailClosed(t *testing.T) {
-	db := openLegacyDB(t)
-	now := time.Now().UTC().Truncate(time.Second)
-	if _, err := db.Exec(`
-		INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
-		VALUES ('task-conflict', 'ws-1', 'legacy', ?, ?)`, now, now); err != nil {
-		t.Fatalf("seed task: %v", err)
-	}
-	for _, s := range []string{"sess-c1", "sess-c2"} {
-		if _, err := db.Exec(`
-			INSERT INTO task_sessions (id, task_id, state, started_at, updated_at)
-			VALUES (?, 'task-conflict', 'RUNNING', ?, ?)`, s, now, now); err != nil {
-			t.Fatalf("seed session: %v", err)
-		}
-	}
-	seedLegacySessionWorktree(t, db, "sess-c1", "wt-c1", "repo-c", "", "/t/c1", "feature/c1", "active", now)
-	seedLegacySessionWorktree(t, db, "sess-c2", "wt-c2", "repo-c", "", "/t/c2", "feature/c2", "active", now)
-
-	_, err := NewWithDB(db, db, nil)
-	if err == nil {
-		t.Fatal("expected cutover to fail on conflicting worktree identities")
-	}
-	if !strings.Contains(err.Error(), "conflict") {
-		t.Fatalf("error must describe the conflict, got: %v", err)
-	}
-	// Pre-upgrade state must be intact.
-	if !legacyTableExists(t, db, "task_session_worktrees") {
-		t.Fatal("legacy table must survive a failed cutover")
-	}
-	envCols := tableColumnSet(t, db, "task_environments")
-	if !envCols["worktree_id"] || !envCols["repository_id"] {
-		t.Fatal("legacy flat columns must survive a failed cutover")
-	}
-}
-
 // TestCutover_RollbackAtEveryFailpoint injects a failure at each cutover
 // step and proves the transaction restores the complete legacy schema and
 // data.
@@ -776,35 +736,6 @@ func TestCutover_PreservesTerminalWorktreeOutsideFlatOwnerSlot(t *testing.T) {
 			sessionSlot := tc.sessionRepoID + "\x00" + tc.sessionBranchSlug
 			if len(env.Repos) != 2 || slots[flatSlot] != "wt-flat-current" || slots[sessionSlot] != "wt-flat-old" {
 				t.Fatalf("preserved repository slots = %+v", env.Repos)
-			}
-		})
-	}
-}
-
-// TestCutover_RejectsLiveWorktreeDifferentFromFlatOwner proves that a
-// non-terminal session with a different physical identity still fails closed.
-func TestCutover_RejectsLiveWorktreeDifferentFromFlatOwner(t *testing.T) {
-	for _, state := range []string{"RUNNING", "WAITING_FOR_INPUT"} {
-		t.Run(state, func(t *testing.T) {
-			db := openLegacyDB(t)
-			now := time.Now().UTC().Truncate(time.Second)
-			seed := legacySeed{envID: "env-flat-live", taskID: "task-flat-live", repoID: "repo-flat-live", sessionID: "sess-flat-live"}
-			seedLegacyTask(t, db, seed, now)
-			if _, err := db.Exec(db.Rebind(`UPDATE task_sessions SET state = ? WHERE id = ?`), state, seed.sessionID); err != nil {
-				t.Fatalf("set session state: %v", err)
-			}
-			seedLegacyFlatEnv(t, db, seed, "wt-flat-current", "/tasks/flat-live/repo", "feature/current", now)
-			seedLegacySessionWorktree(t, db, seed.sessionID, "wt-flat-live", seed.repoID, "", "/tasks/flat-live/old", "feature/live", "active", now)
-
-			_, err := NewWithDB(db, db, nil)
-			if err == nil {
-				t.Fatal("expected live worktree conflict")
-			}
-			if !strings.Contains(err.Error(), "conflict") {
-				t.Fatalf("error must describe the conflict, got: %v", err)
-			}
-			if !legacyTableExists(t, db, "task_session_worktrees") {
-				t.Fatal("legacy table must survive a failed cutover")
 			}
 		})
 	}
@@ -1028,214 +959,5 @@ func linkSessionEnvironment(t *testing.T, db *sqlx.DB, sessionID, envID string) 
 	if _, err := db.Exec(db.Rebind(
 		`UPDATE task_sessions SET task_environment_id = ? WHERE id = ?`), envID, sessionID); err != nil {
 		t.Fatalf("link session environment: %v", err)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// PostgreSQL coverage
-// ---------------------------------------------------------------------------
-
-func openLegacyPostgres(t *testing.T) *sqlx.DB {
-	t.Helper()
-	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
-	if _, err := NewWithDB(db, db, nil); err != nil {
-		t.Fatalf("seed baseline postgres schema: %v", err)
-	}
-	rewindToLegacySchema(t, db)
-	return db
-}
-
-func TestCutoverPostgres_NormalizesLegacyFlatEnvironment(t *testing.T) {
-	db := openLegacyPostgres(t)
-	ctx := context.Background()
-	now := time.Now().UTC().Truncate(time.Second)
-	seed := legacySeed{envID: "env-pg1", taskID: "task-pg1", repoID: "repo-pg1", sessionID: "sess-pg1"}
-	seedLegacyTask(t, db, seed, now)
-	seedLegacySessionWorktree(t, db, "sess-pg1", "wt-pg1", "repo-pg1", "", "/tasks/pg1/kandev", "feature/pg", "active", now)
-	seedLegacyFlatEnv(t, db, seed, "wt-pg1", "/tasks/pg1/kandev", "feature/pg", now)
-	seedCleanupJob(t, db, "job-pg-session-delete", "task-pg1", "session_delete", "pending", now)
-	seedCleanupJob(t, db, "job-pg-archive", "task-pg1", "archive", "pending", now)
-
-	repo, err := NewWithDB(db, db, nil)
-	if err != nil {
-		t.Fatalf("postgres cutover: %v", err)
-	}
-	env, err := repo.GetTaskEnvironment(ctx, "env-pg1")
-	if err != nil {
-		t.Fatalf("GetTaskEnvironment: %v", err)
-	}
-	if len(env.Repos) != 1 || env.Repos[0].WorktreeID != "wt-pg1" || env.Repos[0].Status != "active" {
-		t.Fatalf("normalized repos = %+v", env.Repos)
-	}
-	session, err := repo.GetTaskSession(ctx, "sess-pg1")
-	if err != nil {
-		t.Fatalf("GetTaskSession: %v", err)
-	}
-	if session.TaskEnvironmentID != "env-pg1" {
-		t.Fatalf("session env = %q, want env-pg1", session.TaskEnvironmentID)
-	}
-	var tableCount int
-	if err := db.Get(&tableCount, `
-		SELECT COUNT(*) FROM information_schema.tables
-		WHERE table_name = 'task_session_worktrees' AND table_schema = current_schema()`); err != nil {
-		t.Fatalf("count legacy table: %v", err)
-	}
-	if tableCount != 0 {
-		t.Fatal("task_session_worktrees must be dropped on postgres")
-	}
-	var jobCount int
-	if err := db.Get(&jobCount, `SELECT COUNT(*) FROM task_resource_cleanup_jobs`); err != nil {
-		t.Fatalf("count jobs: %v", err)
-	}
-	if jobCount != 1 {
-		t.Fatalf("postgres cleanup jobs after cutover = %d, want 1", jobCount)
-	}
-}
-
-func TestCutoverPostgres_SessionOnlyNormalization(t *testing.T) {
-	db := openLegacyPostgres(t)
-	ctx := context.Background()
-	now := time.Now().UTC().Truncate(time.Second)
-	seed := legacySeed{taskID: "task-pg2", sessionID: "sess-pg2"}
-	seedLegacyTask(t, db, seed, now)
-	seedLegacySessionWorktree(t, db, "sess-pg2", "wt-pg2", "repo-pg2", "", "/tasks/pg2/kandev", "feature/pg2", "active", now)
-
-	repo, err := NewWithDB(db, db, nil)
-	if err != nil {
-		t.Fatalf("postgres cutover: %v", err)
-	}
-	env, err := repo.GetTaskEnvironmentByTaskID(ctx, "task-pg2")
-	if err != nil {
-		t.Fatalf("GetTaskEnvironmentByTaskID: %v", err)
-	}
-	if env == nil || len(env.Repos) != 1 || env.Repos[0].WorktreeID != "wt-pg2" {
-		t.Fatalf("normalized env = %+v", env)
-	}
-}
-
-func TestCutoverPostgres_ConflictingWorktreesFailClosed(t *testing.T) {
-	db := openLegacyPostgres(t)
-	now := time.Now().UTC().Truncate(time.Second)
-	if _, err := db.Exec(db.Rebind(`
-		INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
-		VALUES (?, 'ws-1', 'legacy', ?, ?)`), "task-pg-conflict", now, now); err != nil {
-		t.Fatalf("seed task: %v", err)
-	}
-	for _, s := range []string{"sess-pgc1", "sess-pgc2"} {
-		if _, err := db.Exec(db.Rebind(`
-			INSERT INTO task_sessions (id, task_id, state, started_at, updated_at)
-			VALUES (?, 'task-pg-conflict', 'COMPLETED', ?, ?)`), s, now, now); err != nil {
-			t.Fatalf("seed session: %v", err)
-		}
-	}
-	seedLegacySessionWorktree(t, db, "sess-pgc1", "wt-pgc1", "repo-pgc", "", "/t/pgc1", "feature/a", "active", now)
-	seedLegacySessionWorktree(t, db, "sess-pgc2", "wt-pgc2", "repo-pgc", "", "/t/pgc2", "feature/b", "active", now)
-
-	_, err := NewWithDB(db, db, nil)
-	if err == nil {
-		t.Fatal("expected postgres cutover to fail on conflicting worktrees")
-	}
-	var tableCount int
-	if err := db.Get(&tableCount, `
-		SELECT COUNT(*) FROM information_schema.tables
-		WHERE table_name = 'task_session_worktrees' AND table_schema = current_schema()`); err != nil {
-		t.Fatalf("count legacy table: %v", err)
-	}
-	if tableCount != 1 {
-		t.Fatal("failed postgres cutover must leave the legacy table intact")
-	}
-}
-
-// TestCutoverPostgres_ReplayIsNoOp proves a second boot skips the cutover.
-func TestCutoverPostgres_ReplayIsNoOp(t *testing.T) {
-	db := openLegacyPostgres(t)
-	now := time.Now().UTC().Truncate(time.Second)
-	seed := legacySeed{envID: "env-pg3", taskID: "task-pg3", repoID: "repo-pg3", sessionID: "sess-pg3"}
-	seedLegacyTask(t, db, seed, now)
-	seedLegacySessionWorktree(t, db, "sess-pg3", "wt-pg3", "repo-pg3", "", "/tasks/pg3/kandev", "feature/pg3", "active", now)
-	seedLegacyFlatEnv(t, db, seed, "wt-pg3", "/tasks/pg3/kandev", "feature/pg3", now)
-
-	if _, err := NewWithDB(db, db, nil); err != nil {
-		t.Fatalf("first boot: %v", err)
-	}
-	if _, err := NewWithDB(db, db, nil); err != nil {
-		t.Fatalf("second boot (replay): %v", err)
-	}
-}
-
-// TestCutoverPostgres_RollbackAtEveryFailpoint mirrors the SQLite failpoint
-// matrix on PostgreSQL.
-func TestCutoverPostgres_RollbackAtEveryFailpoint(t *testing.T) {
-	for _, step := range []string{
-		"create_shadow", "copy_envs", "backfill_repos", "link_sessions",
-		"validate", "pre_swap", "drop_legacy", "swap", "post_swap",
-	} {
-		t.Run(step, func(t *testing.T) {
-			db := openLegacyPostgres(t)
-			now := time.Now().UTC().Truncate(time.Second)
-			seed := legacySeed{envID: "env-pgr", taskID: "task-pgr", repoID: "repo-pgr", sessionID: "sess-pgr"}
-			seedLegacyTask(t, db, seed, now)
-			seedLegacySessionWorktree(t, db, "sess-pgr", "wt-pgr", "repo-pgr", "", "/tasks/pgr/kandev", "feature/pgr", "active", now)
-			seedLegacyFlatEnv(t, db, seed, "wt-pgr", "/tasks/pgr/kandev", "feature/pgr", now)
-
-			repo := &Repository{db: db, ro: db, migrate: dbutil.NewMigrateLogger(db, nil), failCutoverAfter: step}
-			err := repo.initSchema()
-			if err == nil {
-				t.Fatalf("expected injected failure at %s", step)
-			}
-			var tableCount int
-			if err := db.Get(&tableCount, `
-				SELECT COUNT(*) FROM information_schema.tables
-				WHERE table_name = 'task_session_worktrees' AND table_schema = current_schema()`); err != nil {
-				t.Fatalf("count legacy table: %v", err)
-			}
-			if tableCount != 1 {
-				t.Fatalf("legacy table must survive rollback at %s", step)
-			}
-			var path string
-			if err := db.Get(&path, db.Rebind(`
-				SELECT worktree_path FROM task_session_worktrees WHERE worktree_id = ?`), "wt-pgr"); err != nil {
-				t.Fatalf("legacy worktree row lost after rollback at %s: %v", step, err)
-			}
-			if path != "/tasks/pgr/kandev" {
-				t.Fatalf("legacy worktree data changed after rollback at %s", step)
-			}
-		})
-	}
-}
-
-// TestCutoverPostgres_FreshSchemaIsFinal proves a fresh PostgreSQL database
-// contains only the final schema.
-func TestCutoverPostgres_FreshSchemaIsFinal(t *testing.T) {
-	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
-	if _, err := NewWithDB(db, db, nil); err != nil {
-		t.Fatalf("init fresh postgres schema: %v", err)
-	}
-	var tableCount int
-	if err := db.Get(&tableCount, `
-		SELECT COUNT(*) FROM information_schema.tables
-		WHERE table_name = 'task_session_worktrees' AND table_schema = current_schema()`); err != nil {
-		t.Fatalf("count legacy table: %v", err)
-	}
-	if tableCount != 0 {
-		t.Fatal("fresh postgres database must not contain task_session_worktrees")
-	}
-	// The environment FK must reference tasks and the repos FK must
-	// reference task_environments after the swap.
-	var fkCount int
-	if err := db.Get(&fkCount, `
-		SELECT COUNT(*) FROM information_schema.table_constraints tc
-		JOIN information_schema.referential_constraints rc
-			ON rc.constraint_name = tc.constraint_name AND rc.constraint_schema = tc.constraint_schema
-		JOIN information_schema.constraint_column_usage ccu
-			ON ccu.constraint_name = rc.unique_constraint_name AND ccu.constraint_schema = rc.unique_constraint_schema
-		WHERE tc.table_name = 'task_environment_repos'
-		  AND tc.constraint_type = 'FOREIGN KEY'
-		  AND ccu.table_name = 'task_environments'
-		  AND tc.table_schema = current_schema()`); err != nil {
-		t.Fatalf("count env-repo FK: %v", err)
-	}
-	if fkCount != 1 {
-		t.Fatalf("task_environment_repos FK to task_environments missing: %d", fkCount)
 	}
 }

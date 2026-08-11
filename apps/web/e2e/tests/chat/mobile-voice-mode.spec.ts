@@ -39,7 +39,9 @@ test.describe("Mobile voice mode", () => {
     // The five cards rendered by `voice-mode-settings.tsx` at mobile width.
     await expect(testPage.getByText("Enable Voice Input")).toBeVisible();
     await expect(testPage.getByText("Transcription Engine")).toBeVisible();
-    await expect(testPage.getByText("Behavior")).toBeVisible();
+    // Exact: the settings menu's "Task Behavior" row is mounted (display-hidden)
+    // at this width, and a substring match would collide with it.
+    await expect(testPage.getByText("Behavior", { exact: true })).toBeVisible();
     await expect(testPage.getByText("Whisper Web Model")).toBeVisible();
     await expect(testPage.getByText(/Shortcut$/)).toBeVisible();
     // (The legacy `button[data-sidebar="trigger"]` mobile settings-sidebar

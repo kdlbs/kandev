@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/jmoiron/sqlx"
+	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/db/dialect"
 )
@@ -121,6 +122,7 @@ func (r *Repository) normalizeTaskWorktreeOwnership() error {
 		sessionTasks:              make(map[string]string),
 		sessionEnvIDs:             make(map[string]string),
 		sessionWorktreeSuperseded: make(map[string]bool),
+		demotedWorktrees:          make(map[string]bool),
 		authoritativeWorktreeIDs:  make(map[string]bool),
 		tasks:                     make(map[string]*taskWorktreeTargets),
 		taskEnvIDs:                make(map[string]string),
@@ -154,6 +156,7 @@ func (r *Repository) normalizeTaskWorktreeOwnership() error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("cutover: commit: %w", err)
 	}
+	r.logCutoverDemotions(cut)
 	return nil
 }
 
@@ -167,6 +170,18 @@ func (r *Repository) cutoverLegacyEnvironmentColumns(tx *sqlx.Tx) (map[string]bo
 		columns[column] = has
 	}
 	return columns, nil
+}
+
+// logCutoverDemotions reports every legacy worktree that lost a contested
+// repository slot. The migration performs no filesystem operation, so each
+// listed directory and branch is still on disk and recoverable by hand.
+func (r *Repository) logCutoverDemotions(c *worktreeCutover) {
+	if len(c.demotions) == 0 || r.log == nil {
+		return
+	}
+	r.log.Warn("cutover: duplicate legacy worktrees demoted to history",
+		zap.Int("count", len(c.demotions)),
+		zap.Strings("worktrees", c.demotions))
 }
 
 // cutoverAcquireLocks serializes the cutover for the active database engine:

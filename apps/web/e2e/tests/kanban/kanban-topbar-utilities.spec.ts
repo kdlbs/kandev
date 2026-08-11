@@ -20,9 +20,15 @@ test.describe("Kanban topbar utilities", () => {
     const settingsMode = testPage.getByTestId("app-sidebar-settings-mode");
     await expect(settingsMode).toBeVisible();
 
-    // Clicking a settings leaf navigates to its /settings/... page.
-    await settingsMode.getByRole("link", { name: "Automations" }).click();
-    await expect(testPage).toHaveURL(/\/settings\//);
+    // Clicking a settings leaf navigates to its /settings/... page. Pick a row
+    // from the static two-level menu: `flat` is the default mode and renders no
+    // branches, so workspace-nested leaves are not there to click.
+    await settingsMode.getByRole("link", { name: "Task Behavior" }).click();
+    await expect(testPage).toHaveURL(/\/settings\/preferences\/task-behavior$/);
+
+    // While the sidebar shows the settings tree its Home row is gone, so the
+    // topbar home crumb stays visible even at desktop width.
+    await expect(testPage.getByTestId("topbar-phone-home")).toBeVisible();
   });
 
   test("system health button is hidden when there are no issues", async ({ testPage, backend }) => {
