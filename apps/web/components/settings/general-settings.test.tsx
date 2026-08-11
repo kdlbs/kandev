@@ -9,6 +9,9 @@ const SHOW_STATUS_BAR_LABEL = "Show status bar";
 const SAVE_CHANGES_LABEL = "Save changes";
 const CHECKED_STATE = "checked";
 const DATA_STATE_ATTRIBUTE = "data-state";
+const INITIAL_REVISION = "2026-08-11T20:00:00.000000001Z";
+const OLDER_LIVE_REVISION = "2026-08-11T20:00:00.000000002Z";
+const SAVED_REVISION = "2026-08-11T20:00:00.000000003Z";
 const themeMocks = vi.hoisted(() => ({
   previewTheme: vi.fn(),
   commitTheme: vi.fn(),
@@ -109,6 +112,13 @@ async function verifyNewerLiveUpdateWinsOverOlderSaveResponse() {
       resolveSave = resolve;
     }),
   );
+  storeMocks.state = {
+    ...storeMocks.state,
+    userSettings: {
+      ...(storeMocks.state.userSettings as typeof defaultSettingsState.userSettings),
+      revision: INITIAL_REVISION,
+    },
+  };
   const view = renderAppearance();
 
   fireEvent.click(screen.getByRole("switch", { name: SHOW_STATUS_BAR_LABEL }));
@@ -120,6 +130,7 @@ async function verifyNewerLiveUpdateWinsOverOlderSaveResponse() {
     userSettings: {
       ...(storeMocks.state.userSettings as typeof defaultSettingsState.userSettings),
       appStatusBarEnabled: true,
+      revision: SAVED_REVISION,
     },
   };
   view.rerender(
@@ -127,7 +138,12 @@ async function verifyNewerLiveUpdateWinsOverOlderSaveResponse() {
       <AppearanceSettings />
     </SettingsSaveProvider>,
   );
-  resolveSave(appearanceSettingsResponse({ app_status_bar_enabled: false }));
+  resolveSave(
+    appearanceSettingsResponse({
+      app_status_bar_enabled: false,
+      updated_at: OLDER_LIVE_REVISION,
+    }),
+  );
 
   await waitFor(() => expect(storeMocks.setUserSettings).toHaveBeenCalledOnce());
   expect(storeMocks.setUserSettings).toHaveBeenCalledWith(
@@ -168,6 +184,52 @@ async function verifyEditDuringSaveSurvivesItsLiveUpdate() {
   await waitFor(() => expect(storeMocks.setUserSettings).toHaveBeenCalledOnce());
   expect(toggle.getAttribute(DATA_STATE_ATTRIBUTE)).toBe(CHECKED_STATE);
   expect(toggle.getAttribute("data-settings-dirty")).toBe("true");
+}
+
+async function verifyNewerSaveResponseWinsOverOlderLiveUpdate() {
+  let resolveSave: (value: ReturnType<typeof appearanceSettingsResponse>) => void = () => {};
+  apiMocks.updateUserSettings.mockReturnValueOnce(
+    new Promise((resolve) => {
+      resolveSave = resolve;
+    }),
+  );
+  storeMocks.state = {
+    ...storeMocks.state,
+    userSettings: {
+      ...(storeMocks.state.userSettings as typeof defaultSettingsState.userSettings),
+      revision: INITIAL_REVISION,
+    },
+  };
+  const view = renderAppearance();
+
+  fireEvent.click(screen.getByRole("switch", { name: SHOW_STATUS_BAR_LABEL }));
+  fireEvent.click(await screen.findByRole("button", { name: SAVE_CHANGES_LABEL }));
+  await waitFor(() => expect(apiMocks.updateUserSettings).toHaveBeenCalledOnce());
+
+  storeMocks.state = {
+    ...storeMocks.state,
+    userSettings: {
+      ...(storeMocks.state.userSettings as typeof defaultSettingsState.userSettings),
+      appStatusBarEnabled: true,
+      revision: OLDER_LIVE_REVISION,
+    },
+  };
+  view.rerender(
+    <SettingsSaveProvider>
+      <AppearanceSettings />
+    </SettingsSaveProvider>,
+  );
+  resolveSave(
+    appearanceSettingsResponse({
+      app_status_bar_enabled: false,
+      updated_at: SAVED_REVISION,
+    }),
+  );
+
+  await waitFor(() => expect(storeMocks.setUserSettings).toHaveBeenCalledOnce());
+  expect(storeMocks.setUserSettings).toHaveBeenCalledWith(
+    expect.objectContaining({ appStatusBarEnabled: false, revision: SAVED_REVISION }),
+  );
 }
 
 beforeEach(() => {
@@ -268,5 +330,10 @@ describe("AppearanceSettings status bar preference", () => {
   it(
     "keeps an edit made during save when the submitted value arrives live",
     verifyEditDuringSaveSurvivesItsLiveUpdate,
+  );
+
+  it(
+    "applies a newer save response after an older live update",
+    verifyNewerSaveResponseWinsOverOlderLiveUpdate,
   );
 });

@@ -60,7 +60,7 @@ The existing setting is the first gate. If disabled, no status-surface metrics s
 
 ## Data, API, and persistence
 
-The surface reads existing Zustand connection, active-context, user-settings, and system-metrics state. The backend-owned user settings JSON is authoritative for the portable top-level `app_status_bar_enabled` field. Settings > Preferences > Appearance exposes it as **Show status bar**. An absent stored value or an initial compatibility payload that omits the field means `false`; omission in a PATCH or partial live update leaves the current value unchanged, and an explicit boolean is preserved. The phone drawer's open state is presentation-local and is not persisted. Existing `show_in_topbar` user-setting persistence remains authoritative for metrics visibility.
+The surface reads existing Zustand connection, active-context, user-settings, and system-metrics state. The backend-owned user settings JSON is authoritative for the portable top-level `app_status_bar_enabled` field. Settings > Preferences > Appearance exposes it as **Show status bar**. An absent stored value or an initial compatibility payload that omits the field means `false`; omission in a PATCH or partial live update leaves the current value unchanged, and an explicit boolean is preserved. PATCH responses and live events carry a precise `updated_at` revision so the client applies the newest settings snapshot instead of inferring order from store object identity. The phone drawer's open state is presentation-local and is not persisted. Existing `show_in_topbar` user-setting persistence remains authoritative for metrics visibility.
 
 The existing backend-owned user settings JSON stores visibility, the metrics display preference, and the portable layout:
 

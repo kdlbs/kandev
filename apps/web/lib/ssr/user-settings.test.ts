@@ -8,10 +8,32 @@ import {
   parseSystemMetricsDisplay,
   parseVoiceMode,
 } from "./user-settings";
+import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
 import { workspaceId as toWorkspaceId } from "@/lib/types/ids";
 
 const UPDATED_AT = "2026-01-01T00:00:00Z";
 const DEFAULT_USER_ID = "default-user";
+
+describe("user settings revision ordering", () => {
+  it("orders nanosecond timestamps and hydrates the current revision", () => {
+    expect(
+      compareUserSettingsRevisions(
+        "2026-01-01T00:00:00.123456789Z",
+        "2026-01-01T00:00:00.123456788Z",
+      ),
+    ).toBe(1);
+    expect(
+      mapUserSettingsResponse({
+        settings: {
+          user_id: DEFAULT_USER_ID,
+          workspace_id: toWorkspaceId(""),
+          repository_ids: [],
+          updated_at: UPDATED_AT,
+        },
+      }).revision,
+    ).toBe(UPDATED_AT);
+  });
+});
 
 describe("startup page user settings", () => {
   it("normalizes startup page preferences", () => {

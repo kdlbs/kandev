@@ -46,6 +46,7 @@ import {
 
 function makeUnloadedSettings(): UserSettingsState {
   return {
+    revision: null,
     workspaceId: null,
     workflowId: null,
     kanbanViewMode: null,

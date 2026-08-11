@@ -66,6 +66,41 @@ describe("status bar visibility websocket sync", () => {
       (store.getState().userSettings as unknown as Record<string, unknown>).appStatusBarEnabled,
     ).toBe(true);
   });
+
+  it("ignores older settings revisions and accepts newer ones", () => {
+    const store = makeStore();
+    store.setState((state) => ({
+      ...state,
+      userSettings: {
+        ...state.userSettings,
+        appStatusBarEnabled: false,
+        revision: "2026-01-01T00:00:00.000000002Z",
+      },
+    }));
+    const handler = registerUsersHandlers(store)["user.settings.updated"];
+
+    handler?.(
+      userSettingsMessage({
+        app_status_bar_enabled: true,
+        updated_at: "2026-01-01T00:00:00.000000001Z",
+      }),
+    );
+    expect(store.getState().userSettings).toMatchObject({
+      appStatusBarEnabled: false,
+      revision: "2026-01-01T00:00:00.000000002Z",
+    });
+
+    handler?.(
+      userSettingsMessage({
+        app_status_bar_enabled: true,
+        updated_at: "2026-01-01T00:00:00.000000003Z",
+      }),
+    );
+    expect(store.getState().userSettings).toMatchObject({
+      appStatusBarEnabled: true,
+      revision: "2026-01-01T00:00:00.000000003Z",
+    });
+  });
 });
 
 describe("user settings websocket handler", () => {

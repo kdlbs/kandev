@@ -25,6 +25,7 @@ export type UserSettingsData = Omit<Partial<UserSettings>, "workspace_id"> & {
 
 export function createDefaultUserSettings(): UserSettingsState {
   return {
+    revision: null,
     workspaceId: null,
     workflowId: null,
     kanbanViewMode: null,
@@ -275,6 +276,7 @@ export function buildCoreFields(
   current: UserSettingsState = createDefaultUserSettings(),
 ) {
   return {
+    revision: s.updated_at ?? current.revision,
     ...buildIdentityFields(s, current),
     ...buildBehaviorFields(s, current),
     savedLayouts: s.saved_layouts ?? current.savedLayouts,

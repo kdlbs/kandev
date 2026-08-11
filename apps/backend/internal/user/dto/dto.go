@@ -277,6 +277,6 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		AppStatusBarOrder:               settings.AppStatusBarOrder,
 		VoiceMode:                       settings.VoiceMode,
 		KanbanHiddenStepIDs:             settings.KanbanHiddenStepIDs,
-		UpdatedAt:                       settings.UpdatedAt.Format(time.RFC3339),
+		UpdatedAt:                       settings.UpdatedAt.Format(time.RFC3339Nano),
 	}
 }

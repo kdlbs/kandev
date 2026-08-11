@@ -44,6 +44,7 @@ import { AppStatusBarSettingsCard } from "@/components/settings/app-status-bar-s
 import { SettingsMenuModeCard } from "@/components/settings/settings-menu-mode-card";
 import type { SettingsMenuMode } from "@/lib/settings/settings-menu-mode";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
+import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
 import {
   appearanceRevision,
   buildAppearanceUserSettingsPatch,
@@ -371,10 +372,15 @@ function useAppearanceSaveContributor({
           previewMenuMode(draftRef.current.settingsMenuMode);
         }
         const latestUserSettings = storeApi.getState().userSettings;
-        const nextUserSettings =
-          latestUserSettings === settingsAtSubmit
-            ? mapUserSettingsResponse(response, latestUserSettings)
-            : latestUserSettings;
+        const responseOrder = compareUserSettingsRevisions(
+          response.settings.updated_at,
+          latestUserSettings.revision,
+        );
+        const responseIsCurrent =
+          responseOrder === null ? latestUserSettings === settingsAtSubmit : responseOrder >= 0;
+        const nextUserSettings = responseIsCurrent
+          ? mapUserSettingsResponse(response, latestUserSettings)
+          : latestUserSettings;
         const confirmed = createAppearanceSavedState(
           submitted.theme,
           submitted.settingsMenuMode,

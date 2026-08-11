@@ -35,6 +35,12 @@ Backend-owned user settings become the sole durable owner of a top-level
 - boot hydration, PATCH responses, and `user.settings.updated` events carry the
   effective value to every client.
 
+User-settings responses and events serialize `updated_at` with the stored
+subsecond precision. The frontend retains that value as the settings revision:
+it rejects an older live event, applies a newer successful PATCH response, and
+keeps a newer live value when it overtakes an in-flight response. Object
+identity is not an ordering signal.
+
 Settings > Preferences > Appearance exposes the preference as **Show status bar**
 through the existing shared save coordinator. A successful save changes the
 active responsive presentation without restarting Kandev. Desktop and tablet
@@ -58,6 +64,7 @@ production and development default; users explicitly opt in portably.
   or restart, but ordinary status chrome remains off until that user enables it.
 - Each user's choice follows their backend identity and updates other connected
   clients through the existing user-settings event.
+- Delayed settings events cannot replace a newer confirmed settings snapshot.
 - Operators lose the install-wide status-bar kill switch and its environment
   override.
 - Existing runtime override rows need no destructive cleanup and cannot affect
