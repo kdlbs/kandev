@@ -157,20 +157,20 @@ and reference work, while remaining independently releasable as an official plug
 
 ## Capability matrix
 
-| Capability | Cloud | Data Center |
-|---|---|---|
-| API token/PAT connection and health | Required | Required |
-| OAuth 2.0 connect and refresh | Required | Required when an incoming OAuth application link exists |
-| Repository/project browse and search | Required | Required |
-| Native repository picker, branch selection, and PR URL inspection | Required | Required |
-| Scoped clone/fetch/push credential broker | Required | Required |
-| Launch task, link/unlink, and create PR from task | Required | Required |
-| Native desktop/mobile review panel | Required | Required |
-| Composer `#` pull-request search and submitted context | Required | Required |
-| Queue, files/diff, commits, comments/threads, reviewers, approvals, merge/decline | Required | Required where server API supports thread semantics |
-| Status presentation | Pipelines | Commit/build status |
-| Watches with deduplicated task creation | Required | Required |
-| Bitbucket Issues | Not supported; use Jira | Not supported; use Jira |
+| Capability                                                                        | Cloud                   | Data Center                                             |
+| --------------------------------------------------------------------------------- | ----------------------- | ------------------------------------------------------- |
+| API token/PAT connection and health                                               | Required                | Required                                                |
+| OAuth 2.0 connect and refresh                                                     | Required                | Required when an incoming OAuth application link exists |
+| Repository/project browse and search                                              | Required                | Required                                                |
+| Native repository picker, branch selection, and PR URL inspection                 | Required                | Required                                                |
+| Scoped clone/fetch/push credential broker                                         | Required                | Required                                                |
+| Launch task, link/unlink, and create PR from task                                 | Required                | Required                                                |
+| Native desktop/mobile review panel                                                | Required                | Required                                                |
+| Composer `#` pull-request search and submitted context                            | Required                | Required                                                |
+| Queue, files/diff, commits, comments/threads, reviewers, approvals, merge/decline | Required                | Required where server API supports thread semantics     |
+| Status presentation                                                               | Pipelines               | Commit/build status                                     |
+| Watches with deduplicated task creation                                           | Required                | Required                                                |
+| Bitbucket Issues                                                                  | Not supported; use Jira | Not supported; use Jira                                 |
 
 ## Connection, permissions, and secrets
 
@@ -178,8 +178,10 @@ Connection state is `unconfigured`, `checking`, `connected`, `auth_required`, or
 `unavailable`. Workspace-scoped encrypted plugin secrets hold token/PAT credentials,
 OAuth registrations, grants, and rotating refresh tokens. State stores only non-secret
 connection metadata and an atomically rotated credential generation. Refresh is
-singleflight per workspace/generation; logs and returned errors redact headers, query
-parameters, and secret values.
+singleflight per workspace/generation/connection epoch. Disconnect or connection
+replacement removes completed refresh data and fences an exchange already in flight;
+that stale result cannot be returned, cached, or persisted. Logs and returned errors
+redact headers, query parameters, and secret values.
 
 The host authenticates browser actions through normal Kandev session middleware and
 authorizes every claimed workspace, task, and repository before dispatch. It derives
@@ -228,6 +230,11 @@ webhooks remain reserved for provider callbacks.
 
 Plugin state persists connection metadata, capability probe result, watches, cursors,
 dedupe keys, reservations, links, and recovery/error state through the Host state API.
+Durable pull-request identity is provider ID plus provider connection scope plus
+immutable repository ID plus pull-request number; repository namespace/path and display
+keys are never dedupe authority. Provider cursors are bound to that immutable identity
+and their normalized query. Connection replacement pauses a bound watch before any
+provider request; explicit resume rebinds it and clears stale pagination state.
 Encrypted secrets persist separately. Credential broker leases are short-lived and
 non-durable; they are re-resolved from the live plugin and revoked on task/session/
 workspace teardown, plugin disable, connection reset, or credential-generation change.

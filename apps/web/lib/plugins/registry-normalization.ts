@@ -53,11 +53,35 @@ export function normalizeReviewAssociations(
   const seen = new Set<string>();
   return associations.flatMap((association) => {
     if (!association.taskId || !association.reviewKey) return [];
-    const key = `${association.taskId}\u0000${association.reviewKey}`;
+    const repositoryId = association.repositoryId?.trim();
+    const changeRequestNumber = normalizeChangeRequestNumber(association.changeRequestNumber);
+    const hasImmutableIdentity = Boolean(repositoryId) && changeRequestNumber !== undefined;
+    const identity = hasImmutableIdentity
+      ? `${repositoryId}\u0000${String(changeRequestNumber)}`
+      : association.reviewKey;
+    const key = `${association.taskId}\u0000${identity}`;
     if (seen.has(key)) return [];
     seen.add(key);
-    return [{ providerId, taskId: association.taskId, reviewKey: association.reviewKey }];
+    return [
+      {
+        providerId,
+        taskId: association.taskId,
+        reviewKey: association.reviewKey,
+        ...(hasImmutableIdentity
+          ? {
+              repositoryId,
+              changeRequestNumber,
+            }
+          : {}),
+      },
+    ];
   });
+}
+
+function normalizeChangeRequestNumber(value: string | number | undefined) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
+  if (typeof value !== "string") return undefined;
+  return value.trim() || undefined;
 }
 
 const REVIEW_TASK_STATES = new Set<ReviewTaskStatus["state"]>([

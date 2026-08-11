@@ -7,7 +7,10 @@ export type InspectedRepositoryProvider = {
   inspection: RepositoryInspection;
 };
 
-function providerMatchesURL(provider: RepositoryProviderRegistration, url: string): boolean {
+export function repositoryProviderMatchesURL(
+  provider: RepositoryProviderRegistration,
+  url: string,
+): boolean {
   try {
     return provider.matchesURL(url);
   } catch {
@@ -18,7 +21,7 @@ function providerMatchesURL(provider: RepositoryProviderRegistration, url: strin
 export function hasRegisteredRepositoryProviderCandidate(url: string): boolean {
   return pluginRegistry
     .getRepositoryProviders()
-    .some((provider) => providerMatchesURL(provider, url));
+    .some((provider) => repositoryProviderMatchesURL(provider, url));
 }
 
 /**
@@ -33,7 +36,7 @@ export async function inspectRegisteredRepositoryURL(context: {
 }): Promise<InspectedRepositoryProvider | null> {
   const candidates = pluginRegistry
     .getRepositoryProviders()
-    .filter((provider) => providerMatchesURL(provider, context.url));
+    .filter((provider) => repositoryProviderMatchesURL(provider, context.url));
   const inspected = await Promise.allSettled(
     candidates.map(async (provider) => ({
       provider,

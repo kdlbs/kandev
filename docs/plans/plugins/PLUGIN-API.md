@@ -813,7 +813,9 @@ interface ReviewProviderRegistration {
   // workspace-bounded association refresh and renders native task-list/card
   // indicators. Each rendered linked task leases refresh(taskId), deduplicated
   // with topbar/panel consumers; hover/focus may refresh it again.
-  getAssociationSnapshot?(workspaceId: string): readonly ReviewTaskAssociation[];
+  getAssociationSnapshot?(
+    workspaceId: string,
+  ): readonly ReviewTaskAssociation[];
   subscribeAssociations?(workspaceId: string, listener: () => void): () => void;
   refreshAssociations?(workspaceId: string, signal: AbortSignal): Promise<void>;
   // Removes only this task link; it never deletes the remote change request.
@@ -831,6 +833,10 @@ interface ReviewTaskAssociation {
   providerId: string;
   taskId: string;
   reviewKey: string;
+  // Optional immutable identity lets the host retain status matching when a
+  // repository path or display review key changes.
+  repositoryId?: string;
+  changeRequestNumber?: string | number;
 }
 interface ReviewItemSummary {
   providerId: string;

@@ -42,6 +42,29 @@ function expectWorkspaceScopedGitHubRequest() {
 }
 
 describe("useRemoteRepositories registered providers", () => {
+  it("isolates a provider URL matcher failure", async () => {
+    pluginRegistry.forPlugin(PLUGIN_ID).registerRepositoryProvider({
+      id: "bitbucket",
+      label: "Bitbucket",
+      matchesURL: () => {
+        throw new Error("matcher crashed");
+      },
+      listBranches: async () => [],
+      inspectURL: async () => null,
+      listRepositories: async () => [],
+    });
+    mocks.fetchAccessibleRepos.mockResolvedValue([]);
+    mocks.listUserProjects.mockResolvedValue({ projects: [] });
+    mocks.listAzureDevOpsProjects.mockResolvedValue({ projects: [] });
+    const { result } = renderHook(() => useRemoteRepositories(WORKSPACE_ID));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(() => result.current.matchesURL?.("not-a-repository-url")).not.toThrow();
+    expect(result.current.matchesURL?.("not-a-repository-url")).toBe(false);
+  });
+});
+
+describe("useRemoteRepositories registered provider listings", () => {
   it("lists registered provider repositories with their exact clone URL", async () => {
     pluginRegistry.forPlugin(PLUGIN_ID).registerRepositoryProvider({
       id: "bitbucket",

@@ -63,6 +63,74 @@ afterEach(() => {
 });
 
 describe("RegisteredChangeRequestTaskIcon", () => {
+  it("matches a renamed review through immutable association identity", async () => {
+    pluginRegistry.forPlugin(PLUGIN_ID).registerReviewProvider({
+      id: "bitbucket",
+      label: "Bitbucket",
+      changeRequestNoun: "pull request",
+      order: 50,
+      getSnapshot: () => [
+        {
+          providerId: "bitbucket",
+          reviewKey: "old-name/repo#1",
+          title: "Recreated repository at old path",
+          url: "https://bitbucket.example.test/old-name/repo/pull-requests/1",
+          repositoryId: "different-repo-uuid",
+          state: "OPEN",
+          taskStatus: {
+            number: 1,
+            state: "open",
+            pipelineState: "failure",
+            checks: [],
+          },
+        },
+        {
+          providerId: "bitbucket",
+          reviewKey: "new-name/repo#1",
+          title: "Repository renamed",
+          url: "https://bitbucket.example.test/new-name/repo/pull-requests/1",
+          repositoryId: "repo-uuid",
+          state: "OPEN",
+          taskStatus: {
+            number: 1,
+            state: "open",
+            pipelineState: "success",
+            checks: [],
+          },
+        },
+      ],
+      subscribe: () => () => undefined,
+      refresh: async () => undefined,
+      getAssociationSnapshot: () => [
+        {
+          providerId: "bitbucket",
+          taskId: TASK_ID,
+          reviewKey: "old-name/repo#1",
+          repositoryId: "repo-uuid",
+          changeRequestNumber: 1,
+        },
+      ],
+      subscribeAssociations: () => () => undefined,
+      refreshAssociations: async () => undefined,
+      ReviewPanel: () => null,
+    });
+    render(
+      <TooltipProvider>
+        <RegisteredChangeRequestTaskIcon taskId={TASK_ID} />
+      </TooltipProvider>,
+    );
+    await act(async () => Promise.resolve());
+
+    fireEvent.pointerEnter(screen.getByTestId(TASK_ICON_TEST_ID), { pointerType: "mouse" });
+    await act(async () => Promise.resolve());
+    const summary = within(screen.getAllByTestId("pr-task-status-summary")[0]!);
+    expect(summary.getByTestId("pr-task-status-title").textContent).toBe("Repository renamed");
+    expect(screen.queryByText("Recreated repository at old path")).toBeNull();
+    expect(screen.getByTestId(TASK_ICON_TEST_ID).className).toContain("text-green-500");
+  });
+});
+
+describe("RegisteredChangeRequestTaskIcon shared chrome", () => {
   it("renders one host semantic PR glyph and count from workspace associations", async () => {
     registerProvider();
     render(

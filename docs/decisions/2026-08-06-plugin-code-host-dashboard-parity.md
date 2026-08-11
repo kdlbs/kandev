@@ -89,7 +89,11 @@ Every successful PR-from-task creation and watch-created task records the same d
 task-to-change-request association exposed by manual linking. Watch-owned links remain
 authoritative in watch state and are unioned with manual link state when serving task
 review/status and workspace association queries; implementations do not copy them into
-a second store merely for presentation.
+a second store merely for presentation. Durable association, suppression, reservation,
+and watch keys use provider ID, provider connection scope, immutable repository ID, and
+change-request number. Repository paths, display keys, and clone URLs are mutable lookup
+attributes and never durable identity. A changed connection epoch pauses an existing
+watch before provider access; resuming explicitly rebinds it and discards its old cursor.
 
 Task-scoped refresh also performs bounded branch-based discovery, equivalent to
 GitHub's external-PR detection. It derives repository and checkout branch only from the
@@ -116,7 +120,15 @@ either the legacy repository array or `{ repositories, nextCursor }`. The host f
 pages, rejects repeated cursors, and always binds returned provider identities to the
 manifest owner. Registered provider icons are used in native repository controls rather
 than a generic branch glyph. These rules keep large installations usable without adding
-provider-specific search or pagination branches to Kandev.
+provider-specific search or pagination branches to Kandev. Provider cursors are bound to
+the original query, state, provider connection scope, and immutable repository identity;
+using one after any of those inputs changes fails before a provider request.
+
+Task indicator and CI refreshes are summary operations. They fetch only normalized
+change-request metadata, reviews, checks, and an inexpensive accurate unresolved-comment
+count when the provider exposes one. Files, diffs, commits, and comment bodies load lazily
+when Review opens. Both summary and detail responses remain bounded, with explicit
+truncation instead of exceeding the authenticated plugin action response limit.
 
 Pipeline/build status is read from the pull request's source (head) commit. The
 destination commit describes the merge target and cannot represent the CI result for

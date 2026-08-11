@@ -185,6 +185,8 @@ describe("pluginRegistry — review provider associations", () => {
             providerId: "spoofed",
             taskId: "task-a",
             reviewKey: "change-1",
+            repositoryId: " repository-immutable ",
+            changeRequestNumber: " 1 ",
             providerPayload: "discard",
           },
           { providerId: "spoofed", taskId: "", reviewKey: "invalid" },
@@ -197,7 +199,13 @@ describe("pluginRegistry — review provider associations", () => {
     const registration = pluginRegistry.getReviewProvider(SOURCE_CONTROL_PROVIDER_ID)!;
 
     expect(registration.getAssociationSnapshot?.(WORKSPACE_ID)).toEqual([
-      { providerId: SOURCE_CONTROL_PROVIDER_ID, taskId: "task-a", reviewKey: "change-1" },
+      {
+        providerId: SOURCE_CONTROL_PROVIDER_ID,
+        taskId: "task-a",
+        reviewKey: "change-1",
+        repositoryId: "repository-immutable",
+        changeRequestNumber: "1",
+      },
     ]);
     registration.subscribeAssociations?.(WORKSPACE_ID, () => undefined);
     await registration.refreshAssociations?.(WORKSPACE_ID, new AbortController().signal);

@@ -9,6 +9,7 @@ import {
 } from "@/lib/api/domains/azure-devops-api";
 import { usePluginRegistry } from "@/lib/plugins/registry";
 import type { PluginRepositoryProviderRegistration } from "@/lib/plugins/registry";
+import { repositoryProviderMatchesURL } from "@/lib/plugins/repository-provider-url-resolution";
 import { looksLikeSupportedRemoteURL } from "@/components/workspace-source-picker/remote-url";
 
 export const REMOTE_REPOSITORY_PROVIDERS = ["github", "gitlab", "azure_devops"] as const;
@@ -284,7 +285,7 @@ export function useRemoteRepositories(workspaceId: string): UseRemoteRepositorie
   const matchesURL = useCallback(
     (url: string) =>
       looksLikeSupportedRemoteURL(url) ||
-      pluginProviders.some((provider) => provider.matchesURL(url)),
+      pluginProviders.some((provider) => repositoryProviderMatchesURL(provider, url)),
     [pluginProviders],
   );
   return {

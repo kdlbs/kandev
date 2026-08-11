@@ -82,7 +82,7 @@ describe("renderSettingsRoute — plugin integration settings", () => {
     cleanup();
   });
 
-  it("renders a registered integration in the native global settings route", () => {
+  it("redirects a registered integration global route into the active workspace", () => {
     function IntegrationSettings({ workspaceId }: { workspaceId?: string }) {
       return `PluginIntegration:${workspaceId ?? "global"}`;
     }
@@ -93,9 +93,12 @@ describe("renderSettingsRoute — plugin integration settings", () => {
       Component: IntegrationSettings,
     });
 
-    render(renderSettingsRoute(`/settings/integrations/${PLUGIN_INTEGRATION_ID}`) as ReactElement);
+    const route = renderSettingsRoute(
+      `/settings/integrations/${PLUGIN_INTEGRATION_ID}`,
+    ) as ReactElement;
 
-    expect(screen.getByText("PluginIntegration:global")).not.toBeNull();
+    expect((route.type as { name?: string }).name).toBe("ActiveWorkspaceSectionRedirect");
+    expect(route.props).toEqual({ section: `integrations/${PLUGIN_INTEGRATION_ID}` });
   });
 
   it("passes the decoded workspace id to a registered integration", () => {
@@ -128,7 +131,9 @@ describe("renderSettingsRoute — plugin integration settings", () => {
     });
 
     const { container } = render(
-      renderSettingsRoute(`/settings/integrations/${PLUGIN_INTEGRATION_ID}`) as ReactElement,
+      renderSettingsRoute(
+        `/settings/workspaces/workspace-1/integrations/${PLUGIN_INTEGRATION_ID}`,
+      ) as ReactElement,
     );
 
     expect(screen.getByRole("heading", { name: "Acme Source Control" })).not.toBeNull();
@@ -149,7 +154,11 @@ describe("renderSettingsRoute — plugin integration settings", () => {
       Component: ThrowingIntegration,
     });
 
-    render(renderSettingsRoute(`/settings/integrations/${PLUGIN_INTEGRATION_ID}`) as ReactElement);
+    render(
+      renderSettingsRoute(
+        `/settings/workspaces/workspace-1/integrations/${PLUGIN_INTEGRATION_ID}`,
+      ) as ReactElement,
+    );
 
     expect(screen.getByText(/this plugin page failed to load/i)).not.toBeNull();
     errorSpy.mockRestore();

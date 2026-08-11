@@ -296,7 +296,8 @@ function renderDynamicSettingsRoute(pathname: string) {
 
   const integrationId = matchSingle(pathname, /^\/settings\/integrations\/([^/]+)$/);
   if (integrationId && pluginRegistry.getIntegrationSetting(integrationId)) {
-    return renderIntegrationSettingsRoute(integrationId);
+    const section = pathname.split("/").slice(2).join("/");
+    return <ActiveWorkspaceSectionRedirect section={section} />;
   }
 
   const pluginId = matchSingle(pathname, /^\/settings\/plugins\/([^/]+)$/);

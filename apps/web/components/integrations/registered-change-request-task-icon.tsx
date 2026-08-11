@@ -15,7 +15,11 @@ import {
   type ChangeRequestTaskSummaryRow,
 } from "@/components/integrations/change-request-task-status-summary";
 import { usePluginRegistry, type PluginReviewProviderRegistration } from "@/lib/plugins/registry";
-import type { ReviewItemSummary, ReviewTaskStatus } from "@/lib/plugins/types";
+import type {
+  ReviewItemSummary,
+  ReviewTaskAssociation,
+  ReviewTaskStatus,
+} from "@/lib/plugins/types";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { aggregateReviewTaskStatusColor } from "./change-request-task-status-color";
@@ -162,6 +166,20 @@ function taskStatusSummary(review: ReviewItemSummary): ChangeRequestTaskStatusSu
   };
 }
 
+function associationMatchesReview(
+  association: ReviewTaskAssociation,
+  review: ReviewItemSummary,
+): boolean {
+  if (association.repositoryId && association.changeRequestNumber !== undefined) {
+    return Boolean(
+      association.repositoryId === review.repositoryId &&
+      review.taskStatus &&
+      String(association.changeRequestNumber) === String(review.taskStatus.number),
+    );
+  }
+  return association.reviewKey === review.reviewKey;
+}
+
 export function RegisteredChangeRequestTaskIcon({ taskId }: { taskId: string }) {
   const { t } = useTranslation();
   const associations = useRegisteredTaskAssociations(taskId);
@@ -172,16 +190,20 @@ export function RegisteredChangeRequestTaskIcon({ taskId }: { taskId: string }) 
   useReviewProviderRefreshes(taskId, providers);
   const reviewVersion = useReviewProviderUpdates(taskId, providers);
   const matchingReviews = useMemo(() => {
-    const keysByProvider = new Map<string, Set<string>>();
+    const associationsByProvider = new Map<string, ReviewTaskAssociation[]>();
     associations.forEach(({ association, provider }) => {
-      const keys = keysByProvider.get(provider.id) ?? new Set<string>();
-      keys.add(association.reviewKey);
-      keysByProvider.set(provider.id, keys);
+      const entries = associationsByProvider.get(provider.id) ?? [];
+      entries.push(association);
+      associationsByProvider.set(provider.id, entries);
     });
     return providers.flatMap((provider) => {
-      const keys = keysByProvider.get(provider.id);
-      if (!keys) return [];
-      return provider.getSnapshot(taskId).filter((review) => keys.has(review.reviewKey));
+      const entries = associationsByProvider.get(provider.id);
+      if (!entries) return [];
+      return provider
+        .getSnapshot(taskId)
+        .filter((review) =>
+          entries.some((association) => associationMatchesReview(association, review)),
+        );
     });
   }, [associations, providers, reviewVersion, taskId]);
   const summaries = useMemo(

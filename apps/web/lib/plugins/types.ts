@@ -341,6 +341,10 @@ export interface ReviewTaskAssociation {
   providerId: string;
   taskId: string;
   reviewKey: string;
+  /** Immutable provider repository identity; enables matching across repository renames. */
+  repositoryId?: string;
+  /** Provider-local change-request number paired with repositoryId. */
+  changeRequestNumber?: string | number;
 }
 
 /** Verified UI context for removing one task-to-change-request association. */

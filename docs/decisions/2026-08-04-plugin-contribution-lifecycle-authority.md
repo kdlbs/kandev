@@ -39,6 +39,8 @@ generation's abort signal, refuses to start already-aborted work, and rejects la
 results with `AbortError` even when third-party code ignores its signal. Subscription
 cleanup is likewise owner-tracked and idempotent. Unloaded code therefore cannot
 publish stale repositories, review snapshots, or callback results into a newer UI.
+Synchronous coarse callbacks such as repository `matchesURL` are also fault-isolated:
+a throw is treated as no match in every host call site, never as a task-dialog crash.
 
 Desktop dockview and the phone task layout consume the same lifecycle authority. If a
 removed plugin panel is focused on a phone, the mobile session state changes to `chat`.
