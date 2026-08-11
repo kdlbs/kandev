@@ -372,7 +372,9 @@ These actions use the connected GitLab user's permissions and do not bypass prot
 
 ### Automate a linked merge request
 
-For a task with a linked GitLab merge request, open the MR topbar control. The **Automation** group has the same two task-level controls as GitHub's PRs: **Auto-fix CI and address comments** and **Auto-merge when ready**. Below it, expand **Review follow-up** for three lifecycle booleans: **Your review is requested**, **MR merged**, and **MR closed without merging**. Enabling any control applies it to every MR linked to that task; Kandev tracks delivery and deduplication separately for each linked MR.
+For a task with a linked GitLab merge request, open the MR topbar control. The **Automation** group has the same two controls as GitHub's PRs: **Auto-fix CI and address comments** and **Auto-merge when ready**. Below it, expand **Review follow-up** for three lifecycle booleans: **Your review is requested**, **MR merged**, and **MR closed without merging**.
+
+All five belong to a single merge request. A task with several linked MRs shows one **Automation** group per MR, each labelled with its MR number, so you can automate one MR and leave the rest untouched; Kandev tracks delivery and deduplication separately for each. The auto-fix prompt override is the one setting that stays task-level — editing it applies to every linked MR. An agent calling `update_task_mr_automation_kandev` can name a merge request to target it alone, or omit the merge-request fields to apply the change to every MR linked to the task.
 
 Kandev reuses the existing lightweight task MR poller, which checks linked MRs roughly once per minute; it does not add a separate scheduler. Saving enabled options also evaluates the task's current linked MRs without waiting for the next poll.
 
