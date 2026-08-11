@@ -53,7 +53,8 @@ type legacyEnvRepo struct {
 	id, envID, repositoryID, branchSlug      string
 	worktreeID, worktreePath, worktreeBranch string
 	position                                 int
-	errorMessage                             string
+	errorMessage, status                     string
+	mergedAt, deletedAt                      *time.Time
 	createdAt, updatedAt                     time.Time
 }
 
@@ -67,14 +68,14 @@ type legacySessionWorktree struct {
 
 // loadLegacy reads every legacy ownership row into memory. The transaction
 // holds the writer/advisory locks, so the snapshot is consistent.
-func (c *worktreeCutover) loadLegacy(tx *sqlx.Tx, legacyEnvColumns map[string]bool) error {
+func (c *worktreeCutover) loadLegacy(tx *sqlx.Tx, legacyEnvColumns, legacyRepoColumns map[string]bool) error {
 	if err := c.loadLegacyEnvs(tx, legacyEnvColumns); err != nil {
 		return err
 	}
 	if err := c.loadLegacySessions(tx); err != nil {
 		return err
 	}
-	if err := c.loadLegacyEnvRepos(tx); err != nil {
+	if err := c.loadLegacyEnvRepos(tx, legacyRepoColumns); err != nil {
 		return err
 	}
 	return c.loadLegacySessionWorktrees(tx)
@@ -170,27 +171,48 @@ func parseLegacyTimestamp(raw string) time.Time {
 	return time.Time{}
 }
 
-func (c *worktreeCutover) loadLegacyEnvRepos(tx *sqlx.Tx) error {
-	rows, err := tx.Query(`
+func (c *worktreeCutover) loadLegacyEnvRepos(tx *sqlx.Tx, columns map[string]bool) error {
+	// Every interpolated expression comes from the fixed lifecycle-column allowlist.
+	//nolint:gosec
+	rows, err := tx.Query(fmt.Sprintf(`
 		SELECT id, task_environment_id, repository_id, COALESCE(branch_slug, ''),
 			COALESCE(worktree_id, ''), COALESCE(worktree_path, ''),
 			COALESCE(worktree_branch, ''), position, COALESCE(error_message, ''),
-			created_at, updated_at
-		FROM task_environment_repos`)
+			%s, created_at, updated_at, %s, %s
+		FROM task_environment_repos`,
+		legacyRepoColumnExpr(columns, "status", "CAST('active' AS TEXT)"),
+		legacyRepoColumnExpr(columns, "merged_at", "NULL"),
+		legacyRepoColumnExpr(columns, "deleted_at", "NULL")))
 	if err != nil {
 		return fmt.Errorf("cutover: read legacy environment repos: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var row legacyEnvRepo
+		var mergedAt, deletedAt sql.NullTime
 		if err := rows.Scan(&row.id, &row.envID, &row.repositoryID, &row.branchSlug,
 			&row.worktreeID, &row.worktreePath, &row.worktreeBranch, &row.position,
-			&row.errorMessage, &row.createdAt, &row.updatedAt); err != nil {
+			&row.errorMessage, &row.status, &row.createdAt, &row.updatedAt, &mergedAt, &deletedAt); err != nil {
 			return fmt.Errorf("cutover: scan legacy environment repo: %w", err)
+		}
+		if mergedAt.Valid {
+			t := mergedAt.Time
+			row.mergedAt = &t
+		}
+		if deletedAt.Valid {
+			t := deletedAt.Time
+			row.deletedAt = &t
 		}
 		c.envRepos = append(c.envRepos, row)
 	}
 	return rows.Err()
+}
+
+func legacyRepoColumnExpr(columns map[string]bool, column, fallback string) string {
+	if columns[column] {
+		return column
+	}
+	return fallback
 }
 
 func (c *worktreeCutover) loadLegacySessionWorktrees(tx *sqlx.Tx) error {

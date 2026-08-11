@@ -115,6 +115,10 @@ func (r *Repository) normalizeTaskWorktreeOwnership() error {
 	if err != nil {
 		return err
 	}
+	legacyRepoColumns, err := r.tableColumns(tx, "task_environment_repos")
+	if err != nil {
+		return err
+	}
 	cut := &worktreeCutover{
 		envs:                      make(map[string]*legacyEnv),
 		taskEnvs:                  make(map[string][]*legacyEnv),
@@ -129,7 +133,7 @@ func (r *Repository) normalizeTaskWorktreeOwnership() error {
 		loserEnvIDs:               make(map[string]bool),
 		executorTypes:             make(map[string]string),
 	}
-	if err := cut.loadLegacy(tx, legacyEnvColumns); err != nil {
+	if err := cut.loadLegacy(tx, legacyEnvColumns, legacyRepoColumns); err != nil {
 		return err
 	}
 	if err := cut.normalize(tx); err != nil {

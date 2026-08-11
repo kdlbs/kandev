@@ -262,6 +262,12 @@ func seedHybridCutoverState(t *testing.T, db *sqlx.DB, suffix string) legacySeed
 	}
 	seedLegacyEnvRepo(t, db, "env-repo-hybrid", seed.envID, seed.repoID,
 		"wt-hybrid", "/tasks/hybrid/repo", "feature/hybrid", now)
+	if _, err := db.Exec(db.Rebind(`
+		UPDATE task_environment_repos
+		SET status = 'deleted', merged_at = ?, deleted_at = ?
+		WHERE id = 'env-repo-hybrid'`), now, now); err != nil {
+		t.Fatalf("seed normalized repository lifecycle: %v", err)
+	}
 	if _, err := db.Exec(legacySessionWorktreeDDL); err != nil {
 		t.Fatalf("recreate stale legacy table: %v", err)
 	}
@@ -291,6 +297,11 @@ func assertHybridCutoverResult(t *testing.T, repo *Repository, seed legacySeed) 
 		got[envRepo.RepositoryID] = envRepo
 	}
 	assertHybridWorktree(t, got[seed.repoID], "wt-hybrid", "/tasks/hybrid/repo", "feature/hybrid")
+	if got[seed.repoID].Status != "deleted" || got[seed.repoID].MergedAt == nil ||
+		!got[seed.repoID].MergedAt.Equal(got[seed.repoID].CreatedAt) || got[seed.repoID].DeletedAt == nil ||
+		!got[seed.repoID].DeletedAt.Equal(got[seed.repoID].CreatedAt) {
+		t.Fatalf("normalized repository lifecycle = %+v", got[seed.repoID])
+	}
 	assertHybridWorktree(t, got[seed.repoID+"-session-only"], "wt-session-only",
 		"/tasks/hybrid/session-only", "feature/session-only")
 }
