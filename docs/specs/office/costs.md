@@ -1,7 +1,7 @@
 ---
 status: in-progress
 created: 2026-04-25
-updated: 2026-08-08
+updated: 2026-08-11
 owner: cfl
 ---
 
@@ -93,14 +93,53 @@ replaced successfully.
 - **opencode-acp**: `result.usage` with `inputTokens`/`outputTokens`/`thoughtTokens` (no cached tokens). Optional `usage_update.cost.amount` (often `0` on BYOK).
 - **gemini**: `result._meta.quota.token_count.{input_tokens, output_tokens}` (snake_case, no cached, no cost).
 - **codex-acp**: current context occupancy in `usage_update.used`; adapter uses nonnegative occupancy growth as a per-turn estimate and flags rows `estimated=true`. Input vs output cannot be split on the wire. Compaction or other decreases reset the estimate baseline.
-- **auggie**, **copilot-acp**: not tracked. `_meta.copilotUsage` is a billing multiplier; Copilot `/usage` would require scraping.
+- **auggie**: ACP 0.35.0 and 0.36.0-prerelease still emit no per-turn wire usage (`session/prompt` result is `{ stopReason }` only; no host-facing `usage_update`). Token counts live on disk under the Augment session file (see Auggie disk bridge below). When a future Auggie release ships wire `result.usage` or `usage_update`, **wire wins** for that complete and the disk bridge must not also publish for the same turn.
+- **copilot-acp**: not tracked. `_meta.copilotUsage` is a billing multiplier; Copilot `/usage` would require scraping.
 
 ### Disk-runner provider coverage
 
 - **codex** - disk runner is the preferred source. Cost rows promoted from `estimated=true` to `estimated=false` with full token split.
 - **amp** - disk runner is the only source. Cost events emitted with `estimated=false`; `credits` captured in `provider_credits`.
 - **claude, opencode, gemini** - disk runner NOT used; wire data is authoritative.
-- **auggie, copilot** - no `@ccusage/*` package; out of scope.
+- **auggie** - not via `@ccusage/*`. Host-owned private reader of `~/.augment/sessions/<acpSessionId>.json` on stream complete (see Auggie disk bridge).
+- **copilot** - no `@ccusage/*` package; out of scope.
+
+### Auggie disk bridge (host-owned, not ccusage)
+
+Kandy Token Grotto and Office costs both observe `session_prompt_usage.updated.*`. For Auggie, the host fills that bus from disk when the wire path has nothing.
+
+**When.** On agent stream complete for a session whose `agent_profile_snapshot.agent_name` is `auggie`:
+1. If `payload.Data.Usage != nil`, publish the existing wire path only (**wire-wins**). Do not also count disk for that complete.
+2. If wire Usage is nil, resolve the ACP session id, read new exchanges from the Augment session file, sum token deltas since the watermark, publish one `session_prompt_usage.updated.<sessionId>`, then advance the watermark.
+
+**Join key.** ACP session id equals the Augment session filename stem (`~/.augment/sessions/<acpSessionId>.json`). Resolve ACP id the same way as plugin host data: `TaskSession.Metadata["acp"]["session_id"]`, else resume token / `payload.Data.ACPSessionID` when present. HOME follows Augment conventions (`os.UserHomeDir` + `.augment`), never a hardcoded user path.
+
+**Privacy.** The reader returns only `sequenceId`, `model_id`, `finishedAt`, and token integers. It must not return prompts, tool args, response text, or log content fields.
+
+**Exchange selection.** Only history items with `completed == true` and `sequenceId > afterSequence`. Sum non-nil `exchange.response_nodes[].token_usage` per exchange. Incomplete exchanges are left for a later complete (optional short deferred re-read if the file is not flushed yet; do not block teardown long).
+
+**Field map into `streams.PromptUsage` / Kandy `normalizeTokenUsage`:**
+
+| Disk | Wire / event |
+|---|---|
+| sum `input_tokens` | `usage.input_tokens` |
+| sum `output_tokens` | `usage.output_tokens` |
+| sum `cache_read_input_tokens` | `usage.cached_read_tokens` |
+| sum `cache_creation_input_tokens` | `usage.cached_write_tokens` |
+| (none today) | `usage.thought_tokens` = 0 |
+| input + output of the delta batch | `usage.total_tokens` (document; do not invent totals from cache alone) |
+| from disk nodes | `usage.estimated` = false |
+| last exchange `model_id` (else `agentState.modelId`) | top-level `model` |
+| fixed | `agent_type` = `"auggie"` |
+| now UTC | top-level `timestamp` RFC3339 |
+
+JSON numbers must stay ≤ 2^53-1 for plugin float64 parse.
+
+**Watermark.** Persist the max consumed `sequenceId` on `task_sessions.metadata` under `auggie_usage_seq`. Advance only after a successful publish of the summed delta (or when there is nothing new). Restarts and re-completes must not double-count.
+
+**Executor scope (v1).** Local host and Worktree host only (reader sees the same `HOME` / `~/.augment` as the Auggie process). Docker, SSH, and Sprites require mirrored HOME/session bind and are explicit follow-ups.
+
+**Office.** The same bus event feeds `handlePromptUsage`. Auggie rows may still show "pricing unavailable" when models.dev has no Augment model id; Grotto pile growth does not require USD pricing.
 
 ## API surface
 
@@ -180,6 +219,9 @@ There is no per-field permission model. Conformance tests should assert that cos
 - **ccusage JSON schema drift**: schema validator returns decode error; office subscriber treats run as no-op (no rows touched). Codex falls back to wire-side estimated path; amp absent. Nightly fixture-smoke CI alerts maintainers.
 - **`@ccusage/<provider>@latest` yanked**: next runner invocation fails; coverage degrades the same as parse failure.
 - **Coalescing**: if `session/complete` fires while a runner is already executing for that provider, the second invocation is dropped. The 60s sweep catches sessions in the gap.
+- **Auggie session file missing/corrupt/not flushed**: soft-fail; optional short deferred re-read; no publish; watermark unchanged. Never log prompt or response bodies from the file.
+- **Auggie ACP id unknown**: skip disk bridge for that complete (no join key).
+- **Auggie on Docker/SSH/Sprites (v1)**: bridge does not read remote HOME; no fake usage. Documented follow-up.
 
 ## Persistence guarantees
 
@@ -194,6 +236,7 @@ There is no per-field permission model. Conformance tests should assert that cos
 - A failed refresh never replaces or invalidates the last valid cache. Refresh
   coordination and temporary files are transient and do not survive restart.
 - Activity log entries `budget.alert` and `budget.exceeded` (workspace-scoped, included in the standard office backup as part of normal SQLite persistence - see `persistence.Provide` for the snapshot policy).
+- Auggie disk-bridge watermark `task_sessions.metadata.auggie_usage_seq` (max consumed Augment `sequenceId`), so restart + re-complete does not republish old exchanges.
 
 **Does NOT survive restart:**
 
@@ -241,6 +284,16 @@ No TTL or retention is applied to `office_cost_events`; rows accumulate for the 
 
 - **GIVEN** a codex session that completed during a backend restart, **WHEN** the 60s periodic sweep runs after startup, **THEN** the runner discovers the rollout file via ccusage's normal scan, emits cost rows, and the session shows accurate cost in the explorer.
 
+- **GIVEN** an Auggie session whose ACP stream complete carries no wire Usage, and `~/.augment/sessions/<acpSessionId>.json` has completed exchanges after the stored `auggie_usage_seq` watermark, **WHEN** the complete handler runs on a Local or Worktree host, **THEN** one `session_prompt_usage.updated.<sessionId>` event is published with `agent_type="auggie"`, `estimated=false`, token fields mapped from disk, and the watermark advances to the max consumed `sequenceId`.
+
+- **GIVEN** the same Auggie complete is processed again (or the session restarts with the watermark already advanced), **WHEN** no newer completed exchanges exist on disk, **THEN** no second usage event is published and chamber totals do not inflate.
+
+- **GIVEN** an Auggie complete where `payload.Data.Usage != nil` (future wire path), **WHEN** the complete handler runs, **THEN** only the wire usage is published and disk deltas are not double-counted for that complete.
+
+- **GIVEN** a non-Auggie agent complete with nil Usage, **WHEN** the complete handler runs, **THEN** behavior is unchanged (no Augment session file read).
+
+- **GIVEN** the Augment session file is missing, corrupt, or not yet flushed at complete time, **WHEN** the bridge runs, **THEN** it fails soft (optional short deferred re-read); teardown is not blocked and no partial content is logged.
+
 ## Out of scope
 
 - Actual billing integration or payment processing (costs are estimates, not invoices).
@@ -248,11 +301,13 @@ No TTL or retention is applied to `office_cost_events`; rows accumulate for the 
 - Per-turn cost limits (budgets are per-period, not per-turn).
 - Cost allocation across multiple users (single-user workspace model).
 - Cost forecasting or spend predictions.
-- Auggie support - no `@ccusage/*` package exists.
+- Auggie via `@ccusage/*` (host-owned private reader instead). Docker/SSH/Sprites HOME bridging for Auggie session files in v1.
 - Copilot support - billing is request-multiplier-based, not token-based.
 - Retroactive ingestion of sessions from before this feature ships.
 - Replacing the wire-side ingestion for claude-acp / opencode-acp / gemini (their wire data is authoritative).
 - A user-facing UI surface for the disk-runner binary; visibility flows through the existing cost explorer.
+- Inventing token counts from turn length or XP events.
+- Plugin chamber walk animation or optional `agentRoomLabel` "Augment" rename (plugin repo).
 
 ## Open questions
 

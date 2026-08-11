@@ -1,0 +1,42 @@
+{
+  "sessionId": "fixture-nil-nodes",
+  "agentState": {
+    "modelId": "model-from-state"
+  },
+  "chatHistory": [
+    {
+      "sequenceId": 1,
+      "completed": true,
+      "finishedAt": "2026-08-11T12:00:00.000Z",
+      "exchange": {
+        "model_id": "",
+        "request_message": "SCRUBBED",
+        "response_nodes": [
+          { "type": "text", "text": "SCRUBBED" },
+          { "type": "tool", "text": "SCRUBBED" }
+        ]
+      }
+    },
+    {
+      "sequenceId": 2,
+      "completed": true,
+      "finishedAt": "2026-08-11T12:01:00.000Z",
+      "exchange": {
+        "model_id": "model-b",
+        "request_message": "SCRUBBED",
+        "response_nodes": [
+          {
+            "type": "text",
+            "text": "SCRUBBED",
+            "token_usage": {
+              "input_tokens": 4,
+              "output_tokens": 6,
+              "cache_read_input_tokens": 1,
+              "cache_creation_input_tokens": 2
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -2133,34 +2133,16 @@ func (s *Service) publishAgentPlanForTurn(ctx context.Context, payload *lifecycl
 	}
 }
 
-// publishPromptUsage broadcasts prompt token usage to the WebSocket for the frontend.
-// Model and agent type (CLI engine slug) come from payload first; when absent
-// (which is the common case — CurrentModelID only travels on session_models
-// frames) we fall back to the session's AgentProfileSnapshot, populated at
-// session creation and refreshed by persistSessionModel on ACP model updates.
+// publishPromptUsage broadcasts prompt token usage for the frontend, plugins
+// (Kandy Token Grotto), and Office costs. Wire usage wins when present; for
+// auggie sessions with nil wire Usage the host disk bridge may fill from
+// ~/.augment/sessions/<acpSessionId>.json (docs/specs/office/costs.md).
 func (s *Service) publishPromptUsage(
 	ctx context.Context,
 	payload *lifecycle.AgentStreamEventPayload,
 	session *models.TaskSession,
 ) {
-	sessionID := payload.SessionID
-	if sessionID == "" || s.eventBus == nil || payload.Data.Usage == nil {
-		return
-	}
-
-	model, agentType := resolvePromptUsageLabels(payload, session)
-
-	eventPayload := lifecycle.SessionPromptUsageEventPayload{
-		TaskID:    payload.TaskID,
-		SessionID: sessionID,
-		AgentID:   payload.AgentID,
-		AgentType: agentType,
-		Model:     model,
-		Usage:     payload.Data.Usage,
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-	}
-	subject := events.BuildSessionPromptUsageSubject(sessionID)
-	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionPromptUsageUpdated, "orchestrator", eventPayload))
+	s.publishPromptUsageFromWireOrDisk(ctx, payload, session)
 }
 
 func resolvePromptUsageLabels(

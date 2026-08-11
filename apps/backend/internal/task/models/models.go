@@ -214,6 +214,11 @@ const SessionMetaKeyMCPAttachmentState = "mcp_attachment_state"
 // routing contract that successfully launched or resumed a session.
 const SessionMetaKeyGitCredentialSnapshot = "git_credential_snapshot"
 
+// SessionMetaKeyAuggieUsageSeq is the max Augment chatHistory sequenceId already
+// published into session_prompt_usage from the host disk bridge. See
+// docs/specs/office/costs.md (Auggie disk bridge).
+const SessionMetaKeyAuggieUsageSeq = "auggie_usage_seq"
+
 // GitCredentialSnapshot is launch-time display metadata. It never contains a
 // token, broker lease, helper command, credential file, or SSH key detail.
 type GitCredentialSnapshot struct {

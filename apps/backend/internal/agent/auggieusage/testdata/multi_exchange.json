@@ -1,0 +1,76 @@
+{
+  "sessionId": "fixture-multi",
+  "agentState": {
+    "modelId": "claude-sonnet-4-fallback"
+  },
+  "chatHistory": [
+    {
+      "sequenceId": 1,
+      "completed": true,
+      "finishedAt": "2026-08-11T10:00:00.000Z",
+      "exchange": {
+        "model_id": "claude-opus-4-8",
+        "request_message": "SCRUBBED",
+        "response_text": "SCRUBBED",
+        "response_nodes": [
+          {
+            "type": "text",
+            "text": "SCRUBBED",
+            "token_usage": {
+              "input_tokens": 10,
+              "output_tokens": 20,
+              "cache_read_input_tokens": 100,
+              "cache_creation_input_tokens": 50
+            }
+          }
+        ]
+      }
+    },
+    {
+      "sequenceId": 2,
+      "completed": true,
+      "finishedAt": "2026-08-11T10:01:00.000Z",
+      "exchange": {
+        "model_id": "claude-opus-4-8",
+        "request_message": "SCRUBBED",
+        "response_text": "SCRUBBED",
+        "response_nodes": [
+          {
+            "type": "tool",
+            "text": "SCRUBBED"
+          },
+          {
+            "type": "text",
+            "text": "SCRUBBED",
+            "token_usage": {
+              "input_tokens": 5,
+              "output_tokens": 7,
+              "cache_read_input_tokens": 30,
+              "cache_creation_input_tokens": 0
+            }
+          },
+          {
+            "type": "text",
+            "text": "SCRUBBED",
+            "token_usage": {
+              "input_tokens": 1,
+              "output_tokens": 3,
+              "cache_read_input_tokens": 0,
+              "cache_creation_input_tokens": 2
+            }
+          }
+        ]
+      }
+    },
+    {
+      "sequenceId": 3,
+      "completed": false,
+      "finishedAt": "2026-08-11T10:02:00.000Z",
+      "exchange": {
+        "model_id": "claude-opus-4-8",
+        "request_message": "SCRUBBED",
+        "response_nodes": []
+      }
+    }
+  ]
+}
