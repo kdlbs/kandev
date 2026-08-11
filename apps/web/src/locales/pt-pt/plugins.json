@@ -56,6 +56,7 @@
   "no": "não",
   "noDeclaredSettings": "Este plugin não declara quaisquer definições (sem <1>config_schema</1> no manifesto).",
   "noInstalledPluginWithId": "Não há nenhum plugin instalado com o id <1>{{id}}</1>.",
+  "noEnabledSources": "Não há origens de marketplace ativadas, por isso não é possível verificar versões. Ative uma em Explorar > Origens.",
   "noPluginsAvailable": "Ainda não há plugins disponíveis. Volte em breve ou adicione uma origem de marketplace com os seus.",
   "noPluginsMatchSearch": "Nenhum plugin corresponde à sua pesquisa. Experimente limpar os filtros.",
   "noPluginsYet": "Ainda não há plugins. Instale um a partir do separador Explorar ou carregue um pacote.",

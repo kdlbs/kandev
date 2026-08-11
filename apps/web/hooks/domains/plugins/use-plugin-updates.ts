@@ -48,6 +48,7 @@ export function usePluginUpdates() {
     // message so the strip never renders an empty explanation.
     const reason = () => unhealthy.find((source) => source.error)?.error ?? checkFailedMessage();
     if (enabledSources.length > 0 && unhealthy.length === enabledSources.length) {
+      setSourcesDegraded(true);
       setError(reason());
       return;
     }
@@ -59,6 +60,20 @@ export function usePluginUpdates() {
       }
     }
     setLatestById(next);
+    setChecked(true);
+    setLastCheckedAt(new Date().toISOString());
+
+    // With no enabled source there was nothing to query, so this response is
+    // not evidence that anything was delisted — it is evidence of nothing at
+    // all. Flag it degraded (rows stay silent instead of claiming removal) and
+    // say so, since unlike an unreachable source this is something the
+    // operator turned off and can turn back on.
+    if (enabledSources.length === 0) {
+      setSourcesDegraded(true);
+      setError(t("plugins:noEnabledSources"));
+      return;
+    }
+
     // A partially degraded catalog is a success for the sources that answered
     // and a non-answer for the ones that didn't. Report the degraded source so
     // the operator knows the picture is incomplete, and set `sourcesDegraded`
@@ -67,8 +82,6 @@ export function usePluginUpdates() {
     // entirely, which is indistinguishable from delisting without this flag.
     setSourcesDegraded(unhealthy.length > 0);
     setError(unhealthy.length > 0 ? reason() : null);
-    setChecked(true);
-    setLastCheckedAt(new Date().toISOString());
   }, []);
 
   useEffect(() => {

@@ -56,6 +56,7 @@
   "no": "否",
   "noDeclaredSettings": "此插件未声明任何设置（清单中无 <1>config_schema</1>）。",
   "noInstalledPluginWithId": "没有 id 为 <1>{{id}}</1> 的已安装插件。",
+  "noEnabledSources": "未启用任何市场来源，因此无法检查版本。请在“浏览 > 来源”中启用一个。",
   "noPluginsAvailable": "暂无可用插件。请稍后再来，或添加包含自有插件的市场来源。",
   "noPluginsMatchSearch": "没有与搜索匹配的插件。请尝试清除筛选条件。",
   "noPluginsYet": "还没有插件。从“浏览”标签安装，或上传一个包。",

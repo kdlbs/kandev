@@ -150,9 +150,42 @@ describe("usePluginUpdates — failure isolation", () => {
     expect(result.current.error).toBeNull();
   });
 
+  // Regression: with no enabled source nothing was queried, so an empty
+  // catalog is evidence of nothing — not of every plugin being delisted. The
+  // guard on the all-unhealthy branch deliberately skips this case, which used
+  // to drop it into the fully-successful branch and flip every installed row
+  // to "not in the marketplace" under a clean "last checked" line.
+  it("flags a catalog with no enabled source as degraded and explains why", async () => {
+    getMarketplaceCatalog.mockResolvedValue({
+      plugins: [],
+      sources: [source({ enabled: false }), source({ id: "local", enabled: false })],
+    });
+    const { result } = renderHook(() => usePluginUpdates());
+
+    await waitFor(() => expect(result.current.checked).toBe(true));
+    expect(result.current.sourcesDegraded).toBe(true);
+    expect(result.current.error).toBe(
+      "No marketplace sources are enabled, so versions can't be checked. Enable one under Browse > Sources.",
+    );
+  });
+
+  // The early return above skipped `setSourcesDegraded`, so a total outage
+  // after a healthy check left the flag stale at `false` and rows kept
+  // claiming removal on data no source had confirmed this round.
+  it("flags degradation when every enabled source is unhealthy", async () => {
+    getMarketplaceCatalog.mockResolvedValue({
+      plugins: [],
+      sources: [source({ healthy: false, error: "timeout" })],
+    });
+    const { result } = renderHook(() => usePluginUpdates());
+
+    await waitFor(() => expect(result.current.error).toBe("timeout"));
+    expect(result.current.sourcesDegraded).toBe(true);
+  });
+
   it("clears a previous error once a later check succeeds", async () => {
     getMarketplaceCatalog.mockRejectedValueOnce(new Error("offline"));
-    getMarketplaceCatalog.mockResolvedValueOnce({ plugins: [], sources: [] });
+    getMarketplaceCatalog.mockResolvedValueOnce({ plugins: [], sources: [source()] });
     const { result } = renderHook(() => usePluginUpdates());
     await waitFor(() => expect(result.current.error).toBe("offline"));
 

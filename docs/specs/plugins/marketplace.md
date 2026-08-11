@@ -296,6 +296,14 @@ response but stays `enabled`.
   catalog entry shows its latest known version (e.g. "Latest v2.1.0"), and a plugin with
   no catalog entry anywhere shows a "not in the marketplace" hint instead — never before
   the first successful check completes.
+- **GIVEN** a check that reached only some of the enabled sources, **WHEN** it completes,
+  **THEN** plugins missing from that response show **no** "not in the marketplace" hint —
+  a source that failed contributes no entries, which is indistinguishable from delisting —
+  while the healthy sources' known versions and **Update** affordances render as usual, and
+  the degraded source's reason is reported inline.
+- **GIVEN** no marketplace source is enabled, **WHEN** a check completes, **THEN** kandev
+  reports that versions can't be checked and where to enable a source, and no plugin claims
+  to be missing from the marketplace — nothing was queried, so nothing was learned.
 - **GIVEN** the Installed tab, **WHEN** the operator clicks **Sync**, **THEN** kandev
   runs the filesystem sync, then busts the marketplace cache and re-fetches the catalog,
   in that order, and any plugin's latest-version text and **Update available** badge

@@ -56,6 +56,7 @@
   "no": "no",
   "noDeclaredSettings": "This plugin does not declare any settings (no <1>config_schema</1> in its manifest).",
   "noInstalledPluginWithId": "No installed plugin with id <1>{{id}}</1>.",
+  "noEnabledSources": "No marketplace sources are enabled, so versions can't be checked. Enable one under Browse > Sources.",
   "noPluginsAvailable": "No plugins available yet. Check back soon, or add a marketplace source with your own.",
   "noPluginsMatchSearch": "No plugins match your search. Try clearing the filters.",
   "noPluginsYet": "No plugins yet. Install one from the Browse tab, or upload a package.",
