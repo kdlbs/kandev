@@ -52,7 +52,7 @@ export function buildRepositoryItems(
   }
   for (const r of discoveredRepos) {
     if (registeredPaths.has(r.path.replace(/\/+$/, ""))) continue;
-    items.push({ id: DISCOVERED_PREFIX + r.path, label: `${r.name} — ${r.path}` });
+    items.push({ id: DISCOVERED_PREFIX + r.path, label: `${r.name} - ${r.path}` });
   }
   return items;
 }

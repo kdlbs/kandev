@@ -22,7 +22,7 @@ export function getRangeLabel(range: RangeKey): string {
 }
 
 export function formatDuration(ms: number): string {
-  if (ms === 0) return "—";
+  if (ms === 0) return "-";
   const seconds = Math.floor(ms / 1000);
   const minutes = Math.floor(seconds / 60);
   const hours = Math.floor(minutes / 60);
@@ -79,18 +79,18 @@ export function buildStatsSummary(
   const completion =
     global.total_tasks > 0
       ? `${Math.round((global.completed_tasks / global.total_tasks) * 100)}%`
-      : "—";
+      : "-";
   const topRepo = repository_stats
     .filter((r) => r.total_tasks > 0)
     .sort((a, b) => b.total_tasks - a.total_tasks)[0];
-  const topRepoLabel = topRepo ? `${topRepo.repository_name} (${topRepo.total_tasks} tasks)` : "—";
+  const topRepoLabel = topRepo ? `${topRepo.repository_name} (${topRepo.total_tasks} tasks)` : "-";
   const hasGitStats =
     git_stats && (git_stats.total_commits > 0 || git_stats.total_files_changed > 0);
   const gitLine = hasGitStats
     ? `${git_stats.total_commits} commits, +${git_stats.total_insertions.toLocaleString()}/-${git_stats.total_deletions.toLocaleString()}`
     : "no git activity";
   return [
-    `*Kandev Stats — ${rangeLabel}*`,
+    `*Kandev Stats - ${rangeLabel}*`,
     `- Tasks: ${global.total_tasks} total (${global.completed_tasks} done, ${global.in_progress_tasks} in progress) · ${completion} completion`,
     `- Completed (${rangeLabel}): ${completedInRange}`,
     `- Time: ${formatDuration(global.total_duration_ms)} total · ${formatDuration(global.avg_duration_ms_per_task)} avg/task`,

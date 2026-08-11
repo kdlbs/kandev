@@ -36,7 +36,7 @@
   "signOut": "Terminar sessão",
   "thisDevice": "Este dispositivo",
   "tokenCreated": "Token criado",
-  "tokenShownOnlyOnce": "Isto é mostrado apenas uma vez — copie-o agora e guarde-o em segurança.",
+  "tokenShownOnlyOnce": "Isto é mostrado apenas uma vez; copie-o agora e guarde-o em segurança.",
   "tokensPageDescription": "Tokens de acesso pessoal para scripts e CLI que atuam em seu nome.",
   "tokensPageTitle": "Tokens de API"
 }

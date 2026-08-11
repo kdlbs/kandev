@@ -102,6 +102,7 @@ export type UserSettings = {
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_order?: AppStatusBarOrderApi;
   voice_mode?: VoiceModeSettings;
+  kanban_hidden_step_ids?: Record<string, string[]>;
   updated_at: string;
 };
 
@@ -162,4 +163,5 @@ export type UserSettingsUpdatePayload = {
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_order?: AppStatusBarOrderApi;
   voice_mode?: VoiceModeSettings;
+  kanban_hidden_step_ids?: Record<string, string[]>;
 };

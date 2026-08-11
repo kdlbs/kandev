@@ -75,13 +75,6 @@ func (s *Service) createPRWatch(
 	return w, nil
 }
 
-// GetPRWatchBySession returns the first PR watch for a session. Multi-repo
-// callers should prefer GetPRWatchBySessionAndRepo to avoid landing on the
-// wrong repo's watch.
-func (s *Service) GetPRWatchBySession(ctx context.Context, sessionID string) (*PRWatch, error) {
-	return s.store.GetPRWatchBySession(ctx, sessionID)
-}
-
 // GetPRWatch returns one PR watch after authorizing its stored workspace.
 func (s *Service) GetPRWatch(ctx context.Context, id string) (*PRWatch, error) {
 	watch, err := s.store.GetPRWatch(ctx, id)

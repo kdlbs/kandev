@@ -146,7 +146,7 @@ function TaskTableRow({ row }: { row: RowState }) {
         </span>
       </TableCell>
       <TableCell className="text-xs">
-        {task.priority ? t(PRIORITY_LABEL_KEYS[task.priority] ?? "office:none") : "—"}
+        {task.priority ? t(PRIORITY_LABEL_KEYS[task.priority] ?? "office:none") : t("office:none")}
       </TableCell>
     </TableRow>
   );

@@ -416,7 +416,7 @@ export function MostProductiveSummary({
       <div className="flex items-center justify-between text-sm">
         <span className="text-muted-foreground">{t("stats:bestYear")}</span>
         <span className="font-mono tabular-nums">
-          {stats.maxYear.year || "\u2014"} · {stats.maxYear.value}
+          {stats.maxYear.year || "-"} · {stats.maxYear.value}
         </span>
       </div>
     </div>

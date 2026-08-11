@@ -76,6 +76,10 @@ test.describe("Mobile agent profile config selector", () => {
       await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
 
       const prefixInput = testPage.getByTestId("command-prefix-input");
+      const advancedTrigger = testPage.getByTestId("profile-advanced-options-trigger");
+      await expect(advancedTrigger).toBeVisible({ timeout: 15_000 });
+      await expect(prefixInput).toBeHidden();
+      await advancedTrigger.tap();
       await expect(prefixInput).toBeVisible({ timeout: 15_000 });
       await prefixInput.fill("greywall --");
 
@@ -86,7 +90,13 @@ test.describe("Mobile agent profile config selector", () => {
 
       // Reload — the saved prefix must still be there.
       await testPage.reload();
-      await expect(testPage.getByTestId("command-prefix-input")).toHaveValue("greywall --", {
+      const prefixInputAfterReload = testPage.getByTestId("command-prefix-input");
+      await expect(testPage.getByTestId("profile-advanced-options-trigger")).toBeVisible({
+        timeout: 15_000,
+      });
+      await expect(prefixInputAfterReload).toBeHidden();
+      await testPage.getByTestId("profile-advanced-options-trigger").tap();
+      await expect(prefixInputAfterReload).toHaveValue("greywall --", {
         timeout: 15_000,
       });
 
@@ -95,7 +105,7 @@ test.describe("Mobile agent profile config selector", () => {
       expect(stored.commandPrefix).toBe("greywall --");
 
       // Clearing a previously-saved prefix must persist an empty value.
-      await testPage.getByTestId("command-prefix-input").fill("");
+      await prefixInputAfterReload.fill("");
       const saveButtonAfterClear = testPage
         .getByRole("button", { name: /^Save( changes)?$/i })
         .first();
@@ -104,7 +114,12 @@ test.describe("Mobile agent profile config selector", () => {
       await expect(testPage.getByText(/unsaved changes/i)).toBeHidden({ timeout: 15_000 });
 
       await testPage.reload();
-      await expect(testPage.getByTestId("command-prefix-input")).toHaveValue("", {
+      const prefixInputAfterClear = testPage.getByTestId("command-prefix-input");
+      await expect(testPage.getByTestId("profile-advanced-options-trigger")).toBeVisible({
+        timeout: 15_000,
+      });
+      await testPage.getByTestId("profile-advanced-options-trigger").tap();
+      await expect(prefixInputAfterClear).toHaveValue("", {
         timeout: 15_000,
       });
       const storedAfterClear = await apiClient.getAgentProfile(profile.id);

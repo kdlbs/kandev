@@ -31,7 +31,10 @@ export function describeEnsureError(
       detail: t("task:noAgentProfileConfiguredDetail"),
       isAgentProfileMissing: true,
       action: workspaceId
-        ? { label: t("task:openWorkspaceSettings"), href: `/settings/workspace/${workspaceId}` }
+        ? {
+            label: t("task:openWorkspaceSettings"),
+            href: `/settings/workspaces/${workspaceId}`,
+          }
         : null,
     };
   }

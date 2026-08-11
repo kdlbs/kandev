@@ -27,8 +27,6 @@ type KanbanHeaderMobileProps = {
   onSearchChange?: (query: string) => void;
   isSearchLoading?: boolean;
   tasksListOptions?: TasksListDisplayOptions;
-  showHealthIndicator: boolean;
-  onOpenHealthDialog: () => void;
 };
 
 function MobileBrandLink({ workspaceId }: Pick<KanbanHeaderMobileProps, "workspaceId">) {
@@ -155,8 +153,6 @@ export function KanbanHeaderMobile({
   onSearchChange,
   isSearchLoading = false,
   tasksListOptions,
-  showHealthIndicator,
-  onOpenHealthDialog,
 }: KanbanHeaderMobileProps) {
   const isMenuOpen = useAppStore((state) => state.mobileKanban.isMenuOpen);
   const setMenuOpen = useAppStore((state) => state.setMobileKanbanMenuOpen);
@@ -217,8 +213,6 @@ export function KanbanHeaderMobile({
         onSearchChange={onSearchChange}
         isSearchLoading={isSearchLoading}
         tasksListOptions={tasksListOptions}
-        showHealthIndicator={showHealthIndicator}
-        onOpenHealthDialog={onOpenHealthDialog}
       />
     </>
   );

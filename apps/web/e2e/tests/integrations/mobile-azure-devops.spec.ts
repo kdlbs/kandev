@@ -128,7 +128,7 @@ test("mobile settings explain PAT scopes and link to the organization token page
   testPage,
 }) => {
   await testPage.goto(
-    `/settings/workspace/${encodeURIComponent(seedData.workspaceId)}/integrations/azure-devops`,
+    `/settings/workspaces/${encodeURIComponent(seedData.workspaceId)}/integrations/azure-devops`,
   );
 
   await testPage.getByTestId("azure-devops-organization").fill("https://dev.azure.com/acme");
@@ -231,7 +231,7 @@ test("mobile board opens a focused column editor without horizontal overflow", a
   expect(viewportFits).toBe(true);
 
   await testPage.goto(
-    `/settings/workspace/${encodeURIComponent(seedData.workspaceId)}/integrations/azure-devops`,
+    `/settings/workspaces/${encodeURIComponent(seedData.workspaceId)}/integrations/azure-devops`,
   );
   await expect(testPage.getByTestId("azure-devops-watch-settings")).toBeVisible();
   await testPage.getByTestId("azure-add-work-item-watch").click();

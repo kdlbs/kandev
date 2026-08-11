@@ -37,7 +37,7 @@ export function PluginManifestCard({ plugin }: { plugin: PluginRecord }) {
           <ManifestRow label={t("plugins:manifestId")} value={plugin.id} mono />
           <ManifestRow label={t("plugins:manifestVersion")} value={plugin.version} mono />
           <ManifestRow label={t("plugins:manifestApiVersion")} value={String(plugin.api_version)} />
-          <ManifestRow label={t("plugins:manifestAuthor")} value={plugin.author || "—"} />
+          <ManifestRow label={t("plugins:manifestAuthor")} value={plugin.author || "-"} />
           <ManifestRow
             label={t("plugins:manifestSigned")}
             value={plugin.signed ? t("plugins:yes") : t("plugins:no")}

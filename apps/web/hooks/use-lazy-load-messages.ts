@@ -43,13 +43,13 @@ function logLoadMoreResponse(args: LoadMoreResponseLog) {
     newOldestAuthor: first?.author_type ?? null,
   });
   if (ordered.length === 0 && responseHasMore) {
-    debug("loadMore: WARNING empty batch with has_more=true — pagination may be stuck", {
+    debug("loadMore: WARNING empty batch with has_more=true - pagination may be stuck", {
       sessionId,
       before: requestedBefore,
     });
   }
   if (!responseHasMore && ordered.length > 0) {
-    debug("loadMore: reached oldest — check that the first prompt is present", {
+    debug("loadMore: reached oldest - check that the first prompt is present", {
       sessionId,
       newOldestId: newOldestCursor,
       newOldestAuthor: first?.author_type,

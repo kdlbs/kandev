@@ -588,6 +588,9 @@ func (s *Service) secretExists(ctx context.Context, workspaceID string) (bool, e
 	if err != nil || exists {
 		return exists, err
 	}
+	if !s.legacySecretAppliesTo(workspaceID) {
+		return false, nil
+	}
 	return s.secrets.Exists(ctx, SecretKey)
 }
 
@@ -599,6 +602,9 @@ func (s *Service) revealSecret(ctx context.Context, workspaceID string) (string,
 	if err == nil && secret != "" {
 		return secret, nil
 	}
+	if !s.legacySecretAppliesTo(workspaceID) {
+		return "", err
+	}
 	legacy, legacyErr := s.secrets.Reveal(ctx, SecretKey)
 	if legacyErr == nil && legacy != "" {
 		return legacy, nil
@@ -607,6 +613,11 @@ func (s *Service) revealSecret(ctx context.Context, workspaceID string) (string,
 		return "", err
 	}
 	return "", legacyErr
+}
+
+func (s *Service) legacySecretAppliesTo(workspaceID string) bool {
+	target := s.store.MigratedFromWorkspace()
+	return target != "" && workspaceID == target
 }
 
 func validateConfigRequest(req *SetConfigRequest) error {

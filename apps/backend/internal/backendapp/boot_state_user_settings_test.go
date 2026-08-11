@@ -61,6 +61,41 @@ func TestMapUserSettingsStateIncludesNormalizedStartupPage(t *testing.T) {
 	}
 }
 
+func TestMapUserSettingsStateIncludesHiddenWorkflowStepIds(t *testing.T) {
+	state := mapUserSettingsState(userdto.UserSettingsResponse{
+		Settings: userdto.UserSettingsDTO{
+			KanbanHiddenStepIDs: map[string][]string{"wf-1": {"step-a", "step-b"}},
+		},
+	}, "workspace-1")
+
+	// The boot payload key MUST be the store-field name (hiddenWorkflowStepIds),
+	// not a camelCased form of the DTO's snake_case wire name
+	// (kanbanHiddenStepIds) — the frontend's deepMerge hydrator matches keys
+	// directly with no snake->camel remapping, so the wrong key silently
+	// leaves the store field at {} on every cold boot.
+	got, ok := state["hiddenWorkflowStepIds"].(map[string][]string)
+	if !ok {
+		t.Fatalf("hiddenWorkflowStepIds = %#v, want map[string][]string", state["hiddenWorkflowStepIds"])
+	}
+	if ids := got["wf-1"]; len(ids) != 2 || ids[0] != "step-a" || ids[1] != "step-b" {
+		t.Fatalf("hiddenWorkflowStepIds[wf-1] = %#v, want [step-a step-b]", ids)
+	}
+	if _, wrongKey := state["kanbanHiddenStepIds"]; wrongKey {
+		t.Fatal("boot state must not emit the dead kanbanHiddenStepIds key")
+	}
+}
+
+func TestMapUserSettingsStateDefaultsHiddenWorkflowStepIdsToEmptyMap(t *testing.T) {
+	state := mapUserSettingsState(userdto.UserSettingsResponse{
+		Settings: userdto.UserSettingsDTO{},
+	}, "workspace-1")
+
+	got, ok := state["hiddenWorkflowStepIds"].(map[string][]string)
+	if !ok || len(got) != 0 {
+		t.Fatalf("hiddenWorkflowStepIds = %#v, want empty map[string][]string", state["hiddenWorkflowStepIds"])
+	}
+}
+
 func TestMapUserSettingsStateIncludesAppStatusBarOrder(t *testing.T) {
 	state := mapUserSettingsState(userdto.UserSettingsResponse{
 		Settings: userdto.UserSettingsDTO{AppStatusBarOrder: usermodels.AppStatusBarOrder{

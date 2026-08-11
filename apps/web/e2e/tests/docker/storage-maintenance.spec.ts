@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/docker-test-base";
 import { E2E_IMAGE_TAG, removeKandevContainers } from "../../fixtures/docker-probe";
 import { dockerInspectExists, dockerRemove } from "../../helpers/docker";
@@ -12,11 +13,52 @@ function createStoppedContainer(labels: string[]): string {
   return id;
 }
 
+async function openStorageSettings(page: Page): Promise<void> {
+  const storagePage = page.getByTestId("storage-settings-page");
+  let lastError: unknown;
+
+  // Wait only for the document commit. The Go-served SPA can keep
+  // DOMContentLoaded pending while a dynamic Settings chunk is resolving, so
+  // let the test-id assertion own application readiness and retry the full
+  // document request once if the first load is interrupted under CI load.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await page.goto("/settings/system/data-storage", {
+        waitUntil: "commit",
+        timeout: 20_000,
+      });
+      await expect(storagePage).toBeVisible({ timeout: 60_000 });
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError;
+}
+
+async function refreshStorageOverview(page: Page): Promise<void> {
+  const analyze = page.getByTestId("storage-analyze");
+  const managedContainers = page.getByTestId("storage-resource-managed-containers-trigger");
+  await analyze.click();
+  await expect(analyze).toHaveAttribute("data-job-state", "succeeded", {
+    timeout: 60_000,
+  });
+  // The terminal job state arrives before the overview reload completes. Give
+  // the hook's bounded refresh retries time to replace a transient unavailable
+  // snapshot before asserting the Docker measurement.
+  await expect(managedContainers).toContainText("Kandev containers<0.01 GB", {
+    timeout: 60_000,
+  });
+}
+
 test("removes only stopped Kandev-labeled containers and gates daemon-wide cleanup", async ({
   testPage,
   apiClient,
   seedData,
 }) => {
+  test.setTimeout(240_000);
+
   // This test asserts the *global* count of kandev.managed=true containers the
   // daemon reports ("2 managed containers"). The containers project shares one
   // Docker daemon across all specs in the worker and only sweeps managed
@@ -36,11 +78,12 @@ test("removes only stopped Kandev-labeled containers and gates daemon-wide clean
   const active = createStoppedContainer(["kandev.managed=true", `kandev.task_id=${activeTask.id}`]);
   const unrelated = createStoppedContainer(["e2e.storage=unrelated"]);
   try {
-    await testPage.goto("/settings/system/storage");
+    await openStorageSettings(testPage);
+    // The first overview can race Docker client startup and cache an
+    // unavailable result. Analyze after creating the fixtures so this test
+    // observes the current daemon state instead of that transient snapshot.
+    await refreshStorageOverview(testPage);
     await expect(testPage.getByTestId("storage-docker-build-cache")).toBeDisabled();
-    await expect(testPage.getByTestId("storage-resource-managed-containers-trigger")).toContainText(
-      "Kandev containers<0.01 GB",
-    );
     await testPage.getByTestId("storage-resource-managed-containers-trigger").click();
     await expect(testPage.getByTestId("storage-resource-managed-containers")).toContainText(
       "2 managed containers",

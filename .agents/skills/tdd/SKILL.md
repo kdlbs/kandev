@@ -50,6 +50,8 @@ Choose the right level:
 
 Prefer state/output assertions over interaction assertions. Mock only slow, nondeterministic, or external boundaries; use real implementations or fakes when they keep the test deterministic.
 
+For failure-path tests, inject the error at the boundary the production code claims to handle and exercise the real downstream call chain; do not short-circuit by mocking the handler under test.
+
 ### Cross-layer contracts
 
 When adding or renaming a field that crosses backend, WebSocket, and frontend
@@ -84,6 +86,7 @@ state; and stale callbacks must not mutate the replacement.
 1. Identify the single behavior to implement or bug to reproduce
 2. Write the **smallest test** that asserts the expected behavior — one assertion, clear name
 3. Run the test and confirm it **fails with the expected assertion error** (not a compile/import error)
+   For a brand-new Go package, create the package directory and minimal test package first, then run the focused package test so RED fails on behavior rather than package-selection or import errors.
 4. If it passes immediately, the test is not testing new behavior — revise it.
    Exception: a reviewer-requested test that documents behavior already present
    on the current head is valid test-only contract coverage. Label it as such,
@@ -124,6 +127,7 @@ a later patch.
 
 **Don't test implementation details:**
 - Assert behavior, state, API response, DB row, emitted event, or UI outcome. Avoid assertions that only prove a helper was called or an internal query string happened to be built a certain way.
+- Custom hooks and async controller helpers are behavior-bearing logic, not pure React markup: add focused tests for success, failure, cancellation/no-op, and busy/loading-state cleanup.
 
 **Don't test mock behavior:**
 - If your assertion checks a mock element (`*-mock` test ID, mock return value), you're testing the mock, not the code. Test real behavior or don't mock it.

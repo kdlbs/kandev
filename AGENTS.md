@@ -20,6 +20,7 @@ apps/
 - **Launcher**: all four launch modes (`dev`, `start`, `run`, `service`) go through the native Go binary at `apps/backend/bin/kandev`; the launcher package is `apps/backend/internal/launcher`. `make dev` execs a copy of that binary (`bin/kandev-launcher`).
 - **CLI**: `apps/cli` is the npm-published shim only (`bin/cli.js` + `bin/native-shim.js`); its tests run on the Node built-in test runner (`node --test`).
 - **Frontend**: Vite/React SPA (`cd apps && pnpm --filter @kandev/web dev|build:vite|lint`; for direct web typecheck use `cd apps/web && pnpm run typecheck`)
+- **Web-only scripts** live in `apps/web/package.json`; run them from `apps/web` (for example `pnpm run i18n:check` or `pnpm run i18n:ratchet`) or use `pnpm --filter @kandev/web ...`, not from `apps/`.
 - **Desktop**: Tauri shell (`cd apps && pnpm --filter @kandev/desktop build|e2e`; Rust tests from `apps/desktop/src-tauri`)
 - **UI**: Shadcn components via `@kandev/ui`
 - **E2E**: Playwright (`cd apps/web && pnpm e2e:raw`). The `containers` project (gated on `KANDEV_E2E_CONTAINERS=1`, formerly `docker`) covers both the Docker executor and the SSH executor — anything that needs a real Docker daemon on the host lives there. See `apps/web/e2e/README.md`.
@@ -60,7 +61,7 @@ Architecture notes and per-area conventions live alongside the code they describ
 
 Commits to `main` **must** follow [Conventional Commits](https://www.conventionalcommits.org/) (`type: description`). PRs are squash-merged - the PR title becomes the commit, validated by CI. Changelog is auto-generated from these via git-cliff (`cliff.toml`). See `.agents/skills/commit/SKILL.md` for allowed types and examples.
 
-The commitlint hook caps the header at **100 characters** (`type(scope): description`). The pre-commit prettier hook also reformats staged TS/TSX files - if it does, the commit fails. Re-stage the reformatted files and create a new commit (don't `--amend`).
+The commitlint hook caps the header at **100 characters** (`type(scope): description`). The pre-commit prettier hook reformats staged TS/TSX files, and the `gofmt (backend)` hook can reformat staged Go files; if either hook changes files, the commit fails. Re-stage the reformatted files and create a new commit (don't `--amend`). Before committing, use `git diff --cached --name-only | grep '\.go$' | xargs gofmt -l`; run `gofmt -w` and re-add any files it reports.
 
 ### Release & Versioning
 
@@ -108,6 +109,13 @@ it **skips anything assigned to a SCREAMING_CASE identifier** — so a
 `const ROWS = [{ label: "Disk usage" }]` config table passes silently. Review
 those by eye. The pseudo-locale (Settings → General → Appearance, dev/e2e builds)
 is the completeness check. Full guide: [`docs/i18n.md`](docs/i18n.md).
+
+UI punctuation is plain and intentional: do not use the Unicode em dash (U+2014)
+in user-facing copy or locale values. Use a period, colon, comma, semicolon, or
+parentheses instead. This applies to English, pseudo, and translated catalogs,
+rendered fallback strings. `pnpm run i18n:check` enforces it. Historical
+`CHANGELOG.md` entries are excluded because the changelog is generated release
+history and remains immutable.
 
 ### Knowledge
 - **Public docs:** Website-ready user documentation lives in `docs/public/**`. Use `/docs-maintainer` when a change affects CLI commands, config keys, install/deploy flows, workflows, executors, public APIs, screenshots, or user-facing terminology.
@@ -206,7 +214,7 @@ Runtime feature toggles add a SQLite-backed override tier managed through `Setti
 
 Profile selection: `KANDEV_E2E_MOCK=true` → `e2e`, `KANDEV_DEBUG_DEV_MODE=true` or `KANDEV_DEBUG_PPROF_ENABLED=true` → `dev`, otherwise `prod`. The Go dev launcher (`apps/backend/internal/launcher/dev.go`) and `apps/web/e2e/fixtures/backend.ts` set only the selector — they no longer hardcode the underlying values.
 
-For any task that adds, rolls out, promotes, graduates, or removes a release toggle, use `/runtime-feature-flags`. That skill contains the file-by-file checklist, disabled-path requirements, test commands, promotion procedure, and retired-identity removal steps; do not rely on an agent discovering an ADR or public docs. In brief: merge risky features off in every shipped profile, enable a selected install with an admin override or explicit environment, restart and test, then change `prod:` to `"true"` for the all-user release while retaining the registry entry as a kill-switch. Remove the live flag after the feature is permanent, move its key and environment variable to the append-only retired identities in `runtimeflags/registry.go`, and never reuse either identity. Completeness tests cover the registry/profile/frontend contracts. Runtime overrides and restart support are documented in `docs/decisions/0018-runtime-settings-overrides.md` and `docs/decisions/0019-restart-supervisor.md`.
+For any task that adds, rolls out, promotes, graduates, or removes a release toggle, use `/runtime-feature-flags`. That skill contains the file-by-file checklist, disabled-path requirements, test commands, promotion procedure, and retired-identity removal steps; do not rely on an agent discovering an ADR or public docs. In brief: merge risky features off in every shipped profile, enable a selected install with an admin override or explicit environment, restart when required by registry metadata, then test. Change `prod:` to `"true"` for the all-user release while retaining the registry entry as a kill-switch. Remove the live flag after the feature is permanent, move its key and environment variable to the append-only retired identities in `runtimeflags/registry.go`, and never reuse either identity. Completeness tests cover the registry/profile/frontend contracts. Runtime overrides and restart support are documented in `docs/decisions/0018-runtime-settings-overrides.md` and `docs/decisions/0019-restart-supervisor.md`.
 
 ---
 
