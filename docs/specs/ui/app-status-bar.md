@@ -86,7 +86,7 @@ The visibility field name is `app_status_bar_enabled` and defaults to `false` wh
 
 The former runtime identities `features.appStatusBar` and `KANDEV_FEATURES_APP_STATUS_BAR` are retired and never reused. Existing unknown override rows remain inert; no install-wide value is migrated into a per-user preference, and the retired environment variable has no effect. The `/api/v1/features` response no longer includes `appStatusBar`.
 
-No new relational schema, endpoint, WebSocket action, plugin manifest field, or plugin protocol is added. The existing user-settings PATCH, boot payload, and `user.settings.updated` event carry visibility and order.
+The `users.settings_revision` relational column is added as an atomic per-user counter so clients can reject stale boot, HTTP, and WebSocket settings snapshots. No new table, endpoint, WebSocket action, plugin manifest field, or plugin protocol is added. The existing user-settings PATCH, boot payload, and `user.settings.updated` event carry visibility, order, and revision.
 
 The only public API addition is `registerComponent("app-status-bar-left" | "app-status-bar-right", Component)` with the exact slot props above. Plugin registration ownership, enable/disable lifecycle, and error isolation reuse the existing registry.
 

@@ -100,6 +100,21 @@ func assertLegacySettingsRevisionMigration(t *testing.T, conn *sqlx.DB) {
 	if updated.Revision != 1 {
 		t.Fatalf("updated revision = %d, want 1", updated.Revision)
 	}
+
+	replayedRepo, err := newSQLiteRepositoryWithDB(conn, conn)
+	if err != nil {
+		t.Fatalf("reinitialize migrated repo: %v", err)
+	}
+	replayed, err := replayedRepo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("read settings after migration replay: %v", err)
+	}
+	if replayed.Revision != 1 {
+		t.Fatalf("revision after migration replay = %d, want 1", replayed.Revision)
+	}
+	if !replayed.AppStatusBarEnabled {
+		t.Fatal("status bar preference was not preserved across migration replay")
+	}
 }
 
 func TestSQLiteRepositoryAssignsUniqueAtomicSettingsRevisions(t *testing.T) {
