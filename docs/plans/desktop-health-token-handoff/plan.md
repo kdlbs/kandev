@@ -59,6 +59,10 @@ changes are required.
   **File:** `apps/desktop/src-tauri/src/backend.rs` (existing Rust unit test).
   **How:** Run the focused `command_spec_uses_headless_launcher_and_loopback_env` test alongside
   the Go regression suite.
+- **What:** The changed backend code passes the repository's static checks.
+  **File:** `apps/backend/`.
+  **How:** Run `golangci-lint run ./... --new-from-rev=31907ba651221b3bdb09a1db2f19786b43457863
+  --timeout=5m` and require zero issues.
 
 ## E2E Tests
 
@@ -83,6 +87,8 @@ needed writable temporary cache directories in this environment.
 - Desktop producer: `cargo test --features desktop-runtime
   backend::tests::command_spec_uses_headless_launcher_and_loopback_env` passed with the checked-in
   Rust toolchain and temporary `CARGO_HOME`/`CARGO_TARGET_DIR`.
+- Changed-code lint: `golangci-lint run ./... --new-from-rev=31907ba651221b3bdb09a1db2f19786b43457863
+  --timeout=5m` passed with zero issues after the `goconst` cleanup.
 
 Tasks 02 and 03 remain pending until the fix is merged to `main` and the release workflow can be
 run under their documented preconditions.

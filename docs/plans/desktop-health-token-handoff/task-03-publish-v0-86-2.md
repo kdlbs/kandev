@@ -22,23 +22,32 @@ spec: "../../specs/port-collision-safety/spec.md"
 
 ## Verification
 
-After confirming the preconditions, dispatch the one-click Stable patch flow:
+After confirming the preconditions, record the Task 02 validated SHA and dispatch the one-click
+Stable patch flow from that immutable commit:
 
 ```bash
-gh workflow run release.yml --repo kdlbs/kandev --ref main \
+validated_sha="<task-02-validated-main-sha>"
+test -n "$validated_sha"
+gh workflow run release.yml --repo kdlbs/kandev --ref "$validated_sha" \
   -f channel=stable \
   -f bump=patch \
   -f dry_run=false \
   -f desktop_validation_only=false \
   -f backfill_tag=
 gh run watch <release-run-id> --repo kdlbs/kandev --exit-status
+release_head_sha=$(gh run view <release-run-id> --repo kdlbs/kandev --json headSha --jq '.headSha')
+test "$release_head_sha" = "$validated_sha"
 gh run view <release-run-id> --repo kdlbs/kandev --json headSha,jobs,url
 ```
 
 Verify every channel individually:
 
 ```bash
+set -euo pipefail
+
 git fetch --tags origin && git tag -v v0.86.2
+tag_sha=$(git rev-list -n 1 v0.86.2)
+git merge-base --is-ancestor "$validated_sha" "$tag_sha"
 gh release view v0.86.2 --repo kdlbs/kandev --json tagName,isDraft,isPrerelease,publishedAt,url,assets
 for package_path in kandev \
   %40kdlbs%2Fruntime-linux-x64 %40kdlbs%2Fruntime-linux-arm64 \

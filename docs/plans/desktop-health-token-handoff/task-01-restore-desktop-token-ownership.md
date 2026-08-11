@@ -29,7 +29,9 @@ cd apps/backend && \
   go test ./internal/launcher -run 'Test(LaunchHealthToken|RunManagedApp)' -count=1 && \
   go test ./internal/launcher -count=1 && \
   cd ../../apps/desktop/src-tauri && \
-  cargo test --features desktop-runtime backend::tests::command_spec_uses_headless_launcher_and_loopback_env
+  cargo test --features desktop-runtime backend::tests::command_spec_uses_headless_launcher_and_loopback_env && \
+  cd ../../../apps/backend && \
+  golangci-lint run ./... --new-from-rev=31907ba651221b3bdb09a1db2f19786b43457863 --timeout=5m
 ```
 
 ## Files likely touched
@@ -74,6 +76,8 @@ GREEN and verification:
 - `cargo test --features desktop-runtime
   backend::tests::command_spec_uses_headless_launcher_and_loopback_env` passed using the checked-in
   Rust toolchain with temporary writable Cargo cache and target directories.
+- `golangci-lint run ./... --new-from-rev=31907ba651221b3bdb09a1db2f19786b43457863
+  --timeout=5m` passed with zero issues after the `goconst` cleanup.
 
 The launcher now reuses the inherited token only when the desktop-owned marker is exactly `true`
 and the token is non-empty. Ordinary and malformed launches still generate a fresh token. The

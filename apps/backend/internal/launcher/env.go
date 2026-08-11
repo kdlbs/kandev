@@ -9,6 +9,7 @@ import (
 )
 
 const healthTokenBytes = 32
+const desktopNativeNotificationsEnabled = "true"
 
 func newHealthToken() (string, error) {
 	token := make([]byte, healthTokenBytes)
@@ -19,7 +20,7 @@ func newHealthToken() (string, error) {
 }
 
 func launchHealthToken() (string, error) {
-	if os.Getenv("KANDEV_DESKTOP_NATIVE_NOTIFICATIONS") == "true" {
+	if os.Getenv("KANDEV_DESKTOP_NATIVE_NOTIFICATIONS") == desktopNativeNotificationsEnabled {
 		if token := os.Getenv("KANDEV_DESKTOP_HEALTH_TOKEN"); token != "" {
 			return token, nil
 		}

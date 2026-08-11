@@ -20,21 +20,28 @@ spec: "../../specs/port-collision-safety/spec.md"
 
 ## Verification
 
-Confirm `main` contains the merged fix, then dispatch the non-publishing validation mode:
+Confirm `main` contains the merged fix and capture that immutable commit before dispatching the
+non-publishing validation mode:
 
 ```bash
-gh workflow run release.yml --repo kdlbs/kandev --ref main \
+main_sha=$(gh api repos/kdlbs/kandev/git/ref/heads/main --jq '.object.sha')
+test -n "$main_sha"
+gh workflow run release.yml --repo kdlbs/kandev --ref "$main_sha" \
   -f channel=stable \
   -f bump=patch \
   -f dry_run=false \
   -f desktop_validation_only=true \
   -f backfill_tag=
 gh run watch <validation-run-id> --repo kdlbs/kandev --exit-status
+validation_head_sha=$(gh run view <validation-run-id> --repo kdlbs/kandev --json headSha --jq '.headSha')
+test "$validation_head_sha" = "$main_sha"
 gh run view <validation-run-id> --repo kdlbs/kandev --json headSha,jobs,url
 ```
 
 Inspect the job list rather than only the aggregate conclusion. Record successful runtime and
 desktop jobs for Linux x64/arm64, macOS x64/arm64, and Windows x64, plus skipped publication jobs.
+After the run, verify that no release PR, `v0.86.2` tag or GitHub Release, GHCR `0.86.2` tag,
+npm `0.86.2` package, or Homebrew `0.86.2` formula update exists.
 
 ## Files likely touched
 
