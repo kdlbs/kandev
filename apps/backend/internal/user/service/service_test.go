@@ -1640,6 +1640,7 @@ type recordingUserRepository struct {
 	getUserCalls                              int
 	getDefaultUserCalls                       int
 	getUserSettingsCalls                      int
+	getSettingsUserID                         string
 	upsertUserSettingsPreservingLastUsedCalls int
 	updateCalls                               int
 	updateUserID                              string
@@ -1665,8 +1666,9 @@ func (r *recordingUserRepository) GetDefaultUser(context.Context) (*models.User,
 	return nil, errors.New("unexpected GetDefaultUser call")
 }
 
-func (r *recordingUserRepository) GetUserSettings(context.Context, string) (*models.UserSettings, error) {
+func (r *recordingUserRepository) GetUserSettings(_ context.Context, userID string) (*models.UserSettings, error) {
 	r.getUserSettingsCalls++
+	r.getSettingsUserID = userID
 	if r.getErr != nil {
 		return nil, r.getErr
 	}

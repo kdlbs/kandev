@@ -14,6 +14,8 @@ describe("AppStatusBarSettingsCard", () => {
     expect(toggle.getAttribute("data-settings-dirty")).toBe("true");
     expect(screen.getByTestId("app-status-bar-settings-card").dataset.settingsDirty).toBe("true");
     expect(screen.getByTestId("app-status-bar-toggle-row").className).toContain("min-h-11");
+    expect(toggle.className).toContain("data-[size=default]:h-11");
+    expect(toggle.className).toContain("data-[size=default]:w-11");
     expect(
       screen.getByText(
         "Show status details along the bottom of Kandev. On phones, they appear in the Status drawer. Connection warnings remain visible when this is off.",
@@ -22,5 +24,6 @@ describe("AppStatusBarSettingsCard", () => {
 
     fireEvent.click(toggle);
     expect(onChange).toHaveBeenCalledWith(false);
+    expect(onChange).toHaveBeenCalledTimes(1);
   });
 });

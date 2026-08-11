@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "@/components/theme/app-theme";
 import {
@@ -43,6 +43,8 @@ import { SleepInhibitionSettings } from "@/components/settings/sleep-inhibition-
 import { AppStatusBarSettingsCard } from "@/components/settings/app-status-bar-settings-card";
 import { SettingsMenuModeCard } from "@/components/settings/settings-menu-mode-card";
 import type { SettingsMenuMode } from "@/lib/settings/settings-menu-mode";
+import type { UserSettingsUpdatePayload } from "@/lib/types/http";
+import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 
 function ThemeSettingsCard({
   theme,
@@ -330,6 +332,75 @@ export function TaskActionsSettings() {
 
 type AppearanceState = ReturnType<typeof createAppearanceSavedState>;
 
+function buildAppearanceUserSettingsPatch(
+  submitted: AppearanceState,
+  saved: AppearanceState,
+): UserSettingsUpdatePayload {
+  const patch: UserSettingsUpdatePayload = {};
+  if (submitted.startupPage !== saved.startupPage) {
+    patch.startup_page = submitted.startupPage;
+  }
+  if (submitted.changesPanelLayout !== saved.changesPanelLayout) {
+    patch.changes_panel_layout = submitted.changesPanelLayout;
+  }
+  if (submitted.appStatusBarEnabled !== saved.appStatusBarEnabled) {
+    patch.app_status_bar_enabled = submitted.appStatusBarEnabled;
+  }
+  const metrics: NonNullable<UserSettingsUpdatePayload["system_metrics_display"]> = {};
+  if (submitted.showMetrics !== saved.showMetrics) {
+    metrics.show_in_topbar = submitted.showMetrics;
+  }
+  if (submitted.simplifiedMetrics !== saved.simplifiedMetrics) {
+    metrics.simplified = submitted.simplifiedMetrics;
+  }
+  if (Object.keys(metrics).length > 0) {
+    patch.system_metrics_display = metrics;
+  }
+  return patch;
+}
+
+function rebaseAppearanceDraft(
+  draft: AppearanceState,
+  baseline: AppearanceState,
+  nextSaved: AppearanceState,
+): AppearanceState {
+  return {
+    theme: draft.theme === baseline.theme ? nextSaved.theme : draft.theme,
+    settingsMenuMode:
+      draft.settingsMenuMode === baseline.settingsMenuMode
+        ? nextSaved.settingsMenuMode
+        : draft.settingsMenuMode,
+    startupPage:
+      draft.startupPage === baseline.startupPage ? nextSaved.startupPage : draft.startupPage,
+    changesPanelLayout:
+      draft.changesPanelLayout === baseline.changesPanelLayout
+        ? nextSaved.changesPanelLayout
+        : draft.changesPanelLayout,
+    appStatusBarEnabled:
+      draft.appStatusBarEnabled === baseline.appStatusBarEnabled
+        ? nextSaved.appStatusBarEnabled
+        : draft.appStatusBarEnabled,
+    showMetrics:
+      draft.showMetrics === baseline.showMetrics ? nextSaved.showMetrics : draft.showMetrics,
+    simplifiedMetrics:
+      draft.simplifiedMetrics === baseline.simplifiedMetrics
+        ? nextSaved.simplifiedMetrics
+        : draft.simplifiedMetrics,
+  };
+}
+
+function appearanceRevision(state: AppearanceState): string {
+  return JSON.stringify([
+    state.theme,
+    state.settingsMenuMode,
+    state.startupPage,
+    state.changesPanelLayout,
+    state.appStatusBarEnabled,
+    state.showMetrics,
+    state.simplifiedMetrics,
+  ]);
+}
+
 /**
  * Register the Appearance page with the shared save coordinator.
  *
@@ -358,27 +429,18 @@ function useAppearanceSaveContributor({
   const previewMenuMode = useAppStore((state) => state.previewSettingsMenuMode);
   const commitMenuMode = useAppStore((state) => state.commitSettingsMenuMode);
   const restoreMenuMode = useAppStore((state) => state.restoreSettingsMenuMode);
-  const revision = JSON.stringify(draft);
+  const revision = appearanceRevision(draft);
 
   useSettingsSaveContributor({
     id: "general-appearance",
     order: 10,
     revision,
-    isDirty: revision !== JSON.stringify(saved),
+    isDirty: revision !== appearanceRevision(saved),
     save: async () => {
       const submitted = draft;
-      const current = storeApi.getState().userSettings;
-      await updateUserSettings({
-        workspace_id: current.workspaceId || "",
-        repository_ids: current.repositoryIds || [],
-        startup_page: submitted.startupPage,
-        changes_panel_layout: submitted.changesPanelLayout,
-        app_status_bar_enabled: submitted.appStatusBarEnabled,
-        system_metrics_display: {
-          show_in_topbar: submitted.showMetrics,
-          simplified: submitted.simplifiedMetrics,
-        },
-      });
+      const patch = buildAppearanceUserSettingsPatch(submitted, saved);
+      const settingsAtSubmit = storeApi.getState().userSettings;
+      const response = await updateUserSettings(patch);
       commitTheme(submitted.theme);
       commitMenuMode(submitted.settingsMenuMode);
       // A draft edited while the save was in flight keeps its preview: what was
@@ -390,17 +452,19 @@ function useAppearanceSaveContributor({
       if (draftRef.current.settingsMenuMode !== submitted.settingsMenuMode) {
         previewMenuMode(draftRef.current.settingsMenuMode);
       }
-      setSaved(submitted);
-      setUserSettings({
-        ...storeApi.getState().userSettings,
-        changesPanelLayout: submitted.changesPanelLayout,
-        appStatusBarEnabled: submitted.appStatusBarEnabled,
-        startupPage: submitted.startupPage,
-        systemMetricsDisplay: {
-          showInTopbar: submitted.showMetrics,
-          simplified: submitted.simplifiedMetrics,
-        },
-      });
+      const latestUserSettings = storeApi.getState().userSettings;
+      const nextUserSettings =
+        latestUserSettings === settingsAtSubmit
+          ? mapUserSettingsResponse(response, latestUserSettings)
+          : latestUserSettings;
+      const confirmed = createAppearanceSavedState(
+        submitted.theme,
+        submitted.settingsMenuMode,
+        nextUserSettings,
+      );
+      setSaved(confirmed);
+      setDraft(rebaseAppearanceDraft(draftRef.current, submitted, confirmed));
+      setUserSettings(nextUserSettings);
     },
     discard: () => {
       setDraft(saved);
@@ -421,7 +485,20 @@ export function AppearanceSettings() {
   );
   const [draft, setDraft] = useState(saved);
   const draftRef = useRef(draft);
+  const savedRef = useRef(saved);
   draftRef.current = draft;
+  savedRef.current = saved;
+
+  useEffect(() => {
+    const previousSaved = savedRef.current;
+    const nextSaved = createAppearanceSavedState(
+      previousSaved.theme,
+      previousSaved.settingsMenuMode,
+      userSettings,
+    );
+    setDraft(rebaseAppearanceDraft(draftRef.current, previousSaved, nextSaved));
+    setSaved(nextSaved);
+  }, [userSettings]);
 
   useAppearanceSaveContributor({ draft, draftRef, saved, setSaved, setDraft });
 

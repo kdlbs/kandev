@@ -30,9 +30,22 @@ test.describe("Mobile App status bar preference", () => {
     const toggleRow = testPage.getByTestId("app-status-bar-toggle-row");
     const floatingSave = testPage.getByTestId("settings-floating-save");
     await expect(toggle).toHaveAttribute("aria-checked", "true");
+    await toggle.scrollIntoViewIfNeeded();
     expect((await toggleRow.boundingBox())?.height).toBeGreaterThanOrEqual(44);
-
-    await toggle.tap();
+    const toggleBox = await toggle.boundingBox();
+    if (!toggleBox) throw new Error("status bar preference target is not visible");
+    expect(toggleBox.height).toBeGreaterThanOrEqual(44);
+    expect(toggleBox.width).toBeGreaterThanOrEqual(44);
+    const tapX = toggleBox.x + toggleBox.width / 2;
+    const tapY = toggleBox.y + 5;
+    expect(
+      await testPage.evaluate(
+        ({ x, y }) => document.elementFromPoint(x, y)?.closest("[role='switch']")?.id,
+        { x: tapX, y: tapY },
+      ),
+    ).toBe("show-app-status-bar");
+    await testPage.touchscreen.tap(tapX, tapY);
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
     await expect(toggle).toHaveAttribute("data-settings-dirty", "true");
     await floatingSave.getByRole("button", { name: "Save changes" }).tap();
     await expect

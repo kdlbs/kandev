@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -105,8 +106,16 @@ func NewService(repo store.Repository, eventBus bus.EventBus, log *logger.Logger
 	}
 }
 
+func (s *Service) settingsUserID(ctx context.Context) string {
+	identity, ok := authn.IdentityFromContext(ctx)
+	if !ok || identity.Synthetic || identity.UserID == "" {
+		return s.defaultUser
+	}
+	return identity.UserID
+}
+
 func (s *Service) GetCurrentUser(ctx context.Context) (*models.User, error) {
-	user, err := s.repo.GetUser(ctx, s.defaultUser)
+	user, err := s.repo.GetUser(ctx, s.settingsUserID(ctx))
 	if err != nil {
 		return nil, ErrUserNotFound
 	}
@@ -114,7 +123,7 @@ func (s *Service) GetCurrentUser(ctx context.Context) (*models.User, error) {
 }
 
 func (s *Service) GetUserSettings(ctx context.Context) (*models.UserSettings, error) {
-	settings, err := s.repo.GetUserSettings(ctx, s.defaultUser)
+	settings, err := s.repo.GetUserSettings(ctx, s.settingsUserID(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +131,7 @@ func (s *Service) GetUserSettings(ctx context.Context) (*models.UserSettings, er
 }
 
 func (s *Service) PreferredShell(ctx context.Context) (string, error) {
-	settings, err := s.repo.GetUserSettings(ctx, s.defaultUser)
+	settings, err := s.repo.GetUserSettings(ctx, s.settingsUserID(ctx))
 	if err != nil {
 		return "", err
 	}
@@ -131,7 +140,7 @@ func (s *Service) PreferredShell(ctx context.Context) (string, error) {
 
 // GetDefaultUtilitySettings returns the user's default utility agent/model settings.
 func (s *Service) GetDefaultUtilitySettings(ctx context.Context) (agentID, model string, err error) {
-	settings, err := s.repo.GetUserSettings(ctx, s.defaultUser)
+	settings, err := s.repo.GetUserSettings(ctx, s.settingsUserID(ctx))
 	if err != nil {
 		return "", "", err
 	}
@@ -140,7 +149,7 @@ func (s *Service) GetDefaultUtilitySettings(ctx context.Context) (agentID, model
 
 // GetDefaultUtilityAgentProfileID returns the profile used by new built-in utility actions.
 func (s *Service) GetDefaultUtilityAgentProfileID(ctx context.Context) (string, error) {
-	settings, err := s.repo.GetUserSettings(ctx, s.defaultUser)
+	settings, err := s.repo.GetUserSettings(ctx, s.settingsUserID(ctx))
 	if err != nil {
 		return "", err
 	}
@@ -148,7 +157,7 @@ func (s *Service) GetDefaultUtilityAgentProfileID(ctx context.Context) (string, 
 }
 
 func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSettingsRequest) (*models.UserSettings, error) {
-	settings, err := s.repo.GetUserSettings(ctx, s.defaultUser)
+	settings, err := s.repo.GetUserSettings(ctx, s.settingsUserID(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +211,7 @@ func (s *Service) RecordTaskCreateLastUsed(ctx context.Context, patch models.Tas
 }
 
 func (s *Service) updateTaskCreateLastUsed(ctx context.Context, patch models.TaskCreateLastUsed) (*models.UserSettings, error) {
-	return s.repo.UpdateTaskCreateLastUsed(ctx, s.defaultUser, patch)
+	return s.repo.UpdateTaskCreateLastUsed(ctx, s.settingsUserID(ctx), patch)
 }
 
 func taskCreateLastUsedPatchEmpty(patch models.TaskCreateLastUsed) bool {
@@ -872,7 +881,7 @@ func (s *Service) ClearDefaultEditorID(ctx context.Context, editorID string) err
 	if editorID == "" {
 		return nil
 	}
-	settings, err := s.repo.GetUserSettings(ctx, s.defaultUser)
+	settings, err := s.repo.GetUserSettings(ctx, s.settingsUserID(ctx))
 	if err != nil {
 		return err
 	}
