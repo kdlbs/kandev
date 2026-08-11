@@ -5,6 +5,13 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
+
+	"github.com/kandev/kandev/internal/common/logger"
+	dbutil "github.com/kandev/kandev/internal/db"
 )
 
 // TestCutover_ElectsNewestWorktreeForContestedSlot proves that two live
@@ -200,5 +207,43 @@ func TestCutoverElection_RecordsDemotionDiagnostics(t *testing.T) {
 		if !strings.Contains(cut.demotions[0], want) {
 			t.Fatalf("demotion %q must mention %q", cut.demotions[0], want)
 		}
+	}
+}
+
+// TestCutoverElection_DoesNotLogRolledBackDemotions proves operators only see
+// demotion diagnostics after the ownership transaction commits successfully.
+func TestCutoverElection_DoesNotLogRolledBackDemotions(t *testing.T) {
+	db := openLegacyDB(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	if _, err := db.Exec(`
+		INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
+		VALUES ('task-log', 'ws-1', 'legacy', ?, ?)`, now, now); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+	for _, sessionID := range []string{"sess-log-old", "sess-log-new"} {
+		if _, err := db.Exec(`
+			INSERT INTO task_sessions (id, task_id, state, started_at, updated_at)
+			VALUES (?, 'task-log', 'RUNNING', ?, ?)`, sessionID, now, now); err != nil {
+			t.Fatalf("seed session: %v", err)
+		}
+	}
+	seedLegacySessionWorktree(t, db, "sess-log-old", "wt-log-old", "repo-log", "", "/tasks/old", "feature/old", "active", now.Add(-time.Hour))
+	seedLegacySessionWorktree(t, db, "sess-log-new", "wt-log-new", "repo-log", "", "/tasks/new", "feature/new", "active", now)
+
+	core, logs := observer.New(zapcore.WarnLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("create observer logger: %v", err)
+	}
+	repo := &Repository{
+		db: db, ro: db, log: log, migrate: dbutil.NewMigrateLogger(db, log),
+		failCutoverAfter: "pre_swap",
+	}
+	if err := repo.initSchema(); err == nil {
+		t.Fatal("expected injected cutover failure")
+	}
+	message := "cutover: duplicate legacy worktrees demoted to history"
+	if entries := logs.FilterMessage(message).All(); len(entries) != 0 {
+		t.Fatalf("rolled-back demotion logs = %d, want none", len(entries))
 	}
 }

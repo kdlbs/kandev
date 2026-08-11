@@ -131,7 +131,6 @@ func (r *Repository) normalizeTaskWorktreeOwnership() error {
 	if err := cut.normalize(tx); err != nil {
 		return err
 	}
-	r.logCutoverDemotions(cut)
 	if err := r.cutoverBuildShadows(tx); err != nil {
 		return err
 	}
@@ -153,6 +152,7 @@ func (r *Repository) normalizeTaskWorktreeOwnership() error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("cutover: commit: %w", err)
 	}
+	r.logCutoverDemotions(cut)
 	return nil
 }
 
