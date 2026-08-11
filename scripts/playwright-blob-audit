@@ -1,0 +1,179 @@
+#!/usr/bin/env python3
+"""Audit Playwright blob reports for retries, errors, and unexpected results."""
+
+from __future__ import annotations
+
+import argparse
+import io
+import json
+import sys
+import zipfile
+from collections import Counter
+from pathlib import Path, PurePosixPath
+from typing import Iterable
+
+
+EXPECTED_STATUSES = {"passed", "skipped"}
+
+
+def is_report_jsonl(path: str | Path) -> bool:
+    name = Path(path).name
+    return name == "report.jsonl" or (name.startswith("report-") and name.endswith(".jsonl"))
+
+
+def is_report_zip(path: str | Path) -> bool:
+    name = Path(path).name
+    return name.startswith("report-") and name.endswith(".zip")
+
+
+def discover_reports(inputs: Iterable[Path]) -> list[tuple[str, Path, str | None]]:
+    """Return sorted (kind, path, member) tuples without duplicate inputs."""
+
+    reports: dict[tuple[str, str, str | None], tuple[str, Path, str | None]] = {}
+
+    for input_path in inputs:
+        if not input_path.exists():
+            raise FileNotFoundError(input_path)
+
+        candidates = [input_path] if input_path.is_file() else sorted(input_path.rglob("*"))
+        for candidate in candidates:
+            if not candidate.is_file():
+                continue
+            if candidate.suffix == ".zip" and (is_report_zip(candidate) or candidate == input_path):
+                try:
+                    with zipfile.ZipFile(candidate) as archive:
+                        for member in archive.namelist():
+                            if is_report_jsonl(PurePosixPath(member).name):
+                                key = ("zip", str(candidate), member)
+                                reports[key] = ("zip", candidate, member)
+                except zipfile.BadZipFile as exc:
+                    raise ValueError(f"invalid Playwright report archive: {candidate}") from exc
+            elif is_report_jsonl(candidate):
+                key = ("file", str(candidate), None)
+                reports[key] = ("file", candidate, None)
+
+    return sorted(reports.values(), key=lambda report: (str(report[1]), report[2] or ""))
+
+
+def iter_report_lines(kind: str, path: Path, member: str | None) -> Iterable[tuple[int, str]]:
+    if kind == "file":
+        with path.open("r", encoding="utf-8") as stream:
+            for line_number, line in enumerate(stream, start=1):
+                yield line_number, line
+        return
+
+    assert member is not None
+    with zipfile.ZipFile(path) as archive:
+        with archive.open(member) as binary_stream:
+            stream = io.TextIOWrapper(binary_stream, encoding="utf-8")
+            for line_number, line in enumerate(stream, start=1):
+                yield line_number, line
+
+
+def result_from(event: dict) -> dict:
+    params = event.get("params")
+    if not isinstance(params, dict):
+        params = {}
+    result = params.get("result")
+    if not isinstance(result, dict):
+        result = event.get("result")
+    return result if isinstance(result, dict) else {}
+
+
+def audit_reports(reports: list[tuple[str, Path, str | None]]) -> dict:
+    attempt_count = 0
+    retry_attempt_count = 0
+    status_counts: Counter[str] = Counter()
+    unexpected_statuses: Counter[str] = Counter()
+    error_result_count = 0
+    parse_error_count = 0
+    event_count = 0
+    report_names: list[str] = []
+
+    for kind, path, member in reports:
+        report_name = f"{path}!{member}" if member is not None else str(path)
+        report_names.append(report_name)
+        for line_number, raw_line in iter_report_lines(kind, path, member):
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                parse_error_count += 1
+                continue
+            if not isinstance(event, dict):
+                continue
+
+            method = event.get("method") or event.get("event") or event.get("type")
+            if method not in {"onTestBegin", "onTestEnd"}:
+                continue
+            event_count += 1
+            result = result_from(event)
+
+            if method == "onTestBegin":
+                attempt_count += 1
+                retry = result.get("retry", 0)
+                if isinstance(retry, (int, float)) and not isinstance(retry, bool) and retry > 0:
+                    retry_attempt_count += 1
+                continue
+
+            status = result.get("status")
+            if status is None:
+                params = event.get("params")
+                status = params.get("status") if isinstance(params, dict) else event.get("status")
+            status_name = str(status) if status is not None else "unknown"
+            status_counts[status_name] += 1
+            if status_name not in EXPECTED_STATUSES:
+                unexpected_statuses[status_name] += 1
+            errors = result.get("errors")
+            if errors:
+                error_result_count += 1
+
+    violations: list[str] = []
+    if retry_attempt_count:
+        violations.append(f"retry_attempts={retry_attempt_count}")
+    if error_result_count:
+        violations.append(f"error_results={error_result_count}")
+    if unexpected_statuses:
+        violations.append(f"unexpected_statuses={dict(sorted(unexpected_statuses.items()))}")
+    if parse_error_count:
+        violations.append(f"parse_errors={parse_error_count}")
+    if not event_count:
+        violations.append("no_test_events")
+
+    return {
+        "reports": report_names,
+        "report_count": len(report_names),
+        "attempt_count": attempt_count,
+        "retry_attempt_count": retry_attempt_count,
+        "status_counts": dict(sorted(status_counts.items())),
+        "error_result_count": error_result_count,
+        "unexpected_statuses": dict(sorted(unexpected_statuses.items())),
+        "parse_error_count": parse_error_count,
+        "violations": violations,
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Audit Playwright report-*.zip/report.jsonl artifacts for retries and errors."
+    )
+    parser.add_argument("paths", nargs="+", type=Path, help="report files, archives, or directories")
+    args = parser.parse_args(argv)
+
+    try:
+        reports = discover_reports(args.paths)
+        if not reports:
+            raise ValueError("no report-*.zip or report.jsonl artifacts found")
+        summary = audit_reports(reports)
+    except (FileNotFoundError, OSError, ValueError) as exc:
+        print(f"playwright-blob-audit: {exc}", file=sys.stderr)
+        return 2
+
+    print(json.dumps(summary, indent=2, sort_keys=True))
+    return 1 if summary["violations"] else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

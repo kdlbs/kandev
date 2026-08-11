@@ -91,6 +91,11 @@ default:
 4. Run the task's exact targeted unit, integration, or E2E command.
 5. Mark the task `done` and update `plan.md` status in the primary session.
 
+For persisted defaults or coupled settings, audit every write/reset path for
+explicit empty or null values. Add the smallest invalid-pair regression,
+including fixture coverage, and verify normalized read-back plus existing
+validation.
+
 When the user explicitly authorizes subagents, follow
 `/planner-orchestration`: native delegation only, current user-selected model,
 `fork_turns: "none"`, compact task-file handoffs, no recursive spawning, and

@@ -49,3 +49,14 @@ Before fixing, state:
 - exact condition that triggers it;
 - smallest input or state needed to reproduce;
 - code path from input to failure.
+
+## Workflow Transition Triage
+
+For a partial-success report where a workflow step mutates state but sends no
+prompt or message, inspect the serialized step and distinguish payload fields
+from trigger actions: `prompt` supplies content, while `auto_start_agent`
+dispatches it. Trace session identity separately; fixed-profile switches may
+retain legacy implicit-launch behavior, while in-place mutations preserve the
+session and do not satisfy a `sessionSwitched` gate. Verify the distinction with
+paired focused service tests—with and without the dispatch action—that assert
+both the state mutation and the resulting message/prompt output.
