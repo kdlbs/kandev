@@ -1,7 +1,7 @@
 ---
 status: shipped
 created: 2026-06-23
-updated: 2026-07-15
+updated: 2026-08-11
 owner: tbd
 ---
 
@@ -62,8 +62,11 @@ kandev --headless --port <available-loopback-port>
 
 with `KANDEV_SERVER_HOST=127.0.0.1`, and waits for `GET /health`. Each launch supplies a generated
 `KANDEV_DESKTOP_HEALTH_TOKEN`; readiness requires the same value in the successful response's
-`X-Kandev-Desktop-Health-Token` header before the WebView navigates to the backend origin. A second
-instance focuses the first and does not start another backend.
+`X-Kandev-Desktop-Health-Token` header before the WebView navigates to the backend origin. The
+desktop shell also sets `KANDEV_DESKTOP_NATIVE_NOTIFICATIONS=true` to identify the launch as
+desktop-owned. The nested native launcher must forward the shell's exact non-empty health token to
+the backend and use it for its own readiness poll rather than replacing it with another token. A
+second instance focuses the first and does not start another backend.
 
 The shell preserves the existing GUI-launch `PATH` normalization and the existing Kandev data
 directory, SQLite database, worktrees, executor settings, integrations, and agent configuration.
@@ -244,6 +247,10 @@ display before being shown.
   **THEN** the current WebView zoom decreases, increases, or resets without resizing the window.
 - **GIVEN** the machine has no Node.js runtime, **WHEN** the packaged desktop app starts, **THEN**
   its bundled native launcher/backend and embedded SPA become ready without a Node web server.
+- **GIVEN** the desktop shell starts its bundled native launcher with a generated health token,
+  **WHEN** the launcher starts and polls the backend, **THEN** the launcher preserves that exact
+  token through the backend response and the WebView navigates without reaching the startup
+  timeout.
 - **GIVEN** New Task is the topmost dismissible dialog, **WHEN** the user presses `Cmd+W`, **THEN**
   that dialog closes and the app and backend remain running.
 - **GIVEN** a closable file tab is focused and no dismissible overlay is open, **WHEN** the user

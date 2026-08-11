@@ -326,6 +326,8 @@
   "integrationDescriptionJira": "Credenciais do Atlassian Cloud e vigilâncias de issues por JQL.",
   "integrationDescriptionLinear": "Chave de API pessoal e pré-definições da equipa.",
   "integrationDescriptionSentry": "Token de autenticação, pré-definições de organização/projeto e exploração de issues.",
+  "hideDisabledAgentProfilesFromNav": "Ocultar os perfis de agente desativados da navegação do painel esquerdo",
+  "hideDisabledAgentProfilesFromNavDescription": "Quando está ligado, um perfil de agente desativado é removido da navegação do painel esquerdo, mesmo que continue configurado.",
   "hideDisabledIntegrationsFromNav": "Ocultar as integrações desativadas da navegação do painel esquerdo",
   "hideDisabledIntegrationsFromNavDescription": "Quando está ligado, uma integração desativada é removida da barra lateral e do menu móvel, mesmo que continue configurada.",
   "invalidJson": "JSON inválido",

@@ -238,6 +238,13 @@ export function buildAgentsBranch(
    * moment before discovery lands would be worse than saying nothing.
    */
   detectedNames?: ReadonlySet<string>,
+  /**
+   * When on ("Hide disabled agent profiles from left panel navigation"),
+   * profiles with `enabled === false` are omitted from the branch. `undefined`
+   * (the setting off) skips filtering entirely; profiles whose `enabled` is
+   * absent are legacy and always stay listed.
+   */
+  hideDisabled?: boolean,
 ): SettingsMenuNode[] {
   return agents
     .filter((agent) => agent.profiles.length > 0)
@@ -254,13 +261,15 @@ export function buildAgentsBranch(
           ? { badge: "not-installed" as const }
           : {}),
         // The agent is kandev's; only the profiles under it are the user's.
-        children: agent.profiles.map((profile) => ({
-          key: `agent:${agent.name}:profile:${profile.id}`,
-          href: `${agentHref}/profiles/${profile.id}`,
-          label: { text: profile.name },
-          isUserRecord: true,
-          ...(profile.enabled === false ? { badge: "disabled" as const } : {}),
-        })),
+        children: agent.profiles
+          .filter((profile) => !hideDisabled || (profile.enabled ?? true))
+          .map((profile) => ({
+            key: `agent:${agent.name}:profile:${profile.id}`,
+            href: `${agentHref}/profiles/${profile.id}`,
+            label: { text: profile.name },
+            isUserRecord: true,
+            ...(profile.enabled === false ? { badge: "disabled" as const } : {}),
+          })),
       };
     });
 }
