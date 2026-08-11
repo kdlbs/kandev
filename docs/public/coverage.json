@@ -24,7 +24,7 @@
       "docs": ["use-kandev", "tasks-and-workflows", "configuration"],
       "sources": ["apps/backend/internal/task/handlers/workspace_handlers.go", "apps/web/components/app-sidebar/app-sidebar-workspace-picker.tsx"],
       "tests": ["apps/backend/internal/task/handlers/workspace_handlers_test.go", "apps/web/components/app-sidebar/app-sidebar-workspace-picker.test.tsx"],
-      "settingsRoutes": ["/settings/workspace"],
+      "settingsRoutes": ["/settings/workspace", "/settings/workspaces"],
       "mcpTools": ["list_repositories_kandev", "list_workspaces_kandev"]
     },
     {
@@ -189,7 +189,7 @@
         "apps/web/components/settings/agent-profile-page.test.tsx",
         "apps/web/hooks/domains/settings/use-dynamic-models.test.ts"
       ],
-      "settingsRoutes": ["/settings/agents", "/settings/prompts", "/settings/utility-agents"],
+      "settingsRoutes": ["/settings/agents", "/settings/agents/browse", "/settings/prompts", "/settings/utility-agents"],
       "mcpTools": [
         "create_agent_profile_kandev",
         "delete_agent_profile_kandev",
@@ -256,6 +256,12 @@
       "sources": ["apps/web/src/settings-routes.tsx", "apps/web/components/settings/general-settings.tsx", "apps/web/components/settings/layouts/layout-settings.tsx"],
       "tests": ["apps/web/src/settings-routes.test.ts", "apps/web/components/settings/terminal-settings.test.ts", "apps/web/lib/layout/layout-profiles.test.ts"],
       "settingsRoutes": [
+        "/settings/preferences",
+        "/settings/preferences/appearance",
+        "/settings/preferences/keyboard-shortcuts",
+        "/settings/preferences/layouts",
+        "/settings/preferences/notifications",
+        "/settings/preferences/terminal-editors",
         "/settings/general",
         "/settings/general/appearance",
         "/settings/general/editors",
@@ -266,6 +272,7 @@
         "/settings/general/sprites",
         "/settings/general/task-actions",
         "/settings/general/terminal",
+        "/settings/secrets",
         "/settings/preferences/task-behavior"
       ]
     },
@@ -315,6 +322,7 @@
         "/settings/general/message-queue",
         "/settings/system/about",
         "/settings/system/backups",
+        "/settings/system/data-storage",
         "/settings/system/database",
         "/settings/system/feature-toggles",
         "/settings/system/licenses",
