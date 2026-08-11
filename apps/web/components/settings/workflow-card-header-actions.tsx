@@ -1,6 +1,6 @@
 "use client";
 
-import { IconDownload, IconTrash } from "@tabler/icons-react";
+import { IconCopy, IconDownload, IconTrash } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -13,8 +13,12 @@ type WorkflowCardHeaderActionsProps = {
   setExportOpen: (open: boolean) => void;
   toast: ReturnType<typeof useToast>["toast"];
   onDeleteClick: () => Promise<void>;
+  onDuplicateClick: () => Promise<void>;
   deleteDisabled: boolean;
   exportDisabled: boolean;
+  duplicateDisabled: boolean;
+  duplicateDisabledReason?: string;
+  duplicateLoading: boolean;
   readOnly: boolean;
 };
 
@@ -24,8 +28,12 @@ export function WorkflowCardHeaderActions({
   setExportOpen,
   toast,
   onDeleteClick,
+  onDuplicateClick,
   deleteDisabled,
   exportDisabled,
+  duplicateDisabled,
+  duplicateDisabledReason,
+  duplicateLoading,
   readOnly,
 }: WorkflowCardHeaderActionsProps) {
   const { t } = useTranslation();
@@ -52,6 +60,30 @@ export function WorkflowCardHeaderActions({
           </span>
         </TooltipTrigger>
         {exportDisabled && <TooltipContent>{t("workflows:saveBeforeExporting")}</TooltipContent>}
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            tabIndex={duplicateDisabled ? 0 : -1}
+            className="inline-flex"
+            aria-label={duplicateDisabledReason}
+          >
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void onDuplicateClick()}
+              disabled={duplicateDisabled}
+              className="cursor-pointer min-h-11 sm:min-h-9"
+              data-testid="duplicate-workflow-button"
+            >
+              <IconCopy className="h-4 w-4 mr-2" />
+              {duplicateLoading
+                ? t("workflows:duplicatingWorkflow")
+                : t("workflows:duplicateWorkflow")}
+            </Button>
+          </span>
+        </TooltipTrigger>
+        {duplicateDisabledReason && <TooltipContent>{duplicateDisabledReason}</TooltipContent>}
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>

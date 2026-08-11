@@ -99,6 +99,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [explicit-completion-signal](workflow/explicit-completion-signal/spec.md) | shipped |
 | [cancelled-turn-completion](workflow/cancelled-turn-completion/spec.md) | building |
 | [conditional-session-settings](workflow-session-settings/spec.md) | approved |
+| [workflow-duplication](workflow-duplication/spec.md) | draft |
 
 ## agents/ — agent governance
 

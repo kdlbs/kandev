@@ -186,6 +186,7 @@ function useWorkflowActions({
   const finalizedWorkflowIdsRef = useRef(new Map<string, string>());
   const creation = useWorkflowCreation({
     workspace,
+    workflowItems,
     workflowTemplates,
     setWorkflowItems,
   });
@@ -297,6 +298,7 @@ type WorkflowListProps = {
     u: { name?: string; description?: string; agent_profile_id?: string },
   ) => void;
   onDelete: (id: string) => void;
+  onDuplicate: (workflow: Workflow, steps: WorkflowStep[]) => void;
   onWorkflowSaved: (params: WorkflowSavedParams) => void;
   onDiscard: (id: string) => void;
   onReorder: (items: Workflow[]) => void;
@@ -355,6 +357,7 @@ function WorkflowList({
   isImproveWorkspace,
   onUpdate,
   onDelete,
+  onDuplicate,
   onWorkflowSaved,
   onDiscard,
   onReorder,
@@ -406,6 +409,7 @@ function WorkflowList({
                 onDeleteWorkflow={async () => {
                   await onDelete(workflow.id);
                 }}
+                onDuplicateWorkflow={(steps) => onDuplicate(workflow, steps)}
                 onWorkflowSaved={onWorkflowSaved}
                 onDiscardWorkflow={() => onDiscard(workflow.id)}
               />
@@ -479,6 +483,7 @@ export function WorkspaceWorkflowsClient({
           isImproveWorkspace={isImproveWorkspace}
           onUpdate={page.handleUpdateWorkflow}
           onDelete={page.handleDeleteWorkflow}
+          onDuplicate={page.handleDuplicateWorkflow}
           onWorkflowSaved={page.handleWorkflowSaved}
           onDiscard={page.handleDiscardWorkflow}
           onReorder={page.handleReorderWorkflows}
