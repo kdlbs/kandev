@@ -184,6 +184,41 @@ func TestHTTPAppRegistrationManifestIsRouteBoundAndReturnsToWorkspace(t *testing
 	}
 }
 
+func TestHTTPAppRegistrationManifestCallbackAllowsNonDefaultAdmin(t *testing.T) {
+	router, _, store := setupAppRegistrationController(t)
+	seedConnectionWorkspaces(t, store, "workspace-1")
+
+	startRequest := httptest.NewRequest(http.MethodPost,
+		"/api/v1/github/app/registrations/manifest/start", strings.NewReader(`{
+			"workspace_id":"workspace-1","display_name":"Work automation",
+			"owner_type":"organization","owner_login":"acme","visibility":"private",
+			"public_base_url":"https://kandev.example"
+		}`))
+	startRequest.Header.Set("Content-Type", "application/json")
+	startRequest = startRequest.WithContext(authn.WithIdentity(startRequest.Context(), authn.Identity{
+		UserID: "admin-1", Role: authn.RoleAdmin,
+	}))
+	start := httptest.NewRecorder()
+	router.ServeHTTP(start, startRequest)
+	if start.Code != http.StatusOK {
+		t.Fatalf("start = %d %s", start.Code, start.Body.String())
+	}
+	var started AppRegistrationManifestStart
+	if err := json.Unmarshal(start.Body.Bytes(), &started); err != nil || started.RegistrationID == "" {
+		t.Fatalf("start response = %s, error = %v", start.Body.String(), err)
+	}
+
+	callback := httptest.NewRecorder()
+	router.ServeHTTP(callback, httptest.NewRequest(http.MethodGet,
+		"/api/v1/github/app/registrations/"+started.RegistrationID+
+			"/manifest/callback?state="+started.State+"&code=one-time-code", nil))
+	assertPrivateGitHubRedirect(t, callback)
+	if location := callback.Header().Get("Location"); !strings.Contains(location, "workspace_id=workspace-1") ||
+		!strings.Contains(location, "github_result=app_registered") {
+		t.Fatalf("callback location = %q", location)
+	}
+}
+
 func TestHTTPAppRegistrationCatalogRequiresAdminIdentity(t *testing.T) {
 	router, _, store := setupAppRegistrationController(t)
 	seedConnectionWorkspaces(t, store, "workspace-1")
@@ -511,7 +546,7 @@ func TestHTTPAppRegistrationImportPreparationIsSingleUse(t *testing.T) {
 		preparation.ManifestCallbackURL != base+"/manifest/callback" ||
 		preparation.InstallCallbackURL != base+"/install/callback" ||
 		preparation.PersonalCallbackURL != base+"/personal/callback" ||
-		preparation.WebhookURL != base+"/webhook" || preparation.SetupURL != preparation.InstallCallbackURL ||
+		preparation.WebhookURL != base+"/webhook" || preparation.SetupURL != "" ||
 		preparation.Permissions["contents"] != "write" ||
 		!reflect.DeepEqual(preparation.Events, []string{"push", "check_run"}) {
 		t.Fatalf("preparation = %+v", preparation)

@@ -209,7 +209,7 @@ copyable settings for that pending import. It is short-lived and single-use.
    a root credential and never put it in workspace environment variables or executor profiles.
 4. Kandev authenticates as the App, verifies its ID, owner, slug, homepage, permissions, events,
    and webhook settings where GitHub exposes them, then encrypts the credential bundle. You must
-   confirm callback/setup settings that GitHub's API does not expose.
+   confirm callback settings that GitHub's API does not expose.
 5. Select and install the imported registration. Importing alone never replaces the workspace's
    current PAT, CLI account, or App installation.
 

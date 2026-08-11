@@ -172,10 +172,10 @@ a row of chips. The App subscribes to the configurable `push` and `check_run` ev
 `installation`, `installation_repositories`, and `github_app_authorization` lifecycle events
 automatically, so they are handled but are not part of the requested event policy.
 
-An imported App must meet the same callback, setup URL, webhook, event, and permission requirements.
-Kandev validates the App identity and reports missing capabilities after installation. It does not
-silently change an imported App's GitHub settings. The guide provides exact values and GitHub links
-for the user to apply.
+An imported App must meet the same callback, OAuth-on-install, webhook, event, and permission
+requirements. Kandev validates the App identity and reports missing capabilities after installation.
+It does not silently change an imported App's GitHub settings. The guide provides exact values and
+GitHub links for the user to apply.
 
 ## Data Model
 
@@ -301,8 +301,9 @@ before exposing registration management.
 - `POST /api/v1/github/app/registrations/import/prepare` creates a short-lived, single-use import
   preparation for the initiating workspace. It returns `registration_id`, `public_base_url`,
   `manifest_callback_url`, `install_callback_url`, `personal_callback_url`, `webhook_url`,
-  `setup_url`, `permissions`, `events`, and `expires_at` so the user can configure the existing App
-  before submitting any root credentials.
+  `permissions`, `events`, and `expires_at` so the user can configure the existing App before
+  submitting any root credentials. The legacy `setup_url` response field is retained for client
+  compatibility and is always empty because OAuth-on-install disables GitHub's Setup URL.
 - `POST /api/v1/github/app/registrations/import` consumes the prepared `registration_id` and accepts
   the workspace context, label, App ID, client ID/secret, slug, private key, webhook secret, owner,
   and visibility. It verifies the App via GitHub before atomically persisting it. Duplicate
