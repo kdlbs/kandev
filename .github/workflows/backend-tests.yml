@@ -340,7 +340,9 @@ jobs:
   test-windows:
     name: Backend (windows)
     runs-on: windows-latest
-    timeout-minutes: 15
+    # The race-sensitive Windows package suite can exceed 15 minutes on a
+    # busy hosted runner; keep the cap finite while allowing normal completion.
+    timeout-minutes: 20
     # Least-privilege: this job only reads source and runs tests, no PR/issue
     # writes or release operations. Flagged by CodeQL workflow audit + matching
     # CodeRabbit nitpick.

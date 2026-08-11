@@ -2,8 +2,13 @@ import type { SeedData } from "../fixtures/test-base";
 import type { ApiClient } from "./api-client";
 
 export const REVIEW_OWNER = "testorg";
-export const REVIEW_REPO = "testrepo";
 export const REVIEW_SHARED_FILE = "shared-pr.ts";
+
+/** Keep the mocked GitHub repository tied to the worker's seeded repository. */
+export function reviewRepositoryName(seedData: Pick<SeedData, "repositoryId">): string {
+  const suffix = seedData.repositoryId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 12);
+  return `e2e-review-${suffix.toLowerCase()}`;
+}
 
 export const REVIEW_PRS = [
   {
@@ -28,6 +33,7 @@ export async function seedMultiPRReviewTask(
   title: string,
   description = "/e2e:simple-message",
 ) {
+  const repositoryName = reviewRepositoryName(seedData);
   await apiClient.mockGitHubReset();
   await apiClient.mockGitHubSetUser("reviewer");
 
@@ -57,15 +63,15 @@ export async function seedMultiPRReviewTask(
       base_branch: "main",
       author_login: "reviewer",
       repo_owner: REVIEW_OWNER,
-      repo_name: REVIEW_REPO,
-      html_url: `https://github.com/${REVIEW_OWNER}/${REVIEW_REPO}/pull/${pr.number}`,
+      repo_name: repositoryName,
+      html_url: `https://github.com/${REVIEW_OWNER}/${repositoryName}/pull/${pr.number}`,
       additions: 1,
       deletions: 0,
     })),
   );
 
   for (const pr of REVIEW_PRS) {
-    await apiClient.mockGitHubAddPRFiles(REVIEW_OWNER, REVIEW_REPO, pr.number, [
+    await apiClient.mockGitHubAddPRFiles(REVIEW_OWNER, repositoryName, pr.number, [
       {
         filename: REVIEW_SHARED_FILE,
         status: "added",
@@ -78,7 +84,7 @@ export async function seedMultiPRReviewTask(
       workspace_id: seedData.workspaceId,
       task_id: task.id,
       repository_id: seedData.repositoryId,
-      pr_url: `https://github.com/${REVIEW_OWNER}/${REVIEW_REPO}/pull/${pr.number}`,
+      pr_url: `https://github.com/${REVIEW_OWNER}/${repositoryName}/pull/${pr.number}`,
     });
   }
 

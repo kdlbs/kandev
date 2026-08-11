@@ -4,7 +4,7 @@ test.describe("Factory Reset dialog", () => {
   test("confirm button only enables on the literal 'RESET' token; cancel closes the modal", async ({
     testPage,
   }) => {
-    await testPage.goto("/settings/system/database");
+    await testPage.goto("/settings/system/data-storage");
     await expect(testPage.getByTestId("system-database-card")).toBeVisible();
 
     await testPage.getByTestId("system-factory-reset-button").click();

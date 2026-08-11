@@ -26,7 +26,7 @@ import {
   useDialogAttachments,
 } from "./session-dialog-shared";
 import { ContextZone } from "./chat/context-items/context-zone";
-import { clampTaskTitleInput } from "@/lib/task-title";
+import { useTaskTitleSelectionRestore } from "@/hooks/use-task-title-selection-restore";
 import { TaskAutopilotToggle } from "@/components/task-autopilot-toggle";
 
 export function WorktreeBadge({ show, branch }: { show: boolean; branch: string | null }) {
@@ -428,6 +428,7 @@ export function SubtaskFormBody({
   onSubmit,
 }: SubtaskFormBodyProps) {
   const { t } = useTranslation();
+  const { inputRef, clampChange } = useTaskTitleSelectionRestore(title);
   const showWorktreeBadge = shouldShowWorktreeBadge(fs, worktreeBranch, parentRepositoryId);
   const inheritParent = workspaceMode === "inherit_parent";
   return (
@@ -441,9 +442,10 @@ export function SubtaskFormBody({
             {t("common:title")}
           </label>
           <Input
+            ref={inputRef}
             id="subtask-title-input"
             value={title}
-            onChange={(e) => setTitle(clampTaskTitleInput(e.target.value))}
+            onChange={(e) => setTitle(clampChange(e))}
             placeholder={t("common:subtaskTitle")}
             className="min-w-0 max-w-full text-sm"
             data-testid="subtask-title-input"

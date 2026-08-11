@@ -16,7 +16,7 @@ import (
 // allTimeActivityDays is the number of days shown in the daily activity heatmap for the "all" range.
 const allTimeActivityDays = 365
 const taskStatsLimit = 200
-const agentUsageLimit = 5
+const modelUsageLimit = 5
 
 type StatsHandlers struct {
 	repo   repository.Repository
@@ -41,7 +41,7 @@ func (h *StatsHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/workspaces/:id/stats/tasks", h.httpGetTaskStats)
 	api.GET("/workspaces/:id/stats/daily-activity", h.httpGetDailyActivity)
 	api.GET("/workspaces/:id/stats/completed-activity", h.httpGetCompletedActivity)
-	api.GET("/workspaces/:id/stats/agent-usage", h.httpGetAgentUsage)
+	api.GET("/workspaces/:id/stats/model-usage", h.httpGetModelUsage)
 	api.GET("/workspaces/:id/stats/repositories", h.httpGetRepositoryStats)
 	api.GET("/workspaces/:id/stats/git", h.httpGetGitStats)
 }
@@ -128,17 +128,17 @@ func (h *StatsHandlers) httpGetCompletedActivity(c *gin.Context) {
 	c.JSON(http.StatusOK, completedActivityToDTOs(activity))
 }
 
-func (h *StatsHandlers) httpGetAgentUsage(c *gin.Context) {
+func (h *StatsHandlers) httpGetModelUsage(c *gin.Context) {
 	workspaceID, start, _, ok := h.parseRequest(c)
 	if !ok {
 		return
 	}
-	usage, err := h.repo.GetAgentUsage(c.Request.Context(), workspaceID, agentUsageLimit, start)
+	usage, err := h.repo.GetModelUsage(c.Request.Context(), workspaceID, modelUsageLimit, start)
 	if err != nil {
-		h.fail(c, workspaceID, "agent usage", err)
+		h.fail(c, workspaceID, "model usage", err)
 		return
 	}
-	c.JSON(http.StatusOK, agentUsageToDTOs(usage))
+	c.JSON(http.StatusOK, modelUsageToDTOs(usage))
 }
 
 func (h *StatsHandlers) httpGetRepositoryStats(c *gin.Context) {
@@ -241,16 +241,14 @@ func completedActivityToDTOs(items []*models.CompletedTaskActivity) []dto.Comple
 	return result
 }
 
-func agentUsageToDTOs(items []*models.AgentUsage) []dto.AgentUsageDTO {
-	result := make([]dto.AgentUsageDTO, 0, len(items))
-	for _, au := range items {
-		result = append(result, dto.AgentUsageDTO{
-			AgentProfileID:   au.AgentProfileID,
-			AgentProfileName: au.AgentProfileName,
-			AgentModel:       au.AgentModel,
-			SessionCount:     au.SessionCount,
-			TurnCount:        au.TurnCount,
-			TotalDurationMs:  au.TotalDurationMs,
+func modelUsageToDTOs(items []*models.ModelUsage) []dto.ModelUsageDTO {
+	result := make([]dto.ModelUsageDTO, 0, len(items))
+	for _, mu := range items {
+		result = append(result, dto.ModelUsageDTO{
+			Model:           mu.Model,
+			SessionCount:    mu.SessionCount,
+			TurnCount:       mu.TurnCount,
+			TotalDurationMs: mu.TotalDurationMs,
 		})
 	}
 	return result

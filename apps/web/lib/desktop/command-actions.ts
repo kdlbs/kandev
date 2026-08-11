@@ -17,7 +17,7 @@ export function createDesktopCommandActions(
 ): DesktopCommandActions {
   return {
     "close-context": dependencies.closeContext,
-    "open-settings": () => dependencies.navigate("/settings/general"),
+    "open-settings": () => dependencies.navigate("/settings/preferences/appearance"),
     "new-task": dependencies.requestNewTask,
   };
 }
