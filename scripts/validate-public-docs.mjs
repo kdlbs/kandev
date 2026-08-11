@@ -659,7 +659,7 @@ async function collectSettingsRoutes(root) {
     "utf8",
   );
   const routeTable = source.match(
-    /const SETTINGS_ROUTES[\s\S]*?\n};\s*\n\s*export function SettingsRoutes/,
+    /const SETTINGS_ROUTES[\s\S]*?\n};/,
   )?.[0];
   if (!routeTable) {
     throw new Error("could not locate SETTINGS_ROUTES in settings-routes.tsx");
