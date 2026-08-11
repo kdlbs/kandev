@@ -7,6 +7,8 @@ import { AppearanceSettings } from "./general-settings";
 const apiMocks = vi.hoisted(() => ({ updateUserSettings: vi.fn() }));
 const SHOW_STATUS_BAR_LABEL = "Show status bar";
 const SAVE_CHANGES_LABEL = "Save changes";
+const CHECKED_STATE = "checked";
+const DATA_STATE_ATTRIBUTE = "data-state";
 const themeMocks = vi.hoisted(() => ({
   previewTheme: vi.fn(),
   commitTheme: vi.fn(),
@@ -133,6 +135,41 @@ async function verifyNewerLiveUpdateWinsOverOlderSaveResponse() {
   );
 }
 
+async function verifyEditDuringSaveSurvivesItsLiveUpdate() {
+  let resolveSave: (value: ReturnType<typeof appearanceSettingsResponse>) => void = () => {};
+  apiMocks.updateUserSettings.mockReturnValueOnce(
+    new Promise((resolve) => {
+      resolveSave = resolve;
+    }),
+  );
+  const view = renderAppearance();
+  const toggle = screen.getByRole("switch", { name: SHOW_STATUS_BAR_LABEL });
+
+  fireEvent.click(toggle);
+  fireEvent.click(await screen.findByRole("button", { name: SAVE_CHANGES_LABEL }));
+  await waitFor(() => expect(apiMocks.updateUserSettings).toHaveBeenCalledOnce());
+
+  fireEvent.click(toggle);
+  storeMocks.state = {
+    ...storeMocks.state,
+    userSettings: {
+      ...(storeMocks.state.userSettings as typeof defaultSettingsState.userSettings),
+      appStatusBarEnabled: false,
+    },
+  };
+  view.rerender(
+    <SettingsSaveProvider>
+      <AppearanceSettings />
+    </SettingsSaveProvider>,
+  );
+
+  await waitFor(() => expect(toggle.getAttribute(DATA_STATE_ATTRIBUTE)).toBe(CHECKED_STATE));
+  resolveSave(appearanceSettingsResponse({ app_status_bar_enabled: false }));
+  await waitFor(() => expect(storeMocks.setUserSettings).toHaveBeenCalledOnce());
+  expect(toggle.getAttribute(DATA_STATE_ATTRIBUTE)).toBe(CHECKED_STATE);
+  expect(toggle.getAttribute("data-settings-dirty")).toBe("true");
+}
+
 beforeEach(() => {
   apiMocks.updateUserSettings.mockReset();
   storeMocks.setUserSettings.mockReset();
@@ -165,7 +202,7 @@ describe("AppearanceSettings status bar preference", () => {
     renderAppearance();
 
     const toggle = screen.getByRole("switch", { name: SHOW_STATUS_BAR_LABEL });
-    expect(toggle.getAttribute("data-state")).toBe("checked");
+    expect(toggle.getAttribute(DATA_STATE_ATTRIBUTE)).toBe(CHECKED_STATE);
 
     fireEvent.click(toggle);
 
@@ -196,7 +233,7 @@ describe("AppearanceSettings status bar preference", () => {
     fireEvent.click(toggle);
     fireEvent.click(await screen.findByRole("button", { name: "Reset" }));
 
-    await waitFor(() => expect(toggle.getAttribute("data-state")).toBe("checked"));
+    await waitFor(() => expect(toggle.getAttribute(DATA_STATE_ATTRIBUTE)).toBe(CHECKED_STATE));
     expect(apiMocks.updateUserSettings).not.toHaveBeenCalled();
     expect(storeMocks.setUserSettings).not.toHaveBeenCalled();
   });
@@ -210,7 +247,7 @@ describe("AppearanceSettings status bar preference", () => {
     fireEvent.click(await screen.findByRole("button", { name: SAVE_CHANGES_LABEL }));
 
     expect(await screen.findByText("Couldn't save")).toBeTruthy();
-    expect(toggle.getAttribute("data-state")).toBe("unchecked");
+    expect(toggle.getAttribute(DATA_STATE_ATTRIBUTE)).toBe("unchecked");
     expect(toggle.getAttribute("data-settings-dirty")).toBe("true");
     expect(storeMocks.setUserSettings).not.toHaveBeenCalled();
     expect(
@@ -226,5 +263,10 @@ describe("AppearanceSettings status bar preference", () => {
   it(
     "does not replace a newer live update when an older save response finishes",
     verifyNewerLiveUpdateWinsOverOlderSaveResponse,
+  );
+
+  it(
+    "keeps an edit made during save when the submitted value arrives live",
+    verifyEditDuringSaveSurvivesItsLiveUpdate,
   );
 });

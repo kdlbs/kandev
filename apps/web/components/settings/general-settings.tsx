@@ -43,8 +43,14 @@ import { SleepInhibitionSettings } from "@/components/settings/sleep-inhibition-
 import { AppStatusBarSettingsCard } from "@/components/settings/app-status-bar-settings-card";
 import { SettingsMenuModeCard } from "@/components/settings/settings-menu-mode-card";
 import type { SettingsMenuMode } from "@/lib/settings/settings-menu-mode";
-import type { UserSettingsUpdatePayload } from "@/lib/types/http";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
+import {
+  appearanceRevision,
+  buildAppearanceUserSettingsPatch,
+  createAppearanceSavedState,
+  rebaseAppearanceDraft,
+  type AppearanceState,
+} from "@/components/settings/appearance-settings-state";
 
 function ThemeSettingsCard({
   theme,
@@ -168,28 +174,6 @@ function ChangesPanelLayoutCard({
       </CardContent>
     </SettingsCard>
   );
-}
-
-function createAppearanceSavedState(
-  theme: Theme,
-  settingsMenuMode: SettingsMenuMode,
-  userSettings: Pick<
-    UserSettingsState,
-    "appStatusBarEnabled" | "changesPanelLayout" | "startupPage" | "systemMetricsDisplay"
-  >,
-) {
-  return {
-    theme,
-    appStatusBarEnabled: userSettings.appStatusBarEnabled,
-    // Per-device, so it comes from the UI slice rather than `userSettings` —
-    // but it is drafted, previewed and saved alongside them, because the page
-    // has one save contributor and one Save changes control.
-    settingsMenuMode,
-    changesPanelLayout: userSettings.changesPanelLayout,
-    startupPage: userSettings.startupPage,
-    showMetrics: userSettings.systemMetricsDisplay.showInTopbar,
-    simplifiedMetrics: userSettings.systemMetricsDisplay.simplified,
-  };
 }
 
 function StartupPageSettingsSection({
@@ -330,77 +314,6 @@ export function TaskActionsSettings() {
   );
 }
 
-type AppearanceState = ReturnType<typeof createAppearanceSavedState>;
-
-function buildAppearanceUserSettingsPatch(
-  submitted: AppearanceState,
-  saved: AppearanceState,
-): UserSettingsUpdatePayload {
-  const patch: UserSettingsUpdatePayload = {};
-  if (submitted.startupPage !== saved.startupPage) {
-    patch.startup_page = submitted.startupPage;
-  }
-  if (submitted.changesPanelLayout !== saved.changesPanelLayout) {
-    patch.changes_panel_layout = submitted.changesPanelLayout;
-  }
-  if (submitted.appStatusBarEnabled !== saved.appStatusBarEnabled) {
-    patch.app_status_bar_enabled = submitted.appStatusBarEnabled;
-  }
-  const metrics: NonNullable<UserSettingsUpdatePayload["system_metrics_display"]> = {};
-  if (submitted.showMetrics !== saved.showMetrics) {
-    metrics.show_in_topbar = submitted.showMetrics;
-  }
-  if (submitted.simplifiedMetrics !== saved.simplifiedMetrics) {
-    metrics.simplified = submitted.simplifiedMetrics;
-  }
-  if (Object.keys(metrics).length > 0) {
-    patch.system_metrics_display = metrics;
-  }
-  return patch;
-}
-
-function rebaseAppearanceDraft(
-  draft: AppearanceState,
-  baseline: AppearanceState,
-  nextSaved: AppearanceState,
-): AppearanceState {
-  return {
-    theme: draft.theme === baseline.theme ? nextSaved.theme : draft.theme,
-    settingsMenuMode:
-      draft.settingsMenuMode === baseline.settingsMenuMode
-        ? nextSaved.settingsMenuMode
-        : draft.settingsMenuMode,
-    startupPage:
-      draft.startupPage === baseline.startupPage ? nextSaved.startupPage : draft.startupPage,
-    changesPanelLayout:
-      draft.changesPanelLayout === baseline.changesPanelLayout
-        ? nextSaved.changesPanelLayout
-        : draft.changesPanelLayout,
-    appStatusBarEnabled:
-      draft.appStatusBarEnabled === baseline.appStatusBarEnabled
-        ? nextSaved.appStatusBarEnabled
-        : draft.appStatusBarEnabled,
-    showMetrics:
-      draft.showMetrics === baseline.showMetrics ? nextSaved.showMetrics : draft.showMetrics,
-    simplifiedMetrics:
-      draft.simplifiedMetrics === baseline.simplifiedMetrics
-        ? nextSaved.simplifiedMetrics
-        : draft.simplifiedMetrics,
-  };
-}
-
-function appearanceRevision(state: AppearanceState): string {
-  return JSON.stringify([
-    state.theme,
-    state.settingsMenuMode,
-    state.startupPage,
-    state.changesPanelLayout,
-    state.appStatusBarEnabled,
-    state.showMetrics,
-    state.simplifiedMetrics,
-  ]);
-}
-
 /**
  * Register the Appearance page with the shared save coordinator.
  *
@@ -413,12 +326,14 @@ function appearanceRevision(state: AppearanceState): string {
 function useAppearanceSaveContributor({
   draft,
   draftRef,
+  editedDuringSaveRef,
   saved,
   setSaved,
   setDraft,
 }: {
   draft: AppearanceState;
   draftRef: { current: AppearanceState };
+  editedDuringSaveRef: { current: Set<keyof AppearanceState> | null };
   saved: AppearanceState;
   setSaved: (next: AppearanceState) => void;
   setDraft: (next: AppearanceState) => void;
@@ -440,31 +355,39 @@ function useAppearanceSaveContributor({
       const submitted = draft;
       const patch = buildAppearanceUserSettingsPatch(submitted, saved);
       const settingsAtSubmit = storeApi.getState().userSettings;
-      const response = await updateUserSettings(patch);
-      commitTheme(submitted.theme);
-      commitMenuMode(submitted.settingsMenuMode);
-      // A draft edited while the save was in flight keeps its preview: what was
-      // submitted is now persisted, but the screen should still show what the
-      // user is currently looking at.
-      if (draftRef.current.theme !== submitted.theme) {
-        previewTheme(draftRef.current.theme);
+      const editedDuringSave = new Set<keyof AppearanceState>();
+      editedDuringSaveRef.current = editedDuringSave;
+      try {
+        const response = await updateUserSettings(patch);
+        commitTheme(submitted.theme);
+        commitMenuMode(submitted.settingsMenuMode);
+        // A draft edited while the save was in flight keeps its preview: what was
+        // submitted is now persisted, but the screen should still show what the
+        // user is currently looking at.
+        if (draftRef.current.theme !== submitted.theme) {
+          previewTheme(draftRef.current.theme);
+        }
+        if (draftRef.current.settingsMenuMode !== submitted.settingsMenuMode) {
+          previewMenuMode(draftRef.current.settingsMenuMode);
+        }
+        const latestUserSettings = storeApi.getState().userSettings;
+        const nextUserSettings =
+          latestUserSettings === settingsAtSubmit
+            ? mapUserSettingsResponse(response, latestUserSettings)
+            : latestUserSettings;
+        const confirmed = createAppearanceSavedState(
+          submitted.theme,
+          submitted.settingsMenuMode,
+          nextUserSettings,
+        );
+        setSaved(confirmed);
+        setDraft(rebaseAppearanceDraft(draftRef.current, submitted, confirmed, editedDuringSave));
+        setUserSettings(nextUserSettings);
+      } finally {
+        if (editedDuringSaveRef.current === editedDuringSave) {
+          editedDuringSaveRef.current = null;
+        }
       }
-      if (draftRef.current.settingsMenuMode !== submitted.settingsMenuMode) {
-        previewMenuMode(draftRef.current.settingsMenuMode);
-      }
-      const latestUserSettings = storeApi.getState().userSettings;
-      const nextUserSettings =
-        latestUserSettings === settingsAtSubmit
-          ? mapUserSettingsResponse(response, latestUserSettings)
-          : latestUserSettings;
-      const confirmed = createAppearanceSavedState(
-        submitted.theme,
-        submitted.settingsMenuMode,
-        nextUserSettings,
-      );
-      setSaved(confirmed);
-      setDraft(rebaseAppearanceDraft(draftRef.current, submitted, confirmed));
-      setUserSettings(nextUserSettings);
     },
     discard: () => {
       setDraft(saved);
@@ -472,6 +395,25 @@ function useAppearanceSaveContributor({
       restoreMenuMode();
     },
   });
+}
+
+function useAppearanceDraftUpdater(
+  setDraft: (update: (current: AppearanceState) => AppearanceState) => void,
+  editedDuringSaveRef: { current: Set<keyof AppearanceState> | null },
+) {
+  return useCallback(
+    (patch: Partial<AppearanceState>) =>
+      setDraft((current) => {
+        const next = { ...current, ...patch };
+        for (const field of Object.keys(patch) as Array<keyof AppearanceState>) {
+          if (current[field] !== next[field]) {
+            editedDuringSaveRef.current?.add(field);
+          }
+        }
+        return next;
+      }),
+    [editedDuringSaveRef, setDraft],
+  );
 }
 
 export function AppearanceSettings() {
@@ -486,6 +428,7 @@ export function AppearanceSettings() {
   const [draft, setDraft] = useState(saved);
   const draftRef = useRef(draft);
   const savedRef = useRef(saved);
+  const editedDuringSaveRef = useRef<Set<keyof AppearanceState> | null>(null);
   draftRef.current = draft;
   savedRef.current = saved;
 
@@ -496,16 +439,27 @@ export function AppearanceSettings() {
       previousSaved.settingsMenuMode,
       userSettings,
     );
-    setDraft(rebaseAppearanceDraft(draftRef.current, previousSaved, nextSaved));
+    setDraft(
+      rebaseAppearanceDraft(
+        draftRef.current,
+        previousSaved,
+        nextSaved,
+        editedDuringSaveRef.current ?? undefined,
+      ),
+    );
     setSaved(nextSaved);
   }, [userSettings]);
 
-  useAppearanceSaveContributor({ draft, draftRef, saved, setSaved, setDraft });
+  useAppearanceSaveContributor({
+    draft,
+    draftRef,
+    editedDuringSaveRef,
+    saved,
+    setSaved,
+    setDraft,
+  });
 
-  const updateDraft = useCallback(
-    (patch: Partial<typeof draft>) => setDraft((current) => ({ ...current, ...patch })),
-    [],
-  );
+  const updateDraft = useAppearanceDraftUpdater(setDraft, editedDuringSaveRef);
 
   return (
     <div className="space-y-8">
