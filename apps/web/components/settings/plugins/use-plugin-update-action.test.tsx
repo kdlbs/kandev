@@ -42,7 +42,7 @@ describe("usePluginUpdateAction", () => {
     reloadUpdates = vi.fn<() => void>();
   });
 
-  it("tracks updatingId while the install is in flight, then clears it and re-checks the catalog", async () => {
+  it("tracks the updating id while the install is in flight, then clears it and re-checks the catalog", async () => {
     let resolveInstall!: (v: { ok: boolean }) => void;
     marketplaceInstall.mockReturnValue(
       new Promise((resolve) => {
@@ -57,14 +57,14 @@ describe("usePluginUpdateAction", () => {
     act(() => {
       runPromise = result.current.runUpdate(entry());
     });
-    expect(result.current.updatingId).toBe(ENTRY_ID);
+    expect(result.current.updatingIds.has(ENTRY_ID)).toBe(true);
 
     await act(async () => {
       resolveInstall({ ok: true });
       await runPromise;
     });
 
-    expect(result.current.updatingId).toBeNull();
+    expect(result.current.updatingIds.has(ENTRY_ID)).toBe(false);
     expect(marketplaceInstall).toHaveBeenCalledWith("https://ex/acme-2.0.0.tar.gz");
     expect(reloadUpdates).toHaveBeenCalledTimes(1);
   });
@@ -80,7 +80,7 @@ describe("usePluginUpdateAction", () => {
     });
 
     expect(result.current.errorsById.get(ENTRY_ID)).toBe(CHECKSUM_ERROR);
-    expect(result.current.updatingId).toBeNull();
+    expect(result.current.updatingIds.has(ENTRY_ID)).toBe(false);
     expect(reloadUpdates).toHaveBeenCalledTimes(1);
   });
 
@@ -130,6 +130,50 @@ describe("usePluginUpdateAction", () => {
 
     expect(result.current.errorsById.get("a")).toBe("boom");
     expect(result.current.errorsById.get("b")).toBe("boom");
+  });
+});
+
+describe("usePluginUpdateAction — overlapping updates", () => {
+  // Regression: `updatingId` was a single slot, so when two rows updated at
+  // once the first install to settle cleared the marker for the other — the
+  // still-installing row lost its spinner and its Update/Uninstall controls
+  // went live again mid-install, inviting a second concurrent install.
+  it("keeps every in-flight row marked busy when two updates overlap", async () => {
+    const resolvers: Record<string, (v: { ok: boolean }) => void> = {};
+    const marketplaceInstall = vi.fn<MarketplaceInstall>(
+      (url: string) =>
+        new Promise((resolve) => {
+          resolvers[url.includes("/a.") ? "a" : "b"] = resolve;
+        }),
+    );
+    const { result } = renderHook(() =>
+      usePluginUpdateAction(marketplaceInstall, vi.fn<() => void>(), INSTALLED),
+    );
+
+    let runA!: Promise<void>;
+    let runB!: Promise<void>;
+    act(() => {
+      runA = result.current.runUpdate(entry({ id: "a", package_url: "https://ex/a.tar.gz" }));
+    });
+    act(() => {
+      runB = result.current.runUpdate(entry({ id: "b", package_url: "https://ex/b.tar.gz" }));
+    });
+    expect(result.current.updatingIds.has("a")).toBe(true);
+    expect(result.current.updatingIds.has("b")).toBe(true);
+
+    // A settles first; B is still installing and must stay busy.
+    await act(async () => {
+      resolvers.a({ ok: true });
+      await runA;
+    });
+    expect(result.current.updatingIds.has("a")).toBe(false);
+    expect(result.current.updatingIds.has("b")).toBe(true);
+
+    await act(async () => {
+      resolvers.b({ ok: true });
+      await runB;
+    });
+    expect(result.current.updatingIds.size).toBe(0);
   });
 });
 

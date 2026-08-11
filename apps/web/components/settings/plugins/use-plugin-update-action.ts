@@ -25,7 +25,11 @@ export function usePluginUpdateAction(
   reloadUpdates: () => void,
   installedIds: ReadonlySet<string>,
 ) {
-  const [updatingId, setUpdatingId] = useState<string | null>(null);
+  // A set, not a single id: rows update independently, so two installs can be
+  // in flight at once. With one slot the first to settle cleared the marker for
+  // the other, dropping a still-installing row's spinner and re-enabling its
+  // Update/Uninstall controls mid-install.
+  const [updatingIds, setUpdatingIds] = useState<ReadonlySet<string>>(new Set());
   const [errorsById, setErrorsById] = useState<Map<string, string>>(new Map());
 
   useEffect(() => {
@@ -51,7 +55,7 @@ export function usePluginUpdateAction(
   const runUpdate = useCallback(
     async (entry: MarketplaceEntry) => {
       clearError(entry.id);
-      setUpdatingId(entry.id);
+      setUpdatingIds((prev) => new Set(prev).add(entry.id));
       try {
         const result = await marketplaceInstall(entry.package_url);
         if (!result.ok) {
@@ -59,12 +63,17 @@ export function usePluginUpdateAction(
           setErrorsById((prev) => new Map(prev).set(entry.id, message));
         }
       } finally {
-        setUpdatingId(null);
+        setUpdatingIds((prev) => {
+          if (!prev.has(entry.id)) return prev;
+          const next = new Set(prev);
+          next.delete(entry.id);
+          return next;
+        });
         reloadUpdates();
       }
     },
     [marketplaceInstall, reloadUpdates, clearError],
   );
 
-  return { updatingId, errorsById, runUpdate };
+  return { updatingIds, errorsById, runUpdate };
 }

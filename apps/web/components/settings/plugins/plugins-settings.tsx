@@ -261,7 +261,7 @@ function PluginList({ list, actions, autoUpdateDefault, updates, updateAction }:
           hasUpdate: updates.updates.has(plugin.id),
           checked: updates.checked,
           sourcesDegraded: updates.sourcesDegraded,
-          busy: updateAction.updatingId === plugin.id,
+          busy: updateAction.updatingIds.has(plugin.id),
           error: updateAction.errorsById.get(plugin.id),
         };
         return (
