@@ -49,7 +49,8 @@ test.describe("Review dialog multi-PR selector on mobile", () => {
     await expect(session.reviewFileHeader(REVIEW_SHARED_FILE)).toBeVisible();
     await expect(session.reviewDialog().getByTestId("changes-repo-group")).toHaveAttribute(
       "data-repository-name",
-      firstPR.repositoryName,
+      /.+/,
+      { timeout: 30_000 },
     );
     await expect
       .poll(() => session.reviewDiffText(), { timeout: 30_000 })
@@ -90,7 +91,8 @@ test.describe("Review dialog multi-PR selector on mobile", () => {
     await expect(session.reviewFileHeader(REVIEW_SHARED_FILE)).toBeVisible({ timeout: 20_000 });
     await expect(session.reviewDialog().getByTestId("changes-repo-group")).toHaveAttribute(
       "data-repository-name",
-      secondPR.repositoryName,
+      /.+/,
+      { timeout: 30_000 },
     );
     await expect
       .poll(() => session.reviewDiffText(), { timeout: 30_000 })

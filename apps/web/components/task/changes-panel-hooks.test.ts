@@ -6,10 +6,10 @@ import { describePerRepo } from "./changes-panel-hooks";
 
 /**
  * The multi-repo git toast. Its three branches were English template literals
- * (`${operationName} partially succeeded`, `Failed in N repos — …`) and are now
+ * (`${operationName} partially succeeded`, `Failed in N repos: ...`) and are now
  * catalog messages with five interpolation variables between them.
  *
- * A misspelled variable — `repo` for `repos`, `count` for `succeeded` — makes
+ * A misspelled variable, such as `repo` for `repos` or `count` for `succeeded`, makes
  * i18next leave the placeholder in the rendered string rather than throw, so it
  * ships a toast reading "succeeded in {{count}} repos" and nothing else catches
  * it. Every assertion below therefore checks for a leftover `{{`.
@@ -44,7 +44,7 @@ describe("describePerRepo", () => {
 
     expect(result.variant).toBe("error");
     expect(result.title).toBe("Rebase failed");
-    expect(result.description).toBe("Failed in 2 repos — api: no upstream; web: conflict");
+    expect(result.description).toBe("Failed in 2 repos: api: no upstream; web: conflict");
     noPlaceholders(result);
   });
 
@@ -62,7 +62,7 @@ describe("describePerRepo", () => {
   it("falls back to a generic error when a repo reports no message", () => {
     const result = describePerRepo([repo("api", false)], "Pull");
 
-    expect(result.description).toBe("Failed in 1 repo — api: Unknown error");
+    expect(result.description).toBe("Failed in 1 repo: api: Unknown error");
     noPlaceholders(result);
   });
 
@@ -72,8 +72,8 @@ describe("describePerRepo", () => {
     const one = describePerRepo([repo("api", false, "boom")], "Push");
     const two = describePerRepo([repo("api", false, "boom"), repo("web", false, "boom")], "Push");
 
-    expect(one.description).toContain("1 repo —");
-    expect(two.description).toContain("2 repos —");
+    expect(one.description).toContain("1 repo:");
+    expect(two.description).toContain("2 repos:");
   });
 
   it("keeps every branch resolving after a locale switch", async () => {

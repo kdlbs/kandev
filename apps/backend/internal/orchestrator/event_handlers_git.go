@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
@@ -160,7 +161,7 @@ func (s *Service) handleGitStatusUpdate(ctx context.Context, data watcher.GitEve
 	}
 
 	// Update PR watch branch if the user changed branches (e.g. renamed)
-	s.syncPRWatchBranch(ctx, data.SessionID, data.Status.Branch)
+	s.syncPRWatchBranch(ctx, data.TaskID, data.SessionID, data.Status.RepositoryName, data.Status.Branch)
 
 	// Push detection: when ahead goes from >0 to 0, a push happened
 	s.trackPushAndAssociatePR(ctx, data)
@@ -283,15 +284,113 @@ func (s *Service) trackPushAndAssociatePR(ctx context.Context, data watcher.GitE
 // provider's association logic, so the two providers' code paths issue zero
 // calls into each other's client. GitHub's proven detectPushAndAssociatePR is
 // called verbatim for every non-GitLab (including unknown/legacy-empty
-// provider) repository — this wraps it, it does not replace it. Extracted
-// from trackPushAndAssociatePR to keep that function inside the statement
-// budget.
+// provider) repository — this passes the shared repository identity into the
+// existing provider-specific path. Extracted from trackPushAndAssociatePR to
+// keep that function inside the statement budget.
 func (s *Service) dispatchPushDetection(ctx context.Context, sessionID, taskID, repositoryName, branch string) {
-	if s.resolvePushRepositoryProvider(ctx, sessionID, taskID, repositoryName) == gitlabProviderName {
-		s.detectPushAndAssociateMR(ctx, sessionID, taskID, repositoryName, branch)
+	identity := s.resolvePushRepositoryIdentity(ctx, sessionID, taskID, repositoryName)
+	if identity.provider == gitlabProviderName {
+		s.detectPushAndAssociateMRWithIdentity(ctx, sessionID, taskID, repositoryName, branch, identity)
 		return
 	}
-	s.detectPushAndAssociatePR(ctx, sessionID, taskID, repositoryName, branch)
+	if s.githubService == nil {
+		return
+	}
+	s.detectPushAndAssociatePRWithIdentity(ctx, sessionID, taskID, repositoryName, branch, identity)
+}
+
+type pushRepositoryIdentity struct {
+	owner        string
+	name         string
+	repositoryID string
+	provider     string
+	projectPath  string
+}
+
+// resolvePushRepositoryIdentity resolves the repository, provider, and full
+// project path from one repository snapshot. Local checkout fallbacks are
+// shared by routing and association so a legacy row cannot be routed from one
+// identity while its provider-specific lookup uses another.
+func (s *Service) resolvePushRepositoryIdentity(
+	ctx context.Context, sessionID, taskID, repositoryName string,
+) pushRepositoryIdentity {
+	owner, name, repositoryID := s.resolvePushRepo(ctx, sessionID, taskID, repositoryName)
+	identity := pushRepositoryIdentity{
+		owner:        owner,
+		name:         name,
+		repositoryID: repositoryID,
+	}
+	if owner != "" && name != "" {
+		identity.projectPath = owner + "/" + name
+	}
+	if repositoryID == "" {
+		return identity
+	}
+	repoObj := s.getPushRepository(ctx, repositoryID)
+	if repoObj == nil {
+		return identity
+	}
+	remoteURL := s.enrichPushRepositoryIdentity(&identity, repoObj)
+	if identity.projectPath == "" {
+		identity.projectPath = gitLabProjectPathFromRemoteURL(remoteURL)
+	}
+	if identity.provider == "" {
+		identity.provider = s.resolveConfiguredGitLabProvider(ctx, taskID, remoteURL)
+	}
+	return identity
+}
+
+func (s *Service) getPushRepository(ctx context.Context, repositoryID string) *models.Repository {
+	store, ok := s.repo.(repoStore)
+	if !ok {
+		return nil
+	}
+	repoObj, err := store.GetRepository(ctx, repositoryID)
+	if err != nil {
+		return nil
+	}
+	return repoObj
+}
+
+func (s *Service) enrichPushRepositoryIdentity(
+	identity *pushRepositoryIdentity, repoObj *models.Repository,
+) string {
+	identity.provider = repoObj.Provider
+	if identity.provider == "" && repoObj.LocalPath != "" {
+		if provider, _, localOwner, localName := service.ResolveGitRemoteProviderIdentity(repoObj.LocalPath); provider != "" && localOwner != "" {
+			identity.provider = provider
+			if identity.owner == "" && localName != "" {
+				identity.owner = localOwner
+				identity.name = localName
+				identity.projectPath = localOwner + "/" + localName
+			}
+		}
+	}
+
+	remoteURL := repoObj.RemoteURL
+	if remoteURL == "" && repoObj.LocalPath != "" {
+		if origin, localOwner, localName := service.ResolveGitRemoteIdentity(repoObj.LocalPath); origin != "" && localOwner != "" && localName != "" {
+			remoteURL = origin + "/" + localOwner + "/" + localName
+			if identity.projectPath == "" {
+				identity.projectPath = localOwner + "/" + localName
+			}
+		}
+	}
+	return remoteURL
+}
+
+func (s *Service) resolveConfiguredGitLabProvider(ctx context.Context, taskID, remoteURL string) string {
+	if s.gitlabMRLinkService == nil || remoteURL == "" {
+		return ""
+	}
+	workspaceID := s.taskWorkspaceID(ctx, taskID)
+	if workspaceID == "" {
+		return ""
+	}
+	if s.gitlabMRLinkService.IsConfiguredGitLabHost(ctx, workspaceID, remoteURL) {
+		return gitlabProviderName
+	}
+	return ""
 }
 
 // resolvePushRepositoryProvider looks up the provider ("github", "gitlab", or
@@ -299,51 +398,7 @@ func (s *Service) dispatchPushDetection(ctx context.Context, sessionID, taskID, 
 // resolvePushRepo's owner/name matching rather than re-deriving it, so
 // dispatchPushDetection can route without duplicating that logic.
 func (s *Service) resolvePushRepositoryProvider(ctx context.Context, sessionID, taskID, repositoryName string) string {
-	_, _, repositoryID := s.resolvePushRepo(ctx, sessionID, taskID, repositoryName)
-	if repositoryID == "" {
-		return ""
-	}
-	store, ok := s.repo.(repoStore)
-	if !ok {
-		return ""
-	}
-	repoObj, err := store.GetRepository(ctx, repositoryID)
-	if err != nil || repoObj == nil {
-		return ""
-	}
-	if repoObj.Provider != "" {
-		return repoObj.Provider
-	}
-	// The row may not yet reflect a provider resolvePushRepo's own call just
-	// derived from the local git remote: matchPushRepo/resolveSessionRepo
-	// compute it in-memory and persist it via a detached backfill goroutine,
-	// so this read can race ahead of that write on the very first push from a
-	// repository with no durable provider yet. Recompute live from the same
-	// local checkout instead of trusting a possibly-stale empty column.
-	// ResolveGitRemoteProviderIdentity recognizes both github.com and
-	// gitlab.com remotes (the same helper resolveRepositoryProviderIdentity
-	// uses to backfill Repository rows in production), so this closes the
-	// race for either provider rather than only GitHub.
-	if repoObj.LocalPath != "" {
-		if provider, _, owner, _ := service.ResolveGitRemoteProviderIdentity(repoObj.LocalPath); provider != "" && owner != "" {
-			return provider
-		}
-	}
-	// Self-managed GitLab instances never get a durable "gitlab" Provider tag
-	// at all — resolveRepositoryProviderIdentity only recognizes github.com
-	// and gitlab.com at discovery time, so the well-known-host fallback above
-	// can never resolve them either; this is a permanent gap for self-managed
-	// repositories, not just a narrow backfill race. remote_url is their only
-	// durable identity signal (still populated by the same production
-	// backfill), so compare it against the workspace's own configured GitLab
-	// connection instead of a hostname allowlist.
-	if s.gitlabMRLinkService != nil && repoObj.RemoteURL != "" {
-		if workspaceID := s.taskWorkspaceID(ctx, taskID); workspaceID != "" &&
-			s.gitlabMRLinkService.IsConfiguredGitLabHost(ctx, workspaceID, repoObj.RemoteURL) {
-			return gitlabProviderName
-		}
-	}
-	return ""
+	return s.resolvePushRepositoryIdentity(ctx, sessionID, taskID, repositoryName).provider
 }
 
 // shouldFirePushDetection decides whether to kick off PR association for one
@@ -409,32 +464,61 @@ func (s *Service) pushTrackerForget(sessionID string) {
 
 // syncPRWatchBranch updates the PR watch branch if the live git branch
 // differs from what's stored (e.g. user renamed the branch).
-// Only updates watches that haven't found a PR yet (pr_number=0).
-func (s *Service) syncPRWatchBranch(ctx context.Context, sessionID, liveBranch string) {
+// Only updates watches that haven't found a PR yet (pr_number=0), and only
+// within the repository the status belongs to — a session holds one watch per
+// (repository, branch), so a session-wide lookup would re-point whichever row
+// the query happened to return first.
+//
+// This runs on every git-status tick, so the single watch listing is also the
+// early-out: once every watch has found its PR there is nothing to re-point
+// and we return before resolving the repository.
+func (s *Service) syncPRWatchBranch(ctx context.Context, taskID, sessionID, repositoryName, liveBranch string) {
 	if s.githubService == nil || liveBranch == "" {
 		return
 	}
-	watch, err := s.githubService.GetPRWatchBySession(ctx, sessionID)
+	watches, err := s.githubService.ListPRWatchesBySession(ctx, sessionID)
 	if err != nil {
 		s.logger.Warn("failed to get PR watch for branch sync",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 		return
 	}
-	if watch == nil || watch.PRNumber != 0 {
+	if !anySearchingPRWatch(watches) {
 		return
 	}
-	if watch.Branch == liveBranch {
+	_, _, repositoryID := s.resolvePushRepo(ctx, sessionID, taskID, repositoryName)
+	if watchForRepoBranch(watches, repositoryID, liveBranch) != nil {
 		return
 	}
-	s.logger.Info("PR watch branch changed, updating from git status",
-		zap.String("session_id", sessionID),
-		zap.String("old_branch", watch.Branch),
-		zap.String("new_branch", liveBranch))
-	if updateErr := s.githubService.UpdatePRWatchBranchIfSearching(ctx, watch.ID, liveBranch); updateErr != nil {
-		s.logger.Error("failed to update PR watch branch",
-			zap.String("session_id", sessionID), zap.Error(updateErr))
+	if !s.repointSearchingPRWatch(ctx, watches, sessionID, repositoryID, liveBranch, "git status") {
+		// Reached only when the session has a searching watch but none for
+		// this repository — most often because resolvePushRepo could not
+		// resolve repositoryName and returned "". Silent here made "the PR
+		// for branch X was never picked up" indistinguishable from a failed
+		// reset; push detection and the poller still cover the branch.
+		s.logger.Debug("no searching PR watch to re-point for branch",
+			zap.String("session_id", sessionID),
+			zap.String("repository_id", repositoryID),
+			zap.String("branch", liveBranch))
 	}
+}
+
+func anySearchingPRWatch(watches []*github.PRWatch) bool {
+	for _, watch := range watches {
+		if watch != nil && watch.PRNumber == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func watchForRepoBranch(watches []*github.PRWatch, repositoryID, branch string) *github.PRWatch {
+	for _, watch := range watches {
+		if watch != nil && watch.RepositoryID == repositoryID && watch.Branch == branch {
+			return watch
+		}
+	}
+	return nil
 }
 
 // handleContextWindowUpdated handles context window updates and persists them to session metadata
@@ -768,11 +852,13 @@ func (s *Service) handleBranchSwitched(ctx context.Context, data watcher.GitEven
 				zap.Error(err))
 		}
 
-		// Reset the PR watch for this session so the poller re-searches for a PR
-		// on the new branch. This handles both rename (same PR, new branch name)
-		// and stacked-PR workflows (switching to a different branch with its own
-		// open PR).
-		s.resetPRWatchForBranchSwitch(ctx, data.SessionID, data.BranchSwitch.CurrentBranch)
+		// Cover the new branch with a PR watch so the poller searches for its
+		// PR. This handles both rename (same PR, new branch name) and
+		// stacked-PR workflows (switching to a different branch with its own
+		// open PR) without stranding the branch we just left.
+		s.resetPRWatchForBranchSwitch(
+			ctx, data.TaskID, data.SessionID, data.BranchSwitch.RepositoryName, data.BranchSwitch.CurrentBranch,
+		)
 	}
 
 	// Forward branch_switched event to WebSocket subject for frontend real-time updates
@@ -860,33 +946,82 @@ func (s *Service) persistBranchSwitchWorktrees(
 	return nil
 }
 
-// resetPRWatchForBranchSwitch re-points the session's existing PR watch to the
-// new branch and marks it as searching (pr_number=0) so the poller will
-// discover the PR for the new branch on its next tick. If no watch exists this
-// is a no-op — a watch will be created on the next push.
-func (s *Service) resetPRWatchForBranchSwitch(ctx context.Context, sessionID, newBranch string) {
+// resetPRWatchForBranchSwitch makes sure the branch the session just checked
+// out is covered by a PR watch, so the poller discovers its PR on the next
+// tick.
+//
+// It never re-points a watch that has already found a PR. That watch is the
+// only handle keeping the previous branch's PR synced: both the poller and the
+// on-demand sync iterate watches, and CI automation only runs off the events
+// they publish. Re-pointing it froze that PR at its last-observed checks and
+// review state, which stalls auto-fix (it never sees new failures) and
+// auto-merge (it never sees the PR turn mergeable) for every branch but the
+// one currently checked out — the multi-branch failure this replaced.
+//
+// A branch renamed before any PR existed still reuses the searching watch, so
+// a task that hops between branches holds at most one searching watch per
+// repository plus one per PR it actually opened.
+func (s *Service) resetPRWatchForBranchSwitch(ctx context.Context, taskID, sessionID, repositoryName, newBranch string) {
 	if s.githubService == nil {
 		return
 	}
-	watch, err := s.githubService.GetPRWatchBySession(ctx, sessionID)
+	watches, err := s.githubService.ListPRWatchesBySession(ctx, sessionID)
 	if err != nil {
 		s.logger.Debug("failed to look up PR watch for branch switch",
 			zap.String("session_id", sessionID), zap.Error(err))
 		return
 	}
-	if watch == nil {
+	owner, repoName, repositoryID := s.resolvePushRepo(ctx, sessionID, taskID, repositoryName)
+	if watchForRepoBranch(watches, repositoryID, newBranch) != nil {
 		return
 	}
-	if watch.Branch == newBranch && watch.PRNumber == 0 {
+	if s.repointSearchingPRWatch(ctx, watches, sessionID, repositoryID, newBranch, "branch switch") {
 		return
 	}
-	if err := s.githubService.ResetPRWatch(ctx, watch.ID, newBranch); err != nil {
-		s.logger.Error("failed to reset PR watch after branch switch",
+	if owner == "" || repoName == "" {
+		return
+	}
+	workspaceID := s.taskWorkspaceID(ctx, taskID)
+	if workspaceID == "" {
+		return
+	}
+	if _, err := s.githubService.EnsurePRWatchForWorkspace(
+		ctx, workspaceID, sessionID, taskID, repositoryID, owner, repoName, newBranch,
+	); err != nil {
+		s.logger.Error("failed to add PR watch after branch switch",
 			zap.String("session_id", sessionID), zap.String("new_branch", newBranch),
 			zap.Error(err))
 		return
 	}
-	s.logger.Info("reset PR watch after branch switch",
+	s.logger.Info("added PR watch for switched branch",
 		zap.String("session_id", sessionID),
+		zap.String("repository_id", repositoryID),
 		zap.String("new_branch", newBranch))
+}
+
+// repointSearchingPRWatch moves the repository's still-searching watch
+// (pr_number=0) onto newBranch and reports whether it did. At most one such
+// watch exists per (session, repository), so reusing it keeps branch churn
+// from accumulating watches that will never find a PR.
+func (s *Service) repointSearchingPRWatch(
+	ctx context.Context, watches []*github.PRWatch, sessionID, repositoryID, newBranch, reason string,
+) bool {
+	for _, watch := range watches {
+		if watch == nil || watch.RepositoryID != repositoryID || watch.PRNumber != 0 {
+			continue
+		}
+		if err := s.githubService.ResetPRWatch(ctx, watch.ID, newBranch); err != nil {
+			s.logger.Error("failed to re-point PR watch",
+				zap.String("session_id", sessionID), zap.String("new_branch", newBranch),
+				zap.String("reason", reason), zap.Error(err))
+			return false
+		}
+		s.logger.Info("PR watch branch changed, updating",
+			zap.String("session_id", sessionID),
+			zap.String("old_branch", watch.Branch),
+			zap.String("new_branch", newBranch),
+			zap.String("reason", reason))
+		return true
+	}
+	return false
 }

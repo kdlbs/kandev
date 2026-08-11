@@ -170,7 +170,7 @@ function logFetchSummary(
       limit,
       hasMore: response.has_more ?? false,
       byType: summary.byType,
-      hint: "The fetch limit may be too small for this session's last turn — user prompt and agent replies live further back. Paginate or raise the limit to see them.",
+      hint: "The fetch limit may be too small for this session's last turn - user prompt and agent replies live further back. Paginate or raise the limit to see them.",
     });
   }
 }

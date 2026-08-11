@@ -114,7 +114,7 @@ describe("AppSidebarWorkspacePicker — Add workspace routing", () => {
 
     fireEvent.click(screen.getByText("New kanban workspace"));
 
-    expect(navigationMock.push).toHaveBeenCalledWith("/settings/workspace");
+    expect(navigationMock.push).toHaveBeenCalledWith("/settings/workspaces");
   });
 
   it("keeps the legacy add-workspace route when the office feature is disabled", () => {
@@ -123,7 +123,7 @@ describe("AppSidebarWorkspacePicker — Add workspace routing", () => {
 
     fireEvent.click(screen.getByText("Add workspace"));
 
-    expect(navigationMock.push).toHaveBeenCalledWith("/settings/workspace");
+    expect(navigationMock.push).toHaveBeenCalledWith("/settings/workspaces");
   });
 
   it("calls onActionComplete after navigating to add a workspace", () => {
@@ -237,6 +237,25 @@ describe("AppSidebarWorkspacePicker — active workspace display and routing", (
     expect(screen.getByTestId("sidebar-workspace-trigger").textContent).not.toContain("Kanban");
     expect(screen.getByTestId(KANBAN_WORKSPACE_ITEM).textContent).toContain("Kanban");
     expect(screen.getByTestId(OFFICE_WORKSPACE_ITEM).textContent).toContain("Office");
+  });
+
+  it("marks the active workspace with the Active badge between its name and its type", () => {
+    storeState.workspaces.activeId = "w1";
+    render(<AppSidebarWorkspacePicker />);
+
+    const activeRow = screen.getByTestId(KANBAN_WORKSPACE_ITEM).textContent ?? "";
+    expect(activeRow).toContain("Active");
+    expect(activeRow.indexOf("Active")).toBeGreaterThan(activeRow.indexOf("Default Workspace"));
+    expect(activeRow.indexOf("Active")).toBeLessThan(activeRow.indexOf("Kanban"));
+  });
+
+  it("leaves non-active workspace rows unbadged and drops the check icon", () => {
+    storeState.workspaces.activeId = "w1";
+    const { container } = render(<AppSidebarWorkspacePicker />);
+
+    expect(screen.getByTestId(OFFICE_WORKSPACE_ITEM).textContent).not.toContain("Active");
+    expect(screen.getByTestId(ALTERNATE_KANBAN_WORKSPACE_ITEM).textContent).not.toContain("Active");
+    expect(container.querySelector(".tabler-icon-check")).toBeNull();
   });
 
   it("renders the trigger as an obvious selector", () => {

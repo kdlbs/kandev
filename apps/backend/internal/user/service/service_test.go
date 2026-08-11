@@ -839,6 +839,133 @@ func TestApplySavedLayouts(t *testing.T) {
 	}
 }
 
+func TestApplyWorkspaceAndTaskListPreferencesKanbanHiddenStepIDs(t *testing.T) {
+	makeIDs := func(n int) []string {
+		ids := make([]string, n)
+		for i := range ids {
+			ids[i] = fmt.Sprintf("step-%d", i)
+		}
+		return ids
+	}
+	makeWorkflows := func(n int) map[string][]string {
+		hidden := make(map[string][]string, n)
+		for i := 0; i < n; i++ {
+			hidden[fmt.Sprintf("wf-%d", i)] = []string{"step-0"}
+		}
+		return hidden
+	}
+
+	tests := []struct {
+		name    string
+		req     *UpdateUserSettingsRequest
+		wantErr string
+	}{
+		{
+			name: "nil request is a no-op",
+			req:  &UpdateUserSettingsRequest{KanbanHiddenStepIDs: nil},
+		},
+		{
+			name: "empty map is accepted",
+			req:  &UpdateUserSettingsRequest{KanbanHiddenStepIDs: ptr(map[string][]string{})},
+		},
+		{
+			name: "a normal hidden set is applied",
+			req: &UpdateUserSettingsRequest{
+				KanbanHiddenStepIDs: ptr(map[string][]string{"wf-1": {"step-a", "step-b"}}),
+			},
+		},
+		{
+			name: "exactly max workflows is accepted",
+			req: &UpdateUserSettingsRequest{
+				KanbanHiddenStepIDs: ptr(makeWorkflows(maxKanbanHiddenStepWorkflows)),
+			},
+		},
+		{
+			name: "exceeding max workflows returns error",
+			req: &UpdateUserSettingsRequest{
+				KanbanHiddenStepIDs: ptr(makeWorkflows(maxKanbanHiddenStepWorkflows + 1)),
+			},
+			wantErr: fmt.Sprintf("kanban_hidden_step_ids: max %d workflows allowed", maxKanbanHiddenStepWorkflows),
+		},
+		{
+			name: "exactly max ids per workflow is accepted",
+			req: &UpdateUserSettingsRequest{
+				KanbanHiddenStepIDs: ptr(map[string][]string{"wf-1": makeIDs(maxKanbanHiddenStepIDsPerWorkflow)}),
+			},
+		},
+		{
+			name: "exceeding max ids for one workflow returns error",
+			req: &UpdateUserSettingsRequest{
+				KanbanHiddenStepIDs: ptr(map[string][]string{"wf-1": makeIDs(maxKanbanHiddenStepIDsPerWorkflow + 1)}),
+			},
+			wantErr: fmt.Sprintf("kanban_hidden_step_ids[wf-1]: max %d step ids allowed", maxKanbanHiddenStepIDsPerWorkflow),
+		},
+		{
+			name: "a handful of very long ids under the total byte budget is accepted",
+			req: &UpdateUserSettingsRequest{
+				KanbanHiddenStepIDs: ptr(map[string][]string{"wf-1": {strings.Repeat("a", 1024)}}),
+			},
+		},
+		{
+			name: "ids within count limits but exceeding the total byte budget returns error",
+			req: &UpdateUserSettingsRequest{
+				// 200 ids (at the count cap) x 400 bytes each = 80,000 bytes,
+				// comfortably over maxKanbanHiddenStepIDsTotalBytes (64KB) —
+				// this is the exact shape the count-only caps used to miss:
+				// a few oversized strings smuggled past a per-entry count check.
+				KanbanHiddenStepIDs: ptr(map[string][]string{
+					"wf-1": func() []string {
+						ids := make([]string, maxKanbanHiddenStepIDsPerWorkflow)
+						for i := range ids {
+							ids[i] = strings.Repeat("a", 400)
+						}
+						return ids
+					}(),
+				}),
+			},
+			wantErr: fmt.Sprintf("kanban_hidden_step_ids: max %d bytes allowed", maxKanbanHiddenStepIDsTotalBytes),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings := &models.UserSettings{
+				KanbanHiddenStepIDs: map[string][]string{"wf-existing": {"step-x"}},
+			}
+			err := applyWorkspaceAndTaskListPreferences(settings, tt.req)
+
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error %q, got nil", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("expected error containing %q, got %q", tt.wantErr, err.Error())
+				}
+				// Rejected write must not clobber the existing value.
+				if len(settings.KanbanHiddenStepIDs) != 1 {
+					t.Fatalf("expected settings unchanged on error, got %v", settings.KanbanHiddenStepIDs)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if tt.req.KanbanHiddenStepIDs == nil {
+				if len(settings.KanbanHiddenStepIDs) != 1 {
+					t.Fatalf("expected settings unchanged, got %v", settings.KanbanHiddenStepIDs)
+				}
+				return
+			}
+
+			if !reflect.DeepEqual(settings.KanbanHiddenStepIDs, *tt.req.KanbanHiddenStepIDs) {
+				t.Fatalf("expected %v, got %v", *tt.req.KanbanHiddenStepIDs, settings.KanbanHiddenStepIDs)
+			}
+		})
+	}
+}
+
 func makeSidebarViews(n int) []models.SidebarView {
 	views := make([]models.SidebarView, n)
 	for i := range views {

@@ -599,6 +599,9 @@ func registerRoutes(p routeParams) {
 	// the kanban board doesn't react to subtree archive/delete until a
 	// full reload.
 	handoffSvc.SetTaskEventPublisher(p.taskSvc)
+	// Per-user scoping for the cascade is installed by
+	// TaskHandlers.SetHandoffService, which is the call that makes the archive /
+	// delete routes prefer the cascade over the guarded Service methods.
 	if p.services.Office != nil {
 		p.services.Office.SetWorkspaceGroupCleaner(handoffSvc)
 	}

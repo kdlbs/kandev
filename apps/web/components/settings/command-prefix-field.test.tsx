@@ -91,7 +91,7 @@ describe("CommandPrefixField", () => {
         element.textContent ===
           "Tokens prepended to the agent launch command, so it runs under a sandbox launcher " +
             "(e.g. greywall --). The value is shell-tokenised. Leave empty to run the agent " +
-            "directly. Applies to ACP sessions only \u2014 it has no effect when the profile " +
+            "directly. Applies to ACP sessions only; it has no effect when the profile " +
             "uses TUI passthrough.",
     );
     expect(help.querySelector("code")?.textContent).toBe(PREFIX);

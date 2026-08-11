@@ -149,7 +149,7 @@ function PRSingleButton({
   triggerRef?: TriggerRef;
 }) {
   const addPRPanel = useDockviewStore((s) => s.addPRPanel);
-  const tooltip = `${pr.owner}/${pr.repo} #${pr.pr_number} — ${pr.pr_title}`;
+  const tooltip = `${pr.owner}/${pr.repo} #${pr.pr_number} - ${pr.pr_title}`;
   const {
     usesTouchDrawer,
     open,

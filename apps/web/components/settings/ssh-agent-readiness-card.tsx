@@ -374,7 +374,7 @@ function StatusBadge({ row }: { row: SSHAgentReadinessRow }) {
 
 function InstallHint({ hint, available }: { hint?: string; available: boolean }) {
   const { t } = useTranslation();
-  if (available) return <span className="text-muted-foreground">—</span>;
+  if (available) return <span className="text-muted-foreground">-</span>;
   if (!hint)
     return <span className="text-muted-foreground">{t("executors:sshNoHintAvailable")}</span>;
   return (

@@ -1,458 +1,521 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { ReactNode } from "react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { SettingsMenuMode } from "@/lib/settings/settings-menu-mode";
+
 const MAIN_WORKSPACE_ID = "ws-1";
-const ARCHIVE_WORKSPACE_ID = "ws-10";
 const MAIN_WORKSPACE_NAME = "Main Workspace";
-const ARCHIVE_WORKSPACE_NAME = "Archive Workspace";
+// The active workspace carries a badge, so its row's accessible name is the
+// name plus that badge — match on the name rather than the whole string.
+const WORKSPACE_ROW = new RegExp(MAIN_WORKSPACE_NAME);
 const VOICE_MODE_LABEL = "Voice Mode";
+const SEARCH_LABEL = "Search settings";
+const WORKSPACES_ROW_KEY = "row:/settings/workspaces";
+const AGENTS_ROW_KEY = "row:/settings/agents";
+const WORKSPACE_KEY = `workspace:${MAIN_WORKSPACE_ID}`;
+const AGENT_KEY = "agent:claude-code";
+const AGENT_LABEL = "Claude Code";
+// Anchored: the caret beside the row is labelled "Expand/Collapse Claude Code",
+// and a badge can extend the row's own name past an exact match.
+const AGENT_ROW = /^Claude Code/;
+// Which integrations the probe reports as connected, per test.
+const integrationsEnabled = new Set<string>();
 
 const state = {
   workspaces: {
     activeId: MAIN_WORKSPACE_ID,
     items: [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }],
   },
-  setActiveWorkspace: vi.fn(),
   settingsAgents: {
-    items: [],
+    items: [
+      {
+        name: "claude-code",
+        profiles: [
+          { id: "profile-1", name: "Default", agentDisplayName: AGENT_LABEL },
+          { id: "profile-2", name: "Retired", agentDisplayName: AGENT_LABEL, enabled: false },
+        ],
+      },
+    ],
   },
   executors: {
-    items: [],
+    items: [
+      {
+        id: "exec-1",
+        name: "Local Executor",
+        type: "local",
+        profiles: [{ id: "exec-profile-1", name: "Local" }],
+      },
+    ],
   },
-  features: {
-    office: false,
-    auth: false,
+  // The branch orders agents the way the Agents page groups them, so it reads
+  // the CLI scan. Empty here: one agent, so there is no order to disturb.
+  agentDiscovery: {
+    items: [] as Array<{ name: string; available: boolean }>,
+    loaded: false,
+  },
+  settingsData: {
+    executorsLoaded: true,
+    agentsLoaded: true,
+  },
+  userSettings: {
+    loaded: true,
+    savedLayouts: [] as Array<{ id: string }>,
   },
   auth: {
     mode: "disabled" as const,
     authenticated: true,
     user: null,
   },
+  settingsMenu: {
+    mode: "flat" as SettingsMenuMode,
+    savedMode: "flat" as SettingsMenuMode,
+    expandedKeys: [] as string[],
+  },
+  setSettingsMenuExpandedKeys: (keys: string[]) => {
+    state.settingsMenu.expandedKeys = keys;
+  },
 };
-
-const integrationAvailability = vi.hoisted(() => ({
-  azureDevOps: true,
-  github: false,
-  gitlab: false,
-  jira: false,
-  linear: false,
-  sentry: false,
-}));
-
-// Per-integration enable/disable state plus the "hide disabled integrations
-// from left panel navigation" setting, shared by the mocks below so each test
-// can flip them independently (same shape the settings-tree-render suite uses
-// for `integrationAvailability`).
-const integrationEnabled = vi.hoisted(() => ({
-  "azure-devops": true,
-  github: true,
-  gitlab: true,
-  jira: true,
-  linear: true,
-  sentry: true,
-}));
-const hideDisabled = vi.hoisted(() => ({ value: false }));
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: typeof state) => unknown) => selector(state),
 }));
 
-vi.mock("@/hooks/domains/settings/use-available-agents", () => ({
-  useAvailableAgents: () => undefined,
+vi.mock("@/hooks/domains/features/use-feature", () => ({
+  useFeature: () => false,
 }));
 
-vi.mock("@/hooks/domains/azure-devops/use-azure-devops-availability", () => ({
-  useAzureDevOpsAvailable: () => integrationAvailability.azureDevOps,
-}));
-vi.mock("@/hooks/domains/github/use-github-status", () => ({
-  useGitHubStatus: () => ({
-    status: integrationAvailability.github ? { authenticated: true } : null,
+vi.mock("@/hooks/domains/settings/use-secrets", () => ({
+  useSecrets: () => ({
+    items: [{ id: "secret-1" }, { id: "secret-2" }],
+    loaded: true,
     loading: false,
   }),
 }));
-vi.mock("@/hooks/domains/gitlab/use-task-mr", () => ({
-  useGitLabAvailable: () => integrationAvailability.gitlab,
+
+vi.mock("@/hooks/domains/integrations/use-enabled-integrations", () => ({
+  useEnabledIntegrations: () => integrationsEnabled,
 }));
-vi.mock("@/hooks/domains/jira/use-jira-availability", () => ({
-  useJiraAuthed: () => integrationAvailability.jira,
+
+vi.mock("@/hooks/domains/plugins/use-plugins", () => ({
+  usePlugins: () => ({ items: [{ id: "plugin-1" }], loaded: true, loading: false, error: null }),
 }));
-vi.mock("@/hooks/domains/linear/use-linear-availability", () => ({
-  useLinearAuthed: () => integrationAvailability.linear,
-}));
-vi.mock("@/hooks/domains/sentry/use-sentry-availability", () => ({
-  useSentryAvailable: () => integrationAvailability.sentry,
-}));
-vi.mock("@/hooks/domains/azure-devops/use-azure-devops-enabled", () => ({
-  useAzureDevOpsEnabled: () => ({
-    enabled: integrationEnabled["azure-devops"],
-    setEnabled: vi.fn(),
-  }),
-}));
-vi.mock("@/hooks/domains/github/use-github-enabled", () => ({
-  useGitHubEnabled: () => ({ enabled: integrationEnabled.github, setEnabled: vi.fn() }),
-}));
-vi.mock("@/hooks/domains/gitlab/use-gitlab-enabled", () => ({
-  useGitLabEnabled: () => ({ enabled: integrationEnabled.gitlab, setEnabled: vi.fn() }),
-}));
-vi.mock("@/hooks/domains/jira/use-jira-enabled", () => ({
-  useJiraEnabled: () => ({ enabled: integrationEnabled.jira, setEnabled: vi.fn() }),
-}));
-vi.mock("@/hooks/domains/linear/use-linear-enabled", () => ({
-  useLinearEnabled: () => ({ enabled: integrationEnabled.linear, setEnabled: vi.fn() }),
-}));
-vi.mock("@/hooks/domains/sentry/use-sentry-enabled", () => ({
-  useSentryEnabled: () => ({ enabled: integrationEnabled.sentry, setEnabled: vi.fn() }),
-}));
-vi.mock("@/hooks/domains/integrations/use-hide-disabled-integrations-in-nav", () => ({
-  useHideDisabledIntegrationsInNav: () => ({
-    hideDisabled: hideDisabled.value,
-    setHideDisabled: vi.fn(),
-  }),
-}));
-vi.mock("@kandev/ui/collapsible", async () => {
-  const React = await vi.importActual<typeof import("react")>("react");
-  const CollapsibleContext = React.createContext(false);
-  return {
-    Collapsible: ({ open, children }: { open?: boolean; children: ReactNode }) =>
-      React.createElement(CollapsibleContext.Provider, { value: Boolean(open) }, children),
-    CollapsibleContent: ({ children, className }: { children: ReactNode; className?: string }) => {
-      const open = React.useContext(CollapsibleContext);
-      return open ? React.createElement("div", { className }, children) : null;
-    },
-  };
-});
 
 import { SettingsTree } from "./settings-tree";
-import { AgentsGroup } from "./agents-group";
-import { GeneralGroup } from "./general-group";
-import { SystemGroup } from "./system-group";
-import { WorkspacesGroup } from "./workspaces-group";
 
-describe("SettingsTree rendering", () => {
+function setMenuMode(mode: SettingsMenuMode, expandedKeys: string[] = []) {
+  state.settingsMenu.mode = mode;
+  state.settingsMenu.savedMode = mode;
+  state.settingsMenu.expandedKeys = expandedKeys;
+}
+
+const FONT_NORMAL = "font-normal";
+const FONT_MEDIUM = "font-medium";
+/** The glyph box every row opens, whether or not a glyph fills it. */
+const GLYPH_BOX = "h-3.5 w-3.5";
+/** The record mark — shared with the dot the Agents page renders per profile. */
+const RECORD_DOT = "h-1.5 w-1.5";
+
+/**
+ * `data-record` for a row, whether it is a leaf (which carries the attribute
+ * itself) or a branch (whose wrapper carries it, so an href-less agent row gets
+ * it too). Deliberately not `closest`: every row inside an open record branch
+ * has a marked ancestor, which would make the negative assertions vacuous.
+ */
+function recordFlag(row: HTMLElement): string | null {
+  return row.getAttribute("data-record") ?? row.parentElement?.getAttribute("data-record") ?? null;
+}
+
+/** Every row claiming to be the page you are on. Must always be exactly one. */
+function activeRowNames(): string[] {
+  return Array.from(document.querySelectorAll("[data-active='true']")).map(
+    (element) => element.textContent ?? "",
+  );
+}
+
+describe("SettingsTree static menu", () => {
   beforeEach(() => {
     state.workspaces.activeId = MAIN_WORKSPACE_ID;
     state.workspaces.items = [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }];
-    state.setActiveWorkspace.mockClear();
-    state.settingsAgents.items = [];
-    state.executors.items = [];
-    integrationAvailability.azureDevOps = true;
-    integrationAvailability.github = false;
-    integrationAvailability.gitlab = false;
-    integrationAvailability.jira = false;
-    integrationAvailability.linear = false;
-    integrationAvailability.sentry = false;
+    setMenuMode("flat");
   });
 
   afterEach(() => cleanup());
 
-  it("renders workspace repository and workflow links when Workspaces is open", () => {
-    render(<WorkspacesGroup pathname="/settings/workspace" expanded />);
-
-    expect(screen.getByRole("link", { name: "Repositories" }).getAttribute("href")).toBe(
-      "/settings/workspace/ws-1/repositories",
-    );
-    expect(screen.getByRole("link", { name: "Workflows" }).getAttribute("href")).toBe(
-      "/settings/workspace/ws-1/workflows",
-    );
-    expect(screen.getByRole("link", { name: "Automations" }).getAttribute("href")).toBe(
-      "/settings/workspace/ws-1/automations",
-    );
-    expect(screen.getByRole("link", { name: "Integrations" }).getAttribute("href")).toBe(
-      "/settings/workspace/ws-1/integrations",
-    );
-  });
-
-  it("opens the active workspace by default when the settings tree opens", () => {
-    state.workspaces.items = [
-      { id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME },
-      { id: ARCHIVE_WORKSPACE_ID, name: ARCHIVE_WORKSPACE_NAME },
-    ];
-
+  it("renders section headers as static text, not links or buttons", () => {
     render(<SettingsTree pathname="/settings" />);
 
-    expect(screen.getByRole("link", { name: `${MAIN_WORKSPACE_NAME} Active` })).toBeTruthy();
-    expect(screen.getByRole("link", { name: ARCHIVE_WORKSPACE_NAME })).toBeTruthy();
-    expect(screen.queryByText("[active]")).toBeNull();
-    expect(screen.getByRole("link", { name: "Repositories" }).getAttribute("href")).toBe(
-      "/settings/workspace/ws-1/repositories",
-    );
-    expect(screen.getByRole("link", { name: "Automations" }).getAttribute("href")).toBe(
-      "/settings/workspace/ws-1/automations",
-    );
-  });
-
-  it("uses an accordion for workspace subsections", () => {
-    state.workspaces.items = [
-      { id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME },
-      { id: ARCHIVE_WORKSPACE_ID, name: ARCHIVE_WORKSPACE_NAME },
-    ];
-
-    render(<WorkspacesGroup pathname="/settings" expanded />);
-
-    expect(screen.getByRole("link", { name: "Repositories" }).getAttribute("href")).toBe(
-      "/settings/workspace/ws-1/repositories",
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Expand Archive Workspace" }));
-
-    expect(screen.getByRole("button", { name: "Expand Main Workspace" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Repositories" }).getAttribute("href")).toBe(
-      "/settings/workspace/ws-10/repositories",
-    );
-  });
-
-  it("only opens the routed workspace subsection on workspace detail routes", () => {
-    state.workspaces.items = [
-      { id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME },
-      { id: ARCHIVE_WORKSPACE_ID, name: ARCHIVE_WORKSPACE_NAME },
-    ];
-
-    const { rerender } = render(<WorkspacesGroup pathname="/settings/workspace" expanded />);
-
-    expect(screen.getAllByRole("link", { name: "Repositories" })).toHaveLength(1);
-
-    rerender(<WorkspacesGroup pathname="/settings/workspace/ws-10/repositories" expanded />);
-
-    expect(
-      screen.getByRole("link", { name: `${MAIN_WORKSPACE_NAME} Active` }).getAttribute("href"),
-    ).toBe("/settings/workspace/ws-1");
-    const repositoryLinks = screen.getAllByRole("link", { name: "Repositories" });
-    const workflowLinks = screen.getAllByRole("link", { name: "Workflows" });
-
-    expect(repositoryLinks).toHaveLength(1);
-    expect(workflowLinks).toHaveLength(1);
-    expect(repositoryLinks[0].getAttribute("href")).toBe("/settings/workspace/ws-10/repositories");
-    expect(workflowLinks[0].getAttribute("href")).toBe("/settings/workspace/ws-10/workflows");
-    expect(screen.getByRole("link", { name: ARCHIVE_WORKSPACE_NAME }).getAttribute("href")).toBe(
-      "/settings/workspace/ws-10",
-    );
-  });
-
-  it("opens workspace integrations when a workspace integration route is active", () => {
-    state.workspaces.items = [
-      { id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME },
-      { id: ARCHIVE_WORKSPACE_ID, name: ARCHIVE_WORKSPACE_NAME },
-    ];
-
-    render(<WorkspacesGroup pathname="/settings/workspace/ws-10/integrations/github" expanded />);
-
-    expect(screen.getByRole("link", { name: "GitHub" }).getAttribute("href")).toBe(
-      "/settings/workspace/ws-10/integrations/github",
-    );
-    expect(screen.getByRole("button", { name: "Expand Main Workspace" })).toBeTruthy();
-  });
-});
-
-describe("Workspace settings order", () => {
-  beforeEach(() => {
-    state.workspaces.activeId = MAIN_WORKSPACE_ID;
-    state.workspaces.items = [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }];
-  });
-
-  afterEach(() => cleanup());
-
-  it("places workspace secrets below automations", () => {
-    render(<WorkspacesGroup pathname="/settings/workspace" expanded />);
-
-    const hrefs = screen.getAllByRole("link").map((link) => link.getAttribute("href"));
-    const automationsIndex = hrefs.indexOf("/settings/workspace/ws-1/automations");
-    const secretsIndex = hrefs.indexOf("/settings/workspace/ws-1/secrets");
-
-    expect(automationsIndex).toBeGreaterThanOrEqual(0);
-    expect(secretsIndex).toBeGreaterThan(automationsIndex);
-    expect(screen.getByRole("link", { name: "Secrets" })).toBeTruthy();
-    expect(screen.queryByRole("link", { name: "Workspace Secrets" })).toBeNull();
-  });
-});
-
-describe("SettingsTree integration status", () => {
-  beforeEach(() => {
-    state.workspaces.activeId = MAIN_WORKSPACE_ID;
-    state.workspaces.items = [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }];
-    integrationAvailability.azureDevOps = true;
-    integrationAvailability.github = false;
-  });
-
-  afterEach(() => cleanup());
-
-  it("labels configured integrations as enabled", () => {
-    render(
-      <WorkspacesGroup pathname="/settings/workspace/ws-1/integrations/azure-devops" expanded />,
-    );
-
-    expect(screen.getByRole("link", { name: "Azure DevOps Enabled" })).toBeTruthy();
-    expect(screen.getByTestId("azure-devops-icon")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "GitHub" })).toBeTruthy();
-  });
-});
-
-describe("SettingsTree hide disabled integrations", () => {
-  beforeEach(() => {
-    state.workspaces.activeId = MAIN_WORKSPACE_ID;
-    state.workspaces.items = [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }];
-    integrationAvailability.azureDevOps = true;
-    integrationAvailability.github = false;
-    integrationAvailability.gitlab = false;
-    integrationAvailability.jira = false;
-    integrationAvailability.linear = false;
-    integrationAvailability.sentry = false;
-    integrationEnabled["azure-devops"] = true;
-    integrationEnabled.github = true;
-    integrationEnabled.gitlab = true;
-    integrationEnabled.jira = true;
-    integrationEnabled.linear = true;
-    integrationEnabled.sentry = true;
-    hideDisabled.value = false;
-  });
-
-  afterEach(() => {
-    cleanup();
-    // Restore the file-scoped mock state so later suites in this file never
-    // inherit the previous test's hideDisabled/enabled flags.
-    hideDisabled.value = false;
-    integrationEnabled["azure-devops"] = true;
-    integrationEnabled.github = true;
-    integrationEnabled.gitlab = true;
-    integrationEnabled.jira = true;
-    integrationEnabled.linear = true;
-    integrationEnabled.sentry = true;
-  });
-
-  it("keeps every integration listed when the hide-disabled setting is off (default), even disabled ones", () => {
-    integrationEnabled.github = false;
-
-    render(
-      <WorkspacesGroup pathname="/settings/workspace/ws-1/integrations/azure-devops" expanded />,
-    );
-
-    for (const name of [/(Azure DevOps)/, /GitHub/, /GitLab/, /Jira/, /Linear/, /Sentry/]) {
-      expect(screen.getByRole("link", { name })).toBeTruthy();
+    for (const header of ["Preferences", "Workspaces & Access", "System"]) {
+      expect(screen.getByText(header)).toBeTruthy();
+      expect(screen.queryByRole("link", { name: header })).toBeNull();
+      expect(screen.queryByRole("button", { name: header })).toBeNull();
     }
   });
 
-  it("hides a disabled integration from the workspace integrations list when the setting is on", () => {
-    integrationEnabled.github = false;
-    hideDisabled.value = true;
-
-    render(
-      <WorkspacesGroup pathname="/settings/workspace/ws-1/integrations/azure-devops" expanded />,
-    );
-
-    expect(screen.queryByRole("link", { name: "GitHub" })).toBeNull();
-    expect(screen.getByRole("link", { name: /Azure DevOps/ })).toBeTruthy();
-  });
-
-  it("keeps every integration listed when the setting is on but none are disabled", () => {
-    hideDisabled.value = true;
-
-    render(
-      <WorkspacesGroup pathname="/settings/workspace/ws-1/integrations/azure-devops" expanded />,
-    );
-
-    for (const name of [/(Azure DevOps)/, /GitHub/, /GitLab/, /Jira/, /Linear/, /Sentry/]) {
-      expect(screen.getByRole("link", { name })).toBeTruthy();
-    }
-  });
-
-  it("keeps an enabled-but-unconfigured integration listed when the setting is on", () => {
-    // GitHub is enabled (toggle on) but has no credentials — only *disabled*
-    // integrations are hidden by the setting, so it must stay reachable.
-    hideDisabled.value = true;
-
-    render(
-      <WorkspacesGroup pathname="/settings/workspace/ws-1/integrations/azure-devops" expanded />,
-    );
-
-    expect(screen.getByRole("link", { name: "GitHub" })).toBeTruthy();
-  });
-});
-
-describe("SettingsTree agents group", () => {
-  beforeEach(() => {
-    state.settingsAgents.items = [
-      {
-        id: "agent-1",
-        name: "mock-agent",
-        profiles: [
-          { id: "p-on", name: "default", agentDisplayName: "Mock", enabled: true },
-          { id: "p-off", name: "alt", agentDisplayName: "Mock", enabled: false },
-          { id: "p-legacy", name: "legacy", agentDisplayName: "Mock" },
-        ],
-      },
-    ] as unknown as typeof state.settingsAgents.items;
-  });
-
-  afterEach(() => {
-    cleanup();
-    state.settingsAgents.items = [];
-  });
-
-  it("labels disabled profiles with a badge and leaves others unlabeled", () => {
-    render(<AgentsGroup pathname="/settings/agents" expanded />);
-
-    expect(screen.getByRole("link", { name: "Mock • default" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Mock • alt Disabled" })).toBeTruthy();
-    // Legacy payloads without the flag are treated as enabled — no badge.
-    expect(screen.getByRole("link", { name: "Mock • legacy" })).toBeTruthy();
-  });
-});
-
-describe("SettingsTree standalone leaves", () => {
-  afterEach(cleanup);
-
-  it("keeps Voice Mode in the settings tree as a standalone active leaf", () => {
+  it("holds no rows for user-created data, so menu length is constant", () => {
     render(<SettingsTree pathname="/settings" />);
 
-    expect(screen.getByRole("link", { name: VOICE_MODE_LABEL }).getAttribute("href")).toBe(
-      "/settings/voice-mode",
+    // Store has a workspace, an agent profile and an executor profile — none
+    // of them may appear as menu rows.
+    expect(screen.queryByRole("link", { name: WORKSPACE_ROW })).toBeNull();
+    expect(screen.queryByRole("link", { name: new RegExp(AGENT_LABEL) })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Local" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Repositories" })).toBeNull();
+
+    // One row per page.
+    expect(screen.getByRole("link", { name: /^Workspaces/ }).getAttribute("href")).toBe(
+      "/settings/workspaces",
     );
+    expect(screen.getByRole("link", { name: /^Agents/ }).getAttribute("href")).toBe(
+      "/settings/agents",
+    );
+    expect(screen.getByRole("link", { name: /^Executors/ }).getAttribute("href")).toBe(
+      "/settings/executors",
+    );
+  });
 
-    cleanup();
+  it("marks the owning page row active for detail routes", () => {
+    render(<SettingsTree pathname="/settings/agents/claude-code/profiles/profile-1" />);
 
+    expect(screen.getByRole("link", { name: /^Agents/ }).getAttribute("data-active")).toBe("true");
+    expect(screen.getByRole("link", { name: /^Executors/ }).getAttribute("data-active")).toBeNull();
+  });
+
+  it("hides auth-gated rows and the Access Control section when auth is disabled", () => {
+    render(<SettingsTree pathname="/settings" />);
+
+    expect(screen.queryByText("Access Control")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Users" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "API Tokens" })).toBeNull();
+  });
+
+  it("keeps Voice Mode as a page row under Agents", () => {
     render(<SettingsTree pathname="/settings/voice-mode" />);
 
-    expect(screen.getByRole("link", { name: VOICE_MODE_LABEL }).className).toContain(
-      "before:bg-primary",
-    );
-    expect(screen.queryByRole("link", { name: "Appearance" })).toBeNull();
+    const link = screen.getByRole("link", { name: VOICE_MODE_LABEL });
+    expect(link.getAttribute("href")).toBe("/settings/voice-mode");
+    expect(link.getAttribute("data-active")).toBe("true");
   });
 
-  it("puts Plugins immediately before System", () => {
+  it("puts the count straight after the title, not out at the row's edge", () => {
     render(<SettingsTree pathname="/settings" />);
 
+    const row = screen.getByRole("link", { name: "Workspaces 1" });
+    const title = within(row).getByText("Workspaces");
+    const count = title.nextElementSibling;
+
+    // Immediately after the title and sharing its parent — a right-aligned
+    // badge would sit outside the title's wrapper instead.
+    expect(count?.textContent).toBe("1");
+    expect(count?.parentElement).toBe(title.parentElement);
+  });
+
+  it("shows item counts on rows whose page owns a list", () => {
+    render(<SettingsTree pathname="/settings" />);
+
+    // One workspace, two agent profiles (one disabled — the badge does not
+    // change the count), one executor profile, two secrets, one plugin.
+    expect(screen.getByRole("link", { name: "Workspaces 1" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Agents 2" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Executors 1" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Global Secrets 2" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Plugins 1" })).toBeTruthy();
+    // Rows without a list never carry a badge.
+    expect(screen.getByRole("link", { name: "Appearance" }).textContent).toBe("Appearance");
+  });
+});
+
+describe("SettingsTree tree modes", () => {
+  beforeEach(() => {
+    state.workspaces.activeId = MAIN_WORKSPACE_ID;
+    state.workspaces.items = [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }];
+    state.agentDiscovery.items = [];
+    state.agentDiscovery.loaded = false;
+    integrationsEnabled.clear();
+  });
+
+  afterEach(() => {
+    setMenuMode("flat");
+    cleanup();
+  });
+
+  it("grows the branched rows into their records and opens the route's path", () => {
+    setMenuMode("accordion");
+    render(
+      <SettingsTree pathname={`/settings/workspaces/${MAIN_WORKSPACE_ID}/integrations/github`} />,
+    );
+
+    // Workspaces › Main Workspace › Integrations › GitHub — the same chain the
+    // breadcrumb renders on that page.
+    expect(screen.getByRole("link", { name: /^Workspaces/ })).toBeTruthy();
+    expect(screen.getByRole("link", { name: WORKSPACE_ROW })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Integrations" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "GitHub" }).getAttribute("href")).toBe(
+      `/settings/workspaces/${MAIN_WORKSPACE_ID}/integrations/github`,
+    );
+  });
+
+  it("marks only the deepest row active, never its ancestors", () => {
+    setMenuMode("accordion");
+    render(
+      <SettingsTree pathname={`/settings/workspaces/${MAIN_WORKSPACE_ID}/integrations/github`} />,
+    );
+
+    expect(activeRowNames()).toEqual(["GitHub"]);
+  });
+
+  it("falls back to the owning row when no branch node claims the route", () => {
+    setMenuMode("accordion");
+    // `/settings/agents/browse` is the install catalogue, not an agent, so no
+    // node holds it — the Agents row has to keep the active mark itself.
+    render(<SettingsTree pathname="/settings/agents/browse" />);
+
+    expect(activeRowNames()).toEqual(["Agents2"]);
+  });
+
+  it("collapses the other branches when one is opened in accordion mode", () => {
+    setMenuMode("accordion");
+    render(<SettingsTree pathname={`/settings/workspaces/${MAIN_WORKSPACE_ID}`} />);
+
+    expect(screen.getByRole("link", { name: WORKSPACE_ROW })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: AGENT_LABEL })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand Agents" }));
+
+    expect(screen.getByRole("button", { name: AGENT_LABEL })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: WORKSPACE_ROW })).toBeNull();
+  });
+
+  it("keeps several branches open at once in persistent mode", () => {
+    setMenuMode("persistent", [
+      WORKSPACES_ROW_KEY,
+      `workspace:${MAIN_WORKSPACE_ID}`,
+      AGENTS_ROW_KEY,
+      AGENT_KEY,
+      "row:/settings/executors",
+      "executor:exec-1",
+    ]);
+    render(<SettingsTree pathname="/settings/preferences/appearance" />);
+
+    expect(screen.getByRole("link", { name: WORKSPACE_ROW })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Repositories" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: AGENT_LABEL })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Default" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Local" })).toBeTruthy();
+    // A page outside every branch still leaves exactly one active row.
+    expect(activeRowNames()).toEqual(["Appearance"]);
+  });
+
+  it("links an agent's profile under the agent, which only discloses", () => {
+    setMenuMode("persistent", [AGENTS_ROW_KEY, AGENT_KEY]);
+    render(<SettingsTree pathname="/settings/agents/claude-code/profiles/profile-1" />);
+
+    // `/settings/agents/<name>` redirects back to the index for a saved agent,
+    // so the agent row must not be a link.
+    expect(screen.queryByRole("link", { name: new RegExp(AGENT_LABEL) })).toBeNull();
+    expect(screen.getByRole("link", { name: "Default" }).getAttribute("href")).toBe(
+      "/settings/agents/claude-code/profiles/profile-1",
+    );
+    expect(activeRowNames()).toEqual(["Default"]);
+  });
+});
+
+/**
+ * The visual split between rows kandev ships and rows the user made. Its own
+ * block: the tree-mode suite is about what the menu contains, this one is about
+ * how a record is drawn, and together they overran the per-function line limit.
+ */
+describe("SettingsTree record treatment", () => {
+  beforeEach(() => {
+    state.workspaces.activeId = MAIN_WORKSPACE_ID;
+    state.workspaces.items = [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }];
+    state.agentDiscovery.items = [];
+    state.agentDiscovery.loaded = false;
+    integrationsEnabled.clear();
+  });
+
+  afterEach(() => {
+    setMenuMode("flat");
+    cleanup();
+  });
+
+  it("lightens rows from the user's data, leaving navigation alone", () => {
+    setMenuMode("accordion");
+    render(
+      <SettingsTree pathname={`/settings/workspaces/${MAIN_WORKSPACE_ID}/integrations/github`} />,
+    );
+
+    const workspace = screen.getByRole("link", { name: WORKSPACE_ROW });
+    // `GitHub` sits at the same indent as the workspace name but ships with the
+    // app, so the split cannot be read off depth.
+    const integration = screen.getByRole("link", { name: "GitHub" });
+
+    expect(recordFlag(workspace)).toBe("true");
+    expect(recordFlag(integration)).toBeNull();
+    expect(workspace.className).toContain(FONT_NORMAL);
+    expect(integration.className).toContain(FONT_MEDIUM);
+  });
+
+  it("treats a profile as the record, not the agent it belongs to", () => {
+    setMenuMode("persistent", [AGENTS_ROW_KEY, AGENT_KEY]);
+    render(<SettingsTree pathname="/settings/agents/claude-code/profiles/profile-1" />);
+
+    const agent = screen.getByRole("button", { name: AGENT_LABEL });
+    const profile = screen.getByRole("link", { name: "Default" });
+
+    // The agent ships with kandev: full weight.
+    expect(recordFlag(agent)).toBeNull();
+    expect(agent.className).toContain(FONT_MEDIUM);
+    // Its profile is the user's.
+    expect(recordFlag(profile)).toBe("true");
+    expect(profile.className).toContain(FONT_NORMAL);
+  });
+
+  it("marks a record with the dot its own page uses, in a full glyph box", () => {
+    setMenuMode("persistent", [AGENTS_ROW_KEY, AGENT_KEY, WORKSPACES_ROW_KEY]);
+    render(<SettingsTree pathname="/settings/preferences/appearance" />);
+
+    for (const name of [WORKSPACE_ROW, /^Default$/]) {
+      const box = screen.getByRole("link", { name }).firstElementChild;
+      // Same footprint as a tabler glyph, so the label lands in the same column.
+      expect(box?.getAttribute("class")).toContain(GLYPH_BOX);
+      // The dot the Agents page puts in front of a profile.
+      expect(box?.firstElementChild?.getAttribute("class")).toContain(RECORD_DOT);
+    }
+  });
+
+  it("leaves a row that has a glyph of its own alone", () => {
+    setMenuMode("persistent", [AGENTS_ROW_KEY, AGENT_KEY, WORKSPACES_ROW_KEY, WORKSPACE_KEY]);
+    render(<SettingsTree pathname="/settings/preferences/appearance" />);
+
+    // An agent keeps its logo, and a workspace tab its icon — neither is a
+    // record, and neither gains a dot.
+    for (const row of [
+      screen.getByRole("button", { name: AGENT_LABEL }),
+      screen.getByRole("link", { name: "Repositories" }),
+    ]) {
+      expect(row.querySelector("svg, img")).not.toBeNull();
+      expect(row.innerHTML).not.toContain(RECORD_DOT);
+    }
+  });
+});
+
+describe("SettingsTree badges", () => {
+  beforeEach(() => {
+    state.workspaces.activeId = MAIN_WORKSPACE_ID;
+    state.workspaces.items = [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }];
+    state.agentDiscovery.items = [];
+    state.agentDiscovery.loaded = false;
+    integrationsEnabled.clear();
+  });
+
+  afterEach(() => {
+    setMenuMode("flat");
+    cleanup();
+  });
+
+  it("badges a disabled profile, which stays listed so it can be re-enabled", () => {
+    setMenuMode("persistent", [AGENTS_ROW_KEY, AGENT_KEY]);
+    render(<SettingsTree pathname="/settings/preferences/appearance" />);
+
+    // Ported from #2339, which added this to the accordion tree the static menu
+    // replaced. A disabled profile is hidden from every task and session picker
+    // but stays here, so the menu has to say why it looks inert.
+    expect(screen.getByRole("link", { name: /Retired/ }).textContent).toContain("Disabled");
+    expect(screen.getByRole("link", { name: "Default" }).textContent).not.toContain("Disabled");
+  });
+
+  it("badges the active workspace, the way its own list does", () => {
+    setMenuMode("persistent", [WORKSPACES_ROW_KEY]);
+    render(<SettingsTree pathname="/settings/preferences/appearance" />);
+
+    // `MAIN_WORKSPACE_ID` is the active one in the mocked store.
     expect(
-      screen
-        .getAllByRole("link")
-        .slice(-2)
-        .map((link) => link.textContent),
-    ).toEqual(["Plugins", "System"]);
+      screen.getByRole("link", { name: new RegExp(MAIN_WORKSPACE_NAME) }).textContent,
+    ).toContain("Active");
+  });
+
+  it("badges only the active workspace", () => {
+    state.workspaces.items = [
+      { id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME },
+      { id: "ws-2", name: "Second Workspace" },
+    ];
+    setMenuMode("persistent", [WORKSPACES_ROW_KEY]);
+    render(<SettingsTree pathname="/settings/preferences/appearance" />);
+
+    expect(screen.getByRole("link", { name: /Second Workspace/ }).textContent).not.toContain(
+      "Active",
+    );
+  });
+
+  it("badges an agent whose CLI the scan cannot find", () => {
+    state.agentDiscovery.items = [{ name: "claude-code", available: false }];
+    state.agentDiscovery.loaded = true;
+    setMenuMode("persistent", [AGENTS_ROW_KEY]);
+    render(<SettingsTree pathname="/settings/preferences/appearance" />);
+
+    // Its profiles stay listed below, so the agent row says why none can run.
+    expect(screen.getByRole("button", { name: AGENT_ROW }).textContent).toContain("Not installed");
+  });
+
+  it("says nothing about installation before the scan has reported", () => {
+    state.agentDiscovery.items = [];
+    state.agentDiscovery.loaded = false;
+    setMenuMode("persistent", [AGENTS_ROW_KEY]);
+    render(<SettingsTree pathname="/settings/preferences/appearance" />);
+
+    // "Not looked yet" is not "not installed" — badging here would flash a
+    // wrong claim on every cold load.
+    expect(screen.getByRole("button", { name: AGENT_ROW }).textContent).not.toContain(
+      "Not installed",
+    );
+  });
+
+  it("badges an integration the workspace has connected", () => {
+    integrationsEnabled.add("github");
+    setMenuMode("persistent", [WORKSPACES_ROW_KEY, WORKSPACE_KEY, `${WORKSPACE_KEY}:integrations`]);
+    render(<SettingsTree pathname="/settings/preferences/appearance" />);
+
+    expect(screen.getByRole("link", { name: /GitHub/ }).textContent).toContain("Enabled");
+    expect(screen.getByRole("link", { name: /GitLab/ }).textContent).not.toContain("Enabled");
   });
 });
 
 describe("SettingsTree search", () => {
   afterEach(cleanup);
 
-  it("preserves the normal tree until a query filters it to grouped hits", () => {
+  it("preserves the normal menu until a query filters it to grouped hits", () => {
     render(<SettingsTree pathname="/settings" />);
 
-    const search = screen.getByRole("searchbox", { name: "Search settings" });
+    const search = screen.getByRole("searchbox", { name: SEARCH_LABEL });
     expect(screen.getByRole("link", { name: VOICE_MODE_LABEL })).toBeTruthy();
 
     fireEvent.change(search, { target: { value: "font size" } });
 
     const result = screen.getByRole("link", { name: /Terminal Font Size/ });
     expect(result.getAttribute("href")).toBe(
-      "/settings/general/terminal#setting-terminal-font-size",
+      "/settings/preferences/terminal-editors#setting-terminal-font-size",
     );
-    expect(result.textContent).toContain("General");
-    expect(result.textContent).toContain("Terminal");
+    expect(result.textContent).toContain("Terminal & Editors");
     expect(screen.queryByRole("link", { name: VOICE_MODE_LABEL })).toBeNull();
   });
 
-  it("clears a query with Escape and restores the normal tree", () => {
+  it("prefixes per-workspace results with the workspace name", () => {
     render(<SettingsTree pathname="/settings" />);
-    const search = screen.getByRole("searchbox", { name: "Search settings" });
+
+    fireEvent.change(screen.getByRole("searchbox", { name: SEARCH_LABEL }), {
+      target: { value: "Jira" },
+    });
+
+    const result = screen.getByRole("link", { name: /Jira/ });
+    expect(result.getAttribute("href")).toContain(
+      `/settings/workspaces/${MAIN_WORKSPACE_ID}/integrations/jira`,
+    );
+    expect(result.textContent).toContain(`${MAIN_WORKSPACE_NAME} › Integrations`);
+  });
+
+  it("clears a query with Escape and restores the normal menu", () => {
+    render(<SettingsTree pathname="/settings" />);
+    const search = screen.getByRole("searchbox", { name: SEARCH_LABEL });
 
     fireEvent.change(search, { target: { value: "font size" } });
     fireEvent.keyDown(search, { key: "Escape" });
@@ -461,10 +524,10 @@ describe("SettingsTree search", () => {
     expect(screen.getByRole("link", { name: VOICE_MODE_LABEL })).toBeTruthy();
   });
 
-  it("announces an empty result without rendering the normal tree", () => {
+  it("announces an empty result without rendering the normal menu", () => {
     render(<SettingsTree pathname="/settings" />);
 
-    fireEvent.change(screen.getByRole("searchbox", { name: "Search settings" }), {
+    fireEvent.change(screen.getByRole("searchbox", { name: SEARCH_LABEL }), {
       target: { value: "definitely missing" },
     });
 
@@ -472,88 +535,3 @@ describe("SettingsTree search", () => {
     expect(screen.queryByRole("link", { name: VOICE_MODE_LABEL })).toBeNull();
   });
 });
-
-describe("Message Queue settings navigation", () => {
-  afterEach(cleanup);
-
-  it("exposes Message Queue under General in the shared desktop and mobile settings tree", () => {
-    render(<GeneralGroup pathname="/settings/general/message-queue" expanded />);
-
-    const link = screen.getByRole("link", { name: "Message Queue" });
-    expect(link.getAttribute("href")).toBe("/settings/general/message-queue");
-    expect(link.className).toContain("before:bg-primary");
-  });
-
-  it("does not expose Message Queue under System", () => {
-    render(<SystemGroup pathname="/settings/system/status" expanded />);
-
-    expect(screen.queryByRole("link", { name: "Message Queue" })).toBeNull();
-  });
-});
-
-describe("WorkspacesGroup active workspace presentation", () => {
-  beforeEach(() => {
-    state.workspaces.activeId = MAIN_WORKSPACE_ID;
-    state.workspaces.items = [
-      { id: ARCHIVE_WORKSPACE_ID, name: ARCHIVE_WORKSPACE_NAME },
-      { id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME },
-    ];
-    state.setActiveWorkspace.mockClear();
-  });
-
-  afterEach(() => cleanup());
-
-  it("keeps the active workspace first even when the API returns it later", () => {
-    render(<WorkspacesGroup pathname="/settings" expanded />);
-
-    const workspaceLinks = getWorkspaceRootLinks();
-
-    expect(workspaceLinks.map((link) => link.textContent)).toEqual([
-      `${MAIN_WORKSPACE_NAME}Active`,
-      ARCHIVE_WORKSPACE_NAME,
-    ]);
-  });
-
-  it("expands another workspace without changing the active workspace", () => {
-    render(<WorkspacesGroup pathname="/settings" expanded />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Expand Archive Workspace" }));
-
-    expect(state.setActiveWorkspace).not.toHaveBeenCalled();
-    expect(getWorkspaceRootLinks()[0].textContent).toBe(`${MAIN_WORKSPACE_NAME}Active`);
-    expect(screen.getByRole("link", { name: `${MAIN_WORKSPACE_NAME} Active` })).toBeTruthy();
-  });
-});
-
-describe("WorkspacesGroup integration route sync", () => {
-  beforeEach(() => {
-    state.workspaces.activeId = MAIN_WORKSPACE_ID;
-    state.workspaces.items = [
-      { id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME },
-      { id: ARCHIVE_WORKSPACE_ID, name: ARCHIVE_WORKSPACE_NAME },
-    ];
-  });
-
-  afterEach(() => cleanup());
-
-  it("opens workspace integrations after navigating into an integration route", async () => {
-    const { rerender } = render(
-      <WorkspacesGroup pathname="/settings/workspace/ws-10/repositories" expanded />,
-    );
-
-    expect(screen.queryByRole("link", { name: "GitHub" })).toBeNull();
-
-    rerender(<WorkspacesGroup pathname="/settings/workspace/ws-10/integrations/github" expanded />);
-
-    expect((await screen.findByRole("link", { name: "GitHub" })).getAttribute("href")).toBe(
-      "/settings/workspace/ws-10/integrations/github",
-    );
-  });
-});
-
-function getWorkspaceRootLinks(): HTMLAnchorElement[] {
-  return screen.getAllByRole("link").filter((link): link is HTMLAnchorElement => {
-    const href = link.getAttribute("href");
-    return Boolean(href?.match(/^\/settings\/workspace\/[^/]+$/));
-  });
-}

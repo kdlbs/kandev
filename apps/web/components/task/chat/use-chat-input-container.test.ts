@@ -131,7 +131,7 @@ describe("useChatInputContainer", () => {
     // and the generic "Continue working…" prompt would mask that. Assert the
     // resolved chat:composerSteerPlaceholder itself — asserting only that it
     // differs from the caller's would also pass on any other generic label.
-    expect(result.current.inputPlaceholder).toBe("Send now — delivered to the running turn");
+    expect(result.current.inputPlaceholder).toBe("Send now; delivered to the running turn");
   });
 
   it("keeps the caller placeholder when the session cannot steer", () => {

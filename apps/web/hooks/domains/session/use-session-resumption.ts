@@ -177,7 +177,7 @@ export async function resumeWithSilentFallback(
     return true;
   }
   setters.setResumptionState("error");
-  setters.setError("Failed to resume session — workspace restore also unavailable");
+  setters.setError("Failed to resume session - workspace restore also unavailable");
   return false;
 }
 

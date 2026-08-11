@@ -626,19 +626,40 @@ func (c *worktreeCutover) isSupersededSessionWorktree(wt legacySessionWorktree) 
 	case hasSession && c.authoritativeWorktreeIDs[authoritativeWorktreeKey(ownerTaskID, wt.worktreeID)]:
 		superseded = true
 	case hasSession && isLegacyHistoricalSession(session.state):
-		for _, row := range c.envRepos {
-			env, ok := c.envs[row.envID]
-			if !ok || env.taskID != ownerTaskID || row.worktreeID == "" {
-				continue
-			}
-			if row.repositoryID == wt.repositoryID && row.branchSlug == wt.branchSlug {
-				superseded = true
-				break
+		superseded = c.flatEnvironmentSupersedesSessionWorktree(wt, session, ownerTaskID)
+		if !superseded {
+			for _, row := range c.envRepos {
+				env, ok := c.envs[row.envID]
+				if !ok || env.taskID != ownerTaskID || row.worktreeID == "" {
+					continue
+				}
+				if row.repositoryID == wt.repositoryID && row.branchSlug == wt.branchSlug {
+					superseded = true
+					break
+				}
 			}
 		}
 	}
 	c.sessionWorktreeSuperseded[cacheKey] = superseded
 	return superseded
+}
+
+// flatEnvironmentSupersedesSessionWorktree reports whether a surviving flat
+// environment owns the session's repository slot. Terminal history may carry
+// an older physical identity, but only for the task that owns the session's
+// environment and the legacy empty branch slot.
+func (c *worktreeCutover) flatEnvironmentSupersedesSessionWorktree(
+	wt legacySessionWorktree, session *legacySession, ownerTaskID string,
+) bool {
+	if !isLegacyHistoricalSession(session.state) || wt.branchSlug != "" {
+		return false
+	}
+	envID, ok := c.taskEnvIDs[ownerTaskID]
+	if !ok {
+		return false
+	}
+	env, ok := c.envs[envID]
+	return ok && env.taskID == ownerTaskID && env.repositoryID == wt.repositoryID && env.worktreeID != ""
 }
 
 // sessionOwnerTaskID returns the task that owns the environment a session

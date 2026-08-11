@@ -120,20 +120,25 @@ environment across tasks. Such a borrowing task gains no environment of its
 own, and the shared physical worktree keeps exactly one owner.
 Legacy session rows marked `deleted` (or carrying `deleted_at`) and stale
 references from terminal sessions are historical evidence, not additional
-owners, and bypass validation only when a canonical repository owner exists.
+owners. A higher-precedence task-owned source for the same repository and
+branch slot, either a canonical repository row or the surviving flat
+environment row, remains the owner even when a terminal reference carries a
+different physical `worktree_id`.
+
 The task-owned model holds exactly one physical worktree per (repository,
 branch slug) slot, while the legacy per-session model let one task accumulate
 several for the same slot through handoffs, re-materialized workspaces, and
-additional sessions. The upgrade therefore elects one owner per contested slot
-instead of failing: a canonical repository row or the surviving flat
-environment owns the slot outright, and otherwise the live session's worktree
-wins over a terminal session's, then the most recently updated row wins.
-Every other worktree for that slot becomes historical evidence and is logged
-with its identity, repository, path, and branch. No directory, registration, or
-branch is removed, so a demoted workspace remains on disk.
-Irreconcilable data — incompatible path or branch metadata for the same
-physical worktree identity with no higher-precedence owner, or a worktree whose
-task has no resolvable environment — still fails closed with a diagnostic.
+additional sessions. When no higher-precedence task-owned source exists, the
+upgrade elects one owner per contested slot instead of failing: a live
+session's worktree wins over a terminal session's, then the most recently
+updated row wins. Every other worktree for that slot becomes historical
+evidence and is logged with its identity, repository, path, and branch. No
+directory, registration, or branch is removed, so a demoted workspace remains
+on disk.
+
+Irreconcilable data, including incompatible path or branch metadata for the
+same physical worktree identity with no higher-precedence owner or a worktree
+whose task has no resolvable environment, still fails closed with a diagnostic.
 
 After backfill validation, the same upgrade drops `task_session_worktrees` and
 the deprecated flat worktree columns from `task_environments`. It also removes
@@ -229,8 +234,9 @@ remain the authorization boundary for physical cleanup.
   closed, the transaction rolls back, and the pre-upgrade database remains
   authoritative instead of authorizing future deletion from ambiguous data.
 - Historical deleted session-worktree rows and stale references from terminal
-  sessions do not block migration when a canonical task-owned repository row
-  exists; the canonical row remains authoritative.
+  sessions do not block migration when a higher-precedence task-owned source
+  exists for the same repository and branch slot. The higher-precedence source
+  remains authoritative.
 - A legacy session row that repeats a higher-precedence physical `worktree_id`
   cannot block migration solely because its path or branch metadata is stale,
   including when the session is resumable. The higher-precedence repository or
@@ -306,6 +312,10 @@ remain the authorization boundary for physical cleanup.
   repeats the surviving task environment's `worktree_id` with stale path or
   branch metadata, **WHEN** the new binary starts, **THEN** the flat environment
   metadata is retained and the cutover completes.
+- **GIVEN** a terminal legacy session references an older physical worktree for
+  the surviving flat environment's repository slot, **WHEN** the new binary
+  starts, **THEN** the flat environment remains the owner and the cutover
+  completes.
 - **GIVEN** a legacy session of one task is bound to another task's environment
   and carries a session-worktree row for that shared workspace, **WHEN** the new
   binary starts, **THEN** the worktree is normalized onto the owning task's

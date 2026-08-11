@@ -186,7 +186,7 @@ function DegradedSourceLine({ source }: { source: MarketplaceSource }) {
     <div>
       <Trans i18nKey="plugins:sourceUnreachableDetail" values={{ name: source.name, detail }}>
         <span className="font-medium">{source.name}</span> is unreachable
-        {detail} — its plugins are hidden.
+        {detail} - its plugins are hidden.
       </Trans>
     </div>
   );

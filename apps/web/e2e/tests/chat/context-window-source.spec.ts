@@ -28,8 +28,8 @@ test("context window announces unmeasured usage before the first sample", async 
   // same testid; scope to the visible instance like the sibling positive test.
   const contextUsage = contextTooltip.getByTestId("context-window-usage").first();
   await expect(contextUsage).toBeVisible();
-  await expect(contextUsage.getByText("—%", { exact: true })).toBeVisible();
-  await expect(contextUsage.getByText("— of 258.4K tokens", { exact: true })).toBeVisible();
+  await expect(contextUsage.getByText("N/A%", { exact: true })).toBeVisible();
+  await expect(contextUsage.getByText("N/A of 258.4K tokens", { exact: true })).toBeVisible();
   await expect(
     contextUsage.getByText(/Usage data appears after the first completed turn/),
   ).toBeVisible();

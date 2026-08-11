@@ -11,7 +11,7 @@
   "apiKey": "API 密钥",
   "areYouSureThisActionCannot": "确定吗？此操作无法撤销。",
   "areYouSureYouWantTo": "确定要删除此配置吗？此操作无法撤销。",
-  "authFilesNotFoundOnThisMachine": "{{files}} — 本机未找到这些文件",
+  "authFilesNotFoundOnThisMachine": "{{files}}; 本机未找到这些文件",
   "backToExecutor": "返回执行器",
   "backToExecutors": "返回执行器",
   "buildFailedWithMessage": "构建失败：{{message}}",

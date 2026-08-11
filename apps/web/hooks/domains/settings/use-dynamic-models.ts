@@ -1,4 +1,13 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+  type Dispatch,
+  type MutableRefObject,
+  type SetStateAction,
+} from "react";
 import { fetchDynamicModels, resolveAgentModelConfig } from "@/lib/api/domains/settings-api";
 import type {
   AgentModelConfigResponse,
@@ -33,6 +42,7 @@ type UseResolvedModelConfigOptions = {
   configOptions?: Record<string, string>;
   initialConfigOptions?: ConfigOptionEntry[];
   enabled?: boolean;
+  resolveInitial?: boolean;
 };
 
 type UseResolvedModelConfigState = {
@@ -49,6 +59,79 @@ type CachedModelConfigResolution = {
   response: AgentModelConfigResponse;
   expiresAt: number;
 };
+
+function useModelConfigResolutionEffect({
+  requestKey,
+  resolveInitial,
+  run,
+  stableInitialConfigOptions,
+  requestSequence,
+  setResolvedOptions,
+  setStatus,
+  setResolvedRequestKey,
+  setSettledRequestKey,
+  setError,
+  setIsLoading,
+}: {
+  requestKey: string | undefined;
+  resolveInitial: boolean;
+  run: (forceRefresh: boolean) => Promise<void>;
+  stableInitialConfigOptions: ConfigOptionEntry[];
+  requestSequence: MutableRefObject<number>;
+  setResolvedOptions: Dispatch<SetStateAction<ConfigOptionEntry[]>>;
+  setStatus: Dispatch<SetStateAction<CapabilityStatus | undefined>>;
+  setResolvedRequestKey: Dispatch<SetStateAction<string | undefined>>;
+  setSettledRequestKey: Dispatch<SetStateAction<string | undefined>>;
+  setError: Dispatch<SetStateAction<string | null>>;
+  setIsLoading: Dispatch<SetStateAction<boolean>>;
+}) {
+  useEffect(() => {
+    if (!resolveInitial && requestKey) {
+      requestSequence.current += 1;
+      setResolvedOptions(stableInitialConfigOptions);
+      setStatus(stableInitialConfigOptions.length > 0 ? "ok" : undefined);
+      setResolvedRequestKey(requestKey);
+      setSettledRequestKey(requestKey);
+      setError(null);
+      setIsLoading(false);
+      return () => {
+        requestSequence.current += 1;
+      };
+    }
+
+    void run(false);
+    return () => {
+      requestSequence.current += 1;
+    };
+  }, [
+    requestKey,
+    requestSequence,
+    resolveInitial,
+    run,
+    setError,
+    setIsLoading,
+    setResolvedOptions,
+    setResolvedRequestKey,
+    setSettledRequestKey,
+    setStatus,
+    stableInitialConfigOptions,
+  ]);
+}
+
+function buildModelConfigResolutionRequest(
+  model: string | undefined,
+  mode: string | undefined,
+  configOptions: Record<string, string> | undefined,
+): ResolveAgentModelConfigRequest | null {
+  if (!model) return null;
+  return {
+    model,
+    ...(mode ? { mode } : {}),
+    ...(configOptions && Object.keys(configOptions).length > 0
+      ? { config_options: configOptions }
+      : {}),
+  };
+}
 
 const MODEL_CONFIG_RESOLUTION_TTL_MS = 5 * 60 * 1000;
 const CAPABILITY_PENDING_POLL_DELAY_MS = 250;
@@ -313,32 +396,31 @@ export function useResolvedModelConfig(
   model: string | undefined,
   options: UseResolvedModelConfigOptions = {},
 ): UseResolvedModelConfigState {
-  const { mode, configOptions, initialConfigOptions = [], enabled = true } = options;
+  const {
+    mode,
+    configOptions,
+    initialConfigOptions = [],
+    enabled = true,
+    resolveInitial = true,
+  } = options;
   const configOptionsKey = stableRecordKey(configOptions);
   const initialConfigOptionsKey = JSON.stringify(initialConfigOptions);
   const stableConfigOptions = useMemo(() => configOptions, [configOptionsKey]);
   const stableInitialConfigOptions = useMemo(() => initialConfigOptions, [initialConfigOptionsKey]);
-  const request = useMemo<ResolveAgentModelConfigRequest | null>(() => {
-    if (!model) return null;
-    return {
-      model,
-      ...(mode ? { mode } : {}),
-      ...(stableConfigOptions && Object.keys(stableConfigOptions).length > 0
-        ? { config_options: stableConfigOptions }
-        : {}),
-    };
-  }, [mode, model, stableConfigOptions]);
-  const requestKey = useMemo(
-    () => (request ? modelConfigResolutionKey(agentName ?? "", request) : undefined),
-    [agentName, request],
+  const request = useMemo(
+    () => buildModelConfigResolutionRequest(model, mode, stableConfigOptions),
+    [mode, model, stableConfigOptions],
   );
+  const requestKey = request ? modelConfigResolutionKey(agentName ?? "", request) : undefined;
   const [resolvedOptions, setResolvedOptions] = useState<ConfigOptionEntry[]>(
     stableInitialConfigOptions,
   );
   const [status, setStatus] = useState<CapabilityStatus>();
   const [resolvedRequestKey, setResolvedRequestKey] = useState<string>();
   const [settledRequestKey, setSettledRequestKey] = useState<string>();
-  const [isLoading, setIsLoading] = useState(Boolean(enabled && agentName && request));
+  const [isLoading, setIsLoading] = useState(
+    Boolean(enabled && resolveInitial && agentName && request),
+  );
   const [error, setError] = useState<string | null>(null);
   const requestSequence = useRef(0);
 
@@ -385,12 +467,19 @@ export function useResolvedModelConfig(
     [agentName, enabled, request, requestKey, stableInitialConfigOptions],
   );
 
-  useEffect(() => {
-    void run(false);
-    return () => {
-      requestSequence.current += 1;
-    };
-  }, [run]);
+  useModelConfigResolutionEffect({
+    requestKey,
+    resolveInitial,
+    run,
+    stableInitialConfigOptions,
+    requestSequence,
+    setResolvedOptions,
+    setStatus,
+    setResolvedRequestKey,
+    setSettledRequestKey,
+    setError,
+    setIsLoading,
+  });
 
   const refresh = useCallback(() => run(true), [run]);
 
