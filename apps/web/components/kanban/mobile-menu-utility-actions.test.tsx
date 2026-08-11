@@ -2,13 +2,20 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MobileUtilityActions } from "./mobile-menu-utility-actions";
 
+const THEME_TOGGLE_TEST_ID = "mobile-theme-toggle-button";
+
 const mocks = vi.hoisted(() => ({
   setTheme: vi.fn(),
-  theme: "light" as "light" | "dark",
+  theme: "light" as "light" | "dark" | "system",
+  resolvedTheme: "light" as "light" | "dark",
 }));
 
 vi.mock("@/components/theme/app-theme", () => ({
-  useTheme: () => ({ theme: mocks.theme, setTheme: mocks.setTheme }),
+  useTheme: () => ({
+    theme: mocks.theme,
+    resolvedTheme: mocks.resolvedTheme,
+    setTheme: mocks.setTheme,
+  }),
 }));
 vi.mock("@/hooks/use-app-destinations", () => ({
   useStaticDestinations: () => [],
@@ -30,6 +37,7 @@ describe("MobileUtilityActions", () => {
   beforeEach(() => {
     mocks.setTheme.mockClear();
     mocks.theme = "light";
+    mocks.resolvedTheme = "light";
   });
 
   function renderComponent() {
@@ -45,19 +53,36 @@ describe("MobileUtilityActions", () => {
 
   it("renders a theme toggle button", () => {
     renderComponent();
-    expect(screen.getByTestId("mobile-theme-toggle-button")).toBeTruthy();
+    expect(screen.getByTestId(THEME_TOGGLE_TEST_ID)).toBeTruthy();
   });
 
   it("switches from light to dark on click", () => {
     renderComponent();
-    fireEvent.click(screen.getByTestId("mobile-theme-toggle-button"));
+    fireEvent.click(screen.getByTestId(THEME_TOGGLE_TEST_ID));
     expect(mocks.setTheme).toHaveBeenCalledWith("dark");
   });
 
   it("switches from dark to light on click", () => {
     mocks.theme = "dark";
+    mocks.resolvedTheme = "dark";
     renderComponent();
-    fireEvent.click(screen.getByTestId("mobile-theme-toggle-button"));
+    fireEvent.click(screen.getByTestId(THEME_TOGGLE_TEST_ID));
     expect(mocks.setTheme).toHaveBeenCalledWith("light");
+  });
+
+  it("uses resolvedTheme when theme is 'system' and the OS prefers dark", () => {
+    mocks.theme = "system";
+    mocks.resolvedTheme = "dark";
+    renderComponent();
+    fireEvent.click(screen.getByTestId(THEME_TOGGLE_TEST_ID));
+    expect(mocks.setTheme).toHaveBeenCalledWith("light");
+  });
+
+  it("uses resolvedTheme when theme is 'system' and the OS prefers light", () => {
+    mocks.theme = "system";
+    mocks.resolvedTheme = "light";
+    renderComponent();
+    fireEvent.click(screen.getByTestId(THEME_TOGGLE_TEST_ID));
+    expect(mocks.setTheme).toHaveBeenCalledWith("dark");
   });
 });

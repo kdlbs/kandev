@@ -36,7 +36,7 @@ export function MobileUtilityActions({
   const { t } = useTranslation();
   const { enabled: statusDrawerEnabled, issueSeverity, openStatusDrawer } = useAppStatusDrawer();
   const issueDetails = useConnectionIssueCopy(issueSeverity);
-  const { theme, setTheme } = useTheme();
+  const { resolvedTheme, setTheme } = useTheme();
   // Stats, Settings, and anything else added to the manifest's insight/utility
   // sections. Before the manifest, this block hardcoded a Settings link and
   // Stats had no phone entry point at all.
@@ -81,11 +81,11 @@ export function MobileUtilityActions({
       <Button
         type="button"
         variant="outline"
-        className={cn(mobileControlClass, "cursor-pointer justify-start gap-3")}
-        onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+        className={cn(mobileControlClass, "h-11 cursor-pointer justify-start gap-3")}
+        onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
         data-testid="mobile-theme-toggle-button"
       >
-        {theme === "dark" ? (
+        {resolvedTheme === "dark" ? (
           <IconSun className={mobileControlIconClass} />
         ) : (
           <IconMoon className={mobileControlIconClass} />
