@@ -8,8 +8,8 @@ const MAIN_WORKSPACE_NAME = "Main Workspace";
 // The active workspace carries a badge, so its row's accessible name is the
 // name plus that badge — match on the name rather than the whole string.
 const WORKSPACE_ROW = new RegExp(MAIN_WORKSPACE_NAME);
-const VOICE_MODE_LABEL = "Voice Mode";
 const SEARCH_LABEL = "Search settings";
+const VOICE_MODE_LABEL = "Voice Mode";
 const WORKSPACES_ROW_KEY = "row:/settings/workspaces";
 const AGENTS_ROW_KEY = "row:/settings/agents";
 const WORKSPACE_KEY = `workspace:${MAIN_WORKSPACE_ID}`;
@@ -188,12 +188,13 @@ describe("SettingsTree static menu", () => {
     expect(screen.queryByRole("link", { name: "API Tokens" })).toBeNull();
   });
 
-  it("keeps Voice Mode as a page row under Agents", () => {
-    render(<SettingsTree pathname="/settings/voice-mode" />);
+  it("keeps Voice Mode inside Task Behavior instead of as a page row", () => {
+    render(<SettingsTree pathname="/settings/preferences/task-behavior" />);
 
-    const link = screen.getByRole("link", { name: VOICE_MODE_LABEL });
-    expect(link.getAttribute("href")).toBe("/settings/voice-mode");
-    expect(link.getAttribute("data-active")).toBe("true");
+    expect(screen.queryByRole("link", { name: VOICE_MODE_LABEL })).toBeNull();
+    expect(screen.getByRole("link", { name: "Task Behavior" }).getAttribute("data-active")).toBe(
+      "true",
+    );
   });
 
   it("puts the count straight after the title, not out at the row's edge", () => {
@@ -487,7 +488,7 @@ describe("SettingsTree search", () => {
     render(<SettingsTree pathname="/settings" />);
 
     const search = screen.getByRole("searchbox", { name: SEARCH_LABEL });
-    expect(screen.getByRole("link", { name: VOICE_MODE_LABEL })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: VOICE_MODE_LABEL })).toBeNull();
 
     fireEvent.change(search, { target: { value: "font size" } });
 
@@ -521,7 +522,7 @@ describe("SettingsTree search", () => {
     fireEvent.keyDown(search, { key: "Escape" });
 
     expect((search as HTMLInputElement).value).toBe("");
-    expect(screen.getByRole("link", { name: VOICE_MODE_LABEL })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: VOICE_MODE_LABEL })).toBeNull();
   });
 
   it("announces an empty result without rendering the normal menu", () => {
@@ -532,6 +533,6 @@ describe("SettingsTree search", () => {
     });
 
     expect(screen.getByText("No matching settings")).toBeTruthy();
-    expect(screen.queryByRole("link", { name: VOICE_MODE_LABEL })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Voice Mode" })).toBeNull();
   });
 });

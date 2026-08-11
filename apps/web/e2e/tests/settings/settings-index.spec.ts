@@ -65,6 +65,28 @@ test.describe("Settings index on desktop", () => {
     await expect(active).toHaveAccessibleName(/Appearance/);
   });
 
+  test("owns Voice Mode inside Task Behavior", async ({ testPage, prCapture }) => {
+    await testPage.goto("/settings/preferences/task-behavior");
+
+    const settingsNav = testPage.getByTestId("app-sidebar-settings-mode");
+    await expect(
+      settingsNav.getByRole("link", { name: "Task Behavior", exact: true }),
+    ).toBeVisible();
+    await expect(settingsNav.getByRole("link", { name: "Voice Mode", exact: true })).toHaveCount(0);
+    await expect(testPage.getByRole("heading", { name: "Voice Mode", exact: true })).toBeVisible();
+    await expect(testPage.getByTestId("voice-enable-card")).toBeVisible();
+    await expect(testPage.getByText("Transcription Engine", { exact: true })).toBeVisible();
+    await expect(testPage.getByText("Behavior", { exact: true })).toBeVisible();
+    await expect(testPage.getByText("Whisper Web Model", { exact: true })).toBeVisible();
+    await expect(testPage.getByText(/Shortcut$/, { exact: true })).toBeVisible();
+    await testPage
+      .getByRole("heading", { name: "Voice Mode", exact: true })
+      .scrollIntoViewIfNeeded();
+    await prCapture.screenshot("task-behavior-voice-mode-desktop", {
+      caption: "Desktop Task Behavior page with Voice Mode settings",
+    });
+  });
+
   test("redirects the /settings/general prefix to the Appearance page", async ({ testPage }) => {
     await testPage.goto("/settings/general");
 

@@ -266,7 +266,7 @@
         "/settings/general/sprites",
         "/settings/general/task-actions",
         "/settings/general/terminal",
-        "/settings/voice-mode"
+        "/settings/preferences/task-behavior"
       ]
     },
     {

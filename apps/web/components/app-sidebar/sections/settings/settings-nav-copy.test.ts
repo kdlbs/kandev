@@ -24,7 +24,6 @@ const NAV_LABELS: Array<[key: string, english: string]> = [
   ["settings:taskBehavior", "Task Behavior"],
   ["system:navDataStorage", "Data & Logs"],
   ["common:prompts", "Prompts"],
-  ["settings:voiceMode", "Voice Mode"],
   ["settings:utilityAgents", "Utility Agents"],
   ["settings:globalSecrets", "Global Secrets"],
   ["common:externalMcp", "External MCP"],
@@ -52,12 +51,11 @@ const NAV_LABELS: Array<[key: string, english: string]> = [
  * through ONE key. Two keys with identical English today is a translator's
  * licence to make them disagree tomorrow.
  *
- * `sidebar:voiceMode` and `sidebar:utilityAgents` were exactly that mistake and
+ * `sidebar:utilityAgents` was exactly that mistake and
  * were removed in favour of the existing `settings:` keys.
  */
 const OWNED_BY_ANOTHER_NAMESPACE = [
   "Prompts",
-  "Voice Mode",
   "Utility Agents",
   "Global Secrets",
   "External MCP",
