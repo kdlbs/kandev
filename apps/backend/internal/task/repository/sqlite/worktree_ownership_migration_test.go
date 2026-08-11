@@ -226,6 +226,52 @@ func TestCutover_FreshSchemaHasFinalShape(t *testing.T) {
 	}
 }
 
+func TestCutover_HybridNormalizedEnvironmentWithLegacySessionWorktrees(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "hybrid.db")
+	dbConn, err := dbutil.OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	db := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := NewWithDB(db, db, nil); err != nil {
+		t.Fatalf("seed final schema: %v", err)
+	}
+
+	now := time.Now().UTC().Truncate(time.Second)
+	seed := legacySeed{envID: "env-hybrid", taskID: "task-hybrid", repoID: "repo-hybrid", sessionID: "sess-hybrid"}
+	seedLegacyTask(t, db, seed, now)
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_environments (
+			id, task_id, executor_type, status, workspace_path, created_at, updated_at
+		) VALUES (?, ?, 'worktree', 'ready', '/tasks/hybrid', ?, ?)`),
+		seed.envID, seed.taskID, now, now); err != nil {
+		t.Fatalf("seed normalized environment: %v", err)
+	}
+	seedLegacyEnvRepo(t, db, "env-repo-hybrid", seed.envID, seed.repoID,
+		"wt-hybrid", "/tasks/hybrid/repo", "feature/hybrid", now)
+	if _, err := db.Exec(legacySessionWorktreeDDL); err != nil {
+		t.Fatalf("recreate stale legacy table: %v", err)
+	}
+	seedLegacySessionWorktree(t, db, seed.sessionID, "wt-hybrid", seed.repoID, "",
+		"/tasks/hybrid/repo", "feature/hybrid", "active", now)
+
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("upgrade hybrid schema: %v", err)
+	}
+	if legacyTableExists(t, db, "task_session_worktrees") {
+		t.Fatal("stale legacy table must be removed")
+	}
+	env, err := repo.GetTaskEnvironment(context.Background(), seed.envID)
+	if err != nil {
+		t.Fatalf("get normalized environment: %v", err)
+	}
+	if len(env.Repos) != 1 || env.Repos[0].WorktreeID != "wt-hybrid" {
+		t.Fatalf("normalized repositories = %+v", env.Repos)
+	}
+}
+
 func tableColumnSet(t *testing.T, db *sqlx.DB, table string) map[string]bool {
 	t.Helper()
 	cols := map[string]bool{}

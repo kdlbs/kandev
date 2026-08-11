@@ -306,6 +306,11 @@ remain the authorization boundary for physical cleanup.
   the surviving flat environment's repository slot, **WHEN** the new binary
   starts, **THEN** the flat environment remains the owner and the cutover
   completes.
+- **GIVEN** `task_environments` already has the normalized schema but a stale
+  `task_session_worktrees` table remains from an intermediate build, **WHEN**
+  the new binary starts, **THEN** the cutover preserves normalized environment
+  and repository data, imports any remaining session-worktree inventory, and
+  removes the stale legacy table without requiring manual database edits.
 - **GIVEN** a legacy session of one task is bound to another task's environment
   and carries a session-worktree row for that shared workspace, **WHEN** the new
   binary starts, **THEN** the worktree is normalized onto the owning task's

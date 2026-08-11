@@ -65,8 +65,8 @@ type legacySessionWorktree struct {
 
 // loadLegacy reads every legacy ownership row into memory. The transaction
 // holds the writer/advisory locks, so the snapshot is consistent.
-func (c *worktreeCutover) loadLegacy(tx *sqlx.Tx) error {
-	if err := c.loadLegacyEnvs(tx); err != nil {
+func (c *worktreeCutover) loadLegacy(tx *sqlx.Tx, legacyEnvColumns map[string]bool) error {
+	if err := c.loadLegacyEnvs(tx, legacyEnvColumns); err != nil {
 		return err
 	}
 	if err := c.loadLegacySessions(tx); err != nil {
@@ -78,15 +78,20 @@ func (c *worktreeCutover) loadLegacy(tx *sqlx.Tx) error {
 	return c.loadLegacySessionWorktrees(tx)
 }
 
-func (c *worktreeCutover) loadLegacyEnvs(tx *sqlx.Tx) error {
-	rows, err := tx.Query(`
-		SELECT id, task_id, repository_id, executor_type, executor_id,
+func (c *worktreeCutover) loadLegacyEnvs(tx *sqlx.Tx, columns map[string]bool) error {
+	// Every interpolated expression comes from the fixed deprecated-column allowlist.
+	//nolint:gosec
+	rows, err := tx.Query(fmt.Sprintf(`
+		SELECT id, task_id, %s, executor_type, executor_id,
 			executor_profile_id, control_port, status,
-			COALESCE(worktree_id, ''), COALESCE(worktree_path, ''),
-			COALESCE(worktree_branch, ''), COALESCE(workspace_path, ''),
+			%s, %s, %s, COALESCE(workspace_path, ''),
 			COALESCE(container_id, ''), COALESCE(sandbox_id, ''),
 			COALESCE(task_dir_name, ''), created_at, updated_at
-		FROM task_environments`)
+		FROM task_environments`,
+		legacyEnvColumnExpr(columns, "repository_id"),
+		legacyEnvColumnExpr(columns, "worktree_id"),
+		legacyEnvColumnExpr(columns, "worktree_path"),
+		legacyEnvColumnExpr(columns, "worktree_branch")))
 	if err != nil {
 		return fmt.Errorf("cutover: read legacy environments: %w", err)
 	}
@@ -103,6 +108,13 @@ func (c *worktreeCutover) loadLegacyEnvs(tx *sqlx.Tx) error {
 		c.taskEnvs[env.taskID] = append(c.taskEnvs[env.taskID], env)
 	}
 	return rows.Err()
+}
+
+func legacyEnvColumnExpr(columns map[string]bool, column string) string {
+	if columns[column] {
+		return "COALESCE(" + column + ", '')"
+	}
+	return "CAST('' AS TEXT)"
 }
 
 func (c *worktreeCutover) loadLegacySessions(tx *sqlx.Tx) error {
