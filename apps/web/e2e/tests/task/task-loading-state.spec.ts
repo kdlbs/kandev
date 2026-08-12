@@ -47,4 +47,34 @@ test.describe("Task loading state", () => {
     await expect(testPage).toHaveURL(new RegExp(`/t/${sibling.id}$`));
     await expect(testPage.getByTestId("task-load-error-state")).toBeHidden({ timeout: 10_000 });
   });
+
+  test("keeps a session-backed sibling active", async ({ testPage, apiClient, seedData }) => {
+    const sibling = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Missing route session sibling",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    if (!sibling.session_id) throw new Error("session-backed sibling has no session");
+
+    await testPage.goto(`/t/missing-task-route-session?workspaceId=${seedData.workspaceId}`);
+    await expect(testPage.getByTestId("task-load-error-state")).toBeVisible({ timeout: 10_000 });
+
+    const sidebar = new SidebarTasksPage(testPage);
+    await expect(sidebar.row(sibling.id)).toBeVisible({ timeout: 10_000 });
+    await sidebar.plainClick(sibling.id);
+
+    await expect(testPage).toHaveURL(new RegExp(`/t/${sibling.id}$`));
+    await expect(testPage.getByTestId("task-load-error-state")).toBeHidden({ timeout: 10_000 });
+    await expect(testPage.getByTestId("dockview-task-layout")).toBeVisible({ timeout: 10_000 });
+    await expect(sidebar.row(sibling.id)).toHaveAttribute("data-active", "true", {
+      timeout: 10_000,
+    });
+  });
 });

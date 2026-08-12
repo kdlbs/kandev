@@ -260,6 +260,7 @@ function useTaskPageData(
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const setActiveSessionAuto = useAppStore((state) => state.setActiveSessionAuto);
   const setActiveTask = useAppStore((state) => state.setActiveTask);
+  const previousRouteTaskId = useRef<string | null | undefined>(undefined);
 
   // Validate that activeSessionId belongs to activeTaskId to prevent showing
   // messages from an unrelated session when navigating to a task without sessions.
@@ -282,14 +283,24 @@ function useTaskPageData(
   const effectiveSessionId = validatedActiveSessionId ?? initialSessionId;
 
   useEffect(() => {
-    syncActiveTaskSession({
+    const applied = syncActiveTaskSession({
       initialTaskId: initialTask?.id,
       fallbackTaskId,
       initialSessionId,
+      activeTaskId,
+      previousRouteTaskId: previousRouteTaskId.current,
       setActiveSessionAuto,
       setActiveTask,
     });
-  }, [initialTask?.id, fallbackTaskId, initialSessionId, setActiveSessionAuto, setActiveTask]);
+    if (applied) previousRouteTaskId.current = initialTask?.id ?? fallbackTaskId;
+  }, [
+    activeTaskId,
+    initialTask?.id,
+    fallbackTaskId,
+    initialSessionId,
+    setActiveSessionAuto,
+    setActiveTask,
+  ]);
 
   const { repositories } = useRepositories(task?.workspace_id ?? null, Boolean(task?.workspace_id));
   const effectiveRepositories = repositories.length ? repositories : initialRepositories;
