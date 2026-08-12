@@ -1,5 +1,5 @@
 ---
-status: draft
+status: shipped
 created: 2026-08-11
 owner: kandev
 ---
@@ -51,7 +51,8 @@ Decision: [ADR-2026-08-11-composer-access-authenticated-webhooks](../../decision
 - Disabling, uninstalling, or reloading a plugin aborts its in-flight webhook requests, unregisters
   its composer actions, and leaves native drafts intact.
 - The current core Voice Mode stays present until a separately delivered Voice plugin proves parity
-  on all listed surfaces. Removing core Voice Mode is not part of these host prerequisites.
+  on all listed surfaces. Removing core Voice Mode is not part of these host prerequisites. That
+  removal has since happened; see [Voice Mode leaves core](voice-extraction.md).
 
 ## API Surface
 
@@ -91,8 +92,13 @@ interface PluginComposerSlotProps {
 ```
 
 The host re-renders slot props when native state changes. `submit()` always revalidates native state
-at call time. The host may replace the capability object when a surface is remounted; methods on the
-old object return `unavailable`.
+at call time, reading the live draft rather than the last render's snapshot, so a plugin that inserts
+and submits in one callback is not told `blocked` for text it just inserted.
+
+The host replaces the capability object whenever the composer's identity changes: its surface, task
+or session. Methods on the superseded object return `unavailable`. Identity matters separately from
+mounting because a composer is re-rendered, not remounted, when the user switches task or session, so
+without it a handle captured while recording on one conversation would act on the next.
 
 ### Authenticated webhooks
 

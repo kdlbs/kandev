@@ -50,11 +50,12 @@ const STATUS_BADGE: Record<
 
 type RunRowProps = {
   run: AutomationRun;
+  deleting: boolean;
   onDelete: (id: string) => void;
   onNavigate: (taskId: string) => void;
 };
 
-function RunRow({ run, onDelete, onNavigate }: RunRowProps) {
+function RunRow({ run, deleting, onDelete, onNavigate }: RunRowProps) {
   const { t } = useTranslation();
   const badge = STATUS_BADGE[run.status] ?? STATUS_BADGE.triggered;
   // Any run that produced a task links to it, run-mode included. Run mode
@@ -101,6 +102,7 @@ function RunRow({ run, onDelete, onNavigate }: RunRowProps) {
             e.preventDefault();
             onDelete(run.id);
           }}
+          disabled={deleting}
           title={t("automations:deleteRun")}
           data-testid="delete-run"
         >
@@ -108,46 +110,6 @@ function RunRow({ run, onDelete, onNavigate }: RunRowProps) {
         </Button>
       </TableCell>
     </TableRow>
-  );
-}
-
-type DeleteAllButtonProps = { disabled: boolean; onConfirm: () => void };
-
-function DeleteAllButton({ disabled, onConfirm }: DeleteAllButtonProps) {
-  const { t } = useTranslation();
-  return (
-    <AlertDialog>
-      <AlertDialogTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="cursor-pointer text-destructive hover:text-destructive"
-          disabled={disabled}
-          title={t("automations:deleteAllRuns")}
-          data-testid="delete-all-runs"
-        >
-          <IconTrash className="h-3.5 w-3.5" />
-        </Button>
-      </AlertDialogTrigger>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{t("automations:deleteAllRunsTitle")}</AlertDialogTitle>
-          <AlertDialogDescription>
-            {t("automations:deleteAllRunsDescription")}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">{t("common:cancel")}</AlertDialogCancel>
-          <AlertDialogAction
-            className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            onClick={onConfirm}
-            data-testid="delete-all-runs-confirm"
-          >
-            {t("automations:deleteAll")}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   );
 }
 
@@ -168,6 +130,70 @@ const STATUS_FILTERS: { value: RunStatus | "all"; labelKey: string }[] = [
   { value: "archived", labelKey: "automations:runStatusArchived" },
   { value: "cancelled", labelKey: "automations:runStatusCancelled" },
 ];
+
+type DeleteAllButtonProps = {
+  disabled: boolean;
+  statusFilter: RunStatus | "all";
+  onConfirm: () => void;
+};
+
+function DeleteAllButton({ disabled, statusFilter, onConfirm }: DeleteAllButtonProps) {
+  const { t } = useTranslation();
+  // A status-scoped delete-all only removes the runs shown in the active
+  // view, so the confirmation names that scope instead of promising every
+  // run record for the automation.
+  const scoped = statusFilter !== "all";
+  const statusLabel = scoped
+    ? t(STATUS_FILTERS.find((filter) => filter.value === statusFilter)?.labelKey ?? "")
+    : "";
+  // The accessible name must match the action's actual scope, not just the
+  // dialog: in a filtered view "Delete all runs" would promise more than the
+  // button deletes.
+  const label = scoped
+    ? t("automations:deleteAllRunsScoped", { status: statusLabel })
+    : t("automations:deleteAllRuns");
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="cursor-pointer text-destructive hover:text-destructive"
+          disabled={disabled}
+          title={label}
+          aria-label={label}
+          data-testid="delete-all-runs"
+        >
+          <IconTrash className="h-3.5 w-3.5" />
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            {scoped
+              ? t("automations:deleteAllRunsScopedTitle", { status: statusLabel })
+              : t("automations:deleteAllRunsTitle")}
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            {scoped
+              ? t("automations:deleteAllRunsScopedDescription", { status: statusLabel })
+              : t("automations:deleteAllRunsDescription")}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel className="cursor-pointer">{t("common:cancel")}</AlertDialogCancel>
+          <AlertDialogAction
+            className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            onClick={onConfirm}
+            data-testid="delete-all-runs-confirm"
+          >
+            {t("automations:deleteAll")}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
 
 function StatusFilter({
   runs,
@@ -211,7 +237,7 @@ export function RunsSection({ automationId, workspaceId }: RunsSectionProps) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [statusFilter, setStatusFilter] = useState<RunStatus | "all">("all");
-  const { runs, loading, refresh, deleteRun, deleteAllRuns } = useAutomationRuns(
+  const { runs, loading, refresh, deleteRun, deleteAllRuns, deleting } = useAutomationRuns(
     automationId,
     workspaceId,
   );
@@ -246,12 +272,11 @@ export function RunsSection({ automationId, workspaceId }: RunsSectionProps) {
               size="icon-sm"
               className="cursor-pointer"
               onClick={refresh}
-              disabled={loading}
+              disabled={loading || deleting}
               title={t("automations:refresh")}
             >
               <IconRefresh className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
             </Button>
-            {runs.length > 0 && <DeleteAllButton disabled={loading} onConfirm={deleteAllRuns} />}
           </div>
         )}
       </div>
@@ -267,7 +292,21 @@ export function RunsSection({ automationId, workspaceId }: RunsSectionProps) {
                 <TableHead>{t("automations:runsColumnStatus")}</TableHead>
                 <TableHead>{t("automations:outcome")}</TableHead>
                 <TableHead>{t("automations:runsColumnTime")}</TableHead>
-                <TableHead className="w-8" />
+                <TableHead className="w-8">
+                  {visibleRuns.length > 0 && (
+                    <DeleteAllButton
+                      disabled={loading || deleting}
+                      statusFilter={statusFilter}
+                      onConfirm={() => {
+                        if (statusFilter === "all") {
+                          deleteAllRuns();
+                        } else {
+                          deleteAllRuns(visibleRuns.map((run) => run.id));
+                        }
+                      }}
+                    />
+                  )}
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -282,6 +321,7 @@ export function RunsSection({ automationId, workspaceId }: RunsSectionProps) {
                   <RunRow
                     key={run.id}
                     run={run}
+                    deleting={deleting}
                     onDelete={deleteRun}
                     onNavigate={(id) => router.push(`/tasks/${id}`)}
                   />

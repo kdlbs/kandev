@@ -100,6 +100,52 @@ go-plugin/gRPC handshake and Host injection. The backend implements
 pluginsdk.Plugin (OnEvent and/or HandleWebhook) and embeds
 pluginsdk.UnimplementedPlugin for no-op defaults.
 
+### Contribute an agent tool
+
+A managed plugin can contribute task-aware MCP tools through the same supervised
+gRPC process. Add an `agent_tools` declaration to `manifest.yaml` and implement
+the optional `pluginsdk.AgentToolPlugin` interface:
+
+```yaml
+agent_tools:
+  - name: add_tag
+    description: Add an existing tag to the current task.
+    surfaces: [kanban-task]
+    input_schema:
+      type: object
+      properties:
+        tag_id: { type: string }
+      required: [tag_id]
+      additionalProperties: false
+    annotations:
+      read_only_hint: false
+      destructive_hint: false
+      idempotent_hint: true
+```
+
+The host exposes the readable canonical name
+`kandev_<plugin-id-slug>_<local-name>` (for example,
+`kandev_task_tags_v1_add_tag`). Punctuation in the stable plugin ID becomes an
+underscore. Very long names receive a short stable hash suffix after the slug
+is truncated. Tool names are host-owned; the plugin-local `name` is used for
+the gRPC dispatch.
+
+Tools may target `kanban-task`, `office-task`, or both. They are not exposed to
+configuration or external MCP clients. Kandev validates the input and optional
+output JSON Schemas, supplies task/session/workspace/surface context, enforces
+a 30-second deadline and 1 MiB result limit, and does not retry calls.
+
+The optional SDK method is:
+
+```go
+InvokeAgentTool(context.Context, *pluginsdk.AgentToolRequest) (*pluginsdk.AgentToolResult, error)
+```
+
+The request includes immutable invocation, task, session, workspace, and
+surface context. Return required fallback text, optional structured content,
+and `IsError` when the operation failed. Declaring a tool does not grant Host
+API capabilities; use the existing `capabilities` fields for those permissions.
+
 ## Security and capabilities
 
 Plugins are privileged installed code. The capability list gates Host RPCs; it
@@ -186,7 +232,7 @@ bookkeeping is host-internal; plugins do not call lifecycle methods.
 | registerSettingsRoute    | registerSettingsRoute(fullPath, Component) with an exact path under /settings/plugins/<id>/...; settings shell supplies chrome                                                                                                                                                                         | Active ui.bundle                                                       | Route is removed on disable/uninstall                                                                                                                                                          | registry.registerSettingsRoute("/settings/plugins/acme/health", HealthPage)                                         |
 | registerComponent        | registerComponent(slot, Component); component receives { slotProps?: unknown }                                                                                                                                                                                                                         | Active ui.bundle                                                       | Every registration is owner-tracked, error-isolated, and bulk-revoked                                                                                                                          | registry.registerComponent("task-sidebar", Panel)                                                                   |
 | registerWsHandler        | registerWsHandler(action, handler(payload)); receives actions bridged from lib/ws                                                                                                                                                                                                                      | Active ui.bundle                                                       | Handler is removed on disable/uninstall; tolerate duplicate/replayed actions                                                                                                                   | registry.registerWsHandler("acme.updated", renderUpdate)                                                            |
-| registerKeybinding       | registerKeybinding(id, handler(event)); id must be declared in ui.keybindings; users can override the effective combo                                                                                                                                                                                  | ui.bundle and ui.keybindings[]                                         | Handler is removed on disable/uninstall; editable targets/core shortcuts win                                                                                                                   | registry.registerKeybinding("open-panel", () => host.openModal(...))                                                |
+| registerKeybinding       | registerKeybinding(id, handler(event)); id must be declared in ui.keybindings; users can override the effective combo                                                                                                                                                                                  | ui.bundle and ui.keybindings[]                                         | Handler is removed on disable/uninstall; core shortcuts win, and editable targets are skipped unless that entry set ui.keybindings[].allow_in_editor                                                                                                                   | registry.registerKeybinding("open-panel", () => host.openModal(...))                                                |
 | registerTaskPanel        | { id, title, icon?, Component, mobileEnabled? }; adds a row to the task workspace's "+" (add panel) menu; Component receives { panelId, taskId, sessionId, presentation }                                                                                                                              | Active ui.bundle                                                       | Panel renders behind its own error boundary; slow/failed reloads preserve it, a ready generation missing it closes it, and disable/uninstall closes every owned instance                       | registry.registerTaskPanel({ id: "notes", title: "Notes", Component: NotesPanel })                                  |
 | registerTaskMenuAction   | { id, label, icon?, group: "edit" \| "primary", visible?(context), run(context) }; "edit" nests inside the card's Edit submenu, "primary" renders as a flat top-level item between "Move to"/"Send to workflow" and "Link"                                                                             | Active ui.bundle                                                       | Action is revoked on disable/uninstall; a throwing/rejecting run is caught and logged                                                                                                          | registry.registerTaskMenuAction({ id: "enhance", label: "Enhance", group: "edit", run: doEnhance })                 |
 | registerTaskFilter       | { id, label, getOptions(), matches(context, selected) }; adds a client-side, multi-select filter section to the kanban board's display dropdown, alongside Workflow/Repository                                                                                                                         | Active ui.bundle                                                       | Filter is revoked on disable/uninstall; selections are ephemeral (not persisted); matches is only called for a non-empty selection, and a throw is caught, logged, and treated as non-matching | registry.registerTaskFilter({ id: "tags", label: "Tags", getOptions: listTagOptions, matches: taskHasSelectedTag }) |

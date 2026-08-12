@@ -20,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/gitconfigenv"
+	"github.com/kandev/kandev/internal/mcp/plugintools"
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -1615,6 +1616,22 @@ func (m *Manager) SetMcpProvidersForSession(ctx context.Context, sessionID strin
 		return fmt.Errorf("set MCP providers for session %s: %w", sessionID, err)
 	}
 	return nil
+}
+
+// SetPluginToolsForAllExecutions pushes a complete revisioned catalog to each
+// live agentctl. One unavailable execution does not prevent the others from
+// converging; stale delivery is rejected by agentctl's snapshot revision.
+func (m *Manager) SetPluginToolsForAllExecutions(ctx context.Context, snapshot plugintools.Snapshot) error {
+	var refreshErr error
+	for _, execution := range m.ListExecutions() {
+		if execution == nil || execution.agentctl == nil {
+			continue
+		}
+		if err := execution.agentctl.SetPluginTools(ctx, snapshot); err != nil {
+			refreshErr = errors.Join(refreshErr, fmt.Errorf("refresh execution %s plugin tools: %w", execution.ID, err))
+		}
+	}
+	return refreshErr
 }
 
 // resolveApprovalPolicyAndDisplayName resolves the approval policy and agent display name

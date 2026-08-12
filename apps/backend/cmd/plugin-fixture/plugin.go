@@ -57,6 +57,18 @@ type fixturePlugin struct {
 
 var _ pluginsdk.Plugin = (*fixturePlugin)(nil)
 
+var _ pluginsdk.AgentToolPlugin = (*fixturePlugin)(nil)
+
+func (p *fixturePlugin) InvokeAgentTool(_ context.Context, req *pluginsdk.AgentToolRequest) (*pluginsdk.AgentToolResult, error) {
+	value, _ := req.Arguments["value"].(string)
+	return &pluginsdk.AgentToolResult{
+		Text: fmt.Sprintf("fixture echo: %s", value),
+		StructuredContent: map[string]any{
+			"value": value, "task_id": req.Context.TaskID, "surface": req.Context.Surface,
+		},
+	}, nil
+}
+
 // newFixturePlugin builds a fixturePlugin whose data directory is resolved
 // from KANDEV_PLUGIN_DATA_DIR (falling back to the current working
 // directory), per §2 of docs/plans/plugins/GRPC-CONTRACT.md.

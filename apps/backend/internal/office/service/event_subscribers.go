@@ -534,9 +534,9 @@ func (s *Service) tryPostStartFallback(
 //     normalize the model id and look up pricing. On miss the row
 //     records cost_subcents=0 with estimated=true.
 //
-// After insert the session totals (tokens_in / tokens_out / cost_subcents)
-// are incremented on task_sessions, and any applicable budget policy is
-// evaluated. Estimated rows count toward budget totals at face value.
+// After insert the session totals (tokens_in / tokens_cached_in / tokens_out /
+// cost_subcents) are incremented on task_sessions, and any applicable budget
+// policy is evaluated. Estimated rows count toward budget totals at face value.
 func (s *Service) handlePromptUsage(ctx context.Context, event *bus.Event) error {
 	data, err := decodeEventData[PromptUsageData](event)
 	if err != nil || data.TaskID == "" || data.SessionID == "" {
@@ -549,6 +549,7 @@ func (s *Service) handlePromptUsage(ctx context.Context, event *bus.Event) error
 
 	costSubcents, estimated := s.resolveCostForUsage(ctx, *data)
 	provider := resolveProvider(*data)
+	tokensCachedIn := data.Usage.CachedReadTokens + data.Usage.CachedWriteTokens
 
 	costEvent := &models.CostEvent{
 		SessionID:      data.SessionID,
@@ -558,7 +559,7 @@ func (s *Service) handlePromptUsage(ctx context.Context, event *bus.Event) error
 		Model:          data.Model,
 		Provider:       provider,
 		TokensIn:       data.Usage.InputTokens,
-		TokensCachedIn: data.Usage.CachedReadTokens + data.Usage.CachedWriteTokens,
+		TokensCachedIn: tokensCachedIn,
 		TokensOut:      data.Usage.OutputTokens,
 		CostSubcents:   costSubcents,
 		Estimated:      estimated,
@@ -570,7 +571,7 @@ func (s *Service) handlePromptUsage(ctx context.Context, event *bus.Event) error
 
 	s.incrementSessionUsageTotals(
 		ctx, data.SessionID,
-		data.Usage.InputTokens, data.Usage.OutputTokens, costSubcents,
+		data.Usage.InputTokens, tokensCachedIn, data.Usage.OutputTokens, costSubcents,
 	)
 
 	if fields.WorkspaceID != "" {
@@ -652,13 +653,13 @@ func providerFromCLI(cli string) string {
 }
 
 func (s *Service) incrementSessionUsageTotals(
-	ctx context.Context, sessionID string, tokensIn, tokensOut, costSubcents int64,
+	ctx context.Context, sessionID string, tokensIn, tokensCachedIn, tokensOut, costSubcents int64,
 ) {
 	if s.sessionUsageWriter == nil || sessionID == "" {
 		return
 	}
 	if err := s.sessionUsageWriter.IncrementTaskSessionUsage(
-		ctx, sessionID, tokensIn, tokensOut, costSubcents,
+		ctx, sessionID, tokensIn, tokensCachedIn, tokensOut, costSubcents,
 	); err != nil {
 		s.logger.Warn("increment task_session usage failed",
 			zap.String("session_id", sessionID), zap.Error(err))

@@ -14,8 +14,10 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/mcp/plugintools"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/marketplace"
 	"github.com/kandev/kandev/internal/plugins/pkgtar"
@@ -75,6 +77,10 @@ type Service struct {
 	// cannot deadlock against it.
 	lifecycleLocks *keyedMutex
 
+	// agentToolInstallMu makes exposed-name collision validation and registry
+	// insertion one atomic catalog mutation across different plugin IDs.
+	agentToolInstallMu sync.Mutex
+
 	pluginsDir       string
 	store            store.Store
 	registry         *Registry
@@ -84,9 +90,14 @@ type Service struct {
 	eventBus         bus.EventBus
 	log              *logger.Logger
 
-	deliverer Deliverer
-	runtime   PluginRuntime
-	secrets   SecretVault
+	deliverer                Deliverer
+	agentToolCatalogListener AgentToolCatalogListener
+	agentToolGeneration      string
+	agentToolRevision        uint64
+	agentToolSnapshot        plugintools.Snapshot
+	agentToolSnapshotReady   bool
+	runtime                  PluginRuntime
+	secrets                  SecretVault
 
 	// Host data API (ADR 0043) service-layer dependencies, wired via
 	// SetDataSources and handed to every pluginHost hostForPlugin builds.
@@ -144,12 +155,13 @@ type Service struct {
 // directly for tests that want a fake store.Store/PluginRuntime.
 func NewService(pluginStore store.Store, registry *Registry, eventBus bus.EventBus, log *logger.Logger) *Service {
 	return &Service{
-		store:          pluginStore,
-		registry:       registry,
-		eventBus:       eventBus,
-		log:            log,
-		httpClient:     &http.Client{},
-		lifecycleLocks: newKeyedMutex(),
+		store:               pluginStore,
+		registry:            registry,
+		eventBus:            eventBus,
+		log:                 log,
+		httpClient:          &http.Client{},
+		lifecycleLocks:      newKeyedMutex(),
+		agentToolGeneration: uuid.NewString(),
 	}
 }
 
@@ -186,6 +198,22 @@ func (s *Service) SetDeliverer(d Deliverer) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.deliverer = d
+}
+
+// SetAgentToolCatalogListener attaches the dynamic MCP registry bridge.
+func (s *Service) SetAgentToolCatalogListener(listener AgentToolCatalogListener) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.agentToolCatalogListener = listener
+}
+
+func (s *Service) notifyAgentToolCatalogChanged() {
+	s.mu.Lock()
+	listener := s.agentToolCatalogListener
+	s.mu.Unlock()
+	if listener != nil {
+		listener.NotifyAgentToolCatalogChanged()
+	}
 }
 
 // Deliverer returns the currently attached event-delivery subsystem, or nil
@@ -743,6 +771,17 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 		_ = os.RemoveAll(result.InstallPath)
 		return nil, err
 	}
+	s.agentToolInstallMu.Lock()
+	catalogLocked := true
+	defer func() {
+		if catalogLocked {
+			s.agentToolInstallMu.Unlock()
+		}
+	}()
+	if err := s.validateAgentToolInstall(result.Manifest); err != nil {
+		_ = os.RemoveAll(result.InstallPath)
+		return nil, err
+	}
 
 	// The plugin id is only known once pkgtar.Install has parsed the
 	// package's manifest, so the per-plugin lock is acquired here rather
@@ -780,9 +819,12 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 		return nil, fmt.Errorf("plugins: persist installed record: %w", err)
 	}
 	s.registry.Add(rec)
+	s.agentToolInstallMu.Unlock()
+	catalogLocked = false
 
 	activateErr := s.activate(rec)
 	s.notifyDeliverer()
+	s.notifyAgentToolCatalogChanged()
 
 	installed, getErr := s.Get(rec.ID)
 	if getErr != nil {
@@ -949,6 +991,7 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 	s.registry.Remove(id)
 	s.deletePluginState(id)
 	s.notifyDeliverer()
+	s.notifyAgentToolCatalogChanged()
 	return nil
 }
 
@@ -1033,6 +1076,7 @@ func (s *Service) Enable(id string) error {
 		return err
 	}
 	s.notifyDeliverer()
+	s.notifyAgentToolCatalogChanged()
 	return nil
 }
 
@@ -1058,6 +1102,7 @@ func (s *Service) Disable(id string) error {
 		return err
 	}
 	s.notifyDeliverer()
+	s.notifyAgentToolCatalogChanged()
 	return nil
 }
 
@@ -1160,6 +1205,7 @@ func (s *Service) handleStatusChange(id string, healthy bool, reason error) {
 			zap.String("plugin_id", id), zap.Bool("healthy", healthy), zap.Error(err))
 	} else {
 		s.notifyDeliverer()
+		s.notifyAgentToolCatalogChanged()
 		if healthy {
 			if d := s.Deliverer(); d != nil {
 				d.Flush(id)
@@ -1217,6 +1263,7 @@ func (s *Service) StartActivePlugins(ctx context.Context) {
 				// reconcile it after an active plugin fails to spawn. Otherwise
 				// its worker would continue treating the plugin as active.
 				s.notifyDeliverer()
+				s.notifyAgentToolCatalogChanged()
 			}
 		}
 	}

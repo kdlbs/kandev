@@ -1,11 +1,14 @@
 package manifest
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path"
 	"regexp"
 	"strings"
+
+	"github.com/kandev/kandev/internal/mcp/toolschema"
 )
 
 // idPattern matches the required plugin id shape: lowercase alphanumerics,
@@ -130,7 +133,104 @@ func (m *Manifest) Validate() error {
 	errs = append(errs, m.validateUIBundle()...)
 	errs = append(errs, m.validateUIKeybindings()...)
 	errs = append(errs, m.validateWebhooks()...)
+	errs = append(errs, m.validateAgentTools()...)
 	return errors.Join(errs...)
+}
+
+var agentToolNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_]{0,31}$`)
+
+func (m *Manifest) validateAgentTools() []error {
+	if len(m.AgentTools) == 0 {
+		return nil
+	}
+	var errs []error
+	if !m.IsManaged() {
+		errs = append(errs, errors.New("agent_tools require runtime.type binary"))
+	}
+	if len(m.AgentTools) > 16 {
+		errs = append(errs, errors.New("agent_tools must declare at most 16 tools"))
+	}
+	seen := make(map[string]struct{}, len(m.AgentTools))
+	for i, tool := range m.AgentTools {
+		prefix := fmt.Sprintf("agent_tools[%d]", i)
+		errs = append(errs, validateAgentTool(prefix, tool, seen)...)
+	}
+	return errs
+}
+
+func validateAgentTool(prefix string, tool AgentTool, seen map[string]struct{}) []error {
+	var errs []error
+	errs = append(errs, validateAgentToolIdentity(prefix, tool.Name, seen)...)
+	if strings.TrimSpace(tool.Description) == "" || len(tool.Description) > 1024 {
+		errs = append(errs, fmt.Errorf("%s.description must be 1-1024 bytes", prefix))
+	}
+	errs = append(errs, validateAgentToolSurfaces(prefix, tool.Surfaces)...)
+	errs = append(errs, validateAgentToolSchemas(prefix, tool)...)
+	if tool.Annotations.ReadOnlyHint != nil && tool.Annotations.DestructiveHint != nil &&
+		*tool.Annotations.ReadOnlyHint && *tool.Annotations.DestructiveHint {
+		errs = append(errs, fmt.Errorf("%s.annotations cannot set both read_only_hint and destructive_hint", prefix))
+	}
+	return errs
+}
+
+func validateAgentToolIdentity(prefix, name string, seen map[string]struct{}) []error {
+	var errs []error
+	if !agentToolNamePattern.MatchString(name) {
+		errs = append(errs, fmt.Errorf("%s.name must match %s", prefix, agentToolNamePattern.String()))
+	}
+	if _, ok := seen[name]; ok {
+		errs = append(errs, fmt.Errorf("%s.name duplicates %q", prefix, name))
+	}
+	seen[name] = struct{}{}
+	return errs
+}
+
+func validateAgentToolSurfaces(prefix string, surfaces []string) []error {
+	if len(surfaces) == 0 {
+		return []error{fmt.Errorf("%s.surfaces must not be empty", prefix)}
+	}
+	var errs []error
+	seen := map[string]struct{}{}
+	for _, surface := range surfaces {
+		if surface != AgentToolSurfaceKanban && surface != AgentToolSurfaceOffice {
+			errs = append(errs, fmt.Errorf("%s.surfaces contains unsupported surface %q", prefix, surface))
+		}
+		if _, ok := seen[surface]; ok {
+			errs = append(errs, fmt.Errorf("%s.surfaces duplicates %q", prefix, surface))
+		}
+		seen[surface] = struct{}{}
+	}
+	return errs
+}
+
+func validateAgentToolSchemas(prefix string, tool AgentTool) []error {
+	var errs []error
+	if err := validateAgentToolSchema(prefix+".input_schema", tool.InputSchema); err != nil {
+		errs = append(errs, err)
+	}
+	if len(tool.OutputSchema) > 0 {
+		if err := validateAgentToolSchema(prefix+".output_schema", tool.OutputSchema); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errs
+}
+
+func validateAgentToolSchema(name string, schema map[string]any) error {
+	if len(schema) == 0 {
+		return fmt.Errorf("%s must be a non-empty object schema", name)
+	}
+	data, err := json.Marshal(schema)
+	if err != nil {
+		return fmt.Errorf("%s must be valid JSON: %w", name, err)
+	}
+	if len(data) > 64*1024 {
+		return fmt.Errorf("%s must be at most 65536 bytes", name)
+	}
+	if _, err := toolschema.Compile(name, schema); err != nil {
+		return fmt.Errorf("%s is invalid: %w", name, err)
+	}
+	return nil
 }
 
 // dotConfigSuffix mirrors store.dotConfigSuffix: an id ending in ".config"
@@ -323,9 +423,28 @@ func (m *Manifest) validateUIKeybindings() []error {
 		}
 		if err := parseKeybindingCombo(kb.Default); err != nil {
 			errs = append(errs, fmt.Errorf("ui.keybindings[%q]: %w", kb.ID, err))
+			continue
+		}
+		if kb.AllowInEditor && !comboHasNonShiftModifier(kb.Default) {
+			errs = append(errs, fmt.Errorf(
+				"ui.keybindings[%q]: allow_in_editor requires a ctrl/cmd/mod/alt modifier, otherwise the binding would swallow %q while the user is typing",
+				kb.ID, kb.Default))
 		}
 	}
 	return errs
+}
+
+// comboHasNonShiftModifier reports whether an already-parsed combo holds a
+// modifier that makes it unreachable by ordinary typing. Shift alone does
+// not count: shift+a is just a capital A.
+func comboHasNonShiftModifier(combo string) bool {
+	for _, raw := range strings.Split(combo, "+") {
+		switch strings.ToLower(strings.TrimSpace(raw)) {
+		case "mod", "ctrl", "cmd", "meta", "alt", "option":
+			return true
+		}
+	}
+	return false
 }
 
 // validateKeybindingID checks a single keybinding id against the slug

@@ -73,7 +73,7 @@ export function ExternalMcpSettings() {
         // `localhost` is a hostname the user types, not copy. Interpolated so
         // the pseudo-locale leaves it intact — baked into the message it renders
         // as `ĺōćàĺĥōśţ`, a dead pointer to something the reader must reproduce
-        // verbatim. Same reasoning as `voiceUnavailableInsecure`, which already
+        // verbatim. The scheme and host are passed as values so a translator
         // passes its scheme and host as values.
         description={t("settings:externalMcpEndpointsDescription", {
           localhostHost: "localhost",

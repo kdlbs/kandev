@@ -449,10 +449,18 @@ interface PluginRegistry {
   registerWsHandler(action: string, handler: (payload: unknown) => void): void;
 
   // Binds a handler to a keybinding declared in this plugin's manifest
-  // (ui.keybindings[].id — { id, default, description }, see manifest schema).
+  // (ui.keybindings[].id — { id, default, description, allow_in_editor? },
+  // see manifest schema).
   // The host resolves the effective combo (user override if the user
   // rebound it, else the manifest default) and dispatches globally, skipping
-  // editable targets the same way core app shortcuts do. Combos are
+  // editable targets the same way core app shortcuts do — unless that entry
+  // declared `allow_in_editor: true`, which lets it fire while an input,
+  // textarea or contenteditable has focus. That opt-in exists for bindings
+  // whose whole job is to act on the focused composer (dictation); the
+  // manifest validator only accepts it on a combo carrying a
+  // ctrl/cmd/mod/alt modifier, and the dispatcher re-checks the *resolved*
+  // combo, so a user override that drops the modifier silently falls back to
+  // skipping editables rather than swallowing ordinary keystrokes. Combos are
   // user-overridable in Settings > Keyboard Shortcuts, namespaced
   // `plugin:{pluginId}:{id}`. Binding an id the manifest didn't declare still
   // stores the handler (a console warning is logged) since the dispatcher's

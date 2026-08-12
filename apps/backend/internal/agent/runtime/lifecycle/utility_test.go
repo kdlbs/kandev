@@ -361,6 +361,67 @@ func TestManagerExecuteInferenceProfilePrompt(t *testing.T) {
 	})
 }
 
+// The agents table's primary key is a generated UUID while the registry is
+// keyed by the agent slug, so AgentID and AgentName never carry the same value
+// in production. Every fixture above uses one string for both, which hid the
+// registry lookup reading AgentID.
+func TestManagerExecuteInferenceProfilePromptUsesTheRegistryAgentName(t *testing.T) {
+	const dbAgentUUID = "6a2b0f5c-6b9b-4f0e-8f3b-1f2c3d4e5f60"
+
+	harness := newInferenceHarness(t, &stubProfileResolver{profile: &AgentProfileInfo{
+		ProfileID: "profile-1",
+		AgentID:   dbAgentUUID,
+		AgentName: "inference-ok",
+		Model:     "claude-haiku-4-5",
+	}}, newInferenceAgent("inference-ok", true, true))
+
+	resp, err := harness.manager.ExecuteInferenceProfilePrompt(t.Context(), "session-1", "profile-1", "hello")
+	if err != nil {
+		t.Fatalf("ExecuteInferenceProfilePrompt: %v", err)
+	}
+	if resp.Response != "answer for hello" {
+		t.Fatalf("response = %+v", resp)
+	}
+	recorded := harness.recorded()
+	if len(recorded) != 1 {
+		t.Fatalf("agentctl calls = %d", len(recorded))
+	}
+	// agentctl keys its ACP compatibility and session handling off this field,
+	// so the database UUID must never reach the wire.
+	if recorded[0].AgentID != "inference-ok" {
+		t.Fatalf("outgoing AgentID = %q, want the registry agent name", recorded[0].AgentID)
+	}
+}
+
+func TestManagerExecuteInferenceProfilePromptFallsBackToAgentIDWithoutAName(t *testing.T) {
+	harness := newInferenceHarness(t, &stubProfileResolver{profile: &AgentProfileInfo{
+		ProfileID: "profile-1",
+		AgentID:   "inference-ok",
+	}}, newInferenceAgent("inference-ok", true, true))
+
+	if _, err := harness.manager.ExecuteInferenceProfilePrompt(t.Context(), "session-1", "profile-1", "hello"); err != nil {
+		t.Fatalf("ExecuteInferenceProfilePrompt: %v", err)
+	}
+	recorded := harness.recorded()
+	if len(recorded) != 1 || recorded[0].AgentID != "inference-ok" {
+		t.Fatalf("requests = %+v, want the AgentID fallback to reach agentctl", recorded)
+	}
+}
+
+func TestManagerExecuteInferenceProfilePromptReportsTheAgentNameOnLookupFailure(t *testing.T) {
+	harness := newInferenceHarness(t, &stubProfileResolver{profile: &AgentProfileInfo{
+		ProfileID: "profile-1",
+		AgentID:   "6a2b0f5c-6b9b-4f0e-8f3b-1f2c3d4e5f60",
+		AgentName: "not-registered",
+	}})
+
+	_, err := harness.manager.ExecuteInferenceProfilePrompt(t.Context(), "session-1", "profile-1", "hello")
+	// The UUID is meaningless to anyone reading the error; name the agent.
+	if err == nil || !strings.Contains(err.Error(), `agent "not-registered" does not support inference`) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestManagerListInferenceAgentsOnlyReturnsInstalledOnes(t *testing.T) {
 	installed := newInferenceAgent("inference-installed", true, true)
 	missing := newInferenceAgent("inference-missing", true, false)
