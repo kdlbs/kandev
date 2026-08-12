@@ -546,6 +546,9 @@ Completed 2026-08-05.
   Task-not-ready and unsupported-executor attachment failures also return actionable HTTP 422
   responses. The complete gateway WebSocket package passed under the race detector in 3.790s and
   focused Go lint reported zero issues.
+- The branch then rebased without conflict onto `origin/main` at `11f1b2013`, which added lifecycle
+  manager and GitLab coverage without changing production sources. The complete lifecycle-manager
+  and GitLab packages, including the new tests, passed under the race detector in 30.051s and 17.645s.
 
 ---
 
