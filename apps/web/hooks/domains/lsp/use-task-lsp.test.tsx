@@ -127,6 +127,19 @@ describe("useTaskLsp", () => {
 });
 
 describe("useTaskLsp reconnection", () => {
+  it("retries a failed initial load when the subscription reconnects", async () => {
+    api.get.mockRejectedValueOnce(new Error("initial load failed"));
+    const view = renderHook(() => subject("task-1"), { wrapper });
+    await waitFor(() => expect(view.result.current.lsp.error).toBe("initial load failed"));
+    const callsBeforeReconnect = api.get.mock.calls.length;
+
+    act(() => view.result.current.store.getState().setConnectionStatus("disconnected"));
+    act(() => view.result.current.store.getState().setConnectionStatus("connected"));
+
+    await waitFor(() => expect(view.result.current.lsp.loaded).toBe(true));
+    expect(api.get.mock.calls.length).toBeGreaterThan(callsBeforeReconnect);
+  });
+
   it("refreshes stable task state after the WebSocket subscription reconnects", async () => {
     let serverSnapshot = snapshot(language(4, "ready"));
     api.get.mockImplementation(async () => serverSnapshot);

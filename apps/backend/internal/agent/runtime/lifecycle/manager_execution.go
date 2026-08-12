@@ -274,12 +274,15 @@ func (m *Manager) GetTaskHostForEnvironment(
 func (m *Manager) StopTaskHostForEnvironment(
 	ctx context.Context,
 	taskEnvironmentID, reason string,
-) error {
+) (bool, error) {
 	execution, exists, err := m.GetTaskHostForEnvironment(ctx, taskEnvironmentID)
 	if err != nil || !exists {
-		return err
+		return false, err
 	}
-	return m.StopAgentWithReason(ctx, execution.ID, reason, false)
+	if err := m.StopAgentWithReason(ctx, execution.ID, reason, false); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // RecoverTaskHostForEnvironment evicts a proven-dead task-host execution so
@@ -341,6 +344,11 @@ func (m *Manager) ensureTaskHostTaskActive(ctx context.Context, taskID string) e
 func (m *Manager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string) (*AgentExecution, error) {
 	if sessionID == "" {
 		return nil, fmt.Errorf("session_id is required")
+	}
+	if check := m.sessionAccessCheck; check != nil {
+		if err := check(ctx, sessionID); err != nil {
+			return nil, err
+		}
 	}
 
 	// Fast path: execution already in memory

@@ -384,6 +384,7 @@ func (c *Controller) CleanupTask(ctx context.Context, taskID, reason string) err
 	stopAttempts := make(chan struct{}, len(states))
 	commandResults := make(chan error, len(states))
 	taskHostDone := make(chan struct{})
+	var taskHostCleanupResult TaskHostCleanupResult
 	var taskHostCleanupErr error
 	// Each language lane stays held from its refreshed generation snapshot
 	// through the task-host backstop. A Start/Restart accepted on either side
@@ -409,7 +410,7 @@ func (c *Controller) CleanupTask(ctx context.Context, taskID, reason string) err
 					stopAttempts <- struct{}{}
 					<-taskHostDone
 					return nil, c.finalizeTaskLanguageCleanup(
-						workCtx, result, taskHostCleanupErr, reason,
+						workCtx, result, taskHostCleanupResult, reason,
 					)
 				},
 			)
@@ -420,7 +421,9 @@ func (c *Controller) CleanupTask(ctx context.Context, taskID, reason string) err
 		<-stopAttempts
 	}
 	if environment != nil && ExecutorSupportsLSP(environment.ExecutorType) {
-		taskHostCleanupErr = c.runtimes.CleanupTaskHost(ctx, taskID, environment.ID, reason)
+		taskHostCleanupResult, taskHostCleanupErr = c.runtimes.CleanupTaskHost(
+			ctx, taskID, environment.ID, reason,
+		)
 	}
 	close(taskHostDone)
 	for range states {
@@ -483,10 +486,10 @@ func (c *Controller) cleanupTaskLanguage(
 func (c *Controller) finalizeTaskLanguageCleanup(
 	ctx context.Context,
 	result taskLanguageCleanupResult,
-	taskHostCleanupErr error,
+	taskHostCleanupResult TaskHostCleanupResult,
 	reason string,
 ) error {
-	if !result.processGone && taskHostCleanupErr != nil {
+	if !result.processGone && !taskHostCleanupResult.ProcessTreeGone {
 		return result.err
 	}
 	current, _, err := c.store.GetTaskLSPLanguage(ctx, result.state.TaskID, result.state.Language)

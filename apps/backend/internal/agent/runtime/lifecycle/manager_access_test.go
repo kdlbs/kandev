@@ -30,6 +30,24 @@ func TestExecutionAccessChecksGateBeforeCache(t *testing.T) {
 		}
 	})
 
+	t.Run("EnsureWorkspaceExecutionForSession honors sessionAccessCheck", func(t *testing.T) {
+		mgr := &Manager{logger: newTestLogger(), executionStore: NewExecutionStore()}
+		if err := mgr.executionStore.Add(&AgentExecution{ID: "ex-workspace", SessionID: "sess-workspace"}); err != nil {
+			t.Fatal(err)
+		}
+		mgr.SetSessionAccessChecker(func(_ context.Context, sessionID string) error {
+			if sessionID == "sess-workspace" {
+				return denied
+			}
+			return nil
+		})
+		if _, err := mgr.EnsureWorkspaceExecutionForSession(
+			context.Background(), "task-workspace", "sess-workspace",
+		); !errors.Is(err, denied) {
+			t.Fatalf("expected denial before cache hit, got %v", err)
+		}
+	})
+
 	t.Run("GetOrEnsureExecutionForEnvironment honors environmentAccessCheck", func(t *testing.T) {
 		mgr := &Manager{logger: newTestLogger(), executionStore: NewExecutionStore()}
 		if err := mgr.executionStore.Add(&AgentExecution{ID: "ex-2", SessionID: "sess-2", TaskEnvironmentID: "env-1"}); err != nil {

@@ -1910,6 +1910,55 @@ func (r *Repository) FindActiveTaskSessionTaskIDByTaskEnvironmentExcludingTask(c
 	return borrowerTaskID, err
 }
 
+// FindLiveTaskSessionTaskIDByTaskEnvironmentExcludingTask selects a durable
+// non-archived borrower even when its latest session is terminal. Task-level
+// keep-warm services outlive session activity and need a surviving task owner.
+func (r *Repository) FindLiveTaskSessionTaskIDByTaskEnvironmentExcludingTask(ctx context.Context, taskEnvironmentID, taskID string) (string, error) {
+	var borrowerTaskID string
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT ts.task_id
+		FROM task_sessions ts
+		INNER JOIN tasks t ON t.id = ts.task_id
+		WHERE ts.task_environment_id = ?
+			AND ts.task_id != ?
+			AND t.archived_at IS NULL
+		ORDER BY ts.updated_at DESC, ts.task_id
+		LIMIT 1
+	`), taskEnvironmentID, taskID).Scan(&borrowerTaskID)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return borrowerTaskID, err
+}
+
+func (r *Repository) ListLiveTaskSessionTaskIDsByTaskEnvironment(
+	ctx context.Context,
+	taskEnvironmentID string,
+) ([]string, error) {
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT ts.task_id
+		FROM task_sessions ts
+		INNER JOIN tasks t ON t.id = ts.task_id
+		WHERE ts.task_environment_id = ?
+			AND t.archived_at IS NULL
+		GROUP BY ts.task_id
+		ORDER BY MAX(ts.updated_at) DESC, ts.task_id
+	`), taskEnvironmentID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var taskIDs []string
+	for rows.Next() {
+		var taskID string
+		if err := rows.Scan(&taskID); err != nil {
+			return nil, err
+		}
+		taskIDs = append(taskIDs, taskID)
+	}
+	return taskIDs, rows.Err()
+}
+
 func (r *Repository) HasActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (bool, error) {
 	var exists int
 	// Only sessions of live (non-archived) tasks count; archived tasks never

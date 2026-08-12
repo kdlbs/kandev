@@ -99,6 +99,31 @@ func TestCapacityAdoptsAlreadyRunningServersAboveConfiguredLimit(t *testing.T) {
 	}
 }
 
+func TestCapacityReleaseDoesNotPromoteWhileAdoptionStillFillsLimit(t *testing.T) {
+	capacity := NewCapacity(1)
+	first := TaskLanguageKey{TaskID: "task-1", Language: "go"}
+	second := TaskLanguageKey{TaskID: "task-2", Language: "kotlin"}
+	queued := TaskLanguageKey{TaskID: "task-3", Language: "rust"}
+	capacity.Adopt(first, 1)
+	capacity.Adopt(second, 1)
+	if capacity.Admit(queued, 1, time.Unix(1, 0)) {
+		t.Fatal("server beyond adopted capacity was admitted")
+	}
+
+	if next := capacity.Release(first, 1); next != nil {
+		t.Fatalf("release promoted while capacity remained full: %#v", next)
+	}
+	if capacity.Active() != 1 || capacity.Queued() != 1 {
+		t.Fatalf("capacity after first release active=%d queued=%d", capacity.Active(), capacity.Queued())
+	}
+	if next := capacity.Release(second, 1); next == nil || next.Key != queued {
+		t.Fatalf("release below limit promoted %#v, want %#v", next, queued)
+	}
+	if capacity.Active() != 1 || capacity.Queued() != 0 {
+		t.Fatalf("capacity after promotion active=%d queued=%d", capacity.Active(), capacity.Queued())
+	}
+}
+
 func TestCapacitySnapshotRevisionOrdersCountChanges(t *testing.T) {
 	capacity := NewCapacity(1)
 	active := TaskLanguageKey{TaskID: "task-1", Language: "go"}

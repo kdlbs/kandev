@@ -8,6 +8,7 @@ import type {
 export type TaskLspTaskState = {
   languages: Record<string, TaskLspLanguageSnapshot>;
   capacity: TaskLspCapacity;
+  retiredCapacityEpochs?: string[];
   loaded: boolean;
   loading: boolean;
   error: string | null;

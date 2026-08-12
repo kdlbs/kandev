@@ -115,7 +115,7 @@ func (c *Capacity) Release(key TaskLanguageKey, generation uint64) *QueueEntry {
 	}
 	delete(c.active, key)
 	c.revision++
-	if len(c.queued) == 0 {
+	if len(c.active) >= c.limit || len(c.queued) == 0 {
 		return nil
 	}
 	entries := make([]QueueEntry, 0, len(c.queued))

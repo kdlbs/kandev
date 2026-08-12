@@ -2065,7 +2065,7 @@ func dockerEnvironmentReposForLaunch(req *LaunchAgentRequest) []*models.TaskEnvi
 			return nil
 		}
 		return []*models.TaskEnvironmentRepo{{
-			RepositoryID: req.RepositoryID, BranchSlug: req.BranchIdentitySlug, Position: 0,
+			RepositoryID: req.RepositoryID, BranchSlug: dockerTopLevelBranchIdentity(req), Position: 0,
 		}}
 	}
 
@@ -2081,6 +2081,24 @@ func dockerEnvironmentReposForLaunch(req *LaunchAgentRequest) []*models.TaskEnvi
 		})
 	}
 	return repos
+}
+
+func dockerTopLevelBranchIdentity(req *LaunchAgentRequest) string {
+	if identity := worktree.SanitizeBranchSlug(req.BranchIdentitySlug); identity != "" {
+		return identity
+	}
+	if identity := worktree.SanitizeBranchSlug(req.BranchSlug); identity != "" {
+		return identity
+	}
+	plans := worktree.BuildBranchIdentityPlans([]worktree.BranchIdentityInput{{
+		RepositoryID: req.RepositoryID, BaseBranch: req.BaseBranch,
+		CheckoutBranch: req.CheckoutBranch, DefaultBranch: req.DefaultBranch,
+		PRNumber: req.PRNumber,
+	}})
+	if len(plans) == 0 {
+		return ""
+	}
+	return plans[0].IdentitySlug
 }
 
 // buildTaskEnvironmentRepos converts per-repo worktree results into env-repo rows.

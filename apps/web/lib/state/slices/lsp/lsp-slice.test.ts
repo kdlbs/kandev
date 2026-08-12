@@ -3,6 +3,9 @@ import { createAppStore } from "@/lib/state/store";
 import type { TaskLspCapacity, TaskLspLanguageSnapshot } from "@/lib/types/http-lsp";
 
 const NOW = "2026-08-05T10:00:00Z";
+const CAPACITY_EPOCH = "20260806T090000.000000002Z";
+const PRIOR_CAPACITY_EPOCH = "20260806T090000.000000001Z";
+const RESTARTED_CAPACITY_EPOCH = "20260806T080000.000000001Z";
 
 function language(revision: number, phase: TaskLspLanguageSnapshot["phase"] = "ready") {
   return {
@@ -45,7 +48,7 @@ function expectSequencedCapacityAfterUnsequencedSnapshot() {
       queued: 0,
       limit: 4,
       revision: 1,
-      epoch: "20260806T090000.000000002Z",
+      epoch: CAPACITY_EPOCH,
     },
   });
   expect(subject.getState().taskLsp.byTaskId["task-1"]?.capacity.active).toBe(0);
@@ -99,7 +102,7 @@ describe("LSP capacity sequencing", () => {
         queued: 0,
         limit: 4,
         revision: 8,
-        epoch: "20260806T090000.000000001Z",
+        epoch: PRIOR_CAPACITY_EPOCH,
       },
     } as TaskLspLanguageSnapshot);
     subject.getState().setTaskLspSnapshot({
@@ -110,7 +113,7 @@ describe("LSP capacity sequencing", () => {
         queued: 0,
         limit: 4,
         revision: 1,
-        epoch: "20260806T090000.000000002Z",
+        epoch: CAPACITY_EPOCH,
       } as TaskLspCapacity,
     });
     subject.getState().mergeTaskLspLanguage({
@@ -120,7 +123,7 @@ describe("LSP capacity sequencing", () => {
         queued: 0,
         limit: 4,
         revision: 99,
-        epoch: "20260806T090000.000000001Z",
+        epoch: PRIOR_CAPACITY_EPOCH,
       },
     } as TaskLspLanguageSnapshot);
     expect(subject.getState().taskLsp.byTaskId["task-1"]?.capacity.active).toBe(0);
@@ -128,8 +131,8 @@ describe("LSP capacity sequencing", () => {
 
   it("accepts a lower-clock backend epoch only from an authoritative snapshot", () => {
     const subject = store();
-    const previousEpoch = "20260806T090000.000000002Z";
-    const restartedEpoch = "20260806T080000.000000001Z";
+    const previousEpoch = CAPACITY_EPOCH;
+    const restartedEpoch = RESTARTED_CAPACITY_EPOCH;
     subject.getState().mergeTaskLspLanguage({
       ...language(9),
       capacity: { active: 1, queued: 0, limit: 4, revision: 8, epoch: previousEpoch },
@@ -143,6 +146,33 @@ describe("LSP capacity sequencing", () => {
     subject.getState().mergeTaskLspLanguage({
       ...language(11),
       capacity: { active: 2, queued: 0, limit: 4, revision: 99, epoch: previousEpoch },
+    });
+
+    expect(subject.getState().taskLsp.byTaskId["task-1"]?.capacity).toMatchObject({
+      active: 0,
+      epoch: restartedEpoch,
+      revision: 1,
+    });
+  });
+
+  it("rejects a retired epoch from a delayed authoritative snapshot", () => {
+    const subject = store();
+    const previousEpoch = CAPACITY_EPOCH;
+    const restartedEpoch = RESTARTED_CAPACITY_EPOCH;
+    subject.getState().mergeTaskLspLanguage({
+      ...language(9),
+      capacity: { active: 1, queued: 0, limit: 4, revision: 8, epoch: previousEpoch },
+    });
+    subject.getState().setTaskLspSnapshot({
+      task_id: "task-1",
+      languages: [language(10)],
+      capacity: { active: 0, queued: 0, limit: 4, revision: 1, epoch: restartedEpoch },
+    });
+
+    subject.getState().setTaskLspSnapshot({
+      task_id: "task-1",
+      languages: [language(10)],
+      capacity: { active: 3, queued: 0, limit: 4, revision: 99, epoch: previousEpoch },
     });
 
     expect(subject.getState().taskLsp.byTaskId["task-1"]?.capacity).toMatchObject({

@@ -152,6 +152,199 @@ func TestService_DeleteTaskBlocksLSPAdmissionThroughMutation(t *testing.T) {
 	}
 }
 
+func TestService_TerminalMutationBlocksBorrowerAdmissionOnPhysicalEnvironment(t *testing.T) {
+	for _, action := range []struct {
+		name string
+		run  func(*Service) error
+	}{
+		{name: "archive", run: func(svc *Service) error {
+			return svc.ArchiveTask(context.Background(), "parent-task")
+		}},
+		{name: "delete", run: func(svc *Service) error {
+			return svc.DeleteTask(context.Background(), "parent-task")
+		}},
+	} {
+		t.Run(action.name, func(t *testing.T) {
+			svc, _, repo := createTestService(t)
+			seedParentChildWorkspace(t, repo, "ws-physical", "wf-physical", "parent-task", "child-task")
+			if err := repo.CreateTaskEnvironment(context.Background(), &models.TaskEnvironment{
+				ID: "env-physical", TaskID: "parent-task", ExecutorType: string(models.ExecutorTypeLocal),
+				Status: models.TaskEnvironmentStatusReady,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.CreateTaskSession(context.Background(), &models.TaskSession{
+				ID: "session-child", TaskID: "child-task", State: models.TaskSessionStateCompleted,
+				TaskEnvironmentID: "env-physical",
+			}); err != nil {
+				t.Fatal(err)
+			}
+			cleanupEntered := make(chan struct{})
+			cleanupRelease := make(chan struct{})
+			svc.SetTaskLSPLifecycle(&recordingTaskLSPLifecycle{
+				onCleanup: func(context.Context, string) {
+					close(cleanupEntered)
+					<-cleanupRelease
+				},
+			})
+
+			done := make(chan error, 1)
+			go func() { done <- action.run(svc) }()
+			<-cleanupEntered
+			assertTaskLSPAdmissionBlocked(t, svc, "child-task")
+			close(cleanupRelease)
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestService_BorrowerTerminalMutationBlocksOwnerAdmissionOnPhysicalEnvironment(t *testing.T) {
+	for _, action := range []struct {
+		name string
+		run  func(*Service) error
+	}{
+		{name: "archive", run: func(svc *Service) error {
+			return svc.ArchiveTask(context.Background(), "child-task")
+		}},
+		{name: "delete", run: func(svc *Service) error {
+			return svc.DeleteTask(context.Background(), "child-task")
+		}},
+	} {
+		t.Run(action.name, func(t *testing.T) {
+			svc, _, repo := createTestService(t)
+			seedParentChildWorkspace(t, repo, "ws-borrower", "wf-borrower", "parent-task", "child-task")
+			if err := repo.CreateTaskEnvironment(context.Background(), &models.TaskEnvironment{
+				ID: "env-borrower", TaskID: "parent-task", ExecutorType: string(models.ExecutorTypeLocal),
+				Status: models.TaskEnvironmentStatusReady,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.CreateTaskSession(context.Background(), &models.TaskSession{
+				ID: "session-child", TaskID: "child-task", State: models.TaskSessionStateCompleted,
+				TaskEnvironmentID: "env-borrower",
+			}); err != nil {
+				t.Fatal(err)
+			}
+			cleanupEntered := make(chan struct{})
+			cleanupRelease := make(chan struct{})
+			svc.SetTaskLSPLifecycle(&recordingTaskLSPLifecycle{
+				onCleanup: func(context.Context, string) {
+					close(cleanupEntered)
+					<-cleanupRelease
+				},
+			})
+
+			done := make(chan error, 1)
+			go func() { done <- action.run(svc) }()
+			<-cleanupEntered
+			assertTaskLSPAdmissionBlocked(t, svc, "parent-task")
+			close(cleanupRelease)
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestTaskTreeTerminalMutationPreservesWarmBorrowerAndBlocksAdmission(t *testing.T) {
+	for _, action := range []struct {
+		name string
+		run  func(context.Context, *HandoffService) error
+	}{
+		{name: "archive", run: func(ctx context.Context, handoff *HandoffService) error {
+			_, err := handoff.ArchiveTaskTree(ctx, "parent-task", false)
+			return err
+		}},
+		{name: "delete", run: func(ctx context.Context, handoff *HandoffService) error {
+			_, err := handoff.DeleteTaskTree(ctx, "parent-task", false)
+			return err
+		}},
+	} {
+		t.Run(action.name, func(t *testing.T) {
+			svc, _, repo := createTestService(t)
+			ctx := context.Background()
+			seedParentChildWorkspace(t, repo, "ws-tree-shared", "wf-tree-shared", "parent-task", "child-task")
+			if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+				ID: "env-tree-shared", TaskID: "parent-task", ExecutorType: string(models.ExecutorTypeLocal),
+				Status: models.TaskEnvironmentStatusReady,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+				ID: "session-tree-child", TaskID: "child-task", State: models.TaskSessionStateCompleted,
+				TaskEnvironmentID: "env-tree-shared",
+			}); err != nil {
+				t.Fatal(err)
+			}
+			cleanupEntered := make(chan struct{})
+			cleanupRelease := make(chan struct{})
+			svc.SetTaskLSPLifecycle(&recordingTaskLSPLifecycle{
+				onCleanup: func(context.Context, string) {
+					close(cleanupEntered)
+					<-cleanupRelease
+				},
+			})
+			handoff := NewHandoffService(repo, repo, nil, nil, nil, nil)
+			handoff.SetTaskResourceCleaner(svc)
+
+			done := make(chan error, 1)
+			go func() { done <- action.run(ctx, handoff) }()
+			<-cleanupEntered
+			assertTaskLSPAdmissionBlocked(t, svc, "child-task")
+			environment, err := repo.GetTaskEnvironment(ctx, "env-tree-shared")
+			if err != nil || environment.TaskID != "child-task" {
+				close(cleanupRelease)
+				<-done
+				t.Fatalf("environment ownership during %s = %#v, err=%v", action.name, environment, err)
+			}
+			close(cleanupRelease)
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestPreserveTaskEnvironmentsForTerminalMutationRollsBackPartialTransfer(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedParentChildWorkspace(t, repo, "ws-partial", "wf-partial", "owner-a", "owner-b")
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "borrower", WorkspaceID: "ws-partial", WorkflowID: "wf-partial",
+		WorkflowStepID: "step-1", Title: "Borrower", Priority: "medium",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, environment := range []*models.TaskEnvironment{
+		{ID: "env-a", TaskID: "owner-a", ExecutorType: string(models.ExecutorTypeLocal)},
+		{ID: "env-b", TaskID: "owner-b", ExecutorType: string(models.ExecutorTypeLocal)},
+	} {
+		if err := repo.CreateTaskEnvironment(ctx, environment); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, session := range []*models.TaskSession{
+		{ID: "borrow-a", TaskID: "borrower", State: models.TaskSessionStateCompleted, TaskEnvironmentID: "env-a"},
+		{ID: "borrow-b", TaskID: "borrower", State: models.TaskSessionStateCompleted, TaskEnvironmentID: "env-b"},
+	} {
+		if err := repo.CreateTaskSession(ctx, session); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, err := svc.preserveTaskEnvironmentsForTerminalMutation(ctx, []string{"owner-a", "owner-b"}); err == nil {
+		t.Fatal("preserving incompatible environments unexpectedly succeeded")
+	}
+	for environmentID, ownerTaskID := range map[string]string{"env-a": "owner-a", "env-b": "owner-b"} {
+		environment, err := repo.GetTaskEnvironment(ctx, environmentID)
+		if err != nil || environment.TaskID != ownerTaskID {
+			t.Fatalf("environment %s after rollback = %#v, err=%v", environmentID, environment, err)
+		}
+	}
+}
+
 func TestService_StopTaskLSPMarksEnvironmentStoppedBeforeCleanupAndBlocksAdmission(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	seedTaskForLSPLifecycleTest(t, repo)
@@ -196,6 +389,52 @@ func TestService_StopTaskLSPMarksEnvironmentStoppedBeforeCleanupAndBlocksAdmissi
 	}
 }
 
+func TestService_StopTaskLSPPreservesWarmBorrowerEnvironment(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedParentChildWorkspace(t, repo, "ws-stop-shared", "wf-stop-shared", "parent-task", "child-task")
+	if err := repo.CreateTaskEnvironment(context.Background(), &models.TaskEnvironment{
+		ID: "env-stop-shared", TaskID: "parent-task", ExecutorType: string(models.ExecutorTypeLocal),
+		Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateTaskSession(context.Background(), &models.TaskSession{
+		ID: "session-child", TaskID: "child-task", State: models.TaskSessionStateCompleted,
+		TaskEnvironmentID: "env-stop-shared",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cleanupEntered := make(chan struct{})
+	cleanupRelease := make(chan struct{})
+	lifecycle := &recordingTaskLSPLifecycle{
+		onCleanup: func(context.Context, string) {
+			close(cleanupEntered)
+			<-cleanupRelease
+		},
+	}
+	svc.SetTaskLSPLifecycle(lifecycle)
+
+	done := make(chan error, 1)
+	go func() { done <- svc.StopTaskLSP(context.Background(), "parent-task", "user_stop") }()
+	<-cleanupEntered
+	assertTaskLSPAdmissionBlocked(t, svc, "child-task")
+	close(cleanupRelease)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+
+	environment, err := repo.GetTaskEnvironment(context.Background(), "env-stop-shared")
+	if err != nil || environment == nil {
+		t.Fatalf("shared environment after owner stop = %#v, err=%v", environment, err)
+	}
+	if environment.TaskID != "child-task" || environment.Status != models.TaskEnvironmentStatusReady {
+		t.Fatalf("shared environment after owner stop = %#v, want ready child ownership", environment)
+	}
+	if got := lifecycle.cleanupCalls; len(got) != 1 || got[0] != "parent-task:user_stop" {
+		t.Fatalf("cleanup calls = %v", got)
+	}
+}
+
 func assertTaskLSPAdmissionBlocked(t *testing.T, svc *Service, taskID string) {
 	t.Helper()
 	release, err := svc.AcquireTaskLSPAdmission(context.Background(), taskID)
@@ -224,5 +463,45 @@ func TestService_TaskMutationFailsClosedWhenTaskLSPCleanupFails(t *testing.T) {
 	}
 	if _, err := repo.GetTask(context.Background(), "task-lsp"); errors.Is(err, repoerrors.ErrTaskNotFound) {
 		t.Fatal("delete removed task after cleanup failure")
+	}
+}
+
+func TestService_TaskMutationRestoresSharedEnvironmentOwnershipWhenLSPCleanupFails(t *testing.T) {
+	for _, action := range []struct {
+		name string
+		run  func(*Service) error
+	}{
+		{name: "archive", run: func(svc *Service) error {
+			return svc.ArchiveTask(context.Background(), "parent-task")
+		}},
+		{name: "delete", run: func(svc *Service) error {
+			return svc.DeleteTask(context.Background(), "parent-task")
+		}},
+	} {
+		t.Run(action.name, func(t *testing.T) {
+			svc, _, repo := createTestService(t)
+			seedParentChildWorkspace(t, repo, "ws-rollback", "wf-rollback", "parent-task", "child-task")
+			if err := repo.CreateTaskEnvironment(context.Background(), &models.TaskEnvironment{
+				ID: "env-rollback", TaskID: "parent-task", ExecutorType: string(models.ExecutorTypeLocal),
+				Status: models.TaskEnvironmentStatusReady,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.CreateTaskSession(context.Background(), &models.TaskSession{
+				ID: "session-child", TaskID: "child-task", State: models.TaskSessionStateCompleted,
+				TaskEnvironmentID: "env-rollback",
+			}); err != nil {
+				t.Fatal(err)
+			}
+			svc.SetTaskLSPLifecycle(&recordingTaskLSPLifecycle{cleanupErr: errors.New("stop failed")})
+
+			if err := action.run(svc); err == nil {
+				t.Fatal("terminal mutation succeeded despite LSP cleanup failure")
+			}
+			environment, err := repo.GetTaskEnvironment(context.Background(), "env-rollback")
+			if err != nil || environment.TaskID != "parent-task" {
+				t.Fatalf("environment ownership after failed %s = %#v, err=%v", action.name, environment, err)
+			}
+		})
 	}
 }

@@ -121,7 +121,7 @@ type taskLSPTaskHostRuntime interface {
 	EnsureTaskHost(ctx context.Context, taskID, taskEnvironmentID string) (tasklsp.TaskHost, error)
 	ExistingTaskHost(ctx context.Context, taskID, taskEnvironmentID string) (tasklsp.TaskHost, bool, error)
 	RecoverTaskHost(ctx context.Context, taskEnvironmentID string) (bool, error)
-	CleanupTaskHost(ctx context.Context, taskID, taskEnvironmentID, reason string) error
+	CleanupTaskHost(ctx context.Context, taskID, taskEnvironmentID, reason string) (tasklsp.TaskHostCleanupResult, error)
 }
 
 func (p taskLSPRuntimeProvider) RecoverTaskHost(
@@ -148,7 +148,7 @@ func (p taskLSPRuntimeProvider) ExistingTaskHost(
 func (p taskLSPRuntimeProvider) CleanupTaskHost(
 	ctx context.Context,
 	taskID, taskEnvironmentID, reason string,
-) error {
+) (tasklsp.TaskHostCleanupResult, error) {
 	return p.taskHosts.CleanupTaskHost(ctx, taskID, taskEnvironmentID, reason)
 }
 

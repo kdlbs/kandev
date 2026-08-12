@@ -13,6 +13,7 @@ function emptyTaskState(): TaskLspTaskState {
   return {
     languages: {},
     capacity: { ...EMPTY_CAPACITY },
+    retiredCapacityEpochs: [],
     loaded: false,
     loading: false,
     error: null,
@@ -35,18 +36,31 @@ function mergeCapacity(
   authoritativeEpoch = false,
 ): void {
   const currentEpoch = task.capacity.epoch;
-  if (currentEpoch && !incoming.epoch) return;
-  if (!currentEpoch && incoming.epoch) {
-    task.capacity = incoming;
-    return;
-  }
-  if (currentEpoch && incoming.epoch && currentEpoch !== incoming.epoch) {
-    if (!authoritativeEpoch) return;
+  if (currentEpoch) {
+    if (!incoming.epoch) return;
+    if (mergeDifferentCapacityEpoch(task, incoming, authoritativeEpoch)) return;
+  } else if (incoming.epoch) {
     task.capacity = incoming;
     return;
   }
   if ((task.capacity.revision ?? 0) > (incoming.revision ?? 0)) return;
   task.capacity = incoming;
+}
+
+function mergeDifferentCapacityEpoch(
+  task: TaskLspTaskState,
+  incoming: TaskLspCapacity,
+  authoritative: boolean,
+): boolean {
+  const currentEpoch = task.capacity.epoch;
+  const incomingEpoch = incoming.epoch;
+  if (currentEpoch === incomingEpoch) return false;
+  if (!currentEpoch || !incomingEpoch) return false;
+  if (task.retiredCapacityEpochs?.includes(incomingEpoch) || !authoritative) return true;
+  const retired = task.retiredCapacityEpochs ?? [];
+  if (!retired.includes(currentEpoch)) task.retiredCapacityEpochs = [...retired, currentEpoch];
+  task.capacity = incoming;
+  return true;
 }
 
 export const createLspSlice: StateCreator<AppState, [["zustand/immer", never]], [], LspSlice> = (

@@ -1073,8 +1073,12 @@ func TestStopTaskHostForEnvironmentLeavesSessionExecutionsRunning(t *testing.T) 
 	if err != nil {
 		t.Fatalf("create task host: %v", err)
 	}
-	if err := mgr.StopTaskHostForEnvironment(context.Background(), "env-1", "task_archived"); err != nil {
+	proved, err := mgr.StopTaskHostForEnvironment(context.Background(), "env-1", "task_archived")
+	if err != nil {
 		t.Fatalf("StopTaskHostForEnvironment: %v", err)
+	}
+	if !proved {
+		t.Fatal("successful task-host stop did not prove the process tree gone")
 	}
 	if _, ok := mgr.executionStore.Get(host.ID); ok {
 		t.Fatal("task host remains tracked")
@@ -1102,9 +1106,12 @@ func TestStopTaskHostForEnvironmentRetainsOwnershipWhenRuntimeStopFails(t *testi
 	if err != nil {
 		t.Fatalf("create task host: %v", err)
 	}
-	err = mgr.StopTaskHostForEnvironment(context.Background(), "env-1", "task_archived")
+	proved, err := mgr.StopTaskHostForEnvironment(context.Background(), "env-1", "task_archived")
 	if err == nil || !strings.Contains(err.Error(), "runtime teardown failed") {
 		t.Fatalf("StopTaskHostForEnvironment error = %v, want runtime teardown failure", err)
+	}
+	if proved {
+		t.Fatal("failed task-host stop claimed the process tree was gone")
 	}
 	if got, ok := mgr.executionStore.Get(host.ID); !ok || got.ID != host.ID {
 		t.Fatalf("task host was untracked after failed teardown: %#v, %v", got, ok)

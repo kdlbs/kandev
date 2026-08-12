@@ -74,7 +74,7 @@ function useAuthoritativeSubscriptionRefresh(
       taskId !== null &&
       connectionStatus === "connected" &&
       (prior.taskId !== taskId || prior.connectionStatus !== "connected");
-    if (!subscriptionEstablished || !loaded) return;
+    if (!subscriptionEstablished || (!loaded && prior.taskId !== taskId)) return;
     const controller = new AbortController();
     void load(controller.signal).catch(() => undefined);
     return () => controller.abort();

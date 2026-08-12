@@ -790,6 +790,52 @@ func TestDeleteTask_TransfersBorrowedEnvironmentBeforeDeletingOwner(t *testing.T
 	}
 }
 
+func TestTerminalBorrowerKeepsEnvironmentWhenOwnerTerminates(t *testing.T) {
+	for _, action := range []struct {
+		name string
+		run  func(*Service, context.Context, string) error
+	}{
+		{name: "archive", run: func(svc *Service, ctx context.Context, taskID string) error {
+			return svc.ArchiveTask(ctx, taskID)
+		}},
+		{name: "delete", run: func(svc *Service, ctx context.Context, taskID string) error {
+			return svc.DeleteTask(ctx, taskID)
+		}},
+	} {
+		t.Run(action.name, func(t *testing.T) {
+			svc, _, repo := createTestService(t)
+			ctx := context.Background()
+			seedParentChildWorkspace(t, repo, "ws-warm-transfer", "wf-warm-transfer", "parent-task", "child-task")
+			if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+				ID: "env-parent", TaskID: "parent-task", Status: models.TaskEnvironmentStatusReady,
+			}); err != nil {
+				t.Fatalf("create parent environment: %v", err)
+			}
+			if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+				ID: "session-child", TaskID: "child-task", State: models.TaskSessionStateCompleted,
+				TaskEnvironmentID: "env-parent",
+			}); err != nil {
+				t.Fatalf("create terminal child session: %v", err)
+			}
+			svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
+
+			if err := action.run(svc, ctx, "parent-task"); err != nil {
+				t.Fatalf("%s parent task: %v", action.name, err)
+			}
+			waitForCleanupDone(t, svc)
+
+			environment, err := repo.GetTaskEnvironment(ctx, "env-parent")
+			if err != nil || environment == nil {
+				t.Fatalf("terminal borrower's environment did not survive %s: environment=%#v err=%v",
+					action.name, environment, err)
+			}
+			if environment.TaskID != "child-task" {
+				t.Fatalf("environment owner after %s = %q, want child-task", action.name, environment.TaskID)
+			}
+		})
+	}
+}
+
 func TestCleanupTaskResources_TransfersBorrowedEnvironmentBeforeCascadeDelete(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

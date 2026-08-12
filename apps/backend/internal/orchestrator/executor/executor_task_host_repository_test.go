@@ -36,11 +36,12 @@ func TestEnvironmentReposForLaunchPersistsDockerPhysicalRepositoryOrder(t *testi
 	}
 }
 
-func TestEnvironmentReposForLaunchPersistsSingleDockerRepository(t *testing.T) {
+func TestEnvironmentReposForLaunchDerivesSingleDockerRepositoryIdentity(t *testing.T) {
 	repos := environmentReposForLaunch(&LaunchAgentRequest{
-		ExecutorType:       string(models.ExecutorTypeLocalDocker),
-		RepositoryID:       "repo-alpha",
-		BranchIdentitySlug: "main",
+		ExecutorType:  string(models.ExecutorTypeLocalDocker),
+		RepositoryID:  "repo-alpha",
+		BaseBranch:    "main",
+		DefaultBranch: "main",
 	}, &LaunchAgentResponse{})
 
 	if len(repos) != 1 || repos[0].RepositoryID != "repo-alpha" || repos[0].BranchSlug != "main" || repos[0].Position != 0 {

@@ -413,6 +413,14 @@ Completed 2026-08-05.
   followed by web typecheck, lint, i18n checks, and the new-code ratchet. The repository-wide
   backend run reached only the environment's 10-minute package ceiling under severe SQLite I/O
   latency; it reported no assertion failure, and the affected packages pass independently.
+- The next independent GPT-5.6 Sol exact-head audit closed seven further recovery gaps. Fresh
+  single-repository Docker launches now persist a derived physical branch identity; cached runtime
+  access is authorization-gated; failed initial frontend loads retry on reconnect; capacity retires
+  superseded epochs and cannot promote while recovered processes still fill the limit; direct and
+  cascade terminal mutations serialize on the physical environment and preserve terminal-session
+  borrowers with rollback-safe ownership transfer; and a per-language stop failure is cleared only
+  by explicit process-tree cleanup proof. Affected backend packages and their race suites pass, as
+  do nine focused frontend files / 55 tests, web typecheck/lint, and both i18n checks.
 
 ---
 

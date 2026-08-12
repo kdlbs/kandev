@@ -96,8 +96,10 @@ func (r *fakeTaskLSPTaskHostRuntime) RecoverTaskHost(context.Context, string) (b
 	return false, nil
 }
 
-func (r *fakeTaskLSPTaskHostRuntime) CleanupTaskHost(context.Context, string, string, string) error {
-	return nil
+func (r *fakeTaskLSPTaskHostRuntime) CleanupTaskHost(
+	context.Context, string, string, string,
+) (tasklsp.TaskHostCleanupResult, error) {
+	return tasklsp.TaskHostCleanupResult{ProcessTreeGone: true}, nil
 }
 
 type fakeTaskLSPDiscoveryHost struct {

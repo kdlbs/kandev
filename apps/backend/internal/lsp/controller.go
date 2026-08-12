@@ -78,8 +78,14 @@ type RuntimeProvider interface {
 	EnsureTaskHost(ctx context.Context, taskID, taskEnvironmentID string) (TaskHost, error)
 	ExistingTaskHost(ctx context.Context, taskID, taskEnvironmentID string) (TaskHost, bool, error)
 	RecoverTaskHost(ctx context.Context, taskEnvironmentID string) (bool, error)
-	CleanupTaskHost(ctx context.Context, taskID, taskEnvironmentID, reason string) error
+	CleanupTaskHost(ctx context.Context, taskID, taskEnvironmentID, reason string) (TaskHostCleanupResult, error)
 	DiscoverTaskLanguages(ctx context.Context, taskID, taskEnvironmentID string) (*DiscoveryResult, error)
+}
+
+// TaskHostCleanupResult distinguishes a successful physical process-tree reap
+// from an intentional no-op for a task borrowing another task's shared host.
+type TaskHostCleanupResult struct {
+	ProcessTreeGone bool
 }
 
 type LanguageSnapshot struct {

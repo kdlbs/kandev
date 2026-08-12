@@ -633,12 +633,14 @@ func (f *fakeLSPRuntimes) ExistingTaskHost(context.Context, string, string) (Tas
 	return f.host, true, nil
 }
 
-func (f *fakeLSPRuntimes) CleanupTaskHost(context.Context, string, string, string) error {
+func (f *fakeLSPRuntimes) CleanupTaskHost(
+	context.Context, string, string, string,
+) (TaskHostCleanupResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.cleanupCalls++
 	f.host = nil
-	return nil
+	return TaskHostCleanupResult{ProcessTreeGone: true}, nil
 }
 
 func (f *fakeLSPRuntimes) RecoverTaskHost(context.Context, string) (bool, error) {

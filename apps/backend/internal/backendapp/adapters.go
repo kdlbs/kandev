@@ -171,22 +171,23 @@ func (a *taskLSPTaskHostAdapter) ExistingTaskHost(
 func (a *taskLSPTaskHostAdapter) CleanupTaskHost(
 	ctx context.Context,
 	taskID, taskEnvironmentID, reason string,
-) error {
+) (tasklsp.TaskHostCleanupResult, error) {
 	// The controller has already stopped every persisted (task, language)
 	// generation. A shared physical task host belongs to the environment and
 	// must survive cleanup of any one borrowing task. The environment owner
 	// remains responsible for reaping the task-host process tree.
 	if a.environments == nil {
-		return errors.New("task environment owner source is unavailable")
+		return tasklsp.TaskHostCleanupResult{}, errors.New("task environment owner source is unavailable")
 	}
 	environment, err := a.environments.GetTaskEnvironmentByTaskID(ctx, taskID)
 	if err != nil {
-		return err
+		return tasklsp.TaskHostCleanupResult{}, err
 	}
 	if environment == nil || environment.ID != taskEnvironmentID {
-		return nil
+		return tasklsp.TaskHostCleanupResult{}, nil
 	}
-	return a.manager.StopTaskHostForEnvironment(ctx, taskEnvironmentID, reason)
+	proved, err := a.manager.StopTaskHostForEnvironment(ctx, taskEnvironmentID, reason)
+	return tasklsp.TaskHostCleanupResult{ProcessTreeGone: proved}, err
 }
 
 func (a *taskLSPTaskHostAdapter) RecoverTaskHost(

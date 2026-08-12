@@ -364,6 +364,36 @@ func TestCleanupTaskHostFallbackReleasesFailedLanguage(t *testing.T) {
 	}
 }
 
+func TestCleanupBorrowerHostPreservationRetainsFailedLanguage(t *testing.T) {
+	store := newMemoryLSPStore()
+	seedLSPState(t, store, TaskLanguageState{
+		TaskID: "task-1", Language: "kotlin", Policy: PolicyKeepWarm,
+		DetectionState: DetectionComplete, Phase: PhaseReady, Generation: 3,
+		LastInitiator: InitiatorUser,
+	})
+	stopFailure := errors.New("borrower language server may still be running")
+	host := newFakeLSPHost()
+	host.stopErr = stopFailure
+	runtimes := newReconcileRuntimes()
+	runtimes.existing["env-task-1"] = host
+	runtimes.cleanupProved = false
+	capacity := NewCapacity(8)
+	capacity.Adopt(TaskLanguageKey{TaskID: "task-1", Language: "kotlin"}, 3)
+	controller := newReconcileController(store, runtimes, capacity)
+
+	err := controller.CleanupTask(context.Background(), "task-1", "task_archived")
+	if !errors.Is(err, stopFailure) {
+		t.Fatalf("cleanup error = %v, want borrower stop failure", err)
+	}
+	if capacity.Active() != 1 {
+		t.Fatalf("active capacity = %d, want retained slot", capacity.Active())
+	}
+	state := storedLSPState(t, store, "task-1", "kotlin")
+	if state.Phase != PhaseError || state.ErrorCode != "task_host_stop_failed" {
+		t.Fatalf("failed borrower cleanup state = %#v", state)
+	}
+}
+
 func TestCleanupCancelsTaskWorkWhenEnvironmentLookupFails(t *testing.T) {
 	store := newMemoryLSPStore()
 	seedLSPState(t, store, TaskLanguageState{
@@ -433,6 +463,7 @@ type reconcileRuntimes struct {
 	cleanupEnvironment string
 	cleanupReason      string
 	cleanupErr         error
+	cleanupProved      bool
 	recoverCalls       int
 	recoverErr         error
 }
@@ -459,7 +490,7 @@ func (s *cleanupSnapshotStore) ListTaskLSPLanguages(
 func newReconcileRuntimes() *reconcileRuntimes {
 	return &reconcileRuntimes{
 		existing: make(map[string]TaskHost), ensured: make(map[string]*fakeLSPHost),
-		existingErrors: make(map[string]error),
+		existingErrors: make(map[string]error), cleanupProved: true,
 	}
 }
 
@@ -486,17 +517,21 @@ func (r *reconcileRuntimes) EnsureTaskHost(_ context.Context, _ string, environm
 	return host, nil
 }
 
-func (r *reconcileRuntimes) CleanupTaskHost(_ context.Context, _, environmentID, reason string) error {
+func (r *reconcileRuntimes) CleanupTaskHost(
+	_ context.Context, _, environmentID, reason string,
+) (TaskHostCleanupResult, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.cleanupCalls++
 	r.cleanupEnvironment = environmentID
 	r.cleanupReason = reason
 	if r.cleanupErr != nil {
-		return r.cleanupErr
+		return TaskHostCleanupResult{}, r.cleanupErr
 	}
-	delete(r.existing, environmentID)
-	return nil
+	if r.cleanupProved {
+		delete(r.existing, environmentID)
+	}
+	return TaskHostCleanupResult{ProcessTreeGone: r.cleanupProved}, nil
 }
 
 func (r *reconcileRuntimes) RecoverTaskHost(_ context.Context, environmentID string) (bool, error) {
