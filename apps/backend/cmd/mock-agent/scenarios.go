@@ -1126,18 +1126,40 @@ func makeGitRunner(wd string) func(args ...string) error {
 		"GIT_COMMITTER_EMAIL=mock@test.local",
 	)
 	return func(args ...string) error {
-		cmd := subproc.NewGitCommand(context.Background(), append([]string{
-			"-c", "commit.gpgsign=false",
-			"-c", "tag.gpgsign=false",
-		}, args...)...)
-		cmd.Dir = wd
-		cmd.Env = gitEnv
-		out, cmdErr := subproc.RunGitCombinedOutputClass(context.Background(), subproc.GitLifecycle, cmd)
-		if cmdErr != nil {
-			_, _ = fmt.Fprintf(logOutput, "mock-agent: git %v failed: %v\nOutput: %s\n", args, cmdErr, out)
+		for attempt := 0; attempt < 5; attempt++ {
+			cmd := subproc.NewGitCommand(context.Background(), append([]string{
+				"-c", "commit.gpgsign=false",
+				"-c", "tag.gpgsign=false",
+			}, args...)...)
+			cmd.Dir = wd
+			cmd.Env = gitEnv
+			out, cmdErr := subproc.RunGitCombinedOutputClass(context.Background(), subproc.GitLifecycle, cmd)
+			if cmdErr == nil {
+				return nil
+			}
+			if !retryableGitSetupOutput(string(out)) || attempt == 4 {
+				_, _ = fmt.Fprintf(logOutput, "mock-agent: git %v failed: %v\nOutput: %s\n", args, cmdErr, out)
+				return cmdErr
+			}
+			time.Sleep(time.Duration(50*(1<<attempt)) * time.Millisecond)
 		}
-		return cmdErr
+		return fmt.Errorf("git %v failed after retries", args)
 	}
+}
+
+func retryableGitSetupOutput(output string) bool {
+	lower := strings.ToLower(output)
+	for _, marker := range []string{
+		"index.lock",
+		"could not lock",
+		"another git process",
+		"unable to create",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // contextWithTimeout creates a context with timeout in seconds.

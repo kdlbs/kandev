@@ -37,6 +37,10 @@ function worktreeDirectoryName(path: string | undefined): string | undefined {
   return directory ? sanitizeReviewRepositoryName(directory) || undefined : undefined;
 }
 
+function isRepositoryWorktreeName(worktreeName: string, canonicalName: string): boolean {
+  return worktreeName === canonicalName || worktreeName.startsWith(`${canonicalName}-`);
+}
+
 function findPRTaskRepository(
   pr: ReviewPRIdentity,
   taskRepositories: ReviewTaskRepositoryIdentity[],
@@ -105,7 +109,7 @@ export function resolvePRReviewRepositoryIdentity({
   }
 
   const worktreeName = worktreeDirectoryName(findPRWorktree(pr, taskRepository, worktrees)?.path);
-  if (worktreeName) return worktreeName;
+  if (worktreeName && isRepositoryWorktreeName(worktreeName, canonicalName)) return worktreeName;
 
   if (!taskRepository || siblingRepositories.length < 2) return canonicalName;
 
