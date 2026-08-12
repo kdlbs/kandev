@@ -99,6 +99,11 @@ Completed 2026-08-12.
   race set passed 10 repetitions, the full task-service suite passed (59.186s), the full race suite
   passed (91.743s), the exact MCP regression passed 10 repetitions, and changed-code Go lint reported
   zero issues.
+- Two subsequent unrelated utility/dialog commits moved `origin/main` to `3928c58ec`; the branch
+  rebased cleanly. On that exact base, the full task-service suite passed (66.790s), the focused
+  credential-cleanup race set passed 10 repetitions, 3 overlapping frontend files / 35 tests passed,
+  web typecheck passed, changed-code Go lint reported zero issues, all 60 public-doc validator tests
+  passed, and all 41 published pages validated.
 
 ## Files
 

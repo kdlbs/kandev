@@ -445,6 +445,10 @@ Completed 2026-08-05.
   row. Direct and prepared cleanup now share one snapshot builder. A real cascade-delete regression
   failed before the fix and passes afterward; focused race repetitions, the full task-service suite
   and race suite, the exact MCP regression, and changed-code Go lint pass.
+- Two later unrelated utility/dialog commits moved `origin/main` to `3928c58ec`; the branch rebased
+  cleanly. Exact-base verification repeated the full task-service suite, the credential-cleanup race
+  set 10 times, changed-code Go lint, 35 overlapping frontend tests, web typecheck, the 60-test
+  public-doc validator, and all 41 published pages successfully.
 
 ---
 
