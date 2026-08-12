@@ -59,6 +59,9 @@ const ChangesPanel = memo(function ChangesPanel(props: ChangesPanelProps) {
         repoDisplayName={data.repoDisplayName}
         taskId={data.activeTaskId}
         credentialDisplay={data.gitCredentialDisplay}
+        relation={data.relation}
+        resolution={data.resolution}
+        resolutionTarget={data.resolutionTarget}
       />
       <ChangesPanelBody {...buildChangesPanelBodyProps(data, props)} />
     </PanelRoot>

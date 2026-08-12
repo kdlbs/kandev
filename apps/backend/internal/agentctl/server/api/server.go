@@ -184,6 +184,8 @@ func (s *Server) setupRoutes() {
 		api.POST("/git/pull", s.handleGitPull)
 		api.POST("/git/push", s.handleGitPush)
 		api.POST("/git/push-preflight", s.handleGitPushPreflight)
+		api.POST("/git/contribution/replace", s.handleGitReplaceContribution)
+		api.POST("/git/contribution/use", s.handleGitUseContribution)
 		api.POST("/git/rebase", s.handleGitRebase)
 		api.POST("/git/merge", s.handleGitMerge)
 		api.POST("/git/abort", s.handleGitAbort)

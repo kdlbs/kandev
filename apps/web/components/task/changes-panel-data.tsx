@@ -45,6 +45,9 @@ import type { PRDiffFile, TaskPR } from "@/lib/types/github";
 import { getGitCredentialDisplay } from "./changes-git-credential-display";
 import type { RemoteContributionRelation } from "@/hooks/domains/session/remote-contribution-relation";
 import { remoteContributionActionPolicy } from "@/hooks/domains/session/remote-contribution-relation";
+import type { RemoteContributionResolutionTarget } from "./use-remote-contribution-resolution";
+import { useRemoteContributionResolution } from "./use-remote-contribution-resolution";
+import { useTranslation } from "react-i18next";
 
 function useChangesPanelStoreData() {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
@@ -95,6 +98,8 @@ export type ChangesPanelBodyProps = {
   hasPRFiles: boolean;
   hasPRCommits: boolean;
   relation: RemoteContributionRelation;
+  resolution: ReturnType<typeof useRemoteContributionResolution>;
+  resolutionTarget: RemoteContributionResolutionTarget | null;
   providerCommitsLoading: boolean;
   providerCommitsError: string | null;
   pushDisabled: boolean;
@@ -320,6 +325,8 @@ function useChangesPanelPRData(repositoryNames: string[], sessionId: string | nu
     prFiles,
     useRepositoryKeys,
     relation: relationState.relation,
+    repositoryName: relationState.repositoryName,
+    selectedPR: taskPR,
     providerCommitsLoading: relationState.loading,
     providerCommitsError: relationState.error,
   };
@@ -329,7 +336,28 @@ function hasCumulativeFiles(files: Record<string, unknown> | null | undefined): 
   return Object.keys(files ?? {}).length > 0;
 }
 
+function useChangesPanelResolutionTarget(
+  relation: RemoteContributionRelation,
+  repositoryName: string | undefined,
+  selectedPR: TaskPR | null | undefined,
+  t: (key: string) => string,
+) {
+  return useMemo<RemoteContributionResolutionTarget | null>(() => {
+    const providerHead = relation.providerHead;
+    if (!providerHead || (!relation.canReplaceRemote && !relation.canUseRemote)) return null;
+    const displayName =
+      repositoryName ||
+      (selectedPR ? `${selectedPR.owner}/${selectedPR.repo}` : t("task:remoteRepository"));
+    return {
+      expectedRemoteHead: providerHead,
+      repo: repositoryName ?? "",
+      repositoryName: displayName,
+    };
+  }, [relation, repositoryName, selectedPR, t]);
+}
+
 export function useChangesPanelData() {
+  const { t } = useTranslation();
   const { activeTaskId, activeSessionId, baseBranch, existingPrUrl, gitCredentialDisplay } =
     useChangesPanelStoreData();
   const baseBranchByRepo = useBaseBranchByRepo(activeTaskId);
@@ -341,6 +369,13 @@ export function useChangesPanelData() {
     [git.repoNames, git.cumulativeDiff],
   );
   const prData = useChangesPanelPRData(reviewRepositoryNames, activeSessionId);
+  const resolution = useRemoteContributionResolution(activeSessionId);
+  const resolutionTarget = useChangesPanelResolutionTarget(
+    prData.relation,
+    prData.repositoryName,
+    prData.selectedPR,
+    t,
+  );
   const remoteActionPolicy = useMemo(
     () => remoteContributionActionPolicy(prData.relation),
     [prData.relation],
@@ -403,6 +438,8 @@ export function useChangesPanelData() {
     existingPrUrl,
     gitCredentialDisplay,
     walkthroughRequestReady,
+    resolution,
+    resolutionTarget,
     pushDisabled: remoteActionPolicy.pushDisabled,
     pullDisabled: remoteActionPolicy.pullDisabled,
     ...prData,
@@ -429,6 +466,8 @@ export function buildChangesPanelBodyProps(
     hasPRFiles: data.hasPRFiles,
     hasPRCommits: data.hasPRCommits,
     relation: data.relation,
+    resolution: data.resolution,
+    resolutionTarget: data.resolutionTarget,
     providerCommitsLoading: data.providerCommitsLoading,
     providerCommitsError: data.providerCommitsError,
     pushDisabled: data.pushDisabled,

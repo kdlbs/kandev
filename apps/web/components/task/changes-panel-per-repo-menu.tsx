@@ -49,7 +49,7 @@ export function PerRepoPullMenu({
               onClick={() => onRepoPull(repo)}
               className="cursor-pointer text-xs gap-2"
               disabled={pullDisabled}
-              title={pullDisabled ? t("task:remoteActionsDisabledHistoryChanged") : undefined}
+              title={pullDisabled ? t("task:providerHistoryUnavailable") : undefined}
             >
               <IconCloudDownload className="h-3.5 w-3.5 text-muted-foreground" />
               {t("task:pull")}

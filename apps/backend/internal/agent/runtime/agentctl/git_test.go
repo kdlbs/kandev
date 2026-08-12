@@ -56,6 +56,22 @@ func TestGitOperations_PostExpectedPathAndPayload(t *testing.T) {
 			wantBody: map[string]any{"repo": "svc"},
 		},
 		{
+			name: "replace remote contribution",
+			call: func(c *Client) (*GitOperationResult, error) {
+				return c.GitReplaceRemoteContribution(context.Background(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "svc")
+			},
+			wantPath: "/api/v1/git/contribution/replace",
+			wantBody: map[string]any{"expected_remote_head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "repo": "svc"},
+		},
+		{
+			name: "use remote contribution",
+			call: func(c *Client) (*GitOperationResult, error) {
+				return c.GitUseRemoteContribution(context.Background(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "svc")
+			},
+			wantPath: "/api/v1/git/contribution/use",
+			wantBody: map[string]any{"expected_remote_head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "repo": "svc"},
+		},
+		{
 			name: "rebase onto base branch",
 			call: func(c *Client) (*GitOperationResult, error) {
 				return c.GitRebase(context.Background(), "main", "svc")
@@ -195,6 +211,27 @@ func TestGitOperations_PostExpectedPathAndPayload(t *testing.T) {
 				t.Errorf("result = %+v, want the decoded success body", result)
 			}
 		})
+	}
+}
+
+func TestGitUseRemoteContribution_DecodesRecoveryBranch(t *testing.T) {
+	srv, _ := captureServer(t, jsonResponder(http.StatusOK, `{
+		"success":true,
+		"operation":"use_remote_contribution",
+		"output":"HEAD is now at provider",
+		"recovery_branch":"kandev/recovery-123"
+	}`))
+
+	result, err := newHTTPOnlyClient(srv.URL).GitUseRemoteContribution(
+		context.Background(),
+		"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		"svc",
+	)
+	if err != nil {
+		t.Fatalf("GitUseRemoteContribution: %v", err)
+	}
+	if result.RecoveryBranch != "kandev/recovery-123" {
+		t.Errorf("RecoveryBranch = %q, want %q", result.RecoveryBranch, "kandev/recovery-123")
 	}
 }
 

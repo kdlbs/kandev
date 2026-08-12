@@ -67,4 +67,33 @@ describe("GitActionsDropdown remote safety", () => {
         .every((button) => button.hasAttribute("disabled")),
     ).toBe(true);
   });
+
+  it("offers scoped contribution version choices without the generic push submenu", () => {
+    const onReplaceContribution = vi.fn();
+    const onUseContribution = vi.fn();
+    const onViewPRVersion = vi.fn();
+    render(
+      <GitActionsDropdown
+        {...baseProps}
+        showContributionResolution
+        onReplaceContribution={onReplaceContribution}
+        onUseContribution={onUseContribution}
+        onViewPRVersion={onViewPRVersion}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /Commit/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Replace PR branch/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Use PR version/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /View PR version/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Force Push/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Pull$/i })).toBeNull();
+
+    screen.getByRole("button", { name: /Replace PR branch/ }).click();
+    screen.getByRole("button", { name: /Use PR version/ }).click();
+    screen.getByRole("button", { name: /View PR version/ }).click();
+    expect(onReplaceContribution).toHaveBeenCalledOnce();
+    expect(onUseContribution).toHaveBeenCalledOnce();
+    expect(onViewPRVersion).toHaveBeenCalledOnce();
+  });
 });

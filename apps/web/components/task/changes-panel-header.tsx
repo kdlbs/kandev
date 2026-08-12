@@ -33,6 +33,12 @@ import type { GitCredentialDisplay } from "./changes-git-credential-display";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { useTranslation } from "react-i18next";
 import { PerRepoPullMenu } from "./changes-panel-per-repo-menu";
+import type { RemoteContributionRelation } from "@/hooks/domains/session/remote-contribution-relation";
+import {
+  type RemoteContributionResolutionTarget,
+  type useRemoteContributionResolution,
+} from "./use-remote-contribution-resolution";
+import { RemoteContributionHeaderActions } from "./remote-contribution-header-actions";
 
 export type PerRepoStatus = {
   repository_name: string;
@@ -393,7 +399,7 @@ export function PullDropdown({
             {pullButton}
           </span>
         </TooltipTrigger>
-        <TooltipContent>{t("task:remoteActionsDisabledHistoryChanged")}</TooltipContent>
+        <TooltipContent>{t("task:providerHistoryUnavailable")}</TooltipContent>
       </Tooltip>
     );
   }
@@ -494,31 +500,7 @@ function ChangesPanelWalkthroughButton({
   );
 }
 
-export function ChangesPanelHeader({
-  hasChanges,
-  hasCommits,
-  hasPRFiles,
-  displayBranch,
-  baseBranchDisplay,
-  baseBranchByRepo,
-  behindCount,
-  pullDisabled,
-  isLoading,
-  loadingOperation,
-  onOpenDiffAll,
-  onOpenReview,
-  onRequestWalkthrough,
-  requestWalkthroughDisabled,
-  repoNames,
-  perRepoStatus,
-  onRepoPull,
-  onRepoRebase,
-  onRepoMerge,
-  repoDisplayName,
-  taskId,
-  onRenameBranch,
-  credentialDisplay,
-}: {
+type ChangesPanelHeaderProps = {
   hasChanges: boolean;
   hasCommits: boolean;
   hasPRFiles?: boolean;
@@ -548,7 +530,40 @@ export function ChangesPanelHeader({
    *  the right task_repositories row to PATCH. Null while task data is
    *  hydrating — the picker falls back to a static label. */
   taskId: string | null;
-}) {
+  relation?: RemoteContributionRelation;
+  resolution?: ReturnType<typeof useRemoteContributionResolution>;
+  resolutionTarget?: RemoteContributionResolutionTarget | null;
+};
+
+export function ChangesPanelHeader(props: ChangesPanelHeaderProps) {
+  const {
+    hasChanges,
+    hasCommits,
+    hasPRFiles,
+    displayBranch,
+    baseBranchDisplay,
+    baseBranchByRepo,
+    behindCount,
+    pullDisabled,
+    isLoading,
+    loadingOperation,
+    onOpenDiffAll,
+    onOpenReview,
+    onRequestWalkthrough,
+    requestWalkthroughDisabled,
+    repoNames,
+    perRepoStatus,
+    onRepoPull,
+    onRepoRebase,
+    onRepoMerge,
+    repoDisplayName,
+    taskId,
+    onRenameBranch,
+    credentialDisplay,
+    relation,
+    resolution,
+    resolutionTarget,
+  } = props;
   const branchRows = buildBranchRows(
     perRepoStatus,
     baseBranchByRepo,
@@ -580,6 +595,11 @@ export function ChangesPanelHeader({
               credentialDisplay={credentialDisplay}
             />
           )}
+          <RemoteContributionHeaderActions
+            relation={relation}
+            resolution={resolution}
+            resolutionTarget={resolutionTarget}
+          />
           <PullDropdown
             behindCount={behindCount}
             pullDisabled={pullDisabled}

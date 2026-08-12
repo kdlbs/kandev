@@ -103,7 +103,8 @@ describe("useRemoteContributionRelation repository scoping", () => {
       kind: "aligned",
       canPush: false,
       canPull: false,
-      remoteMutationBlocked: false,
+      canReplaceRemote: false,
+      canUseRemote: false,
     });
   });
 
@@ -116,7 +117,8 @@ describe("useRemoteContributionRelation repository scoping", () => {
       kind: "aligned",
       canPush: false,
       canPull: false,
-      remoteMutationBlocked: false,
+      canReplaceRemote: false,
+      canUseRemote: false,
     });
   });
 });

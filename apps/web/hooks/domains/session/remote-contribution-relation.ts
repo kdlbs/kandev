@@ -8,6 +8,12 @@ export type RemoteContributionRelationKind =
 
 export type RemoteContributionPresentation = "unified" | "separate";
 
+export type RemoteContributionAction =
+  | "normal_push"
+  | "provider_ahead_pull"
+  | "diverged_replace"
+  | "unavailable_evidence";
+
 export type RemoteContributionRelationInput = {
   hasSelectedPR: boolean;
   providerCommits: ReadonlyArray<{ sha: string }>;
@@ -26,18 +32,23 @@ export type RemoteContributionRelationInput = {
 export type RemoteContributionRelation = {
   kind: RemoteContributionRelationKind;
   presentation: RemoteContributionPresentation;
+  action: RemoteContributionAction;
   providerHead: string | null;
   pushAhead: number;
   pullBehind: number;
   canPush: boolean;
   canPull: boolean;
-  remoteMutationBlocked: boolean;
+  canReplaceRemote: boolean;
+  canUseRemote: boolean;
 };
 
 export type RemoteContributionActionPolicy = {
+  action: RemoteContributionAction;
   pushDisabled: boolean;
   pullDisabled: boolean;
-  disabledReason: "history_changed" | null;
+  replaceDisabled: boolean;
+  useDisabled: boolean;
+  disabledReason: "provider_evidence_unavailable" | null;
 };
 
 /**
@@ -48,12 +59,23 @@ export type RemoteContributionActionPolicy = {
 export function remoteContributionActionPolicy(
   relation: RemoteContributionRelation,
 ): RemoteContributionActionPolicy {
-  const historyChanged = relation.remoteMutationBlocked;
+  const unavailable = relation.action === "unavailable_evidence";
+  const diverged = relation.action === "diverged_replace";
   return {
-    pushDisabled: historyChanged || relation.kind === "provider_ahead",
-    pullDisabled: historyChanged,
-    disabledReason: historyChanged ? "history_changed" : null,
+    action: relation.action,
+    pushDisabled: unavailable || diverged || relation.action === "provider_ahead_pull",
+    pullDisabled: unavailable || diverged,
+    replaceDisabled: !relation.canReplaceRemote,
+    useDisabled: !relation.canUseRemote,
+    disabledReason: unavailable ? "provider_evidence_unavailable" : null,
   };
+}
+
+export function isFullCommitSHA(value: string | null | undefined): boolean {
+  return (
+    (value?.length === 40 || value?.length === 64) &&
+    [...(value ?? "")].every((character) => /^[0-9a-f]$/i.test(character))
+  );
 }
 
 function nonNegative(value: number): number {
@@ -70,8 +92,20 @@ function fallbackCapabilities(input: RemoteContributionRelationInput) {
     pullBehind,
     canPush: pushAhead > 0,
     canPull: pullBehind > 0,
-    remoteMutationBlocked: false,
+    canReplaceRemote: false,
+    canUseRemote: false,
   };
+}
+
+function actionFor(
+  kind: RemoteContributionRelationKind,
+  providerHead: string | null,
+): RemoteContributionAction {
+  if (kind === "provider_ahead") return "provider_ahead_pull";
+  if (kind === "diverged" && isFullCommitSHA(providerHead)) return "diverged_replace";
+  if (kind === "unknown") return "unavailable_evidence";
+  if (kind === "diverged") return "unavailable_evidence";
+  return "normal_push";
 }
 
 function result(
@@ -79,9 +113,11 @@ function result(
   providerHead: string | null,
   capabilities: ReturnType<typeof fallbackCapabilities>,
 ): RemoteContributionRelation {
+  const action = actionFor(kind, providerHead);
   return {
     kind,
     presentation: kind === "diverged" ? "separate" : "unified",
+    action,
     providerHead,
     ...capabilities,
   };
@@ -119,7 +155,6 @@ export function classifyRemoteContribution(
       ...fallback,
       canPush: false,
       canPull: true,
-      remoteMutationBlocked: false,
     });
   }
 
@@ -129,14 +164,15 @@ export function classifyRemoteContribution(
       pushAhead: input.remoteAhead,
       canPush: true,
       canPull: false,
-      remoteMutationBlocked: false,
     });
   }
 
+  const canResolve = isFullCommitSHA(providerHead);
   return result("diverged", providerHead, {
     ...fallback,
     canPush: false,
     canPull: false,
-    remoteMutationBlocked: true,
+    canReplaceRemote: canResolve,
+    canUseRemote: canResolve,
   });
 }
