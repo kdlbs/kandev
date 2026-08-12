@@ -95,7 +95,7 @@ if [[ "$permanent_status" -ne 23 ]]; then
 fi
 
 if grep -q 'retrying' "$TMP_DIR/permanent-error"; then
-  fail "permanent failure unexpectedly succeeded"
+  fail "permanent failure was retried but should have failed immediately"
 fi
 
 echo "PASS: GHCR retry helper retries secondary limits with bounded backoff"

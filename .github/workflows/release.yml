@@ -1447,6 +1447,11 @@ jobs:
         with:
           images: ghcr.io/kdlbs/kandev
 
+      # The inline Buildx command uses the GHA cache backend directly. This
+      # helper exposes ACTIONS_RUNTIME_TOKEN and ACTIONS_CACHE_URL, which
+      # docker/build-push-action normally prepares for its own invocation.
+      - uses: crazy-max/ghaction-github-runtime@04d248b84655b509d8c44dc1d6f990c879747487 # v4.0.0
+
       - name: Build and push (amd64 staging tag)
         id: build
         env:
@@ -1530,6 +1535,8 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ghcr.io/kdlbs/kandev
+
+      - uses: crazy-max/ghaction-github-runtime@04d248b84655b509d8c44dc1d6f990c879747487 # v4.0.0
 
       - name: Build and push (arm64 staging tag)
         id: build
@@ -1671,6 +1678,8 @@ jobs:
         with:
           images: ghcr.io/kdlbs/kandev
 
+      - uses: crazy-max/ghaction-github-runtime@04d248b84655b509d8c44dc1d6f990c879747487 # v4.0.0
+
       - name: Build and push (universal amd64 staging tag)
         id: build
         env:
@@ -1743,6 +1752,8 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ghcr.io/kdlbs/kandev
+
+      - uses: crazy-max/ghaction-github-runtime@04d248b84655b509d8c44dc1d6f990c879747487 # v4.0.0
 
       - name: Build and push (universal arm64 staging tag)
         id: build

@@ -53,8 +53,10 @@ Report the workflow and contract changes, files changed, exact test results, any
 ## Results
 
 Replaced the four GHCR build action calls with retry-wrapped Buildx CLI commands, preserved BuildKit digest outputs, wrapped manifest mutations, and serialized each architecture pair.
+Added the pinned GitHub runtime helper before each inline build so the existing GHA cache backend receives its runtime credentials.
 
 - `python3 .github/scripts/release-workflow-contract_test.py` — passed, 28 tests.
 - `python3 .github/scripts/lint-action-pinning.py` — passed, all 18 workflow files use SHA-pinned action refs.
+- `python3 .github/scripts/lint-action-pinning_test.py` — passed, 9 tests.
 - `bash scripts/release/retry-ghcr-command.test.sh` — passed.
 - `bash -n scripts/release/retry-ghcr-command.sh` — passed.

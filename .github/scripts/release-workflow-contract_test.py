@@ -696,14 +696,27 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn("|| true", DIAGNOSTICS)
 
     def test_ghcr_builds_retry_transient_failures_and_publish_digests(self) -> None:
-        for name in (
-            "Build and push (amd64 staging tag)",
-            "Build and push (arm64 staging tag)",
-            "Build and push (universal amd64 staging tag)",
-            "Build and push (universal arm64 staging tag)",
+        for job, name in (
+            ("docker-amd64", "Build and push (amd64 staging tag)"),
+            ("docker-arm64", "Build and push (arm64 staging tag)"),
+            (
+                "docker-universal-amd64",
+                "Build and push (universal amd64 staging tag)",
+            ),
+            (
+                "docker-universal-arm64",
+                "Build and push (universal arm64 staging tag)",
+            ),
         ):
             build = step_block(name)
+            job_text = job_block(job)
             with self.subTest(step=name):
+                runtime_setup = "crazy-max/ghaction-github-runtime@"
+                self.assertIn(runtime_setup, job_text)
+                self.assertLess(
+                    job_text.index(runtime_setup),
+                    job_text.index(f"- name: {name}"),
+                )
                 self.assertIn("bash scripts/release/retry-ghcr-command.sh", build)
                 self.assertIn("docker buildx build", build)
                 self.assertIn("--metadata-file", build)
