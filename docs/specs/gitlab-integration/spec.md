@@ -133,9 +133,10 @@ workflows are not usable end to end.
   dropdown), also mirroring GitHub's single-PR topbar button. A task with
   2+ linked MRs, and touch/coarse-pointer surfaces regardless of MR count,
   keep the click-only dropdown (per-MR review/open/unlink rows, one
-  collapsible Automation block per linked MR — each labeled with that MR's
-  number and collapsed by default unless one of its own switches is already
-  on — and "Link another merge request") with no hover popover.
+  Automation block per linked MR — each labeled with that MR's number, its
+  auto-fix/auto-merge rows always visible and its nested `Review follow-up`
+  group collapsed unless one of that MR's own three lifecycle switches is
+  already on — and "Link another merge request") with no hover popover.
 - The Kanban card shows a merge-request badge (`IconGitMerge`, coloured by
   state/pipeline/approval) next to the existing pull-request badge when the
   task has at least one linked MR. Multiple linked MRs collapse into one badge

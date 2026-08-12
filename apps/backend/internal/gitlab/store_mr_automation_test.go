@@ -773,13 +773,13 @@ func assertMRAutomationTablesExist(t *testing.T, sqlxDB *sqlx.DB) {
 	}
 }
 
-// TestStore_DeleteTaskMR_DropsPerMRAutomationOptions covers the unlink half of
-// the per-MR switch lifecycle. Leaving the switch row behind meant re-linking
-// the same MR — by hand, or through push-detection auto-link — silently
-// re-armed whatever was configured before the unlink, including auto-merge,
-// with no surface showing it (taskMRAutomationOptionsList hides rows whose MR
-// is not linked) but the evaluator still reading it.
-func TestStore_DeleteTaskMR_DropsPerMRAutomationOptions(t *testing.T) {
+// TestStore_DeleteTaskMRForWorkspace_DropsPerMRAutomationOptions covers the
+// unlink half of the per-MR switch lifecycle. Leaving the switch row behind
+// meant re-linking the same MR — by hand, or through push-detection auto-link
+// — silently re-armed whatever was configured before the unlink, including
+// auto-merge, with no surface showing it (taskMRAutomationOptionsList hides
+// rows whose MR is not linked) but the evaluator still reading it.
+func TestStore_DeleteTaskMRForWorkspace_DropsPerMRAutomationOptions(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 	seedWorkspace(t, store, "ws-1")
@@ -820,6 +820,41 @@ func TestStore_DeleteTaskMR_DropsPerMRAutomationOptions(t *testing.T) {
 	}
 	if opts.AutoMergeEnabled {
 		t.Errorf("re-linked MR silently re-armed auto-merge: %+v", opts)
+	}
+}
+
+// TestStore_DeleteTaskMR_DropsPerMRAutomationOptions pins the same cleanup on
+// the association-ID delete path, which cascades to gitlab_task_mr_state
+// independently of DeleteTaskMRForWorkspace. The two must stay in step: a
+// caller routed through this one would otherwise leave an enabled auto-merge
+// switch behind for the next link of the same MR to inherit.
+func TestStore_DeleteTaskMR_DropsPerMRAutomationOptions(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	seedWorkspace(t, store, "ws-1")
+	seedTask(t, store, "task-1", "ws-1")
+
+	mr := newTestMR("task-1", "", "group/a", 1)
+	if err := store.UpsertTaskMR(ctx, mr); err != nil {
+		t.Fatalf("upsert MR: %v", err)
+	}
+	id := MRIdentity{RepositoryID: "", ProjectPath: "group/a", MRIID: 1}
+	if _, err := store.UpdateTaskMRAutomationOptionsForMR(
+		ctx, "task-1", id, TaskMRAutomationSwitchPatch{AutoMergeEnabled: boolPtr(true)},
+	); err != nil {
+		t.Fatalf("enable auto-merge: %v", err)
+	}
+
+	if err := store.DeleteTaskMR(ctx, mr.ID); err != nil {
+		t.Fatalf("DeleteTaskMR: %v", err)
+	}
+
+	stored, err := store.ListTaskMRAutomationOptions(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("ListTaskMRAutomationOptions: %v", err)
+	}
+	if len(stored) != 0 {
+		t.Fatalf("delete left automation rows behind: %+v", stored)
 	}
 }
 
