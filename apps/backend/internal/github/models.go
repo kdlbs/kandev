@@ -501,6 +501,18 @@ type TaskCIOptionsResponse struct {
 	EffectiveClosedPrompt   string                     `json:"-"`
 	UpdatedAt               time.Time                  `json:"updated_at"`
 	PRStates                []*TaskCIPRAutomationState `json:"pr_states"`
+	// WorkspaceID is routing metadata for workspace-scoped WebSocket delivery.
+	// It stays JSON-visible because NATS-backed event buses round-trip payloads.
+	WorkspaceID string `json:"workspace_id,omitempty"`
+}
+
+// GetWorkspaceID lets the WebSocket broadcaster route CI-option updates to
+// the task's owning workspace when the in-memory event retains its typed shape.
+func (r *TaskCIOptionsResponse) GetWorkspaceID() string {
+	if r == nil {
+		return ""
+	}
+	return r.WorkspaceID
 }
 
 // TaskCIPRAutomationState stores per-PR dedupe and error state for CI automation.

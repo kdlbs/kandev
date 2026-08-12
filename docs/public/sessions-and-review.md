@@ -237,7 +237,7 @@ The PR panel has two action controls:
 - **Auto-fix CI and address comments** waits for a check run to finish, then sends newly failed checks or review comments to the agent. It refreshes about once a minute, coalesces queued updates, and stops after 10 repair rounds for that PR. Disable and re-enable it after manual review to reset the limit.
 - **Auto-merge when ready** merges only after CI, required reviews, and mergeability are all ready.
 
-Open **Review follow-up** for three notification controls:
+Open **PR events** for three notification controls:
 
 - **Your review is requested** wakes the agent for any new request, including re-review after changes.
 - **PR merged** and **PR closed without merging** independently wake the agent when review work ends.

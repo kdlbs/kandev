@@ -152,6 +152,170 @@ test.describe("CLI mode: passthrough toolbar", () => {
     await expect(testPage.getByTestId("passthrough-composer")).toBeHidden({ timeout: 5_000 });
   });
 
+  test("narrow toolbar wraps complete PR and provider controls without overflow", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    await testPage.setViewportSize({ width: 320, height: 800 });
+    await apiClient.mockAzureDevOpsSeed({
+      authenticated: true,
+      user: { ok: true, id: "user-1", displayName: "Ada Reviewer" },
+      pullRequests: [
+        {
+          id: 42,
+          title: "Azure companion PR",
+          status: "active",
+          isDraft: false,
+          sourceBranch: "refs/heads/feature/narrow-toolbar",
+          targetBranch: "refs/heads/main",
+          author: { id: "user-1", displayName: "Ada Reviewer" },
+          projectId: "project-1",
+          projectName: "Platform",
+          repositoryId: "azure-repo-1",
+          repositoryName: "api",
+          webUrl: "https://dev.azure.com/acme/Platform/_git/api/pullrequest/42",
+          apiUrl: "https://dev.azure.com/acme/Platform/_apis/git/pullrequests/42",
+        },
+      ],
+      feedback: {
+        "42": {
+          pullRequest: {
+            id: 42,
+            title: "Azure companion PR",
+            status: "active",
+            isDraft: false,
+            sourceBranch: "refs/heads/feature/narrow-toolbar",
+            targetBranch: "refs/heads/main",
+            author: { id: "user-1", displayName: "Ada Reviewer" },
+            projectId: "project-1",
+            projectName: "Platform",
+            repositoryId: "azure-repo-1",
+            repositoryName: "api",
+            webUrl: "https://dev.azure.com/acme/Platform/_git/api/pullrequest/42",
+            apiUrl: "https://dev.azure.com/acme/Platform/_apis/git/pullrequests/42",
+          },
+          reviewers: [],
+          threads: [],
+          linkedWorkItems: [],
+          policies: [],
+          reviewState: "pending",
+          policyState: "pending",
+        },
+      },
+    });
+    await apiClient.setAzureDevOpsConfig(seedData.workspaceId, {
+      organizationUrl: "https://dev.azure.com/acme",
+      pat: "azure-test-pat",
+    });
+    await apiClient.updateRepository(seedData.repositoryId, {
+      provider: "azure_devops",
+      provider_repo_id: "azure-repo-1",
+      provider_host: "dev.azure.com/acme",
+      provider_owner: "project-1",
+      provider_name: "azure-repo-1",
+    });
+    const profileId = await createPassthroughProfile(apiClient, "CLI Narrow Toolbar");
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Narrow Toolbar Task",
+      profileId,
+      {
+        description: "initial prompt",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    await apiClient.associateAzureDevOpsTaskPR(
+      seedData.workspaceId,
+      task.id,
+      seedData.repositoryId,
+      42,
+    );
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("test-user");
+    const githubPR = {
+      workspace_id: seedData.workspaceId,
+      task_id: task.id,
+      owner: "acme",
+      repo: "demo",
+      pr_number: 99,
+      pr_url: "https://github.com/acme/demo/pull/99",
+      pr_title: "Keep passthrough controls contained",
+      head_branch: "feature/narrow-toolbar",
+      base_branch: "main",
+      author_login: "test-user",
+      state: "open",
+      checks_state: "pending",
+      checks_total: 5,
+      checks_passing: 0,
+      review_state: "pending",
+      pending_review_count: 1,
+    };
+    await apiClient.mockGitHubAssociateTaskPR(githubPR);
+    await apiClient.updateTaskCIAutomationOptions(task.id, {
+      auto_fix_enabled: true,
+      auto_merge_enabled: true,
+      prompt_on_review_requested: true,
+      prompt_on_merged: true,
+      prompt_on_closed: true,
+    });
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForPassthroughLoad(20_000);
+    await session.waitForPassthroughLoaded(20_000);
+    const row = testPage.getByTestId("passthrough-status-row");
+    const chip = row.getByTestId("pr-status-chip");
+    await expect(chip.getByTestId("pr-status-auto-fix-chip")).toBeVisible();
+    await expect(chip.getByTestId("pr-status-auto-merge-chip")).toBeVisible();
+    await expect(chip.getByTestId("pr-status-pr-events-chip")).toHaveText("PR events 3/3");
+    await expect(row.getByRole("link", { name: /Azure PR 42/ })).toBeVisible();
+
+    for (const width of [320, 280]) {
+      await testPage.setViewportSize({ width, height: 800 });
+      await expect(row).toHaveCSS("flex-wrap", "wrap");
+      expect(
+        await row.evaluate((element) => {
+          const bounds = element.getBoundingClientRect();
+          const controls = Array.from(element.querySelectorAll("button, a")).filter((control) => {
+            const rect = control.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0;
+          });
+          return (
+            element.scrollWidth <= element.clientWidth &&
+            controls.every((control) => {
+              const rect = control.getBoundingClientRect();
+              return rect.left >= bounds.left - 1 && rect.right <= bounds.right + 1;
+            })
+          );
+        }),
+      ).toBe(true);
+      expect(
+        await testPage.evaluate(
+          () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        ),
+      ).toBe(true);
+    }
+
+    expect(
+      await chip.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        const hit = document.elementFromPoint(
+          rect.left + rect.width / 2,
+          rect.top + rect.height / 2,
+        );
+        return hit === element || element.contains(hit);
+      }),
+    ).toBe(true);
+
+    await apiClient.mockGitHubAssociateTaskPR({ ...githubPR, state: "merged" });
+    await expect(row.getByTestId("pr-merged-banner")).toBeVisible();
+    expect(await row.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  });
+
   test("composer toggle + send forwards message to the agent", async ({
     testPage,
     apiClient,

@@ -49,6 +49,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     showScrollToStart: false,
     showTranscriptAutoScrollControl: false,
     showTodoListPanel: false,
+    showTodoListPanelOnlyWhenNotEmpty: false,
     showReleaseNotification: true,
     releaseNotesLastSeenVersion: null,
     lspAutoStartLanguages: [],
@@ -262,6 +263,8 @@ function buildBehaviorFields(s: UserSettingsData, current: UserSettingsState) {
     showTranscriptAutoScrollControl:
       s.show_transcript_auto_scroll_control ?? current.showTranscriptAutoScrollControl,
     showTodoListPanel: s.show_todo_list_panel ?? current.showTodoListPanel,
+    showTodoListPanelOnlyWhenNotEmpty:
+      s.show_todo_list_panel_only_when_not_empty ?? current.showTodoListPanelOnlyWhenNotEmpty,
     showReleaseNotification: s.show_release_notification ?? current.showReleaseNotification,
     releaseNotesLastSeenVersion: mapNullableString(
       s.release_notes_last_seen_version,

@@ -229,6 +229,7 @@ export type UserSettingsState = {
   showScrollToStart: boolean;
   showTranscriptAutoScrollControl: boolean;
   showTodoListPanel: boolean;
+  showTodoListPanelOnlyWhenNotEmpty: boolean;
   showReleaseNotification: boolean;
   releaseNotesLastSeenVersion: string | null;
   lspAutoStartLanguages: string[];

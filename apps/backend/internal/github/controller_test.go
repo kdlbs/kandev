@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -1198,6 +1199,86 @@ func TestHttpTaskCIOptions_DefaultAndPatch(t *testing.T) {
 	}
 	if got.AutoFixPromptOverride != nil || !got.UsingDefaultPrompt {
 		t.Fatalf("expected reset to default prompt, got %+v", got)
+	}
+}
+
+func TestHttpTaskCIOptions_DeniesForeignWorkspaceReadAndUpdate(t *testing.T) {
+	store := newTestStore(t)
+	log := newControllerTestLogger()
+	svc := NewService(&stubClient{}, AuthMethodPAT, nil, store, nil, log)
+	svc.SetPromptResolver(staticPromptResolver{content: "resolved default prompt"})
+	svc.SetTaskIssueStore(&fakeTaskIssueStore{
+		task: &taskmodels.Task{ID: "task-foreign", WorkspaceID: "workspace-foreign"},
+	})
+	svc.SetWorkspaceAuthorizer(func(_ context.Context, workspaceID string) error {
+		if workspaceID != "workspace-foreign" {
+			t.Fatalf("authorized workspace = %q, want workspace-foreign", workspaceID)
+		}
+		return repoerrors.ErrWorkspaceNotFound
+	})
+	controller := NewController(svc, log)
+	router := gin.New()
+	controller.RegisterHTTPRoutes(router)
+
+	for _, method := range []string{http.MethodGet, http.MethodPatch} {
+		t.Run(method, func(t *testing.T) {
+			var body io.Reader
+			if method == http.MethodPatch {
+				body = strings.NewReader(`{"auto_fix_enabled":true}`)
+			}
+			req := httptest.NewRequest(method, "/api/v1/github/tasks/task-foreign/ci-options", body)
+			req = req.WithContext(authn.WithIdentity(req.Context(), authn.Identity{
+				UserID: "attacker", Role: authn.RoleMember,
+			}))
+			if method == http.MethodPatch {
+				req.Header.Set("Content-Type", "application/json")
+			}
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, req)
+
+			if response.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404: %s", response.Code, response.Body.String())
+			}
+		})
+	}
+
+	options, err := store.GetTaskCIOptions(context.Background(), "task-foreign")
+	if err != nil {
+		t.Fatalf("get stored options: %v", err)
+	}
+	if options.AutoFixEnabled {
+		t.Fatal("foreign PATCH mutated task CI options")
+	}
+}
+
+func TestHttpTaskCIOptions_WorkspacelessTaskReturnsNotFound(t *testing.T) {
+	store := newTestStore(t)
+	log := newControllerTestLogger()
+	svc := NewService(&stubClient{}, AuthMethodPAT, nil, store, nil, log)
+	svc.SetTaskIssueStore(&fakeTaskIssueStore{
+		task: &taskmodels.Task{ID: "task-workspaceless"},
+	})
+	router := gin.New()
+	NewController(svc, log).RegisterHTTPRoutes(router)
+
+	for _, method := range []string{http.MethodGet, http.MethodPatch} {
+		t.Run(method, func(t *testing.T) {
+			var body io.Reader
+			if method == http.MethodPatch {
+				body = strings.NewReader(`{"auto_fix_enabled":true}`)
+			}
+			req := httptest.NewRequest(method, "/api/v1/github/tasks/task-workspaceless/ci-options", body)
+			if method == http.MethodPatch {
+				req.Header.Set("Content-Type", "application/json")
+			}
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, req)
+
+			if response.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404: %s", response.Code, response.Body.String())
+			}
+			assertJSONError(t, response.Body.Bytes(), "task not found")
+		})
 	}
 }
 

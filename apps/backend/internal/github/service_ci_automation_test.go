@@ -118,6 +118,65 @@ func TestServiceTaskCIOptionsResponseOmitsLifecyclePromptOverrides(t *testing.T)
 	}
 }
 
+func TestServiceTaskCIOptionsResponseAdvancesVersionForPRState(t *testing.T) {
+	store := newTestStore(t)
+	svc := NewService(&stubClient{}, "pat", nil, store, nil, testLogger(t))
+	ctx := context.Background()
+	enabled := true
+
+	if _, err := store.UpdateTaskCIOptions(ctx, "task-1", TaskCIOptionsPatch{
+		AutoFixEnabled: &enabled,
+	}); err != nil {
+		t.Fatalf("enable auto-fix: %v", err)
+	}
+	before, err := svc.GetTaskCIOptionsResponse(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("get initial options response: %v", err)
+	}
+	if err := store.RecordTaskCIFixAttempt(ctx, TaskCIFixAttempt{
+		TaskID: "task-1", RepositoryID: "repo-1", PRNumber: 42, IncrementRound: true,
+	}); err != nil {
+		t.Fatalf("record auto-fix attempt: %v", err)
+	}
+	afterRound, err := svc.GetTaskCIOptionsResponse(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("get auto-fix round response: %v", err)
+	}
+
+	if !afterRound.UpdatedAt.After(before.UpdatedAt) {
+		t.Fatalf("response version did not advance after auto-fix round: before=%s after=%s", before.UpdatedAt, afterRound.UpdatedAt)
+	}
+	if len(afterRound.PRStates) != 1 || afterRound.PRStates[0].AutoFixRoundCount != 1 {
+		t.Fatalf("PR state = %+v, want one incremented auto-fix round", afterRound.PRStates)
+	}
+	if err := store.RecordTaskCIError(ctx, "task-1", "repo-1", 42, "tests failed"); err != nil {
+		t.Fatalf("record CI error: %v", err)
+	}
+	afterError, err := svc.GetTaskCIOptionsResponse(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("get CI error response: %v", err)
+	}
+	if !afterError.UpdatedAt.After(afterRound.UpdatedAt) {
+		t.Fatalf("response version did not advance after CI error: before=%s after=%s", afterRound.UpdatedAt, afterError.UpdatedAt)
+	}
+	if afterError.PRStates[0].LastError == nil || *afterError.PRStates[0].LastError != "tests failed" {
+		t.Fatalf("last error = %v, want tests failed", afterError.PRStates[0].LastError)
+	}
+	if err := store.MarkTaskCIAutoFixExhausted(ctx, "task-1", "repo-1", 42, "round limit reached"); err != nil {
+		t.Fatalf("mark auto-fix exhausted: %v", err)
+	}
+	afterExhaustion, err := svc.GetTaskCIOptionsResponse(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("get auto-fix exhaustion response: %v", err)
+	}
+	if !afterExhaustion.UpdatedAt.After(afterError.UpdatedAt) {
+		t.Fatalf("response version did not advance after auto-fix exhaustion: before=%s after=%s", afterError.UpdatedAt, afterExhaustion.UpdatedAt)
+	}
+	if afterExhaustion.PRStates[0].AutoFixExhaustedAt == nil {
+		t.Fatal("auto-fix exhaustion timestamp is nil")
+	}
+}
+
 func TestServiceTaskCIPRStatesMergesStoredAndCurrentPRs(t *testing.T) {
 	store := newTestStore(t)
 	svc := NewService(&stubClient{}, "pat", nil, store, nil, testLogger(t))

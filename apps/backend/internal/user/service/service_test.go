@@ -414,6 +414,38 @@ func TestApplyBasicSettingsTodoListPanel(t *testing.T) {
 	})
 }
 
+func TestApplyBasicSettingsTodoListPanelOnlyWhenNotEmpty(t *testing.T) {
+	t.Run("omission preserves saved value", func(t *testing.T) {
+		settings := &models.UserSettings{ShowTodoListPanelOnlyWhenNotEmpty: true}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{}); err != nil {
+			t.Fatalf("apply settings: %v", err)
+		}
+		if !settings.ShowTodoListPanelOnlyWhenNotEmpty {
+			t.Fatal("ShowTodoListPanelOnlyWhenNotEmpty = false, want true (unchanged)")
+		}
+	})
+
+	t.Run("explicit value replaces saved value", func(t *testing.T) {
+		settings := &models.UserSettings{ShowTodoListPanelOnlyWhenNotEmpty: false}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{ShowTodoListPanelOnlyWhenNotEmpty: ptr(true)}); err != nil {
+			t.Fatalf("apply settings: %v", err)
+		}
+		if !settings.ShowTodoListPanelOnlyWhenNotEmpty {
+			t.Fatal("ShowTodoListPanelOnlyWhenNotEmpty = false, want true")
+		}
+	})
+
+	t.Run("explicit false disables it", func(t *testing.T) {
+		settings := &models.UserSettings{ShowTodoListPanelOnlyWhenNotEmpty: true}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{ShowTodoListPanelOnlyWhenNotEmpty: ptr(false)}); err != nil {
+			t.Fatalf("apply settings: %v", err)
+		}
+		if settings.ShowTodoListPanelOnlyWhenNotEmpty {
+			t.Fatal("ShowTodoListPanelOnlyWhenNotEmpty = true, want false")
+		}
+	})
+}
+
 func TestApplyBasicSettingsTranscriptNavigation(t *testing.T) {
 	settings := &models.UserSettings{
 		ShowScrollToLastPrompt:          true,

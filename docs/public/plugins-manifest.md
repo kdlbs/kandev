@@ -22,31 +22,32 @@ workflow and [Plugins](plugins.md) for install/operate.
 ## Annotated example
 
 ```yaml
-id: "kandev-plugin-slack"                    # ^[a-z0-9][a-z0-9._-]*$
-api_version: 1                               # must be 1 (the only supported value)
+id: "kandev-plugin-slack" # ^[a-z0-9][a-z0-9._-]*$
+api_version: 1 # must be 1 (the only supported value)
 version: "1.0.0"
 display_name: "Slack Notifications"
 description: "Post to Slack on task events, relay messages to agents"
 author: "kandev"
-categories: ["connector"]                    # connector | automation | tools | analytics
-repo_url: "https://github.com/kdlbs/kandev-plugin-slack"  # optional; "Repo" link in Settings > Plugins
+categories: ["connector"] # connector | automation | tools | analytics
+repo_url: "https://github.com/kdlbs/kandev-plugin-slack" # optional; "Repo" link in Settings > Plugins
 
 runtime:
-  type: binary                               # only supported value today
+  type: binary # only supported value today
   executables:
     linux-amd64: server/plugin-linux-amd64
     linux-arm64: server/plugin-linux-arm64
     darwin-amd64: server/plugin-darwin-amd64
     darwin-arm64: server/plugin-darwin-arm64
-    windows-amd64: server/plugin-windows-amd64.exe
-                                              # any subset; the host's <goos>-<goarch> key
-                                              # is required at install time
-min_kandev_version: "0.78.0"                 # optional
+    windows-amd64:
+      server/plugin-windows-amd64.exe
+      # any subset; the host's <goos>-<goarch> key
+      # is required at install time
+min_kandev_version: "0.78.0" # optional
 
 capabilities:
   events: ["task.created", "task.state_changed", "agent.completed"]
-  api_read: ["tasks", "agent_profiles"]      # gates the Host data-reader RPCs
-  api_write: ["tasks"]                       # gates Tasks().Create/Update
+  api_read: ["tasks", "agent_profiles"] # gates the Host data-reader RPCs
+  api_write: ["tasks"] # gates Tasks().Create/Update
   state: true
   secrets: true
   agent_invoke: true                         # gates Host.InvokeUtilityAgent
@@ -56,28 +57,43 @@ capabilities:
 webhooks:
   - key: "slack-events"
     description: "Slack Events API webhook"
-    method: "POST"                           # informational only, not enforced
+    method: "POST" # informational only, not enforced
+    access: public # public (default) or authenticated
+    max_body_bytes: 4194304 # public maximum 4 MiB; authenticated maximum 16 MiB
 
-auth_providers:                              # login buttons (needs capabilities.auth)
+auth_providers: # login buttons (needs capabilities.auth)
   - id: "google"
     display_name: "Google"
-    initiate: "login-start"                  # names a webhook key above; the button navigates there
+    initiate: "login-start" # names a webhook key above; the button navigates there
 
 config_schema:
   type: object
   properties:
-    bot_token:  { type: string, secret: true, title: "Bot Token", description: "Slack bot OAuth token" }
-    default_channel:  { type: string, description: "Default channel for notifications" }
+    bot_token:
+      {
+        type: string,
+        secret: true,
+        title: "Bot Token",
+        description: "Slack bot OAuth token",
+      }
+    default_channel:
+      { type: string, description: "Default channel for notifications" }
     notify_on_task_created: { type: boolean, default: true }
-    utility_agent: { type: string, format: utility-agent, title: "Utility Agent", description: "Agent used for plugin LLM calls" }
+    utility_agent:
+      {
+        type: string,
+        format: utility-agent,
+        title: "Utility Agent",
+        description: "Agent used for plugin LLM calls",
+      }
   required: ["bot_token", "default_channel", "utility_agent"]
 
-ui:                                           # optional native frontend plugin
-  bundle: "/ui/bundle.js"                    # root-relative
-  styles: ["/ui/plugin.css"]                 # optional, root-relative
-  keybindings:                                # optional, requires ui.bundle
-    - id: "open-panel"                       # plugin-local: ^[a-z0-9][a-z0-9-]*$
-      default: "mod+shift+j"                 # combo grammar, see field reference
+ui: # optional native frontend plugin
+  bundle: "/ui/bundle.js" # root-relative
+  styles: ["/ui/plugin.css"] # optional, root-relative
+  keybindings: # optional, requires ui.bundle
+    - id: "open-panel" # plugin-local: ^[a-z0-9][a-z0-9-]*$
+      default: "mod+shift+j" # combo grammar, see field reference
       description: "Open the Acme panel"
 ```
 
@@ -113,6 +129,8 @@ ui:                                           # optional native frontend plugin
 | `webhooks[].key` | yes | string | Must be unique within the manifest. Used in the relay path `POST /api/plugins/{id}/webhooks/{key}`. |
 | `webhooks[].description` | no | string | Free-form. |
 | `webhooks[].method` | no | string | **Informational only**: kandev does not validate or enforce the inbound HTTP method against this value. |
+| `webhooks[].access` | no | string | `public` (default) allows anonymous callers; `authenticated` requires a Kandev identity. Cookie-authenticated browser calls remain subject to Kandev's same-origin policy. |
+| `webhooks[].max_body_bytes` | no | int | Request-body limit for this key. Defaults to 4 MiB. Public webhooks cannot exceed 4 MiB; authenticated webhooks can request up to 16 MiB. Plugins using this field should declare the first supporting `min_kandev_version`. |
 | `auth_providers[]` | no | object[] | Login buttons this plugin contributes to the pre-auth login screen (needs `capabilities.auth`). Each is `{ id, display_name, initiate }`, where `initiate` names one of the plugin's `webhooks[].key` values: the button navigates to that webhook, which 302-redirects to the IdP. Surfaced anonymously in the boot payload as `auth.ssoProviders`. |
 | `config_schema` | no | object | JSON-Schema-like object driving the settings form at **Settings > Plugins > `<plugin>`** (`GET /api/plugins/{id}/config` and `PATCH /api/plugins/{id}`). See "Config schema validation and secret fields" below. |
 | `ui.bundle` | no | string | Root-relative path (must start with `/`, e.g. `/ui/bundle.js`) to the plugin's native UI ES module, served at `GET /api/plugins/{id}/bundle`. |
@@ -142,7 +160,7 @@ must **not** set `base_url` or an `endpoints` block (`health`/`events`/
 remote/operator-hosted tier, and validation rejects a managed manifest that
 sets them.
 
-A manifest with an empty `runtime.type` still *parses* as a legacy remote
+A manifest with an empty `runtime.type` still _parses_ as a legacy remote
 manifest (with `base_url`/`endpoints` instead) and passes
 `manifest.Validate()` on its own, but the **installer** rejects it: `pkgtar
 .Install` requires `manifest.IsManaged()` to be true (`runtime.type:
@@ -228,37 +246,37 @@ matched, so a plugin subscribed to `shell.output.*` reads the session id off
 `event_type` as its last segment. For an unsuffixed subject that string is
 just the subject itself (`task.created`).
 
-| Domain | Events |
-|---|---|
-| Tasks | `task.created`, `task.updated`, `task.state_changed`, `task.deleted`, `task.moved`, `task.tree_hold_created`, `task.tree_hold_released` |
-| Workspaces | `workspace.created`, `workspace.updated`, `workspace.deleted` |
-| Workflows | `workflow.created`, `workflow.updated`, `workflow.deleted` |
-| Workflow steps | `workflow_step.created`, `workflow_step.updated`, `workflow_step.deleted`, `workflow.step_completion_signaled` |
-| Comments / messages | `message.added`, `message.updated`, `message.deleted`, `message.queue.status_changed` |
-| Task sessions | `task_session.state_changed` |
-| Task plans | `task_plan.created`, `task_plan.updated`, `task_plan.deleted`, `task_plan.revision.created`, `task_plan.reverted` |
-| Task walkthroughs | `task_walkthrough.created`, `task_walkthrough.updated`, `task_walkthrough.deleted` |
-| Session turns | `turn.started`, `turn.completed` |
-| Repositories | `repository.created`, `repository.updated`, `repository.deleted`, `repository.script.created`, `repository.script.updated`, `repository.script.deleted` |
-| Executors | `executor.created`, `executor.updated`, `executor.deleted`, `executor.profile.created`, `executor.profile.updated`, `executor.profile.deleted`, `executor.prepare.progress`, `executor.prepare.completed` |
-| Users | `user.settings.updated` |
-| System | `system.job.update` |
-| Environments | `environment.created`, `environment.updated`, `environment.deleted` |
-| Agent profiles | `agent_profile.created`, `agent_profile.updated`, `agent_profile.deleted` |
-| Agents | `agent.started`, `agent.running`, `agent.boot_ready`, `agent.ready`, `agent.completed`, `agent.failed`, `agent.stopped`, `agent.context_reset`, `agent.acp_session_created`, `agentctl.starting`, `agentctl.ready`, `agentctl.error` |
-| Agent stream | `agent.stream` (per-session: `agent.stream.<sessionId>`), `agent.turn.message_saved` |
-| Agent prompts | `permission_request.received` (per-session: `permission_request.received.<sessionId>`) |
-| Clarification | `clarification.answered`, `clarification.primary_answered`, `clarification.cancelled`, `clarification.stale_dismissed` |
-| Git / workspace status | `git.event` (per-session), `git.ws` (per-session), `file.change.notified` (per-session) |
-| Shell I/O | `shell.output` (per-session), `shell.exit` (per-session) |
-| Dev server I/O | `process.output` (per-session), `process.status` (per-session) |
-| Session context | `context_window.updated` (per-session), `available_commands.updated` (per-session), `session_mode.changed` (per-session), `agent_capabilities.updated` (per-session), `session_models.updated` (per-session), `session_info.updated` (per-session), `session_todos.updated` (per-session), `session_prompt_usage.updated` (per-session) |
-| Automations | `automation.triggered`, `automation.run.created` |
-| GitHub | `github.pr_feedback`, `github.pr_state_changed`, `github.new_pr_to_review`, `github.new_issue`, `github.task_pr.updated`, `github.task_ci_options.updated`, `github.watch.event`, `github.rate_limit.updated` |
-| GitLab | `gitlab.mr_feedback`, `gitlab.mr_state_changed`, `gitlab.new_mr_to_review`, `gitlab.new_issue`, `gitlab.task_mr.updated`, `gitlab.watch.event` |
-| Jira | `jira.new_issue` |
-| Linear | `linear.new_issue` |
-| Sentry | `sentry.new_issue` |
+| Domain                     | Events                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tasks                      | `task.created`, `task.updated`, `task.state_changed`, `task.deleted`, `task.moved`, `task.tree_hold_created`, `task.tree_hold_released`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Workspaces                 | `workspace.created`, `workspace.updated`, `workspace.deleted`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Workflows                  | `workflow.created`, `workflow.updated`, `workflow.deleted`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Workflow steps             | `workflow_step.created`, `workflow_step.updated`, `workflow_step.deleted`, `workflow.step_completion_signaled`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Comments / messages        | `message.added`, `message.updated`, `message.deleted`, `message.queue.status_changed`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Task sessions              | `task_session.state_changed`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Task plans                 | `task_plan.created`, `task_plan.updated`, `task_plan.deleted`, `task_plan.revision.created`, `task_plan.reverted`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Task walkthroughs          | `task_walkthrough.created`, `task_walkthrough.updated`, `task_walkthrough.deleted`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Session turns              | `turn.started`, `turn.completed`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Repositories               | `repository.created`, `repository.updated`, `repository.deleted`, `repository.script.created`, `repository.script.updated`, `repository.script.deleted`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Executors                  | `executor.created`, `executor.updated`, `executor.deleted`, `executor.profile.created`, `executor.profile.updated`, `executor.profile.deleted`, `executor.prepare.progress`, `executor.prepare.completed`                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Users                      | `user.settings.updated`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| System                     | `system.job.update`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Environments               | `environment.created`, `environment.updated`, `environment.deleted`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Agent profiles             | `agent_profile.created`, `agent_profile.updated`, `agent_profile.deleted`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Agents                     | `agent.started`, `agent.running`, `agent.boot_ready`, `agent.ready`, `agent.completed`, `agent.failed`, `agent.stopped`, `agent.context_reset`, `agent.acp_session_created`, `agentctl.starting`, `agentctl.ready`, `agentctl.error`                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Agent stream               | `agent.stream` (per-session: `agent.stream.<sessionId>`), `agent.turn.message_saved`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Agent prompts              | `permission_request.received` (per-session: `permission_request.received.<sessionId>`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Clarification              | `clarification.answered`, `clarification.primary_answered`, `clarification.cancelled`, `clarification.stale_dismissed`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Git / workspace status     | `git.event` (per-session), `git.ws` (per-session), `file.change.notified` (per-session)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Shell I/O                  | `shell.output` (per-session), `shell.exit` (per-session)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Dev server I/O             | `process.output` (per-session), `process.status` (per-session)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Session context            | `context_window.updated` (per-session), `available_commands.updated` (per-session), `session_mode.changed` (per-session), `agent_capabilities.updated` (per-session), `session_models.updated` (per-session), `session_info.updated` (per-session), `session_todos.updated` (per-session), `session_prompt_usage.updated` (per-session)                                                                                                                                                                                                                                                                                                                     |
+| Automations                | `automation.triggered`, `automation.run.created`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| GitHub                     | `github.pr_feedback`, `github.pr_state_changed`, `github.new_pr_to_review`, `github.new_issue`, `github.task_pr.updated`, `github.task_ci_options.updated`, `github.watch.event`, `github.rate_limit.updated`                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| GitLab                     | `gitlab.mr_feedback`, `gitlab.mr_state_changed`, `gitlab.new_mr_to_review`, `gitlab.new_issue`, `gitlab.task_mr.updated`, `gitlab.watch.event`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Jira                       | `jira.new_issue`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Linear                     | `linear.new_issue`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Sentry                     | `sentry.new_issue`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | Office (autonomous agents) | `office.agent.created`, `office.agent.updated`, `office.agent.status_changed`, `office.skill.created`, `office.skill.updated`, `office.project.created`, `office.project.updated`, `office.approval.created`, `office.approval.resolved`, `office.comment.created`, `office.cost.recorded`, `office.run.queued`, `office.run.processed`, `office.run.event_appended` (per-run), `office.routine.triggered`, `office.inbox.item`, `office.task.status_changed`, `office.task.updated`, `office.task.decision_recorded`, `office.task.review_requested`, `office.provider.health_changed`, `office.route_attempt.appended`, `office.routing.settings_updated` |
 | Cross-plugin | `plugin.<plugin_id>.<name>`; published by `Host.EmitEvent`; subscribe with `plugin.<other-plugin-id>.*` to react to another plugin's events. |
 
@@ -272,13 +290,13 @@ alongside the parsed manifest. These are **kandev-owned runtime state, not
 author-supplied manifest fields**: do not include them in `manifest.yaml`;
 they have no effect there and are overwritten on install:
 
-| Field | Meaning |
-|---|---|
-| `status` | Current lifecycle state: `registered`, `active`, `error`, `disabled`, or `uninstalled`. |
-| `install_path` | Absolute path the package was extracted to (`~/.kandev/plugins/<id>/<version>/`). |
-| `signed` | Whether the package's `checksums.txt.sig` was cryptographically verified. Signature verification is not currently wired, so this is always false today (every package is reported unsigned). |
-| `installed_at` | Install timestamp. |
-| `restart_count` | Best-effort restart bookkeeping used by the supervision loop. |
+| Field           | Meaning                                                                                                                                                                                      |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `status`        | Current lifecycle state: `registered`, `active`, `error`, `disabled`, or `uninstalled`.                                                                                                      |
+| `install_path`  | Absolute path the package was extracted to (`~/.kandev/plugins/<id>/<version>/`).                                                                                                            |
+| `signed`        | Whether the package's `checksums.txt.sig` was cryptographically verified. Signature verification is not currently wired, so this is always false today (every package is reported unsigned). |
+| `installed_at`  | Install timestamp.                                                                                                                                                                           |
+| `restart_count` | Best-effort restart bookkeeping used by the supervision loop.                                                                                                                                |
 
 Related: [Plugins](plugins.md), [Authoring a plugin](plugins-authoring.md).
 

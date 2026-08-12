@@ -493,6 +493,24 @@ describe("todo list panel setting", () => {
     expect(fallback.showTodoListPanel).toBe(false);
     expect(enabled.showTodoListPanel).toBe(true);
   });
+
+  it("defaults the not-empty sub-option to false and preserves an explicit true", () => {
+    const fallback = mapUserSettingsResponse(null) as {
+      showTodoListPanelOnlyWhenNotEmpty?: boolean;
+    };
+    const enabled = mapUserSettingsResponse({
+      settings: {
+        user_id: DEFAULT_USER_ID,
+        workspace_id: toWorkspaceId(""),
+        repository_ids: [],
+        show_todo_list_panel_only_when_not_empty: true,
+        updated_at: UPDATED_AT,
+      } as unknown as NonNullable<Parameters<typeof mapUserSettingsResponse>[0]>["settings"],
+    }) as { showTodoListPanelOnlyWhenNotEmpty?: boolean };
+
+    expect(fallback.showTodoListPanelOnlyWhenNotEmpty).toBe(false);
+    expect(enabled.showTodoListPanelOnlyWhenNotEmpty).toBe(true);
+  });
 });
 
 describe("parseChangesPanelLayout", () => {
