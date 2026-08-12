@@ -65,4 +65,18 @@ describe("useSettingsData", () => {
     expect(result.current.agentsLoaded).toBe(true);
     expect(result.current.agentProfiles[0]?.id).toBe("profile-1");
   });
+
+  it("uses the final attempt after exhausting every retry delay", async () => {
+    mocks.listAgents.mockResolvedValue({ agents: [], total: 0 });
+
+    const { result } = renderHook(() => useSettingsSnapshot(), { wrapper });
+
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    expect(mocks.listAgents).toHaveBeenCalledTimes(5);
+    expect(result.current.agentsLoaded).toBe(true);
+    expect(result.current.agentProfiles).toEqual([]);
+  });
 });

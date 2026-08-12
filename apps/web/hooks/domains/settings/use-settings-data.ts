@@ -23,26 +23,18 @@ function waitForAgentListRetry(delayMs: number): Promise<void> {
  * "no agents" state.
  */
 export async function listAgentsUntilSettled(): Promise<AgentListResponse> {
-  let lastResponse: AgentListResponse | undefined;
-  let lastError: unknown;
-
-  for (let attempt = 0; attempt <= AGENT_LIST_RETRY_DELAYS_MS.length; attempt++) {
+  for (const retryDelayMs of AGENT_LIST_RETRY_DELAYS_MS) {
     try {
       const response = await listAgents({ cache: "no-store" });
-      lastResponse = response;
-      if (hasAgentProfiles(response) || attempt === AGENT_LIST_RETRY_DELAYS_MS.length) {
+      if (hasAgentProfiles(response)) {
         return response;
       }
-    } catch (error) {
-      lastError = error;
-      if (attempt === AGENT_LIST_RETRY_DELAYS_MS.length) throw error;
-    }
+    } catch {}
 
-    await waitForAgentListRetry(AGENT_LIST_RETRY_DELAYS_MS[attempt]);
+    await waitForAgentListRetry(retryDelayMs);
   }
 
-  if (lastResponse) return lastResponse;
-  throw lastError ?? new Error("Unable to load agent profiles");
+  return listAgents({ cache: "no-store" });
 }
 
 function applyAgentList(
