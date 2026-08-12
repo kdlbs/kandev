@@ -2023,7 +2023,7 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 	// tasks foreign key so nothing cascades, and a left-over edge would keep a
 	// dependent blocked forever on a task that no longer exists. Dependents are
 	// refreshed but deliberately not started: deletion is not success.
-	s.deleteDependencyEdgesForTask(ctx, id)
+	s.deleteDependencyEdgesForTask(context.WithoutCancel(ctx), id)
 
 	// 5. Publish event (sync, fast) - frontend removes task immediately
 	var extra map[string]interface{}

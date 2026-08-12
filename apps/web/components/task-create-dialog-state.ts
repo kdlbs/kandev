@@ -58,6 +58,7 @@ type FormResetters = {
   setGitHubUrlError: (v: string | null) => void;
   setFreshBranchEnabled: (v: boolean) => void;
   setCurrentLocalBranch: (v: string) => void;
+  setBlockedBy: (v: string[]) => void;
 };
 
 type FormResetEffectsArgs = {
@@ -237,6 +238,9 @@ function resetDiscoveryState(resetters: FormResetters, iv?: TaskCreateDialogInit
   // mode and reopening for a different task would land in None mode again.
   resetters.setNoRepository(false);
   resetters.setWorkspacePath("");
+  // The dialog stays mounted between opens, so without this the previous
+  // create's predecessor selection reappears on the next one.
+  resetters.setBlockedBy([]);
 }
 
 /** Hook to manage draft persistence for task creation dialog */
@@ -443,6 +447,7 @@ export function useDialogFormState(
     prevOpenRef: form.prevOpenRef,
     lockedWorkflow,
     resetters: {
+      setBlockedBy: dependencies.setBlockedBy,
       setTaskName: form.setTaskName,
       setHasTitle: form.setHasTitle,
       setHasDescription: form.setHasDescription,

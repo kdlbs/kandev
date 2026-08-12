@@ -3,7 +3,7 @@ id: "08-verify-flows-and-docs"
 title: "Verify browser flows and documentation"
 status: not_started
 wave: 8
-depends_on: ["04-failed-predecessor-halt", "07-dependencies-board-view"]
+depends_on: ["04-failed-predecessor-halt", "06-kanban-dependency-ui"]
 plan: "plan.md"
 spec: "../../specs/task-dependencies/spec.md"
 ---
@@ -62,8 +62,8 @@ Documentation:
 - The spec's `status` moves to `shipped` and its Open questions section is
   empty or deleted.
 - `docs/specs/INDEX.md` and this plan's statuses are accurate.
-- `apps/web/AGENTS.md` notes the new board view if the view registry's
-  conventions changed.
+- `apps/web/AGENTS.md` is untouched: Task 07's board view was dropped, so no
+  view-registry convention changed.
 
 ## TDD sequence
 

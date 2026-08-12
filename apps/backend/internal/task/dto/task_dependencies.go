@@ -46,24 +46,8 @@ func EnrichTaskDependencies(dto *TaskDTO, projection TaskDependencyProjection, t
 }
 
 // HasStartWhenUnblockedIntent reports whether the task carries a deferred launch
-// intent that dependency resolution should consume.
-//
-// The intent is the same metadata record WIP overflow persists, reused so the
-// "launch exactly once" and restart-survival properties are inherited rather
-// than re-derived. The dependency flavour is marked so a WIP-only intent is not
-// mistaken for a chain step.
+// intent that dependency resolution should consume. Delegates to the models
+// helper, which owns the metadata key.
 func HasStartWhenUnblockedIntent(task *models.Task) bool {
-	if task == nil || task.Metadata == nil {
-		return false
-	}
-	raw, ok := task.Metadata[models.MetaKeyDeferredLaunch]
-	if !ok {
-		return false
-	}
-	launch, ok := raw.(map[string]interface{})
-	if !ok {
-		return false
-	}
-	flag, ok := launch[models.DeferredLaunchStartWhenUnblockedKey].(bool)
-	return ok && flag
+	return models.HasStartWhenUnblockedIntent(task)
 }

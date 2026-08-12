@@ -99,12 +99,14 @@ func (h *TaskHandlers) respondWithDependencies(c *gin.Context, taskID string) {
 		return
 	}
 	views := h.service.BuildDependencyViews(c.Request.Context(), []*models.Task{task})
-	v := views[taskID]
+	// Serialize through the same DTO adapter the task-list path uses, so a
+	// mutation response and a list response are one JSON contract.
+	projection := dependencyProjection(views[taskID])
 	c.JSON(http.StatusOK, gin.H{
 		dependencyKeyTaskID: taskID,
-		"blocked":           v.Blocked,
-		"blocked_reason":    v.BlockedReason,
-		"depends_on":        v.DependsOn,
-		"blocks":            v.Blocks,
+		"blocked":           projection.Blocked,
+		"blocked_reason":    projection.BlockedReason,
+		"depends_on":        projection.DependsOn,
+		"blocks":            projection.Blocks,
 	})
 }

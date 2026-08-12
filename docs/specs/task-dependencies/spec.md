@@ -175,15 +175,20 @@ Task DTOs returned over HTTP, WebSocket boot, WebSocket events, and MCP gain:
 {
   "blocked": true,
   "blocked_reason": "pending",
-  "depends_on": ["task-a", "task-b"],
-  "blocks": ["task-d"],
+  "depends_on": [
+    { "id": "task-a", "title": "Add the schema migration", "state": "COMPLETED", "status": "resolved" },
+    { "id": "task-b", "title": "Expose the edges on the API", "state": "TODO", "status": "pending" }
+  ],
+  "blocks": [{ "id": "task-d", "title": "Render the chip", "state": "TODO" }],
   "start_when_unblocked": true
 }
 ```
 
 - `blocked_reason` is one of `"pending"` (at least one predecessor unfinished),
-  `"failed"` (no predecessor unfinished, at least one failed), or omitted when
-  `blocked` is false.
+  `"failed"` (no predecessor unfinished, at least one failed), `"unknown"` (the
+  dependency store could not be read, so the gate failed closed), or omitted
+  when `blocked` is false. A client renders `"unknown"` as blocked without a
+  named cause; it must not present it as resolved.
 - `depends_on` lists direct predecessors only, in `created_at` order.
 - `blocks` lists direct dependents only, in `created_at` order. It exists so the
   dependency chip can show both directions without a second round trip, and so
@@ -207,8 +212,16 @@ Task DTOs returned over HTTP, WebSocket boot, WebSocket events, and MCP gain:
 { "blocked_by": ["task-a"], "start_when_unblocked": true }
 ```
 
-When `start_when_unblocked` is true, the create request's agent/executor/prompt
-resolution is recorded as the deferred launch intent instead of launching now.
+When `start_when_unblocked` is true **and `blocked_by` is non-empty**, the
+create request's agent/executor/prompt resolution is recorded as the deferred
+launch intent instead of launching now.
+
+`start_when_unblocked: true` with an empty `blocked_by` records no intent. The
+task is born unblocked, so there is no later moment at which it would fire; a
+create that also asked to start an agent launches immediately, exactly as it
+would without the flag, and one that did not launches nothing. The flag defers
+a start, it never invents one. Adding a dependency to that task afterwards
+gates its *automated* starts but does not retroactively create an intent.
 
 When `blocked_by` is non-empty and `start_when_unblocked` is omitted, it defaults
 to the request's agent-start intent: a create that asked to start an agent
@@ -321,9 +334,16 @@ dependencies. A user who removes the edge is taking manual control.
 - Creating or removing an edge requires the same authorization as updating both
   tasks; both must be in a workspace the caller can access. Cross-workspace
   edges are rejected, so no new cross-tenant surface exists.
-- Agents can create edges only through task creation (`blocked_by`) and the
+- Agents create edges through task creation (`blocked_by`), the two MCP tools
+  (`add_task_dependency_kandev`, `remove_task_dependency_kandev`), and the
   existing Office blocker endpoints. They cannot set `start_when_unblocked` on
   a task they did not create.
+- Every one of those paths authorizes BOTH task IDs against the caller's
+  identity before any read or write, and denials surface as not-found so an
+  edge attempt cannot be used to probe for another user's tasks. In a
+  task-bound MCP session the dependent end is the session's own task, taken
+  from the `AgentExecution` rather than from an agent-supplied identifier; the
+  predecessor is necessarily another task and is authorized on its own.
 - The dependency gate is not a permission: a user with start rights can start a
   blocked task manually.
 
@@ -478,6 +498,10 @@ MCP:
 - **GIVEN** an agent calls `create_task_kandev` with `blocked_by: ["A"]` and
   `start_when_unblocked: false`, **THEN** the edge is created, no launch intent
   is recorded, and completing A starts nothing.
+- **GIVEN** an agent calls `create_task_kandev` with `start_when_unblocked: true`
+  and no `blocked_by`, **THEN** no launch intent is recorded and the task starts
+  or does not start purely per `start_agent`; the response reports
+  `start_when_unblocked: false`.
 - **GIVEN** an agent decomposes a plan into three chained sibling tasks over
   three `create_task_kandev` calls, **WHEN** the first task completes
   successfully, **THEN** the second starts and the third does not.

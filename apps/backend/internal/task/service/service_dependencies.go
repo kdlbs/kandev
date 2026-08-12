@@ -173,6 +173,20 @@ func (s *Service) AddDependency(ctx context.Context, taskID, dependsOnTaskID str
 	// spec, which rules out multiple active processes), so a process-wide lock
 	// is sufficient and keeps the check and the write atomic with respect to
 	// each other.
+	if err := s.insertDependencyEdge(ctx, taskID, dependsOnTaskID); err != nil {
+		return err
+	}
+	// Publish OUTSIDE the lock: event delivery is synchronous, so holding the
+	// lock across it would serialize every dependency mutation behind fan-out,
+	// and a subscriber that called back into this method would deadlock on a
+	// non-reentrant mutex.
+	s.publishDependencyChange(ctx, taskID, dependsOnTaskID)
+	return nil
+}
+
+// insertDependencyEdge holds dependencyEdgeMu across exactly the validate,
+// cycle-walk and insert, and nothing else.
+func (s *Service) insertDependencyEdge(ctx context.Context, taskID, dependsOnTaskID string) error {
 	s.dependencyEdgeMu.Lock()
 	defer s.dependencyEdgeMu.Unlock()
 	if err := s.validateDependencyPair(ctx, taskID, dependsOnTaskID); err != nil {
@@ -183,11 +197,7 @@ func (s *Service) AddDependency(ctx context.Context, taskID, dependsOnTaskID str
 	} else if cycle != nil {
 		return cycle
 	}
-	if err := s.createBlockerEdge(ctx, taskID, dependsOnTaskID); err != nil {
-		return err
-	}
-	s.publishDependencyChange(ctx, taskID, dependsOnTaskID)
-	return nil
+	return s.createBlockerEdge(ctx, taskID, dependsOnTaskID)
 }
 
 // RemoveDependency deletes a dependency edge. Removing an absent edge is a
@@ -204,13 +214,19 @@ func (s *Service) RemoveDependency(ctx context.Context, taskID, dependsOnTaskID 
 	if err := s.authorizeDependencyPair(ctx, taskID, dependsOnTaskID); err != nil {
 		return err
 	}
-	s.dependencyEdgeMu.Lock()
-	defer s.dependencyEdgeMu.Unlock()
-	if err := s.blockers.DeleteTaskBlocker(ctx, taskID, dependsOnTaskID); err != nil {
+	if err := s.deleteDependencyEdge(ctx, taskID, dependsOnTaskID); err != nil {
 		return err
 	}
+	// Published outside the lock, for the same reason as AddDependency.
 	s.publishDependencyChange(ctx, taskID, dependsOnTaskID)
 	return nil
+}
+
+// deleteDependencyEdge holds the edge lock across the delete only.
+func (s *Service) deleteDependencyEdge(ctx context.Context, taskID, dependsOnTaskID string) error {
+	s.dependencyEdgeMu.Lock()
+	defer s.dependencyEdgeMu.Unlock()
+	return s.blockers.DeleteTaskBlocker(ctx, taskID, dependsOnTaskID)
 }
 
 // publishDependencyChange emits task.updated for both ends of a mutated edge so
@@ -356,15 +372,28 @@ func (s *Service) resolveDependencyRefs(
 		}
 	}
 	refs := make(map[string]DependencyRef, len(seen))
+	ids := make([]string, 0, len(seen))
 	for id := range seen {
-		task, err := s.tasks.GetTask(ctx, id)
+		ids = append(ids, id)
+	}
+	// One batched read: a board payload references every edge on every card, so
+	// a per-edge query turned one board load into N round trips.
+	found, batchErr := s.tasks.GetTasksByIDs(ctx, ids)
+	byID := make(map[string]*models.Task, len(found))
+	for _, task := range found {
+		if task != nil {
+			byID[task.ID] = task
+		}
+	}
+	for _, id := range ids {
+		task := byID[id]
 		if task == nil {
 			// Absent row (deleted predecessor, dangling edge) versus a failed
 			// read: the former must not block forever, the latter must not open
 			// the gate. Mark them differently so buildDependencyView can tell.
-			status := DependencyPending
-			if err == nil || errors.Is(err, taskrepo.ErrTaskNotFound) {
-				status = dependencyMissing
+			status := dependencyMissing
+			if batchErr != nil {
+				status = DependencyPending
 			}
 			refs[id] = DependencyRef{ID: id, Status: status}
 			continue
@@ -387,7 +416,7 @@ func buildDependencyView(
 		DependsOn: make([]DependencyRef, 0, len(predecessorIDs)),
 		Blocks:    make([]DependencyRef, 0, len(dependentIDs)),
 	}
-	anyPending, anyFailed := false, false
+	tally := dependencyTally{}
 	for _, id := range predecessorIDs {
 		ref := refs[id]
 		if ref.ID == "" {
@@ -399,13 +428,7 @@ func buildDependencyView(
 			continue
 		}
 		view.DependsOn = append(view.DependsOn, ref)
-		switch ref.Status {
-		case DependencyFailed:
-			anyFailed = true
-		case DependencyResolved:
-		default:
-			anyPending = true
-		}
+		tally.add(ref.Status)
 	}
 	for _, id := range dependentIDs {
 		ref := refs[id]
@@ -414,14 +437,7 @@ func buildDependencyView(
 		}
 		view.Blocks = append(view.Blocks, ref)
 	}
-	switch {
-	case anyPending:
-		view.Blocked = true
-		view.BlockedReason = BlockedReasonPending
-	case anyFailed:
-		view.Blocked = true
-		view.BlockedReason = BlockedReasonFailed
-	}
+	view.Blocked, view.BlockedReason = tally.verdict()
 	return view
 }
 
@@ -465,7 +481,7 @@ func (s *Service) DependencyGate(ctx context.Context, taskID string) (blocked bo
 	if len(blockers) == 0 {
 		return false, "", nil
 	}
-	anyPending, anyFailed := false, false
+	tally := dependencyTally{}
 	for _, b := range blockers {
 		predecessor, getErr := s.tasks.GetTask(ctx, b.BlockerTaskID)
 		if getErr != nil && !errors.Is(getErr, taskrepo.ErrTaskNotFound) {
@@ -484,21 +500,41 @@ func (s *Service) DependencyGate(ctx context.Context, taskID string) (blocked bo
 			s.pruneDanglingEdge(ctx, taskID, b.BlockerTaskID)
 			continue
 		}
-		switch DependencyStatusForTask(predecessor) {
-		case DependencyFailed:
-			anyFailed = true
-		case DependencyResolved:
-		default:
-			anyPending = true
-		}
+		tally.add(DependencyStatusForTask(predecessor))
 	}
+	blocked, reason = tally.verdict()
+	return blocked, reason, nil
+}
+
+// dependencyTally accumulates predecessor verdicts and applies the single
+// precedence rule. The gate and the derived projection both use it: two copies
+// of "pending wins over failed" could drift, and the fail-closed behaviour is
+// exactly the thing that must not.
+type dependencyTally struct {
+	anyPending bool
+	anyFailed  bool
+}
+
+func (d *dependencyTally) add(status string) {
+	switch status {
+	case DependencyFailed:
+		d.anyFailed = true
+	case DependencyResolved, dependencyMissing:
+		// Resolved satisfies the edge; missing is a dangling edge that is
+		// dropped entirely, so neither blocks.
+	default:
+		d.anyPending = true
+	}
+}
+
+func (d *dependencyTally) verdict() (bool, string) {
 	switch {
-	case anyPending:
-		return true, BlockedReasonPending, nil
-	case anyFailed:
-		return true, BlockedReasonFailed, nil
+	case d.anyPending:
+		return true, BlockedReasonPending
+	case d.anyFailed:
+		return true, BlockedReasonFailed
 	}
-	return false, "", nil
+	return false, ""
 }
 
 // PendingDependencyLaunch is a task that will start on its own once its
@@ -548,22 +584,12 @@ type dependentTaskLister interface {
 }
 
 // HasStartWhenUnblockedIntent reports whether the task's deferred launch intent
-// belongs to a dependency chain rather than to WIP overflow. The two share one
-// record; the flag is what tells them apart.
+// belongs to a dependency chain rather than to WIP overflow.
+//
+// Thin re-export of the models helper so the orchestrator, the DTO layer and
+// this service cannot drift on what counts as a chain intent.
 func HasStartWhenUnblockedIntent(task *models.Task) bool {
-	if task == nil || task.Metadata == nil {
-		return false
-	}
-	raw, ok := task.Metadata[models.MetaKeyDeferredLaunch]
-	if !ok {
-		return false
-	}
-	launch, ok := raw.(map[string]interface{})
-	if !ok {
-		return false
-	}
-	flag, ok := launch[models.DeferredLaunchStartWhenUnblockedKey].(bool)
-	return ok && flag
+	return models.HasStartWhenUnblockedIntent(task)
 }
 
 // pruneDanglingEdge removes an edge whose predecessor row no longer exists.

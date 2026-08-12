@@ -46,10 +46,10 @@ spec: "../../specs/task-dependencies/spec.md"
 - Both badges can appear on one card without truncating either, on desktop and
   on a narrow mobile viewport, with no horizontal page overflow and no
   hover-only disclosure of the blocked state itself.
-- The Kanban task detail view mounts a "Depends on" picker. `BlockersPicker` is
-  reused — including its optimistic mutation and its `cycle` error-body parsing
-  — repointed at the task-scoped endpoints from Task 01. It replaces the
-  optimistic state with the formatted cycle path on a `409`.
+- The Kanban task detail view mounts **no** edge editor. Dependencies are
+  declared in the create dialog or over MCP, so every detail-view surface that
+  reads them (card badge, chip, chip list) is read-only and no `BlockersPicker`
+  is repointed at the task-scoped routes.
 - The task-create dialog gains a "Depends on" field and a "Start automatically
   when unblocked" checkbox, submitting `blocked_by` and `start_when_unblocked`.
   The checkbox is disabled when no dependency is selected.

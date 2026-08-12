@@ -69,6 +69,17 @@ func (s *Server) dispatchDependencyMutation(
 		}
 		taskID = s.taskID
 	}
+	// In a task-bound session the dependent end is the server's own task.
+	// Ownership comes from the AgentExecution the session was bound to, never
+	// from an agent-supplied id, so an explicit task_id may only confirm it —
+	// the same rule add_branch_to_task_kandev applies. The predecessor
+	// (depends_on_task_id) is necessarily another task and stays free; the
+	// backend authorizes both ends against the session's identity.
+	if s.taskID != "" && taskID != s.taskID {
+		return mcp.NewToolResultError(
+			"task_id must be your current task; use depends_on_task_id to name the other task",
+		), nil
+	}
 	payload := map[string]interface{}{
 		mcpKeyTaskID:         taskID,
 		"depends_on_task_id": dependsOn,

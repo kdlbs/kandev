@@ -808,7 +808,10 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		BlockedBy:          req.BlockedBy,
 		StartWhenUnblocked: req.StartWhenUnblocked,
 	})
-	if startAgent && !startWhenUnblocked && task.QueuedForStepID == "" && h.sessionLauncher != nil {
+	// Blockers suppress the immediate launch on their own. start_when_unblocked
+	// only decides whether a DEFERRED launch is recorded, so `false` means "no
+	// automatic start at all" — launching now would start a task that is blocked.
+	if startAgent && len(req.BlockedBy) == 0 && task.QueuedForStepID == "" && h.sessionLauncher != nil {
 		h.launchAutoStartTask(ctx, task, launchConfig)
 	}
 

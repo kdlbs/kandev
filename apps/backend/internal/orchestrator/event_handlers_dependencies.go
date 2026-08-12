@@ -90,7 +90,7 @@ func (s *Service) evaluateDependentAfterPredecessorChange(
 		// Still waiting on something. When nothing is pending and the only
 		// obstacle is a failed predecessor, the chain has halted and needs a
 		// human: surface it rather than retrying or dropping the edge.
-		if reason == blockedReasonFailed {
+		if reason == taskservice.BlockedReasonFailed {
 			s.publishDependencyFailed(ctx, dependentID, predecessorID, predecessorState)
 		}
 		return
@@ -106,13 +106,18 @@ func (s *Service) evaluateDependentAfterPredecessorChange(
 			zap.String("task_id", dependentID), zap.Error(err))
 		return
 	}
+	// Resolution starts a task only when it recorded a start-when-unblocked
+	// intent. Without this, a blocked task parked in a step that has
+	// on_enter:auto_start_agent would launch the moment its gate opened, even
+	// though nobody asked for a start — the chokepoint's step-based auto-start
+	// is meant for a task ENTERING that step, not for one already sitting in it.
+	if !taskservice.HasStartWhenUnblockedIntent(task) {
+		s.logger.Debug("dependency resolution: no start-when-unblocked intent; leaving task unstarted",
+			zap.String("task_id", task.ID))
+		return
+	}
 	s.autoStartTaskForStep(ctx, task.ID, task.WorkflowStepID, events.TaskDependenciesResolved)
 }
-
-// blockedReasonFailed mirrors service.BlockedReasonFailed. Duplicated as a
-// constant rather than imported to keep the orchestrator's dependency coupling
-// to the narrow TaskDependencyReader seam.
-const blockedReasonFailed = "failed"
 
 // publishDependenciesResolved announces that a task's last unresolved
 // dependency resolved successfully.

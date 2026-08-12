@@ -173,7 +173,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
         onVoiceAutoSend={props.onVoiceAutoSend}
       />
       <CreateModeAgentSelectors {...props} />
-      {!isTaskStarted && (
+      {isCreateMode && !isTaskStarted && (
         <TaskCreateDependencies
           value={fs.blockedBy}
           onChange={fs.setBlockedBy}

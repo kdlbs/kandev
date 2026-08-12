@@ -660,6 +660,28 @@ type ChildCompletionRow struct {
 	UpdatedAt            time.Time    `json:"updated_at" db:"updated_at"`
 }
 
+// HasStartWhenUnblockedIntent reports whether a task's deferred launch intent
+// belongs to a dependency chain rather than to WIP overflow.
+//
+// The two share one record; DeferredLaunchStartWhenUnblockedKey is what tells
+// them apart. Defined here, next to the key, so the DTO layer, the task service
+// and the orchestrator cannot drift on what counts as a chain intent.
+func HasStartWhenUnblockedIntent(task *Task) bool {
+	if task == nil || task.Metadata == nil {
+		return false
+	}
+	raw, ok := task.Metadata[MetaKeyDeferredLaunch]
+	if !ok {
+		return false
+	}
+	launch, ok := raw.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	flag, ok := launch[DeferredLaunchStartWhenUnblockedKey].(bool)
+	return ok && flag
+}
+
 // IsTerminalTaskState reports whether a task state means no further child work
 // is expected from that task.
 func IsTerminalTaskState(state v1.TaskState) bool {

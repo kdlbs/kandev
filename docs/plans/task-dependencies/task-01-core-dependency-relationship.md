@@ -24,9 +24,11 @@ spec: "../../specs/task-dependencies/spec.md"
   left as a second path.
 - A `(blocker_task_id)` index on `task_blockers` is added through an idempotent
   migration in `internal/task/repository/sqlite/base_migrations.go`.
-- Deleting or archiving a task removes its edges in both directions, on SQLite
-  and on PostgreSQL, via explicit repository work rather than a
-  `ON DELETE CASCADE` the table does not have.
+- **Deleting** a task removes its edges in both directions, on SQLite and on
+  PostgreSQL, via explicit repository work rather than an `ON DELETE CASCADE`
+  the table does not have. **Archiving** does not: an archived predecessor still
+  blocks its dependents and reads as `pending` (Task 04), so its edges survive
+  and reappear if the task is unarchived.
 - One batch service helper resolves, for a list of task IDs, each task's direct
   predecessors **and direct dependents**, and a per-predecessor verdict of
   `resolved` / `failed` / `pending`, using `state = COMPLETED` or
@@ -41,16 +43,22 @@ spec: "../../specs/task-dependencies/spec.md"
   chip renders without a per-entry fetch. Neither list is transitive.
 - New task-scoped routes exist and behave as specified:
   `POST /api/v1/tasks/:id/dependencies`,
-  `DELETE /api/v1/tasks/:id/dependencies/:depId`,
-  `GET /api/v1/workflows/:id/dependencies`. `POST` returns `409` with a `cycle`
-  array on a cycle and `400` on a self-edge or cross-workspace edge; `DELETE` of
-  an absent edge succeeds.
+  `DELETE /api/v1/tasks/:id/dependencies/:depId`. `POST` returns `409` with a
+  `cycle` array on a cycle and `400` on a self-edge or cross-workspace edge;
+  `DELETE` of an absent edge succeeds. Both return the mutated task's dependency
+  projection so a caller does not re-fetch. There is no graph-wide listing
+  route: every reader gets its edges from the dependency fields already on the
+  task payload.
 - `task.updated` with `fields: ["dependencies"]` is published on edge add and
   remove, through the task event publisher (not a bare repository write).
 - `POST /api/v1/tasks` and `create_task_kandev` accept `start_when_unblocked`;
-  when true, the resolved launch inputs are persisted as
-  `metadata.deferred_launch` in the same atomic boundary as the task row and no
-  session, workspace, or executor is prepared.
+  when true **and the request declares at least one dependency**, the resolved
+  launch inputs are persisted as `metadata.deferred_launch` in the same atomic
+  boundary as the task row and no session, workspace, or executor is prepared.
+  `start_when_unblocked: true` with no dependencies records no intent: the task
+  is already unblocked, so an agent-start request on it launches immediately
+  exactly as it would without the flag, and a create with neither launches
+  nothing. The flag defers a start; it never invents one.
 - Edge routes authorize both tasks with the existing `authorize*` helpers, and
   the payload field names stay `task_id` / `session_id` compatible with the
   gateway dispatch backstop.
@@ -71,7 +79,8 @@ spec: "../../specs/task-dependencies/spec.md"
    including the id/title/state shape of `depends_on` and `blocks` entries.
 5. Failing handler tests for the three routes including the `409` `cycle` body
    shape and the authorization denials.
-6. Failing tests for edge cleanup on task delete and archive, and the
+6. Failing tests for edge cleanup on task delete, for edge *survival* across
+   archive, and for zero-dependency `start_when_unblocked`, plus the
    environment-gated PostgreSQL equivalents.
 7. Implement: wiring move, migration/index, validator consolidation, batch
    helper, DTO fields, routes, event publication, `start_when_unblocked`

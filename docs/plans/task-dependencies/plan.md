@@ -117,9 +117,11 @@ install has them:
 - Wire `SetBlockerRepository` **before** the `Features.Office` early return in
   `internal/backendapp/main.go`. This is the smallest change that makes
   `blocked_by` and `list_related_tasks_kandev` work in Kanban mode.
-- Edge cleanup on task delete/archive is explicit repository work, not a
-  SQLite `ON DELETE CASCADE`, because the table predates the foreign key and
-  must behave identically on PostgreSQL.
+- Edge cleanup on task **delete** is explicit repository work, not a SQLite
+  `ON DELETE CASCADE`, because the table predates the foreign key and must
+  behave identically on PostgreSQL. **Archive** deliberately keeps the edges:
+  an archived predecessor reads as `pending`, so dropping them would silently
+  unblock the chain.
 
 ### Derived blocked state
 
@@ -220,9 +222,9 @@ launcher.
   the drawer-on-mobile pattern `PRStatusChip` already establishes.
   `shouldRenderChatStatusBar` must learn about the chip, or a task whose only
   status content is the chip renders no row.
-- Mount a "Depends on" picker in the Kanban task detail view. Reuse
-  `BlockersPicker` — it already handles optimistic mutation and the `cycle`
-  error body — repointed at the task-scoped endpoints.
+- No "Depends on" picker in the Kanban task detail view. Dependencies are
+  declared in the create dialog or over MCP (see the spec's What); the detail
+  view's dependency surfaces — card badge, chip, list — stay read-only.
 - "Depends on" field plus a "Start automatically when unblocked" checkbox in the
   task-create dialog, and an "Add dependency" entry in the Kanban card context
   menu (`kanban-card-link-submenu.tsx` is the precedent).
@@ -314,7 +316,9 @@ that dependency resolution does not bypass WIP limits.
 
 Tasks 01–04 are strictly sequential: each consumes a contract the previous one
 introduces. Tasks 05 and 06 need only Task 01's API surface, so either may start
-once 01 lands. Task 07 builds on 06. Task 08 closes out.
+once 01 lands. Task 08 closes out. Task 07 was built on 06 and then dropped
+before shipping, so it is not part of the executable set and Task 08 does not
+wait on it.
 
 - [ ] [Task 01: Promote dependency edges to a core relationship](task-01-core-dependency-relationship.md)
 - [ ] [Task 02: Gate automated launches on unresolved dependencies](task-02-gate-automated-launch.md)
@@ -322,7 +326,6 @@ once 01 lands. Task 07 builds on 06. Task 08 closes out.
 - [ ] [Task 04: Halt chains on a failed predecessor](task-04-failed-predecessor-halt.md)
 - [ ] [Task 05: MCP dependency tools](task-05-mcp-dependency-tools.md)
 - [ ] [Task 06: Kanban dependency UI](task-06-kanban-dependency-ui.md)
-- [~] [Task 07: Dependencies board view](task-07-dependencies-board-view.md) — built, then removed before shipping; see the spec's Out of scope.
 - [ ] [Task 08: Verify browser flows and documentation](task-08-verify-flows-and-docs.md)
 
 No task is marked `parallel-safe`; waves do not authorize subagent execution.

@@ -1004,8 +1004,11 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	})
 	response.StartWhenUnblocked = startWhenUnblocked
 
+	// Blockers suppress the immediate launch regardless of start_when_unblocked:
+	// that flag governs the deferred launch only, so `false` must not mean
+	// "start the blocked task now".
 	dispatch := h.prepareTaskSession(c, &response, taskDTO.ID, body, resolvedStepID,
-		task.QueuedForStepID == "" && !startWhenUnblocked)
+		task.QueuedForStepID == "" && len(body.BlockedBy) == 0)
 
 	// Settlement (create-sequence step 7): after all required synchronous
 	// work above — including session prepare — and before any asynchronous
