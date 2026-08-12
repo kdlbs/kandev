@@ -83,6 +83,16 @@ func newTestService(t *testing.T, factory ClientFactory) (*Service, *Store, *fak
 		t.Fatalf("new store: %v", err)
 	}
 	secrets := newFakeSecretStore()
+	if factory == nil {
+		// Tests that do not care about the Azure client still reach an auth
+		// probe through SetConfigForWorkspace. Without a stub the service would
+		// fall back to DefaultClientFactory and issue a real HTTPS request to
+		// dev.azure.com, which makes the suite depend on the network and leaves
+		// a transport goroutine behind (see goleak_test.go).
+		factory = func(*Config, string) Client {
+			return &fakeClient{result: &TestConnectionResult{OK: true}}
+		}
+	}
 	return NewService(store, secrets, factory, logger.Default()), store, secrets
 }
 
