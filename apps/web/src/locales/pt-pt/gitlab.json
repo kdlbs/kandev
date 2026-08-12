@@ -327,9 +327,5 @@
   "mrPopoverUnresolvedComments_one": "{{count}} comentário por resolver",
   "mrPopoverUnresolvedComments_other": "{{count}} comentários por resolver",
   "mrPopoverUpdatedJustNow": "atualizado agora mesmo",
-  "mrPopoverUpdatedAgo": "atualizado há {{elapsed}}",
-  "mrTooltipState": "Estado: {{state}}",
-  "mrTooltipReview": "Revisão: {{state}}",
-  "mrTooltipPipeline": "Pipeline: {{state}}",
-  "mrTooltipReadyToMerge": "Pronto para merge"
+  "mrPopoverUpdatedAgo": "atualizado há {{elapsed}}"
 }

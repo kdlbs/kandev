@@ -45,12 +45,16 @@ export function TaskSubtaskRow({ subtask }: { subtask: TaskSubtask }) {
     <Link
       href={linkToTask(subtask.id)}
       data-testid={`task-subtask-row-${subtask.id}`}
-      aria-label={formatTaskStateLabel(subtask.state)}
-      className="flex items-center gap-1.5 rounded-sm px-1 py-1 hover:bg-accent"
+      className="flex cursor-pointer items-center gap-1.5 rounded-sm px-1 py-1 hover:bg-accent"
       onClick={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      {getTaskStateIcon(subtask.state, "h-3.5 w-3.5 shrink-0")}
+      {/* The state label names the icon, not the link: an aria-label on the
+          anchor would replace its accessible name, so every row would announce
+          as its lifecycle state with the subtask title never read out. */}
+      <span role="img" aria-label={formatTaskStateLabel(subtask.state)} className="inline-flex">
+        {getTaskStateIcon(subtask.state, "h-3.5 w-3.5 shrink-0")}
+      </span>
       <SubtaskCIGlyph taskId={subtask.id} />
       <span className="min-w-0 flex-1 text-pretty break-words text-xs leading-snug [overflow-wrap:anywhere]">
         {subtask.title}

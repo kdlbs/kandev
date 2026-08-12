@@ -8,6 +8,7 @@ import { TaskTitleHoverCard } from "./task-title-hover-card";
 afterEach(() => cleanup());
 
 const LONG_TITLE = "A very long parent task title that should render in full";
+const FIRST_SUBTASK_TITLE = "First subtask";
 
 function makeTask(overrides: Partial<KanbanState["tasks"][number]>): KanbanState["tasks"][number] {
   return {
@@ -84,17 +85,43 @@ describe("TaskTitleHoverCard", () => {
   it("AC13: renders one row per direct subtask with its full title", async () => {
     renderCard([
       makeTask({ id: "parent-1" }),
-      makeTask({ id: "child-1", title: "First subtask", parentTaskId: "parent-1", position: 1 }),
+      makeTask({
+        id: "child-1",
+        title: FIRST_SUBTASK_TITLE,
+        parentTaskId: "parent-1",
+        position: 1,
+      }),
       makeTask({ id: "child-2", title: "Second subtask", parentTaskId: "parent-1", position: 2 }),
     ]);
     await openCard();
 
     expect(screen.getAllByTestId("task-subtask-row-child-1")[0].textContent).toContain(
-      "First subtask",
+      FIRST_SUBTASK_TITLE,
     );
     expect(screen.getAllByTestId("task-subtask-row-child-2")[0].textContent).toContain(
       "Second subtask",
     );
+  });
+
+  it("names the subtask link by its title, with the state label on the icon", async () => {
+    renderCard([
+      makeTask({ id: "parent-1" }),
+      makeTask({
+        id: "child-1",
+        title: FIRST_SUBTASK_TITLE,
+        parentTaskId: "parent-1",
+        position: 1,
+        state: "IN_PROGRESS",
+      }),
+    ]);
+    await openCard();
+
+    const row = screen.getAllByTestId("task-subtask-row-child-1")[0];
+    // An aria-label on the anchor would override its accessible name, so every
+    // row would announce as "In progress" with the title never read out.
+    expect(row.getAttribute("aria-label")).toBeNull();
+    expect(row.textContent).toContain(FIRST_SUBTASK_TITLE);
+    expect(row.querySelector('[role="img"]')?.getAttribute("aria-label")).toBe("In progress");
   });
 
   it("AC13: shows a CI glyph only for a subtask with a linked PR", async () => {
