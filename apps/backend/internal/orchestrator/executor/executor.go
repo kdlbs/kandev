@@ -94,6 +94,13 @@ type officeTaskSessionCreator interface {
 	CreateOfficeTaskSession(context.Context, *models.TaskSession) error
 }
 
+// initialRuntimeSeedTaskSessionCreator lets repositories claim the launch-only
+// runtime seed and create the session in one transaction. Test and legacy
+// stores can omit it; the executor keeps its existing best-effort fallback.
+type initialRuntimeSeedTaskSessionCreator interface {
+	CreateTaskSessionWithInitialRuntimeSeed(context.Context, *models.TaskSession) error
+}
+
 type primarySessionTaskStateStore interface {
 	UpdateTaskStateIfPrimarySessionState(
 		context.Context,

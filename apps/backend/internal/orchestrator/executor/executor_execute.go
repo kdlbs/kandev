@@ -750,6 +750,7 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 	metadata := cloneMetadata(task.Metadata)
 	initialRuntimeConfig, hasInitialRuntimeConfig := models.LoadInitialSessionRuntimeConfig(task.Metadata)
 	delete(metadata, models.MetaKeyInitialSessionRuntimeConfig)
+	_, hasAtomicInitialRuntimeSeed := e.repo.(initialRuntimeSeedTaskSessionCreator)
 	var repositoryID string
 	var baseBranch string
 
@@ -794,7 +795,7 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 			metadata = make(map[string]interface{})
 		}
 		metadata[models.SessionMetaKeyOrigin] = models.SessionOriginTaskInitial
-		if hasInitialRuntimeConfig {
+		if hasInitialRuntimeConfig && !hasAtomicInitialRuntimeSeed {
 			metadata[models.SessionMetaKeyRuntimeConfigOverrides] = initialRuntimeConfig
 		}
 	}
@@ -836,11 +837,17 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 		session.ExecutorID = execConfig.ExecutorID
 	}
 
-	if err := e.repo.CreateTaskSession(ctx, session); err != nil {
+	var createErr error
+	if atomicCreator, ok := e.repo.(initialRuntimeSeedTaskSessionCreator); ok {
+		createErr = atomicCreator.CreateTaskSessionWithInitialRuntimeSeed(ctx, session)
+	} else {
+		createErr = e.repo.CreateTaskSession(ctx, session)
+	}
+	if createErr != nil {
 		e.logger.Error("failed to persist agent session",
 			zap.String("task_id", task.ID),
-			zap.Error(err))
-		return "", err
+			zap.Error(createErr))
+		return "", createErr
 	}
 
 	// Set primary flag only for the first session (no existing primary).

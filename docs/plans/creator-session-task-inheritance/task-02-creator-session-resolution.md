@@ -67,6 +67,9 @@ explicit profiles, and `workspace_default` suppress the copied runtime. The
 existing executor inheritance chain remains unchanged, and invalid creator
 context fails before task persistence.
 
+The server forwards the bound session ID only when the bound task ID is also
+present, so the backend never receives an unpairable creator identity.
+
 Files changed:
 
 - `apps/backend/internal/mcp/server/handlers.go`

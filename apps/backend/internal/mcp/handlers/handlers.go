@@ -1274,6 +1274,8 @@ func (h *Handlers) resolveMCPFinalAgentProfile(
 		return "", false, fmt.Errorf("resolve workflow agent profile: %w", err)
 	}
 	if workflowProfileID != "" && (onStepAtLaunch || agentProfileID == "") {
+		// The workflow-selected profile owns this launch, so creator runtime
+		// values must not be copied into it.
 		return workflowProfileID, false, nil
 	}
 	if agentProfileID != "" || h.taskSvc == nil {

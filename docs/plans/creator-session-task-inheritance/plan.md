@@ -141,6 +141,7 @@ documentation, and managed E2E checks pass:
 
 ```text
 rtk go test ./internal/mcp/server ./internal/mcp/handlers ./internal/task/models ./internal/task/service ./internal/orchestrator/executor -count=1  PASS
+rtk go test ./internal/task/repository/sqlite -run TestCreateTaskSessionWithInitialRuntimeSeedConsumesOnceAcrossConcurrentAndReplacementSessions -count=1  PASS
 GOCACHE=/tmp/kandev-go-build GOLANGCI_LINT_CACHE=/tmp/kandev-golangci-lint make lint  PASS
 pnpm --filter @kandev/web test -- components/settings/mcp-task-agent-profile-default-settings.test.tsx  PASS (4 tests)
 pnpm --filter @kandev/web typecheck  PASS
@@ -154,6 +155,13 @@ pnpm e2e:run --no-build --project mobile-chrome tests/task/mobile-mcp-task-agent
 
 The PR capture run also passed and produced validated, compressed desktop and
 mobile settings screenshots in the ignored `.pr-assets` directory.
+
+Review follow-up added the repository-level persistence guarantee for the
+launch-only seed. Session creation now reads and removes the seed in the same
+transaction as the first-session insert, and the SQLite regression covers
+concurrent launches plus deletion and replacement of the seed-bearing session.
+The MCP server also omits `source_session_id` unless its bound task context is
+present.
 
 ## Implementation Waves And Parallel Candidates
 

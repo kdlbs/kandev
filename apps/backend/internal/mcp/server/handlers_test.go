@@ -408,6 +408,7 @@ func TestCreateTask_SourceTaskID_EmptyWhenNoTaskContext(t *testing.T) {
 	payload, ok := backend.lastPayload.(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "", payload["source_task_id"])
+	assert.NotContains(t, payload, "source_session_id")
 }
 
 func TestCreateTask_StartAgentFalse_DoesNotAutoStart(t *testing.T) {

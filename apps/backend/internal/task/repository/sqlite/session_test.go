@@ -171,6 +171,78 @@ func TestCreateOfficeTaskSessionMarksOnlyTheFirstConcurrentSessionAsOrigin(t *te
 	}
 }
 
+func TestCreateTaskSessionWithInitialRuntimeSeedConsumesOnceAcrossConcurrentAndReplacementSessions(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-initial-runtime-seed-race"
+	seed := models.SessionRuntimeConfig{
+		Model:         "mock-smart",
+		Mode:          "plan-mock",
+		ConfigOptions: map[string]string{"effort": "max"},
+	}
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID:    taskID,
+		Title: "Initial runtime seed race",
+		Metadata: map[string]interface{}{
+			models.MetaKeyInitialSessionRuntimeConfig: seed,
+		},
+	}))
+
+	sessions := []*models.TaskSession{
+		{ID: "initial-runtime-session-1", TaskID: taskID, AgentProfileID: "profile-1", State: models.TaskSessionStateCreated},
+		{ID: "initial-runtime-session-2", TaskID: taskID, AgentProfileID: "profile-2", State: models.TaskSessionStateCreated},
+	}
+	errs := make([]error, len(sessions))
+	var wg sync.WaitGroup
+	for i, session := range sessions {
+		wg.Add(1)
+		go func(i int, session *models.TaskSession) {
+			defer wg.Done()
+			errs[i] = repo.CreateTaskSessionWithInitialRuntimeSeed(ctx, session)
+		}(i, session)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		require.NoError(t, err, "CreateTaskSessionWithInitialRuntimeSeed(%d)", i)
+	}
+
+	created, err := repo.ListTaskSessions(ctx, taskID)
+	require.NoError(t, err)
+	require.Len(t, created, len(sessions))
+	initialCount := 0
+	initialSessionID := ""
+	for _, session := range created {
+		if overrides, ok := models.LoadSessionRuntimeConfigOverrides(session.Metadata); ok {
+			initialCount++
+			initialSessionID = session.ID
+			require.Equal(t, seed.Model, overrides.Model)
+			require.Equal(t, seed.Mode, overrides.Mode)
+			require.Equal(t, "max", overrides.ConfigOptions["effort"])
+		}
+	}
+	require.Equal(t, 1, initialCount)
+
+	task, err := repo.GetTask(ctx, taskID)
+	require.NoError(t, err)
+	if _, ok := task.Metadata[models.MetaKeyInitialSessionRuntimeConfig]; ok {
+		t.Fatalf("initial runtime seed remained in task metadata: %#v", task.Metadata)
+	}
+
+	require.NoError(t, repo.DeleteTaskSession(ctx, initialSessionID))
+	replacement := &models.TaskSession{
+		ID:             "initial-runtime-session-replacement",
+		TaskID:         taskID,
+		AgentProfileID: "profile-replacement",
+		State:          models.TaskSessionStateCreated,
+	}
+	require.NoError(t, repo.CreateTaskSessionWithInitialRuntimeSeed(ctx, replacement))
+	createdReplacement, err := repo.GetTaskSession(ctx, replacement.ID)
+	require.NoError(t, err)
+	if _, ok := models.LoadSessionRuntimeConfigOverrides(createdReplacement.Metadata); ok {
+		t.Fatalf("replacement session unexpectedly received initial runtime overrides: %#v", createdReplacement.Metadata)
+	}
+}
+
 func TestPostgresCreateOfficeTaskSessionMarksOnlyTheFirstConcurrentSessionAsOrigin(t *testing.T) {
 	db := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), 2)
 	repo, err := NewWithDB(db, db, nil)

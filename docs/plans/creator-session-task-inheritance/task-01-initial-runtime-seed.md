@@ -31,6 +31,9 @@ cd apps/backend && go test ./internal/task/models ./internal/orchestrator/execut
 - `apps/backend/internal/task/models/session_runtime_config_test.go`
 - `apps/backend/internal/orchestrator/executor/executor_execute.go`
 - `apps/backend/internal/orchestrator/executor/executor_test.go`
+- `apps/backend/internal/task/repository/sqlite/session.go`
+- `apps/backend/internal/task/repository/sqlite/session_test.go`
+- `apps/backend/internal/task/repository/sqlite/task.go`
 
 ## Dependencies
 
@@ -63,6 +66,11 @@ when provider metadata stores those values in both locations.
 `PrepareSession` consumes the seed only for the first task session, writes it as
 session runtime overrides, and removes the launch-only key from every session
 metadata copy. Later sessions do not receive the seed.
+
+The concrete SQLite repository now claims and removes the seed in the same
+transaction as session creation. This closes concurrent first-session and
+delete-and-replace races that could otherwise reuse a stale task seed. The
+regression test covers both races.
 
 Files changed:
 
