@@ -1,10 +1,26 @@
 ---
-spec: docs/specs/plugin-nav-insights-section/spec.md
+spec: docs/specs/plugin-nav-sidebar-footer/spec.md
 created: 2026-08-12
-status: complete
+status: superseded
 ---
 
 # Implementation Plan: Plugin nav items in the sidebar footer icon row
+
+> **SUPERSEDED BY AMENDMENT 1 (2026-08-12). Do not build from this file.**
+>
+> This plan and its three task files are the implementation record of the **first**
+> version of the contract, which is already built and on this branch. The spec was
+> amended afterwards (see `## Amendment log` in the spec), and this plan does **not**
+> describe the amended contract. Two of its claims are now actively false:
+>
+> - it plans for the plugin-facing value `"insights"`; the accepted value is now
+>   `"sidebar-footer"`, and `"insights"` deliberately degrades to the plugin rail;
+> - it states no footer component changes are needed. The amendment adds an inline
+>   budget (`MAX_INLINE_PLUGIN_FOOTER_ITEMS`) and an overflow menu to
+>   `app-sidebar-footer.tsx`.
+>
+> The spec is the contract. Build the amendment from the spec, not from here. The
+> `status: done` markers on the task files refer to the pre-amendment work only.
 
 ## Overview
 

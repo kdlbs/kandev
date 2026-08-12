@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/plugin-nav-insights-section/spec.md"
+spec: "../../specs/plugin-nav-sidebar-footer/spec.md"
 ---
 
 # Task 01: Contract and mapping

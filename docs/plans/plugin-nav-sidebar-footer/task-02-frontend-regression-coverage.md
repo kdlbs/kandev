@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-contract-and-mapping"]
 plan: "plan.md"
-spec: "../../specs/plugin-nav-insights-section/spec.md"
+spec: "../../specs/plugin-nav-sidebar-footer/spec.md"
 ---
 
 # Task 02: Frontend regression coverage
