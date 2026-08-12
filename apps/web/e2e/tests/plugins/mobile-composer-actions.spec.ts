@@ -58,6 +58,17 @@ async function expectTouchReachable(page: Page, button: Locator): Promise<void> 
   expect(hit, "a native control is intercepting taps on the plugin action").toBe(true);
 }
 
+/**
+ * Walks left from the end rather than using Control+Home, which is a no-op
+ * under Android emulation and silently leaves the caret at the end. The
+ * insertion then appends and the selection-honouring assertion passes for the
+ * wrong reason.
+ */
+async function caretBackFromEnd(target: Locator, steps: number): Promise<void> {
+  await target.click();
+  for (let i = 0; i < steps; i++) await target.press("ArrowLeft");
+}
+
 async function expectNoHorizontalOverflow(page: Page): Promise<void> {
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(
     await page.evaluate(() => document.documentElement.clientWidth),
@@ -101,8 +112,7 @@ test.describe("Mobile plugin composer actions", () => {
     await expectTouchReachable(testPage, composerAction.getByTestId("e2e-composer-insert"));
 
     await editor.fill("head tail");
-    await editor.press("Control+Home");
-    for (let i = 0; i < "head".length; i++) await editor.press("ArrowRight");
+    await caretBackFromEnd(editor, " tail".length);
 
     await composerAction.getByTestId("e2e-composer-insert").tap();
     await expect(editor).toHaveText(`head ${DICTATED} tail`);
@@ -138,8 +148,7 @@ test.describe("Mobile plugin composer actions", () => {
     await expectTouchReachable(testPage, composerAction.getByTestId("e2e-composer-insert"));
 
     await description.fill("head tail");
-    await description.press("Control+Home");
-    for (let i = 0; i < "head".length; i++) await description.press("ArrowRight");
+    await caretBackFromEnd(description, " tail".length);
 
     await composerAction.getByTestId("e2e-composer-insert").tap();
     await expect(description).toHaveValue(`head ${DICTATED} tail`);
@@ -186,8 +195,7 @@ test.describe("Mobile plugin composer actions", () => {
     await expectTouchReachable(testPage, composerAction.getByTestId("e2e-composer-insert"));
 
     await description.fill("head tail");
-    await description.press("Control+Home");
-    for (let i = 0; i < "head".length; i++) await description.press("ArrowRight");
+    await caretBackFromEnd(description, " tail".length);
 
     await composerAction.getByTestId("e2e-composer-insert").tap();
     await expect(description).toHaveValue(`head ${DICTATED} tail`);

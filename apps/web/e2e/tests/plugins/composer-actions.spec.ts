@@ -35,11 +35,15 @@ function action(scope: Page | Locator): Locator {
 /**
  * Places the caret in the middle of an already-typed draft, so an insertion
  * that merely appends is distinguishable from one that honours the selection.
+ *
+ * Walks left from the end rather than using Control+Home: `fill` leaves the
+ * caret at the end on every platform, while Control+Home is a no-op under
+ * Android emulation and silently leaves the caret where it was, which makes
+ * the assertion vacuous instead of failing.
  */
-async function caretAfter(target: Locator, prefixLength: number): Promise<void> {
+async function caretBackFromEnd(target: Locator, steps: number): Promise<void> {
   await target.click();
-  await target.press("Control+Home");
-  for (let i = 0; i < prefixLength; i++) await target.press("ArrowRight");
+  for (let i = 0; i < steps; i++) await target.press("ArrowLeft");
 }
 
 test.describe("Plugins — composer capability", () => {
@@ -86,7 +90,7 @@ test.describe("Plugins — composer capability", () => {
     await expect(composerAction).toHaveAttribute("data-submittable", "true");
 
     // Caret between "head" and " tail" — a plain append would land at the end.
-    await caretAfter(editor, "head".length);
+    await caretBackFromEnd(editor, " tail".length);
     await composerAction.getByTestId("e2e-composer-insert").click();
     await expect(composerAction).toHaveAttribute("data-status", "inserted");
     await expect(editor).toHaveText(`head ${DICTATED} tail`);
@@ -200,7 +204,7 @@ test.describe("Plugins — composer capability", () => {
 
     await description.fill("head tail");
     await expect(composerAction).toHaveAttribute("data-submittable", "true");
-    await caretAfter(description, "head".length);
+    await caretBackFromEnd(description, " tail".length);
 
     await composerAction.getByTestId("e2e-composer-insert").click();
     await expect(composerAction).toHaveAttribute("data-status", "inserted");
@@ -266,7 +270,7 @@ test.describe("Plugins — composer capability", () => {
     await expect(composerAction).toHaveAttribute("data-surface", "new-session");
 
     await description.fill("head tail");
-    await caretAfter(description, "head".length);
+    await caretBackFromEnd(description, " tail".length);
     await composerAction.getByTestId("e2e-composer-insert").click();
     await expect(description).toHaveValue(`head ${DICTATED} tail`);
 
