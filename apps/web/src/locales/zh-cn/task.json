@@ -178,7 +178,6 @@
   "chooseRepositoriesOrFoldersToMake": "选择要在此任务中可用的仓库或文件夹。",
   "cleanup": "清理",
   "clearAllAnnotations": "清除全部标注",
-  "cliModeYourPromptWillBe": "CLI 模式; 你的提示词将自动注入到终端",
   "clickAnywhereToStartWriting": "点击任意位置开始编写",
   "clickRefreshToDetectListeningPorts": "点击刷新以检测监听端口。",
   "cloneFromAProviderOrGit": "从提供商或 Git URL 克隆。",
