@@ -191,3 +191,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-20-acp-client-non-underscore-extension-methods | [Route Non-Underscore Inbound Client Methods to the Extension Handler](2026-08-20-acp-client-non-underscore-extension-methods.md) | accepted | backend, protocol | 2026-08-20 |
 | 2026-08-22-persistent-fork-approval-labels | [Persist Fork Approval Labels Across Pushes](2026-08-22-persistent-fork-approval-labels.md) | accepted | infra, workflow, security | 2026-08-22 |
 | 2026-08-22-plugin-version-retention | [Keep Exactly One Superseded Plugin Version](2026-08-22-plugin-version-retention.md) | accepted | backend | 2026-08-22 |
+| 2026-08-12-plugin-webhook-auth-gate | [Require Auth for Plugin Webhooks Unless the Manifest Declares Them Public](2026-08-12-plugin-webhook-auth-gate.md) | accepted | backend, frontend, security | 2026-08-12 |
