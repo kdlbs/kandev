@@ -28,6 +28,9 @@ on:
       - ".claude/rules/**/*.md"
       - ".cursor/rules/**/*.mdc"
       - ".claude/commands/**/*.md"
+      - "apps/web/lib/plugins/types.ts"
+      - "scripts/validate-plugin-api-claims.mjs"
+      - "scripts/validate-plugin-api-claims.test.mjs"
   pull_request:
     branches: [main]
     paths:
@@ -55,6 +58,9 @@ on:
       - ".claude/rules/**/*.md"
       - ".cursor/rules/**/*.mdc"
       - ".claude/commands/**/*.md"
+      - "apps/web/lib/plugins/types.ts"
+      - "scripts/validate-plugin-api-claims.mjs"
+      - "scripts/validate-plugin-api-claims.test.mjs"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -79,3 +85,9 @@ jobs:
 
       - name: Lint harness files
         run: python3 .github/scripts/lint-harness-files.py --all
+
+      - name: Test plugin API claim guard
+        run: node --test scripts/validate-plugin-api-claims.test.mjs
+
+      - name: Validate plugin API claims
+        run: node scripts/validate-plugin-api-claims.mjs

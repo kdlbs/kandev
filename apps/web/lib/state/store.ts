@@ -243,6 +243,7 @@ export type AppState = KanbanSlice & {
   kanbanPreviewedTaskId: (typeof defaultUIState)["kanbanPreviewedTaskId"];
   sidebarTaskPrefs: (typeof defaultUIState)["sidebarTaskPrefs"];
   appSidebar: (typeof defaultUIState)["appSidebar"];
+  settingsMenu: (typeof defaultUIState)["settingsMenu"];
   acknowledgedAgentErrors: (typeof defaultUIState)["acknowledgedAgentErrors"];
   dismissedAgentErrors: (typeof defaultUIState)["dismissedAgentErrors"];
 
@@ -332,6 +333,7 @@ export type AppState = KanbanSlice & {
   setMobileKanbanActiveStep: (workflowId: string, stepId: string) => void;
   setMobileKanbanMenuOpen: (open: boolean) => void;
   setMobileKanbanSearchOpen: (open: boolean) => void;
+  setMobileKanbanFocusedWorkflow: (workflowId: string | null) => void;
   setMobileSessionPanel: (sessionId: string, panel: UISliceTypes.MobileSessionPanel) => void;
   setMobileSessionReview: (sessionId: string, mrKey: string | null) => void;
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
@@ -524,6 +526,11 @@ export type AppState = KanbanSlice & {
   setAppSidebarSettingsMode: UIA["setAppSidebarSettingsMode"];
   toggleAppSidebarSettingsMode: UIA["toggleAppSidebarSettingsMode"];
   setImproveDialogOpen: UIA["setImproveDialogOpen"];
+  setWorkspacePickerOpen: UIA["setWorkspacePickerOpen"];
+  previewSettingsMenuMode: UIA["previewSettingsMenuMode"];
+  commitSettingsMenuMode: UIA["commitSettingsMenuMode"];
+  restoreSettingsMenuMode: UIA["restoreSettingsMenuMode"];
+  setSettingsMenuExpandedKeys: UIA["setSettingsMenuExpandedKeys"];
   acknowledgeAgentErrors: UIA["acknowledgeAgentErrors"];
   dismissAgentError: UIA["dismissAgentError"];
 } & GitHubSliceActions &

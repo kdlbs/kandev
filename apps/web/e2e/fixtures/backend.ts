@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { BackendFixtureEnvOverrides, createScopedEnvUse } from "./backend-env";
+import { E2E_DOCKER_SCOPE } from "./docker-probe";
 
 const BACKEND_DIR = path.resolve(__dirname, "../../../../apps/backend");
 const WEB_DIR = path.resolve(__dirname, "../..");
@@ -51,6 +52,11 @@ export type BackendContext = {
    * agents, WS connections) is lost.
    */
   restart: (envOverrides?: Record<string, string>) => Promise<void>;
+  /**
+   * Verify the worker backend is serving requests and recover it when a
+   * previous test left the process unavailable.
+   */
+  ensureReady: () => Promise<void>;
   /**
    * Applies test-owned process environment values to the current backend and
    * every later restart until the returned release callback is awaited.
@@ -420,6 +426,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           // binaries the test runner pre-built, so containers can bind-mount them.
           ...(dockerEnabled
             ? {
+                KANDEV_E2E_DOCKER_SCOPE: E2E_DOCKER_SCOPE,
                 KANDEV_AGENTCTL_LINUX_BINARY: agentctlLinuxBinary,
                 KANDEV_MOCK_AGENT_LINUX_BINARY: mockAgentLinuxBinary,
               }
@@ -487,6 +494,22 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           await waitForHealth(`${baseUrl}/health`, HEALTH_TIMEOUT_MS, backendProc);
         };
 
+        let recovery: Promise<void> | null = null;
+        const ensureReady = async () => {
+          try {
+            await waitForHealth(`${baseUrl}/health`, 5_000);
+            return;
+          } catch {
+            // A worker can outlive a backend process that a prior test left
+            // stopped. Restart the isolated fixture before the next page is
+            // created so its setup requests do not hit a refused port.
+            recovery ??= restart().finally(() => {
+              recovery = null;
+            });
+            await recovery;
+          }
+        };
+
         const useEnv = createScopedEnvUse(scopedEnv, restart);
 
         await use({
@@ -496,6 +519,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           frontendUrl,
           tmpDir,
           restart,
+          ensureReady,
           useEnv,
         });
       });

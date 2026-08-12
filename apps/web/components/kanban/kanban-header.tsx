@@ -424,7 +424,6 @@ export function KanbanHeader({
           hideTitle={hideTitle}
           {...sharedSearch}
           tasksListOptions={tasksListOptions}
-          {...healthProps}
         />
       );
     }
@@ -450,7 +449,6 @@ export function KanbanHeader({
             currentPage={currentPage}
             {...sharedSearch}
             tasksListOptions={tasksListOptions}
-            {...healthProps}
           />
         </>
       );

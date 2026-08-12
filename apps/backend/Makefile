@@ -7,6 +7,16 @@ GO := go
 GOFLAGS := -v
 LDFLAGS := -s -w
 
+# Debug launches get a distinct browser identity by default. An explicit
+# environment or command-line value still wins through Make's `?=` semantics.
+KANDEV_WEB_TITLE_PREFIX ?= Debug
+
+# Quote the debug title prefix for the POSIX recipe. The replacement keeps
+# embedded single quotes safe while preserving spaces and shell metacharacters.
+single_quote := '
+single_quote_escape := '\''
+shell_quote = $(single_quote)$(subst $(single_quote),$(single_quote_escape),$(1))$(single_quote)
+
 # Cross-platform commands
 #
 # Two independent axes decide these variables; conflating them breaks Git
@@ -50,8 +60,8 @@ ifeq ($(OS)$(MSYSTEM),Windows_NT)
   GO_DARWIN_AMD64 = set CGO_ENABLED=0& set GOOS=darwin& set GOARCH=amd64&
   # Run-target env prefixes and binary invocation. cmd.exe has no `NAME=VAL cmd`
   # syntax (use `set NAME=VAL&`) and no `exec`; the binary path needs backslashes.
-  DEV_ENV = set KANDEV_DEBUG_PPROF_ENABLED=true&
-  DEBUG_ENV = set KANDEV_DEBUG_PPROF_ENABLED=true& set KANDEV_LOG_LEVEL=debug&
+  DEV_ENV = set KANDEV_DEBUG_DEV_MODE=true&
+  DEBUG_ENV = set KANDEV_DEBUG_PPROF_ENABLED=true& set KANDEV_LOG_LEVEL=debug& set "KANDEV_WEB_TITLE_PREFIX=$(KANDEV_WEB_TITLE_PREFIX)"&
   EXEC =
   RUN_BIN = "$(subst /,\,$(BUILD_DIR)/$(BINARY_NAME)$(EXE))"
   # check-make-shells is a bash script; native cmd.exe can't run its shebang, so
@@ -75,8 +85,8 @@ else
   GO_LINUX_ARM64 = CGO_ENABLED=0 GOOS=linux GOARCH=arm64
   GO_DARWIN_ARM64 = CGO_ENABLED=0 GOOS=darwin GOARCH=arm64
   GO_DARWIN_AMD64 = CGO_ENABLED=0 GOOS=darwin GOARCH=amd64
-  DEV_ENV = KANDEV_DEBUG_PPROF_ENABLED=true
-  DEBUG_ENV = KANDEV_DEBUG_PPROF_ENABLED=true KANDEV_LOG_LEVEL=debug
+  DEV_ENV = KANDEV_DEBUG_DEV_MODE=true
+  DEBUG_ENV = KANDEV_DEBUG_PPROF_ENABLED=true KANDEV_LOG_LEVEL=debug KANDEV_WEB_TITLE_PREFIX=$(call shell_quote,$(KANDEV_WEB_TITLE_PREFIX))
   EXEC = exec
   RUN_BIN = ./$(BUILD_DIR)/$(BINARY_NAME)$(EXE)
   CHECK_SHELLS = @../../scripts/check-make-shells
@@ -128,12 +138,27 @@ COMMIT := $(shell git rev-parse --short HEAD $(NULL_REDIR) || echo unknown)
 
 LDFLAGS += -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
 
+# Development only needs the native agentctl plus the linux/amd64 helper when
+# the control plane is not linux/amd64. A same-platform Linux/amd64 remote can
+# use the native helper through AgentctlResolver's dev fallback.
+DEV_HOST_GOOS := $(shell $(GO) env GOHOSTOS $(NULL_REDIR))
+DEV_HOST_GOARCH := $(shell $(GO) env GOHOSTARCH $(NULL_REDIR))
+ifeq ($(DEV_HOST_GOOS),linux)
+ifeq ($(DEV_HOST_GOARCH),amd64)
+  DEV_AGENTCTL_TARGETS := build-agentctl
+else
+  DEV_AGENTCTL_TARGETS := build-agentctl build-agentctl-linux
+endif
+else
+  DEV_AGENTCTL_TARGETS := build-agentctl build-agentctl-linux
+endif
+
 # Force the application module's Go version; go run otherwise selects the
 # analyzer module's minimum toolchain before go/packages loads this module.
 DEADCODE_VERSION ?= v0.48.0
 DEADCODE_GO_TOOLCHAIN ?= go1.26.0
 
-.PHONY: all build build-runtime build-all build-agentctl build-agentctl-remote build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg acpdbg build-mock-agent build-mock-agent-linux build-preview build-winjob e2e-plugin-package clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint deadcode fmt vet check-make-shells help
+.PHONY: all build build-dev build-runtime build-kandev build-all build-agentctl build-agentctl-dev build-agentctl-remote build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg acpdbg build-mock-agent build-mock-agent-linux build-preview build-winjob e2e-plugin-package clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint deadcode fmt vet check-make-shells help
 
 ## Default target
 all: build
@@ -153,7 +178,9 @@ build-mock-agent:
 ## Build the winjob helper — wraps a subprocess in a Windows Job Object so
 ## Ctrl-C at the top of the chain reliably terminates the entire subtree
 ## (kandev, agentctl, etc.) instead of leaking them. No-op passthrough on Unix.
-## See apps/cli/src/dev.ts for how the CLI launcher uses it.
+## The native Go launcher replaces this on the `make dev` path with its own
+## process-group handling (internal/launcher/process_group_windows.go); the
+## helper stays for any other consumer.
 build-winjob:
 	@echo "Building winjob..."
 	-@$(MKDIR) $(BUILD_DIR)
@@ -172,10 +199,20 @@ build-acpdbg:
 ## Build the complete development binary set.
 build: build-runtime build-mock-agent build-acpdbg build-winjob
 
+## Build the lean development binary set. Unlike `build`, this does not build
+## every cross-platform remote helper; dev needs the host helper and, for a
+## host other than Linux/amd64, one linux/amd64 helper.
+build-dev: build-kandev build-agentctl-dev build-mock-agent build-acpdbg build-winjob
+
 ## Build only the binaries shipped in a runtime bundle. Always includes remote
 ## agentctl helpers because SSH/Docker/Sprites executors upload or bind-mount
 ## platform-specific sidecars into remote environments.
-build-runtime: build-agentctl build-agentctl-remote
+build-runtime: build-agentctl build-agentctl-remote build-kandev
+
+## Build the native kandev binary used both by runtime bundles and by the
+## copied make-dev launcher. Keep this separate from build-runtime so the
+## launcher prebuild does not pull in agentctl helpers it does not use yet.
+build-kandev:
 	@echo "Building $(BINARY_NAME)..."
 	-@$(MKDIR) $(BUILD_DIR)
 	$(CGO_PREFIX) $(GO) build $(GOFLAGS) -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)$(EXE) ./cmd/kandev
@@ -190,6 +227,9 @@ build-agentctl:
 	@echo "Building agentctl..."
 	-@$(MKDIR) $(BUILD_DIR)
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl$(EXE) ./cmd/agentctl
+
+## Build only the agentctl helpers needed by the development profile.
+build-agentctl-dev: $(DEV_AGENTCTL_TARGETS)
 
 ## Build all remote agentctl helpers used by SSH/Docker/Sprites executors.
 build-agentctl-remote: build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64
@@ -264,7 +304,7 @@ run: build
 	$(RUN_BIN) __backend
 
 ## Run in development mode (with pprof enabled)
-dev: build
+dev: build-dev
 	@echo "Running $(BINARY_NAME) in development mode..."
 	@$(DEV_ENV) $(EXEC) $(RUN_BIN) __backend
 

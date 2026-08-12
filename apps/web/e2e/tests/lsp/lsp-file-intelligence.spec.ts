@@ -26,7 +26,7 @@ import {
   removeFakeKotlinLsp,
 } from "./lsp-e2e-helpers";
 
-const EDITORS_SETTINGS_PATH = "/settings/general/editors";
+const EDITORS_SETTINGS_PATH = "/settings/preferences/terminal-editors";
 const RESERVED_SOURCE_PATH = "Main # query? 100%.kt";
 const DEFINITION_PARENT_PATH = "nested/references";
 const DEFINITION_TARGET_PATH = `${DEFINITION_PARENT_PATH}/Definition Target # query? 100%.kt`;
@@ -254,7 +254,9 @@ test.describe("LSP file intelligence", () => {
     const initial = await apiClient.getUserSettings();
     const initialLocation =
       initial.settings.lsp_status_location === "status_bar" ? "status_bar" : "toolbar";
+    const initialStatusBarEnabled = initial.settings.app_status_bar_enabled === true;
     await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+      app_status_bar_enabled: true,
       lsp_status_location: "toolbar",
     });
 
@@ -349,6 +351,7 @@ test.describe("LSP file intelligence", () => {
       await expect(statusItem).toHaveAttribute("data-lsp-state", "disabled");
     } finally {
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+        app_status_bar_enabled: initialStatusBarEnabled,
         lsp_status_location: initialLocation,
       });
     }

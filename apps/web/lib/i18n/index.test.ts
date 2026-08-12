@@ -120,7 +120,7 @@ describe("activateLocale", () => {
   it("keeps the CLI-mode hint in a single namespace", async () => {
     await activateLocale("en");
     expect(i18n.t("common:cliModeYourPromptWillBe")).toBe(
-      "CLI mode — your prompt will be auto-injected into the terminal",
+      "CLI mode; your prompt will be auto-injected into the terminal",
     );
     expect(i18n.getResource("en", "task", "cliModeYourPromptWillBe")).toBeUndefined();
   });

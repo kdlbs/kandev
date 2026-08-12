@@ -175,7 +175,7 @@ function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
         } else {
           toast.success(t("automations:automationCreated"));
           runWithNavigationBlockerBypassed(() =>
-            router.push(`/settings/workspace/${workspaceId}/automations`),
+            router.push(`/settings/workspaces/${workspaceId}/automations`),
           );
         }
       } else if (currentId) {
@@ -219,7 +219,7 @@ function useLoadAutomation(opts: LoadAutomationOpts) {
         onLoaded(loadedForm, loadedTriggers);
       })
       .catch(() => {
-        router.push(`/settings/workspace/${workspaceId}/automations`);
+        router.push(`/settings/workspaces/${workspaceId}/automations`);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [automationId]);
@@ -306,7 +306,7 @@ function useRemoveAutomation(
     try {
       await remove(currentId);
       runWithNavigationBlockerBypassed(() =>
-        router.push(`/settings/workspace/${workspaceId}/automations`),
+        router.push(`/settings/workspaces/${workspaceId}/automations`),
       );
     } catch (error) {
       onError(error);
@@ -458,7 +458,7 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
         details={createdWebhook}
         onClose={() => {
           setCreatedWebhook(null);
-          router.push(`/settings/workspace/${workspaceId}/automations`);
+          router.push(`/settings/workspaces/${workspaceId}/automations`);
         }}
       />
     </div>

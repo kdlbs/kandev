@@ -43,9 +43,9 @@ type GitHubService interface {
 	CreatePRWatchForWorkspace(ctx context.Context, workspaceID, sessionID, taskID, repositoryID, owner, repo string, prNumber int, branch string) (*github.PRWatch, error)
 	EnsurePRWatchForWorkspace(ctx context.Context, workspaceID, sessionID, taskID, repositoryID, owner, repo, branch string) (*github.PRWatch, error)
 	FindPRByBranchForWorkspace(ctx context.Context, workspaceID, owner, repo, branch string) (*github.PR, error)
-	GetPRWatchBySession(ctx context.Context, sessionID string) (*github.PRWatch, error)
 	GetPRWatchBySessionAndRepo(ctx context.Context, sessionID, repositoryID string) (*github.PRWatch, error)
 	GetPRWatchBySessionRepoAndBranch(ctx context.Context, sessionID, repositoryID, branch string) (*github.PRWatch, error)
+	ListPRWatchesBySession(ctx context.Context, sessionID string) ([]*github.PRWatch, error)
 	UpdatePRWatchBranchIfSearching(ctx context.Context, id, branch string) error
 	UpdatePRWatchPRNumber(ctx context.Context, id string, prNumber int) error
 	ResetPRWatch(ctx context.Context, id, branch string) error
@@ -623,13 +623,19 @@ func (s *Service) detectPushAndAssociatePR(
 	if s.githubService == nil {
 		return
 	}
+	identity := s.resolvePushRepositoryIdentity(ctx, sessionID, taskID, repositoryName)
+	s.detectPushAndAssociatePRWithIdentity(ctx, sessionID, taskID, repositoryName, branch, identity)
+}
+
+func (s *Service) detectPushAndAssociatePRWithIdentity(
+	ctx context.Context, sessionID, taskID, repositoryName, branch string, identity pushRepositoryIdentity,
+) {
 	workspaceID := s.taskWorkspaceID(ctx, taskID)
 	if workspaceID == "" {
 		return
 	}
 
-	owner, repoName, repositoryID := s.resolvePushRepo(ctx, sessionID, taskID, repositoryName)
-	if owner == "" || repoName == "" {
+	if identity.owner == "" || identity.name == "" {
 		return
 	}
 
@@ -640,7 +646,7 @@ func (s *Service) detectPushAndAssociatePR(
 	// If the watch already has a PR number, the PR was found — nothing to do.
 	// If the watch has pr_number=0, it's still searching — do an immediate
 	// search (faster than waiting for the 1-minute poller).
-	existing, err := s.githubService.GetPRWatchBySessionRepoAndBranch(ctx, sessionID, repositoryID, branch)
+	existing, err := s.githubService.GetPRWatchBySessionRepoAndBranch(ctx, sessionID, identity.repositoryID, branch)
 	if err == nil && existing != nil {
 		if existing.PRNumber > 0 {
 			return // PR already found and being monitored
@@ -659,12 +665,12 @@ func (s *Service) detectPushAndAssociatePR(
 			case <-time.After(delay):
 			}
 			// Re-check if a watch was created in the meantime (e.g. by CreatePR callback)
-			if ex, err := s.githubService.GetPRWatchBySessionRepoAndBranch(ctx, sessionID, repositoryID, branch); err == nil && ex != nil {
+			if ex, err := s.githubService.GetPRWatchBySessionRepoAndBranch(ctx, sessionID, identity.repositoryID, branch); err == nil && ex != nil {
 				return
 			}
 		}
 		foundPR, findErr := s.githubService.FindPRByBranchForWorkspace(
-			ctx, workspaceID, owner, repoName, branch,
+			ctx, workspaceID, identity.owner, identity.name, branch,
 		)
 		if findErr != nil || foundPR == nil {
 			s.logger.Debug("no PR found for branch (will retry)",
@@ -680,7 +686,7 @@ func (s *Service) detectPushAndAssociatePR(
 			zap.String("repository_name", repositoryName),
 			zap.Int("pr_number", foundPR.Number),
 			zap.String("branch", branch))
-		s.associatePRFromPushScoped(ctx, workspaceID, sessionID, taskID, owner, repoName, repositoryID, branch, foundPR)
+		s.associatePRFromPushScoped(ctx, workspaceID, sessionID, taskID, identity.owner, identity.name, identity.repositoryID, branch, foundPR)
 		return
 	}
 	s.logger.Warn("exhausted all retries, no PR found after push",

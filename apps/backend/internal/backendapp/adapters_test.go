@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 
@@ -42,6 +43,201 @@ func TestBuildLifecycleLaunchRequestForwardsRemoteContributions(t *testing.T) {
 	}
 	if len(launchReq.Repositories) != 1 || launchReq.Repositories[0].RemoteContribution != binding {
 		t.Fatalf("per-repository remote contribution was not forwarded: %#v", launchReq.Repositories)
+	}
+}
+
+// distinctFiller populates struct fields with non-zero values that are unique
+// per field, so a mapper that drops a field (or crosswires two of the same
+// type) produces an observable difference rather than two matching zero
+// values. Bool is the documented exception — see fill.
+type distinctFiller struct{ n int }
+
+// fillStruct populates every exported field of the struct pointed at by ptr.
+func (f *distinctFiller) fillStruct(t *testing.T, ptr any) {
+	t.Helper()
+	v := reflect.ValueOf(ptr).Elem()
+	typ := v.Type()
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+		if !v.Field(i).CanSet() {
+			t.Fatalf("distinctFiller: %s.%s is unexported and cannot be covered", typ, field.Name)
+		}
+		f.fill(t, v.Field(i), field.Name)
+	}
+}
+
+func (f *distinctFiller) fill(t *testing.T, v reflect.Value, name string) {
+	t.Helper()
+	f.n++
+	switch v.Kind() {
+	case reflect.String:
+		v.SetString(fmt.Sprintf("%s-%d", name, f.n))
+	case reflect.Bool:
+		// Always true, never counter-derived: bool has only two values and one
+		// of them is the zero value, so distinctness across several bool fields
+		// and drop-detection are mutually exclusive. Drop-detection wins —
+		// a field left unmapped reads back false and fails. The cost is that
+		// two crosswired bool fields would still compare equal.
+		v.SetBool(true)
+	case reflect.Int, reflect.Int64:
+		v.SetInt(int64(f.n))
+	case reflect.Pointer:
+		// Deliberately shallow: a zero-value allocation is enough to catch a
+		// dropped pointer field (nil != non-nil). It does not catch a mapper
+		// that substitutes a freshly allocated zero value of the same type,
+		// since reflect.DeepEqual compares pointees rather than addresses.
+		v.Set(reflect.New(v.Type().Elem()))
+	case reflect.Slice:
+		slice := reflect.MakeSlice(v.Type(), 1, 1)
+		f.fill(t, slice.Index(0), name+"-elem")
+		v.Set(slice)
+	case reflect.Map:
+		m := reflect.MakeMap(v.Type())
+		key := reflect.New(v.Type().Key()).Elem()
+		f.fill(t, key, name+"-key")
+		value := reflect.New(v.Type().Elem()).Elem()
+		f.fill(t, value, name+"-value")
+		m.SetMapIndex(key, value)
+		v.Set(m)
+	default:
+		t.Fatalf("distinctFiller: unsupported kind %s for field %s — extend the helper", v.Kind(), name)
+	}
+}
+
+// assertSameNamedFieldsEqual fails unless src and dst expose the same number of
+// exported fields and every same-named pair holds a DeepEqual value. Mapper
+// tests use it so that dropping a field — or adding one to both sides of a
+// mirrored type pair and forgetting to wire it — fails instead of passing
+// silently the way a hand-written subset of field assertions would.
+func assertSameNamedFieldsEqual(t *testing.T, label string, src, dst any) {
+	t.Helper()
+	srcVal, dstVal := reflect.ValueOf(src), reflect.ValueOf(dst)
+	srcType, dstType := srcVal.Type(), dstVal.Type()
+	if srcType.NumField() != dstType.NumField() {
+		t.Fatalf("%s: %s has %d fields but %s has %d — the mirrored types drifted",
+			label, srcType, srcType.NumField(), dstType, dstType.NumField())
+	}
+	for i := 0; i < srcType.NumField(); i++ {
+		name := srcType.Field(i).Name
+		dstField := dstVal.FieldByName(name)
+		if !dstField.IsValid() {
+			t.Errorf("%s: %s has no field %s", label, dstType, name)
+			continue
+		}
+		want := srcVal.Field(i).Interface()
+		if got := dstField.Interface(); !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: field %s = %#v, want %#v", label, name, got, want)
+		}
+	}
+}
+
+// TestLifecycleWorkspaceFoldersMapsEveryField covers the launch path's folder
+// projection. Every agent launch flows through it and a dropped field is
+// silent — no panic, no error, just missing agent configuration.
+func TestLifecycleWorkspaceFoldersMapsEveryField(t *testing.T) {
+	if got := lifecycleWorkspaceFolders(nil); got != nil {
+		t.Errorf("lifecycleWorkspaceFolders(nil) = %#v, want nil", got)
+	}
+	if got := lifecycleWorkspaceFolders([]orchestratorexecutor.WorkspaceFolderSpec{}); got != nil {
+		t.Errorf("lifecycleWorkspaceFolders(empty) = %#v, want nil", got)
+	}
+
+	filler := &distinctFiller{}
+	folders := make([]orchestratorexecutor.WorkspaceFolderSpec, 2)
+	for i := range folders {
+		filler.fillStruct(t, &folders[i])
+	}
+
+	got := lifecycleWorkspaceFolders(folders)
+	if len(got) != len(folders) {
+		t.Fatalf("lifecycleWorkspaceFolders returned %d folders, want %d", len(got), len(folders))
+	}
+	for i := range folders {
+		assertSameNamedFieldsEqual(t, fmt.Sprintf("workspace folder %d", i), folders[i], got[i])
+	}
+}
+
+// TestLifecycleRouteOverrideMapsEveryField pins the same all-fields contract on
+// the sibling route-override mapper.
+func TestLifecycleRouteOverrideMapsEveryField(t *testing.T) {
+	if got := lifecycleRouteOverride(nil); got != nil {
+		t.Errorf("lifecycleRouteOverride(nil) = %#v, want nil", got)
+	}
+
+	override := &orchestratorexecutor.RouteOverride{}
+	(&distinctFiller{}).fillStruct(t, override)
+
+	got := lifecycleRouteOverride(override)
+	if got == nil {
+		t.Fatal("lifecycleRouteOverride returned nil for a non-nil override")
+	}
+	assertSameNamedFieldsEqual(t, "route override", *override, *got)
+}
+
+// TestLifecycleRepoLaunchSpecsMapsEveryField pins the all-fields contract on
+// the multi-repo launch spec mapper — the widest of the three (19 fields).
+func TestLifecycleRepoLaunchSpecsMapsEveryField(t *testing.T) {
+	if got := lifecycleRepoLaunchSpecs(nil); got != nil {
+		t.Errorf("lifecycleRepoLaunchSpecs(nil) = %#v, want nil", got)
+	}
+	if got := lifecycleRepoLaunchSpecs([]orchestratorexecutor.RepoSpec{}); got != nil {
+		t.Errorf("lifecycleRepoLaunchSpecs(empty) = %#v, want nil", got)
+	}
+
+	filler := &distinctFiller{}
+	repos := make([]orchestratorexecutor.RepoSpec, 2)
+	for i := range repos {
+		filler.fillStruct(t, &repos[i])
+	}
+
+	got := lifecycleRepoLaunchSpecs(repos)
+	if len(got) != len(repos) {
+		t.Fatalf("lifecycleRepoLaunchSpecs returned %d specs, want %d", len(got), len(repos))
+	}
+	for i := range repos {
+		assertSameNamedFieldsEqual(t, fmt.Sprintf("repo spec %d", i), repos[i], got[i])
+	}
+}
+
+// TestBuildLifecycleLaunchRequestWiresMappedCollections asserts the launch
+// request actually carries the three mapper outputs. A mapper can be correct
+// while the wiring in buildLifecycleLaunchRequest drops it.
+func TestBuildLifecycleLaunchRequestWiresMappedCollections(t *testing.T) {
+	filler := &distinctFiller{}
+	folders := make([]orchestratorexecutor.WorkspaceFolderSpec, 2)
+	for i := range folders {
+		filler.fillStruct(t, &folders[i])
+	}
+	repos := make([]orchestratorexecutor.RepoSpec, 2)
+	for i := range repos {
+		filler.fillStruct(t, &repos[i])
+	}
+	override := &orchestratorexecutor.RouteOverride{}
+	filler.fillStruct(t, override)
+
+	launchReq := buildLifecycleLaunchRequest(&orchestratorexecutor.LaunchAgentRequest{
+		WorkspaceFolders: folders,
+		RouteOverride:    override,
+		Repositories:     repos,
+	}, "/workspace", "office-profile")
+
+	if len(launchReq.WorkspaceFolders) != len(folders) {
+		t.Fatalf("WorkspaceFolders length = %d, want %d", len(launchReq.WorkspaceFolders), len(folders))
+	}
+	for i := range folders {
+		assertSameNamedFieldsEqual(t, fmt.Sprintf("launch workspace folder %d", i), folders[i], launchReq.WorkspaceFolders[i])
+	}
+
+	if launchReq.RouteOverride == nil {
+		t.Fatal("RouteOverride was dropped from the launch request")
+	}
+	assertSameNamedFieldsEqual(t, "launch route override", *override, *launchReq.RouteOverride)
+
+	if len(launchReq.Repositories) != len(repos) {
+		t.Fatalf("Repositories length = %d, want %d", len(launchReq.Repositories), len(repos))
+	}
+	for i := range repos {
+		assertSameNamedFieldsEqual(t, fmt.Sprintf("launch repo spec %d", i), repos[i], launchReq.Repositories[i])
 	}
 }
 

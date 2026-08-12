@@ -5,12 +5,14 @@ test.describe("MCP-created task agent profile default on mobile", () => {
     testPage,
     apiClient,
   }) => {
-    await testPage.goto("/settings/general");
-    const taskActionsLink = testPage.getByRole("link", { name: /Task Actions/ });
-    await expect(taskActionsLink).toBeVisible({ timeout: 15_000 });
-    await taskActionsLink.tap();
+    await testPage.goto("/settings");
+    // Task Actions is a section inside the Task Behavior page now; the menu row
+    // that reaches it is the page, not the section.
+    const taskBehaviorLink = testPage.getByRole("link", { name: /Task Behavior/ });
+    await expect(taskBehaviorLink).toBeVisible({ timeout: 15_000 });
+    await taskBehaviorLink.tap();
 
-    await expect(testPage).toHaveURL(/\/settings\/general\/task-actions$/);
+    await expect(testPage).toHaveURL(/\/settings\/preferences\/task-behavior$/);
     await expect(
       testPage.getByRole("heading", { name: "Task Actions", exact: true }),
     ).toBeVisible();

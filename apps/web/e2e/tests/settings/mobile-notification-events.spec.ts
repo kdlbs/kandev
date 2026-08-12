@@ -46,7 +46,7 @@ test.describe("Mobile notification event settings", () => {
     );
 
     try {
-      await testPage.goto("/settings/general/notifications");
+      await testPage.goto("/settings/preferences/notifications");
 
       const eventContainer = testPage.getByTestId("notification-events-mobile-list");
       const turnFinished = testPage.getByRole("checkbox", {

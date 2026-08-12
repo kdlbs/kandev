@@ -55,6 +55,20 @@ func IsValidBaseBranchRef(ref string) bool {
 // This prevents argument injection where user input could introduce malicious flags.
 // Only flags actually used by the Kandev codebase are whitelisted.
 func IsKnownSafeGitFlag(arg string) bool {
+	// Flags allowed only as an exact argument, because the prefix match below
+	// would admit variants this codebase never issues: "--rebase" would let
+	// through "--rebase-merges" and "--rebase=interactive" (which spawns an
+	// editor), and "--abort" would let through "--abort-*".
+	exactFlags := []string{
+		"--", // Path separator - everything after this is treated as paths, not flags
+		"--rebase",
+		"--abort",
+	}
+	for _, safe := range exactFlags {
+		if arg == safe {
+			return true
+		}
+	}
 	// Whitelist of git flags actually used by our codebase
 	safeFlags := []string{
 		"-m", "-M", "-n", "--set-upstream", "--all", "--porcelain", "--short",
@@ -63,10 +77,9 @@ func IsKnownSafeGitFlag(arg string) bool {
 		"--amend", "--allow-empty", "--soft", "--mixed", "--hard",
 		"--cached", "--force", "--source=HEAD", "--staged", "--worktree",
 		"--dry-run", "--get-all", "--first-parent", "--is-ancestor",
-		"--", // Path separator - everything after this is treated as paths, not flags
 	}
 	for _, safe := range safeFlags {
-		if arg == safe || (safe != "--" && strings.HasPrefix(arg, safe)) {
+		if strings.HasPrefix(arg, safe) {
 			return true
 		}
 	}

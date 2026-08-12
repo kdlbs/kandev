@@ -11,7 +11,7 @@
   "apiKey": "Chave de API",
   "areYouSureThisActionCannot": "Tem a certeza? Esta ação não pode ser anulada.",
   "areYouSureYouWantTo": "Tem a certeza de que quer eliminar este perfil? Esta ação não pode ser anulada.",
-  "authFilesNotFoundOnThisMachine": "{{files}} — ficheiros não encontrados nesta máquina",
+  "authFilesNotFoundOnThisMachine": "{{files}}; ficheiros não encontrados nesta máquina",
   "backToExecutor": "Voltar ao executor",
   "backToExecutors": "Voltar aos executores",
   "buildFailedWithMessage": "A compilação falhou: {{message}}",

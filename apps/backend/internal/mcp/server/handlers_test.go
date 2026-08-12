@@ -18,6 +18,22 @@ func newTaskModeServer(t *testing.T, backend BackendClient, taskID string) *Serv
 	return New(backend, "test-session", taskID, 10005, log, "", false, ModeTask, []string{"github", "gitlab"})
 }
 
+func TestArchiveTaskHandlerInjectsBoundCallerID(t *testing.T) {
+	backend := &testBackend{}
+	s := newTaskModeServer(t, backend, "automation-run-1")
+
+	result := callTool(t, s, "archive_task_kandev", map[string]interface{}{
+		"task_id": "target-task-1",
+	})
+
+	require.False(t, result.IsError)
+	payload, ok := backend.lastPayload.(map[string]string)
+	require.True(t, ok, "archive payload should use the server-owned string map")
+	assert.Equal(t, "target-task-1", payload["task_id"])
+	assert.Equal(t, "automation-run-1", payload["caller_task_id"])
+	assert.NotContains(t, toolInputProperties(t, s, "archive_task_kandev"), "caller_task_id")
+}
+
 func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	backend := &testBackend{}
 	s := newTaskModeServer(t, backend, "task-current")

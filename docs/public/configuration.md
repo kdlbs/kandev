@@ -58,7 +58,7 @@ Some common camelCase keys have explicit compatibility aliases. Use the document
 | `server.readTimeout` | `KANDEV_SERVER_READTIMEOUT` | `30` | HTTP read timeout in seconds. |
 | `server.writeTimeout` | `KANDEV_SERVER_WRITETIMEOUT` | `30` | HTTP write timeout in seconds. |
 | `server.webInternalUrl` | `KANDEV_WEB_INTERNAL_URL` | empty | Development reverse-proxy target for a separately running web app. Installed releases normally serve embedded assets. |
-| `server.webTitlePrefix` | `KANDEV_WEB_TITLE_PREFIX` | empty | Prefixes the browser tab title as `<prefix> Kandev` (for example `TEST` renders `TEST Kandev`), so several instances stay distinguishable in adjacent tabs. `make dev` defaults to `Dev`; PR previews use `Preview`. An explicit value overrides these defaults. Empty keeps the plain `Kandev` title. |
+| `server.webTitlePrefix` | `KANDEV_WEB_TITLE_PREFIX` | empty | Prefixes the browser tab title as `<prefix> Kandev` (for example `TEST` renders `TEST Kandev`), so several instances stay distinguishable in adjacent tabs. `make dev` defaults to `Dev`; `make start-debug` keeps production defaults, enables diagnostics, and defaults to `Debug`; PR previews use `Preview`. An explicit value overrides these defaults. Empty keeps the plain `Kandev` title. |
 
 The default host exposes the server on every interface even though the CLI prints a `localhost` URL. The current local product path must not be treated as an authenticated multi-user perimeter. For remote access, bind to loopback and use a trusted authenticated tunnel/proxy, or isolate the network at the deployment layer.
 
@@ -128,7 +128,6 @@ The launcher starts `agentctl`, performs a one-time nonce handshake, and supplie
 | `office.jwtSigningKey` | `KANDEV_OFFICE_JWTSIGNINGKEY` | random per start | HMAC key for Office agent-runtime JWTs. Set a stable secret when Office tasks must survive restarts. |
 | `voice.openAIApiKey` | `KANDEV_VOICE_OPENAI_API_KEY` | empty | Server-side transcription fallback when browser speech recognition is unavailable. Empty disables the fallback and its endpoint returns unavailable. |
 | `features.office` | `KANDEV_FEATURES_OFFICE` | `false` in production | Experimental Office UI, routes, services, and automation. |
-| `features.app_status_bar` | `KANDEV_FEATURES_APP_STATUS_BAR` | `false` in production | Opt-in global connection/host-metrics/plugin surface: bottom bar on tablet/desktop and Status drawer on phones. Disabling it does not suppress active WebSocket connectivity warnings. |
 | `features.auth` | `KANDEV_FEATURES_AUTH` | `false` in production | Opt-in authentication and per-user workspaces. The first visitor after enabling completes setup and becomes the admin. |
 | `features.claude_background_prompt_handoff` | `KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF` | `false` | High-risk experiment that lets Claude Code accept a new prompt after its foreground yields while adapter-attested background work remains active. Other providers keep the coarse busy gate. |
 | `features.claude_mid_turn_steering` | `KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING` | `false` | High-risk experiment that delivers a new prompt into a Claude turn that is still generating (mid-turn steering) instead of queuing it, for agents that advertise prompt queueing. Whether the agent folds the prompt into the running turn or runs it next is the agent's decision; other providers keep the coarse busy gate. |
@@ -170,9 +169,17 @@ Discovery roots bound automatic filesystem traversal, so scope them narrowly. Th
 | YAML key | Environment variable | Default | Current behavior |
 |---|---|---|---|
 | `debug.devMode` | `KANDEV_DEBUG_DEV_MODE` | `false` | Enables diagnostic endpoints and agent-message debug logging. |
-| `debug.pprofEnabled` | `KANDEV_DEBUG_PPROF_ENABLED` | `false` | Legacy alias; also enables debug mode. |
+| `debug.pprofEnabled` | `KANDEV_DEBUG_PPROF_ENABLED` | `false` | Legacy diagnostics switch. It enables pprof behavior but does not select the `dev` profile. |
 
-Debug mode is high risk. It enables local diagnostic surfaces and implies `KANDEV_DEBUG_AGENT_MESSAGES=true` and `KANDEV_DEBUG_PPROF_ENABLED=true` when not explicitly locked by the environment. ACP JSONL frames include complete prompts, file content, and tool calls. Do not enable it on a shared or network-exposed backend.
+`KANDEV_DEBUG_DEV_MODE=true` selects the `dev` profile. `make dev` sets that
+selector and defaults the browser title to `Dev Kandev`. `make start-debug`
+enables pprof and debug logging without selecting the `dev` profile, and
+defaults the browser title to `Debug Kandev`. Debug mode is high risk. It
+enables local diagnostic surfaces and implies
+`KANDEV_DEBUG_AGENT_MESSAGES=true` and `KANDEV_DEBUG_PPROF_ENABLED=true` when
+not explicitly locked by the environment. ACP JSONL frames include complete
+prompts, file content, and tool calls. Do not enable it on a shared or
+network-exposed backend.
 
 ## Minimal examples
 
@@ -284,7 +291,6 @@ voice:
 
 features:
   office: false
-  app_status_bar: false
   auth: false
   claude_background_prompt_handoff: false
 ```
@@ -300,11 +306,10 @@ Copying this entire file is unnecessary and can freeze old defaults in a deploym
 | Key | Environment lock | Production default | Effect |
 |---|---|---|---|
 | `features.office` | `KANDEV_FEATURES_OFFICE` | off | Experimental autonomous-agent Office surfaces and automation. |
-| `features.appStatusBar` | `KANDEV_FEATURES_APP_STATUS_BAR` | off | Global status bar on tablet/desktop and Status drawer entry on phones. Enabling changes visibility only; urgent WebSocket connectivity warnings remain visible when it is off. |
 | `features.auth` | `KANDEV_FEATURES_AUTH` | off | Authentication and per-user workspaces for the whole install. |
 | `features.claudeBackgroundPromptHandoff` | `KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF` | off | High-risk Claude Code experiment that exposes recognized background-only activity and admits a successor prompt. |
 | `features.claudeMidTurnSteering` | `KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING` | off | High-risk Claude Code experiment that delivers a prompt into a still-generating turn (mid-turn steering) instead of queuing it, for agents advertising prompt queueing. |
-| `debug.devMode` | `KANDEV_DEBUG_DEV_MODE` (also locked by explicit legacy/debug-message vars) | off | High-risk diagnostic endpoints and ACP frame logging. |
+| `debug.devMode` | `KANDEV_DEBUG_DEV_MODE` | off | High-risk diagnostic endpoints and ACP frame logging. |
 
 UI changes are persisted in the database and require a restart. An explicitly set environment value wins and locks the UI control. Otherwise a database override wins over the embedded profile/default. Resetting a toggle removes its database override.
 
@@ -316,7 +321,7 @@ the rollout is complete, then remove the live flag and move its key and
 environment variable to the runtime registry's append-only retired identities.
 Plugins are part of the base product and are not a runtime toggle.
 
-The source checkout's `make dev` activates the embedded development profile, which enables Office, debug surfaces, ACP logging, and a mock agent; the App status bar, authentication, and Claude background prompt handoff remain opt-in. Installed `run`/desktop builds select the safe production profile unless the environment explicitly opts in. E2E mock variables and routes are test-only and must never be enabled on a public deployment.
+The source checkout's `make dev` activates the embedded development profile, which enables Office, debug surfaces, ACP logging, and a mock agent; authentication and Claude background prompt handoff remain opt-in. Installed `run`/desktop builds select the safe production profile unless the environment explicitly opts in. E2E mock variables and routes are test-only and must never be enabled on a public deployment.
 
 ## Credentials and product settings
 The **Unread Messages** preference in **Settings > General > Task Actions** controls the Slack-style **New** divider in session transcripts. It defaults off for each user, persists with user settings, and takes effect immediately. Enabling it also allows that user's active transcript view to advance the session read cursor.

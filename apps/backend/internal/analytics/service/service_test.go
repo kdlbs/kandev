@@ -35,7 +35,7 @@ func (f *fakeRepository) GetCompletedTaskActivity(context.Context, string, int) 
 	return nil, nil
 }
 
-func (f *fakeRepository) GetAgentUsage(context.Context, string, int, *time.Time) ([]*models.AgentUsage, error) {
+func (f *fakeRepository) GetModelUsage(context.Context, string, int, *time.Time) ([]*models.ModelUsage, error) {
 	return nil, nil
 }
 

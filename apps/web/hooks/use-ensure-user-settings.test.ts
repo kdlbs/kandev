@@ -46,6 +46,7 @@ import {
 
 function makeUnloadedSettings(): UserSettingsState {
   return {
+    revision: null,
     workspaceId: null,
     workflowId: null,
     kanbanViewMode: null,
@@ -96,6 +97,7 @@ function makeUnloadedSettings(): UserSettingsState {
     terminalFontSize: null,
     changesPanelLayout: "tree",
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
+    appStatusBarEnabled: false,
     appStatusBarOrder: { leftItemIds: [], rightItemIds: [] },
     voiceMode: {
       enabled: true,
@@ -109,6 +111,7 @@ function makeUnloadedSettings(): UserSettingsState {
     lspAutoInstallLanguages: [],
     lspServerConfigs: {},
     lspStatusLocation: "toolbar",
+    hiddenWorkflowStepIds: {},
     loaded: false,
   };
 }

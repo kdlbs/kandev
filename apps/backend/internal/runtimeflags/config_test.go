@@ -59,14 +59,14 @@ func TestOptionsFromConfigParsesUppercaseTruthyEnv(t *testing.T) {
 	}
 }
 
-func TestOptionsFromConfigParsesUppercaseTruthyEnvForAppStatusBar(t *testing.T) {
-	preserveEnv(t, "KANDEV_FEATURES_APP_STATUS_BAR")
-	t.Setenv("KANDEV_FEATURES_APP_STATUS_BAR", "TRUE")
+func TestOptionsFromConfigIgnoresRetiredAppStatusBarEnv(t *testing.T) {
+	preserveEnv(t, retiredAppStatusBarEnvVar)
+	t.Setenv(retiredAppStatusBarEnvVar, "TRUE")
 
 	opts := OptionsFromConfig(&config.Config{})
 
-	if !opts.EnvValues["KANDEV_FEATURES_APP_STATUS_BAR"] {
-		t.Fatal("KANDEV_FEATURES_APP_STATUS_BAR TRUE parsed false, want true")
+	if _, ok := opts.EnvValues[retiredAppStatusBarEnvVar]; ok {
+		t.Fatal("retired KANDEV_FEATURES_APP_STATUS_BAR remains active")
 	}
 }
 
@@ -81,25 +81,15 @@ func TestOptionsFromConfigParsesClaudeBackgroundPromptHandoffEnv(t *testing.T) {
 	}
 }
 
-func TestApplyStatesToConfigSetsAppStatusBar(t *testing.T) {
-	cfg := &config.Config{Features: config.FeaturesConfig{AppStatusBar: true}}
+func TestApplyStatesToConfigIgnoresRetiredAppStatusBar(t *testing.T) {
+	cfg := &config.Config{}
 	ApplyStatesToConfig(cfg, []RuntimeFlagState{{
-		Key:            "features.appStatusBar",
-		EffectiveValue: false,
+		Key:            retiredAppStatusBarKey,
+		EffectiveValue: true,
 	}})
 
-	if cfg.Features.AppStatusBar {
-		t.Fatal("ApplyStatesToConfig did not set Features.AppStatusBar = false")
-	}
-}
-
-func TestValuesFromConfigIncludesAppStatusBar(t *testing.T) {
-	cfg := &config.Config{Features: config.FeaturesConfig{AppStatusBar: true}}
-
-	values := ValuesFromConfig(cfg)
-
-	if !values["features.appStatusBar"] {
-		t.Fatal("ValuesFromConfig did not surface features.appStatusBar = true")
+	if _, ok := ValuesFromConfig(cfg)[retiredAppStatusBarKey]; ok {
+		t.Fatal("ValuesFromConfig surfaced retired features.appStatusBar")
 	}
 }
 

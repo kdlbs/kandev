@@ -312,8 +312,8 @@ Built with these excellent open-source projects:
 
 <a href="https://www.star-history.com/?repos=kdlbs%2Fkandev&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=kdlbs/kandev&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=kdlbs/kandev&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=kdlbs/kandev&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=kdlbs/kandev&type=date&theme=dark&legend=top-left&sealed_token=VcdQXTkas2odX-D8DZINZOcBVuA6ZfkugIzgWgnAi0lqW3gwdqlh_Ei77fi2bdXwc3HnCFz3NQAYtRnoKxspsck-pIQxTdEwEIveR27Y3k8cKBWJxYGOCFqYhHiJGcECnrrMU_NhWcWWTWaz0t5cX-3Fm-1BOouTejaUEy9w78CSuoakpeUJby66XlCB" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=kdlbs/kandev&type=date&legend=top-left&sealed_token=VcdQXTkas2odX-D8DZINZOcBVuA6ZfkugIzgWgnAi0lqW3gwdqlh_Ei77fi2bdXwc3HnCFz3NQAYtRnoKxspsck-pIQxTdEwEIveR27Y3k8cKBWJxYGOCFqYhHiJGcECnrrMU_NhWcWWTWaz0t5cX-3Fm-1BOouTejaUEy9w78CSuoakpeUJby66XlCB" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=kdlbs/kandev&type=date&legend=top-left&sealed_token=VcdQXTkas2odX-D8DZINZOcBVuA6ZfkugIzgWgnAi0lqW3gwdqlh_Ei77fi2bdXwc3HnCFz3NQAYtRnoKxspsck-pIQxTdEwEIveR27Y3k8cKBWJxYGOCFqYhHiJGcECnrrMU_NhWcWWTWaz0t5cX-3Fm-1BOouTejaUEy9w78CSuoakpeUJby66XlCB" />
  </picture>
 </a>

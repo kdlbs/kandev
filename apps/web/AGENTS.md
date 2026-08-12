@@ -4,7 +4,7 @@ Scoped guidance for `apps/web/`. Repo-wide rules (commit format, code-quality li
 
 ## Plugin authoring
 
-For plugin UI work, begin with the [canonical plugin authoring guide](../../docs/public/plugins-authoring.md). Follow: choose recipe → edit `manifest.yaml` → implement → validate → package → smoke test. The frontend contract pair is `../../docs/plans/plugins/PLUGIN-API.md` plus `lib/plugins/types.ts`; concrete shared Host UI exports are in `lib/plugins/host-api.ts`, and registration/cleanup behavior is in `lib/plugins/registry.ts` and `lib/plugins/host.ts`. Keep the guide and that contract pair synchronized; do not invent hooks such as task panels, task-menu actions, per-user `host.storage`, rich-text components, or Kanban-card injection when they are absent from the current source.
+For plugin UI work, begin with the [canonical plugin authoring guide](../../docs/public/plugins-authoring.md). Follow: choose recipe → edit `manifest.yaml` → implement → validate → package → smoke test. The frontend contract pair is `../../docs/plans/plugins/PLUGIN-API.md` plus `lib/plugins/types.ts`; concrete shared Host UI exports are in `lib/plugins/host-api.ts`, and registration/cleanup behavior is in `lib/plugins/registry.ts` and `lib/plugins/host.ts`. Treat that pair as the source of truth for which hooks exist, and extend it in the same change rather than shipping a signature it does not declare.
 
 ## UI Components
 
@@ -39,6 +39,10 @@ Go Boot Payload -> Hydrate Store -> Components Read Store -> Hooks Subscribe
 ```
 
 **Never fetch data directly in components.**
+
+### Browser capability boundaries
+
+- Use `generateUUID()` for client-only non-security IDs, not `crypto.randomUUID()`; use `copyToClipboard()` for copy actions, not `navigator.clipboard.writeText()`. Keep fallbacks non-security; test missing or rejected capabilities with an `rg` audit.
 
 ## Store Structure (Domain Slices)
 
@@ -87,6 +91,11 @@ For rebasing or finishing PRs written against the old Next.js runtime, follow [`
 **Format:** `{id, type, action, payload, timestamp}`.
 
 Use subscription hooks only; the WS client auto-deduplicates.
+
+**Task overview vs. session detail:** Shared task rows read `Task.statusSummary` and `task.status_summary.updated`; rich streams stay session-detail-only. Extend the bounded projection per the [spec](../../docs/specs/platform/bounded-task-status-delivery.md) and [ADR](../../docs/decisions/2026-08-01-separate-task-summary-session-stream-traffic.md).
+
+**Branch-scoped task state:** For live worktree/session state plus `task_prs`, key by `(repository, checked-out branch)`, not task/repository alone. `branch_switched` invalidates prior status/commits; reject late results with a generation/identity guard and preserve siblings. Historical PRs affect Changes only when `repository_id` and normalized `head_branch` match; Review/PR history may still show them. Test single/multi-repo cases and desktop/mobile Changes behavior.
+**HTTP/WS cache races:** When HTTP hydrates a cache also updated by WebSockets, guard responses with per-scope revision and request/workspace generation; discard or refresh stale responses and cover deferred responses. `useEnsureTaskSession` re-fires `session.ensure` when an open task page sees zero sessions after a prior ensure, so deleting the last session from that page spawns a replacement; test zero-session states through the backend/API instead.
 
 When changing task lifecycle WS handlers (`task.updated`, `task.deleted`,
 `task.state_changed`), check both kanban and Office surfaces. Archive/delete
@@ -153,33 +162,24 @@ surface.
   with independent open state. Touch-pinned help must close on a second trigger
   tap, outside interaction, and Escape; verify desktop pointer and mobile-sized
   touch flows.
-- **Renaming a `data-testid`:** set the new id as `data-testid="<new>"` and keep the old id as
-  `data-legacy-testid="<old>"`, then migrate e2e specs to the new id in the same PR. JSX rejects two
-  `data-testid` attributes on one element, and Playwright's `getByTestId` only matches one attribute
-  name — the `data-legacy-testid` alias lets existing specs keep selecting the element mid-migration.
-- **Dockview session panel activation:** session chat panels can become active through tab
-  pointer/keyboard events, global tab-cycling shortcuts, reopen/menu actions, and Dockview close
-  controls. When changing `tasks.activeSessionId` or active-session sync, audit all of those paths.
-  Use store state in addition to Dockview `api.isActive`; the current session's chat tab may be
-  Dockview-inactive while Files/Changes is active. Same-session clicks must not leave stale
-  activation intent, and Dockview `.dv-default-tab-action` close controls should be treated as
-  close/delete actions rather than session-switch intent.
-- **Conditional review-panel ownership:** the reusable `pr-detail` panel may be
-  visible only while the active task has a linked PR or MR. A custom Default
-  layout's canonical panel supplies the preferred group and tab index; it does
-  not make an empty tab persistent. After review data hydrates, review loss
-  removes any canonical panel regardless of how it entered the runtime layout.
-  Restoration, maximized layouts, and a session's offered/dismissed marker
-  defer or suppress automatic insertion; linked existing panels synchronize
-  provider and review identity without moving them.
-- **GitHub PR status UI:** visual PR/CI status surfaces should use the shared helpers in
-  `apps/web/components/github/pr-task-icon.tsx` (`hasPRChecksPassedForDisplay`,
-  `hasPRChecksInProgressForDisplay`, `hasPRChecksPassedWithoutReviewWaitForDisplay`) instead of
-  re-deriving status from `checks_state`, `checks_total`, or `checks_passing` locally. Aggregate
-  check counts are a display-only fallback when `checks_state` is empty; they may make chips or task
-  icons render passed/in-progress, but must not enable merge actions. Merge readiness must use
-  `isPRReadyToMerge`, which requires GitHub's explicit `checks_state === "success"` rollup. When
-  changing PR status behavior, update both `pr-task-icon.test.ts` and `pr-status-chip.test.tsx`.
+- **Renaming a `data-testid`:** use `data-legacy-testid` for the old id while
+  migrating specs; JSX and Playwright only support one `data-testid` attribute.
+- **Dockview session activation:** audit pointer/keyboard tabs, shortcuts,
+  reopen/menu actions, and close controls; combine store state with
+  `api.isActive`, clear same-session intent, and treat default-tab close as
+  delete rather than session switching.
+- **Conditional review panels:** show `pr-detail` only for active tasks with a
+  linked PR/MR; default layouts only provide preferred placement. Hydrated review
+  loss removes canonical panels, while restoration/maximized and offered/dismissed
+  markers suppress insertion; existing panels sync identity without moving.
+- **Dockview environment switching:** reconcile ephemeral panels before restoring views;
+  correlate ID-less groups by stable ID or position. Treat `chat`/`session:*` as semantic only with a non-null `activeSessionId`.
+- **GitHub PR status UI:** use the shared `pr-task-icon.tsx` display helpers and
+  `isPRReadyToMerge`; aggregate counts are display-only and cannot enable merges.
+  Update `pr-task-icon.test.ts` and `pr-status-chip.test.tsx` with behavior changes.
+- **GitHub PR associations:** retain terminal/merged siblings for tabs/unlink;
+  derive `openPRs` only for aggregate status/automation and test desktop/mobile
+  terminal unlink plus two-to-one collapse/focus.
 - **Task repository labels:** user-facing task/card repo chips should display a
   stable repo slug or name (`owner/repo` when known, otherwise the repo name),
   not a local filesystem path. Local clone paths or folder paths belong in
@@ -220,6 +220,9 @@ locale is active, and never updates on a switch — and the pseudo-locale cannot
 see it, because the text _is_ translated, just frozen. Store the key and resolve
 at render, or make the value a component. `check-module-scope-t.mjs` enforces it.
 
+UI punctuation: avoid Unicode em dash (U+2014) in user-facing copy and locale values.
+`pnpm run i18n:check` enforces periods, colons, commas, semicolons, and parentheses.
+
 `pnpm lint` fails on hardcoded UI strings (`i18next/no-literal-string` is an
 **error**), but **only on the `i18nGuardFiles` allowlist** in
 `eslint.i18n.options.mjs`, which covers every area the migration touched. It
@@ -236,14 +239,11 @@ and a file you modified is judged on the lines you touched. Untouched literals a
 never reported, so it cannot ask you to migrate code you did not write — the same
 contract as `golangci-lint --new-from-rev` for Go.
 
-The rule **only sees literals in JSX** — `confirm()` arguments and copy in plain
-`.ts` helpers are invisible to it — and it **skips anything assigned to a
-SCREAMING_CASE identifier**, so `const ROWS = [{ label: "Disk usage" }]` passes
-silently. A clean lint is not proof a file is done. `pnpm run i18n:check` gates key/catalog
-drift, `<Trans>` tag indices, inline plurals and module-scope `t()`, and the
-**pseudo-locale** (Settings → General → Appearance, dev/e2e) is the completeness
-check — any plain-English text under it was never externalized. The tooling needs
-**Node 24**. Full guide:
+The rule sees JSX literals but misses `confirm()` and plain `.ts` helper copy; it
+also skips SCREAMING_CASE constants, so review config tables by eye. `i18n:check`
+gates key/catalog drift, `<Trans>` indices, inline plurals, module-scope `t()`, and
+the **pseudo-locale** (Settings → General → Appearance) completeness check. It
+needs **Node 24**. Full guide:
 [`docs/i18n.md`](../../docs/i18n.md); spec:
 [`docs/specs/platform/i18n.md`](../../docs/specs/platform/i18n.md).
 
@@ -293,8 +293,7 @@ plugin leaks a stale registration.
 
 ## Testing notes
 
-- jsdom drops `secure` cookies over `http`, so `document.cookie` reads back empty. To assert a cookie write in a Vitest unit test, intercept the setter with `Object.defineProperty(document, "cookie", { set: ... })` and restore it after.
-- jsdom synthetic mouse events do not reliably open Radix Tooltip. In component tests, use
-  `TooltipProvider` and assert keyboard focus; cover pointer hover in Playwright with `locator.hover()`
-  and a visible `role="tooltip"`, keeping regressions that jsdom cannot exercise.
-- In Playwright tests, avoid strict locators that assume only one `terminal-panel` or `.xterm` exists. Mobile and dockview layouts can mount multiple terminal instances; scope to the active panel or use `.first()` / `.last()` deliberately with a comment or helper. Shared E2E helpers that inspect mounted React/DOM internals must also be scoped to the active panel/container, not global selectors, because hidden or stale mounted panels can coexist in dock/mobile layouts.
+- jsdom secure cookies need cookie-setter interception; Radix Tooltip tests use
+  keyboard focus, while Playwright covers pointer hover with `locator.hover()`.
+- Scope terminal selectors to the active panel/container; mobile and dockview may
+  mount multiple instances, so shared helpers must not use global selectors.

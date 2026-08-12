@@ -100,8 +100,11 @@ export type UserSettings = {
   terminal_font_size?: number;
   changes_panel_layout?: "flat" | "tree";
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
+  app_status_bar_enabled?: boolean;
   app_status_bar_order?: AppStatusBarOrderApi;
   voice_mode?: VoiceModeSettings;
+  kanban_hidden_step_ids?: Record<string, string[]>;
+  revision?: number;
   updated_at: string;
 };
 
@@ -160,6 +163,8 @@ export type UserSettingsUpdatePayload = {
   terminal_font_size?: number;
   changes_panel_layout?: "flat" | "tree";
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
+  app_status_bar_enabled?: boolean;
   app_status_bar_order?: AppStatusBarOrderApi;
   voice_mode?: VoiceModeSettings;
+  kanban_hidden_step_ids?: Record<string, string[]>;
 };

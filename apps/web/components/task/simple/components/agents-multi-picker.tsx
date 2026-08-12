@@ -62,7 +62,7 @@ function decisionTooltip(decision: TaskDecision | undefined): string {
   const verb =
     decision.decision === "approved" ? t("task:approvedVerb") : t("task:requestedChangesVerb");
   const when = formatRelativeTime(decision.createdAt);
-  const note = decision.comment ? ` — ${decision.comment}` : "";
+  const note = decision.comment ? ` - ${decision.comment}` : "";
   return `${verb} ${when}${note}`;
 }
 

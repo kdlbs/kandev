@@ -105,3 +105,69 @@ func TestHTTPUpdateSidebarDraftFromCleanSettings(t *testing.T) {
 		t.Fatalf("sidebar draft = %+v, want workflow draft", payload.Settings.SidebarDraft)
 	}
 }
+
+func newTestUserSettingsRouter(t *testing.T) *gin.Engine {
+	t.Helper()
+	conn, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	conn.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	repo, cleanup, err := userstore.Provide(conn, conn)
+	if err != nil {
+		t.Fatalf("create user repository: %v", err)
+	}
+	t.Cleanup(func() { _ = cleanup() })
+
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("create logger: %v", err)
+	}
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	NewHandlers(controller.NewController(service.NewService(repo, nil, log)), log).registerHTTP(router)
+	return router
+}
+
+func TestHTTPUpdateUserSettingsKanbanHiddenStepIDsRoundTrip(t *testing.T) {
+	router := newTestUserSettingsRouter(t)
+
+	patch := []byte(`{"kanban_hidden_step_ids":{"wf-1":["step-a","step-b"]}}`)
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/user/settings", bytes.NewReader(patch))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("PATCH kanban_hidden_step_ids status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+	}
+
+	getResponse := httptest.NewRecorder()
+	router.ServeHTTP(getResponse, httptest.NewRequest(http.MethodGet, "/api/v1/user/settings", nil))
+	if getResponse.Code != http.StatusOK {
+		t.Fatalf("GET user settings status = %d, want %d: %s", getResponse.Code, http.StatusOK, getResponse.Body.String())
+	}
+	var payload dto.UserSettingsResponse
+	if err := json.NewDecoder(getResponse.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode user settings: %v", err)
+	}
+	got := payload.Settings.KanbanHiddenStepIDs["wf-1"]
+	if len(got) != 2 || got[0] != "step-a" || got[1] != "step-b" {
+		t.Fatalf("kanban_hidden_step_ids[wf-1] = %v, want [step-a step-b]", got)
+	}
+}
+
+func TestHTTPUpdateUserSettingsBodyTooLarge(t *testing.T) {
+	router := newTestUserSettingsRouter(t)
+
+	oversized := append(bytes.Repeat([]byte(" "), maxUpdateUserSettingsBodyBytes+10), []byte("{}")...)
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/user/settings", bytes.NewReader(oversized))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("PATCH oversized body status = %d, want %d: %s", response.Code, http.StatusRequestEntityTooLarge, response.Body.String())
+	}
+}

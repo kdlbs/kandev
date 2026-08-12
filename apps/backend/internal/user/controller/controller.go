@@ -94,8 +94,10 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		TerminalFontSize:                req.TerminalFontSize,
 		ChangesPanelLayout:              req.ChangesPanelLayout,
 		SystemMetricsDisplay:            systemMetricsDisplayPatch(req.SystemMetricsDisplay),
+		AppStatusBarEnabled:             req.AppStatusBarEnabled,
 		AppStatusBarOrder:               req.AppStatusBarOrder,
 		VoiceMode:                       req.VoiceMode,
+		KanbanHiddenStepIDs:             req.KanbanHiddenStepIDs,
 	})
 	if err != nil {
 		return dto.UserSettingsResponse{}, err

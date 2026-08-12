@@ -86,6 +86,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       issues: write
+      # issues.addLabels on a *pull request* requires the PR-scoped
+      # permission; issues: write alone 403s with "Resource not accessible
+      # by integration" (see kdlbs/kandev#2532 and siblings).
       pull-requests: write
 
     steps:

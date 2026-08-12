@@ -9,6 +9,8 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
+const mcpKeyCallerTaskID = "caller_task_id"
+
 // --- Workflow config tools ---
 
 func (s *Server) registerConfigWorkflowTools() {
@@ -654,6 +656,9 @@ func (s *Server) archiveTaskHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError("task_id is required"), nil
 		}
 		payload := map[string]string{"task_id": taskID}
+		if s.taskID != "" {
+			payload[mcpKeyCallerTaskID] = s.taskID
+		}
 		return s.forwardToBackend(ctx, ws.ActionMCPArchiveTask, payload)
 	}
 }

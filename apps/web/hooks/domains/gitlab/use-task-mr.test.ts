@@ -7,15 +7,23 @@ import type { GitLabStatus, TaskMR } from "@/lib/types/gitlab";
 const fetchGitLabStatusMock = vi.fn<() => Promise<GitLabStatus | null>>();
 const listWorkspaceTaskMRsMock =
   vi.fn<(workspaceId: string) => Promise<{ task_mrs: Record<string, TaskMR[]> } | null>>();
+const deleteTaskMRMock = vi.fn<(associationId: string, workspaceId: string) => Promise<void>>();
 const EMPTY_TASK_MRS: Record<string, TaskMR[]> = {};
 const WORKSPACE_MRS_TEST_ID = "workspace-mrs";
+const toastMock = vi.fn();
 
 vi.mock("@/lib/api/domains/gitlab-api", () => ({
   fetchGitLabStatus: () => fetchGitLabStatusMock(),
   listWorkspaceTaskMRs: (workspaceId: string) => listWorkspaceTaskMRsMock(workspaceId),
+  deleteTaskMR: (associationId: string, workspaceId: string) =>
+    deleteTaskMRMock(associationId, workspaceId),
 }));
 
-import { useGitLabAvailable, useTaskMRs, useWorkspaceMRs } from "./use-task-mr";
+vi.mock("@/components/toast-provider", () => ({
+  useToast: () => ({ toast: toastMock }),
+}));
+
+import { useGitLabAvailable, useTaskMRs, useUnlinkTaskMR, useWorkspaceMRs } from "./use-task-mr";
 
 function wrapper({ children }: { children: ReactNode }) {
   return createElement(StateProvider, {
@@ -350,5 +358,83 @@ describe("useGitLabAvailable", () => {
     });
     await new Promise((r) => setTimeout(r, 10));
     expect(fetchGitLabStatusMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+// spec: API surface, "one extraction ... moved verbatim". Both
+// MRTopbarButton and MRStatusChip call this closure, so parity between the
+// two surfaces holds because there is exactly one implementation.
+describe("useUnlinkTaskMR", () => {
+  beforeEach(() => {
+    deleteTaskMRMock.mockReset();
+    toastMock.mockReset();
+  });
+
+  it("is a no-op when workspaceId is null", async () => {
+    const { result } = renderHook(() => useUnlinkTaskMR(null), { wrapper });
+    await act(async () => {
+      await result.current("assoc-1");
+    });
+    expect(deleteTaskMRMock).not.toHaveBeenCalled();
+  });
+
+  it("removes the association from the store on success", async () => {
+    deleteTaskMRMock.mockResolvedValueOnce(undefined);
+    const mr = makeMR({ id: "assoc-1", task_id: "task-1" });
+    const { result } = renderHook(
+      () => {
+        const setTaskMRs = useAppStore((s) => s.setTaskMRs);
+        const mrs = useTaskMRs("task-1", "ws-1");
+        const unlink = useUnlinkTaskMR("ws-1");
+        return { setTaskMRs, mrs, unlink };
+      },
+      { wrapper },
+    );
+    act(() => {
+      result.current.setTaskMRs("ws-1", { "task-1": [mr] });
+    });
+    expect(result.current.mrs).toEqual([mr]);
+
+    await act(async () => {
+      await result.current.unlink("assoc-1");
+    });
+
+    expect(deleteTaskMRMock).toHaveBeenCalledWith("assoc-1", "ws-1");
+    expect(toastMock).not.toHaveBeenCalled();
+    // The whole point of this test: the association actually left the
+    // store. Asserting only pre-unlink state (as this test previously did)
+    // is phantom-green — deleting the removeTaskMR call from the hook still
+    // leaves that assertion passing.
+    expect(result.current.mrs).toEqual([]);
+  });
+
+  it("toasts an error and leaves the association in the store on failure", async () => {
+    deleteTaskMRMock.mockRejectedValueOnce(new Error("network down"));
+    const mr = makeMR({ id: "assoc-1", task_id: "task-1" });
+    const { result } = renderHook(
+      () => {
+        const setTaskMRs = useAppStore((s) => s.setTaskMRs);
+        const mrs = useTaskMRs("task-1", "ws-1");
+        const unlink = useUnlinkTaskMR("ws-1");
+        return { setTaskMRs, mrs, unlink };
+      },
+      { wrapper },
+    );
+    act(() => {
+      result.current.setTaskMRs("ws-1", { "task-1": [mr] });
+    });
+
+    await act(async () => {
+      await result.current.unlink("assoc-1");
+    });
+
+    // spec.md:1026-1029 names the specific title key (gitlab:failedToUnlinkMergeRequest)
+    // both surfaces must use; assert its resolved English text since i18next
+    // is the real instance in this test environment, not a raw-key stub.
+    expect(toastMock).toHaveBeenCalledTimes(1);
+    expect(toastMock).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Failed to unlink merge request" }),
+    );
+    expect(result.current.mrs).toEqual([mr]);
   });
 });

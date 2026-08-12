@@ -27,6 +27,8 @@ const (
 	dockerAgentctlInstancePortBase  = 41001
 	dockerAgentctlInstancePortMax   = 41100
 	boolStringTrue                  = "true"
+	e2eDockerScopeEnv               = "KANDEV_E2E_DOCKER_SCOPE"
+	e2eDockerScopeLabel             = "kandev.e2e.run"
 	gitHubCredentialHelperConfigKey = "credential.https://github.com.helper"
 	remoteAgentctlExecutablePath    = "/usr/local/bin/agentctl"
 )
@@ -545,6 +547,9 @@ exec /usr/local/bin/agentctl`,
 		},
 		AutoRemove: false, // We manage cleanup ourselves
 	}
+	if scope := os.Getenv(e2eDockerScopeEnv); scope != "" {
+		containerCfg.Labels[e2eDockerScopeLabel] = scope
+	}
 
 	if config.ExecutorProfileID != "" {
 		containerCfg.Labels["kandev.executor_profile_id"] = config.ExecutorProfileID
@@ -726,9 +731,11 @@ func generateBootstrapNonce() (string, error) {
 
 // ListManagedContainers returns all containers managed by kandev
 func (cm *ContainerManager) ListManagedContainers(ctx context.Context) ([]docker.ContainerInfo, error) {
-	return cm.dockerClient.ListContainers(ctx, map[string]string{
-		"kandev.managed": boolStringTrue,
-	})
+	labels := map[string]string{"kandev.managed": boolStringTrue}
+	if scope := os.Getenv(e2eDockerScopeEnv); scope != "" {
+		labels[e2eDockerScopeLabel] = scope
+	}
+	return cm.dockerClient.ListContainers(ctx, labels)
 }
 
 // GetContainerInfo returns information about a specific container

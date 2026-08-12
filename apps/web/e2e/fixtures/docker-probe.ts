@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -8,6 +9,8 @@ import path from "node:path";
  * Tag is stable so layer caches survive across runs.
  */
 export const E2E_IMAGE_TAG = "kandev-agent:e2e";
+/** Label value shared by resources created in this Playwright process. */
+export const E2E_DOCKER_SCOPE = `e2e-${process.pid}-${randomUUID().slice(0, 8)}`;
 const FAKE_LSP_SERVER = path.resolve(__dirname, "fake-lsp-server.mjs");
 
 const E2E_DOCKERFILE = `FROM node:22-slim
@@ -46,14 +49,22 @@ export function buildE2EImage(): void {
 }
 
 /**
- * Remove all containers labeled as managed by kandev. Called at worker
- * teardown to clean up anything the suite leaked. Safe to run on a host with
- * no matching containers.
+ * Remove only containers owned by this E2E process. Never use a daemon-wide
+ * kandev.managed=true sweep: another shard can share the Docker daemon.
  */
-export function removeKandevContainers(): void {
-  const list = spawnSync("docker", ["ps", "-aq", "--filter", "label=kandev.managed=true"], {
-    encoding: "utf8",
-  });
+export function removeScopedKandevContainers(scope = E2E_DOCKER_SCOPE): void {
+  const list = spawnSync(
+    "docker",
+    [
+      "ps",
+      "-aq",
+      "--filter",
+      "label=kandev.managed=true",
+      "--filter",
+      `label=kandev.e2e.run=${scope}`,
+    ],
+    { encoding: "utf8" },
+  );
   if (list.status !== 0) return;
   const ids = list.stdout
     .split("\n")

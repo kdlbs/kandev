@@ -83,7 +83,7 @@ INSTRUCTIONS:
 3. Identify potential risks or blockers
 4. Estimate relative complexity for each step (low/medium/high)
 
-Output the plan as a numbered list. Be specific about file paths, function names, and the approach for each step. Do NOT implement anything yet — only plan.`,
+Output the plan as a numbered list. Be specific about file paths, function names, and the approach for each step. Do NOT implement anything yet - only plan.`,
   },
   {
     labelKey: "workflows:templateCodeReview",
@@ -98,7 +98,7 @@ STEP 1: Determine what to review
   - Use: git log --oneline $(git merge-base "$BASE_REF" HEAD)..HEAD to list the branch commits
   - Use: git diff $(git merge-base "$BASE_REF" HEAD) to see the cumulative changes
   - Do NOT diff directly against BASE_REF or origin/main/master - that would include unrelated changes if the branch is outdated
-- Read each changed file in full — understand surrounding code, not just the diff
+- Read each changed file in full - understand surrounding code, not just the diff
 - Navigate callers, interfaces, and tests to understand changes end-to-end
 - Check git blame on modified sections to understand why code was written a certain way
 - Only REPORT issues on code modified in this changeset, but USE the full codebase for context
@@ -141,7 +141,7 @@ LOGIC & CORRECTNESS:
 - Edge cases handled (empty input, nil/null, zero, max values)
 - Error paths covered and not silently swallowed
 - Race conditions or concurrency issues (unprotected shared state, missing synchronization, goroutine leaks)
-- Broken invariants — state that can become invalid
+- Broken invariants - state that can become invalid
 
 PERFORMANCE:
 
@@ -156,8 +156,8 @@ CODE QUALITY:
 - No dead code, unused imports, or commented-out code
 - Check for orphaned code: if the change refactored or removed callers, grep for functions/types/exports that lost their last consumer
 - No speculative code (unused flags, one-off abstractions with single call site)
-- No duplicated logic — extract shared helpers or constants
-- Deep nesting (>3 levels) — use early returns
+- No duplicated logic - extract shared helpers or constants
+- Deep nesting (>3 levels) - use early returns
 
 AI SLOP DETECTION:
 
@@ -165,7 +165,7 @@ AI SLOP DETECTION:
 - Unnecessary try/catch that swallow errors or return silent defaults
 - as any / as unknown casts to dodge type errors instead of fixing types
 - Redundant validation where inputs are already parsed/typed
-- Defensive checks abnormal for the area — compare with surrounding code patterns
+- Defensive checks abnormal for the area - compare with surrounding code patterns
 
 STEP 3: Output your findings.
 
@@ -175,20 +175,20 @@ Only report findings you're >=80% confident about.
 Use these sections (omit empty ones):
 
 ## BLOCKER
-Must fix before merge — architectural violations, security holes, data loss risk, broken logic, crashes.
+Must fix before merge - architectural violations, security holes, data loss risk, broken logic, crashes.
 
 - file:line - Description. Why it matters. How to fix.
 
 ## SUGGESTION
-Recommended but doesn't block — architecture, performance, maintainability, or specific missing tests.
+Recommended but doesn't block - architecture, performance, maintainability, or specific missing tests.
 
 - file:line - Description. Why it matters. How to fix.
 
-End with a verdict: Ready to merge / Ready with suggestions / Blocked — fix blockers first
+End with a verdict: Ready to merge / Ready with suggestions / Blocked - fix blockers first
 
 NOT A FINDING (skip these):
 
-- Issues on lines or files the change didn't modify — even if they are real bugs
+- Issues on lines or files the change didn't modify - even if they are real bugs
 - Pre-existing code patterns that this change didn't introduce
 - Things linters, typecheckers, or CI catch (imports, types, formatting)
 - Intentional functionality changes directly related to the task

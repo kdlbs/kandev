@@ -179,6 +179,7 @@ export const test = backendFixture.extend<
   // SSR always resolves to the correct workspace regardless of what commitSettings
   // may have written during previous tests.
   testPage: async ({ browser, backend, apiClient, seedData }, use) => {
+    await backend.ensureReady();
     // Clean up tasks, test-created workflows, and extra agent profiles from
     // previous tests in this worker. Keep the seeded workflow and the seed
     // agent profile so the worker-scoped seedData fixture remains valid.
@@ -336,6 +337,9 @@ test.beforeEach(async ({ apiClient, seedData }) => {
     sidebar_active_view_id: DEFAULT_SIDEBAR_VIEW.id,
     sidebar_draft: null,
     saved_layouts: [],
+    // Status-surface specs opt in from their local beforeEach hooks; unrelated
+    // tests start from the portable setting's default-off state.
+    app_status_bar_enabled: false,
     lsp_auto_start_languages: [],
     lsp_auto_install_languages: [],
     lsp_server_configs: {},

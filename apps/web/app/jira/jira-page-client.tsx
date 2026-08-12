@@ -2,9 +2,10 @@
 
 import Link from "@/components/routing/app-link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { IconTicket } from "@tabler/icons-react";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
-import { PageTopbar } from "@/components/page-topbar";
+import { PageShell } from "@/components/page-shell";
 import { getJiraConfig, listJiraProjects, searchJiraTickets } from "@/lib/api/domains/jira-api";
 import type { JiraProject, JiraTicket } from "@/lib/types/jira";
 import type { Workflow, WorkflowStep } from "@/lib/types/http";
@@ -32,7 +33,6 @@ import { ResultsPagination } from "@/components/jira/my-jira/results-pagination"
 import { JqlEditor } from "@/components/jira/my-jira/jql-editor";
 import { useJiraTaskPresets } from "@/components/jira/my-jira/use-task-presets";
 import type { JiraTaskPreset } from "@/components/jira/my-jira/presets";
-import { Trans, useTranslation } from "react-i18next";
 
 type JiraPageClientProps = {
   workspaceId?: string;
@@ -243,7 +243,8 @@ function AuthenticatedView({
           onClear={() => state.updateFilters(DEFAULT_FILTERS)}
         />
       )}
-      <main className="flex-1 overflow-auto px-6 py-2">
+      {/* Not a <main>: AppShell owns that landmark, one per page. */}
+      <div className="flex-1 overflow-auto px-6 py-2">
         <TicketResults
           items={search.items}
           loading={search.loading}
@@ -252,7 +253,7 @@ function AuthenticatedView({
           onStartTask={onStartTask}
           onOpen={onOpenTicket}
         />
-      </main>
+      </div>
       <ResultsPagination
         page={search.page}
         pageSize={search.pageSize}
@@ -338,26 +339,28 @@ export function JiraPageClient({ workspaceId, workflows, steps }: JiraPageClient
   const onOpenTicket = useCallback((ticket: JiraTicket) => setOpenTicket(ticket), []);
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col bg-background">
-      <PageTopbar
-        title="Jira"
-        subtitle={t("jira:ticketsAcrossYourAtlassianProjects")}
-        icon={<IconTicket className="h-4 w-4" />}
-      />
-      {!loaded && (
-        <div className="p-6 text-sm text-muted-foreground">{t("jira:checkingJiraStatus")}</div>
-      )}
-      {loaded && !configured && <NotConfiguredNotice />}
-      {loaded && configured && (
-        <AuthenticatedView
-          workspaceId={workspaceId}
-          projects={projects}
-          defaultProjectKey={defaultProjectKey}
-          presets={taskPresets}
-          onStartTask={onStartTask}
-          onOpenTicket={onOpenTicket}
-        />
-      )}
+    <PageShell
+      title="Jira"
+      subtitle={t("jira:ticketsAcrossYourAtlassianProjects")}
+      icon={<IconTicket className="h-4 w-4" />}
+      scroll="none"
+    >
+      <div className="flex min-h-0 w-full flex-1 flex-col bg-background">
+        {!loaded && (
+          <div className="p-6 text-sm text-muted-foreground">{t("jira:checkingJiraStatus")}</div>
+        )}
+        {loaded && !configured && <NotConfiguredNotice />}
+        {loaded && configured && (
+          <AuthenticatedView
+            workspaceId={workspaceId}
+            projects={projects}
+            defaultProjectKey={defaultProjectKey}
+            presets={taskPresets}
+            onStartTask={onStartTask}
+            onOpenTicket={onOpenTicket}
+          />
+        )}
+      </div>
       <QuickTaskLauncher
         workspaceId={workspaceId ?? null}
         workflows={workflows}
@@ -379,6 +382,6 @@ export function JiraPageClient({ workspaceId, workflows, steps }: JiraPageClient
           onStartTask(ticket, preset);
         }}
       />
-    </div>
+    </PageShell>
   );
 }

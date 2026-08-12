@@ -205,6 +205,7 @@ export type SleepInhibitionStoreState = {
 };
 
 export type UserSettingsState = {
+  revision: number | null;
   workspaceId: string | null;
   kanbanViewMode: string | null;
   startupPage: StartupPage;
@@ -253,8 +254,10 @@ export type UserSettingsState = {
   terminalFontSize: number | null;
   changesPanelLayout: "flat" | "tree";
   systemMetricsDisplay: { showInTopbar: boolean; simplified: boolean };
+  appStatusBarEnabled: boolean;
   appStatusBarOrder: AppStatusBarOrderState;
   voiceMode: VoiceModeState;
+  hiddenWorkflowStepIds: Record<string, string[]>;
   loaded: boolean;
 };
 

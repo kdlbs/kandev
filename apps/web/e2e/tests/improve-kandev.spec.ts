@@ -225,6 +225,83 @@ test.describe("Improve Kandev dialog", () => {
       .not.toContainEqual(expect.objectContaining({ title }));
   });
 
+  test("a second bug can be filed after reopening the dialog in the dedicated workspace", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    // Seed the dedicated workspace under a temporary name (repositories and
+    // workflows cannot be created in the immutable workspace via the API),
+    // then rename it — same approach as the isolation test above.
+    const staging = await apiClient.createWorkspace("Improve Kandev Setup");
+    const dedicatedWorkflow = await apiClient.createWorkflow(
+      staging.id,
+      "Improve Kandev",
+      "simple",
+    );
+    const dedicatedRepo = await apiClient.createRepository(
+      staging.id,
+      seedData.repositoryPath,
+      "main",
+    );
+    await apiClient.updateWorkspace(staging.id, { name: "Improve Kandev" });
+    await apiClient.saveUserSettings({ agent_generated_task_titles: false });
+    const dedicated = staging;
+    await mockImproveKandevApis(testPage, seedData, {
+      workspaceId: dedicated.id,
+      workflowId: dedicatedWorkflow.id,
+      issueWorkflowId: dedicatedWorkflow.id,
+      repositoryId: dedicatedRepo.id,
+    });
+
+    await testPage.goto("/");
+    // Activate the dedicated workspace — the state a user is in after their
+    // first contribution navigates them there.
+    await testPage.getByTestId("sidebar-workspace-trigger").click();
+    await testPage.getByTestId(`sidebar-workspace-item-${dedicated.id}`).click();
+    await expect(testPage.getByTestId("sidebar-workspace-trigger")).toHaveText(/Improve Kandev/);
+
+    // First bug: New Task opens the Improve dialog, dismiss the intro, submit.
+    await testPage.getByTestId("create-task-button").click();
+    const introDialog = testPage.getByRole("dialog", { name: "Improve Kandev" });
+    await introDialog.getByTestId("improve-kandev-skip-intro").click();
+    await testPage.getByTestId("improve-kandev-proceed").click();
+
+    const createDialog = testPage.getByTestId("create-task-dialog");
+    await expect(createDialog).toBeVisible({ timeout: 10_000 });
+    await createDialog.getByTestId("task-title-input").fill("First contribution");
+    await createDialog
+      .getByTestId("task-description-input")
+      .fill("First bug: column header overlap on narrow viewports.");
+    const submit = createDialog.getByTestId("submit-start-agent");
+    await expect(submit).toBeEnabled({ timeout: 10_000 });
+    await submit.click();
+    await expect(createDialog).toBeHidden({ timeout: 10_000 });
+    await expect
+      .poll(async () => (await apiClient.listTasks(dedicated.id)).tasks)
+      .toContainEqual(expect.objectContaining({ title: "First contribution" }));
+
+    // Second bug: reopen the dialog in the same workspace. The bootstrap probe
+    // must re-run and unblock submit — regression: it stayed at the idle
+    // "Preparing kandev repository in background" banner with submit disabled
+    // forever because the workspace-choice gate was never re-asserted.
+    await testPage.getByTestId("create-task-button").click();
+    await expect(createDialog).toBeVisible({ timeout: 10_000 });
+    // Contributor banner proves this is the Improve dialog with bootstrap
+    // ready (the generic create dialog never renders it).
+    await expect(createDialog.getByText("@octocat")).toBeVisible({ timeout: 10_000 });
+    await createDialog.getByTestId("task-title-input").fill("Second contribution");
+    await createDialog
+      .getByTestId("task-description-input")
+      .fill("Second bug: missing keyboard shortcut for marking a task Done.");
+    await expect(submit).toBeEnabled({ timeout: 10_000 });
+    await submit.click();
+    await expect(createDialog).toBeHidden({ timeout: 10_000 });
+    await expect
+      .poll(async () => (await apiClient.listTasks(dedicated.id)).tasks)
+      .toContainEqual(expect.objectContaining({ title: "Second contribution" }));
+  });
+
   test("New task button opens the Improve Kandev dialog in the dedicated workspace", async ({
     testPage,
     apiClient,

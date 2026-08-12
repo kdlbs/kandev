@@ -66,8 +66,11 @@ type UserSettingsDTO struct {
 	TerminalFontSize                int                                 `json:"terminal_font_size"`
 	ChangesPanelLayout              string                              `json:"changes_panel_layout"`
 	SystemMetricsDisplay            models.SystemMetricsDisplaySettings `json:"system_metrics_display"`
+	AppStatusBarEnabled             bool                                `json:"app_status_bar_enabled"`
 	AppStatusBarOrder               models.AppStatusBarOrder            `json:"app_status_bar_order"`
 	VoiceMode                       models.VoiceModeSettings            `json:"voice_mode"`
+	KanbanHiddenStepIDs             map[string][]string                 `json:"kanban_hidden_step_ids"`
+	Revision                        int64                               `json:"revision"`
 	UpdatedAt                       string                              `json:"updated_at"`
 }
 
@@ -137,8 +140,10 @@ type UpdateUserSettingsRequest struct {
 	TerminalFontSize                *int                               `json:"terminal_font_size,omitempty"`
 	ChangesPanelLayout              *string                            `json:"changes_panel_layout,omitempty"`
 	SystemMetricsDisplay            *SystemMetricsDisplaySettingsPatch `json:"system_metrics_display,omitempty"`
+	AppStatusBarEnabled             *bool                              `json:"app_status_bar_enabled,omitempty"`
 	AppStatusBarOrder               *models.AppStatusBarOrder          `json:"app_status_bar_order,omitempty"`
 	VoiceMode                       *models.VoiceModeSettings          `json:"voice_mode,omitempty"`
+	KanbanHiddenStepIDs             *map[string][]string               `json:"kanban_hidden_step_ids,omitempty"`
 }
 
 type SystemMetricsDisplaySettingsPatch struct {
@@ -269,8 +274,11 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		TerminalFontSize:                settings.TerminalFontSize,
 		ChangesPanelLayout:              settings.ChangesPanelLayout,
 		SystemMetricsDisplay:            settings.SystemMetricsDisplay,
+		AppStatusBarEnabled:             settings.AppStatusBarEnabled,
 		AppStatusBarOrder:               settings.AppStatusBarOrder,
 		VoiceMode:                       settings.VoiceMode,
+		KanbanHiddenStepIDs:             settings.KanbanHiddenStepIDs,
+		Revision:                        settings.Revision,
 		UpdatedAt:                       settings.UpdatedAt.Format(time.RFC3339),
 	}
 }

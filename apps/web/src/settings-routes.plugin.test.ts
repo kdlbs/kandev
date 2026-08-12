@@ -65,7 +65,8 @@ describe("renderSettingsRoute — plugin fallthrough", () => {
 
     const route = renderSettingsRoute("/settings/general");
 
-    // "/settings/general" is a real static route (GeneralSettings), not the plugin's.
+    // "/settings/general" is a first-party route (a redirect to its first page),
+    // not the plugin's.
     expect((route as ReactElement).type).not.toBe(ShouldNotMatch);
   });
 });

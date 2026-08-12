@@ -9,6 +9,7 @@ import {
   statsReducer,
   toPanelState,
 } from "./stats-utils";
+import { composeStatsResponse, type StatsSections } from "./stats-data";
 
 const emptyGlobal: StatsResponse["global"] = {
   total_tasks: 0,
@@ -40,7 +41,7 @@ const sampleStats: StatsResponse = {
   task_stats: [],
   daily_activity: [],
   completed_activity: [],
-  agent_usage: [],
+  model_usage: [],
   repository_stats: [
     {
       repository_id: "r1",
@@ -68,6 +69,40 @@ const sampleStats: StatsResponse = {
   },
 };
 
+function readySections(modelUsage: StatsResponse["model_usage"]): StatsSections {
+  return {
+    global: { kind: "ready", data: sampleStats.global },
+    tasks: {
+      kind: "ready",
+      data: { task_stats: sampleStats.task_stats, task_stats_has_more: false },
+    },
+    daily: { kind: "ready", data: sampleStats.daily_activity },
+    completed: { kind: "ready", data: sampleStats.completed_activity },
+    models: { kind: "ready", data: modelUsage },
+    repos: { kind: "ready", data: sampleStats.repository_stats },
+    git: { kind: "ready", data: sampleStats.git_stats },
+  };
+}
+
+describe("composeStatsResponse", () => {
+  it("waits for model usage before composing the response", () => {
+    const sections = readySections([]);
+    sections.models = { kind: "loading" };
+
+    expect(composeStatsResponse(sections)).toBeNull();
+  });
+
+  it("maps model usage into the composed response", () => {
+    const modelUsage = [{ model: "opus", session_count: 2, turn_count: 4, total_duration_ms: 100 }];
+
+    expect(composeStatsResponse(readySections(modelUsage))?.model_usage).toEqual(modelUsage);
+  });
+
+  it("preserves an empty model usage response", () => {
+    expect(composeStatsResponse(readySections([]))?.model_usage).toEqual([]);
+  });
+});
+
 describe("isRangeKey", () => {
   it("accepts the three valid keys", () => {
     expect(isRangeKey("week")).toBe(true);
@@ -94,7 +129,7 @@ describe("getRangeLabel", () => {
 
 describe("formatDuration", () => {
   it("renders an em-dash for zero", () => {
-    expect(formatDuration(0)).toBe("—");
+    expect(formatDuration(0)).toBe("-");
   });
 
   it("formats seconds, minutes, and hours", () => {
@@ -173,7 +208,7 @@ describe("toPanelState", () => {
 describe("buildStatsSummary", () => {
   it("includes completion %, top repo, and git line", () => {
     const summary = buildStatsSummary(sampleStats, "Last Month", 4);
-    expect(summary).toContain("*Kandev Stats — Last Month*");
+    expect(summary).toContain("*Kandev Stats - Last Month*");
     expect(summary).toContain("10 total (4 done, 2 in progress) · 40% completion");
     expect(summary).toContain("Completed (Last Month): 4");
     expect(summary).toContain("Top repo: kandev (6 tasks)");
@@ -193,8 +228,8 @@ describe("buildStatsSummary", () => {
       },
     };
     const summary = buildStatsSummary(empty, "All Time", 0);
-    expect(summary).toContain("Top repo: —");
+    expect(summary).toContain("Top repo: -");
     expect(summary).toContain("Git: no git activity");
-    expect(summary).toContain("0 total (0 done, 0 in progress) · — completion");
+    expect(summary).toContain("0 total (0 done, 0 in progress) · - completion");
   });
 });

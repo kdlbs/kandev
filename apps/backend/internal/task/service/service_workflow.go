@@ -161,6 +161,9 @@ func (s *Service) resolveApprovalNextStep(ctx context.Context, step *wfmodels.Wo
 // UpdateTaskState updates the state of a task, moves it to the matching column,
 // and publishes a task.state_changed event
 func (s *Service) UpdateTaskState(ctx context.Context, id string, state v1.TaskState) (*models.Task, error) {
+	if err := s.authorizeTaskID(ctx, id); err != nil {
+		return nil, err
+	}
 	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
 		return nil, err
@@ -430,6 +433,9 @@ func (s *Service) MoveTaskWithOptions(
 	position int,
 	opts MoveTaskOptions,
 ) (*MoveTaskResult, error) {
+	if err := s.authorizeTaskID(ctx, id); err != nil {
+		return nil, err
+	}
 	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
 		return nil, err
@@ -684,6 +690,19 @@ func (s *Service) promoteFeederQueuedTask(ctx context.Context, candidate *models
 		s.publishTaskMovedEvent(ctx, candidate, oldWorkflowID, fromStepID, targetStep.ID, "")
 		return true
 	}
+	// ctx here still carries the identity of whoever triggered the move that
+	// freed the slot, so MoveTaskWithOptions' authorizeTaskID applies to the
+	// promoted candidate too. That is safe by construction: a step's
+	// PullFromStepID resolves within the same workflow, a workflow belongs to
+	// one workspace, and a workspace has one owner — so the candidate always
+	// belongs to the caller who just passed the same check.
+	//
+	// If a future configuration ever allowed cross-workspace feeder pulls, this
+	// would refuse and log below rather than promote. Leave it that way: do not
+	// strip the identity to "fix" it. Promoting another user's task into a step
+	// they cannot see is the worse outcome, and the atomic promoter above (which
+	// the SQLite repository implements, so it is the only path production takes)
+	// does not go through a guarded method at all.
 	if _, err := s.MoveTaskWithOptions(ctx, candidate.ID, targetStep.WorkflowID, targetStep.ID, position, MoveTaskOptions{PreserveDeferredLaunch: true}); err != nil {
 		skipped[candidate.ID] = struct{}{}
 		s.logger.Warn("skipping queued task that could not be promoted", zap.String("task_id", candidate.ID), zap.String("to_step_id", targetStep.ID), zap.Error(err))

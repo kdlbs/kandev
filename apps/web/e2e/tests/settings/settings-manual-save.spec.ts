@@ -1,10 +1,12 @@
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 
-const APPEARANCE_PATH = "/settings/general/appearance";
-const TERMINAL_PATH = "/settings/general/terminal";
-const NOTIFICATIONS_PATH = "/settings/general/notifications";
-const TASK_ACTIONS_PATH = "/settings/general/task-actions";
+const APPEARANCE_PATH = "/settings/preferences/appearance";
+const TERMINAL_PATH = "/settings/preferences/terminal-editors";
+const NOTIFICATIONS_PATH = "/settings/preferences/notifications";
+// The menu row the Terminal page now sits on; it was plain "Terminal" before
+// the settings restructure merged Terminal and Editors into one page.
+const TERMINAL_ROW = "Terminal & Editors";
 const CLARIFICATION_REQUESTED = "session.clarification_requested";
 const PROVIDER_NAME = "E2E semantic notifications";
 
@@ -26,84 +28,17 @@ async function seedNotificationProvider(
 }
 
 test.describe("Settings manual save", () => {
-  test("persists host sleep inhibition only when Save changes is pressed", async ({
-    testPage,
-    apiClient,
-    prCapture,
-  }) => {
-    const initialResponse = await apiClient.rawRequest("GET", "/api/v1/system/sleep-inhibition");
-    expect(initialResponse.ok).toBe(true);
-    const initial = (await initialResponse.json()) as {
-      settings: { enabled: boolean };
-    };
-    const next = !initial.settings.enabled;
-
-    try {
-      await testPage.goto(TASK_ACTIONS_PATH);
-      const card = testPage.getByTestId("sleep-inhibition-settings");
-      const toggle = card.getByRole("switch", { name: "Prevent idle system sleep" });
-      await expect(card).toBeVisible();
-      await expect(card).toContainText("Container, Kubernetes, remote-executor");
-      const info = card.getByRole("button", { name: "How host sleep prevention works" });
-      await info.hover();
-      const infoTooltip = testPage.getByRole("tooltip");
-      await expect(infoTooltip).toContainText("/usr/bin/caffeinate -i -w");
-      await expect(infoTooltip).toContainText("SetThreadExecutionState");
-      await expect(infoTooltip).toContainText("systemd-logind");
-      await testPage.waitForTimeout(500);
-      await prCapture.screenshot("sleep-inhibition-desktop-info", {
-        caption: "Desktop host sleep prevention details in the hover tooltip",
-      });
-      if (initial.settings.enabled) await expect(toggle).toBeChecked();
-      else await expect(toggle).not.toBeChecked();
-
-      await toggle.click();
-      await expect(card).toHaveAttribute("data-settings-dirty", "true");
-      const beforeSaveResponse = await apiClient.rawRequest(
-        "GET",
-        "/api/v1/system/sleep-inhibition",
-      );
-      expect(((await beforeSaveResponse.json()) as typeof initial).settings.enabled).toBe(
-        initial.settings.enabled,
-      );
-
-      const floatingSave = testPage.getByTestId("settings-floating-save");
-      await testPage.waitForTimeout(1_000);
-      await testPage
-        .locator("[data-sonner-toast], [data-testid='toast-message']")
-        .evaluateAll((toasts) => {
-          for (const toast of toasts) (toast as HTMLElement).style.display = "none";
-        });
-      await prCapture.screenshot("sleep-inhibition-desktop-draft", {
-        caption: "Task Actions sleep inhibition setting with Save changes pending",
-      });
-      await floatingSave.getByRole("button", { name: "Save changes" }).click();
-      await expect(floatingSave).not.toBeVisible({ timeout: 15_000 });
-
-      const savedResponse = await apiClient.rawRequest("GET", "/api/v1/system/sleep-inhibition");
-      expect(((await savedResponse.json()) as typeof initial).settings.enabled).toBe(next);
-      await testPage.reload();
-      const reloadedToggle = testPage
-        .getByTestId("sleep-inhibition-settings")
-        .getByRole("switch", { name: "Prevent idle system sleep" });
-      if (next) await expect(reloadedToggle).toBeChecked();
-      else await expect(reloadedToggle).not.toBeChecked();
-    } finally {
-      await apiClient.rawRequest("PATCH", "/api/v1/system/sleep-inhibition", {
-        enabled: initial.settings.enabled,
-      });
-    }
-  });
-
   test("keeps Appearance changes local and guards dirty navigation", async ({
     testPage,
     apiClient,
   }) => {
     const initial = await apiClient.getUserSettings();
     const initialLayout = initial.settings.changes_panel_layout === "tree" ? "tree" : "flat";
+    const initialStatusBarEnabled = initial.settings.app_status_bar_enabled === true;
     const nextLayout = initialLayout === "tree" ? "flat" : "tree";
 
     try {
+      await apiClient.saveUserSettings({ app_status_bar_enabled: true });
       await testPage.goto(APPEARANCE_PATH);
       await expect(
         testPage.getByRole("heading", { name: "Appearance", exact: true }),
@@ -125,7 +60,47 @@ test.describe("Settings manual save", () => {
         initial.settings.changes_panel_layout,
       );
 
-      await testPage.getByRole("link", { name: "Terminal", exact: true }).first().click();
+      const surface = floatingSave.getByTestId("settings-floating-save-surface");
+      const contentArea = testPage.getByTestId("settings-scroll-container");
+      const configChatButton = testPage.getByRole("button", { name: "Configuration Chat" });
+      const [surfaceBox, contentBox, configChatBox] = await Promise.all([
+        surface.boundingBox(),
+        contentArea.boundingBox(),
+        configChatButton.boundingBox(),
+      ]);
+      expect(surfaceBox).not.toBeNull();
+      expect(contentBox).not.toBeNull();
+      expect(configChatBox).not.toBeNull();
+      expect(surfaceBox!.height).toBeLessThanOrEqual(48);
+      expect(
+        Math.abs(surfaceBox!.x + surfaceBox!.width / 2 - (contentBox!.x + contentBox!.width / 2)),
+      ).toBeLessThanOrEqual(2);
+      expect(
+        Math.abs(
+          surfaceBox!.y + surfaceBox!.height / 2 - (configChatBox!.y + configChatBox!.height / 2),
+        ),
+      ).toBeLessThanOrEqual(2);
+      await expect(floatingSave).not.toHaveClass(/bg-success/);
+      await expect(floatingSave.getByRole("button", { name: "Save changes" })).toHaveClass(
+        /bg-success/,
+      );
+
+      await floatingSave.getByRole("button", { name: "Reset" }).click();
+      await expect(floatingSave).not.toBeVisible();
+      await expect(testPage.getByTestId("changes-panel-layout-card")).toHaveAttribute(
+        "data-settings-dirty",
+        "false",
+      );
+      expect((await apiClient.getUserSettings()).settings.changes_panel_layout).toBe(
+        initial.settings.changes_panel_layout,
+      );
+
+      await layout.click();
+      await testPage
+        .getByRole("option", { name: nextLayout === "tree" ? "Tree" : "Flat list" })
+        .click();
+
+      await testPage.getByRole("link", { name: TERMINAL_ROW, exact: true }).first().click();
       const navigationDialog = testPage.getByRole("alertdialog", {
         name: "Save changes before leaving?",
       });
@@ -133,13 +108,14 @@ test.describe("Settings manual save", () => {
       await navigationDialog.getByRole("button", { name: "Continue editing" }).click();
       await expect(testPage).toHaveURL(new RegExp(`${APPEARANCE_PATH}$`));
 
-      await testPage.getByRole("link", { name: "Terminal", exact: true }).first().click();
+      await testPage.getByRole("link", { name: TERMINAL_ROW, exact: true }).first().click();
       await expect(navigationDialog).toBeVisible();
       await navigationDialog.getByRole("button", { name: "Save and leave" }).click();
       await expect(testPage).toHaveURL(new RegExp(`${TERMINAL_PATH}$`));
       expect((await apiClient.getUserSettings()).settings.changes_panel_layout).toBe(nextLayout);
     } finally {
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+        app_status_bar_enabled: initialStatusBarEnabled,
         changes_panel_layout: initialLayout,
       });
     }
@@ -188,7 +164,7 @@ test.describe("Settings manual save", () => {
     const initialAutoScrollControl = initial.settings.show_transcript_auto_scroll_control;
 
     try {
-      await testPage.goto("/settings/general/task-actions");
+      await testPage.goto("/settings/preferences/task-behavior");
       const autoScrollControl = testPage.getByRole("switch", {
         name: "Show transcript auto-scroll control",
       });

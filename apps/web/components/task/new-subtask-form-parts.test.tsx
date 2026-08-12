@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { UtilityGenerationResult } from "@/hooks/use-utility-agent-generator";
@@ -11,21 +12,83 @@ vi.mock("@/components/enhance-prompt-button", () => ({
   ),
 }));
 
+vi.mock("@/components/task-create-dialog-repo-chips", () => ({
+  RepoChipsRow: () => (
+    <div data-testid="repo-chips-row">
+      <button type="button" data-testid="repo-chip-trigger">
+        Parent repository
+      </button>
+    </div>
+  ),
+}));
+
+vi.mock("@/components/task-create-dialog-selectors", () => ({
+  AgentSelector: () => <div data-testid="agent-profile-selector" />,
+  ExecutorProfileSelector: () => <div data-testid="executor-profile-selector" />,
+}));
+
+vi.mock("@/components/task-autopilot-toggle", () => ({
+  TaskAutopilotToggle: () => <div data-testid="autopilot-toggle-row" />,
+}));
+
 vi.mock("./session-dialog-shared", () => ({
   AttachButton: ({ onClick }: { onClick: () => void }) => (
     <button type="button" onClick={onClick}>
       Attach
     </button>
   ),
+  ContextSelect: () => <div data-testid="context-select" />,
 }));
 
-import { PromptZone } from "./new-subtask-form-parts";
+import { PromptZone, SubtaskFormBody } from "./new-subtask-form-parts";
 
 const GENERATED_RESULT = {
   content: "improved prompt",
   callId: "call-123",
   durationMs: 1_200,
 } satisfies UtilityGenerationResult;
+
+type FormProps = ComponentProps<typeof SubtaskFormBody>;
+
+function createFormProps(workspaceMode: FormProps["workspaceMode"]): FormProps {
+  return {
+    fs: {
+      repositories: [{ key: "row-1", repositoryId: "parent-repository", branch: "main" }],
+      useRemote: false,
+      executorProfileId: "executor-profile",
+      autopilot: false,
+      setAutopilot: vi.fn(),
+    } as unknown as FormProps["fs"],
+    handlers: {
+      handleRowRepositoryChange: vi.fn(),
+      handleRowBranchChange: vi.fn(),
+      handleToggleRemote: vi.fn(),
+      handleAgentProfileChange: vi.fn(),
+      handleExecutorProfileChange: vi.fn(),
+    } as unknown as FormProps["handlers"],
+    title: "Subtask",
+    setTitle: vi.fn(),
+    autopilot: false,
+    workspaceId: "workspace-1",
+    availableRepositories: [],
+    worktreeBranch: "feature/parent",
+    profileOptions: [],
+    executorProfileOptions: [],
+    agentProfileId: "agent-profile",
+    workspaceMode,
+    onWorkspaceModeChange: vi.fn(),
+    contextValue: "blank",
+    onContextChange: vi.fn(),
+    hasInitialPrompt: false,
+    sessionOptions: [],
+    promptZone: <div data-testid="prompt-zone" />,
+    isCreating: false,
+    isSummarizing: false,
+    hasPrompt: true,
+    onClose: vi.fn(),
+    onSubmit: vi.fn(),
+  };
+}
 
 describe("PromptZone", () => {
   beforeEach(() => {
@@ -74,5 +137,18 @@ describe("PromptZone", () => {
 
     expect(onApplyPending).toHaveBeenCalledTimes(1);
     expect(onCopyPending).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("SubtaskFormBody workspace messaging", () => {
+  it("shows the parent branch only when the child inherits the workspace", () => {
+    const { rerender } = render(<SubtaskFormBody {...createFormProps("inherit_parent")} />);
+
+    expect(screen.getByText("Same branch as current session")).toBeTruthy();
+
+    rerender(<SubtaskFormBody {...createFormProps("new_workspace")} />);
+
+    expect(screen.queryByText("Same branch as current session")).toBeNull();
+    expect(screen.getByTestId("repo-chip-trigger")).toBeTruthy();
   });
 });

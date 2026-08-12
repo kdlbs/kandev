@@ -21,6 +21,7 @@ import { Button } from "@kandev/ui/button";
 import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { PRStatusChip } from "@/components/github/pr-status-chip";
+import { MRStatusChip } from "@/components/gitlab/mr-status-chip";
 import { AzureDevOpsTaskPullRequestChip } from "@/components/azure-devops/azure-devops-task-pull-request-chip";
 import { PRMergedBanner } from "./chat/pr-archive-banners";
 import { type ChatInputContainerHandle } from "./chat/chat-input-container";
@@ -356,7 +357,7 @@ function CommentsTooltipBody({ commentsOpen, count }: { commentsOpen: boolean; c
       <p className="text-muted-foreground">
         <Trans i18nKey="task:sendToAgentHelp">
           Hit <strong>Send to agent</strong> inside the panel to deliver them to the CLI agent right
-          away, or just open the chat box and type a follow-up — the comments will be prepended.
+          away, or just open the chat box and type a follow-up - the comments will be prepended.
         </Trans>
       </p>
     </div>
@@ -535,6 +536,7 @@ function PassthroughStatusRow({
 
       <div className="ml-auto flex items-center gap-1.5">
         <PRStatusChip taskId={taskId} />
+        <MRStatusChip taskId={taskId} />
         <AzureDevOpsTaskPullRequestChip taskId={taskId} />
         {taskId && <PRMergedBanner key={taskId} taskId={taskId} />}
         {showProceed && nextStepName && (

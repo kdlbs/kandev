@@ -20,5 +20,5 @@ export const MOCK_ITEMS: TaskSwitcherItem[] = [
   { ...base, id: "mock-4", title: "Update dependencies", state: "COMPLETED", sessionState: "COMPLETED", repositoryPath: MOCK_REPO, diffStats: { additions: 466, deletions: 124 }, updatedAt: hrs(2), createdAt: hrs(6), prInfo: { number: 138, state: "Merged" } },
   { ...base, id: "mock-5", title: "Implement feature X with full test coverage", state: "IN_PROGRESS", sessionState: "RUNNING", repositoryPath: "myorg/other-repo", diffStats: { additions: 11, deletions: 3 }, updatedAt: mins(0.5), createdAt: hrs(1) },
   { ...base, id: "mock-5a", title: "Add unit tests", repositoryPath: "myorg/other-repo", parentTaskId: "mock-5", createdAt: mins(30) },
-  { ...base, id: "mock-6", title: "Draft task — no repo assigned yet", createdAt: hrs(7) },
+  { ...base, id: "mock-6", title: "Draft task - no repo assigned yet", createdAt: hrs(7) },
 ];

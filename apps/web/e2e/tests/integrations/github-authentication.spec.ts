@@ -3,7 +3,7 @@ import { expectElementsNotToIntersect } from "../../helpers/layout-assertions";
 import { GitHubAuthSettingsPage } from "../../pages/github-auth-settings-page";
 
 const settingsPath = (workspaceId: string) =>
-  `/settings/workspace/${workspaceId}/integrations/github`;
+  `/settings/workspaces/${workspaceId}/integrations/github`;
 
 test.describe("GitHub workspace authentication", () => {
   test("keeps actors isolated while switching workspaces and lists named CLI accounts", async ({
@@ -248,10 +248,11 @@ test.describe("GitHub workspace authentication", () => {
     await testPage.getByTestId("github-scope-mode").click();
     await testPage.getByRole("option", { name: "Organizations" }).click();
     const floatingSave = testPage.getByTestId("settings-floating-save");
+    const floatingSaveSurface = floatingSave.getByTestId("settings-floating-save-surface");
     await expect(floatingSave).toBeVisible();
 
     await expectElementsNotToIntersect(
-      floatingSave,
+      floatingSaveSurface,
       testPage.getByRole("button", { name: "Configuration Chat" }),
     );
 

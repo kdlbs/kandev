@@ -192,3 +192,60 @@ func TestMockControllerRejectsIncompleteRepoFilesRequest(t *testing.T) {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body.String())
 	}
 }
+
+func TestMockControllerSeedsRemainingResourceTypes(t *testing.T) {
+	router, workspaceA, _ := newMockControllerFixture(t)
+	workspaceA.SeedMR("group/project", &MR{IID: 7, Title: "Review"})
+	requests := []struct {
+		method string
+		path   string
+		body   any
+	}{
+		{http.MethodPut, "/user", map[string]string{"username": "reviewer"}},
+		{http.MethodPost, "/issues", mockIssueRequest{Project: "group/project", Issues: []Issue{{IID: 3, Title: "Bug", State: "opened"}}}},
+		{http.MethodPost, "/pipelines", mockPipelineRequest{Project: "group/project", Pipelines: []Pipeline{{ID: 10, Status: "failed"}}}},
+		{http.MethodPost, "/pipeline-jobs", mockPipelineJobsRequest{PipelineID: 10, Jobs: []PipelineJob{{ID: 11, Name: "test", Status: "failed"}}}},
+		{http.MethodPost, "/discussions", mockDiscussionRequest{Project: "group/project", IID: 7, Discussions: []MRDiscussion{{ID: "thread-1", Resolvable: true}}}},
+		{http.MethodPost, "/approvals", mockApprovalRequest{Project: "group/project", IID: 7, Approvals: []MRApproval{{Username: "alice"}}, Required: 2}},
+		{http.MethodPost, "/branches", mockBranchesRequest{Project: "group/project", Branches: []RepoBranch{{Name: "main"}}}},
+	}
+	for _, item := range requests {
+		response := mockControlRequest(t, router, item.method,
+			"/api/v1/gitlab/mock"+item.path+"?workspace_id=workspace-a", item.body)
+		if response.Code != http.StatusOK {
+			t.Fatalf("seed %s status=%d body=%s", item.path, response.Code, response.Body.String())
+		}
+	}
+
+	if username, err := workspaceA.GetAuthenticatedUser(t.Context()); err != nil || username != "reviewer" {
+		t.Fatalf("user = (%q, %v), want reviewer", username, err)
+	}
+	if state, err := workspaceA.GetIssueState(t.Context(), "group/project", 3); err != nil || state != "opened" {
+		t.Fatalf("issue state = (%q, %v), want opened", state, err)
+	}
+	if jobs, err := workspaceA.ListPipelineJobs(t.Context(), "group/project", 10); err != nil || len(jobs) != 1 || jobs[0].ID != 11 {
+		t.Fatalf("jobs = (%#v, %v), want job 11", jobs, err)
+	}
+	if discussions, err := workspaceA.ListMRDiscussions(t.Context(), "group/project", 7, nil); err != nil || len(discussions) != 1 || discussions[0].ID != "thread-1" {
+		t.Fatalf("discussions = (%#v, %v), want thread-1", discussions, err)
+	}
+	if approvals, err := workspaceA.ListMRApprovals(t.Context(), "group/project", 7); err != nil || len(approvals) != 1 || approvals[0].Username != "alice" {
+		t.Fatalf("approvals = (%#v, %v), want alice", approvals, err)
+	}
+	if branches, err := workspaceA.ListProjectBranches(t.Context(), "group/project"); err != nil || len(branches) != 1 || branches[0].Name != "main" {
+		t.Fatalf("branches = (%#v, %v), want main", branches, err)
+	}
+}
+
+func TestMockControllerSeedRoutesRejectInvalidPayloads(t *testing.T) {
+	router, _, _ := newMockControllerFixture(t)
+	for _, path := range []string{
+		"/mrs", "/issues", "/pipelines", "/pipeline-jobs", "/discussions",
+		"/approvals", "/branches", "/members", "/files", "/commits",
+	} {
+		response := mockControlRequest(t, router, http.MethodPost, "/api/v1/gitlab/mock"+path, map[string]any{})
+		if response.Code != http.StatusBadRequest {
+			t.Errorf("%s status=%d body=%s, want 400", path, response.Code, response.Body.String())
+		}
+	}
+}
