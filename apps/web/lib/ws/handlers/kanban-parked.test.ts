@@ -77,7 +77,7 @@ describe("kanban.update handler — parkedOnBackgroundWork preservation (AC-58a)
           },
         },
       },
-    } as Partial<AppState>);
+    } as unknown as Partial<AppState>);
 
     const handler = registerKanbanHandlers(store)["kanban.update"]!;
     handler(
@@ -117,7 +117,7 @@ describe("kanban.update handler — parkedOnBackgroundWork preservation (AC-58a)
           },
         },
       },
-    } as Partial<AppState>);
+    } as unknown as Partial<AppState>);
 
     const handler = registerKanbanHandlers(store)["kanban.update"]!;
     handler(
