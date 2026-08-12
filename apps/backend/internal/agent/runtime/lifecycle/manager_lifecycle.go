@@ -219,6 +219,10 @@ func (m *Manager) StopAllAgents(ctx context.Context) error {
 		wg.Add(1)
 		go func(e *AgentExecution) {
 			defer wg.Done()
+			if e.IsTaskHost {
+				m.detachTaskHostForBackendShutdown(e)
+				return
+			}
 			if err := m.StopAgentWithReason(ctx, e.ID, StopReasonBackendShutdown, false); err != nil {
 				errCh <- err
 				m.logger.Warn("failed to stop agent during shutdown",
@@ -236,6 +240,20 @@ func (m *Manager) StopAllAgents(ctx context.Context) error {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
+}
+
+func (m *Manager) detachTaskHostForBackendShutdown(execution *AgentExecution) {
+	if execution == nil {
+		return
+	}
+	if execution.agentctl != nil {
+		execution.agentctl.Close()
+	}
+	m.RemoveExecution(execution.ID)
+	m.logger.Info("detached task host for backend restart",
+		zap.String("execution_id", execution.ID),
+		zap.String("task_id", execution.TaskID),
+		zap.String("task_environment_id", execution.TaskEnvironmentID))
 }
 
 const stopReasonStaleExecutionCleanup = "stale execution cleanup"

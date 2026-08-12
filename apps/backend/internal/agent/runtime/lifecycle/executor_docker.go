@@ -187,6 +187,16 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 	if reconnected, ok := r.tryReconnect(baseCtx, dockerClient, req); ok {
 		return reconnected, nil
 	}
+	if req.IsTaskHost {
+		// Task hosts are services inside the task environment's existing
+		// container. Discovery may race initial environment materialization; it
+		// must wait instead of provisioning a second container without an agent
+		// runtime identity.
+		return nil, fmt.Errorf(
+			"%w: Docker task host requires a materialized task container",
+			ErrSessionWorkspaceNotReady,
+		)
+	}
 
 	r.seedSessionDir(baseCtx, req)
 

@@ -63,10 +63,18 @@ type stubDestroyer struct {
 	sandboxErr               error
 	worktreeErr              error
 	pushErr                  error
+	containerEntered         chan struct{}
+	containerRelease         chan struct{}
 }
 
 func (s *stubDestroyer) DestroyContainer(_ context.Context, id string) error {
 	s.containerCalls = append(s.containerCalls, id)
+	if s.containerEntered != nil {
+		close(s.containerEntered)
+	}
+	if s.containerRelease != nil {
+		<-s.containerRelease
+	}
 	if s.cancelAfterContainer != nil {
 		s.cancelAfterContainer()
 	}
@@ -208,6 +216,45 @@ func TestResetTaskEnvironment_StopsTaskLSPBeforeTeardown(t *testing.T) {
 	if got := lifecycle.cleanupCalls; len(got) != 1 || got[0] != "task-1:task_environment_reset" {
 		t.Fatalf("cleanup calls = %v", got)
 	}
+}
+
+func TestResetTaskEnvironmentBlocksLSPAdmissionThroughRowDeletion(t *testing.T) {
+	repo := &stubEnvRepo{env: &models.TaskEnvironment{
+		ID: "env-1", TaskID: "task-1", ContainerID: "container-1",
+	}}
+	destroyer := &stubDestroyer{
+		containerEntered: make(chan struct{}), containerRelease: make(chan struct{}),
+	}
+	svc := newResetTestService(t, repo)
+	svc.SetSessionRunningChecker(&stubRunningChecker{})
+	svc.SetEnvironmentDestroyer(destroyer)
+	svc.SetTaskLSPLifecycle(&recordingTaskLSPLifecycle{})
+
+	resetDone := make(chan error, 1)
+	go func() {
+		resetDone <- svc.ResetTaskEnvironment(context.Background(), "task-1", ResetOptions{})
+	}()
+	<-destroyer.containerEntered
+
+	if release, err := svc.AcquireTaskLSPAdmission(context.Background(), "task-1"); !errors.Is(err, ErrTaskLSPAdmissionBlocked) {
+		if release != nil {
+			release()
+		}
+		t.Fatalf("LSP admission during reset = %v, want blocked", err)
+	}
+
+	close(destroyer.containerRelease)
+	if err := <-resetDone; err != nil {
+		t.Fatal(err)
+	}
+	if !repo.deleted {
+		t.Fatal("environment row was not deleted before reset admission released")
+	}
+	release, err := svc.AcquireTaskLSPAdmission(context.Background(), "task-1")
+	if err != nil {
+		t.Fatalf("LSP admission did not reopen after environment reset: %v", err)
+	}
+	release()
 }
 
 func TestResetTaskEnvironment_LSPCleanupFailurePreservesEnvironment(t *testing.T) {

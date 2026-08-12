@@ -79,7 +79,7 @@ export function AppStatusDrawerTrigger({
       size={buttonProps.size ?? "icon"}
       className={cn(
         "relative h-11 w-11 cursor-pointer",
-        drawerTriggerVisibilityClass(drawer.connectionOnly),
+        drawerTriggerVisibilityClass(),
         issueActive && (drawer.issueSeverity === "lost" ? "text-destructive" : "text-amber-500"),
         className,
       )}
@@ -105,11 +105,11 @@ export function AppStatusDrawerTrigger({
 /**
  * The trigger must be visible exactly where `useDrawerSurface` picks the drawer
  * over the inline bar, or the drawer becomes unreachable and the status surface
- * disappears. `md:hidden` tracks the hook's mobile boundary; the connection-only
- * variant additionally covers the tablet clause up to the desktop boundary.
+ * disappears. Coarse-pointer tablets use the drawer through the `lg` boundary,
+ * including non-task routes that have no task-topbar fallback.
  */
-function drawerTriggerVisibilityClass(connectionOnly: boolean) {
-  return connectionOnly ? "lg:hidden" : "md:hidden";
+function drawerTriggerVisibilityClass() {
+  return "lg:hidden";
 }
 
 export function AppStatusSurfaceProvider({ children }: { children: ReactNode }) {

@@ -35,6 +35,64 @@ func TestReconcileAdoptsLiveGenerationBeforeLaunching(t *testing.T) {
 	}
 }
 
+func TestReconcileReconnectsTaskHostBeforeAllocatingReplacementGeneration(t *testing.T) {
+	store := newMemoryLSPStore()
+	seedLSPState(t, store, TaskLanguageState{
+		TaskID: "task-1", Language: "kotlin", Policy: PolicyKeepWarm,
+		DetectionState: DetectionComplete, Phase: PhaseInitializing, Generation: 4,
+		LastInitiator: InitiatorAutomatic,
+	})
+	host := newFakeLSPHost()
+	host.snapshots["kotlin"] = RuntimeSnapshot{
+		Language: "kotlin", Generation: 4, Phase: PhaseReady,
+	}
+	runtimes := newReconcileRuntimes()
+	runtimes.ensured["env-task-1"] = host
+	controller := newReconcileController(store, runtimes, NewCapacity(8))
+
+	if err := controller.ReconcileAll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	state := storedLSPState(t, store, "task-1", "kotlin")
+	if state.Generation != 4 || state.Phase != PhaseReady || store.allocations != 0 || host.startCalls != 0 {
+		t.Fatalf("state=%#v allocations=%d starts=%d", state, store.allocations, host.startCalls)
+	}
+	if runtimes.ensureCalls != 1 || controller.capacity.Active() != 1 {
+		t.Fatalf("ensure=%d active=%d", runtimes.ensureCalls, controller.capacity.Active())
+	}
+}
+
+func TestExplicitStartReconnectsAndAdoptsLiveGeneration(t *testing.T) {
+	store := newMemoryLSPStore()
+	seedLSPState(t, store, TaskLanguageState{
+		TaskID: "task-1", Language: "go", Policy: PolicyInherit,
+		DetectionState: DetectionComplete, Phase: PhaseReady, Generation: 6,
+		LastInitiator: InitiatorUser,
+	})
+	host := newFakeLSPHost()
+	host.snapshots["go"] = RuntimeSnapshot{Language: "go", Generation: 6, Phase: PhaseReady}
+	runtimes := newReconcileRuntimes()
+	runtimes.ensured["env-task-1"] = host
+	controller := newReconcileController(store, runtimes, NewCapacity(8))
+
+	snapshot, err := controller.Start(context.Background(), "task-1", "go", Origin{
+		Initiator: InitiatorUser, Reason: "user_control",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Generation != 6 || snapshot.Phase != PhaseReady || store.allocations != 0 || host.startCalls != 0 {
+		t.Fatalf("snapshot=%#v allocations=%d starts=%d", snapshot, store.allocations, host.startCalls)
+	}
+	if runtimes.ensureCalls != 1 {
+		t.Fatalf("ensure calls = %d, want reconnect probe", runtimes.ensureCalls)
+	}
+	if snapshot.Policy != PolicyKeepWarm || snapshot.LastAction != ActionStart ||
+		snapshot.LastInitiator != InitiatorUser {
+		t.Fatalf("explicit Start evidence = %#v", snapshot)
+	}
+}
+
 func TestReconcileStartsOneReplacementForMissingDesiredRuntime(t *testing.T) {
 	store := newMemoryLSPStore()
 	seedLSPState(t, store, TaskLanguageState{
@@ -51,7 +109,7 @@ func TestReconcileStartsOneReplacementForMissingDesiredRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	state := storedLSPState(t, store, "task-1", "go")
-	if host.startCalls != 1 || runtimes.ensureCalls != 1 || store.allocations != 1 || state.Generation != 3 {
+	if host.startCalls != 1 || runtimes.ensureCalls == 0 || store.allocations != 1 || state.Generation != 3 {
 		t.Fatalf("state=%#v starts=%d ensure=%d allocations=%d", state, host.startCalls, runtimes.ensureCalls, store.allocations)
 	}
 	if state.Policy != PolicyKeepWarm {
@@ -375,6 +433,8 @@ type reconcileRuntimes struct {
 	cleanupEnvironment string
 	cleanupReason      string
 	cleanupErr         error
+	recoverCalls       int
+	recoverErr         error
 }
 
 type cleanupSnapshotStore struct {
@@ -437,6 +497,20 @@ func (r *reconcileRuntimes) CleanupTaskHost(_ context.Context, environmentID, re
 	}
 	delete(r.existing, environmentID)
 	return nil
+}
+
+func (r *reconcileRuntimes) RecoverTaskHost(_ context.Context, environmentID string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.recoverCalls++
+	if r.recoverErr != nil {
+		return false, r.recoverErr
+	}
+	if r.existing[environmentID] == nil {
+		return false, nil
+	}
+	delete(r.existing, environmentID)
+	return true, nil
 }
 
 func (r *reconcileRuntimes) DiscoverTaskLanguages(context.Context, string) (*DiscoveryResult, error) {

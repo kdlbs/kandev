@@ -1044,6 +1044,103 @@ func TestStopTaskHostForEnvironmentRetainsOwnershipWhenRuntimeStopFails(t *testi
 	}
 }
 
+func TestRecoverTaskHostForEnvironmentEvictsOnlyProvenDeadHost(t *testing.T) {
+	mgr, _ := newEnvironmentExecutionTestManager(t, &mockWorkspaceInfoProvider{
+		envInfos: map[string]*WorkspaceInfo{
+			"env-1": {
+				TaskID: "task-1", TaskEnvironmentID: "env-1",
+				WorkspacePath: "/workspace/task-1",
+			},
+		},
+	})
+	host, err := mgr.GetOrEnsureTaskHostForEnvironment(context.Background(), "env-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recovered, err := mgr.RecoverTaskHostForEnvironment(context.Background(), "env-1")
+	if err != nil || recovered {
+		t.Fatalf("healthy recovery = %v, %v", recovered, err)
+	}
+	if _, exists := mgr.executionStore.Get(host.ID); !exists {
+		t.Fatal("healthy task host was evicted")
+	}
+
+	host.agentctl.Close()
+	host.agentctl = agentctl.NewClient("127.0.0.1", 1, mgr.logger)
+	recovered, err = mgr.RecoverTaskHostForEnvironment(context.Background(), "env-1")
+	if err != nil || !recovered {
+		t.Fatalf("dead recovery = %v, %v", recovered, err)
+	}
+	if _, exists := mgr.executionStore.Get(host.ID); exists {
+		t.Fatal("dead task host remains tracked")
+	}
+}
+
+func TestRecoverTaskHostForEnvironmentDoesNotEvictConcurrentReplacement(t *testing.T) {
+	healthStarted := make(chan struct{})
+	releaseHealth := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/health" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		close(healthStarted)
+		<-releaseHealth
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(server.Close)
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostName, portString, err := net.SplitHostPort(parsed.Host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(portString)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr := newTestManager(t)
+	old := &AgentExecution{
+		ID: "stable-host", TaskID: "task-1", TaskEnvironmentID: "env-1", IsTaskHost: true,
+		agentctl: agentctl.NewClient(hostName, port, mgr.logger),
+	}
+	if err := mgr.executionStore.Add(old); err != nil {
+		t.Fatal(err)
+	}
+
+	result := make(chan struct {
+		recovered bool
+		err       error
+	}, 1)
+	go func() {
+		recovered, recoverErr := mgr.RecoverTaskHostForEnvironment(context.Background(), "env-1")
+		result <- struct {
+			recovered bool
+			err       error
+		}{recovered: recovered, err: recoverErr}
+	}()
+	<-healthStarted
+	mgr.executionStore.Remove(old.ID)
+	replacement := &AgentExecution{
+		ID: old.ID, TaskID: old.TaskID, TaskEnvironmentID: old.TaskEnvironmentID, IsTaskHost: true,
+		agentctl: newReadyAgentctlClient(t, mgr.logger),
+	}
+	if err := mgr.executionStore.Add(replacement); err != nil {
+		t.Fatal(err)
+	}
+	close(releaseHealth)
+	got := <-result
+	if got.err != nil || got.recovered {
+		t.Fatalf("recovery result = %v, %v; want concurrent replacement retained", got.recovered, got.err)
+	}
+	if current, exists := mgr.executionStore.GetTaskHostByEnvironmentID("env-1"); !exists || current != replacement {
+		t.Fatalf("task host = %#v, %v; want concurrent replacement", current, exists)
+	}
+}
+
 func TestTaskHostUsesDedicatedInstanceInsideExistingDockerTaskEnvironment(t *testing.T) {
 	log := newTestLogger()
 	backend := &createInstanceExecutor{
@@ -1099,6 +1196,50 @@ func TestTaskHostUsesDedicatedInstanceInsideExistingDockerTaskEnvironment(t *tes
 	}
 	if !host.IsTaskHost {
 		t.Fatal("docker host is not marked task-owned")
+	}
+}
+
+func TestTaskHostUsesLiveDockerControlCredentialsBeforeDurableMirror(t *testing.T) {
+	log := newTestLogger()
+	backend := &createInstanceExecutor{
+		MockExecutor: MockExecutor{name: executor.NameDocker},
+		client:       newReadyAgentctlClient(t, log),
+	}
+	execRegistry := NewExecutorRegistry(log)
+	execRegistry.Register(backend)
+	provider := &mockWorkspaceInfoProvider{envInfos: map[string]*WorkspaceInfo{
+		"env-docker": {
+			TaskID: "task-docker", TaskEnvironmentID: "env-docker",
+			ExecutorType: string(models.ExecutorTypeLocalDocker), WorkspacePath: t.TempDir(),
+			Metadata: map[string]interface{}{MetadataKeyContainerID: "container-task"},
+		},
+	}}
+	mgr := NewManager(
+		newTestRegistry(), &MockEventBus{}, execRegistry, &MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		ExecutorFallbackWarn, "", log,
+	)
+	mgr.workspaceInfoProvider = provider
+	mgr.secretStore = &inMemorySecretStore{store: map[string]*secrets.SecretWithValue{
+		"auth-secret":  {Secret: secrets.Secret{ID: "auth-secret"}, Value: "live-auth-token"},
+		"nonce-secret": {Secret: secrets.Secret{ID: "nonce-secret"}, Value: "live-bootstrap-nonce"},
+	}}
+	cleanupManagerStopCh(t, mgr)
+	liveSession := &AgentExecution{
+		ID: "session-execution", TaskID: "task-docker", SessionID: "session-1",
+		TaskEnvironmentID: "env-docker", ContainerID: "container-task",
+	}
+	liveSession.setMetadataValue(MetadataKeyAuthTokenSecret, "auth-secret")
+	liveSession.setMetadataValue(MetadataKeyBootstrapNonceSecret, "nonce-secret")
+	if err := mgr.executionStore.Add(liveSession); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := mgr.GetOrEnsureTaskHostForEnvironment(context.Background(), "env-docker"); err != nil {
+		t.Fatalf("GetOrEnsureTaskHostForEnvironment: %v", err)
+	}
+	request := backend.lastRequest
+	if request == nil || request.AuthToken != "live-auth-token" || request.BootstrapNonce != "live-bootstrap-nonce" {
+		t.Fatalf("docker control credentials = %#v", request)
 	}
 }
 

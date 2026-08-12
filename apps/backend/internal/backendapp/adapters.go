@@ -74,6 +74,31 @@ func (a *taskLSPTaskHostAdapter) CleanupTaskHost(
 	return a.manager.StopTaskHostForEnvironment(ctx, taskEnvironmentID, reason)
 }
 
+func (a *taskLSPTaskHostAdapter) RecoverTaskHost(
+	ctx context.Context,
+	taskEnvironmentID string,
+) (bool, error) {
+	return a.manager.RecoverTaskHostForEnvironment(ctx, taskEnvironmentID)
+}
+
+type taskLSPWorkspaceAdapter struct {
+	tasks *taskservice.Service
+}
+
+func (a taskLSPWorkspaceAdapter) TaskLSPWorkspace(
+	ctx context.Context,
+	taskEnvironmentID string,
+) (*taskLSPWorkspace, error) {
+	info, err := a.tasks.GetWorkspaceInfoForEnvironment(ctx, taskEnvironmentID)
+	if err != nil || info == nil {
+		return nil, err
+	}
+	return &taskLSPWorkspace{
+		executorType:   models.ExecutorType(info.ExecutorType),
+		discoveryRoots: taskLSPDiscoveryRoots(info),
+	}, nil
+}
+
 func taskLSPDiscoveryRoots(info *lifecycle.WorkspaceInfo) []string {
 	if info == nil {
 		return nil

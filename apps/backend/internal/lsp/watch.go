@@ -9,8 +9,7 @@ import (
 var recoveryBackoffs = []time.Duration{time.Second, 5 * time.Second, 30 * time.Second}
 
 const (
-	readyRecoveryReset  = 5 * time.Minute
-	watchReconnectDelay = time.Second
+	readyRecoveryReset = 5 * time.Minute
 )
 
 type ScheduledTimer interface {
@@ -124,34 +123,24 @@ func (c *Controller) watchTaskLanguage(ctx context.Context, key TaskLanguageKey)
 		delete(c.watches, key)
 		c.lifecycleMu.Unlock()
 	}()
-	for {
-		host, err := c.resolveExistingHost(ctx, key.TaskID)
-		if err == nil && host != nil {
-			err = host.WatchTaskLSP(ctx, key.Language, func(snapshot RuntimeSnapshot) error {
-				return c.observeRuntimeSnapshot(ctx, key, snapshot)
-			})
+	host, err := c.resolveExistingHost(ctx, key.TaskID)
+	if err == nil && host != nil {
+		err = host.WatchTaskLSP(ctx, key.Language, func(snapshot RuntimeSnapshot) error {
+			return c.observeRuntimeSnapshot(ctx, key, snapshot)
+		})
+		if err == nil {
+			err = errors.New("task host watch ended unexpectedly")
 		}
-		if ctx.Err() != nil {
-			return
-		}
-		if err != nil {
-			state, _, stateErr := c.store.GetTaskLSPLanguage(ctx, key.TaskID, key.Language)
-			if stateErr == nil {
-				settings, _ := c.loadSettings(ctx)
-				_, _ = c.transition(ctx, *state, settings, PhaseError, "task_host_watch_lost", err.Error())
-			}
-		}
-		timer := time.NewTimer(watchReconnectDelay)
-		select {
-		case <-timer.C:
-		case <-ctx.Done():
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
-			return
+	}
+	if ctx.Err() != nil {
+		return
+	}
+	if err != nil {
+		state, _, stateErr := c.store.GetTaskLSPLanguage(ctx, key.TaskID, key.Language)
+		if stateErr == nil {
+			settings, _ := c.loadSettings(ctx)
+			snapshot, _ := c.transition(ctx, *state, settings, PhaseError, "task_host_watch_lost", err.Error())
+			c.scheduleDesiredRecovery(key, snapshot)
 		}
 	}
 }
@@ -272,8 +261,19 @@ func (c *Controller) attemptRecovery(
 	key TaskLanguageKey,
 	state TaskLanguageState,
 ) bool {
-	candidate, err := c.inspectReconcileState(ctx, state)
-	if err != nil || candidate == nil {
+	candidate, err := c.inspectReconcileState(ctx, state, false)
+	if err != nil {
+		if !c.recoverDeadTaskHost(ctx, key.TaskID) {
+			return false
+		}
+		candidate = &reconcileCandidate{state: state}
+		settings, settingsErr := c.loadSettings(ctx)
+		if settingsErr != nil {
+			return false
+		}
+		candidate.settings = settings
+	}
+	if candidate == nil {
 		return false
 	}
 	snapshot, err := c.commands.submit(
@@ -294,6 +294,21 @@ func (c *Controller) attemptRecovery(
 		return true
 	}
 	return snapshot.Phase != PhaseError && snapshot.Phase != PhaseOff
+}
+
+func (c *Controller) recoverDeadTaskHost(ctx context.Context, taskID string) bool {
+	environment, err := c.tasks.GetTaskEnvironmentByTaskID(ctx, taskID)
+	if err != nil || !readyTaskEnvironment(environment) || !ExecutorSupportsLSP(environment.ExecutorType) {
+		return false
+	}
+	recovered, err := c.runtimes.RecoverTaskHost(ctx, environment.ID)
+	return err == nil && recovered
+}
+
+func (c *Controller) scheduleDesiredRecovery(key TaskLanguageKey, snapshot *LanguageSnapshot) {
+	if snapshot != nil && snapshot.EffectivePolicy == PolicyKeepWarm {
+		c.scheduleRecovery(key)
+	}
 }
 
 func (c *Controller) scheduleReadyReset(key TaskLanguageKey, generation uint64) {

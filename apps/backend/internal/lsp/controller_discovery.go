@@ -3,6 +3,7 @@ package lsp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -13,12 +14,16 @@ type discoveryCall struct {
 	err  error
 }
 
-const workspaceRootsChangedReason = "workspace_roots_changed"
+const (
+	workspaceRootsChangedReason = "workspace_roots_changed"
+	discoveryRetryDelay         = time.Second
+)
 
 // RefreshDiscovery explicitly refreshes bounded task-host evidence. It is a
 // human-facing operation, so task authorization precedes environment lookup.
-// Discovery is a bounded backend filesystem scan and never starts an execution
-// or language server.
+// Discovery is bounded and never starts a language server or project import.
+// Docker discovery may ensure the task-owned control host so the scan runs
+// against authoritative container files rather than host-side shadows.
 func (c *Controller) RefreshDiscovery(ctx context.Context, taskID string) error {
 	if err := c.authorize(ctx, taskID); err != nil {
 		return err
@@ -115,7 +120,7 @@ func (c *Controller) discoverTask(ctx context.Context, taskID string, force bool
 		if err != nil {
 			return err
 		}
-		if discoveryAlreadyRecorded(states) {
+		if discoveryAlreadyRecorded(states, c.clock()) {
 			return nil
 		}
 	}
@@ -154,6 +159,11 @@ func (c *Controller) finishDiscovery(taskID string, call *discoveryCall, err err
 }
 
 func (c *Controller) runDiscovery(ctx context.Context, taskID string) error {
+	releaseAdmission, err := c.tasks.AcquireTaskLSPAdmission(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrTaskNotReady, err)
+	}
+	defer releaseAdmission()
 	environment, err := c.tasks.GetTaskEnvironmentByTaskID(ctx, taskID)
 	if err != nil {
 		return err
@@ -203,13 +213,17 @@ func (c *Controller) persistDiscovery(ctx context.Context, taskID string, result
 	return errors.Join(persistErrors...)
 }
 
-func discoveryAlreadyRecorded(states []TaskLanguageState) bool {
+func discoveryAlreadyRecorded(states []TaskLanguageState, now time.Time) bool {
 	if len(states) < len(registeredLanguages()) {
 		return false
 	}
 	for _, state := range states {
 		if state.DetectionState == DetectionUnknown || state.DetectionState == DetectionScanning ||
 			state.DetectionScannedAt == nil || state.DetectionScannedAt.Equal(time.Time{}) {
+			return false
+		}
+		if state.DetectionState == DetectionUnavailable &&
+			!now.Before(state.DetectionScannedAt.Add(discoveryRetryDelay)) {
 			return false
 		}
 	}

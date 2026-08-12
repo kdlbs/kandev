@@ -108,12 +108,20 @@ func (s *ExecutionStore) Add(execution *AgentExecution) error {
 
 // Remove removes an agent execution from all tracking maps.
 func (s *ExecutionStore) Remove(executionID string) {
+	s.RemoveIfSame(executionID, nil)
+}
+
+// RemoveIfSame removes executionID only when it still points at expected.
+// A nil expected preserves Remove's unconditional behavior. Pointer identity
+// prevents a delayed health probe from evicting a replacement registered under
+// the same stable task-host ID.
+func (s *ExecutionStore) RemoveIfSame(executionID string, expected *AgentExecution) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	execution, exists := s.executions[executionID]
-	if !exists {
-		return
+	if !exists || (expected != nil && execution != expected) {
+		return false
 	}
 
 	// Remove from secondary indexes
@@ -129,6 +137,7 @@ func (s *ExecutionStore) Remove(executionID string) {
 
 	// Remove from primary map
 	delete(s.executions, executionID)
+	return true
 }
 
 // Get returns an agent execution by its ID.

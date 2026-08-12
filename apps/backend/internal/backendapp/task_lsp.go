@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	tasklsp "github.com/kandev/kandev/internal/lsp"
 	"github.com/kandev/kandev/internal/orchestrator"
+	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	userservice "github.com/kandev/kandev/internal/user/service"
@@ -63,13 +64,30 @@ func (p taskLSPSettingsProvider) TaskLSPSettings(ctx context.Context) (tasklsp.T
 
 type taskLSPRuntimeProvider struct {
 	taskHosts taskLSPTaskHostRuntime
-	tasks     *taskservice.Service
+	tasks     taskLSPWorkspaceProvider
+}
+
+type taskLSPWorkspace struct {
+	executorType   models.ExecutorType
+	discoveryRoots []string
+}
+
+type taskLSPWorkspaceProvider interface {
+	TaskLSPWorkspace(ctx context.Context, taskEnvironmentID string) (*taskLSPWorkspace, error)
 }
 
 type taskLSPTaskHostRuntime interface {
 	EnsureTaskHost(ctx context.Context, taskEnvironmentID string) (tasklsp.TaskHost, error)
 	ExistingTaskHost(ctx context.Context, taskEnvironmentID string) (tasklsp.TaskHost, bool, error)
+	RecoverTaskHost(ctx context.Context, taskEnvironmentID string) (bool, error)
 	CleanupTaskHost(ctx context.Context, taskEnvironmentID, reason string) error
+}
+
+func (p taskLSPRuntimeProvider) RecoverTaskHost(
+	ctx context.Context,
+	taskEnvironmentID string,
+) (bool, error) {
+	return p.taskHosts.RecoverTaskHost(ctx, taskEnvironmentID)
 }
 
 func (p taskLSPRuntimeProvider) EnsureTaskHost(
@@ -100,14 +118,24 @@ func (p taskLSPRuntimeProvider) DiscoverTaskLanguages(
 	if p.tasks == nil {
 		return nil, errors.New("task workspace provider is unavailable")
 	}
-	info, err := p.tasks.GetWorkspaceInfoForEnvironment(ctx, taskEnvironmentID)
+	info, err := p.tasks.TaskLSPWorkspace(ctx, taskEnvironmentID)
 	if err != nil {
 		return nil, err
 	}
 	if info == nil {
 		return nil, errors.New("task workspace is unavailable for language discovery")
 	}
-	result := agentctllsp.DiscoverLanguagesAtRoots(ctx, taskLSPDiscoveryRoots(info))
+	if info.executorType == models.ExecutorTypeLocalDocker {
+		host, ensureErr := p.taskHosts.EnsureTaskHost(ctx, taskEnvironmentID)
+		if ensureErr != nil {
+			return nil, ensureErr
+		}
+		if host == nil {
+			return nil, errors.New("task host is unavailable for language discovery")
+		}
+		return host.DiscoverLSP(ctx)
+	}
+	result := agentctllsp.DiscoverLanguagesAtRoots(ctx, info.discoveryRoots)
 	return &result, nil
 }
 
@@ -123,7 +151,10 @@ func newTaskLSPController(
 	}
 	return tasklsp.NewController(tasklsp.ControllerConfig{
 		Tasks: tasks, Store: store, Settings: taskLSPSettingsProvider{users: users},
-		Runtimes:  taskLSPRuntimeProvider{taskHosts: taskHosts, tasks: tasks},
+		Runtimes: taskLSPRuntimeProvider{
+			taskHosts: taskHosts,
+			tasks:     taskLSPWorkspaceAdapter{tasks: tasks},
+		},
 		Capacity:  tasklsp.NewCapacityFromEnv(),
 		Publisher: taskLSPStatePublisher{events: eventBus},
 	})

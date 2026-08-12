@@ -182,6 +182,37 @@ func TestDiscoveryFailureIsTruthfulAndNeverEnsuresResources(t *testing.T) {
 	}
 }
 
+func TestSnapshotRetriesStaleUnavailableDiscoveryWithoutHotLooping(t *testing.T) {
+	store := newMemoryLSPStore()
+	runtimes := &fakeLSPRuntimes{discoveryErr: errors.New("task host still materializing")}
+	now := time.Unix(100, 0).UTC()
+	controller := newTestController(&fakeControllerTasks{}, store, &fakeLSPSettings{}, runtimes)
+	controller.clock = func() time.Time { return now }
+
+	if _, err := controller.Snapshot(context.Background(), "task-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.Snapshot(context.Background(), "task-1"); err != nil {
+		t.Fatal(err)
+	}
+	if runtimes.discoveryCalls != 1 {
+		t.Fatalf("fresh unavailable discovery calls = %d, want 1", runtimes.discoveryCalls)
+	}
+
+	now = now.Add(discoveryRetryDelay)
+	runtimes.discoveryErr = nil
+	runtimes.discovery = &DiscoveryResult{
+		Languages: []string{"kotlin"}, State: DetectionComplete, ScannedAt: now,
+	}
+	snapshot, err := controller.Snapshot(context.Background(), "task-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !languageFromSnapshot(t, snapshot, "kotlin").Detected || runtimes.discoveryCalls != 2 {
+		t.Fatalf("retried discovery snapshot/calls = %#v/%d", snapshot.Languages, runtimes.discoveryCalls)
+	}
+}
+
 func TestWorkspaceSourceChangeUpdatesDynamicServerAndMarksStaticServer(t *testing.T) {
 	store := newMemoryLSPStore()
 	for _, language := range []string{"go", "kotlin"} {
@@ -469,6 +500,28 @@ func TestConcurrentDuplicateStartCoalescesOneGeneration(t *testing.T) {
 	}
 }
 
+func TestTaskLifecycleBarrierRejectsStartBeforeCapacityOrRuntimeAcquisition(t *testing.T) {
+	store := newMemoryLSPStore()
+	runtimes := &fakeLSPRuntimes{}
+	controller := newTestController(
+		&fakeControllerTasks{admissionErr: errors.New("environment reset active")},
+		store,
+		&fakeLSPSettings{},
+		runtimes,
+	)
+
+	_, err := controller.Start(context.Background(), "task-1", "go", Origin{
+		Initiator: InitiatorUser, Reason: "user_control",
+	})
+	if !errors.Is(err, ErrTaskNotReady) {
+		t.Fatalf("Start error = %v, want task-not-ready", err)
+	}
+	if store.allocations != 0 || runtimes.ensureCalls != 0 || controller.capacity.Active() != 0 {
+		t.Fatalf("allocations=%d ensure=%d active=%d",
+			store.allocations, runtimes.ensureCalls, controller.capacity.Active())
+	}
+}
+
 func newTestController(
 	tasks *fakeControllerTasks,
 	store *memoryLSPStore,
@@ -503,6 +556,7 @@ type fakeControllerTasks struct {
 	mu             sync.Mutex
 	authErr        error
 	environmentErr error
+	admissionErr   error
 	calls          []string
 	environments   map[string]*models.TaskEnvironment
 }
@@ -510,6 +564,14 @@ type fakeControllerTasks struct {
 func (f *fakeControllerTasks) AuthorizeTaskAccess(_ context.Context, taskID string) error {
 	f.record("authorize:" + taskID)
 	return f.authErr
+}
+
+func (f *fakeControllerTasks) AcquireTaskLSPAdmission(_ context.Context, taskID string) (func(), error) {
+	f.record("admission:" + taskID)
+	if f.admissionErr != nil {
+		return nil, f.admissionErr
+	}
+	return func() {}, nil
 }
 
 func (f *fakeControllerTasks) GetTask(_ context.Context, taskID string) (*models.Task, error) {
@@ -581,6 +643,7 @@ type fakeLSPRuntimes struct {
 	discovery      *DiscoveryResult
 	discoveryErr   error
 	discoveryCalls int
+	recoverCalls   int
 }
 
 func (f *fakeLSPRuntimes) EnsureTaskHost(context.Context, string) (TaskHost, error) {
@@ -609,6 +672,17 @@ func (f *fakeLSPRuntimes) CleanupTaskHost(context.Context, string, string) error
 	f.cleanupCalls++
 	f.host = nil
 	return nil
+}
+
+func (f *fakeLSPRuntimes) RecoverTaskHost(context.Context, string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.recoverCalls++
+	if f.host == nil {
+		return false, nil
+	}
+	f.host = nil
+	return true, nil
 }
 
 func (f *fakeLSPRuntimes) DiscoverTaskLanguages(context.Context, string) (*DiscoveryResult, error) {
@@ -644,6 +718,8 @@ type fakeLSPHost struct {
 	workspaceResult    *WorkspaceUpdateResult
 	workspaceErr       error
 	workspaceRefreshes int
+	snapshotErr        error
+	watchErr           error
 }
 
 func (f *fakeLSPHost) RefreshTaskLSPWorkspace(context.Context) (*WorkspaceUpdateResult, error) {
@@ -750,12 +826,21 @@ func (f *fakeLSPHost) StopTaskLSP(_ context.Context, request TaskHostStopRequest
 func (f *fakeLSPHost) TaskLSPSnapshot(_ context.Context, language string) (*RuntimeSnapshot, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.snapshotErr != nil {
+		return nil, f.snapshotErr
+	}
 	snapshot := f.snapshots[language]
 	snapshot.Language = language
 	return &snapshot, nil
 }
 
 func (f *fakeLSPHost) WatchTaskLSP(ctx context.Context, language string, onSnapshot func(RuntimeSnapshot) error) error {
+	f.mu.Lock()
+	watchErr := f.watchErr
+	f.mu.Unlock()
+	if watchErr != nil {
+		return watchErr
+	}
 	snapshot, err := f.TaskLSPSnapshot(ctx, language)
 	if err != nil {
 		return err

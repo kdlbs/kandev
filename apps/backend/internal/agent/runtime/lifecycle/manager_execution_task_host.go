@@ -119,9 +119,27 @@ func (m *Manager) taskHostReconnectDetails(
 	if info.ExecutorType != string(models.ExecutorTypeLocalDocker) {
 		return "", "", ""
 	}
-	return executionID,
-		m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret),
-		m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret)
+	authToken := m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret)
+	bootstrapNonce := m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret)
+	if authToken != "" && bootstrapNonce != "" {
+		return executionID, authToken, bootstrapNonce
+	}
+
+	// The environment-ready callback can run before the session execution's
+	// control-secret references have reached executors_running. The live
+	// execution already owns those transport credentials at that point. Use it
+	// only to reattach the task-owned host to the shared container; session
+	// identity does not become part of task-host ownership.
+	if live, exists := m.executionStore.GetByTaskEnvironmentID(info.TaskEnvironmentID); exists {
+		metadata := live.MetadataSnapshot()
+		if authToken == "" {
+			authToken = m.revealRuntimeSecret(ctx, metadata, MetadataKeyAuthTokenSecret)
+		}
+		if bootstrapNonce == "" {
+			bootstrapNonce = m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret)
+		}
+	}
+	return executionID, authToken, bootstrapNonce
 }
 
 func (m *Manager) finishTaskHostExecution(

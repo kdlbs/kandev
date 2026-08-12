@@ -49,6 +49,130 @@ func TestRecoveryUsesOneFiveThirtySecondBackoffAndThenStops(t *testing.T) {
 	}
 }
 
+func TestFailedExplicitStartSchedulesAutomaticRecovery(t *testing.T) {
+	store := newMemoryLSPStore()
+	host := newFakeLSPHost()
+	host.startErr = errors.New("task host start failed")
+	host.startErrorSnapshot = &RuntimeSnapshot{
+		Phase: PhaseError, ErrorCode: errorCodeProcessStartFailed,
+	}
+	runtimes := newReconcileRuntimes()
+	runtimes.ensured["env-task-1"] = host
+	scheduler := newFakeScheduler()
+	controller := newReconcileControllerWithScheduler(store, runtimes, scheduler)
+	if err := controller.StartReconciler(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+
+	snapshot, err := controller.Start(context.Background(), "task-1", "kotlin", Origin{
+		Initiator: InitiatorUser, Reason: "user_control",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Phase != PhaseError {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+	if timer := scheduler.next(t); timer.delay != time.Second {
+		t.Fatalf("first recovery delay = %s", timer.delay)
+	}
+}
+
+func TestWatchFailureStopsReconnectLoopAndSchedulesRecovery(t *testing.T) {
+	store := newMemoryLSPStore()
+	seedLSPState(t, store, TaskLanguageState{
+		TaskID: "task-1", Language: "go", Policy: PolicyKeepWarm,
+		DetectionState: DetectionComplete, Phase: PhaseReady, Generation: 2,
+		LastInitiator: InitiatorAutomatic,
+	})
+	host := newFakeLSPHost()
+	host.snapshots["go"] = RuntimeSnapshot{Language: "go", Generation: 2, Phase: PhaseReady}
+	host.watchErr = errors.New("task host connection lost")
+	runtimes := newReconcileRuntimes()
+	runtimes.existing["env-task-1"] = host
+	scheduler := newFakeScheduler()
+	controller := newReconcileControllerWithScheduler(store, runtimes, scheduler)
+	if err := controller.StartReconciler(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+
+	if timer := scheduler.next(t); timer.delay != time.Second {
+		t.Fatalf("watch recovery delay = %s", timer.delay)
+	}
+	state := storedLSPState(t, store, "task-1", "go")
+	if state.Phase != PhaseError || state.ErrorCode != "task_host_watch_lost" {
+		t.Fatalf("watch failure state = %#v", state)
+	}
+}
+
+func TestRecoveryEvictsDeadTaskHostBeforeEnsuringReplacement(t *testing.T) {
+	store := newMemoryLSPStore()
+	seedLSPState(t, store, TaskLanguageState{
+		TaskID: "task-1", Language: "rust", Policy: PolicyKeepWarm,
+		DetectionState: DetectionComplete, Phase: PhaseError, Generation: 3,
+		LastInitiator: InitiatorAutomatic,
+	})
+	dead := newFakeLSPHost()
+	dead.snapshotErr = errors.New("connection refused")
+	replacement := newFakeLSPHost()
+	runtimes := newReconcileRuntimes()
+	runtimes.existing["env-task-1"] = dead
+	runtimes.ensured["env-task-1"] = replacement
+	scheduler := newFakeScheduler()
+	controller := newReconcileControllerWithScheduler(store, runtimes, scheduler)
+	lifecycleCtx, cancel := context.WithCancel(context.Background())
+	controller.lifecycleCtx = lifecycleCtx
+	controller.lifecycleCancel = cancel
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+
+	key := TaskLanguageKey{TaskID: "task-1", Language: "rust"}
+	controller.scheduleRecovery(key)
+	scheduler.next(t).Fire()
+
+	state := storedLSPState(t, store, "task-1", "rust")
+	if runtimes.recoverCalls != 1 || runtimes.ensureCalls == 0 || replacement.startCalls != 1 {
+		t.Fatalf("recover=%d ensure=%d starts=%d state=%#v",
+			runtimes.recoverCalls, runtimes.ensureCalls, replacement.startCalls, state)
+	}
+	if state.Generation != 4 || state.Phase != PhaseReady {
+		t.Fatalf("replacement state = %#v", state)
+	}
+}
+
+func TestStartupSnapshotFailureSchedulesDeadTaskHostRecovery(t *testing.T) {
+	store := newMemoryLSPStore()
+	seedLSPState(t, store, TaskLanguageState{
+		TaskID: "task-1", Language: "go", Policy: PolicyKeepWarm,
+		DetectionState: DetectionComplete, Phase: PhaseReady, Generation: 2,
+		LastInitiator: InitiatorAutomatic,
+	})
+	dead := newFakeLSPHost()
+	dead.snapshotErr = errors.New("connection refused")
+	replacement := newFakeLSPHost()
+	runtimes := newReconcileRuntimes()
+	runtimes.existing["env-task-1"] = dead
+	runtimes.ensured["env-task-1"] = replacement
+	scheduler := newFakeScheduler()
+	controller := newReconcileControllerWithScheduler(store, runtimes, scheduler)
+	if err := controller.StartReconciler(context.Background()); err == nil {
+		t.Fatal("startup reconcile unexpectedly accepted a dead task host")
+	}
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+
+	timer := scheduler.next(t)
+	if timer.delay != time.Second {
+		t.Fatalf("startup recovery delay = %s", timer.delay)
+	}
+	timer.Fire()
+	state := storedLSPState(t, store, "task-1", "go")
+	if runtimes.recoverCalls != 1 || replacement.startCalls != 1 ||
+		state.Generation != 3 || state.Phase != PhaseReady {
+		t.Fatalf("recover=%d starts=%d state=%#v", runtimes.recoverCalls, replacement.startCalls, state)
+	}
+}
+
 func TestProcessExitReleasesCapacityAndPromotesQueuedGeneration(t *testing.T) {
 	tasks := &fakeControllerTasks{environments: map[string]*models.TaskEnvironment{
 		"crashed": readyEnvironment("crashed", "local_pc"),

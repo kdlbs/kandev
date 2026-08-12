@@ -25,6 +25,8 @@ import (
 // have a resolved workspace path (typically while worktree preparation is in progress).
 var ErrSessionWorkspaceNotReady = errors.New("session workspace not ready")
 
+const taskHostRecoveryProbeTimeout = 3 * time.Second
+
 // ErrSessionTerminal indicates the task session has reached a terminal state
 // (cancelled/completed/failed) and no execution can be created for it. User-facing
 // workspace handlers treat this like ErrSessionWorkspaceNotReady: a graceful
@@ -278,6 +280,39 @@ func (m *Manager) StopTaskHostForEnvironment(
 		return err
 	}
 	return m.StopAgentWithReason(ctx, execution.ID, reason, false)
+}
+
+// RecoverTaskHostForEnvironment evicts a proven-dead task-host execution so
+// the next Ensure can reattach to or recreate its stable runtime instance.
+func (m *Manager) RecoverTaskHostForEnvironment(
+	ctx context.Context,
+	taskEnvironmentID string,
+) (bool, error) {
+	execution, exists, err := m.GetTaskHostForEnvironment(ctx, taskEnvironmentID)
+	if err != nil || !exists || execution == nil {
+		return false, err
+	}
+	client := execution.GetAgentCtlClient()
+	probeCtx, cancel := context.WithTimeout(ctx, taskHostRecoveryProbeTimeout)
+	defer cancel()
+	if client != nil {
+		if healthErr := client.Health(probeCtx); healthErr == nil {
+			return false, nil
+		}
+		if err := context.Cause(ctx); err != nil {
+			return false, err
+		}
+		client.Close()
+	}
+	if !m.executionStore.RemoveIfSame(execution.ID, execution) {
+		return false, nil
+	}
+	m.releaseActivity(executionActivityKey(execution.ID))
+	m.closeStreamCoalescer(execution)
+	m.logger.Debug("removed dead task host from tracking",
+		zap.String("execution_id", execution.ID),
+		zap.String("task_environment_id", taskEnvironmentID))
+	return true, nil
 }
 
 func (m *Manager) ensureTaskHostTaskActive(ctx context.Context, taskID string) error {

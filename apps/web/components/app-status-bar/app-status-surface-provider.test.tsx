@@ -127,14 +127,15 @@ describe("AppStatusSurfaceProvider", () => {
   });
 
   it("keeps the drawer trigger visible across the whole mobile band", () => {
-    // The drawer replaces the inline bar below the hook's mobile boundary
-    // (768px). A narrower visibility class would hide the only trigger on
-    // topbar routes, leaving 640-767px with no status surface at all.
+    // The drawer replaces the inline bar through the coarse-pointer tablet
+    // boundary. A narrower visibility class hides the only trigger on routes
+    // without a task-topbar fallback.
     responsiveState.breakpoint = "mobile";
     renderSurface();
 
     const trigger = screen.getByTestId(STATUS_DRAWER_TRIGGER_TEST_ID);
-    expect(trigger.className).toContain("md:hidden");
+    expect(trigger.className).toContain("lg:hidden");
+    expect(trigger.className).not.toContain("md:hidden");
     expect(trigger.className).not.toContain("sm:hidden");
   });
 });
@@ -211,7 +212,9 @@ describe("AppStatusSurfaceProvider tablet and recovery behavior", () => {
 
     expect(screen.queryByTestId(STATUS_BAR_TEST_ID)).toBeNull();
     expect(screen.getByTestId(STATUS_DRAWER_TEST_ID).textContent).toBe("false");
-    expect(screen.getByTestId(STATUS_DRAWER_TRIGGER_TEST_ID).className).toContain("md:hidden");
+    const trigger = screen.getByTestId(STATUS_DRAWER_TRIGGER_TEST_ID);
+    expect(trigger.className).toContain("lg:hidden");
+    expect(trigger.className).not.toContain("md:hidden");
   });
 
   it("keeps an active connection warning reachable at the tablet breakpoint", () => {

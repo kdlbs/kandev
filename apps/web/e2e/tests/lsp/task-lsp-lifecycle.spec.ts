@@ -1,5 +1,10 @@
 import { expect, test } from "../../fixtures/test-base";
 import type { Locator, Page } from "@playwright/test";
+import {
+  captureAppStatusBarSettings,
+  restoreAppStatusBarSettings,
+  setAppStatusBarEnabled,
+} from "../../helpers/app-status-bar-settings";
 import { SessionPage } from "../../pages/session-page";
 import {
   createKotlinTask,
@@ -16,28 +21,12 @@ import {
   releaseFakeLspInitialization,
 } from "./lsp-e2e-helpers";
 
-type E2EStore = {
-  getState: () => {
-    features: Record<string, boolean>;
-    setFeatures: (features: Record<string, boolean>) => void;
-  };
-};
-
 async function expectKotlinState(page: Page, state: string) {
   const surface = await openTaskLspControl(page);
   await expect(surface.getByTestId("task-lsp-language-kotlin")).toHaveAttribute(
     "data-lsp-state",
     state,
   );
-}
-
-async function setAppStatusBarEnabled(page: Page, enabled: boolean) {
-  await page.evaluate((nextEnabled) => {
-    const store = (window as Window & { __KANDEV_E2E_STORE__?: E2EStore }).__KANDEV_E2E_STORE__;
-    if (!store) throw new Error("E2E store bridge missing");
-    const state = store.getState();
-    state.setFeatures({ ...state.features, appStatusBar: nextEnabled });
-  }, enabled);
 }
 
 test.describe("task-scoped LSP lifecycle", () => {
@@ -313,33 +302,42 @@ test.describe("task-scoped LSP lifecycle", () => {
     seedData,
     backend,
   }) => {
-    installFakeKotlinLsp(backend, {
-      progress: {
-        title: "Importing Kotlin project",
-        message: LONG_LSP_PROGRESS_MESSAGE,
-        percentage: 42,
-        endMessage: "Task project model loaded",
-      },
-    });
-    const task = await createKotlinTask(testPage, apiClient, seedData, backend, {
-      title: "Task LSP Progress Away From File",
-      filePaths: ["Main.kt", "README.md"],
-      fileContents: ['fun main() = println("progress")\n', "# Other panel\n"],
-    });
-    await performTaskLspAction(testPage, "kotlin", "start");
-    await expectFakeLspGeneration(backend, 1);
+    const statusBarBaseline = await captureAppStatusBarSettings(apiClient);
+    try {
+      await setAppStatusBarEnabled(apiClient, true);
+      await expect
+        .poll(async () => (await apiClient.getUserSettings()).settings.app_status_bar_enabled)
+        .toBe(true);
+      installFakeKotlinLsp(backend, {
+        progress: {
+          title: "Importing Kotlin project",
+          message: LONG_LSP_PROGRESS_MESSAGE,
+          percentage: 42,
+          endMessage: "Task project model loaded",
+        },
+      });
+      const task = await createKotlinTask(testPage, apiClient, seedData, backend, {
+        title: "Task LSP Progress Away From File",
+        filePaths: ["Main.kt", "README.md"],
+        fileContents: ['fun main() = println("progress")\n', "# Other panel\n"],
+      });
+      await performTaskLspAction(testPage, "kotlin", "start");
+      await expectFakeLspGeneration(backend, 1);
 
-    await task.session.clickTab("Changes");
-    const aggregate = testPage.getByTestId("app-status-lsp");
-    await expect(aggregate).toBeVisible();
-    await expect(aggregate).toContainText(/Kotlin.*Importing|LSP.*running/i);
-    const surface = await openTaskLspControl(testPage);
-    const kotlin = await expandTaskLspLanguage(surface, "kotlin");
-    await expect(kotlin).toContainText(LONG_LSP_PROGRESS_MESSAGE);
+      await task.session.clickTab("Changes");
+      const aggregate = testPage.getByTestId("app-status-lsp");
+      await expect(aggregate).toBeVisible();
+      await expect(aggregate).toContainText(/Kotlin.*Importing|LSP.*running/i);
+      const surface = await openTaskLspControl(testPage);
+      const kotlin = await expandTaskLspLanguage(surface, "kotlin");
+      await expect(kotlin).toContainText(LONG_LSP_PROGRESS_MESSAGE);
 
-    releaseFakeLspInitialization(backend);
-    await expectKotlinState(testPage, "ready");
-    await performTaskLspAction(testPage, "kotlin", "stop");
+      releaseFakeLspInitialization(backend);
+      await expectKotlinState(testPage, "ready");
+      await performTaskLspAction(testPage, "kotlin", "stop");
+    } finally {
+      await restoreAppStatusBarSettings(apiClient, statusBarBaseline);
+    }
   });
 
   test("keeps a task control discoverable when the application status bar is disabled", async ({
@@ -348,19 +346,24 @@ test.describe("task-scoped LSP lifecycle", () => {
     seedData,
     backend,
   }) => {
-    installFakeKotlinLsp(backend);
-    await createKotlinTask(testPage, apiClient, seedData, backend, {
-      title: "Task LSP Status Bar Fallback",
-    });
-    await setAppStatusBarEnabled(testPage, false);
+    const statusBarBaseline = await captureAppStatusBarSettings(apiClient);
+    try {
+      await setAppStatusBarEnabled(apiClient, false);
+      installFakeKotlinLsp(backend);
+      await createKotlinTask(testPage, apiClient, seedData, backend, {
+        title: "Task LSP Status Bar Fallback",
+      });
 
-    await expect(testPage.getByTestId("app-status-bar")).toHaveCount(0);
-    const trigger = testPage.getByTestId("task-lsp-control");
-    await expect(trigger).toBeVisible();
-    await expect(trigger).toHaveAttribute("data-lsp-placement", "task-topbar");
-    await performTaskLspAction(testPage, "kotlin", "start");
-    await expectFakeLspGeneration(backend, 1);
-    await performTaskLspAction(testPage, "kotlin", "stop");
+      await expect(testPage.getByTestId("app-status-bar")).toHaveCount(0);
+      const trigger = testPage.getByTestId("task-lsp-control");
+      await expect(trigger).toBeVisible();
+      await expect(trigger).toHaveAttribute("data-lsp-placement", "task-topbar");
+      await performTaskLspAction(testPage, "kotlin", "start");
+      await expectFakeLspGeneration(backend, 1);
+      await performTaskLspAction(testPage, "kotlin", "stop");
+    } finally {
+      await restoreAppStatusBarSettings(apiClient, statusBarBaseline);
+    }
   });
 
   test("persists status visibility without changing the running task server", async ({

@@ -118,6 +118,29 @@ func TestDockerExecutor_RecoverInstances(t *testing.T) {
 	}
 }
 
+func TestDockerTaskHostWaitsForExistingTaskContainer(t *testing.T) {
+	dockerDaemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead && r.URL.Path == "/_ping" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		t.Fatalf("task host attempted Docker provisioning: %s %s", r.Method, r.URL.Path)
+	}))
+	t.Cleanup(dockerDaemon.Close)
+
+	dockerExec := NewDockerExecutor(config.DockerConfig{
+		Host: "tcp://" + strings.TrimPrefix(dockerDaemon.URL, "http://"),
+	}, "", newTestDockerLogger())
+	t.Cleanup(func() { require.NoError(t, dockerExec.Close()) })
+
+	_, err := dockerExec.CreateInstance(context.Background(), &ExecutorCreateRequest{
+		InstanceID: "task-host-env-1", TaskEnvironmentID: "env-1", IsTaskHost: true,
+	})
+	if !errors.Is(err, ErrSessionWorkspaceNotReady) {
+		t.Fatalf("CreateInstance error = %v, want workspace-not-ready", err)
+	}
+}
+
 func TestDockerExecutor_GetInteractiveRunner(t *testing.T) {
 	log := newTestDockerLogger()
 	exec := NewDockerExecutor(config.DockerConfig{}, "", log)

@@ -31,7 +31,7 @@ func (c *Controller) ReconcileAll(ctx context.Context) error {
 	missing := make([]reconcileCandidate, 0)
 	var reconcileErrors []error
 	for _, state := range states {
-		candidate, inspectErr := c.inspectReconcileState(ctx, state)
+		candidate, inspectErr := c.inspectReconcileState(ctx, state, true)
 		if inspectErr != nil {
 			reconcileErrors = append(reconcileErrors, inspectErr)
 			continue
@@ -65,7 +65,7 @@ func (c *Controller) ReconcileTask(ctx context.Context, taskID string) error {
 		key := TaskLanguageKey{TaskID: state.TaskID, Language: state.Language}
 		_, commandErr := c.commands.submit(ctx, key, ActionReconcile, "",
 			func(workCtx context.Context) (*LanguageSnapshot, error) {
-				candidate, inspectErr := c.inspectReconcileState(workCtx, state)
+				candidate, inspectErr := c.inspectReconcileState(workCtx, state, true)
 				if inspectErr != nil || candidate == nil {
 					return nil, inspectErr
 				}
@@ -81,7 +81,13 @@ func (c *Controller) ReconcileTask(ctx context.Context, taskID string) error {
 func (c *Controller) inspectReconcileState(
 	ctx context.Context,
 	state TaskLanguageState,
+	scheduleFailure bool,
 ) (*reconcileCandidate, error) {
+	releaseAdmission, err := c.tasks.AcquireTaskLSPAdmission(ctx, state.TaskID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrTaskNotReady, err)
+	}
+	defer releaseAdmission()
 	task, err := c.tasks.GetTask(ctx, state.TaskID)
 	if err != nil {
 		return nil, err
@@ -98,23 +104,113 @@ func (c *Controller) inspectReconcileState(
 	if handled, stateErr := c.reconcileEnvironmentState(ctx, state, settings, desired, environment); handled {
 		return nil, stateErr
 	}
+	return c.inspectReconcileRuntime(ctx, state, settings, environment, desired, scheduleFailure)
+}
+
+func (c *Controller) inspectReconcileRuntime(
+	ctx context.Context,
+	state TaskLanguageState,
+	settings TaskSettings,
+	environment *taskmodels.TaskEnvironment,
+	desired bool,
+	scheduleFailure bool,
+) (*reconcileCandidate, error) {
 	host, exists, err := c.runtimes.ExistingTaskHost(ctx, environment.ID)
 	if err != nil {
-		_, _ = c.transition(ctx, state, settings, PhaseError, "task_host_unreachable", err.Error())
+		c.recordReconcileHostFailure(ctx, state, settings, desired, scheduleFailure, err)
 		return nil, fmt.Errorf("inspect task host for %s/%s: %w", state.TaskID, state.Language, err)
 	}
 	if !exists || host == nil {
-		return c.reconcileAbsentRuntime(ctx, state, settings, desired)
+		return c.inspectAbsentTaskHost(ctx, state, settings, environment, desired, scheduleFailure)
 	}
 	runtime, err := host.TaskLSPSnapshot(ctx, state.Language)
 	if err != nil {
-		_, _ = c.transition(ctx, state, settings, PhaseError, "task_host_unreachable", err.Error())
+		c.recordReconcileHostFailure(ctx, state, settings, desired, scheduleFailure, err)
 		return nil, fmt.Errorf("snapshot task host for %s/%s: %w", state.TaskID, state.Language, err)
 	}
 	if !runtimeHasProcess(runtime) {
 		return c.reconcileAbsentRuntime(ctx, state, settings, desired)
 	}
 	return c.reconcileLiveRuntime(ctx, state, settings, desired, host, *runtime)
+}
+
+func (c *Controller) inspectAbsentTaskHost(
+	ctx context.Context,
+	state TaskLanguageState,
+	settings TaskSettings,
+	environment *taskmodels.TaskEnvironment,
+	desired bool,
+	scheduleFailure bool,
+) (*reconcileCandidate, error) {
+	if !desired || state.Generation == 0 {
+		return c.reconcileAbsentRuntime(ctx, state, settings, desired)
+	}
+	_, adopted, err := c.adoptExistingRuntime(
+		ctx, state, settings, environment, ActionReconcile,
+		Origin{Initiator: InitiatorAutomatic, Reason: "reconcile_existing_runtime"},
+	)
+	if err != nil {
+		c.recordReconcileHostFailure(ctx, state, settings, desired, scheduleFailure, err)
+		return nil, err
+	}
+	if adopted {
+		return nil, nil
+	}
+	return c.reconcileAbsentRuntime(ctx, state, settings, desired)
+}
+
+func (c *Controller) recordReconcileHostFailure(
+	ctx context.Context,
+	state TaskLanguageState,
+	settings TaskSettings,
+	desired bool,
+	scheduleFailure bool,
+	cause error,
+) {
+	snapshot, _ := c.transition(ctx, state, settings, PhaseError, "task_host_unreachable", cause.Error())
+	if scheduleFailure && desired {
+		c.scheduleDesiredRecovery(TaskLanguageKey{TaskID: state.TaskID, Language: state.Language}, snapshot)
+	}
+}
+
+func (c *Controller) adoptExistingRuntime(
+	ctx context.Context,
+	state TaskLanguageState,
+	settings TaskSettings,
+	environment *taskmodels.TaskEnvironment,
+	action Action,
+	origin Origin,
+) (*LanguageSnapshot, bool, error) {
+	host, err := c.runtimes.EnsureTaskHost(ctx, environment.ID)
+	if err != nil {
+		return nil, false, err
+	}
+	if host == nil {
+		return nil, false, errors.New("task host ensure returned no host")
+	}
+	runtime, err := host.TaskLSPSnapshot(ctx, state.Language)
+	if err != nil {
+		return nil, false, fmt.Errorf("snapshot reconnected task host for %s/%s: %w",
+			state.TaskID, state.Language, err)
+	}
+	if !runtimeHasProcess(runtime) {
+		return nil, false, nil
+	}
+	stored, err := c.adoptRuntime(ctx, state, *runtime)
+	if err != nil {
+		return nil, false, err
+	}
+	if action == ActionStart {
+		stored, err = c.recordExplicitStartIntent(ctx, *stored, origin)
+		if err != nil {
+			return nil, false, err
+		}
+	}
+	key := TaskLanguageKey{TaskID: state.TaskID, Language: state.Language}
+	c.capacity.Adopt(key, runtime.Generation)
+	c.ensureWatch(key)
+	snapshot := c.languageSnapshot(*stored, settings, runtime)
+	return &snapshot, true, nil
 }
 
 func (c *Controller) reconcileEnvironmentState(

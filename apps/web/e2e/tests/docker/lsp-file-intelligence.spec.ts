@@ -2,16 +2,45 @@ import { test, expect } from "../../fixtures/docker-test-base";
 import {
   attachLspDidOpenCapture,
   createKotlinTask,
+  expandTaskLspLanguage,
   expectedMonacoModelUri,
   expectFakeLspMarkerCount,
+  expectTaskLanguageDetected,
   openDesktopFile,
+  openTaskLspControl,
   performLspAction,
+  performTaskLspAction,
   readSessionModelSnapshots,
   removeFakeKotlinLsp,
 } from "../lsp/lsp-e2e-helpers";
 
 test.describe("Docker task-host LSP", () => {
   test.describe.configure({ timeout: 180_000 });
+
+  test("discovers and starts Kotlin inside the container before an editor opens", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    removeFakeKotlinLsp(backend);
+    const task = await createKotlinTask(testPage, apiClient, seedData, backend, {
+      title: "Docker Kotlin LSP Discovery",
+      executorProfileId: seedData.dockerExecutorProfileId,
+      repositoryDirectory: "e2e-docker-repo",
+      push: true,
+    });
+
+    await expect(testPage.locator(".monaco-editor:visible")).toHaveCount(0);
+    await expectTaskLanguageDetected(apiClient, task.taskId, "kotlin");
+    await performTaskLspAction(testPage, "kotlin", "start");
+
+    const surface = await openTaskLspControl(testPage);
+    const kotlin = await expandTaskLspLanguage(surface, "kotlin");
+    await expect(kotlin).toHaveAttribute("data-lsp-state", "ready", { timeout: 30_000 });
+    await testPage.keyboard.press("Escape");
+    await performTaskLspAction(testPage, "kotlin", "stop");
+  });
 
   test("runs kotlin-lsp from inside the task container", async ({
     testPage,
