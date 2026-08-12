@@ -772,4 +772,28 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
       timeout: 15_000,
     });
   });
+
+  test("registers an insights-section item as a footer icon, not a rail row", async ({
+    testPage,
+  }) => {
+    test.setTimeout(60_000);
+
+    await openInstallDialog(testPage);
+    await uploadPackage(testPage, PACKAGE_PATH);
+    await expect(testPage.getByTestId(`plugin-row-${PLUGIN_ID}`)).toBeVisible({ timeout: 15_000 });
+
+    await testPage.goto("/");
+    await testPage.reload();
+
+    const footerButton = testPage.getByTestId(
+      `sidebar-plugin:${PLUGIN_ID}:e2e-insights-tools-button`,
+    );
+    await expect(footerButton).toBeVisible({ timeout: 15_000 });
+    await expect(footerButton).toHaveAttribute("aria-label", "E2E Insights Tools");
+    await footerButton.click();
+    await expect(testPage).toHaveURL(/\/plugins\/e2e-hello$/);
+
+    // Moves, does not add: the same item never also renders in the rail.
+    await expect(testPage.getByTestId("plugin-nav-item-e2e-insights-tools")).toHaveCount(0);
+  });
 });

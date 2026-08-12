@@ -494,6 +494,12 @@
         path: "/plugins/e2e-hello",
         section: "main",
       });
+      registry.registerNavItem({
+        id: "e2e-insights-tools",
+        label: "E2E Insights Tools",
+        path: "/plugins/e2e-hello",
+        section: "insights",
+      });
       registry.registerRoute("/plugins/e2e-hello", PluginPage);
       registry.registerComponent("task-sidebar", SidebarSlot);
       registry.registerComponent("main-top-bar", MainTopBarSlot);

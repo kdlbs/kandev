@@ -287,4 +287,31 @@ test.describe("Mobile plugin navigation", () => {
       }
     }
   });
+
+  test("shows the insights item in the Utilities group, not the Plugins group", async ({
+    testPage,
+  }) => {
+    test.setTimeout(60_000);
+
+    await testPage.goto("/settings/plugins");
+    await testPage.getByTestId("install-plugin-trigger").click();
+    await testPage.getByTestId("install-plugin-tab-upload").click();
+    await testPage.getByTestId("install-plugin-file-input").setInputFiles(PACKAGE_PATH);
+    await testPage.getByTestId("install-plugin-upload-submit").click();
+    await expect(testPage.getByTestId(`plugin-row-${PLUGIN_ID}`)).toBeVisible({ timeout: 30_000 });
+
+    await testPage.goto("/");
+    await testPage.reload();
+    await testPage.getByRole("button", { name: "Open menu" }).click();
+
+    // Utilities rows carry no data-testid (see spec's Rendered identity
+    // section) — select by the visible label instead.
+    const utilitiesRow = testPage.getByRole("link", { name: "E2E Insights Tools" });
+    await expect(utilitiesRow).toBeVisible();
+
+    // Moves, does not add: the same item never also renders in the Plugins
+    // group.
+    const pluginsGroup = testPage.getByTestId("mobile-plugin-nav-section");
+    await expect(pluginsGroup.getByText("E2E Insights Tools")).toHaveCount(0);
+  });
 });
