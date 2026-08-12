@@ -108,12 +108,17 @@ test.describe("Workspace GitHub App onboarding", () => {
     const policy = testPage.getByRole("dialog", { name: "Required GitHub App policy" });
     await expect(policy.getByText("Contents", { exact: true })).toBeVisible();
     await expect(policy.getByText("Workflows", { exact: true })).toBeVisible();
+    await expect(policy.getByText("Push", { exact: true })).toBeVisible();
+    await expect(policy.getByText("Check Run", { exact: true })).toBeVisible();
+    await expect(policy.getByText("Installation", { exact: true })).toHaveCount(0);
     await policy.getByRole("button", { name: "Close" }).click();
 
     let manifest: Record<string, unknown> | undefined;
+    let registrationState: string | null = null;
     await testPage.route(
-      "https://github.com/organizations/acme/settings/apps/new",
+      "https://github.com/organizations/acme/settings/apps/new?**",
       async (route) => {
+        registrationState = new URL(route.request().url()).searchParams.get("state");
         const fields = new URLSearchParams(route.request().postData() ?? "");
         manifest = JSON.parse(fields.get("manifest") ?? "{}") as Record<string, unknown>;
         await route.fulfill({
@@ -130,8 +135,10 @@ test.describe("Workspace GitHub App onboarding", () => {
     await expect(
       testPage.getByRole("heading", { name: "Confirm Work automation on GitHub" }),
     ).toBeVisible();
+    expect(registrationState).toBeTruthy();
 
     const redirectUrl = String(manifest?.redirect_url ?? "");
+    expect(new URL(redirectUrl).search).toBe("");
     const registrationId = redirectUrl.match(
       /\/app\/registrations\/([^/]+)\/manifest\/callback/,
     )?.[1];
@@ -139,15 +146,17 @@ test.describe("Workspace GitHub App onboarding", () => {
     expect(manifest).toMatchObject({
       url: "https://1.1.1.1",
       public: false,
+      default_events: ["push", "check_run"],
       hook_attributes: {
         url: `https://1.1.1.1/api/v1/github/app/registrations/${registrationId}/webhook`,
         active: true,
       },
       callback_urls: [
+        `https://1.1.1.1/api/v1/github/app/registrations/${registrationId}/install/callback`,
         `https://1.1.1.1/api/v1/github/app/registrations/${registrationId}/personal/callback`,
       ],
-      setup_url: `https://1.1.1.1/api/v1/github/app/registrations/${registrationId}/install/callback`,
     });
+    expect(manifest).not.toHaveProperty("setup_url");
 
     await apiClient.mockGitHubSetAppRegistration({
       id: registrationId!,
@@ -194,6 +203,9 @@ test.describe("Workspace GitHub App onboarding", () => {
     await expect(
       connection.getByText(preparation.install_callback_url, { exact: true }),
     ).toBeVisible();
+    await expect(connection.getByText("User authorization callback URL 1")).toBeVisible();
+    await expect(connection.getByText("User authorization callback URL 2")).toBeVisible();
+    await expect(connection.getByText("Setup URL")).toHaveCount(0);
     await expect(connection.getByText(preparation.webhook_url, { exact: true })).toBeVisible();
     await expect(connection.getByText(/application\/json/)).toBeVisible();
     await expect(connection.getByText(/SSL verification enabled/)).toBeVisible();
@@ -277,7 +289,7 @@ test.describe("Workspace GitHub App onboarding", () => {
     await testPage.evaluate((path) => {
       window.history.pushState({}, "", path);
       window.dispatchEvent(new Event("kandev:navigation"));
-    }, `/settings/workspace/${otherWorkspace.id}/integrations/github`);
+    }, `/settings/workspaces/${otherWorkspace.id}/integrations/github`);
     await expect(settings.automation().getByText("home-user", { exact: true })).toBeVisible({
       timeout: 15_000,
     });

@@ -21,6 +21,7 @@ import {
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { SHORTCUTS } from "@/lib/keyboard/constants";
 import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
+import type { PluginComposerCapability } from "@/lib/plugins/types";
 import { t } from "@/lib/i18n";
 
 type MobileToolbarProps = {
@@ -57,6 +58,8 @@ type MobileToolbarProps = {
   submitShortcut: (typeof SHORTCUTS)[keyof typeof SHORTCUTS];
   onVoiceTranscript?: (text: string) => void;
   onVoiceAutoSend?: () => void;
+  composerCapability?: PluginComposerCapability;
+  composerSurface?: "task-chat" | "quick-chat";
 };
 
 function mobileContextButton(contextCount: number) {
@@ -177,6 +180,12 @@ export function MobileChatInputToolbar(props: MobileToolbarProps) {
             sessionId={props.sessionId}
             taskId={props.taskId}
             taskTitle={props.taskTitle}
+            surface={props.composerSurface ?? (props.taskId ? "task-chat" : "quick-chat")}
+            presentation="mobile"
+            disabled={props.isDisabled}
+            submittable={!props.isDisabled && props.hasContent}
+            disabledReason={props.submitDisabledReason}
+            composer={props.composerCapability}
           />
         )}
         {props.onVoiceTranscript && (

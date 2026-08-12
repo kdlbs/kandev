@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { scanPublicDocsEmDashViolations } from "../apps/web/scripts/check-no-em-dash-ui.mjs";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -17,6 +18,19 @@ const defaultDocsDir = path.join(repoRoot, "docs/public");
  * @returns {Promise<{pageCount: number}>} Number of validated published pages.
  */
 export async function validatePublicDocs(docsDir = defaultDocsDir) {
+  const emDashViolations = scanPublicDocsEmDashViolations({
+    docsRoot: docsDir,
+    root: docsDir,
+  });
+  if (emDashViolations.length > 0) {
+    const locations = emDashViolations.map(
+      ({ file, line }) => `${file}:${line}`,
+    );
+    throw new Error(
+      `public docs contain em dash (U+2014): ${locations.join(", ")}`,
+    );
+  }
+
   const meta = await readMeta(docsDir);
   const files = await collectMarkdownFiles(docsDir);
   const pagesBySlug = new Map();
@@ -659,7 +673,7 @@ async function collectSettingsRoutes(root) {
     "utf8",
   );
   const routeTable = source.match(
-    /const SETTINGS_ROUTES[\s\S]*?\n};\s*\n\s*export function SettingsRoutes/,
+    /const SETTINGS_ROUTES[\s\S]*?\n};(?=[\s\S]*?\nexport (?:const SETTINGS_ROUTE_PATHS|function SettingsRoutes))/,
   )?.[0];
   if (!routeTable) {
     throw new Error("could not locate SETTINGS_ROUTES in settings-routes.tsx");

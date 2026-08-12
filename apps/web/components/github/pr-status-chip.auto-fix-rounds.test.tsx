@@ -170,7 +170,7 @@ describe("PRStatusChip auto-fix round display", () => {
     renderWithStore(stateWithAutoFix(10, true), <PRStatusChip taskId="task-1" />);
 
     const chip = screen.getByTestId(AUTO_FIX_BADGE_TESTID);
-    expect(chip.textContent).toBe("Auto-fix 10/10");
+    expect(chip.textContent).toBe("Auto-fix paused 10/10");
     expect(chip.getAttribute("data-auto-fix-exhausted")).toBe("true");
   });
 

@@ -3,9 +3,11 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -490,5 +492,54 @@ func TestLaunchRestoreWorkspace_IncludesWorktreeInfo(t *testing.T) {
 	}
 	if resp.WorktreeBranch == nil || *resp.WorktreeBranch != "feature/test" {
 		t.Errorf("expected worktree_branch 'feature/test', got %v", resp.WorktreeBranch)
+	}
+}
+
+func TestIsBenignLaunchTeardownErr(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", err: nil, want: false},
+		{
+			name: "wrapped context.Canceled",
+			err:  fmt.Errorf("launch failed: %w", context.Canceled),
+			want: true,
+		},
+		{
+			name: "wrapped ErrSessionTerminal",
+			err:  fmt.Errorf("restore workspace: %w", lifecycle.ErrSessionTerminal),
+			want: true,
+		},
+		{
+			// resume path stringifies a persisted session error, destroying the
+			// sentinel (task_operations.go uses %s): the string fallback catches it.
+			name: "stringified context canceled (resume)",
+			err:  fmt.Errorf("session failed: %s", "context canceled"),
+			want: true,
+		},
+		{
+			name: "stringified session is terminal",
+			err:  errors.New("session failed: session is terminal"),
+			want: true,
+		},
+		{
+			name: "unknown task is not benign",
+			err:  errors.New("task not found"),
+			want: false,
+		},
+		{
+			name: "validation error is not benign",
+			err:  errors.New("task_id is required"),
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsBenignLaunchTeardownErr(tt.err); got != tt.want {
+				t.Fatalf("IsBenignLaunchTeardownErr(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
 	}
 }

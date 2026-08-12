@@ -15,6 +15,13 @@ agentctl exposes these route groups (see `server/api/`):
 - `/workspace/*` - File operations, search, tree
 - `/vscode/*` - VS Code integration proxy
 
+## Multi-repository Git and review payloads
+
+Preserve the repository-scoped fields `repository_name`, `base_ref`, and
+`is_submodule` in aggregate results; nested submodule comparisons stay anchored
+to the parent gitlink. The focused contract tests are in
+`server/api/git_multi_repo_review_test.go`.
+
 ## Pull request creation (`server/process/git_pr_providers.go`)
 
 `GitOperator.CreatePR` picks a host CLI from `origin`:

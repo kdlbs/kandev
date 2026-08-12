@@ -132,10 +132,8 @@
   --git-deletion: 244 112 103;
 }
 
-@media (min-width: 640px) {
-  :root {
-    --app-status-bar-height: 1.5rem;
-  }
+:root[data-app-status-bar-visible="true"] {
+  --app-status-bar-height: 1.5rem;
 }
 
 .dark {

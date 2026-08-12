@@ -3,9 +3,12 @@ package worktree
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // archiveDeletesLocalBranch simulates what task archive does to a worktree's
@@ -157,4 +160,77 @@ func TestRecreate_ForkPRFetchesPullHeadRef(t *testing.T) {
 	if gotSHA != prHeadSHA {
 		t.Errorf("worktree HEAD = %q, want %q (PR head)", gotSHA, prHeadSHA)
 	}
+}
+
+// TestCreate_RestoresReleasedWorktreeAfterArchive is the whole unarchive
+// round trip at the worktree layer. Archiving a task removes the worktree
+// directory and releases its reference (status=deleted + deleted_at) while
+// deliberately keeping the git branch, so the next launch must rebuild the
+// directory from the released record — including reactivating that record.
+// Leaving deleted_at set would hide the restored worktree from every lookup
+// that filters on `deleted_at IS NULL`, so the session would silently get a
+// brand-new worktree instead of its own work back.
+func TestCreate_RestoresReleasedWorktreeAfterArchive(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	ctx := context.Background()
+	seedReferenceCleanupSession(t, store, "task-archived", "session-archived", models.TaskSessionStateCompleted)
+
+	repoPath := initGitRepoWithRemote(t)
+	req := CreateRequest{
+		TaskID:         "task-archived",
+		SessionID:      "session-archived",
+		TaskTitle:      "Archived work",
+		RepositoryID:   "repository",
+		RepositoryPath: repoPath,
+		BaseBranch:     "main",
+		TaskDirName:    "task-archived",
+		RepoName:       "repository",
+	}
+	wt, err := mgr.Create(ctx, req)
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+	// Work the user never pushed. It only survives because archive keeps the
+	// branch (DestroyWorktree passes removeBranch=false).
+	runGit(t, wt.Path, "commit", "--allow-empty", "-m", "unpushed work")
+	workSHA := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD"))
+
+	// Archive: remove the directory, release the reference, keep the branch.
+	if err := mgr.RemoveByID(ctx, wt.ID, false); err != nil {
+		t.Fatalf("archive worktree: %v", err)
+	}
+	if _, statErr := os.Stat(wt.Path); !os.IsNotExist(statErr) {
+		t.Fatalf("archive should remove the worktree directory, stat error = %v", statErr)
+	}
+
+	// Unarchive + resume: the launch carries the stored worktree ID.
+	resumeReq := req
+	resumeReq.WorktreeID = wt.ID
+	restored, err := mgr.Create(ctx, resumeReq)
+	if err != nil {
+		t.Fatalf("resume after unarchive must recreate the worktree: %v", err)
+	}
+	if restored.Path != wt.Path {
+		t.Fatalf("restored path = %q, want the original %q", restored.Path, wt.Path)
+	}
+	if restored.Branch != wt.Branch {
+		t.Fatalf("restored branch = %q, want the original %q", restored.Branch, wt.Branch)
+	}
+	if got := strings.TrimSpace(runGit(t, restored.Path, "rev-parse", "HEAD")); got != workSHA {
+		t.Fatalf("restored HEAD = %q, want the pre-archive work %q", got, workSHA)
+	}
+
+	// The record must be visible again to the session-scoped lookup the next
+	// launch uses; a lingering deleted_at would strand it.
+	found, err := store.GetWorktreeBySessionAndRepository(ctx, "session-archived", "repository", restored.BranchSlug)
+	if err != nil {
+		t.Fatalf("look up restored worktree: %v", err)
+	}
+	if found == nil {
+		t.Fatal("restored worktree is still hidden from the session lookup (deleted_at was not cleared)")
+	}
+	if found.ID != wt.ID {
+		t.Fatalf("session lookup returned worktree %q, want the restored %q", found.ID, wt.ID)
+	}
+	assertWorktreeReferenceStatus(t, store, wt.ID, StatusActive)
 }

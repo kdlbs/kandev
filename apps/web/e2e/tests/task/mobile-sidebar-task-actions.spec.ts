@@ -357,15 +357,23 @@ test.describe("Mobile sidebar task actions", () => {
     prCapture,
   }) => {
     const parentTitle = "Mobile create subtask parent";
-    const task = await apiClient.seedTask(seedData.workspaceId, parentTitle, {
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    });
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      parentTitle,
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+        executor_profile_id: seedData.worktreeExecutorProfileId,
+      },
+    );
 
-    await testPage.goto(`/t/${task.task_id}`);
+    await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
     await testPage.getByTestId("mobile-session-menu").click();
 
     const taskSheet = testPage.getByRole("dialog", { name: "Tasks" });
@@ -387,6 +395,19 @@ test.describe("Mobile sidebar task actions", () => {
     await expect(testPage.getByTestId("subtask-title-input")).toHaveValue(
       /Mobile create subtask parent \/ Subtask 1/,
     );
+    const parentBranchBadge = dialog.getByText("Same branch as current session", { exact: true });
+    await expect(parentBranchBadge).toBeVisible();
+    await expect(dialog.getByTestId("subtask-workspace-mode-inherit")).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    await dialog.getByTestId("subtask-workspace-mode-new").tap();
+    await expect(parentBranchBadge).toHaveCount(0);
+    await expect(dialog.getByTestId("repo-chip-trigger")).toBeVisible();
+    await expect(dialog.getByTestId("branch-chip-trigger")).toBeVisible();
+    await prCapture.screenshot("mobile-subtask-isolated-workspace", {
+      caption: "Mobile New Subtask dialog with isolated workspace controls",
+    });
     await expect(testPage.getByTestId("subtask-context-autopilot-row")).toBeVisible();
     const contextTrigger = testPage
       .getByTestId("subtask-context-autopilot-row")

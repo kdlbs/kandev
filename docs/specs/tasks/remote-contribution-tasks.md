@@ -1,6 +1,7 @@
 ---
 status: approved
 created: 2026-08-04
+updated: 2026-08-10
 owner: product
 ---
 
@@ -13,6 +14,11 @@ they must manually reconstruct the target repository, contributor fork, head bra
 review association before an agent can make a useful change. Kandev should accept the remote change
 URL at task creation, prepare the contributor's exact branch, and push commits back to that branch
 without making `create_task_kandev` materially larger.
+
+The contributor can update or rewrite that branch after the task starts. Kandev must not present the
+old checkout and the provider's current change as one continuous history, label old contributor
+commits as maintainer-authored work waiting to be pushed, or offer a remote mutation whose safety has
+not been established. It must preserve local work while making the drift explicit.
 
 ## What
 
@@ -41,8 +47,25 @@ without making `create_task_kandev` materially larger.
   server-authored contribution identity and branch guidance.
 - Ordinary repository URLs retain their current behavior, including default branch resolution,
   normal `origin` pushes, and new-PR creation.
+- Git status keeps two separate divergence concepts: `ahead`/`behind` compare the checkout with the
+  target base branch, while `remote_ahead`/`remote_behind` compare it with its configured upstream.
+  Push and pull affordances use the upstream-relative values; review scope and base-branch rebase
+  affordances continue to use the base-relative values.
+- For an associated contribution, Kandev compares the local HEAD and upstream snapshot with the
+  provider's current commit history using commit identity and ancestry evidence. It never infers
+  equivalence from commit message, author, timestamp, file statistics, or patch similarity.
+- When the provider history no longer contains the local HEAD and the histories cannot be proven to be
+  a safe local-ahead or provider-ahead relationship, the Changes panel shows the current remote change
+  and local checkout as separate histories. Local work remains intact. Push, force-push, and generic
+  pull actions are unavailable until the histories are reconciled outside this flow.
+- A provider-ahead history that still contains local HEAD is a safe fast-forward case: the UI may offer
+  Pull, but must not label the existing local commits as unpushed work. A local-ahead history whose
+  tracked upstream equals the provider head may offer a normal Push for exactly `remote_ahead` commits.
 
-Decision: [ADR-2026-08-04-remote-contribution-bindings](../../decisions/2026-08-04-remote-contribution-bindings.md).
+Decisions:
+[ADR-2026-08-04-remote-contribution-bindings](../../decisions/2026-08-04-remote-contribution-bindings.md)
+and
+[ADR-2026-08-10-remote-contribution-head-drift](../../decisions/2026-08-10-remote-contribution-head-drift.md).
 
 ## Data model
 
@@ -114,6 +137,9 @@ internal boundary.
 | Fork does not allow maintainer collaboration | Task creation fails before persistence with provider-specific remediation guidance. |
 | Task persists but the existing-change association fails | Kandev compensates the newly created task and returns failure; it does not launch an agent. |
 | Checkout SHA no longer matches the source branch during preparation | Launch fails without checking out or pushing a different revision; retry resolves fresh provider state. |
+| Provider branch advances after launch and still contains local HEAD | Kandev identifies a provider-ahead fast-forward, shows the current provider history, and offers Pull instead of Push. |
+| Provider branch is rewritten after launch and no longer contains local HEAD | Kandev preserves the checkout, separates local and provider histories, explains the drift, and disables unsafe remote actions. |
+| Current provider commits cannot be loaded | Kandev does not assert that a rewrite occurred. It shows the provider error and derives Push/Pull only from available upstream evidence. |
 | Effective Git credentials cannot dry-run a push to the source branch | The task remains durable, but the session does not start and exposes an actionable credential/collaboration error. |
 | Contribution binding is missing, malformed, or an unknown version | Runtime preparation and managed source-scope issuance fail closed. |
 | Agent attempts a normal create-PR action | Kandev reuses the existing association and does not open a second remote change. |
@@ -125,6 +151,10 @@ environments reconstruct the target checkout, contribution remote, upstream bran
 from the binding. Credential leases and preflight results are ephemeral and are recomputed on each
 launch or resume. A moved or deleted source branch causes a later launch to fail visibly rather than
 silently falling back to the target repository.
+
+The original contribution `head_sha` remains creation-time provenance. It is not mutated to pretend an
+existing checkout follows a later provider rewrite. Live provider commits and Git status are observed
+state. Neither observation automatically resets, rebases, merges, or deletes the task checkout.
 
 ## Scenarios
 
@@ -162,6 +192,36 @@ GIVEN a contribution was resolved but its source branch moved before worktree pr
 WHEN Kandev prepares the task
 THEN preparation fails rather than checking out the new head or pushing from the stale SHA
 
+### Show a provider fast-forward safely
+
+GIVEN a running contribution task whose provider branch advances without rewriting local HEAD
+WHEN Kandev loads the current provider commits
+THEN the Changes panel treats the provider as ahead, does not mark the existing commits as local work
+to push, and offers Pull rather than Push
+
+### Separate a rewritten provider history
+
+GIVEN a running contribution task whose provider branch is force-pushed and no longer contains local
+HEAD
+WHEN Kandev loads the current provider commits
+THEN the Changes panel warns that the contribution changed, renders "Current PR commits" separately
+from "Local checkout commits", preserves every local commit, and offers no Push, force-push, or generic
+Pull action
+
+### Keep ordinary local-ahead work pushable
+
+GIVEN a contribution checkout whose upstream equals the provider's current head
+AND the maintainer creates commits on top
+WHEN Kandev computes Git status
+THEN Push reports only the commits absent from the upstream and the provider commits are not duplicated
+
+### Avoid guessing when provider history is unavailable
+
+GIVEN Kandev cannot load the current provider commit list
+WHEN the Changes panel renders the checkout
+THEN it reports that provider history is unavailable, does not claim the branch was rewritten, and
+does not compare commits by message or patch similarity
+
 ### Preserve ordinary repository creation
 
 GIVEN an ordinary GitHub, GitLab, or provider-neutral repository URL
@@ -181,6 +241,9 @@ mentions pull and merge request URLs
 - Creating tasks from issues, review comments, or arbitrary commit URLs.
 - Azure DevOps or additional source-control providers.
 - Multiple remote contributions in one create call.
-- Force pushes, branch renames, retargeting, merging, or changing collaboration settings.
+- Kandev performing force pushes, branch renames, retargeting, merging, or changing collaboration
+  settings.
+- Automatically resetting, rebasing, merging, or replacing an existing checkout after provider drift.
+- A guided history-reconciliation workflow; this iteration detects and contains the unsafe state.
 - Copying remote titles, bodies, comments, or diffs into trusted prompts.
 - Guaranteeing write access after credentials or provider permissions change during a running session.

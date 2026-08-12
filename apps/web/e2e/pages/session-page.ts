@@ -643,8 +643,12 @@ export class SessionPage {
    * Hovers to reveal the menu trigger, opens it, clicks "Archive",
    * and confirms the archive dialog.
    */
-  async archiveTaskInSidebar(title: string): Promise<void> {
+  async archiveTaskInSidebar(title: string, options: { cascade?: boolean } = {}): Promise<void> {
     await this.openSidebarMenuAndClick(title, "Archive");
+    if (options.cascade) {
+      const cascadeCheckbox = this.page.getByTestId("archive-cascade-checkbox");
+      await cascadeCheckbox.click();
+    }
     // Confirm the archive dialog
     const confirmButton = this.page
       .getByRole("alertdialog")
@@ -745,6 +749,50 @@ export class SessionPage {
   async tapPRStatusChip(): Promise<void> {
     await this.prStatusChip().tap();
     await expect(this.prStatusChipDrawer()).toBeVisible({ timeout: 5_000 });
+  }
+
+  // --- GitLab MR status chip accessors: mirrors the PR status chip shape
+  // above, including its scoping (spec: gitlab-mr-status-chip, Constraints).
+
+  /** Compact GitLab MR status chip rendered in the chat status bar. */
+  mrStatusChip(): Locator {
+    return this.activeChat().getByTestId("chat-status-bar").getByTestId("mr-status-chip");
+  }
+
+  /** Compact GitLab MR status chip rendered in the passthrough toolbar's status row. */
+  mrStatusChipInPassthrough(): Locator {
+    return this.page.getByTestId("passthrough-status-row").getByTestId("mr-status-chip");
+  }
+
+  /** Mobile bottom-sheet drawer that hosts the chip's MRCIPopover body. */
+  mrStatusChipDrawer(): Locator {
+    return this.page.getByTestId("mr-status-chip-drawer");
+  }
+
+  /** Close button inside the chip's mobile drawer. */
+  mrStatusChipDrawerClose(): Locator {
+    return this.page.getByTestId("mr-status-chip-drawer-close");
+  }
+
+  /**
+   * MRCIPopover body when rendered inside the chip's own disclosure — the
+   * hover popover on a fine pointer, or the drawer on a coarse pointer.
+   * `mr-topbar-popover-inner` is also emitted by MRTopbarButton's own
+   * popover on the same route, so this scopes through the chip's own
+   * wrapper testid (`mr-status-chip-popover` / `mr-status-chip-drawer`)
+   * rather than resolving the inner testid globally.
+   */
+  mrStatusChipPopoverInner(): Locator {
+    return this.page
+      .getByTestId("mr-status-chip-popover")
+      .getByTestId("mr-topbar-popover-inner")
+      .or(this.mrStatusChipDrawer().getByTestId("mr-topbar-popover-inner"));
+  }
+
+  /** Tap the chip and wait for the mobile drawer to be visible. */
+  async tapMRStatusChip(): Promise<void> {
+    await this.mrStatusChip().tap();
+    await expect(this.mrStatusChipDrawer()).toBeVisible({ timeout: 5_000 });
   }
 
   /** Multi-PR aggregate popover content (segmented tabs + selected PR's CI). */
@@ -901,13 +949,13 @@ export class SessionPage {
   }
 
   /** Click a dockview tab by its visible label (e.g. "Changes", "Files", "Terminal"). */
-  async clickTab(label: string): Promise<void> {
+  async clickTab(label: string, options: { force?: boolean } = {}): Promise<void> {
     const tab = this.page
       .locator(".dv-default-tab:visible")
       .filter({ hasText: new RegExp(`^${escapeRegExp(label)}(?: \\(\\d+\\))?$`) })
       .first();
     await expect(tab).toBeVisible();
-    await tab.click();
+    await tab.click(options);
   }
 
   /**
@@ -1098,7 +1146,7 @@ export class SessionPage {
    * placeholder decoration is only rendered while the editor has no content.
    */
   async waitForDirectInput(timeout = 15_000) {
-    await expect(this.anyIdleInput()).toBeVisible({ timeout });
+    await this.waitForChatIdle({ timeout, requireEditable: true });
   }
 
   /** The composer's send/submit button (scoped to the active chat panel). */

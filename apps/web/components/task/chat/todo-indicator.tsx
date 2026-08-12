@@ -36,7 +36,13 @@ function StatusIcon({ status, className }: { status: string; className?: string 
   }
 }
 
-function TodoList({ todos }: { todos: TodoDisplayItem[] }) {
+function TodoList({
+  todos,
+  fillHeight = false,
+}: {
+  todos: TodoDisplayItem[];
+  fillHeight?: boolean;
+}) {
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -44,7 +50,17 @@ function TodoList({ todos }: { todos: TodoDisplayItem[] }) {
   }, []);
 
   return (
-    <div ref={listRef} className="space-y-1.5 max-h-48 overflow-y-auto">
+    <div
+      ref={listRef}
+      className={cn(
+        "space-y-1.5 overflow-y-auto",
+        // The popover/hovercard caps the list at max-h-48 so it never
+        // outgrows its small surface; a pinned panel instead lets the list
+        // flex to fill the whole height of its hosting panel and scrolls
+        // internally there.
+        fillHeight ? "min-h-0 flex-1" : "max-h-48",
+      )}
+    >
       {todos.map((todo, idx) => {
         const s = resolveStatus(todo);
         return (
@@ -67,14 +83,19 @@ function TodoIndicatorContent({
   todos,
   completed,
   progress,
+  fillHeight = false,
 }: {
   todos: TodoDisplayItem[];
   completed: number;
   progress: number;
+  fillHeight?: boolean;
 }) {
   const { t } = useTranslation();
   return (
-    <div data-testid="todo-indicator-popover">
+    <div
+      data-testid="todo-indicator-popover"
+      className={cn(fillHeight && "flex h-full min-h-0 flex-col")}
+    >
       <div className="flex items-center justify-between text-xs mb-2">
         <span className="font-medium text-foreground">{t("task:todos")}</span>
         <span className="text-muted-foreground">
@@ -87,7 +108,7 @@ function TodoIndicatorContent({
           style={{ width: `${progress}%` }}
         />
       </div>
-      <TodoList todos={todos} />
+      <TodoList todos={todos} fillHeight={fillHeight} />
     </div>
   );
 }

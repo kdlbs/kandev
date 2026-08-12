@@ -11,6 +11,7 @@ import type { PRDiffFile } from "@/lib/types/github";
 import { normalizeFileChangeStatus, type FileChangeStatus } from "@/lib/utils/file-change-status";
 import type { PRChangedFile } from "./changes-panel-timeline";
 import type { CommitDetailTarget } from "./changes-diff-target";
+import type { CommitPresentation } from "./commit-row";
 
 export type ChangedFile = {
   path: string;
@@ -279,6 +280,7 @@ export type MergedCommit = {
   /** Multi-repo: name of the repo this commit was made in. Empty for single-repo. */
   repository_name?: string;
   committed_at?: string;
+  presentation?: CommitPresentation;
 };
 
 export type PRCommitForMerge = {
@@ -407,6 +409,64 @@ export function mergeCommits(
   }
   appendPROnlyCommits(prCommits, matchedPRKeys, pushed);
   return [...unpushed, ...pushed];
+}
+
+function mapLocalCheckoutCommit(commit: {
+  commit_sha: string;
+  commit_message: string;
+  insertions: number;
+  deletions: number;
+  repository_name?: string;
+  committed_at?: string;
+}): MergedCommit {
+  return {
+    ...commit,
+    pushed: false,
+    statsAvailable: true,
+    detailTarget: localCommitTarget(commit),
+    presentation: "local_checkout",
+  };
+}
+
+function mapCurrentPRCommit(commit: PRCommitForMerge): MergedCommit | null {
+  const detailTarget = githubCommitTarget(commit);
+  if (!detailTarget) return null;
+  return {
+    commit_sha: commit.sha,
+    commit_message: commit.message,
+    insertions: commit.additions,
+    deletions: commit.deletions,
+    pushed: true,
+    statsAvailable: commit.stats_available === true,
+    detailTarget,
+    presentation: "current_pr",
+    ...(commit.repository_name ? { repository_name: commit.repository_name } : {}),
+    committed_at: commit.author_date,
+  };
+}
+
+/**
+ * Keeps provider and checkout rows independent after a proven history drift.
+ * No SHA, message, or metadata matching occurs in this mode.
+ */
+export function separateCommitHistories(
+  localCommits: {
+    commit_sha: string;
+    commit_message: string;
+    insertions: number;
+    deletions: number;
+    repository_name?: string;
+    committed_at?: string;
+  }[],
+  prCommits: PRCommitForMerge[],
+): { providerCommits: MergedCommit[]; localCommits: MergedCommit[] } {
+  return {
+    providerCommits: prCommits.flatMap((commit) => {
+      const mapped = mapCurrentPRCommit(commit);
+      return mapped ? [mapped] : [];
+    }),
+    localCommits: localCommits.map(mapLocalCheckoutCommit),
+  };
 }
 
 export function getBaseBranchDisplay(baseBranch: string | undefined): string {

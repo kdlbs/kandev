@@ -2,6 +2,82 @@
 
 All notable changes to Kandev.
 
+## 0.87.1 - 2026-08-12
+
+### Features
+
+- add agent profile duplicate ([#2550](https://github.com/kdlbs/kandev/pull/2550)) by @Fclem
+- duplicate workflow drafts ([#2539](https://github.com/kdlbs/kandev/pull/2539))
+- fill zh-cn gaps against latest main ([#2551](https://github.com/kdlbs/kandev/pull/2551)) by @BillChenIDY
+- add voice extraction host APIs ([#2548](https://github.com/kdlbs/kandev/pull/2548))
+- add PR event automation pills ([#2522](https://github.com/kdlbs/kandev/pull/2522)) by @luancm
+- add only-pin-when-not-empty option for the todo list panel ([#2543](https://github.com/kdlbs/kandev/pull/2543)) by @Fclem
+- make status bar a default-off appearance preference ([#2523](https://github.com/kdlbs/kandev/pull/2523))
+
+### Bug Fixes
+
+- prevent cascade archive navigation to descendants ([#2557](https://github.com/kdlbs/kandev/pull/2557))
+- preserve canonical worktree during cutover ([#2554](https://github.com/kdlbs/kandev/pull/2554))
+- repair GitHub App registration and installation auth ([#2511](https://github.com/kdlbs/kandev/pull/2511)) by @NazyS
+- include workspace root with submodules ([#2524](https://github.com/kdlbs/kandev/pull/2524))
+- make pinned todos panel fill its hosting panel height ([#2532](https://github.com/kdlbs/kandev/pull/2532)) by @Fclem
+- contain rewritten contribution histories ([#2509](https://github.com/kdlbs/kandev/pull/2509))
+
+### Documentation
+
+- prevent em dashes in public copy ([#2516](https://github.com/kdlbs/kandev/pull/2516))
+
+## 0.87.0 - 2026-08-11
+
+### Features
+
+- hide disabled agent profiles from left panel navigation ([#2528](https://github.com/kdlbs/kandev/pull/2528)) by @Fclem
+- add MR status chip to chat and passthrough toolbars ([#2537](https://github.com/kdlbs/kandev/pull/2537)) by @nova28
+- make available-to-install section collapsible ([#2544](https://github.com/kdlbs/kandev/pull/2544)) by @Fclem
+- move voice mode into task behavior ([#2534](https://github.com/kdlbs/kandev/pull/2534))
+- restructure settings and unify page chrome behind PageShell ([#2322](https://github.com/kdlbs/kandev/pull/2322)) by @Aulma
+- add saved query default views ([#2399](https://github.com/kdlbs/kandev/pull/2399))
+- add per-workflow step visibility filter to board ([#2467](https://github.com/kdlbs/kandev/pull/2467)) by @nova28
+- center settings save surface ([#2466](https://github.com/kdlbs/kandev/pull/2466))
+
+### Bug Fixes
+
+- correct isolated subtask branch messaging ([#2533](https://github.com/kdlbs/kandev/pull/2533))
+- detect wildcard listeners in port availability probe ([#2536](https://github.com/kdlbs/kandev/pull/2536))
+- preserve nested health token ownership ([#2538](https://github.com/kdlbs/kandev/pull/2538))
+- grant pull-requests write to fork label job ([#2542](https://github.com/kdlbs/kandev/pull/2542)) by @Fclem
+- recover hybrid worktree cutovers ([#2531](https://github.com/kdlbs/kandev/pull/2531))
+- elect legacy worktree ownership ([#2535](https://github.com/kdlbs/kandev/pull/2535))
+- key Top Agents usage by model and stop dropping each range's first day ([#2510](https://github.com/kdlbs/kandev/pull/2510))
+- keep caret in task title fields clamped at the limit ([#2529](https://github.com/kdlbs/kandev/pull/2529)) by @Fclem
+- truncate title when linking an external issue ([#2527](https://github.com/kdlbs/kandev/pull/2527)) by @Fclem
+- auto-link gitlab mrs for self-managed hosts ([#2515](https://github.com/kdlbs/kandev/pull/2515)) by @nova28
+- show dark mode toggle in mobile menu ([#2514](https://github.com/kdlbs/kandev/pull/2514)) by @nova28
+- recreate the worktree when resuming an unarchived task ([#2508](https://github.com/kdlbs/kandev/pull/2508))
+
+## 0.86.1 - 2026-08-10
+
+### Features
+
+- move make dev to the native Go launcher ([#2411](https://github.com/kdlbs/kandev/pull/2411))
+
+### Bug Fixes
+
+- preserve flat owner over terminal history ([#2505](https://github.com/kdlbs/kandev/pull/2505)) ([#2506](https://github.com/kdlbs/kandev/pull/2506))
+- keep a PR watch per branch so multi-branch automation works ([#2504](https://github.com/kdlbs/kandev/pull/2504))
+- scope task state, move and delete to the calling user ([#2503](https://github.com/kdlbs/kandev/pull/2503))
+- serialize workspace stream websocket writes ([#2502](https://github.com/kdlbs/kandev/pull/2502))
+- allow git pull --rebase past the flag allowlist ([#2501](https://github.com/kdlbs/kandev/pull/2501))
+- copy the watch handed to the initial-check goroutine ([#2492](https://github.com/kdlbs/kandev/pull/2492))
+- separate debug and development launch profiles ([#2487](https://github.com/kdlbs/kandev/pull/2487))
+- normalize OMP shell command output ([#2480](https://github.com/kdlbs/kandev/pull/2480)) ([#2486](https://github.com/kdlbs/kandev/pull/2486))
+- preserve Homebrew formula version ([#2488](https://github.com/kdlbs/kandev/pull/2488))
+- re-run bootstrap when the dialog reopens ([#2484](https://github.com/kdlbs/kandev/pull/2484)) by @Fclem
+
+### Refactoring
+
+- split execution creation ([#2382](https://github.com/kdlbs/kandev/pull/2382)) ([#2485](https://github.com/kdlbs/kandev/pull/2485))
+
 ## 0.86.0 - 2026-08-10
 
 ### Features

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { useAzureDevOpsEnabled } from "./use-azure-devops-enabled";
-import { makeLocalStorageMock } from "../integrations/local-storage-mock.test-helpers";
+import { makeLocalStorageMock } from "../../local-storage-mock.test-helpers";
 
 const STORAGE_KEY = "kandev:azure-devops:enabled:v1";
 

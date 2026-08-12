@@ -8,6 +8,7 @@ import { TodoIndicator } from "./todo-indicator";
 import { AutoScrollToggleButton } from "./auto-scroll-toggle-button";
 import { PRMergedBanner, PRClosedBanner } from "./pr-archive-banners";
 import { PRStatusChip } from "@/components/github/pr-status-chip";
+import { MRStatusChip } from "@/components/gitlab/mr-status-chip";
 import { AzureDevOpsTaskPullRequestChip } from "@/components/azure-devops/azure-devops-task-pull-request-chip";
 import { shareableSessionStateClient } from "@/components/task/share/share-button";
 import { TranscriptNavGroup } from "@/components/task/chat/transcript-nav-group";
@@ -424,11 +425,12 @@ function ChatStatusBar({
   return (
     <div
       data-testid="chat-status-bar"
-      className="flex items-center gap-1.5 py-1 text-xs text-muted-foreground"
+      className="flex min-w-0 flex-wrap items-center gap-1.5 py-1 text-xs text-muted-foreground"
     >
       {showTodos && <TodoIndicator todos={todoItems} />}
       {autopilot && <AutopilotChatChip />}
       <PRStatusChip taskId={taskId} />
+      <MRStatusChip taskId={taskId} />
       <AzureDevOpsTaskPullRequestChip taskId={taskId} />
       {queueChip}
       {/* Distinct per-banner keys: the key remounts the banner on task switch

@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -12,6 +13,14 @@ import (
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+// sessionTerminalErrText mirrors lifecycle.ErrSessionTerminal's message. It is
+// duplicated as a string rather than imported so this higher-level orchestrator
+// file does not take a direct dependency on internal/agent/runtime/lifecycle
+// (ARCH-RUNTIME-IMPORT): the launch failures reach here only as wrapped-error
+// strings or a stringified persisted session error, so a string match is both
+// sufficient and required (see IsBenignLaunchTeardownErr).
+const sessionTerminalErrText = "session is terminal"
 
 // SessionIntent represents the type of session operation requested.
 type SessionIntent string
@@ -40,6 +49,14 @@ type LaunchSessionRequest struct {
 	LaunchWorkspace   bool          `json:"launch_workspace,omitempty"`
 	SkipMessageRecord bool          `json:"skip_message_record,omitempty"`
 	AutoStart         bool          `json:"auto_start,omitempty"`
+	// NoAgentLaunch marks a prepare request that must NEVER be upgraded into an
+	// agent launch, even for passthrough profiles (whose prepare would normally
+	// be eagerly upgraded so the PTY exists). It backs the session.ensure
+	// auto_start=false override used by the prevent-auto-start-on-open
+	// preference: the session is created workspace-only (CREATED) and the
+	// Start agent button launches it later. It is an internal server-side flag
+	// set from EnsureSessionOptions, kept off the wire protocol (`json:"-"`).
+	NoAgentLaunch bool `json:"-"`
 	// DeferredStart marks a prepare whose caller will follow up with an explicit
 	// IntentStartCreated that carries the prompt (the two-phase create flow:
 	// cheap sync prepare + async start). It suppresses the passthrough
@@ -97,6 +114,33 @@ func ResolveIntent(req *LaunchSessionRequest) SessionIntent {
 		return IntentPrepare
 	}
 	return IntentStart
+}
+
+// IsBenignLaunchTeardownErr reports whether a session-launch failure is an
+// expected graceful-shutdown teardown race rather than a genuine fault. During
+// shutdown the root context is cancelled and terminal sessions reject launches,
+// so an in-flight session.launch fails predictably; those should log WARN
+// without a stack trace, not ERROR.
+//
+// Two shapes reach the launch handler on shutdown:
+//   - restore_workspace wraps lifecycle.ErrSessionTerminal with %w and the
+//     cancelled root context surfaces context.Canceled, so errors.Is matches
+//     the context sentinel.
+//   - resume stringifies a persisted session error (task_operations.go uses %s
+//     on sess.ErrorMessage), destroying any sentinel, so a bounded string
+//     fallback for "context canceled"/"session is terminal" is required. The
+//     terminal-session text is matched as a string (not errors.Is) to avoid a
+//     higher-level import of the runtime/lifecycle seam.
+func IsBenignLaunchTeardownErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, context.Canceled.Error()) ||
+		strings.Contains(msg, sessionTerminalErrText)
 }
 
 // LaunchSession is the unified entry point for all session operations.
@@ -170,9 +214,14 @@ func (s *Service) launchPrepare(ctx context.Context, req *LaunchSessionRequest) 
 // imminent prompt-bearing start) get the eager launch. See launchPrepare for
 // why AutoStart and DeferredStart each suppress it.
 func (s *Service) shouldUpgradePassthroughPrepare(ctx context.Context, req *LaunchSessionRequest) bool {
+	if req.NoAgentLaunch {
+		return false
+	}
 	return !req.AutoStart && !req.DeferredStart && s.isPassthroughProfile(ctx, req.AgentProfileID)
 }
 
+// isPassthroughProfile reports whether the agent profile is a CLI
+// passthrough provider.
 func (s *Service) isPassthroughProfile(ctx context.Context, profileID string) bool {
 	if profileID == "" || s.agentManager == nil {
 		return false
@@ -339,6 +388,8 @@ func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action 
 	return resp, nil
 }
 
+// normalizeRecoverSessionError maps a missing-profile resume failure to a
+// user-actionable message.
 func normalizeRecoverSessionError(err error) error {
 	if err == nil {
 		return nil
@@ -349,6 +400,8 @@ func normalizeRecoverSessionError(err error) error {
 	return err
 }
 
+// isMissingProfileResumeError reports whether the error indicates the
+// session's agent profile no longer exists.
 func isMissingProfileResumeError(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "failed to resolve agent profile") ||

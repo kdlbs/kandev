@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,7 +18,8 @@ import (
 )
 
 type settingsScanner struct {
-	raw string
+	raw      string
+	revision int64
 }
 
 func upsertUserSettingsForTest(t *testing.T, repo *sqliteRepository, ctx context.Context, settings *models.UserSettings) {
@@ -33,7 +36,149 @@ func upsertUserSettingsForTest(t *testing.T, repo *sqliteRepository, ctx context
 func (s settingsScanner) Scan(dest ...any) error {
 	*(dest[0].(*string)) = s.raw
 	*(dest[1].(*time.Time)) = time.Time{}
+	*(dest[2].(*int64)) = s.revision
 	return nil
+}
+
+func TestSQLiteRepositoryMigratesLegacySettingsRevision(t *testing.T) {
+	conn, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	conn.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = conn.Close() })
+	assertLegacySettingsRevisionMigration(t, conn)
+}
+
+func TestPostgresRepositoryMigratesLegacySettingsRevision(t *testing.T) {
+	conn := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	assertLegacySettingsRevisionMigration(t, conn)
+}
+
+func assertLegacySettingsRevisionMigration(t *testing.T, conn *sqlx.DB) {
+	t.Helper()
+	now := time.Now().UTC()
+	if _, err := conn.Exec(`
+		CREATE TABLE users (
+			id TEXT PRIMARY KEY,
+			email TEXT NOT NULL,
+			settings TEXT NOT NULL DEFAULT '{}',
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL
+		)
+	`); err != nil {
+		t.Fatalf("create legacy users table: %v", err)
+	}
+	if _, err := conn.Exec(
+		conn.Rebind(`INSERT INTO users (id, email, settings, created_at, updated_at) VALUES (?, ?, '{}', ?, ?)`),
+		DefaultUserID,
+		DefaultUserEmail,
+		now,
+		now,
+	); err != nil {
+		t.Fatalf("insert legacy user: %v", err)
+	}
+
+	repo, err := newSQLiteRepositoryWithDB(conn, conn)
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+	ctx := context.Background()
+	settings, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("read migrated settings: %v", err)
+	}
+	if settings.Revision != 0 {
+		t.Fatalf("migrated revision = %d, want 0", settings.Revision)
+	}
+	settings.AppStatusBarEnabled = true
+	settings.UpdatedAt = now.Add(time.Second)
+	updated, err := repo.UpsertUserSettingsPreservingTaskCreateLastUsed(ctx, settings, nil)
+	if err != nil {
+		t.Fatalf("write migrated settings: %v", err)
+	}
+	if updated.Revision != 1 {
+		t.Fatalf("updated revision = %d, want 1", updated.Revision)
+	}
+
+	replayedRepo, err := newSQLiteRepositoryWithDB(conn, conn)
+	if err != nil {
+		t.Fatalf("reinitialize migrated repo: %v", err)
+	}
+	replayed, err := replayedRepo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("read settings after migration replay: %v", err)
+	}
+	if replayed.Revision != 1 {
+		t.Fatalf("revision after migration replay = %d, want 1", replayed.Revision)
+	}
+	if !replayed.AppStatusBarEnabled {
+		t.Fatal("status bar preference was not preserved across migration replay")
+	}
+}
+
+func TestSQLiteRepositoryAssignsUniqueAtomicSettingsRevisions(t *testing.T) {
+	conn, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	conn.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = conn.Close() })
+	repo, err := newSQLiteRepositoryWithDB(conn, conn)
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+
+	ctx := context.Background()
+	settings, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get defaults: %v", err)
+	}
+	first := *settings
+	second := *settings
+	first.AppStatusBarEnabled = true
+	second.ChangesPanelLayout = "flat"
+
+	start := make(chan struct{})
+	revisions := make(chan int64, 2)
+	errors := make(chan error, 2)
+	var workers sync.WaitGroup
+	for _, candidate := range []*models.UserSettings{&first, &second} {
+		workers.Add(1)
+		go func(candidate *models.UserSettings) {
+			defer workers.Done()
+			<-start
+			updated, updateErr := repo.UpsertUserSettingsPreservingTaskCreateLastUsed(ctx, candidate, nil)
+			if updateErr != nil {
+				errors <- updateErr
+				return
+			}
+			revisions <- updated.Revision
+		}(candidate)
+	}
+	close(start)
+	workers.Wait()
+	close(errors)
+	close(revisions)
+	for updateErr := range errors {
+		t.Fatalf("concurrent update: %v", updateErr)
+	}
+
+	got := make([]int64, 0, 2)
+	for revision := range revisions {
+		got = append(got, revision)
+	}
+	sort.Slice(got, func(i, j int) bool { return got[i] < got[j] })
+	if !reflect.DeepEqual(got, []int64{1, 2}) {
+		t.Fatalf("revisions = %v, want unique commit order [1 2]", got)
+	}
+	final, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get final settings: %v", err)
+	}
+	if final.Revision != 2 {
+		t.Fatalf("final revision = %d, want 2", final.Revision)
+	}
 }
 
 func TestScanUserSettingsStartupPage(t *testing.T) {
@@ -400,6 +545,38 @@ func TestScanUserSettingsTodoListPanelDefault(t *testing.T) {
 	}
 }
 
+func TestScanUserSettingsTodoListPanelOnlyWhenNotEmptyDefault(t *testing.T) {
+	settings, err := scanUserSettings(settingsScanner{raw: "{}"}, DefaultUserID)
+	if err != nil {
+		t.Fatalf("scan defaults: %v", err)
+	}
+	if settings.ShowTodoListPanelOnlyWhenNotEmpty {
+		t.Fatal("ShowTodoListPanelOnlyWhenNotEmpty = true, want false (default)")
+	}
+
+	settings, err = scanUserSettings(
+		settingsScanner{raw: `{"show_todo_list_panel_only_when_not_empty":true}`},
+		DefaultUserID,
+	)
+	if err != nil {
+		t.Fatalf("scan stored preference: %v", err)
+	}
+	if !settings.ShowTodoListPanelOnlyWhenNotEmpty {
+		t.Fatal("ShowTodoListPanelOnlyWhenNotEmpty = false, want true (stored)")
+	}
+
+	settings, err = scanUserSettings(
+		settingsScanner{raw: `{"show_todo_list_panel_only_when_not_empty":false}`},
+		DefaultUserID,
+	)
+	if err != nil {
+		t.Fatalf("scan explicit false: %v", err)
+	}
+	if settings.ShowTodoListPanelOnlyWhenNotEmpty {
+		t.Fatal("ShowTodoListPanelOnlyWhenNotEmpty = true, want false (explicit)")
+	}
+}
+
 func TestTodoListPanelSettingRoundTripThroughMarshalAndScan(t *testing.T) {
 	raw, err := marshalUserSettingsPayload(&models.UserSettings{ShowTodoListPanel: true})
 	if err != nil {
@@ -411,6 +588,22 @@ func TestTodoListPanelSettingRoundTripThroughMarshalAndScan(t *testing.T) {
 	}
 	if !settings.ShowTodoListPanel {
 		t.Fatal("ShowTodoListPanel = false, want true (round-tripped)")
+	}
+}
+
+func TestTodoListPanelOnlyWhenNotEmptyRoundTripThroughMarshalAndScan(t *testing.T) {
+	raw, err := marshalUserSettingsPayload(&models.UserSettings{
+		ShowTodoListPanelOnlyWhenNotEmpty: true,
+	})
+	if err != nil {
+		t.Fatalf("marshal settings: %v", err)
+	}
+	settings, err := scanUserSettings(settingsScanner{raw: string(raw)}, DefaultUserID)
+	if err != nil {
+		t.Fatalf("scan settings: %v", err)
+	}
+	if !settings.ShowTodoListPanelOnlyWhenNotEmpty {
+		t.Fatal("ShowTodoListPanelOnlyWhenNotEmpty = false, want true (round-tripped)")
 	}
 }
 
@@ -686,6 +879,87 @@ func TestSQLiteRepositoryAppStatusBarOrderDefaultAndRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepositoryKanbanHiddenStepIDsDefaultAndRoundTrip(t *testing.T) {
+	conn, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	conn.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = conn.Close() })
+	repo, err := newSQLiteRepositoryWithDB(conn, conn)
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+
+	ctx := context.Background()
+	settings, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get defaults: %v", err)
+	}
+	if len(settings.KanbanHiddenStepIDs) != 0 {
+		t.Fatalf("default KanbanHiddenStepIDs = %#v, want empty", settings.KanbanHiddenStepIDs)
+	}
+	settings.KanbanHiddenStepIDs = map[string][]string{
+		"wf-1": {"step-a", "step-b"},
+		"wf-2": {"step-c"},
+	}
+	upsertUserSettingsForTest(t, repo, ctx, settings)
+	got, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get settings: %v", err)
+	}
+	if !reflect.DeepEqual(got.KanbanHiddenStepIDs, settings.KanbanHiddenStepIDs) {
+		t.Fatalf("KanbanHiddenStepIDs = %#v, want %#v", got.KanbanHiddenStepIDs, settings.KanbanHiddenStepIDs)
+	}
+}
+
+func TestScanUserSettingsKanbanHiddenStepIDsCorruptFallsBackToEmpty(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{
+			// A top-level shape mismatch: the whole field is a JSON string,
+			// not an object. json.Unmarshal never allocates the destination
+			// map in this case, so a `decoded == nil` check alone happens to
+			// catch it.
+			name: "top-level value is not an object",
+			raw:  `{"kanban_hidden_step_ids":"not-an-object","workspace_id":"ws-1"}`,
+		},
+		{
+			// A NESTED shape mismatch: the field is a valid object, but one
+			// of its per-workflow VALUES has the wrong type. Unlike the
+			// top-level case, json.Unmarshal still allocates and partially
+			// populates the map here (e.g. {"wf-1": nil}) while returning a
+			// non-nil error, so a decode path that ignores the error and
+			// only checks for a nil map would incorrectly return that
+			// partial/garbage map instead of falling back to {}. This is
+			// the exact shape a real corruption (e.g. an interrupted
+			// partial write) is more likely to produce than a top-level
+			// type swap.
+			name: "nested per-workflow value is not an array",
+			raw:  `{"kanban_hidden_step_ids":{"wf-1":"not-an-array"},"workspace_id":"ws-1"}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings, err := scanUserSettings(settingsScanner{raw: tt.raw}, DefaultUserID)
+			if err != nil {
+				t.Fatalf("scan settings with corrupt kanban_hidden_step_ids: %v", err)
+			}
+			if len(settings.KanbanHiddenStepIDs) != 0 {
+				t.Fatalf("KanbanHiddenStepIDs = %#v, want empty on corrupt value", settings.KanbanHiddenStepIDs)
+			}
+			// Corruption in this one field must not take the rest of the
+			// settings blob down with it.
+			if settings.WorkspaceID != "ws-1" {
+				t.Fatalf("WorkspaceID = %q, want %q (sibling fields must still load)", settings.WorkspaceID, "ws-1")
+			}
+		})
+	}
+}
+
 func TestSQLiteRepositoryUpdateTaskCreateLastUsedPatchesNonEmptyFields(t *testing.T) {
 	conn, err := sqlx.Open("sqlite3", ":memory:")
 	if err != nil {
@@ -843,6 +1117,10 @@ func TestBuildPostgresTaskCreateLastUsedUpdatePatchesNonEmptyFields(t *testing.T
 	if !strings.Contains(query, "jsonb_set") {
 		t.Fatalf("postgres update should use jsonb_set: %s", query)
 	}
+	if !strings.Contains(query, "settings_revision = settings_revision + 1") ||
+		!strings.Contains(query, "RETURNING settings, updated_at, settings_revision") {
+		t.Fatalf("postgres update should atomically return its settings revision: %s", query)
+	}
 	if !strings.Contains(query, "{task_create_last_used,repository_id}") ||
 		!strings.Contains(query, "{task_create_last_used,branch}") ||
 		!strings.Contains(query, "{task_create_last_used,agent_profile_id}") ||
@@ -930,6 +1208,10 @@ func TestBuildPostgresUserSettingsPreservingTaskCreateLastUsedUpdateUsesJSONB(t 
 	if !strings.Contains(query, "?::jsonb") || !strings.Contains(query, "jsonb_set") {
 		t.Fatalf("postgres update should merge payload with jsonb_set: %s", query)
 	}
+	if !strings.Contains(query, "settings_revision = settings_revision + 1") ||
+		!strings.Contains(query, "RETURNING settings, updated_at, settings_revision") {
+		t.Fatalf("postgres update should atomically return its settings revision: %s", query)
+	}
 	if !strings.Contains(query, "{task_create_last_used,repository_id}") ||
 		!strings.Contains(query, "{task_create_last_used,branch}") ||
 		!strings.Contains(query, "{task_create_last_used,agent_profile_id}") ||
@@ -979,6 +1261,10 @@ func TestPostgresRepositoryTaskCreateLastUsedRoundTrip(t *testing.T) {
 		got.TaskCreateLastUsed.ExecutorProfileID != "exec-before" {
 		t.Fatalf("postgres task-create update mismatch: %+v", got.TaskCreateLastUsed)
 	}
+	if got.Revision < 2 {
+		t.Fatalf("postgres settings revision = %d, want at least 2", got.Revision)
+	}
+	firstRevision := got.Revision
 
 	staleSettings.SidebarActiveViewID = "view-after"
 	staleSettings.TaskCreateLastUsed = models.TaskCreateLastUsed{
@@ -997,6 +1283,9 @@ func TestPostgresRepositoryTaskCreateLastUsedRoundTrip(t *testing.T) {
 		got.TaskCreateLastUsed.AgentProfileID != "agent-after" ||
 		got.TaskCreateLastUsed.ExecutorProfileID != "exec-before" {
 		t.Fatalf("postgres preserving upsert should keep current task-create values: %+v", got.TaskCreateLastUsed)
+	}
+	if got.Revision != firstRevision+1 {
+		t.Fatalf("postgres settings revision = %d, want %d", got.Revision, firstRevision+1)
 	}
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -13,6 +13,8 @@ import type { ContextItem } from "@/lib/types/context";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { ImagePasteIssue } from "./clipboard-attachments";
 import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
+import { createPluginComposerCapability } from "@/lib/plugins/composer-capability";
+import type { PluginComposerCapability } from "@/lib/plugins/types";
 
 export type ChatInputEditorAreaProps = {
   inputRef: React.RefObject<import("./tiptap-input").TipTapInputHandle | null>;
@@ -129,6 +131,41 @@ function FileInput({
   );
 }
 
+function useChatPluginComposer(p: {
+  inputRef: ChatInputEditorAreaProps["inputRef"];
+  submitDisabled: boolean;
+  isEnhancingPrompt: boolean;
+  onSubmit: () => void;
+}): PluginComposerCapability {
+  const handle = useMemo(
+    () =>
+      createPluginComposerCapability({
+        insertText: (text) => {
+          const editor = p.inputRef.current;
+          if (!editor) return false;
+          const from = editor.getSelectionStart();
+          const prefix = from > 0 && !/\s/.test(editor.getValue().charAt(from - 1)) ? " " : "";
+          editor.insertText(prefix + text.trim(), from, editor.getSelectionEnd());
+          editor.focus();
+          return true;
+        },
+        focus: () => {
+          if (!p.inputRef.current) return false;
+          p.inputRef.current.focus();
+          return true;
+        },
+        submit: async () => {
+          if (p.isEnhancingPrompt || p.submitDisabled) return false;
+          p.onSubmit();
+          return true;
+        },
+      }),
+    [p.inputRef, p.isEnhancingPrompt, p.onSubmit, p.submitDisabled],
+  );
+  useEffect(() => () => handle.revoke(), [handle]);
+  return handle.api;
+}
+
 export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
   const { t } = useTranslation("chat");
   const { inputRef, value, handleChange, handleSubmitWithReset, inputPlaceholder } = p;
@@ -148,6 +185,13 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
   const hasContent = value.trim().length > 0 || userContextCount > 0;
   // Block submit while enhancing prompt, but keep editor editable for programmatic updates
   const wrappedSubmit = isEnhancingPrompt || p.submitDisabled ? () => {} : handleSubmitWithReset;
+
+  const composerCapability = useChatPluginComposer({
+    inputRef,
+    submitDisabled: p.submitDisabled,
+    isEnhancingPrompt: Boolean(isEnhancingPrompt),
+    onSubmit: handleSubmitWithReset,
+  });
   const submitDisabledReason = p.hasPendingAttachmentUploads
     ? t("chat:attachmentUploadPendingSubmit")
     : p.submitDisabledReason;
@@ -200,6 +244,8 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
         isSending={isSending}
         onCancel={onCancel}
         onSubmit={wrappedSubmit}
+        composerCapability={composerCapability}
+        composerSurface={taskId ? "task-chat" : "quick-chat"}
         submitKey={submitKey}
         contextCount={contextCount}
         contextPopoverOpen={contextPopoverOpen}

@@ -54,9 +54,18 @@ test.describe("Configuration Chat", () => {
     const initial = await apiClient.getUserSettings();
     const initialLayout = initial.settings.changes_panel_layout === "tree" ? "tree" : "flat";
     const nextLayout = initialLayout === "tree" ? "flat" : "tree";
+    expect(initial.settings.app_status_bar_enabled).toBe(false);
 
     try {
-      await testPage.goto("/settings/general/appearance");
+      await testPage.goto("/settings/preferences/appearance");
+      await expect(testPage.getByTestId("app-status-bar")).toHaveCount(0);
+      await expect
+        .poll(() =>
+          testPage.evaluate(() =>
+            getComputedStyle(document.documentElement).getPropertyValue("--app-status-bar-height"),
+          ),
+        )
+        .toBe("0px");
       const layout = testPage.getByTestId("changes-panel-layout-select");
       await layout.click();
       await testPage
@@ -65,14 +74,65 @@ test.describe("Configuration Chat", () => {
 
       const floatingSave = testPage.getByTestId("settings-floating-save");
       const saveButton = floatingSave.getByRole("button", { name: "Save changes" });
+      const resetButton = floatingSave.getByRole("button", { name: "Reset" });
+      const surface = floatingSave.getByTestId("settings-floating-save-surface");
+      const contentArea = testPage.getByTestId("settings-scroll-container");
       const configChatButton = testPage.getByRole("button", { name: "Configuration Chat" });
+      const [closedSurfaceBox, contentBox, configChatBox, resetBox, saveBox] = await Promise.all([
+        surface.boundingBox(),
+        contentArea.boundingBox(),
+        configChatButton.boundingBox(),
+        resetButton.boundingBox(),
+        saveButton.boundingBox(),
+      ]);
+      expect(closedSurfaceBox).not.toBeNull();
+      expect(contentBox).not.toBeNull();
+      expect(configChatBox).not.toBeNull();
+      expect(resetBox).not.toBeNull();
+      expect(saveBox).not.toBeNull();
+      expect(closedSurfaceBox!.height).toBeLessThanOrEqual(40);
+      expect(resetBox!.height).toBeLessThanOrEqual(32);
+      expect(saveBox!.height).toBeLessThanOrEqual(32);
+      expect(
+        Math.abs(
+          closedSurfaceBox!.x +
+            closedSurfaceBox!.width / 2 -
+            (contentBox!.x + contentBox!.width / 2),
+        ),
+      ).toBeLessThanOrEqual(2);
+      expect(closedSurfaceBox!.height - saveBox!.height).toBeGreaterThanOrEqual(6);
+      expect(
+        Math.abs(
+          closedSurfaceBox!.y +
+            closedSurfaceBox!.height / 2 -
+            (configChatBox!.y + configChatBox!.height / 2),
+        ),
+      ).toBeLessThanOrEqual(2);
       await expect(saveButton).toHaveClass(/bg-success/);
+      await expect(floatingSave).not.toHaveClass(/bg-success/);
       await expectElementsNotToIntersect(saveButton, configChatButton);
 
       await configChatButton.click();
       const configChatPopover = testPage.getByTestId("config-chat-popover");
       await expect(configChatPopover).toBeVisible();
       await expectElementAbove(saveButton, configChatPopover);
+      await expectElementAbove(surface, configChatPopover);
+      const [surfaceBox, popoverBox] = await Promise.all([
+        surface.boundingBox(),
+        configChatPopover.boundingBox(),
+      ]);
+      expect(surfaceBox).not.toBeNull();
+      expect(popoverBox).not.toBeNull();
+      expect(surfaceBox!.height).toBeLessThanOrEqual(48);
+      expect(
+        Math.abs(surfaceBox!.x + surfaceBox!.width / 2 - (popoverBox!.x + popoverBox!.width / 2)),
+      ).toBeLessThanOrEqual(2);
+      const leftParentGap = surfaceBox!.x - popoverBox!.x;
+      const rightParentGap =
+        popoverBox!.x + popoverBox!.width - (surfaceBox!.x + surfaceBox!.width);
+      expect(leftParentGap).toBeGreaterThanOrEqual(8);
+      expect(rightParentGap).toBeGreaterThanOrEqual(8);
+      expect(Math.abs(leftParentGap - rightParentGap)).toBeLessThanOrEqual(2);
     } finally {
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
         changes_panel_layout: initialLayout,

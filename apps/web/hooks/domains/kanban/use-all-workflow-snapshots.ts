@@ -105,6 +105,13 @@ async function fetchAndWriteSnapshot(
       `[useAllWorkflowSnapshots] Failed to fetch snapshot for workflow "${wf.name}" (${wf.id}):`,
       err,
     );
+    // A failed fetch must not leave a placeholder permanently "unknown": that
+    // would block the final-step ensure forever. Transition to an explicit
+    // known-but-empty state so the ensure proceeds ungated (safe default).
+    const current = store.getState().kanbanMulti.snapshots[wf.id];
+    if (current?.isPlaceholder) {
+      store.getState().setWorkflowSnapshot(wf.id, { ...current, isPlaceholder: false });
+    }
   }
 }
 

@@ -265,3 +265,78 @@ describe("workflow step cancellation fields", () => {
     });
   });
 });
+
+describe("workflow step stage types", () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          id: "step-1",
+          workflow_id: "wf-1",
+          name: REVIEW_STEP_NAME,
+          position: 1,
+          color: STEP_COLOR,
+          stage_type: "review",
+          created_at: "",
+          updated_at: "",
+        }),
+      ),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("preserves stage types returned from workflow step APIs", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          steps: [
+            {
+              id: "step-1",
+              workflow_id: "wf-1",
+              name: REVIEW_STEP_NAME,
+              position: 1,
+              color: STEP_COLOR,
+              stage_type: "review",
+              created_at: "",
+              updated_at: "",
+            },
+          ],
+        }),
+      ),
+    );
+
+    const result = await listWorkflowStepsAction("wf-1");
+
+    expect(result.steps[0].stage_type).toBe("review");
+  });
+
+  it("sends stage types when creating a workflow step", async () => {
+    await createWorkflowStepAction({
+      workflow_id: "wf-1",
+      name: REVIEW_STEP_NAME,
+      position: 1,
+      color: STEP_COLOR,
+      stage_type: "review",
+    } as Parameters<typeof createWorkflowStepAction>[0]);
+
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init.body as string)).toMatchObject({ stage_type: "review" });
+  });
+
+  it("sends stage types when updating a workflow step", async () => {
+    await updateWorkflowStepAction("step-1", {
+      stage_type: "review",
+    } as Parameters<typeof updateWorkflowStepAction>[1]);
+
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init.body as string)).toMatchObject({ stage_type: "review" });
+  });
+});

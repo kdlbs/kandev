@@ -17,7 +17,7 @@ import {
   selectableLocales,
   type SupportedLocale,
 } from "@/lib/i18n";
-import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/general";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 
 /**
  * Language switcher. Applies immediately (no deferred save) — `activateLocale`

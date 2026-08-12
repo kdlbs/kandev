@@ -64,6 +64,20 @@ test.describe("No silent model fallback on mobile", () => {
       await testPage.keyboard.press("Escape");
       await expect(helpDrawer).toBeHidden();
 
+      const advancedOptions = testPage.getByTestId("profile-advanced-options");
+      const advancedTrigger = testPage.getByTestId("profile-advanced-options-trigger");
+      await expect(advancedTrigger).toBeVisible({ timeout: 10_000 });
+      await expect(testPage.getByTestId("command-prefix-input")).toBeHidden();
+      const fallbackBox = await testPage.getByTestId("profile-fallback-settings").boundingBox();
+      const advancedBox = await advancedOptions.boundingBox();
+      expect(fallbackBox).not.toBeNull();
+      expect(advancedBox).not.toBeNull();
+      if (!fallbackBox || !advancedBox) throw new Error("profile disclosures are not laid out");
+      expect(advancedBox.y - (fallbackBox.y + fallbackBox.height)).toBeLessThanOrEqual(8);
+
+      await advancedTrigger.tap();
+      await expect(testPage.getByTestId("command-prefix-input")).toBeVisible();
+
       const overflow = await testPage.evaluate(() => ({
         scrollWidth: document.documentElement.scrollWidth,
         clientWidth: document.documentElement.clientWidth,

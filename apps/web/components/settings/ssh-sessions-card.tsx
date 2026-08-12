@@ -149,10 +149,10 @@ function SSHSessionsRow({ session: s }: { session: SSHSession }) {
         {s.user ? `${s.user}@${s.host}` : s.host}
       </TableCell>
       <TableCell className="font-mono text-xs" data-testid="ssh-session-remote-port">
-        {s.remote_agentctl_port ?? "—"}
+        {s.remote_agentctl_port ?? "-"}
       </TableCell>
       <TableCell className="font-mono text-xs" data-testid="ssh-session-local-port">
-        {s.local_forward_port ?? "—"}
+        {s.local_forward_port ?? "-"}
       </TableCell>
       <TableCell className="text-xs" data-testid="ssh-session-uptime">
         {formatUptime(s.uptime_seconds)}

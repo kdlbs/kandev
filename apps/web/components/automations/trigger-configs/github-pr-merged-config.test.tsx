@@ -42,7 +42,7 @@ describe("GitHubPRMergedConfig", () => {
     renderConfig({ all_repos: false, repos: [] });
     // getByText throws if the warning is not rendered.
     screen.getByText(
-      "No repositories selected — this trigger will not fire. Enable 'All repositories' or add at least one repository.",
+      "No repositories selected; this trigger will not fire. Enable 'All repositories' or add at least one repository.",
     );
   });
 
@@ -50,7 +50,7 @@ describe("GitHubPRMergedConfig", () => {
     renderConfig({ all_repos: true });
     expect(
       screen.queryByText(
-        "No repositories selected — this trigger will not fire. Enable 'All repositories' or add at least one repository.",
+        "No repositories selected; this trigger will not fire. Enable 'All repositories' or add at least one repository.",
       ),
     ).toBeNull();
   });

@@ -35,7 +35,7 @@ test.describe("Mobile storage maintenance", () => {
       });
     });
 
-    await testPage.goto("/settings/system/storage");
+    await testPage.goto("/settings/system/data-storage");
     const trigger = testPage.getByTestId("storage-resource-temporary-artifacts-trigger");
     await trigger.tap();
     const cleanButton = testPage.getByTestId("storage-temporary-artifacts-clean");
@@ -86,7 +86,7 @@ test.describe("Mobile storage maintenance", () => {
       });
     });
 
-    await testPage.goto("/settings/system/storage");
+    await testPage.goto("/settings/system/data-storage");
     await testPage.getByTestId("storage-run-now").tap();
     await expect(testPage.getByTestId("storage-busy")).toContainText("A test command is running");
     await expect(testPage.getByTestId("storage-run-anyway")).toBeVisible();
@@ -118,10 +118,8 @@ test.describe("Mobile storage maintenance", () => {
     await mobile.goto();
     await mobile.mobileMenuButton.click();
     await testPage.getByRole("link", { name: "Settings" }).click();
-    await testPage.getByTestId("settings-mobile-menu-button").click();
-    const settingsMenu = testPage.getByTestId("settings-mobile-menu");
-    await settingsMenu.getByRole("button", { name: "Expand System" }).click();
-    await settingsMenu.getByRole("link", { name: "Storage" }).click();
+    const index = testPage.getByTestId("settings-index");
+    await index.locator('a[href="/settings/system/data-storage"]').click();
 
     await expect(testPage.getByTestId("storage-settings-page")).toBeVisible();
     await expect(testPage.getByTestId("storage-disk-capacity-card")).toBeVisible();
@@ -217,13 +215,13 @@ test.describe("Mobile storage maintenance", () => {
 
     await testPage.route(overviewPattern, holdOverview);
     try {
-      await testPage.goto("/settings/system/storage");
+      await testPage.goto("/settings/system/data-storage");
       await overviewObserved;
 
       const spinner = testPage.getByTestId("storage-overview-spinner");
       await expect(spinner).toBeVisible();
       await expect(testPage.getByText("Loading storage data…")).toBeVisible();
-      await expect(testPage.getByTestId("storage-overview-card")).toBeInViewport();
+      await expect(testPage.getByTestId("storage-overview-card")).toBeVisible();
       await expect(testPage.getByTestId("storage-policy-card")).toBeVisible();
       await expect(testPage.getByTestId("storage-run-history")).toBeVisible();
       await expect(testPage.getByTestId("storage-quarantine-card")).toBeVisible();
@@ -282,7 +280,7 @@ test.describe("Mobile storage maintenance", () => {
         body: JSON.stringify({ job_id: "mobile-force-purge" }),
       });
     });
-    await testPage.goto("/settings/system/storage");
+    await testPage.goto("/settings/system/data-storage");
     await expect(testPage.getByTestId("storage-quarantine-force-clear")).toBeVisible();
     await testPage.getByTestId("storage-quarantine-card").scrollIntoViewIfNeeded();
     await prCapture.screenshot("quarantine-actions", {

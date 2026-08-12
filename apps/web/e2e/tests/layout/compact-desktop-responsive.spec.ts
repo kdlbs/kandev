@@ -9,12 +9,21 @@ const COMPACT_DESKTOP_VIEWPORT = { width: 900, height: 800 };
 useRegularMode();
 
 test.describe("compact desktop responsive layout", () => {
+  test.afterEach(async ({ apiClient }) => {
+    await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+      app_status_bar_enabled: false,
+    });
+  });
+
   test("task page hands off from compact desktop to mobile below the sidebar boundary", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
     await testPage.setViewportSize(COMPACT_DESKTOP_VIEWPORT);
+    await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+      app_status_bar_enabled: true,
+    });
 
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,

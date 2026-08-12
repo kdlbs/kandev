@@ -135,7 +135,7 @@ func (s *Service) createAutomationTask(ctx context.Context, evt *automation.Auto
 	title := s.resolveAutomationTaskTitle(a, evt)
 	repositories := s.resolveAutomationRepository(ctx, a, evt)
 	if len(repositories) == 0 {
-		errMsg := "no repository available — add a repository to the workspace"
+		errMsg := "no repository available; add a repository to the workspace"
 		s.logger.Warn("automation skipped: "+errMsg,
 			zap.String("automation_id", a.ID),
 			zap.String("workspace_id", a.WorkspaceID))

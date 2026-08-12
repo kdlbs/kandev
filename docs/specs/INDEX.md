@@ -46,6 +46,7 @@ Product-wide capabilities that are not tied to a single feature area.
 | [plugins](plugins/spec.md) | draft |
 | [plugins — authoring experience](plugins/authoring-experience.md) | draft |
 | [plugins — marketplace](plugins/marketplace.md) | building |
+| [plugins — Voice extraction host prerequisites](plugins/voice-extraction-host.md) | draft |
 | [semantic-notifications](platform/notifications.md) | shipped |
 | [workspace-git-status](platform/workspace-git-status.md) | shipped |
 | [git-subprocess-admission](platform/git-subprocess-admission.md) | building |
@@ -53,6 +54,7 @@ Product-wide capabilities that are not tied to a single feature area.
 | [diagnostic-logging](platform/diagnostic-logging.md) | approved |
 | [provider-error-recovery](platform/provider-error-recovery.md) | draft |
 | [health-endpoint-version](health-endpoint-version/spec.md) | building |
+| [go-dev-launcher](go-dev-launcher/spec.md) | draft |
 
 ## tasks/ — task & workflow model
 
@@ -98,6 +100,8 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [explicit-completion-signal](workflow/explicit-completion-signal/spec.md) | shipped |
 | [cancelled-turn-completion](workflow/cancelled-turn-completion/spec.md) | building |
 | [conditional-session-settings](workflow-session-settings/spec.md) | approved |
+| [prevent-agent-autostart-on-open](prevent-agent-autostart-on-open/spec.md) | draft |
+| [workflow-duplication](workflow-duplication/spec.md) | draft |
 
 ## agents/ — agent governance
 
@@ -126,6 +130,7 @@ Per-workspace credentials and triage triggers for external services.
 | [provider-aware-review-automation](integrations/provider-aware-review-automation.md) | approved |
 | [github-authentication](integrations/github-authentication.md) | draft |
 | [gitlab-integration](gitlab-integration/spec.md) | shipped |
+| [gitlab-mr-status-chip](gitlab-mr-status-chip/spec.md) | draft |
 | [gitlab-workflow-sync](gitlab-workflow-sync/spec.md) | shipped |
 | [jira-status-filter](jira-status-filter/spec.md) | shipped |
 | [enable-disable-toggle](integrations/enable-disable-toggle.md) | shipped |
@@ -152,8 +157,10 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 
 | Spec | Status |
 |---|---|
+| [available-to-install-collapsible](ui/available-to-install-collapsible.md) | shipped |
 | [ci-pr-automation](ui/ci-pr-automation.md) | building |
 | [github-pr-review-actions](ui/github-pr-review-actions.md) | shipped |
+| [github-saved-query-defaults](ui/github-saved-query-defaults.md) | shipped |
 | [pr-task-status-summary](ui/pr-task-status-summary.md) | shipped |
 | [comment-markdown](ui/comment-markdown.md) | shipped |
 | [resizable-markdown-tables](ui/resizable-markdown-tables.md) | building |
@@ -185,6 +192,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [executor-settings-card-spacing](ui/executor-settings-card-spacing.md) | shipped |
 | [quick-chat-elevation](ui/quick-chat-elevation.md) | building |
 | [transcript-navigation-settings](ui/transcript-navigation-settings.md) | shipped |
+| [voice-mode-task-behavior](ui/voice-mode-task-behavior.md) | shipped |
 | [app-status-bar](ui/app-status-bar.md) | shipped |
 | [quick-terminal](quick-terminal/spec.md) | shipped |
 | [mobile-task-navigation](ui/mobile-task-navigation.md) | shipped |
@@ -254,6 +262,8 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [browser-inspect-annotations-save](browser-inspect-annotations-save/spec.md) | shipped |
 | [automations-pr-merged-trigger](automations-pr-merged-trigger/spec.md) | draft |
 | [no-silent-model-fallback](no-silent-model-fallback/spec.md) | approved |
+| [e2e-duration-aware-sharding](e2e-duration-aware-sharding/spec.md) | implemented |
+| [board-step-visibility-filter](board-step-visibility-filter/spec.md) | draft |
 
 ---
 

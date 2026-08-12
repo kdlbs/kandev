@@ -40,6 +40,7 @@ export type TipTapInputHandle = {
   focus: () => void;
   blur: () => void;
   getSelectionStart: () => number;
+  getSelectionEnd: () => number;
   getValue: () => string;
   setValue: (value: string) => void;
   clear: () => void;
@@ -497,6 +498,7 @@ function useEditorImperativeHandle(
       focus: () => editor?.commands.focus(),
       blur: () => editor?.commands.blur(),
       getSelectionStart: () => editor?.state.selection.from ?? 0,
+      getSelectionEnd: () => editor?.state.selection.to ?? 0,
       getValue: () => (editor ? getMarkdownText(editor) : ""),
       setValue: (v: string) => {
         if (!editor) return;

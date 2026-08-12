@@ -105,4 +105,43 @@ describe("useArchiveAndSwitchTask", () => {
     expect(replaceTaskUrlMock).toHaveBeenCalledWith("task-A");
     expect(archiveTaskMock).toHaveBeenCalledWith("task-A", undefined);
   });
+
+  it("excludes the cascade tree before and after the archive request", async () => {
+    archiveTaskMock.mockResolvedValueOnce(undefined);
+    const excludedTaskIds = new Set(["task-A", "task-child"]);
+    removeTaskFromBoardMock
+      .mockResolvedValueOnce({ switchedTaskId: "task-B", excludedTaskIds })
+      .mockResolvedValueOnce({ switchedTaskId: "task-B" });
+    const { result } = renderHook(() => useArchiveAndSwitchTask());
+
+    await result.current("task-A", { cascade: true });
+
+    expect(removeTaskFromBoardMock).toHaveBeenNthCalledWith(1, "task-A", {
+      wasActiveTaskId: "task-A",
+      wasActiveSessionId: "sess-A",
+      switchOnly: true,
+      excludeTaskTree: true,
+    });
+    expect(removeTaskFromBoardMock).toHaveBeenNthCalledWith(2, "task-A", {
+      wasActiveTaskId: "task-A",
+      wasActiveSessionId: "sess-A",
+      excludeTaskTree: true,
+      excludedTaskIds,
+    });
+    expect(archiveTaskMock).toHaveBeenCalledWith("task-A", { cascade: true });
+  });
+
+  it("does not restore a task when a cascade archive fails before any switch", async () => {
+    const error = new Error("archive failed");
+    archiveTaskMock.mockRejectedValueOnce(error);
+    removeTaskFromBoardMock.mockResolvedValueOnce({ switchedTaskId: null });
+    const { result } = renderHook(() => useArchiveAndSwitchTask());
+
+    await expect(result.current("task-A", { cascade: true })).rejects.toThrow("archive failed");
+
+    expect(removeTaskFromBoardMock).toHaveBeenCalledTimes(1);
+    expect(setActiveSessionMock).not.toHaveBeenCalled();
+    expect(setActiveTaskMock).not.toHaveBeenCalled();
+    expect(replaceTaskUrlMock).not.toHaveBeenCalled();
+  });
 });
