@@ -313,5 +313,9 @@ test.describe("Mobile plugin navigation", () => {
     // group.
     const pluginsGroup = testPage.getByTestId("mobile-plugin-nav-section");
     await expect(pluginsGroup.getByText("E2E Insights Tools")).toHaveCount(0);
+
+    // Complete the user path, not just the render: the row navigates.
+    await utilitiesRow.click();
+    await expect(testPage).toHaveURL(/\/plugins\/e2e-hello$/);
   });
 });
