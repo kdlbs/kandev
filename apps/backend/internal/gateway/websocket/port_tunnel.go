@@ -24,13 +24,25 @@ type TunnelInfo struct {
 	TunnelPort int `json:"tunnel_port"`
 }
 
-// tunnelEntry tracks a running tunnel HTTP server.
+// tunnelEntry tracks a running tunnel HTTP server. Entries reach m.tunnels
+// only once they are complete, so every reader can dereference them.
 type tunnelEntry struct {
 	port       int
 	tunnelPort int
 	server     *http.Server
 	ln         net.Listener
 	cancel     context.CancelFunc
+}
+
+// pendingTunnel is a StartTunnel that is still resolving and binding. It is
+// kept out of m.tunnels so that a concurrent caller waits for the in-flight
+// bind and shares its outcome instead of observing a half-built entry, and so
+// that StopTunnel, ListTunnels, InvalidateSession and Shutdown never see one.
+// tunnelPort and err are written before done is closed and read only after.
+type pendingTunnel struct {
+	done       chan struct{}
+	tunnelPort int
+	err        error
 }
 
 // TunnelManager manages per-session port tunnels that bind dedicated host
@@ -42,7 +54,8 @@ type TunnelManager struct {
 	logger       *logger.Logger
 
 	mu      sync.Mutex
-	tunnels map[string]*tunnelEntry // key: "sessionId:port"
+	tunnels map[string]*tunnelEntry   // key: "sessionId:port"; complete entries only
+	pending map[string]*pendingTunnel // key: "sessionId:port"; starts still in flight
 }
 
 // NewTunnelManager creates a new TunnelManager.
@@ -51,6 +64,7 @@ func NewTunnelManager(lifecycleMgr *lifecycle.Manager, log *logger.Logger) *Tunn
 		lifecycleMgr: lifecycleMgr,
 		logger:       log.WithFields(zap.String("component", "port-tunnel")),
 		tunnels:      make(map[string]*tunnelEntry),
+		pending:      make(map[string]*pendingTunnel),
 	}
 }
 
@@ -60,20 +74,16 @@ func NewTunnelManager(lifecycleMgr *lifecycle.Manager, log *logger.Logger) *Tunn
 func (m *TunnelManager) StartTunnel(sessionID string, port int, tunnelPort int) (int, error) {
 	cacheKey := sessionID + ":" + strconv.Itoa(port)
 
-	// Check for existing tunnel under lock to prevent duplicate creation.
-	m.mu.Lock()
-	if entry, ok := m.tunnels[cacheKey]; ok {
-		tp := entry.tunnelPort
-		m.mu.Unlock()
-		return tp, nil
+	started, existingPort, err := m.claimStart(cacheKey)
+	if started == nil {
+		// Another caller already owns this session:port, either as a running
+		// tunnel or as an in-flight start we just waited for.
+		return existingPort, err
 	}
-	// Reserve the key with a nil entry to prevent concurrent creation.
-	m.tunnels[cacheKey] = nil
-	m.mu.Unlock()
 
-	target, authToken, ln, err := m.resolveAndBind(cacheKey, sessionID, tunnelPort)
+	target, authToken, ln, err := m.resolveAndBind(sessionID, tunnelPort)
 	if err != nil {
-		return 0, err
+		return m.finishStart(cacheKey, started, 0, err)
 	}
 	actualPort := ln.Addr().(*net.TCPAddr).Port
 
@@ -89,6 +99,8 @@ func (m *TunnelManager) StartTunnel(sessionID string, port int, tunnelPort int) 
 		cancel:     cancel,
 	}
 
+	// Publish the finished entry before releasing the reservation, so a caller
+	// arriving in between finds the tunnel rather than starting a second one.
 	m.mu.Lock()
 	m.tunnels[cacheKey] = entry
 	m.mu.Unlock()
@@ -100,43 +112,70 @@ func (m *TunnelManager) StartTunnel(sessionID string, port int, tunnelPort int) 
 		zap.Int("port", port),
 		zap.Int("tunnel_port", actualPort))
 
-	return actualPort, nil
+	return m.finishStart(cacheKey, started, actualPort, nil)
+}
+
+// claimStart reserves cacheKey for the calling StartTunnel. It returns a
+// non-nil pendingTunnel when the caller owns the start; otherwise it returns
+// the result of the tunnel that already exists or was being built
+// concurrently, having waited for the latter to settle.
+func (m *TunnelManager) claimStart(cacheKey string) (*pendingTunnel, int, error) {
+	m.mu.Lock()
+	entry, running := m.tunnels[cacheKey]
+	inFlight, starting := m.pending[cacheKey]
+	var started *pendingTunnel
+	if !running && !starting {
+		started = &pendingTunnel{done: make(chan struct{})}
+		m.pending[cacheKey] = started
+	}
+	m.mu.Unlock()
+
+	switch {
+	case running:
+		return nil, entry.tunnelPort, nil
+	case starting:
+		<-inFlight.done // Never while holding m.mu: the owner needs it to finish.
+		return nil, inFlight.tunnelPort, inFlight.err
+	default:
+		return started, 0, nil
+	}
+}
+
+// finishStart releases the reservation taken by claimStart and hands its
+// outcome to every caller waiting on the same session:port.
+func (m *TunnelManager) finishStart(cacheKey string, started *pendingTunnel, tunnelPort int, err error) (int, error) {
+	started.tunnelPort = tunnelPort
+	started.err = err
+
+	m.mu.Lock()
+	delete(m.pending, cacheKey)
+	m.mu.Unlock()
+
+	close(started.done)
+	return tunnelPort, err
 }
 
 // resolveAndBind resolves the agentctl target URL for the session and binds a
-// local TCP listener for the tunnel. On failure it cleans up the placeholder
-// entry reserved by StartTunnel.
-func (m *TunnelManager) resolveAndBind(cacheKey, sessionID string, tunnelPort int) (*url.URL, string, net.Listener, error) {
-	cleanup := func() {
-		m.mu.Lock()
-		if m.tunnels[cacheKey] == nil {
-			delete(m.tunnels, cacheKey)
-		}
-		m.mu.Unlock()
-	}
-
+// local TCP listener for the tunnel.
+func (m *TunnelManager) resolveAndBind(sessionID string, tunnelPort int) (*url.URL, string, net.Listener, error) {
 	execution, ok := m.lifecycleMgr.GetExecutionBySessionID(sessionID)
 	if !ok {
-		cleanup()
 		return nil, "", nil, fmt.Errorf("session not found or no active execution")
 	}
 
 	agentctlClient := execution.GetAgentCtlClient()
 	if agentctlClient == nil {
-		cleanup()
 		return nil, "", nil, fmt.Errorf("agentctl client not available")
 	}
 
 	target, err := url.Parse(agentctlClient.BaseURL())
 	if err != nil {
-		cleanup()
 		return nil, "", nil, fmt.Errorf("failed to parse agentctl URL: %w", err)
 	}
 	authToken := agentctlClient.AuthToken()
 
 	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", tunnelPort))
 	if err != nil {
-		cleanup()
 		if netutil.IsAddrInUse(err) {
 			return nil, "", nil, fmt.Errorf("port %d is already in use, choose a different port", tunnelPort)
 		}
