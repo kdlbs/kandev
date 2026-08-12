@@ -69,13 +69,26 @@ async function openMobileReview(
       await expect(changesPanel).toBeVisible({ timeout: 15_000 });
       const prFiles = changesPanel.getByTestId("pr-files-section");
       await expect(prFiles).toBeVisible({ timeout: 20_000 });
-      for (const pr of REVIEW_PRS) {
-        await expect(
-          prFiles.locator(
-            `[data-changes-file=${JSON.stringify(REVIEW_SHARED_FILE)}][data-pr-key="${REVIEW_OWNER}/${repositoryName}/${pr.number}"]`,
-          ),
-        ).toBeVisible({ timeout: 30_000 });
-      }
+      const expectedFileLocators = REVIEW_PRS.map((pr) =>
+        prFiles.locator(
+          `[data-changes-file=${JSON.stringify(REVIEW_SHARED_FILE)}][data-pr-key="${REVIEW_OWNER}/${repositoryName}/${pr.number}"]`,
+        ),
+      );
+      await expect
+        .poll(
+          async () => {
+            const visible = await Promise.all(
+              expectedFileLocators.map((locator) => locator.isVisible().catch(() => false)),
+            );
+            return visible.filter(Boolean).length;
+          },
+          {
+            timeout: 30_000,
+            intervals: [250, 500, 1_000],
+            message: "waiting for all seeded PR files to hydrate in the mobile changes panel",
+          },
+        )
+        .toBe(REVIEW_PRS.length);
       await changesPanel.getByRole("button", { name: "Review", exact: true }).tap();
       await expect(session.reviewDialog()).toBeVisible({ timeout: 15_000 });
       return;
