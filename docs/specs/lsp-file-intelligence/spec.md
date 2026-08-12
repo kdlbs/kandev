@@ -104,6 +104,8 @@ and obscure the actual task-level work that is still running.
   stop the server. Kandev does not overwrite another editor's unsaved buffer. Every browser-originated
   file URI is canonicalized and must resolve inside the backend-authorized task workspace or one of
   its repository roots; sibling paths, traversal, and symlink escapes fail before upstream traffic.
+  Lexical task-root and authority/volume checks happen before filesystem resolution so an untrusted
+  Windows UNC URI cannot trigger network access merely by being rejected.
 - Successful saves first synchronize the newest live editor snapshot, then send `didSave` only
   when the server requested it. Stale persisted text is omitted if editing advanced while the save
   was in flight; failed saves send no save notification.

@@ -68,7 +68,8 @@ order only and do not authorize subagents.
   get monotonic versions in arrival order, stale duplicate opens do not rewind text, and only the
   final close sends upstream `didClose`.
 - Canonicalize every browser-originated document URI against backend-authorized task roots before
-  forwarding it. Reject sibling paths, traversal, and symlink escapes without upstream traffic.
+  forwarding it. Pre-authorize lexical root and authority/volume membership before filesystem
+  resolution, then reject sibling paths, traversal, and symlink escapes without upstream traffic.
 - Send an `attached` envelope with generation, workspace metadata, and capabilities before raw
   feature traffic. Detaching the final browser releases documents and outstanding requests but
   leaves the task-host process, initialization, progress, and caches alive.

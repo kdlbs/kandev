@@ -67,6 +67,8 @@ spec: "../../specs/lsp-file-intelligence/spec.md"
   task-LSP control failure.
 - Browser document requests and notifications resolve only inside the canonical task workspace or
   authorized repository roots; sibling, traversal, and symlink escapes never reach the server.
+  Lexical root and authority/volume membership is proven before filesystem resolution, so a rejected
+  untrusted UNC URI cannot cause network side effects.
 - A live generation never treats a physical task workspace-root change as a dynamic folder update;
   it keeps the old scope and reports restart-required until explicit Restart adopts the new root.
 - Completed Start bookkeeping is removed before its operation lock becomes available, so concurrent
@@ -220,6 +222,12 @@ Completed 2026-08-12.
   base, the agentctl LSP/API and backend LSP packages passed under the race detector, changed-code
   Go lint reported zero issues, all 62 public-doc validator tests passed, all 41 published pages
   validated, and the three-dot diff whitespace check passed.
+- The isolated exact-head Sol Max re-review verified all three preceding findings closed, then found
+  one Windows security blocker: URI canonicalization could touch an attacker-controlled UNC path
+  before proving task membership. Document authorization now performs a filesystem-free lexical
+  containment check first, including Windows volume/share boundaries. A red-first symlink-loop test
+  proves outside paths are rejected before resolution; the focused security/lifecycle set passed 20
+  race-enabled repetitions. Native UNC coverage is included in the Windows CI package allowlist.
 
 ## Files
 

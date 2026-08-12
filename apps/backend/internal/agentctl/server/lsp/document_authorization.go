@@ -17,12 +17,24 @@ var errDocumentOutsideWorkspace = errors.New("document URI is outside the task w
 // documentWorkspace authorizes browser-originated document URIs against the
 // task workspace projection captured by the task-host generation.
 type documentWorkspace struct {
-	mu    sync.RWMutex
-	roots []string
+	mu          sync.RWMutex
+	roots       []documentRoot
+	resolvePath func(string) (string, error)
+}
+
+type documentRoot struct {
+	lexical   string
+	canonical string
 }
 
 func newDocumentWorkspace() *documentWorkspace {
-	return &documentWorkspace{}
+	return newDocumentWorkspaceWithResolver(canonicalFilesystemPath)
+}
+
+func newDocumentWorkspaceWithResolver(
+	resolvePath func(string) (string, error),
+) *documentWorkspace {
+	return &documentWorkspace{resolvePath: resolvePath}
 }
 
 func (w *documentWorkspace) SetSnapshot(snapshot Snapshot) {
@@ -39,27 +51,32 @@ func (w *documentWorkspace) set(
 ) {
 	paths := make([]string, 0, len(folders)+2)
 	paths = append(paths, workspacePath)
-	if uriPath, err := canonicalFileURIPath(workspaceURI); err == nil {
+	if uriPath, err := localFileURIPath(workspaceURI); err == nil {
 		paths = append(paths, uriPath)
 	}
 	for _, folder := range folders {
-		if folderPath, err := canonicalFileURIPath(folder.URI); err == nil {
+		if folderPath, err := localFileURIPath(folder.URI); err == nil {
 			paths = append(paths, folderPath)
 		}
 	}
 
-	roots := make([]string, 0, len(paths))
+	roots := make([]documentRoot, 0, len(paths))
 	seen := make(map[string]struct{}, len(paths))
 	for _, candidate := range paths {
-		root, err := canonicalFilesystemPath(candidate)
+		lexical, err := cleanAbsoluteFilesystemPath(candidate)
 		if err != nil {
 			continue
 		}
-		if _, duplicate := seen[root]; duplicate {
+		canonical, err := w.resolvePath(lexical)
+		if err != nil {
 			continue
 		}
-		seen[root] = struct{}{}
-		roots = append(roots, root)
+		key := lexical + "\x00" + canonical
+		if _, duplicate := seen[key]; duplicate {
+			continue
+		}
+		seen[key] = struct{}{}
+		roots = append(roots, documentRoot{lexical: lexical, canonical: canonical})
 	}
 	w.mu.Lock()
 	w.roots = roots
@@ -67,20 +84,40 @@ func (w *documentWorkspace) set(
 }
 
 func (w *documentWorkspace) CanonicalURI(raw string) (string, error) {
-	documentPath, err := canonicalFileURIPath(raw)
+	documentPath, err := localFileURIPath(raw)
 	if err != nil {
 		return "", err
 	}
 	w.mu.RLock()
-	roots := append([]string(nil), w.roots...)
+	roots := append([]documentRoot(nil), w.roots...)
 	w.mu.RUnlock()
+	if !lexicallyAuthorizedDocumentPath(documentPath, roots) {
+		return "", fmt.Errorf("%w: %s", errDocumentOutsideWorkspace, raw)
+	}
+	canonicalPath, err := w.resolvePath(documentPath)
+	if err != nil {
+		return "", err
+	}
 	for _, root := range roots {
-		relative, relErr := filepath.Rel(root, documentPath)
-		if relErr == nil && !pathLeavesRoot(relative) {
-			return WorkspaceFileURI(documentPath), nil
+		if pathWithinRoot(canonicalPath, root.canonical) {
+			return WorkspaceFileURI(canonicalPath), nil
 		}
 	}
 	return "", fmt.Errorf("%w: %s", errDocumentOutsideWorkspace, raw)
+}
+
+func lexicallyAuthorizedDocumentPath(path string, roots []documentRoot) bool {
+	for _, root := range roots {
+		if pathWithinRoot(path, root.lexical) || pathWithinRoot(path, root.canonical) {
+			return true
+		}
+	}
+	return false
+}
+
+func pathWithinRoot(path, root string) bool {
+	relative, err := filepath.Rel(root, path)
+	return err == nil && !pathLeavesRoot(relative)
 }
 
 func (w *documentWorkspace) CanonicalizeTextDocumentParams(
@@ -109,17 +146,17 @@ func (w *documentWorkspace) CanonicalizeTextDocumentParams(
 	return json.Marshal(params)
 }
 
-func canonicalFileURIPath(raw string) (string, error) {
+func localFileURIPath(raw string) (string, error) {
 	parsed, err := url.Parse(raw)
 	if err != nil || !strings.EqualFold(parsed.Scheme, "file") || parsed.Path == "" ||
-		parsed.RawQuery != "" || parsed.Fragment != "" || parsed.User != nil {
+		parsed.RawQuery != "" || parsed.Fragment != "" || parsed.User != nil || parsed.Port() != "" {
 		return "", fmt.Errorf("invalid file document URI: %q", raw)
 	}
 	localPath, err := localPathFromFileURL(parsed)
 	if err != nil {
 		return "", fmt.Errorf("invalid file document URI %q: %w", raw, err)
 	}
-	return canonicalFilesystemPath(localPath)
+	return cleanAbsoluteFilesystemPath(localPath)
 }
 
 func localPathFromFileURL(parsed *url.URL) (string, error) {
@@ -142,9 +179,9 @@ func localPathFromFileURL(parsed *url.URL) (string, error) {
 }
 
 func canonicalFilesystemPath(path string) (string, error) {
-	path = filepath.Clean(path)
-	if !filepath.IsAbs(path) {
-		return "", errors.New("file document path must be absolute")
+	path, err := cleanAbsoluteFilesystemPath(path)
+	if err != nil {
+		return "", err
 	}
 	resolved, err := filepath.EvalSymlinks(path)
 	if err == nil {
@@ -154,6 +191,14 @@ func canonicalFilesystemPath(path string) (string, error) {
 		return "", fmt.Errorf("resolve file document path: %w", err)
 	}
 	return resolveMissingFilesystemPath(path)
+}
+
+func cleanAbsoluteFilesystemPath(path string) (string, error) {
+	path = filepath.Clean(path)
+	if !filepath.IsAbs(path) {
+		return "", errors.New("file document path must be absolute")
+	}
+	return path, nil
 }
 
 func resolveMissingFilesystemPath(path string) (string, error) {

@@ -429,6 +429,9 @@ jobs:
       - name: Test windows-sensitive packages
         run: go test -race -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/... ./internal/common/ptyexec/... ./internal/backendapp/ownershiplock/...
 
+      - name: Test task LSP UNC containment
+        run: go test -race -v ./internal/agentctl/server/lsp -run '^TestDocumentWorkspaceRejectsUntrustedUNCBeforeResolution$'
+
       # Keep port-collision coverage targeted: the instance package contains
       # broader stdio MCP fixture tests that depend on Unix command behavior.
       - name: Test Windows port collision handling
