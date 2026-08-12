@@ -280,11 +280,12 @@ jobs:
         working-directory: apps
         run: pnpm install --frozen-lockfile
 
-      # Required for the docker pull below to succeed even if the kandev-ci
-      # package is private on GHCR. The `e2e` / `e2e-report` jobs above don't
-      # need this because GitHub's `container:` integration handles auth
-      # implicitly using GITHUB_TOKEN.
+      # The kandev-ci image is public, so fork PRs can pull it anonymously.
+      # Their read-only GITHUB_TOKEN can still be rejected by GHCR during an
+      # explicit login because it belongs to the base repository, not the
+      # contributor's fork. Keep authenticated pulls for trusted runs.
       - name: Log in to GHCR
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
