@@ -165,7 +165,9 @@ with an end-to-end managed-plugin fixture and public authoring documentation.
 - Implemented and verified manifest/SDK, plugin catalog/invocation, dynamic MCP
   registry, backend dispatch, and the managed fixture package.
 - Focused race suites pass for `internal/plugins`, `internal/mcp/server`,
-  `internal/mcp/handlers`, and `pkg/pluginsdk`.
+  `internal/mcp/handlers`, `internal/agent/runtime/lifecycle`,
+  `internal/agent/runtime/agentctl`, `internal/agentctl/server/api`,
+  `internal/backendapp`, and `pkg/pluginsdk`.
 - `go test ./...` reaches unrelated existing filesystem/task-service failures
   in this environment; no plugin/MCP package failures were reported.
 - A live backend on port `18101` has the fixture package installed and active.
@@ -183,7 +185,7 @@ Wave 2 (parallel candidates after Task 01; user authorization required):
 
 Wave 3:
 
-- [ ] [Task 04: Backend dispatch and runtime propagation](task-04-runtime-propagation-backend-dispatch.md)
+- [x] [Task 04: Backend dispatch and runtime propagation](task-04-runtime-propagation-backend-dispatch.md)
 
 Wave 4:
 

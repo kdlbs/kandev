@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/mcp/plugintools"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -407,6 +408,31 @@ func (c *Client) SetMcpProviders(ctx context.Context, providers []string) error 
 	}
 
 	tracing.TraceHTTPResponse(span, resp.StatusCode, nil)
+	return nil
+}
+
+// SetPluginTools replaces the plugin-contributed MCP catalog on agentctl.
+func (c *Client) SetPluginTools(ctx context.Context, snapshot plugintools.Snapshot) error {
+	ctx, span := tracing.TraceHTTPRequest(ctx, "PUT", "/api/v1/mcp/plugin-tools", c.executionID)
+	defer span.End()
+	body, err := json.Marshal(snapshot)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, "PUT", c.baseURL+"/api/v1/mcp/plugin-tools", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := readResponseBody(resp)
+		return fmt.Errorf("set plugin tools failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
 	return nil
 }
 

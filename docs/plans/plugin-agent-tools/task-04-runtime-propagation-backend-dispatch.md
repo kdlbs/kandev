@@ -1,7 +1,7 @@
 ---
 id: "04-runtime-propagation-backend-dispatch"
 title: "Runtime propagation and backend dispatch"
-status: in_progress
+status: done
 wave: 3
 depends_on: ["02-plugin-catalog-invocation", "03-agentctl-dynamic-registry"]
 plan: "plan.md"
@@ -78,6 +78,10 @@ updates.
   session binding checks, surface filtering, and service dispatch.
 - Wired the plugin service into backend MCP handler registration and preserved
   existing identity scoping.
-- The current implementation uses lazy catalog synchronization before
-  `tools/list`; a backendapp push/coalescing refresher remains future work.
-- Verification: `go test ./internal/mcp/handlers ./internal/backendapp` passed.
+- Added the agentctl plugin-tool control endpoint, lifecycle fan-out, and a
+  coalescing backendapp refresher wired to plugin lifecycle notifications.
+- Agentctl retains the complete revisioned catalog and applies surface filters
+  while rebuilding the active MCP profile, so live surface changes do not lose
+  declarations.
+- Verification: focused `-race` suites passed for MCP handlers, lifecycle,
+  agentctl client/server, backendapp, plugin service, MCP server, and SDK.

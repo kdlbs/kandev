@@ -297,6 +297,99 @@ runtime:
 	return &buf
 }
 
+func testAgentToolPackage(t *testing.T, id, toolName string) *bytes.Buffer {
+	t.Helper()
+	platformKey := goruntime.GOOS + "-" + goruntime.GOARCH
+	manifestYAML := fmt.Sprintf(`
+id: %s
+api_version: 1
+version: 1.0.0
+display_name: Test Plugin
+runtime:
+  type: binary
+  executables:
+    %s: server/plugin
+agent_tools:
+  - name: %s
+    description: Test tool
+    surfaces: [kanban-task]
+    input_schema:
+      type: object
+`, id, platformKey, toolName)
+	var buf bytes.Buffer
+	if err := pkgtartest.WritePackage(&buf, map[string][]byte{
+		"manifest.yaml": []byte(manifestYAML),
+		"server/plugin": []byte("#!/bin/sh\necho fake\n"),
+	}); err != nil {
+		t.Fatalf("WritePackage: %v", err)
+	}
+	return &buf
+}
+
+type installBarrierStore struct {
+	store.Store
+	firstSave    chan struct{}
+	secondSave   chan struct{}
+	releaseFirst chan struct{}
+	saves        int
+	mu           sync.Mutex
+}
+
+func (s *installBarrierStore) Save(record *store.Record) error {
+	s.mu.Lock()
+	s.saves++
+	call := s.saves
+	s.mu.Unlock()
+	switch call {
+	case 1:
+		close(s.firstSave)
+		<-s.releaseFirst
+	case 2:
+		close(s.secondSave)
+	}
+	return s.Store.Save(record)
+}
+
+func TestServiceInstallSerializesAgentToolCollisionValidation(t *testing.T) {
+	dir := t.TempDir()
+	barrier := &installBarrierStore{
+		Store: store.NewFSStore(dir), firstSave: make(chan struct{}),
+		secondSave: make(chan struct{}), releaseFirst: make(chan struct{}),
+	}
+	svc := NewService(barrier, NewRegistry(), nil, testLogger(t))
+	svc.SetPluginsDir(dir)
+	svc.SetRuntime(newFakeRuntime())
+	firstPackage := testAgentToolPackage(t, "plugin-a", "echo")
+	secondPackage := testAgentToolPackage(t, "plugin_a", "echo")
+
+	errs := make(chan error, 2)
+	go func() {
+		_, err := svc.Install(context.Background(), firstPackage)
+		errs <- err
+	}()
+	<-barrier.firstSave
+	go func() {
+		_, err := svc.Install(context.Background(), secondPackage)
+		errs <- err
+	}()
+
+	secondCrossedBoundary := false
+	select {
+	case <-barrier.secondSave:
+		secondCrossedBoundary = true
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(barrier.releaseFirst)
+	firstErr, secondErr := <-errs, <-errs
+
+	if secondCrossedBoundary {
+		t.Error("second install persisted before the first catalog mutation completed")
+	}
+	if (firstErr == nil) == (secondErr == nil) {
+		t.Fatalf("install errors = %v, %v; want exactly one collision", firstErr, secondErr)
+	}
+}
+
 // newTestService wires a Service against a real FSStore rooted at a temp
 // plugins dir, a fresh Registry, and a fakeRuntime — mirroring what Provide
 // does, minus the real runtime.Manager.

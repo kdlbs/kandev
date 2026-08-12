@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/plugins"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -56,21 +57,51 @@ func (h *Handlers) handleInvokePluginTool(ctx context.Context, msg *ws.Message) 
 	if req.PluginID == "" || req.LocalName == "" || req.Surface == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "plugin_id, local_name, and surface are required", nil)
 	}
-	if req.TaskID == "" || req.SessionID == "" || h.sessionRepo == nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "task_id and session_id are required", nil)
+	invocation, contextErrorResponse, err := h.resolvePluginToolInvocationContext(ctx, msg, req)
+	if err != nil || contextErrorResponse != nil {
+		return contextErrorResponse, err
 	}
-	session, err := h.sessionRepo.GetTaskSession(ctx, req.SessionID)
-	if err != nil || session == nil || session.TaskID != req.TaskID {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "session is not bound to task", nil)
-	}
-	result, err := h.pluginSvc.InvokeAgentTool(ctx, req.PluginID, req.LocalName, req.Arguments, plugins.AgentToolInvocationContext{
-		InvocationID: req.InvocationID, TaskID: req.TaskID, SessionID: req.SessionID,
-		WorkspaceID: req.WorkspaceID, Surface: req.Surface,
-	})
+	result, err := h.pluginSvc.InvokeAgentTool(ctx, req.PluginID, req.LocalName, req.Arguments, invocation)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fmt.Sprintf("plugin tool invocation failed: %v", err), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]any{
 		"text": result.Text, "structured_content": result.StructuredContent, "is_error": result.IsError,
 	})
+}
+
+func (h *Handlers) resolvePluginToolInvocationContext(ctx context.Context, msg *ws.Message, req pluginToolInvocationRequest) (plugins.AgentToolInvocationContext, *ws.Message, error) {
+	execution, ok := streams.MCPExecutionContextFromContext(ctx)
+	if !ok || h.sessionRepo == nil || h.taskSvc == nil {
+		return pluginToolContextError(msg, ws.ErrorCodeInternalError, "plugin tool execution context is unavailable")
+	}
+	taskID, sessionID := execution.TaskID, execution.SessionID
+	if pluginToolRequestContextMismatch(req, execution) {
+		return pluginToolContextError(msg, ws.ErrorCodeBadRequest, "request context does not match the running execution")
+	}
+	session, err := h.sessionRepo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || session.TaskID != taskID {
+		return pluginToolContextError(msg, ws.ErrorCodeBadRequest, "running session is not bound to task")
+	}
+	task, err := h.taskSvc.GetTask(ctx, taskID)
+	if err != nil || task == nil || task.WorkspaceID == "" {
+		return pluginToolContextError(msg, ws.ErrorCodeInternalError, "failed to resolve the execution workspace")
+	}
+	if req.WorkspaceID != "" && req.WorkspaceID != task.WorkspaceID {
+		return pluginToolContextError(msg, ws.ErrorCodeBadRequest, "request context does not match the running execution")
+	}
+	return plugins.AgentToolInvocationContext{
+		InvocationID: req.InvocationID, TaskID: taskID, SessionID: sessionID,
+		WorkspaceID: task.WorkspaceID, Surface: req.Surface,
+	}, nil, nil
+}
+
+func pluginToolRequestContextMismatch(req pluginToolInvocationRequest, execution streams.MCPExecutionContext) bool {
+	return (req.TaskID != "" && req.TaskID != execution.TaskID) ||
+		(req.SessionID != "" && req.SessionID != execution.SessionID)
+}
+
+func pluginToolContextError(msg *ws.Message, code, message string) (plugins.AgentToolInvocationContext, *ws.Message, error) {
+	response, err := ws.NewError(msg.ID, msg.Action, code, message, nil)
+	return plugins.AgentToolInvocationContext{}, response, err
 }

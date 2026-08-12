@@ -77,6 +77,10 @@ type Service struct {
 	// cannot deadlock against it.
 	lifecycleLocks *keyedMutex
 
+	// agentToolInstallMu makes exposed-name collision validation and registry
+	// insertion one atomic catalog mutation across different plugin IDs.
+	agentToolInstallMu sync.Mutex
+
 	pluginsDir       string
 	store            store.Store
 	registry         *Registry
@@ -767,6 +771,13 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 		_ = os.RemoveAll(result.InstallPath)
 		return nil, err
 	}
+	s.agentToolInstallMu.Lock()
+	catalogLocked := true
+	defer func() {
+		if catalogLocked {
+			s.agentToolInstallMu.Unlock()
+		}
+	}()
 	if err := s.validateAgentToolInstall(result.Manifest); err != nil {
 		_ = os.RemoveAll(result.InstallPath)
 		return nil, err
@@ -808,6 +819,8 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 		return nil, fmt.Errorf("plugins: persist installed record: %w", err)
 	}
 	s.registry.Add(rec)
+	s.agentToolInstallMu.Unlock()
+	catalogLocked = false
 
 	activateErr := s.activate(rec)
 	s.notifyDeliverer()

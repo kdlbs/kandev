@@ -412,18 +412,26 @@ func (s *Server) Close(ctx context.Context) error {
 
 // wrapHandler wraps a tool handler with debug logging for tracing MCP calls.
 func (s *Server) wrapHandler(toolName string, handler server.ToolHandlerFunc) server.ToolHandlerFunc {
+	return s.wrapHandlerWithArgumentLogging(toolName, handler, true)
+}
+
+func (s *Server) wrapSensitiveHandler(toolName string, handler server.ToolHandlerFunc) server.ToolHandlerFunc {
+	return s.wrapHandlerWithArgumentLogging(toolName, handler, false)
+}
+
+func (s *Server) wrapHandlerWithArgumentLogging(toolName string, handler server.ToolHandlerFunc, logArguments bool) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		start := time.Now()
-		args := req.GetArguments()
 
-		s.logger.Debug("MCP tool call",
-			zap.String("tool", toolName),
-			zap.Any("args", args))
+		fields := []zap.Field{zap.String("tool", toolName)}
+		if logArguments {
+			fields = append(fields, zap.Any("args", req.GetArguments()))
+		}
+		s.logger.Debug("MCP tool call", fields...)
 		if s.mcpLogger != nil {
-			s.mcpLogger.Debug("MCP tool call",
-				zap.String("tool", toolName),
-				zap.String("session_id", s.sessionID),
-				zap.Any("args", args))
+			mcpFields := append([]zap.Field(nil), fields...)
+			mcpFields = append(mcpFields, zap.String("session_id", s.sessionID))
+			s.mcpLogger.Debug("MCP tool call", mcpFields...)
 		}
 
 		validatedReq, validationErr := s.validateToolArguments(toolName, req)
@@ -450,16 +458,18 @@ func (s *Server) wrapHandler(toolName string, handler server.ToolHandlerFunc) se
 					zap.Error(err))
 			}
 		case result != nil && result.IsError:
-			s.logger.Debug("MCP tool returned error",
+			resultFields := []zap.Field{
 				zap.String("tool", toolName),
 				zap.Duration("duration", duration),
-				zap.Any("result", result.Content))
+			}
+			if logArguments {
+				resultFields = append(resultFields, zap.Any("result", result.Content))
+			}
+			s.logger.Debug("MCP tool returned error", resultFields...)
 			if s.mcpLogger != nil {
-				s.mcpLogger.Debug("MCP tool returned error",
-					zap.String("tool", toolName),
-					zap.String("session_id", s.sessionID),
-					zap.Duration("duration", duration),
-					zap.Any("result", result.Content))
+				mcpResultFields := append([]zap.Field(nil), resultFields...)
+				mcpResultFields = append(mcpResultFields, zap.String("session_id", s.sessionID))
+				s.mcpLogger.Debug("MCP tool returned error", mcpResultFields...)
 			}
 		default:
 			s.logger.Debug("MCP tool success",
@@ -621,17 +631,22 @@ func (s *Server) registerPluginTools() {
 		return
 	}
 	for _, definition := range snapshot.Tools {
+		if !pluginToolSupportsSurface(definition, string(s.profile.Surface)) {
+			continue
+		}
 		tool := mcp.NewToolWithRawSchema(definition.ExposedName, definition.Description, definition.InputSchema)
 		tool.Annotations = mcp.ToolAnnotation{
 			ReadOnlyHint: &definition.ReadOnlyHint, DestructiveHint: &definition.DestructiveHint,
 			IdempotentHint: &definition.IdempotentHint, OpenWorldHint: &definition.OpenWorldHint,
 		}
 		d := definition
-		s.mcpServer.AddTool(tool, s.wrapHandler(d.ExposedName, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		s.mcpServer.AddTool(tool, s.wrapSensitiveHandler(d.ExposedName, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			s.mu.RLock()
+			surface := string(s.profile.Surface)
+			s.mu.RUnlock()
 			payload := map[string]any{
 				"plugin_id": d.PluginID, "local_name": d.LocalName, "arguments": req.GetArguments(),
-				"invocation_id": fmt.Sprintf("mcp-%d", time.Now().UnixNano()), "task_id": s.taskID,
-				"session_id": s.sessionID, "surface": string(s.profile.Surface),
+				"invocation_id": fmt.Sprintf("mcp-%d", time.Now().UnixNano()), "surface": surface,
 			}
 			var result struct {
 				Text              string         `json:"text"`
@@ -650,6 +665,15 @@ func (s *Server) registerPluginTools() {
 			return mcp.NewToolResultText(result.Text), nil
 		}))
 	}
+}
+
+func pluginToolSupportsSurface(definition plugintools.Definition, surface string) bool {
+	for _, allowed := range definition.Surfaces {
+		if allowed == surface {
+			return true
+		}
+	}
+	return false
 }
 
 func sameProviderSet(left, right []string) bool {

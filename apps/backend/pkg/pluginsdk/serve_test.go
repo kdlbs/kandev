@@ -6,7 +6,10 @@ import (
 	"time"
 
 	hcplugin "github.com/hashicorp/go-plugin"
+	pluginv1 "github.com/kandev/kandev/proto/kandev/plugin/v1"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // fakeAuthorPlugin is a minimal author-facing Plugin used to exercise the
@@ -34,6 +37,19 @@ func (p *fakeAuthorPlugin) InvokeAgentTool(_ context.Context, req *AgentToolRequ
 			"name": req.Name, "value": req.Arguments["value"],
 		},
 	}, nil
+}
+
+type nilAgentToolPlugin struct{ UnimplementedPlugin }
+
+func (*nilAgentToolPlugin) InvokeAgentTool(context.Context, *AgentToolRequest) (*AgentToolResult, error) {
+	return nil, nil
+}
+
+func TestGRPCPluginServerRejectsNilAgentToolResult(t *testing.T) {
+	server := &grpcPluginServer{impl: &nilAgentToolPlugin{}}
+	_, err := server.InvokeAgentTool(context.Background(), &pluginv1.AgentToolRequest{Name: "echo"})
+	require.Error(t, err)
+	require.Equal(t, codes.Internal, status.Code(err))
 }
 
 // TestServe_EndToEnd exercises the same GRPCPlugin wiring Serve() (plugin

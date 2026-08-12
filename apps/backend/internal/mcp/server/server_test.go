@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,12 +16,14 @@ import (
 	mcpsrv "github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestMCPAttachmentObserverEmitsSafeConnectionEvidence(t *testing.T) {
 	log := newTestLogger(t)
 	backend := NewChannelBackendClient(log)
-	defer backend.Close()
+	t.Cleanup(backend.Close)
 	s := New(backend, "session-1", "task-1", 10005, log, "", false, ModeTask)
 	events := make(chan streams.MCPAttachmentEvidence, 4)
 	s.SetAttachmentReporter(func(evidence streams.MCPAttachmentEvidence) { events <- evidence })
@@ -47,7 +50,7 @@ func TestMCPAttachmentObserverEmitsSafeConnectionEvidence(t *testing.T) {
 func TestMCPAttachmentObserverKeepsConnectionAttemptAcrossRollover(t *testing.T) {
 	log := newTestLogger(t)
 	backend := NewChannelBackendClient(log)
-	defer backend.Close()
+	t.Cleanup(backend.Close)
 	s := New(backend, "session-1", "task-1", 10005, log, "", false, ModeTask)
 	events := make(chan streams.MCPAttachmentEvidence, 8)
 	s.SetAttachmentReporter(func(evidence streams.MCPAttachmentEvidence) { events <- evidence })
@@ -83,10 +86,10 @@ func newTestLogger(t *testing.T) *logger.Logger {
 func TestSetPluginToolsReplacesRuntimeRegistry(t *testing.T) {
 	log := newTestLogger(t)
 	backend := NewChannelBackendClient(log)
-	defer backend.Close()
+	t.Cleanup(backend.Close)
 	s := New(backend, "session-1", "task-1", 10005, log, "", false, ModeTask)
 	definition := plugintools.Definition{
-		PluginID: "task-tags.v1", LocalName: "add_tag", ExposedName: "plugin_8d5b66e217366546_add_tag",
+		PluginID: "task-tags.v1", LocalName: "add_tag", ExposedName: plugintools.ExposedName("task-tags.v1", "add_tag"),
 		Description: "Add a tag", InputSchema: []byte(`{"type":"object","properties":{"tag":{"type":"string"}}}`),
 		Surfaces: []string{plugintools.SurfaceKanban},
 	}
@@ -100,13 +103,115 @@ func TestSetPluginToolsReplacesRuntimeRegistry(t *testing.T) {
 	}
 }
 
+func TestSetPluginToolsRebuildsArgumentValidators(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	t.Cleanup(backend.Close)
+	s := New(backend, "session-1", "task-1", 10005, log, "", false, ModeTask)
+	definition := plugintools.Definition{
+		PluginID: "task-tags.v1", LocalName: "add_tag", ExposedName: plugintools.ExposedName("task-tags.v1", "add_tag"),
+		Description: "Add a tag", InputSchema: []byte(`{"type":"object","properties":{"tag":{"type":"string"}},"required":["tag"]}`),
+		Surfaces: []string{plugintools.SurfaceKanban},
+	}
+	s.SetPluginTools(plugintools.Snapshot{Generation: "g", Revision: 1, Tools: []plugintools.Definition{definition}})
+
+	req := mcplib.CallToolRequest{Params: mcplib.CallToolParams{Name: definition.ExposedName, Arguments: map[string]any{"tag": "urgent"}}}
+	if _, err := s.validateToolArguments(definition.ExposedName, req); err != nil {
+		t.Fatalf("validateToolArguments() error = %v", err)
+	}
+}
+
+func TestPluginToolCallDoesNotLogArguments(t *testing.T) {
+	core, observed := observer.New(zap.DebugLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	require.NoError(t, err)
+	backend := &testBackend{response: map[string]any{"text": "ok"}}
+	s := New(backend, "session-1", "task-1", 10005, log, "", false, ModeTask)
+	definition := plugintools.Definition{
+		PluginID: "echo", LocalName: "echo", ExposedName: plugintools.ExposedName("echo", "echo"),
+		Description: "Echo", InputSchema: []byte(`{"type":"object","properties":{"token":{"type":"string"}}}`),
+		Surfaces: []string{plugintools.SurfaceKanban},
+	}
+	s.SetPluginTools(plugintools.Snapshot{Generation: "g", Revision: 1, Tools: []plugintools.Definition{definition}})
+	callTool(t, s, definition.ExposedName, map[string]interface{}{"token": "secret-value"})
+
+	entries := observed.FilterMessage("MCP tool call").All()
+	require.Len(t, entries, 1)
+	_, loggedArgs := entries[0].ContextMap()["args"]
+	require.False(t, loggedArgs, "plugin arguments must not be attached to logs")
+}
+
+func TestPluginToolErrorDoesNotLogResult(t *testing.T) {
+	core, observed := observer.New(zap.DebugLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	require.NoError(t, err)
+	backend := &testBackend{response: map[string]any{"text": "secret-result", "is_error": true}}
+	s := New(backend, "session-1", "task-1", 10005, log, "", false, ModeTask)
+	definition := plugintools.Definition{
+		PluginID: "echo", LocalName: "echo", ExposedName: plugintools.ExposedName("echo", "echo"),
+		Description: "Echo", InputSchema: []byte(`{"type":"object"}`), Surfaces: []string{plugintools.SurfaceKanban},
+	}
+	s.SetPluginTools(plugintools.Snapshot{Generation: "g", Revision: 1, Tools: []plugintools.Definition{definition}})
+	callTool(t, s, definition.ExposedName, map[string]interface{}{})
+
+	entries := observed.FilterMessage("MCP tool returned error").All()
+	require.Len(t, entries, 1)
+	_, loggedResult := entries[0].ContextMap()["result"]
+	require.False(t, loggedResult, "plugin results must not be attached to logs")
+}
+
+type staticPluginBackend struct{}
+
+func (staticPluginBackend) RequestPayload(_ context.Context, _ string, _, result interface{}) error {
+	response, ok := result.(*struct {
+		Text              string         `json:"text"`
+		StructuredContent map[string]any `json:"structured_content,omitempty"`
+		IsError           bool           `json:"is_error"`
+	})
+	if ok {
+		response.Text = "ok"
+	}
+	return nil
+}
+
+func TestPluginToolInvocationProfileAccessIsRaceFree(t *testing.T) {
+	log := newTestLogger(t)
+	s := New(staticPluginBackend{}, "session-1", "task-1", 10005, log, "", false, ModeTask)
+	definition := plugintools.Definition{
+		PluginID: "echo", LocalName: "echo", ExposedName: plugintools.ExposedName("echo", "echo"),
+		Description: "Echo", InputSchema: []byte(`{"type":"object"}`),
+		Surfaces: []string{plugintools.SurfaceKanban, plugintools.SurfaceOffice},
+	}
+	s.SetPluginTools(plugintools.Snapshot{Generation: "g", Revision: 1, Tools: []plugintools.Definition{definition}})
+	tool := s.mcpServer.ListTools()[definition.ExposedName]
+	require.NotNil(t, tool)
+	req := mcplib.CallToolRequest{Params: mcplib.CallToolParams{Name: definition.ExposedName, Arguments: map[string]any{}}}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			s.SetProfile(mcpprofile.New(mcpprofile.SurfaceKanbanTask, nil, nil))
+			s.SetProfile(mcpprofile.New(mcpprofile.SurfaceOfficeTask, nil, nil))
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			_, _ = tool.Handler(context.Background(), req)
+		}
+	}()
+	wg.Wait()
+}
+
 func TestSetPluginToolsIgnoresStaleRevision(t *testing.T) {
 	log := newTestLogger(t)
 	backend := NewChannelBackendClient(log)
-	defer backend.Close()
+	t.Cleanup(backend.Close)
 	s := New(backend, "session-1", "task-1", 10005, log, "", false, ModeTask)
 	definition := plugintools.Definition{
-		PluginID: "plugin", LocalName: "current", ExposedName: "plugin_8d5b66e217366546_current",
+		PluginID: "plugin", LocalName: "current", ExposedName: plugintools.ExposedName("plugin", "current"),
 		Description: "Current", InputSchema: []byte(`{"type":"object"}`),
 		Surfaces: []string{plugintools.SurfaceKanban},
 	}
@@ -115,6 +220,31 @@ func TestSetPluginToolsIgnoresStaleRevision(t *testing.T) {
 	_, ok := s.mcpServer.ListTools()[definition.ExposedName]
 	if !ok {
 		t.Fatal("stale revision replaced the current registry")
+	}
+}
+
+func TestSetPluginToolsPreservesCatalogAcrossSurfaceChange(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	t.Cleanup(backend.Close)
+	s := New(backend, "session-1", "task-1", 10005, log, "", false, ModeTask)
+	kanban := plugintools.Definition{
+		PluginID: "plugin", LocalName: "kanban", ExposedName: plugintools.ExposedName("plugin", "kanban"),
+		Description: "Kanban", InputSchema: []byte(`{"type":"object"}`), Surfaces: []string{plugintools.SurfaceKanban},
+	}
+	office := plugintools.Definition{
+		PluginID: "plugin", LocalName: "office", ExposedName: plugintools.ExposedName("plugin", "office"),
+		Description: "Office", InputSchema: []byte(`{"type":"object"}`), Surfaces: []string{plugintools.SurfaceOffice},
+	}
+	s.SetPluginTools(plugintools.Snapshot{Generation: "g", Revision: 1, Tools: []plugintools.Definition{kanban, office}})
+	s.SetProfile(mcpprofile.New(mcpprofile.SurfaceOfficeTask, nil, nil))
+
+	tools := s.mcpServer.ListTools()
+	if _, ok := tools[office.ExposedName]; !ok {
+		t.Fatal("office tool was lost when the MCP surface changed")
+	}
+	if _, ok := tools[kanban.ExposedName]; ok {
+		t.Fatal("kanban-only tool remained on the office surface")
 	}
 }
 

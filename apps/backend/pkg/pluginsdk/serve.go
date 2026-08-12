@@ -247,6 +247,9 @@ func (s *grpcPluginServer) InvokeAgentTool(ctx context.Context, req *pluginv1.Ag
 	if err != nil {
 		return nil, err
 	}
+	if result == nil {
+		return nil, status.Error(codes.Internal, "plugin returned a nil agent tool result")
+	}
 	return result.toProto()
 }
 

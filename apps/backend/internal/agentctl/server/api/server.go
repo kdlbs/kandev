@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
 	lspinstaller "github.com/kandev/kandev/internal/lsp/installer"
+	"github.com/kandev/kandev/internal/mcp/plugintools"
 	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
 	"github.com/kandev/kandev/internal/mcp/server"
 	"github.com/kandev/kandev/internal/system/metrics"
@@ -211,6 +212,7 @@ func (s *Server) setupRoutes() {
 		s.mcpServer.RegisterRoutes(s.router)
 		api.PUT("/mcp/mode", s.handleSetMcpMode)
 		api.PUT("/mcp/providers", s.handleSetMcpProviders)
+		api.PUT("/mcp/plugin-tools", s.handleSetPluginTools)
 	}
 
 	// pprof + memory stats (enabled via KANDEV_DEBUG_PPROF_ENABLED=true)
@@ -341,6 +343,16 @@ func (s *Server) handleSetMcpProviders(c *gin.Context) {
 	providers := mcpproviders.Normalize(req.Providers)
 	s.mcpServer.SetProviders(providers)
 	c.JSON(http.StatusOK, gin.H{"mcp_providers": providers})
+}
+
+func (s *Server) handleSetPluginTools(c *gin.Context) {
+	var snapshot plugintools.Snapshot
+	if err := c.ShouldBindJSON(&snapshot); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	s.mcpServer.SetPluginTools(snapshot)
+	c.JSON(http.StatusOK, gin.H{"generation": snapshot.Generation, "revision": snapshot.Revision})
 }
 
 // Status response

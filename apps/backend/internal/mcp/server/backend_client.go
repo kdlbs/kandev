@@ -98,7 +98,7 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 	c.logger.Debug("sending MCP request through agent stream",
 		zap.String("request_id", id),
 		zap.String("action", action),
-		zap.Any("payload", payload))
+		zap.Any("payload", backendPayloadForLog(action, payload)))
 
 	// Ensure cleanup on exit
 	defer func() {
@@ -168,6 +168,23 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 			zap.Error(ctx.Err()))
 		return ctx.Err()
 	}
+}
+
+func backendPayloadForLog(action string, payload interface{}) interface{} {
+	if action != ws.ActionMCPInvokePluginTool {
+		return payload
+	}
+	values, ok := payload.(map[string]any)
+	if !ok {
+		return "<redacted>"
+	}
+	safe := make(map[string]any, len(values))
+	for key, value := range values {
+		if key != "arguments" {
+			safe[key] = value
+		}
+	}
+	return safe
 }
 
 // Reset clears all pending MCP requests.
