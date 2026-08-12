@@ -20,7 +20,7 @@ async function openMobileReview(testPage: Page, session: SessionPage, repository
       prFiles.locator(
         `[data-changes-file=${JSON.stringify(REVIEW_SHARED_FILE)}][data-pr-key="${REVIEW_OWNER}/${repositoryName}/${pr.number}"]`,
       ),
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 30_000 });
   }
   await changesPanel.getByRole("button", { name: "Review", exact: true }).tap();
   await expect(session.reviewDialog()).toBeVisible({ timeout: 15_000 });

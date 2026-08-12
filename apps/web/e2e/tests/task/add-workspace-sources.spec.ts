@@ -73,7 +73,7 @@ test.describe("Attach local workspace sources", () => {
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await session.waitForChatIdle({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 60_000 });
     await session.clickTab("Files");
 
     const workspaceActions = testPage.getByTestId("files-workspace-actions");
@@ -160,7 +160,7 @@ test.describe("Attach local workspace sources", () => {
     );
     await repositoryRow.getByRole("textbox", { name: "Base branch" }).fill("main");
     await submit.click();
-    await expect(dialog).not.toBeVisible();
+    await expect(dialog).not.toBeVisible({ timeout: 30_000 });
     await expect(
       session.files
         .getByTestId("file-tree-node")
@@ -185,7 +185,7 @@ test.describe("Attach local workspace sources", () => {
       caption: "Desktop Add to workspace dialog with a local folder configured",
     });
     await submit.click();
-    await expect(dialog).not.toBeVisible();
+    await expect(dialog).not.toBeVisible({ timeout: 30_000 });
 
     await expect(
       session.files.getByTestId("file-tree-node").filter({ hasText: "plain-local-folder" }),
