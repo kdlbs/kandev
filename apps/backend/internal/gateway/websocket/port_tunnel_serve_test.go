@@ -110,18 +110,26 @@ func TestStartTunnelBindsRequestedPortAndIsIdempotent(t *testing.T) {
 	manager := NewTunnelManager(lifecycleMgr, log)
 	t.Cleanup(manager.Shutdown)
 
-	probe, err := net.Listen("tcp", ":0")
-	if err != nil {
-		t.Fatalf("reserve a free port: %v", err)
+	// Reserving a port means binding it, reading it, and releasing it, so another
+	// process can always win the gap before StartTunnel re-binds. Retry rather
+	// than let a loaded CI machine turn that into a flake; losing every attempt
+	// is not plausible. Loopback-only, to match the tunnel listener and to keep
+	// the window as narrow as possible.
+	var wanted, got int
+	var err error
+	for attempt := 1; attempt <= tunnelPortBindAttempts; attempt++ {
+		wanted = reserveLoopbackPort(t)
+		got, err = manager.StartTunnel("sess-fixed", 3000, wanted)
+		if err == nil {
+			break
+		}
+		if !strings.Contains(err.Error(), "already in use") {
+			t.Fatalf("StartTunnel: %v", err)
+		}
+		t.Logf("attempt %d: port %d was taken between reserve and bind, retrying", attempt, wanted)
 	}
-	wanted := probe.Addr().(*net.TCPAddr).Port
-	if err := probe.Close(); err != nil {
-		t.Fatalf("release probe listener: %v", err)
-	}
-
-	got, err := manager.StartTunnel("sess-fixed", 3000, wanted)
 	if err != nil {
-		t.Fatalf("StartTunnel: %v", err)
+		t.Fatalf("StartTunnel never won the port race in %d attempts: %v", tunnelPortBindAttempts, err)
 	}
 	if got != wanted {
 		t.Fatalf("StartTunnel() port = %d, want the requested %d", got, wanted)
@@ -289,6 +297,9 @@ func TestShutdownStopsEveryTunnel(t *testing.T) {
 	addExecutionForURL(t, lifecycleMgr, "sess-1", upstream.server.URL, "", log)
 	addExecutionForURL(t, lifecycleMgr, "sess-2", upstream.server.URL, "", log)
 	manager := NewTunnelManager(lifecycleMgr, log)
+	// Registered before the StartTunnel calls below: an early t.Fatalf there
+	// would otherwise strand the listeners this test already opened.
+	t.Cleanup(manager.Shutdown)
 
 	first, err := manager.StartTunnel("sess-1", 3000, 0)
 	if err != nil {
@@ -310,7 +321,7 @@ func TestShutdownStopsEveryTunnel(t *testing.T) {
 	assertPortClosed(t, first)
 	assertPortClosed(t, second)
 
-	// Shutdown must be safe to call twice (it also runs from the test cleanup path).
+	// Shutdown must be idempotent: the registered cleanup calls it a second time.
 	manager.Shutdown()
 }
 
@@ -337,6 +348,23 @@ func TestTunnelProxyReportsBadGatewayWhenAgentctlIsDown(t *testing.T) {
 	if !strings.Contains(body, "tunnel proxy error") {
 		t.Fatalf("body = %q, want the tunnel proxy error", body)
 	}
+}
+
+// tunnelPortBindAttempts bounds the reserve/re-bind retry below.
+const tunnelPortBindAttempts = 5
+
+// reserveLoopbackPort returns a loopback port that was free a moment ago.
+func reserveLoopbackPort(t *testing.T) int {
+	t.Helper()
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve a free port: %v", err)
+	}
+	port := probe.Addr().(*net.TCPAddr).Port
+	if err := probe.Close(); err != nil {
+		t.Fatalf("release probe listener: %v", err)
+	}
+	return port
 }
 
 // assertPortClosed fails unless nothing is listening on the given local port.

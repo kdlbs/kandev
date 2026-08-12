@@ -31,6 +31,16 @@ func newTerminalWSPair(t *testing.T) (dialed, accepted *gorillaws.Conn) {
 	t.Helper()
 
 	accepts := make(chan *gorillaws.Conn, 1)
+	// Drain a connection the handler delivers after the timeout branch below:
+	// nothing else would ever close it, and its read goroutine would outlive
+	// the test.
+	t.Cleanup(func() {
+		select {
+		case late := <-accepts:
+			_ = late.Close()
+		default:
+		}
+	})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := testWSUpgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -49,11 +59,13 @@ func newTerminalWSPair(t *testing.T) (dialed, accepted *gorillaws.Conn) {
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 
+	acceptTimer := time.NewTimer(wsTestTimeout)
+	defer acceptTimer.Stop()
 	select {
 	case server := <-accepts:
 		t.Cleanup(func() { _ = server.Close() })
 		return conn, server
-	case <-time.After(wsTestTimeout):
+	case <-acceptTimer.C:
 		t.Fatal("timed out waiting for the server side of the websocket pair")
 		return nil, nil
 	}
@@ -89,13 +101,44 @@ func readBinary(t *testing.T, conn *gorillaws.Conn) []byte {
 	return data
 }
 
+// spawnJoinable starts fn in a goroutine and registers, immediately, a cleanup
+// that unblocks it and waits for it to return.
+//
+// Registering the join up front rather than only on the happy path is what
+// keeps an early t.Fatal from leaving a pump running into later tests, where
+// goleak would report it against the wrong test. The cleanup reports
+// non-fatally so the remaining cleanups (which close the connections) still run.
+func spawnJoinable(t *testing.T, what string, unblock func(), fn func()) <-chan struct{} {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		fn()
+	}()
+	t.Cleanup(func() {
+		if unblock != nil {
+			unblock()
+		}
+		timer := time.NewTimer(wsTestTimeout)
+		defer timer.Stop()
+		select {
+		case <-done:
+		case <-timer.C:
+			t.Errorf("%s did not return within %s", what, wsTestTimeout)
+		}
+	})
+	return done
+}
+
 // joinWithin waits for done to close, failing the test when the production
 // goroutine under test did not terminate.
 func joinWithin(t *testing.T, done <-chan struct{}, what string) {
 	t.Helper()
+	timer := time.NewTimer(wsTestTimeout)
+	defer timer.Stop()
 	select {
 	case <-done:
-	case <-time.After(wsTestTimeout):
+	case <-timer.C:
 		t.Fatalf("%s did not return within %s", what, wsTestTimeout)
 	}
 }

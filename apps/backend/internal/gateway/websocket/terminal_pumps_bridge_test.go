@@ -98,11 +98,9 @@ func TestBridgeBinaryWebSocketsForwardsBothDirections(t *testing.T) {
 	browser, bridgeClientSide := newTerminalWSPair(t)
 	bridgeUpstreamSide, agentctl := newTerminalWSPair(t)
 
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
+	done := spawnJoinable(t, "bridgeBinaryWebSockets", func() { _ = browser.Close() }, func() {
 		handler.bridgeBinaryWebSockets(bridgeClientSide, bridgeUpstreamSide, "term-1")
-	}()
+	})
 
 	// client → agentctl (keystrokes)
 	if err := browser.WriteMessage(gorillaws.BinaryMessage, []byte("echo hi\r")); err != nil {
@@ -142,11 +140,9 @@ func TestBridgeBinaryWebSocketsReturnsWhenUpstreamDisconnects(t *testing.T) {
 	browser, bridgeClientSide := newTerminalWSPair(t)
 	bridgeUpstreamSide, agentctl := newTerminalWSPair(t)
 
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
+	done := spawnJoinable(t, "bridgeBinaryWebSockets", func() { _ = agentctl.Close() }, func() {
 		handler.bridgeBinaryWebSockets(bridgeClientSide, bridgeUpstreamSide, "term-2")
-	}()
+	})
 
 	if err := agentctl.Close(); err != nil {
 		t.Fatalf("close agentctl conn: %v", err)
@@ -169,13 +165,11 @@ func TestRunTerminalBridgeReleasesSessionOutputOnDisconnect(t *testing.T) {
 		t.Fatal("session WebSocket was not tracked before the bridge started")
 	}
 
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		// "proc-gone" is deliberately unknown to the runner: PTY setup fails, so
-		// the bridge exercises its drop-input path without spawning a real PTY.
+	// "proc-gone" is deliberately unknown to the runner: PTY setup fails, so the
+	// bridge exercises its drop-input path without spawning a real PTY.
+	done := spawnJoinable(t, "runTerminalBridge", func() { _ = browser.Close() }, func() {
 		handler.runTerminalBridge(server, sessionID, "proc-gone", runner, wsw)
-	}()
+	})
 
 	if err := browser.WriteMessage(gorillaws.BinaryMessage, nil); err != nil {
 		t.Fatalf("write empty frame: %v", err)
@@ -207,11 +201,9 @@ func TestRunTerminalBridgeResizeFallsBackWhenProcessAndSessionAreGone(t *testing
 	browser, server := newTerminalWSPair(t)
 	wsw := newWsWriter(server)
 
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
+	done := spawnJoinable(t, "runTerminalBridge", func() { _ = browser.Close() }, func() {
 		handler.runTerminalBridge(server, "session-resize", "proc-gone", runner, wsw)
-	}()
+	})
 
 	resize := append([]byte{resizeCommandByte}, []byte(`{"cols":120,"rows":40}`)...)
 	if err := browser.WriteMessage(gorillaws.BinaryMessage, resize); err != nil {
@@ -248,11 +240,9 @@ func TestRunUserShellBridgeClearsShellDirectOutputOnDisconnect(t *testing.T) {
 		t.Fatal("direct output was not registered on the user shell process")
 	}
 
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
+	done := spawnJoinable(t, "runUserShellBridge", func() { _ = browser.Close() }, func() {
 		handler.runUserShellBridge(server, sessionID, scopeID, terminalID, info.ID, runner, wsw)
-	}()
+	})
 
 	if err := browser.WriteMessage(gorillaws.BinaryMessage, nil); err != nil {
 		t.Fatalf("write empty frame: %v", err)
@@ -284,11 +274,9 @@ func TestRunUserShellBridgeReportsUnresizableShell(t *testing.T) {
 	browser, server := newTerminalWSPair(t)
 	wsw := newWsWriter(server)
 
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
+	done := spawnJoinable(t, "runUserShellBridge", func() { _ = browser.Close() }, func() {
 		handler.runUserShellBridge(server, "session-x", "env-x", "term-unknown", "proc-gone", runner, wsw)
-	}()
+	})
 
 	resize := append([]byte{resizeCommandByte}, []byte(`{"cols":100,"rows":30}`)...)
 	if err := browser.WriteMessage(gorillaws.BinaryMessage, resize); err != nil {

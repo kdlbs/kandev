@@ -65,14 +65,17 @@ func TestHandleVscodeProxyRewritesPathAndInjectsAgentctlToken(t *testing.T) {
 		t.Fatalf("body = %q, want the proxied code-server body", got.body)
 	}
 
+	// One snapshot: seen() copies, so indexing a second call would address a
+	// different slice than the one being ranged over.
+	seen := upstream.seen()
 	var proxied *recordedRequest
-	for i, req := range upstream.seen() {
-		if strings.HasPrefix(req.path, "/api/v1/vscode/proxy") {
-			proxied = &upstream.seen()[i]
+	for i := range seen {
+		if strings.HasPrefix(seen[i].path, "/api/v1/vscode/proxy") {
+			proxied = &seen[i]
 		}
 	}
 	if proxied == nil {
-		t.Fatalf("no proxied request reached the upstream: %+v", upstream.seen())
+		t.Fatalf("no proxied request reached the upstream: %+v", seen)
 	}
 	if proxied.path != "/api/v1/vscode/proxy/static/out/main.js" {
 		t.Fatalf("upstream path = %q", proxied.path)

@@ -181,11 +181,9 @@ func TestProxyLSPConnectionsForwardsMessagesInBothDirections(t *testing.T) {
 	browser, handlerBrowserSide := newTerminalWSPair(t)
 	handlerUpstreamSide, upstream := newTerminalWSPair(t)
 
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
+	done := spawnJoinable(t, "proxyLSPConnections", func() { _ = browser.Close() }, func() {
 		handler.proxyLSPConnections(handlerBrowserSide, handlerUpstreamSide, "sess-lsp", "go")
-	}()
+	})
 
 	request := []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`)
 	if err := browser.WriteMessage(gorillaws.TextMessage, request); err != nil {
@@ -239,11 +237,9 @@ func TestProxyLSPConnectionsPropagatesUpstreamCloseCode(t *testing.T) {
 	browser, handlerBrowserSide := newTerminalWSPair(t)
 	handlerUpstreamSide, upstream := newTerminalWSPair(t)
 
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
+	done := spawnJoinable(t, "proxyLSPConnections", func() { _ = browser.Close() }, func() {
 		handler.proxyLSPConnections(handlerBrowserSide, handlerUpstreamSide, "sess-lsp", "go")
-	}()
+	})
 
 	closeFrame := gorillaws.FormatCloseMessage(lspCloseInstallFailed, "install failed")
 	if err := upstream.WriteControl(

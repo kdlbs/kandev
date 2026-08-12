@@ -292,24 +292,15 @@ func TestHandlePortProxyForwardsRootPathForPrefixOnlyRequests(t *testing.T) {
 	addExecutionForURL(t, manager, "sess-root", upstream.server.URL, "", log)
 	handler := NewPortProxyHandler(manager, log)
 
-	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// The gin wildcard route would redirect the prefix-only form, so the handler
+	// is driven directly with the params it reads.
+	gateway := serveGateway(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, _ := gin.CreateTestContext(w)
 		c.Request = r
 		c.Params = gin.Params{{Key: "sessionId", Value: "sess-root"}, {Key: "port", Value: "3000"}}
 		handler.HandlePortProxy(c)
 	}))
-	srv.Config.SetKeepAlivesEnabled(false)
-	srv.Start()
-	t.Cleanup(srv.Close)
-
-	transport := &http.Transport{DisableKeepAlives: true}
-	t.Cleanup(transport.CloseIdleConnections)
-	client := &http.Client{Transport: transport}
-	resp, err := client.Get(srv.URL + "/port-proxy/sess-root/3000")
-	if err != nil {
-		t.Fatalf("request: %v", err)
-	}
-	_ = resp.Body.Close()
+	gateway(http.MethodGet, "/port-proxy/sess-root/3000")
 
 	seen := upstream.seen()
 	if len(seen) != 1 || seen[0].path != "/api/v1/port-proxy/3000/" {

@@ -240,10 +240,12 @@ func TestHandleRemoteUserShellWSBridgesAgentctlShell(t *testing.T) {
 	})
 	browser := dialTerminal(t, srv, "/terminal/environment/env-1?terminalId=term-1&scriptId=script-1")
 
+	shellTimer := time.NewTimer(wsTestTimeout)
+	defer shellTimer.Stop()
 	var shell *gorillaws.Conn
 	select {
 	case shell = <-agentctl.shells:
-	case <-time.After(wsTestTimeout):
+	case <-shellTimer.C:
 		t.Fatal("agentctl never received a shell stream connection")
 	}
 	t.Cleanup(func() { _ = shell.Close() })

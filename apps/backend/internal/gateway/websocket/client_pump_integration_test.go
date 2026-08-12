@@ -77,10 +77,25 @@ func newConnectedClient(t *testing.T) *connectedClient {
 	}
 	t.Cleanup(func() { _ = browser.Close() })
 
+	// Join the pumps from a cleanup registered before the assertions below, so
+	// an early t.Fatal cannot leave them running into a later test.
+	t.Cleanup(func() {
+		_ = browser.Close()
+		pumpTimer := time.NewTimer(wsTestTimeout)
+		defer pumpTimer.Stop()
+		select {
+		case <-pumpsDone:
+		case <-pumpTimer.C:
+			t.Errorf("client pumps did not return within %s", wsTestTimeout)
+		}
+	})
+
+	readyTimer := time.NewTimer(wsTestTimeout)
+	defer readyTimer.Stop()
 	var client *Client
 	select {
 	case client = <-ready:
-	case <-time.After(wsTestTimeout):
+	case <-readyTimer.C:
 		t.Fatal("gateway never registered the client")
 	}
 
