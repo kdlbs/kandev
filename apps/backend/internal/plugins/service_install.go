@@ -191,8 +191,9 @@ func (s *Service) InstallFromURL(ctx context.Context, url string) (*store.Record
 	if err != nil {
 		return nil, fmt.Errorf("plugins: build download request: %w", err)
 	}
-	// codeql[go/request-forgery] The only HTTP caller is guarded by RequireAdmin;
-	// this operator-level feature intentionally fetches the validated package URL.
+	// The only HTTP caller is guarded by RequireAdmin; this operator-level
+	// feature intentionally fetches the validated package URL.
+	// lgtm[go/request-forgery]
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("plugins: download package: %w", err)
