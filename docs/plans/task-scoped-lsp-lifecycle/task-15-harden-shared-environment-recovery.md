@@ -177,6 +177,11 @@ Completed 2026-08-12.
   Go lint with zero issues, 22 focused frontend tests, strict targeted ESLint, web typecheck, the
   i18n ratchet, all 62 public-doc validator tests, validation of all 41 published pages, and the
   three-dot diff whitespace check.
+- After `origin/main` advanced again, the branch rebased without conflict onto `be966f410`. The
+  intervening product source was unchanged. Final-base verification passed the complete task-service
+  and SQLite suites (66.548s and 25.059s), changed-code Go lint with zero issues, 22 focused frontend
+  tests, web typecheck, all 62 public-doc validator tests, validation of all 41 published pages, and
+  the three-dot diff whitespace check.
 
 ## Files
 
