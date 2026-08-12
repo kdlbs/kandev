@@ -37,6 +37,9 @@ type TaskDeleteConfirmDialogProps = {
   confirmTestId?: string;
 };
 
+const dialogClass =
+  "w-[calc(100vw-2rem)] !max-w-[calc(100vw-2rem)] font-sans !text-sm sm:!max-w-lg";
+
 export function TaskDeleteConfirmDialog({
   open,
   onOpenChange,
@@ -75,10 +78,10 @@ export function TaskDeleteConfirmDialog({
 
   return (
     <AlertDialog open={open} onOpenChange={handleOpenChange}>
-      <AlertDialogContent onClick={(e) => e.stopPropagation()}>
+      <AlertDialogContent className={dialogClass} onClick={(e) => e.stopPropagation()}>
         <AlertDialogHeader>
-          <AlertDialogTitle>{title}</AlertDialogTitle>
-          <AlertDialogDescription asChild>
+          <AlertDialogTitle className="text-base font-semibold">{title}</AlertDialogTitle>
+          <AlertDialogDescription asChild className="text-sm leading-6">
             <div>
               <p>{description}</p>
               {cleanup.lines.map((line, i) => (
@@ -102,17 +105,19 @@ export function TaskDeleteConfirmDialog({
             />
             <span>
               {t("task:alsoDeleteSubtasks", { count: subtaskCount })}
-              <span className="block text-xs text-muted-foreground">
+              <span className="block text-sm text-muted-foreground">
                 {t("task:subtasksBecomeRootTasksUnlessYou")}
               </span>
             </span>
           </label>
         )}
         <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">{t("common:cancel")}</AlertDialogCancel>
+          <AlertDialogCancel className="cursor-pointer !text-sm">
+            {t("common:cancel")}
+          </AlertDialogCancel>
           <AlertDialogAction
             disabled={isDeleting}
-            className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            className="cursor-pointer bg-destructive !text-sm text-destructive-foreground hover:bg-destructive/90"
             data-testid={confirmTestId}
             onClick={() => {
               if (isDeleting) return;
