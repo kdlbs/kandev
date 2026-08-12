@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/messageconstraints"
@@ -272,14 +273,14 @@ type autoMergeIdentityFields struct {
 	Model     string
 	PlanMode  bool
 	QueuedBy  string
-	QueuedAt  interface{}
+	QueuedAt  time.Time
 }
 
 func autoMergeIdentity(message QueuedMessage) autoMergeIdentityFields {
 	return autoMergeIdentityFields{
 		ID: message.ID, SessionID: message.SessionID, TaskID: message.TaskID,
 		Position: message.Position, Model: message.Model, PlanMode: message.PlanMode,
-		QueuedBy: message.QueuedBy, QueuedAt: message.QueuedAt,
+		QueuedBy: message.QueuedBy, QueuedAt: message.QueuedAt.UTC().Truncate(time.Microsecond),
 	}
 }
 
