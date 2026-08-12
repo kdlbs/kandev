@@ -428,6 +428,10 @@ Completed 2026-08-05.
   settlement order; and the ADR, spec, and public guide consistently preserve a shared host for a
   live borrower. Full task-service race verification, the exact CI regression, focused frontend
   tests/typecheck/lint, changed-code Go lint, and public-doc validation pass.
+- Main then advanced to `9c3e7a2d3`; the 32-commit feature branch rebased without conflicts. The
+  rebased head repeated the full task-service race suite, exact MCP CI regression, changed-code Go
+  lint, focused frontend tests/typecheck/lint, and public-doc validators successfully before its
+  replacement review and CI run.
 
 ---
 

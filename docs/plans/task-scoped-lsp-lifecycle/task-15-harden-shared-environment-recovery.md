@@ -80,6 +80,10 @@ Completed 2026-08-12.
   race-enabled repetitions; full `go test -race ./internal/task/service -count=1` passed; changed
   task-service lint reported zero issues. The two focused frontend files passed 20 tests, ESLint,
   and typecheck. Public-doc validation passed 60 tests and all 41 published pages.
+- Main advanced after the remediation push, so the branch was rebased cleanly onto `origin/main` at
+  `9c3e7a2d3`. Exact rebased-head verification repeated the full task-service race suite, the exact
+  MCP CI regression 10 times, changed-code Go lint, 20 focused frontend tests plus ESLint/typecheck,
+  and the 60-test/41-page public-doc validators; all passed.
 
 ## Files
 
