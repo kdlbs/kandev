@@ -84,11 +84,13 @@ Completed 2026-08-12.
   `9c3e7a2d3`. Exact rebased-head verification repeated the full task-service race suite, the exact
   MCP CI regression 10 times, changed-code Go lint, 20 focused frontend tests plus ESLint/typecheck,
   and the 60-test/41-page public-doc validators; all passed.
-- Subsequent main updates rebased cleanly through release commit `2089e7c92` and unrelated Message
-  Queue UI commit `db4fc039a`. Fresh final-base verification passed the full task-service race suite
-  (122.663s), the exact MCP regression 10 times, 24 focused frontend tests, changed-code Go lint
-  (zero issues), focused ESLint, web typecheck, all 60 public-doc validator tests, and all 41
-  published pages.
+- Subsequent main updates rebased cleanly through release commit `2089e7c92`, Message Queue UI commit
+  `db4fc039a`, and session auto-start commit `1f1710e54`. The last update exposed one required-state
+  mismatch in the status-surface test fixture; adding the upstream `resumeSkippedSessionIds` field
+  restored type safety. Fresh final-base verification passed the full task-service race suite
+  (113.217s), the exact MCP regression 10 times, 9 focused frontend files / 104 tests, the repaired
+  status-surface file / 10 tests, web typecheck, changed-code Go lint (zero issues), focused
+  ESLint/Prettier, all 60 public-doc validator tests, and all 41 published pages.
 
 ## Files
 

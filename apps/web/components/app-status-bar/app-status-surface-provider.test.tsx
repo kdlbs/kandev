@@ -161,6 +161,7 @@ describe("AppStatusSurfaceProvider disabled fallbacks", () => {
         activeSessionId: null,
         pinnedSessionId: null,
         lastSessionByTaskId: {},
+        resumeSkippedSessionIds: {},
       },
     });
 

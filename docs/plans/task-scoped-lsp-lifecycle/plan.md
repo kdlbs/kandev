@@ -432,11 +432,13 @@ Completed 2026-08-05.
   rebased head repeated the full task-service race suite, exact MCP CI regression, changed-code Go
   lint, focused frontend tests/typecheck/lint, and public-doc validators successfully before its
   replacement review and CI run.
-- Follow-up main updates moved through release commit `2089e7c92` and unrelated Message Queue UI
-  commit `db4fc039a`; the branch rebased cleanly each time. On the final exact base, the full
-  task-service race suite, the exact MCP regression 10 times, 24 focused frontend tests,
-  changed-code Go lint, focused ESLint, web typecheck, the 60-test public-doc validator, and all 41
-  published pages passed before replacement review and CI.
+- Follow-up main updates moved through release commit `2089e7c92`, Message Queue UI commit
+  `db4fc039a`, and session auto-start commit `1f1710e54`; the branch rebased cleanly each time. The
+  last update added required task state, so the status-surface test fixture was reconciled. On the
+  final exact base, the full task-service race suite, the exact MCP regression 10 times, 9 focused
+  frontend files / 104 tests, the repaired status-surface file / 10 tests, and web typecheck passed
+  with changed-code Go lint, focused ESLint/Prettier, the 60-test public-doc validator, and all 41
+  published pages before replacement review and CI.
 
 ---
 
