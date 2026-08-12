@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/docker"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
@@ -329,39 +330,38 @@ func (cm *ContainerManager) removeContainerBestEffort(containerID string) {
 // waitForHealth waits for agentctl to be healthy with retries.
 // The budget covers the time it takes for the container's bootstrap to run the
 // prepare script (git clone, optional network installs) and then exec agentctl.
-// 120s is generous but matches what real workspaces need on first launch.
+// The budget matches the common setup-script timeout used by other executors.
 func (cm *ContainerManager) waitForHealth(ctx context.Context, ctl *agentctl.ControlClient) error {
-	const maxRetries = 240
 	const retryDelay = 500 * time.Millisecond
 
+	setupTimeout := constants.SetupScriptTimeout
+	healthCtx, cancel := context.WithTimeout(ctx, setupTimeout)
+	defer cancel()
+
 	var lastErr error
-	for i := 0; i < maxRetries; i++ {
-		if err := ctl.Health(ctx); err == nil {
+	for {
+		if err := ctl.Health(healthCtx); err == nil {
 			return nil
 		} else {
 			lastErr = err
 		}
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		// Cancelable wait that also skips the final retry's sleep — the loop
-		// only re-enters if i+1 < maxRetries, so the extra delay was just
-		// added latency on aborted launches.
-		if i+1 < maxRetries {
-			select {
-			case <-ctx.Done():
+		if healthCtx.Err() != nil {
+			if ctx.Err() != nil {
 				return ctx.Err()
-			case <-time.After(retryDelay):
 			}
+			return fmt.Errorf("agentctl not healthy after %s: %w", setupTimeout, lastErr)
+		}
+
+		timer := time.NewTimer(retryDelay)
+		select {
+		case <-healthCtx.Done():
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return fmt.Errorf("agentctl not healthy after %s: %w", setupTimeout, lastErr)
+		case <-timer.C:
 		}
 	}
-
-	if lastErr != nil {
-		return fmt.Errorf("agentctl not healthy after %s: %w",
-			time.Duration(maxRetries)*retryDelay, lastErr)
-	}
-	return fmt.Errorf("agentctl not healthy after %s",
-		time.Duration(maxRetries)*retryDelay)
 }
 
 // StopContainer stops and removes a Docker container

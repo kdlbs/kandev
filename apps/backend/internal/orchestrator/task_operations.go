@@ -2190,10 +2190,8 @@ func (s *Service) startAgentOnPreparedWorkspace(ctx context.Context, sessionID s
 
 // waitForSessionReady polls the session state until the agent is ready for prompts.
 func (s *Service) waitForSessionReady(ctx context.Context, sessionID string) error {
-	const (
-		pollInterval = 500 * time.Millisecond
-		maxWait      = constants.AgentLaunchTimeout
-	)
+	const pollInterval = 500 * time.Millisecond
+	maxWait := constants.AgentLaunchTimeout
 	// Derive a bounded context so the overall wait AND each GetTaskSession query
 	// inside the loop honor maxWait. Callers pass context.WithoutCancel(ctx) so
 	// the wait survives the caller's request timeout during resume/launch — but

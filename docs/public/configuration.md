@@ -119,6 +119,22 @@ The Docker socket is effectively root-equivalent on many hosts. Do not publish i
 
 The launcher starts `agentctl`, performs a one-time nonce handshake, and supplies the resulting per-launch token internally. Do not persist or proxy its bootstrap/auth state. Agent command, model, environment, permission, and MCP configuration belongs in agent profiles rather than this section.
 
+### Setup and launch timing
+
+`KANDEV_TASK_PREPARATION_TIMEOUT` controls how long Kandev allows repository
+setup and executor-profile prepare scripts to run. The value uses Go duration
+syntax, such as `90s`, `10m`, or `1h`. The default is `10m`.
+
+Only positive durations are accepted. An unset, invalid, zero, or negative value
+uses the `10m` default. Kandev reads this environment variable when the backend
+starts, so restart the backend after changing it. The setting applies to Local,
+Worktree, Docker, Sprites, and SSH launches.
+
+The shared launch deadline is the configured preparation timeout plus a fixed
+five-minute allowance for runtime creation and `agentctl` readiness. With the
+default, the shared launch limit is `15m`. This setting is environment-only; it
+is not read from YAML, the database, or Settings.
+
 ### Authentication, Office, Plugins, voice, and feature flags
 
 | YAML key | Environment variable | Default | Current behavior |

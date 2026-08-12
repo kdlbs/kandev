@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/appctx"
+	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
@@ -31,11 +32,6 @@ var ErrSessionWorkspaceNotReady = errors.New("session workspace not ready")
 // not-ready envelope rather than an ERROR-logged failure, since a terminal session
 // will never recover an execution.
 var ErrSessionTerminal = errors.New("session is terminal")
-
-// coalescedExecutionCreationTimeout matches the runtime's 60-second agentctl
-// startup window while preventing blocked instance I/O from owning the shared
-// session slot and its activity lease for the lifetime of the manager.
-const coalescedExecutionCreationTimeout = time.Minute
 
 // ResolveSessionRuntime returns the runtime selected for a session without
 // creating or resuming its execution. Session-scoped handlers can use this to
@@ -223,7 +219,7 @@ func (m *Manager) doCoalescedExecution(
 }
 
 func (m *Manager) coalescedExecutionContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	sharedCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), coalescedExecutionCreationTimeout)
+	sharedCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.AgentLaunchTimeout)
 	if m.stopCh == nil {
 		return sharedCtx, cancel
 	}

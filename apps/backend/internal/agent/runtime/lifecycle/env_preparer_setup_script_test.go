@@ -6,7 +6,24 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/constants"
 )
+
+func TestRunSetupScript_UsesConfiguredTimeout(t *testing.T) {
+	previousTimeout := constants.SetupScriptTimeout
+	constants.SetupScriptTimeout = 10 * time.Millisecond
+	t.Cleanup(func() { constants.SetupScriptTimeout = previousTimeout })
+
+	startedAt := time.Now()
+	_, err := runSetupScript(context.Background(), "sleep 1", t.TempDir(), nil, nil)
+	if err == nil {
+		t.Fatal("runSetupScript() error = nil, want timeout error")
+	}
+	if elapsed := time.Since(startedAt); elapsed >= 500*time.Millisecond {
+		t.Fatalf("runSetupScript() took %s, want it to use the configured timeout", elapsed)
+	}
+}
 
 // TestRunSetupScript_StreamsOutputWhileRunning verifies that the streaming
 // callback fires with partial output as the script runs, not only once at the

@@ -58,11 +58,7 @@ const (
 	// sprite (agentctl ~21 MB, credential files, skill files). Sized for slow
 	// home connections — a 21 MB push needs ~1.4 Mbit/s to fit in 2 min, which
 	// many residential uplinks can't sustain.
-	spriteUploadTimeout = 10 * time.Minute
-	// spritePrepareTimeout caps the prepare script run inside the sprite,
-	// which does git clones and npm/curl agent installs over the sprite's
-	// internet. Five+ agent installs commonly run past 2 minutes.
-	spritePrepareTimeout   = 10 * time.Minute
+	spriteUploadTimeout    = 10 * time.Minute
 	spriteHealthTimeout    = 15 * time.Second
 	spriteDestroyTimeout   = 30 * time.Second
 	spriteHealthRetryWait  = 500 * time.Millisecond
