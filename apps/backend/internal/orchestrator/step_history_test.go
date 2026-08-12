@@ -142,8 +142,8 @@ func TestExecuteStepTransition_OnTurnStartDoesNotAttachSignal(t *testing.T) {
 		t.Fatalf("expected 1 recorded transition, got %d", len(calls))
 	}
 	got := calls[0]
-	if got.trigger != wfmodels.StepTransitionTriggerAutoComplete {
-		t.Errorf("trigger = %q, want auto_complete", got.trigger)
+	if got.trigger != wfmodels.StepTransitionTriggerTurnStart {
+		t.Errorf("trigger = %q, want on_turn_start", got.trigger)
 	}
 	if got.metadata != nil {
 		t.Errorf("metadata = %v, want nil (on_turn_start does not consume the signal)", got.metadata)
@@ -256,8 +256,8 @@ func TestApplyEngineTransition_OnTurnStartDoesNotAttachSignal(t *testing.T) {
 		t.Fatalf("expected 1 recorded transition, got %d", len(calls))
 	}
 	got := calls[0]
-	if got.trigger != wfmodels.StepTransitionTriggerAutoComplete {
-		t.Errorf("trigger = %q, want auto_complete", got.trigger)
+	if got.trigger != wfmodels.StepTransitionTriggerTurnStart {
+		t.Errorf("trigger = %q, want on_turn_start", got.trigger)
 	}
 	if got.metadata != nil {
 		t.Errorf("metadata = %v, want nil (on_turn_start does not consume the signal)", got.metadata)
@@ -296,8 +296,8 @@ func TestApplyEngineTransition_ChildrenCompletedRecordsNoSignalMetadata(t *testi
 	if len(calls) != 1 {
 		t.Fatalf("expected 1 recorded transition, got %d", len(calls))
 	}
-	if calls[0].trigger != wfmodels.StepTransitionTriggerAutoComplete {
-		t.Errorf("trigger = %q, want auto_complete", calls[0].trigger)
+	if calls[0].trigger != wfmodels.StepTransitionTriggerChildrenCompleted {
+		t.Errorf("trigger = %q, want on_children_completed", calls[0].trigger)
 	}
 	if calls[0].metadata != nil {
 		t.Errorf("metadata = %v, want nil (on_children_completed never consumes a signal)", calls[0].metadata)

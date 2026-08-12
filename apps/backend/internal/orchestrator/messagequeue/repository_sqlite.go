@@ -6,12 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/db"
 )
 
 // sqliteRepository persists queued messages and pending moves.
@@ -88,8 +88,10 @@ func (r *sqliteRepository) initSchema() error {
 	if err != nil {
 		return err
 	}
-	// Existing installations may have the pre-audit shape.
-	if _, alterErr := r.db.Exec(`ALTER TABLE pending_moves ADD COLUMN actor TEXT NOT NULL DEFAULT ''`); alterErr != nil && !strings.Contains(strings.ToLower(alterErr.Error()), "duplicate column") {
+	// Existing installations may have the pre-audit shape; fresh installs
+	// already get the column from CREATE TABLE above, so this replays as a
+	// duplicate-column error there.
+	if _, alterErr := r.db.Exec(`ALTER TABLE pending_moves ADD COLUMN actor TEXT NOT NULL DEFAULT ''`); alterErr != nil && !db.IsDuplicateColumnError(alterErr) {
 		return alterErr
 	}
 	return nil
