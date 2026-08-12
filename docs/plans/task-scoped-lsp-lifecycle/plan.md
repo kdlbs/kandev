@@ -378,8 +378,8 @@ Completed 2026-08-05.
   Kotlin generation or import. Seven focused frontend files passed 73 tests; web lint, typecheck,
   formatting, i18n, production build, backend user/backendapp tests, changed-file Go lint, and the
   58-test/41-page public-doc validators passed. The container command rebuilt successfully but this
-   host lacked a reachable Docker daemon, leaving two daemon-backed cases skipped and two
-   fixture-safe cases passed; Task 10 retains the prior 4/4 real-container evidence.
+  host lacked a reachable Docker daemon, leaving two daemon-backed cases skipped and two
+  fixture-safe cases passed; Task 10 retains the prior 4/4 real-container evidence.
 
 ---
 

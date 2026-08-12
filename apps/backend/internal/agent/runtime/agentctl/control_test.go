@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -462,16 +463,18 @@ func TestDeleteInstance_UsesDeleteVerbWithIDInPath(t *testing.T) {
 
 func TestDeleteInstance_FailureModes(t *testing.T) {
 	tests := []struct {
-		name    string
-		status  int
-		body    string
-		wantErr string
+		name         string
+		status       int
+		body         string
+		wantErr      string
+		wantNotFound bool
 	}{
 		{
-			name:    "structured error",
-			status:  http.StatusNotFound,
-			body:    `{"error":"no such instance"}`,
-			wantErr: "failed to delete instance: no such instance (status 404)",
+			name:         "structured error",
+			status:       http.StatusNotFound,
+			body:         `{"error":"no such instance"}`,
+			wantErr:      "failed to delete instance: no such instance (status 404)",
+			wantNotFound: true,
 		},
 		{
 			name:    "unparseable error body",
@@ -488,6 +491,9 @@ func TestDeleteInstance_FailureModes(t *testing.T) {
 			err := newTestControlClient(t, srv).DeleteInstance(context.Background(), "inst-9")
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("error = %v, want %q", err, tc.wantErr)
+			}
+			if got := errors.Is(err, ErrInstanceNotFound); got != tc.wantNotFound {
+				t.Fatalf("errors.Is(ErrInstanceNotFound) = %v, want %v", got, tc.wantNotFound)
 			}
 		})
 	}
@@ -526,14 +532,15 @@ func TestGetInstance_DecodesEveryField(t *testing.T) {
 
 func TestGetInstance_FailureModes(t *testing.T) {
 	tests := []struct {
-		name    string
-		status  int
-		body    string
-		wantErr string
+		name         string
+		status       int
+		body         string
+		wantErr      string
+		wantNotFound bool
 	}{
-		{"not found", http.StatusNotFound, `{}`, `instance "inst-3" not found`},
-		{"other status", http.StatusInternalServerError, `{}`, "failed to get instance: status 500"},
-		{"malformed body", http.StatusOK, `{"id":`, "failed to decode response"},
+		{"not found", http.StatusNotFound, `{}`, `instance "inst-3" not found`, true},
+		{"other status", http.StatusInternalServerError, `{}`, "failed to get instance: status 500", false},
+		{"malformed body", http.StatusOK, `{"id":`, "failed to decode response", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -543,6 +550,9 @@ func TestGetInstance_FailureModes(t *testing.T) {
 			info, err := newTestControlClient(t, srv).GetInstance(context.Background(), "inst-3")
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("error = %v, want %q", err, tc.wantErr)
+			}
+			if got := errors.Is(err, ErrInstanceNotFound); got != tc.wantNotFound {
+				t.Fatalf("errors.Is(ErrInstanceNotFound) = %v, want %v", got, tc.wantNotFound)
 			}
 			if info != nil {
 				t.Errorf("info = %+v, want nil on failure", info)

@@ -3,14 +3,13 @@
 import { useMemo } from "react";
 import { useAppStatusDrawer } from "@/components/app-status-bar/app-status-surface-provider";
 import { useAppStore } from "@/components/state-provider";
-import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useTaskLsp } from "@/hooks/domains/lsp/use-task-lsp";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { deriveTaskLspViewModel } from "@/lib/lsp/task-lsp-view-model";
 import { TaskLspControl } from "./task-lsp-control";
 
 export function TaskLspTopbarControl({ taskId }: { taskId: string | null }) {
-  const appStatusBarEnabled = useFeature("appStatusBar");
+  const appStatusBarEnabled = useAppStore((state) => state.userSettings.appStatusBarEnabled);
   const responsive = useResponsiveBreakpoint();
   const drawer = useAppStatusDrawer();
   const lsp = useTaskLsp(taskId);

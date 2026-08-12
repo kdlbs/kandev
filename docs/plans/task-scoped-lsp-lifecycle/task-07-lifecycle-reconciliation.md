@@ -153,3 +153,7 @@ reloads both the current row and task host after prior commands finish, and hold
 the full task-host cleanup backstop. Finalization releases and clears the exact current generation
 that teardown proved dead. The deterministic barrier regression failed before the fix, then passed
 20 repetitions under `-race` together with the cleanup failure/fallback cases.
+
+After merging `origin/main` at `9a4c65f75`, the combined `internal/lsp`, task-host LSP, and gateway
+WebSocket suites pass under `-race`, and changed-code backend lint reports zero issues. The broad
+unfiltered lint command now reports eight unrelated `goconst` findings from the merged mainline.

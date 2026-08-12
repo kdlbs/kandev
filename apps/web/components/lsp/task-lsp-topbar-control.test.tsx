@@ -7,17 +7,13 @@ const TEST_TIME = "2026-08-05T12:00:00Z";
 const CONTROL_TEST_ID = "mock-task-lsp-control";
 
 const state = vi.hoisted(() => ({
-  appStatusBar: true,
+  appStatusBarEnabled: true,
   finePointer: true,
   drawerEnabled: false,
   drawerOpen: false,
   languages: [] as TaskLspLanguageSnapshot[],
   hiddenLanguages: [] as string[],
   openLspStatusDrawer: vi.fn(),
-}));
-
-vi.mock("@/hooks/domains/features/use-feature", () => ({
-  useFeature: () => state.appStatusBar,
 }));
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
@@ -38,8 +34,16 @@ vi.mock("@/hooks/domains/lsp/use-task-lsp", () => ({
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (
-    selector: (value: { userSettings: { lspStatusHiddenLanguages: string[] } }) => unknown,
-  ) => selector({ userSettings: { lspStatusHiddenLanguages: state.hiddenLanguages } }),
+    selector: (value: {
+      userSettings: { appStatusBarEnabled: boolean; lspStatusHiddenLanguages: string[] };
+    }) => unknown,
+  ) =>
+    selector({
+      userSettings: {
+        appStatusBarEnabled: state.appStatusBarEnabled,
+        lspStatusHiddenLanguages: state.hiddenLanguages,
+      },
+    }),
 }));
 
 vi.mock("./task-lsp-control", () => ({
@@ -76,7 +80,7 @@ const kotlin: TaskLspLanguageSnapshot = {
 
 describe("TaskLspTopbarControl", () => {
   beforeEach(() => {
-    state.appStatusBar = true;
+    state.appStatusBarEnabled = true;
     state.finePointer = true;
     state.drawerEnabled = false;
     state.drawerOpen = false;
@@ -93,7 +97,7 @@ describe("TaskLspTopbarControl", () => {
   });
 
   it("is the always-discoverable desktop fallback when the status bar is disabled", () => {
-    state.appStatusBar = false;
+    state.appStatusBarEnabled = false;
     render(<TaskLspTopbarControl taskId="task-1" />);
 
     expect(screen.getByTestId(CONTROL_TEST_ID).getAttribute("data-task-id")).toBe("task-1");
