@@ -26,13 +26,7 @@ func newTestRouter(t *testing.T) (*gin.Engine, *testEnv) {
 // do issues a request and returns the recorder.
 func do(t *testing.T, router *gin.Engine, method, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	var reader *strings.Reader
-	if body == "" {
-		reader = strings.NewReader("")
-	} else {
-		reader = strings.NewReader(body)
-	}
-	req := httptest.NewRequest(method, path, reader)
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -229,11 +223,14 @@ func TestHandler_ApplyImport(t *testing.T) {
 func TestHandler_ApplyImport_MalformedBody(t *testing.T) {
 	router, env := newTestRouter(t)
 
-	rec := do(t, router, http.MethodPost, "/api/v1/workspaces/ws/config/import", "{not json")
+	rec := do(t, router, http.MethodPost,
+		"/api/v1/workspaces/"+testWorkspaceID+"/config/import", "{not json")
 	assertStatus(t, rec, http.StatusBadRequest)
 	assertErrorBody(t, rec)
 
-	agents, err := env.repo.ListAgentInstances(context.Background(), "")
+	// Scoped to the workspace the request actually targeted: listing a
+	// workspace nothing writes to would pass no matter what the handler did.
+	agents, err := env.repo.ListAgentInstances(context.Background(), testWorkspaceID)
 	if err != nil {
 		t.Fatalf("list agents: %v", err)
 	}

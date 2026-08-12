@@ -414,8 +414,9 @@ func projectByName(t *testing.T, e *testEnv, wsID, name string) *models.Project 
 	return nil
 }
 
-// assertStrings compares a []string against want, treating nil and empty as
-// distinct only when want is explicitly nil.
+// assertStrings compares a []string against want by length and elements. A nil
+// slice and an empty slice are equivalent here; pass want=nil to mean "no
+// entries" regardless of which the production code returns.
 func assertStrings(t *testing.T, label string, got, want []string) {
 	t.Helper()
 	if len(got) != len(want) {

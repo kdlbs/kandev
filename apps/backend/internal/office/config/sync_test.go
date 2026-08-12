@@ -117,9 +117,15 @@ func TestScanFilesystem_CarriesEveryFieldFromDisk(t *testing.T) {
 		`{"type":"local_docker"}`)
 }
 
-// TestScanFilesystem_DropsNameReferences pins the same deliberate gap the
-// importer has: the scan does not carry reports_to, assignee_name or
-// lead_agent_name off disk even though all three are present in the files.
+// TestScanFilesystem_DropsNameReferences records the same gap the importer
+// has: the scan does not carry reports_to, assignee_name or lead_agent_name
+// off disk even though all three are present in the fixture files. The result
+// is a lossy sync — applying a checked-in workspace config erases the org
+// chart, routine assignees and project leads rather than resolving the
+// portable names to IDs.
+//
+// Recorded rather than fixed (test-only change); carrying the names through
+// the scan and resolving them on import must update this test.
 func TestScanFilesystem_DropsNameReferences(t *testing.T) {
 	env := newTestEnv(t)
 	seedFullFSState(t, env)
@@ -473,9 +479,14 @@ func TestApplyOutgoing_WritesDatabaseStateToDisk(t *testing.T) {
 	assertEqual(t, "project budget", bundle.Projects[0].BudgetCents, 99000)
 }
 
-// TestApplyOutgoing_DoesNotDeleteStaleFiles documents the asymmetry with
-// ApplyIncoming: the outgoing apply only writes, so a file with no DB row
-// survives even though OutgoingDiff lists it as a deletion.
+// TestApplyOutgoing_DoesNotDeleteStaleFiles records the asymmetry with
+// ApplyIncoming: the incoming apply prunes DB rows missing from disk, but the
+// outgoing apply only writes, so a file with no DB row survives even though
+// OutgoingDiff just listed it as a deletion. A user who applies the outgoing
+// diff in the Sync UI can still commit or later re-import the stale file.
+//
+// Recorded rather than fixed: making export-fs prune is a production change,
+// and it must invert this test.
 func TestApplyOutgoing_DoesNotDeleteStaleFiles(t *testing.T) {
 	env := newTestEnv(t)
 	ctx := context.Background()

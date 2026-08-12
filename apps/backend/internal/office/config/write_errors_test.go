@@ -74,18 +74,48 @@ func TestApplyImport_PropagatesUpdateErrors(t *testing.T) {
 }
 
 // TestDeleteRowsMissingFromBundle_PropagatesDeleteErrors covers the prune
-// path's write failures, one entity at a time. Each subtest seeds only the
-// entity under test so the earlier stages have nothing to delete and the
-// error comes from the stage named by the subtest.
+// path's write failures, one entity at a time.
+//
+// deleteRowsMissingFromBundle returns repository errors unwrapped, so the
+// error text cannot say which stage failed. The stage is isolated by the
+// fixture instead: each subtest seeds only its own entity, so every earlier
+// stage finds nothing to delete and returns before attempting a write. The
+// surviving-row assertion then confirms the delete was both attempted and
+// refused, rather than skipped.
 func TestDeleteRowsMissingFromBundle_PropagatesDeleteErrors(t *testing.T) {
 	tests := []struct {
-		name string
-		seed func(t *testing.T, env *testEnv)
+		name    string
+		seed    func(t *testing.T, env *testEnv)
+		remains func(t *testing.T, env *testEnv)
 	}{
-		{"agents", func(t *testing.T, env *testEnv) { seedAgent(t, env, testWorkspaceID, "gone") }},
-		{"skills", func(t *testing.T, env *testEnv) { seedSkill(t, env, testWorkspaceID, "gone") }},
-		{"routines", func(t *testing.T, env *testEnv) { seedRoutine(t, env, testWorkspaceID, "gone") }},
-		{"projects", func(t *testing.T, env *testEnv) { seedProject(t, env, testWorkspaceID, "gone") }},
+		{
+			"agents",
+			func(t *testing.T, env *testEnv) { seedAgent(t, env, testWorkspaceID, "gone") },
+			func(t *testing.T, env *testEnv) {
+				assertRemainingNames(t, env, testWorkspaceID, []string{"gone"}, nil, nil, nil)
+			},
+		},
+		{
+			"skills",
+			func(t *testing.T, env *testEnv) { seedSkill(t, env, testWorkspaceID, "gone") },
+			func(t *testing.T, env *testEnv) {
+				assertRemainingNames(t, env, testWorkspaceID, nil, []string{"gone"}, nil, nil)
+			},
+		},
+		{
+			"routines",
+			func(t *testing.T, env *testEnv) { seedRoutine(t, env, testWorkspaceID, "gone") },
+			func(t *testing.T, env *testEnv) {
+				assertRemainingNames(t, env, testWorkspaceID, nil, nil, []string{"gone"}, nil)
+			},
+		},
+		{
+			"projects",
+			func(t *testing.T, env *testEnv) { seedProject(t, env, testWorkspaceID, "gone") },
+			func(t *testing.T, env *testEnv) {
+				assertRemainingNames(t, env, testWorkspaceID, nil, nil, nil, []string{"gone"})
+			},
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -98,6 +128,7 @@ func TestDeleteRowsMissingFromBundle_PropagatesDeleteErrors(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected a delete error, got nil")
 			}
+			tc.remains(t, env)
 		})
 	}
 }

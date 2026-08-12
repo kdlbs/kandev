@@ -212,15 +212,40 @@ func TestWriteBundleToFS_EmptyBundleWritesNothing(t *testing.T) {
 // validation reaching back through writeBundleEntities: a traversal name must
 // abort the write rather than escape the workspace directory.
 func TestWriteBundleToFS_RejectsUnsafeNames(t *testing.T) {
+	// escapedPath is where the write would land if the name were joined
+	// unchecked: "../escape" climbs out of the per-entity subdirectory into
+	// the workspace root. Asserting on that exact path matters — an
+	// arbitrary non-existent path would pass no matter what the writer did.
 	tests := []struct {
-		name   string
-		bundle *ConfigBundle
+		name        string
+		bundle      *ConfigBundle
+		escapedPath []string
 	}{
-		{"agent traversal", &ConfigBundle{Agents: []AgentConfig{{Name: "../escape"}}}},
-		{"skill traversal", &ConfigBundle{Skills: []SkillConfig{{Slug: "../escape"}}}},
-		{"routine traversal", &ConfigBundle{Routines: []RoutineConfig{{Name: "../escape"}}}},
-		{"project traversal", &ConfigBundle{Projects: []ProjectConfig{{Name: "../escape"}}}},
-		{"empty agent name", &ConfigBundle{Agents: []AgentConfig{{Name: ""}}}},
+		{
+			"agent traversal",
+			&ConfigBundle{Agents: []AgentConfig{{Name: "../escape"}}},
+			[]string{"escape.yml"},
+		},
+		{
+			"skill traversal",
+			&ConfigBundle{Skills: []SkillConfig{{Slug: "../escape"}}},
+			[]string{"escape", "SKILL.md"},
+		},
+		{
+			"routine traversal",
+			&ConfigBundle{Routines: []RoutineConfig{{Name: "../escape"}}},
+			[]string{"escape.yml"},
+		},
+		{
+			"project traversal",
+			&ConfigBundle{Projects: []ProjectConfig{{Name: "../escape"}}},
+			[]string{"escape.yml"},
+		},
+		{
+			"empty agent name",
+			&ConfigBundle{Agents: []AgentConfig{{Name: ""}}},
+			nil,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -229,9 +254,12 @@ func TestWriteBundleToFS_RejectsUnsafeNames(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected an error for an unsafe name, got nil")
 			}
-			escaped := filepath.Join(env.base, "workspaces", "escape.yml")
+			if tc.escapedPath == nil {
+				return
+			}
+			escaped := env.wsPath(tc.escapedPath...)
 			if _, statErr := os.Stat(escaped); !os.IsNotExist(statErr) {
-				t.Errorf("write escaped the workspace directory: %v", statErr)
+				t.Errorf("write escaped into %s: %v", escaped, statErr)
 			}
 		})
 	}
@@ -281,8 +309,8 @@ func TestWriteBundleToFS_UsesDefaultWorkspaceOnly(t *testing.T) {
 	}
 }
 
-// TestWriteBundleEntities_NilWriterPanicsNever guards the direct helper entry
-// point used by ApplyOutgoing after its nil check.
+// TestWriteBundleEntities_EmptyIsNoOp guards the direct helper entry point used
+// by ApplyOutgoing after its nil check: an empty bundle creates no directories.
 func TestWriteBundleEntities_EmptyIsNoOp(t *testing.T) {
 	base := t.TempDir()
 	loader := configloader.NewConfigLoader(base)

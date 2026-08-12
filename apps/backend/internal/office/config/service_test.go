@@ -197,11 +197,18 @@ func TestExportBundle_UnresolvableReferencesBecomeEmpty(t *testing.T) {
 	assertEqual(t, "project lead", bundle.Projects[0].LeadAgentName, "")
 }
 
-// TestExportBundle_IsNotWorkspaceScoped documents current behaviour: the
-// workspace ID argument only labels the settings block. Every export helper
-// lists across all workspaces, so rows from another workspace are included.
-// PreviewImport, by contrast, *is* scoped (see TestPreviewImport_ScopesToWorkspace).
-func TestExportBundle_IsNotWorkspaceScoped(t *testing.T) {
+// TestExportBundle_LeaksOtherWorkspaces_KnownDefect records a suspected bug,
+// not an endorsed contract. Every export helper calls ListX(ctx, "") and so
+// lists across all workspaces; the workspace ID argument only labels the
+// settings block. PreviewImport on the same service *is* scoped (see
+// TestPreviewImport_ScopesToWorkspace), so the two disagree, and under
+// enabled auth a config export or zip for one workspace can carry another
+// user's agents, routines, projects and skill content.
+//
+// This is reported separately rather than fixed here: this package's tests
+// were added under a test-only mandate. Scoping the export is the fix, and it
+// must delete or invert this test — that failure is the intended signal.
+func TestExportBundle_LeaksOtherWorkspaces_KnownDefect(t *testing.T) {
 	env := newTestEnv(t)
 	seedAgent(t, env, testWorkspaceID, "ada")
 	seedAgent(t, env, "ws-other", "grace")

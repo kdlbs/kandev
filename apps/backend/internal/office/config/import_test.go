@@ -323,16 +323,21 @@ func TestApplyImport_LogsActivityWithCounts(t *testing.T) {
 // TestApplyImport_WrapsRepositoryErrors breaks one entity's table at a time so
 // each apply stage fails on its own, and asserts the stage names itself in the
 // wrapped error rather than surfacing a bare SQL message.
+//
+// wantAgentSurvives records the other half of the contract: the import is not
+// wrapped in a transaction, so rows written by stages that ran before the
+// failure stay in the DB. Adding a transaction here should flip these.
 func TestApplyImport_WrapsRepositoryErrors(t *testing.T) {
 	tests := []struct {
-		name       string
-		dropTable  string
-		wantPrefix string
+		name              string
+		dropTable         string
+		wantPrefix        string
+		wantAgentSurvives bool
 	}{
-		{"agents", "agent_profiles", "apply agents:"},
-		{"skills", "office_skills", "apply skills:"},
-		{"routines", "office_routines", "apply routines:"},
-		{"projects", "office_projects", "apply projects:"},
+		{"agents", "agent_profiles", "apply agents:", false},
+		{"skills", "office_skills", "apply skills:", true},
+		{"routines", "office_routines", "apply routines:", true},
+		{"projects", "office_projects", "apply projects:", true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -353,6 +358,13 @@ func TestApplyImport_WrapsRepositoryErrors(t *testing.T) {
 				t.Errorf("failed import should not log activity, got %d entries",
 					len(env.activity.entries))
 			}
+			if !tc.wantAgentSurvives {
+				return
+			}
+			// The agent stage ran to completion before the failure. Its row
+			// is committed and is not rolled back.
+			agent := agentByName(t, env, testWorkspaceID, "ada")
+			assertEqual(t, "partially imported agent survives", agent.Name, "ada")
 		})
 	}
 }
