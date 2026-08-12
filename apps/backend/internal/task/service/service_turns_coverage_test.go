@@ -244,9 +244,11 @@ func TestGitSnapshotAndCommitReads(t *testing.T) {
 		t.Fatalf("cumulative diff = %+v, want nil for a fresh session", diff)
 	}
 
-	first := seedGitSnapshot(t, repo, "snap-1", "sess-msg", "base-sha", "head-1")
-	time.Sleep(2 * time.Millisecond)
-	latest := seedGitSnapshot(t, repo, "snap-2", "sess-msg", "base-sha-2", "head-2")
+	// Explicit created_at values pin first-vs-latest ordering without depending
+	// on wall-clock spacing between two inserts.
+	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	first := seedGitSnapshot(t, repo, "snap-1", "sess-msg", "base-sha", "head-1", base)
+	latest := seedGitSnapshot(t, repo, "snap-2", "sess-msg", "base-sha-2", "head-2", base.Add(time.Minute))
 
 	snapshots, err := svc.GetGitSnapshots(ctx, "sess-msg", 10)
 	if err != nil {
@@ -316,12 +318,13 @@ func TestGitSnapshotAndCommitReads(t *testing.T) {
 	}
 }
 
-func seedGitSnapshot(t *testing.T, repo *sqliterepo.Repository, id, sessionID, baseCommit, headCommit string) *models.GitSnapshot {
+func seedGitSnapshot(t *testing.T, repo *sqliterepo.Repository, id, sessionID, baseCommit, headCommit string, createdAt time.Time) *models.GitSnapshot {
 	t.Helper()
 	snapshot := &models.GitSnapshot{
 		ID: id, SessionID: sessionID, SnapshotType: models.SnapshotTypeStatusUpdate,
 		Branch: "main", HeadCommit: headCommit, BaseCommit: baseCommit,
-		Files: map[string]interface{}{"main.go": map[string]interface{}{"status": "modified"}},
+		Files:     map[string]interface{}{"main.go": map[string]interface{}{"status": "modified"}},
+		CreatedAt: createdAt,
 	}
 	if err := repo.CreateGitSnapshot(context.Background(), snapshot); err != nil {
 		t.Fatalf("CreateGitSnapshot %s: %v", id, err)
