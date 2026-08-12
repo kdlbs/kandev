@@ -9,9 +9,46 @@ export type RepositoryStatusSummary = {
   branch: string | null;
   ahead: number;
   behind: number;
+  remoteAhead: number;
+  remoteBehind: number;
+  pushAhead: number;
+  pullBehind: number;
+  hasUpstream: boolean;
   hasStaged: boolean;
   hasUnstaged: boolean;
 };
+
+function upstreamCounts(status: RepositoryStatus["status"], ahead: number) {
+  const hasUpstream = Boolean(status?.remote_branch);
+  const remoteAhead = status?.remote_ahead ?? 0;
+  const remoteBehind = status?.remote_behind ?? 0;
+  return {
+    hasUpstream,
+    remoteAhead,
+    remoteBehind,
+    pushAhead: hasUpstream ? remoteAhead : ahead,
+    pullBehind: hasUpstream ? remoteBehind : 0,
+  };
+}
+
+function summarizeRepositoryStatus(
+  { repository_name, status }: RepositoryStatus,
+  stagedByRepo: Map<string, boolean>,
+  unstagedByRepo: Map<string, boolean>,
+): RepositoryStatusSummary {
+  const ahead = status?.ahead ?? 0;
+  const behind = status?.behind ?? 0;
+  const remote = upstreamCounts(status, ahead);
+  return {
+    repository_name,
+    branch: status?.branch ?? null,
+    ahead,
+    behind,
+    ...remote,
+    hasStaged: stagedByRepo.get(repository_name) ?? false,
+    hasUnstaged: unstagedByRepo.get(repository_name) ?? false,
+  };
+}
 
 export function deriveMultiRepoSummary(
   statusByRepo: RepositoryStatus[],
@@ -42,14 +79,9 @@ export function deriveMultiRepoSummary(
     !hasRootStatus && hasNamed
       ? statusByRepo.filter((status) => status.repository_name !== "")
       : statusByRepo;
-  const perRepoStatus = filtered.map(({ repository_name, status }) => ({
-    repository_name,
-    branch: status?.branch ?? null,
-    ahead: status?.ahead ?? 0,
-    behind: status?.behind ?? 0,
-    hasStaged: stagedByRepo.get(repository_name) ?? false,
-    hasUnstaged: unstagedByRepo.get(repository_name) ?? false,
-  }));
+  const perRepoStatus = filtered.map((entry) =>
+    summarizeRepositoryStatus(entry, stagedByRepo, unstagedByRepo),
+  );
   return { repoNamesForControls, perRepoStatus };
 }
 

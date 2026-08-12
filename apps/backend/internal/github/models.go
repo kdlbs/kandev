@@ -501,6 +501,18 @@ type TaskCIOptionsResponse struct {
 	EffectiveClosedPrompt   string                     `json:"-"`
 	UpdatedAt               time.Time                  `json:"updated_at"`
 	PRStates                []*TaskCIPRAutomationState `json:"pr_states"`
+	// WorkspaceID is routing metadata for workspace-scoped WebSocket delivery.
+	// It stays JSON-visible because NATS-backed event buses round-trip payloads.
+	WorkspaceID string `json:"workspace_id,omitempty"`
+}
+
+// GetWorkspaceID lets the WebSocket broadcaster route CI-option updates to
+// the task's owning workspace when the in-memory event retains its typed shape.
+func (r *TaskCIOptionsResponse) GetWorkspaceID() string {
+	if r == nil {
+		return ""
+	}
+	return r.WorkspaceID
 }
 
 // TaskCIPRAutomationState stores per-PR dedupe and error state for CI automation.
@@ -828,6 +840,15 @@ type PRCommitInfo struct {
 	Deletions      int    `json:"deletions"`
 	FilesChanged   int    `json:"files_changed"`
 	StatsAvailable bool   `json:"stats_available"`
+}
+
+// PRCommitsResult contains the current provider head and the ancestry data
+// used to classify a contribution checkout. Complete is true only when the
+// provider client finished loading the full PR commit list.
+type PRCommitsResult struct {
+	Commits  []PRCommitInfo `json:"commits"`
+	HeadSHA  string         `json:"head_sha"`
+	Complete bool           `json:"complete"`
 }
 
 // PRCommitDetail represents the metadata and changed files for one GitHub

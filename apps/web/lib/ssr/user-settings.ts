@@ -25,6 +25,7 @@ export type UserSettingsData = Omit<Partial<UserSettings>, "workspace_id"> & {
 
 export function createDefaultUserSettings(): UserSettingsState {
   return {
+    revision: null,
     workspaceId: null,
     workflowId: null,
     kanbanViewMode: null,
@@ -48,6 +49,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     showScrollToStart: false,
     showTranscriptAutoScrollControl: false,
     showTodoListPanel: false,
+    showTodoListPanelOnlyWhenNotEmpty: false,
     showReleaseNotification: true,
     releaseNotesLastSeenVersion: null,
     lspAutoStartLanguages: [],
@@ -80,6 +82,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     terminalFontSize: null,
     changesPanelLayout: "tree",
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
+    appStatusBarEnabled: false,
     appStatusBarOrder: { leftItemIds: [], rightItemIds: [] },
     voiceMode: { ...DEFAULT_VOICE_MODE_STATE },
     hiddenWorkflowStepIds: {},
@@ -260,6 +263,8 @@ function buildBehaviorFields(s: UserSettingsData, current: UserSettingsState) {
     showTranscriptAutoScrollControl:
       s.show_transcript_auto_scroll_control ?? current.showTranscriptAutoScrollControl,
     showTodoListPanel: s.show_todo_list_panel ?? current.showTodoListPanel,
+    showTodoListPanelOnlyWhenNotEmpty:
+      s.show_todo_list_panel_only_when_not_empty ?? current.showTodoListPanelOnlyWhenNotEmpty,
     showReleaseNotification: s.show_release_notification ?? current.showReleaseNotification,
     releaseNotesLastSeenVersion: mapNullableString(
       s.release_notes_last_seen_version,
@@ -274,6 +279,7 @@ export function buildCoreFields(
   current: UserSettingsState = createDefaultUserSettings(),
 ) {
   return {
+    revision: s.revision ?? current.revision,
     ...buildIdentityFields(s, current),
     ...buildBehaviorFields(s, current),
     savedLayouts: s.saved_layouts ?? current.savedLayouts,
@@ -321,6 +327,7 @@ export function buildCoreFields(
       current.appStatusBarOrder,
       parseAppStatusBarOrder,
     ),
+    appStatusBarEnabled: s.app_status_bar_enabled ?? current.appStatusBarEnabled,
     hiddenWorkflowStepIds: s.kanban_hidden_step_ids ?? current.hiddenWorkflowStepIds,
     ...buildTerminalFields(s, current),
     ...buildSystemMetricsDisplayFields(s, current),
@@ -370,6 +377,7 @@ export function mapUserSettingsResponse(
   }
   return {
     ...mapUserSettingsData(s, current),
+    revision: s.revision ?? null,
     shellOptions,
   };
 }

@@ -7,13 +7,11 @@ import {
   IconGitCommit,
   IconGitPullRequest,
   IconCloudDownload,
-  IconCloudUpload,
   IconGitCherryPick,
   IconGitMerge,
   IconDots,
   IconCheck,
   IconLoader2,
-  IconAlertTriangle,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
@@ -30,9 +28,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubTrigger,
-  DropdownMenuSubContent,
 } from "@kandev/ui/dropdown-menu";
 import { Input } from "@kandev/ui/input";
 import { Textarea } from "@kandev/ui/textarea";
@@ -55,6 +50,7 @@ import {
   PRSubmitButton,
 } from "./session-mobile-top-bar-dialog-parts";
 import { useTranslation } from "react-i18next";
+import { PushSubmenu } from "./mobile-git-push-submenu";
 
 // A Git branch name, not copy: shown when the task has no recorded base branch.
 const DEFAULT_BASE_BRANCH = "main";
@@ -368,43 +364,9 @@ export type GitActionsDropdownProps = {
   onPush: (force?: boolean) => void;
   onRebase: () => void;
   onMerge: () => void;
+  pushDisabled?: boolean;
+  pullDisabled?: boolean;
 };
-
-function PushSubmenu({
-  disabled,
-  onPush,
-}: {
-  disabled: boolean;
-  onPush: (force: boolean) => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <DropdownMenuSub>
-      <DropdownMenuSubTrigger className="cursor-pointer gap-3" disabled={disabled}>
-        <IconCloudUpload className="h-4 w-4 text-green-500" />
-        <span className="flex-1">{t("task:push")}</span>
-      </DropdownMenuSubTrigger>
-      <DropdownMenuSubContent>
-        <DropdownMenuItem
-          className="cursor-pointer gap-3"
-          onClick={() => onPush(false)}
-          disabled={disabled}
-        >
-          <IconCloudUpload className="h-4 w-4 text-green-500" />
-          <span>{t("task:push")}</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          className="cursor-pointer gap-3"
-          onClick={() => onPush(true)}
-          disabled={disabled}
-        >
-          <IconAlertTriangle className="h-4 w-4 text-orange-500" />
-          <span>{t("task:forcePush")}</span>
-        </DropdownMenuItem>
-      </DropdownMenuSubContent>
-    </DropdownMenuSub>
-  );
-}
 
 function RebaseMergeItems({
   disabled,
@@ -448,6 +410,8 @@ export function GitActionsDropdown({
   onPush,
   onRebase,
   onMerge,
+  pushDisabled = false,
+  pullDisabled = false,
 }: GitActionsDropdownProps) {
   const { t } = useTranslation();
   const disabled = isGitLoading || !sessionId;
@@ -490,11 +454,20 @@ export function GitActionsDropdown({
           </span>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem className="cursor-pointer gap-3" onClick={onPull} disabled={disabled}>
+        <DropdownMenuItem
+          className="cursor-pointer gap-3"
+          onClick={onPull}
+          disabled={disabled || pullDisabled}
+          title={pullDisabled ? t("task:remoteActionsDisabledHistoryChanged") : undefined}
+        >
           <IconCloudDownload className="h-4 w-4 text-blue-500" />
           <span className="flex-1">{t("task:pull")}</span>
         </DropdownMenuItem>
-        <PushSubmenu disabled={disabled} onPush={onPush} />
+        <PushSubmenu
+          disabled={disabled || pushDisabled}
+          disabledReason={pushDisabled ? t("task:remoteActionsDisabledHistoryChanged") : undefined}
+          onPush={onPush}
+        />
         <DropdownMenuSeparator />
         <RebaseMergeItems
           disabled={disabled}

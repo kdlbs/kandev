@@ -55,7 +55,7 @@ import { MultiPRCIPopover } from "./multi-pr-ci-popover";
 const MERGED_PROMPT_LABEL = "PR merged";
 const CLOSED_PROMPT_LABEL = "PR closed without merging";
 const REVIEW_REQUEST_PROMPT_LABEL = "Your review is requested";
-const REVIEW_FOLLOW_UP_TRIGGER = "ci-review-follow-up-trigger";
+const PR_EVENTS_TRIGGER = "ci-pr-events-trigger";
 const REMOVE_FIRST_PR_LABEL = "Remove r #1 from task";
 const BACKEND_UNAVAILABLE = "backend unavailable";
 
@@ -143,7 +143,7 @@ describe("PRCIPopover automation toggles", () => {
     expect(screen.getByLabelText("Explain CI automation options")).not.toBeNull();
     fireEvent.click(screen.getByLabelText("Auto-fix CI and address comments"));
     fireEvent.click(screen.getByLabelText("Auto-merge when ready"));
-    fireEvent.click(screen.getByTestId(REVIEW_FOLLOW_UP_TRIGGER));
+    fireEvent.click(screen.getByTestId(PR_EVENTS_TRIGGER));
     fireEvent.click(screen.getByLabelText(REVIEW_REQUEST_PROMPT_LABEL));
     fireEvent.click(screen.getByLabelText(MERGED_PROMPT_LABEL));
     fireEvent.click(screen.getByLabelText(CLOSED_PROMPT_LABEL));
@@ -155,9 +155,9 @@ describe("PRCIPopover automation toggles", () => {
     expect(hookMocks.updateMock).toHaveBeenCalledWith({ prompt_on_closed: true });
   });
 
-  it("keeps review follow-up collapsed until opened while auto-fix and auto-merge stay primary", () => {
+  it("keeps PR events collapsed until opened while auto-fix and auto-merge stay primary", () => {
     renderPopover();
-    const trigger = screen.getByTestId(REVIEW_FOLLOW_UP_TRIGGER);
+    const trigger = screen.getByTestId(PR_EVENTS_TRIGGER);
 
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
     expect(screen.getByLabelText("Auto-fix CI and address comments")).not.toBeNull();
@@ -190,30 +190,30 @@ describe("PRCIPopover automation toggles", () => {
     expect(screen.getByTestId("ci-pr-terminal-help")).not.toBeNull();
   });
 
-  it("opens review follow-up when lifecycle automation is enabled", () => {
+  it("opens PR events when lifecycle automation is enabled", () => {
     hookMocks.options = makeOptions({ prompt_on_merged: true });
     renderPopover();
 
-    expect(screen.getByTestId(REVIEW_FOLLOW_UP_TRIGGER).getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByTestId(PR_EVENTS_TRIGGER).getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByLabelText(MERGED_PROMPT_LABEL)).not.toBeNull();
   });
 
-  it("keeps the review follow-up trigger compact for desktop and touch-sized otherwise", () => {
+  it("keeps the PR events trigger compact for desktop and touch-sized otherwise", () => {
     renderPopover();
-    const desktopTrigger = screen.getByTestId(REVIEW_FOLLOW_UP_TRIGGER);
+    const desktopTrigger = screen.getByTestId(PR_EVENTS_TRIGGER);
     expect(desktopTrigger.classList.contains("min-h-7")).toBe(true);
     expect(desktopTrigger.classList.contains("min-h-11")).toBe(false);
 
     cleanup();
     responsiveMock.isMobile = true;
     renderPopover();
-    expect(screen.getByTestId(REVIEW_FOLLOW_UP_TRIGGER).classList.contains("min-h-11")).toBe(true);
+    expect(screen.getByTestId(PR_EVENTS_TRIGGER).classList.contains("min-h-11")).toBe(true);
 
     cleanup();
     responsiveMock.isMobile = false;
     responsiveMock.isFinePointer = false;
     renderPopover();
-    expect(screen.getByTestId(REVIEW_FOLLOW_UP_TRIGGER).classList.contains("min-h-11")).toBe(true);
+    expect(screen.getByTestId(PR_EVENTS_TRIGGER).classList.contains("min-h-11")).toBe(true);
   });
 });
 
@@ -252,7 +252,7 @@ describe("PRCIPopover automation status", () => {
     expect(screen.getByRole("alert").textContent).toContain(
       "No promptable task session is available.",
     );
-    fireEvent.click(screen.getByTestId(REVIEW_FOLLOW_UP_TRIGGER));
+    fireEvent.click(screen.getByTestId(PR_EVENTS_TRIGGER));
     expect(screen.getByLabelText(REVIEW_REQUEST_PROMPT_LABEL)).not.toBeNull();
     expect(screen.queryByLabelText(/edit.*review/i)).toBeNull();
   });

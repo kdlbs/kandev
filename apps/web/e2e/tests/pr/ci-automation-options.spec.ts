@@ -8,7 +8,12 @@ const REPO = "demo";
 const PR_NUMBER = 144;
 const PR_URL = `https://github.com/${OWNER}/${REPO}/pull/${PR_NUMBER}`;
 
-async function seedTaskWithPR(apiClient: ApiClient, seedData: SeedData, title: string) {
+async function seedTaskWithPR(
+  apiClient: ApiClient,
+  seedData: SeedData,
+  title: string,
+  prOverrides: Partial<Parameters<ApiClient["mockGitHubAssociateTaskPR"]>[0]> = {},
+) {
   await apiClient.mockGitHubReset();
   await apiClient.mockGitHubSetUser("test-user");
   const task = await apiClient.createTaskWithAgent(
@@ -40,6 +45,7 @@ async function seedTaskWithPR(apiClient: ApiClient, seedData: SeedData, title: s
     checks_total: 3,
     checks_passing: 2,
     unresolved_review_threads: 1,
+    ...prOverrides,
   });
   return task.id;
 }
@@ -101,6 +107,74 @@ async function interceptLifecycleError(
 }
 
 test.describe("PR CI automation options", () => {
+  test("composer tray groups PR event automations in a narrow window", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    await testPage.setViewportSize({ width: 820, height: 800 });
+    const taskId = await seedTaskWithPR(apiClient, seedData, "CI automation composer tray", {
+      checks_state: "pending",
+      checks_passing: 0,
+      review_state: "pending",
+      review_count: 0,
+      pending_review_count: 1,
+      unresolved_review_threads: 0,
+    });
+    await apiClient.updateTaskCIAutomationOptions(taskId, {
+      auto_fix_enabled: true,
+      auto_merge_enabled: true,
+      prompt_on_review_requested: true,
+      prompt_on_merged: true,
+      prompt_on_closed: true,
+    });
+
+    await testPage.goto(`/t/${taskId}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    const chip = session.prStatusChip();
+    await expect(chip).toBeVisible({ timeout: 15_000 });
+    await expect(chip.getByTestId("pr-status-auto-fix-chip")).toContainText("Auto-fix 0/10");
+    await expect(chip.getByTestId("pr-status-auto-merge-chip")).toHaveText("Auto-merge");
+    const prEvents = chip.getByTestId("pr-status-pr-events-chip");
+    await expect(prEvents).toHaveText("PR events 3/3");
+    await expect(prEvents).toHaveAttribute("data-pr-events-count", "3");
+    await expect(chip).toHaveAttribute("aria-label", /Your review is requested/);
+    await expect(chip).toHaveAttribute("aria-label", /PR merged/);
+    await expect(chip).toHaveAttribute("aria-label", /PR closed without merging/);
+
+    const statusBar = session.activeChat().getByTestId("chat-status-bar");
+    await expect(statusBar).toHaveCSS("flex-wrap", "wrap");
+    expect(
+      await statusBar.evaluate((element) => {
+        const bar = element.getBoundingClientRect();
+        return Array.from(element.children).every((child) => {
+          const rect = child.getBoundingClientRect();
+          return rect.left >= bar.left - 1 && rect.right <= bar.right + 1;
+        });
+      }),
+    ).toBe(true);
+    expect(
+      await chip.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        const hit = document.elementFromPoint(
+          rect.left + rect.width / 2,
+          rect.top + rect.height / 2,
+        );
+        return hit === element || element.contains(hit);
+      }),
+    ).toBe(true);
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+
+    await session.hoverPRChip();
+    await expect(session.prChipPopover()).toBeVisible();
+  });
+
   test("desktop popover persists automation and lifecycle notification options", async ({
     testPage,
     apiClient,
@@ -116,10 +190,10 @@ test.describe("PR CI automation options", () => {
       popover.getByRole("switch", { name: "Auto-fix CI and address comments" }),
     ).toBeVisible();
     await expect(popover.getByRole("switch", { name: "Auto-merge when ready" })).toBeVisible();
-    const reviewFollowUp = popover.getByTestId("ci-review-follow-up-trigger");
-    await expect(reviewFollowUp).toHaveAttribute("aria-expanded", "false");
-    await reviewFollowUp.click();
-    await expect(reviewFollowUp).toHaveAttribute("aria-expanded", "true");
+    const prEvents = popover.getByTestId("ci-pr-events-trigger");
+    await expect(prEvents).toHaveAttribute("aria-expanded", "false");
+    await prEvents.click();
+    await expect(prEvents).toHaveAttribute("aria-expanded", "true");
     await expect(popover.getByRole("switch", { name: "Your review is requested" })).toBeVisible();
     await expect(popover.getByRole("switch", { name: "PR merged" })).toBeVisible();
     await expect(popover.getByRole("switch", { name: "PR closed without merging" })).toBeVisible();
@@ -205,7 +279,7 @@ test.describe("PR CI automation options", () => {
 
     const session = await openTask(testPage, taskId);
     const popover = session.prTopbarPopover();
-    await popover.getByTestId("ci-review-follow-up-trigger").click();
+    await popover.getByTestId("ci-pr-events-trigger").click();
     await expect(popover.getByRole("switch", { name: "Your review is requested" })).toBeVisible();
     await expect(popover.getByRole("alert")).toContainText(
       "Lifecycle prompt could not be delivered to a task session.",

@@ -72,6 +72,11 @@ export type GitStatusEntry = {
   renamed: string[];
   ahead: number;
   behind: number;
+  head_commit?: string;
+  base_commit?: string;
+  remote_ahead?: number;
+  remote_behind?: number;
+  remote_head_commit?: string;
   files: Record<string, FileInfo>;
   timestamp: string | null;
   branch_additions?: number;

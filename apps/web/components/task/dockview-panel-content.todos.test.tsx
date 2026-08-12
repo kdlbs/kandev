@@ -57,11 +57,15 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 import { renderPanel } from "./dockview-panel-content";
+import { TodosContent } from "./todos-panel-content";
 
 afterEach(cleanup);
 
 const WRITE_TESTS = "Write tests";
 const IMPLEMENT_FEATURE = "Implement feature";
+// The dockview panel id equals the root testid; sharing one constant keeps
+// the string under the lint duplicate-literal threshold.
+const TODOS_PANEL_ID = "todos-panel";
 
 describe("dockview-panel-content todos panel (desktop task workbench)", () => {
   it("renders the same checklist rows, order, and status semantics the todo indicator shows", () => {
@@ -73,7 +77,7 @@ describe("dockview-panel-content todos panel (desktop task workbench)", () => {
     };
     mockMessages.items = [];
 
-    render(<>{renderPanel("todos-panel", "todos", {})}</>);
+    render(<>{renderPanel(TODOS_PANEL_ID, "todos", {})}</>);
 
     const rows = screen.getAllByText(new RegExp(`${WRITE_TESTS}|${IMPLEMENT_FEATURE}`));
     expect(rows.map((row) => row.textContent)).toEqual([WRITE_TESTS, IMPLEMENT_FEATURE]);
@@ -86,9 +90,12 @@ describe("dockview-panel-content todos panel (desktop task workbench)", () => {
     mockAppState.sessionTodos.bySessionId = {};
     mockMessages.items = [];
 
-    render(<>{renderPanel("todos-panel", "todos", {})}</>);
+    render(<>{renderPanel(TODOS_PANEL_ID, "todos", {})}</>);
 
     expect(screen.getByTestId("todos-panel-empty-state").textContent).toBe("No todos yet.");
+    // The empty state must occupy the full hosting panel like the populated
+    // state (review finding, round 3), not collapse to its intrinsic height.
+    expect(screen.getByTestId("todos-panel-empty-state").classList.contains("h-full")).toBe(true);
   });
 
   it("falls back to the latest persisted todo message when the live store has no entry for the session (a completed/reopened session)", () => {
@@ -107,11 +114,33 @@ describe("dockview-panel-content todos panel (desktop task workbench)", () => {
       },
     ];
 
-    render(<>{renderPanel("todos-panel", "todos", {})}</>);
+    render(<>{renderPanel(TODOS_PANEL_ID, "todos", {})}</>);
 
     const rows = screen.getAllByText(new RegExp(`${WRITE_TESTS}|${IMPLEMENT_FEATURE}`));
     expect(rows.map((row) => row.textContent)).toEqual([WRITE_TESTS, IMPLEMENT_FEATURE]);
     expect(screen.getByText("1/2 completed")).toBeTruthy();
     expect(screen.queryByTestId("todos-panel-empty-state")).toBeNull();
+  });
+
+  it("fills the hosting panel height instead of capping the checklist at the popover height", () => {
+    mockAppState.sessionTodos.bySessionId = {
+      "session-1": [
+        { description: WRITE_TESTS, status: "completed" },
+        { description: IMPLEMENT_FEATURE, status: "in_progress" },
+      ],
+    };
+    mockMessages.items = [];
+
+    render(<TodosContent />);
+
+    // The pinned panel root must stretch to the portal slot's full height
+    // (`h-full`), and its scroll container must not carry the popover-only
+    // `max-h-48` cap — that cap is what left the lower part of the hosting
+    // panel empty (the reported bug).
+    const panel = screen.getByTestId(TODOS_PANEL_ID);
+    expect(panel.classList.contains("h-full")).toBe(true);
+    const list = panel.querySelector(".overflow-y-auto");
+    expect(list).not.toBeNull();
+    expect(list!.classList.contains("max-h-48")).toBe(false);
   });
 });

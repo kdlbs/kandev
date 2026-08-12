@@ -5,6 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"reflect"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -103,6 +109,247 @@ func (m *mockSessionReader) GetSessionBaseBranch(_ context.Context, sessionID st
 		return ""
 	}
 	return m.baseBranches[sessionID]
+}
+
+func TestGitMutationHandlersForwardRequestsAndReturnResults(t *testing.T) {
+	tests := []struct {
+		name       string
+		path       string
+		request    any
+		invoke     func(*GitHandlers, context.Context, *ws.Message) (*ws.Message, error)
+		assertBody func(*testing.T, map[string]any)
+	}{
+		{name: "pull", path: "/api/v1/git/pull", request: GitPullRequest{SessionID: "s", Rebase: true, Repo: "repo"}, invoke: (*GitHandlers).wsPull, assertBody: expectGitBody("rebase", true)},
+		{name: "push", path: "/api/v1/git/push", request: GitPushRequest{SessionID: "s", Force: true, SetUpstream: true, Repo: "repo"}, invoke: (*GitHandlers).wsPush, assertBody: expectGitBody("force", true)},
+		{name: "commit", path: "/api/v1/git/commit", request: GitCommitRequest{SessionID: "s", Message: "message", StageAll: true, Repo: "repo"}, invoke: (*GitHandlers).wsCommit, assertBody: expectGitBody("message", "message")},
+		{name: "rebase", path: "/api/v1/git/rebase", request: GitRebaseRequest{SessionID: "s", BaseBranch: "main", Repo: "repo"}, invoke: (*GitHandlers).wsRebase, assertBody: expectGitBody("base_branch", "main")},
+		{name: "merge", path: "/api/v1/git/merge", request: GitMergeRequest{SessionID: "s", BaseBranch: "main", Repo: "repo"}, invoke: (*GitHandlers).wsMerge, assertBody: expectGitBody("base_branch", "main")},
+		{name: "abort", path: "/api/v1/git/abort", request: GitAbortRequest{SessionID: "s", Operation: "rebase", Repo: "repo"}, invoke: (*GitHandlers).wsAbort, assertBody: expectGitBody("operation", "rebase")},
+		{name: "reset defaults mixed", path: "/api/v1/git/reset", request: GitResetRequest{SessionID: "s", CommitSHA: "abc", Repo: "repo"}, invoke: (*GitHandlers).wsReset, assertBody: expectGitBody("mode", "mixed")},
+		{name: "stage", path: "/api/v1/git/stage", request: GitStageRequest{SessionID: "s", Paths: []string{"a.go"}, Repo: "repo"}, invoke: (*GitHandlers).wsStage, assertBody: expectGitBody("repo", "repo")},
+		{name: "unstage", path: "/api/v1/git/unstage", request: GitUnstageRequest{SessionID: "s", Paths: []string{"a.go"}, Repo: "repo"}, invoke: (*GitHandlers).wsUnstage, assertBody: expectGitBody("repo", "repo")},
+		{name: "discard", path: "/api/v1/git/discard", request: GitDiscardRequest{SessionID: "s", Paths: []string{"a.go"}, Repo: "repo"}, invoke: (*GitHandlers).wsDiscard, assertBody: expectGitBody("repo", "repo")},
+		{name: "revert", path: "/api/v1/git/revert-commit", request: GitRevertCommitRequest{SessionID: "s", CommitSHA: "abc", Repo: "repo"}, invoke: (*GitHandlers).wsRevertCommit, assertBody: expectGitBody("commit_sha", "abc")},
+		{name: "commit diff", path: "/api/v1/git/commit/abc", request: GitShowCommitRequest{SessionID: "s", CommitSHA: "abc", Repo: "repo"}, invoke: (*GitHandlers).wsCommitDiff, assertBody: func(*testing.T, map[string]any) {}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var body map[string]any
+			h, server := gitHandlerServer(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != tt.path {
+					t.Errorf("path = %s, want %s", r.URL.Path, tt.path)
+				}
+				if tt.name != "commit diff" {
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Errorf("decode request: %v", err)
+					}
+				}
+				if tt.name == "commit diff" {
+					_, _ = w.Write([]byte(`{"success":true,"commit_sha":"abc","diff":"patch"}`))
+					return
+				}
+				_, _ = w.Write([]byte(`{"success":true,"operation":"ok","output":"done"}`))
+			})
+			defer server.Close()
+			msg, err := ws.NewRequest("id", "action", tt.request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response, err := tt.invoke(h, context.Background(), msg)
+			if err != nil {
+				t.Fatalf("handler: %v", err)
+			}
+			if response == nil || !strings.Contains(string(response.Payload), `"success":true`) {
+				t.Fatalf("response = %#v", response)
+			}
+			tt.assertBody(t, body)
+		})
+	}
+}
+
+func TestGitRenameBranchCallsCallbackOnlyOnSuccess(t *testing.T) {
+	for _, success := range []bool{false, true} {
+		t.Run(fmt.Sprintf("success_%t", success), func(t *testing.T) {
+			h, server := gitHandlerServer(t, func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = fmt.Fprintf(w, `{"success":%t}`, success)
+			})
+			defer server.Close()
+			var callback []string
+			h.SetOnBranchRenamed(func(_ context.Context, sessionID, newName, repo string) {
+				callback = []string{sessionID, newName, repo}
+			})
+			msg, _ := ws.NewRequest("id", "action", GitRenameBranchRequest{SessionID: "s", NewName: "feature", Repo: "repo"})
+			if _, err := h.wsRenameBranch(context.Background(), msg); err != nil {
+				t.Fatalf("wsRenameBranch: %v", err)
+			}
+			if success && !reflect.DeepEqual(callback, []string{"s", "feature", "repo"}) {
+				t.Fatalf("callback = %v", callback)
+			}
+			if !success && callback != nil {
+				t.Fatalf("callback unexpectedly called: %v", callback)
+			}
+		})
+	}
+}
+
+func TestGitCreatePRAssociatesSupportedChange(t *testing.T) {
+	h, server := gitHandlerServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/git/create-pr" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["title"] != "Title" || body["repo"] != "repo" || body["draft"] != true {
+			t.Errorf("body = %#v", body)
+		}
+		_, _ = w.Write([]byte(`{"success":true,"pr_url":"https://github.com/acme/repo/pull/1","provider":"github"}`))
+	})
+	defer server.Close()
+	callback := make(chan []string, 1)
+	h.SetOnPRCreated(func(_ context.Context, sessionID, taskID, provider, prURL, branch, repo string) {
+		callback <- []string{sessionID, taskID, provider, prURL, branch, repo}
+	})
+	msg, _ := ws.NewRequest("id", "action", GitCreatePRRequest{SessionID: "s", Title: "Title", Draft: true, Repo: "repo"})
+	response, err := h.wsCreatePR(context.Background(), msg)
+	if err != nil || !strings.Contains(string(response.Payload), `"success":true`) {
+		t.Fatalf("wsCreatePR = (%#v, %v)", response, err)
+	}
+	select {
+	case got := <-callback:
+		want := []string{"s", "task", "github", "https://github.com/acme/repo/pull/1", "", "repo"}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("callback = %v, want %v", got, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for PR callback")
+	}
+}
+
+func TestGitCreatePRValidationAndDependencyFailure(t *testing.T) {
+	h := NewGitHandlers(nil, nil, newTestLogger())
+	for _, request := range []GitCreatePRRequest{{}, {SessionID: "s"}} {
+		msg, _ := ws.NewRequest("id", "action", request)
+		if _, err := h.wsCreatePR(context.Background(), msg); err == nil {
+			t.Fatalf("expected validation error for %#v", request)
+		}
+	}
+	h, server := gitHandlerServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "failure", http.StatusBadGateway)
+	})
+	defer server.Close()
+	msg, _ := ws.NewRequest("id", "action", GitCreatePRRequest{SessionID: "s", Title: "Title"})
+	if _, err := h.wsCreatePR(context.Background(), msg); err == nil || !strings.Contains(err.Error(), "create PR failed") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestGitMutationHandlersMapHTTPFailures(t *testing.T) {
+	tests := []struct {
+		name    string
+		request any
+		invoke  func(*GitHandlers, context.Context, *ws.Message) (*ws.Message, error)
+		want    string
+	}{
+		{name: "rebase", request: GitRebaseRequest{SessionID: "s", BaseBranch: "main"}, invoke: (*GitHandlers).wsRebase, want: "rebase failed"},
+		{name: "pull", request: GitPullRequest{SessionID: "s"}, invoke: (*GitHandlers).wsPull, want: "pull failed"},
+		{name: "push", request: GitPushRequest{SessionID: "s"}, invoke: (*GitHandlers).wsPush, want: "push failed"},
+		{name: "commit", request: GitCommitRequest{SessionID: "s", Message: "message"}, invoke: (*GitHandlers).wsCommit, want: "commit failed"},
+		{name: "merge", request: GitMergeRequest{SessionID: "s", BaseBranch: "main"}, invoke: (*GitHandlers).wsMerge, want: "merge failed"},
+		{name: "abort", request: GitAbortRequest{SessionID: "s", Operation: "merge"}, invoke: (*GitHandlers).wsAbort, want: "abort failed"},
+		{name: "rename", request: GitRenameBranchRequest{SessionID: "s", NewName: "new"}, invoke: (*GitHandlers).wsRenameBranch, want: "rename branch failed"},
+		{name: "reset", request: GitResetRequest{SessionID: "s", CommitSHA: "abc"}, invoke: (*GitHandlers).wsReset, want: "reset failed"},
+		{name: "stage", request: GitStageRequest{SessionID: "s"}, invoke: (*GitHandlers).wsStage, want: "stage failed"},
+		{name: "unstage", request: GitUnstageRequest{SessionID: "s"}, invoke: (*GitHandlers).wsUnstage, want: "unstage failed"},
+		{name: "discard", request: GitDiscardRequest{SessionID: "s", Paths: []string{"a"}}, invoke: (*GitHandlers).wsDiscard, want: "discard failed"},
+		{name: "revert", request: GitRevertCommitRequest{SessionID: "s", CommitSHA: "abc"}, invoke: (*GitHandlers).wsRevertCommit, want: "revert commit failed"},
+		{name: "commit diff", request: GitShowCommitRequest{SessionID: "s", CommitSHA: "abc"}, invoke: (*GitHandlers).wsCommitDiff, want: "show commit failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, server := gitHandlerServer(t, func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "failure", http.StatusBadGateway) })
+			defer server.Close()
+			msg, _ := ws.NewRequest("id", "action", tt.request)
+			_, err := tt.invoke(h, context.Background(), msg)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestGitMutationHandlersRejectInvalidRequestsBeforeLookup(t *testing.T) {
+	h := NewGitHandlers(nil, nil, newTestLogger())
+	tests := []struct {
+		name   string
+		action string
+		body   any
+		invoke func(*GitHandlers, context.Context, *ws.Message) (*ws.Message, error)
+		want   string
+	}{
+		{name: "pull malformed", action: ws.ActionWorktreePull, body: json.RawMessage(`{invalid`), invoke: (*GitHandlers).wsPull, want: "invalid payload"},
+		{name: "rebase malformed", action: ws.ActionWorktreeRebase, body: json.RawMessage(`{invalid`), invoke: (*GitHandlers).wsRebase, want: "invalid payload"},
+		{name: "merge malformed", action: ws.ActionWorktreeMerge, body: json.RawMessage(`{invalid`), invoke: (*GitHandlers).wsMerge, want: "invalid payload"},
+		{name: "abort malformed", action: ws.ActionWorktreeAbort, body: json.RawMessage(`{invalid`), invoke: (*GitHandlers).wsAbort, want: "invalid payload"},
+		{name: "reset malformed", action: ws.ActionWorktreeReset, body: json.RawMessage(`{invalid`), invoke: (*GitHandlers).wsReset, want: "invalid payload"},
+		{name: "stage malformed", action: ws.ActionWorktreeStage, body: json.RawMessage(`{invalid`), invoke: (*GitHandlers).wsStage, want: "invalid payload"},
+		{name: "discard malformed", action: ws.ActionWorktreeDiscard, body: json.RawMessage(`{invalid`), invoke: (*GitHandlers).wsDiscard, want: "invalid payload"},
+		{name: "diff malformed", action: ws.ActionSessionCommitDiff, body: json.RawMessage(`{invalid`), invoke: (*GitHandlers).wsCommitDiff, want: "invalid payload"},
+		{name: "push session", action: ws.ActionWorktreePush, body: GitPushRequest{}, invoke: (*GitHandlers).wsPush, want: "session_id is required"},
+		{name: "rebase base", action: ws.ActionWorktreeRebase, body: GitRebaseRequest{SessionID: "s"}, invoke: (*GitHandlers).wsRebase, want: "base_branch is required"},
+		{name: "merge base", action: ws.ActionWorktreeMerge, body: GitMergeRequest{SessionID: "s"}, invoke: (*GitHandlers).wsMerge, want: "base_branch is required"},
+		{name: "abort operation", action: ws.ActionWorktreeAbort, body: GitAbortRequest{SessionID: "s", Operation: "cherry-pick"}, invoke: (*GitHandlers).wsAbort, want: "operation must be"},
+		{name: "commit session", action: ws.ActionWorktreeCommit, body: GitCommitRequest{Message: "message"}, invoke: (*GitHandlers).wsCommit, want: "session_id is required"},
+		{name: "rename name", action: ws.ActionWorktreeRenameBranch, body: GitRenameBranchRequest{SessionID: "s"}, invoke: (*GitHandlers).wsRenameBranch, want: "new_name is required"},
+		{name: "reset sha", action: ws.ActionWorktreeReset, body: GitResetRequest{SessionID: "s"}, invoke: (*GitHandlers).wsReset, want: "commit_sha is required"},
+		{name: "reset mode", action: ws.ActionWorktreeReset, body: GitResetRequest{SessionID: "s", CommitSHA: "abc", Mode: "invalid"}, invoke: (*GitHandlers).wsReset, want: "invalid reset mode"},
+		{name: "stage session", action: ws.ActionWorktreeStage, body: GitStageRequest{}, invoke: (*GitHandlers).wsStage, want: "session_id is required"},
+		{name: "unstage session", action: ws.ActionWorktreeUnstage, body: GitUnstageRequest{}, invoke: (*GitHandlers).wsUnstage, want: "session_id is required"},
+		{name: "discard paths", action: ws.ActionWorktreeDiscard, body: GitDiscardRequest{SessionID: "s"}, invoke: (*GitHandlers).wsDiscard, want: "paths are required"},
+		{name: "revert sha", action: ws.ActionWorktreeRevertCommit, body: GitRevertCommitRequest{SessionID: "s"}, invoke: (*GitHandlers).wsRevertCommit, want: "commit_sha is required"},
+		{name: "diff sha", action: ws.ActionSessionCommitDiff, body: GitShowCommitRequest{SessionID: "s"}, invoke: (*GitHandlers).wsCommitDiff, want: "commit_sha is required"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var message *ws.Message
+			if raw, ok := tt.body.(json.RawMessage); ok {
+				message = &ws.Message{ID: "id", Action: tt.action, Payload: raw}
+			} else {
+				message, _ = ws.NewRequest("id", tt.action, tt.body)
+			}
+			_, err := tt.invoke(h, context.Background(), message)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func expectGitBody(key string, want any) func(*testing.T, map[string]any) {
+	return func(t *testing.T, body map[string]any) {
+		t.Helper()
+		if body[key] != want {
+			t.Fatalf("body[%s] = %#v, want %#v", key, body[key], want)
+		}
+	}
+}
+
+func gitHandlerServer(t *testing.T, handler http.HandlerFunc) (*GitHandlers, *httptest.Server) {
+	t.Helper()
+	server := httptest.NewServer(handler)
+	u, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(u.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution := &lifecycle.AgentExecution{SessionID: "s", TaskID: "task"}
+	execution.SetAgentCtlClientForTesting(client.NewClient(u.Hostname(), port, newTestLogger()))
+	lookup := &mockExecutionLookup{executions: map[string]*lifecycle.AgentExecution{"s": execution}}
+	return NewGitHandlers(lookup, nil, newTestLogger()), server
 }
 
 func TestNewGitHandlers(t *testing.T) {
