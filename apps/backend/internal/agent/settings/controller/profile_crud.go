@@ -783,6 +783,7 @@ func toAgentDTO(agent *models.Agent, profiles []*models.AgentProfile) dto.AgentD
 			Description:     agent.TUIConfig.Description,
 			CommandArgs:     agent.TUIConfig.CommandArgs,
 			WaitForTerminal: agent.TUIConfig.WaitForTerminal,
+			MCPStrategy:     agent.TUIConfig.MCPStrategy,
 		}
 	}
 	return result

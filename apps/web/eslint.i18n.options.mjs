@@ -537,6 +537,7 @@ export const i18nGuardFiles = [
   "components/settings/command-prefix-field.tsx",
   "components/settings/install-agent-card.tsx",
   "components/settings/installed-agent-card.tsx",
+  "components/settings/mcp-strategy-select.tsx",
   "components/settings/mode-combobox.tsx",
   "components/settings/profile-capability-helpers.tsx",
   "components/settings/profile-form-fields.tsx",

@@ -296,6 +296,7 @@ function useAgentPageState() {
     display_name: string;
     model?: string;
     command: string;
+    mcp_strategy?: string;
   }) => {
     await createCustomTUIAgent(data);
     const [discoveryResp, agentsResp, availableResp] = await Promise.all([

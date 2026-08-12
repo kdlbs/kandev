@@ -117,10 +117,33 @@ type LoginAgent interface {
 }
 
 // IsPassthroughOnly returns true if the agent only supports passthrough mode
-// and should not have interactive MCP tools (e.g. ask_user_question) registered.
+// (a raw CLI under a PTY, no ACP protocol mode). It governs execution mode —
+// notably seeding the agent's default profile as CLI passthrough — and is true
+// for every TUI agent regardless of MCP configuration.
+//
+// For "should interactive MCP tools be registered?", use
+// SupportsInteractiveMCPTools instead. The two questions used to share this one
+// predicate, which is why a custom TUI agent could never get ask_user_question.
 func IsPassthroughOnly(a Agent) bool {
 	_, ok := a.(*TUIAgent)
 	return ok
+}
+
+// SupportsInteractiveMCPTools reports whether interactive MCP tools (notably
+// ask_user_question) should be registered for the agent's session.
+//
+// A TUI agent with no MCP injection strategy is a plain terminal tool that
+// never speaks MCP: registering a tool it cannot call just means a question
+// that hangs forever. A TUI agent *with* a strategy wraps a real MCP-capable
+// CLI that kandev points at the per-session server, so it should get the same
+// tools as the built-in claude-acp agent running in passthrough mode. Every
+// non-TUI agent supports them.
+func SupportsInteractiveMCPTools(a Agent) bool {
+	tui, ok := a.(*TUIAgent)
+	if !ok {
+		return true
+	}
+	return tui.MCPStrategy() != nil
 }
 
 // LogoVariant selects light or dark logo.

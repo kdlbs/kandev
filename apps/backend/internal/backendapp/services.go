@@ -392,9 +392,15 @@ func loadCustomTUIAgents(ctx context.Context, repos *Repositories, agentRegistry
 			continue
 		}
 		cfg := agent.TUIConfig
-		if regErr := agentRegistry.RegisterCustomTUIAgent(
-			agent.Name, cfg.DisplayName, cfg.Command, cfg.Description, cfg.Model, cfg.CommandArgs,
-		); regErr != nil {
+		if regErr := agentRegistry.RegisterCustomTUIAgent(registry.CustomTUIAgentSpec{
+			Slug:           agent.Name,
+			DisplayName:    cfg.DisplayName,
+			Command:        cfg.Command,
+			Description:    cfg.Description,
+			Model:          cfg.Model,
+			CommandArgs:    cfg.CommandArgs,
+			MCPStrategyKey: cfg.MCPStrategy,
+		}); regErr != nil {
 			log.Warn("failed to register custom TUI agent",
 				zap.String("name", agent.Name), zap.Error(regErr))
 		}

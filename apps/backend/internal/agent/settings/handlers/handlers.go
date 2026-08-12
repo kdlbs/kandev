@@ -58,6 +58,8 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.GET("/agents", h.httpListAgents)
 	api.POST("/agents", h.interlock, h.httpCreateAgent)
 	api.POST("/agents/tui", h.interlock, h.httpCreateCustomTUIAgent)
+	api.GET("/agents/tui/mcp-strategies", h.httpListMCPStrategies)
+	api.PATCH("/agents/tui/:id/mcp", h.interlock, h.httpUpdateCustomTUIAgentMCP)
 	api.GET("/agents/:id", h.httpGetAgent)
 	api.PATCH("/agents/:id", h.interlock, h.httpUpdateAgent)
 	api.DELETE("/agents/:id", h.interlock, h.httpDeleteAgent)
