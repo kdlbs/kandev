@@ -529,7 +529,6 @@
   "thisWorkspaceUsesOneCredentialFor": "此工作区使用一个凭据执行仓库同步、监控、后台任务和托管代理的 GitHub 访问。执行器配置凭据仍可优先使用。",
   "titleIssues": "议题",
   "titlePullRequests": "拉取请求",
-  "togglePrEventPromptAutomation": "切换 PR 事件提示自动化",
   "typeACustomQueryFirst": "请先输入自定义查询",
   "typeOwnerRepoToSearch": "输入 {{format}} 进行搜索",
   "unableToLoadTheCurrentTask": "无法加载当前任务访问设置。",

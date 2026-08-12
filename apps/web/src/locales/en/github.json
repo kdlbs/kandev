@@ -531,7 +531,6 @@
   "thisWorkspaceUsesOneCredentialFor": "This workspace uses one credential for repository sync, watches, background jobs, and managed agent GitHub access. Executor profile credentials can still take precedence.",
   "titleIssues": "Issues",
   "titlePullRequests": "Pull requests",
-  "togglePrEventPromptAutomation": "Toggle PR event prompt automation",
   "toggleReviewFollowUpAutomation": "Toggle review follow-up automation",
   "typeACustomQueryFirst": "Type a custom query first",
   "typeOwnerRepoToSearch": "Type {{format}} to search",

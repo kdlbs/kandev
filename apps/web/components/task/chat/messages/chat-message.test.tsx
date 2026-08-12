@@ -5,6 +5,7 @@ import { StateProvider } from "@/components/state-provider";
 import { ChatMessage } from "./chat-message";
 import { entityReferenceMarkdown } from "@/lib/entity-references/message-references";
 import type { EntityReference } from "@/lib/types/entity-reference";
+import { activateLocale } from "@/lib/i18n";
 import {
   sessionId as toSessionId,
   taskId as toTaskId,
@@ -368,6 +369,18 @@ describe("ChatMessage sender badge", () => {
     expect(container.querySelector("a[href='/t/task-deleted']")).toBeNull();
     // Falls back to the snapshotted title rather than blanking the badge.
     expect(badge?.textContent).toContain("Old title");
+  });
+
+  it("localizes the fallback when no sender task title is available", async () => {
+    await activateLocale("pseudo");
+    const { container } = renderWithSender([], {
+      sender_task_id: "task-deleted",
+      sender_task_title: "",
+    });
+
+    const badge = container.querySelector(SENDER_BADGE_SELECTOR);
+    expect(badge?.textContent).not.toContain("(unknown task)");
+    await activateLocale("en");
   });
 
   it("uses the live title when it differs from the snapshot", () => {

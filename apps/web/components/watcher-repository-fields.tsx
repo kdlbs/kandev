@@ -7,9 +7,7 @@ import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useBranches } from "@/hooks/domains/workspace/use-repository-branches";
 import {
   NO_REPOSITORY,
-  NO_REPOSITORY_LABEL,
   DEFAULT_BRANCH,
-  DEFAULT_BRANCH_LABEL,
   branchPlaceholder,
   resolveBaseBranch,
   resolveRepositoryId,
@@ -83,6 +81,15 @@ export function WatcherRepositoryFields({
   const { repositories } = useRepositories(workspaceId, !!workspaceId, true);
   const branchSource = repositoryId ? ({ kind: "id", workspaceId, repositoryId } as const) : null;
   const { branches, isLoading: branchesLoading } = useBranches(branchSource, !!repositoryId);
+  const noRepositoryLabel = t("common:noRepositoryOption");
+  const defaultBranchLabel = t("common:repositoryDefaultBranchOption");
+  const branchPlaceholderLabels = {
+    defaultBranch: t("common:watcherDefaultBranchPlaceholder"),
+    loading: t("common:watcherLoadingBranchesPlaceholder"),
+    pickRepository: t("common:watcherPickRepositoryPlaceholder"),
+  };
+  const branchPlaceholderLabel =
+    branchPlaceholderLabels[branchPlaceholder(repositoryId, branchesLoading)];
   // A branch name can appear twice (local + remote tracking, e.g. "main" and
   // origin/"main"), which would emit two <SelectItem value="main"> — Radix then
   // renders every matching item's text in the trigger ("mainmain") and React
@@ -95,9 +102,9 @@ export function WatcherRepositoryFields({
         description={t("common:optionalTheRepositoryTheAgentWorks")}
         value={repositoryId || NO_REPOSITORY}
         onChange={(v) => onRepositoryChange(resolveRepositoryId(v))}
-        placeholder={NO_REPOSITORY_LABEL}
+        placeholder={noRepositoryLabel}
         items={[
-          { id: NO_REPOSITORY, label: NO_REPOSITORY_LABEL },
+          { id: NO_REPOSITORY, label: noRepositoryLabel },
           ...repositories.map((r) => ({ id: r.id, label: r.name })),
         ]}
       />
@@ -106,9 +113,9 @@ export function WatcherRepositoryFields({
         description={t("common:theBaseBranchTheAgentStarts")}
         value={baseBranch || DEFAULT_BRANCH}
         onChange={(v) => onBaseBranchChange(resolveBaseBranch(v))}
-        placeholder={branchPlaceholder(repositoryId, branchesLoading)}
+        placeholder={branchPlaceholderLabel}
         items={[
-          { id: DEFAULT_BRANCH, label: DEFAULT_BRANCH_LABEL },
+          { id: DEFAULT_BRANCH, label: defaultBranchLabel },
           ...uniqueBranchNames.map((name) => ({ id: name, label: name })),
         ]}
         disabled={!repositoryId || branchesLoading}
