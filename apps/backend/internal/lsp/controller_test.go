@@ -4,13 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net/http"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -515,66 +513,6 @@ func languageFromSnapshot(t *testing.T, snapshot *TaskSnapshot, language string)
 	return LanguageSnapshot{}
 }
 
-type fakeControllerTasks struct {
-	mu             sync.Mutex
-	authErr        error
-	environmentErr error
-	admissionErr   error
-	calls          []string
-	environments   map[string]*models.TaskEnvironment
-	task           *models.Task
-}
-
-func (f *fakeControllerTasks) AuthorizeTaskAccess(_ context.Context, taskID string) error {
-	f.record("authorize:" + taskID)
-	return f.authErr
-}
-
-func (f *fakeControllerTasks) AcquireTaskLSPAdmission(_ context.Context, taskID string) (func(), error) {
-	f.record("admission:" + taskID)
-	if f.admissionErr != nil {
-		return nil, f.admissionErr
-	}
-	return func() {}, nil
-}
-
-func (f *fakeControllerTasks) GetTask(_ context.Context, taskID string) (*models.Task, error) {
-	f.record("task:" + taskID)
-	if f.task != nil {
-		return f.task, nil
-	}
-	return &models.Task{ID: taskID}, nil
-}
-
-func (f *fakeControllerTasks) GetTaskEnvironmentForTaskLSP(_ context.Context, taskID string) (*models.TaskEnvironment, error) {
-	f.record("environment:" + taskID)
-	if f.environmentErr != nil {
-		return nil, f.environmentErr
-	}
-	if f.environments != nil {
-		return f.environments[taskID], nil
-	}
-	return readyEnvironment(taskID, executorTypeLocalPC), nil
-}
-
-func (f *fakeControllerTasks) record(call string) {
-	f.mu.Lock()
-	f.calls = append(f.calls, call)
-	f.mu.Unlock()
-}
-
-func (f *fakeControllerTasks) callsSnapshot() []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]string(nil), f.calls...)
-}
-
-func (f *fakeControllerTasks) resetCalls() {
-	f.mu.Lock()
-	f.calls = nil
-	f.mu.Unlock()
-}
-
 type fakeLSPSettings struct {
 	settings TaskSettings
 }
@@ -667,39 +605,54 @@ func (f *fakeLSPRuntimes) DiscoverTaskLanguages(context.Context, string, string)
 }
 
 type fakeLSPHost struct {
-	mu                  sync.Mutex
-	startCalls          int
-	restartCalls        int
-	stopCalls           int
-	configurationCalls  int
-	lastStart           TaskHostStartRequest
-	lastStop            TaskHostStopRequest
-	lastConfiguration   TaskHostConfigurationRequest
-	snapshots           map[string]RuntimeSnapshot
-	startEntered        chan struct{}
-	startRelease        chan struct{}
-	startErr            error
-	startErrorSnapshot  *RuntimeSnapshot
-	restartBeforeReturn func(TaskHostStartRequest)
-	restartResponse     *RuntimeSnapshot
-	restartErr          error
-	stopErr             error
-	purgeCalls          int
-	purgeErr            error
-	discovery           *DiscoveryResult
-	discoveryErr        error
-	discoveries         int
-	workspaceResult     *WorkspaceUpdateResult
-	workspaceErr        error
-	workspaceRefreshes  int
-	snapshotErr         error
-	watchErr            error
+	mu                      sync.Mutex
+	startCalls              int
+	restartCalls            int
+	stopCalls               int
+	configurationCalls      int
+	lastStart               TaskHostStartRequest
+	lastStop                TaskHostStopRequest
+	lastConfiguration       TaskHostConfigurationRequest
+	snapshots               map[string]RuntimeSnapshot
+	startEntered            chan struct{}
+	startRelease            chan struct{}
+	startErr                error
+	startErrorSnapshot      *RuntimeSnapshot
+	restartBeforeReturn     func(TaskHostStartRequest)
+	restartResponse         *RuntimeSnapshot
+	restartErr              error
+	stopErr                 error
+	purgeCalls              int
+	purgeErr                error
+	discovery               *DiscoveryResult
+	discoveryErr            error
+	discoveries             int
+	workspaceResult         *WorkspaceUpdateResult
+	workspaceErr            error
+	workspaceRefreshes      int
+	workspaceRefreshEntered chan struct{}
+	workspaceRefreshRelease chan struct{}
+	snapshotErr             error
+	watchErr                error
+	watchSnapshotEntered    chan struct{}
+	watchSnapshotRelease    chan struct{}
+	watchSnapshotDone       chan struct{}
 }
 
 func (f *fakeLSPHost) RefreshTaskLSPWorkspace(context.Context) (*WorkspaceUpdateResult, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.workspaceRefreshes++
+	entered := f.workspaceRefreshEntered
+	release := f.workspaceRefreshRelease
+	f.mu.Unlock()
+	if entered != nil {
+		close(entered)
+	}
+	if release != nil {
+		<-release
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.workspaceResult == nil {
 		return &WorkspaceUpdateResult{}, f.workspaceErr
 	}
@@ -830,6 +783,9 @@ func (f *fakeLSPHost) TaskLSPSnapshot(_ context.Context, language string) (*Runt
 func (f *fakeLSPHost) WatchTaskLSP(ctx context.Context, language string, onSnapshot func(RuntimeSnapshot) error) error {
 	f.mu.Lock()
 	watchErr := f.watchErr
+	entered := f.watchSnapshotEntered
+	release := f.watchSnapshotRelease
+	done := f.watchSnapshotDone
 	f.mu.Unlock()
 	if watchErr != nil {
 		return watchErr
@@ -838,15 +794,30 @@ func (f *fakeLSPHost) WatchTaskLSP(ctx context.Context, language string, onSnaps
 	if err != nil {
 		return err
 	}
+	if entered != nil {
+		select {
+		case <-entered:
+		default:
+			close(entered)
+		}
+	}
+	if release != nil {
+		<-release
+	}
+	if done != nil {
+		defer func() {
+			select {
+			case <-done:
+			default:
+				close(done)
+			}
+		}()
+	}
 	if err := onSnapshot(*snapshot); err != nil {
 		return err
 	}
 	<-ctx.Done()
 	return context.Cause(ctx)
-}
-
-func (f *fakeLSPHost) DialTaskLSPAttach(context.Context, string, uint64) (*websocket.Conn, *http.Response, error) {
-	return nil, nil, errors.New("not dialed by controller tests")
 }
 
 func (f *fakeLSPHost) setReady(language string, generation uint64) *RuntimeSnapshot {

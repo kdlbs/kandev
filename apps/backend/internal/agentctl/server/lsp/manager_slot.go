@@ -16,6 +16,11 @@ type languageSlot struct {
 	startMu        sync.Mutex
 	runtime        *runtime
 	lastGeneration uint64
+	retired        bool
+
+	// beforeStartRegistration is a test-only scheduling hook. Production
+	// managers leave it nil.
+	beforeStartRegistration func()
 
 	nextStartToken uint64
 	pendingStarts  map[uint64]*pendingStartOperation
@@ -30,6 +35,9 @@ func (s *languageSlot) lockStartOperation(
 	parent context.Context,
 	generation uint64,
 ) (context.Context, func()) {
+	if s.beforeStartRegistration != nil {
+		s.beforeStartRegistration()
+	}
 	operationCtx, cancel := context.WithCancel(parent)
 	s.startMu.Lock()
 	s.nextStartToken++

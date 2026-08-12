@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -153,6 +154,90 @@ func TestCapacityPromotionSchedulesRecoveryWhenWaitingStatePersistenceFails(t *t
 	}
 	if controller.capacity.Active() != 0 {
 		t.Fatalf("active capacity after blocked promotion = %d, want 0", controller.capacity.Active())
+	}
+}
+
+func TestExplicitStartResetsExhaustedRecoveryBeforeFailedPromotion(t *testing.T) {
+	tasks := &fakeControllerTasks{environments: map[string]*models.TaskEnvironment{
+		"first":  readyEnvironment("first", "local_docker"),
+		"queued": readyEnvironment("queued", "local_docker"),
+	}}
+	store := newMemoryLSPStore()
+	host := newFakeLSPHost()
+	scheduler := newFakeScheduler()
+	controller := newTestController(tasks, store, &fakeLSPSettings{}, &fakeLSPRuntimes{host: host})
+	controller.capacity = NewCapacity(1)
+	controller.scheduler = scheduler
+	lifecycleCtx, cancel := context.WithCancel(context.Background())
+	controller.lifecycleCtx = lifecycleCtx
+	controller.lifecycleCancel = cancel
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+	origin := Origin{Initiator: InitiatorUser, Reason: "user_control"}
+
+	if _, err := controller.Start(context.Background(), "first", "go", origin); err != nil {
+		t.Fatal(err)
+	}
+	initialReady := scheduler.next(t)
+	if initialReady.delay != readyRecoveryReset {
+		t.Fatalf("initial ready-reset delay = %s, want %s", initialReady.delay, readyRecoveryReset)
+	}
+	queuedKey := TaskLanguageKey{TaskID: "queued", Language: "kotlin"}
+	controller.lifecycleMu.Lock()
+	controller.recoveries[queuedKey] = &recoveryState{attempts: len(recoveryBackoffs)}
+	controller.lifecycleMu.Unlock()
+	queued, err := controller.Start(context.Background(), "queued", "kotlin", origin)
+	if err != nil || queued.Phase != PhaseQueued {
+		t.Fatalf("queued=%#v error=%v", queued, err)
+	}
+	store.mu.Lock()
+	store.compareErrPhase = PhaseWaitingForTask
+	store.compareErr = errors.New("persistence unavailable")
+	store.mu.Unlock()
+	tasks.admissionErr = errors.New("task environment teardown in progress")
+
+	if _, err := controller.Stop(context.Background(), "first", "go", origin); err != nil {
+		t.Fatal(err)
+	}
+	if timer := scheduler.next(t); timer.delay != time.Second {
+		t.Fatalf("recovery delay after new explicit start = %s, want 1s", timer.delay)
+	}
+}
+
+func TestStopIgnoresSnapshotAlreadyReadByCancelledWatch(t *testing.T) {
+	store := newMemoryLSPStore()
+	host := newFakeLSPHost()
+	host.watchSnapshotEntered = make(chan struct{})
+	host.watchSnapshotRelease = make(chan struct{})
+	host.watchSnapshotDone = make(chan struct{})
+	controller := newTestController(
+		&fakeControllerTasks{}, store, &fakeLSPSettings{}, &fakeLSPRuntimes{host: host},
+	)
+	controller.capacity = NewCapacity(1)
+	lifecycleCtx, cancel := context.WithCancel(context.Background())
+	controller.lifecycleCtx = lifecycleCtx
+	controller.lifecycleCancel = cancel
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+	origin := Origin{Initiator: InitiatorUser, Reason: "user_control"}
+
+	if _, err := controller.Start(context.Background(), "task-1", "go", origin); err != nil {
+		t.Fatal(err)
+	}
+	<-host.watchSnapshotEntered
+	if _, err := controller.Stop(context.Background(), "task-1", "go", origin); err != nil {
+		t.Fatal(err)
+	}
+	close(host.watchSnapshotRelease)
+	<-host.watchSnapshotDone
+
+	state, _, err := store.GetTaskLSPLanguage(context.Background(), "task-1", "go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Phase != PhaseOff {
+		t.Fatalf("phase after cancelled watch delivered stale snapshot = %q, want %q", state.Phase, PhaseOff)
+	}
+	if active := controller.capacity.Active(); active != 0 {
+		t.Fatalf("capacity after cancelled watch delivered stale snapshot = %d, want 0", active)
 	}
 }
 

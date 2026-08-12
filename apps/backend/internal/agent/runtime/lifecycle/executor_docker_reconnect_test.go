@@ -62,6 +62,43 @@ func TestDockerContainerAuthRecoverySerializesOneShotHandshake(t *testing.T) {
 	}
 }
 
+func TestDockerContainerAuthEvictionWaitsForInFlightRecovery(t *testing.T) {
+	executor := &DockerExecutor{}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	connectDone := make(chan error, 1)
+	go func() {
+		_, err := executor.withContainerAuth("container-1", "stale-token", func(string) (reconnectAgentctlConn, error) {
+			close(entered)
+			<-release
+			return reconnectAgentctlConn{authToken: "rotated-token"}, nil
+		})
+		connectDone <- err
+	}()
+	<-entered
+	forgetDone := make(chan struct{})
+	go func() {
+		executor.forgetContainerAuth("container-1")
+		close(forgetDone)
+	}()
+	select {
+	case <-forgetDone:
+		t.Fatal("auth state was evicted while credential recovery still owned it")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	if err := <-connectDone; err != nil {
+		t.Fatal(err)
+	}
+	<-forgetDone
+	executor.containerAuthMu.Lock()
+	_, exists := executor.containerAuthStates["container-1"]
+	executor.containerAuthMu.Unlock()
+	if exists {
+		t.Fatal("removed container retained auth state after in-flight recovery drained")
+	}
+}
+
 // stubHostPortLookup satisfies hostPortLookup for resolveDockerEndpoint
 // tests without needing a real docker daemon.
 type stubHostPortLookup struct {

@@ -3,6 +3,7 @@ package lsp
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agentctl/server/process"
@@ -194,4 +195,40 @@ func TestManagerPurgeTaskRejectsLiveRuntimeOwnership(t *testing.T) {
 	}
 	// Avoid leaving a synthetic live runtime for any later cleanup.
 	slot.runtime = nil
+}
+
+func TestManagerPurgeTaskPreventsStartUsingSlotAcquiredBeforePurge(t *testing.T) {
+	manager, processes := newManagerForTest(t, func(int) *fakeLSPServer {
+		return newFakeLSPServer()
+	})
+	key := taskLanguageRuntimeKey("task-1", "kotlin")
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var enteredOnce sync.Once
+	manager.mu.Lock()
+	manager.slots[key] = &languageSlot{beforeStartRegistration: func() {
+		enteredOnce.Do(func() { close(entered) })
+		<-release
+	}}
+	manager.mu.Unlock()
+
+	startDone := make(chan error, 1)
+	go func() {
+		_, err := manager.Start(context.Background(), StartRequest{
+			TaskID: "task-1", Language: "kotlin", Generation: 1,
+		})
+		startDone <- err
+	}()
+	<-entered
+	if err := manager.PurgeTask("task-1"); err != nil {
+		t.Fatalf("purge task: %v", err)
+	}
+	close(release)
+	if err := <-startDone; !errors.Is(err, ErrTaskStatePurging) {
+		t.Fatalf("start after purge error = %v, want %v", err, ErrTaskStatePurging)
+	}
+	started, _, _ := processes.counts()
+	if started != 0 {
+		t.Fatalf("language-server processes started after purge = %d, want 0", started)
+	}
 }

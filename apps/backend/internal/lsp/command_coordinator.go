@@ -13,6 +13,7 @@ type commandResult struct {
 type commandBatch struct {
 	action      Action
 	coalesceKey string
+	coalescible bool
 	ctx         context.Context
 	run         func(context.Context) (*LanguageSnapshot, error)
 	done        chan struct{}
@@ -72,7 +73,8 @@ func (c *commandCoordinator) submitCommand(
 	if batch == nil {
 		batch = &commandBatch{
 			action: action, coalesceKey: coalesceKey,
-			ctx: context.WithoutCancel(ctx), run: run, done: make(chan struct{}),
+			coalescible: allowCoalesce,
+			ctx:         context.WithoutCancel(ctx), run: run, done: make(chan struct{}),
 		}
 		if lane.running == nil {
 			lane.running = batch
@@ -94,12 +96,13 @@ func (c *commandCoordinator) submitCommand(
 func coalescibleBatch(lane *commandLane, action Action, coalesceKey string) *commandBatch {
 	if len(lane.queued) > 0 {
 		last := lane.queued[len(lane.queued)-1]
-		if last.action == action && last.coalesceKey == coalesceKey {
+		if last.coalescible && last.action == action && last.coalesceKey == coalesceKey {
 			return last
 		}
 		return nil
 	}
-	if lane.running != nil && lane.running.action == action && lane.running.coalesceKey == coalesceKey {
+	if lane.running != nil && lane.running.coalescible &&
+		lane.running.action == action && lane.running.coalesceKey == coalesceKey {
 		return lane.running
 	}
 	return nil

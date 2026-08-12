@@ -140,7 +140,18 @@ func (c *Controller) watchTaskLanguage(
 	host, err := c.resolveExistingHost(ctx, key.TaskID)
 	if err == nil && host != nil {
 		err = host.WatchTaskLSP(ctx, key.Language, func(snapshot RuntimeSnapshot) error {
-			return c.observeRuntimeSnapshot(ctx, key, snapshot)
+			_, observeErr := c.commands.submitExclusive(
+				ctx,
+				key,
+				ActionReconcile,
+				func(workCtx context.Context) (*LanguageSnapshot, error) {
+					if !c.watchIsCurrent(key, watch) {
+						return nil, nil
+					}
+					return nil, c.observeRuntimeSnapshot(workCtx, key, snapshot)
+				},
+			)
+			return observeErr
 		})
 		if err == nil {
 			err = errors.New("task host watch ended unexpectedly")
@@ -157,6 +168,12 @@ func (c *Controller) watchTaskLanguage(
 			c.scheduleDesiredRecovery(key, snapshot)
 		}
 	}
+}
+
+func (c *Controller) watchIsCurrent(key TaskLanguageKey, watch *taskLanguageWatch) bool {
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	return c.lifecycleCtx != nil && c.lifecycleCtx.Err() == nil && c.watches[key] == watch
 }
 
 func (c *Controller) resolveExistingHost(ctx context.Context, taskID string) (TaskHost, error) {

@@ -46,6 +46,16 @@ spec: "../../specs/lsp-file-intelligence/spec.md"
   previously unseen capacity epoch cannot replace a newer response.
 - Public docs, the feature spec, and the ADR define shared-owner transfer consistently: a live
   borrower preserves the physical host while the departing task's independent slots stop.
+- Direct Archive/Delete and cascades reserve durable cleanup admission before any fallible inventory
+  read; failed preparation cancels promptly, and old prepared rows recover even when marker writes
+  or cancellation exceeded the immediate retry window.
+- Task-host purge retires an acquired slot before map removal, and delayed watch evidence cannot
+  resurrect stopped state or capacity. Explicit Start/Restart resets an exhausted recovery epoch.
+- Workspace-source refresh holds task/environment admission through runtime mutation. Task hosts
+  stay private until readiness plus credential persistence commit, and incomplete hosts are reaped
+  before replacement.
+- Docker container-auth tokens and serialization state survive warm stop and uncertain cleanup but
+  are evicted after confirmed physical removal and executor shutdown.
 
 ## Verification
 

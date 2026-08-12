@@ -25,6 +25,11 @@ import (
 // have a resolved workspace path (typically while worktree preparation is in progress).
 var ErrSessionWorkspaceNotReady = errors.New("session workspace not ready")
 
+// ErrTaskHostNotReady indicates that a task-host runtime is still starting or
+// remains tracked after an uncertain rollback. It must not be exposed to LSP
+// callers until agentctl readiness and credential persistence both commit.
+var ErrTaskHostNotReady = errors.New("task host not ready")
+
 const taskHostRecoveryProbeTimeout = 3 * time.Second
 
 // ErrSessionTerminal indicates the task session has reached a terminal state
@@ -204,22 +209,21 @@ func (m *Manager) GetOrEnsureTaskHostForEnvironment(
 	ctx context.Context,
 	taskEnvironmentID string,
 ) (*AgentExecution, error) {
-	if taskEnvironmentID == "" {
-		return nil, fmt.Errorf("task_environment_id is required")
+	if err := m.authorizeTaskHostEnvironment(ctx, taskEnvironmentID); err != nil {
+		return nil, err
 	}
-	if check := m.environmentAccessCheck; check != nil {
-		if err := check(ctx, taskEnvironmentID); err != nil {
-			return nil, err
-		}
-	}
-	if execution, exists := m.executionStore.GetTaskHostByEnvironmentID(taskEnvironmentID); exists {
+	if execution, exists := m.executionStore.GetTaskHostByEnvironmentID(taskEnvironmentID); exists &&
+		execution.IsAgentctlReady() {
 		return execution, nil
 	}
 
 	value, err := m.doCoalescedExecution(ctx, taskHostRuntimeSessionPrefix+taskEnvironmentID,
 		func(sharedCtx context.Context) (interface{}, error) {
 			if execution, exists := m.executionStore.GetTaskHostByEnvironmentID(taskEnvironmentID); exists {
-				return execution, nil
+				if execution.IsAgentctlReady() {
+					return execution, nil
+				}
+				return nil, fmt.Errorf("%w for environment %s", ErrTaskHostNotReady, taskEnvironmentID)
 			}
 			if m.workspaceInfoProvider == nil {
 				return nil, fmt.Errorf("workspace info provider not configured")
@@ -251,21 +255,19 @@ func (m *Manager) GetOrEnsureTaskHostForEnvironment(
 	return value.(*AgentExecution), nil
 }
 
-// GetTaskHostForEnvironment returns only the dedicated task-host execution.
-// Authorization runs before the cache lookup.
+// GetTaskHostForEnvironment returns only a fully committed dedicated task-host
+// execution. Authorization runs before the cache lookup.
 func (m *Manager) GetTaskHostForEnvironment(
 	ctx context.Context,
 	taskEnvironmentID string,
 ) (*AgentExecution, bool, error) {
-	if taskEnvironmentID == "" {
-		return nil, false, fmt.Errorf("task_environment_id is required")
-	}
-	if check := m.environmentAccessCheck; check != nil {
-		if err := check(ctx, taskEnvironmentID); err != nil {
-			return nil, false, err
-		}
+	if err := m.authorizeTaskHostEnvironment(ctx, taskEnvironmentID); err != nil {
+		return nil, false, err
 	}
 	execution, exists := m.executionStore.GetTaskHostByEnvironmentID(taskEnvironmentID)
+	if exists && !execution.IsAgentctlReady() {
+		return nil, false, nil
+	}
 	return execution, exists, nil
 }
 
@@ -275,9 +277,12 @@ func (m *Manager) StopTaskHostForEnvironment(
 	ctx context.Context,
 	taskEnvironmentID, reason string,
 ) (bool, error) {
-	execution, exists, err := m.GetTaskHostForEnvironment(ctx, taskEnvironmentID)
-	if err != nil || !exists {
+	if err := m.authorizeTaskHostEnvironment(ctx, taskEnvironmentID); err != nil {
 		return false, err
+	}
+	execution, exists := m.executionStore.GetTaskHostByEnvironmentID(taskEnvironmentID)
+	if !exists {
+		return false, nil
 	}
 	if err := m.StopAgentWithReason(ctx, execution.ID, reason, false); err != nil {
 		return false, err
@@ -291,9 +296,22 @@ func (m *Manager) RecoverTaskHostForEnvironment(
 	ctx context.Context,
 	taskEnvironmentID string,
 ) (bool, error) {
-	execution, exists, err := m.GetTaskHostForEnvironment(ctx, taskEnvironmentID)
-	if err != nil || !exists || execution == nil {
+	if err := m.authorizeTaskHostEnvironment(ctx, taskEnvironmentID); err != nil {
 		return false, err
+	}
+	execution, exists := m.executionStore.GetTaskHostByEnvironmentID(taskEnvironmentID)
+	if !exists || execution == nil {
+		return false, nil
+	}
+	if !execution.IsAgentctlReady() {
+		// Creation registered this handle before readiness so rollback could
+		// retain ownership on an uncertain stop. A later recovery must retry
+		// that physical stop rather than expose the incomplete host or launch a
+		// duplicate beside it.
+		if err := m.StopAgentWithReason(ctx, execution.ID, "incomplete_task_host_recovery", false); err != nil {
+			return false, err
+		}
+		return true, nil
 	}
 	client := execution.GetAgentCtlClient()
 	probeCtx, cancel := context.WithTimeout(ctx, taskHostRecoveryProbeTimeout)
@@ -316,6 +334,16 @@ func (m *Manager) RecoverTaskHostForEnvironment(
 		zap.String("execution_id", execution.ID),
 		zap.String("task_environment_id", taskEnvironmentID))
 	return true, nil
+}
+
+func (m *Manager) authorizeTaskHostEnvironment(ctx context.Context, taskEnvironmentID string) error {
+	if taskEnvironmentID == "" {
+		return fmt.Errorf("task_environment_id is required")
+	}
+	if check := m.environmentAccessCheck; check != nil {
+		return check(ctx, taskEnvironmentID)
+	}
+	return nil
 }
 
 func (m *Manager) ensureTaskHostTaskActive(ctx context.Context, taskID string) error {

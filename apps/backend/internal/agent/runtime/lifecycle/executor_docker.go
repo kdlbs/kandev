@@ -101,8 +101,17 @@ type DockerExecutor struct {
 	activity     *activity.Coordinator
 
 	containerAuthMu     sync.Mutex
-	containerAuthLocks  map[string]*sync.Mutex
-	containerAuthTokens map[string]string
+	containerAuthStates map[string]*containerAuthState
+}
+
+// containerAuthState serializes the one-shot credential handshake for one
+// physical container. refs is guarded by DockerExecutor.containerAuthMu; the
+// remaining fields are guarded by mu.
+type containerAuthState struct {
+	mu        sync.Mutex
+	refs      int
+	authToken string
+	retired   bool
 }
 
 // NewDockerExecutor creates a new Docker runtime.
@@ -487,47 +496,95 @@ func (r *DockerExecutor) withContainerAuth(
 	containerID, fallbackToken string,
 	connect func(authToken string) (reconnectAgentctlConn, error),
 ) (reconnectAgentctlConn, error) {
-	lock := r.containerAuthLock(containerID)
-	lock.Lock()
-	defer lock.Unlock()
-
-	r.containerAuthMu.Lock()
-	authToken := r.containerAuthTokens[containerID]
-	r.containerAuthMu.Unlock()
+	state := r.acquireContainerAuthState(containerID)
+	state.mu.Lock()
+	defer func() {
+		state.mu.Unlock()
+		r.releaseContainerAuthState(containerID, state)
+	}()
+	if state.retired {
+		return reconnectAgentctlConn{}, fmt.Errorf("container %s auth state was retired after removal", containerID)
+	}
+	authToken := state.authToken
 	if authToken == "" {
 		authToken = fallbackToken
 	}
 	result, err := connect(authToken)
-	if err == nil {
-		r.rememberContainerAuth(containerID, result.authToken)
+	if err == nil && result.authToken != "" {
+		state.authToken = result.authToken
 	}
 	return result, err
 }
 
-func (r *DockerExecutor) containerAuthLock(containerID string) *sync.Mutex {
+func (r *DockerExecutor) acquireContainerAuthState(containerID string) *containerAuthState {
 	r.containerAuthMu.Lock()
 	defer r.containerAuthMu.Unlock()
-	if r.containerAuthLocks == nil {
-		r.containerAuthLocks = make(map[string]*sync.Mutex)
+	if r.containerAuthStates == nil {
+		r.containerAuthStates = make(map[string]*containerAuthState)
 	}
-	lock := r.containerAuthLocks[containerID]
-	if lock == nil {
-		lock = &sync.Mutex{}
-		r.containerAuthLocks[containerID] = lock
+	state := r.containerAuthStates[containerID]
+	if state == nil {
+		state = &containerAuthState{}
+		r.containerAuthStates[containerID] = state
 	}
-	return lock
+	state.refs++
+	return state
+}
+
+func (r *DockerExecutor) releaseContainerAuthState(containerID string, state *containerAuthState) {
+	r.containerAuthMu.Lock()
+	defer r.containerAuthMu.Unlock()
+	state.refs--
+	if state.refs == 0 && state.retired && r.containerAuthStates[containerID] == state {
+		delete(r.containerAuthStates, containerID)
+	}
 }
 
 func (r *DockerExecutor) rememberContainerAuth(containerID, authToken string) {
 	if containerID == "" || authToken == "" {
 		return
 	}
-	r.containerAuthMu.Lock()
-	defer r.containerAuthMu.Unlock()
-	if r.containerAuthTokens == nil {
-		r.containerAuthTokens = make(map[string]string)
+	state := r.acquireContainerAuthState(containerID)
+	state.mu.Lock()
+	if !state.retired {
+		state.authToken = authToken
 	}
-	r.containerAuthTokens[containerID] = authToken
+	state.mu.Unlock()
+	r.releaseContainerAuthState(containerID, state)
+}
+
+func (r *DockerExecutor) forgetContainerAuth(containerID string) {
+	if containerID == "" {
+		return
+	}
+	r.containerAuthMu.Lock()
+	state := r.containerAuthStates[containerID]
+	if state == nil {
+		r.containerAuthMu.Unlock()
+		return
+	}
+	state.mu.Lock()
+	state.authToken = ""
+	state.retired = true
+	state.mu.Unlock()
+	if state.refs == 0 {
+		delete(r.containerAuthStates, containerID)
+	}
+	r.containerAuthMu.Unlock()
+}
+
+func (r *DockerExecutor) clearContainerAuth() {
+	r.containerAuthMu.Lock()
+	for containerID, state := range r.containerAuthStates {
+		state.mu.Lock()
+		state.authToken = ""
+		state.retired = true
+		state.mu.Unlock()
+		if state.refs == 0 {
+			delete(r.containerAuthStates, containerID)
+		}
+	}
+	r.containerAuthMu.Unlock()
 }
 
 func reconnectInstanceID(req *ExecutorCreateRequest, previousExecutionID string) string {
@@ -807,6 +864,7 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 		if removeErr := dockerClient.RemoveContainer(cleanupCtx, instance.ContainerID, true); removeErr != nil {
 			return fmt.Errorf("failed to remove container after kill: %w", removeErr)
 		}
+		r.forgetContainerAuth(instance.ContainerID)
 		return nil
 	}
 
@@ -814,6 +872,7 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 		if err := containerMgr.StopContainer(cleanupCtx, instance.ContainerID, dockerStopContainerTimeout); err != nil {
 			return fmt.Errorf("failed to stop and remove container: %w", err)
 		}
+		r.forgetContainerAuth(instance.ContainerID)
 		return nil
 	}
 
@@ -873,6 +932,7 @@ func (r *DockerExecutor) RecoverInstances(_ context.Context) ([]*ExecutorInstanc
 func (r *DockerExecutor) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.clearContainerAuth()
 
 	if r.docker != nil {
 		err := r.docker.Close()

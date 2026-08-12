@@ -95,6 +95,20 @@ the rows. Backend shutdown drops watches without making a browser or watch strea
 If the task host does not survive, recovery launches at most one new generation after the old
 runtime is known dead.
 
+Terminal task mutation reserves its durable cleanup admission barrier before reading sessions,
+worktrees, executions, or environment inventory. Every runtime-producing path, including queued
+promotion and workspace-source refresh, holds the shared side of that same task/environment
+barrier. An abandoned prepared reservation is cancelled deterministically after its bounded
+transition window, including when a repository failure prevented its diagnostic marker from being
+written. Inside agentctl, purging a task retires its slots before removing their map entries, so a
+caller that already obtained a slot cannot launch an untracked process after purge.
+
+A task-host execution becomes observable to the LSP control plane only after agentctl readiness and
+runtime-credential persistence both succeed. Registration may happen earlier solely so rollback
+and recovery retain the physical cleanup handle. Docker credential-handshake state follows the
+physical container lifetime: warm stop retains it, confirmed removal evicts it, uncertain removal
+retains it, and executor shutdown clears it.
+
 ## Consequences
 
 File switches, panel switches, editor unmounts, session switches, multiple browsers, navigation,

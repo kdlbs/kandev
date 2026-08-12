@@ -225,6 +225,11 @@ Kandev does not impose an automatic initialization timeout or invent a percentag
 
 The task host owns protocol initialization, progress, and the process tree, so closing the last editor or browser attachment does not stop the server. A backend restart reattaches to a live task-host generation when possible; a task-environment restart necessarily creates a new generation. Task stop, archive, and delete stop that task's language servers. When another live task shares the departing owner's physical environment, Kandev transfers environment ownership, removes the departing task's cached host state, and keeps the shared task host plus the other task's servers alive. Otherwise cleanup reaps the full server process tree; environment teardown always does. Stop and archive preserve the task policy so resume can reconcile it, while delete removes the task's language-server records.
 
+Kandev does not expose a newly created task host to language-server controls until its control
+service is healthy and any rotated Local Docker credentials are durably stored. Task teardown and
+workspace-root refresh use one admission barrier, so a late refresh cannot recreate task-host state
+after stop, archive, or delete begins.
+
 Kandev admits eight real task/language servers by default. Operators can change the startup limit with `KANDEV_LSP_MAX_SERVERS`; browser attachments and editor mounts do not consume slots. Excess task/language starts remain queued without launching or resuming task resources and are promoted after a real server is fully reaped. If a control reports the server unavailable, distinguish a missing task-host binary, an unsupported executor, a queued capacity state, and a server error before retrying.
 
 ## Integrated terminal

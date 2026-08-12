@@ -293,7 +293,9 @@ func (c *Controller) Start(
 	if err := validateLanguageAndOrigin(language, origin); err != nil {
 		return nil, err
 	}
-	return c.commands.submit(ctx, TaskLanguageKey{TaskID: taskID, Language: language}, ActionStart, "",
+	key := TaskLanguageKey{TaskID: taskID, Language: language}
+	c.cancelRecovery(key)
+	return c.commands.submit(ctx, key, ActionStart, "",
 		func(workCtx context.Context) (*LanguageSnapshot, error) {
 			return c.start(workCtx, taskID, language, origin, ActionStart)
 		})
@@ -328,7 +330,9 @@ func (c *Controller) Restart(
 	if err := validateLanguageAndOrigin(language, origin); err != nil {
 		return nil, err
 	}
-	return c.commands.submit(ctx, TaskLanguageKey{TaskID: taskID, Language: language}, ActionRestart, "",
+	key := TaskLanguageKey{TaskID: taskID, Language: language}
+	c.cancelRecovery(key)
+	return c.commands.submit(ctx, key, ActionRestart, "",
 		func(workCtx context.Context) (*LanguageSnapshot, error) {
 			return c.start(workCtx, taskID, language, origin, ActionRestart)
 		})

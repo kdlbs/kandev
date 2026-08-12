@@ -72,6 +72,11 @@ func (m *Manager) removeTaskState(taskID string, slots []taskLanguageSlot) {
 	defer m.mu.Unlock()
 	for _, entry := range slots {
 		if m.slots[entry.key] == entry.slot {
+			// The operation lock is held by PurgeTask. Retiring before removal
+			// makes a caller that already obtained this pointer fail after it
+			// eventually acquires the lock instead of launching into an orphaned
+			// slot that is no longer tracked by the manager.
+			entry.slot.retired = true
 			delete(m.slots, entry.key)
 		}
 	}

@@ -245,12 +245,20 @@ func TestPreparedCleanupSnapshotStartAndRunningReset(t *testing.T) {
 	job := &models.TaskResourceCleanupJob{
 		ID: "job-prepared-lifecycle", OperationID: "delete:prepared-lifecycle", TaskID: "task-prepared-lifecycle",
 		Trigger: models.TaskResourceCleanupTriggerDelete, State: models.TaskResourceCleanupStatePrepared,
+		LastError: "inventory capture in progress",
 	}
 	if err := repo.CreateTaskResourceCleanupJob(ctx, job); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.UpdateTaskResourceCleanupSnapshot(ctx, job.OperationID, `{"worktrees":["one"]}`); err != nil {
 		t.Fatalf("UpdateTaskResourceCleanupSnapshot: %v", err)
+	}
+	prepared, err := repo.GetTaskResourceCleanupJobByOperationID(ctx, job.OperationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared.LastError != "" {
+		t.Fatalf("prepared snapshot update retained transition marker %q", prepared.LastError)
 	}
 	if err := repo.UpdateTaskResourceCleanupSnapshot(ctx, "missing", `{}`); err == nil {
 		t.Fatal("missing prepared snapshot update returned nil")

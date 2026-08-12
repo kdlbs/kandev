@@ -149,6 +149,9 @@ func (m *Manager) AttachForTask(taskID, language string, generation uint64) (*At
 	}
 	slot.opMu.Lock()
 	defer slot.opMu.Unlock()
+	if slot.retired {
+		return nil, ErrTaskStatePurging
+	}
 	if slot.runtime == nil {
 		return nil, ErrRuntimeNotReady
 	}
@@ -181,6 +184,9 @@ func (m *Manager) UpdateConfiguration(_ context.Context, request ConfigurationRe
 	}
 	slot.opMu.Lock()
 	defer slot.opMu.Unlock()
+	if slot.retired {
+		return Snapshot{}, ErrTaskStatePurging
+	}
 	if slot.runtime == nil {
 		return m.SnapshotForTask(request.TaskID, request.Language), ErrRuntimeNotReady
 	}
@@ -211,6 +217,9 @@ func (m *Manager) start(request StartRequest) (Snapshot, error) {
 
 	operationCtx, unlock := slot.lockStartOperation(lifetimeCtx, request.Generation)
 	defer unlock()
+	if slot.retired {
+		return Snapshot{}, ErrTaskStatePurging
+	}
 	if err := m.checkOpen(); err != nil {
 		return Snapshot{}, err
 	}
@@ -361,59 +370,63 @@ func (m *Manager) applyWorkspaceFoldersForTask(
 
 	var updateErrors []error
 	for _, language := range languages {
-		slot, err := m.slotForTask(taskID, language)
+		dynamic, restartRequired, err := m.applyWorkspaceFoldersToLanguage(taskID, language, folders)
+		if dynamic {
+			result.DynamicLanguages = append(result.DynamicLanguages, language)
+		}
+		if restartRequired {
+			result.RestartRequiredLanguages = append(result.RestartRequiredLanguages, language)
+		}
 		if err != nil {
 			updateErrors = append(updateErrors, err)
-			continue
 		}
-		slot.opMu.Lock()
-		current := slot.runtime
-		if current == nil {
-			slot.opMu.Unlock()
-			continue
-		}
-		snapshot := m.SnapshotForTask(taskID, language)
-		if snapshot.Phase != sharedlsp.PhaseReady || !supportsWorkspaceFolderChanges(snapshot.Capabilities) {
-			result.RestartRequiredLanguages = append(result.RestartRequiredLanguages, language)
-			slot.opMu.Unlock()
-			continue
-		}
-		added, removed := workspaceFolderDiff(current.workspace.WorkspaceFolders, folders)
-		if len(added) == 0 && len(removed) == 0 &&
-			!workspaceFoldersEqual(current.workspace.WorkspaceFolders, folders) {
-			// LSP folder-change notifications describe set membership only. A
-			// pure reorder (or rename at the same URI) cannot be represented
-			// honestly, so preserve the live generation's scope and require one
-			// deliberate restart to adopt the new ordered roots.
-			result.RestartRequiredLanguages = append(result.RestartRequiredLanguages, language)
-			slot.opMu.Unlock()
-			continue
-		}
-		if len(added) != 0 || len(removed) != 0 {
-			params, marshalErr := json.Marshal(map[string]any{
-				"event": map[string]any{"added": added, "removed": removed},
-			})
-			if marshalErr != nil {
-				result.RestartRequiredLanguages = append(result.RestartRequiredLanguages, language)
-				updateErrors = append(updateErrors, marshalErr)
-				slot.opMu.Unlock()
-				continue
-			}
-			if notifyErr := current.Notify("workspace/didChangeWorkspaceFolders", params); notifyErr != nil {
-				result.RestartRequiredLanguages = append(result.RestartRequiredLanguages, language)
-				updateErrors = append(updateErrors, fmt.Errorf("update %s workspace folders: %w", language, notifyErr))
-				slot.opMu.Unlock()
-				continue
-			}
-		}
-		current.workspace.WorkspaceFolders = append([]WorkspaceFolder(nil), folders...)
-		m.publishForTaskGeneration(taskID, language, current.generation, func(next *Snapshot) {
-			next.WorkspaceFolders = append([]WorkspaceFolder(nil), folders...)
-		})
-		result.DynamicLanguages = append(result.DynamicLanguages, language)
-		slot.opMu.Unlock()
 	}
 	return result, errors.Join(updateErrors...)
+}
+
+func (m *Manager) applyWorkspaceFoldersToLanguage(
+	taskID, language string,
+	folders []WorkspaceFolder,
+) (dynamic, restartRequired bool, resultErr error) {
+	slot, err := m.slotForTask(taskID, language)
+	if err != nil {
+		return false, false, err
+	}
+	slot.opMu.Lock()
+	defer slot.opMu.Unlock()
+	if slot.retired || slot.runtime == nil {
+		return false, false, nil
+	}
+	current := slot.runtime
+	snapshot := m.SnapshotForTask(taskID, language)
+	if snapshot.Phase != sharedlsp.PhaseReady || !supportsWorkspaceFolderChanges(snapshot.Capabilities) {
+		return false, true, nil
+	}
+	added, removed := workspaceFolderDiff(current.workspace.WorkspaceFolders, folders)
+	if len(added) == 0 && len(removed) == 0 &&
+		!workspaceFoldersEqual(current.workspace.WorkspaceFolders, folders) {
+		// LSP folder-change notifications describe set membership only. A
+		// pure reorder (or rename at the same URI) cannot be represented
+		// honestly, so preserve the live generation's scope and require one
+		// deliberate restart to adopt the new ordered roots.
+		return false, true, nil
+	}
+	if len(added) != 0 || len(removed) != 0 {
+		params, marshalErr := json.Marshal(map[string]any{
+			"event": map[string]any{"added": added, "removed": removed},
+		})
+		if marshalErr != nil {
+			return false, true, marshalErr
+		}
+		if notifyErr := current.Notify("workspace/didChangeWorkspaceFolders", params); notifyErr != nil {
+			return false, true, fmt.Errorf("update %s workspace folders: %w", language, notifyErr)
+		}
+	}
+	current.workspace.WorkspaceFolders = append([]WorkspaceFolder(nil), folders...)
+	m.publishForTaskGeneration(taskID, language, current.generation, func(next *Snapshot) {
+		next.WorkspaceFolders = append([]WorkspaceFolder(nil), folders...)
+	})
+	return true, false, nil
 }
 
 func (m *Manager) DiscoveryRootsForTask(taskID string) []string {
@@ -529,6 +542,9 @@ func (m *Manager) Stop(ctx context.Context, request StopRequest) (Snapshot, erro
 	}
 	slot.lockAfterCancelingStart(request.Generation)
 	defer slot.opMu.Unlock()
+	if slot.retired {
+		return Snapshot{}, ErrTaskStatePurging
+	}
 	if request.Generation != 0 && request.Generation < slot.lastGeneration {
 		return m.SnapshotForTask(request.TaskID, request.Language), ErrStaleGeneration
 	}

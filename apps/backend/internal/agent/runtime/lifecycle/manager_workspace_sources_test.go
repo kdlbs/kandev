@@ -100,6 +100,7 @@ func TestRescanWorkspaceForTaskHostUsesCurrentEnvironmentWorkspace(t *testing.T)
 		WorkspaceSourceRoots: []string{sourceA},
 		agentctl:             agentctl.NewClient(parsed.Hostname(), port, newTestLogger()),
 	}
+	execution.MarkAgentctlReady()
 	store := NewExecutionStore()
 	if err := store.Add(execution); err != nil {
 		t.Fatal(err)
@@ -159,6 +160,7 @@ func TestRescanWorkspaceForDockerTaskHostUsesRuntimeWorkspace(t *testing.T) {
 		WorkspacePath: dockerWorkspacePath, WorkspaceSourceRoots: []string{dockerWorkspacePath},
 		agentctl: agentctl.NewClient(parsed.Hostname(), port, newTestLogger()),
 	}
+	execution.MarkAgentctlReady()
 	store := NewExecutionStore()
 	if err := store.Add(execution); err != nil {
 		t.Fatal(err)
@@ -208,6 +210,7 @@ func TestTaskLSPWorkspaceProjectionDoesNotRebindSharedTaskHost(t *testing.T) {
 		TaskEnvironmentID: "env-1", IsTaskHost: true, RuntimeName: agentruntime.RuntimeStandalone,
 		WorkspacePath: physicalRoot, WorkspaceSourceRoots: []string{physicalRoot},
 	}
+	execution.MarkAgentctlReady()
 	store := NewExecutionStore()
 	if err := store.Add(execution); err != nil {
 		t.Fatal(err)

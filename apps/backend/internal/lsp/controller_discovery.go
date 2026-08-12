@@ -53,6 +53,16 @@ func (c *Controller) WorkspaceSourcesChanged(ctx context.Context, taskID string)
 	if err := c.authorize(ctx, taskID); err != nil {
 		return err
 	}
+	releaseAdmission, err := c.tasks.AcquireTaskLSPAdmission(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrTaskNotReady, err)
+	}
+	admissionHeld := true
+	defer func() {
+		if admissionHeld {
+			releaseAdmission()
+		}
+	}()
 	task, err := c.tasks.GetTask(ctx, taskID)
 	if err != nil {
 		return err
@@ -70,6 +80,10 @@ func (c *Controller) WorkspaceSourcesChanged(ctx context.Context, taskID string)
 	}
 	dynamic, restartRequired, refreshErr := c.refreshTaskWorkspace(ctx, taskID, environment)
 	updateErrors := c.recordWorkspaceRefresh(ctx, taskID, states, dynamic, restartRequired, refreshErr)
+	// Discovery owns its own admission. Release this refresh admission first so
+	// a waiting terminal mutation cannot make the nested reader fail closed.
+	releaseAdmission()
+	admissionHeld = false
 	discoveryErr := c.discoverTask(ctx, taskID, true)
 	return errors.Join(refreshErr, errors.Join(updateErrors...), discoveryErr)
 }

@@ -1804,6 +1804,135 @@ func (s *Service) RestoreTaskMessageRollback(
 // ArchiveTask archives a task by setting its archived_at timestamp.
 // The task remains in the DB but is excluded from active board views.
 // Active agent sessions are stopped and worktrees cleaned up in background.
+type archiveCleanupInventory struct {
+	activeSessions []*models.TaskSession
+	sessions       []*models.TaskSession
+	worktrees      []*worktree.Worktree
+	stopTargets    []taskStopTarget
+}
+
+type archiveCommitResult struct {
+	inventory  archiveCleanupInventory
+	taskEnv    *models.TaskEnvironment
+	envCleanup taskEnvironmentCleanup
+}
+
+func (s *Service) gatherArchiveCleanupInventory(
+	ctx context.Context,
+	taskID string,
+) (archiveCleanupInventory, error) {
+	var inventory archiveCleanupInventory
+	var err error
+	inventory.activeSessions, err = s.sessions.ListActiveTaskSessionsByTaskID(ctx, taskID)
+	if err != nil {
+		return inventory, fmt.Errorf("list active task sessions for archive: %w", err)
+	}
+	if s.executionStopper != nil {
+		inventory.stopTargets, err = s.buildStopTargets(ctx, taskID, inventory.activeSessions)
+		if err != nil {
+			return inventory, fmt.Errorf("list runtime cleanup inventory: %w", err)
+		}
+	}
+	// Capture before stopping agents. A stuck agentctl is bounded per session
+	// and remains a warning rather than blocking durable archive cleanup.
+	if s.gitArchiveCapture != nil {
+		for _, session := range inventory.activeSessions {
+			if session == nil || session.ID == "" {
+				continue
+			}
+			snapshotCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			captureErr := s.gitArchiveCapture.CaptureArchiveSnapshot(snapshotCtx, session.ID)
+			cancel()
+			if captureErr != nil {
+				s.logger.Warn("failed to capture git archive snapshot",
+					zap.String("task_id", taskID),
+					zap.String("session_id", session.ID),
+					zap.Error(captureErr))
+			}
+		}
+	}
+	inventory.sessions, err = s.sessions.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return inventory, fmt.Errorf("list task sessions for archive: %w", err)
+	}
+	inventory.worktrees, err = s.gatherWorktreesForDelete(ctx, taskID)
+	if err != nil {
+		return inventory, fmt.Errorf("list worktrees for archive: %w", err)
+	}
+	return inventory, nil
+}
+
+func (s *Service) prepareAndCommitTaskArchive(
+	ctx context.Context,
+	taskID string,
+	cleanupJob *models.TaskResourceCleanupJob,
+) (result archiveCommitResult, resultErr error) {
+	cleanupResolved := false
+	defer func() {
+		if cleanupJob == nil || cleanupResolved {
+			return
+		}
+		if cancelErr := s.cancelFailedTaskResourceCleanupPreparation(ctx, cleanupJob); cancelErr != nil {
+			resultErr = errors.Join(
+				resultErr,
+				fmt.Errorf("cancel failed archive cleanup preparation: %w", cancelErr),
+			)
+		}
+	}()
+
+	var err error
+	result.inventory, err = s.gatherArchiveCleanupInventory(ctx, taskID)
+	if err != nil {
+		return result, err
+	}
+	releaseEnvironmentMutation, err := s.acquireTaskLSPEnvironmentMutationForTask(ctx, taskID)
+	if err != nil {
+		return result, fmt.Errorf("lock physical task environment for archive: %w", err)
+	}
+	defer releaseEnvironmentMutation()
+	result.taskEnv, err = s.gatherTaskEnvironmentForCleanup(ctx, taskID)
+	if err != nil {
+		return result, fmt.Errorf("lookup task environment for archive: %w", err)
+	}
+	ownershipTransfer, err := s.preserveTaskEnvironmentForLiveBorrower(ctx, taskID, result.taskEnv)
+	if err != nil {
+		return result, err
+	}
+	if ownershipTransfer != nil {
+		s.logger.Info("transferred borrowed task environment before task archive",
+			zap.String("task_id", taskID),
+			zap.String("env_id", taskEnvironmentID(result.taskEnv)),
+			zap.String("new_owner_task_id", result.taskEnv.TaskID))
+	}
+	result.envCleanup = taskEnvironmentCleanup{
+		env: result.taskEnv, deleteRow: true, deleteSecrets: true,
+	}
+	if err := s.updatePreparedTaskResourceCleanupSnapshot(
+		ctx, cleanupJob, result.inventory.sessions, result.inventory.worktrees,
+		result.inventory.stopTargets, result.envCleanup,
+	); err != nil {
+		return result, s.rollbackTaskEnvironmentOwnershipAfterFailure(ctx, ownershipTransfer, err)
+	}
+	if s.taskLSP != nil {
+		if err := s.taskLSP.CleanupTask(ctx, taskID, "task_archived"); err != nil {
+			cleanupResolved = true
+			s.resolveTaskResourceCleanupAfterMutationError(ctx, cleanupJob)
+			return result, s.rollbackTaskEnvironmentOwnershipAfterFailure(
+				ctx, ownershipTransfer, fmt.Errorf("stop task language servers before archive: %w", err),
+			)
+		}
+	}
+	if err := s.tasks.ArchiveTask(ctx, taskID); err != nil {
+		cleanupResolved = true
+		s.resolveTaskResourceCleanupAfterMutationError(ctx, cleanupJob)
+		return result, s.rollbackTaskEnvironmentOwnershipAfterFailure(ctx, ownershipTransfer, err)
+	}
+	s.registerTaskRuntimeStopOwners(result.inventory.stopTargets, true)
+	cleanupResolved = true
+	s.startTaskResourceCleanup(cleanupJob)
+	return result, nil
+}
+
 func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	start := time.Now()
 
@@ -1821,94 +1950,16 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	if task.ArchivedAt != nil {
 		return fmt.Errorf("%w: %s", ErrTaskAlreadyArchived, id)
 	}
-
-	// 2. Gather data needed for cleanup BEFORE archive
-	var stopTargets []taskStopTarget
-	activeSessions, err := s.sessions.ListActiveTaskSessionsByTaskID(ctx, id)
-	if err != nil {
-		return fmt.Errorf("list active task sessions for archive: %w", err)
-	}
-	if s.executionStopper != nil {
-		stopTargets, err = s.buildStopTargets(ctx, id, activeSessions)
-		if err != nil {
-			return fmt.Errorf("list runtime cleanup inventory: %w", err)
-		}
-	}
-
-	// 2b. Capture git archive snapshot for active sessions BEFORE stopping agents
-	// Use a bounded timeout to prevent blocking the archive operation if agentctl is stuck.
-	if s.gitArchiveCapture != nil && len(activeSessions) > 0 {
-		for _, sess := range activeSessions {
-			if sess == nil || sess.ID == "" {
-				continue
-			}
-			snapCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-			err := s.gitArchiveCapture.CaptureArchiveSnapshot(snapCtx, sess.ID)
-			cancel()
-			if err != nil {
-				s.logger.Warn("failed to capture git archive snapshot",
-					zap.String("task_id", id),
-					zap.String("session_id", sess.ID),
-					zap.Error(err))
-			}
-		}
-	}
-
-	sessions, err := s.sessions.ListTaskSessions(ctx, id)
-	if err != nil {
-		return fmt.Errorf("list task sessions for archive: %w", err)
-	}
-
-	worktrees, err := s.gatherWorktreesForDelete(ctx, id)
-	if err != nil {
-		return fmt.Errorf("list worktrees for archive: %w", err)
-	}
-	releaseEnvironmentMutation, err := s.acquireTaskLSPEnvironmentMutationForTask(ctx, id)
-	if err != nil {
-		return fmt.Errorf("lock physical task environment for archive: %w", err)
-	}
-	defer releaseEnvironmentMutation()
-	taskEnv, err := s.gatherTaskEnvironmentForCleanup(ctx, id)
-	if err != nil {
-		return fmt.Errorf("lookup task environment for archive: %w", err)
-	}
-	ownershipTransfer, preserveErr := s.preserveTaskEnvironmentForLiveBorrower(ctx, id, taskEnv)
-	if preserveErr != nil {
-		return preserveErr
-	}
-	if ownershipTransfer != nil {
-		s.logger.Info("transferred borrowed task environment before task archive",
-			zap.String("task_id", id),
-			zap.String("env_id", taskEnvironmentID(taskEnv)),
-			zap.String("new_owner_task_id", taskEnv.TaskID))
-	}
-	envCleanup := taskEnvironmentCleanup{env: taskEnv, deleteRow: true, deleteSecrets: true}
-	cleanupJob, err := s.persistTaskResourceCleanup(
+	cleanupJob, err := s.reservePreparedTaskResourceCleanup(
 		ctx, id, models.TaskResourceCleanupTriggerArchive, "",
-		sessions, worktrees, stopTargets, envCleanup, true,
 	)
 	if err != nil {
-		return s.rollbackTaskEnvironmentOwnershipAfterFailure(ctx, ownershipTransfer, err)
+		return err
 	}
-	if s.taskLSP != nil {
-		if err := s.taskLSP.CleanupTask(ctx, id, "task_archived"); err != nil {
-			s.resolveTaskResourceCleanupAfterMutationError(ctx, cleanupJob)
-			return s.rollbackTaskEnvironmentOwnershipAfterFailure(
-				ctx, ownershipTransfer, fmt.Errorf("stop task language servers before archive: %w", err),
-			)
-		}
+	commit, err := s.prepareAndCommitTaskArchive(ctx, id, cleanupJob)
+	if err != nil {
+		return err
 	}
-
-	// 3. Set archived_at in DB
-	if err := s.tasks.ArchiveTask(ctx, id); err != nil {
-		s.resolveTaskResourceCleanupAfterMutationError(ctx, cleanupJob)
-		return s.rollbackTaskEnvironmentOwnershipAfterFailure(ctx, ownershipTransfer, err)
-	}
-
-	// Register the exact inventory before CANCELLED becomes visible. A launch
-	// persistence loser can then distinguish these owned executions from one
-	// that raced in after the snapshot and must clean itself up.
-	s.registerTaskRuntimeStopOwners(stopTargets, true)
 
 	// archived_at has committed above: the rest of this function only
 	// reports on that already-durable state (cancelling sessions, re-reading
@@ -1921,7 +1972,7 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 
 	// 3b. Finalize active sessions in the DB and publish their cancellation
 	// events. See finalizeCancelledSessions for the detailed rationale.
-	s.finalizeCancelledSessions(finalizeCtx, id, activeSessions)
+	s.finalizeCancelledSessions(finalizeCtx, id, commit.inventory.activeSessions)
 
 	// 4. Re-read task for updated archived_at field
 	task, err = s.tasks.GetTask(finalizeCtx, id)
@@ -1942,8 +1993,11 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 			s.logger.Warn("start committed archive resource cleanup",
 				zap.String("job_id", cleanupJob.ID), zap.String("task_id", id), zap.Error(err))
 		}
-	} else if len(stopTargets) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 || taskEnv != nil {
-		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, envCleanup,
+	} else if len(commit.inventory.stopTargets) > 0 || s.worktreeCleanup != nil ||
+		len(commit.inventory.sessions) > 0 || commit.taskEnv != nil {
+		s.runAsyncTaskCleanup(
+			id, commit.inventory.sessions, commit.inventory.worktrees,
+			commit.inventory.stopTargets, commit.envCleanup,
 			"task archived", "failed to stop session on task archive", "task archive cleanup completed")
 	}
 
@@ -2072,7 +2126,7 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 	reason string,
 	trigger models.TaskResourceCleanupTrigger,
 	deleteFromDB func(context.Context, string) (bool, error),
-) (bool, error) {
+) (deletedResult bool, resultErr error) {
 	start := time.Now()
 	releaseLSPMutation := s.acquireTaskLSPMutation(id)
 	defer releaseLSPMutation()
@@ -2082,6 +2136,22 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 	if err != nil {
 		return false, err
 	}
+	cleanupJob, err := s.reservePreparedTaskResourceCleanup(ctx, id, trigger, "")
+	if err != nil {
+		return false, err
+	}
+	cleanupResolved := false
+	defer func() {
+		if cleanupJob == nil || cleanupResolved {
+			return
+		}
+		if cancelErr := s.cancelFailedTaskResourceCleanupPreparation(ctx, cleanupJob); cancelErr != nil {
+			resultErr = errors.Join(
+				resultErr,
+				fmt.Errorf("cancel failed delete cleanup preparation: %w", cancelErr),
+			)
+		}
+	}()
 
 	// 2. Gather data needed for cleanup BEFORE delete (sync, fast)
 	sessions, err := s.sessions.ListTaskSessions(ctx, id)
@@ -2118,14 +2188,14 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 	}
 
 	envCleanup := taskEnvironmentCleanup{env: taskEnv, deleteSecrets: true}
-	cleanupJob, err := s.persistTaskResourceCleanup(
-		ctx, id, trigger, "", sessions, worktrees, stopTargets, envCleanup, true,
-	)
-	if err != nil {
+	if err := s.updatePreparedTaskResourceCleanupSnapshot(
+		ctx, cleanupJob, sessions, worktrees, stopTargets, envCleanup,
+	); err != nil {
 		return false, s.rollbackTaskEnvironmentOwnershipAfterFailure(ctx, ownershipTransfer, err)
 	}
 	if s.taskLSP != nil {
 		if err := s.taskLSP.CleanupTask(ctx, id, "task_deleted"); err != nil {
+			cleanupResolved = true
 			s.resolveTaskResourceCleanupAfterMutationError(ctx, cleanupJob)
 			return false, s.rollbackTaskEnvironmentOwnershipAfterFailure(
 				ctx, ownershipTransfer, fmt.Errorf("stop task language servers before delete: %w", err),
@@ -2136,17 +2206,21 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 	// 4. Delete from DB (sync, fast)
 	deleted, err := deleteFromDB(ctx, id)
 	if err != nil {
+		cleanupResolved = true
 		s.resolveTaskResourceCleanupAfterMutationError(ctx, cleanupJob)
 		s.logger.Error("failed to delete task", zap.String("task_id", id), zap.Error(err))
 		return false, s.rollbackTaskEnvironmentOwnershipAfterFailure(ctx, ownershipTransfer, err)
 	}
 	if !deleted {
+		cleanupResolved = true
 		s.resolveTaskResourceCleanupAfterMutationError(ctx, cleanupJob)
 		if ownershipTransfer != nil {
 			return false, s.rollbackTaskEnvironmentOwnershipAfterFailure(ctx, ownershipTransfer, nil)
 		}
 		return false, nil
 	}
+	cleanupResolved = true
+	s.startTaskResourceCleanup(cleanupJob)
 	if s.attachmentSvc != nil {
 		if err := s.attachmentSvc.DeleteByTask(context.WithoutCancel(ctx), id); err != nil {
 			s.logger.Warn("failed to remove task attachment bytes",

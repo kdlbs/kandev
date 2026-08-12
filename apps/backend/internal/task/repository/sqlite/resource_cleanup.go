@@ -43,7 +43,7 @@ func (r *Repository) CreateTaskResourceCleanupJob(ctx context.Context, job *mode
 func (r *Repository) UpdateTaskResourceCleanupSnapshot(ctx context.Context, operationID, snapshot string) error {
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_resource_cleanup_jobs
-		SET resource_snapshot = ?, updated_at = ?
+		SET resource_snapshot = ?, last_error = '', updated_at = ?
 		WHERE operation_id = ? AND state = ?
 	`), snapshot, time.Now().UTC(), operationID, models.TaskResourceCleanupStatePrepared)
 	if err != nil {

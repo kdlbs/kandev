@@ -157,6 +157,7 @@ func TestDockerStopInstancePreservesContainerOnPlainStop(t *testing.T) {
 		t.Fatal("plain stop should not initialize docker client")
 		return nil, nil
 	}
+	exec.rememberContainerAuth("container-1", "warm-token")
 
 	if err := exec.StopInstance(context.Background(), &ExecutorInstance{
 		InstanceID:  "inst-1",
@@ -164,6 +165,10 @@ func TestDockerStopInstancePreservesContainerOnPlainStop(t *testing.T) {
 		StopReason:  "stopped via API",
 	}, false); err != nil {
 		t.Fatalf("StopInstance: %v", err)
+	}
+	state := exec.containerAuthStates["container-1"]
+	if state == nil || state.authToken != "warm-token" {
+		t.Fatal("plain stop evicted auth state for preserved container")
 	}
 }
 
@@ -263,6 +268,7 @@ func TestDockerStopInstanceStopsAndRemovesContainerOnTaskArchive(t *testing.T) {
 		Host: "tcp://" + strings.TrimPrefix(dockerDaemon.URL, "http://"),
 	}, "", newTestDockerLogger())
 	t.Cleanup(func() { require.NoError(t, dockerExec.Close()) })
+	dockerExec.rememberContainerAuth("archive-container", "archive-token")
 
 	require.NoError(t, dockerExec.StopInstance(context.Background(), &ExecutorInstance{
 		InstanceID:  "archive-instance",
@@ -273,6 +279,41 @@ func TestDockerStopInstanceStopsAndRemovesContainerOnTaskArchive(t *testing.T) {
 	got := []string{<-requests, <-requests}
 	requireDockerRequest(t, got, http.MethodPost, "/containers/archive-container/stop")
 	requireDockerRequest(t, got, http.MethodDelete, "/containers/archive-container")
+	if _, exists := dockerExec.containerAuthStates["archive-container"]; exists {
+		t.Fatal("removed container retained auth state")
+	}
+}
+
+func TestDockerStopInstanceRetainsAuthStateWhenContainerRemovalFails(t *testing.T) {
+	dockerDaemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead && r.URL.Path == "/_ping" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if r.Method == http.MethodDelete {
+			http.Error(w, "remove failed", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(dockerDaemon.Close)
+
+	dockerExec := NewDockerExecutor(config.DockerConfig{
+		Host: "tcp://" + strings.TrimPrefix(dockerDaemon.URL, "http://"),
+	}, "", newTestDockerLogger())
+	t.Cleanup(func() { require.NoError(t, dockerExec.Close()) })
+	dockerExec.rememberContainerAuth("failed-container", "retained-token")
+
+	err := dockerExec.StopInstance(context.Background(), &ExecutorInstance{
+		InstanceID: "failed-instance", ContainerID: "failed-container", StopReason: StopReasonTaskArchived,
+	}, false)
+	if err == nil {
+		t.Fatal("container removal failure was ignored")
+	}
+	state := dockerExec.containerAuthStates["failed-container"]
+	if state == nil || state.authToken != "retained-token" {
+		t.Fatal("uncertain container removal discarded the only cached auth state")
+	}
 }
 
 func TestDockerCleanupContextIgnoresCanceledParentAfterAgentStopFailed(t *testing.T) {
@@ -439,9 +480,13 @@ func TestDockerExecutor_Client_ReturnsClientOnSuccess(t *testing.T) {
 func TestDockerExecutor_Close_BeforeInit(t *testing.T) {
 	log := newTestDockerLogger()
 	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
+	exec.rememberContainerAuth("container-1", "token-1")
 
 	if err := exec.Close(); err != nil {
 		t.Errorf("expected nil error, got: %v", err)
+	}
+	if len(exec.containerAuthStates) != 0 {
+		t.Fatalf("Close retained container auth state: %#v", exec.containerAuthStates)
 	}
 }
 

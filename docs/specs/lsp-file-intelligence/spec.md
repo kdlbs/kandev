@@ -296,6 +296,10 @@ budget. After three failed recoveries, the phase stays `error` with explicit Res
 there is no unbounded crash loop. An initialize request that remains alive is not a crash and is
 never auto-restarted or timed out.
 
+An explicit Start or Restart begins a new user-requested recovery epoch and therefore resets any
+exhausted automatic retry budget for that task/language. A delayed task-host watch snapshot cannot
+reacquire capacity or replace Off after Stop has cancelled that watch.
+
 ## Permissions
 
 - Any authenticated human who can access the task can read and operate its LSP controls under the
@@ -343,10 +347,17 @@ never auto-restarted or timed out.
   subscriptions, caches, and workspace projection. When no live borrower remains, or the environment
   itself is torn down, cleanup reaps the physical task host and every descendant.
 - **Workspace roots change:** supported dynamic folder updates keep the generation; otherwise the
-  task reports `restart_required` without silently discarding an expensive import.
+  task reports `restart_required` without silently discarding an expensive import. Refresh holds
+  task/environment admission through runtime and durable-state updates, so terminal cleanup either
+  follows the refresh and purges it or blocks the refresh before runtime access.
 - **Task stop/archive/delete:** cleanup cancels starts/recovery before runtime teardown. Failure of
   graceful LSP control falls back to the task environment's full process-tree cleanup. Delete
-  removes the persistent row only after cleanup ownership is registered.
+  removes the persistent row only after cleanup ownership is registered. Direct and cascade
+  terminal mutations persist a prepared cleanup barrier before inventory reads; abandoned barriers
+  are cancelled after a bounded interval even when transition-marker persistence failed.
+- **Task-host startup:** the runtime registration remains internal until agentctl readiness and
+  task-environment credential persistence both commit. A failed rollback keeps the cleanup handle
+  private and recovery retries physical teardown before permitting replacement.
 - **Malformed/stale protocol data:** oversized 16 MiB JSON-RPC frames, malformed progress, unknown
   tokens, lower revisions, old generations, and responses for detached request IDs are rejected
   without mutating current state.

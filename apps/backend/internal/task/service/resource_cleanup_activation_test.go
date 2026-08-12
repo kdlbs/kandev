@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -244,6 +245,52 @@ func TestCancelPreparedCleanupUsesDetachedContextAndRetriesTransientFailure(t *t
 	}
 	if job.State != models.TaskResourceCleanupStateCancelled {
 		t.Fatalf("prepared cancellation state = %q, want cancelled", job.State)
+	}
+}
+
+func TestAbandonedPreparedCleanupIsRecoveredByPeriodicReconciliation(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		lastError string
+	}{
+		{name: "durable inventory marker", lastError: taskResourceCleanupPreparationInProgress},
+		{name: "marker persistence also failed"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			taskSvc, repo := setupOfficeTest(t)
+			ctx := context.Background()
+			taskID := "task-cancel-durable-recovery-" + strings.ReplaceAll(test.name, " ", "-")
+			operationID := "cascade-delete:" + taskID
+			seedCleanupTaskAndSession(t, repo, taskID, "session-before-durable-recovery")
+			if _, err := taskSvc.persistTaskResourceCleanupWithLastError(
+				ctx, taskID, models.TaskResourceCleanupTriggerCascadeDelete, operationID,
+				nil, nil, nil, taskEnvironmentCleanup{}, true, test.lastError,
+			); err != nil {
+				t.Fatalf("persist abandoned preparation: %v", err)
+			}
+			old := time.Now().UTC().Add(-preparedCleanupAbandonmentDelay - time.Minute)
+			if _, err := repo.DB().ExecContext(ctx, `
+				UPDATE task_resource_cleanup_jobs SET updated_at = ? WHERE operation_id = ?
+			`, old, operationID); err != nil {
+				t.Fatal(err)
+			}
+			if err := taskSvc.processDueTaskResourceCleanupJobs(ctx); err != nil {
+				t.Fatalf("periodic reconciliation: %v", err)
+			}
+			job, err := repo.GetTaskResourceCleanupJobByOperationID(ctx, operationID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if job.State != models.TaskResourceCleanupStateCancelled {
+				t.Fatalf("abandoned preparation state = %q, want cancelled", job.State)
+			}
+			if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+				ID: "session-after-durable-recovery", TaskID: taskID,
+				State: models.TaskSessionStateCreated,
+			}); err != nil {
+				t.Fatalf("create session after durable barrier recovery: %v", err)
+			}
+		})
 	}
 }
 

@@ -477,6 +477,12 @@ Completed 2026-08-05.
   snapshot. The focused admission and persistence-error regressions passed 20 race-enabled
   repetitions. The real process-tree test also keeps a bounded two-second stop deadline so the full
   race package does not mistake detector scheduling delay for a leaked child.
+- A separate-workspace GPT-5.6 Sol Max audit of the rebased PR head found eight remaining lifecycle
+  races. Direct terminal mutation now reserves cleanup before inventory; abandoned reservations
+  recover durably; purge retires acquired slots; delayed watches cannot resurrect Stop; explicit
+  controls reset exhausted recovery; workspace refresh shares teardown admission; pre-ready task
+  hosts stay private and recover by physical cleanup; and Docker auth state follows confirmed
+  container lifetime. Every finding has a synchronized or real-repository regression.
 
 ---
 

@@ -970,6 +970,91 @@ func TestGetOrEnsureTaskHostForEnvironment(t *testing.T) {
 			t.Fatalf("hosts = %q/%q, creates = %d; want one", first.ID, second.ID, backend.createCount.Load())
 		}
 	})
+
+	t.Run("cached host remains private until readiness and credentials commit", func(t *testing.T) {
+		mgr, backend := newEnvironmentExecutionTestManager(t, &mockWorkspaceInfoProvider{
+			envInfos: map[string]*WorkspaceInfo{
+				"env-1": {
+					TaskID: "task-1", SessionID: "session-1", TaskEnvironmentID: "env-1",
+					WorkspacePath: "/workspace/task-1",
+				},
+			},
+		})
+		healthEntered := make(chan struct{})
+		healthRelease := make(chan struct{})
+		var healthOnce sync.Once
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/health" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			healthOnce.Do(func() { close(healthEntered) })
+			<-healthRelease
+			w.WriteHeader(http.StatusOK)
+		}))
+		t.Cleanup(server.Close)
+		parsed, err := url.Parse(server.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		host, portString, err := net.SplitHostPort(parsed.Host)
+		if err != nil {
+			t.Fatal(err)
+		}
+		port, err := strconv.Atoi(portString)
+		if err != nil {
+			t.Fatal(err)
+		}
+		backend.client = agentctl.NewClient(host, port, mgr.logger)
+
+		type result struct {
+			execution *AgentExecution
+			err       error
+		}
+		firstDone := make(chan result, 1)
+		go func() {
+			execution, ensureErr := mgr.GetOrEnsureTaskHostForEnvironment(context.Background(), "env-1")
+			firstDone <- result{execution: execution, err: ensureErr}
+		}()
+		<-healthEntered
+
+		_, exposedEarly, lookupErr := mgr.GetTaskHostForEnvironment(context.Background(), "env-1")
+		secondDone := make(chan result, 1)
+		go func() {
+			execution, ensureErr := mgr.GetOrEnsureTaskHostForEnvironment(context.Background(), "env-1")
+			secondDone <- result{execution: execution, err: ensureErr}
+		}()
+		var earlyResult *result
+		select {
+		case got := <-secondDone:
+			earlyResult = &got
+		case <-time.After(100 * time.Millisecond):
+		}
+		close(healthRelease)
+		first := <-firstDone
+		second := result{}
+		if earlyResult != nil {
+			second = *earlyResult
+		} else {
+			second = <-secondDone
+		}
+
+		if lookupErr != nil {
+			t.Fatal(lookupErr)
+		}
+		if exposedEarly {
+			t.Fatal("GetTaskHostForEnvironment exposed host before readiness committed")
+		}
+		if earlyResult != nil {
+			t.Fatal("second ensure returned cached host before readiness committed")
+		}
+		if first.err != nil || second.err != nil {
+			t.Fatalf("ensure errors = %v / %v", first.err, second.err)
+		}
+		if first.execution != second.execution || backend.createCount.Load() != 1 {
+			t.Fatalf("hosts = %p/%p creates=%d, want one committed host", first.execution, second.execution, backend.createCount.Load())
+		}
+	})
 }
 
 func TestFailedTaskHostRollbackRetainsRuntimeOwnership(t *testing.T) {
@@ -1154,6 +1239,35 @@ func TestRecoverTaskHostForEnvironmentEvictsOnlyProvenDeadHost(t *testing.T) {
 	}
 }
 
+func TestRecoverTaskHostForEnvironmentReapsUncommittedHealthyHost(t *testing.T) {
+	mgr, backend := newEnvironmentExecutionTestManager(t, &mockWorkspaceInfoProvider{
+		envInfos: map[string]*WorkspaceInfo{
+			"env-1": {
+				TaskID: "task-1", TaskEnvironmentID: "env-1",
+				WorkspacePath: "/workspace/task-1",
+			},
+		},
+	})
+	host, err := mgr.GetOrEnsureTaskHostForEnvironment(context.Background(), "env-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Model a credential-persistence failure whose first rollback could not
+	// prove that this otherwise healthy process was gone.
+	host.agentctlReady.Store(false)
+
+	recovered, err := mgr.RecoverTaskHostForEnvironment(context.Background(), "env-1")
+	if err != nil || !recovered {
+		t.Fatalf("uncommitted recovery = %v, %v", recovered, err)
+	}
+	if backend.stopCount.Load() != 1 {
+		t.Fatalf("uncommitted host stop attempts = %d, want 1", backend.stopCount.Load())
+	}
+	if _, exists := mgr.executionStore.Get(host.ID); exists {
+		t.Fatal("uncommitted task host remains tracked after physical stop")
+	}
+}
+
 func TestRecoverTaskHostForEnvironmentDoesNotEvictConcurrentReplacement(t *testing.T) {
 	healthStarted := make(chan struct{})
 	releaseHealth := make(chan struct{})
@@ -1184,6 +1298,7 @@ func TestRecoverTaskHostForEnvironmentDoesNotEvictConcurrentReplacement(t *testi
 		ID: "stable-host", TaskID: "task-1", TaskEnvironmentID: "env-1", IsTaskHost: true,
 		agentctl: agentctl.NewClient(hostName, port, mgr.logger),
 	}
+	old.MarkAgentctlReady()
 	if err := mgr.executionStore.Add(old); err != nil {
 		t.Fatal(err)
 	}
@@ -1205,6 +1320,7 @@ func TestRecoverTaskHostForEnvironmentDoesNotEvictConcurrentReplacement(t *testi
 		ID: old.ID, TaskID: old.TaskID, TaskEnvironmentID: old.TaskEnvironmentID, IsTaskHost: true,
 		agentctl: newReadyAgentctlClient(t, mgr.logger),
 	}
+	replacement.MarkAgentctlReady()
 	if err := mgr.executionStore.Add(replacement); err != nil {
 		t.Fatal(err)
 	}
