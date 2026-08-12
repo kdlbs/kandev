@@ -112,11 +112,17 @@ type stepCompleteSessionReadBarrier struct {
 }
 
 func (r *stepCompleteSessionReadBarrier) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
+	// Capture the snapshot before waiting so both callers have observed the
+	// empty bag when the test releases them into the atomic claim.
+	session, err := r.Repository.GetTaskSession(ctx, id)
+	if err != nil {
+		return nil, err
+	}
 	if r.reads.Add(1) <= 2 {
 		r.ready <- struct{}{}
 		<-r.release
 	}
-	return r.Repository.GetTaskSession(ctx, id)
+	return session, nil
 }
 
 type concurrentStepCompleteEventBus struct {
