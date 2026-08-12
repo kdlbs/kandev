@@ -1410,6 +1410,13 @@ func (m *Manager) MarkCompleted(executionID string, exitCode int, errorMessage s
 		return nil
 	}
 
+	// A turn aborted because backend graceful shutdown killed the agent
+	// subprocess is not an agent failure. Treat the terminal error as a benign
+	// stop so the session stays resumable and the UI shows no red error banner.
+	if (exitCode != 0 || errorMessage != "") && m.IsShuttingDown() {
+		return m.markStoppedDuringShutdown(execution, exitCode, errorMessage)
+	}
+
 	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
 		now := time.Now()
 		exec.FinishedAt = &now
@@ -1447,6 +1454,36 @@ func (m *Manager) MarkCompleted(executionID string, exitCode int, errorMessage s
 		m.classifyAndMaybeRemediate(execution, exitCode, errorMessage)
 	}
 	m.eventPublisher.PublishAgentEvent(context.Background(), eventType, execution)
+
+	return nil
+}
+
+// markStoppedDuringShutdown records a terminal error completion that arrived
+// while backend graceful shutdown was in progress as a benign STOPPED outcome
+// instead of a FAILED one. It stamps the terminal fields, runs the same teardown
+// as the failed branch, and publishes events.AgentStopped — mirroring the
+// StopReasonBackendShutdown teardown so the orchestrator treats it as resumable.
+// It deliberately does not remove the execution or run classifyAndMaybeRemediate.
+func (m *Manager) markStoppedDuringShutdown(execution *AgentExecution, exitCode int, errorMessage string) error {
+	m.logger.Warn("error completion during shutdown, treating as cancellation",
+		zap.String("execution_id", execution.ID),
+		zap.String("task_id", execution.TaskID),
+		zap.Int("exit_code", exitCode),
+		zap.String("error", errorMessage))
+
+	_ = m.executionStore.WithLock(execution.ID, func(exec *AgentExecution) {
+		now := time.Now()
+		exec.FinishedAt = &now
+		exec.ExitCode = &exitCode
+		exec.ErrorMessage = errorMessage
+		exec.Status = v1.AgentStatusStopped
+	})
+
+	execution.EndSessionSpan()
+	m.persistExecutorRunning(context.Background(), execution)
+	m.releaseActivity(executionActivityKey(execution.ID))
+
+	m.eventPublisher.PublishAgentEvent(context.Background(), events.AgentStopped, execution)
 
 	return nil
 }

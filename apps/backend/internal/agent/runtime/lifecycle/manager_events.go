@@ -108,6 +108,14 @@ func extractErrorMessage(event *agentctl.AgentEvent) string {
 func (m *Manager) handleCompleteEventMarkState(execution *AgentExecution, event *agentctl.AgentEvent, isError bool) {
 	if isError {
 		errorMsg := extractErrorMessage(event)
+		// A turn aborted by backend graceful shutdown is not an agent failure.
+		// Redirect it to a benign stop so the session stays resumable and the UI
+		// shows no red error banner. MarkCompleted applies the same guard, but
+		// routing here keeps the misleading "marking as failed" WARN out of logs.
+		if m.IsShuttingDown() {
+			_ = m.markStoppedDuringShutdown(execution, 1, errorMsg)
+			return
+		}
 		m.logger.Warn("error completion received, marking execution as failed",
 			zap.String("execution_id", execution.ID),
 			zap.String("task_id", execution.TaskID),
