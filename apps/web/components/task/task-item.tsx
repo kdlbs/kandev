@@ -7,15 +7,13 @@ import {
   IconCircleCheck,
   IconCircleDashed,
   IconDots,
-  IconGitPullRequest,
   IconMessageQuestion,
   IconProgressCheck,
   IconPinFilled,
   IconShieldQuestion,
 } from "@tabler/icons-react";
-import { getPRAggregateStatusColor, PRTaskIcon } from "@/components/github/pr-task-icon";
 import { IssueTaskIcon } from "@/components/github/issue-task-icon";
-import { useAppStore } from "@/components/state-provider";
+import { TaskPRIcon, TaskMRIcon } from "@/components/task/task-item-badges";
 import { cn } from "@/lib/utils";
 import { computeRowIndent, resolveRowDepth } from "@/lib/sidebar/row-indent";
 import { TaskItemStatsRow } from "./task-item-stats-row";
@@ -34,6 +32,7 @@ import { classifyTask } from "./task-classify";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { useTranslation } from "react-i18next";
 import { TaskAutopilotIcon } from "@/components/task/task-autopilot-icon";
+import { TaskTitleHoverCard } from "@/components/task/task-title-hover-card";
 
 type DiffStats = {
   additions: number;
@@ -310,29 +309,6 @@ function DiffStatsRight({ diffStats, menuOpen }: { diffStats: DiffStats; menuOpe
   );
 }
 
-/** Shows PR icon from store (real data) or from prInfo prop (prototype/mock). */
-function TaskPRIcon({
-  taskId,
-  prInfo,
-}: {
-  taskId?: string;
-  prInfo?: { number: number; state: string; aggregateState?: string };
-}) {
-  const hasStorePR = useAppStore((s) => !!taskId && (s.taskPRs.byTaskId[taskId]?.length ?? 0) > 0);
-  if (hasStorePR) return <PRTaskIcon taskId={taskId!} />;
-  if (!prInfo) return null;
-  const color = getPRAggregateStatusColor(prInfo.aggregateState ?? prInfo.state);
-  return (
-    <span
-      data-testid={taskId ? `pr-task-icon-${taskId}` : "pr-task-icon"}
-      data-pr-state={prInfo.state}
-      className={cn("inline-flex items-center shrink-0", color)}
-    >
-      <IconGitPullRequest className="h-3.5 w-3.5" />
-    </span>
-  );
-}
-
 function TaskItemContent({
   title,
   autopilot,
@@ -370,7 +346,13 @@ function TaskItemContent({
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
       <span className="flex items-center gap-1 min-w-0 text-[13px] font-medium text-foreground leading-tight">
-        <ScrollOnOverflow className="min-w-0">{title}</ScrollOnOverflow>
+        {taskId ? (
+          <TaskTitleHoverCard taskId={taskId} title={title}>
+            <ScrollOnOverflow className="min-w-0">{title}</ScrollOnOverflow>
+          </TaskTitleHoverCard>
+        ) : (
+          <ScrollOnOverflow className="min-w-0">{title}</ScrollOnOverflow>
+        )}
         {autopilot && <TaskAutopilotIcon />}
         {isPinned && (
           <IconPinFilled
@@ -379,6 +361,7 @@ function TaskItemContent({
           />
         )}
         <TaskPRIcon taskId={taskId} prInfo={prInfo} />
+        <TaskMRIcon taskId={taskId} />
         {issueInfo && <IssueTaskIcon issueInfo={issueInfo} />}
         {agentErrorMessage && <TaskAgentErrorIcon message={agentErrorMessage} />}
         {isRemoteExecutor && (

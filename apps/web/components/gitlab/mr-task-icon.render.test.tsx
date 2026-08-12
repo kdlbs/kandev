@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider, useAppStore } from "@/components/state-provider";
 import type { TaskMR } from "@/lib/types/gitlab";
@@ -80,8 +80,59 @@ describe("MRTaskIcon", () => {
     renderMRTaskIcon([makeMR({ state: "merged" })]);
     const badge = screen.getByTestId(BADGE_TEST_ID);
     expect(badge.getAttribute("data-mr-state")).toBe("merged");
-    // The tooltip text itself (getMRTooltip's "State: merged" output) is
-    // covered directly in mr-task-icon.test.ts — jsdom does not reliably
-    // open Radix Tooltip content on a non-focusable trigger span.
+  });
+
+  // AC1, AC7, AC24: the trigger is keyboard-focusable and accessible, and the
+  // rendered summary uses MR !{iid} plus labelled rows — no pipe-delimited
+  // string anywhere.
+  it("AC1/AC7: trigger has role=img, tabIndex=0, and a localized aria-label", () => {
+    renderMRTaskIcon([makeMR({ mr_iid: 42 })]);
+    const badge = screen.getByTestId(BADGE_TEST_ID);
+    expect(badge.getAttribute("role")).toBe("img");
+    expect(badge.getAttribute("tabIndex")).toBe("0");
+    expect(badge.getAttribute("aria-label")).toBe("Merge request !42 status");
+  });
+
+  it("AC1/AC24: hovering the trigger opens the structured summary with MR !iid and the title", () => {
+    renderMRTaskIcon([
+      makeMR({
+        mr_iid: 7,
+        mr_title: "Fix the login flow",
+        approval_state: "approved",
+        pipeline_state: "success",
+        detailed_merge_status: "mergeable",
+      }),
+    ]);
+    const badge = screen.getByTestId(BADGE_TEST_ID);
+    fireEvent.pointerEnter(badge, { pointerType: "mouse" });
+
+    // Radix mounts the tooltip content into both a measurement copy and the
+    // visible portal, so scope to the first (portal) match rather than
+    // asserting a single element.
+    expect(screen.getAllByTestId("mr-task-status-summary").length).toBeGreaterThan(0);
+    expect(screen.getAllByTestId("mr-task-status-iid")[0].textContent).toBe("MR !7");
+    expect(screen.getAllByTestId("mr-task-status-title")[0].textContent).toBe("Fix the login flow");
+    expect(screen.getAllByTestId("mr-task-status-review")[0].textContent).toContain("Review");
+    expect(screen.getAllByTestId("mr-task-status-review")[0].textContent).toContain("Approved");
+    expect(screen.getAllByTestId("mr-task-status-ci")[0].textContent).toContain("CI");
+    expect(screen.getAllByTestId("mr-task-status-merge")[0].textContent).toContain("Merge");
+    expect(document.body.textContent).not.toContain("|");
+  });
+
+  it("malformed store value still bails to null instead of throwing", () => {
+    function Fixture() {
+      const setTaskMRs = useAppStore((s) => s.setTaskMRs);
+      // @ts-expect-error simulating a partial hydration payload
+      setTaskMRs("ws-1", { "task-1": { not: "an array" } });
+      return <MRTaskIcon taskId="task-1" />;
+    }
+    render(
+      <TooltipProvider>
+        <StateProvider initialState={{ workspaces: { items: [], activeId: "ws-1" } }}>
+          <Fixture />
+        </StateProvider>
+      </TooltipProvider>,
+    );
+    expect(screen.queryByTestId(BADGE_TEST_ID)).toBeNull();
   });
 });

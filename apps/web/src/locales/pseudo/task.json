@@ -1276,6 +1276,8 @@
   "submitUnavailable": "Śũƀḿĩţ ũńàvàĩĺàƀĺē",
   "submitting": "Śũƀḿĩţţĩńĝ…",
   "subtask": "Śũƀţàśķ",
+  "subtasksHeading_one": "{{count}} śũƀţàśķ",
+  "subtasksHeading_other": "{{count}} śũƀţàśķś",
   "subtasksBecomeRootTasksUnlessYou": "Śũƀţàśķś ƀēćōḿē ŕōōţ ţàśķś ũńĺēśś ŷōũ ţĩćķ ţĥĩś. Ţĥēŷ ḿàŷ śţĩĺĺ ƀē ĩń ƥŕōĝŕēśś.",
   "subtasksStayActiveUnlessYouTick": "Śũƀţàśķś śţàŷ àćţĩvē ũńĺēśś ŷōũ ţĩćķ ţĥĩś. Ţĥēŷ ḿàŷ śţĩĺĺ ƀē ĩń ƥŕōĝŕēśś.",
   "successful": "{{operationName}} śũććēśśƒũĺ",

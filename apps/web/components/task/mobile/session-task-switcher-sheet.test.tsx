@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   toggleSidebarGroupCollapsed: vi.fn(),
   appState: {
     taskPRs: { byTaskId: {} },
+    taskMRs: { byWorkspaceId: {} },
+    workspaces: { activeId: "ws-1" },
     comments: { byTaskId: {} },
   },
 }));

@@ -2,10 +2,10 @@
 
 import { IconGitPullRequest } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { useState, type FocusEvent, type PointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";
+import { useTaskBadgeTooltip } from "@/hooks/use-task-badge-tooltip";
 import type { TaskPR } from "@/lib/types/github";
 import { derivePRTaskStatusSummary, PRTaskStatusSummary } from "./pr-task-status-summary";
 
@@ -244,41 +244,9 @@ export function PRTaskIcon({ taskId }: { taskId: string }) {
   return <MultiPRIcon taskId={taskId} prs={prs} />;
 }
 
-function usePRTaskTooltipState() {
-  const [hovered, setHovered] = useState(false);
-  const [focused, setFocused] = useState(false);
-  const [dismissed, setDismissed] = useState(false);
-
-  return {
-    open: !dismissed && (hovered || focused),
-    onPointerEnter(event: PointerEvent<HTMLSpanElement>) {
-      if (event.pointerType !== "mouse") return;
-      setHovered(true);
-      setDismissed(false);
-    },
-    onPointerLeave(event: PointerEvent<HTMLSpanElement>) {
-      if (event.pointerType !== "mouse") return;
-      setHovered(false);
-      if (!focused) setDismissed(false);
-    },
-    onFocus(event: FocusEvent<HTMLSpanElement>) {
-      if (!event.currentTarget.matches(":focus-visible")) return;
-      setFocused(true);
-      setDismissed(false);
-    },
-    onBlur() {
-      setFocused(false);
-      if (!hovered) setDismissed(false);
-    },
-    onEscapeKeyDown() {
-      setDismissed(true);
-    },
-  };
-}
-
 function SinglePRIcon({ taskId, pr }: { taskId: string; pr: TaskPR }) {
   const { t } = useTranslation();
-  const tooltip = usePRTaskTooltipState();
+  const tooltip = useTaskBadgeTooltip();
   const readyToMerge = isPRReadyToMerge(pr);
   const summary = derivePRTaskStatusSummary(pr, readyToMerge);
   return (
@@ -314,7 +282,7 @@ function SinglePRIcon({ taskId, pr }: { taskId: string; pr: TaskPR }) {
 
 function MultiPRIcon({ taskId, prs }: { taskId: string; prs: TaskPR[] }) {
   const { t } = useTranslation();
-  const tooltip = usePRTaskTooltipState();
+  const tooltip = useTaskBadgeTooltip();
   const aggregateColor = aggregatePRStatusColor(prs);
   const allReady = areAllOpenPRsReadyToMerge(prs);
   const summaries = prs.map((pr) => derivePRTaskStatusSummary(pr, isPRReadyToMerge(pr)));

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const mockAppState = {
   workspaces: { activeId: "ws-1" },
   kanban: { tasks: [] as Array<{ id: string; title: string }> },
+  kanbanMulti: { snapshots: {} as Record<string, { tasks: Array<{ id: string }> }> },
   taskPRs: { byTaskId: {} as Record<string, unknown> },
 };
 
@@ -34,6 +35,7 @@ const SECOND_PLUGIN_ID = "kandev-plugin-second";
 const TAGS_TEST_ID = "plugin-tags";
 const TAGS_SLOT = "task-card-tags";
 const INDICATOR_TEST_ID = "plugin-indicator";
+const TITLE_TEST_ID = "task-card-title";
 const SLOT_PROPS_TEXT = "task-1|ws-1|step-1";
 
 function SlotPropsProbe({ testId, slotProps }: { testId: string; slotProps?: unknown }) {
@@ -139,7 +141,7 @@ describe("KanbanCardBody — task-card-tags slot", () => {
 
       render(<KanbanCardBody task={TASK} repositoryChips={[]} />);
 
-      expect(screen.getByTestId("task-card-title").textContent).toBe(TASK.title);
+      expect(screen.getByTestId(TITLE_TEST_ID).textContent).toBe(TASK.title);
       expect(screen.getByTestId(INDICATOR_TEST_ID)).toBeTruthy();
     } finally {
       consoleError.mockRestore();
@@ -150,7 +152,7 @@ describe("KanbanCardBody — task-card-tags slot", () => {
 describe("KanbanCardBody — linked PR/MR badges (AC30)", () => {
   it("renders both the PR badge and the MR badge, PR first", () => {
     const { container } = render(<KanbanCardBody task={TASK} repositoryChips={[]} />);
-    const title = screen.getByTestId("task-card-title");
+    const title = screen.getByTestId(TITLE_TEST_ID);
     const row = title.parentElement;
     expect(row).not.toBeNull();
     const prIcon = screen.getByTestId("pr-task-icon");
@@ -159,5 +161,19 @@ describe("KanbanCardBody — linked PR/MR badges (AC30)", () => {
     expect(container.contains(mrIcon)).toBe(true);
     // AC30: PR badge before MR badge in document order.
     expect(prIcon.compareDocumentPosition(mrIcon) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+describe("KanbanCardBody — title hover card gating", () => {
+  it("does not mount a hover card trigger when enableTitleHover is unset (drag preview)", () => {
+    render(<KanbanCardBody task={TASK} repositoryChips={[]} />);
+    const title = screen.getByTestId(TITLE_TEST_ID);
+    expect(title.getAttribute("data-slot")).not.toBe("hover-card-trigger");
+  });
+
+  it("mounts the hover card trigger around the title when enableTitleHover is set", () => {
+    render(<KanbanCardBody task={TASK} repositoryChips={[]} enableTitleHover />);
+    const title = screen.getByTestId(TITLE_TEST_ID);
+    expect(title.closest('[data-slot="hover-card-trigger"]')).not.toBeNull();
   });
 });

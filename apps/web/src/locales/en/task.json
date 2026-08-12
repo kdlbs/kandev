@@ -1276,6 +1276,8 @@
   "submitUnavailable": "Submit unavailable",
   "submitting": "Submitting…",
   "subtask": "Subtask",
+  "subtasksHeading_one": "{{count}} subtask",
+  "subtasksHeading_other": "{{count}} subtasks",
   "subtasksBecomeRootTasksUnlessYou": "Subtasks become root tasks unless you tick this. They may still be in progress.",
   "subtasksStayActiveUnlessYouTick": "Subtasks stay active unless you tick this. They may still be in progress.",
   "successful": "{{operationName}} successful",

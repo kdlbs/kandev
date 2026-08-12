@@ -3,6 +3,8 @@
 import { IconAlertCircle, IconSubtask } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { PRTaskIcon } from "@/components/github/pr-task-icon";
+import { MRTaskIcon } from "@/components/gitlab/mr-task-icon";
+import { TaskTitleHoverCard } from "@/components/task/task-title-hover-card";
 import { useTaskPendingInput, type PendingInput } from "@/hooks/use-task-pending-input";
 import { getTaskStateIcon } from "@/lib/ui/state-icons";
 import type { Repository, Task } from "@/lib/types/http";
@@ -41,15 +43,18 @@ function PrimaryTaskLine({
         hasPendingPermission: pendingInput.permission,
         interrupted: task.interrupted,
       })}
-      <span className="min-w-0 truncate font-medium" data-testid="tasks-list-row-title">
-        {task.title}
-      </span>
+      <TaskTitleHoverCard taskId={task.id} title={task.title}>
+        <span className="min-w-0 truncate font-medium" data-testid="tasks-list-row-title">
+          {task.title}
+        </span>
+      </TaskTitleHoverCard>
       {showPullRequest && (
         <span
           onClick={(event) => event.stopPropagation()}
           onPointerDown={(event) => event.stopPropagation()}
         >
           <PRTaskIcon taskId={task.id} />
+          <MRTaskIcon taskId={task.id} />
         </span>
       )}
       <ArchivedBadge task={task} />

@@ -25,6 +25,7 @@ import { repositorySlug } from "@/lib/repository-slug";
 import { buildSwitchToSession, selectTaskWithLayout } from "./task-select-helpers";
 import { useArchivedTaskState } from "./task-archived-context";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
+import { useWorkspaceMRs } from "@/hooks/domains/gitlab/use-task-mr";
 import { useGroupedSidebarView } from "./task-session-sidebar-grouped-view";
 import { useSidebarLinkActions } from "./task-session-sidebar-link-actions";
 import { buildArchivedSidebarItem } from "./task-session-sidebar-archived-item";
@@ -402,6 +403,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   const store = useAppStoreApi();
   const { t } = useTranslation();
   useRepositories(workspaceId);
+  useWorkspaceMRs(workspaceId);
   const pathname = usePathname();
 
   const {
