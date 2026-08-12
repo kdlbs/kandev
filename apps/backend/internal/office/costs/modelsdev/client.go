@@ -197,9 +197,7 @@ func (c *Client) LookupForModelWithVersion(ctx context.Context, modelID string) 
 	buf, bufVersion := c.snapshotBufferAndVersion()
 	if len(buf) > 0 {
 		if pricing, ok = lookupInDataset(buf, key); ok {
-			c.mu.Lock()
-			c.index[key] = pricing
-			c.mu.Unlock()
+			c.cacheIfVersionCurrent(key, pricing, bufVersion)
 			c.maybeRefresh(ctx)
 			return pricing, bufVersion, true
 		}
@@ -207,6 +205,26 @@ func (c *Client) LookupForModelWithVersion(ctx context.Context, modelID string) 
 
 	c.maybeRefresh(ctx)
 	return shared.ModelPricing{}, "", false
+}
+
+// cacheIfVersionCurrent stores pricing into the index under key, but only if
+// the catalogue is still the one snapshotVersion was captured from. Without
+// this guard, a Refresh landing between the caller's snapshotBufferAndVersion
+// call and this write would let a stale rate get written into the NEW index
+// — refreshPhysical rebuilds c.index from the new buffer and replaces the
+// map wholesale under c.mu — so a later, unrelated lookup for the same key
+// would then read old rates paired with the new catalogue version, the exact
+// provenance lie LookupForModelWithVersion exists to prevent
+// (docs/kandev/TODOS.md P1). The returned (pricing, bufVersion) pair for
+// THIS call is unaffected either way, since both were derived from the same
+// buf snapshot.
+func (c *Client) cacheIfVersionCurrent(key string, pricing shared.ModelPricing, snapshotVersion string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.catalogVersionLocked() != snapshotVersion {
+		return
+	}
+	c.index[key] = pricing
 }
 
 // snapshotBufferAndVersion returns the cache buffer and its catalogue

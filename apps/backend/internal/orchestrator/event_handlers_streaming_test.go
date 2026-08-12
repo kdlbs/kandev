@@ -1363,10 +1363,100 @@ func TestPublishPromptUsage_NonTerminalCompletionUsesReadyTurnSnapshot(t *testin
 		"non-terminal completion must carry the turn id the ready event just closed, not NULL")
 }
 
-// TestPublishPromptUsage_TerminalCompletionCarriesTurnID covers the terminal
-// (agent.completed) sibling of the case above: the marker snapshot taken by
-// markExecutionCompleted must also reach the published prompt-usage event.
-func TestPublishPromptUsage_TerminalCompletionCarriesTurnID(t *testing.T) {
+// TestMarkReadyTurn_ZeroGenerationQueuesFIFO is the unit-level regression
+// test for R2-F3: markReadyTurn's old promptGeneration==0 early return
+// rested on the false premise that generation-less completions never
+// publish agent.ready synchronously (see markReadyTurn's doc comment for the
+// actual mechanism — handleCompleteEventMarkState calls MarkReady
+// unconditionally). Two pending marks on the same (session, execution) with
+// no generation to disambiguate them must not collide — they queue FIFO and
+// come back out in the order they were recorded.
+func TestMarkReadyTurn_ZeroGenerationQueuesFIFO(t *testing.T) {
+	svc := &Service{}
+
+	svc.markReadyTurn("s1", "exec-1", 0, "turn-A")
+	svc.markReadyTurn("s1", "exec-1", 0, "turn-B")
+
+	first, ok := svc.takeReadyTurnMark("s1", "exec-1", 0)
+	require.True(t, ok, "expected a mark for the first pending completion")
+	require.Equal(t, "turn-A", first, "FIFO: the first mark recorded must be the first consumed")
+
+	second, ok := svc.takeReadyTurnMark("s1", "exec-1", 0)
+	require.True(t, ok, "expected a mark for the second pending completion")
+	require.Equal(t, "turn-B", second)
+
+	_, ok = svc.takeReadyTurnMark("s1", "exec-1", 0)
+	require.False(t, ok, "queue must be drained after both marks are consumed")
+
+	// A different execution on the same session must not share the queue.
+	svc.markReadyTurn("s1", "exec-2", 0, "turn-C")
+	_, ok = svc.takeReadyTurnMark("s1", "exec-1", 0)
+	require.False(t, ok, "exec-1's (already-drained) queue must not see exec-2's mark")
+	turnC, ok := svc.takeReadyTurnMark("s1", "exec-2", 0)
+	require.True(t, ok)
+	require.Equal(t, "turn-C", turnC)
+}
+
+// TestPublishPromptUsage_NonTerminalCompletionZeroGenerationUsesReadyTurnSnapshot
+// is the integration-level regression test for R2-F3: the generation-0
+// (generation-less transport) sibling of
+// TestPublishPromptUsage_NonTerminalCompletionUsesReadyTurnSnapshot. Before
+// the fix, markReadyTurn no-op'd for promptGeneration==0, so this scenario
+// always stored turn_id NULL even though agent.ready closes the turn here
+// exactly as it does for a generation-tracked completion.
+func TestPublishPromptUsage_NonTerminalCompletionZeroGenerationUsesReadyTurnSnapshot(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+	}
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "t1", v1.TaskStateInProgress)
+	agentMgr := &mockAgentManager{isAgentRunning: true}
+	agentMgr.currentPromptExecutionID = "exec-1"
+	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentMgr)
+	svc.turnService = &repoTurnService{repo: repo}
+	eb := &recordingEventBus{}
+	svc.eventBus = eb
+
+	turn, err := svc.turnService.StartTurn(ctx, "s1")
+	require.NoError(t, err)
+
+	svc.handleAgentReady(ctx, watcher.AgentEventData{
+		TaskID: "t1", SessionID: "s1", AgentExecutionID: "exec-1", PromptGeneration: 0,
+	})
+
+	active, err := svc.turnService.GetActiveTurn(ctx, "s1")
+	require.NoError(t, err)
+	require.Nil(t, active, "handleAgentReady must have already closed the turn")
+
+	svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:      "t1",
+		SessionID:   "s1",
+		ExecutionID: "exec-1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type:  agentEventComplete,
+			Usage: &streams.PromptUsage{InputTokens: 10, OutputTokens: 5},
+		},
+	})
+
+	usageEvent := findPromptUsageEvent(t, eb)
+	require.NotNil(t, usageEvent, "expected a session_prompt_usage.updated event to be published")
+	require.Equal(t, turn.ID, usageEvent.TurnID,
+		"generation-less non-terminal completion must carry the turn id the ready event just closed, not NULL")
+}
+
+// TestPublishPromptUsage_TerminalCompletionWithoutReadyMarkFallsBackToTerminalMarker
+// covers the terminal (agent.completed) fallback path for a completion that
+// never went through handleAgentReady's synchronous ready path at all — e.g.
+// a crash mid-prompt, where finishPromptCompletion never runs and no ready
+// mark is ever recorded. There, markTerminalExecution's live-turn snapshot
+// (captured before completeTurnForSession closes it) is the only source of
+// truth, so this test deliberately keeps that ordering.
+func TestPublishPromptUsage_TerminalCompletionWithoutReadyMarkFallsBackToTerminalMarker(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "")
@@ -1394,7 +1484,71 @@ func TestPublishPromptUsage_TerminalCompletionCarriesTurnID(t *testing.T) {
 	usageEvent := findPromptUsageEvent(t, eb)
 	require.NotNil(t, usageEvent, "expected a session_prompt_usage.updated event to be published")
 	require.Equal(t, turn.ID, usageEvent.TurnID,
-		"terminal completion must carry the marker's snapshotted turn id")
+		"terminal completion with no ready mark must fall back to the terminal marker's snapshotted turn id")
+}
+
+// TestPublishPromptUsage_TerminalCompletionAfterReadyUsesReadyTurnSnapshot is
+// the R2-F1 regression test: the REALISTIC terminal-completion ordering,
+// where agent.ready fires (and closes the turn) before the process later
+// exits and agent.completed marks the execution terminal.
+// finishPromptCompletion (lifecycle package) publishes agent.ready
+// synchronously on EVERY successful prompt completion, independent of
+// whether the process subsequently exits — so by the time
+// markExecutionCompleted runs, the turn markTerminalExecution would snapshot
+// via a live lookup is already closed (returns ""), and the correct turn id
+// is only available from the ready mark handleAgentReady recorded. Before
+// the R2-F1 fix, the terminal branch of handleCompleteStreamEvent read
+// terminalMarker.turnID directly and never consulted that mark, so this
+// scenario stored turn_id NULL.
+func TestPublishPromptUsage_TerminalCompletionAfterReadyUsesReadyTurnSnapshot(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+	}
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "t1", v1.TaskStateInProgress)
+	agentMgr := &mockAgentManager{isAgentRunning: true}
+	agentMgr.currentPromptExecutionID = "exec-1"
+	agentMgr.currentPromptGeneration.Store(7)
+	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentMgr)
+	svc.turnService = &repoTurnService{repo: repo}
+	eb := &recordingEventBus{}
+	svc.eventBus = eb
+
+	turn, err := svc.turnService.StartTurn(ctx, "s1")
+	require.NoError(t, err)
+
+	// The ready event closes the turn synchronously, exactly as it does for
+	// the non-terminal case — this fires unconditionally on every successful
+	// completion, terminal or not.
+	svc.handleAgentReady(ctx, watcher.AgentEventData{
+		TaskID: "t1", SessionID: "s1", AgentExecutionID: "exec-1", PromptGeneration: 7,
+	})
+
+	// The process exits sometime after: agent.completed marks the execution
+	// terminal. Its live-turn snapshot finds nothing, since ready already
+	// closed the turn above.
+	svc.markExecutionCompleted("s1", "exec-1")
+
+	svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:      "t1",
+		SessionID:   "s1",
+		ExecutionID: "exec-1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type:             agentEventComplete,
+			PromptGeneration: 7,
+			Usage:            &streams.PromptUsage{InputTokens: 10, OutputTokens: 5},
+		},
+	})
+
+	usageEvent := findPromptUsageEvent(t, eb)
+	require.NotNil(t, usageEvent, "expected a session_prompt_usage.updated event to be published")
+	require.Equal(t, turn.ID, usageEvent.TurnID,
+		"terminal completion after a prior ready event must carry the turn id from the ready mark, not NULL")
 }
 
 func findAllPromptUsageEvents(t *testing.T, eb *recordingEventBus, sessionID string) []lifecycle.SessionPromptUsageEventPayload {

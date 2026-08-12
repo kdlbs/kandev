@@ -13,10 +13,18 @@ import (
 // costContractVersion is the in-band activation point for the cache-split /
 // cost-provenance / turn-attribution columns (docs/kandev/TODOS.md P1).
 // The Rill cost extract has no schema versioning of its own, so a row
-// written under the old contract is distinguished by
-// cost_contract_version IS NULL, not by a date an analyst has to be told
-// out of band. Bump only if the contract's meaning changes again.
-const costContractVersion int64 = 1
+// written under a prior contract is distinguished by comparing
+// cost_contract_version, not by a date an analyst has to be told out of
+// band. Bump only if the contract's meaning changes again.
+//
+// v1 → v2: on the CostSourceUnpriced path, v1 forced Estimated=true
+// regardless of data.Usage.Estimated, conflating "we could not resolve a
+// price" with "the token counts themselves were synthesised" — two
+// different signals this same contract introduced CostSource specifically
+// to keep separate. v2 preserves data.Usage.Estimated verbatim on every
+// path (see resolveCostForUsage); cost_source=unpriced alone now carries
+// the pricing-failure signal.
+const costContractVersion int64 = 2
 
 // costResolution is resolveCostForUsage's output: the priced cost plus
 // everything needed to record provenance on the row. Kept separate from
@@ -36,7 +44,11 @@ type costResolution struct {
 // when the adapter forwarded a non-zero provider-reported cost
 // (claude-acp's usage_update.cost.amount). Layer B (models.dev) is queried
 // when a PricingLookup is wired; on miss or when no PricingLookup is
-// configured the row is unpriced.
+// configured the row is unpriced. Estimated is data.Usage.Estimated
+// verbatim on every branch, including unpriced: whether the tokens were
+// synthesised and whether a price could be resolved are independent facts,
+// and cost_source=unpriced already carries the second one — see
+// costContractVersion's v1→v2 doc comment.
 func (s *Service) resolveCostForUsage(ctx context.Context, data PromptUsageData) costResolution {
 	if data.Usage.ProviderReportedCostSubcents > 0 {
 		return costResolution{
@@ -46,11 +58,11 @@ func (s *Service) resolveCostForUsage(ctx context.Context, data PromptUsageData)
 		}
 	}
 	if s.pricingLookup == nil || data.Model == "" {
-		return costResolution{estimated: true, source: models.CostSourceUnpriced}
+		return costResolution{estimated: data.Usage.Estimated, source: models.CostSourceUnpriced}
 	}
 	pricing, catalogVersion, ok := s.lookupPricingWithVersion(ctx, data.Model)
 	if !ok {
-		return costResolution{estimated: true, source: models.CostSourceUnpriced}
+		return costResolution{estimated: data.Usage.Estimated, source: models.CostSourceUnpriced}
 	}
 	cost := costs.CalculateCostSubcents(
 		data.Usage.InputTokens,

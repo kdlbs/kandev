@@ -213,14 +213,20 @@ func TestPromptUsage_CostSourceModelsDevList(t *testing.T) {
 	if row.PricingCatalogVersion == nil || *row.PricingCatalogVersion != "2026-08-12T00:00:00Z" {
 		t.Errorf("PricingCatalogVersion = %v, want the fake's version", row.PricingCatalogVersion)
 	}
-	if row.CostContractVersion == nil || *row.CostContractVersion != 1 {
-		t.Errorf("CostContractVersion = %v, want 1 (in-band activation point)", row.CostContractVersion)
+	if row.CostContractVersion == nil || *row.CostContractVersion != 2 {
+		t.Errorf("CostContractVersion = %v, want 2 (in-band activation point)", row.CostContractVersion)
 	}
 }
 
 // TestPromptUsage_CostSourceUnpriced confirms the "both layers miss" case
 // (no provider-reported cost, no pricing lookup wired) is tagged unpriced,
-// not silently left as a bare estimated=true with no source at all.
+// not silently left as a bare estimated=true with no source at all. It also
+// covers the R2-F4 regression: usage carrying authoritative (non-synthesised)
+// token counts must keep Estimated=false even though the row is unpriced —
+// cost_source=unpriced alone carries "we could not resolve a price";
+// Estimated is strictly "the token counts were synthesised" (see
+// costContractVersion's v1→v2 doc comment in prompt_usage_cost.go). Before
+// that fix this case incorrectly forced Estimated=true.
 func TestPromptUsage_CostSourceUnpriced(t *testing.T) {
 	svc, eb := newTestServiceWithBus(t)
 	ctx := context.Background()
@@ -236,6 +242,7 @@ func TestPromptUsage_CostSourceUnpriced(t *testing.T) {
 		"usage": map[string]interface{}{
 			"input_tokens":  100,
 			"output_tokens": 200,
+			"estimated":     false,
 		},
 	})
 	if err := eb.Publish(ctx, events.BuildSessionPromptUsageSubject("session-src-c"), event); err != nil {
@@ -249,6 +256,9 @@ func TestPromptUsage_CostSourceUnpriced(t *testing.T) {
 	row := costs[0]
 	if row.CostSource == nil || *row.CostSource != models.CostSourceUnpriced {
 		t.Fatalf("CostSource = %v, want %q", row.CostSource, models.CostSourceUnpriced)
+	}
+	if row.Estimated {
+		t.Error("Estimated = true, want false: unpriced must not overwrite the adapter's own token-synthesis flag")
 	}
 }
 

@@ -1344,18 +1344,38 @@ func readyTurnKey(sessionID, executionID string, promptGeneration uint64) string
 	return fmt.Sprintf("%s\x00%s\x00%d", sessionID, executionID, promptGeneration)
 }
 
+// readyTurnZeroGenKey is deliberately generation-less: promptGeneration==0
+// means the transport carries no generation tracking at all (see
+// finishPromptCompletion / claimPromptCompletion's early return), so every
+// completion on this (session, execution) shares the same identity and must
+// be threaded through the FIFO queue in s.readyTurnMarksZeroGen instead of
+// the single-slot s.readyTurnMarks map.
+func readyTurnZeroGenKey(sessionID, executionID string) string {
+	return fmt.Sprintf("%s\x00%s", sessionID, executionID)
+}
+
 // markReadyTurn records the turn ID handleAgentReady confirmed for
 // (sessionID, executionID, promptGeneration), just before completeTurnForSession
-// closes it and removes it from activeTurns. promptGeneration==0 covers events
-// that never publish agent.ready synchronously via this path (see
-// finishPromptCompletion), so there is no race for takeReadyTurnMark to guard
-// against there and no-op is correct.
+// closes it and removes it from activeTurns. handleCompleteEventMarkState
+// (lifecycle package) publishes agent.ready synchronously and closes the turn
+// before the complete-stream frame for the same completion is processed on
+// EVERY transport, including promptGeneration==0 (generation-less)
+// completions — so this mark is required there too, not skippable. Because
+// generation-less completions share one key per (session, execution) with no
+// generation to disambiguate them, they queue FIFO in readyTurnMarksZeroGen
+// instead of the single-slot readyTurnMarks map: ready and complete-stream
+// for the same completion are strictly ordered per execution, so pending
+// marks and pending completions correlate 1:1 in arrival order.
 func (s *Service) markReadyTurn(sessionID, executionID string, promptGeneration uint64, turnID string) {
-	if sessionID == "" || executionID == "" || promptGeneration == 0 || turnID == "" {
+	if sessionID == "" || executionID == "" || turnID == "" {
+		return
+	}
+	expiresAt := time.Now().Add(completedExecutionRetention)
+	if promptGeneration == 0 {
+		s.pushZeroGenReadyTurnMark(sessionID, executionID, readyTurnMark{turnID: turnID, expiresAt: expiresAt})
 		return
 	}
 	key := readyTurnKey(sessionID, executionID, promptGeneration)
-	expiresAt := time.Now().Add(completedExecutionRetention)
 	s.readyTurnMarks.Store(key, readyTurnMark{turnID: turnID, expiresAt: expiresAt})
 	time.AfterFunc(completedExecutionRetention, func() {
 		s.deleteReadyTurnMarkIfExpired(key, expiresAt)
@@ -1365,10 +1385,14 @@ func (s *Service) markReadyTurn(sessionID, executionID string, promptGeneration 
 // takeReadyTurnMark consumes (and removes) the turn ID markReadyTurn recorded
 // for this completion, if any. A miss is expected whenever the completion
 // never went through handleAgentReady's synchronous ready path (or the mark
-// already expired); the caller falls back to a live lookup in that case.
+// already expired); the caller falls back to a live lookup or a terminal-
+// execution snapshot in that case.
 func (s *Service) takeReadyTurnMark(sessionID, executionID string, promptGeneration uint64) (string, bool) {
-	if sessionID == "" || executionID == "" || promptGeneration == 0 {
+	if sessionID == "" || executionID == "" {
 		return "", false
+	}
+	if promptGeneration == 0 {
+		return s.popZeroGenReadyTurnMark(sessionID, executionID)
 	}
 	key := readyTurnKey(sessionID, executionID, promptGeneration)
 	value, ok := s.readyTurnMarks.LoadAndDelete(key)
@@ -1391,6 +1415,73 @@ func (s *Service) deleteReadyTurnMarkIfExpired(key string, expiresAt time.Time) 
 	if !ok || !current.expiresAt.After(expiresAt) {
 		s.readyTurnMarks.Delete(key)
 	}
+}
+
+// pushZeroGenReadyTurnMark appends a generation-less ready-turn mark to the
+// FIFO queue for (sessionID, executionID). Guarded by
+// readyTurnMarksZeroGenMu: sync.Map has no atomic append, and multiple
+// pending marks for the same key are the expected case here (unlike the
+// generation-keyed map, where each key holds at most one).
+func (s *Service) pushZeroGenReadyTurnMark(sessionID, executionID string, mark readyTurnMark) {
+	key := readyTurnZeroGenKey(sessionID, executionID)
+	s.readyTurnMarksZeroGenMu.Lock()
+	if s.readyTurnMarksZeroGen == nil {
+		s.readyTurnMarksZeroGen = make(map[string][]readyTurnMark)
+	}
+	s.readyTurnMarksZeroGen[key] = append(s.readyTurnMarksZeroGen[key], mark)
+	s.readyTurnMarksZeroGenMu.Unlock()
+	time.AfterFunc(completedExecutionRetention, func() {
+		s.pruneExpiredZeroGenReadyTurnMarks(key)
+	})
+}
+
+// popZeroGenReadyTurnMark consumes the oldest live mark queued for
+// (sessionID, executionID), discarding any expired entries ahead of it.
+func (s *Service) popZeroGenReadyTurnMark(sessionID, executionID string) (string, bool) {
+	key := readyTurnZeroGenKey(sessionID, executionID)
+	s.readyTurnMarksZeroGenMu.Lock()
+	defer s.readyTurnMarksZeroGenMu.Unlock()
+	queue := s.readyTurnMarksZeroGen[key]
+	now := time.Now()
+	for len(queue) > 0 {
+		mark := queue[0]
+		queue = queue[1:]
+		if now.After(mark.expiresAt) {
+			continue
+		}
+		if len(queue) == 0 {
+			delete(s.readyTurnMarksZeroGen, key)
+		} else {
+			s.readyTurnMarksZeroGen[key] = queue
+		}
+		return mark.turnID, true
+	}
+	delete(s.readyTurnMarksZeroGen, key)
+	return "", false
+}
+
+// pruneExpiredZeroGenReadyTurnMarks drops expired entries from the front of
+// (sessionID+executionID)'s queue so an unconsumed mark cannot grow the map
+// unbounded, mirroring completedExecutions' expiry pattern.
+func (s *Service) pruneExpiredZeroGenReadyTurnMarks(key string) {
+	s.readyTurnMarksZeroGenMu.Lock()
+	defer s.readyTurnMarksZeroGenMu.Unlock()
+	queue := s.readyTurnMarksZeroGen[key]
+	if len(queue) == 0 {
+		return
+	}
+	now := time.Now()
+	kept := queue[:0]
+	for _, mark := range queue {
+		if now.Before(mark.expiresAt) {
+			kept = append(kept, mark)
+		}
+	}
+	if len(kept) == 0 {
+		delete(s.readyTurnMarksZeroGen, key)
+		return
+	}
+	s.readyTurnMarksZeroGen[key] = kept
 }
 
 func (s *Service) currentTurnIDForSession(ctx context.Context, sessionID string) string {
@@ -1932,22 +2023,23 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 		s.storeResumeToken(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID, payload.Data.ACPSessionID, lastMsgUUID)
 	}
 
-	// terminalMarker.turnID is only a valid snapshot for THIS event when
-	// terminalCompleteStream is true — a marker found but not yet allowed
-	// to complete-stream can carry a turn id captured for a prior mark
-	// (see markTerminalExecution), which would misattribute this usage
-	// event's cost. On the non-terminal path, handleAgentReady's synchronous
-	// agent.ready publish (and the completeTurnForSession it triggers) has
-	// already run and closed the turn by the time this complete-stream frame
-	// is processed — see markReadyTurn's doc comment — so a live lookup here
-	// finds nothing. Prefer the snapshot handleAgentReady recorded for this
-	// exact (session, execution, prompt generation) completion; fall back to
-	// the live lookup only when no such mark exists (e.g. this completion
-	// never went through handleAgentReady's synchronous path).
-	promptUsageTurnID := terminalMarker.turnID
-	if !terminalCompleteStream {
-		if turnID, ok := s.takeReadyTurnMark(payload.SessionID, payload.ExecutionID, payload.Data.PromptGeneration); ok {
-			promptUsageTurnID = turnID
+	// The generation-keyed (or generation-less FIFO) mark handleAgentReady
+	// recorded for THIS exact completion is always the first choice, on both
+	// the terminal and non-terminal paths: agent.ready is published
+	// synchronously and closes the turn before the complete-stream frame for
+	// the same completion is processed (see markReadyTurn's doc comment), so
+	// by the time either fallback below runs the turn is already gone from
+	// live state. A miss means this completion never went through
+	// handleAgentReady's synchronous ready path (e.g. an error/interrupt that
+	// completed the execution directly) — fall back to whichever snapshot the
+	// branch has: terminalMarker.turnID (captured by markTerminalExecution at
+	// agent.completed, valid here only because terminalCompleteStream is
+	// true — see markTerminalExecution) for terminal completions, or a live
+	// active-turn lookup for non-terminal ones.
+	promptUsageTurnID, ok := s.takeReadyTurnMark(payload.SessionID, payload.ExecutionID, payload.Data.PromptGeneration)
+	if !ok {
+		if terminalCompleteStream {
+			promptUsageTurnID = terminalMarker.turnID
 		} else {
 			promptUsageTurnID = s.currentTurnIDForSession(ctx, payload.SessionID)
 		}
