@@ -43,7 +43,7 @@ func TestMigrateLegacyBindingsUpdatesOnlyUnambiguousRows(t *testing.T) {
 	}
 }
 
-func TestMigrateLegacyBindingsPreservesEmptyUnconfiguredBuiltin(t *testing.T) {
+func TestMigrateLegacyBindingsNormalizesEmptyUnconfiguredBuiltin(t *testing.T) {
 	repo := &fakeRepository{agents: map[string]*models.UtilityAgent{
 		"builtin": {
 			ID:                  "builtin",
@@ -58,11 +58,46 @@ func TestMigrateLegacyBindingsPreservesEmptyUnconfiguredBuiltin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MigrateLegacyBindings() error = %v", err)
 	}
-	if updated != 0 {
-		t.Fatalf("MigrateLegacyBindings() updated = %d, want 0", updated)
+	if updated != 1 {
+		t.Fatalf("MigrateLegacyBindings() updated = %d, want 1", updated)
 	}
-	if got := repo.agents["builtin"].ProfileBindingState; got != models.ProfileBindingUnconfigured {
-		t.Fatalf("profile binding state = %q, want %q", got, models.ProfileBindingUnconfigured)
+	if got := repo.agents["builtin"].ProfileBindingState; got != models.ProfileBindingInherit {
+		t.Fatalf("profile binding state = %q, want %q", got, models.ProfileBindingInherit)
+	}
+	if repo.agents["builtin"].Enabled {
+		t.Fatal("migration enabled the built-in action")
+	}
+
+	updated, err = svc.MigrateLegacyBindings(context.Background())
+	if err != nil || updated != 0 {
+		t.Fatalf("second MigrateLegacyBindings() = (%d, %v), want (0, nil)", updated, err)
+	}
+}
+
+func TestMigrateLegacyBindingsPreservesConcreteAndCustomUnconfiguredBindings(t *testing.T) {
+	repo := &fakeRepository{agents: map[string]*models.UtilityAgent{
+		"builtin": {
+			ID:                  "builtin",
+			Builtin:             true,
+			AgentProfileID:      "deleted-profile",
+			ProfileBindingState: models.ProfileBindingUnconfigured,
+		},
+		"custom": {
+			ID:                  "custom",
+			ProfileBindingState: models.ProfileBindingUnconfigured,
+		},
+	}}
+	svc := NewService(repo)
+	svc.SetProfileResolver(fakeProfileResolver{})
+
+	updated, err := svc.MigrateLegacyBindings(context.Background())
+	if err != nil || updated != 0 {
+		t.Fatalf("MigrateLegacyBindings() = (%d, %v), want (0, nil)", updated, err)
+	}
+	for id, agent := range repo.agents {
+		if agent.ProfileBindingState != models.ProfileBindingUnconfigured {
+			t.Fatalf("%s binding state = %q, want %q", id, agent.ProfileBindingState, models.ProfileBindingUnconfigured)
+		}
 	}
 }
 
