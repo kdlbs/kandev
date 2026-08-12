@@ -3,6 +3,7 @@ import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
 import { t } from "@/lib/i18n";
 import { ReviewDetailPanelComponent } from "../review-detail-panel";
 import { ReviewItemSelector } from "../review-item-selector";
+import { reviewItemId } from "../review-selection";
 
 type MobileReviewPanelProps = {
   currentMobilePanel: MobileSessionPanel;
@@ -33,9 +34,15 @@ export function MobileReviewPanel({
       {selectedReview ? (
         <div className="min-h-0 flex-1">
           <ReviewDetailPanelComponent
-            key={`${selectedReview.providerId}:${selectedReview.reviewKey}`}
+            key={reviewItemId(selectedReview)}
             panelId={`mobile-review-${selectedReview.providerId}`}
-            params={{ providerId: selectedReview.providerId, reviewKey: selectedReview.reviewKey }}
+            params={{
+              providerId: selectedReview.providerId,
+              reviewKey: selectedReview.reviewKey,
+              connectionScope: selectedReview.connectionScope,
+              repositoryId: selectedReview.repositoryId,
+              changeRequestNumber: selectedReview.changeRequestNumber,
+            }}
             presentation="mobile"
           />
         </div>

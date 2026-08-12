@@ -29,18 +29,26 @@ const DEFAULT_OPTIONS: ConditionalReviewPanelOptions = {
   wasOffered: false,
 };
 
-const githubPR = { owner: "kandev", repo: "kandev", pr_number: 42 } as TaskPR;
+const githubPR = {
+  owner: "kandev",
+  repo: "kandev",
+  pr_number: 42,
+  pr_url: "https://github.com/kandev/kandev/pull/42",
+} as TaskPR;
 const gitlabMR = {
   host: "https://gitlab.example.test",
   project_path: "group/project",
   mr_iid: 7,
+  mr_url: "https://gitlab.example.test/group/project/-/merge_requests/7",
 } as TaskMR;
 const bitbucketReview = {
   providerId: "bitbucket",
   reviewKey: bitbucketReviewKey,
   title: "Bitbucket Pull Request #42",
   url: "https://bitbucket.example/workspace/repository/pull-requests/42",
+  connectionScope: "https://bitbucket.example",
   repositoryId: "repository-1",
+  changeRequestNumber: 42,
   state: "OPEN",
 };
 
@@ -87,20 +95,28 @@ function makeApi(
 describe("resolveCanonicalReviewPanelState", () => {
   it("normalizes GitHub and GitLab identities", () => {
     expect(resolveCanonicalReviewPanelState([githubPR], [])).toEqual({
+      kind: "github",
       params: {
         providerId: "github",
         provider: "github",
         reviewKey: githubPRKey,
+        connectionScope: "https://github.com",
+        repositoryId: "kandev/kandev",
+        changeRequestNumber: 42,
         prKey: githubPRKey,
         mrKey: undefined,
       },
       title: PULL_REQUEST_TITLE,
     });
     expect(resolveCanonicalReviewPanelState([], [gitlabMR])).toEqual({
+      kind: "gitlab",
       params: {
         providerId: "gitlab",
         provider: "gitlab",
         reviewKey: gitlabMRKey,
+        connectionScope: "https://gitlab.example.test",
+        repositoryId: "group/project",
+        changeRequestNumber: 7,
         prKey: undefined,
         mrKey: gitlabMRKey,
       },
@@ -110,10 +126,14 @@ describe("resolveCanonicalReviewPanelState", () => {
 
   it("normalizes a registered provider review", () => {
     expect(resolveCanonicalReviewPanelState([], [], [bitbucketReview])).toEqual({
+      kind: "registered",
       params: {
         providerId: "bitbucket",
         provider: undefined,
         reviewKey: bitbucketReviewKey,
+        connectionScope: "https://bitbucket.example",
+        repositoryId: "repository-1",
+        changeRequestNumber: 42,
         prKey: undefined,
         mrKey: undefined,
       },
@@ -123,10 +143,14 @@ describe("resolveCanonicalReviewPanelState", () => {
 
   it("requires selection when providers coexist", () => {
     expect(resolveCanonicalReviewPanelState([githubPR], [gitlabMR], [bitbucketReview])).toEqual({
+      kind: "multiple",
       params: {
         providerId: undefined,
         provider: undefined,
         reviewKey: undefined,
+        connectionScope: undefined,
+        repositoryId: undefined,
+        changeRequestNumber: undefined,
         prKey: undefined,
         mrKey: undefined,
       },
@@ -136,10 +160,14 @@ describe("resolveCanonicalReviewPanelState", () => {
 
   it("returns an empty canonical panel state when no review is linked", () => {
     expect(resolveCanonicalReviewPanelState([], [])).toEqual({
+      kind: "empty",
       params: {
         providerId: undefined,
         provider: undefined,
         reviewKey: undefined,
+        connectionScope: undefined,
+        repositoryId: undefined,
+        changeRequestNumber: undefined,
         prKey: undefined,
         mrKey: undefined,
       },

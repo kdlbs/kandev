@@ -41,6 +41,11 @@ function makeHostFactory(pluginId: string): PluginHostApi {
       invokeAction: async <TResponse>() => undefined as TResponse,
       baseUrl: "",
     },
+    i18n: {
+      locale: "en",
+      t: (key) => key,
+      useTranslation: () => ({ locale: "en", t: (key) => key }),
+    },
     ui: {} as PluginHostApi["ui"],
     useResponsiveBreakpoint,
     theme: "light",
@@ -154,6 +159,36 @@ describe("loadPlugins — initialize() timeout isolation", () => {
 });
 
 describe("loadPlugins — timed-out host mutation isolation", () => {
+  it("preserves the read-only localization capability on the fenced host", async () => {
+    const translated = vi.fn();
+    const importer = fakeImporterFor({
+      "/localized.js": (win) =>
+        (win as unknown as FakeWindow).registerKandevPlugin(PLUGIN_HANG_A_ID, {
+          initialize: (_registry: PluginRegistry, host: PluginHostApi) => {
+            translated(host.i18n.t("settings"));
+          },
+        }),
+    });
+    const hostFactory = (pluginId: string): PluginHostApi => ({
+      ...makeHostFactory(pluginId),
+      i18n: {
+        locale: "en",
+        t: (key) => `localized:${key}`,
+        useTranslation: () => ({ locale: "en", t: (key) => `localized:${key}` }),
+      },
+    });
+
+    await loadPlugins(
+      [activePlugin({ id: PLUGIN_HANG_A_ID, bundleUrl: "/localized.js" })],
+      hostFactory,
+      importer,
+      window,
+      10,
+    );
+
+    expect(translated).toHaveBeenCalledWith("localized:settings");
+  });
+
   it("closes UI resources opened before initialize times out", async () => {
     const modalClose = vi.fn();
     const taskLinkClose = vi.fn();
@@ -304,6 +339,9 @@ describe("loadPlugins — late host mutation isolation", () => {
             host.openTaskReview({
               providerId: "late",
               reviewKey: "late-review",
+              connectionScope: "https://late.example.test",
+              repositoryId: "late-repository",
+              changeRequestNumber: 1,
               title: "Late review",
               presentation: "desktop",
             });

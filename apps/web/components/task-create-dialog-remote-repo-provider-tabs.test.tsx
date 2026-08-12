@@ -59,6 +59,10 @@ const BITBUCKET_REPO: RemoteRepository = {
   private: true,
 };
 
+function PluginProviderIcon({ className }: { className?: string }) {
+  return <svg className={className} data-testid="plugin-provider-icon" />;
+}
+
 afterEach(() => {
   cleanup();
   pluginRegistry.unregisterPlugin("bitbucket-plugin");
@@ -104,18 +108,16 @@ describe("RemoteRepoChip provider tabs", () => {
     pluginRegistry.forPlugin("bitbucket-plugin").registerRepositoryProvider({
       id: "bitbucket",
       label: "Bitbucket",
-      icon: "bitbucket",
+      icon: PluginProviderIcon,
       listRepositories: async () => [],
       matchesURL: () => false,
       listBranches: async () => [],
       inspectURL: async () => null,
     });
 
-    const { container } = render(<RemoteRepositoryProviderIcon provider="bitbucket" />);
+    render(<RemoteRepositoryProviderIcon provider="bitbucket" />);
 
-    expect(container.querySelector("svg")?.classList.contains("tabler-icon-brand-bitbucket")).toBe(
-      true,
-    );
+    expect(screen.getByTestId("plugin-provider-icon")).not.toBeNull();
   });
 
   it("renders a registered-provider-style tab without requiring a built-in union member", () => {

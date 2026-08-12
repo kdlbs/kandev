@@ -5,12 +5,12 @@ import { PageShell } from "@/components/page-shell";
 import { lookupPluginIcon } from "@/lib/plugins/icons";
 import { pluginRegistry } from "@/lib/plugins/registry";
 import type { PluginRouteRegistration } from "@/lib/plugins/registry";
-import type { NavItem, PluginPageChrome } from "@/lib/plugins/types";
+import type { NavItem, PluginIcon, PluginPageChrome } from "@/lib/plugins/types";
 
 export interface ResolvedPageChrome {
   title: string;
   subtitle?: string;
-  icon?: string;
+  icon?: PluginIcon;
   backHref?: string;
   backLabel?: string;
   Actions?: ComponentType;

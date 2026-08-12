@@ -100,6 +100,23 @@ interface PluginHostApi {
     baseUrl: string;
   };
   ui: PluginUIApi; // named curated host components; no open Record index
+  // Plugin-scoped locale and translation API. Components use the reactive
+  // hook; registry getters may use the imperative translator.
+  i18n: {
+    readonly locale: string;
+    t(
+      key: string,
+      options?: {
+        defaultValue?: string;
+        count?: number;
+        values?: Readonly<Record<string, string | number>>;
+      },
+    ): string;
+    useTranslation(): {
+      readonly locale: string;
+      t: PluginHostApi["i18n"]["t"];
+    };
+  };
   // The resolved light/dark theme, read live on every access. `host` is built
   // once per plugin load, so copying this into a variable that outlives a
   // render freezes it; read it during render, and pair it with onThemeChange
@@ -539,17 +556,19 @@ own write).
 
 ```ts
 // icon: curated icon name (apps/web/lib/plugins/icons.ts — "ticket", "chart",
-// "robot", "database", ...); unknown/missing names render a puzzle glyph in
-// the sidebar.
+// "robot", "database", ...) or a plugin-owned component rendered with host
+// React. Unknown/missing names render a puzzle glyph in the sidebar.
 // section: "main" (default) renders as a top-level sidebar entry;
 // "integrations" renders inside the sidebar's Integrations section alongside
 // the first-party integration links (GitHub, Jira, ...). Hosts predating a
 // section value simply don't render items targeting it (additive change).
+type PluginIcon = string | React.ComponentType<{ className?: string }>;
+
 interface NavItem {
   id: string;
   label: string;
   path: string;
-  icon?: string;
+  icon?: PluginIcon;
   section?: "main" | "settings" | "integrations";
 }
 
@@ -558,7 +577,7 @@ interface NavItem {
 interface PluginPageChrome {
   title?: string; // default: nav-item label for the same path, else plugin name
   subtitle?: string; // muted text next to the title
-  icon?: string; // curated icon name; default: matching nav item's icon
+  icon?: PluginIcon; // default: matching nav item's icon
   backHref?: string; // back-link target (host default "/")
   backLabel?: string; // back-link label (host default "Kandev")
   actions?: React.ComponentType; // rendered on the right side of the topbar
@@ -571,6 +590,13 @@ interface PluginRouteOptions {
 }
 
 interface PluginRegistry {
+  // Installs flat locale catalogs under this plugin's isolated namespace.
+  // English is required as the fallback. Registration is atomic; unload
+  // removes all catalog bundles and locale changes invalidate host consumers.
+  registerTranslations(
+    catalogs: Readonly<Record<string, Readonly<Record<string, string>>>>,
+  ): void;
+
   // Top-level SPA route, e.g. "/jira". Component rendered by the SPA route resolver
   // when window.location path === path (exact match; trailing segments via ":param" not
   // required for v1 — exact + startsWith("/plugins/{id}") allowed). The host wraps the
@@ -697,7 +723,7 @@ interface IntegrationSettingsRegistration {
   id: string;
   label: string;
   description: string;
-  icon?: string;
+  icon?: PluginIcon;
   Component: React.ComponentType<{ workspaceId?: string }>;
 }
 
@@ -708,7 +734,7 @@ interface IntegrationSettingsRegistration {
 interface RepositoryProviderRegistration {
   id: string;
   label: string;
-  icon?: string;
+  icon?: PluginIcon;
   listRepositories(context: {
     workspaceId: string;
     /** Optional server-side search text. */
@@ -800,7 +826,7 @@ interface RepositoryInspection {
 interface TaskActionRegistration {
   id: string;
   label: string;
-  icon?: string;
+  icon?: PluginIcon;
   placement: "link";
   group?: string;
   visible?(context: PluginTaskActionContext): boolean;
@@ -817,7 +843,7 @@ interface PluginTaskActionContext {
 interface ReviewProviderRegistration {
   id: string;
   label: string;
-  icon?: string;
+  icon?: PluginIcon;
   changeRequestNoun: string;
   order: number;
   getSnapshot(taskId: string): readonly ReviewItemSummary[];
@@ -847,17 +873,18 @@ interface ReviewTaskAssociation {
   providerId: string;
   taskId: string;
   reviewKey: string;
-  // Optional immutable identity lets the host retain status matching when a
-  // repository path or display review key changes.
-  repositoryId?: string;
-  changeRequestNumber?: string | number;
+  connectionScope: string;
+  repositoryId: string;
+  changeRequestNumber: string | number;
 }
 interface ReviewItemSummary {
   providerId: string;
   reviewKey: string;
   title: string;
   url: string;
+  connectionScope: string;
   repositoryId: string;
+  changeRequestNumber: string | number;
   // open/opened/draft participates in native Create PR eligibility.
   state: string;
   statusBadge?: { label: string; tone?: string };
@@ -893,6 +920,9 @@ interface PluginReviewPanelProps {
   taskId: string;
   sessionId?: string;
   reviewKey: string;
+  connectionScope: string;
+  repositoryId: string;
+  changeRequestNumber: string | number;
 }
 
 type PluginPresentation = "desktop" | "mobile";
@@ -933,7 +963,7 @@ interface PluginTaskPanelProps {
 interface TaskPanelRegistration {
   id: string; // plugin-local panel id (unique within the plugin, not globally)
   title: string; // add-panel-menu row label and dockview tab title
-  icon?: string; // curated icon name (apps/web/lib/plugins/icons.ts)
+  icon?: PluginIcon;
   Component: React.ComponentType<PluginTaskPanelProps>; // wrapped in a PluginErrorBoundary
   mobileEnabled?: boolean; // include in the phone's grouped Panels picker. Default: false.
 }

@@ -10,6 +10,8 @@ const TASK_ID = "task-a";
 const TASK_ICON_TEST_ID = "registered-change-request-task-icon-task-a";
 const refreshAssociations = vi.fn(async () => undefined);
 const refreshReview = vi.fn(async () => undefined);
+const CONNECTION_SCOPE = "https://bitbucket.example.test";
+const REPOSITORY_ID = "workspace/repo";
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
@@ -30,7 +32,9 @@ function registerProvider() {
               reviewKey: "repo#1",
               title: "Provider-neutral contract",
               url: "https://bitbucket.example.test/workspace/repo/pull-requests/1",
-              repositoryId: "workspace/repo",
+              connectionScope: CONNECTION_SCOPE,
+              repositoryId: REPOSITORY_ID,
+              changeRequestNumber: 1,
               state: "OPEN",
               taskStatus: {
                 number: 1,
@@ -45,9 +49,30 @@ function registerProvider() {
     subscribe: () => () => undefined,
     refresh: refreshReview,
     getAssociationSnapshot: () => [
-      { providerId: "bitbucket", taskId: TASK_ID, reviewKey: "repo#1" },
-      { providerId: "bitbucket", taskId: TASK_ID, reviewKey: "repo#2" },
-      { providerId: "bitbucket", taskId: "task-b", reviewKey: "repo#3" },
+      {
+        providerId: "bitbucket",
+        taskId: TASK_ID,
+        reviewKey: "repo#1",
+        connectionScope: CONNECTION_SCOPE,
+        repositoryId: REPOSITORY_ID,
+        changeRequestNumber: 1,
+      },
+      {
+        providerId: "bitbucket",
+        taskId: TASK_ID,
+        reviewKey: "repo#2",
+        connectionScope: CONNECTION_SCOPE,
+        repositoryId: REPOSITORY_ID,
+        changeRequestNumber: 2,
+      },
+      {
+        providerId: "bitbucket",
+        taskId: "task-b",
+        reviewKey: "repo#3",
+        connectionScope: CONNECTION_SCOPE,
+        repositoryId: REPOSITORY_ID,
+        changeRequestNumber: 3,
+      },
     ],
     subscribeAssociations: () => () => undefined,
     refreshAssociations,
@@ -75,7 +100,9 @@ describe("RegisteredChangeRequestTaskIcon", () => {
           reviewKey: "old-name/repo#1",
           title: "Recreated repository at old path",
           url: "https://bitbucket.example.test/old-name/repo/pull-requests/1",
+          connectionScope: CONNECTION_SCOPE,
           repositoryId: "different-repo-uuid",
+          changeRequestNumber: 1,
           state: "OPEN",
           taskStatus: {
             number: 1,
@@ -89,7 +116,9 @@ describe("RegisteredChangeRequestTaskIcon", () => {
           reviewKey: "new-name/repo#1",
           title: "Repository renamed",
           url: "https://bitbucket.example.test/new-name/repo/pull-requests/1",
+          connectionScope: CONNECTION_SCOPE,
           repositoryId: "repo-uuid",
+          changeRequestNumber: 1,
           state: "OPEN",
           taskStatus: {
             number: 1,
@@ -106,6 +135,7 @@ describe("RegisteredChangeRequestTaskIcon", () => {
           providerId: "bitbucket",
           taskId: TASK_ID,
           reviewKey: "old-name/repo#1",
+          connectionScope: CONNECTION_SCOPE,
           repositoryId: "repo-uuid",
           changeRequestNumber: 1,
         },
@@ -250,7 +280,9 @@ describe("RegisteredChangeRequestTaskIcon status hydration", () => {
                 reviewKey: "repo#1",
                 title: "Failing build",
                 url: "https://bitbucket.example.test/workspace/repo/pull-requests/1",
-                repositoryId: "workspace/repo",
+                connectionScope: CONNECTION_SCOPE,
+                repositoryId: REPOSITORY_ID,
+                changeRequestNumber: 1,
                 state: "OPEN",
                 taskStatus: {
                   number: 1,
@@ -265,7 +297,14 @@ describe("RegisteredChangeRequestTaskIcon status hydration", () => {
           };
         }),
       getAssociationSnapshot: () => [
-        { providerId: "bitbucket", taskId: TASK_ID, reviewKey: "repo#1" },
+        {
+          providerId: "bitbucket",
+          taskId: TASK_ID,
+          reviewKey: "repo#1",
+          connectionScope: CONNECTION_SCOPE,
+          repositoryId: REPOSITORY_ID,
+          changeRequestNumber: 1,
+        },
       ],
       subscribeAssociations: () => () => undefined,
       refreshAssociations: async () => undefined,

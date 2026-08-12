@@ -34,6 +34,7 @@ import {
 } from "./layout-manager";
 import type { BuiltInPreset, LayoutState, LayoutGroupIds } from "./layout-manager";
 import type { CommitDetailTarget } from "@/components/task/changes-diff-target";
+import type { ReviewItemSummary } from "@/lib/plugins/types";
 import { performEnvSwitch, replaceStaleSessionPanels } from "./dockview-env-switch";
 import { enforcePinnedTargets } from "./dockview-pinned-enforce";
 import {
@@ -175,7 +176,17 @@ type DockviewStore = {
   /** Open a GitLab merge request detail panel keyed by host/project/iid. */
   addMRPanel: (mrKey: string) => void;
   /** Open a provider-neutral review detail panel. */
-  addReviewPanel: (providerId: string, reviewKey: string, title?: string) => void;
+  addReviewPanel: (
+    review: Pick<
+      ReviewItemSummary,
+      | "providerId"
+      | "reviewKey"
+      | "connectionScope"
+      | "repositoryId"
+      | "changeRequestNumber"
+      | "title"
+    >,
+  ) => void;
   addTerminalPanel: (
     terminalId?: string,
     groupId?: string,

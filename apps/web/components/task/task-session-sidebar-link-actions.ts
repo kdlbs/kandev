@@ -5,7 +5,11 @@ import type { ReactNode } from "react";
 import type { KanbanState } from "@/lib/state/slices";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import { usePluginRegistry } from "@/lib/plugins/registry";
-import type { PluginHostRepository, PluginTaskActionContext } from "@/lib/plugins/types";
+import type {
+  PluginHostRepository,
+  PluginIcon,
+  PluginTaskActionContext,
+} from "@/lib/plugins/types";
 import type { PluginTaskActionRegistration } from "@/lib/plugins/registry";
 import type { Repository } from "@/lib/types/http";
 import { toPluginHostRepository } from "@/lib/plugins/host-repository";
@@ -40,7 +44,7 @@ export type SidebarExternalLinkTarget = {
 export type PluginLinkMenuAction = {
   id: string;
   label: string;
-  icon?: string;
+  icon?: PluginIcon;
   onSelect: () => void;
 };
 

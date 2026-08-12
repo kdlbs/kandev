@@ -12,6 +12,10 @@ import {
 
 const PLUGIN_ID = "remote-repo-chip-icon-test";
 
+function PluginProviderIcon({ className }: { className?: string }) {
+  return <svg className={className} data-testid="plugin-provider-icon" />;
+}
+
 afterEach(() => {
   cleanup();
   pluginRegistry.unregisterPlugin(PLUGIN_ID);
@@ -22,7 +26,7 @@ describe("RemoteRepoChip registered provider icon", () => {
     pluginRegistry.forPlugin(PLUGIN_ID).registerRepositoryProvider({
       id: "bitbucket",
       label: "Bitbucket",
-      icon: "bitbucket",
+      icon: PluginProviderIcon,
       listRepositories: async () => [],
       matchesURL: () => false,
       listBranches: async () => [],
@@ -66,7 +70,9 @@ describe("RemoteRepoChip registered provider icon", () => {
     );
 
     expect(
-      screen.getByTestId("remote-repo-chip-trigger").querySelector(".tabler-icon-brand-bitbucket"),
-    ).not.toBeNull();
+      screen
+        .getByTestId("remote-repo-chip-trigger")
+        .contains(screen.getByTestId("plugin-provider-icon")),
+    ).toBe(true);
   });
 });

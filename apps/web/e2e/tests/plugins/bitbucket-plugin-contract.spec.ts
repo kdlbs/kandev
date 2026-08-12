@@ -108,7 +108,7 @@ test.describe("Bitbucket plugin contract", () => {
       "task-context-link-plugin-kandev-plugin-e2e:link-bitbucket-pull-request",
     );
     await expect(bitbucketLink).toHaveText("Bitbucket Pull Request");
-    await expect(bitbucketLink.locator("svg.tabler-icon-brand-bitbucket")).toBeVisible();
+    await expect(bitbucketLink.getByTestId("fixture-bitbucket-icon")).toBeVisible();
     await bitbucketLink.click();
     const linkDialog = testPage.getByRole("dialog", { name: "Link Bitbucket pull request" });
     await expect(linkDialog).toContainText("Use a Bitbucket pull request URL for this task.");

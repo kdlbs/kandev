@@ -44,6 +44,7 @@ export function wrapRepositoryProviderLifecycle(
         createChangeRequest({ ...context, signal: lifecycleSignal }),
       );
   }
+  preserveAccessor(wrapped, provider, "label");
   return wrapped;
 }
 
@@ -104,5 +105,20 @@ export function wrapReviewProviderLifecycle(
         unlink({ ...context, signal: lifecycleSignal }),
       );
   }
+  preserveAccessor(wrapped, provider, "label");
+  preserveAccessor(wrapped, provider, "changeRequestNoun");
   return wrapped;
+}
+
+function preserveAccessor<T extends object, Key extends keyof T>(
+  target: T,
+  source: T,
+  key: Key,
+): void {
+  if (!Object.getOwnPropertyDescriptor(source, key)?.get) return;
+  Object.defineProperty(target, key, {
+    configurable: true,
+    enumerable: true,
+    get: () => source[key],
+  });
 }

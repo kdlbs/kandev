@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { pluginRegistry } from "./registry";
 import type { RepositoryProviderRegistration } from "./types";
+import { i18n } from "@/lib/i18n";
 
 const TASK_SIDEBAR_SLOT = "task-sidebar";
 const TASK_CREATED_ACTION = "task.created";
@@ -48,6 +49,37 @@ describe("pluginRegistry", () => {
     });
   });
 
+  it("invalidates registration consumers when the host locale changes", async () => {
+    const originalLocale = i18n.language;
+    const listener = vi.fn();
+    const unsubscribe = pluginRegistry.subscribe(listener);
+    try {
+      await i18n.changeLanguage(originalLocale === "pt-pt" ? "en" : "pt-pt");
+      expect(listener).toHaveBeenCalled();
+    } finally {
+      unsubscribe();
+      await i18n.changeLanguage(originalLocale);
+    }
+  });
+
+  it("invalidates consumers when a plugin replaces or removes its translation catalog", () => {
+    const listener = vi.fn();
+    const unsubscribe = pluginRegistry.subscribe(listener);
+    const scoped = pluginRegistry.forPlugin("plugin-a");
+    try {
+      scoped.registerTranslations({ en: { greeting: "Hello" } });
+      expect(listener).toHaveBeenCalledTimes(1);
+
+      scoped.registerTranslations({ en: { greeting: "Welcome" } });
+      expect(listener).toHaveBeenCalledTimes(2);
+
+      pluginRegistry.unregisterPlugin("plugin-a");
+      expect(listener).toHaveBeenCalledTimes(3);
+    } finally {
+      unsubscribe();
+    }
+  });
+
   it("registers and returns a nav item", () => {
     const scoped = pluginRegistry.forPlugin("plugin-a");
 
@@ -84,6 +116,12 @@ describe("pluginRegistry", () => {
       path: "/settings/plugins/plugin-a",
       Component: Settings,
     });
+  });
+});
+
+describe("pluginRegistry — slots", () => {
+  afterEach(() => {
+    cleanup("plugin-a", "plugin-b");
   });
 
   it("registers a slot component and only returns it for the matching slot", () => {
@@ -500,6 +538,24 @@ describe("pluginRegistry — repository provider contracts", () => {
       id: SOURCE_CONTROL_PROVIDER_ID,
       label: SOURCE_CONTROL_PROVIDER_ID,
     });
+  });
+
+  it("preserves lazy provider labels so locale changes do not require plugin reload", () => {
+    let label = "Source control";
+    const provider = repositoryProvider(SOURCE_CONTROL_PROVIDER_ID);
+    Object.defineProperty(provider, "label", {
+      enumerable: true,
+      get: () => label,
+    });
+    pluginRegistry.forPlugin(PRIMARY_PLUGIN_ID).registerRepositoryProvider(provider);
+
+    expect(pluginRegistry.getRepositoryProvider(SOURCE_CONTROL_PROVIDER_ID)?.label).toBe(
+      "Source control",
+    );
+    label = "Controlo de código-fonte";
+    expect(pluginRegistry.getRepositoryProvider(SOURCE_CONTROL_PROVIDER_ID)?.label).toBe(
+      "Controlo de código-fonte",
+    );
   });
 
   it("rejects a repository provider not declared for its plugin when declarations are available", () => {

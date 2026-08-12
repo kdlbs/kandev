@@ -170,14 +170,11 @@ function associationMatchesReview(
   association: ReviewTaskAssociation,
   review: ReviewItemSummary,
 ): boolean {
-  if (association.repositoryId && association.changeRequestNumber !== undefined) {
-    return Boolean(
-      association.repositoryId === review.repositoryId &&
-      review.taskStatus &&
-      String(association.changeRequestNumber) === String(review.taskStatus.number),
-    );
-  }
-  return association.reviewKey === review.reviewKey;
+  return Boolean(
+    association.repositoryId === review.repositoryId &&
+    association.connectionScope === review.connectionScope &&
+    String(association.changeRequestNumber) === String(review.changeRequestNumber),
+  );
 }
 
 export function RegisteredChangeRequestTaskIcon({ taskId }: { taskId: string }) {

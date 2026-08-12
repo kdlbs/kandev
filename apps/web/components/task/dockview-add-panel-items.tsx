@@ -29,6 +29,7 @@ import { RepositoryScriptsMenuItems } from "./repository-scripts-menu";
 import { SessionReopenMenuItems } from "./session-reopen-menu";
 import { TerminalReopenMenuItems } from "./terminal-reopen-menu";
 import { useNormalizedTaskReviews } from "./review-panel-provider";
+import { reviewItemId } from "./review-selection";
 import type { PortForwardingVisibility } from "./port-forwarding-visibility-provider";
 
 export type AddPanelMenuState = {
@@ -239,10 +240,10 @@ function PluginReviewPanelMenuItems({ taskId }: { taskId: string | null }) {
   );
   return reviews.map((review) => (
     <DropdownMenuItem
-      key={`${review.providerId}:${review.reviewKey}`}
-      onClick={() => addReviewPanel(review.providerId, review.reviewKey, review.title)}
+      key={reviewItemId(review)}
+      onClick={() => addReviewPanel(review)}
       className={MENU_ITEM_CLASS}
-      data-testid={`add-panel-review-item-${review.providerId}-${review.reviewKey}`}
+      data-testid={`add-panel-review-item-${reviewItemId(review)}`}
     >
       <IconGitPullRequest className={MENU_ICON_CLASS} />
       {review.title}

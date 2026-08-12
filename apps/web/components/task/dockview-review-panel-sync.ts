@@ -24,11 +24,15 @@ export type CanonicalReviewParams = {
   providerId: string | undefined;
   provider: "github" | "gitlab" | undefined;
   reviewKey: string | undefined;
+  connectionScope: string | undefined;
+  repositoryId: string | undefined;
+  changeRequestNumber: string | number | undefined;
   prKey: string | undefined;
   mrKey: string | undefined;
 };
 
 export type CanonicalReviewPanelState = {
+  kind: "multiple" | "github" | "gitlab" | "registered" | "empty";
   params: CanonicalReviewParams;
   title: string;
 };
@@ -44,14 +48,18 @@ export function resolveCanonicalReviewPanelState(
   registeredReviews.forEach((review) => linkedProviderIds.add(review.providerId));
   if (linkedProviderIds.size > 1) {
     return {
+      kind: "multiple",
       params: {
         providerId: undefined,
         provider: undefined,
         reviewKey: undefined,
+        connectionScope: undefined,
+        repositoryId: undefined,
+        changeRequestNumber: undefined,
         prKey: undefined,
         mrKey: undefined,
       },
-      title: "Reviews",
+      title: t("integrations:reviews", { summary: "" }),
     };
   }
 
@@ -59,14 +67,18 @@ export function resolveCanonicalReviewPanelState(
   if (pr) {
     const key = prTaskKey(pr);
     return {
+      kind: "github",
       params: {
         providerId: "github",
         provider: "github",
         reviewKey: key,
+        connectionScope: reviewConnectionScope(pr.pr_url, "github"),
+        repositoryId: pr.repository_id || `${pr.owner}/${pr.repo}`,
+        changeRequestNumber: pr.pr_number,
         prKey: key,
         mrKey: undefined,
       },
-      title: "Pull Request",
+      title: t("task:pullRequest2"),
     };
   }
 
@@ -74,14 +86,18 @@ export function resolveCanonicalReviewPanelState(
   if (mr) {
     const key = mrTaskKey(mr);
     return {
+      kind: "gitlab",
       params: {
         providerId: "gitlab",
         provider: "gitlab",
         reviewKey: key,
+        connectionScope: mr.host || reviewConnectionScope(mr.mr_url, "gitlab"),
+        repositoryId: mr.repository_id || mr.project_path,
+        changeRequestNumber: mr.mr_iid,
         prKey: undefined,
         mrKey: key,
       },
-      title: "Merge Request",
+      title: t("task:mergeRequestLabel"),
     };
   }
 
@@ -90,10 +106,14 @@ export function resolveCanonicalReviewPanelState(
   );
   if (registered) {
     return {
+      kind: "registered",
       params: {
         providerId: registered.providerId,
         provider: undefined,
         reviewKey: registered.reviewKey,
+        connectionScope: registered.connectionScope,
+        repositoryId: registered.repositoryId,
+        changeRequestNumber: registered.changeRequestNumber,
         prKey: undefined,
         mrKey: undefined,
       },
@@ -102,28 +122,37 @@ export function resolveCanonicalReviewPanelState(
   }
 
   return {
+    kind: "empty",
     params: {
       providerId: undefined,
       provider: undefined,
       reviewKey: undefined,
+      connectionScope: undefined,
+      repositoryId: undefined,
+      changeRequestNumber: undefined,
       prKey: undefined,
       mrKey: undefined,
     },
-    title: "PR Details",
+    title: t("common:prDetails"),
   };
 }
+
+const CANONICAL_REVIEW_PARAM_KEYS = [
+  "providerId",
+  "provider",
+  "reviewKey",
+  "connectionScope",
+  "repositoryId",
+  "changeRequestNumber",
+  "prKey",
+  "mrKey",
+] as const satisfies readonly (keyof CanonicalReviewParams)[];
 
 function hasSameReviewParams(
   current: Record<string, unknown> | undefined,
   next: CanonicalReviewParams,
 ): boolean {
-  return (
-    current?.providerId === next.providerId &&
-    current?.provider === next.provider &&
-    current?.reviewKey === next.reviewKey &&
-    current?.prKey === next.prKey &&
-    current?.mrKey === next.mrKey
-  );
+  return CANONICAL_REVIEW_PARAM_KEYS.every((key) => current?.[key] === next[key]);
 }
 
 export type ConditionalReviewPanelAction = "add" | "remove" | "sync" | "none";
@@ -232,12 +261,7 @@ function syncExistingReviewPanel(
 }
 
 function hasCanonicalReview(next: CanonicalReviewPanelState): boolean {
-  return (
-    next.params.providerId !== undefined ||
-    next.params.provider !== undefined ||
-    next.params.reviewKey !== undefined ||
-    next.title === "Reviews"
-  );
+  return next.kind !== "empty";
 }
 
 function resolveReviewPanelAction(
@@ -284,7 +308,21 @@ export function syncCanonicalReviewPanel(
 }
 
 function reviewIdentity(state: CanonicalReviewPanelState): string {
-  return `${state.params.providerId ?? "none"}:${state.params.reviewKey ?? ""}:${state.title}`;
+  return [
+    state.kind,
+    state.params.providerId ?? "none",
+    state.params.connectionScope ?? "",
+    state.params.repositoryId ?? "",
+    String(state.params.changeRequestNumber ?? ""),
+  ].join(":");
+}
+
+function reviewConnectionScope(url: string, fallback: string): string {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return fallback;
+  }
 }
 
 /** Keep an existing canonical PR Details panel in sync with the active task. */

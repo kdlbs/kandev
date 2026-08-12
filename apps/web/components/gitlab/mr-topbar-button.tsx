@@ -74,7 +74,15 @@ export function openMobileMRReview(
   sessionId: string,
   mr: TaskMR,
 ) {
-  setReview(sessionId, reviewItemId({ providerId: "gitlab", reviewKey: mrTaskKey(mr) }));
+  setReview(
+    sessionId,
+    reviewItemId({
+      providerId: "gitlab",
+      connectionScope: mr.host,
+      repositoryId: mr.repository_id || mr.project_path,
+      changeRequestNumber: mr.mr_iid,
+    }),
+  );
 }
 
 export function openDesktopMRReview(

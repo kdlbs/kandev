@@ -82,6 +82,9 @@ surfaces. The core stays small; the ecosystem grows independently.
   toolbar, scope, task-menu, and linked-task primitives exposed through `host.ui`.
   Plugins provide normalized data and callbacks; task presets open the native
   `TaskCreateDialog`, while review remains owned by the task review-provider surface.
+- Native UI plugins register bounded, plugin-owned translation catalogs and consume them through a
+  host-scoped imperative/reactive localization API. Locale changes follow Kandev without bundling a
+  second i18n runtime, and disable/reload/uninstall removes only that plugin's resources.
 
 ## Data model
 

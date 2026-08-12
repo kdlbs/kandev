@@ -273,8 +273,19 @@ describe("addPluginPanel / closePluginPanels", () => {
 describe("addReviewPanel", () => {
   const providerId = "bitbucket";
   const reviewKey = "project/repository/42";
+  const repositoryId = "repository-uuid";
+  const connectionScope = "https://bitbucket.example.test";
+  const changeRequestNumber = 42;
   const title = "Bitbucket Pull Request";
-  const panelId = `review-detail|${providerId}|${encodeURIComponent(reviewKey)}`;
+  const review = {
+    providerId,
+    reviewKey,
+    connectionScope,
+    repositoryId,
+    changeRequestNumber,
+    title,
+  };
+  const panelId = reviewPanelId(review);
 
   it("opens a provider-neutral panel with normalized params in the canonical review group", () => {
     const api = makeApi();
@@ -286,11 +297,17 @@ describe("addReviewPanel", () => {
       position: { referenceGroup: "provider-review-group" },
     });
 
-    actions.addReviewPanel(providerId, reviewKey, title);
+    actions.addReviewPanel(review);
 
     const panel = api.getPanel(panelId) as unknown as MockPanel;
     expect(panel.title).toBe(title);
-    expect(panel.params).toEqual({ providerId, reviewKey });
+    expect(panel.params).toEqual({
+      providerId,
+      reviewKey,
+      connectionScope,
+      repositoryId,
+      changeRequestNumber,
+    });
     expect(panel.group.id).toBe("provider-review-group");
   });
 
@@ -301,10 +318,10 @@ describe("addReviewPanel", () => {
       id: "pr-detail",
       component: "pr-detail",
       title: PR_DETAILS_TITLE,
-      params: { providerId, reviewKey },
+      params: { providerId, reviewKey, connectionScope, repositoryId, changeRequestNumber },
     });
 
-    actions.addReviewPanel(providerId, reviewKey, title);
+    actions.addReviewPanel(review);
 
     expect((api.getPanel("pr-detail") as unknown as MockPanel).isActive).toBe(true);
     expect(api.getPanel(panelId)).toBeUndefined();
@@ -314,10 +331,26 @@ describe("addReviewPanel", () => {
     const api = makeApi();
     const actions = buildExtraPanelActions(makeStore(api).get);
 
-    actions.addReviewPanel("a|b", "c", "First");
-    actions.addReviewPanel("a", "b|c", "Second");
+    const first = {
+      providerId: "a|b",
+      reviewKey: "mutable",
+      connectionScope: "https://one.example.test",
+      repositoryId: "c",
+      changeRequestNumber: 1,
+      title: "First",
+    };
+    const second = {
+      providerId: "a",
+      reviewKey: "mutable",
+      connectionScope: "https://two.example.test",
+      repositoryId: "b|c",
+      changeRequestNumber: 1,
+      title: "Second",
+    };
+    actions.addReviewPanel(first);
+    actions.addReviewPanel(second);
 
-    expect(api.getPanel(reviewPanelId("a|b", "c"))).toBeDefined();
-    expect(api.getPanel(reviewPanelId("a", "b|c"))).toBeDefined();
+    expect(api.getPanel(reviewPanelId(first))).toBeDefined();
+    expect(api.getPanel(reviewPanelId(second))).toBeDefined();
   });
 });

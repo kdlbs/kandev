@@ -209,6 +209,7 @@ slice shapes in a released plugin.
 | registerWsHandler           | registerWsHandler(action, handler(payload)); receives actions bridged from lib/ws                                                                                                                                                                                                                      | Active ui.bundle                                                       | Handler is removed on disable/uninstall; tolerate duplicate/replayed actions                                                                                                                                    | registry.registerWsHandler("acme.updated", renderUpdate)                                                            |
 | registerKeybinding          | registerKeybinding(id, handler(event)); id must be declared in ui.keybindings; users can override the effective combo                                                                                                                                                                                  | ui.bundle and ui.keybindings[]                                         | Handler is removed on disable/uninstall; editable targets/core shortcuts win                                                                                                                                    | registry.registerKeybinding("open-panel", () => host.openModal(...))                                                |
 | registerIntegrationSettings | One provider-owned settings component mounted inside Settings > Integrations                                                                                                                                                                                                                           | Active ui.bundle                                                       | Registration is exclusive by id and revoked on unload; host owns workspace selection and settings navigation                                                                                                    | registry.registerIntegrationSettings({ id: "acme", ... })                                                           |
+| registerTranslations        | Flat English fallback plus optional Kandev locale catalogs, isolated to this plugin's namespace                                                                                                                                                                                                        | Active ui.bundle                                                       | Catalogs are replaced atomically, removed on unload, and registry consumers invalidate when the host locale changes                                                                                             | registry.registerTranslations({ en: { settings: "Settings" }, "pt-pt": { settings: "Definições" } })                |
 | registerRepositoryProvider  | Provider-owned paged/searchable repository list, URL match/inspect, branches, and optional native `createChangeRequest` transport                                                                                                                                                                      | ui.bundle and matching `repository_providers[]` id                     | Registration and in-flight callbacks are result-fenced on unload; host owns native task and Create PR UI                                                                                                        | registry.registerRepositoryProvider({ id: "acme", ...provider })                                                    |
 | registerTaskAction          | Child action inside the task menu's native Link section                                                                                                                                                                                                                                                | Active ui.bundle                                                       | Action is revoked on unload; host supplies current task/workspace and desktop/mobile presentation                                                                                                               | registry.registerTaskAction({ id: "link-pr", placement: "link", ... })                                              |
 | registerReviewProvider      | Normalized task reviews, workspace associations, unlink, and shared Review panel                                                                                                                                                                                                                       | ui.bundle and matching `repository_providers[]` id                     | Snapshots/subscriptions are owner-scoped and revoked on unload; host owns status chrome, indicators, unlink UI, and responsive Review placement                                                                 | registry.registerReviewProvider({ id: "acme", ...reviews })                                                         |
@@ -217,6 +218,7 @@ slice shapes in a released plugin.
 | registerTaskFilter          | { id, label, getOptions(), matches(context, selected) }; adds a client-side, multi-select filter section to the kanban board's display dropdown, alongside Workflow/Repository                                                                                                                         | Active ui.bundle                                                       | Filter is revoked on disable/uninstall; selections are ephemeral (not persisted); matches is only called for a non-empty selection, and a throw is caught, logged, and treated as non-matching                  | registry.registerTaskFilter({ id: "tags", label: "Tags", getOptions: listTagOptions, matches: taskHasSelectedTag }) |
 | host.React / host.jsx       | Shared React instance and React.createElement alias                                                                                                                                                                                                                                                    | Active ui.bundle                                                       | No cleanup; never bundle a second React/Radix runtime                                                                                                                                                           | const h = host.jsx                                                                                                  |
 | host.context                | Versioned provider-neutral reads/subscriptions for active workspace, native task creation, and exact provider repository identity                                                                                                                                                                      | Active ui.bundle                                                       | Subscriptions are generation-owned and revoked on unload; records are stable SDK shapes, not private app state                                                                                                  | const context = host.context.getTaskCreationContext(workspaceId)                                                    |
+| host.i18n                   | Plugin-scoped `locale`, imperative `t(key, options?)`, and reactive `useTranslation()`                                                                                                                                                                                                                 | A registered English catalog                                           | Locale changes re-render reactive consumers; missing active-locale messages fall back to the plugin's English catalog                                                                                           | const { t } = host.i18n.useTranslation(); t("pullRequests")                                                         |
 | host.store (legacy)         | Compatibility-only access to Kandev's private Zustand store; intentionally absent from `@kandev/plugin-sdk`                                                                                                                                                                                            | Older ui.bundle                                                        | Do not use in new or official plugins; private slices may change without plugin-API compatibility                                                                                                               | Migrate reads to host.context                                                                                       |
 | host.api.fetch / baseUrl    | fetch(path, init?) is scoped to /api/plugins/<id>/...; baseUrl is the backend origin for split-origin deployments                                                                                                                                                                                      | Active ui.bundle; backend path must be a declared webhook when relayed | Declare `webhooks[].access: authenticated` for UI-only or billable operations; requests are generation-aborted on unload                                                                                        | host.api.fetch("webhooks/inbound", { method: "POST" })                                                              |
 | host.api.invokeAction       | Authenticated call to a declared action with host-verified workspace/task/session/repository selectors and bounded untrusted body                                                                                                                                                                      | Matching manifest `actions[]` key/scope                                | Browser abort cancels the bounded plugin RPC; safe domain statuses and `Retry-After` may be returned                                                                                                            | host.api.invokeAction("reviews.get", { taskId }, { signal })                                                        |
@@ -270,6 +272,70 @@ Include immutable repository identity and provider connection scope in that bind
 reject a mismatched cursor before making a remote request.
 Kandev follows pages and fails a repeated cursor instead of looping forever.
 
+### Localize plugin UI
+
+Register an English fallback before registering labels or rendering routes.
+Catalogs are flat, plugin-scoped, and support `{{name}}` interpolation plus
+`_one`/`_other` plural keys. Use the reactive hook in components and the
+imperative translator in registry getters so a locale change updates native
+navigation and provider labels without reloading the plugin.
+
+```ts
+registry.registerTranslations({
+  en: {
+    pullRequests: "Pull requests",
+    linkedCount_one: "{{count}} pull request linked",
+    linkedCount_other: "{{count}} pull requests linked",
+  },
+  "pt-pt": {
+    pullRequests: "Pull requests",
+    linkedCount_one: "{{count}} pull request associado",
+    linkedCount_other: "{{count}} pull requests associados",
+  },
+});
+
+const translate = host.i18n.t;
+registry.registerNavItem({
+  id: "reviews",
+  get label() {
+    return translate("pullRequests");
+  },
+  path: "/reviews",
+});
+
+function ReviewsPage() {
+  const { t } = host.i18n.useTranslation();
+  return host.jsx("h1", null, t("pullRequests"));
+}
+```
+
+### Own provider brand icons
+
+Icon fields accept a curated host icon name or a plugin-owned component. Keep
+provider brands in the plugin repository so a new code host does not require a
+Kandev icon-map change. Build the component with `host.jsx`; do not bundle React.
+
+```ts
+const AcmeIcon = ({ className }: { className?: string }) =>
+  host.jsx(
+    "svg",
+    { viewBox: "0 0 24 24", className, "aria-hidden": true },
+    host.jsx("path", { d: "M4 12h16" }),
+  );
+
+registry.registerRepositoryProvider({
+  id: "acme",
+  label: "Acme",
+  icon: AcmeIcon,
+  // listRepositories, listBranches, and inspectURL omitted here
+});
+```
+
+Kandev accepts only supported host locale IDs, at most 1,000 messages per
+locale, safe flat keys, and messages up to 4,096 characters. An invalid
+replacement is rejected before the active catalog changes. Do not translate
+provider identifiers, action keys, URL paths, or other machine-readable state.
+
 For a plugin-owned workbench, use `host.ui.IntegrationRepositoryFilter` and
 `host.ui.IntegrationCursorPagination`; they preserve the same searchable picker,
 pagination geometry, touch targets, and responsive behavior as first-party code-host
@@ -293,7 +359,7 @@ repository provider appears inside Kandev's existing task dialog.
 `registerTaskAction` contributes only the provider entry. The host owns the
 parent **Link** menu and the link dialog.
 
-![A task context menu with its Link submenu open, showing GitHub, GitLab, and Bitbucket targets using host icons and labels.](../screenshots/plugin-code-host-link-menu.png)
+![A task context menu with its Link submenu open, showing GitHub, GitLab, and Bitbucket targets in the shared host layout with provider-owned brand icons.](../screenshots/plugin-code-host-link-menu.png)
 
 ![The host-owned Link Bitbucket pull request dialog with provider copy, one reference field, and the standard Cancel and Save actions.](../screenshots/plugin-code-host-link-dialog.png)
 
@@ -736,7 +802,9 @@ interface ReviewItemSummary {
   reviewKey: string;
   title: string;
   url: string;
+  connectionScope: string;
   repositoryId: string;
+  changeRequestNumber: string | number;
   state: string;
   taskStatus?: {
     number: number | string;
@@ -914,12 +982,14 @@ interface PluginRegistry {
   registerKeybinding(id: string, handler: (event: KeyboardEvent) => void): void;
 }
 
+type PluginIcon = string | React.ComponentType<{ className?: string }>;
+
 interface NavItem {
   id: string;
   label: string;
   path: string;
-  // Curated icon name (see lib/plugins/icons.ts); unknown names render the puzzle glyph.
-  icon?: string;
+  // Curated icon name or plugin-owned component; unknown names render the puzzle glyph.
+  icon?: PluginIcon;
   // "main" (default): top-level sidebar entry. "integrations": renders inside
   // the sidebar's Integrations section alongside first-party integration links.
   // Both also render in the phone menu sheet, so plugin pages stay reachable
@@ -934,7 +1004,7 @@ interface IntegrationSettingsRegistration {
   id: string;
   label: string;
   description: string;
-  icon?: string;
+  icon?: PluginIcon;
   Component: React.ComponentType<{ workspaceId?: string }>;
 }
 
@@ -949,7 +1019,7 @@ interface PluginRouteOptions {
 interface PluginPageChrome {
   title?: string;
   subtitle?: string;
-  icon?: string; // same curated set as NavItem.icon
+  icon?: PluginIcon;
   backHref?: string; // default "/"
   backLabel?: string; // default "Kandev"
   actions?: React.ComponentType; // rendered on the right side of the topbar
@@ -996,6 +1066,21 @@ interface PluginHostApi {
     baseUrl: string;
   };
   ui: PluginUIApi; // named curated host components; see @kandev/plugin-sdk
+  i18n: {
+    readonly locale: string;
+    t(
+      key: string,
+      options?: {
+        defaultValue?: string;
+        count?: number;
+        values?: Record<string, string | number>;
+      },
+    ): string;
+    useTranslation(): {
+      readonly locale: string;
+      t: PluginHostApi["i18n"]["t"];
+    };
+  };
   theme: "light" | "dark";
   // Soft SPA navigation (history push/replace), same as the app's own router.
   navigate(href: string, options?: { replace?: boolean }): void;
@@ -1094,11 +1179,12 @@ panel consumer, so status color does not depend on first opening the popover. Pu
 poller. Mobile exposes the same review data through the native Status and Review surfaces
 because it has no hover interaction.
 
-Each `ReviewTaskAssociation` should include `repositoryId` and
-`changeRequestNumber` when the provider supplies immutable repository identity. Kandev
-then matches the association to `ReviewItemSummary` by immutable identity even if the
-repository path and human-readable `reviewKey` change. Older providers may omit both
-fields and retain display-key matching for compatibility.
+Each `ReviewTaskAssociation` and `ReviewItemSummary` must include
+`connectionScope`, immutable `repositoryId`, and `changeRequestNumber`. Kandev matches
+them only by that complete identity, so a renamed repository remains linked while a
+new repository reusing the old display path cannot inherit its task or mutation
+authority. `reviewKey` is display and lookup data, never an authorization key. The host
+drops incomplete provider records instead of falling back to a mutable display key.
 
 Registered review panels use `host.ui.ChangeRequestDetail`, the same detail
 component consumed by GitHub. Supply provider-neutral identity, state, branches,

@@ -76,7 +76,7 @@ describe("mrTriggerClass", () => {
     } as TaskMR);
     expect(setReview).toHaveBeenCalledWith(
       "session-1",
-      "gitlab:https%3A%2F%2Fgitlab.example%7Cgroup%2Fb%7C22",
+      "gitlab:https%3A%2F%2Fgitlab.example:group%2Fb:22",
     );
   });
 

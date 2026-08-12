@@ -45,9 +45,10 @@ Decision: [ADR-2026-08-11-composer-access-authenticated-webhooks](../../decision
   authenticated webhook with a limit of at least 10 MiB.
 - The Voice plugin's OpenAI key belongs to its existing plugin settings and secret storage. Kandev
   relays the request but does not own, expose, or select that key.
-- Plugin localization is a separately scoped prerequisite. This package adds no host i18n API. The
-  later Voice plugin task must decide how plugin-owned catalogs follow Kandev's locale before core
-  Voice Mode is removed.
+- Plugin-owned copy uses the scoped catalog and reactive locale API established by
+  [ADR-2026-08-12-plugin-localization-contract](../../decisions/2026-08-12-plugin-localization-contract.md).
+  The later Voice plugin registers its English fallback and supported-locale catalogs before any
+  composer contribution.
 - Disabling, uninstalling, or reloading a plugin aborts its in-flight webhook requests, unregisters
   its composer actions, and leaves native drafts intact.
 - The current core Voice Mode stays present until a separately delivered Voice plugin proves parity
@@ -194,7 +195,6 @@ current external-call behavior. Request cancellation propagates through the exis
 - General authenticated REST routing, response streaming, bidirectional browser sockets, or changing
   the default limit for existing public webhooks.
 - Sandboxing mutually malicious native UI plugin bundles.
-- Plugin localization; it is a separate prerequisite for the later Voice plugin extraction.
 
 ## Implementation Plan
 

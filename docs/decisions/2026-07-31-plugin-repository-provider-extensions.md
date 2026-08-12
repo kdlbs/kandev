@@ -30,6 +30,11 @@ legacy runtime compatibility and is not part of the public SDK; official and new
 plugins must request provider-neutral context additions instead of copying host store
 shapes.
 
+Registration icon fields accept either a backwards-compatible curated host icon
+name or a plugin-owned component rendered through the supplied host React runtime.
+Provider brand glyphs belong to the provider plugin, so adding another code host
+does not require a brand import or lookup-table edit in Kandev production code.
+
 Repository URL ownership is established by cancellable, workspace-scoped structured
 inspection. `matchesURL` is optional and only narrows candidates; `inspectURL` returns
 `null` when the configured provider does not own the URL. The host rejects multiple

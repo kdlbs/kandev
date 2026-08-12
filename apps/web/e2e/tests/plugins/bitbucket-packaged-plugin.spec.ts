@@ -92,6 +92,7 @@ function linkedPullRequest(taskId: string) {
     number: 42,
     title: "Add audit log export with retention controls",
     url: "https://bitbucket.org/northstar-labs/relay/pull-requests/42",
+    provider_scope: "https://bitbucket.org",
     repository_id: "northstar-labs/relay",
     repository_name: "relay",
     state: "OPEN",
@@ -122,7 +123,14 @@ async function mockLinkedPullRequestState(page: Page, taskId: string): Promise<(
         contentType: "application/json",
         body: JSON.stringify({
           associations: [
-            { review_key: LINKED_REVIEW_KEY, task_id: taskId, task_title: "Sidebar summary" },
+            {
+              review_key: LINKED_REVIEW_KEY,
+              provider_scope: "https://bitbucket.org",
+              repository_id: "northstar-labs/relay",
+              number: 42,
+              task_id: taskId,
+              task_title: "Sidebar summary",
+            },
           ],
         }),
       });

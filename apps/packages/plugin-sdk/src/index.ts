@@ -16,6 +16,14 @@ export type ElementFactory = (...args: any[]) => HostNode;
 export type Component<Props = {}> = (props: Props) => any;
 export type HostComponent = unknown;
 
+export interface PluginIconProps {
+  className?: string;
+  "aria-hidden"?: boolean | "true" | "false";
+}
+
+/** Curated host icon name or a plugin-owned component rendered with host React. */
+export type PluginIcon = string | Component<PluginIconProps>;
+
 export type StateUpdater<Value> = Value | ((previous: Value) => Value);
 export type StateSetter<Value> = (value: StateUpdater<Value>) => void;
 
@@ -115,7 +123,7 @@ export interface RepositoryInspection {
 export interface RepositoryProviderRegistration {
   id: string;
   label: string;
-  icon?: string;
+  icon?: PluginIcon;
   listRepositories(context: {
     workspaceId: string;
     query?: string;
@@ -198,7 +206,9 @@ export interface ReviewSummary {
   reviewKey: string;
   title: string;
   url: string;
+  connectionScope: string;
   repositoryId: string;
+  changeRequestNumber: string | number;
   state: string;
   statusBadge?: { label: string; tone?: string };
   taskStatus?: ReviewTaskStatus;
@@ -208,8 +218,9 @@ export interface ReviewTaskAssociation {
   providerId: string;
   taskId: string;
   reviewKey: string;
-  repositoryId?: string;
-  changeRequestNumber?: string | number;
+  connectionScope: string;
+  repositoryId: string;
+  changeRequestNumber: string | number;
 }
 
 export interface QueryState<T> {
@@ -223,7 +234,7 @@ export interface QueryState<T> {
 export interface PluginPageChrome {
   title?: string;
   subtitle?: string;
-  icon?: string;
+  icon?: PluginIcon;
   backHref?: string;
   backLabel?: string;
   actions?: Component;
@@ -243,7 +254,7 @@ export interface PluginTaskPanelProps {
 export interface TaskPanelRegistration {
   id: string;
   title: string;
-  icon?: string;
+  icon?: PluginIcon;
   Component: Component<PluginTaskPanelProps>;
   mobileEnabled?: boolean;
 }
@@ -259,7 +270,7 @@ export interface PluginTaskMenuContext {
 export interface TaskMenuActionRegistration {
   id: string;
   label: string;
-  icon?: HostNode;
+  icon?: PluginIcon;
   group: "edit" | "primary";
   visible?(context: PluginTaskMenuContext): boolean;
   run(context: PluginTaskMenuContext): void | Promise<void>;
@@ -466,11 +477,31 @@ export interface PluginToastApi {
   dismiss(id?: string | number): unknown;
 }
 
+export type PluginTranslationValues = Readonly<Record<string, string | number>>;
+
+export type PluginTranslationOptions = {
+  defaultValue?: string;
+  count?: number;
+  values?: PluginTranslationValues;
+};
+
+export type PluginTranslationCatalogs = Readonly<Record<string, Readonly<Record<string, string>>>>;
+
+export interface PluginI18nApi {
+  readonly locale: string;
+  t(key: string, options?: PluginTranslationOptions): string;
+  useTranslation(): {
+    readonly locale: string;
+    t(key: string, options?: PluginTranslationOptions): string;
+  };
+}
+
 export interface PluginHostApi {
   pluginId: string;
   React: HostReact;
   jsx: ElementFactory;
   ui: PluginUIApi;
+  i18n: PluginI18nApi;
   context: PluginContextApi;
   api: {
     readonly baseUrl: string;
@@ -511,6 +542,9 @@ export interface PluginHostApi {
       | {
           providerId: string;
           reviewKey: string;
+          connectionScope: string;
+          repositoryId: string;
+          changeRequestNumber: string | number;
           title: string;
           presentation: "desktop";
           sessionId?: string;
@@ -518,6 +552,9 @@ export interface PluginHostApi {
       | {
           providerId: string;
           reviewKey: string;
+          connectionScope: string;
+          repositoryId: string;
+          changeRequestNumber: string | number;
           title: string;
           presentation: "mobile";
           sessionId: string;
@@ -533,12 +570,13 @@ export interface PluginHostApi {
 }
 
 export interface PluginRegistry {
+  registerTranslations(catalogs: PluginTranslationCatalogs): void;
   registerRoute(path: string, component: Component, options?: PluginRouteOptions): void;
   registerNavItem(item: {
     id: string;
     label: string;
     path: string;
-    icon?: string;
+    icon?: PluginIcon;
     section?: "main" | "settings" | "integrations";
   }): void;
   registerSettingsRoute(path: string, component: Component): void;
@@ -549,14 +587,14 @@ export interface PluginRegistry {
     id: string;
     label: string;
     description: string;
-    icon?: string;
+    icon?: PluginIcon;
     Component: Component<{ workspaceId?: string }>;
   }): void;
   registerRepositoryProvider(provider: RepositoryProviderRegistration): void;
   registerTaskAction(action: {
     id: string;
     label: string;
-    icon?: string;
+    icon?: PluginIcon;
     placement: "link";
     group?: string;
     visible?(context: TaskContext): boolean;
@@ -566,7 +604,7 @@ export interface PluginRegistry {
   registerReviewProvider(provider: {
     id: string;
     label: string;
-    icon?: string;
+    icon?: PluginIcon;
     changeRequestNoun: string;
     order: number;
     getSnapshot(taskId: string): readonly ReviewSummary[];
@@ -579,6 +617,9 @@ export interface PluginRegistry {
       workspaceId: string;
       taskId: string;
       reviewKey: string;
+      connectionScope: string;
+      repositoryId: string;
+      changeRequestNumber: string | number;
       signal: AbortSignal;
     }): Promise<void>;
     ReviewPanel: Component<{
@@ -588,6 +629,9 @@ export interface PluginRegistry {
       taskId: string;
       sessionId?: string;
       reviewKey: string;
+      connectionScope: string;
+      repositoryId: string;
+      changeRequestNumber: string | number;
     }>;
     Selector?: Component;
     EmptyState?: Component;

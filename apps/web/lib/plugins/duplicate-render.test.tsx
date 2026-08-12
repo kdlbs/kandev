@@ -43,6 +43,11 @@ function makeHostFactory(pluginId: string): PluginHostApi {
       invokeAction: async <TResponse,>() => undefined as TResponse,
       baseUrl: "",
     },
+    i18n: {
+      locale: "en",
+      t: (key) => key,
+      useTranslation: () => ({ locale: "en", t: (key) => key }),
+    },
     ui: {} as PluginHostApi["ui"],
     useResponsiveBreakpoint,
     theme: "light",

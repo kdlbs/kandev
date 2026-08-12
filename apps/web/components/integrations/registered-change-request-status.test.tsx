@@ -42,7 +42,9 @@ function registerProvider() {
         reviewKey: "workspace/repo/42",
         title: "Fix shared status",
         url: "https://bitbucket.test/workspace/repo/pull-requests/42",
+        connectionScope: "https://bitbucket.test",
         repositoryId: "workspace/repo",
+        changeRequestNumber: 42,
         state: "open",
         taskStatus: {
           number: 42,
@@ -93,7 +95,14 @@ describe("RegisteredChangeRequestStatus", () => {
     await act(async () => Promise.resolve());
     expect(refresh).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByTestId("pr-popover-title"));
-    expect(openDesktop).toHaveBeenCalledWith("bitbucket", "workspace/repo/42", "Fix shared status");
+    expect(openDesktop).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerId: "bitbucket",
+        connectionScope: "https://bitbucket.test",
+        repositoryId: "workspace/repo",
+        changeRequestNumber: 42,
+      }),
+    );
   });
 
   it("uses the composer chip anatomy and disappears on provider unload", async () => {
@@ -123,6 +132,9 @@ describe("RegisteredChangeRequestStatus", () => {
       workspaceId: "workspace-a",
       taskId: "task-a",
       reviewKey: "workspace/repo/42",
+      connectionScope: "https://bitbucket.test",
+      repositoryId: "workspace/repo",
+      changeRequestNumber: 42,
       signal: expect.any(AbortSignal),
     });
     expect(refresh).toHaveBeenCalled();

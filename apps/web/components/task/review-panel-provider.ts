@@ -19,7 +19,9 @@ function githubReviewItem(pr: TaskPR): ReviewItemSummary {
     reviewKey: prTaskKey(pr),
     title: pr.pr_title || `Pull Request #${pr.pr_number}`,
     url: pr.pr_url,
+    connectionScope: reviewConnectionScope(pr.pr_url, "github"),
     repositoryId: pr.repository_id || `${pr.owner}/${pr.repo}`,
+    changeRequestNumber: pr.pr_number,
     state: pr.state,
     ...(pr.checks_state ? { statusBadge: { label: pr.checks_state } } : {}),
   };
@@ -31,10 +33,20 @@ function gitLabReviewItem(mr: TaskMR): ReviewItemSummary {
     reviewKey: mrTaskKey(mr),
     title: mr.mr_title || `Merge Request !${mr.mr_iid}`,
     url: mr.mr_url,
+    connectionScope: mr.host || reviewConnectionScope(mr.mr_url, "gitlab"),
     repositoryId: mr.repository_id || mr.project_path,
+    changeRequestNumber: mr.mr_iid,
     state: mr.state,
     ...(mr.pipeline_state ? { statusBadge: { label: mr.pipeline_state } } : {}),
   };
+}
+
+function reviewConnectionScope(url: string, fallback: string): string {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return fallback;
+  }
 }
 
 export function useReviewProviderUpdates(

@@ -2,6 +2,7 @@ import type { DockviewApi, DockviewGroupPanel } from "dockview-react";
 import type { CommitDetailTarget } from "@/components/task/changes-diff-target";
 import { t } from "@/lib/i18n";
 import { focusOrAddPanel } from "./dockview-layout-builders";
+import { reviewPanelId, type ReviewPanelTarget } from "./dockview-review-panel-id";
 import { TERMINAL_DEFAULT_ID } from "./layout-manager/constants";
 import { panelTitle } from "./layout-manager/panel-title";
 import {
@@ -34,9 +35,7 @@ function addSimplePanel(api: DockviewApi, groupId: string, opts: SimplePanelOpts
   focusOrAddPanel(api, { ...opts, position: { referenceGroup: groupId } });
 }
 
-export function reviewPanelId(providerId: string, reviewKey: string): string {
-  return `review-detail|${encodeURIComponent(providerId)}|${encodeURIComponent(reviewKey)}`;
-}
+export { reviewPanelId };
 
 function openBrowserPanel(api: DockviewApi, centerGroupId: string, url: string): void {
   const browserPanel =
@@ -583,18 +582,20 @@ function buildReviewPanelActions(get: StoreGet) {
         params: { mrKey },
       });
     },
-    addReviewPanel: (providerId: string, reviewKey: string, title = "Review") => {
+    addReviewPanel: (review: ReviewPanelTarget) => {
       const { api, centerGroupId } = get();
       if (!api) return;
       const canonical = api.getPanel("pr-detail");
       if (
-        canonical?.params?.providerId === providerId &&
-        canonical.params.reviewKey === reviewKey
+        canonical?.params?.providerId === review.providerId &&
+        canonical.params.connectionScope === review.connectionScope &&
+        canonical.params.repositoryId === review.repositoryId &&
+        String(canonical.params.changeRequestNumber) === String(review.changeRequestNumber)
       ) {
         canonical.api.setActive();
         return;
       }
-      const id = reviewPanelId(providerId, reviewKey);
+      const id = reviewPanelId(review);
       const existing = api.getPanel(id);
       if (existing) {
         existing.api.setActive();
@@ -603,9 +604,15 @@ function buildReviewPanelActions(get: StoreGet) {
       focusOrAddPanel(api, {
         id,
         component: "review-detail",
-        title,
+        title: review.title,
         position: { referenceGroup: canonical?.group.id ?? centerGroupId },
-        params: { providerId, reviewKey },
+        params: {
+          providerId: review.providerId,
+          reviewKey: review.reviewKey,
+          connectionScope: review.connectionScope,
+          repositoryId: review.repositoryId,
+          changeRequestNumber: review.changeRequestNumber,
+        },
       });
     },
   };

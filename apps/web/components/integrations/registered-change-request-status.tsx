@@ -44,23 +44,26 @@ function createUnlinkHandler({
   provider,
   workspaceId,
   taskId,
-  reviewKey,
+  review,
   toast,
 }: {
   provider: PluginReviewProviderRegistration;
   workspaceId: string;
   taskId: string;
-  reviewKey: string;
+  review: ReviewItemSummary;
   toast: ReturnType<typeof useToast>["toast"];
 }) {
   if (!provider.unlink) return undefined;
-  return async () => {
+  return async (signal: AbortSignal) => {
     try {
       await provider.unlink!({
         workspaceId,
         taskId,
-        reviewKey,
-        signal: new AbortController().signal,
+        reviewKey: review.reviewKey,
+        connectionScope: review.connectionScope,
+        repositoryId: review.repositoryId,
+        changeRequestNumber: review.changeRequestNumber,
+        signal,
       });
       await Promise.all([
         refreshReviewProvider(provider, taskId),
@@ -105,13 +108,13 @@ function useRegisteredStatusItems({
                 provider,
                 workspaceId,
                 taskId,
-                reviewKey: review.reviewKey,
+                review,
                 toast,
               })
             : undefined;
         return [
           {
-            id: `${review.providerId}:${review.reviewKey}`,
+            id: reviewItemId(review),
             number: status.number,
             title: review.title,
             repositoryLabel: review.repositoryId,
@@ -133,16 +136,10 @@ function useRegisteredStatusItems({
             onOpenReview: () => {
               const mobileSessionId = sessionId ?? activeSessionId;
               if (usesTouchDrawer && mobileSessionId) {
-                setMobileSessionReview(
-                  mobileSessionId,
-                  reviewItemId({
-                    providerId: review.providerId,
-                    reviewKey: review.reviewKey,
-                  }),
-                );
+                setMobileSessionReview(mobileSessionId, reviewItemId(review));
                 return;
               }
-              addReviewPanel(review.providerId, review.reviewKey, review.title);
+              addReviewPanel(review);
             },
           },
         ];

@@ -1,4 +1,4 @@
-import { isValidElement, type ReactElement, type ReactNode } from "react";
+import { createElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { pluginRegistry } from "@/lib/plugins/registry";
@@ -122,15 +122,18 @@ describe("renderSettingsRoute — plugin integration settings", () => {
   });
 
   it("wraps plugin content in the native integration settings section", () => {
+    function PluginProviderIcon({ className }: { className?: string }) {
+      return createElement("svg", { className, "data-testid": "plugin-provider-icon" });
+    }
     pluginRegistry.forPlugin(PLUGIN_ID).registerIntegrationSettings({
       id: PLUGIN_INTEGRATION_ID,
       label: "Acme Source Control",
       description: "Configure Acme source control.",
-      icon: "bitbucket",
+      icon: PluginProviderIcon,
       Component: () => "Plugin-owned settings cards",
     });
 
-    const { container } = render(
+    render(
       renderSettingsRoute(
         `/settings/workspaces/workspace-1/integrations/${PLUGIN_INTEGRATION_ID}`,
       ) as ReactElement,
@@ -138,7 +141,7 @@ describe("renderSettingsRoute — plugin integration settings", () => {
 
     expect(screen.getByRole("heading", { name: "Acme Source Control" })).not.toBeNull();
     expect(screen.getByText("Configure Acme source control.")).not.toBeNull();
-    expect(container.querySelector(".tabler-icon-brand-bitbucket")).not.toBeNull();
+    expect(screen.getByTestId("plugin-provider-icon")).not.toBeNull();
     expect(screen.getByText("Plugin-owned settings cards")).not.toBeNull();
   });
 

@@ -11,11 +11,13 @@
  * methods) — this is what `host.ts` passes into a plugin's `initialize()`.
  */
 import { useSyncExternalStore } from "react";
+import { i18n } from "@/lib/i18n";
 import type {
   NavItem,
   IntegrationSettingsRegistration,
   PluginRegistry,
   PluginRouteOptions,
+  PluginTranslationCatalogs,
   RepositoryProviderRegistration,
   ReviewProviderRegistration,
   SlotComponent,
@@ -33,6 +35,7 @@ import {
 } from "./registry-provider-lifecycle";
 import { PluginWorkLifecycle } from "./registry-work-lifecycle";
 import { PluginProviderOwnership } from "./registry-provider-ownership";
+import { registerPluginTranslations, unregisterPluginTranslations } from "./plugin-translations";
 import type {
   PluginIntegrationSettingsRegistration,
   PluginKeybindingHandler,
@@ -113,6 +116,10 @@ class PluginRegistryStore {
   private declaredKeybindingIds = new Map<string, Set<string>>();
   private listeners = new Set<() => void>();
   private version = 0;
+
+  constructor() {
+    i18n.on("languageChanged", () => this.notify());
+  }
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -310,6 +317,11 @@ class PluginRegistryStore {
     this.notify();
   }
 
+  registerTranslations(pluginId: string, catalogs: PluginTranslationCatalogs): void {
+    registerPluginTranslations(pluginId, catalogs);
+    this.notify();
+  }
+
   /** Bulk-revoke every registration owned by `pluginId` (disable/uninstall). */
   unregisterPlugin(pluginId: string): void {
     const before = this.totalCount();
@@ -331,6 +343,7 @@ class PluginRegistryStore {
     this.reviewProviders.forEach((entry, id) => {
       if (entry.pluginId === pluginId) this.reviewProviders.delete(id);
     });
+    const removedTranslations = unregisterPluginTranslations(pluginId);
     this.abortPluginWork(pluginId);
     this.providerOwnership.releasePlugin(pluginId);
     this.taskPanels = removeByPlugin(this.taskPanels, pluginId);
@@ -338,7 +351,7 @@ class PluginRegistryStore {
     this.taskFilters = removeByPlugin(this.taskFilters, pluginId);
     this.pluginNames.delete(pluginId);
     this.declaredKeybindingIds.delete(pluginId);
-    if (this.totalCount() !== before) this.notify();
+    if (removedTranslations || this.totalCount() !== before) this.notify();
   }
 
   getRoutes(): PluginRouteRegistration[] {
@@ -496,6 +509,7 @@ class PluginRegistryStore {
   forPlugin(pluginId: string, pluginName?: string): PluginRegistry {
     if (pluginName) this.pluginNames.set(pluginId, pluginName);
     return {
+      registerTranslations: (catalogs) => this.registerTranslations(pluginId, catalogs),
       registerRoute: (path, Component, options) =>
         this.registerRoute(pluginId, path, Component, options),
       registerNavItem: (item) => this.registerNavItem(pluginId, item),

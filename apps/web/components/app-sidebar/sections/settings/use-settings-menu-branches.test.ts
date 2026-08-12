@@ -136,7 +136,7 @@ describe("useSettingsMenuBranches integration visibility", () => {
       id: "bitbucket",
       label: "Bitbucket",
       description: "Configure Bitbucket.",
-      icon: "bitbucket",
+      icon: () => null,
       Component: () => null,
     });
     const { result } = renderHook(() => useSettingsMenuBranches("accordion"));

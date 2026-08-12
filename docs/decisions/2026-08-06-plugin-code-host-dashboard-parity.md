@@ -24,8 +24,9 @@ they do not copy SVG paths from first-party providers.
 Task presets use the same provider-neutral semantic icon keys as first-party presets.
 The host resolves those keys to its Tabler components, so **Review**, **Address
 feedback**, and **Fix CI** render the exact eye, message, and tool glyphs everywhere.
-Plugins do not pass React icon components or rely on a generic fallback when a native
-semantic equivalent exists.
+Plugins do not pass custom icon components or rely on a generic fallback when a native
+semantic equivalent exists. Provider brand glyphs are different: the plugin owns that
+component and Kandev reuses it across native surfaces.
 
 Kandev also owns common task change-request linking anatomy. Code-host plugins invoke
 the host task-link dialog contract with provider copy and a submit callback; they do not
@@ -118,8 +119,8 @@ Repository discovery is a provider-neutral, server-searchable paged contract. Th
 passes optional `query`, opaque `cursor`, and requested `limit` fields; providers return
 either the legacy repository array or `{ repositories, nextCursor }`. The host follows
 pages, rejects repeated cursors, and always binds returned provider identities to the
-manifest owner. Registered provider icons are used in native repository controls rather
-than a generic branch glyph. These rules keep large installations usable without adding
+manifest owner. Registered plugin-owned provider icons are used in native repository
+controls rather than a generic branch glyph. These rules keep large installations usable without adding
 provider-specific search or pagination branches to Kandev. Provider cursors are bound to
 the original query, state, provider connection scope, and immutable repository identity;
 using one after any of those inputs changes fails before a provider request.

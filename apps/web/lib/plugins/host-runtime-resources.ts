@@ -143,6 +143,7 @@ export function generationFencedHost(
       },
     },
     ui: host.ui,
+    i18n: host.i18n,
     useResponsiveBreakpoint: host.useResponsiveBreakpoint,
     get theme() {
       return host.theme;
@@ -262,7 +263,7 @@ function openTaskReviewAndTrack(
   options: PluginTaskReviewOptions,
 ): void {
   if (options.presentation === "desktop") {
-    const id = reviewPanelId(options.providerId, options.reviewKey);
+    const id = reviewPanelId(options);
     const existed = Boolean(useDockviewStore.getState().api?.getPanel(id));
     host.openTaskReview(options);
     if (!existed && useDockviewStore.getState().api?.getPanel(id)) {

@@ -3,6 +3,7 @@
  * into a plugin's `initialize(registry, host)`.
  */
 import * as React from "react";
+import { useTranslation as useI18nextTranslation } from "react-i18next";
 import type { StoreApi } from "zustand";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@kandev/ui/accordion";
 import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
@@ -125,7 +126,7 @@ import { IntegrationIcon } from "@/components/integrations/integration-icon";
 import { TaskChangeRequestLinkForm } from "@/components/integrations/task-change-request-link-form";
 import { getBackendConfig } from "@/lib/config";
 import { fetchJson } from "@/lib/api/client";
-import { t } from "@/lib/i18n";
+import { i18n, normalizeLocale, t } from "@/lib/i18n";
 import { formatRelativeTime } from "@/lib/i18n/formats";
 import { createPluginToast } from "@/lib/toast/sonner";
 import { generateUUID } from "@/lib/utils";
@@ -138,13 +139,16 @@ import { pluginModalManager } from "./modal-manager";
 import { readResolvedTheme, subscribeToThemeChanges } from "./theme";
 import { composeWriterId, subscribeToUserStateChanges } from "./user-state-sync";
 import { buildPluginContextApi } from "./plugin-context-api";
+import { pluginTranslationNamespace } from "./plugin-translations";
 import type {
   PluginActionInput,
   PluginActionOptions,
   PluginHostApi,
+  PluginI18nApi,
   PluginModalHandle,
   PluginTaskLinkDialogOptions,
   PluginTaskReviewOptions,
+  PluginTranslationOptions,
 } from "./types";
 import type { PluginUIApi } from "@kandev/plugin-sdk";
 import {
@@ -388,11 +392,53 @@ function effectiveWriterId(surfaceId: string | undefined): string {
   return composeWriterId(TAB_WRITER_ID, surfaceId);
 }
 
+function pluginTranslationValues(options?: PluginTranslationOptions): Record<string, unknown> {
+  return {
+    defaultValue: options?.defaultValue,
+    count: options?.count,
+    ...options?.values,
+  };
+}
+
+function buildPluginI18nApi(pluginId: string): PluginI18nApi {
+  const namespace = pluginTranslationNamespace(pluginId);
+  return {
+    get locale() {
+      return normalizeLocale(i18n.resolvedLanguage ?? i18n.language);
+    },
+    t: (key, options) =>
+      String(
+        i18n.t(`${namespace}:${key}`, {
+          ...pluginTranslationValues(options),
+          defaultValue: options?.defaultValue ?? key,
+        }),
+      ),
+    useTranslation() {
+      const { i18n: activeI18n, t: translate } = useI18nextTranslation(namespace);
+      const scopedTranslate = React.useCallback(
+        (key: string, options?: PluginTranslationOptions) =>
+          String(
+            translate(key, {
+              ...pluginTranslationValues(options),
+              defaultValue: options?.defaultValue ?? key,
+            }),
+          ),
+        [translate],
+      );
+      return {
+        locale: normalizeLocale(activeI18n.resolvedLanguage ?? activeI18n.language),
+        t: scopedTranslate,
+      };
+    },
+  };
+}
+
 export function buildHostApi(pluginId: string, storeApi: StoreApi<AppState>): PluginHostApi {
   return {
     pluginId,
     React,
     jsx: React.createElement,
+    i18n: buildPluginI18nApi(pluginId),
     store: {
       getState: storeApi.getState,
       setState: storeApi.setState,
@@ -439,17 +485,10 @@ export function buildHostApi(pluginId: string, storeApi: StoreApi<AppState>): Pl
 
 function openTaskReview(storeApi: StoreApi<AppState>, options: PluginTaskReviewOptions): void {
   if (options.presentation === "desktop") {
-    useDockviewStore
-      .getState()
-      .addReviewPanel(options.providerId, options.reviewKey, options.title);
+    useDockviewStore.getState().addReviewPanel(options);
     return;
   }
-  storeApi
-    .getState()
-    .setMobileSessionReview(
-      options.sessionId,
-      reviewItemId({ providerId: options.providerId, reviewKey: options.reviewKey }),
-    );
+  storeApi.getState().setMobileSessionReview(options.sessionId, reviewItemId(options));
 }
 
 function openTaskLinkDialog(

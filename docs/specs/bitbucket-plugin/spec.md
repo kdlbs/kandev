@@ -285,7 +285,7 @@ for its declared provider; exact repository path matching remains case-sensitive
   those registrations disappear, in-flight work is aborted, review selections close
   safely, and no host Bitbucket fallback remains.
 - **GIVEN** the plugin is active, **WHEN** a user opens the native integrations index
-  or a workspace settings tree, **THEN** Bitbucket appears with its curated icon and
+  or a workspace settings tree, **THEN** Bitbucket appears with its plugin-owned brand icon and
   native settings page, receives the selected workspace ID, and disappears from both
   surfaces when the plugin unloads.
 - **GIVEN** a connected Bitbucket workspace, **WHEN** the user opens `/bitbucket`,

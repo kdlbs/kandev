@@ -309,7 +309,9 @@ describe("MobilePanelArea PR identity", () => {
           reviewKey: "pr-a",
           title: "GitHub pull request",
           url: "https://github.test/a",
+          connectionScope: "https://github.test",
           repositoryId: "owner/repository",
+          changeRequestNumber: 1,
           state: "OPEN",
         },
         {
@@ -317,7 +319,9 @@ describe("MobilePanelArea PR identity", () => {
           reviewKey: "pr-b",
           title: "Bitbucket pull request",
           url: "https://bitbucket.test/b",
+          connectionScope: "https://bitbucket.test",
           repositoryId: "workspace/repository",
+          changeRequestNumber: 2,
           state: "OPEN",
         },
       ];

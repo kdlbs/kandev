@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { pluginRegistry } from "./registry";
-import type { ReviewProviderRegistration } from "./types";
+import type { ReviewItemSummary, ReviewProviderRegistration, ReviewTaskAssociation } from "./types";
 
 const PRIMARY_PLUGIN_ID = "plugin-a";
 const SECONDARY_PLUGIN_ID = "plugin-b";
@@ -8,6 +8,10 @@ const SOURCE_CONTROL_PROVIDER_ID = "source-control";
 const CHANGE_URL = "https://example.test/changes/1";
 const REPOSITORY_ID = "repository-a";
 const WORKSPACE_ID = "workspace-a";
+const TASK_ID = "task-a";
+const REVIEW_KEY = "change-1";
+const CONNECTION_SCOPE = "https://example.test";
+const IMMUTABLE_REPOSITORY_ID = "repository-immutable";
 
 function reviewProvider(
   id: string,
@@ -30,10 +34,12 @@ function providerSpecificStatusSnapshot() {
   return [
     {
       providerId: SOURCE_CONTROL_PROVIDER_ID,
-      reviewKey: "change-1",
+      reviewKey: REVIEW_KEY,
       title: "Change 1",
       url: CHANGE_URL,
+      connectionScope: CONNECTION_SCOPE,
       repositoryId: REPOSITORY_ID,
+      changeRequestNumber: 1,
       state: "open",
       taskStatus: {
         number: 1,
@@ -98,10 +104,12 @@ describe("pluginRegistry — review provider contracts", () => {
       getSnapshot: () => [
         {
           providerId: SOURCE_CONTROL_PROVIDER_ID,
-          reviewKey: "change-1",
+          reviewKey: REVIEW_KEY,
           title: "Change 1",
           url: CHANGE_URL,
+          connectionScope: CONNECTION_SCOPE,
           repositoryId: REPOSITORY_ID,
+          changeRequestNumber: 1,
           state: "open",
           statusBadge: { label: "Checks passing", tone: "success" },
         },
@@ -110,7 +118,9 @@ describe("pluginRegistry — review provider contracts", () => {
           reviewKey: "spoofed-change",
           title: "Spoofed",
           url: "https://example.test/changes/2",
+          connectionScope: CONNECTION_SCOPE,
           repositoryId: REPOSITORY_ID,
+          changeRequestNumber: 2,
           state: "open",
         },
       ],
@@ -132,19 +142,21 @@ describe("pluginRegistry — review provider contracts", () => {
     const registration = pluginRegistry.getReviewProvider(SOURCE_CONTROL_PROVIDER_ID);
     if (!registration) throw new Error("review provider registration missing");
 
-    expect(registration.getSnapshot("task-a")).toEqual([
+    expect(registration.getSnapshot(TASK_ID)).toEqual([
       {
         providerId: SOURCE_CONTROL_PROVIDER_ID,
-        reviewKey: "change-1",
+        reviewKey: REVIEW_KEY,
         title: "Change 1",
         url: CHANGE_URL,
+        connectionScope: CONNECTION_SCOPE,
         repositoryId: REPOSITORY_ID,
+        changeRequestNumber: 1,
         state: "open",
         statusBadge: { label: "Checks passing", tone: "success" },
       },
     ]);
-    registration.subscribe("task-a", () => {});
-    const refresh = registration.refresh("task-a", new AbortController().signal);
+    registration.subscribe(TASK_ID, () => {});
+    const refresh = registration.refresh(TASK_ID, new AbortController().signal);
     await refreshStarted;
 
     pluginRegistry.unregisterPlugin(PRIMARY_PLUGIN_ID);
@@ -163,7 +175,7 @@ describe("pluginRegistry — review provider contracts", () => {
     );
 
     expect(
-      pluginRegistry.getReviewProvider(SOURCE_CONTROL_PROVIDER_ID)?.getSnapshot("task-a"),
+      pluginRegistry.getReviewProvider(SOURCE_CONTROL_PROVIDER_ID)?.getSnapshot(TASK_ID),
     ).toEqual(normalizedStatusSnapshot());
   });
 });
@@ -180,17 +192,19 @@ describe("pluginRegistry — review provider associations", () => {
     const subscribe = vi.fn(() => () => undefined);
     pluginRegistry.forPlugin(PRIMARY_PLUGIN_ID).registerReviewProvider(
       reviewProvider(SOURCE_CONTROL_PROVIDER_ID, {
-        getAssociationSnapshot: () => [
-          {
-            providerId: "spoofed",
-            taskId: "task-a",
-            reviewKey: "change-1",
-            repositoryId: " repository-immutable ",
-            changeRequestNumber: " 1 ",
-            providerPayload: "discard",
-          },
-          { providerId: "spoofed", taskId: "", reviewKey: "invalid" },
-        ],
+        getAssociationSnapshot: () =>
+          [
+            {
+              providerId: "spoofed",
+              taskId: TASK_ID,
+              reviewKey: REVIEW_KEY,
+              connectionScope: CONNECTION_SCOPE,
+              repositoryId: ` ${IMMUTABLE_REPOSITORY_ID} `,
+              changeRequestNumber: " 1 ",
+              providerPayload: "discard",
+            },
+            { providerId: "spoofed", taskId: "", reviewKey: "invalid" },
+          ] as unknown as ReviewTaskAssociation[],
         subscribeAssociations: subscribe,
         refreshAssociations: refresh,
         unlink,
@@ -201,9 +215,10 @@ describe("pluginRegistry — review provider associations", () => {
     expect(registration.getAssociationSnapshot?.(WORKSPACE_ID)).toEqual([
       {
         providerId: SOURCE_CONTROL_PROVIDER_ID,
-        taskId: "task-a",
-        reviewKey: "change-1",
-        repositoryId: "repository-immutable",
+        taskId: TASK_ID,
+        reviewKey: REVIEW_KEY,
+        connectionScope: CONNECTION_SCOPE,
+        repositoryId: IMMUTABLE_REPOSITORY_ID,
         changeRequestNumber: "1",
       },
     ]);
@@ -211,14 +226,61 @@ describe("pluginRegistry — review provider associations", () => {
     await registration.refreshAssociations?.(WORKSPACE_ID, new AbortController().signal);
     await registration.unlink?.({
       workspaceId: WORKSPACE_ID,
-      taskId: "task-a",
-      reviewKey: "change-1",
+      taskId: TASK_ID,
+      reviewKey: REVIEW_KEY,
+      connectionScope: CONNECTION_SCOPE,
+      repositoryId: IMMUTABLE_REPOSITORY_ID,
+      changeRequestNumber: "1",
       signal: new AbortController().signal,
     });
 
     expect(subscribe).toHaveBeenCalledOnce();
     expect(refresh).toHaveBeenCalledWith(WORKSPACE_ID, expect.any(AbortSignal));
-    expect(unlink).toHaveBeenCalledWith(expect.objectContaining({ taskId: "task-a" }));
+    expect(unlink).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: TASK_ID,
+        repositoryId: IMMUTABLE_REPOSITORY_ID,
+        changeRequestNumber: "1",
+      }),
+    );
+  });
+});
+
+describe("pluginRegistry — review provider association identity", () => {
+  afterEach(() => {
+    pluginRegistry.unregisterPlugin(PRIMARY_PLUGIN_ID);
+    pluginRegistry.unregisterPlugin(SECONDARY_PLUGIN_ID);
+  });
+
+  it("drops summaries and associations without immutable identity", () => {
+    pluginRegistry.forPlugin(PRIMARY_PLUGIN_ID).registerReviewProvider(
+      reviewProvider(SOURCE_CONTROL_PROVIDER_ID, {
+        getSnapshot: () =>
+          [
+            {
+              providerId: SOURCE_CONTROL_PROVIDER_ID,
+              reviewKey: REVIEW_KEY,
+              title: "Change 1",
+              url: CHANGE_URL,
+              connectionScope: CONNECTION_SCOPE,
+              repositoryId: REPOSITORY_ID,
+              state: "open",
+            },
+          ] as unknown as ReviewItemSummary[],
+        getAssociationSnapshot: () =>
+          [
+            {
+              providerId: SOURCE_CONTROL_PROVIDER_ID,
+              taskId: TASK_ID,
+              reviewKey: REVIEW_KEY,
+            },
+          ] as unknown as ReviewTaskAssociation[],
+      }),
+    );
+    const registration = pluginRegistry.getReviewProvider(SOURCE_CONTROL_PROVIDER_ID)!;
+
+    expect(registration.getSnapshot(TASK_ID)).toEqual([]);
+    expect(registration.getAssociationSnapshot?.(WORKSPACE_ID)).toEqual([]);
   });
 
   it("rejects a review provider claimed by another active plugin", () => {

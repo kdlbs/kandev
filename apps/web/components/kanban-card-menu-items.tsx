@@ -33,7 +33,7 @@ import {
 } from "@/components/task/task-move-context-menu";
 import { cn } from "@/lib/utils";
 import { buildLinkSubmenu } from "./kanban-card-link-submenu";
-import type { PluginTaskMenuContext } from "@/lib/plugins/types";
+import type { PluginIcon, PluginTaskMenuContext } from "@/lib/plugins/types";
 import { buildEditMenuEntry } from "./kanban-card-edit-submenu";
 import { buildPrimaryPluginEntries } from "./kanban-card-plugin-menu-actions";
 import { useTranslation } from "react-i18next";
@@ -77,7 +77,7 @@ export type KanbanCardMoveTargets = {
 export type KanbanPluginLinkAction = {
   id: string;
   label: string;
-  icon?: string;
+  icon?: PluginIcon;
   disabled?: boolean;
   onSelect: () => void;
 };

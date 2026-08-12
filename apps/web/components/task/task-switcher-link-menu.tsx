@@ -17,6 +17,7 @@ import {
   ContextMenuSubTrigger,
 } from "@kandev/ui/context-menu";
 import { resolvePluginIcon } from "@/lib/plugins/icons";
+import type { PluginIcon } from "@/lib/plugins/types";
 import { useTaskPluginLinkActions } from "./task-session-sidebar-link-actions";
 import type { TaskSwitcherItem } from "./task-switcher-types";
 
@@ -100,7 +101,7 @@ function TaskLinkMenu({
   onLinkJiraTicket?: () => void;
   onLinkLinearIssue?: () => void;
   onLinkSentryIssue?: () => void;
-  pluginLinkActions?: { id: string; label: string; icon?: string; onSelect: () => void }[];
+  pluginLinkActions?: { id: string; label: string; icon?: PluginIcon; onSelect: () => void }[];
 }) {
   const { t } = useTranslation();
   if (

@@ -15,7 +15,20 @@ import {
   useReviewProviderUpdates,
 } from "./review-panel-provider";
 import { ReviewItemSelector } from "./review-item-selector";
-import { useReviewItemSelection } from "./review-selection";
+import { reviewItemId, useReviewItemSelection } from "./review-selection";
+
+type RegisteredReviewPanelProps = {
+  panelId: string;
+  provider: PluginReviewProviderRegistration;
+  taskId: string;
+  workspaceId: string;
+  sessionId: string | null;
+  reviewKey: string;
+  connectionScope: string;
+  repositoryId: string;
+  changeRequestNumber: string | number;
+  presentation: "desktop" | "mobile";
+};
 
 function RegisteredReviewPanel({
   panelId,
@@ -24,20 +37,20 @@ function RegisteredReviewPanel({
   workspaceId,
   sessionId,
   reviewKey,
+  connectionScope,
+  repositoryId,
+  changeRequestNumber,
   presentation,
-}: {
-  panelId: string;
-  provider: PluginReviewProviderRegistration;
-  taskId: string;
-  workspaceId: string;
-  sessionId: string | null;
-  reviewKey: string;
-  presentation: "desktop" | "mobile";
-}) {
+}: RegisteredReviewPanelProps) {
   const providers = useMemo(() => [provider], [provider]);
   const version = useReviewProviderUpdates(taskId, providers);
   const items = provider.getSnapshot(taskId);
-  const selected = items.find((item) => item.reviewKey === reviewKey);
+  const selected = items.find(
+    (item) =>
+      item.repositoryId === repositoryId &&
+      item.connectionScope === connectionScope &&
+      String(item.changeRequestNumber) === String(changeRequestNumber),
+  );
 
   if (!selected) {
     const EmptyState = provider.EmptyState;
@@ -53,6 +66,9 @@ function RegisteredReviewPanel({
       taskId={taskId}
       sessionId={sessionId ?? undefined}
       reviewKey={reviewKey}
+      connectionScope={connectionScope}
+      repositoryId={repositoryId}
+      changeRequestNumber={changeRequestNumber}
     />
   );
 }
@@ -69,6 +85,60 @@ function hasExplicitReviewIdentity(params: Record<string, unknown>): boolean {
   return [params.providerId, params.provider, params.reviewKey, params.prKey, params.mrKey].some(
     (value) => typeof value === "string" && value.length > 0,
   );
+}
+
+function parseRegisteredReviewIdentity(params: Record<string, unknown>) {
+  const reviewKey = resolveReviewKey(params);
+  const repositoryId = typeof params.repositoryId === "string" ? params.repositoryId : undefined;
+  const connectionScope =
+    typeof params.connectionScope === "string" ? params.connectionScope : undefined;
+  const changeRequestNumber =
+    typeof params.changeRequestNumber === "string" || typeof params.changeRequestNumber === "number"
+      ? params.changeRequestNumber
+      : undefined;
+  return { reviewKey, repositoryId, connectionScope, changeRequestNumber };
+}
+
+function resolveRegisteredReviewPanelProps({
+  panelId,
+  provider,
+  taskId,
+  workspaceId,
+  sessionId,
+  identity,
+  presentation,
+}: {
+  panelId: string;
+  provider: PluginReviewProviderRegistration | undefined;
+  taskId: string | null;
+  workspaceId: string | null;
+  sessionId: string | null;
+  identity: ReturnType<typeof parseRegisteredReviewIdentity>;
+  presentation: "desktop" | "mobile";
+}): RegisteredReviewPanelProps | null {
+  if (
+    !provider ||
+    !taskId ||
+    !workspaceId ||
+    !identity.reviewKey ||
+    !identity.connectionScope ||
+    !identity.repositoryId ||
+    identity.changeRequestNumber === undefined
+  ) {
+    return null;
+  }
+  return {
+    panelId,
+    provider,
+    taskId,
+    workspaceId,
+    sessionId,
+    reviewKey: identity.reviewKey,
+    connectionScope: identity.connectionScope,
+    repositoryId: identity.repositoryId,
+    changeRequestNumber: identity.changeRequestNumber,
+    presentation,
+  };
 }
 
 function CanonicalReviewPanel({ panelId }: { panelId: string }) {
@@ -93,11 +163,14 @@ function CanonicalReviewPanel({ panelId }: { panelId: string }) {
       {selectedReview ? (
         <div className="min-h-0 flex-1">
           <ReviewDetailPanelComponent
-            key={`${selectedReview.providerId}:${selectedReview.reviewKey}`}
+            key={reviewItemId(selectedReview)}
             panelId={panelId}
             params={{
               providerId: selectedReview.providerId,
               reviewKey: selectedReview.reviewKey,
+              connectionScope: selectedReview.connectionScope,
+              repositoryId: selectedReview.repositoryId,
+              changeRequestNumber: selectedReview.changeRequestNumber,
             }}
           />
         </div>
@@ -131,34 +204,31 @@ export function ReviewDetailPanelComponent({
   const hasGitLabMR = useTaskMRs(activeTaskId).length > 0;
   const panelParams = params ?? {};
   const provider = resolveReviewPanelProvider(panelParams, hasGitHubPR, hasGitLabMR);
-  const reviewKey = resolveReviewKey(panelParams);
+  const identity = parseRegisteredReviewIdentity(panelParams);
   const registeredProvider = useMemo(
     () => (provider ? registry.getReviewProvider(provider) : undefined),
     [provider, registry, registryVersion],
   );
+  const registeredPanelProps = resolveRegisteredReviewPanelProps({
+    panelId,
+    provider: registeredProvider,
+    taskId: activeTaskId,
+    workspaceId,
+    sessionId,
+    identity,
+    presentation,
+  });
 
   if (panelId === "pr-detail" && !hasExplicitReviewIdentity(panelParams)) {
     return <CanonicalReviewPanel panelId={panelId} />;
   }
 
-  if (registeredProvider && activeTaskId && workspaceId && reviewKey) {
-    return (
-      <RegisteredReviewPanel
-        panelId={panelId}
-        provider={registeredProvider}
-        taskId={activeTaskId}
-        workspaceId={workspaceId}
-        sessionId={sessionId}
-        reviewKey={reviewKey}
-        presentation={presentation}
-      />
-    );
-  }
+  if (registeredPanelProps) return <RegisteredReviewPanel {...registeredPanelProps} />;
 
   if (provider && provider !== "github" && provider !== "gitlab") return <ReviewUnavailable />;
 
   if (provider === "gitlab") {
-    return <MRDetailPanelComponent panelId={panelId} params={{ mrKey: reviewKey }} />;
+    return <MRDetailPanelComponent panelId={panelId} params={{ mrKey: identity.reviewKey }} />;
   }
-  return <PRDetailPanelComponent panelId={panelId} params={{ prKey: reviewKey }} />;
+  return <PRDetailPanelComponent panelId={panelId} params={{ prKey: identity.reviewKey }} />;
 }

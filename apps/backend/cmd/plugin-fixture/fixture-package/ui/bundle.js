@@ -366,6 +366,22 @@
         );
       }
 
+      function FixtureBitbucketIcon(props) {
+        return jsx(
+          "svg",
+          {
+            className: props.className,
+            viewBox: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            "aria-hidden": props["aria-hidden"] || true,
+            "data-testid": "fixture-bitbucket-icon",
+          },
+          jsx("path", { d: "M4 5h16l-2.5 14h-11z" }),
+          jsx("path", { d: "M9 9h6l-1 6h-4z" }),
+        );
+      }
+
       registry.registerNavItem({
         id: "e2e-hello",
         label: "Hello E2E",
@@ -384,6 +400,7 @@
       registry.registerRepositoryProvider({
         id: PROVIDER_ID,
         label: "Bitbucket",
+        icon: FixtureBitbucketIcon,
         listRepositories: function () {
           return Promise.resolve([fixtureRepository()]);
         },
@@ -417,7 +434,7 @@
       registry.registerTaskAction({
         id: "link-bitbucket-pull-request",
         label: "Bitbucket Pull Request",
-        icon: "bitbucket",
+        icon: FixtureBitbucketIcon,
         placement: "link",
         group: "Link",
         run: openLinkResult,
@@ -426,6 +443,7 @@
       registry.registerReviewProvider({
         id: PROVIDER_ID,
         label: "Bitbucket",
+        icon: FixtureBitbucketIcon,
         changeRequestNoun: "Pull Request",
         order: 50,
         getSnapshot: function (taskId) {
@@ -435,7 +453,9 @@
               reviewKey: "pull-request-42",
               title: "Bitbucket Pull Request #42",
               url: PULL_REQUEST_URL,
+              connectionScope: "https://bitbucket.example.test",
               repositoryId: "fixture-repository",
+              changeRequestNumber: 42,
               state: "OPEN",
               statusBadge: { label: "Open" },
               taskId: taskId,
@@ -445,7 +465,9 @@
               reviewKey: "pull-request-43",
               title: "Bitbucket Pull Request #43",
               url: "https://bitbucket.example.test/projects/TEAM/repos/fixture/pull-requests/43",
+              connectionScope: "https://bitbucket.example.test",
               repositoryId: "fixture-repository",
+              changeRequestNumber: 43,
               state: "OPEN",
               statusBadge: { label: "Open" },
               taskId: taskId,

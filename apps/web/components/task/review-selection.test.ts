@@ -8,7 +8,9 @@ const githubReview: ReviewItemSummary = {
   reviewKey: "owner/repository/12",
   title: "GitHub pull request",
   url: "https://github.test/owner/repository/pull/12",
+  connectionScope: "https://github.test",
   repositoryId: "owner/repository",
+  changeRequestNumber: 12,
   state: "OPEN",
 };
 
@@ -17,13 +19,16 @@ const bitbucketReview: ReviewItemSummary = {
   reviewKey: "workspace/repository/42",
   title: "Bitbucket pull request",
   url: "https://bitbucket.test/workspace/repository/pull-requests/42",
+  connectionScope: "https://bitbucket.test",
   repositoryId: "workspace/repository",
+  changeRequestNumber: 42,
   state: "OPEN",
 };
 
 const secondGithubReview: ReviewItemSummary = {
   ...githubReview,
   reviewKey: "owner/repository/13",
+  changeRequestNumber: 13,
   title: "Second GitHub pull request",
   url: "https://github.test/owner/repository/pull/13",
 };
@@ -45,6 +50,23 @@ describe("selectReviewItem", () => {
 
     expect(reviewItemId(first)).not.toBe(reviewItemId(second));
     expect(selectReviewItem([first, second], reviewItemId(second))).toBe(second);
+  });
+
+  it("uses immutable repository identity when a repository path is recreated", () => {
+    const oldRepository = {
+      ...bitbucketReview,
+      repositoryId: "repository-uuid-old",
+      reviewKey: "workspace/repository#42",
+    };
+    const recreatedRepository = {
+      ...oldRepository,
+      repositoryId: "repository-uuid-new",
+    };
+
+    expect(reviewItemId(oldRepository)).not.toBe(reviewItemId(recreatedRepository));
+    expect(
+      selectReviewItem([oldRepository, recreatedRepository], reviewItemId(recreatedRepository)),
+    ).toBe(recreatedRepository);
   });
 
   it("opens a lone review without an unnecessary chooser", () => {

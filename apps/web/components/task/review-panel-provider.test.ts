@@ -125,7 +125,9 @@ function review(title: string) {
     reviewKey: BITBUCKET_REVIEW_KEY,
     title,
     url: "https://bitbucket.test/workspace/repository/pull-requests/42",
+    connectionScope: "https://bitbucket.test",
     repositoryId: "workspace/repository",
+    changeRequestNumber: 42,
     state: "OPEN",
   };
 }

@@ -19,7 +19,9 @@ export function normalizeReviewItems(
       !item.reviewKey ||
       !item.title ||
       !item.url ||
+      !item.connectionScope ||
       !item.repositoryId ||
+      normalizeChangeRequestNumber(item.changeRequestNumber) === undefined ||
       !item.state
     ) {
       return [];
@@ -31,13 +33,16 @@ export function normalizeReviewItems(
         }
       : undefined;
     const taskStatus = normalizeReviewTaskStatus(item.taskStatus);
+    const changeRequestNumber = normalizeChangeRequestNumber(item.changeRequestNumber)!;
     return [
       {
         providerId,
         reviewKey: item.reviewKey,
         title: item.title,
         url: item.url,
+        connectionScope: item.connectionScope,
         repositoryId: item.repositoryId,
+        changeRequestNumber,
         state: item.state,
         ...(statusBadge ? { statusBadge } : {}),
         ...(taskStatus ? { taskStatus } : {}),
@@ -53,12 +58,13 @@ export function normalizeReviewAssociations(
   const seen = new Set<string>();
   return associations.flatMap((association) => {
     if (!association.taskId || !association.reviewKey) return [];
+    const connectionScope = association.connectionScope?.trim();
     const repositoryId = association.repositoryId?.trim();
     const changeRequestNumber = normalizeChangeRequestNumber(association.changeRequestNumber);
-    const hasImmutableIdentity = Boolean(repositoryId) && changeRequestNumber !== undefined;
-    const identity = hasImmutableIdentity
-      ? `${repositoryId}\u0000${String(changeRequestNumber)}`
-      : association.reviewKey;
+    const hasImmutableIdentity =
+      Boolean(connectionScope) && Boolean(repositoryId) && changeRequestNumber !== undefined;
+    if (!hasImmutableIdentity) return [];
+    const identity = `${connectionScope}\u0000${repositoryId}\u0000${String(changeRequestNumber)}`;
     const key = `${association.taskId}\u0000${identity}`;
     if (seen.has(key)) return [];
     seen.add(key);
@@ -67,12 +73,9 @@ export function normalizeReviewAssociations(
         providerId,
         taskId: association.taskId,
         reviewKey: association.reviewKey,
-        ...(hasImmutableIdentity
-          ? {
-              repositoryId,
-              changeRequestNumber,
-            }
-          : {}),
+        connectionScope: connectionScope!,
+        repositoryId: repositoryId!,
+        changeRequestNumber: changeRequestNumber!,
       },
     ];
   });

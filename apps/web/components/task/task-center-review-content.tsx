@@ -5,6 +5,7 @@ import type { ReviewItemSummary } from "@/lib/plugins/types";
 import { t } from "@/lib/i18n";
 import { ReviewDetailPanelComponent } from "./review-detail-panel";
 import { ReviewItemSelector } from "./review-item-selector";
+import { reviewItemId } from "./review-selection";
 
 export function TaskCenterReviewContent({
   reviews,
@@ -27,11 +28,14 @@ export function TaskCenterReviewContent({
         {selectedReview ? (
           <div className="min-h-0 flex-1">
             <ReviewDetailPanelComponent
-              key={`${selectedReview.providerId}:${selectedReview.reviewKey}`}
+              key={reviewItemId(selectedReview)}
               panelId="task-center-review"
               params={{
                 providerId: selectedReview.providerId,
                 reviewKey: selectedReview.reviewKey,
+                connectionScope: selectedReview.connectionScope,
+                repositoryId: selectedReview.repositoryId,
+                changeRequestNumber: selectedReview.changeRequestNumber,
               }}
             />
           </div>

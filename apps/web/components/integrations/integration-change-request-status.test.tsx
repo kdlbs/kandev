@@ -151,6 +151,27 @@ describe("IntegrationChangeRequestStatus", () => {
 
     expect(onUnlink).toHaveBeenCalledOnce();
   });
+
+  it("aborts a provider unlink when its host-owned popover unmounts", async () => {
+    vi.useFakeTimers();
+    let unlinkSignal: AbortSignal | undefined;
+    const onUnlink = vi.fn((signal?: AbortSignal) => {
+      unlinkSignal = signal;
+      return new Promise<void>(() => {});
+    });
+    const item = statusItem({ onUnlink });
+    const rendered = render(<IntegrationChangeRequestStatus items={[item.item]} />);
+    const trigger = screen.getByRole("button", { name: /#42 Provider-neutral change/ });
+    fireEvent.mouseEnter(trigger);
+    act(() => vi.advanceTimersByTime(150));
+
+    fireEvent.click(screen.getByRole("button", { name: "Unlink pull request #42" }));
+    await act(async () => Promise.resolve());
+    expect(unlinkSignal).toBeInstanceOf(AbortSignal);
+
+    rendered.unmount();
+    expect(unlinkSignal?.aborted).toBe(true);
+  });
 });
 
 describe("IntegrationChangeRequestStatus touch and multi-review parity", () => {

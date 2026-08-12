@@ -381,7 +381,7 @@ scope for both initial host materialization and helper-lease redemption, and ret
 only a transient credential consumed by the host Git process. Initial materialization
 and strict pre-worktree refresh carry the same task/session/repository scope; after a
 successful refresh the worktree layer uses local refs and performs no second network operation.
-must include workspace, task, active session, repository, exact host, and exact path;
+Credential requests must include workspace, task, active session, repository, exact host, and exact path;
 an incomplete plugin-provider scope fails closed.
 `GetGitCredentialBinding` receives the same scope and returns an opaque, non-secret
 generation checked before and after redemption; missing or changed bindings fail closed.

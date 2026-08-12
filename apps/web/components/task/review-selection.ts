@@ -9,8 +9,20 @@ type ReviewSelection = {
   preferredReviewId: string | null;
 };
 
-export function reviewItemId(review: Pick<ReviewItemSummary, "providerId" | "reviewKey">): string {
-  return `${encodeURIComponent(review.providerId)}:${encodeURIComponent(review.reviewKey)}`;
+export function reviewItemId(
+  review: Pick<
+    ReviewItemSummary,
+    "providerId" | "connectionScope" | "repositoryId" | "changeRequestNumber"
+  >,
+): string {
+  return [
+    review.providerId,
+    review.connectionScope,
+    review.repositoryId,
+    String(review.changeRequestNumber),
+  ]
+    .map(encodeURIComponent)
+    .join(":");
 }
 
 /**
