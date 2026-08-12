@@ -541,11 +541,21 @@ func (m *Manager) handleStreamDisconnect(
 	err error,
 	promptGeneration uint64,
 ) {
-	m.logger.Warn("agent updates stream disconnected",
+	disconnectFields := []zap.Field{
 		zap.String("execution_id", execution.ID),
 		zap.String("session_id", execution.SessionID),
 		zap.Uint64("prompt_generation", promptGeneration),
-		zap.Error(err))
+		zap.Error(err),
+	}
+	// A disconnect during graceful shutdown is expected: StopAllAgents stops the
+	// agent process, which drops the agentctl WebSocket. Logging it at WARN turns
+	// routine teardown into noise, so downgrade to DEBUG while shutting down. The
+	// failed-status/error-event handling below is unchanged either way.
+	if m.IsShuttingDown() {
+		m.logger.Debug("agent updates stream disconnected during shutdown", disconnectFields...)
+	} else {
+		m.logger.Warn("agent updates stream disconnected", disconnectFields...)
+	}
 
 	if promptGeneration != 0 {
 		execution.promptLifecycleMu.Lock()

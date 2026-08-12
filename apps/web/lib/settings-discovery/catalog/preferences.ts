@@ -35,6 +35,7 @@ export const GENERAL_SETTINGS_TARGETS = {
   agentTaskProfile: "setting-agent-task-profile",
   agentGeneratedTitles: "setting-agent-generated-task-titles",
   archiveConfirmation: "setting-archive-confirmation",
+  preventAutoStartOnOpen: "setting-prevent-auto-start-on-open",
   unreadMessages: "setting-unread-messages",
   transcriptNavigation: "setting-transcript-navigation",
   messageQueue: "setting-message-queue",
@@ -325,6 +326,16 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     order: 62,
   },
   {
+    id: "task-actions-prevent-auto-start-on-open",
+    kind: "control",
+    labelKey: "settings:preventAutoStartAgentOnOpen",
+    parentId: TASK_BEHAVIOR_ID,
+    groupId: "preferences",
+    href: TASK_BEHAVIOR_SETTINGS_HREF,
+    targetId: GENERAL_SETTINGS_TARGETS.preventAutoStartOnOpen,
+    order: 63,
+  },
+  {
     id: "task-actions-archive-confirmation",
     kind: "control",
     labelKey: "settings:archiveConfirmation",
@@ -333,7 +344,7 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     groupId: "preferences",
     href: TASK_BEHAVIOR_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.archiveConfirmation,
-    order: 63,
+    order: 64,
   },
   {
     id: "task-actions-unread-messages",
@@ -343,7 +354,7 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     groupId: "preferences",
     href: TASK_BEHAVIOR_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.unreadMessages,
-    order: 64,
+    order: 65,
   },
   {
     id: "task-actions-transcript-navigation",

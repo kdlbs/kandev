@@ -26,8 +26,13 @@ test.describe("Kanban card actions menu — delete/archive does not navigate", (
     await deleteItem.click();
 
     // Confirm dialog must appear with the task title
-    await expect(testPage.getByRole("alertdialog")).toBeVisible();
-    await expect(testPage.getByRole("alertdialog")).toContainText("Card Menu Delete Task");
+    const dialog = testPage.getByRole("alertdialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText("Card Menu Delete Task");
+    const dialogBox = await dialog.boundingBox();
+    if (!dialogBox) throw new Error("delete confirmation dialog has no layout box");
+    expect(dialogBox.width).toBeGreaterThanOrEqual(480);
+    await expect(dialog).toHaveClass(/font-sans/);
 
     // URL must not have changed (no navigation to /tasks/:id and no ?taskId=)
     expect(testPage.url()).toBe(startUrl);
@@ -53,8 +58,13 @@ test.describe("Kanban card actions menu — delete/archive does not navigate", (
     await expect(archiveItem).toBeVisible();
     await archiveItem.click();
 
-    await expect(testPage.getByRole("alertdialog")).toBeVisible();
-    await expect(testPage.getByRole("alertdialog")).toContainText("Card Menu Archive Task");
+    const dialog = testPage.getByRole("alertdialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText("Card Menu Archive Task");
+    const dialogBox = await dialog.boundingBox();
+    if (!dialogBox) throw new Error("archive confirmation dialog has no layout box");
+    expect(dialogBox.width).toBeGreaterThanOrEqual(480);
+    await expect(dialog).toHaveClass(/font-sans/);
 
     expect(testPage.url()).toBe(startUrl);
   });

@@ -82,6 +82,7 @@ function makeStateChangedMessage(payload: Record<string, unknown>) {
 
 const existingTask = {
   id: "t1",
+  workflowId: "wf1",
   workflowStepId: "step1",
   title: "Old",
   position: 0,

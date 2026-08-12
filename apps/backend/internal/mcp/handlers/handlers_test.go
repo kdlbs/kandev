@@ -136,6 +136,7 @@ func newTestTaskServiceWithWorkflow(t *testing.T) (*service.Service, *sqliterepo
 		Reviews:      repo,
 	}, eventBus, log, service.RepositoryDiscoveryConfig{})
 	workflowSvc := workflowservice.NewService(workflowRepo, log)
+	t.Cleanup(func() { _ = workflowSvc.Close() })
 	return svc, repo, workflowcontroller.NewController(workflowSvc), workflowRepo
 }
 

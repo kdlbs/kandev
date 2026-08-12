@@ -8,14 +8,18 @@ import (
 	"github.com/kandev/kandev/internal/user/service"
 )
 
+// Controller exposes the user settings HTTP handlers backed by the user
+// service.
 type Controller struct {
 	svc *service.Service
 }
 
+// NewController builds a user settings controller.
 func NewController(svc *service.Service) *Controller {
 	return &Controller{svc: svc}
 }
 
+// GetCurrentUser returns the authenticated user together with their settings.
 func (c *Controller) GetCurrentUser(ctx context.Context) (dto.UserResponse, error) {
 	user, err := c.svc.GetCurrentUser(ctx)
 	if err != nil {
@@ -31,6 +35,7 @@ func (c *Controller) GetCurrentUser(ctx context.Context) (dto.UserResponse, erro
 	}, nil
 }
 
+// GetUserSettings returns the current user's settings and OS shell options.
 func (c *Controller) GetUserSettings(ctx context.Context) (dto.UserSettingsResponse, error) {
 	settings, err := c.svc.GetUserSettings(ctx)
 	if err != nil {
@@ -42,6 +47,8 @@ func (c *Controller) GetUserSettings(ctx context.Context) (dto.UserSettingsRespo
 	}, nil
 }
 
+// UpdateUserSettings applies a partial settings patch and returns the
+// resulting settings with OS shell options.
 func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserSettingsRequest) (dto.UserSettingsResponse, error) {
 	settings, err := c.svc.UpdateUserSettings(ctx, &service.UpdateUserSettingsRequest{
 		WorkspaceID:                       req.WorkspaceID,
@@ -59,6 +66,7 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		ChatSubmitKey:                     req.ChatSubmitKey,
 		ReviewAutoMarkOnScroll:            req.ReviewAutoMarkOnScroll,
 		ConfirmTaskArchive:                req.ConfirmTaskArchive,
+		PreventAutoStartAgentOnOpen:       req.PreventAutoStartAgentOnOpen,
 		UnreadDivider:                     req.UnreadDivider,
 		AgentGeneratedTaskTitles:          req.AgentGeneratedTaskTitles,
 		MCPTaskAgentProfileDefault:        req.MCPTaskAgentProfileDefault,
@@ -109,6 +117,8 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 	}, nil
 }
 
+// systemMetricsDisplayPatch maps the API patch shape to the service layer,
+// returning nil when the patch is omitted.
 func systemMetricsDisplayPatch(patch *dto.SystemMetricsDisplaySettingsPatch) *service.SystemMetricsDisplaySettingsPatch {
 	if patch == nil {
 		return nil
@@ -119,6 +129,8 @@ func systemMetricsDisplayPatch(patch *dto.SystemMetricsDisplaySettingsPatch) *se
 	}
 }
 
+// shellOptionsForOS returns the shell choices offered in settings for the
+// current operating system.
 func shellOptionsForOS() []dto.ShellOption {
 	switch runtime.GOOS {
 	case "windows":

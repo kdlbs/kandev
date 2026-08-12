@@ -54,6 +54,17 @@ test.describe.serial("Message Queue general settings", () => {
     );
     await expect(testPage.getByText("Message Queue").first()).toBeVisible();
 
+    // The Message Queue box spans the full settings column like every other
+    // settings box; it must not be width-restricted.
+    const queueCard = testPage.getByTestId("message-queue-settings");
+    const siblingCard = testPage.getByTestId("voice-enable-card");
+    await expect(queueCard).toBeVisible();
+    await expect(siblingCard).toBeVisible();
+    expect((await queueCard.boundingBox())?.width ?? 0).toBeCloseTo(
+      (await siblingCard.boundingBox())?.width ?? 0,
+      0,
+    );
+
     const input = testPage.getByTestId("message-queue-max-per-session");
     await expect(input).toHaveValue(String(baseline));
     await input.fill(String(updated));

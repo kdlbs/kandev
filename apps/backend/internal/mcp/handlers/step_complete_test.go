@@ -3,6 +3,10 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"expvar"
+	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -10,12 +14,54 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
+
+// readSignalReceivedCounterExact reads the exact-match entry in the ADR 0015
+// workflow_step_completion_signal_received_total expvar map for the given
+// key, verifying the label the handler actually wrote rather than a prefix
+// that would also match a wrong or empty value. Callers seed a distinct
+// agent_id per test (see seedAgentProfileSnapshot) so the exact key is also
+// unique across this file's process-wide expvar state.
+func readSignalReceivedCounterExact(t *testing.T, key string) int64 {
+	t.Helper()
+	v := expvar.Get("workflow_step_completion_signal_received_total")
+	require.NotNil(t, v, "workflow_step_completion_signal_received_total must be published")
+	m, ok := v.(*expvar.Map)
+	require.True(t, ok, "workflow_step_completion_signal_received_total must be an expvar.Map")
+	var total int64
+	m.Do(func(kv expvar.KeyValue) {
+		if kv.Key != key {
+			return
+		}
+		n, err := strconv.ParseInt(kv.Value.String(), 10, 64)
+		require.NoError(t, err, "counter %q value not int: %s", kv.Key, kv.Value.String())
+		total += n
+	})
+	return total
+}
+
+// seedAgentProfileSnapshot writes an AgentProfileSnapshot onto the session
+// with distinct agent_id and agent_name values, matching the shape
+// executor.resolveAgentProfileSnapshot produces in production: agent_id is
+// the store's auto-generated UUID for the agent row
+// (internal/agent/settings/store/sqlite.go CreateAgent), agent_name is the
+// registry-facing type like "claude"/"codex"
+// (internal/agent/settings/controller/reconciler.go ensureDBAgent). Seeding
+// them with different values means a test asserting on agentName fails if
+// the handler is ever switched back to reading agent_id.
+func seedAgentProfileSnapshot(t *testing.T, repo *sqliterepo.Repository, sessionID, agentName string) {
+	t.Helper()
+	require.NoError(t, repo.UpdateTaskSessionAgentProfileSnapshot(context.Background(), sessionID, map[string]interface{}{
+		"agent_id":   "decoy-uuid-" + agentName,
+		"agent_name": agentName,
+	}))
+}
 
 // seedStepCompleteTarget seeds a workspace, task (with WorkflowStepID), and
 // session in the requested state. Used by every TestHandleStepComplete_* case
@@ -56,6 +102,39 @@ func newStepCompleteHandler(t *testing.T, taskSvc *service.Service, repo *sqlite
 		eventBus:    bus,
 		logger:      testLogger(t).WithFields(),
 	}
+}
+
+type stepCompleteSessionReadBarrier struct {
+	*sqliterepo.Repository
+	ready   chan<- struct{}
+	release <-chan struct{}
+	reads   atomic.Int32
+}
+
+func (r *stepCompleteSessionReadBarrier) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
+	if r.reads.Add(1) <= 2 {
+		r.ready <- struct{}{}
+		<-r.release
+	}
+	return r.Repository.GetTaskSession(ctx, id)
+}
+
+type concurrentStepCompleteEventBus struct {
+	mu     sync.Mutex
+	events []*bus.Event
+}
+
+func (b *concurrentStepCompleteEventBus) Publish(_ context.Context, _ string, event *bus.Event) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.events = append(b.events, event)
+	return nil
+}
+
+func (b *concurrentStepCompleteEventBus) eventCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.events)
 }
 
 // TestHandleStepComplete_MissingFields covers the input-validation branches
@@ -149,8 +228,12 @@ func TestHandleStepComplete_TerminalSessionRejected(t *testing.T) {
 func TestHandleStepComplete_FirstCallAccepted(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	seedStepCompleteTarget(t, repo, "task-first", "session-first", "step-1", models.TaskSessionStateRunning)
+	seedAgentProfileSnapshot(t, repo, "session-first", "claude-first-call")
 	bus := &mcpRecordingEventBus{}
 	h := newStepCompleteHandler(t, svc, repo, bus)
+
+	const counterKey = "source=agent;agent_type=claude-first-call"
+	before := readSignalReceivedCounterExact(t, counterKey)
 
 	msg := makeWSMessage(t, ws.ActionMCPStepComplete, map[string]interface{}{
 		"task_id":    "task-first",
@@ -197,6 +280,9 @@ func TestHandleStepComplete_FirstCallAccepted(t *testing.T) {
 	assert.Equal(t, "implementation finished", data["summary"])
 	_, hasHandoff := data["handoff"]
 	assert.False(t, hasHandoff, "handoff is bag-only, not on the wire")
+
+	after := readSignalReceivedCounterExact(t, counterKey)
+	assert.Equal(t, int64(1), after-before, "accepted signal must increment workflow_step_completion_signal_received_total")
 }
 
 // TestHandleStepComplete_DedupRunningNoRepublish covers the
@@ -214,8 +300,12 @@ func TestHandleStepComplete_DedupRunningNoRepublish(t *testing.T) {
 		Summary:    "first call",
 		SignaledAt: time.Now().UTC(),
 	}))
+	seedAgentProfileSnapshot(t, repo, "session-dup", "claude-dup-call")
 	bus := &mcpRecordingEventBus{}
 	h := newStepCompleteHandler(t, svc, repo, bus)
+
+	const counterKey = "source=agent;agent_type=claude-dup-call"
+	before := readSignalReceivedCounterExact(t, counterKey)
 
 	msg := makeWSMessage(t, ws.ActionMCPStepComplete, map[string]interface{}{
 		"task_id":    "task-dup",
@@ -233,6 +323,9 @@ func TestHandleStepComplete_DedupRunningNoRepublish(t *testing.T) {
 	assert.Equal(t, "already_signaled", payload["reason"])
 
 	assert.Empty(t, bus.events, "RUNNING dedup path must not re-publish (inline turn-end will consume the bag)")
+
+	after := readSignalReceivedCounterExact(t, counterKey)
+	assert.Equal(t, before, after, "already_signaled dedup must not increment workflow_step_completion_signal_received_total")
 }
 
 // TestHandleStepComplete_DedupWaitingRepublishes covers the retry-after-
@@ -271,4 +364,82 @@ func TestHandleStepComplete_DedupWaitingRepublishes(t *testing.T) {
 
 	require.Len(t, bus.events, 1, "WAITING dedup must re-publish the bus event so the subscriber can drive the transition")
 	assert.Equal(t, events.WorkflowStepCompletionSignaled, bus.events[0].Type)
+}
+
+// TestHandleStepComplete_ConcurrentCallsClaimOneSignal verifies that two
+// requests which read the empty bag at the same time still produce one
+// accepted signal, one event, and one telemetry increment.
+func TestHandleStepComplete_ConcurrentCallsClaimOneSignal(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	seedStepCompleteTarget(t, repo, "task-concurrent", "session-concurrent", "step-1", models.TaskSessionStateWaitingForInput)
+	seedAgentProfileSnapshot(t, repo, "session-concurrent", "claude-concurrent")
+
+	ready := make(chan struct{}, 2)
+	release := make(chan struct{})
+	gatedRepo := &stepCompleteSessionReadBarrier{
+		Repository: repo,
+		ready:      ready,
+		release:    release,
+	}
+	eventBus := &concurrentStepCompleteEventBus{}
+	h := &Handlers{
+		taskSvc:     svc,
+		sessionRepo: gatedRepo,
+		eventBus:    eventBus,
+		logger:      testLogger(t).WithFields(),
+	}
+
+	const counterKey = "source=agent;agent_type=claude-concurrent"
+	before := readSignalReceivedCounterExact(t, counterKey)
+	messages := []*ws.Message{
+		makeWSMessage(t, ws.ActionMCPStepComplete, map[string]interface{}{
+			"task_id":    "task-concurrent",
+			"session_id": "session-concurrent",
+			"summary":    "first concurrent signal",
+		}),
+		makeWSMessage(t, ws.ActionMCPStepComplete, map[string]interface{}{
+			"task_id":    "task-concurrent",
+			"session_id": "session-concurrent",
+			"summary":    "second concurrent signal",
+		}),
+	}
+	type result struct {
+		response *ws.Message
+		err      error
+	}
+	results := make(chan result, len(messages))
+	for _, msg := range messages {
+		go func(msg *ws.Message) {
+			response, err := h.handleStepComplete(ctx, msg)
+			results <- result{response: response, err: err}
+		}(msg)
+	}
+	<-ready
+	<-ready
+	close(release)
+
+	accepted := 0
+	for range messages {
+		outcome := <-results
+		require.NoError(t, outcome.err)
+		require.NotNil(t, outcome.response)
+		var payload map[string]interface{}
+		require.NoError(t, json.Unmarshal(outcome.response.Payload, &payload))
+		if payload["accepted"] == true {
+			accepted++
+		}
+	}
+
+	assert.Equal(t, 1, accepted, "only one concurrent request can claim the current workflow step")
+	assert.Equal(t, 1, eventBus.eventCount(), "only the winning request can publish the completion event")
+	after := readSignalReceivedCounterExact(t, counterKey)
+	assert.Equal(t, int64(1), after-before, "only the winning request can increment received-signal telemetry")
+
+	session, err := repo.GetTaskSession(ctx, "session-concurrent")
+	require.NoError(t, err)
+	signal, ok := models.LoadPendingStepSignal(session.Metadata)
+	require.True(t, ok, "the winning request must persist the completion signal")
+	assert.Equal(t, "step-1", signal.StepID)
+	assert.Contains(t, []string{"first concurrent signal", "second concurrent signal"}, signal.Summary)
 }

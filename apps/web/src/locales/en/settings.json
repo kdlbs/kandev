@@ -36,6 +36,8 @@
   "appriseServiceUrls": "Service URL(s)",
   "appriseUrlRequired": "At least one Apprise service URL is required.",
   "archiveConfirmation": "Archive Confirmation",
+  "preventAutoStartAgentOnOpen": "Prevent auto-start on open",
+  "preventAutoStartAgentOnOpenHelp": "Don't start the agent automatically when opening a task after a restart or from the final workflow step. The Start agent button is shown instead.",
   "arrangeSplit": "Arrange split",
   "autoApprove": "Auto-approve",
   "autoInstallIfNotFound": "Auto-install if not found",

@@ -51,6 +51,7 @@ type UpdateUserSettingsRequest struct {
 	ChatSubmitKey                     *string
 	ReviewAutoMarkOnScroll            *bool
 	ConfirmTaskArchive                *bool
+	PreventAutoStartAgentOnOpen       *bool
 	UnreadDivider                     *bool
 	AgentGeneratedTaskTitles          *bool
 	MCPTaskAgentProfileDefault        *string
@@ -98,6 +99,8 @@ type SystemMetricsDisplaySettingsPatch struct {
 	Simplified   *bool
 }
 
+// NewService builds the user settings service with its repository, event bus,
+// and logger.
 func NewService(repo store.Repository, eventBus bus.EventBus, log *logger.Logger) *Service {
 	return &Service{
 		repo:        repo,
@@ -107,6 +110,8 @@ func NewService(repo store.Repository, eventBus bus.EventBus, log *logger.Logger
 	}
 }
 
+// settingsUserID resolves the effective user for settings operations:
+// the authenticated identity when present, otherwise the default user.
 func (s *Service) settingsUserID(ctx context.Context) string {
 	identity, ok := authn.IdentityFromContext(ctx)
 	if !ok || identity.Synthetic || identity.UserID == "" {
@@ -115,6 +120,8 @@ func (s *Service) settingsUserID(ctx context.Context) string {
 	return identity.UserID
 }
 
+// GetCurrentUser returns the current (or default) user, mapping a missing
+// row to ErrUserNotFound.
 func (s *Service) GetCurrentUser(ctx context.Context) (*models.User, error) {
 	user, err := s.repo.GetUser(ctx, s.settingsUserID(ctx))
 	if err != nil {
@@ -123,6 +130,7 @@ func (s *Service) GetCurrentUser(ctx context.Context) (*models.User, error) {
 	return user, nil
 }
 
+// GetUserSettings returns the current user's persisted settings.
 func (s *Service) GetUserSettings(ctx context.Context) (*models.UserSettings, error) {
 	settings, err := s.repo.GetUserSettings(ctx, s.settingsUserID(ctx))
 	if err != nil {
@@ -131,6 +139,7 @@ func (s *Service) GetUserSettings(ctx context.Context) (*models.UserSettings, er
 	return settings, nil
 }
 
+// PreferredShell returns the user's configured shell.
 func (s *Service) PreferredShell(ctx context.Context) (string, error) {
 	settings, err := s.repo.GetUserSettings(ctx, s.settingsUserID(ctx))
 	if err != nil {
@@ -157,6 +166,9 @@ func (s *Service) GetDefaultUtilityAgentProfileID(ctx context.Context) (string, 
 	return settings.DefaultUtilityAgentProfileID, nil
 }
 
+// UpdateUserSettings applies a partial settings patch field by field,
+// validates each group, persists the result, and publishes the settings
+// update event.
 func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSettingsRequest) (*models.UserSettings, error) {
 	settings, err := s.repo.GetUserSettings(ctx, s.settingsUserID(ctx))
 	if err != nil {
@@ -199,6 +211,8 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 	return settings, nil
 }
 
+// RecordTaskCreateLastUsed persists the last task-creation choices (a no-op
+// for an empty patch) and publishes the settings update event.
 func (s *Service) RecordTaskCreateLastUsed(ctx context.Context, patch models.TaskCreateLastUsed) error {
 	if taskCreateLastUsedPatchEmpty(patch) {
 		return nil
@@ -211,10 +225,13 @@ func (s *Service) RecordTaskCreateLastUsed(ctx context.Context, patch models.Tas
 	return nil
 }
 
+// updateTaskCreateLastUsed delegates the patch to the repository.
 func (s *Service) updateTaskCreateLastUsed(ctx context.Context, patch models.TaskCreateLastUsed) (*models.UserSettings, error) {
 	return s.repo.UpdateTaskCreateLastUsed(ctx, s.settingsUserID(ctx), patch)
 }
 
+// taskCreateLastUsedPatchEmpty reports whether every field of the patch is
+// unset, i.e. nothing to record.
 func taskCreateLastUsedPatchEmpty(patch models.TaskCreateLastUsed) bool {
 	return patch.RepositoryID == "" &&
 		patch.Branch == "" &&
@@ -254,6 +271,8 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 	return nil
 }
 
+// applyWorkspaceAndTaskListPreferences copies workspace, board, and task-list
+// fields from the patch, validating the hidden-step map and list sort/group.
 func applyWorkspaceAndTaskListPreferences(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
 	if req.WorkspaceID != nil {
 		settings.WorkspaceID = *req.WorkspaceID
@@ -339,6 +358,7 @@ func validateKanbanHiddenStepIDs(hidden map[string][]string) error {
 	return nil
 }
 
+// applyStartupPage validates and applies the startup page enum.
 func applyStartupPage(settings *models.UserSettings, value *string) error {
 	if value == nil {
 		return nil
@@ -353,12 +373,18 @@ func applyStartupPage(settings *models.UserSettings, value *string) error {
 	}
 }
 
+// applyTaskActionPreferences copies the task-action preference group
+// (archive confirmation, auto-start prevention, transcript display toggles,
+// MCP default profile, release notification) from the patch.
 func applyTaskActionPreferences(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
 	if req.ReviewAutoMarkOnScroll != nil {
 		settings.ReviewAutoMarkOnScroll = *req.ReviewAutoMarkOnScroll
 	}
 	if req.ConfirmTaskArchive != nil {
 		settings.ConfirmTaskArchive = *req.ConfirmTaskArchive
+	}
+	if req.PreventAutoStartAgentOnOpen != nil {
+		settings.PreventAutoStartAgentOnOpen = *req.PreventAutoStartAgentOnOpen
 	}
 	if req.UnreadDivider != nil {
 		settings.UnreadDivider = *req.UnreadDivider
@@ -393,6 +419,8 @@ func applyTaskActionPreferences(settings *models.UserSettings, req *UpdateUserSe
 	return nil
 }
 
+// applyUtilityPreferences copies the utility-agent defaults and release-notes
+// version from the patch.
 func applyUtilityPreferences(settings *models.UserSettings, req *UpdateUserSettingsRequest) {
 	if req.ReleaseNotesLastSeenVersion != nil {
 		settings.ReleaseNotesLastSeenVersion = *req.ReleaseNotesLastSeenVersion
@@ -408,6 +436,7 @@ func applyUtilityPreferences(settings *models.UserSettings, req *UpdateUserSetti
 	}
 }
 
+// applyKeyboardShortcuts validates and applies the keyboard shortcut map.
 func applyKeyboardShortcuts(settings *models.UserSettings, value *map[string]interface{}) error {
 	if value == nil {
 		return nil
@@ -419,6 +448,7 @@ func applyKeyboardShortcuts(settings *models.UserSettings, value *map[string]int
 	return nil
 }
 
+// applySystemMetricsDisplay applies the topbar metrics display patch.
 func applySystemMetricsDisplay(settings *models.UserSettings, value *SystemMetricsDisplaySettingsPatch) {
 	if value == nil {
 		return
@@ -431,6 +461,8 @@ func applySystemMetricsDisplay(settings *models.UserSettings, value *SystemMetri
 	}
 }
 
+// applyTerminalFontPreferences applies the terminal font family and validates
+// the font size range.
 func applyTerminalFontPreferences(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
 	if req.TerminalFontFamily != nil {
 		settings.TerminalFontFamily = strings.TrimSpace(*req.TerminalFontFamily)
@@ -446,6 +478,8 @@ func applyTerminalFontPreferences(settings *models.UserSettings, req *UpdateUser
 	return nil
 }
 
+// applyMCPTaskAgentProfileDefault validates and applies the MCP task agent
+// profile default enum.
 func applyMCPTaskAgentProfileDefault(settings *models.UserSettings, value *string) error {
 	if value == nil {
 		return nil
@@ -462,6 +496,8 @@ func applyMCPTaskAgentProfileDefault(settings *models.UserSettings, value *strin
 	}
 }
 
+// applyTasksListPreferences validates and applies the task list sort and
+// group enums, defaulting empty values.
 func applyTasksListPreferences(settings *models.UserSettings, sortValue, groupValue *string) error {
 	if sortValue != nil {
 		v := strings.TrimSpace(*sortValue)
@@ -486,6 +522,8 @@ func applyTasksListPreferences(settings *models.UserSettings, sortValue, groupVa
 	return nil
 }
 
+// applyTerminalLinkBehavior validates and applies the terminal link behavior
+// enum.
 func applyTerminalLinkBehavior(settings *models.UserSettings, value *string) error {
 	if value == nil {
 		return nil
@@ -498,6 +536,8 @@ func applyTerminalLinkBehavior(settings *models.UserSettings, value *string) err
 	return nil
 }
 
+// applyChangesPanelLayout validates and applies the changes panel layout
+// enum (flat or tree).
 func applyChangesPanelLayout(settings *models.UserSettings, value *string) error {
 	if value == nil {
 		return nil
@@ -683,6 +723,8 @@ func applySidebarViews(settings *models.UserSettings, req *UpdateUserSettingsReq
 	return nil
 }
 
+// applySidebarViewState validates and applies the active sidebar view id and
+// the sidebar draft.
 func applySidebarViewState(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
 	if req.SidebarActiveViewID != nil {
 		activeViewID := strings.TrimSpace(*req.SidebarActiveViewID)
@@ -700,6 +742,7 @@ func applySidebarViewState(settings *models.UserSettings, req *UpdateUserSetting
 	return nil
 }
 
+// sidebarViewIDExists reports whether a view with the given id is saved.
 func sidebarViewIDExists(views []models.SidebarView, id string) bool {
 	for _, view := range views {
 		if view.ID == id {
@@ -711,6 +754,9 @@ func sidebarViewIDExists(views []models.SidebarView, id string) bool {
 
 const maxUserPreferenceBlobBytes = 64 * 1024
 
+// applyUserPreferenceBlobs applies each free-form preference blob (sidebar
+// task prefs, Jira/GitHub/GitLab/Azure saved views and presets), validating
+// size and shape via applyUserPreferenceBlob.
 func applyUserPreferenceBlobs(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
 	if req.SidebarTaskPrefs != nil {
 		settings.SidebarTaskPrefs = *req.SidebarTaskPrefs
@@ -736,6 +782,9 @@ func applyUserPreferenceBlobs(settings *models.UserSettings, req *UpdateUserSett
 	return nil
 }
 
+// applyUserPreferenceBlob applies one PATCH-distinguished blob: omitted
+// leaves the target untouched, explicit null clears it, and a value is
+// validated before being stored.
 func applyUserPreferenceBlob(field string, value **json.RawMessage, target *json.RawMessage) error {
 	if value == nil {
 		return nil
@@ -751,6 +800,8 @@ func applyUserPreferenceBlob(field string, value **json.RawMessage, target *json
 	return nil
 }
 
+// validateUserPreferenceBlob enforces the blob size cap and JSON shape
+// (object, array, or null).
 func validateUserPreferenceBlob(field string, value json.RawMessage) error {
 	if len(value) > maxUserPreferenceBlobBytes {
 		return fmt.Errorf("%s: max %d bytes allowed", field, maxUserPreferenceBlobBytes)
@@ -767,6 +818,8 @@ func validateUserPreferenceBlob(field string, value json.RawMessage) error {
 	}
 }
 
+// publishUserSettingsEvent broadcasts the full settings snapshot on the
+// UserSettingsUpdated event bus topic so connected clients stay in sync.
 func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models.UserSettings) {
 	if s.eventBus == nil || settings == nil {
 		return
@@ -788,6 +841,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"chat_submit_key":                          settings.ChatSubmitKey,
 		"review_auto_mark_on_scroll":               settings.ReviewAutoMarkOnScroll,
 		"confirm_task_archive":                     settings.ConfirmTaskArchive,
+		"prevent_auto_start_agent_on_open":         settings.PreventAutoStartAgentOnOpen,
 		"unread_divider":                           settings.UnreadDivider,
 		"agent_generated_task_titles":              settings.AgentGeneratedTaskTitles,
 		"mcp_task_agent_profile_default":           models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
@@ -836,6 +890,8 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 	}
 }
 
+// validateKeyboardShortcuts checks the shortcut map shape: each entry must be
+// an object with a non-empty key and boolean-only modifiers.
 func validateKeyboardShortcuts(shortcuts map[string]interface{}) error {
 	for name, raw := range shortcuts {
 		shortcut, ok := raw.(map[string]interface{})
@@ -861,6 +917,7 @@ func validateKeyboardShortcuts(shortcuts map[string]interface{}) error {
 	return nil
 }
 
+// validateLSPLanguages rejects languages the LSP installer does not support.
 func validateLSPLanguages(langs []string) error {
 	supported := installer.SupportedLanguages()
 	for _, lang := range langs {
@@ -871,6 +928,8 @@ func validateLSPLanguages(langs []string) error {
 	return nil
 }
 
+// validateLSPAutoInstallLanguages rejects languages that are unsupported or
+// cannot be auto-installed.
 func validateLSPAutoInstallLanguages(langs []string) error {
 	if err := validateLSPLanguages(langs); err != nil {
 		return err
@@ -883,6 +942,9 @@ func validateLSPAutoInstallLanguages(langs []string) error {
 	return nil
 }
 
+// ClearDefaultEditorID clears the saved default editor when it matches the
+// given editor id (used when an editor is uninstalled), persisting and
+// publishing the change.
 func (s *Service) ClearDefaultEditorID(ctx context.Context, editorID string) error {
 	if editorID == "" {
 		return nil
