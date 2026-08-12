@@ -495,6 +495,67 @@ func TestPromoteQueuedTaskIfWorkflowStepHasCapacity_ClaimsOnce(t *testing.T) {
 	}
 }
 
+func TestPromoteQueuedTaskIfWorkflowStepHasCapacity_SameStepConcurrentClaim(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	promoter, ok := any(repo).(queuedTaskPromoter)
+	if !ok {
+		t.Fatal("task repository does not implement atomic queued-task promotion")
+	}
+	ctx := context.Background()
+	queued := &models.Task{
+		ID: "same-step-queued", WorkspaceID: "wip-workspace", WorkflowID: "wip-workflow",
+		WorkflowStepID: "target", Title: "Same-step queued", State: v1.TaskStateCreated,
+		WIPAdmitted: false, QueuedForStepID: "target",
+	}
+	if err := repo.CreateTask(ctx, queued); err != nil {
+		t.Fatalf("create same-step queued task: %v", err)
+	}
+
+	// Both reconcilers select the same row before either attempts its atomic
+	// claim. The database predicate, rather than caller timing, must decide the
+	// winner.
+	start := make(chan struct{})
+	results := make(chan bool, 2)
+	errs := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		candidate := *queued
+		candidate.Metadata = map[string]interface{}{
+			models.MetaKeyQueuePromotionPending: true,
+		}
+		candidate.WIPAdmitted = true
+		candidate.QueuedForStepID = ""
+		go func(task *models.Task) {
+			<-start
+			claimed, err := promoter.PromoteQueuedTaskIfWorkflowStepHasCapacity(ctx, task, "target", "target", 1)
+			results <- claimed
+			errs <- err
+		}(&candidate)
+	}
+	close(start)
+
+	claimedCount := 0
+	for i := 0; i < 2; i++ {
+		if err := <-errs; err != nil {
+			t.Fatalf("concurrent promotion %d: %v", i, err)
+		}
+		if <-results {
+			claimedCount++
+		}
+	}
+	if claimedCount != 1 {
+		t.Fatalf("concurrent same-step claims = %d, want exactly 1", claimedCount)
+	}
+
+	got, err := repo.GetTask(ctx, queued.ID)
+	if err != nil {
+		t.Fatalf("reload same-step promoted task: %v", err)
+	}
+	if got.WorkflowStepID != "target" || got.QueuedForStepID != "" || !got.WIPAdmitted {
+		t.Fatalf("same-step promoted task: step=%q queue=%q admitted=%t", got.WorkflowStepID, got.QueuedForStepID, got.WIPAdmitted)
+	}
+}
+
 func TestTaskMetadataKeyHelpersRoundTripNestedValue(t *testing.T) {
 	repo, cleanup := createTestSQLiteRepo(t)
 	defer cleanup()

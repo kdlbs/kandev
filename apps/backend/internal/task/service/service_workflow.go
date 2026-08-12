@@ -498,10 +498,16 @@ func (s *Service) MoveTaskWithOptions(
 	task.WorkflowStepID = workflowStepID
 	task.Position = position
 	if stepChanged {
+		if task.Metadata == nil {
+			task.Metadata = make(map[string]interface{})
+		}
 		task.WIPAdmitted = true
 		task.QueuedForStepID = ""
 		task.QueuedAt = nil
-		delete(task.Metadata, models.MetaKeyQueuedMoveExitPending)
+		task.Metadata[models.MetaKeyQueuedMoveExitPending] = map[string]interface{}{
+			"from_step_id": oldStepID,
+		}
+		delete(task.Metadata, models.MetaKeyQueuedMoveExitCompleted)
 		delete(task.Metadata, models.MetaKeyQueuePromotionPending)
 		if !opts.PreserveDeferredLaunch {
 			delete(task.Metadata, models.MetaKeyDeferredLaunch)
@@ -672,10 +678,26 @@ func (s *Service) promoteNextQueuedTask(ctx context.Context, targetStep *wfmodel
 		skipped[candidate.ID] = struct{}{}
 		return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
 	}
+	if queuedMoveExitPending(candidate) {
+		skipped[candidate.ID] = struct{}{}
+		return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
+	}
 	if candidate.WorkflowStepID == targetStep.ID {
 		return s.promoteSameStepQueuedTask(ctx, candidate, fromStepID, targetStep, position, skipped)
 	}
 	return s.promoteFeederQueuedTask(ctx, candidate, fromStepID, oldWorkflowID, targetStep, position, skipped)
+}
+
+func queuedMoveExitPending(task *models.Task) bool {
+	if task == nil || task.Metadata == nil {
+		return false
+	}
+	_, pending := task.Metadata[models.MetaKeyQueuedMoveExitPending]
+	if !pending {
+		return false
+	}
+	_, completed := task.Metadata[models.MetaKeyQueuedMoveExitCompleted]
+	return !completed
 }
 
 func (s *Service) promoteSameStepQueuedTask(ctx context.Context, candidate *models.Task, fromStepID string, targetStep *wfmodels.WorkflowStep, position int, skipped map[string]struct{}) bool {
@@ -687,7 +709,6 @@ func (s *Service) promoteSameStepQueuedTask(ctx context.Context, candidate *mode
 	candidate.QueuedForStepID = ""
 	candidate.QueuedAt = nil
 	candidate.Position = position
-	delete(candidate.Metadata, models.MetaKeyQueuedMoveExitPending)
 	candidate.Metadata[models.MetaKeyQueuePromotionPending] = true
 	if err := s.syncTaskStateForQueuePromotion(ctx, candidate, targetStep); err != nil {
 		s.logger.Warn("failed to prepare same-step queued promotion", zap.String("task_id", candidate.ID), zap.Error(err))
@@ -753,7 +774,6 @@ func (s *Service) promoteFeederQueuedTask(ctx context.Context, candidate *models
 	candidate.WIPAdmitted = true
 	candidate.QueuedForStepID = ""
 	candidate.QueuedAt = nil
-	delete(candidate.Metadata, models.MetaKeyQueuedMoveExitPending)
 	candidate.Metadata[models.MetaKeyQueuePromotionPending] = true
 	candidate.Position = position
 	candidate.WorkflowID = targetStep.WorkflowID
@@ -975,6 +995,7 @@ func (s *Service) updateMovedTask(ctx context.Context, task *models.Task, oldSte
 	}
 	if admitted && admittedState != nil {
 		task.State = *admittedState
+		delete(task.Metadata, models.MetaKeyQueuedMoveExitPending)
 	} else if !admitted {
 		if task.Metadata == nil {
 			task.Metadata = make(map[string]interface{})

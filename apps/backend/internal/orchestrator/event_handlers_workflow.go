@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -31,6 +32,10 @@ type taskMetadataKeyRemover interface {
 
 type taskMetadataKeySetter interface {
 	SetTaskMetadataKey(context.Context, string, string, interface{}) error
+}
+
+type lifecycleTaskMetadataLister interface {
+	ListTasksWithMetadataKey(context.Context, string) ([]*models.Task, error)
 }
 
 type taskMovedLifecyclePrerequisites struct {
@@ -275,23 +280,29 @@ func (s *Service) processOnTurnStart(ctx context.Context, task *models.Task, ses
 	return true
 }
 
+// ProcessOnTurnStartResult reports whether the initiating prompt must wait for
+// WIP admission before it can be delivered.
+type ProcessOnTurnStartResult struct {
+	Queued bool
+}
+
 // ProcessOnTurnStart is the public API for triggering on_turn_start events.
 // Called by message handlers before sending a prompt to the agent.
-func (s *Service) ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) error {
+func (s *Service) ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) (ProcessOnTurnStartResult, error) {
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	defer release()
 	lock.Lock()
 	defer lock.Unlock()
 	if err := s.waitForCancellationWithGuard(ctx, sessionID, lock.Unlock, lock.Lock); err != nil {
-		return err
+		return ProcessOnTurnStartResult{}, err
 	}
 
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
-		return fmt.Errorf("load session for on_turn_start: %w", err)
+		return ProcessOnTurnStartResult{}, fmt.Errorf("load session for on_turn_start: %w", err)
 	}
 	if isTerminalSessionState(session.State) {
-		return &executor.SessionStateSupersededError{
+		return ProcessOnTurnStartResult{}, &executor.SessionStateSupersededError{
 			SessionID: session.ID,
 			State:     session.State,
 		}
@@ -301,7 +312,15 @@ func (s *Service) ProcessOnTurnStart(ctx context.Context, taskID, sessionID stri
 	// user is continuing the conversation; this step is no longer "done".
 	s.clearPendingStepSignal(ctx, session)
 	s.processOnTurnStartViaEngine(ctx, taskID, session)
-	return nil
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		// Do not let a read race turn an unknown admission state into an
+		// immediate prompt. The caller can retry after reconciliation.
+		return ProcessOnTurnStartResult{Queued: true}, fmt.Errorf("load task admission after on_turn_start: %w", err)
+	}
+	return ProcessOnTurnStartResult{
+		Queued: task != nil && !task.WIPAdmitted && task.QueuedForStepID != "",
+	}, nil
 }
 
 // executeStepTransition moves a task/session from one step to another.
@@ -478,7 +497,7 @@ func (s *Service) handleTaskMoved(ctx context.Context, data watcher.TaskMovedEve
 		if task.WorkflowStepID != data.ToStepID || task.QueuedForStepID != data.QueuedForStepID || task.WIPAdmitted {
 			return
 		}
-		if !s.claimTaskEventMetadata(ctx, task, models.MetaKeyQueuedMoveExitPending) {
+		if !s.ensureQueuedMoveExitDescriptor(ctx, task, data.FromStepID) {
 			return
 		}
 	} else if task.WorkflowStepID != data.ToStepID {
@@ -496,12 +515,19 @@ func (s *Service) handleTaskMoved(ctx context.Context, data watcher.TaskMovedEve
 
 	// No session yet — check if we need to create one via auto-start
 	if data.SessionID == "" {
-		if !queued {
-			if prerequisites != nil && prerequisites.targetStep != nil {
-				s.autoStartTaskForLoadedStep(ctx, task, prerequisites.targetStep, "task.moved", data.QueuePromotion)
-			} else {
-				s.handleTaskMovedNoSession(ctx, data)
+		if queued {
+			// A task without a session has no source-session side effect to
+			// run. Persist the completed no-op so promotion is not blocked by
+			// the queued-move barrier.
+			if s.persistQueuedMoveExitCompletion(ctx, task.ID) {
+				s.continueQueuedMoveLifecycle(ctx, task.ID, data.FromStepID)
 			}
+			return
+		}
+		if prerequisites != nil && prerequisites.targetStep != nil {
+			s.autoStartTaskForLoadedStep(ctx, task, prerequisites.targetStep, "task.moved", data.QueuePromotion)
+		} else {
+			s.handleTaskMovedNoSession(ctx, data)
 		}
 		return
 	}
@@ -592,6 +618,12 @@ func (s *Service) handleTaskQueuePromoted(ctx context.Context, data watcher.Task
 	if task.QueuedForStepID != "" || !task.WIPAdmitted {
 		return
 	}
+	if queuedMoveExitPending(task) {
+		// A queued manual move has not finished its source-step exit yet.
+		// Keep the promotion token durable; source-exit completion will trigger
+		// queue reconciliation and retry destination entry.
+		return
+	}
 	targetStep, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
 	if err != nil || targetStep == nil {
 		s.logger.Warn("task.queue_promoted: failed to load target step",
@@ -612,11 +644,18 @@ func (s *Service) handleTaskQueuePromoted(ctx context.Context, data watcher.Task
 	if !s.claimTaskEventMetadata(ctx, task, models.MetaKeyQueuePromotionPending) {
 		return
 	}
+	if remover, ok := s.repo.(taskMetadataKeyRemover); ok {
+		_, _ = remover.RemoveTaskMetadataKey(ctx, task.ID, models.MetaKeyQueuedMoveExitCompleted)
+	}
 	s.processParentChildrenCompletedForTerminalStepMove(ctx, task.ID, targetStep.ID)
 	if session != nil {
 		go func() {
 			if err := s.finalizeStepEnter(context.WithoutCancel(ctx), task.ID, session.ID, targetStep, task.Description, targetStep.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent)); err != nil {
 				s.restoreTaskLifecycleToken(context.WithoutCancel(ctx), task.ID, models.MetaKeyQueuePromotionPending, "task.queue_promoted")
+				return
+			}
+			if s.onTaskQueuePromotionEntryComplete != nil {
+				s.onTaskQueuePromotionEntryComplete()
 			}
 		}()
 		return
@@ -629,7 +668,7 @@ func (s *Service) claimTaskEventMetadata(ctx context.Context, task *models.Task,
 		return false
 	}
 	if _, marked := task.Metadata[key]; !marked {
-		// Current queued lifecycle events always carry a one-shot token. Its
+		// One-shot lifecycle events use metadata removal as their claim. Its
 		// absence means another delivery already claimed the event.
 		return false
 	}
@@ -658,6 +697,150 @@ func (s *Service) restoreTaskLifecycleToken(ctx context.Context, taskID, key, ev
 		s.logger.Warn(eventName+": failed to restore lifecycle token",
 			zap.String("task_id", taskID), zap.String("metadata_key", key), zap.Error(err))
 	}
+}
+
+// reconcileTaskLifecycleTokens scans durable lifecycle markers at startup.
+// A small fixed worker pool and bounded per-task attempts prevent a corrupted
+// or repeatedly failing row from creating an unbounded goroutine storm.
+func (s *Service) reconcileTaskLifecycleTokens(ctx context.Context) {
+	lister, ok := s.repo.(lifecycleTaskMetadataLister)
+	if !ok {
+		return
+	}
+	pending, err := lister.ListTasksWithMetadataKey(ctx, models.MetaKeyQueuedMoveExitPending)
+	if err != nil {
+		s.logger.Warn("failed to list queued move exit tokens for recovery", zap.Error(err))
+		return
+	}
+	promotions, err := lister.ListTasksWithMetadataKey(ctx, models.MetaKeyQueuePromotionPending)
+	if err != nil {
+		s.logger.Warn("failed to list queue promotion tokens for recovery", zap.Error(err))
+		return
+	}
+	jobs := make(map[string]struct{}, len(pending)+len(promotions))
+	for _, task := range pending {
+		if task != nil {
+			jobs[task.ID] = struct{}{}
+		}
+	}
+	for _, task := range promotions {
+		if task != nil {
+			jobs[task.ID] = struct{}{}
+		}
+	}
+	if len(jobs) == 0 {
+		return
+	}
+	jobIDs := make(chan string)
+	workerCount := 4
+	if len(jobs) < workerCount {
+		workerCount = len(jobs)
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < workerCount; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for taskID := range jobIDs {
+				s.recoverTaskLifecycleToken(ctx, taskID)
+			}
+		}()
+	}
+	for taskID := range jobs {
+		jobIDs <- taskID
+	}
+	close(jobIDs)
+	wg.Wait()
+}
+
+func (s *Service) recoverTaskLifecycleToken(ctx context.Context, taskID string) {
+	const maxAttempts = 3
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if !s.recoverTaskLifecycleAttempt(ctx, taskID) {
+			return
+		}
+		if attempt+1 == maxAttempts {
+			return
+		}
+		if !waitForLifecycleRecovery(ctx) {
+			return
+		}
+	}
+}
+
+func (s *Service) recoverTaskLifecycleAttempt(ctx context.Context, taskID string) bool {
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		return false
+	}
+	if queuedMoveExitPending(task) {
+		if !s.recoverQueuedMoveExit(ctx, task) {
+			return false
+		}
+		task, err = s.repo.GetTask(ctx, taskID)
+		if err != nil || task == nil {
+			return false
+		}
+	}
+	if _, pending := task.Metadata[models.MetaKeyQueuePromotionPending]; pending {
+		s.handleTaskQueuePromoted(ctx, watcher.TaskEventData{TaskID: taskID})
+	}
+	latest, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || latest == nil {
+		return false
+	}
+	return queuedMoveExitPending(latest) || hasQueuePromotionPending(latest)
+}
+
+func (s *Service) recoverQueuedMoveExit(ctx context.Context, task *models.Task) bool {
+	sourceStepID := queuedMoveExitSourceStep(task)
+	session, err := s.repo.GetActiveTaskSessionByTaskID(ctx, task.ID)
+	if sourceStepID == "" || err != nil || session == nil || s.workflowStepGetter == nil {
+		return false
+	}
+	fromStep, err := s.workflowStepGetter.GetStep(ctx, sourceStepID)
+	if err != nil || fromStep == nil {
+		return false
+	}
+	// Startup recovery is already running in a bounded worker. Run this
+	// serialized lifecycle operation directly so the next attempt observes
+	// its durable completion instead of racing an unbounded detached goroutine.
+	s.processQueuedMoveExit(ctx, task.ID, session, fromStep, sourceStepID)
+	return true
+}
+
+func hasQueuePromotionPending(task *models.Task) bool {
+	if task == nil || task.Metadata == nil {
+		return false
+	}
+	_, pending := task.Metadata[models.MetaKeyQueuePromotionPending]
+	return pending
+}
+
+func waitForLifecycleRecovery(ctx context.Context) bool {
+	timer := time.NewTimer(25 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func queuedMoveExitSourceStep(task *models.Task) string {
+	if task == nil || task.Metadata == nil {
+		return ""
+	}
+	value, ok := task.Metadata[models.MetaKeyQueuedMoveExitPending]
+	if !ok {
+		return ""
+	}
+	if descriptor, ok := value.(map[string]interface{}); ok {
+		source, _ := descriptor["from_step_id"].(string)
+		return source
+	}
+	return ""
 }
 
 func (s *Service) syncTaskStateForQueuePromotion(ctx context.Context, task *models.Task, targetStep *wfmodels.WorkflowStep) error {
@@ -940,7 +1123,9 @@ func (s *Service) fromStepAndTargetForTaskMoved(
 	}
 
 	if data.QueuedForStepID != "" && !data.WIPAdmitted {
-		go s.processStepExitWithStep(context.WithoutCancel(ctx), data.TaskID, session, fromStep, data.FromStepID)
+		go s.processQueuedMoveExit(
+			context.WithoutCancel(ctx), data.TaskID, session, fromStep, data.FromStepID,
+		)
 		return
 	}
 	go s.processStepExitAndEnterWithSteps(
@@ -970,6 +1155,121 @@ func (s *Service) processStepExitWithStep(ctx context.Context, taskID string, se
 		}
 	}
 	s.processOnExit(ctx, taskID, session, fromStep)
+}
+
+// ensureQueuedMoveExitDescriptor records the source step on the durable
+// queued-move token. Older rows may contain only true; the event payload lets
+// the first delivery upgrade those rows before the asynchronous side effect.
+func (s *Service) ensureQueuedMoveExitDescriptor(ctx context.Context, task *models.Task, fromStepID string) bool {
+	if task == nil || fromStepID == "" || task.Metadata == nil {
+		return false
+	}
+	if _, completed := task.Metadata[models.MetaKeyQueuedMoveExitCompleted]; completed {
+		return false
+	}
+	value, marked := task.Metadata[models.MetaKeyQueuedMoveExitPending]
+	if !marked {
+		return false
+	}
+	if descriptor, ok := value.(map[string]interface{}); ok {
+		if source, _ := descriptor["from_step_id"].(string); source == fromStepID {
+			return true
+		}
+	}
+	setter, ok := s.repo.(taskMetadataKeySetter)
+	if !ok {
+		return false
+	}
+	if err := setter.SetTaskMetadataKey(ctx, task.ID, models.MetaKeyQueuedMoveExitPending, map[string]interface{}{
+		"from_step_id": fromStepID,
+	}); err != nil {
+		s.logger.Warn("failed to persist queued move source step",
+			zap.String("task_id", task.ID), zap.Error(err))
+		return false
+	}
+	return true
+}
+
+func queuedMoveExitCompleted(task *models.Task) bool {
+	if task == nil || task.Metadata == nil {
+		return false
+	}
+	_, completed := task.Metadata[models.MetaKeyQueuedMoveExitCompleted]
+	return completed
+}
+
+// processQueuedMoveExit runs the source-step side effect exactly once per
+// task. The in-memory lock serializes duplicate event deliveries, while the
+// pending/completed metadata pair makes the ordering recoverable after a
+// process restart.
+func (s *Service) processQueuedMoveExit(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	fromStep *wfmodels.WorkflowStep,
+	fromStepID string,
+) {
+	lockValue, _ := s.queuedMoveLifecycleLocks.LoadOrStore(taskID, &sync.Mutex{})
+	lock := lockValue.(*sync.Mutex)
+	lock.Lock()
+	defer lock.Unlock()
+
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil || queuedMoveExitCompleted(task) {
+		return
+	}
+	if _, pending := task.Metadata[models.MetaKeyQueuedMoveExitPending]; !pending {
+		return
+	}
+	if sourceStepID := queuedMoveExitSourceStep(task); sourceStepID != "" && sourceStepID != fromStepID {
+		// A stale delivery from an earlier move must not execute against the
+		// marker for a newer queued move on the same task.
+		return
+	}
+	if s.onQueuedMoveExitStart != nil {
+		s.onQueuedMoveExitStart()
+	}
+	s.processStepExitWithStep(ctx, taskID, session, fromStep, fromStepID)
+	if !s.persistQueuedMoveExitCompletion(ctx, taskID) {
+		return
+	}
+	if s.onQueuedMoveExitComplete != nil {
+		s.onQueuedMoveExitComplete()
+	}
+	s.continueQueuedMoveLifecycle(ctx, taskID, fromStepID)
+}
+
+func (s *Service) persistQueuedMoveExitCompletion(ctx context.Context, taskID string) bool {
+	setter, ok := s.repo.(taskMetadataKeySetter)
+	if !ok {
+		s.logger.Warn("queued move source-exit completion cannot be persisted",
+			zap.String("task_id", taskID))
+		return false
+	}
+	if err := setter.SetTaskMetadataKey(ctx, taskID, models.MetaKeyQueuedMoveExitCompleted, true); err != nil {
+		s.logger.Warn("failed to persist queued move source-exit completion",
+			zap.String("task_id", taskID), zap.Error(err))
+		return false
+	}
+	if remover, ok := s.repo.(taskMetadataKeyRemover); ok {
+		if _, err := remover.RemoveTaskMetadataKey(ctx, taskID, models.MetaKeyQueuedMoveExitPending); err != nil {
+			s.logger.Warn("failed to clear queued move source-exit token",
+				zap.String("task_id", taskID), zap.Error(err))
+		}
+	}
+	return true
+}
+
+func (s *Service) continueQueuedMoveLifecycle(ctx context.Context, taskID, vacatedStepID string) {
+	latest, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || latest == nil {
+		return
+	}
+	if hasQueuePromotionPending(latest) {
+		s.handleTaskQueuePromoted(ctx, watcher.TaskEventData{TaskID: taskID})
+	} else if latest.QueuedForStepID != "" && s.workflowStore != nil && vacatedStepID != "" {
+		s.workflowStore.pullNextTaskOnVacate(ctx, vacatedStepID, "")
+	}
 }
 
 // processStepExitAndEnter runs the on_exit → clear review → reload session → on_enter

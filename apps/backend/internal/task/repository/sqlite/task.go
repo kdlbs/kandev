@@ -588,7 +588,9 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 		if admitted {
 			delete(task.Metadata, models.MetaKeyQueuedMoveExitPending)
 		} else {
-			task.Metadata[models.MetaKeyQueuedMoveExitPending] = true
+			if _, exists := task.Metadata[models.MetaKeyQueuedMoveExitPending]; !exists {
+				task.Metadata[models.MetaKeyQueuedMoveExitPending] = true
+			}
 		}
 	}
 	metadata, err := json.Marshal(task.Metadata)
@@ -955,15 +957,30 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 			return false, nil
 		}
 	}
+	queuePredicate := `
+		  AND workflow_step_id = ?
+		  AND (queued_for_step_id = ? OR queued_for_step_id = '' OR queued_for_step_id IS NULL)`
+	predicateArgs := []interface{}{fromStepID, destinationStepID}
+	if fromStepID == destinationStepID {
+		// A same-step promotion is a claim on a visible queue row. Once the
+		// first reconciler admits it, the row has no queue marker and must not
+		// satisfy a second promotion attempt. The empty-marker form remains
+		// reserved for legacy feeder rows below.
+		queuePredicate = `
+		  AND workflow_step_id = ?
+		  AND wip_admitted = 0
+		  AND queued_for_step_id = ?`
+	}
 
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = ?, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?
 		WHERE id = ?
-		  AND workflow_step_id = ?
-		  AND (queued_for_step_id = ? OR queued_for_step_id = '' OR queued_for_step_id IS NULL)
+		`+queuePredicate+`
 		  AND archived_at IS NULL
 		  AND is_ephemeral = 0`+andNotAutomationOrigin+`
-	`), task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.ID, fromStepID, destinationStepID)
+	`), append([]interface{}{
+		task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.ID,
+	}, predicateArgs...)...)
 	if err != nil {
 		return false, err
 	}
@@ -1309,6 +1326,34 @@ func (r *Repository) ListQueuedTasks(ctx context.Context) ([]*models.Task, error
 		  AND t.archived_at IS NULL AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
 		ORDER BY t.queued_at ASC, t.created_at ASC, t.id ASC
 	`))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return r.scanTasks(rows)
+}
+
+// ListTasksWithMetadataKey returns active, non-ephemeral tasks carrying a
+// named metadata key. It is used by startup lifecycle recovery, where queue
+// destination columns alone cannot find already-admitted work whose entry or
+// source-exit side effect still needs to run.
+func (r *Repository) ListTasksWithMetadataKey(ctx context.Context, key string) ([]*models.Task, error) {
+	var predicate, path string
+	if dialect.IsPostgres(r.ro.DriverName()) {
+		predicate = "jsonb_extract_path(CASE WHEN t.metadata IS NULL OR t.metadata = 'null' OR t.metadata = '' THEN '{}'::jsonb ELSE t.metadata::jsonb END, ?) IS NOT NULL"
+		path = key
+	} else {
+		predicate = "json_type(CASE WHEN t.metadata IS NULL OR t.metadata = 'null' OR t.metadata = '' THEN '{}' ELSE t.metadata END, ?) IS NOT NULL"
+		path = jsonPath(key)
+	}
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT `+taskSelectColumns("t")+`
+		FROM tasks t
+		WHERE `+predicate+`
+		  AND t.archived_at IS NULL
+		  AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
+		ORDER BY t.updated_at ASC, t.created_at ASC, t.id ASC
+	`), path)
 	if err != nil {
 		return nil, err
 	}

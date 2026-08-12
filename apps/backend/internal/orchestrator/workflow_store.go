@@ -62,6 +62,17 @@ type queuedTaskLister interface {
 	ListQueuedTasks(ctx context.Context) ([]*models.Task, error)
 }
 
+func queuedMoveExitPending(task *models.Task) bool {
+	if task == nil || task.Metadata == nil {
+		return false
+	}
+	if _, pending := task.Metadata[models.MetaKeyQueuedMoveExitPending]; !pending {
+		return false
+	}
+	_, completed := task.Metadata[models.MetaKeyQueuedMoveExitCompleted]
+	return !completed
+}
+
 // workflowStore implements engine.TransitionStore by delegating to the
 // orchestrator's existing repositories and services.
 type workflowStore struct {
@@ -195,6 +206,7 @@ func (s *workflowStore) ApplyTransition(ctx context.Context, taskID, sessionID, 
 	task.QueuedAt = nil
 	if task.Metadata != nil {
 		delete(task.Metadata, models.MetaKeyQueuedMoveExitPending)
+		delete(task.Metadata, models.MetaKeyQueuedMoveExitCompleted)
 		delete(task.Metadata, models.MetaKeyQueuePromotionPending)
 	}
 	task.UpdatedAt = time.Now().UTC()
@@ -376,6 +388,10 @@ func (s *workflowStore) pullOneFeederTask(
 		if candidate == nil {
 			return false
 		}
+		if queuedMoveExitPending(candidate) {
+			skipped[candidate.ID] = struct{}{}
+			continue
+		}
 		if s.feederCandidateBlocked(ctx, candidate.ID) {
 			skipped[candidate.ID] = struct{}{}
 			continue
@@ -387,7 +403,6 @@ func (s *workflowStore) pullOneFeederTask(
 		if candidate.Metadata == nil {
 			candidate.Metadata = make(map[string]interface{})
 		}
-		delete(candidate.Metadata, models.MetaKeyQueuedMoveExitPending)
 		candidate.Metadata[models.MetaKeyQueuePromotionPending] = true
 		candidate.Position = position
 		oldState, stateChanged, err := s.syncQueuedPromotionState(ctx, candidate, vacatedStep)
@@ -453,7 +468,6 @@ func (s *workflowStore) promoteSameStepTask(ctx context.Context, candidate *mode
 	candidate.WIPAdmitted = true
 	candidate.QueuedForStepID = ""
 	candidate.QueuedAt = nil
-	delete(candidate.Metadata, models.MetaKeyQueuedMoveExitPending)
 	candidate.Metadata[models.MetaKeyQueuePromotionPending] = true
 	candidate.Position = position
 	candidate.UpdatedAt = time.Now().UTC()
@@ -533,6 +547,9 @@ func (s *workflowStore) nextQueuedSameStepTask(ctx context.Context, stepID strin
 	var best *models.Task
 	for _, candidate := range candidates {
 		if candidate == nil || candidate.WIPAdmitted || candidate.QueuedForStepID != stepID {
+			continue
+		}
+		if queuedMoveExitPending(candidate) {
 			continue
 		}
 		if _, seen := skipped[candidate.ID]; seen {

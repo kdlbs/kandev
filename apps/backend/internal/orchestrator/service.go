@@ -407,6 +407,14 @@ type Service struct {
 	// onProcessOnEnterComplete is a package-test hook for synchronizing with
 	// applyEngineTransition's asynchronous processOnEnter goroutine.
 	onProcessOnEnterComplete func()
+	// queuedMoveExitStart and queuedMoveExitComplete are package-test hooks
+	// for the durable source-exit barrier.
+	onQueuedMoveExitStart             func()
+	onQueuedMoveExitComplete          func()
+	onTaskQueuePromotionEntryComplete func()
+	// queuedMoveLifecycleLocks serializes source-exit work per task. The
+	// completion marker remains durable so a restart can safely resume work.
+	queuedMoveLifecycleLocks sync.Map
 	// engineOptions are applied each time initWorkflowEngine runs. Wired
 	// from cmd/kandev (Phase 3.2) to plug Phase 2 ADR-0004 dependencies
 	// — RunQueueAdapter, ParticipantStore, DecisionStore, and the CEO /
@@ -1655,6 +1663,7 @@ func (s *Service) Start(ctx context.Context) error {
 	if s.workflowStore != nil {
 		s.workflowStore.ReconcileQueuedTasks(ctx)
 	}
+	s.reconcileTaskLifecycleTokens(ctx)
 
 	// Start the watcher first to begin receiving events
 	if err := s.watcher.Start(ctx); err != nil {
@@ -2512,6 +2521,44 @@ func (s *Service) GetStatus() *Status {
 // GetMessageQueue returns the message queue service
 func (s *Service) GetMessageQueue() *messagequeue.Service {
 	return s.messageQueue
+}
+
+// QueueUserPrompt persists a prompt that must wait for workflow WIP admission.
+// The user message row is already written by the WebSocket handler, so the
+// queue marker prevents the drain path from creating a duplicate row.
+func (s *Service) QueueUserPrompt(
+	ctx context.Context,
+	taskID, sessionID, prompt, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	metadata map[string]interface{},
+	userMessageRecorded bool,
+) error {
+	if s.messageQueue == nil {
+		return errors.New("message queue is not configured")
+	}
+	queueMetadata := make(map[string]interface{}, len(metadata)+1)
+	for key, value := range metadata {
+		queueMetadata[key] = value
+	}
+	if userMessageRecorded {
+		queueMetadata[metaKeyUserMessageRecorded] = true
+	}
+	if _, err := s.messageQueue.QueueMessageWithMetadata(
+		ctx,
+		sessionID,
+		taskID,
+		prompt,
+		model,
+		messagequeue.QueuedByUser,
+		planMode,
+		toQueuedAttachments(attachments),
+		queueMetadata,
+	); err != nil {
+		return fmt.Errorf("queue user prompt: %w", err)
+	}
+	s.publishQueueStatusEvent(ctx, sessionID)
+	return nil
 }
 
 // GetEventBus returns the event bus
