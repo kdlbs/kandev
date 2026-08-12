@@ -106,6 +106,26 @@ func TestHandleSpawnSession_ExplicitProfile(t *testing.T) {
 	assert.Empty(t, orch.renameCalls)
 }
 
+func TestHandleSpawnSessionReportsEffectiveAgentProfile(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	_, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	h, orch := newMessageTaskHandler(t, svc)
+	orch.launchResponseProfileID = "workflow-default-profile"
+
+	payload := spawnPayload(target.ID, "work with the workflow profile", target.ID, sess.ID)
+	payload["agent_profile_id"] = "requested-profile"
+	msg := makeWSMessage(t, ws.ActionMCPSpawnSession, payload)
+	resp, err := h.handleSpawnSession(context.Background(), msg)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var out map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &out))
+	assert.Equal(t, "workflow-default-profile", out["agent_profile_id"])
+	assert.Equal(t, "requested-profile", orch.launchCalls[0].AgentProfileID)
+}
+
 // Cross-task spawns (sender session belongs to another task) fall back to the
 // target task's primary-session profile.
 func TestHandleSpawnSession_CrossTask_DefaultsToTargetPrimaryProfile(t *testing.T) {

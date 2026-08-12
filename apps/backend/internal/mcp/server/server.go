@@ -974,7 +974,9 @@ Unlike create_task_kandev this does NOT create a new task — the new session ru
 
 The spawned session knows it was spawned by you and can reply via message_task_kandev using your task_id + session_id. You can message it the same way using the session_id returned by this tool.
 
-Returns {task_id, session_id, state}.`),
+The returned agent_profile_id is the effective agent profile used by the new session. On a workflow step, the step's launch profile wins: a pinned step profile outranks the requested agent_profile_id, and an unpinned step uses the workflow default. Without a workflow launch profile, an explicit agent_profile_id wins; when omitted, the existing inheritance rules apply.
+
+Returns {task_id, session_id, state, agent_profile_id}.`),
 			mcp.WithString("prompt", mcp.Required(), mcp.Description("The spawned session's initial prompt. This is the ONLY context the new agent receives — be specific and detailed.")),
 			mcp.WithString("agent_profile_id", mcp.Description("Agent profile for the new session. Omit to reuse your own session's agent profile.")),
 			mcp.WithString("name", mcp.Description("Optional session name shown on the session tab (e.g. 'reviewer'). Helps the user tell concurrent sessions apart.")),
