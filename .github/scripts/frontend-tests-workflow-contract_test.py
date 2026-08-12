@@ -69,9 +69,13 @@ class FrontendTestsWorkflowContractTest(unittest.TestCase):
         self.assertIn(
             "production=false",
             npmrc,
-            "apps/.npmrc must set production=false. The test step above runs "
-            "under NODE_ENV=production, and pnpm otherwise skips "
-            "devDependencies, leaving no vitest, eslint, or tsc to run.",
+            "apps/.npmrc must set production=false. This is not for the "
+            "workflow's own install step, which runs before the step-scoped "
+            "export and sees no NODE_ENV. It is for every install performed "
+            "under the same variable the test step reproduces: inside the "
+            "runtime image (`Dockerfile`) or any shell inheriting it, pnpm "
+            "otherwise skips devDependencies, leaving no vitest, eslint, or "
+            "tsc to run at all.",
         )
 
 
