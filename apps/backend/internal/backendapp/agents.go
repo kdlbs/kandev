@@ -106,6 +106,7 @@ func provideLifecycleManager(
 		cfg.ResolvedHomeDir(),
 		log,
 	)
+	lifecycleMgr.SetParkedOnBackgroundWork(cfg.Features.ParkedOnBackgroundWork)
 
 	// Register environment preparers (keyed by ExecutorType — the
 	// "local"/"worktree"/"local_docker"/"sprites" taxonomy, not Runtime).

@@ -243,6 +243,10 @@ type InstanceConfig struct {
 	// keeps child processes alive when stdin closes (opencode acp).
 	RequiresProcessKill bool
 
+	// ParkedOnBackgroundWork enables turn-start marker plumbing for the
+	// parked-board projection. It is passed per instance by the backend.
+	ParkedOnBackgroundWork bool
+
 	// StripEnv lists environment variables to strip from the agent's child
 	// process environment entirely (not just set to empty).
 	StripEnv []string
@@ -474,6 +478,7 @@ func applyApprovalOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.ApprovalPolicy != "" {
 		cfg.ApprovalPolicy = overrides.ApprovalPolicy
 	}
+	cfg.ParkedOnBackgroundWork = overrides.ParkedOnBackgroundWork
 }
 
 // InstanceOverrides allows overriding default values when creating an instance
@@ -497,6 +502,7 @@ type InstanceOverrides struct {
 	McpProviders           []string
 	McpProfile             *mcpprofile.Context
 	RequiresProcessKill    bool
+	ParkedOnBackgroundWork bool
 	StripEnv               []string
 	BaseBranches           map[string]string
 	RemoteContributions    map[string]models.RemoteContribution

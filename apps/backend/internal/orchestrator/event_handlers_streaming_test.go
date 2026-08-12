@@ -2173,6 +2173,33 @@ func TestSessionStartClearsInterruptedMarker(t *testing.T) {
 			"task.updated must be republished after clearing the marker")
 	})
 
+	t.Run("launch path clears parked attestation", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		session.State = models.TaskSessionStateStarting
+		session.ErrorMessage = ""
+		session.UpdatedAt = time.Now().UTC()
+
+		probe := &fakeBackgroundProbe{result: probeResultLive}
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.config.ParkedOnBackgroundWork = true
+		svc.SetBackgroundProbe(probe)
+		attestShellLaunch(ctx, svc, "t1", "s1")
+		require.True(t, svc.parkedStateFor("s1").observedDetached,
+			"precondition: launch must have a parked attestation to clear")
+
+		require.NoError(t, svc.setSessionStarting(ctx, "t1", session, models.TaskSessionStateRunning, true))
+		require.False(t, svc.parkedStateFor("s1").observedDetached,
+			"the production launch path must clear the previous turn attestation")
+
+		svc.updateTaskSessionState(ctx, "t1", "s1", models.TaskSessionStateWaitingForInput, "", false)
+		require.Equal(t, 0, probe.callCount(),
+			"a later settle must not probe after STARTING cleared the attestation")
+	})
+
 	t.Run("no marker means no republish", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")

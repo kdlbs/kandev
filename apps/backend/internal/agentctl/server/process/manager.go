@@ -97,6 +97,15 @@ type Manager struct {
 	exitCode           atomic.Int32
 	exitErr            atomic.Value // error
 
+	// agentRootIdentity is the (pid, start time) identity captured once,
+	// right after the agent subprocess starts (INV-1: "a process is
+	// identified by (pid, start time), never bare pid"). ProbeProcessTree
+	// compares against a fresh read of whatever process currently holds that
+	// PID, so a PID reused by an unrelated process after the agent exits
+	// cannot be misattributed as the agent's still-live process tree. Holds
+	// a rootIdentity; zero value (unset) is a valid "capture failed" state.
+	agentRootIdentity atomic.Value
+
 	// Stderr buffering for error context
 	stderrBuffer    []string
 	stderrMu        sync.RWMutex
@@ -222,9 +231,18 @@ type Manager struct {
 	stopChClosed     atomic.Bool
 	groupAliveFn     func(int) bool
 	terminateGroupFn func(int) error
-	killGroupFn      func(int) error
-	waitGroupExitFn  func(context.Context, int) bool
-	managerWaitFn    func(context.Context, <-chan struct{}, time.Duration) bool
+	// lastTurnStartMarker stores the turnStartMarker computed at the most
+	// recent turn-start stamp — including any platform-specific boot-tick
+	// conversion done once, at stamp time (INV-1, AC-80's clock-domain
+	// rule; see turnStartMarker's doc comment). Zero value (unset atomic.Value)
+	// means no prompt has been dispatched yet. Written by RecordTurnStart
+	// (called from sendPrompt, after beginPromptTurn, on every non-dropped
+	// dispatch — D-1); read by ProbeProcessTree and LastTurnStart. Uses
+	// atomic to avoid holding mu.
+	lastTurnStartMarker atomic.Value
+	killGroupFn         func(int) error
+	waitGroupExitFn     func(context.Context, int) bool
+	managerWaitFn       func(context.Context, <-chan struct{}, time.Duration) bool
 }
 
 // ErrManagerStopping indicates that process admission is closed for teardown.
@@ -1104,6 +1122,15 @@ func (m *Manager) Start(ctx context.Context) error {
 		m.status.Store(StatusError)
 		return formatAgentStartError(err, m.cfg.AgentEnv)
 	}
+	// Capture the (pid, start time) identity immediately after Start()
+	// returns, before anything else can observe or act on this PID. A
+	// failed capture (unsupported platform, or a raced read of an
+	// already-exited process) leaves agentRootIdentity unset, and
+	// ProbeProcessTree treats that as "unknown" rather than falling back to
+	// a bare-PID check (INV-1).
+	if identity, ok := captureRootIdentity(m.cmd.Process.Pid); ok {
+		m.agentRootIdentity.Store(identity)
+	}
 	processLifecycle, err := installProcessLifecycle(m.cmd)
 	if err != nil {
 		reapErr := killAndWaitStartedCommand(m.cmd)
@@ -1202,6 +1229,10 @@ func (m *Manager) buildAdapterConfig() error {
 			Headers: mcp.Headers,
 		}
 	}
+	recordTurnStart := m.RecordTurnStart
+	if !m.cfg.ParkedOnBackgroundWork {
+		recordTurnStart = nil
+	}
 	m.adapterCfg = &adapter.Config{
 		WorkDir:             m.cfg.WorkDir,
 		AutoApprove:         m.cfg.AutoApprovePermissions,
@@ -1211,6 +1242,7 @@ func (m *Manager) buildAdapterConfig() error {
 		AssumeMcpSse:        m.cfg.AssumeMcpSse,
 		AssumeMcpHttp:       m.cfg.AssumeMcpHttp,
 		RequiresProcessKill: m.cfg.RequiresProcessKill,
+		RecordTurnStart:     recordTurnStart,
 	}
 
 	// Configure one-shot mode when a continue command is provided.
@@ -1759,6 +1791,78 @@ func (m *Manager) agentPID() int {
 		return 0
 	}
 	return m.cmd.Process.Pid
+}
+
+// RecordTurnStart stamps the time of a prompt dispatch that reaches
+// conn.Prompt. The ACP adapter calls it immediately after beginPromptTurn and
+// before conn.Prompt when the parked-board feature is enabled. All three
+// dispatch callers (Prompt, PromptSteer, fireWakeup) funnel through sendPrompt,
+// so this one call site covers every non-dropped dispatch. Do not move this
+// into syncNotifQueueThen's barrier callback — that callback is skipped when
+// lifetimeCtx is done, which would leave the stamp stale at shutdown and bias
+// the probe toward a spuriously parked card (D-1).
+func (m *Manager) RecordTurnStart(t time.Time) {
+	m.lastTurnStartMarker.Store(newTurnStartMarker(t))
+}
+
+// LastTurnStart returns the timestamp of the most recent turn-start stamp.
+// Returns the zero time when no prompt has been dispatched yet.
+func (m *Manager) LastTurnStart() time.Time {
+	return m.lastTurnStartMarkerValue().wallTime
+}
+
+// lastTurnStartMarkerValue returns the turnStartMarker recorded by the most
+// recent RecordTurnStart call, or the zero marker when none has been
+// recorded yet.
+func (m *Manager) lastTurnStartMarkerValue() turnStartMarker {
+	v, ok := m.lastTurnStartMarker.Load().(turnStartMarker)
+	if !ok {
+		return turnStartMarker{}
+	}
+	return v
+}
+
+// AgentPID returns the PID of the agent subprocess for the given ACP session ID.
+// Returns ok=false when the session ID does not match the current session or
+// when no subprocess is running.
+func (m *Manager) AgentPID(acpSessionID string) (int, bool) {
+	m.mu.RLock()
+	pid := m.agentPID()
+	a := m.adapter
+	m.mu.RUnlock()
+	if pid == 0 || a == nil {
+		return 0, false
+	}
+	if a.GetSessionID() != acpSessionID {
+		return 0, false
+	}
+	return pid, true
+}
+
+// ProbeProcessTree walks the agent's process tree and reports whether any
+// descendant process born at or after the most recent turn start is still
+// alive. Returns "live", "settled", or "unknown".
+func (m *Manager) ProbeProcessTree(ctx context.Context, acpSessionID string) string {
+	pid, ok := m.AgentPID(acpSessionID)
+	if !ok {
+		return probeResultUnknown
+	}
+	root, ok := m.agentRootIdentity.Load().(rootIdentity)
+	if !ok || root.pid != pid {
+		// No captured identity, or it belongs to a different PID than the
+		// one currently recorded (e.g. capture failed on this platform, or
+		// a restart raced this read) — INV-1 forbids falling back to a bare
+		// PID walk.
+		return probeResultUnknown
+	}
+	marker := m.lastTurnStartMarkerValue()
+	if marker.isZero() {
+		return probeResultUnknown
+	}
+	budget := parseProbeEnvBudget(m.logger)
+	probeCtx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	return walkProcessTree(probeCtx, root, marker)
 }
 
 func (m *Manager) agentProtocol() string {

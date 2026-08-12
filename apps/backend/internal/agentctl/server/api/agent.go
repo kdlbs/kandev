@@ -280,6 +280,8 @@ func (s *Server) handleAgentStreamRequest(ctx context.Context, msg *ws.Message) 
 		return s.handleWSAuthenticate(ctx, msg)
 	case "agent.session.reset":
 		return s.handleWSResetSession(ctx, msg)
+	case "agent.background.probe":
+		return s.handleWSBackgroundProbe(ctx, msg)
 	default:
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction, fmt.Sprintf("unknown action: %s", msg.Action), nil)
 		return resp

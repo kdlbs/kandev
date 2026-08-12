@@ -105,6 +105,24 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:         "features.parkedOnBackgroundWork",
+			EnvVar:      "KANDEV_FEATURES_PARKED_ON_BACKGROUND_WORK",
+			Kind:        KindFeature,
+			Label:       "Parked on background work",
+			Description: "Renders a Claude session's board card as parked when it settled to Waiting for input while a detached background shell it launched is still alive.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskMedium,
+			RiskDescription: "The liveness sample is a single synchronous process-tree probe taken at settle time, " +
+				"not a continuous monitor. A parked card can remain shown after the background work has actually " +
+				"finished, until the session next leaves Waiting for input. Enable it for controlled testing.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.ParkedOnBackgroundWork },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.ParkedOnBackgroundWork = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "debug.devMode",
 			EnvVar:      "KANDEV_DEBUG_DEV_MODE",
 			Kind:        KindDebug,

@@ -390,6 +390,7 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 		) && kind == streams.BackgroundWorkKindSubagent {
 			s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
 		}
+		s.attestParkedIfShellLaunch(payload, kind)
 	case toolOwnershipForeground:
 		if s.markForegroundGenerating(payload.SessionID, payload.ExecutionID) {
 			s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
@@ -657,6 +658,7 @@ func (s *Service) trackBackgroundToolUpdate(
 			) && kind == streams.BackgroundWorkKindSubagent {
 				s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
 			}
+			s.attestParkedIfShellLaunch(payload, kind)
 			return
 		}
 		// A finished top-level background task no longer holds the turn open.
@@ -704,6 +706,7 @@ func (s *Service) trackBackgroundToolUpdate(
 	) && kind == streams.BackgroundWorkKindSubagent {
 		s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
 	}
+	s.attestParkedIfShellLaunch(payload, kind)
 }
 
 // resolveToolUpdateOwnership preserves the ownership established by the
@@ -755,6 +758,32 @@ func backgroundWorkKind(payload *streams.NormalizedPayload) streams.BackgroundWo
 		return ""
 	}
 	return payload.BackgroundWork().Kind
+}
+
+// attestParkedIfShellLaunch is the backend's Kind==shell half of the
+// parked-on-background-work attestation predicate (D-7: the recogniser half
+// stays inline in agentctl, normalize.go's stampBackgroundShellWork). Called
+// from every one of the ordered tool-call consumer's three
+// backgroundWorkKind call sites — the initial tool_call
+// (handleToolCallEvent) and both the non-terminal and terminal branches of
+// trackBackgroundToolUpdate — because for Claude specifically the
+// run_in_background flag is often not yet known at the initial tool_call and
+// only becomes visible on a later tool_call_update (see
+// trackBackgroundToolUpdate's doc comment); attesting only at the literal
+// initial call would miss real Claude detached launches. markObservedDetached
+// is idempotent, so calling this at more than one recognition point for the
+// same launch is harmless. Requiring BOTH Kind==shell AND
+// IsDetachedBackgroundLaunch() excludes stampSubagentBackgroundWork's
+// independent Kind=subagent, Detached=true producer — which
+// IsDetachedBackgroundLaunch() alone cannot distinguish — from ever
+// attesting parked (AC-37's mock-agent regression guard).
+func (s *Service) attestParkedIfShellLaunch(payload *lifecycle.AgentStreamEventPayload, kind streams.BackgroundWorkKind) {
+	if !s.config.ParkedOnBackgroundWork {
+		return
+	}
+	if kind == streams.BackgroundWorkKindShell && payload.Data.Normalized.IsDetachedBackgroundLaunch() {
+		s.markObservedDetached(payload.SessionID)
+	}
 }
 
 // isTerminalToolStatus reports whether a tool_update status marks the tool call
@@ -857,6 +886,18 @@ func (s *Service) updateTaskSessionStateWithHook(
 			zap.String("old_state", string(oldState)),
 			zap.String("new_state", string(nextState)))
 		s.publishTaskSessionStateChanged(ctx, taskID, sessionID, oldState, nextState, errorMessage, authoritativeUpdatedAt, session)
+	}
+
+	// Parked-on-background-work hook (docs/specs/parked-board-mvp/spec.md
+	// §10.1): runs after the state write and its publish, before
+	// republishTaskActivityOnSettle — entering WAITING_FOR_INPUT probes and
+	// projects; every other transition may clear the attestation (D-3) or
+	// un-park (AC-68), never both branches for the same call since oldState
+	// != nextState is already guaranteed above.
+	if nextState == models.TaskSessionStateWaitingForInput {
+		s.onSessionParkedHook(ctx, taskID, sessionID)
+	} else {
+		s.handleParkedStateTransition(ctx, taskID, sessionID, oldState, nextState)
 	}
 
 	s.republishTaskActivityOnSettle(ctx, taskID, oldState, nextState)
@@ -1425,6 +1466,13 @@ func (s *Service) setSessionStarting(
 	// updateTaskSessionStateWithHook, so clear the interruption marker here
 	// too (no-op when absent).
 	s.clearTaskInterruptedMarker(ctx, taskID)
+	if oldState != session.State {
+		// The launch path persists STARTING directly and therefore bypasses
+		// updateTaskSessionStateWithHook. Keep the parked projection in sync
+		// with that real transition as well, so a previous turn's attestation
+		// cannot survive a relaunch.
+		s.handleParkedStateTransition(ctx, taskID, session.ID, oldState, session.State)
+	}
 
 	if publishSession != nil {
 		s.publishTaskSessionStateChanged(ctx, taskID, session.ID, oldState, session.State, session.ErrorMessage, stateUpdatedAt, publishSession)

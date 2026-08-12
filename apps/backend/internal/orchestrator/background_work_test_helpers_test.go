@@ -13,6 +13,27 @@ func attestedSubagentPayload(description, prompt, subagentType string) *streams.
 	return payload
 }
 
+// attestedDetachedSubagentPayload builds a Kind=subagent payload with
+// Detached=true — deliberately ambiguous to IsDetachedBackgroundLaunch(),
+// which cannot tell a detached subagent apart from a detached shell. This
+// mirrors the real stampSubagentBackgroundWork producer AC-37's second GIVEN
+// names (the one mockAgentID drives via /detached-background), so a test
+// built on this payload actually exercises the Kind==shell filter rather
+// than trivially passing because IsDetachedBackgroundLaunch() was already
+// false. Kept separate from attestedSubagentPayload (Detached=false), which
+// many unrelated foreground-activity/subagent-accounting tests already rely
+// on for non-ambiguous subagent attestation.
+func attestedDetachedSubagentPayload(description, prompt, subagentType string) *streams.NormalizedPayload {
+	payload := streams.NewSubagentTask(description, prompt, subagentType)
+	payload.SetBackgroundWorkIdentity(
+		streams.BackgroundWorkKindSubagent,
+		"test-subagent",
+		true,
+		false,
+	)
+	return payload
+}
+
 func attestedBackgroundShellPayload(command string) *streams.NormalizedPayload {
 	payload := streams.NewShellExec(command, "", "", 0, true)
 	payload.SetBackgroundWorkIdentity(streams.BackgroundWorkKindShell, "", true, false)

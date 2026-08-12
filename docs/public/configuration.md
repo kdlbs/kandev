@@ -131,6 +131,7 @@ The launcher starts `agentctl`, performs a one-time nonce handshake, and supplie
 | `features.auth` | `KANDEV_FEATURES_AUTH` | `false` in production | Opt-in authentication and per-user workspaces. The first visitor after enabling completes setup and becomes the admin. |
 | `features.claude_background_prompt_handoff` | `KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF` | `false` | High-risk experiment that lets Claude Code accept a new prompt after its foreground yields while adapter-attested background work remains active. Other providers keep the coarse busy gate. |
 | `features.claude_mid_turn_steering` | `KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING` | `false` | High-risk experiment that delivers a new prompt into a Claude turn that is still generating (mid-turn steering) instead of queuing it, for agents that advertise prompt queueing. Whether the agent folds the prompt into the running turn or runs it next is the agent's decision; other providers keep the coarse busy gate. |
+| `features.parked_on_background_work` | `KANDEV_FEATURES_PARKED_ON_BACKGROUND_WORK` | `false` | Experimental: renders a Claude Code session's board card as parked when it settles to Waiting for input while a detached background shell it launched is still alive, based on a single process-tree check taken at that moment (not continuous monitoring). |
 
 Do not infer security from `auth.jwtSecret`: setting it currently does not turn the local server into an authenticated public service. Office's JWT key has a narrower, active purpose. Store both active secrets and third-party API keys in your deployment secret manager; never commit them in `config.yaml`.
 
@@ -309,7 +310,8 @@ Copying this entire file is unnecessary and can freeze old defaults in a deploym
 | `features.auth` | `KANDEV_FEATURES_AUTH` | off | Authentication and per-user workspaces for the whole install. |
 | `features.claudeBackgroundPromptHandoff` | `KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF` | off | High-risk Claude Code experiment that exposes recognized background-only activity and admits a successor prompt. |
 | `features.claudeMidTurnSteering` | `KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING` | off | High-risk Claude Code experiment that delivers a prompt into a still-generating turn (mid-turn steering) instead of queuing it, for agents advertising prompt queueing. |
-| `debug.devMode` | `KANDEV_DEBUG_DEV_MODE` | off | High-risk diagnostic endpoints and ACP frame logging. |
+| `features.parkedOnBackgroundWork` | `KANDEV_FEATURES_PARKED_ON_BACKGROUND_WORK` | off | Experimental board-card affordance for a Claude Code session parked on a live detached background shell, based on a single settle-time check rather than continuous monitoring. |
+| `debug.devMode` | `KANDEV_DEBUG_DEV_MODE` (also locked by explicit legacy/debug-message vars) | off | High-risk diagnostic endpoints and ACP frame logging. |
 
 UI changes are persisted in the database and require a restart. An explicitly set environment value wins and locks the UI control. Otherwise a database override wins over the embedded profile/default. Resetting a toggle removes its database override.
 

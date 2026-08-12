@@ -22,12 +22,27 @@ type activeSubagentCountProvider interface {
 	ActiveSubagentCount(sessionID string) int
 }
 
+// TaskParkedProvider surfaces the task-level parked-on-background-work OR
+// projection (docs/specs/parked-board-mvp/spec.md), satisfied by the
+// orchestrator. The task service depends only on this narrow seam so it
+// takes no hard orchestrator dependency and can be faked in tests.
+type TaskParkedProvider interface {
+	TaskParkedProjectionSnapshot(taskID string) bool
+}
+
 // SetForegroundActivityProvider wires the live per-session activity tracker used
 // to compute the task-level MOST-ACTIVE-WINS aggregate. Optional; when unset the
 // aggregate is left empty and task-level surfaces fall through to the coarse
 // task state.
 func (s *Service) SetForegroundActivityProvider(provider ForegroundActivityProvider) {
 	s.foregroundActivity = provider
+}
+
+// SetTaskParkedProvider wires the task-level parked-on-background-work OR
+// projection used on task.updated events. Optional; when unset the field is
+// left false on every event.
+func (s *Service) SetTaskParkedProvider(provider TaskParkedProvider) {
+	s.taskParked = provider
 }
 
 // computeTaskActivitySnapshot resolves the task-wide activity and subagent
@@ -38,7 +53,7 @@ func (s *Service) computeTaskActivitySnapshot(
 	taskID string,
 ) (taskActivitySnapshot, bool) {
 	if s.foregroundActivity == nil {
-		return taskActivitySnapshot{known: true}, true
+		return taskActivitySnapshot{known: true, parked: s.computeTaskParked(taskID)}, true
 	}
 	sessions, err := s.sessions.ListActiveTaskSessionsByTaskID(ctx, taskID)
 	if err != nil {
@@ -50,7 +65,17 @@ func (s *Service) computeTaskActivitySnapshot(
 		activity:            s.computeTaskForegroundActivityForSessions(sessions),
 		activeSubagentCount: s.computeTaskActiveSubagentCountForSessions(sessions),
 		known:               true,
+		parked:              s.computeTaskParked(taskID),
 	}, true
+}
+
+// computeTaskParked reads the task-level parked-on-background-work OR
+// projection. An unwired provider (projection not configured) is false.
+func (s *Service) computeTaskParked(taskID string) bool {
+	if s.taskParked == nil {
+		return false
+	}
+	return s.taskParked.TaskParkedProjectionSnapshot(taskID)
 }
 
 func (s *Service) computeTaskActiveSubagentCountForSessions(
@@ -94,7 +119,7 @@ func (s *Service) computeTaskForegroundActivityForSessions(sessions []*models.Ta
 // activity aggregate or live subagent count changes. It is safe to call on
 // every session activity flip; unchanged snapshots are deduplicated.
 func (s *Service) PublishTaskActivityIfChanged(ctx context.Context, taskID string) {
-	if taskID == "" || s.foregroundActivity == nil {
+	if taskID == "" || (s.foregroundActivity == nil && s.taskParked == nil) {
 		return
 	}
 	s.enqueueTaskPublication(ctx, taskID, events.TaskUpdated, func(publicationCtx context.Context) {
@@ -109,10 +134,12 @@ func (s *Service) PublishTaskActivityIfChanged(ctx context.Context, taskID strin
 		s.taskActivityMu.Lock()
 		previousActivity, activitySeen := s.lastTaskActivity[taskID]
 		previousCount, countSeen := s.lastTaskSubagentCount[taskID]
+		previousParked, parkedSeen := s.lastTaskParked[taskID]
 		s.taskActivityMu.Unlock()
-		if activitySeen && countSeen &&
+		if activitySeen && countSeen && parkedSeen &&
 			previousActivity == current.activity &&
-			previousCount == current.activeSubagentCount {
+			previousCount == current.activeSubagentCount &&
+			previousParked == current.parked {
 			return
 		}
 
@@ -147,8 +174,12 @@ func (s *Service) recordTaskActivitySnapshot(taskID string, snapshot *taskActivi
 	if s.lastTaskSubagentCount == nil {
 		s.lastTaskSubagentCount = make(map[string]int)
 	}
+	if s.lastTaskParked == nil {
+		s.lastTaskParked = make(map[string]bool)
+	}
 	s.lastTaskActivity[taskID] = snapshot.activity
 	s.lastTaskSubagentCount[taskID] = snapshot.activeSubagentCount
+	s.lastTaskParked[taskID] = snapshot.parked
 	s.taskActivityMu.Unlock()
 }
 
@@ -161,5 +192,6 @@ func (s *Service) forgetTaskActivity(taskID string) {
 	s.taskActivityMu.Lock()
 	delete(s.lastTaskActivity, taskID)
 	delete(s.lastTaskSubagentCount, taskID)
+	delete(s.lastTaskParked, taskID)
 	s.taskActivityMu.Unlock()
 }

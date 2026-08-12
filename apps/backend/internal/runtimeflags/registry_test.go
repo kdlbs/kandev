@@ -426,3 +426,32 @@ func TestDefinitionsIncludeClaudeMidTurnSteeringMetadata(t *testing.T) {
 		t.Fatal("RestartRequired = false, want true")
 	}
 }
+
+// TestDefinitionsIncludeParkedOnBackgroundWorkMetadata pins the V1-08…V1-12
+// flag-checklist metadata for the parked-board-mvp slice
+// (docs/specs/parked-board-mvp/spec.md §7.5): experimental/medium-risk,
+// restart-required, mutable, gated at the settle hook only.
+func TestDefinitionsIncludeParkedOnBackgroundWorkMetadata(t *testing.T) {
+	def, ok := DefinitionByKey("features.parkedOnBackgroundWork")
+	if !ok {
+		t.Fatal("features.parkedOnBackgroundWork definition missing")
+	}
+	if def.EnvVar != "KANDEV_FEATURES_PARKED_ON_BACKGROUND_WORK" {
+		t.Fatalf("EnvVar = %q, want KANDEV_FEATURES_PARKED_ON_BACKGROUND_WORK", def.EnvVar)
+	}
+	if def.Stability != StabilityExperimental {
+		t.Fatalf("Stability = %q, want experimental", def.Stability)
+	}
+	if def.RiskLevel != RiskMedium {
+		t.Fatalf("RiskLevel = %q, want medium", def.RiskLevel)
+	}
+	if def.RiskDescription == "" {
+		t.Fatal("RiskDescription empty")
+	}
+	if !def.RestartRequired {
+		t.Fatal("RestartRequired = false, want true")
+	}
+	if !def.Mutable {
+		t.Fatal("Mutable = false, want true")
+	}
+}

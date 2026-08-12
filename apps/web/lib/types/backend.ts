@@ -99,6 +99,8 @@ export type TaskEventPayload = {
   // Task-level MOST-ACTIVE-WINS activity aggregate across the task's sessions;
   // absent/null when no session is running.
   foreground_activity?: ForegroundActivity | null;
+  /** Task-level parked-on-background-work OR (docs/specs/parked-board-mvp/spec.md). */
+  parked_on_background_work?: boolean;
   active_subagent_count?: number;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;

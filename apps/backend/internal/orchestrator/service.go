@@ -63,6 +63,12 @@ type ServiceConfig struct {
 	// turn for an agent that advertised prompt queueing. Independent of
 	// ClaudeBackgroundPromptHandoff, which covers the foreground-idle handoff.
 	ClaudeMidTurnSteering bool
+
+	// ParkedOnBackgroundWork gates the parked-on-background-work board
+	// projection (docs/specs/parked-board-mvp/spec.md). The effective startup
+	// value is copied into the service and agentctl lifecycle; it is off by
+	// default and off in every shipped profile.
+	ParkedOnBackgroundWork bool
 }
 
 // AttachmentReader is the narrow attachment-store seam needed when the
@@ -345,6 +351,27 @@ type Service struct {
 	taskRepo     scheduler.TaskRepository
 	repo         sessionExecutorStore
 	agentManager executor.AgentManagerClient
+
+	// backgroundProbe is the injectable port used by the
+	// parked-on-background-work projection to query whether background
+	// processes are still alive. Nil-safe: when unset the projection skips
+	// the probe and never parks. Wired from internal/backendapp via
+	// SetBackgroundProbe after the lifecycle manager is constructed.
+	backgroundProbe backgroundProbePort
+
+	// parkedStatesMu guards parkedStates. Lock order: parkedStatesMu before
+	// any per-task mutex; never hold a session mutex while acquiring this,
+	// and never held across a call into the session repository, the
+	// workflow engine, the event bus, or the probe port (§7.2).
+	parkedStatesMu sync.RWMutex
+	// parkedStates holds the per-session tracking state used by the
+	// parked-on-background-work projection. Keyed by Kandev session ID.
+	parkedStates map[string]*sessionParkedState
+
+	// taskParkedStatesMu guards taskParkedStates.
+	taskParkedStatesMu sync.RWMutex
+	// taskParkedStates holds the task-level OR of all session parked states.
+	taskParkedStates map[string]*taskParkedState
 
 	// Components
 	queue     *queue.TaskQueue

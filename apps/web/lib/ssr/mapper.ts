@@ -51,6 +51,7 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         primarySessionPendingAction: pickPendingAction(task.primary_session_pending_action),
         taskPendingAction: pickPendingAction(task.task_pending_action),
         foregroundActivity: task.foreground_activity ?? undefined,
+        parkedOnBackgroundWork: task.parked_on_background_work,
         activeSubagentCount: task.active_subagent_count ?? undefined,
         sessionCount: task.session_count ?? undefined,
         reviewStatus: task.review_status ?? undefined,

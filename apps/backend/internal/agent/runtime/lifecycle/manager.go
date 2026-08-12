@@ -59,6 +59,9 @@ type Manager struct {
 
 	// executorFallbackPolicy controls behavior when a requested runtime is unavailable.
 	executorFallbackPolicy ExecutorFallbackPolicy
+	// parkedOnBackgroundWork controls whether agentctl instances receive the
+	// turn marker plumbing for the parked-board projection.
+	parkedOnBackgroundWork bool
 
 	// Refactored components for separation of concerns
 	executionStore *ExecutionStore        // Thread-safe execution tracking
@@ -212,6 +215,13 @@ func (m *Manager) SetActivityCoordinator(coordinator *activity.Coordinator) {
 // unset in tests that don't exercise the persistence path.
 func (m *Manager) SetStandaloneHostPID(pid int) {
 	m.standaloneHostPID.Store(int64(pid))
+}
+
+// SetParkedOnBackgroundWork enables the parked-board marker plumbing for
+// subsequently created agentctl instances. The feature flag is restart-scoped,
+// so callers set this during backend construction before any launch occurs.
+func (m *Manager) SetParkedOnBackgroundWork(enabled bool) {
+	m.parkedOnBackgroundWork = enabled
 }
 
 // NewManager creates a new lifecycle manager.

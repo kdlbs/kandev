@@ -274,14 +274,27 @@ export function renderTaskStatusIcon(
   const showInterrupted = !!task.interrupted;
   const hasActivity =
     task.foregroundActivity === "generating" || task.foregroundActivity === "background";
-  if (!showRunningSpinner && !needsMe && !hasActivity && !showInterrupted) {
+  const parkedOnBackgroundWork = !!task.parkedOnBackgroundWork;
+  if (
+    !showRunningSpinner &&
+    !needsMe &&
+    !hasActivity &&
+    !showInterrupted &&
+    !parkedOnBackgroundWork
+  ) {
     return null;
   }
   // A "needs me" prompt (pending clarification / permission) must not be masked
   // by the launch-spinner short-circuit — a mid-turn prompt can coincide with a
   // coarse running state. Live foreground activity still wins, handled inside
-  // getTaskStateIcon.
-  if (showRunningSpinner && !needsMe && task.foregroundActivity !== "background") {
+  // getTaskStateIcon. Parked tasks also skip the short-circuit to show the
+  // background spinner rather than the plain launch spinner.
+  if (
+    showRunningSpinner &&
+    !needsMe &&
+    task.foregroundActivity !== "background" &&
+    !parkedOnBackgroundWork
+  ) {
     return <IconLoader2 className="h-4 w-4 text-blue-500 animate-spin" />;
   }
   return getTaskStateIcon(task.state, "h-4 w-4", {
@@ -289,6 +302,7 @@ export function renderTaskStatusIcon(
     foregroundActivity: task.foregroundActivity,
     hasPendingPermission,
     interrupted: showInterrupted,
+    parkedOnBackgroundWork,
   });
 }
 

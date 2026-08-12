@@ -408,6 +408,15 @@ type FeaturesConfig struct {
 	// kill-switch after rollout because the agent-side fold is undocumented and
 	// can regress without notice.
 	ClaudeMidTurnSteering bool `mapstructure:"claude_mid_turn_steering" json:"claudeMidTurnSteering"`
+
+	// ParkedOnBackgroundWork gates the parked-board-mvp slice
+	// (docs/specs/parked-board-mvp/spec.md): projecting a Claude session that
+	// settled to WAITING_FOR_INPUT after attesting a detached background
+	// shell launch as "parked" on the board card, based on one synchronous
+	// process-tree probe taken at the settle hook. Off in every embedded
+	// profile. When off, the lifecycle and agentctl layers omit turn-marker
+	// plumbing, and the orchestrator omits attestation and probing.
+	ParkedOnBackgroundWork bool `mapstructure:"parked_on_background_work" json:"parkedOnBackgroundWork"`
 }
 
 // LoggingConfig holds logging configuration.

@@ -2,6 +2,12 @@ package shared
 
 import "time"
 
+// RecordTurnStartFunc stamps the time of a prompt dispatch that reaches
+// conn.Prompt, for the parked-on-background-work settle probe (D-1: fires on
+// every non-dropped dispatch — the operator path, mid-turn steering, and the
+// synthetic wakeup path — all of which funnel through sendPrompt).
+type RecordTurnStartFunc func(time.Time)
+
 // DefaultPermissionTimeout is the default timeout for permission requests (5 minutes).
 const DefaultPermissionTimeout = 5 * time.Minute
 
@@ -59,6 +65,12 @@ type Config struct {
 	// adapter's return value to decide whether to kill the entire process
 	// group on shutdown so MCP child processes don't leak.
 	RequiresProcessKill bool
+
+	// RecordTurnStart stamps process.Manager's turn-start marker, read later
+	// by the parked-on-background-work settle probe. The lifecycle layer omits
+	// this callback when the feature is disabled. May be nil in tests; callers
+	// must guard.
+	RecordTurnStart RecordTurnStartFunc
 }
 
 // GetPermissionTimeout returns the configured permission timeout or the default.

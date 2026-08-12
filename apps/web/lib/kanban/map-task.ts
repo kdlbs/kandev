@@ -55,6 +55,13 @@ export type TaskLike = {
   /** True when the task's session was mid-turn when the backend died. */
   interrupted?: boolean;
   foreground_activity?: ForegroundActivity | null;
+  /**
+   * True when the task's session settled to WAITING_FOR_INPUT while a
+   * detached background shell it launched is still alive (runtime-only
+   * projection; docs/specs/parked-board-mvp/spec.md). Absent is read as
+   * false, never as unknown.
+   */
+  parked_on_background_work?: boolean;
   active_subagent_count?: number;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
@@ -152,6 +159,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     taskPendingAction: pickPendingAction(source.task_pending_action),
     interrupted: source.interrupted,
     foregroundActivity: pickForegroundActivity(source.foreground_activity),
+    parkedOnBackgroundWork: source.parked_on_background_work,
     activeSubagentCount: source.active_subagent_count ?? undefined,
     sessionCount: source.session_count ?? undefined,
     reviewStatus: source.review_status ?? undefined,

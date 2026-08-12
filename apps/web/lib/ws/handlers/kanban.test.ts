@@ -265,6 +265,9 @@ describe("kanban.update handler — foregroundActivity preservation", () => {
 });
 // eslint-disable-next-line max-lines-per-function -- test describe block, splitting hurts readability
 
+// parkedOnBackgroundWork preservation (AC-58a) has its own sibling test file,
+// kanban-parked.test.ts, to keep this file under the line-count lint limit.
+
 // eslint-disable-next-line max-lines-per-function -- fixture-heavy test callback
 describe("kanban.update handler — taskPendingAction preservation", () => {
   it("preserves taskPendingAction from existing tasks", () => {

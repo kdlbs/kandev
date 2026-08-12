@@ -338,10 +338,12 @@ func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mc
 
 	c.logger.Info("connected to updates stream", zap.String("url", wsURL))
 
-	// writeMessage uses the shared stream write mutex for thread-safe writes
+	// writeMessage uses the shared stream write admission for thread-safe writes.
 	writeMessage := func(data []byte) error {
-		c.streamWriteMu.Lock()
-		defer c.streamWriteMu.Unlock()
+		if err := c.acquireStreamWrite(context.Background()); err != nil {
+			return err
+		}
+		defer c.releaseStreamWrite()
 		return conn.WriteMessage(websocket.TextMessage, data)
 	}
 

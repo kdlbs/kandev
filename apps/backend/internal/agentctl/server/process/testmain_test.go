@@ -46,6 +46,7 @@ func TestMain(m *testing.M) {
 //	echo-then-sleep <msg> <secs>   — print msg, then sleep <secs>
 //	delay-then-child <pidfile> <delay-ms> <secs>
 //	                               — wait, spawn a sleeping child, write its PID, then sleep
+//	zombie-parent <secs>           — spawn an un-awaited child, print its PID, then sleep
 //
 // New commands can be added here as tests need them; the goal is to keep the
 // surface tiny so the helper stays inspectable.
@@ -196,11 +197,51 @@ func runFixture(spec string) {
 			fmt.Fprintf(os.Stderr, "fixture: exit-with-child: write pidfile: %v\n", err)
 			os.Exit(2)
 		}
+	case "zombie-parent":
+		// Keep the parent alive without calling Wait on the short-lived child.
+		// This creates a stable zombie without relying on shell signal behavior.
+		if len(parts) != 2 {
+			fmt.Fprintln(os.Stderr, "fixture: zombie-parent takes 1 arg")
+			os.Exit(2)
+		}
+		secs, err := strconv.Atoi(parts[1])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fixture: zombie-parent: bad seconds %q\n", parts[1])
+			os.Exit(2)
+		}
+		childCmd := exec.Command(os.Args[0])
+		childCmd.Env = fixtureChildEnv("sleep 0")
+		if err := childCmd.Start(); err != nil {
+			fmt.Fprintf(os.Stderr, "fixture: zombie-parent: spawn child: %v\n", err)
+			os.Exit(2)
+		}
+		// The child is the same race-instrumented test binary. Give it time to
+		// enter fixture mode and exit before publishing its PID, so the caller
+		// observes a zombie instead of a still-starting process.
+		time.Sleep(3 * time.Second)
+		fmt.Println(childCmd.Process.Pid)
+		_ = os.Stdout.Sync()
+		time.Sleep(time.Duration(secs) * time.Second)
 	default:
 		fmt.Fprintf(os.Stderr, "fixture: unknown command %q\n", parts[0])
 		os.Exit(2)
 	}
 	os.Exit(0)
+}
+
+// fixtureChildEnv replaces the fixture selector instead of appending a
+// duplicate environment entry. The child of a fixture inherits its parent's
+// selector, so appending would leave two values and make os.Getenv select the
+// parent's long-lived command.
+func fixtureChildEnv(spec string) []string {
+	env := make([]string, 0, len(os.Environ())+1)
+	for _, entry := range os.Environ() {
+		if strings.HasPrefix(entry, kandevTestFixtureEnv+"=") {
+			continue
+		}
+		env = append(env, entry)
+	}
+	return append(env, kandevTestFixtureEnv+"="+spec)
 }
 
 // fixtureExec returns the (Command argv, Env) pair tests pass to runners that
