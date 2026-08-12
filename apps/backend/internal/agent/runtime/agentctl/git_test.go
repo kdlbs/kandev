@@ -611,7 +611,8 @@ const gitStatusBody = `{
 	"success":true,"is_submodule":true,
 	"branch":"feature/x","remote_branch":"origin/feature/x",
 	"head_commit":"head1","base_commit":"base1",
-	"ahead":3,"behind":1,
+	"ahead":3,"behind":1,"remote_ahead":4,"remote_behind":2,
+	"remote_head_commit":"remote1",
 	"modified":["m.go"],"added":["a.go"],"deleted":["d.go"],
 	"untracked":["u.go"],"renamed":["r.go"],
 	"files":{"m.go":{"status":"M"}},
@@ -632,6 +633,10 @@ func assertFullGitStatus(t *testing.T, result *GitStatusResult) {
 	}
 	if result.Ahead != 3 || result.Behind != 1 {
 		t.Errorf("ahead/behind = %d / %d, want 3 / 1", result.Ahead, result.Behind)
+	}
+	if result.RemoteAhead != 4 || result.RemoteBehind != 2 || result.RemoteHeadCommit != "remote1" {
+		t.Errorf("remote ancestry = %d / %d / %q, want 4 / 2 / remote1",
+			result.RemoteAhead, result.RemoteBehind, result.RemoteHeadCommit)
 	}
 	for name, got := range map[string][]string{
 		"modified":  result.Modified,

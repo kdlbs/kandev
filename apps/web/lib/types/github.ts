@@ -304,6 +304,7 @@ export type TaskPRAutomationOptions = {
 
 export type TaskCIAutomationOptions = {
   task_id: string;
+  workspace_id?: string;
   auto_fix_enabled: boolean;
   auto_merge_enabled: boolean;
   auto_fix_prompt_override: string | null;

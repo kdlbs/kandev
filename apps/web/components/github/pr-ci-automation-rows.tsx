@@ -201,7 +201,7 @@ function PRAgentPromptRows({
 }) {
   const { t } = useTranslation();
   const terminalHelpID = `task-pr-terminal-help-${scopeKey}`;
-  const terminalHelp = "Wake the agent when review work ends. Choose either or both outcomes.";
+  const terminalHelp = t("github:wakeAgentOnTerminalPrState");
   return (
     <>
       <ReviewRequestedPromptRow
@@ -308,7 +308,7 @@ function ReviewRequestedPromptRow({
 }) {
   const { t } = useTranslation();
   const helpID = `task-pr-review-requested-prompt-${scopeKey}-description`;
-  const help = "Wake the agent for any new request, including re-review after changes.";
+  const help = t("github:wakeAgentOnReviewRequest");
   return (
     <>
       <span id={helpID} className="sr-only">

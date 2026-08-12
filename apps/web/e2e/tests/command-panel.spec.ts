@@ -2,6 +2,7 @@ import { test, expect } from "../fixtures/test-base";
 import { KanbanPage } from "../pages/kanban-page";
 import { SessionPage } from "../pages/session-page";
 import { waitForSessionDone } from "../helpers/session";
+import { createSubmoduleReviewFixture } from "./review/submodule-review-helpers";
 
 type CommandAliasExpectation = {
   query: string;
@@ -229,6 +230,50 @@ test.describe("Command Panel", () => {
 
     // Should show empty state for file search
     await expect(dialog.getByText("Type to search files...")).toBeVisible();
+  });
+
+  test("Cmd+Shift+K finds root and submodule files", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(180_000);
+    const fixture = await createSubmoduleReviewFixture(
+      apiClient,
+      seedData,
+      backend.tmpDir,
+      "Submodule file search E2E",
+    );
+
+    try {
+      await testPage.goto(`/t/${fixture.taskId}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await session.waitForChatIdle({ timeout: 45_000 });
+      await fixture.waitForWorktree(apiClient);
+
+      await openFileSearch(testPage);
+      const dialog = commandDialog(testPage);
+      await expect(dialog).toBeVisible({ timeout: 5_000 });
+      await dialog.getByRole("combobox").fill("README.md");
+
+      const groups = dialog.getByTestId("file-search-repo-group");
+      await expect(groups).toHaveCount(3, { timeout: 45_000 });
+      await expect(
+        dialog.locator('[data-testid="file-search-repo-group"][data-repository=""]'),
+      ).toBeVisible();
+      await expect(
+        dialog.locator('[data-testid="file-search-repo-group"][data-repository="vendor/outer"]'),
+      ).toBeVisible();
+      await expect(
+        dialog.locator(
+          '[data-testid="file-search-repo-group"][data-repository="vendor/outer/vendor/inner"]',
+        ),
+      ).toBeVisible();
+    } finally {
+      fixture.cleanup();
+    }
   });
 
   test("Cmd+K inline task search shows matching tasks", async ({

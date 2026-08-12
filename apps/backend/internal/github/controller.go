@@ -359,8 +359,7 @@ func (c *Controller) handleTaskIssueLinkError(ctx *gin.Context, err error) {
 func (c *Controller) httpGetTaskCIOptions(ctx *gin.Context) {
 	resp, err := c.service.GetTaskCIOptionsResponse(ctx.Request.Context(), ctx.Param("taskId"))
 	if err != nil {
-		c.logger.Error("get task CI options failed", zap.String("task_id", ctx.Param("taskId")), zap.Error(err))
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load CI automation options"})
+		c.writeTaskCIOptionsError(ctx, err, "get", "failed to load CI automation options")
 		return
 	}
 	ctx.JSON(http.StatusOK, resp)
@@ -375,8 +374,7 @@ func (c *Controller) httpPatchTaskCIOptions(ctx *gin.Context) {
 	if !patch.HasAny() {
 		resp, err := c.service.GetTaskCIOptionsResponse(ctx.Request.Context(), ctx.Param("taskId"))
 		if err != nil {
-			c.logger.Error("load task CI options failed", zap.String("task_id", ctx.Param("taskId")), zap.Error(err))
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load CI automation options"})
+			c.writeTaskCIOptionsError(ctx, err, "load", "failed to load CI automation options")
 			return
 		}
 		ctx.JSON(http.StatusOK, resp)
@@ -384,16 +382,29 @@ func (c *Controller) httpPatchTaskCIOptions(ctx *gin.Context) {
 	}
 	resp, err := c.service.UpdateTaskCIOptions(ctx.Request.Context(), ctx.Param("taskId"), patch)
 	if err != nil {
-		if errors.Is(err, ErrTaskPRNotLinked) {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.logger.Error("update task CI options failed", zap.String("task_id", ctx.Param("taskId")), zap.Error(err))
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update CI automation options"})
+		c.writeTaskCIOptionsError(ctx, err, "update", "failed to update CI automation options")
 		return
 	}
 	c.publishTaskCIOptionsUpdated(ctx.Request.Context(), resp)
 	ctx.JSON(http.StatusOK, resp)
+}
+
+func (c *Controller) writeTaskCIOptionsError(ctx *gin.Context, err error, operation, message string) {
+	if errors.Is(err, ErrTaskNotFound) ||
+		errors.Is(err, repoerrors.ErrWorkspaceNotFound) ||
+		errors.Is(err, ErrGitHubWorkspaceRequired) {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+		return
+	}
+	if errors.Is(err, ErrTaskPRNotLinked) {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if writeGitHubOperationalAuthError(ctx, err) {
+		return
+	}
+	c.logger.Error(operation+" task CI options failed", zap.String("task_id", ctx.Param("taskId")), zap.Error(err))
+	ctx.JSON(http.StatusInternalServerError, gin.H{"error": message})
 }
 
 func parseTaskCIOptionsPatch(ctx *gin.Context) (TaskCIOptionsPatch, error) {

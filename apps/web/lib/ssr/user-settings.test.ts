@@ -493,6 +493,24 @@ describe("todo list panel setting", () => {
     expect(fallback.showTodoListPanel).toBe(false);
     expect(enabled.showTodoListPanel).toBe(true);
   });
+
+  it("defaults the not-empty sub-option to false and preserves an explicit true", () => {
+    const fallback = mapUserSettingsResponse(null) as {
+      showTodoListPanelOnlyWhenNotEmpty?: boolean;
+    };
+    const enabled = mapUserSettingsResponse({
+      settings: {
+        user_id: DEFAULT_USER_ID,
+        workspace_id: toWorkspaceId(""),
+        repository_ids: [],
+        show_todo_list_panel_only_when_not_empty: true,
+        updated_at: UPDATED_AT,
+      } as unknown as NonNullable<Parameters<typeof mapUserSettingsResponse>[0]>["settings"],
+    }) as { showTodoListPanelOnlyWhenNotEmpty?: boolean };
+
+    expect(fallback.showTodoListPanelOnlyWhenNotEmpty).toBe(false);
+    expect(enabled.showTodoListPanelOnlyWhenNotEmpty).toBe(true);
+  });
 });
 
 describe("parseChangesPanelLayout", () => {
@@ -583,5 +601,35 @@ describe("mapUserSettingsResponse voice mode", () => {
       autoSend: false,
       whisperWebModel: "base",
     });
+  });
+});
+
+describe("prevent auto-start on open preference", () => {
+  it("defaults the missing preference to false", () => {
+    expect(buildCoreFields({}).preventAutoStartAgentOnOpen).toBe(false);
+    expect(mapUserSettingsResponse(null).preventAutoStartAgentOnOpen).toBe(false);
+  });
+
+  it("preserves an explicit enabled preference", () => {
+    expect(
+      buildCoreFields({ prevent_auto_start_agent_on_open: true }).preventAutoStartAgentOnOpen,
+    ).toBe(true);
+    expect(
+      mapUserSettingsResponse({
+        settings: {
+          user_id: DEFAULT_USER_ID,
+          workspace_id: toWorkspaceId(""),
+          repository_ids: [],
+          prevent_auto_start_agent_on_open: true,
+          updated_at: UPDATED_AT,
+        },
+      }).preventAutoStartAgentOnOpen,
+    ).toBe(true);
+  });
+
+  it("preserves an explicit disabled preference", () => {
+    expect(
+      buildCoreFields({ prevent_auto_start_agent_on_open: false }).preventAutoStartAgentOnOpen,
+    ).toBe(false);
   });
 });

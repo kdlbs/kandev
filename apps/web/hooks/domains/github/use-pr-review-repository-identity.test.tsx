@@ -81,6 +81,7 @@ const initialState: Partial<AppState> = {
     tasks: [
       {
         id: TASK_ID,
+        workflowId: "wf-1",
         workflowStepId: "step-1",
         title: "Multi-PR task",
         position: 0,

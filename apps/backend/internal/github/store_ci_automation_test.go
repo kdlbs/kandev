@@ -607,6 +607,46 @@ func TestStoreMigrateTaskCIOptionsToPRScope_FansOutToLinkedPRs(t *testing.T) {
 	}
 }
 
+func TestStoreMigrateTaskCIOptionsToPRScope_SkipsDetachedPRs(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	seedLegacyTaskCIOptions(t, store, "task-1", true, true)
+	active := &TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "o", Repo: "r", PRNumber: 1, CreatedAt: now,
+	}
+	detached := &TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "o", Repo: "r", PRNumber: 2, CreatedAt: now.Add(time.Second),
+	}
+	for _, pr := range []*TaskPR{active, detached} {
+		if err := store.CreateTaskPR(ctx, pr); err != nil {
+			t.Fatalf("seed PR #%d: %v", pr.PRNumber, err)
+		}
+	}
+	if _, transitioned, err := store.DetachTaskPR(ctx, detached.ID); err != nil || !transitioned {
+		t.Fatalf("detach PR #%d: transitioned=%v err=%v", detached.PRNumber, transitioned, err)
+	}
+
+	if err := store.initSchema(false); err != nil {
+		t.Fatalf("replay schema migration: %v", err)
+	}
+	activeOptions, err := store.GetTaskPRAutomationOptions(ctx, "task-1", "repo-1", active.PRNumber)
+	if err != nil {
+		t.Fatalf("get active PR options: %v", err)
+	}
+	if !activeOptions.AutoFixEnabled || !activeOptions.AutoMergeEnabled {
+		t.Fatalf("active PR options = %+v, want legacy switches enabled", activeOptions)
+	}
+	detachedOptions, err := store.GetTaskPRAutomationOptions(ctx, "task-1", "repo-1", detached.PRNumber)
+	if err != nil {
+		t.Fatalf("get detached PR options: %v", err)
+	}
+	if detachedOptions.AutoFixEnabled || detachedOptions.AutoMergeEnabled {
+		t.Fatalf("detached PR inherited legacy switches: %+v", detachedOptions)
+	}
+}
+
 // TestStoreMigrateTaskCIOptionsToPRScope_Idempotent covers AC15: replaying
 // the migration on an already-migrated database changes no per-PR row.
 func TestStoreMigrateTaskCIOptionsToPRScope_Idempotent(t *testing.T) {

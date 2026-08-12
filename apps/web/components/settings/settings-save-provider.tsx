@@ -63,6 +63,23 @@ type SaveResult = {
 const SettingsSaveRegistryContext = createContext<Registry | null>(null);
 const SettingsDirtyScopeContext = createContext<DirtyScopeRegistry | null>(null);
 
+export type SettingsSaveCoordinator = {
+  /** Save every dirty contributor. Respects each contributor's canSave;
+   * returns canLeave=false when any contributor is invalid or fails. */
+  saveAll: () => Promise<SaveResult>;
+  status: SettingsSaveStatus;
+  errorKind: SettingsSaveErrorKind | null;
+  hasDirty: boolean;
+  /** Reason why the first invalid dirty contributor cannot be saved, if any. */
+  invalidReason: string | undefined;
+  /** Cancel a navigation intent blocked by the dirty guard (the caller is
+   * superseding it with its own navigation). */
+  cancelPendingNavigation: () => void;
+  clearSavedStatus: () => void;
+};
+
+const SettingsSaveCoordinatorContext = createContext<SettingsSaveCoordinator | null>(null);
+
 export function SettingsSaveProvider({
   children,
   placement = "viewport",
@@ -75,10 +92,6 @@ export function SettingsSaveProvider({
     contributors,
     refreshRegistry,
   );
-  const pendingNavigationRef = useRef<NavigationIntent | null>(null);
-  const discardingRef = useRef(false);
-  const [pendingNavigation, setPendingNavigation] = useState<NavigationIntent | null>(null);
-  const [isDiscarding, setIsDiscarding] = useState(false);
   const hasDirty = dirtyContributors.length > 0;
   const invalidReason = dirtyContributors.find(({ contributor }) => contributor.canSave === false)
     ?.contributor.invalidReason;
@@ -89,6 +102,153 @@ export function SettingsSaveProvider({
     const timeout = window.setTimeout(clearSavedStatus, 1500);
     return () => window.clearTimeout(timeout);
   }, [clearSavedStatus, status]);
+
+  const {
+    pendingNavigation,
+    isDiscarding,
+    handleSave,
+    discardDirtyContributors,
+    discardAndLeave,
+    continueEditing,
+  } = useSaveNavigationFlow({ saveAll, contributors, markError, refreshRegistry, hasDirty });
+
+  useSettingsBeforeUnloadGuard(hasDirty);
+
+  return (
+    <SettingsSaveProviderBody
+      registry={registry}
+      coordinator={{
+        saveAll,
+        status,
+        errorKind,
+        hasDirty,
+        invalidReason,
+        cancelPendingNavigation: continueEditing,
+        clearSavedStatus,
+      }}
+      placement={placement}
+      displayStatus={displayStatus}
+      errorKind={errorKind}
+      dirtyContributorIds={dirtyContributors.map(({ contributor }) => contributor.id).join(",")}
+      invalidReason={invalidReason}
+      pendingNavigation={pendingNavigation}
+      isDiscarding={isDiscarding}
+      onSave={handleSave}
+      onReset={discardDirtyContributors}
+      onDiscardAndLeave={discardAndLeave}
+      onContinueEditing={continueEditing}
+    >
+      {children}
+    </SettingsSaveProviderBody>
+  );
+}
+
+type SettingsSaveProviderBodyProps = {
+  registry: Registry;
+  coordinator: SettingsSaveCoordinator;
+  placement: SettingsSavePlacement;
+  displayStatus: SettingsSaveStatus;
+  errorKind: SettingsSaveErrorKind | null;
+  dirtyContributorIds: string;
+  invalidReason: string | undefined;
+  pendingNavigation: NavigationIntent | null;
+  isDiscarding: boolean;
+  onSave: () => Promise<boolean>;
+  onReset: () => Promise<boolean>;
+  onDiscardAndLeave: () => Promise<void>;
+  onContinueEditing: () => void;
+  children: ReactNode;
+};
+
+/**
+ * Renders the provider's context stack (registry + coordinator) around the
+ * page content and the floating save bar/dialog. Extracted to keep
+ * SettingsSaveProvider under the line limit.
+ */
+function SettingsSaveProviderBody({
+  registry,
+  coordinator,
+  placement,
+  displayStatus,
+  errorKind,
+  dirtyContributorIds,
+  invalidReason,
+  pendingNavigation,
+  isDiscarding,
+  onSave,
+  onReset,
+  onDiscardAndLeave,
+  onContinueEditing,
+  children,
+}: SettingsSaveProviderBodyProps) {
+  const hasDirty = coordinator.hasDirty;
+  return (
+    <SettingsSaveRegistryContext.Provider value={registry}>
+      <SettingsSaveCoordinatorContext.Provider value={coordinator}>
+        {children}
+        {(hasDirty || displayStatus === "saved") && (
+          <SettingsFloatingSave
+            status={displayStatus}
+            placement={placement}
+            errorKind={errorKind}
+            dirtyContributorIds={dirtyContributorIds}
+            invalidReason={invalidReason}
+            navigationIntent={pendingNavigation}
+            isDiscarding={isDiscarding}
+            onSave={onSave}
+            onReset={onReset}
+            onDiscardAndLeave={onDiscardAndLeave}
+            onContinueEditing={onContinueEditing}
+          />
+        )}
+      </SettingsSaveCoordinatorContext.Provider>
+    </SettingsSaveRegistryContext.Provider>
+  );
+}
+
+/**
+ * Imperative handle on the shared settings save coordinator: save every dirty
+ * contributor (across pages that register multiple contributors, e.g. the
+ * profile editor and its MCP card) and learn whether the page can be left.
+ * Requires SettingsSaveProvider.
+ */
+export function useSettingsSaveCoordinator(): SettingsSaveCoordinator {
+  const coordinator = useContext(SettingsSaveCoordinatorContext);
+  if (!coordinator) throw new Error("useSettingsSaveCoordinator requires SettingsSaveProvider");
+  return coordinator;
+}
+
+/**
+ * Owns the save/discard/continue actions and the dirty-navigation blocker:
+ * registers the blocker while anything is dirty, saves and settles a pending
+ * navigation intent, or discards the dirty contributors and leaves.
+ */
+function useSaveNavigationFlow({
+  saveAll,
+  contributors,
+  markError,
+  refreshRegistry,
+  hasDirty,
+}: {
+  saveAll: () => Promise<SaveResult>;
+  contributors: Map<string, RegisteredContributor>;
+  markError: (kind: SettingsSaveErrorKind) => void;
+  refreshRegistry: () => void;
+  hasDirty: boolean;
+}) {
+  const pendingNavigationRef = useRef<NavigationIntent | null>(null);
+  const discardingRef = useRef(false);
+  const [pendingNavigation, setPendingNavigation] = useState<NavigationIntent | null>(null);
+  const [isDiscarding, setIsDiscarding] = useState(false);
+
+  useEffect(() => {
+    if (!hasDirty) return;
+    return setNavigationBlocker((intent) => {
+      pendingNavigationRef.current?.cancel();
+      pendingNavigationRef.current = intent;
+      setPendingNavigation(intent);
+    });
+  }, [hasDirty]);
 
   const handleSave = useCallback(async (): Promise<boolean> => {
     const result = await saveAll();
@@ -136,37 +296,14 @@ export function SettingsSaveProvider({
     intent?.cancel();
   }, []);
 
-  useEffect(() => {
-    if (!hasDirty) return;
-    return setNavigationBlocker((intent) => {
-      pendingNavigationRef.current?.cancel();
-      pendingNavigationRef.current = intent;
-      setPendingNavigation(intent);
-    });
-  }, [hasDirty]);
-
-  useSettingsBeforeUnloadGuard(hasDirty);
-
-  return (
-    <SettingsSaveRegistryContext.Provider value={registry}>
-      {children}
-      {(hasDirty || status === "saved") && (
-        <SettingsFloatingSave
-          status={displayStatus}
-          placement={placement}
-          errorKind={errorKind}
-          dirtyContributorIds={dirtyContributors.map(({ contributor }) => contributor.id).join(",")}
-          invalidReason={invalidReason}
-          navigationIntent={pendingNavigation}
-          isDiscarding={isDiscarding}
-          onSave={handleSave}
-          onReset={discardDirtyContributors}
-          onDiscardAndLeave={discardAndLeave}
-          onContinueEditing={continueEditing}
-        />
-      )}
-    </SettingsSaveRegistryContext.Provider>
-  );
+  return {
+    pendingNavigation,
+    isDiscarding,
+    handleSave,
+    discardDirtyContributors,
+    discardAndLeave,
+    continueEditing,
+  };
 }
 
 function useSettingsBeforeUnloadGuard(enabled: boolean) {
@@ -299,11 +436,25 @@ function useSaveCoordinator(
     }
 
     savingRef.current = false;
+    // Revalidate the whole registry before reporting canLeave: a contributor
+    // that became dirty while the saves were in flight (e.g. the MCP card
+    // edited during the profile save) is absent from the submitted snapshot
+    // and would otherwise be skipped while the caller proceeds on stale data.
+    // Compare by id: the registry replaces the contributor object on every
+    // upsert, so an identity check would report submitted contributors as
+    // newly dirty after any re-render and block save-and-leave.
+    const submittedIds = new Set(submitted.map(({ contributor }) => contributor.id));
+    const newlyDirty = getDirtyContributors(contributors).filter(
+      ({ contributor }) => !submittedIds.has(contributor.id),
+    );
     const completionStatus = saveCompletionStatus(failedIds, hasNewerChanges);
     setErrorKind(completionStatus === "error" ? "save" : null);
     setStatus(completionStatus);
     refreshRegistry();
-    return { canLeave: failedIds.size === 0 && !hasNewerChanges, failedIds };
+    return {
+      canLeave: failedIds.size === 0 && !hasNewerChanges && newlyDirty.length === 0,
+      failedIds,
+    };
   }, [contributors, refreshRegistry]);
 
   return { status, errorKind, saveAll, clearSavedStatus, markError };

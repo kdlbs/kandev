@@ -46,6 +46,7 @@ Product-wide capabilities that are not tied to a single feature area.
 | [plugins](plugins/spec.md) | draft |
 | [plugins — authoring experience](plugins/authoring-experience.md) | draft |
 | [plugins — marketplace](plugins/marketplace.md) | building |
+| [plugins — Voice extraction host prerequisites](plugins/voice-extraction-host.md) | draft |
 | [semantic-notifications](platform/notifications.md) | shipped |
 | [workspace-git-status](platform/workspace-git-status.md) | shipped |
 | [git-subprocess-admission](platform/git-subprocess-admission.md) | building |
@@ -99,6 +100,8 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [explicit-completion-signal](workflow/explicit-completion-signal/spec.md) | shipped |
 | [cancelled-turn-completion](workflow/cancelled-turn-completion/spec.md) | building |
 | [conditional-session-settings](workflow-session-settings/spec.md) | approved |
+| [prevent-agent-autostart-on-open](prevent-agent-autostart-on-open/spec.md) | draft |
+| [workflow-duplication](workflow-duplication/spec.md) | draft |
 
 ## agents/ — agent governance
 

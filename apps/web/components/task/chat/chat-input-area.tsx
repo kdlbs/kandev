@@ -425,7 +425,7 @@ function ChatStatusBar({
   return (
     <div
       data-testid="chat-status-bar"
-      className="flex items-center gap-1.5 py-1 text-xs text-muted-foreground"
+      className="flex min-w-0 flex-wrap items-center gap-1.5 py-1 text-xs text-muted-foreground"
     >
       {showTodos && <TodoIndicator todos={todoItems} />}
       {autopilot && <AutopilotChatChip />}

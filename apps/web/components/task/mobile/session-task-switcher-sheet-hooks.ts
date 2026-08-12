@@ -348,6 +348,7 @@ function buildKanbanTaskUpsert(
     id: task.id,
     parentTaskId: task.parent_id ?? undefined,
     workspaceMode: workspaceModeFromMetadata(task.metadata),
+    workflowId: task.workflow_id,
     workflowStepId: task.workflow_step_id,
     title: task.title,
     description: task.description,

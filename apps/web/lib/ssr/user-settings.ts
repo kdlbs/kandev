@@ -41,6 +41,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     chatSubmitKey: "cmd_enter",
     reviewAutoMarkOnScroll: true,
     confirmTaskArchive: true,
+    preventAutoStartAgentOnOpen: false,
     unreadDivider: false,
     agentGeneratedTaskTitles: true,
     mcpTaskAgentProfileDefault: "current_task",
@@ -49,6 +50,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     showScrollToStart: false,
     showTranscriptAutoScrollControl: false,
     showTodoListPanel: false,
+    showTodoListPanelOnlyWhenNotEmpty: false,
     showReleaseNotification: true,
     releaseNotesLastSeenVersion: null,
     lspAutoStartLanguages: [],
@@ -248,6 +250,8 @@ function buildBehaviorFields(s: UserSettingsData, current: UserSettingsState) {
     chatSubmitKey: s.chat_submit_key ?? current.chatSubmitKey,
     reviewAutoMarkOnScroll: s.review_auto_mark_on_scroll ?? current.reviewAutoMarkOnScroll,
     confirmTaskArchive: s.confirm_task_archive ?? current.confirmTaskArchive,
+    preventAutoStartAgentOnOpen:
+      s.prevent_auto_start_agent_on_open ?? current.preventAutoStartAgentOnOpen,
     unreadDivider: s.unread_divider ?? current.unreadDivider,
     agentGeneratedTaskTitles: s.agent_generated_task_titles ?? current.agentGeneratedTaskTitles,
     mcpTaskAgentProfileDefault: mapDefined(
@@ -256,18 +260,25 @@ function buildBehaviorFields(s: UserSettingsData, current: UserSettingsState) {
       parseMCPTaskAgentProfileDefault,
     ),
     startupPage: mapDefined(s.startup_page, current.startupPage, parseStartupPage),
+    keyboardShortcuts: s.keyboard_shortcuts ?? current.keyboardShortcuts,
+  };
+}
+
+function buildAppearanceFields(s: UserSettingsData, current: UserSettingsState) {
+  return {
     showAnchoredPromptBar: s.show_anchored_prompt_bar ?? current.showAnchoredPromptBar,
     showScrollToLastPrompt: s.show_scroll_to_last_prompt ?? current.showScrollToLastPrompt,
     showScrollToStart: s.show_scroll_to_start ?? current.showScrollToStart,
     showTranscriptAutoScrollControl:
       s.show_transcript_auto_scroll_control ?? current.showTranscriptAutoScrollControl,
     showTodoListPanel: s.show_todo_list_panel ?? current.showTodoListPanel,
+    showTodoListPanelOnlyWhenNotEmpty:
+      s.show_todo_list_panel_only_when_not_empty ?? current.showTodoListPanelOnlyWhenNotEmpty,
     showReleaseNotification: s.show_release_notification ?? current.showReleaseNotification,
     releaseNotesLastSeenVersion: mapNullableString(
       s.release_notes_last_seen_version,
       current.releaseNotesLastSeenVersion,
     ),
-    keyboardShortcuts: s.keyboard_shortcuts ?? current.keyboardShortcuts,
   };
 }
 
@@ -279,6 +290,7 @@ export function buildCoreFields(
     revision: s.revision ?? current.revision,
     ...buildIdentityFields(s, current),
     ...buildBehaviorFields(s, current),
+    ...buildAppearanceFields(s, current),
     savedLayouts: s.saved_layouts ?? current.savedLayouts,
     sidebarViews: mapDefined(s.sidebar_views, current.sidebarViews, (views) =>
       views.map(fromApiSidebarView),

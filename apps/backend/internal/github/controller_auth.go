@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/auth/authn"
 )
@@ -140,7 +141,16 @@ func (c *Controller) httpCompleteAppInstallation(ctx *gin.Context) {
 			InstallationID: installationID,
 		})
 	if err != nil {
-		redirectGitHubCallback(ctx, workspaceID, githubAuthErrorCode(err))
+		resultCode := githubAuthErrorCode(err)
+		if c.logger != nil {
+			c.logger.Warn("GitHub App installation callback verification failed",
+				zap.String("registration_id", ctx.Param("registrationId")),
+				zap.String("workspace_id", workspaceID),
+				zap.String("result_code", resultCode),
+				zap.Error(err),
+			)
+		}
+		redirectGitHubCallback(ctx, workspaceID, resultCode)
 		return
 	}
 	redirectGitHubCallback(ctx, result.WorkspaceID, "app_connected")

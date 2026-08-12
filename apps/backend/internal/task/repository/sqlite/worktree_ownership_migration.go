@@ -127,6 +127,7 @@ func (r *Repository) normalizeTaskWorktreeOwnership() error {
 		sessionEnvIDs:             make(map[string]string),
 		sessionWorktreeSuperseded: make(map[string]bool),
 		demotedWorktrees:          make(map[string]bool),
+		demotedFlatEnvironments:   make(map[string]bool),
 		authoritativeWorktreeIDs:  make(map[string]bool),
 		tasks:                     make(map[string]*taskWorktreeTargets),
 		taskEnvIDs:                make(map[string]string),

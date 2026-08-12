@@ -255,6 +255,18 @@ describe("todo list panel websocket sync", () => {
     registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
     expect(store.getState().userSettings.showTodoListPanel).toBe(true);
   });
+
+  it("syncs the not-empty sub-option and preserves it when omitted", () => {
+    const store = makeStore();
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({ show_todo_list_panel_only_when_not_empty: true }),
+    );
+    expect(store.getState().userSettings.showTodoListPanelOnlyWhenNotEmpty).toBe(true);
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
+    expect(store.getState().userSettings.showTodoListPanelOnlyWhenNotEmpty).toBe(true);
+  });
 });
 
 describe("user settings websocket partial updates", () => {

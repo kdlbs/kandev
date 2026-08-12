@@ -199,15 +199,17 @@ copyable settings for that pending import. It is short-lived and single-use.
 1. Start **Add existing App** from the workspace GitHub connection flow. Enter its owner, label,
    visibility, and the public Kandev origin.
 2. Open the App under the owning user's or organization's **Settings > Developer settings > GitHub
-   Apps**, then apply every URL, permission, and event shown by Kandev. Set the App homepage to the
-   public Kandev origin, use JSON webhook delivery with SSL verification, request user
-   authorization during installation, and keep expiring user tokens enabled.
+   Apps**, then apply every URL, permission, and event shown by Kandev. Add the workspace
+   installation callback as the first user authorization callback and the personal identity
+   callback as the second. Set the App homepage to the public Kandev origin, use JSON webhook
+   delivery with SSL verification, request user authorization during installation, leave the setup
+   URL empty, and keep expiring user tokens enabled.
 3. Return before the preparation expires and provide the App ID, OAuth client ID and secret, App
    slug, webhook secret, and an RSA private key generated for that App. Treat every secret field as
    a root credential and never put it in workspace environment variables or executor profiles.
 4. Kandev authenticates as the App, verifies its ID, owner, slug, homepage, permissions, events,
    and webhook settings where GitHub exposes them, then encrypts the credential bundle. You must
-   confirm callback/setup settings that GitHub's API does not expose.
+   confirm callback settings that GitHub's API does not expose.
 5. Select and install the imported registration. Importing alone never replaces the workspace's
    current PAT, CLI account, or App installation.
 
@@ -220,7 +222,7 @@ templates are useful when checking a proxy or GitHub setting:
 | Purpose | URL path |
 |---|---|
 | Manifest creation callback | `/api/v1/github/app/registrations/{registrationId}/manifest/callback` |
-| Workspace installation setup | `/api/v1/github/app/registrations/{registrationId}/install/callback` |
+| Workspace installation OAuth callback | `/api/v1/github/app/registrations/{registrationId}/install/callback` |
 | Personal identity OAuth callback | `/api/v1/github/app/registrations/{registrationId}/personal/callback` |
 | Signed webhook delivery | `/api/v1/github/app/registrations/{registrationId}/webhook` |
 
@@ -244,7 +246,7 @@ For full Kandev behavior, request the smallest applicable repository/organizatio
 | Members | Read | Organization/team membership lookups. |
 | Workflows | Write | Changes under `.github/workflows`; omit when agents must not edit workflow files. |
 
-Subscribe only to `installation`, `installation_repositories`, and `github_app_authorization`. Kandev uses these events to track installation suspension/deletion, repository access changes, and revoked personal authorizations. PR, issue, review, and CI watches continue to poll and do not require their corresponding webhooks. GitHub's [registration guide](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app), [App permission reference](https://docs.github.com/en/rest/authentication/permissions-required-for-github-apps), and [webhook guide](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/using-webhooks-with-github-apps) describe the provider-side settings.
+Subscribe to `push` and `check_run`. GitHub sends `installation`, `installation_repositories`, and `github_app_authorization` lifecycle events automatically; they do not appear as selectable subscriptions. Kandev uses the lifecycle events to track installation suspension/deletion, repository access changes, and revoked personal authorizations. PR, issue, and review watches continue to poll and do not require their corresponding webhooks. GitHub's [registration guide](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app), [App permission reference](https://docs.github.com/en/rest/authentication/permissions-required-for-github-apps), and [webhook guide](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/using-webhooks-with-github-apps) describe the provider-side settings.
 
 To delete a registration, first disconnect every workspace using it and remove personal identities
 issued through it. Kandev blocks deletion while any workspace or personal connection is bound,
@@ -292,7 +294,7 @@ Repository scope, authentication, and watch filters are workspace-specific. Repo
 
 ### Automate a linked pull request
 
-For a task with linked GitHub pull requests, open the PR status control above the task chat input. The automation controls — **Auto-fix CI & address comments**, **Auto-merge when ready**, **Your review is requested**, **PR merged**, and **PR closed without merging** — are scoped to whichever linked PR's tab is selected. Enabling a control for one linked PR does not enable it for the task's other linked PRs; Kandev tracks delivery and deduplication separately for each linked PR. The saved auto-fix prompt override applies to every linked PR.
+For a task with linked GitHub pull requests, open the PR status control above the task chat input. The automation controls, **Auto-fix CI & address comments**, **Auto-merge when ready**, **Your review is requested**, **PR merged**, and **PR closed without merging**, are scoped to whichever linked PR's tab is selected. Enabling a control for one linked PR does not enable it for the task's other linked PRs; Kandev tracks delivery and deduplication separately for each linked PR. The saved auto-fix prompt override applies to every linked PR.
 
 This is a GitHub-only lifecycle feature. Kandev reuses the existing lightweight task PR poller, which checks watched linked PRs roughly once per minute; it does not add a separate scheduler. Saving enabled options also evaluates the task's current linked PRs without waiting for the next poll.
 
@@ -305,7 +307,7 @@ server-owned templates that include only the linked PR's canonical URL; their
 text cannot be customized through the UI, HTTP, MCP, or storage. They report the
 observed event without prescribing an action; the task workflow and agent
 context determine the response. GitLab has the same auto-fix, auto-merge, and
-lifecycle controls — see "Automate a linked merge request" below. Selecting a
+lifecycle controls. See "Automate a linked merge request" below. Selecting a
 destination workflow step for a lifecycle event remains follow-up work for
 both providers.
 
@@ -360,9 +362,9 @@ Kandev reuses the existing lightweight task MR poller, which checks linked MRs r
 
 **Auto-merge when ready** merges the linked MR only when it is open, not a draft, its pipeline is passing, it has no unresolved discussions, and GitLab's own merge-readiness verdict (`detailed_merge_status`, falling back to `merge_status` on older GitLab versions) agrees. An auto-fix dispatch in the same evaluation pass takes priority over an auto-merge attempt in that pass.
 
-**Your review is requested** matches the GitLab account connected to the task's workspace against the MR's current reviewer list — GitLab has no separate "review requested" API event, so appearing as a reviewer is the signal. The first observation is a quiet baseline; only a later false-to-true transition to being a reviewer wakes the agent. Staying assigned across MR updates does not re-fire it; clearing the reviewer assignment and being re-added — for example, for a re-review after changes — rearms the next transition.
+**Your review is requested** matches the GitLab account connected to the task's workspace against the MR's current reviewer list: GitLab has no separate "review requested" API event, so appearing as a reviewer is the signal. The first observation is a quiet baseline; only a later false-to-true transition to being a reviewer wakes the agent. Staying assigned across MR updates does not re-fire it; clearing the reviewer assignment and being re-added (for example, for a re-review after changes) rearms the next transition.
 
-**MR merged** and **MR closed without merging** each notify once when the linked MR enters that terminal state; reopening and re-closing an MR re-arms the notification. Kandev delivers lifecycle notifications to the task's active promptable session, preferring the primary session, and does not interrupt a busy session — it queues the message for delivery when that session is available. Lifecycle messages report only the observed event and the MR's canonical URL and cannot be customized.
+**MR merged** and **MR closed without merging** each notify once when the linked MR enters that terminal state; reopening and re-closing an MR re-arms the notification. Kandev delivers lifecycle notifications to the task's active promptable session, preferring the primary session, and does not interrupt a busy session; it queues the message for delivery when that session is available. Lifecycle messages report only the observed event and the MR's canonical URL and cannot be customized.
 
 For a GitLab Review Watch task with any MR lifecycle prompt enabled, the **Auto** cleanup policy retains the terminal task so lifecycle delivery can finish, matching the GitHub review-watch behavior described above.
 
@@ -468,7 +470,7 @@ Linear polling is also bounded. **Default (Linear order)** reads one page of 50;
 
 Sentry configuration is workspace-specific and supports multiple named instances. This is useful when one Kandev workspace spans different Sentry organizations or self-hosted installations.
 
-Create an instance with a unique name, base URL, and bearer authentication token. The default URL is `https://sentry.io`; replace it for self-hosted Sentry. A URL with no scheme becomes HTTPS. It must be a bare HTTP(S) host root—paths, queries, and fragments are rejected. The UI lists `org:read`, `project:read`, and `event:read` as the required read scopes.
+Create an instance with a unique name, base URL, and bearer authentication token. The default URL is `https://sentry.io`; replace it for self-hosted Sentry. A URL with no scheme becomes HTTPS. It must be a bare HTTP(S) host root, paths, queries, and fragments are rejected. The UI lists `org:read`, `project:read`, and `event:read` as the required read scopes.
 
 On any saved edit, a blank token preserves the existing token, including when the URL changes. The pre-save **Test connection** candidate cannot reuse that stored token after a URL change, so paste the token to test the new URL before saving.
 

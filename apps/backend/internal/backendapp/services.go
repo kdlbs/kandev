@@ -740,13 +740,17 @@ func (a pluginsUtilityAgentAdapter) GetAgentByID(ctx context.Context, id string)
 		return nil, err
 	}
 	profileID := agent.AgentProfileID
-	if profileID == "" && agent.ProfileBindingState == utilitymodels.ProfileBindingInherit && a.userSvc != nil {
+	bindingState := agent.ProfileBindingState
+	if utilitymodels.UsesDefaultProfile(agent) && a.userSvc != nil {
 		profileID, err = a.userSvc.GetDefaultUtilityAgentProfileID(ctx)
 		if err != nil {
 			return nil, err
 		}
+		if profileID != "" {
+			bindingState = utilitymodels.ProfileBindingExplicit
+		}
 	}
-	return &plugins.UtilityAgent{Name: agent.Name, AgentID: agent.AgentID, Model: agent.Model, AgentProfileID: profileID, ProfileBindingState: agent.ProfileBindingState, Enabled: agent.Enabled}, nil
+	return &plugins.UtilityAgent{Name: agent.Name, AgentID: agent.AgentID, Model: agent.Model, AgentProfileID: profileID, ProfileBindingState: bindingState, Enabled: agent.Enabled}, nil
 }
 
 // pluginsTaskWriterAdapter adapts the task service to the plugins package's

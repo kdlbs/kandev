@@ -11,6 +11,7 @@ import {
 } from "@kandev/ui/dialog";
 import { Label } from "@kandev/ui/label";
 import { Textarea } from "@kandev/ui/textarea";
+import AppLink from "@/components/routing/app-link";
 import { Trans, useTranslation } from "react-i18next";
 
 const PR_FEEDBACK_PLACEHOLDER = "{{pr.feedback}}";
@@ -78,13 +79,13 @@ export function CIAutomationPromptDialog({
               >
                 {t("github:insertPrFeedback")}
               </Button>
-              <a
+              <AppLink
                 href="/settings/prompts"
                 className="cursor-pointer text-xs text-primary hover:underline"
                 onClick={(e) => e.stopPropagation()}
               >
                 {t("github:editDefaultPrompt")}
-              </a>
+              </AppLink>
             </div>
           </div>
           <div

@@ -5,7 +5,7 @@ import {
   buildResumeRequest,
   buildRestoreWorkspaceRequest,
 } from "@/lib/services/session-launch-helpers";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import {
   sessionId as toSessionId,
   taskId as toTaskId,
@@ -59,7 +59,7 @@ export type ResumeStateSetter = {
   setResumptionState: (s: ResumptionState) => void;
   setError: (e: string | null) => void;
   setWorktreePath: (p: string | null) => void;
-  setWorktreeBranch: (b: string | null) => void;
+  setWorktreeBranch: (p: string | null) => void;
   setTaskSession: (s: {
     id: SessionId;
     task_id: TaskId;
@@ -68,9 +68,13 @@ export type ResumeStateSetter = {
     updated_at: string;
   }) => void;
   setAgentctlReady?: (sessionId: string) => void;
+  /** Records/clears the resume-skipped marker (prevent-auto-start-on-open). */
+  setResumeSkipped?: (sessionId: string, skipped: boolean) => void;
+  /** Reads the session row live from the store (monotonic hydration guard). */
+  getLiveSession?: (sessionId: string) => SessionLike | null;
 };
 
-type SessionLike = { started_at?: string; updated_at?: string } | null;
+type SessionLike = { started_at?: string; updated_at?: string; state?: string } | null;
 
 /** Apply a successful resume response to local state. */
 function applyResumeResponse(
@@ -229,9 +233,48 @@ type CheckAndResumeParams = {
   session: SessionLike;
   setSessionStatus: (s: SessionStatus) => void;
   setters: ResumeStateSetter;
+  /** True when the prevent-auto-start-on-open preference gates open-time resumes. */
+  preventAutoStart: boolean;
 };
 
-/** Apply session status fields to local state. */
+const TERMINAL_STATES = new Set<TaskSessionState>(["FAILED", "CANCELLED", "COMPLETED"]);
+
+type LiveSessionLike = (SessionLike & { state?: string }) | null;
+
+/**
+ * Monotonic status-hydration guard: a `task.session.status` response must not
+ * downgrade a live STARTING/RUNNING/WAITING_FOR_INPUT session state (a stale
+ * response can race a newer `session.state_changed` WS event and leave the UI
+ * showing a stopped session while the agent runs — WAITING_FOR_INPUT means the
+ * agent is alive and awaiting the next prompt, so an older response claiming
+ * otherwise must not overwrite it), and must not overwrite a live TERMINAL
+ * state (FAILED/CANCELLED/COMPLETED — which determines the recovery
+ * affordances the UI shows) with an older or timestamp-less response. In both
+ * cases the incoming status is accepted only when its timestamp is newer than
+ * the live session's.
+ */
+function shouldApplyStatusState(status: SessionStatus, live: LiveSessionLike): boolean {
+  if (!status.state) return false;
+  const liveState = live?.state;
+  const liveIsProtected =
+    liveState === "STARTING" ||
+    liveState === "RUNNING" ||
+    liveState === "WAITING_FOR_INPUT" ||
+    TERMINAL_STATES.has(liveState as TaskSessionState);
+  if (!liveIsProtected) return true;
+  const liveUpdated = live?.updated_at ? Date.parse(live.updated_at) : Number.NaN;
+  const incomingUpdated = status.updated_at ? Date.parse(status.updated_at) : Number.NaN;
+  return (
+    Number.isFinite(liveUpdated) &&
+    Number.isFinite(incomingUpdated) &&
+    incomingUpdated > liveUpdated
+  );
+}
+
+/**
+ * Apply session status fields to local state (guarded by
+ * `shouldApplyStatusState` against stale downgrades).
+ */
 function applyStatusToState(
   status: SessionStatus,
   taskId: string,
@@ -241,15 +284,18 @@ function applyStatusToState(
 ): void {
   setters.setWorktreePath(status.worktree_path ?? null);
   setters.setWorktreeBranch(status.worktree_branch ?? null);
-  if (status.state) {
-    setters.setTaskSession({
-      id: toSessionId(sessionId),
-      task_id: toTaskId(taskId),
-      state: status.state as TaskSessionState,
-      started_at: session?.started_at ?? "",
-      updated_at: status.updated_at ?? session?.updated_at ?? "",
-    });
+  if (!status.state) return;
+  const live = setters.getLiveSession?.(sessionId) ?? session;
+  if (!shouldApplyStatusState(status, live)) {
+    return; // stale or non-terminal status must not downgrade a running session
   }
+  setters.setTaskSession({
+    id: toSessionId(sessionId),
+    task_id: toTaskId(taskId),
+    state: status.state as TaskSessionState,
+    started_at: session?.started_at ?? "",
+    updated_at: status.updated_at ?? session?.updated_at ?? "",
+  });
 }
 
 type RefreshSessionStatusParams = {
@@ -276,11 +322,39 @@ async function refreshSessionStatus({
     });
     setSessionStatus(status);
     applyStatusToState(status, taskId, sessionId, session, setters);
+    // A status response confirming the agent is running must clear any
+    // stale resume-skipped marker (a delayed response can otherwise leave
+    // a Start button beside a running agent).
+    if (status.is_agent_running || status.state === "RUNNING") {
+      setters.setResumeSkipped?.(sessionId, false);
+    }
     if (status.is_agent_running && setters.setAgentctlReady) {
       setters.setAgentctlReady(sessionId);
     }
   } catch (err) {
     console.error("[refreshSessionStatus] failed to refresh session status", { sessionId, err });
+  }
+}
+
+type ResumeAction = "running" | "skip" | "resume" | "restore" | "idle";
+
+function decideResumeAction(status: SessionStatus, preventAutoStart: boolean): ResumeAction {
+  if (status.is_agent_running) return "running";
+  if (preventAutoStart && status.needs_resume && status.is_resumable) return "skip";
+  if (status.needs_resume && status.is_resumable) return "resume";
+  if (status.needs_workspace_restore) return "restore";
+  return "idle";
+}
+
+/**
+ * Record the resume-skipped marker only while the live session row is not
+ * STARTING/RUNNING (checked here with typed live-store access so a stale
+ * status can never leave a Start button beside a running agent).
+ */
+function recordResumeSkipIfStopped(setters: ResumeStateSetter, sessionId: string): void {
+  const liveState = setters.getLiveSession?.(sessionId)?.state;
+  if (liveState !== "STARTING" && liveState !== "RUNNING") {
+    setters.setResumeSkipped?.(sessionId, true);
   }
 }
 
@@ -290,6 +364,7 @@ async function checkAndResume({
   session,
   setSessionStatus,
   setters,
+  preventAutoStart,
 }: CheckAndResumeParams): Promise<void> {
   const client = getWebSocketClient();
   if (!client) return;
@@ -313,20 +388,36 @@ async function checkAndResume({
       setters.setAgentctlReady(sessionId);
     }
     let resumed = false;
-    if (status.is_agent_running) {
-      setters.setResumptionState("running");
-    } else if (status.needs_resume && status.is_resumable) {
-      resumed = await resumeWithSilentFallback(taskId, sessionId, session, setters);
-    } else if (status.needs_workspace_restore) {
-      resumed = await resumeViaLaunch(
-        taskId,
-        sessionId,
-        session,
-        setters,
-        buildRestoreWorkspaceRequest,
-      );
-    } else {
-      setters.setResumptionState("idle");
+    switch (decideResumeAction(status, preventAutoStart)) {
+      case "running":
+        setters.setResumptionState("running");
+        // A status response confirming the agent is running clears any stale
+        // resume-skipped marker (the WS RUNNING transition may have been
+        // missed, or the marker predates this page load).
+        setters.setResumeSkipped?.(sessionId, false);
+        break;
+      case "skip":
+        // The preference gates the open-time auto-resume: leave the session
+        // stopped and record the skip so the Start agent button renders.
+        // The record is guarded against a live STARTING/RUNNING row (a stale
+        // status can race a running WS transition).
+        recordResumeSkipIfStopped(setters, sessionId);
+        setters.setResumptionState("idle");
+        break;
+      case "resume":
+        resumed = await resumeWithSilentFallback(taskId, sessionId, session, setters);
+        break;
+      case "restore":
+        resumed = await resumeViaLaunch(
+          taskId,
+          sessionId,
+          session,
+          setters,
+          buildRestoreWorkspaceRequest,
+        );
+        break;
+      default:
+        setters.setResumptionState("idle");
     }
     if (resumed) {
       await refreshSessionStatus({ client, taskId, sessionId, session, setSessionStatus, setters });
@@ -356,14 +447,24 @@ type SessionResetAndCheckResult = {
   sessionStatus: SessionStatus | null;
 };
 
+type ResetAndCheckParams = {
+  taskId: string | null;
+  sessionId: string | null;
+  connectionStatus: string;
+  session: SessionLike;
+  setters: ResumeStateSetter;
+  preventAutoStart: boolean;
+};
+
 /** Extracted effects: reset state on session/task change, auto-check/resume, and remote retry. */
-function useSessionResetAndCheck(
-  taskId: string | null,
-  sessionId: string | null,
-  connectionStatus: string,
-  session: { started_at?: string; updated_at?: string } | null,
-  setters: ResumeStateSetter,
-): SessionResetAndCheckResult {
+function useSessionResetAndCheck({
+  taskId,
+  sessionId,
+  connectionStatus,
+  session,
+  setters,
+  preventAutoStart,
+}: ResetAndCheckParams): SessionResetAndCheckResult {
   const [sessionStatusState, setSessionStatus] = useState<{
     id: string | null;
     status: SessionStatus | null;
@@ -396,12 +497,13 @@ function useSessionResetAndCheck(
       taskId,
       sessionId,
       session,
+      preventAutoStart,
       setSessionStatus: (s) => {
         if (activeSessionRef.current === sessionId) setSessionStatus({ id: sessionId, status: s });
       },
       setters: guardedSetters,
     });
-  }, [taskId, sessionId, connectionStatus, session]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [taskId, sessionId, connectionStatus, session, preventAutoStart]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Freshly created remote sessions may return status before runtime metadata is available.
   // Retry a few times so topbar/tooltips can show remote details without manual refresh.
@@ -453,6 +555,19 @@ function buildGuardedSetters(
     setWorktreeBranch: (b) => {
       if (guard()) setters.setWorktreeBranch(b);
     },
+    // The remaining setters write store state keyed by session id, but a
+    // stale async callback completing after navigation can still touch the
+    // previous session's row (e.g. re-mark it resume-skipped or overwrite its
+    // status). Guard them all so a switched-away session is never mutated.
+    setTaskSession: (s) => {
+      if (guard()) setters.setTaskSession(s);
+    },
+    setAgentctlReady: (sid) => {
+      if (guard()) setters.setAgentctlReady?.(sid);
+    },
+    setResumeSkipped: (sid, skipped) => {
+      if (guard()) setters.setResumeSkipped?.(sid, skipped);
+    },
   };
 }
 
@@ -465,11 +580,16 @@ export function useSessionResumption(
   const [worktreePath, setWorktreePath] = useState<string | null>(null);
   const [worktreeBranch, setWorktreeBranch] = useState<string | null>(null);
   const connectionStatus = useAppStore((state) => state.connection.status);
+  const preventAutoStartAgentOnOpen = useAppStore(
+    (state) => state.userSettings.preventAutoStartAgentOnOpen,
+  );
   const session = useAppStore((state) =>
     sessionId ? (state.taskSessions.items[sessionId] ?? null) : null,
   );
   const setTaskSession = useAppStore((state) => state.setTaskSession);
   const setSessionAgentctlStatus = useAppStore((state) => state.setSessionAgentctlStatus);
+  const setResumeSkipped = useAppStore((state) => state.setResumeSkipped);
+  const storeApi = useAppStoreApi();
 
   const setters: ResumeStateSetter = {
     setResumptionState,
@@ -478,15 +598,18 @@ export function useSessionResumption(
     setWorktreeBranch,
     setTaskSession,
     setAgentctlReady: (sid: string) => setSessionAgentctlStatus(sid, { status: "ready" }),
+    setResumeSkipped,
+    getLiveSession: (sid: string) => storeApi.getState().taskSessions.items[sid] ?? null,
   };
 
-  const { sessionStatus } = useSessionResetAndCheck(
+  const { sessionStatus } = useSessionResetAndCheck({
     taskId,
     sessionId,
     connectionStatus,
     session,
     setters,
-  );
+    preventAutoStart: preventAutoStartAgentOnOpen,
+  });
 
   // Manual resume function
   const resumeSession = useCallback(async (): Promise<boolean> => {
@@ -507,6 +630,14 @@ export function useSessionResumption(
             updated_at: session?.updated_at ?? "",
           });
         }
+        // A successful resume commonly returns state STARTING (launch
+        // accepted, not agent running). Only confirmed RUNNING clears the
+        // resume-skipped marker; a STARTING response keeps it so the Start
+        // button stays until the WS RUNNING transition (or a later status)
+        // confirms the agent. Failed resumes keep it as a retry affordance.
+        if (response.state === "RUNNING") {
+          setResumeSkipped(sessionId, false);
+        }
         if (response.worktree_path) setWorktreePath(response.worktree_path);
         if (response.worktree_branch) setWorktreeBranch(response.worktree_branch);
         return true;
@@ -519,7 +650,15 @@ export function useSessionResumption(
       setError(err instanceof Error ? err.message : "Unknown error");
       return false;
     }
-  }, [taskId, sessionId, session, setTaskSession, setWorktreePath, setWorktreeBranch]);
+  }, [
+    taskId,
+    sessionId,
+    session,
+    setTaskSession,
+    setWorktreePath,
+    setWorktreeBranch,
+    setResumeSkipped,
+  ]);
 
   return {
     resumptionState,

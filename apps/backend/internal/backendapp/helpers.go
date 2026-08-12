@@ -334,19 +334,24 @@ func tryGetLiveGitStatus(ctx context.Context, lifecycleMgr *lifecycle.Manager, s
 // stores it under byEnvironmentRepo[envKey][repository_name].
 func buildGitStatusNotification(sessionID, repositoryName string, status client.GitStatusResult) *ws.Message {
 	statusPayload := map[string]interface{}{
-		"branch":           status.Branch,
-		"remote_branch":    status.RemoteBranch,
-		"ahead":            status.Ahead,
-		"behind":           status.Behind,
-		"files":            status.Files,
-		"modified":         status.Modified,
-		"added":            status.Added,
-		"deleted":          status.Deleted,
-		"untracked":        status.Untracked,
-		"renamed":          status.Renamed,
-		"branch_additions": status.BranchAdditions,
-		"branch_deletions": status.BranchDeletions,
-		"is_submodule":     status.IsSubmodule,
+		"branch":             status.Branch,
+		"remote_branch":      status.RemoteBranch,
+		"head_commit":        status.HeadCommit,
+		"base_commit":        status.BaseCommit,
+		"ahead":              status.Ahead,
+		"behind":             status.Behind,
+		"remote_ahead":       status.RemoteAhead,
+		"remote_behind":      status.RemoteBehind,
+		"remote_head_commit": status.RemoteHeadCommit,
+		"files":              status.Files,
+		"modified":           status.Modified,
+		"added":              status.Added,
+		"deleted":            status.Deleted,
+		"untracked":          status.Untracked,
+		"renamed":            status.Renamed,
+		"branch_additions":   status.BranchAdditions,
+		"branch_deletions":   status.BranchDeletions,
+		"is_submodule":       status.IsSubmodule,
 	}
 	if repositoryName != "" {
 		statusPayload["repository_name"] = repositoryName

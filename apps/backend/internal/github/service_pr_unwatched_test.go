@@ -169,9 +169,19 @@ func TestRefreshStaleWorkspaceWatches_HealsUnwatchedRow(t *testing.T) {
 	// hands it to the background goroutine; the join it uses needs the real
 	// tasks schema, so drive the goroutine directly.
 	svc.refreshStaleWorkspaceWatches(testWorkspaceID, map[string]struct{}{"task-1": {}})
-	awaitTaskPRUpdated(t, updated)
-	// Drain the goroutine before the in-memory DB closes. Stop() cancels
-	// stopCtx, so it has to come after the write we just observed.
+	unwatchedUpdate := awaitTaskPRUpdated(t, updated)
+	if unwatchedUpdate.PRNumber != 1293 {
+		t.Fatalf("first background update PR = %d, want unwatched PR 1293", unwatchedUpdate.PRNumber)
+	}
+	// The same goroutine updates the watched PR after the unwatched row. Wait
+	// for that write too: canceling it via Stop can make sqlite discard the
+	// sole :memory: connection and leave the final assertion without a schema.
+	watchedUpdate := awaitTaskPRUpdated(t, updated)
+	if watchedUpdate.PRNumber != 1299 {
+		t.Fatalf("second background update PR = %d, want watched PR 1299", watchedUpdate.PRNumber)
+	}
+	// Drain the goroutine before the in-memory DB closes. Both observable writes
+	// have completed, so Stop has no database operation left to cancel.
 	svc.Stop()
 
 	got, err := store.GetTaskPRByRepoAndNumber(ctx, "task-1", "repo-1", 1293)

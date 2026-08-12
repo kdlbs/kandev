@@ -108,19 +108,16 @@ workflows are not usable end to end.
   switches — `Auto-fix CI and address comments` and `Auto-merge when ready` —
   above a collapsible `Review follow-up` group holding the three lifecycle
   notification switches (`Your review is requested`, `MR merged`, `MR closed
-  without merging`) introduced for MR lifecycle notifications. All five
-  switches are scoped per linked MR (mirroring the GitHub PR automation
-  redesign in [ADR-0051](../../decisions/0051-pr-agent-notifications-extend-task-pr-automation.md)'s
-  Consequences section): enabling a switch on one linked MR does not affect
-  any other linked MR's switches, and a `PATCH`/MCP update that omits MR
-  identity fans out to every linked MR, preserving prior agent behavior.
-  Auto-fix and auto-merge additionally track per-MR round/attempt state. The
-  auto-fix prompt override remains task-level. Tracked in the "Scope GitLab
-  MR automation switches per MR" follow-up task. See "Automation (lifecycle,
+  without merging`) introduced for MR lifecycle notifications. These switches
+  currently use task-level settings, so changing one linked MR's control also
+  affects the task's other linked MRs. Per-MR switch scoping, including
+  per-MR round/attempt state and identity-aware `PATCH`/MCP updates, is tracked
+  in the "Scope GitLab MR automation switches per MR" follow-up task. The
+  auto-fix prompt override remains task-level. See "Automation (lifecycle,
   auto-fix, auto-merge)" below.
 - `Auto-fix CI and address comments` sends or queues an agent prompt when a
   linked MR's pipeline has a new or changed failing job, or a new or changed
-  unresolved discussion note, capped at 10 accepted rounds per task/MR.
+  unresolved discussion note, capped at 10 accepted rounds per task.
   `Auto-merge when ready` merges a linked MR only when it is open, not a
   draft, its pipeline succeeded, it has zero unresolved discussions, and
   GitLab's own merge-readiness verdict agrees.

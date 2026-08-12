@@ -37,3 +37,30 @@ func TestWsRecoverSessionCancelRetryReportsServiceResult(t *testing.T) {
 	require.NoError(t, json.Unmarshal(response.Payload, &payload))
 	require.False(t, payload.Cancelled)
 }
+
+func TestWsEnsureSessionRequestParsesAutoStartOverride(t *testing.T) {
+	tests := []struct {
+		name      string
+		payload   map[string]interface{}
+		wantSet   bool
+		wantValue bool
+	}{
+		{name: "absent auto_start stays nil", payload: map[string]interface{}{"task_id": "t1"}, wantSet: false},
+		{name: "auto_start false parses", payload: map[string]interface{}{"task_id": "t1", "auto_start": false}, wantSet: true, wantValue: false},
+		{name: "auto_start true parses", payload: map[string]interface{}{"task_id": "t1", "auto_start": true}, wantSet: true, wantValue: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := createTestMessage(t, ws.ActionSessionEnsure, tt.payload)
+			var req wsEnsureSessionRequest
+			require.NoError(t, msg.ParsePayload(&req))
+			if tt.wantSet {
+				require.NotNil(t, req.AutoStart, "auto_start should be set")
+				require.Equal(t, tt.wantValue, *req.AutoStart)
+			} else {
+				require.Nil(t, req.AutoStart, "auto_start should be absent")
+			}
+		})
+	}
+}

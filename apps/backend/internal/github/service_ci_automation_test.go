@@ -118,6 +118,65 @@ func TestServiceTaskCIOptionsResponseOmitsLifecyclePromptOverrides(t *testing.T)
 	}
 }
 
+func TestServiceTaskCIOptionsResponseAdvancesVersionForPRState(t *testing.T) {
+	store := newTestStore(t)
+	svc := NewService(&stubClient{}, "pat", nil, store, nil, testLogger(t))
+	ctx := context.Background()
+	enabled := true
+
+	if _, err := store.UpdateTaskCIOptions(ctx, "task-1", TaskCIOptionsPatch{
+		AutoFixEnabled: &enabled,
+	}); err != nil {
+		t.Fatalf("enable auto-fix: %v", err)
+	}
+	before, err := svc.GetTaskCIOptionsResponse(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("get initial options response: %v", err)
+	}
+	if err := store.RecordTaskCIFixAttempt(ctx, TaskCIFixAttempt{
+		TaskID: "task-1", RepositoryID: "repo-1", PRNumber: 42, IncrementRound: true,
+	}); err != nil {
+		t.Fatalf("record auto-fix attempt: %v", err)
+	}
+	afterRound, err := svc.GetTaskCIOptionsResponse(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("get auto-fix round response: %v", err)
+	}
+
+	if !afterRound.UpdatedAt.After(before.UpdatedAt) {
+		t.Fatalf("response version did not advance after auto-fix round: before=%s after=%s", before.UpdatedAt, afterRound.UpdatedAt)
+	}
+	if len(afterRound.PRStates) != 1 || afterRound.PRStates[0].AutoFixRoundCount != 1 {
+		t.Fatalf("PR state = %+v, want one incremented auto-fix round", afterRound.PRStates)
+	}
+	if err := store.RecordTaskCIError(ctx, "task-1", "repo-1", 42, "tests failed"); err != nil {
+		t.Fatalf("record CI error: %v", err)
+	}
+	afterError, err := svc.GetTaskCIOptionsResponse(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("get CI error response: %v", err)
+	}
+	if !afterError.UpdatedAt.After(afterRound.UpdatedAt) {
+		t.Fatalf("response version did not advance after CI error: before=%s after=%s", afterRound.UpdatedAt, afterError.UpdatedAt)
+	}
+	if afterError.PRStates[0].LastError == nil || *afterError.PRStates[0].LastError != "tests failed" {
+		t.Fatalf("last error = %v, want tests failed", afterError.PRStates[0].LastError)
+	}
+	if err := store.MarkTaskCIAutoFixExhausted(ctx, "task-1", "repo-1", 42, "round limit reached"); err != nil {
+		t.Fatalf("mark auto-fix exhausted: %v", err)
+	}
+	afterExhaustion, err := svc.GetTaskCIOptionsResponse(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("get auto-fix exhaustion response: %v", err)
+	}
+	if !afterExhaustion.UpdatedAt.After(afterError.UpdatedAt) {
+		t.Fatalf("response version did not advance after auto-fix exhaustion: before=%s after=%s", afterError.UpdatedAt, afterExhaustion.UpdatedAt)
+	}
+	if afterExhaustion.PRStates[0].AutoFixExhaustedAt == nil {
+		t.Fatal("auto-fix exhaustion timestamp is nil")
+	}
+}
+
 func TestServiceTaskCIPRStatesMergesStoredAndCurrentPRs(t *testing.T) {
 	store := newTestStore(t)
 	svc := NewService(&stubClient{}, "pat", nil, store, nil, testLogger(t))
@@ -170,6 +229,54 @@ func TestServiceTaskCIPRStatesMergesStoredAndCurrentPRs(t *testing.T) {
 	}
 	if got := byKey[taskCIPRStateKey("repo-old", 9)]; got == nil || got.LastError == nil || *got.LastError != "old state" {
 		t.Fatalf("orphan state=%+v, want retained stored state", got)
+	}
+}
+
+func TestServiceTaskCIOptionsExcludeDetachedPRAutomation(t *testing.T) {
+	store := newTestStore(t)
+	svc := NewService(&stubClient{}, "pat", nil, store, nil, testLogger(t))
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	active := &TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget",
+		PRNumber: 1, State: "open", CreatedAt: now,
+	}
+	detached := &TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget",
+		PRNumber: 2, State: "open", CreatedAt: now.Add(time.Second),
+	}
+	for _, pr := range []*TaskPR{active, detached} {
+		if err := store.CreateTaskPR(ctx, pr); err != nil {
+			t.Fatalf("create PR #%d: %v", pr.PRNumber, err)
+		}
+	}
+	if _, transitioned, err := store.DetachTaskPR(ctx, detached.ID); err != nil || !transitioned {
+		t.Fatalf("detach PR #%d: transitioned=%v err=%v", detached.PRNumber, transitioned, err)
+	}
+
+	enabled := true
+	if _, err := store.UpdateTaskPRAutomationOptions(ctx, "task-1", "repo-1", detached.PRNumber,
+		TaskPRAutomationOptionsPatch{PromptOnMerged: &enabled}, false); err != nil {
+		t.Fatalf("enable detached PR automation: %v", err)
+	}
+
+	response, err := svc.GetTaskCIOptionsResponse(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("get task CI options: %v", err)
+	}
+	if len(response.PROptions) != 1 || response.PROptions[0].PRNumber != active.PRNumber {
+		t.Fatalf("PR options = %+v, want only active PR #%d", response.PROptions, active.PRNumber)
+	}
+	if response.AutoFixEnabled || response.AutoMergeEnabled || response.PromptOnMerged {
+		t.Fatalf("detached automation affected task aggregate: %+v", response)
+	}
+	hasEnabled, err := svc.HasEnabledTaskPRAgentPrompts(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("check enabled lifecycle prompts: %v", err)
+	}
+	if hasEnabled {
+		t.Fatal("detached lifecycle automation kept the task eligible for PR automation")
 	}
 }
 

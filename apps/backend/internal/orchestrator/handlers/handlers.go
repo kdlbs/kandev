@@ -60,6 +60,7 @@ func (h *Handlers) wsGetStatus(ctx context.Context, msg *ws.Message) (*ws.Messag
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
 
+// wsGetQueue returns the queue of tasks waiting for an agent.
 func (h *Handlers) wsGetQueue(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	queuedTasks := h.service.GetQueuedTasks()
 	tasks := make([]dto.QueuedTaskDTO, 0, len(queuedTasks))
@@ -77,6 +78,7 @@ func (h *Handlers) wsGetQueue(ctx context.Context, msg *ws.Message) (*ws.Message
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
 
+// wsLaunchSession starts or resumes a task's agent session.
 func (h *Handlers) wsLaunchSession(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req orchestrator.LaunchSessionRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -109,9 +111,11 @@ func (h *Handlers) wsLaunchSession(ctx context.Context, msg *ws.Message) (*ws.Me
 }
 
 type wsEnsureSessionRequest struct {
-	TaskID string `json:"task_id"`
+	TaskID    string `json:"task_id"`
+	AutoStart *bool  `json:"auto_start,omitempty"`
 }
 
+// wsEnsureSession ensures a task has a session, honoring the auto_start override.
 func (h *Handlers) wsEnsureSession(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req wsEnsureSessionRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -121,7 +125,7 @@ func (h *Handlers) wsEnsureSession(ctx context.Context, msg *ws.Message) (*ws.Me
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
 
-	resp, err := h.service.EnsureSession(ctx, req.TaskID)
+	resp, err := h.service.EnsureSession(ctx, req.TaskID, orchestrator.EnsureSessionOptions{AutoStart: req.AutoStart})
 	if err != nil {
 		h.logger.Error("failed to ensure session",
 			zap.String("task_id", req.TaskID),
@@ -141,6 +145,7 @@ type wsResetContextRequest struct {
 	SessionID string `json:"session_id"`
 }
 
+// wsResetContext clears the session's agent context window.
 func (h *Handlers) wsResetContext(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req wsResetContextRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -167,6 +172,7 @@ type wsSetPlanModeRequest struct {
 	Enabled   bool   `json:"enabled"`
 }
 
+// wsSetPlanMode toggles plan mode for a session.
 func (h *Handlers) wsSetPlanMode(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req wsSetPlanModeRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -196,6 +202,7 @@ type wsRecoverSessionRequest struct {
 	Action    string `json:"action"` // "resume", "fresh_start", or "cancel_retry"
 }
 
+// wsRecoverSession recovers a session by id (resume or fresh start).
 func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req wsRecoverSessionRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -237,6 +244,7 @@ type wsStopTaskRequest struct {
 	Force  bool   `json:"force,omitempty"`
 }
 
+// wsStopTask stops the agent running for a task.
 func (h *Handlers) wsStopTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req wsStopTaskRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -268,6 +276,7 @@ type wsPermissionRespondRequest struct {
 	Rejected bool `json:"rejected,omitempty"`
 }
 
+// wsRespondToPermission forwards the user's permission decision.
 func (h *Handlers) wsRespondToPermission(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req wsPermissionRespondRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -330,6 +339,7 @@ func (h *Handlers) wsCheckSessionAssociation(
 	return ws.NewResponse(msg.ID, msg.Action, map[string]bool{"found": found})
 }
 
+// wsCheckSessionPR refreshes the PR association for a session.
 func (h *Handlers) wsCheckSessionPR(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req wsCheckSessionAssociationRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -338,6 +348,7 @@ func (h *Handlers) wsCheckSessionPR(ctx context.Context, msg *ws.Message) (*ws.M
 	return h.wsCheckSessionAssociation(ctx, msg, req, h.service.CheckSessionPR, "session PR")
 }
 
+// wsCheckSessionMR refreshes the MR association for a session.
 func (h *Handlers) wsCheckSessionMR(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req wsCheckSessionAssociationRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -351,6 +362,7 @@ type wsGetTaskSessionStatusRequest struct {
 	TaskSessionID string `json:"session_id"`
 }
 
+// wsGetTaskSessionStatus returns a task session's detailed status.
 func (h *Handlers) wsGetTaskSessionStatus(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req wsGetTaskSessionStatusRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -382,6 +394,7 @@ type wsSessionActionRequest struct {
 	Force     bool   `json:"force,omitempty"`
 }
 
+// parseSessionAction parses a session-scoped action request, returning an error message on failure.
 func (h *Handlers) parseSessionAction(msg *ws.Message) (*wsSessionActionRequest, *ws.Message) {
 	var req wsSessionActionRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -395,6 +408,7 @@ func (h *Handlers) parseSessionAction(msg *ws.Message) (*wsSessionActionRequest,
 	return &req, nil
 }
 
+// wsStopSession stops a session's agent.
 func (h *Handlers) wsStopSession(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	req, errResp := h.parseSessionAction(msg)
 	if errResp != nil {
@@ -411,6 +425,7 @@ func (h *Handlers) wsStopSession(ctx context.Context, msg *ws.Message) (*ws.Mess
 	return ws.NewResponse(msg.ID, msg.Action, dto.SuccessResponse{Success: true})
 }
 
+// wsDeleteSession deletes a session.
 func (h *Handlers) wsDeleteSession(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	req, errResp := h.parseSessionAction(msg)
 	if errResp != nil {
@@ -423,6 +438,7 @@ func (h *Handlers) wsDeleteSession(ctx context.Context, msg *ws.Message) (*ws.Me
 	return ws.NewResponse(msg.ID, msg.Action, dto.SuccessResponse{Success: true})
 }
 
+// wsSetPrimarySession marks a session as the task's primary session.
 func (h *Handlers) wsSetPrimarySession(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	req, errResp := h.parseSessionAction(msg)
 	if errResp != nil {
@@ -440,6 +456,7 @@ type wsRenameSessionRequest struct {
 	Name      string `json:"name"`
 }
 
+// wsRenameSession renames a session.
 func (h *Handlers) wsRenameSession(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req wsRenameSessionRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -459,6 +476,7 @@ type wsCancelAgentRequest struct {
 	SessionID string `json:"session_id"`
 }
 
+// wsCancelAgent cancels the in-flight agent turn.
 func (h *Handlers) wsCancelAgent(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req wsCancelAgentRequest
 	if err := msg.ParsePayload(&req); err != nil {

@@ -665,7 +665,7 @@ func (s *Store) fanOutTaskCIOptionsToPRScope(
 		)
 		SELECT task_id, repository_id, pr_number, ?, ?, ?, ?, ?, ?, ?
 		FROM github_task_prs
-		WHERE task_id = ?
+		WHERE task_id = ? AND detached_at IS NULL
 		ON CONFLICT(task_id, repository_id, pr_number) DO NOTHING`,
 		autoFix, autoMerge, promptReview, promptMerged, promptClosed, now, now, taskID); err != nil {
 		return fmt.Errorf("fan out task CI options for %s: %w", taskID, err)
@@ -1706,6 +1706,23 @@ func (s *Store) ListTaskPRsByTask(ctx context.Context, taskID string) ([]*TaskPR
 	return out, nil
 }
 
+// ListTaskPRsByTaskIncludingDetached returns every PR association for a task,
+// including detached tombstones. Callers that expose active task surfaces
+// should use ListTaskPRsByTask; this variant is for cleanup of state keyed by
+// an association that may have been detached.
+func (s *Store) ListTaskPRsByTaskIncludingDetached(ctx context.Context, taskID string) ([]*TaskPR, error) {
+	var prs []TaskPR
+	if err := s.ro.SelectContext(ctx, &prs,
+		`SELECT `+taskPRColumns+` FROM github_task_prs WHERE task_id = ? ORDER BY created_at ASC`, taskID); err != nil {
+		return nil, err
+	}
+	out := make([]*TaskPR, 0, len(prs))
+	for i := range prs {
+		out = append(out, &prs[i])
+	}
+	return out, nil
+}
+
 // DetachTaskPR marks an association as removed from active task surfaces while
 // retaining the row so automatic PR discovery cannot silently resurrect it.
 // The bool return reports whether this call performed the transition.
@@ -1929,42 +1946,233 @@ func (s *Store) GetTaskCIOptions(ctx context.Context, taskID string) (*TaskCIOpt
 	return &opts, err
 }
 
-// UpdateTaskCIOptions applies a partial update to the task-level CI
-// automation fields (AutoFixPromptOverride, ReviewReviewerLogin). The five
-// automation switches are per-PR — see UpdateTaskPRAutomationOptions.
+// advanceTaskCIOptionsVersion advances the version carried by the complete CI
+// automation payload. It creates disabled defaults for state-first tasks so a
+// later WebSocket update can always be ordered against an earlier payload.
+func (s *Store) advanceTaskCIOptionsVersion(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	taskID string,
+	candidate time.Time,
+) (time.Time, error) {
+	candidate = candidate.UTC()
+	var current time.Time
+	err := tx.GetContext(ctx, &current, `SELECT updated_at FROM github_task_ci_options WHERE task_id = ?`, taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO github_task_ci_options (
+				task_id, auto_fix_enabled, auto_merge_enabled, auto_fix_prompt_override, created_at, updated_at
+			) VALUES (?, 0, 0, NULL, ?, ?)`,
+			taskID, candidate, candidate); err != nil {
+			return time.Time{}, err
+		}
+		return candidate, nil
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	version := candidate
+	if !version.After(current) {
+		version = current.Add(time.Nanosecond)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE github_task_ci_options SET updated_at = ? WHERE task_id = ?`, version, taskID); err != nil {
+		return time.Time{}, err
+	}
+	return version, nil
+}
+
+func (s *Store) mutateTaskCIPRState(
+	ctx context.Context,
+	taskID string,
+	mutate func(context.Context, *sqlx.Tx, time.Time) error,
+) error {
+	writeCtx := context.WithoutCancel(ctx)
+	tx, err := s.db.BeginTxx(writeCtx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	version, err := s.advanceTaskCIOptionsVersion(writeCtx, tx, taskID, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	if err := mutate(writeCtx, tx, version); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// UpdateTaskCIOptions applies a partial update to task CI automation options.
 func (s *Store) UpdateTaskCIOptions(ctx context.Context, taskID string, patch TaskCIOptionsPatch) (*TaskCIOptions, error) {
 	writeCtx := context.WithoutCancel(ctx)
-	now := time.Now().UTC()
 	tx, err := s.db.BeginTxx(writeCtx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(writeCtx, `
-		INSERT INTO github_task_ci_options (
-			task_id, auto_fix_enabled, auto_merge_enabled, auto_fix_prompt_override, created_at, updated_at
-		) VALUES (?, 0, 0, NULL, ?, ?)
-		ON CONFLICT(task_id) DO NOTHING`,
-		taskID, now, now); err != nil {
-		return nil, err
-	}
-	promptSet := patch.AutoFixPromptOverride != nil
-	promptValue := normalizedPromptOverride(patch.AutoFixPromptOverride)
-	reviewerLoginSet := patch.ReviewReviewerLogin != nil
-	if _, err := tx.ExecContext(writeCtx, `
-		UPDATE github_task_ci_options SET
-			auto_fix_prompt_override = CASE WHEN ? THEN ? ELSE auto_fix_prompt_override END,
-			review_reviewer_login = CASE WHEN ? THEN ? ELSE review_reviewer_login END,
-			updated_at = ?
-		WHERE task_id = ?`,
-		promptSet, promptValue, reviewerLoginSet, normalizedString(patch.ReviewReviewerLogin),
-		now, taskID); err != nil {
+	if err := s.updateTaskCIOptionsTx(writeCtx, tx, taskID, patch); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return s.GetTaskCIOptions(writeCtx, taskID)
+}
+
+// UpdateTaskCIOptionsWithPRAutomation applies a task update and all selected
+// per-PR switch updates in one transaction. The service resolves and
+// validates targets before calling this method, so a rejected identity cannot
+// leave task-level fields or a subset of fan-out rows persisted.
+func (s *Store) UpdateTaskCIOptionsWithPRAutomation(
+	ctx context.Context,
+	taskID string,
+	patch TaskCIOptionsPatch,
+	targets []*TaskPR,
+	prPatch TaskPRAutomationOptionsPatch,
+	reviewerChanged bool,
+) (*TaskCIOptions, error) {
+	writeCtx := context.WithoutCancel(ctx)
+	tx, err := s.db.BeginTxx(writeCtx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := s.updateTaskCIOptionsTx(writeCtx, tx, taskID, patch); err != nil {
+		return nil, err
+	}
+	for _, target := range targets {
+		if target == nil {
+			continue
+		}
+		if err := s.updateTaskPRAutomationOptionsTx(
+			writeCtx, tx, taskID, target.RepositoryID, target.PRNumber, prPatch, reviewerChanged,
+		); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return s.GetTaskCIOptions(writeCtx, taskID)
+}
+
+func (s *Store) updateTaskCIOptionsTx(
+	ctx context.Context, tx *sqlx.Tx, taskID string, patch TaskCIOptionsPatch,
+) error {
+	now := time.Now().UTC()
+	version, err := s.advanceTaskCIOptionsVersion(ctx, tx, taskID, now)
+	if err != nil {
+		return err
+	}
+	var previous TaskCIOptions
+	if err := tx.GetContext(ctx, &previous, `SELECT * FROM github_task_ci_options WHERE task_id = ?`, taskID); err != nil {
+		return err
+	}
+	autoFixSet, autoFixValue := boolPatchValue(patch.AutoFixEnabled)
+	autoMergeSet, autoMergeValue := boolPatchValue(patch.AutoMergeEnabled)
+	reviewSet, reviewValue := boolPatchValue(patch.PromptOnReviewRequested)
+	mergedSet, mergedValue := boolPatchValue(patch.PromptOnMerged)
+	closedSet, closedValue := boolPatchValue(patch.PromptOnClosed)
+	promptSet := patch.AutoFixPromptOverride != nil
+	promptValue := normalizedPromptOverride(patch.AutoFixPromptOverride)
+	reviewerLoginSet := patch.ReviewReviewerLogin != nil
+	reviewerChanged := reviewerLoginSet && !strings.EqualFold(
+		previous.ReviewReviewerLogin, normalizedString(patch.ReviewReviewerLogin),
+	)
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE github_task_ci_options SET
+			auto_fix_enabled = CASE WHEN ? THEN ? ELSE auto_fix_enabled END,
+			auto_merge_enabled = CASE WHEN ? THEN ? ELSE auto_merge_enabled END,
+			auto_fix_prompt_override = CASE WHEN ? THEN ? ELSE auto_fix_prompt_override END,
+			prompt_on_review_requested = CASE WHEN ? THEN ? ELSE prompt_on_review_requested END,
+			prompt_on_merged = CASE WHEN ? THEN ? ELSE prompt_on_merged END,
+			prompt_on_closed = CASE WHEN ? THEN ? ELSE prompt_on_closed END,
+			review_reviewer_login = CASE WHEN ? THEN ? ELSE review_reviewer_login END,
+			updated_at = ?
+		WHERE task_id = ?`,
+		autoFixSet, autoFixValue, autoMergeSet, autoMergeValue, promptSet, promptValue,
+		reviewSet, reviewValue, mergedSet, mergedValue, closedSet, closedValue,
+		reviewerLoginSet, normalizedString(patch.ReviewReviewerLogin),
+		version, taskID); err != nil {
+		return err
+	}
+	return applyTaskCIOptionResets(ctx, tx, taskID, version, previous, patch, reviewerChanged)
+}
+
+func applyTaskCIOptionResets(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	taskID string,
+	now time.Time,
+	previous TaskCIOptions,
+	patch TaskCIOptionsPatch,
+	reviewerChanged bool,
+) error {
+	if shouldResetAutoFix(patch.AutoFixEnabled, previous.AutoFixEnabled) {
+		if err := resetTaskCIAutoFixStateForTask(ctx, tx, taskID, now); err != nil {
+			return err
+		}
+	}
+	if shouldResetReviewRequests(
+		patch.PromptOnReviewRequested, previous.PromptOnReviewRequested, reviewerChanged,
+	) {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE github_task_ci_pr_state
+			SET review_request_initialized = 0, last_review_requested = 0, updated_at = ?
+			WHERE task_id = ?`, now, taskID); err != nil {
+			return err
+		}
+	}
+	if shouldResetTerminalPrompt(patch.PromptOnMerged, previous.PromptOnMerged) {
+		if err := resetTaskCITerminalCheckpointForTask(ctx, tx, taskID, "merged", now); err != nil {
+			return err
+		}
+	}
+	if shouldResetTerminalPrompt(patch.PromptOnClosed, previous.PromptOnClosed) {
+		return resetTaskCITerminalCheckpointForTask(ctx, tx, taskID, "closed", now)
+	}
+	return nil
+}
+
+func resetTaskCIAutoFixStateForTask(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	taskID string,
+	now time.Time,
+) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE github_task_ci_pr_state
+		SET auto_fix_round_count = 0,
+		    last_fix_signature = '',
+		    last_fix_checkpoint_json = '',
+		    last_fix_enqueued_at = NULL,
+		    last_fix_session_id = NULL,
+		    last_error = CASE WHEN auto_fix_exhausted_at IS NOT NULL THEN NULL ELSE last_error END,
+		    auto_fix_exhausted_at = NULL,
+		    updated_at = ?
+		WHERE task_id = ?`, now, taskID)
+	return err
+}
+
+func resetTaskCITerminalCheckpointForTask(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	taskID, state string,
+	now time.Time,
+) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE github_task_ci_pr_state
+		SET last_observed_pr_state = '',
+		    last_lifecycle_event = '',
+		    last_lifecycle_prompt_at = NULL,
+		    last_lifecycle_session_id = NULL,
+		    updated_at = ?
+		WHERE task_id = ? AND (last_observed_pr_state = ? OR last_lifecycle_event = ?)`,
+		now, taskID, state, state)
+	return err
 }
 
 // GetTaskPRAutomationOptions returns one PR's automation switches, or disabled defaults.
@@ -2012,33 +2220,52 @@ func (s *Store) UpdateTaskPRAutomationOptions(
 	patch TaskPRAutomationOptionsPatch, reviewerChanged bool,
 ) (*TaskPRAutomationOptions, error) {
 	writeCtx := context.WithoutCancel(ctx)
-	now := time.Now().UTC()
 	tx, err := s.db.BeginTxx(writeCtx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(writeCtx, `
+	if err := s.updateTaskPRAutomationOptionsTx(
+		writeCtx, tx, taskID, repositoryID, prNumber, patch, reviewerChanged,
+	); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return s.GetTaskPRAutomationOptions(writeCtx, taskID, repositoryID, prNumber)
+}
+
+func (s *Store) updateTaskPRAutomationOptionsTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	taskID, repositoryID string,
+	prNumber int,
+	patch TaskPRAutomationOptionsPatch,
+	reviewerChanged bool,
+) error {
+	now := time.Now().UTC()
+	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO github_task_pr_automation_options (
 			task_id, repository_id, pr_number, auto_fix_enabled, auto_merge_enabled,
 			prompt_on_review_requested, prompt_on_merged, prompt_on_closed, created_at, updated_at
 		) VALUES (?, ?, ?, 0, 0, 0, 0, 0, ?, ?)
 		ON CONFLICT(task_id, repository_id, pr_number) DO NOTHING`,
 		taskID, repositoryID, prNumber, now, now); err != nil {
-		return nil, err
+		return err
 	}
 	var previous TaskPRAutomationOptions
-	if err := tx.GetContext(writeCtx, &previous,
+	if err := tx.GetContext(ctx, &previous,
 		`SELECT * FROM github_task_pr_automation_options WHERE task_id = ? AND repository_id = ? AND pr_number = ?`,
 		taskID, repositoryID, prNumber); err != nil {
-		return nil, err
+		return err
 	}
 	autoFixSet, autoFixValue := boolPatchValue(patch.AutoFixEnabled)
 	autoMergeSet, autoMergeValue := boolPatchValue(patch.AutoMergeEnabled)
 	reviewSet, reviewValue := boolPatchValue(patch.PromptOnReviewRequested)
 	mergedSet, mergedValue := boolPatchValue(patch.PromptOnMerged)
 	closedSet, closedValue := boolPatchValue(patch.PromptOnClosed)
-	if _, err := tx.ExecContext(writeCtx, `
+	if _, err := tx.ExecContext(ctx, `
 		UPDATE github_task_pr_automation_options SET
 			auto_fix_enabled = CASE WHEN ? THEN ? ELSE auto_fix_enabled END,
 			auto_merge_enabled = CASE WHEN ? THEN ? ELSE auto_merge_enabled END,
@@ -2050,17 +2277,14 @@ func (s *Store) UpdateTaskPRAutomationOptions(
 		autoFixSet, autoFixValue, autoMergeSet, autoMergeValue,
 		reviewSet, reviewValue, mergedSet, mergedValue, closedSet, closedValue,
 		now, taskID, repositoryID, prNumber); err != nil {
-		return nil, err
+		return err
 	}
 	if err := applyTaskPRAutomationOptionResets(
-		writeCtx, tx, taskID, repositoryID, prNumber, now, previous, patch, reviewerChanged,
+		ctx, tx, taskID, repositoryID, prNumber, now, previous, patch, reviewerChanged,
 	); err != nil {
-		return nil, err
+		return err
 	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return s.GetTaskPRAutomationOptions(writeCtx, taskID, repositoryID, prNumber)
+	return nil
 }
 
 func applyTaskPRAutomationOptionResets(
@@ -2164,22 +2388,25 @@ func (s *Store) RebindTaskPRReviewer(ctx context.Context, taskID, login string) 
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var current string
-	err = tx.GetContext(ctx, &current, `SELECT review_reviewer_login FROM github_task_ci_options WHERE task_id = ?`, taskID)
+	var current TaskCIOptions
+	err = tx.GetContext(ctx, &current, `SELECT * FROM github_task_ci_options WHERE task_id = ?`, taskID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	if strings.EqualFold(current, login) {
+	if strings.EqualFold(current.ReviewReviewerLogin, login) {
 		return false, tx.Commit()
 	}
-	now := time.Now().UTC()
-	if _, err := tx.ExecContext(ctx, `UPDATE github_task_ci_options SET review_reviewer_login = ?, updated_at = ? WHERE task_id = ?`, login, now, taskID); err != nil {
+	version, err := s.advanceTaskCIOptionsVersion(ctx, tx, taskID, time.Now().UTC())
+	if err != nil {
 		return false, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE github_task_ci_pr_state SET review_request_initialized = 0, last_review_requested = 0, updated_at = ? WHERE task_id = ?`, now, taskID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE github_task_ci_options SET review_reviewer_login = ?, updated_at = ? WHERE task_id = ?`, login, version, taskID); err != nil {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE github_task_ci_pr_state SET review_request_initialized = 0, last_review_requested = 0, updated_at = ? WHERE task_id = ?`, version, taskID); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -2218,189 +2445,190 @@ func (s *Store) GetTaskCIPRState(ctx context.Context, taskID, repositoryID strin
 
 // RecordTaskCIFixAttempt records the feedback checkpoint that produced an auto-fix prompt.
 func (s *Store) RecordTaskCIFixAttempt(ctx context.Context, attempt TaskCIFixAttempt) error {
-	ctx = context.WithoutCancel(ctx)
 	when := attempt.EnqueuedAt
 	if when.IsZero() {
 		when = time.Now().UTC()
 	}
-	now := time.Now().UTC()
 	roundCount := 0
 	if attempt.IncrementRound {
 		roundCount = 1
 	}
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO github_task_ci_pr_state (
-			task_id, repository_id, pr_number, last_fix_signature, last_fix_checkpoint_json,
-			last_fix_enqueued_at, last_fix_session_id, auto_fix_round_count, auto_fix_exhausted_at,
-			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
-		ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
-			last_fix_signature = excluded.last_fix_signature,
-			last_fix_checkpoint_json = excluded.last_fix_checkpoint_json,
-			last_fix_enqueued_at = excluded.last_fix_enqueued_at,
-			last_fix_session_id = excluded.last_fix_session_id,
-			auto_fix_round_count = github_task_ci_pr_state.auto_fix_round_count + excluded.auto_fix_round_count,
-			last_error = NULL,
-			updated_at = excluded.updated_at`,
-		attempt.TaskID, attempt.RepositoryID, attempt.PRNumber, attempt.Signature,
-		attempt.CheckpointJSON, when, nullableString(attempt.SessionID), roundCount, now, now)
-	return err
+	return s.mutateTaskCIPRState(ctx, attempt.TaskID, func(ctx context.Context, tx *sqlx.Tx, now time.Time) error {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO github_task_ci_pr_state (
+				task_id, repository_id, pr_number, last_fix_signature, last_fix_checkpoint_json,
+				last_fix_enqueued_at, last_fix_session_id, auto_fix_round_count, auto_fix_exhausted_at,
+				created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+			ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
+				last_fix_signature = excluded.last_fix_signature,
+				last_fix_checkpoint_json = excluded.last_fix_checkpoint_json,
+				last_fix_enqueued_at = excluded.last_fix_enqueued_at,
+				last_fix_session_id = excluded.last_fix_session_id,
+				auto_fix_round_count = github_task_ci_pr_state.auto_fix_round_count + excluded.auto_fix_round_count,
+				last_error = NULL,
+				updated_at = excluded.updated_at`,
+			attempt.TaskID, attempt.RepositoryID, attempt.PRNumber, attempt.Signature,
+			attempt.CheckpointJSON, when, nullableString(attempt.SessionID), roundCount, now, now)
+		return err
+	})
 }
 
 // RefreshTaskCIFixCheckpoint updates the current feedback checkpoint without recording a new prompt dispatch.
 func (s *Store) RefreshTaskCIFixCheckpoint(ctx context.Context, taskID, repositoryID string, prNumber int, signature, checkpointJSON string) error {
-	ctx = context.WithoutCancel(ctx)
-	now := time.Now().UTC()
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO github_task_ci_pr_state (
-			task_id, repository_id, pr_number, last_fix_signature, last_fix_checkpoint_json, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
-			last_fix_signature = excluded.last_fix_signature,
-			last_fix_checkpoint_json = excluded.last_fix_checkpoint_json,
-			last_fix_enqueued_at = NULL,
-			last_fix_session_id = NULL,
-			last_error = NULL,
-			updated_at = excluded.updated_at`,
-		taskID, repositoryID, prNumber, signature, checkpointJSON, now, now)
-	return err
+	return s.mutateTaskCIPRState(ctx, taskID, func(ctx context.Context, tx *sqlx.Tx, now time.Time) error {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO github_task_ci_pr_state (
+				task_id, repository_id, pr_number, last_fix_signature, last_fix_checkpoint_json, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
+				last_fix_signature = excluded.last_fix_signature,
+				last_fix_checkpoint_json = excluded.last_fix_checkpoint_json,
+				last_fix_enqueued_at = NULL,
+				last_fix_session_id = NULL,
+				last_error = NULL,
+				updated_at = excluded.updated_at`,
+			taskID, repositoryID, prNumber, signature, checkpointJSON, now, now)
+		return err
+	})
 }
 
 // RecordTaskCIMergeAttempt records an auto-merge attempt signature.
 func (s *Store) RecordTaskCIMergeAttempt(ctx context.Context, attempt TaskCIMergeAttempt) error {
-	ctx = context.WithoutCancel(ctx)
 	when := attempt.AttemptedAt
 	if when.IsZero() {
 		when = time.Now().UTC()
 	}
-	now := time.Now().UTC()
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO github_task_ci_pr_state (
-			task_id, repository_id, pr_number, last_merge_signature, last_merge_attempt_at, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
-			last_merge_signature = excluded.last_merge_signature,
-			last_merge_attempt_at = excluded.last_merge_attempt_at,
-			last_error = NULL,
-			updated_at = excluded.updated_at`,
-		attempt.TaskID, attempt.RepositoryID, attempt.PRNumber, attempt.Signature, when, now, now)
-	return err
+	return s.mutateTaskCIPRState(ctx, attempt.TaskID, func(ctx context.Context, tx *sqlx.Tx, now time.Time) error {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO github_task_ci_pr_state (
+				task_id, repository_id, pr_number, last_merge_signature, last_merge_attempt_at, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
+				last_merge_signature = excluded.last_merge_signature,
+				last_merge_attempt_at = excluded.last_merge_attempt_at,
+				last_error = NULL,
+				updated_at = excluded.updated_at`,
+			attempt.TaskID, attempt.RepositoryID, attempt.PRNumber, attempt.Signature, when, now, now)
+		return err
+	})
 }
 
 // RecordTaskCIError stores the latest user-visible CI automation error for a task PR.
 func (s *Store) RecordTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int, message string) error {
-	ctx = context.WithoutCancel(ctx)
-	now := time.Now().UTC()
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO github_task_ci_pr_state (
-			task_id, repository_id, pr_number, last_error, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
-			last_error = excluded.last_error,
-			updated_at = excluded.updated_at`,
-		taskID, repositoryID, prNumber, strings.TrimSpace(message), now, now)
-	return err
+	return s.mutateTaskCIPRState(ctx, taskID, func(ctx context.Context, tx *sqlx.Tx, now time.Time) error {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO github_task_ci_pr_state (
+				task_id, repository_id, pr_number, last_error, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?)
+			ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
+				last_error = excluded.last_error,
+				updated_at = excluded.updated_at`,
+			taskID, repositoryID, prNumber, strings.TrimSpace(message), now, now)
+		return err
+	})
 }
 
 // MarkTaskCIAutoFixExhausted records that auto-fix reached its per-PR round cap.
 func (s *Store) MarkTaskCIAutoFixExhausted(ctx context.Context, taskID, repositoryID string, prNumber int, message string) error {
-	ctx = context.WithoutCancel(ctx)
-	now := time.Now().UTC()
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO github_task_ci_pr_state (
-			task_id, repository_id, pr_number, auto_fix_exhausted_at, last_error, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
-			auto_fix_exhausted_at = excluded.auto_fix_exhausted_at,
-			last_error = excluded.last_error,
-			updated_at = excluded.updated_at`,
-		taskID, repositoryID, prNumber, now, strings.TrimSpace(message), now, now)
-	return err
+	return s.mutateTaskCIPRState(ctx, taskID, func(ctx context.Context, tx *sqlx.Tx, now time.Time) error {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO github_task_ci_pr_state (
+				task_id, repository_id, pr_number, auto_fix_exhausted_at, last_error, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
+				auto_fix_exhausted_at = excluded.auto_fix_exhausted_at,
+				last_error = excluded.last_error,
+				updated_at = excluded.updated_at`,
+			taskID, repositoryID, prNumber, now, strings.TrimSpace(message), now, now)
+		return err
+	})
 }
 
 // ClearTaskCIError clears the latest CI automation error for a task PR.
 func (s *Store) ClearTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int) error {
-	ctx = context.WithoutCancel(ctx)
-	_, err := s.db.ExecContext(ctx, `
-		UPDATE github_task_ci_pr_state SET last_error = NULL, updated_at = ?
-		WHERE task_id = ? AND repository_id = ? AND pr_number = ?`,
-		time.Now().UTC(), taskID, repositoryID, prNumber)
-	return err
+	return s.mutateTaskCIPRState(ctx, taskID, func(ctx context.Context, tx *sqlx.Tx, now time.Time) error {
+		_, err := tx.ExecContext(ctx, `
+			UPDATE github_task_ci_pr_state SET last_error = NULL, updated_at = ?
+			WHERE task_id = ? AND repository_id = ? AND pr_number = ?`,
+			now, taskID, repositoryID, prNumber)
+		return err
+	})
 }
 
 // SetTaskPRReviewRequestState records a complete reviewer-request observation.
 func (s *Store) SetTaskPRReviewRequestState(
 	ctx context.Context, taskID, repositoryID string, prNumber int, requested bool,
 ) error {
-	ctx = context.WithoutCancel(ctx)
-	now := time.Now().UTC()
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO github_task_ci_pr_state (
-			task_id, repository_id, pr_number, review_request_initialized,
-			last_review_requested, created_at, updated_at
-		) VALUES (?, ?, ?, 1, ?, ?, ?)
-		ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
-			review_request_initialized = 1,
-			last_review_requested = excluded.last_review_requested,
-			updated_at = excluded.updated_at`,
-		taskID, repositoryID, prNumber, requested, now, now)
-	return err
+	return s.mutateTaskCIPRState(ctx, taskID, func(ctx context.Context, tx *sqlx.Tx, now time.Time) error {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO github_task_ci_pr_state (
+				task_id, repository_id, pr_number, review_request_initialized,
+				last_review_requested, created_at, updated_at
+			) VALUES (?, ?, ?, 1, ?, ?, ?)
+			ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
+				review_request_initialized = 1,
+				last_review_requested = excluded.last_review_requested,
+				updated_at = excluded.updated_at`,
+			taskID, repositoryID, prNumber, requested, now, now)
+		return err
+	})
 }
 
 // SetTaskPRObservedState records the current PR state used to detect terminal entry.
 func (s *Store) SetTaskPRObservedState(
 	ctx context.Context, taskID, repositoryID string, prNumber int, state string,
 ) error {
-	ctx = context.WithoutCancel(ctx)
-	now := time.Now().UTC()
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO github_task_ci_pr_state (
-			task_id, repository_id, pr_number, last_observed_pr_state, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
-			last_observed_pr_state = excluded.last_observed_pr_state,
-			last_lifecycle_event = CASE
-				WHEN excluded.last_observed_pr_state IN ('merged', 'closed')
-				THEN github_task_ci_pr_state.last_lifecycle_event
-				ELSE '' END,
-			updated_at = excluded.updated_at`,
-		taskID, repositoryID, prNumber, state, now, now)
-	return err
+	return s.mutateTaskCIPRState(ctx, taskID, func(ctx context.Context, tx *sqlx.Tx, now time.Time) error {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO github_task_ci_pr_state (
+				task_id, repository_id, pr_number, last_observed_pr_state, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?)
+			ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
+				last_observed_pr_state = excluded.last_observed_pr_state,
+				last_lifecycle_event = CASE
+					WHEN excluded.last_observed_pr_state IN ('merged', 'closed')
+					THEN github_task_ci_pr_state.last_lifecycle_event
+					ELSE '' END,
+				updated_at = excluded.updated_at`,
+			taskID, repositoryID, prNumber, state, now, now)
+		return err
+	})
 }
 
 // RecordTaskPRLifecyclePrompt stamps an accepted or durably queued lifecycle prompt.
 func (s *Store) RecordTaskPRLifecyclePrompt(ctx context.Context, prompt TaskPRLifecyclePrompt) error {
-	ctx = context.WithoutCancel(ctx)
 	when := prompt.PromptedAt
 	if when.IsZero() {
 		when = time.Now().UTC()
 	}
-	now := time.Now().UTC()
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO github_task_ci_pr_state (
-			task_id, repository_id, pr_number, review_request_initialized,
-			last_review_requested, last_observed_pr_state, last_lifecycle_event,
-			last_lifecycle_prompt_at, last_lifecycle_session_id, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
-			review_request_initialized = CASE
-				WHEN excluded.last_lifecycle_event = 'review_requested' THEN 1
-				ELSE github_task_ci_pr_state.review_request_initialized END,
-			last_review_requested = CASE
-				WHEN excluded.last_lifecycle_event = 'review_requested' THEN excluded.last_review_requested
-				ELSE github_task_ci_pr_state.last_review_requested END,
-			last_observed_pr_state = CASE
-				WHEN excluded.last_observed_pr_state <> '' THEN excluded.last_observed_pr_state
-				ELSE github_task_ci_pr_state.last_observed_pr_state END,
-			last_lifecycle_event = excluded.last_lifecycle_event,
-			last_lifecycle_prompt_at = excluded.last_lifecycle_prompt_at,
-			last_lifecycle_session_id = excluded.last_lifecycle_session_id,
-			last_error = NULL,
-			updated_at = excluded.updated_at`,
-		prompt.TaskID, prompt.RepositoryID, prompt.PRNumber,
-		prompt.Event == "review_requested", prompt.ReviewRequested,
-		prompt.ObservedState, prompt.Event, when, nullableString(prompt.SessionID), now, now)
-	return err
+	return s.mutateTaskCIPRState(ctx, prompt.TaskID, func(ctx context.Context, tx *sqlx.Tx, now time.Time) error {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO github_task_ci_pr_state (
+				task_id, repository_id, pr_number, review_request_initialized,
+				last_review_requested, last_observed_pr_state, last_lifecycle_event,
+				last_lifecycle_prompt_at, last_lifecycle_session_id, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
+				review_request_initialized = CASE
+					WHEN excluded.last_lifecycle_event = 'review_requested' THEN 1
+					ELSE github_task_ci_pr_state.review_request_initialized END,
+				last_review_requested = CASE
+					WHEN excluded.last_lifecycle_event = 'review_requested' THEN excluded.last_review_requested
+					ELSE github_task_ci_pr_state.last_review_requested END,
+				last_observed_pr_state = CASE
+					WHEN excluded.last_observed_pr_state <> '' THEN excluded.last_observed_pr_state
+					ELSE github_task_ci_pr_state.last_observed_pr_state END,
+				last_lifecycle_event = excluded.last_lifecycle_event,
+				last_lifecycle_prompt_at = excluded.last_lifecycle_prompt_at,
+				last_lifecycle_session_id = excluded.last_lifecycle_session_id,
+				last_error = NULL,
+				updated_at = excluded.updated_at`,
+			prompt.TaskID, prompt.RepositoryID, prompt.PRNumber,
+			prompt.Event == "review_requested", prompt.ReviewRequested,
+			prompt.ObservedState, prompt.Event, when, nullableString(prompt.SessionID), now, now)
+		return err
+	})
 }
 
 func nullableString(value string) *string {

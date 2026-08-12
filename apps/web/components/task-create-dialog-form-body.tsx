@@ -377,7 +377,7 @@ export type DialogPromptSectionProps = {
    */
   autoFocusDescription?: boolean;
   /** Called after a non-empty voice transcript is inserted and auto-send is on. */
-  onVoiceAutoSend?: () => void;
+  onVoiceAutoSend?: () => boolean | Promise<boolean>;
 };
 
 // importBindings collapses the optional Jira/Linear import callbacks into the

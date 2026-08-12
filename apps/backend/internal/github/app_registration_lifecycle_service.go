@@ -116,7 +116,7 @@ type AppRegistrationImportPreparationResult struct {
 	InstallCallbackURL  string            `json:"install_callback_url"`
 	PersonalCallbackURL string            `json:"personal_callback_url"`
 	WebhookURL          string            `json:"webhook_url"`
-	SetupURL            string            `json:"setup_url"`
+	SetupURL            string            `json:"setup_url"` // legacy field; empty with OAuth-on-install
 	Permissions         map[string]string `json:"permissions"`
 	Events              []string          `json:"events"`
 	ExpiresAt           time.Time         `json:"expires_at"`
@@ -253,14 +253,14 @@ func (s *AppRegistrationLifecycleService) StartManifest(
 	if err := s.store.CreateDeploymentAppRegistrationFlow(ctx, flow); err != nil {
 		return AppRegistrationManifestStart{}, fmt.Errorf("persist GitHub App manifest state: %w", err)
 	}
-	callback, err := url.Parse(submission.Manifest.RedirectURL)
+	registrationURL, err := url.Parse(submission.RegistrationURL)
 	if err != nil {
-		return AppRegistrationManifestStart{}, errors.New("build GitHub App manifest callback")
+		return AppRegistrationManifestStart{}, errors.New("build GitHub App registration URL")
 	}
-	query := callback.Query()
+	query := registrationURL.Query()
 	query.Set("state", state)
-	callback.RawQuery = query.Encode()
-	submission.Manifest.RedirectURL = callback.String()
+	registrationURL.RawQuery = query.Encode()
+	submission.RegistrationURL = registrationURL.String()
 	return AppRegistrationManifestStart{
 		RegistrationID: registrationID, WorkspaceID: request.WorkspaceID,
 		State: state, ExpiresAt: flow.ExpiresAt, Revision: submission.Revision,
@@ -341,7 +341,7 @@ func (s *AppRegistrationLifecycleService) consumeManifestFlow(
 		}
 		return nil, fmt.Errorf("consume GitHub App manifest state: %w", err)
 	}
-	if flow == nil || flow.RegistrationID != registrationID || flow.UserID != DefaultUserID ||
+	if flow == nil || flow.RegistrationID != registrationID || strings.TrimSpace(flow.UserID) == "" ||
 		flow.ManifestRevision != DeploymentAppManifestRevision {
 		return nil, ErrDeploymentAppManifestStateUnavailable
 	}
@@ -452,7 +452,7 @@ func (s *AppRegistrationLifecycleService) PrepareImport(
 		ManifestCallbackURL: registrationBaseURL + "/manifest/callback",
 		InstallCallbackURL:  installCallbackURL,
 		PersonalCallbackURL: registrationBaseURL + "/personal/callback",
-		WebhookURL:          registrationBaseURL + "/webhook", SetupURL: installCallbackURL,
+		WebhookURL:          registrationBaseURL + "/webhook", SetupURL: "",
 		Permissions: policy.Manifest.DefaultPermissions, Events: policy.Manifest.DefaultEvents,
 		ExpiresAt: preparation.ExpiresAt,
 	}, nil

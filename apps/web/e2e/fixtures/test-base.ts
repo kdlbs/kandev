@@ -215,6 +215,10 @@ export const test = backendFixture.extend<
       kanban_view_mode: "",
       // Keep startup routing deterministic for tests that open bare home.
       startup_page: "task_overview",
+      // Reset to the default (off). Prevent-auto-start tests flip this via
+      // saveUserSettings; without this reset it would leak into unrelated
+      // tests running later in the same worker.
+      prevent_auto_start_agent_on_open: false,
       // Reset to the default (off). Anchored-bar tests flip this via
       // saveUserSettings; without this reset it would leak into unrelated
       // tests running later in the same worker.

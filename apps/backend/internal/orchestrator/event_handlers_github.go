@@ -226,6 +226,9 @@ func (s *Service) handleTaskCIOptionsUpdated(ctx context.Context, event *bus.Eve
 // hand without per-PR data), matching resolvePRScopedCIOptions's same
 // graceful-degradation pattern rather than silently swallowing the event.
 func anyTaskPRAutomationEnabled(options *github.TaskCIOptionsResponse) bool {
+	if options == nil {
+		return false
+	}
 	if len(options.PROptions) == 0 {
 		return options.AutoFixEnabled || options.AutoMergeEnabled ||
 			options.PromptOnReviewRequested || options.PromptOnMerged || options.PromptOnClosed

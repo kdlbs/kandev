@@ -17,11 +17,19 @@ func (s *Service) GetTaskCIOptionsResponse(ctx context.Context, taskID string) (
 	if s.store == nil {
 		return nil, errStoreUnavailable
 	}
+	workspaceID, err := s.resolveAuthorizedTaskWorkspace(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
 	opts, err := s.store.GetTaskCIOptions(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
-	return s.buildTaskCIOptionsResponse(ctx, opts)
+	response, err := s.buildTaskCIOptionsResponse(ctx, opts)
+	if response != nil {
+		response.WorkspaceID = workspaceID
+	}
+	return response, err
 }
 
 // UpdateTaskCIOptions updates task CI automation options and returns the
@@ -34,8 +42,20 @@ func (s *Service) UpdateTaskCIOptions(ctx context.Context, taskID string, patch 
 	if s.store == nil {
 		return nil, errStoreUnavailable
 	}
+	workspaceID, err := s.resolveAuthorizedTaskWorkspace(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
 	if (patch.RepositoryID == nil) != (patch.PRNumber == nil) {
 		return nil, errTaskPRIdentityIncomplete
+	}
+	prPatch := patch.PRAutomationPatch()
+	var targets []*TaskPR
+	if patch.RepositoryID != nil || prPatch.HasAny() {
+		targets, err = s.resolveTaskPRAutomationTargets(ctx, taskID, patch.RepositoryID, patch.PRNumber)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if err := s.populateReviewReviewer(ctx, taskID, &patch); err != nil {
 		return nil, err
@@ -44,16 +64,51 @@ func (s *Service) UpdateTaskCIOptions(ctx context.Context, taskID string, patch 
 	if err != nil {
 		return nil, err
 	}
-	opts, err := s.store.UpdateTaskCIOptions(ctx, taskID, patch)
+	var opts *TaskCIOptions
+	if prPatch.HasAny() {
+		opts, err = s.store.UpdateTaskCIOptionsWithPRAutomation(
+			ctx, taskID, patch, targets, prPatch, reviewerChanged,
+		)
+	} else {
+		opts, err = s.store.UpdateTaskCIOptions(ctx, taskID, patch)
+	}
 	if err != nil {
 		return nil, err
 	}
-	if prPatch := patch.PRAutomationPatch(); prPatch.HasAny() {
-		if err := s.applyTaskPRAutomationPatch(ctx, taskID, patch, prPatch, reviewerChanged); err != nil {
-			return nil, err
-		}
+	response, err := s.buildTaskCIOptionsResponse(ctx, opts)
+	if response != nil {
+		response.WorkspaceID = workspaceID
 	}
-	return s.buildTaskCIOptionsResponse(ctx, opts)
+	return response, err
+}
+
+// resolveAuthorizedTaskWorkspace resolves ownership through the task service
+// before any user-facing CI-option read or mutation. Unit tests and legacy
+// auth-disabled embeddings without a task store retain their unscoped path;
+// an installed authorizer without the resolver fails closed.
+func (s *Service) resolveAuthorizedTaskWorkspace(ctx context.Context, taskID string) (string, error) {
+	taskStore := s.getTaskIssueStore()
+	if taskStore == nil {
+		if s.workspaceAuthorizer != nil {
+			return "", errStoreUnavailable
+		}
+		return "", nil
+	}
+	task, err := taskStore.GetTask(ctx, taskID)
+	if err != nil {
+		return "", err
+	}
+	if task == nil {
+		return "", ErrTaskNotFound
+	}
+	workspaceID := strings.TrimSpace(task.WorkspaceID)
+	if workspaceID == "" {
+		return "", ErrGitHubWorkspaceRequired
+	}
+	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
+		return "", err
+	}
+	return workspaceID, nil
 }
 
 // taskPRReviewerChanged compares the newly resolved task-level reviewer
@@ -69,27 +124,6 @@ func (s *Service) taskPRReviewerChanged(ctx context.Context, taskID string, newL
 		return false, err
 	}
 	return !strings.EqualFold(previous.ReviewReviewerLogin, strings.TrimSpace(*newLogin)), nil
-}
-
-// applyTaskPRAutomationPatch applies the per-PR automation switches in
-// prPatch to either the single PR named by patch.RepositoryID/PRNumber, or —
-// when PR identity is omitted — every PR currently linked to the task.
-func (s *Service) applyTaskPRAutomationPatch(
-	ctx context.Context, taskID string, patch TaskCIOptionsPatch,
-	prPatch TaskPRAutomationOptionsPatch, reviewerChanged bool,
-) error {
-	targets, err := s.resolveTaskPRAutomationTargets(ctx, taskID, patch.RepositoryID, patch.PRNumber)
-	if err != nil {
-		return err
-	}
-	for _, target := range targets {
-		if _, err := s.store.UpdateTaskPRAutomationOptions(
-			ctx, taskID, target.RepositoryID, target.PRNumber, prPatch, reviewerChanged,
-		); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // resolveTaskPRAutomationTargets resolves which linked PR(s) a patch
@@ -153,7 +187,7 @@ func (s *Service) anyOtherPRHasReviewRequestEnabled(
 	ctx context.Context, taskID string, excludeRepositoryID *string, excludePRNumber *int,
 ) (bool, error) {
 	fanOut := excludeRepositoryID == nil && excludePRNumber == nil
-	options, err := s.store.ListTaskPRAutomationOptions(ctx, taskID)
+	options, err := s.taskPRAutomationOptionsList(ctx, taskID)
 	if err != nil {
 		return false, err
 	}
@@ -253,7 +287,7 @@ func (s *Service) IsReviewRequestedForLogin(
 // a lifecycle prompt switch enabled. Checks the per-PR table, not the legacy
 // task row, so a task with mixed per-PR configuration is still detected.
 func (s *Service) HasEnabledTaskPRAgentPrompts(ctx context.Context, taskID string) (bool, error) {
-	options, err := s.store.ListTaskPRAutomationOptions(ctx, taskID)
+	options, err := s.taskPRAutomationOptionsList(ctx, taskID)
 	if err != nil {
 		return false, err
 	}
@@ -414,18 +448,51 @@ func (s *Service) taskPRAutomationOptionsList(ctx context.Context, taskID string
 	if err != nil {
 		return nil, err
 	}
-	return mergeTaskPRRows(stored, prs,
+	allPRs, err := s.store.ListTaskPRsByTaskIncludingDetached(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	merged := mergeTaskPRRows(stored, prs,
 		func(opt *TaskPRAutomationOptions) string { return taskCIPRStateKey(opt.RepositoryID, opt.PRNumber) },
 		func(pr *TaskPR) *TaskPRAutomationOptions {
 			return &TaskPRAutomationOptions{TaskID: taskID, RepositoryID: pr.RepositoryID, PRNumber: pr.PRNumber}
 		},
-	), nil
+	)
+	active := make(map[string]struct{}, len(prs))
+	for _, pr := range prs {
+		active[taskCIPRStateKey(pr.RepositoryID, pr.PRNumber)] = struct{}{}
+	}
+	detached := make(map[string]struct{})
+	for _, pr := range allPRs {
+		if pr.DetachedAt != nil {
+			detached[taskCIPRStateKey(pr.RepositoryID, pr.PRNumber)] = struct{}{}
+		}
+	}
+	filtered := make([]*TaskPRAutomationOptions, 0, len(prs))
+	for _, option := range merged {
+		key := taskCIPRStateKey(option.RepositoryID, option.PRNumber)
+		if _, ok := detached[key]; ok {
+			continue
+		}
+		if _, ok := active[key]; ok {
+			filtered = append(filtered, option)
+			continue
+		}
+		// Keep legacy/single-repo option rows that predate a durable TaskPR
+		// association. Only a matching detached association is excluded.
+		if _, known := detached[key]; !known {
+			filtered = append(filtered, option)
+		}
+	}
+	return filtered, nil
 }
 
 // mergeTaskPRRows overlays stored per-PR rows onto every PR currently linked
 // to the task, synthesizing a default row (via makeDefault) for a linked PR
 // with no stored row yet, and keeping any stored row for a PR no longer
-// linked (e.g. detached) at the end. Shared by taskCIPRStates and
+// linked (e.g. detached) at the end. Task CI state keeps those historical rows
+// for diagnostics, while task automation options filters them before exposing
+// aggregates or lifecycle eligibility. Shared by taskCIPRStates and
 // taskPRAutomationOptionsList, which differ only in row type.
 func mergeTaskPRRows[T any](stored []T, prs []*TaskPR, keyOf func(T) string, makeDefault func(*TaskPR) T) []T {
 	byKey := make(map[string]T, len(stored))

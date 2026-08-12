@@ -8,6 +8,8 @@ import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { LineStat } from "@/components/diff-stat";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
+import { useRemoteContributionRelation } from "@/hooks/domains/session/use-remote-contribution-relation";
+import { remoteContributionActionPolicy } from "@/hooks/domains/session/remote-contribution-relation";
 import {
   CommitDialog,
   PRDialog,
@@ -140,6 +142,11 @@ function useMobileGitMetrics(
   };
 }
 
+function useMobileRemoteActionPolicy(sessionId: string | null | undefined) {
+  const { relation } = useRemoteContributionRelation(sessionId);
+  return remoteContributionActionPolicy(relation);
+}
+
 type MobileGitDialogsProps = {
   commitDialogOpen: boolean;
   setCommitDialogOpen: (open: boolean) => void;
@@ -239,6 +246,7 @@ function MobileTopBarActions({
   onMenuClick,
 }: MobileTopBarActionsProps) {
   const { t } = useTranslation();
+  const remoteActionPolicy = useMobileRemoteActionPolicy(sessionId);
   return (
     <div className="flex items-center gap-1" data-testid="mobile-topbar-actions">
       <MRTopbarButton compact mobile />
@@ -275,6 +283,8 @@ function MobileTopBarActions({
         onPush={onPush}
         onRebase={onRebase}
         onMerge={onMerge}
+        pushDisabled={remoteActionPolicy.pushDisabled}
+        pullDisabled={remoteActionPolicy.pullDisabled}
       />
       <Button
         variant="ghost"
@@ -297,7 +307,6 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar(
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
   const [prDialogOpen, setPrDialogOpen] = useState(false);
   const [prBranchPushed, setPrBranchPushed] = useState(false);
-
   const {
     commits,
     displayBranch,
@@ -322,7 +331,6 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar(
     setPrDialogOpen,
     setPrBranchPushed,
   );
-
   return (
     <header className="flex items-center justify-between px-2 py-2 bg-background">
       <div className="flex items-center gap-2 min-w-0 flex-1">

@@ -1,13 +1,13 @@
 ---
 title: "Agent Communication"
-description: "How agents send messages across tasks, receive replies, and run multi-turn negotiations — with built-in Kandev MCP tools and a worked contract-negotiation example."
+description: "How agents send messages across tasks, receive replies, and run multi-turn negotiations, with built-in Kandev MCP tools and a worked contract-negotiation example."
 ---
 
 # Agent Communication
 
 Agents running in separate Kandev tasks can talk to each other directly. One agent sends a structured prompt to another task; the receiving agent processes it as a normal turn and sends its reply back the same way. This closes the loop into a genuine two-way conversation without any additional infrastructure.
 
-Communication works across all relationship types — parent to child, child to parent, sibling to sibling, and tasks in entirely different workspaces or workflows ("projects"). The only requirement is that each agent knows the other task's full UUID.
+Communication works across all relationship types: parent to child, child to parent, sibling to sibling, and tasks in entirely different workspaces or workflows ("projects"). The only requirement is that each agent knows the other task's full UUID.
 
 The examples below use canonical MCP protocol names ending in `_kandev`. An agent client may show a server-qualified alias; use the form exposed by that client.
 
@@ -21,7 +21,7 @@ The examples below use canonical MCP protocol names ending in `_kandev`. An agen
 
 An agent typically learns a peer's task ID in one of three ways:
 
-**From related tasks.** `list_related_tasks_kandev` returns parent, children, siblings, blockers, and blocked-by tasks for the current task. Each entry includes the full task UUID, title, lifecycle state, and associated pull requests — but not the workflow step (kanban column). To check which column a related task currently sits in, look it up with `list_tasks_kandev` on its workflow.
+**From related tasks.** `list_related_tasks_kandev` returns parent, children, siblings, blockers, and blocked-by tasks for the current task. Each entry includes the full task UUID, title, lifecycle state, and associated pull requests, but not the workflow step (kanban column). To check which column a related task currently sits in, look it up with `list_tasks_kandev` on its workflow.
 
 ```
 list_related_tasks_kandev()
@@ -51,7 +51,7 @@ Delivery behaviour depends on the target session's state at the moment of the ca
 | Running or starting, direct parent uses `delivery_mode="interrupt"` | Kandev queues the message, then tries to interrupt the current turn and deliver it immediately | `"sent"` if interrupted and delivered immediately; otherwise `"queued"` |
 | Idle (waiting for input, or turn just finished) | Message starts a new turn immediately | `"sent"` |
 | Created (agent not yet started) | Agent is started with this message as its first prompt | `"started"` |
-| Failed or cancelled | Error is returned | — |
+| Failed or cancelled | Error is returned | N/A |
 
 The `queued` outcome is normal and correct. It does not mean the message was dropped; it means the receiving agent will process it on its very next turn. Design your messages to be self-contained so that a small delay between delivery and processing does not matter.
 
@@ -67,7 +67,7 @@ of being silently downgraded to `queued`.
 
 The receiving agent processes the incoming message as an ordinary user turn. It can use any tool, read code, run tests, and reason freely before formulating its response.
 
-To reply, the agent calls `message_task_kandev` with the **originating task's ID** and the response text. That message becomes a new turn in the sender's conversation — closing the loop into a bidirectional exchange.
+To reply, the agent calls `message_task_kandev` with the **originating task's ID** and the response text. That message becomes a new turn in the sender's conversation, closing the loop into a bidirectional exchange.
 
 ```
 # Agent B, replying to Agent A after receiving a proposal:
@@ -77,7 +77,7 @@ message_task_kandev(
 )
 ```
 
-There is no persistent channel or shared socket between tasks. Each `message_task_kandev` call is discrete. The conversation thread is implicit — both tasks can recover context by reading back the relevant messages (see [Reading the thread](#reading-the-thread) below).
+There is no persistent channel or shared socket between tasks. Each `message_task_kandev` call is discrete. The conversation thread is implicit; both tasks can recover context by reading back the relevant messages (see [Reading the thread](#reading-the-thread) below).
 
 ## Autopilot parent questions
 
@@ -125,14 +125,14 @@ operator-facing `ask_user_question_kandev` flow.
 - resume context after a long pause;
 - audit what was actually communicated.
 
-By default this reads the task's **primary** session. A task can have several sessions — `spawn_session_kandev` adds one, and each runs its own conversation — and one call never merges them. Pass `session_id` to read a specific one, and use `list_task_sessions_kandev(task_id)` to discover the IDs: it returns every session newest-first with `session_id`, `name`, `state`, `is_primary` (the one both this tool and `message_task_kandev` default to) and `is_current` (your own session). The same `session_id` addresses a sibling session with `message_task_kandev`.
+By default this reads the task's **primary** session. A task can have several sessions. `spawn_session_kandev` adds one, and each runs its own conversation. A call never merges them. Pass `session_id` to read a specific one, and use `list_task_sessions_kandev(task_id)` to discover the IDs: it returns every session newest-first with `session_id`, `name`, `state`, `is_primary` (the one both this tool and `message_task_kandev` default to) and `is_current` (your own session). The same `session_id` addresses a sibling session with `message_task_kandev`.
 
-Pagination and filtering are available via `limit`, `before`, `after`, `sort`, and `message_types` parameters. `message_types=["message"]` returns every regular chat/prompt row — the same `message` type covers ordinary user turns and cross-task deliveries alike, so this filter alone does not isolate coordination traffic. To identify a message that arrived via `message_task_kandev`, check the returned message's `metadata.sender_task_id` (and `sender_task_title`): messages sent within the same task have no `sender_task_id`. Include `"tool_call"` in `message_types` to see tool outputs too.
+Pagination and filtering are available via `limit`, `before`, `after`, `sort`, and `message_types` parameters. `message_types=["message"]` returns every regular chat/prompt row; the same `message` type covers ordinary user turns and cross-task deliveries alike, so this filter alone does not isolate coordination traffic. To identify a message that arrived via `message_task_kandev`, check the returned message's `metadata.sender_task_id` (and `sender_task_title`): messages sent within the same task have no `sender_task_id`. Include `"tool_call"` in `message_types` to see tool outputs too.
 
 <details>
 <summary>Worked example: API contract negotiation</summary>
 
-## Worked example — API contract negotiation
+## Worked example: API contract negotiation
 
 Backend Task A and Frontend Task B need to agree on an API contract before they both start implementing. Neither task knows what the other needs; they resolve it through a short negotiation.
 
@@ -151,13 +151,13 @@ sequenceDiagram
     B->>A: message_task_kandev(A, "Need created_at too, ISO-8601 format please.")
     Note over A: running → "queued" (next turn)
     A->>B: message_task_kandev(B, "Agreed: GET /items → {id, name, created_at} (ISO-8601). Starting impl.")
-    Note over A,B: Contract agreed — both implement
+    Note over A,B: Contract agreed; both implement
     A-->>A: get_task_conversation_kandev(B) to confirm spec
 ```
 
 ### Agent A's actual tool calls (turn by turn)
 
-**Turn 1 — propose the contract:**
+**Turn 1: propose the contract:**
 
 ```
 message_task_kandev(
@@ -175,7 +175,7 @@ message_task_kandev(
 # → "sent" (Task B was idle)
 ```
 
-**Turn 2 — Task B's reply arrives as a new user turn in Task A's conversation:**
+**Turn 2: Task B's reply arrives as a new user turn in Task A's conversation:**
 
 ```
 # Incoming turn (user message in A's conversation):
@@ -197,7 +197,7 @@ message_task_kandev(
 # → "queued" (Task B was running its own turn)
 ```
 
-**Turn 3 — verify before writing tests:**
+**Turn 3: verify before writing tests:**
 
 ```
 get_task_conversation_kandev(
@@ -216,7 +216,7 @@ Task B processes each incoming message as a normal turn. When it receives Agent 
 
 ## Good practices
 
-**Be self-contained.** Each message should include enough context for the receiving agent to act without looking up prior conversation history — task ID, repo, branch, current status, and what you expect in return.
+**Be self-contained.** Each message should include enough context for the receiving agent to act without looking up prior conversation history; task ID, repo, branch, current status, and what you expect in return.
 
 **One bounded question at a time.** Cross-task messages work best for specific, answerable requests ("does this schema cover your needs?"), not open-ended collaboration. Keep the negotiation short.
 
@@ -239,10 +239,10 @@ These tools complement cross-task communication for common coordination patterns
 | `list_task_sessions_kandev` | List a task's sessions to find the `session_id` for the two tools above |
 | `list_related_tasks_kandev` | Discover parent / child / sibling / blocker task IDs |
 | `create_task_kandev` | Delegate work to a new subtask; returns the new task's ID |
-| `spawn_session_kandev` | Start another session on an existing task; returns `{task_id, session_id, state}` — use the `session_id` field to message the new session directly |
+| `spawn_session_kandev` | Start another session on an existing task; returns `{task_id, session_id, state}`; use the `session_id` field to message the new session directly |
 | `move_task_kandev` | Hand off a task to the next workflow step with an optional prompt for the receiving agent |
 | `create_task_plan_kandev` | Record an agreed implementation plan (both tasks can create/update their own plans) |
-| `get_task_plan_kandev` | Read a task's plan — useful before messaging to share a structured proposal |
+| `get_task_plan_kandev` | Read a task's plan; useful before messaging to share a structured proposal |
 | `step_complete_kandev` | Signal that the current workflow step is done (task-mode only) |
 | `ask_user_question_kandev` | Escalate to a human when agent negotiation cannot resolve a question |
 

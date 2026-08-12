@@ -92,20 +92,29 @@ func TestHandleUpdateTaskPRAutomationWithIdentityTargetsOnePR(t *testing.T) {
 // TestHandleUpdateTaskPRAutomationMapsUnlinkedPRToValidationError covers the
 // MCP-side error mapping for ErrTaskPRNotLinked (HTTP's AC8 equivalent).
 func TestHandleUpdateTaskPRAutomationMapsUnlinkedPRToValidationError(t *testing.T) {
-	automation := &recordingTaskPRAutomationServiceWithErr{err: github.ErrTaskPRNotLinked}
-	h := &Handlers{taskPRAutomation: automation, logger: testLogger(t).WithFields()}
+	for name, identity := range map[string]map[string]any{
+		"repository only": {"repository_id": "repo-1"},
+		"PR number only":  {"pr_number": 999},
+	} {
+		t.Run(name, func(t *testing.T) {
+			automation := &recordingTaskPRAutomationServiceWithErr{err: github.ErrTaskPRNotLinked}
+			h := &Handlers{taskPRAutomation: automation, logger: testLogger(t).WithFields()}
 
-	msg := makeWSMessage(t, ws.ActionMCPUpdateTaskPRAutomation, map[string]any{
-		"task_id":          "task-current",
-		"repository_id":    "repo-1",
-		"pr_number":        999,
-		"auto_fix_enabled": true,
-	})
-	response, err := h.handleUpdateTaskPRAutomation(context.Background(), msg)
+			payload := map[string]any{
+				"task_id":          "task-current",
+				"auto_fix_enabled": true,
+			}
+			for key, value := range identity {
+				payload[key] = value
+			}
+			msg := makeWSMessage(t, ws.ActionMCPUpdateTaskPRAutomation, payload)
+			response, err := h.handleUpdateTaskPRAutomation(context.Background(), msg)
 
-	require.NoError(t, err)
-	assert.Equal(t, ws.MessageTypeError, response.Type)
-	assert.Contains(t, string(response.Payload), "PR is not linked to this task")
+			require.NoError(t, err)
+			assert.Equal(t, ws.MessageTypeError, response.Type)
+			assert.Contains(t, string(response.Payload), "PR is not linked to this task")
+		})
+	}
 }
 
 func TestHandleUpdateTaskPRAutomationRejectsLifecyclePromptOverrides(t *testing.T) {
