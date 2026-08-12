@@ -2035,6 +2035,17 @@ export class ApiClient {
     return this.request("DELETE", `/api/v1/tasks/${taskId}/dependencies/${dependsOnTaskId}`);
   }
 
+  async ensureTaskSession(taskId: string): Promise<{
+    success: boolean;
+    task_id: string;
+    session_id?: string;
+    state: string;
+    source: string;
+    newly_created: boolean;
+  }> {
+    return this.request("POST", `/api/v1/tasks/${taskId}/sessions/ensure`);
+  }
+
   async setPrimarySession(sessionId: string): Promise<void> {
     await this.wsRequest("session.set_primary", { session_id: sessionId });
   }
