@@ -24,7 +24,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import {
   canApproveAgentRuntimeUpdate,
+  resolveRuntimeOperation,
   resolveRuntimeVersionPair,
+  runtimeOperationLabelKey,
 } from "@/lib/agent-runtime-update";
 import type { AgentUpdateJob, AgentUpdatePreview, InstallJob } from "@/lib/api";
 import type { RuntimeUpdate } from "@/lib/types/http";
@@ -101,29 +103,96 @@ type UpdateBodyProps = {
   approveError: string | null;
   job?: AgentUpdateJob;
   onRetryPreview: () => void;
+  selectedTarget: string;
+  onSelectTarget: (targetVersion: string) => void;
+  starting: boolean;
 };
 
 function RuntimeVersionSummary({
+  agentName,
   preview,
   job,
 }: {
+  agentName: string;
   preview: AgentUpdatePreview;
   job?: AgentUpdateJob;
 }) {
   const { t } = useTranslation();
   const { currentVersion, targetVersion, versionsMatch } = resolveRuntimeVersionPair(preview, job);
+  const operation = resolveRuntimeOperation(preview, job);
 
   return (
-    <div className="space-y-1">
-      <p className="font-medium">{t("agents:runtimeVersion")}</p>
+    <div className="space-y-1" data-testid={`agent-update-version-summary-${agentName}`}>
+      <p className="font-medium">{t(runtimeOperationLabelKey(operation))}</p>
       <p className="break-words font-mono text-sm">
         {versionsMatch ? currentVersion : `${currentVersion} → ${targetVersion}`}
       </p>
+      {preview.active_version && (
+        <p className="text-sm text-muted-foreground">
+          {t("agents:activeRuntimeVersion", { version: preview.active_version })}
+        </p>
+      )}
       {versionsMatch && (
         <p className="text-sm text-muted-foreground" role="status">
           {t("agents:upToDate")}
         </p>
       )}
+    </div>
+  );
+}
+
+function RuntimeVersionSelector({
+  agentName,
+  preview,
+  selectedTarget,
+  starting,
+  job,
+  onSelectTarget,
+}: {
+  agentName: string;
+  preview: AgentUpdatePreview;
+  selectedTarget: string;
+  starting: boolean;
+  job?: AgentUpdateJob;
+  onSelectTarget: (targetVersion: string) => void;
+}) {
+  const { t } = useTranslation();
+  const versions = preview.available_versions ?? [
+    { version: preview.target_version, latest: false },
+  ];
+  return (
+    <div className="space-y-1">
+      <label className="font-medium" htmlFor={`agent-update-version-${agentName}`}>
+        {t("agents:selectRuntimeVersion")}
+      </label>
+      <select
+        id={`agent-update-version-${agentName}`}
+        className="h-11 w-full min-w-0 rounded-md border bg-background px-3 text-sm"
+        value={selectedTarget || preview.target_version}
+        onChange={(event) => onSelectTarget(event.target.value)}
+        disabled={Boolean(job && ACTIVE_UPDATE_STATUSES.has(job.status)) || starting}
+        data-testid={`agent-update-version-${agentName}`}
+      >
+        {versions.map((version) => {
+          const markers = [
+            version.latest ? t("agents:latestRuntimeVersion") : "",
+            version.version === preview.active_version
+              ? t("agents:activeRuntimeVersionMarker")
+              : "",
+          ]
+            .filter(Boolean)
+            .join(", ");
+          const markerLabel = markers ? t("agents:runtimeVersionMarkerGroup", { markers }) : "";
+          return (
+            <option key={version.version} value={version.version}>
+              {t("agents:runtimeVersionOption", {
+                version: version.version,
+                markers: markerLabel,
+              })}
+            </option>
+          );
+        })}
+      </select>
     </div>
   );
 }
@@ -136,12 +205,15 @@ function UpdateBody({
   approveError,
   job,
   onRetryPreview,
+  selectedTarget,
+  onSelectTarget,
+  starting,
 }: UpdateBodyProps) {
   const { t } = useTranslation();
   const phase = updatePhase(t, job?.status);
   return (
     <div
-      className="max-h-[calc(80dvh-10rem)] min-h-0 space-y-4 overflow-y-auto overscroll-contain px-4 py-3 text-xs/relaxed"
+      className="max-h-[calc(80dvh-10rem)] min-h-0 space-y-3 overflow-y-auto overscroll-contain px-4 py-3 text-xs/relaxed"
       data-testid={`agent-update-dialog-body-${agentName}`}
     >
       {loading && (
@@ -178,7 +250,15 @@ function UpdateBody({
       )}
       {preview && (
         <>
-          <RuntimeVersionSummary preview={preview} job={job} />
+          <RuntimeVersionSummary agentName={agentName} preview={preview} job={job} />
+          <RuntimeVersionSelector
+            agentName={agentName}
+            preview={preview}
+            selectedTarget={selectedTarget}
+            starting={starting}
+            job={job}
+            onSelectTarget={onSelectTarget}
+          />
           <div className="space-y-1 text-muted-foreground">
             <p>{t("agents:runtimeUpdateExplainer")}</p>
             <p>{t("agents:runtimeUpdateSessionsNote")}</p>
@@ -265,7 +345,9 @@ function UpdateFooter({
           data-testid={`agent-update-confirm-${agentName}`}
         >
           {starting && <IconLoader2 className="mr-2 size-4 animate-spin" />}
-          {canRetry ? t("agents:retryUpdate") : t("agents:approveUpdate")}
+          {canRetry
+            ? t("agents:retryUpdate")
+            : t(runtimeOperationLabelKey(job?.operation ?? preview?.operation))}
         </Button>
       )}
     </>
@@ -333,8 +415,8 @@ export function AgentRuntimeUpdateControl({
   runtimeUpdate: RuntimeUpdate;
   job?: AgentUpdateJob;
   installJob?: InstallJob;
-  onPreview: (agentName: string) => Promise<AgentUpdatePreview>;
-  onUpdate: (agentName: string) => Promise<AgentUpdateJob>;
+  onPreview: (agentName: string, targetVersion?: string) => Promise<AgentUpdatePreview>;
+  onUpdate: (agentName: string, targetVersion: string) => Promise<AgentUpdateJob>;
 }) {
   const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
@@ -348,6 +430,8 @@ export function AgentRuntimeUpdateControl({
     open,
     preview,
     previewError,
+    selectTarget,
+    selectedTarget,
     starting,
   } = useAgentUpdateDialogState({ agentName, job, onPreview, onUpdate });
   const installInFlight = installJob?.status === "queued" || installJob?.status === "running";
@@ -363,6 +447,9 @@ export function AgentRuntimeUpdateControl({
       approveError={approveError}
       job={activeJob}
       onRetryPreview={() => void loadPreview()}
+      selectedTarget={selectedTarget}
+      onSelectTarget={selectTarget}
+      starting={starting}
     />
   );
 

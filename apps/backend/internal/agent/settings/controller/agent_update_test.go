@@ -79,6 +79,25 @@ func TestHostRuntimeUpdaterResolvesTargetWithDirectNPMArgv(t *testing.T) {
 	}
 }
 
+func TestHostRuntimeUpdaterResolvesStableVersionCatalogue(t *testing.T) {
+	executor := &recordingCommandExecutor{
+		output: `{"versions":["1.0.1","1.0.2-beta.1","1.0.2"],"dist-tags":{"latest":"1.0.2"}}`,
+	}
+	updater := &hostRuntimeUpdater{executor: executor}
+
+	metadata, err := updater.ResolveVersions(context.Background(), "@example/managed-acp")
+	if err != nil {
+		t.Fatalf("ResolveVersions: %v", err)
+	}
+	if metadata.Latest != "1.0.2" || len(metadata.Versions) != 3 {
+		t.Fatalf("metadata = %#v", metadata)
+	}
+	want := []string{"npm", "view", "@example/managed-acp", "versions", "dist-tags", "--json"}
+	if got := strings.Join(executor.outputCommand, "\x00"); got != strings.Join(want, "\x00") {
+		t.Fatalf("command = %v, want %v", executor.outputCommand, want)
+	}
+}
+
 func TestHostRuntimeUpdaterInvalidatesOnlyManagedNPMExecutionTree(t *testing.T) {
 	cacheRoot := t.TempDir()
 	spec := agents.ManagedNPMRuntimeSpec{Package: "opencode-ai"}
@@ -225,7 +244,7 @@ func waitForUpdateStatus(
 			return &snapshot
 		}
 	}
-	t.Fatalf("job %s finished with status %s, want %v", jobID, snapshot.Status, statuses)
+	t.Fatalf("job %s finished with status %s, error %q, operation %q, want %v", jobID, snapshot.Status, snapshot.Error, snapshot.Operation, statuses)
 	return nil
 }
 

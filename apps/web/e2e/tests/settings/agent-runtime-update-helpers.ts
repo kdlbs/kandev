@@ -4,11 +4,14 @@ const AGENT_NAME = "claude-acp";
 const NOW = "2026-07-26T12:00:00.000Z";
 
 type UpdateStatus = "queued" | "resolving" | "updating" | "refreshing" | "succeeded" | "failed";
+type UpdateOperation = "update" | "rollback" | "repair" | "up_to_date";
 
 type UpdateJob = {
   job_id: string;
   agent_name: string;
   status: UpdateStatus;
+  operation?: UpdateOperation;
+  active_version?: string;
   current_version?: string;
   target_version?: string;
   output?: string;
@@ -22,7 +25,10 @@ type UpdatePreview = {
   agent_name: string;
   package: string;
   current_version: string;
+  active_version?: string;
   target_version: string;
+  operation?: UpdateOperation;
+  available_versions?: Array<{ version: string; latest: boolean }>;
   command: string[];
   command_string: string;
 };
@@ -59,6 +65,7 @@ function catalogue(models: Array<{ id: string; name: string }>, displayName = "C
           supported: true,
           package: "@agentclientprotocol/claude-agent-acp",
           current_version: "0.62.0",
+          active_version: "0.62.0",
         },
         updated_at: NOW,
       },
@@ -122,6 +129,8 @@ export async function installRuntimeUpdateFixture(
     } satisfies UpdateJob);
   let postCount = 0;
   let previewCount = 0;
+  const previewTargets: string[] = [];
+  const postTargets: string[] = [];
   let previewResponse: UpdatePreview =
     options.previewResponse ??
     ({
@@ -129,6 +138,14 @@ export async function installRuntimeUpdateFixture(
       package: "@agentclientprotocol/claude-agent-acp",
       current_version: "0.62.0",
       target_version: "0.63.0",
+      operation: "update",
+      active_version: "0.62.0",
+      available_versions: [
+        { version: "0.64.0", latest: true },
+        { version: "0.63.0", latest: false },
+        { version: "0.62.0", latest: false },
+        { version: "0.61.0", latest: false },
+      ],
       command: [
         "npm",
         "exec",
@@ -175,10 +192,19 @@ export async function installRuntimeUpdateFixture(
       url.pathname.endsWith(`/agent-update/${AGENT_NAME}/preview`)
     ) {
       previewCount += 1;
+      previewTargets.push(url.searchParams.get("target_version") ?? "");
+      const requestedTarget = url.searchParams.get("target_version");
+      const response = requestedTarget
+        ? {
+            ...previewResponse,
+            target_version: requestedTarget,
+            operation: requestedTarget === "0.62.0" ? "up_to_date" : "rollback",
+          }
+        : previewResponse;
       return route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify(previewResponse),
+        body: JSON.stringify(response),
       });
     }
     if (request.method() === "GET" && url.pathname.endsWith("/agent-update/jobs")) {
@@ -190,6 +216,8 @@ export async function installRuntimeUpdateFixture(
     }
     if (request.method() === "POST" && url.pathname.endsWith(`/agent-update/${AGENT_NAME}`)) {
       postCount += 1;
+      const body = request.postDataJSON() as { target_version?: string } | null;
+      postTargets.push(body?.target_version ?? "");
       return route.fulfill({
         status: 202,
         contentType: "application/json",
@@ -241,6 +269,8 @@ export async function installRuntimeUpdateFixture(
     },
     postCount: () => postCount,
     previewCount: () => previewCount,
+    previewTargets: () => [...previewTargets],
+    postTargets: () => [...postTargets],
     async emit(action: string, payload: unknown) {
       await expect.poll(() => Boolean(socket)).toBe(true);
       await expect.poll(() => clientReady).toBe(true);
@@ -274,6 +304,7 @@ export function updateJob(overrides: Partial<UpdateJob> = {}): UpdateJob {
     status: "updating",
     current_version: "0.62.0",
     target_version: "0.63.0",
+    operation: "update",
     output: "Downloading @agentclientprotocol/claude-agent-acp…\n",
     started_at: NOW,
     ...overrides,

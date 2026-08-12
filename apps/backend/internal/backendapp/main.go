@@ -446,7 +446,17 @@ func startAgentInfrastructure(
 	// ============================================
 	// AGENT MANAGER
 	// ============================================
-	lifecycleMgr, err := provideLifecycleManager(ctx, cfg, log, eventBus, repos.AgentSettings, agentRegistry, userSecretStore, services.Task.TaskBaseBranches)
+	lifecycleMgr, err := provideLifecycleManager(
+		ctx,
+		cfg,
+		log,
+		eventBus,
+		repos.AgentSettings,
+		agentRegistry,
+		userSecretStore,
+		services.Task.TaskBaseBranches,
+		services.ManagedRuntimeSelections,
+	)
 	if err != nil {
 		log.Error("Failed to initialize agent manager", zap.Error(err))
 		return false
@@ -765,6 +775,7 @@ func startGatewayAndServe(
 		_, ok := agentRegistry.GetInferenceAgent(agentID)
 		return ok
 	}))
+	hostUtilityMgr.SetManagedRuntimeSelectionStore(services.ManagedRuntimeSelections)
 	// Wire the host utility manager into the settings controller so
 	// /api/v1/agent-models/:agentName reads live capability data.
 	agentSettingsController.SetHostUtility(hostUtilityMgr)

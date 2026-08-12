@@ -26,6 +26,7 @@ test.describe("managed agent runtime updates on mobile", () => {
     });
     await testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`).tap();
     expect(runtime.postCount()).toBe(1);
+    expect(runtime.postTargets()).toEqual(["0.63.0"]);
 
     await runtime.emitUpdate(
       updateJob({
@@ -69,7 +70,11 @@ test.describe("managed agent runtime updates on mobile", () => {
     await testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`).tap();
 
     const drawer = testPage.getByTestId(`agent-update-drawer-${runtime.agentName}`);
-    await expect(drawer.getByText("0.64.0", { exact: true })).toBeVisible();
+    await expect(
+      drawer.getByTestId(`agent-update-version-summary-${runtime.agentName}`).getByText("0.64.0", {
+        exact: true,
+      }),
+    ).toBeVisible();
     await expect(drawer.getByText("Up to date", { exact: true })).toBeVisible();
     await expect(drawer).not.toContainText("0.64.0 → 0.64.0");
     await expect(testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`)).toBeDisabled();
@@ -77,6 +82,23 @@ test.describe("managed agent runtime updates on mobile", () => {
     await prCapture.screenshot("mobile-update-up-to-date", {
       caption: "Mobile update preview when the managed runtime is up to date",
     });
+  });
+
+  test("selects an older stable version for rollback in the drawer", async ({ testPage }) => {
+    const runtime = await installRuntimeUpdateFixture(testPage);
+
+    await testPage.goto("/settings/agents");
+    await testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`).tap();
+    const drawer = testPage.getByTestId(`agent-update-drawer-${runtime.agentName}`);
+    await drawer.getByTestId(`agent-update-version-${runtime.agentName}`).selectOption("0.61.0");
+
+    await expect(drawer).toContainText("0.62.0 → 0.61.0");
+    await expect(testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`)).toHaveText(
+      "Roll back runtime",
+    );
+    await testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`).tap();
+    expect(runtime.postTargets()).toEqual(["0.61.0"]);
+    expect(runtime.previewTargets()).toEqual(["", "0.61.0"]);
   });
 
   test("keeps retry available after an update job fails", async ({ testPage }) => {

@@ -176,6 +176,9 @@ type CommandOptions struct {
 	// standalone CLI was found in the execution environment. Such agents emit
 	// the native binary (e.g. "copilot --acp") instead of "npx -y <pkg>".
 	PreferNativeBinary bool
+	// ManagedRuntimeVersion is an internal exact version override for trusted
+	// managed npm ACP runtimes. Empty preserves the legacy unversioned command.
+	ManagedRuntimeVersion string
 }
 
 // PassthroughOptions are passed to BuildPassthroughCommand.

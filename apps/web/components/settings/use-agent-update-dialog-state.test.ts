@@ -70,11 +70,20 @@ describe("useAgentUpdateDialogState", () => {
     const { result } = renderHook(() =>
       useAgentUpdateDialogState({
         agentName: AGENT_NAME,
-        onPreview: vi.fn().mockResolvedValue(FIRST_PREVIEW),
+        onPreview: vi.fn().mockImplementation((_agentName: string, targetVersion?: string) =>
+          Promise.resolve({
+            ...FIRST_PREVIEW,
+            target_version: targetVersion ?? FIRST_PREVIEW.target_version,
+          }),
+        ),
         onUpdate,
       }),
     );
 
+    await act(async () => {
+      await result.current.loadPreview();
+    });
+    await waitFor(() => expect(result.current.preview).toEqual(FIRST_PREVIEW));
     act(() => {
       void result.current.approve();
     });
@@ -100,10 +109,88 @@ describe("useAgentUpdateDialogState", () => {
     );
 
     await act(async () => {
+      await result.current.loadPreview();
+    });
+    await waitFor(() => expect(result.current.preview).toEqual(FIRST_PREVIEW));
+    await act(async () => {
       await result.current.approve();
     });
 
     expect(result.current.previewError).toBeNull();
     expect(result.current.approveError).toBe(UPDATE_ALREADY_RUNNING);
+  });
+});
+
+describe("useAgentUpdateDialogState target selection", () => {
+  it("refreshes a selected target and ignores an older target response", async () => {
+    const first = deferred<AgentUpdatePreview>();
+    const olderTarget = deferred<AgentUpdatePreview>();
+    const newerTarget = deferred<AgentUpdatePreview>();
+    const onPreview = vi
+      .fn<(agentName: string, targetVersion?: string) => Promise<AgentUpdatePreview>>()
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(olderTarget.promise)
+      .mockReturnValueOnce(newerTarget.promise);
+    const { result } = renderHook(() =>
+      useAgentUpdateDialogState({
+        agentName: AGENT_NAME,
+        onPreview,
+        onUpdate: vi.fn(),
+      }),
+    );
+
+    act(() => void result.current.loadPreview());
+    await waitFor(() => expect(onPreview).toHaveBeenCalledWith(AGENT_NAME, undefined));
+    await act(async () => {
+      first.resolve(FIRST_PREVIEW);
+      await first.promise;
+    });
+
+    act(() => result.current.selectTarget("0.61.0"));
+    act(() => result.current.selectTarget("0.60.0"));
+    await waitFor(() => expect(onPreview).toHaveBeenCalledTimes(3));
+
+    await act(async () => {
+      olderTarget.resolve({ ...FIRST_PREVIEW, target_version: "0.61.0" });
+      await olderTarget.promise;
+    });
+    expect(result.current.preview).toBeNull();
+
+    await act(async () => {
+      newerTarget.resolve({ ...FIRST_PREVIEW, target_version: "0.60.0" });
+      await newerTarget.promise;
+    });
+    expect(result.current.selectedTarget).toBe("0.60.0");
+    expect(result.current.preview?.target_version).toBe("0.60.0");
+  });
+
+  it("approves the selected exact target", async () => {
+    const onUpdate = vi.fn().mockResolvedValue({
+      job_id: "job-1",
+      agent_name: AGENT_NAME,
+      status: "queued",
+      started_at: "2026-01-01T00:00:00.000Z",
+    } satisfies AgentUpdateJob);
+    const { result } = renderHook(() =>
+      useAgentUpdateDialogState({
+        agentName: AGENT_NAME,
+        onPreview: vi.fn().mockImplementation((_agentName: string, targetVersion?: string) =>
+          Promise.resolve({
+            ...FIRST_PREVIEW,
+            target_version: targetVersion ?? FIRST_PREVIEW.target_version,
+          }),
+        ),
+        onUpdate,
+      }),
+    );
+    await act(async () => {
+      await result.current.loadPreview();
+    });
+    act(() => result.current.selectTarget("0.61.0"));
+    await waitFor(() => expect(result.current.selectedTarget).toBe("0.61.0"));
+    await act(async () => {
+      await result.current.approve();
+    });
+    expect(onUpdate).toHaveBeenLastCalledWith(AGENT_NAME, "0.61.0");
   });
 });

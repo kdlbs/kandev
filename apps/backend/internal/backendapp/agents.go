@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/credentials"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
@@ -29,6 +30,7 @@ func provideLifecycleManager(
 	agentRegistry *registry.Registry,
 	secretStore secrets.SecretStore,
 	baseBranchProvider lifecycle.BaseBranchProvider,
+	managedRuntimeSelections managedruntime.SelectionReader,
 ) (*lifecycle.Manager, error) {
 	log.Info("Initializing Agent Manager...")
 
@@ -129,6 +131,7 @@ func provideLifecycleManager(
 	// enrichment fields. Without a wired SkillDeployer this is a no-op,
 	// but the reader still lets future Wave-B/C consumers light up.
 	lifecycleMgr.SetAgentProfileReader(agentSettingsRepo)
+	lifecycleMgr.SetManagedRuntimeSelectionStore(managedRuntimeSelections)
 
 	// MCP handler is set later in main.go after MCP handlers are registered
 	// via lifecycleMgr.SetMCPHandler(gateway.Dispatcher)

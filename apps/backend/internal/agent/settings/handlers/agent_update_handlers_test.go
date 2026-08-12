@@ -140,6 +140,13 @@ func updateRequest(method, path string) *http.Request {
 	return request
 }
 
+func updateJSONRequest(method, path, body string) *http.Request {
+	request := httptest.NewRequest(method, path, strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set(httpmw.InterimSettingsInterlockHeader, "test-interlock")
+	return request
+}
+
 func TestAgentUpdatePreviewEndpointIsReadOnly(t *testing.T) {
 	router, _, _ := newAgentUpdateRouter(t, &handlerRuntimeUpdater{})
 	response := httptest.NewRecorder()
@@ -171,7 +178,11 @@ func TestAgentUpdatePreviewEndpointIsReadOnly(t *testing.T) {
 func TestAgentUpdateEndpointsAcceptAndRetainJobs(t *testing.T) {
 	router, _, completed := newAgentUpdateRouter(t, &handlerRuntimeUpdater{})
 	response := httptest.NewRecorder()
-	router.ServeHTTP(response, updateRequest(http.MethodPost, "/api/v1/agent-update/claude-acp"))
+	router.ServeHTTP(response, updateJSONRequest(
+		http.MethodPost,
+		"/api/v1/agent-update/claude-acp",
+		`{"target_version":"1.1.0"}`,
+	))
 	if response.Code != http.StatusAccepted {
 		t.Fatalf("POST status = %d, body = %s", response.Code, response.Body.String())
 	}
@@ -223,9 +234,10 @@ func TestAgentUpdateEndpointReturnsMaintenanceConflict(t *testing.T) {
 		}
 	})
 	updateResponse := httptest.NewRecorder()
-	router.ServeHTTP(updateResponse, updateRequest(
+	router.ServeHTTP(updateResponse, updateJSONRequest(
 		http.MethodPost,
 		"/api/v1/agent-update/claude-acp",
+		`{"target_version":"1.1.0"}`,
 	))
 	if updateResponse.Code != http.StatusAccepted {
 		t.Fatalf("update status = %d, body = %s", updateResponse.Code, updateResponse.Body.String())
@@ -283,5 +295,20 @@ func TestAgentUpdateEndpointRejectsUnmanagedAgentAndMissingJob(t *testing.T) {
 	))
 	if missing.Code != http.StatusNotFound {
 		t.Fatalf("missing status = %d, body = %s", missing.Code, missing.Body.String())
+	}
+}
+
+func TestAgentUpdateEndpointRequiresExactTargetVersion(t *testing.T) {
+	router, _, _ := newAgentUpdateRouter(t, &handlerRuntimeUpdater{})
+	for _, body := range []string{"", `{}`, `{"target_version":"latest"}`} {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, updateJSONRequest(
+			http.MethodPost,
+			"/api/v1/agent-update/claude-acp",
+			body,
+		))
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("body %q status = %d, want 400: %s", body, response.Code, response.Body.String())
+		}
 	}
 }

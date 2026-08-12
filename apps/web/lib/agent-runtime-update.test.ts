@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 import i18n from "i18next";
 import type { AgentUpdateJob, AgentUpdatePreview } from "@/lib/api";
-import { canApproveAgentRuntimeUpdate, resolveRuntimeVersionPair } from "./agent-runtime-update";
+import {
+  canApproveAgentRuntimeUpdate,
+  resolveRuntimeOperation,
+  resolveRuntimeVersionPair,
+  runtimeOperationLabelKey,
+} from "./agent-runtime-update";
 
 const preview = (overrides: Partial<AgentUpdatePreview> = {}): AgentUpdatePreview => ({
   agent_name: "claude-acp",
@@ -74,6 +79,23 @@ describe("canApproveAgentRuntimeUpdate", () => {
     ],
   ])("returns %s = %s", (_name, state, expected) => {
     expect(canApproveAgentRuntimeUpdate(state)).toBe(expected);
+  });
+
+  it("allows a repair when the backend says the observed version is unknown", () => {
+    expect(
+      canApproveAgentRuntimeUpdate({
+        ...ready,
+        preview: preview({ current_version: "", operation: "repair" }),
+      }),
+    ).toBe(true);
+  });
+
+  it("uses operation state instead of translated labels", () => {
+    const state = preview({ operation: "rollback" });
+    expect(resolveRuntimeOperation(state)).toBe("rollback");
+    expect(runtimeOperationLabelKey("rollback")).toBe("agents:rollBackRuntime");
+    expect(runtimeOperationLabelKey("repair")).toBe("agents:repairRuntime");
+    expect(runtimeOperationLabelKey("up_to_date")).toBe("agents:upToDateRuntime");
   });
 });
 

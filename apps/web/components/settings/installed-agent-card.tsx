@@ -27,7 +27,7 @@ type Props = {
   updateJob?: AgentUpdateJob;
   installJob?: InstallJob;
   onPreview?: (agentName: string) => Promise<AgentUpdatePreview>;
-  onUpdate?: (agentName: string) => Promise<AgentUpdateJob>;
+  onUpdate?: (agentName: string, targetVersion: string) => Promise<AgentUpdateJob>;
   /**
    * Called when the auth/shell dialog closes so the page can refresh
    * discovery + availability. Without this the yellow lock stays put even
