@@ -456,6 +456,27 @@ Completed 2026-08-05.
   recovery. The regression failed before the fix and passed afterward; the focused LSP race suite
   passed 10 repetitions, the task-service admission race set passed 10 repetitions, and changed-code
   Go lint reported zero issues.
+- The same audit found a deleted or archived borrower left task-keyed slots, snapshots,
+  subscriptions, diagnostics/capabilities, and workspace configuration inside a shared agentctl host
+  that correctly survived for another task. Cleanup now calls one authenticated task-scoped purge
+  after all language stop attempts and before the physical-host decision. The purge rejects live or
+  pending runtime ownership, removes only the departing task's namespace, and is mandatory when the
+  shared process survives; a proven full process-tree reap remains the fallback. Manager isolation,
+  controller borrower behavior, internal route authorization, and client transport regressions pass
+  10 race-enabled repetitions.
+- Sol Max also found that a prepared cascade-cleanup reservation survived when inventory capture
+  failed before the caller recorded its operation ID. Because prepared jobs participate in session,
+  worktree, and LSP admission, the task then remained blocked. Preparation now cancels its own
+  reservation on every post-reservation failure, cascade coordination records the current operation
+  before invoking preparation, and cancellation uses a bounded detached retry loop. Real SQLite
+  regressions prove the failed job becomes cancelled and a new session is admitted; coordinator and
+  transient-cancellation cases pass.
+- A follow-up promotion audit found that a transient persistence error while recording
+  `waiting_for_task` could remove the queued capacity entry without scheduling recovery. Promotion
+  now schedules from the already-validated keep-warm intent even when that transition has no
+  snapshot. The focused admission and persistence-error regressions passed 20 race-enabled
+  repetitions. The real process-tree test also keeps a bounded two-second stop deadline so the full
+  race package does not mistake detector scheduling delay for a leaked child.
 
 ---
 

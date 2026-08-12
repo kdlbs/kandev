@@ -113,6 +113,49 @@ func TestCapacityPromotionRechecksTaskAdmissionBeforeLaunch(t *testing.T) {
 	}
 }
 
+func TestCapacityPromotionSchedulesRecoveryWhenWaitingStatePersistenceFails(t *testing.T) {
+	tasks := &fakeControllerTasks{environments: map[string]*models.TaskEnvironment{
+		"first":  readyEnvironment("first", "local_docker"),
+		"queued": readyEnvironment("queued", "local_docker"),
+	}}
+	store := newMemoryLSPStore()
+	host := newFakeLSPHost()
+	scheduler := newFakeScheduler()
+	controller := newTestController(tasks, store, &fakeLSPSettings{}, &fakeLSPRuntimes{host: host})
+	controller.capacity = NewCapacity(1)
+	controller.scheduler = scheduler
+	lifecycleCtx, cancel := context.WithCancel(context.Background())
+	controller.lifecycleCtx = lifecycleCtx
+	controller.lifecycleCancel = cancel
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+	origin := Origin{Initiator: InitiatorUser, Reason: "user_control"}
+
+	if _, err := controller.Start(context.Background(), "first", "go", origin); err != nil {
+		t.Fatal(err)
+	}
+	queued, err := controller.Start(context.Background(), "queued", "kotlin", origin)
+	if err != nil || queued.Phase != PhaseQueued {
+		t.Fatalf("queued=%#v error=%v", queued, err)
+	}
+	store.mu.Lock()
+	store.compareErrPhase = PhaseWaitingForTask
+	store.compareErr = errors.New("persistence unavailable")
+	store.mu.Unlock()
+	tasks.admissionErr = errors.New("task environment teardown in progress")
+
+	if _, err := controller.Stop(context.Background(), "first", "go", origin); err != nil {
+		t.Fatal(err)
+	}
+
+	scheduler.next(t)
+	if host.startCalls != 1 {
+		t.Fatalf("task-host start calls = %d, want only the initial server", host.startCalls)
+	}
+	if controller.capacity.Active() != 0 {
+		t.Fatalf("active capacity after blocked promotion = %d, want 0", controller.capacity.Active())
+	}
+}
+
 func TestProvenStartFailureReleasesCapacity(t *testing.T) {
 	tasks := &fakeControllerTasks{environments: map[string]*models.TaskEnvironment{
 		"failed": readyEnvironment("failed", executorTypeLocalPC),

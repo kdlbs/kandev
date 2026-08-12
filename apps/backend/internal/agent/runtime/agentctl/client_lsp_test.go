@@ -117,6 +117,25 @@ func TestTaskLSPConfigurationUsesTaskHostGenerationRoute(t *testing.T) {
 	}
 }
 
+func TestPurgeTaskLSPUsesTaskScopedDeleteRoute(t *testing.T) {
+	var gotMethod, gotPath, gotTaskID string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		gotTaskID = r.Header.Get(taskLSPTaskIDHeader)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(server.Close)
+	host, port := testServerAddress(t, server.URL)
+	client := NewClient(host, port, newTestLogger(), WithAuthToken("secret"))
+
+	if err := client.PurgeTaskLSP(context.Background(), "borrower-task"); err != nil {
+		t.Fatal(err)
+	}
+	if gotMethod != http.MethodDelete || gotPath != "/api/v1/lsp/task" || gotTaskID != "borrower-task" {
+		t.Fatalf("purge request = %s %s task=%q", gotMethod, gotPath, gotTaskID)
+	}
+}
+
 func TestDialTaskLSPAttachUsesGenerationAndAuthHeaders(t *testing.T) {
 	var gotPath, gotGeneration, gotAuth, gotInstanceID, gotTaskID string
 	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}

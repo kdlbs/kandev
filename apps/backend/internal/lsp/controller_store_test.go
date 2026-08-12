@@ -8,13 +8,14 @@ import (
 )
 
 type memoryLSPStore struct {
-	mu             sync.Mutex
-	states         map[TaskLanguageKey]TaskLanguageState
-	allocations    int
-	compareCalls   int
-	compareErrAt   int
-	compareErr     error
-	getContextHook func(context.Context)
+	mu              sync.Mutex
+	states          map[TaskLanguageKey]TaskLanguageState
+	allocations     int
+	compareCalls    int
+	compareErrAt    int
+	compareErrPhase Phase
+	compareErr      error
+	getContextHook  func(context.Context)
 }
 
 func newMemoryLSPStore() *memoryLSPStore {
@@ -70,7 +71,8 @@ func (m *memoryLSPStore) CompareAndUpdateTaskLSPLanguage(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.compareCalls++
-	if m.compareErrAt != 0 && m.compareCalls == m.compareErrAt {
+	if (m.compareErrAt != 0 && m.compareCalls == m.compareErrAt) ||
+		(m.compareErrPhase != "" && next.Phase == m.compareErrPhase) {
 		return nil, m.compareErr
 	}
 	key := TaskLanguageKey{TaskID: next.TaskID, Language: next.Language}

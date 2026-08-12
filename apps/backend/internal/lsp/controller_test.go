@@ -684,6 +684,8 @@ type fakeLSPHost struct {
 	restartResponse     *RuntimeSnapshot
 	restartErr          error
 	stopErr             error
+	purgeCalls          int
+	purgeErr            error
 	discovery           *DiscoveryResult
 	discoveryErr        error
 	discoveries         int

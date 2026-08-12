@@ -135,9 +135,11 @@ and obscure the actual task-level work that is still running.
 - Task stop, archive, and delete cancel pending starts/recovery, clear active progress, and
   terminate every LSP process descendant owned by that task. If another live task shares the
   departing owner's physical environment, Kandev transfers environment ownership to that borrower
-  and preserves its task-host process and independent language slots. With no live borrower, and
-  on environment teardown, Kandev reaps the full task-host process tree. A temporary task stop or
-  archive preserves policy and history for resume; task deletion cascades the task-language records.
+  and preserves its task-host process and independent language slots. The surviving host purges the
+  departing task's stopped slots, snapshots, subscriptions, diagnostic/capability caches, and
+  workspace projection. With no live borrower, and on environment teardown, Kandev reaps the full
+  task-host process tree. A temporary task stop or archive preserves policy and history for resume;
+  task deletion cascades the task-language records.
 - The task-scoped controller carries server-stamped initiator metadata (`user`, `agent`, or
   `automatic`) and reason codes. A future task-scoped MCP tool must call this controller with task
   ownership derived from its execution; it must not accept a caller-selected task/session ID or
@@ -337,8 +339,9 @@ never auto-restarted or timed out.
 - **Shared physical environment:** stopping a borrowing task stops only that task's language slots.
   Stopping, archiving, or deleting the environment owner transfers the environment to one live
   borrower before mutation and preserves the physical task host plus every other task's independent
-  slot. When no live borrower remains, or the environment itself is torn down, cleanup reaps the
-  physical task host and every descendant.
+  slot. After stop proof, cleanup purges only the departing task's in-host slots, snapshots,
+  subscriptions, caches, and workspace projection. When no live borrower remains, or the environment
+  itself is torn down, cleanup reaps the physical task host and every descendant.
 - **Workspace roots change:** supported dynamic folder updates keep the generation; otherwise the
   task reports `restart_required` without silently discarding an expensive import.
 - **Task stop/archive/delete:** cleanup cancels starts/recovery before runtime teardown. Failure of

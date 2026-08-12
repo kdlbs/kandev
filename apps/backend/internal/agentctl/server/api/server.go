@@ -124,6 +124,7 @@ func (s *Server) setupRoutes() {
 		api.POST("/lsp/languages/:language/stop", s.handleTaskLSPStop)
 		api.POST("/lsp/languages/:language/restart", s.handleTaskLSPRestart)
 		api.POST("/lsp/languages/:language/configuration", s.handleTaskLSPConfiguration)
+		api.DELETE("/lsp/task", s.handleTaskLSPPurge)
 		api.GET("/lsp/languages/:language/watch", s.handleTaskLSPWatch)
 		api.GET("/lsp/languages/:language/attach", s.handleTaskLSPAttach)
 

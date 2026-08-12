@@ -260,6 +260,27 @@ func TestDeleteTaskTree_MembershipReleaseFailureCancelsEveryPreparedCleanup(t *t
 	}
 }
 
+func TestDeleteTaskTreePrepareFailureCancelsFailedCleanupReservation(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	prepareErr := errors.New("cleanup inventory unavailable")
+	coordinator := &recordingCleanupCoordinator{prepareErr: prepareErr}
+	svc := NewHandoffService(
+		&fakeDeleteRepo{fakeCascadeRepo: newCascadeRepo(tasks)}, nil, nil, nil, nil, nil,
+	)
+	svc.SetTaskResourceCleaner(coordinator)
+
+	if _, err := svc.DeleteTaskTree(context.Background(), "root", false); !errors.Is(err, prepareErr) {
+		t.Fatalf("DeleteTaskTree error = %v, want preparation failure", err)
+	}
+	coordinator.mu.Lock()
+	defer coordinator.mu.Unlock()
+	if len(coordinator.prepared) != 1 || len(coordinator.cancelled) != 1 ||
+		coordinator.cancelled[0] != coordinator.prepared[0] {
+		t.Fatalf("prepared=%v cancelled=%v, want failed reservation cancelled", coordinator.prepared, coordinator.cancelled)
+	}
+}
+
 func (f *fakeWSGroupRepoCascade) RestoreWorkspaceGroupMemberByCascade(_ context.Context, taskID, cascadeID string) error {
 	// no-op for these tests
 	_ = taskID

@@ -58,6 +58,28 @@ func (c *Client) StopTaskLSP(
 	})
 }
 
+// PurgeTaskLSP removes stopped task-scoped caches from a shared task host.
+func (c *Client) PurgeTaskLSP(ctx context.Context, taskID string) error {
+	request, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.baseURL+"/api/v1/lsp/task", nil)
+	if err != nil {
+		return err
+	}
+	request.Header.Set(taskLSPTaskIDHeader, taskID)
+	response, err := c.httpClient.Do(request)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = response.Body.Close() }()
+	body, err := readResponseBody(response)
+	if err != nil {
+		return fmt.Errorf("read task LSP purge response: %w", err)
+	}
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("task LSP purge failed with status %d: %s", response.StatusCode, truncateBody(body))
+	}
+	return nil
+}
+
 func (c *Client) UpdateTaskLSPConfiguration(
 	ctx context.Context,
 	request sharedlsp.TaskHostConfigurationRequest,

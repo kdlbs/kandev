@@ -71,6 +71,28 @@ func TestTaskLSPStopRouteIsRegistered(t *testing.T) {
 	}
 }
 
+func TestTaskLSPPurgeRouteClearsOnlyTrustedTaskState(t *testing.T) {
+	server := newTestServer(t)
+	taskWorkspace := filepath.Join(server.cfg.WorkDir, "borrower")
+	if _, err := server.lspManager.UpdateWorkspaceForTask("task-1", taskWorkspace, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := server.lspManager.SnapshotForTask("task-1", "kotlin").WorkspacePath; got != taskWorkspace {
+		t.Fatalf("task workspace before purge = %q", got)
+	}
+
+	request := httptest.NewRequest(http.MethodDelete, "/api/v1/lsp/task", nil)
+	setTaskLSPTaskHeader(request)
+	response := httptest.NewRecorder()
+	server.router.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("task LSP purge status = %d body=%s", response.Code, response.Body.String())
+	}
+	if got := server.lspManager.SnapshotForTask("task-1", "kotlin").WorkspacePath; got != server.cfg.WorkDir {
+		t.Fatalf("task workspace after purge = %q, want default %q", got, server.cfg.WorkDir)
+	}
+}
+
 func TestTaskLSPWatchDisconnectIsNonOwning(t *testing.T) {
 	server := newTestServer(t)
 	httpServer := httptest.NewServer(server.router)
@@ -171,11 +193,19 @@ func TestTaskLSPWorkspaceRefreshScopesTaskWithoutRebindingPhysicalTrackers(t *te
 
 func TestTaskLSPRoutesRequireTrustedTaskIdentityHeader(t *testing.T) {
 	server := newTestServer(t)
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/lsp/languages/kotlin", nil)
-	response := httptest.NewRecorder()
-	server.router.ServeHTTP(response, request)
-	if response.Code != http.StatusBadRequest {
-		t.Fatalf("missing task identity status = %d, want 400", response.Code)
+	for _, test := range []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodGet, path: "/api/v1/lsp/languages/kotlin"},
+		{method: http.MethodDelete, path: "/api/v1/lsp/task"},
+	} {
+		request := httptest.NewRequest(test.method, test.path, nil)
+		response := httptest.NewRecorder()
+		server.router.ServeHTTP(response, request)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("%s %s missing task identity status = %d, want 400", test.method, test.path, response.Code)
+		}
 	}
 }
 

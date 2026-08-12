@@ -127,6 +127,7 @@ func (*fakeTaskLSPDiscoveryHost) UpdateTaskLSPConfiguration(context.Context, tas
 func (*fakeTaskLSPDiscoveryHost) StopTaskLSP(context.Context, tasklsp.TaskHostStopRequest) (*tasklsp.RuntimeSnapshot, error) {
 	return nil, nil
 }
+func (*fakeTaskLSPDiscoveryHost) PurgeTaskLSP(context.Context) error { return nil }
 func (*fakeTaskLSPDiscoveryHost) TaskLSPSnapshot(context.Context, string) (*tasklsp.RuntimeSnapshot, error) {
 	return nil, nil
 }

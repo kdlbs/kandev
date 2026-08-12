@@ -9,7 +9,7 @@ agentctl exposes these route groups (see `server/api/`):
 - `/instances/*` - Multi-instance management
 - `/processes/*` - Agent subprocess management (start/stop)
 - `/agent/configure`, `/agent/stream` - Agent configuration and event streaming
-- `/lsp/discovery`, `/lsp/workspace/*`, `/lsp/languages/*` - Instance-owned language-server discovery, control, watch, and non-owning attachment
+- `/lsp/discovery`, `/lsp/workspace/*`, `/lsp/languages/*`, `/lsp/task` - Instance-owned language-server discovery, control, task-state purge, watch, and non-owning attachment
 - `/git/*` - Git operations (status, commit, push, pull, rebase, stage, create PR, etc.)
 - `/shell/*` - Shell session management
 - `/workspace/*` - File operations, search, tree

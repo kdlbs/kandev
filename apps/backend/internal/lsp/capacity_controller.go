@@ -49,7 +49,11 @@ func (c *Controller) promoteCapacityEntry(
 		snapshot, transitionErr := c.transition(
 			ctx, *state, settings, PhaseWaitingForTask, "", "",
 		)
-		c.scheduleDesiredRecovery(entry.Key, snapshot)
+		// The queue entry has already been removed and this state was verified
+		// keep-warm above. Schedule from that durable intent even when persisting
+		// waiting_for_task fails and therefore produces no snapshot; otherwise no
+		// capacity or lifecycle event remains to retry the stranded generation.
+		c.scheduleRecovery(entry.Key)
 		return snapshot, errors.Join(fmt.Errorf("%w: %v", ErrTaskNotReady, err), transitionErr)
 	}
 	defer releaseAdmission()

@@ -20,8 +20,10 @@ import (
 )
 
 var (
-	ErrManagerClosed   = errors.New("task-host LSP manager is closed")
-	ErrStaleGeneration = errors.New("task-host LSP generation is stale")
+	ErrManagerClosed     = errors.New("task-host LSP manager is closed")
+	ErrStaleGeneration   = errors.New("task-host LSP generation is stale")
+	ErrTaskRuntimeActive = errors.New("task-host LSP task runtime is still active")
+	ErrTaskStatePurging  = errors.New("task-host LSP task state is being purged")
 )
 
 type ProcessManager interface {
@@ -45,16 +47,17 @@ type Manager struct {
 	installer Installer
 	logger    *logger.Logger
 
-	mu          sync.RWMutex
-	slots       map[string]*languageSlot
-	snapshots   map[string]Snapshot
-	subscribers map[string]map[uint64]chan Snapshot
-	nextSubID   uint64
-	incarnation string
-	startedAt   time.Time
-	closed      bool
-	closeErr    error
-	taskConfigs map[string]Config
+	mu           sync.RWMutex
+	slots        map[string]*languageSlot
+	snapshots    map[string]Snapshot
+	subscribers  map[string]map[uint64]chan Snapshot
+	nextSubID    uint64
+	incarnation  string
+	startedAt    time.Time
+	closed       bool
+	closeErr     error
+	taskConfigs  map[string]Config
+	purgingTasks map[string]struct{}
 
 	lifetimeMu      sync.Mutex
 	lifetimeCtx     context.Context
@@ -66,16 +69,17 @@ type Manager struct {
 
 func NewManager(cfg Config, processes ProcessManager, installerRegistry Installer, log *logger.Logger) *Manager {
 	return &Manager{
-		cfg:         cfg,
-		processes:   processes,
-		installer:   installerRegistry,
-		logger:      log,
-		slots:       make(map[string]*languageSlot),
-		snapshots:   make(map[string]Snapshot),
-		subscribers: make(map[string]map[uint64]chan Snapshot),
-		taskConfigs: make(map[string]Config),
-		incarnation: uuid.NewString(),
-		startedAt:   time.Now().UTC(),
+		cfg:          cfg,
+		processes:    processes,
+		installer:    installerRegistry,
+		logger:       log,
+		slots:        make(map[string]*languageSlot),
+		snapshots:    make(map[string]Snapshot),
+		subscribers:  make(map[string]map[uint64]chan Snapshot),
+		taskConfigs:  make(map[string]Config),
+		purgingTasks: make(map[string]struct{}),
+		incarnation:  uuid.NewString(),
+		startedAt:    time.Now().UTC(),
 	}
 }
 
@@ -99,6 +103,11 @@ func (m *Manager) SubscribeForTask(taskID, language string) (<-chan Snapshot, fu
 	updates := make(chan Snapshot, 1)
 	m.mu.Lock()
 	if m.closed {
+		close(updates)
+		m.mu.Unlock()
+		return updates, func() {}
+	}
+	if _, purging := m.purgingTasks[taskID]; purging {
 		close(updates)
 		m.mu.Unlock()
 		return updates, func() {}
@@ -281,6 +290,10 @@ func (m *Manager) UpdateWorkspaceFoldersForTask(
 	taskID = normalizeTaskID(taskID, m.cfg.OwnerID)
 	folders = normalizeWorkspaceFolders(folders)
 	m.mu.Lock()
+	if _, purging := m.purgingTasks[taskID]; purging {
+		m.mu.Unlock()
+		return sharedlsp.WorkspaceUpdateResult{}, ErrTaskStatePurging
+	}
 	taskConfig := m.cfg
 	if configured, ok := m.taskConfigs[taskID]; ok {
 		taskConfig = configured
@@ -309,6 +322,10 @@ func (m *Manager) UpdateWorkspaceForTask(
 		return sharedlsp.WorkspaceUpdateResult{}, errors.New("task LSP workspace has no valid roots")
 	}
 	m.mu.Lock()
+	if _, purging := m.purgingTasks[taskID]; purging {
+		m.mu.Unlock()
+		return sharedlsp.WorkspaceUpdateResult{}, ErrTaskStatePurging
+	}
 	taskConfig := m.cfg
 	if configured, ok := m.taskConfigs[taskID]; ok {
 		taskConfig = configured
@@ -791,6 +808,9 @@ func (m *Manager) slotForTask(taskID, language string) (*languageSlot, error) {
 	defer m.mu.Unlock()
 	if m.closed {
 		return nil, ErrManagerClosed
+	}
+	if _, purging := m.purgingTasks[taskID]; purging {
+		return nil, ErrTaskStatePurging
 	}
 	if m.slots[key] == nil {
 		m.slots[key] = &languageSlot{}

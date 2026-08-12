@@ -85,8 +85,11 @@ Task stop, archive, and delete cancel recovery and stop every language namespace
 task. Cleanup of a borrowing task cannot terminate another task's host or language slots. When a
 departing task owns a physical environment that another live task still uses, ownership transfers
 to one live borrower before the task mutation and the shared task host remains alive; only the
-departing task's slots stop. When no live borrower remains, cleanup reaps the full task-host process
-tree. Task-environment teardown remains the final unconditional full-process-tree owner. Policy
+departing task's slots stop. Once those processes are proved stopped, the surviving host purges the
+departing task's slots, snapshots, subscriptions, diagnostics, capabilities, and workspace
+projection without touching another task's namespace. When no live borrower remains, cleanup reaps
+the full task-host process tree. Task-environment teardown remains the final unconditional
+full-process-tree owner. Policy
 survives temporary task stop and archive so task resume can reconcile it; task deletion cascades
 the rows. Backend shutdown drops watches without making a browser or watch stream the stop owner.
 If the task host does not survive, recovery launches at most one new generation after the old

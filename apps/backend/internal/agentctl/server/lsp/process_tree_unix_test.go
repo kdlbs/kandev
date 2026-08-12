@@ -47,7 +47,11 @@ func TestManagerStopReapsLanguageServerProcessGroup(t *testing.T) {
 		t.Fatalf("start language server: %v", err)
 	}
 	parentPID, childPID := waitForProcessTreePIDs(t, pidFile)
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	// The race detector can delay process reaping beyond a few hundred
+	// milliseconds under full-package load. Keep the assertion bounded while
+	// allowing the real process manager enough time to prove the whole group is
+	// gone.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if _, err := manager.Stop(ctx, StopRequest{Language: "kotlin", Generation: 1}); err != nil {
 		t.Fatalf("stop language server: %v", err)

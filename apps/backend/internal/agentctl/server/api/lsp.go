@@ -138,6 +138,18 @@ func (s *Server) handleTaskLSPStop(c *gin.Context) {
 	writeTaskLSPResult(c, snapshot, err)
 }
 
+func (s *Server) handleTaskLSPPurge(c *gin.Context) {
+	taskID, ok := taskLSPTaskID(c)
+	if !ok {
+		return
+	}
+	if err := s.lspManager.PurgeTask(taskID); err != nil {
+		c.JSON(http.StatusConflict, gin.H{errKey: err.Error()})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 func (s *Server) handleTaskLSPConfiguration(c *gin.Context) {
 	taskID, ok := taskLSPTaskID(c)
 	if !ok {

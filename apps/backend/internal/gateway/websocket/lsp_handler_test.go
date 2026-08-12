@@ -316,6 +316,8 @@ func (f *gatewayFakeTaskHost) StopTaskLSP(context.Context, sharedlsp.TaskHostSto
 	return nil, errors.New("unexpected stop")
 }
 
+func (f *gatewayFakeTaskHost) PurgeTaskLSP(context.Context) error { return nil }
+
 func (f *gatewayFakeTaskHost) TaskLSPSnapshot(context.Context, string) (*sharedlsp.RuntimeSnapshot, error) {
 	return nil, errors.New("unexpected snapshot")
 }

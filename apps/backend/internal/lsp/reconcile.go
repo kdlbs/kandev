@@ -386,6 +386,7 @@ func (c *Controller) CleanupTask(ctx context.Context, taskID, reason string) err
 	taskHostDone := make(chan struct{})
 	var taskHostCleanupResult TaskHostCleanupResult
 	var taskHostCleanupErr error
+	var taskHostPurgeErr error
 	// Each language lane stays held from its refreshed generation snapshot
 	// through the task-host backstop. A Start/Restart accepted on either side
 	// of cleanup therefore cannot be mistaken for the generation that cleanup
@@ -421,15 +422,26 @@ func (c *Controller) CleanupTask(ctx context.Context, taskID, reason string) err
 		<-stopAttempts
 	}
 	if environment != nil && ExecutorSupportsLSP(environment.ExecutorType) {
+		host, hostExists, hostErr := c.runtimes.ExistingTaskHost(ctx, taskID, environment.ID)
+		if hostErr != nil {
+			taskHostPurgeErr = hostErr
+		} else if hostExists && host != nil {
+			taskHostPurgeErr = host.PurgeTaskLSP(ctx)
+		}
 		taskHostCleanupResult, taskHostCleanupErr = c.runtimes.CleanupTaskHost(
 			ctx, taskID, environment.ID, reason,
 		)
+		if taskHostCleanupResult.ProcessTreeGone {
+			// State in a reaped task-host process cannot leak. Per-language
+			// cleanup may also use this physical teardown as its final proof.
+			taskHostPurgeErr = nil
+		}
 	}
 	close(taskHostDone)
 	for range states {
 		cleanupErrors = append(cleanupErrors, <-commandResults)
 	}
-	cleanupErrors = append(cleanupErrors, taskHostCleanupErr)
+	cleanupErrors = append(cleanupErrors, taskHostPurgeErr, taskHostCleanupErr)
 	return errors.Join(cleanupErrors...)
 }
 

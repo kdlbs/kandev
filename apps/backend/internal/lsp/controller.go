@@ -61,6 +61,7 @@ type TaskHost interface {
 		request TaskHostConfigurationRequest,
 	) (*RuntimeSnapshot, error)
 	StopTaskLSP(ctx context.Context, request TaskHostStopRequest) (*RuntimeSnapshot, error)
+	PurgeTaskLSP(ctx context.Context) error
 	TaskLSPSnapshot(ctx context.Context, language string) (*RuntimeSnapshot, error)
 	WatchTaskLSP(
 		ctx context.Context,

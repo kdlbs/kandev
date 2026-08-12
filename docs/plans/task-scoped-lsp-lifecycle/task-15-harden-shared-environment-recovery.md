@@ -112,6 +112,26 @@ Completed 2026-08-12.
   returns to `waiting_for_task`, and schedules desired-state recovery. The focused regression passed,
   `go test -race ./internal/lsp -count=10` passed, the three task-service admission regressions passed
   10 race-enabled repetitions, and changed-code LSP lint reported zero issues.
+- The same audit found that preserving a shared physical host also retained the departing borrower's
+  task-keyed slots, snapshots, subscriptions, diagnostic/capability caches, and workspace projection.
+  Cleanup now invokes one trusted task-scoped agentctl purge after language stop attempts. Purge
+  refuses live or pending runtime ownership, deletes only the departing namespace, and remains an
+  error when the shared host survives; a proven full process-tree reap safely supersedes it. The
+  controller borrower cases, manager isolation/live-runtime cases, authenticated internal route,
+  and client transport tests passed 10 race-enabled repetitions.
+- Sol Max found a second cleanup blocker: `PrepareTaskResourceCleanup` reserved a durable admission
+  barrier before inventory capture, but a capture failure returned without cancelling the current
+  reservation because the cascade map recorded it only after success. Preparation now cancels its
+  own failed reservation, the coordinator records and cancels the current operation too, and the
+  terminal transition retries on a bounded detached context. Regressions prove the real job is
+  `cancelled`, session creation resumes, the failed coordinator reservation is included, and a
+  cancelled request survives one transient cancellation failure.
+- The capacity follow-up found one remaining stranded-generation path: after admission rejected a
+  queued promotion, failure to persist `waiting_for_task` also suppressed recovery because no
+  snapshot existed. Promotion now schedules recovery from its already-validated keep-warm intent;
+  the focused admission and persistence-error tests passed 20 race-enabled repetitions. A bounded
+  two-second process-stop deadline also stabilized the real process-tree proof under full-package
+  race-detector load without changing the process-reap assertion.
 
 ## Files
 

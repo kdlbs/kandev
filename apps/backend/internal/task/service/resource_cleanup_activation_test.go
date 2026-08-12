@@ -18,6 +18,33 @@ type transientStartCleanupRepository struct {
 	calls    int
 }
 
+type transientCancelCleanupRepository struct {
+	repository.TaskResourceCleanupRepository
+	mu       sync.Mutex
+	failures int
+	calls    int
+}
+
+func (r *transientCancelCleanupRepository) CompleteTaskResourceCleanupJob(
+	ctx context.Context,
+	id string,
+	state models.TaskResourceCleanupState,
+	lastError string,
+	nextAttemptAt *time.Time,
+) error {
+	r.mu.Lock()
+	r.calls++
+	if r.failures > 0 {
+		r.failures--
+		r.mu.Unlock()
+		return errors.New("transient prepared cleanup cancellation failure")
+	}
+	r.mu.Unlock()
+	return r.TaskResourceCleanupRepository.CompleteTaskResourceCleanupJob(
+		ctx, id, state, lastError, nextAttemptAt,
+	)
+}
+
 type failOnceResetCleanupRepository struct {
 	repository.TaskResourceCleanupRepository
 	mu        sync.Mutex
@@ -148,6 +175,75 @@ func TestStartPreparedCleanupUsesDetachedContextAndRetriesTransientFailure(t *te
 	}
 	if job.State == models.TaskResourceCleanupStatePrepared {
 		t.Fatal("cleanup remained prepared after committed lifecycle mutation")
+	}
+}
+
+func TestPrepareTaskResourceCleanupCancelsBarrierWhenInventoryCaptureFails(t *testing.T) {
+	taskSvc, repo := setupOfficeTest(t)
+	ctx := context.Background()
+	const taskID = "task-prepare-failure"
+	seedCleanupTaskAndSession(t, repo, taskID, "session-before-failure")
+	inventoryErr := errors.New("injected session inventory failure")
+	taskSvc.sessions = failingListTaskSessionsRepo{
+		SessionRepository: repo,
+		err:               inventoryErr,
+	}
+	const operationID = "cascade-delete:prepare-failure"
+
+	err := taskSvc.PrepareTaskResourceCleanup(
+		ctx, taskID, models.TaskResourceCleanupTriggerCascadeDelete, operationID, true,
+	)
+	if !errors.Is(err, inventoryErr) {
+		t.Fatalf("prepare cleanup error = %v, want inventory failure", err)
+	}
+	job, err := repo.GetTaskResourceCleanupJobByOperationID(ctx, operationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.State != models.TaskResourceCleanupStateCancelled {
+		t.Fatalf("failed preparation state = %q, want cancelled", job.State)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-after-failure", TaskID: taskID, State: models.TaskSessionStateCreated,
+	}); err != nil {
+		t.Fatalf("create session after failed preparation: %v", err)
+	}
+}
+
+func TestCancelPreparedCleanupUsesDetachedContextAndRetriesTransientFailure(t *testing.T) {
+	taskSvc, repo := setupOfficeTest(t)
+	ctx := context.Background()
+	const taskID = "task-cancel-retry"
+	seedCleanupTaskAndSession(t, repo, taskID, "session-cancel-retry")
+	const operationID = "cascade-delete:cancel-retry"
+	if err := taskSvc.PrepareTaskResourceCleanup(
+		ctx, taskID, models.TaskResourceCleanupTriggerCascadeDelete, operationID, true,
+	); err != nil {
+		t.Fatalf("PrepareTaskResourceCleanup: %v", err)
+	}
+	transient := &transientCancelCleanupRepository{
+		TaskResourceCleanupRepository: taskSvc.resourceCleanups,
+		failures:                      1,
+	}
+	taskSvc.resourceCleanups = transient
+	cancelledCtx, cancel := context.WithCancel(ctx)
+	cancel()
+
+	if err := taskSvc.CancelPreparedTaskResourceCleanup(cancelledCtx, operationID); err != nil {
+		t.Fatalf("CancelPreparedTaskResourceCleanup: %v", err)
+	}
+	transient.mu.Lock()
+	calls := transient.calls
+	transient.mu.Unlock()
+	if calls != 2 {
+		t.Fatalf("prepared cancellation attempts = %d, want 2", calls)
+	}
+	job, err := repo.GetTaskResourceCleanupJobByOperationID(ctx, operationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.State != models.TaskResourceCleanupStateCancelled {
+		t.Fatalf("prepared cancellation state = %q, want cancelled", job.State)
 	}
 }
 

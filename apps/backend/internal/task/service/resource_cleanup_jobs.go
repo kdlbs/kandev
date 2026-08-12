@@ -604,7 +604,7 @@ func (s *Service) PrepareTaskResourceCleanup(
 	trigger models.TaskResourceCleanupTrigger,
 	operationID string,
 	deleteEnvironmentRow bool,
-) error {
+) (resultErr error) {
 	// Reserve the durable lifecycle barrier BEFORE capturing the inventory.
 	// Session and worktree creation serialize against the owning task row and
 	// reject new ownership while this prepared barrier is active, so the
@@ -618,6 +618,18 @@ func (s *Service) PrepareTaskResourceCleanup(
 		return nil
 	}
 	barrierOperationID := job.OperationID
+	defer func() {
+		if resultErr == nil {
+			return
+		}
+		cancelErr := s.CancelPreparedTaskResourceCleanup(ctx, barrierOperationID)
+		if cancelErr != nil {
+			resultErr = errors.Join(
+				resultErr,
+				fmt.Errorf("cancel failed task cleanup preparation: %w", cancelErr),
+			)
+		}
+	}()
 	sessions, err := s.sessions.ListTaskSessions(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("list task sessions for cleanup snapshot: %w", err)
@@ -694,11 +706,29 @@ func (s *Service) CancelPreparedTaskResourceCleanup(ctx context.Context, operati
 	if s.resourceCleanups == nil {
 		return nil
 	}
-	job, err := s.resourceCleanups.GetTaskResourceCleanupJobByOperationID(ctx, operationID)
-	if err != nil {
-		return err
+	if operationID == "" {
+		return errors.New("task resource cleanup operation ID is required")
 	}
-	return s.resourceCleanups.CompleteTaskResourceCleanupJob(
-		ctx, job.ID, models.TaskResourceCleanupStateCancelled, "", nil,
-	)
+	transitionCtx, cancel := detachedCleanupTransitionContext(ctx)
+	defer cancel()
+	var lastErr error
+	for {
+		job, err := s.resourceCleanups.GetTaskResourceCleanupJobByOperationID(transitionCtx, operationID)
+		if err == nil {
+			err = s.resourceCleanups.CompleteTaskResourceCleanupJob(
+				transitionCtx, job.ID, models.TaskResourceCleanupStateCancelled, "", nil,
+			)
+			if err == nil {
+				return nil
+			}
+		}
+		lastErr = err
+		timer := time.NewTimer(preparedCleanupTransitionRetryDelay)
+		select {
+		case <-transitionCtx.Done():
+			timer.Stop()
+			return errors.Join(lastErr, transitionCtx.Err())
+		case <-timer.C:
+		}
+	}
 }

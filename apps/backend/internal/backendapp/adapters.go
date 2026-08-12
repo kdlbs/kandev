@@ -115,6 +115,10 @@ func (h *taskLSPBoundHost) StopTaskLSP(ctx context.Context, request tasklsp.Task
 	return h.client.StopTaskLSP(ctx, request)
 }
 
+func (h *taskLSPBoundHost) PurgeTaskLSP(ctx context.Context) error {
+	return h.client.PurgeTaskLSP(ctx, h.taskID)
+}
+
 func (h *taskLSPBoundHost) TaskLSPSnapshot(ctx context.Context, language string) (*tasklsp.RuntimeSnapshot, error) {
 	return h.client.TaskLSPSnapshot(ctx, h.taskID, language)
 }

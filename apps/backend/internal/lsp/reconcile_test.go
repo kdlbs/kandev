@@ -364,6 +364,60 @@ func TestCleanupTaskHostFallbackReleasesFailedLanguage(t *testing.T) {
 	}
 }
 
+func TestCleanupBorrowerPurgesOnlyItsTaskHostState(t *testing.T) {
+	store := newMemoryLSPStore()
+	seedLSPState(t, store, TaskLanguageState{
+		TaskID: "task-1", Language: "kotlin", Policy: PolicyKeepWarm,
+		DetectionState: DetectionComplete, Phase: PhaseReady, Generation: 3,
+		LastInitiator: InitiatorUser,
+	})
+	host := newFakeLSPHost()
+	runtimes := newReconcileRuntimes()
+	runtimes.existing["env-task-1"] = host
+	runtimes.cleanupProved = false
+	controller := newReconcileController(store, runtimes, NewCapacity(8))
+
+	if err := controller.CleanupTask(context.Background(), "task-1", "task_deleted"); err != nil {
+		t.Fatalf("borrower task cleanup: %v", err)
+	}
+	if host.purgeCalls != 1 {
+		t.Fatalf("task-host purge calls = %d, want one", host.purgeCalls)
+	}
+	if runtimes.existing["env-task-1"] != host {
+		t.Fatal("borrower cleanup stopped the surviving shared task host")
+	}
+}
+
+func (f *fakeLSPHost) PurgeTaskLSP(context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.purgeCalls++
+	return f.purgeErr
+}
+
+func TestCleanupBorrowerFailsWhenTaskHostStateCannotBePurged(t *testing.T) {
+	store := newMemoryLSPStore()
+	seedLSPState(t, store, TaskLanguageState{
+		TaskID: "task-1", Language: "kotlin", Policy: PolicyKeepWarm,
+		DetectionState: DetectionComplete, Phase: PhaseReady, Generation: 3,
+		LastInitiator: InitiatorUser,
+	})
+	purgeFailure := errors.New("task-host retained task state")
+	host := newFakeLSPHost()
+	host.purgeErr = purgeFailure
+	runtimes := newReconcileRuntimes()
+	runtimes.existing["env-task-1"] = host
+	runtimes.cleanupProved = false
+	controller := newReconcileController(store, runtimes, NewCapacity(8))
+
+	if err := controller.CleanupTask(context.Background(), "task-1", "task_deleted"); !errors.Is(err, purgeFailure) {
+		t.Fatalf("borrower task cleanup error = %v, want purge failure", err)
+	}
+	if runtimes.existing["env-task-1"] != host {
+		t.Fatal("failed borrower purge stopped the surviving shared task host")
+	}
+}
+
 func TestCleanupBorrowerHostPreservationRetainsFailedLanguage(t *testing.T) {
 	store := newMemoryLSPStore()
 	seedLSPState(t, store, TaskLanguageState{

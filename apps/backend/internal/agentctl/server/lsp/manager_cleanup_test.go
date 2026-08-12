@@ -118,3 +118,80 @@ func TestManagerCloseCleanupFailureRetainsRuntimeOwnershipEvidence(t *testing.T)
 	}
 	manager.closeErr = nil
 }
+
+func TestManagerPurgeTaskRemovesOnlyTargetTaskState(t *testing.T) {
+	manager := NewManager(Config{
+		OwnerID: "owner-task", WorkDir: "/workspace", WorkspaceURI: "file:///workspace",
+	}, nil, nil, testLogger())
+	targetKey := taskLanguageRuntimeKey("borrower-task", "kotlin")
+	otherKey := taskLanguageRuntimeKey("other-task", "go")
+	targetUpdates := make(chan Snapshot)
+	otherUpdates := make(chan Snapshot)
+	manager.mu.Lock()
+	manager.slots[targetKey] = &languageSlot{lastGeneration: 3}
+	manager.slots[otherKey] = &languageSlot{lastGeneration: 7}
+	manager.snapshots[targetKey] = Snapshot{
+		Language: "kotlin", Generation: 3, WorkspacePath: "/workspace/borrower",
+	}
+	manager.snapshots[otherKey] = Snapshot{
+		Language: "go", Generation: 7, WorkspacePath: "/workspace/other",
+	}
+	manager.subscribers[targetKey] = map[uint64]chan Snapshot{1: targetUpdates}
+	manager.subscribers[otherKey] = map[uint64]chan Snapshot{2: otherUpdates}
+	manager.taskConfigs["borrower-task"] = Config{OwnerID: "borrower-task", WorkDir: "/workspace/borrower"}
+	manager.taskConfigs["other-task"] = Config{OwnerID: "other-task", WorkDir: "/workspace/other"}
+	manager.mu.Unlock()
+
+	if err := manager.PurgeTask("borrower-task"); err != nil {
+		t.Fatalf("purge borrower task: %v", err)
+	}
+	manager.mu.RLock()
+	_, targetSlotExists := manager.slots[targetKey]
+	_, targetSnapshotExists := manager.snapshots[targetKey]
+	_, targetSubscribersExist := manager.subscribers[targetKey]
+	_, targetConfigExists := manager.taskConfigs["borrower-task"]
+	_, otherSlotExists := manager.slots[otherKey]
+	_, otherSnapshotExists := manager.snapshots[otherKey]
+	_, otherSubscribersExist := manager.subscribers[otherKey]
+	_, otherConfigExists := manager.taskConfigs["other-task"]
+	manager.mu.RUnlock()
+	if targetSlotExists || targetSnapshotExists || targetSubscribersExist || targetConfigExists {
+		t.Fatal("purged task retained task-host state")
+	}
+	if !otherSlotExists || !otherSnapshotExists || !otherSubscribersExist || !otherConfigExists {
+		t.Fatal("purge removed another task's state from the shared host")
+	}
+	if _, open := <-targetUpdates; open {
+		t.Fatal("purge left target task subscriber open")
+	}
+	select {
+	case <-otherUpdates:
+		t.Fatal("purge closed another task's subscriber")
+	default:
+	}
+}
+
+func TestManagerPurgeTaskRejectsLiveRuntimeOwnership(t *testing.T) {
+	manager := NewManager(Config{OwnerID: "owner-task"}, nil, nil, testLogger())
+	key := taskLanguageRuntimeKey("borrower-task", "kotlin")
+	slot := &languageSlot{runtime: &runtime{taskID: "borrower-task", language: "kotlin", generation: 4}}
+	manager.mu.Lock()
+	manager.slots[key] = slot
+	manager.snapshots[key] = Snapshot{Language: "kotlin", Generation: 4}
+	manager.taskConfigs["borrower-task"] = Config{OwnerID: "borrower-task", WorkDir: "/workspace/borrower"}
+	manager.mu.Unlock()
+
+	if err := manager.PurgeTask("borrower-task"); !errors.Is(err, ErrTaskRuntimeActive) {
+		t.Fatalf("purge live task error = %v, want %v", err, ErrTaskRuntimeActive)
+	}
+	manager.mu.RLock()
+	_, slotExists := manager.slots[key]
+	_, snapshotExists := manager.snapshots[key]
+	_, configExists := manager.taskConfigs["borrower-task"]
+	manager.mu.RUnlock()
+	if !slotExists || !snapshotExists || !configExists {
+		t.Fatal("rejected purge discarded live runtime evidence")
+	}
+	// Avoid leaving a synthetic live runtime for any later cleanup.
+	slot.runtime = nil
+}
