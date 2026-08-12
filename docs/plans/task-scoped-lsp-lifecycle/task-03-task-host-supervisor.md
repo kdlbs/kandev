@@ -151,3 +151,13 @@ starts and pending stops now register in separate token maps without holding the
 across the operation-slot wait. Stop cancels the active matching generation plus every unaccepted
 queued start; starts arriving behind a pending Stop self-cancel. The active-plus-queued regression
 and the original blocked-install regression pass 20 repetitions under `-race`.
+
+The 2026-08-12 independent audit found Docker control credentials were routed through a
+user-visible secret filter and propagated to sibling sessions only after durable writes. The
+lifecycle manager now separates user-selected credentials from internal runtime credentials,
+updates every live same-environment client before persistence, and mirrors only committed state.
+Fresh Docker launches reserve the task-environment row before lifecycle startup, with rollback of
+the row, runtime, and secrets on failure. Ordered workspace roots are projected to container paths
+for initial task-host creation and rescans. Focused credential-ordering tests passed 20 race
+repetitions; real-container first launch, shared-session reuse, and four Docker Kotlin task-host
+scenarios passed 6/6.

@@ -157,3 +157,12 @@ that teardown proved dead. The deterministic barrier regression failed before th
 After merging `origin/main` at `9a4c65f75`, the combined `internal/lsp`, task-host LSP, and gateway
 WebSocket suites pass under `-race`, and changed-code backend lint reports zero issues. The broad
 unfiltered lint command now reports eight unrelated `goconst` findings from the merged mainline.
+
+The 2026-08-12 audit closed recovery ownership gaps across user settings, runtime evidence, and
+environment cleanup. Task policy/config now resolves through task → workspace owner and is cached
+per task. Runtime incarnation, start time, and monotonic revision are persisted atomically, so
+delayed REST/watch snapshots cannot regress phase, release current capacity, or start a duplicate.
+Reset/archive/delete remove the environment's internal runtime secrets only after successful
+teardown and retain the row on cleanup failure. Exact-head `make test` passed, as did
+`go test -race ./internal/lsp ./internal/agentctl/server/lsp
+./internal/agent/runtime/lifecycle ./internal/orchestrator/executor -count=1` and changed-code lint.

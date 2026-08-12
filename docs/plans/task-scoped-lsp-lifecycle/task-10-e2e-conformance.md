@@ -126,3 +126,7 @@ Completed 2026-08-05.
   passed 1/1 with retries disabled. The same shard's status-placement retry passed once in isolation
   and 3/3 repeated runs with one worker and no retries, so no product change or timeout increase was
   made for that non-reproducing timing artifact.
+- After the 2026-08-12 Docker credential/environment fixes, the exact production container command
+  selected first launch, multi-session environment reuse, and the complete Docker task-host LSP
+  spec. All 6/6 passed in 1.7 minutes: Kotlin discovery/start before opening an editor, in-container
+  server execution, two-session Monaco isolation, and edit persistence across LSP Stop/reload.

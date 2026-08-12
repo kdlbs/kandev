@@ -380,6 +380,15 @@ Completed 2026-08-05.
   58-test/41-page public-doc validators passed. The container command rebuilt successfully but this
   host lacked a reachable Docker daemon, leaving two daemon-backed cases skipped and two
   fixture-safe cases passed; Task 10 retains the prior 4/4 real-container evidence.
+- The 2026-08-12 independent GPT-5.6 Sol audit found seven backend recovery gaps. Runtime
+  credentials now use an internal-only store, fresh Docker launches reserve their environment row
+  before lifecycle startup, rotated credentials reach every live environment client before
+  fallible persistence, Docker task hosts use ordered `/workspace` roots, settings resolve through
+  the task workspace owner, runtime snapshots enforce an incarnation/revision high-water mark, and
+  permanent environment deletion removes its internal credentials. The branch was rebased onto
+  `origin/main` at `b170d205f` (already up to date). Exact-head `make test`, changed-code lint, and
+  the LSP/task-host/lifecycle/executor race suites pass. Real-container first-launch, shared-session,
+  and four Kotlin task-host scenarios pass 6/6.
 
 ---
 
