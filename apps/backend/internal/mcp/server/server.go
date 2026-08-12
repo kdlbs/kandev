@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/mcp/plugintools"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
 	"github.com/kandev/kandev/internal/task/service"
@@ -109,6 +110,9 @@ type Server struct {
 	attachmentReporter func(streams.MCPAttachmentEvidence)
 	validatorMu        sync.RWMutex
 	toolValidators     map[string]toolArgumentValidator
+	pluginToolsMu      sync.Mutex
+	pluginTools        plugintools.Snapshot
+	pluginToolsReady   bool
 }
 
 // New creates a new MCP server for agentctl.
@@ -228,6 +232,9 @@ func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *
 	})
 	hooks.AddAfterListTools(func(ctx context.Context, _ any, _ *mcp.ListToolsRequest, result *mcp.ListToolsResult) {
 		s.observeMCPConnection(mcpConnectionID(ctx), streams.MCPAttachmentEvidenceToolsListObserved, len(result.Tools), "")
+	})
+	hooks.AddBeforeListTools(func(ctx context.Context, _ any, _ *mcp.ListToolsRequest) {
+		s.syncPluginTools(ctx)
 	})
 	hooks.AddAfterCallTool(func(ctx context.Context, _ any, _ *mcp.CallToolRequest, _ *mcp.CallToolResult) {
 		s.observeMCPConnection(mcpConnectionID(ctx), streams.MCPAttachmentEvidenceToolCallObserved, 0, "")
@@ -569,6 +576,82 @@ func (s *Server) rebuildTools() {
 	s.mcpServer.SetTools(s.assembleTools()...)
 }
 
+// SetPluginTools atomically replaces sideloaded tools. SetTools emits one
+// tools/list_changed notification to initialized MCP clients.
+func (s *Server) SetPluginTools(snapshot plugintools.Snapshot) {
+	s.pluginToolsMu.Lock()
+	if s.pluginToolsReady && snapshot.Generation == s.pluginTools.Generation && snapshot.Revision < s.pluginTools.Revision {
+		s.pluginToolsMu.Unlock()
+		return
+	}
+	if s.pluginToolsReady && plugintools.Equal(s.pluginTools, snapshot) {
+		s.pluginToolsMu.Unlock()
+		return
+	}
+	s.pluginTools = plugintools.Normalize(snapshot)
+	s.pluginToolsReady = true
+	s.pluginToolsMu.Unlock()
+	s.mu.Lock()
+	s.rebuildTools()
+	s.mu.Unlock()
+}
+
+func (s *Server) syncPluginTools(ctx context.Context) {
+	if s.backend == nil {
+		return
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	s.mu.RLock()
+	surface := string(s.profile.Surface)
+	s.mu.RUnlock()
+	var snapshot plugintools.Snapshot
+	if err := s.backend.RequestPayload(requestCtx, ws.ActionMCPListPluginTools, map[string]string{"surface": surface}, &snapshot); err != nil {
+		return
+	}
+	s.SetPluginTools(snapshot)
+}
+
+func (s *Server) registerPluginTools() {
+	s.pluginToolsMu.Lock()
+	ready := s.pluginToolsReady
+	snapshot := plugintools.Normalize(s.pluginTools)
+	s.pluginToolsMu.Unlock()
+	if !ready {
+		return
+	}
+	for _, definition := range snapshot.Tools {
+		tool := mcp.NewToolWithRawSchema(definition.ExposedName, definition.Description, definition.InputSchema)
+		tool.Annotations = mcp.ToolAnnotation{
+			ReadOnlyHint: &definition.ReadOnlyHint, DestructiveHint: &definition.DestructiveHint,
+			IdempotentHint: &definition.IdempotentHint, OpenWorldHint: &definition.OpenWorldHint,
+		}
+		d := definition
+		s.mcpServer.AddTool(tool, s.wrapHandler(d.ExposedName, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			payload := map[string]any{
+				"plugin_id": d.PluginID, "local_name": d.LocalName, "arguments": req.GetArguments(),
+				"invocation_id": fmt.Sprintf("mcp-%d", time.Now().UnixNano()), "task_id": s.taskID,
+				"session_id": s.sessionID, "surface": string(s.profile.Surface),
+			}
+			var result struct {
+				Text              string         `json:"text"`
+				StructuredContent map[string]any `json:"structured_content,omitempty"`
+				IsError           bool           `json:"is_error"`
+			}
+			if err := s.backend.RequestPayload(ctx, ws.ActionMCPInvokePluginTool, payload, &result); err != nil {
+				return nil, err
+			}
+			if result.IsError {
+				return mcp.NewToolResultError(result.Text), nil
+			}
+			if result.StructuredContent != nil {
+				return mcp.NewToolResultStructured(result.StructuredContent, result.Text), nil
+			}
+			return mcp.NewToolResultText(result.Text), nil
+		}))
+	}
+}
+
 func sameProviderSet(left, right []string) bool {
 	if len(left) != len(right) {
 		return false
@@ -667,6 +750,7 @@ func (s *Server) registerTools() {
 			group.register(s)
 		}
 	}
+	s.registerPluginTools()
 	s.logger.Info("registered MCP tools",
 		zap.String("mode", s.mode),
 		zap.Int("count", len(s.mcpServer.ListTools())),

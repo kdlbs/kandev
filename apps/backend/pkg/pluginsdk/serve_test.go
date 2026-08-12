@@ -27,6 +27,15 @@ func (p *fakeAuthorPlugin) HandleWebhook(_ context.Context, req *WebhookRequest)
 	return &WebhookResponse{Status: 200, Body: append([]byte("got:"), req.Body...)}, nil
 }
 
+func (p *fakeAuthorPlugin) InvokeAgentTool(_ context.Context, req *AgentToolRequest) (*AgentToolResult, error) {
+	return &AgentToolResult{
+		Text: "called:" + req.Context.TaskID,
+		StructuredContent: map[string]any{
+			"name": req.Name, "value": req.Arguments["value"],
+		},
+	}, nil
+}
+
 // TestServe_EndToEnd exercises the same GRPCPlugin wiring Serve() (plugin
 // side) and kandev's runtime manager (host side, via plugin.NewClient)
 // use, over a real go-plugin gRPC connection + broker
@@ -78,6 +87,16 @@ func TestServe_EndToEnd(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, int32(200), resp.Status)
 		require.Equal(t, []byte("got:hi"), resp.Body)
+	})
+
+	t.Run("InvokeAgentTool", func(t *testing.T) {
+		resp, err := remote.InvokeAgentTool(context.Background(), &AgentToolRequest{
+			InvocationID: "inv-1", Name: "echo", Arguments: map[string]any{"value": "ok"},
+			Context: AgentToolContext{TaskID: "task-1", SessionID: "session-1", WorkspaceID: "workspace-1", Surface: "kanban-task"},
+		})
+		require.NoError(t, err)
+		require.Equal(t, "called:task-1", resp.Text)
+		require.Equal(t, "echo", resp.StructuredContent["name"])
 	})
 
 	t.Run("HostBrokerRoundTrip", func(t *testing.T) {

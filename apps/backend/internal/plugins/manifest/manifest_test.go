@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -88,6 +89,59 @@ func TestValidate_ValidManifestPasses(t *testing.T) {
 	}
 	if err := m.Validate(); err != nil {
 		t.Fatalf("Validate() unexpected error: %v", err)
+	}
+}
+
+func TestParse_AgentToolDeclarationIsRetained(t *testing.T) {
+	yaml := validManifestYAML + `
+agent_tools:
+  - name: add_tag
+    description: Add a tag to the current task.
+    surfaces: [kanban-task]
+    input_schema:
+      type: object
+      properties:
+        tag_id: {type: string}
+      required: [tag_id]
+`
+	m, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	field := reflect.ValueOf(m).Elem().FieldByName("AgentTools")
+	if !field.IsValid() || field.Len() != 1 {
+		t.Fatalf("AgentTools = %v, want one declaration", field)
+	}
+}
+
+func TestValidate_AgentToolContract(t *testing.T) {
+	m := validManifest(t)
+	readOnly := true
+	destructive := false
+	m.AgentTools = []AgentTool{{
+		Name:        "read_tag",
+		Description: "Read the current task tag.",
+		Surfaces:    []string{AgentToolSurfaceKanban},
+		InputSchema: map[string]any{"type": "object"},
+		Annotations: AgentToolAnnotations{
+			ReadOnlyHint: &readOnly, DestructiveHint: &destructive,
+		},
+	}}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("Validate() unexpected error: %v", err)
+	}
+}
+
+func TestValidate_RejectsInvalidAgentTool(t *testing.T) {
+	m := validManifest(t)
+	m.AgentTools = []AgentTool{{
+		Name:        "Bad-Name",
+		Description: "",
+		Surfaces:    []string{"configuration"},
+		InputSchema: map[string]any{"type": "string"},
+	}}
+	if err := m.Validate(); err == nil {
+		t.Fatal("Validate() expected agent tool errors, got nil")
 	}
 }
 

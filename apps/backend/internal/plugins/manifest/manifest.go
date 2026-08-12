@@ -47,11 +47,37 @@ type Manifest struct {
 	AuthProviders []AuthProvider `yaml:"auth_providers,omitempty" json:"auth_providers,omitempty"`
 
 	ConfigSchema map[string]any `yaml:"config_schema,omitempty" json:"config_schema,omitempty"`
+	AgentTools   []AgentTool    `yaml:"agent_tools,omitempty" json:"agent_tools,omitempty"`
 
 	UI UISection `yaml:"ui,omitempty" json:"ui,omitempty"`
 
 	Runtime          Runtime `yaml:"runtime,omitempty" json:"runtime,omitempty"`
 	MinKandevVersion string  `yaml:"min_kandev_version,omitempty" json:"min_kandev_version,omitempty"`
+}
+
+const (
+	AgentToolSurfaceKanban = "kanban-task"
+	AgentToolSurfaceOffice = "office-task"
+)
+
+// AgentTool is an MCP tool a plugin contributes to matching task sessions.
+// The exposed MCP name is derived by the host and is not author-controlled.
+type AgentTool struct {
+	Name         string               `yaml:"name" json:"name"`
+	Description  string               `yaml:"description" json:"description"`
+	Surfaces     []string             `yaml:"surfaces" json:"surfaces"`
+	InputSchema  map[string]any       `yaml:"input_schema" json:"input_schema"`
+	OutputSchema map[string]any       `yaml:"output_schema,omitempty" json:"output_schema,omitempty"`
+	Annotations  AgentToolAnnotations `yaml:"annotations,omitempty" json:"annotations,omitempty"`
+}
+
+// AgentToolAnnotations are MCP hints. Nil values preserve omission so the
+// runtime descriptor can apply conservative defaults explicitly.
+type AgentToolAnnotations struct {
+	ReadOnlyHint    *bool `yaml:"read_only_hint,omitempty" json:"read_only_hint,omitempty"`
+	DestructiveHint *bool `yaml:"destructive_hint,omitempty" json:"destructive_hint,omitempty"`
+	IdempotentHint  *bool `yaml:"idempotent_hint,omitempty" json:"idempotent_hint,omitempty"`
+	OpenWorldHint   *bool `yaml:"open_world_hint,omitempty" json:"open_world_hint,omitempty"`
 }
 
 // Runtime declares that a plugin ships a kandev-managed binary rather than

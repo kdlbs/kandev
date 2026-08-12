@@ -8,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/mcp/plugintools"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	mcplib "github.com/mark3labs/mcp-go/mcp"
@@ -77,6 +78,44 @@ func newTestLogger(t *testing.T) *logger.Logger {
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
 	require.NoError(t, err)
 	return log
+}
+
+func TestSetPluginToolsReplacesRuntimeRegistry(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+	s := New(backend, "session-1", "task-1", 10005, log, "", false, ModeTask)
+	definition := plugintools.Definition{
+		PluginID: "task-tags.v1", LocalName: "add_tag", ExposedName: "plugin_8d5b66e217366546_add_tag",
+		Description: "Add a tag", InputSchema: []byte(`{"type":"object","properties":{"tag":{"type":"string"}}}`),
+		Surfaces: []string{plugintools.SurfaceKanban},
+	}
+	s.SetPluginTools(plugintools.Snapshot{Generation: "g", Revision: 1, Tools: []plugintools.Definition{definition}})
+	if _, ok := s.mcpServer.ListTools()[definition.ExposedName]; !ok {
+		t.Fatalf("plugin tool was not registered")
+	}
+	s.SetPluginTools(plugintools.Snapshot{Generation: "g", Revision: 2})
+	if _, ok := s.mcpServer.ListTools()[definition.ExposedName]; ok {
+		t.Fatalf("plugin tool was not removed on replacement")
+	}
+}
+
+func TestSetPluginToolsIgnoresStaleRevision(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+	s := New(backend, "session-1", "task-1", 10005, log, "", false, ModeTask)
+	definition := plugintools.Definition{
+		PluginID: "plugin", LocalName: "current", ExposedName: "plugin_8d5b66e217366546_current",
+		Description: "Current", InputSchema: []byte(`{"type":"object"}`),
+		Surfaces: []string{plugintools.SurfaceKanban},
+	}
+	s.SetPluginTools(plugintools.Snapshot{Generation: "g", Revision: 2, Tools: []plugintools.Definition{definition}})
+	s.SetPluginTools(plugintools.Snapshot{Generation: "g", Revision: 1})
+	_, ok := s.mcpServer.ListTools()[definition.ExposedName]
+	if !ok {
+		t.Fatal("stale revision replaced the current registry")
+	}
 }
 
 // getRegisteredToolNames returns the names of all tools registered on the MCP server.

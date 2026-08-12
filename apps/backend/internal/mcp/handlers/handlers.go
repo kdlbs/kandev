@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/plugins"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/dto"
@@ -234,6 +235,7 @@ type Handlers struct {
 	// registered — see registerReviewHandlers.
 	reviewService *service.ReviewService
 	reviewRunner  ReviewRunner
+	pluginSvc     *plugins.Service
 
 	// Optional task-bound GitHub PR automation controls.
 	taskPRAutomation       TaskPRAutomationService
@@ -328,12 +330,21 @@ func (h *Handlers) SetConfigDeps(
 	h.mcpConfigSvc = mcpConfigSvc
 }
 
+// SetPluginService wires the plugin agent-tool catalog and invocation bridge.
+func (h *Handlers) SetPluginService(svc *plugins.Service) {
+	h.pluginSvc = svc
+}
+
 // RegisterHandlers registers all MCP handlers with the dispatcher.
 func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	before := d.HandlerCount()
 
 	// Task-mode handlers (always registered)
 	d.RegisterFunc(ws.ActionMCPListWorkspaces, h.handleListWorkspaces)
+	if h.pluginSvc != nil {
+		d.RegisterFunc(ws.ActionMCPListPluginTools, h.handleListPluginTools)
+		d.RegisterFunc(ws.ActionMCPInvokePluginTool, h.handleInvokePluginTool)
+	}
 	d.RegisterFunc(ws.ActionMCPListWorkflows, h.handleListWorkflows)
 	d.RegisterFunc(ws.ActionMCPListWorkflowSteps, h.handleListWorkflowSteps)
 	d.RegisterFunc(ws.ActionMCPListRepositories, h.handleListRepositories)

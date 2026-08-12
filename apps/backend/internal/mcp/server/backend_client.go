@@ -34,6 +34,8 @@ type ChannelBackendClient struct {
 	requestCh chan *ws.Message
 	pending   map[string]chan *ws.Message
 	pendingMu sync.Mutex
+	done      chan struct{}
+	closeOnce sync.Once
 	logger    *logger.Logger
 }
 
@@ -47,6 +49,7 @@ func NewChannelBackendClient(log *logger.Logger) *ChannelBackendClient {
 	return &ChannelBackendClient{
 		requestCh: make(chan *ws.Message, 100),
 		pending:   make(map[string]chan *ws.Message),
+		done:      make(chan struct{}),
 		logger:    clientLogger,
 	}
 }
@@ -108,6 +111,8 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 	select {
 	case c.requestCh <- msg:
 		// Request sent
+	case <-c.done:
+		return fmt.Errorf("MCP backend client is closed")
 	case <-ctx.Done():
 		c.logger.Debug("MCP request cancelled before send",
 			zap.String("request_id", id),
@@ -181,5 +186,5 @@ func (c *ChannelBackendClient) Reset() {
 
 // Close closes the request channel.
 func (c *ChannelBackendClient) Close() {
-	close(c.requestCh)
+	c.closeOnce.Do(func() { close(c.done) })
 }
