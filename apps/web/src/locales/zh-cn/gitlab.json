@@ -347,5 +347,5 @@
   "mrChipAutoMerge": "自动合并",
   "mrChipDrawerTitle": "合并请求 !{{mriid}}",
   "mrChipDrawerDescription": "流水线状态、审阅状态和合并请求操作。",
-  "mrChipDrawerClose": "关闭合并请求状态"
+  "mrChipDrawerClose": "关闭合并请求状态面板"
 }
