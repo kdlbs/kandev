@@ -50,23 +50,26 @@ response and Review step, but no finished-state icon on the sidebar row.
 - **Scenario:** A backend restart resumes a review-state task.
   **File:** `apps/web/e2e/tests/session/session-resume.spec.ts`.
   **How:** Reload after restart, assert the persisted transcript and immediate
-  review placement, wait for automatic resume to settle, and assert the task
-  remains Turn Finished without Backlog or Running placement.
+  review placement, wait for the durable `Resumed agent Mock` boot message to
+  prove automatic resume ran, poll the session back to `WAITING_FOR_INPUT`, and
+  assert the task remains Turn Finished without Backlog or Running placement.
 
 ## Verification Results
 
 - `cd apps/web && pnpm e2e:run tests/session/session-resume.spec.ts -- --grep
   "task stays in Turn Finished section after backend restart and agent resume"
-  --retries=0 --workers=1` — passed, 1 test in 8.6s.
+  --retries=0 --workers=1` — passed, 1 test in 8.3s after the review fix.
 - `cd apps/web && pnpm e2e:docker --no-build -- --repeat-each=4 --workers=1
   --retries=0 tests/session/session-resume.spec.ts:121` — passed, 4 tests in
-  34.6s.
+  31.2s after the review fix.
 - `cd apps/web && pnpm run typecheck` — passed.
 - `cd apps/web && pnpm exec prettier --check
   e2e/tests/session/session-resume.spec.ts` — passed.
 - `git diff --check` — passed.
 - The managed E2E runner's generated artifacts were cleaned and no generated
   files remain in the worktree.
+- Review fixup: the post-restart assertion now requires the durable
+  `Resumed agent Mock` boot message before polling back to `WAITING_FOR_INPUT`.
 
 ## Implementation Waves And Parallel Candidates
 

@@ -182,6 +182,11 @@ test.describe("Task status during resume", () => {
 
     // 7. Wait for auto-resume to complete (agent relaunches and becomes idle)
     await session.waitForChatIdle({ timeout: 60_000 });
+    // The idle composer can briefly survive the reload before auto-resume starts.
+    // The durable boot message proves that the resumed agent actually relaunched.
+    await expect(session.chat.getByText("Resumed agent Mock", { exact: false })).toBeVisible({
+      timeout: 15_000,
+    });
     await waitForSessionState(apiClient, {
       taskId: task.id,
       sessionId,

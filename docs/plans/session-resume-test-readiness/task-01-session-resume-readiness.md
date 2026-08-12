@@ -53,9 +53,11 @@ None.
    render the response and idle composer while the sidebar row has no finished
    icon.
 2. Add the exact-session `WAITING_FOR_INPUT` readiness poll.
-3. Run the focused test with retries disabled, then run the repeated isolated
+3. Require the durable `Resumed agent Mock` boot message before the post-restart
+   poll so the assertion proves automatic resume ran.
+4. Run the focused test with retries disabled, then run the repeated isolated
    worker command.
-4. Re-run the final changed test after any formatting or selector adjustment.
+5. Re-run the final changed test after any formatting or selector adjustment.
 
 ## Verification
 
@@ -63,7 +65,7 @@ Run from `apps/web` after the workspace dependencies are installed:
 
 ```bash
 pnpm e2e:run tests/session/session-resume.spec.ts -- --grep 'task stays in Turn Finished section after backend restart and agent resume' --retries=0 --workers=1
-pnpm e2e:docker --no-build -- --repeat-each=4 --workers=1 --retries=0 tests/session/session-resume.spec.ts:120
+pnpm e2e:docker --no-build -- --repeat-each=4 --workers=1 --retries=0 tests/session/session-resume.spec.ts:121
 ```
 
 The managed runner must rebuild the production Go-served Vite assets before the
@@ -74,6 +76,8 @@ generated E2E artifacts in the diff.
 
 - A poll over `sessions[0]` could observe the wrong session. Match the created
   session ID when it is available and fail clearly if it is missing.
+- The post-restart `WAITING_FOR_INPUT` poll must follow the durable resumed-agent
+  boot message, or it could accept the pre-restart idle state.
 - Polling only the API could hide a frontend hydration issue. Keep the existing
   sidebar locator assertions as the user-visible proof.
 
@@ -88,13 +92,16 @@ synchronize the plan checkbox and `## Verification Results`.
 
 - Added an exact-session poll for `WAITING_FOR_INPUT` before the initial
   Turn Finished assertion and again after automatic resume.
+- Added a durable `Resumed agent Mock` boot-message assertion before the
+  post-restart poll, so the final state check cannot accept the pre-restart
+  idle state.
 - Preserved the transcript, restart, Backlog, Running, and final Turn Finished
   UI assertions.
 - The original CI failure showed the response and idle composer before the
   sidebar received the settled lifecycle state. The new poll synchronizes the
   UI assertion with that persisted state instead of adding a sleep or larger
   locator timeout.
-- Focused managed E2E run: passed, 1 test in 8.6s.
-- Four-repeat single-worker E2E run: passed, 4 tests in 34.6s.
+- Focused managed E2E run after review fix: passed, 1 test in 8.3s.
+- Four-repeat single-worker E2E run after review fix: passed, 4 tests in 31.2s.
 - Web typecheck, Prettier check, and `git diff --check`: passed.
 - No generated E2E artifacts remain in the worktree.
