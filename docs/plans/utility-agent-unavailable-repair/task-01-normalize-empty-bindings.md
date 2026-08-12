@@ -18,6 +18,7 @@ Repair legacy built-in rows before changing the settings save path.
   unchanged and fail closed.
 - **Acceptance:** Migration preserves the row's existing `enabled` value and does not copy a concrete
   default profile ID.
+- **Acceptance:** A concurrent concrete repair cannot be overwritten by the startup normalization.
 - **Verification:** Add the failing migration tests first, then run:
 
   ```bash
@@ -25,8 +26,10 @@ Repair legacy built-in rows before changing the settings save path.
   go test -run 'TestMigrateLegacyBindings' ./internal/utility/service/...
   ```
 
-- **Files likely touched:** `apps/backend/internal/utility/service/service.go` and
-  `apps/backend/internal/utility/service/service_test.go`.
+- **Files likely touched:** `apps/backend/internal/utility/service/service.go`,
+  `apps/backend/internal/utility/service/service_test.go`,
+  `apps/backend/internal/utility/store/interface.go`, `apps/backend/internal/utility/store/sqlite.go`,
+  and `apps/backend/internal/utility/store/sqlite_migration_test.go`.
 - **Dependencies:** None.
 - **Parallelism:** sequential.
 - **Inputs:** The legacy migration, failure-mode, persistence, and scenario sections in
@@ -37,9 +40,10 @@ Repair legacy built-in rows before changing the settings save path.
 
 ## Results
 
-Implemented idempotent normalization for empty `unconfigured` built-in rows. The migration now
-persists `inherit` without changing `enabled`. Concrete stale built-in bindings and custom
-unconfigured bindings remain unchanged.
+Implemented idempotent, conditional normalization for empty `unconfigured` built-in rows. The
+migration now persists only the binding-state field to `inherit` without changing `enabled`, and a
+stale-row predicate prevents a concurrent concrete repair from being overwritten. Concrete stale
+built-in bindings and custom unconfigured bindings remain unchanged.
 
 - RED: `cd apps/backend && go test -run 'TestMigrateLegacyBindingsNormalizesEmptyUnconfiguredBuiltin' ./internal/utility/service/...`
   (failed as expected: `updated = 0, want 1`)
@@ -47,6 +51,12 @@ unconfigured bindings remain unchanged.
   (pass: 1 test)
 - REFACTOR: `cd apps/backend && go test -run 'TestMigrateLegacyBindings' ./internal/utility/service/...`
   (pass: 5 tests)
+- Concurrency guard: `cd apps/backend && go test -run 'TestMigrateLegacyBindingsDoesNotOverwriteConcurrentRepair' ./internal/utility/service/...`
+  (pass: conditional repository fake preserves the concurrent explicit repair)
+- SQLite predicate: `cd apps/backend && go test -run 'TestNormalizeEmptyBuiltinBindingUsesStalePredicate' ./internal/utility/store/...`
+  (pass: first stale row updates, second repaired row is not changed)
+- Package verification: `cd apps/backend && go test ./internal/utility/... ./internal/backendapp/...`
+  (pass: 378 tests) and `go vet ./internal/utility/...` (pass).
 - Generated artifacts: None.
 - Cleanup: No temporary artifacts.
 - Security or external side effects: None. Tests use the in-memory fake repository.

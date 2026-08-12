@@ -88,6 +88,9 @@ func (s *Service) MigrateLegacyBindings(ctx context.Context) (int, error) {
 	}
 	updated := 0
 	for _, agent := range agents {
+		// Skip already-inherited rows and any row that still carries a concrete
+		// profile ID. The latter includes stale/unconfigured overrides whose
+		// original intent must remain available for explicit user repair.
 		if agent == nil || agent.AgentProfileID != "" ||
 			agent.ProfileBindingState == models.ProfileBindingInherit {
 			continue
@@ -96,11 +99,13 @@ func (s *Service) MigrateLegacyBindings(ctx context.Context) (int, error) {
 			if !agent.Builtin {
 				continue
 			}
-			agent.ProfileBindingState = models.ProfileBindingInherit
-			if err := s.repo.UpdateAgent(ctx, agent); err != nil {
+			changed, err := s.repo.NormalizeEmptyBuiltinBinding(ctx, agent.ID)
+			if err != nil {
 				return updated, err
 			}
-			updated++
+			if changed {
+				updated++
+			}
 			continue
 		}
 		profile, matchErr := s.profileResolver.MatchLegacy(ctx, agent.AgentID, agent.Model)

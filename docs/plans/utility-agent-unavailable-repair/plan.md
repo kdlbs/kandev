@@ -22,7 +22,8 @@ shared desktop and mobile save path and proves persistence through the real back
 
 - `apps/backend/internal/utility/service/service.go`: update `MigrateLegacyBindings` so a built-in
   with `profile_binding_state = 'unconfigured'` and an empty `agent_profile_id` is persisted as
-  `inherit`. Preserve non-empty stale IDs and every custom `unconfigured` row.
+  `inherit` through a conditional repository update. Preserve non-empty stale IDs and every custom
+  `unconfigured` row, including when a concurrent settings save changes the stale row first.
 - Keep the operation idempotent and preserve the existing `enabled` value. This repair changes only
   binding ownership. It does not silently enable an action or copy a concrete profile ID.
 
@@ -72,8 +73,9 @@ binding.
 
 ## Verification Results
 
-- Backend migration suite: `cd apps/backend && go test ./internal/utility/service/...` passed 14
-  tests.
+- Backend utility and backend-app suites: `cd apps/backend && go test ./internal/utility/... ./internal/backendapp/...`
+  passed 378 tests; `go vet ./internal/utility/...` passed. The SQLite stale-predicate regression is
+  covered by the utility store migration suite.
 - Frontend utility suites: `cd apps/web && pnpm exec vitest run
   components/settings/utility-agents-section.test.ts
   components/settings/utility-sections.test.ts` passed 8 tests.

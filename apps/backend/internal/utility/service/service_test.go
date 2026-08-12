@@ -74,6 +74,31 @@ func TestMigrateLegacyBindingsNormalizesEmptyUnconfiguredBuiltin(t *testing.T) {
 	}
 }
 
+func TestMigrateLegacyBindingsDoesNotOverwriteConcurrentRepair(t *testing.T) {
+	repo := &fakeRepository{agents: map[string]*models.UtilityAgent{
+		"builtin": {
+			ID:                  "builtin",
+			Builtin:             true,
+			ProfileBindingState: models.ProfileBindingUnconfigured,
+		},
+	}}
+	repo.normalizeEmptyBuiltinBindingHook = func(agent *models.UtilityAgent) {
+		agent.AgentProfileID = "profile-1"
+		agent.ProfileBindingState = models.ProfileBindingExplicit
+	}
+	svc := NewService(repo)
+	svc.SetProfileResolver(fakeProfileResolver{})
+
+	updated, err := svc.MigrateLegacyBindings(context.Background())
+	if err != nil || updated != 0 {
+		t.Fatalf("MigrateLegacyBindings() = (%d, %v), want (0, nil)", updated, err)
+	}
+	got := repo.agents["builtin"]
+	if got.AgentProfileID != "profile-1" || got.ProfileBindingState != models.ProfileBindingExplicit {
+		t.Fatalf("concurrent repair was overwritten: %#v", got)
+	}
+}
+
 func TestMigrateLegacyBindingsPreservesConcreteAndCustomUnconfiguredBindings(t *testing.T) {
 	repo := &fakeRepository{agents: map[string]*models.UtilityAgent{
 		"builtin": {
@@ -190,7 +215,8 @@ func TestClearAgentProfileBindingsRetainsStaleProfileID(t *testing.T) {
 }
 
 type fakeRepository struct {
-	agents map[string]*models.UtilityAgent
+	agents                           map[string]*models.UtilityAgent
+	normalizeEmptyBuiltinBindingHook func(*models.UtilityAgent)
 }
 
 func (r *fakeRepository) ListAgents(context.Context) ([]*models.UtilityAgent, error) {
@@ -226,6 +252,19 @@ func (r *fakeRepository) CreateAgent(_ context.Context, agent *models.UtilityAge
 func (r *fakeRepository) UpdateAgent(_ context.Context, agent *models.UtilityAgent) error {
 	r.agents[agent.ID] = agent
 	return nil
+}
+
+func (r *fakeRepository) NormalizeEmptyBuiltinBinding(_ context.Context, id string) (bool, error) {
+	agent := r.agents[id]
+	if r.normalizeEmptyBuiltinBindingHook != nil {
+		r.normalizeEmptyBuiltinBindingHook(agent)
+	}
+	if agent == nil || !agent.Builtin || agent.AgentProfileID != "" ||
+		agent.ProfileBindingState != models.ProfileBindingUnconfigured {
+		return false, nil
+	}
+	agent.ProfileBindingState = models.ProfileBindingInherit
+	return true, nil
 }
 
 func (r *fakeRepository) DeleteAgent(_ context.Context, id string) error {
