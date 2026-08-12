@@ -15,10 +15,8 @@
     "access": "public"
   },
   "scripts": {
+    "test": "node --test test/*.node.mjs",
     "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@types/react": "^19"
   },
   "devDependencies": {
     "typescript": "^5.7.2"

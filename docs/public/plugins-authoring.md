@@ -149,7 +149,8 @@ of truth and must be updated together when the contract changes:
 
 - Versioned frontend author contract: `@kandev/plugin-sdk`, sourced from
   `apps/packages/plugin-sdk`. Import it with `import type`; the package has no
-  runtime dependency on Kandev, React, Zustand, or private `@/` modules.
+  dependency on Kandev, React, Zustand, or private `@/` modules, so it also
+  typechecks when consumed from an isolated or sparse checkout.
 - Frontend host implementation: docs/plans/plugins/PLUGIN-API.md and
   apps/web/lib/plugins/types.ts. These may contain compatibility-only host
   details that are deliberately absent from the public SDK.

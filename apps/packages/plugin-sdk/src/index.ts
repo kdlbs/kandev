@@ -1,23 +1,46 @@
 /**
  * Public, runtime-free frontend contract for Kandev plugins.
  *
- * This package deliberately has no runtime imports and no imports from the
- * Kandev web application, Zustand, or host UI implementation modules. The
- * React import below is type-only. Plugins receive all runtime values during
- * initialize and use these structural types at compile time only.
+ * This package deliberately has no imports from React, the Kandev web
+ * application, Zustand, or host UI implementation modules. Plugins receive
+ * all runtime values during initialize and use these structural types at
+ * compile time only.
  */
-import type * as ReactType from "react";
+export type HostNode = unknown;
+// `any` is deliberate at these two React compatibility seams. Reproducing
+// React's overloaded createElement and recursive ReactNode types would make
+// this runtime-free package depend on React's private type graph again.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type ElementFactory = (...args: any[]) => HostNode;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type Component<Props = {}> = (props: Props) => any;
+export type HostComponent = unknown;
 
-export type ElementFactory = typeof ReactType.createElement;
-export type Component<Props = {}> = ReactType.ComponentType<Props>;
-export type HostComponent = ReactType.ElementType;
+export type StateUpdater<Value> = Value | ((previous: Value) => Value);
+export type StateSetter<Value> = (value: StateUpdater<Value>) => void;
+
+export interface MutableRef<Value> {
+  current: Value;
+}
 
 export interface ResponsiveBreakpoint {
   isMobile: boolean;
   usesDesktopWorkbench?: boolean;
 }
 
-export type HostReact = typeof ReactType;
+/** React-compatible primitives supplied by the host; no React package is required to consume them. */
+export interface HostReact {
+  readonly Fragment: HostComponent;
+  createElement: ElementFactory;
+  useState<Value>(initialValue: Value | (() => Value)): [Value, StateSetter<Value>];
+  useEffect(effect: () => void | (() => void), dependencies?: readonly unknown[]): void;
+  useMemo<Value>(factory: () => Value, dependencies: readonly unknown[]): Value;
+  useCallback<Callback extends (...args: never[]) => unknown>(
+    callback: Callback,
+    dependencies: readonly unknown[],
+  ): Callback;
+  useRef<Value>(initialValue: Value): MutableRef<Value>;
+}
 
 export interface ActionInput {
   workspaceId?: string;
@@ -236,7 +259,7 @@ export interface PluginTaskMenuContext {
 export interface TaskMenuActionRegistration {
   id: string;
   label: string;
-  icon?: ReactType.ReactNode;
+  icon?: HostNode;
   group: "edit" | "primary";
   visible?(context: PluginTaskMenuContext): boolean;
   run(context: PluginTaskMenuContext): void | Promise<void>;

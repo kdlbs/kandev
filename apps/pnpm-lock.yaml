@@ -97,10 +97,6 @@ importers:
         version: 8.0.16(@types/node@20.19.28)(esbuild@0.27.2)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.0)
 
   packages/plugin-sdk:
-    dependencies:
-      '@types/react':
-        specifier: ^19
-        version: 19.2.8
     devDependencies:
       typescript:
         specifier: ^5.7.2
