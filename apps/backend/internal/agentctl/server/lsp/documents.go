@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
-	"path"
 	"sort"
 	"sync"
 	"unicode/utf16"
@@ -29,10 +27,11 @@ type openDocument struct {
 }
 
 type documentBroker struct {
-	mu       sync.Mutex
-	upstream featureUpstream
-	docs     map[string]*openDocument
-	save     documentSaveCapability
+	mu        sync.Mutex
+	upstream  featureUpstream
+	docs      map[string]*openDocument
+	save      documentSaveCapability
+	workspace *documentWorkspace
 }
 
 type documentSaveCapability struct {
@@ -40,8 +39,10 @@ type documentSaveCapability struct {
 	includeText bool
 }
 
-func newDocumentBroker(upstream featureUpstream) *documentBroker {
-	return &documentBroker{upstream: upstream, docs: make(map[string]*openDocument)}
+func newDocumentBroker(upstream featureUpstream, workspace *documentWorkspace) *documentBroker {
+	return &documentBroker{
+		upstream: upstream, docs: make(map[string]*openDocument), workspace: workspace,
+	}
 }
 
 func (b *documentBroker) SetCapabilities(raw json.RawMessage) {
@@ -78,7 +79,7 @@ func (b *documentBroker) open(attachmentID uint64, raw json.RawMessage) error {
 	if err := json.Unmarshal(raw, &params); err != nil {
 		return fmt.Errorf("decode didOpen: %w", err)
 	}
-	uri, err := canonicalDocumentURI(params.TextDocument.URI)
+	uri, err := b.workspace.CanonicalURI(params.TextDocument.URI)
 	if err != nil {
 		return err
 	}
@@ -118,7 +119,7 @@ func (b *documentBroker) change(attachmentID uint64, raw json.RawMessage) error 
 	if err := json.Unmarshal(raw, &params); err != nil {
 		return fmt.Errorf("decode didChange: %w", err)
 	}
-	uri, err := canonicalDocumentURI(params.TextDocument.URI)
+	uri, err := b.workspace.CanonicalURI(params.TextDocument.URI)
 	if err != nil {
 		return err
 	}
@@ -166,7 +167,7 @@ func (b *documentBroker) saveDocument(attachmentID uint64, raw json.RawMessage) 
 	if err := json.Unmarshal(raw, &params); err != nil {
 		return fmt.Errorf("decode didSave: %w", err)
 	}
-	uri, err := canonicalDocumentURI(params.TextDocument.URI)
+	uri, err := b.workspace.CanonicalURI(params.TextDocument.URI)
 	if err != nil {
 		return err
 	}
@@ -194,7 +195,7 @@ func (b *documentBroker) close(attachmentID uint64, raw json.RawMessage) error {
 	if err := json.Unmarshal(raw, &params); err != nil {
 		return fmt.Errorf("decode didClose: %w", err)
 	}
-	uri, err := canonicalDocumentURI(params.TextDocument.URI)
+	uri, err := b.workspace.CanonicalURI(params.TextDocument.URI)
 	if err != nil {
 		return err
 	}
@@ -238,7 +239,7 @@ func (b *documentBroker) releaseReference(attachmentID uint64, uri string) error
 func (b *documentBroker) Snapshot(uri string) (DocumentSnapshot, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	canonical, err := canonicalDocumentURI(uri)
+	canonical, err := b.workspace.CanonicalURI(uri)
 	if err != nil {
 		return DocumentSnapshot{}, false
 	}
@@ -253,18 +254,6 @@ func (b *documentBroker) Snapshot(uri string) (DocumentSnapshot, bool) {
 		Version:    document.version,
 		References: len(document.attachmentText),
 	}, true
-}
-
-func canonicalDocumentURI(raw string) (string, error) {
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Scheme != "file" || parsed.Path == "" {
-		return "", fmt.Errorf("invalid file document URI: %q", raw)
-	}
-	parsed.Path = path.Clean(parsed.Path)
-	parsed.RawPath = ""
-	parsed.RawQuery = ""
-	parsed.Fragment = ""
-	return parsed.String(), nil
 }
 
 type documentPosition struct {

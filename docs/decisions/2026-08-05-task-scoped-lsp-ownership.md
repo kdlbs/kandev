@@ -51,7 +51,9 @@ notifications through the task-host multiplexer. Request IDs are namespaced by a
 generation. The task host sends only one upstream `didOpen` for a canonical file URI, orders
 accepted changes with one monotonically increasing server version, releases the upstream document
 after the last attachment closes, and never stops the language-server process merely because no
-documents or attachments remain.
+documents or attachments remain. Browser-originated file URIs are canonicalized against the
+backend-authorized task workspace and repository roots before upstream traffic; traversal, sibling
+paths, and symlink escapes are rejected at the task-host boundary.
 
 `TaskEnvironment` is the sole runtime target for the task-scoped owner. Multi-repository tasks
 initialize one server from the task workspace root with the task's ordered repository roots as
@@ -61,7 +63,10 @@ host keeps independent `(task_id, language)` slots, workspace projections, progr
 and processes. A task ID travels to agentctl only in the authenticated backend transport header;
 it is never accepted from a browser or control body. Replacing the environment requires the old
 generation to be reaped before a new target may launch; an unproven old process blocks the new
-launch rather than risking duplicate imports.
+launch rather than risking duplicate imports. Changing the physical task workspace root requires
+an explicit language-server restart: `workspace/didChangeWorkspaceFolders` may change repository
+membership but cannot rebind the process working directory, initialize-time `rootUri`, or attachment
+authorization scope of a live generation.
 
 The backend persists one `task_lsp_languages` row per materialized task/language policy or runtime
 record, with a composite primary key and task cascade. The row holds policy, detection summary,

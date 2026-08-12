@@ -3,10 +3,76 @@ package lsp
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
+	"time"
 
 	sharedlsp "github.com/kandev/kandev/internal/lsp"
 )
+
+func TestManagerRequiresRestartWhenTaskWorkspaceRootChanges(t *testing.T) {
+	server := newFakeLSPServer()
+	server.capabilities = map[string]any{
+		fieldWorkspace: map[string]any{
+			fieldWorkspaceFolders: map[string]any{"supported": true, "changeNotifications": true},
+		},
+	}
+	manager, processes := newManagerForTest(t, func(int) *fakeLSPServer { return server })
+	initialRoot := filepath.Join(t.TempDir(), "single-repository")
+	promotedRoot := filepath.Join(t.TempDir(), "task-workspace")
+	promotedRepositories := []string{
+		filepath.Join(promotedRoot, "repository-a"),
+		filepath.Join(promotedRoot, "repository-b"),
+	}
+	if _, err := manager.UpdateWorkspaceForTask("task-1", initialRoot, []string{initialRoot}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Start(context.Background(), StartRequest{Language: "kotlin", Generation: 1}); err != nil {
+		t.Fatal(err)
+	}
+	before := waitForPhase(t, manager, "kotlin", sharedlsp.PhaseReady)
+
+	result, err := manager.UpdateWorkspaceForTask("task-1", promotedRoot, promotedRepositories)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.RestartRequiredLanguages) != 1 || result.RestartRequiredLanguages[0] != "kotlin" ||
+		len(result.DynamicLanguages) != 0 {
+		t.Fatalf("root-change result = %#v", result)
+	}
+	select {
+	case change := <-server.workspaceChanges:
+		t.Fatalf("root change was sent as an in-place folder update: %s", change)
+	case <-time.After(50 * time.Millisecond):
+	}
+	foldersOnlyResult, err := manager.UpdateWorkspaceFoldersForTask(
+		"task-1",
+		WorkspaceFoldersAtRoots(promotedRoot, promotedRepositories),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(foldersOnlyResult.RestartRequiredLanguages) != 1 ||
+		foldersOnlyResult.RestartRequiredLanguages[0] != "kotlin" ||
+		len(foldersOnlyResult.DynamicLanguages) != 0 {
+		t.Fatalf("folder refresh after root change = %#v", foldersOnlyResult)
+	}
+	after := manager.Snapshot("kotlin")
+	started, stopped, _ := processes.counts()
+	if started != 1 || stopped != 0 || after.WorkspaceURI != before.WorkspaceURI ||
+		after.WorkspacePath != before.WorkspacePath {
+		t.Fatalf("root change mutated live generation: started=%d stopped=%d before=%#v after=%#v", started, stopped, before, after)
+	}
+
+	if _, err := manager.Restart(context.Background(), StartRequest{Language: "kotlin", Generation: 2}); err != nil {
+		t.Fatal(err)
+	}
+	restarted := waitForPhase(t, manager, "kotlin", sharedlsp.PhaseReady)
+	if restarted.WorkspacePath != promotedRoot || restarted.WorkspaceURI != WorkspaceFileURI(promotedRoot) ||
+		len(restarted.WorkspaceFolders) != len(promotedRepositories) {
+		t.Fatalf("restarted workspace = %#v", restarted)
+	}
+}
 
 func TestManagerMarksPureWorkspaceFolderReorderForRestart(t *testing.T) {
 	server := newFakeLSPServer()

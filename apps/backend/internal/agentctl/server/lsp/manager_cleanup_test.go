@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	sharedlsp "github.com/kandev/kandev/internal/lsp"
@@ -195,6 +196,56 @@ func TestManagerPurgeTaskRejectsLiveRuntimeOwnership(t *testing.T) {
 	}
 	// Avoid leaving a synthetic live runtime for any later cleanup.
 	slot.runtime = nil
+}
+
+func TestManagerPurgeWaitsForCompletedStartBookkeeping(t *testing.T) {
+	manager := NewManager(
+		Config{OwnerID: "task-1", WorkDir: "/workspace", WorkspaceURI: "file:///workspace"},
+		newFakeProcessManager(func(int) *fakeLSPServer { return newFakeLSPServer() }),
+		&blockingInstallRegistry{},
+		testLogger(),
+	)
+	t.Cleanup(func() {
+		if err := manager.Close(context.Background()); err != nil {
+			t.Errorf("close manager: %v", err)
+		}
+	})
+	key := taskLanguageRuntimeKey("task-1", "go")
+	cleanupEntered := make(chan struct{})
+	releaseCleanup := make(chan struct{})
+	manager.mu.Lock()
+	manager.slots[key] = &languageSlot{beforeStartCleanup: func() {
+		close(cleanupEntered)
+		<-releaseCleanup
+	}}
+	manager.mu.Unlock()
+
+	startDone := make(chan error, 1)
+	go func() {
+		_, err := manager.Start(context.Background(), StartRequest{
+			TaskID: "task-1", Language: "go", Generation: 1,
+		})
+		startDone <- err
+	}()
+	<-cleanupEntered
+
+	purgeDone := make(chan error, 1)
+	go func() { purgeDone <- manager.PurgeTask("task-1") }()
+	select {
+	case err := <-purgeDone:
+		close(releaseCleanup)
+		<-startDone
+		t.Fatalf("purge observed stale completed-start bookkeeping: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(releaseCleanup)
+	if err := <-startDone; err == nil {
+		t.Fatal("start unexpectedly succeeded without an installed binary")
+	}
+	if err := <-purgeDone; err != nil {
+		t.Fatalf("purge after completed start: %v", err)
+	}
 }
 
 func TestManagerPurgeTaskPreventsStartUsingSlotAcquiredBeforePurge(t *testing.T) {

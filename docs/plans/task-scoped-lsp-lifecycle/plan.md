@@ -67,6 +67,8 @@ order only and do not authorize subagents.
   Maintain one upstream open document per canonical URI: duplicate opens add references, changes
   get monotonic versions in arrival order, stale duplicate opens do not rewind text, and only the
   final close sends upstream `didClose`.
+- Canonicalize every browser-originated document URI against backend-authorized task roots before
+  forwarding it. Reject sibling paths, traversal, and symlink escapes without upstream traffic.
 - Send an `attached` envelope with generation, workspace metadata, and capabilities before raw
   feature traffic. Detaching the final browser releases documents and outstanding requests but
   leaves the task-host process, initialization, progress, and caches alive.
@@ -126,7 +128,8 @@ order only and do not authorize subagents.
   replacement environment readiness, discover/reconcile once. Refuse a new environment launch
   until the old task-host generation is confirmed dead.
 - For multi-repository source changes, push `workspace/didChangeWorkspaceFolders` when advertised;
-  otherwise persist and publish `restart_required` without automatic reimport.
+  otherwise persist and publish `restart_required` without automatic reimport. Treat a physical task
+  workspace-root change as restart-required even when folder notifications are supported.
 
 ---
 

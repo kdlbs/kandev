@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-const documentURI = "file:///workspace/Main.kt"
-
 func TestDocumentBrokerDeduplicatesOpenAndVersionsInterleavedChanges(t *testing.T) {
 	upstream := &recordingFeatureUpstream{}
 	hub, snapshot := newHubForTest(upstream)

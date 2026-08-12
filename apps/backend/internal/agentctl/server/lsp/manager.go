@@ -311,7 +311,7 @@ func (m *Manager) UpdateWorkspaceFoldersForTask(
 	taskConfig.WorkspaceFolders = append([]WorkspaceFolder(nil), folders...)
 	m.taskConfigs[taskID] = taskConfig
 	m.mu.Unlock()
-	return m.applyWorkspaceFoldersForTask(taskID, folders)
+	return m.applyWorkspaceFoldersForTask(taskID, taskConfig)
 }
 
 // UpdateWorkspaceForTask records a complete, backend-authorized workspace
@@ -339,9 +339,10 @@ func (m *Manager) UpdateWorkspaceForTask(
 	if configured, ok := m.taskConfigs[taskID]; ok {
 		taskConfig = configured
 	}
+	workspaceURI := WorkspaceFileURI(workspacePath)
 	taskConfig.OwnerID = taskID
 	taskConfig.WorkDir = workspacePath
-	taskConfig.WorkspaceURI = WorkspaceFileURI(workspacePath)
+	taskConfig.WorkspaceURI = workspaceURI
 	taskConfig.WorkspaceFolders = append([]WorkspaceFolder(nil), folders...)
 	taskConfig.DiscoveryRoots = append([]string(nil), workspaceRoots...)
 	if len(taskConfig.DiscoveryRoots) == 0 {
@@ -349,13 +350,14 @@ func (m *Manager) UpdateWorkspaceForTask(
 	}
 	m.taskConfigs[taskID] = taskConfig
 	m.mu.Unlock()
-	return m.applyWorkspaceFoldersForTask(taskID, folders)
+	return m.applyWorkspaceFoldersForTask(taskID, taskConfig)
 }
 
 func (m *Manager) applyWorkspaceFoldersForTask(
 	taskID string,
-	folders []WorkspaceFolder,
+	workspace Config,
 ) (sharedlsp.WorkspaceUpdateResult, error) {
+	folders := workspace.WorkspaceFolders
 	result := sharedlsp.WorkspaceUpdateResult{WorkspaceFolders: append([]WorkspaceFolder(nil), folders...)}
 	m.mu.RLock()
 	languages := make([]string, 0, len(m.slots))
@@ -370,7 +372,9 @@ func (m *Manager) applyWorkspaceFoldersForTask(
 
 	var updateErrors []error
 	for _, language := range languages {
-		dynamic, restartRequired, err := m.applyWorkspaceFoldersToLanguage(taskID, language, folders)
+		dynamic, restartRequired, err := m.applyWorkspaceFoldersToLanguage(
+			taskID, language, workspace,
+		)
 		if dynamic {
 			result.DynamicLanguages = append(result.DynamicLanguages, language)
 		}
@@ -386,7 +390,7 @@ func (m *Manager) applyWorkspaceFoldersForTask(
 
 func (m *Manager) applyWorkspaceFoldersToLanguage(
 	taskID, language string,
-	folders []WorkspaceFolder,
+	workspace Config,
 ) (dynamic, restartRequired bool, resultErr error) {
 	slot, err := m.slotForTask(taskID, language)
 	if err != nil {
@@ -397,7 +401,15 @@ func (m *Manager) applyWorkspaceFoldersToLanguage(
 	if slot.retired || slot.runtime == nil {
 		return false, false, nil
 	}
+	// LSP rootPath/rootUri and the language-server process working directory
+	// are initialize-time state. Folder notifications cannot honestly rebind
+	// them, even when the server supports dynamic workspace folders.
 	current := slot.runtime
+	if filepath.Clean(current.workspace.WorkDir) != filepath.Clean(workspace.WorkDir) ||
+		current.workspace.WorkspaceURI != workspace.WorkspaceURI {
+		return false, true, nil
+	}
+	folders := workspace.WorkspaceFolders
 	snapshot := m.SnapshotForTask(taskID, language)
 	if snapshot.Phase != sharedlsp.PhaseReady || !supportsWorkspaceFolderChanges(snapshot.Capabilities) {
 		return false, true, nil
@@ -423,6 +435,7 @@ func (m *Manager) applyWorkspaceFoldersToLanguage(
 		}
 	}
 	current.workspace.WorkspaceFolders = append([]WorkspaceFolder(nil), folders...)
+	current.hub.SetWorkspace(current.workspace)
 	m.publishForTaskGeneration(taskID, language, current.generation, func(next *Snapshot) {
 		next.WorkspaceFolders = append([]WorkspaceFolder(nil), folders...)
 	})

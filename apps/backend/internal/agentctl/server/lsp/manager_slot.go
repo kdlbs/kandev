@@ -21,6 +21,9 @@ type languageSlot struct {
 	// beforeStartRegistration is a test-only scheduling hook. Production
 	// managers leave it nil.
 	beforeStartRegistration func()
+	// beforeStartCleanup is a test-only scheduling hook. Production managers
+	// leave it nil.
+	beforeStartCleanup func()
 
 	nextStartToken uint64
 	pendingStarts  map[uint64]*pendingStartOperation
@@ -57,9 +60,15 @@ func (s *languageSlot) lockStartOperation(
 	pending.active = true
 	s.startMu.Unlock()
 	return operationCtx, func() {
-		s.opMu.Unlock()
 		s.startMu.Lock()
 		delete(s.pendingStarts, token)
+		if s.beforeStartCleanup != nil {
+			s.beforeStartCleanup()
+		}
+		// Keep the registration and operation slot atomic to PurgeTask: a
+		// completed Start must not expose a stale pending token after releasing
+		// opMu.
+		s.opMu.Unlock()
 		s.startMu.Unlock()
 		cancel()
 	}

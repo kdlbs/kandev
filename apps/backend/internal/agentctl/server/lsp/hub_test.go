@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -24,6 +27,11 @@ type recordingFeatureUpstream struct {
 	canceled      chan struct{}
 	cancelOnce    sync.Once
 }
+
+var (
+	testDocumentWorkspacePath = filepath.Join(os.TempDir(), "kandev-lsp-test-workspace")
+	documentURI               = WorkspaceFileURI(filepath.Join(testDocumentWorkspacePath, "Main.kt"))
+)
 
 func (u *recordingFeatureUpstream) Request(
 	ctx context.Context,
@@ -63,10 +71,10 @@ func newHubForTest(upstream featureUpstream) (*hub, Snapshot) {
 		Generation:    7,
 		Phase:         sharedlsp.PhaseReady,
 		Capabilities:  json.RawMessage(`{"hoverProvider":true}`),
-		WorkspacePath: "/workspace",
-		WorkspaceURI:  "file:///workspace",
+		WorkspacePath: testDocumentWorkspacePath,
+		WorkspaceURI:  WorkspaceFileURI(testDocumentWorkspacePath),
 		WorkspaceFolders: []WorkspaceFolder{
-			{URI: "file:///workspace/repo", Name: "repo"},
+			{URI: WorkspaceFileURI(filepath.Join(testDocumentWorkspacePath, "repo")), Name: "repo"},
 		},
 		Diagnostics: []json.RawMessage{},
 	}
@@ -84,14 +92,16 @@ func TestHubRemapsCollidingRequestIDsPerAttachment(t *testing.T) {
 	t.Cleanup(first.Close)
 	t.Cleanup(second.Close)
 
-	if err := first.Handle([]byte(
-		`{"jsonrpc":"2.0","id":1,"method":"textDocument/hover","params":{"owner":"first"}}`,
-	)); err != nil {
+	if err := first.Handle([]byte(fmt.Sprintf(
+		`{"jsonrpc":"2.0","id":1,"method":"textDocument/hover","params":{"owner":"first","textDocument":{"uri":%q}}}`,
+		documentURI,
+	))); err != nil {
 		t.Fatal(err)
 	}
-	if err := second.Handle([]byte(
-		`{"jsonrpc":"2.0","id":1,"method":"textDocument/hover","params":{"owner":"second"}}`,
-	)); err != nil {
+	if err := second.Handle([]byte(fmt.Sprintf(
+		`{"jsonrpc":"2.0","id":1,"method":"textDocument/hover","params":{"owner":"second","textDocument":{"uri":%q}}}`,
+		documentURI,
+	))); err != nil {
 		t.Fatal(err)
 	}
 	firstResponse := readAttachmentMessage(t, first)
@@ -101,6 +111,82 @@ func TestHubRemapsCollidingRequestIDsPerAttachment(t *testing.T) {
 	}
 	if !rawContains(secondResponse, `"id":1`) || !rawContains(secondResponse, `"owner":"second"`) {
 		t.Fatalf("second response = %s", secondResponse)
+	}
+}
+
+func TestAttachmentRejectsDocumentURIsOutsideTaskWorkspace(t *testing.T) {
+	workspace := t.TempDir()
+	outside := t.TempDir()
+	insideFile := filepath.Join(workspace, "Main.kt")
+	outsideFile := filepath.Join(outside, "Secret.kt")
+	if err := os.WriteFile(insideFile, []byte("inside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(outsideFile, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	upstream := &recordingFeatureUpstream{}
+	hub, snapshot := newHubForTest(upstream)
+	snapshot.WorkspacePath = workspace
+	snapshot.WorkspaceURI = WorkspaceFileURI(workspace)
+	snapshot.WorkspaceFolders = []WorkspaceFolder{{
+		URI: WorkspaceFileURI(workspace), Name: filepath.Base(workspace),
+	}}
+	t.Cleanup(hub.Close)
+	attachment := hub.Attach(snapshot)
+	drainAttached(t, attachment)
+	t.Cleanup(attachment.Close)
+
+	outsideURIs := []string{
+		WorkspaceFileURI(outsideFile),
+		WorkspaceFileURI(workspace) + "/%2e%2e/" + url.PathEscape(filepath.Base(outside)) + "/Secret.kt",
+	}
+	link := filepath.Join(workspace, "linked-outside")
+	if err := os.Symlink(outside, link); err == nil {
+		outsideURIs = append(outsideURIs, WorkspaceFileURI(filepath.Join(link, "Secret.kt")))
+	}
+
+	for index, uri := range outsideURIs {
+		request := fmt.Sprintf(
+			`{"jsonrpc":"2.0","id":%d,"method":"textDocument/hover","params":{"textDocument":{"uri":%q}}}`,
+			index+1,
+			uri,
+		)
+		if err := attachment.Handle([]byte(request)); err != nil {
+			t.Fatalf("handle outside request %q: %v", uri, err)
+		}
+		response := readAttachmentMessage(t, attachment)
+		if !rawContains(response, `"code":-32602`) {
+			t.Fatalf("outside request %q response = %s", uri, response)
+		}
+
+		notification := []byte(fmt.Sprintf(
+			`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":%q,"languageId":"kotlin","text":"secret"}}}`,
+			uri,
+		))
+		if err := attachment.Handle(notification); err == nil {
+			t.Fatalf("outside notification %q was accepted", uri)
+		}
+	}
+
+	upstream.mu.Lock()
+	requestCount := len(upstream.requests)
+	notificationCount := len(upstream.notifications)
+	upstream.mu.Unlock()
+	if requestCount != 0 || notificationCount != 0 {
+		t.Fatalf("outside messages reached upstream: requests=%d notifications=%d", requestCount, notificationCount)
+	}
+
+	valid := []byte(fmt.Sprintf(
+		`{"jsonrpc":"2.0","id":99,"method":"textDocument/hover","params":{"textDocument":{"uri":%q}}}`,
+		WorkspaceFileURI(insideFile),
+	))
+	if err := attachment.Handle(valid); err != nil {
+		t.Fatalf("handle task document request: %v", err)
+	}
+	if response := readAttachmentMessage(t, attachment); !rawContains(response, `"id":99`) {
+		t.Fatalf("task document response = %s", response)
 	}
 }
 
@@ -114,9 +200,10 @@ func TestAttachmentCancellationAndDetachDiscardPendingResponse(t *testing.T) {
 	attachment := hub.Attach(snapshot)
 	drainAttached(t, attachment)
 
-	if err := attachment.Handle([]byte(
-		`{"jsonrpc":"2.0","id":"same","method":"textDocument/hover","params":{}}`,
-	)); err != nil {
+	if err := attachment.Handle([]byte(fmt.Sprintf(
+		`{"jsonrpc":"2.0","id":"same","method":"textDocument/hover","params":{"textDocument":{"uri":%q}}}`,
+		documentURI,
+	))); err != nil {
 		t.Fatal(err)
 	}
 	if err := attachment.Handle([]byte(
@@ -149,8 +236,9 @@ func TestAttachmentBoundsPendingRequestsAndClosesPromptly(t *testing.T) {
 
 	for id := 1; id <= attachmentQueueSize+1; id++ {
 		message := fmt.Sprintf(
-			`{"jsonrpc":"2.0","id":%d,"method":"textDocument/hover","params":{}}`,
+			`{"jsonrpc":"2.0","id":%d,"method":"textDocument/hover","params":{"textDocument":{"uri":%q}}}`,
 			id,
+			documentURI,
 		)
 		if err := attachment.Handle([]byte(message)); err != nil {
 			t.Fatal(err)
@@ -344,9 +432,10 @@ func TestAttachmentRejectsLifecycleMessagesWithoutClosing(t *testing.T) {
 	if got := upstream.notificationSnapshot(); len(got) != 0 {
 		t.Fatalf("lifecycle notifications reached upstream: %#v", got)
 	}
-	if err := attachment.Handle([]byte(
-		`{"jsonrpc":"2.0","id":10,"method":"textDocument/hover","params":{}}`,
-	)); err != nil {
+	if err := attachment.Handle([]byte(fmt.Sprintf(
+		`{"jsonrpc":"2.0","id":10,"method":"textDocument/hover","params":{"textDocument":{"uri":%q}}}`,
+		documentURI,
+	))); err != nil {
 		t.Fatal(err)
 	}
 	if response := readAttachmentMessage(t, attachment); !rawContains(response, `"id":10`) {

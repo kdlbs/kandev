@@ -22,6 +22,7 @@ type hub struct {
 	generation uint64
 	upstream   featureUpstream
 	documents  *documentBroker
+	workspace  *documentWorkspace
 
 	mu          sync.RWMutex
 	nextID      uint64
@@ -30,11 +31,13 @@ type hub struct {
 }
 
 func newHub(language string, generation uint64, upstream featureUpstream) *hub {
+	workspace := newDocumentWorkspace()
 	return &hub{
 		language:    language,
 		generation:  generation,
 		upstream:    upstream,
-		documents:   newDocumentBroker(upstream),
+		documents:   newDocumentBroker(upstream, workspace),
+		workspace:   workspace,
 		attachments: make(map[uint64]*Attachment),
 	}
 }
@@ -50,6 +53,7 @@ func (h *hub) Attach(snapshot Snapshot) *Attachment {
 	}
 	h.nextID++
 	attachment := newAttachment(h.nextID, h)
+	h.workspace.SetSnapshot(snapshot)
 	h.documents.SetCapabilities(snapshot.Capabilities)
 	replay := make([][]byte, 0, len(snapshot.Diagnostics)+1)
 	replay = append(replay, attachmentHandshake(snapshot))
@@ -63,6 +67,10 @@ func (h *hub) Attach(snapshot Snapshot) *Attachment {
 	h.attachments[attachment.id] = attachment
 	h.mu.Unlock()
 	return attachment
+}
+
+func (h *hub) SetWorkspace(config Config) {
+	h.workspace.SetConfig(config)
 }
 
 func (h *hub) Broadcast(method string, params json.RawMessage) {

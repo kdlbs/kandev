@@ -131,6 +131,14 @@ func (a *Attachment) Handle(raw []byte) error {
 			a.enqueueRPCError(message.ID, -32601, "unsupported attachment method")
 			return nil
 		}
+		if strings.HasPrefix(message.Method, "textDocument/") {
+			params, err := a.hub.workspace.CanonicalizeTextDocumentParams(message.Params)
+			if err != nil {
+				a.enqueueRPCError(message.ID, -32602, err.Error())
+				return nil
+			}
+			message.Params = params
+		}
 		return a.startRequest(message)
 	}
 	return nil

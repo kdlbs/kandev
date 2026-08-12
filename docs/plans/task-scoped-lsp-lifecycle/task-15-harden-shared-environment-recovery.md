@@ -65,6 +65,12 @@ spec: "../../specs/lsp-file-intelligence/spec.md"
 - Cascade and workspace mutations reconcile durable state after ambiguous database errors instead
   of cancelling cleanup that may already own deleted resources. A delayed GET cannot clear a newer
   task-LSP control failure.
+- Browser document requests and notifications resolve only inside the canonical task workspace or
+  authorized repository roots; sibling, traversal, and symlink escapes never reach the server.
+- A live generation never treats a physical task workspace-root change as a dynamic folder update;
+  it keeps the old scope and reports restart-required until explicit Restart adopts the new root.
+- Completed Start bookkeeping is removed before its operation lock becomes available, so concurrent
+  task purge cannot observe a stale pending operation and fail cleanup spuriously.
 
 ## Verification
 
@@ -202,6 +208,14 @@ Completed 2026-08-12.
   agentctl instance. Reconnect now derives the marker from the typed task-host request before
   rollback. The regression uses real reconnect plus authenticated deletion, rejects any Docker
   container mutation, and passed 20 race-enabled repetitions.
+- A fresh exact-head GPT-5.6 Sol Max review found three further task-host defects despite green CI:
+  attachment document URIs lacked canonical task-root containment, physical workspace-root changes
+  were incorrectly sent as folder-only updates, and completed Start could briefly expose stale
+  bookkeeping to Purge. Red-first regressions cover sibling/traversal/symlink escapes, live-root
+  promotion, and synchronized Start/Purge ordering. Focused tests and 20 race-enabled repetitions
+  passed, as did the complete agentctl-server suite and race-enabled agentctl LSP/API plus backend
+  LSP packages. Changed-code Go lint reported zero issues, the LSP package cross-compiled for
+  Windows, all 62 public-doc validator tests passed, and all 41 published pages validated.
 
 ## Files
 
@@ -210,6 +224,7 @@ Completed 2026-08-12.
 - `apps/backend/internal/orchestrator/executor/**`
 - `apps/backend/internal/agent/runtime/lifecycle/**`
 - `apps/backend/internal/task/handlers/**`
+- `apps/backend/internal/agentctl/server/lsp/**`
 - `apps/web/hooks/domains/lsp/**`
 - `apps/web/hooks/use-lsp.ts`
 - `apps/web/components/editors/**`

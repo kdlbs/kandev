@@ -101,7 +101,9 @@ and obscure the actual task-level work that is still running.
   duplicate attachment opens add references without rewinding text, accepted changes receive
   monotonically increasing upstream versions in arrival order, and the last accepted change is the
   server's analysis overlay. The final document attachment may send `didClose`, but that does not
-  stop the server. Kandev does not overwrite another editor's unsaved buffer.
+  stop the server. Kandev does not overwrite another editor's unsaved buffer. Every browser-originated
+  file URI is canonicalized and must resolve inside the backend-authorized task workspace or one of
+  its repository roots; sibling paths, traversal, and symlink escapes fail before upstream traffic.
 - Successful saves first synchronize the newest live editor snapshot, then send `didSave` only
   when the server requested it. Stale persisted text is omitted if editing advanced while the save
   was in flight; failed saves send no save notification.
@@ -111,7 +113,9 @@ and obscure the actual task-level work that is still running.
 - Multi-repository tasks use one server. The task workspace is `rootUri`; ordered repository roots
   are `workspaceFolders`. A source-root change uses `workspace/didChangeWorkspaceFolders` when the
   server supports it; otherwise the current generation stays usable for its old scope and the task
-  status becomes `restart_required` until the user restarts.
+  status becomes `restart_required` until the user restarts. A change to the physical task workspace
+  root always requires an explicit restart because process working directory, `rootUri`, and
+  attachment scope are initialize-time state; folder notifications never pretend to rebind them.
 - The canonical `TaskEnvironment` is only a runtime target. All sessions of the task use it. An
   inherited-workspace task may share the physical environment and task-host process with another
   task, but never its language-server slot: agentctl keys runtime, progress, configuration, and
@@ -517,6 +521,9 @@ task-environment cleanup merely because a browser remains connected.
 - **GIVEN** an unauthorized browser requests another task's LSP snapshot, action, or attachment,
   **WHEN** the route handles it, **THEN** authorization fails before runtime lookup and leaks no
   task, environment, generation, or binary evidence.
+- **GIVEN** an authorized attachment sends a document URI that traverses, names a sibling path, or
+  resolves through a symlink outside the task's canonical roots, **WHEN** the task host handles it,
+  **THEN** it rejects the message before the language server receives any request or notification.
 
 ## Out of scope
 
