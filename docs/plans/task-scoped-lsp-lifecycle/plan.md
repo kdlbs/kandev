@@ -495,6 +495,11 @@ Completed 2026-08-05.
   before transition. Frontend authoritative snapshots carry an error epoch so an older GET cannot
   erase a newer failed control. Focused regressions, complete task-service/SQLite suites and race
   suites, web typecheck/lint, i18n ratchet, and changed-code Go lint passed before final rebase.
+- The branch then rebased without conflict onto `origin/main` at `7855a4e08`. Exact-base
+  verification passed the task-service and SQLite race suites (117.110s and 45.179s), changed-code
+  Go lint with zero issues, 22 focused frontend tests, strict targeted ESLint, web typecheck, the
+  i18n ratchet, all 62 public-doc validator tests, validation of all 41 published pages, and the
+  three-dot diff whitespace check.
 
 ---
 
