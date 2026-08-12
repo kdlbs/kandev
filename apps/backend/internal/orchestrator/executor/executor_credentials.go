@@ -424,7 +424,10 @@ func managedGitCredentialProvider(repository *models.Repository, githubManaged b
 	if providerID == "" {
 		providerID = gitHubProviderID
 	}
-	if providerID == gitLabProviderID {
+	// Native GitLab and Azure DevOps credentials keep their existing executor
+	// paths. The generic broker is reserved for managed GitHub credentials and
+	// manifest-owned plugin providers.
+	if providerID == gitLabProviderID || providerID == providerAzureDevOps {
 		return ""
 	}
 	if providerID == gitHubProviderID && (!githubManaged || env[envGitHubToken] != "" || env[envGHToken] != "") {

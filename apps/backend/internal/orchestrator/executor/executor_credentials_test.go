@@ -397,6 +397,30 @@ func TestConfigureGitCredentialBrokerSkipsGitLabLegacyCredentials(t *testing.T) 
 	}
 }
 
+func TestConfigureGitCredentialBrokerSkipsAzureWorkspaceCredentials(t *testing.T) {
+	issuer := &fakeGitHubCredentialLeaseIssuer{err: gitcredentials.ErrUnsupported}
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	exec.SetGitHubCredentialBroker(issuer, "https://kandev.example/api/v1/github/credentials/resolve")
+	req := &LaunchAgentRequest{
+		TaskID: "task-1", WorkspaceID: "workspace-1", SessionID: "session-1",
+		ExecutorType: string(models.ExecutorTypeRemoteDocker), Env: map[string]string{},
+	}
+	info := &repoInfo{RepositoryID: "repo-1", Repository: &models.Repository{
+		Provider: "azure_devops", ProviderHost: "https://dev.azure.com/acme",
+		RemoteURL: "https://dev.azure.com/acme/project/_git/widgets",
+	}}
+
+	if err := exec.configureGitCredentialBrokerForRepositories(context.Background(), req, []*repoInfo{info}); err != nil {
+		t.Fatalf("configureGitCredentialBrokerForRepositories() error = %v", err)
+	}
+	if issuer.calls != 0 {
+		t.Fatalf("Issue calls = %d, want 0 for native Azure workspace credentials", issuer.calls)
+	}
+	if got := req.Env[envGitHubCredentialBrokerURL]; got != "" {
+		t.Fatalf("broker URL = %q, want no generic broker for Azure DevOps", got)
+	}
+}
+
 func TestConfigureGitCredentialBrokerRejectsUnsupportedPluginProvider(t *testing.T) {
 	issuer := &fakeGitHubCredentialLeaseIssuer{err: gitcredentials.ErrUnsupported}
 	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
