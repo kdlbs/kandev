@@ -68,6 +68,7 @@ func newRuntime(cfg runtimeConfig) *runtime {
 		done:          make(chan struct{}),
 	}
 	runtime.hub = newHub(cfg.language, cfg.generation, runtime)
+	runtime.hub.SetWorkspace(cfg.workspace)
 	return runtime
 }
 

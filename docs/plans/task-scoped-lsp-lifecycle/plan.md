@@ -497,8 +497,8 @@ Completed 2026-08-05.
   sessions; workspace deletion freezes task creation, reserves before all inventory, holds task and
   physical-environment admission, and purges task LSP before cascade. Renewable preparation leases
   protect legitimate long mutations, while cascade/workspace errors probe durable commit state
-  before transition. Frontend authoritative snapshots carry an error epoch so an older GET cannot
-  erase a newer failed control. Focused regressions, complete task-service/SQLite suites and race
+  before transition. Frontend authoritative snapshots carry a control-error epoch so an older GET
+  cannot erase a newer failed control. Focused regressions, complete task-service/SQLite suites and race
   suites, web typecheck/lint, i18n ratchet, and changed-code Go lint passed before final rebase.
 - The branch then rebased without conflict onto `origin/main` at `7855a4e08`. Exact-base
   verification passed the task-service and SQLite race suites (117.110s and 45.179s), changed-code
@@ -528,6 +528,12 @@ Completed 2026-08-05.
   derives the marker from the typed task-host request before rollback is possible. The regression
   exercises real reconnect and authenticated instance deletion, rejects any container mutation,
   and passed 20 race-enabled repetitions.
+- The final exact-head Sol Max security pass found that component-wise absolute path checks remained
+  vulnerable to selected-root reparses and ancestor replacement, plus a frontend overlap that could
+  retain an older refresh error after newer success. Trusted task-host setup now pins canonical OS
+  roots, browser document resolution is handle-relative with authorized cross-root switching, and
+  authoritative load failures settle in response order without advancing the control-error epoch.
+  Task 15 records the red-first regressions and final verification.
 
 ---
 

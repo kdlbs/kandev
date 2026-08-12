@@ -6,6 +6,7 @@ const NOW = "2026-08-05T10:00:00Z";
 const CAPACITY_EPOCH = "20260806T090000.000000002Z";
 const PRIOR_CAPACITY_EPOCH = "20260806T090000.000000001Z";
 const RESTARTED_CAPACITY_EPOCH = "20260806T080000.000000001Z";
+const STOP_FAILED = "stop failed";
 
 function language(revision: number, phase: TaskLspLanguageSnapshot["phase"] = "ready") {
   return {
@@ -225,7 +226,7 @@ describe("LSP live evidence", () => {
       },
       0,
     );
-    subject.getState().setTaskLspError("task-1", "stop failed");
+    subject.getState().setTaskLspError("task-1", STOP_FAILED);
 
     subject.getState().setTaskLspSnapshot(
       {
@@ -235,7 +236,7 @@ describe("LSP live evidence", () => {
       },
       0,
     );
-    expect(subject.getState().taskLsp.byTaskId["task-1"]?.error).toBe("stop failed");
+    expect(subject.getState().taskLsp.byTaskId["task-1"]?.error).toBe(STOP_FAILED);
 
     subject.getState().setTaskLspSnapshot(
       {
@@ -246,5 +247,33 @@ describe("LSP live evidence", () => {
       1,
     );
     expect(subject.getState().taskLsp.byTaskId["task-1"]?.error).toBeNull();
+  });
+
+  it("clears a load failure without advancing the control error epoch", () => {
+    const subject = store();
+    subject.getState().setTaskLspLoadError("task-1", "refresh failed", 0);
+
+    expect(subject.getState().taskLsp.byTaskId["task-1"]).toMatchObject({
+      error: "refresh failed",
+      controlErrorEpoch: 0,
+    });
+
+    subject.getState().setTaskLspSnapshot(
+      {
+        task_id: "task-1",
+        languages: [language(1)],
+        capacity: { active: 1, queued: 0, limit: 4 },
+      },
+      0,
+    );
+    expect(subject.getState().taskLsp.byTaskId["task-1"]?.error).toBeNull();
+  });
+
+  it("does not replace a newer control failure with an older load failure", () => {
+    const subject = store();
+    subject.getState().setTaskLspError("task-1", STOP_FAILED);
+    subject.getState().setTaskLspLoadError("task-1", "refresh failed", 0);
+
+    expect(subject.getState().taskLsp.byTaskId["task-1"]?.error).toBe(STOP_FAILED);
   });
 });

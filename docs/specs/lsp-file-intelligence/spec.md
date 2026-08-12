@@ -104,9 +104,16 @@ and obscure the actual task-level work that is still running.
   stop the server. Kandev does not overwrite another editor's unsaved buffer. Every browser-originated
   file URI is canonicalized and must resolve inside the backend-authorized task workspace or one of
   its repository roots; sibling paths, traversal, and symlink escapes fail before upstream traffic.
-  Lexical task-root and authority/volume checks happen before filesystem resolution. Symlink and
-  Windows reparse targets are checked again before target lookup, so neither a direct UNC URI nor an
-  in-root redirect to an untrusted share can trigger network access merely by being rejected.
+  Lexical task-root and authority/volume checks happen before filesystem resolution. Trusted
+  task-host setup canonicalizes and pins one OS root handle per authorized root before any browser
+  attaches; Windows uses the selected root's opened-handle identity so junction and mount-point roots
+  cannot defer their redirect until a browser child lookup. Browser authorization uses only
+  handle-relative inspection, including across concurrent ancestor replacement. Symlink and Windows
+  reparse targets are projected into the authorized root set before target lookup, with valid
+  cross-root links switching pinned handles, so neither a direct UNC URI nor an in-root redirect to an
+  untrusted share can trigger network access merely by being rejected. Missing document tails stop
+  lookup at the first absent component. Since LSP servers consume pathnames rather than file handles,
+  task-environment containment remains responsible for replacement after authorization completes.
 - Successful saves first synchronize the newest live editor snapshot, then send `didSave` only
   when the server requested it. Stale persisted text is omitted if editing advanced while the save
   was in flight; failed saves send no save notification.
@@ -530,6 +537,16 @@ task-environment cleanup merely because a browser remains connected.
 - **GIVEN** an in-root Windows reparse point targets an untrusted UNC share, **WHEN** an attachment
   names a document beneath that redirect, **THEN** the task host rejects the target before any DNS,
   SMB, or target-filesystem lookup.
+- **GIVEN** a backend-selected Windows workspace root is itself a junction or mount point, **WHEN**
+  the task host configures the generation, **THEN** it records and pins the opened root's canonical
+  identity before browser attachment, and later document traffic cannot reopen or rebind that root.
+- **GIVEN** a checked document ancestor is replaced by a symlink or reparse point while authorization
+  is walking the path, **WHEN** the next component is inspected, **THEN** handle-relative traversal
+  fails closed without touching an outside root or untrusted network authority.
+- **GIVEN** overlapping authoritative browser refreshes for the same task, **WHEN** an older refresh
+  fails after a newer refresh has begun and the newer refresh succeeds, **THEN** the accepted snapshot
+  is not paired with the older transport error, while newer failed controls remain protected from
+  older successful refreshes.
 
 ## Out of scope
 

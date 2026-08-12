@@ -12,7 +12,7 @@ export type TaskLspTaskState = {
   loaded: boolean;
   loading: boolean;
   error: string | null;
-  errorEpoch?: number;
+  controlErrorEpoch?: number;
 };
 
 export type LspSliceState = {
@@ -23,9 +23,10 @@ export type LspSliceState = {
 };
 
 export type LspSliceActions = {
-  setTaskLspSnapshot: (snapshot: TaskLspSnapshot, expectedErrorEpoch?: number) => void;
+  setTaskLspSnapshot: (snapshot: TaskLspSnapshot, expectedControlErrorEpoch?: number) => void;
   mergeTaskLspLanguage: (snapshot: TaskLspLanguageSnapshot) => void;
   setTaskLspLoading: (taskId: string, loading: boolean) => void;
+  setTaskLspLoadError: (taskId: string, error: string, expectedControlErrorEpoch: number) => void;
   setTaskLspError: (taskId: string, error: string | null) => void;
   setTaskLspActionPending: (taskId: string, language: string, action?: TaskLspAction) => void;
   clearTaskLsp: (taskId: string) => void;

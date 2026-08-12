@@ -23,11 +23,20 @@ type documentWorkspace struct {
 	mu                     sync.RWMutex
 	roots                  []documentRoot
 	resolveTrustedRootPath func(string) (string, error)
+	openRoot               func(string) (documentRootAccess, error)
+	closed                 bool
 }
 
 type documentRoot struct {
 	lexical   string
 	canonical string
+	access    documentRootAccess
+}
+
+type documentRootAccess interface {
+	Lstat(string) (fs.FileInfo, error)
+	Readlink(string) (string, error)
+	Close() error
 }
 
 func newDocumentWorkspace() *documentWorkspace {
@@ -37,11 +46,18 @@ func newDocumentWorkspace() *documentWorkspace {
 func newDocumentWorkspaceWithResolver(
 	resolvePath func(string) (string, error),
 ) *documentWorkspace {
-	return &documentWorkspace{resolveTrustedRootPath: resolvePath}
+	return newDocumentWorkspaceWithRootAccess(resolvePath, openDocumentRoot)
 }
 
-func (w *documentWorkspace) SetSnapshot(snapshot Snapshot) {
-	w.set(snapshot.WorkspacePath, snapshot.WorkspaceURI, snapshot.WorkspaceFolders)
+func newDocumentWorkspaceWithRootAccess(
+	resolvePath func(string) (string, error),
+	openRoot func(string) (documentRootAccess, error),
+) *documentWorkspace {
+	return &documentWorkspace{resolveTrustedRootPath: resolvePath, openRoot: openRoot}
+}
+
+func openDocumentRoot(path string) (documentRootAccess, error) {
+	return os.OpenRoot(path)
 }
 
 func (w *documentWorkspace) SetConfig(config Config) {
@@ -74,16 +90,51 @@ func (w *documentWorkspace) set(
 		if err != nil {
 			continue
 		}
+		access, err := w.openRoot(canonical)
+		if err != nil {
+			continue
+		}
 		key := lexical + "\x00" + canonical
 		if _, duplicate := seen[key]; duplicate {
+			_ = access.Close()
 			continue
 		}
 		seen[key] = struct{}{}
-		roots = append(roots, documentRoot{lexical: lexical, canonical: canonical})
+		roots = append(roots, documentRoot{
+			lexical: lexical, canonical: canonical, access: access,
+		})
 	}
 	w.mu.Lock()
+	if w.closed {
+		w.mu.Unlock()
+		closeDocumentRoots(roots)
+		return
+	}
+	oldRoots := w.roots
 	w.roots = roots
 	w.mu.Unlock()
+	closeDocumentRoots(oldRoots)
+}
+
+func (w *documentWorkspace) Close() {
+	w.mu.Lock()
+	if w.closed {
+		w.mu.Unlock()
+		return
+	}
+	w.closed = true
+	roots := w.roots
+	w.roots = nil
+	w.mu.Unlock()
+	closeDocumentRoots(roots)
+}
+
+func closeDocumentRoots(roots []documentRoot) {
+	for _, root := range roots {
+		if root.access != nil {
+			_ = root.access.Close()
+		}
+	}
 }
 
 func (w *documentWorkspace) CanonicalURI(raw string) (string, error) {
@@ -92,8 +143,8 @@ func (w *documentWorkspace) CanonicalURI(raw string) (string, error) {
 		return "", err
 	}
 	w.mu.RLock()
-	roots := append([]documentRoot(nil), w.roots...)
-	w.mu.RUnlock()
+	defer w.mu.RUnlock()
+	roots := w.roots
 	if !lexicallyAuthorizedDocumentPath(documentPath, roots) {
 		return "", fmt.Errorf("%w: %s", errDocumentOutsideWorkspace, raw)
 	}
@@ -109,54 +160,41 @@ func (w *documentWorkspace) CanonicalURI(raw string) (string, error) {
 	return "", fmt.Errorf("%w: %s", errDocumentOutsideWorkspace, raw)
 }
 
-type documentFilesystem struct {
-	lstat    func(string) (fs.FileInfo, error)
-	readlink func(string) (string, error)
-}
-
-var localDocumentFilesystem = documentFilesystem{
-	lstat:    os.Lstat,
-	readlink: os.Readlink,
-}
-
 type documentPathProjection struct {
-	root     string
+	root     int
 	relative string
 	score    int
 }
 
 func canonicalDocumentPath(path string, roots []documentRoot) (string, error) {
-	return canonicalDocumentPathWithFilesystem(path, roots, localDocumentFilesystem)
-}
-
-func canonicalDocumentPathWithFilesystem(
-	path string,
-	roots []documentRoot,
-	filesystem documentFilesystem,
-) (string, error) {
 	projection, ok := projectDocumentPath(path, roots)
 	if !ok {
 		return "", errDocumentOutsideWorkspace
 	}
-	return walkDocumentPath(projection, roots, filesystem)
+	return walkDocumentPath(projection, roots)
 }
 
 func walkDocumentPath(
 	projection documentPathProjection,
 	roots []documentRoot,
-	filesystem documentFilesystem,
 ) (string, error) {
 	pending := pathComponents(projection.relative)
-	current := projection.root
+	currentRoot := projection.root
+	current := "."
 	linksWalked := 0
 	for len(pending) != 0 {
 		component := pending[0]
 		pending = pending[1:]
-		candidate := filepath.Join(current, component)
+		root := roots[currentRoot]
+		if root.access == nil {
+			return "", errors.New("file document root is unavailable")
+		}
+		candidateRelative := filepath.Join(current, component)
+		candidate := filepath.Join(root.canonical, candidateRelative)
 		if !pathWithinCanonicalRoot(candidate, roots) {
 			return "", errDocumentOutsideWorkspace
 		}
-		info, err := filesystem.lstat(candidate)
+		info, err := root.access.Lstat(candidateRelative)
 		if errors.Is(err, fs.ErrNotExist) {
 			return unresolvedDocumentTail(candidate, pending, roots)
 		}
@@ -167,14 +205,14 @@ func walkDocumentPath(
 			if len(pending) != 0 && !info.IsDir() {
 				return "", errors.New("file document ancestor is not a directory")
 			}
-			current = candidate
+			current = candidateRelative
 			continue
 		}
 		linksWalked++
 		if linksWalked > 255 {
 			return "", errors.New("resolve file document path: too many links")
 		}
-		target, err := filesystem.readlink(candidate)
+		target, err := root.access.Readlink(candidateRelative)
 		if err != nil {
 			return "", fmt.Errorf("read file document link: %w", err)
 		}
@@ -187,9 +225,10 @@ func walkDocumentPath(
 			return "", errDocumentOutsideWorkspace
 		}
 		pending = append(pathComponents(nextProjection.relative), pending...)
-		current = nextProjection.root
+		currentRoot = nextProjection.root
+		current = "."
 	}
-	return filepath.Clean(current), nil
+	return filepath.Clean(filepath.Join(roots[currentRoot].canonical, current)), nil
 }
 
 func isDocumentLink(info fs.FileInfo) bool {
@@ -200,14 +239,14 @@ func isDocumentLink(info fs.FileInfo) bool {
 
 func projectDocumentPath(path string, roots []documentRoot) (documentPathProjection, bool) {
 	best := documentPathProjection{score: -1}
-	for _, root := range roots {
+	for index, root := range roots {
 		for _, source := range []string{root.lexical, root.canonical} {
 			relative, err := filepath.Rel(source, path)
 			if err != nil || pathLeavesRoot(relative) || len(source) <= best.score {
 				continue
 			}
 			best = documentPathProjection{
-				root: root.canonical, relative: relative, score: len(source),
+				root: index, relative: relative, score: len(source),
 			}
 		}
 	}
@@ -336,7 +375,7 @@ func canonicalFilesystemPath(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	resolved, err := filepath.EvalSymlinks(path)
+	resolved, err := canonicalExistingFilesystemPath(path)
 	if err == nil {
 		return filepath.Clean(resolved), nil
 	}
@@ -358,7 +397,7 @@ func resolveMissingFilesystemPath(path string) (string, error) {
 	current := path
 	var tail []string
 	for {
-		resolved, err := filepath.EvalSymlinks(current)
+		resolved, err := canonicalExistingFilesystemPath(current)
 		if err == nil {
 			for index := len(tail) - 1; index >= 0; index-- {
 				resolved = filepath.Join(resolved, tail[index])

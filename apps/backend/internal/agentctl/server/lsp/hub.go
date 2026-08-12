@@ -53,7 +53,6 @@ func (h *hub) Attach(snapshot Snapshot) *Attachment {
 	}
 	h.nextID++
 	attachment := newAttachment(h.nextID, h)
-	h.workspace.SetSnapshot(snapshot)
 	h.documents.SetCapabilities(snapshot.Capabilities)
 	replay := make([][]byte, 0, len(snapshot.Diagnostics)+1)
 	replay = append(replay, attachmentHandshake(snapshot))
@@ -104,6 +103,7 @@ func (h *hub) Close() {
 	for _, attachment := range attachments {
 		attachment.close(false)
 	}
+	h.workspace.Close()
 }
 
 func (h *hub) Closed() bool {

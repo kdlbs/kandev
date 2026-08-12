@@ -216,6 +216,42 @@ describe("useTaskLsp reconnection", () => {
   });
 });
 
+describe("useTaskLsp overlapping refreshes", () => {
+  it("does not retain an older refresh error after a newer refresh succeeds", async () => {
+    const view = renderHook(() => subject("task-1"), { wrapper });
+    await waitFor(() => expect(view.result.current.lsp.loaded).toBe(true));
+
+    let rejectOlder!: (reason: Error) => void;
+    api.get.mockReturnValueOnce(
+      new Promise<TaskLspSnapshot>((_, reject) => {
+        rejectOlder = reject;
+      }),
+    );
+    const older = view.result.current.lsp.refetch();
+
+    let resolveNewer!: (value: TaskLspSnapshot) => void;
+    api.get.mockReturnValueOnce(
+      new Promise<TaskLspSnapshot>((resolve) => {
+        resolveNewer = resolve;
+      }),
+    );
+    const newer = view.result.current.lsp.refetch();
+
+    await act(async () => {
+      rejectOlder(new Error("stale refresh failed"));
+      await expect(older).rejects.toThrow("stale refresh failed");
+    });
+    expect(view.result.current.lsp.error).toBe("stale refresh failed");
+    await act(async () => {
+      resolveNewer(snapshot(language(5, "ready")));
+      await newer;
+    });
+
+    expect(view.result.current.lsp.error).toBeNull();
+    expect(view.result.current.lsp.byLanguage.kotlin?.revision).toBe(5);
+  });
+});
+
 describe("useTaskLsp controls", () => {
   it("runs controls through one API seam and merges the authoritative result", async () => {
     api.start.mockResolvedValue(language(2, "starting"));

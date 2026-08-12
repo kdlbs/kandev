@@ -65,7 +65,12 @@ func (u *recordingFeatureUpstream) notificationSnapshot() []recordedFeatureMessa
 	return append([]recordedFeatureMessage(nil), u.notifications...)
 }
 
-func newHubForTest(upstream featureUpstream) (*hub, Snapshot) {
+func newHubForTest(t testing.TB, upstream featureUpstream) (*hub, Snapshot) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(testDocumentWorkspacePath, "repo"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(testDocumentWorkspacePath) })
 	snapshot := Snapshot{
 		Language:      "kotlin",
 		Generation:    7,
@@ -78,12 +83,18 @@ func newHubForTest(upstream featureUpstream) (*hub, Snapshot) {
 		},
 		Diagnostics: []json.RawMessage{},
 	}
-	return newHub("kotlin", 7, upstream), snapshot
+	hub := newHub("kotlin", 7, upstream)
+	hub.SetWorkspace(Config{
+		WorkDir:          snapshot.WorkspacePath,
+		WorkspaceURI:     snapshot.WorkspaceURI,
+		WorkspaceFolders: snapshot.WorkspaceFolders,
+	})
+	return hub, snapshot
 }
 
 func TestHubRemapsCollidingRequestIDsPerAttachment(t *testing.T) {
 	upstream := &recordingFeatureUpstream{}
-	hub, snapshot := newHubForTest(upstream)
+	hub, snapshot := newHubForTest(t, upstream)
 	t.Cleanup(hub.Close)
 	first := hub.Attach(snapshot)
 	second := hub.Attach(snapshot)
@@ -127,12 +138,17 @@ func TestAttachmentRejectsDocumentURIsOutsideTaskWorkspace(t *testing.T) {
 	}
 
 	upstream := &recordingFeatureUpstream{}
-	hub, snapshot := newHubForTest(upstream)
+	hub, snapshot := newHubForTest(t, upstream)
 	snapshot.WorkspacePath = workspace
 	snapshot.WorkspaceURI = WorkspaceFileURI(workspace)
 	snapshot.WorkspaceFolders = []WorkspaceFolder{{
 		URI: WorkspaceFileURI(workspace), Name: filepath.Base(workspace),
 	}}
+	hub.SetWorkspace(Config{
+		WorkDir:          snapshot.WorkspacePath,
+		WorkspaceURI:     snapshot.WorkspaceURI,
+		WorkspaceFolders: snapshot.WorkspaceFolders,
+	})
 	t.Cleanup(hub.Close)
 	attachment := hub.Attach(snapshot)
 	drainAttached(t, attachment)
@@ -190,12 +206,46 @@ func TestAttachmentRejectsDocumentURIsOutsideTaskWorkspace(t *testing.T) {
 	}
 }
 
+func TestHubAttachmentCannotRebindPinnedDocumentWorkspace(t *testing.T) {
+	trusted := t.TempDir()
+	untrusted := t.TempDir()
+	upstream := &recordingFeatureUpstream{}
+	hub := newHub("kotlin", 7, upstream)
+	hub.SetWorkspace(Config{WorkDir: trusted, WorkspaceURI: WorkspaceFileURI(trusted)})
+	t.Cleanup(hub.Close)
+
+	attachment := hub.Attach(Snapshot{
+		Language:      "kotlin",
+		Generation:    7,
+		Phase:         sharedlsp.PhaseReady,
+		WorkspacePath: untrusted,
+		WorkspaceURI:  WorkspaceFileURI(untrusted),
+	})
+	drainAttached(t, attachment)
+	t.Cleanup(attachment.Close)
+
+	request := []byte(fmt.Sprintf(
+		`{"jsonrpc":"2.0","id":1,"method":"textDocument/hover","params":{"textDocument":{"uri":%q}}}`,
+		WorkspaceFileURI(filepath.Join(untrusted, "Secret.kt")),
+	))
+	if err := attachment.Handle(request); err != nil {
+		t.Fatal(err)
+	}
+	response := readAttachmentMessage(t, attachment)
+	if !rawContains(response, `"code":-32602`) {
+		t.Fatalf("untrusted attachment workspace response = %s", response)
+	}
+	if len(upstream.requests) != 0 {
+		t.Fatalf("attachment workspace reached upstream: %#v", upstream.requests)
+	}
+}
+
 func TestAttachmentCancellationAndDetachDiscardPendingResponse(t *testing.T) {
 	upstream := &recordingFeatureUpstream{
 		blockMethod: "textDocument/hover",
 		canceled:    make(chan struct{}),
 	}
-	hub, snapshot := newHubForTest(upstream)
+	hub, snapshot := newHubForTest(t, upstream)
 	t.Cleanup(hub.Close)
 	attachment := hub.Attach(snapshot)
 	drainAttached(t, attachment)
@@ -229,7 +279,7 @@ func TestAttachmentBoundsPendingRequestsAndClosesPromptly(t *testing.T) {
 		blockMethod: "textDocument/hover",
 		canceled:    make(chan struct{}),
 	}
-	hub, snapshot := newHubForTest(upstream)
+	hub, snapshot := newHubForTest(t, upstream)
 	t.Cleanup(hub.Close)
 	attachment := hub.Attach(snapshot)
 	drainAttached(t, attachment)
@@ -263,7 +313,7 @@ func TestAttachmentBoundsPendingRequestsAndClosesPromptly(t *testing.T) {
 
 func TestHubHandshakeDiagnosticReplayAndNotificationFanout(t *testing.T) {
 	upstream := &recordingFeatureUpstream{}
-	hub, snapshot := newHubForTest(upstream)
+	hub, snapshot := newHubForTest(t, upstream)
 	snapshot.Diagnostics = []json.RawMessage{
 		json.RawMessage(`{"uri":"file:///workspace/Main.kt","diagnostics":[{"message":"broken"}]}`),
 	}
@@ -297,7 +347,7 @@ func TestHubHandshakeDiagnosticReplayAndNotificationFanout(t *testing.T) {
 
 func TestHubAttachmentReplaysEveryCachedDiagnosticBeyondLiveQueueCapacity(t *testing.T) {
 	upstream := &recordingFeatureUpstream{}
-	hub, snapshot := newHubForTest(upstream)
+	hub, snapshot := newHubForTest(t, upstream)
 	snapshot.Diagnostics = make([]json.RawMessage, attachmentQueueSize+44)
 	for index := range snapshot.Diagnostics {
 		snapshot.Diagnostics[index] = json.RawMessage(fmt.Sprintf(
@@ -326,7 +376,7 @@ func TestHubAttachmentReplaysEveryCachedDiagnosticBeyondLiveQueueCapacity(t *tes
 
 func TestHubQueueOverflowClosesAttachmentMessageStream(t *testing.T) {
 	upstream := &recordingFeatureUpstream{}
-	hub, snapshot := newHubForTest(upstream)
+	hub, snapshot := newHubForTest(t, upstream)
 	t.Cleanup(hub.Close)
 	attachment := hub.Attach(snapshot)
 	drainAttached(t, attachment)
@@ -368,7 +418,7 @@ overflow:
 
 func TestHubAttachPublishesHandshakeBeforeConcurrentBroadcast(t *testing.T) {
 	upstream := &recordingFeatureUpstream{}
-	hub, snapshot := newHubForTest(upstream)
+	hub, snapshot := newHubForTest(t, upstream)
 	t.Cleanup(hub.Close)
 	hub.documents.mu.Lock()
 	attached := make(chan *Attachment, 1)
@@ -407,7 +457,7 @@ func TestHubAttachPublishesHandshakeBeforeConcurrentBroadcast(t *testing.T) {
 
 func TestAttachmentRejectsLifecycleMessagesWithoutClosing(t *testing.T) {
 	upstream := &recordingFeatureUpstream{}
-	hub, snapshot := newHubForTest(upstream)
+	hub, snapshot := newHubForTest(t, upstream)
 	t.Cleanup(hub.Close)
 	attachment := hub.Attach(snapshot)
 	drainAttached(t, attachment)

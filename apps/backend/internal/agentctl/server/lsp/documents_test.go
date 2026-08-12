@@ -7,7 +7,7 @@ import (
 
 func TestDocumentBrokerDeduplicatesOpenAndVersionsInterleavedChanges(t *testing.T) {
 	upstream := &recordingFeatureUpstream{}
-	hub, snapshot := newHubForTest(upstream)
+	hub, snapshot := newHubForTest(t, upstream)
 	t.Cleanup(hub.Close)
 	first := hub.Attach(snapshot)
 	second := hub.Attach(snapshot)
@@ -62,7 +62,7 @@ func TestDocumentBrokerDeduplicatesOpenAndVersionsInterleavedChanges(t *testing.
 
 func TestDocumentBrokerAppliesIncrementalChangeToSendingAttachmentBaseline(t *testing.T) {
 	upstream := &recordingFeatureUpstream{}
-	hub, snapshot := newHubForTest(upstream)
+	hub, snapshot := newHubForTest(t, upstream)
 	t.Cleanup(hub.Close)
 	first := hub.Attach(snapshot)
 	second := hub.Attach(snapshot)
@@ -103,7 +103,7 @@ func TestDocumentBrokerAppliesIncrementalChangeToSendingAttachmentBaseline(t *te
 
 func TestDocumentBrokerFinalCloseAndDetachReleaseOnlyDocuments(t *testing.T) {
 	upstream := &recordingFeatureUpstream{}
-	hub, snapshot := newHubForTest(upstream)
+	hub, snapshot := newHubForTest(t, upstream)
 	t.Cleanup(hub.Close)
 	first := hub.Attach(snapshot)
 	second := hub.Attach(snapshot)
@@ -135,7 +135,7 @@ func TestDocumentBrokerFinalCloseAndDetachReleaseOnlyDocuments(t *testing.T) {
 
 func TestDocumentBrokerOmitsStaleSaveTextAndHonorsCapability(t *testing.T) {
 	upstream := &recordingFeatureUpstream{}
-	hub, snapshot := newHubForTest(upstream)
+	hub, snapshot := newHubForTest(t, upstream)
 	snapshot.Capabilities = json.RawMessage(
 		`{"textDocumentSync":{"change":2,"save":{"includeText":true}}}`,
 	)

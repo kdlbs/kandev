@@ -53,11 +53,19 @@ accepted changes with one monotonically increasing server version, releases the 
 after the last attachment closes, and never stops the language-server process merely because no
 documents or attachments remain. Browser-originated file URIs are canonicalized against the
 backend-authorized task workspace and repository roots before upstream traffic; traversal, sibling
-paths, and symlink escapes are rejected at the task-host boundary. The task host first proves lexical
-root and authority/volume membership without filesystem access, then resolves symlinks one component
-at a time. Every symlink or reparse target is projected back into an authorized canonical root before
-the target is inspected; an original or redirected untrusted UNC authority cannot trigger DNS or SMB
-work during rejection.
+paths, and symlink escapes are rejected at the task-host boundary. During trusted task-host
+configuration, the task host canonicalizes each backend-authorized root, resolves the selected root's
+opened-handle identity on Windows, and pins one OS root handle until the workspace projection changes
+or the generation closes. Browser attachment and document traffic cannot open, replace, or rebind
+those roots. The task host first proves lexical root and authority/volume membership without
+filesystem access, then performs only handle-relative component inspection. Every symlink or reparse
+target is projected back into an authorized canonical root before the target is inspected; a valid
+cross-root target switches to that root's pinned handle. These rooted operations fail closed when an
+ancestor is replaced during authorization, and an original or redirected untrusted UNC authority
+cannot trigger DNS or SMB work during rejection. A missing document tail remains valid after the
+first not-found component without further lookup. The language server ultimately consumes a pathname,
+not an open file handle, so replacement after authorization and before server use is contained by the
+task environment rather than claimed as an atomic file-open guarantee.
 
 `TaskEnvironment` is the sole runtime target for the task-scoped owner. Multi-repository tasks
 initialize one server from the task workspace root with the task's ordered repository roots as

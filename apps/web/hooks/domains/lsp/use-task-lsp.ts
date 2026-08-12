@@ -71,8 +71,8 @@ function isLoadedTaskState(task: { loaded: boolean } | undefined): boolean {
   return task?.loaded ?? false;
 }
 
-function taskErrorEpoch(store: ReturnType<typeof useAppStoreApi>, taskId: string): number {
-  return store.getState().taskLsp.byTaskId[taskId]?.errorEpoch ?? 0;
+function taskControlErrorEpoch(store: ReturnType<typeof useAppStoreApi>, taskId: string): number {
+  return store.getState().taskLsp.byTaskId[taskId]?.controlErrorEpoch ?? 0;
 }
 
 function useTaskLspSubscription(taskId: string | null, connectionStatus: string) {
@@ -118,11 +118,11 @@ function useTransientRefresh(taskId: string | null, loaded: boolean, needed: boo
       if (inFlight) return;
       inFlight = true;
       const request = beginAuthoritativeRequest(store, taskId);
-      const errorEpoch = taskErrorEpoch(store, taskId);
+      const controlErrorEpoch = taskControlErrorEpoch(store, taskId);
       try {
         const snapshot = await getTaskLsp(taskId, { init: { signal: controller.signal } });
         if (!controller.signal.aborted && settleAuthoritativeRequest(store, taskId, request)) {
-          store.getState().setTaskLspSnapshot(snapshot, errorEpoch);
+          store.getState().setTaskLspSnapshot(snapshot, controlErrorEpoch);
         }
       } catch {
         // WebSocket notifications remain primary. Poll failures must not
@@ -154,15 +154,15 @@ export function useTaskLsp(taskId: string | null) {
       const state = store.getState();
       state.setTaskLspLoading(taskId, true);
       const request = beginAuthoritativeRequest(store, taskId);
-      const errorEpoch = taskErrorEpoch(store, taskId);
+      const controlErrorEpoch = taskControlErrorEpoch(store, taskId);
       try {
         const snapshot = await getTaskLsp(taskId, { init: { signal } });
         if (!signal?.aborted && settleAuthoritativeRequest(store, taskId, request)) {
-          store.getState().setTaskLspSnapshot(snapshot, errorEpoch);
+          store.getState().setTaskLspSnapshot(snapshot, controlErrorEpoch);
         }
       } catch (error) {
         if (!signal?.aborted && settleAuthoritativeRequest(store, taskId, request)) {
-          store.getState().setTaskLspError(taskId, errorMessage(error));
+          store.getState().setTaskLspLoadError(taskId, errorMessage(error), controlErrorEpoch);
         }
         if (!signal?.aborted) throw error;
       }

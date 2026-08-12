@@ -17,7 +17,7 @@ function emptyTaskState(): TaskLspTaskState {
     loaded: false,
     loading: false,
     error: null,
-    errorEpoch: 0,
+    controlErrorEpoch: 0,
   };
 }
 
@@ -68,14 +68,17 @@ export const createLspSlice: StateCreator<AppState, [["zustand/immer", never]], 
   set,
 ) => ({
   ...defaultLspState,
-  setTaskLspSnapshot: (snapshot, expectedErrorEpoch) =>
+  setTaskLspSnapshot: (snapshot, expectedControlErrorEpoch) =>
     set((draft) => {
       const task = draft.taskLsp.byTaskId[snapshot.task_id] ?? emptyTaskState();
       for (const language of snapshot.languages) mergeLanguage(task.languages, language);
       mergeCapacity(task, snapshot.capacity, true);
       task.loaded = true;
       task.loading = false;
-      if (expectedErrorEpoch === undefined || expectedErrorEpoch === (task.errorEpoch ?? 0)) {
+      if (
+        expectedControlErrorEpoch === undefined ||
+        expectedControlErrorEpoch === (task.controlErrorEpoch ?? 0)
+      ) {
         task.error = null;
       }
       draft.taskLsp.byTaskId[snapshot.task_id] = task;
@@ -94,11 +97,18 @@ export const createLspSlice: StateCreator<AppState, [["zustand/immer", never]], 
       task.loading = loading;
       draft.taskLsp.byTaskId[taskId] = task;
     }),
+  setTaskLspLoadError: (taskId, error, expectedControlErrorEpoch) =>
+    set((draft) => {
+      const task = draft.taskLsp.byTaskId[taskId] ?? emptyTaskState();
+      if (expectedControlErrorEpoch === (task.controlErrorEpoch ?? 0)) task.error = error;
+      task.loading = false;
+      draft.taskLsp.byTaskId[taskId] = task;
+    }),
   setTaskLspError: (taskId, error) =>
     set((draft) => {
       const task = draft.taskLsp.byTaskId[taskId] ?? emptyTaskState();
       task.error = error;
-      if (error !== null) task.errorEpoch = (task.errorEpoch ?? 0) + 1;
+      if (error !== null) task.controlErrorEpoch = (task.controlErrorEpoch ?? 0) + 1;
       task.loading = false;
       draft.taskLsp.byTaskId[taskId] = task;
     }),

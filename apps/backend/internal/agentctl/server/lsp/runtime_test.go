@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -24,6 +25,23 @@ func TestRuntimeInitializeRequestContextUsesLifetime(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("initialize context did not follow runtime cancellation")
+	}
+}
+
+func TestNewRuntimePinsDocumentWorkspaceBeforeBrowserAttachment(t *testing.T) {
+	workspacePath := t.TempDir()
+	runtime := newRuntime(runtimeConfig{
+		workspace: Config{WorkDir: workspacePath, WorkspaceURI: WorkspaceFileURI(workspacePath)},
+	})
+	t.Cleanup(runtime.hub.Close)
+	want := WorkspaceFileURI(filepath.Join(workspacePath, "Main.kt"))
+
+	got, err := runtime.hub.workspace.CanonicalURI(want)
+	if err != nil {
+		t.Fatalf("authorize runtime document before attachment: %v", err)
+	}
+	if got != want {
+		t.Fatalf("canonical URI = %q, want %q", got, want)
 	}
 }
 

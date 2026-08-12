@@ -242,6 +242,24 @@ Completed 2026-08-12.
   changed-code Go lint reported zero issues; Makefile shell-dispatch checks passed; all 60 public-doc
   validator tests and all 41 published-page checks passed. Native execution remains exact-head CI
   delivery evidence.
+- A third immutable-head Sol Max pass found that string-based component inspection still trusted the
+  selected root name and previously checked ancestors, and that an older overlapping frontend refresh
+  failure could survive beside a newer successful snapshot. Document roots are now canonicalized and
+  pinned during trusted task-host setup, including opened-handle canonical identity on Windows;
+  browser paths use handle-relative `os.Root` operations and manually switch pinned handles only after
+  cross-root link authorization. Root handles rotate with workspace configuration and close with the
+  generation. Authoritative refresh failures settle in response order without advancing the distinct
+  control-error epoch, so newer snapshots clear older load failures while newer control failures stay
+  protected. Red-first tests cover pinned
+  root lifecycle, root-relative access, ancestor replacement, selected-root junctions, missing tails,
+  cross-root links, loops, and overlapping refresh settlement.
+- Third-pass local verification: the focused containment/lifecycle set passed 20 race-enabled
+  repetitions, and the complete agentctl LSP package passed under the race detector in 16.983s. The
+  package cross-compiled for Windows; changed-code Go lint reported zero issues; Makefile
+  shell-dispatch validation passed for Unix, native Windows, and Git Bash; the 25 focused frontend
+  tests, strict targeted ESLint, Prettier, and web typecheck passed. All 60 public-doc validator tests
+  and all 41 published-page checks passed. Native selected-root junction execution remains exact-head
+  Windows CI delivery evidence.
 
 ## Files
 
