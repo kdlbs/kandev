@@ -27,7 +27,7 @@ import { SettingsFields } from "./linear-issue-watch-fields";
 import { FilterFields, SelectField } from "./linear-issue-watch-filter-fields";
 import { linearIssueWatchPlaceholders } from "./linear-issue-watch-placeholders";
 import { STEP_DEFAULT, STEP_DEFAULT_LABEL, resolveProfileId } from "@/lib/watcher-profile-default";
-import { WatcherRepositoryFields } from "@/components/watcher-repository-fields";
+import { WatcherRepositoryMultiFields } from "@/components/watcher-repository-multi-fields";
 import { clearWorkspaceScopedForm } from "@/lib/watcher-repository-default";
 import {
   type FormState,
@@ -182,14 +182,10 @@ function AutomationFields({
           disabled={!form.workflowId || stepsLoading || steps.length === 0}
         />
       </div>
-      <WatcherRepositoryFields
+      <WatcherRepositoryMultiFields
         workspaceId={form.workspaceId}
-        repositoryId={form.repositoryId}
-        baseBranch={form.baseBranch}
-        onRepositoryChange={(repositoryId) =>
-          setForm((p) => ({ ...p, repositoryId, baseBranch: "" }))
-        }
-        onBaseBranchChange={(baseBranch) => setForm((p) => ({ ...p, baseBranch }))}
+        bindings={form.repositories}
+        onChange={(repositories) => setForm((p) => ({ ...p, repositories }))}
       />
       <div className="grid grid-cols-2 gap-4">
         <SelectField

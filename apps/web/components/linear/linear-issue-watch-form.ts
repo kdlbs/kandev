@@ -3,6 +3,7 @@ import type {
   LinearIssueWatch,
   LinearSearchFilter,
   LinearUser,
+  LinearWatchRepositoryBinding,
 } from "@/lib/types/linear";
 import { DEFAULT_LINEAR_ISSUE_WATCH_PROMPT } from "./linear-issue-watch-placeholders";
 
@@ -56,10 +57,8 @@ export interface FormState {
   estimateMax: string;
   workflowId: string;
   workflowStepId: string;
-  /** Optional repository binding; "" = unbound (repo-less task). */
-  repositoryId: string;
-  /** Base branch for the worktree; "" = the repository's default branch. */
-  baseBranch: string;
+  /** Repository bindings; [] = unbound (repo-less task). */
+  repositories: LinearWatchRepositoryBinding[];
   agentProfileId: string;
   executorProfileId: string;
   prompt: string;
@@ -90,8 +89,7 @@ export function makeEmptyForm(workspaceId: string): FormState {
     estimateMax: "",
     workflowId: "",
     workflowStepId: "",
-    repositoryId: "",
-    baseBranch: "",
+    repositories: [],
     agentProfileId: "",
     executorProfileId: "",
     prompt: DEFAULT_LINEAR_ISSUE_WATCH_PROMPT,
@@ -104,6 +102,19 @@ export function makeEmptyForm(workspaceId: string): FormState {
 
 function estimateString(v: number | null | undefined): string {
   return v === undefined || v === null ? "" : String(v);
+}
+
+/**
+ * Maps a stored watch's repository bindings into the form. A defined
+ * `repositories` array is canonical — including an empty one, which means
+ * "unbound" even if the legacy singular fields still carry stale values.
+ * The legacy singular fields are read only when `repositories` is undefined
+ * (watches saved before multi-repository support).
+ */
+export function watchRepositories(w: LinearIssueWatch): LinearWatchRepositoryBinding[] {
+  if (w.repositories !== undefined) return w.repositories;
+  if (w.repositoryId) return [{ repositoryId: w.repositoryId, baseBranch: w.baseBranch ?? "" }];
+  return [];
 }
 
 export function formStateFromWatch(w: LinearIssueWatch): FormState {
@@ -121,8 +132,7 @@ export function formStateFromWatch(w: LinearIssueWatch): FormState {
     estimateMax: estimateString(f.estimateMax),
     workflowId: w.workflowId,
     workflowStepId: w.workflowStepId,
-    repositoryId: w.repositoryId ?? "",
-    baseBranch: w.baseBranch ?? "",
+    repositories: watchRepositories(w),
     agentProfileId: w.agentProfileId,
     executorProfileId: w.executorProfileId,
     prompt: w.prompt || DEFAULT_LINEAR_ISSUE_WATCH_PROMPT,
@@ -186,8 +196,8 @@ export function buildWatchPayload(form: FormState): {
   filter: LinearSearchFilter;
   workflowId: string;
   workflowStepId: string;
-  repositoryId: string;
-  baseBranch: string;
+  /** Repository bindings; [] = unbound (repo-less task). */
+  repositories: LinearWatchRepositoryBinding[];
   agentProfileId: string;
   executorProfileId: string;
   prompt: string;
@@ -202,10 +212,10 @@ export function buildWatchPayload(form: FormState): {
     filter: buildFilterPayload(form),
     workflowId: form.workflowId,
     workflowStepId: form.workflowStepId,
-    // An empty repositoryId clears the binding; the empty base branch is sent
-    // verbatim so the backend fills it with the repo's default at save time.
-    repositoryId: form.repositoryId,
-    baseBranch: form.repositoryId ? form.baseBranch : "",
+    // Rows without a chosen repository are dropped (half-filled UI rows); the
+    // backend also ignores them defensively. An empty list = unbound, and the
+    // backend fills each empty base branch with the repo's default at save.
+    repositories: form.repositories.filter((r) => r.repositoryId.trim() !== ""),
     agentProfileId: form.agentProfileId,
     executorProfileId: form.executorProfileId,
     prompt: form.prompt,

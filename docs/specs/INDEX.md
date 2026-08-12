@@ -126,7 +126,9 @@ Per-workspace credentials and triage triggers for external services.
 | Spec | Status |
 |---|---|
 | [azure-devops-integration](azure-devops-integration/spec.md) | shipped |
+| [linear-watcher-multiple-repositories](linear-watcher-multiple-repositories/spec.md) | draft |
 | [slack](integrations/slack.md) | archived — moved to `kandev-plugin-slack` |
+>>>>>>> bc75e168d (docs: add linear watcher multi-repo spec, plan, and task files)
 | [external-mcp](integrations/external-mcp.md) | draft |
 | [mcp-tool-argument-validation](integrations/mcp-tool-argument-validation.md) | shipped |
 | [provider-aware-review-automation](integrations/provider-aware-review-automation.md) | approved |

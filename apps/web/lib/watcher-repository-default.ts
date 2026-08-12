@@ -27,19 +27,28 @@ export function resolveBaseBranch(value: string): string {
   return value === DEFAULT_BRANCH ? "" : value;
 }
 
+// WorkspaceScopedForm is the shared slice of a watcher form that must be
+// cleared when the user switches workspaces. Each dialog carries whichever
+// binding representation it supports (legacy singular fields, the multi-repo
+// list, or both) — the fields that exist on the shape are cleared.
+type WorkspaceScopedForm = {
+  workspaceId: string;
+  workflowId: string;
+  workflowStepId: string;
+  repositoryId?: string;
+  baseBranch?: string;
+  repositories?: { repositoryId: string; baseBranch: string }[];
+};
+
 // clearWorkspaceScopedForm switches a watcher form to a new workspace and clears
 // every field scoped to the previous one (workflow, step, and the repository
-// binding) so a stale cross-workspace reference can't be saved. Shared across
-// the Linear/Jira/Sentry dialogs to keep this data-loss guard in one place.
-export function clearWorkspaceScopedForm<
-  T extends {
-    workspaceId: string;
-    workflowId: string;
-    workflowStepId: string;
-    repositoryId: string;
-    baseBranch: string;
-  },
->(prev: T, workspaceId: string): T {
+// binding, in whichever representation the form carries) so a stale
+// cross-workspace reference can't be saved. Shared across the Linear/Jira/Sentry
+// dialogs to keep this data-loss guard in one place.
+export function clearWorkspaceScopedForm<T extends WorkspaceScopedForm>(
+  prev: T,
+  workspaceId: string,
+): T {
   // No-op when the workspace didn't actually change, so re-selecting the current
   // workspace doesn't wipe the user's workflow/step/repository choices.
   if (prev.workspaceId === workspaceId) return prev;
@@ -48,9 +57,9 @@ export function clearWorkspaceScopedForm<
     workspaceId,
     workflowId: "",
     workflowStepId: "",
-    repositoryId: "",
-    baseBranch: "",
-  };
+    ...("repositoryId" in prev ? { repositoryId: "", baseBranch: "" } : {}),
+    ...("repositories" in prev ? { repositories: [] } : {}),
+  } as T;
 }
 
 // branchPlaceholder mirrors the workflow-step placeholder pattern: it nudges the

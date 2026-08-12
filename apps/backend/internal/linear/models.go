@@ -4,6 +4,7 @@
 package linear
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/kandev/kandev/internal/integrations/optional"
@@ -200,6 +201,16 @@ func LegacySecretKeyForWorkspace(workspaceID string) string {
 // against Linear rate limits when many workspaces have watches configured.
 const DefaultIssueWatchPollInterval = 300
 
+// IssueWatchRepository pairs a bound repository with the branch the per-task
+// worktree is cut from. A watch may bind several repositories; each created
+// task carries all of them (first entry = primary) and launches one worktree
+// per entry. BaseBranch empty means the repository's default branch (resolved
+// at save time).
+type IssueWatchRepository struct {
+	RepositoryID string `json:"repositoryId"`
+	BaseBranch   string `json:"baseBranch"`
+}
+
 // IssueWatch configures periodic Linear search-polling. The filter is a
 // structured SearchFilter (Linear has no JQL equivalent) persisted as JSON;
 // the poller deserialises it back to SearchFilter at the store boundary.
@@ -211,16 +222,19 @@ type IssueWatch struct {
 	WorkspaceID    string `json:"workspaceId" db:"workspace_id"`
 	WorkflowID     string `json:"workflowId" db:"workflow_id"`
 	WorkflowStepID string `json:"workflowStepId" db:"workflow_step_id"`
-	// RepositoryID optionally binds watcher-created tasks to a repository so the
-	// agent launches in an isolated worktree of that repo instead of a blank
-	// scratch checkout. Empty = unbound, which preserves the historical
-	// repo-less behaviour. When set, the resulting task carries a single
-	// (repository_id, base_branch) pair.
-	RepositoryID string `json:"repositoryId" db:"repository_id"`
-	// BaseBranch is the branch the per-task worktree is cut from. Empty defaults
-	// to the repository's default branch (resolved at create/update time).
-	// Meaningful only when RepositoryID is set.
-	BaseBranch          string       `json:"baseBranch" db:"base_branch"`
+	// Repositories binds the watcher to one or more repositories so the agent
+	// launches in one isolated worktree per repo instead of a blank scratch
+	// checkout. Empty = unbound, which preserves the historical repo-less
+	// behaviour. The first entry is the task's primary repository. Persisted
+	// as JSON in repositories_json; RepositoryID / BaseBranch below mirror the
+	// first entry for downgrade compatibility and are read as a fallback when
+	// repositories_json is empty.
+	Repositories []IssueWatchRepository `json:"repositories,omitempty"`
+	// RepositoryID / BaseBranch are the legacy single-binding columns, kept for
+	// DB read-compat (rows written before multi-repository support) and as a
+	// downgrade mirror of the first entry. Not the source of truth.
+	RepositoryID        string       `json:"repositoryId,omitempty" db:"repository_id"`
+	BaseBranch          string       `json:"baseBranch,omitempty" db:"base_branch"`
 	Filter              SearchFilter `json:"filter"`
 	AgentProfileID      string       `json:"agentProfileId" db:"agent_profile_id"`
 	ExecutorProfileID   string       `json:"executorProfileId" db:"executor_profile_id"`
@@ -265,14 +279,13 @@ type NewLinearIssueEvent struct {
 	WorkspaceID    string `json:"workspaceId"`
 	WorkflowID     string `json:"workflowId"`
 	WorkflowStepID string `json:"workflowStepId"`
-	// RepositoryID / BaseBranch carry the watch's optional repository binding so
-	// the orchestrator source can populate IssueTaskRequest.Repositories without
-	// reloading the watch row. Empty RepositoryID = unbound (repo-less task).
-	RepositoryID      string `json:"repositoryId,omitempty"`
-	BaseBranch        string `json:"baseBranch,omitempty"`
-	AgentProfileID    string `json:"agentProfileId"`
-	ExecutorProfileID string `json:"executorProfileId"`
-	Prompt            string `json:"prompt"`
+	// Repositories carries the watch's repository bindings so the orchestrator
+	// source can populate IssueTaskRequest.Repositories without reloading the
+	// watch row. Empty = unbound (repo-less task).
+	Repositories      []IssueWatchRepository `json:"repositories,omitempty"`
+	AgentProfileID    string                 `json:"agentProfileId"`
+	ExecutorProfileID string                 `json:"executorProfileId"`
+	Prompt            string                 `json:"prompt"`
 	// MaxInflightTasks mirrors the watch row's per-watcher throttle cap so the
 	// orchestrator's gate can read it without loading the row again. nil =
 	// uncapped.
@@ -280,21 +293,48 @@ type NewLinearIssueEvent struct {
 	Issue            *LinearIssue `json:"issue"`
 }
 
+// UnmarshalJSON accepts the legacy singular repositoryId/baseBranch keys
+// (written by watcher configs from before multi-repository support) alongside
+// the current `repositories` array, so a JSON round-trip of an old watch still
+// yields a binding. When both are present the plural field wins. The store
+// applies the same fallback at the row level; this keeps the wire shape
+// self-consistent.
+func (w *IssueWatch) UnmarshalJSON(data []byte) error {
+	type plain IssueWatch // avoid recursing back into this method
+	aux := struct {
+		*plain
+		LegacyRepositoryID string `json:"repositoryId"`
+		LegacyBaseBranch   string `json:"baseBranch"`
+	}{plain: (*plain)(w)}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if len(w.Repositories) == 0 && aux.LegacyRepositoryID != "" {
+		w.Repositories = []IssueWatchRepository{{RepositoryID: aux.LegacyRepositoryID, BaseBranch: aux.LegacyBaseBranch}}
+	}
+	return nil
+}
+
 // CreateIssueWatchRequest is the payload for POST /api/v1/linear/watches/issue.
 type CreateIssueWatchRequest struct {
-	WorkspaceID         string       `json:"workspaceId"`
-	WorkflowID          string       `json:"workflowId"`
-	WorkflowStepID      string       `json:"workflowStepId"`
-	RepositoryID        string       `json:"repositoryId"`
-	BaseBranch          string       `json:"baseBranch"`
-	Filter              SearchFilter `json:"filter"`
-	AgentProfileID      string       `json:"agentProfileId"`
-	ExecutorProfileID   string       `json:"executorProfileId"`
-	Prompt              string       `json:"prompt"`
-	PollIntervalSeconds int          `json:"pollIntervalSeconds"`
-	MaxInflightTasks    *int         `json:"maxInflightTasks,omitempty"`
-	SortBy              IssueSortBy  `json:"sortBy,omitempty"`
-	Enabled             *bool        `json:"enabled,omitempty"`
+	WorkspaceID    string `json:"workspaceId"`
+	WorkflowID     string `json:"workflowId"`
+	WorkflowStepID string `json:"workflowStepId"`
+	// Repositories binds the watcher to one or more repositories; each entry
+	// carries the base branch its per-task worktree is cut from. Empty/unset =
+	// unbound (repo-less task). The legacy RepositoryID / BaseBranch fields are
+	// still accepted; the plural field wins when both are present.
+	Repositories        []IssueWatchRepository `json:"repositories"`
+	RepositoryID        string                 `json:"repositoryId"`
+	BaseBranch          string                 `json:"baseBranch"`
+	Filter              SearchFilter           `json:"filter"`
+	AgentProfileID      string                 `json:"agentProfileId"`
+	ExecutorProfileID   string                 `json:"executorProfileId"`
+	Prompt              string                 `json:"prompt"`
+	PollIntervalSeconds int                    `json:"pollIntervalSeconds"`
+	MaxInflightTasks    *int                   `json:"maxInflightTasks,omitempty"`
+	SortBy              IssueSortBy            `json:"sortBy,omitempty"`
+	Enabled             *bool                  `json:"enabled,omitempty"`
 }
 
 // UpdateIssueWatchRequest is the payload for PATCH /api/v1/linear/watches/issue/:id.
@@ -302,16 +342,21 @@ type CreateIssueWatchRequest struct {
 // change. MaxInflightTasks uses optional.Int for tri-state PATCH semantics
 // (absent = unchanged, null = uncapped, positive int = cap).
 type UpdateIssueWatchRequest struct {
-	WorkflowID          *string       `json:"workflowId,omitempty"`
-	WorkflowStepID      *string       `json:"workflowStepId,omitempty"`
-	RepositoryID        *string       `json:"repositoryId,omitempty"`
-	BaseBranch          *string       `json:"baseBranch,omitempty"`
-	Filter              *SearchFilter `json:"filter,omitempty"`
-	AgentProfileID      *string       `json:"agentProfileId,omitempty"`
-	ExecutorProfileID   *string       `json:"executorProfileId,omitempty"`
-	Prompt              *string       `json:"prompt,omitempty"`
-	Enabled             *bool         `json:"enabled,omitempty"`
-	PollIntervalSeconds *int          `json:"pollIntervalSeconds,omitempty"`
+	WorkflowID     *string `json:"workflowId,omitempty"`
+	WorkflowStepID *string `json:"workflowStepId,omitempty"`
+	// Repositories is tri-state via slice nil-ness: an absent key leaves the
+	// binding unchanged, [] clears it, a non-empty array replaces it. The
+	// legacy singular RepositoryID / BaseBranch pointers are still accepted
+	// (single-repo callers); the plural field wins when both are present.
+	Repositories        []IssueWatchRepository `json:"repositories"`
+	RepositoryID        *string                `json:"repositoryId,omitempty"`
+	BaseBranch          *string                `json:"baseBranch,omitempty"`
+	Filter              *SearchFilter          `json:"filter,omitempty"`
+	AgentProfileID      *string                `json:"agentProfileId,omitempty"`
+	ExecutorProfileID   *string                `json:"executorProfileId,omitempty"`
+	Prompt              *string                `json:"prompt,omitempty"`
+	Enabled             *bool                  `json:"enabled,omitempty"`
+	PollIntervalSeconds *int                   `json:"pollIntervalSeconds,omitempty"`
 	// MaxInflightTasks is tri-state so a partial PATCH that omits the field
 	// leaves the cap unchanged (a plain *int can't tell "omitted" from
 	// "null"). Absent = unchanged, null = uncapped, positive int = cap.

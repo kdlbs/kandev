@@ -161,7 +161,7 @@
   "updatedAgo": "· updated {{time}}",
   "updatedTime": "Updated {{time}}",
   "updateFailed": "Update failed: {{error}}",
-  "watchDialogDescription": "Poll Linear with a structured filter and auto-create a Kandev task for each newly-matching issue. Optionally bind a repository so each task runs against that codebase, or leave it unset to run with no repository.",
+  "watchDialogDescription": "Poll Linear with a structured filter and auto-create a Kandev task for each newly-matching issue. Optionally bind one or more repositories so each task runs against those codebases, or leave it unset to run with no repository.",
   "watcherCreated": "Watcher created",
   "watcherDeleted": "Watcher deleted",
   "watcherUpdated": "Watcher updated",
@@ -170,5 +170,15 @@
   "workflowStep": "Workflow Step",
   "workflowStepHelp": "Initial step for new tasks.",
   "workspaceHelp": "Tasks created by this watcher land in the selected workspace.",
-  "yourLinearApiKeyIsInvalid": "Your Linear API key is invalid or has been revoked. Reconnect to view this issue."
+  "yourLinearApiKeyIsInvalid": "Your Linear API key is invalid or has been revoked. Reconnect to view this issue.",
+  "watcher.repositories": "Repositories",
+  "watcher.repositoriesDescription": "Optional: the repositories the agent works in. Select one or more; each task runs against every selected repository.",
+  "watcher.noRepositories": "No repositories available in this workspace.",
+  "watcher.addRepository": "Add repository",
+  "watcher.selectRepository": "Select a repository…",
+  "watcher.repository": "Repository",
+  "watcher.baseBranch": "Base branch",
+  "watcher.defaultBranch": "(repository default branch)",
+  "watcher.removeRepository": "Remove repository",
+  "watcher.loadingBranches": "Loading…"
 }
