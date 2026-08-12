@@ -306,6 +306,7 @@ function MultiRepoVcsDropdown({
   blockedRepositoryName,
   repoDisplayName,
   callbacks,
+  prNumber,
 }: {
   disabled: boolean;
   baseBranch: string;
@@ -319,6 +320,7 @@ function MultiRepoVcsDropdown({
   blockedRepositoryName: string | undefined;
   repoDisplayName: (repositoryName: string) => string | undefined;
   callbacks: PerRepoCallbacks;
+  prNumber?: number;
 }) {
   const { t } = useTranslation();
   return (
@@ -358,6 +360,7 @@ function MultiRepoVcsDropdown({
             onReplaceContribution={() => callbacks.onReplaceContribution(blockedRepositoryName)}
             onUseContribution={() => callbacks.onUseContribution(blockedRepositoryName)}
             onViewPRVersion={() => callbacks.onViewContribution(blockedRepositoryName)}
+            prNumber={prNumber}
           />
         </>
       )}
@@ -402,6 +405,7 @@ export function MultiRepoVcsButton({
   blockedRepositoryName,
   repoDisplayName,
   callbacks,
+  prNumber,
 }: {
   primaryButtonConfig: PrimaryButtonConfig;
   primaryAction: "commit" | "push" | "pr" | "rebase";
@@ -418,6 +422,7 @@ export function MultiRepoVcsButton({
   blockedRepositoryName?: string;
   repoDisplayName: (repositoryName: string) => string | undefined;
   callbacks: PerRepoCallbacks;
+  prNumber?: number;
 }) {
   const { t } = useTranslation();
   return (
@@ -460,6 +465,7 @@ export function MultiRepoVcsButton({
               blockedRepositoryName={blockedRepositoryName}
               repoDisplayName={repoDisplayName}
               callbacks={callbacks}
+              prNumber={prNumber}
             />
           </DropdownMenu>
         </span>

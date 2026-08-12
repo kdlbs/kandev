@@ -56,6 +56,7 @@ export type GitActionsDropdownProps = {
   onReplaceContribution?: () => void;
   onUseContribution?: () => void;
   onViewPRVersion?: () => void;
+  prNumber?: number;
 };
 
 function RebaseMergeItems({
@@ -104,6 +105,7 @@ function ContributionResolutionItems({
   onReplaceContribution,
   onUseContribution,
   onViewPRVersion,
+  prNumber,
 }: Pick<
   GitActionsDropdownProps,
   | "replaceDisabled"
@@ -111,6 +113,7 @@ function ContributionResolutionItems({
   | "onReplaceContribution"
   | "onUseContribution"
   | "onViewPRVersion"
+  | "prNumber"
 > & { disabled: boolean }) {
   return (
     <RemoteContributionActionItems
@@ -122,6 +125,7 @@ function ContributionResolutionItems({
       onViewPRVersion={onViewPRVersion}
       descriptionMode="inline"
       testIdPrefix="mobile"
+      prNumber={prNumber}
     />
   );
 }
@@ -175,6 +179,7 @@ export function GitActionsDropdown({
   onReplaceContribution,
   onUseContribution,
   onViewPRVersion,
+  prNumber,
 }: GitActionsDropdownProps) {
   const { t } = useTranslation();
   const disabled = isGitLoading || !sessionId;
@@ -231,6 +236,7 @@ export function GitActionsDropdown({
             onReplaceContribution={onReplaceContribution}
             onUseContribution={onUseContribution}
             onViewPRVersion={onViewPRVersion}
+            prNumber={prNumber}
           />
         ) : (
           <StandardGitActionItems

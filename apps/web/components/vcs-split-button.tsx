@@ -15,7 +15,6 @@ import { useRemoteContributionRelation } from "@/hooks/domains/session/use-remot
 import { remoteContributionActionPolicy } from "@/hooks/domains/session/remote-contribution-relation";
 import { gitOperationLabel, useGitWithFeedback } from "@/hooks/use-git-with-feedback";
 import { useVcsDialogs } from "@/components/vcs/vcs-dialogs";
-import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
 import type { TaskPR } from "@/lib/types/github";
 import { useRepoDisplayName } from "@/hooks/domains/session/use-repo-display-name";
 import {
@@ -224,14 +223,14 @@ function useVcsContributionResolution(
   return { resolution, confirmResolution, resolutionTarget };
 }
 
-function useVcsContributionState(sessionId: string | null, selectedPR: TaskPR | null) {
+function useVcsContributionState(sessionId: string | null) {
   const contribution = useRemoteContributionRelation(sessionId);
   const remoteActionPolicy = remoteContributionActionPolicy(contribution.relation);
   const resolutionState = useVcsContributionResolution(
     sessionId,
     contribution.relation,
     contribution.repositoryName,
-    selectedPR,
+    contribution.selectedPR,
     contribution.refreshProviderEvidence,
   );
   return { ...contribution, remoteActionPolicy, ...resolutionState };
@@ -246,15 +245,15 @@ const VcsSplitButton = memo(function VcsSplitButton({
   const { t } = useTranslation();
   const git = useSessionGit(sessionId);
   const { openCommitDialog, openPRDialog } = useVcsDialogs();
-  const activePR = useActiveTaskPR();
   const {
     relation,
     repositoryName,
+    selectedPR,
     remoteActionPolicy,
     resolution,
     confirmResolution,
     resolutionTarget,
-  } = useVcsContributionState(sessionId, activePR);
+  } = useVcsContributionState(sessionId);
   const { handlePull, handlePush, handleRebase, handleMerge } = useGitActions(git, baseBranch);
   const repoDisplayName = useRepoDisplayName(sessionId);
 
@@ -267,15 +266,11 @@ const VcsSplitButton = memo(function VcsSplitButton({
   const isDisabled = git.isLoading || !sessionId;
   const isGitLoading = git.isLoading;
   const showContributionResolution = relation.action === "diverged_replace";
-  // Multi-repo when there's more than one named repo. Single-repo workspaces
-  // get either a single empty-name entry or no entries at all in repoNames.
-  const isMultiRepo = git.repoNames.length > 1;
-
   const primaryAction = determinePrimaryAction(
     uncommittedFileCount,
     aheadCount,
     behindCount,
-    activePR?.state === "open",
+    selectedPR?.state === "open",
   );
   const primaryButtonConfig = buildPrimaryButtonConfig({
     t,
@@ -293,7 +288,7 @@ const VcsSplitButton = memo(function VcsSplitButton({
 
   return (
     <VcsSplitButtonContent
-      isMultiRepo={isMultiRepo}
+      isMultiRepo={git.repoNames.length > 1}
       primaryButtonConfig={primaryButtonConfig}
       primaryAction={primaryAction}
       isDisabled={isDisabled}
@@ -332,13 +327,14 @@ const VcsSplitButton = memo(function VcsSplitButton({
           }
         },
         onViewContribution: (repo) => {
-          if (resolutionTarget?.repo !== repo || !activePR?.pr_url) return;
-          void openExternalLink(activePR.pr_url).catch(() => undefined);
+          if (resolutionTarget?.repo !== repo || !selectedPR?.pr_url) return;
+          void openExternalLink(selectedPR.pr_url).catch(() => undefined);
         },
       }}
       resolution={resolution}
       resolutionTarget={resolutionTarget}
       confirmResolution={confirmResolution}
+      prNumber={selectedPR?.pr_number}
     />
   );
 });

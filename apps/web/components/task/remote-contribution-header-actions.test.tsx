@@ -23,8 +23,20 @@ vi.mock("@kandev/ui/dropdown-menu", () => ({
   DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
+vi.mock("@kandev/ui/tooltip", () => ({
+  Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  TooltipTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  TooltipContent: ({ children }: { children: React.ReactNode }) => (
+    <div role="tooltip">{children}</div>
+  ),
+}));
+
 vi.mock("@/lib/desktop/external-links", () => ({
   openExternalLink: vi.fn(),
+}));
+
+vi.mock("@/components/toast-provider", () => ({
+  useToast: () => ({ toast: vi.fn() }),
 }));
 
 vi.mock("./remote-contribution-resolution-dialog", () => ({
@@ -72,6 +84,7 @@ describe("RemoteContributionHeaderActions", () => {
           expectedRemoteHead: relation.providerHead!,
         }}
         prUrl="https://github.com/testorg/testrepo/pull/901"
+        prNumber={901}
       />,
     );
 
@@ -80,16 +93,17 @@ describe("RemoteContributionHeaderActions", () => {
     ).toBe("PR branch changed");
     expect(screen.getByTestId("header-replace-pr-branch")).toBeTruthy();
     expect(screen.getByTestId("header-use-pr-version")).toBeTruthy();
-    expect(screen.getByTestId("header-view-pr-version")).toBeTruthy();
+    expect(screen.getByTestId("header-view-pr-version").textContent).toContain("PR #901 version");
     expect(
       screen.getByRole("img", { name: /Replace the published PR branch/ }).getAttribute("title"),
-    ).toContain("Replace the published PR branch");
-    expect(
-      screen.getByRole("img", { name: /Use the current PR version/ }).getAttribute("title"),
-    ).toContain("Use the current PR version");
-    expect(
-      screen.getByRole("img", { name: /Open the current PR version/ }).getAttribute("title"),
-    ).toContain("Open the current PR version");
+    ).toBeNull();
+    expect(screen.getAllByRole("tooltip").map((tooltip) => tooltip.textContent)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("Replace the published PR branch"),
+        expect.stringContaining("Use the current PR version"),
+        expect.stringContaining("Open PR #901 version"),
+      ]),
+    );
 
     fireEvent.click(screen.getByTestId("header-replace-pr-branch"));
     fireEvent.click(screen.getByTestId("header-use-pr-version"));

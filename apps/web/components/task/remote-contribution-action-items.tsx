@@ -4,6 +4,7 @@ import type { ComponentType } from "react";
 import { useTranslation } from "react-i18next";
 import { IconCloudDownload, IconCloudUpload, IconEye, IconInfoCircle } from "@tabler/icons-react";
 import { DropdownMenuItem } from "@kandev/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@kandev/ui/lib/utils";
 
 type ActionKind = "replace" | "use" | "view";
@@ -34,7 +35,7 @@ const ACTION_DEFINITIONS: ActionDefinition[] = [
   },
   {
     kind: "view",
-    labelKey: "task:viewPRVersion",
+    labelKey: "task:prNumberVersion",
     descriptionKey: "task:remoteContributionViewDescription",
     icon: IconEye,
     iconClassName: "text-muted-foreground",
@@ -51,6 +52,7 @@ export type RemoteContributionActionItemsProps = {
   descriptionMode?: DescriptionMode;
   itemClassName?: string;
   testIdPrefix?: string;
+  prNumber?: number;
 };
 
 function actionHandler(
@@ -77,18 +79,24 @@ function actionTestId(prefix: string | undefined, kind: ActionKind): string | un
 
 function ActionInfo({ description }: { description: string }) {
   return (
-    <span
-      aria-label={description}
-      className="ml-1 inline-flex h-5 w-5 shrink-0 cursor-help items-center justify-center rounded text-muted-foreground/70 hover:text-foreground"
-      onClick={(event) => event.stopPropagation()}
-      onKeyDown={(event) => event.stopPropagation()}
-      onPointerDown={(event) => event.stopPropagation()}
-      role="img"
-      tabIndex={0}
-      title={description}
-    >
-      <IconInfoCircle className="h-3.5 w-3.5" aria-hidden="true" />
-    </span>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          aria-label={description}
+          className="ml-1 inline-flex h-5 w-5 shrink-0 cursor-help items-center justify-center rounded text-muted-foreground/70 hover:text-foreground"
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
+          onPointerDown={(event) => event.stopPropagation()}
+          role="img"
+          tabIndex={0}
+        >
+          <IconInfoCircle className="h-3.5 w-3.5" aria-hidden="true" />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="left" sideOffset={4}>
+        {description}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -99,6 +107,7 @@ function ActionItem({
   itemClassName,
   testIdPrefix,
   onSelect,
+  prNumber,
 }: {
   definition: ActionDefinition;
   disabled: boolean;
@@ -106,11 +115,12 @@ function ActionItem({
   itemClassName?: string;
   testIdPrefix?: string;
   onSelect?: () => void;
+  prNumber?: number;
 }) {
   const { t } = useTranslation();
   const Icon = definition.icon;
-  const label = t(definition.labelKey);
-  const description = t(definition.descriptionKey);
+  const label = t(definition.labelKey, { number: prNumber ?? "" });
+  const description = t(definition.descriptionKey, { number: prNumber ?? "" });
   const labelContent = (
     <span
       className={cn(
@@ -159,6 +169,7 @@ export function RemoteContributionActionItems(props: RemoteContributionActionIte
           itemClassName={props.itemClassName}
           testIdPrefix={props.testIdPrefix}
           onSelect={actionHandler(definition.kind, props)}
+          prNumber={props.prNumber}
         />
       ))}
     </>

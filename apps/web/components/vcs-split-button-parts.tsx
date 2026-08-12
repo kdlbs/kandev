@@ -96,6 +96,7 @@ type SingleRepoVcsButtonProps = {
   onReplaceContribution: () => void;
   onUseContribution: () => void;
   onViewPRVersion: () => void;
+  prNumber?: number;
   onRebase: () => void;
   onMerge: () => void;
   className?: string;
@@ -123,6 +124,7 @@ function SingleRepoVcsButton({
   onReplaceContribution,
   onUseContribution,
   onViewPRVersion,
+  prNumber,
   onRebase,
   onMerge,
   className,
@@ -187,6 +189,7 @@ function SingleRepoVcsButton({
           onReplaceContribution={onReplaceContribution}
           onUseContribution={onUseContribution}
           onViewPRVersion={onViewPRVersion}
+          prNumber={prNumber}
           onRebase={onRebase}
           onMerge={onMerge}
         />
@@ -233,6 +236,7 @@ type VcsSplitButtonContentProps = {
   resolution: ReturnType<typeof useRemoteContributionResolution>;
   resolutionTarget: RemoteContributionResolutionTarget | null;
   confirmResolution: () => Promise<void>;
+  prNumber?: number;
 };
 
 function ContributionResolutionDialog({
@@ -278,6 +282,7 @@ function MultiRepoVcsContent({
   resolution,
   resolutionTarget,
   confirmResolution,
+  prNumber,
 }: Pick<
   VcsSplitButtonContentProps,
   | "primaryButtonConfig"
@@ -298,6 +303,7 @@ function MultiRepoVcsContent({
   | "resolution"
   | "resolutionTarget"
   | "confirmResolution"
+  | "prNumber"
 >) {
   const multiRepoCallbacks: PerRepoCallbacks = {
     onCommit: (repo) => callbacks.onCommit(repo),
@@ -328,6 +334,7 @@ function MultiRepoVcsContent({
         blockedRepositoryName={blockedRepositoryName}
         repoDisplayName={repoDisplayName}
         callbacks={multiRepoCallbacks}
+        prNumber={prNumber}
       />
       <ContributionResolutionDialog
         resolution={resolution}
@@ -364,6 +371,7 @@ export function VcsSplitButtonContent({
   resolution,
   resolutionTarget,
   confirmResolution,
+  prNumber,
 }: VcsSplitButtonContentProps) {
   if (isMultiRepo) {
     return (
@@ -386,6 +394,7 @@ export function VcsSplitButtonContent({
         resolution={resolution}
         resolutionTarget={resolutionTarget}
         confirmResolution={confirmResolution}
+        prNumber={prNumber}
       />
     );
   }
@@ -415,6 +424,7 @@ export function VcsSplitButtonContent({
         onReplaceContribution={() => callbacks.onReplaceContribution()}
         onUseContribution={() => callbacks.onUseContribution()}
         onViewPRVersion={() => callbacks.onViewContribution()}
+        prNumber={prNumber}
         onRebase={() => callbacks.onRebase()}
         onMerge={() => callbacks.onMerge()}
       />

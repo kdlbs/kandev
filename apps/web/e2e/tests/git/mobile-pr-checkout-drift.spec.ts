@@ -155,16 +155,19 @@ test.describe("Mobile rewritten contribution history", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 45_000 });
+    git.exec(`git checkout -B ${providerBranch} ${localHead}`);
+    git.exec(`git branch --set-upstream-to=origin/${providerBranch} ${providerBranch}`);
     await testPage.getByRole("button", { name: "Changes" }).tap();
 
     const changes = testPage.getByTestId("mobile-changes-panel");
-    await expect(changes.getByTestId("remote-contribution-drift-status")).toBeVisible({
-      timeout: 30_000,
-    });
+    await expect(changes.getByTestId("remote-contribution-drift-status")).toHaveCount(0);
     const providerSection = changes.getByTestId("current-pr-commits-section");
     const localSection = changes.getByTestId("local-checkout-commits-section");
     await expect(providerSection).toBeVisible({ timeout: 10_000 });
     await expect(localSection).toBeVisible({ timeout: 10_000 });
+    await expect(
+      providerSection.getByTestId("current-pr-commits-section-collapse-toggle"),
+    ).toContainText("PR #902 version");
     await expect(
       providerSection.getByTestId("current-pr-commits-section-collapse-toggle"),
     ).toHaveAttribute("aria-expanded", "false");
@@ -197,10 +200,10 @@ test.describe("Mobile rewritten contribution history", () => {
     );
     await expect(openMenu.getByTestId("mobile-replace-pr-branch")).toBeVisible();
     await expect(openMenu.getByTestId("mobile-use-pr-version")).toBeVisible();
-    await expect(openMenu.getByTestId("mobile-view-pr-version")).toBeVisible();
+    await expect(openMenu.getByTestId("mobile-view-pr-version")).toContainText("PR #902 version");
     await expect(openMenu).toContainText("Replace the published PR branch");
     await expect(openMenu).toContainText("Use the current PR version");
-    await expect(openMenu).toContainText("Open the current PR version");
+    await expect(openMenu).toContainText("Open PR #902 version");
     await expect(menuItems.filter({ hasText: /^Pull$/ })).toHaveCount(0);
     await expect(openMenu.locator('[data-slot="dropdown-menu-sub-trigger"]')).toHaveCount(0);
     await openMenu.getByTestId("mobile-replace-pr-branch").tap();

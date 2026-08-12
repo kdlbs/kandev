@@ -101,7 +101,7 @@ Use these English concepts consistently:
 - status body: **Your task version is unchanged. When you are ready, choose which version to use.**
 - primary destructive action: **Replace PR branch**
 - local destructive action: **Use PR version**
-- secondary disclosure: **View PR version**
+- secondary disclosure: **PR #<number> version**
 
 The replacement confirmation must identify the repository and provider head. It must state that the
 task version replaces the published branch. The provider-adoption confirmation must state that Kandev
@@ -114,13 +114,18 @@ conditions to translated instructions. Lease mismatches must tell the user that 
 
 For a diverged relation:
 
-- Show a compact status in the Changes panel.
+- Show one yellow warning icon in the Changes toolbar and no repeated warning banner in the body.
 - Keep the local task history as the primary commit list.
-- Keep the provider history collapsed behind **View PR version**.
+- Keep the provider history collapsed behind **PR #<number> version**.
 - Keep local edit and commit actions enabled.
 - Replace disabled Push and force-push controls with **Replace PR branch**.
 - Add **Use PR version** as the secondary version choice.
 - Keep generic Pull disabled.
+- Show each desktop action explanation in the shared immediate tooltip component.
+
+Changes relation and PR-file inputs must include only pull requests whose `repository_id` and
+normalized `head_branch` match a live checkout status. A historical PR may remain in Review, but it
+must not supply provider commits, files, links, or drift state to Changes.
 
 Apply the same action model to `ChangesPanelHeader`, `VcsSplitButton`, and
 `VcsMultiRepoMenu`. Scope every destructive action to the selected contribution repository.
@@ -132,7 +137,7 @@ Apply the same action model to `ChangesPanelHeader`, `VcsSplitButton`, and
 - **Nearest exemplar:** `session-mobile-top-bar-git-controls.tsx` supplies the compact menu entry.
   `mobile-menu-sheet.tsx` supplies the inset, safe-area-aware bottom surface.
 - **Hierarchy:** Keep Commit first. Show **Replace PR branch** as the primary drift action. Show
-  **Use PR version** and **View PR version** as secondary actions.
+  **Use PR version** and **PR #<number> version** as secondary actions.
 - **Presentation:** Use the existing responsive Git menu for entry. Use an inset bottom drawer for the
   destructive confirmation on phone. Keep the desktop confirmation as a dialog.
 - **Rationale:** The confirmation is temporary and action-focused. It does not need a new route or a
@@ -153,6 +158,8 @@ Apply the same action model to `ChangesPanelHeader`, `VcsSplitButton`, and
   action names, repository scope, expected head, response fields, and missing-field errors.
 - **Relation policy:** Update the pure classifier tests for local-first divergence, unavailable evidence,
   provider-ahead Pull, and local-ahead Push.
+- **Branch-scoped selection:** Prove that a merged historical PR cannot override the open PR matching
+  the checked-out repository and branch, including when Review still selects the historical PR.
 - **Frontend callbacks:** Prove both actions send one repository scope and the exact provider head.
 - **Desktop components:** Prove that the compact state replaces the blocking warning. Prove that local
   actions remain available and destructive actions require confirmation.
@@ -166,8 +173,9 @@ Apply the same action model to `ChangesPanelHeader`, `VcsSplitButton`, and
 
 - **Scenario:** A provider rewrites the PR after task creation. The user chooses the task version.
 - **File:** `apps/web/e2e/tests/git/git-changes-panel.spec.ts`
-- **What to verify:** The local-first status appears, provider history stays collapsed, confirmation
-  names the effect, and the remote ref changes to local HEAD through an exact lease.
+- **What to verify:** The toolbar warning appears without a repeated body banner, provider history
+  stays collapsed, confirmation names the effect, and the remote ref changes to local HEAD through an
+  exact lease.
 
 ### Adopt the current PR version on desktop
 
@@ -205,6 +213,10 @@ Wave 4:
 
 - [x] [Task 05: Desktop and mobile drift E2E](task-05-desktop-mobile-drift-e2e.md)
 
+Wave 5:
+
+- [x] [Task 06: Branch-scoped drift UX correction](task-06-branch-scoped-drift-ux-correction.md)
+
 The default execution order is sequential in the primary conversation. The wave labels do not
 authorize subagents.
 
@@ -222,6 +234,9 @@ Completed 2026-08-12. Each task records its exact commands and results.
 - Destructive ref mutation and provider adoption are covered by the real-Git process tests. The current
   REST E2E helper cannot create the server-owned contribution binding, so browser execution stops before
   mutation; the limitation is recorded in Task 05.
+- The branch-scoped follow-up passed 66 focused Vitest assertions, full web lint and typecheck, i18n
+  catalog and ratchet checks, all 21 desktop Changes E2E scenarios, and the Pixel 5 drift scenario with
+  retries disabled. It proves that a merged historical PR does not drive the live checkout relation.
 
 ## Documentation Impact
 

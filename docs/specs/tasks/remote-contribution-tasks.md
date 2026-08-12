@@ -53,9 +53,13 @@ Kandev must preserve both versions and ask for user intent before one version re
 - For an associated contribution, Kandev compares the local HEAD and upstream snapshot with the
   provider's current commit history using commit identity and ancestry evidence. It never infers
   equivalence from commit message, author, timestamp, file statistics, or patch similarity.
+- The Changes panel uses provider evidence only from a pull request whose repository and normalized
+  head branch match the live checkout. Historical pull requests remain available in Review, but they
+  do not affect Changes after the checkout moves to another branch.
 - When the provider history no longer contains local HEAD, the Changes panel keeps the task version as
-  the primary version. A compact status states that the remote branch changed. The current provider
-  history remains available through a secondary disclosure.
+  the primary version. A yellow warning icon in the Changes toolbar opens the available version
+  actions; the panel body does not repeat the warning. The current provider history remains collapsed
+  behind a **PR #<number> version** disclosure.
 - A diverged task keeps local edit, commit, amend, reset, and review actions available. Generic Pull is
   unavailable because it requires a merge strategy. Push becomes an explicit **Replace PR branch**
   action instead of a disabled control.
@@ -154,25 +158,25 @@ recovery branch name after a successful reset. Neither action appears in the age
 
 ## Failure modes
 
-| Condition | Observable behavior |
-|---|---|
-| URL is malformed, credential-bearing, or unsupported | Task creation fails before persistence with an argument error. |
-| Provider connection cannot read the change or source repository | Task creation fails before persistence with an authorization/not-found error that does not reveal cross-workspace data. |
-| Change is closed, merged, or has no live head | Task creation fails before persistence and explains that only open contributions are supported. |
-| Provider returns an invalid head/base ref or inconsistent target identity | Task creation fails closed before any Git command. |
-| Fork does not allow maintainer collaboration | Task creation fails before persistence with provider-specific remediation guidance. |
-| Task persists but the existing-change association fails | Kandev compensates the newly created task and returns failure; it does not launch an agent. |
-| Checkout SHA no longer matches the source branch during preparation | Launch fails without checking out or pushing a different revision; retry resolves fresh provider state. |
-| Provider branch advances after launch and still contains local HEAD | Kandev identifies a provider-ahead fast-forward, shows the current provider history, and offers Pull instead of Push. |
-| Provider branch is rewritten after launch and no longer contains local HEAD | Kandev preserves the task version, shows a compact remote-change status, and offers user-controlled version choices. |
-| Provider head changes after the replacement confirmation opens | The exact lease fails. Kandev does not change the remote branch and refreshes the shown provider state. |
-| Provider rejects the leased replacement | The task version remains unchanged. Kandev shows the provider or Git error. |
-| The user selects **Use PR version** with local file changes | Kandev does not reset the checkout. It asks the user to commit or discard the file changes first. |
-| The user selects **Use PR version** and the fetch does not match the confirmed provider head | Kandev does not create a recovery branch or reset the checkout. It refreshes the provider state. |
-| Current provider commits cannot be loaded | Kandev does not assert that a rewrite occurred. It shows the provider error and derives Push/Pull only from available upstream evidence. |
-| Effective Git credentials cannot dry-run a push to the source branch | The task remains durable, but the session does not start and exposes an actionable credential/collaboration error. |
-| Contribution binding is missing, malformed, or an unknown version | Runtime preparation and managed source-scope issuance fail closed. |
-| Agent attempts a normal create-PR action | Kandev reuses the existing association and does not open a second remote change. |
+| Condition                                                                                    | Observable behavior                                                                                                                      |
+| -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| URL is malformed, credential-bearing, or unsupported                                         | Task creation fails before persistence with an argument error.                                                                           |
+| Provider connection cannot read the change or source repository                              | Task creation fails before persistence with an authorization/not-found error that does not reveal cross-workspace data.                  |
+| Change is closed, merged, or has no live head                                                | Task creation fails before persistence and explains that only open contributions are supported.                                          |
+| Provider returns an invalid head/base ref or inconsistent target identity                    | Task creation fails closed before any Git command.                                                                                       |
+| Fork does not allow maintainer collaboration                                                 | Task creation fails before persistence with provider-specific remediation guidance.                                                      |
+| Task persists but the existing-change association fails                                      | Kandev compensates the newly created task and returns failure; it does not launch an agent.                                              |
+| Checkout SHA no longer matches the source branch during preparation                          | Launch fails without checking out or pushing a different revision; retry resolves fresh provider state.                                  |
+| Provider branch advances after launch and still contains local HEAD                          | Kandev identifies a provider-ahead fast-forward, shows the current provider history, and offers Pull instead of Push.                    |
+| Provider branch is rewritten after launch and no longer contains local HEAD                  | Kandev preserves the task version, shows a compact remote-change status, and offers user-controlled version choices.                     |
+| Provider head changes after the replacement confirmation opens                               | The exact lease fails. Kandev does not change the remote branch and refreshes the shown provider state.                                  |
+| Provider rejects the leased replacement                                                      | The task version remains unchanged. Kandev shows the provider or Git error.                                                              |
+| The user selects **Use PR version** with local file changes                                  | Kandev does not reset the checkout. It asks the user to commit or discard the file changes first.                                        |
+| The user selects **Use PR version** and the fetch does not match the confirmed provider head | Kandev does not create a recovery branch or reset the checkout. It refreshes the provider state.                                         |
+| Current provider commits cannot be loaded                                                    | Kandev does not assert that a rewrite occurred. It shows the provider error and derives Push/Pull only from available upstream evidence. |
+| Effective Git credentials cannot dry-run a push to the source branch                         | The task remains durable, but the session does not start and exposes an actionable credential/collaboration error.                       |
+| Contribution binding is missing, malformed, or an unknown version                            | Runtime preparation and managed source-scope issuance fail closed.                                                                       |
+| Agent attempts a normal create-PR action                                                     | Kandev reuses the existing association and does not open a second remote change.                                                         |
 
 ## Persistence guarantees
 
@@ -237,8 +241,18 @@ to push, and offers Pull rather than Push
 GIVEN a running contribution task whose provider branch is force-pushed and no longer contains local
 HEAD
 WHEN Kandev loads the current provider commits
-THEN the Changes panel keeps the task version primary, shows a compact remote-change status, and offers
-**Replace PR branch**, **Use PR version**, and **View PR version**
+THEN the Changes panel keeps the task version primary, shows one warning icon in its toolbar, and offers
+**Replace PR branch**, **Use PR version**, and **PR #<number> version** from the warning menu
+AND each action explanation appears in an immediate tooltip on pointer hover
+AND the panel body does not repeat the warning
+
+### Ignore a historical pull request after the checkout changes branch
+
+GIVEN a task retains a merged pull request for an earlier branch
+AND a newer pull request exists for the current checked-out branch in the same repository
+WHEN Kandev computes the Changes relation and provider history
+THEN it uses only the newer pull request
+AND the historical pull request remains available in Review without producing a Changes warning
 
 ### Replace the PR branch with the task version
 

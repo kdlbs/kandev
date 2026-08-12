@@ -63,6 +63,7 @@ const ChangesPanel = memo(function ChangesPanel(props: ChangesPanelProps) {
         resolution={data.resolution}
         resolutionTarget={data.resolutionTarget}
         remoteContributionUrl={data.selectedPR?.pr_url ?? data.existingPrUrl}
+        remoteContributionNumber={data.selectedPR?.pr_number}
       />
       <ChangesPanelBody {...buildChangesPanelBodyProps(data, props)} />
     </PanelRoot>

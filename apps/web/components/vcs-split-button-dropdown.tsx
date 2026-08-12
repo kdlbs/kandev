@@ -83,6 +83,7 @@ function ContributionDropdownItems({
   onReplaceContribution,
   onUseContribution,
   onViewPRVersion,
+  prNumber,
 }: {
   disabled: boolean;
   replaceDisabled: boolean;
@@ -90,6 +91,7 @@ function ContributionDropdownItems({
   onReplaceContribution: () => void;
   onUseContribution: () => void;
   onViewPRVersion: () => void;
+  prNumber?: number;
 }) {
   return (
     <>
@@ -101,6 +103,7 @@ function ContributionDropdownItems({
         onReplaceContribution={onReplaceContribution}
         onUseContribution={onUseContribution}
         onViewPRVersion={onViewPRVersion}
+        prNumber={prNumber}
       />
     </>
   );
@@ -123,6 +126,7 @@ export type VcsDropdownItemsProps = {
   onReplaceContribution: () => void;
   onUseContribution: () => void;
   onViewPRVersion: () => void;
+  prNumber?: number;
   onRebase: () => void;
   onMerge: () => void;
 };
@@ -144,6 +148,7 @@ export function VcsDropdownItems({
   onReplaceContribution,
   onUseContribution,
   onViewPRVersion,
+  prNumber,
   onRebase,
   onMerge,
 }: VcsDropdownItemsProps) {
@@ -189,6 +194,7 @@ export function VcsDropdownItems({
           onReplaceContribution={onReplaceContribution}
           onUseContribution={onUseContribution}
           onViewPRVersion={onViewPRVersion}
+          prNumber={prNumber}
         />
       )}
       <DropdownMenuSeparator />

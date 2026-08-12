@@ -23,7 +23,7 @@ destructive action.
 
 ## Acceptance
 
-1. The mobile Git menu exposes **Replace PR branch**, **Use PR version**, and **View PR version** for a
+1. The mobile Git menu exposes **Replace PR branch**, **Use PR version**, and **PR #<number> version** for a
    diverged contribution.
 2. The destructive confirmations use an inset bottom drawer with 44px actions, one scroll owner,
    safe-area clearance, and focus return.
@@ -69,7 +69,7 @@ exact test results. Update this task and `plan.md` in the same conversation.
 Completed 2026-08-12.
 
 - The mobile Git menu keeps Commit first and exposes repository-scoped **Replace PR branch**, **Use PR
-  version**, and **View PR version** actions for diverged contributions. Generic Push, force-push, and
+  version**, and **PR #<number> version** actions for diverged contributions. Generic Push, force-push, and
   Pull entries are not reachable for the selected drift state.
 - Destructive confirmation uses an inset bottom drawer with safe-area padding, 44px action targets,
   one inner error scroll owner, and shared resolution state with the desktop dialog.

@@ -382,6 +382,7 @@ function MobileTopBarActions({
         onReplaceContribution={requestReplace}
         onUseContribution={requestUse}
         onViewPRVersion={viewPRVersion}
+        prNumber={remoteActionPolicy.selectedPR?.pr_number}
       />
       <MobileResolutionDrawer
         resolution={resolution}

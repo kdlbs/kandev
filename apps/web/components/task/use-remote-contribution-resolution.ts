@@ -137,13 +137,13 @@ export function useRemoteContributionResolution(
 }
 
 export function useRemoteContributionResolutionConfirmation(
-  resolution: ReturnType<typeof useRemoteContributionResolution>,
+  resolution: ReturnType<typeof useRemoteContributionResolution> | null | undefined,
 ) {
   const { t } = useTranslation();
   const { toast } = useToast();
   return useCallback(async () => {
-    const action = resolution.pending?.action;
-    const result = await resolution.confirm();
+    const action = resolution?.pending?.action;
+    const result = await resolution?.confirm();
     if (!result?.success) return;
     toast({
       title:
@@ -154,5 +154,5 @@ export function useRemoteContributionResolutionConfirmation(
             }),
       variant: "success",
     });
-  }, [resolution.confirm, resolution.pending?.action, t, toast]);
+  }, [resolution?.confirm, resolution?.pending?.action, t, toast]);
 }

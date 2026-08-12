@@ -62,18 +62,6 @@ function useChangesPanelStoreData() {
   const baseBranch = useAppStore((state) =>
     activeSessionId ? state.taskSessions.items[activeSessionId]?.base_branch : undefined,
   );
-  const existingPrUrl = useAppStore((state) => {
-    const taskId = state.tasks.activeTaskId;
-    if (!taskId) return undefined;
-    // Multi-branch tasks hold N PRs per task. The panel-header "View PR"
-    // button is a single-URL surface, so collapse only when there's exactly
-    // one PR — otherwise the per-repo buttons (prByRepo) take over and the
-    // generic button is hidden to avoid silently linking to a sibling.
-    const taskPRs = state.taskPRs.byTaskId[taskId];
-    if (Array.isArray(taskPRs) && taskPRs.length === 1) return taskPRs[0]?.pr_url;
-    if (Array.isArray(taskPRs) && taskPRs.length > 1) return undefined;
-    return state.pendingPrUrlByTaskId.byTaskId[taskId]?.[""];
-  });
   const activeSessionMetadata = useAppStore((state) =>
     activeSessionId ? state.taskSessions.items[activeSessionId]?.metadata : undefined,
   );
@@ -86,7 +74,6 @@ function useChangesPanelStoreData() {
     activeSessionId,
     taskTitle,
     baseBranch,
-    existingPrUrl,
     gitCredentialDisplay,
   };
 }
@@ -105,6 +92,7 @@ export type ChangesPanelBodyProps = {
   resolutionTarget: RemoteContributionResolutionTarget | null;
   providerCommitsLoading: boolean;
   providerCommitsError: string | null;
+  providerPRNumber: number | undefined;
   pushDisabled: boolean;
   pullDisabled: boolean;
   canPush: boolean;
@@ -270,10 +258,11 @@ function buildChangesPanelPRData({
 }
 
 function useChangesPanelPRData(repositoryNames: string[], sessionId: string | null) {
-  const { prs, filesByPRKey } = useActiveTaskPRsWithFiles();
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const relationState: RemoteContributionRelationState = useRemoteContributionRelation(sessionId);
+  const { filesByPRKey } = useActiveTaskPRsWithFiles(relationState.prs);
+  const prs = relationState.prs;
   const taskPR = relationState.selectedPR;
   const reposByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
   const repoNameById = useMemo(() => buildRepoNameById(reposByWorkspace), [reposByWorkspace]);
@@ -328,6 +317,7 @@ function useChangesPanelPRData(repositoryNames: string[], sessionId: string | nu
     prFiles,
     useRepositoryKeys,
     relation: relationState.relation,
+    prs,
     repositoryName: relationState.repositoryName,
     selectedPR: taskPR,
     providerCommitsLoading: relationState.loading,
@@ -361,7 +351,7 @@ function useChangesPanelResolutionTarget(
 
 export function useChangesPanelData() {
   const { t } = useTranslation();
-  const { activeTaskId, activeSessionId, baseBranch, existingPrUrl, gitCredentialDisplay } =
+  const { activeTaskId, activeSessionId, baseBranch, gitCredentialDisplay } =
     useChangesPanelStoreData();
   const baseBranchByRepo = useBaseBranchByRepo(activeTaskId);
   const git = useSessionGit(activeSessionId);
@@ -407,17 +397,15 @@ export function useChangesPanelData() {
   const dialogs = { ...localDialogs, ...vcsDialogs };
   const repoCallbacks = usePerRepoCallbacks(git, vcsDialogs, gitHandlers);
   const repoDisplayName = useRepoDisplayName(activeSessionId);
-  const taskPRsForMap = useAppStore((state) =>
-    activeTaskId ? state.taskPRs.byTaskId[activeTaskId] : undefined,
-  );
   const reposByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
   const repoNameById = useMemo(() => buildRepoNameById(reposByWorkspace), [reposByWorkspace]);
   const pendingByRepo = useAppStore((state) =>
     activeTaskId ? state.pendingPrUrlByTaskId.byTaskId[activeTaskId] : undefined,
   );
+  const existingPrUrl = prData.selectedPR?.pr_url ?? pendingByRepo?.[""];
   const prByRepo = useMemo(
-    () => buildPrByRepoMap(taskPRsForMap, repoNameById, pendingByRepo),
-    [taskPRsForMap, repoNameById, pendingByRepo],
+    () => buildPrByRepoMap(prData.prs, repoNameById, pendingByRepo),
+    [prData.prs, repoNameById, pendingByRepo],
   );
   const walkthroughRequestReady =
     unstagedFiles.length > 0 ||
@@ -476,6 +464,7 @@ export function buildChangesPanelBodyProps(
     resolutionTarget: data.resolutionTarget,
     providerCommitsLoading: data.providerCommitsLoading,
     providerCommitsError: data.providerCommitsError,
+    providerPRNumber: data.selectedPR?.pr_number,
     pushDisabled: data.pushDisabled,
     pullDisabled: data.pullDisabled,
     canPush: git.canPush,

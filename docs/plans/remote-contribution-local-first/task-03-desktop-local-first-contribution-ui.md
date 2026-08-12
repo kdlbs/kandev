@@ -23,7 +23,7 @@ and explicit version actions.
 ## Acceptance
 
 1. A diverged Changes panel keeps the task history primary and keeps the PR history collapsed behind
-   **View PR version**.
+   **PR #<number> version**.
 2. Changes and VCS controls keep local actions enabled and expose **Replace PR branch** and
    **Use PR version** with destructive confirmation.
 3. Success and error feedback show the recovery branch or the actionable stale-lease and dirty-tree
@@ -75,9 +75,9 @@ Update this task and `plan.md` in the same conversation.
 Completed 2026-08-12.
 
 - The Changes panel now presents the local checkout first, keeps provider commits collapsed behind
-  **View PR version**, and preserves local edit, commit, and review actions during drift.
+  **PR #<number> version**, and preserves local edit, commit, and review actions during drift.
 - The Changes header, split VCS button, and per-repository menu expose repository-scoped **Replace PR
-  branch**, **Use PR version**, and **View PR version** actions. Generic Push and force-push entries are
+  branch**, **Use PR version**, and **PR #<number> version** actions. Generic Push and force-push entries are
   removed only for the selected diverged contribution, while generic Pull remains unavailable.
 - The desktop confirmation names the repository and exact provider head, explains the replacement or
   recovery effect, keeps failed confirmations open for retry, and shows translated result feedback.

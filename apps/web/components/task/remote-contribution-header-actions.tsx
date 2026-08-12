@@ -18,6 +18,7 @@ import { openExternalLink } from "@/lib/desktop/external-links";
 import {
   type RemoteContributionResolutionTarget,
   type useRemoteContributionResolution,
+  useRemoteContributionResolutionConfirmation,
 } from "./use-remote-contribution-resolution";
 import { RemoteContributionActionItems } from "./remote-contribution-action-items";
 import { RemoteContributionResolutionDialog } from "./remote-contribution-resolution-dialog";
@@ -27,13 +28,16 @@ export function RemoteContributionHeaderActions({
   resolution,
   resolutionTarget,
   prUrl,
+  prNumber,
 }: {
   relation?: RemoteContributionRelation;
   resolution?: ReturnType<typeof useRemoteContributionResolution>;
   resolutionTarget?: RemoteContributionResolutionTarget | null;
   prUrl?: string;
+  prNumber?: number;
 }) {
   const { t } = useTranslation();
+  const confirmResolution = useRemoteContributionResolutionConfirmation(resolution);
   if (relation?.kind !== "diverged" || !resolution || !resolutionTarget) return null;
   const policy = remoteContributionActionPolicy(relation);
   return (
@@ -82,6 +86,7 @@ export function RemoteContributionHeaderActions({
               prUrl ? () => void openExternalLink(prUrl).catch(() => undefined) : undefined
             }
             testIdPrefix="header"
+            prNumber={prNumber}
           />
         </DropdownMenuContent>
       </DropdownMenu>
@@ -97,7 +102,7 @@ export function RemoteContributionHeaderActions({
             if (!open) resolution.cancel();
           }}
           onConfirm={() => {
-            void resolution.confirm();
+            void confirmResolution();
           }}
         />
       )}

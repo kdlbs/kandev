@@ -15,7 +15,6 @@ import {
 } from "./changes-panel-helpers";
 import type { ChangesPanelBodyProps } from "./changes-panel-data";
 import { useTranslation } from "react-i18next";
-import { IconAlertTriangle } from "@tabler/icons-react";
 
 function ChangesPanelDialogsSection({
   dialogs,
@@ -49,43 +48,6 @@ function ChangesPanelDialogsSection({
   );
 }
 
-function RemoteContributionDriftStatus({
-  relation,
-  resolution,
-}: Pick<ChangesPanelBodyProps, "relation" | "resolution">) {
-  const { t } = useTranslation();
-  if (relation.kind !== "diverged") return null;
-  const lastResult = resolution.lastResult;
-  return (
-    <div
-      className="mx-1 mb-2 rounded-md border border-yellow-500/40 bg-yellow-500/10 px-2.5 py-2 text-xs text-yellow-700 dark:text-yellow-300"
-      data-testid="remote-contribution-drift-status"
-      role="status"
-    >
-      <div className="flex items-start gap-2">
-        <IconAlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-        <div className="min-w-0 space-y-1">
-          <p className="font-medium">{t("task:remoteContributionChangedTitle")}</p>
-          <p>{t("task:remoteContributionChangedBody")}</p>
-          {lastResult?.success && lastResult.operation === "replace_remote_contribution" && (
-            <p className="font-medium">{t("task:remoteContributionReplaced")}</p>
-          )}
-          {lastResult?.success && lastResult.operation === "use_remote_contribution" && (
-            <p className="font-medium">
-              {t("task:remoteContributionUsed", {
-                branch: lastResult.recovery_branch ?? "",
-              })}
-            </p>
-          )}
-          {resolution.errorKey && !lastResult?.success && (
-            <p className="font-medium">{t(resolution.errorKey)}</p>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 type TimelineProps = Pick<
   ChangesPanelBodyProps,
   | "hasAnything"
@@ -98,6 +60,7 @@ type TimelineProps = Pick<
   | "resolutionTarget"
   | "providerCommitsLoading"
   | "providerCommitsError"
+  | "providerPRNumber"
   | "pushDisabled"
   | "pullDisabled"
   | "canPush"
@@ -252,7 +215,7 @@ function CommitHistorySections({
         {separated.providerCommits.length > 0 && (
           <CommitsSection
             commits={separated.providerCommits}
-            label={t("task:viewPRVersion")}
+            label={t("task:prNumberVersion", { number: props.providerPRNumber ?? "" })}
             testId="current-pr-commits-section"
             defaultCollapsed
             showActions={false}
@@ -363,8 +326,6 @@ function ChangesPanelTimeline(props: TimelineProps) {
           {t("task:providerHistoryUnavailable")}
         </div>
       )}
-
-      <RemoteContributionDriftStatus relation={props.relation} resolution={props.resolution} />
 
       {showCommitsList && (
         <CommitHistorySections

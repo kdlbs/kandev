@@ -4,15 +4,17 @@ import { useCallback, useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
 import type { PRCommitInfo, TaskPR } from "@/lib/types/github";
 import { usePRCommits } from "@/hooks/domains/github/use-pr-commits";
-import { usePRReviewRepositoryIdentity } from "@/hooks/domains/github/use-pr-review-repository-identity";
+import { usePRReviewRepositoryIdentityResolver } from "@/hooks/domains/github/use-pr-review-repository-identity";
 import { useReviewPRSelection } from "@/hooks/domains/github/use-review-pr-selection";
 import { useSessionGitStatusByRepo } from "./use-session-git-status";
+import { resolveBranchScopedTaskPRs, selectBranchScopedTaskPR } from "./branch-scoped-task-pr";
 import {
   classifyRemoteContribution,
   type RemoteContributionRelation,
 } from "./remote-contribution-relation";
 
 export type RemoteContributionRelationState = {
+  prs: TaskPR[];
   selectedPR: TaskPR | null;
   repositoryName: string | undefined;
   commits: PRCommitInfo[];
@@ -26,34 +28,37 @@ export function useRemoteContributionRelation(
   sessionId: string | null | undefined,
 ): RemoteContributionRelationState {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
-  const { selectedPR } = useReviewPRSelection(activeTaskId);
+  const { prs, selectedKey } = useReviewPRSelection(activeTaskId);
+  const statusByRepo = useSessionGitStatusByRepo(sessionId ?? null);
+  const resolveRepositoryName = usePRReviewRepositoryIdentityResolver(activeTaskId, sessionId);
+  const branchScopedPRs = useMemo(
+    () =>
+      resolveBranchScopedTaskPRs({
+        prs,
+        statuses: statusByRepo,
+        preferredKey: selectedKey,
+        resolveRepositoryName,
+      }),
+    [prs, statusByRepo, selectedKey, resolveRepositoryName],
+  );
+  const selection = useMemo(
+    () => selectBranchScopedTaskPR(branchScopedPRs, selectedKey),
+    [branchScopedPRs, selectedKey],
+  );
+  const scopedPRs = useMemo(() => branchScopedPRs.map((entry) => entry.pr), [branchScopedPRs]);
+  const selectedPR = selection?.pr ?? null;
   const commitsState = usePRCommits(
     selectedPR?.owner ?? null,
     selectedPR?.repo ?? null,
     selectedPR?.pr_number ?? null,
     selectedPR?.last_synced_at ?? null,
   );
-  const repositoryName = usePRReviewRepositoryIdentity(activeTaskId, sessionId, selectedPR);
-  const statusByRepo = useSessionGitStatusByRepo(sessionId ?? null);
+  const repositoryName = selection?.repositoryName;
   const refreshProviderEvidence = useCallback(async () => {
     const refreshed = await commitsState.refresh();
     return refreshed?.providerHead ?? null;
   }, [commitsState.refresh]);
-  const gitStatus = useMemo(() => {
-    const matchingStatus = repositoryName
-      ? statusByRepo.find((entry) => entry.repository_name === repositoryName)?.status
-      : undefined;
-    if (matchingStatus) return matchingStatus;
-
-    // Single-repository sessions keep the legacy empty repository key even
-    // when the selected PR resolves to the workspace repository name. A lone
-    // empty-key entry is therefore the selected repository, while a lone
-    // named entry is only a safe fallback when no identity was resolved.
-    if (statusByRepo.length !== 1) return undefined;
-    const onlyStatus = statusByRepo[0];
-    if (onlyStatus.repository_name === "" || !repositoryName) return onlyStatus.status;
-    return undefined;
-  }, [repositoryName, statusByRepo]);
+  const gitStatus = selection?.gitStatus;
 
   const relation = useMemo(
     () =>
@@ -83,6 +88,7 @@ export function useRemoteContributionRelation(
   );
 
   return {
+    prs: scopedPRs,
     selectedPR,
     repositoryName,
     commits: commitsState.commits,

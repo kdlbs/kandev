@@ -534,6 +534,7 @@ type ChangesPanelHeaderProps = {
   resolution?: ReturnType<typeof useRemoteContributionResolution>;
   resolutionTarget?: RemoteContributionResolutionTarget | null;
   remoteContributionUrl?: string;
+  remoteContributionNumber?: number;
 };
 
 export function ChangesPanelHeader(props: ChangesPanelHeaderProps) {
@@ -565,6 +566,7 @@ export function ChangesPanelHeader(props: ChangesPanelHeaderProps) {
     resolution,
     resolutionTarget,
     remoteContributionUrl,
+    remoteContributionNumber,
   } = props;
   const branchRows = buildBranchRows(
     perRepoStatus,
@@ -602,6 +604,7 @@ export function ChangesPanelHeader(props: ChangesPanelHeaderProps) {
             resolution={resolution}
             resolutionTarget={resolutionTarget}
             prUrl={remoteContributionUrl}
+            prNumber={remoteContributionNumber}
           />
           <PullDropdown
             behindCount={behindCount}
