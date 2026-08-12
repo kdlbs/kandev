@@ -800,7 +800,6 @@ func (r *Repository) initGitSchema() error {
 
 	CREATE INDEX IF NOT EXISTS idx_session_commits_session ON task_session_commits(session_id, committed_at DESC);
 	CREATE INDEX IF NOT EXISTS idx_session_commits_sha ON task_session_commits(commit_sha);
-	CREATE UNIQUE INDEX IF NOT EXISTS uniq_session_commits_session_sha ON task_session_commits(session_id, commit_sha);
 	`)
 	return err
 }

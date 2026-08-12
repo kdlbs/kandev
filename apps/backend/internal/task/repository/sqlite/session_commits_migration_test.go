@@ -96,6 +96,69 @@ func TestSessionCommitsDedupeAndActivationMigration(t *testing.T) {
 	}
 }
 
+// Regression: initSchema() (the real boot path — persistence.Provide calls
+// this, not runMigrations() directly) must not crash on an existing database
+// that already has duplicate (session_id, commit_sha) rows. Before this
+// test, initGitSchema() (base_schema.go) created
+// uniq_session_commits_session_sha unconditionally as part of its
+// unconditional, error-propagating schema-init Exec — which runs BEFORE
+// runMigrations() in initSchema()'s step list, i.e. before
+// migrateSessionCommitsDedupeAndActivation ever gets a chance to dedupe.
+// CREATE UNIQUE INDEX over pre-existing duplicate data fails outright, and
+// initGitSchema returns that error directly (unlike migrate.Apply, which
+// swallows it), so initSchema() — and therefore process boot — would abort.
+// TestSessionCommitsDedupeAndActivationMigration alone cannot catch this: it
+// calls runMigrations() directly, skipping initGitSchema entirely.
+func TestInitSchemaSurvivesLegacyDuplicateCommitRows(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	seedSessionForGit(t, repo, "task-boot-dup", "session-boot-dup")
+
+	// seedSessionForGit's bare CreateTask leaves workspace_id unset. On a
+	// real legacy database every existing task already went through
+	// ensureDefaultWorkspace's backfill on a prior boot; simulate that here
+	// so this test isolates the task_session_commits ordering bug under
+	// test rather than tripping the unrelated (pre-existing, out of scope)
+	// ensureDefaultWorkspace behavior for a same-boot, workflow-less task.
+	var defaultWorkspaceID string
+	if err := repo.db.Get(&defaultWorkspaceID, `SELECT id FROM workspaces ORDER BY created_at LIMIT 1`); err != nil {
+		t.Fatalf("look up default workspace: %v", err)
+	}
+	if _, err := repo.db.Exec(repo.db.Rebind(`UPDATE tasks SET workspace_id = ? WHERE id = ?`),
+		defaultWorkspaceID, "task-boot-dup"); err != nil {
+		t.Fatalf("backfill task workspace_id: %v", err)
+	}
+
+	// Simulate the pre-deploy production state this migration exists to
+	// clean up: unique index absent, duplicate (session_id, commit_sha) rows
+	// already present (e.g. from a pre-idempotency-fix repeated archive
+	// capture).
+	if _, err := repo.db.Exec(`DROP INDEX IF EXISTS uniq_session_commits_session_sha`); err != nil {
+		t.Fatalf("drop index to simulate legacy schema: %v", err)
+	}
+	now := time.Now().UTC()
+	insertRawCommit(t, repo, "dup-a", "session-boot-dup", "dup-sha", now)
+	insertRawCommit(t, repo, "dup-b", "session-boot-dup", "dup-sha", now.Add(time.Minute))
+
+	// Simulate the next process boot on this same (legacy, duplicate-laden)
+	// database.
+	if err := repo.initSchema(); err != nil {
+		t.Fatalf("initSchema() on a legacy DB with pre-existing duplicate commit rows must not error: %v", err)
+	}
+
+	if got := countRows(t, repo,
+		`SELECT COUNT(1) FROM task_session_commits WHERE session_id = ? AND commit_sha = ?`,
+		"session-boot-dup", "dup-sha"); got != 1 {
+		t.Errorf("rows for dup-sha after initSchema() = %d, want 1 (deduped)", got)
+	}
+
+	var indexName string
+	if err := repo.db.Get(&indexName, `
+		SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'uniq_session_commits_session_sha'
+	`); err != nil {
+		t.Fatalf("uniq_session_commits_session_sha index is missing after initSchema(): %v", err)
+	}
+}
+
 // insertRawCommit writes a task_session_commits row bypassing
 // CreateSessionCommit, so a test can construct pre-migration states
 // (duplicates) the production write path would now refuse.

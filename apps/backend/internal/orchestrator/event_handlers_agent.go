@@ -1060,6 +1060,17 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 
 	s.completeTurnForSession(context.WithoutCancel(ctx), data.SessionID)
 
+	// Reconcile task_session_commits while the agent process for THIS turn is
+	// still guaranteed alive - see captureSessionCommitsSweep. This must run
+	// before both branches below: the pending-clarification early return
+	// skips straight to cleanup (so a later branch would never run for this
+	// turn at all), and a profile-switch transition inside
+	// processOnTurnCompleteViaEngine can synchronously stop the agent for
+	// this very session (reuseSessionForStep/createNewSessionForStep ->
+	// completeAndStopSession -> StopAgent), which would make a
+	// GetGitLog call placed after it find the agent already gone.
+	s.captureSessionCommitsSweep(ctx, data.SessionID)
+
 	if s.sessionHasPendingClarification(ctx, data.SessionID) {
 		s.logger.Info("deferring on_turn_complete on agent.completed while clarification is pending",
 			zap.String("task_id", data.TaskID),
@@ -1091,11 +1102,6 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 	// Capture a git status snapshot before cleanup so it can be served
 	// when clients subscribe to this session later (sidebar diff stats, etc.).
 	s.captureGitStatusSnapshot(ctx, data.SessionID)
-
-	// Reconcile task_session_commits while the agent process is still
-	// running - see captureSessionCommitsSweep for why this runs here
-	// rather than relying solely on the live commit-created event.
-	s.captureSessionCommitsSweep(ctx, data.SessionID)
 
 	// Clean up the agent execution (stop agentctl, release port)
 	go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)

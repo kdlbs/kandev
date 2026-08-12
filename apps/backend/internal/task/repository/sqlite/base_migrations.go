@@ -701,6 +701,23 @@ const commitCaptureActivatedAtMetaKey = "commit_capture_activated_at"
 // broken by id: task_session_commits is an append-only observation ledger
 // (a rebase/squash adds new SHAs, it never retroactively changes which row
 // was first seen), so "earliest seen" is the row future replays preserve.
+//
+// Rebase/squash decision: immutable observation history, not the final
+// branch object set. A rebase that drops a previously-observed commit SHA
+// from reachable history leaves that row in place - it is not deleted or
+// reconciled against the current branch. Same tradeoff the task brief
+// already accepts for summed commit diffstats counting churn and reverts
+// (task_session_git_snapshots deltas are the net-branch-growth answer;
+// commit rows are the observation-history answer, published side by side,
+// not merged into one number). Live capture makes this more visible than
+// the old archive-only design (which only ever ran GetGitLog once, at
+// archive time, so it naturally reflected whatever was reachable from HEAD
+// at that instant) - continuous capture can now persist a commit that a
+// later rebase makes unreachable. Accepted rather than reconciled: pruning
+// on every rebase/force-push would require diffing against live git state
+// on every sweep, and "what got captured" is itself useful observability
+// (e.g. abandoned work), not just noise.
+//
 // Must run before CreateSessionCommit starts firing from more than archive -
 // CREATE UNIQUE INDEX fails on an existing duplicate pair, and
 // MigrateLogger.Apply swallows non-"already exists" errors, so an unhandled
