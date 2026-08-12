@@ -23,11 +23,12 @@ import (
 // agentctl workspace. RepositoryURL must be a credential-free Git locator;
 // destination is always a direct child of the current workspace root.
 type MaterializeRepositoryRequest struct {
-	RepositoryURL      string                     `json:"repository_url"`
-	Destination        string                     `json:"destination"`
-	BaseBranch         string                     `json:"base_branch"`
-	CheckoutBranch     string                     `json:"checkout_branch,omitempty"`
-	RemoteContribution *models.RemoteContribution `json:"remote_contribution,omitempty"`
+	RepositoryURL           string                          `json:"repository_url"`
+	Destination             string                          `json:"destination"`
+	BaseBranch              string                          `json:"base_branch"`
+	CheckoutBranch          string                          `json:"checkout_branch,omitempty"`
+	RemoteContribution      *models.RemoteContribution      `json:"remote_contribution,omitempty"`
+	ContributionDestination *models.ContributionDestination `json:"contribution_destination,omitempty"`
 }
 
 // MaterializeRepositoryResponse deliberately contains no remote locator so a
@@ -79,8 +80,14 @@ func (s *Server) handleWorkspaceMaterializeRepository(c *gin.Context) {
 			return
 		}
 	}
+	if req.ContributionDestination != nil {
+		if err := req.ContributionDestination.Validate(); err != nil {
+			c.JSON(http.StatusBadRequest, MaterializeRepositoryResponse{Error: "invalid contribution destination"})
+			return
+		}
+	}
 
-	reused, err := materializeRepository(c.Request.Context(), req.RepositoryURL, destination, req.BaseBranch, req.CheckoutBranch, req.RemoteContribution)
+	reused, err := materializeRepositoryWithDestination(c.Request.Context(), req.RepositoryURL, destination, req.BaseBranch, req.CheckoutBranch, req.RemoteContribution, req.ContributionDestination)
 	if err != nil {
 		if errors.Is(err, errMaterializeCollision) {
 			c.JSON(http.StatusConflict, MaterializeRepositoryResponse{Error: "destination already exists"})
@@ -213,7 +220,15 @@ func materializeRepository(ctx context.Context, locator, destination, baseBranch
 	if len(bindings) > 0 {
 		binding = bindings[0]
 	}
-	if reused, err := matchingCheckout(ctx, destination, locator, baseBranch, checkoutBranch, binding); err != nil || reused {
+	return materializeRepositoryInternal(ctx, locator, destination, baseBranch, checkoutBranch, binding, nil)
+}
+
+func materializeRepositoryWithDestination(ctx context.Context, locator, destination, baseBranch, checkoutBranch string, binding *models.RemoteContribution, contributionDestination *models.ContributionDestination) (bool, error) {
+	return materializeRepositoryInternal(ctx, locator, destination, baseBranch, checkoutBranch, binding, contributionDestination)
+}
+
+func materializeRepositoryInternal(ctx context.Context, locator, destination, baseBranch, checkoutBranch string, binding *models.RemoteContribution, contributionDestination *models.ContributionDestination) (bool, error) {
+	if reused, err := matchingCheckoutWithDestination(ctx, destination, locator, baseBranch, checkoutBranch, binding, contributionDestination); err != nil || reused {
 		return reused, err
 	}
 	// codeql[go/path-injection] destination is a direct child of the canonical workspace root; Lstat rejects links before use.
@@ -240,6 +255,11 @@ func materializeRepository(ctx context.Context, locator, destination, baseBranch
 	} else if err := checkoutMaterializedBranch(ctx, checkout, baseBranch, checkoutBranch); err != nil {
 		return false, err
 	}
+	if contributionDestination != nil {
+		if err := configureContributionDestination(ctx, checkout, contributionDestination); err != nil {
+			return false, err
+		}
+	}
 	// codeql[go/path-injection] checkout is newly created beneath the trusted workspace root; destination is its direct child.
 	if err := os.Rename(checkout, destination); err != nil {
 		if os.IsExist(err) {
@@ -248,6 +268,49 @@ func materializeRepository(ctx context.Context, locator, destination, baseBranch
 		return false, err
 	}
 	return false, nil
+}
+
+func matchingCheckoutWithDestination(ctx context.Context, destination, locator, baseBranch, checkoutBranch string, binding *models.RemoteContribution, contributionDestination *models.ContributionDestination) (bool, error) {
+	reused, err := matchingCheckout(ctx, destination, locator, baseBranch, checkoutBranch, binding)
+	if err != nil || !reused || contributionDestination == nil {
+		return reused, err
+	}
+	return true, configureContributionDestination(ctx, destination, contributionDestination)
+}
+
+func configureContributionDestination(ctx context.Context, checkout string, destination *models.ContributionDestination) error {
+	if destination == nil {
+		return nil
+	}
+	if err := destination.Validate(); err != nil {
+		return err
+	}
+	remoteName := destination.ContributionRemoteName()
+	configured, err := materializeGitOutput(ctx, "-C", checkout, "config", "--get", "remote."+remoteName+".url")
+	if err == nil {
+		if strings.TrimSpace(configured) != destination.TargetRepository.RemoteURL {
+			return errors.New("contribution destination identity conflict")
+		}
+	} else if _, err := materializeGitOutput(ctx, "-C", checkout, "remote", "add", remoteName, destination.TargetRepository.RemoteURL); err != nil {
+		return errors.New("contribution destination could not be configured")
+	}
+	pushURLs, pushErr := materializeGitOutput(ctx, "-C", checkout, "config", "--get-all", "remote."+remoteName+".pushurl")
+	if pushErr == nil && strings.TrimSpace(pushURLs) != destination.TargetRepository.RemoteURL {
+		return errors.New("contribution destination push identity conflict")
+	}
+	if pushErr != nil {
+		if _, err := materializeGitOutput(ctx, "-C", checkout, "config", "--add", "remote."+remoteName+".pushurl", destination.TargetRepository.RemoteURL); err != nil {
+			return errors.New("contribution destination push URL could not be configured")
+		}
+	}
+	branch, err := materializeGitOutput(ctx, "-C", checkout, "branch", "--show-current")
+	if err != nil || strings.TrimSpace(branch) == "" {
+		return errors.New("contribution destination branch could not be identified")
+	}
+	if _, err := materializeGitOutput(ctx, "-C", checkout, "config", "branch."+strings.TrimSpace(branch)+".pushRemote", remoteName); err != nil {
+		return errors.New("contribution destination push remote could not be configured")
+	}
+	return nil
 }
 
 func checkoutMaterializedBranch(ctx context.Context, checkout, baseBranch, checkoutBranch string) error {

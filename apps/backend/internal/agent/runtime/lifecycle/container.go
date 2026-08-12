@@ -64,8 +64,9 @@ type ContainerConfig struct {
 	// BaseBranches maps RepositoryName → base branch ref; forwarded into
 	// agentctl's CreateInstanceRequest so each WorkspaceTracker resolves
 	// diff stats against the task-recorded base.
-	BaseBranches        map[string]string
-	RemoteContributions map[string]models.RemoteContribution
+	BaseBranches             map[string]string
+	RemoteContributions      map[string]models.RemoteContribution
+	ContributionDestinations map[string]models.ContributionDestination
 }
 
 func boolPtr(v bool) *bool {
@@ -99,19 +100,20 @@ func buildContainerCreateInstanceRequest(
 			config.AutoApprovePermissions,
 			config.AutoApprovePermissionsOverride,
 		),
-		AutoStart:           false,
-		McpServers:          config.McpServers,
-		SessionID:           config.SessionID,
-		DisableAskQuestion:  disableAskQuestion,
-		AssumeMcpSse:        assumeMcpSse,
-		AssumeMcpHttp:       assumeMcpHttp,
-		McpMode:             config.McpMode,
-		McpProviders:        config.McpProviders,
-		McpProfile:          config.McpProfile,
-		RequiresProcessKill: requiresProcessKill,
-		StripEnv:            stripEnv,
-		BaseBranches:        config.BaseBranches,
-		RemoteContributions: config.RemoteContributions,
+		AutoStart:                false,
+		McpServers:               config.McpServers,
+		SessionID:                config.SessionID,
+		DisableAskQuestion:       disableAskQuestion,
+		AssumeMcpSse:             assumeMcpSse,
+		AssumeMcpHttp:            assumeMcpHttp,
+		McpMode:                  config.McpMode,
+		McpProviders:             config.McpProviders,
+		McpProfile:               config.McpProfile,
+		RequiresProcessKill:      requiresProcessKill,
+		StripEnv:                 stripEnv,
+		BaseBranches:             config.BaseBranches,
+		RemoteContributions:      config.RemoteContributions,
+		ContributionDestinations: config.ContributionDestinations,
 	}
 }
 

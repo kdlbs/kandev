@@ -61,6 +61,14 @@ func (c *NoopClient) HasRepositoryAccess(context.Context, string, string) (bool,
 	return false, ErrNoClient
 }
 
+func (c *NoopClient) GetRepository(context.Context, string, string) (*GitHubRepository, error) {
+	return nil, ErrNoClient
+}
+
+func (c *NoopClient) CreateFork(context.Context, string, string) (*GitHubRepository, error) {
+	return nil, ErrNoClient
+}
+
 func (c *NoopClient) ListPRReviews(context.Context, string, string, int) ([]PRReview, error) {
 	return nil, ErrNoClient
 }

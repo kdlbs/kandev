@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/system/logbundle"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
@@ -29,6 +30,51 @@ type fakeGitHubInfo struct {
 	hasFork       bool
 	hasForkErr    error
 	calledHasFork bool
+}
+
+type fakeManagedGitHub struct {
+	policy    github.TaskGitCredentialPolicy
+	policyErr error
+	result    github.ContributionForkResolution
+	resultErr error
+	probed    bool
+}
+
+func (f *fakeManagedGitHub) DescribeTaskGitCredentialPolicy(context.Context, string) (github.TaskGitCredentialPolicy, error) {
+	return f.policy, f.policyErr
+}
+
+func (f *fakeManagedGitHub) ProbeContributionForkCapabilityForWorkspace(context.Context, string, string, string) (github.ContributionForkResolution, error) {
+	f.probed = true
+	return f.result, f.resultErr
+}
+
+func TestResolveGitHubAccessForWorkspaceUsesManagedForkCapability(t *testing.T) {
+	managed := &fakeManagedGitHub{
+		policy: github.TaskGitCredentialPolicy{Mode: github.TaskGitCredentialsModeManaged},
+		result: github.ContributionForkResolution{Status: github.ContributionForkStatusCreatable, ActorLogin: "automation"},
+	}
+	handler := newTestHandler(&fakeGitHubInfo{login: "ambient", hasWrite: true})
+	handler.SetManagedGitHubForkProber(managed)
+
+	access := handler.resolveGitHubAccessForWorkspace(context.Background(), "workspace-1")
+	if access.forkStatus != ForkStatusCreatable || access.login != "automation" || !managed.probed {
+		t.Fatalf("managed access = %+v, probed=%v", access, managed.probed)
+	}
+}
+
+func TestResolveGitHubAccessForWorkspaceBlocksManagedErrorsWithoutAmbientFallback(t *testing.T) {
+	managed := &fakeManagedGitHub{
+		policy:    github.TaskGitCredentialPolicy{Mode: github.TaskGitCredentialsModeManaged},
+		resultErr: github.ErrContributionForkAppUnsupported,
+	}
+	handler := newTestHandler(&fakeGitHubInfo{login: "ambient", hasWrite: true})
+	handler.SetManagedGitHubForkProber(managed)
+
+	access := handler.resolveGitHubAccessForWorkspace(context.Background(), "workspace-1")
+	if access.forkStatus != ForkStatusBlockedManaged || access.login != "" || access.hasWrite {
+		t.Fatalf("managed error access = %+v", access)
+	}
 }
 
 func (f *fakeGitHubInfo) GetAuthenticatedLogin(_ context.Context) (string, error) {

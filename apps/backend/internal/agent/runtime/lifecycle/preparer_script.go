@@ -21,6 +21,10 @@ func resolvePreparerSetupScript(req *EnvPrepareRequest, workspacePath string) st
 	if script == "" {
 		script = defaultPreparerSetupScript(req)
 	}
+	if req.ContributionDestination != nil {
+		destinationScript, _ := scriptengine.ContributionDestinationSetupScriptAt(req.ContributionDestination, workspacePath)
+		script += destinationScript
+	}
 	if script == "" {
 		return ""
 	}

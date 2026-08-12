@@ -1,6 +1,7 @@
 ---
 status: building
 created: 2026-04-29
+amended: 2026-08-12
 owner: Carlos Florencio
 ---
 
@@ -53,6 +54,26 @@ the user's own agent picks up immediately — turning every report into a contri
     the URLs so the user can verify the change in a second kandev instance.
   - **PR** — agent invokes the `pr` skill to commit, push, and open a pull
     request against `main` in `kdlbs/kandev`.
+- Creating an Improve Kandev implementation task with managed task credentials
+  prepares its publication route before the first agent launches. Kandev uses
+  the dedicated workspace's automation connection to check direct write
+  access. Without direct access, it reuses or creates that automation actor's
+  fork, verifies that the fork's parent is exactly `kdlbs/kandev`, verifies
+  write access, and stores a versioned, credential-free
+  `contribution_destination` binding on the task's canonical repository
+  attachment.
+- The repository row and managed checkout `origin` remain
+  `https://github.com/kdlbs/kandev`. A bound fork is a dedicated push remote,
+  not another repository attachment and not the repository identity used for
+  issues or pull requests. Managed task credentials authorize the canonical
+  repository plus that exact fork only; they never fall back to executor or
+  host credentials.
+- In managed mode, the **PR** step pushes the current branch through the
+  prepared destination remote and creates the pull request with explicit target
+  repository, base, fork owner, and head branch. It does not run `gh repo
+  fork`, rename `origin`, or depend on `gh` inferring a cross-fork topology.
+  Executor-owned mode retains an explicitly separate agent-managed fork path
+  because Kandev cannot prove the identity behind an opaque executor credential.
 - The `improve-kandev` workflow is hidden from the workflow management page in
   workspace settings and from the workflow picker in the standard task-create
   dialog, except in the dedicated `Improve Kandev` workspace itself where the
@@ -92,6 +113,14 @@ the user's own agent picks up immediately — turning every report into a contri
   - `workflow_id: string` — the workspace instance of `improve-kandev`.
   - `issue_workflow_id: string` — the workspace instance of
     `report-kandev-issue`.
+- Under managed task credentials, the bootstrap GitHub identity and
+  fork-capability probe use the selected Improve Kandev workspace automation
+  connection, which is also the source for task leases. Fork status
+  distinguishes direct write, an exact ready fork, a fork that can be created
+  during task creation, and a blocked automation configuration. Executor-owned
+  mode keeps its separately labeled executor capability probe. Blocked
+  responses include user-facing recovery guidance and still allow the
+  issue-only workflow.
 - Both workflow IDs refer to hidden, workspace-scoped workflow instances in
   the returned workspace and are safe to request repeatedly.
 
@@ -106,6 +135,10 @@ the user's own agent picks up immediately — turning every report into a contri
 - The two hidden workflow instances live in the dedicated workspace and remain
   idempotent: opening the dialog again reuses the existing workflow for each
   template.
+- `contribution_destination` is stored only on the canonical
+  `task_repositories` attachment. It contains a version, provider, and exact
+  credential-free fork identity/URL. Tokens, leases, credential helpers, and
+  ambient Git remotes are never persisted.
 
 ## Failure modes
 
@@ -124,6 +157,17 @@ the user's own agent picks up immediately — turning every report into a contri
 - A fork restriction blocks only **Bug fix** and **Feature request** submission.
   Switching to **Open issue** clears that restriction because publishing an
   issue requires neither a fork nor push access.
+- In managed mode, if direct write is unavailable and the workspace automation
+  connection cannot own a fork, task creation is blocked before persistence or
+  launch. This includes a GitHub App installation without target write access;
+  Kandev does not create a fork with a personal identity and push it with
+  unrelated App credentials.
+- If `<automation-login>/kandev` exists but is not a fork of `kdlbs/kandev`, or
+  if GitHub does not make a newly created fork readable and writable within the
+  bounded preparation window, creation fails without starting an agent.
+- A malformed, unknown-version, or target-mismatched destination binding fails
+  closed during launch or resume. An unrelated fork can never be redeemed as a
+  managed credential scope.
 
 ## Scenarios
 
@@ -159,9 +203,37 @@ the user's own agent picks up immediately — turning every report into a contri
   auto-starts with the test step prompt, runs `make install` and `make dev`,
   and reports the assigned URLs back to the user.
 
+- **GIVEN** the Improve Kandev workspace uses managed credentials and its human
+  automation actor cannot push to `kdlbs/kandev`, **WHEN** an implementation
+  task is created, **THEN** Kandev resolves or creates the actor's exact fork,
+  persists it as the task-bound contribution destination, and launches the
+  task with credential scopes for only `kdlbs/kandev` and that fork.
+
 - **GIVEN** the user has verified the change works, **WHEN** they move the task
   to **PR**, **THEN** the agent invokes the `pr` skill and opens a pull request
-  against `main` in `kdlbs/kandev`.
+  against `main` in `kdlbs/kandev`, while canonical `origin` remains unchanged
+  and the branch is pushed through the prepared fork remote.
+
+- **GIVEN** `<automation-login>/kandev` exists but its parent is not
+  `kdlbs/kandev`, **WHEN** an implementation task is created, **THEN** Kandev
+  blocks creation with a destination-conflict error and does not authorize or
+  overwrite that repository.
+
+- **GIVEN** the workspace automation connection is a GitHub App that lacks
+  write access to `kdlbs/kandev` and task access is managed, **WHEN** the user
+  selects an implementation report kind, **THEN** the dialog shows a blocking
+  managed-credential recovery message on desktop and mobile, while **Open
+  issue** remains available.
+
+- **GIVEN** task access inherits executor credentials, **WHEN** an Improve
+  Kandev implementation task is created, **THEN** Kandev does not claim a
+  server-authored fork identity for the opaque executor account and the PR step
+  retains its executor-owned fork preparation path.
+
+- **GIVEN** a managed Improve Kandev task is resumed, **WHEN** Kandev
+  reconciles its provider-backed checkout, **THEN** `origin` is restored to the
+  canonical HTTPS repository and the same validated contribution remote and
+  fork lease are reconstructed without consulting ambient Git configuration.
 
 - **GIVEN** the standard task-create dialog or the workspace workflows settings
   page is open, **WHEN** the page lists workflows, **THEN** neither
@@ -292,10 +364,10 @@ the user's own agent picks up immediately — turning every report into a contri
 - Rate limiting, quotas, or one-task-at-a-time guards.
 - Log redaction or sensitive-value scrubbing.
 - Manual upstream-URL configuration. The user is expected to have `gh`
-  authenticated; during the PR step, the agent automatically forks
-  `kdlbs/kandev` to the user's account when they lack write access on the
-  upstream repo, and pushes directly otherwise. Manual fork/remote setup
-  remains an optional advanced workflow but is not part of this feature.
+  authenticated only when executor-owned credentials are selected. In managed
+  mode Kandev prepares the exact fork destination before launch; manual
+  fork/remote setup remains an optional advanced workflow but is not part of
+  this feature.
 - A generic feedback inbox or report archive; this feature produces tasks,
   not stored reports.
 - Cleanup of the temporary log bundle directory; left to OS/temp policy.

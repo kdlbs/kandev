@@ -78,6 +78,62 @@ func RemoteContributionSetupScript(binding *models.RemoteContribution) (string, 
 		branchSuffix, branchSuffix), nil
 }
 
+// ContributionDestinationSetupScript configures a server-bound fork as the
+// push remote for the current branch. It never changes origin or the branch's
+// upstream remote, so fetch and pull continue to use the canonical checkout.
+func ContributionDestinationSetupScript(destination *models.ContributionDestination) (string, error) {
+	return ContributionDestinationSetupScriptAt(destination, "/workspace")
+}
+
+// ContributionDestinationSetupScriptAt is the workspace-path variant used by
+// host and SSH preparers whose checkout root is not /workspace.
+func ContributionDestinationSetupScriptAt(destination *models.ContributionDestination, workspacePath string) (string, error) {
+	if destination == nil {
+		return "", nil
+	}
+	if err := destination.Validate(); err != nil {
+		return "", fmt.Errorf("validate contribution destination: %w", err)
+	}
+	remoteName := destination.ContributionRemoteName()
+	return fmt.Sprintf(`
+
+# ---- kandev-managed: configure contribution destination ----
+# origin and the branch upstream remain canonical; only ordinary pushes use
+# this exact, server-verified destination repository.
+(
+  set -eu
+  cd %s
+  destination_remote=%s
+  destination_url=%s
+  if configured_url=$(git config --get "remote.$destination_remote.url" 2>/dev/null); then
+    if [ "$configured_url" != "$destination_url" ]; then
+      echo 'kandev: contribution destination identity conflict' >&2
+      exit 1
+    fi
+  else
+    git remote add "$destination_remote" "$destination_url"
+  fi
+  configured_push_urls=$(git config --get-all "remote.$destination_remote.pushurl" 2>/dev/null || true)
+  if [ -n "$configured_push_urls" ]; then
+    while IFS= read -r configured_push_url; do
+      if [ "$configured_push_url" != "$destination_url" ]; then
+        echo 'kandev: contribution destination push identity conflict' >&2
+        exit 1
+      fi
+    done <<EOF
+$configured_push_urls
+EOF
+  else
+    git config --add "remote.$destination_remote.pushurl" "$destination_url"
+  fi
+  current_branch=$(git branch --show-current)
+  if [ -n "$current_branch" ]; then
+    git config "branch.$current_branch.pushRemote" "$destination_remote"
+  fi
+)
+	`, shellQuote(workspacePath), shellQuote(remoteName), shellQuote(destination.TargetRepository.RemoteURL)), nil
+}
+
 // RepositoryProvider returns git-related placeholders from metadata and environment.
 // Parameters:
 //   - metadata: executor create request metadata (contains "repository_path", "base_branch", etc.)

@@ -115,23 +115,31 @@ describe("improve kandev dialog model", () => {
     });
   });
 
-  it("blocks only implementation kinds for EMU fork restrictions", () => {
+  it("blocks only implementation kinds for managed fork restrictions", () => {
     const message = "Forks are unavailable";
     expect(getImproveKandevForkBlockedReason("bug", "blocked_emu", message)).toBe(message);
     expect(getImproveKandevForkBlockedReason("feature", "blocked_emu", message)).toBe(message);
+    expect(getImproveKandevForkBlockedReason("bug", "blocked_managed", message)).toBe(message);
     expect(getImproveKandevForkBlockedReason("issue", "blocked_emu", message)).toBeNull();
     expect(getImproveKandevForkBlockedReason("bug", "unknown", null)).toBeNull();
-  });
-
-  it("describes contributor access for each workflow kind", () => {
-    expect(contributorAccessMessage("issue", false)).toContain("does not require");
-    expect(contributorAccessMessage("bug", true)).toContain("write access");
-    expect(contributorAccessMessage("feature", false)).toContain("fork");
   });
 
   it("prefers stable workflow step ids for descriptions", () => {
     expect(
       getImproveKandevStepDescription({ id: "improve", name: "Renamed phase" } as WorkflowStep),
     ).toContain("implements the change");
+  });
+});
+
+describe("improve kandev contributor access", () => {
+  it("describes each workflow kind with a translation key", () => {
+    expect(contributorAccessMessage("issue", false)).toBe("common:improveKandevIssueNoForkAccess");
+    expect(contributorAccessMessage("bug", true)).toBe("common:improveKandevDirectPushAccess");
+    expect(contributorAccessMessage("feature", false, "creatable")).toBe(
+      "common:improveKandevManagedForkPrepared",
+    );
+    expect(contributorAccessMessage("feature", false, "ready")).toBe(
+      "common:improveKandevExistingForkPrepared",
+    );
   });
 });

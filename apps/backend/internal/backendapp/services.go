@@ -51,6 +51,11 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+const (
+	canonicalKandevOwner = "kdlbs"
+	canonicalKandevName  = "kandev"
+)
+
 func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories, dbPool *db.Pool, eventBus bus.EventBus, agentRegistry *registry.Registry, version string) (*Services, *agentsettingscontroller.Controller, error) {
 	// Load custom TUI agents from DB into registry before discovery
 	loadCustomTUIAgents(context.Background(), repos, agentRegistry, log)
@@ -141,6 +146,10 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	if githubSvc != nil {
 		taskSvc.SetTaskStatusSummaryPRReader(&githubTaskStatusSummaryPRReader{gh: githubSvc})
 		githubSvc.SetPromptResolver(promptSvc)
+		taskSvc.SetContributionDestinationPreparer(&githubContributionDestinationPreparer{service: githubSvc})
+		if brokerErr := githubSvc.ConfigureCredentialBroker(&githubBrokerScopeAuthorizer{repo: repos.Task}); brokerErr != nil {
+			log.Warn("GitHub credential broker initialization failed", zap.Error(brokerErr))
+		}
 	}
 	gitlabSvc := initGitLabService(dbPool, eventBus, repos.Secrets, log)
 	if gitlabSvc != nil {
@@ -274,6 +283,66 @@ func reserveBuiltinMentionIdentities(
 	pluginService.SetReservedReferenceIdentities(identities)
 }
 
+type githubContributionDestinationPreparer struct {
+	service *github.Service
+}
+
+func (p *githubContributionDestinationPreparer) PrepareContributionDestination(
+	ctx context.Context,
+	req *taskservice.CreateTaskRequest,
+	workflow *taskmodels.Workflow,
+	repositories []*taskmodels.Repository,
+) error {
+	if p == nil || p.service == nil || req == nil || workflow == nil ||
+		workflow.WorkflowTemplateID == nil || *workflow.WorkflowTemplateID != "improve-kandev" {
+		return nil
+	}
+	policy, err := p.service.DescribeTaskGitCredentialPolicy(ctx, req.WorkspaceID)
+	if err != nil {
+		return fmt.Errorf("resolve Improve Kandev GitHub credential policy: %w", err)
+	}
+	if policy.Mode != github.TaskGitCredentialsModeManaged {
+		return nil
+	}
+	for index := range req.Repositories {
+		input := &req.Repositories[index]
+		if input.RemoteContribution != nil || input.ContributionDestination != nil {
+			continue
+		}
+		if !isCanonicalKandevRepositoryInput(input, repositoryAt(repositories, index)) {
+			continue
+		}
+		destination, resolveErr := p.service.ResolveContributionDestinationForWorkspace(
+			ctx, req.WorkspaceID, canonicalKandevOwner, canonicalKandevName,
+		)
+		if resolveErr != nil {
+			return fmt.Errorf("prepare Improve Kandev contribution destination: %w", resolveErr)
+		}
+		input.ContributionDestination = destination
+		return nil
+	}
+	return nil
+}
+
+func repositoryAt(repositories []*taskmodels.Repository, index int) *taskmodels.Repository {
+	if index < 0 || index >= len(repositories) {
+		return nil
+	}
+	return repositories[index]
+}
+
+func isCanonicalKandevRepositoryInput(
+	input *taskservice.TaskRepositoryInput,
+	repository *taskmodels.Repository,
+) bool {
+	if repository != nil {
+		return repository.Provider == "github" &&
+			repository.ProviderOwner == canonicalKandevOwner && repository.ProviderName == canonicalKandevName
+	}
+	return input != nil && input.Provider == "github" &&
+		input.ProviderOwner == canonicalKandevOwner && input.ProviderName == canonicalKandevName
+}
+
 type githubBrokerScopeAuthorizer struct {
 	repo interface {
 		GetTask(context.Context, string) (*taskmodels.Task, error)
@@ -316,6 +385,19 @@ func (a *githubBrokerScopeAuthorizer) AuthorizeGitHubRepository(
 	binding, found, err := taskmodels.LoadRemoteContribution(link.Metadata)
 	if err != nil {
 		return fmt.Errorf("validate remote contribution scope: %w", err)
+	}
+	destination, destinationFound, destinationErr := taskmodels.LoadContributionDestination(link.Metadata)
+	if destinationErr != nil {
+		return fmt.Errorf("validate contribution destination scope: %w", destinationErr)
+	}
+	if destinationFound && destination.Provider == taskmodels.ContributionDestinationProviderGitHub &&
+		strings.EqualFold(destination.TargetRepository.Host, "github.com") {
+		parts := strings.Split(destination.TargetRepository.Path, "/")
+		canonical := strings.TrimSpace(repository.ProviderOwner) + "/" + strings.TrimSpace(repository.ProviderName)
+		if len(parts) == 2 && strings.EqualFold(parts[0], owner) && strings.EqualFold(parts[1], repoName) &&
+			strings.EqualFold(destination.SourceRepository.Path, canonical) {
+			return nil
+		}
 	}
 	if !found || binding.Provider != taskmodels.RemoteContributionProviderGitHub ||
 		!binding.CollaborationAllowed || !strings.EqualFold(binding.SourceRepository.Host, "github.com") {

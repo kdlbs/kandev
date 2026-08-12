@@ -316,6 +316,52 @@ func TestLoadTemplates_ReportKandevIssuePromptContract(t *testing.T) {
 	}
 }
 
+func TestLoadTemplates_ImproveKandevManagedPublicationPromptContract(t *testing.T) {
+	templates, err := LoadTemplates()
+	if err != nil {
+		t.Fatalf("LoadTemplates() returned error: %v", err)
+	}
+
+	var improve *models.WorkflowTemplate
+	for _, tmpl := range templates {
+		if tmpl.ID == "improve-kandev" {
+			improve = tmpl
+			break
+		}
+	}
+	if improve == nil {
+		t.Fatal("improve-kandev template not found")
+	}
+	if len(improve.Steps) != 3 {
+		t.Fatalf("improve-kandev steps = %d, want 3", len(improve.Steps))
+	}
+
+	prStep := improve.Steps[2]
+	normalizedPrompt := strings.Join(strings.Fields(prStep.Prompt), " ")
+	for _, required := range []string{
+		"Managed workspace credentials",
+		"origin` remains the canonical `kdlbs/kandev`",
+		"ordinary `git push`",
+		"gh pr create --repo kdlbs/kandev --base main",
+		"<fork-owner>:<branch>",
+		"Executor-owned credentials are a separate compatibility path",
+		"Never select that path to recover from a managed preparation failure",
+	} {
+		if !strings.Contains(normalizedPrompt, required) {
+			t.Errorf("managed publication prompt must contain %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"gh repo fork",
+		"remote-name=origin",
+		"rename the existing `origin`",
+	} {
+		if strings.Contains(normalizedPrompt, forbidden) {
+			t.Errorf("managed publication prompt must not contain %q", forbidden)
+		}
+	}
+}
+
 // TestLoadTemplates_PRReviewMRAutomationInstruction is AC30: the pr-review
 // template's review step must instruct the agent to enable lifecycle
 // notifications on whichever provider the task's linked review target is

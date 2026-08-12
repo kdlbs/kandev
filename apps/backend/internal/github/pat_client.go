@@ -152,6 +152,29 @@ func (c *PATClient) HasRepositoryAccess(ctx context.Context, owner, repo string)
 	return metadata.FullName != "", nil
 }
 
+// GetRepository returns the provider-authoritative repository identity and
+// permissions used by managed contribution-destination preparation.
+func (c *PATClient) GetRepository(ctx context.Context, owner, repo string) (*GitHubRepository, error) {
+	var raw githubRepositoryResponse
+	endpoint := fmt.Sprintf("/repos/%s/%s", owner, repo)
+	if err := c.get(ctx, endpoint, &raw); err != nil {
+		return nil, fmt.Errorf("get repository %s/%s: %w", owner, repo, err)
+	}
+	return projectGitHubRepository(raw), nil
+}
+
+// CreateFork creates a fork for the authenticated human automation identity.
+// GitHub may return before the fork is fully readable; the service resolver
+// performs the bounded follow-up verification.
+func (c *PATClient) CreateFork(ctx context.Context, owner, repo string) (*GitHubRepository, error) {
+	var raw githubRepositoryResponse
+	endpoint := fmt.Sprintf("/repos/%s/%s/forks", owner, repo)
+	if err := c.postJSON(ctx, endpoint, []byte(`{}`), &raw); err != nil {
+		return nil, fmt.Errorf("create fork for %s/%s: %w", owner, repo, err)
+	}
+	return projectGitHubRepository(raw), nil
+}
+
 func (c *PATClient) GetPR(ctx context.Context, owner, repo string, number int) (*PR, error) {
 	var raw patPR
 	endpoint := fmt.Sprintf("/repos/%s/%s/pulls/%d", owner, repo, number)

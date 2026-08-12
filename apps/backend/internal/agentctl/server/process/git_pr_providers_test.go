@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
 func prepareGitLabPRRepo(t *testing.T, remoteURL string) (*GitOperator, string) {
@@ -72,6 +74,63 @@ func TestGitOperatorCreatePR_GitLabRESTUsesJSONAndProjectDefaultBranch(t *testin
 	}
 	if createBody["title"] != "Draft: Quoted \"title\"\nline" {
 		t.Fatalf("title body = %#v", createBody["title"])
+	}
+}
+
+func TestGitOperatorCreatePR_ContributionDestinationUsesCanonicalTargetAndForkHead(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell wrapper test is Unix-only")
+	}
+	repoDir, cleanup := setupTestRepo(t)
+	t.Cleanup(cleanup)
+	targetDir := t.TempDir()
+	runGit(t, targetDir, "init", "--bare", "--initial-branch=main")
+	runGit(t, repoDir, "checkout", "-b", "feature/managed-destination")
+	writeFile(t, repoDir, "managed-destination.txt", "managed destination\n")
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "managed destination")
+
+	destination := &taskmodels.ContributionDestination{
+		Version:  taskmodels.ContributionDestinationVersion,
+		Provider: taskmodels.ContributionDestinationProviderGitHub,
+		SourceRepository: taskmodels.ContributionDestinationRepository{
+			Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
+		},
+		TargetRepository: taskmodels.ContributionDestinationRepository{
+			Host: "github.com", Path: "agent/kandev", ProviderID: "200", RemoteURL: "https://github.com/agent/kandev.git",
+		},
+	}
+	if err := destination.Validate(); err != nil {
+		t.Fatalf("destination.Validate() = %v", err)
+	}
+	runGit(t, repoDir, "config", "url."+targetDir+".insteadOf", destination.TargetRepository.RemoteURL)
+	runGit(t, repoDir, "remote", "add", destination.ContributionRemoteName(), destination.TargetRepository.RemoteURL)
+	runGit(t, repoDir, "remote", "set-url", "--push", destination.ContributionRemoteName(), destination.TargetRepository.RemoteURL)
+
+	scriptDir := t.TempDir()
+	ghArgsPath := filepath.Join(scriptDir, "gh-args.txt")
+	writeExecutable(t, filepath.Join(scriptDir, "gh"), fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$@\" > %q\nprintf 'https://github.com/kdlbs/kandev/pull/42\\n'\n", ghArgsPath))
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	operator := NewGitOperator(repoDir, newTestLogger(t), nil)
+	operator.setContributionDestination(destination)
+	result, err := operator.CreatePR(context.Background(), "Managed title", "Managed body", "main", true)
+	if err != nil || !result.Success {
+		t.Fatalf("CreatePR = %+v, err = %v", result, err)
+	}
+	if got := strings.TrimSpace(runGit(t, targetDir, "rev-parse", "refs/heads/feature/managed-destination")); got == "" {
+		t.Fatal("managed destination branch was not pushed")
+	}
+	if got := strings.TrimSpace(runGit(t, repoDir, "remote", "get-url", "origin")); got == "" {
+		t.Fatal("canonical origin was removed or rewritten")
+	}
+
+	wantArgs := []string{
+		"pr", "create", "--title", "Managed title", "--body", "Managed body",
+		"--repo", "kdlbs/kandev", "--head", "agent:feature/managed-destination", "--base", "main", "--draft",
+	}
+	if got := readScriptArgs(t, ghArgsPath); strings.Join(got, "\n") != strings.Join(wantArgs, "\n") {
+		t.Fatalf("gh args = %q, want %q", got, wantArgs)
 	}
 }
 

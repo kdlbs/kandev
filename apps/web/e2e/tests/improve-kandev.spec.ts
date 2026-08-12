@@ -11,7 +11,13 @@ import { test, expect } from "../fixtures/test-base";
 const BOOTSTRAP_URL = "**/api/v1/system/improve-kandev/bootstrap";
 const HEALTH_URL = "**/api/v1/system/health";
 
-type ForkStatus = "writable" | "ready" | "blocked_emu" | "unknown";
+type ForkStatus =
+  | "writable"
+  | "ready"
+  | "creatable"
+  | "blocked_emu"
+  | "blocked_managed"
+  | "unknown";
 
 type BootstrapOverrides = {
   /** Override the dedicated workspace the response points at. */
@@ -338,6 +344,7 @@ test.describe("Improve Kandev dialog", () => {
     await mockImproveKandevApis(testPage, seedData, {
       github_login: "octocat",
       has_write_access: false,
+      fork_status: "creatable",
     });
 
     await testPage.goto("/");
@@ -366,7 +373,7 @@ test.describe("Improve Kandev dialog", () => {
     // Contributor banner (fork mode)
     await expect(createDialog.getByText("@octocat")).toBeVisible();
     await expect(
-      createDialog.getByText(/agent will fork kdlbs\/kandev to your account/i),
+      createDialog.getByText(/will prepare a writable fork for this task/i),
     ).toBeVisible();
 
     // Workflow preview header
@@ -442,6 +449,37 @@ test.describe("Improve Kandev dialog", () => {
     await expect(createDialog).toBeVisible({ timeout: 10_000 });
     await expect(createDialog.getByText(blockedMessage)).toBeVisible();
     await createDialog.getByTestId("task-title-input").fill("EMU contribution");
+    await createDialog.getByTestId("task-description-input").fill("Describe the problem");
+    await expect(createDialog.getByTestId("submit-start-agent")).toBeDisabled();
+
+    await createDialog.getByRole("tab", { name: "Open issue" }).click();
+    await expect(createDialog.getByTestId("submit-start-agent")).toBeEnabled({ timeout: 10_000 });
+  });
+
+  test("blocks implementation but keeps issue reporting available when managed fork setup is blocked", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.createWorkspace("Improve Kandev");
+    await apiClient.saveUserSettings({ agent_generated_task_titles: false });
+    const blockedMessage =
+      "The selected workspace GitHub automation connection cannot prepare a verified contribution destination.";
+    await mockImproveKandevApis(testPage, seedData, {
+      github_login: "automation",
+      has_write_access: false,
+      fork_status: "blocked_managed",
+      fork_message: blockedMessage,
+    });
+
+    await testPage.goto("/");
+    await testPage.getByTestId("sidebar-improve-kandev-button").click();
+    await testPage.getByTestId("improve-kandev-proceed").click();
+
+    const createDialog = testPage.getByTestId("create-task-dialog");
+    await expect(createDialog).toBeVisible({ timeout: 10_000 });
+    await expect(createDialog.getByText(blockedMessage)).toBeVisible();
+    await createDialog.getByTestId("task-title-input").fill("Managed fork recovery");
     await createDialog.getByTestId("task-description-input").fill("Describe the problem");
     await expect(createDialog.getByTestId("submit-start-agent")).toBeDisabled();
 

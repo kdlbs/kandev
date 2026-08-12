@@ -575,24 +575,25 @@ func (ae *AgentExecution) EndSessionSpan() {
 // the top level. When LaunchRequest.Repositories is set, each entry produces
 // one prepared worktree under the shared TaskDirName.
 type RepoLaunchSpec struct {
-	RepositoryID           string
-	RepositoryPath         string
-	RepositoryURL          string // Clone URL for remote executors that need to clone
-	RepoName               string // Repository name used as subdirectory inside TaskDirName
-	BaseBranch             string
-	DefaultBranch          string // Repository's default_branch, used as fallback when BaseBranch is missing
-	CheckoutBranch         string
-	PRNumber               int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	RemoteContribution     *models.RemoteContribution
-	WorktreeID             string // Existing worktree ID to reuse (skip creation if set)
-	WorktreeBranchPrefix   string
-	WorktreeBranchTemplate string
-	WorktreeBranchTicket   string
-	PullBeforeWorktree     bool
-	RemoteSyncHandled      bool
-	RepoSetupScript        string // Repository-level setup script (optional)
-	RepoCleanupScript      string // Repository-level cleanup script (optional)
-	CopyFiles              string // Comma-separated paths/globs to copy from the source repo (gitignored .env / config files)
+	RepositoryID            string
+	RepositoryPath          string
+	RepositoryURL           string // Clone URL for remote executors that need to clone
+	RepoName                string // Repository name used as subdirectory inside TaskDirName
+	BaseBranch              string
+	DefaultBranch           string // Repository's default_branch, used as fallback when BaseBranch is missing
+	CheckoutBranch          string
+	PRNumber                int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution      *models.RemoteContribution
+	WorktreeID              string // Existing worktree ID to reuse (skip creation if set)
+	WorktreeBranchPrefix    string
+	WorktreeBranchTemplate  string
+	WorktreeBranchTicket    string
+	PullBeforeWorktree      bool
+	RemoteSyncHandled       bool
+	RepoSetupScript         string // Repository-level setup script (optional)
+	RepoCleanupScript       string // Repository-level cleanup script (optional)
+	CopyFiles               string // Comma-separated paths/globs to copy from the source repo (gitignored .env / config files)
+	ContributionDestination *models.ContributionDestination
 	// BranchSlug, when set, suffixes the worktree directory as
 	// {RepoName}-{BranchSlug} so multi-branch tasks (same repo, multiple
 	// branches) don't collide.
@@ -708,20 +709,21 @@ type LaunchRequest struct {
 	CopyFiles string
 
 	// Worktree configuration
-	UseWorktree            bool   // Whether to use a Git worktree for isolation
-	WorktreeID             string // Existing worktree ID to reuse (skip creation if set)
-	RepositoryID           string // Repository ID for worktree tracking
-	RepositoryPath         string // Path to the main repository (for worktree creation)
-	BaseBranch             string // Base branch for the worktree (e.g., "main")
-	DefaultBranch          string // Repository's default_branch, used as fallback when BaseBranch is missing
-	CheckoutBranch         string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
-	PRNumber               int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	RemoteContribution     *models.RemoteContribution
-	WorktreeBranchPrefix   string // Branch prefix for worktree branches
-	WorktreeBranchTemplate string // Branch name template for worktree branches
-	WorktreeBranchTicket   string // External ticket value for branch templates
-	PullBeforeWorktree     bool   // Whether to pull from remote before creating the worktree
-	RemoteSyncHandled      bool   // Authenticated provider refresh already completed
+	UseWorktree             bool   // Whether to use a Git worktree for isolation
+	WorktreeID              string // Existing worktree ID to reuse (skip creation if set)
+	RepositoryID            string // Repository ID for worktree tracking
+	RepositoryPath          string // Path to the main repository (for worktree creation)
+	BaseBranch              string // Base branch for the worktree (e.g., "main")
+	DefaultBranch           string // Repository's default_branch, used as fallback when BaseBranch is missing
+	CheckoutBranch          string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
+	PRNumber                int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution      *models.RemoteContribution
+	WorktreeBranchPrefix    string // Branch prefix for worktree branches
+	WorktreeBranchTemplate  string // Branch name template for worktree branches
+	WorktreeBranchTicket    string // External ticket value for branch templates
+	PullBeforeWorktree      bool   // Whether to pull from remote before creating the worktree
+	RemoteSyncHandled       bool   // Authenticated provider refresh already completed
+	ContributionDestination *models.ContributionDestination
 
 	// Task directory mode: place worktree at ~/.kandev/tasks/{TaskDirName}/{RepoName}/
 	TaskDirName string // Semantic task directory name (e.g. "fix-bug_ab12")
@@ -755,23 +757,24 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		return nil
 	}
 	return []RepoLaunchSpec{{
-		RepositoryID:           r.RepositoryID,
-		RepositoryPath:         r.RepositoryPath,
-		RepoName:               r.RepoName,
-		BaseBranch:             r.BaseBranch,
-		DefaultBranch:          r.DefaultBranch,
-		CheckoutBranch:         r.CheckoutBranch,
-		PRNumber:               r.PRNumber,
-		RemoteContribution:     r.RemoteContribution,
-		WorktreeID:             r.WorktreeID,
-		WorktreeBranchPrefix:   r.WorktreeBranchPrefix,
-		WorktreeBranchTemplate: r.WorktreeBranchTemplate,
-		WorktreeBranchTicket:   r.WorktreeBranchTicket,
-		PullBeforeWorktree:     r.PullBeforeWorktree,
-		RemoteSyncHandled:      r.RemoteSyncHandled,
-		CopyFiles:              r.CopyFiles,
-		BranchSlug:             r.BranchSlug,
-		BranchIdentitySlug:     r.BranchIdentitySlug,
+		RepositoryID:            r.RepositoryID,
+		RepositoryPath:          r.RepositoryPath,
+		RepoName:                r.RepoName,
+		BaseBranch:              r.BaseBranch,
+		DefaultBranch:           r.DefaultBranch,
+		CheckoutBranch:          r.CheckoutBranch,
+		PRNumber:                r.PRNumber,
+		RemoteContribution:      r.RemoteContribution,
+		ContributionDestination: r.ContributionDestination,
+		WorktreeID:              r.WorktreeID,
+		WorktreeBranchPrefix:    r.WorktreeBranchPrefix,
+		WorktreeBranchTemplate:  r.WorktreeBranchTemplate,
+		WorktreeBranchTicket:    r.WorktreeBranchTicket,
+		PullBeforeWorktree:      r.PullBeforeWorktree,
+		RemoteSyncHandled:       r.RemoteSyncHandled,
+		CopyFiles:               r.CopyFiles,
+		BranchSlug:              r.BranchSlug,
+		BranchIdentitySlug:      r.BranchIdentitySlug,
 	}}
 }
 

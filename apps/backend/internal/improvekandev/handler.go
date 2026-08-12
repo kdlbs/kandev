@@ -14,6 +14,7 @@ import (
 
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/system/logbundle"
 	"github.com/kandev/kandev/internal/system/storage/tempartifacts"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -65,6 +66,17 @@ type GitHubWorkspaceCopier interface {
 	CopyWorkspaceConnectionToWorkspace(ctx context.Context, srcWorkspaceID, dstWorkspaceID string) error
 }
 
+// ManagedGitHubForkProber is the workspace-scoped provider capability used
+// when task credentials are managed. It must resolve the same automation
+// identity that will receive the task's credential leases.
+type ManagedGitHubForkProber interface {
+	DescribeTaskGitCredentialPolicy(ctx context.Context, workspaceID string) (github.TaskGitCredentialPolicy, error)
+	ProbeContributionForkCapabilityForWorkspace(
+		ctx context.Context,
+		workspaceID, owner, repo string,
+	) (github.ContributionForkResolution, error)
+}
+
 // DefaultWorkspaceResolver resolves the workspace whose GitHub configuration
 // the dedicated workspace inherits on creation (active workspace in user
 // settings → first-created workspace → literal "default").
@@ -88,6 +100,7 @@ type Handler struct {
 	// resolveRemote resolves a local repo path's origin remote. Defaults to
 	// service.ResolveGitRemoteProvider; tests can substitute a fake.
 	resolveRemote remoteResolver
+	managedGitHub ManagedGitHubForkProber
 	tempArtifacts *tempartifacts.Registry
 }
 
@@ -122,6 +135,10 @@ func (h *Handler) SetLogBundles(service diagnosticBundleService) {
 
 func (h *Handler) SetTemporaryArtifactRegistry(registry *tempartifacts.Registry) {
 	h.tempArtifacts = registry
+}
+
+func (h *Handler) SetManagedGitHubForkProber(prober ManagedGitHubForkProber) {
+	h.managedGitHub = prober
 }
 
 // RegisterRoutes registers the bootstrap and diagnostic-bundle lease endpoints.
@@ -160,10 +177,16 @@ const (
 	// ForkStatusReady: user already has a fork at github.com/{login}/kandev,
 	// so the PR step can push to it without forking again.
 	ForkStatusReady ForkStatus = "ready"
+	// ForkStatusCreatable: the managed human automation identity can create
+	// its exact fork during task creation.
+	ForkStatusCreatable ForkStatus = "creatable"
 	// ForkStatusBlockedEMU: the authenticated user looks like an Enterprise
 	// Managed User. EMU accounts cannot fork repositories outside their
 	// owning enterprise, so the contribution flow will fail at the PR step.
 	ForkStatusBlockedEMU ForkStatus = "blocked_emu"
+	// ForkStatusBlockedManaged means the selected workspace automation
+	// connection cannot prove or prepare a safe destination.
+	ForkStatusBlockedManaged ForkStatus = "blocked_managed"
 	// ForkStatusUnknown: bootstrap could not determine fork eligibility
 	// (e.g., gh CLI lookup failed). Frontend should proceed and rely on the
 	// PR step to surface any errors.
@@ -254,7 +277,7 @@ func (h *Handler) httpBootstrap(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{errorKey: "failed to create bundle dir"})
 		return
 	}
-	access := h.resolveGitHubAccess(ctx)
+	access := h.resolveGitHubAccessForWorkspace(ctx, workspaceID)
 
 	c.JSON(http.StatusOK, BootstrapResponse{
 		WorkspaceID:     workspaceID,
@@ -519,6 +542,57 @@ func (h *Handler) resolveGitHubAccess(ctx context.Context) githubAccess {
 		out.forkMessage = emuBlockedMessage
 	}
 	return out
+}
+
+func (h *Handler) resolveGitHubAccessForWorkspace(ctx context.Context, workspaceID string) githubAccess {
+	if h.managedGitHub == nil {
+		return h.resolveGitHubAccess(ctx)
+	}
+	policy, err := h.managedGitHub.DescribeTaskGitCredentialPolicy(ctx, workspaceID)
+	if err != nil {
+		return githubAccess{
+			forkStatus:  ForkStatusBlockedManaged,
+			forkMessage: managedForkErrorMessage(err),
+		}
+	}
+	if policy.Mode != github.TaskGitCredentialsModeManaged {
+		return h.resolveGitHubAccess(ctx)
+	}
+	result, err := h.managedGitHub.ProbeContributionForkCapabilityForWorkspace(
+		ctx, workspaceID, repoOwner, repoName,
+	)
+	out := githubAccess{login: result.ActorLogin, forkStatus: ForkStatusBlockedManaged}
+	if err != nil {
+		out.forkMessage = managedForkErrorMessage(err)
+		return out
+	}
+	switch result.Status {
+	case github.ContributionForkStatusDirectWrite:
+		out.hasWrite = true
+		out.forkStatus = ForkStatusWritable
+	case github.ContributionForkStatusReady:
+		out.forkStatus = ForkStatusReady
+	case github.ContributionForkStatusCreatable:
+		out.forkStatus = ForkStatusCreatable
+	default:
+		out.forkMessage = managedForkErrorMessage(errors.New("managed GitHub fork capability is blocked"))
+	}
+	return out
+}
+
+func managedForkErrorMessage(err error) string {
+	switch {
+	case errors.Is(err, github.ErrContributionForkAppUnsupported):
+		return "The workspace GitHub App cannot write kdlbs/kandev and cannot own an automatic personal fork. Use a human PAT or named GitHub CLI connection, or grant the App write access."
+	case errors.Is(err, github.ErrContributionForkConflict):
+		return "The workspace GitHub account already has a kandev repository, but it is not a fork of kdlbs/kandev. Rename or remove it, then try again."
+	case errors.Is(err, github.ErrContributionForkNotWritable):
+		return "The workspace GitHub account has a kandev fork, but it is not writable. Update its permissions or use another connection."
+	case errors.Is(err, github.ErrContributionForkNotReady):
+		return "GitHub is still preparing the workspace fork. Try again in a moment."
+	default:
+		return "The selected workspace GitHub automation connection cannot prepare a verified contribution destination. You can still open an issue instead."
+	}
 }
 
 // ensureWorkflow finds or creates a hidden Improve Kandev workflow in the

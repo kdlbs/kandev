@@ -98,27 +98,28 @@ type MockClient struct {
 	// `github_not_configured`. Used by e2e tests that need to verify the
 	// "Connect GitHub" banner in the Remote-tab chip popover without ripping
 	// the whole mock client out of the wiring.
-	reposUnavailable bool
-	prs              map[prKey]*PR
-	issues           map[issueKey]*Issue
-	prsByBranch      map[branchKey]*PR
-	orgs             []GitHubOrg
-	repos            map[string][]GitHubRepo
-	branches         map[repoKey][]RepoBranch
-	reviews          map[prKey][]PRReview
-	comments         map[prKey][]PRComment
-	checks           map[checkKey][]CheckRun
-	files            map[prKey][]PRFile
-	commits          map[prKey][]PRCommitInfo
-	commitDetails    map[commitDetailKey]PRCommitDetail
-	submittedReviews []submittedReview
-	requestedReviews []requestedReviewers
-	mergedPRs        []mergedPR
-	mergeMethods     map[repoKey]RepoMergeMethods
-	gists            map[string]mockGist
-	deletedGists     []string
-	nextGistID       int
-	repoFiles        map[repoKey][]repoFileEntry
+	reposUnavailable  bool
+	prs               map[prKey]*PR
+	issues            map[issueKey]*Issue
+	prsByBranch       map[branchKey]*PR
+	orgs              []GitHubOrg
+	repos             map[string][]GitHubRepo
+	branches          map[repoKey][]RepoBranch
+	reviews           map[prKey][]PRReview
+	comments          map[prKey][]PRComment
+	checks            map[checkKey][]CheckRun
+	files             map[prKey][]PRFile
+	commits           map[prKey][]PRCommitInfo
+	commitDetails     map[commitDetailKey]PRCommitDetail
+	submittedReviews  []submittedReview
+	requestedReviews  []requestedReviewers
+	mergedPRs         []mergedPR
+	mergeMethods      map[repoKey]RepoMergeMethods
+	repositoryDetails map[repoKey]*GitHubRepository
+	gists             map[string]mockGist
+	deletedGists      []string
+	nextGistID        int
+	repoFiles         map[repoKey][]repoFileEntry
 
 	// findPRByBranchCalls counts FindPRByBranch invocations so tests can
 	// assert that branch-detection probes are throttled. Atomic because
@@ -146,22 +147,23 @@ type mockGist struct {
 // NewMockClient creates a new MockClient with default values.
 func NewMockClient() *MockClient {
 	return &MockClient{
-		user:          mockDefaultUser,
-		authenticated: true,
-		prs:           make(map[prKey]*PR),
-		issues:        make(map[issueKey]*Issue),
-		prsByBranch:   make(map[branchKey]*PR),
-		repos:         make(map[string][]GitHubRepo),
-		branches:      make(map[repoKey][]RepoBranch),
-		reviews:       make(map[prKey][]PRReview),
-		comments:      make(map[prKey][]PRComment),
-		checks:        make(map[checkKey][]CheckRun),
-		files:         make(map[prKey][]PRFile),
-		commits:       make(map[prKey][]PRCommitInfo),
-		commitDetails: make(map[commitDetailKey]PRCommitDetail),
-		mergeMethods:  make(map[repoKey]RepoMergeMethods),
-		gists:         make(map[string]mockGist),
-		repoFiles:     make(map[repoKey][]repoFileEntry),
+		user:              mockDefaultUser,
+		authenticated:     true,
+		prs:               make(map[prKey]*PR),
+		issues:            make(map[issueKey]*Issue),
+		prsByBranch:       make(map[branchKey]*PR),
+		repos:             make(map[string][]GitHubRepo),
+		branches:          make(map[repoKey][]RepoBranch),
+		reviews:           make(map[prKey][]PRReview),
+		comments:          make(map[prKey][]PRComment),
+		checks:            make(map[checkKey][]CheckRun),
+		files:             make(map[prKey][]PRFile),
+		commits:           make(map[prKey][]PRCommitInfo),
+		commitDetails:     make(map[commitDetailKey]PRCommitDetail),
+		mergeMethods:      make(map[repoKey]RepoMergeMethods),
+		repositoryDetails: make(map[repoKey]*GitHubRepository),
+		gists:             make(map[string]mockGist),
+		repoFiles:         make(map[repoKey][]repoFileEntry),
 	}
 }
 
@@ -407,6 +409,53 @@ func (m *MockClient) HasRepositoryAccess(_ context.Context, owner, repo string) 
 		}
 	}
 	return false, nil
+}
+
+// GetRepository returns an explicitly seeded repository identity. The
+// lightweight repo-search fixture remains separate so existing autocomplete
+// tests do not accidentally grant write access.
+func (m *MockClient) GetRepository(_ context.Context, owner, repo string) (*GitHubRepository, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.reposUnavailable {
+		return nil, ErrNoClient
+	}
+	repository, ok := m.repositoryDetails[repoKey{owner, repo}]
+	if !ok {
+		return nil, &GitHubAPIError{StatusCode: 404, Endpoint: "/repos/" + owner + "/" + repo}
+	}
+	copy := *repository
+	return &copy, nil
+}
+
+// CreateFork creates a deterministic in-memory fork for mock Improve Kandev
+// flows. Production clients still use the provider API and bounded polling.
+func (m *MockClient) CreateFork(_ context.Context, owner, repo string) (*GitHubRepository, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.reposUnavailable {
+		return nil, ErrNoClient
+	}
+	parent, ok := m.repositoryDetails[repoKey{owner, repo}]
+	if !ok {
+		return nil, &GitHubAPIError{StatusCode: 404, Endpoint: "/repos/" + owner + "/" + repo}
+	}
+	login := m.user
+	fullName := login + "/" + repo
+	fork := &GitHubRepository{
+		ID:             parent.ID + 1,
+		FullName:       fullName,
+		Owner:          login,
+		Name:           repo,
+		CloneURL:       "https://github.com/" + fullName + ".git",
+		Fork:           true,
+		ParentID:       parent.ID,
+		ParentFullName: parent.FullName,
+		PushAccess:     true,
+		AdminAccess:    true,
+	}
+	m.repositoryDetails[repoKey{login, repo}] = fork
+	return copyGitHubRepository(fork), nil
 }
 
 func (m *MockClient) ListPRReviews(_ context.Context, owner, repo string, number int) ([]PRReview, error) {
@@ -804,6 +853,15 @@ func (m *MockClient) AddRepos(org string, repos []GitHubRepo) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.repos[org] = append(m.repos[org], repos...)
+}
+
+// SetRepositoryDetails seeds the provider-authoritative repository response
+// used by managed fork preparation tests.
+func (m *MockClient) SetRepositoryDetails(repository GitHubRepository) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := repositoryKeyFromFullName(repository.FullName)
+	m.repositoryDetails[key] = copyGitHubRepository(&repository)
 }
 
 // AddReviews appends reviews for a PR.

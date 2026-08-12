@@ -61,6 +61,10 @@ type GitCredentialLeaseIssuer interface {
 	Issue(context.Context, gitcredentials.Scope) (gitcredentials.Lease, error)
 }
 
+// GitHubCredentialLease preserves the historical executor-facing lease name
+// while the broker uses the provider-neutral gitcredentials.Lease contract.
+type GitHubCredentialLease = gitcredentials.Lease
+
 // GitHubCredentialLeaseIssuer is retained as a source-compatible name for
 // callers which configure the same generic HTTPS helper broker.
 type GitHubCredentialLeaseIssuer = GitCredentialLeaseIssuer
@@ -238,6 +242,14 @@ func (e *Executor) issueGitCredentialScopes(
 			scopes = append(scopes, *contributionScope)
 			helpers[contributionScope.Host] = struct{}{}
 		}
+		destinationScope, err := e.issueGitHubContributionDestinationCredentialScope(ctx, req, info)
+		if err != nil {
+			return nil, nil, err
+		}
+		if destinationScope != nil {
+			scopes = append(scopes, *destinationScope)
+			helpers[destinationScope.Host] = struct{}{}
+		}
 	}
 	return scopes, helpers, nil
 }
@@ -366,6 +378,18 @@ func (e *Executor) issueGitCredentialScope(
 	}, nil
 }
 
+func appendUniqueGitHubCredentialScope(scopes *[]githubCredentialScope, scope githubCredentialScope) {
+	for _, existing := range *scopes {
+		if existing.RepositoryID == scope.RepositoryID &&
+			strings.EqualFold(existing.Host, scope.Host) &&
+			strings.EqualFold(existing.Owner, scope.Owner) &&
+			strings.EqualFold(existing.Repo, scope.Repo) {
+			return
+		}
+	}
+	*scopes = append(*scopes, scope)
+}
+
 func (e *Executor) issueGitHubContributionCredentialScope(
 	ctx context.Context,
 	req *LaunchAgentRequest,
@@ -396,13 +420,54 @@ func (e *Executor) issueGitHubContributionCredentialScope(
 	if !binding.CollaborationAllowed {
 		return nil, fmt.Errorf("remote contribution does not permit collaboration")
 	}
+	return e.issueGitHubCredentialScopeForIdentity(ctx, req, info.RepositoryID, parts[0], parts[1], defaultGitHubHost)
+}
+
+func (e *Executor) issueGitHubContributionDestinationCredentialScope(
+	ctx context.Context,
+	req *LaunchAgentRequest,
+	info *repoInfo,
+) (*githubCredentialScope, error) {
+	destination := info.ContributionDestination
+	if destination == nil {
+		return nil, nil
+	}
+	if err := destination.Validate(); err != nil {
+		return nil, fmt.Errorf("validate contribution destination credential scope: %w", err)
+	}
+	if destination.Provider != models.ContributionDestinationProviderGitHub || info.Repository == nil {
+		return nil, nil
+	}
+	if !strings.EqualFold(destination.SourceRepository.Host, defaultGitHubHost) ||
+		!strings.EqualFold(destination.TargetRepository.Host, defaultGitHubHost) {
+		return nil, fmt.Errorf("contribution destination is not a GitHub repository")
+	}
+	canonicalPath := strings.TrimSpace(info.Repository.ProviderOwner) + "/" + strings.TrimSpace(info.Repository.ProviderName)
+	if !strings.EqualFold(destination.SourceRepository.Path, canonicalPath) {
+		return nil, fmt.Errorf("contribution destination source does not match the canonical repository")
+	}
+	parts := strings.Split(destination.TargetRepository.Path, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return nil, fmt.Errorf("contribution destination GitHub target identity is invalid")
+	}
+	if strings.EqualFold(destination.TargetRepository.Path, canonicalPath) {
+		return nil, nil
+	}
+	return e.issueGitHubCredentialScopeForIdentity(ctx, req, info.RepositoryID, parts[0], parts[1], defaultGitHubHost)
+}
+
+func (e *Executor) issueGitHubCredentialScopeForIdentity(
+	ctx context.Context,
+	req *LaunchAgentRequest,
+	repositoryID, owner, repo, host string,
+) (*githubCredentialScope, error) {
 	if err := validateGitHubCredentialBrokerURL(e.gitCredentialBrokerURL, req.ExecutorType); err != nil {
 		return nil, err
 	}
-	path := "/" + parts[0] + "/" + parts[1] + ".git"
+	path := "/" + owner + "/" + repo + ".git"
 	lease, err := e.gitCredentialIssuer.Issue(ctx, gitcredentials.Scope{
 		ProviderID: gitHubProviderID, WorkspaceID: req.WorkspaceID, TaskID: req.TaskID, SessionID: req.SessionID,
-		RepositoryID: info.RepositoryID, Host: defaultGitHubHost, Path: path,
+		RepositoryID: repositoryID, Host: host, Path: path,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("issue Git credential lease: %w", err)
@@ -412,7 +477,7 @@ func (e *Executor) issueGitHubContributionCredentialScope(
 	}
 	return &githubCredentialScope{
 		Lease: lease.Token, TaskID: req.TaskID, SessionID: req.SessionID,
-		RepositoryID: info.RepositoryID, Owner: parts[0], Repo: parts[1], Host: defaultGitHubHost, Path: path,
+		RepositoryID: repositoryID, Owner: owner, Repo: repo, Host: host, Path: path,
 	}, nil
 }
 

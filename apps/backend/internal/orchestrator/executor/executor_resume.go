@@ -61,18 +61,19 @@ func isTerminalSessionState(state models.TaskSessionState) bool {
 
 // repoInfo holds resolved repository details for agent launch.
 type repoInfo struct {
-	RepositoryID           string
-	RepositoryPath         string
-	BaseBranch             string
-	CheckoutBranch         string
-	PRNumber               int // GitHub PR number when CheckoutBranch is a PR head; sourced from task_repositories.metadata["pr_number"].
-	RemoteContribution     *models.RemoteContribution
-	Position               int
-	WorktreeBranchPrefix   string
-	WorktreeBranchTemplate string
-	PullBeforeWorktree     bool
-	RemoteSyncHandled      bool
-	Repository             *models.Repository
+	RepositoryID            string
+	RepositoryPath          string
+	BaseBranch              string
+	CheckoutBranch          string
+	PRNumber                int // GitHub PR number when CheckoutBranch is a PR head; sourced from task_repositories.metadata["pr_number"].
+	RemoteContribution      *models.RemoteContribution
+	ContributionDestination *models.ContributionDestination
+	Position                int
+	WorktreeBranchPrefix    string
+	WorktreeBranchTemplate  string
+	PullBeforeWorktree      bool
+	RemoteSyncHandled       bool
+	Repository              *models.Repository
 }
 
 // resumeCredentialSnapshotBackup holds the non-secret routing metadata that
@@ -176,6 +177,11 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 		info.RemoteContribution = &binding
 		info.BaseBranch = binding.BaseBranch
 		info.CheckoutBranch = binding.HeadBranch
+	}
+	if destination, found, err := models.LoadContributionDestination(tr.Metadata); err != nil {
+		return nil, fmt.Errorf("load contribution destination for task repository %q: %w", tr.ID, err)
+	} else if found {
+		info.ContributionDestination = &destination
 	}
 	if info.RepositoryID == "" {
 		return info, nil
@@ -1165,6 +1171,12 @@ func (e *Executor) applyResumeRepoConfig(
 
 	repositoryPath := repository.LocalPath
 	applyResumeRepoBasics(req, repository, repositoryPath)
+	for _, info := range allRepos {
+		if info != nil && info.RepositoryID == repositoryID {
+			req.ContributionDestination = info.ContributionDestination
+			break
+		}
+	}
 
 	if err := e.applyResumeCloneURL(req, repository, baseBranch); err != nil {
 		return "", err
@@ -1287,6 +1299,11 @@ func (e *Executor) applyResumeWorktreeConfig(
 	if primaryTaskRepo != nil && primaryTaskRepo.CheckoutBranch != "" {
 		req.CheckoutBranch = primaryTaskRepo.CheckoutBranch
 		req.PRNumber = prNumberFromMetadata(primaryTaskRepo.Metadata)
+	}
+	if primaryTaskRepo != nil {
+		if destination, found, err := models.LoadContributionDestination(primaryTaskRepo.Metadata); err == nil && found {
+			req.ContributionDestination = &destination
+		}
 	}
 	req.WorktreeBranchPrefix = repository.WorktreeBranchPrefix
 	req.WorktreeBranchTemplate = repository.WorktreeBranchTemplate

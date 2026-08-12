@@ -509,6 +509,35 @@ func (c *GHClient) HasRepositoryAccess(ctx context.Context, owner, repo string) 
 	return strings.TrimSpace(out) != "", nil
 }
 
+// GetRepository returns the selected gh account's repository identity and
+// permissions for managed contribution-destination preparation.
+func (c *GHClient) GetRepository(ctx context.Context, owner, repo string) (*GitHubRepository, error) {
+	out, err := c.run(ctx, "api", fmt.Sprintf("/repos/%s/%s", owner, repo))
+	if err != nil {
+		return nil, fmt.Errorf("get repository %s/%s: %w", owner, repo, err)
+	}
+	var raw githubRepositoryResponse
+	if err := json.Unmarshal([]byte(out), &raw); err != nil {
+		return nil, fmt.Errorf("decode repository %s/%s: %w", owner, repo, err)
+	}
+	return projectGitHubRepository(raw), nil
+}
+
+// CreateFork creates a fork for the selected named gh account. The service
+// resolver verifies the returned identity after GitHub finishes provisioning.
+func (c *GHClient) CreateFork(ctx context.Context, owner, repo string) (*GitHubRepository, error) {
+	args := []string{"api", fmt.Sprintf("/repos/%s/%s/forks", owner, repo), "-X", "POST", "--input", "-"}
+	out, err := c.runWithStdin(ctx, []byte(`{}`), args...)
+	if err != nil {
+		return nil, fmt.Errorf("create fork for %s/%s: %w", owner, repo, err)
+	}
+	var raw githubRepositoryResponse
+	if err := json.Unmarshal([]byte(out), &raw); err != nil {
+		return nil, fmt.Errorf("decode created fork for %s/%s: %w", owner, repo, err)
+	}
+	return projectGitHubRepository(raw), nil
+}
+
 // buildAccessibleReposGHArgs constructs the `gh api /user/repos?...` argv for
 // ListAccessibleRepos. Keeping it pure makes the endpoint/query construction
 // unit-testable without spawning gh. Callers must clamp `limit` via

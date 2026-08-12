@@ -207,6 +207,18 @@ type asyncStepHistoryRecorder interface {
 	EnqueueStepTransition(sessionID, fromStepID, toStepID string, trigger wfmodels.StepTransitionTrigger, actorID *string, metadata map[string]interface{})
 }
 
+// ContributionDestinationPreparer is an internal creation-time hook for a
+// server-owned publication route. It runs after request/workflow validation
+// and external-ID deduplication, but before the task row is inserted.
+type ContributionDestinationPreparer interface {
+	PrepareContributionDestination(
+		ctx context.Context,
+		req *CreateTaskRequest,
+		workflow *models.Workflow,
+		repositories []*models.Repository,
+	) error
+}
+
 var (
 	ErrActiveTaskSessions        = errors.New("active agent sessions exist")
 	ErrWIPLimitExceeded          = wfmodels.ErrWIPLimitExceeded
@@ -304,6 +316,7 @@ type Service struct {
 	workflowStepGetter          WorkflowStepGetter
 	startStepResolver           StartStepResolver
 	stepHistoryRecorder         StepHistoryRecorder
+	contributionDestinationPreparer ContributionDestinationPreparer
 	prTaskResolver              PRTaskResolver
 	quickChatDir                string // Directory for quick-chat workspaces (e.g., ~/.kandev/quick-chat)
 	branchFetcher               *branchFetcher
@@ -321,6 +334,7 @@ type Service struct {
 	workspaceSecretDeleter WorkspaceSecretDeleter
 	baseBranchPusher       AgentBaseBranchPusher
 	runtimeOverridesMu     sync.Mutex
+
 
 	workspaceSourceProviderRefresher WorkspaceSourceProviderRefresher
 
@@ -527,6 +541,12 @@ func (s *Service) SetStartStepResolver(resolver StartStepResolver) {
 // step transitions (MoveTaskWithOptions). Optional.
 func (s *Service) SetStepHistoryRecorder(recorder StepHistoryRecorder) {
 	s.stepHistoryRecorder = recorder
+}
+
+// SetContributionDestinationPreparer wires the optional server-side
+// publication-route preparation used by managed Improve Kandev tasks.
+func (s *Service) SetContributionDestinationPreparer(preparer ContributionDestinationPreparer) {
+	s.contributionDestinationPreparer = preparer
 }
 
 // SetPRTaskResolver wires the GitHub PR→task resolver for PR-number search.

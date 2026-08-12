@@ -275,3 +275,34 @@ func TestGitHubBrokerScopeAuthorizerAllowsOnlyTheBoundContributionFork(t *testin
 		t.Fatalf("non-collaborative fork error = %v, want identity denial", err)
 	}
 }
+
+func TestGitHubBrokerScopeAuthorizerAllowsOnlyTheBoundContributionDestination(t *testing.T) {
+	destination := taskmodels.ContributionDestination{
+		Version:  taskmodels.ContributionDestinationVersion,
+		Provider: taskmodels.ContributionDestinationProviderGitHub,
+		SourceRepository: taskmodels.ContributionDestinationRepository{
+			Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
+		},
+		TargetRepository: taskmodels.ContributionDestinationRepository{
+			Host: "github.com", Path: "automation/kandev", ProviderID: "200", RemoteURL: "https://github.com/automation/kandev.git",
+		},
+	}
+	metadata := map[string]interface{}{}
+	if err := taskmodels.PutContributionDestination(metadata, &destination); err != nil {
+		t.Fatalf("PutContributionDestination() error = %v", err)
+	}
+	repo := &fakeGitHubBrokerTaskRepository{
+		task:       &taskmodels.Task{ID: "task-destination", WorkspaceID: "workspace-destination"},
+		session:    &taskmodels.TaskSession{ID: "session-destination", TaskID: "task-destination", State: taskmodels.TaskSessionStateRunning},
+		repository: &taskmodels.Repository{ID: "repository-destination", WorkspaceID: "workspace-destination", Provider: "github", ProviderOwner: "kdlbs", ProviderName: "kandev"},
+		links:      []*taskmodels.TaskRepository{{TaskID: "task-destination", RepositoryID: "repository-destination", Metadata: metadata}},
+	}
+	authorizer := &githubBrokerScopeAuthorizer{repo: repo}
+
+	if err := authorizer.AuthorizeGitHubRepository(context.Background(), "workspace-destination", "task-destination", "session-destination", "repository-destination", "automation", "kandev"); err != nil {
+		t.Fatalf("bound destination was denied: %v", err)
+	}
+	if err := authorizer.AuthorizeGitHubRepository(context.Background(), "workspace-destination", "task-destination", "session-destination", "repository-destination", "automation", "other"); err == nil || !strings.Contains(err.Error(), "identity does not match") {
+		t.Fatalf("unbound destination error = %v, want identity denial", err)
+	}
+}

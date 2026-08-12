@@ -199,6 +199,9 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 	if _, err := validateRemoteContributions(req.RemoteContributions); err != nil {
 		return nil, fmt.Errorf("ssh: validate remote contributions: %w", err)
 	}
+	if _, err := validateContributionDestinations(req.ContributionDestinations); err != nil {
+		return nil, fmt.Errorf("ssh: validate contribution destinations: %w", err)
+	}
 
 	target, err := r.targetFromMetadata(req.Metadata)
 	if err != nil {

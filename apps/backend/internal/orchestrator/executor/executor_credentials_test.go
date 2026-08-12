@@ -303,7 +303,7 @@ func TestConfigureGitHubCredentialBrokerPublishesLocalHelperBeforePreparation(t 
 }
 
 func TestConfigureGitHubCredentialBrokerIssuesOneLeasePerRepository(t *testing.T) {
-	issuer := &fakeGitHubCredentialLeaseIssuer{}
+	issuer := &fakeGitHubCredentialLeaseIssuer{lease: GitHubCredentialLease{Token: "opaque-lease"}}
 	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
 	exec.SetGitHubCredentialBroker(issuer, "https://kandev.example/api/github/credentials/resolve")
 	req := &LaunchAgentRequest{
@@ -531,6 +531,40 @@ func TestIssueGitHubContributionCredentialScopeIgnoresGitLabBinding(t *testing.T
 	}
 	if scope != nil {
 		t.Fatalf("scope = %#v, want nil for GitLab binding", scope)
+	}
+}
+
+func TestConfigureGitHubCredentialBrokerIncludesExactContributionDestination(t *testing.T) {
+	issuer := &fakeGitHubCredentialLeaseIssuer{lease: GitHubCredentialLease{Token: "opaque-lease"}}
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	exec.SetGitHubCredentialBroker(issuer, "https://kandev.example/api/github/credentials/resolve")
+	req := &LaunchAgentRequest{
+		TaskID: "task-1", WorkspaceID: "workspace-1", SessionID: "session-1",
+		ExecutorType: string(models.ExecutorTypeRemoteDocker), Env: map[string]string{},
+	}
+	info := &repoInfo{
+		RepositoryID: "repo-1",
+		Repository:   &models.Repository{Provider: "github", ProviderOwner: "kdlbs", ProviderName: "kandev"},
+		ContributionDestination: &models.ContributionDestination{
+			Version:  models.ContributionDestinationVersion,
+			Provider: models.ContributionDestinationProviderGitHub,
+			SourceRepository: models.ContributionDestinationRepository{
+				Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
+			},
+			TargetRepository: models.ContributionDestinationRepository{
+				Host: "github.com", Path: "agent/kandev", ProviderID: "200", RemoteURL: "https://github.com/agent/kandev.git",
+			},
+		},
+	}
+
+	if err := exec.configureGitHubCredentialBroker(context.Background(), req, info); err != nil {
+		t.Fatalf("configureGitHubCredentialBroker() error = %v", err)
+	}
+	if len(issuer.requests) != 2 {
+		t.Fatalf("lease requests = %d, want canonical and destination scopes: %+v", len(issuer.requests), issuer.requests)
+	}
+	if issuer.requests[1].Path != "/agent/kandev.git" {
+		t.Fatalf("destination lease scope = %+v", issuer.requests[1])
 	}
 }
 
