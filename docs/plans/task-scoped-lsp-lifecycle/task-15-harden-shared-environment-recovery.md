@@ -216,6 +216,10 @@ Completed 2026-08-12.
   passed, as did the complete agentctl-server suite and race-enabled agentctl LSP/API plus backend
   LSP packages. Changed-code Go lint reported zero issues, the LSP package cross-compiled for
   Windows, all 62 public-doc validator tests passed, and all 41 published pages validated.
+- The remediated branch rebased without conflict onto `origin/main` at `fe84566b9`. On that exact
+  base, the agentctl LSP/API and backend LSP packages passed under the race detector, changed-code
+  Go lint reported zero issues, all 62 public-doc validator tests passed, all 41 published pages
+  validated, and the three-dot diff whitespace check passed.
 
 ## Files
 
