@@ -406,7 +406,9 @@ Completed 2026-08-05.
   lifecycle/recovery defects: shared-environment reset races, cascaded runtime-secret cleanup,
   physical Docker repository projection, stale inherited environment references, editor-toolbar
   task identity, reconnect hydration, backend-clock rollback in capacity epochs, and reset-route
-  authorization mapping. The branch was rebased onto `origin/main` at `6033d5717`. Focused backend
+  authorization mapping. The branch was rebased onto `origin/main` at `7e207c6fd`; conflict
+  resolution retained the task-scoped developer-tools contract, main's newer Chinese translations,
+  and main's stronger GitHub background-refresh synchronization. Focused backend
   packages and the synchronized LSP race suite pass; five focused frontend files pass 27 tests,
   followed by web typecheck, lint, i18n checks, and the new-code ratchet. The repository-wide
   backend run reached only the environment's 10-minute package ceiling under severe SQLite I/O
