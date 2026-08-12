@@ -103,6 +103,7 @@ export function useTaskSubmitHandlers({
   repositoryLocalPath,
   noRepository,
   workspacePath,
+  blockedBy,
   transformDescriptionBeforeSubmit,
 }: SubmitHandlersDeps) {
   const router = useRouter();
@@ -388,6 +389,7 @@ export function useTaskSubmitHandlers({
           // "empty path string" on the wire.
           workspacePath: noRepository ? workspacePath.trim() || undefined : undefined,
           autopilot,
+          blockedBy,
         });
         submittedPayload = payload;
         return payload;
@@ -419,6 +421,7 @@ export function useTaskSubmitHandlers({
       workspaceId,
       effectiveWorkflowId,
       autoTitle,
+      blockedBy,
       agentProfileId,
       executorId,
       executorProfileId,
@@ -651,6 +654,7 @@ export function useTaskSubmitHandlers({
           attachments,
           workspacePath: noRepository ? workspacePath.trim() || undefined : undefined,
           autopilot,
+          blockedBy,
         });
         p.workflow_step_id = requirements.workflowStepId;
         submittedPayload = p;

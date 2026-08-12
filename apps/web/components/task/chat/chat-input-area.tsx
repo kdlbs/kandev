@@ -9,6 +9,7 @@ import { AutoScrollToggleButton } from "./auto-scroll-toggle-button";
 import { PRMergedBanner, PRClosedBanner } from "./pr-archive-banners";
 import { PRStatusChip } from "@/components/github/pr-status-chip";
 import { MRStatusChip } from "@/components/gitlab/mr-status-chip";
+import { TaskDependencyChip } from "@/components/task/task-dependency-chip";
 import { AzureDevOpsTaskPullRequestChip } from "@/components/azure-devops/azure-devops-task-pull-request-chip";
 import { shareableSessionStateClient } from "@/components/task/share/share-button";
 import { TranscriptNavGroup } from "@/components/task/chat/transcript-nav-group";
@@ -429,6 +430,7 @@ function ChatStatusBar({
     >
       {showTodos && <TodoIndicator todos={todoItems} />}
       {autopilot && <AutopilotChatChip />}
+      <TaskDependencyChip taskId={taskId} />
       <PRStatusChip taskId={taskId} />
       <MRStatusChip taskId={taskId} />
       <AzureDevOpsTaskPullRequestChip taskId={taskId} />

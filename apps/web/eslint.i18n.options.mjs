@@ -221,6 +221,9 @@ export const noLiteralStringOptions = {
  * the completeness check. See docs/i18n.md.
  */
 export const i18nGuardFiles = [
+  // Task dependencies (added with the feature, per the same-PR rule).
+  "components/task/task-dependency-chip.tsx",
+  "components/task-create-dialog-dependencies.tsx",
   // The i18n runtime itself.
   "lib/i18n/**/*.{ts,tsx}",
   // Settings → Preferences — Appearance, Notifications, Terminal & Editors and

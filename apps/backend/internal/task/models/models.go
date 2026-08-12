@@ -94,6 +94,12 @@ const (
 	MetaKeyExecutorID        = "executor_id"
 	MetaKeyExecutorProfileID = "executor_profile_id"
 	MetaKeyDeferredLaunch    = "deferred_launch"
+	// DeferredLaunchStartWhenUnblockedKey marks a deferred launch intent as
+	// belonging to a task dependency chain rather than to WIP overflow. The
+	// record itself is identical; the flag lets dependency resolution recognise
+	// its own intents and keeps a WIP-only intent from being read as a chain
+	// step (and vice versa).
+	DeferredLaunchStartWhenUnblockedKey = "start_when_unblocked"
 	// MetaKeyWorkspacePath is the optional host folder for repo-less tasks
 	// (set by CreateTask, read by the orchestrator when building a session).
 	// Centralised here so the set/read sites can't drift apart.

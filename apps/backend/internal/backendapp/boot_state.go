@@ -669,6 +669,9 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 	if queuedErr != nil {
 		b.logBootError("queued prompt counts", queuedErr)
 	}
+	// Dependency state is derived per read (never stored, so the auto-start gate
+	// can never read a stale value). One batched call for the whole boot payload.
+	dependencyViews := b.p.taskSvc.BuildDependencyViews(ctx, tasks)
 	result := make([]taskdto.TaskDTO, 0, len(tasks))
 	for _, task := range tasks {
 		if task == nil {
@@ -710,6 +713,7 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 		if b.p.orchestratorSvc != nil {
 			taskdto.EnrichTaskForegroundActivity(&dto, sessions, b.p.orchestratorSvc)
 		}
+		taskdto.EnrichTaskDependencies(&dto, bootDependencyProjection(dependencyViews[task.ID]), task)
 		dto.StatusSummary = statusSummaries[task.ID]
 		if dto.StatusSummary != nil {
 			switch {

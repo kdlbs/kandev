@@ -486,6 +486,13 @@ func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, even
 	if task == nil || task.QueuedForStepID != "" {
 		return
 	}
+	// Dependency gate. Sits here — the single automated-launch chokepoint — so
+	// one check covers task.moved, task.queue_promoted, watcher auto-start and
+	// dependency resolution itself. Placed BEFORE launchDeferredTask so a
+	// blocked task neither starts a session nor consumes its launch intent.
+	if s.dependencyBlocksAutoStart(ctx, taskID, eventName) {
+		return
+	}
 	if s.launchDeferredTask(ctx, task, eventName) {
 		return
 	}

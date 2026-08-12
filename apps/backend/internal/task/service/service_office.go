@@ -18,6 +18,16 @@ type BlockerRepository interface {
 	// ListTasksBlockedBy returns task IDs that have blockerTaskID listed as
 	// one of their blockers (the reverse direction of ListTaskBlockers).
 	ListTasksBlockedBy(ctx context.Context, blockerTaskID string) ([]string, error)
+	// ListBlockersForTasks batches the forward direction over many tasks.
+	ListBlockersForTasks(ctx context.Context, taskIDs []string) (map[string][]string, error)
+	// ListDependentsForTasks batches the reverse direction over many tasks.
+	ListDependentsForTasks(ctx context.Context, blockerTaskIDs []string) (map[string][]string, error)
+}
+
+// taskDependencyCleaner removes every edge touching a task. Optional on
+// BlockerRepository so existing test doubles keep compiling.
+type taskDependencyCleaner interface {
+	DeleteTaskBlockersForTask(ctx context.Context, taskID string) error
 }
 
 // CommentRepository provides access to task comment persistence.
@@ -100,33 +110,30 @@ func (s *Service) ListTasksByAssignee(ctx context.Context, agentInstanceID strin
 }
 
 // AddBlocker creates a blocker relationship between two tasks.
-// It validates that the blocker does not create a circular dependency.
+//
+// Thin alias for AddDependency, which owns the only edge validator (self-edge,
+// cross-workspace, BFS cycle with a reportable path). This used to run its own
+// weaker check; two validators meant a cycle could enter through whichever path
+// was laxer.
 func (s *Service) AddBlocker(ctx context.Context, taskID, blockerTaskID string) error {
-	if s.blockers == nil {
-		return fmt.Errorf("blocker repository not configured")
-	}
-	if taskID == blockerTaskID {
-		return fmt.Errorf("a task cannot block itself")
-	}
-
-	// Check for circular dependency: if blockerTaskID is already (transitively) blocked by taskID
-	if err := s.checkCircularBlocker(ctx, taskID, blockerTaskID); err != nil {
-		return err
-	}
-
-	blocker := &orchmodels.TaskBlocker{
-		TaskID:        taskID,
-		BlockerTaskID: blockerTaskID,
-	}
-	return s.blockers.CreateTaskBlocker(ctx, blocker)
+	return s.AddDependency(ctx, taskID, blockerTaskID)
 }
 
 // RemoveBlocker removes a blocker relationship between two tasks.
 func (s *Service) RemoveBlocker(ctx context.Context, taskID, blockerTaskID string) error {
-	if s.blockers == nil {
-		return fmt.Errorf("blocker repository not configured")
-	}
-	return s.blockers.DeleteTaskBlocker(ctx, taskID, blockerTaskID)
+	return s.RemoveDependency(ctx, taskID, blockerTaskID)
+}
+
+// createBlockerEdge writes the dependency row.
+//
+// The row type is Office-owned, and ARCH-TASK-OFFICE-IMPORT keeps new task-tier
+// files free of Office imports; this file is already baselined for it, so the
+// construction is confined here rather than widening the baseline.
+func (s *Service) createBlockerEdge(ctx context.Context, taskID, blockerTaskID string) error {
+	return s.blockers.CreateTaskBlocker(ctx, &orchmodels.TaskBlocker{
+		TaskID:        taskID,
+		BlockerTaskID: blockerTaskID,
+	})
 }
 
 // GetBlockers returns all tasks that block the given task.
@@ -161,42 +168,6 @@ func (s *Service) GetBlocking(ctx context.Context, taskID string) ([]string, err
 		return []string{}, nil
 	}
 	return ids, nil
-}
-
-// checkCircularBlocker checks if adding blockerTaskID as a blocker to taskID
-// would create a circular dependency. It walks the blocker chain from
-// blockerTaskID to see if it leads back to taskID.
-func (s *Service) checkCircularBlocker(ctx context.Context, taskID, blockerTaskID string) error {
-	// Walk the transitive blockers of blockerTaskID. If any path reaches
-	// taskID, adding this blocker would create a cycle.
-	target := taskID
-	visited := make(map[string]bool)
-	queue := []string{blockerTaskID}
-
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-
-		if visited[current] {
-			continue
-		}
-		visited[current] = true
-
-		blockers, err := s.blockers.ListTaskBlockers(ctx, current)
-		if err != nil {
-			return fmt.Errorf("failed to check circular dependency: %w", err)
-		}
-		for _, b := range blockers {
-			if b.BlockerTaskID == target {
-				return fmt.Errorf("circular dependency detected: adding %s as blocker of %s creates a cycle",
-					blockerTaskID, taskID)
-			}
-			if !visited[b.BlockerTaskID] {
-				queue = append(queue, b.BlockerTaskID)
-			}
-		}
-	}
-	return nil
 }
 
 // CreateComment creates a new comment on a task.

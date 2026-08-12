@@ -250,6 +250,10 @@ func buildTaskDTOsWithSessionInfo(
 	if queuedErr != nil {
 		log.Warn("failed to load queued prompt counts for task list, omitting badges", zap.Error(queuedErr))
 	}
+	// Dependency state is derived, never stored, so it is computed per read. One
+	// batched call for the whole list: a per-task query would add a round trip
+	// per card to every board load.
+	dependencyViews := svc.BuildDependencyViews(ctx, tasks)
 	result := make([]dto.TaskDTO, 0, len(tasks))
 	for _, task := range tasks {
 		sessions := sessionsByTask[task.ID]
@@ -281,6 +285,7 @@ func buildTaskDTOsWithSessionInfo(
 		)
 		taskDTO.TaskPendingAction = taskPendingActionPtr(sessions, pendingActionsBySession)
 		dto.EnrichTaskForegroundActivity(&taskDTO, sessions, activityProvider)
+		dto.EnrichTaskDependencies(&taskDTO, dependencyProjection(dependencyViews[task.ID]), task)
 		taskDTO.StatusSummary = statusSummaries[task.ID]
 		if taskDTO.StatusSummary != nil {
 			switch {
@@ -752,7 +757,10 @@ type httpCreateTaskRequest struct {
 	ParentID          string                    `json:"parent_id,omitempty"`
 	WorkspacePath     string                    `json:"workspace_path,omitempty"`
 	BlockedBy         []string                  `json:"blocked_by,omitempty"`
-	ProjectID         string                    `json:"project_id,omitempty"`
+	// StartWhenUnblocked records the agent start as an intent consumed by
+	// dependency resolution. nil derives it from StartAgent when BlockedBy is set.
+	StartWhenUnblocked *bool  `json:"start_when_unblocked,omitempty"`
+	ProjectID          string `json:"project_id,omitempty"`
 	// ExternalID is a caller-supplied identity used for create-idempotency
 	// (docs/specs/tasks/external-id-idempotency/spec.md).
 	ExternalID string `json:"external_id,omitempty"`
@@ -902,25 +910,26 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	}
 
 	result, err := h.service.CreateTask(c.Request.Context(), &service.CreateTaskRequest{
-		WorkspaceID:    body.WorkspaceID,
-		WorkflowID:     body.WorkflowID,
-		WorkflowStepID: body.WorkflowStepID,
-		Title:          title,
-		Description:    description,
-		AutoTitle:      body.AutoTitle,
-		Autopilot:      body.Autopilot,
-		Priority:       body.Priority,
-		State:          body.State,
-		Repositories:   convertToServiceRepos(repos),
-		Position:       body.Position,
-		Metadata:       metadata,
-		DeferredLaunch: deferredLaunch,
-		PlanMode:       body.PlanMode && !body.StartAgent,
-		ParentID:       body.ParentID,
-		WorkspacePath:  body.WorkspacePath,
-		BlockedBy:      body.BlockedBy,
-		ProjectID:      body.ProjectID,
-		ExternalID:     body.ExternalID,
+		WorkspaceID:        body.WorkspaceID,
+		WorkflowID:         body.WorkflowID,
+		WorkflowStepID:     body.WorkflowStepID,
+		Title:              title,
+		Description:        description,
+		AutoTitle:          body.AutoTitle,
+		Autopilot:          body.Autopilot,
+		Priority:           body.Priority,
+		State:              body.State,
+		Repositories:       convertToServiceRepos(repos),
+		Position:           body.Position,
+		Metadata:           metadata,
+		DeferredLaunch:     deferredLaunch,
+		PlanMode:           body.PlanMode && !body.StartAgent,
+		ParentID:           body.ParentID,
+		WorkspacePath:      body.WorkspacePath,
+		BlockedBy:          body.BlockedBy,
+		StartWhenUnblocked: body.StartWhenUnblocked,
+		ProjectID:          body.ProjectID,
+		ExternalID:         body.ExternalID,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not created")
@@ -987,7 +996,16 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	// prepareTaskSession's doc comment for why. dispatch is nil unless a
 	// start_agent create genuinely prepared a session; it is only ever acted
 	// on below once settlement has succeeded.
-	dispatch := h.prepareTaskSession(c, &response, taskDTO.ID, body, resolvedStepID, task.QueuedForStepID == "")
+	// A create that declared dependencies records its start as a
+	// start-when-unblocked intent instead of launching now; dependency
+	// resolution consumes it later.
+	startWhenUnblocked := service.ResolveStartWhenUnblocked(&service.CreateTaskRequest{
+		BlockedBy: body.BlockedBy, StartWhenUnblocked: body.StartWhenUnblocked,
+	})
+	response.StartWhenUnblocked = startWhenUnblocked
+
+	dispatch := h.prepareTaskSession(c, &response, taskDTO.ID, body, resolvedStepID,
+		task.QueuedForStepID == "" && !startWhenUnblocked)
 
 	// Settlement (create-sequence step 7): after all required synchronous
 	// work above — including session prepare — and before any asynchronous

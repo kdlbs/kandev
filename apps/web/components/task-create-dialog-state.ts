@@ -287,6 +287,15 @@ function useWorkflowAgentProfileState() {
   return { workflowAgentProfileId, setWorkflowAgentProfileId };
 }
 
+/**
+ * Predecessor task IDs selected in the dialog. Dependencies are declared at
+ * creation time (or later via MCP); nothing edits them from the task view.
+ */
+function useTaskDependencyState() {
+  const [blockedBy, setBlockedBy] = useState<string[]>([]);
+  return { blockedBy, setBlockedBy };
+}
+
 function useFreshBranchState() {
   const [freshBranchEnabled, setFreshBranchEnabled] = useState(false);
   const [currentLocalBranch, setCurrentLocalBranch] = useState("");
@@ -419,6 +428,7 @@ export function useDialogFormState(
   const repos = useRepositoriesState();
   const remoteRepos = useRemoteReposState();
   const freshBranch = useFreshBranchState();
+  const dependencies = useTaskDependencyState();
   const branchesByUrl = useBranchesByURL(workspaceId);
   const prInfoByUrl = usePRInfoByURL(workspaceId);
 
@@ -487,6 +497,7 @@ export function useDialogFormState(
     ...repos,
     ...remoteRepos,
     ...freshBranch,
+    ...dependencies,
     branchesByUrl,
     prInfoByUrl,
     clearDraft,

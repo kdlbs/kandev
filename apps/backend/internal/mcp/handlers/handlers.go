@@ -346,6 +346,8 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPRAutomation, h.handleUpdateTaskPRAutomation)
 	d.RegisterFunc(ws.ActionMCPGetTaskMRAutomation, h.handleGetTaskMRAutomation)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskMRAutomation, h.handleUpdateTaskMRAutomation)
+	d.RegisterFunc(ws.ActionMCPAddTaskDependency, h.handleAddTaskDependency)
+	d.RegisterFunc(ws.ActionMCPRemoveTaskDependency, h.handleRemoveTaskDependency)
 	d.RegisterFunc(ws.ActionMCPAddBranchToTask, h.handleAddBranchToTask)
 	d.RegisterFunc(ws.ActionMCPAddWorkspaceSources, h.handleAddWorkspaceSources)
 	d.RegisterFunc(ws.ActionMCPUpdateRepositoryBaseBranch, h.handleUpdateRepositoryBaseBranch)
@@ -578,6 +580,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Repositories           []mcpRepositoryInput `json:"repositories"`              // explicit repositories for top-level tasks
 		BaseBranch             string               `json:"base_branch"`               // top-level fallback applied to every resolved repo only when no per-repo entries are supplied; explicit per-repo BaseBranch is authoritative when Repositories is set
 		BlockedBy              []string             `json:"blocked_by"`                // task IDs that must complete before this task
+		StartWhenUnblocked     *bool                `json:"start_when_unblocked"`      // nil = derive from start_agent when BlockedBy is set
 		AssigneeAgentProfileID string               `json:"assignee_agent_profile_id"` // agent instance to assign the task to
 		ExternalID             string               `json:"external_id"`               // caller-supplied create-idempotency key
 	}
@@ -705,6 +708,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Autopilot:              req.Autopilot,
 		Repositories:           repos,
 		BlockedBy:              req.BlockedBy,
+		StartWhenUnblocked:     req.StartWhenUnblocked,
 		AssigneeAgentProfileID: req.AssigneeAgentProfileID,
 		Metadata:               metadata,
 		DeferredLaunch:         deferredLaunch,
@@ -795,12 +799,25 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 
 	// Auto-start agent session asynchronously only if requested and admitted.
-	if startAgent && task.QueuedForStepID == "" && h.sessionLauncher != nil {
+	//
+	// A create that declared dependencies does NOT launch now: the start intent
+	// was recorded as a start-when-unblocked deferred launch and dependency
+	// resolution consumes it. Agents pass start_agent=true by habit, so without
+	// this every step of an agent-built chain would launch at once.
+	startWhenUnblocked := service.ResolveStartWhenUnblocked(&service.CreateTaskRequest{
+		BlockedBy:          req.BlockedBy,
+		StartWhenUnblocked: req.StartWhenUnblocked,
+	})
+	if startAgent && !startWhenUnblocked && task.QueuedForStepID == "" && h.sessionLauncher != nil {
 		h.launchAutoStartTask(ctx, task, launchConfig)
 	}
 
+	response := dto.FromTask(task)
+	// Report the deferred start so the caller does not have to infer whether the
+	// task launched or is waiting on its dependencies.
+	response.StartWhenUnblocked = startWhenUnblocked
 	return ws.NewResponse(msg.ID, msg.Action, mcpCreateTaskResult{
-		TaskDTO:          dto.FromTask(task),
+		TaskDTO:          response,
 		Deduplicated:     false,
 		CreationComplete: true,
 	})

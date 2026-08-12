@@ -167,6 +167,8 @@ export type BuildCreatePayloadArgs = {
   parentId?: string;
   workspacePath?: string;
   autopilot?: boolean;
+  /** Task IDs this task must wait for. */
+  blockedBy?: string[];
 };
 
 export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTaskParams {
@@ -187,6 +189,10 @@ export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTask
     parent_id: args.parentId || undefined,
     workspace_path: args.workspacePath || undefined,
     autopilot: args.autopilot || undefined,
+    // Dependencies declared at creation time. With edges present the backend
+    // records the requested agent start as a start-when-unblocked intent rather
+    // than launching now, so a chain runs in order instead of all at once.
+    blocked_by: args.blockedBy && args.blockedBy.length > 0 ? args.blockedBy : undefined,
   };
 }
 

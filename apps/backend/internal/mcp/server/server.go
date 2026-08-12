@@ -637,6 +637,8 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "configuration-executors", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigExecutorTools() }},
 		{name: "configuration-tasks", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigTaskTools() }},
 		{name: "external-create-task", enabled: external, register: func(s *Server) { s.registerCreateTaskTool() }},
+		// Dependency edges are manageable wherever a task can be created.
+		{name: "task-dependencies", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || external(ctx) }, register: func(s *Server) { s.registerTaskDependencyTools() }},
 		{name: "kanban-task", enabled: kanban, register: func(s *Server) { s.registerKanbanTools() }},
 		{name: "github-pr", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool { return mcpproviders.Contains(ctx.Providers, mcpproviders.GitHub) }), register: func(s *Server) { s.registerPRAutomationTools() }},
 		{name: "gitlab-mr", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool { return mcpproviders.Contains(ctx.Providers, mcpproviders.GitLab) }), register: func(s *Server) { s.registerMRAutomationTools() }},
@@ -968,8 +970,57 @@ IDEMPOTENCY (external_id):
 			mcp.WithString("repository_url", mcp.Description("Repository URL, GitHub pull request URL, or GitLab merge request URL (for example 'https://github.com/owner/repo'). A contribution URL attaches the task to that existing contribution and prepares its source branch. For subtasks: supply only when the subtask should target a different repo than the parent.")),
 			mcp.WithString("base_branch", mcp.Description("Base branch for the repository (e.g. 'main'). Optional. Defaults: same-repo subtasks inherit the parent's base_branch; cross-repo subtasks and top-level tasks fall back to the repository's default_branch (visible via list_repositories_kandev).")),
 			mcp.WithString("external_id", mcp.Description("A stable identifier from your own system (issue key, webhook delivery ID, a UUID you generated). Creating a task twice with the same external_id in the same workspace returns the first task instead of making a duplicate — use it when a retry or restart could re-run this call. Replay the same arguments you sent the first time. This creates the task when nothing holds the identity yet — it is not a lookup.")),
+			mcp.WithArray("blocked_by",
+				mcp.Description(blockedByParamDesc),
+				mcp.Items(map[string]any{"type": "string"}),
+			),
+			mcp.WithBoolean("start_when_unblocked", mcp.Description(startWhenUnblockedParamDesc)),
 		),
 		s.wrapHandler("create_task_kandev", s.createTaskHandler()),
+	)
+}
+
+// Dependency parameter descriptions for create_task_kandev. Extracted as
+// constants because the same guidance has to appear on the two dependency tools
+// below and must not drift between them.
+const (
+	blockedByParamDesc = "Task IDs this task depends on: it will not start until every one of them completes SUCCESSFULLY. " +
+		"Use this — not parent_id — to express ordering. A subtask means \"part of\"; a dependency means \"not until\". " +
+		"Decomposing a plan into ordered phases is N sibling tasks chained with blocked_by, NOT N subtasks started at once. " +
+		"A predecessor that ends FAILED or CANCELLED halts the chain and needs human action; it will not retry itself."
+
+	startWhenUnblockedParamDesc = "Whether to start this task automatically once every task in blocked_by completes successfully. " +
+		"Defaults to true when blocked_by is non-empty, which is what chains ordered work: with blocked_by set, " +
+		"start_agent=true records this intent instead of launching now, so the whole chain does not start at once. " +
+		"Pass false to create the dependency edges with no automatic start at all."
+)
+
+// registerTaskDependencyTools registers add/remove for task dependency edges.
+// Mirrors the two HTTP routes one-to-one and shares the single edge validator
+// (self-edge, cross-workspace, cycle-with-path) in the task service. The read
+// side already exists as list_related_tasks_kandev.
+func (s *Server) registerTaskDependencyTools() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("add_task_dependency_kandev",
+			mcp.WithDescription(`Declare that a task is blocked by another task: it will not start until that one completes successfully.
+
+`+blockedByParamDesc+`
+
+task_id defaults to your CURRENT task. Rejected when the edge would create a cycle (the error names the cycle path), when both IDs are the same, or when the two tasks are in different workspaces. Returns the task's resulting depends_on list.`),
+			mcp.WithString(mcpKeyTaskID, mcp.Description("The blocked task. Defaults to your current task when omitted.")),
+			mcp.WithString("depends_on_task_id", mcp.Required(), mcp.Description("The task that must complete first (the predecessor).")),
+		),
+		s.wrapHandler("add_task_dependency_kandev", s.addTaskDependencyHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("remove_task_dependency_kandev",
+			mcp.WithDescription(`Remove a task dependency edge. Removing an edge that does not exist succeeds.
+
+Removing the last edge unblocks the task but does NOT start it: an automatic start is triggered by a dependency RESOLVING, not by the edge going away. Removing the edge means you are taking manual control.`),
+			mcp.WithString(mcpKeyTaskID, mcp.Description("The blocked task. Defaults to your current task when omitted.")),
+			mcp.WithString("depends_on_task_id", mcp.Required(), mcp.Description("The predecessor task to unlink.")),
+		),
+		s.wrapHandler("remove_task_dependency_kandev", s.removeTaskDependencyHandler()),
 	)
 }
 

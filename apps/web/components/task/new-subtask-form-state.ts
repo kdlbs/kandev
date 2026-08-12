@@ -155,6 +155,8 @@ const EMPTY_STEPS: StepType[] | null = null;
 // its own title input directly and doesn't restore drafts. Extracted so the
 // useMemo body stays under the function-length lint cap.
 const INERT_TITLE_DRAFT = {
+  blockedBy: [] as string[],
+  setBlockedBy: () => undefined,
   taskName: "",
   setTaskName: NOOP,
   hasTitle: false,
