@@ -126,11 +126,14 @@ environment row, remains the owner even when a terminal reference carries a
 different physical `worktree_id`.
 
 A non-deleted canonical repository row also takes precedence over deprecated
-flat fields for the same environment, repository, and empty branch slot. This
-rule applies when the two sources contain different physical `worktree_id`
-values. The upgrade records the flat worktree as historical evidence and logs
-its identity, path, and branch after the transaction commits. The upgrade does
-not remove its directory, Git registration, or branch.
+flat fields for the same normalized task-owned repository slot: the repository
+and empty branch slot within the surviving task environment. This rule applies
+when the two sources contain different physical `worktree_id` values, including
+when the canonical row was re-homed from a collapsed legacy environment. The
+original environment ID is not an ownership condition after re-homing. The
+upgrade records the flat worktree as historical evidence and logs its identity,
+path, and branch after the transaction commits. The upgrade does not remove its
+directory, Git registration, or branch.
 
 The task-owned model holds exactly one physical worktree per (repository,
 branch slug) slot, while the legacy per-session model let one task accumulate
@@ -249,9 +252,10 @@ remain the authorization boundary for physical cleanup.
   including when the session is resumable. The higher-precedence repository or
   flat environment metadata remains authoritative.
 - Deprecated flat fields cannot block migration when a non-deleted canonical
-  row owns the same environment, repository, and empty branch slot. The
-  canonical row remains authoritative, and the upgrade records the flat
-  worktree as historical evidence.
+  row owns the same normalized task, repository, and empty branch slot. The
+  canonical row remains authoritative even when it was re-homed from a
+  collapsed environment, and the upgrade records the flat worktree as
+  historical evidence.
 - A session bound to another task's environment does not block migration and
   does not create a second owner for the shared worktree.
 - If migration fails after shadow tables are populated or after legacy DDL has
@@ -319,6 +323,10 @@ remain the authorization boundary for physical cleanup.
   contain different worktree IDs for the same empty branch slot, **WHEN** the
   new binary starts, **THEN** the canonical row remains the owner, the flat
   worktree is logged as history, and the cutover completes.
+- **GIVEN** a surviving flat environment and a canonical row only in a legacy
+  environment that collapses into it, **WHEN** the new binary starts, **THEN**
+  the re-homed canonical row remains the owner of the normalized slot and the
+  flat worktree is logged as history.
 - **GIVEN** a resumable legacy session and a canonical task-owned repository row
   carry the same `worktree_id` but different path or branch metadata, **WHEN**
   the new binary starts, **THEN** the canonical metadata is retained and the

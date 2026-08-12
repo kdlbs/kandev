@@ -59,10 +59,6 @@ func (t *taskWorktreeTargets) targetForWorktree(worktreeID string) *envRepoTarge
 func (t *taskWorktreeTargets) mergeLegacyEnvRepo(row legacyEnvRepo) error {
 	target := t.rowForKey(row.repositoryID, row.branchSlug)
 	target.canonical = true
-	if target.canonicalEnvironmentIDs == nil {
-		target.canonicalEnvironmentIDs = make(map[string]bool)
-	}
-	target.canonicalEnvironmentIDs[row.envID] = true
 	if err := target.claimWorktree(row.worktreeID, row.worktreePath, row.worktreeBranch, row.position, row.errorMessage, row.createdAt, row.updatedAt, row.status); err != nil {
 		return err
 	}
@@ -71,12 +67,12 @@ func (t *taskWorktreeTargets) mergeLegacyEnvRepo(row legacyEnvRepo) error {
 	return target.mergeCreation(row.createdAt, row.updatedAt)
 }
 
-// canonicalOwnerForSlot returns the active canonical owner for a repository
-// slot in the specified environment. A canonical row with no physical
-// worktree does not block flat data from filling that slot.
-func (t *taskWorktreeTargets) canonicalOwnerForSlot(environmentID, repositoryID, branchSlug string) *envRepoTarget {
+// canonicalOwnerForSlot returns the active canonical owner for a normalized
+// repository slot. Rows from collapsed environments are already re-homed into
+// this task target, so their original environment ID is not part of ownership.
+func (t *taskWorktreeTargets) canonicalOwnerForSlot(repositoryID, branchSlug string) *envRepoTarget {
 	target, ok := t.byKey[envRepoKey(repositoryID, branchSlug)]
-	if !ok || !target.canonical || !target.canonicalEnvironmentIDs[environmentID] || target.worktreeID == "" ||
+	if !ok || !target.canonical || target.worktreeID == "" ||
 		target.status == worktreeRepoStatusDeleted || target.deletedAt != nil {
 		return nil
 	}

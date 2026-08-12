@@ -40,10 +40,12 @@ When a non-deleted canonical row already owns the same repository and empty
 branch slot, keep that row if the flat source has a different worktree ID.
 Classify the flat source as historical evidence instead of adding a conflict.
 
-Use the exact environment and repository slot for this rule. Do not suppress a
-flat worktree when the canonical row belongs to another environment, repository,
-or non-empty branch slot. Keep the current merge behavior when the canonical
-row has no worktree ID.
+Use the normalized task, repository, and empty branch slot for this rule.
+Canonical rows from environments collapsed into the surviving task environment
+are already re-homed into that normalized target and must retain precedence.
+Do not suppress a flat worktree when the canonical row belongs to another task,
+repository, or non-empty branch slot. Keep the current merge behavior when the
+canonical row has no worktree ID.
 
 Do not add the demoted flat ID to the authoritative worktree index. Add one
 diagnostic entry to the existing post-commit demotion log. Include the
@@ -83,6 +85,11 @@ The migration must not change the file system or Git state.
   **How:** Give duplicate environments the same canonical slot and divergent
   flat fields on the surviving environment. Run both canonical row orders and
   make sure that the canonical worktree remains authoritative.
+- **What:** Re-homed canonical rows retain precedence over surviving flat data.
+  **File:** the same test file.
+  **How:** Put flat fields on the surviving environment and the only canonical
+  row on a collapsed older environment. Make sure that the cutover keeps the
+  canonical worktree.
 - **What:** PostgreSQL uses the same precedence and transaction behavior.
   **File:**
   `apps/backend/internal/task/repository/sqlite/worktree_ownership_postgres_test.go`.
@@ -94,9 +101,9 @@ The migration must not change the file system or Git state.
 
 ## Verification Results
 
-- `cd apps/backend && go test ./internal/task/repository/sqlite -run 'TestCutover_(CanonicalRepoSupersedesDivergentFlatOwner|PreservesDivergentFlatOutsideCanonicalSlot|DuplicateCanonicalRowsRetainSurvivingEnvironmentPrecedence|DoesNotLogRolledBackFlatDemotion)|TestCutoverPostgres_CanonicalRepoSupersedesDivergentFlatOwner' -count=1` — 6 SQLite tests passed; the PostgreSQL test is environment-gated and skipped because `KANDEV_TEST_POSTGRES_DSN` is unset.
-- `cd apps/backend && go test ./internal/task/repository/sqlite -run 'TestCutover' -count=1` — 53 tests passed.
-- `cd apps/backend && go test ./internal/task/repository/sqlite -count=1` — 420 tests passed.
+- `cd apps/backend && go test ./internal/task/repository/sqlite -run 'TestCutover_(CanonicalRepoSupersedesDivergentFlatOwner|PreservesDivergentFlatOutsideCanonicalSlot|DuplicateCanonicalRowsRetainSurvivingEnvironmentPrecedence|RehomedCanonicalRowSupersedesSurvivingFlatOwner|DoesNotLogRolledBackFlatDemotion)|TestCutoverPostgres_CanonicalRepoSupersedesDivergentFlatOwner' -count=1` — 7 SQLite tests passed; the PostgreSQL test is environment-gated and skipped because `KANDEV_TEST_POSTGRES_DSN` is unset.
+- `cd apps/backend && go test ./internal/task/repository/sqlite -run 'TestCutover' -count=1` — 54 tests passed.
+- `cd apps/backend && go test ./internal/task/repository/sqlite -count=1` — 421 tests passed.
 
 ## Implementation Waves And Parallel Candidates
 

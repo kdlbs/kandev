@@ -265,7 +265,6 @@ type envRepoTarget struct {
 	key                      string
 	repositoryID, branchSlug string
 	canonical                bool
-	canonicalEnvironmentIDs  map[string]bool
 	worktreeID               string
 	worktreePath             string
 	worktreeBranch           string
@@ -358,7 +357,7 @@ func (c *worktreeCutover) mergeFlatEnvironmentFields() {
 			continue
 		}
 		targets := c.targetsForTask(env.taskID)
-		if canonical := targets.canonicalOwnerForSlot(env.id, env.repositoryID, ""); canonical != nil && env.worktreeID != "" && env.worktreeID != canonical.worktreeID {
+		if canonical := targets.canonicalOwnerForSlot(env.repositoryID, ""); canonical != nil && env.worktreeID != "" && env.worktreeID != canonical.worktreeID {
 			c.demoteFlatEnvironment(env, canonical)
 			continue
 		}

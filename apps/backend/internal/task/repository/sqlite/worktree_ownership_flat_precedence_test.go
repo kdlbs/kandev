@@ -150,6 +150,38 @@ func TestCutover_DuplicateCanonicalRowsRetainSurvivingEnvironmentPrecedence(t *t
 	}
 }
 
+func TestCutover_RehomedCanonicalRowSupersedesSurvivingFlatOwner(t *testing.T) {
+	db := openLegacyDB(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	seed := legacySeed{
+		envID:     "env-rehome-survivor",
+		taskID:    "task-rehome-canonical",
+		repoID:    "repo-rehome-canonical",
+		sessionID: "sess-rehome-canonical",
+	}
+	seedLegacyTask(t, db, seed, now)
+	seedLegacyFlatEnv(t, db, seed, "wt-flat-rehome", "/tasks/flat-rehome", "feature/flat", now)
+	seedLegacyFlatEnv(t, db, legacySeed{
+		envID:  "env-rehome-loser",
+		taskID: seed.taskID,
+		repoID: seed.repoID,
+	}, "", "", "", now.Add(-time.Hour))
+	seedLegacyEnvRepo(t, db, "env-repo-rehomed", "env-rehome-loser", seed.repoID,
+		"wt-canonical-rehome", "/tasks/canonical-rehome", "feature/canonical", now)
+
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("cutover: %v", err)
+	}
+	env, err := repo.GetTaskEnvironment(context.Background(), seed.envID)
+	if err != nil {
+		t.Fatalf("get task environment: %v", err)
+	}
+	if len(env.Repos) != 1 || env.Repos[0].WorktreeID != "wt-canonical-rehome" {
+		t.Fatalf("normalized repos = %+v, want rehomed canonical owner", env.Repos)
+	}
+}
+
 func TestCutover_DoesNotLogRolledBackFlatDemotion(t *testing.T) {
 	db := openLegacyDB(t)
 	now := time.Now().UTC().Truncate(time.Second)

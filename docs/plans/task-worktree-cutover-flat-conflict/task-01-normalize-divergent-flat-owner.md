@@ -13,17 +13,19 @@ spec: "../../specs/session-delete-resource-cleanup/spec.md"
 ## Acceptance
 
 - A non-deleted canonical row wins when deprecated flat fields name another
-  worktree for the same environment, repository, and empty branch slot.
+  worktree for the same normalized task, repository, and empty branch slot,
+  including when the canonical row was re-homed from a collapsed environment.
 - The migration logs the demoted flat identity only after commit. It does not
   change the directory, Git registration, or branch.
-- A canonical row in another slot does not suppress the flat worktree.
+- A canonical row in another task, repository, or slot does not suppress the
+  flat worktree.
 - SQLite and PostgreSQL retain the existing rollback, replay, and fail-closed
   behavior for unrelated conflicts.
 
 ## Verification
 
 ```bash
-cd apps/backend && go test ./internal/task/repository/sqlite -run 'TestCutover_(CanonicalRepoSupersedesDivergentFlatOwner|PreservesDivergentFlatOutsideCanonicalSlot|DuplicateCanonicalRowsRetainSurvivingEnvironmentPrecedence|DoesNotLogRolledBackFlatDemotion)|TestCutoverPostgres_CanonicalRepoSupersedesDivergentFlatOwner' -count=1
+cd apps/backend && go test ./internal/task/repository/sqlite -run 'TestCutover_(CanonicalRepoSupersedesDivergentFlatOwner|PreservesDivergentFlatOutsideCanonicalSlot|DuplicateCanonicalRowsRetainSurvivingEnvironmentPrecedence|RehomedCanonicalRowSupersedesSurvivingFlatOwner|DoesNotLogRolledBackFlatDemotion)|TestCutoverPostgres_CanonicalRepoSupersedesDivergentFlatOwner' -count=1
 cd apps/backend && go test ./internal/task/repository/sqlite -run 'TestCutover' -count=1
 cd apps/backend && go test ./internal/task/repository/sqlite -count=1
 ```
@@ -63,19 +65,19 @@ temporary-file cleanup. Update this task and `plan.md` in the same conversation.
 ## Results
 
 - Canonical repository rows now supersede divergent deprecated flat worktree
-  fields only for the same environment, repository, and empty branch slot.
+  fields for the same normalized task, repository, and empty branch slot,
+  including canonical rows re-homed from collapsed environments.
 - Demoted flat worktrees are excluded from normalized inventory validation and
   are reported through the existing post-commit demotion warning with their
   environment, repository, identity, path, branch, and canonical winner.
-- A canonical row in another branch slot remains independent. Empty flat
-  metadata and canonical rows from another environment do not trigger this
-  demotion rule.
+- A canonical row in another task, repository, or branch slot remains
+  independent. Empty flat metadata does not trigger this demotion rule.
 - Changed files: `worktree_ownership_normalize.go`,
   `worktree_ownership_targets.go`, `worktree_ownership_migration.go`,
   `worktree_ownership_flat_precedence_test.go`,
   `worktree_ownership_postgres_test.go`, and the repair spec/plan files.
-- `cd apps/backend && go test ./internal/task/repository/sqlite -run 'TestCutover_(CanonicalRepoSupersedesDivergentFlatOwner|PreservesDivergentFlatOutsideCanonicalSlot|DuplicateCanonicalRowsRetainSurvivingEnvironmentPrecedence|DoesNotLogRolledBackFlatDemotion)|TestCutoverPostgres_CanonicalRepoSupersedesDivergentFlatOwner' -count=1` — 6 SQLite tests passed; the PostgreSQL test is environment-gated and skipped because `KANDEV_TEST_POSTGRES_DSN` is unset.
-- `cd apps/backend && go test ./internal/task/repository/sqlite -run 'TestCutover' -count=1` — 53 tests passed.
-- `cd apps/backend && go test ./internal/task/repository/sqlite -count=1` — 420 tests passed.
+- `cd apps/backend && go test ./internal/task/repository/sqlite -run 'TestCutover_(CanonicalRepoSupersedesDivergentFlatOwner|PreservesDivergentFlatOutsideCanonicalSlot|DuplicateCanonicalRowsRetainSurvivingEnvironmentPrecedence|RehomedCanonicalRowSupersedesSurvivingFlatOwner|DoesNotLogRolledBackFlatDemotion)|TestCutoverPostgres_CanonicalRepoSupersedesDivergentFlatOwner' -count=1` — 7 SQLite tests passed; the PostgreSQL test is environment-gated and skipped because `KANDEV_TEST_POSTGRES_DSN` is unset.
+- `cd apps/backend && go test ./internal/task/repository/sqlite -run 'TestCutover' -count=1` — 54 tests passed.
+- `cd apps/backend && go test ./internal/task/repository/sqlite -count=1` — 421 tests passed.
 - No throwaway reproduction files remain. Test databases use `t.TempDir()` and
   are cleaned up by the test framework.
