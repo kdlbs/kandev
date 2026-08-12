@@ -47,6 +47,7 @@
   "manifestInstalled": "Installed",
   "manifestSigned": "Signed",
   "manifestVersion": "Version",
+  "manifestWebhookPublic": "{{key}} (public)",
   "manifestWebhooks": "Webhooks",
   "marketplaceSources": "Marketplace sources",
   "marketplaceSourcesDescription": "Add a team or corporate registry to browse its plugins alongside the official catalog. Each source serves an {{document}} document.",

@@ -51,7 +51,10 @@ export function PluginManifestCard({ plugin }: { plugin: PluginRecord }) {
         <CapabilityBadges plugin={plugin} />
         <DeclarationList
           label={t("plugins:manifestWebhooks")}
-          items={(plugin.webhooks ?? []).map((w) => ({ key: w.key, text: w.key }))}
+          items={(plugin.webhooks ?? []).map((w) => ({
+            key: w.key,
+            text: w.public ? t("plugins:manifestWebhookPublic", { key: w.key }) : w.key,
+          }))}
         />
 
         {showRaw && (
