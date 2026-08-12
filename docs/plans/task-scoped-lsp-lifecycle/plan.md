@@ -534,6 +534,11 @@ Completed 2026-08-05.
   roots, browser document resolution is handle-relative with authorized cross-root switching, and
   authoritative load failures settle in response order without advancing the control-error epoch.
   Task 15 records the red-first regressions and final verification.
+- The remediated branch rebased without conflict onto `origin/main` at `f3a7d43eb`. Exact-base race
+  suites passed for agentctl LSP, task service, SQLite, and the newly expanded Office config package;
+  changed-code Go lint reported zero issues. The 25 focused frontend tests, web typecheck, i18n
+  ratchet, Windows LSP cross-build, Makefile shell-dispatch checks, all 60 public-doc validator tests,
+  all 41 published pages, and the three-dot whitespace check passed.
 
 ---
 

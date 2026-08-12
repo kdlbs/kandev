@@ -260,6 +260,12 @@ Completed 2026-08-12.
   tests, strict targeted ESLint, Prettier, and web typecheck passed. All 60 public-doc validator tests
   and all 41 published-page checks passed. Native selected-root junction execution remains exact-head
   Windows CI delivery evidence.
+- Final-base verification: the branch rebased without conflict onto `origin/main` at `f3a7d43eb`.
+  Exact-base race suites passed for agentctl LSP (12.188s), task service (116.931s), SQLite (25.093s),
+  and the newly expanded Office config package (5.466s). Changed-code Go lint reported zero issues;
+  the 25 focused frontend tests, web typecheck, i18n ratchet, Windows LSP cross-build, Makefile
+  shell-dispatch checks, all 60 public-doc validator tests, all 41 published pages, and the three-dot
+  whitespace check passed.
 
 ## Files
 
