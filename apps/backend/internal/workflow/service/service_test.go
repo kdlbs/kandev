@@ -22,6 +22,11 @@ import (
 func setupTestService(t *testing.T) (*Service, *sqlx.DB) {
 	rawDB, err := sql.Open("sqlite3", ":memory:")
 	require.NoError(t, err)
+	// Pin the pool to one connection: every connection to an in-memory SQLite
+	// DB gets its own database, so a second one (e.g. the async history
+	// writer goroutine racing a test's read) would not see the schema,
+	// causing flaky "no such table" failures.
+	rawDB.SetMaxOpenConns(1)
 	sqlxDB := sqlx.NewDb(rawDB, "sqlite3")
 	t.Cleanup(func() { _ = sqlxDB.Close() })
 
@@ -37,7 +42,9 @@ func setupTestService(t *testing.T) (*Service, *sqlx.DB) {
 	require.NoError(t, err)
 
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
-	return NewService(repo, log), sqlxDB
+	svc := NewService(repo, log)
+	t.Cleanup(func() { _ = svc.Close() })
+	return svc, sqlxDB
 }
 
 func insertWorkflow(t *testing.T, db *sqlx.DB, id, name string) {

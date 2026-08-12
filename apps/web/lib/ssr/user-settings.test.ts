@@ -603,3 +603,33 @@ describe("mapUserSettingsResponse voice mode", () => {
     });
   });
 });
+
+describe("prevent auto-start on open preference", () => {
+  it("defaults the missing preference to false", () => {
+    expect(buildCoreFields({}).preventAutoStartAgentOnOpen).toBe(false);
+    expect(mapUserSettingsResponse(null).preventAutoStartAgentOnOpen).toBe(false);
+  });
+
+  it("preserves an explicit enabled preference", () => {
+    expect(
+      buildCoreFields({ prevent_auto_start_agent_on_open: true }).preventAutoStartAgentOnOpen,
+    ).toBe(true);
+    expect(
+      mapUserSettingsResponse({
+        settings: {
+          user_id: DEFAULT_USER_ID,
+          workspace_id: toWorkspaceId(""),
+          repository_ids: [],
+          prevent_auto_start_agent_on_open: true,
+          updated_at: UPDATED_AT,
+        },
+      }).preventAutoStartAgentOnOpen,
+    ).toBe(true);
+  });
+
+  it("preserves an explicit disabled preference", () => {
+    expect(
+      buildCoreFields({ prevent_auto_start_agent_on_open: false }).preventAutoStartAgentOnOpen,
+    ).toBe(false);
+  });
+});

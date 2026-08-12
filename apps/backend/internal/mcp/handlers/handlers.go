@@ -35,6 +35,7 @@ import (
 	workflowctrl "github.com/kandev/kandev/internal/workflow/controller"
 	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowsvc "github.com/kandev/kandev/internal/workflow/service"
+	"github.com/kandev/kandev/internal/workflow/signalmetrics"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -84,10 +85,10 @@ type MessageCreator interface {
 type SessionRepository interface {
 	UpdateTaskSessionState(ctx context.Context, sessionID string, state models.TaskSessionState, errorMessage string) error
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
-	// SetSessionMetadataKey is used by handleStepComplete (ADR 0015) to
-	// atomically write the pending-completion bag without clobbering other
-	// metadata keys.
-	SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error
+	// SetSessionMetadataKeyIfAbsentOrDifferentStep atomically claims the
+	// pending-completion bag for a step. It preserves first-signal-wins for
+	// concurrent requests and replaces a stale signal from an older step.
+	SetSessionMetadataKeyIfAbsentOrDifferentStep(ctx context.Context, sessionID, key, stepID string, value interface{}) (bool, error)
 }
 
 // conditionalSessionStateUpdater is implemented by repositories that can
@@ -1851,13 +1852,13 @@ func classifyAddBranchError(err error) string {
 // (ADR 0015). The handler:
 //
 //   - Loads the session and the task to identify the current workflow step.
-//   - Dedupes: if a pending signal already exists for the same step, returns
-//     {accepted: false, reason: "already_signaled"} without overwriting.
-//     When the session is WAITING_FOR_INPUT, the bus event is re-published
-//     so a failed first-attempt publish can still drive the subscriber.
-//   - Otherwise writes a PendingStepCompletionSignal blob under
-//     TaskSession.Metadata[SessionMetaKeyPendingStepCompletion] via
-//     SetSessionMetadataKey (json_set — preserves other metadata keys).
+//   - Atomically claims the pending signal for the current step. A signal for
+//     an older step is replaced, but concurrent signals for the same step use
+//     the first successful database claim.
+//   - If the current step is already claimed, returns {accepted: false,
+//     reason: "already_signaled"}. When the session is WAITING_FOR_INPUT, the
+//     bus event is re-published so a failed first-attempt publish can still
+//     drive the subscriber.
 //   - Publishes events.WorkflowStepCompletionSignaled so the orchestrator
 //     subscriber can drive the on_turn_complete transition for steps with
 //     AutoAdvanceRequiresSignal=true. Steps that don't opt in ignore the
@@ -1890,29 +1891,6 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return errMsg, err
 	}
 
-	// Idempotency: if a pending signal exists for the current step, return
-	// without overwriting. A stale signal for a different step (left over
-	// from a transition that hasn't yet cleared the bag) is treated as
-	// absent and overwritten — the new step's signal supersedes.
-	//
-	// Re-publish on the dedup path when the session is WAITING_FOR_INPUT.
-	// Without this, an agent's retry after a publish failure short-circuits
-	// to `already_signaled` without firing the out-of-band subscriber,
-	// leaving the session stuck until the user replies. Publish is
-	// idempotent on the subscriber side (it re-checks bag + step), so a
-	// double-fire when the first publish actually landed is harmless.
-	if existing, ok := models.LoadPendingStepSignal(session.Metadata); ok && existing.StepID == task.WorkflowStepID {
-		if session.State == models.TaskSessionStateWaitingForInput {
-			if errMsg, err := h.publishStepCompletionEvent(ctx, msg, req.TaskID, req.SessionID, task.WorkflowStepID, existing); errMsg != nil {
-				return errMsg, err
-			}
-		}
-		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-			"accepted": false,
-			"reason":   "already_signaled",
-		})
-	}
-
 	signal := models.PendingStepCompletionSignal{
 		StepID:     task.WorkflowStepID,
 		Source:     models.StepCompletionSourceAgent,
@@ -1921,13 +1899,36 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		Blockers:   strings.TrimSpace(req.Blockers),
 		SignaledAt: time.Now().UTC(),
 	}
-	if err := h.sessionRepo.SetSessionMetadataKey(ctx, req.SessionID, models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
+	stored, err := h.sessionRepo.SetSessionMetadataKeyIfAbsentOrDifferentStep(
+		ctx,
+		req.SessionID,
+		models.SessionMetaKeyPendingStepCompletion,
+		task.WorkflowStepID,
+		signal,
+	)
+	if err != nil {
 		h.logger.Error("failed to persist step-completion signal",
 			zap.String("task_id", req.TaskID),
 			zap.String("session_id", req.SessionID),
 			zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record signal", nil)
 	}
+	if !stored {
+		return h.handleDuplicateStepComplete(ctx, msg, req.TaskID, req.SessionID, task.WorkflowStepID, session)
+	}
+
+	// Counted here, at the durable bag write, not after publishStepCompletionEvent
+	// below: publish is a delivery concern, and a publish failure sends the agent
+	// down the already_signaled dedup retry path, which never reaches this call
+	// again for the same signal.
+	//
+	// agent_name, not agent_id: agent_id is the store's auto-generated UUID for
+	// the agent row (internal/agent/settings/store/sqlite.go CreateAgent), unique
+	// per install and per re-creation. agent_name is the registry-facing type
+	// ("claude", "codex") that internal/agent/runtime/lifecycle/manager_profile.go
+	// keys the agent registry on.
+	agentType, _ := session.AgentProfileSnapshot["agent_name"].(string)
+	signalmetrics.RecordSignalReceived(signal.Source, agentType)
 
 	if errMsg, err := h.publishStepCompletionEvent(ctx, msg, req.TaskID, req.SessionID, task.WorkflowStepID, signal); errMsg != nil {
 		return errMsg, err
@@ -1937,6 +1938,28 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		"accepted":    true,
 		"step_id":     task.WorkflowStepID,
 		"signaled_at": signal.SignaledAt,
+	})
+}
+
+func (h *Handlers) handleDuplicateStepComplete(
+	ctx context.Context,
+	msg *ws.Message,
+	taskID, sessionID, stepID string,
+	session *models.TaskSession,
+) (*ws.Message, error) {
+	// If the initial snapshot already contained this step's signal, this is a
+	// retry after a possible publish failure and the event must be re-published
+	// while the session waits. If the initial snapshot was empty, another
+	// concurrent request won the claim and will publish the event itself.
+	existing, ok := models.LoadPendingStepSignal(session.Metadata)
+	if ok && existing.StepID == stepID && session.State == models.TaskSessionStateWaitingForInput {
+		if errMsg, err := h.publishStepCompletionEvent(ctx, msg, taskID, sessionID, stepID, existing); errMsg != nil {
+			return errMsg, err
+		}
+	}
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"accepted": false,
+		"reason":   "already_signaled",
 	})
 }
 

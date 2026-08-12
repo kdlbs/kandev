@@ -32,9 +32,33 @@ export class WorkflowSettingsPage {
   }
 
   /** Find a workflow card by the name shown in its input field using its current value. */
-  async findWorkflowCard(name: string): Promise<Locator> {
+  async findWorkflowCard(
+    name: string,
+    { waitForName = false }: { waitForName?: boolean } = {},
+  ): Promise<Locator> {
     const cards = this.page.locator('[data-testid^="workflow-card-"]');
-    await expect(cards.first()).toBeVisible();
+    if (waitForName) {
+      await expect
+        .poll(
+          async () => {
+            const testIds = await cards.evaluateAll((elements) =>
+              elements
+                .map((element) => element.getAttribute("data-testid"))
+                .filter((testId): testId is string => Boolean(testId)),
+            );
+            for (const testId of testIds) {
+              const input = this.page.getByTestId(testId).locator("input").first();
+              if ((await input.inputValue({ timeout: 500 }).catch(() => null)) === name)
+                return true;
+            }
+            return false;
+          },
+          { timeout: 5_000 },
+        )
+        .toBe(true);
+    } else {
+      await expect(cards.first()).toBeVisible();
+    }
 
     const testIds = await cards.evaluateAll((elements) =>
       elements
@@ -160,6 +184,16 @@ export class WorkflowSettingsPage {
   /** The delete workflow button within a card. */
   deleteWorkflowButton(card: Locator): Locator {
     return card.getByTestId("delete-workflow-button");
+  }
+
+  /** The duplicate workflow button within a card. */
+  duplicateWorkflowButton(card: Locator): Locator {
+    return card.getByTestId("duplicate-workflow-button");
+  }
+
+  /** Duplicate a saved workflow through its visible card action. */
+  async duplicateWorkflow(card: Locator, touch = false): Promise<void> {
+    await this.activate(this.duplicateWorkflowButton(card), touch);
   }
 
   /** The step delete confirmation dialog. */

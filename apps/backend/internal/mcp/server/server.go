@@ -922,17 +922,29 @@ If the child has no live execution, the call succeeds idempotently with status="
 func (s *Server) registerPRAutomationTools() {
 	s.mcpServer.AddTool(
 		mcp.NewToolWithRawSchema("get_task_pr_automation_kandev",
-			"Get the current task's GitHub PR automation settings, including lifecycle notification switches.",
+			"Get the current task's GitHub PR automation settings, including lifecycle notification switches. "+
+				"The five automation switches are scoped per linked PR; pr_options carries one entry per PR "+
+				"(repository_id, pr_number, and the five booleans). The top-level booleans are an aggregate "+
+				"that reports true only when every linked PR has that switch on and at least one PR is linked "+
+				"— use them to check whether a task-wide enable fully took, and use pr_options for anything "+
+				"PR-specific.",
 			json.RawMessage(`{"type":"object","properties":{}}`),
 		),
 		s.wrapHandler("get_task_pr_automation_kandev", s.getTaskPRAutomationHandler()),
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("update_task_pr_automation_kandev",
-			mcp.WithDescription("Update this task's PR automation options (auto-fix, auto-merge, and lifecycle notifications)."),
+			mcp.WithDescription(
+				"Update this task's PR automation options (auto-fix, auto-merge, and lifecycle notifications). "+
+					"The five switches are scoped per linked PR: pass both repository_id and pr_number to target "+
+					"one linked PR, or omit both to apply the change to every PR currently linked to the task "+
+					"(unchanged default behavior). auto_fix_prompt_override applies task-wide regardless of PR identity.",
+			),
+			mcp.WithString("repository_id", mcp.Description("Target one linked PR's repository_id; must be paired with pr_number. Omit both to apply to every linked PR.")),
+			mcp.WithNumber("pr_number", mcp.Description("Target one linked PR's number; must be paired with repository_id. Omit both to apply to every linked PR.")),
 			mcp.WithBoolean("auto_fix_enabled", mcp.Description("Enable or disable auto-fix when CI checks fail")),
 			mcp.WithBoolean("auto_merge_enabled", mcp.Description("Enable or disable auto-merge when PR passes all checks")),
-			mcp.WithString("auto_fix_prompt_override", mcp.Description("Custom prompt for auto-fix (empty string clears the override)")),
+			mcp.WithString("auto_fix_prompt_override", mcp.Description("Custom prompt for auto-fix (empty string clears the override). Task-wide; not affected by repository_id/pr_number.")),
 			mcp.WithBoolean("prompt_on_review_requested", mcp.Description("Prompt this task's agent when a review is requested for the authenticated user")),
 			mcp.WithBoolean("prompt_on_merged", mcp.Description("Prompt this task's agent once when the linked PR becomes merged")),
 			mcp.WithBoolean("prompt_on_closed", mcp.Description("Prompt this task's agent once when the linked PR becomes closed without merge")),
@@ -1058,9 +1070,11 @@ Unlike create_task_kandev this does NOT create a new task — the new session ru
 
 The spawned session knows it was spawned by you and can reply via message_task_kandev using your task_id + session_id. You can message it the same way using the session_id returned by this tool.
 
-Returns {task_id, session_id, state}.`),
+The returned agent_profile_id is the effective agent profile used by the new session. On a workflow step, the step's launch profile wins: a pinned step profile outranks the requested agent_profile_id, and an unpinned step uses the workflow default. Without a workflow launch profile, an explicit agent_profile_id wins; when omitted, the existing inheritance rules apply.
+
+Returns {task_id, session_id, state, agent_profile_id}.`),
 			mcp.WithString("prompt", mcp.Required(), mcp.Description("The spawned session's initial prompt. This is the ONLY context the new agent receives — be specific and detailed.")),
-			mcp.WithString("agent_profile_id", mcp.Description("Agent profile for the new session. Omit to reuse your own session's agent profile.")),
+			mcp.WithString("agent_profile_id", mcp.Description("Requested agent profile for the new session. Omit to inherit your session's profile; a workflow launch profile may override it.")),
 			mcp.WithString("name", mcp.Description("Optional session name shown on the session tab (e.g. 'reviewer'). Helps the user tell concurrent sessions apart.")),
 			mcp.WithString("task_id", mcp.Description("Task to spawn the session on. Omit to use your current task.")),
 		),

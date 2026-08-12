@@ -210,4 +210,7 @@ type PendingMove struct {
 	WorkflowStepID string    `json:"workflow_step_id"`
 	Position       int       `json:"position"`
 	QueuedAt       time.Time `json:"queued_at"`
+	// Actor records provenance across the deferred move boundary. Agent is the
+	// value used by move_task_kandev; it prevents owner identity leakage.
+	Actor string `json:"actor,omitempty"`
 }

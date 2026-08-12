@@ -72,6 +72,33 @@ func TestCutoverPostgres_NormalizesLegacyFlatEnvironment(t *testing.T) {
 	}
 }
 
+func TestCutoverPostgres_CanonicalRepoSupersedesDivergentFlatOwner(t *testing.T) {
+	db := openLegacyPostgres(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	seed := legacySeed{
+		envID:     "env-pg-flat-conflict",
+		taskID:    "task-pg-flat-conflict",
+		repoID:    "repo-pg-flat-conflict",
+		sessionID: "sess-pg-flat-conflict",
+	}
+	seedLegacyTask(t, db, seed, now)
+	seedLegacyFlatEnv(t, db, seed, "wt-pg-flat", "/tasks/pg-flat", "feature/flat", now)
+	seedLegacyEnvRepo(t, db, "env-pg-repo-canonical", seed.envID, seed.repoID,
+		"wt-pg-canonical", "/tasks/pg-canonical", "feature/canonical", now)
+
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("postgres cutover: %v", err)
+	}
+	env, err := repo.GetTaskEnvironment(context.Background(), seed.envID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	if len(env.Repos) != 1 || env.Repos[0].WorktreeID != "wt-pg-canonical" {
+		t.Fatalf("normalized postgres repos = %+v, want canonical wt-pg-canonical", env.Repos)
+	}
+}
+
 func TestCutoverPostgres_SessionOnlyNormalization(t *testing.T) {
 	db := openLegacyPostgres(t)
 	ctx := context.Background()

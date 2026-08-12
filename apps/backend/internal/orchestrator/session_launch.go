@@ -49,6 +49,14 @@ type LaunchSessionRequest struct {
 	LaunchWorkspace   bool          `json:"launch_workspace,omitempty"`
 	SkipMessageRecord bool          `json:"skip_message_record,omitempty"`
 	AutoStart         bool          `json:"auto_start,omitempty"`
+	// NoAgentLaunch marks a prepare request that must NEVER be upgraded into an
+	// agent launch, even for passthrough profiles (whose prepare would normally
+	// be eagerly upgraded so the PTY exists). It backs the session.ensure
+	// auto_start=false override used by the prevent-auto-start-on-open
+	// preference: the session is created workspace-only (CREATED) and the
+	// Start agent button launches it later. It is an internal server-side flag
+	// set from EnsureSessionOptions, kept off the wire protocol (`json:"-"`).
+	NoAgentLaunch bool `json:"-"`
 	// DeferredStart marks a prepare whose caller will follow up with an explicit
 	// IntentStartCreated that carries the prompt (the two-phase create flow:
 	// cheap sync prepare + async start). It suppresses the passthrough
@@ -83,6 +91,7 @@ type LaunchSessionResponse struct {
 	TaskID           string  `json:"task_id"`
 	SessionID        string  `json:"session_id,omitempty"`
 	AgentExecutionID string  `json:"agent_execution_id,omitempty"`
+	AgentProfileID   string  `json:"agent_profile_id,omitempty"`
 	State            string  `json:"state"`
 	WorktreePath     *string `json:"worktree_path,omitempty"`
 	WorktreeBranch   *string `json:"worktree_branch,omitempty"`
@@ -206,9 +215,14 @@ func (s *Service) launchPrepare(ctx context.Context, req *LaunchSessionRequest) 
 // imminent prompt-bearing start) get the eager launch. See launchPrepare for
 // why AutoStart and DeferredStart each suppress it.
 func (s *Service) shouldUpgradePassthroughPrepare(ctx context.Context, req *LaunchSessionRequest) bool {
+	if req.NoAgentLaunch {
+		return false
+	}
 	return !req.AutoStart && !req.DeferredStart && s.isPassthroughProfile(ctx, req.AgentProfileID)
 }
 
+// isPassthroughProfile reports whether the agent profile is a CLI
+// passthrough provider.
 func (s *Service) isPassthroughProfile(ctx context.Context, profileID string) bool {
 	if profileID == "" || s.agentManager == nil {
 		return false
@@ -375,6 +389,8 @@ func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action 
 	return resp, nil
 }
 
+// normalizeRecoverSessionError maps a missing-profile resume failure to a
+// user-actionable message.
 func normalizeRecoverSessionError(err error) error {
 	if err == nil {
 		return nil
@@ -385,6 +401,8 @@ func normalizeRecoverSessionError(err error) error {
 	return err
 }
 
+// isMissingProfileResumeError reports whether the error indicates the
+// session's agent profile no longer exists.
 func isMissingProfileResumeError(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "failed to resolve agent profile") ||
@@ -398,6 +416,7 @@ func executionToLaunchResponse(taskID string, exec *executor.TaskExecution) *Lau
 		TaskID:           taskID,
 		SessionID:        exec.SessionID,
 		AgentExecutionID: exec.AgentExecutionID,
+		AgentProfileID:   exec.AgentProfileID,
 		State:            string(exec.SessionState),
 	}
 	if exec.WorktreePath != "" {

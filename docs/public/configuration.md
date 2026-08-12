@@ -108,7 +108,7 @@ An external NATS URL moves event traffic across the configured network and can e
 | `docker.defaultNetwork` | `KANDEV_DOCKER_DEFAULTNETWORK` | `kandev-network` | Accepted compatibility field; not wired into current executor networking. |
 | `docker.volumeBasePath` | `KANDEV_DOCKER_VOLUMEBASEPATH` | `/var/lib/kandev/volumes` on Unix; `%LOCALAPPDATA%\kandev\volumes` on Windows | Accepted compatibility field; not wired into current executor volume placement. |
 
-The Docker socket is effectively root-equivalent on many hosts. Do not publish it or assume `docker.tlsVerify` secures a TCP daemon—it currently does not. Configure TLS through a supported Docker endpoint/environment and validate it independently, or keep the daemon local. See [Docker](./docker.md) and [Executors](./executors.md).
+The Docker socket is effectively root-equivalent on many hosts. Do not publish it or assume `docker.tlsVerify` secures a TCP daemon; it currently does not. Configure TLS through a supported Docker endpoint/environment and validate it independently, or keep the daemon local. See [Docker](./docker.md) and [Executors](./executors.md).
 
 ### Core agent service
 
@@ -388,7 +388,7 @@ Startup validation currently enforces:
 - logging level/format; and
 - positive `repositoryDiscovery.maxDepth`.
 
-Other fields can pass configuration validation and still fail later—for example an unreachable NATS/PostgreSQL/Docker endpoint, unwritable log path, nonsensical timeout, or incompatible pool sizes. A field appearing in the schema does not prove its subsystem is available.
+Other fields can pass configuration validation and still fail later, for example an unreachable NATS/PostgreSQL/Docker endpoint, unwritable log path, nonsensical timeout, or incompatible pool sizes. A field appearing in the schema does not prove its subsystem is available.
 
 If a value appears ignored:
 
@@ -400,4 +400,4 @@ If a value appears ignored:
 
 Use `kandev --verbose` to surface startup errors. Do not use `--debug` merely to diagnose a YAML typo on an exposed machine; verbose logs are usually sufficient.
 
-Variables used only to assemble/test the runtime—such as `KANDEV_WEB_DIST_DIR`, `KANDEV_DESKTOP_RUNTIME_DIR`, mock/E2E switches, supervisor socket/manifest values, and bootstrap nonces—are internal implementation contracts, not supported deployment configuration. `KANDEV_BUNDLE_DIR` is the narrow exception documented for installer/package integration in [CLI](./cli.md); end users should still let the installer set it.
+Variables used only to assemble/test the runtime: such as `KANDEV_WEB_DIST_DIR`, `KANDEV_DESKTOP_RUNTIME_DIR`, mock/E2E switches, supervisor socket/manifest values, and bootstrap nonces, are internal implementation contracts, not supported deployment configuration. `KANDEV_BUNDLE_DIR` is the narrow exception documented for installer/package integration in [CLI](./cli.md); end users should still let the installer set it.

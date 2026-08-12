@@ -75,13 +75,17 @@ export type EnsureSessionResponse = {
  */
 export async function ensureTaskSession(
   taskId: string,
-  opts?: { ensureExecution?: boolean; timeout?: number },
+  opts?: { ensureExecution?: boolean; autoStart?: boolean; timeout?: number },
 ): Promise<EnsureSessionResponse> {
   const client = getWebSocketClient();
   if (!client) throw new Error("WebSocket client not available");
   return client.request<EnsureSessionResponse>(
     "session.ensure",
-    { task_id: taskId, ensure_execution: opts?.ensureExecution },
+    {
+      task_id: taskId,
+      ensure_execution: opts?.ensureExecution,
+      ...(opts?.autoStart !== undefined ? { auto_start: opts.autoStart } : {}),
+    },
     opts?.timeout ?? 15_000,
   );
 }

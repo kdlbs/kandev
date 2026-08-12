@@ -1963,6 +1963,7 @@ func newBootStateTestHarness(t *testing.T) bootStateTestHarness {
 	eventBus := bus.NewMemoryEventBus(log)
 	userSvc := userservice.NewService(userRepo, eventBus, log)
 	workflowSvc := workflowservice.NewService(workflowRepo, log)
+	t.Cleanup(func() { _ = workflowSvc.Close() })
 	taskSvc := taskservice.NewService(
 		taskservice.Repos{
 			Workspaces:       taskRepo,

@@ -1,7 +1,7 @@
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
-import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
+import { compareTimestamps, toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import { normalizeAgentProfile } from "@/lib/api/domains/agent-profile-normalize";
 import type { AgentProfile } from "@/lib/types/agent-profile";
 
@@ -15,8 +15,78 @@ function getAgentId(raw: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-function handleProfileCreated(state: AppState, profile: unknown): Partial<AppState> {
+/**
+ * Office-scoped profiles are owned by the office channels, never the kanban
+ * settings surface (the HTTP agent list hides them via filterGlobalProfiles).
+ * Defense in depth: ignore their events here so a stray broadcast cannot leak
+ * them into the global settings store and selectors.
+ */
+function isOfficeScoped(normalized: { workspaceId?: string }): boolean {
+  return Boolean(normalized.workspaceId);
+}
+
+/** Finds a profile in the settings agents list by id, across all agents. */
+function findExistingProfile(state: AppState, profileId: string): AgentProfile | undefined {
+  for (const item of state.settingsAgents.items) {
+    const found = item.profiles.find((p) => p.id === profileId);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+// Deletion tombstones keyed by profile id -> deletion event timestamp, so a
+// delayed create/update event cannot resurrect a profile that was deleted
+// after the event was produced. Cleared when a genuinely newer create arrives.
+// Tombstones are keyed by UUID and profiles are never recreated under the same
+// ID, so the map is bounded by the number of profiles deleted in this session
+// (typically single digits to low dozens — no eviction needed).
+const deletionTombstones = new Map<string, string>();
+
+/**
+ * A profile event is stale when the store already holds a newer revision of
+ * the profile or its option (e.g. a delayed duplicate response or a newer
+ * WebSocket update arrived first), or when the profile was deleted after the
+ * event was produced (tombstone). Events must never regress newer state.
+ * Missing event timestamps (never produced by the backend) are treated as
+ * not-stale so they cannot trip the guards.
+ */
+function isStaleProfileEvent(
+  state: AppState,
+  normalized: { id: string; updatedAt?: string },
+  eventTimestamp: string | undefined,
+): boolean {
+  const tombstone = deletionTombstones.get(normalized.id);
+  if (
+    tombstone !== undefined &&
+    eventTimestamp &&
+    compareTimestamps(tombstone, eventTimestamp) >= 0
+  ) {
+    return true;
+  }
+  const existingProfile = findExistingProfile(state, normalized.id);
+  if (existingProfile && compareTimestamps(existingProfile.updatedAt, normalized.updatedAt) > 0) {
+    return true;
+  }
+  const existingOption = state.agentProfiles.items.find((o) => o.id === normalized.id);
+  return Boolean(
+    existingOption && compareTimestamps(existingOption.updatedAt, normalized.updatedAt) > 0,
+  );
+}
+
+/**
+ * Applies an agent.profile.created event, skipping office-scoped or stale
+ * events (see isStaleProfileEvent) and clearing the deletion tombstone when a
+ * genuinely newer create arrives.
+ */
+function handleProfileCreated(
+  state: AppState,
+  profile: unknown,
+  eventTimestamp: string | undefined,
+): Partial<AppState> {
   const normalized = normalizeAgentProfile(profile);
+  if (isOfficeScoped(normalized)) return {};
+  if (isStaleProfileEvent(state, normalized, eventTimestamp)) return {};
+  deletionTombstones.delete(normalized.id); // a genuinely newer create wins
   const agentId = getAgentId(profile);
   const agent = state.settingsAgents.items.find((a) => a.id === agentId);
   const agentStub = { id: agentId, name: agent?.name ?? "" };
@@ -41,8 +111,18 @@ function handleProfileCreated(state: AppState, profile: unknown): Partial<AppSta
   };
 }
 
-function handleProfileUpdated(state: AppState, profile: unknown): Partial<AppState> {
+/**
+ * Applies an agent.profile.updated event, skipping office-scoped or stale
+ * events so a delayed update never regresses newer stored state.
+ */
+function handleProfileUpdated(
+  state: AppState,
+  profile: unknown,
+  eventTimestamp: string | undefined,
+): Partial<AppState> {
   const normalized = normalizeAgentProfile(profile);
+  if (isOfficeScoped(normalized)) return {};
+  if (isStaleProfileEvent(state, normalized, eventTimestamp)) return {};
   const agentId = getAgentId(profile);
   const agent = state.settingsAgents.items.find((a) => a.id === agentId);
   const agentStub = { id: agentId, name: agent?.name ?? "" };
@@ -59,6 +139,41 @@ function handleProfileUpdated(state: AppState, profile: unknown): Partial<AppSta
   );
   return {
     agentProfiles: { ...state.agentProfiles, items: nextProfiles },
+    settingsAgents: { items: nextAgents },
+  };
+}
+
+/**
+ * Applies an agent.profile.deleted event: removes the profile from both
+ * slices and records a deletion tombstone (keyed by the event timestamp) so a
+ * delayed create/update cannot resurrect it. Office-scoped and stale deletes
+ * (a delete whose snapshot is older than the stored revision — e.g. a delayed
+ * event after a newer update already applied) are ignored so the handler
+ * never regresses newer state.
+ */
+function handleProfileDeleted(
+  state: AppState,
+  profile: unknown,
+  eventTimestamp: string | undefined,
+): Partial<AppState> {
+  const normalized = normalizeAgentProfile(profile);
+  if (isOfficeScoped(normalized)) return {};
+  if (isStaleProfileEvent(state, normalized, eventTimestamp)) return {};
+  if (eventTimestamp) deletionTombstones.set(normalized.id, eventTimestamp);
+  const agentId = getAgentId(profile);
+  const nextAgents = state.settingsAgents.items.map((item) =>
+    item.id === agentId
+      ? {
+          ...item,
+          profiles: item.profiles.filter((p) => p.id !== normalized.id),
+        }
+      : item,
+  );
+  return {
+    agentProfiles: {
+      ...state.agentProfiles,
+      items: state.agentProfiles.items.filter((p) => p.id !== normalized.id),
+    },
     settingsAgents: { items: nextAgents },
   };
 }
@@ -118,35 +233,19 @@ export function registerAgentsHandlers(store: StoreApi<AppState>): WsHandlers {
     "agent.profile.created": (message) => {
       store.setState((state) => ({
         ...state,
-        ...handleProfileCreated(state, message.payload.profile),
+        ...handleProfileCreated(state, message.payload.profile, message.timestamp),
       }));
     },
     "agent.profile.updated": (message) => {
       store.setState((state) => ({
         ...state,
-        ...handleProfileUpdated(state, message.payload.profile),
+        ...handleProfileUpdated(state, message.payload.profile, message.timestamp),
       }));
     },
     "agent.profile.deleted": (message) => {
-      const profile = message.payload.profile as Record<string, unknown>;
-      const profileId = profile.id as string;
-      const agentId = getAgentId(profile);
       store.setState((state) => ({
         ...state,
-        agentProfiles: {
-          ...state.agentProfiles,
-          items: state.agentProfiles.items.filter((p) => p.id !== profileId),
-        },
-        settingsAgents: {
-          items: state.settingsAgents.items.map((item) =>
-            item.id === agentId
-              ? {
-                  ...item,
-                  profiles: item.profiles.filter((p) => p.id !== profileId),
-                }
-              : item,
-          ),
-        },
+        ...handleProfileDeleted(state, message.payload.profile, message.timestamp),
       }));
     },
   };

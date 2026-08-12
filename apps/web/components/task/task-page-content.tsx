@@ -273,7 +273,11 @@ function useTaskPageData(
   const { task, taskLoadError, onTaskUnarchived } = useTaskDetails(activeTaskId, initialTask);
 
   const agent = useSessionAgent(task);
-  const ensureSession = useEnsureTaskSession(task);
+  const ensureSession = useEnsureTaskSession({
+    id: task?.id,
+    workflowStepId: task?.workflow_step_id,
+    workflowId: task?.workflow_id,
+  });
   const initialSessionId = sessionId ?? agent.taskSessionId ?? null;
   const effectiveSessionId = validatedActiveSessionId ?? initialSessionId;
 

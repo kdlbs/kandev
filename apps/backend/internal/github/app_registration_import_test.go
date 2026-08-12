@@ -173,7 +173,9 @@ func TestAppRegistrationImportAcceptsDocumentedAuthenticatedAppShapeAndPersists(
 			}
 			return appRegistrationVerifierFunc(func(context.Context) (AuthenticatedApp, error) {
 				verified = true
-				return authenticatedAppForImport(t, request), nil
+				app := authenticatedAppForImport(t, request)
+				app.Events = []string{"push", "check_run"}
+				return app, nil
 			}), nil
 		})
 

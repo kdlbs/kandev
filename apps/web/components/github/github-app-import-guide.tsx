@@ -10,13 +10,13 @@ import { Trans, useTranslation } from "react-i18next";
 import { formatDateTime } from "@/lib/i18n/formats";
 
 // These are the verbatim field names on GitHub's own "Register a new GitHub App"
-// form, which is English-only. The guide tells the user which field to paste each
-// value into, so translating them would break that mapping — they are references
-// to another product's UI, not our copy.
+// form, which is English-only. The numeric suffixes preserve the order GitHub
+// uses for OAuth during installation; they are references to another product's
+// UI, not our copy.
 const urlLabels: [keyof PrepareGitHubAppImportResponse, string][] = [
   ["public_base_url", "Homepage URL"],
-  ["personal_callback_url", "User authorization callback URL"],
-  ["setup_url", "Setup URL"],
+  ["install_callback_url", "User authorization callback URL 1"],
+  ["personal_callback_url", "User authorization callback URL 2"],
   ["webhook_url", "Webhook URL"],
 ];
 

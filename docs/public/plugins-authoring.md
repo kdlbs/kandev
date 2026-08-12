@@ -448,43 +448,39 @@ function useNoteValue(taskId, panelId) {
   // duplicating the read-and-commit logic without its guards.
   const guardRef = host.React.useRef({ cancelled: false, generation: 0 });
 
-  const refresh = host.React.useCallback(
-    (options = {}) => {
-      const preserveValue = options.preserveValue ?? dirtyRef.current;
-      const guard = guardRef.current;
-      const generation = ++guard.generation;
-      return host.storage.get("task", taskId, "note").then(
-        (entry) => {
-          // Ignore a response that resolves after taskId changed, the panel
-          // unmounted, or a newer refresh started — otherwise a stale read
-          // (the previous task's note, or one of two overlapping reads that
-          // resolved out of order) can land in the current field.
-          if (guard.cancelled || generation !== guard.generation) return;
-          if (!preserveValue && !dirtyRef.current)
-            setValue(entry ? entry.value : "");
-          updatedAtRef.current = entry ? entry.updatedAt : undefined;
-          setLoadedTaskId(taskId);
-          setReadError(false);
-          return true;
-        },
-        () => {
-          // Do not mark the task loaded after a rejected read. Rendering an
-          // empty editor here would allow its first save to omit
-          // ifUnmodifiedSince and overwrite an existing note. Keep the panel
-          // in a retry state until an authoritative read succeeds.
-          if (guard.cancelled || generation !== guard.generation) return false;
-          setReadError(true);
-          return false;
-        },
-      );
-    },
-    [taskId],
-  );
+  const refresh = host.React.useCallback((options = {}) => {
+    const preserveValue = options.preserveValue ?? dirtyRef.current;
+    const guard = guardRef.current;
+    const generation = ++guard.generation;
+    return host.storage.get("task", taskId, "note").then(
+      (entry) => {
+        // Ignore a response that resolves after taskId changed, the panel
+        // unmounted, or a newer refresh started; otherwise a stale read
+        // (the previous task's note, or one of two overlapping reads that
+        // resolved out of order) can land in the current field.
+        if (guard.cancelled || generation !== guard.generation) return;
+        if (!preserveValue && !dirtyRef.current) setValue(entry ? entry.value : "");
+        updatedAtRef.current = entry ? entry.updatedAt : undefined;
+        setLoadedTaskId(taskId);
+        setReadError(false);
+        return true;
+      },
+      () => {
+        // Do not mark the task loaded after a rejected read. Rendering an
+        // empty editor here would allow its first save to omit
+        // ifUnmodifiedSince and overwrite an existing note. Keep the panel
+        // in a retry state until an authoritative read succeeds.
+        if (guard.cancelled || generation !== guard.generation) return false;
+        setReadError(true);
+        return false;
+      },
+    );
+  }, [taskId]);
 
   host.React.useEffect(() => {
     const guard = guardRef.current;
     guard.cancelled = false;
-    // Clear the previous task's value/timestamp synchronously — otherwise it
+    // Clear the previous task's value/timestamp synchronously; otherwise it
     // stays on screen (and could be sent as ifUnmodifiedSince under the new
     // taskId) until this effect's first refresh() resolves.
     setValue("");
@@ -494,7 +490,7 @@ function useNoteValue(taskId, panelId) {
     setReadError(false);
     refresh();
     // Scope echo suppression to this panel instance rather than the shared
-    // per-tab default writer id — otherwise a second surface editing the
+    // per-tab default writer id; otherwise a second surface editing the
     // same note (a kanban shortcut, another panel) looks like this panel's
     // own echo and its write never arrives here.
     const unsubscribe = host.storage.subscribe(
@@ -680,14 +676,14 @@ The same registration and panel identity drive both viewports, so a panel remain
 selected through a slow or failed reload and is closed only after a ready
 generation omits it or the plugin is explicitly disabled/uninstalled.
 
-`writerId` is appended to the host's own per-tab id, not a full replacement —
+`writerId` is appended to the host's own per-tab id, not a full replacement;
 a static value like `panelId` is the same across every tab that has that
 panel open, so two different tabs subscribing with the same raw `panelId`
 would otherwise suppress each other's real, cross-tab updates as if they were
 local echoes. Pass `ifUnmodifiedSince` (the `updatedAt` from the last `get`)
 to `set` and handle the resulting `409` by refetching, rather than silently
 discarding a concurrent edit. `host.storage.list` returns every entry under a
-`(scope, scopeId)` pair with no pagination — fine for a handful of keys per
+`(scope, scopeId)` pair with no pagination; fine for a handful of keys per
 task, not for an unbounded per-item collection.
 
 ### 4. Webhook receiver
@@ -743,13 +739,13 @@ Host reader because event queues are bounded and delivery is best-effort.
 ### 6. Kanban-aware contribution
 
 `registerTaskMenuAction` adds an item to the kanban card's context/dropdown
-menu — group `"edit"` nests it inside the `Edit` submenu, group `"primary"`
+menu; group `"edit"` nests it inside the `Edit` submenu, group `"primary"`
 renders it as a flat, top-level item positioned between the "Move
 to"/"Send to workflow" submenus and the "Link" submenu.
 `task-card-indicators` (see the named slots table) is the matching read-only
 surface, rendered beside the PR status icon on every card. `task-card-tags`
 is a sibling read-only surface with the same `slotProps` shape, mounted in its
-own row instead of that cramped title-row spot — reach for it when a
+own row instead of that cramped title-row spot; reach for it when a
 contribution (e.g. a row of tag chips) needs its own width. Both
 `visible(context)` and `run(context)` receive the card's actual `presentation`:
 `"desktop"` on the desktop kanban and `"mobile"` on the phone kanban. Use it
@@ -779,9 +775,9 @@ Kanban components directly.
 `registerTaskFilter` adds a client-side, multi-select filter section to the
 kanban board's display dropdown, next to the built-in Workflow and Repository
 sections. The plugin supplies its own options (including any "untagged"-style
-sentinel — the host does not special-case option values) and a `matches`
+sentinel; the host does not special-case option values) and a `matches`
 predicate; filtering runs entirely against tasks already loaded in the
-board's in-memory state, with no backend query or persistence — selections
+board's in-memory state, with no backend query or persistence; selections
 reset on reload.
 
 ```js
@@ -796,7 +792,7 @@ registry.registerTaskFilter({
 });
 ```
 
-An empty selection is implicit "All" for that section — `matches` is only
+An empty selection is implicit "All" for that section: `matches` is only
 called once at least one option is selected, and a `matches` that throws is
 caught, logged, and treated as non-matching for that task.
 
@@ -889,7 +885,7 @@ repackaging.
 - **Reusing a raw surface id as writerId:** a static id like panelId is the
   same across every tab that has that surface open. Passed as-is to
   host.storage's writerId, it makes two different tabs look like the same
-  writer and suppresses real cross-tab updates as if they were local echoes —
+  writer and suppresses real cross-tab updates as if they were local echoes;
   the host already appends it to a per-tab id, so pass the surface id, not a
   fabricated combined string.
 - **Writing outside KANDEV_PLUGIN_DATA_DIR:** arbitrary files belong below the

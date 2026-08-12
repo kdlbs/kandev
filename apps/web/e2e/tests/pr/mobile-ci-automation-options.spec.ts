@@ -5,7 +5,7 @@ import type { SeedData } from "../../fixtures/test-base";
 
 const OWNER = "acme";
 const REPO = "demo";
-const PR_NUMBER = 145;
+const PR_NUMBER = 144;
 const PR_URL = `https://github.com/${OWNER}/${REPO}/pull/${PR_NUMBER}`;
 
 function manyRunningChecks(count: number) {
@@ -121,11 +121,11 @@ test.describe("mobile PR CI automation options", () => {
       drawer.getByRole("switch", { name: "Auto-fix CI and address comments" }),
     ).toBeVisible();
     await expect(drawer.getByRole("switch", { name: "Auto-merge when ready" })).toBeVisible();
-    const prEvents = drawer.getByTestId("ci-pr-events-trigger");
-    await expect(prEvents).toHaveAttribute("aria-expanded", "false");
-    await expect(prEvents).toHaveCSS("min-height", "44px");
-    await prEvents.tap();
-    await expect(prEvents).toHaveAttribute("aria-expanded", "true");
+    const reviewFollowUp = drawer.getByTestId("ci-review-follow-up-trigger");
+    await expect(reviewFollowUp).toHaveAttribute("aria-expanded", "false");
+    await expect(reviewFollowUp).toHaveCSS("min-height", "44px");
+    await reviewFollowUp.tap();
+    await expect(reviewFollowUp).toHaveAttribute("aria-expanded", "true");
     await expect(drawer.getByRole("switch", { name: "Your review is requested" })).toBeVisible();
     await expect(drawer.getByRole("switch", { name: "PR merged" })).toBeVisible();
     await expect(drawer.getByRole("switch", { name: "PR closed without merging" })).toBeVisible();
@@ -178,6 +178,57 @@ test.describe("mobile PR CI automation options", () => {
     );
   });
 
+  test("drawer keeps two linked PRs' automation switches independent", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const taskId = await seedTaskWithPR(apiClient, seedData, "CI automation mobile independence");
+    const secondPRNumber = PR_NUMBER + 1;
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: taskId,
+      workspace_id: seedData.workspaceId,
+      owner: OWNER,
+      repo: REPO,
+      pr_number: secondPRNumber,
+      pr_url: `https://github.com/${OWNER}/${REPO}/pull/${secondPRNumber}`,
+      pr_title: "Second PR",
+      head_branch: "feat/second",
+      base_branch: "main",
+      author_login: "test-user",
+      state: "open",
+      review_state: "approved",
+      checks_state: "success",
+    });
+
+    await testPage.goto(`/t/${taskId}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.tapPRStatusChip();
+
+    const drawer = session.prStatusChipDrawer();
+    await drawer.getByRole("tab", { name: `${REPO} #${PR_NUMBER}` }).tap();
+    await expect(
+      drawer.getByRole("switch", { name: "Auto-fix CI and address comments" }),
+    ).toBeVisible();
+    await drawer.getByRole("switch", { name: "Auto-fix CI and address comments" }).tap();
+
+    await expect
+      .poll(async () => apiClient.getTaskCIAutomationOptions(taskId))
+      .toMatchObject({
+        pr_options: expect.arrayContaining([
+          expect.objectContaining({ pr_number: PR_NUMBER, auto_fix_enabled: true }),
+          expect.objectContaining({ pr_number: secondPRNumber, auto_fix_enabled: false }),
+        ]),
+      });
+
+    await drawer.getByRole("tab", { name: `${REPO} #${secondPRNumber}` }).tap();
+    await expect(
+      drawer.getByRole("switch", { name: "Auto-fix CI and address comments" }),
+    ).not.toBeChecked();
+  });
+
   test("drawer contains lifecycle errors without horizontal document overflow", async ({
     testPage,
     apiClient,
@@ -197,7 +248,7 @@ test.describe("mobile PR CI automation options", () => {
     await session.tapPRStatusChip();
 
     const drawer = session.prStatusChipDrawer();
-    await drawer.getByTestId("ci-pr-events-trigger").tap();
+    await drawer.getByTestId("ci-review-follow-up-trigger").tap();
     await expect(drawer.getByRole("switch", { name: "Your review is requested" })).toBeVisible();
     await expect(drawer.getByRole("alert")).toContainText(
       "Lifecycle prompt could not be delivered to a task session.",

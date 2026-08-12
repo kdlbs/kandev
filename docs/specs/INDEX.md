@@ -90,6 +90,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [parent-child-message-interrupt](tasks/parent-child-message-interrupt.md) | shipped |
 | [parent-child-task-stop](tasks/parent-child-task-stop.md) | shipped |
 | [mcp-task-agent-profile-default](tasks/mcp-task-agent-profile-default/spec.md) | shipped |
+| [spawn-session-effective-profile](spawn-session-effective-profile/spec.md) | shipped |
 | [runtime-state-publication-order](tasks/runtime-state-publication-order.md) | shipped |
 | [agent-generated-titles](tasks/agent-generated-titles.md) | approved |
 | [task-create-executor-default](tasks/task-create-executor-default.md) | approved |
@@ -101,6 +102,8 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [explicit-completion-signal](workflow/explicit-completion-signal/spec.md) | shipped |
 | [cancelled-turn-completion](workflow/cancelled-turn-completion/spec.md) | building |
 | [conditional-session-settings](workflow-session-settings/spec.md) | approved |
+| [prevent-agent-autostart-on-open](prevent-agent-autostart-on-open/spec.md) | draft |
+| [workflow-duplication](workflow-duplication/spec.md) | draft |
 
 ## agents/ — agent governance
 
@@ -156,7 +159,6 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 
 | Spec | Status |
 |---|---|
-| [available-to-install-collapsible](ui/available-to-install-collapsible.md) | shipped |
 | [ci-pr-automation](ui/ci-pr-automation.md) | building |
 | [github-pr-review-actions](ui/github-pr-review-actions.md) | shipped |
 | [github-saved-query-defaults](ui/github-saved-query-defaults.md) | shipped |
@@ -263,6 +265,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [no-silent-model-fallback](no-silent-model-fallback/spec.md) | approved |
 | [e2e-duration-aware-sharding](e2e-duration-aware-sharding/spec.md) | implemented |
 | [board-step-visibility-filter](board-step-visibility-filter/spec.md) | draft |
+| [shutdown-turn-failure-suppression](shutdown-turn-failure-suppression/spec.md) | draft |
 
 ---
 

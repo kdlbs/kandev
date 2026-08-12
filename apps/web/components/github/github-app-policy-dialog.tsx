@@ -25,11 +25,7 @@ export const githubAppPermissions: Record<string, "read" | "write"> = {
   workflows: "write",
 };
 
-export const githubAppEvents = [
-  "installation",
-  "installation_repositories",
-  "github_app_authorization",
-];
+export const githubAppEvents = ["push", "check_run"];
 
 function title(value: string) {
   return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());

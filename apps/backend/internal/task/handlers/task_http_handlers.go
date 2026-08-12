@@ -24,6 +24,7 @@ import (
 	"github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/task/statussummary"
 	usermodels "github.com/kandev/kandev/internal/user/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
@@ -1635,7 +1636,7 @@ func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
 	result, err := h.service.MoveTaskWithOptions(
 		c.Request.Context(), c.Param("id"),
 		body.WorkflowID, body.WorkflowStepID, body.Position,
-		service.MoveTaskOptions{AllowActivePrimarySession: true},
+		service.MoveTaskOptions{AllowActivePrimarySession: true, StepHistoryActor: wfmodels.StepTransitionActorHuman},
 	)
 	if err != nil {
 		handleSelectedMoveError(c, h.logger, err)

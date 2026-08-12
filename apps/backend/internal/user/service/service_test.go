@@ -185,6 +185,42 @@ func TestApplyBasicSettings_ConfirmTaskArchive(t *testing.T) {
 	})
 }
 
+func TestApplyBasicSettings_PreventAutoStartAgentOnOpen(t *testing.T) {
+	t.Run("omitted value leaves the setting unchanged", func(t *testing.T) {
+		settings := &models.UserSettings{PreventAutoStartAgentOnOpen: true}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !settings.PreventAutoStartAgentOnOpen {
+			t.Fatal("expected the setting to remain enabled")
+		}
+	})
+
+	t.Run("explicit true enables the setting", func(t *testing.T) {
+		settings := &models.UserSettings{PreventAutoStartAgentOnOpen: false}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{
+			PreventAutoStartAgentOnOpen: ptr(true),
+		}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !settings.PreventAutoStartAgentOnOpen {
+			t.Fatal("expected the setting to be enabled")
+		}
+	})
+
+	t.Run("explicit false disables the setting", func(t *testing.T) {
+		settings := &models.UserSettings{PreventAutoStartAgentOnOpen: true}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{
+			PreventAutoStartAgentOnOpen: ptr(false),
+		}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.PreventAutoStartAgentOnOpen {
+			t.Fatal("expected the setting to be disabled")
+		}
+	})
+}
+
 func TestApplyBasicSettingsAgentGeneratedTaskTitles(t *testing.T) {
 	settings := &models.UserSettings{AgentGeneratedTaskTitles: false}
 	if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{}); err != nil {

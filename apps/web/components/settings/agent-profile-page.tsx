@@ -4,7 +4,7 @@ import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
 import { useParams } from "@/lib/routing/client-router";
-import { IconTrash } from "@tabler/icons-react";
+import { IconCopy, IconTrash } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -33,6 +33,10 @@ import {
   useProfileSave,
   useSyncAgentsToStore,
 } from "@/components/settings/agent-profile-page-state";
+import {
+  profileSaveInvalidReason,
+  useProfileDuplicateAction,
+} from "@/components/settings/agent-profile-duplicate-action";
 import { CustomCLIFlagsCard } from "@/components/settings/cli-flags-field";
 import { ProfileEnabledHelp } from "@/components/settings/profile-enabled-help";
 
@@ -73,17 +77,9 @@ type ProfileEditorHeaderProps = {
   savedProfileName: string;
   enabled: boolean;
   onEnabledChange: (enabled: boolean) => void;
+  onDuplicate: () => void;
+  duplicating: boolean;
 };
-
-function profileSaveInvalidReason(
-  profileName: string,
-  modelConfigResolutionPending: boolean,
-  translate: (key: string) => string,
-): string | undefined {
-  if (!profileName.trim()) return translate("agents:profileNameRequired");
-  if (modelConfigResolutionPending) return translate("agents:resolvingModelOptions");
-  return undefined;
-}
 
 function ProfileEditorHeader({
   agentName,
@@ -91,6 +87,8 @@ function ProfileEditorHeader({
   savedProfileName,
   enabled,
   onEnabledChange,
+  onDuplicate,
+  duplicating,
 }: ProfileEditorHeaderProps) {
   const { t } = useTranslation();
   return (
@@ -105,6 +103,18 @@ function ProfileEditorHeader({
         </p>
       </div>
       <div className="flex items-center gap-3 sm:shrink-0">
+        <Button
+          variant="outline"
+          onClick={onDuplicate}
+          data-testid="duplicate-profile-header"
+          className="min-h-11"
+          disabled={duplicating}
+          aria-busy={duplicating}
+          title={t("agents:duplicateProfileNamed", { name: savedProfileName })}
+        >
+          <IconCopy className="h-4 w-4 mr-2" />
+          {t("agents:duplicate")}
+        </Button>
         <div className="flex items-center gap-1 text-left sm:text-right">
           <p className="text-sm font-medium">{t("agents:enabled")}</p>
           <ProfileEnabledHelp />
@@ -403,6 +413,13 @@ function ProfileEditor({
   });
   const deleteState = useProfileDelete(agent, draft, settingsAgents, syncAgentsToStore, toast);
 
+  const { handleDuplicate: handleDuplicateProfile, duplicating } = useProfileDuplicateAction({
+    agent,
+    draft,
+    modelConfigResolutionPending,
+    translate: t,
+  });
+
   return (
     <div className="space-y-8">
       <ProfileEditorHeader
@@ -411,6 +428,8 @@ function ProfileEditor({
         savedProfileName={savedProfile.name}
         enabled={draft.enabled ?? true}
         onEnabledChange={(next) => updateDraft({ enabled: next })}
+        onDuplicate={() => void handleDuplicateProfile()}
+        duplicating={duplicating}
       />
 
       <Separator />

@@ -35,6 +35,8 @@
   "appriseServiceUrls": "URL(s) do serviço",
   "appriseUrlRequired": "É obrigatório pelo menos um URL de serviço Apprise.",
   "archiveConfirmation": "Confirmação de arquivo",
+  "preventAutoStartAgentOnOpen": "Impedir arranque automático ao abrir",
+  "preventAutoStartAgentOnOpenHelp": "Não inicia o agente automaticamente ao abrir uma tarefa após um reinício ou a partir do passo final do fluxo de trabalho. O botão Iniciar o agente é mostrado em vez disso.",
   "arrangeSplit": "Organizar a divisão",
   "autoApprove": "Aprovação automática",
   "autoFallback": "Fazer fallback automaticamente para o modelo seguinte",

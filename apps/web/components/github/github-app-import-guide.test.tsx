@@ -12,7 +12,7 @@ const preparation: PrepareGitHubAppImportResponse = {
   install_callback_url: "https://kandev.example/install/callback",
   personal_callback_url: "https://kandev.example/personal/callback",
   webhook_url: "https://kandev.example/webhook",
-  setup_url: "https://kandev.example/install/callback",
+  setup_url: "",
   permissions: { contents: "write" },
   events: ["installation"],
   expires_at: "2026-07-22T00:00:00Z",
@@ -27,8 +27,17 @@ describe("GitHubAppImportGuide", () => {
       />,
     );
     expect(screen.getByText("Homepage URL")).toBeTruthy();
-    expect(screen.getByText("User authorization callback URL")).toBeTruthy();
-    expect(screen.getByText("Setup URL")).toBeTruthy();
+    expect(screen.getByText("User authorization callback URL 1")).toBeTruthy();
+    expect(screen.getByText("User authorization callback URL 2")).toBeTruthy();
+    expect(
+      screen
+        .getAllByText(/^https:\/\/kandev\.example\/(?:install|personal)\/callback$/)
+        .map((element) => element.textContent),
+    ).toEqual([
+      "https://kandev.example/install/callback",
+      "https://kandev.example/personal/callback",
+    ]);
+    expect(screen.queryByText("Setup URL")).toBeNull();
     expect(screen.getByText("Webhook URL")).toBeTruthy();
     expect(screen.getByText(/application\/json/)).toBeTruthy();
     expect(screen.getByText(/SSL verification enabled/)).toBeTruthy();
