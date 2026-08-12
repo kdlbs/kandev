@@ -261,6 +261,11 @@ function useTaskPageData(
   const setActiveSessionAuto = useAppStore((state) => state.setActiveSessionAuto);
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const previousRouteTaskId = useRef<string | null | undefined>(undefined);
+  // Route synchronization must see the current selection when route data or
+  // delayed session hydration changes, but a sidebar selection must not
+  // retrigger it and overwrite the session chosen by task selection.
+  const activeTaskIdForSyncRef = useRef(activeTaskId);
+  activeTaskIdForSyncRef.current = activeTaskId;
 
   // Validate that activeSessionId belongs to activeTaskId to prevent showing
   // messages from an unrelated session when navigating to a task without sessions.
@@ -287,20 +292,13 @@ function useTaskPageData(
       initialTaskId: initialTask?.id,
       fallbackTaskId,
       initialSessionId,
-      activeTaskId,
+      activeTaskId: activeTaskIdForSyncRef.current,
       previousRouteTaskId: previousRouteTaskId.current,
       setActiveSessionAuto,
       setActiveTask,
     });
     if (applied) previousRouteTaskId.current = initialTask?.id ?? fallbackTaskId;
-  }, [
-    activeTaskId,
-    initialTask?.id,
-    fallbackTaskId,
-    initialSessionId,
-    setActiveSessionAuto,
-    setActiveTask,
-  ]);
+  }, [initialTask?.id, fallbackTaskId, initialSessionId, setActiveSessionAuto, setActiveTask]);
 
   const { repositories } = useRepositories(task?.workspace_id ?? null, Boolean(task?.workspace_id));
   const effectiveRepositories = repositories.length ? repositories : initialRepositories;

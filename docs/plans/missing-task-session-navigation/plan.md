@@ -42,6 +42,10 @@ export function syncActiveTaskSession(params: {
 - Return `false` when the route ID is unchanged and the active store task differs. This rule preserves an in-place sidebar selection.
 - Track the prior route task ID with `useRef<string | null | undefined>(undefined)` in `useTaskPageData`.
 - Update the ref only when `syncActiveTaskSession` returns `true`.
+- Read the latest active task ID through a ref, but do not include it as a
+  reactive effect dependency. Sidebar task selection owns preferred-session
+  restoration and must not be followed by route synchronization that reapplies
+  the route's primary session.
 
 ### URL and Dockview boundaries
 
@@ -81,6 +85,10 @@ export function syncActiveTaskSession(params: {
 - **Setup:** Create the sibling with `createTaskWithAgent` and the existing mock-agent profile.
 - **What to validate:** The URL selects the sibling. The error state disappears. The Dockview workbench appears. The sibling row stays active after session updates.
 - Keep the existing no-session sibling scenario. It covers the prepare-session path.
+- **Scenario:** Given task A has a primary and a non-primary session, switching
+  A → B → A preserves the selected non-primary session.
+- **What to validate:** The route returns to A while the active-session store
+  value remains the non-primary session.
 
 ## Implementation Waves And Parallel Candidates
 
@@ -100,9 +108,8 @@ The task is sequential. The unit guard and browser regression describe one state
 
 ## Verification Results
 
-- RED browser run: `pnpm e2e:run tests/task/task-loading-state.spec.ts -- --grep
-  "keeps a session-backed sibling active"` reproduced the visible task error state
-  after sibling selection.
+- RED browser run: the focused session-backed sibling E2E reproduced the visible
+  task error state after sibling selection.
 - RED unit run: the stale-route case failed because `syncActiveTaskSession` returned
   `undefined` and re-applied stale route state.
 - GREEN unit run: the focused helper suite passed, 22 tests.
@@ -110,3 +117,9 @@ The task is sequential. The unit guard and browser regression describe one state
 - `pnpm run typecheck` passed.
 - Targeted Prettier check passed.
 - Targeted ESLint passed.
+- Review fixup RED E2E: the A → B → A secondary-session regression returned
+  task A's primary session after returning from task B.
+- Review fixup GREEN E2E: the same production-build regression passed after
+  removing the active-task-only effect trigger and reading the current active
+  task from a ref.
+- Full task-loading-state production-build E2E passed, 4 tests.
