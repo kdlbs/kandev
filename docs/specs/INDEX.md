@@ -47,7 +47,8 @@ Product-wide capabilities that are not tied to a single feature area.
 | [plugins — authoring experience](plugins/authoring-experience.md) | draft |
 | [plugins — marketplace](plugins/marketplace.md) | building |
 | [plugins — agent tools](plugins/agent-tools.md) | draft |
-| [plugins — Voice extraction host prerequisites](plugins/voice-extraction-host.md) | draft |
+| [plugins — Voice extraction host prerequisites](plugins/voice-extraction-host.md) | shipped |
+| [plugins — Voice Mode leaves core](plugins/voice-extraction.md) | shipped |
 | [semantic-notifications](platform/notifications.md) | shipped |
 | [workspace-git-status](platform/workspace-git-status.md) | shipped |
 | [git-subprocess-admission](platform/git-subprocess-admission.md) | building |
@@ -193,7 +194,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [executor-settings-card-spacing](ui/executor-settings-card-spacing.md) | shipped |
 | [quick-chat-elevation](ui/quick-chat-elevation.md) | building |
 | [transcript-navigation-settings](ui/transcript-navigation-settings.md) | shipped |
-| [voice-mode-task-behavior](ui/voice-mode-task-behavior.md) | shipped |
+| [voice-mode-task-behavior](ui/voice-mode-task-behavior.md) | archived |
 | [app-status-bar](ui/app-status-bar.md) | shipped |
 | [quick-terminal](quick-terminal/spec.md) | shipped |
 | [mobile-task-navigation](ui/mobile-task-navigation.md) | shipped |

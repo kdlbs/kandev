@@ -9,7 +9,10 @@ const MAIN_WORKSPACE_NAME = "Main Workspace";
 // name plus that badge — match on the name rather than the whole string.
 const WORKSPACE_ROW = new RegExp(MAIN_WORKSPACE_NAME);
 const SEARCH_LABEL = "Search settings";
-const VOICE_MODE_LABEL = "Voice Mode";
+// A section that lives inside Task Behavior rather than owning a nav row —
+// the same shape Voice Mode had before it moved to a plugin. Used as the probe
+// for "sections never render as page rows".
+const NESTED_SECTION_LABEL = "Message Queue";
 const WORKSPACES_ROW_KEY = "row:/settings/workspaces";
 const AGENTS_ROW_KEY = "row:/settings/agents";
 const WORKSPACE_KEY = `workspace:${MAIN_WORKSPACE_ID}`;
@@ -192,10 +195,10 @@ describe("SettingsTree static menu", () => {
     expect(screen.queryByRole("link", { name: "API Tokens" })).toBeNull();
   });
 
-  it("keeps Voice Mode inside Task Behavior instead of as a page row", () => {
+  it("keeps a section inside Task Behavior instead of rendering it as a page row", () => {
     render(<SettingsTree pathname="/settings/preferences/task-behavior" />);
 
-    expect(screen.queryByRole("link", { name: VOICE_MODE_LABEL })).toBeNull();
+    expect(screen.queryByRole("link", { name: NESTED_SECTION_LABEL })).toBeNull();
     expect(screen.getByRole("link", { name: "Task Behavior" }).getAttribute("data-active")).toBe(
       "true",
     );
@@ -516,7 +519,7 @@ describe("SettingsTree search", () => {
     render(<SettingsTree pathname="/settings" />);
 
     const search = screen.getByRole("searchbox", { name: SEARCH_LABEL });
-    expect(screen.queryByRole("link", { name: VOICE_MODE_LABEL })).toBeNull();
+    expect(screen.queryByRole("link", { name: NESTED_SECTION_LABEL })).toBeNull();
 
     fireEvent.change(search, { target: { value: "font size" } });
 
@@ -525,7 +528,7 @@ describe("SettingsTree search", () => {
       "/settings/preferences/terminal-editors#setting-terminal-font-size",
     );
     expect(result.textContent).toContain("Terminal & Editors");
-    expect(screen.queryByRole("link", { name: VOICE_MODE_LABEL })).toBeNull();
+    expect(screen.queryByRole("link", { name: NESTED_SECTION_LABEL })).toBeNull();
   });
 
   it("prefixes per-workspace results with the workspace name", () => {
@@ -550,7 +553,7 @@ describe("SettingsTree search", () => {
     fireEvent.keyDown(search, { key: "Escape" });
 
     expect((search as HTMLInputElement).value).toBe("");
-    expect(screen.queryByRole("link", { name: VOICE_MODE_LABEL })).toBeNull();
+    expect(screen.queryByRole("link", { name: NESTED_SECTION_LABEL })).toBeNull();
   });
 
   it("announces an empty result without rendering the normal menu", () => {
@@ -561,6 +564,6 @@ describe("SettingsTree search", () => {
     });
 
     expect(screen.getByText("No matching settings")).toBeTruthy();
-    expect(screen.queryByRole("link", { name: "Voice Mode" })).toBeNull();
+    expect(screen.queryByRole("link", { name: NESTED_SECTION_LABEL })).toBeNull();
   });
 });

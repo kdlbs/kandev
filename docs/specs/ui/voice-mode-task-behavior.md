@@ -1,10 +1,15 @@
 ---
-status: shipped
+status: archived
 created: 2026-08-11
 owner: kandev
 ---
 
 # Voice Mode In Task Behavior
+
+> **Archived.** Voice Mode left core and now ships as
+> [`kdlbs/kandev-plugin-voice`](https://github.com/kdlbs/kandev-plugin-voice); its settings live on
+> the plugin's own page. See [Voice Mode leaves core](../plugins/voice-extraction.md). This spec is
+> kept as the record of how the setting was placed while it was a core feature.
 
 ## Why
 

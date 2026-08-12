@@ -61,7 +61,6 @@ export async function installPluginUpload(
   formData.append("package", file);
 
   // Spread caller init *first* so method/body always win, matching the
-  // convention in lib/api/domains/voice-api.ts.
   const response = await fetch(`${baseUrl}${BASE}/install`, {
     ...options?.init,
     method: "POST",
