@@ -693,7 +693,7 @@ export interface PluginHostApi {
    * first-party app UI (PageTopbar, TaskCreateDialog, RichTextEditor,
    * RichTextReadOnly). See `lib/plugins/host-api.ts` for the full list.
    */
-  ui: Partial<PluginUIApi> & Record<string, unknown>;
+  ui: PluginUIApi & Record<string, unknown>;
   /** Canonical responsive breakpoint hook for host-native plugin composition. */
   useResponsiveBreakpoint: typeof useResponsiveBreakpoint;
   /**

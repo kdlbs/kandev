@@ -37,7 +37,7 @@ function makeHostFactory(pluginId: string): PluginHostApi {
       invokeAction: async <TResponse>() => undefined as TResponse,
       baseUrl: "",
     },
-    ui: {},
+    ui: {} as PluginHostApi["ui"],
     useResponsiveBreakpoint,
     theme: "light",
     onThemeChange: () => () => {},
