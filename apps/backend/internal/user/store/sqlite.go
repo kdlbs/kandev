@@ -512,60 +512,61 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		keyboardShortcuts = map[string]interface{}{}
 	}
 	return json.Marshal(map[string]interface{}{
-		"workspace_id":                        settings.WorkspaceID,
-		"kanban_view_mode":                    settings.KanbanViewMode,
-		"startup_page":                        models.NormalizeStartupPage(settings.StartupPage),
-		"workflow_filter_id":                  settings.WorkflowFilterID,
-		"repository_ids":                      settings.RepositoryIDs,
-		"tasks_list_sort":                     models.NormalizeTasksListSort(settings.TasksListSort),
-		"tasks_list_group":                    models.NormalizeTasksListGroup(settings.TasksListGroup),
-		"tasks_list_show_details":             settings.TasksListShowDetails,
-		"initial_setup_complete":              settings.InitialSetupComplete,
-		"preferred_shell":                     settings.PreferredShell,
-		"default_editor_id":                   settings.DefaultEditorID,
-		"enable_preview_on_click":             settings.EnablePreviewOnClick,
-		"chat_submit_key":                     settings.ChatSubmitKey,
-		"review_auto_mark_on_scroll":          settings.ReviewAutoMarkOnScroll,
-		"confirm_task_archive":                settings.ConfirmTaskArchive,
-		"unread_divider":                      settings.UnreadDivider,
-		"agent_generated_task_titles":         settings.AgentGeneratedTaskTitles,
-		"mcp_task_agent_profile_default":      models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
-		"show_anchored_prompt_bar":            settings.ShowAnchoredPromptBar,
-		"show_scroll_to_last_prompt":          settings.ShowScrollToLastPrompt,
-		"show_scroll_to_start":                settings.ShowScrollToStart,
-		"show_transcript_auto_scroll_control": settings.ShowTranscriptAutoScrollControl,
-		"show_todo_list_panel":                settings.ShowTodoListPanel,
-		"show_release_notification":           settings.ShowReleaseNotification,
-		"release_notes_last_seen_version":     settings.ReleaseNotesLastSeenVersion,
-		"lsp_auto_start_languages":            lspAutoStart,
-		"lsp_auto_install_languages":          lspAutoInstall,
-		"lsp_server_configs":                  lspServerConfigs,
-		"lsp_status_location":                 models.NormalizeLspStatusLocation(settings.LspStatusLocation),
-		"saved_layouts":                       savedLayouts,
-		"sidebar_views":                       sidebarViews,
-		"sidebar_active_view_id":              settings.SidebarActiveViewID,
-		"sidebar_draft":                       settings.SidebarDraft,
-		"sidebar_task_prefs":                  sidebarTaskPrefs,
-		"task_create_last_used":               settings.TaskCreateLastUsed,
-		"jira_saved_views":                    settings.JiraSavedViews,
-		"jira_task_presets":                   settings.JiraTaskPresets,
-		"github_saved_presets":                settings.GitHubSavedPresets,
-		"github_default_query_presets":        settings.GitHubDefaultQueryPresets,
-		"gitlab_saved_presets":                settings.GitLabSavedPresets,
-		"azure_devops_browse_preferences":     settings.AzureDevOpsBrowsePreferences,
-		"default_utility_agent_id":            settings.DefaultUtilityAgentID,
-		"default_utility_model":               settings.DefaultUtilityModel,
-		"default_utility_agent_profile_id":    settings.DefaultUtilityAgentProfileID,
-		"keyboard_shortcuts":                  keyboardShortcuts,
-		"terminal_link_behavior":              settings.TerminalLinkBehavior,
-		"terminal_font_family":                settings.TerminalFontFamily,
-		"terminal_font_size":                  settings.TerminalFontSize,
-		"changes_panel_layout":                settings.ChangesPanelLayout,
-		"system_metrics_display":              settings.SystemMetricsDisplay,
-		"app_status_bar_enabled":              settings.AppStatusBarEnabled,
-		"app_status_bar_order":                normalizeAppStatusBarOrder(settings.AppStatusBarOrder),
-		"voice_mode":                          settings.VoiceMode,
-		"kanban_hidden_step_ids":              settings.KanbanHiddenStepIDs,
+		"workspace_id":                             settings.WorkspaceID,
+		"kanban_view_mode":                         settings.KanbanViewMode,
+		"startup_page":                             models.NormalizeStartupPage(settings.StartupPage),
+		"workflow_filter_id":                       settings.WorkflowFilterID,
+		"repository_ids":                           settings.RepositoryIDs,
+		"tasks_list_sort":                          models.NormalizeTasksListSort(settings.TasksListSort),
+		"tasks_list_group":                         models.NormalizeTasksListGroup(settings.TasksListGroup),
+		"tasks_list_show_details":                  settings.TasksListShowDetails,
+		"initial_setup_complete":                   settings.InitialSetupComplete,
+		"preferred_shell":                          settings.PreferredShell,
+		"default_editor_id":                        settings.DefaultEditorID,
+		"enable_preview_on_click":                  settings.EnablePreviewOnClick,
+		"chat_submit_key":                          settings.ChatSubmitKey,
+		"review_auto_mark_on_scroll":               settings.ReviewAutoMarkOnScroll,
+		"confirm_task_archive":                     settings.ConfirmTaskArchive,
+		"unread_divider":                           settings.UnreadDivider,
+		"agent_generated_task_titles":              settings.AgentGeneratedTaskTitles,
+		"mcp_task_agent_profile_default":           models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
+		"show_anchored_prompt_bar":                 settings.ShowAnchoredPromptBar,
+		"show_scroll_to_last_prompt":               settings.ShowScrollToLastPrompt,
+		"show_scroll_to_start":                     settings.ShowScrollToStart,
+		"show_transcript_auto_scroll_control":      settings.ShowTranscriptAutoScrollControl,
+		"show_todo_list_panel":                     settings.ShowTodoListPanel,
+		"show_todo_list_panel_only_when_not_empty": settings.ShowTodoListPanelOnlyWhenNotEmpty,
+		"show_release_notification":                settings.ShowReleaseNotification,
+		"release_notes_last_seen_version":          settings.ReleaseNotesLastSeenVersion,
+		"lsp_auto_start_languages":                 lspAutoStart,
+		"lsp_auto_install_languages":               lspAutoInstall,
+		"lsp_server_configs":                       lspServerConfigs,
+		"lsp_status_location":                      models.NormalizeLspStatusLocation(settings.LspStatusLocation),
+		"saved_layouts":                            savedLayouts,
+		"sidebar_views":                            sidebarViews,
+		"sidebar_active_view_id":                   settings.SidebarActiveViewID,
+		"sidebar_draft":                            settings.SidebarDraft,
+		"sidebar_task_prefs":                       sidebarTaskPrefs,
+		"task_create_last_used":                    settings.TaskCreateLastUsed,
+		"jira_saved_views":                         settings.JiraSavedViews,
+		"jira_task_presets":                        settings.JiraTaskPresets,
+		"github_saved_presets":                     settings.GitHubSavedPresets,
+		"github_default_query_presets":             settings.GitHubDefaultQueryPresets,
+		"gitlab_saved_presets":                     settings.GitLabSavedPresets,
+		"azure_devops_browse_preferences":          settings.AzureDevOpsBrowsePreferences,
+		"default_utility_agent_id":                 settings.DefaultUtilityAgentID,
+		"default_utility_model":                    settings.DefaultUtilityModel,
+		"default_utility_agent_profile_id":         settings.DefaultUtilityAgentProfileID,
+		"keyboard_shortcuts":                       keyboardShortcuts,
+		"terminal_link_behavior":                   settings.TerminalLinkBehavior,
+		"terminal_font_family":                     settings.TerminalFontFamily,
+		"terminal_font_size":                       settings.TerminalFontSize,
+		"changes_panel_layout":                     settings.ChangesPanelLayout,
+		"system_metrics_display":                   settings.SystemMetricsDisplay,
+		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
+		"app_status_bar_order":                     normalizeAppStatusBarOrder(settings.AppStatusBarOrder),
+		"voice_mode":                               settings.VoiceMode,
+		"kanban_hidden_step_ids":                   settings.KanbanHiddenStepIDs,
 	})
 }
 
@@ -639,38 +640,39 @@ func mergeVoiceModeDefaults(stored *storedVoiceMode) models.VoiceModeSettings {
 
 func defaultUserSettings(userID string) *models.UserSettings {
 	return &models.UserSettings{
-		UserID:                          userID,
-		StartupPage:                     models.StartupPageTaskOverview,
-		RepositoryIDs:                   []string{},
-		TasksListSort:                   models.TasksListSortDefault,
-		TasksListGroup:                  models.TasksListGroupDefault,
-		ReviewAutoMarkOnScroll:          true,
-		ConfirmTaskArchive:              true,
-		UnreadDivider:                   false,
-		AgentGeneratedTaskTitles:        true,
-		MCPTaskAgentProfileDefault:      models.MCPTaskAgentProfileDefaultCurrentTask,
-		ShowAnchoredPromptBar:           false,
-		ShowScrollToLastPrompt:          true,
-		ShowScrollToStart:               false,
-		ShowTranscriptAutoScrollControl: false,
-		ShowTodoListPanel:               false,
-		ShowReleaseNotification:         true,
-		LspAutoStartLanguages:           []string{},
-		LspAutoInstallLanguages:         []string{},
-		LspServerConfigs:                map[string]map[string]interface{}{},
-		LspStatusLocation:               models.LspStatusLocationToolbar,
-		SavedLayouts:                    []models.SavedLayout{},
-		ChatSubmitKey:                   "cmd_enter",
-		KeyboardShortcuts:               map[string]interface{}{},
-		TerminalLinkBehavior:            "new_tab",
-		ChangesPanelLayout:              defaultChangesPanelLayout,
-		SidebarViews:                    DefaultSidebarViews(),
-		SidebarActiveViewID:             DefaultSidebarViewID,
-		SidebarTaskPrefs:                normalizeSidebarTaskPrefs(models.SidebarTaskPrefs{}),
-		AppStatusBarEnabled:             false,
-		AppStatusBarOrder:               normalizeAppStatusBarOrder(models.AppStatusBarOrder{}),
-		VoiceMode:                       defaultVoiceModeSettings(),
-		KanbanHiddenStepIDs:             map[string][]string{},
+		UserID:                            userID,
+		StartupPage:                       models.StartupPageTaskOverview,
+		RepositoryIDs:                     []string{},
+		TasksListSort:                     models.TasksListSortDefault,
+		TasksListGroup:                    models.TasksListGroupDefault,
+		ReviewAutoMarkOnScroll:            true,
+		ConfirmTaskArchive:                true,
+		UnreadDivider:                     false,
+		AgentGeneratedTaskTitles:          true,
+		MCPTaskAgentProfileDefault:        models.MCPTaskAgentProfileDefaultCurrentTask,
+		ShowAnchoredPromptBar:             false,
+		ShowScrollToLastPrompt:            true,
+		ShowScrollToStart:                 false,
+		ShowTranscriptAutoScrollControl:   false,
+		ShowTodoListPanel:                 false,
+		ShowTodoListPanelOnlyWhenNotEmpty: false,
+		ShowReleaseNotification:           true,
+		LspAutoStartLanguages:             []string{},
+		LspAutoInstallLanguages:           []string{},
+		LspServerConfigs:                  map[string]map[string]interface{}{},
+		LspStatusLocation:                 models.LspStatusLocationToolbar,
+		SavedLayouts:                      []models.SavedLayout{},
+		ChatSubmitKey:                     "cmd_enter",
+		KeyboardShortcuts:                 map[string]interface{}{},
+		TerminalLinkBehavior:              "new_tab",
+		ChangesPanelLayout:                defaultChangesPanelLayout,
+		SidebarViews:                      DefaultSidebarViews(),
+		SidebarActiveViewID:               DefaultSidebarViewID,
+		SidebarTaskPrefs:                  normalizeSidebarTaskPrefs(models.SidebarTaskPrefs{}),
+		AppStatusBarEnabled:               false,
+		AppStatusBarOrder:                 normalizeAppStatusBarOrder(models.AppStatusBarOrder{}),
+		VoiceMode:                         defaultVoiceModeSettings(),
+		KanbanHiddenStepIDs:               map[string][]string{},
 	}
 }
 
@@ -695,60 +697,61 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		return settings, nil
 	}
 	var payload struct {
-		WorkspaceID                     string                              `json:"workspace_id"`
-		KanbanViewMode                  string                              `json:"kanban_view_mode"`
-		StartupPage                     string                              `json:"startup_page"`
-		WorkflowFilterID                string                              `json:"workflow_filter_id"`
-		RepositoryIDs                   []string                            `json:"repository_ids"`
-		TasksListSort                   string                              `json:"tasks_list_sort"`
-		TasksListGroup                  string                              `json:"tasks_list_group"`
-		TasksListShowDetails            bool                                `json:"tasks_list_show_details"`
-		InitialSetupComplete            bool                                `json:"initial_setup_complete"`
-		PreferredShell                  string                              `json:"preferred_shell"`
-		DefaultEditorID                 string                              `json:"default_editor_id"`
-		EnablePreviewOnClick            bool                                `json:"enable_preview_on_click"`
-		ChatSubmitKey                   string                              `json:"chat_submit_key"`
-		ReviewAutoMarkOnScroll          *bool                               `json:"review_auto_mark_on_scroll"`
-		ConfirmTaskArchive              *bool                               `json:"confirm_task_archive"`
-		UnreadDivider                   *bool                               `json:"unread_divider"`
-		AgentGeneratedTaskTitles        *bool                               `json:"agent_generated_task_titles"`
-		MCPTaskAgentProfileDefault      string                              `json:"mcp_task_agent_profile_default"`
-		ShowAnchoredPromptBar           *bool                               `json:"show_anchored_prompt_bar"`
-		ShowScrollToLastPrompt          *bool                               `json:"show_scroll_to_last_prompt"`
-		ShowScrollToStart               *bool                               `json:"show_scroll_to_start"`
-		ShowTranscriptAutoScrollControl *bool                               `json:"show_transcript_auto_scroll_control"`
-		ShowTodoListPanel               *bool                               `json:"show_todo_list_panel"`
-		ShowReleaseNotification         *bool                               `json:"show_release_notification"`
-		ReleaseNotesLastSeenVersion     string                              `json:"release_notes_last_seen_version"`
-		LspAutoStartLanguages           []string                            `json:"lsp_auto_start_languages"`
-		LspAutoInstallLanguages         []string                            `json:"lsp_auto_install_languages"`
-		LspServerConfigs                map[string]map[string]interface{}   `json:"lsp_server_configs"`
-		LspStatusLocation               string                              `json:"lsp_status_location"`
-		SavedLayouts                    []models.SavedLayout                `json:"saved_layouts"`
-		SidebarViews                    json.RawMessage                     `json:"sidebar_views"`
-		SidebarActiveViewID             json.RawMessage                     `json:"sidebar_active_view_id"`
-		SidebarDraft                    *models.SidebarViewDraft            `json:"sidebar_draft"`
-		SidebarTaskPrefs                models.SidebarTaskPrefs             `json:"sidebar_task_prefs"`
-		TaskCreateLastUsed              models.TaskCreateLastUsed           `json:"task_create_last_used"`
-		JiraSavedViews                  json.RawMessage                     `json:"jira_saved_views"`
-		JiraTaskPresets                 json.RawMessage                     `json:"jira_task_presets"`
-		GitHubSavedPresets              json.RawMessage                     `json:"github_saved_presets"`
-		GitHubDefaultQueryPresets       json.RawMessage                     `json:"github_default_query_presets"`
-		GitLabSavedPresets              json.RawMessage                     `json:"gitlab_saved_presets"`
-		AzureDevOpsBrowsePreferences    json.RawMessage                     `json:"azure_devops_browse_preferences"`
-		DefaultUtilityAgentID           string                              `json:"default_utility_agent_id"`
-		DefaultUtilityModel             string                              `json:"default_utility_model"`
-		DefaultUtilityAgentProfileID    string                              `json:"default_utility_agent_profile_id"`
-		KeyboardShortcuts               map[string]interface{}              `json:"keyboard_shortcuts"`
-		TerminalLinkBehavior            string                              `json:"terminal_link_behavior"`
-		TerminalFontFamily              string                              `json:"terminal_font_family"`
-		TerminalFontSize                int                                 `json:"terminal_font_size"`
-		ChangesPanelLayout              string                              `json:"changes_panel_layout"`
-		SystemMetricsDisplay            models.SystemMetricsDisplaySettings `json:"system_metrics_display"`
-		AppStatusBarEnabled             *bool                               `json:"app_status_bar_enabled"`
-		AppStatusBarOrder               models.AppStatusBarOrder            `json:"app_status_bar_order"`
-		VoiceMode                       *storedVoiceMode                    `json:"voice_mode"`
-		KanbanHiddenStepIDs             json.RawMessage                     `json:"kanban_hidden_step_ids"`
+		WorkspaceID                       string                              `json:"workspace_id"`
+		KanbanViewMode                    string                              `json:"kanban_view_mode"`
+		StartupPage                       string                              `json:"startup_page"`
+		WorkflowFilterID                  string                              `json:"workflow_filter_id"`
+		RepositoryIDs                     []string                            `json:"repository_ids"`
+		TasksListSort                     string                              `json:"tasks_list_sort"`
+		TasksListGroup                    string                              `json:"tasks_list_group"`
+		TasksListShowDetails              bool                                `json:"tasks_list_show_details"`
+		InitialSetupComplete              bool                                `json:"initial_setup_complete"`
+		PreferredShell                    string                              `json:"preferred_shell"`
+		DefaultEditorID                   string                              `json:"default_editor_id"`
+		EnablePreviewOnClick              bool                                `json:"enable_preview_on_click"`
+		ChatSubmitKey                     string                              `json:"chat_submit_key"`
+		ReviewAutoMarkOnScroll            *bool                               `json:"review_auto_mark_on_scroll"`
+		ConfirmTaskArchive                *bool                               `json:"confirm_task_archive"`
+		UnreadDivider                     *bool                               `json:"unread_divider"`
+		AgentGeneratedTaskTitles          *bool                               `json:"agent_generated_task_titles"`
+		MCPTaskAgentProfileDefault        string                              `json:"mcp_task_agent_profile_default"`
+		ShowAnchoredPromptBar             *bool                               `json:"show_anchored_prompt_bar"`
+		ShowScrollToLastPrompt            *bool                               `json:"show_scroll_to_last_prompt"`
+		ShowScrollToStart                 *bool                               `json:"show_scroll_to_start"`
+		ShowTranscriptAutoScrollControl   *bool                               `json:"show_transcript_auto_scroll_control"`
+		ShowTodoListPanel                 *bool                               `json:"show_todo_list_panel"`
+		ShowTodoListPanelOnlyWhenNotEmpty *bool                               `json:"show_todo_list_panel_only_when_not_empty"`
+		ShowReleaseNotification           *bool                               `json:"show_release_notification"`
+		ReleaseNotesLastSeenVersion       string                              `json:"release_notes_last_seen_version"`
+		LspAutoStartLanguages             []string                            `json:"lsp_auto_start_languages"`
+		LspAutoInstallLanguages           []string                            `json:"lsp_auto_install_languages"`
+		LspServerConfigs                  map[string]map[string]interface{}   `json:"lsp_server_configs"`
+		LspStatusLocation                 string                              `json:"lsp_status_location"`
+		SavedLayouts                      []models.SavedLayout                `json:"saved_layouts"`
+		SidebarViews                      json.RawMessage                     `json:"sidebar_views"`
+		SidebarActiveViewID               json.RawMessage                     `json:"sidebar_active_view_id"`
+		SidebarDraft                      *models.SidebarViewDraft            `json:"sidebar_draft"`
+		SidebarTaskPrefs                  models.SidebarTaskPrefs             `json:"sidebar_task_prefs"`
+		TaskCreateLastUsed                models.TaskCreateLastUsed           `json:"task_create_last_used"`
+		JiraSavedViews                    json.RawMessage                     `json:"jira_saved_views"`
+		JiraTaskPresets                   json.RawMessage                     `json:"jira_task_presets"`
+		GitHubSavedPresets                json.RawMessage                     `json:"github_saved_presets"`
+		GitHubDefaultQueryPresets         json.RawMessage                     `json:"github_default_query_presets"`
+		GitLabSavedPresets                json.RawMessage                     `json:"gitlab_saved_presets"`
+		AzureDevOpsBrowsePreferences      json.RawMessage                     `json:"azure_devops_browse_preferences"`
+		DefaultUtilityAgentID             string                              `json:"default_utility_agent_id"`
+		DefaultUtilityModel               string                              `json:"default_utility_model"`
+		DefaultUtilityAgentProfileID      string                              `json:"default_utility_agent_profile_id"`
+		KeyboardShortcuts                 map[string]interface{}              `json:"keyboard_shortcuts"`
+		TerminalLinkBehavior              string                              `json:"terminal_link_behavior"`
+		TerminalFontFamily                string                              `json:"terminal_font_family"`
+		TerminalFontSize                  int                                 `json:"terminal_font_size"`
+		ChangesPanelLayout                string                              `json:"changes_panel_layout"`
+		SystemMetricsDisplay              models.SystemMetricsDisplaySettings `json:"system_metrics_display"`
+		AppStatusBarEnabled               *bool                               `json:"app_status_bar_enabled"`
+		AppStatusBarOrder                 models.AppStatusBarOrder            `json:"app_status_bar_order"`
+		VoiceMode                         *storedVoiceMode                    `json:"voice_mode"`
+		KanbanHiddenStepIDs               json.RawMessage                     `json:"kanban_hidden_step_ids"`
 	}
 	if err := json.Unmarshal([]byte(settingsRaw), &payload); err != nil {
 		return nil, err
@@ -798,6 +801,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	}
 	if payload.ShowTodoListPanel != nil {
 		settings.ShowTodoListPanel = *payload.ShowTodoListPanel
+	}
+	if payload.ShowTodoListPanelOnlyWhenNotEmpty != nil {
+		settings.ShowTodoListPanelOnlyWhenNotEmpty = *payload.ShowTodoListPanelOnlyWhenNotEmpty
 	}
 	if payload.ShowReleaseNotification != nil {
 		settings.ShowReleaseNotification = *payload.ShowReleaseNotification

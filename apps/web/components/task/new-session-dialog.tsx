@@ -444,6 +444,7 @@ function NewSessionForm({
       />
       <TaskFormInputs
         isSessionMode
+        taskId={taskId}
         workspaceId={workspaceId}
         autoFocus
         initialDescription=""
@@ -468,8 +469,11 @@ function NewSessionForm({
         isEnhancingPrompt={isEnhancingPrompt}
         isUtilityConfigured={isUtilityConfigured}
         onVoiceAutoSend={() => {
-          if (isBusyState || hasPendingAttachmentUploads || !profileSelection.hasProfiles) return;
+          if (isBusyState || hasPendingAttachmentUploads || !profileSelection.hasProfiles) {
+            return false;
+          }
           void handleSubmit(VOICE_SUBMIT_EVENT);
+          return true;
         }}
       />
       <PromptResultRecovery

@@ -89,5 +89,7 @@
   "whenEnabledClickingATaskOpens": "启用后，点击任务会打开预览面板；禁用后，点击会直接进入会话。",
   "wipTaskCount": "{{label}} 个任务",
   "workflow": "工作流",
-  "workflowStepFallback": "工作流步骤 {{stepId}}"
+  "workflowStepFallback": "工作流步骤 {{stepId}}",
+  "columns": "列",
+  "columnsForWorkflow": "{{name}} 的列"
 }

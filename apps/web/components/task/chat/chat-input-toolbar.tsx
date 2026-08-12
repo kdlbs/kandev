@@ -10,6 +10,7 @@ import { shouldUseCompactTaskChrome } from "@/hooks/use-compact-task-chrome";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
+import type { PluginComposerCapability } from "@/lib/plugins/types";
 
 export type ChatInputToolbarProps = {
   planModeEnabled: boolean;
@@ -61,6 +62,8 @@ export type ChatInputToolbarProps = {
   hideAgentControls?: boolean;
   /** Hide the plan mode toggle button (for ephemeral/quick chat sessions) */
   hidePlanMode?: boolean;
+  composerCapability?: PluginComposerCapability;
+  composerSurface?: "task-chat" | "quick-chat";
 };
 
 function MinimalToolbar({

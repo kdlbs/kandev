@@ -106,7 +106,11 @@ const (
 	agentShutdownTimeout     = 20 * time.Second
 	httpShutdownTimeout      = 10 * time.Second
 	tracingShutdownTimeout   = 5 * time.Second
+	addedFieldKey            = "added"
 	branchFieldKey           = "branch"
+	branchAdditionsFieldKey  = "branch_additions"
+	branchDeletionsFieldKey  = "branch_deletions"
+	deletedFieldKey          = "deleted"
 	versionFieldKey          = "version"
 	kandevName               = "kandev"
 	startingStatus           = "starting"
@@ -338,19 +342,24 @@ func tryGetLiveGitStatus(ctx context.Context, lifecycleMgr *lifecycle.Manager, s
 // stores it under byEnvironmentRepo[envKey][repository_name].
 func buildGitStatusNotification(sessionID, repositoryName string, status client.GitStatusResult) *ws.Message {
 	statusPayload := map[string]interface{}{
-		branchFieldKey:     status.Branch,
-		"remote_branch":    status.RemoteBranch,
-		"ahead":            status.Ahead,
-		"behind":           status.Behind,
-		"files":            status.Files,
-		"modified":         status.Modified,
-		"added":            status.Added,
-		"deleted":          status.Deleted,
-		"untracked":        status.Untracked,
-		"renamed":          status.Renamed,
-		"branch_additions": status.BranchAdditions,
-		"branch_deletions": status.BranchDeletions,
-		"is_submodule":     status.IsSubmodule,
+		branchFieldKey:          status.Branch,
+		"remote_branch":         status.RemoteBranch,
+		"head_commit":           status.HeadCommit,
+		"base_commit":           status.BaseCommit,
+		"ahead":                 status.Ahead,
+		"behind":                status.Behind,
+		"remote_ahead":          status.RemoteAhead,
+		"remote_behind":         status.RemoteBehind,
+		"remote_head_commit":    status.RemoteHeadCommit,
+		"files":                 status.Files,
+		"modified":              status.Modified,
+		addedFieldKey:           status.Added,
+		deletedFieldKey:         status.Deleted,
+		"untracked":             status.Untracked,
+		"renamed":               status.Renamed,
+		branchAdditionsFieldKey: status.BranchAdditions,
+		branchDeletionsFieldKey: status.BranchDeletions,
+		"is_submodule":          status.IsSubmodule,
 	}
 	if repositoryName != "" {
 		statusPayload["repository_name"] = repositoryName
@@ -396,18 +405,18 @@ func appendDBSnapshotGitStatus(ctx context.Context, taskRepo *sqliterepo.Reposit
 		"session_id": sessionID,
 		"timestamp":  metadata["timestamp"],
 		"status": map[string]interface{}{
-			branchFieldKey:     latestSnapshot.Branch,
-			"remote_branch":    latestSnapshot.RemoteBranch,
-			"ahead":            latestSnapshot.Ahead,
-			"behind":           latestSnapshot.Behind,
-			"files":            latestSnapshot.Files,
-			"modified":         metadata["modified"],
-			"added":            metadata["added"],
-			"deleted":          metadata["deleted"],
-			"untracked":        metadata["untracked"],
-			"renamed":          metadata["renamed"],
-			"branch_additions": metadata["branch_additions"],
-			"branch_deletions": metadata["branch_deletions"],
+			branchFieldKey:          latestSnapshot.Branch,
+			"remote_branch":         latestSnapshot.RemoteBranch,
+			"ahead":                 latestSnapshot.Ahead,
+			"behind":                latestSnapshot.Behind,
+			"files":                 latestSnapshot.Files,
+			"modified":              metadata["modified"],
+			addedFieldKey:           metadata[addedFieldKey],
+			deletedFieldKey:         metadata[deletedFieldKey],
+			"untracked":             metadata["untracked"],
+			"renamed":               metadata["renamed"],
+			branchAdditionsFieldKey: metadata[branchAdditionsFieldKey],
+			branchDeletionsFieldKey: metadata[branchDeletionsFieldKey],
 		},
 	}
 	notification, err := ws.NewNotification(ws.ActionSessionGitEvent, gitEventData)

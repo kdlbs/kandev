@@ -20,7 +20,10 @@ import (
 
 // --- Authenticated action relay ---
 
-const actionErrorField = "error"
+const (
+	actionErrorField              = "error"
+	authenticationRequiredMessage = "authentication required"
+)
 
 type actionHTTPEnvelope struct {
 	WorkspaceID  string          `json:"workspaceId"`
@@ -135,7 +138,7 @@ func (c *Controller) verifyActionContext(
 ) (pluginsdk.VerifiedActionContext, bool) {
 	identity, authenticated := authn.FromGin(ctx)
 	if !authenticated || identity.UserID == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{actionErrorField: "authentication required"})
+		ctx.JSON(http.StatusUnauthorized, gin.H{actionErrorField: authenticationRequiredMessage})
 		return pluginsdk.VerifiedActionContext{}, false
 	}
 	if c.svc.taskData == nil {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { t } from "@/lib/i18n";
-import { hasOpenChangeRequest } from "./vcs-split-button";
+import { determinePrimaryAction, hasOpenChangeRequest } from "./vcs-split-button";
 
 /**
  * The VCS tooltips used to build their plural by hand:
@@ -72,6 +72,16 @@ describe("hasOpenChangeRequest", () => {
         },
       ]),
     ).toBe(false);
+  });
+});
+
+describe("vcs split-button remote action semantics", () => {
+  it("uses the upstream-relative count for a linked PR push", () => {
+    expect(determinePrimaryAction(0, 1, 7, true)).toBe("push");
+  });
+
+  it("does not select Push when divergence policy removes unsafe push evidence", () => {
+    expect(determinePrimaryAction(0, 0, 7, true)).toBe("rebase");
   });
 });
 

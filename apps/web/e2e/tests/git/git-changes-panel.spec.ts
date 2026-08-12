@@ -1523,4 +1523,251 @@ test.describe("Git Changes Panel", () => {
     await expect(pushedRow).toBeVisible({ timeout: 10_000 });
     await expect(pushedRow.locator(".tabler-icon-git-commit")).toBeVisible({ timeout: 5_000 });
   });
+
+  test("separates rewritten provider history from the local checkout", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+    prCapture,
+  }) => {
+    test.setTimeout(120_000);
+
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const gitEnv = {
+      ...process.env,
+      HOME: backend.tmpDir,
+      GIT_AUTHOR_NAME: "E2E Test",
+      GIT_AUTHOR_EMAIL: "e2e@test.local",
+      GIT_COMMITTER_NAME: "E2E Test",
+      GIT_COMMITTER_EMAIL: "e2e@test.local",
+    };
+    const git = new GitHelper(repoDir, gitEnv);
+
+    // Build a deterministic stale checkout. The upstream stays at the fixture
+    // seed commit while the task checkout grows six local commits.
+    git.exec("git checkout -f main");
+    if (git.exec("git remote").split(/\r?\n/).includes("origin")) {
+      git.exec(`git remote set-url origin "${seedData.repositoryRemoteURL}"`);
+    } else {
+      git.exec(`git remote add origin "${seedData.repositoryRemoteURL}"`);
+    }
+    git.exec("git fetch origin main");
+    git.exec("git reset --hard origin/main");
+    git.exec("git clean -fd");
+    git.exec("git branch --set-upstream-to=origin/main main");
+    for (let index = 1; index <= 6; index += 1) {
+      git.createFile(`drift-local-${index}.txt`, `local checkout commit ${index}`);
+      git.stageFile(`drift-local-${index}.txt`);
+      git.commit(`Contribution commit ${index}`);
+    }
+    const localHead = git.getCurrentSha();
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Git Rewritten Contribution History",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    const providerCommits = Array.from({ length: 15 }, (_, index) => ({
+      // These are intentionally valid, unique provider SHAs that do not exist
+      // in the local checkout. Their absence proves graph drift, not metadata
+      // mismatch, and keeps the provider fixture independent of local Git.
+      sha: `${String(index + 1).padStart(2, "0")}${"a".repeat(38)}`,
+      message: `Rewritten provider commit ${index + 1}`,
+      author_login: "remote-contributor",
+      author_date: `2026-08-${String(index + 1).padStart(2, "0")}T12:00:00Z`,
+      stats_available: false,
+    }));
+
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("remote-contributor");
+    await apiClient.mockGitHubAddPRs([
+      {
+        number: 901,
+        title: "Rewritten contribution",
+        state: "open",
+        head_branch: "feature/rewritten-contribution",
+        base_branch: "main",
+        author_login: "remote-contributor",
+        repo_owner: "testorg",
+        repo_name: "testrepo",
+        head_sha: providerCommits[providerCommits.length - 1].sha,
+      },
+    ]);
+    await apiClient.mockGitHubAddPRCommits("testorg", "testrepo", 901, providerCommits);
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 901,
+      pr_url: "https://github.com/testorg/testrepo/pull/901",
+      pr_title: "Rewritten contribution",
+      head_branch: "feature/rewritten-contribution",
+      base_branch: "main",
+      author_login: "remote-contributor",
+    });
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 45_000 });
+    await session.clickTab("Changes");
+
+    const changes = testPage.getByTestId("changes-panel");
+    await expect(changes.getByTestId("remote-contribution-drift-warning")).toBeVisible({
+      timeout: 30_000,
+    });
+    const providerSection = changes.getByTestId("current-pr-commits-section");
+    const localSection = changes.getByTestId("local-checkout-commits-section");
+    await expect(providerSection).toBeVisible({ timeout: 10_000 });
+    await expect(localSection).toBeVisible({ timeout: 10_000 });
+    await expect(
+      providerSection.getByTestId("current-pr-commits-section-collapse-toggle"),
+    ).toContainText("Current PR commits");
+    await expect(
+      localSection.getByTestId("local-checkout-commits-section-collapse-toggle"),
+    ).toContainText("Local checkout commits");
+    await expect(providerSection.locator('[data-testid^="commit-row-"]')).toHaveCount(15);
+    await expect(localSection.locator('[data-testid^="commit-row-"]')).toHaveCount(6);
+
+    // A rewritten provider history must not label the preserved checkout as
+    // six unpushed commits, and reading the panel must not mutate the checkout.
+    await expect(providerSection.locator(".tabler-icon-arrow-up")).toHaveCount(0);
+    await expect(localSection.locator(".tabler-icon-arrow-up")).toHaveCount(0);
+    expect(git.getCurrentSha()).toBe(localHead);
+    expect(git.exec("git status --porcelain").trim()).toBe("");
+
+    const changesPull = changes.getByRole("button", { name: /^Pull$/ });
+    await expect(changesPull).toBeDisabled();
+    await prCapture.screenshot("remote-contribution-drift-desktop", {
+      caption: "Rewritten provider history is separated from the preserved local checkout",
+    });
+
+    // The review dialog uses the desktop VCS split button. It must expose the
+    // same safety policy as the Changes panel.
+    await changes.getByRole("button", { name: "Review" }).click();
+    const reviewDialog = testPage.getByRole("dialog", { name: "Review Changes" });
+    await expect(reviewDialog).toBeVisible({ timeout: 15_000 });
+    await reviewDialog.getByRole("button", { name: "Open VCS options" }).click();
+    const openMenu = testPage.locator('[data-slot="dropdown-menu-content"][data-state="open"]');
+    await expect(openMenu).toHaveCount(1);
+    await expect(
+      openMenu.locator('[data-slot="dropdown-menu-item"]').filter({ hasText: /^Pull$/ }),
+    ).toHaveAttribute("aria-disabled", "true");
+    await expect(
+      openMenu.locator('[data-slot="dropdown-menu-sub-trigger"]').filter({ hasText: /^Push/ }),
+    ).toHaveAttribute("aria-disabled", "true");
+  });
+
+  test("keeps a one-commit local-ahead contribution pushable", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const gitEnv = {
+      ...process.env,
+      HOME: backend.tmpDir,
+      GIT_AUTHOR_NAME: "E2E Test",
+      GIT_AUTHOR_EMAIL: "e2e@test.local",
+      GIT_COMMITTER_NAME: "E2E Test",
+      GIT_COMMITTER_EMAIL: "e2e@test.local",
+    };
+    const git = new GitHelper(repoDir, gitEnv);
+
+    git.exec("git checkout -f main");
+    if (git.exec("git remote").split(/\r?\n/).includes("origin")) {
+      git.exec(`git remote set-url origin "${seedData.repositoryRemoteURL}"`);
+    } else {
+      git.exec(`git remote add origin "${seedData.repositoryRemoteURL}"`);
+    }
+    git.exec("git fetch origin main");
+    git.exec("git reset --hard origin/main");
+    git.exec("git clean -fd");
+    git.exec("git branch --set-upstream-to=origin/main main");
+    const providerHead = git.exec("git rev-parse origin/main").trim();
+    git.createFile("local-ahead-contribution.txt", "one local commit ahead");
+    git.stageFile("local-ahead-contribution.txt");
+    const localHead = git.commit("Local maintainer contribution");
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Git Local Ahead Contribution",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("local-ahead-author");
+    await apiClient.mockGitHubAddPRs([
+      {
+        number: 903,
+        title: "Local ahead contribution",
+        state: "open",
+        head_branch: "feature/local-ahead",
+        base_branch: "main",
+        author_login: "local-ahead-author",
+        repo_owner: "testorg",
+        repo_name: "testrepo",
+      },
+    ]);
+    await apiClient.mockGitHubAddPRCommits("testorg", "testrepo", 903, [
+      {
+        sha: providerHead,
+        message: "Current provider head",
+        author_login: "local-ahead-author",
+        author_date: "2026-08-10T12:00:00Z",
+        stats_available: false,
+      },
+    ]);
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 903,
+      pr_url: "https://github.com/testorg/testrepo/pull/903",
+      pr_title: "Local ahead contribution",
+      head_branch: "feature/local-ahead",
+      base_branch: "main",
+      author_login: "local-ahead-author",
+    });
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 45_000 });
+    await session.clickTab("Changes");
+    const changes = testPage.getByTestId("changes-panel");
+    await expect(changes.getByTestId("commits-section")).toBeVisible({ timeout: 30_000 });
+    await expect(changes.getByText("Local maintainer contribution")).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(changes.getByTestId("remote-contribution-drift-warning")).toHaveCount(0);
+
+    await changes.getByRole("button", { name: "Review" }).click();
+    const reviewDialog = testPage.getByRole("dialog", { name: "Review Changes" });
+    await expect(reviewDialog).toBeVisible({ timeout: 15_000 });
+    await expect(reviewDialog.getByTestId("vcs-primary-push")).toBeVisible({ timeout: 15_000 });
+    await reviewDialog.getByRole("button", { name: "Open VCS options" }).click();
+    const openMenu = testPage.locator('[data-slot="dropdown-menu-content"][data-state="open"]');
+    await expect(
+      openMenu.locator('[data-slot="dropdown-menu-sub-trigger"]').filter({ hasText: /^Push/ }),
+    ).not.toHaveAttribute("aria-disabled", "true");
+    expect(git.getCurrentSha()).toBe(localHead);
+    expect(git.exec("git status --porcelain").trim()).toBe("");
+  });
 });

@@ -560,19 +560,43 @@ export function insertLastAgentErrorItem(
   return [...items.slice(0, insertAt), notice, ...items.slice(insertAt)];
 }
 
+/** Builds the todo checklist from the latest persisted `todo`-type message,
+ *  accepting string and `{ text, done }` entries. Total by construction:
+ *  malformed metadata yields an empty list, never throws. */
 export function buildTodoItems(visibleMessages: Message[]) {
-  const latestTodos = [...visibleMessages]
-    .reverse()
-    .find((message) => message.type === "todo" || (message.metadata as { todos?: unknown })?.todos);
-  return (
-    (
-      latestTodos?.metadata as
-        | { todos?: Array<{ text: string; done?: boolean } | string> }
-        | undefined
-    )?.todos
-      ?.map((item) => (typeof item === "string" ? { text: item, done: false } : item))
-      .filter((item) => item.text) ?? []
-  );
+  // Scan backward from the latest message without allocating a reversed
+  // copy: this runs on the todo-panel sync hot path for every message-array
+  // update while the "only pin when not empty" sub-option is on.
+  for (let i = visibleMessages.length - 1; i >= 0; i--) {
+    const message = visibleMessages[i];
+    const hasTodoMetadata =
+      message.metadata !== null &&
+      typeof message.metadata === "object" &&
+      "todos" in message.metadata;
+    if (message.type !== "todo" && !hasTodoMetadata) continue;
+    const metadata = message.metadata;
+    const todos =
+      metadata !== null && typeof metadata === "object" && "todos" in metadata
+        ? metadata.todos
+        : undefined;
+    // Total by construction: malformed persisted metadata (non-array `todos`,
+    // null/primitive entries) must yield an empty list, never throw, so the
+    // todos panel, chat processing, and the todo-panel sync hook can all
+    // trust this call. Matches the spec's "malformed todo message falls back
+    // to an empty state" behavior. The latest todo-carrying message wins even
+    // when its payload is malformed.
+    if (!Array.isArray(todos)) return [];
+    return todos
+      .map((item) => (typeof item === "string" ? { text: item, done: false } : item))
+      .filter(
+        (item): item is { text: string; done?: boolean } =>
+          typeof item === "object" &&
+          item !== null &&
+          typeof item.text === "string" &&
+          item.text.length > 0,
+      );
+  }
+  return [];
 }
 
 export function useProcessedMessages(

@@ -65,6 +65,11 @@ type GitStatusUpdate struct {
 	// empty.
 	RemoteBehind int `json:"remote_behind"`
 
+	// RemoteHeadCommit is the locally observed tip of RemoteBranch. It is
+	// captured with RemoteAhead and RemoteBehind so consumers can compare the
+	// checkout with an upstream snapshot without confusing it with the base.
+	RemoteHeadCommit string `json:"remote_head_commit,omitempty"`
+
 	// HeadCommit is the current HEAD commit SHA.
 	HeadCommit string `json:"head_commit,omitempty"`
 

@@ -95,7 +95,7 @@ type pluginUserStateUpdatedEvent struct {
 func (c *Controller) userStateIdentity(ctx *gin.Context) (userID string, record *store.Record, scope string, ok bool) {
 	identity, hasIdentity := authn.FromGin(ctx)
 	if !hasIdentity {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		ctx.JSON(http.StatusUnauthorized, gin.H{actionErrorField: authenticationRequiredMessage})
 		return "", nil, "", false
 	}
 

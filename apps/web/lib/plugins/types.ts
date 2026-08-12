@@ -376,6 +376,32 @@ export interface ReviewProviderRegistration {
 /** Presentation context a task panel or kanban menu action renders under. */
 export type PluginPresentation = "desktop" | "mobile";
 
+export type PluginComposerSurface = "task-chat" | "quick-chat" | "task-create" | "new-session";
+
+export type PluginComposerSubmitResult =
+  | { status: "submitted" }
+  | { status: "blocked"; reason?: string }
+  | { status: "unavailable" };
+
+export interface PluginComposerCapability {
+  insertText(text: string): { status: "inserted" | "ignored" | "unavailable" };
+  focus(): { status: "focused" | "unavailable" };
+  submit(): Promise<PluginComposerSubmitResult>;
+}
+
+export interface PluginComposerSlotProps {
+  surface: PluginComposerSurface;
+  presentation: PluginPresentation;
+  taskId: string | null;
+  taskTitle?: string;
+  activeSessionId: string | null;
+  sessionIds: string[];
+  disabled: boolean;
+  submittable: boolean;
+  disabledReason?: string;
+  composer: PluginComposerCapability;
+}
+
 /** Props passed to a `TaskPanelRegistration.Component`. */
 export interface PluginTaskPanelProps {
   /** This registration's panel id, so one Component can back multiple panels. */

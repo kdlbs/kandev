@@ -600,7 +600,8 @@ interface PluginRegistry {
 
   // Named slot injection. Host renders all components registered for a slot via
   // <PluginSlot name="..." slotProps={...}/>. Initial slots: "task-sidebar",
-  // "settings-nav", "chat-input-actions", "chat-top-bar",
+  // "settings-nav", "chat-input-actions", "task-create-input-actions",
+  // "new-session-input-actions", "chat-top-bar",
   // "main-top-bar", "app-status-bar-left", "app-status-bar-right",
   // "plugin-settings", "task-card-indicators", and "task-card-tags".
   // "task-card-indicators" renders a small icon/badge beside the PR status
@@ -613,9 +614,10 @@ interface PluginRegistry {
   // same `{ taskId: string, workspaceId: string | null, workflowStepId: string | null }`
   // shape as `slotProps` (`workspaceId` is null with no active workspace, and
   // `workflowStepId` is null when the task has no workflow step assigned).
-  // "chat-input-actions" renders icon buttons in the chat composer toolbar
-  // (beside the model picker, mic, and send) and forwards
-  // `{ taskId, taskTitle, activeSessionId, sessionIds }` as `slotProps`.
+  // "chat-input-actions", "task-create-input-actions", and
+  // "new-session-input-actions" render composer actions for task/Quick Chat,
+  // task creation, and new-session creation. Each forwards the typed
+  // `PluginComposerSlotProps`, including native insert/focus/submit capabilities.
   // "chat-top-bar" renders status in the session top bar (beside the
   // document/editor/debug controls) and forwards
   // `{ taskId, taskTitle, workspaceId, activeSessionId, sessionIds }`. Both
@@ -895,6 +897,32 @@ interface PluginReviewPanelProps {
 
 type PluginPresentation = "desktop" | "mobile";
 
+type PluginComposerSurface =
+  | "task-chat"
+  | "quick-chat"
+  | "task-create"
+  | "new-session";
+interface PluginComposerCapability {
+  insertText(text: string): { status: "inserted" | "ignored" | "unavailable" };
+  focus(): { status: "focused" | "unavailable" };
+  submit(): Promise<{
+    status: "submitted" | "blocked" | "unavailable";
+    reason?: string;
+  }>;
+}
+interface PluginComposerSlotProps {
+  surface: PluginComposerSurface;
+  presentation: PluginPresentation;
+  taskId: string | null;
+  taskTitle?: string;
+  activeSessionId: string | null;
+  sessionIds: string[];
+  disabled: boolean;
+  submittable: boolean;
+  disabledReason?: string;
+  composer: PluginComposerCapability;
+}
+
 interface PluginTaskPanelProps {
   panelId: string; // this registration's panel id, so one Component can back multiple panels
   taskId: string;
@@ -1118,8 +1146,10 @@ defaults, or the bare component when the route opted out (`topbar: false`).
   The chat composer toolbar
   (`components/task/chat/chat-input-toolbar-desktop.tsx` and
   `-mobile.tsx`, via `chat-input-plugin-actions.tsx`) hosts the
-  `chat-input-actions` slot, passing
-  `{ taskId, taskTitle, activeSessionId, sessionIds }`. `kanban-card-plugin-slots.tsx`
+  `chat-input-actions` slot for task and Quick Chat, passing the typed
+  `PluginComposerSlotProps`. Task creation and new-session creation mount
+  `task-create-input-actions` and `new-session-input-actions` with the same
+  capability contract. `kanban-card-plugin-slots.tsx`
   hosts `task-card-indicators` beside `PRTaskIcon` and `task-card-tags` as its
   own row, both mounted from `kanban-card-content.tsx`'s `KanbanCardBody`.
 - `components/task/dockview-shared.tsx` / `dockview-panel-content.tsx` /

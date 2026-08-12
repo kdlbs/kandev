@@ -125,9 +125,32 @@ type AuthProvider struct {
 
 // Webhook is a proxied external webhook endpoint the plugin declares.
 type Webhook struct {
-	Key         string `yaml:"key" json:"key"`
-	Description string `yaml:"description,omitempty" json:"description,omitempty"`
-	Method      string `yaml:"method,omitempty" json:"method,omitempty"`
+	Key          string `yaml:"key" json:"key"`
+	Description  string `yaml:"description,omitempty" json:"description,omitempty"`
+	Method       string `yaml:"method,omitempty" json:"method,omitempty"`
+	Access       string `yaml:"access,omitempty" json:"access,omitempty"`
+	MaxBodyBytes int64  `yaml:"max_body_bytes,omitempty" json:"max_body_bytes,omitempty"`
+}
+
+const (
+	WebhookAccessPublic              = "public"
+	WebhookAccessAuthenticated       = "authenticated"
+	DefaultWebhookMaxBodyBytes int64 = 4 << 20
+	MaximumWebhookMaxBodyBytes int64 = 16 << 20
+)
+
+func (w Webhook) EffectiveAccess() string {
+	if w.Access == "" {
+		return WebhookAccessPublic
+	}
+	return w.Access
+}
+
+func (w Webhook) EffectiveMaxBodyBytes() int64 {
+	if w.MaxBodyBytes == 0 {
+		return DefaultWebhookMaxBodyBytes
+	}
+	return w.MaxBodyBytes
 }
 
 // Action is an authenticated browser-to-plugin operation. Unlike Webhook,

@@ -8,6 +8,7 @@ import {
 import type { RichMetadata } from "@/components/task/chat/types";
 import {
   buildGroupedRenderItems,
+  buildTodoItems,
   collapseTodoSnapshotsPerTurn,
   deduplicateAgentBootResumes,
   insertLastAgentErrorItem,
@@ -476,5 +477,76 @@ describe("buildGroupedRenderItems subagent hoisting", () => {
       { canAnchorPrepareProgress: false },
     );
     expect(items.map((i) => i.type)).toEqual(["turn_group", "message", "turn_group"]);
+  });
+});
+
+describe("buildTodoItems", () => {
+  it("returns the latest persisted todo entries, accepting string and object items", () => {
+    const messages = [
+      makeMessage("m1", "message", undefined, "hello"),
+      makeTodo("m2", "turn-1", [
+        { text: "Old task", done: true },
+        { text: "Old task 2", done: false },
+      ]),
+      {
+        ...makeMessage("m3", "todo", {
+          todos: ["Write tests", { text: "Implement", done: true }],
+        }),
+        turn_id: "turn-2",
+      },
+    ];
+
+    expect(buildTodoItems(messages)).toEqual([
+      { text: "Write tests", done: false },
+      { text: "Implement", done: true },
+    ]);
+  });
+
+  it("returns an empty list when no message carries todos", () => {
+    expect(buildTodoItems([makeMessage("m1", "message", undefined, "hello")])).toEqual([]);
+    expect(buildTodoItems([])).toEqual([]);
+  });
+
+  it("drops empty-text entries so they do not count as a non-empty list", () => {
+    const messages = [
+      {
+        ...makeMessage("m1", "todo", { todos: [{ text: "" }, "Valid", { text: "Whitespace " }] }),
+        turn_id: "t",
+      },
+    ];
+
+    expect(buildTodoItems(messages)).toEqual([
+      { text: "Valid", done: false },
+      { text: "Whitespace ", done: undefined },
+    ]);
+  });
+
+  it("is total for malformed todo metadata instead of throwing", () => {
+    const malformed = [
+      // todos is a non-array object
+      { ...makeMessage("m1", "todo", { todos: { text: "x" } }), turn_id: "turn-1" },
+      // todos is a primitive
+      { ...makeMessage("m2", "todo", { todos: "x" }), turn_id: "turn-2" },
+      // todos contains null / non-object entries
+      { ...makeMessage("m3", "todo", { todos: [null, 42, { text: "Valid" }] }), turn_id: "turn-3" },
+      // metadata is a primitive (not an object)
+      {
+        ...makeMessage("m4", "todo", "not-an-object" as unknown as Record<string, unknown>),
+        turn_id: "turn-4",
+      },
+      // todo-type message without metadata
+      { ...makeMessage("m5", "todo", undefined), turn_id: "turn-5" },
+    ];
+
+    // Each shape independently must yield [] (or only the valid entries),
+    // never throw.
+    for (const message of malformed) {
+      expect(() => buildTodoItems([message])).not.toThrow();
+    }
+    expect(buildTodoItems([malformed[0]])).toEqual([]);
+    expect(buildTodoItems([malformed[1]])).toEqual([]);
+    expect(buildTodoItems([malformed[2]])).toEqual([{ text: "Valid", done: undefined }]);
+    expect(buildTodoItems([malformed[3]])).toEqual([]);
+    expect(buildTodoItems([malformed[4]])).toEqual([]);
   });
 });

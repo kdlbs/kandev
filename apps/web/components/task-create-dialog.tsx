@@ -4,7 +4,10 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Dialog, DialogContent, DialogHeader, DialogFooter } from "@kandev/ui/dialog";
 import type { TaskCreateLastUsedState } from "@/lib/state/slices/settings/types";
-import { TaskCreateDialogFooter } from "@/components/task-create-dialog-footer";
+import {
+  isNativeSubmitDisabled,
+  TaskCreateDialogFooter,
+} from "@/components/task-create-dialog-footer";
 import { DiscardLocalChangesDialog } from "@/components/discard-local-changes-dialog";
 import { DialogHeaderContent } from "@/components/task-create-dialog-header";
 import {
@@ -224,14 +227,19 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
     }
     resetQueuedLastUsedOnClose();
   }, [props.open, resetQueuedLastUsedOnClose]);
-  // Voice auto-send invokes the same submit handler as the in-form Submit
-  // button. Every existing validation gate (missing title/repo/branch/agent,
-  // `submitBlockedReason`, in-flight create) still applies because they live
-  // inside `handleSubmit` itself, so a dictation with incomplete fields
-  // silently no-ops rather than creating a malformed task.
+  // Programmatic submissions use the native control's preflight before
+  // entering the same guarded submit handler as the form button.
+  const pendingAttachmentReason = setup.fs.hasPendingAttachmentUploads
+    ? t("chat:attachmentUploadPendingSubmit")
+    : null;
+  const nativeSubmitDisabled = isNativeSubmitDisabled(
+    buildDialogFooterProps(setup, props, pendingAttachmentReason),
+  );
   const handleVoiceAutoSend = useCallback(() => {
+    if (nativeSubmitDisabled) return false;
     guardedHandleSubmit(VOICE_SUBMIT_EVENT);
-  }, [guardedHandleSubmit]);
+    return true;
+  }, [guardedHandleSubmit, nativeSubmitDisabled]);
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogContent
@@ -261,13 +269,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             />
             <DialogFooter className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2">
               <TaskCreateDialogFooter
-                {...buildDialogFooterProps(
-                  setup,
-                  props,
-                  setup.fs.hasPendingAttachmentUploads
-                    ? t("chat:attachmentUploadPendingSubmit")
-                    : null,
-                )}
+                {...buildDialogFooterProps(setup, props, pendingAttachmentReason)}
               />
             </DialogFooter>
           </form>

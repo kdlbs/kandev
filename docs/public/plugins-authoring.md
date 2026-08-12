@@ -119,9 +119,10 @@ curated React, UI, and app-store surface.
   capabilities.events controls event delivery.
 - GetConfig and EmitEvent are ungated. GetConfig returns this plugin's own
   config, including cleartext secret fields, so do not log or commit it.
-- Declared webhook keys are routable, but Kandev does not authenticate callers
-  or enforce webhooks[].method. Validate the method, provider signature, and
-  replay/timestamp rules inside the plugin before side effects.
+- Declared webhook keys default to public. Set `webhooks[].access: authenticated`
+  for browser UI and billable operations. Kandev does not enforce
+  `webhooks[].method`; public integrations must still validate the provider
+  signature and replay/timestamp rules before side effects.
 - capabilities.auth is the highest-risk capability. A webhook response may
   assert a verified external identity with X-Kandev-Auth-Login; only assert an
   email the IdP verified as owned by the subject. See [ADR 0050](../decisions/0050-plugin-external-auth-capability.md).
@@ -216,7 +217,7 @@ slice shapes in a released plugin.
 | host.React / host.jsx       | Shared React instance and React.createElement alias                                                                                                                                                                                                                                                    | Active ui.bundle                                                       | No cleanup; never bundle a second React/Radix runtime                                                                                                                                                           | const h = host.jsx                                                                                                  |
 | host.context                | Versioned provider-neutral reads/subscriptions for active workspace, native task creation, and exact provider repository identity                                                                                                                                                                      | Active ui.bundle                                                       | Subscriptions are generation-owned and revoked on unload; records are stable SDK shapes, not private app state                                                                                                  | const context = host.context.getTaskCreationContext(workspaceId)                                                    |
 | host.store (legacy)         | Compatibility-only access to Kandev's private Zustand store; intentionally absent from `@kandev/plugin-sdk`                                                                                                                                                                                            | Older ui.bundle                                                        | Do not use in new or official plugins; private slices may change without plugin-API compatibility                                                                                                               | Migrate reads to host.context                                                                                       |
-| host.api.fetch / baseUrl    | fetch(path, init?) is scoped to /api/plugins/<id>/...; baseUrl is the backend origin for split-origin deployments                                                                                                                                                                                      | Active ui.bundle; backend path must be a declared webhook when relayed | Abort/ignore requests after destroy; do not assume a webhook authenticates callers                                                                                                                              | host.api.fetch("webhooks/inbound", { method: "POST" })                                                              |
+| host.api.fetch / baseUrl    | fetch(path, init?) is scoped to /api/plugins/<id>/...; baseUrl is the backend origin for split-origin deployments                                                                                                                                                                                      | Active ui.bundle; backend path must be a declared webhook when relayed | Declare `webhooks[].access: authenticated` for UI-only or billable operations; requests are generation-aborted on unload                                                                                        | host.api.fetch("webhooks/inbound", { method: "POST" })                                                              |
 | host.api.invokeAction       | Authenticated call to a declared action with host-verified workspace/task/session/repository selectors and bounded untrusted body                                                                                                                                                                      | Matching manifest `actions[]` key/scope                                | Browser abort cancels the bounded plugin RPC; safe domain statuses and `Retry-After` may be returned                                                                                                            | host.api.invokeAction("reviews.get", { taskId }, { signal })                                                        |
 | host.storage                | Authenticated, per-user key/value storage: get(scope, scopeId, key, options?)/set(scope, scopeId, key, value, options?)/delete(scope, scopeId, key, options?)/list(scope, scopeId, options?) plus subscribe(filter, handler); no plugin backend required                                               | capabilities.user_state: true                                          | Reads and writes accept an AbortSignal; set/delete also accept writerId (appended to the host's per-tab id, not a replacement) for echo suppression; list returns every entry under the scope pair, unpaginated | host.storage.set("task", taskId, "note", value, { writerId: panelId, signal })                                      |
 | host.ui                     | Curated host instances: Alert*, Badge, Button, Card*, Checkbox, Dialog*, DropdownMenu*, Input, Label, Pagination*, ScrollArea, Select*, Separator, Sheet*, Skeleton, Spinner, Switch, Table*, Tabs*, Textarea, Tooltip*, RichTextEditor, RichTextReadOnly, plus Combobox, PageTopbar, TaskCreateDialog | Active ui.bundle                                                       | Host owns contexts/portals; render with host React and let modal/slot cleanup run                                                                                                                               | const Button = host.ui.Button                                                                                       |
@@ -319,24 +320,32 @@ display-only until Kandev calls the plugin again to authorize it for submission.
 registerComponent currently has these mounted slots. The source type is open
 to strings, but an unmounted name renders nowhere.
 
-| Slot                 | Mounted location                                         | slotProps                                                        |
-| -------------------- | -------------------------------------------------------- | ---------------------------------------------------------------- |
-| task-sidebar         | Bottom of task-detail sidebar                            | none                                                             |
-| settings-nav         | Settings navigation tree                                 | none                                                             |
-| chat-input-actions   | Chat composer toolbar                                    | { taskId, taskTitle?, activeSessionId, sessionIds }              |
-| chat-top-bar         | Session top bar                                          | { taskId, taskTitle?, workspaceId, activeSessionId, sessionIds } |
-| main-top-bar         | Home/Kanban/Tasks top bar                                | { workspaceId, workspaceLabel?, currentPage }                    |
-| app-status-bar-left  | Left side of desktop status bar or mobile status drawer  | AppStatusBarSlotProps                                            |
-| app-status-bar-right | Right side of desktop status bar or mobile status drawer | AppStatusBarSlotProps                                            |
-| plugin-settings      | Top of this plugin's Settings > Plugins page             | { pluginId, status }; owner-scoped to the plugin being viewed    |
-| task-card-indicators | Kanban card, beside the PR status icon                   | { taskId, workspaceId, workflowStepId }                          |
-| task-card-tags       | Kanban card, its own row below the badges row            | { taskId, workspaceId, workflowStepId }                          |
+| Slot                      | Mounted location                                         | slotProps                                                        |
+| ------------------------- | -------------------------------------------------------- | ---------------------------------------------------------------- |
+| task-sidebar              | Bottom of task-detail sidebar                            | none                                                             |
+| settings-nav              | Settings navigation tree                                 | none                                                             |
+| chat-input-actions        | Task or Quick Chat composer toolbar                      | PluginComposerSlotProps                                          |
+| task-create-input-actions | Task creation composer toolbar                           | PluginComposerSlotProps                                          |
+| new-session-input-actions | New-session composer toolbar                             | PluginComposerSlotProps                                          |
+| chat-top-bar              | Session top bar                                          | { taskId, taskTitle?, workspaceId, activeSessionId, sessionIds } |
+| main-top-bar              | Home/Kanban/Tasks top bar                                | { workspaceId, workspaceLabel?, currentPage }                    |
+| app-status-bar-left       | Left side of desktop status bar or mobile status drawer  | AppStatusBarSlotProps                                            |
+| app-status-bar-right      | Right side of desktop status bar or mobile status drawer | AppStatusBarSlotProps                                            |
+| plugin-settings           | Top of this plugin's Settings > Plugins page             | { pluginId, status }; owner-scoped to the plugin being viewed    |
+| task-card-indicators      | Kanban card, beside the PR status icon                   | { taskId, workspaceId, workflowStepId }                          |
+| task-card-tags            | Kanban card, its own row below the badges row            | { taskId, workspaceId, workflowStepId }                          |
 
 AppStatusBarSlotProps is { placement, presentation, density, pathname,
 activeWorkspaceId, activeTaskId, activeSessionId }. Desktop presentation is a
 compact 24px bar; mobile presentation is an in-flow drawer, so render a
 touch-usable row. Status items can be reordered by the host; plugins do not get
 an ordering API.
+
+`PluginComposerSlotProps` is `{ surface, presentation, taskId, taskTitle?,
+activeSessionId, sessionIds, disabled, submittable, disabledReason?, composer }`.
+The `composer` capability provides `insertText`, `focus`, and asynchronous
+`submit`; submit returns `submitted` only when the native composer accepts the
+operation, otherwise `blocked` or `unavailable`.
 
 ## Backend contract
 
@@ -459,7 +468,7 @@ type Plugin interface {
 ```
 
 Embed `pluginsdk.UnimplementedPlugin` and override only the methods you need
-— it's a no-op base that also implements `HostSetter`, so `Serve` injects a
+It is a no-op base that also implements `HostSetter`, so `Serve` injects a
 live `Host` into your plugin once the broker connection back to kandev is
 established (retrieve it later via `p.Host()`).
 
@@ -486,7 +495,7 @@ type Host interface {
 
 	// GetConfig returns the plugin's own operator-editable config (set via
 	// Settings > Plugins > <plugin>, generated from manifest config_schema).
-	// Ungated — always readable, secret values included. Kandev restarts a
+	// Ungated: always readable, secret values included. Kandev restarts a
 	// running plugin when its config changes, so re-read at startup.
 	GetConfig(ctx context.Context) (map[string]any, error)
 
@@ -545,7 +554,7 @@ its own database. Each entry is addressed by a `(scope, scopeID, key)`
 triple and holds a JSON object (`map[string]any`): `SetState` upserts one,
 `GetState` reads it back (`found` is `false` when the key was never set),
 `DeleteState` removes it, and `ListState` returns every entry under a
-`(scope, scopeID)`. Values are JSON objects, not bare scalars — wrap a
+`(scope, scopeID)`. Values are JSON objects, not bare scalars; wrap a
 number as `map[string]any{"n": 3}`. State is namespaced per plugin (kandev
 injects your plugin id server-side, so no plugin can read or write
 another's), survives restarts, is captured by kandev's database backups, and
@@ -556,13 +565,13 @@ data directory below for arbitrary files you'd rather manage yourself.
 `scope` partitions that store by what a value belongs to: `instance` (the
 whole kandev instance; `scopeID` empty), or `workspace` / `task` / `agent`
 with `scopeID` set to that entity's id. A per-task counter, for example, is
-`SetState(ctx, "task", taskID, "count", map[string]any{"n": 3})` — kept
+`SetState(ctx, "task", taskID, "count", map[string]any{"n": 3})`; kept
 separate from every other task's.
 
 `EmitEvent` publishes `plugin.<your-plugin-id>.<name>` on kandev's internal
 event bus for delivery to any subscriber (including other plugins).
 
-The data-reader accessors return typed, paginated readers — e.g.
+The data-reader accessors return typed, paginated readers, for example
 `host.Tasks().List(ctx, TaskFilter{...}, Page{Limit: 50})` returns
 `([]Task, *PageInfo, error)` with an opaque `PageInfo.NextCursor` for the
 next page. See `pkg/pluginsdk/data_types.go` for the full `Task`,
@@ -572,10 +581,10 @@ next page. See `pkg/pluginsdk/data_types.go` for the full `Task`,
 `host.Messages().List(ctx, MessageFilter{...}, Page{...})` reads historical
 conversation content (capability `api_read:messages`). Filter by `SessionIDs`,
 `TaskIDs`, a `Since`/`Until` `created_at` window (RFC3339; `Since` inclusive,
-`Until` exclusive — the natural way to fetch "yesterday"), and message
+`Until` exclusive, the natural way to fetch "yesterday"), and message
 `Types`. Each `Message` carries `id`, `session_id`, `task_id`, `turn_id`,
 `author_type` (`user` or `agent`), `content`, `type`, and `created_at`.
-`content` has kandev's injected `<kandev-system>` blocks stripped — a plugin
+`content` has kandev's injected `<kandev-system>` blocks stripped; a plugin
 never sees raw system prompts.
 
 `host.InvokeUtilityAgent(ctx, prompt)` runs a one-shot, non-interactive LLM
@@ -617,7 +626,7 @@ requires `capabilities.agent_invoke: true`; each data-reader accessor requires
 its resource in `capabilities.api_read` (e.g. `tasks`, `sessions`, `messages`,
 `workspaces`, `workflows`, `agent_profiles`, `repositories`).
 Calling one without the declared capability returns gRPC `PermissionDenied`
-with a message naming the missing capability — declare what you use.
+with a message naming the missing capability; declare what you use.
 
 ### Live Host writes
 
@@ -639,7 +648,7 @@ Treat all write calls as user-visible mutations and honor `ctx.Done()`.
 ## Authenticated declared actions
 
 Use a manifest `actions` entry for a browser action that needs the current
-Kandev identity and a Kandev resource—not a public webhook. The bundle calls
+Kandev identity and a Kandev resource, not a public webhook. The bundle calls
 `host.api.invokeAction`; Kandev authenticates the request, authorizes the
 declared `scope`, strips selectors from the untrusted body, and calls the
 plugin's optional `ActionHandler` with a `VerifiedActionContext`.
@@ -796,7 +805,7 @@ ACS in a `webhook`, validate the token yourself, then set the reserved
 `X-Kandev-Auth-Login` response header to a JSON object
 `{"provider","subject","email","display_name"}`. Kandev maps it to a user
 (link-by-email or just-in-time member provisioning), mints the session, and sets
-the `kandev_session` cookie itself — your plugin never handles the raw token,
+the `kandev_session` cookie itself; your plugin never handles the raw token,
 and any `Set-Cookie` you return is dropped. Requires authentication enabled;
 emitting the header without `capabilities.auth` returns 403.
 
@@ -804,10 +813,10 @@ emitting the header without `capabilities.auth` returns 403.
 Kandev auto-links that email to (or provisions) an account, so an unverified or
 user-settable email claim is an account-takeover vector. Kandev refuses to
 auto-link to an admin account as defense-in-depth, but it cannot tell a verified
-email from an unverified one — that is on your plugin. See ADR 0050.
+email from an unverified one; that is on your plugin. See ADR 0050.
 
 **Writable data directory.** Kandev injects `KANDEV_PLUGIN_DATA_DIR` into
-every spawned plugin subprocess — a per-plugin writable directory
+every spawned plugin subprocess: a per-plugin writable directory
 (`~/.kandev/plugins/<id>/data`) for anything you'd rather keep on disk than
 in `Host` state.
 
@@ -951,7 +960,7 @@ interface PluginPageChrome {
 ```ts
 interface PluginHostApi {
   pluginId: string;
-  React: typeof import("react"); // shared host React instance — MUST use this, never bundle your own React
+  React: typeof import("react"); // shared host React instance; MUST use this, never bundle your own React
   jsx: typeof React.createElement; // convenience alias
   context: {
     getActiveWorkspaceId(): string | undefined;
@@ -981,11 +990,11 @@ interface PluginHostApi {
       },
       options?: { signal?: AbortSignal },
     ): Promise<T>;
-    // Backend API origin ("" when the SPA and API share an origin) — lets a
+    // Backend API origin ("" when the SPA and API share an origin); lets a
     // plugin reach first-party kandev REST endpoints directly.
     baseUrl: string;
   };
-  ui: PluginUIApi; // named curated host components — see @kandev/plugin-sdk
+  ui: PluginUIApi; // named curated host components; see @kandev/plugin-sdk
   theme: "light" | "dark";
   // Soft SPA navigation (history push/replace), same as the app's own router.
   navigate(href: string, options?: { replace?: boolean }): void;
@@ -1027,13 +1036,13 @@ A compatibility-only `host.store` remains for older bundles, but it is absent
 from `@kandev/plugin-sdk`. New plugins must not depend on private `AppState`
 records or mutate the SPA store.
 
-A plugin bundle must render with `host.React` / `host.jsx` — bundling your
+A plugin bundle must render with `host.React` / `host.jsx`; bundling your
 own React copy breaks hook identity against the host tree.
 
-`host.ui` is a curated `@kandev/ui` subset — Alert, Badge, Button, Card,
+`host.ui` is a curated `@kandev/ui` subset: Alert, Badge, Button, Card,
 Checkbox, Dialog, DropdownMenu, Input, Label, Pagination, ScrollArea, Select,
 Separator, Sheet, Skeleton, Spinner, Switch, Table, Tabs, Textarea, Tooltip
-(each with their compound sub-parts, e.g. `DialogContent`, `TableRow`) — plus
+(each with their compound sub-parts, e.g. `DialogContent`, `TableRow`) plus
 first-party app UI: `Combobox` (the app's picker), `PageTopbar` (the title
 bar a route gets by default via `registerRoute`'s `options.topbar`, exposed
 here for routes that opt out and render their own chrome), and
@@ -1126,13 +1135,13 @@ reinterpret an older unscoped row.
 
 ### Modal windows
 
-`host.openModal(options)` imperatively opens a host-owned Dialog — rendered
+`host.openModal(options)` imperatively opens a host-owned Dialog, rendered
 by a `<PluginModalHost/>` mounted once inside the authenticated AppShell's
 theme/tooltip/toast provider tree, isolated behind its own error boundary, and
 auto-closed if the plugin is disabled or uninstalled
 while it's open. It's independent of keybindings: call it from a keybinding
 handler, a nav route, a slot component, or a WS handler. It complements the
-declarative `host.ui.Dialog` — reach for `host.ui.Dialog` when a dialog is
+declarative `host.ui.Dialog`; reach for `host.ui.Dialog` when a dialog is
 embedded in a slot's own render tree, and `host.openModal` when you need to
 pop one open imperatively from anywhere in your plugin's code.
 
@@ -1186,17 +1195,19 @@ slot. The host renders every plugin's component for that slot (each isolated
 behind an error boundary), so a slot may hold contributions from several
 plugins at once. Available slots:
 
-| Slot                   | Where it renders                                                                                       | `slotProps`                                                       |
-| ---------------------- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
-| `task-sidebar`         | Bottom of the task-detail sidebar                                                                      | —                                                                 |
-| `settings-nav`         | Settings navigation tree                                                                               | —                                                                 |
-| `main-nav-footer`      | Footer of the main sidebar                                                                             | —                                                                 |
-| `chat-input-actions`   | Chat composer toolbar, beside the model picker, mic, and send button                                   | `{ taskId, taskTitle, activeSessionId, sessionIds }`              |
-| `chat-top-bar`         | Session top bar, beside the CPU/DB metrics and the document/editor/debug controls                      | `{ taskId, taskTitle, workspaceId, activeSessionId, sessionIds }` |
-| `main-top-bar`         | Default app top bar (Home / Kanban / Tasks), beside the CPU/DB metrics and the view/display controls   | `{ workspaceId, workspaceLabel, currentPage }`                    |
-| `app-status-bar-left`  | Default-left item in the global status surface                                                         | `AppStatusBarSlotProps`                                           |
-| `app-status-bar-right` | Default-right item in the global status surface                                                        | `AppStatusBarSlotProps`                                           |
-| `plugin-settings`      | A plugin's own settings page (**Settings > Plugins > `<plugin>`**), at the top above the settings form | `{ pluginId, status }`                                            |
+| Slot                        | Where it renders                                                                                       | `slotProps`                                                       |
+| --------------------------- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
+| `task-sidebar`              | Bottom of the task-detail sidebar                                                                      | none                                                              |
+| `settings-nav`              | Settings navigation tree                                                                               | none                                                              |
+| `main-nav-footer`           | Footer of the main sidebar                                                                             | none                                                              |
+| `chat-input-actions`        | Task or Quick Chat composer toolbar                                                                    | `PluginComposerSlotProps`                                         |
+| `task-create-input-actions` | Task creation composer toolbar                                                                         | `PluginComposerSlotProps`                                         |
+| `new-session-input-actions` | New-session composer toolbar                                                                           | `PluginComposerSlotProps`                                         |
+| `chat-top-bar`              | Session top bar, beside the CPU/DB metrics and the document/editor/debug controls                      | `{ taskId, taskTitle, workspaceId, activeSessionId, sessionIds }` |
+| `main-top-bar`              | Default app top bar (Home / Kanban / Tasks), beside the CPU/DB metrics and the view/display controls   | `{ workspaceId, workspaceLabel, currentPage }`                    |
+| `app-status-bar-left`       | Default-left item in the global status surface                                                         | `AppStatusBarSlotProps`                                           |
+| `app-status-bar-right`      | Default-right item in the global status surface                                                        | `AppStatusBarSlotProps`                                           |
+| `plugin-settings`           | A plugin's own settings page (**Settings > Plugins > `<plugin>`**), at the top above the settings form | `{ pluginId, status }`                                            |
 
 `plugin-settings` is the one exception to "every plugin's component renders":
 it is **owner-scoped**, so the host renders only the component registered by the
@@ -1208,22 +1219,15 @@ navigation, and global/workspace routes, then wraps the plugin component in the 
 settings section. IDs must be URL-safe, cannot shadow built-in integrations, and stay
 owned until unload.
 
-### Chat toolbar actions
+### Composer actions
 
-Register a `chat-input-actions` component to add an icon button to the chat
-composer toolbar. The host passes the current context as `slotProps`:
-
-```ts
-type ChatInputActionsSlotProps = {
-  taskId: string | null;
-  taskTitle?: string;
-  activeSessionId: string | null; // session the composer is bound to
-  sessionIds: string[]; // every kandev session id on the task
-};
-```
+Register `chat-input-actions`, `task-create-input-actions`, or
+`new-session-input-actions` to add an action to the corresponding composer.
+Each receives the versioned `PluginComposerSlotProps` contract described above,
+including presentation and native insert, focus, and submit capabilities.
 
 A task can hold several sessions, so both the active session and the full
-`sessionIds` list are provided. These are **kandev** session ids — resolving one
+`sessionIds` list are provided. These are **kandev** session ids; resolving one
 to an agent/ACP transcript id (for example, to key per-session cost data from a
 tool like tokscale) is your plugin's job. Do that **server-side in your plugin
 backend** via the Host data API (`host.Sessions()` exposes each session's
@@ -1301,7 +1305,7 @@ registry.registerComponent("chat-top-bar", makeTopBarStatus(host));
 ### Default app top bar
 
 Register a `main-top-bar` component to add status or a small action to the
-**default app top bar** — the strip across the Home, Kanban, and Tasks views,
+**default app top bar**, the strip across the Home, Kanban, and Tasks views,
 beside the CPU/DB metrics and the view/display controls. This is the app-wide,
 task-agnostic counterpart to `chat-top-bar`: use it for something that isn't
 tied to one session (a workspace-level indicator, a global quick action). The
@@ -1341,7 +1345,7 @@ type PluginSettingsSlotProps = {
 
 Unlike the other slots, `plugin-settings` is **owner-scoped**: the host renders
 only the component registered by the plugin currently being viewed, so your card
-appears on your own settings page and never on another plugin's — you do **not**
+appears on your own settings page and never on another plugin's; you do **not**
 need to gate on `slotProps.pluginId` yourself. The host provides no wrapper card,
 so your component owns its own card and can render `null` when it has nothing to
 show.
@@ -1435,7 +1439,7 @@ function useNoteValue(taskId, panelId) {
       return host.storage.get("task", taskId, "note").then(
         (entry) => {
           // Ignore a response that resolves after taskId changed, the panel
-          // unmounted, or a newer refresh started — otherwise a stale read
+          // unmounted, or a newer refresh started; otherwise a stale read
           // (the previous task's note, or one of two overlapping reads that
           // resolved out of order) can land in the current field.
           if (guard.cancelled || generation !== guard.generation) return;
@@ -1463,7 +1467,7 @@ function useNoteValue(taskId, panelId) {
   host.React.useEffect(() => {
     const guard = guardRef.current;
     guard.cancelled = false;
-    // Clear the previous task's value/timestamp synchronously — otherwise it
+    // Clear the previous task's value/timestamp synchronously; otherwise it
     // stays on screen (and could be sent as ifUnmodifiedSince under the new
     // taskId) until this effect's first refresh() resolves.
     setValue("");
@@ -1473,7 +1477,7 @@ function useNoteValue(taskId, panelId) {
     setReadError(false);
     refresh();
     // Scope echo suppression to this panel instance rather than the shared
-    // per-tab default writer id — otherwise a second surface editing the
+    // per-tab default writer id; otherwise a second surface editing the
     // same note (a kanban shortcut, another panel) looks like this panel's
     // own echo and its write never arrives here.
     const unsubscribe = host.storage.subscribe(
@@ -1659,21 +1663,23 @@ The same registration and panel identity drive both viewports, so a panel remain
 selected through a slow or failed reload and is closed only after a ready
 generation omits it or the plugin is explicitly disabled/uninstalled.
 
-`writerId` is appended to the host's own per-tab id, not a full replacement —
+`writerId` is appended to the host's own per-tab id, not a full replacement;
 a static value like `panelId` is the same across every tab that has that
 panel open, so two different tabs subscribing with the same raw `panelId`
 would otherwise suppress each other's real, cross-tab updates as if they were
 local echoes. Pass `ifUnmodifiedSince` (the `updatedAt` from the last `get`)
 to `set` and handle the resulting `409` by refetching, rather than silently
 discarding a concurrent edit. `host.storage.list` returns every entry under a
-`(scope, scopeId)` pair with no pagination — fine for a handful of keys per
+`(scope, scopeId)` pair with no pagination; fine for a handful of keys per
 task, not for an unbounded per-item collection.
 
 ### 4. Webhook receiver
 
 Declare the route, validate the method and provider signature inside the
-backend, and return a bounded status/body. Kandev caps incoming bodies at 4 MiB
-but does not authenticate the caller.
+backend, and return a bounded status/body. Public webhooks are capped at 4 MiB.
+For plugin-UI operations, declare `access: authenticated`; those routes may
+raise `max_body_bytes` to 16 MiB. Kandev verifies the current user but strips
+its session cookie and PAT before relaying the remaining headers.
 
 ```yaml
 webhooks:
@@ -1720,13 +1726,13 @@ Host reader because event queues are bounded and delivery is best-effort.
 ### 6. Kanban-aware contribution
 
 `registerTaskMenuAction` adds an item to the kanban card's context/dropdown
-menu — group `"edit"` nests it inside the `Edit` submenu, group `"primary"`
+menu; group `"edit"` nests it inside the `Edit` submenu, group `"primary"`
 renders it as a flat, top-level item positioned between the "Move
 to"/"Send to workflow" submenus and the "Link" submenu.
 `task-card-indicators` (see the named slots table) is the matching read-only
 surface, rendered beside the PR status icon on every card. `task-card-tags`
 is a sibling read-only surface with the same `slotProps` shape, mounted in its
-own row instead of that cramped title-row spot — reach for it when a
+own row instead of that cramped title-row spot; reach for it when a
 contribution (e.g. a row of tag chips) needs its own width. Both
 `visible(context)` and `run(context)` receive the card's actual `presentation`:
 `"desktop"` on the desktop kanban and `"mobile"` on the phone kanban. Use it
@@ -1756,9 +1762,9 @@ Kanban components directly.
 `registerTaskFilter` adds a client-side, multi-select filter section to the
 kanban board's display dropdown, next to the built-in Workflow and Repository
 sections. The plugin supplies its own options (including any "untagged"-style
-sentinel — the host does not special-case option values) and a `matches`
+sentinel; the host does not special-case option values) and a `matches`
 predicate; filtering runs entirely against tasks already loaded in the
-board's in-memory state, with no backend query or persistence — selections
+board's in-memory state, with no backend query or persistence; selections
 reset on reload.
 
 ```js
@@ -1773,7 +1779,7 @@ registry.registerTaskFilter({
 });
 ```
 
-An empty selection is implicit "All" for that section — `matches` is only
+An empty selection is implicit "All" for that section: `matches` is only
 called once at least one option is selected, and a `matches` that throws is
 caught, logged, and treated as non-matching for that task.
 
@@ -1866,7 +1872,7 @@ repackaging.
 - **Reusing a raw surface id as writerId:** a static id like panelId is the
   same across every tab that has that surface open. Passed as-is to
   host.storage's writerId, it makes two different tabs look like the same
-  writer and suppresses real cross-tab updates as if they were local echoes —
+  writer and suppresses real cross-tab updates as if they were local echoes;
   the host already appends it to a per-tab id, so pass the surface id, not a
   fabricated combined string.
 - **Writing outside KANDEV_PLUGIN_DATA_DIR:** arbitrary files belong below the
@@ -1877,8 +1883,8 @@ repackaging.
   uninstall.
 - **Importing direct DB/internal packages:** use apps/backend/pkg/pluginsdk and
   typed Host methods. Direct database access is outside the plugin contract.
-- **Trusting webhook metadata:** webhooks[].method is informational and the route
-  is not authenticated by Kandev. Validate method, signature, timestamp, replay
+- **Trusting webhook metadata:** `webhooks[].method` is informational. Public
+  routes are not authenticated by Kandev, so validate method, signature, timestamp, replay
   protection, and body before side effects.
 - **Bundling React:** use host.React, host.jsx, and host.ui; a second React or
   Radix copy breaks shared contexts and portals.

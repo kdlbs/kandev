@@ -161,6 +161,8 @@ function DesktopRightSection(props: {
   submitShortcut: (typeof SHORTCUTS)[keyof typeof SHORTCUTS];
   onVoiceTranscript?: (text: string) => void;
   onVoiceAutoSend?: () => void;
+  composerCapability?: ChatInputToolbarProps["composerCapability"];
+  composerSurface?: ChatInputToolbarProps["composerSurface"];
 }) {
   return (
     <div className="flex items-center gap-0.5 shrink-0">
@@ -176,6 +178,12 @@ function DesktopRightSection(props: {
           sessionId={props.sessionId}
           taskId={props.taskId}
           taskTitle={props.taskTitle}
+          surface={props.composerSurface ?? (props.taskId ? "task-chat" : "quick-chat")}
+          presentation="desktop"
+          disabled={props.isDisabled}
+          submittable={!props.isDisabled && props.hasContent}
+          disabledReason={props.submitDisabledReason}
+          composer={props.composerCapability}
         />
       )}
       <div className="ml-1 flex items-center gap-1">

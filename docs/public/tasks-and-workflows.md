@@ -129,7 +129,7 @@ For a compact reminder while you read later replies, enable **Show anchored
 prompt bar** in the same settings section. On desktop, it pins a shortened
 copy of your latest prompt below the session tabs once you've scrolled past
 it further down the transcript. It stays hidden while you're browsing earlier
-history above your prompt, even though the prompt itself is out of view —
+  history above your prompt, even though the prompt itself is out of view.
 use **Scroll to last prompt** to jump back to it instead. Expand the bar for
 longer prompts, or use its scroll action to return to the full prompt; the
 expanded view is capped at 40% of the transcript panel's height so it stays
@@ -214,7 +214,7 @@ On desktop and tablet, the header switches between **Kanban**, **Pipeline**, and
 Under **Settings → General → Appearance → Startup Page**, choose **Task overview** (the default) or **Last visited task**. The latter resumes the most recently opened task in the current workspace on that device when Kandev starts or you open bare Home. It does not change an explicit task or workflow link. Home navigation and a task's Back action always return to the task overview; when there is no matching local recent task, Kandev opens the overview instead.
 
 - Search matches tasks without changing their state.
-- The display menu filters by **Workflow** and **Repository** and can enable **Open preview on click**. In Kanban/Pipeline, each workflow lane has a **Columns** menu to hide individual steps — unticking a step hides its column and tasks on that board, scoped to its own workflow, until you re-tick it. On phones, open the menu drawer to change columns for the focused workflow.
+- The display menu filters by **Workflow** and **Repository** and can enable **Open preview on click**. In Kanban/Pipeline, each workflow lane has a **Columns** menu to hide individual steps. Unticking a step hides its column and tasks on that board, scoped to its own workflow, until you re-tick it. On phones, open the menu drawer to change columns for the focused workflow.
 - In **List**, the display menu can enable **Show task details** to include available repository, description, pull-request, session, parent, review, and archive context in each row. This option is off by default and follows the user across devices.
 - **List** can group by **State**, **Workflow**, **Repository**, or **None**.
 - **List** can sort by updated time, created time, or title in either direction.
@@ -271,7 +271,7 @@ reservation and does not start an agent for them.
 
 Auto-archive is checked on a five-minute background interval and uses the task's last update time. Any task update postpones eligibility, so the archive is not guaranteed at the exact configured minute. Archiving, deleting, or moving an admitted task opens capacity and promotes the oldest queued card. Auto-archive affects the task itself, not its children.
 
-Pull configuration rejects self-references, cycles, and cross-workflow feeders. Pulling runs when a task vacates the limited step and when eligible work is created in its feeder, filling each available slot. Candidates are ordered by board position, then priority (`critical`, `high`, `medium`, `low`, `none`), queue time, creation time, and ID. A candidate whose move fails—for example because its session is running or starting—is skipped for that pull pass.
+Pull configuration rejects self-references, cycles, and cross-workflow feeders. Pulling runs when a task vacates the limited step and when eligible work is created in its feeder, filling each available slot. Candidates are ordered by board position, then priority (`critical`, `high`, `medium`, `low`, `none`), queue time, creation time, and ID. A candidate whose move fails, for example because its session is running or starting, is skipped for that pull pass.
 
 ### Configure events and transitions
 

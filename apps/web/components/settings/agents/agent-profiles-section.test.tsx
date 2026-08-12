@@ -6,6 +6,7 @@ import type { Agent, AgentProfile } from "@/lib/types/http";
 
 const mocks = vi.hoisted(() => ({
   deleteAgentProfileAction: vi.fn(),
+  duplicateAgentProfileAction: vi.fn(),
   toast: vi.fn(),
   routerPush: vi.fn(),
 }));
@@ -41,11 +42,12 @@ const selectors = {
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: unknown) => unknown) => selector({ ...storeState, ...selectors }),
-  useAppStoreApi: () => ({ getState: () => storeState }),
+  useAppStoreApi: () => ({ getState: () => storeState, setState: vi.fn() }),
 }));
 
 vi.mock("@/app/actions/agents", () => ({
   deleteAgentProfileAction: mocks.deleteAgentProfileAction,
+  duplicateAgentProfileAction: mocks.duplicateAgentProfileAction,
 }));
 
 vi.mock("@/components/toast-provider", () => ({
@@ -68,8 +70,16 @@ vi.mock("@kandev/ui/dropdown-menu", () => ({
   DropdownMenu: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   DropdownMenuTrigger: ({ children }: { children?: ReactNode }) => <>{children}</>,
   DropdownMenuContent: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-  DropdownMenuItem: ({ children, onSelect }: { children?: ReactNode; onSelect?: () => void }) => (
-    <button type="button" data-testid="delete-item" onClick={onSelect}>
+  DropdownMenuItem: ({
+    children,
+    onSelect,
+    "data-testid": testId,
+  }: {
+    children?: ReactNode;
+    onSelect?: () => void;
+    "data-testid"?: string;
+  }) => (
+    <button type="button" data-testid={testId ?? "delete-item"} onClick={onSelect}>
       {children}
     </button>
   ),
@@ -156,5 +166,28 @@ describe("ProfileRow deletion", () => {
       expect(storeState.settingsAgents.items[0].profiles).toEqual([]);
     });
     expect(storeState.agentProfiles.items).toEqual([]);
+  });
+});
+
+describe("ProfileRow duplicate", () => {
+  beforeEach(() => {
+    storeState = {
+      settingsAgents: { items: [{ ...AGENT, profiles: [...AGENT.profiles] }] },
+      agentProfiles: { items: [] },
+    };
+  });
+
+  it("calls the duplicate action with the profile id", async () => {
+    mocks.duplicateAgentProfileAction.mockResolvedValue({
+      id: "p-3",
+      name: "Alpha Copy",
+    } as unknown as AgentProfile);
+    renderRows();
+
+    const row = screen.getByLabelText("Alpha").closest('[data-testid="agent-profile-row"]');
+    if (!row) throw new Error("no row for Alpha");
+    fireEvent.click(row.querySelector('[data-testid="duplicate-profile-p-1"]')!);
+
+    await waitFor(() => expect(mocks.duplicateAgentProfileAction).toHaveBeenCalledWith("p-1"));
   });
 });

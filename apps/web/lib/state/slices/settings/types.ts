@@ -60,6 +60,9 @@ export type AgentProfileOption = {
   /** Legacy automatic-fallback opt-in. */
   auto_fallback?: boolean;
   workspace_id?: string;
+  /** Persisted profile revision (RFC3339 updated_at), used to prefer newer
+   * WS-delivered options over a stale in-flight response. */
+  updatedAt?: string;
   /**
    * False hides the profile from task/session creation pickers. Existing
    * sessions keep their labels and the profile stays editable in settings.
@@ -79,10 +82,53 @@ export function isSelectableAgentProfile(profile: Pick<AgentProfileOption, "enab
   return profile.enabled !== false;
 }
 
+/**
+ * Compares two RFC3339 timestamps as instants (millisecond precision).
+ * Lexical comparison misorders values with fractional seconds or differing
+ * offsets (e.g. `10:00:00.100Z` is newer than `10:00:00Z` but sorts before
+ * it), so revision precedence must parse the instants. Missing timestamps
+ * sort oldest so a present timestamp always wins.
+ */
+export function compareTimestamps(a: string | undefined, b: string | undefined): number {
+  if (a === b) return 0;
+  if (a === undefined || a === "") return -1;
+  if (b === undefined || b === "") return 1;
+  const aMs = Date.parse(a);
+  const bMs = Date.parse(b);
+  if (Number.isNaN(aMs)) return -1;
+  if (Number.isNaN(bMs)) return 1;
+  return aMs - bMs;
+}
+
+/**
+ * Merge two option lists by ID, keeping the NEWER revision per id (missing or
+ * equal updatedAt defers to the rebuilt option). A newer WebSocket-delivered
+ * option must never be regressed by a stale list rebuild — e.g. a disabled
+ * profile whose option was updated by `agent.profile.updated` while its owning
+ * agent was absent must not reappear as selectable.
+ */
+export function mergeOptionsByNewest(
+  previous: AgentProfileOption[],
+  rebuilt: AgentProfileOption[],
+): AgentProfileOption[] {
+  const byId = new Map<string, AgentProfileOption>();
+  for (const option of previous) {
+    byId.set(option.id, option);
+  }
+  for (const option of rebuilt) {
+    const existing = byId.get(option.id);
+    if (!existing || compareTimestamps(option.updatedAt, existing.updatedAt) >= 0) {
+      byId.set(option.id, option);
+    }
+  }
+  return [...byId.values()];
+}
+
 /** Single source of truth for mapping an API Agent+Profile to a store AgentProfileOption. */
 export function toAgentProfileOption(
   agent: Pick<Agent, "id" | "name" | "capability_status" | "capability_error">,
   profile: Pick<AgentProfile, "id" | "agentDisplayName" | "name" | "workspaceId"> & {
+    updatedAt?: string;
     cliPassthrough?: boolean;
     model?: string;
     fallbackModel?: string;
@@ -100,6 +146,7 @@ export function toAgentProfileOption(
     fallback_model: profile.fallbackModel ?? undefined,
     auto_fallback: profile.autoFallback ?? undefined,
     workspace_id: profile.workspaceId,
+    updatedAt: profile.updatedAt,
     enabled: profile.enabled ?? true,
     capability_status: agent.capability_status,
     capability_error: agent.capability_error,
@@ -229,6 +276,7 @@ export type UserSettingsState = {
   showScrollToStart: boolean;
   showTranscriptAutoScrollControl: boolean;
   showTodoListPanel: boolean;
+  showTodoListPanelOnlyWhenNotEmpty: boolean;
   showReleaseNotification: boolean;
   releaseNotesLastSeenVersion: string | null;
   lspAutoStartLanguages: string[];

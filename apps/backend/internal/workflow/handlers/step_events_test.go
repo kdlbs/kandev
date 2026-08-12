@@ -177,8 +177,9 @@ func TestHTTPUpdateStepPublishesUpdatedEvent(t *testing.T) {
 	rec := recordStepEvents(t, eventBus)
 
 	resp := doJSON(t, router, http.MethodPut, "/api/v1/workflow/steps/"+step.ID, map[string]interface{}{
-		"name":      "Triage",
-		"wip_limit": 3,
+		"name":       "Triage",
+		"stage_type": "review",
+		"wip_limit":  3,
 	})
 	if resp.Code != http.StatusOK {
 		t.Fatalf("update status = %d, body = %s", resp.Code, resp.Body.String())
@@ -190,6 +191,9 @@ func TestHTTPUpdateStepPublishesUpdatedEvent(t *testing.T) {
 	}
 	if wip, ok := got.step["wip_limit"].(int); !ok || wip != 3 {
 		t.Errorf("wip_limit = %#v, want 3", got.step["wip_limit"])
+	}
+	if stageType, ok := got.step["stage_type"].(string); !ok || stageType != "review" {
+		t.Errorf("stage_type = %#v, want review", got.step["stage_type"])
 	}
 }
 

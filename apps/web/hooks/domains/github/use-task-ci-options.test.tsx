@@ -58,7 +58,9 @@ describe("useTaskCIAutomationOptions", () => {
     apiMocks.getOptionsMock.mockResolvedValue(
       makeOptions({ auto_fix_prompt_override: "Custom prompt" }),
     );
-    apiMocks.updateOptionsMock.mockResolvedValue(makeOptions({ auto_fix_prompt_override: null }));
+    apiMocks.updateOptionsMock.mockResolvedValue(
+      makeOptions({ auto_fix_prompt_override: null, updated_at: "2026-06-18T10:01:00Z" }),
+    );
 
     const { result } = renderHook(() => useTaskCIAutomationOptions("task-1"), { wrapper });
     await waitFor(() => expect(result.current.options).not.toBeNull());
@@ -166,11 +168,11 @@ describe("useTaskCIAutomationOptions updates", () => {
       firstUpdate = result.current.update({ auto_fix_enabled: true });
       secondUpdate = result.current.update({ auto_merge_enabled: true });
     });
-    resolveSecond(makeOptions({ auto_merge_enabled: true }));
+    resolveSecond(makeOptions({ auto_merge_enabled: true, updated_at: "2026-06-18T10:02:00Z" }));
     await act(async () => {
       await secondUpdate!;
     });
-    resolveFirst(makeOptions({ auto_fix_enabled: true }));
+    resolveFirst(makeOptions({ auto_fix_enabled: true, updated_at: "2026-06-18T10:01:00Z" }));
     await act(async () => {
       await firstUpdate!;
     });

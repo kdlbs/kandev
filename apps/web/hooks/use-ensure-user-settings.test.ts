@@ -70,6 +70,7 @@ function makeUnloadedSettings(): UserSettingsState {
     showScrollToStart: false,
     showTranscriptAutoScrollControl: true,
     showTodoListPanel: false,
+    showTodoListPanelOnlyWhenNotEmpty: false,
     showReleaseNotification: true,
     releaseNotesLastSeenVersion: null,
     savedLayouts: [],

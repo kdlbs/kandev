@@ -224,8 +224,9 @@ Use i18next `_one`/`_other` plural keys; never build English suffixes locally.
 
 Never capture `t()` in a module-level constant; it freezes the boot locale.
 
-UI punctuation: avoid Unicode em dash (U+2014) in user-facing copy and locale values.
-`pnpm run i18n:check` enforces periods, colons, commas, semicolons, and parentheses.
+UI punctuation: avoid Unicode em dash (U+2014) in user-facing copy, locale values,
+published documentation. `pnpm run i18n:check` and the `public-copy-em-dash` hook
+enforce periods, colons, commas, semicolons, and parentheses across those sources.
 
 `pnpm lint` fails on hardcoded UI strings (`i18next/no-literal-string` is an
 **error**), but **only on the `i18nGuardFiles` allowlist** in
@@ -294,7 +295,6 @@ plugin leaks a stale registration.
 
 ## Testing notes
 
-- jsdom secure cookies need cookie-setter interception; Radix Tooltip tests use
-  keyboard focus, while Playwright covers pointer hover with `locator.hover()`.
+- jsdom secure cookies need cookie-setter interception; Radix Tooltip tests use keyboard focus, while Playwright covers pointer hover with `locator.hover()`.
 - Scope terminal selectors to the active panel/container; mobile and dockview may
   mount multiple instances, so shared helpers must not use global selectors.

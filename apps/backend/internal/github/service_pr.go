@@ -546,17 +546,50 @@ func (s *Service) GetPRCommits(ctx context.Context, owner, repo string, number i
 	return s.client.ListPRCommits(ctx, owner, repo, number)
 }
 
+// GitHub's pull-request commit endpoint returns at most 250 commits, even
+// when pagination has been requested. Treat a response at that limit as
+// incomplete because the missing older ancestry can change a safe relation
+// into an apparent divergence.
+const githubPRCommitHistoryLimit = 250
+
+func completePRCommitHistory(headSHA string, commits []PRCommitInfo) bool {
+	if headSHA == "" || len(commits) == 0 || len(commits) >= githubPRCommitHistoryLimit {
+		return false
+	}
+	for _, commit := range commits {
+		if commit.SHA == "" {
+			return false
+		}
+	}
+	return commits[len(commits)-1].SHA == headSHA
+}
+
 func (s *Service) GetPRCommitsForWorkspace(
 	ctx context.Context, workspaceID, userID, owner, repo string, number int,
-) ([]PRCommitInfo, error) {
+) (PRCommitsResult, error) {
 	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
-		return nil, err
+		return PRCommitsResult{}, err
 	}
 	resolved, err := s.resolvePersonalReadClient(ctx, workspaceID, userID, owner, repo)
 	if err != nil {
-		return nil, err
+		return PRCommitsResult{}, err
 	}
-	return resolved.Client.ListPRCommits(ctx, owner, repo, number)
+	pr, err := resolved.Client.GetPR(ctx, owner, repo, number)
+	if err != nil {
+		return PRCommitsResult{}, fmt.Errorf("get PR #%d for commit history: %w", number, err)
+	}
+	if pr == nil {
+		return PRCommitsResult{}, fmt.Errorf("get PR #%d for commit history: empty response", number)
+	}
+	commits, err := resolved.Client.ListPRCommits(ctx, owner, repo, number)
+	if err != nil {
+		return PRCommitsResult{}, fmt.Errorf("list PR #%d commits: %w", number, err)
+	}
+	return PRCommitsResult{
+		Commits:  commits,
+		HeadSHA:  pr.HeadSHA,
+		Complete: completePRCommitHistory(pr.HeadSHA, commits),
+	}, nil
 }
 
 // GetPRCommitDetailForWorkspace fetches one commit through the workspace's

@@ -218,7 +218,7 @@ describe("DialogPromptSection (CLI-mode parity)", () => {
 
   it("forwards onVoiceAutoSend to TaskFormInputs", () => {
     taskFormInputsCalls.length = 0;
-    const onVoiceAutoSend = () => {};
+    const onVoiceAutoSend = () => true;
     render(
       <DialogPromptSection
         isSessionMode={false}

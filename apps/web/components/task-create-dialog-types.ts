@@ -576,5 +576,5 @@ export type DialogFormBodyProps = {
    * routes this to a programmatic form submit so dictation can create the task
    * hands-free.
    */
-  onVoiceAutoSend?: () => void;
+  onVoiceAutoSend?: () => boolean | Promise<boolean>;
 };

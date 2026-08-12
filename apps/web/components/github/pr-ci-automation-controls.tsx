@@ -348,7 +348,7 @@ function PRAgentPromptRows({
   );
 }
 
-function ReviewFollowUpSection({
+function PREventsSection({
   taskId,
   options,
   disabled,
@@ -378,11 +378,12 @@ function ReviewFollowUpSection({
           type="button"
           variant="ghost"
           size="sm"
-          data-testid="ci-review-follow-up-trigger"
-          aria-label={t("github:toggleReviewFollowUpAutomation")}
+          data-testid="ci-pr-events-trigger"
+          data-legacy-testid="ci-review-follow-up-trigger"
+          aria-label={t("github:togglePrEventPromptAutomation")}
           className={`w-full cursor-pointer justify-between px-1 text-xs text-muted-foreground ${minHeight}`}
         >
-          {t("github:reviewFollowUp")}
+          {t("github:prEvents")}
           <IconChevronDown
             aria-hidden="true"
             className={`h-3.5 w-3.5 transition-transform ${open ? "rotate-180" : ""}`}
@@ -507,7 +508,7 @@ function CIAutomationOptionRows({
         disabled={disabled}
         onCheckedChange={(checked) => patchOption({ auto_merge_enabled: checked })}
       />
-      <ReviewFollowUpSection
+      <PREventsSection
         taskId={pr.task_id}
         options={options}
         disabled={disabled}
