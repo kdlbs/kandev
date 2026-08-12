@@ -105,11 +105,13 @@ test.describe("mobile Bitbucket plugin contract", () => {
     await testPage.getByRole("button", { name: "Review", exact: true }).tap();
     await expect(testPage.getByTestId("mobile-review-panel")).toBeVisible();
     const selector = testPage.getByTestId("review-item-selector-trigger");
+    await expect(selector).toBeVisible();
     expect((await selector.boundingBox())?.height).toBeGreaterThanOrEqual(44);
     await selector.tap();
-    const reviewOption = testPage.getByTestId(
-      "review-item-selector-item-fixture-source-control:pull-request-42",
-    );
+    const reviewOption = testPage.getByRole("menuitemradio", {
+      name: /^Bitbucket Pull Request #42/,
+    });
+    await expect(reviewOption).toBeVisible();
     expect((await reviewOption.boundingBox())?.height).toBeGreaterThanOrEqual(44);
     await reviewOption.tap();
     await expect(testPage.getByTestId("fixture-review-panel-mobile")).toHaveAttribute(

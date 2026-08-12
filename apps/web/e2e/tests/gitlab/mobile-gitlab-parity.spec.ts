@@ -101,13 +101,16 @@ test.describe("Mobile GitLab parity", () => {
     await gitlab.openLinkedMR(selectedIID);
     const panel = testPage.getByTestId("mr-detail-panel").last();
     await expect(panel.getByText(selectedTitle, { exact: true })).toBeVisible();
+    const expectedReviewId = ["gitlab", GITLAB_HOST, seedData.repositoryId, String(selectedIID)]
+      .map(encodeURIComponent)
+      .join(":");
     await expect
       .poll(() =>
         testPage.evaluate(
           "window.__KANDEV_E2E_STORE__?.getState().mobileSession.reviewItemIdBySessionId[window.__KANDEV_E2E_STORE__?.getState().tasks.activeSessionId ?? '']",
         ),
       )
-      .toBe(`gitlab:${encodeURIComponent(`${GITLAB_HOST}|${GITLAB_PROJECT}|${selectedIID}`)}`);
+      .toBe(expectedReviewId);
   });
 
   test("browses, quick launches, reviews, subscribes, and unlinks without overflow", async ({

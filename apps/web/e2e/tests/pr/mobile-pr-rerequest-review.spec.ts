@@ -178,13 +178,11 @@ test.describe("mobile PR re-request review", () => {
     await expect(action).toBeVisible({ timeout: 15_000 });
 
     await testPage.getByTestId("review-item-selector-trigger").tap();
-    await testPage
-      .getByTestId(
-        `review-item-selector-item-github:${encodeURIComponent(
-          `${OWNER}/${REPO}/${SWITCH_SECOND_PR_NUMBER}`,
-        )}`,
-      )
-      .tap();
+    const secondReview = testPage.getByRole("menuitemradio", {
+      name: new RegExp(`^PR ${SWITCH_SECOND_PR_NUMBER}\\b`),
+    });
+    await expect(secondReview).toBeVisible();
+    await secondReview.tap();
     await secondFeedbackRequested;
 
     await expect(action).toHaveCount(0);
