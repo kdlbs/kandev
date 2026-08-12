@@ -347,9 +347,12 @@ func TestHandlePassthroughExitFastFailsFreshLaunch(t *testing.T) {
 		"a launch that never used a resume flag has nothing to fall back from")
 }
 
+// TestHandlePassthroughExitSkipsWithoutTerminal pins the no-subscriber guard.
+// The observable is that none of the relaunch machinery ran: building a fresh
+// command materializes an MCP config file and records it on the execution, so
+// an empty file list proves the handler returned before that work.
 func TestHandlePassthroughExitSkipsWithoutTerminal(t *testing.T) {
-	mgr, runner, execution := newPassthroughRunnerManager(t)
-	_ = runner
+	mgr, _, execution := newPassthroughRunnerManager(t)
 
 	exitCode := 1
 	mgr.handlePassthroughExit(execution, &agentctltypes.ProcessStatusUpdate{
@@ -357,10 +360,11 @@ func TestHandlePassthroughExitSkipsWithoutTerminal(t *testing.T) {
 		ProcessID: "pty-1",
 		ExitCode:  &exitCode,
 		Timestamp: time.Now(),
-	}, time.Now(), false)
+	}, time.Now(), true)
 
-	require.Empty(t, execution.PassthroughProcessID,
-		"with nobody watching the terminal there is nothing to auto-restart for")
+	require.Empty(t, getPassthroughMCPFiles(execution),
+		"with nobody watching the terminal, no relaunch command may be built")
+	require.Empty(t, execution.PassthroughProcessID)
 }
 
 // TestHandlePassthroughExitUsesStatusTimestampNotWallClock pins that the
@@ -385,8 +389,12 @@ func TestHandlePassthroughExitUsesStatusTimestampNotWallClock(t *testing.T) {
 		"uptime must be measured from the exit event, not from time.Now()")
 }
 
-func TestStopPassthroughProcessLogsRunnerFailure(t *testing.T) {
-	mgr, runner, execution := newPassthroughRunnerManager(t)
+// TestStopPassthroughProcessLeavesExecutionStateToItsCaller pins that a failed
+// runner stop is swallowed AND that this helper never edits the execution:
+// StopAgentWithReason still needs the process ID to build the ExecutorInstance
+// it hands to the backend teardown immediately afterwards.
+func TestStopPassthroughProcessLeavesExecutionStateToItsCaller(t *testing.T) {
+	mgr, _, execution := newPassthroughRunnerManager(t)
 	backend, err := mgr.executorRegistry.GetBackend(executor.NameStandalone)
 	require.NoError(t, err)
 	execution.PassthroughProcessID = "pty-gone"
@@ -394,7 +402,9 @@ func TestStopPassthroughProcessLogsRunnerFailure(t *testing.T) {
 	// The runner does not know this process; the failure is logged and
 	// teardown continues rather than aborting the stop.
 	mgr.stopPassthroughProcess(context.Background(), execution.ID, execution, backend)
-	require.NotNil(t, runner)
+
+	require.Equal(t, "pty-gone", execution.PassthroughProcessID,
+		"clearing the process ID is the caller's job, not this helper's")
 }
 
 func TestStopPassthroughProcessSkipsNonPassthroughExecutions(t *testing.T) {
