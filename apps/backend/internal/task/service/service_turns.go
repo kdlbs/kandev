@@ -167,6 +167,26 @@ func selectedConfigValueName(options []streams.ConfigOptionValue, value string) 
 	return value
 }
 
+// stringConfigOptions decodes the profile option shapes used by persisted
+// task-service metadata. Keep this package-local decoder available for the
+// service coverage tests that exercise both in-memory and JSON-like values.
+func stringConfigOptions(raw interface{}) map[string]string {
+	switch values := raw.(type) {
+	case map[string]string:
+		return maps.Clone(values)
+	case map[string]interface{}:
+		result := make(map[string]string, len(values))
+		for key, value := range values {
+			if text := models.StringFromAny(value); text != "" {
+				result[key] = text
+			}
+		}
+		return result
+	default:
+		return nil
+	}
+}
+
 // GetTurn returns a turn by ID.
 func (s *Service) GetTurn(ctx context.Context, turnID string) (*models.Turn, error) {
 	return s.turns.GetTurn(ctx, turnID)

@@ -178,6 +178,25 @@ func TestBuildTurnRuntimeConfigSnapshotUsesSessionModeOverRuntimeMode(t *testing
 	require.Equal(t, "default", options["collaboration_mode"])
 }
 
+func TestStringConfigOptionsCompatibility(t *testing.T) {
+	typed := stringConfigOptions(map[string]string{"effort": "high"})
+	if typed["effort"] != "high" {
+		t.Fatalf("typed options = %#v", typed)
+	}
+
+	loose := stringConfigOptions(map[string]interface{}{"effort": "low", "ignored": 42})
+	if loose["effort"] != "low" {
+		t.Fatalf("loose options = %#v", loose)
+	}
+	if _, ok := loose["ignored"]; ok {
+		t.Fatalf("loose options retained non-string value: %#v", loose)
+	}
+
+	if got := stringConfigOptions(nil); got != nil {
+		t.Fatalf("nil options = %#v, want nil", got)
+	}
+}
+
 func (nilTaskSessionRepo) GetTaskSession(context.Context, string) (*models.TaskSession, error) {
 	return nil, nil
 }
