@@ -459,12 +459,13 @@ func TestResumeSession_SerializesFirstLocalEnvironmentAcrossSessions(t *testing.
 
 	var wg sync.WaitGroup
 	errorsBySession := make([]error, 2)
-	for index, sessionID := range []string{"sess-1", "sess-2"} {
+	sessions := []*models.TaskSession{repo.sessions["sess-1"], repo.sessions["sess-2"]}
+	for index, session := range sessions {
 		wg.Add(1)
 		go func(index int, session *models.TaskSession) {
 			defer wg.Done()
 			_, errorsBySession[index] = executor.ResumeSession(context.Background(), session, false)
-		}(index, repo.sessions[sessionID])
+		}(index, session)
 	}
 	wg.Wait()
 	for index, err := range errorsBySession {
