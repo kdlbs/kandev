@@ -51,8 +51,13 @@ type DependencyChipData = {
  */
 export function useTaskDependencies(taskId: string | null): DependencyChipData | null {
   const fromStore = useTaskDependenciesFromStore(taskId);
-  const fetched = useFetchedTaskDependencies(taskId, fromStore !== undefined);
-  return fromStore ?? fetched;
+  const storeAnswered = fromStore !== undefined;
+  const fetched = useFetchedTaskDependencies(taskId, storeAnswered);
+  // `??` would be wrong here: the store's `null` is a real answer ("this task
+  // has no edges"), and falling through on it would keep showing the previously
+  // fetched task's dependencies after an edge is removed or after switching to
+  // a task the store knows is edge-free. Only `undefined` means "ask the server".
+  return storeAnswered ? fromStore : fetched;
 }
 
 /**
@@ -68,7 +73,12 @@ function useFetchedTaskDependencies(
 ): DependencyChipData | null {
   const [data, setData] = useState<DependencyChipData | null>(null);
   useEffect(() => {
-    if (!taskId || storeAnswered) return;
+    if (!taskId || storeAnswered) {
+      // Drop anything fetched for a previous task/state so it can never be
+      // rendered again once the store can answer.
+      setData(null);
+      return;
+    }
     let cancelled = false;
     void getTaskDependencies(taskId)
       .then((task) => {

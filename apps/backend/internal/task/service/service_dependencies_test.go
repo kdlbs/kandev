@@ -3,11 +3,13 @@ package service
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
 	orchmodels "github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -247,5 +249,194 @@ func TestDependencyStatusForTask_ArchivedIsPendingNotResolved(t *testing.T) {
 	}
 	if got := DependencyStatusForTask(nil); got != DependencyPending {
 		t.Errorf("nil task = %q; want %q", got, DependencyPending)
+	}
+}
+
+// Regression coverage for the review findings on PR #2589.
+
+// seedForeignPair creates two tasks in another user's workspace plus one the
+// caller owns, so scoping can be exercised on both ends of an edge.
+func seedForeignPair(t *testing.T, repo interface {
+	CreateWorkspace(context.Context, *models.Workspace) error
+	CreateWorkflow(context.Context, *models.Workflow) error
+	CreateTask(context.Context, *models.Task) error
+	CreateTaskSession(context.Context, *models.TaskSession) error
+}) {
+	t.Helper()
+	seedScopedWorkspaces(t, repo)
+	ctx := context.Background()
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-b2", WorkspaceID: "ws-b", WorkflowID: "wf-b", WorkflowStepID: "step-1",
+		Title: "B's second", State: v1.TaskStateTODO,
+	}); err != nil {
+		t.Fatalf("create second foreign task: %v", err)
+	}
+}
+
+// A caller must not be able to link, unlink, or probe another user's tasks.
+// Both IDs are caller-supplied, so guarding only the dependent end would still
+// let a caller attach a foreign task as a blocker.
+func TestDependencyMutationsAreScopedToTheCaller(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedForeignPair(t, repo)
+	svc.SetBlockerRepository(&mockBlockerRepo{})
+
+	if err := svc.AddDependency(ctxAs("user-a"), "task-b", "task-b2"); !errors.Is(err, taskrepo.ErrTaskNotFound) {
+		t.Errorf("add between two foreign tasks = %v; want ErrTaskNotFound", err)
+	}
+	if err := svc.RemoveDependency(ctxAs("user-a"), "task-b", "task-b2"); !errors.Is(err, taskrepo.ErrTaskNotFound) {
+		t.Errorf("remove between two foreign tasks = %v; want ErrTaskNotFound", err)
+	}
+	// The owner is unaffected.
+	if err := svc.AddDependency(ctxAs("user-b"), "task-b", "task-b2"); err != nil {
+		t.Errorf("owner add = %v; want nil", err)
+	}
+	// An internal (identity-free) caller stays unscoped, as the orchestrator relies on.
+	if err := svc.RemoveDependency(context.Background(), "task-b", "task-b2"); err != nil {
+		t.Errorf("internal caller remove = %v; want nil", err)
+	}
+}
+
+// gateBlockerRepo forces the interleaving the cycle race needs: each cycle walk
+// announces itself and then waits for the other walk to start. Two bare
+// goroutines practically never land inside the validate-then-insert window, so
+// a test without this barrier passes even with the serialization removed and
+// proves nothing.
+type gateBlockerRepo struct {
+	*mockBlockerRepo
+	arrived chan struct{}
+	once    sync.Once
+}
+
+func (g *gateBlockerRepo) ListTaskBlockers(ctx context.Context, taskID string) ([]*orchmodels.TaskBlocker, error) {
+	g.once.Do(func() { close(g.arrived) })
+	select {
+	case <-g.arrived:
+	case <-time.After(time.Second):
+	}
+	// Give the other goroutine room to finish its own walk before this one
+	// inserts. Serialization must make that impossible; without it both walks
+	// complete against a pre-insert view.
+	time.Sleep(20 * time.Millisecond)
+	return g.mockBlockerRepo.ListTaskBlockers(ctx, taskID)
+}
+
+// Two concurrent adds must not each pass a cycle walk that predates the other's
+// insert and commit a cycle between them.
+func TestAddDependencyConcurrentInsertsCannotCreateACycle(t *testing.T) {
+	svc, _ := setupOfficeTest(t)
+	repo := &gateBlockerRepo{mockBlockerRepo: &mockBlockerRepo{}, arrived: make(chan struct{})}
+	svc.SetBlockerRepository(repo)
+	ctx := context.Background()
+	a := mustSeedTask(t, svc, "A").ID
+	b := mustSeedTask(t, svc, "B").ID
+
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	wg.Add(2)
+	go func() { defer wg.Done(); errs[0] = svc.AddDependency(ctx, a, b) }()
+	go func() { defer wg.Done(); errs[1] = svc.AddDependency(ctx, b, a) }()
+	wg.Wait()
+
+	accepted := 0
+	for _, err := range errs {
+		if err == nil {
+			accepted++
+		}
+	}
+	if accepted != 1 {
+		t.Fatalf("accepted %d of 2 opposing edges; exactly one must win", accepted)
+	}
+	// Belt and braces: the surviving graph must not block both ways.
+	aBlocked, _, _ := svc.DependencyGate(ctx, a)
+	bBlocked, _, _ := svc.DependencyGate(ctx, b)
+	if aBlocked && bBlocked {
+		t.Error("both tasks blocked by each other: a cycle was committed")
+	}
+}
+
+// A dangling edge (predecessor row gone because delete-time cleanup failed)
+// must not block its dependent forever, while a genuine read FAILURE still
+// fails closed.
+func TestDependencyGateIgnoresDanglingEdgeButFailsClosedOnError(t *testing.T) {
+	svc, _ := setupOfficeTest(t)
+	repo := &mockBlockerRepo{}
+	svc.SetBlockerRepository(repo)
+	ctx := context.Background()
+	dependent := mustSeedTask(t, svc, "Dependent").ID
+
+	// Edge pointing at a task that does not exist, as a failed cleanup leaves.
+	if err := repo.CreateTaskBlocker(ctx, &orchmodels.TaskBlocker{
+		TaskID: dependent, BlockerTaskID: "deleted-task-id",
+	}); err != nil {
+		t.Fatalf("seed dangling edge: %v", err)
+	}
+	blocked, reason, err := svc.DependencyGate(ctx, dependent)
+	if err != nil {
+		t.Fatalf("gate returned error: %v", err)
+	}
+	if blocked {
+		t.Errorf("dangling edge blocked the task (reason=%q); a deleted predecessor can never complete", reason)
+	}
+
+	// A read error is different and must still fail closed.
+	svc.SetBlockerRepository(&errBlockerRepo{mockBlockerRepo: &mockBlockerRepo{}, failList: true})
+	blocked, reason, err = svc.DependencyGate(ctx, dependent)
+	if err == nil || !blocked || reason != BlockedReasonUnknown {
+		t.Errorf("read failure: blocked=%v reason=%q err=%v; want true/unknown/non-nil", blocked, reason, err)
+	}
+}
+
+// The derived projection must drop a dangling edge too, so the board does not
+// render a blocked badge for a predecessor that no longer exists.
+func TestBuildDependencyViewsDropsDanglingEdges(t *testing.T) {
+	svc, _ := setupOfficeTest(t)
+	repo := &mockBlockerRepo{}
+	svc.SetBlockerRepository(repo)
+	ctx := context.Background()
+	dependent := mustSeedTask(t, svc, "Dependent")
+	if err := repo.CreateTaskBlocker(ctx, &orchmodels.TaskBlocker{
+		TaskID: dependent.ID, BlockerTaskID: "deleted-task-id",
+	}); err != nil {
+		t.Fatalf("seed dangling edge: %v", err)
+	}
+
+	view := svc.BuildDependencyViews(ctx, []*models.Task{dependent})[dependent.ID]
+	if view.Blocked {
+		t.Errorf("blocked=%v reason=%q; a dangling edge must not block", view.Blocked, view.BlockedReason)
+	}
+	if len(view.DependsOn) != 0 {
+		t.Errorf("depends_on = %+v; a dangling edge must not be reported", view.DependsOn)
+	}
+}
+
+// An edge mutation must publish the recomputed projection, not a bare
+// task.updated: the client treats omitted dependency keys as "unchanged", so a
+// bare event leaves every other open board rendering a stale chip and badge.
+func TestDependencyEventFieldsCarryTheProjection(t *testing.T) {
+	svc, _ := setupOfficeTest(t)
+	svc.SetBlockerRepository(&mockBlockerRepo{})
+	ctx := context.Background()
+	predecessor := mustSeedTask(t, svc, "Predecessor")
+	dependent := mustSeedTask(t, svc, "Dependent")
+	if err := svc.AddDependency(ctx, dependent.ID, predecessor.ID); err != nil {
+		t.Fatalf("AddDependency: %v", err)
+	}
+
+	fields := svc.dependencyEventFields(ctx, dependent)
+	for _, key := range []string{"blocked", "blocked_reason", "depends_on", "blocks"} {
+		if _, ok := fields[key]; !ok {
+			t.Errorf("event payload is missing %q; the client would treat it as unchanged", key)
+		}
+	}
+	if fields["blocked"] != true {
+		t.Errorf("blocked = %v; want true", fields["blocked"])
+	}
+	if fields["blocked_reason"] != BlockedReasonPending {
+		t.Errorf("blocked_reason = %v; want %q", fields["blocked_reason"], BlockedReasonPending)
+	}
+	deps, _ := fields["depends_on"].([]DependencyRef)
+	if len(deps) != 1 || deps[0].ID != predecessor.ID {
+		t.Errorf("depends_on = %+v; want one entry for %s", deps, predecessor.ID)
 	}
 }

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -33,6 +34,9 @@ const (
 	// DependencyPending means the predecessor has not finished. Archived
 	// predecessors are pending: archival is neither success nor failure.
 	DependencyPending = "pending"
+	// dependencyMissing marks an edge whose predecessor row is gone. Internal
+	// only: such edges are dropped from the projection rather than reported.
+	dependencyMissing = "missing"
 )
 
 // Blocked reasons reported on the task payload.
@@ -106,22 +110,10 @@ func ResolveStartWhenUnblocked(req *CreateTaskRequest) bool {
 	return *req.StartWhenUnblocked
 }
 
-// AddDependency records "taskID depends on dependsOnTaskID".
-//
-// This is the single validator for dependency edges. Self-edges,
-// cross-workspace edges, and cycles of any length are rejected here, and both
-// the task-scoped routes and the Office blocker routes go through it — a second
-// validator would let a cycle in through whichever path was weakest.
-func (s *Service) AddDependency(ctx context.Context, taskID, dependsOnTaskID string) error {
-	if s.blockers == nil {
-		return ErrDependencyRepositoryUnavailable
-	}
-	if taskID == "" || dependsOnTaskID == "" {
-		return fmt.Errorf("both task_id and depends_on_task_id are required")
-	}
-	if taskID == dependsOnTaskID {
-		return fmt.Errorf("a task cannot depend on itself")
-	}
+// validateDependencyPair resolves both ends and rejects a cross-workspace edge.
+// Both tasks must exist: an edge to a missing task would leave the dependent
+// blocked on something that can never complete.
+func (s *Service) validateDependencyPair(ctx context.Context, taskID, dependsOnTaskID string) error {
 	task, err := s.tasks.GetTask(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("resolve task: %w", err)
@@ -138,6 +130,53 @@ func (s *Service) AddDependency(ctx context.Context, taskID, dependsOnTaskID str
 	}
 	if task.WorkspaceID != "" && dep.WorkspaceID != "" && task.WorkspaceID != dep.WorkspaceID {
 		return fmt.Errorf("task %s belongs to a different workspace", dependsOnTaskID)
+	}
+	return nil
+}
+
+// authorizeDependencyPair guards BOTH ends of an edge before any read or write.
+//
+// Both IDs are caller-supplied, so guarding only the dependent would let a
+// caller link (or unlink) another user's task and infer its existence from the
+// validation error. Denials surface as ErrTaskNotFound, so there is no
+// existence leak.
+func (s *Service) authorizeDependencyPair(ctx context.Context, taskID, dependsOnTaskID string) error {
+	if err := s.authorizeTaskID(ctx, taskID); err != nil {
+		return err
+	}
+	return s.authorizeTaskID(ctx, dependsOnTaskID)
+}
+
+// AddDependency records "taskID depends on dependsOnTaskID".
+//
+// This is the single validator for dependency edges. Self-edges,
+// cross-workspace edges, and cycles of any length are rejected here, and both
+// the task-scoped routes and the Office blocker routes go through it — a second
+// validator would let a cycle in through whichever path was weakest.
+func (s *Service) AddDependency(ctx context.Context, taskID, dependsOnTaskID string) error {
+	if s.blockers == nil {
+		return ErrDependencyRepositoryUnavailable
+	}
+	if taskID == "" || dependsOnTaskID == "" {
+		return fmt.Errorf("both task_id and depends_on_task_id are required")
+	}
+	if taskID == dependsOnTaskID {
+		return fmt.Errorf("a task cannot depend on itself")
+	}
+	if err := s.authorizeDependencyPair(ctx, taskID, dependsOnTaskID); err != nil {
+		return err
+	}
+	// Serialize validate-then-insert. The cycle walk and the insert are two
+	// statements, so two concurrent adds can each pass a walk that cannot yet
+	// see the other's edge and commit a cycle between them, leaving both tasks
+	// blocked forever. Kandev runs one backend process (see the run-scheduling
+	// spec, which rules out multiple active processes), so a process-wide lock
+	// is sufficient and keeps the check and the write atomic with respect to
+	// each other.
+	s.dependencyEdgeMu.Lock()
+	defer s.dependencyEdgeMu.Unlock()
+	if err := s.validateDependencyPair(ctx, taskID, dependsOnTaskID); err != nil {
+		return err
 	}
 	if cycle, err := s.checkDependencyCycle(ctx, taskID, dependsOnTaskID); err != nil {
 		return fmt.Errorf("check dependency cycle: %w", err)
@@ -162,6 +201,11 @@ func (s *Service) RemoveDependency(ctx context.Context, taskID, dependsOnTaskID 
 	if s.blockers == nil {
 		return ErrDependencyRepositoryUnavailable
 	}
+	if err := s.authorizeDependencyPair(ctx, taskID, dependsOnTaskID); err != nil {
+		return err
+	}
+	s.dependencyEdgeMu.Lock()
+	defer s.dependencyEdgeMu.Unlock()
 	if err := s.blockers.DeleteTaskBlocker(ctx, taskID, dependsOnTaskID); err != nil {
 		return err
 	}
@@ -181,7 +225,25 @@ func (s *Service) publishDependencyChange(ctx context.Context, taskIDs ...string
 		if err != nil || task == nil {
 			continue
 		}
-		s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
+		// Carry the recomputed projection on the event. A bare task.updated
+		// omits these keys, and the client reads an omitted projection as
+		// "unchanged" (it must, because most task.updated publishers are
+		// lightweight) — so without them every other open board would keep a
+		// stale chip and badge until a full refetch.
+		s.publishTaskEventWithExtra(ctx, events.TaskUpdated, task, nil, s.dependencyEventFields(ctx, task))
+	}
+}
+
+// dependencyEventFields renders one task's derived projection in the wire shape
+// the client's task.updated mapper reads.
+func (s *Service) dependencyEventFields(ctx context.Context, task *models.Task) map[string]interface{} {
+	views := s.BuildDependencyViews(ctx, []*models.Task{task})
+	view := views[task.ID]
+	return map[string]interface{}{
+		"blocked":        view.Blocked,
+		"blocked_reason": view.BlockedReason,
+		"depends_on":     view.DependsOn,
+		"blocks":         view.Blocks,
 	}
 }
 
@@ -296,10 +358,15 @@ func (s *Service) resolveDependencyRefs(
 	refs := make(map[string]DependencyRef, len(seen))
 	for id := range seen {
 		task, err := s.tasks.GetTask(ctx, id)
-		if err != nil || task == nil {
-			// A referenced task we cannot read counts as pending, never as
-			// resolved — the gate must not open on a failed lookup.
-			refs[id] = DependencyRef{ID: id, Status: DependencyPending}
+		if task == nil {
+			// Absent row (deleted predecessor, dangling edge) versus a failed
+			// read: the former must not block forever, the latter must not open
+			// the gate. Mark them differently so buildDependencyView can tell.
+			status := DependencyPending
+			if err == nil || errors.Is(err, taskrepo.ErrTaskNotFound) {
+				status = dependencyMissing
+			}
+			refs[id] = DependencyRef{ID: id, Status: status}
 			continue
 		}
 		refs[id] = DependencyRef{
@@ -325,6 +392,11 @@ func buildDependencyView(
 		ref := refs[id]
 		if ref.ID == "" {
 			ref = DependencyRef{ID: id, Status: DependencyPending}
+		}
+		if ref.Status == dependencyMissing {
+			// Dangling edge to a deleted task: not shown and not counted, so a
+			// failed cleanup cannot block a dependent forever.
+			continue
 		}
 		view.DependsOn = append(view.DependsOn, ref)
 		switch ref.Status {
@@ -396,13 +468,20 @@ func (s *Service) DependencyGate(ctx context.Context, taskID string) (blocked bo
 	anyPending, anyFailed := false, false
 	for _, b := range blockers {
 		predecessor, getErr := s.tasks.GetTask(ctx, b.BlockerTaskID)
-		if getErr != nil {
+		if getErr != nil && !errors.Is(getErr, taskrepo.ErrTaskNotFound) {
 			return true, BlockedReasonUnknown, getErr
 		}
 		if predecessor == nil {
-			// Edge to a task that no longer exists: treat as pending rather
-			// than resolved, and let edge cleanup remove it.
-			anyPending = true
+			// The predecessor row is genuinely gone: this is a dangling edge
+			// left behind when delete-time cleanup failed. Counting it as
+			// pending would block the dependent forever, since a deleted task
+			// can never reach a terminal state. A deleted predecessor is
+			// specified to unblock (without firing a launch intent), so ignore
+			// the edge and prune it opportunistically.
+			//
+			// This is NOT the fail-open case: a read ERROR above still fails
+			// closed. Only a confirmed-absent row is ignored.
+			s.pruneDanglingEdge(ctx, taskID, b.BlockerTaskID)
 			continue
 		}
 		switch DependencyStatusForTask(predecessor) {
@@ -485,6 +564,22 @@ func HasStartWhenUnblockedIntent(task *models.Task) bool {
 	}
 	flag, ok := launch[models.DeferredLaunchStartWhenUnblockedKey].(bool)
 	return ok && flag
+}
+
+// pruneDanglingEdge removes an edge whose predecessor row no longer exists.
+//
+// Best-effort and non-fatal: the caller has already decided to ignore the edge,
+// so a failed prune only means the next read prunes it again.
+func (s *Service) pruneDanglingEdge(ctx context.Context, taskID, missingTaskID string) {
+	if s.blockers == nil {
+		return
+	}
+	if err := s.blockers.DeleteTaskBlocker(ctx, taskID, missingTaskID); err != nil {
+		s.logger.Warn("failed to prune dangling dependency edge",
+			zap.String("task_id", taskID),
+			zap.String("missing_task_id", missingTaskID),
+			zap.Error(err))
+	}
 }
 
 // ListDependentTaskIDs returns the tasks directly blocked by taskID.
