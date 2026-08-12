@@ -820,6 +820,43 @@ type failingTransitionQuarantineStore struct {
 	err   error
 }
 
+type removePayloadOnGetStore struct {
+	delegate *storagepkg.Store
+	path     string
+	removed  bool
+}
+
+func (s *removePayloadOnGetStore) GetQuarantineEntry(
+	ctx context.Context,
+	id string,
+) (storagepkg.QuarantineEntry, error) {
+	entry, err := s.delegate.GetQuarantineEntry(ctx, id)
+	if err != nil || s.removed {
+		return entry, err
+	}
+	if err := os.RemoveAll(s.path); err != nil {
+		return storagepkg.QuarantineEntry{}, err
+	}
+	s.removed = true
+	return entry, nil
+}
+
+func (s *removePayloadOnGetStore) ListQuarantineEntries(
+	ctx context.Context,
+	includeTerminal bool,
+) ([]storagepkg.QuarantineEntry, error) {
+	return s.delegate.ListQuarantineEntries(ctx, includeTerminal)
+}
+
+func (s *removePayloadOnGetStore) TransitionQuarantineEntry(
+	ctx context.Context,
+	id string,
+	next storagepkg.QuarantineState,
+	lastError string,
+) (storagepkg.QuarantineEntry, error) {
+	return s.delegate.TransitionQuarantineEntry(ctx, id, next, lastError)
+}
+
 func (s *failingTransitionQuarantineStore) GetQuarantineEntry(
 	context.Context, string,
 ) (storagepkg.QuarantineEntry, error) {
@@ -1016,6 +1053,56 @@ func TestQuarantineControllerPurgeReportsZeroBytesForMissingGoCachePayload(t *te
 	}
 	if stored.State != storagepkg.QuarantineStateDeleted {
 		t.Fatalf("stored state = %q, want deleted", stored.State)
+	}
+}
+
+func TestQuarantineControllerPurgeReportsBytesFromDeletionOutcome(t *testing.T) {
+	home := t.TempDir()
+	original := filepath.Join(home, "cache", "go-build")
+	quarantined := filepath.Join(home, "trash", "go-cache", "removed-before-delete")
+	if err := os.MkdirAll(original, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	liveArtifact := filepath.Join(original, "replacement-artifact")
+	if err := os.WriteFile(liveArtifact, []byte("active cache"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(quarantined, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(quarantined, "old-artifact"), []byte("old cache"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings, store := newStorageMaintenanceStores(t)
+	entry := storagepkg.QuarantineEntry{
+		ID:             "removed-before-delete",
+		ResourceType:   storagepkg.ResourceTypeGoCache,
+		OriginalPath:   original,
+		QuarantinePath: quarantined,
+		SizeBytes:      42,
+		State:          storagepkg.QuarantineStateQuarantined,
+		QuarantinedAt:  time.Now().UTC().Add(-2 * time.Hour),
+		DeleteAfter:    time.Now().UTC().Add(-time.Hour),
+		Metadata:       json.RawMessage(`{"ownership":"managed"}`),
+	}
+	if err := store.CreateQuarantineEntry(context.Background(), &entry); err != nil {
+		t.Fatalf("create entry: %v", err)
+	}
+	deletingStore := &removePayloadOnGetStore{delegate: store, path: quarantined}
+	controller := &workspaceQuarantineController{settings: settings, store: deletingStore, homeDir: home}
+
+	result, err := controller.Purge(
+		context.Background(), storagepkg.QuarantinePurgeScopeEligible,
+		storagepkg.QuarantineConfirmationEligible,
+	)
+	if err != nil {
+		t.Fatalf("Purge: %v", err)
+	}
+	if result.Deleted != 1 || result.Failed != 0 || result.DeletedBytes != 0 {
+		t.Fatalf("purge result = %#v, want one deleted entry and zero deleted bytes", result)
+	}
+	if data, err := os.ReadFile(liveArtifact); err != nil || string(data) != "active cache" {
+		t.Fatalf("live cache changed: data=%q err=%v", data, err)
 	}
 }
 

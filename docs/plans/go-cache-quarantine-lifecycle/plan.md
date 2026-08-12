@@ -60,9 +60,10 @@ can make the durable entry terminal.
 
 ## Frontend
 
-No frontend change is required. Existing run-result rendering accepts provider result fields, and
-the existing **Delete**, **Clear eligible**, and **Force clear all** actions use the repaired backend
-paths.
+No frontend code change is required. `CleanupResult.Skipped` and `CleanupResult.Reason` extend the
+`MaintenanceRun.Result` payload under `go_cache.result`; the existing run-result rendering accepts
+those fields. Route shapes, UI actions, and confirmation flows remain unchanged, and the existing
+**Delete**, **Clear eligible**, and **Force clear all** actions use the repaired backend paths.
 
 ---
 
@@ -97,8 +98,9 @@ paths.
   **File:** `apps/backend/internal/backendapp/storage_maintenance_test.go`.
   **How:** retain and narrow the existing missing-payload restore regression test.
 - **Integration boundary:** the backendapp tests exercise the production quarantine controller,
-  real `storage.Store`, SQLite state transitions, and filesystem effects. No HTTP or frontend
-  contract changes, so a handler test is not required.
+  real `storage.Store`, SQLite state transitions, and filesystem effects. The existing
+  `MaintenanceRun.Result` envelope carries the result-field extension without route or UI action
+  changes, so a handler or frontend test is not required.
 
 ---
 
@@ -113,7 +115,7 @@ route shapes, confirmation flows, or user interaction sequence.
 
 - Task 01: `cd apps/backend && go test ./internal/system/storage ./internal/system/storage/gocache`
   passed (123 tests).
-- Task 02: `cd apps/backend && go test ./internal/backendapp` passed (315 tests).
+- Task 02: `cd apps/backend && go test ./internal/backendapp` passed (316 tests).
 - Task 03: `node --test scripts/validate-public-docs.test.mjs && node scripts/validate-public-docs.mjs
   && git diff --check` passed (60 validation tests and 41 published pages).
 

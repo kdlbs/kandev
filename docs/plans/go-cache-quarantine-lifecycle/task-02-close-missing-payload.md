@@ -71,8 +71,8 @@ database assertions, remaining risks, and the synchronized task and plan status.
   'TestQuarantineController.*MissingGoCachePayload'` failed for the eligible, forced, and bulk
   missing-payload cases because deletion returned `storage.ErrConflict`.
 - Green: the same focused command passed (4 tests), and `cd apps/backend && go test
-  ./internal/backendapp` passed (315 tests).
+  ./internal/backendapp` passed (316 tests).
 - Permanent deletion now closes a validated missing Go-cache payload without reading or changing the
   original cache path. Restore continues through the existing fail-closed missing-payload guard.
-  Purge measures payload presence before deletion and reports zero deleted bytes when the durable
-  entry was already missing on disk.
+  Purge uses the deletion-time payload outcome and reports zero deleted bytes when the durable entry
+  was already missing on disk, including a payload disappearing before the deletion check.
