@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -13,7 +13,11 @@ import type { ContextItem } from "@/lib/types/context";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { ImagePasteIssue } from "./clipboard-attachments";
 import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
-import { createPluginComposerCapability } from "@/lib/plugins/composer-capability";
+import {
+  composerIdentity,
+  composerInsertionText,
+  useStablePluginComposerCapability,
+} from "@/lib/plugins/composer-capability";
 import type { PluginComposerCapability } from "@/lib/plugins/types";
 
 export type ChatInputEditorAreaProps = {
@@ -135,35 +139,45 @@ function useChatPluginComposer(p: {
   inputRef: ChatInputEditorAreaProps["inputRef"];
   submitDisabled: boolean;
   isEnhancingPrompt: boolean;
+  hasContent: boolean;
+  identity: string;
   onSubmit: () => void;
 }): PluginComposerCapability {
-  const handle = useMemo(
-    () =>
-      createPluginComposerCapability({
-        insertText: (text) => {
-          const editor = p.inputRef.current;
-          if (!editor) return false;
-          const from = editor.getSelectionStart();
-          const prefix = from > 0 && !/\s/.test(editor.getValue().charAt(from - 1)) ? " " : "";
-          editor.insertText(prefix + text.trim(), from, editor.getSelectionEnd());
-          editor.focus();
-          return true;
-        },
-        focus: () => {
-          if (!p.inputRef.current) return false;
-          p.inputRef.current.focus();
-          return true;
-        },
-        submit: async () => {
-          if (p.isEnhancingPrompt || p.submitDisabled) return false;
-          p.onSubmit();
-          return true;
-        },
-      }),
-    [p.inputRef, p.isEnhancingPrompt, p.onSubmit, p.submitDisabled],
+  return useStablePluginComposerCapability(
+    {
+      insertText: (text) => {
+        const editor = p.inputRef.current;
+        if (!editor) return false;
+        const insertion = composerInsertionText(text, editor.getCharBefore());
+        if (!insertion) return false;
+        editor.insertText(insertion, editor.getSelectionStart(), editor.getSelectionEnd());
+        editor.focus();
+        return true;
+      },
+      focus: () => {
+        if (!p.inputRef.current) return false;
+        p.inputRef.current.focus();
+        return true;
+      },
+      // Revalidated at call time against the same gate the slot advertises as
+      // `submittable`, so a capability never submits an empty draft it just
+      // told the plugin was not submittable.
+      //
+      // The draft is read from the editor, not from `hasContent`. A plugin may
+      // insert a transcript and submit in one callback, and React has not
+      // re-rendered by then, so the render snapshot still says "empty" while
+      // the editor already holds the text. `submitDraft` reads its own
+      // synchronous `valueRef` for the same reason.
+      submit: async () => {
+        if (p.isEnhancingPrompt || p.submitDisabled) return false;
+        const liveDraft = p.inputRef.current?.getValue() ?? "";
+        if (liveDraft.trim().length === 0 && !p.hasContent) return false;
+        p.onSubmit();
+        return true;
+      },
+    },
+    p.identity,
   );
-  useEffect(() => () => handle.revoke(), [handle]);
-  return handle.api;
 }
 
 export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
@@ -190,6 +204,10 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
     inputRef,
     submitDisabled: p.submitDisabled,
     isEnhancingPrompt: Boolean(isEnhancingPrompt),
+    hasContent,
+    // The container is not remounted when the user switches task or session,
+    // so this is what tells a captured plugin handle it has been superseded.
+    identity: composerIdentity(taskId ? "task-chat" : "quick-chat", taskId, sessionId),
     onSubmit: handleSubmitWithReset,
   });
   const submitDisabledReason = p.hasPendingAttachmentUploads

@@ -434,9 +434,28 @@ func (m *Manifest) validateUIKeybindings() []error {
 		}
 		if err := parseKeybindingCombo(kb.Default); err != nil {
 			errs = append(errs, fmt.Errorf("ui.keybindings[%q]: %w", kb.ID, err))
+			continue
+		}
+		if kb.AllowInEditor && !comboHasNonShiftModifier(kb.Default) {
+			errs = append(errs, fmt.Errorf(
+				"ui.keybindings[%q]: allow_in_editor requires a ctrl/cmd/mod/alt modifier, otherwise the binding would swallow %q while the user is typing",
+				kb.ID, kb.Default))
 		}
 	}
 	return errs
+}
+
+// comboHasNonShiftModifier reports whether an already-parsed combo holds a
+// modifier that makes it unreachable by ordinary typing. Shift alone does
+// not count: shift+a is just a capital A.
+func comboHasNonShiftModifier(combo string) bool {
+	for _, raw := range strings.Split(combo, "+") {
+		switch strings.ToLower(strings.TrimSpace(raw)) {
+		case "mod", "ctrl", "cmd", "meta", "alt", "option":
+			return true
+		}
+	}
+	return false
 }
 
 // validateKeybindingID checks a single keybinding id against the slug

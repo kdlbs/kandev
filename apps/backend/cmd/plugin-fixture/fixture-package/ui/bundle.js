@@ -22,7 +22,10 @@
  * (get on mount, debounced set, subscribe to pick up a write from another
  * tab/surface), a task-card-indicators slot component, a task-card-tags slot
  * component, and a registerTaskMenuAction under the kanban card's "edit"
- * group.
+ * group. It also registers one composer action on all three composer slots
+ * (chat-input-actions, task-create-input-actions, new-session-input-actions),
+ * which is how the e2e suite exercises PluginComposerCapability against real
+ * native composers rather than a mock.
  *
  * The task-created counter lives in module scope (not component state) with
  * a tiny listener set, so it survives across route navigations (the page
@@ -366,6 +369,109 @@
         );
       }
 
+      // Drives PluginComposerCapability through native composers. Capturing
+      // the capability and using it after later renders mirrors a real voice
+      // integration whose recording completes asynchronously.
+      var COMPOSER_BUTTON_STYLE = {
+        fontSize: "9px",
+        lineHeight: "1",
+        padding: "2px 3px",
+        minWidth: "16px",
+      };
+
+      function ComposerAction(props) {
+        var slotProps = props.slotProps || {};
+        var composer = slotProps.composer;
+        var statusState = React.useState("");
+        var status = statusState[0];
+        var setStatus = statusState[1];
+        var capturedRef = React.useRef(null);
+
+        function record(result) {
+          setStatus(result && result.status ? result.status : String(result));
+        }
+
+        return jsx(
+          "span",
+          {
+            "data-testid": "e2e-composer-action",
+            "data-surface": String(slotProps.surface),
+            "data-presentation": String(slotProps.presentation),
+            "data-task-id": String(slotProps.taskId || ""),
+            "data-session-id": String(slotProps.activeSessionId || ""),
+            "data-disabled": String(Boolean(slotProps.disabled)),
+            "data-submittable": String(Boolean(slotProps.submittable)),
+            "data-status": status,
+          },
+          jsx(
+            "button",
+            {
+              type: "button",
+              "data-testid": "e2e-composer-insert",
+              style: COMPOSER_BUTTON_STYLE,
+              onClick: function () {
+                record(composer.insertText("DICTATED"));
+              },
+            },
+            "insert",
+          ),
+          jsx(
+            "button",
+            {
+              type: "button",
+              "data-testid": "e2e-composer-capture",
+              style: COMPOSER_BUTTON_STYLE,
+              onClick: function () {
+                capturedRef.current = composer;
+                setStatus("captured");
+              },
+            },
+            "capture",
+          ),
+          jsx(
+            "button",
+            {
+              type: "button",
+              "data-testid": "e2e-composer-insert-captured",
+              style: COMPOSER_BUTTON_STYLE,
+              onClick: function () {
+                record(
+                  capturedRef.current
+                    ? capturedRef.current.insertText("DICTATED")
+                    : { status: "not-captured" },
+                );
+              },
+            },
+            "insert captured",
+          ),
+          jsx(
+            "button",
+            {
+              type: "button",
+              "data-testid": "e2e-composer-submit",
+              style: COMPOSER_BUTTON_STYLE,
+              onClick: function () {
+                var target = capturedRef.current || composer;
+                target.submit().then(record);
+              },
+            },
+            "submit",
+          ),
+          jsx(
+            "button",
+            {
+              type: "button",
+              "data-testid": "e2e-composer-focus",
+              style: COMPOSER_BUTTON_STYLE,
+              onClick: function () {
+                record(composer.focus());
+              },
+            },
+            "focus",
+          ),
+        );
+      }
+
       function FixtureBitbucketIcon(props) {
         return jsx(
           "svg",
@@ -491,6 +597,9 @@
         Component: NotesPanel,
         mobileEnabled: true,
       });
+      registry.registerComponent("chat-input-actions", ComposerAction);
+      registry.registerComponent("task-create-input-actions", ComposerAction);
+      registry.registerComponent("new-session-input-actions", ComposerAction);
       registry.registerComponent("task-card-indicators", CardIndicator);
       registry.registerComponent("task-card-tags", CardTags);
       registry.registerTaskMenuAction({

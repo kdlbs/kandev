@@ -263,6 +263,13 @@ type UIKeybinding struct {
 	ID          string `yaml:"id" json:"id"`
 	Default     string `yaml:"default" json:"default"`
 	Description string `yaml:"description" json:"description"`
+	// AllowInEditor opts this one binding out of the dispatcher's
+	// skip-while-typing rule. By default a plugin keybinding does not fire
+	// when the keydown target is an input, textarea or contenteditable, so a
+	// plugin cannot shadow a character the user is trying to type. A binding
+	// whose whole purpose is to act on the focused composer (dictation,
+	// for instance) has to run there, and declares it here.
+	AllowInEditor bool `yaml:"allow_in_editor,omitempty" json:"allow_in_editor,omitempty"`
 }
 
 // Parse decodes a plugin manifest from YAML bytes. It does not validate the
