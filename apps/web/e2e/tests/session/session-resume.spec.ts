@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForSessionState } from "../../helpers/session";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import type { Page } from "@playwright/test";
@@ -127,7 +128,7 @@ test.describe("Task status during resume", () => {
 
     // 1. Create task and start agent — after the turn completes the workflow
     //    advances it from "Running" to "Turn Finished".
-    await apiClient.createTaskWithAgent(
+    const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Status Stable Task",
       seedData.agentProfileId,
@@ -138,6 +139,8 @@ test.describe("Task status during resume", () => {
         repository_ids: [seedData.repositoryId],
       },
     );
+    const sessionId = task.session_id;
+    if (!sessionId) throw new Error("createTaskWithAgent did not return a session_id");
 
     // 2. Navigate to the session and wait for the agent to finish its first turn
     const session = await openTaskSession(testPage, "Status Stable Task");
@@ -145,6 +148,13 @@ test.describe("Task status during resume", () => {
       timeout: 30_000,
     });
     await session.waitForChatIdle({ timeout: 15_000 });
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "Initial session did not settle before the Turn Finished assertion",
+      timeout: 30_000,
+    });
 
     // 3. Confirm the task moved to the "Turn Finished" section after the turn completed
     await expect(session.taskInSection("Status Stable Task", "Turn Finished")).toBeVisible({
@@ -172,6 +182,13 @@ test.describe("Task status during resume", () => {
 
     // 7. Wait for auto-resume to complete (agent relaunches and becomes idle)
     await session.waitForChatIdle({ timeout: 60_000 });
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "Resumed session did not settle before the final Turn Finished assertion",
+      timeout: 30_000,
+    });
 
     // 8. After resume completes, the task must still be in "Turn Finished"
     await expect(session.taskInSection("Status Stable Task", "Turn Finished")).toBeVisible({
