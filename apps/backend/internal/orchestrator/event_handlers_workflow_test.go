@@ -8,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
@@ -139,6 +140,67 @@ func TestClaimTaskEventMetadataIsOneShot(t *testing.T) {
 	}
 	if svc.claimTaskEventMetadata(ctx, claimedTask, models.MetaKeyQueuedMoveExitPending) {
 		t.Fatal("replayed lifecycle event was claimed twice")
+	}
+}
+
+func TestQueuedMoveLifecycleTokenRemainsPendingWhenPrerequisitesFail(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "queued-move-retry", "queued-move-session", "source-step")
+	task, err := repo.GetTask(ctx, "queued-move-retry")
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	task.WorkflowStepID = "destination-step"
+	task.WIPAdmitted = false
+	task.QueuedForStepID = "destination-step"
+	task.Metadata = map[string]interface{}{models.MetaKeyQueuedMoveExitPending: true}
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatalf("queue task: %v", err)
+	}
+
+	// The source-step lookup fails before the one-shot token is claimed. A
+	// replay after the workflow snapshot is available must still be able to run
+	// the source on_exit action.
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.handleTaskMoved(ctx, watcher.TaskMovedEventData{
+		TaskID:          task.ID,
+		SessionID:       "queued-move-session",
+		FromStepID:      "source-step",
+		ToStepID:        "destination-step",
+		WIPAdmitted:     false,
+		QueuedForStepID: "destination-step",
+	})
+
+	stored, err := repo.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	if _, ok := stored.Metadata[models.MetaKeyQueuedMoveExitPending]; !ok {
+		t.Fatal("queued move lifecycle token was consumed before prerequisites succeeded")
+	}
+}
+
+func TestQueuePromotionTokenRemainsPendingWhenTargetLookupFails(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "promotion-retry", WorkspaceID: "ws1", WorkflowID: "wf1", WorkflowStepID: "missing-target",
+		Title: "Promotion retry", State: "TODO", WIPAdmitted: true,
+		Metadata: map[string]interface{}{models.MetaKeyQueuePromotionPending: true},
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.handleTaskQueuePromoted(ctx, watcher.TaskEventData{TaskID: "promotion-retry"})
+
+	stored, err := repo.GetTask(ctx, "promotion-retry")
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	if _, ok := stored.Metadata[models.MetaKeyQueuePromotionPending]; !ok {
+		t.Fatal("queue promotion token was consumed before target lookup succeeded")
 	}
 }
 

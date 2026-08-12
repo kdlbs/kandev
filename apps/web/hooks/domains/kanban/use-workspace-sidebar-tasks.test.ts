@@ -17,6 +17,7 @@ type Snapshot = {
     priority?: string;
     queuedAt?: string;
     createdAt?: string;
+    isArchived?: boolean;
   }>;
 };
 
@@ -58,16 +59,19 @@ function setMockState(patch: Partial<MockState>) {
   };
 }
 
+const defaultStepId = "step-1";
+const defaultStepColor = "bg-blue-500";
+
 function makeSnapshot(
   workflowId: string,
   workflowName: string,
   taskIds: string[],
-  stepId = "step-1",
+  stepId = defaultStepId,
 ): Snapshot {
   return {
     workflowId,
     workflowName,
-    steps: [{ id: stepId, title: "Step 1", color: "bg-blue-500", position: 0 }],
+    steps: [{ id: stepId, title: "Step 1", color: defaultStepColor, position: 0 }],
     tasks: taskIds.map((id, i) => ({ id, workflowStepId: stepId, title: id, position: i })),
   };
 }
@@ -166,8 +170,8 @@ describe("useWorkspaceSidebarTasks", () => {
       kanbanMulti: { snapshots: {}, isLoading: false },
       kanban: {
         workflowId: "wf-A",
-        tasks: [{ id: "t-a1", workflowStepId: "step-1", title: "A1", position: 0 }],
-        steps: [{ id: "step-1", title: "Step 1", color: "bg-blue-500", position: 0 }],
+        tasks: [{ id: "t-a1", workflowStepId: defaultStepId, title: "A1", position: 0 }],
+        steps: [{ id: defaultStepId, title: "Step 1", color: defaultStepColor, position: 0 }],
       },
     });
 
@@ -194,12 +198,12 @@ describe("useWorkspaceSidebarTasks WIP queue", () => {
           "wf-A": {
             workflowId: "wf-A",
             workflowName: "Alpha",
-            steps: [{ id: "step-1", title: "Review", color: "bg-blue-500", position: 0 }],
+            steps: [{ id: defaultStepId, title: "Review", color: defaultStepColor, position: 0 }],
             tasks: [
               {
                 id: "queued-later",
-                workflowStepId: "step-1",
-                queuedForStepId: "step-1",
+                workflowStepId: defaultStepId,
+                queuedForStepId: defaultStepId,
                 wipAdmitted: false,
                 priority: "low",
                 queuedAt: "2026-08-12T00:02:00Z",
@@ -208,8 +212,8 @@ describe("useWorkspaceSidebarTasks WIP queue", () => {
               },
               {
                 id: "queued-first",
-                workflowStepId: "step-1",
-                queuedForStepId: "step-1",
+                workflowStepId: defaultStepId,
+                queuedForStepId: defaultStepId,
                 wipAdmitted: false,
                 priority: "high",
                 queuedAt: "2026-08-12T00:01:00Z",
@@ -234,6 +238,49 @@ describe("useWorkspaceSidebarTasks WIP queue", () => {
       total: 2,
       destinationTitle: "Review",
     });
+  });
+
+  it("excludes archived tasks from active queue positions", () => {
+    setMockState({
+      workflows: { items: [{ id: "wf-A", workspaceId: "ws-1", name: "Alpha" }] },
+      kanbanMulti: {
+        snapshots: {
+          "wf-A": {
+            workflowId: "wf-A",
+            workflowName: "Alpha",
+            steps: [{ id: defaultStepId, title: "Review", color: defaultStepColor, position: 0 }],
+            tasks: [
+              {
+                id: "archived-queued",
+                workflowStepId: defaultStepId,
+                queuedForStepId: defaultStepId,
+                wipAdmitted: false,
+                isArchived: true,
+                position: 0,
+                title: "Archived",
+              },
+              {
+                id: "active-queued",
+                workflowStepId: defaultStepId,
+                queuedForStepId: defaultStepId,
+                wipAdmitted: false,
+                position: 1,
+                title: "Active",
+              },
+            ],
+          },
+        },
+        isLoading: false,
+      },
+    });
+
+    const { result } = renderHook(() => useWorkspaceSidebarTasks("ws-1"));
+    expect(result.current.wipQueueByTaskId.get("active-queued")).toEqual({
+      position: 1,
+      total: 1,
+      destinationTitle: "Review",
+    });
+    expect(result.current.wipQueueByTaskId.has("archived-queued")).toBe(false);
   });
 });
 

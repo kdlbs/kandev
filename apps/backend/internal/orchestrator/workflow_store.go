@@ -24,6 +24,7 @@ type taskUpdatedPublisher func(ctx context.Context, task *models.Task, oldWorkfl
 
 type taskMovedPublisher func(ctx context.Context, task *models.Task, fromWorkflowID, fromStepID, toStepID, sessionID string)
 type taskQueuePromotedPublisher func(ctx context.Context, task *models.Task)
+type taskStateChangedPublisher func(ctx context.Context, task *models.Task, oldState v1.TaskState)
 
 type workflowMoveLimitsRepository interface {
 	CountTasksByWorkflowStepExcludingTask(ctx context.Context, stepID, excludeTaskID string) (int, error)
@@ -70,6 +71,7 @@ type workflowStore struct {
 	publishTaskUpdated  taskUpdatedPublisher
 	publishTaskMoved    taskMovedPublisher
 	publishTaskPromoted taskQueuePromotedPublisher
+	publishStateChanged taskStateChangedPublisher
 	logger              *logger.Logger
 	appliedOps          sync.Map
 }
@@ -84,6 +86,7 @@ func newWorkflowStore(
 ) *workflowStore {
 	var moved taskMovedPublisher
 	var promoted taskQueuePromotedPublisher
+	var stateChanged taskStateChangedPublisher
 	for _, publisher := range publishers {
 		switch value := publisher.(type) {
 		case taskMovedPublisher:
@@ -94,6 +97,10 @@ func newWorkflowStore(
 			promoted = value
 		case func(context.Context, *models.Task):
 			promoted = taskQueuePromotedPublisher(value)
+		case taskStateChangedPublisher:
+			stateChanged = value
+		case func(context.Context, *models.Task, v1.TaskState):
+			stateChanged = taskStateChangedPublisher(value)
 		}
 	}
 	return &workflowStore{
@@ -103,6 +110,7 @@ func newWorkflowStore(
 		publishTaskUpdated:  publishTaskUpdated,
 		publishTaskMoved:    moved,
 		publishTaskPromoted: promoted,
+		publishStateChanged: stateChanged,
 		logger:              log,
 	}
 }
@@ -375,7 +383,13 @@ func (s *workflowStore) pullOneFeederTask(
 		delete(candidate.Metadata, models.MetaKeyQueuedMoveExitPending)
 		candidate.Metadata[models.MetaKeyQueuePromotionPending] = true
 		candidate.Position = position
-		s.syncQueuedPromotionState(ctx, candidate, vacatedStep)
+		oldState, stateChanged, err := s.syncQueuedPromotionState(ctx, candidate, vacatedStep)
+		if err != nil {
+			s.logger.Warn("skipping feeder task: failed to prepare promotion state",
+				zap.String("task_id", candidate.ID), zap.Error(err))
+			skipped[candidate.ID] = struct{}{}
+			continue
+		}
 		candidate.UpdatedAt = time.Now().UTC()
 		if promoter, ok := s.repo.(workflowQueuedTaskPromoter); ok {
 			claimed, err := promoter.PromoteQueuedTaskIfWorkflowStepHasCapacity(ctx, candidate, fromStepID, vacatedStep.ID, vacatedStep.WIPLimit)
@@ -391,7 +405,8 @@ func (s *workflowStore) pullOneFeederTask(
 			claimed, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, candidate, vacatedStep.ID, vacatedStep.WIPLimit)
 			if err != nil {
 				s.logger.Warn("failed to promote feeder task", zap.String("task_id", candidate.ID), zap.Error(err))
-				return false
+				skipped[candidate.ID] = struct{}{}
+				continue
 			}
 			if !claimed {
 				skipped[candidate.ID] = struct{}{}
@@ -404,6 +419,9 @@ func (s *workflowStore) pullOneFeederTask(
 			continue
 		}
 		s.publishTaskUpdated(ctx, candidate)
+		if stateChanged && s.publishStateChanged != nil {
+			s.publishStateChanged(ctx, candidate, oldState)
+		}
 		sessionID := ""
 		if session, err := s.repo.GetActiveTaskSessionByTaskID(ctx, candidate.ID); err == nil && session != nil {
 			sessionID = session.ID
@@ -425,10 +443,17 @@ func (s *workflowStore) promoteSameStepTask(ctx context.Context, candidate *mode
 	candidate.Metadata[models.MetaKeyQueuePromotionPending] = true
 	candidate.Position = position
 	candidate.UpdatedAt = time.Now().UTC()
-	s.syncQueuedPromotionState(ctx, candidate, step)
+	oldState, stateChanged, err := s.syncQueuedPromotionState(ctx, candidate, step)
+	if err != nil {
+		s.logger.Warn("skipping queued task: failed to prepare promotion state",
+			zap.String("task_id", candidate.ID), zap.Error(err))
+		skipped[candidate.ID] = struct{}{}
+		return s.pullOneFeederTask(ctx, pullRepo, limitedRepo, step, position, skipped)
+	}
 	if promoter, ok := s.repo.(workflowQueuedTaskPromoter); ok {
 		claimed, err := promoter.PromoteQueuedTaskIfWorkflowStepHasCapacity(ctx, candidate, fromStepID, step.ID, step.WIPLimit)
 		if err != nil {
+			s.logger.Warn("failed to promote same-step queued task", zap.String("task_id", candidate.ID), zap.Error(err))
 			return false
 		}
 		if !claimed {
@@ -437,36 +462,49 @@ func (s *workflowStore) promoteSameStepTask(ctx context.Context, candidate *mode
 		}
 	} else if admissionRepo, ok := s.repo.(workflowMoveAdmissionRepository); ok {
 		claimed, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, candidate, step.ID, step.WIPLimit)
-		if err != nil || !claimed {
-			return false
+		if err != nil {
+			s.logger.Warn("failed to promote same-step queued task", zap.String("task_id", candidate.ID), zap.Error(err))
+			skipped[candidate.ID] = struct{}{}
+			return s.pullOneFeederTask(ctx, pullRepo, limitedRepo, step, position, skipped)
+		}
+		if !claimed {
+			skipped[candidate.ID] = struct{}{}
+			return s.pullOneFeederTask(ctx, pullRepo, limitedRepo, step, position, skipped)
 		}
 	} else if err := limitedRepo.UpdateTaskIfWorkflowStepHasCapacity(ctx, candidate, step.ID, candidate.ID, step.WIPLimit); err != nil {
-		return false
+		s.logger.Warn("failed to promote same-step queued task", zap.String("task_id", candidate.ID), zap.Error(err))
+		skipped[candidate.ID] = struct{}{}
+		return s.pullOneFeederTask(ctx, pullRepo, limitedRepo, step, position, skipped)
 	}
 	s.publishTaskUpdated(ctx, candidate)
+	if stateChanged && s.publishStateChanged != nil {
+		s.publishStateChanged(ctx, candidate, oldState)
+	}
 	if s.publishTaskPromoted != nil {
 		s.publishTaskPromoted(ctx, candidate)
 	}
 	return true
 }
 
-func (s *workflowStore) syncQueuedPromotionState(ctx context.Context, task *models.Task, targetStep *wfmodels.WorkflowStep) {
+func (s *workflowStore) syncQueuedPromotionState(ctx context.Context, task *models.Task, targetStep *wfmodels.WorkflowStep) (v1.TaskState, bool, error) {
 	if targetStep == nil || s.workflowStepGetter == nil {
-		return
+		return task.State, false, nil
 	}
 	next, err := s.workflowStepGetter.GetNextStepByPosition(ctx, targetStep.WorkflowID, targetStep.Position)
 	if err != nil {
-		return
+		return task.State, false, fmt.Errorf("load next step after %s: %w", targetStep.ID, err)
 	}
+	oldState := task.State
 	if wfmodels.IsTerminalStep(targetStep, next) {
 		if !models.IsTerminalTaskState(task.State) {
 			task.State = v1.TaskStateCompleted
 		}
-		return
+		return oldState, oldState != task.State, nil
 	}
 	if task.State == v1.TaskStateCompleted {
 		task.State = v1.TaskStateTODO
 	}
+	return oldState, oldState != task.State, nil
 }
 
 func (s *workflowStore) nextQueuedSameStepTask(ctx context.Context, stepID string, skipped map[string]struct{}) *models.Task {

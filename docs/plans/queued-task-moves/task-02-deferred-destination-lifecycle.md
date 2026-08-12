@@ -61,12 +61,21 @@ go test -tags fts5 ./internal/task/service/... \
   before feeder candidates.
 - Workflow-engine transitions use the same admission boundary and stop before
   destination entry when the target is queued.
+- Replay prerequisite failures leave lifecycle claim metadata available for a
+  later retry, and promotion state synchronization errors abort that attempt.
 
 The focused backend run passed:
 
 ```text
 rtk go test -tags fts5 ./internal/task/service ./internal/orchestrator -run 'TestService_MoveTaskQueuesFullWIPLimitedTarget|TestClaimTaskEventMetadataIsOneShot|TestExecuteStepTransition_FullTargetRunsExitAndDefersEntry|TestService_MoveTaskPullsNextFeederTaskOnVacate|TestService_MoveTaskPullSkipsBlockedFeederCandidate' -count=1
 5 passed in 2 packages
+```
+
+The post-review focused backend run also passed the full affected package set:
+
+```text
+rtk go test -tags fts5 ./internal/task/repository/... ./internal/task/service ./internal/orchestrator -count=1
+Go test: 3150 passed in 5 packages
 ```
 
 ## Files Likely Touched

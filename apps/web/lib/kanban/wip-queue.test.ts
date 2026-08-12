@@ -3,6 +3,7 @@ import {
   getDestinationQueue,
   getWipQueueStatus,
   partitionWipTasks,
+  compareWipQueueTasks,
   type WipQueueTask,
 } from "./wip-queue";
 
@@ -67,5 +68,27 @@ describe("wip queue helper", () => {
       destinationTitle: "Review",
     });
     expect(getWipQueueStatus(tasks[2], tasks, "review", "Review")).toBeUndefined();
+  });
+
+  it("keeps partitioned queued tasks in the same sorted order as their positions", () => {
+    const tasks = [
+      task({ id: "low", priority: "low", position: 2 }),
+      task({ id: "critical", priority: "critical", position: 1 }),
+      task({ id: "high", priority: "high", position: 1 }),
+    ];
+
+    expect(partitionWipTasks(tasks, "review").queued.map((item) => item.id)).toEqual([
+      "critical",
+      "high",
+      "low",
+    ]);
+  });
+
+  it("orders missing timestamps deterministically without producing NaN", () => {
+    const left = task({ id: "left", queuedAt: null, createdAt: null });
+    const right = task({ id: "right", queuedAt: "not-a-date", createdAt: "not-a-date" });
+
+    expect(compareWipQueueTasks(left, right)).toBeLessThan(0);
+    expect(Number.isNaN(compareWipQueueTasks(left, right))).toBe(false);
   });
 });

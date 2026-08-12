@@ -42,6 +42,7 @@ spec: "../../specs/tasks/wip-limit-pull-system.md"
 ```bash
 cd apps
 pnpm --filter @kandev/web exec vitest run \
+  lib/kanban/wip-queue.test.ts \
   hooks/domains/kanban/use-workspace-sidebar-tasks.test.ts \
   components/task/task-session-sidebar-item.test.ts \
   components/task/mobile/session-task-switcher-sheet-hooks.test.ts \
@@ -60,9 +61,9 @@ pnpm --filter @kandev/web run i18n:ratchet
 - Desktop and mobile task switchers share the same queue status mapping.
   Fine pointers receive a tooltip with `Position N of M in STEP queue`; coarse
   pointers receive an inline `Queued N/M` chip.
-- Focused mapper and component tests passed with the 5-file, 71-test Vitest
-  run. The queue chip disappears after promotion and preserves mobile width
-  constraints in managed E2E coverage.
+- Focused mapper and component tests passed with the exact 5-file, 71-test
+  Vitest run above. The queue chip disappears after promotion and preserves
+  mobile width constraints in managed E2E coverage.
 
 ## Files Likely Touched
 

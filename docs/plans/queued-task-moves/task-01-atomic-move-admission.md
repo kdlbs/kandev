@@ -39,10 +39,10 @@ spec: "../../specs/tasks/wip-limit-pull-system.md"
 
 ```bash
 cd apps/backend
-go test -tags fts5 -race ./internal/task/repository/... \
-  -run 'Test.*Move.*Admission|Test.*Move.*Concurrent' -count=1
-go test -tags fts5 ./internal/task/service/... \
-  -run 'Test.*Move.*(WIP|Queue|Bulk|Deferred)' -count=1
+rtk go test -tags fts5 ./internal/task/repository/... \
+  ./internal/task/service ./internal/orchestrator -count=1
+rtk go test -tags fts5 ./internal/task/repository/sqlite \
+  -run TestPostgresUpdateTaskWithWorkflowStepAdmission_ConcurrentLastSlot -count=1
 ```
 
 ## Implementation Result
@@ -56,13 +56,20 @@ go test -tags fts5 ./internal/task/service/... \
 - Moving a queued task clears its old deferred state before applying the new
   target admission.
 - Repository and service tests cover overflow, unlimited targets, the final
-  slot race, event metadata, and bulk moves.
+  slot race, event metadata, and bulk moves. Manual placement, admitted state,
+  and queue-exit metadata now commit atomically.
+- Lifecycle replay keeps move and promotion tokens pending when prerequisite
+  loading fails, and promotion errors no longer terminate queue filling.
 
 The focused implementation run was:
 
 ```text
 rtk go test -tags fts5 ./internal/task/repository/... ./internal/task/service ./internal/orchestrator -count=1
-Go test: 3146 passed in 5 packages
+Go test: 3150 passed in 5 packages
+
+rtk go test -tags fts5 ./internal/task/repository/sqlite \
+  -run TestPostgresUpdateTaskWithWorkflowStepAdmission_ConcurrentLastSlot -count=1
+Go test: skipped because KANDEV_TEST_POSTGRES_DSN is not set
 ```
 
 The repository admission tests and the focused service/orchestrator move

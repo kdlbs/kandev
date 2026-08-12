@@ -28,9 +28,9 @@ The source step exits when the queued move commits. Destination entry behavior
 runs only after admission. The Kanban column shows active and queued areas. The
 task sidebar shows the queue position for destination-resident queued tasks.
 
-This decision replaces only the manual-move conflict rule in
-ADR-2026-07-28-visible-wip-overflow-queues. The remaining creation, persistence,
-and feeder rules stay accepted.
+This decision replaces the capacity-conflict rule for explicit, bulk, approval,
+MCP, and workflow-engine moves in ADR-2026-07-28-visible-wip-overflow-queues.
+The remaining creation, persistence, and feeder rules stay accepted.
 
 ## Consequences
 

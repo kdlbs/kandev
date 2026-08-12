@@ -25,6 +25,20 @@ import (
 
 type turnCompletionCause string
 
+type taskMetadataKeyRemover interface {
+	RemoveTaskMetadataKey(context.Context, string, string) (bool, error)
+}
+
+type taskMetadataKeySetter interface {
+	SetTaskMetadataKey(context.Context, string, string, interface{}) error
+}
+
+type taskMovedLifecyclePrerequisites struct {
+	session    *models.TaskSession
+	fromStep   *wfmodels.WorkflowStep
+	targetStep *wfmodels.WorkflowStep
+}
+
 const (
 	turnCompletionCauseAgentTurn        turnCompletionCause = "agent_turn"
 	turnCompletionCauseUserCancellation turnCompletionCause = "user_cancellation"
@@ -440,6 +454,10 @@ func (s *Service) handleTaskMoved(ctx context.Context, data watcher.TaskMovedEve
 		return
 	}
 	queued := data.QueuedForStepID != "" && !data.WIPAdmitted
+	prerequisites, ok := s.loadTaskMovedLifecyclePrerequisites(ctx, data, queued)
+	if !ok {
+		return
+	}
 	if queued {
 		if task.WorkflowStepID != data.ToStepID || task.QueuedForStepID != data.QueuedForStepID || task.WIPAdmitted {
 			return
@@ -463,12 +481,83 @@ func (s *Service) handleTaskMoved(ctx context.Context, data watcher.TaskMovedEve
 	// No session yet — check if we need to create one via auto-start
 	if data.SessionID == "" {
 		if !queued {
-			s.handleTaskMovedNoSession(ctx, data)
+			if prerequisites != nil && prerequisites.targetStep != nil {
+				s.autoStartTaskForLoadedStep(ctx, task, prerequisites.targetStep, "task.moved", data.QueuePromotion)
+			} else {
+				s.handleTaskMovedNoSession(ctx, data)
+			}
 		}
 		return
 	}
 
+	if prerequisites != nil && prerequisites.session != nil {
+		s.handleTaskMovedWithLoadedSession(ctx, data, prerequisites.session, prerequisites.fromStep, prerequisites.targetStep)
+		return
+	}
 	s.handleTaskMovedWithSession(ctx, data)
+}
+
+func (s *Service) loadTaskMovedLifecyclePrerequisites(
+	ctx context.Context,
+	data watcher.TaskMovedEventData,
+	queued bool,
+) (*taskMovedLifecyclePrerequisites, bool) {
+	if !queued && !data.QueuePromotion {
+		return nil, true
+	}
+	prerequisites := &taskMovedLifecyclePrerequisites{}
+	if data.QueuePromotion {
+		targetStep, ok := s.loadTaskMovedPromotionTarget(ctx, data)
+		if !ok {
+			return nil, false
+		}
+		prerequisites.targetStep = targetStep
+	}
+	if data.SessionID == "" {
+		return prerequisites, true
+	}
+	session, fromStep, ok := s.loadTaskMovedSessionPrerequisites(ctx, data)
+	if !ok {
+		return nil, false
+	}
+	prerequisites.session = session
+	prerequisites.fromStep = fromStep
+	return prerequisites, true
+}
+
+func (s *Service) loadTaskMovedPromotionTarget(ctx context.Context, data watcher.TaskMovedEventData) (*wfmodels.WorkflowStep, bool) {
+	targetStep, err := s.workflowStepGetter.GetStep(ctx, data.ToStepID)
+	if err != nil || targetStep == nil {
+		s.logger.Warn("task.moved: failed to load promotion target step",
+			zap.String("task_id", data.TaskID),
+			zap.String("step_id", data.ToStepID),
+			zap.Error(err))
+		return nil, false
+	}
+	return targetStep, true
+}
+
+func (s *Service) loadTaskMovedSessionPrerequisites(
+	ctx context.Context,
+	data watcher.TaskMovedEventData,
+) (*models.TaskSession, *wfmodels.WorkflowStep, bool) {
+	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
+	if err != nil || session == nil {
+		s.logger.Warn("task.moved: failed to load lifecycle session",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.Error(err))
+		return nil, nil, false
+	}
+	fromStep, err := s.workflowStepGetter.GetStep(ctx, data.FromStepID)
+	if err != nil || fromStep == nil {
+		s.logger.Warn("task.moved: failed to load lifecycle source step",
+			zap.String("task_id", data.TaskID),
+			zap.String("step_id", data.FromStepID),
+			zap.Error(err))
+		return nil, nil, false
+	}
+	return session, fromStep, true
 }
 
 // handleTaskMovedNoSession handles the case where a task is moved but has no session.
@@ -487,20 +576,36 @@ func (s *Service) handleTaskQueuePromoted(ctx context.Context, data watcher.Task
 	if task.QueuedForStepID != "" || !task.WIPAdmitted {
 		return
 	}
+	targetStep, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
+	if err != nil || targetStep == nil {
+		s.logger.Warn("task.queue_promoted: failed to load target step",
+			zap.String("task_id", task.ID), zap.String("step_id", task.WorkflowStepID), zap.Error(err))
+		return
+	}
+	if err := s.syncTaskStateForQueuePromotion(ctx, task, targetStep); err != nil {
+		s.logger.Warn("task.queue_promoted: failed to synchronize task state",
+			zap.String("task_id", task.ID), zap.Error(err))
+		return
+	}
+	session, sessionErr := s.repo.GetActiveTaskSessionByTaskID(ctx, task.ID)
+	if sessionErr != nil {
+		s.logger.Warn("task.queue_promoted: failed to load active session",
+			zap.String("task_id", task.ID), zap.Error(sessionErr))
+		return
+	}
 	if !s.claimTaskEventMetadata(ctx, task, models.MetaKeyQueuePromotionPending) {
 		return
 	}
-	targetStep, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
-	if err != nil || targetStep == nil {
-		return
-	}
-	s.syncTaskStateForQueuePromotion(ctx, task, targetStep)
 	s.processParentChildrenCompletedForTerminalStepMove(ctx, task.ID, targetStep.ID)
-	if session, sessionErr := s.repo.GetActiveTaskSessionByTaskID(ctx, task.ID); sessionErr == nil && session != nil {
-		go s.finalizeStepEnter(context.WithoutCancel(ctx), task.ID, session.ID, targetStep, task.Description, targetStep.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent))
+	if session != nil {
+		go func() {
+			if err := s.finalizeStepEnter(context.WithoutCancel(ctx), task.ID, session.ID, targetStep, task.Description, targetStep.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent)); err != nil {
+				s.restoreTaskLifecycleToken(context.WithoutCancel(ctx), task.ID, models.MetaKeyQueuePromotionPending, "task.queue_promoted")
+			}
+		}()
 		return
 	}
-	s.autoStartTaskForStep(ctx, task.ID, task.WorkflowStepID, "task.queue_promoted")
+	s.autoStartTaskForLoadedStep(ctx, task, targetStep, "task.queue_promoted", true)
 }
 
 func (s *Service) claimTaskEventMetadata(ctx context.Context, task *models.Task, key string) bool {
@@ -512,10 +617,10 @@ func (s *Service) claimTaskEventMetadata(ctx context.Context, task *models.Task,
 		// absence means another delivery already claimed the event.
 		return false
 	}
-	remover, ok := s.repo.(interface {
-		RemoveTaskMetadataKey(context.Context, string, string) (bool, error)
-	})
+	remover, ok := s.repo.(taskMetadataKeyRemover)
 	if !ok {
+		s.logger.Warn("task lifecycle event cannot be claimed: repository lacks metadata-key removal",
+			zap.String("task_id", task.ID), zap.String("metadata_key", key))
 		return false
 	}
 	claimed, err := remover.RemoveTaskMetadataKey(ctx, task.ID, key)
@@ -526,13 +631,26 @@ func (s *Service) claimTaskEventMetadata(ctx context.Context, task *models.Task,
 	return claimed
 }
 
-func (s *Service) syncTaskStateForQueuePromotion(ctx context.Context, task *models.Task, targetStep *wfmodels.WorkflowStep) {
-	if targetStep == nil {
+func (s *Service) restoreTaskLifecycleToken(ctx context.Context, taskID, key, eventName string) {
+	setter, ok := s.repo.(taskMetadataKeySetter)
+	if !ok {
+		s.logger.Warn(eventName+": repository cannot restore lifecycle token",
+			zap.String("task_id", taskID), zap.String("metadata_key", key))
 		return
+	}
+	if err := setter.SetTaskMetadataKey(ctx, taskID, key, true); err != nil {
+		s.logger.Warn(eventName+": failed to restore lifecycle token",
+			zap.String("task_id", taskID), zap.String("metadata_key", key), zap.Error(err))
+	}
+}
+
+func (s *Service) syncTaskStateForQueuePromotion(ctx context.Context, task *models.Task, targetStep *wfmodels.WorkflowStep) error {
+	if targetStep == nil {
+		return nil
 	}
 	next, err := s.workflowStepGetter.GetNextStepByPosition(ctx, targetStep.WorkflowID, targetStep.Position)
 	if err != nil {
-		return
+		return fmt.Errorf("load next step after promoted step %s: %w", targetStep.ID, err)
 	}
 	oldState := task.State
 	if wfmodels.IsTerminalStep(targetStep, next) {
@@ -543,15 +661,15 @@ func (s *Service) syncTaskStateForQueuePromotion(ctx context.Context, task *mode
 		task.State = v1.TaskStateTODO
 	}
 	if oldState == task.State {
-		return
+		return nil
 	}
 	task.UpdatedAt = time.Now().UTC()
 	if err := s.repo.UpdateTask(ctx, task); err != nil {
-		s.logger.Warn("failed to persist promoted task state", zap.String("task_id", task.ID), zap.Error(err))
-		return
+		return fmt.Errorf("persist promoted task state: %w", err)
 	}
 	s.publishTaskUpdated(ctx, task)
 	s.publishTaskStateChanged(ctx, task, oldState)
+	return nil
 }
 
 func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, eventName string) {
@@ -561,10 +679,7 @@ func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, even
 			zap.String("task_id", taskID), zap.Error(err))
 		return
 	}
-	if task == nil || task.QueuedForStepID != "" {
-		return
-	}
-	if s.launchDeferredTask(ctx, task, eventName) {
+	if task == nil {
 		return
 	}
 
@@ -577,10 +692,20 @@ func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, even
 			zap.Error(err))
 		return
 	}
+	s.autoStartTaskForLoadedStep(ctx, task, step, eventName, false)
+}
+
+func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep, eventName string, restoreQueuePromotion bool) {
+	if task == nil || task.QueuedForStepID != "" || step == nil {
+		return
+	}
+	if s.launchDeferredTask(ctx, task, eventName) {
+		return
+	}
 	if step == nil || !step.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent) {
 		s.logger.Debug(eventName+": target step has no auto-start",
-			zap.String("task_id", taskID),
-			zap.String("to_step_id", stepID))
+			zap.String("task_id", task.ID),
+			zap.String("to_step_id", step.ID))
 		return
 	}
 
@@ -594,8 +719,8 @@ func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, even
 	planMode := step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
 
 	s.logger.Info(eventName+": starting task (no session, auto-start step)",
-		zap.String("task_id", taskID),
-		zap.String("to_step_id", stepID),
+		zap.String("task_id", task.ID),
+		zap.String("to_step_id", step.ID),
 		zap.String("agent_profile_id", agentProfileID),
 		zap.String("executor_id", executorID),
 		zap.String("executor_profile_id", executorProfileID),
@@ -613,7 +738,7 @@ func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, even
 		if _, hasGuard := task.Metadata[models.MetaKeyAutoStartGuard]; hasGuard {
 			if !s.claimAutoStart(asyncCtx, task.ID, eventName) {
 				s.logger.Debug(eventName+": auto-start claim lost; watcher path will launch",
-					zap.String("task_id", taskID))
+					zap.String("task_id", task.ID))
 				return
 			}
 		}
@@ -622,12 +747,15 @@ func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, even
 		if workflowAgentProfileID != "" {
 			startAgentProfileID = ""
 		}
-		_, err := s.StartTask(asyncCtx, task.ID, startAgentProfileID, executorID, executorProfileID, "", task.Description, stepID, planMode, true, nil)
+		_, err := s.StartTask(asyncCtx, task.ID, startAgentProfileID, executorID, executorProfileID, "", task.Description, step.ID, planMode, true, nil)
 		if err != nil {
 			s.logger.Error(eventName+": failed to auto-start task",
-				zap.String("task_id", taskID),
+				zap.String("task_id", task.ID),
 				zap.Error(err))
 			s.restoreAutoStartClaim(asyncCtx, task.ID, eventName)
+			if restoreQueuePromotion {
+				s.restoreTaskLifecycleToken(asyncCtx, task.ID, models.MetaKeyQueuePromotionPending, eventName)
+			}
 		}
 	}()
 }
@@ -693,9 +821,7 @@ func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eve
 }
 
 func (s *Service) claimDeferredLaunch(ctx context.Context, taskID, eventName string) (bool, bool) {
-	remover, ok := s.repo.(interface {
-		RemoveTaskMetadataKey(context.Context, string, string) (bool, error)
-	})
+	remover, ok := s.repo.(taskMetadataKeyRemover)
 	if !ok {
 		return false, true
 	}
@@ -731,9 +857,7 @@ func (s *Service) restoreDeferredLaunch(ctx context.Context, taskID string, raw 
 // only the winner proceeds to StartTask. When the token is absent (ordinary
 // non-watcher auto-start), the caller skips the claim and launches as before.
 func (s *Service) claimAutoStart(ctx context.Context, taskID, eventName string) bool {
-	remover, ok := s.repo.(interface {
-		RemoveTaskMetadataKey(context.Context, string, string) (bool, error)
-	})
+	remover, ok := s.repo.(taskMetadataKeyRemover)
 	if !ok {
 		return true // repo doesn't support atomic removal; allow launch
 	}
@@ -777,12 +901,36 @@ func (s *Service) handleTaskMovedWithSession(ctx context.Context, data watcher.T
 			zap.Error(err))
 		return
 	}
+	s.fromStepAndTargetForTaskMoved(ctx, data, session, nil, nil)
+}
 
-	if data.QueuedForStepID != "" && !data.WIPAdmitted {
-		go s.processStepExit(context.WithoutCancel(ctx), data.TaskID, session, data.FromStepID)
+func (s *Service) handleTaskMovedWithLoadedSession(
+	ctx context.Context,
+	data watcher.TaskMovedEventData,
+	session *models.TaskSession,
+	fromStep, targetStep *wfmodels.WorkflowStep,
+) {
+	s.fromStepAndTargetForTaskMoved(ctx, data, session, fromStep, targetStep)
+}
+
+func (s *Service) fromStepAndTargetForTaskMoved(
+	ctx context.Context,
+	data watcher.TaskMovedEventData,
+	session *models.TaskSession,
+	fromStep, targetStep *wfmodels.WorkflowStep,
+) {
+	if session == nil {
 		return
 	}
-	go s.processStepExitAndEnter(context.WithoutCancel(ctx), data.TaskID, session, data.FromStepID, data.ToStepID, data.TaskDescription)
+
+	if data.QueuedForStepID != "" && !data.WIPAdmitted {
+		go s.processStepExitWithStep(context.WithoutCancel(ctx), data.TaskID, session, fromStep, data.FromStepID)
+		return
+	}
+	go s.processStepExitAndEnterWithSteps(
+		context.WithoutCancel(ctx), data.TaskID, session, fromStep, targetStep,
+		data.FromStepID, data.ToStepID, data.TaskDescription, data.QueuePromotion,
+	)
 }
 
 func (s *Service) processStepExit(ctx context.Context, taskID string, session *models.TaskSession, fromStepID string) {
@@ -792,6 +940,19 @@ func (s *Service) processStepExit(ctx context.Context, taskID string, session *m
 			zap.String("step_id", fromStepID), zap.Error(err))
 		return
 	}
+	s.processStepExitWithStep(ctx, taskID, session, fromStep, fromStepID)
+}
+
+func (s *Service) processStepExitWithStep(ctx context.Context, taskID string, session *models.TaskSession, fromStep *wfmodels.WorkflowStep, fromStepID string) {
+	if fromStep == nil {
+		var err error
+		fromStep, err = s.workflowStepGetter.GetStep(ctx, fromStepID)
+		if err != nil || fromStep == nil {
+			s.logger.Warn("failed to load from-step for queued move on_exit",
+				zap.String("step_id", fromStepID), zap.Error(err))
+			return
+		}
+	}
 	s.processOnExit(ctx, taskID, session, fromStep)
 }
 
@@ -800,36 +961,57 @@ func (s *Service) processStepExit(ctx context.Context, taskID string, session *m
 // already persisted the step change in the DB).
 func (s *Service) processStepExitAndEnter(ctx context.Context, taskID string, session *models.TaskSession, fromStepID, toStepID, taskDescription string) {
 	// Process on_exit for the step we're leaving
-	fromStep, err := s.workflowStepGetter.GetStep(ctx, fromStepID)
-	if err != nil || fromStep == nil {
-		s.logger.Warn("failed to load from-step for on_exit",
-			zap.String("step_id", fromStepID),
-			zap.Error(err))
+	s.processStepExitAndEnterWithSteps(ctx, taskID, session, nil, nil, fromStepID, toStepID, taskDescription, false)
+}
+
+func (s *Service) processStepExitAndEnterWithSteps(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	fromStep, targetStep *wfmodels.WorkflowStep,
+	fromStepID, toStepID, taskDescription string, queuePromotion bool,
+) {
+	if fromStep == nil {
+		var err error
+		fromStep, err = s.workflowStepGetter.GetStep(ctx, fromStepID)
+		if err != nil || fromStep == nil {
+			s.logger.Warn("failed to load from-step for on_exit",
+				zap.String("step_id", fromStepID),
+				zap.Error(err))
+		} else {
+			s.processOnExit(ctx, taskID, session, fromStep)
+		}
 	} else {
 		s.processOnExit(ctx, taskID, session, fromStep)
 	}
 
-	targetStep, err := s.workflowStepGetter.GetStep(ctx, toStepID)
-	if err != nil || targetStep == nil {
-		s.logger.Warn("failed to load target step for on_enter",
-			zap.String("step_id", toStepID),
-			zap.Error(err))
-		return
+	if targetStep == nil {
+		var err error
+		targetStep, err = s.workflowStepGetter.GetStep(ctx, toStepID)
+		if err != nil || targetStep == nil {
+			s.logger.Warn("failed to load target step for on_enter",
+				zap.String("step_id", toStepID),
+				zap.Error(err))
+			return
+		}
 	}
 
 	clearReview := targetStep.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent)
-	s.finalizeStepEnter(ctx, taskID, session.ID, targetStep, taskDescription, clearReview)
+	if err := s.finalizeStepEnter(ctx, taskID, session.ID, targetStep, taskDescription, clearReview); err != nil && queuePromotion {
+		s.restoreTaskLifecycleToken(ctx, taskID, models.MetaKeyQueuePromotionPending, "task.moved")
+	}
 }
 
 // finalizeStepEnter optionally clears review status, reloads the session, and
 // processes on_enter actions for the target step. Shared by executeStepTransition
 // and processStepExitAndEnter.
-func (s *Service) finalizeStepEnter(ctx context.Context, taskID, sessionID string, targetStep *wfmodels.WorkflowStep, taskDescription string, clearReview bool) {
+func (s *Service) finalizeStepEnter(ctx context.Context, taskID, sessionID string, targetStep *wfmodels.WorkflowStep, taskDescription string, clearReview bool) error {
 	if clearReview {
 		if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, ""); err != nil {
 			s.logger.Warn("failed to clear session review status",
 				zap.String("session_id", sessionID),
 				zap.Error(err))
+			return fmt.Errorf("clear session review status: %w", err)
 		}
 	}
 
@@ -839,10 +1021,11 @@ func (s *Service) finalizeStepEnter(ctx context.Context, taskID, sessionID strin
 		s.logger.Warn("failed to load session for on_enter",
 			zap.String("session_id", sessionID), zap.Error(err))
 		s.setSessionWaitingForInput(ctx, taskID, sessionID)
-		return
+		return fmt.Errorf("load session for on_enter: %w", err)
 	}
 
 	s.processOnEnter(ctx, taskID, session, targetStep, taskDescription)
+	return nil
 }
 
 // resolveStepPlanMode determines whether plan mode should be active for a step.

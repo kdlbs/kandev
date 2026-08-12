@@ -123,11 +123,14 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
 
   const wipQueueByTaskId = useMemo(() => {
     const result = new Map<string, WipQueueStatus>();
+    const activeTasks = allTasks.filter((task) => task.isArchived !== true);
     const destinationStepIds = new Set(
-      allTasks.map((task) => task.queuedForStepId).filter((stepId): stepId is string => !!stepId),
+      activeTasks
+        .map((task) => task.queuedForStepId)
+        .filter((stepId): stepId is string => !!stepId),
     );
     for (const stepId of destinationStepIds) {
-      for (const entry of getDestinationQueue(allTasks, stepId)) {
+      for (const entry of getDestinationQueue(activeTasks, stepId)) {
         const task = entry.task;
         const stepTitle =
           aggregated.stepsByWorkflowId[task._workflowId]?.find((step) => step.id === stepId)

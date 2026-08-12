@@ -26,6 +26,10 @@ type workflowStepMoveAdmissionRepository interface {
 	UpdateTaskWithWorkflowStepAdmission(context.Context, *models.Task, string, int) (bool, error)
 }
 
+type workflowStepMoveAdmissionWithStateRepository interface {
+	UpdateTaskWithWorkflowStepAdmissionAndState(context.Context, *models.Task, string, int, *v1.TaskState, bool) (bool, error)
+}
+
 type queuedTaskPromoter interface {
 	PromoteQueuedTaskIfWorkflowStepHasCapacity(context.Context, *models.Task, string, string, int) (bool, error)
 }
@@ -249,6 +253,84 @@ func TestUpdateTaskWithWorkflowStepAdmission_UnlimitedClearsQueue(t *testing.T) 
 	}
 	if candidate.WorkflowStepID != "unlimited-target" || !candidate.WIPAdmitted || candidate.QueuedForStepID != "" || candidate.QueuedAt != nil {
 		t.Fatalf("candidate placement: step=%q admitted=%t queued=%q queued_at=%v", candidate.WorkflowStepID, candidate.WIPAdmitted, candidate.QueuedForStepID, candidate.QueuedAt)
+	}
+	stored, err := repo.GetTask(ctx, candidate.ID)
+	if err != nil {
+		t.Fatalf("reload unlimited candidate: %v", err)
+	}
+	if stored.WorkflowStepID != "unlimited-target" || !stored.WIPAdmitted || stored.QueuedForStepID != "" || stored.QueuedAt != nil {
+		t.Fatalf("stored candidate placement: step=%q admitted=%t queued=%q queued_at=%v", stored.WorkflowStepID, stored.WIPAdmitted, stored.QueuedForStepID, stored.QueuedAt)
+	}
+}
+
+func TestUpdateTaskWithWorkflowStepAdmissionAndState_PersistsMoveLifecycleAtomically(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+
+	mover, ok := any(repo).(workflowStepMoveAdmissionWithStateRepository)
+	if !ok {
+		t.Fatal("task repository does not implement atomic workflow-step move admission with state")
+	}
+	ctx := context.Background()
+	const targetStepID = "atomic-move-target"
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "atomic-move-occupant", WorkspaceID: "wip-workspace", WorkflowID: "wip-workflow",
+		WorkflowStepID: targetStepID, Title: "Occupant", State: v1.TaskStateCreated,
+	}); err != nil {
+		t.Fatalf("seed occupant: %v", err)
+	}
+	candidate := &models.Task{
+		ID: "atomic-move-candidate", WorkspaceID: "wip-workspace", WorkflowID: "wip-workflow",
+		WorkflowStepID: "atomic-move-source", Title: "Candidate", State: v1.TaskStateTODO,
+		WIPAdmitted: true,
+	}
+	if err := repo.CreateTask(ctx, candidate); err != nil {
+		t.Fatalf("seed candidate: %v", err)
+	}
+	admittedState := v1.TaskStateCompleted
+	admitted, err := mover.UpdateTaskWithWorkflowStepAdmissionAndState(ctx, candidate, targetStepID, 1, &admittedState, true)
+	if err != nil {
+		t.Fatalf("move candidate: %v", err)
+	}
+	if admitted {
+		t.Fatal("full target unexpectedly admitted candidate")
+	}
+	stored, err := repo.GetTask(ctx, candidate.ID)
+	if err != nil {
+		t.Fatalf("reload candidate: %v", err)
+	}
+	if stored.State != v1.TaskStateTODO {
+		t.Fatalf("queued move state = %q, want original TODO", stored.State)
+	}
+	if _, ok := stored.Metadata[models.MetaKeyQueuedMoveExitPending]; !ok {
+		t.Fatalf("queued move metadata = %#v, want %q marker", stored.Metadata, models.MetaKeyQueuedMoveExitPending)
+	}
+
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "atomic-admitted-candidate", WorkspaceID: "wip-workspace", WorkflowID: "wip-workflow",
+		WorkflowStepID: "atomic-move-source", Title: "Admitted candidate", State: v1.TaskStateTODO,
+		WIPAdmitted: true,
+		Metadata:    map[string]interface{}{models.MetaKeyQueuedMoveExitPending: true},
+	}); err != nil {
+		t.Fatalf("seed unlimited candidate: %v", err)
+	}
+	admittedCandidate, err := repo.GetTask(ctx, "atomic-admitted-candidate")
+	if err != nil {
+		t.Fatalf("load unlimited candidate: %v", err)
+	}
+	admitted, err = mover.UpdateTaskWithWorkflowStepAdmissionAndState(ctx, admittedCandidate, "atomic-unlimited-target", 0, &admittedState, true)
+	if err != nil || !admitted {
+		t.Fatalf("unlimited move admitted=%t err=%v", admitted, err)
+	}
+	stored, err = repo.GetTask(ctx, admittedCandidate.ID)
+	if err != nil {
+		t.Fatalf("reload admitted candidate: %v", err)
+	}
+	if stored.State != v1.TaskStateCompleted {
+		t.Fatalf("admitted move state = %q, want COMPLETED", stored.State)
+	}
+	if _, ok := stored.Metadata[models.MetaKeyQueuedMoveExitPending]; ok {
+		t.Fatalf("admitted move retained queued lifecycle marker: %#v", stored.Metadata)
 	}
 }
 

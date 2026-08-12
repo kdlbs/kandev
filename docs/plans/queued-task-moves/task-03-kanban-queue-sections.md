@@ -48,8 +48,10 @@ spec: "../../specs/tasks/wip-limit-pull-system.md"
 cd apps
 pnpm --filter @kandev/web exec vitest run \
   lib/kanban/wip-queue.test.ts \
-  components/kanban-column.test.tsx \
-  components/settings/workflow-pipeline-editor-wip-controls.test.tsx
+  hooks/domains/kanban/use-workspace-sidebar-tasks.test.ts \
+  components/task/task-session-sidebar-item.test.ts \
+  components/task/mobile/session-task-switcher-sheet-hooks.test.ts \
+  components/task/task-item.test.tsx
 pnpm --filter @kandev/web run typecheck
 pnpm --filter @kandev/web run lint
 pnpm --filter @kandev/web run i18n:check
@@ -64,7 +66,8 @@ pnpm --filter @kandev/web run i18n:ratchet
   the header count remains admitted WIP over the configured limit.
 - Added visible localized `Pull from` guidance for feeder and no-feeder
   configurations across English, pseudo, Portuguese, and Simplified Chinese.
-- Focused Vitest coverage passed with 5 files and 71 tests. Typecheck, lint,
+- Focused Vitest coverage passed with 5 files and 71 tests using the exact
+  command above. Typecheck, lint,
   `i18n:check`, `i18n:ratchet`, and the E2E production build passed.
 
 ## Files Likely Touched

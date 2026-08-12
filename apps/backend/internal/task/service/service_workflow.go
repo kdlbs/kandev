@@ -406,6 +406,17 @@ type workflowMoveAdmissionRepository interface {
 	UpdateTaskWithWorkflowStepAdmission(ctx context.Context, task *models.Task, targetStepID string, limit int) (bool, error)
 }
 
+type workflowMoveAdmissionWithStateRepository interface {
+	UpdateTaskWithWorkflowStepAdmissionAndState(
+		ctx context.Context,
+		task *models.Task,
+		targetStepID string,
+		limit int,
+		admittedState *v1.TaskState,
+		queueExitPending bool,
+	) (bool, error)
+}
+
 type workflowQueuedTaskPromoter interface {
 	PromoteQueuedTaskIfWorkflowStepHasCapacity(ctx context.Context, task *models.Task, fromStepID, destinationStepID string, limit int) (bool, error)
 }
@@ -476,28 +487,14 @@ func (s *Service) MoveTaskWithOptions(
 	}
 	task.UpdatedAt = time.Now().UTC()
 
-	admitted, err := s.updateMovedTask(ctx, task, oldStepID, targetStep)
+	var admittedState *v1.TaskState
+	if stepChanged {
+		admittedState = &stateAfterAdmission.State
+	}
+	_, err = s.updateMovedTask(ctx, task, oldStepID, targetStep, admittedState)
 	if err != nil {
 		s.logger.Error("failed to move task", zap.String("task_id", id), zap.Error(err))
 		return nil, err
-	}
-	if admitted && stepChanged && stateAfterAdmission.State != task.State {
-		task.State = stateAfterAdmission.State
-		if err := s.tasks.UpdateTask(ctx, task); err != nil {
-			s.logger.Error("failed to apply admitted workflow move state", zap.String("task_id", id), zap.Error(err))
-			return nil, err
-		}
-	}
-	if !admitted && stepChanged {
-		if task.Metadata == nil {
-			task.Metadata = make(map[string]interface{})
-		}
-		task.Metadata[models.MetaKeyQueuedMoveExitPending] = true
-		task.UpdatedAt = time.Now().UTC()
-		if err := s.tasks.UpdateTask(ctx, task); err != nil {
-			s.logger.Error("failed to mark queued workflow move", zap.String("task_id", id), zap.Error(err))
-			return nil, err
-		}
 	}
 
 	// Resolve active session for the task.moved event (needed for on_exit/on_enter).
@@ -655,6 +652,7 @@ func (s *Service) promoteNextQueuedTask(ctx context.Context, targetStep *wfmodel
 }
 
 func (s *Service) promoteSameStepQueuedTask(ctx context.Context, candidate *models.Task, fromStepID string, targetStep *wfmodels.WorkflowStep, position int, skipped map[string]struct{}) bool {
+	oldState := candidate.State
 	if candidate.Metadata == nil {
 		candidate.Metadata = make(map[string]interface{})
 	}
@@ -664,13 +662,22 @@ func (s *Service) promoteSameStepQueuedTask(ctx context.Context, candidate *mode
 	candidate.Position = position
 	delete(candidate.Metadata, models.MetaKeyQueuedMoveExitPending)
 	candidate.Metadata[models.MetaKeyQueuePromotionPending] = true
-	s.syncTaskStateForQueuePromotion(ctx, candidate, targetStep)
+	if err := s.syncTaskStateForQueuePromotion(ctx, candidate, targetStep); err != nil {
+		s.logger.Warn("failed to prepare same-step queued promotion", zap.String("task_id", candidate.ID), zap.Error(err))
+		skipped[candidate.ID] = struct{}{}
+		return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
+	}
 	supported, claimed, err := promoteQueuedTaskAtomically(ctx, s.tasks, candidate, fromStepID, targetStep.ID, targetStep.WIPLimit)
 	if supported {
-		return s.finishAtomicQueuedPromotion(ctx, candidate, targetStep, position, skipped, claimed, err)
+		return s.finishAtomicQueuedPromotion(ctx, candidate, targetStep, position, skipped, claimed, err, oldState)
 	} else if admissionRepo, ok := s.tasks.(workflowMoveAdmissionRepository); ok {
 		claimed, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, candidate, targetStep.ID, targetStep.WIPLimit)
-		if err != nil || !claimed {
+		if err != nil {
+			s.logger.Warn("failed to promote same-step queued task", zap.String("task_id", candidate.ID), zap.Error(err))
+			skipped[candidate.ID] = struct{}{}
+			return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
+		}
+		if !claimed {
 			skipped[candidate.ID] = struct{}{}
 			return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
 		}
@@ -678,11 +685,14 @@ func (s *Service) promoteSameStepQueuedTask(ctx context.Context, candidate *mode
 		return false
 	}
 	s.publishTaskEvent(ctx, events.TaskUpdated, candidate, nil)
+	if oldState != candidate.State {
+		s.publishTaskEvent(ctx, events.TaskStateChanged, candidate, &oldState)
+	}
 	s.publishTaskEvent(ctx, events.TaskQueuePromoted, candidate, nil)
 	return true
 }
 
-func (s *Service) finishAtomicQueuedPromotion(ctx context.Context, candidate *models.Task, targetStep *wfmodels.WorkflowStep, position int, skipped map[string]struct{}, claimed bool, err error) bool {
+func (s *Service) finishAtomicQueuedPromotion(ctx context.Context, candidate *models.Task, targetStep *wfmodels.WorkflowStep, position int, skipped map[string]struct{}, claimed bool, err error, oldState v1.TaskState) bool {
 	if err != nil {
 		s.logger.Warn("failed to promote same-step queued task", zap.String("task_id", candidate.ID), zap.Error(err))
 		return false
@@ -692,6 +702,9 @@ func (s *Service) finishAtomicQueuedPromotion(ctx context.Context, candidate *mo
 		return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
 	}
 	s.publishTaskEvent(ctx, events.TaskUpdated, candidate, nil)
+	if oldState != candidate.State {
+		s.publishTaskEvent(ctx, events.TaskStateChanged, candidate, &oldState)
+	}
 	s.publishTaskEvent(ctx, events.TaskQueuePromoted, candidate, nil)
 	return true
 }
@@ -706,6 +719,7 @@ func promoteQueuedTaskAtomically(ctx context.Context, tasks interface{}, task *m
 }
 
 func (s *Service) promoteFeederQueuedTask(ctx context.Context, candidate *models.Task, fromStepID, oldWorkflowID string, targetStep *wfmodels.WorkflowStep, position int, skipped map[string]struct{}) bool {
+	oldState := candidate.State
 	if candidate.Metadata == nil {
 		candidate.Metadata = make(map[string]interface{})
 	}
@@ -717,7 +731,11 @@ func (s *Service) promoteFeederQueuedTask(ctx context.Context, candidate *models
 	candidate.Position = position
 	candidate.WorkflowID = targetStep.WorkflowID
 	candidate.WorkflowStepID = targetStep.ID
-	s.syncTaskStateForQueuePromotion(ctx, candidate, targetStep)
+	if err := s.syncTaskStateForQueuePromotion(ctx, candidate, targetStep); err != nil {
+		s.logger.Warn("failed to prepare feeder queued promotion", zap.String("task_id", candidate.ID), zap.Error(err))
+		skipped[candidate.ID] = struct{}{}
+		return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
+	}
 	if promoter, ok := s.tasks.(workflowQueuedTaskPromoter); ok {
 		claimed, err := promoter.PromoteQueuedTaskIfWorkflowStepHasCapacity(ctx, candidate, fromStepID, targetStep.ID, targetStep.WIPLimit)
 		if err != nil {
@@ -729,19 +747,26 @@ func (s *Service) promoteFeederQueuedTask(ctx context.Context, candidate *models
 			return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
 		}
 		s.publishTaskEvent(ctx, events.TaskUpdated, candidate, nil, oldWorkflowID)
+		if oldState != candidate.State {
+			s.publishTaskEvent(ctx, events.TaskStateChanged, candidate, &oldState)
+		}
 		s.publishTaskMovedEvent(ctx, candidate, oldWorkflowID, fromStepID, targetStep.ID, "")
 		return true
 	} else if admissionRepo, ok := s.tasks.(workflowMoveAdmissionRepository); ok {
 		claimed, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, candidate, targetStep.ID, targetStep.WIPLimit)
 		if err != nil {
 			s.logger.Warn("failed to promote feeder queued task", zap.String("task_id", candidate.ID), zap.Error(err))
-			return false
+			skipped[candidate.ID] = struct{}{}
+			return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
 		}
 		if !claimed {
 			skipped[candidate.ID] = struct{}{}
 			return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
 		}
 		s.publishTaskEvent(ctx, events.TaskUpdated, candidate, nil, oldWorkflowID)
+		if oldState != candidate.State {
+			s.publishTaskEvent(ctx, events.TaskStateChanged, candidate, &oldState)
+		}
 		s.publishTaskMovedEvent(ctx, candidate, oldWorkflowID, fromStepID, targetStep.ID, "")
 		return true
 	}
@@ -878,7 +903,7 @@ func skippedTaskIDs(skipped map[string]struct{}) []string {
 	return ids
 }
 
-func (s *Service) updateMovedTask(ctx context.Context, task *models.Task, oldStepID string, targetStep *wfmodels.WorkflowStep) (bool, error) {
+func (s *Service) updateMovedTask(ctx context.Context, task *models.Task, oldStepID string, targetStep *wfmodels.WorkflowStep, admittedState *v1.TaskState) (bool, error) {
 	if targetStep == nil || oldStepID == targetStep.ID {
 		if err := s.tasks.UpdateTask(ctx, task); err != nil {
 			return false, err
@@ -889,27 +914,51 @@ func (s *Service) updateMovedTask(ctx context.Context, task *models.Task, oldSte
 	if !ok {
 		return false, fmt.Errorf("workflow step admission repository unavailable for step %s", targetStep.ID)
 	}
-	return admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, task, targetStep.ID, targetStep.WIPLimit)
+	if admissionWithState, ok := s.tasks.(workflowMoveAdmissionWithStateRepository); ok {
+		return admissionWithState.UpdateTaskWithWorkflowStepAdmissionAndState(
+			ctx, task, targetStep.ID, targetStep.WIPLimit, admittedState, true,
+		)
+	}
+
+	// Keep compatibility with narrow test/dry-run repositories that expose
+	// only the original admission method. Production repositories implement the
+	// atomic variant above, so this fallback is never used for real moves.
+	admitted, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, task, targetStep.ID, targetStep.WIPLimit)
+	if err != nil {
+		return false, err
+	}
+	if admitted && admittedState != nil {
+		task.State = *admittedState
+	} else if !admitted {
+		if task.Metadata == nil {
+			task.Metadata = make(map[string]interface{})
+		}
+		task.Metadata[models.MetaKeyQueuedMoveExitPending] = true
+	}
+	if err := s.tasks.UpdateTask(ctx, task); err != nil {
+		return false, err
+	}
+	return admitted, nil
 }
 
-func (s *Service) syncTaskStateForQueuePromotion(ctx context.Context, task *models.Task, targetStep *wfmodels.WorkflowStep) {
+func (s *Service) syncTaskStateForQueuePromotion(ctx context.Context, task *models.Task, targetStep *wfmodels.WorkflowStep) error {
 	if targetStep == nil {
-		return
+		return nil
 	}
 	terminal, err := s.terminalWorkflowStep(ctx, targetStep.ID)
 	if err != nil {
-		s.logger.Warn("failed to sync promoted task state", zap.String("task_id", task.ID), zap.Error(err))
-		return
+		return fmt.Errorf("sync promoted task state for %s: %w", task.ID, err)
 	}
 	if terminal {
 		if !models.IsTerminalTaskState(task.State) {
 			task.State = v1.TaskStateCompleted
 		}
-		return
+		return nil
 	}
 	if task.State == v1.TaskStateCompleted {
 		task.State = v1.TaskStateTODO
 	}
+	return nil
 }
 
 func (s *Service) validateTaskMove(ctx context.Context, task *models.Task, workflowID, workflowStepID string, opts MoveTaskOptions) (*wfmodels.WorkflowStep, error) {

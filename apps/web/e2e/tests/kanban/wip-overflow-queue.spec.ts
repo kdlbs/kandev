@@ -33,13 +33,14 @@ test("shows same-step WIP overflow and promotes the next queued task", async ({
 
   const kanban = new KanbanPage(testPage);
   await kanban.goto();
-  const reviewColumn = kanban.columnByStepId(reviewStep.id).first();
+  const reviewColumn = kanban.columnByStepId(reviewStep.id);
   await expect(reviewColumn).toContainText("2/2");
   await expect(reviewColumn.getByTestId("task-card-title")).toHaveCount(7);
   await expect(reviewColumn.getByTestId("kanban-queued-section")).toBeVisible();
   await expect(reviewColumn).toContainText("Queued for Review");
   await prCapture.screenshot("desktop-visible-queue", {
-    caption: "Desktop Kanban showing seven visible tasks with two admitted and queued overflow.",
+    caption:
+      "Desktop Kanban showing seven visible tasks with two admitted cards and queued overflow.",
   });
 
   await apiClient.moveTask(tasks[0].id, workflow.id, doneStep.id);
@@ -91,8 +92,7 @@ test("moves into a full step, shows sidebar queue position, and promotes through
 
   const sidebarRow = testPage
     .getByTestId("sidebar-task-item")
-    .filter({ hasText: "Moved Review Queue" })
-    .first();
+    .filter({ hasText: "Moved Review Queue" });
   await expect(sidebarRow).toBeVisible({ timeout: 10_000 });
   await expect(sidebarRow.getByTestId("sidebar-task-wip-queue")).toHaveAttribute(
     "aria-label",

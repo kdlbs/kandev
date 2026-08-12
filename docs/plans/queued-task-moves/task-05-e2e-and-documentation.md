@@ -28,8 +28,10 @@ spec: "../../specs/tasks/wip-limit-pull-system.md"
 - Tests seed prerequisite workflow/task state through the API but perform and
   assert the behavior under test through visible UI interactions.
 - Existing creation-overflow and feeder auto-pull E2E coverage stays green.
-- Screenshots are reviewed at desktop and mobile widths for section hierarchy,
-  truncation, chip legibility, and queue-position consistency.
+- When PR asset capture is available, screenshots are reviewed at desktop and
+  mobile widths for section hierarchy, truncation, chip legibility, and
+  queue-position consistency. Capture is best effort and environment failures
+  are recorded without blocking functional verification.
 - Public task/workflow documentation states that full-step moves queue in the
   destination, destination queues promote before feeders, and the UI exposes
   queued cards and position.
@@ -68,6 +70,11 @@ pnpm --filter @kandev/web run i18n:ratchet
 - The managed E2E checks assert admitted counts, queued sections, sidebar
   tooltip/inline position, promotion, touch interaction, and no horizontal
   overflow. Existing queue overflow behavior remains green.
+- After the review hardening, the desktop and mobile queue suites were rerun
+  against the updated selectors and each passed two tests.
+- The pseudo-locale E2E build passed. The focused queue helper and sidebar
+  Vitest suites passed 14 tests, and web typecheck, lint, i18n check, and i18n
+  ratchet all passed.
 - Public documentation validation passed: 58 Node tests and 41 published
   pages. The two public workflow pages now describe destination admission,
   destination-before-feeder promotion, and Kanban/sidebar indicators.
@@ -86,6 +93,14 @@ Final verification highlights:
 ```text
 rtk make -C apps/backend test
 exit 0
+
+rtk pnpm --filter @kandev/web run build:e2e
+exit 0
+
+rtk pnpm --filter @kandev/web exec vitest run \
+  lib/kanban/wip-queue.test.ts \
+  hooks/domains/kanban/use-workspace-sidebar-tasks.test.ts
+2 files, 14 tests passed
 
 rtk pnpm e2e:run tests/kanban/wip-overflow-queue.spec.ts
 2 passed

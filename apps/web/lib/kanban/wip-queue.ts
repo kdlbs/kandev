@@ -43,6 +43,12 @@ function timestamp(value: string | null | undefined): number {
   return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
 }
 
+function compareNumbers(left: number, right: number): number {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
+}
+
 export function compareWipQueueTasks(left: WipQueueTask, right: WipQueueTask): number {
   const position = (left.position ?? 0) - (right.position ?? 0);
   if (position !== 0) return position;
@@ -50,10 +56,10 @@ export function compareWipQueueTasks(left: WipQueueTask, right: WipQueueTask): n
   const priority = priorityRank(left.priority) - priorityRank(right.priority);
   if (priority !== 0) return priority;
 
-  const queuedAt = timestamp(left.queuedAt) - timestamp(right.queuedAt);
+  const queuedAt = compareNumbers(timestamp(left.queuedAt), timestamp(right.queuedAt));
   if (queuedAt !== 0) return queuedAt;
 
-  const createdAt = timestamp(left.createdAt) - timestamp(right.createdAt);
+  const createdAt = compareNumbers(timestamp(left.createdAt), timestamp(right.createdAt));
   if (createdAt !== 0) return createdAt;
 
   return left.id.localeCompare(right.id);
@@ -80,12 +86,11 @@ export function partitionWipTasks<T extends WipQueueTask>(
   tasks: T[],
   destinationStepId: string,
 ): { admitted: T[]; queued: T[] } {
-  const queuedIds = new Set(
-    getDestinationQueue(tasks, destinationStepId).map(({ task }) => task.id),
-  );
+  const queuedEntries = getDestinationQueue(tasks, destinationStepId);
+  const queuedIds = new Set(queuedEntries.map(({ task }) => task.id));
   return {
     admitted: tasks.filter((task) => !queuedIds.has(task.id)),
-    queued: tasks.filter((task) => queuedIds.has(task.id)),
+    queued: queuedEntries.map(({ task }) => task),
   };
 }
 

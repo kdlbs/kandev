@@ -233,11 +233,14 @@ and lifecycle contract, and E2E/doc work validates the complete behavior.
 
 ## Implementation Progress
 
-Tasks 01 through 04 are implemented. The backend now commits admitted or
+Tasks 01 through 05 are implemented. The backend now commits admitted or
 destination-queued placement atomically, defers destination lifecycle work
 until promotion, and prioritizes destination-resident queues over feeder work.
 The web client shows the same queue order in Kanban and desktop/mobile task
-switchers, with localized `Pull from` guidance.
+switchers, with localized `Pull from` guidance. Review hardening also keeps
+replay tokens available after prerequisite failures, preserves state changes in
+the promotion event path, and skips failed fallback candidates while filling
+capacity.
 
 Focused backend and frontend checks pass. The broad backend regression gate,
 managed browser checks, public-doc validation, and final diff review are

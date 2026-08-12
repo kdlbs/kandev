@@ -525,14 +525,36 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmission(
 	targetStepID string,
 	limit int,
 ) (bool, error) {
+	return r.updateTaskWithWorkflowStepAdmission(ctx, task, targetStepID, limit, nil, false)
+}
+
+// UpdateTaskWithWorkflowStepAdmissionAndState is the manual-move variant of
+// UpdateTaskWithWorkflowStepAdmission. It keeps the destination admission,
+// the state that applies after admission, and the queued source-exit marker
+// in one transaction so a later full-row update cannot strand the move.
+func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndState(
+	ctx context.Context,
+	task *models.Task,
+	targetStepID string,
+	limit int,
+	admittedState *v1.TaskState,
+	queueExitPending bool,
+) (bool, error) {
+	return r.updateTaskWithWorkflowStepAdmission(ctx, task, targetStepID, limit, admittedState, queueExitPending)
+}
+
+func (r *Repository) updateTaskWithWorkflowStepAdmission(
+	ctx context.Context,
+	task *models.Task,
+	targetStepID string,
+	limit int,
+	admittedState *v1.TaskState,
+	queueExitPending bool,
+) (bool, error) {
 	now := time.Now().UTC()
 	task.UpdatedAt = now
 	if task.Metadata == nil {
 		task.Metadata = map[string]interface{}{}
-	}
-	metadata, err := json.Marshal(task.Metadata)
-	if err != nil {
-		metadata = []byte("{}")
 	}
 
 	tx, err := r.db.BeginTx(ctx, nil)
@@ -554,10 +576,24 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmission(
 		task.WIPAdmitted = !task.IsEphemeral
 		task.QueuedForStepID = ""
 		task.QueuedAt = nil
+		if admittedState != nil {
+			task.State = *admittedState
+		}
 	} else {
 		task.WIPAdmitted = false
 		task.QueuedForStepID = targetStepID
 		task.QueuedAt = &now
+	}
+	if queueExitPending {
+		if admitted {
+			delete(task.Metadata, models.MetaKeyQueuedMoveExitPending)
+		} else {
+			task.Metadata[models.MetaKeyQueuedMoveExitPending] = true
+		}
+	}
+	metadata, err := json.Marshal(task.Metadata)
+	if err != nil {
+		metadata = []byte("{}")
 	}
 	if err := r.updateTaskTx(ctx, tx, task, metadata); err != nil {
 		return false, err
