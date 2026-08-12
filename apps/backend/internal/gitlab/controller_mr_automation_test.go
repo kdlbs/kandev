@@ -436,3 +436,27 @@ func TestControllerPatchTaskMRAutomation_RejectsBadMRIdentity(t *testing.T) {
 		}
 	}
 }
+
+// TestControllerPatchTaskMRAutomation_RejectsSwitchesWithNoLinkedMRs is the
+// HTTP half of the zero-target rule: because the switches only exist per MR,
+// a task with none has nowhere to store them, and answering 200 would report
+// a write that never happened. The task-level prompt override stays accepted.
+func TestControllerPatchTaskMRAutomation_RejectsSwitchesWithNoLinkedMRs(t *testing.T) {
+	router, svc := newMRAutomationControllerFixture(t)
+	seedTask(t, svc.store, "task-2", "ws-1")
+
+	patch := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPatch, "/api/v1/gitlab/tasks/task-2/mr-automation", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+		return resp
+	}
+
+	if resp := patch(`{"auto_merge_enabled":true}`); resp.Code != http.StatusBadRequest {
+		t.Errorf("switch patch status = %d, want 400 (body = %s)", resp.Code, resp.Body.String())
+	}
+	if resp := patch(`{"auto_fix_prompt_override":"custom"}`); resp.Code != http.StatusOK {
+		t.Errorf("prompt override status = %d, want 200 (body = %s)", resp.Code, resp.Body.String())
+	}
+}
