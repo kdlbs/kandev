@@ -382,25 +382,22 @@ func serveInstalledFile(ctx *gin.Context, root, relPath, contentType string) {
 
 // --- External webhook relay ---
 
-// webhook serves POST/GET /api/plugins/:id/webhooks/:key: validates :key
-// against the plugin's manifest-declared webhooks (404 for an undeclared
-// key — this endpoint must not blindly relay an arbitrary caller-supplied
-// key to the subprocess), reads the body capped at maxWebhookBodyBytes (413
-// if exceeded), builds a pluginsdk.WebhookRequest from the inbound HTTP
-// request, relays it to the plugin's live subprocess via
-// Service.InvokeWebhook, then writes back the plugin's WebhookResponse
-// verbatim.
+// webhook serves POST/GET /api/plugins/:id/webhooks/:key. Its authorization
+// gate runs before lookup errors and declaration validation so an anonymous
+// caller cannot enumerate installed plugins or their webhook keys.
 func (c *Controller) webhook(ctx *gin.Context) {
-	id := ctx.Param("id")
-	record, err := c.svc.Get(id)
-	if err != nil {
-		c.writeLookupError(ctx, err)
+	id, key := ctx.Param("id"), ctx.Param("key")
+	record, lookupErr := c.svc.Get(id)
+	declaration, declared := findWebhookDeclaration(record, key)
+	public := declared && declaration.EffectiveAccess() == manifest.WebhookAccessPublic
+	if !webhookCallerAuthorized(ctx, public) {
 		return
 	}
-
-	key := ctx.Param("key")
-	declaration, ok := findWebhookDeclaration(record, key)
-	if !ok {
+	if lookupErr != nil {
+		c.writeLookupError(ctx, lookupErr)
+		return
+	}
+	if !declared {
 		ctx.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("plugin %q has no webhook %q", id, key)})
 		return
 	}
@@ -430,6 +427,28 @@ func (c *Controller) webhook(ctx *gin.Context) {
 		return
 	}
 	c.writeWebhookResponse(ctx, record, resp)
+}
+
+// webhookCallerAuthorized enforces the auth gate for a plugin webhook
+// caller. A webhook the manifest declares public is reachable by anyone, on
+// the plugin's own assertion that it authenticates callers itself (external
+// signature, IdP redirect, shared secret). Anything else requires a real
+// request identity: httpmw.Middleware guarantees every request carries
+// either a resolved session/PAT identity or the synthetic identity injected
+// while auth is disabled, so "no identity" here means auth is enabled and
+// this specific caller presented no credentials. It writes the 401 body
+// itself (matching the global middleware's own unauthenticated response) so
+// callers can return immediately.
+func webhookCallerAuthorized(ctx *gin.Context, public bool) bool {
+	if public {
+		return true
+	}
+	if _, ok := authn.FromGin(ctx); ok {
+		return true
+	}
+	ctx.Header("WWW-Authenticate", "Bearer")
+	ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+	return false
 }
 
 // webhookStatusForResponse validates a plugin-supplied WebhookResponse.Status
@@ -511,20 +530,19 @@ func (c *Controller) applyAuthLogin(ctx *gin.Context, record *store.Record, raw 
 	return bridge.LoginExternal(ctx, a.Provider, a.Subject, a.Email, a.DisplayName)
 }
 
-// manifestDeclaresWebhookKey reports whether record's manifest declares a
-// webhooks[] entry with the given key.
+// findWebhookDeclaration reports whether record's manifest declares a
+// webhooks[] entry with the given key. record can be nil when an unknown
+// plugin reaches the authorization gate before its lookup error is written.
 func findWebhookDeclaration(record *store.Record, key string) (manifest.Webhook, bool) {
+	if record == nil {
+		return manifest.Webhook{}, false
+	}
 	for _, wh := range record.Webhooks {
 		if wh.Key == key {
 			return wh, true
 		}
 	}
 	return manifest.Webhook{}, false
-}
-
-func manifestDeclaresWebhookKey(record *store.Record, key string) bool {
-	_, ok := findWebhookDeclaration(record, key)
-	return ok
 }
 
 // readCappedWebhookBody reads ctx.Request.Body bounded at
@@ -550,13 +568,34 @@ func readCappedWebhookBody(ctx *gin.Context, maxBytes int64) ([]byte, error) {
 }
 
 // flattenHeaders converts a net/http.Header (map[string][]string) into the
-// single-valued map[string]string WebhookRequest.Headers expects,
-// per §3 of docs/plans/plugins/GRPC-CONTRACT.md: multi-valued headers are
-// joined by ", ".
-func flattenHeaders(h http.Header) map[string]string {
+// single-valued map[string]string WebhookRequest.Headers expects, per §3 of
+// docs/plans/plugins/GRPC-CONTRACT.md (multi-valued headers joined by ", "),
+// after stripping Kandev's own credentials: the kandev_session cookie and a
+// kandev_pat_* Authorization bearer never reach the plugin subprocess. This
+// matters now that a non-public webhook is reachable by an authenticated
+// browser (host.api.fetch sends credentials:"include") or PAT caller — the
+// plugin should see only what it needs to verify (its own provider bearer or
+// signature header), not the caller's Kandev credential. sessionCookieName
+// is "" when no auth bridge is wired (auth disabled entirely, so no session
+// cookie is ever minted); non-Kandev cookies and non-PAT bearers relay
+// unchanged.
+func flattenHeaders(h http.Header, sessionCookieName string) map[string]string {
 	out := make(map[string]string, len(h))
 	for k, v := range h {
-		out[k] = strings.Join(v, ", ")
+		joined := strings.Join(v, ", ")
+		switch http.CanonicalHeaderKey(k) {
+		case "Cookie":
+			stripped, keep := stripSessionCookie(joined, sessionCookieName)
+			if !keep {
+				continue
+			}
+			joined = stripped
+		case "Authorization":
+			if strings.HasPrefix(strings.TrimPrefix(joined, "Bearer "), auth.PATPrefix) {
+				continue
+			}
+		}
+		out[k] = joined
 	}
 	return out
 }

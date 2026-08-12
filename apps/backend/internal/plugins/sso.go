@@ -13,7 +13,13 @@ type SSOProvider struct {
 // SSOProviders returns the external login options from every active,
 // auth-capable plugin that declares auth_providers. A provider whose Initiate
 // does not match one of the plugin's declared webhook keys is skipped (its
-// button would 404), mirroring the webhook handler's own key check.
+// button would 404), mirroring the webhook handler's own key check. A
+// provider whose Initiate webhook is not declared `public: true` is also
+// skipped: the login button is the visitor's very first request, with no
+// session or PAT to present, so a non-public initiate webhook would 401 the
+// moment it's clicked. This is a clean skip rather than a manifest
+// validation error, so an unpatched SSO plugin degrades to "no login button"
+// instead of an error state (see docs/decisions for the rationale).
 func (s *Service) SSOProviders() []SSOProvider {
 	var out []SSOProvider
 	for _, rec := range s.List() {
@@ -21,7 +27,8 @@ func (s *Service) SSOProviders() []SSOProvider {
 			continue
 		}
 		for _, p := range rec.AuthProviders {
-			if p.ID == "" || p.Initiate == "" || !manifestDeclaresWebhookKey(rec, p.Initiate) {
+			wh, declared := lookupWebhook(rec, p.Initiate)
+			if p.ID == "" || p.Initiate == "" || !declared || !wh.Public {
 				continue
 			}
 			out = append(out, SSOProvider{

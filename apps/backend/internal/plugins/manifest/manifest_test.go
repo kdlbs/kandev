@@ -81,6 +81,39 @@ func TestParse_UserStateCapabilityDefaultsFalse(t *testing.T) {
 	}
 }
 
+// TestParse_WebhookPublicRoundTrips pins that webhooks[].public parses
+// (AC10): the auth gate reads this field to decide whether a webhook is
+// reachable without a caller identity.
+func TestParse_WebhookPublicRoundTrips(t *testing.T) {
+	yaml := strings.Replace(validManifestYAML, `method: "POST"`, "method: \"POST\"\n    public: true", 1)
+	m, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	if len(m.Webhooks) != 1 || !m.Webhooks[0].Public {
+		t.Fatalf("Webhooks[0].Public = %+v, want a single public webhook", m.Webhooks)
+	}
+}
+
+// TestParse_WebhookPublicDefaultsFalse pins that omitting webhooks[].public
+// defaults to false — an unflagged webhook requires a caller identity.
+func TestParse_WebhookPublicDefaultsFalse(t *testing.T) {
+	m := validManifest(t)
+	if len(m.Webhooks) != 1 || m.Webhooks[0].Public {
+		t.Fatalf("Webhooks[0].Public = %+v, want false (not declared in fixture)", m.Webhooks)
+	}
+}
+
+// TestParse_APIVersionStaysOne pins assumption 2 (hard cutover, no
+// api_version grandfathering): adding webhooks[].public is additive YAML, so
+// supportedAPIVersion / the parsed api_version contract is unchanged.
+func TestParse_APIVersionStaysOne(t *testing.T) {
+	m := validManifest(t)
+	if m.APIVersion != 1 {
+		t.Fatalf("m.APIVersion = %d, want 1", m.APIVersion)
+	}
+}
+
 func TestValidate_ValidManifestPasses(t *testing.T) {
 	m, err := Parse([]byte(validManifestYAML))
 	if err != nil {
