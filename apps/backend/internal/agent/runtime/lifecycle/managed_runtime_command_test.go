@@ -8,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
+	agentruntime "github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -82,5 +83,63 @@ func TestBuildAgentCommandFailsWhenActiveSelectionCannotBeRead(t *testing.T) {
 	)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("selection error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestBuildFreshAgentCommandUsesExactVersionForStandaloneRestart(t *testing.T) {
+	manager := &Manager{commandBuilder: NewCommandBuilder(), logger: newTestLogger()}
+	manager.SetManagedRuntimeSelectionStore(managedRuntimeSelectionStore{
+		selection: managedruntime.Selection{Package: "opencode-ai", Version: "1.18.5"},
+		found:     true,
+	})
+
+	commands, err := manager.buildFreshAgentCommand(
+		context.Background(),
+		&AgentExecution{RuntimeName: agentruntime.RuntimeStandalone},
+		agents.NewOpenCodeACP(),
+	)
+	if err != nil {
+		t.Fatalf("buildFreshAgentCommand: %v", err)
+	}
+	if !strings.Contains(commands.initial, "opencode-ai@1.18.5") {
+		t.Fatalf("restart command = %q, want exact selected version", commands.initial)
+	}
+}
+
+func TestBuildFreshAgentCommandFailsWhenStandaloneSelectionCannotBeRead(t *testing.T) {
+	manager := &Manager{commandBuilder: NewCommandBuilder(), logger: newTestLogger()}
+	wantErr := errors.New("selection unavailable")
+	manager.SetManagedRuntimeSelectionStore(managedRuntimeSelectionStore{err: wantErr})
+
+	_, err := manager.buildFreshAgentCommand(
+		context.Background(),
+		&AgentExecution{RuntimeName: agentruntime.RuntimeStandalone},
+		agents.NewOpenCodeACP(),
+	)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("selection error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestBuildFreshAgentCommandLeavesRemoteCommandUnversioned(t *testing.T) {
+	manager := &Manager{commandBuilder: NewCommandBuilder(), logger: newTestLogger()}
+	manager.SetManagedRuntimeSelectionStore(managedRuntimeSelectionStore{
+		selection: managedruntime.Selection{Package: "opencode-ai", Version: "1.18.5"},
+		found:     true,
+	})
+
+	commands, err := manager.buildFreshAgentCommand(
+		context.Background(),
+		&AgentExecution{RuntimeName: agentruntime.RuntimeSSH},
+		agents.NewOpenCodeACP(),
+	)
+	if err != nil {
+		t.Fatalf("buildFreshAgentCommand: %v", err)
+	}
+	if strings.Contains(commands.initial, "opencode-ai@1.18.5") {
+		t.Fatalf("remote restart command = %q, must not use host selection", commands.initial)
+	}
+	if !strings.Contains(commands.initial, "opencode-ai") {
+		t.Fatalf("remote restart command = %q, want managed runtime command", commands.initial)
 	}
 }

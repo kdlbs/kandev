@@ -13,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/hostutility"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -430,6 +431,47 @@ func TestEnqueueAgentUpdateReusesActiveJobBeforeMetadataResolution(t *testing.T)
 
 	close(updater.releaseRun)
 	waitForUpdateStatus(t, hub.completed, first.JobID, dto.AgentUpdateJobStatusSucceeded)
+}
+
+func TestEnqueueAgentUpdateDoesNotCreateJobForAlreadyActiveHealthyTarget(t *testing.T) {
+	selectionStore := newRecoverySelectionStore()
+	selectionStore.values["managed-acp\x00@example/managed-acp"] = managedruntime.Selection{
+		Package: "@example/managed-acp",
+		Version: "1.1.0",
+	}
+	updater := &recoveryRuntimeUpdater{
+		metadata: RuntimeVersionMetadata{Versions: []string{"1.1.0"}, Latest: "1.1.0"},
+		current: hostutility.AgentCapabilities{
+			Status:       hostutility.StatusOK,
+			AgentVersion: "1.1.0",
+		},
+		currentFound: true,
+	}
+	ag := &managedTestAgent{
+		testAgent: testAgent{id: "managed-acp", name: "Managed", enabled: true},
+		spec:      managedRuntimeSpec(),
+	}
+	ctrl := newTestController(map[string]agents.Agent{ag.ID(): ag})
+	ctrl.SetManagedRuntimeSelectionStore(selectionStore)
+	ctrl.SetJobBroadcaster(newUpdateTerminalBroadcaster())
+	ctrl.SetRuntimeUpdater(updater)
+
+	result, err := ctrl.EnqueueAgentUpdate(context.Background(), ag.ID(), "1.1.0")
+	if err != nil {
+		t.Fatalf("EnqueueAgentUpdate: %v", err)
+	}
+	if result.JobID != "" {
+		t.Fatalf("no-op response job ID = %q, want no persisted job", result.JobID)
+	}
+	if result.Operation != string(managedruntime.OperationUpToDate) {
+		t.Fatalf("no-op operation = %q, want up_to_date", result.Operation)
+	}
+	if jobs := ctrl.ListAgentUpdateJobs(); len(jobs) != 0 {
+		t.Fatalf("retained jobs = %d, want none", len(jobs))
+	}
+	if updater.runCalls != 0 || len(updater.probe) != 0 {
+		t.Fatalf("no-op mutated updater: runs=%d probes=%d", updater.runCalls, len(updater.probe))
+	}
 }
 
 func TestAgentUpdateJobResolvesUpdatesRefreshesAndStreams(t *testing.T) {

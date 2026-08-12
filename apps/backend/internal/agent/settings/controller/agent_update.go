@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/hostutility"
@@ -457,21 +458,11 @@ func (c *Controller) EnqueueAgentUpdate(
 	if targetVersion == "" {
 		return nil, ErrRuntimeUpdateTargetRequired
 	}
-	if _, err := managedruntime.ParseStableVersion(targetVersion); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrRuntimeUpdateTargetInvalid, err)
+	if err := c.validateAgentUpdateTarget(ctx, spec, targetVersion); err != nil {
+		return nil, err
 	}
-	if resolver, ok := c.runtimeUpdater.(RuntimeVersionResolver); ok {
-		metadata, err := resolver.ResolveVersions(ctx, spec.Package)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrRuntimeUpdatePreviewFailed, err)
-		}
-		catalogue, err := managedruntime.BuildCatalogue(metadata.Versions, metadata.Latest)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrRuntimeUpdatePreviewFailed, err)
-		}
-		if !catalogue.Has(targetVersion) {
-			return nil, fmt.Errorf("%w: %s", ErrRuntimeUpdateTargetMissing, targetVersion)
-		}
+	if noOp := c.alreadyActiveHealthyUpdate(ctx, name, spec, targetVersion); noOp != nil {
+		return noOp, nil
 	}
 	job, err := c.updateJobStore.Enqueue(name, spec, targetVersion)
 	if err != nil {
@@ -482,6 +473,65 @@ func (c *Controller) EnqueueAgentUpdate(
 	}
 	snapshot := job.snapshot()
 	return &snapshot, nil
+}
+
+func (c *Controller) validateAgentUpdateTarget(
+	ctx context.Context,
+	spec agents.ManagedNPMRuntimeSpec,
+	targetVersion string,
+) error {
+	if _, err := managedruntime.ParseStableVersion(targetVersion); err != nil {
+		return fmt.Errorf("%w: %v", ErrRuntimeUpdateTargetInvalid, err)
+	}
+	resolver, ok := c.runtimeUpdater.(RuntimeVersionResolver)
+	if !ok {
+		return nil
+	}
+	metadata, err := resolver.ResolveVersions(ctx, spec.Package)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrRuntimeUpdatePreviewFailed, err)
+	}
+	catalogue, err := managedruntime.BuildCatalogue(metadata.Versions, metadata.Latest)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrRuntimeUpdatePreviewFailed, err)
+	}
+	if !catalogue.Has(targetVersion) {
+		return fmt.Errorf("%w: %s", ErrRuntimeUpdateTargetMissing, targetVersion)
+	}
+	return nil
+}
+
+// alreadyActiveHealthyUpdate returns a terminal response without retaining a
+// job when the requested version is already the exact active healthy runtime.
+func (c *Controller) alreadyActiveHealthyUpdate(
+	ctx context.Context,
+	agentName string,
+	spec agents.ManagedNPMRuntimeSpec,
+	targetVersion string,
+) *dto.AgentUpdateJobDTO {
+	if c.managedRuntimeSelections == nil {
+		return nil
+	}
+	caps, found := c.runtimeUpdater.CurrentCapabilities(agentName)
+	if !found || caps.Status != hostutility.StatusOK || caps.AgentVersion != targetVersion {
+		return nil
+	}
+	selection, found, err := c.managedRuntimeSelections.Get(ctx, agentName, spec.Package)
+	if err != nil || !found || selection.Package != spec.Package || selection.Version != targetVersion {
+		return nil
+	}
+	now := time.Now().UTC()
+	return &dto.AgentUpdateJobDTO{
+		AgentName:      agentName,
+		Status:         dto.AgentUpdateJobStatusSucceeded,
+		Operation:      string(managedruntime.OperationUpToDate),
+		CurrentVersion: caps.AgentVersion,
+		ActiveVersion:  selection.Version,
+		TargetVersion:  targetVersion,
+		Output:         "Runtime already up to date.\n",
+		StartedAt:      now,
+		FinishedAt:     &now,
+	}
 }
 
 func (c *Controller) ListAgentUpdateJobs() []dto.AgentUpdateJobDTO {

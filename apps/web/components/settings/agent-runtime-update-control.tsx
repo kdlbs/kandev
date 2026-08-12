@@ -24,6 +24,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import {
   canApproveAgentRuntimeUpdate,
+  resolveRuntimeActiveVersion,
   resolveRuntimeOperation,
   resolveRuntimeVersionPair,
   runtimeOperationLabelKey,
@@ -119,6 +120,7 @@ function RuntimeVersionSummary({
 }) {
   const { t } = useTranslation();
   const { currentVersion, targetVersion } = resolveRuntimeVersionPair(preview, job);
+  const activeVersion = resolveRuntimeActiveVersion(preview, job);
   const operation = resolveRuntimeOperation(preview, job);
   const isUpToDate = operation === "up_to_date";
 
@@ -128,9 +130,9 @@ function RuntimeVersionSummary({
       <p className="break-words font-mono text-sm">
         {isUpToDate ? currentVersion : `${currentVersion} → ${targetVersion}`}
       </p>
-      {preview.active_version && (
+      {activeVersion && (
         <p className="text-sm text-muted-foreground">
-          {t("agents:activeRuntimeVersion", { version: preview.active_version })}
+          {t("agents:activeRuntimeVersion", { version: activeVersion })}
         </p>
       )}
       {isUpToDate && (
@@ -161,6 +163,7 @@ function RuntimeVersionSelector({
   const versions = preview.available_versions ?? [
     { version: preview.target_version, latest: false },
   ];
+  const activeVersion = resolveRuntimeActiveVersion(preview, job);
   return (
     <div className="space-y-1">
       <label className="font-medium" htmlFor={`agent-update-version-${agentName}`}>
@@ -177,9 +180,7 @@ function RuntimeVersionSelector({
         {versions.map((version) => {
           const markers = [
             version.latest ? t("agents:latestRuntimeVersion") : "",
-            version.version === preview.active_version
-              ? t("agents:activeRuntimeVersionMarker")
-              : "",
+            version.version === activeVersion ? t("agents:activeRuntimeVersionMarker") : "",
           ]
             .filter(Boolean)
             .join(", ");

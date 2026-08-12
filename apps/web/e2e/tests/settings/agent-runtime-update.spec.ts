@@ -263,4 +263,60 @@ test.describe("managed agent runtime updates", () => {
     await retryUpdate.click();
     expect(runtime.postCount()).toBe(2);
   });
+
+  test("shows the newly activated version after a successful job", async ({ testPage }) => {
+    const runtime = await installRuntimeUpdateFixture(testPage);
+
+    await testPage.goto("/settings/agents");
+    await testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`).click();
+    const dialog = testPage.getByTestId(`agent-update-dialog-${runtime.agentName}`);
+    await testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`).click();
+    await runtime.emitUpdate(
+      updateJob({
+        status: "succeeded",
+        current_version: "0.63.0",
+        active_version: "0.63.0",
+        target_version: "0.63.0",
+        finished_at: "2026-07-26T12:01:00.000Z",
+      }),
+    );
+
+    await expect(dialog).toContainText("Active version: 0.63.0");
+    const successOptionText = await dialog
+      .getByTestId(`agent-update-version-${runtime.agentName}`)
+      .locator("option")
+      .allTextContents();
+    expect(
+      successOptionText.some((text) => text.includes("0.63.0") && text.includes("active")),
+    ).toBe(true);
+  });
+
+  test("keeps the previous active version after a failed activation", async ({ testPage }) => {
+    const runtime = await installRuntimeUpdateFixture(testPage);
+
+    await testPage.goto("/settings/agents");
+    await testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`).click();
+    const dialog = testPage.getByTestId(`agent-update-dialog-${runtime.agentName}`);
+    await testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`).click();
+    await runtime.emitUpdate(
+      updateJob({
+        status: "failed",
+        active_version: "0.62.0",
+        error: "candidate ACP probe failed",
+        finished_at: "2026-07-26T12:01:00.000Z",
+      }),
+    );
+
+    await expect(dialog).toContainText("Active version: 0.62.0");
+    const failedOptionText = await dialog
+      .getByTestId(`agent-update-version-${runtime.agentName}`)
+      .locator("option")
+      .allTextContents();
+    expect(
+      failedOptionText.some((text) => text.includes("0.62.0") && text.includes("active")),
+    ).toBe(true);
+    expect(
+      failedOptionText.some((text) => text.includes("0.63.0") && text.includes("active")),
+    ).toBe(false);
+  });
 });

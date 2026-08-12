@@ -28,6 +28,13 @@ export function resolveRuntimeVersionPair(
   return { currentVersion, hasCurrentVersion: Boolean(reported), targetVersion, versionsMatch };
 }
 
+export function resolveRuntimeActiveVersion(
+  preview: AgentUpdatePreview,
+  job?: AgentUpdateJob,
+): string | undefined {
+  return job?.active_version ?? preview.active_version;
+}
+
 export function resolveRuntimeOperation(
   preview: AgentUpdatePreview | null,
   job?: AgentUpdateJob,

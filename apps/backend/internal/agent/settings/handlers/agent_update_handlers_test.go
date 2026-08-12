@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/discovery"
 	"github.com/kandev/kandev/internal/agent/hostutility"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/controller"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
@@ -28,8 +29,24 @@ type handlerRuntimeUpdater struct {
 	once    sync.Once
 }
 
+type handlerSelectionStore struct {
+	selection managedruntime.Selection
+}
+
+func (s handlerSelectionStore) Get(
+	context.Context,
+	string,
+	string,
+) (managedruntime.Selection, bool, error) {
+	return s.selection, true, nil
+}
+
+func (handlerSelectionStore) Save(context.Context, string, string, string) error {
+	return nil
+}
+
 func (u *handlerRuntimeUpdater) CurrentCapabilities(string) (hostutility.AgentCapabilities, bool) {
-	return hostutility.AgentCapabilities{AgentVersion: "1.0.0"}, true
+	return hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.0.0"}, true
 }
 
 func (u *handlerRuntimeUpdater) ResolveTarget(context.Context, string) (string, error) {
@@ -217,6 +234,38 @@ func TestAgentUpdateEndpointsAcceptAndRetainJobs(t *testing.T) {
 	if listResponse.Code != http.StatusOK ||
 		!strings.Contains(listResponse.Body.String(), accepted.JobID) {
 		t.Fatalf("list response = %d %s", listResponse.Code, listResponse.Body.String())
+	}
+}
+
+func TestAgentUpdateEndpointDoesNotCreateAlreadyActiveHealthyJob(t *testing.T) {
+	router, ctrl, _ := newAgentUpdateRouter(t, &handlerRuntimeUpdater{})
+	selectionStore := handlerSelectionStore{selection: managedruntime.Selection{
+		Package: "@agentclientprotocol/claude-agent-acp",
+		Version: "1.0.0",
+	}}
+	ctrl.SetManagedRuntimeSelectionStore(selectionStore)
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, updateJSONRequest(
+		http.MethodPost,
+		"/api/v1/agent-update/claude-acp",
+		`{"target_version":"1.0.0"}`,
+	))
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("POST status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var result dto.AgentUpdateJobDTO
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode no-op response: %v", err)
+	}
+	if result.JobID != "" || result.Operation != string(managedruntime.OperationUpToDate) {
+		t.Fatalf("no-op response = %#v, want terminal up_to_date without job ID", result)
+	}
+
+	jobs := httptest.NewRecorder()
+	router.ServeHTTP(jobs, updateRequest(http.MethodGet, "/api/v1/agent-update/jobs"))
+	if jobs.Code != http.StatusOK || !strings.Contains(jobs.Body.String(), `"jobs":[]`) {
+		t.Fatalf("no-op jobs response = %d %s", jobs.Code, jobs.Body.String())
 	}
 }
 

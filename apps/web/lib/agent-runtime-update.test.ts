@@ -3,6 +3,7 @@ import i18n from "i18next";
 import type { AgentUpdateJob, AgentUpdatePreview } from "@/lib/api";
 import {
   canApproveAgentRuntimeUpdate,
+  resolveRuntimeActiveVersion,
   resolveRuntimeOperation,
   resolveRuntimeVersionPair,
   runtimeOperationLabelKey,
@@ -48,6 +49,26 @@ describe("resolveRuntimeVersionPair", () => {
       targetVersion: "0.63.0",
       versionsMatch: false,
     });
+  });
+});
+
+describe("resolveRuntimeActiveVersion", () => {
+  it("uses the successful job activation snapshot", () => {
+    expect(
+      resolveRuntimeActiveVersion(
+        preview({ active_version: "0.62.0" }),
+        job({ status: "succeeded", active_version: "0.63.0" }),
+      ),
+    ).toBe("0.63.0");
+  });
+
+  it("keeps the preview selection when activation fails", () => {
+    expect(
+      resolveRuntimeActiveVersion(
+        preview({ active_version: "0.62.0" }),
+        job({ status: "failed", active_version: "0.62.0" }),
+      ),
+    ).toBe("0.62.0");
   });
 });
 
