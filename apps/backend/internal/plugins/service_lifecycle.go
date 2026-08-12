@@ -33,6 +33,7 @@ func (s *Service) Enable(id string) error {
 		return err
 	}
 	s.notifyDeliverer()
+	s.notifyAgentToolCatalogChanged()
 	return nil
 }
 
@@ -61,6 +62,7 @@ func (s *Service) Disable(id string) error {
 		return err
 	}
 	s.notifyDeliverer()
+	s.notifyAgentToolCatalogChanged()
 	return nil
 }
 
@@ -236,6 +238,7 @@ func (s *Service) handleStatusChange(id string, healthy bool, reason error) {
 			zap.String("plugin_id", id), zap.Bool("healthy", healthy), zap.Error(err))
 	} else {
 		s.notifyDeliverer()
+		s.notifyAgentToolCatalogChanged()
 		if healthy {
 			if d := s.Deliverer(); d != nil {
 				d.Flush(id)
@@ -284,7 +287,9 @@ func (s *Service) StartActivePlugins(ctx context.Context) {
 		}
 		if err := s.ensureOwnershipAvailable(&rec.Manifest); err != nil {
 			s.log.Warn("plugins: active ownership collision", zap.String("plugin_id", rec.ID), zap.Error(err))
-			_ = s.SetStatus(rec.ID, StatusError)
+			if statusErr := s.SetStatus(rec.ID, StatusError); statusErr == nil {
+				s.notifyAgentToolCatalogChanged()
+			}
 			continue
 		}
 		if err := s.runtime.Start(ctx, rec, s.hostForPlugin); err != nil {
@@ -298,6 +303,7 @@ func (s *Service) StartActivePlugins(ctx context.Context) {
 				// reconcile it after an active plugin fails to spawn. Otherwise
 				// its worker would continue treating the plugin as active.
 				s.notifyDeliverer()
+				s.notifyAgentToolCatalogChanged()
 			}
 		}
 	}

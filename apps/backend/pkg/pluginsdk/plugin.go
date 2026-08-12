@@ -3,6 +3,9 @@ package pluginsdk
 import (
 	"context"
 	"sync"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // Plugin is the interface a plugin author implements. It is delivered RPCs
@@ -67,6 +70,13 @@ type GitCredentialHandler interface {
 	GitCredentialBinder
 }
 
+// AgentToolPlugin is an optional extension implemented by plugins that
+// declare agent_tools in their manifest. Keeping it separate from Plugin
+// preserves source compatibility for existing plugins.
+type AgentToolPlugin interface {
+	InvokeAgentTool(context.Context, *AgentToolRequest) (*AgentToolResult, error)
+}
+
 // HostSetter is implemented by Plugin values that want Serve to inject the
 // Host once the broker connection back to kandev is established (see the
 // "Host injection" section of the serve.go file header). UnimplementedPlugin
@@ -106,6 +116,10 @@ func (*UnimplementedPlugin) OnEvent(context.Context, *Event) error {
 // webhook path has nothing sensible to serve.
 func (*UnimplementedPlugin) HandleWebhook(context.Context, *WebhookRequest) (*WebhookResponse, error) {
 	return &WebhookResponse{Status: 404}, nil
+}
+
+func (*UnimplementedPlugin) InvokeAgentTool(context.Context, *AgentToolRequest) (*AgentToolResult, error) {
+	return nil, status.Error(codes.Unimplemented, "agent tool invocation is not implemented")
 }
 
 // SetHost stores the Host injected by Serve. Call Host() from your

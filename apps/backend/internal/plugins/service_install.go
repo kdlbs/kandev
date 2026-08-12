@@ -53,6 +53,17 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 		_ = os.RemoveAll(result.InstallPath)
 		return nil, err
 	}
+	s.agentToolInstallMu.Lock()
+	catalogLocked := true
+	defer func() {
+		if catalogLocked {
+			s.agentToolInstallMu.Unlock()
+		}
+	}()
+	if err := s.validateAgentToolInstall(result.Manifest); err != nil {
+		_ = os.RemoveAll(result.InstallPath)
+		return nil, err
+	}
 
 	// The plugin id is only known once pkgtar.Install has parsed the
 	// package's manifest, so the per-plugin lock is acquired here rather
@@ -108,9 +119,12 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 		return nil, fmt.Errorf("plugins: persist installed record: %w", err)
 	}
 	s.registry.Add(rec)
+	s.agentToolInstallMu.Unlock()
+	catalogLocked = false
 
 	activateErr := s.activate(rec)
 	s.notifyDeliverer()
+	s.notifyAgentToolCatalogChanged()
 
 	installed, getErr := s.Get(rec.ID)
 	if getErr != nil {
@@ -291,6 +305,7 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 	s.registry.Remove(id)
 	s.deletePluginState(id)
 	s.notifyDeliverer()
+	s.notifyAgentToolCatalogChanged()
 	return nil
 }
 

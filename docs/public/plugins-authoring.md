@@ -103,6 +103,52 @@ go-plugin/gRPC handshake and Host injection. The backend implements
 pluginsdk.Plugin (OnEvent and/or HandleWebhook) and embeds
 pluginsdk.UnimplementedPlugin for no-op defaults.
 
+### Contribute an agent tool
+
+A managed plugin can contribute task-aware MCP tools through the same supervised
+gRPC process. Add an `agent_tools` declaration to `manifest.yaml` and implement
+the optional `pluginsdk.AgentToolPlugin` interface:
+
+```yaml
+agent_tools:
+  - name: add_tag
+    description: Add an existing tag to the current task.
+    surfaces: [kanban-task]
+    input_schema:
+      type: object
+      properties:
+        tag_id: { type: string }
+      required: [tag_id]
+      additionalProperties: false
+    annotations:
+      read_only_hint: false
+      destructive_hint: false
+      idempotent_hint: true
+```
+
+The host exposes the readable canonical name
+`kandev_<plugin-id-slug>_<local-name>` (for example,
+`kandev_task_tags_v1_add_tag`). Punctuation in the stable plugin ID becomes an
+underscore. Very long names receive a short stable hash suffix after the slug
+is truncated. Tool names are host-owned; the plugin-local `name` is used for
+the gRPC dispatch.
+
+Tools may target `kanban-task`, `office-task`, or both. They are not exposed to
+configuration or external MCP clients. Kandev validates the input and optional
+output JSON Schemas, supplies task/session/workspace/surface context, enforces
+a 30-second deadline and 1 MiB result limit, and does not retry calls.
+
+The optional SDK method is:
+
+```go
+InvokeAgentTool(context.Context, *pluginsdk.AgentToolRequest) (*pluginsdk.AgentToolResult, error)
+```
+
+The request includes immutable invocation, task, session, workspace, and
+surface context. Return required fallback text, optional structured content,
+and `IsError` when the operation failed. Declaring a tool does not grant Host
+API capabilities; use the existing `capabilities` fields for those permissions.
+
 ## Security and capabilities
 
 Plugins are privileged installed code. The capability list gates Host RPCs; it

@@ -9,8 +9,10 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/mcp/plugintools"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/marketplace"
 	"github.com/kandev/kandev/internal/plugins/state"
@@ -69,6 +71,10 @@ type Service struct {
 	// the full RPC; lifecycle mutation holds the write side.
 	dispatchLocks *keyedRWMutex
 
+	// agentToolInstallMu makes exposed-name collision validation and registry
+	// insertion one atomic catalog mutation across different plugin IDs.
+	agentToolInstallMu sync.Mutex
+
 	pluginsDir       string
 	store            store.Store
 	registry         *Registry
@@ -78,9 +84,14 @@ type Service struct {
 	eventBus         bus.EventBus
 	log              *logger.Logger
 
-	deliverer Deliverer
-	runtime   PluginRuntime
-	secrets   SecretVault
+	deliverer                Deliverer
+	agentToolCatalogListener AgentToolCatalogListener
+	agentToolGeneration      string
+	agentToolRevision        uint64
+	agentToolSnapshot        plugintools.Snapshot
+	agentToolSnapshotReady   bool
+	runtime                  PluginRuntime
+	secrets                  SecretVault
 
 	// revokeGitCredentialProvider invalidates leases for a repository provider
 	// when its owning plugin is no longer active. It is wired by backendapp to
@@ -154,13 +165,14 @@ type ReferenceIdentity struct {
 // directly for tests that want a fake store.Store/PluginRuntime.
 func NewService(pluginStore store.Store, registry *Registry, eventBus bus.EventBus, log *logger.Logger) *Service {
 	return &Service{
-		store:          pluginStore,
-		registry:       registry,
-		eventBus:       eventBus,
-		log:            log,
-		httpClient:     &http.Client{},
-		lifecycleLocks: newKeyedMutex(),
-		dispatchLocks:  newKeyedRWMutex(),
+		store:               pluginStore,
+		registry:            registry,
+		eventBus:            eventBus,
+		log:                 log,
+		httpClient:          &http.Client{},
+		lifecycleLocks:      newKeyedMutex(),
+		dispatchLocks:       newKeyedRWMutex(),
+		agentToolGeneration: uuid.NewString(),
 	}
 }
 
@@ -285,6 +297,22 @@ func (s *Service) SetDeliverer(d Deliverer) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.deliverer = d
+}
+
+// SetAgentToolCatalogListener attaches the dynamic MCP registry bridge.
+func (s *Service) SetAgentToolCatalogListener(listener AgentToolCatalogListener) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.agentToolCatalogListener = listener
+}
+
+func (s *Service) notifyAgentToolCatalogChanged() {
+	s.mu.Lock()
+	listener := s.agentToolCatalogListener
+	s.mu.Unlock()
+	if listener != nil {
+		listener.NotifyAgentToolCatalogChanged()
+	}
 }
 
 // Deliverer returns the currently attached event-delivery subsystem, or nil

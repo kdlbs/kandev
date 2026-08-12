@@ -6,6 +6,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -55,7 +56,7 @@ func TestMCPHandlerForScopesToExecutionTask(t *testing.T) {
 		return authn.WithIdentity(ctx, authn.Identity{UserID: "owner-of-" + taskID, Role: authn.RoleMember}), nil
 	})
 
-	handler := sm.mcpHandlerFor(&AgentExecution{ID: "exec-1", TaskID: "task-a"})
+	handler := sm.mcpHandlerFor(&AgentExecution{ID: "exec-1", TaskID: "task-a", SessionID: "session-a"})
 	resp, err := handler.Dispatch(context.Background(), mcpRequest(t, map[string]interface{}{}))
 	if err != nil {
 		t.Fatalf("Dispatch: %v", err)
@@ -74,6 +75,13 @@ func TestMCPHandlerForScopesToExecutionTask(t *testing.T) {
 	if identity.UserID != "owner-of-task-a" {
 		t.Errorf("UserID = %q, want owner-of-task-a", identity.UserID)
 	}
+	executionContext, ok := streams.MCPExecutionContextFromContext(inner.gotCtx)
+	if !ok {
+		t.Fatal("tool handlers received no execution context")
+	}
+	if executionContext.TaskID != "task-a" || executionContext.SessionID != "session-a" {
+		t.Errorf("execution context = %#v, want task-a/session-a", executionContext)
+	}
 }
 
 // TestMCPHandlerForIgnoresPayloadSessionID is the privilege-escalation pin. The
@@ -87,7 +95,7 @@ func TestMCPHandlerForIgnoresPayloadSessionID(t *testing.T) {
 		return ctx, nil
 	})
 
-	handler := sm.mcpHandlerFor(&AgentExecution{ID: "exec-1", TaskID: "task-a"})
+	handler := sm.mcpHandlerFor(&AgentExecution{ID: "exec-1", TaskID: "task-a", SessionID: "session-a"})
 	_, err := handler.Dispatch(context.Background(), mcpRequest(t, map[string]interface{}{
 		"session_id": "session-of-victim",
 		"task_id":    "task-victim",
@@ -109,7 +117,7 @@ func TestMCPHandlerForDeniesWhenScopingFails(t *testing.T) {
 		return nil, errors.New("db unavailable")
 	})
 
-	handler := sm.mcpHandlerFor(&AgentExecution{ID: "exec-1", TaskID: "task-a"})
+	handler := sm.mcpHandlerFor(&AgentExecution{ID: "exec-1", TaskID: "task-a", SessionID: "session-a"})
 	resp, err := handler.Dispatch(context.Background(), mcpRequest(t, map[string]interface{}{}))
 	if err != nil {
 		t.Fatalf("Dispatch: %v", err)
@@ -123,14 +131,35 @@ func TestMCPHandlerForDeniesWhenScopingFails(t *testing.T) {
 	}
 }
 
-// TestMCPHandlerForPassesThroughWithoutScoper keeps single-user instances and
-// isolated tests on the original unwrapped handler.
-func TestMCPHandlerForPassesThroughWithoutScoper(t *testing.T) {
+func TestMCPHandlerForScopesTaskWithoutSessionID(t *testing.T) {
+	inner := &recordingMCPHandler{}
+	sm := newMCPStreamManager(t, inner, func(ctx context.Context, taskID string) (context.Context, error) {
+		return authn.WithIdentity(ctx, authn.Identity{UserID: "owner-of-" + taskID, Role: authn.RoleMember}), nil
+	})
+
+	handler := sm.mcpHandlerFor(&AgentExecution{ID: "exec-1", TaskID: "task-a"})
+	if _, err := handler.Dispatch(context.Background(), mcpRequest(t, nil)); err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	identity, ok := authn.IdentityFromContext(inner.gotCtx)
+	if !ok || identity.UserID != "owner-of-task-a" {
+		t.Fatalf("identity = %#v, present = %v; want task owner", identity, ok)
+	}
+}
+
+// TestMCPHandlerForCarriesExecutionWithoutScoper keeps standalone runtimes
+// execution-bound even when user identity scoping is not configured.
+func TestMCPHandlerForCarriesExecutionWithoutScoper(t *testing.T) {
 	inner := &recordingMCPHandler{}
 	sm := newMCPStreamManager(t, inner, nil)
 
-	if got := sm.mcpHandlerFor(&AgentExecution{ID: "exec-1", TaskID: "task-a"}); got != inner {
-		t.Errorf("handler = %T, want the unwrapped inner handler", got)
+	handler := sm.mcpHandlerFor(&AgentExecution{ID: "exec-1", TaskID: "task-a", SessionID: "session-a"})
+	if _, err := handler.Dispatch(context.Background(), mcpRequest(t, nil)); err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	execution, ok := streams.MCPExecutionContextFromContext(inner.gotCtx)
+	if !ok || execution.ExecutionID != "exec-1" {
+		t.Errorf("execution context = %#v, want exec-1", execution)
 	}
 }
 

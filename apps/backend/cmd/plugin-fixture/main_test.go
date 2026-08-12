@@ -59,6 +59,21 @@ func TestOnEvent_AppendsJSONLineToDataDir(t *testing.T) {
 	require.Equal(t, "evt_1", recs[0].EventID)
 }
 
+func TestInvokeAgentToolEchoesContext(t *testing.T) {
+	p := &fixturePlugin{}
+	result, err := p.InvokeAgentTool(context.Background(), &pluginsdk.AgentToolRequest{
+		Name: "test_echo", Arguments: map[string]any{"value": "hello"},
+		Context: pluginsdk.AgentToolContext{TaskID: "task-1", Surface: "kanban-task"},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "fixture echo: hello", result.Text)
+	require.False(t, result.IsError)
+	require.Equal(t, "hello", result.StructuredContent["value"])
+	require.Equal(t, "task-1", result.StructuredContent["task_id"])
+	require.Equal(t, "kanban-task", result.StructuredContent["surface"])
+}
+
 func TestOnEvent_AppendsMultipleDeliveriesInOrder(t *testing.T) {
 	dir := t.TempDir()
 	p := &fixturePlugin{dataDir: dir}

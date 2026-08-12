@@ -36,6 +36,7 @@ const (
 	connectionStatusAction = "connection-status"
 	searchPurpose          = "search"
 	submissionPurpose      = "submission"
+	fixtureTaskIDKey       = "task_id"
 )
 
 // deliveryRecord is one recorded OnEvent delivery, appended as a JSON line
@@ -68,6 +69,18 @@ type fixturePlugin struct {
 }
 
 var _ pluginsdk.Plugin = (*fixturePlugin)(nil)
+
+var _ pluginsdk.AgentToolPlugin = (*fixturePlugin)(nil)
+
+func (p *fixturePlugin) InvokeAgentTool(_ context.Context, req *pluginsdk.AgentToolRequest) (*pluginsdk.AgentToolResult, error) {
+	value, _ := req.Arguments["value"].(string)
+	return &pluginsdk.AgentToolResult{
+		Text: fmt.Sprintf("fixture echo: %s", value),
+		StructuredContent: map[string]any{
+			"value": value, fixtureTaskIDKey: req.Context.TaskID, "surface": req.Context.Surface,
+		},
+	}, nil
+}
 
 // newFixturePlugin builds a fixturePlugin whose data directory is resolved
 // from KANDEV_PLUGIN_DATA_DIR (falling back to the current working
@@ -167,7 +180,7 @@ func (p *fixturePlugin) HandleAction(ctx context.Context, req *pluginsdk.PluginA
 		}
 	case "link-pull-request":
 		response["linked"] = true
-		response["task_id"] = req.Context.TaskID
+		response[fixtureTaskIDKey] = req.Context.TaskID
 		response["pull_request_id"] = fixturePullRequestID
 	case "watch-create-task":
 		return p.createWatchTask(ctx, req.Context.WorkspaceID)
@@ -195,7 +208,7 @@ func (p *fixturePlugin) createWatchTask(ctx context.Context, workspaceID string)
 	if err != nil {
 		return nil, fmt.Errorf("plugin-fixture: creating watch task: %w", err)
 	}
-	body, err := json.Marshal(map[string]any{"watch_created": true, "task_id": task.ID})
+	body, err := json.Marshal(map[string]any{"watch_created": true, fixtureTaskIDKey: task.ID})
 	if err != nil {
 		return nil, fmt.Errorf("plugin-fixture: marshaling watch response: %w", err)
 	}

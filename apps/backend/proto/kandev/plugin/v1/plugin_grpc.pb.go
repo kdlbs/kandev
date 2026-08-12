@@ -26,6 +26,7 @@ const (
 	Plugin_AuthorizeEntityReference_FullMethodName = "/kandev.plugin.v1.Plugin/AuthorizeEntityReference"
 	Plugin_ResolveGitCredential_FullMethodName     = "/kandev.plugin.v1.Plugin/ResolveGitCredential"
 	Plugin_GetGitCredentialBinding_FullMethodName  = "/kandev.plugin.v1.Plugin/GetGitCredentialBinding"
+	Plugin_InvokeAgentTool_FullMethodName          = "/kandev.plugin.v1.Plugin/InvokeAgentTool"
 )
 
 // PluginClient is the client API for Plugin service.
@@ -52,6 +53,7 @@ type PluginClient interface {
 	// after credential redemption so a rotated or disconnected provider fails
 	// closed without resolving a secret merely to inspect its revision.
 	GetGitCredentialBinding(ctx context.Context, in *GitCredentialBindingRequest, opts ...grpc.CallOption) (*GitCredentialBindingResponse, error)
+	InvokeAgentTool(ctx context.Context, in *AgentToolRequest, opts ...grpc.CallOption) (*AgentToolResponse, error)
 }
 
 type pluginClient struct {
@@ -132,6 +134,16 @@ func (c *pluginClient) GetGitCredentialBinding(ctx context.Context, in *GitCrede
 	return out, nil
 }
 
+func (c *pluginClient) InvokeAgentTool(ctx context.Context, in *AgentToolRequest, opts ...grpc.CallOption) (*AgentToolResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AgentToolResponse)
+	err := c.cc.Invoke(ctx, Plugin_InvokeAgentTool_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // PluginServer is the server API for Plugin service.
 // All implementations must embed UnimplementedPluginServer
 // for forward compatibility.
@@ -156,6 +168,7 @@ type PluginServer interface {
 	// after credential redemption so a rotated or disconnected provider fails
 	// closed without resolving a secret merely to inspect its revision.
 	GetGitCredentialBinding(context.Context, *GitCredentialBindingRequest) (*GitCredentialBindingResponse, error)
+	InvokeAgentTool(context.Context, *AgentToolRequest) (*AgentToolResponse, error)
 	mustEmbedUnimplementedPluginServer()
 }
 
@@ -186,6 +199,9 @@ func (UnimplementedPluginServer) ResolveGitCredential(context.Context, *ResolveG
 }
 func (UnimplementedPluginServer) GetGitCredentialBinding(context.Context, *GitCredentialBindingRequest) (*GitCredentialBindingResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetGitCredentialBinding not implemented")
+}
+func (UnimplementedPluginServer) InvokeAgentTool(context.Context, *AgentToolRequest) (*AgentToolResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method InvokeAgentTool not implemented")
 }
 func (UnimplementedPluginServer) mustEmbedUnimplementedPluginServer() {}
 func (UnimplementedPluginServer) testEmbeddedByValue()                {}
@@ -334,6 +350,24 @@ func _Plugin_GetGitCredentialBinding_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Plugin_InvokeAgentTool_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AgentToolRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServer).InvokeAgentTool(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Plugin_InvokeAgentTool_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServer).InvokeAgentTool(ctx, req.(*AgentToolRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Plugin_ServiceDesc is the grpc.ServiceDesc for Plugin service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -368,6 +402,10 @@ var Plugin_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetGitCredentialBinding",
 			Handler:    _Plugin_GetGitCredentialBinding_Handler,
+		},
+		{
+			MethodName: "InvokeAgentTool",
+			Handler:    _Plugin_InvokeAgentTool_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

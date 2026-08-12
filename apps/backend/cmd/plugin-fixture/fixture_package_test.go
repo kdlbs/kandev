@@ -38,6 +38,8 @@ func TestFixtureManifest_ParsesAndValidates(t *testing.T) {
 	require.Equal(t, "fixture-pull-requests", m.ReferenceSources[0].Source)
 	require.Equal(t, "fixture-source-control", m.ReferenceSources[0].Provider)
 	require.Equal(t, "pull_request", m.ReferenceSources[0].Kind)
+	require.Len(t, m.AgentTools, 1)
+	require.Equal(t, "test_echo", m.AgentTools[0].Name)
 
 	require.Len(t, m.Webhooks, 1)
 	require.Equal(t, "test-hook", m.Webhooks[0].Key)

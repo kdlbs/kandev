@@ -324,6 +324,96 @@ reference_sources:
 	}
 }
 
+func TestParse_AgentToolDeclarationIsRetained(t *testing.T) {
+	yaml := validManifestYAML + `
+agent_tools:
+  - name: add_tag
+    description: Add a tag to the current task.
+    surfaces: [kanban-task]
+    input_schema:
+      type: object
+      properties:
+        tag_id: {type: string}
+      required: [tag_id]
+`
+	m, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	if len(m.AgentTools) != 1 {
+		t.Fatalf("AgentTools = %v, want one declaration", m.AgentTools)
+	}
+	tool := m.AgentTools[0]
+	if tool.Name != "add_tag" {
+		t.Fatalf("AgentTools[0].Name = %q, want add_tag", tool.Name)
+	}
+	if tool.Description != "Add a tag to the current task." {
+		t.Fatalf("AgentTools[0].Description = %q", tool.Description)
+	}
+	if len(tool.Surfaces) != 1 || tool.Surfaces[0] != AgentToolSurfaceKanban {
+		t.Fatalf("AgentTools[0].Surfaces = %v, want [%s]", tool.Surfaces, AgentToolSurfaceKanban)
+	}
+	if tool.InputSchema["type"] != "object" {
+		t.Fatalf("AgentTools[0].InputSchema.type = %v, want object", tool.InputSchema["type"])
+	}
+	properties, ok := tool.InputSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("AgentTools[0].InputSchema.properties = %T, want map[string]any", tool.InputSchema["properties"])
+	}
+	tagID, ok := properties["tag_id"].(map[string]any)
+	if !ok || tagID["type"] != "string" {
+		t.Fatalf("AgentTools[0].InputSchema.properties.tag_id = %v, want string schema", properties["tag_id"])
+	}
+	required, ok := tool.InputSchema["required"].([]any)
+	if !ok || len(required) != 1 || required[0] != "tag_id" {
+		t.Fatalf("AgentTools[0].InputSchema.required = %v, want [tag_id]", tool.InputSchema["required"])
+	}
+}
+
+func TestValidate_AgentToolContract(t *testing.T) {
+	m := managedManifest(t)
+	readOnly := true
+	destructive := false
+	m.AgentTools = []AgentTool{{
+		Name:        "read_tag",
+		Description: "Read the current task tag.",
+		Surfaces:    []string{AgentToolSurfaceKanban},
+		InputSchema: map[string]any{"type": "object"},
+		Annotations: AgentToolAnnotations{
+			ReadOnlyHint: &readOnly, DestructiveHint: &destructive,
+		},
+	}}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("Validate() unexpected error: %v", err)
+	}
+}
+
+func TestValidate_RejectsAgentToolsOnLegacyRemotePlugin(t *testing.T) {
+	m := validManifest(t)
+	m.AgentTools = []AgentTool{{
+		Name: "echo", Description: "Echo input.",
+		Surfaces:    []string{AgentToolSurfaceKanban},
+		InputSchema: map[string]any{"type": "object"},
+	}}
+	err := m.Validate()
+	if err == nil || !strings.Contains(err.Error(), "agent_tools require runtime.type binary") {
+		t.Fatalf("Validate() error = %v, want managed-runtime requirement", err)
+	}
+}
+
+func TestValidate_RejectsInvalidAgentTool(t *testing.T) {
+	m := validManifest(t)
+	m.AgentTools = []AgentTool{{
+		Name:        "Bad-Name",
+		Description: "",
+		Surfaces:    []string{"configuration"},
+		InputSchema: map[string]any{"type": "string"},
+	}}
+	if err := m.Validate(); err == nil {
+		t.Fatal("Validate() expected agent tool errors, got nil")
+	}
+}
+
 // validManifest returns a freshly parsed copy of the valid fixture so each
 // test can mutate it independently without affecting others.
 func validManifest(t *testing.T) *Manifest {

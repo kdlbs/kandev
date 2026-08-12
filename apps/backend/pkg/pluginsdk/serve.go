@@ -243,6 +243,20 @@ func (r *RemotePlugin) GetGitCredentialBinding(ctx context.Context, req *GitCred
 	return gitCredentialBindingResponseFromProto(resp), nil
 }
 
+// InvokeAgentTool calls the optional plugin agent-tool RPC. The caller owns
+// timeout and retry policy because tool calls may have side effects.
+func (r *RemotePlugin) InvokeAgentTool(ctx context.Context, req *AgentToolRequest) (*AgentToolResult, error) {
+	protoReq, err := req.toProto()
+	if err != nil {
+		return nil, err
+	}
+	resp, err := r.client.InvokeAgentTool(ctx, protoReq)
+	if err != nil {
+		return nil, err
+	}
+	return agentToolResultFromProto(resp)
+}
+
 // grpcPluginServer adapts the author-facing Plugin interface to the
 // generated pluginv1.PluginServer interface. Registered inside the plugin
 // subprocess by GRPCPlugin.GRPCServer.
@@ -347,6 +361,25 @@ func (s *grpcPluginServer) GetGitCredentialBinding(ctx context.Context, req *plu
 		return nil, status.Error(codes.Internal, "pluginsdk: git credential binder returned nil response")
 	}
 	return resp.toProto(), nil
+}
+
+func (s *grpcPluginServer) InvokeAgentTool(ctx context.Context, req *pluginv1.AgentToolRequest) (*pluginv1.AgentToolResponse, error) {
+	handler, ok := s.impl.(AgentToolPlugin)
+	if !ok {
+		return nil, unsupportedPluginExtension("agent tool invocation")
+	}
+	converted, err := agentToolRequestFromProto(req)
+	if err != nil {
+		return nil, err
+	}
+	result, err := handler.InvokeAgentTool(ctx, converted)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
+		return nil, status.Error(codes.Internal, "plugin returned a nil agent tool result")
+	}
+	return result.toProto()
 }
 
 func unsupportedPluginExtension(extension string) error {
