@@ -328,14 +328,13 @@ func (cm *ContainerManager) removeContainerBestEffort(containerID string) {
 }
 
 // waitForHealth waits for agentctl to be healthy with retries.
-// The budget covers the time it takes for the container's bootstrap to run the
-// prepare script (git clone, optional network installs) and then exec agentctl.
-// The budget matches the common setup-script timeout used by other executors.
+// The budget covers the time it takes for the container's bootstrap to exec
+// agentctl after the prepare script's own common setup timeout.
 func (cm *ContainerManager) waitForHealth(ctx context.Context, ctl *agentctl.ControlClient) error {
 	const retryDelay = 500 * time.Millisecond
 
-	setupTimeout := constants.SetupScriptTimeout
-	healthCtx, cancel := context.WithTimeout(ctx, setupTimeout)
+	launchTimeout := constants.AgentLaunchTimeout
+	healthCtx, cancel := context.WithTimeout(ctx, launchTimeout)
 	defer cancel()
 
 	var lastErr error
@@ -349,16 +348,17 @@ func (cm *ContainerManager) waitForHealth(ctx context.Context, ctl *agentctl.Con
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			return fmt.Errorf("agentctl not healthy after %s: %w", setupTimeout, lastErr)
+			return fmt.Errorf("agentctl not healthy after %s: %w", launchTimeout, lastErr)
 		}
 
 		timer := time.NewTimer(retryDelay)
 		select {
 		case <-healthCtx.Done():
+			timer.Stop()
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			return fmt.Errorf("agentctl not healthy after %s: %w", setupTimeout, lastErr)
+			return fmt.Errorf("agentctl not healthy after %s: %w", launchTimeout, lastErr)
 		case <-timer.C:
 		}
 	}
@@ -504,7 +504,8 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 	// still bring agentctl up so the host can connect, surface the failure, and
 	// the user can debug from the Executor Settings popover.
 	//
-	//nolint:dupword // two `fi` tokens close two distinct shell blocks.
+	prepareTimeout := constants.SetupScriptTimeout.String()
+	//nolint:dupword // shell branches contain repeated `fi` tokens.
 	bootstrap := []string{
 		"sh", "-c",
 		`if [ -n "${KANDEV_GITHUB_CREDENTIAL_BROKER_URL:-}" ] && [ -n "${KANDEV_GITHUB_CREDENTIAL_LEASE:-}" ]; then
@@ -515,7 +516,7 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
   fi
 fi
 if [ -n "$KANDEV_PREPARE_SCRIPT" ]; then
-  (eval "$KANDEV_PREPARE_SCRIPT")
+  timeout --signal=TERM --kill-after=1s ` + prepareTimeout + ` sh -c 'eval "$KANDEV_PREPARE_SCRIPT"'
   prep_rc=$?
   if [ "$prep_rc" -ne 0 ]; then
     echo "[kandev-bootstrap] prepare script failed (exit $prep_rc); starting agentctl anyway so the host can connect and the user can debug via Executor Settings" >&2

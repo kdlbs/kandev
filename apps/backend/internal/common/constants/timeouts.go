@@ -2,6 +2,7 @@
 package constants
 
 import (
+	"math"
 	"os"
 	"time"
 )
@@ -10,6 +11,7 @@ import (
 const (
 	defaultSetupScriptTimeout = 10 * time.Minute
 	setupLaunchAllowance      = 5 * time.Minute
+	maxSetupScriptTimeout     = time.Duration(math.MaxInt64) - setupLaunchAllowance
 
 	// CleanupScriptTimeout is the maximum time to wait for a cleanup script to complete.
 	CleanupScriptTimeout = 5 * time.Minute
@@ -49,7 +51,7 @@ func resolveSetupScriptTimeout(value string) time.Duration {
 	}
 
 	timeout, err := time.ParseDuration(value)
-	if err != nil || timeout <= 0 {
+	if err != nil || timeout <= 0 || timeout > maxSetupScriptTimeout {
 		return defaultSetupScriptTimeout
 	}
 	return timeout

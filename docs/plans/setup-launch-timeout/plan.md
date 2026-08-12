@@ -36,10 +36,10 @@ policy and documents the operator contract.
   `apps/backend/internal/backendapp/worktree.go` on the same value.
 - Replace `spritePrepareTimeout` and `sshPrepareTimeout` with the common setup
   value in `executor_sprites_operations.go` and `executor_ssh_scripts.go`.
-- Update `ContainerManager.waitForHealth` in `container.go` so the Docker
-  bootstrap, which runs the prepare script before `agentctl`, waits for the
-  common setup limit instead of the fixed two-minute retry count. Preserve
-  caller cancellation and the last health error.
+- Update the Docker bootstrap and `ContainerManager.waitForHealth` in
+  `container.go`: enforce the common setup limit around the prepare command so
+  a timeout remains non-fatal, then give `agentctl` readiness the derived
+  launch budget. Preserve caller cancellation and the last health error.
 
 ### Shared launch deadline
 
@@ -78,8 +78,8 @@ policy and documents the operator contract.
 
 ## Verification Results
 
-- Task 01: `cd apps/backend && go test ./internal/common/constants ./internal/agent/runtime/lifecycle ./internal/backendapp` passed with 1,840 tests across 3 packages.
-- Task 02: `cd apps/backend && go test ./internal/agent/runtime/lifecycle ./internal/orchestrator ./internal/task/handlers ./internal/mcp/handlers` passed with 4,267 tests across 4 packages.
+- Task 01: `cd apps/backend && go test ./internal/common/constants ./internal/agent/runtime/lifecycle ./internal/backendapp` passed with 1,844 tests across 3 packages.
+- Task 02: `cd apps/backend && go test ./internal/agent/runtime/lifecycle ./internal/orchestrator ./internal/task/handlers ./internal/mcp/handlers` passed with 4,268 tests across 4 packages.
 - Focused lifecycle regressions passed under `go test -race`, covering setup-script timeout, container health timeout, and shared launch deadline behavior.
 - `git diff --check` passed.
 

@@ -14,10 +14,16 @@ import (
 	"github.com/kandev/kandev/internal/common/constants"
 )
 
-func TestContainerManagerWaitForHealthUsesSetupTimeout(t *testing.T) {
-	previousTimeout := constants.SetupScriptTimeout
+func TestContainerManagerWaitForHealthUsesLaunchTimeout(t *testing.T) {
+	// Mutates package-level timeout values; do not call t.Parallel().
+	previousSetupTimeout := constants.SetupScriptTimeout
+	previousLaunchTimeout := constants.AgentLaunchTimeout
 	constants.SetupScriptTimeout = 20 * time.Millisecond
-	t.Cleanup(func() { constants.SetupScriptTimeout = previousTimeout })
+	constants.AgentLaunchTimeout = 40 * time.Millisecond
+	t.Cleanup(func() {
+		constants.SetupScriptTimeout = previousSetupTimeout
+		constants.AgentLaunchTimeout = previousLaunchTimeout
+	})
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -43,8 +49,8 @@ func TestContainerManagerWaitForHealthUsesSetupTimeout(t *testing.T) {
 	if err == nil {
 		t.Fatal("waitForHealth() error = nil, want timeout error")
 	}
-	if !strings.Contains(err.Error(), "20ms") {
-		t.Fatalf("waitForHealth() error = %v, want setup timeout", err)
+	if !strings.Contains(err.Error(), "40ms") {
+		t.Fatalf("waitForHealth() error = %v, want launch timeout", err)
 	}
 	if elapsed := time.Since(startedAt); elapsed >= 500*time.Millisecond {
 		t.Fatalf("waitForHealth() took %s, want it to use the configured timeout", elapsed)

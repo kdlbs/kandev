@@ -65,7 +65,7 @@ status.
 ## Results
 
 - Added the process-start setup timeout policy with a 10-minute default, positive-duration parsing, and fallback for unset, malformed, zero, or negative values.
-- Applied the policy to local/worktree setup scripts, container health checks, Sprites preparation, and SSH preparation while preserving each executor's existing failure semantics.
+- Applied the policy to local/worktree setup scripts, Docker bootstrap preparation, Sprites preparation, and SSH preparation while preserving each executor's existing failure semantics; Docker readiness uses the derived launch budget after the bounded prepare command.
 - RED verification first demonstrated that setup-script and container-health operations ignored the configured timeout; the focused regressions now pass.
-- Verification: `cd apps/backend && go test ./internal/common/constants ./internal/agent/runtime/lifecycle ./internal/backendapp` passed with 1,840 tests across 3 packages.
+- Verification: `cd apps/backend && go test ./internal/common/constants ./internal/agent/runtime/lifecycle ./internal/backendapp` passed with 1,844 tests across 3 packages.
 - The environment value is read when the backend process starts. Changing it requires a backend restart, as specified.

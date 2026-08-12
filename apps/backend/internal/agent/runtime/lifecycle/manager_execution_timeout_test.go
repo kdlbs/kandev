@@ -11,6 +11,10 @@ import (
 
 func TestCoalescedExecutionAllowsSetupPastOldDeadline(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
+		if constants.AgentLaunchTimeout <= 90*time.Second {
+			t.Fatalf("AgentLaunchTimeout = %s, want more than 90s", constants.AgentLaunchTimeout)
+		}
+
 		mgr := &Manager{stopCh: make(chan struct{})}
 		result := make(chan error, 1)
 		go func() {
@@ -27,9 +31,6 @@ func TestCoalescedExecutionAllowsSetupPastOldDeadline(t *testing.T) {
 
 		if err := <-result; err != nil {
 			t.Fatalf("setup crossing old deadline failed: %v", err)
-		}
-		if constants.AgentLaunchTimeout <= 90*time.Second {
-			t.Fatalf("AgentLaunchTimeout = %s, want more than 90s", constants.AgentLaunchTimeout)
 		}
 	})
 }

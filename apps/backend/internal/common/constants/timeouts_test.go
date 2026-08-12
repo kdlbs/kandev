@@ -1,6 +1,7 @@
 package constants
 
 import (
+	"math"
 	"testing"
 	"time"
 )
@@ -37,5 +38,25 @@ func TestAgentLaunchTimeoutIncludesSetupAllowance(t *testing.T) {
 	want := SetupScriptTimeout + 5*time.Minute
 	if AgentLaunchTimeout != want {
 		t.Fatalf("AgentLaunchTimeout = %s, want %s", AgentLaunchTimeout, want)
+	}
+}
+
+func TestResolveSetupScriptTimeoutRejectsLaunchBudgetOverflow(t *testing.T) {
+	maxSafe := time.Duration(math.MaxInt64) - 5*time.Minute
+	tests := []struct {
+		name  string
+		value string
+		want  time.Duration
+	}{
+		{name: "maximum safe value", value: maxSafe.String(), want: maxSafe},
+		{name: "launch budget overflow", value: (maxSafe + time.Nanosecond).String(), want: 10 * time.Minute},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveSetupScriptTimeout(tt.value); got != tt.want {
+				t.Fatalf("resolveSetupScriptTimeout(%q) = %s, want %s", tt.value, got, tt.want)
+			}
+		})
 	}
 }

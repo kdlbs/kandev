@@ -11,6 +11,7 @@ import (
 )
 
 func TestRunSetupScript_UsesConfiguredTimeout(t *testing.T) {
+	// Mutates the package-level SetupScriptTimeout; do not call t.Parallel().
 	previousTimeout := constants.SetupScriptTimeout
 	constants.SetupScriptTimeout = 10 * time.Millisecond
 	t.Cleanup(func() { constants.SetupScriptTimeout = previousTimeout })
