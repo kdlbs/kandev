@@ -181,6 +181,79 @@ describe("usePluginShortcuts", () => {
   });
 });
 
+describe("usePluginShortcuts editable-target opt-in", () => {
+  beforeEach(() => {
+    mockOverrides = {};
+    mockItems = [];
+  });
+
+  afterEach(() => {
+    cleanup();
+    pluginRegistry.unregisterPlugin(PLUGIN_ID);
+  });
+
+  it("dispatches inside an editable element when the binding declared allow_in_editor", () => {
+    mockItems = [
+      makePlugin({ ui: { keybindings: [{ ...TOGGLE_KEYBINDING, allow_in_editor: true }] } }),
+    ];
+    const handler = vi.fn();
+    pluginRegistry.forPlugin(PLUGIN_ID).registerKeybinding("toggle", handler);
+
+    renderHook(() => usePluginShortcuts());
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    pressKey("e", { ctrlKey: true, shiftKey: true }, input);
+    input.remove();
+
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("dispatches inside a contenteditable composer when the binding declared allow_in_editor", () => {
+    mockItems = [
+      makePlugin({ ui: { keybindings: [{ ...TOGGLE_KEYBINDING, allow_in_editor: true }] } }),
+    ];
+    const handler = vi.fn();
+    pluginRegistry.forPlugin(PLUGIN_ID).registerKeybinding("toggle", handler);
+
+    renderHook(() => usePluginShortcuts());
+    const editor = document.createElement("div");
+    editor.contentEditable = "true";
+    Object.defineProperty(editor, "isContentEditable", { value: true });
+    document.body.appendChild(editor);
+    pressKey("e", { ctrlKey: true, shiftKey: true }, editor);
+    editor.remove();
+
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps skipping editables for a sibling binding that did not opt in", () => {
+    mockItems = [
+      makePlugin({
+        ui: {
+          keybindings: [
+            { ...TOGGLE_KEYBINDING, allow_in_editor: true },
+            { id: "open", default: OPEN_COMBO, description: "Open" },
+          ],
+        },
+      }),
+    ];
+    const optedIn = vi.fn();
+    const optedOut = vi.fn();
+    pluginRegistry.forPlugin(PLUGIN_ID).registerKeybinding("toggle", optedIn);
+    pluginRegistry.forPlugin(PLUGIN_ID).registerKeybinding("open", optedOut);
+
+    renderHook(() => usePluginShortcuts());
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    pressKey("e", { ctrlKey: true, shiftKey: true }, input);
+    pressKey("o", { ctrlKey: true, shiftKey: true }, input);
+    input.remove();
+
+    expect(optedIn).toHaveBeenCalledTimes(1);
+    expect(optedOut).not.toHaveBeenCalled();
+  });
+});
+
 describe("usePluginShortcuts handler exceptions", () => {
   beforeEach(() => {
     mockOverrides = {};

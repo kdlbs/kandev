@@ -185,6 +185,8 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
         submitShortcut={submitShortcut}
         onVoiceTranscript={props.onVoiceTranscript}
         onVoiceAutoSend={props.onVoiceAutoSend}
+        composerCapability={props.composerCapability}
+        composerSurface={props.composerSurface}
       />
     );
   }

@@ -43,7 +43,10 @@ import { ApiError } from "@/lib/api/client";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 import { PluginSlot } from "@/components/plugins/plugin-slot";
-import { createPluginComposerCapability } from "@/lib/plugins/composer-capability";
+import {
+  composerInsertionText,
+  useStablePluginComposerCapability,
+} from "@/lib/plugins/composer-capability";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 const CURSOR_POINTER_CLASS = "cursor-pointer";
@@ -671,14 +674,11 @@ function useDescriptionInput(
 
   const insertAtCursor = useCallback(
     (text: string) => {
-      const trimmed = text.trim();
-      if (!trimmed) return;
       const textarea = textareaRef.current;
       const start = textarea?.selectionStart ?? description.length;
       const end = textarea?.selectionEnd ?? description.length;
-      const charBefore = start > 0 ? description.charAt(start - 1) : "";
-      const needsLeadingSpace = charBefore !== "" && !/\s/.test(charBefore);
-      const insert = needsLeadingSpace ? ` ${trimmed}` : trimmed;
+      const insert = composerInsertionText(text, start > 0 ? description.charAt(start - 1) : "");
+      if (!insert) return;
       const next = description.slice(0, start) + insert + description.slice(end);
       pendingCursorRef.current = start + insert.length;
       setDescriptionValue(next);
@@ -783,26 +783,21 @@ function useCreationComposerPluginActions(args: {
   submit?: () => boolean | Promise<boolean>;
 }) {
   const { isMobile } = useResponsiveBreakpoint();
-  const handle = useMemo(
-    () =>
-      createPluginComposerCapability({
-        insertText: (text) => {
-          args.insertAtCursor(text);
-          return true;
-        },
-        focus: () => {
-          if (!args.textareaRef.current) return false;
-          args.textareaRef.current.focus();
-          return true;
-        },
-        submit: async () => {
-          if (args.disabled || !args.description.trim() || !args.submit) return false;
-          return await args.submit();
-        },
-      }),
-    [args],
-  );
-  useEffect(() => () => handle.revoke(), [handle]);
+  const composer = useStablePluginComposerCapability({
+    insertText: (text) => {
+      args.insertAtCursor(text);
+      return true;
+    },
+    focus: () => {
+      if (!args.textareaRef.current) return false;
+      args.textareaRef.current.focus();
+      return true;
+    },
+    submit: async () => {
+      if (args.disabled || !args.description.trim() || !args.submit) return false;
+      return await args.submit();
+    },
+  });
   return (
     <PluginSlot
       name={args.isSessionMode ? "new-session-input-actions" : "task-create-input-actions"}
@@ -814,7 +809,7 @@ function useCreationComposerPluginActions(args: {
         sessionIds: [],
         disabled: args.disabled,
         submittable: !args.disabled && args.description.trim().length > 0,
-        composer: handle.api,
+        composer,
       }}
     />
   );

@@ -293,6 +293,8 @@ export function DesktopChatInputToolbar(props: DesktopToolbarProps) {
         submitShortcut={props.submitShortcut}
         onVoiceTranscript={props.onVoiceTranscript}
         onVoiceAutoSend={props.onVoiceAutoSend}
+        composerCapability={props.composerCapability}
+        composerSurface={props.composerSurface}
       />
     </div>
   );

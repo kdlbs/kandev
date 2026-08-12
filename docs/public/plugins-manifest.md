@@ -95,6 +95,7 @@ ui: # optional native frontend plugin
     - id: "open-panel" # plugin-local: ^[a-z0-9][a-z0-9-]*$
       default: "mod+shift+j" # combo grammar, see field reference
       description: "Open the Acme panel"
+      allow_in_editor: false # optional; true lets it fire while typing
 ```
 
 ## Field reference
@@ -144,6 +145,7 @@ ui: # optional native frontend plugin
 | `ui.keybindings[].id` | yes* | string | Stable, plugin-local slug (*required when a keybinding entry is present). Must match `^[a-z0-9][a-z0-9-]*$` and be unique within this plugin's own `ui.keybindings` list, not globally; the effective shortcut is namespaced `plugin:{pluginId}:{id}`. |
 | `ui.keybindings[].default` | yes* | string | Default combo string. `+`-separated tokens: zero or more modifiers from `mod`, `ctrl`, `cmd`, `meta`, `alt`, `option`, `shift` (`mod` = ⌘ on macOS, Ctrl elsewhere) plus exactly one non-modifier key. `shift` may not combine with a digit or symbol key; the browser reports the shifted glyph for those keys, so the combo could never match. |
 | `ui.keybindings[].description` | yes* | string | Non-empty, human-readable label shown in **Settings > Keyboard Shortcuts**. |
+| `ui.keybindings[].allow_in_editor` | no | boolean | Lets this binding fire while an `input`, `textarea` or contenteditable holds focus. Defaults to `false`, so a plugin cannot shadow ordinary typing. Only accepted on a combo carrying a `ctrl`/`cmd`/`mod`/`alt` modifier; `shift` alone does not count, since `shift+a` is just a capital A. Declare it only when the binding exists to act on the focused field (dictation into the composer is the canonical case). |
 
 `ui.pages` is declarative manifest metadata only and is not currently rendered
 by the frontend. A native bundle's runtime nav items, icons, routes, named

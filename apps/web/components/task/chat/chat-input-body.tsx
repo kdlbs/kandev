@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -13,7 +13,10 @@ import type { ContextItem } from "@/lib/types/context";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { ImagePasteIssue } from "./clipboard-attachments";
 import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
-import { createPluginComposerCapability } from "@/lib/plugins/composer-capability";
+import {
+  composerInsertionText,
+  useStablePluginComposerCapability,
+} from "@/lib/plugins/composer-capability";
 import type { PluginComposerCapability } from "@/lib/plugins/types";
 
 export type ChatInputEditorAreaProps = {
@@ -135,35 +138,33 @@ function useChatPluginComposer(p: {
   inputRef: ChatInputEditorAreaProps["inputRef"];
   submitDisabled: boolean;
   isEnhancingPrompt: boolean;
+  hasContent: boolean;
   onSubmit: () => void;
 }): PluginComposerCapability {
-  const handle = useMemo(
-    () =>
-      createPluginComposerCapability({
-        insertText: (text) => {
-          const editor = p.inputRef.current;
-          if (!editor) return false;
-          const from = editor.getSelectionStart();
-          const prefix = from > 0 && !/\s/.test(editor.getValue().charAt(from - 1)) ? " " : "";
-          editor.insertText(prefix + text.trim(), from, editor.getSelectionEnd());
-          editor.focus();
-          return true;
-        },
-        focus: () => {
-          if (!p.inputRef.current) return false;
-          p.inputRef.current.focus();
-          return true;
-        },
-        submit: async () => {
-          if (p.isEnhancingPrompt || p.submitDisabled) return false;
-          p.onSubmit();
-          return true;
-        },
-      }),
-    [p.inputRef, p.isEnhancingPrompt, p.onSubmit, p.submitDisabled],
-  );
-  useEffect(() => () => handle.revoke(), [handle]);
-  return handle.api;
+  return useStablePluginComposerCapability({
+    insertText: (text) => {
+      const editor = p.inputRef.current;
+      if (!editor) return false;
+      const insertion = composerInsertionText(text, editor.getCharBefore());
+      if (!insertion) return false;
+      editor.insertText(insertion, editor.getSelectionStart(), editor.getSelectionEnd());
+      editor.focus();
+      return true;
+    },
+    focus: () => {
+      if (!p.inputRef.current) return false;
+      p.inputRef.current.focus();
+      return true;
+    },
+    // Revalidated at call time, and against exactly the gate the slot
+    // advertises as `submittable` — a capability that submitted an empty
+    // draft while reporting submittable: false would be lying to the plugin.
+    submit: async () => {
+      if (p.isEnhancingPrompt || p.submitDisabled || !p.hasContent) return false;
+      p.onSubmit();
+      return true;
+    },
+  });
 }
 
 export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
@@ -190,6 +191,7 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
     inputRef,
     submitDisabled: p.submitDisabled,
     isEnhancingPrompt: Boolean(isEnhancingPrompt),
+    hasContent,
     onSubmit: handleSubmitWithReset,
   });
   const submitDisabledReason = p.hasPendingAttachmentUploads

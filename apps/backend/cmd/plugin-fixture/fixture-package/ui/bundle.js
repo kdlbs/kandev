@@ -22,7 +22,10 @@
  * (get on mount, debounced set, subscribe to pick up a write from another
  * tab/surface), a task-card-indicators slot component, a task-card-tags slot
  * component, and a registerTaskMenuAction under the kanban card's "edit"
- * group.
+ * group. It also registers one composer action on all three composer slots
+ * (chat-input-actions, task-create-input-actions, new-session-input-actions),
+ * which is how the e2e suite exercises PluginComposerCapability against real
+ * native composers rather than a mock.
  *
  * The task-created counter lives in module scope (not component state) with
  * a tiny listener set, so it survives across route navigations (the page
@@ -247,6 +250,122 @@
         );
       }
 
+
+      // ── Composer action ────────────────────────────────────────────────
+      //
+      // Drives the PluginComposerCapability the host passes to
+      // chat-input-actions, task-create-input-actions and
+      // new-session-input-actions. This is what proves the contract end to
+      // end in a browser: a mock that calls the host's submit callback
+      // directly would prove nothing about the native path.
+      //
+      // "Capture" then "insert captured" deliberately splits the flow across
+      // renders, because that is the shape a real voice plugin has — the
+      // capability is grabbed when recording starts and used seconds later,
+      // after the host has re-rendered the composer many times.
+      // Deliberately tiny: the fixture needs five affordances where a real
+      // plugin contributes one icon button, and five full-size buttons
+      // overflow a phone toolbar and land underneath the native controls.
+      var COMPOSER_BUTTON_STYLE = {
+        fontSize: "9px",
+        lineHeight: "1",
+        padding: "2px 3px",
+        minWidth: "16px",
+      };
+
+      function ComposerAction(props) {
+        var slotProps = props.slotProps || {};
+        var composer = slotProps.composer;
+        var statusState = React.useState("");
+        var status = statusState[0];
+        var setStatus = statusState[1];
+        var capturedRef = React.useRef(null);
+
+        function record(result) {
+          setStatus(result && result.status ? result.status : String(result));
+        }
+
+        return jsx(
+          "span",
+          {
+            "data-testid": "e2e-composer-action",
+            "data-surface": String(slotProps.surface),
+            "data-presentation": String(slotProps.presentation),
+            "data-task-id": String(slotProps.taskId || ""),
+            "data-session-id": String(slotProps.activeSessionId || ""),
+            "data-disabled": String(Boolean(slotProps.disabled)),
+            "data-submittable": String(Boolean(slotProps.submittable)),
+            "data-status": status,
+          },
+          jsx(
+            "button",
+            {
+              type: "button",
+              "data-testid": "e2e-composer-insert",
+              style: COMPOSER_BUTTON_STYLE,
+              onClick: function () {
+                record(composer.insertText("DICTATED"));
+              },
+            },
+            "insert",
+          ),
+          jsx(
+            "button",
+            {
+              type: "button",
+              "data-testid": "e2e-composer-capture",
+              style: COMPOSER_BUTTON_STYLE,
+              onClick: function () {
+                capturedRef.current = composer;
+                setStatus("captured");
+              },
+            },
+            "capture",
+          ),
+          jsx(
+            "button",
+            {
+              type: "button",
+              "data-testid": "e2e-composer-insert-captured",
+              style: COMPOSER_BUTTON_STYLE,
+              onClick: function () {
+                record(
+                  capturedRef.current
+                    ? capturedRef.current.insertText("DICTATED")
+                    : { status: "not-captured" },
+                );
+              },
+            },
+            "insert captured",
+          ),
+          jsx(
+            "button",
+            {
+              type: "button",
+              "data-testid": "e2e-composer-submit",
+              style: COMPOSER_BUTTON_STYLE,
+              onClick: function () {
+                var target = capturedRef.current || composer;
+                target.submit().then(record);
+              },
+            },
+            "submit",
+          ),
+          jsx(
+            "button",
+            {
+              type: "button",
+              "data-testid": "e2e-composer-focus",
+              style: COMPOSER_BUTTON_STYLE,
+              onClick: function () {
+                record(composer.focus());
+              },
+            },
+            "focus",
+          ),
+        );
+      }
+
       registry.registerNavItem({
         id: "e2e-hello",
         label: "Hello E2E",
@@ -269,6 +388,9 @@
         Component: NotesPanel,
         mobileEnabled: true,
       });
+      registry.registerComponent("chat-input-actions", ComposerAction);
+      registry.registerComponent("task-create-input-actions", ComposerAction);
+      registry.registerComponent("new-session-input-actions", ComposerAction);
       registry.registerComponent("task-card-indicators", CardIndicator);
       registry.registerComponent("task-card-tags", CardTags);
       registry.registerTaskMenuAction({

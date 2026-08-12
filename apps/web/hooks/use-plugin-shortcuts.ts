@@ -96,11 +96,10 @@ export function usePluginShortcuts(): void {
       // preventDefault) — core wins, so bail out without invoking any
       // plugin handler for the same keypress.
       if (event.defaultPrevented) return;
-      if (isEditableKeydownTarget(event)) return;
 
       const overrides = appStore.getState().userSettings
         .keyboardShortcuts as StoredShortcutOverrides;
-      dispatchMatchingPluginShortcuts(event, items, overrides);
+      dispatchMatchingPluginShortcuts(event, items, overrides, isEditableKeydownTarget(event));
     };
 
     // Capture phase so plugin shortcuts win before focus-trapped surfaces
@@ -136,6 +135,23 @@ function buildCoreComboKeySet(
 }
 
 /**
+ * Collects the namespaced ids of every declared keybinding that set
+ * `allow_in_editor`, so the dispatcher can let just those through while an
+ * input, textarea or contenteditable holds focus.
+ */
+function buildAllowInEditorSet(
+  plugins: Parameters<typeof buildConfigurableShortcutEntries>[0],
+): Set<string> {
+  const ids = new Set<string>();
+  for (const plugin of plugins) {
+    for (const keybinding of plugin.ui?.keybindings ?? []) {
+      if (keybinding.allow_in_editor) ids.add(`plugin:${plugin.id}:${keybinding.id}`);
+    }
+  }
+  return ids;
+}
+
+/**
  * Dispatches `event` to every registered plugin keybinding handler whose
  * effective combo matches. Iterates in `pluginRegistry.getKeybindingHandlers()`
  * order — registration order — so when two plugins bind the same combo, the
@@ -157,12 +173,14 @@ function dispatchMatchingPluginShortcuts(
   event: KeyboardEvent,
   plugins: Parameters<typeof buildConfigurableShortcutEntries>[0],
   overrides: StoredShortcutOverrides,
+  targetIsEditable: boolean,
 ): void {
   const entryById = new Map(
     buildConfigurableShortcutEntries(plugins)
       .filter((entry) => entry.source === "plugin")
       .map((entry) => [entry.id, entry] as const),
   );
+  const allowedInEditor = buildAllowInEditorSet(plugins);
 
   const isMacPlatform = isMac();
   const coreComboKeys = buildCoreComboKeySet(overrides, isMacPlatform);
@@ -170,6 +188,10 @@ function dispatchMatchingPluginShortcuts(
   for (const { pluginId, id, handler } of pluginRegistry.getKeybindingHandlers()) {
     const entry = entryById.get(`plugin:${pluginId}:${id}`);
     if (!entry) continue;
+    // Skipping while the user is typing is the default so a plugin can never
+    // shadow an ordinary keystroke. A binding that exists to act on the
+    // focused composer opts in through the manifest.
+    if (targetIsEditable && !allowedInEditor.has(`plugin:${pluginId}:${id}`)) continue;
 
     const shortcut = resolveShortcutEntry(entry, overrides);
     if (!matchesShortcut(event, shortcut)) continue;
