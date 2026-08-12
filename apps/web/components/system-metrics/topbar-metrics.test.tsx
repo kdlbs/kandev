@@ -7,21 +7,17 @@ import { defaultSystemState } from "@/lib/state/slices/system/system-slice";
 import type { AppState } from "@/lib/state/store";
 import { TopbarMetrics } from "./topbar-metrics";
 
-const featureState = vi.hoisted(() => ({ appStatusBar: false }));
 const subscribeMock = vi.hoisted(() => vi.fn());
-
-vi.mock("@/hooks/domains/features/use-feature", () => ({
-  useFeature: () => featureState.appStatusBar,
-}));
 
 vi.mock("@/hooks/use-system-metrics-subscription", () => ({
   useSystemMetricsSubscription: subscribeMock,
 }));
 
-function renderMetrics() {
+function renderMetrics(appStatusBarEnabled: boolean) {
   const initialState = {
     userSettings: {
       ...defaultSettingsState.userSettings,
+      appStatusBarEnabled,
       systemMetricsDisplay: { showInTopbar: true, simplified: false },
     },
     system: {
@@ -50,16 +46,15 @@ function renderMetrics() {
   );
 }
 
-describe("TopbarMetrics feature fallback", () => {
+describe("TopbarMetrics preference fallback", () => {
   beforeEach(() => {
-    featureState.appStatusBar = false;
     subscribeMock.mockClear();
   });
 
   afterEach(cleanup);
 
   it("keeps existing metrics visible while the app status bar is disabled", () => {
-    renderMetrics();
+    renderMetrics(false);
 
     expect(screen.getByTestId("topbar-metrics")).toBeTruthy();
     expect(screen.getByLabelText("CPU 42%")).toBeTruthy();
@@ -67,8 +62,7 @@ describe("TopbarMetrics feature fallback", () => {
   });
 
   it("yields metrics ownership to the app status bar when enabled", () => {
-    featureState.appStatusBar = true;
-    renderMetrics();
+    renderMetrics(true);
 
     expect(screen.queryByTestId("topbar-metrics")).toBeNull();
     expect(subscribeMock).not.toHaveBeenCalled();

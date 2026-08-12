@@ -277,7 +277,7 @@ describe("CommandPanelView search-only commands", () => {
     id: "setting:terminal-font-size",
     label: FONT_SIZE_LABEL,
     group: "Settings",
-    context: "Settings › General › Terminal",
+    context: "Settings › Terminal & Editors",
     searchOnly: true,
     action: vi.fn(),
   };
@@ -314,7 +314,7 @@ describe("CommandPanelView search-only commands", () => {
     );
 
     expect(screen.getByText(FONT_SIZE_LABEL)).toBeTruthy();
-    expect(screen.getByText("Settings › General › Terminal")).toBeTruthy();
+    expect(screen.getByText("Settings › Terminal & Editors")).toBeTruthy();
     expect(screen.getByText("Settings", { selector: CMDK_GROUP_HEADING_SELECTOR })).toBeTruthy();
     expect(screen.queryByText("Commands", { selector: CMDK_GROUP_HEADING_SELECTOR })).toBeNull();
   });

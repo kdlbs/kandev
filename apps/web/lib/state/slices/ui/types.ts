@@ -1,5 +1,6 @@
 import type { ConnectionIssueSeverity, ConnectionStatus } from "@/lib/types/connection";
 import type { HealthCheckSummary, HealthIssue, SystemHealthResponse } from "@/lib/types/health";
+import type { SettingsMenuMode } from "@/lib/settings/settings-menu-mode";
 import type {
   FilterClause,
   GroupKey,
@@ -188,6 +189,22 @@ export type SidebarTaskPrefsState = {
   syncPending?: boolean;
 };
 
+/** Settings menu shape + open branches, per device (localStorage). */
+export type SettingsMenuState = {
+  /**
+   * What the menu renders right now: the saved mode, or the unsaved one the
+   * Appearance page is previewing. Read this everywhere the menu is drawn.
+   */
+  mode: SettingsMenuMode;
+  /** The persisted value. `restoreSettingsMenuMode` reverts `mode` to this. */
+  savedMode: SettingsMenuMode;
+  /**
+   * Branch keys open in `persistent` mode. Accordion mode derives its single
+   * open path from the route instead, so it never reads or writes this.
+   */
+  expandedKeys: string[];
+};
+
 /** Unified AppSidebar collapse + per-section expand state (localStorage). */
 export type AppSidebarState = {
   collapsed: boolean;
@@ -244,6 +261,8 @@ export type UISliceState = {
   sidebarTaskPrefs: SidebarTaskPrefsState;
   /** Unified AppSidebar collapse + section expand state (localStorage). */
   appSidebar: AppSidebarState;
+  /** Settings menu shape + open branches (localStorage). */
+  settingsMenu: SettingsMenuState;
   /**
    * Most recently dismissed `last_agent_error` stamp per sessionId. Shared by
    * the chat banner and the sidebar error icon so dismissing the banner also
@@ -368,6 +387,13 @@ export type UISliceActions = {
    * sidebar, since the trigger renders only in the expanded header.
    */
   setWorkspacePickerOpen: (open: boolean) => void;
+  /** Render `mode` without persisting it — the Appearance page's live preview. */
+  previewSettingsMenuMode: (mode: SettingsMenuMode) => void;
+  /** Persist `mode` for this device. Called by the settings save coordinator. */
+  commitSettingsMenuMode: (mode: SettingsMenuMode) => void;
+  /** Drop an unsaved preview and render the persisted mode again. */
+  restoreSettingsMenuMode: () => void;
+  setSettingsMenuExpandedKeys: (keys: string[]) => void;
   /** Record multiple sidebar badge acknowledgements with one localStorage merge. */
   acknowledgeAgentErrors: (stamps: Record<string, string>) => void;
   /** Record that `stamp` has been dismissed for `sessionId`. */

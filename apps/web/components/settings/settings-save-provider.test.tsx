@@ -138,6 +138,18 @@ describe("SettingsSaveProvider", () => {
       "var(--app-status-bar-height)",
     );
   });
+
+  it("does not double-reserve status-bar space for the content-hosted save action", async () => {
+    render(
+      <SettingsSaveProvider placement="content">
+        <DraftContributor id={APPEARANCE_ID} onSave={vi.fn()} />
+      </SettingsSaveProvider>,
+    );
+
+    expect((await screen.findByTestId(FLOATING_SAVE_TEST_ID)).className).not.toContain(
+      "var(--app-status-bar-height)",
+    );
+  });
 });
 
 describe("SettingsFloatingSave", () => {

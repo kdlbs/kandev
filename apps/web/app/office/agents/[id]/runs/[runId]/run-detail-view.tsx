@@ -42,7 +42,8 @@ export function RunDetailView({ agentId, initial, recent }: Props) {
       <aside className="lg:sticky lg:top-4 lg:self-start">
         <RecentRunsSidebar runs={recent.runs} agentId={agentId} activeRunId={initial.id} />
       </aside>
-      <main className="space-y-4 min-w-0">
+      {/* Not a <main>: AppShell owns that landmark, one per page. */}
+      <div className="space-y-4 min-w-0">
         <RunHeader run={liveRun} />
         <RoutePanel runId={initial.id} />
         <SessionCollapsible session={initial.session} />
@@ -52,7 +53,7 @@ export function RunDetailView({ agentId, initial, recent }: Props) {
         <TasksTouched runId={initial.id} taskIds={initial.tasks_touched} />
         <RunConversation taskId={taskId} sessionId={sessionId} />
         <EventsLog events={events} />
-      </main>
+      </div>
     </div>
   );
 }

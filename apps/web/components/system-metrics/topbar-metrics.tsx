@@ -1,7 +1,6 @@
 "use client";
 
 import { useAppStore } from "@/components/state-provider";
-import { useFeature } from "@/hooks/domains/features/use-feature";
 import { StatusSurfaceMetrics } from "./status-surface-metrics";
 
 type TopbarMetricsProps = {
@@ -9,9 +8,9 @@ type TopbarMetricsProps = {
   size?: "sm" | "lg";
 };
 
-/** Preserves pre-status-bar metrics until the new surface is enabled. */
+/** Preserves topbar metrics while the user-owned status surface is hidden. */
 export function TopbarMetrics({ size = "lg" }: TopbarMetricsProps) {
-  const statusBarEnabled = useFeature("appStatusBar");
+  const statusBarEnabled = useAppStore((state) => state.userSettings.appStatusBarEnabled);
   const metricsEnabled = useAppStore(
     (state) => state.userSettings.systemMetricsDisplay.showInTopbar,
   );

@@ -25,6 +25,7 @@ export type UserSettingsData = Omit<Partial<UserSettings>, "workspace_id"> & {
 
 export function createDefaultUserSettings(): UserSettingsState {
   return {
+    revision: null,
     workspaceId: null,
     workflowId: null,
     kanbanViewMode: null,
@@ -80,6 +81,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     terminalFontSize: null,
     changesPanelLayout: "tree",
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
+    appStatusBarEnabled: false,
     appStatusBarOrder: { leftItemIds: [], rightItemIds: [] },
     voiceMode: { ...DEFAULT_VOICE_MODE_STATE },
     hiddenWorkflowStepIds: {},
@@ -274,6 +276,7 @@ export function buildCoreFields(
   current: UserSettingsState = createDefaultUserSettings(),
 ) {
   return {
+    revision: s.revision ?? current.revision,
     ...buildIdentityFields(s, current),
     ...buildBehaviorFields(s, current),
     savedLayouts: s.saved_layouts ?? current.savedLayouts,
@@ -321,6 +324,7 @@ export function buildCoreFields(
       current.appStatusBarOrder,
       parseAppStatusBarOrder,
     ),
+    appStatusBarEnabled: s.app_status_bar_enabled ?? current.appStatusBarEnabled,
     hiddenWorkflowStepIds: s.kanban_hidden_step_ids ?? current.hiddenWorkflowStepIds,
     ...buildTerminalFields(s, current),
     ...buildSystemMetricsDisplayFields(s, current),
@@ -370,6 +374,7 @@ export function mapUserSettingsResponse(
   }
   return {
     ...mapUserSettingsData(s, current),
+    revision: s.revision ?? null,
     shellOptions,
   };
 }

@@ -120,15 +120,25 @@ environment across tasks. Such a borrowing task gains no environment of its
 own, and the shared physical worktree keeps exactly one owner.
 Legacy session rows marked `deleted` (or carrying `deleted_at`) and stale
 references from terminal sessions are historical evidence, not additional
-owners. A terminal reference bypasses validation when a higher-precedence
-task-owned source exists for the same repository and branch slot. This source
-can be a canonical repository row or the surviving flat environment row. The
-higher-precedence source remains the owner when the terminal reference carries
-a different physical `worktree_id`. A terminal-only reference without a
-higher-precedence owner still requires compatible identity, path, branch, and
-repository data. A non-terminal session with a different physical identity
-also requires compatible data. Unresolved ownership fails closed with a
-diagnostic.
+owners. A higher-precedence task-owned source for the same repository and
+branch slot, either a canonical repository row or the surviving flat
+environment row, remains the owner even when a terminal reference carries a
+different physical `worktree_id`.
+
+The task-owned model holds exactly one physical worktree per (repository,
+branch slug) slot, while the legacy per-session model let one task accumulate
+several for the same slot through handoffs, re-materialized workspaces, and
+additional sessions. When no higher-precedence task-owned source exists, the
+upgrade elects one owner per contested slot instead of failing: a live
+session's worktree wins over a terminal session's, then the most recently
+updated row wins. Every other worktree for that slot becomes historical
+evidence and is logged with its identity, repository, path, and branch. No
+directory, registration, or branch is removed, so a demoted workspace remains
+on disk.
+
+Irreconcilable data, including incompatible path or branch metadata for the
+same physical worktree identity with no higher-precedence owner or a worktree
+whose task has no resolvable environment, still fails closed with a diagnostic.
 
 After backfill validation, the same upgrade drops `task_session_worktrees` and
 the deprecated flat worktree columns from `task_environments`. It also removes
@@ -306,15 +316,27 @@ remain the authorization boundary for physical cleanup.
   the surviving flat environment's repository slot, **WHEN** the new binary
   starts, **THEN** the flat environment remains the owner and the cutover
   completes.
+- **GIVEN** `task_environments` already has the normalized schema but a stale
+  `task_session_worktrees` table remains from an intermediate build, **WHEN**
+  the new binary starts, **THEN** the cutover preserves normalized environment
+  and repository data, imports any remaining session-worktree inventory, and
+  removes the stale legacy table without requiring manual database edits.
 - **GIVEN** a legacy session of one task is bound to another task's environment
   and carries a session-worktree row for that shared workspace, **WHEN** the new
   binary starts, **THEN** the worktree is normalized onto the owning task's
   environment, both sessions keep that environment, the borrowing task gains no
   environment of its own, and the cutover completes.
-- **GIVEN** a non-terminal session references a worktree that conflicts with
-  the canonical owner and cannot be reconciled, **WHEN** the new binary starts,
-  **THEN** startup fails closed, the transaction rolls back, and the verified
-  pre-upgrade backup remains the recovery source.
+- **GIVEN** several legacy sessions of one task registered different physical
+  worktrees for the same repository and branch slot, **WHEN** the new binary
+  starts, **THEN** the canonical owner — or the newest live session worktree
+  when there is none — keeps the slot, the other worktrees are recorded as
+  history and logged with their paths, no directory or branch is removed, and
+  the cutover completes.
+- **GIVEN** a non-terminal session references a worktree whose path or branch
+  metadata contradicts the same physical worktree's owner and cannot be
+  reconciled, **WHEN** the new binary starts, **THEN** startup fails closed, the
+  transaction rolls back, and the verified pre-upgrade backup remains the
+  recovery source.
 
 ## Out of Scope
 
