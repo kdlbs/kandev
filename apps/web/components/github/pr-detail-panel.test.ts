@@ -14,6 +14,7 @@ import {
   usePRScopedReviewRequest,
 } from "./use-pr-scoped-review-request";
 import type { TaskPR, PRFeedback, GitHubPR, PRReview } from "@/lib/types/github";
+import { activateLocale, i18n } from "@/lib/i18n";
 
 const feedbackMocks = vi.hoisted(() => ({
   refresh: vi.fn(),
@@ -57,7 +58,7 @@ vi.mock("./pr-mergeability-notice", () => ({
 vi.mock("./pr-checks-section", () => ({ ChecksSection: () => null }));
 vi.mock("./pr-comments-section", () => ({ CommentsSection: () => null }));
 
-afterEach(() => {
+afterEach(async () => {
   vi.useRealTimers();
   cleanup();
   feedbackMocks.refresh.mockReset();
@@ -65,6 +66,7 @@ afterEach(() => {
   reviewMocks.requestReviewers.mockReset();
   reviewMocks.submitReview.mockReset();
   clearPRReviewRequestRegistryForTests();
+  await activateLocale("en");
 });
 
 function makeTaskPR(overrides: Partial<TaskPR> = {}): TaskPR {
@@ -195,6 +197,18 @@ describe("PRDetailContent shared presentation", () => {
 
     expect(screen.getByTestId("change-request-detail")).not.toBeNull();
     expect(screen.getByText("Test PR")).not.toBeNull();
+  });
+
+  it("localizes review actions instead of embedding English in the detail model", async () => {
+    await activateLocale("pseudo");
+    feedbackMocks.value = makeFeedback({ reviews: [dismissedReview()] });
+
+    renderPRDetail();
+
+    expect(screen.getByTestId(RE_REQUEST_BUTTON).textContent).toBe(
+      i18n.t("github:reRequestReview"),
+    );
+    expect(screen.getByTestId(RE_REQUEST_BUTTON).textContent).not.toBe("Re-request review");
   });
 });
 

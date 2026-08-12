@@ -45,9 +45,9 @@ export function PRDetailPanelComponent({ panelId, params }: PRDetailPanelProps) 
   const pr = (params?.prKey ? prs.find((p) => prTaskKey(p) === params.prKey) : null) ?? activePR;
 
   useEffect(() => {
-    const title = pr ? prPanelLabel(pr.pr_number) : "Pull Request";
+    const title = pr ? prPanelLabel(pr.pr_number) : t("task:pullRequest2");
     setPanelTitle(panelId, title);
-  }, [pr, panelId]);
+  }, [pr, panelId, t]);
 
   if (!pr || !sessionId) {
     return (
@@ -284,6 +284,7 @@ function mapGitHubReviews(
   taskPR: TaskPR,
   feedback: PRFeedback | null,
   requestingReviewers: string[],
+  labels: { reRequestReview: string; requesting: string },
 ) {
   const requesting = new Set(requestingReviewers.map((reviewer) => reviewer.toLowerCase()));
   const state = feedback?.pr.state ?? taskPR.state;
@@ -297,8 +298,8 @@ function mapGitHubReviews(
       ? [
           {
             id: "rerequest-review",
-            label: "Re-request review",
-            pendingLabel: "Requesting...",
+            label: labels.reRequestReview,
+            pendingLabel: labels.requesting,
             tone: "secondary" as const,
             disabled: requesting.has(review.author.toLowerCase()),
             busy: requesting.has(review.author.toLowerCase()),
@@ -337,8 +338,11 @@ function mapGitHubDetail(
   taskPR: TaskPR,
   feedback: PRFeedback | null,
   metrics: PRPanelMetrics,
-  requestedReviewers: { login: string; type: "user" | "team" }[],
-  requestingReviewers: string[],
+  review: {
+    requestedReviewers: { login: string; type: "user" | "team" }[];
+    requestingReviewers: string[];
+    labels: { reRequestReview: string; requesting: string };
+  },
 ): ChangeRequestDetailModel {
   return {
     providerId: "github",
@@ -349,8 +353,8 @@ function mapGitHubDetail(
     ...mapGitHubBranches(taskPR, feedback),
     reviewState: metrics.reviewState,
     pendingReviewCount: metrics.pendingReviewCount,
-    reviews: mapGitHubReviews(taskPR, feedback, requestingReviewers),
-    requestedReviewers: requestedReviewers.map((reviewer) => ({
+    reviews: mapGitHubReviews(taskPR, feedback, review.requestingReviewers, review.labels),
+    requestedReviewers: review.requestedReviewers.map((reviewer) => ({
       ...githubPerson(reviewer.login),
       kind: reviewer.type,
     })),
@@ -376,6 +380,7 @@ function useConflictQueued(sessionId: string, prNumber: number): boolean {
 }
 
 export function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; sessionId: string }) {
+  const { t } = useTranslation();
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const { feedback, loading, refresh } = usePRFeedback(
     workspaceId,
@@ -409,13 +414,14 @@ export function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; session
     );
   }, [addAsContext, conflictQueued, taskPR.pr_number, taskPR.head_branch, taskPR.base_branch]);
 
-  const detail = mapGitHubDetail(
-    taskPR,
-    feedback,
-    metrics,
-    reviewRequest.requestedReviewers,
-    reviewRequest.requestingReviewers,
-  );
+  const detail = mapGitHubDetail(taskPR, feedback, metrics, {
+    requestedReviewers: reviewRequest.requestedReviewers,
+    requestingReviewers: reviewRequest.requestingReviewers,
+    labels: {
+      reRequestReview: t("github:reRequestReview"),
+      requesting: t("github:requesting"),
+    },
+  });
   const liveState = feedback?.pr.state ?? taskPR.state;
   const isDraft = feedback?.pr.draft ?? false;
   const isMergeable = feedback?.pr.mergeable ?? true;
