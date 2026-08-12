@@ -78,7 +78,7 @@ const TaskTopBar = memo(function TaskTopBar({
   return (
     <header
       data-testid="task-topbar"
-      className="@container/topbar grid h-10 shrink-0 grid-cols-[minmax(0,auto)_minmax(0,1fr)_auto] items-center gap-2 overflow-hidden px-3 py-1 border-b border-border"
+      className="@container/topbar grid h-10 shrink-0 grid-cols-[minmax(0,auto)_minmax(0,1fr)_auto] items-center gap-2 overflow-hidden border-b border-border px-3 py-1 [@media(pointer:coarse)]:h-12"
     >
       <TopBarLeft
         taskId={taskId}

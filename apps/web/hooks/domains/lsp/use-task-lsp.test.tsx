@@ -114,6 +114,21 @@ describe("useTaskLsp", () => {
     expect(view.result.current.lsp.pending.kotlin).toBeUndefined();
   });
 
+  it("clears a failed control error after a successful retry", async () => {
+    api.start.mockRejectedValueOnce(new Error("start failed"));
+    const view = renderHook(() => subject("task-1"), { wrapper });
+    await waitFor(() => expect(view.result.current.lsp.loaded).toBe(true));
+
+    await act(async () => {
+      await expect(view.result.current.lsp.start("kotlin")).rejects.toThrow("start failed");
+    });
+    expect(view.result.current.lsp.error).toBe("start failed");
+
+    api.start.mockResolvedValueOnce(language(2, "starting"));
+    await act(async () => view.result.current.lsp.start("kotlin"));
+    expect(view.result.current.lsp.error).toBeNull();
+  });
+
   it("refetches transient state so a dropped ready event cannot leave stale progress", async () => {
     const view = renderHook(() => subject("task-1"), { wrapper });
     await waitFor(() => expect(view.result.current.lsp.loaded).toBe(true));

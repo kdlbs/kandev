@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/url"
 	"strconv"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -44,6 +45,21 @@ type ExecutorRunningWriter interface {
 	RepairExecutorRunningDead(ctx context.Context, sessionID string) error
 }
 
+// TaskEnvironmentRuntimeSecretWriter stores references to encrypted runtime
+// credentials on their task-owned environment. Raw credentials remain solely
+// in SecretStore.
+type TaskEnvironmentRuntimeSecretWriter interface {
+	UpdateTaskEnvironmentRuntimeSecretRefs(
+		ctx context.Context,
+		taskEnvironmentID, authSecretID, bootstrapSecretID string,
+	) error
+}
+
+type taskEnvironmentCredentialLock struct {
+	mu   sync.Mutex
+	refs int
+}
+
 // SetExecutorRunningWriter wires the writer used to persist row state in
 // lockstep with executionStore.Add / Remove. Must be called during DI before
 // any Launch / createExecution can run, otherwise the in-memory store will
@@ -52,6 +68,41 @@ type ExecutorRunningWriter interface {
 // Optional only for tests that don't exercise the persistence path.
 func (m *Manager) SetExecutorRunningWriter(w ExecutorRunningWriter) {
 	m.runningWriter = w
+}
+
+func (m *Manager) SetTaskEnvironmentRuntimeSecretWriter(w TaskEnvironmentRuntimeSecretWriter) {
+	m.taskEnvironmentRuntimeSecretWriter = w
+}
+
+// lockTaskEnvironmentCredentials serializes Docker credential recovery from
+// runtime authentication through durable task-environment commit. Session and
+// task-host singleflight keys differ, so neither one alone can protect the
+// container's shared one-shot bootstrap nonce.
+func (m *Manager) lockTaskEnvironmentCredentials(executorType, taskEnvironmentID string) func() {
+	if executorType != string(models.ExecutorTypeLocalDocker) || taskEnvironmentID == "" {
+		return func() {}
+	}
+	m.taskEnvironmentCredentialMu.Lock()
+	if m.taskEnvironmentCredentialLocks == nil {
+		m.taskEnvironmentCredentialLocks = make(map[string]*taskEnvironmentCredentialLock)
+	}
+	lock := m.taskEnvironmentCredentialLocks[taskEnvironmentID]
+	if lock == nil {
+		lock = &taskEnvironmentCredentialLock{}
+		m.taskEnvironmentCredentialLocks[taskEnvironmentID] = lock
+	}
+	lock.refs++
+	m.taskEnvironmentCredentialMu.Unlock()
+	lock.mu.Lock()
+	return func() {
+		lock.mu.Unlock()
+		m.taskEnvironmentCredentialMu.Lock()
+		lock.refs--
+		if lock.refs == 0 && m.taskEnvironmentCredentialLocks[taskEnvironmentID] == lock {
+			delete(m.taskEnvironmentCredentialLocks, taskEnvironmentID)
+		}
+		m.taskEnvironmentCredentialMu.Unlock()
+	}
 }
 
 // buildRunningFromExecution maps an in-memory execution into the persistence

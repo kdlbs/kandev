@@ -416,9 +416,9 @@ type ExecutorInstance struct {
 
 // ToAgentExecution converts a ExecutorInstance to an AgentExecution.
 func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentExecution {
-	metadata := req.Metadata
-	if metadata == nil {
-		metadata = make(map[string]interface{})
+	metadata := make(map[string]interface{}, len(req.Metadata)+len(ri.Metadata))
+	for key, value := range req.Metadata {
+		metadata[key] = value
 	}
 	// Merge runtime metadata
 	for k, v := range ri.Metadata {

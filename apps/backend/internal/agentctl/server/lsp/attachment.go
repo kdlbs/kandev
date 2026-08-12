@@ -143,6 +143,12 @@ func (a *Attachment) startRequest(message rpcMessage) error {
 		a.enqueueRPCError(message.ID, -32600, "duplicate pending request id")
 		return nil
 	}
+	if len(a.pending) >= attachmentQueueSize {
+		a.pendingMu.Unlock()
+		cancel()
+		a.enqueueRPCError(message.ID, -32000, "too many pending attachment requests")
+		return nil
+	}
 	a.pending[key] = request
 	a.pendingMu.Unlock()
 	a.requests.Add(1)

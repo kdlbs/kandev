@@ -2567,14 +2567,18 @@ func (s *Service) StopTask(ctx context.Context, taskID string, reason string, fo
 		zap.String("reason", reason),
 		zap.Bool("force", force))
 
-	// Stop all agents for this task
-	if err := s.executor.StopByTaskID(ctx, taskID, reason, force); err != nil {
-		return err
-	}
+	// Stop all agents for this task. Task-owned cleanup still runs when no
+	// session execution exists (or session teardown fails), because the LSP
+	// host is intentionally independent from session runtime ownership.
+	stopErr := s.executor.StopByTaskID(ctx, taskID, reason, force)
+	var cleanupErr error
 	if s.taskStopCleanup != nil {
 		if err := s.taskStopCleanup(ctx, taskID, reason); err != nil {
-			return fmt.Errorf("clean up task-owned runtimes: %w", err)
+			cleanupErr = fmt.Errorf("clean up task-owned runtimes: %w", err)
 		}
+	}
+	if err := errors.Join(stopErr, cleanupErr); err != nil {
+		return err
 	}
 
 	// Move task to REVIEW state for user review
@@ -2626,7 +2630,7 @@ func (s *Service) StopTaskForCoordinator(ctx context.Context, taskID string) (Co
 		}
 	}
 	cleanupSucceeded := true
-	if accepted > 0 && s.taskStopCleanup != nil {
+	if s.taskStopCleanup != nil {
 		blockingSessionID, sessionsKnown := s.otherWorkingSessionID(ctx, taskID, "")
 		if !sessionsKnown || blockingSessionID != "" {
 			cleanupSucceeded = false

@@ -19,6 +19,7 @@ const (
 	fieldVersion          = "version"
 	fieldText             = "text"
 	fieldContentChanges   = "contentChanges"
+	fieldWorkspace        = "workspace"
 	fieldWorkspaceFolders = "workspaceFolders"
 	fieldDynamicRegister  = "dynamicRegistration"
 

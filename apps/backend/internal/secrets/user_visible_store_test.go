@@ -54,6 +54,25 @@ func TestUserVisibleStoreRejectsInternalCreate(t *testing.T) {
 	}
 }
 
+func TestUserVisibleStoreHidesInternalRuntimeSecrets(t *testing.T) {
+	store := newTestSQLiteStore(t)
+	ctx := context.Background()
+	internal := &SecretWithValue{
+		Secret: Secret{ID: "runtime:task-environment:env-1:agentctl-auth", Name: "runtime auth"},
+		Value:  "transport-secret",
+	}
+	if err := store.Create(ctx, internal); err != nil {
+		t.Fatal(err)
+	}
+	items, err := NewUserVisibleStore(store).List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("user-visible runtime secrets = %#v", items)
+	}
+}
+
 func TestUserVisibleStoreWorkspaceOperationsFilterInternalSecrets(t *testing.T) {
 	store := newTestSQLiteStore(t)
 	ctx := context.Background()

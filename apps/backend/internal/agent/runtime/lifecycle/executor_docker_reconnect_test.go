@@ -3,10 +3,64 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestDockerContainerAuthRecoverySerializesOneShotHandshake(t *testing.T) {
+	executor := &DockerExecutor{}
+	var handshakes atomic.Int32
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	connect := func(authToken string) (reconnectAgentctlConn, error) {
+		if authToken == "stale-token" {
+			if handshakes.Add(1) != 1 {
+				return reconnectAgentctlConn{}, errors.New("one-shot handshake was attempted more than once")
+			}
+			close(entered)
+			<-release
+			authToken = "rotated-token"
+		}
+		return reconnectAgentctlConn{authToken: authToken}, nil
+	}
+
+	results := make(chan string, 2)
+	errorsCh := make(chan error, 2)
+	var callers sync.WaitGroup
+	for range 2 {
+		callers.Add(1)
+		go func() {
+			defer callers.Done()
+			result, err := executor.withContainerAuth("container-1", "stale-token", connect)
+			errorsCh <- err
+			results <- result.authToken
+		}()
+	}
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("first auth recovery did not enter handshake")
+	}
+	close(release)
+	callers.Wait()
+	close(errorsCh)
+	close(results)
+	for err := range errorsCh {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for token := range results {
+		if token != "rotated-token" {
+			t.Fatalf("serialized reconnect token = %q", token)
+		}
+	}
+	if handshakes.Load() != 1 {
+		t.Fatalf("handshake count = %d, want 1", handshakes.Load())
+	}
+}
 
 // stubHostPortLookup satisfies hostPortLookup for resolveDockerEndpoint
 // tests without needing a real docker daemon.

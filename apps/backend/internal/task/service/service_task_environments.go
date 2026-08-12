@@ -278,7 +278,7 @@ func (s *Service) ResetTaskEnvironment(ctx context.Context, taskID string, opts 
 	if err := s.authorizeTaskID(ctx, taskID); err != nil {
 		return err
 	}
-	releaseReset := s.acquireTaskLSPReset(taskID)
+	releaseReset := s.acquireTaskLSPMutation(taskID)
 	defer releaseReset()
 	env, err := s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, taskID)
 	if err != nil {

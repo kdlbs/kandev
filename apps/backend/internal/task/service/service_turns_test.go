@@ -318,6 +318,19 @@ func TestApplyTaskEnvironmentToWorkspaceInfoUsesEnvironmentProfileAsFallback(t *
 	}
 }
 
+func TestApplyTaskEnvironmentToWorkspaceInfoProjectsRuntimeSecretRefs(t *testing.T) {
+	info := &lifecycle.WorkspaceInfo{}
+	applyTaskEnvironmentToWorkspaceInfo(info, &models.TaskEnvironment{
+		ID: "env-1", AgentctlAuthSecretID: "auth-ref", AgentctlBootstrapSecretID: "nonce-ref",
+	})
+	if got := info.Metadata[lifecycle.MetadataKeyAuthTokenSecret]; got != "auth-ref" {
+		t.Fatalf("auth secret ref = %#v", got)
+	}
+	if got := info.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret]; got != "nonce-ref" {
+		t.Fatalf("bootstrap secret ref = %#v", got)
+	}
+}
+
 func TestGetWorkspaceInfoForSession_ProjectsPersistedWorktreeIdentity(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
@@ -850,14 +863,16 @@ func TestGetWorkspaceInfoForSession_IncludesEnvironmentReconnectMetadata(t *test
 	}
 
 	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
-		ID:            "env-123",
-		TaskID:        "task-123",
-		ExecutorType:  string(models.ExecutorTypeLocalDocker),
-		Status:        models.TaskEnvironmentStatusReady,
-		WorkspacePath: "/host/repo",
-		ContainerID:   "container-from-env",
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		ID:                        "env-123",
+		TaskID:                    "task-123",
+		ExecutorType:              string(models.ExecutorTypeLocalDocker),
+		Status:                    models.TaskEnvironmentStatusReady,
+		WorkspacePath:             "/host/repo",
+		ContainerID:               "container-from-env",
+		AgentctlAuthSecretID:      "environment-secret-token",
+		AgentctlBootstrapSecretID: "environment-secret-nonce",
+		CreatedAt:                 now,
+		UpdatedAt:                 now,
 	}); err != nil {
 		t.Fatalf("failed to create task environment: %v", err)
 	}
@@ -912,11 +927,11 @@ func TestGetWorkspaceInfoForSession_IncludesEnvironmentReconnectMetadata(t *test
 	if info.Metadata[lifecycle.MetadataKeyContainerID] != "container-from-running" {
 		t.Fatalf("container metadata = %v, want container-from-running", info.Metadata[lifecycle.MetadataKeyContainerID])
 	}
-	if info.Metadata[lifecycle.MetadataKeyAuthTokenSecret] != "secret-token" {
-		t.Fatalf("auth secret metadata missing: %v", info.Metadata)
+	if info.Metadata[lifecycle.MetadataKeyAuthTokenSecret] != "environment-secret-token" {
+		t.Fatalf("task-owned auth secret metadata missing: %v", info.Metadata)
 	}
-	if info.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret] != "secret-nonce" {
-		t.Fatalf("nonce secret metadata missing: %v", info.Metadata)
+	if info.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret] != "environment-secret-nonce" {
+		t.Fatalf("task-owned nonce secret metadata missing: %v", info.Metadata)
 	}
 	if info.Metadata[lifecycle.MetadataKeyImageTagOverride] != "kandev:test" {
 		t.Fatalf("image override metadata missing: %v", info.Metadata)

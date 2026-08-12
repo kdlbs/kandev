@@ -120,6 +120,48 @@ func (m *Manager) RescanWorkspaceForSession(ctx context.Context, sessionID, work
 	return nil
 }
 
+// RescanWorkspaceForTaskHost rebinds the dedicated task-host tracker graph to
+// the environment's current durable workspace projection. Task hosts outlive
+// sessions, so their launch-time root list cannot remain authoritative after a
+// user attaches, removes, or reorders task workspace sources.
+func (m *Manager) RescanWorkspaceForTaskHost(ctx context.Context, taskEnvironmentID string) error {
+	execution, exists, err := m.GetTaskHostForEnvironment(ctx, taskEnvironmentID)
+	if err != nil || !exists || execution == nil {
+		return err
+	}
+	if m.workspaceInfoProvider == nil {
+		return fmt.Errorf("workspace info provider not configured")
+	}
+	info, err := m.workspaceInfoProvider.GetWorkspaceInfoForEnvironment(ctx, taskEnvironmentID)
+	if err != nil {
+		return fmt.Errorf("get current workspace info for task host: %w", err)
+	}
+	if info == nil || info.TaskEnvironmentID != taskEnvironmentID {
+		return fmt.Errorf("workspace info did not resolve task environment %s", taskEnvironmentID)
+	}
+	if info.WorkspacePath == "" {
+		return fmt.Errorf("task environment %s has no workspace path", taskEnvironmentID)
+	}
+	client := execution.GetAgentCtlClient()
+	if client == nil {
+		return fmt.Errorf("task-host execution has no agentctl client")
+	}
+
+	newRoots := workspaceSourceRoots(info.WorkspaceFolders, info.WorkspaceRepositories)
+	execution.promptLifecycleMu.Lock()
+	defer execution.promptLifecycleMu.Unlock()
+	oldPath := execution.WorkspacePath
+	oldRoots := append([]string(nil), execution.WorkspaceSourceRoots...)
+	execution.WorkspacePath = info.WorkspacePath
+	execution.WorkspaceSourceRoots = append([]string(nil), newRoots...)
+	if err := client.RescanWorkspace(ctx, info.WorkspacePath, newRoots); err != nil {
+		execution.WorkspacePath = oldPath
+		execution.WorkspaceSourceRoots = oldRoots
+		return fmt.Errorf("rescan task-host workspace via agentctl: %w", err)
+	}
+	return nil
+}
+
 func optionalWorkspaceSourceRoots(current []string, roots [][]string) []string {
 	if len(roots) == 0 {
 		return append([]string(nil), current...)

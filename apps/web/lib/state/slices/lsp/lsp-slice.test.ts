@@ -142,4 +142,16 @@ describe("LSP slice", () => {
     );
     expect(subject.getState().taskLsp.byTaskId["task-2"]?.languages.kotlin?.revision).toBe(1);
   });
+
+  it("clears control errors only when authoritative language evidence is accepted", () => {
+    const subject = store();
+    subject.getState().mergeTaskLspLanguage(language(9, "starting"));
+    subject.getState().setTaskLspError("task-1", "start failed");
+
+    subject.getState().mergeTaskLspLanguage(language(8, "ready"));
+    expect(subject.getState().taskLsp.byTaskId["task-1"]?.error).toBe("start failed");
+
+    subject.getState().mergeTaskLspLanguage(language(10, "ready"));
+    expect(subject.getState().taskLsp.byTaskId["task-1"]?.error).toBeNull();
+  });
 });

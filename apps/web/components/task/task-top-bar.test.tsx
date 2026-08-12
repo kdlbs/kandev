@@ -110,6 +110,12 @@ vi.mock("@/components/lsp/task-lsp-topbar-control", () => ({
 }));
 
 describe("TaskTopBar executor environment controls", () => {
+  it("leaves room for the 44px LSP control on coarse pointers", () => {
+    renderTopBar(<TaskTopBar taskId="task-1" />);
+
+    expect(screen.getByTestId("task-topbar").className).toContain("[@media(pointer:coarse)]:h-12");
+  });
+
   it("hides the executor environment button for filesystem executors", () => {
     renderTopBar(<TaskTopBar taskId="task-1" remoteExecutorType="worktree" />);
 

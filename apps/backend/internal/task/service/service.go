@@ -372,8 +372,9 @@ type Service struct {
 }
 
 // AcquireTaskLSPAdmission holds shared task admission while a language-server
-// launch probes or acquires runtime resources. Environment reset holds the
-// exclusive side across LSP cleanup, resource teardown, and row deletion.
+// launch probes or acquires runtime resources. Environment reset and terminal
+// task mutations hold the exclusive side through LSP cleanup and durable row
+// mutation, so a queued start cannot recreate resources behind teardown.
 func (s *Service) AcquireTaskLSPAdmission(
 	ctx context.Context,
 	taskID string,
@@ -407,7 +408,7 @@ func (s *Service) taskLSPAdmissionLock(taskID string) *sync.RWMutex {
 	return lock
 }
 
-func (s *Service) acquireTaskLSPReset(taskID string) func() {
+func (s *Service) acquireTaskLSPMutation(taskID string) func() {
 	lock := s.taskLSPAdmissionLock(taskID)
 	lock.Lock()
 	return lock.Unlock
@@ -531,6 +532,31 @@ func (s *Service) SetTaskLSPLifecycle(lifecycle TaskLSPLifecycle) {
 // It accepts only a task ID and semantic reason; runtime/session identifiers
 // remain private to the LSP controller.
 func (s *Service) CleanupTaskLSP(ctx context.Context, taskID, reason string) error {
+	if s.taskLSP == nil {
+		return nil
+	}
+	return s.taskLSP.CleanupTask(ctx, taskID, reason)
+}
+
+// StopTaskLSP durably suspends task-owned language servers before task stop
+// returns. The environment transition and cleanup share one exclusive
+// admission window, so a queued Start cannot recreate a task host after the
+// cleanup boundary. A later agent launch marks the environment ready and the
+// environment-ready callback reconciles the preserved per-language policy.
+func (s *Service) StopTaskLSP(ctx context.Context, taskID, reason string) error {
+	releaseMutation := s.acquireTaskLSPMutation(taskID)
+	defer releaseMutation()
+
+	environment, err := s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("get task environment before LSP stop: %w", err)
+	}
+	if environment != nil && environment.Status != models.TaskEnvironmentStatusStopped {
+		environment.Status = models.TaskEnvironmentStatusStopped
+		if err := s.taskEnvironments.UpdateTaskEnvironment(ctx, environment); err != nil {
+			return fmt.Errorf("mark task environment stopped before LSP cleanup: %w", err)
+		}
+	}
 	if s.taskLSP == nil {
 		return nil
 	}

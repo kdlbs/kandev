@@ -178,6 +178,10 @@ func (r *Repository) runMigrations() error {
 	}
 	// Must run BEFORE migrateTaskEnvironmentsRemoveAgentExecutionID, which copies task_dir_name into the recreated table.
 	r.migrate.Apply("task_environments.task_dir_name", `ALTER TABLE task_environments ADD COLUMN task_dir_name TEXT DEFAULT ''`)
+	// Add task-owned runtime credential references before the table rebuild so
+	// legacy databases preserve them through the explicit copy below.
+	r.migrate.Apply("task_environments.agentctl_auth_secret_id", `ALTER TABLE task_environments ADD COLUMN agentctl_auth_secret_id TEXT DEFAULT ''`)
+	r.migrate.Apply("task_environments.agentctl_bootstrap_secret_id", `ALTER TABLE task_environments ADD COLUMN agentctl_bootstrap_secret_id TEXT DEFAULT ''`)
 	if err := r.migrateTaskEnvironmentsRemoveAgentExecutionID(); err != nil {
 		return err
 	}
@@ -759,6 +763,8 @@ func (r *Repository) migrateTaskEnvironmentsRemoveAgentExecutionID() error {
 			workspace_path TEXT DEFAULT '',
 			container_id TEXT DEFAULT '',
 			sandbox_id TEXT DEFAULT '',
+			agentctl_auth_secret_id TEXT DEFAULT '',
+			agentctl_bootstrap_secret_id TEXT DEFAULT '',
 			task_dir_name TEXT DEFAULT '',
 			created_at TIMESTAMP NOT NULL,
 			updated_at TIMESTAMP NOT NULL,
@@ -768,6 +774,7 @@ func (r *Repository) migrateTaskEnvironmentsRemoveAgentExecutionID() error {
 			id, task_id, repository_id, executor_type, executor_id, executor_profile_id,
 			control_port, status, worktree_id, worktree_path, worktree_branch,
 			workspace_path, container_id, sandbox_id,
+			COALESCE(agentctl_auth_secret_id, ''), COALESCE(agentctl_bootstrap_secret_id, ''),
 			COALESCE(task_dir_name, ''), created_at, updated_at
 		FROM task_environments`,
 		`DROP TABLE task_environments`,

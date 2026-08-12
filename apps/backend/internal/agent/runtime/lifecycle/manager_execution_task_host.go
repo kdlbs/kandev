@@ -49,6 +49,8 @@ func (m *Manager) createTaskHostExecution(
 	if err := resumeRemoteInstancePreflight(ctx, rt, request); err != nil {
 		return nil, err
 	}
+	releaseCredentials := m.lockTaskEnvironmentCredentials(info.ExecutorType, info.TaskEnvironmentID)
+	defer releaseCredentials()
 	runtimeInstance, err := rt.CreateInstance(ctx, request)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create execution: %w", err)
@@ -151,21 +153,26 @@ func (m *Manager) finishTaskHostExecution(
 	execution *AgentExecution,
 ) (*AgentExecution, error) {
 	if err := m.ensureTaskHostTaskActive(ctx, taskID); err != nil {
-		m.rollbackTaskHostExecution(rt, runtimeInstance, execution, "task cleanup won task-host registration")
-		return nil, err
+		rollbackErr := m.rollbackTaskHostExecution(rt, runtimeInstance, execution, "task cleanup won task-host registration")
+		return nil, errors.Join(err, rollbackErr)
 	}
 	if execution.agentctl == nil {
-		m.rollbackTaskHostExecution(rt, runtimeInstance, execution, "task host has no control client")
-		return nil, fmt.Errorf("task-host execution has no agentctl client")
+		rollbackErr := m.rollbackTaskHostExecution(rt, runtimeInstance, execution, "task host has no control client")
+		return nil, errors.Join(fmt.Errorf("task-host execution has no agentctl client"), rollbackErr)
 	}
 	if err := execution.agentctl.WaitForReady(ctx, coalescedExecutionCreationTimeout); err != nil {
-		m.rollbackTaskHostExecution(rt, runtimeInstance, execution, "task host did not become ready")
-		return nil, fmt.Errorf("task-host agentctl not ready: %w", err)
+		rollbackErr := m.rollbackTaskHostExecution(rt, runtimeInstance, execution, "task host did not become ready")
+		return nil, errors.Join(fmt.Errorf("task-host agentctl not ready: %w", err), rollbackErr)
 	}
 	// A Docker re-handshake may rotate the container-wide agentctl credential.
-	// Adopt it in every live client and mirror it through the existing encrypted
-	// executor metadata before exposing this task host as ready.
-	m.persistRuntimeSecrets(ctx, runtimeInstance, execution)
+	// Adopt it in every live client and commit its encrypted task-environment
+	// references before exposing this task host as ready.
+	if err := m.persistRuntimeSecrets(ctx, runtimeInstance, execution); err != nil {
+		rollbackErr := m.rollbackTaskHostExecution(
+			rt, runtimeInstance, execution, "task-host runtime credential persistence failed",
+		)
+		return nil, errors.Join(fmt.Errorf("persist task-host runtime credentials: %w", err), rollbackErr)
+	}
 	execution.MarkAgentctlReady()
 	m.logger.Info("task-host execution created",
 		zap.String("execution_id", execution.ID),
@@ -195,21 +202,26 @@ func (m *Manager) rollbackTaskHostExecution(
 	runtimeInstance *ExecutorInstance,
 	execution *AgentExecution,
 	reason string,
-) {
+) error {
 	m.logger.Warn("rolling back task-host execution",
 		zap.String("execution_id", execution.ID),
 		zap.String("task_environment_id", execution.TaskEnvironmentID),
 		zap.String("reason", reason))
-	m.executionStore.Remove(execution.ID)
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if rt != nil && runtimeInstance != nil {
 		if err := rt.StopInstance(cleanupCtx, runtimeInstance, true); err != nil {
 			m.logger.Warn("failed to stop task-host runtime during rollback",
 				zap.String("execution_id", execution.ID), zap.Error(err))
+			// Keep the only durable in-memory handle while cleanup remains
+			// uncertain. Removing it here would make a still-live task host
+			// unreachable and allow a duplicate runtime to start.
+			return fmt.Errorf("stop task-host runtime during rollback: %w", err)
 		}
 	}
+	m.executionStore.RemoveIfSame(execution.ID, execution)
 	if execution.agentctl != nil {
 		execution.agentctl.Close()
 	}
+	return nil
 }

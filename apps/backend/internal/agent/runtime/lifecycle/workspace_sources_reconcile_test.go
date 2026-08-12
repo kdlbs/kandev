@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"testing"
 
@@ -19,6 +20,18 @@ func TestReconcileWorkspaceSources_RejectsMissingFolderTarget(t *testing.T) {
 	err := reconcileWorkspaceSources(context.Background(), t.TempDir(), []WorkspaceFolderSpec{{Name: "missing", LocalPath: "/definitely/not/a/kandev-folder"}}, testWorkspaceLinkOwner())
 	if err == nil {
 		t.Fatal("missing durable folder target was accepted")
+	}
+}
+
+func TestWorkspaceSourceRootsPreserveCombinedDurablePosition(t *testing.T) {
+	folder := canonicalTempDir(t)
+	repository := canonicalTempDir(t)
+	got := workspaceSourceRoots(
+		[]WorkspaceFolderSpec{{Name: "folder", LocalPath: folder, Position: 2}},
+		[]WorkspaceRepositorySpec{{RepoName: "repo", RepositoryPath: repository, Position: 1}},
+	)
+	if want := []string{repository, folder}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("workspace source roots = %v, want position order %v", got, want)
 	}
 }
 

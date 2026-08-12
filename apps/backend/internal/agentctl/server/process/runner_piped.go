@@ -1,6 +1,7 @@
 package process
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -45,6 +46,26 @@ func (p *PipedProcess) Wait() error {
 	reapErr := p.process.reapErr
 	p.process.mu.Unlock()
 	return errors.Join(waitErr, reapErr)
+}
+
+// WaitCleanup blocks until the runner has finished process-tree cleanup and
+// returns only cleanup uncertainty. A non-zero command exit is runtime
+// evidence, not proof that descendants survived, so waitErr is deliberately
+// excluded. Test fakes without an internal commandProcess retain the Done-only
+// behavior.
+func (p *PipedProcess) WaitCleanup(ctx context.Context) error {
+	select {
+	case <-p.Done:
+	case <-ctx.Done():
+		return context.Cause(ctx)
+	}
+	if p.process == nil {
+		return nil
+	}
+	p.process.mu.Lock()
+	reapErr := p.process.reapErr
+	p.process.mu.Unlock()
+	return reapErr
 }
 
 // StartPiped starts a directly executed process with caller-owned stdin/stdout.

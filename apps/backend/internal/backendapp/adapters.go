@@ -34,6 +34,49 @@ type taskLSPTaskHostAdapter struct {
 	manager *lifecycle.Manager
 }
 
+type taskLSPWorkspaceRescanner interface {
+	RescanWorkspaceForTaskHost(ctx context.Context, taskEnvironmentID string) error
+}
+
+type taskLSPBoundHost struct {
+	tasklsp.TaskHost
+	rescanner         taskLSPWorkspaceRescanner
+	taskEnvironmentID string
+}
+
+func (h *taskLSPBoundHost) bindWorkspace(ctx context.Context) error {
+	return h.rescanner.RescanWorkspaceForTaskHost(ctx, h.taskEnvironmentID)
+}
+
+func (h *taskLSPBoundHost) StartTaskLSP(
+	ctx context.Context,
+	request tasklsp.TaskHostStartRequest,
+) (*tasklsp.RuntimeSnapshot, error) {
+	if err := h.bindWorkspace(ctx); err != nil {
+		return nil, err
+	}
+	return h.TaskHost.StartTaskLSP(ctx, request)
+}
+
+func (h *taskLSPBoundHost) RestartTaskLSP(
+	ctx context.Context,
+	request tasklsp.TaskHostStartRequest,
+) (*tasklsp.RuntimeSnapshot, error) {
+	if err := h.bindWorkspace(ctx); err != nil {
+		return nil, err
+	}
+	return h.TaskHost.RestartTaskLSP(ctx, request)
+}
+
+func (h *taskLSPBoundHost) RefreshTaskLSPWorkspace(
+	ctx context.Context,
+) (*tasklsp.WorkspaceUpdateResult, error) {
+	if err := h.bindWorkspace(ctx); err != nil {
+		return nil, err
+	}
+	return h.TaskHost.RefreshTaskLSPWorkspace(ctx)
+}
+
 func newTaskLSPTaskHostAdapter(manager *lifecycle.Manager) *taskLSPTaskHostAdapter {
 	return &taskLSPTaskHostAdapter{manager: manager}
 }
@@ -49,7 +92,10 @@ func (a *taskLSPTaskHostAdapter) EnsureTaskHost(
 	if execution == nil || execution.GetAgentCtlClient() == nil {
 		return nil, errors.New("task host control client is unavailable")
 	}
-	return execution.GetAgentCtlClient(), nil
+	return &taskLSPBoundHost{
+		TaskHost: execution.GetAgentCtlClient(), rescanner: a.manager,
+		taskEnvironmentID: taskEnvironmentID,
+	}, nil
 }
 
 func (a *taskLSPTaskHostAdapter) ExistingTaskHost(
@@ -64,7 +110,9 @@ func (a *taskLSPTaskHostAdapter) ExistingTaskHost(
 	if client == nil {
 		return nil, false, nil
 	}
-	return client, true, nil
+	return &taskLSPBoundHost{
+		TaskHost: client, rescanner: a.manager, taskEnvironmentID: taskEnvironmentID,
+	}, true, nil
 }
 
 func (a *taskLSPTaskHostAdapter) CleanupTaskHost(
@@ -346,7 +394,9 @@ func lifecycleWorkspaceFolders(folders []executor.WorkspaceFolderSpec) []lifecyc
 	}
 	result := make([]lifecycle.WorkspaceFolderSpec, 0, len(folders))
 	for _, f := range folders {
-		result = append(result, lifecycle.WorkspaceFolderSpec{Name: f.Name, LocalPath: f.LocalPath})
+		result = append(result, lifecycle.WorkspaceFolderSpec{
+			Name: f.Name, LocalPath: f.LocalPath, Position: f.Position,
+		})
 	}
 	return result
 }
@@ -377,6 +427,7 @@ func lifecycleRepoLaunchSpecs(repos []executor.RepoSpec) []lifecycle.RepoLaunchS
 			RepositoryPath:         r.RepositoryPath,
 			RepositoryURL:          r.RepositoryURL,
 			RepoName:               r.RepoName,
+			Position:               r.Position,
 			BaseBranch:             r.BaseBranch,
 			DefaultBranch:          r.DefaultBranch,
 			CheckoutBranch:         r.CheckoutBranch,

@@ -127,6 +127,13 @@ type Manager struct {
 	// See SetExecutorRunningWriter and persistence.go. The lifecycle manager is the
 	// only component allowed to write the lifecycle-owned columns of this table.
 	runningWriter ExecutorRunningWriter
+	// taskEnvironmentRuntimeSecretWriter persists encrypted Docker control
+	// secret references at the task-environment ownership boundary. Unlike an
+	// executors_running row, this owner remains present when only the task host
+	// is live and every user session has stopped.
+	taskEnvironmentRuntimeSecretWriter TaskEnvironmentRuntimeSecretWriter
+	taskEnvironmentCredentialMu        sync.Mutex
+	taskEnvironmentCredentialLocks     map[string]*taskEnvironmentCredentialLock
 
 	// executorProfileReader resolves the executor profile bound to a task
 	// environment so user shell terminals can be given the same profile env

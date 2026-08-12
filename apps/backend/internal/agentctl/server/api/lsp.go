@@ -37,6 +37,10 @@ func (s *Server) handleTaskLSPDiscovery(c *gin.Context) {
 }
 
 func (s *Server) handleTaskLSPWorkspaceRefresh(c *gin.Context) {
+	if err := s.procMgr.RescanRepositories(c.Request.Context(), ""); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{errKey: err.Error()})
+		return
+	}
 	folders := taskLSPWorkspaceFolders(s.cfg.WorkDir, s.procMgr.RepoSubpaths()...)
 	result, err := s.lspManager.UpdateWorkspaceFolders(folders)
 	if err != nil {

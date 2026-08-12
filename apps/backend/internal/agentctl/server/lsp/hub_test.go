@@ -3,6 +3,7 @@ package lsp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -133,6 +134,42 @@ func TestAttachmentCancellationAndDetachDiscardPendingResponse(t *testing.T) {
 		if rawContains(message, `"result"`) {
 			t.Fatalf("detached attachment received stale success: %s", message)
 		}
+	}
+}
+
+func TestAttachmentBoundsPendingRequestsAndClosesPromptly(t *testing.T) {
+	upstream := &recordingFeatureUpstream{
+		blockMethod: "textDocument/hover",
+		canceled:    make(chan struct{}),
+	}
+	hub, snapshot := newHubForTest(upstream)
+	t.Cleanup(hub.Close)
+	attachment := hub.Attach(snapshot)
+	drainAttached(t, attachment)
+
+	for id := 1; id <= attachmentQueueSize+1; id++ {
+		message := fmt.Sprintf(
+			`{"jsonrpc":"2.0","id":%d,"method":"textDocument/hover","params":{}}`,
+			id,
+		)
+		if err := attachment.Handle([]byte(message)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	overload := readAttachmentMessage(t, attachment)
+	if !rawContains(overload, `"id":257`) || !rawContains(overload, `"code":-32000`) {
+		t.Fatalf("pending-request overload response = %s", overload)
+	}
+
+	closed := make(chan struct{})
+	go func() {
+		attachment.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("attachment close blocked behind flooded pending requests")
 	}
 }
 

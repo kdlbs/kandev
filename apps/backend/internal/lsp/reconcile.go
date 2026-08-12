@@ -52,10 +52,14 @@ func (c *Controller) ReconcileAll(ctx context.Context) error {
 // internal lifecycle hook: callers resolve the task record rather than
 // accepting an agent-selected ownership identifier.
 func (c *Controller) ReconcileTask(ctx context.Context, taskID string) error {
-	if _, err := c.tasks.GetTask(ctx, taskID); err != nil {
+	task, err := c.tasks.GetTask(ctx, taskID)
+	if err != nil {
 		return err
 	}
-	discoveryErr := c.discoverTask(ctx, taskID, false)
+	var discoveryErr error
+	if taskAllowsLSPRuntime(task) {
+		discoveryErr = c.discoverTask(ctx, taskID, false)
+	}
 	states, err := c.store.ListTaskLSPLanguages(ctx, taskID)
 	if err != nil {
 		return errors.Join(discoveryErr, err)
@@ -348,6 +352,7 @@ func (c *Controller) stopReconciledRuntime(
 // recovery and reaps every language before the environment cleanup backstop;
 // policy/history remain durable for archive/stop resume.
 func (c *Controller) CleanupTask(ctx context.Context, taskID, reason string) error {
+	c.cancelDiscoveryRetry(taskID)
 	states, err := c.store.ListTaskLSPLanguages(ctx, taskID)
 	if err != nil {
 		return err

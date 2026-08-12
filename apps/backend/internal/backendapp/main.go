@@ -516,6 +516,7 @@ func startAgentInfrastructure(
 	// the structural fix for the agent-execution-id divergence bug. Must be set
 	// before any Launch / EnsureWorkspaceExecutionForSession can run.
 	lifecycleMgr.SetExecutorRunningWriter(repos.Task)
+	lifecycleMgr.SetTaskEnvironmentRuntimeSecretWriter(repos.Task)
 
 	// Lets user shell terminals export the executor profile's env vars, so the
 	// terminal sees the same variables the agent subprocess and the repository

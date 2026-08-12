@@ -276,6 +276,10 @@ type taskLSPMutationCleaner interface {
 	CleanupTaskLSP(ctx context.Context, taskID, reason string) error
 }
 
+type taskLSPMutationGuard interface {
+	acquireTaskLSPMutation(taskID string) func()
+}
+
 // SetTaskResourceCleaner wires the resource teardown surface invoked by
 // cascade archive/delete to release containers / sandboxes / worktrees.
 // Optional — when nil the cascade does not tear down runtime resources.

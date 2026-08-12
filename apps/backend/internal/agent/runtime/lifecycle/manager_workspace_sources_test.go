@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"testing"
@@ -57,6 +58,72 @@ func TestRescanWorkspaceForSessionRestoresRootsOnFailure(t *testing.T) {
 	}
 	if !sameStrings(execution.WorkspaceSourceRoots, []string{"/old"}) {
 		t.Fatalf("roots after failed rescan = %v, want old roots", execution.WorkspaceSourceRoots)
+	}
+}
+
+func TestRescanWorkspaceForTaskHostUsesCurrentEnvironmentWorkspace(t *testing.T) {
+	var gotPath string
+	var gotRoots []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/workspace/rescan" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		var request struct {
+			WorkDir              string   `json:"work_dir"`
+			WorkspaceSourceRoots []string `json:"workspace_source_roots"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		gotPath = request.WorkDir
+		gotRoots = request.WorkspaceSourceRoots
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(parsed.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldRoot := t.TempDir()
+	newRoot := filepath.Dir(oldRoot)
+	sourceB := t.TempDir()
+	sourceA := t.TempDir()
+	execution := &AgentExecution{
+		ID: "task-host", SessionID: taskHostRuntimeSessionPrefix + "env-1",
+		TaskEnvironmentID: "env-1", IsTaskHost: true, WorkspacePath: oldRoot,
+		WorkspaceSourceRoots: []string{sourceA},
+		agentctl:             agentctl.NewClient(parsed.Hostname(), port, newTestLogger()),
+	}
+	store := NewExecutionStore()
+	if err := store.Add(execution); err != nil {
+		t.Fatal(err)
+	}
+	manager := &Manager{
+		executionStore: store,
+		logger:         newTestLogger(),
+		workspaceInfoProvider: &mockWorkspaceInfoProvider{envInfos: map[string]*WorkspaceInfo{
+			"env-1": {
+				TaskID: "task-1", TaskEnvironmentID: "env-1", WorkspacePath: newRoot,
+				WorkspaceRepositories: []WorkspaceRepositorySpec{
+					{RepositoryPath: sourceB, Position: 1},
+					{RepositoryPath: sourceA, Position: 2},
+				},
+			},
+		}},
+	}
+	if err := manager.RescanWorkspaceForTaskHost(context.Background(), "env-1"); err != nil {
+		t.Fatalf("RescanWorkspaceForTaskHost: %v", err)
+	}
+	if gotPath != newRoot || !sameStrings(gotRoots, []string{sourceB, sourceA}) {
+		t.Fatalf("task-host rescan path=%q roots=%v", gotPath, gotRoots)
+	}
+	if execution.WorkspacePath != newRoot || !sameStrings(execution.WorkspaceSourceRoots, gotRoots) {
+		t.Fatalf("task-host execution path=%q roots=%v", execution.WorkspacePath, execution.WorkspaceSourceRoots)
 	}
 }
 

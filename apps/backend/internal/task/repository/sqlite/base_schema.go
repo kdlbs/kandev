@@ -773,6 +773,8 @@ const sessionWorktreeSchemaDDL = `
 		workspace_path TEXT DEFAULT '',
 		container_id TEXT DEFAULT '',
 		sandbox_id TEXT DEFAULT '',
+		agentctl_auth_secret_id TEXT DEFAULT '',
+		agentctl_bootstrap_secret_id TEXT DEFAULT '',
 		task_dir_name TEXT DEFAULT '',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,

@@ -101,6 +101,112 @@ func TestService_DeleteTaskStopsTaskLSPBeforeMutation(t *testing.T) {
 	}
 }
 
+func TestService_ArchiveTaskBlocksLSPAdmissionThroughMutation(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedTaskForLSPLifecycleTest(t, repo)
+	cleanupEntered := make(chan struct{})
+	cleanupRelease := make(chan struct{})
+	svc.SetTaskLSPLifecycle(&recordingTaskLSPLifecycle{
+		onCleanup: func(context.Context, string) {
+			close(cleanupEntered)
+			<-cleanupRelease
+		},
+	})
+
+	done := make(chan error, 1)
+	go func() { done <- svc.ArchiveTask(context.Background(), "task-lsp") }()
+	<-cleanupEntered
+	assertTaskLSPAdmissionBlocked(t, svc, "task-lsp")
+	close(cleanupRelease)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	task, err := repo.GetTask(context.Background(), "task-lsp")
+	if err != nil || task.ArchivedAt == nil {
+		t.Fatalf("task was not archived before admission reopened: task=%#v err=%v", task, err)
+	}
+}
+
+func TestService_DeleteTaskBlocksLSPAdmissionThroughMutation(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedTaskForLSPLifecycleTest(t, repo)
+	cleanupEntered := make(chan struct{})
+	cleanupRelease := make(chan struct{})
+	svc.SetTaskLSPLifecycle(&recordingTaskLSPLifecycle{
+		onCleanup: func(context.Context, string) {
+			close(cleanupEntered)
+			<-cleanupRelease
+		},
+	})
+
+	done := make(chan error, 1)
+	go func() { done <- svc.DeleteTask(context.Background(), "task-lsp") }()
+	<-cleanupEntered
+	assertTaskLSPAdmissionBlocked(t, svc, "task-lsp")
+	close(cleanupRelease)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.GetTask(context.Background(), "task-lsp"); !errors.Is(err, repoerrors.ErrTaskNotFound) {
+		t.Fatalf("task remained after admission reopened: %v", err)
+	}
+}
+
+func TestService_StopTaskLSPMarksEnvironmentStoppedBeforeCleanupAndBlocksAdmission(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedTaskForLSPLifecycleTest(t, repo)
+	if err := repo.CreateTaskEnvironment(context.Background(), &models.TaskEnvironment{
+		ID:           "env-lsp-stop",
+		TaskID:       "task-lsp",
+		ExecutorType: string(models.ExecutorTypeLocal),
+		Status:       models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cleanupEntered := make(chan struct{})
+	cleanupRelease := make(chan struct{})
+	lifecycle := &recordingTaskLSPLifecycle{
+		onCleanup: func(ctx context.Context, taskID string) {
+			environment, err := repo.GetTaskEnvironmentByTaskID(ctx, taskID)
+			if err != nil || environment == nil || environment.Status != models.TaskEnvironmentStatusStopped {
+				t.Errorf("environment was not stopped before LSP cleanup: environment=%#v err=%v", environment, err)
+			}
+			close(cleanupEntered)
+			<-cleanupRelease
+		},
+	}
+	svc.SetTaskLSPLifecycle(lifecycle)
+
+	done := make(chan error, 1)
+	go func() { done <- svc.StopTaskLSP(context.Background(), "task-lsp", "user_stop") }()
+	<-cleanupEntered
+	assertTaskLSPAdmissionBlocked(t, svc, "task-lsp")
+	close(cleanupRelease)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+
+	environment, err := repo.GetTaskEnvironmentByTaskID(context.Background(), "task-lsp")
+	if err != nil || environment == nil || environment.Status != models.TaskEnvironmentStatusStopped {
+		t.Fatalf("environment after task stop = %#v, err=%v", environment, err)
+	}
+	if got := lifecycle.cleanupCalls; len(got) != 1 || got[0] != "task-lsp:user_stop" {
+		t.Fatalf("cleanup calls = %v", got)
+	}
+}
+
+func assertTaskLSPAdmissionBlocked(t *testing.T, svc *Service, taskID string) {
+	t.Helper()
+	release, err := svc.AcquireTaskLSPAdmission(context.Background(), taskID)
+	if release != nil {
+		release()
+	}
+	if !errors.Is(err, ErrTaskLSPAdmissionBlocked) {
+		t.Fatalf("LSP admission during terminal mutation = %v, want blocked", err)
+	}
+}
+
 func TestService_TaskMutationFailsClosedWhenTaskLSPCleanupFails(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	seedTaskForLSPLifecycleTest(t, repo)

@@ -206,6 +206,8 @@ func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string, cas
 	} else {
 		all = []string{rootID}
 	}
+	releaseLSPMutations := s.acquireTaskLSPMutationGuards(all)
+	defer releaseLSPMutations()
 	cleanupOps, err := s.prepareCascadeResourceCleanup(ctx, all, cascadeID, models.TaskResourceCleanupTriggerCascadeArchive)
 	if err != nil {
 		return out, err
@@ -301,6 +303,8 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string, casc
 	if err != nil {
 		return nil, err
 	}
+	releaseLSPMutations := s.acquireTaskLSPMutationGuards(all)
+	defer releaseLSPMutations()
 	ownershipTransfers, err := s.transferSharedWorkspaceEnvironmentOwnership(ctx, all)
 	if err != nil {
 		return out, err
@@ -386,6 +390,31 @@ func (s *HandoffService) cleanupTaskLSPBeforeMutation(
 		}
 	}
 	return nil
+}
+
+func (s *HandoffService) acquireTaskLSPMutationGuards(taskIDs []string) func() {
+	guard, ok := s.resourceCleaner.(taskLSPMutationGuard)
+	if !ok {
+		return func() {}
+	}
+	ordered := append([]string(nil), taskIDs...)
+	sort.Strings(ordered)
+	releases := make([]func(), 0, len(ordered))
+	previous := ""
+	for _, taskID := range ordered {
+		if taskID == "" || taskID == previous {
+			continue
+		}
+		previous = taskID
+		if release := guard.acquireTaskLSPMutation(taskID); release != nil {
+			releases = append(releases, release)
+		}
+	}
+	return func() {
+		for index := len(releases) - 1; index >= 0; index-- {
+			releases[index]()
+		}
+	}
 }
 
 // transferSharedWorkspaceEnvironmentOwnership moves a materialized environment

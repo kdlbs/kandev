@@ -51,12 +51,13 @@ type peer struct {
 	stdin  io.WriteCloser
 	stdout io.ReadCloser
 
-	writeMu sync.Mutex
-	mu      sync.Mutex
-	nextID  uint64
-	pending map[string]chan rpcResponse
-	done    chan struct{}
-	doneErr error
+	writeGateMu sync.Mutex
+	writeGate   chan struct{}
+	mu          sync.Mutex
+	nextID      uint64
+	pending     map[string]chan rpcResponse
+	done        chan struct{}
+	doneErr     error
 
 	onRequest      func(string, json.RawMessage) (any, error)
 	onNotification func(string, json.RawMessage)
@@ -78,6 +79,8 @@ func newPeer(
 		onNotification: onNotification,
 		writeTimeout:   defaultPeerWriteTimeout,
 	}
+	p.writeGate = make(chan struct{}, 1)
+	p.writeGate <- struct{}{}
 	go p.readLoop()
 	return p
 }
@@ -127,7 +130,7 @@ func (p *peer) callRaw(
 	p.pending[id] = response
 	p.mu.Unlock()
 
-	if err := p.write(rpcMessage{
+	if err := p.writeContext(ctx, rpcMessage{
 		JSONRPC: rpcVersion,
 		ID:      idJSON,
 		Method:  method,
@@ -144,8 +147,13 @@ func (p *peer) callRaw(
 		}
 		return append(json.RawMessage(nil), reply.result...), nil
 	case <-ctx.Done():
-		_ = p.Notify("$/cancelRequest", map[string]any{"id": json.RawMessage(idJSON)})
 		p.removePending(id)
+		// If the original request reached the server, send a bounded best-effort
+		// cancellation. A blocked process pipe must never delay the caller's own
+		// context cancellation indefinitely.
+		cancelCtx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+		_ = p.notifyContext(cancelCtx, "$/cancelRequest", map[string]any{"id": json.RawMessage(idJSON)})
 		return nil, ctx.Err()
 	case <-p.done:
 		p.mu.Lock()
@@ -156,11 +164,15 @@ func (p *peer) callRaw(
 }
 
 func (p *peer) Notify(method string, params any) error {
+	return p.notifyContext(context.Background(), method, params)
+}
+
+func (p *peer) notifyContext(ctx context.Context, method string, params any) error {
 	paramsJSON, err := json.Marshal(params)
 	if err != nil {
 		return fmt.Errorf("marshal %s params: %w", method, err)
 	}
-	return p.write(rpcMessage{JSONRPC: rpcVersion, Method: method, Params: paramsJSON})
+	return p.writeContext(ctx, rpcMessage{JSONRPC: rpcVersion, Method: method, Params: paramsJSON})
 }
 
 func (p *peer) Done() <-chan struct{} {
@@ -255,13 +267,26 @@ func (p *peer) handleResponse(message rpcMessage) {
 }
 
 func (p *peer) write(message rpcMessage) error {
+	return p.writeContext(context.Background(), message)
+}
+
+func (p *peer) writeContext(ctx context.Context, message rpcMessage) error {
 	payload, err := json.Marshal(message)
 	if err != nil {
 		return err
 	}
-	p.writeMu.Lock()
-	defer p.writeMu.Unlock()
+	gate := p.writeSemaphore()
 	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-p.done:
+		return errPeerClosed
+	case <-gate:
+	}
+	defer func() { gate <- struct{}{} }()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
 	case <-p.done:
 		return errPeerClosed
 	default:
@@ -271,6 +296,16 @@ func (p *peer) write(message rpcMessage) error {
 		return err
 	}
 	return p.writeFrame(frame)
+}
+
+func (p *peer) writeSemaphore() chan struct{} {
+	p.writeGateMu.Lock()
+	defer p.writeGateMu.Unlock()
+	if p.writeGate == nil {
+		p.writeGate = make(chan struct{}, 1)
+		p.writeGate <- struct{}{}
+	}
+	return p.writeGate
 }
 
 func buildPeerFrame(payload []byte) ([]byte, error) {

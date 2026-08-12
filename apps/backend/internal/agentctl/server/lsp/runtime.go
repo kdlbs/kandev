@@ -158,7 +158,7 @@ func (r *runtime) initializeParams() map[string]any {
 func taskHostClientCapabilities() map[string]any {
 	return map[string]any{
 		"window": map[string]any{"workDoneProgress": true},
-		"workspace": map[string]any{
+		fieldWorkspace: map[string]any{
 			"configuration":       true,
 			fieldWorkspaceFolders: true,
 		},

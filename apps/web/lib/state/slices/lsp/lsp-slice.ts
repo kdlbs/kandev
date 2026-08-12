@@ -22,10 +22,11 @@ function emptyTaskState(): TaskLspTaskState {
 function mergeLanguage(
   languages: Record<string, TaskLspLanguageSnapshot>,
   incoming: TaskLspLanguageSnapshot,
-): void {
+): boolean {
   const current = languages[incoming.language];
-  if (current && current.revision > incoming.revision) return;
+  if (current && current.revision > incoming.revision) return false;
   languages[incoming.language] = incoming;
+  return true;
 }
 
 function mergeCapacity(task: TaskLspTaskState, incoming: TaskLspCapacity): void {
@@ -61,8 +62,9 @@ export const createLspSlice: StateCreator<AppState, [["zustand/immer", never]], 
   mergeTaskLspLanguage: (snapshot) =>
     set((draft) => {
       const task = draft.taskLsp.byTaskId[snapshot.task_id] ?? emptyTaskState();
-      mergeLanguage(task.languages, snapshot);
+      const accepted = mergeLanguage(task.languages, snapshot);
       if (snapshot.capacity) mergeCapacity(task, snapshot.capacity);
+      if (accepted) task.error = null;
       draft.taskLsp.byTaskId[snapshot.task_id] = task;
     }),
   setTaskLspLoading: (taskId, loading) =>

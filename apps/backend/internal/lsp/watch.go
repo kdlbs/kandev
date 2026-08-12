@@ -37,6 +37,10 @@ type recoveryState struct {
 	readyTimer ScheduledTimer
 }
 
+type taskLanguageWatch struct {
+	cancel context.CancelFunc
+}
+
 // StartReconciler owns startup adoption, task-host watches, and bounded
 // recovery until Close. It is safe to call once.
 func (c *Controller) StartReconciler(ctx context.Context) error {
@@ -76,13 +80,19 @@ func (c *Controller) Close(ctx context.Context) error {
 		return nil
 	}
 	c.lifecycleCancel = nil
-	for key, watchCancel := range c.watches {
-		watchCancel()
+	for key, watch := range c.watches {
+		watch.cancel()
 		delete(c.watches, key)
 	}
 	for key, recovery := range c.recoveries {
 		stopRecoveryTimers(recovery)
 		delete(c.recoveries, key)
+	}
+	for taskID, retry := range c.discoveryRetries {
+		if retry.timer != nil {
+			retry.timer.Stop()
+		}
+		delete(c.discoveryRetries, taskID)
 	}
 	c.lifecycleMu.Unlock()
 	cancel()
@@ -110,17 +120,24 @@ func (c *Controller) ensureWatch(key TaskLanguageKey) {
 		return
 	}
 	watchCtx, cancel := context.WithCancel(c.lifecycleCtx)
-	c.watches[key] = cancel
+	watch := &taskLanguageWatch{cancel: cancel}
+	c.watches[key] = watch
 	c.lifecycleWG.Add(1)
 	c.lifecycleMu.Unlock()
-	go c.watchTaskLanguage(watchCtx, key)
+	go c.watchTaskLanguage(watchCtx, key, watch)
 }
 
-func (c *Controller) watchTaskLanguage(ctx context.Context, key TaskLanguageKey) {
+func (c *Controller) watchTaskLanguage(
+	ctx context.Context,
+	key TaskLanguageKey,
+	watch *taskLanguageWatch,
+) {
 	defer c.lifecycleWG.Done()
 	defer func() {
 		c.lifecycleMu.Lock()
-		delete(c.watches, key)
+		if c.watches[key] == watch {
+			delete(c.watches, key)
+		}
 		c.lifecycleMu.Unlock()
 	}()
 	host, err := c.resolveExistingHost(ctx, key.TaskID)
@@ -146,8 +163,12 @@ func (c *Controller) watchTaskLanguage(ctx context.Context, key TaskLanguageKey)
 }
 
 func (c *Controller) resolveExistingHost(ctx context.Context, taskID string) (TaskHost, error) {
-	if _, err := c.tasks.GetTask(ctx, taskID); err != nil {
+	task, err := c.tasks.GetTask(ctx, taskID)
+	if err != nil {
 		return nil, err
+	}
+	if !taskAllowsLSPRuntime(task) {
+		return nil, ErrTaskNotReady
 	}
 	environment, err := c.tasks.GetTaskEnvironmentByTaskID(ctx, taskID)
 	if err != nil {
@@ -178,7 +199,8 @@ func (c *Controller) observeRuntimeSnapshot(
 	if runtime.Generation < state.Generation {
 		return nil
 	}
-	if runtimeFailureProvesNoProcess(&runtime, runtime.Generation) {
+	processGone := runtimeFailureProvesNoProcess(&runtime, runtime.Generation)
+	if processGone {
 		c.releaseCapacity(ctx, key, runtime.Generation)
 	}
 	stored, err := c.adoptRuntime(ctx, *state, runtime)
@@ -197,7 +219,7 @@ func (c *Controller) observeRuntimeSnapshot(
 	case PhaseReady:
 		c.scheduleReadyReset(key, runtime.Generation)
 	case PhaseError, PhaseOff:
-		if desired {
+		if desired && processGone {
 			c.scheduleRecovery(key)
 		}
 	}
@@ -274,7 +296,15 @@ func (c *Controller) attemptRecovery(
 		candidate.settings = settings
 	}
 	if candidate == nil {
-		return false
+		// A nil candidate is a successful convergence result: inspection either
+		// adopted the live runtime or established a non-starting terminal state.
+		// Do not spend another recovery attempt merely because no start command
+		// was required.
+		current, _, stateErr := c.store.GetTaskLSPLanguage(ctx, key.TaskID, key.Language)
+		if stateErr == nil && current.Phase == PhaseReady {
+			c.scheduleReadyReset(key, current.Generation)
+		}
+		return true
 	}
 	snapshot, err := c.commands.submit(
 		ctx,
@@ -358,8 +388,8 @@ func (c *Controller) cancelRecovery(key TaskLanguageKey) {
 func (c *Controller) cancelWatch(key TaskLanguageKey) {
 	c.lifecycleMu.Lock()
 	defer c.lifecycleMu.Unlock()
-	if cancel := c.watches[key]; cancel != nil {
-		cancel()
+	if watch := c.watches[key]; watch != nil {
+		watch.cancel()
 		delete(c.watches, key)
 	}
 }

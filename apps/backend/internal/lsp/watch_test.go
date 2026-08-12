@@ -49,6 +49,77 @@ func TestRecoveryUsesOneFiveThirtySecondBackoffAndThenStops(t *testing.T) {
 	}
 }
 
+func TestFailedDiscoveryRetriesWithoutAnotherSnapshot(t *testing.T) {
+	store := newMemoryLSPStore()
+	runtimes := &fakeLSPRuntimes{discoveryErr: errors.New("task host still materializing")}
+	scheduler := newFakeScheduler()
+	controller := NewController(ControllerConfig{
+		Tasks: &fakeControllerTasks{environments: map[string]*models.TaskEnvironment{
+			"task-1": readyEnvironment("task-1", executorTypeLocalPC),
+		}},
+		Store: store, Settings: &fakeLSPSettings{}, Runtimes: runtimes,
+		Capacity: NewCapacity(8), Scheduler: scheduler,
+		Clock: func() time.Time { return time.Unix(300, 0).UTC() },
+	})
+	if err := controller.StartReconciler(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+
+	if _, err := controller.Snapshot(context.Background(), "task-1"); err != nil {
+		t.Fatal(err)
+	}
+	timer := scheduler.next(t)
+	if timer.delay != time.Second {
+		t.Fatalf("discovery retry delay = %s, want 1s", timer.delay)
+	}
+	runtimes.mu.Lock()
+	runtimes.discoveryErr = nil
+	runtimes.discovery = &DiscoveryResult{
+		Languages: []string{"kotlin"}, State: DetectionComplete, ScannedAt: time.Unix(301, 0).UTC(),
+	}
+	runtimes.mu.Unlock()
+	timer.Fire()
+
+	state := storedLSPState(t, store, "task-1", "kotlin")
+	if !state.Detected || state.DetectionState != DetectionComplete {
+		t.Fatalf("automatic discovery retry state = %#v", state)
+	}
+	runtimes.mu.Lock()
+	discoveryCalls := runtimes.discoveryCalls
+	runtimes.mu.Unlock()
+	if discoveryCalls != 2 {
+		t.Fatalf("discovery calls = %d, want initial plus retry", discoveryCalls)
+	}
+	scheduler.assertNoActiveTimers(t)
+}
+
+func TestCloseCancelsPendingDiscoveryRetry(t *testing.T) {
+	store := newMemoryLSPStore()
+	runtimes := &fakeLSPRuntimes{discoveryErr: errors.New("scanner unavailable")}
+	scheduler := newFakeScheduler()
+	controller := NewController(ControllerConfig{
+		Tasks: &fakeControllerTasks{environments: map[string]*models.TaskEnvironment{
+			"task-1": readyEnvironment("task-1", executorTypeLocalPC),
+		}},
+		Store: store, Settings: &fakeLSPSettings{}, Runtimes: runtimes,
+		Capacity: NewCapacity(8), Scheduler: scheduler,
+	})
+	if err := controller.StartReconciler(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.Snapshot(context.Background(), "task-1"); err != nil {
+		t.Fatal(err)
+	}
+	timer := scheduler.next(t)
+	if err := controller.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !timer.Stopped() {
+		t.Fatal("pending discovery retry remained live after controller close")
+	}
+}
+
 func TestFailedExplicitStartSchedulesAutomaticRecovery(t *testing.T) {
 	store := newMemoryLSPStore()
 	host := newFakeLSPHost()
@@ -141,6 +212,34 @@ func TestRecoveryEvictsDeadTaskHostBeforeEnsuringReplacement(t *testing.T) {
 	}
 }
 
+func TestRecoveryTreatsLiveRuntimeAdoptionAsConverged(t *testing.T) {
+	store := newMemoryLSPStore()
+	seedLSPState(t, store, TaskLanguageState{
+		TaskID: "task-1", Language: "rust", Policy: PolicyKeepWarm,
+		DetectionState: DetectionComplete, Phase: PhaseError, Generation: 3,
+		LastInitiator: InitiatorAutomatic,
+	})
+	host := newFakeLSPHost()
+	host.snapshots["rust"] = RuntimeSnapshot{
+		Language: "rust", Generation: 3, Phase: PhaseReady,
+	}
+	runtimes := newReconcileRuntimes()
+	runtimes.existing["env-task-1"] = host
+	controller := newReconcileControllerWithScheduler(store, runtimes, newFakeScheduler())
+
+	state := storedLSPState(t, store, "task-1", "rust")
+	if converged := controller.attemptRecovery(
+		context.Background(),
+		TaskLanguageKey{TaskID: "task-1", Language: "rust"},
+		state,
+	); !converged {
+		t.Fatal("live runtime adoption consumed another recovery attempt")
+	}
+	if stored := storedLSPState(t, store, "task-1", "rust"); stored.Phase != PhaseReady {
+		t.Fatalf("adopted state = %#v, want ready", stored)
+	}
+}
+
 func TestStartupSnapshotFailureSchedulesDeadTaskHostRecovery(t *testing.T) {
 	store := newMemoryLSPStore()
 	seedLSPState(t, store, TaskLanguageState{
@@ -175,8 +274,8 @@ func TestStartupSnapshotFailureSchedulesDeadTaskHostRecovery(t *testing.T) {
 
 func TestProcessExitReleasesCapacityAndPromotesQueuedGeneration(t *testing.T) {
 	tasks := &fakeControllerTasks{environments: map[string]*models.TaskEnvironment{
-		"crashed": readyEnvironment("crashed", "local_pc"),
-		"queued":  readyEnvironment("queued", "local_pc"),
+		"crashed": readyEnvironment("crashed", executorTypeLocalPC),
+		"queued":  readyEnvironment("queued", executorTypeLocalPC),
 	}}
 	store := newMemoryLSPStore()
 	host := newFakeLSPHost()
@@ -206,6 +305,46 @@ func TestProcessExitReleasesCapacityAndPromotesQueuedGeneration(t *testing.T) {
 	if promoted.Phase != PhaseReady || controller.capacity.Active() != 1 || controller.capacity.Queued() != 0 {
 		t.Fatalf("promoted=%#v active=%d queued=%d", promoted, controller.capacity.Active(), controller.capacity.Queued())
 	}
+}
+
+func TestProcessCleanupFailureRetainsCapacityWithoutRecovery(t *testing.T) {
+	store := newMemoryLSPStore()
+	seedLSPState(t, store, TaskLanguageState{
+		TaskID: "crashed", Language: "go", Policy: PolicyKeepWarm,
+		DetectionState: DetectionComplete, Phase: PhaseReady, Generation: 1,
+		LastInitiator: InitiatorAutomatic,
+	})
+	seedLSPState(t, store, TaskLanguageState{
+		TaskID: "queued", Language: "kotlin", Policy: PolicyKeepWarm,
+		DetectionState: DetectionComplete, Phase: PhaseQueued, Generation: 1,
+		LastInitiator: InitiatorAutomatic,
+	})
+	scheduler := newFakeScheduler()
+	controller := newReconcileControllerWithScheduler(store, newReconcileRuntimes(), scheduler)
+	controller.capacity = NewCapacity(1)
+	crashedKey := TaskLanguageKey{TaskID: "crashed", Language: "go"}
+	queuedKey := TaskLanguageKey{TaskID: "queued", Language: "kotlin"}
+	controller.capacity.Adopt(crashedKey, 1)
+	if controller.capacity.Admit(queuedKey, 1, time.Unix(1, 0)) {
+		t.Fatal("queued generation unexpectedly admitted")
+	}
+	lifecycleCtx, cancel := context.WithCancel(context.Background())
+	controller.lifecycleCtx = lifecycleCtx
+	controller.lifecycleCancel = cancel
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+
+	if err := controller.observeRuntimeSnapshot(context.Background(), crashedKey, RuntimeSnapshot{
+		Language: "go", Generation: 1, Phase: PhaseError, ErrorCode: "process_cleanup_failed",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	queued := storedLSPState(t, store, "queued", "kotlin")
+	if queued.Phase != PhaseQueued || controller.capacity.Active() != 1 || controller.capacity.Queued() != 1 {
+		t.Fatalf("queued=%#v active=%d queued-count=%d",
+			queued, controller.capacity.Active(), controller.capacity.Queued())
+	}
+	scheduler.assertNoActiveTimers(t)
 }
 
 func TestRecoveryIsCanceledByExplicitStop(t *testing.T) {
@@ -268,7 +407,7 @@ func TestReadyFiveMinutesResetsRecoveryBudgetAndInitializingNeverRetries(t *test
 
 	key := TaskLanguageKey{TaskID: "task-1", Language: "rust"}
 	if err := controller.observeRuntimeSnapshot(context.Background(), key, RuntimeSnapshot{
-		Language: "rust", Generation: 2, Phase: PhaseError,
+		Language: "rust", Generation: 2, Phase: PhaseError, ErrorCode: errorCodeProcessExited,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +426,7 @@ func TestReadyFiveMinutesResetsRecoveryBudgetAndInitializingNeverRetries(t *test
 	}
 	reset.Fire()
 	if err := controller.observeRuntimeSnapshot(context.Background(), key, RuntimeSnapshot{
-		Language: "rust", Generation: 2, Phase: PhaseError,
+		Language: "rust", Generation: 2, Phase: PhaseError, ErrorCode: errorCodeProcessExited,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -362,13 +501,89 @@ func TestStoppedReadyTimerUsesCanceledLifecycleContext(t *testing.T) {
 	}
 }
 
+func TestCanceledWatchCannotDeleteReplacementRegistration(t *testing.T) {
+	store := newMemoryLSPStore()
+	seedLSPState(t, store, TaskLanguageState{
+		TaskID: "task-1", Language: "go", Policy: PolicyKeepWarm,
+		DetectionState: DetectionComplete, Phase: PhaseReady, Generation: 1,
+		LastInitiator: InitiatorAutomatic,
+	})
+	host := newControlledWatchHost()
+	runtimes := newReconcileRuntimes()
+	runtimes.existing["env-task-1"] = host
+	controller := newReconcileControllerWithScheduler(store, runtimes, newFakeScheduler())
+	lifecycleCtx, cancel := context.WithCancel(context.Background())
+	controller.lifecycleCtx = lifecycleCtx
+	controller.lifecycleCancel = cancel
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+
+	key := TaskLanguageKey{TaskID: "task-1", Language: "go"}
+	controller.ensureWatch(key)
+	<-host.firstStarted
+	controller.cancelWatch(key)
+	<-host.firstCanceled
+	controller.ensureWatch(key)
+	<-host.secondStarted
+	close(host.firstRelease)
+	<-host.firstReturned
+
+	controller.lifecycleMu.Lock()
+	replacementRegistered := controller.watches[key] != nil
+	controller.lifecycleMu.Unlock()
+	if !replacementRegistered {
+		t.Fatal("canceled watch deleted its replacement registration")
+	}
+}
+
+type controlledWatchHost struct {
+	*fakeLSPHost
+	mu            sync.Mutex
+	calls         int
+	firstStarted  chan struct{}
+	firstCanceled chan struct{}
+	firstRelease  chan struct{}
+	firstReturned chan struct{}
+	secondStarted chan struct{}
+}
+
+func newControlledWatchHost() *controlledWatchHost {
+	return &controlledWatchHost{
+		fakeLSPHost:  newFakeLSPHost(),
+		firstStarted: make(chan struct{}), firstCanceled: make(chan struct{}),
+		firstRelease: make(chan struct{}), firstReturned: make(chan struct{}),
+		secondStarted: make(chan struct{}),
+	}
+}
+
+func (h *controlledWatchHost) WatchTaskLSP(
+	ctx context.Context,
+	_ string,
+	_ func(RuntimeSnapshot) error,
+) error {
+	h.mu.Lock()
+	h.calls++
+	call := h.calls
+	h.mu.Unlock()
+	if call == 1 {
+		close(h.firstStarted)
+		<-ctx.Done()
+		close(h.firstCanceled)
+		<-h.firstRelease
+		close(h.firstReturned)
+		return context.Cause(ctx)
+	}
+	close(h.secondStarted)
+	<-ctx.Done()
+	return context.Cause(ctx)
+}
+
 func newReconcileControllerWithScheduler(
 	store *memoryLSPStore,
 	runtimes *reconcileRuntimes,
 	scheduler *fakeScheduler,
 ) *Controller {
 	tasks := &fakeControllerTasks{environments: map[string]*models.TaskEnvironment{
-		"task-1": readyEnvironment("task-1", "local_pc"),
+		"task-1": readyEnvironment("task-1", executorTypeLocalPC),
 	}}
 	return NewController(ControllerConfig{
 		Tasks: tasks, Store: store, Settings: &fakeLSPSettings{}, Runtimes: runtimes,

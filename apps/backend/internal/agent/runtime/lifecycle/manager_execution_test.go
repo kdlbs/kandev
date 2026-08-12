@@ -971,6 +971,75 @@ func TestGetOrEnsureTaskHostForEnvironment(t *testing.T) {
 	})
 }
 
+func TestFailedTaskHostRollbackRetainsRuntimeOwnership(t *testing.T) {
+	cleanupFailure := errors.New("task-host cleanup failed")
+	backend := &createInstanceExecutor{
+		MockExecutor: MockExecutor{name: executor.NameStandalone},
+		stopErr:      cleanupFailure,
+	}
+	execution := &AgentExecution{
+		ID: "task-host", TaskID: "task-1", SessionID: taskHostRuntimeSessionPrefix + "env-1",
+		TaskEnvironmentID: "env-1", RuntimeName: agentruntime.RuntimeStandalone, IsTaskHost: true,
+	}
+	manager := &Manager{executionStore: NewExecutionStore(), logger: newTestLogger()}
+	if err := manager.executionStore.Add(execution); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := manager.finishTaskHostExecution(
+		context.Background(),
+		"task-1",
+		&WorkspaceInfo{TaskEnvironmentID: "env-1"},
+		backend,
+		&ExecutorInstance{InstanceID: execution.ID},
+		execution,
+	)
+	if err == nil {
+		t.Fatal("task-host readiness failure unexpectedly succeeded")
+	}
+	if current, exists := manager.executionStore.GetTaskHostByEnvironmentID("env-1"); !exists || current != execution {
+		t.Fatalf("task-host cleanup handle = %#v, %v; want original execution", current, exists)
+	}
+	if backend.stopCount.Load() != 1 {
+		t.Fatalf("task-host cleanup attempts = %d, want 1", backend.stopCount.Load())
+	}
+}
+
+func TestTaskHostCredentialPersistenceFailurePreventsReady(t *testing.T) {
+	persistFailure := errors.New("secret database unavailable")
+	store := newInMemorySecretStore()
+	store.err = persistFailure
+	backend := &createInstanceExecutor{
+		MockExecutor: MockExecutor{name: executor.NameDocker},
+	}
+	execution := &AgentExecution{
+		ID: "task-host", TaskID: "task-1", SessionID: taskHostRuntimeSessionPrefix + "env-1",
+		TaskEnvironmentID: "env-1", RuntimeName: agentruntime.RuntimeDocker, IsTaskHost: true,
+		agentctl: newReadyAgentctlClient(t, newTestLogger()),
+	}
+	manager := &Manager{
+		executionStore: NewExecutionStore(), logger: newTestLogger(), secretStore: store,
+		taskEnvironmentRuntimeSecretWriter: &captureTaskEnvironmentRuntimeSecretWriter{},
+	}
+	if err := manager.executionStore.Add(execution); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := manager.finishTaskHostExecution(
+		context.Background(), "task-1", &WorkspaceInfo{TaskEnvironmentID: "env-1"},
+		backend, &ExecutorInstance{InstanceID: execution.ID, AuthToken: "rotated-token"}, execution,
+	)
+	if !errors.Is(err, persistFailure) {
+		t.Fatalf("task-host credential persistence error = %v", err)
+	}
+	if execution.IsAgentctlReady() {
+		t.Fatal("task host became ready before durable credentials committed")
+	}
+	if backend.stopCount.Load() != 1 {
+		t.Fatalf("rollback cleanup attempts = %d, want 1", backend.stopCount.Load())
+	}
+}
+
 func TestTaskHostExecutionIDIsStablePerTaskEnvironment(t *testing.T) {
 	first := taskHostExecutionID("env-1")
 	if first == "" || first != taskHostExecutionID("env-1") {
@@ -1166,6 +1235,7 @@ func TestTaskHostUsesDedicatedInstanceInsideExistingDockerTaskEnvironment(t *tes
 		ExecutorFallbackWarn, "", log,
 	)
 	mgr.workspaceInfoProvider = provider
+	mgr.taskEnvironmentRuntimeSecretWriter = &captureTaskEnvironmentRuntimeSecretWriter{}
 	mgr.secretStore = &inMemorySecretStore{store: map[string]*secrets.SecretWithValue{
 		"auth-secret":  {Secret: secrets.Secret{ID: "auth-secret"}, Value: "task-auth-token"},
 		"nonce-secret": {Secret: secrets.Secret{ID: "nonce-secret"}, Value: "task-bootstrap-nonce"},
@@ -1219,6 +1289,7 @@ func TestTaskHostUsesLiveDockerControlCredentialsBeforeDurableMirror(t *testing.
 		ExecutorFallbackWarn, "", log,
 	)
 	mgr.workspaceInfoProvider = provider
+	mgr.taskEnvironmentRuntimeSecretWriter = &captureTaskEnvironmentRuntimeSecretWriter{}
 	mgr.secretStore = &inMemorySecretStore{store: map[string]*secrets.SecretWithValue{
 		"auth-secret":  {Secret: secrets.Secret{ID: "auth-secret"}, Value: "live-auth-token"},
 		"nonce-secret": {Secret: secrets.Secret{ID: "nonce-secret"}, Value: "live-bootstrap-nonce"},

@@ -151,6 +151,13 @@ test.describe("Mobile LSP boundaries", () => {
       const triggerBox = await statusButton.boundingBox();
       expect(triggerBox?.width).toBeGreaterThanOrEqual(44);
       expect(triggerBox?.height).toBeGreaterThanOrEqual(44);
+      const topbarBox = await testPage.getByTestId("task-topbar").boundingBox();
+      expect(triggerBox).not.toBeNull();
+      expect(topbarBox).not.toBeNull();
+      const visibleTriggerHeight =
+        Math.min(triggerBox!.y + triggerBox!.height, topbarBox!.y + topbarBox!.height) -
+        Math.max(triggerBox!.y, topbarBox!.y);
+      expect(visibleTriggerHeight).toBeGreaterThanOrEqual(44);
       await statusButton.tap();
 
       const drawer = testPage.getByTestId("app-status-drawer");

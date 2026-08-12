@@ -1781,6 +1781,8 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	if err := s.authorizeTaskID(ctx, id); err != nil {
 		return err
 	}
+	releaseLSPMutation := s.acquireTaskLSPMutation(id)
+	defer releaseLSPMutation()
 	// 1. Get task and verify it exists
 	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
@@ -2026,6 +2028,8 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 	deleteFromDB func(context.Context, string) (bool, error),
 ) (bool, error) {
 	start := time.Now()
+	releaseLSPMutation := s.acquireTaskLSPMutation(id)
+	defer releaseLSPMutation()
 
 	// 1. Get task (sync, fast)
 	task, err := s.tasks.GetTask(ctx, id)

@@ -382,7 +382,7 @@ func TestCleanupCancelsTaskWorkWhenEnvironmentLookupFails(t *testing.T) {
 	timer := &fakeScheduledTimer{}
 	watchCanceled := false
 	controller.recoveries[key] = &recoveryState{timer: timer}
-	controller.watches[key] = func() { watchCanceled = true }
+	controller.watches[key] = &taskLanguageWatch{cancel: func() { watchCanceled = true }}
 
 	if err := controller.CleanupTask(context.Background(), "task-1", "task_archived"); err == nil {
 		t.Fatal("cleanup unexpectedly succeeded")
@@ -396,7 +396,7 @@ func TestCleanupCancelsTaskWorkWhenEnvironmentLookupFails(t *testing.T) {
 func newReconcileController(store *memoryLSPStore, runtimes *reconcileRuntimes, capacity *Capacity) *Controller {
 	tasks := &fakeControllerTasks{environments: make(map[string]*models.TaskEnvironment)}
 	for _, taskID := range []string{"task-1", "disabled", "live-a", "live-b"} {
-		tasks.environments[taskID] = readyEnvironment(taskID, "local_pc")
+		tasks.environments[taskID] = readyEnvironment(taskID, executorTypeLocalPC)
 	}
 	return NewController(ControllerConfig{
 		Tasks: tasks, Store: store, Settings: &fakeLSPSettings{}, Runtimes: runtimes,
@@ -425,7 +425,7 @@ func storedLSPState(t *testing.T, store *memoryLSPStore, taskID, language string
 
 type reconcileRuntimes struct {
 	mu                 sync.Mutex
-	existing           map[string]*fakeLSPHost
+	existing           map[string]TaskHost
 	ensured            map[string]*fakeLSPHost
 	existingErrors     map[string]error
 	ensureCalls        int
@@ -458,7 +458,7 @@ func (s *cleanupSnapshotStore) ListTaskLSPLanguages(
 
 func newReconcileRuntimes() *reconcileRuntimes {
 	return &reconcileRuntimes{
-		existing: make(map[string]*fakeLSPHost), ensured: make(map[string]*fakeLSPHost),
+		existing: make(map[string]TaskHost), ensured: make(map[string]*fakeLSPHost),
 		existingErrors: make(map[string]error),
 	}
 }

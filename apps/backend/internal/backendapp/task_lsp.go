@@ -170,7 +170,7 @@ func configureTaskLSP(
 ) {
 	controller := services.TaskLSP
 	services.Task.SetTaskLSPLifecycle(controller)
-	orchestratorService.SetOnTaskStopCleanup(services.Task.CleanupTaskLSP)
+	orchestratorService.SetOnTaskStopCleanup(services.Task.StopTaskLSP)
 	orchestratorService.SetOnTaskEnvironmentReady(func(readyCtx context.Context, taskID string) {
 		if err := controller.ReconcileTask(readyCtx, taskID); err != nil && readyCtx.Err() == nil {
 			log.Warn("Task LSP environment-ready reconciliation failed",

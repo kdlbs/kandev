@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -115,6 +116,27 @@ func TestLSPDiscoveryRouteDetectsWithoutStartingProcess(t *testing.T) {
 	}
 	if processes := server.procMgr.ListProcesses(""); len(processes) != 0 {
 		t.Fatalf("discovery started processes: %#v", processes)
+	}
+}
+
+func TestTaskLSPWorkspaceRefreshRescansRepositoryRoots(t *testing.T) {
+	server := newTestServer(t)
+	t.Cleanup(func() { _ = server.procMgr.Stop(context.Background()) })
+	for _, name := range []string{"repo-a", "repo-b"} {
+		initWorkspaceGitRepo(t, filepath.Join(server.cfg.WorkDir, name))
+	}
+	if got := server.procMgr.RepoSubpaths(); len(got) != 0 {
+		t.Fatalf("initial repository subpaths = %v, want none", got)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/lsp/workspace/refresh", nil)
+	response := httptest.NewRecorder()
+	server.router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("workspace refresh status=%d body=%s", response.Code, response.Body.String())
+	}
+	if got := server.procMgr.RepoSubpaths(); len(got) != 2 || got[0] != "repo-a" || got[1] != "repo-b" {
+		t.Fatalf("repository subpaths after LSP refresh = %v, want [repo-a repo-b]", got)
 	}
 }
 

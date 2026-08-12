@@ -19,6 +19,14 @@ const (
 	discoveryRetryDelay         = time.Second
 )
 
+var discoveryRetryBackoffs = []time.Duration{time.Second, 5 * time.Second, 30 * time.Second}
+
+type discoveryRetryState struct {
+	attempts   int
+	timer      ScheduledTimer
+	timerEpoch uint64
+}
+
 // RefreshDiscovery explicitly refreshes bounded task-host evidence. It is a
 // human-facing operation, so task authorization precedes environment lookup.
 // Discovery is bounded and never starts a language server or project import.
@@ -28,8 +36,12 @@ func (c *Controller) RefreshDiscovery(ctx context.Context, taskID string) error 
 	if err := c.authorize(ctx, taskID); err != nil {
 		return err
 	}
-	if _, err := c.tasks.GetTask(ctx, taskID); err != nil {
+	task, err := c.tasks.GetTask(ctx, taskID)
+	if err != nil {
 		return err
+	}
+	if !taskAllowsLSPRuntime(task) {
+		return ErrTaskNotReady
 	}
 	return c.discoverTask(ctx, taskID, true)
 }
@@ -41,8 +53,12 @@ func (c *Controller) WorkspaceSourcesChanged(ctx context.Context, taskID string)
 	if err := c.authorize(ctx, taskID); err != nil {
 		return err
 	}
-	if _, err := c.tasks.GetTask(ctx, taskID); err != nil {
+	task, err := c.tasks.GetTask(ctx, taskID)
+	if err != nil {
 		return err
+	}
+	if !taskAllowsLSPRuntime(task) {
+		return ErrTaskNotReady
 	}
 	states, err := c.store.ListTaskLSPLanguages(ctx, taskID)
 	if err != nil {
@@ -136,6 +152,11 @@ func (c *Controller) discoverTask(ctx context.Context, taskID string, force bool
 	}
 	err := c.runDiscovery(ctx, taskID)
 	c.finishDiscovery(taskID, call, err)
+	if err != nil {
+		c.scheduleDiscoveryRetry(taskID)
+	} else {
+		c.cancelDiscoveryRetry(taskID)
+	}
 	return err
 }
 
@@ -164,6 +185,13 @@ func (c *Controller) runDiscovery(ctx context.Context, taskID string) error {
 		return fmt.Errorf("%w: %v", ErrTaskNotReady, err)
 	}
 	defer releaseAdmission()
+	task, err := c.tasks.GetTask(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if !taskAllowsLSPRuntime(task) {
+		return nil
+	}
 	environment, err := c.tasks.GetTaskEnvironmentByTaskID(ctx, taskID)
 	if err != nil {
 		return err
@@ -186,6 +214,61 @@ func (c *Controller) runDiscovery(ctx context.Context, taskID string) error {
 		return errors.Join(discoverErr, err)
 	}
 	return discoverErr
+}
+
+func (c *Controller) scheduleDiscoveryRetry(taskID string) {
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	if c.lifecycleCtx == nil || c.lifecycleCtx.Err() != nil || c.lifecycleCancel == nil {
+		return
+	}
+	if c.discoveryRetries == nil {
+		c.discoveryRetries = make(map[string]*discoveryRetryState)
+	}
+	retry := c.discoveryRetries[taskID]
+	if retry == nil {
+		retry = &discoveryRetryState{}
+		c.discoveryRetries[taskID] = retry
+	}
+	if retry.timer != nil || retry.attempts >= len(discoveryRetryBackoffs) {
+		return
+	}
+	delay := discoveryRetryBackoffs[retry.attempts]
+	retry.attempts++
+	retry.timerEpoch++
+	epoch := retry.timerEpoch
+	scheduler := c.scheduler
+	if scheduler == nil {
+		scheduler = realScheduler{}
+	}
+	retry.timer = scheduler.AfterFunc(delay, func() { c.runDiscoveryRetry(taskID, epoch) })
+}
+
+func (c *Controller) runDiscoveryRetry(taskID string, epoch uint64) {
+	c.lifecycleMu.Lock()
+	retry := c.discoveryRetries[taskID]
+	if retry == nil || retry.timer == nil || retry.timerEpoch != epoch ||
+		c.lifecycleCtx == nil || c.lifecycleCtx.Err() != nil || c.lifecycleCancel == nil {
+		c.lifecycleMu.Unlock()
+		return
+	}
+	retry.timer = nil
+	ctx := c.lifecycleCtx
+	c.lifecycleWG.Add(1)
+	c.lifecycleMu.Unlock()
+	defer c.lifecycleWG.Done()
+	_ = c.discoverTask(ctx, taskID, true)
+}
+
+func (c *Controller) cancelDiscoveryRetry(taskID string) {
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	if retry := c.discoveryRetries[taskID]; retry != nil {
+		if retry.timer != nil {
+			retry.timer.Stop()
+		}
+		delete(c.discoveryRetries, taskID)
+	}
 }
 
 func (c *Controller) persistDiscovery(ctx context.Context, taskID string, result DiscoveryResult) error {

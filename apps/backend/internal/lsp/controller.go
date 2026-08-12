@@ -133,17 +133,18 @@ type Controller struct {
 	scheduler Scheduler
 	publisher StatePublisher
 
-	lifecycleMu     sync.Mutex
-	lifecycleCtx    context.Context
-	lifecycleCancel context.CancelFunc
-	lifecycleWG     sync.WaitGroup
-	watches         map[TaskLanguageKey]context.CancelFunc
-	recoveries      map[TaskLanguageKey]*recoveryState
-	settingsApplyMu sync.Mutex
-	appliedSettings *TaskSettings
-	settingsSignal  chan struct{}
-	discoveryMu     sync.Mutex
-	discoveries     map[string]*discoveryCall
+	lifecycleMu      sync.Mutex
+	lifecycleCtx     context.Context
+	lifecycleCancel  context.CancelFunc
+	lifecycleWG      sync.WaitGroup
+	watches          map[TaskLanguageKey]*taskLanguageWatch
+	recoveries       map[TaskLanguageKey]*recoveryState
+	settingsApplyMu  sync.Mutex
+	appliedSettings  *TaskSettings
+	settingsSignal   chan struct{}
+	discoveryMu      sync.Mutex
+	discoveries      map[string]*discoveryCall
+	discoveryRetries map[string]*discoveryRetryState
 }
 
 func NewController(config ControllerConfig) *Controller {
@@ -159,10 +160,11 @@ func NewController(config ControllerConfig) *Controller {
 		tasks: config.Tasks, store: config.Store, settings: config.Settings,
 		runtimes: config.Runtimes, capacity: capacity, clock: clock,
 		scheduler: config.Scheduler, publisher: config.Publisher,
-		watches:        make(map[TaskLanguageKey]context.CancelFunc),
-		recoveries:     make(map[TaskLanguageKey]*recoveryState),
-		settingsSignal: make(chan struct{}, 1),
-		discoveries:    make(map[string]*discoveryCall),
+		watches:          make(map[TaskLanguageKey]*taskLanguageWatch),
+		recoveries:       make(map[TaskLanguageKey]*recoveryState),
+		settingsSignal:   make(chan struct{}, 1),
+		discoveries:      make(map[string]*discoveryCall),
+		discoveryRetries: make(map[string]*discoveryRetryState),
 	}
 }
 
@@ -170,15 +172,19 @@ func (c *Controller) Snapshot(ctx context.Context, taskID string) (*TaskSnapshot
 	if err := c.authorize(ctx, taskID); err != nil {
 		return nil, err
 	}
-	if _, err := c.tasks.GetTask(ctx, taskID); err != nil {
+	task, err := c.tasks.GetTask(ctx, taskID)
+	if err != nil {
 		return nil, err
 	}
-	// Bounded discovery is opportunistic and never starts an LSP or project
-	// import. Docker discovery may ensure the task host to inspect its filesystem.
-	_ = c.discoverTask(ctx, taskID, false)
-	// Converge already-persisted task policy after reload/resume. Errors are
-	// represented on the language rows so the status surface remains usable.
-	_ = c.ReconcileTask(ctx, taskID)
+	active := taskAllowsLSPRuntime(task)
+	if active {
+		// Bounded discovery is opportunistic and never starts an LSP or project
+		// import. Docker discovery may ensure the task host to inspect its filesystem.
+		_ = c.discoverTask(ctx, taskID, false)
+		// Converge already-persisted task policy after reload/resume. Errors are
+		// represented on the language rows so the status surface remains usable.
+		_ = c.ReconcileTask(ctx, taskID)
+	}
 	settings, err := c.loadSettings(ctx)
 	if err != nil {
 		return nil, err
@@ -193,7 +199,10 @@ func (c *Controller) Snapshot(ctx context.Context, taskID string) (*TaskSnapshot
 			byLanguage[state.Language] = state
 		}
 	}
-	runtimeByLanguage := c.liveRuntimeSnapshots(ctx, taskID, states)
+	runtimeByLanguage := make(map[string]RuntimeSnapshot)
+	if active {
+		runtimeByLanguage = c.liveRuntimeSnapshots(ctx, taskID, states)
+	}
 	languages := registeredLanguages()
 	result := &TaskSnapshot{
 		TaskID:    taskID,
@@ -327,8 +336,12 @@ func (c *Controller) ResolveAttachment(
 	if !installer.IsSupported(language) {
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedLanguage, language)
 	}
-	if _, err := c.tasks.GetTask(ctx, taskID); err != nil {
+	task, err := c.tasks.GetTask(ctx, taskID)
+	if err != nil {
 		return nil, err
+	}
+	if !taskAllowsLSPRuntime(task) {
+		return nil, ErrTaskNotReady
 	}
 	state, _, err := c.store.GetTaskLSPLanguage(ctx, taskID, language)
 	if err != nil {
@@ -419,13 +432,18 @@ func (c *Controller) start(
 		snapshot := c.languageSnapshot(*current, settings, nil)
 		return &snapshot, nil
 	}
-	if action == ActionRestart &&
-		(current.Policy == PolicyDisabled || current.Generation == 0 || !phaseHasServer(current.Phase)) {
+	if restartRequiresRunningServer(action, *current) {
 		return nil, ErrServerDisabled
+	}
+	if !taskAllowsLSPRuntime(task) {
+		return c.waitForTaskWithoutAllocation(ctx, *current, settings, origin, action)
 	}
 	environment, err := c.tasks.GetTaskEnvironmentByTaskID(ctx, taskID)
 	if err != nil {
 		return nil, err
+	}
+	if !readyTaskEnvironment(environment) {
+		return c.waitForTaskWithoutAllocation(ctx, *current, settings, origin, action)
 	}
 	if snapshot, handled, reconnectErr := c.reconnectBeforeStart(
 		ctx, *current, settings, environment, action, origin,
@@ -440,6 +458,42 @@ func (c *Controller) start(
 		return nil, err
 	}
 	return c.startAllocatedWithEnvironment(ctx, task, *state, settings, acceptedAt, action, environment)
+}
+
+func restartRequiresRunningServer(action Action, state TaskLanguageState) bool {
+	return action == ActionRestart &&
+		(state.Policy == PolicyDisabled || state.Generation == 0 || !phaseHasServer(state.Phase))
+}
+
+func (c *Controller) waitForTaskWithoutAllocation(
+	ctx context.Context,
+	state TaskLanguageState,
+	settings TaskSettings,
+	origin Origin,
+	action Action,
+) (*LanguageSnapshot, error) {
+	switch action {
+	case ActionStart:
+		updated, updateErr := c.recordExplicitStartIntent(ctx, state, origin)
+		if updateErr != nil {
+			return nil, updateErr
+		}
+		state = *updated
+	case ActionRestart:
+		now := c.clock()
+		updated, updateErr := c.updateState(ctx, state.TaskID, state.Language, func(next *TaskLanguageState) {
+			next.LastAction = ActionRestart
+			next.LastActionAt = &now
+			next.LastInitiator = origin.Initiator
+			next.LastRestartReason = origin.Reason
+			next.LastTransitionAt = now
+		})
+		if updateErr != nil {
+			return nil, updateErr
+		}
+		state = *updated
+	}
+	return c.transition(ctx, state, settings, PhaseWaitingForTask, "", "")
 }
 
 func (c *Controller) reconnectBeforeStart(
@@ -683,6 +737,10 @@ func (c *Controller) authorize(ctx context.Context, taskID string) error {
 		return errors.New("task LSP controller task service is not configured")
 	}
 	return c.tasks.AuthorizeTaskAccess(ctx, taskID)
+}
+
+func taskAllowsLSPRuntime(task *taskmodels.Task) bool {
+	return task != nil && task.ArchivedAt == nil
 }
 
 func (c *Controller) loadSettings(ctx context.Context) (TaskSettings, error) {

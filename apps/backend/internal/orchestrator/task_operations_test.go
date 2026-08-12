@@ -262,6 +262,28 @@ func TestStopTaskCleansTaskLSPBeforeReview(t *testing.T) {
 	}
 }
 
+func TestStopTaskCleansTaskLSPWhenNoSessionExecutionExists(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "task1", v1.TaskStateInProgress)
+	svc := newCoordinatorStopTestService(repo, taskRepo, &mockAgentManager{repoForExecutionLookup: repo})
+
+	cleanupCalls := 0
+	svc.SetOnTaskStopCleanup(func(_ context.Context, taskID, reason string) error {
+		cleanupCalls++
+		if taskID != "task1" || reason != "user_stop" {
+			t.Fatalf("cleanup task=%q reason=%q", taskID, reason)
+		}
+		return nil
+	})
+
+	_ = svc.StopTask(ctx, "task1", "user_stop", false)
+	if cleanupCalls != 1 {
+		t.Fatalf("cleanup calls = %d, want task-owned cleanup despite no session execution", cleanupCalls)
+	}
+}
+
 func TestStopTaskForCoordinator_StopsAndIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -347,6 +369,32 @@ func TestStopTaskForCoordinatorCleansTaskLSPBeforeReview(t *testing.T) {
 	}
 	if got := taskRepo.updatedStates["task1"]; got != v1.TaskStateReview {
 		t.Fatalf("task state = %q, want REVIEW", got)
+	}
+}
+
+func TestStopTaskForCoordinatorCleansTaskLSPWhenNoSessionIsRunning(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "task1", v1.TaskStateInProgress)
+	service := newCoordinatorStopTestService(
+		repo, taskRepo, &mockAgentManager{repoForExecutionLookup: repo},
+	)
+	cleanupCalls := 0
+	service.SetOnTaskStopCleanup(func(_ context.Context, taskID, reason string) error {
+		cleanupCalls++
+		if taskID != "task1" || reason != coordinatorMCPStopReason {
+			t.Fatalf("cleanup task=%q reason=%q", taskID, reason)
+		}
+		return nil
+	})
+
+	result, err := service.StopTaskForCoordinator(ctx, "task1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != CoordinatorTaskStopStatusNotRunning || cleanupCalls != 1 {
+		t.Fatalf("result=%#v cleanup calls=%d", result, cleanupCalls)
 	}
 }
 

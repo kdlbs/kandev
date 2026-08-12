@@ -277,6 +277,16 @@ func (m *Manager) UpdateWorkspaceFolders(folders []WorkspaceFolder) (sharedlsp.W
 			continue
 		}
 		added, removed := workspaceFolderDiff(current.workspace.WorkspaceFolders, folders)
+		if len(added) == 0 && len(removed) == 0 &&
+			!workspaceFoldersEqual(current.workspace.WorkspaceFolders, folders) {
+			// LSP folder-change notifications describe set membership only. A
+			// pure reorder (or rename at the same URI) cannot be represented
+			// honestly, so preserve the live generation's scope and require one
+			// deliberate restart to adopt the new ordered roots.
+			result.RestartRequiredLanguages = append(result.RestartRequiredLanguages, language)
+			slot.opMu.Unlock()
+			continue
+		}
 		if len(added) != 0 || len(removed) != 0 {
 			params, marshalErr := json.Marshal(map[string]any{
 				"event": map[string]any{"added": added, "removed": removed},
@@ -323,6 +333,18 @@ func normalizeWorkspaceFolders(folders []WorkspaceFolder) []WorkspaceFolder {
 		result = append(result, folder)
 	}
 	return result
+}
+
+func workspaceFoldersEqual(left, right []WorkspaceFolder) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func supportsWorkspaceFolderChanges(capabilities json.RawMessage) bool {
@@ -467,6 +489,14 @@ func (m *Manager) closeAll(ctx context.Context) error {
 			m.publishPhase(slot.runtime.language, slot.runtime.generation, sharedlsp.PhaseStopping)
 			if err := m.stopRuntime(ctx, slot.runtime); err != nil {
 				stopErrors = append(stopErrors, err)
+				m.publishError(
+					slot.runtime.language,
+					slot.runtime.generation,
+					"process_cleanup_failed",
+					err,
+				)
+				slot.opMu.Unlock()
+				continue
 			}
 			m.publishOff(slot.runtime.language, slot.runtime.generation)
 			slot.runtime = nil
@@ -530,7 +560,25 @@ func (m *Manager) runRuntime(slot *languageSlot, current *runtime) {
 	}
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), processCleanupTimeout)
 	defer cancel()
-	_ = m.processes.StopProcess(cleanupCtx, process.StopProcessRequest{ProcessID: current.process.ID})
+	cleanupErr := m.processes.StopProcess(
+		cleanupCtx,
+		process.StopProcessRequest{ProcessID: current.process.ID},
+	)
+	if errors.Is(cleanupErr, process.ErrProcessNotFound) {
+		cleanupErr = nil
+	}
+	cleanupErr = errors.Join(cleanupErr, waitForRuntimeCleanup(cleanupCtx, current))
+	if cleanupErr != nil {
+		if !current.stopping.Load() && !m.isClosed() {
+			m.publishError(
+				current.language,
+				current.generation,
+				"process_cleanup_failed",
+				errors.Join(err, cleanupErr),
+			)
+		}
+		return
+	}
 	slot.runtime = nil
 	if current.stopping.Load() || m.isClosed() {
 		return
@@ -548,6 +596,9 @@ func (m *Manager) stopRuntime(ctx context.Context, current *runtime) error {
 	cleanupCtx, cancel := cleanupContext(ctx)
 	defer cancel()
 	stopErr := m.processes.StopProcess(cleanupCtx, process.StopProcessRequest{ProcessID: current.process.ID})
+	if errors.Is(stopErr, process.ErrProcessNotFound) {
+		stopErr = nil
+	}
 	current.closeStreams()
 	stopErr = errors.Join(stopErr, waitForRuntimeCleanup(cleanupCtx, current))
 	return stopErr
@@ -559,12 +610,7 @@ func waitForRuntimeCleanup(ctx context.Context, current *runtime) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	select {
-	case <-current.process.Done:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	return current.process.WaitCleanup(ctx)
 }
 
 func cleanupContext(parent context.Context) (context.Context, context.CancelFunc) {

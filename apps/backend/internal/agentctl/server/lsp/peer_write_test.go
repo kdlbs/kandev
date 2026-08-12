@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"context"
 	"errors"
 	"io"
 	"math"
@@ -85,5 +86,45 @@ func TestPeerWriteTimeoutClosesBlockedStdin(t *testing.T) {
 	case <-writer.closed:
 	default:
 		t.Fatal("timed-out writer was not closed")
+	}
+}
+
+func TestPeerCanceledCallDoesNotWaitForBlockedWriter(t *testing.T) {
+	writer := newBlockingPeerWriter()
+	protocolPeer := &peer{
+		stdin: writer, pending: make(map[string]chan rpcResponse), done: make(chan struct{}),
+		writeTimeout: time.Second,
+	}
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- protocolPeer.write(rpcMessage{JSONRPC: rpcVersion, Method: "test/blocked"})
+	}()
+	select {
+	case <-writer.started:
+	case <-time.After(time.Second):
+		t.Fatal("first write did not block")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	callDone := make(chan error, 1)
+	go func() {
+		_, err := protocolPeer.callRaw(ctx, "textDocument/hover", nil)
+		callDone <- err
+	}()
+	cancel()
+	select {
+	case err := <-callDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("canceled call error = %v, want context canceled", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("canceled call remained blocked on the peer write lock")
+	}
+
+	_ = writer.Close()
+	select {
+	case <-firstDone:
+	case <-time.After(time.Second):
+		t.Fatal("first blocked write did not exit")
 	}
 }
