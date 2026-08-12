@@ -110,7 +110,12 @@ func TestPollerStopDrainsAndRestarts(t *testing.T) {
 
 		poller := NewPoller(service, logger.Default())
 		ctx, cancel := context.WithCancel(context.Background())
-		t.Cleanup(cancel)
+		// Registered up front, before any t.Fatalf path: Stop is idempotent, so
+		// this stays correct across the explicit Stop and restart below.
+		t.Cleanup(func() {
+			cancel()
+			poller.Stop()
+		})
 
 		poller.Start(ctx)
 		poller.Start(ctx) // second Start must not launch a second loop
@@ -140,7 +145,6 @@ func TestPollerStopDrainsAndRestarts(t *testing.T) {
 
 		poller.Start(ctx)
 		synctest.Wait()
-		t.Cleanup(poller.Stop)
 		restarted, err := store.ListWorkItemWatchTasks(t.Context(), watch.ID, watch.Generation)
 		if err != nil || len(restarted) != 2 {
 			t.Fatalf("restarted poller reservations = %+v, %v", restarted, err)

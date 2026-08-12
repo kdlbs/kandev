@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -200,69 +201,66 @@ func TestCreatePullRequestWatchDeniesForeignWorkspaceAccess(t *testing.T) {
 
 // TestCreatePullRequestWatchRunsTheInitialCheck proves the create path fires
 // its own first poll rather than waiting a full interval for the poller.
+//
+// CreatePullRequestWatch runs that first check on an untracked goroutine, so
+// the test runs inside a synctest bubble and joins it with synctest.Wait
+// instead of polling the store or racing a wall-clock deadline.
 func TestCreatePullRequestWatchRunsTheInitialCheck(t *testing.T) {
-	client := &watchClient{page: &PullRequestPage{Items: []PullRequest{{
-		ID: 42, ProjectID: "project-1", RepositoryID: "azure-repo-1",
-		WebURL: "https://azure/pr/42", Title: "Ship it",
-	}}}}
-	service, store := newWatchService(t, client)
-	eventBus := bus.NewMemoryEventBus(logger.Default())
-	service.SetEventBus(eventBus)
-	published := make(chan *PullRequestWatchEvent, 1)
-	if _, err := eventBus.Subscribe(events.AzureDevOpsPullRequestWatchMatch, func(_ context.Context, event *bus.Event) error {
-		published <- event.Data.(*PullRequestWatchEvent)
-		return nil
-	}); err != nil {
-		t.Fatalf("subscribe: %v", err)
-	}
-
-	req := validPullRequestWatchRequest()
-	req.CreatorID = "creator-1"
-	req.ReviewerID = "reviewer-1"
-	req.PollIntervalSeconds = 5
-	watch, err := service.CreatePullRequestWatch(t.Context(), req)
-	if err != nil {
-		t.Fatalf("CreatePullRequestWatch: %v", err)
-	}
-	if watch.ID == "" || !watch.Enabled || watch.Generation != 1 ||
-		watch.PollIntervalSeconds != minWatchPollIntervalSeconds ||
-		watch.CleanupPolicy != CleanupPolicyAuto {
-		t.Fatalf("created watch = %+v", watch)
-	}
-
-	select {
-	case event := <-published:
-		if event.PullRequest.ID != 42 || event.WatchID != watch.ID ||
-			event.AzureRepositoryID != "azure-repo-1" || event.WorkspaceID != "ws-1" ||
-			event.WorkflowStepID != "step-1" || event.RepositoryID != "repo-1" ||
-			event.BaseBranch != "main" || event.Prompt != "Review {{title}}" ||
-			!event.ReservationClaimed {
-			t.Fatalf("initial watch event = %+v", event)
+	synctest.Test(t, func(t *testing.T) {
+		client := &watchClient{page: &PullRequestPage{Items: []PullRequest{{
+			ID: 42, ProjectID: "project-1", RepositoryID: "azure-repo-1",
+			WebURL: "https://azure/pr/42", Title: "Ship it",
+		}}}}
+		service, store := newWatchService(t, client)
+		eventBus := bus.NewMemoryEventBus(logger.Default())
+		service.SetEventBus(eventBus)
+		published := make(chan *PullRequestWatchEvent, 1)
+		if _, err := eventBus.Subscribe(events.AzureDevOpsPullRequestWatchMatch, func(_ context.Context, event *bus.Event) error {
+			published <- event.Data.(*PullRequestWatchEvent)
+			return nil
+		}); err != nil {
+			t.Fatalf("subscribe: %v", err)
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("initial pull-request check never published a match")
-	}
 
-	filter := client.filter()
-	if filter.ProjectID != "project-1" || filter.RepositoryID != "azure-repo-1" ||
-		filter.Status != "active" || filter.CreatorID != "creator-1" ||
-		filter.ReviewerID != "reviewer-1" || filter.Top != 100 {
-		t.Fatalf("upstream filter = %+v", filter)
-	}
-	waitForReservation(t, store, watch.ID, watch.Generation)
-}
-
-func waitForReservation(t *testing.T, store *Store, watchID string, generation int64) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		rows, err := store.ListPullRequestWatchTasks(t.Context(), watchID, generation)
-		if err == nil && len(rows) == 1 && rows[0].PullRequestID == 42 {
-			return
+		req := validPullRequestWatchRequest()
+		req.CreatorID = "creator-1"
+		req.ReviewerID = "reviewer-1"
+		req.PollIntervalSeconds = 5
+		watch, err := service.CreatePullRequestWatch(t.Context(), req)
+		if err != nil {
+			t.Fatalf("CreatePullRequestWatch: %v", err)
 		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatal("reservation row was never written for the initial pull-request match")
+		if watch.ID == "" || !watch.Enabled || watch.Generation != 1 ||
+			watch.PollIntervalSeconds != minWatchPollIntervalSeconds ||
+			watch.CleanupPolicy != CleanupPolicyAuto {
+			t.Fatalf("created watch = %+v", watch)
+		}
+		synctest.Wait()
+
+		select {
+		case event := <-published:
+			if event.PullRequest.ID != 42 || event.WatchID != watch.ID ||
+				event.AzureRepositoryID != "azure-repo-1" || event.WorkspaceID != "ws-1" ||
+				event.WorkflowStepID != "step-1" || event.RepositoryID != "repo-1" ||
+				event.BaseBranch != "main" || event.Prompt != "Review {{title}}" ||
+				!event.ReservationClaimed {
+				t.Fatalf("initial watch event = %+v", event)
+			}
+		default:
+			t.Fatal("initial pull-request check never published a match")
+		}
+
+		filter := client.filter()
+		if filter.ProjectID != "project-1" || filter.RepositoryID != "azure-repo-1" ||
+			filter.Status != "active" || filter.CreatorID != "creator-1" ||
+			filter.ReviewerID != "reviewer-1" || filter.Top != 100 {
+			t.Fatalf("upstream filter = %+v", filter)
+		}
+		rows, err := store.ListPullRequestWatchTasks(t.Context(), watch.ID, watch.Generation)
+		if err != nil || len(rows) != 1 || rows[0].PullRequestID != 42 {
+			t.Fatalf("reservations after the initial check = %+v, %v", rows, err)
+		}
+	})
 }
 
 func TestUpdatePullRequestWatchAppliesEveryRequestedField(t *testing.T) {
