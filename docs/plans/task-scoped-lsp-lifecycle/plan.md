@@ -512,6 +512,11 @@ Completed 2026-08-05.
   stage, overflow fails and detaches the attachment while closing its stream, browser recovery
   continues at the capped backoff, and Docker instances retain a non-persisted effective cleanup
   credential. Each defect has a red-first regression, including an auth-enforcing rollback server.
+- The remediated branch rebased without conflict onto `origin/main` at `d616a1fcd`. Exact-base
+  verification passed the agentctl LSP/API, lifecycle, task-service, and SQLite packages under the
+  race detector; changed-code Go lint with zero issues; 29 focused frontend tests; strict targeted
+  ESLint; web typecheck; the i18n ratchet; all 62 public-doc validator tests; validation of all 41
+  published pages; and the three-dot diff whitespace check.
 
 ---
 

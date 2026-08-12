@@ -191,6 +191,11 @@ Completed 2026-08-12.
   from the optional durable-token update. The two attachment regressions passed 10 race-enabled
   repetitions; full agentctl LSP/API and lifecycle race suites passed; 29 focused frontend tests,
   strict targeted ESLint, and web typecheck passed.
+- The remediated branch rebased without conflict onto `origin/main` at `d616a1fcd`. Exact-base
+  verification passed the agentctl LSP/API, lifecycle, task-service, and SQLite packages under the
+  race detector; changed-code Go lint with zero issues; 29 focused frontend tests; strict targeted
+  ESLint; web typecheck; the i18n ratchet; all 62 public-doc validator tests; validation of all 41
+  published pages; and the three-dot diff whitespace check.
 
 ## Files
 
