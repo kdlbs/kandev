@@ -39,6 +39,8 @@ type Service struct {
 	historyStop          chan struct{}
 	historyDone          chan struct{}
 	historyCloseOnce     sync.Once
+	historyMu            sync.RWMutex
+	historyClosed        bool
 }
 
 type historyWrite struct {
@@ -102,25 +104,50 @@ func (s *Service) runHistoryWriter() {
 			}
 			cancel()
 		case <-s.historyStop:
-			for {
-				select {
-				case write := <-s.historyQueue:
-					ctx, cancel := context.WithTimeout(context.Background(), constants.StepHistoryWriteTimeout)
-					_ = s.CreateStepTransition(ctx, write.sessionID, write.fromStepID, write.toStepID, write.trigger, write.actorID, write.metadata)
-					cancel()
-				default:
-					return
-				}
+			s.drainHistoryQueue()
+			return
+		}
+	}
+}
+
+// drainHistoryQueue flushes whatever is left in the queue at shutdown under a
+// single bounded deadline shared by every remaining row, rather than a fresh
+// StepHistoryWriteTimeout per row — a stalled database and a full 256-row
+// queue would otherwise be able to block graceful shutdown for minutes. Rows
+// that don't fit inside the deadline are dropped; this audit trail is
+// best-effort and must never hold up shutdown.
+func (s *Service) drainHistoryQueue() {
+	ctx, cancel := context.WithTimeout(context.Background(), constants.StepHistoryWriteTimeout)
+	defer cancel()
+	for {
+		select {
+		case write := <-s.historyQueue:
+			if err := s.CreateStepTransition(ctx, write.sessionID, write.fromStepID, write.toStepID, write.trigger, write.actorID, write.metadata); err != nil {
+				s.logger.Warn("failed to write queued step transition during shutdown", zap.Error(err))
 			}
+		case <-ctx.Done():
+			if dropped := len(s.historyQueue); dropped > 0 {
+				s.logger.Warn("dropped queued step transitions at shutdown deadline", zap.Int("dropped", dropped))
+			}
+			return
+		default:
+			return
 		}
 	}
 }
 
 // EnqueueStepTransition records transition history outside the caller's
-// event-reader path. The queue is bounded. A full queue is logged as a
-// dropped best-effort telemetry row, while the workflow mutation succeeds.
+// event-reader path. The queue is bounded. A full queue, or an enqueue after
+// Close has begun, is logged as a dropped best-effort telemetry row while the
+// workflow mutation itself succeeds.
 func (s *Service) EnqueueStepTransition(sessionID, fromStepID, toStepID string, trigger models.StepTransitionTrigger, actorID *string, metadata map[string]interface{}) {
 	if sessionID == "" {
+		return
+	}
+	s.historyMu.RLock()
+	defer s.historyMu.RUnlock()
+	if s.historyClosed {
+		s.logger.Warn("dropped step transition enqueued after shutdown", zap.String("session_id", sessionID))
 		return
 	}
 	select {
@@ -130,12 +157,21 @@ func (s *Service) EnqueueStepTransition(sessionID, fromStepID, toStepID string, 
 	}
 }
 
-// Close drains queued history writes before service shutdown.
+// Close stops accepting new history writes, drains the queue under a bounded
+// deadline, and waits for the writer goroutine to exit. The closed flag is
+// set under the same lock EnqueueStepTransition holds across its
+// check-and-send, so no enqueue can land in the queue after a concurrent
+// Close has started shutting it down.
 func (s *Service) Close() error {
 	if s.historyStop == nil {
 		return nil
 	}
-	s.historyCloseOnce.Do(func() { close(s.historyStop) })
+	s.historyCloseOnce.Do(func() {
+		s.historyMu.Lock()
+		s.historyClosed = true
+		s.historyMu.Unlock()
+		close(s.historyStop)
+	})
 	<-s.historyDone
 	return nil
 }

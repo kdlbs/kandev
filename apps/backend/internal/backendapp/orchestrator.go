@@ -172,14 +172,17 @@ func provideOrchestrator(
 		taskSvc.PublishTaskUpdated(ctx, task)
 	})
 
-	// Wire workflow step getter for prompt building
+	// Wire workflow step getter for prompt building. The recorder is wired
+	// first: SetStepHistoryRecorder's own initWorkflowEngine() call is a
+	// no-op while workflowStepGetter is still nil, so the store/engine only
+	// get built once, by SetWorkflowStepGetter below, instead of twice.
 	if workflowSvc != nil {
-		orchestratorSvc.SetWorkflowStepGetter(&orchestratorWorkflowStepGetterAdapter{svc: workflowSvc})
 		// Wire the ADR 0015 audit-trail writer for auto-advance step
 		// transitions. workflowSvc.CreateStepTransition already matches
 		// orchestrator.StepHistoryRecorder structurally, so no adapter is
 		// needed.
 		orchestratorSvc.SetStepHistoryRecorder(workflowSvc)
+		orchestratorSvc.SetWorkflowStepGetter(&orchestratorWorkflowStepGetterAdapter{svc: workflowSvc})
 	}
 
 	// Wire agent family resolution so configure_session rules can name an agent

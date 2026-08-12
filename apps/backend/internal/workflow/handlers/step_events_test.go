@@ -109,7 +109,9 @@ func setupStepRouter(t *testing.T) (*gin.Engine, *bus.MemoryEventBus, *repositor
 	}
 	log := logger.Default()
 	eventBus := bus.NewMemoryEventBus(log)
-	h := NewHandlers(controller.NewController(service.NewService(repo, log)), eventBus, log)
+	workflowSvc := service.NewService(repo, log)
+	t.Cleanup(func() { _ = workflowSvc.Close() })
+	h := NewHandlers(controller.NewController(workflowSvc), eventBus, log)
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
