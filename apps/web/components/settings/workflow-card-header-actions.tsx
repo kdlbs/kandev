@@ -75,7 +75,7 @@ export function WorkflowCardHeaderActions({
               variant="outline"
               onClick={() => void onDuplicateClick()}
               disabled={duplicateDisabled}
-              className="cursor-pointer min-h-11 sm:min-h-9"
+              className="cursor-pointer"
               data-testid="duplicate-workflow-button"
             >
               <IconCopy className="h-4 w-4 mr-2" />

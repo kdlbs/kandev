@@ -23,11 +23,16 @@ test.describe("mobile: workflow duplication", () => {
     await settings.goto(seedData.workspaceId);
     const sourceCard = await settings.findWorkflowCard("Mobile Duplication Source");
     const duplicateButton = settings.duplicateWorkflowButton(sourceCard);
+    const exportButton = sourceCard.getByRole("button", { name: "Export", exact: true });
     await expect(duplicateButton).toBeVisible();
     await expect(duplicateButton).toBeEnabled();
-    const duplicateBox = await duplicateButton.boundingBox();
+    const [duplicateBox, exportBox] = await Promise.all([
+      duplicateButton.boundingBox(),
+      exportButton.boundingBox(),
+    ]);
     expect(duplicateBox).not.toBeNull();
-    expect(duplicateBox!.height).toBeGreaterThanOrEqual(44);
+    expect(exportBox).not.toBeNull();
+    expect(duplicateBox!.height).toBe(exportBox!.height);
 
     await settings.duplicateWorkflow(sourceCard, true);
     const copyCard = await settings.findWorkflowCard("Mobile Duplication Source (copy)", {
