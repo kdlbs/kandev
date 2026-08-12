@@ -23,14 +23,43 @@ function seedStaleCheckout(git: GitHelper, remoteUrl: string): string {
   return git.getCurrentSha();
 }
 
-function rewrittenProviderCommits() {
-  return Array.from({ length: 15 }, (_, index) => ({
-    sha: `${String(index + 1).padStart(2, "0")}${"b".repeat(38)}`,
-    message: `Mobile rewritten provider commit ${index + 1}`,
-    author_login: "mobile-remote-contributor",
-    author_date: `2026-08-${String(index + 1).padStart(2, "0")}T12:00:00Z`,
-    stats_available: false,
-  }));
+function createRewrittenProviderHistory(
+  git: GitHelper,
+  branch: string,
+): {
+  head: string;
+  commits: Array<{
+    sha: string;
+    message: string;
+    author_login: string;
+    author_date: string;
+    stats_available: boolean;
+  }>;
+} {
+  git.exec("git checkout -B kandev-e2e-provider-rewrite origin/main");
+  const commits: Array<{
+    sha: string;
+    message: string;
+    author_login: string;
+    author_date: string;
+    stats_available: boolean;
+  }> = [];
+  for (let index = 1; index <= 15; index += 1) {
+    const message = `Mobile rewritten provider commit ${index}`;
+    git.createFile(`mobile-provider-rewrite-${index}.txt`, message);
+    git.stageFile(`mobile-provider-rewrite-${index}.txt`);
+    const sha = git.commit(message);
+    commits.push({
+      sha,
+      message,
+      author_login: "mobile-remote-contributor",
+      author_date: `2026-08-${String(index).padStart(2, "0")}T12:00:00Z`,
+      stats_available: false,
+    });
+  }
+  git.exec(`git push --force origin HEAD:refs/heads/${branch}`);
+  git.exec("git checkout -f main");
+  return { head: commits[commits.length - 1].sha, commits };
 }
 
 async function swipeUpOnElement(page: Page, element: Locator): Promise<void> {
@@ -71,7 +100,7 @@ test.describe("Mobile rewritten contribution history", () => {
     git.exec("git clean -fd");
   });
 
-  test("preserves local history and disables remote mutations after a rewrite", async ({
+  test("local-first contribution menu preserves local history after a rewrite", async ({
     testPage,
     apiClient,
     seedData,
@@ -81,6 +110,8 @@ test.describe("Mobile rewritten contribution history", () => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
     const localHead = seedStaleCheckout(git, seedData.repositoryRemoteURL);
+    const providerBranch = "feature/mobile-rewritten";
+    const providerHistory = createRewrittenProviderHistory(git, providerBranch);
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Mobile Rewritten Contribution History",
@@ -92,8 +123,6 @@ test.describe("Mobile rewritten contribution history", () => {
         repository_ids: [seedData.repositoryId],
       },
     );
-    const providerCommits = rewrittenProviderCommits();
-
     await apiClient.mockGitHubReset();
     await apiClient.mockGitHubSetUser("mobile-remote-contributor");
     await apiClient.mockGitHubAddPRs([
@@ -101,15 +130,15 @@ test.describe("Mobile rewritten contribution history", () => {
         number: 902,
         title: "Mobile rewritten contribution",
         state: "open",
-        head_branch: "feature/mobile-rewritten",
+        head_branch: providerBranch,
         base_branch: "main",
         author_login: "mobile-remote-contributor",
         repo_owner: "testorg",
         repo_name: "testrepo",
-        head_sha: providerCommits[providerCommits.length - 1].sha,
+        head_sha: providerHistory.head,
       },
     ]);
-    await apiClient.mockGitHubAddPRCommits("testorg", "testrepo", 902, providerCommits);
+    await apiClient.mockGitHubAddPRCommits("testorg", "testrepo", 902, providerHistory.commits);
     await apiClient.mockGitHubAssociateTaskPR({
       task_id: task.id,
       owner: "testorg",
@@ -126,18 +155,25 @@ test.describe("Mobile rewritten contribution history", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 45_000 });
+    git.exec(`git checkout -B ${providerBranch} ${localHead}`);
+    git.exec(`git branch --set-upstream-to=origin/${providerBranch} ${providerBranch}`);
     await testPage.getByRole("button", { name: "Changes" }).tap();
 
     const changes = testPage.getByTestId("mobile-changes-panel");
-    await expect(changes.getByTestId("remote-contribution-drift-warning")).toBeVisible({
-      timeout: 30_000,
-    });
+    await expect(changes.getByTestId("remote-contribution-drift-status")).toHaveCount(0);
     const providerSection = changes.getByTestId("current-pr-commits-section");
     const localSection = changes.getByTestId("local-checkout-commits-section");
     await expect(providerSection).toBeVisible({ timeout: 10_000 });
     await expect(localSection).toBeVisible({ timeout: 10_000 });
-    await expect(providerSection.locator('[data-testid^="commit-row-"]')).toHaveCount(15);
+    await expect(
+      providerSection.getByTestId("current-pr-commits-section-collapse-toggle"),
+    ).toContainText("PR #902 version");
+    await expect(
+      providerSection.getByTestId("current-pr-commits-section-collapse-toggle"),
+    ).toHaveAttribute("aria-expanded", "false");
     await expect(localSection.locator('[data-testid^="commit-row-"]')).toHaveCount(6);
+    await providerSection.getByTestId("current-pr-commits-section-collapse-toggle").tap();
+    await expect(providerSection.locator('[data-testid^="commit-row-"]')).toHaveCount(15);
     await expect(providerSection.locator(".tabler-icon-arrow-up")).toHaveCount(0);
     await expect(localSection.locator(".tabler-icon-arrow-up")).toHaveCount(0);
 
@@ -153,9 +189,6 @@ test.describe("Mobile rewritten contribution history", () => {
     await swipeUpOnElement(testPage, scroller);
     await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
 
-    const changesPull = changes.getByRole("button", { name: /^Pull$/ });
-    await expect(changesPull).toBeDisabled();
-
     const gitActions = testPage.getByTestId("mobile-git-actions");
     await gitActions.tap();
     const openMenu = testPage.locator('[data-slot="dropdown-menu-content"][data-state="open"]');
@@ -165,10 +198,20 @@ test.describe("Mobile rewritten contribution history", () => {
       "aria-disabled",
       "true",
     );
-    await expect(menuItems.filter({ hasText: /^Pull$/ })).toHaveAttribute("aria-disabled", "true");
-    await expect(
-      openMenu.locator('[data-slot="dropdown-menu-sub-trigger"]').filter({ hasText: /^Push/ }),
-    ).toHaveAttribute("aria-disabled", "true");
+    await expect(openMenu.getByTestId("mobile-replace-pr-branch")).toBeVisible();
+    await expect(openMenu.getByTestId("mobile-use-pr-version")).toBeVisible();
+    await expect(openMenu.getByTestId("mobile-view-pr-version")).toContainText("PR #902 version");
+    await expect(openMenu).toContainText("Replace the published PR branch");
+    await expect(openMenu).toContainText("Use the current PR version");
+    await expect(openMenu).toContainText("Open PR #902 version");
+    await expect(menuItems.filter({ hasText: /^Pull$/ })).toHaveCount(0);
+    await expect(openMenu.locator('[data-slot="dropdown-menu-sub-trigger"]')).toHaveCount(0);
+    await openMenu.getByTestId("mobile-replace-pr-branch").tap();
+    const drawer = testPage.getByTestId("mobile-remote-contribution-drawer");
+    await expect(drawer).toBeVisible();
+    await expect(drawer).toContainText(providerHistory.head);
+    await expect(testPage.getByTestId("mobile-remote-contribution-confirm")).toHaveClass(/h-11/);
+    await drawer.getByRole("button", { name: "Cancel" }).tap();
 
     expect(git.getCurrentSha()).toBe(localHead);
     expect(git.exec("git status --porcelain").trim()).toBe("");
@@ -178,7 +221,7 @@ test.describe("Mobile rewritten contribution history", () => {
       ),
     ).toBe(true);
     await prCapture.screenshot("remote-contribution-drift-mobile", {
-      caption: "Pixel 5 keeps the preserved checkout separate and blocks remote mutations",
+      caption: "Pixel 5 preserves the local checkout and offers explicit provider version choices",
     });
   });
 });

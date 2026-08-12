@@ -12,11 +12,13 @@ import (
 // GitOperationResult represents the result of a git operation.
 // This matches the server-side process.GitOperationResult.
 type GitOperationResult struct {
-	Success       bool     `json:"success"`
-	Operation     string   `json:"operation"`
-	Output        string   `json:"output"`
-	Error         string   `json:"error,omitempty"`
-	ConflictFiles []string `json:"conflict_files,omitempty"`
+	Success        bool     `json:"success"`
+	Operation      string   `json:"operation"`
+	Output         string   `json:"output"`
+	Error          string   `json:"error,omitempty"`
+	ErrorCode      string   `json:"error_code,omitempty"`
+	ConflictFiles  []string `json:"conflict_files,omitempty"`
+	RecoveryBranch string   `json:"recovery_branch,omitempty"`
 }
 
 // PRCreateResult represents the result of a PR creation operation.
@@ -68,6 +70,32 @@ func (c *Client) GitPushPreflight(ctx context.Context, repo string) (*GitOperati
 		Repo string `json:"repo,omitempty"`
 	}{Repo: repo}
 	return c.gitOperation(ctx, "/api/v1/git/push-preflight", payload)
+}
+
+// GitReplaceRemoteContribution replaces the bound contribution branch when
+// its provider head still matches expectedRemoteHead.
+func (c *Client) GitReplaceRemoteContribution(ctx context.Context, expectedRemoteHead, repo string) (*GitOperationResult, error) {
+	payload := struct {
+		ExpectedRemoteHead string `json:"expected_remote_head"`
+		Repo               string `json:"repo,omitempty"`
+	}{
+		ExpectedRemoteHead: expectedRemoteHead,
+		Repo:               repo,
+	}
+	return c.gitOperation(ctx, "/api/v1/git/contribution/replace", payload)
+}
+
+// GitUseRemoteContribution adopts the bound contribution head after creating
+// a local recovery branch at the current task HEAD.
+func (c *Client) GitUseRemoteContribution(ctx context.Context, expectedRemoteHead, repo string) (*GitOperationResult, error) {
+	payload := struct {
+		ExpectedRemoteHead string `json:"expected_remote_head"`
+		Repo               string `json:"repo,omitempty"`
+	}{
+		ExpectedRemoteHead: expectedRemoteHead,
+		Repo:               repo,
+	}
+	return c.gitOperation(ctx, "/api/v1/git/contribution/use", payload)
 }
 
 // GitRebase rebases the worktree branch onto the specified base branch.

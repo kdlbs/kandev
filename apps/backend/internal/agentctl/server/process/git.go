@@ -28,11 +28,13 @@ var ErrInvalidBranchName = errors.New("invalid branch name")
 
 // GitOperationResult represents the result of a git operation.
 type GitOperationResult struct {
-	Success       bool     `json:"success"`
-	Operation     string   `json:"operation"`
-	Output        string   `json:"output"`
-	Error         string   `json:"error,omitempty"`
-	ConflictFiles []string `json:"conflict_files,omitempty"`
+	Success        bool     `json:"success"`
+	Operation      string   `json:"operation"`
+	Output         string   `json:"output"`
+	Error          string   `json:"error,omitempty"`
+	ErrorCode      string   `json:"error_code,omitempty"`
+	ConflictFiles  []string `json:"conflict_files,omitempty"`
+	RecoveryBranch string   `json:"recovery_branch,omitempty"`
 }
 
 // GitOperator executes git operations in a workspace directory.
@@ -155,6 +157,13 @@ func (g *GitOperator) runGitCommand(ctx context.Context, args ...string) (string
 
 		// After "--", all arguments are file paths - no validation needed
 		if afterDoubleDash {
+			continue
+		}
+
+		if strings.HasPrefix(arg, contributionLeaseFlagPrefix) {
+			if err := validateContributionLeaseFlag(arg); err != nil {
+				return "", err
+			}
 			continue
 		}
 

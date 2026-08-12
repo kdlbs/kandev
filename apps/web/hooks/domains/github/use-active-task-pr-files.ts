@@ -53,17 +53,18 @@ function isCurrentScope(
  * one row per file across every per-repo PR (multi-repo tasks now have one
  * PR per repo, not just one for the whole task).
  */
-export function useActiveTaskPRsWithFiles(): {
+export function useActiveTaskPRsWithFiles(scopedPRs?: TaskPR[]): {
   prs: TaskPR[];
   filesByPRKey: PRFilesByKey;
 } {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
-  const prs = useAppStore((s) => {
+  const taskPRs = useAppStore((s) => {
     const taskId = s.tasks.activeTaskId;
     if (!taskId) return EMPTY_PRS;
     return s.taskPRs.byTaskId[taskId] ?? EMPTY_PRS;
   });
+  const prs = scopedPRs ?? taskPRs;
 
   const [fileCache, setFileCache] = useState<ScopedPRFiles>({
     workspaceId,

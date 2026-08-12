@@ -309,19 +309,21 @@ const (
 	ActionSessionProcessStatus = "session.process.status"
 
 	// Git worktree actions
-	ActionWorktreePull         = "worktree.pull"          // Pull from remote
-	ActionWorktreePush         = "worktree.push"          // Push to remote
-	ActionWorktreeRebase       = "worktree.rebase"        // Rebase onto base branch
-	ActionWorktreeMerge        = "worktree.merge"         // Merge base branch into worktree
-	ActionWorktreeAbort        = "worktree.abort"         // Abort in-progress merge or rebase
-	ActionWorktreeCommit       = "worktree.commit"        // Commit changes
-	ActionWorktreeStage        = "worktree.stage"         // Stage files for commit
-	ActionWorktreeUnstage      = "worktree.unstage"       // Unstage files from index
-	ActionWorktreeDiscard      = "worktree.discard"       // Discard changes to files
-	ActionWorktreeCreatePR     = "worktree.create_pr"     // Create a pull request
-	ActionWorktreeRevertCommit = "worktree.revert_commit" // Revert a commit (staged, no new commit)
-	ActionWorktreeRenameBranch = "worktree.rename_branch" // Rename the current branch
-	ActionWorktreeReset        = "worktree.reset"         // Reset HEAD to a commit (soft/hard)
+	ActionWorktreePull                = "worktree.pull"                 // Pull from remote
+	ActionWorktreePush                = "worktree.push"                 // Push to remote
+	ActionWorktreeReplaceContribution = "worktree.replace_contribution" // Replace the bound contribution branch
+	ActionWorktreeUseContribution     = "worktree.use_contribution"     // Adopt the bound contribution version
+	ActionWorktreeRebase              = "worktree.rebase"               // Rebase onto base branch
+	ActionWorktreeMerge               = "worktree.merge"                // Merge base branch into worktree
+	ActionWorktreeAbort               = "worktree.abort"                // Abort in-progress merge or rebase
+	ActionWorktreeCommit              = "worktree.commit"               // Commit changes
+	ActionWorktreeStage               = "worktree.stage"                // Stage files for commit
+	ActionWorktreeUnstage             = "worktree.unstage"              // Unstage files from index
+	ActionWorktreeDiscard             = "worktree.discard"              // Discard changes to files
+	ActionWorktreeCreatePR            = "worktree.create_pr"            // Create a pull request
+	ActionWorktreeRevertCommit        = "worktree.revert_commit"        // Revert a commit (staged, no new commit)
+	ActionWorktreeRenameBranch        = "worktree.rename_branch"        // Rename the current branch
+	ActionWorktreeReset               = "worktree.reset"                // Reset HEAD to a commit (soft/hard)
 
 	// User actions
 	ActionUserGet             = "user.get"

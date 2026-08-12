@@ -6,10 +6,10 @@ import {
 } from "./remote-contribution-relation";
 
 const LOCAL_HEAD = "local-head";
-const PROVIDER_BASE = "provider-base";
-const PROVIDER_HEAD = "provider-head";
-const REWRITTEN_BASE = "rewritten-base";
-const REWRITTEN_HEAD = "rewritten-head";
+const PROVIDER_BASE = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const PROVIDER_HEAD = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const REWRITTEN_BASE = "cccccccccccccccccccccccccccccccccccccccc";
+const REWRITTEN_HEAD = "dddddddddddddddddddddddddddddddddddddddd";
 
 const baseInput: RemoteContributionRelationInput = {
   hasSelectedPR: true,
@@ -67,7 +67,8 @@ const classificationCases = [
       kind: "diverged",
       canPush: false,
       canPull: false,
-      remoteMutationBlocked: true,
+      canReplaceRemote: true,
+      canUseRemote: true,
       presentation: "separate",
     },
   },
@@ -90,9 +91,11 @@ describe("classifyRemoteContribution", () => {
     expect(classifyRemoteContribution(input(overrides))).toMatchObject({
       kind: "unknown",
       presentation: "unified",
-      remoteMutationBlocked: false,
       canPush: false,
       canPull: false,
+      canReplaceRemote: false,
+      canUseRemote: false,
+      action: "unavailable_evidence",
     });
   });
 
@@ -140,7 +143,12 @@ describe("classifyRemoteContribution", () => {
       classifyRemoteContribution(
         input({ upstreamHead: "unrelated-upstream", remoteAhead: 3, remoteBehind: 0 }),
       ),
-    ).toMatchObject({ kind: "diverged", canPush: false, remoteMutationBlocked: true });
+    ).toMatchObject({
+      kind: "diverged",
+      canPush: false,
+      canReplaceRemote: true,
+      canUseRemote: true,
+    });
   });
 
   it("uses the explicit provider head instead of the last listed commit", () => {
@@ -175,13 +183,13 @@ describe("classifyRemoteContribution", () => {
     expect(classifyRemoteContribution(incompleteInput)).toMatchObject({
       kind: "unknown",
       providerHead: REWRITTEN_HEAD,
-      remoteMutationBlocked: false,
+      action: "unavailable_evidence",
     });
   });
 });
 
 describe("remoteContributionActionPolicy", () => {
-  it("blocks both remote mutations only for diverged histories", () => {
+  it("offers explicit version choices for diverged histories", () => {
     const relation = classifyRemoteContribution(
       input({
         providerCommits: [{ sha: REWRITTEN_HEAD }],
@@ -192,9 +200,12 @@ describe("remoteContributionActionPolicy", () => {
     );
 
     expect(remoteContributionActionPolicy(relation)).toEqual({
+      action: "diverged_replace",
       pushDisabled: true,
       pullDisabled: true,
-      disabledReason: "history_changed",
+      replaceDisabled: false,
+      useDisabled: false,
+      disabledReason: null,
     });
   });
 
@@ -207,9 +218,38 @@ describe("remoteContributionActionPolicy", () => {
     );
 
     expect(remoteContributionActionPolicy(relation)).toEqual({
+      action: "provider_ahead_pull",
       pushDisabled: true,
       pullDisabled: false,
+      replaceDisabled: true,
+      useDisabled: true,
       disabledReason: null,
+    });
+  });
+
+  it("keeps normal push behavior for local-ahead history", () => {
+    const relation = classifyRemoteContribution(input({ remoteAhead: 2 }));
+
+    expect(remoteContributionActionPolicy(relation)).toEqual({
+      action: "normal_push",
+      pushDisabled: false,
+      pullDisabled: false,
+      replaceDisabled: true,
+      useDisabled: true,
+      disabledReason: null,
+    });
+  });
+
+  it("does not offer destructive choices when provider evidence is unavailable", () => {
+    const relation = classifyRemoteContribution(input({ providerLoading: true }));
+
+    expect(remoteContributionActionPolicy(relation)).toEqual({
+      action: "unavailable_evidence",
+      pushDisabled: false,
+      pullDisabled: false,
+      replaceDisabled: true,
+      useDisabled: true,
+      disabledReason: "provider_evidence_unavailable",
     });
   });
 });
