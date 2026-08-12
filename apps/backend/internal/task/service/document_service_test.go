@@ -643,8 +643,20 @@ func TestDocumentServicePropagatesRepositoryErrors(t *testing.T) {
 		if _, err := svc.CreateOrUpdateDocument(ctx, "task-doc", "k", "", "", "", "", ""); !errors.Is(err, boom) {
 			t.Fatalf("error = %v, want %v", err, boom)
 		}
-		if _, err := svc.RevertDocument(ctx, "task-doc", "k", "rev"); err == nil {
-			t.Fatal("revert must fail when the revision write fails")
+
+		// Revert reaches WriteDocumentRevision only once the target revision
+		// resolves, so seed a real one first — otherwise the revision lookup
+		// short-circuits and the injected write error is never exercised.
+		seed := NewDocumentService(repo, accessTestLogger(t))
+		if _, err := seed.CreateOrUpdateDocument(ctx, "task-doc", "revert-write-k", "", "", "body", "", ""); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		revs, err := repo.ListDocumentRevisions(ctx, "task-doc", "revert-write-k", 1)
+		if err != nil || len(revs) != 1 {
+			t.Fatalf("seed revisions = %v, %v", revs, err)
+		}
+		if _, err := svc.RevertDocument(ctx, "task-doc", "revert-write-k", revs[0].ID); !errors.Is(err, boom) {
+			t.Fatalf("revert write error = %v, want %v", err, boom)
 		}
 	})
 

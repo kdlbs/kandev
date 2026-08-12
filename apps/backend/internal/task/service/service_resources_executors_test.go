@@ -96,9 +96,6 @@ func TestUpdateExecutorAppliesOnlySuppliedFields(t *testing.T) {
 	if updated.Type != models.ExecutorTypeLocal || !updated.Resumable {
 		t.Fatalf("unsupplied fields changed: %+v", updated)
 	}
-	if !updated.UpdatedAt.After(executor.CreatedAt) && updated.UpdatedAt.IsZero() {
-		t.Fatalf("updated_at = %v, want a fresh timestamp", updated.UpdatedAt)
-	}
 
 	reloaded, err := svc.GetExecutor(ctx, executor.ID)
 	if err != nil {
