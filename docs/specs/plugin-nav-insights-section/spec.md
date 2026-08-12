@@ -1,5 +1,5 @@
 ---
-status: draft
+status: shipped
 created: 2026-08-12
 owner: nova28
 ---

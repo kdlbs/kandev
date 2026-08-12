@@ -165,9 +165,10 @@ describe("resolveDestinations with plugin items", () => {
       pluginItems,
     });
 
-    // Plugin insights items follow the first-party `utilities` entry
-    // (Settings), not `stats` — the resolver groups by catalog array order,
-    // not by section.
+    // Plugin insights items are appended after the last catalog entry that
+    // matches this multi-section query (here: settings, a utilities entry),
+    // so the order is stats, settings, plugin, not interleaved with
+    // insights-section entries.
     expect(ids(resolved)).toEqual(["stats", "settings", "plugin:acme:board"]);
   });
 });
