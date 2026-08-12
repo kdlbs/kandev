@@ -1,5 +1,10 @@
 import { test, expect } from "../../fixtures/office-fixture";
 
+// Keep queued seed rows out of the live scheduler. Each test drives its own
+// status transitions, so an automatic claim would make the initial UI state
+// depend on scheduler timing.
+const holdQueuedRun = () => new Date(Date.now() + 60 * 60 * 1000).toISOString();
+
 /**
  * E2E coverage for the per-comment run status badge on the office task
  * chat page. A user comment that triggers a `task_comment` wakeup
@@ -41,6 +46,7 @@ test.describe("User comment run status badge", () => {
       taskId: task.id,
       commentId: comment.comment_id,
       idempotencyKey: `task_comment:${comment.comment_id}`,
+      scheduledRetryAt: holdQueuedRun(),
     });
 
     await testPage.goto(`/office/tasks/${task.id}`);
@@ -84,6 +90,7 @@ test.describe("User comment run status badge", () => {
       taskId: task.id,
       commentId: comment.comment_id,
       idempotencyKey: `task_comment:${comment.comment_id}`,
+      scheduledRetryAt: holdQueuedRun(),
     });
 
     await testPage.goto(`/office/tasks/${task.id}`);
@@ -144,6 +151,7 @@ test.describe("User comment run status badge", () => {
       taskId: task.id,
       commentId: comment.comment_id,
       idempotencyKey: `task_comment:${comment.comment_id}`,
+      scheduledRetryAt: holdQueuedRun(),
     });
     await apiClient.updateRunStatus(seeded.run_id, {
       status: "failed",
@@ -198,6 +206,7 @@ test.describe("User comment run status badge", () => {
       taskId: task.id,
       commentId: userComment.comment_id,
       idempotencyKey: `task_comment:${userComment.comment_id}`,
+      scheduledRetryAt: holdQueuedRun(),
     });
 
     await apiClient.seedComment({

@@ -2772,6 +2772,7 @@ export class ApiClient {
     idempotencyKey?: string;
     errorMessage?: string;
     requestedAt?: string;
+    scheduledRetryAt?: string;
     claimedAt?: string;
     finishedAt?: string;
   }): Promise<{ run_id: string }> {
@@ -2787,6 +2788,7 @@ export class ApiClient {
     if (opts.idempotencyKey !== undefined) payload.idempotency_key = opts.idempotencyKey;
     if (opts.errorMessage !== undefined) payload.error_message = opts.errorMessage;
     if (opts.requestedAt !== undefined) payload.requested_at = opts.requestedAt;
+    if (opts.scheduledRetryAt !== undefined) payload.scheduled_retry_at = opts.scheduledRetryAt;
     if (opts.claimedAt !== undefined) payload.claimed_at = opts.claimedAt;
     if (opts.finishedAt !== undefined) payload.finished_at = opts.finishedAt;
     return this.request("POST", "/api/v1/_test/runs", payload);

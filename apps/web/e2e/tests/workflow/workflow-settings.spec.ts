@@ -37,7 +37,7 @@ test.describe("Workflow settings", () => {
       // Template data can contain the same step name more than once. The
       // workflow card is the scope under test; any matching rendered step is
       // sufficient and avoids a strict-mode race while the card hydrates.
-      await expect(card.getByText(step.name).first()).toBeVisible();
+      await expect(card.getByText(step.name, { exact: true }).first()).toBeVisible();
     }
   });
 
