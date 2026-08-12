@@ -68,9 +68,9 @@ build.
 Run the workspace install once first if `apps/node_modules` is absent:
 
 ```bash
-cd apps && pnpm install --frozen-lockfile
-cd apps/web && pnpm e2e:run tests/task/archive-task-redirect.spec.ts
-cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/task/mobile-archive-task-redirect.spec.ts -- --grep 'keeps navigation responsive'
+(cd apps && pnpm install --frozen-lockfile)
+(cd apps/web && pnpm e2e:run tests/task/archive-task-redirect.spec.ts)
+(cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/task/mobile-archive-task-redirect.spec.ts -- --grep 'keeps navigation responsive')
 ```
 
 Confirm that Playwright discovers the intended mobile test. `No tests found` is
@@ -105,6 +105,14 @@ command and outcome in `## Results`.
 - Desktop and phone assertions kept the URL and rendered task synchronized,
   removed the parent and both children from active projections, and opened a
   later phone task from the drawer without increasing the main-frame document
-  request count.
+  request count. The desktop archive count was 0 to 0, and the phone archive
+  and later drawer navigation counts were each 0 to 0.
+- The original RED symptom was the recent child becoming the temporary target
+  of a parent cascade archive, after which the WebSocket redirect could leave
+  the URL and rendered route out of sync. The GREEN tests now choose the
+  unrelated task and preserve later SPA navigation.
+- Remaining risks are limited to asynchronous WebSocket update ordering and
+  cached projection freshness; user navigation remains protected by the
+  existing active-task guard. Task 02 is done and the parent plan is complete.
 - The managed E2E runners cleaned up their isolated runtime and database after
   each run.

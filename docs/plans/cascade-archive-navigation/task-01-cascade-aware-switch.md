@@ -69,8 +69,8 @@ None.
 ## Verification
 
 ```bash
-cd apps && pnpm --filter @kandev/web exec vitest run hooks/use-task-removal.test.ts hooks/use-task-actions.test.ts
-cd apps/web && pnpm run typecheck
+(cd apps && pnpm --filter @kandev/web exec vitest run hooks/use-task-removal.test.ts hooks/use-task-actions.test.ts)
+(cd apps/web && pnpm run typecheck)
 ```
 
 ## Risks
@@ -96,3 +96,7 @@ synchronized task and plan status. Record each command and outcome in
 - GREEN: the same focused Vitest command passed with 21 tests across both files.
 - `cd apps/web && pnpm run typecheck` passed.
 - The shared removal hook now walks all cached workflow and canonical Kanban task projections transitively with duplicate and cycle protection. Cascade callers exclude that tree before and after the archive request; non-cascade callers keep child selection; switch-only cleanup leaves the current route in place when no safe candidate exists.
+- Changed files: `apps/web/hooks/use-task-removal.ts`, `apps/web/hooks/use-task-removal.test.ts`, `apps/web/hooks/use-task-actions.ts`, and `apps/web/hooks/use-task-actions.test.ts`.
+- Archive failure coverage passes for both paths: a safe pre-switch restores the original task/session/URL, while a cascade with no pre-switch leaves the original task in place.
+- Review remediation adds snapshot-first duplicate-row reconciliation and carries the pre-request exclusion set into post-archive cleanup so pruned descendants cannot become candidates. The focused suites now pass with 23 tests.
+- Remaining risks are limited to the existing WebSocket/manual-navigation race guards and projection freshness; the backend archive contract and route ownership remain unchanged. Task 01 is done and the parent plan is complete.

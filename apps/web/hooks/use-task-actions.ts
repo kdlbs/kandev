@@ -57,6 +57,9 @@ export function useArchiveAndSwitchTask(opts?: { useLayoutSwitch?: boolean }) {
           wasActiveTaskId,
           wasActiveSessionId,
           ...removalOptions,
+          ...(initialSwitch.excludedTaskIds
+            ? { excludedTaskIds: initialSwitch.excludedTaskIds }
+            : {}),
         });
       } catch (error) {
         if (

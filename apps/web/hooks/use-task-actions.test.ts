@@ -108,8 +108,9 @@ describe("useArchiveAndSwitchTask", () => {
 
   it("excludes the cascade tree before and after the archive request", async () => {
     archiveTaskMock.mockResolvedValueOnce(undefined);
+    const excludedTaskIds = new Set(["task-A", "task-child"]);
     removeTaskFromBoardMock
-      .mockResolvedValueOnce({ switchedTaskId: "task-B" })
+      .mockResolvedValueOnce({ switchedTaskId: "task-B", excludedTaskIds })
       .mockResolvedValueOnce({ switchedTaskId: "task-B" });
     const { result } = renderHook(() => useArchiveAndSwitchTask());
 
@@ -125,6 +126,7 @@ describe("useArchiveAndSwitchTask", () => {
       wasActiveTaskId: "task-A",
       wasActiveSessionId: "sess-A",
       excludeTaskTree: true,
+      excludedTaskIds,
     });
     expect(archiveTaskMock).toHaveBeenCalledWith("task-A", { cascade: true });
   });

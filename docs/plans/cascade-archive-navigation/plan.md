@@ -107,11 +107,11 @@ an error, which explains why a hard refresh repaired the page.
 Run the workspace install once first if `apps/node_modules` is absent:
 
 ```bash
-cd apps && pnpm install --frozen-lockfile
-cd apps && pnpm --filter @kandev/web exec vitest run hooks/use-task-removal.test.ts hooks/use-task-actions.test.ts
-cd apps/web && pnpm run typecheck
-cd apps/web && pnpm e2e:run tests/task/archive-task-redirect.spec.ts -- --grep 'skips cascaded descendants'
-cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/task/mobile-archive-task-redirect.spec.ts -- --grep 'keeps navigation responsive'
+(cd apps && pnpm install --frozen-lockfile)
+(cd apps && pnpm --filter @kandev/web exec vitest run hooks/use-task-removal.test.ts hooks/use-task-actions.test.ts)
+(cd apps/web && pnpm run typecheck)
+(cd apps/web && pnpm e2e:run tests/task/archive-task-redirect.spec.ts -- --grep 'skips cascaded descendants')
+(cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/task/mobile-archive-task-redirect.spec.ts -- --grep 'keeps navigation responsive')
 ```
 
 Confirm that Playwright discovers and runs the intended test for each focused
@@ -143,14 +143,14 @@ is authorized by this plan.
 
 ## Verification results
 
-All implementation waves are complete. Focused unit tests pass (21 tests
+All implementation waves are complete. Focused unit tests pass (23 tests
 across the removal and action hook suites), the web typecheck passes, and the
 desktop and phone archive navigation scenarios pass without main-frame
 document requests during the SPA transitions.
 
 Verification:
 
-- `cd apps && pnpm --filter @kandev/web exec vitest run hooks/use-task-removal.test.ts hooks/use-task-actions.test.ts` passed with 21 tests.
+- `(cd apps && pnpm --filter @kandev/web exec vitest run hooks/use-task-removal.test.ts hooks/use-task-actions.test.ts)` passed with 23 tests after review remediation.
 - `cd apps/web && pnpm run typecheck` passed.
 - `cd apps/web && pnpm e2e:run tests/task/archive-task-redirect.spec.ts -- --grep 'skips cascaded descendants'` passed with 1 test.
 - `cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/task/mobile-archive-task-redirect.spec.ts -- --grep 'keeps navigation responsive'` passed with 1 test.

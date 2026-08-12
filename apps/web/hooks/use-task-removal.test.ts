@@ -25,11 +25,7 @@ vi.mock("@/lib/api", () => ({
 import { useTaskRemoval, selectNextTaskAfterRemoval } from "./use-task-removal";
 import { setRecentTasks } from "@/lib/recent-tasks";
 
-type TaskRow = {
-  id: string;
-  primarySessionId: string | null;
-  parentTaskId?: string | null;
-};
+type TaskRow = { id: string; primarySessionId: string | null; parentTaskId?: string | null };
 
 const CASCADE_PARENT: TaskRow = { id: "task-parent", primarySessionId: "sess-parent" };
 const CASCADE_CHILD: TaskRow = {
@@ -489,6 +485,37 @@ describe("useTaskRemoval — cascade tree exclusion", () => {
     );
   });
 
+  it("prefers the workflow snapshot when canonical ancestry is stale", async () => {
+    const detachedChild = { ...CASCADE_CHILD, parentTaskId: null };
+    const unrelated: TaskRow = { id: "task-unrelated", primarySessionId: "sess-unrelated" };
+    const store = makeStore({
+      activeTaskId: CASCADE_PARENT.id,
+      activeSessionId: CASCADE_PARENT.primarySessionId,
+      remainingTasks: [CASCADE_PARENT, detachedChild, unrelated],
+      canonicalTasks: [CASCADE_CHILD],
+    });
+    setRecentTasks([
+      { taskId: detachedChild.id, title: "Detached child", visitedAt: CASCADE_CHILD_VISITED_AT },
+      { taskId: unrelated.id, title: "Unrelated", visitedAt: RECENT_TASK_VISITED_AT },
+    ]);
+
+    const { result } = renderHook(() =>
+      useTaskRemoval({ store: store as unknown as StoreApi<never> }),
+    );
+
+    await result.current.removeTaskFromBoard(CASCADE_PARENT.id, {
+      wasActiveTaskId: CASCADE_PARENT.id,
+      wasActiveSessionId: CASCADE_PARENT.primarySessionId,
+      switchOnly: true,
+      excludeTaskTree: true,
+    } as never);
+
+    expect(store.getRecorded().setActiveSession).toHaveBeenCalledWith(
+      detachedChild.id,
+      detachedChild.primarySessionId,
+    );
+  });
+
   it("can still switch to an active child when cascade exclusion is not requested", async () => {
     const store = makeStore({
       activeTaskId: CASCADE_PARENT.id,
@@ -570,11 +597,49 @@ describe("useTaskRemoval — cascade no-candidate transition", () => {
       location.restore();
     }
   });
+
+  it("retains the original cascade tree for cleanup after cache pruning", async () => {
+    const store = makeStore({
+      activeTaskId: CASCADE_PARENT.id,
+      activeSessionId: CASCADE_PARENT.primarySessionId,
+      remainingTasks: [CASCADE_PARENT, CASCADE_CHILD],
+    });
+    const location = mockLocation();
+
+    try {
+      const { result } = renderHook(() =>
+        useTaskRemoval({ store: store as unknown as StoreApi<never> }),
+      );
+      const initialRemoval = await result.current.removeTaskFromBoard(CASCADE_PARENT.id, {
+        wasActiveTaskId: CASCADE_PARENT.id,
+        wasActiveSessionId: CASCADE_PARENT.primarySessionId,
+        switchOnly: true,
+        excludeTaskTree: true,
+      } as never);
+
+      expect(initialRemoval.excludedTaskIds).toEqual(
+        new Set([CASCADE_PARENT.id, CASCADE_CHILD.id]),
+      );
+      store.getRecorded().kanbanMulti.snapshots["wf-1"].tasks = [
+        { ...CASCADE_CHILD, parentTaskId: null },
+      ];
+      store.getRecorded().kanban.tasks = [];
+
+      await result.current.removeTaskFromBoard(CASCADE_PARENT.id, {
+        wasActiveTaskId: CASCADE_PARENT.id,
+        wasActiveSessionId: CASCADE_PARENT.primarySessionId,
+        excludeTaskTree: true,
+        excludedTaskIds: initialRemoval.excludedTaskIds,
+      } as never);
+
+      expect(location.hrefSetter).toHaveBeenCalledWith(OVERVIEW_URL);
+    } finally {
+      location.restore();
+    }
+  });
 });
 
 describe("selectNextTaskAfterRemoval — stale-candidate rejection", () => {
-  // The exported helper takes the full kanban task shape; the tests use the
-  // minimal TaskRow, so cast at the boundary exactly as the store-based tests do.
   const select = selectNextTaskAfterRemoval as unknown as (
     remaining: TaskRow[],
     removedTaskId: string,
@@ -603,16 +668,12 @@ describe("selectNextTaskAfterRemoval — stale-candidate rejection", () => {
   });
 
   it("returns null (redirect home) when the only remaining candidate is not a live board member", async () => {
-    // A task deleted moments earlier can linger in a snapshot that races the
-    // local delete. It is not the removed task, but it is no longer a live
-    // board member, so it must not be chosen — the caller then redirects home.
     const stale: TaskRow = { id: "task-A-stale", primarySessionId: "sess-A" };
 
     await expect(select([stale], "task-B", async () => false)).resolves.toBeNull();
   });
 
   it("returns the candidate when it is a live board member", async () => {
-    // Guards against over-rejection: a genuinely present task is still selected.
     const live: TaskRow = { id: "task-A-live", primarySessionId: "sess-A" };
 
     await expect(select([live], "task-B", async () => true)).resolves.toBe(live);
