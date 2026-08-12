@@ -214,4 +214,37 @@ describe("LSP live evidence", () => {
     subject.getState().mergeTaskLspLanguage(language(10, "ready"));
     expect(subject.getState().taskLsp.byTaskId["task-1"]?.error).toBeNull();
   });
+
+  it("does not clear a newer error with a snapshot from an older error epoch", () => {
+    const subject = store();
+    subject.getState().setTaskLspSnapshot(
+      {
+        task_id: "task-1",
+        languages: [language(1)],
+        capacity: { active: 1, queued: 0, limit: 4 },
+      },
+      0,
+    );
+    subject.getState().setTaskLspError("task-1", "stop failed");
+
+    subject.getState().setTaskLspSnapshot(
+      {
+        task_id: "task-1",
+        languages: [language(1)],
+        capacity: { active: 1, queued: 0, limit: 4 },
+      },
+      0,
+    );
+    expect(subject.getState().taskLsp.byTaskId["task-1"]?.error).toBe("stop failed");
+
+    subject.getState().setTaskLspSnapshot(
+      {
+        task_id: "task-1",
+        languages: [language(1)],
+        capacity: { active: 1, queued: 0, limit: 4 },
+      },
+      1,
+    );
+    expect(subject.getState().taskLsp.byTaskId["task-1"]?.error).toBeNull();
+  });
 });

@@ -314,6 +314,8 @@ type Service struct {
 	taskLSPAdmissions           map[string]*sync.RWMutex
 	taskEnvLSPAdmissionMu       sync.Mutex
 	taskEnvLSPAdmissions        map[string]*sync.RWMutex
+	workspaceTaskAdmissionMu    sync.Mutex
+	workspaceTaskAdmissions     map[string]*sync.RWMutex
 	providerProber              ProviderDefaultBranchProber
 	gitArchiveCapture           GitArchiveCapture
 	workflowStepCreator         WorkflowStepCreator
@@ -366,6 +368,10 @@ type Service struct {
 	cleanupWorkerWake   chan struct{}
 	cleanupRunsMu       sync.Mutex
 	cleanupRuns         map[*taskResourceCleanupRun]struct{}
+	cleanupPrepMu       sync.Mutex
+	cleanupPreparations map[string]*taskResourceCleanupPreparationLease
+	cleanupPrepWG       sync.WaitGroup
+	cleanupPrepClosed   bool
 	// repoResolveMu serializes the check-then-create sections of
 	// FindOrCreateRepository and FindOrCreateRepositoryByLocalPath so two
 	// resolvers racing to register the same not-yet-known repository (by
@@ -438,6 +444,57 @@ func (s *Service) taskLSPAdmissionLock(taskID string) *sync.RWMutex {
 
 func (s *Service) acquireTaskLSPMutation(taskID string) func() {
 	lock := s.taskLSPAdmissionLock(taskID)
+	lock.Lock()
+	return lock.Unlock
+}
+
+func (s *Service) acquireTaskLSPMutations(taskIDs []string) func() {
+	ordered := append([]string(nil), taskIDs...)
+	sort.Strings(ordered)
+	releases := make([]func(), 0, len(ordered))
+	previous := ""
+	for _, taskID := range ordered {
+		if taskID == "" || taskID == previous {
+			continue
+		}
+		previous = taskID
+		releases = append(releases, s.acquireTaskLSPMutation(taskID))
+	}
+	return func() {
+		for index := len(releases) - 1; index >= 0; index-- {
+			releases[index]()
+		}
+	}
+}
+
+func (s *Service) workspaceTaskAdmissionLock(workspaceID string) *sync.RWMutex {
+	s.workspaceTaskAdmissionMu.Lock()
+	defer s.workspaceTaskAdmissionMu.Unlock()
+	if s.workspaceTaskAdmissions == nil {
+		s.workspaceTaskAdmissions = make(map[string]*sync.RWMutex)
+	}
+	lock := s.workspaceTaskAdmissions[workspaceID]
+	if lock == nil {
+		lock = &sync.RWMutex{}
+		s.workspaceTaskAdmissions[workspaceID] = lock
+	}
+	return lock
+}
+
+func (s *Service) acquireWorkspaceTaskCreation(workspaceID string) func() {
+	if workspaceID == "" {
+		return func() {}
+	}
+	lock := s.workspaceTaskAdmissionLock(workspaceID)
+	lock.RLock()
+	return lock.RUnlock
+}
+
+func (s *Service) acquireWorkspaceTaskDeletion(workspaceID string) func() {
+	if workspaceID == "" {
+		return func() {}
+	}
+	lock := s.workspaceTaskAdmissionLock(workspaceID)
 	lock.Lock()
 	return lock.Unlock
 }

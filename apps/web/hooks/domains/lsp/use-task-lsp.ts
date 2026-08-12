@@ -71,6 +71,10 @@ function isLoadedTaskState(task: { loaded: boolean } | undefined): boolean {
   return task?.loaded ?? false;
 }
 
+function taskErrorEpoch(store: ReturnType<typeof useAppStoreApi>, taskId: string): number {
+  return store.getState().taskLsp.byTaskId[taskId]?.errorEpoch ?? 0;
+}
+
 function useTaskLspSubscription(taskId: string | null, connectionStatus: string) {
   useEffect(() => {
     if (!taskId) return;
@@ -114,10 +118,11 @@ function useTransientRefresh(taskId: string | null, loaded: boolean, needed: boo
       if (inFlight) return;
       inFlight = true;
       const request = beginAuthoritativeRequest(store, taskId);
+      const errorEpoch = taskErrorEpoch(store, taskId);
       try {
         const snapshot = await getTaskLsp(taskId, { init: { signal: controller.signal } });
         if (!controller.signal.aborted && settleAuthoritativeRequest(store, taskId, request)) {
-          store.getState().setTaskLspSnapshot(snapshot);
+          store.getState().setTaskLspSnapshot(snapshot, errorEpoch);
         }
       } catch {
         // WebSocket notifications remain primary. Poll failures must not
@@ -149,10 +154,11 @@ export function useTaskLsp(taskId: string | null) {
       const state = store.getState();
       state.setTaskLspLoading(taskId, true);
       const request = beginAuthoritativeRequest(store, taskId);
+      const errorEpoch = taskErrorEpoch(store, taskId);
       try {
         const snapshot = await getTaskLsp(taskId, { init: { signal } });
         if (!signal?.aborted && settleAuthoritativeRequest(store, taskId, request)) {
-          store.getState().setTaskLspSnapshot(snapshot);
+          store.getState().setTaskLspSnapshot(snapshot, errorEpoch);
         }
       } catch (error) {
         if (!signal?.aborted && settleAuthoritativeRequest(store, taskId, request)) {

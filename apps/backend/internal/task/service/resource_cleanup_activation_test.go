@@ -294,6 +294,42 @@ func TestAbandonedPreparedCleanupIsRecoveredByPeriodicReconciliation(t *testing.
 	}
 }
 
+func TestPeriodicReconciliationPreservesLocallyOwnedStalePreparation(t *testing.T) {
+	taskSvc, repo := setupOfficeTest(t)
+	ctx := context.Background()
+	const (
+		taskID      = "task-live-stale-preparation"
+		operationID = "cascade-delete:live-stale-preparation"
+	)
+	seedCleanupTaskAndSession(t, repo, taskID, "session-live-stale-preparation")
+	job, err := taskSvc.reservePreparedTaskResourceCleanup(
+		ctx, taskID, models.TaskResourceCleanupTriggerCascadeDelete, operationID,
+	)
+	if err != nil {
+		t.Fatalf("reserve prepared cleanup: %v", err)
+	}
+	old := time.Now().UTC().Add(-preparedCleanupAbandonmentDelay - time.Minute)
+	if _, err := repo.DB().ExecContext(ctx, `
+		UPDATE task_resource_cleanup_jobs SET updated_at = ? WHERE operation_id = ?
+	`, old, operationID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := taskSvc.processDueTaskResourceCleanupJobs(ctx); err != nil {
+		t.Fatalf("periodic reconciliation: %v", err)
+	}
+	got, err := repo.GetTaskResourceCleanupJob(ctx, job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != models.TaskResourceCleanupStatePrepared {
+		t.Fatalf("live preparation state = %q, want prepared", got.State)
+	}
+	if err := taskSvc.CancelPreparedTaskResourceCleanup(ctx, operationID); err != nil {
+		t.Fatalf("cancel prepared cleanup: %v", err)
+	}
+}
+
 func TestArchiveAndDeleteCleanupRemainPreparedUntilMutationCommits(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -31,6 +31,7 @@ vi.mock("@/lib/ws/connection", () => ({
 import { useTaskLsp } from "./use-task-lsp";
 
 const NOW = "2026-08-05T10:00:00Z";
+const STOP_FAILED = "stop failed";
 
 function language(revision: number, phase: TaskLspLanguageSnapshot["phase"] = "off") {
   return {
@@ -239,6 +240,30 @@ describe("useTaskLsp controls", () => {
     api.start.mockResolvedValueOnce(language(2, "starting"));
     await act(async () => view.result.current.lsp.start("kotlin"));
     expect(view.result.current.lsp.error).toBeNull();
+  });
+
+  it("keeps a control failure when an older refetch settles afterward", async () => {
+    const view = renderHook(() => subject("task-1"), { wrapper });
+    await waitFor(() => expect(view.result.current.lsp.loaded).toBe(true));
+
+    let resolveRefetch!: (value: TaskLspSnapshot) => void;
+    api.get.mockReturnValueOnce(
+      new Promise<TaskLspSnapshot>((resolve) => {
+        resolveRefetch = resolve;
+      }),
+    );
+    const refetch = view.result.current.lsp.refetch();
+    api.stop.mockRejectedValueOnce(new Error(STOP_FAILED));
+    await act(async () => {
+      await expect(view.result.current.lsp.stop("kotlin")).rejects.toThrow(STOP_FAILED);
+    });
+    expect(view.result.current.lsp.error).toBe(STOP_FAILED);
+
+    await act(async () => {
+      resolveRefetch(snapshot(language(1, "ready")));
+      await refetch;
+    });
+    expect(view.result.current.lsp.error).toBe(STOP_FAILED);
   });
 
   it("refetches transient state so a dropped ready event cannot leave stale progress", async () => {

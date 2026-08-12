@@ -68,6 +68,21 @@ func TestTaskCleanupBarrier_RejectsSessionCreation(t *testing.T) {
 	}
 }
 
+func TestTaskCleanupBarrier_RejectsOfficeSessionCreation(t *testing.T) {
+	repo := newBarrierTestRepo(t)
+	ctx := context.Background()
+	seedBarrierTask(t, repo, "task-barrier-office-session")
+	reserveBarrier(t, repo, "task-barrier-office-session", "op-office-session")
+
+	err := repo.CreateOfficeTaskSession(ctx, &models.TaskSession{
+		ID: "office-session-barrier", TaskID: "task-barrier-office-session",
+		State: models.TaskSessionStateCreated,
+	})
+	if !errors.Is(err, repoerrors.ErrTaskCleanupInProgress) {
+		t.Fatalf("CreateOfficeTaskSession error = %v, want ErrTaskCleanupInProgress", err)
+	}
+}
+
 func TestTaskCleanupBarrier_RejectsEnvironmentCreation(t *testing.T) {
 	repo := newBarrierTestRepo(t)
 	ctx := context.Background()
@@ -211,5 +226,63 @@ func TestTaskCleanupBarrierPostgres_AllowsCreationWithoutBarrier(t *testing.T) {
 		WorkspacePath: "/tmp", Status: models.TaskEnvironmentStatusReady,
 	}); err != nil {
 		t.Fatalf("postgres CreateTaskEnvironment without barrier: %v", err)
+	}
+}
+
+func TestTaskCleanupBarrierPostgres_CreatorFirstCommitsBeforeReservation(t *testing.T) {
+	db := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), 2)
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres: %v", err)
+	}
+	ctx := context.Background()
+	const taskID = "task-barrier-pg-creator-first"
+	seedBarrierTask(t, repo, taskID)
+
+	tx, err := repo.db.BeginTxx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin creator transaction: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := repo.taskCleanupBarrierLocked(ctx, tx, taskID); err != nil {
+		t.Fatalf("admit creator: %v", err)
+	}
+	if err := repo.createTaskSession(ctx, tx, &models.TaskSession{
+		ID: "session-pg-creator-first", TaskID: taskID, State: models.TaskSessionStateCreated,
+	}); err != nil {
+		t.Fatalf("create session in transaction: %v", err)
+	}
+
+	reserved := make(chan error, 1)
+	go func() {
+		reserved <- repo.CreateTaskResourceCleanupJob(ctx, &models.TaskResourceCleanupJob{
+			OperationID: "op-pg-creator-first", TaskID: taskID,
+			Trigger: models.TaskResourceCleanupTriggerDelete,
+			State:   models.TaskResourceCleanupStatePrepared,
+		})
+	}()
+	select {
+	case err := <-reserved:
+		t.Fatalf("cleanup reservation crossed the uncommitted creator: %v", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit creator: %v", err)
+	}
+	select {
+	case err := <-reserved:
+		if err != nil {
+			t.Fatalf("reserve cleanup after creator commit: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cleanup reservation remained blocked after creator commit")
+	}
+
+	sessions, err := repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		t.Fatalf("ListTaskSessions: %v", err)
+	}
+	if len(sessions) != 1 || sessions[0].ID != "session-pg-creator-first" {
+		t.Fatalf("cleanup inventory = %+v, want committed creator", sessions)
 	}
 }

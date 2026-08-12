@@ -56,6 +56,15 @@ spec: "../../specs/lsp-file-intelligence/spec.md"
   before replacement.
 - Docker container-auth tokens and serialization state survive warm stop and uncertain cleanup but
   are evicted after confirmed physical removal and executor shutdown.
+- Workspace deletion freezes task membership, reserves every task cleanup barrier before inventory,
+  holds task and physical-environment mutation admission, and stops task-owned language servers
+  before the database cascade.
+- Prepared cleanup reservations use the same PostgreSQL task-row serialization as resource
+  creators, reject Office-session admission, and renew an explicit owner lease while a legitimate
+  long-running mutation remains active.
+- Cascade and workspace mutations reconcile durable state after ambiguous database errors instead
+  of cancelling cleanup that may already own deleted resources. A delayed GET cannot clear a newer
+  task-LSP control failure.
 
 ## Verification
 
@@ -154,6 +163,15 @@ Completed 2026-08-12.
   base, the five-package race suite passed (task service 138.920s), changed-code Go lint reported
   zero issues, all 60 public-doc validator tests passed, all 41 published pages validated, and
   `git diff --check origin/main...HEAD` passed.
+- A subsequent exact-head GPT-5.6 Sol review found seven cleanup/control defects not covered by CI:
+  non-atomic PostgreSQL reservation, workspace inventory and LSP ordering, age-only preparation
+  abandonment, Office-session admission, stale-GET error clearing, and ambiguous workspace commit
+  handling. Barrier-first workspace teardown, task-row reservation locking, renewable preparation
+  ownership, shared Office admission, durable outcome reconciliation, and frontend error epochs now
+  have focused regressions. The full task-service and SQLite suites passed; their race suites passed
+  in 112.526s and 24.024s; 22 focused frontend tests, typecheck, strict targeted ESLint/Prettier,
+  i18n ratchet, and changed-code Go lint passed. The one unrelated agentctl timing failure from the
+  combined race run passed five immediate race-enabled repetitions.
 
 ## Files
 

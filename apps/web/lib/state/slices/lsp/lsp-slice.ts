@@ -17,6 +17,7 @@ function emptyTaskState(): TaskLspTaskState {
     loaded: false,
     loading: false,
     error: null,
+    errorEpoch: 0,
   };
 }
 
@@ -67,14 +68,16 @@ export const createLspSlice: StateCreator<AppState, [["zustand/immer", never]], 
   set,
 ) => ({
   ...defaultLspState,
-  setTaskLspSnapshot: (snapshot) =>
+  setTaskLspSnapshot: (snapshot, expectedErrorEpoch) =>
     set((draft) => {
       const task = draft.taskLsp.byTaskId[snapshot.task_id] ?? emptyTaskState();
       for (const language of snapshot.languages) mergeLanguage(task.languages, language);
       mergeCapacity(task, snapshot.capacity, true);
       task.loaded = true;
       task.loading = false;
-      task.error = null;
+      if (expectedErrorEpoch === undefined || expectedErrorEpoch === (task.errorEpoch ?? 0)) {
+        task.error = null;
+      }
       draft.taskLsp.byTaskId[snapshot.task_id] = task;
     }),
   mergeTaskLspLanguage: (snapshot) =>
@@ -95,6 +98,7 @@ export const createLspSlice: StateCreator<AppState, [["zustand/immer", never]], 
     set((draft) => {
       const task = draft.taskLsp.byTaskId[taskId] ?? emptyTaskState();
       task.error = error;
+      if (error !== null) task.errorEpoch = (task.errorEpoch ?? 0) + 1;
       task.loading = false;
       draft.taskLsp.byTaskId[taskId] = task;
     }),

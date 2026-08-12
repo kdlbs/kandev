@@ -157,6 +157,30 @@ type commitThenErrorTaskRepository struct {
 	err error
 }
 
+type commitThenErrorCascadeRepository struct {
+	repository.TaskRepository
+	workspaceEnvironmentRepository
+	err error
+}
+
+func (r *commitThenErrorCascadeRepository) ArchiveTaskIfActive(
+	ctx context.Context,
+	taskID, cascadeID string,
+) (bool, error) {
+	ok, err := r.TaskRepository.ArchiveTaskIfActive(ctx, taskID, cascadeID)
+	if err != nil {
+		return false, err
+	}
+	return ok, r.err
+}
+
+func (r *commitThenErrorCascadeRepository) DeleteTask(ctx context.Context, taskID string) error {
+	if err := r.TaskRepository.DeleteTask(ctx, taskID); err != nil {
+		return err
+	}
+	return r.err
+}
+
 func (r *commitThenErrorTaskRepository) DeleteTask(ctx context.Context, id string) error {
 	if err := r.TaskRepository.DeleteTask(ctx, id); err != nil {
 		return err
@@ -239,6 +263,47 @@ func TestTaskMutationCommitThenErrorKeepsCleanupRunnable(t *testing.T) {
 				if getErr != nil || task.ArchivedAt == nil {
 					t.Fatalf("archive did not commit: task=%#v err=%v", task, getErr)
 				}
+			}
+		})
+	}
+}
+
+func TestCascadeMutationCommitThenErrorKeepsCleanupRunnable(t *testing.T) {
+	for _, operation := range []string{"delete", "archive"} {
+		t.Run(operation, func(t *testing.T) {
+			taskSvc, repo := setupOfficeTest(t)
+			taskSvc.setCleanupDoneForTestHook(make(chan struct{}, 1))
+			ctx := context.Background()
+			taskID := "task-cascade-commit-then-error-" + operation
+			seedCleanupTaskAndSession(t, repo, taskID, "session-cascade-commit-then-error-"+operation)
+			commitErr := errors.New("transport lost after cascade commit")
+			mutations := &commitThenErrorCascadeRepository{
+				TaskRepository: repo, workspaceEnvironmentRepository: repo, err: commitErr,
+			}
+			handoff := NewHandoffService(mutations, repo, nil, nil, nil, nil)
+			handoff.SetTaskResourceCleaner(taskSvc)
+
+			if operation == "delete" {
+				_, err := handoff.DeleteTaskTree(ctx, taskID, false)
+				if !errors.Is(err, commitErr) {
+					t.Fatalf("DeleteTaskTree error = %v, want %v", err, commitErr)
+				}
+			} else {
+				_, err := handoff.ArchiveTaskTree(ctx, taskID, false)
+				if !errors.Is(err, commitErr) {
+					t.Fatalf("ArchiveTaskTree error = %v, want %v", err, commitErr)
+				}
+			}
+
+			waitForCleanupDone(t, taskSvc)
+			var state models.TaskResourceCleanupState
+			if err := repo.DB().QueryRowContext(ctx, `
+				SELECT state FROM task_resource_cleanup_jobs WHERE task_id = ?
+			`, taskID).Scan(&state); err != nil {
+				t.Fatalf("load cleanup state: %v", err)
+			}
+			if state != models.TaskResourceCleanupStateSucceeded {
+				t.Fatalf("cleanup state = %q, want succeeded", state)
 			}
 		})
 	}

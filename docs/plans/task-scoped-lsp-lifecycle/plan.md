@@ -487,6 +487,14 @@ Completed 2026-08-05.
   verification passed the five affected backend packages under the race detector, changed-code Go
   lint with zero issues, 60 public-doc validator tests, validation of all 41 published pages, and
   the three-dot diff whitespace check.
+- The next immutable-head Sol review found seven lifecycle gaps beyond the green 44-check CI run.
+  Cleanup reservation now shares PostgreSQL task-row serialization with creators and blocks Office
+  sessions; workspace deletion freezes task creation, reserves before all inventory, holds task and
+  physical-environment admission, and purges task LSP before cascade. Renewable preparation leases
+  protect legitimate long mutations, while cascade/workspace errors probe durable commit state
+  before transition. Frontend authoritative snapshots carry an error epoch so an older GET cannot
+  erase a newer failed control. Focused regressions, complete task-service/SQLite suites and race
+  suites, web typecheck/lint, i18n ratchet, and changed-code Go lint passed before final rebase.
 
 ---
 

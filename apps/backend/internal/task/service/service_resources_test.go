@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -29,6 +30,14 @@ type failingWorkspaceBootstrapper struct {
 }
 
 type failingTransactionalWorkspaceSecretDeleter struct{}
+
+type failingLegacyWorkspaceSecretDeleter struct {
+	err error
+}
+
+func (d failingLegacyWorkspaceSecretDeleter) DeleteWorkspaceSecrets(context.Context, string) error {
+	return d.err
+}
 
 func (failingTransactionalWorkspaceSecretDeleter) DeleteWorkspaceSecrets(context.Context, string) error {
 	return errors.New("legacy cleanup should not be used")
@@ -813,6 +822,33 @@ type renameBeforeConfirmedDeleteRepo struct {
 	repository.WorkspaceRepository
 }
 
+type commitThenErrorWorkspaceRepo struct {
+	repository.WorkspaceRepository
+	err error
+}
+
+func (r commitThenErrorWorkspaceRepo) DeleteWorkspaceCascade(
+	ctx context.Context,
+	id string,
+) ([]*models.Task, []*models.Workflow, error) {
+	tasks, workflows, err := r.WorkspaceRepository.DeleteWorkspaceCascade(ctx, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	return tasks, workflows, r.err
+}
+
+func (r commitThenErrorWorkspaceRepo) DeleteWorkspaceCascadeWithName(
+	ctx context.Context,
+	id, name string,
+) ([]*models.Task, []*models.Workflow, error) {
+	tasks, workflows, err := r.WorkspaceRepository.DeleteWorkspaceCascadeWithName(ctx, id, name)
+	if err != nil {
+		return nil, nil, err
+	}
+	return tasks, workflows, r.err
+}
+
 func (r renameBeforeConfirmedDeleteRepo) DeleteWorkspaceCascadeWithName(
 	ctx context.Context,
 	id, name string,
@@ -1030,6 +1066,56 @@ func TestService_DeleteWorkspaceRollsBackCascadeWhenSecretCleanupFails(t *testin
 	}
 }
 
+func TestService_DeleteWorkspaceCommitThenErrorKeepsCleanupRunnable(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	const taskID = "task-workspace-commit-then-error"
+	seedCleanupTaskAndSession(t, repo, taskID, "session-workspace-commit-then-error")
+	commitErr := errors.New("transport lost after workspace commit")
+	svc.workspaces = commitThenErrorWorkspaceRepo{WorkspaceRepository: repo, err: commitErr}
+	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
+
+	err := svc.DeleteWorkspace(ctx, "ws-"+taskID)
+	if !errors.Is(err, commitErr) {
+		t.Fatalf("DeleteWorkspace error = %v, want %v", err, commitErr)
+	}
+	waitForCleanupDone(t, svc)
+	var state models.TaskResourceCleanupState
+	if err := repo.DB().QueryRowContext(ctx, `
+		SELECT state FROM task_resource_cleanup_jobs WHERE task_id = ?
+	`, taskID).Scan(&state); err != nil {
+		t.Fatalf("load cleanup state: %v", err)
+	}
+	if state != models.TaskResourceCleanupStateSucceeded {
+		t.Fatalf("cleanup state = %q, want succeeded", state)
+	}
+}
+
+func TestService_DeleteWorkspaceSecretFailureAfterCascadeKeepsCleanupRunnable(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	const taskID = "task-workspace-secret-error"
+	seedCleanupTaskAndSession(t, repo, taskID, "session-workspace-secret-error")
+	secretErr := errors.New("legacy secret cleanup unavailable")
+	svc.SetWorkspaceSecretDeleter(failingLegacyWorkspaceSecretDeleter{err: secretErr})
+	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
+
+	err := svc.DeleteWorkspace(ctx, "ws-"+taskID)
+	if !errors.Is(err, secretErr) {
+		t.Fatalf("DeleteWorkspace error = %v, want %v", err, secretErr)
+	}
+	waitForCleanupDone(t, svc)
+	var state models.TaskResourceCleanupState
+	if err := repo.DB().QueryRowContext(ctx, `
+		SELECT state FROM task_resource_cleanup_jobs WHERE task_id = ?
+	`, taskID).Scan(&state); err != nil {
+		t.Fatalf("load cleanup state: %v", err)
+	}
+	if state != models.TaskResourceCleanupStateSucceeded {
+		t.Fatalf("cleanup state = %q, want succeeded", state)
+	}
+}
+
 func TestService_DeleteWorkspacePublishesChildEventsAndCleansResources(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()
@@ -1221,18 +1307,9 @@ func TestService_DeleteWorkspaceWithConfirmNamePublishesChildEventsAndCleansReso
 	}
 }
 
-func TestService_DeleteWorkspaceWithConfirmNamePublishesEventsForAllCascadeDeletedChildren(t *testing.T) {
-	svc, eventBus, repo := createTestService(t)
+func TestService_DeleteWorkspaceFreezesTaskCreationAndStopsLSPBeforeCascade(t *testing.T) {
+	svc, _, repo := createTestService(t)
 	ctx := context.Background()
-	svc.setCleanupDoneForTestHook(make(chan struct{}, 2))
-	cleanup := &recordingWorktreeCleanup{
-		worktreesByTaskID: map[string][]*worktree.Worktree{
-			"task-delete": {{ID: "wt-delete", TaskID: "task-delete"}},
-			"task-raced":  {{ID: "wt-raced", TaskID: "task-raced"}},
-		},
-	}
-	svc.SetWorktreeCleanup(cleanup)
-
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-delete", Name: "Delete Me"})
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-delete", WorkspaceID: "ws-delete", Name: "Doomed"})
 	if err := repo.CreateTask(ctx, &models.Task{
@@ -1244,44 +1321,55 @@ func TestService_DeleteWorkspaceWithConfirmNamePublishesEventsForAllCascadeDelet
 	}); err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
-	svc.workspaces = createDuringConfirmedDeleteRepo{
-		WorkspaceRepository: repo,
-		tasks:               repo,
-		workflows:           repo,
+	cleanupEntered := make(chan struct{})
+	cleanupRelease := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(cleanupRelease) }) })
+	lifecycle := &recordingTaskLSPLifecycle{
+		onCleanup: func(ctx context.Context, taskID string) {
+			if _, err := repo.GetTask(ctx, taskID); err != nil {
+				t.Errorf("LSP cleanup ran after workspace cascade: %v", err)
+			}
+			close(cleanupEntered)
+			<-cleanupRelease
+		},
 	}
-	eventBus.ClearEvents()
+	svc.SetTaskLSPLifecycle(lifecycle)
 
-	if err := svc.DeleteWorkspaceWithConfirmName(ctx, "ws-delete", "Delete Me"); err != nil {
+	deleteDone := make(chan error, 1)
+	go func() { deleteDone <- svc.DeleteWorkspaceWithConfirmName(ctx, "ws-delete", "Delete Me") }()
+	select {
+	case <-cleanupEntered:
+	case <-time.After(time.Second):
+		t.Fatal("workspace delete did not reach task LSP cleanup")
+	}
+	createDone := make(chan error, 1)
+	go func() {
+		_, err := svc.CreateTask(ctx, &CreateTaskRequest{
+			WorkspaceID: "ws-delete", WorkflowID: "wf-delete",
+			WorkflowStepID: "step-delete", Title: "Racing task",
+		})
+		createDone <- err
+	}()
+	select {
+	case err := <-createDone:
+		t.Fatalf("task creation crossed workspace deletion boundary: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	releaseOnce.Do(func() { close(cleanupRelease) })
+	if err := <-deleteDone; err != nil {
 		t.Fatalf("DeleteWorkspaceWithConfirmName: %v", err)
 	}
-	waitForCleanupDone(t, svc)
-	waitForCleanupDone(t, svc)
-
-	// This covers event publication from the repository cascade return value.
-	// Runtime cleanup is prepared before the cascade and topped up from the
-	// cascade return value for children that appear after that first snapshot.
-	eventCounts := make(map[string]int)
-	for _, event := range eventBus.GetPublishedEvents() {
-		eventCounts[event.Type]++
+	select {
+	case err := <-createDone:
+		if err == nil {
+			t.Fatal("task creation succeeded after workspace deletion")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("task creation did not resume after workspace deletion")
 	}
-	if eventCounts[events.TaskDeleted] != 2 {
-		t.Fatalf("task deleted events = %d, want 2", eventCounts[events.TaskDeleted])
-	}
-	if eventCounts[events.WorkflowDeleted] != 2 {
-		t.Fatalf("workflow deleted events = %d, want 2", eventCounts[events.WorkflowDeleted])
-	}
-	if _, err := repo.GetTask(ctx, "task-raced"); err == nil {
-		t.Fatalf("late-created task should be deleted")
-	}
-	if _, err := repo.GetWorkflow(ctx, "wf-raced"); err == nil {
-		t.Fatalf("late-created workflow should be deleted")
-	}
-	cleaned := make(map[string]bool)
-	for _, id := range cleanup.cleanedIDs() {
-		cleaned[id] = true
-	}
-	if len(cleaned) != 2 || !cleaned["wt-delete"] || !cleaned["wt-raced"] {
-		t.Fatalf("cleaned worktrees = %#v, want wt-delete and wt-raced", cleaned)
+	if got := lifecycle.cleanupCalls; len(got) != 1 || got[0] != "task-delete:task_deleted" {
+		t.Fatalf("cleanup calls = %v", got)
 	}
 }
 

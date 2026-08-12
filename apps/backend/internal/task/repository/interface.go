@@ -290,6 +290,7 @@ type SessionWorktreeRepository interface {
 type TaskResourceCleanupRepository interface {
 	CreateTaskResourceCleanupJob(ctx context.Context, job *models.TaskResourceCleanupJob) error
 	HasActiveTaskResourceCleanupJob(ctx context.Context, taskID string) (bool, error)
+	TouchPreparedTaskResourceCleanupJob(ctx context.Context, operationID string) error
 	UpdateTaskResourceCleanupSnapshot(ctx context.Context, operationID, snapshot string) error
 	GetTaskResourceCleanupJob(ctx context.Context, id string) (*models.TaskResourceCleanupJob, error)
 	GetTaskResourceCleanupJobByOperationID(ctx context.Context, operationID string) (*models.TaskResourceCleanupJob, error)

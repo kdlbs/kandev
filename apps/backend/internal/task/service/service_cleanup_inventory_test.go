@@ -168,3 +168,36 @@ func TestDirectTaskMutationReservesCleanupBarrierBeforeInventory(t *testing.T) {
 		})
 	}
 }
+
+func TestWorkspaceDeleteReservesCleanupBarrierBeforeInventory(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	const taskID = "task-workspace-barrier-before-inventory"
+	seedCleanupTaskAndSession(t, repo, taskID, "session-workspace-before-inventory")
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	svc.sessions = &blockingCleanupInventorySessions{
+		SessionRepository: repo,
+		entered:           entered,
+		release:           release,
+	}
+	done := make(chan error, 1)
+	go func() { done <- svc.DeleteWorkspace(ctx, "ws-"+taskID) }()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("workspace delete did not reach inventory capture")
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-racing-workspace-inventory", TaskID: taskID,
+		State: models.TaskSessionStateCreated,
+	}); err == nil {
+		t.Fatal("session creation crossed the workspace cleanup barrier")
+	}
+	releaseOnce.Do(func() { close(release) })
+	if err := <-done; err != nil {
+		t.Fatalf("DeleteWorkspace: %v", err)
+	}
+}

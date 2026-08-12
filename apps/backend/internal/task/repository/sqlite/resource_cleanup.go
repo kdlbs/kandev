@@ -26,13 +26,37 @@ func (r *Repository) CreateTaskResourceCleanupJob(ctx context.Context, job *mode
 	if job.State == "" {
 		job.State = models.TaskResourceCleanupStatePending
 	}
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if job.State == models.TaskResourceCleanupStatePrepared {
+		if err := r.lockTaskCleanupReservation(ctx, tx, job.TaskID); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_resource_cleanup_jobs (`+taskResourceCleanupColumns+`)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(operation_id) DO NOTHING
 	`), job.ID, job.OperationID, job.TaskID, job.Trigger, job.State,
 		job.ResourceSnapshot, job.Attempts, job.NextAttemptAt, job.LastError,
-		job.CreatedAt, job.UpdatedAt, job.CompletedAt)
+		job.CreatedAt, job.UpdatedAt, job.CompletedAt); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// TouchPreparedTaskResourceCleanupJob renews the durable owner lease while an
+// admitted inventory/mutation sequence is still running. A concurrent state
+// transition wins harmlessly because only prepared rows are touched.
+func (r *Repository) TouchPreparedTaskResourceCleanupJob(ctx context.Context, operationID string) error {
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_resource_cleanup_jobs
+		SET updated_at = ?
+		WHERE operation_id = ? AND state = ?
+	`), time.Now().UTC(), operationID, models.TaskResourceCleanupStatePrepared)
 	return err
 }
 
