@@ -34,8 +34,21 @@ vi.mock("@/hooks/use-in-office", () => ({
   useInOffice: () => false,
 }));
 
+type NavRegistration = {
+  pluginId: string;
+  id: string;
+  label: string;
+  path: string;
+  section?: string;
+};
+
+// Mutable so a specific test can inject plugin registrations (e.g. an
+// `insights`-section item) without affecting the rest of the suite, which
+// exercises the default no-plugins case.
+let navRegistrations: NavRegistration[] = [];
+
 vi.mock("@/lib/plugins/registry", () => ({
-  usePluginRegistry: () => ({ getNavRegistrations: () => [] }),
+  usePluginRegistry: () => ({ getNavRegistrations: () => navRegistrations }),
 }));
 
 vi.mock("@/hooks/use-nav-availability", () => ({
@@ -107,6 +120,7 @@ describe("AppNavSheet", () => {
   beforeEach(() => {
     healthHasIssues = false;
     resolvedTheme = "light";
+    navRegistrations = [];
     vi.clearAllMocks();
   });
   afterEach(cleanup);
@@ -145,6 +159,7 @@ describe("AppNavSections", () => {
   beforeEach(() => {
     healthHasIssues = false;
     statusSeverity = "none";
+    navRegistrations = [];
     vi.clearAllMocks();
   });
   afterEach(cleanup);
@@ -204,12 +219,36 @@ describe("AppNavSections", () => {
 
     expect(screen.getByTestId("app-nav-health-button")).not.toBeNull();
   });
+
+  it("orders the Utilities group's manifest rows as Stats, Settings, then a plugin insights item", () => {
+    navRegistrations = [
+      {
+        pluginId: "acme",
+        id: "board",
+        label: "Acme Board",
+        path: "/plugins/acme",
+        section: "insights",
+      },
+    ];
+
+    render(<SectionsHost />);
+
+    const links = screen.getAllByRole("link").map((link) => link.textContent);
+    const stats = links.indexOf("Stats");
+    const settings = links.indexOf("Settings");
+    const plugin = links.indexOf("Acme Board");
+
+    expect(stats).toBeGreaterThanOrEqual(0);
+    expect(settings).toBeGreaterThan(stats);
+    expect(plugin).toBeGreaterThan(settings);
+  });
 });
 
 describe("AppNavSections theme toggle", () => {
   beforeEach(() => {
     healthHasIssues = false;
     resolvedTheme = "light";
+    navRegistrations = [];
     vi.clearAllMocks();
   });
   afterEach(cleanup);

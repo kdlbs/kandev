@@ -56,17 +56,31 @@ vi.mock("@/hooks/domains/features/use-feature", () => ({
 }));
 
 // The footer renders its insight buttons from the navigation manifest; the
-// manifest itself is covered in `lib/navigation/core-destinations.test.ts`.
+// manifest itself is covered in `lib/navigation/core-destinations.test.ts` and
+// `lib/navigation/plugin-destinations.test.ts`. `insightDestinations` is
+// mutable so individual tests can inject plugin entries alongside `stats`.
+type FooterDestination = {
+  id: string;
+  label: string;
+  icon: typeof IconChartBar;
+  section: string;
+  href: string;
+  source?: "plugin";
+  pluginItemId?: string;
+};
+
+const STATS_DESTINATION: FooterDestination = {
+  id: "stats",
+  label: "Stats",
+  icon: IconChartBar,
+  section: "insights",
+  href: "/stats",
+};
+
+let insightDestinations: FooterDestination[] = [STATS_DESTINATION];
+
 vi.mock("@/hooks/use-app-destinations", () => ({
-  useStaticDestinations: () => [
-    {
-      id: "stats",
-      label: "Stats",
-      icon: IconChartBar,
-      section: "insights",
-      href: "/stats",
-    },
-  ],
+  useStaticDestinations: () => insightDestinations,
 }));
 
 vi.mock("@/hooks/use-release-notes", () => ({
@@ -122,10 +136,10 @@ vi.mock("@kandev/ui/dropdown-menu", () => ({
 
 import { AppSidebarFooter } from "./app-sidebar-footer";
 
-function renderFooter() {
+function renderFooter(collapsed = false) {
   return render(
     <TooltipProvider>
-      <AppSidebarFooter collapsed={false} onToggleSettingsMode={mocks.toggleSettingsMode} />
+      <AppSidebarFooter collapsed={collapsed} onToggleSettingsMode={mocks.toggleSettingsMode} />
     </TooltipProvider>,
   );
 }
@@ -148,6 +162,7 @@ function resetFooterState() {
   document.cookie = "office-active-workspace=; path=/; max-age=0";
   mocks.routerPush.mockClear();
   mocks.toggleSettingsMode.mockClear();
+  insightDestinations = [STATS_DESTINATION];
 }
 
 const KANBAN_HOME_HREF = "/?home=overview&workspaceId=kanban-1";
@@ -386,5 +401,75 @@ describe("AppSidebarFooter current-user chip", () => {
     fireEvent.click(screen.getByTestId("current-user-logout"));
 
     expect(mocks.logout).toHaveBeenCalledOnce();
+  });
+});
+
+function eightPluginDestinations(): FooterDestination[] {
+  return [
+    STATS_DESTINATION,
+    ...Array.from({ length: 8 }, (_, i) => ({
+      id: `plugin:acme-${i}:board`,
+      label: `Acme Board ${i}`,
+      icon: IconChartBar,
+      section: "insights",
+      href: `/plugins/acme-${i}`,
+      source: "plugin" as const,
+      pluginItemId: "board",
+    })),
+  ];
+}
+
+describe("AppSidebarFooter plugin insights items", () => {
+  beforeEach(resetFooterState);
+
+  afterEach(() => cleanup());
+
+  it("renders a plugin insights destination as an icon button with the owner-namespaced testid, and navigates on click", () => {
+    insightDestinations = [
+      STATS_DESTINATION,
+      {
+        id: "plugin:acme:board",
+        label: "Acme Board",
+        icon: IconChartBar,
+        section: "insights",
+        href: "/plugins/acme",
+        source: "plugin",
+        pluginItemId: "board",
+      },
+    ];
+
+    renderFooter();
+
+    const button = screen.getByTestId("sidebar-plugin:acme:board-button");
+    expect(button).not.toBeNull();
+    expect(button.getAttribute("aria-label")).toBe("Acme Board");
+
+    fireEvent.click(button);
+
+    expect(mocks.routerPush).toHaveBeenCalledWith("/plugins/acme");
+  });
+
+  it("renders every plugin insights destination with no cap, wrapping when expanded", () => {
+    insightDestinations = eightPluginDestinations();
+
+    renderFooter(false);
+
+    for (let i = 0; i < 8; i++) {
+      expect(screen.getByTestId(`sidebar-plugin:acme-${i}:board-button`)).not.toBeNull();
+    }
+    const container = screen.getByTestId("sidebar-settings-gear").parentElement;
+    expect(container?.className).toContain("flex-wrap");
+  });
+
+  it("renders every plugin insights destination with no cap when collapsed, in a non-wrapping column", () => {
+    insightDestinations = eightPluginDestinations();
+
+    renderFooter(true);
+
+    for (let i = 0; i < 8; i++) {
+      expect(screen.getByTestId(`sidebar-plugin:acme-${i}:board-button`)).not.toBeNull();
+    }
+    const container = screen.getByTestId("sidebar-settings-gear").parentElement;
+    expect(container?.className).toContain("flex-col");
   });
 });
