@@ -375,6 +375,22 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		return
 	}
 
+	// ADR 0015 — record the audit row before the pending signal (if any)
+	// is cleared below. Only the triggerOnEnter=true (legacy
+	// on_turn_complete) branch could have consumed a signal; the
+	// on_turn_start branch records with no signal metadata.
+	var consumedSignal *models.PendingStepCompletionSignal
+	if triggerOnEnter && exitSession != nil {
+		if signal, has := models.LoadPendingStepSignal(exitSession.Metadata); has && signal.StepID == fromStep.ID {
+			consumedSignal = &signal
+		}
+	}
+	trigger := wfmodels.StepTransitionTriggerTurnStart
+	if triggerOnEnter {
+		trigger = wfmodels.StepTransitionTriggerAutoComplete
+	}
+	s.recordAutoStepTransition(ctx, sessionID, fromStep.ID, toStepID, consumedSignal, trigger)
+
 	if triggerOnEnter {
 		// ADR 0015 — clear any pending completion-signal bag for the
 		// step we just left. Only on_turn_complete transitions trigger
@@ -1630,6 +1646,17 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		}
 		return
 	}
+
+	// ADR 0015 — record the audit row now that the transition is durably
+	// persisted. This is the agent-initiated move_task_kandev path (the move
+	// couldn't apply inline because the calling session was still
+	// RUNNING/STARTING); the idle-session path records through
+	// task/service.MoveTaskWithOptions instead.
+	actor := wfmodels.StepTransitionActorAgent
+	if move.Actor != "" {
+		actor = wfmodels.StepTransitionActor(move.Actor)
+	}
+	s.recordManualStepTransition(ctx, sessionID, fromStepID, move.WorkflowStepID, actor)
 
 	s.logger.Info("applying pending move",
 		zap.String("task_id", taskID),
@@ -3044,6 +3071,25 @@ func (s *Service) applyEngineTransition(
 		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
 		return false
 	}
+
+	// ADR 0015 — record the audit row before the pending signal (if any) is
+	// cleared. Only an on_turn_complete transition can have consumed a
+	// signal; on_turn_start and on_children_completed transitions record
+	// with no signal metadata.
+	var consumedSignal *models.PendingStepCompletionSignal
+	if trigger == engine.TriggerOnTurnComplete {
+		if signal, has := models.LoadPendingStepSignal(session.Metadata); has && signal.StepID == result.FromStepID {
+			consumedSignal = &signal
+		}
+	}
+	historyTrigger := wfmodels.StepTransitionTriggerAutoComplete
+	switch trigger {
+	case engine.TriggerOnTurnStart:
+		historyTrigger = wfmodels.StepTransitionTriggerTurnStart
+	case engine.TriggerOnChildrenCompleted:
+		historyTrigger = wfmodels.StepTransitionTriggerChildrenCompleted
+	}
+	s.recordAutoStepTransition(ctx, session.ID, result.FromStepID, result.ToStepID, consumedSignal, historyTrigger)
 
 	// ADR 0015 — a successful on_turn_complete transition consumes any
 	// pending step-completion signal for the source step. The bag must be

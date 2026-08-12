@@ -6,9 +6,9 @@ test.describe("System Licenses page", () => {
   }) => {
     test.setTimeout(60_000);
 
-    await testPage.goto("/settings/system/licenses");
+    await testPage.goto("/settings/system/about");
 
-    await expect(testPage.getByTestId("system-page-title")).toHaveText("Licenses");
+    await expect(testPage.getByTestId("system-page-title")).toHaveText("About");
     const card = testPage.getByTestId("system-licenses-card");
     await expect(card).toBeVisible();
 

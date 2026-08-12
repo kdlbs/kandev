@@ -964,12 +964,11 @@ complete.
 - **Mandatory package signing.** `checksums.txt.sig` verification is supported when
   present, but signing is optional in v1 — an unsigned package installs with a warning
   rather than being rejected. Requiring signatures is future work.
-- **Agent tools.** Plugins do not contribute tools to agents. An earlier
-  `tools[]` manifest section with an `InvokeTool` RPC was built during the
-  initial buildout but never wired into agent tool sets, and has been removed —
-  it duplicated MCP, kandev's established mechanism for exposing tools to
-  agents (`internal/mcp/`). If plugins ever contribute agent tools, they should
-  feed through the MCP surface rather than a parallel invocation path.
+- **Agent tools in the base v1 runtime.** The original parallel `tools[]` plus
+  `InvokeTool` path remains removed. Plugin-contributed agent tools are a
+  separate extension specified in [Plugin-Contributed Agent Tools](agent-tools.md)
+  and feed through Kandev's existing MCP surface rather than a second discovery
+  or invocation protocol.
 - **Hot reload.** Upgrading a plugin requires a new install (new version directory);
   there is no in-place manifest or binary swap on a running process.
 - **Multi-instance plugins.** Each plugin ID maps to exactly one supervised subprocess.

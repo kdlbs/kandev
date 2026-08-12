@@ -31,16 +31,17 @@ type fakeOrchestrator struct {
 
 	queue *messagequeue.Service
 
-	promptCalls       []promptCall
-	startCreatedCalls []startCreatedCall
-	resumeCalls       int
-	turnStartCalls    []turnStartCall
-	onTurnStart       func(context.Context, string, string) error
-	interruptCalls    []interruptCall
-	launchCalls       []*orchestrator.LaunchSessionRequest
-	launchErr         error
-	renameCalls       []renameCall
-	renameErr         error
+	promptCalls             []promptCall
+	startCreatedCalls       []startCreatedCall
+	resumeCalls             int
+	turnStartCalls          []turnStartCall
+	onTurnStart             func(context.Context, string, string) error
+	interruptCalls          []interruptCall
+	launchCalls             []*orchestrator.LaunchSessionRequest
+	launchErr               error
+	launchResponseProfileID string
+	renameCalls             []renameCall
+	renameErr               error
 
 	// Configurable: error returned by PromptTask. Cleared after first call so
 	// the retry-after-resume path can succeed on the second call.
@@ -99,12 +100,18 @@ func (f *fakeOrchestrator) LaunchSession(_ context.Context, req *orchestrator.La
 	if f.launchErr != nil {
 		return nil, f.launchErr
 	}
-	return &orchestrator.LaunchSessionResponse{
+	response := &orchestrator.LaunchSessionResponse{
 		Success:   true,
 		TaskID:    req.TaskID,
 		SessionID: "spawned-sess-1",
 		State:     "STARTING",
-	}, nil
+	}
+	profileID := req.AgentProfileID
+	if f.launchResponseProfileID != "" {
+		profileID = f.launchResponseProfileID
+	}
+	response.AgentProfileID = profileID
+	return response, nil
 }
 
 func (f *fakeOrchestrator) PromptTask(_ context.Context, taskID, sessionID, prompt, _ string, _ bool, _ []v1.MessageAttachment, dispatchOnly bool) (*orchestrator.PromptResult, error) {

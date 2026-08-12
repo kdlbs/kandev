@@ -172,8 +172,16 @@ func provideOrchestrator(
 		taskSvc.PublishTaskUpdated(ctx, task)
 	})
 
-	// Wire workflow step getter for prompt building
+	// Wire workflow step getter for prompt building. The recorder is wired
+	// first: SetStepHistoryRecorder's own initWorkflowEngine() call is a
+	// no-op while workflowStepGetter is still nil, so the store/engine only
+	// get built once, by SetWorkflowStepGetter below, instead of twice.
 	if workflowSvc != nil {
+		// Wire the ADR 0015 audit-trail writer for auto-advance step
+		// transitions. workflowSvc.CreateStepTransition already matches
+		// orchestrator.StepHistoryRecorder structurally, so no adapter is
+		// needed.
+		orchestratorSvc.SetStepHistoryRecorder(workflowSvc)
 		orchestratorSvc.SetWorkflowStepGetter(&orchestratorWorkflowStepGetterAdapter{svc: workflowSvc})
 	}
 
@@ -602,7 +610,7 @@ func (a *utilityDepsAdapter) ListUtilityAgentsByAgentProfile(ctx context.Context
 	}
 	for _, agent := range agents {
 		if agent != nil && (agent.AgentProfileID == profileID ||
-			(agent.ProfileBindingState == utilitymodels.ProfileBindingInherit && defaultProfileID == profileID)) {
+			(utilitymodels.UsesDefaultProfile(agent) && defaultProfileID == profileID)) {
 			refs = append(refs, agentsettingscontroller.UtilityAgentReference{ID: agent.ID, Name: agent.Name})
 		}
 	}
@@ -615,15 +623,6 @@ func (a *utilityDepsAdapter) ClearUtilityAgentProfileBindings(ctx context.Contex
 	}
 	if err := a.svc.ClearAgentProfileBindings(ctx, profileID); err != nil {
 		return err
-	}
-	if a.userSvc != nil {
-		defaultProfileID, err := a.userSvc.GetDefaultUtilityAgentProfileID(ctx)
-		if err != nil {
-			return err
-		}
-		if defaultProfileID == profileID {
-			return a.svc.ClearInheritedProfileBindings(ctx)
-		}
 	}
 	return nil
 }

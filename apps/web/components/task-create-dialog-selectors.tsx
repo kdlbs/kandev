@@ -37,11 +37,18 @@ import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
 import { useTaskCreatePromptMention } from "@/hooks/use-task-create-prompt-mention";
 import { cn } from "@/lib/utils";
-import { clampTaskTitleInput } from "@/lib/task-title";
+import { useTaskTitleSelectionRestore } from "@/hooks/use-task-title-selection-restore";
 import { deleteAttachment, uploadAttachment } from "@/lib/api/domains/attachment-api";
 import { ApiError } from "@/lib/api/client";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
+import { PluginSlot } from "@/components/plugins/plugin-slot";
+import {
+  composerIdentity,
+  composerInsertionText,
+  useStablePluginComposerCapability,
+} from "@/lib/plugins/composer-capability";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 const CURSOR_POINTER_CLASS = "cursor-pointer";
 
@@ -303,7 +310,7 @@ export const InlineTaskName = memo(function InlineTaskName({
   autoFocus,
 }: InlineTaskNameProps) {
   const { t } = useTranslation();
-  const inputRef = useRef<HTMLInputElement>(null);
+  const { inputRef, clampChange } = useTaskTitleSelectionRestore(value);
   const hasFocusedRef = useRef(false);
 
   useEffect(() => {
@@ -319,7 +326,7 @@ export const InlineTaskName = memo(function InlineTaskName({
       ref={inputRef}
       type="text"
       value={value}
-      onChange={(e) => onChange(clampTaskTitleInput(e.target.value))}
+      onChange={(e) => onChange(clampChange(e))}
       placeholder={t("task:taskName")}
       data-testid="task-title-input"
       className="w-full min-w-0 max-w-full border border-input bg-input/20 dark:bg-input/30 text-sm font-medium rounded-md px-3 py-2 placeholder:text-muted-foreground/70 outline-none focus-visible:border-ring transition-colors"
@@ -330,6 +337,7 @@ export const InlineTaskName = memo(function InlineTaskName({
 // Memoized description input to prevent re-rendering the entire dialog on every keystroke
 type TaskFormInputsProps = {
   isSessionMode: boolean;
+  taskId?: string | null;
   workspaceId?: string | null;
   autoFocus?: boolean;
   initialDescription: string;
@@ -357,7 +365,7 @@ type TaskFormInputsProps = {
    * when the user has voice auto-send enabled. The dialog wires this to a
    * programmatic form submit so dictation can create the task hands-free.
    */
-  onVoiceAutoSend?: () => void;
+  onVoiceAutoSend?: () => boolean | Promise<boolean>;
 };
 
 // eslint-disable-next-line max-lines-per-function
@@ -667,22 +675,28 @@ function useDescriptionInput(
 
   const insertAtCursor = useCallback(
     (text: string) => {
-      const trimmed = text.trim();
-      if (!trimmed) return;
+      // Read the synchronous ref, not the render snapshot: a plugin can
+      // insert twice (or insert then submit) inside one callback, before React
+      // has re-rendered with the first insertion.
+      const current = descriptionRef.current;
       const textarea = textareaRef.current;
-      const start = textarea?.selectionStart ?? description.length;
-      const end = textarea?.selectionEnd ?? description.length;
-      const charBefore = start > 0 ? description.charAt(start - 1) : "";
-      const needsLeadingSpace = charBefore !== "" && !/\s/.test(charBefore);
-      const insert = needsLeadingSpace ? ` ${trimmed}` : trimmed;
-      const next = description.slice(0, start) + insert + description.slice(end);
+      // A caret we set but have not applied yet outranks the DOM's: after a
+      // programmatic insertion the textarea still reports the pre-insert
+      // selection until the layout effect below runs, so a second insertion in
+      // the same callback would splice at the old offset.
+      const pending = pendingCursorRef.current;
+      const start = pending ?? textarea?.selectionStart ?? current.length;
+      const end = pending ?? textarea?.selectionEnd ?? current.length;
+      const insert = composerInsertionText(text, start > 0 ? current.charAt(start - 1) : "");
+      if (!insert) return;
+      const next = current.slice(0, start) + insert + current.slice(end);
       pendingCursorRef.current = start + insert.length;
       setDescriptionValue(next);
     },
-    [description, setDescriptionValue],
+    [setDescriptionValue],
   );
 
-  return { description, textareaRef, setDescriptionValue, insertAtCursor };
+  return { description, descriptionRef, textareaRef, setDescriptionValue, insertAtCursor };
 }
 
 type FormInputsToolbarProps = {
@@ -697,6 +711,7 @@ type FormInputsToolbarProps = {
     onTranscript: (text: string) => void;
     onAutoSend?: () => void;
   };
+  pluginActions?: React.ReactNode;
 };
 
 function FormInputsToolbar({
@@ -708,6 +723,7 @@ function FormInputsToolbar({
   jiraImport,
   linearImport,
   voice,
+  pluginActions,
 }: FormInputsToolbarProps) {
   return (
     <div className="flex items-center px-1 pb-1">
@@ -733,6 +749,7 @@ function FormInputsToolbar({
           onImport={linearImport.onImport}
         />
       )}
+      {pluginActions}
       {voice && (
         <div className="ml-auto flex items-center">
           <VoiceInputButton
@@ -762,6 +779,56 @@ function PromptMentionPopover({
       onSelect={mention.handleSelect}
       onClose={mention.closeMenu}
       setSelectedIndex={mention.setSelectedIndex}
+    />
+  );
+}
+
+function useCreationComposerPluginActions(args: {
+  isSessionMode: boolean;
+  taskId: string | null;
+  disabled: boolean;
+  description: string;
+  descriptionRef: React.RefObject<string>;
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  insertAtCursor: (text: string) => void;
+  submit?: () => boolean | Promise<boolean>;
+}) {
+  const { isMobile } = useResponsiveBreakpoint();
+  const surface = args.isSessionMode ? "new-session" : "task-create";
+  const composer = useStablePluginComposerCapability(
+    {
+      insertText: (text) => {
+        args.insertAtCursor(text);
+        return true;
+      },
+      focus: () => {
+        if (!args.textareaRef.current) return false;
+        args.textareaRef.current.focus();
+        return true;
+      },
+      // Gate on the synchronous ref for the same reason the chat composer
+      // reads its editor: insert-then-submit in one callback happens before
+      // React re-renders with the new description.
+      submit: async () => {
+        if (args.disabled || !args.descriptionRef.current.trim() || !args.submit) return false;
+        return await args.submit();
+      },
+    },
+    composerIdentity(surface, args.taskId, null),
+  );
+  return (
+    <PluginSlot
+      name={args.isSessionMode ? "new-session-input-actions" : "task-create-input-actions"}
+      slotProps={{
+        surface,
+        presentation: isMobile ? "mobile" : "desktop",
+        taskId: args.taskId,
+        activeSessionId: null,
+        sessionIds: [],
+        disabled: args.disabled,
+        submittable: !args.disabled && args.description.trim().length > 0,
+        composer,
+      }}
     />
   );
 }
@@ -830,6 +897,8 @@ function DraggingOverlay({ isDragging }: { isDragging: boolean }) {
   );
 }
 
+// The input coordinates existing attachment, mention, voice, and plugin controls in one field.
+// eslint-disable-next-line max-lines-per-function
 export const TaskFormInputs = memo(function TaskFormInputs({
   workspaceId,
   isSessionMode,
@@ -847,6 +916,7 @@ export const TaskFormInputs = memo(function TaskFormInputs({
   jiraImport,
   linearImport,
   onVoiceAutoSend,
+  taskId = null,
 }: TaskFormInputsProps) {
   const { t } = useTranslation();
   const {
@@ -866,13 +936,14 @@ export const TaskFormInputs = memo(function TaskFormInputs({
     () => toContextItems(attachments, handleRemoveAttachment, handleRetryAttachment),
     [attachments, handleRemoveAttachment, handleRetryAttachment],
   );
-  const { description, textareaRef, setDescriptionValue, insertAtCursor } = useDescriptionInput(
-    initialDescription,
-    autoFocus,
-    descriptionValueRef,
-    onDescriptionChange,
-    attachments,
-  );
+  const { description, descriptionRef, textareaRef, setDescriptionValue, insertAtCursor } =
+    useDescriptionInput(
+      initialDescription,
+      autoFocus,
+      descriptionValueRef,
+      onDescriptionChange,
+      attachments,
+    );
   const mention = useTaskCreatePromptMention({
     textareaRef,
     value: description,
@@ -884,6 +955,16 @@ export const TaskFormInputs = memo(function TaskFormInputs({
     () => ({ onTranscript: insertAtCursor, onAutoSend: onVoiceAutoSend }),
     [insertAtCursor, onVoiceAutoSend],
   );
+  const pluginActions = useCreationComposerPluginActions({
+    isSessionMode,
+    taskId,
+    disabled: Boolean(disabled),
+    description,
+    descriptionRef,
+    textareaRef,
+    insertAtCursor,
+    submit: onVoiceAutoSend,
+  });
 
   return (
     <div
@@ -923,6 +1004,7 @@ export const TaskFormInputs = memo(function TaskFormInputs({
           jiraImport={jiraImport}
           linearImport={linearImport}
           voice={voiceBinding}
+          pluginActions={pluginActions}
         />
         <HiddenFileInput inputRef={fileInputRef} onChange={handleFileInputChange} />
       </div>

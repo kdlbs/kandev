@@ -303,7 +303,7 @@ export function MessageQueueSettings() {
   return (
     <SettingsCard
       isDirty={state.isDirty}
-      className="min-w-0 w-full max-w-3xl"
+      className="min-w-0 w-full"
       data-testid="message-queue-settings"
     >
       <CardHeader>

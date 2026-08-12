@@ -37,6 +37,8 @@ import (
 	hcplugin "github.com/hashicorp/go-plugin"
 	pluginv1 "github.com/kandev/kandev/proto/kandev/plugin/v1"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // Handshake is the go-plugin handshake shared by kandev and every plugin
@@ -191,6 +193,20 @@ func (r *RemotePlugin) HandleWebhook(ctx context.Context, req *WebhookRequest) (
 	return webhookResponseFromProto(resp), nil
 }
 
+// InvokeAgentTool calls the optional plugin agent-tool RPC. The caller owns
+// timeout and retry policy because tool calls may have side effects.
+func (r *RemotePlugin) InvokeAgentTool(ctx context.Context, req *AgentToolRequest) (*AgentToolResult, error) {
+	proto, err := req.toProto()
+	if err != nil {
+		return nil, err
+	}
+	resp, err := r.client.InvokeAgentTool(ctx, proto)
+	if err != nil {
+		return nil, err
+	}
+	return agentToolResultFromProto(resp)
+}
+
 // grpcPluginServer adapts the author-facing Plugin interface to the
 // generated pluginv1.PluginServer interface. Registered inside the plugin
 // subprocess by GRPCPlugin.GRPCServer.
@@ -216,6 +232,25 @@ func (s *grpcPluginServer) HandleWebhook(ctx context.Context, req *pluginv1.Webh
 		return nil, err
 	}
 	return resp.toProto(), nil
+}
+
+func (s *grpcPluginServer) InvokeAgentTool(ctx context.Context, req *pluginv1.AgentToolRequest) (*pluginv1.AgentToolResponse, error) {
+	impl, ok := s.impl.(AgentToolPlugin)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "agent tool invocation is not implemented")
+	}
+	converted, err := agentToolRequestFromProto(req)
+	if err != nil {
+		return nil, err
+	}
+	result, err := impl.InvokeAgentTool(ctx, converted)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
+		return nil, status.Error(codes.Internal, "plugin returned a nil agent tool result")
+	}
+	return result.toProto()
 }
 
 var _ pluginv1.PluginServer = (*grpcPluginServer)(nil)
@@ -247,6 +282,9 @@ func Serve(p Plugin, opts ...Option) {
 	hcplugin.Serve(&hcplugin.ServeConfig{
 		HandshakeConfig: Handshake,
 		Plugins:         map[string]hcplugin.Plugin{PluginMapKey: gp},
-		GRPCServer:      hcplugin.DefaultGRPCServer,
+		GRPCServer: func(options []grpc.ServerOption) *grpc.Server {
+			// The webhook HTTP body may be 16 MiB; leave room for protobuf metadata.
+			return grpc.NewServer(append(options, grpc.MaxRecvMsgSize(17<<20))...)
+		},
 	})
 }

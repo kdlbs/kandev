@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	DeploymentAppManifestRevision = 1
+	DeploymentAppManifestRevision = 2
 	deploymentAppManifestFlowTTL  = time.Hour
 	deploymentAppNameMaxLength    = 34
 )
@@ -102,7 +102,7 @@ type DeploymentAppManifest struct {
 	HookAttributes        DeploymentAppManifestHook `json:"hook_attributes"`
 	RedirectURL           string                    `json:"redirect_url"`
 	CallbackURLs          []string                  `json:"callback_urls"`
-	SetupURL              string                    `json:"setup_url"`
+	SetupURL              string                    `json:"setup_url,omitempty"`
 	Public                bool                      `json:"public"`
 	DefaultPermissions    map[string]string         `json:"default_permissions"`
 	DefaultEvents         []string                  `json:"default_events"`
@@ -143,10 +143,14 @@ func BuildAppRegistrationManifest(
 	}
 	baseURL := strings.TrimRight(submission.Manifest.URL, "/") +
 		"/api/v1/github/app/registrations/" + registrationID.String()
+	installCallbackURL := baseURL + "/install/callback"
 	submission.Manifest.HookAttributes.URL = baseURL + "/webhook"
 	submission.Manifest.RedirectURL = baseURL + "/manifest/callback"
-	submission.Manifest.CallbackURLs = []string{baseURL + "/personal/callback"}
-	submission.Manifest.SetupURL = baseURL + "/install/callback"
+	submission.Manifest.CallbackURLs = []string{
+		installCallbackURL,
+		baseURL + "/personal/callback",
+	}
+	submission.Manifest.SetupURL = ""
 	submission.Manifest.Public = public
 	return submission, nil
 }
@@ -218,26 +222,21 @@ func BuildDeploymentAppManifest(
 			HookAttributes: DeploymentAppManifestHook{
 				URL: baseURL + "/api/v1/github/app/webhook", Active: true,
 			},
-			RedirectURL:  baseURL + "/api/v1/github/app/registration/callback",
-			CallbackURLs: []string{baseURL + "/api/v1/github/personal-connection/callback"},
-			SetupURL:     baseURL + "/api/v1/github/app/install/callback",
-			Public:       false,
+			RedirectURL: baseURL + "/api/v1/github/app/registration/callback",
+			CallbackURLs: []string{
+				baseURL + "/api/v1/github/app/install/callback",
+				baseURL + "/api/v1/github/personal-connection/callback",
+			},
+			Public: false,
 			DefaultPermissions: map[string]string{
 				"actions": "read", "administration": "read", "checks": "read",
 				"contents": "write", "issues": "write", "members": "read",
 				"metadata": "read", "pull_requests": "write", "statuses": "read",
 				"workflows": "write",
 			},
-			// push and check_run enable webhook-driven github_push/github_ci automation
-			// triggers. Deployment caveat: GitHub Apps only deliver events a user has
-			// explicitly subscribed to at installation time, so existing installations
-			// created before this manifest change must be re-accepted (reinstalled, or
-			// updated via the App's GitHub settings page) before push/check_run
-			// webhooks start arriving for them.
-			DefaultEvents: []string{
-				"installation", "installation_repositories", "github_app_authorization",
-				"push", "check_run",
-			},
+			// GitHub delivers App lifecycle events automatically. Only configurable
+			// webhook subscriptions belong in default_events.
+			DefaultEvents:         []string{"push", "check_run"},
 			RequestOAuthOnInstall: true,
 			SetupOnUpdate:         false,
 		},

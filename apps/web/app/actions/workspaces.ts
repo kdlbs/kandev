@@ -400,6 +400,7 @@ type BackendWorkflowStep = {
   cancel_triggers_turn_complete?: boolean;
   wip_limit?: number;
   pull_from_step_id?: string | null;
+  stage_type?: WorkflowStep["stage_type"];
   created_at: string;
   updated_at: string;
 };
@@ -421,6 +422,7 @@ const transformWorkflowStep = (step: BackendWorkflowStep): WorkflowStep => ({
   cancel_triggers_turn_complete: step.cancel_triggers_turn_complete,
   wip_limit: step.wip_limit ?? 0,
   pull_from_step_id: step.pull_from_step_id ?? null,
+  stage_type: step.stage_type,
   created_at: step.created_at,
   updated_at: step.updated_at,
 });
@@ -462,6 +464,7 @@ export async function createWorkflowStepAction(payload: {
   allow_manual_move?: boolean;
   wip_limit?: number;
   pull_from_step_id?: string | null;
+  stage_type?: WorkflowStep["stage_type"];
   cancel_triggers_turn_complete?: boolean;
 }): Promise<WorkflowStep> {
   const body = {
@@ -475,6 +478,7 @@ export async function createWorkflowStepAction(payload: {
     is_start_step: payload.is_start_step ?? false,
     wip_limit: payload.wip_limit ?? 0,
     pull_from_step_id: payload.pull_from_step_id ?? "",
+    stage_type: payload.stage_type,
     cancel_triggers_turn_complete: payload.cancel_triggers_turn_complete ?? false,
   };
   const response = await fetchJson<BackendWorkflowStep>(`${apiBaseUrl}/api/v1/workflow/steps`, {
@@ -503,6 +507,7 @@ export async function updateWorkflowStepAction(
       | "cancel_triggers_turn_complete"
       | "wip_limit"
       | "pull_from_step_id"
+      | "stage_type"
     >
   >,
 ): Promise<WorkflowStep> {
@@ -525,6 +530,7 @@ export async function updateWorkflowStepAction(
     body.cancel_triggers_turn_complete = payload.cancel_triggers_turn_complete;
   if (payload.wip_limit !== undefined) body.wip_limit = payload.wip_limit;
   if (payload.pull_from_step_id !== undefined) body.pull_from_step_id = payload.pull_from_step_id;
+  body.stage_type = payload.stage_type;
   const response = await fetchJson<BackendWorkflowStep>(
     `${apiBaseUrl}/api/v1/workflow/steps/${stepId}`,
     {

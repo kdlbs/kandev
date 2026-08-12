@@ -22,6 +22,31 @@ function updateJob(overrides: Record<string, unknown> = {}) {
   };
 }
 
+describe("user settings snapshots", () => {
+  it("rejects an older server snapshot but allows an equal-revision optimistic update", () => {
+    const store = makeStore();
+    const actions = store.getState();
+    const current = {
+      ...actions.userSettings,
+      appStatusBarEnabled: true,
+      revision: 2,
+    };
+
+    actions.setUserSettings(current);
+    actions.setUserSettings({ ...current, appStatusBarEnabled: false, revision: 1 });
+    expect(store.getState().userSettings).toMatchObject({
+      appStatusBarEnabled: true,
+      revision: 2,
+    });
+
+    actions.setUserSettings({ ...current, appStatusBarEnabled: false });
+    expect(store.getState().userSettings).toMatchObject({
+      appStatusBarEnabled: false,
+      revision: 2,
+    });
+  });
+});
+
 describe("settings update jobs", () => {
   it("rehydrates the newest retained job for each agent", () => {
     const store = makeStore();

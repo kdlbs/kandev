@@ -23,6 +23,7 @@ test.describe("Linear settings", () => {
   test("saving the config persists across reload and shows the auth banner", async ({
     testPage,
     apiClient,
+    seedData,
   }) => {
     // Seed a single team so the dropdown post-save can populate without an
     // empty-list flash. The default-team field is optional, but the team
@@ -30,13 +31,17 @@ test.describe("Linear settings", () => {
     await apiClient.mockLinearSetTeams([{ id: "team-1", key: "ENG", name: "Engineering" }]);
 
     const settings = new LinearSettingsPage(testPage);
-    await settings.goto();
+    // Pin the workspace: the install-level path redirects to the active
+    // workspace, which need not match the API client's probe target below.
+    await settings.gotoWorkspace(seedData.workspaceId);
 
     await settings.secretInput.fill("lin_api_xxx");
     await settings.saveButton.click();
     await expect(settings.saveButton).toHaveCount(0);
     // Wait for the async post-save probe to write lastOk=true before reloading.
-    await apiClient.waitForIntegrationAuthHealthy("linear");
+    await apiClient.waitForIntegrationAuthHealthy("linear", {
+      workspaceId: seedData.workspaceId,
+    });
 
     await testPage.reload();
     await settings.secretInput.waitFor();
@@ -48,12 +53,13 @@ test.describe("Linear settings", () => {
   test("workspace-scoped route scopes the saved credentials form", async ({
     testPage,
     apiClient,
+    seedData,
   }) => {
     const other = await apiClient.createWorkspace("Linear Secondary Workspace");
     await apiClient.mockLinearSetTeams([{ id: "team-1", key: "ENG", name: "Engineering" }]);
 
     const settings = new LinearSettingsPage(testPage);
-    await settings.goto();
+    await settings.gotoWorkspace(seedData.workspaceId);
 
     await settings.secretInput.fill("lin_api_default");
     await settings.saveButton.click();
@@ -94,7 +100,7 @@ test.describe("Linear settings", () => {
     await settings.gotoWorkspace(other.id);
 
     await expect(testPage).toHaveURL(
-      new RegExp(`/settings/workspace/${other.id}/integrations/linear$`),
+      new RegExp(`/settings/workspaces/${other.id}/integrations/linear$`),
     );
     await expect(testPage).not.toHaveURL(/[?&]workspace=/);
     await expect(settings.secretInput).toHaveValue("");
@@ -103,12 +109,16 @@ test.describe("Linear settings", () => {
   test("copy config duplicates the credentials to another workspace", async ({
     testPage,
     apiClient,
+    seedData,
   }) => {
     const other = await apiClient.createWorkspace("Linear Copy Target Workspace");
     await apiClient.mockLinearSetTeams([{ id: "team-1", key: "ENG", name: "Engineering" }]);
 
     const settings = new LinearSettingsPage(testPage);
-    await settings.goto();
+    // Pin the source workspace: the install-level path redirects to the active
+    // workspace, which in a fresh context resolves to the newest workspace —
+    // the copy target we just created.
+    await settings.gotoWorkspace(seedData.workspaceId);
 
     // Configure the source (default) workspace.
     await settings.secretInput.fill("lin_api_source");
@@ -156,15 +166,20 @@ test.describe("Linear settings", () => {
   test("seeded auth-health failure renders the failed banner on load", async ({
     testPage,
     apiClient,
+    seedData,
   }) => {
     const settings = new LinearSettingsPage(testPage);
-    await settings.goto();
+    // Pin the workspace so the UI save and the API-side health probe below
+    // target the same config row.
+    await settings.gotoWorkspace(seedData.workspaceId);
     await settings.secretInput.fill("lin_api_xxx");
     await settings.saveButton.click();
     // Wait for the post-save probe to land BEFORE forcing the failure: the
     // probe goroutine could otherwise overwrite our forced lastOk=false back
     // to true a few ms after the mockLinearSetAuthHealth call.
-    await apiClient.waitForIntegrationAuthHealthy("linear");
+    await apiClient.waitForIntegrationAuthHealthy("linear", {
+      workspaceId: seedData.workspaceId,
+    });
 
     await apiClient.mockLinearSetAuthHealth({
       ok: false,

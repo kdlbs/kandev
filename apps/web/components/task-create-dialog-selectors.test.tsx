@@ -12,6 +12,7 @@ import {
 import { formatBytes } from "@/lib/utils/format-bytes";
 import { TaskFormInputs } from "./task-create-dialog-selectors";
 import type { TaskFormInputsHandle } from "./task-create-dialog-types";
+import type { PluginComposerSlotProps } from "@/lib/plugins/types";
 
 const TOAST_MESSAGE_TEST_ID = "toast-message";
 
@@ -32,10 +33,18 @@ type VoiceProps = {
   disabled?: boolean;
 };
 const voiceCalls: VoiceProps[] = [];
+const pluginSlotCalls: PluginComposerSlotProps[] = [];
 vi.mock("@/components/task/chat/voice-input-button", () => ({
   VoiceInputButton: (props: VoiceProps) => {
     voiceCalls.push(props);
     return <button type="button" data-testid="voice-input-button" />;
+  },
+}));
+
+vi.mock("@/components/plugins/plugin-slot", () => ({
+  PluginSlot: ({ slotProps }: { slotProps: PluginComposerSlotProps }) => {
+    pluginSlotCalls.push(slotProps);
+    return null;
   },
 }));
 
@@ -60,9 +69,16 @@ vi.mock("@/hooks/use-task-create-prompt-mention", () => ({
 afterEach(() => {
   cleanup();
   voiceCalls.length = 0;
+  pluginSlotCalls.length = 0;
   vi.restoreAllMocks();
   vi.mocked(processFile).mockReset();
 });
+
+function lastPluginSlotProps(): PluginComposerSlotProps {
+  const last = pluginSlotCalls.at(-1);
+  if (!last) throw new Error("PluginSlot was not rendered");
+  return last;
+}
 
 function lastVoiceProps(): VoiceProps {
   const last = voiceCalls.at(-1);
@@ -155,6 +171,88 @@ describe("TaskFormInputs voice-input wiring — rendering", () => {
     );
 
     expect(lastVoiceProps().disabled).toBe(true);
+  });
+});
+
+describe("TaskFormInputs plugin composer submission", () => {
+  it("reports blocked when the native creation path rejects submission", async () => {
+    const ref = createRef<TaskFormInputsHandle>();
+    render(
+      <TaskFormInputs
+        isSessionMode={false}
+        autoFocus={false}
+        initialDescription="prompt"
+        onDescriptionChange={() => {}}
+        onKeyDown={() => {}}
+        descriptionValueRef={ref}
+        onVoiceAutoSend={() => false}
+      />,
+      { wrapper: Wrapper },
+    );
+
+    await expect(lastPluginSlotProps().composer.submit()).resolves.toEqual({ status: "blocked" });
+  });
+
+  it("reports submitted only when the native creation path accepts submission", async () => {
+    const ref = createRef<TaskFormInputsHandle>();
+    render(
+      <TaskFormInputs
+        isSessionMode={false}
+        autoFocus={false}
+        initialDescription="prompt"
+        onDescriptionChange={() => {}}
+        onKeyDown={() => {}}
+        descriptionValueRef={ref}
+        onVoiceAutoSend={() => true}
+      />,
+      { wrapper: Wrapper },
+    );
+
+    await expect(lastPluginSlotProps().composer.submit()).resolves.toEqual({ status: "submitted" });
+  });
+});
+
+describe("TaskFormInputs plugin composer chained calls", () => {
+  it("submits a transcript inserted in the same callback, before React re-renders", async () => {
+    // The shape a dictation plugin actually has: insert the transcript and
+    // submit it without yielding. The gate must read the synchronous value,
+    // not the render snapshot, or an empty composer stays "blocked" forever.
+    const onVoiceAutoSend = vi.fn(() => true);
+    const ref = createRef<TaskFormInputsHandle>();
+    render(
+      <TaskFormInputs
+        isSessionMode={false}
+        autoFocus={false}
+        initialDescription=""
+        onDescriptionChange={() => {}}
+        onKeyDown={() => {}}
+        descriptionValueRef={ref}
+        onVoiceAutoSend={onVoiceAutoSend}
+      />,
+      { wrapper: Wrapper },
+    );
+
+    const composer = lastPluginSlotProps().composer;
+    let result: Awaited<ReturnType<typeof composer.submit>> | undefined;
+    await act(async () => {
+      composer.insertText("dictated prompt");
+      result = await composer.submit();
+    });
+
+    expect(result).toEqual({ status: "submitted" });
+    expect(onVoiceAutoSend).toHaveBeenCalledTimes(1);
+    expect(ref.current?.getValue()).toBe("dictated prompt");
+  });
+
+  it("keeps both transcripts when a plugin inserts twice in one callback", () => {
+    const { textarea } = renderTaskFormInputs("");
+
+    act(() => {
+      lastPluginSlotProps().composer.insertText("first");
+      lastPluginSlotProps().composer.insertText("second");
+    });
+
+    expect(textarea.value).toBe("first second");
   });
 });
 

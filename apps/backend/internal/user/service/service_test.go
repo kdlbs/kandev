@@ -185,6 +185,42 @@ func TestApplyBasicSettings_ConfirmTaskArchive(t *testing.T) {
 	})
 }
 
+func TestApplyBasicSettings_PreventAutoStartAgentOnOpen(t *testing.T) {
+	t.Run("omitted value leaves the setting unchanged", func(t *testing.T) {
+		settings := &models.UserSettings{PreventAutoStartAgentOnOpen: true}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !settings.PreventAutoStartAgentOnOpen {
+			t.Fatal("expected the setting to remain enabled")
+		}
+	})
+
+	t.Run("explicit true enables the setting", func(t *testing.T) {
+		settings := &models.UserSettings{PreventAutoStartAgentOnOpen: false}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{
+			PreventAutoStartAgentOnOpen: ptr(true),
+		}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !settings.PreventAutoStartAgentOnOpen {
+			t.Fatal("expected the setting to be enabled")
+		}
+	})
+
+	t.Run("explicit false disables the setting", func(t *testing.T) {
+		settings := &models.UserSettings{PreventAutoStartAgentOnOpen: true}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{
+			PreventAutoStartAgentOnOpen: ptr(false),
+		}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.PreventAutoStartAgentOnOpen {
+			t.Fatal("expected the setting to be disabled")
+		}
+	})
+}
+
 func TestApplyBasicSettingsAgentGeneratedTaskTitles(t *testing.T) {
 	settings := &models.UserSettings{AgentGeneratedTaskTitles: false}
 	if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{}); err != nil {
@@ -410,6 +446,38 @@ func TestApplyBasicSettingsTodoListPanel(t *testing.T) {
 		}
 		if settings.ShowTodoListPanel {
 			t.Fatal("ShowTodoListPanel = true, want false")
+		}
+	})
+}
+
+func TestApplyBasicSettingsTodoListPanelOnlyWhenNotEmpty(t *testing.T) {
+	t.Run("omission preserves saved value", func(t *testing.T) {
+		settings := &models.UserSettings{ShowTodoListPanelOnlyWhenNotEmpty: true}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{}); err != nil {
+			t.Fatalf("apply settings: %v", err)
+		}
+		if !settings.ShowTodoListPanelOnlyWhenNotEmpty {
+			t.Fatal("ShowTodoListPanelOnlyWhenNotEmpty = false, want true (unchanged)")
+		}
+	})
+
+	t.Run("explicit value replaces saved value", func(t *testing.T) {
+		settings := &models.UserSettings{ShowTodoListPanelOnlyWhenNotEmpty: false}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{ShowTodoListPanelOnlyWhenNotEmpty: ptr(true)}); err != nil {
+			t.Fatalf("apply settings: %v", err)
+		}
+		if !settings.ShowTodoListPanelOnlyWhenNotEmpty {
+			t.Fatal("ShowTodoListPanelOnlyWhenNotEmpty = false, want true")
+		}
+	})
+
+	t.Run("explicit false disables it", func(t *testing.T) {
+		settings := &models.UserSettings{ShowTodoListPanelOnlyWhenNotEmpty: true}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{ShowTodoListPanelOnlyWhenNotEmpty: ptr(false)}); err != nil {
+			t.Fatalf("apply settings: %v", err)
+		}
+		if settings.ShowTodoListPanelOnlyWhenNotEmpty {
+			t.Fatal("ShowTodoListPanelOnlyWhenNotEmpty = true, want false")
 		}
 	})
 }
@@ -1467,6 +1535,7 @@ func TestRecordTaskCreateLastUsed(t *testing.T) {
 		}
 		updatedSettings := &models.UserSettings{
 			UserID:    store.DefaultUserID,
+			Revision:  42,
 			UpdatedAt: time.Unix(123, 0).UTC(),
 			TaskCreateLastUsed: models.TaskCreateLastUsed{
 				RepositoryID: "repo-1",
@@ -1505,6 +1574,9 @@ func TestRecordTaskCreateLastUsed(t *testing.T) {
 		}
 		if !reflect.DeepEqual(data["task_create_last_used"], updatedSettings.TaskCreateLastUsed) {
 			t.Fatalf("expected event task-create state %+v, got %+v", updatedSettings.TaskCreateLastUsed, data["task_create_last_used"])
+		}
+		if got := data["revision"]; got != int64(42) {
+			t.Fatalf("revision = %#v, want 42", got)
 		}
 	})
 
@@ -1640,6 +1712,7 @@ type recordingUserRepository struct {
 	getUserCalls                              int
 	getDefaultUserCalls                       int
 	getUserSettingsCalls                      int
+	getSettingsUserID                         string
 	upsertUserSettingsPreservingLastUsedCalls int
 	updateCalls                               int
 	updateUserID                              string
@@ -1665,8 +1738,9 @@ func (r *recordingUserRepository) GetDefaultUser(context.Context) (*models.User,
 	return nil, errors.New("unexpected GetDefaultUser call")
 }
 
-func (r *recordingUserRepository) GetUserSettings(context.Context, string) (*models.UserSettings, error) {
+func (r *recordingUserRepository) GetUserSettings(_ context.Context, userID string) (*models.UserSettings, error) {
 	r.getUserSettingsCalls++
+	r.getSettingsUserID = userID
 	if r.getErr != nil {
 		return nil, r.getErr
 	}

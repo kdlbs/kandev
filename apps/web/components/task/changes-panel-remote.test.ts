@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergeCommits } from "./changes-panel";
+import { mergeCommits, separateCommitHistories } from "./changes-panel";
 
 const PR_DATE = "2026-03-29T00:00:00Z";
 const SHARED_SHA = "ccc3333";
@@ -117,6 +117,43 @@ describe("mergeCommits source provenance", () => {
       repository_name: "widget-b",
       detailTarget: { source: "github", repo: "widget-b" },
     });
+  });
+});
+
+describe("separateCommitHistories", () => {
+  it("preserves rewritten provider and checkout rows without deduplication", () => {
+    const local = [makeLocal("old1111", "same message"), makeLocal("old2222", "local work")];
+    const provider = [
+      {
+        ...makePR("new1111", "same message"),
+        stats_available: false,
+        workspace_id: WORKSPACE_ID,
+        owner: "acme",
+        repo: WIDGET_REPO,
+      },
+      {
+        ...makePR("new3333", "provider work"),
+        stats_available: false,
+        workspace_id: WORKSPACE_ID,
+        owner: "acme",
+        repo: WIDGET_REPO,
+      },
+    ];
+
+    const result = separateCommitHistories(local, provider);
+
+    expect(result.providerCommits.map((commit) => commit.commit_sha)).toEqual([
+      "new1111",
+      "new3333",
+    ]);
+    expect(result.localCommits.map((commit) => commit.commit_sha)).toEqual(["old1111", "old2222"]);
+    expect(result.providerCommits.every((commit) => commit.presentation === "current_pr")).toBe(
+      true,
+    );
+    expect(result.localCommits.every((commit) => commit.presentation === "local_checkout")).toBe(
+      true,
+    );
+    expect(result.localCommits.every((commit) => commit.pushed === false)).toBe(true);
   });
 });
 

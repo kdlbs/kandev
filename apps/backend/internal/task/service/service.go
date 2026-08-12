@@ -195,6 +195,18 @@ type StartStepResolver interface {
 	ResolveFirstStep(ctx context.Context, workflowID string) (string, error)
 }
 
+// StepHistoryRecorder persists an ADR 0015 session-step transition audit
+// row. Optional — when unset, MoveTaskWithOptions records nothing. Errors
+// are logged and swallowed by the caller: the audit trail must never fail
+// the move it is recording.
+type StepHistoryRecorder interface {
+	CreateStepTransition(ctx context.Context, sessionID, fromStepID, toStepID string, trigger wfmodels.StepTransitionTrigger, actorID *string, metadata map[string]interface{}) error
+}
+
+type asyncStepHistoryRecorder interface {
+	EnqueueStepTransition(sessionID, fromStepID, toStepID string, trigger wfmodels.StepTransitionTrigger, actorID *string, metadata map[string]interface{})
+}
+
 var (
 	ErrActiveTaskSessions        = errors.New("active agent sessions exist")
 	ErrWIPLimitExceeded          = wfmodels.ErrWIPLimitExceeded
@@ -291,6 +303,7 @@ type Service struct {
 	workspaceBootstrapper       WorkspaceBootstrapper
 	workflowStepGetter          WorkflowStepGetter
 	startStepResolver           StartStepResolver
+	stepHistoryRecorder         StepHistoryRecorder
 	prTaskResolver              PRTaskResolver
 	quickChatDir                string // Directory for quick-chat workspaces (e.g., ~/.kandev/quick-chat)
 	branchFetcher               *branchFetcher
@@ -504,6 +517,12 @@ func (s *Service) SetWorkflowStepGetter(getter WorkflowStepGetter) {
 // SetStartStepResolver wires the start step resolver for CreateTask.
 func (s *Service) SetStartStepResolver(resolver StartStepResolver) {
 	s.startStepResolver = resolver
+}
+
+// SetStepHistoryRecorder wires the ADR 0015 audit-trail writer for manual
+// step transitions (MoveTaskWithOptions). Optional.
+func (s *Service) SetStepHistoryRecorder(recorder StepHistoryRecorder) {
+	s.stepHistoryRecorder = recorder
 }
 
 // SetPRTaskResolver wires the GitHub PR→task resolver for PR-number search.

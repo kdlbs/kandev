@@ -35,6 +35,29 @@ The template prompts are product behavior, not merely sample text. Review them b
 
 Choose this for short implementation work with a simple run-and-review loop.
 
+## Duplicate a workflow
+
+Use **Duplicate** to create a new workflow from a saved workflow. The copy starts as a local draft.
+
+1. Save the source workflow before you select **Duplicate**.
+2. Select **Duplicate** on the source workflow card.
+3. Review and edit the copied workflow and its steps.
+4. Select the route-level **Save changes** action to persist the copy.
+
+Kandev places the draft after the source workflow. The first copy uses `<name> (copy)`.
+If that name exists, Kandev uses the lowest available number. For example, the next name can be `<name> (copy 2)`.
+
+The copy includes these settings:
+
+- workflow description, prompt, and default agent profile
+- step prompts, colors, positions, transitions, and start-step state
+- command-panel visibility, manual-move policy, and auto-archive policy
+- step agent profiles, completion-signal policy, cancellation policy, WIP limits, and pull-from relationships
+
+The copy does not include tasks, task sessions, execution history, workflow history, template identity, or sync ownership. A copy of a sync-managed workflow becomes an independent manual workflow. The source remains unchanged.
+
+If you remove or discard the draft, or reload before you save it, Kandev does not create a workflow.
+
 ### Plan & Build
 
 **Todo → Plan → Implementation → Done**
@@ -168,9 +191,9 @@ Cancellation policy is deliberately narrow: it is evaluated only for the visible
 
 A step's Prompt field accepts `@name` references to [saved prompts](developer-tools.md#saved-prompts) (**Settings > Prompts**), the same way task chat does. Type `@` and select a prompt, or type the name directly.
 
-- The reference is resolved when the step prompt runs, not when it is saved. Editing the saved prompt's content later automatically changes what every step referencing it sends next time — there is nothing to update on the step itself.
+- The reference is resolved when the step prompt runs, not when it is saved. Editing the saved prompt's content later automatically changes what every step referencing it sends next time: there is nothing to update on the step itself.
 - The `@name` mention stays visible in the prompt/chat. Kandev attaches the referenced prompt's content as hidden context for the agent; it is not shown as part of the visible conversation.
-- `{{task_prompt}}` is only interpolated in the step prompt field itself. If a referenced saved prompt's content contains `{{task_prompt}}`, it is **not** expanded — it is sent to the agent as literal text.
+- `{{task_prompt}}` is only interpolated in the step prompt field itself. If a referenced saved prompt's content contains `{{task_prompt}}`, it is **not** expanded; it is sent to the agent as literal text.
 
 The same `@name` syntax and resolution apply to a GitHub Review Watch's prompt field. See [Integrations](integrations.md#configure-and-use-the-workspace).
 

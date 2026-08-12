@@ -186,6 +186,7 @@ test.describe("Mobile changes panel", () => {
     apiClient,
     seedData,
   }) => {
+    const checkoutBranch = "main";
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Mobile PR File Diff",
@@ -194,7 +195,7 @@ test.describe("Mobile changes panel", () => {
         description: "/e2e:simple-message",
         workflow_id: seedData.workflowId,
         workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
+        repositories: [{ repository_id: seedData.repositoryId, checkout_branch: checkoutBranch }],
       },
     );
 
@@ -202,7 +203,6 @@ test.describe("Mobile changes panel", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 45_000 });
-
     await apiClient.mockGitHubReset();
     await apiClient.mockGitHubSetUser("test-user");
     await apiClient.mockGitHubAddPRs([
@@ -210,7 +210,7 @@ test.describe("Mobile changes panel", () => {
         number: 42,
         title: "Mobile PR file diff test",
         state: "open",
-        head_branch: "feat/mobile-fix",
+        head_branch: checkoutBranch,
         base_branch: "main",
         author_login: "test-user",
         repo_owner: "testorg",
@@ -236,7 +236,7 @@ test.describe("Mobile changes panel", () => {
       pr_number: 42,
       pr_url: "https://github.com/testorg/testrepo/pull/42",
       pr_title: "Mobile PR file diff test",
-      head_branch: "feat/mobile-fix",
+      head_branch: checkoutBranch,
       base_branch: "main",
       author_login: "test-user",
     });
@@ -259,6 +259,7 @@ test.describe("Mobile changes panel", () => {
     apiClient,
     seedData,
   }) => {
+    const checkoutBranch = "main";
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Mobile PR-only Commit Detail",
@@ -267,7 +268,7 @@ test.describe("Mobile changes panel", () => {
         description: "/e2e:simple-message",
         workflow_id: seedData.workflowId,
         workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
+        repositories: [{ repository_id: seedData.repositoryId, checkout_branch: checkoutBranch }],
       },
     );
 
@@ -280,7 +281,7 @@ test.describe("Mobile changes panel", () => {
         number: 2254,
         title: "Mobile force-pushed PR",
         state: "open",
-        head_branch: "feature/mobile-stale",
+        head_branch: checkoutBranch,
         base_branch: "main",
         author_login: "mobile-remote-author",
         repo_owner: "testorg",
@@ -321,7 +322,7 @@ test.describe("Mobile changes panel", () => {
       pr_number: 2254,
       pr_url: "https://github.com/testorg/testrepo/pull/2254",
       pr_title: "Mobile force-pushed PR",
-      head_branch: "feature/mobile-stale",
+      head_branch: checkoutBranch,
       base_branch: "main",
       author_login: "mobile-remote-author",
     });
@@ -360,6 +361,7 @@ test.describe("Mobile changes panel", () => {
     seedData,
     backend,
   }) => {
+    const checkoutBranch = "main";
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Mobile PR Overlap Diff",
@@ -368,7 +370,7 @@ test.describe("Mobile changes panel", () => {
         description: "/e2e:simple-message",
         workflow_id: seedData.workflowId,
         workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
+        repositories: [{ repository_id: seedData.repositoryId, checkout_branch: checkoutBranch }],
       },
     );
 
@@ -376,7 +378,6 @@ test.describe("Mobile changes panel", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 45_000 });
-
     await apiClient.mockGitHubReset();
     await apiClient.mockGitHubSetUser("test-user");
     await apiClient.mockGitHubAddPRs([
@@ -384,7 +385,7 @@ test.describe("Mobile changes panel", () => {
         number: 44,
         title: "Mobile overlap PR diff test",
         state: "open",
-        head_branch: "feat/mobile-overlap",
+        head_branch: checkoutBranch,
         base_branch: "main",
         author_login: "test-user",
         repo_owner: "testorg",
@@ -409,7 +410,7 @@ test.describe("Mobile changes panel", () => {
       pr_number: 44,
       pr_url: "https://github.com/testorg/testrepo/pull/44",
       pr_title: "Mobile overlap PR diff test",
-      head_branch: "feat/mobile-overlap",
+      head_branch: checkoutBranch,
       base_branch: "main",
       author_login: "test-user",
     });

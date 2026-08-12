@@ -5,6 +5,7 @@ import { missingGitHealth } from "./health-fixtures";
 test.describe("Mobile kanban view", () => {
   test.afterEach(async ({ apiClient }) => {
     await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+      app_status_bar_enabled: false,
       system_metrics_display: { show_in_topbar: false },
       workflow_filter_id: "",
       kanban_view_mode: "",
@@ -16,6 +17,7 @@ test.describe("Mobile kanban view", () => {
     apiClient,
   }) => {
     await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+      app_status_bar_enabled: true,
       system_metrics_display: { show_in_topbar: true },
     });
     const mobile = new MobileKanbanPage(testPage);

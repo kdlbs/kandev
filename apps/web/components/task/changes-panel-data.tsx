@@ -11,12 +11,14 @@ import type { PRChangedFile } from "./changes-panel-timeline";
 import { useChangesGitHandlers, useChangesDialogHandlers } from "./changes-panel-hooks";
 import { useRepoDisplayName } from "@/hooks/domains/session/use-repo-display-name";
 import { useBaseBranchByRepo } from "@/hooks/domains/session/use-base-branch-by-repo";
-import { useReviewPRSelection } from "@/hooks/domains/github/use-review-pr-selection";
+import {
+  useRemoteContributionRelation,
+  type RemoteContributionRelationState,
+} from "@/hooks/domains/session/use-remote-contribution-relation";
 import {
   prFetchKey,
   useActiveTaskPRsWithFiles,
 } from "@/hooks/domains/github/use-active-task-pr-files";
-import { usePRCommits } from "@/hooks/domains/github/use-pr-commits";
 import { usePRReviewRepositoryIdentity } from "@/hooks/domains/github/use-pr-review-repository-identity";
 import {
   getCumulativeReviewRepositoryNames,
@@ -41,6 +43,14 @@ import {
 import type { CommitDetailTarget, OpenDiffOptions } from "./changes-diff-target";
 import type { PRDiffFile, TaskPR } from "@/lib/types/github";
 import { getGitCredentialDisplay } from "./changes-git-credential-display";
+import type { RemoteContributionRelation } from "@/hooks/domains/session/remote-contribution-relation";
+import { remoteContributionActionPolicy } from "@/hooks/domains/session/remote-contribution-relation";
+import {
+  buildRemoteContributionResolutionTarget,
+  type RemoteContributionResolutionTarget,
+} from "./use-remote-contribution-resolution";
+import { useRemoteContributionResolution } from "./use-remote-contribution-resolution";
+import { useTranslation } from "react-i18next";
 
 function useChangesPanelStoreData() {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
@@ -52,18 +62,6 @@ function useChangesPanelStoreData() {
   const baseBranch = useAppStore((state) =>
     activeSessionId ? state.taskSessions.items[activeSessionId]?.base_branch : undefined,
   );
-  const existingPrUrl = useAppStore((state) => {
-    const taskId = state.tasks.activeTaskId;
-    if (!taskId) return undefined;
-    // Multi-branch tasks hold N PRs per task. The panel-header "View PR"
-    // button is a single-URL surface, so collapse only when there's exactly
-    // one PR — otherwise the per-repo buttons (prByRepo) take over and the
-    // generic button is hidden to avoid silently linking to a sibling.
-    const taskPRs = state.taskPRs.byTaskId[taskId];
-    if (Array.isArray(taskPRs) && taskPRs.length === 1) return taskPRs[0]?.pr_url;
-    if (Array.isArray(taskPRs) && taskPRs.length > 1) return undefined;
-    return state.pendingPrUrlByTaskId.byTaskId[taskId]?.[""];
-  });
   const activeSessionMetadata = useAppStore((state) =>
     activeSessionId ? state.taskSessions.items[activeSessionId]?.metadata : undefined,
   );
@@ -76,7 +74,6 @@ function useChangesPanelStoreData() {
     activeSessionId,
     taskTitle,
     baseBranch,
-    existingPrUrl,
     gitCredentialDisplay,
   };
 }
@@ -90,6 +87,14 @@ export type ChangesPanelBodyProps = {
   hasCommits: boolean;
   hasPRFiles: boolean;
   hasPRCommits: boolean;
+  relation: RemoteContributionRelation;
+  resolution: ReturnType<typeof useRemoteContributionResolution>;
+  resolutionTarget: RemoteContributionResolutionTarget | null;
+  providerCommitsLoading: boolean;
+  providerCommitsError: string | null;
+  providerPRNumber: number | undefined;
+  pushDisabled: boolean;
+  pullDisabled: boolean;
   canPush: boolean;
   canCreatePR: boolean;
   existingPrUrl: string | undefined;
@@ -135,7 +140,12 @@ export type ChangesPanelBodyProps = {
   onRepoPush?: (repo: string) => void;
   onRepoCreatePR?: (repo: string) => void;
   repoDisplayName?: (repositoryName: string) => string | undefined;
-  perRepoStatus?: Array<{ repository_name: string; ahead: number }>;
+  perRepoStatus?: Array<{
+    repository_name: string;
+    ahead: number;
+    pushAhead: number;
+    pullBehind: number;
+  }>;
   prByRepo?: Record<string, string | undefined>;
 };
 
@@ -248,10 +258,12 @@ function buildChangesPanelPRData({
 }
 
 function useChangesPanelPRData(repositoryNames: string[], sessionId: string | null) {
-  const { prs, filesByPRKey } = useActiveTaskPRsWithFiles();
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
-  const { selectedPR: taskPR } = useReviewPRSelection(activeTaskId);
+  const relationState: RemoteContributionRelationState = useRemoteContributionRelation(sessionId);
+  const { filesByPRKey } = useActiveTaskPRsWithFiles(relationState.prs);
+  const prs = relationState.prs;
+  const taskPR = relationState.selectedPR;
   const reposByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
   const repoNameById = useMemo(() => buildRepoNameById(reposByWorkspace), [reposByWorkspace]);
   const taskRepositoryCount = useAppStore((s) => {
@@ -263,13 +275,7 @@ function useChangesPanelPRData(repositoryNames: string[], sessionId: string | nu
   const taskHasMultipleRepos = taskRepositoryCount > 1;
   const useRepositoryKeys = isReviewMultiRepo(taskRepositoryCount, repositoryNames);
   const selectedPRRepositoryName = usePRReviewRepositoryIdentity(activeTaskId, sessionId, taskPR);
-  const refreshKey = taskPR?.last_synced_at ?? null;
-  const { commits: prCommitsList } = usePRCommits(
-    taskPR?.owner ?? null,
-    taskPR?.repo ?? null,
-    taskPR?.pr_number ?? null,
-    refreshKey,
-  );
+  const prCommitsList = relationState.commits;
   const prCommits = useMemo<PRCommitForMerge[]>(() => {
     if (!workspaceId?.trim() || !taskPR?.owner?.trim() || !taskPR.repo?.trim()) return [];
     return prCommitsList.map((commit) => ({
@@ -310,6 +316,13 @@ function useChangesPanelPRData(repositoryNames: string[], sessionId: string | nu
     hasPRCommits,
     prFiles,
     useRepositoryKeys,
+    relation: relationState.relation,
+    prs,
+    repositoryName: relationState.repositoryName,
+    selectedPR: taskPR,
+    providerCommitsLoading: relationState.loading,
+    providerCommitsError: relationState.error,
+    refreshProviderEvidence: relationState.refreshProviderEvidence,
   };
 }
 
@@ -317,8 +330,28 @@ function hasCumulativeFiles(files: Record<string, unknown> | null | undefined): 
   return Object.keys(files ?? {}).length > 0;
 }
 
+function useChangesPanelResolutionTarget(
+  relation: RemoteContributionRelation,
+  repositoryName: string | undefined,
+  selectedPR: TaskPR | null | undefined,
+  t: (key: string) => string,
+) {
+  const remoteRepositoryLabel = t("task:remoteRepository");
+  return useMemo(
+    () =>
+      buildRemoteContributionResolutionTarget(
+        relation,
+        repositoryName,
+        selectedPR,
+        remoteRepositoryLabel,
+      ),
+    [relation, repositoryName, selectedPR, remoteRepositoryLabel],
+  );
+}
+
 export function useChangesPanelData() {
-  const { activeTaskId, activeSessionId, baseBranch, existingPrUrl, gitCredentialDisplay } =
+  const { t } = useTranslation();
+  const { activeTaskId, activeSessionId, baseBranch, gitCredentialDisplay } =
     useChangesPanelStoreData();
   const baseBranchByRepo = useBaseBranchByRepo(activeTaskId);
   const git = useSessionGit(activeSessionId);
@@ -329,6 +362,20 @@ export function useChangesPanelData() {
     [git.repoNames, git.cumulativeDiff],
   );
   const prData = useChangesPanelPRData(reviewRepositoryNames, activeSessionId);
+  const resolution = useRemoteContributionResolution(
+    activeSessionId,
+    prData.refreshProviderEvidence,
+  );
+  const resolutionTarget = useChangesPanelResolutionTarget(
+    prData.relation,
+    prData.repositoryName,
+    prData.selectedPR,
+    t,
+  );
+  const remoteActionPolicy = useMemo(
+    () => remoteContributionActionPolicy(prData.relation),
+    [prData.relation],
+  );
   const vcsDialogs = useVcsDialogs();
   const baseBranchDisplay = useMemo(() => getBaseBranchDisplay(baseBranch), [baseBranch]);
   const unstagedFiles = useMemo(() => mapToChangedFiles(git.unstagedFiles), [git.unstagedFiles]);
@@ -350,17 +397,15 @@ export function useChangesPanelData() {
   const dialogs = { ...localDialogs, ...vcsDialogs };
   const repoCallbacks = usePerRepoCallbacks(git, vcsDialogs, gitHandlers);
   const repoDisplayName = useRepoDisplayName(activeSessionId);
-  const taskPRsForMap = useAppStore((state) =>
-    activeTaskId ? state.taskPRs.byTaskId[activeTaskId] : undefined,
-  );
   const reposByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
   const repoNameById = useMemo(() => buildRepoNameById(reposByWorkspace), [reposByWorkspace]);
   const pendingByRepo = useAppStore((state) =>
     activeTaskId ? state.pendingPrUrlByTaskId.byTaskId[activeTaskId] : undefined,
   );
+  const existingPrUrl = prData.selectedPR?.pr_url ?? pendingByRepo?.[""];
   const prByRepo = useMemo(
-    () => buildPrByRepoMap(taskPRsForMap, repoNameById, pendingByRepo),
-    [taskPRsForMap, repoNameById, pendingByRepo],
+    () => buildPrByRepoMap(prData.prs, repoNameById, pendingByRepo),
+    [prData.prs, repoNameById, pendingByRepo],
   );
   const walkthroughRequestReady =
     unstagedFiles.length > 0 ||
@@ -387,6 +432,10 @@ export function useChangesPanelData() {
     existingPrUrl,
     gitCredentialDisplay,
     walkthroughRequestReady,
+    resolution,
+    resolutionTarget,
+    pushDisabled: remoteActionPolicy.pushDisabled,
+    pullDisabled: remoteActionPolicy.pullDisabled,
     ...prData,
   };
 }
@@ -410,6 +459,14 @@ export function buildChangesPanelBodyProps(
     hasCommits: git.hasCommits,
     hasPRFiles: data.hasPRFiles,
     hasPRCommits: data.hasPRCommits,
+    relation: data.relation,
+    resolution: data.resolution,
+    resolutionTarget: data.resolutionTarget,
+    providerCommitsLoading: data.providerCommitsLoading,
+    providerCommitsError: data.providerCommitsError,
+    providerPRNumber: data.selectedPR?.pr_number,
+    pushDisabled: data.pushDisabled,
+    pullDisabled: data.pullDisabled,
     canPush: git.canPush,
     canCreatePR: git.canCreatePR,
     existingPrUrl: data.existingPrUrl,

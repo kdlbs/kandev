@@ -141,3 +141,141 @@ describe("PR workspace request scope", () => {
     });
   });
 });
+
+describe("PR file refresh stability", () => {
+  it("discards a superseded timestamp response that resolves last", async () => {
+    mocks.prs = [taskPR()];
+    let resolveSecond: ((value: { files: Array<{ filename: string }> }) => void) | undefined;
+    let resolveThird: ((value: { files: Array<{ filename: string }> }) => void) | undefined;
+    mocks.request
+      .mockResolvedValueOnce({ files: [{ filename: "stable.ts" }] })
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSecond = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveThird = resolve;
+          }),
+      );
+
+    const { result, rerender } = renderHook(() => useActiveTaskPRsWithFiles());
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledTimes(1));
+
+    mocks.prs = [{ ...taskPR(), last_synced_at: "2026-07-20T00:01:00Z" }];
+    rerender();
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledTimes(2));
+
+    mocks.prs = [{ ...taskPR(), last_synced_at: "2026-07-20T00:02:00Z" }];
+    rerender();
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledTimes(3));
+
+    await act(async () => {
+      resolveThird!({ files: [{ filename: "newest.ts" }] });
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(Object.values(result.current.filesByPRKey).flat()).toEqual([
+        { filename: "newest.ts" },
+      ]),
+    );
+
+    await act(async () => {
+      resolveSecond!({ files: [{ filename: "superseded.ts" }] });
+      await Promise.resolve();
+    });
+    expect(Object.values(result.current.filesByPRKey).flat()).toEqual([{ filename: "newest.ts" }]);
+  });
+});
+
+describe("PR file refresh retention", () => {
+  it("keeps resolved files visible while a sync timestamp refresh is pending", async () => {
+    mocks.prs = [taskPR()];
+    let resolveRefresh: ((value: { files: Array<{ filename: string }> }) => void) | undefined;
+    mocks.request
+      .mockResolvedValueOnce({ files: [{ filename: "stable.ts" }] })
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveRefresh = resolve;
+          }),
+      );
+
+    const { result, rerender } = renderHook(() => useActiveTaskPRsWithFiles());
+    await waitFor(() =>
+      expect(Object.values(result.current.filesByPRKey).flat()).toEqual([
+        { filename: "stable.ts" },
+      ]),
+    );
+
+    mocks.prs = [{ ...taskPR(), last_synced_at: "2026-07-20T00:01:00Z" }];
+    rerender();
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledTimes(2));
+
+    expect(Object.values(result.current.filesByPRKey).flat()).toEqual([{ filename: "stable.ts" }]);
+
+    await act(async () => {
+      resolveRefresh!({ files: [{ filename: "refreshed.ts" }] });
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(Object.values(result.current.filesByPRKey).flat()).toEqual([
+        { filename: "refreshed.ts" },
+      ]),
+    );
+  });
+
+  it("keeps resolved files visible when a background refresh fails", async () => {
+    mocks.prs = [taskPR()];
+    mocks.request.mockResolvedValueOnce({ files: [{ filename: "stable.ts" }] });
+    let rejectRefresh: ((reason: Error) => void) | undefined;
+
+    const { result, rerender } = renderHook(() => useActiveTaskPRsWithFiles());
+    await waitFor(() =>
+      expect(Object.values(result.current.filesByPRKey).flat()).toEqual([
+        { filename: "stable.ts" },
+      ]),
+    );
+
+    mocks.request.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectRefresh = reject;
+        }),
+    );
+    mocks.prs = [{ ...taskPR(), last_synced_at: "2026-07-20T00:01:00Z" }];
+    rerender();
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      rejectRefresh!(new Error("refresh failed"));
+      await Promise.resolve();
+    });
+    expect(Object.values(result.current.filesByPRKey).flat()).toEqual([{ filename: "stable.ts" }]);
+  });
+
+  it("clears retained files when the active task changes or removes its PR", async () => {
+    mocks.prs = [taskPR()];
+    mocks.request.mockResolvedValueOnce({ files: [{ filename: "task-one.ts" }] });
+
+    const { result, rerender } = renderHook(() => useActiveTaskPRsWithFiles());
+    await waitFor(() =>
+      expect(Object.values(result.current.filesByPRKey).flat()).toEqual([
+        { filename: "task-one.ts" },
+      ]),
+    );
+
+    mocks.activeTaskId = "task-2";
+    mocks.request.mockImplementationOnce(() => new Promise(() => undefined));
+    rerender();
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledTimes(2));
+    expect(result.current.filesByPRKey).toEqual({});
+
+    mocks.prs = [];
+    rerender();
+    expect(result.current.filesByPRKey).toEqual({});
+  });
+});

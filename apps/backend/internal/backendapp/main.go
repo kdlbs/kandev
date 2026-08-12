@@ -362,6 +362,9 @@ func startServices( //nolint:cyclop
 		log.Error("Failed to initialize services", zap.Error(err))
 		return false
 	}
+	if services.Workflow != nil {
+		addCleanup(services.Workflow.Close)
+	}
 	services.RuntimeFlags = runtimeflags.NewService(
 		repos.RuntimeFlags,
 		runtimeflags.RuntimeOptionsFromAppliedConfig(runtimeFlagDefaults, cfg),
@@ -666,7 +669,7 @@ func startAgentInfrastructure(
 	// Start the plugin system's event delivery and health monitor
 	// background loops.
 	if services.Plugins != nil {
-		startPluginsSubsystems(ctx, services.Plugins, eventBus, log, addCleanup)
+		startPluginsSubsystems(ctx, services.Plugins, lifecycleMgr, eventBus, log, addCleanup)
 	}
 
 	return startGatewayAndServe(ctx, cfg, log, eventBus, agentRuntimeAvailability, dbPool, repos, services,

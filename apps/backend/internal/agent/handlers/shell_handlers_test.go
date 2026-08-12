@@ -4,14 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
+	terminalservice "github.com/kandev/kandev/internal/terminal/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -94,6 +98,77 @@ func TestNewShellHandlers(t *testing.T) {
 		if handlers.logger == nil {
 			t.Error("expected non-nil logger")
 		}
+	}
+}
+
+func TestShellPresentationHelpers(t *testing.T) {
+	for id, want := range map[string]string{terminalservice.BottomPanelID: "fixed", "custom": "script"} {
+		if got := kindForUnmanaged(id); got != want {
+			t.Fatalf("kindForUnmanaged(%q) = %q, want %q", id, got, want)
+		}
+	}
+	if ptyStatusFromRunning(true) != terminalservice.PTYStatusRunning || ptyStatusFromRunning(false) != terminalservice.PTYStatusStopped {
+		t.Fatal("unexpected PTY status mapping")
+	}
+}
+
+func TestShellStateHandlersValidateAndRequireService(t *testing.T) {
+	h := NewShellHandlers(newTestManager(), nil, newTestLogger())
+	tests := []struct {
+		name   string
+		action string
+		body   any
+		invoke func(context.Context, *ws.Message) (*ws.Message, error)
+		want   string
+	}{
+		{name: "rename malformed", action: ws.ActionUserShellRename, body: json.RawMessage(`{invalid`), invoke: h.wsUserShellRename, want: "invalid payload"},
+		{name: "rename id", action: ws.ActionUserShellRename, body: UserShellRenameRequest{}, invoke: h.wsUserShellRename, want: "terminal_id is required"},
+		{name: "rename service", action: ws.ActionUserShellRename, body: UserShellRenameRequest{TerminalID: "terminal"}, invoke: h.wsUserShellRename, want: "terminal service not available"},
+		{name: "park id", action: ws.ActionUserShellPark, body: UserShellStateRequest{}, invoke: h.wsUserShellPark, want: "terminal_id is required"},
+		{name: "park service", action: ws.ActionUserShellPark, body: UserShellStateRequest{TerminalID: "terminal"}, invoke: h.wsUserShellPark, want: "terminal service not available"},
+		{name: "resume id", action: ws.ActionUserShellResume, body: UserShellStateRequest{}, invoke: h.wsUserShellResume, want: "terminal_id is required"},
+		{name: "resume service", action: ws.ActionUserShellResume, body: UserShellStateRequest{TerminalID: "terminal"}, invoke: h.wsUserShellResume, want: "terminal service not available"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var message *ws.Message
+			if raw, ok := tt.body.(json.RawMessage); ok {
+				message = &ws.Message{ID: "id", Action: tt.action, Payload: raw}
+			} else {
+				message, _ = ws.NewRequest("id", tt.action, tt.body)
+			}
+			_, err := tt.invoke(context.Background(), message)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestShellHTTPRoutesReturnEmptyWithoutRunners(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	h := NewShellHandlers(newTestManager(), nil, newTestLogger())
+	RegisterShellRoutesOn(router, h)
+
+	for _, path := range []string{"/api/v1/environments/env-1/terminals", "/api/v1/tasks/task-1/terminals?task_environment_id=env-1"} {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		router.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"terminals":[]`) {
+			t.Fatalf("%s response = %d %s", path, recorder.Code, recorder.Body.String())
+		}
+	}
+}
+
+func TestRegisterShellRoutesBuildsLegacyHandler(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	RegisterShellRoutes(router, newTestManager(), newTestLogger())
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/environments/env/terminals", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d", recorder.Code)
 	}
 }
 
