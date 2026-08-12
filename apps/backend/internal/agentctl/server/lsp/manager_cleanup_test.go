@@ -98,7 +98,7 @@ func TestManagerCloseCleanupFailureRetainsRuntimeOwnershipEvidence(t *testing.T)
 	if snapshot.ErrorCode != "process_cleanup_failed" || snapshot.Generation != 8 {
 		t.Fatalf("failed close snapshot = %#v", snapshot)
 	}
-	slot := manager.slots["kotlin"]
+	slot := manager.slots[taskLanguageRuntimeKey("task-1", "kotlin")]
 	slot.opMu.Lock()
 	runtime := slot.runtime
 	slot.opMu.Unlock()

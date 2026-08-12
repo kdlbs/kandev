@@ -167,14 +167,14 @@ func (c *Controller) resolveExistingHost(ctx context.Context, taskID string) (Ta
 	if !taskAllowsLSPRuntime(task) {
 		return nil, ErrTaskNotReady
 	}
-	environment, err := c.tasks.GetTaskEnvironmentByTaskID(ctx, taskID)
+	environment, err := c.tasks.GetTaskEnvironmentForTaskLSP(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
 	if !readyTaskEnvironment(environment) || !ExecutorSupportsLSP(environment.ExecutorType) {
 		return nil, ErrTaskNotReady
 	}
-	host, exists, err := c.runtimes.ExistingTaskHost(ctx, environment.ID)
+	host, exists, err := c.runtimes.ExistingTaskHost(ctx, taskID, environment.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -327,7 +327,7 @@ func (c *Controller) attemptRecovery(
 }
 
 func (c *Controller) recoverDeadTaskHost(ctx context.Context, taskID string) bool {
-	environment, err := c.tasks.GetTaskEnvironmentByTaskID(ctx, taskID)
+	environment, err := c.tasks.GetTaskEnvironmentForTaskLSP(ctx, taskID)
 	if err != nil || !readyTaskEnvironment(environment) || !ExecutorSupportsLSP(environment.ExecutorType) {
 		return false
 	}

@@ -44,7 +44,7 @@ type TaskService interface {
 	AuthorizeTaskAccess(ctx context.Context, taskID string) error
 	AcquireTaskLSPAdmission(ctx context.Context, taskID string) (release func(), err error)
 	GetTask(ctx context.Context, taskID string) (*taskmodels.Task, error)
-	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*taskmodels.TaskEnvironment, error)
+	GetTaskEnvironmentForTaskLSP(ctx context.Context, taskID string) (*taskmodels.TaskEnvironment, error)
 }
 
 type SettingsProvider interface {
@@ -75,11 +75,11 @@ type TaskHost interface {
 }
 
 type RuntimeProvider interface {
-	EnsureTaskHost(ctx context.Context, taskEnvironmentID string) (TaskHost, error)
-	ExistingTaskHost(ctx context.Context, taskEnvironmentID string) (TaskHost, bool, error)
+	EnsureTaskHost(ctx context.Context, taskID, taskEnvironmentID string) (TaskHost, error)
+	ExistingTaskHost(ctx context.Context, taskID, taskEnvironmentID string) (TaskHost, bool, error)
 	RecoverTaskHost(ctx context.Context, taskEnvironmentID string) (bool, error)
-	CleanupTaskHost(ctx context.Context, taskEnvironmentID, reason string) error
-	DiscoverTaskLanguages(ctx context.Context, taskEnvironmentID string) (*DiscoveryResult, error)
+	CleanupTaskHost(ctx context.Context, taskID, taskEnvironmentID, reason string) error
+	DiscoverTaskLanguages(ctx context.Context, taskID, taskEnvironmentID string) (*DiscoveryResult, error)
 }
 
 type LanguageSnapshot struct {
@@ -233,11 +233,11 @@ func (c *Controller) liveRuntimeSnapshots(
 	states []TaskLanguageState,
 ) map[string]RuntimeSnapshot {
 	result := make(map[string]RuntimeSnapshot)
-	environment, err := c.tasks.GetTaskEnvironmentByTaskID(ctx, taskID)
+	environment, err := c.tasks.GetTaskEnvironmentForTaskLSP(ctx, taskID)
 	if err != nil || !readyTaskEnvironment(environment) || !ExecutorSupportsLSP(environment.ExecutorType) {
 		return result
 	}
-	host, exists, err := c.runtimes.ExistingTaskHost(ctx, environment.ID)
+	host, exists, err := c.runtimes.ExistingTaskHost(ctx, taskID, environment.ID)
 	if err != nil || !exists || host == nil {
 		return result
 	}
@@ -351,7 +351,7 @@ func (c *Controller) ResolveAttachment(
 	if state.Policy == PolicyDisabled || state.Generation == 0 || state.Phase != PhaseReady {
 		return nil, ErrAttachmentNotReady
 	}
-	environment, err := c.tasks.GetTaskEnvironmentByTaskID(ctx, taskID)
+	environment, err := c.tasks.GetTaskEnvironmentForTaskLSP(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -361,7 +361,7 @@ func (c *Controller) ResolveAttachment(
 	if !ExecutorSupportsLSP(environment.ExecutorType) {
 		return nil, ErrExecutorUnsupported
 	}
-	host, exists, err := c.runtimes.ExistingTaskHost(ctx, environment.ID)
+	host, exists, err := c.runtimes.ExistingTaskHost(ctx, taskID, environment.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -439,7 +439,7 @@ func (c *Controller) start(
 	if !taskAllowsLSPRuntime(task) {
 		return c.waitForTaskWithoutAllocation(ctx, *current, settings, origin, action)
 	}
-	environment, err := c.tasks.GetTaskEnvironmentByTaskID(ctx, taskID)
+	environment, err := c.tasks.GetTaskEnvironmentForTaskLSP(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}

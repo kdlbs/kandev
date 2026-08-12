@@ -128,3 +128,11 @@ Stop; SetPolicy retains its requested value while still stopping under the disab
 policy. The regression also proves a later global default change starts the inherited language as
 the next generation. It passed 20 repetitions, the full controller package under `-race`, and
 backend lint.
+
+The follow-up independent review tightened the controller/task-host boundary for inherited
+environments. The task service authorizes the requested task first, proves environment membership
+from durable task/session state, and derives task-specific repository roots before runtime access.
+Browser and control bodies cannot provide task identity; only the authenticated backend transport
+header can. Restart also rejects a previous generation's cleanup-failure snapshot as success and
+persists an actionable failure for the requested replacement generation. Authorization,
+strict-body, inherited-environment, and failed-restart regressions pass.

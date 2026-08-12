@@ -73,6 +73,7 @@ type fakeTaskLSPWorkspaceProvider struct {
 func (p fakeTaskLSPWorkspaceProvider) TaskLSPWorkspace(
 	context.Context,
 	string,
+	string,
 ) (*taskLSPWorkspace, error) {
 	return p.info, nil
 }
@@ -82,12 +83,12 @@ type fakeTaskLSPTaskHostRuntime struct {
 	ensureCalls int
 }
 
-func (r *fakeTaskLSPTaskHostRuntime) EnsureTaskHost(context.Context, string) (tasklsp.TaskHost, error) {
+func (r *fakeTaskLSPTaskHostRuntime) EnsureTaskHost(context.Context, string, string) (tasklsp.TaskHost, error) {
 	r.ensureCalls++
 	return r.host, nil
 }
 
-func (r *fakeTaskLSPTaskHostRuntime) ExistingTaskHost(context.Context, string) (tasklsp.TaskHost, bool, error) {
+func (r *fakeTaskLSPTaskHostRuntime) ExistingTaskHost(context.Context, string, string) (tasklsp.TaskHost, bool, error) {
 	return nil, false, nil
 }
 
@@ -95,7 +96,7 @@ func (r *fakeTaskLSPTaskHostRuntime) RecoverTaskHost(context.Context, string) (b
 	return false, nil
 }
 
-func (r *fakeTaskLSPTaskHostRuntime) CleanupTaskHost(context.Context, string, string) error {
+func (r *fakeTaskLSPTaskHostRuntime) CleanupTaskHost(context.Context, string, string, string) error {
 	return nil
 }
 
@@ -177,7 +178,7 @@ func TestDockerTaskLSPDiscoveryRunsInsideTaskHost(t *testing.T) {
 		}},
 	}
 
-	result, err := provider.DiscoverTaskLanguages(context.Background(), "env-docker")
+	result, err := provider.DiscoverTaskLanguages(context.Background(), "task-1", "env-docker")
 	if err != nil {
 		t.Fatal(err)
 	}

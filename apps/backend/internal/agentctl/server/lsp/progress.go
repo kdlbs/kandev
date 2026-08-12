@@ -19,7 +19,7 @@ type progressParams struct {
 	} `json:"value"`
 }
 
-func (m *Manager) applyProgress(language string, generation uint64, raw json.RawMessage) {
+func (m *Manager) applyProgress(taskID, language string, generation uint64, raw json.RawMessage) {
 	var params progressParams
 	if json.Unmarshal(raw, &params) != nil {
 		return
@@ -28,7 +28,7 @@ func (m *Manager) applyProgress(language string, generation uint64, raw json.Raw
 	if !ok {
 		return
 	}
-	m.publishForGeneration(language, generation, func(snapshot *Snapshot) {
+	m.publishForTaskGeneration(taskID, language, generation, func(snapshot *Snapshot) {
 		index := workIndex(snapshot.Work, token)
 		switch params.Value.Kind {
 		case "begin":
@@ -80,14 +80,14 @@ func (m *Manager) applyProgress(language string, generation uint64, raw json.Raw
 	})
 }
 
-func (m *Manager) applyDiagnostics(language string, generation uint64, raw json.RawMessage) {
+func (m *Manager) applyDiagnostics(taskID, language string, generation uint64, raw json.RawMessage) {
 	var params struct {
 		URI string `json:"uri"`
 	}
 	if json.Unmarshal(raw, &params) != nil || params.URI == "" {
 		return
 	}
-	m.publishForGeneration(language, generation, func(snapshot *Snapshot) {
+	m.publishForTaskGeneration(taskID, language, generation, func(snapshot *Snapshot) {
 		byURI := make(map[string]json.RawMessage, len(snapshot.Diagnostics)+1)
 		for _, diagnostic := range snapshot.Diagnostics {
 			var existing struct {

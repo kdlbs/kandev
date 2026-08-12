@@ -57,7 +57,7 @@ func (c *Controller) stopRuntime(
 	if c.capacity.CancelQueued(key) || state.Generation == 0 || state.Phase == PhaseOff {
 		return c.transition(ctx, state, settings, PhaseOff, "", "")
 	}
-	environment, err := c.tasks.GetTaskEnvironmentByTaskID(ctx, taskID)
+	environment, err := c.tasks.GetTaskEnvironmentForTaskLSP(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +65,7 @@ func (c *Controller) stopRuntime(
 		c.releaseCapacity(ctx, key, state.Generation)
 		return c.transition(ctx, state, settings, PhaseOff, "", "")
 	}
-	host, exists, err := c.runtimes.ExistingTaskHost(ctx, environment.ID)
+	host, exists, err := c.runtimes.ExistingTaskHost(ctx, taskID, environment.ID)
 	if err != nil {
 		return c.transition(ctx, state, settings, PhaseError, "task_host_control_failed", err.Error())
 	}

@@ -21,6 +21,7 @@ const (
 )
 
 type runtimeConfig struct {
+	taskID        string
 	language      string
 	generation    uint64
 	configuration json.RawMessage
@@ -31,6 +32,7 @@ type runtimeConfig struct {
 }
 
 type runtime struct {
+	taskID     string
 	language   string
 	generation uint64
 	workspace  Config
@@ -54,6 +56,7 @@ type runtime struct {
 
 func newRuntime(cfg runtimeConfig) *runtime {
 	runtime := &runtime{
+		taskID:        cfg.taskID,
 		language:      cfg.language,
 		generation:    cfg.generation,
 		configuration: append(json.RawMessage(nil), cfg.configuration...),
@@ -87,7 +90,7 @@ func (r *runtime) run() (runErr error) {
 	defer r.hub.Close()
 
 	now := time.Now().UTC()
-	r.manager.publishForGeneration(r.language, r.generation, func(snapshot *Snapshot) {
+	r.manager.publishForTaskGeneration(r.taskID, r.language, r.generation, func(snapshot *Snapshot) {
 		snapshot.Phase = sharedlsp.PhaseInitializing
 		snapshot.InitializeStartedAt = &now
 	})
@@ -97,7 +100,7 @@ func (r *runtime) run() (runErr error) {
 	if err := protocolPeer.Call(r.initializeRequestContext(), "initialize", r.initializeParams(), &result); err != nil {
 		return fmt.Errorf("initialize language server: %w", err)
 	}
-	r.manager.publishForGeneration(r.language, r.generation, func(snapshot *Snapshot) {
+	r.manager.publishForTaskGeneration(r.taskID, r.language, r.generation, func(snapshot *Snapshot) {
 		snapshot.Capabilities = append(json.RawMessage(nil), result.Capabilities...)
 	})
 	if err := protocolPeer.Notify(methodInitialized, map[string]any{}); err != nil {
@@ -113,7 +116,7 @@ func (r *runtime) run() (runErr error) {
 		}
 	}
 	readyAt := time.Now().UTC()
-	r.manager.publishForGeneration(r.language, r.generation, func(snapshot *Snapshot) {
+	r.manager.publishForTaskGeneration(r.taskID, r.language, r.generation, func(snapshot *Snapshot) {
 		snapshot.Phase = sharedlsp.PhaseReady
 		snapshot.ReadyAt = &readyAt
 		if len(snapshot.Work) == 0 {
@@ -221,9 +224,9 @@ func (r *runtime) updateConfiguration(configuration json.RawMessage, notify bool
 func (r *runtime) handleNotification(method string, params json.RawMessage) {
 	switch method {
 	case methodProgress:
-		r.manager.applyProgress(r.language, r.generation, params)
+		r.manager.applyProgress(r.taskID, r.language, r.generation, params)
 	case "textDocument/publishDiagnostics":
-		r.manager.applyDiagnostics(r.language, r.generation, params)
+		r.manager.applyDiagnostics(r.taskID, r.language, r.generation, params)
 		r.hub.Broadcast(method, params)
 	default:
 		r.hub.Broadcast(method, params)

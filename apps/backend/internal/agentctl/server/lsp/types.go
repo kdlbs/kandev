@@ -21,5 +21,6 @@ type Config struct {
 	WorkDir          string
 	WorkspaceURI     string
 	WorkspaceFolders []WorkspaceFolder
+	DiscoveryRoots   []string
 	OwnerID          string
 }

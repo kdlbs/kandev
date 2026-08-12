@@ -101,7 +101,7 @@ func (c *Controller) inspectReconcileState(
 		return nil, err
 	}
 	desired := effectivePolicy(state, settings) == PolicyKeepWarm && task.ArchivedAt == nil
-	environment, err := c.tasks.GetTaskEnvironmentByTaskID(ctx, state.TaskID)
+	environment, err := c.tasks.GetTaskEnvironmentForTaskLSP(ctx, state.TaskID)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +119,7 @@ func (c *Controller) inspectReconcileRuntime(
 	desired bool,
 	scheduleFailure bool,
 ) (*reconcileCandidate, error) {
-	host, exists, err := c.runtimes.ExistingTaskHost(ctx, environment.ID)
+	host, exists, err := c.runtimes.ExistingTaskHost(ctx, state.TaskID, environment.ID)
 	if err != nil {
 		c.recordReconcileHostFailure(ctx, state, settings, desired, scheduleFailure, err)
 		return nil, fmt.Errorf("inspect task host for %s/%s: %w", state.TaskID, state.Language, err)
@@ -185,7 +185,7 @@ func (c *Controller) adoptExistingRuntime(
 	action Action,
 	origin Origin,
 ) (*LanguageSnapshot, bool, error) {
-	host, err := c.runtimes.EnsureTaskHost(ctx, environment.ID)
+	host, err := c.runtimes.EnsureTaskHost(ctx, state.TaskID, environment.ID)
 	if err != nil {
 		return nil, false, err
 	}
@@ -376,7 +376,7 @@ func (c *Controller) CleanupTask(ctx context.Context, taskID, reason string) err
 		c.cancelWatch(key)
 		c.capacity.CancelQueued(key)
 	}
-	environment, envErr := c.tasks.GetTaskEnvironmentByTaskID(ctx, taskID)
+	environment, envErr := c.tasks.GetTaskEnvironmentForTaskLSP(ctx, taskID)
 	if envErr != nil {
 		return envErr
 	}
@@ -401,7 +401,7 @@ func (c *Controller) CleanupTask(ctx context.Context, taskID, reason string) err
 					)
 					result := taskLanguageCleanupResult{state: listed, err: currentErr}
 					if currentErr == nil {
-						host, hostExists, hostErr := c.cleanupTaskHost(workCtx, environment)
+						host, hostExists, hostErr := c.cleanupTaskHost(workCtx, taskID, environment)
 						result = c.cleanupTaskLanguage(
 							workCtx, *current, host, hostExists, hostErr, reason,
 						)
@@ -420,7 +420,7 @@ func (c *Controller) CleanupTask(ctx context.Context, taskID, reason string) err
 		<-stopAttempts
 	}
 	if environment != nil && ExecutorSupportsLSP(environment.ExecutorType) {
-		taskHostCleanupErr = c.runtimes.CleanupTaskHost(ctx, environment.ID, reason)
+		taskHostCleanupErr = c.runtimes.CleanupTaskHost(ctx, taskID, environment.ID, reason)
 	}
 	close(taskHostDone)
 	for range states {
@@ -438,12 +438,13 @@ type taskLanguageCleanupResult struct {
 
 func (c *Controller) cleanupTaskHost(
 	ctx context.Context,
+	taskID string,
 	environment *taskmodels.TaskEnvironment,
 ) (TaskHost, bool, error) {
 	if environment == nil || !ExecutorSupportsLSP(environment.ExecutorType) {
 		return nil, false, nil
 	}
-	return c.runtimes.ExistingTaskHost(ctx, environment.ID)
+	return c.runtimes.ExistingTaskHost(ctx, taskID, environment.ID)
 }
 
 func (c *Controller) cleanupTaskLanguage(

@@ -43,6 +43,15 @@ type WorkspaceUpdateResult struct {
 	RestartRequiredLanguages []string          `json:"restart_required_languages"`
 }
 
+// TaskHostWorkspaceRequest carries the backend-authorized workspace projection
+// for one task namespace. TaskID is transport metadata and is never decoded
+// from a caller-controlled body.
+type TaskHostWorkspaceRequest struct {
+	TaskID         string   `json:"-"`
+	WorkspacePath  string   `json:"workspace_path"`
+	WorkspaceRoots []string `json:"workspace_roots,omitempty"`
+}
+
 type RuntimeSnapshot struct {
 	Language            string             `json:"language"`
 	Generation          uint64             `json:"generation"`
@@ -67,6 +76,7 @@ type RuntimeSnapshot struct {
 }
 
 type TaskHostStartRequest struct {
+	TaskID        string          `json:"-"`
 	Language      string          `json:"language"`
 	Generation    uint64          `json:"generation"`
 	AutoInstall   bool            `json:"auto_install"`
@@ -74,12 +84,14 @@ type TaskHostStartRequest struct {
 }
 
 type TaskHostConfigurationRequest struct {
+	TaskID        string          `json:"-"`
 	Language      string          `json:"language"`
 	Generation    uint64          `json:"generation"`
 	Configuration json.RawMessage `json:"configuration"`
 }
 
 type TaskHostStopRequest struct {
+	TaskID     string `json:"-"`
 	Language   string `json:"language"`
 	Generation uint64 `json:"generation,omitempty"`
 	Reason     string `json:"reason,omitempty"`

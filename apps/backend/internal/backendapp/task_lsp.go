@@ -114,14 +114,14 @@ type taskLSPWorkspace struct {
 }
 
 type taskLSPWorkspaceProvider interface {
-	TaskLSPWorkspace(ctx context.Context, taskEnvironmentID string) (*taskLSPWorkspace, error)
+	TaskLSPWorkspace(ctx context.Context, taskID, taskEnvironmentID string) (*taskLSPWorkspace, error)
 }
 
 type taskLSPTaskHostRuntime interface {
-	EnsureTaskHost(ctx context.Context, taskEnvironmentID string) (tasklsp.TaskHost, error)
-	ExistingTaskHost(ctx context.Context, taskEnvironmentID string) (tasklsp.TaskHost, bool, error)
+	EnsureTaskHost(ctx context.Context, taskID, taskEnvironmentID string) (tasklsp.TaskHost, error)
+	ExistingTaskHost(ctx context.Context, taskID, taskEnvironmentID string) (tasklsp.TaskHost, bool, error)
 	RecoverTaskHost(ctx context.Context, taskEnvironmentID string) (bool, error)
-	CleanupTaskHost(ctx context.Context, taskEnvironmentID, reason string) error
+	CleanupTaskHost(ctx context.Context, taskID, taskEnvironmentID, reason string) error
 }
 
 func (p taskLSPRuntimeProvider) RecoverTaskHost(
@@ -133,33 +133,33 @@ func (p taskLSPRuntimeProvider) RecoverTaskHost(
 
 func (p taskLSPRuntimeProvider) EnsureTaskHost(
 	ctx context.Context,
-	taskEnvironmentID string,
+	taskID, taskEnvironmentID string,
 ) (tasklsp.TaskHost, error) {
-	return p.taskHosts.EnsureTaskHost(ctx, taskEnvironmentID)
+	return p.taskHosts.EnsureTaskHost(ctx, taskID, taskEnvironmentID)
 }
 
 func (p taskLSPRuntimeProvider) ExistingTaskHost(
 	ctx context.Context,
-	taskEnvironmentID string,
+	taskID, taskEnvironmentID string,
 ) (tasklsp.TaskHost, bool, error) {
-	return p.taskHosts.ExistingTaskHost(ctx, taskEnvironmentID)
+	return p.taskHosts.ExistingTaskHost(ctx, taskID, taskEnvironmentID)
 }
 
 func (p taskLSPRuntimeProvider) CleanupTaskHost(
 	ctx context.Context,
-	taskEnvironmentID, reason string,
+	taskID, taskEnvironmentID, reason string,
 ) error {
-	return p.taskHosts.CleanupTaskHost(ctx, taskEnvironmentID, reason)
+	return p.taskHosts.CleanupTaskHost(ctx, taskID, taskEnvironmentID, reason)
 }
 
 func (p taskLSPRuntimeProvider) DiscoverTaskLanguages(
 	ctx context.Context,
-	taskEnvironmentID string,
+	taskID, taskEnvironmentID string,
 ) (*tasklsp.DiscoveryResult, error) {
 	if p.tasks == nil {
 		return nil, errors.New("task workspace provider is unavailable")
 	}
-	info, err := p.tasks.TaskLSPWorkspace(ctx, taskEnvironmentID)
+	info, err := p.tasks.TaskLSPWorkspace(ctx, taskID, taskEnvironmentID)
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +167,7 @@ func (p taskLSPRuntimeProvider) DiscoverTaskLanguages(
 		return nil, errors.New("task workspace is unavailable for language discovery")
 	}
 	if info.executorType == models.ExecutorTypeLocalDocker {
-		host, ensureErr := p.taskHosts.EnsureTaskHost(ctx, taskEnvironmentID)
+		host, ensureErr := p.taskHosts.EnsureTaskHost(ctx, taskID, taskEnvironmentID)
 		if ensureErr != nil {
 			return nil, ensureErr
 		}

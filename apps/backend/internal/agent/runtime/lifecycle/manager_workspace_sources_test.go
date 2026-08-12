@@ -117,7 +117,7 @@ func TestRescanWorkspaceForTaskHostUsesCurrentEnvironmentWorkspace(t *testing.T)
 			},
 		}},
 	}
-	if err := manager.RescanWorkspaceForTaskHost(context.Background(), "env-1"); err != nil {
+	if err := manager.RescanWorkspaceForTaskHost(context.Background(), "task-1", "env-1"); err != nil {
 		t.Fatalf("RescanWorkspaceForTaskHost: %v", err)
 	}
 	if gotPath != newRoot || !sameStrings(gotRoots, []string{sourceB, sourceA}) {
@@ -176,7 +176,7 @@ func TestRescanWorkspaceForDockerTaskHostUsesRuntimeWorkspace(t *testing.T) {
 			},
 		}},
 	}
-	if err := manager.RescanWorkspaceForTaskHost(context.Background(), "env-1"); err != nil {
+	if err := manager.RescanWorkspaceForTaskHost(context.Background(), "task-1", "env-1"); err != nil {
 		t.Fatalf("RescanWorkspaceForTaskHost: %v", err)
 	}
 	wantRoots := []string{dockerWorkspacePath, filepath.Join(dockerWorkspacePath, "API-feature-add-source")}
@@ -185,6 +185,57 @@ func TestRescanWorkspaceForDockerTaskHostUsesRuntimeWorkspace(t *testing.T) {
 	}
 	if execution.WorkspacePath != dockerWorkspacePath || !sameStrings(execution.WorkspaceSourceRoots, wantRoots) {
 		t.Fatalf("Docker task-host execution path=%q roots=%v, want runtime paths", execution.WorkspacePath, execution.WorkspaceSourceRoots)
+	}
+}
+
+type taskScopedWorkspaceInfoProvider struct {
+	*mockWorkspaceInfoProvider
+	taskInfos map[string]*WorkspaceInfo
+}
+
+func (p *taskScopedWorkspaceInfoProvider) GetWorkspaceInfoForTaskLSP(
+	_ context.Context,
+	taskID, _ string,
+) (*WorkspaceInfo, error) {
+	return p.taskInfos[taskID], nil
+}
+
+func TestTaskLSPWorkspaceProjectionDoesNotRebindSharedTaskHost(t *testing.T) {
+	physicalRoot := t.TempDir()
+	childRoot := t.TempDir()
+	execution := &AgentExecution{
+		ID: "task-host", SessionID: taskHostRuntimeSessionPrefix + "env-1",
+		TaskEnvironmentID: "env-1", IsTaskHost: true, RuntimeName: agentruntime.RuntimeStandalone,
+		WorkspacePath: physicalRoot, WorkspaceSourceRoots: []string{physicalRoot},
+	}
+	store := NewExecutionStore()
+	if err := store.Add(execution); err != nil {
+		t.Fatal(err)
+	}
+	manager := &Manager{
+		executionStore: store,
+		logger:         newTestLogger(),
+		workspaceInfoProvider: &taskScopedWorkspaceInfoProvider{
+			mockWorkspaceInfoProvider: &mockWorkspaceInfoProvider{},
+			taskInfos: map[string]*WorkspaceInfo{
+				"task-child": {
+					TaskID: "task-child", TaskEnvironmentID: "env-1", WorkspacePath: childRoot,
+					WorkspaceRepositories: []WorkspaceRepositorySpec{{RepositoryPath: childRoot}},
+				},
+			},
+		},
+	}
+	projection, err := manager.TaskLSPWorkspaceForTaskHost(
+		context.Background(), "task-child", "env-1",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projection.WorkspacePath != childRoot || !sameStrings(projection.WorkspaceRoots, []string{childRoot}) {
+		t.Fatalf("child projection = %#v", projection)
+	}
+	if execution.WorkspacePath != physicalRoot || !sameStrings(execution.WorkspaceSourceRoots, []string{physicalRoot}) {
+		t.Fatalf("physical task host was rebound: path=%q roots=%v", execution.WorkspacePath, execution.WorkspaceSourceRoots)
 	}
 }
 

@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -299,11 +300,18 @@ func (m *Manager) CleanupStaleExecutionBySessionID(ctx context.Context, sessionI
 	// goroutines. Without this, the old agentctl instance keeps running when a new
 	// execution is created for the same session, causing git polling on deleted worktrees.
 	// This is idempotent — returns success if the instance is already gone.
-	_ = m.stopAgentViaBackend(ctx, execution.ID, execution, stopReasonStaleExecutionCleanup, false, false)
+	runtimeStopErr := m.stopAgentViaBackend(
+		ctx, execution.ID, execution, stopReasonStaleExecutionCleanup, false, false,
+	)
 
 	// Close agentctl connection if it exists
 	if execution.agentctl != nil {
 		execution.agentctl.Close()
+	}
+	if runtimeStopErr == nil {
+		if err := m.deleteExecutionRuntimeSecrets(ctx, execution); err != nil {
+			return fmt.Errorf("delete stale execution runtime secrets: %w", err)
+		}
 	}
 
 	// Remove from execution store

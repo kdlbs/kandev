@@ -64,11 +64,11 @@ func (c *Controller) WorkspaceSourcesChanged(ctx context.Context, taskID string)
 	if err != nil {
 		return err
 	}
-	environment, err := c.tasks.GetTaskEnvironmentByTaskID(ctx, taskID)
+	environment, err := c.tasks.GetTaskEnvironmentForTaskLSP(ctx, taskID)
 	if err != nil {
 		return err
 	}
-	dynamic, restartRequired, refreshErr := c.refreshTaskWorkspace(ctx, environment)
+	dynamic, restartRequired, refreshErr := c.refreshTaskWorkspace(ctx, taskID, environment)
 	updateErrors := c.recordWorkspaceRefresh(ctx, taskID, states, dynamic, restartRequired, refreshErr)
 	discoveryErr := c.discoverTask(ctx, taskID, true)
 	return errors.Join(refreshErr, errors.Join(updateErrors...), discoveryErr)
@@ -76,6 +76,7 @@ func (c *Controller) WorkspaceSourcesChanged(ctx context.Context, taskID string)
 
 func (c *Controller) refreshTaskWorkspace(
 	ctx context.Context,
+	taskID string,
 	environment *taskmodels.TaskEnvironment,
 ) (map[string]bool, map[string]bool, error) {
 	dynamic := make(map[string]bool)
@@ -83,7 +84,7 @@ func (c *Controller) refreshTaskWorkspace(
 	if !readyTaskEnvironment(environment) || !ExecutorSupportsLSP(environment.ExecutorType) {
 		return dynamic, restartRequired, nil
 	}
-	host, exists, err := c.runtimes.ExistingTaskHost(ctx, environment.ID)
+	host, exists, err := c.runtimes.ExistingTaskHost(ctx, taskID, environment.ID)
 	if err != nil || !exists || host == nil {
 		return dynamic, restartRequired, err
 	}
@@ -192,14 +193,14 @@ func (c *Controller) runDiscovery(ctx context.Context, taskID string) error {
 	if !taskAllowsLSPRuntime(task) {
 		return nil
 	}
-	environment, err := c.tasks.GetTaskEnvironmentByTaskID(ctx, taskID)
+	environment, err := c.tasks.GetTaskEnvironmentForTaskLSP(ctx, taskID)
 	if err != nil {
 		return err
 	}
 	if !readyTaskEnvironment(environment) || !ExecutorSupportsLSP(environment.ExecutorType) {
 		return nil
 	}
-	result, discoverErr := c.runtimes.DiscoverTaskLanguages(ctx, environment.ID)
+	result, discoverErr := c.runtimes.DiscoverTaskLanguages(ctx, taskID, environment.ID)
 	if result == nil {
 		result = &DiscoveryResult{State: DetectionUnavailable, Truncated: true, ScannedAt: c.clock()}
 	}

@@ -463,7 +463,7 @@ func newReconcileRuntimes() *reconcileRuntimes {
 	}
 }
 
-func (r *reconcileRuntimes) ExistingTaskHost(_ context.Context, environmentID string) (TaskHost, bool, error) {
+func (r *reconcileRuntimes) ExistingTaskHost(_ context.Context, _ string, environmentID string) (TaskHost, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := r.existingErrors[environmentID]; err != nil {
@@ -473,7 +473,7 @@ func (r *reconcileRuntimes) ExistingTaskHost(_ context.Context, environmentID st
 	return host, host != nil, nil
 }
 
-func (r *reconcileRuntimes) EnsureTaskHost(_ context.Context, environmentID string) (TaskHost, error) {
+func (r *reconcileRuntimes) EnsureTaskHost(_ context.Context, _ string, environmentID string) (TaskHost, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.ensureCalls++
@@ -486,7 +486,7 @@ func (r *reconcileRuntimes) EnsureTaskHost(_ context.Context, environmentID stri
 	return host, nil
 }
 
-func (r *reconcileRuntimes) CleanupTaskHost(_ context.Context, environmentID, reason string) error {
+func (r *reconcileRuntimes) CleanupTaskHost(_ context.Context, _, environmentID, reason string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.cleanupCalls++
@@ -513,6 +513,6 @@ func (r *reconcileRuntimes) RecoverTaskHost(_ context.Context, environmentID str
 	return true, nil
 }
 
-func (r *reconcileRuntimes) DiscoverTaskLanguages(context.Context, string) (*DiscoveryResult, error) {
+func (r *reconcileRuntimes) DiscoverTaskLanguages(context.Context, string, string) (*DiscoveryResult, error) {
 	return &DiscoveryResult{State: DetectionComplete, ScannedAt: time.Unix(200, 0).UTC()}, nil
 }

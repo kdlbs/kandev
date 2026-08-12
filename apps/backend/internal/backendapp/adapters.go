@@ -4,17 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"path/filepath"
 	"sort"
 	"sync"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/registry"
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
-	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	client "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	runtimeenv "github.com/kandev/kandev/internal/agent/runtime/environment"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -31,59 +33,110 @@ import (
 )
 
 type taskLSPTaskHostAdapter struct {
-	manager *lifecycle.Manager
+	manager      *lifecycle.Manager
+	environments taskLSPEnvironmentOwnerSource
 }
 
-type taskLSPWorkspaceRescanner interface {
-	RescanWorkspaceForTaskHost(ctx context.Context, taskEnvironmentID string) error
+type taskLSPEnvironmentOwnerSource interface {
+	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
+}
+
+type taskLSPWorkspaceProjector interface {
+	TaskLSPWorkspaceForTaskHost(
+		ctx context.Context,
+		taskID, taskEnvironmentID string,
+	) (*lifecycle.TaskLSPWorkspaceProjection, error)
 }
 
 type taskLSPBoundHost struct {
-	tasklsp.TaskHost
-	rescanner         taskLSPWorkspaceRescanner
+	client            *client.Client
+	taskID            string
+	projector         taskLSPWorkspaceProjector
 	taskEnvironmentID string
 }
 
-func (h *taskLSPBoundHost) bindWorkspace(ctx context.Context) error {
-	return h.rescanner.RescanWorkspaceForTaskHost(ctx, h.taskEnvironmentID)
+func (h *taskLSPBoundHost) bindWorkspace(
+	ctx context.Context,
+) (*tasklsp.WorkspaceUpdateResult, error) {
+	projection, err := h.projector.TaskLSPWorkspaceForTaskHost(ctx, h.taskID, h.taskEnvironmentID)
+	if err != nil {
+		return nil, err
+	}
+	if projection == nil {
+		return nil, errors.New("task LSP workspace projection is unavailable")
+	}
+	return h.client.RefreshTaskLSPWorkspace(ctx, h.taskID, tasklsp.TaskHostWorkspaceRequest{
+		WorkspacePath: projection.WorkspacePath, WorkspaceRoots: projection.WorkspaceRoots,
+	})
 }
 
 func (h *taskLSPBoundHost) StartTaskLSP(
 	ctx context.Context,
 	request tasklsp.TaskHostStartRequest,
 ) (*tasklsp.RuntimeSnapshot, error) {
-	if err := h.bindWorkspace(ctx); err != nil {
+	if _, err := h.bindWorkspace(ctx); err != nil {
 		return nil, err
 	}
-	return h.TaskHost.StartTaskLSP(ctx, request)
+	request.TaskID = h.taskID
+	return h.client.StartTaskLSP(ctx, request)
 }
 
 func (h *taskLSPBoundHost) RestartTaskLSP(
 	ctx context.Context,
 	request tasklsp.TaskHostStartRequest,
 ) (*tasklsp.RuntimeSnapshot, error) {
-	if err := h.bindWorkspace(ctx); err != nil {
+	if _, err := h.bindWorkspace(ctx); err != nil {
 		return nil, err
 	}
-	return h.TaskHost.RestartTaskLSP(ctx, request)
+	request.TaskID = h.taskID
+	return h.client.RestartTaskLSP(ctx, request)
 }
 
 func (h *taskLSPBoundHost) RefreshTaskLSPWorkspace(
 	ctx context.Context,
 ) (*tasklsp.WorkspaceUpdateResult, error) {
-	if err := h.bindWorkspace(ctx); err != nil {
-		return nil, err
-	}
-	return h.TaskHost.RefreshTaskLSPWorkspace(ctx)
+	return h.bindWorkspace(ctx)
 }
 
-func newTaskLSPTaskHostAdapter(manager *lifecycle.Manager) *taskLSPTaskHostAdapter {
-	return &taskLSPTaskHostAdapter{manager: manager}
+func (h *taskLSPBoundHost) DiscoverLSP(ctx context.Context) (*tasklsp.DiscoveryResult, error) {
+	if _, err := h.bindWorkspace(ctx); err != nil {
+		return nil, err
+	}
+	return h.client.DiscoverLSP(ctx, h.taskID)
+}
+
+func (h *taskLSPBoundHost) UpdateTaskLSPConfiguration(ctx context.Context, request tasklsp.TaskHostConfigurationRequest) (*tasklsp.RuntimeSnapshot, error) {
+	request.TaskID = h.taskID
+	return h.client.UpdateTaskLSPConfiguration(ctx, request)
+}
+
+func (h *taskLSPBoundHost) StopTaskLSP(ctx context.Context, request tasklsp.TaskHostStopRequest) (*tasklsp.RuntimeSnapshot, error) {
+	request.TaskID = h.taskID
+	return h.client.StopTaskLSP(ctx, request)
+}
+
+func (h *taskLSPBoundHost) TaskLSPSnapshot(ctx context.Context, language string) (*tasklsp.RuntimeSnapshot, error) {
+	return h.client.TaskLSPSnapshot(ctx, h.taskID, language)
+}
+
+func (h *taskLSPBoundHost) WatchTaskLSP(ctx context.Context, language string, onSnapshot func(tasklsp.RuntimeSnapshot) error) error {
+	return h.client.WatchTaskLSP(ctx, h.taskID, language, onSnapshot)
+}
+
+func (h *taskLSPBoundHost) DialTaskLSPAttach(ctx context.Context, language string, generation uint64) (*websocket.Conn, *http.Response, error) {
+	return h.client.DialTaskLSPAttach(ctx, h.taskID, language, generation)
+}
+
+func newTaskLSPTaskHostAdapter(
+	manager *lifecycle.Manager,
+	environments taskLSPEnvironmentOwnerSource,
+) *taskLSPTaskHostAdapter {
+	return &taskLSPTaskHostAdapter{manager: manager, environments: environments}
 }
 
 func (a *taskLSPTaskHostAdapter) EnsureTaskHost(
 	ctx context.Context,
-	taskEnvironmentID string,
+	taskID, taskEnvironmentID string,
 ) (tasklsp.TaskHost, error) {
 	execution, err := a.manager.GetOrEnsureTaskHostForEnvironment(ctx, taskEnvironmentID)
 	if err != nil {
@@ -93,14 +146,14 @@ func (a *taskLSPTaskHostAdapter) EnsureTaskHost(
 		return nil, errors.New("task host control client is unavailable")
 	}
 	return &taskLSPBoundHost{
-		TaskHost: execution.GetAgentCtlClient(), rescanner: a.manager,
+		client: execution.GetAgentCtlClient(), taskID: taskID, projector: a.manager,
 		taskEnvironmentID: taskEnvironmentID,
 	}, nil
 }
 
 func (a *taskLSPTaskHostAdapter) ExistingTaskHost(
 	ctx context.Context,
-	taskEnvironmentID string,
+	taskID, taskEnvironmentID string,
 ) (tasklsp.TaskHost, bool, error) {
 	execution, exists, err := a.manager.GetTaskHostForEnvironment(ctx, taskEnvironmentID)
 	if err != nil || !exists || execution == nil {
@@ -111,14 +164,28 @@ func (a *taskLSPTaskHostAdapter) ExistingTaskHost(
 		return nil, false, nil
 	}
 	return &taskLSPBoundHost{
-		TaskHost: client, rescanner: a.manager, taskEnvironmentID: taskEnvironmentID,
+		client: client, taskID: taskID, projector: a.manager, taskEnvironmentID: taskEnvironmentID,
 	}, true, nil
 }
 
 func (a *taskLSPTaskHostAdapter) CleanupTaskHost(
 	ctx context.Context,
-	taskEnvironmentID, reason string,
+	taskID, taskEnvironmentID, reason string,
 ) error {
+	// The controller has already stopped every persisted (task, language)
+	// generation. A shared physical task host belongs to the environment and
+	// must survive cleanup of any one borrowing task. The environment owner
+	// remains responsible for reaping the task-host process tree.
+	if a.environments == nil {
+		return errors.New("task environment owner source is unavailable")
+	}
+	environment, err := a.environments.GetTaskEnvironmentByTaskID(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if environment == nil || environment.ID != taskEnvironmentID {
+		return nil
+	}
 	return a.manager.StopTaskHostForEnvironment(ctx, taskEnvironmentID, reason)
 }
 
@@ -135,9 +202,9 @@ type taskLSPWorkspaceAdapter struct {
 
 func (a taskLSPWorkspaceAdapter) TaskLSPWorkspace(
 	ctx context.Context,
-	taskEnvironmentID string,
+	taskID, taskEnvironmentID string,
 ) (*taskLSPWorkspace, error) {
-	info, err := a.tasks.GetWorkspaceInfoForEnvironment(ctx, taskEnvironmentID)
+	info, err := a.tasks.GetWorkspaceInfoForTaskLSP(ctx, taskID, taskEnvironmentID)
 	if err != nil || info == nil {
 		return nil, err
 	}

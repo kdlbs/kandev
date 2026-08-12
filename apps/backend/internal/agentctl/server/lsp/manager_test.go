@@ -33,6 +33,7 @@ type fakeProcessManager struct {
 	stopReturned    chan struct{}
 	stopReturnOnce  sync.Once
 	stopErr         error
+	stopErrOnce     error
 }
 
 type fakeLSPProcess struct {
@@ -122,6 +123,12 @@ func (m *fakeProcessManager) StartPipedProcess(req process.PipedStartRequest) (*
 
 func (m *fakeProcessManager) StopProcess(_ context.Context, req process.StopProcessRequest) error {
 	m.mu.Lock()
+	if m.stopErrOnce != nil {
+		err := m.stopErrOnce
+		m.stopErrOnce = nil
+		m.mu.Unlock()
+		return err
+	}
 	if m.stopErr != nil {
 		err := m.stopErr
 		m.mu.Unlock()
@@ -158,6 +165,12 @@ func (m *fakeProcessManager) counts() (started, stopped int, overlap bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.started, m.stopped, m.overlapObserved
+}
+
+func (m *fakeProcessManager) activeCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.active)
 }
 
 func serveFakeLSP(server *fakeLSPServer, fakeProcess *fakeLSPProcess, req process.PipedStartRequest) {
@@ -546,6 +559,33 @@ func TestManagerStopUsesShutdownExitAndCloseReapsRuntime(t *testing.T) {
 	}
 }
 
+func TestManagerPublishesOffWhenDelayedCleanupReapsFailedStop(t *testing.T) {
+	manager, processes := newManagerForTest(t, func(int) *fakeLSPServer {
+		return newFakeLSPServer()
+	})
+	if _, err := manager.Start(context.Background(), StartRequest{Language: "kotlin", Generation: 1}); err != nil {
+		t.Fatalf("start generation: %v", err)
+	}
+	waitForPhase(t, manager, "kotlin", sharedlsp.PhaseReady)
+	processes.mu.Lock()
+	processes.stopErrOnce = errors.New("transient stop failure")
+	processes.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if _, err := manager.Stop(ctx, StopRequest{Language: "kotlin", Generation: 1}); err == nil {
+		t.Fatal("stop unexpectedly succeeded")
+	}
+	snapshot := waitForPhase(t, manager, "kotlin", sharedlsp.PhaseOff)
+	if snapshot.Generation != 1 || snapshot.ErrorCode != "" {
+		t.Fatalf("delayed stop cleanup snapshot = %#v", snapshot)
+	}
+	_, stopped, _ := processes.counts()
+	if stopped != 1 {
+		t.Fatalf("stopped processes = %d, want one", stopped)
+	}
+}
+
 func TestManagerStopWaitsForProcessTreeReap(t *testing.T) {
 	manager, processes := newManagerForTest(t, func(int) *fakeLSPServer {
 		return newFakeLSPServer()
@@ -565,7 +605,7 @@ func TestManagerStopWaitsForProcessTreeReap(t *testing.T) {
 	}
 	waitForPhase(t, manager, "kotlin", sharedlsp.PhaseReady)
 	manager.mu.RLock()
-	slot := manager.slots["kotlin"]
+	slot := manager.slots[taskLanguageRuntimeKey("task-1", "kotlin")]
 	manager.mu.RUnlock()
 	slot.opMu.Lock()
 	current := slot.runtime

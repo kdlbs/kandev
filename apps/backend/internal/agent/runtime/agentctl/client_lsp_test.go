@@ -18,12 +18,13 @@ import (
 )
 
 func TestTaskLSPControlUsesLanguageRouteAndServerOwnedBody(t *testing.T) {
-	var gotMethod, gotPath, gotAuth, gotInstanceID string
+	var gotMethod, gotPath, gotAuth, gotInstanceID, gotTaskID string
 	var gotBody map[string]any
 	want := sharedlsp.RuntimeSnapshot{Language: "python", Generation: 4, Phase: sharedlsp.PhaseReady}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotMethod, gotPath = r.Method, r.URL.Path
 		gotAuth, gotInstanceID = r.Header.Get("Authorization"), r.Header.Get("X-Instance-ID")
+		gotTaskID = r.Header.Get(taskLSPTaskIDHeader)
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
 			t.Errorf("decode body: %v", err)
 		}
@@ -34,7 +35,7 @@ func TestTaskLSPControlUsesLanguageRouteAndServerOwnedBody(t *testing.T) {
 	client := NewClient(host, port, newTestLogger(), WithAuthToken("secret-token"), WithExecutionID("exec-1"))
 
 	got, err := client.StartTaskLSP(context.Background(), sharedlsp.TaskHostStartRequest{
-		Language: "python", Generation: 4, AutoInstall: true,
+		TaskID: "task-1", Language: "python", Generation: 4, AutoInstall: true,
 		Configuration: json.RawMessage(`{"python":{"analysis":{"typeCheckingMode":"strict"}}}`),
 	})
 	if err != nil {
@@ -45,6 +46,9 @@ func TestTaskLSPControlUsesLanguageRouteAndServerOwnedBody(t *testing.T) {
 	}
 	if gotAuth != "Bearer secret-token" || gotInstanceID != "exec-1" {
 		t.Fatalf("headers auth=%q instance=%q", gotAuth, gotInstanceID)
+	}
+	if gotTaskID != "task-1" {
+		t.Fatalf("task header = %q", gotTaskID)
 	}
 	if gotBody["language"] != nil || gotBody["task_id"] != nil || gotBody["session_id"] != nil {
 		t.Fatalf("ownership leaked into body: %v", gotBody)
@@ -71,7 +75,7 @@ func TestTaskLSPControlReturnsFailureSnapshot(t *testing.T) {
 	client := NewClient(host, port, newTestLogger())
 
 	got, err := client.StartTaskLSP(context.Background(), sharedlsp.TaskHostStartRequest{
-		Language: "go", Generation: 3,
+		TaskID: "task-1", Language: "go", Generation: 3,
 	})
 	if err == nil {
 		t.Fatal("start unexpectedly succeeded")
@@ -82,10 +86,11 @@ func TestTaskLSPControlReturnsFailureSnapshot(t *testing.T) {
 }
 
 func TestTaskLSPConfigurationUsesTaskHostGenerationRoute(t *testing.T) {
-	var gotPath string
+	var gotPath, gotTaskID string
 	var gotBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
+		gotTaskID = r.Header.Get(taskLSPTaskIDHeader)
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
 			t.Errorf("decode body: %v", err)
 		}
@@ -98,13 +103,13 @@ func TestTaskLSPConfigurationUsesTaskHostGenerationRoute(t *testing.T) {
 	client := NewClient(host, port, newTestLogger())
 
 	got, err := client.UpdateTaskLSPConfiguration(context.Background(), sharedlsp.TaskHostConfigurationRequest{
-		Language: "kotlin", Generation: 7,
+		TaskID: "task-1", Language: "kotlin", Generation: 7,
 		Configuration: json.RawMessage(`{"kotlin":{"compiler":{"jvmTarget":"21"}}}`),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotPath != "/api/v1/lsp/languages/kotlin/configuration" || gotBody["generation"] != float64(7) {
+	if gotPath != "/api/v1/lsp/languages/kotlin/configuration" || gotBody["generation"] != float64(7) || gotTaskID != "task-1" {
 		t.Fatalf("request path=%q body=%v", gotPath, gotBody)
 	}
 	if gotBody["task_id"] != nil || gotBody["session_id"] != nil || got.Generation != 7 {
@@ -113,11 +118,12 @@ func TestTaskLSPConfigurationUsesTaskHostGenerationRoute(t *testing.T) {
 }
 
 func TestDialTaskLSPAttachUsesGenerationAndAuthHeaders(t *testing.T) {
-	var gotPath, gotGeneration, gotAuth, gotInstanceID string
+	var gotPath, gotGeneration, gotAuth, gotInstanceID, gotTaskID string
 	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath, gotGeneration = r.URL.Path, r.URL.Query().Get("generation")
 		gotAuth, gotInstanceID = r.Header.Get("Authorization"), r.Header.Get("X-Instance-ID")
+		gotTaskID = r.Header.Get(taskLSPTaskIDHeader)
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			t.Errorf("upgrade: %v", err)
@@ -129,7 +135,7 @@ func TestDialTaskLSPAttachUsesGenerationAndAuthHeaders(t *testing.T) {
 	host, port := testServerAddress(t, server.URL)
 	client := NewClient(host, port, newTestLogger(), WithAuthToken("secret-token"), WithExecutionID("exec-1"))
 
-	conn, _, err := client.DialTaskLSPAttach(context.Background(), "kotlin", 9)
+	conn, _, err := client.DialTaskLSPAttach(context.Background(), "task-1", "kotlin", 9)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +143,7 @@ func TestDialTaskLSPAttachUsesGenerationAndAuthHeaders(t *testing.T) {
 	if gotPath != "/api/v1/lsp/languages/kotlin/attach" || gotGeneration != "9" {
 		t.Fatalf("attach path=%q generation=%q", gotPath, gotGeneration)
 	}
-	if gotAuth != "Bearer secret-token" || gotInstanceID != "exec-1" {
+	if gotAuth != "Bearer secret-token" || gotInstanceID != "exec-1" || gotTaskID != "task-1" {
 		t.Fatalf("headers auth=%q instance=%q", gotAuth, gotInstanceID)
 	}
 }
@@ -147,6 +153,9 @@ func TestWatchTaskLSPStreamsSnapshotsUntilContextCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/lsp/languages/go/watch" {
 			t.Errorf("watch path = %q", r.URL.Path)
+		}
+		if got := r.Header.Get(taskLSPTaskIDHeader); got != "task-1" {
+			t.Errorf("task header = %q", got)
 		}
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -163,7 +172,7 @@ func TestWatchTaskLSPStreamsSnapshotsUntilContextCancellation(t *testing.T) {
 	updates := make(chan sharedlsp.RuntimeSnapshot, 1)
 	done := make(chan error, 1)
 	go func() {
-		done <- client.WatchTaskLSP(ctx, "go", func(snapshot sharedlsp.RuntimeSnapshot) error {
+		done <- client.WatchTaskLSP(ctx, "task-1", "go", func(snapshot sharedlsp.RuntimeSnapshot) error {
 			updates <- snapshot
 			cancel()
 			return nil
@@ -183,7 +192,7 @@ func TestWatchTaskLSPStreamsSnapshotsUntilContextCancellation(t *testing.T) {
 }
 
 func TestDiscoverLSPUsesReadOnlyTaskHostRouteWithAuthHeaders(t *testing.T) {
-	var gotMethod, gotPath, gotAuth, gotInstanceID string
+	var gotMethod, gotPath, gotAuth, gotInstanceID, gotTaskID string
 	want := sharedlsp.DiscoveryResult{
 		Languages: []string{"go", "kotlin"},
 		State:     sharedlsp.DetectionComplete,
@@ -194,6 +203,7 @@ func TestDiscoverLSPUsesReadOnlyTaskHostRouteWithAuthHeaders(t *testing.T) {
 		gotPath = r.URL.Path
 		gotAuth = r.Header.Get("Authorization")
 		gotInstanceID = r.Header.Get("X-Instance-ID")
+		gotTaskID = r.Header.Get(taskLSPTaskIDHeader)
 		_ = json.NewEncoder(w).Encode(want)
 	}))
 	t.Cleanup(server.Close)
@@ -203,14 +213,14 @@ func TestDiscoverLSPUsesReadOnlyTaskHostRouteWithAuthHeaders(t *testing.T) {
 		WithExecutionID("exec-1"),
 	)
 
-	got, err := client.DiscoverLSP(context.Background())
+	got, err := client.DiscoverLSP(context.Background(), "task-1")
 	if err != nil {
 		t.Fatalf("DiscoverLSP: %v", err)
 	}
 	if gotMethod != http.MethodGet || gotPath != "/api/v1/lsp/discovery" {
 		t.Fatalf("discovery request = %s %s", gotMethod, gotPath)
 	}
-	if gotAuth != "Bearer secret-token" || gotInstanceID != "exec-1" {
+	if gotAuth != "Bearer secret-token" || gotInstanceID != "exec-1" || gotTaskID != "task-1" {
 		t.Fatalf("discovery headers auth=%q instance=%q", gotAuth, gotInstanceID)
 	}
 	if !slices.Equal(got.Languages, want.Languages) || got.State != want.State ||
@@ -220,24 +230,32 @@ func TestDiscoverLSPUsesReadOnlyTaskHostRouteWithAuthHeaders(t *testing.T) {
 }
 
 func TestRefreshTaskLSPWorkspaceUsesTaskHostRoute(t *testing.T) {
-	var gotMethod, gotPath string
+	var gotMethod, gotPath, gotTaskID string
+	var gotBody map[string]any
 	want := sharedlsp.WorkspaceUpdateResult{
 		DynamicLanguages: []string{"go"},
 		WorkspaceFolders: []sharedlsp.WorkspaceFolder{{URI: "file:///task/repo", Name: "repo"}},
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotMethod, gotPath = r.Method, r.URL.Path
+		gotTaskID = r.Header.Get(taskLSPTaskIDHeader)
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
 		_ = json.NewEncoder(w).Encode(want)
 	}))
 	t.Cleanup(server.Close)
 	host, port := testServerAddress(t, server.URL)
 	client := NewClient(host, port, newTestLogger(), WithAuthToken("secret"))
 
-	got, err := client.RefreshTaskLSPWorkspace(context.Background())
+	got, err := client.RefreshTaskLSPWorkspace(context.Background(), "task-1", sharedlsp.TaskHostWorkspaceRequest{
+		WorkspacePath: "/task", WorkspaceRoots: []string{"/task/repo"},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotMethod != http.MethodPost || gotPath != "/api/v1/lsp/workspace/refresh" ||
+	if gotMethod != http.MethodPost || gotPath != "/api/v1/lsp/workspace/refresh" || gotTaskID != "task-1" ||
+		gotBody["workspace_path"] != "/task" ||
 		!slices.Equal(got.DynamicLanguages, want.DynamicLanguages) {
 		t.Fatalf("request=%s %s result=%#v", gotMethod, gotPath, got)
 	}

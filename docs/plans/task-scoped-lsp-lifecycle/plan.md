@@ -389,6 +389,14 @@ Completed 2026-08-05.
   `origin/main` at `b170d205f` (already up to date). Exact-head `make test`, changed-code lint, and
   the LSP/task-host/lifecycle/executor race suites pass. Real-container first-launch, shared-session,
   and four Kotlin task-host scenarios pass 6/6.
+- A second independent GPT-5.6 Sol review found five lifecycle defects: concurrent first resume
+  could launch without a durable environment identity, inherited tasks could collide inside a
+  shared physical task host, legacy runtime credentials remained user-visible, failed replacement
+  cleanup could report the old generation as a successful restart, and delayed stop cleanup could
+  leave capacity occupied. Resume now serializes before launch; authenticated task identity and
+  task-specific workspace projections isolate `(task, language)` slots; runtime secrets migrate to
+  stable internal identities; restart failures retain the requested generation as actionable
+  evidence; and successful delayed reaping publishes Off. Each defect has a focused regression.
 
 ---
 

@@ -161,3 +161,13 @@ the row, runtime, and secrets on failure. Ordered workspace roots are projected 
 for initial task-host creation and rescans. Focused credential-ordering tests passed 20 race
 repetitions; real-container first launch, shared-session reuse, and four Docker Kotlin task-host
 scenarios passed 6/6.
+
+The follow-up independent review found that two tasks sharing one physical task host could collide
+on a language-only runtime slot and that projecting one task's workspace by rebinding the physical
+tracker would disturb the other. Agentctl now keys configuration, discovery, progress, snapshots,
+attachments, and processes by `(task_id, language)`. The authorized backend sends task identity in
+an internal header and refreshes an isolated task workspace projection; it never rebinds the shared
+physical tracker. Runtime credentials now use stable internal environment/execution identities,
+migrate every live environment member, delete superseded legacy UUID references, and remain hidden
+from user-visible settings. Focused multi-task namespace, workspace-projection, migration, and
+cleanup regressions pass.

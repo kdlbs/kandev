@@ -166,3 +166,11 @@ Reset/archive/delete remove the environment's internal runtime secrets only afte
 teardown and retain the row on cleanup failure. Exact-head `make test` passed, as did
 `go test -race ./internal/lsp ./internal/agentctl/server/lsp
 ./internal/agent/runtime/lifecycle ./internal/orchestrator/executor -count=1` and changed-code lint.
+
+The follow-up independent review found first-session resume could launch before assigning and
+reserving the task environment, allowing concurrent resumes to diverge. Resume now holds the task
+environment lock through resolution, reservation, launch, and durable finalization; launch failure
+rolls back the reservation and internal credentials. Inherited tasks resolve their shared physical
+environment from durable session membership, while cleanup of a borrower stops only its task LSP
+namespace. Delayed stop cleanup now publishes Off after it finally reaps the process, releasing
+backend capacity. Concurrent-resume, rollback, inherited-cleanup, and delayed-reap regressions pass.

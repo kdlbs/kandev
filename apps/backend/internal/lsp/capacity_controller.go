@@ -52,7 +52,7 @@ func (c *Controller) promoteCapacityEntry(
 		snapshot, transitionErr := c.transition(ctx, *state, settings, PhaseWaitingForTask, "", "")
 		return snapshot, transitionErr
 	}
-	environment, err := c.tasks.GetTaskEnvironmentByTaskID(ctx, entry.Key.TaskID)
+	environment, err := c.tasks.GetTaskEnvironmentForTaskLSP(ctx, entry.Key.TaskID)
 	if err != nil {
 		return c.failCapacityPromotion(ctx, *state, settings, "task_environment_unavailable", err)
 	}

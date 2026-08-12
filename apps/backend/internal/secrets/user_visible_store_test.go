@@ -73,6 +73,50 @@ func TestUserVisibleStoreHidesInternalRuntimeSecrets(t *testing.T) {
 	}
 }
 
+func TestUserVisibleStoreHidesLegacyRuntimeSecretsByReservedName(t *testing.T) {
+	store := newTestSQLiteStore(t)
+	ctx := context.Background()
+	legacy := &SecretWithValue{
+		Secret: Secret{ID: "legacy-random-id", Name: "agentctl-auth-instance-1"},
+		Value:  "legacy-transport-secret",
+	}
+	if err := store.Create(ctx, legacy); err != nil {
+		t.Fatal(err)
+	}
+
+	wrapper := NewUserVisibleStore(store)
+	items, err := wrapper.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("user-visible legacy runtime secrets = %#v", items)
+	}
+	for _, operation := range []func() error{
+		func() error { _, err := wrapper.Get(ctx, legacy.ID); return err },
+		func() error { _, err := wrapper.Reveal(ctx, legacy.ID); return err },
+		func() error { return wrapper.Update(ctx, legacy.ID, &UpdateSecretRequest{}) },
+		func() error { return wrapper.Delete(ctx, legacy.ID) },
+	} {
+		if err := operation(); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("legacy runtime operation error = %v, want not found", err)
+		}
+	}
+	if got, err := store.Reveal(ctx, legacy.ID); err != nil || got != legacy.Value {
+		t.Fatalf("raw legacy runtime reveal = %q, %v", got, err)
+	}
+}
+
+func TestUserVisibleStoreRejectsLegacyRuntimeReservedName(t *testing.T) {
+	store := newTestSQLiteStore(t)
+	err := NewUserVisibleStore(store).Create(context.Background(), &SecretWithValue{
+		Secret: Secret{Name: "agentctl-bootstrap-instance-1"}, Value: "secret",
+	})
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Create() error = %v, want not found", err)
+	}
+}
+
 func TestUserVisibleStoreWorkspaceOperationsFilterInternalSecrets(t *testing.T) {
 	store := newTestSQLiteStore(t)
 	ctx := context.Background()

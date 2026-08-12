@@ -16,7 +16,7 @@ func (c *Controller) launchReserved(
 	action Action,
 ) (*LanguageSnapshot, error) {
 	key := TaskLanguageKey{TaskID: state.TaskID, Language: state.Language}
-	host, err := c.runtimes.EnsureTaskHost(ctx, environment.ID)
+	host, err := c.runtimes.EnsureTaskHost(ctx, state.TaskID, environment.ID)
 	if err != nil {
 		c.releaseCapacity(ctx, key, state.Generation)
 		snapshot, transitionErr := c.transition(ctx, state, settings, PhaseError, "task_host_unavailable", err.Error())
@@ -67,6 +67,13 @@ func (c *Controller) handleLaunchFailure(
 	}
 	state = *persisted
 	if !accepted {
+		// Replacement cleanup failures are reported with the previous live
+		// generation. That is not newer watch evidence: the requested generation
+		// still needs an actionable error while capacity remains reserved for the
+		// process tree whose cleanup is unresolved.
+		if runtimeSnapshot.Generation < state.Generation {
+			return c.transitionLaunchFailure(ctx, key, state, settings, controlErr)
+		}
 		// A watch persisted newer evidence while the HTTP request was in flight.
 		c.ensureWatch(key)
 		snapshot := c.languageSnapshot(state, settings, nil)

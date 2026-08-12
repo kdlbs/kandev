@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"sync"
 	"time"
@@ -53,6 +54,7 @@ type Manager struct {
 	startedAt   time.Time
 	closed      bool
 	closeErr    error
+	taskConfigs map[string]Config
 
 	lifetimeMu      sync.Mutex
 	lifetimeCtx     context.Context
@@ -71,18 +73,29 @@ func NewManager(cfg Config, processes ProcessManager, installerRegistry Installe
 		slots:       make(map[string]*languageSlot),
 		snapshots:   make(map[string]Snapshot),
 		subscribers: make(map[string]map[uint64]chan Snapshot),
+		taskConfigs: make(map[string]Config),
 		incarnation: uuid.NewString(),
 		startedAt:   time.Now().UTC(),
 	}
 }
 
 func (m *Manager) Snapshot(language string) Snapshot {
+	return m.SnapshotForTask(m.cfg.OwnerID, language)
+}
+
+func (m *Manager) SnapshotForTask(taskID, language string) Snapshot {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return cloneSnapshot(m.snapshotLocked(language))
+	return cloneSnapshot(m.snapshotLocked(normalizeTaskID(taskID, m.cfg.OwnerID), language))
 }
 
 func (m *Manager) Subscribe(language string) (<-chan Snapshot, func()) {
+	return m.SubscribeForTask(m.cfg.OwnerID, language)
+}
+
+func (m *Manager) SubscribeForTask(taskID, language string) (<-chan Snapshot, func()) {
+	taskID = normalizeTaskID(taskID, m.cfg.OwnerID)
+	key := taskLanguageRuntimeKey(taskID, language)
 	updates := make(chan Snapshot, 1)
 	m.mu.Lock()
 	if m.closed {
@@ -92,19 +105,19 @@ func (m *Manager) Subscribe(language string) (<-chan Snapshot, func()) {
 	}
 	m.nextSubID++
 	id := m.nextSubID
-	if m.subscribers[language] == nil {
-		m.subscribers[language] = make(map[uint64]chan Snapshot)
+	if m.subscribers[key] == nil {
+		m.subscribers[key] = make(map[uint64]chan Snapshot)
 	}
-	m.subscribers[language][id] = updates
-	updates <- cloneSnapshot(m.snapshotLocked(language))
+	m.subscribers[key][id] = updates
+	updates <- cloneSnapshot(m.snapshotLocked(taskID, language))
 	m.mu.Unlock()
 
 	var once sync.Once
 	return updates, func() {
 		once.Do(func() {
 			m.mu.Lock()
-			if subscriber, ok := m.subscribers[language][id]; ok {
-				delete(m.subscribers[language], id)
+			if subscriber, ok := m.subscribers[key][id]; ok {
+				delete(m.subscribers[key], id)
 				close(subscriber)
 			}
 			m.mu.Unlock()
@@ -113,10 +126,15 @@ func (m *Manager) Subscribe(language string) (<-chan Snapshot, func()) {
 }
 
 func (m *Manager) Attach(language string, generation uint64) (*Attachment, error) {
+	return m.AttachForTask(m.cfg.OwnerID, language, generation)
+}
+
+func (m *Manager) AttachForTask(taskID, language string, generation uint64) (*Attachment, error) {
+	taskID = normalizeTaskID(taskID, m.cfg.OwnerID)
 	if !installer.IsSupported(language) {
 		return nil, fmt.Errorf("unsupported language: %s", language)
 	}
-	slot, err := m.slotFor(language)
+	slot, err := m.slotForTask(taskID, language)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +146,7 @@ func (m *Manager) Attach(language string, generation uint64) (*Attachment, error
 	if generation != 0 && generation != slot.runtime.generation {
 		return nil, ErrStaleGeneration
 	}
-	snapshot := m.Snapshot(language)
+	snapshot := m.SnapshotForTask(taskID, language)
 	if snapshot.Phase != sharedlsp.PhaseReady || snapshot.Generation != slot.runtime.generation {
 		return nil, ErrRuntimeNotReady
 	}
@@ -144,22 +162,23 @@ func (m *Manager) Restart(_ context.Context, request StartRequest) (Snapshot, er
 }
 
 func (m *Manager) UpdateConfiguration(_ context.Context, request ConfigurationRequest) (Snapshot, error) {
+	request.TaskID = normalizeTaskID(request.TaskID, m.cfg.OwnerID)
 	if err := validateConfigurationRequest(request); err != nil {
 		return Snapshot{}, err
 	}
-	slot, err := m.slotFor(request.Language)
+	slot, err := m.slotForTask(request.TaskID, request.Language)
 	if err != nil {
 		return Snapshot{}, err
 	}
 	slot.opMu.Lock()
 	defer slot.opMu.Unlock()
 	if slot.runtime == nil {
-		return m.Snapshot(request.Language), ErrRuntimeNotReady
+		return m.SnapshotForTask(request.TaskID, request.Language), ErrRuntimeNotReady
 	}
 	if request.Generation != slot.runtime.generation {
-		return m.Snapshot(request.Language), ErrStaleGeneration
+		return m.SnapshotForTask(request.TaskID, request.Language), ErrStaleGeneration
 	}
-	snapshot := m.Snapshot(request.Language)
+	snapshot := m.SnapshotForTask(request.TaskID, request.Language)
 	notify := snapshot.Phase == sharedlsp.PhaseReady
 	if err := slot.runtime.updateConfiguration(request.Configuration, notify); err != nil {
 		return snapshot, err
@@ -168,6 +187,7 @@ func (m *Manager) UpdateConfiguration(_ context.Context, request ConfigurationRe
 }
 
 func (m *Manager) start(request StartRequest) (Snapshot, error) {
+	request.TaskID = normalizeTaskID(request.TaskID, m.cfg.OwnerID)
 	if err := validateStartRequest(request); err != nil {
 		return Snapshot{}, err
 	}
@@ -175,7 +195,7 @@ func (m *Manager) start(request StartRequest) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
-	slot, err := m.slotFor(request.Language)
+	slot, err := m.slotForTask(request.TaskID, request.Language)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -186,19 +206,19 @@ func (m *Manager) start(request StartRequest) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 	if err := operationCtx.Err(); err != nil {
-		return m.Snapshot(request.Language), err
+		return m.SnapshotForTask(request.TaskID, request.Language), err
 	}
 	if request.Generation < slot.lastGeneration {
-		return m.Snapshot(request.Language), ErrStaleGeneration
+		return m.SnapshotForTask(request.TaskID, request.Language), ErrStaleGeneration
 	}
 	if request.Generation == slot.lastGeneration {
-		return m.Snapshot(request.Language), nil
+		return m.SnapshotForTask(request.TaskID, request.Language), nil
 	}
 	if slot.runtime != nil {
-		m.publishPhase(request.Language, slot.runtime.generation, sharedlsp.PhaseStopping)
+		m.publishTaskPhase(request.TaskID, request.Language, slot.runtime.generation, sharedlsp.PhaseStopping)
 		if err := m.stopRuntime(context.Background(), slot.runtime); err != nil {
-			return m.publishError(
-				request.Language, slot.runtime.generation, "replacement_cleanup_failed", err,
+			return m.publishTaskError(
+				request.TaskID, request.Language, slot.runtime.generation, "replacement_cleanup_failed", err,
 			), err
 		}
 		slot.runtime = nil
@@ -207,8 +227,8 @@ func (m *Manager) start(request StartRequest) (Snapshot, error) {
 	// is proven gone. A failed cleanup remains retryable with the same request.
 	slot.lastGeneration = request.Generation
 
-	workspace := m.configSnapshot()
-	m.publishForGeneration(request.Language, request.Generation, func(snapshot *Snapshot) {
+	workspace := m.configSnapshot(request.TaskID)
+	m.publishForTaskGeneration(request.TaskID, request.Language, request.Generation, func(snapshot *Snapshot) {
 		resetRuntimeSnapshot(snapshot)
 		snapshot.Phase = sharedlsp.PhaseStarting
 		snapshot.WorkspacePath = workspace.WorkDir
@@ -217,14 +237,15 @@ func (m *Manager) start(request StartRequest) (Snapshot, error) {
 	})
 	binaryPath, err := m.resolveBinary(operationCtx, request)
 	if err != nil {
-		return m.publishError(request.Language, request.Generation, classifyStartError(err), err), err
+		return m.publishTaskError(request.TaskID, request.Language, request.Generation, classifyStartError(err), err), err
 	}
 
 	server, err := m.startProcess(request, binaryPath, workspace)
 	if err != nil {
-		return m.publishError(request.Language, request.Generation, "process_start_failed", err), err
+		return m.publishTaskError(request.TaskID, request.Language, request.Generation, "process_start_failed", err), err
 	}
 	runtime := newRuntime(runtimeConfig{
+		taskID:        request.TaskID,
 		language:      request.Language,
 		generation:    request.Generation,
 		configuration: request.Configuration,
@@ -238,33 +259,92 @@ func (m *Manager) start(request StartRequest) (Snapshot, error) {
 	}
 	slot.runtime = runtime
 	now := time.Now().UTC()
-	m.publishForGeneration(request.Language, request.Generation, func(snapshot *Snapshot) {
+	m.publishForTaskGeneration(request.TaskID, request.Language, request.Generation, func(snapshot *Snapshot) {
 		snapshot.Phase = sharedlsp.PhaseProcessStarted
 		snapshot.ProcessStartedAt = &now
 	})
 	go m.runRuntime(slot, runtime)
-	return m.Snapshot(request.Language), nil
+	return m.SnapshotForTask(request.TaskID, request.Language), nil
 }
 
 // UpdateWorkspaceFolders applies one task-level root change to every live
 // language. Capable servers receive the standard dynamic notification; other
 // generations keep their old scope and are reported restart-required.
 func (m *Manager) UpdateWorkspaceFolders(folders []WorkspaceFolder) (sharedlsp.WorkspaceUpdateResult, error) {
-	folders = normalizeWorkspaceFolders(folders)
-	result := sharedlsp.WorkspaceUpdateResult{WorkspaceFolders: append([]WorkspaceFolder(nil), folders...)}
+	return m.UpdateWorkspaceFoldersForTask(m.cfg.OwnerID, folders)
+}
 
+func (m *Manager) UpdateWorkspaceFoldersForTask(
+	taskID string,
+	folders []WorkspaceFolder,
+) (sharedlsp.WorkspaceUpdateResult, error) {
+	taskID = normalizeTaskID(taskID, m.cfg.OwnerID)
+	folders = normalizeWorkspaceFolders(folders)
 	m.mu.Lock()
-	m.cfg.WorkspaceFolders = append([]WorkspaceFolder(nil), folders...)
-	languages := make([]string, 0, len(m.slots))
-	for language := range m.slots {
-		languages = append(languages, language)
+	taskConfig := m.cfg
+	if configured, ok := m.taskConfigs[taskID]; ok {
+		taskConfig = configured
 	}
+	taskConfig.OwnerID = taskID
+	taskConfig.WorkspaceFolders = append([]WorkspaceFolder(nil), folders...)
+	m.taskConfigs[taskID] = taskConfig
 	m.mu.Unlock()
+	return m.applyWorkspaceFoldersForTask(taskID, folders)
+}
+
+// UpdateWorkspaceForTask records a complete, backend-authorized workspace
+// projection without rebinding the physical task-host tracker graph.
+func (m *Manager) UpdateWorkspaceForTask(
+	taskID, workspacePath string,
+	workspaceRoots []string,
+) (sharedlsp.WorkspaceUpdateResult, error) {
+	taskID = normalizeTaskID(taskID, m.cfg.OwnerID)
+	workspacePath = filepath.Clean(workspacePath)
+	if !filepath.IsAbs(workspacePath) {
+		return sharedlsp.WorkspaceUpdateResult{}, errors.New("task LSP workspace_path must be absolute")
+	}
+	workspaceRoots = normalizeWorkspaceRoots(workspaceRoots)
+	folders := WorkspaceFoldersAtRoots(workspacePath, workspaceRoots)
+	if len(folders) == 0 {
+		return sharedlsp.WorkspaceUpdateResult{}, errors.New("task LSP workspace has no valid roots")
+	}
+	m.mu.Lock()
+	taskConfig := m.cfg
+	if configured, ok := m.taskConfigs[taskID]; ok {
+		taskConfig = configured
+	}
+	taskConfig.OwnerID = taskID
+	taskConfig.WorkDir = workspacePath
+	taskConfig.WorkspaceURI = WorkspaceFileURI(workspacePath)
+	taskConfig.WorkspaceFolders = append([]WorkspaceFolder(nil), folders...)
+	taskConfig.DiscoveryRoots = append([]string(nil), workspaceRoots...)
+	if len(taskConfig.DiscoveryRoots) == 0 {
+		taskConfig.DiscoveryRoots = []string{workspacePath}
+	}
+	m.taskConfigs[taskID] = taskConfig
+	m.mu.Unlock()
+	return m.applyWorkspaceFoldersForTask(taskID, folders)
+}
+
+func (m *Manager) applyWorkspaceFoldersForTask(
+	taskID string,
+	folders []WorkspaceFolder,
+) (sharedlsp.WorkspaceUpdateResult, error) {
+	result := sharedlsp.WorkspaceUpdateResult{WorkspaceFolders: append([]WorkspaceFolder(nil), folders...)}
+	m.mu.RLock()
+	languages := make([]string, 0, len(m.slots))
+	for key := range m.slots {
+		keyTaskID, language := splitTaskLanguageRuntimeKey(key)
+		if keyTaskID == taskID {
+			languages = append(languages, language)
+		}
+	}
+	m.mu.RUnlock()
 	sort.Strings(languages)
 
 	var updateErrors []error
 	for _, language := range languages {
-		slot, err := m.slotFor(language)
+		slot, err := m.slotForTask(taskID, language)
 		if err != nil {
 			updateErrors = append(updateErrors, err)
 			continue
@@ -275,7 +355,7 @@ func (m *Manager) UpdateWorkspaceFolders(folders []WorkspaceFolder) (sharedlsp.W
 			slot.opMu.Unlock()
 			continue
 		}
-		snapshot := m.Snapshot(language)
+		snapshot := m.SnapshotForTask(taskID, language)
 		if snapshot.Phase != sharedlsp.PhaseReady || !supportsWorkspaceFolderChanges(snapshot.Capabilities) {
 			result.RestartRequiredLanguages = append(result.RestartRequiredLanguages, language)
 			slot.opMu.Unlock()
@@ -310,7 +390,7 @@ func (m *Manager) UpdateWorkspaceFolders(folders []WorkspaceFolder) (sharedlsp.W
 			}
 		}
 		current.workspace.WorkspaceFolders = append([]WorkspaceFolder(nil), folders...)
-		m.publishForGeneration(language, current.generation, func(next *Snapshot) {
+		m.publishForTaskGeneration(taskID, language, current.generation, func(next *Snapshot) {
 			next.WorkspaceFolders = append([]WorkspaceFolder(nil), folders...)
 		})
 		result.DynamicLanguages = append(result.DynamicLanguages, language)
@@ -319,11 +399,41 @@ func (m *Manager) UpdateWorkspaceFolders(folders []WorkspaceFolder) (sharedlsp.W
 	return result, errors.Join(updateErrors...)
 }
 
-func (m *Manager) configSnapshot() Config {
+func (m *Manager) DiscoveryRootsForTask(taskID string) []string {
+	config := m.configSnapshot(taskID)
+	if len(config.DiscoveryRoots) == 0 && config.WorkDir != "" {
+		return []string{config.WorkDir}
+	}
+	return append([]string(nil), config.DiscoveryRoots...)
+}
+
+func (m *Manager) configSnapshot(taskID string) Config {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	result := m.cfg
-	result.WorkspaceFolders = append([]WorkspaceFolder(nil), m.cfg.WorkspaceFolders...)
+	if configured, ok := m.taskConfigs[taskID]; ok {
+		result = configured
+	}
+	result.OwnerID = normalizeTaskID(taskID, m.cfg.OwnerID)
+	result.WorkspaceFolders = append([]WorkspaceFolder(nil), result.WorkspaceFolders...)
+	result.DiscoveryRoots = append([]string(nil), result.DiscoveryRoots...)
+	return result
+}
+
+func normalizeWorkspaceRoots(roots []string) []string {
+	result := make([]string, 0, len(roots))
+	seen := make(map[string]struct{}, len(roots))
+	for _, root := range roots {
+		if root == "" || !filepath.IsAbs(root) {
+			continue
+		}
+		root = filepath.Clean(root)
+		if _, duplicate := seen[root]; duplicate {
+			continue
+		}
+		seen[root] = struct{}{}
+		result = append(result, root)
+	}
 	return result
 }
 
@@ -389,31 +499,32 @@ func workspaceFolderDiff(before, after []WorkspaceFolder) (added, removed []Work
 }
 
 func (m *Manager) Stop(ctx context.Context, request StopRequest) (Snapshot, error) {
+	request.TaskID = normalizeTaskID(request.TaskID, m.cfg.OwnerID)
 	if !installer.IsSupported(request.Language) {
 		return Snapshot{}, fmt.Errorf("unsupported language: %s", request.Language)
 	}
-	slot, err := m.slotFor(request.Language)
+	slot, err := m.slotForTask(request.TaskID, request.Language)
 	if err != nil {
 		if errors.Is(err, ErrManagerClosed) {
-			return m.Snapshot(request.Language), nil
+			return m.SnapshotForTask(request.TaskID, request.Language), nil
 		}
 		return Snapshot{}, err
 	}
 	slot.lockAfterCancelingStart(request.Generation)
 	defer slot.opMu.Unlock()
 	if request.Generation != 0 && request.Generation < slot.lastGeneration {
-		return m.Snapshot(request.Language), ErrStaleGeneration
+		return m.SnapshotForTask(request.TaskID, request.Language), ErrStaleGeneration
 	}
 	if slot.runtime == nil {
-		return m.publishOff(request.Language, slot.lastGeneration), nil
+		return m.publishTaskOff(request.TaskID, request.Language, slot.lastGeneration), nil
 	}
-	m.publishPhase(request.Language, slot.runtime.generation, sharedlsp.PhaseStopping)
+	m.publishTaskPhase(request.TaskID, request.Language, slot.runtime.generation, sharedlsp.PhaseStopping)
 	if err := m.stopRuntime(ctx, slot.runtime); err != nil {
-		return m.publishError(request.Language, slot.runtime.generation, "process_stop_failed", err), err
+		return m.publishTaskError(request.TaskID, request.Language, slot.runtime.generation, "process_stop_failed", err), err
 	}
 	generation := slot.runtime.generation
 	slot.runtime = nil
-	return m.publishOff(request.Language, generation), nil
+	return m.publishTaskOff(request.TaskID, request.Language, generation), nil
 }
 
 func (m *Manager) Close(ctx context.Context) error {
@@ -491,10 +602,13 @@ func (m *Manager) closeAll(ctx context.Context) error {
 	for _, slot := range slots {
 		slot.opMu.Lock()
 		if slot.runtime != nil {
-			m.publishPhase(slot.runtime.language, slot.runtime.generation, sharedlsp.PhaseStopping)
+			m.publishTaskPhase(
+				slot.runtime.taskID, slot.runtime.language, slot.runtime.generation, sharedlsp.PhaseStopping,
+			)
 			if err := m.stopRuntime(ctx, slot.runtime); err != nil {
 				stopErrors = append(stopErrors, err)
-				m.publishError(
+				m.publishTaskError(
+					slot.runtime.taskID,
 					slot.runtime.language,
 					slot.runtime.generation,
 					"process_cleanup_failed",
@@ -503,7 +617,7 @@ func (m *Manager) closeAll(ctx context.Context) error {
 				slot.opMu.Unlock()
 				continue
 			}
-			m.publishOff(slot.runtime.language, slot.runtime.generation)
+			m.publishTaskOff(slot.runtime.taskID, slot.runtime.language, slot.runtime.generation)
 			slot.runtime = nil
 		}
 		slot.opMu.Unlock()
@@ -522,7 +636,7 @@ func (m *Manager) resolveBinary(ctx context.Context, request StartRequest) (stri
 	if !request.AutoInstall || !installer.CanAutoInstall(request.Language) {
 		return "", err
 	}
-	m.publishPhase(request.Language, request.Generation, sharedlsp.PhaseInstalling)
+	m.publishTaskPhase(request.TaskID, request.Language, request.Generation, sharedlsp.PhaseInstalling)
 	return sharedInstallCoordinator.run(ctx, installMutationKey(request.Language), func() (string, error) {
 		// Another task/language may have populated the shared cache while this
 		// generation waited for its mutation key.
@@ -575,7 +689,8 @@ func (m *Manager) runRuntime(slot *languageSlot, current *runtime) {
 	cleanupErr = errors.Join(cleanupErr, waitForRuntimeCleanup(cleanupCtx, current))
 	if cleanupErr != nil {
 		if !current.stopping.Load() && !m.isClosed() {
-			m.publishError(
+			m.publishTaskError(
+				current.taskID,
 				current.language,
 				current.generation,
 				"process_cleanup_failed",
@@ -585,13 +700,20 @@ func (m *Manager) runRuntime(slot *languageSlot, current *runtime) {
 		return
 	}
 	slot.runtime = nil
-	if current.stopping.Load() || m.isClosed() {
+	if current.stopping.Load() {
+		// Stop may return before process cleanup can be proven. If the runtime
+		// goroutine subsequently completes that cleanup, publish the terminal
+		// evidence so the backend can release task/language capacity.
+		m.publishTaskOff(current.taskID, current.language, current.generation)
+		return
+	}
+	if m.isClosed() {
 		return
 	}
 	if err == nil {
 		err = errors.New("language server exited")
 	}
-	m.publishError(current.language, current.generation, "process_exited", err)
+	m.publishTaskError(current.taskID, current.language, current.generation, "process_exited", err)
 }
 
 func (m *Manager) stopRuntime(ctx context.Context, current *runtime) error {
@@ -659,15 +781,21 @@ func classifyStartError(err error) string {
 }
 
 func (m *Manager) slotFor(language string) (*languageSlot, error) {
+	return m.slotForTask(m.cfg.OwnerID, language)
+}
+
+func (m *Manager) slotForTask(taskID, language string) (*languageSlot, error) {
+	taskID = normalizeTaskID(taskID, m.cfg.OwnerID)
+	key := taskLanguageRuntimeKey(taskID, language)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {
 		return nil, ErrManagerClosed
 	}
-	if m.slots[language] == nil {
-		m.slots[language] = &languageSlot{}
+	if m.slots[key] == nil {
+		m.slots[key] = &languageSlot{}
 	}
-	return m.slots[language], nil
+	return m.slots[key], nil
 }
 
 func (m *Manager) checkOpen() error {
@@ -683,121 +811,4 @@ func (m *Manager) isClosed() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.closed
-}
-
-func (m *Manager) snapshotLocked(language string) Snapshot {
-	if snapshot, ok := m.snapshots[language]; ok {
-		return snapshot
-	}
-	return Snapshot{
-		Language:         language,
-		Incarnation:      m.incarnation,
-		RuntimeStartedAt: m.startedAt,
-		Phase:            sharedlsp.PhaseOff,
-		Activity:         ActivityIdle,
-		Work:             []WorkItem{},
-		Diagnostics:      []json.RawMessage{},
-		WorkspacePath:    m.cfg.WorkDir,
-		WorkspaceURI:     m.cfg.WorkspaceURI,
-		WorkspaceFolders: append([]WorkspaceFolder(nil), m.cfg.WorkspaceFolders...),
-	}
-}
-
-func (m *Manager) publishForGeneration(language string, generation uint64, mutate func(*Snapshot)) Snapshot {
-	m.mu.Lock()
-	snapshot := m.snapshotLocked(language)
-	snapshot.Incarnation = m.incarnation
-	snapshot.RuntimeStartedAt = m.startedAt
-	if snapshot.Generation > generation {
-		m.mu.Unlock()
-		return cloneSnapshot(snapshot)
-	}
-	if snapshot.Generation < generation {
-		snapshot = m.snapshotLocked(language)
-		snapshot.Generation = generation
-	}
-	mutate(&snapshot)
-	snapshot.Revision++
-	snapshot.LastTransitionAt = time.Now().UTC()
-	m.snapshots[language] = snapshot
-	result := cloneSnapshot(snapshot)
-	for _, subscriber := range m.subscribers[language] {
-		select {
-		case subscriber <- cloneSnapshot(snapshot):
-		default:
-			select {
-			case <-subscriber:
-			default:
-			}
-			subscriber <- cloneSnapshot(snapshot)
-		}
-	}
-	m.mu.Unlock()
-	return result
-}
-
-func (m *Manager) publishPhase(language string, generation uint64, phase sharedlsp.Phase) Snapshot {
-	return m.publishForGeneration(language, generation, func(snapshot *Snapshot) {
-		snapshot.Phase = phase
-	})
-}
-
-func (m *Manager) publishError(language string, generation uint64, code string, err error) Snapshot {
-	return m.publishForGeneration(language, generation, func(snapshot *Snapshot) {
-		snapshot.Phase = sharedlsp.PhaseError
-		snapshot.Activity = ActivityIdle
-		snapshot.Work = []WorkItem{}
-		snapshot.LastCompletedWork = nil
-		snapshot.ErrorCode = code
-		snapshot.ErrorMessage = err.Error()
-	})
-}
-
-func (m *Manager) publishOff(language string, generation uint64) Snapshot {
-	return m.publishForGeneration(language, generation, func(snapshot *Snapshot) {
-		snapshot.Phase = sharedlsp.PhaseOff
-		snapshot.Activity = ActivityIdle
-		snapshot.Work = []WorkItem{}
-		snapshot.LastCompletedWork = nil
-		snapshot.ErrorCode = ""
-		snapshot.ErrorMessage = ""
-	})
-}
-
-func resetRuntimeSnapshot(snapshot *Snapshot) {
-	snapshot.Activity = ActivityIdle
-	snapshot.ProcessStartedAt = nil
-	snapshot.InitializeStartedAt = nil
-	snapshot.ReadyAt = nil
-	snapshot.Work = []WorkItem{}
-	snapshot.LastCompletedWork = nil
-	snapshot.Capabilities = nil
-	snapshot.Diagnostics = []json.RawMessage{}
-	snapshot.ErrorCode = ""
-	snapshot.ErrorMessage = ""
-}
-
-func cloneSnapshot(snapshot Snapshot) Snapshot {
-	copy := snapshot
-	copy.Work = append([]WorkItem(nil), snapshot.Work...)
-	if snapshot.LastCompletedWork != nil {
-		completed := *snapshot.LastCompletedWork
-		copy.LastCompletedWork = &completed
-	}
-	copy.Capabilities = append([]byte(nil), snapshot.Capabilities...)
-	copy.Diagnostics = make([]json.RawMessage, len(snapshot.Diagnostics))
-	for index := range snapshot.Diagnostics {
-		copy.Diagnostics[index] = append(json.RawMessage(nil), snapshot.Diagnostics[index]...)
-	}
-	copy.WorkspaceFolders = append([]WorkspaceFolder(nil), snapshot.WorkspaceFolders...)
-	return copy
-}
-
-func sortWork(items []WorkItem) {
-	sort.Slice(items, func(left, right int) bool {
-		if items[left].StartedAt.Equal(items[right].StartedAt) {
-			return items[left].Token < items[right].Token
-		}
-		return items[left].StartedAt.Before(items[right].StartedAt)
-	})
 }

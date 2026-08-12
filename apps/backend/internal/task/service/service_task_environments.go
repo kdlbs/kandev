@@ -275,6 +275,45 @@ func (s *Service) GetTaskEnvironmentByTaskID(ctx context.Context, taskID string)
 	return s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, taskID)
 }
 
+// GetTaskEnvironmentForTaskLSP resolves the physical environment a task is
+// allowed to use for its own LSP namespace. Most tasks own the row directly;
+// inherited/shared-workspace tasks prove membership through one of their
+// durable sessions instead of borrowing the environment owner's LSP state.
+func (s *Service) GetTaskEnvironmentForTaskLSP(
+	ctx context.Context,
+	taskID string,
+) (*models.TaskEnvironment, error) {
+	if err := s.authorizeTaskID(ctx, taskID); err != nil {
+		return nil, err
+	}
+	owned, err := s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, taskID)
+	if err != nil || owned != nil {
+		return owned, err
+	}
+	sessions, err := s.sessions.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("list task sessions for LSP environment: %w", err)
+	}
+	environmentID := ""
+	for _, session := range sessions {
+		if session == nil || session.TaskEnvironmentID == "" {
+			continue
+		}
+		if environmentID != "" && environmentID != session.TaskEnvironmentID {
+			return nil, fmt.Errorf("task %s references multiple physical environments", taskID)
+		}
+		environmentID = session.TaskEnvironmentID
+	}
+	if environmentID == "" {
+		return nil, nil
+	}
+	environment, err := s.taskEnvironments.GetTaskEnvironment(ctx, environmentID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve inherited task LSP environment: %w", err)
+	}
+	return environment, nil
+}
+
 // ResetTaskEnvironment tears down the task's current environment (container/sandbox/worktree)
 // and deletes the TaskEnvironment row, so the next session launch starts fresh.
 //

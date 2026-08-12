@@ -546,7 +546,7 @@ func (f *fakeControllerTasks) GetTask(_ context.Context, taskID string) (*models
 	return &models.Task{ID: taskID}, nil
 }
 
-func (f *fakeControllerTasks) GetTaskEnvironmentByTaskID(_ context.Context, taskID string) (*models.TaskEnvironment, error) {
+func (f *fakeControllerTasks) GetTaskEnvironmentForTaskLSP(_ context.Context, taskID string) (*models.TaskEnvironment, error) {
 	f.record("environment:" + taskID)
 	if f.environmentErr != nil {
 		return nil, f.environmentErr
@@ -613,7 +613,7 @@ type fakeLSPRuntimes struct {
 	recoverCalls   int
 }
 
-func (f *fakeLSPRuntimes) EnsureTaskHost(context.Context, string) (TaskHost, error) {
+func (f *fakeLSPRuntimes) EnsureTaskHost(context.Context, string, string) (TaskHost, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.ensureCalls++
@@ -623,7 +623,7 @@ func (f *fakeLSPRuntimes) EnsureTaskHost(context.Context, string) (TaskHost, err
 	return f.host, nil
 }
 
-func (f *fakeLSPRuntimes) ExistingTaskHost(context.Context, string) (TaskHost, bool, error) {
+func (f *fakeLSPRuntimes) ExistingTaskHost(context.Context, string, string) (TaskHost, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.existingCalls++
@@ -633,7 +633,7 @@ func (f *fakeLSPRuntimes) ExistingTaskHost(context.Context, string) (TaskHost, b
 	return f.host, true, nil
 }
 
-func (f *fakeLSPRuntimes) CleanupTaskHost(context.Context, string, string) error {
+func (f *fakeLSPRuntimes) CleanupTaskHost(context.Context, string, string, string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.cleanupCalls++
@@ -652,7 +652,7 @@ func (f *fakeLSPRuntimes) RecoverTaskHost(context.Context, string) (bool, error)
 	return true, nil
 }
 
-func (f *fakeLSPRuntimes) DiscoverTaskLanguages(context.Context, string) (*DiscoveryResult, error) {
+func (f *fakeLSPRuntimes) DiscoverTaskLanguages(context.Context, string, string) (*DiscoveryResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.discoveryCalls++
@@ -773,8 +773,12 @@ func (f *fakeLSPHost) RestartTaskLSP(_ context.Context, request TaskHostStartReq
 	}
 	if response != nil {
 		snapshot := *response
-		snapshot.Language = request.Language
-		snapshot.Generation = request.Generation
+		if snapshot.Language == "" {
+			snapshot.Language = request.Language
+		}
+		if snapshot.Generation == 0 {
+			snapshot.Generation = request.Generation
+		}
 		return &snapshot, restartErr
 	}
 	if restartErr != nil {

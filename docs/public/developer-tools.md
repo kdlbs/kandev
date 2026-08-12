@@ -204,6 +204,8 @@ Phone and touch-oriented tablet layouts expose the same visibility preference, i
 
 Language servers run beside the project on a task-owned **task host**, with one logical server per task and language shared by every session and browser surface for that task. Local PC and Local Docker tasks are supported. SSH, Sprites, and remote-Docker tasks show an unsupported-executor state before launching or resuming resources. The desktop Monaco editor wires diagnostics plus completion, hover, definition, references, signature help, and semantic tokens when the server advertises them. TypeScript/JavaScript built-ins remain available to other sessions and models, and for features the active external server does not advertise or Kandev does not replace. After a file is successfully saved, Kandev sends its latest content change before notifying an active server that requested save synchronization; a failed save sends no save notification.
 
+Tasks that intentionally share one physical workspace environment still keep separate language-server processes, progress, policies, and workspace roots. Stopping the borrowing task does not terminate another task's server; tearing down the physical environment reaps all of its language-server descendants.
+
 Only enable Kotlin language support for repositories you trust. Kotlin project import can evaluate Gradle or Maven build configuration on the task host; use a disposable Local Docker executor when the repository or its build files are untrusted.
 
 Server lookup checks the task host's `PATH` and its `~/.kandev/lsp-servers` directory. The managed cache resolves `~` from the same task `HOME` used to execute installer commands, including executor-provided environment overrides. Auto-install uses different toolchains:

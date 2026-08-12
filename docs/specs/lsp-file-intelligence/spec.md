@@ -112,10 +112,13 @@ and obscure the actual task-level work that is still running.
   are `workspaceFolders`. A source-root change uses `workspace/didChangeWorkspaceFolders` when the
   server supports it; otherwise the current generation stays usable for its old scope and the task
   status becomes `restart_required` until the user restarts.
-- The canonical `TaskEnvironment` is only a runtime target. All sessions use it. If that environment
-  is replaced, Kandev proves the old generation is reaped before automatically starting one new
-  generation in the replacement. An unresolved old runtime blocks the new launch with an
-  actionable error instead of risking duplicate imports.
+- The canonical `TaskEnvironment` is only a runtime target. All sessions of the task use it. An
+  inherited-workspace task may share the physical environment and task-host process with another
+  task, but never its language-server slot: agentctl keys runtime, progress, configuration, and
+  workspace roots by `(task_id, language)`. Membership is proven from durable session state before
+  runtime access. If an environment is replaced, Kandev proves the old generation is reaped before
+  automatically starting one new generation in the replacement. An unresolved old runtime blocks
+  the new launch with an actionable error instead of risking duplicate imports.
 - Local PC/Worktree and Local Docker task environments are supported. Remote Docker, SSH, Sprites,
   missing, and unknown executors fail closed before Kandev acquires capacity or starts/resumes task
   resources. Backend capability data, not a frontend executor-name allowlist, owns that decision.
@@ -301,7 +304,8 @@ never auto-restarted or timed out.
   reaches the same controller. Agent-provided task/session IDs and initiator values are ignored or
   rejected. No identity-free fallback is allowed when execution ownership cannot be resolved.
 - The task-host control/watch/attachment APIs remain protected by the execution's agentctl secret;
-  they are not public browser endpoints.
+  they are not public browser endpoints. The backend supplies task identity in an authenticated
+  internal transport header after authorization; JSON bodies cannot supply or override it.
 
 ## Failure modes
 
@@ -327,6 +331,10 @@ never auto-restarted or timed out.
   and uses bounded recovery only after the old runtime is known dead.
 - **Environment replacement ambiguity:** Kandev blocks the replacement launch until the old
   generation is confirmed stopped or its execution is dead; it never optimistically runs both.
+- **Shared physical environment:** stopping a borrowing task stops only that task's language slots.
+  Stopping or deleting the environment owner and environment teardown reap the physical task host
+  and every descendant; recovery recreates independent task/language slots without adopting
+  another task's state.
 - **Workspace roots change:** supported dynamic folder updates keep the generation; otherwise the
   task reports `restart_required` without silently discarding an expensive import.
 - **Task stop/archive/delete:** cleanup cancels starts/recovery before runtime teardown. Failure of

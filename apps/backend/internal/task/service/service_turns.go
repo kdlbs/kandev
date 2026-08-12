@@ -981,6 +981,48 @@ func (s *Service) GetWorkspaceInfoForEnvironment(ctx context.Context, taskEnviro
 	return s.getTaskOwnedWorkspaceInfo(ctx, env)
 }
 
+// GetWorkspaceInfoForTaskLSP projects task-specific roots and settings onto a
+// validated physical environment. Shared-workspace borrowers therefore keep
+// independent LSP namespaces while executing inside the same task host.
+func (s *Service) GetWorkspaceInfoForTaskLSP(
+	ctx context.Context,
+	taskID, taskEnvironmentID string,
+) (*lifecycle.WorkspaceInfo, error) {
+	environment, err := s.GetTaskEnvironmentForTaskLSP(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if environment == nil || environment.ID != taskEnvironmentID {
+		return nil, fmt.Errorf("task %s is not a member of task environment %s", taskID, taskEnvironmentID)
+	}
+	sessions, err := s.sessions.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("list task sessions for LSP workspace: %w", err)
+	}
+	matching := make([]*models.TaskSession, 0, len(sessions))
+	for _, session := range sessions {
+		if session != nil && session.TaskEnvironmentID == taskEnvironmentID {
+			matching = append(matching, session)
+		}
+	}
+	if len(matching) == 0 {
+		if environment.TaskID != taskID {
+			return nil, fmt.Errorf("task %s has no session in task environment %s", taskID, taskEnvironmentID)
+		}
+		return s.getTaskOwnedWorkspaceInfo(ctx, environment)
+	}
+	sort.SliceStable(matching, func(i, j int) bool {
+		if !matching[i].StartedAt.Equal(matching[j].StartedAt) {
+			return matching[i].StartedAt.After(matching[j].StartedAt)
+		}
+		if !matching[i].UpdatedAt.Equal(matching[j].UpdatedAt) {
+			return matching[i].UpdatedAt.After(matching[j].UpdatedAt)
+		}
+		return matching[i].ID > matching[j].ID
+	})
+	return s.GetWorkspaceInfoForSession(ctx, taskID, matching[0].ID)
+}
+
 func (s *Service) getTaskOwnedWorkspaceInfo(
 	ctx context.Context,
 	env *models.TaskEnvironment,

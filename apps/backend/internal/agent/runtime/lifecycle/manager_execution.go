@@ -1080,6 +1080,7 @@ func (m *Manager) persistRuntimeSecrets(
 	instance *ExecutorInstance,
 	execution *AgentExecution,
 ) error {
+	priorMetadata := execution.MetadataSnapshot()
 	liveDockerExecutions := m.propagateDockerTaskEnvironmentAuthToken(execution, instance.AuthToken)
 	if err := m.persistAuthToken(ctx, instance, execution); err != nil {
 		return err
@@ -1090,8 +1091,14 @@ func (m *Manager) persistRuntimeSecrets(
 	if err := m.persistTaskEnvironmentRuntimeSecretRefs(ctx, execution); err != nil {
 		return err
 	}
-	m.persistDockerTaskEnvironmentAuthTokenMirrors(ctx, execution, instance.AuthToken, liveDockerExecutions)
-	return nil
+	if execution.RuntimeName == agentruntime.RuntimeDocker {
+		if err := m.deleteSupersededRuntimeSecrets(ctx, priorMetadata, execution.MetadataSnapshot()); err != nil {
+			return err
+		}
+	}
+	return m.persistDockerTaskEnvironmentAuthTokenMirrors(
+		ctx, execution, instance.AuthToken, liveDockerExecutions,
+	)
 }
 
 func (m *Manager) persistTaskEnvironmentRuntimeSecretRefs(ctx context.Context, execution *AgentExecution) error {
@@ -1149,11 +1156,12 @@ func (m *Manager) persistDockerTaskEnvironmentAuthTokenMirrors(
 	source *AgentExecution,
 	authToken string,
 	live []*AgentExecution,
-) {
+) error {
+	sourceMetadata := source.MetadataSnapshot()
+	bootstrapSecretID := getMetadataString(sourceMetadata, MetadataKeyBootstrapNonceSecret)
+	var migrationErr error
 	for _, execution := range live {
-		if execution.IsTaskHost {
-			continue
-		}
+		priorMetadata := execution.MetadataSnapshot()
 		if execution != source {
 			if err := m.persistAuthToken(ctx, &ExecutorInstance{
 				InstanceID: execution.ID,
@@ -1164,8 +1172,22 @@ func (m *Manager) persistDockerTaskEnvironmentAuthTokenMirrors(
 				continue
 			}
 		}
+		if bootstrapSecretID != "" {
+			execution.setMetadataValue(MetadataKeyBootstrapNonceSecret, bootstrapSecretID)
+		}
+		if err := m.deleteSupersededRuntimeSecrets(
+			ctx, priorMetadata, execution.MetadataSnapshot(),
+		); err != nil {
+			migrationErr = errors.Join(migrationErr, fmt.Errorf(
+				"migrate Docker runtime secrets for execution %s: %w", execution.ID, err,
+			))
+		}
+		if execution.IsTaskHost {
+			continue
+		}
 		m.persistExecutorRunning(ctx, execution)
 	}
+	return migrationErr
 }
 
 // persistAuthToken stores the agentctl handshake auth token in SecretStore
@@ -1199,7 +1221,11 @@ func (m *Manager) persistRuntimeSecret(
 		},
 		Value: value,
 	}
-	if err := m.storeRuntimeSecret(ctx, secret, deterministicRuntimeSecretID(execution, metadataKey)); err != nil {
+	secretID := deterministicRuntimeSecretID(execution, instance.InstanceID, metadataKey)
+	if secretID == "" {
+		return fmt.Errorf("determine runtime secret owner for %s", metadataKey)
+	}
+	if err := m.storeRuntimeSecret(ctx, secret, secretID); err != nil {
 		return err
 	}
 
@@ -1235,28 +1261,47 @@ func (m *Manager) storeRuntimeSecret(ctx context.Context, secret *secrets.Secret
 	return nil
 }
 
-func deterministicRuntimeSecretID(execution *AgentExecution, metadataKey string) string {
-	if execution == nil || execution.RuntimeName != agentruntime.RuntimeDocker ||
-		execution.TaskEnvironmentID == "" {
+func deterministicRuntimeSecretID(execution *AgentExecution, instanceID, metadataKey string) string {
+	if execution == nil {
 		return ""
 	}
-	return deterministicTaskEnvironmentRuntimeSecretID(execution.TaskEnvironmentID, metadataKey)
+	if execution.RuntimeName == agentruntime.RuntimeDocker && execution.TaskEnvironmentID != "" {
+		return deterministicTaskEnvironmentRuntimeSecretID(execution.TaskEnvironmentID, metadataKey)
+	}
+	ownerID := execution.ID
+	if ownerID == "" {
+		ownerID = instanceID
+	}
+	if ownerID == "" {
+		return ""
+	}
+	kind := runtimeSecretKind(metadataKey)
+	if kind == "" {
+		return ""
+	}
+	return fmt.Sprintf("runtime:execution:%s:%s", ownerID, kind)
 }
 
 func deterministicTaskEnvironmentRuntimeSecretID(taskEnvironmentID, metadataKey string) string {
 	if taskEnvironmentID == "" {
 		return ""
 	}
-	kind := ""
-	switch metadataKey {
-	case MetadataKeyAuthTokenSecret:
-		kind = "agentctl-auth"
-	case MetadataKeyBootstrapNonceSecret:
-		kind = "agentctl-bootstrap"
-	default:
+	kind := runtimeSecretKind(metadataKey)
+	if kind == "" {
 		return ""
 	}
 	return fmt.Sprintf("runtime:task-environment:%s:%s", taskEnvironmentID, kind)
+}
+
+func runtimeSecretKind(metadataKey string) string {
+	switch metadataKey {
+	case MetadataKeyAuthTokenSecret:
+		return "agentctl-auth"
+	case MetadataKeyBootstrapNonceSecret:
+		return "agentctl-bootstrap"
+	default:
+		return ""
+	}
 }
 
 // DeleteTaskEnvironmentRuntimeSecrets removes the two deterministic encrypted
@@ -1273,15 +1318,61 @@ func (m *Manager) DeleteTaskEnvironmentRuntimeSecrets(
 	if m.runtimeSecretStore == nil {
 		return errors.New("runtime secret store is not configured")
 	}
+	return m.deleteRuntimeSecretIDs(ctx, []string{
+		authSecretID,
+		bootstrapSecretID,
+		deterministicTaskEnvironmentRuntimeSecretID(taskEnvironmentID, MetadataKeyAuthTokenSecret),
+		deterministicTaskEnvironmentRuntimeSecretID(taskEnvironmentID, MetadataKeyBootstrapNonceSecret),
+	})
+}
+
+func (m *Manager) deleteSupersededRuntimeSecrets(
+	ctx context.Context,
+	before, after map[string]interface{},
+) error {
+	var superseded []string
+	for _, key := range []string{MetadataKeyAuthTokenSecret, MetadataKeyBootstrapNonceSecret} {
+		oldID := getMetadataString(before, key)
+		if oldID != "" && oldID != getMetadataString(after, key) {
+			superseded = append(superseded, oldID)
+		}
+	}
+	if len(superseded) == 0 {
+		return nil
+	}
+	return m.deleteRuntimeSecretIDs(ctx, superseded)
+}
+
+func (m *Manager) deleteExecutionRuntimeSecrets(ctx context.Context, execution *AgentExecution) error {
+	if execution == nil || execution.RuntimeName == agentruntime.RuntimeDocker {
+		return nil
+	}
+	if m.runtimeSecretStore == nil {
+		return nil
+	}
+	metadata := execution.MetadataSnapshot()
+	return m.deleteRuntimeSecretIDs(ctx, []string{
+		getMetadataString(metadata, MetadataKeyAuthTokenSecret),
+		getMetadataString(metadata, MetadataKeyBootstrapNonceSecret),
+		deterministicRuntimeSecretID(execution, execution.ID, MetadataKeyAuthTokenSecret),
+		deterministicRuntimeSecretID(execution, execution.ID, MetadataKeyBootstrapNonceSecret),
+	})
+}
+
+func (m *Manager) deleteRuntimeSecretIDs(ctx context.Context, secretIDs []string) error {
+	if m.runtimeSecretStore == nil {
+		return errors.New("runtime secret store is not configured")
+	}
+	seen := make(map[string]struct{}, len(secretIDs))
 	var cleanupErr error
-	secretIDs := []string{authSecretID, bootstrapSecretID}
-	if secretIDs[0] == "" {
-		secretIDs[0] = deterministicTaskEnvironmentRuntimeSecretID(taskEnvironmentID, MetadataKeyAuthTokenSecret)
-	}
-	if secretIDs[1] == "" {
-		secretIDs[1] = deterministicTaskEnvironmentRuntimeSecretID(taskEnvironmentID, MetadataKeyBootstrapNonceSecret)
-	}
 	for _, secretID := range secretIDs {
+		if secretID == "" {
+			continue
+		}
+		if _, duplicate := seen[secretID]; duplicate {
+			continue
+		}
+		seen[secretID] = struct{}{}
 		if err := m.runtimeSecretStore.Delete(ctx, secretID); err != nil && !errors.Is(err, secrets.ErrNotFound) {
 			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("delete runtime secret %s: %w", secretID, err))
 		}

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +17,7 @@ import (
 func TestTaskLSPControlSnapshotRouteIsRegistered(t *testing.T) {
 	server := newTestServer(t)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/lsp/languages/kotlin", nil)
+	setTaskLSPTaskHeader(request)
 	response := httptest.NewRecorder()
 	server.router.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -31,6 +33,7 @@ func TestTaskLSPControlRoutesRejectTransportOwnershipFields(t *testing.T) {
 			strings.NewReader(`{"generation":1,"task_id":"untrusted"}`),
 		)
 		request.Header.Set("Content-Type", "application/json")
+		setTaskLSPTaskHeader(request)
 		response := httptest.NewRecorder()
 		server.router.ServeHTTP(response, request)
 		if response.Code != http.StatusBadRequest {
@@ -46,6 +49,7 @@ func TestTaskLSPConfigurationRouteValidatesLiveGeneration(t *testing.T) {
 		strings.NewReader(`{"generation":1,"configuration":{"kotlin":{"compiler":{"jvmTarget":"21"}}}}`),
 	)
 	request.Header.Set("Content-Type", "application/json")
+	setTaskLSPTaskHeader(request)
 	response := httptest.NewRecorder()
 	server.router.ServeHTTP(response, request)
 	if response.Code != http.StatusConflict {
@@ -59,6 +63,7 @@ func TestTaskLSPStopRouteIsRegistered(t *testing.T) {
 		http.MethodPost, "/api/v1/lsp/languages/kotlin/stop", strings.NewReader(`{"reason":"user"}`),
 	)
 	request.Header.Set("Content-Type", "application/json")
+	setTaskLSPTaskHeader(request)
 	response := httptest.NewRecorder()
 	server.router.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -71,7 +76,9 @@ func TestTaskLSPWatchDisconnectIsNonOwning(t *testing.T) {
 	httpServer := httptest.NewServer(server.router)
 	t.Cleanup(httpServer.Close)
 	watchURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/api/v1/lsp/languages/kotlin/watch"
-	conn, _, err := websocket.DefaultDialer.Dial(watchURL, nil)
+	headers := http.Header{}
+	headers.Set(taskLSPTaskIDHeader, "task-1")
+	conn, _, err := websocket.DefaultDialer.Dial(watchURL, headers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,6 +93,7 @@ func TestTaskLSPWatchDisconnectIsNonOwning(t *testing.T) {
 	_ = conn.Close()
 
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/lsp/languages/kotlin", nil)
+	setTaskLSPTaskHeader(request)
 	response := httptest.NewRecorder()
 	server.router.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"phase":"off"`) {
@@ -96,6 +104,7 @@ func TestTaskLSPWatchDisconnectIsNonOwning(t *testing.T) {
 func TestLSPAttachRouteIsRegisteredAndRequiresReadyGeneration(t *testing.T) {
 	server := newTestServer(t)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/lsp/languages/kotlin/attach?generation=1", nil)
+	setTaskLSPTaskHeader(request)
 	response := httptest.NewRecorder()
 	server.router.ServeHTTP(response, request)
 	if response.Code != http.StatusConflict {
@@ -109,6 +118,7 @@ func TestLSPDiscoveryRouteDetectsWithoutStartingProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/lsp/discovery", nil)
+	setTaskLSPTaskHeader(request)
 	response := httptest.NewRecorder()
 	server.router.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"kotlin"`) {
@@ -119,7 +129,7 @@ func TestLSPDiscoveryRouteDetectsWithoutStartingProcess(t *testing.T) {
 	}
 }
 
-func TestTaskLSPWorkspaceRefreshRescansRepositoryRoots(t *testing.T) {
+func TestTaskLSPWorkspaceRefreshScopesTaskWithoutRebindingPhysicalTrackers(t *testing.T) {
 	server := newTestServer(t)
 	t.Cleanup(func() { _ = server.procMgr.Stop(context.Background()) })
 	for _, name := range []string{"repo-a", "repo-b"} {
@@ -129,15 +139,48 @@ func TestTaskLSPWorkspaceRefreshRescansRepositoryRoots(t *testing.T) {
 		t.Fatalf("initial repository subpaths = %v, want none", got)
 	}
 
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/lsp/workspace/refresh", nil)
+	payload, err := json.Marshal(map[string]any{
+		"workspace_path": server.cfg.WorkDir,
+		"workspace_roots": []string{
+			filepath.Join(server.cfg.WorkDir, "repo-a"),
+			filepath.Join(server.cfg.WorkDir, "repo-b"),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(
+		http.MethodPost, "/api/v1/lsp/workspace/refresh", strings.NewReader(string(payload)),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	setTaskLSPTaskHeader(request)
 	response := httptest.NewRecorder()
 	server.router.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
 		t.Fatalf("workspace refresh status=%d body=%s", response.Code, response.Body.String())
 	}
-	if got := server.procMgr.RepoSubpaths(); len(got) != 2 || got[0] != "repo-a" || got[1] != "repo-b" {
-		t.Fatalf("repository subpaths after LSP refresh = %v, want [repo-a repo-b]", got)
+	if got := server.procMgr.RepoSubpaths(); len(got) != 0 {
+		t.Fatalf("physical repository trackers changed during task LSP refresh: %v", got)
 	}
+	snapshot := server.lspManager.SnapshotForTask("task-1", "kotlin")
+	if len(snapshot.WorkspaceFolders) != 2 || snapshot.WorkspaceFolders[0].Name != "repo-a" ||
+		snapshot.WorkspaceFolders[1].Name != "repo-b" {
+		t.Fatalf("task-scoped LSP workspace = %#v", snapshot.WorkspaceFolders)
+	}
+}
+
+func TestTaskLSPRoutesRequireTrustedTaskIdentityHeader(t *testing.T) {
+	server := newTestServer(t)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/lsp/languages/kotlin", nil)
+	response := httptest.NewRecorder()
+	server.router.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("missing task identity status = %d, want 400", response.Code)
+	}
+}
+
+func setTaskLSPTaskHeader(request *http.Request) {
+	request.Header.Set(taskLSPTaskIDHeader, "task-1")
 }
 
 func TestWorkspaceFileURI(t *testing.T) {

@@ -293,6 +293,60 @@ func TestGetWorkspaceInfoForSession_BasicFields(t *testing.T) {
 	}
 }
 
+func TestTaskLSPResolvesInheritedEnvironmentWithTaskSpecificWorkspace(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	for _, taskID := range []string{"task-child", "task-unrelated"} {
+		if err := repo.CreateTask(ctx, &models.Task{
+			ID: taskID, WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123",
+			Title: taskID, Priority: "medium",
+		}); err != nil {
+			t.Fatalf("CreateTask(%s): %v", taskID, err)
+		}
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-parent", TaskID: "task-123", ExecutorType: string(models.ExecutorTypeLocal),
+		WorkspacePath: "/physical/parent", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-child", TaskID: "task-child", TaskEnvironmentID: "env-parent",
+		RepositorySnapshot: map[string]interface{}{"path": "/physical/parent/child-worktree"},
+		State:              models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	environment, err := svc.GetTaskEnvironmentForTaskLSP(ctx, "task-child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if environment == nil || environment.ID != "env-parent" {
+		t.Fatalf("inherited environment = %#v", environment)
+	}
+	info, err := svc.GetWorkspaceInfoForTaskLSP(ctx, "task-child", "env-parent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.TaskID != "task-child" || info.TaskEnvironmentID != "env-parent" ||
+		info.WorkspacePath != "/physical/parent/child-worktree" {
+		t.Fatalf("task-specific inherited workspace = %#v", info)
+	}
+	unrelated, err := svc.GetTaskEnvironmentForTaskLSP(ctx, "task-unrelated")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unrelated != nil {
+		t.Fatalf("unrelated task inherited environment = %#v", unrelated)
+	}
+	if _, err := svc.GetWorkspaceInfoForTaskLSP(ctx, "task-unrelated", "env-parent"); err == nil {
+		t.Fatal("unrelated task resolved inherited workspace")
+	}
+}
+
 func TestApplyTaskEnvironmentToWorkspaceInfoUsesEnvironmentProfileAsFallback(t *testing.T) {
 	info := &lifecycle.WorkspaceInfo{}
 	applyTaskEnvironmentToWorkspaceInfo(info, &models.TaskEnvironment{

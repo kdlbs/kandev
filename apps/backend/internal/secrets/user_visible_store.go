@@ -11,6 +11,8 @@ import (
 const (
 	internalGitHubSecretPrefix  = "github:"
 	internalRuntimeSecretPrefix = "runtime:"
+	legacyAgentctlAuthPrefix    = "agentctl-auth-"
+	legacyAgentctlNoncePrefix   = "agentctl-bootstrap-"
 )
 
 // IsInternalID reports whether a secret is owned by backend infrastructure
@@ -19,6 +21,15 @@ func IsInternalID(id string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(id))
 	return strings.HasPrefix(normalized, internalGitHubSecretPrefix) ||
 		strings.HasPrefix(normalized, internalRuntimeSecretPrefix)
+}
+
+func isInternalSecret(id, name string) bool {
+	if IsInternalID(id) {
+		return true
+	}
+	normalizedName := strings.ToLower(strings.TrimSpace(name))
+	return strings.HasPrefix(normalizedName, legacyAgentctlAuthPrefix) ||
+		strings.HasPrefix(normalizedName, legacyAgentctlNoncePrefix)
 }
 
 // UserVisibleStore restricts a SecretStore to user-managed credentials. The
@@ -50,7 +61,7 @@ func NewUserVisibleStore(store SecretStore) SecretStore {
 
 // Create creates a secret owned by the current user.
 func (s *UserVisibleStore) Create(ctx context.Context, secret *SecretWithValue) error {
-	if secret != nil && IsInternalID(secret.ID) {
+	if secret != nil && isInternalSecret(secret.ID, secret.Name) {
 		return internalSecretNotFound(secret.ID)
 	}
 	return s.store.Create(ctx, secret)
@@ -66,6 +77,9 @@ func (s *UserVisibleStore) Get(ctx context.Context, id string) (*Secret, error) 
 	if err != nil {
 		return nil, err
 	}
+	if isInternalSecret(secret.ID, secret.Name) {
+		return nil, internalSecretNotFound(id)
+	}
 	if normalizeStoredScope(secret.Scope) != ScopeGlobal {
 		return nil, internalSecretNotFound(id)
 	}
@@ -74,18 +88,15 @@ func (s *UserVisibleStore) Get(ctx context.Context, id string) (*Secret, error) 
 
 // Reveal returns the plaintext value of the user-visible secret with the given id.
 func (s *UserVisibleStore) Reveal(ctx context.Context, id string) (string, error) {
-	if IsInternalID(id) {
-		return "", internalSecretNotFound(id)
-	}
-	if s.scoped != nil {
-		return s.scoped.RevealGlobal(ctx, id)
-	}
-	return s.store.Reveal(ctx, id)
+	return s.RevealGlobal(ctx, id)
 }
 
 // Update updates the user-visible secret with the given id.
 func (s *UserVisibleStore) Update(ctx context.Context, id string, req *UpdateSecretRequest) error {
 	if IsInternalID(id) {
+		return internalSecretNotFound(id)
+	}
+	if req != nil && req.Name != nil && isInternalSecret("", *req.Name) {
 		return internalSecretNotFound(id)
 	}
 	if _, err := s.Get(ctx, id); err != nil {
@@ -116,7 +127,7 @@ func (s *UserVisibleStore) List(ctx context.Context) ([]*SecretListItem, error) 
 	}
 	visible := make([]*SecretListItem, 0, len(items))
 	for _, item := range items {
-		if item != nil && !IsInternalID(item.ID) {
+		if item != nil && !isInternalSecret(item.ID, item.Name) {
 			visible = append(visible, item)
 		}
 	}
@@ -149,13 +160,20 @@ func (s *UserVisibleStore) GetForWorkspace(ctx context.Context, id, workspaceID 
 	if s.scoped == nil {
 		return nil, fmt.Errorf("workspace-scoped secret storage is unavailable")
 	}
-	return s.scoped.GetForWorkspace(ctx, id, workspaceID)
+	secret, err := s.scoped.GetForWorkspace(ctx, id, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if isInternalSecret(secret.ID, secret.Name) {
+		return nil, internalSecretNotFound(id)
+	}
+	return secret, nil
 }
 
 // RevealGlobal returns the plaintext value of the global user-visible secret with the given id.
 func (s *UserVisibleStore) RevealGlobal(ctx context.Context, id string) (string, error) {
-	if IsInternalID(id) {
-		return "", internalSecretNotFound(id)
+	if _, err := s.Get(ctx, id); err != nil {
+		return "", err
 	}
 	if s.scoped != nil {
 		return s.scoped.RevealGlobal(ctx, id)
@@ -165,14 +183,11 @@ func (s *UserVisibleStore) RevealGlobal(ctx context.Context, id string) (string,
 
 // RevealForWorkspace returns the plaintext value of the user-visible secret with the given id scoped to the workspace.
 func (s *UserVisibleStore) RevealForWorkspace(ctx context.Context, id, workspaceID string) (string, error) {
-	if IsInternalID(id) {
-		return "", internalSecretNotFound(id)
+	if _, err := s.GetForWorkspace(ctx, id, workspaceID); err != nil {
+		return "", err
 	}
 	if s.scoped != nil {
 		return s.scoped.RevealForWorkspace(ctx, id, workspaceID)
-	}
-	if _, err := s.GetForWorkspace(ctx, id, workspaceID); err != nil {
-		return "", err
 	}
 	return s.store.Reveal(ctx, id)
 }
@@ -231,7 +246,7 @@ func internalSecretNotFound(id string) error {
 func filterInternalSecretItems(items []*SecretListItem) []*SecretListItem {
 	visible := make([]*SecretListItem, 0, len(items))
 	for _, item := range items {
-		if item != nil && !IsInternalID(item.ID) {
+		if item != nil && !isInternalSecret(item.ID, item.Name) {
 			visible = append(visible, item)
 		}
 	}

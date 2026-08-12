@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
@@ -274,6 +275,156 @@ func TestPersistRuntimeSecrets(t *testing.T) {
 	if got := m.revealRuntimeSecret(context.Background(), execution.MetadataSnapshot(), MetadataKeyBootstrapNonceSecret); got != "bootstrap-nonce" {
 		t.Fatalf("revealed bootstrap nonce = %q, want bootstrap-nonce", got)
 	}
+	if len(store.store) != 2 {
+		t.Fatalf("runtime secret count = %d, want 2", len(store.store))
+	}
+	for id := range store.store {
+		if !secrets.IsInternalID(id) {
+			t.Fatalf("runtime secret %q is not internally owned", id)
+		}
+	}
+}
+
+func TestLocalRuntimeSecretRotationUsesStableInternalExecutionOwner(t *testing.T) {
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	store := newInMemorySecretStore()
+	manager := &Manager{logger: log, runtimeSecretStore: store}
+	execution := &AgentExecution{
+		ID: "exec-local-1", RuntimeName: agentruntime.RuntimeStandalone, metadata: make(map[string]interface{}),
+	}
+	for _, token := range []string{"token-1", "token-2", "token-3"} {
+		if err := manager.persistRuntimeSecrets(context.Background(), &ExecutorInstance{
+			InstanceID: execution.ID, AuthToken: token, BootstrapNonce: "nonce",
+		}, execution); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(store.store) != 2 {
+		t.Fatalf("rotated local runtime secret count = %d, want 2", len(store.store))
+	}
+	for id := range store.store {
+		if !strings.HasPrefix(id, "runtime:execution:exec-local-1:") || !secrets.IsInternalID(id) {
+			t.Fatalf("local runtime secret ID = %q", id)
+		}
+	}
+	if got := manager.revealRuntimeSecret(
+		context.Background(), execution.MetadataSnapshot(), MetadataKeyAuthTokenSecret,
+	); got != "token-3" {
+		t.Fatalf("rotated token = %q, want token-3", got)
+	}
+}
+
+func TestPersistDockerRuntimeSecretsDeletesSupersededLegacyIDs(t *testing.T) {
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	store := newInMemorySecretStore()
+	writer := &captureTaskEnvironmentRuntimeSecretWriter{}
+	manager := &Manager{
+		logger: log, runtimeSecretStore: store, taskEnvironmentRuntimeSecretWriter: writer,
+	}
+	for id, value := range map[string]string{"legacy-auth-id": "old-auth", "legacy-nonce-id": "old-nonce"} {
+		store.store[id] = &secrets.SecretWithValue{Secret: secrets.Secret{ID: id}, Value: value}
+	}
+	execution := &AgentExecution{
+		ID: "exec-docker-1", RuntimeName: agentruntime.RuntimeDocker, TaskEnvironmentID: "env-1",
+		metadata: map[string]interface{}{
+			MetadataKeyAuthTokenSecret:      "legacy-auth-id",
+			MetadataKeyBootstrapNonceSecret: "legacy-nonce-id",
+		},
+	}
+	if err := manager.persistRuntimeSecrets(context.Background(), &ExecutorInstance{
+		InstanceID: execution.ID, AuthToken: "new-auth", BootstrapNonce: "new-nonce",
+	}, execution); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.store) != 2 {
+		t.Fatalf("secrets after migration = %v, want two deterministic entries", store.store)
+	}
+	if _, exists := store.store["legacy-auth-id"]; exists {
+		t.Fatal("legacy auth secret survived migration")
+	}
+	if _, exists := store.store["legacy-nonce-id"]; exists {
+		t.Fatal("legacy nonce secret survived migration")
+	}
+}
+
+func TestPersistDockerRuntimeSecretsMigratesEveryLiveEnvironmentMember(t *testing.T) {
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	store := newInMemorySecretStore()
+	manager := &Manager{
+		logger: log, runtimeSecretStore: store, executionStore: NewExecutionStore(),
+		taskEnvironmentRuntimeSecretWriter: &captureTaskEnvironmentRuntimeSecretWriter{},
+	}
+	var source *AgentExecution
+	for index, entry := range []struct {
+		id, sessionID string
+		taskHost      bool
+	}{
+		{id: "source", sessionID: "session-source"},
+		{id: "sibling", sessionID: "session-sibling"},
+		{id: "task-host", sessionID: taskHostRuntimeSessionPrefix + "env-1", taskHost: true},
+	} {
+		authID := fmt.Sprintf("legacy-auth-%d", index)
+		nonceID := fmt.Sprintf("legacy-nonce-%d", index)
+		store.store[authID] = &secrets.SecretWithValue{Secret: secrets.Secret{ID: authID}}
+		store.store[nonceID] = &secrets.SecretWithValue{Secret: secrets.Secret{ID: nonceID}}
+		execution := &AgentExecution{
+			ID: entry.id, SessionID: entry.sessionID, TaskID: "task-1",
+			TaskEnvironmentID: "env-1", RuntimeName: agentruntime.RuntimeDocker, IsTaskHost: entry.taskHost,
+			metadata: map[string]interface{}{
+				MetadataKeyAuthTokenSecret: authID, MetadataKeyBootstrapNonceSecret: nonceID,
+			},
+		}
+		if err := manager.executionStore.Add(execution); err != nil {
+			t.Fatal(err)
+		}
+		if entry.id == "source" {
+			source = execution
+		}
+	}
+	if err := manager.persistRuntimeSecrets(context.Background(), &ExecutorInstance{
+		InstanceID: source.ID, AuthToken: "new-auth", BootstrapNonce: "new-nonce",
+	}, source); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.store) != 2 {
+		t.Fatalf("secrets after live migration = %v, want two deterministic entries", store.store)
+	}
+	wantAuth := deterministicTaskEnvironmentRuntimeSecretID("env-1", MetadataKeyAuthTokenSecret)
+	wantNonce := deterministicTaskEnvironmentRuntimeSecretID("env-1", MetadataKeyBootstrapNonceSecret)
+	for _, execution := range manager.executionStore.List() {
+		metadata := execution.MetadataSnapshot()
+		if getMetadataString(metadata, MetadataKeyAuthTokenSecret) != wantAuth ||
+			getMetadataString(metadata, MetadataKeyBootstrapNonceSecret) != wantNonce {
+			t.Fatalf("%s migrated metadata = %v", execution.ID, metadata)
+		}
+	}
+}
+
+func TestDeleteExecutionRuntimeSecretsRemovesLegacyAndDeterministicIDs(t *testing.T) {
+	store := newInMemorySecretStore()
+	execution := &AgentExecution{
+		ID: "exec-local-1", RuntimeName: agentruntime.RuntimeStandalone,
+		metadata: map[string]interface{}{
+			MetadataKeyAuthTokenSecret:      "legacy-auth-id",
+			MetadataKeyBootstrapNonceSecret: "legacy-nonce-id",
+		},
+	}
+	for _, id := range []string{
+		"legacy-auth-id",
+		"legacy-nonce-id",
+		deterministicRuntimeSecretID(execution, execution.ID, MetadataKeyAuthTokenSecret),
+		deterministicRuntimeSecretID(execution, execution.ID, MetadataKeyBootstrapNonceSecret),
+	} {
+		store.store[id] = &secrets.SecretWithValue{Secret: secrets.Secret{ID: id}}
+	}
+	store.store["user-visible"] = &secrets.SecretWithValue{Secret: secrets.Secret{ID: "user-visible"}}
+	manager := &Manager{runtimeSecretStore: store}
+	if err := manager.deleteExecutionRuntimeSecrets(context.Background(), execution); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.store) != 1 || store.store["user-visible"] == nil {
+		t.Fatalf("remaining secrets = %v, want only user-visible", store.store)
+	}
 }
 
 func TestRuntimeSecretsCannotResolveAsUserCredentials(t *testing.T) {
@@ -532,9 +683,12 @@ func TestTaskHostPersistsDockerCredentialsToTaskEnvironmentOwner(t *testing.T) {
 
 func TestDeleteTaskEnvironmentRuntimeSecretsRemovesOnlyDeterministicCredentials(t *testing.T) {
 	store := newInMemorySecretStore()
-	authSecretID := "runtime:legacy-task-environment-auth"
+	authSecretID := "legacy-task-environment-auth"
+	bootstrapSecretID := "legacy-task-environment-nonce"
 	for id, value := range map[string]string{
-		authSecretID: "auth",
+		authSecretID:      "legacy-auth",
+		bootstrapSecretID: "legacy-nonce",
+		deterministicTaskEnvironmentRuntimeSecretID("env-1", MetadataKeyAuthTokenSecret):      "auth",
 		deterministicTaskEnvironmentRuntimeSecretID("env-1", MetadataKeyBootstrapNonceSecret): "nonce",
 		"user-visible": "keep",
 	} {
@@ -542,7 +696,9 @@ func TestDeleteTaskEnvironmentRuntimeSecretsRemovesOnlyDeterministicCredentials(
 	}
 	manager := &Manager{runtimeSecretStore: store}
 
-	if err := manager.DeleteTaskEnvironmentRuntimeSecrets(context.Background(), "env-1", authSecretID, ""); err != nil {
+	if err := manager.DeleteTaskEnvironmentRuntimeSecrets(
+		context.Background(), "env-1", authSecretID, bootstrapSecretID,
+	); err != nil {
 		t.Fatal(err)
 	}
 	if _, exists := store.store["user-visible"]; !exists || len(store.store) != 1 {

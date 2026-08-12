@@ -13,10 +13,11 @@ That model duplicates servers across sessions or browser windows, hides task wor
 file changes, and can repeatedly pay Kotlin's expensive project-import cost even though all
 sessions are working in one task environment.
 
-A Kandev task already has one canonical `TaskEnvironment` shared by its sessions, while task
-archive, deletion, and environment teardown already own runtime cleanup. LSP policy and runtime
-therefore need the same task boundary without exposing the task environment, an execution, or a
-session as product ownership.
+A Kandev task resolves one canonical `TaskEnvironment` for its sessions, while task archive,
+deletion, and environment teardown already own runtime cleanup. An inherited-workspace task can
+use another task's physical environment, so physical hosting is not proof of product ownership.
+LSP policy and runtime therefore need the task boundary without exposing the task environment, an
+execution, or a session as product ownership.
 
 ## Decision
 
@@ -31,7 +32,7 @@ Ownership is split across two cooperating layers:
 - The main backend's `internal/lsp` control plane owns task authorization, durable per-language
   policy and evidence, effective-policy resolution, process-wide capacity, task lifecycle hooks,
   recovery, and task-scoped HTTP/WebSocket projection.
-- The canonical task host's `agentctl` instance owns one runtime manager per language. That manager
+- The canonical task host's `agentctl` instance owns one runtime slot per task and language. That manager
   owns binary discovery or installation, the process tree, the single upstream JSON-RPC peer,
   `initialize`/`initialized`, server work-done progress, capability and diagnostic caches, open
   document arbitration, and downstream browser attachments. Its instance and execution identity
@@ -54,8 +55,12 @@ documents or attachments remain.
 
 `TaskEnvironment` is the sole runtime target for the task-scoped owner. Multi-repository tasks
 initialize one server from the task workspace root with the task's ordered repository roots as
-workspace folders. Every session uses that same target. Replacing the environment requires the
-old generation to be reaped before a new target may launch; an unproven old process blocks the new
+workspace folders. Every session of that task uses the same target. When tasks share one physical
+environment, the backend first proves membership from durable task/session state, then the task
+host keeps independent `(task_id, language)` slots, workspace projections, progress, generations,
+and processes. A task ID travels to agentctl only in the authenticated backend transport header;
+it is never accepted from a browser or control body. Replacing the environment requires the old
+generation to be reaped before a new target may launch; an unproven old process blocks the new
 launch rather than risking duplicate imports.
 
 The backend persists one `task_lsp_languages` row per materialized task/language policy or runtime
@@ -76,9 +81,11 @@ creation. Local PC/Worktree and Local Docker remain supported; Remote Docker, SS
 fail closed. Language-server commands still come only from Kandev's existing registry and managed
 cache or an absolute task-host `PATH`; project-controlled binaries remain forbidden.
 
-Task stop, archive, delete, and task-environment teardown cancel recovery, stop every language,
-clear runtime progress, and reap the full task-host process tree. Policy survives temporary task
-stop and archive so task resume can reconcile it; task deletion cascades the rows. Backend
+Task stop, archive, and delete cancel recovery and stop every language namespace owned by that
+task. If the task owns the physical environment, cleanup also reaps the full task-host process
+tree; cleanup of a borrowing task cannot terminate another task's host or language slots.
+Task-environment teardown remains the final full-process-tree owner. Policy survives temporary
+task stop and archive so task resume can reconcile it; task deletion cascades the rows. Backend
 shutdown drops watches without making a browser or watch stream the stop owner. If the task host
 does not survive, recovery launches at most one new generation after the old runtime is known
 dead.
@@ -117,9 +124,10 @@ are ordered for analysis but do not turn Kandev into a collaborative editor.
   through a transient browser stream.
 - **Use one server per session or browser and aggregate only the UI.** Rejected because it hides
   duplicate resource use and repeated project imports rather than preventing them.
-- **Own servers by workspace or repository.** Rejected because task environments can carry
-  task-specific worktrees, branches, source sets, and executor policy. Sharing across tasks would
-  cross filesystem and authorization boundaries.
+- **Own servers by physical workspace, environment, or repository.** Rejected because task
+  environments can carry task-specific worktrees, branches, source sets, and executor policy.
+  A physical host may be reused, but sharing one language-server lifecycle across tasks would cross
+  filesystem and authorization boundaries.
 - **Let a future MCP tool start its own hidden server.** Rejected because it would create a second
   lifecycle and let agent-supplied identity bypass task ownership. MCP must use the shared
   controller when that product surface is designed.

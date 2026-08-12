@@ -18,6 +18,7 @@ import (
 
 // mockAgentManager implements AgentManagerClient for testing
 type mockAgentManager struct {
+	trackingMu                       sync.Mutex
 	launchAgentFunc                  func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error)
 	startAgentProcessFunc            func(ctx context.Context, agentExecutionID string) error
 	stopAgentFunc                    func(ctx context.Context, agentExecutionID string, force bool) error
@@ -50,9 +51,12 @@ type passthroughStdinCall struct {
 }
 
 func (m *mockAgentManager) LaunchAgent(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+	m.trackingMu.Lock()
 	m.launchAgentCallCount++
-	if m.launchAgentFunc != nil {
-		return m.launchAgentFunc(ctx, req)
+	launch := m.launchAgentFunc
+	m.trackingMu.Unlock()
+	if launch != nil {
+		return launch(ctx, req)
 	}
 	return &LaunchAgentResponse{
 		AgentExecutionID: "exec-123",
@@ -148,9 +152,12 @@ func (m *mockAgentManager) SetSessionModeBySessionID(ctx context.Context, sessio
 }
 
 func (m *mockAgentManager) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
+	m.trackingMu.Lock()
 	m.isAgentRunningForSessionCallArgs = append(m.isAgentRunningForSessionCallArgs, sessionID)
-	if m.isAgentRunningForSessionFunc != nil {
-		return m.isAgentRunningForSessionFunc(ctx, sessionID)
+	probe := m.isAgentRunningForSessionFunc
+	m.trackingMu.Unlock()
+	if probe != nil {
+		return probe(ctx, sessionID)
 	}
 	return false
 }
@@ -204,9 +211,12 @@ func (m *mockAgentManager) GetRemoteRuntimeStatusBySession(ctx context.Context, 
 func (m *mockAgentManager) PollRemoteStatusForRecords(ctx context.Context, records []RemoteStatusPollRequest) {
 }
 func (m *mockAgentManager) CleanupStaleExecutionBySessionID(ctx context.Context, sessionID string) error {
+	m.trackingMu.Lock()
 	m.cleanupStaleExecutionCallCount++
-	if m.cleanupStaleExecutionFunc != nil {
-		return m.cleanupStaleExecutionFunc(ctx, sessionID)
+	cleanup := m.cleanupStaleExecutionFunc
+	m.trackingMu.Unlock()
+	if cleanup != nil {
+		return cleanup(ctx, sessionID)
 	}
 	return nil
 }
