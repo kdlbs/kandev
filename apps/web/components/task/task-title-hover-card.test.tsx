@@ -3,6 +3,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { TaskPR } from "@/lib/types/github";
+import type { TaskMR } from "@/lib/types/gitlab";
 import { TaskTitleHoverCard } from "./task-title-hover-card";
 
 afterEach(() => cleanup());
@@ -51,6 +52,35 @@ function makePR(overrides: Pick<TaskPR, "id" | "task_id">): TaskPR {
   };
 }
 
+function makeMR(): TaskMR {
+  return {
+    id: "mr-1",
+    task_id: "child-1",
+    host: "https://gitlab.com",
+    project_path: "group/project",
+    mr_iid: 5,
+    mr_url: "",
+    mr_title: "Linked MR",
+    head_branch: "feature",
+    base_branch: "main",
+    author_username: "alice",
+    state: "open",
+    approval_state: "",
+    pipeline_state: "",
+    merge_status: "",
+    draft: false,
+    approval_count: 0,
+    required_approvals: 0,
+    pipeline_jobs_total: 0,
+    pipeline_jobs_pass: 0,
+    reviewer_count: 0,
+    unapproved_reviewers: 0,
+    unresolved_discussions: 0,
+    created_at: "",
+    updated_at: "",
+  };
+}
+
 function renderCard(tasks: KanbanState["tasks"], title = LONG_TITLE) {
   render(
     <StateProvider initialState={{ kanban: { workflowId: "wf-1", steps: [], tasks } }}>
@@ -69,6 +99,11 @@ function renderCard(tasks: KanbanState["tasks"], title = LONG_TITLE) {
 async function openCard() {
   screen.getByTestId("trigger").focus();
   await screen.findAllByTestId("task-title-hover-card");
+}
+
+/** First (portal) match for a subtask row; Radix also force-mounts a copy. */
+function subtaskRow(childId: string): HTMLElement {
+  return screen.getAllByTestId(`task-subtask-row-${childId}`)[0];
 }
 
 describe("TaskTitleHoverCard", () => {
@@ -95,12 +130,8 @@ describe("TaskTitleHoverCard", () => {
     ]);
     await openCard();
 
-    expect(screen.getAllByTestId("task-subtask-row-child-1")[0].textContent).toContain(
-      FIRST_SUBTASK_TITLE,
-    );
-    expect(screen.getAllByTestId("task-subtask-row-child-2")[0].textContent).toContain(
-      "Second subtask",
-    );
+    expect(subtaskRow("child-1").textContent).toContain(FIRST_SUBTASK_TITLE);
+    expect(subtaskRow("child-2").textContent).toContain("Second subtask");
   });
 
   it("names the subtask link by its title, with the state label on the icon", async () => {
@@ -116,7 +147,7 @@ describe("TaskTitleHoverCard", () => {
     ]);
     await openCard();
 
-    const row = screen.getAllByTestId("task-subtask-row-child-1")[0];
+    const row = subtaskRow("child-1");
     // An aria-label on the anchor would override its accessible name, so every
     // row would announce as "In progress" with the title never read out.
     expect(row.getAttribute("aria-label")).toBeNull();
@@ -163,11 +194,51 @@ describe("TaskTitleHoverCard", () => {
     );
     await openCard();
 
-    const withPR = screen.getAllByTestId("task-subtask-row-child-1")[0];
-    const withoutPR = screen.getAllByTestId("task-subtask-row-child-2")[0];
+    const withPR = subtaskRow("child-1");
+    const withoutPR = subtaskRow("child-2");
     expect(withPR.querySelector(".tabler-icon-git-pull-request")).not.toBeNull();
     expect(withoutPR.querySelector(".tabler-icon-git-pull-request")).toBeNull();
     expect(withoutPR.querySelector(".tabler-icon-git-merge")).toBeNull();
+  });
+});
+
+describe("TaskTitleHoverCard — GitLab MR subtasks", () => {
+  it("AC13: shows the merge glyph for a subtask whose only link is a GitLab MR", async () => {
+    render(
+      <StateProvider
+        initialState={{
+          workspaces: { items: [], activeId: "ws-1" },
+          kanban: {
+            workflowId: "wf-1",
+            steps: [],
+            tasks: [
+              makeTask({ id: "parent-1" }),
+              makeTask({
+                id: "child-1",
+                title: "Has an MR",
+                parentTaskId: "parent-1",
+                position: 1,
+              }),
+              makeTask({ id: "child-2", title: "No link", parentTaskId: "parent-1", position: 2 }),
+            ],
+          },
+          taskMRs: { byWorkspaceId: { "ws-1": { "child-1": [makeMR()] } } },
+        }}
+      >
+        <TaskTitleHoverCard taskId="parent-1" title="Parent">
+          <span tabIndex={0} data-testid="trigger">
+            Parent
+          </span>
+        </TaskTitleHoverCard>
+      </StateProvider>,
+    );
+    await openCard();
+
+    const withMR = subtaskRow("child-1");
+    const withoutMR = subtaskRow("child-2");
+    expect(withMR.querySelector(".tabler-icon-git-merge")).not.toBeNull();
+    expect(withMR.querySelector(".tabler-icon-git-pull-request")).toBeNull();
+    expect(withoutMR.querySelector(".tabler-icon-git-merge")).toBeNull();
   });
 });
 

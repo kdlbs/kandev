@@ -113,4 +113,28 @@ test.describe("Task title hover card on the Kanban card", () => {
     await expect(hoverCard).toContainText("Childless title hover task");
     await expect(hoverCard.getByTestId("task-title-hover-subtasks")).toHaveCount(0);
   });
+
+  test("the open hover card does not swallow the click that opens the parent task", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    // The card is an interactive HoverCard, not a pointer-events-none tooltip,
+    // so it really does sit over the board once open. Opening the parent task
+    // by clicking its card is the board's primary action and must survive.
+    const { parent } = await seedParentWithSubtasks(apiClient, seedData, "Clickable parent card");
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    const card = kanban.taskCard(parent.id);
+    await expect(card).toBeVisible({ timeout: 45_000 });
+
+    const title = card.getByTestId("task-card-title");
+    await title.hover();
+    await expect(testPage.getByTestId("task-title-hover-card")).toBeVisible();
+
+    await title.click();
+    await expect(testPage).toHaveURL(new RegExp(`/t/${parent.id}`));
+  });
 });

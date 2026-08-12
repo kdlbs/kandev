@@ -119,6 +119,45 @@ describe("MRTaskIcon", () => {
     expect(document.body.textContent).not.toContain("|");
   });
 
+  it("AC1/AC24: the multi-MR badge renders one summary entry per MR, separated", () => {
+    renderMRTaskIcon([
+      makeMR({ id: "a", mr_iid: 11, mr_title: "First linked MR", pipeline_state: "success" }),
+      makeMR({ id: "b", mr_iid: 12, mr_title: "Second linked MR", pipeline_state: "failure" }),
+    ]);
+    fireEvent.pointerEnter(screen.getByTestId(BADGE_TEST_ID), { pointerType: "mouse" });
+
+    // Radix force-mounts a measurement copy alongside the visible portal, so
+    // scope to one summary rather than counting matches across the document.
+    const summary = screen.getAllByTestId("mr-task-status-summary")[0];
+    const entries = summary.querySelectorAll('[data-testid="mr-task-status-entry"]');
+    expect(entries).toHaveLength(2);
+    expect(entries[0].textContent).toContain("MR !11");
+    expect(entries[0].textContent).toContain("First linked MR");
+    expect(entries[0].textContent).toContain("Passed");
+    expect(entries[1].textContent).toContain("MR !12");
+    expect(entries[1].textContent).toContain("Second linked MR");
+    expect(entries[1].textContent).toContain("Failed");
+    // Only the trailing entries carry the divider.
+    expect(entries[0].className).not.toContain("border-t");
+    expect(entries[1].className).toContain("border-t");
+  });
+
+  it("AC7: the multi-MR badge reports ready-to-merge only when every open MR is ready", () => {
+    const ready = {
+      pipeline_state: "success" as const,
+      detailed_merge_status: "mergeable",
+    };
+    renderMRTaskIcon([makeMR({ id: "a", ...ready }), makeMR({ id: "b", mr_iid: 2, ...ready })]);
+    expect(screen.getByTestId(BADGE_TEST_ID).getAttribute("data-mr-ready-to-merge")).toBe("true");
+
+    cleanup();
+    renderMRTaskIcon([
+      makeMR({ id: "a", ...ready }),
+      makeMR({ id: "b", mr_iid: 2, pipeline_state: "failure" }),
+    ]);
+    expect(screen.getByTestId(BADGE_TEST_ID).getAttribute("data-mr-ready-to-merge")).toBe("false");
+  });
+
   it("malformed store value still bails to null instead of throwing", () => {
     function Fixture() {
       const setTaskMRs = useAppStore((s) => s.setTaskMRs);
