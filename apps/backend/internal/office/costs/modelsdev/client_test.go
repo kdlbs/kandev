@@ -116,6 +116,33 @@ func TestClient_Lookup(t *testing.T) {
 	}
 }
 
+// CatalogVersion implements shared.PricingCatalogVersioner: "" before
+// anything has loaded, and a non-empty RFC3339 timestamp once the cache
+// has warmed from disk or refreshed from the network — models.dev's
+// dataset carries no version field of its own, so the writer needs this
+// "as-of" signal to attribute a models_dev_list-priced row.
+func TestClient_CatalogVersion(t *testing.T) {
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "models-dev.json")
+	c, _ := newTestClient(t, cachePath)
+
+	if v := c.CatalogVersion(); v != "" {
+		t.Fatalf("CatalogVersion before any load = %q, want empty", v)
+	}
+
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	v := c.CatalogVersion()
+	if v == "" {
+		t.Fatal("CatalogVersion after refresh = empty, want a timestamp")
+	}
+	if _, err := time.Parse(time.RFC3339, v); err != nil {
+		t.Errorf("CatalogVersion = %q, not RFC3339: %v", v, err)
+	}
+}
+
 // codex-acp model ids carry a /<effort> suffix and use dotted
 // versions. Normalize strips the effort; the dataset uses dotted form
 // too so the verbatim lookup hits.

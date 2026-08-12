@@ -149,6 +149,20 @@ func (c *Client) LookupModelInfo(ctx context.Context, modelID string) (ModelInfo
 	return ModelInfo{}, false
 }
 
+// CatalogVersion implements shared.PricingCatalogVersioner. Returns the
+// on-disk cache's load time in RFC3339 (UTC), or "" when nothing has been
+// loaded yet (cold cache, no Lookup call has run). models.dev's dataset
+// carries no version field of its own (see datasetEntry below) — the
+// cache load/fetch time is the honest "as-of" identifier available.
+func (c *Client) CatalogVersion() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.loadedAt.IsZero() {
+		return ""
+	}
+	return c.loadedAt.UTC().Format(time.RFC3339)
+}
+
 // warmFromDisk reads the cache file into cacheBuf so subsequent
 // lookups can parse individual model entries lazily. Missing or
 // unreadable cache is non-fatal — the next refresh tick warms it.

@@ -258,6 +258,16 @@ func (r *Repository) createCostTables() error {
 	// 10000 when rendering dollars. The estimated flag is set when
 	// token counts were synthesised (e.g. cumulative-delta inference for
 	// codex-acp) rather than reported directly by the agent.
+	//
+	// tokens_cached_read / tokens_cached_write / turn_id / usage_event_id /
+	// cost_source / rate_*_per_million / pricing_catalog_version /
+	// cost_contract_version have deliberately NO DEFAULT: an absent default
+	// is what makes a fresh row's un-set columns NULL rather than 0, matching
+	// the ALTER-based migration in migrateCostEventContract (which the same
+	// columns must stay byte-identical to — see base_migrations.go). NULL
+	// means "not recorded" (legacy row, or an adapter with no per-turn usage
+	// frame); 0 would silently claim zero cache activity. See
+	// docs/kandev/TODOS.md P1.
 	_, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS office_cost_events (
 		id TEXT PRIMARY KEY,
@@ -269,9 +279,20 @@ func (r *Repository) createCostTables() error {
 		provider TEXT DEFAULT '',
 		tokens_in INTEGER DEFAULT 0,
 		tokens_cached_in INTEGER DEFAULT 0,
+		tokens_cached_read INTEGER,
+		tokens_cached_write INTEGER,
 		tokens_out INTEGER DEFAULT 0,
 		cost_subcents INTEGER NOT NULL DEFAULT 0,
 		estimated INTEGER NOT NULL DEFAULT 0,
+		turn_id TEXT,
+		usage_event_id TEXT,
+		cost_source TEXT,
+		rate_input_per_million INTEGER,
+		rate_cached_read_per_million INTEGER,
+		rate_cached_write_per_million INTEGER,
+		rate_output_per_million INTEGER,
+		pricing_catalog_version TEXT,
+		cost_contract_version INTEGER,
 		occurred_at TIMESTAMP NOT NULL,
 		created_at TIMESTAMP NOT NULL
 	);
@@ -286,6 +307,10 @@ func (r *Repository) createCostTables() error {
 	-- full table scan per task_sessions row - measured at 76.72s at a modest
 	-- 4,000 sessions / 80,000 events versus 0.17s indexed.
 	CREATE INDEX IF NOT EXISTS idx_office_cost_events_session_id ON office_cost_events(session_id);
+	-- uniq_office_cost_usage_event is created by migrateCostEventContract
+	-- (base_migrations.go), not here: schema init runs before migrations,
+	-- so indexing usage_event_id inline would crash a pre-migration
+	-- database that doesn't have the column yet.
 
 	CREATE TABLE IF NOT EXISTS office_budget_policies (
 		id TEXT PRIMARY KEY,

@@ -662,14 +662,24 @@ func (p SessionTodosEventPayload) GetSessionID() string {
 // AgentID is the lifecycle execution.ID (UUID); AgentType is the CLI engine
 // slug (claude-acp, codex-acp, ...). The office cost subscriber derives the
 // provider name from AgentType — AgentID is kept for legacy consumers.
+//
+// TurnID and UsageEventID are resolved/minted at the publish site
+// (orchestrator's publishPromptUsage), not by a downstream consumer:
+// TurnID because the turn is only reliably known there (active-turn state
+// plus the terminal-execution marker), and UsageEventID because minting it
+// once at the point of publish — rather than per-consumer — is what makes
+// it a stable idempotency key across event redelivery. Both are empty when
+// unavailable (e.g. no active turn), never a synthesized placeholder.
 type SessionPromptUsageEventPayload struct {
-	TaskID    string               `json:"task_id"`
-	SessionID string               `json:"session_id"`
-	AgentID   string               `json:"agent_id"`
-	AgentType string               `json:"agent_type,omitempty"`
-	Model     string               `json:"model,omitempty"`
-	Usage     *streams.PromptUsage `json:"usage"`
-	Timestamp string               `json:"timestamp"`
+	TaskID       string               `json:"task_id"`
+	SessionID    string               `json:"session_id"`
+	AgentID      string               `json:"agent_id"`
+	AgentType    string               `json:"agent_type,omitempty"`
+	Model        string               `json:"model,omitempty"`
+	Usage        *streams.PromptUsage `json:"usage"`
+	Timestamp    string               `json:"timestamp"`
+	TurnID       string               `json:"turn_id,omitempty"`
+	UsageEventID string               `json:"usage_event_id,omitempty"`
 }
 
 // GetSessionID returns the session ID for this event (used by event routing).

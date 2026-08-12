@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -117,13 +116,15 @@ type AgentLifecycleData struct {
 }
 
 type PromptUsageData struct {
-	TaskID    string      `json:"task_id"`
-	SessionID string      `json:"session_id"`
-	AgentID   string      `json:"agent_id"`
-	AgentType string      `json:"agent_type"`
-	Model     string      `json:"model"`
-	Provider  string      `json:"provider"`
-	Usage     UsageTokens `json:"usage"`
+	TaskID       string      `json:"task_id"`
+	SessionID    string      `json:"session_id"`
+	AgentID      string      `json:"agent_id"`
+	AgentType    string      `json:"agent_type"`
+	Model        string      `json:"model"`
+	Provider     string      `json:"provider"`
+	Usage        UsageTokens `json:"usage"`
+	TurnID       string      `json:"turn_id,omitempty"`
+	UsageEventID string      `json:"usage_event_id,omitempty"`
 }
 
 // UsageTokens mirrors streams.PromptUsage on the wire. All counts are int64
@@ -522,7 +523,9 @@ func (s *Service) tryPostStartFallback(
 
 // handlePromptUsage records a cost event from a session/prompt usage
 // update. Cost resolution follows the three-layer order from
-// docs/specs/office-costs/spec.md:
+// docs/specs/office-costs/spec.md, and CostSource on the row records which
+// layer actually produced the dollar amount (see resolveCostForUsage in
+// prompt_usage_cost.go — distinct from Estimated, a token-synthesis flag):
 //
 //  1. Provider-reported cost (Layer A) — claude-acp emits exact USD per
 //     turn on usage_update.cost.amount; the adapter forwards this as
@@ -532,46 +535,50 @@ func (s *Service) tryPostStartFallback(
 //     (default / sonnet / haiku) with no real-name mapping.
 //  2. models.dev (Layer B) — when tokens are reported but no cost,
 //     normalize the model id and look up pricing. On miss the row
-//     records cost_subcents=0 with estimated=true.
+//     records cost_subcents=0 with estimated=true and cost_source=unpriced.
 //
-// After insert the session totals (tokens_in / tokens_cached_in / tokens_out /
-// cost_subcents) are incremented on task_sessions, and any applicable budget
-// policy is evaluated. Estimated rows count toward budget totals at face value.
+// buildCostEvent (prompt_usage_cost.go) also records the cache read/write
+// split (NULL when Usage.Estimated — see its doc comment) and turn_id /
+// usage_event_id threaded from the publish site. After insert the session
+// totals (tokens_in / tokens_cached_in / tokens_out / cost_subcents) are
+// incremented on task_sessions, and any applicable budget policy is
+// evaluated. Estimated rows count toward budget totals at face value.
+// Every early return and the insert path record a writer-health metric
+// (cost_metrics.go) so a silently-stopped writer is observable.
 func (s *Service) handlePromptUsage(ctx context.Context, event *bus.Event) error {
 	data, err := decodeEventData[PromptUsageData](event)
-	if err != nil || data.TaskID == "" || data.SessionID == "" {
+	if err != nil {
+		s.recordCostEventDropped(costDropReasonDecodeError, "")
+		return nil
+	}
+	if data.TaskID == "" || data.SessionID == "" {
+		s.recordCostEventDropped(costDropReasonMissingIDs, data.TaskID)
 		return nil
 	}
 	fields, err := s.repo.GetTaskExecutionFields(ctx, data.TaskID)
 	if err != nil {
+		s.recordCostEventDropped(costDropReasonTaskFieldsError, data.TaskID)
 		return nil
 	}
 
-	costSubcents, estimated := s.resolveCostForUsage(ctx, *data)
+	resolution := s.resolveCostForUsage(ctx, *data)
 	provider := resolveProvider(*data)
-	tokensCachedIn := data.Usage.CachedReadTokens + data.Usage.CachedWriteTokens
+	costEvent := buildCostEvent(*data, fields, s.projectIDForTask(ctx, data.TaskID), provider, resolution)
 
-	costEvent := &models.CostEvent{
-		SessionID:      data.SessionID,
-		TaskID:         data.TaskID,
-		AgentProfileID: fields.AssigneeAgentProfileID,
-		ProjectID:      s.projectIDForTask(ctx, data.TaskID),
-		Model:          data.Model,
-		Provider:       provider,
-		TokensIn:       data.Usage.InputTokens,
-		TokensCachedIn: tokensCachedIn,
-		TokensOut:      data.Usage.OutputTokens,
-		CostSubcents:   costSubcents,
-		Estimated:      estimated,
-		OccurredAt:     time.Now().UTC(),
-	}
+
 	if err := s.repo.CreateCostEvent(ctx, costEvent); err != nil {
+		if errors.Is(err, sqlite.ErrDuplicateUsageEvent) {
+			s.recordCostEventDropped(costDropReasonDuplicate, data.TaskID)
+			return nil
+		}
+		s.recordCostEventDropped(costDropReasonInsertError, data.TaskID)
 		return err
 	}
+	s.recordCostEventWritten(string(resolution.source), provider)
 
 	s.incrementSessionUsageTotals(
 		ctx, data.SessionID,
-		data.Usage.InputTokens, tokensCachedIn, data.Usage.OutputTokens, costSubcents,
+		data.Usage.InputTokens, costEvent.TokensCachedIn, data.Usage.OutputTokens, resolution.costSubcents,
 	)
 
 	if fields.WorkspaceID != "" {
@@ -583,39 +590,6 @@ func (s *Service) handlePromptUsage(ctx context.Context, event *bus.Event) error
 		}
 	}
 	return nil
-}
-
-// resolveCostForUsage applies the Layer A / Layer B lookup. Returns
-// (costSubcents, estimated). Layer A wins when the adapter forwarded a
-// non-zero provider-reported cost (claude-acp's usage_update.cost.amount).
-// Layer B (models.dev) is queried when a PricingLookup is wired; on miss
-// or when no PricingLookup is configured the row records 0/estimated.
-func (s *Service) resolveCostForUsage(
-	ctx context.Context, data PromptUsageData,
-) (int64, bool) {
-	if data.Usage.ProviderReportedCostSubcents > 0 {
-		return data.Usage.ProviderReportedCostSubcents, data.Usage.Estimated
-	}
-	if s.pricingLookup == nil || data.Model == "" {
-		return 0, true
-	}
-	pricing, ok := s.pricingLookup.LookupForModel(ctx, data.Model)
-	if !ok {
-		return 0, true
-	}
-	cost := costs.CalculateCostSubcents(
-		data.Usage.InputTokens,
-		data.Usage.CachedReadTokens,
-		data.Usage.CachedWriteTokens,
-		data.Usage.OutputTokens,
-		costs.ModelPricing{
-			InputPerMillion:       pricing.InputPerMillion,
-			CachedReadPerMillion:  pricing.CachedReadPerMillion,
-			CachedWritePerMillion: pricing.CachedWritePerMillion,
-			OutputPerMillion:      pricing.OutputPerMillion,
-		},
-	)
-	return cost, data.Usage.Estimated
 }
 
 // resolveProvider derives the provider id for the cost row. AgentType

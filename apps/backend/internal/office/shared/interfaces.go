@@ -150,6 +150,22 @@ type PricingLookup interface {
 	LookupForModel(ctx context.Context, modelID string) (ModelPricing, bool)
 }
 
+// PricingCatalogVersioner is an optional capability a PricingLookup
+// implementation may satisfy to report an "as-of" identifier for the
+// pricing data it served — recorded on CostEvent.PricingCatalogVersion so a
+// models.dev-list-priced row can be traced back to the catalogue state that
+// produced it. Deliberately separate from PricingLookup (rather than
+// widening it) so existing implementers and test fakes are unaffected;
+// callers type-assert and treat a missing implementation as "no version
+// available" (NULL column), not an error.
+type PricingCatalogVersioner interface {
+	// CatalogVersion returns an identifier for the currently-served
+	// pricing data, or "" when none is available yet (e.g. cold cache,
+	// nothing loaded). models.dev's dataset carries no version field of
+	// its own, so implementations report the load/fetch time instead.
+	CatalogVersion() string
+}
+
 // SessionUsageWriter increments the cumulative tokens/cost columns on
 // task_sessions when a cost event lands. Implemented by the task repo.
 type SessionUsageWriter interface {

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
@@ -1867,7 +1868,17 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 		s.storeResumeToken(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID, payload.Data.ACPSessionID, lastMsgUUID)
 	}
 
-	s.publishPromptUsage(ctx, payload, session)
+	// terminalMarker.turnID is only a valid snapshot for THIS event when
+	// terminalCompleteStream is true — a marker found but not yet allowed
+	// to complete-stream can carry a turn id captured for a prior mark
+	// (see markTerminalExecution), which would misattribute this usage
+	// event's cost. The live lookup mirrors that snapshot's own read path
+	// (currentTurnIDForSession) without side effects.
+	promptUsageTurnID := terminalMarker.turnID
+	if !terminalCompleteStream {
+		promptUsageTurnID = s.currentTurnIDForSession(ctx, payload.SessionID)
+	}
+	s.publishPromptUsage(ctx, payload, session, promptUsageTurnID)
 
 	if terminalCompleteStream {
 		s.saveAgentTextForTurn(ctx, payload, terminalMarker.turnID)
@@ -2133,15 +2144,24 @@ func (s *Service) publishAgentPlanForTurn(ctx context.Context, payload *lifecycl
 	}
 }
 
-// publishPromptUsage broadcasts prompt token usage to the WebSocket for the frontend.
-// Model and agent type (CLI engine slug) come from payload first; when absent
-// (which is the common case — CurrentModelID only travels on session_models
-// frames) we fall back to the session's AgentProfileSnapshot, populated at
-// session creation and refreshed by persistSessionModel on ACP model updates.
+// publishPromptUsage broadcasts prompt token usage to the WebSocket for the
+// frontend and to the office cost subscriber. Model and agent type (CLI
+// engine slug) come from payload first; when absent (which is the common
+// case — CurrentModelID only travels on session_models frames) we fall back
+// to the session's AgentProfileSnapshot, populated at session creation and
+// refreshed by persistSessionModel on ACP model updates.
+//
+// turnID is resolved by the caller (handleCompleteStreamEvent), not here:
+// the terminal-execution snapshot and the live active-turn lookup are both
+// call-site concerns. usageEventID is minted here, once, at the single
+// publish site — that is what makes it a stable idempotency key across
+// event redelivery; a downstream consumer minting its own would defeat the
+// point.
 func (s *Service) publishPromptUsage(
 	ctx context.Context,
 	payload *lifecycle.AgentStreamEventPayload,
 	session *models.TaskSession,
+	turnID string,
 ) {
 	sessionID := payload.SessionID
 	if sessionID == "" || s.eventBus == nil || payload.Data.Usage == nil {
@@ -2151,13 +2171,15 @@ func (s *Service) publishPromptUsage(
 	model, agentType := resolvePromptUsageLabels(payload, session)
 
 	eventPayload := lifecycle.SessionPromptUsageEventPayload{
-		TaskID:    payload.TaskID,
-		SessionID: sessionID,
-		AgentID:   payload.AgentID,
-		AgentType: agentType,
-		Model:     model,
-		Usage:     payload.Data.Usage,
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		TaskID:       payload.TaskID,
+		SessionID:    sessionID,
+		AgentID:      payload.AgentID,
+		AgentType:    agentType,
+		Model:        model,
+		Usage:        payload.Data.Usage,
+		Timestamp:    time.Now().UTC().Format(time.RFC3339),
+		TurnID:       turnID,
+		UsageEventID: uuid.New().String(),
 	}
 	subject := events.BuildSessionPromptUsageSubject(sessionID)
 	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionPromptUsageUpdated, "orchestrator", eventPayload))
