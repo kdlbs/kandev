@@ -32,6 +32,10 @@ webhooks:
   - key: "test-hook"
     description: "Records inbound webhooks for e2e polling"
     method: "POST"
+  - key: "public-hook"
+    description: "Public counterpart of test-hook for exercising the anonymous auth-gate opt-in"
+    method: "POST"
+    public: true
 
 ui:
   bundle: "/ui/bundle.js"

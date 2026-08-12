@@ -30,9 +30,12 @@ func TestFixtureManifest_ParsesAndValidates(t *testing.T) {
 	require.True(t, m.Capabilities.State)
 	require.True(t, m.Capabilities.UserState)
 
-	require.Len(t, m.Webhooks, 1)
+	require.Len(t, m.Webhooks, 2)
 	require.Equal(t, "test-hook", m.Webhooks[0].Key)
 	require.Equal(t, "POST", m.Webhooks[0].Method)
+	require.False(t, m.Webhooks[0].Public, "test-hook exercises the private (auth-gated) webhook path")
+	require.Equal(t, "public-hook", m.Webhooks[1].Key)
+	require.True(t, m.Webhooks[1].Public, "public-hook exercises the anonymous auth-gate opt-in")
 }
 
 func TestFixtureManifest_DeclaresHostPlatformExecutable(t *testing.T) {

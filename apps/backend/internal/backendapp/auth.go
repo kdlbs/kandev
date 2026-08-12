@@ -28,6 +28,13 @@ type pluginSSOBridge struct {
 	auth *auth.Service
 }
 
+// SessionCookieName returns the name of Kandev's own session cookie, used by
+// the plugin webhook relay to strip it from headers forwarded to a plugin
+// subprocess.
+func (b pluginSSOBridge) SessionCookieName() string {
+	return b.auth.CookieName()
+}
+
 func (b pluginSSOBridge) LoginExternal(c *gin.Context, provider, subject, email, displayName string) error {
 	_, token, err := b.auth.AuthenticateExternal(c.Request.Context(), auth.ExternalIdentity{
 		Provider:    provider,

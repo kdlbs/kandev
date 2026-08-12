@@ -109,11 +109,21 @@ type AuthProvider struct {
 	Initiate    string `yaml:"initiate" json:"initiate"`
 }
 
-// Webhook is a proxied external webhook endpoint the plugin declares.
+// Webhook is a proxied external webhook endpoint the plugin declares. Public
+// opts the endpoint out of the host's authentication gate: false (the
+// default) means the host requires a real caller identity (session or PAT,
+// or the synthetic identity injected while auth is disabled) before relaying
+// to the plugin subprocess; true means the host relays anonymous requests
+// unchecked, on the assertion that the plugin's own handler verifies the
+// caller (external signature, IdP redirect, shared secret, etc.). The host
+// can only enforce presence of a caller identity — it cannot verify that a
+// `public: true` webhook actually authenticates its callers, so this is a
+// manifest author's assertion, not a host-verified guarantee.
 type Webhook struct {
 	Key         string `yaml:"key" json:"key"`
 	Description string `yaml:"description,omitempty" json:"description,omitempty"`
 	Method      string `yaml:"method,omitempty" json:"method,omitempty"`
+	Public      bool   `yaml:"public,omitempty" json:"public,omitempty"`
 }
 
 // UISection declares UI pages the plugin contributes, and/or a native UI
