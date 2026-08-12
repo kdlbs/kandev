@@ -9,15 +9,15 @@ import (
 	"github.com/kandev/kandev/internal/testutil"
 )
 
-// The cached-token rollup (officeCostEventsTableExists,
-// backfillSessionTokensCachedIn, IncrementTaskSessionUsage) is dialect-sensitive
-// in a way the SQLite tests in session_usage_test.go and session_test.go cannot
-// exercise: SQLite's INTEGER is 64-bit, so a column declared INTEGER never
-// overflows there. On Postgres, INTEGER is int4 (max 2,147,483,647), and
-// office_cost_events.tokens_cached_in routinely accumulates well past that for
-// a single long-running session (the reported bug measured up to 98,805,109 on
-// one already-completed task). Without this file the type of the new column
-// was never exercised against Postgres at all.
+// The cached-token rollup (BackfillSessionTokensCachedIn,
+// IncrementTaskSessionUsage) is dialect-sensitive in a way the SQLite tests in
+// session_usage_test.go and session_test.go cannot exercise: SQLite's INTEGER
+// is 64-bit, so a column declared INTEGER never overflows there. On Postgres,
+// INTEGER is int4 (max 2,147,483,647), and office_cost_events.tokens_cached_in
+// routinely accumulates well past that for a single long-running session (the
+// reported bug measured up to 98,805,109 on one already-completed task).
+// Without this file the type of the new column was never exercised against
+// Postgres at all.
 //
 // Skips unless KANDEV_TEST_POSTGRES_DSN is set.
 
@@ -38,35 +38,6 @@ func seedPostgresTaskSession(t *testing.T, repo *Repository, taskID, sessionID s
 	}
 }
 
-// TestPostgresOfficeCostEventsTableExists is the Postgres counterpart to
-// TestOfficeCostEventsTableExists: the guard reads information_schema.tables
-// on this dialect, a code path the SQLite tests give no signal about.
-func TestPostgresOfficeCostEventsTableExists(t *testing.T) {
-	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
-	repo, err := NewWithDB(db, db, nil)
-	if err != nil {
-		t.Fatalf("init postgres schema: %v", err)
-	}
-
-	exists, err := repo.officeCostEventsTableExists()
-	if err != nil {
-		t.Fatalf("officeCostEventsTableExists: %v", err)
-	}
-	if exists {
-		t.Fatal("expected office_cost_events to not exist before the office repo creates it")
-	}
-
-	createOfficeCostEventsTable(t, repo)
-
-	exists, err = repo.officeCostEventsTableExists()
-	if err != nil {
-		t.Fatalf("officeCostEventsTableExists after create: %v", err)
-	}
-	if !exists {
-		t.Fatal("expected office_cost_events to exist after creation")
-	}
-}
-
 // TestPostgresBackfillSessionTokensCachedIn_SumsLedger is the Postgres
 // counterpart to TestBackfillSessionTokensCachedIn_SumsLedger: proves the
 // correlated-subquery UPDATE and its CREATE INDEX IF NOT EXISTS both work
@@ -83,7 +54,7 @@ func TestPostgresBackfillSessionTokensCachedIn_SumsLedger(t *testing.T) {
 	insertOfficeCostEvent(t, repo, "cost-2", "sess-backfill-pg", 1_194_891)
 	insertOfficeCostEvent(t, repo, "cost-other", "sess-other-pg", 555)
 
-	if err := repo.backfillSessionTokensCachedIn(); err != nil {
+	if _, err := repo.BackfillSessionTokensCachedIn(context.Background()); err != nil {
 		t.Fatalf("backfill: %v", err)
 	}
 
@@ -132,7 +103,7 @@ func TestPostgresBackfillSessionTokensCachedIn_HandlesValuesBeyondInt32Range(t *
 	// entire UPDATE down with it.
 	insertOfficeCostEvent(t, repo, "cost-normal", "sess-normal-pg", 1_000)
 
-	if err := repo.backfillSessionTokensCachedIn(); err != nil {
+	if _, err := repo.BackfillSessionTokensCachedIn(context.Background()); err != nil {
 		t.Fatalf("backfill must not error on a ledger sum beyond int32 range: %v", err)
 	}
 
