@@ -570,13 +570,28 @@ func flattenHeaders(h http.Header, sessionCookieName string) map[string]string {
 			}
 			joined = stripped
 		case "Authorization":
-			if strings.HasPrefix(strings.TrimPrefix(joined, "Bearer "), auth.PATPrefix) {
+			if isKandevPATCredential(joined) {
 				continue
 			}
 		}
 		out[k] = joined
 	}
 	return out
+}
+
+// isKandevPATCredential reports whether an Authorization header value carries
+// a kandev_pat_* token, with or without a bearer scheme prefix. RFC 9110 makes
+// the auth scheme case-insensitive, so "bearer kandev_pat_..." has to be
+// stripped just like "Bearer kandev_pat_...": httpmw.BearerToken would not have
+// authenticated such a request, but the credential still must not be relayed to
+// a plugin subprocess (which a public webhook would otherwise receive it as).
+func isKandevPATCredential(value string) bool {
+	const bearerPrefix = "Bearer "
+	token := strings.TrimSpace(value)
+	if len(token) > len(bearerPrefix) && strings.EqualFold(token[:len(bearerPrefix)], bearerPrefix) {
+		token = strings.TrimSpace(token[len(bearerPrefix):])
+	}
+	return strings.HasPrefix(token, auth.PATPrefix)
 }
 
 // stripSessionCookie removes the sessionCookieName cookie from a Cookie
