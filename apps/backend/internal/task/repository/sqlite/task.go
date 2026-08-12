@@ -336,7 +336,7 @@ func (r *Repository) insertTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 		return err
 	}
 	if task.AssigneeAgentProfileID != "" && task.WorkflowStepID != "" {
-		return upsertRunnerInTx(ctx, tx, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID)
+		return upsertRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID)
 	}
 	return nil
 }
@@ -403,53 +403,53 @@ func lockWorkflowStepForCapacity(ctx context.Context, tx *sql.Tx, driver string,
 // upsertRunnerInTx writes (or replaces) a 'runner' participant row for
 // (stepID, taskID) inside the provided transaction. Mirrors
 // workflow.Repository.SetTaskRunner but reuses the caller's tx.
-func upsertRunnerInTx(ctx context.Context, tx *sql.Tx, stepID, taskID, agentProfileID string) error {
+func upsertRunnerInTx(ctx context.Context, tx *sql.Tx, rebind func(string) string, stepID, taskID, agentProfileID string) error {
 	if stepID == "" || taskID == "" || agentProfileID == "" {
 		return nil
 	}
 	var existing string
-	err := tx.QueryRowContext(ctx, `SELECT id FROM workflow_step_participants
+	err := tx.QueryRowContext(ctx, rebind(`SELECT id FROM workflow_step_participants
 		WHERE step_id = ? AND task_id = ? AND role = 'runner' LIMIT 1`,
-		stepID, taskID).Scan(&existing)
+	), stepID, taskID).Scan(&existing)
 	if err == nil {
-		_, uerr := tx.ExecContext(ctx,
+		_, uerr := tx.ExecContext(ctx, rebind(
 			`UPDATE workflow_step_participants SET agent_profile_id = ? WHERE id = ?`,
-			agentProfileID, existing)
+		), agentProfileID, existing)
 		return uerr
 	}
 	if err != sql.ErrNoRows {
 		return err
 	}
 	id := uuid.New().String()
-	_, ierr := tx.ExecContext(ctx, `INSERT INTO workflow_step_participants
+	_, ierr := tx.ExecContext(ctx, rebind(`INSERT INTO workflow_step_participants
 		(id, step_id, task_id, role, agent_profile_id, decision_required, position)
 		VALUES (?, ?, ?, 'runner', ?, 0, 0)`,
-		id, stepID, taskID, agentProfileID)
+	), id, stepID, taskID, agentProfileID)
 	return ierr
 }
 
 // clearRunnerInTx removes any 'runner' participant row for (stepID, taskID).
-func clearRunnerInTx(ctx context.Context, tx *sql.Tx, stepID, taskID string) error {
+func clearRunnerInTx(ctx context.Context, tx *sql.Tx, rebind func(string) string, stepID, taskID string) error {
 	if stepID == "" || taskID == "" {
 		return nil
 	}
-	_, err := tx.ExecContext(ctx,
+	_, err := tx.ExecContext(ctx, rebind(
 		`DELETE FROM workflow_step_participants
 		 WHERE step_id = ? AND task_id = ? AND role = 'runner'`,
-		stepID, taskID)
+	), stepID, taskID)
 	return err
 }
 
 // syncRunnerInTx upserts the runner participant when agentProfileID is set,
 // otherwise clears it. No-op when stepID is empty.
-func syncRunnerInTx(ctx context.Context, tx *sql.Tx, stepID, taskID, agentProfileID string) error {
+func syncRunnerInTx(ctx context.Context, tx *sql.Tx, rebind func(string) string, stepID, taskID, agentProfileID string) error {
 	if stepID == "" {
 		return nil
 	}
 	if agentProfileID != "" {
-		return upsertRunnerInTx(ctx, tx, stepID, taskID, agentProfileID)
+		return upsertRunnerInTx(ctx, tx, rebind, stepID, taskID, agentProfileID)
 	}
-	return clearRunnerInTx(ctx, tx, stepID, taskID)
+	return clearRunnerInTx(ctx, tx, rebind, stepID, taskID)
 }
 
 // GetTask retrieves a task by ID
@@ -513,7 +513,7 @@ func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 	if rows == 0 {
 		return fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
 	}
-	return syncRunnerInTx(ctx, tx, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID)
+	return syncRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID)
 }
 
 // UpdateTaskWithWorkflowStepAdmission atomically moves a task into a workflow
@@ -910,7 +910,7 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 	if rows == 0 {
 		return fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
 	}
-	if err := syncRunnerInTx(ctx, tx, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
+	if err := syncRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -988,7 +988,7 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 	if rows == 0 {
 		return false, nil
 	}
-	if err := syncRunnerInTx(ctx, tx, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
+	if err := syncRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -2213,7 +2213,7 @@ func (r *Repository) RestoreTaskMessageRollbackIfSessionState(
 	if rows == 0 {
 		return false, tx.Commit()
 	}
-	if err := syncRunnerInTx(ctx, tx, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
+	if err := syncRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
