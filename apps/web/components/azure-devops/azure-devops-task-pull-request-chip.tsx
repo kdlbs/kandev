@@ -31,7 +31,7 @@ export function AzureDevOpsTaskPullRequestChip({ taskId }: { taskId: string | nu
           asChild
           variant="outline"
           size="sm"
-          className={`h-7 max-w-56 cursor-pointer gap-1.5 px-2 ${TONE_CLASS[presentation.tone]}`}
+          className={`h-7 max-w-56 shrink-0 cursor-pointer gap-1.5 px-2 ${TONE_CLASS[presentation.tone]}`}
         >
           <a href={first.pullRequestUrl} target="_blank" rel="noreferrer" aria-label={label}>
             <IconBrandAzure className="h-3.5 w-3.5 shrink-0" />

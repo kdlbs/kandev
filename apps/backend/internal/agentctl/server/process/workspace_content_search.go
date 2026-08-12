@@ -84,7 +84,7 @@ func (m *Manager) contentSearchTrackers() []*WorkspaceTracker {
 		}
 		return trackers
 	}
-	if root != nil && root.RepositoryName() != "" {
+	if root != nil && root.gitIndexPath != "" {
 		trackers = append(trackers, root)
 	}
 	trackers = append(trackers, repositories...)

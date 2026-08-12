@@ -373,6 +373,49 @@ describe("mergeInitialState — sidebar views from boot settings", () => {
   });
 });
 
+describe("hydrateState — user settings revisions", () => {
+  it("applies a newer boot snapshot after an earlier websocket update", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.userSettings.loaded = true;
+      draft.userSettings.revision = 1;
+      draft.userSettings.appStatusBarEnabled = false;
+      hydrateState(draft, {
+        userSettings: {
+          loaded: true,
+          revision: 2,
+          appStatusBarEnabled: true,
+        },
+      } as unknown as Partial<AppState>);
+    });
+
+    expect(result.userSettings).toMatchObject({
+      loaded: true,
+      revision: 2,
+      appStatusBarEnabled: true,
+    });
+  });
+
+  it("keeps a newer websocket snapshot when boot hydration is older", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.userSettings.loaded = true;
+      draft.userSettings.revision = 3;
+      draft.userSettings.appStatusBarEnabled = true;
+      hydrateState(draft, {
+        userSettings: {
+          loaded: true,
+          revision: 2,
+          appStatusBarEnabled: false,
+        },
+      } as unknown as Partial<AppState>);
+    });
+
+    expect(result.userSettings).toMatchObject({
+      revision: 3,
+      appStatusBarEnabled: true,
+    });
+  });
+});
+
 describe("hydrateState — sidebar views from user settings", () => {
   it("hydrates active view and draft from backend user settings", () => {
     const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {

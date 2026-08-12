@@ -7,6 +7,29 @@ import { SETTINGS_DISCOVERY_DEFINITIONS, SETTINGS_DISCOVERY_ROUTE_EXCLUSIONS } f
 import { resolveSettingsDiscovery } from "./resolve";
 
 const GITHUB_CONNECTION_ID = "integration-github-connection";
+const STABLE_CONTROL_IDS = [
+  "appearance-color-theme",
+  "appearance-startup-page",
+  "appearance-display-language",
+  "terminal-preferred-shell",
+  "notifications-desktop",
+  "notifications-sound",
+  "keyboard-submit-shortcut",
+  "keyboard-command-shortcuts",
+  "task-actions-agent-profile",
+  "task-actions-archive-confirmation",
+  "task-actions-transcript-navigation",
+  "layouts-profiles",
+  "sprites-connection",
+  "sprites-instances",
+  "voice-enable",
+  "voice-engine",
+  "voice-behavior",
+  "utility-default-model",
+  "utility-actions",
+  "external-mcp-endpoints",
+  "external-mcp-snippets",
+] as const;
 
 const translate = (key: string) =>
   (
@@ -44,30 +67,18 @@ describe("settings discovery catalog invariants", () => {
   it("indexes stable controls across general and standalone settings", () => {
     const ids = SETTINGS_DISCOVERY_DEFINITIONS.map((entry) => entry.id);
 
-    expect(ids).toEqual(
-      expect.arrayContaining([
-        "appearance-color-theme",
-        "appearance-startup-page",
-        "appearance-display-language",
-        "terminal-preferred-shell",
-        "notifications-desktop",
-        "notifications-sound",
-        "keyboard-submit-shortcut",
-        "keyboard-command-shortcuts",
-        "task-actions-agent-profile",
-        "task-actions-archive-confirmation",
-        "task-actions-transcript-navigation",
-        "layouts-profiles",
-        "sprites-connection",
-        "sprites-instances",
-        "voice-enable",
-        "voice-engine",
-        "voice-behavior",
-        "utility-default-model",
-        "utility-actions",
-        "external-mcp-endpoints",
-        "external-mcp-snippets",
-      ]),
+    expect(ids).toEqual(expect.arrayContaining([...STABLE_CONTROL_IDS]));
+
+    const voiceEntries = SETTINGS_DISCOVERY_DEFINITIONS.filter((entry) =>
+      entry.id.startsWith("voice-"),
+    );
+    expect(voiceEntries).toHaveLength(6);
+    expect(new Set(voiceEntries.map((entry) => entry.href))).toEqual(
+      new Set(["/settings/preferences/task-behavior"]),
+    );
+    expect(new Set(voiceEntries.map((entry) => entry.groupId))).toEqual(new Set(["preferences"]));
+    expect(voiceEntries.find((entry) => entry.id === "voice-mode")?.targetId).toBe(
+      "setting-voice-mode",
     );
   });
 

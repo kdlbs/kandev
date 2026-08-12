@@ -37,6 +37,7 @@ import {
   type DiscoveredAgent,
 } from "@/lib/settings/agent-display-order";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
+import { HideDisabledAgentProfilesSetting } from "@/app/settings/agents/hide-disabled-agent-profiles-setting";
 import type { AgentDiscovery, Agent, AvailableAgent, RuntimeUpdate } from "@/lib/types/http";
 
 type InstalledAgentsSectionProps = {
@@ -366,6 +367,8 @@ export default function AgentsSettingsPage() {
       </div>
 
       <Separator />
+
+      <HideDisabledAgentProfilesSetting />
 
       <InstalledAgentsSection
         installedAgents={installedAgents}

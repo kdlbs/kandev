@@ -225,6 +225,7 @@ export const i18nGuardFiles = [
   "lib/i18n/**/*.{ts,tsx}",
   // Settings → Preferences — Appearance, Notifications, Terminal & Editors and
   // friends render straight from components/settings via the SPA route table.
+  "components/settings/app-status-bar-settings-card.tsx",
   "components/settings/general-settings.tsx",
   "components/settings/language-settings.tsx",
   "components/settings/notification-events-table.tsx",
@@ -265,7 +266,7 @@ export const i18nGuardFiles = [
   // The pages render from general-settings.tsx (already listed above); these
   // entries add the merged pages plus the per-setting cards those pages own.
   // Shortcut *names* still come from `lib/keyboard/shortcut-overrides.ts`, a
-  // registry shared with the un-migrated voice-mode page — deliberately not
+  // registry shared with the voice-mode settings section — deliberately not
   // migrated here.
   "components/settings/task-behavior-settings.tsx",
   "components/settings/terminal-editors-settings.tsx",
@@ -1007,7 +1008,7 @@ export const i18nGuardFiles = [
   // of them holds any copy at all, but the next migration should not have to
   // rediscover which ones are live:
   //
-  //   - `app/settings/prompts/page.tsx` and `app/settings/voice-mode/page.tsx`
+  //   - `app/settings/prompts/page.tsx`
   //     are unreferenced. `SETTINGS_ROUTES` in `src/settings-routes.tsx` renders
   //     `<PromptsSettings />` and `<VoiceModeSettings />` directly, so the SSR
   //     prefetch in those pages never runs. `external-mcp` and `utility-agents`
@@ -1096,7 +1097,6 @@ export const i18nGuardFiles = [
   "app/settings/external-mcp/**/*.{ts,tsx}",
   "app/settings/prompts/**/*.{ts,tsx}",
   "app/settings/utility-agents/**/*.{ts,tsx}",
-  "app/settings/voice-mode/**/*.{ts,tsx}",
   "components/settings/changelog-notification-card.tsx",
   "components/settings/changelog-settings.tsx",
   "components/settings/config-chat-agent-section.tsx",
@@ -1422,6 +1422,11 @@ export const i18nGuardFiles = [
   "components/gitlab/mr-files-section.tsx",
   "components/gitlab/mr-overview-section.tsx",
   "components/gitlab/mr-reviewer-control.tsx",
+  "components/gitlab/mr-status-chip.tsx",
+  "components/gitlab/mr-status-chip-drawer.tsx",
+  "components/gitlab/mr-status-chip-popover.tsx",
+  "components/gitlab/mr-status-chip-selection.ts",
+  "components/gitlab/mr-status-chip-trigger.tsx",
   "components/gitlab/mr-topbar-button.tsx",
   "components/gitlab/my-gitlab/issue-list.tsx",
   "components/gitlab/my-gitlab/list-toolbar.tsx",

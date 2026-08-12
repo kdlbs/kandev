@@ -424,6 +424,32 @@ func TestPATClient_ListPRCommits(t *testing.T) {
 	}
 }
 
+func TestPATClient_ListPRCommits_FollowsLinkHeaderPages(t *testing.T) {
+	c, requests := newLinkPaginatedPATServer(t, "/repos/acme/widget/pulls/42/commits", []string{
+		`[
+			{"sha":"aaa","commit":{"message":"first","author":{"date":"2026-01-07T10:00:00Z"}}},
+			{"sha":"bbb","commit":{"message":"second","author":{"date":"2026-01-08T10:00:00Z"}}}
+		]`,
+		`[
+			{"sha":"ccc","commit":{"message":"provider head","author":{"date":"2026-01-09T10:00:00Z"}}}
+		]`,
+	})
+
+	commits, err := c.ListPRCommits(context.Background(), "acme", "widget", 42)
+	if err != nil {
+		t.Fatalf("ListPRCommits: %v", err)
+	}
+	if len(commits) != 3 {
+		t.Fatalf("commits = %d, want all pages (3)", len(commits))
+	}
+	if commits[2].SHA != "ccc" {
+		t.Errorf("last commit = %q, want the second-page provider head", commits[2].SHA)
+	}
+	if len(*requests) != 2 {
+		t.Fatalf("requests = %d, want 2 pages", len(*requests))
+	}
+}
+
 func TestPATClient_ListPRCommits_Error(t *testing.T) {
 	c, _ := newRecordingPATServer(t, nil)
 	if _, err := c.ListPRCommits(context.Background(), "acme", "widget", 42); err == nil ||

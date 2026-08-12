@@ -81,7 +81,6 @@ const SEGMENT_LABEL_KEYS: Record<string, string> = {
   updates: "system:navUpdates",
   users: "system:navUsers",
   "utility-agents": "settings:utilityAgents",
-  "voice-mode": "settings:voiceMode",
   workflows: "workflows:workflows",
   workspace: "common:workspace",
   workspaces: "common:workspaces",

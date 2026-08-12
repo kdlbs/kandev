@@ -1,5 +1,11 @@
 import { expect, test } from "../../fixtures/test-base";
 import {
+  captureAppStatusBarSettings,
+  restoreAppStatusBarSettings,
+  setAppStatusBarEnabled,
+  type AppStatusBarSettingsBaseline,
+} from "../../helpers/app-status-bar-settings";
+import {
   metricsUnavailableWasRendered,
   observeMetricsUnavailable,
 } from "./metrics-loading-observer";
@@ -11,16 +17,20 @@ type SystemMetricsDisplay = {
 
 test.describe("Mobile resource metrics display", () => {
   let baseline: SystemMetricsDisplay;
+  let statusBarBaseline: AppStatusBarSettingsBaseline;
 
   test.beforeEach(async ({ apiClient }) => {
     const settings = await apiClient.getUserSettings();
     baseline = settings.settings.system_metrics_display as SystemMetricsDisplay;
+    statusBarBaseline = await captureAppStatusBarSettings(apiClient);
+    await setAppStatusBarEnabled(apiClient, true);
   });
 
   test.afterEach(async ({ apiClient }) => {
     await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
       system_metrics_display: baseline,
     });
+    await restoreAppStatusBarSettings(apiClient, statusBarBaseline);
   });
 
   test("renders simplified metrics in the Status drawer", async ({ testPage }) => {

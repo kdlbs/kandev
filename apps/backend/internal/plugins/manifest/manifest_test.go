@@ -509,6 +509,36 @@ func TestParseKeybindingCombo_RejectsNoNonModifierKey(t *testing.T) {
 	}
 }
 
+func TestWebhookAccessAndBodyLimitValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		webhook Webhook
+		wantErr string
+	}{
+		{name: "legacy defaults", webhook: Webhook{Key: "transcribe"}},
+		{name: "authenticated 16 MiB", webhook: Webhook{Key: "transcribe", Access: "authenticated", MaxBodyBytes: 16 << 20}},
+		{name: "public over default ceiling", webhook: Webhook{Key: "transcribe", Access: "public", MaxBodyBytes: (4 << 20) + 1}, wantErr: "authenticated"},
+		{name: "unknown access", webhook: Webhook{Key: "transcribe", Access: "private"}, wantErr: "access"},
+		{name: "over host ceiling", webhook: Webhook{Key: "transcribe", MaxBodyBytes: (16 << 20) + 1}, wantErr: "max_body_bytes"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := validManifest(t)
+			m.Webhooks = []Webhook{tt.webhook}
+			err := m.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Validate() unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Validate() error = %v, want substring %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestParseKeybindingCombo_RejectsUnknownModifier(t *testing.T) {
 	err := parseKeybindingCombo("hyper+k")
 	if err == nil {

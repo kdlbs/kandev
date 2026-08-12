@@ -34,9 +34,11 @@ test.describe("Settings manual save", () => {
   }) => {
     const initial = await apiClient.getUserSettings();
     const initialLayout = initial.settings.changes_panel_layout === "tree" ? "tree" : "flat";
+    const initialStatusBarEnabled = initial.settings.app_status_bar_enabled === true;
     const nextLayout = initialLayout === "tree" ? "flat" : "tree";
 
     try {
+      await apiClient.saveUserSettings({ app_status_bar_enabled: true });
       await testPage.goto(APPEARANCE_PATH);
       await expect(
         testPage.getByRole("heading", { name: "Appearance", exact: true }),
@@ -113,6 +115,7 @@ test.describe("Settings manual save", () => {
       expect((await apiClient.getUserSettings()).settings.changes_panel_layout).toBe(nextLayout);
     } finally {
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+        app_status_bar_enabled: initialStatusBarEnabled,
         changes_panel_layout: initialLayout,
       });
     }

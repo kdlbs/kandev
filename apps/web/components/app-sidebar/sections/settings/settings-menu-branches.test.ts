@@ -15,6 +15,9 @@ import {
 const WORKSPACE_ID = "ws-1";
 const WORKSPACES_HREF = "/settings/workspaces";
 const WORKSPACES = [{ id: WORKSPACE_ID, name: "Main Workspace" }];
+// Hoisted so the filter tests can build fixtures without re-spelling the
+// display name (sonar duplicate-literal rule).
+const AGENT_DISPLAY_NAME = "Claude Code";
 const AGENTS = [
   {
     name: "claude-code",
@@ -191,6 +194,42 @@ describe("buildAgentsBranch", () => {
 
   it("drops an agent with no profiles rather than rendering a dead row", () => {
     expect(buildAgentsBranch([{ name: "empty", profiles: [] }])).toEqual([]);
+  });
+
+  it("omits disabled profiles from the branch only when the hide setting is on", () => {
+    const mixedAgent = {
+      name: "claude-code",
+      profiles: [
+        { id: "profile-1", name: "Default", agentDisplayName: AGENT_DISPLAY_NAME },
+        { id: "profile-2", name: "Retired", agentDisplayName: AGENT_DISPLAY_NAME, enabled: false },
+        { id: "profile-3", name: "Legacy", agentDisplayName: AGENT_DISPLAY_NAME },
+      ],
+    };
+
+    const [agent] = buildAgentsBranch([mixedAgent], undefined, true);
+
+    // Enabled and legacy (no `enabled` field) profiles stay; only `enabled ===
+    // false` is omitted.
+    expect(hrefsOf(agent.children ?? [])).toEqual([
+      "/settings/agents/claude-code/profiles/profile-1",
+      "/settings/agents/claude-code/profiles/profile-3",
+    ]);
+  });
+
+  it("keeps disabled profiles listed when the hide setting is off or absent", () => {
+    const mixedAgent = {
+      name: "claude-code",
+      profiles: [
+        { id: "profile-1", name: "Default", agentDisplayName: AGENT_DISPLAY_NAME },
+        { id: "profile-2", name: "Retired", agentDisplayName: AGENT_DISPLAY_NAME, enabled: false },
+      ],
+    };
+
+    const [agent] = buildAgentsBranch([mixedAgent]);
+    const [agentWithOff] = buildAgentsBranch([mixedAgent], undefined, false);
+
+    expect(hrefsOf(agent.children ?? [])).toHaveLength(2);
+    expect(hrefsOf(agentWithOff.children ?? [])).toHaveLength(2);
   });
 });
 

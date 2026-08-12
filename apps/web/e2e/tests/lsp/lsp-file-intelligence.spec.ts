@@ -254,7 +254,9 @@ test.describe("LSP file intelligence", () => {
     const initial = await apiClient.getUserSettings();
     const initialLocation =
       initial.settings.lsp_status_location === "status_bar" ? "status_bar" : "toolbar";
+    const initialStatusBarEnabled = initial.settings.app_status_bar_enabled === true;
     await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+      app_status_bar_enabled: true,
       lsp_status_location: "toolbar",
     });
 
@@ -349,6 +351,7 @@ test.describe("LSP file intelligence", () => {
       await expect(statusItem).toHaveAttribute("data-lsp-state", "disabled");
     } finally {
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+        app_status_bar_enabled: initialStatusBarEnabled,
         lsp_status_location: initialLocation,
       });
     }

@@ -1246,24 +1246,27 @@ func mergeCumulativeFiles(dst, src map[string]interface{}, repo, baseRef string,
 
 // GitStatusResult represents the result of a git status query.
 type GitStatusResult struct {
-	Success         bool                   `json:"success"`
-	IsSubmodule     bool                   `json:"is_submodule,omitempty"`
-	Branch          string                 `json:"branch"`
-	RemoteBranch    string                 `json:"remote_branch"`
-	HeadCommit      string                 `json:"head_commit"`
-	BaseCommit      string                 `json:"base_commit"` // Merge-base with origin branch
-	Ahead           int                    `json:"ahead"`
-	Behind          int                    `json:"behind"`
-	Modified        []string               `json:"modified"`
-	Added           []string               `json:"added"`
-	Deleted         []string               `json:"deleted"`
-	Untracked       []string               `json:"untracked"`
-	Renamed         []string               `json:"renamed"`
-	Files           map[string]interface{} `json:"files"`
-	Timestamp       string                 `json:"timestamp"`
-	BranchAdditions int                    `json:"branch_additions,omitempty"`
-	BranchDeletions int                    `json:"branch_deletions,omitempty"`
-	Error           string                 `json:"error,omitempty"`
+	Success          bool                   `json:"success"`
+	IsSubmodule      bool                   `json:"is_submodule,omitempty"`
+	Branch           string                 `json:"branch"`
+	RemoteBranch     string                 `json:"remote_branch"`
+	HeadCommit       string                 `json:"head_commit"`
+	BaseCommit       string                 `json:"base_commit"` // Merge-base with origin branch
+	Ahead            int                    `json:"ahead"`
+	Behind           int                    `json:"behind"`
+	RemoteAhead      int                    `json:"remote_ahead"`
+	RemoteBehind     int                    `json:"remote_behind"`
+	RemoteHeadCommit string                 `json:"remote_head_commit,omitempty"`
+	Modified         []string               `json:"modified"`
+	Added            []string               `json:"added"`
+	Deleted          []string               `json:"deleted"`
+	Untracked        []string               `json:"untracked"`
+	Renamed          []string               `json:"renamed"`
+	Files            map[string]interface{} `json:"files"`
+	Timestamp        string                 `json:"timestamp"`
+	BranchAdditions  int                    `json:"branch_additions,omitempty"`
+	BranchDeletions  int                    `json:"branch_deletions,omitempty"`
+	Error            string                 `json:"error,omitempty"`
 }
 
 // PerRepoGitStatus pairs a repository_name with its current status. Used by
@@ -1357,23 +1360,26 @@ func (s *Server) collectStatusForRepo(ctx context.Context, sub string, fresh boo
 	return PerRepoGitStatus{
 		RepositoryName: sub,
 		Status: GitStatusResult{
-			Success:         true,
-			IsSubmodule:     status.IsSubmodule,
-			Branch:          status.Branch,
-			RemoteBranch:    status.RemoteBranch,
-			HeadCommit:      status.HeadCommit,
-			BaseCommit:      status.BaseCommit,
-			Ahead:           status.Ahead,
-			Behind:          status.Behind,
-			Modified:        status.Modified,
-			Added:           status.Added,
-			Deleted:         status.Deleted,
-			Untracked:       status.Untracked,
-			Renamed:         status.Renamed,
-			Files:           filesMap,
-			Timestamp:       status.Timestamp.Format("2006-01-02T15:04:05.000Z07:00"),
-			BranchAdditions: status.BranchAdditions,
-			BranchDeletions: status.BranchDeletions,
+			Success:          true,
+			IsSubmodule:      status.IsSubmodule,
+			Branch:           status.Branch,
+			RemoteBranch:     status.RemoteBranch,
+			HeadCommit:       status.HeadCommit,
+			BaseCommit:       status.BaseCommit,
+			Ahead:            status.Ahead,
+			Behind:           status.Behind,
+			RemoteAhead:      status.RemoteAhead,
+			RemoteBehind:     status.RemoteBehind,
+			RemoteHeadCommit: status.RemoteHeadCommit,
+			Modified:         status.Modified,
+			Added:            status.Added,
+			Deleted:          status.Deleted,
+			Untracked:        status.Untracked,
+			Renamed:          status.Renamed,
+			Files:            filesMap,
+			Timestamp:        status.Timestamp.Format("2006-01-02T15:04:05.000Z07:00"),
+			BranchAdditions:  status.BranchAdditions,
+			BranchDeletions:  status.BranchDeletions,
 		},
 	}
 }
@@ -1416,23 +1422,26 @@ func (s *Server) handleGitStatus(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, GitStatusResult{
-		Success:         true,
-		IsSubmodule:     status.IsSubmodule,
-		Branch:          status.Branch,
-		RemoteBranch:    status.RemoteBranch,
-		HeadCommit:      status.HeadCommit,
-		BaseCommit:      status.BaseCommit,
-		Ahead:           status.Ahead,
-		Behind:          status.Behind,
-		Modified:        status.Modified,
-		Added:           status.Added,
-		Deleted:         status.Deleted,
-		Untracked:       status.Untracked,
-		Renamed:         status.Renamed,
-		Files:           filesMap,
-		Timestamp:       status.Timestamp.Format("2006-01-02T15:04:05.000Z07:00"),
-		BranchAdditions: status.BranchAdditions,
-		BranchDeletions: status.BranchDeletions,
+		Success:          true,
+		IsSubmodule:      status.IsSubmodule,
+		Branch:           status.Branch,
+		RemoteBranch:     status.RemoteBranch,
+		HeadCommit:       status.HeadCommit,
+		BaseCommit:       status.BaseCommit,
+		Ahead:            status.Ahead,
+		Behind:           status.Behind,
+		RemoteAhead:      status.RemoteAhead,
+		RemoteBehind:     status.RemoteBehind,
+		RemoteHeadCommit: status.RemoteHeadCommit,
+		Modified:         status.Modified,
+		Added:            status.Added,
+		Deleted:          status.Deleted,
+		Untracked:        status.Untracked,
+		Renamed:          status.Renamed,
+		Files:            filesMap,
+		Timestamp:        status.Timestamp.Format("2006-01-02T15:04:05.000Z07:00"),
+		BranchAdditions:  status.BranchAdditions,
+		BranchDeletions:  status.BranchDeletions,
 	})
 }
 

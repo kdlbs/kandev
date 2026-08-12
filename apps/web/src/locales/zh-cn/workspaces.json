@@ -82,6 +82,7 @@
   "manualPath": "手动路径",
   "name": "名称",
   "noAgentProfilesAvailable": "无可用代理配置",
+  "overview": "概览",
   "noCustomScripts": "无自定义脚本",
   "noDefault": "无默认",
   "noExecutorsAvailable": "无可用执行器",
@@ -91,6 +92,8 @@
   "patternSyntax": "模式语法",
   "remoteRepository": "远程仓库",
   "repositories": "仓库",
+  "resourceCount_one": "{{count}} 个资源",
+  "resourceCount_other": "{{count}} 个资源",
   "repositoriesInThisWorkspace": "此工作区中的仓库",
   "repository": "仓库",
   "repositoryName": "仓库名称",
@@ -114,7 +117,6 @@
   "workspaceNamePlaceholder": "我的工作区",
   "workspaceNotFound": "未找到工作区",
   "workspaceSettings": "工作区设置",
-  "workspaceSettingsLink": "工作区设置",
   "worktreeBranchTemplate": "Worktree 分支模板",
   "worktreeSync": "Worktree 同步"
 }

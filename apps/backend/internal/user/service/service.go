@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -35,59 +36,61 @@ type Service struct {
 }
 
 type UpdateUserSettingsRequest struct {
-	WorkspaceID                     *string
-	KanbanViewMode                  *string
-	StartupPage                     *string
-	WorkflowFilterID                *string
-	RepositoryIDs                   *[]string
-	TasksListSort                   *string
-	TasksListGroup                  *string
-	TasksListShowDetails            *bool
-	InitialSetupComplete            *bool
-	PreferredShell                  *string
-	DefaultEditorID                 *string
-	EnablePreviewOnClick            *bool
-	ChatSubmitKey                   *string
-	ReviewAutoMarkOnScroll          *bool
-	ConfirmTaskArchive              *bool
-	UnreadDivider                   *bool
-	AgentGeneratedTaskTitles        *bool
-	MCPTaskAgentProfileDefault      *string
-	ShowAnchoredPromptBar           *bool
-	ShowScrollToLastPrompt          *bool
-	ShowScrollToStart               *bool
-	ShowTranscriptAutoScrollControl *bool
-	ShowTodoListPanel               *bool
-	ShowReleaseNotification         *bool
-	ReleaseNotesLastSeenVersion     *string
-	LspAutoStartLanguages           *[]string
-	LspAutoInstallLanguages         *[]string
-	LspServerConfigs                *map[string]map[string]interface{}
-	LspStatusLocation               *string
-	SavedLayouts                    *[]models.SavedLayout
-	SidebarViews                    *[]models.SidebarView
-	SidebarActiveViewID             *string
-	SidebarDraft                    **models.SidebarViewDraft
-	SidebarTaskPrefs                *models.SidebarTaskPrefs
-	TaskCreateLastUsed              *models.TaskCreateLastUsed
-	JiraSavedViews                  **json.RawMessage
-	JiraTaskPresets                 **json.RawMessage
-	GitHubSavedPresets              **json.RawMessage
-	GitHubDefaultQueryPresets       **json.RawMessage
-	GitLabSavedPresets              **json.RawMessage
-	AzureDevOpsBrowsePreferences    **json.RawMessage
-	DefaultUtilityAgentID           *string
-	DefaultUtilityModel             *string
-	DefaultUtilityAgentProfileID    *string
-	KeyboardShortcuts               *map[string]interface{}
-	TerminalLinkBehavior            *string
-	TerminalFontFamily              *string
-	TerminalFontSize                *int
-	ChangesPanelLayout              *string
-	SystemMetricsDisplay            *SystemMetricsDisplaySettingsPatch
-	AppStatusBarOrder               *models.AppStatusBarOrder
-	VoiceMode                       *models.VoiceModeSettings
-	KanbanHiddenStepIDs             *map[string][]string
+	WorkspaceID                       *string
+	KanbanViewMode                    *string
+	StartupPage                       *string
+	WorkflowFilterID                  *string
+	RepositoryIDs                     *[]string
+	TasksListSort                     *string
+	TasksListGroup                    *string
+	TasksListShowDetails              *bool
+	InitialSetupComplete              *bool
+	PreferredShell                    *string
+	DefaultEditorID                   *string
+	EnablePreviewOnClick              *bool
+	ChatSubmitKey                     *string
+	ReviewAutoMarkOnScroll            *bool
+	ConfirmTaskArchive                *bool
+	UnreadDivider                     *bool
+	AgentGeneratedTaskTitles          *bool
+	MCPTaskAgentProfileDefault        *string
+	ShowAnchoredPromptBar             *bool
+	ShowScrollToLastPrompt            *bool
+	ShowScrollToStart                 *bool
+	ShowTranscriptAutoScrollControl   *bool
+	ShowTodoListPanel                 *bool
+	ShowTodoListPanelOnlyWhenNotEmpty *bool
+	ShowReleaseNotification           *bool
+	ReleaseNotesLastSeenVersion       *string
+	LspAutoStartLanguages             *[]string
+	LspAutoInstallLanguages           *[]string
+	LspServerConfigs                  *map[string]map[string]interface{}
+	LspStatusLocation                 *string
+	SavedLayouts                      *[]models.SavedLayout
+	SidebarViews                      *[]models.SidebarView
+	SidebarActiveViewID               *string
+	SidebarDraft                      **models.SidebarViewDraft
+	SidebarTaskPrefs                  *models.SidebarTaskPrefs
+	TaskCreateLastUsed                *models.TaskCreateLastUsed
+	JiraSavedViews                    **json.RawMessage
+	JiraTaskPresets                   **json.RawMessage
+	GitHubSavedPresets                **json.RawMessage
+	GitHubDefaultQueryPresets         **json.RawMessage
+	GitLabSavedPresets                **json.RawMessage
+	AzureDevOpsBrowsePreferences      **json.RawMessage
+	DefaultUtilityAgentID             *string
+	DefaultUtilityModel               *string
+	DefaultUtilityAgentProfileID      *string
+	KeyboardShortcuts                 *map[string]interface{}
+	TerminalLinkBehavior              *string
+	TerminalFontFamily                *string
+	TerminalFontSize                  *int
+	ChangesPanelLayout                *string
+	SystemMetricsDisplay              *SystemMetricsDisplaySettingsPatch
+	AppStatusBarEnabled               *bool
+	AppStatusBarOrder                 *models.AppStatusBarOrder
+	VoiceMode                         *models.VoiceModeSettings
+	KanbanHiddenStepIDs               *map[string][]string
 }
 
 type SystemMetricsDisplaySettingsPatch struct {
@@ -104,8 +107,16 @@ func NewService(repo store.Repository, eventBus bus.EventBus, log *logger.Logger
 	}
 }
 
+func (s *Service) settingsUserID(ctx context.Context) string {
+	identity, ok := authn.IdentityFromContext(ctx)
+	if !ok || identity.Synthetic || identity.UserID == "" {
+		return s.defaultUser
+	}
+	return identity.UserID
+}
+
 func (s *Service) GetCurrentUser(ctx context.Context) (*models.User, error) {
-	user, err := s.repo.GetUser(ctx, s.defaultUser)
+	user, err := s.repo.GetUser(ctx, s.settingsUserID(ctx))
 	if err != nil {
 		return nil, ErrUserNotFound
 	}
@@ -113,7 +124,7 @@ func (s *Service) GetCurrentUser(ctx context.Context) (*models.User, error) {
 }
 
 func (s *Service) GetUserSettings(ctx context.Context) (*models.UserSettings, error) {
-	settings, err := s.repo.GetUserSettings(ctx, s.defaultUser)
+	settings, err := s.repo.GetUserSettings(ctx, s.settingsUserID(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +132,7 @@ func (s *Service) GetUserSettings(ctx context.Context) (*models.UserSettings, er
 }
 
 func (s *Service) PreferredShell(ctx context.Context) (string, error) {
-	settings, err := s.repo.GetUserSettings(ctx, s.defaultUser)
+	settings, err := s.repo.GetUserSettings(ctx, s.settingsUserID(ctx))
 	if err != nil {
 		return "", err
 	}
@@ -130,7 +141,7 @@ func (s *Service) PreferredShell(ctx context.Context) (string, error) {
 
 // GetDefaultUtilitySettings returns the user's default utility agent/model settings.
 func (s *Service) GetDefaultUtilitySettings(ctx context.Context) (agentID, model string, err error) {
-	settings, err := s.repo.GetUserSettings(ctx, s.defaultUser)
+	settings, err := s.repo.GetUserSettings(ctx, s.settingsUserID(ctx))
 	if err != nil {
 		return "", "", err
 	}
@@ -139,7 +150,7 @@ func (s *Service) GetDefaultUtilitySettings(ctx context.Context) (agentID, model
 
 // GetDefaultUtilityAgentProfileID returns the profile used by new built-in utility actions.
 func (s *Service) GetDefaultUtilityAgentProfileID(ctx context.Context) (string, error) {
-	settings, err := s.repo.GetUserSettings(ctx, s.defaultUser)
+	settings, err := s.repo.GetUserSettings(ctx, s.settingsUserID(ctx))
 	if err != nil {
 		return "", err
 	}
@@ -147,7 +158,7 @@ func (s *Service) GetDefaultUtilityAgentProfileID(ctx context.Context) (string, 
 }
 
 func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSettingsRequest) (*models.UserSettings, error) {
-	settings, err := s.repo.GetUserSettings(ctx, s.defaultUser)
+	settings, err := s.repo.GetUserSettings(ctx, s.settingsUserID(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +212,7 @@ func (s *Service) RecordTaskCreateLastUsed(ctx context.Context, patch models.Tas
 }
 
 func (s *Service) updateTaskCreateLastUsed(ctx context.Context, patch models.TaskCreateLastUsed) (*models.UserSettings, error) {
-	return s.repo.UpdateTaskCreateLastUsed(ctx, s.defaultUser, patch)
+	return s.repo.UpdateTaskCreateLastUsed(ctx, s.settingsUserID(ctx), patch)
 }
 
 func taskCreateLastUsedPatchEmpty(patch models.TaskCreateLastUsed) bool {
@@ -231,6 +242,9 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 		return err
 	}
 	applySystemMetricsDisplay(settings, req.SystemMetricsDisplay)
+	if req.AppStatusBarEnabled != nil {
+		settings.AppStatusBarEnabled = *req.AppStatusBarEnabled
+	}
 	if req.AppStatusBarOrder != nil {
 		settings.AppStatusBarOrder = *req.AppStatusBarOrder
 	}
@@ -369,6 +383,9 @@ func applyTaskActionPreferences(settings *models.UserSettings, req *UpdateUserSe
 	}
 	if req.ShowTodoListPanel != nil {
 		settings.ShowTodoListPanel = *req.ShowTodoListPanel
+	}
+	if req.ShowTodoListPanelOnlyWhenNotEmpty != nil {
+		settings.ShowTodoListPanelOnlyWhenNotEmpty = *req.ShowTodoListPanelOnlyWhenNotEmpty
 	}
 	if req.ShowReleaseNotification != nil {
 		settings.ShowReleaseNotification = *req.ShowReleaseNotification
@@ -755,61 +772,64 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		return
 	}
 	data := map[string]interface{}{
-		"user_id":                             settings.UserID,
-		"workspace_id":                        settings.WorkspaceID,
-		"kanban_view_mode":                    settings.KanbanViewMode,
-		"startup_page":                        models.NormalizeStartupPage(settings.StartupPage),
-		"workflow_filter_id":                  settings.WorkflowFilterID,
-		"repository_ids":                      settings.RepositoryIDs,
-		"tasks_list_sort":                     settings.TasksListSort,
-		"tasks_list_group":                    settings.TasksListGroup,
-		"tasks_list_show_details":             settings.TasksListShowDetails,
-		"initial_setup_complete":              settings.InitialSetupComplete,
-		"preferred_shell":                     settings.PreferredShell,
-		"default_editor_id":                   settings.DefaultEditorID,
-		"enable_preview_on_click":             settings.EnablePreviewOnClick,
-		"chat_submit_key":                     settings.ChatSubmitKey,
-		"review_auto_mark_on_scroll":          settings.ReviewAutoMarkOnScroll,
-		"confirm_task_archive":                settings.ConfirmTaskArchive,
-		"unread_divider":                      settings.UnreadDivider,
-		"agent_generated_task_titles":         settings.AgentGeneratedTaskTitles,
-		"mcp_task_agent_profile_default":      models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
-		"show_anchored_prompt_bar":            settings.ShowAnchoredPromptBar,
-		"show_scroll_to_last_prompt":          settings.ShowScrollToLastPrompt,
-		"show_scroll_to_start":                settings.ShowScrollToStart,
-		"show_transcript_auto_scroll_control": settings.ShowTranscriptAutoScrollControl,
-		"show_todo_list_panel":                settings.ShowTodoListPanel,
-		"show_release_notification":           settings.ShowReleaseNotification,
-		"release_notes_last_seen_version":     settings.ReleaseNotesLastSeenVersion,
-		"lsp_auto_start_languages":            settings.LspAutoStartLanguages,
-		"lsp_auto_install_languages":          settings.LspAutoInstallLanguages,
-		"lsp_server_configs":                  settings.LspServerConfigs,
-		"lsp_status_location":                 models.NormalizeLspStatusLocation(settings.LspStatusLocation),
-		"saved_layouts":                       settings.SavedLayouts,
-		"sidebar_views":                       settings.SidebarViews,
-		"sidebar_active_view_id":              settings.SidebarActiveViewID,
-		"sidebar_draft":                       settings.SidebarDraft,
-		"sidebar_task_prefs":                  settings.SidebarTaskPrefs,
-		"task_create_last_used":               settings.TaskCreateLastUsed,
-		"jira_saved_views":                    settings.JiraSavedViews,
-		"jira_task_presets":                   settings.JiraTaskPresets,
-		"github_saved_presets":                settings.GitHubSavedPresets,
-		"github_default_query_presets":        settings.GitHubDefaultQueryPresets,
-		"gitlab_saved_presets":                settings.GitLabSavedPresets,
-		"azure_devops_browse_preferences":     settings.AzureDevOpsBrowsePreferences,
-		"default_utility_agent_id":            settings.DefaultUtilityAgentID,
-		"default_utility_model":               settings.DefaultUtilityModel,
-		"default_utility_agent_profile_id":    settings.DefaultUtilityAgentProfileID,
-		"keyboard_shortcuts":                  settings.KeyboardShortcuts,
-		"terminal_link_behavior":              settings.TerminalLinkBehavior,
-		"terminal_font_family":                settings.TerminalFontFamily,
-		"terminal_font_size":                  settings.TerminalFontSize,
-		"changes_panel_layout":                settings.ChangesPanelLayout,
-		"system_metrics_display":              settings.SystemMetricsDisplay,
-		"app_status_bar_order":                settings.AppStatusBarOrder,
-		"voice_mode":                          settings.VoiceMode,
-		"kanban_hidden_step_ids":              settings.KanbanHiddenStepIDs,
-		"updated_at":                          settings.UpdatedAt.Format(time.RFC3339),
+		"user_id":                                  settings.UserID,
+		"workspace_id":                             settings.WorkspaceID,
+		"kanban_view_mode":                         settings.KanbanViewMode,
+		"startup_page":                             models.NormalizeStartupPage(settings.StartupPage),
+		"workflow_filter_id":                       settings.WorkflowFilterID,
+		"repository_ids":                           settings.RepositoryIDs,
+		"tasks_list_sort":                          settings.TasksListSort,
+		"tasks_list_group":                         settings.TasksListGroup,
+		"tasks_list_show_details":                  settings.TasksListShowDetails,
+		"initial_setup_complete":                   settings.InitialSetupComplete,
+		"preferred_shell":                          settings.PreferredShell,
+		"default_editor_id":                        settings.DefaultEditorID,
+		"enable_preview_on_click":                  settings.EnablePreviewOnClick,
+		"chat_submit_key":                          settings.ChatSubmitKey,
+		"review_auto_mark_on_scroll":               settings.ReviewAutoMarkOnScroll,
+		"confirm_task_archive":                     settings.ConfirmTaskArchive,
+		"unread_divider":                           settings.UnreadDivider,
+		"agent_generated_task_titles":              settings.AgentGeneratedTaskTitles,
+		"mcp_task_agent_profile_default":           models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
+		"show_anchored_prompt_bar":                 settings.ShowAnchoredPromptBar,
+		"show_scroll_to_last_prompt":               settings.ShowScrollToLastPrompt,
+		"show_scroll_to_start":                     settings.ShowScrollToStart,
+		"show_transcript_auto_scroll_control":      settings.ShowTranscriptAutoScrollControl,
+		"show_todo_list_panel":                     settings.ShowTodoListPanel,
+		"show_todo_list_panel_only_when_not_empty": settings.ShowTodoListPanelOnlyWhenNotEmpty,
+		"show_release_notification":                settings.ShowReleaseNotification,
+		"release_notes_last_seen_version":          settings.ReleaseNotesLastSeenVersion,
+		"lsp_auto_start_languages":                 settings.LspAutoStartLanguages,
+		"lsp_auto_install_languages":               settings.LspAutoInstallLanguages,
+		"lsp_server_configs":                       settings.LspServerConfigs,
+		"lsp_status_location":                      models.NormalizeLspStatusLocation(settings.LspStatusLocation),
+		"saved_layouts":                            settings.SavedLayouts,
+		"sidebar_views":                            settings.SidebarViews,
+		"sidebar_active_view_id":                   settings.SidebarActiveViewID,
+		"sidebar_draft":                            settings.SidebarDraft,
+		"sidebar_task_prefs":                       settings.SidebarTaskPrefs,
+		"task_create_last_used":                    settings.TaskCreateLastUsed,
+		"jira_saved_views":                         settings.JiraSavedViews,
+		"jira_task_presets":                        settings.JiraTaskPresets,
+		"github_saved_presets":                     settings.GitHubSavedPresets,
+		"github_default_query_presets":             settings.GitHubDefaultQueryPresets,
+		"gitlab_saved_presets":                     settings.GitLabSavedPresets,
+		"azure_devops_browse_preferences":          settings.AzureDevOpsBrowsePreferences,
+		"default_utility_agent_id":                 settings.DefaultUtilityAgentID,
+		"default_utility_model":                    settings.DefaultUtilityModel,
+		"default_utility_agent_profile_id":         settings.DefaultUtilityAgentProfileID,
+		"keyboard_shortcuts":                       settings.KeyboardShortcuts,
+		"terminal_link_behavior":                   settings.TerminalLinkBehavior,
+		"terminal_font_family":                     settings.TerminalFontFamily,
+		"terminal_font_size":                       settings.TerminalFontSize,
+		"changes_panel_layout":                     settings.ChangesPanelLayout,
+		"system_metrics_display":                   settings.SystemMetricsDisplay,
+		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
+		"app_status_bar_order":                     settings.AppStatusBarOrder,
+		"voice_mode":                               settings.VoiceMode,
+		"kanban_hidden_step_ids":                   settings.KanbanHiddenStepIDs,
+		"revision":                                 settings.Revision,
+		"updated_at":                               settings.UpdatedAt.Format(time.RFC3339),
 	}
 	if err := s.eventBus.Publish(ctx, events.UserSettingsUpdated, bus.NewEvent(events.UserSettingsUpdated, "user-service", data)); err != nil {
 		s.logger.Error("failed to publish user settings event", zap.Error(err))
@@ -867,7 +887,7 @@ func (s *Service) ClearDefaultEditorID(ctx context.Context, editorID string) err
 	if editorID == "" {
 		return nil
 	}
-	settings, err := s.repo.GetUserSettings(ctx, s.defaultUser)
+	settings, err := s.repo.GetUserSettings(ctx, s.settingsUserID(ctx))
 	if err != nil {
 		return err
 	}

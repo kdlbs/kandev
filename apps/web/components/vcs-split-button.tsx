@@ -28,6 +28,8 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@kandev/ui/lib/utils";
 import { useSessionGit } from "@/hooks/domains/session/use-session-git";
+import { useRemoteContributionRelation } from "@/hooks/domains/session/use-remote-contribution-relation";
+import { remoteContributionActionPolicy } from "@/hooks/domains/session/remote-contribution-relation";
 import { gitOperationLabel, useGitWithFeedback } from "@/hooks/use-git-with-feedback";
 import { useVcsDialogs } from "@/components/vcs/vcs-dialogs";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
@@ -36,7 +38,7 @@ import { MultiRepoVcsButton } from "@/components/vcs-multi-repo-menu";
 
 const DEFAULT_BASE_BRANCH = "origin/main";
 
-function determinePrimaryAction(
+export function determinePrimaryAction(
   uncommittedFileCount: number,
   aheadCount: number,
   behindCount: number,
@@ -214,9 +216,11 @@ function GitDivergencePills({ ahead, behind }: { ahead: number; behind: number }
 type VcsDropdownItemsProps = {
   disabled: boolean;
   baseBranch?: string;
-  hasMatchingUpstream: boolean | "" | null | undefined;
+  hasUpstream: boolean;
   behindCount: number;
   aheadCount: number;
+  pushDisabled: boolean;
+  pullDisabled: boolean;
   onPR: () => void;
   onPull: () => void;
   onPush: (force: boolean) => void;
@@ -227,9 +231,11 @@ type VcsDropdownItemsProps = {
 function VcsDropdownItems({
   disabled,
   baseBranch,
-  hasMatchingUpstream,
+  hasUpstream,
   behindCount,
   aheadCount,
+  pushDisabled,
+  pullDisabled,
   onPR,
   onPull,
   onPush,
@@ -237,6 +243,7 @@ function VcsDropdownItems({
   onMerge,
 }: VcsDropdownItemsProps) {
   const { t } = useTranslation();
+  const remoteActionsDisabledTitle = t("task:remoteActionsDisabledHistoryChanged");
   return (
     <DropdownMenuContent align="end" className="w-56">
       <DropdownMenuItem className="cursor-pointer gap-3" onClick={onPR} disabled={disabled}>
@@ -244,20 +251,29 @@ function VcsDropdownItems({
         <span className="flex-1">{t("integrations:createPr")}</span>
       </DropdownMenuItem>
       <DropdownMenuSeparator />
-      <DropdownMenuItem className="cursor-pointer gap-3" onClick={onPull} disabled={disabled}>
+      <DropdownMenuItem
+        className="cursor-pointer gap-3"
+        onClick={onPull}
+        disabled={disabled || pullDisabled}
+        title={pullDisabled ? remoteActionsDisabledTitle : undefined}
+      >
         <IconCloudDownload className="h-4 w-4 text-muted-foreground" />
         <span className="flex-1">{t("integrations:pull")}</span>
-        {hasMatchingUpstream && behindCount > 0 && (
+        {hasUpstream && behindCount > 0 && (
           <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
             ↓{behindCount}
           </span>
         )}
       </DropdownMenuItem>
       <DropdownMenuSub>
-        <DropdownMenuSubTrigger className="cursor-pointer gap-3" disabled={disabled}>
+        <DropdownMenuSubTrigger
+          className="cursor-pointer gap-3"
+          disabled={disabled || pushDisabled}
+          title={pushDisabled ? remoteActionsDisabledTitle : undefined}
+        >
           <IconCloudUpload className="h-4 w-4 text-muted-foreground" />
           <span className="flex-1">{t("integrations:push")}</span>
-          {hasMatchingUpstream && aheadCount > 0 && (
+          {hasUpstream && aheadCount > 0 && (
             <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
               ↑{aheadCount}
             </span>
@@ -267,7 +283,8 @@ function VcsDropdownItems({
           <DropdownMenuItem
             className="cursor-pointer gap-3"
             onClick={() => onPush(false)}
-            disabled={disabled}
+            disabled={disabled || pushDisabled}
+            title={pushDisabled ? remoteActionsDisabledTitle : undefined}
           >
             <IconCloudUpload className="h-4 w-4 text-muted-foreground" />
             <span>{t("integrations:push")}</span>
@@ -275,7 +292,8 @@ function VcsDropdownItems({
           <DropdownMenuItem
             className="cursor-pointer gap-3"
             onClick={() => onPush(true)}
-            disabled={disabled}
+            disabled={disabled || pushDisabled}
+            title={pushDisabled ? remoteActionsDisabledTitle : undefined}
           >
             <IconAlertTriangle className="h-4 w-4 text-muted-foreground" />
             <span>{t("integrations:forcePush")}</span>
@@ -364,17 +382,18 @@ const VcsSplitButton = memo(function VcsSplitButton({
   const git = useSessionGit(sessionId);
   const { openCommitDialog, openPRDialog } = useVcsDialogs();
   const activePR = useActiveTaskPR();
+  const { relation, repositoryName } = useRemoteContributionRelation(sessionId);
+  const remoteActionPolicy = remoteContributionActionPolicy(relation);
   const hasOpenPR = activePR?.state === "open";
   const { handlePull, handlePush, handleRebase, handleMerge } = useGitActions(git, baseBranch);
   const repoDisplayName = useRepoDisplayName(sessionId);
 
-  const currentBranch = git.branch;
   const remoteBranch = git.remoteBranch;
-  const hasMatchingUpstream =
-    remoteBranch && currentBranch && remoteBranch === `origin/${currentBranch}`;
+  const hasUpstream = Boolean(remoteBranch);
   const uncommittedFileCount = git.allFiles.length;
-  const aheadCount = git.ahead;
+  const aheadCount = remoteActionPolicy.pushDisabled ? 0 : git.pushAhead;
   const behindCount = git.behind;
+  const pullCount = git.pullBehind;
   const isDisabled = git.isLoading || !sessionId;
   const isGitLoading = git.isLoading;
   // Multi-repo when there's more than one named repo. Single-repo workspaces
@@ -411,6 +430,9 @@ const VcsSplitButton = memo(function VcsSplitButton({
         baseBranch={baseBranch || DEFAULT_BASE_BRANCH}
         repoNames={git.repoNames}
         perRepoStatus={git.perRepoStatus}
+        pushDisabled={remoteActionPolicy.pushDisabled}
+        pullDisabled={remoteActionPolicy.pullDisabled}
+        blockedRepositoryName={repositoryName}
         repoDisplayName={repoDisplayName}
         callbacks={{
           onCommit: (repo) => openCommitDialog(repo),
@@ -431,9 +453,11 @@ const VcsSplitButton = memo(function VcsSplitButton({
       isDisabled={isDisabled}
       isGitLoading={isGitLoading}
       baseBranch={baseBranch}
-      hasMatchingUpstream={hasMatchingUpstream}
-      behindCount={behindCount}
+      hasUpstream={hasUpstream}
+      behindCount={pullCount}
       aheadCount={aheadCount}
+      pushDisabled={remoteActionPolicy.pushDisabled}
+      pullDisabled={remoteActionPolicy.pullDisabled}
       buttonSize={buttonSize}
       className={className}
       showDivergencePills={showDivergencePills}
@@ -452,9 +476,11 @@ function SingleRepoVcsButton({
   isDisabled,
   isGitLoading,
   baseBranch,
-  hasMatchingUpstream,
+  hasUpstream,
   behindCount,
   aheadCount,
+  pushDisabled,
+  pullDisabled,
   onPR,
   onPull,
   onPush,
@@ -469,9 +495,11 @@ function SingleRepoVcsButton({
   isDisabled: boolean;
   isGitLoading: boolean;
   baseBranch?: string;
-  hasMatchingUpstream: boolean | "" | null | undefined;
+  hasUpstream: boolean;
   behindCount: number;
   aheadCount: number;
+  pushDisabled: boolean;
+  pullDisabled: boolean;
   onPR: () => void;
   onPull: () => void;
   onPush: (force: boolean) => void;
@@ -525,9 +553,11 @@ function SingleRepoVcsButton({
         <VcsDropdownItems
           disabled={isDisabled}
           baseBranch={baseBranch}
-          hasMatchingUpstream={hasMatchingUpstream}
+          hasUpstream={hasUpstream}
           behindCount={behindCount}
           aheadCount={aheadCount}
+          pushDisabled={pushDisabled}
+          pullDisabled={pullDisabled}
           onPR={onPR}
           onPull={onPull}
           onPush={onPush}
