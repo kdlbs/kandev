@@ -124,6 +124,9 @@ func TestMigrateLegacyBindingsPreservesConcreteAndCustomUnconfiguredBindings(t *
 			t.Fatalf("%s binding state = %q, want %q", id, agent.ProfileBindingState, models.ProfileBindingUnconfigured)
 		}
 	}
+	if got := repo.agents["builtin"].AgentProfileID; got != "deleted-profile" {
+		t.Fatalf("builtin profile ID = %q, want %q", got, "deleted-profile")
+	}
 }
 
 func TestMigrateLegacyBindingsNormalizesEmptyExplicitBuiltin(t *testing.T) {

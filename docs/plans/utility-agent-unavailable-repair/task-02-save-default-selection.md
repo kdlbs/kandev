@@ -68,6 +68,8 @@ captures the inherited PATCH body, and verifies that the actions card does not o
   e2e/tests/settings/mobile-utility-agents.spec.ts --project=mobile-chrome` passed 2 tests.
 - Saved mobile PATCH: `agent_profile_id: ""`, `profile_binding_state: "inherit"`, and
   `enabled: true`.
+- Fixup review: both desktop and mobile option selection now scope through the page-level listbox
+  role, while the picker test ID remains available for the trigger and dropdown semantics.
 - Generated artifacts: None.
 - Cleanup: The desktop E2E restores the original built-in row in a `finally` block.
 - Security or external side effects: None. Both browser projects use an isolated E2E backend.

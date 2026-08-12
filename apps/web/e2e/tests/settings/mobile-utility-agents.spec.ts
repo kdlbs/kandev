@@ -71,8 +71,8 @@ test.describe("Mobile utility agents action rows", () => {
     const row = testPage.getByTestId(`utility-action-row-${agentId}`);
     const picker = row.getByTestId(`utility-profile-picker-action-${agentId}`);
     await picker.tap();
-    const dropdown = testPage.getByTestId(`utility-profile-picker-action-${agentId}-dropdown`);
-    await dropdown.locator('[data-value="__USE_DEFAULT__"]').tap();
+    const listbox = testPage.getByRole("listbox");
+    await listbox.locator('[data-value="__USE_DEFAULT__"]').tap();
 
     const floatingSave = testPage.getByTestId("settings-floating-save");
     await floatingSave.getByRole("button", { name: "Save changes" }).tap();

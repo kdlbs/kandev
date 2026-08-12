@@ -57,6 +57,8 @@ built-in bindings and custom unconfigured bindings remain unchanged.
   (pass: first stale row updates, second repaired row is not changed)
 - Package verification: `cd apps/backend && go test ./internal/utility/... ./internal/backendapp/...`
   (pass: 378 tests) and `go vet ./internal/utility/...` (pass).
+- Fixup review: preserved the stale concrete profile ID assertion and added a conditional SQLite
+  update so concurrent settings repairs cannot be overwritten.
 - Generated artifacts: None.
 - Cleanup: No temporary artifacts.
 - Security or external side effects: None. Tests use the in-memory fake repository.

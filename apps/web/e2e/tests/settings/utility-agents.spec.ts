@@ -70,8 +70,8 @@ test.describe("Utility Agents settings page", () => {
       ).toBeVisible();
 
       await picker.click();
-      const dropdown = testPage.getByTestId(`utility-profile-picker-action-${agentId}-dropdown`);
-      await dropdown.locator('[data-value="__USE_DEFAULT__"]').click();
+      const listbox = testPage.getByRole("listbox");
+      await listbox.locator('[data-value="__USE_DEFAULT__"]').click();
 
       const floatingSave = testPage.getByTestId("settings-floating-save");
       await expect(floatingSave).toBeVisible();
