@@ -32,6 +32,7 @@ type GitOperationResult struct {
 	Operation      string   `json:"operation"`
 	Output         string   `json:"output"`
 	Error          string   `json:"error,omitempty"`
+	ErrorCode      string   `json:"error_code,omitempty"`
 	ConflictFiles  []string `json:"conflict_files,omitempty"`
 	RecoveryBranch string   `json:"recovery_branch,omitempty"`
 }

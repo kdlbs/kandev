@@ -235,6 +235,27 @@ func TestGitUseRemoteContribution_DecodesRecoveryBranch(t *testing.T) {
 	}
 }
 
+func TestGitOperation_DecodesContributionErrorCode(t *testing.T) {
+	srv, _ := captureServer(t, jsonResponder(http.StatusOK, `{
+		"success":false,
+		"operation":"replace_remote_contribution",
+		"error":"remote contribution head changed",
+		"error_code":"lease_mismatch"
+	}`))
+
+	result, err := newHTTPOnlyClient(srv.URL).GitReplaceRemoteContribution(
+		context.Background(),
+		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"svc",
+	)
+	if err != nil {
+		t.Fatalf("GitReplaceRemoteContribution: %v", err)
+	}
+	if result.ErrorCode != "lease_mismatch" {
+		t.Errorf("ErrorCode = %q, want %q", result.ErrorCode, "lease_mismatch")
+	}
+}
+
 // jsonEqual compares two values decoded from (or destined for) JSON.
 func jsonEqual(a, b any) bool {
 	ab, err := json.Marshal(a)

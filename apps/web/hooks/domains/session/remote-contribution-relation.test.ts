@@ -245,8 +245,8 @@ describe("remoteContributionActionPolicy", () => {
 
     expect(remoteContributionActionPolicy(relation)).toEqual({
       action: "unavailable_evidence",
-      pushDisabled: true,
-      pullDisabled: true,
+      pushDisabled: false,
+      pullDisabled: false,
       replaceDisabled: true,
       useDisabled: true,
       disabledReason: "provider_evidence_unavailable",

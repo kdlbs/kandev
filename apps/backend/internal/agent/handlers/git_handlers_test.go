@@ -330,6 +330,8 @@ func TestGitMutationHandlersRejectInvalidRequestsBeforeLookup(t *testing.T) {
 		{name: "discard malformed", action: ws.ActionWorktreeDiscard, body: json.RawMessage(`{invalid`), invoke: (*GitHandlers).wsDiscard, want: "invalid payload"},
 		{name: "diff malformed", action: ws.ActionSessionCommitDiff, body: json.RawMessage(`{invalid`), invoke: (*GitHandlers).wsCommitDiff, want: "invalid payload"},
 		{name: "push session", action: ws.ActionWorktreePush, body: GitPushRequest{}, invoke: (*GitHandlers).wsPush, want: "session_id is required"},
+		{name: "replace contribution session", action: ws.ActionWorktreeReplaceContribution, body: GitContributionRequest{}, invoke: (*GitHandlers).wsReplaceContribution, want: "session_id is required"},
+		{name: "use contribution session", action: ws.ActionWorktreeUseContribution, body: GitContributionRequest{}, invoke: (*GitHandlers).wsUseContribution, want: "session_id is required"},
 		{name: "replace contribution expected head", action: ws.ActionWorktreeReplaceContribution, body: GitContributionRequest{SessionID: "s"}, invoke: (*GitHandlers).wsReplaceContribution, want: "expected_remote_head is required"},
 		{name: "use contribution expected head", action: ws.ActionWorktreeUseContribution, body: GitContributionRequest{SessionID: "s"}, invoke: (*GitHandlers).wsUseContribution, want: "expected_remote_head is required"},
 		{name: "rebase base", action: ws.ActionWorktreeRebase, body: GitRebaseRequest{SessionID: "s"}, invoke: (*GitHandlers).wsRebase, want: "base_branch is required"},

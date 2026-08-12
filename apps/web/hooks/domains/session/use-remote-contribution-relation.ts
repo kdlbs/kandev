@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
 import type { PRCommitInfo, TaskPR } from "@/lib/types/github";
 import { usePRCommits } from "@/hooks/domains/github/use-pr-commits";
@@ -19,6 +19,7 @@ export type RemoteContributionRelationState = {
   loading: boolean;
   error: string | null;
   relation: RemoteContributionRelation;
+  refreshProviderEvidence: () => Promise<string | null>;
 };
 
 export function useRemoteContributionRelation(
@@ -34,6 +35,10 @@ export function useRemoteContributionRelation(
   );
   const repositoryName = usePRReviewRepositoryIdentity(activeTaskId, sessionId, selectedPR);
   const statusByRepo = useSessionGitStatusByRepo(sessionId ?? null);
+  const refreshProviderEvidence = useCallback(async () => {
+    const refreshed = await commitsState.refresh();
+    return refreshed?.providerHead ?? null;
+  }, [commitsState.refresh]);
   const gitStatus = useMemo(() => {
     const matchingStatus = repositoryName
       ? statusByRepo.find((entry) => entry.repository_name === repositoryName)?.status
@@ -84,5 +89,6 @@ export function useRemoteContributionRelation(
     loading: commitsState.loading,
     error: commitsState.error,
     relation,
+    refreshProviderEvidence,
   };
 }

@@ -10,6 +10,7 @@ export interface GitOperationResult {
   operation: string;
   output: string;
   error?: string;
+  error_code?: string;
   conflict_files?: string[];
   recovery_branch?: string;
 }

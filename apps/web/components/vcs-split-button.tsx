@@ -202,10 +202,13 @@ function useVcsContributionResolution(
   sessionId: string | null,
   relation: ReturnType<typeof useRemoteContributionRelation>["relation"],
   repositoryName: string | undefined,
+  refreshProviderEvidence: ReturnType<
+    typeof useRemoteContributionRelation
+  >["refreshProviderEvidence"],
 ) {
   const { t } = useTranslation();
   const { toast } = useToast();
-  const resolution = useRemoteContributionResolution(sessionId);
+  const resolution = useRemoteContributionResolution(sessionId, refreshProviderEvidence);
   const confirmResolution = useCallback(async () => {
     const action = resolution.pending?.action;
     const result = await resolution.confirm();
@@ -234,6 +237,18 @@ function useVcsContributionResolution(
   return { resolution, confirmResolution, resolutionTarget };
 }
 
+function useVcsContributionState(sessionId: string | null) {
+  const contribution = useRemoteContributionRelation(sessionId);
+  const remoteActionPolicy = remoteContributionActionPolicy(contribution.relation);
+  const resolutionState = useVcsContributionResolution(
+    sessionId,
+    contribution.relation,
+    contribution.repositoryName,
+    contribution.refreshProviderEvidence,
+  );
+  return { ...contribution, remoteActionPolicy, ...resolutionState };
+}
+
 const VcsSplitButton = memo(function VcsSplitButton({
   sessionId,
   baseBranch,
@@ -244,14 +259,14 @@ const VcsSplitButton = memo(function VcsSplitButton({
   const git = useSessionGit(sessionId);
   const { openCommitDialog, openPRDialog } = useVcsDialogs();
   const activePR = useActiveTaskPR();
-  const { relation, repositoryName } = useRemoteContributionRelation(sessionId);
-  const remoteActionPolicy = remoteContributionActionPolicy(relation);
-  const { resolution, confirmResolution, resolutionTarget } = useVcsContributionResolution(
-    sessionId,
+  const {
     relation,
     repositoryName,
-  );
-  const hasOpenPR = activePR?.state === "open";
+    remoteActionPolicy,
+    resolution,
+    confirmResolution,
+    resolutionTarget,
+  } = useVcsContributionState(sessionId);
   const { handlePull, handlePush, handleRebase, handleMerge } = useGitActions(git, baseBranch);
   const repoDisplayName = useRepoDisplayName(sessionId);
 
@@ -272,7 +287,7 @@ const VcsSplitButton = memo(function VcsSplitButton({
     uncommittedFileCount,
     aheadCount,
     behindCount,
-    hasOpenPR,
+    activePR?.state === "open",
   );
   const primaryButtonConfig = buildPrimaryButtonConfig({
     t,

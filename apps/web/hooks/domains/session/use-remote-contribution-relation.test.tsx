@@ -27,6 +27,7 @@ vi.mock("@/hooks/domains/github/use-pr-commits", () => ({
     providerCommitsComplete: true,
     loading: false,
     error: null,
+    refresh: vi.fn(),
   }),
 }));
 

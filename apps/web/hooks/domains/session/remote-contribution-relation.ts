@@ -54,7 +54,7 @@ export type RemoteContributionActionPolicy = {
 /**
  * Safety gates shared by desktop and mobile Git controls. A provider-ahead
  * checkout may pull, but must not push over the provider's newer history.
- * Diverged histories require reconciliation outside these controls.
+ * Diverged histories expose explicit contribution replacement or adoption.
  */
 export function remoteContributionActionPolicy(
   relation: RemoteContributionRelation,
@@ -63,8 +63,8 @@ export function remoteContributionActionPolicy(
   const diverged = relation.action === "diverged_replace";
   return {
     action: relation.action,
-    pushDisabled: unavailable || diverged || relation.action === "provider_ahead_pull",
-    pullDisabled: unavailable || diverged,
+    pushDisabled: diverged || relation.action === "provider_ahead_pull",
+    pullDisabled: diverged,
     replaceDisabled: !relation.canReplaceRemote,
     useDisabled: !relation.canUseRemote,
     disabledReason: unavailable ? "provider_evidence_unavailable" : null,

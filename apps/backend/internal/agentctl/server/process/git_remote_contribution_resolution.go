@@ -11,7 +11,12 @@ import (
 	"go.uber.org/zap"
 )
 
-const contributionLeaseFlagPrefix = "--force-with-lease=refs/heads/"
+const (
+	contributionLeaseFlagPrefix    = "--force-with-lease=refs/heads/"
+	contributionErrorLeaseMismatch = "lease_mismatch"
+	contributionErrorDirtyWorktree = "dirty_worktree"
+	contributionErrorRemoteFailure = "remote_unavailable"
+)
 
 func validateContributionLeaseFlag(arg string) error {
 	lease := strings.TrimPrefix(arg, contributionLeaseFlagPrefix)
@@ -73,6 +78,7 @@ func (g *GitOperator) ReplaceRemoteContribution(ctx context.Context, expectedRem
 	result.Output = output
 	if err != nil {
 		result.Error = err.Error()
+		result.ErrorCode = contributionErrorCode(result.Error)
 		return result, nil
 	}
 
@@ -97,13 +103,7 @@ func (g *GitOperator) UseRemoteContribution(ctx context.Context, expectedRemoteH
 		return result, nil
 	}
 
-	dirty, err := g.hasUncommittedChanges(ctx)
-	if err != nil {
-		result.Error = err.Error()
-		return result, nil
-	}
-	if dirty {
-		result.Error = "working tree must be clean before using remote contribution"
+	if g.rejectDirtyContributionWorktree(ctx, result) {
 		return result, nil
 	}
 
@@ -112,18 +112,18 @@ func (g *GitOperator) UseRemoteContribution(ctx context.Context, expectedRemoteH
 	fetchOutput, err := g.runGitCommand(ctx, "fetch", remote, binding.HeadBranch)
 	result.Output = fetchOutput
 	if err != nil {
-		result.Error = fmt.Errorf("failed to fetch remote contribution: %w", err).Error()
+		setContributionError(result, contributionErrorRemoteFailure, fmt.Errorf("failed to fetch remote contribution: %w", err).Error())
 		return result, nil
 	}
 
 	fetchedHead, err := g.runGitCommand(ctx, "rev-parse", remote+"/"+binding.HeadBranch)
 	if err != nil {
-		result.Error = fmt.Errorf("failed to resolve fetched remote contribution: %w", err).Error()
+		setContributionError(result, contributionErrorRemoteFailure, fmt.Errorf("failed to resolve fetched remote contribution: %w", err).Error())
 		return result, nil
 	}
 	fetchedHead = strings.TrimSpace(fetchedHead)
 	if fetchedHead != expectedRemoteHead {
-		result.Error = fmt.Sprintf("remote contribution head changed before adoption: expected %s, fetched %s", expectedRemoteHead, fetchedHead)
+		setContributionError(result, contributionErrorLeaseMismatch, fmt.Sprintf("remote contribution head changed before adoption: expected %s, fetched %s", expectedRemoteHead, fetchedHead))
 		return result, nil
 	}
 
@@ -142,6 +142,13 @@ func (g *GitOperator) UseRemoteContribution(ctx context.Context, expectedRemoteH
 	result.RecoveryBranch = recoveryBranch
 	result.Output = strings.TrimSpace(strings.Join([]string{result.Output, branchOutput}, "\n"))
 
+	// Fetching the provider ref and creating the recovery branch can give
+	// another workspace writer time to modify the worktree. Check again
+	// immediately before the destructive reset so those changes are preserved.
+	if g.rejectDirtyContributionWorktree(ctx, result) {
+		return result, nil
+	}
+
 	resetOutput, err := g.runGitCommand(ctx, "reset", "--hard", fetchedHead)
 	result.Output = strings.TrimSpace(strings.Join([]string{result.Output, resetOutput}, "\n"))
 	if err != nil {
@@ -154,6 +161,40 @@ func (g *GitOperator) UseRemoteContribution(ctx context.Context, expectedRemoteH
 		zap.String("branch", binding.HeadBranch),
 		zap.String("recovery_branch", recoveryBranch))
 	return result, nil
+}
+
+func (g *GitOperator) rejectDirtyContributionWorktree(ctx context.Context, result *GitOperationResult) bool {
+	dirty, err := g.hasUncommittedChanges(ctx)
+	if err != nil {
+		result.Error = err.Error()
+		return true
+	}
+	if !dirty {
+		return false
+	}
+	setContributionError(result, contributionErrorDirtyWorktree, "working tree must be clean before using remote contribution")
+	return true
+}
+
+func setContributionError(result *GitOperationResult, code, message string) {
+	result.Error = message
+	result.ErrorCode = code
+}
+
+func contributionErrorCode(message string) string {
+	normalized := strings.ToLower(message)
+	if strings.Contains(normalized, "stale info") ||
+		strings.Contains(normalized, "head changed") ||
+		strings.Contains(normalized, "non-fast-forward") {
+		return contributionErrorLeaseMismatch
+	}
+	if strings.Contains(normalized, "could not resolve host") ||
+		strings.Contains(normalized, "unable to access") ||
+		strings.Contains(normalized, "authentication failed") ||
+		strings.Contains(normalized, "repository not found") {
+		return contributionErrorRemoteFailure
+	}
+	return ""
 }
 
 func (g *GitOperator) createRecoveryBranch(ctx context.Context, currentHead string) (string, string, error) {

@@ -206,7 +206,10 @@ function useMobileContributionResolutionActions(sessionId: string | null | undef
   const { t } = useTranslation();
   const { toast } = useToast();
   const remoteActionPolicy = useMobileRemoteActionPolicy(sessionId);
-  const resolution = useRemoteContributionResolution(sessionId);
+  const resolution = useRemoteContributionResolution(
+    sessionId,
+    remoteActionPolicy.refreshProviderEvidence,
+  );
   const resolutionTarget = useMemo<RemoteContributionResolutionTarget | null>(() => {
     const providerHead = remoteActionPolicy.relation.providerHead;
     if (

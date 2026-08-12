@@ -2,6 +2,9 @@ package process
 
 import (
 	"context"
+	"os"
+	osExec "os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -57,6 +60,9 @@ func TestGitOperatorReplaceRemoteContributionUsesExactHeadLease(t *testing.T) {
 	if stale.Success {
 		t.Fatalf("stale replacement = %+v, want failure", stale)
 	}
+	if stale.ErrorCode != contributionErrorLeaseMismatch {
+		t.Fatalf("stale replacement error code = %q, want %q", stale.ErrorCode, contributionErrorLeaseMismatch)
+	}
 	if got := strings.TrimSpace(runGit(t, originDir, "rev-parse", "refs/heads/feature/contribution")); got != providerTwo {
 		t.Fatalf("remote head after stale replacement = %q, want %q", got, providerTwo)
 	}
@@ -110,6 +116,9 @@ func TestGitOperatorUseRemoteContributionRejectsStaleFetch(t *testing.T) {
 	if result.Success || result.RecoveryBranch != "" {
 		t.Fatalf("stale adoption = %+v, want no mutation", result)
 	}
+	if result.ErrorCode != contributionErrorLeaseMismatch {
+		t.Fatalf("stale adoption error code = %q, want %q", result.ErrorCode, contributionErrorLeaseMismatch)
+	}
 	if got := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD")); got != localHead {
 		t.Fatalf("task HEAD after stale adoption = %q, want %q", got, localHead)
 	}
@@ -140,10 +149,45 @@ func TestGitOperatorUseRemoteContributionRejectsDirtyWorktree(t *testing.T) {
 			if result.Success || result.RecoveryBranch != "" || !strings.Contains(result.Error, "clean") {
 				t.Fatalf("dirty adoption = %+v, want clean-tree rejection", result)
 			}
+			if result.ErrorCode != contributionErrorDirtyWorktree {
+				t.Fatalf("dirty adoption error code = %q, want %q", result.ErrorCode, contributionErrorDirtyWorktree)
+			}
 			if got := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD")); got != localHead {
 				t.Fatalf("task HEAD after dirty adoption = %q, want %q", got, localHead)
 			}
 		})
+	}
+}
+
+func TestGitOperatorUseRemoteContributionRechecksWorktreeAfterFetch(t *testing.T) {
+	repoDir, _, _, binding, _, providerTwo, localHead := setupDivergedContributionRepo(t)
+	realGit, err := osExec.LookPath("git")
+	if err != nil {
+		t.Fatalf("locate git: %v", err)
+	}
+	shimDir := t.TempDir()
+	shimPath := filepath.Join(shimDir, "git")
+	if err := os.WriteFile(shimPath, []byte("#!/bin/sh\nif [ \"$1\" = \"fetch\" ]; then\n  \"$REAL_GIT\" \"$@\"\n  status=$?\n  printf 'created during fetch\\n' > \"$RACE_WORKTREE/race-after-fetch.txt\"\n  exit $status\nfi\nexec \"$REAL_GIT\" \"$@\"\n"), 0o755); err != nil {
+		t.Fatalf("write git shim: %v", err)
+	}
+	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("REAL_GIT", realGit)
+	t.Setenv("RACE_WORKTREE", repoDir)
+
+	operator := NewGitOperator(repoDir, newTestLogger(t), nil)
+	operator.setRemoteContribution(binding)
+	result, err := operator.UseRemoteContribution(context.Background(), providerTwo)
+	if err != nil {
+		t.Fatalf("UseRemoteContribution returned error: %v", err)
+	}
+	if result.Success || result.RecoveryBranch == "" || result.ErrorCode != contributionErrorDirtyWorktree {
+		t.Fatalf("racing adoption = %+v, want final clean-tree rejection", result)
+	}
+	if got := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD")); got != localHead {
+		t.Fatalf("task HEAD after racing adoption = %q, want %q", got, localHead)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "race-after-fetch.txt")); err != nil {
+		t.Fatalf("post-fetch worktree change missing: %v", err)
 	}
 }
 

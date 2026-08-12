@@ -19,23 +19,10 @@ export type PendingRemoteContributionResolution = RemoteContributionResolutionTa
 export type RemoteContributionResolutionError = "lease_mismatch" | "dirty_worktree" | "generic";
 
 export function classifyRemoteContributionError(
-  message: string | undefined,
+  errorCode: string | undefined,
 ): RemoteContributionResolutionError {
-  const normalized = message?.toLowerCase() ?? "";
-  if (
-    normalized.includes("stale info") ||
-    normalized.includes("head changed") ||
-    normalized.includes("non-fast-forward")
-  ) {
-    return "lease_mismatch";
-  }
-  if (
-    normalized.includes("working tree must be clean") ||
-    normalized.includes("clean working tree") ||
-    normalized.includes("uncommitted changes")
-  ) {
-    return "dirty_worktree";
-  }
+  if (errorCode === "lease_mismatch") return "lease_mismatch";
+  if (errorCode === "dirty_worktree") return "dirty_worktree";
   return "generic";
 }
 
@@ -47,7 +34,10 @@ export function remoteContributionResolutionErrorKey(
   return "task:remoteContributionResolutionFailed";
 }
 
-export function useRemoteContributionResolution(sessionId: string | null | undefined) {
+export function useRemoteContributionResolution(
+  sessionId: string | null | undefined,
+  refreshProviderEvidence?: () => Promise<string | null>,
+) {
   const { replaceRemoteContribution, useRemoteContribution, isLoading } = useGitOperations(
     sessionId ?? null,
   );
@@ -85,16 +75,31 @@ export function useRemoteContributionResolution(sessionId: string | null | undef
       const operation =
         pending.action === "replace" ? replaceRemoteContribution : useRemoteContribution;
       const result = await operation(pending.expectedRemoteHead, pending.repo);
+      const resolutionError = result.success
+        ? null
+        : classifyRemoteContributionError(result.error_code);
+      let refreshedHead: string | null = null;
+      if (result.success || resolutionError === "lease_mismatch") {
+        try {
+          refreshedHead = (await refreshProviderEvidence?.()) ?? null;
+        } catch {
+          // The Git operation result remains authoritative if provider refresh fails.
+        }
+      }
       if (result.success) setPending(null);
+      if (!result.success && resolutionError === "lease_mismatch" && refreshedHead) {
+        setPending((current) =>
+          current ? { ...current, expectedRemoteHead: refreshedHead } : current,
+        );
+      }
       setLastResult(result);
-      setError(result.success ? null : classifyRemoteContributionError(result.error));
+      setError(resolutionError);
       return result;
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : undefined;
-      setError(classifyRemoteContributionError(message));
+    } catch {
+      setError("generic");
       return null;
     }
-  }, [pending, replaceRemoteContribution, useRemoteContribution]);
+  }, [pending, refreshProviderEvidence, replaceRemoteContribution, useRemoteContribution]);
 
   return {
     pending,

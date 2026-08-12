@@ -329,6 +329,7 @@ function useChangesPanelPRData(repositoryNames: string[], sessionId: string | nu
     selectedPR: taskPR,
     providerCommitsLoading: relationState.loading,
     providerCommitsError: relationState.error,
+    refreshProviderEvidence: relationState.refreshProviderEvidence,
   };
 }
 
@@ -369,7 +370,10 @@ export function useChangesPanelData() {
     [git.repoNames, git.cumulativeDiff],
   );
   const prData = useChangesPanelPRData(reviewRepositoryNames, activeSessionId);
-  const resolution = useRemoteContributionResolution(activeSessionId);
+  const resolution = useRemoteContributionResolution(
+    activeSessionId,
+    prData.refreshProviderEvidence,
+  );
   const resolutionTarget = useChangesPanelResolutionTarget(
     prData.relation,
     prData.repositoryName,

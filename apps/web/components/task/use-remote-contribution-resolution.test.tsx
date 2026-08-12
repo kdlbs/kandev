@@ -9,6 +9,7 @@ import {
 const mocks = vi.hoisted(() => ({
   replaceRemoteContribution: vi.fn(),
   useRemoteContribution: vi.fn(),
+  refreshProviderEvidence: vi.fn(),
 }));
 
 vi.mock("@/hooks/use-git-operations", () => ({
@@ -35,15 +36,19 @@ describe("useRemoteContributionResolution", () => {
   beforeEach(() => {
     mocks.replaceRemoteContribution.mockReset();
     mocks.useRemoteContribution.mockReset();
+    mocks.refreshProviderEvidence.mockReset();
     mocks.replaceRemoteContribution.mockResolvedValue({
       ...successResult,
       operation: "replace_remote_contribution",
     });
     mocks.useRemoteContribution.mockResolvedValue(successResult);
+    mocks.refreshProviderEvidence.mockResolvedValue(TARGET.expectedRemoteHead);
   });
 
   it("keeps a typed replacement confirmation pending until it is confirmed", async () => {
-    const { result } = renderHook(() => useRemoteContributionResolution("session-1"));
+    const { result } = renderHook(() =>
+      useRemoteContributionResolution("session-1", mocks.refreshProviderEvidence),
+    );
 
     act(() => result.current.requestReplace(TARGET));
     expect(result.current.pending).toEqual({ action: "replace", ...TARGET });
@@ -53,6 +58,7 @@ describe("useRemoteContributionResolution", () => {
     });
 
     expect(mocks.replaceRemoteContribution).toHaveBeenCalledWith(TARGET.expectedRemoteHead, "");
+    expect(mocks.refreshProviderEvidence).toHaveBeenCalledOnce();
     expect(result.current.pending).toBeNull();
     expect(result.current.lastResult?.operation).toBe("replace_remote_contribution");
   });
@@ -69,6 +75,30 @@ describe("useRemoteContributionResolution", () => {
     expect(result.current.lastResult?.recovery_branch).toBe("kandev/recovery-123");
   });
 
+  it("refreshes the provider head after a lease mismatch before retry", async () => {
+    const refreshedHead = "cccccccccccccccccccccccccccccccccccccccc";
+    mocks.replaceRemoteContribution.mockResolvedValue({
+      ...successResult,
+      success: false,
+      operation: "replace_remote_contribution",
+      error: "remote contribution head changed",
+      error_code: "lease_mismatch",
+    });
+    mocks.refreshProviderEvidence.mockResolvedValue(refreshedHead);
+    const { result } = renderHook(() =>
+      useRemoteContributionResolution("session-1", mocks.refreshProviderEvidence),
+    );
+
+    act(() => result.current.requestReplace(TARGET));
+    await act(async () => {
+      await result.current.confirm();
+    });
+
+    expect(mocks.refreshProviderEvidence).toHaveBeenCalledOnce();
+    expect(result.current.pending?.expectedRemoteHead).toBe(refreshedHead);
+    expect(result.current.error).toBe("lease_mismatch");
+  });
+
   it("clears a pending confirmation without calling Git", () => {
     const { result } = renderHook(() => useRemoteContributionResolution("session-1"));
 
@@ -81,19 +111,20 @@ describe("useRemoteContributionResolution", () => {
 });
 
 describe("classifyRemoteContributionError", () => {
-  it.each(["remote contribution head changed before adoption", "! [rejected] (stale info)"])(
-    "maps %s to a lease mismatch",
-    (message) => {
-      expect(classifyRemoteContributionError(message)).toBe("lease_mismatch");
-    },
-  );
+  it.each(["lease_mismatch"])("maps %s to a lease mismatch", (errorCode) => {
+    expect(classifyRemoteContributionError(errorCode)).toBe("lease_mismatch");
+  });
 
-  it("maps clean-tree failures to the dirty worktree instruction", () => {
-    expect(classifyRemoteContributionError("working tree must be clean")).toBe("dirty_worktree");
+  it("maps dirty-worktree error codes to the clean-tree instruction", () => {
+    expect(classifyRemoteContributionError("dirty_worktree")).toBe("dirty_worktree");
+  });
+
+  it("does not infer a category from provider error text", () => {
+    expect(classifyRemoteContributionError("remote contribution head changed")).toBe("generic");
   });
 
   it("keeps unrelated provider errors generic", () => {
-    expect(classifyRemoteContributionError("permission denied")).toBe("generic");
+    expect(classifyRemoteContributionError("remote_unavailable")).toBe("generic");
     expect(classifyRemoteContributionError(undefined)).toBe("generic");
   });
 });
