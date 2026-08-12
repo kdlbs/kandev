@@ -330,3 +330,35 @@ exit 8
 		t.Fatalf("result = %+v", result)
 	}
 }
+
+// TestMainScrubsAmbientGitLabEnvironment guards the TestMain hermeticity
+// scrub in testmain_test.go. If that scrub is ever removed, this fails
+// loudly instead of letting the parent shell's KANDEV_GITLAB_HOST /
+// GITLAB_TOKEN silently re-arm GitLab host-trust test failures.
+func TestMainScrubsAmbientGitLabEnvironment(t *testing.T) {
+	for _, name := range []string{gitLabHostEnv, gitLabTokenEnv} {
+		if got := os.Getenv(name); got != "" {
+			t.Fatalf("%s = %q, want empty — TestMain scrub missing or removed", name, got)
+		}
+	}
+}
+
+// TestGitOperatorEnvironmentValueReachesGitLabHostDetection covers the
+// os.Environ() fallback in environmentValues (git.go:117-133): a GitOperator
+// built with a nil environment provider (NewGitOperator(dir, log, nil), as
+// every CreatePR test in this package does) reads KANDEV_GITLAB_HOST from
+// the ambient process environment, and that value reaches GitLab remote-host
+// validation the same way git.go:1183 wires it into parseGitLabRepoInfo.
+func TestGitOperatorEnvironmentValueReachesGitLabHostDetection(t *testing.T) {
+	t.Setenv(gitLabHostEnv, "https://gitlab.selfhosted.example")
+	op := NewGitOperator(t.TempDir(), newTestLogger(t), nil)
+
+	matched, err := parseGitLabRepoInfo("git@gitlab.selfhosted.example:group/widgets.git", op.environmentValue(gitLabHostEnv))
+	if err != nil || matched == nil || matched.Origin != "https://gitlab.selfhosted.example" {
+		t.Fatalf("parseGitLabRepoInfo(matching remote) = %+v, %v", matched, err)
+	}
+
+	if _, err := parseGitLabRepoInfo("git@gitlab.com:group/widgets.git", op.environmentValue(gitLabHostEnv)); err == nil {
+		t.Fatal("gitlab.com remote unexpectedly accepted when ambient KANDEV_GITLAB_HOST names a different host")
+	}
+}
