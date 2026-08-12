@@ -18,11 +18,13 @@ import (
 )
 
 const (
-	lspCloseStreamError  = 4006
-	lspProxyWriteTimeout = 10 * time.Second
-	lspProxyIdleTimeout  = 90 * time.Second
-	lspProxyPingInterval = 30 * time.Second
-	lspErrorResponseKey  = "error"
+	lspCloseStreamError    = 4006
+	lspProxyWriteTimeout   = 10 * time.Second
+	lspProxyIdleTimeout    = 90 * time.Second
+	lspProxyPingInterval   = 30 * time.Second
+	lspErrorResponseKey    = "error"
+	lspUnavailableText     = "task language server attachment unavailable"
+	lspHostUnavailableText = "task-host LSP attachment unavailable"
 )
 
 type lspMessageWriter interface {
@@ -62,8 +64,9 @@ func (h *LSPHandler) HandleLSPConnection(c *gin.Context) {
 	target, err := h.controller.ResolveAttachment(c.Request.Context(), taskID, language)
 	if err != nil {
 		status := lspAttachmentHTTPStatus(err)
-		message := "task language server attachment unavailable"
-		if status == http.StatusBadRequest || status == http.StatusConflict {
+		message := lspUnavailableText
+		if status == http.StatusBadRequest || status == http.StatusConflict ||
+			status == http.StatusUnprocessableEntity {
 			message = err.Error()
 		}
 		c.JSON(status, gin.H{lspErrorResponseKey: message})
@@ -78,7 +81,7 @@ func (h *LSPHandler) HandleLSPConnection(c *gin.Context) {
 		if response != nil && response.StatusCode >= http.StatusBadRequest {
 			status = response.StatusCode
 		}
-		c.JSON(status, gin.H{lspErrorResponseKey: "task-host LSP attachment unavailable"})
+		c.JSON(status, gin.H{lspErrorResponseKey: lspHostUnavailableText})
 		return
 	}
 	upstreamConn.SetReadLimit(protocol.MaxMessageBytes)
@@ -98,6 +101,8 @@ func lspAttachmentHTTPStatus(err error) int {
 		return http.StatusBadRequest
 	case errors.Is(err, sharedlsp.ErrAttachmentNotReady), errors.Is(err, sharedlsp.ErrServerDisabled):
 		return http.StatusConflict
+	case errors.Is(err, sharedlsp.ErrTaskNotReady), errors.Is(err, sharedlsp.ErrExecutorUnsupported):
+		return http.StatusUnprocessableEntity
 	case errors.Is(err, repoerrors.ErrTaskNotFound):
 		return http.StatusNotFound
 	default:

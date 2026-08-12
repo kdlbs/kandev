@@ -539,6 +539,13 @@ Completed 2026-08-05.
   changed-code Go lint reported zero issues. The 25 focused frontend tests, web typecheck, i18n
   ratchet, Windows LSP cross-build, Makefile shell-dispatch checks, all 60 public-doc validator tests,
   all 41 published pages, and the three-dot whitespace check passed.
+- After `origin/main` added gateway coverage, the branch rebased without conflict onto `590ffb31f`.
+  The new tests exposed a semantic merge conflict with the retired session route, connection lease,
+  and session-runtime manager. Coverage now exercises the task/language attachment resolver, task
+  route, controller-owned capacity boundary, safe upstream failures, and bidirectional proxy instead.
+  Task-not-ready and unsupported-executor attachment failures also return actionable HTTP 422
+  responses. The complete gateway WebSocket package passed under the race detector in 3.790s and
+  focused Go lint reported zero issues.
 
 ---
 

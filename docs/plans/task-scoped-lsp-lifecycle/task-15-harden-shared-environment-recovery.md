@@ -266,6 +266,12 @@ Completed 2026-08-12.
   the 25 focused frontend tests, web typecheck, i18n ratchet, Windows LSP cross-build, Makefile
   shell-dispatch checks, all 60 public-doc validator tests, all 41 published pages, and the three-dot
   whitespace check passed.
+- `origin/main` then added gateway coverage and the branch rebased without conflict onto `590ffb31f`.
+  Those tests described the retired session route, connection capacity lease, and lifecycle manager;
+  they now cover the task/language resolver and route, controller-owned capacity boundary, safe
+  task-host failures, and bidirectional proxy semantics. Task-not-ready and unsupported-executor
+  attachment failures return actionable HTTP 422 responses. The complete gateway WebSocket package
+  passed under the race detector in 3.790s and focused Go lint reported zero issues.
 
 ## Files
 

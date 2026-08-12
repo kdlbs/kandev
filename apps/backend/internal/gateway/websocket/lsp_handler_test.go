@@ -283,6 +283,8 @@ func (f *gatewayFakeAttachmentResolver) ResolveAttachment(
 
 type gatewayFakeTaskHost struct {
 	attachURL      string
+	dialErr        error
+	dialResponse   *http.Response
 	dialLanguage   string
 	dialGeneration uint64
 	stopCalls      int
@@ -336,5 +338,8 @@ func (f *gatewayFakeTaskHost) DialTaskLSPAttach(
 	generation uint64,
 ) (*gorillaws.Conn, *http.Response, error) {
 	f.dialLanguage, f.dialGeneration = language, generation
+	if f.dialErr != nil {
+		return nil, f.dialResponse, f.dialErr
+	}
 	return gorillaws.DefaultDialer.DialContext(ctx, f.attachURL, nil)
 }
