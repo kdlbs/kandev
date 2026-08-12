@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/auth"
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/plugins/manifest"
@@ -591,7 +592,7 @@ func flattenHeaders(h http.Header, sessionCookieName string) map[string]string {
 			}
 			joined = stripped
 		case "Authorization":
-			if strings.HasPrefix(strings.TrimPrefix(joined, "Bearer "), auth.PATPrefix) {
+			if isKandevPATCredential(joined) {
 				continue
 			}
 		}
@@ -605,4 +606,42 @@ func flattenWebhookHeaders(h http.Header) map[string]string {
 	safe.Del("Authorization")
 	safe.Del("Cookie")
 	return flattenHeaders(safe)
+// isKandevPATCredential reports whether an Authorization header value carries
+// a kandev_pat_* token, with or without a bearer scheme prefix. RFC 9110 makes
+// the auth scheme case-insensitive, so "bearer kandev_pat_..." has to be
+// stripped just like "Bearer kandev_pat_...": httpmw.BearerToken would not have
+// authenticated such a request, but the credential still must not be relayed to
+// a plugin subprocess (which a public webhook would otherwise receive it as).
+func isKandevPATCredential(value string) bool {
+	const bearerPrefix = "Bearer "
+	token := strings.TrimSpace(value)
+	if len(token) > len(bearerPrefix) && strings.EqualFold(token[:len(bearerPrefix)], bearerPrefix) {
+		token = strings.TrimSpace(token[len(bearerPrefix):])
+	}
+	return strings.HasPrefix(token, auth.PATPrefix)
+}
+
+// stripSessionCookie removes the sessionCookieName cookie from a Cookie
+// header value ("a=1; b=2"). keep is false when no cookies remain, so the
+// caller can omit the header entirely rather than send an empty one.
+func stripSessionCookie(header, sessionCookieName string) (stripped string, keep bool) {
+	if sessionCookieName == "" {
+		return header, true
+	}
+	parts := strings.Split(header, ";")
+	kept := make([]string, 0, len(parts))
+	for _, p := range parts {
+		trimmed := strings.TrimSpace(p)
+		name, _, found := strings.Cut(trimmed, "=")
+		if found && name == sessionCookieName {
+			continue
+		}
+		if trimmed != "" {
+			kept = append(kept, trimmed)
+		}
+	}
+	if len(kept) == 0 {
+		return "", false
+	}
+	return strings.Join(kept, "; "), true
 }

@@ -232,6 +232,28 @@ func TestFlattenHeaders_StripsPATBearerButKeepsOtherBearers(t *testing.T) {
 	}
 }
 
+// TestFlattenHeaders_StripsPATBearerCaseInsensitively pins that the bearer
+// scheme is matched case-insensitively (RFC 9110): a caller sending
+// "bearer kandev_pat_..." is not authenticated by httpmw.BearerToken, so on a
+// public webhook the request is relayed — the PAT must still be stripped
+// rather than handed to the plugin subprocess.
+func TestFlattenHeaders_StripsPATBearerCaseInsensitively(t *testing.T) {
+	for _, scheme := range []string{"bearer", "BEARER", "BeArEr"} {
+		h := http.Header{}
+		h.Set("Authorization", scheme+" kandev_pat_abc123_secret")
+		if out := flattenHeaders(h, ""); out["Authorization"] != "" {
+			t.Fatalf("scheme %q: Authorization = %q, want stripped PAT bearer", scheme, out["Authorization"])
+		}
+	}
+
+	// A bare PAT with no scheme at all is stripped too.
+	bare := http.Header{}
+	bare.Set("Authorization", "kandev_pat_abc123_secret")
+	if out := flattenHeaders(bare, ""); out["Authorization"] != "" {
+		t.Fatalf("Authorization = %q, want stripped bare PAT", out["Authorization"])
+	}
+}
+
 // TestFlattenHeaders_NoSessionCookieNameSkipsStripping pins that an empty
 // sessionCookieName (no auth bridge wired — auth disabled entirely, so no
 // session cookie is ever minted) relays the Cookie header unchanged.
