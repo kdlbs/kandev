@@ -140,6 +140,13 @@ test.describe("Mobile sidebar task actions", () => {
     await expect(dialog).toBeVisible();
     await expect(dialog).toHaveClass(/font-sans/);
     await expect(dialog.locator('[data-slot="alert-dialog-description"]')).toHaveClass(/text-sm/);
+    await dialog.evaluate(async (element) => {
+      await Promise.all(
+        element
+          .getAnimations({ subtree: true })
+          .map((animation) => animation.finished.catch(() => undefined)),
+      );
+    });
 
     const [dialogBox, viewport] = await Promise.all([
       dialog.boundingBox(),
@@ -155,18 +162,23 @@ test.describe("Mobile sidebar task actions", () => {
     const typography = await dialog.evaluate((element) => {
       const description = element.querySelector('[data-slot="alert-dialog-description"]');
       const cancel = element.querySelector('[data-slot="alert-dialog-cancel"]');
+      const action = element.querySelector('[data-slot="alert-dialog-action"]');
       return {
         dialogFontFamily: getComputedStyle(element).fontFamily,
         descriptionFontFamily: description ? getComputedStyle(description).fontFamily : "",
         descriptionFontSize: description ? getComputedStyle(description).fontSize : "",
         cancelFontFamily: cancel ? getComputedStyle(cancel).fontFamily : "",
         cancelFontSize: cancel ? getComputedStyle(cancel).fontSize : "",
+        actionFontFamily: action ? getComputedStyle(action).fontFamily : "",
+        actionFontSize: action ? getComputedStyle(action).fontSize : "",
       };
     });
     expect(typography.dialogFontFamily).toContain("Figtree");
     expect(typography.descriptionFontFamily).toBe(typography.dialogFontFamily);
     expect(typography.cancelFontFamily).toBe(typography.dialogFontFamily);
     expect(typography.descriptionFontSize).toBe(typography.cancelFontSize);
+    expect(typography.actionFontFamily).toBe(typography.dialogFontFamily);
+    expect(typography.actionFontSize).toBe(typography.descriptionFontSize);
   });
 
   test("keeps the tablet task switcher as a left-side sheet", async ({

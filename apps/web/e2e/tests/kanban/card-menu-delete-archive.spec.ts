@@ -58,10 +58,9 @@ test.describe("Kanban card actions menu — delete/archive does not navigate", (
     await expect(archiveItem).toBeVisible();
     await archiveItem.click();
 
-    await expect(testPage.getByRole("alertdialog")).toBeVisible();
-    await expect(testPage.getByRole("alertdialog")).toContainText("Card Menu Archive Task");
-
     const dialog = testPage.getByRole("alertdialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText("Card Menu Archive Task");
     const dialogBox = await dialog.boundingBox();
     if (!dialogBox) throw new Error("archive confirmation dialog has no layout box");
     expect(dialogBox.width).toBeGreaterThanOrEqual(480);

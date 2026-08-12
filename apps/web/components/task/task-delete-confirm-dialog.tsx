@@ -17,6 +17,7 @@ import { useSubtaskCount } from "@/hooks/use-subtask-count";
 import { useTaskInFlight } from "@/hooks/use-task-in-flight";
 import { getCleanupSummary, getBulkCleanupSummary } from "./task-cleanup-summary";
 import { StillWorkingWarning } from "./task-still-working-warning";
+import { TASK_CONFIRM_CLASS, stopDialogPropagation } from "./task-confirm-dialog-shared";
 import { useTranslation } from "react-i18next";
 
 type TaskDeleteConfirmDialogProps = {
@@ -36,9 +37,6 @@ type TaskDeleteConfirmDialogProps = {
   onConfirm: (opts: { cascade: boolean }) => void;
   confirmTestId?: string;
 };
-
-const dialogClass =
-  "w-[calc(100vw-2rem)] !max-w-[calc(100vw-2rem)] font-sans !text-sm sm:!max-w-lg";
 
 export function TaskDeleteConfirmDialog({
   open,
@@ -78,7 +76,7 @@ export function TaskDeleteConfirmDialog({
 
   return (
     <AlertDialog open={open} onOpenChange={handleOpenChange}>
-      <AlertDialogContent className={dialogClass} onClick={(e) => e.stopPropagation()}>
+      <AlertDialogContent size="lg" className={TASK_CONFIRM_CLASS} onClick={stopDialogPropagation}>
         <AlertDialogHeader>
           <AlertDialogTitle className="text-base font-semibold">{title}</AlertDialogTitle>
           <AlertDialogDescription asChild className="text-sm leading-6">
