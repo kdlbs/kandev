@@ -1092,6 +1092,11 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 	// when clients subscribe to this session later (sidebar diff stats, etc.).
 	s.captureGitStatusSnapshot(ctx, data.SessionID)
 
+	// Reconcile task_session_commits while the agent process is still
+	// running - see captureSessionCommitsSweep for why this runs here
+	// rather than relying solely on the live commit-created event.
+	s.captureSessionCommitsSweep(ctx, data.SessionID)
+
 	// Clean up the agent execution (stop agentctl, release port)
 	go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
 

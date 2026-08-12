@@ -229,6 +229,16 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("task_session_messages.updated_at.backfill", `UPDATE task_session_messages SET updated_at = created_at WHERE updated_at IS NULL`)
 	r.migrate.Apply("idx_messages_session_updated", `CREATE INDEX IF NOT EXISTS idx_messages_session_updated ON task_session_messages(task_session_id, updated_at)`)
 
+	// task_session_commits gains a uniqueness constraint before its writer
+	// starts firing from more than just archive capture (CreateSessionCommit
+	// was previously a plain INSERT). Must dedupe existing duplicates first:
+	// CREATE UNIQUE INDEX fails on a duplicate pair, and MigrateLogger.Apply
+	// swallows non-"already exists" errors, so an unhandled duplicate would
+	// silently leave both the index and every future ON CONFLICT missing.
+	if err := r.migrateSessionCommitsDedupeAndActivation(); err != nil {
+		return err
+	}
+
 	// Backfill the per-session cost/token columns. Runs after the gated
 	// task_sessions rebuilds above so it repairs legacy DBs whose schema can no
 	// longer trigger a rebuild (see migrateSessionsAddCostColumns).
@@ -672,6 +682,65 @@ func (r *Repository) backfillExecutorsRunningFromTaskSessions() error {
 		WHERE COALESCE(ts.agent_execution_id, '') != '' AND er.id IS NULL
 	`, now); err != nil {
 		return fmt.Errorf("backfill executors_running: %w", err)
+	}
+	return nil
+}
+
+// commitCaptureActivatedAtMetaKey is the kandev_meta key published by
+// migrateSessionCommitsDedupeAndActivation.
+const commitCaptureActivatedAtMetaKey = "commit_capture_activated_at"
+
+// migrateSessionCommitsDedupeAndActivation enforces uniqueness on
+// task_session_commits(session_id, commit_sha) and publishes the point in
+// time commit capture started firing from more than just archive capture, so
+// downstream readers (the Rill extract, ListSessionCodeStats) can tell
+// "capture wasn't running yet" apart from "session made zero commits" -
+// both previously read as a plain 0.
+//
+// Dedup keeps the earliest-observed row per (session_id, commit_sha), ties
+// broken by id: task_session_commits is an append-only observation ledger
+// (a rebase/squash adds new SHAs, it never retroactively changes which row
+// was first seen), so "earliest seen" is the row future replays preserve.
+// Must run before CreateSessionCommit starts firing from more than archive -
+// CREATE UNIQUE INDEX fails on an existing duplicate pair, and
+// MigrateLogger.Apply swallows non-"already exists" errors, so an unhandled
+// duplicate would silently leave both the index and every future
+// ON CONFLICT missing.
+func (r *Repository) migrateSessionCommitsDedupeAndActivation() error {
+	r.migrate.Apply("task_session_commits.dedupe", `
+		DELETE FROM task_session_commits
+		WHERE id NOT IN (
+			SELECT id FROM (
+				SELECT id,
+					ROW_NUMBER() OVER (
+						PARTITION BY session_id, commit_sha
+						ORDER BY created_at ASC, id ASC
+					) AS rn
+				FROM task_session_commits
+			) ranked
+			WHERE rn = 1
+		)
+	`)
+	r.migrate.Apply("uniq_session_commits_session_sha",
+		`CREATE UNIQUE INDEX IF NOT EXISTS uniq_session_commits_session_sha ON task_session_commits(session_id, commit_sha)`)
+
+	// kandev_meta already exists by the time repository migrations run in
+	// production (persistence.Provide creates it before opening any
+	// repository), but repo-level tests build a bare DB via NewWithDB where
+	// it does not, so recreate it defensively.
+	if _, err := r.db.Exec(`
+		CREATE TABLE IF NOT EXISTS kandev_meta (
+			key   TEXT PRIMARY KEY,
+			value TEXT NOT NULL DEFAULT ''
+		)`); err != nil {
+		return fmt.Errorf("ensure kandev_meta: %w", err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := r.db.Exec(r.db.Rebind(`
+		INSERT INTO kandev_meta (key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO NOTHING
+	`), commitCaptureActivatedAtMetaKey, now); err != nil {
+		return fmt.Errorf("write %s: %w", commitCaptureActivatedAtMetaKey, err)
 	}
 	return nil
 }

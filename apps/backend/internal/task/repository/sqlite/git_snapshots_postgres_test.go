@@ -141,8 +141,12 @@ func TestPostgresSessionCommitLifecycle(t *testing.T) {
 		FilesChanged: 9, Insertions: 123, Deletions: 45,
 		CreatedAt: time.Date(2026, 4, 2, 3, 4, 6, 0, time.UTC),
 	}
-	if err := repo.CreateSessionCommit(ctx, want); err != nil {
+	inserted, err := repo.CreateSessionCommit(ctx, want)
+	if err != nil {
 		t.Fatalf("CreateSessionCommit: %v", err)
+	}
+	if !inserted {
+		t.Error("CreateSessionCommit(want) inserted = false, want true (first observation)")
 	}
 	got, err := repo.GetLatestSessionCommit(ctx, "session-commit-pg")
 	if err != nil {
@@ -150,7 +154,26 @@ func TestPostgresSessionCommitLifecycle(t *testing.T) {
 	}
 	assertSessionCommitEqual(t, got, want)
 
-	if err := repo.CreateSessionCommit(ctx, &models.SessionCommit{
+	// The unique index on (session_id, commit_sha) must hold on Postgres too
+	// (ADR-0027 parity): the same commit observed by a second trigger (live
+	// event, sweep, archive) is a no-op, not a duplicate row or an error.
+	dupInserted, err := repo.CreateSessionCommit(ctx, &models.SessionCommit{
+		ID: "commit-pg-duplicate", SessionID: "session-commit-pg", CommitSHA: want.CommitSHA,
+		CommittedAt: want.CommittedAt,
+	})
+	if err != nil {
+		t.Fatalf("CreateSessionCommit(duplicate): %v", err)
+	}
+	if dupInserted {
+		t.Error("CreateSessionCommit(duplicate) inserted = true, want false (ON CONFLICT DO NOTHING)")
+	}
+	if got := countRows(t, repo,
+		`SELECT COUNT(1) FROM task_session_commits WHERE session_id = ? AND commit_sha = ?`,
+		"session-commit-pg", want.CommitSHA); got != 1 {
+		t.Errorf("rows for %s after duplicate insert = %d, want 1", want.CommitSHA, got)
+	}
+
+	if _, err := repo.CreateSessionCommit(ctx, &models.SessionCommit{
 		ID: "commit-pg-older", SessionID: "session-commit-pg", CommitSHA: "older",
 		CommittedAt: want.CommittedAt.Add(-time.Hour),
 	}); err != nil {

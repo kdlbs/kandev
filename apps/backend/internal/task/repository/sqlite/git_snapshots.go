@@ -332,7 +332,14 @@ func (r *Repository) GetGitSnapshotsBySession(ctx context.Context, sessionID str
 }
 
 // CreateSessionCommit inserts a new commit record into the database.
-func (r *Repository) CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) error {
+// Idempotent on (session_id, commit_sha): a commit already observed for this
+// session is silently skipped rather than duplicated, since it can now be
+// reported from more than one trigger (live commit events, the per-turn
+// reconcile sweep, and archive capture) for the same underlying git commit.
+// The returned bool reports whether a new row was actually inserted, so
+// callers can distinguish a fresh observation from a re-observed duplicate
+// for writer-health counters.
+func (r *Repository) CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) (bool, error) {
 	if commit.ID == "" {
 		commit.ID = uuid.New().String()
 	}
@@ -340,18 +347,26 @@ func (r *Repository) CreateSessionCommit(ctx context.Context, commit *models.Ses
 		commit.CreatedAt = time.Now().UTC()
 	}
 
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_session_commits (
 			id, session_id, commit_sha, parent_sha, author_name, author_email,
 			commit_message, committed_at, pre_commit_snapshot_id, post_commit_snapshot_id,
 			files_changed, insertions, deletions, created_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (session_id, commit_sha) DO NOTHING
 	`), commit.ID, commit.SessionID, commit.CommitSHA, commit.ParentSHA,
 		commit.AuthorName, commit.AuthorEmail, commit.CommitMessage, commit.CommittedAt,
 		commit.PreCommitSnapshotID, commit.PostCommitSnapshotID, commit.FilesChanged,
 		commit.Insertions, commit.Deletions, commit.CreatedAt)
+	if err != nil {
+		return false, err
+	}
 
-	return err
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
 }
 
 // GetSessionCommits retrieves all commits for a session, ordered by committed_at descending.
