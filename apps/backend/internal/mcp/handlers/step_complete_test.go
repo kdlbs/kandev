@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"expvar"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
@@ -99,6 +102,39 @@ func newStepCompleteHandler(t *testing.T, taskSvc *service.Service, repo *sqlite
 		eventBus:    bus,
 		logger:      testLogger(t).WithFields(),
 	}
+}
+
+type stepCompleteSessionReadBarrier struct {
+	*sqliterepo.Repository
+	ready   chan<- struct{}
+	release <-chan struct{}
+	reads   atomic.Int32
+}
+
+func (r *stepCompleteSessionReadBarrier) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
+	if r.reads.Add(1) <= 2 {
+		r.ready <- struct{}{}
+		<-r.release
+	}
+	return r.Repository.GetTaskSession(ctx, id)
+}
+
+type concurrentStepCompleteEventBus struct {
+	mu     sync.Mutex
+	events []*bus.Event
+}
+
+func (b *concurrentStepCompleteEventBus) Publish(_ context.Context, _ string, event *bus.Event) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.events = append(b.events, event)
+	return nil
+}
+
+func (b *concurrentStepCompleteEventBus) eventCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.events)
 }
 
 // TestHandleStepComplete_MissingFields covers the input-validation branches
@@ -328,4 +364,82 @@ func TestHandleStepComplete_DedupWaitingRepublishes(t *testing.T) {
 
 	require.Len(t, bus.events, 1, "WAITING dedup must re-publish the bus event so the subscriber can drive the transition")
 	assert.Equal(t, events.WorkflowStepCompletionSignaled, bus.events[0].Type)
+}
+
+// TestHandleStepComplete_ConcurrentCallsClaimOneSignal verifies that two
+// requests which read the empty bag at the same time still produce one
+// accepted signal, one event, and one telemetry increment.
+func TestHandleStepComplete_ConcurrentCallsClaimOneSignal(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	seedStepCompleteTarget(t, repo, "task-concurrent", "session-concurrent", "step-1", models.TaskSessionStateRunning)
+	seedAgentProfileSnapshot(t, repo, "session-concurrent", "claude-concurrent")
+
+	ready := make(chan struct{}, 2)
+	release := make(chan struct{})
+	gatedRepo := &stepCompleteSessionReadBarrier{
+		Repository: repo,
+		ready:      ready,
+		release:    release,
+	}
+	eventBus := &concurrentStepCompleteEventBus{}
+	h := &Handlers{
+		taskSvc:     svc,
+		sessionRepo: gatedRepo,
+		eventBus:    eventBus,
+		logger:      testLogger(t).WithFields(),
+	}
+
+	const counterKey = "source=agent;agent_type=claude-concurrent"
+	before := readSignalReceivedCounterExact(t, counterKey)
+	messages := []*ws.Message{
+		makeWSMessage(t, ws.ActionMCPStepComplete, map[string]interface{}{
+			"task_id":    "task-concurrent",
+			"session_id": "session-concurrent",
+			"summary":    "first concurrent signal",
+		}),
+		makeWSMessage(t, ws.ActionMCPStepComplete, map[string]interface{}{
+			"task_id":    "task-concurrent",
+			"session_id": "session-concurrent",
+			"summary":    "second concurrent signal",
+		}),
+	}
+	type result struct {
+		response *ws.Message
+		err      error
+	}
+	results := make(chan result, len(messages))
+	for _, msg := range messages {
+		go func(msg *ws.Message) {
+			response, err := h.handleStepComplete(ctx, msg)
+			results <- result{response: response, err: err}
+		}(msg)
+	}
+	<-ready
+	<-ready
+	close(release)
+
+	accepted := 0
+	for range messages {
+		outcome := <-results
+		require.NoError(t, outcome.err)
+		require.NotNil(t, outcome.response)
+		var payload map[string]interface{}
+		require.NoError(t, json.Unmarshal(outcome.response.Payload, &payload))
+		if payload["accepted"] == true {
+			accepted++
+		}
+	}
+
+	assert.Equal(t, 1, accepted, "only one concurrent request can claim the current workflow step")
+	assert.Equal(t, 1, eventBus.eventCount(), "only the winning request can publish the completion event")
+	after := readSignalReceivedCounterExact(t, counterKey)
+	assert.Equal(t, int64(1), after-before, "only the winning request can increment received-signal telemetry")
+
+	session, err := repo.GetTaskSession(ctx, "session-concurrent")
+	require.NoError(t, err)
+	signal, ok := models.LoadPendingStepSignal(session.Metadata)
+	require.True(t, ok, "the winning request must persist the completion signal")
+	assert.Equal(t, "step-1", signal.StepID)
+	assert.Contains(t, []string{"first concurrent signal", "second concurrent signal"}, signal.Summary)
 }

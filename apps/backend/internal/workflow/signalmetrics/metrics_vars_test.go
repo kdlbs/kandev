@@ -59,25 +59,30 @@ func TestRecordSignalReceived(t *testing.T) {
 	}
 }
 
-func TestRecordSignalReceived_ManualFallbackSourceIsLabelled(t *testing.T) {
-	// The manual-fallback affordance (ADR 0015 § Decision ¶6) has no
-	// production call site yet, but RecordSignalReceived itself must not
-	// assume "agent" — the moment that path exists it drives the ADR's
-	// fallback-used/received ratio through this same source label with no
-	// second counter.
-	label := metricLabel("source", "manual_fallback", "agent_type", "claude-fallback-test")
+func TestRecordSignalFallbackUsed(t *testing.T) {
+	const agentType = "claude-fallback-test"
+	label := metricLabel("agent_type", agentType)
+	receivedLabel := metricLabel("source", "manual_fallback", "agent_type", agentType)
 
-	before := readCounter(t, workflowStepSignalReceived, label)
-	RecordSignalReceived("manual_fallback", "claude-fallback-test")
-	after := readCounter(t, workflowStepSignalReceived, label)
+	before := readCounter(t, workflowStepSignalFallbackUsed, label)
+	receivedBefore := readCounter(t, workflowStepSignalReceived, receivedLabel)
+	RecordSignalFallbackUsed(agentType)
+	after := readCounter(t, workflowStepSignalFallbackUsed, label)
+	receivedAfter := readCounter(t, workflowStepSignalReceived, receivedLabel)
 
 	if after-before != 1 {
-		t.Errorf("received counter delta = %d, want 1", after-before)
+		t.Errorf("fallback counter delta = %d, want 1", after-before)
+	}
+	if receivedAfter != receivedBefore {
+		t.Errorf("received counter changed for fallback-only record: before=%d after=%d", receivedBefore, receivedAfter)
 	}
 }
 
 func TestWorkflowStepSignalReceivedPublishedAtKnownName(t *testing.T) {
 	if expvar.Get("workflow_step_completion_signal_received_total") == nil {
 		t.Error("expvar \"workflow_step_completion_signal_received_total\" not published — /debug/vars consumers will miss it")
+	}
+	if expvar.Get("workflow_step_completion_signal_fallback_used_total") == nil {
+		t.Error("expvar \"workflow_step_completion_signal_fallback_used_total\" not published — /debug/vars consumers will miss it")
 	}
 }

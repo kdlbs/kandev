@@ -1,7 +1,6 @@
 // Package signalmetrics publishes the ADR 0015 step-completion-signal expvar
-// counter. It is a neutral package (not internal/mcp/handlers) so that a
-// future manual-fallback affordance can increment through the same
-// RecordSignalReceived call instead of forking a second call site.
+// counters. It is a neutral package so both MCP and UI code can record the
+// signal source without depending on each other.
 package signalmetrics
 
 import (
@@ -11,19 +10,13 @@ import (
 
 // workflowStepSignalReceived counts accepted `step_complete_kandev` signals
 // (ADR 0015), labelled by source and agent type. It is the ADR's
-// `step_completion_signal_received_total` counter. The ADR also specifies a
-// companion `step_completion_signal_fallback_used_total` counter, but that
-// counter's only production increment site is the manual "Mark complete &
-// advance" fallback button (ADR 0015 § Decision ¶6), which is unimplemented
-// as of this package's introduction. Publishing that counter with no call
-// site would pin it at zero and make the ADR's fallback-used/received ratio
-// misreport "0% fallback" regardless of reality, so it is deliberately not
-// published here. The `source` label on this map already carries the
-// dimension the ratio needs: once the fallback path exists and calls
-// RecordSignalReceived with source="manual_fallback", the same ratio is
-// computable as received{source=manual_fallback} / received{all sources},
-// with no second counter and no rework of this map.
+// `step_completion_signal_received_total` counter.
 var workflowStepSignalReceived = expvar.NewMap("workflow_step_completion_signal_received_total")
+
+// workflowStepSignalFallbackUsed counts manual completion fallbacks, labelled
+// by agent type. It is separate from workflowStepSignalReceived so the ADR's
+// fallback-used / received ratio has the correct denominator.
+var workflowStepSignalFallbackUsed = expvar.NewMap("workflow_step_completion_signal_fallback_used_total")
 
 // metricLabel builds a "k1=v1;k2=v2;..." label string for an expvar map key,
 // matching the convention in internal/office/scheduler/metrics_vars.go so a
@@ -43,9 +36,8 @@ func metricLabel(pairs ...string) string {
 }
 
 // RecordSignalReceived counts one accepted step-completion signal. `source`
-// is one of models.StepCompletionSource* — today only
-// models.StepCompletionSourceAgent is reachable in production, since the
-// ADR's manual fallback affordance (§ Decision ¶6) has no call site yet.
+// is one of models.StepCompletionSource*. The manual fallback affordance may
+// call RecordSignalFallbackUsed separately when it is available.
 // `agentType` is the bounded agent-type dimension the ADR's ratio threshold
 // ("fallback-used / received <= 10% per agent type") is expressed against —
 // e.g. AgentProfile.AgentName ("claude", "codex"), the registry-facing type
@@ -57,4 +49,10 @@ func metricLabel(pairs ...string) string {
 func RecordSignalReceived(source, agentType string) {
 	workflowStepSignalReceived.Add(
 		metricLabel("source", source, "agent_type", agentType), 1)
+}
+
+// RecordSignalFallbackUsed counts one manual completion fallback. The
+// separate counter keeps fallback events out of the received-signal count.
+func RecordSignalFallbackUsed(agentType string) {
+	workflowStepSignalFallbackUsed.Add(metricLabel("agent_type", agentType), 1)
 }
