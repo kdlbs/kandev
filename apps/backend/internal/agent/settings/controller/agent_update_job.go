@@ -126,6 +126,18 @@ func (s *AgentUpdateJobStore) Get(jobID string) (*dto.AgentUpdateJobDTO, bool) {
 	return &snapshot, true
 }
 
+// GetActive returns the current queued or running update for an agent.
+func (s *AgentUpdateJobStore) GetActive(agentName string) (*dto.AgentUpdateJobDTO, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	job, ok := s.activeByAgt[agentName]
+	if !ok {
+		return nil, false
+	}
+	snapshot := job.snapshot()
+	return &snapshot, true
+}
+
 func (s *AgentUpdateJobStore) ListAll() []dto.AgentUpdateJobDTO {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -250,6 +262,16 @@ func (s *AgentUpdateJobStore) resolveTargetFromMetadata(
 	packageName string,
 	requestedTarget string,
 ) (string, bool, error) {
+	requestedTarget = strings.TrimSpace(requestedTarget)
+	if requestedTarget != "" {
+		// EnqueueAgentUpdate already checked this exact target against the
+		// package catalogue. The worker only needs to preserve that target,
+		// avoiding a second registry round-trip after the job is queued.
+		if _, err := managedruntime.ParseStableVersion(requestedTarget); err != nil {
+			return "", true, fmt.Errorf("%w: %v", ErrRuntimeUpdateTargetInvalid, err)
+		}
+		return requestedTarget, true, nil
+	}
 	metadata, err := resolver.ResolveVersions(ctx, packageName)
 	if err != nil {
 		return "", true, err
@@ -258,16 +280,7 @@ func (s *AgentUpdateJobStore) resolveTargetFromMetadata(
 	if err != nil {
 		return "", true, err
 	}
-	if requestedTarget == "" {
-		return catalogue.Latest, true, nil
-	}
-	if _, err := managedruntime.ParseStableVersion(requestedTarget); err != nil {
-		return "", true, fmt.Errorf("%w: %v", ErrRuntimeUpdateTargetInvalid, err)
-	}
-	if !catalogue.Has(requestedTarget) {
-		return "", true, fmt.Errorf("%w: %s", ErrRuntimeUpdateTargetMissing, requestedTarget)
-	}
-	return requestedTarget, true, nil
+	return catalogue.Latest, true, nil
 }
 
 func (s *AgentUpdateJobStore) runExactCandidate(

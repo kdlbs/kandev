@@ -58,7 +58,7 @@ function updatePhase(t: TFunction, status: AgentUpdateJob["status"] | undefined)
 function UpdateResult({ agentName, job }: { agentName: string; job?: AgentUpdateJob }) {
   const { t } = useTranslation();
   if (!job) return null;
-  const { versionsMatch } = resolveRuntimeVersionPair(null, job);
+  const isUpToDate = job.operation === "up_to_date";
   if (job.status === "succeeded" && job.refresh_error) {
     return (
       <p
@@ -77,7 +77,7 @@ function UpdateResult({ agentName, job }: { agentName: string; job?: AgentUpdate
         role="status"
         data-testid={`agent-update-result-${agentName}`}
       >
-        {versionsMatch ? t("agents:runtimeAlreadyUpToDate") : t("agents:runtimeUpdatedSuccess")}
+        {isUpToDate ? t("agents:runtimeAlreadyUpToDate") : t("agents:runtimeUpdatedSuccess")}
       </p>
     );
   }
@@ -118,21 +118,22 @@ function RuntimeVersionSummary({
   job?: AgentUpdateJob;
 }) {
   const { t } = useTranslation();
-  const { currentVersion, targetVersion, versionsMatch } = resolveRuntimeVersionPair(preview, job);
+  const { currentVersion, targetVersion } = resolveRuntimeVersionPair(preview, job);
   const operation = resolveRuntimeOperation(preview, job);
+  const isUpToDate = operation === "up_to_date";
 
   return (
     <div className="space-y-1" data-testid={`agent-update-version-summary-${agentName}`}>
       <p className="font-medium">{t(runtimeOperationLabelKey(operation))}</p>
       <p className="break-words font-mono text-sm">
-        {versionsMatch ? currentVersion : `${currentVersion} → ${targetVersion}`}
+        {isUpToDate ? currentVersion : `${currentVersion} → ${targetVersion}`}
       </p>
       {preview.active_version && (
         <p className="text-sm text-muted-foreground">
           {t("agents:activeRuntimeVersion", { version: preview.active_version })}
         </p>
       )}
-      {versionsMatch && (
+      {isUpToDate && (
         <p className="text-sm text-muted-foreground" role="status">
           {t("agents:upToDate")}
         </p>
@@ -446,7 +447,7 @@ export function AgentRuntimeUpdateControl({
       previewError={previewError}
       approveError={approveError}
       job={activeJob}
-      onRetryPreview={() => void loadPreview()}
+      onRetryPreview={() => void loadPreview(selectedTarget || undefined)}
       selectedTarget={selectedTarget}
       onSelectTarget={selectTarget}
       starting={starting}

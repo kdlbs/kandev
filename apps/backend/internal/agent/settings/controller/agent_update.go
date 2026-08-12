@@ -55,7 +55,10 @@ func (c *Controller) PreviewAgentUpdate(
 	if caps, found := c.runtimeUpdater.CurrentCapabilities(name); found {
 		current = caps.AgentVersion
 	}
-	active := c.activeRuntimeVersion(ctx, name, spec.Package)
+	active, err := c.activeRuntimeVersion(ctx, name, spec.Package)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrRuntimeUpdatePreviewFailed, err)
+	}
 	catalogue, exactCatalogue, err := c.resolveRuntimeCatalogue(ctx, spec.Package, active, current)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrRuntimeUpdatePreviewFailed, err)
@@ -126,15 +129,22 @@ func runtimeVersionDTOs(catalogue managedruntime.Catalogue) []dto.AgentUpdateVer
 	return versions
 }
 
-func (c *Controller) activeRuntimeVersion(ctx context.Context, agentName, packageName string) string {
+func (c *Controller) activeRuntimeVersion(
+	ctx context.Context,
+	agentName string,
+	packageName string,
+) (string, error) {
 	if c.managedRuntimeSelections == nil {
-		return ""
+		return "", nil
 	}
 	selection, found, err := c.managedRuntimeSelections.Get(ctx, agentName, packageName)
-	if err != nil || !found {
-		return ""
+	if err != nil {
+		return "", fmt.Errorf("read active runtime version: %w", err)
 	}
-	return selection.Version
+	if !found {
+		return "", nil
+	}
+	return selection.Version, nil
 }
 
 // RuntimeUpdater is the external-process and host-probe boundary used by
@@ -274,30 +284,29 @@ func (u *hostRuntimeUpdater) RunUpdate(
 	return u.executor.Stream(ctx, command, onChunk)
 }
 
-func (u *hostRuntimeUpdater) InvalidateExecutionCache(ctx context.Context, packageName string) error {
-	packageName = strings.TrimSpace(packageName)
-	if packageName == "" {
-		return errors.New("managed runtime package is empty")
-	}
+func (u *hostRuntimeUpdater) npxCacheRoot(ctx context.Context) (string, error) {
 	output, err := u.executor.Output(ctx, agents.NewCommand("npm", "config", "get", "cache"))
 	if err != nil {
-		return fmt.Errorf("resolve npm cache root: %w", err)
+		return "", fmt.Errorf("resolve npm cache root: %w", err)
 	}
 	cacheRoot := strings.TrimSpace(output)
 	if !filepath.IsAbs(cacheRoot) {
-		return fmt.Errorf("npm cache root is not absolute: %q", cacheRoot)
+		return "", fmt.Errorf("npm cache root is not absolute: %q", cacheRoot)
 	}
 	cacheRoot = filepath.Clean(cacheRoot)
 	if cacheRoot == string(filepath.Separator) {
-		return errors.New("refusing to invalidate execution cache under filesystem root")
+		return "", errors.New("refusing to invalidate execution cache under filesystem root")
 	}
 	npxRoot := filepath.Join(cacheRoot, "_npx")
 	if info, statErr := os.Lstat(npxRoot); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("refusing to invalidate execution cache through symlink: %s", npxRoot)
+		return "", fmt.Errorf("refusing to invalidate execution cache through symlink: %s", npxRoot)
 	} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
-		return fmt.Errorf("inspect npm execution cache: %w", statErr)
+		return "", fmt.Errorf("inspect npm execution cache: %w", statErr)
 	}
-	key := (agents.ManagedNPMRuntimeSpec{Package: packageName}).ExecutionCacheKey()
+	return npxRoot, nil
+}
+
+func removeNpmExecutionCacheKey(npxRoot, key string) error {
 	target := filepath.Join(npxRoot, key)
 	rel, err := filepath.Rel(npxRoot, target)
 	if err != nil || rel != key {
@@ -307,6 +316,19 @@ func (u *hostRuntimeUpdater) InvalidateExecutionCache(ctx context.Context, packa
 		return fmt.Errorf("remove npm execution cache %s: %w", target, err)
 	}
 	return nil
+}
+
+func (u *hostRuntimeUpdater) InvalidateExecutionCache(ctx context.Context, packageName string) error {
+	packageName = strings.TrimSpace(packageName)
+	if packageName == "" {
+		return errors.New("managed runtime package is empty")
+	}
+	npxRoot, err := u.npxCacheRoot(ctx)
+	if err != nil {
+		return err
+	}
+	key := (agents.ManagedNPMRuntimeSpec{Package: packageName}).ExecutionCacheKey()
+	return removeNpmExecutionCacheKey(npxRoot, key)
 }
 
 func (u *hostRuntimeUpdater) InvalidateExecutionCacheVersion(
@@ -322,34 +344,12 @@ func (u *hostRuntimeUpdater) InvalidateExecutionCacheVersion(
 	if _, err := managedruntime.ParseStableVersion(version); err != nil {
 		return err
 	}
-	output, err := u.executor.Output(ctx, agents.NewCommand("npm", "config", "get", "cache"))
+	npxRoot, err := u.npxCacheRoot(ctx)
 	if err != nil {
-		return fmt.Errorf("resolve npm cache root: %w", err)
-	}
-	cacheRoot := strings.TrimSpace(output)
-	if !filepath.IsAbs(cacheRoot) {
-		return fmt.Errorf("npm cache root is not absolute: %q", cacheRoot)
-	}
-	cacheRoot = filepath.Clean(cacheRoot)
-	if cacheRoot == string(filepath.Separator) {
-		return errors.New("refusing to invalidate execution cache under filesystem root")
-	}
-	npxRoot := filepath.Join(cacheRoot, "_npx")
-	if info, statErr := os.Lstat(npxRoot); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("refusing to invalidate execution cache through symlink: %s", npxRoot)
-	} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
-		return fmt.Errorf("inspect npm execution cache: %w", statErr)
+		return err
 	}
 	spec := agents.ManagedNPMRuntimeSpec{Package: packageName}
-	target := filepath.Join(npxRoot, spec.ExecutionCacheKey(version))
-	rel, err := filepath.Rel(npxRoot, target)
-	if err != nil || rel != spec.ExecutionCacheKey(version) {
-		return fmt.Errorf("invalid npm execution cache target: %s", target)
-	}
-	if err := os.RemoveAll(target); err != nil {
-		return fmt.Errorf("remove npm execution cache %s: %w", target, err)
-	}
-	return nil
+	return removeNpmExecutionCacheKey(npxRoot, spec.ExecutionCacheKey(version))
 }
 
 func (u *hostRuntimeUpdater) Refresh(
@@ -437,6 +437,9 @@ func (c *Controller) EnqueueAgentUpdate(
 ) (*dto.AgentUpdateJobDTO, error) {
 	if c.updateJobStore == nil || c.runtimeUpdater == nil {
 		return nil, ErrRuntimeUpdaterUnavailable
+	}
+	if active, found := c.updateJobStore.GetActive(name); found {
+		return active, nil
 	}
 	ag, ok := c.agentRegistry.Get(name)
 	if !ok {

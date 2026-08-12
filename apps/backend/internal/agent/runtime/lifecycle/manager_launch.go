@@ -311,14 +311,6 @@ func (m *Manager) resolveProfileLaunchTokens(profileInfo *AgentProfileInfo) (cli
 	return cliFlagTokens, commandPrefixTokens, nil
 }
 
-// buildAgentCommand builds the agent command strings for the execution.
-// Returns both the initial command and the continue command (for one-shot agents like Amp).
-// Returns an error when a configured command_prefix cannot be resolved, so a
-// configured profile fails closed instead of launching unwrapped.
-func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfileInfo, agentConfig agents.Agent, preferNative bool) (agentCommands, error) {
-	return m.buildAgentCommandWithContext(context.Background(), req, profileInfo, agentConfig, preferNative)
-}
-
 func (m *Manager) buildAgentCommandWithContext(
 	ctx context.Context,
 	req *LaunchRequest,

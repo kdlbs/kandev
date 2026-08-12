@@ -106,10 +106,27 @@ function event(action: string, payload: unknown) {
   });
 }
 
+function compareStableVersions(left: string, right: string) {
+  const leftParts = left.split(".").map(Number);
+  const rightParts = right.split(".").map(Number);
+  for (let index = 0; index < 3; index += 1) {
+    if (leftParts[index] !== rightParts[index])
+      return leftParts[index] > rightParts[index] ? 1 : -1;
+  }
+  return 0;
+}
+
+function operationForTarget(currentVersion: string, targetVersion: string): UpdateOperation {
+  const comparison = compareStableVersions(targetVersion, currentVersion);
+  if (comparison === 0) return "up_to_date";
+  return comparison > 0 ? "update" : "rollback";
+}
+
 export type RuntimeUpdateFixtureOptions = {
   retainedJobs?: UpdateJob[];
   postResponse?: UpdateJob;
   previewResponse?: UpdatePreview;
+  previewFailures?: string[];
 };
 
 export async function installRuntimeUpdateFixture(
@@ -131,6 +148,7 @@ export async function installRuntimeUpdateFixture(
   let previewCount = 0;
   const previewTargets: string[] = [];
   const postTargets: string[] = [];
+  const previewFailures = [...(options.previewFailures ?? [])];
   let previewResponse: UpdatePreview =
     options.previewResponse ??
     ({
@@ -194,11 +212,19 @@ export async function installRuntimeUpdateFixture(
       previewCount += 1;
       previewTargets.push(url.searchParams.get("target_version") ?? "");
       const requestedTarget = url.searchParams.get("target_version");
+      if (requestedTarget && previewFailures.includes(requestedTarget)) {
+        previewFailures.splice(previewFailures.indexOf(requestedTarget), 1);
+        return route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "preview temporarily unavailable" }),
+        });
+      }
       const response = requestedTarget
         ? {
             ...previewResponse,
             target_version: requestedTarget,
-            operation: requestedTarget === "0.62.0" ? "up_to_date" : "rollback",
+            operation: operationForTarget(previewResponse.current_version, requestedTarget),
           }
         : previewResponse;
       return route.fulfill({

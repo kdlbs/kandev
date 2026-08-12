@@ -149,6 +149,19 @@ gate. It is the absence of an exact, validated, durable version choice.
 - Fresh desktop/mobile PR screenshots were captured from synthetic fixtures,
   visually inspected, compressed, and validated against their manifest.
 
+## Post-implementation fixup verification
+
+- Preserved the selected target across failed preview retries and cleared stale
+  failed-job state when selecting a new target.
+- Kept repair distinct from up-to-date state, reused active jobs before npm
+  metadata lookup, skipped redundant exact-target metadata fetches, propagated
+  selection-store errors, and shared npm cache-root validation.
+- Backend fixup tests: `rtk go test ./internal/agent/settings/controller
+  ./internal/agent/runtime/lifecycle` — 1,705 passed.
+- Frontend fixup tests: 27 passed in the runtime-operation and dialog-state
+  suites.
+- Fixup E2E: desktop 8 passed; mobile 4 passed.
+
 ## Implementation waves
 
 Wave 1:

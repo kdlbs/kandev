@@ -61,6 +61,7 @@ test.describe("managed agent runtime updates on mobile", () => {
         package: "@agentclientprotocol/claude-agent-acp",
         current_version: "0.64.0",
         target_version: "0.64.0",
+        operation: "up_to_date",
         command: ["npm", "exec"],
         command_string: "npm exec",
       },
@@ -75,7 +76,7 @@ test.describe("managed agent runtime updates on mobile", () => {
         exact: true,
       }),
     ).toBeVisible();
-    await expect(drawer.getByText("Up to date", { exact: true })).toBeVisible();
+    await expect(drawer.getByRole("status").filter({ hasText: "Up to date" })).toBeVisible();
     await expect(drawer).not.toContainText("0.64.0 → 0.64.0");
     await expect(testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`)).toBeDisabled();
     expect(runtime.postCount()).toBe(0);

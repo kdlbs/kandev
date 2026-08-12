@@ -65,6 +65,7 @@ describe("canApproveAgentRuntimeUpdate", () => {
   it.each([
     ["differing versions", ready, true],
     ["equal versions", { ...ready, preview: preview({ target_version: "0.62.0" }) }, false],
+    ["up-to-date operation", { ...ready, preview: preview({ operation: "up_to_date" }) }, false],
     ["missing current version", { ...ready, preview: preview({ current_version: "" }) }, false],
     ["missing target version", { ...ready, preview: preview({ target_version: "" }) }, false],
     ["loading preview", { ...ready, loading: true }, false],
@@ -93,6 +94,9 @@ describe("canApproveAgentRuntimeUpdate", () => {
   it("uses operation state instead of translated labels", () => {
     const state = preview({ operation: "rollback" });
     expect(resolveRuntimeOperation(state)).toBe("rollback");
+    expect(
+      resolveRuntimeOperation(preview({ operation: "update" }), job({ operation: "repair" })),
+    ).toBe("repair");
     expect(runtimeOperationLabelKey("rollback")).toBe("agents:rollBackRuntime");
     expect(runtimeOperationLabelKey("repair")).toBe("agents:repairRuntime");
     expect(runtimeOperationLabelKey("up_to_date")).toBe("agents:upToDateRuntime");

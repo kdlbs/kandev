@@ -62,18 +62,19 @@ func (s *recoverySelectionStore) Save(
 }
 
 type recoveryRuntimeUpdater struct {
-	mu           sync.Mutex
-	metadata     RuntimeVersionMetadata
-	current      hostutility.AgentCapabilities
-	currentFound bool
-	probeCaps    hostutility.AgentCapabilities
-	probeErr     error
-	runErrs      []error
-	runCalls     int
-	prepare      []string
-	probe        []string
-	invalidate   []string
-	events       *[]string
+	mu            sync.Mutex
+	metadata      RuntimeVersionMetadata
+	metadataCalls int
+	current       hostutility.AgentCapabilities
+	currentFound  bool
+	probeCaps     hostutility.AgentCapabilities
+	probeErr      error
+	runErrs       []error
+	runCalls      int
+	prepare       []string
+	probe         []string
+	invalidate    []string
+	events        *[]string
 }
 
 func (u *recoveryRuntimeUpdater) CurrentCapabilities(string) (hostutility.AgentCapabilities, bool) {
@@ -89,6 +90,7 @@ func (u *recoveryRuntimeUpdater) ResolveTarget(context.Context, string) (string,
 func (u *recoveryRuntimeUpdater) ResolveVersions(context.Context, string) (RuntimeVersionMetadata, error) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
+	u.metadataCalls++
 	return u.metadata, nil
 }
 
@@ -216,6 +218,33 @@ func TestAgentUpdateExactCandidatePersistsBeforePublishing(t *testing.T) {
 	}
 	if len(events) != 3 || events[0] != "probe" || events[1] != "persist" || events[2] != "publish" {
 		t.Fatalf("activation order = %#v", events)
+	}
+}
+
+func TestAgentUpdateExactTargetSkipsMetadataRefetch(t *testing.T) {
+	selectionStore := newRecoverySelectionStore()
+	updater := &recoveryRuntimeUpdater{
+		metadata: RuntimeVersionMetadata{
+			Versions: []string{"1.0.1", "1.0.2"},
+			Latest:   "1.0.2",
+		},
+		current:      hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.0.1"},
+		currentFound: true,
+		probeCaps:    hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.0.2"},
+	}
+	store, completed := newRecoveryStore(updater, selectionStore)
+
+	job, err := store.Enqueue("managed-acp", managedRuntimeSpec(), "1.0.2")
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	waitForUpdateStatus(t, completed, job.ID, dto.AgentUpdateJobStatusSucceeded)
+
+	updater.mu.Lock()
+	metadataCalls := updater.metadataCalls
+	updater.mu.Unlock()
+	if metadataCalls != 0 {
+		t.Fatalf("metadata calls = %d, want no refetch for a validated target", metadataCalls)
 	}
 }
 

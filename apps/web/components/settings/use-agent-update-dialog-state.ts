@@ -66,6 +66,7 @@ export function useAgentUpdateDialogState({
 
   const selectTarget = useCallback(
     (targetVersion: string) => {
+      setActiveJobID(null);
       setSelectedTarget(targetVersion);
       void loadPreview(targetVersion);
     },

@@ -41,6 +41,26 @@ type fakeRuntimeUpdater struct {
 	resolvedPackage string
 }
 
+type sequencedVersionUpdater struct {
+	fakeRuntimeUpdater
+	metadata     RuntimeVersionMetadata
+	metadataErr  error
+	metadataCall int
+}
+
+func (u *sequencedVersionUpdater) ResolveVersions(
+	_ context.Context,
+	_ string,
+) (RuntimeVersionMetadata, error) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.metadataCall++
+	if u.metadataCall > 1 && u.metadataErr != nil {
+		return RuntimeVersionMetadata{}, u.metadataErr
+	}
+	return u.metadata, nil
+}
+
 type recordingCommandExecutor struct {
 	outputCommand []string
 	output        string
@@ -333,6 +353,83 @@ func TestAgentUpdatePreviewRejectsUnsupportedAndResolutionFailure(t *testing.T) 
 			}
 		})
 	}
+}
+
+func TestAgentUpdatePreviewSurfacesSelectionStoreFailure(t *testing.T) {
+	updater := &fakeRuntimeUpdater{target: "1.1.0"}
+	selectionStore := newRecoverySelectionStore()
+	selectionStore.err = errors.New("selection store locked")
+	ag := &managedTestAgent{
+		testAgent: testAgent{id: "managed-acp", name: "Managed", enabled: true},
+		spec:      managedRuntimeSpec(),
+	}
+	ctrl := newTestController(map[string]agents.Agent{ag.ID(): ag})
+	ctrl.SetRuntimeUpdater(updater)
+	ctrl.SetManagedRuntimeSelectionStore(selectionStore)
+
+	_, err := ctrl.PreviewAgentUpdate(context.Background(), ag.ID())
+	if !errors.Is(err, ErrRuntimeUpdatePreviewFailed) {
+		t.Fatalf("PreviewAgentUpdate error = %v, want %v", err, ErrRuntimeUpdatePreviewFailed)
+	}
+	if !strings.Contains(err.Error(), "selection store locked") {
+		t.Fatalf("PreviewAgentUpdate error = %v, want selection error", err)
+	}
+}
+
+func TestEnqueueAgentUpdateReusesActiveJobBeforeMetadataResolution(t *testing.T) {
+	metadataErr := errors.New("registry unavailable")
+	updater := &sequencedVersionUpdater{
+		fakeRuntimeUpdater: fakeRuntimeUpdater{
+			current:      hostutility.AgentCapabilities{AgentVersion: "1.0.0"},
+			currentFound: true,
+			refreshCaps:  hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.1.0"},
+			runStarted:   make(chan struct{}),
+			releaseRun:   make(chan struct{}),
+		},
+		metadata:    RuntimeVersionMetadata{Versions: []string{"1.0.0", "1.1.0"}, Latest: "1.1.0"},
+		metadataErr: metadataErr,
+	}
+	hub := newUpdateTerminalBroadcaster()
+	ag := &managedTestAgent{
+		testAgent: testAgent{id: "managed-acp", name: "Managed", enabled: true},
+		spec:      managedRuntimeSpec(),
+	}
+	ctrl := newTestController(map[string]agents.Agent{ag.ID(): ag})
+	ctrl.SetRuntimeUpdater(updater)
+	ctrl.updateJobStore = NewAgentUpdateJobStore(
+		hub,
+		zap.NewNop(),
+		updater,
+		newMaintenanceCoordinator(),
+		nil,
+	)
+
+	first, err := ctrl.EnqueueAgentUpdate(context.Background(), ag.ID(), "1.1.0")
+	if err != nil {
+		t.Fatalf("first EnqueueAgentUpdate: %v", err)
+	}
+	select {
+	case <-updater.runStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first update did not reach the running phase")
+	}
+
+	second, err := ctrl.EnqueueAgentUpdate(context.Background(), ag.ID(), "1.1.0")
+	if err != nil {
+		t.Fatalf("second EnqueueAgentUpdate: %v", err)
+	}
+	if second.JobID != first.JobID {
+		t.Fatalf("job IDs differ: %s != %s", second.JobID, first.JobID)
+	}
+	updater.mu.Lock()
+	metadataCalls := updater.metadataCall
+	updater.mu.Unlock()
+	if metadataCalls != 1 {
+		t.Fatalf("metadata calls = %d, want one initial validation", metadataCalls)
+	}
+
+	close(updater.releaseRun)
+	waitForUpdateStatus(t, hub.completed, first.JobID, dto.AgentUpdateJobStatusSucceeded)
 }
 
 func TestAgentUpdateJobResolvesUpdatesRefreshesAndStreams(t *testing.T) {

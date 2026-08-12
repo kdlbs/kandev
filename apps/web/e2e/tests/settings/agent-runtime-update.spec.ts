@@ -116,6 +116,7 @@ test.describe("managed agent runtime updates", () => {
         package: "@agentclientprotocol/claude-agent-acp",
         current_version: "0.64.0",
         target_version: "0.64.0",
+        operation: "up_to_date",
         command: ["npm", "exec"],
         command_string: "npm exec",
       },
@@ -139,6 +140,44 @@ test.describe("managed agent runtime updates", () => {
     });
   });
 
+  test("keeps repair distinct when observed and target versions match", async ({ testPage }) => {
+    const runtime = await installRuntimeUpdateFixture(testPage, {
+      previewResponse: {
+        agent_name: "claude-acp",
+        package: "@agentclientprotocol/claude-agent-acp",
+        current_version: "0.64.0",
+        target_version: "0.64.0",
+        operation: "repair",
+        command: ["npm", "exec"],
+        command_string: "npm exec",
+      },
+    });
+
+    await testPage.goto("/settings/agents");
+    await testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`).click();
+
+    const dialog = testPage.getByTestId(`agent-update-dialog-${runtime.agentName}`);
+    const summary = dialog.getByTestId(`agent-update-version-summary-${runtime.agentName}`);
+    await expect(summary).toContainText("Repair runtime");
+    await expect(summary).toContainText("0.64.0 → 0.64.0");
+    await expect(summary.getByText("Up to date", { exact: true })).toHaveCount(0);
+    const confirm = testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`);
+    await expect(confirm).toBeEnabled();
+    await confirm.click();
+    await runtime.emitUpdate(
+      updateJob({
+        status: "succeeded",
+        operation: "repair",
+        current_version: "0.64.0",
+        target_version: "0.64.0",
+        finished_at: "2026-07-26T12:01:00.000Z",
+      }),
+    );
+    await expect(dialog.getByTestId(`agent-update-result-${runtime.agentName}`)).toContainText(
+      "Runtime updated successfully",
+    );
+  });
+
   test("selects an older stable version for rollback", async ({ testPage }) => {
     const runtime = await installRuntimeUpdateFixture(testPage);
 
@@ -154,6 +193,22 @@ test.describe("managed agent runtime updates", () => {
     await testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`).click();
     expect(runtime.postTargets()).toEqual(["0.61.0"]);
     expect(runtime.previewTargets()).toEqual(["", "0.61.0"]);
+  });
+
+  test("retries a failed preview for the selected target", async ({ testPage }) => {
+    const runtime = await installRuntimeUpdateFixture(testPage, {
+      previewFailures: ["0.61.0"],
+    });
+
+    await testPage.goto("/settings/agents");
+    await testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`).click();
+    const dialog = testPage.getByTestId(`agent-update-dialog-${runtime.agentName}`);
+    await testPage.getByTestId(`agent-update-version-${runtime.agentName}`).selectOption("0.61.0");
+
+    await expect(dialog.getByRole("alert")).toContainText("preview temporarily unavailable");
+    await dialog.getByRole("button", { name: "Retry version check" }).click();
+    await expect(dialog).toContainText("0.62.0 → 0.61.0");
+    expect(runtime.previewTargets()).toEqual(["", "0.61.0", "0.61.0"]);
   });
 
   test("uses the job operation for a stale retry decision", async ({ testPage }) => {
