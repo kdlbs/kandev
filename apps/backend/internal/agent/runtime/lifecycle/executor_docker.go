@@ -26,6 +26,7 @@ import (
 const dockerWorkspacePath = "/workspace"
 const dockerStopContainerTimeout = 30 * time.Second
 const dockerFallbackCleanupTimeout = dockerStopContainerTimeout + 5*time.Second
+const reuseExistingProcessMetadataKey = "reuse_existing_process"
 
 // getMetadataString retrieves a string value from metadata map.
 func getMetadataString(metadata map[string]interface{}, key string) string {
@@ -369,20 +370,27 @@ func (r *DockerExecutor) reconnectToContainer(ctx context.Context, dockerClient 
 	if conn.authToken != "" && conn.authToken != req.AuthToken {
 		refreshedAuthToken = conn.authToken
 	}
+	metadata := map[string]interface{}{
+		MetadataKeyIsRemote:             true,
+		MetadataKeyContainerID:          info.ID,
+		reuseExistingProcessMetadataKey: conn.reusingProcess,
+	}
+	if req.IsTaskHost {
+		// StopInstance needs this trusted request property before the instance is
+		// merged into AgentExecution metadata. A failed task-host reconnect must
+		// delete only its agentctl instance, never the shared task container.
+		metadata["task_host"] = true
+	}
 	return &ExecutorInstance{
-		InstanceID:    req.InstanceID,
-		TaskID:        req.TaskID,
-		SessionID:     req.SessionID,
-		RuntimeName:   r.Name(),
-		Client:        client,
-		ContainerID:   info.ID,
-		ContainerIP:   containerIP,
-		WorkspacePath: dockerWorkspacePath,
-		Metadata: map[string]interface{}{
-			MetadataKeyIsRemote:      true,
-			MetadataKeyContainerID:   info.ID,
-			"reuse_existing_process": conn.reusingProcess,
-		},
+		InstanceID:       req.InstanceID,
+		TaskID:           req.TaskID,
+		SessionID:        req.SessionID,
+		RuntimeName:      r.Name(),
+		Client:           client,
+		ContainerID:      info.ID,
+		ContainerIP:      containerIP,
+		WorkspacePath:    dockerWorkspacePath,
+		Metadata:         metadata,
 		AuthToken:        refreshedAuthToken,
 		ControlAuthToken: conn.authToken,
 	}, nil

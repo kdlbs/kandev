@@ -255,25 +255,39 @@ func TestRollbackLaunchExecutionForceKillsAndRemovesUnregisteredDockerContainer(
 }
 
 func TestDockerTaskHostRollbackUsesEffectiveReconnectCredential(t *testing.T) {
-	const authToken = "unchanged-container-token"
+	const (
+		authToken          = "unchanged-container-token"
+		taskHostPort       = 41001
+		taskHostInstanceID = "task-host-1"
+	)
 	authenticatedDelete := make(chan struct{}, 1)
 	controlServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer "+authToken {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		if r.Method != http.MethodDelete {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/health":
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/instances/"+taskHostInstanceID:
+			http.NotFound(w, r)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/instances":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_, _ = fmt.Fprintf(w, `{"id":%q,"port":%d}`, taskHostInstanceID, taskHostPort)
+		case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/instances/"+taskHostInstanceID:
+			authenticatedDelete <- struct{}{}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
 		}
-		authenticatedDelete <- struct{}{}
-		w.WriteHeader(http.StatusNoContent)
 	}))
 	t.Cleanup(controlServer.Close)
 	controlHost, controlPortString, err := net.SplitHostPort(strings.TrimPrefix(controlServer.URL, "http://"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	destructiveDockerRequest := make(chan string, 2)
 	dockerDaemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodHead && r.URL.Path == "/_ping" {
 			w.WriteHeader(http.StatusOK)
@@ -282,11 +296,22 @@ func TestDockerTaskHostRollbackUsesEffectiveReconnectCredential(t *testing.T) {
 		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/containers/container-1/json") {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = fmt.Fprintf(w,
-				`{"Id":"container-1","NetworkSettings":{"Ports":{"%d/tcp":[{"HostIp":%q,"HostPort":%q}]}}}`,
+				`{"Id":"container-1","State":{"Status":"running"},`+
+					`"NetworkSettings":{"Ports":{"%d/tcp":[{"HostIp":%q,"HostPort":%q}],`+
+					`"%d/tcp":[{"HostIp":%q,"HostPort":%q}]},`+
+					`"Networks":{"bridge":{"IPAddress":"172.17.0.2"}}}}`,
 				AgentCtlPort,
 				controlHost,
 				controlPortString,
+				taskHostPort,
+				controlHost,
+				controlPortString,
 			)
+			return
+		}
+		if r.Method == http.MethodPost || r.Method == http.MethodDelete {
+			destructiveDockerRequest <- r.Method + " " + r.URL.Path
+			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		http.NotFound(w, r)
@@ -297,17 +322,28 @@ func TestDockerTaskHostRollbackUsesEffectiveReconnectCredential(t *testing.T) {
 	}, "", newTestDockerLogger())
 	t.Cleanup(func() { require.NoError(t, dockerExec.Close()) })
 
+	runtimeInstance, err := dockerExec.reconnectToContainer(context.Background(), dockerExec.Client(), &ExecutorCreateRequest{
+		InstanceID: taskHostInstanceID, PreviousExecutionID: taskHostInstanceID,
+		TaskID: "task-1", TaskEnvironmentID: "env-1", IsTaskHost: true, AuthToken: authToken,
+		Metadata: map[string]interface{}{MetadataKeyContainerID: "container-1"},
+	})
+	if err != nil {
+		t.Fatalf("reconnectToContainer: %v", err)
+	}
+	if !getMetadataBool(runtimeInstance.Metadata, "task_host") {
+		t.Fatal("reconnected task-host runtime lost its task-host ownership marker")
+	}
+	if runtimeInstance.ControlAuthToken != authToken {
+		t.Fatalf("ControlAuthToken = %q, want unchanged reconnect token", runtimeInstance.ControlAuthToken)
+	}
+
 	manager := &Manager{executionStore: NewExecutionStore(), logger: newTestLogger()}
 	execution := &AgentExecution{
-		ID: "task-host-1", TaskID: "task-1", TaskEnvironmentID: "env-1",
+		ID: taskHostInstanceID, TaskID: "task-1", TaskEnvironmentID: "env-1",
 		RuntimeName: agentruntime.RuntimeDocker, IsTaskHost: true,
 	}
 	if err := manager.executionStore.Add(execution); err != nil {
 		t.Fatal(err)
-	}
-	runtimeInstance := &ExecutorInstance{
-		InstanceID: "task-host-1", ContainerID: "container-1", ContainerIP: "127.0.0.1",
-		Metadata: map[string]interface{}{"task_host": true}, ControlAuthToken: authToken,
 	}
 	if err := manager.rollbackTaskHostExecution(dockerExec, runtimeInstance, execution, "readiness failed"); err != nil {
 		t.Fatalf("rollbackTaskHostExecution: %v", err)
@@ -319,6 +355,11 @@ func TestDockerTaskHostRollbackUsesEffectiveReconnectCredential(t *testing.T) {
 	}
 	if _, exists := manager.executionStore.Get(execution.ID); exists {
 		t.Fatal("successful rollback retained task-host execution")
+	}
+	select {
+	case request := <-destructiveDockerRequest:
+		t.Fatalf("task-host rollback mutated the shared container: %s", request)
+	default:
 	}
 }
 

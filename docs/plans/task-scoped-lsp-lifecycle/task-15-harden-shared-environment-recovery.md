@@ -196,6 +196,12 @@ Completed 2026-08-12.
   race detector; changed-code Go lint with zero issues; 29 focused frontend tests; strict targeted
   ESLint; web typecheck; the i18n ratchet; all 62 public-doc validator tests; validation of all 41
   published pages; and the three-dot diff whitespace check.
+- Exact-head review found one remaining Docker rollback gap: reconnect retained the effective
+  credential but dropped the task-host ownership marker from the runtime instance. Failed readiness
+  could therefore force-remove the shared task container instead of deleting only the task-host
+  agentctl instance. Reconnect now derives the marker from the typed task-host request before
+  rollback. The regression uses real reconnect plus authenticated deletion, rejects any Docker
+  container mutation, and passed 20 race-enabled repetitions.
 
 ## Files
 

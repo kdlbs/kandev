@@ -517,6 +517,12 @@ Completed 2026-08-05.
   race detector; changed-code Go lint with zero issues; 29 focused frontend tests; strict targeted
   ESLint; web typecheck; the i18n ratchet; all 62 public-doc validator tests; validation of all 41
   published pages; and the three-dot diff whitespace check.
+- Exact-head review then found that Docker task-host reconnect retained the effective credential but
+  dropped the task-host ownership marker from the runtime instance. A failed readiness rollback
+  could consequently take the force-removal path for the shared task container. Reconnect now
+  derives the marker from the typed task-host request before rollback is possible. The regression
+  exercises real reconnect and authenticated instance deletion, rejects any container mutation,
+  and passed 20 race-enabled repetitions.
 
 ---
 
