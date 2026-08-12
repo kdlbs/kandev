@@ -490,8 +490,12 @@ func (l *Launcher) pipeOutput(name string, scanner *bufio.Scanner) {
 // uppercased level ("INFO"/"WARN"/…) or "" when the line does not match that
 // shape.
 func childLogLevel(line string) string {
-	fields := strings.SplitN(line, "\t", 3)
-	if len(fields) < 2 {
+	// A well-formed console record is "<ts>\t<LEVEL>\t<caller>\t<msg>", so the
+	// level token must be bounded by at least a following caller field. Requiring
+	// three segments rejects truncated lines (e.g. "<ts>\t<token>") whose second
+	// field is not actually a level, so they fall back to WARN.
+	fields := strings.SplitN(line, "\t", 4)
+	if len(fields) < 3 {
 		return ""
 	}
 	level := strings.ToUpper(stripANSI(fields[1]))
@@ -513,7 +517,10 @@ func stripANSI(s string) string {
 		}
 		end := strings.IndexByte(s[start:], 'm')
 		if end < 0 {
-			return s[:start]
+			// Unterminated escape: leave the raw ESC byte in place rather than
+			// dropping the tail, so a truncated token (e.g. "INFO\x1b[34") does
+			// not collapse into a valid level and instead falls back to WARN.
+			return s
 		}
 		s = s[:start] + s[start+end+1:]
 	}

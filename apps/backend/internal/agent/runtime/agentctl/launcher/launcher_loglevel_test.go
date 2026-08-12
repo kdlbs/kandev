@@ -53,6 +53,21 @@ func TestChildLogLevel(t *testing.T) {
 			line: "2026-08-12T10:00:00.000Z\tTRACE\tx.go:1\tsomething",
 			want: "",
 		},
+		{
+			name: "two-field record is too short to be a level",
+			line: "2026-08-12T10:00:00.000Z\tINFO",
+			want: "",
+		},
+		{
+			name: "three-field record with empty message still has level",
+			line: "2026-08-12T10:00:00.000Z\tINFO\tmain.go:97",
+			want: "INFO",
+		},
+		{
+			name: "unterminated ansi escape falls back to no level",
+			line: "2026-08-12T10:00:00.000Z\tINFO\x1b[34\tmain.go:97\tstarting agentctl",
+			want: "",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -72,7 +87,7 @@ func TestStripANSI(t *testing.T) {
 		{name: "no escapes", in: "INFO", want: "INFO"},
 		{name: "color wrapped", in: "\x1b[34mINFO\x1b[0m", want: "INFO"},
 		{name: "multiple sequences", in: "\x1b[1m\x1b[31mERROR\x1b[0m", want: "ERROR"},
-		{name: "unterminated escape drops tail", in: "INFO\x1b[34", want: "INFO"},
+		{name: "unterminated escape keeps raw byte", in: "INFO\x1b[34", want: "INFO\x1b[34"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
