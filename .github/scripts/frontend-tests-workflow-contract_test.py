@@ -18,6 +18,7 @@ breaks nothing visibly, and CI silently stops guarding the fix.
 """
 
 from pathlib import Path
+import re
 import unittest
 
 
@@ -25,9 +26,14 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "frontend-tests.yml"
 VITEST_CONFIG = REPO_ROOT / "apps" / "web" / "vitest.config.ts"
 NPMRC = REPO_ROOT / "apps" / ".npmrc"
+LINT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "lint-action-pinning.yml"
 
 STEP_MARKER = "      - name: Run tests\n"
 NEXT_STEP_MARKER = "\n      - name: "
+
+# The subjects above that live outside `.github/`, and so are not covered by
+# this job's `.github/workflows/**` trigger.
+UNTRIGGERED_SUBJECTS = ("apps/web/vitest.config.ts", "apps/.npmrc")
 
 
 def run_tests_step(workflow: str) -> str:
@@ -76,6 +82,44 @@ class FrontendTestsWorkflowContractTest(unittest.TestCase):
             "runtime image (`Dockerfile`) or any shell inheriting it, pnpm "
             "otherwise skips devDependencies, leaving no vitest, eslint, or "
             "tsc to run at all.",
+        )
+
+    def test_this_contract_runs_when_its_subjects_change(self) -> None:
+        """The assertions above are only worth anything if CI runs them.
+
+        `lint-action-pinning.yml` triggers on `.github/workflows/**`, which
+        covers `frontend-tests.yml` but neither subject in
+        `UNTRIGGERED_SUBJECTS`. `frontend-tests.yml` does not cover
+        `apps/.npmrc` either, so without an explicit trigger here a PR that
+        deletes `production=false` and nothing else runs no job at all and the
+        assertion above never executes. Mirrors the equivalent test in
+        `release-workflow-contract_test.py`.
+        """
+        lint_workflow = LINT_WORKFLOW.read_text(encoding="utf-8")
+
+        for trigger in ("push", "pull_request"):
+            block = re.search(
+                rf"  {trigger}:\n.*?(?=\n  [a-z_]+:|\nconcurrency:)",
+                lint_workflow,
+                re.DOTALL,
+            )
+            self.assertIsNotNone(block, f"lint-action-pinning.yml has no {trigger} trigger")
+
+            for subject in UNTRIGGERED_SUBJECTS:
+                self.assertIn(
+                    f'"{subject}"',
+                    block.group(0),
+                    f"{subject} must be a {trigger} path trigger in "
+                    "lint-action-pinning.yml. It is a subject of this contract "
+                    "but lives outside .github/, so nothing else brings this "
+                    "job up when it changes.",
+                )
+
+        self.assertIn(
+            "run: python3 .github/scripts/frontend-tests-workflow-contract_test.py",
+            lint_workflow,
+            "lint-action-pinning.yml must run this file. Without the step it "
+            "is dead code and every assertion here silently stops guarding.",
         )
 
 
