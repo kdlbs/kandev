@@ -512,6 +512,9 @@ func (c *Controller) startAllocatedWithEnvironment(
 	action Action,
 	environment *taskmodels.TaskEnvironment,
 ) (*LanguageSnapshot, error) {
+	if task.ArchivedAt != nil {
+		return c.transition(ctx, state, settings, PhaseWaitingForTask, "", "")
+	}
 	if !readyTaskEnvironment(environment) {
 		return c.transition(ctx, state, settings, PhaseWaitingForTask, "", "")
 	}

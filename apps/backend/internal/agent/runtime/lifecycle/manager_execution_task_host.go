@@ -162,6 +162,10 @@ func (m *Manager) finishTaskHostExecution(
 		m.rollbackTaskHostExecution(rt, runtimeInstance, execution, "task host did not become ready")
 		return nil, fmt.Errorf("task-host agentctl not ready: %w", err)
 	}
+	// A Docker re-handshake may rotate the container-wide agentctl credential.
+	// Adopt it in every live client and mirror it through the existing encrypted
+	// executor metadata before exposing this task host as ready.
+	m.persistRuntimeSecrets(ctx, runtimeInstance, execution)
 	execution.MarkAgentctlReady()
 	m.logger.Info("task-host execution created",
 		zap.String("execution_id", execution.ID),

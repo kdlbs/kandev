@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"testing"
 
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
 )
@@ -250,5 +252,93 @@ func TestPersistRuntimeSecrets(t *testing.T) {
 	}
 	if got := m.revealRuntimeSecret(context.Background(), execution.MetadataSnapshot(), MetadataKeyBootstrapNonceSecret); got != "bootstrap-nonce" {
 		t.Fatalf("revealed bootstrap nonce = %q, want bootstrap-nonce", got)
+	}
+}
+
+func TestPersistRuntimeSecretsPropagatesRotatedDockerTokenAcrossTaskEnvironment(t *testing.T) {
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	store := newInMemorySecretStore()
+	writer := &captureExecutorRunningWriter{}
+	m := &Manager{
+		logger:         log,
+		secretStore:    store,
+		executionStore: NewExecutionStore(),
+		runningWriter:  writer,
+	}
+
+	sessionClient := agentctl.NewClient("127.0.0.1", 41001, log, agentctl.WithAuthToken("stale-token"))
+	session := &AgentExecution{
+		ID: "session-execution", TaskID: "task-1", SessionID: "session-1",
+		TaskEnvironmentID: "env-1", RuntimeName: agentruntime.RuntimeDocker, agentctl: sessionClient,
+	}
+	hostClient := agentctl.NewClient("127.0.0.1", 41002, log, agentctl.WithAuthToken("stale-token"))
+	host := &AgentExecution{
+		ID: "task-host", TaskID: "task-1", SessionID: taskHostRuntimeSessionPrefix + "env-1",
+		TaskEnvironmentID: "env-1", RuntimeName: agentruntime.RuntimeDocker, IsTaskHost: true, agentctl: hostClient,
+	}
+	if err := m.executionStore.Add(session); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.executionStore.Add(host); err != nil {
+		t.Fatal(err)
+	}
+
+	m.persistRuntimeSecrets(context.Background(), &ExecutorInstance{
+		InstanceID: "resumed-session", AuthToken: "rotated-token",
+	}, session)
+
+	for name, client := range map[string]*agentctl.Client{"session": sessionClient, "task host": hostClient} {
+		if got := client.AuthToken(); got != "rotated-token" {
+			t.Errorf("%s auth token = %q, want rotated token", name, got)
+		}
+	}
+	if writer.running == nil {
+		t.Fatal("rotated token was not mirrored to durable executor metadata")
+	}
+	if got := m.revealRuntimeSecret(context.Background(), writer.running.Metadata, MetadataKeyAuthTokenSecret); got != "rotated-token" {
+		t.Fatalf("durable auth token = %q, want rotated token", got)
+	}
+}
+
+func TestTaskHostRotatedDockerTokenUpdatesSessionCredentialOwner(t *testing.T) {
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	store := newInMemorySecretStore()
+	writer := &captureExecutorRunningWriter{}
+	m := &Manager{
+		logger:         log,
+		secretStore:    store,
+		executionStore: NewExecutionStore(),
+		runningWriter:  writer,
+	}
+
+	sessionClient := agentctl.NewClient("127.0.0.1", 41001, log, agentctl.WithAuthToken("stale-token"))
+	session := &AgentExecution{
+		ID: "session-execution", TaskID: "task-1", SessionID: "session-1",
+		TaskEnvironmentID: "env-1", RuntimeName: agentruntime.RuntimeDocker, agentctl: sessionClient,
+	}
+	hostClient := agentctl.NewClient("127.0.0.1", 41002, log, agentctl.WithAuthToken("rotated-token"))
+	host := &AgentExecution{
+		ID: "task-host", TaskID: "task-1", SessionID: taskHostRuntimeSessionPrefix + "env-1",
+		TaskEnvironmentID: "env-1", RuntimeName: agentruntime.RuntimeDocker, IsTaskHost: true, agentctl: hostClient,
+	}
+	if err := m.executionStore.Add(session); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.executionStore.Add(host); err != nil {
+		t.Fatal(err)
+	}
+
+	m.persistRuntimeSecrets(context.Background(), &ExecutorInstance{
+		InstanceID: "task-host", AuthToken: "rotated-token",
+	}, host)
+
+	if got := sessionClient.AuthToken(); got != "rotated-token" {
+		t.Fatalf("session auth token = %q, want task-host rotation", got)
+	}
+	if writer.running == nil || writer.running.SessionID != "session-1" {
+		t.Fatalf("durable credential owner = %+v, want session-1", writer.running)
+	}
+	if got := m.revealRuntimeSecret(context.Background(), writer.running.Metadata, MetadataKeyAuthTokenSecret); got != "rotated-token" {
+		t.Fatalf("durable auth token = %q, want rotated token", got)
 	}
 }
