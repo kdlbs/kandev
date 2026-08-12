@@ -51,9 +51,12 @@ test.describe("Subagent card", () => {
     );
 
     // Metadata row of chips surfaces the completed subagent's metrics.
-    await expect(card.locator('[data-testid="subagent-meta"]')).toBeVisible({
-      timeout: 15_000,
-    });
+    // Chat idle means the outer turn is no longer streaming. The nested
+    // subagent completion event can still be hydrating into the card, so wait
+    // for that state boundary explicitly instead of relying on the default
+    // five-second assertion timeout.
+    const metadata = card.locator('[data-testid="subagent-meta"]');
+    await expect(metadata).toBeVisible({ timeout: 15_000 });
     await expect(card.locator('[data-testid="subagent-meta-duration"]')).toContainText("2.2s");
     await expect(card.locator('[data-testid="subagent-meta-tokens"]')).toContainText("9,987");
     await expect(card.locator('[data-testid="subagent-meta-tools"]')).toContainText("3 tools");

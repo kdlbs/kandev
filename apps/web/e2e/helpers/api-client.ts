@@ -14,6 +14,7 @@ import type {
   PRCommitDetail,
   TaskCIAutomationOptions,
   TaskCIAutomationPatch,
+  TaskPR,
 } from "../../lib/types/github";
 import type { TaskStatusSummary } from "../../lib/types/task-status-summary";
 import type { SecretListItem, SecretScope } from "../../lib/types/http-secrets";
@@ -1584,6 +1585,14 @@ export class ApiClient {
       throw new Error(`getTaskPR failed (${res.status}): ${await res.text()}`);
     }
     return res.json();
+  }
+
+  async listTaskPRs(taskId: string): Promise<TaskPR[]> {
+    const response = await this.request<{ task_prs?: Record<string, TaskPR[]> }>(
+      "GET",
+      `/api/v1/github/task-prs?task_ids=${encodeURIComponent(taskId)}`,
+    );
+    return response.task_prs?.[taskId] ?? [];
   }
 
   async mockGitHubSeedPRFeedback(data: {

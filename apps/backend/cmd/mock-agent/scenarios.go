@@ -399,19 +399,16 @@ func scenarioDiffExpansionSetup(e *emitter) {
 	}
 
 	runGitCmd := makeGitRunner(wd)
-	_ = runGitCmd("rm", "--force", filePath)
-	_ = runGitCmd("commit", "-m", "cleanup expansion_test.go")
-
-	if err := os.WriteFile(filePath, []byte(original), 0o644); err != nil {
-		e.text("diff-expansion-setup: re-write failed: " + err.Error())
-		return
-	}
-
+	// Add the canonical content directly. `--allow-empty` makes retries
+	// idempotent when a reused worktree already has the same file at HEAD;
+	// overwriting before `git add` also repairs a worktree left with the prior
+	// scenario's modified content. The old rm/cleanup commit sequence could
+	// fail under concurrent git setup and left the real fixture commit absent.
 	if err := runGitCmd("add", filePath); err != nil {
 		e.text("diff-expansion-setup: git add failed")
 		return
 	}
-	if err := runGitCmd("commit", "-m", "add expansion_test.go for e2e diff expansion test"); err != nil {
+	if err := runGitCmd("commit", "--allow-empty", "-m", "add expansion_test.go for e2e diff expansion test"); err != nil {
 		e.text("diff-expansion-setup: git commit failed")
 		return
 	}
