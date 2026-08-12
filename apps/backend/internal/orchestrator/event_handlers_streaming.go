@@ -778,6 +778,9 @@ func backgroundWorkKind(payload *streams.NormalizedPayload) streams.BackgroundWo
 // IsDetachedBackgroundLaunch() alone cannot distinguish — from ever
 // attesting parked (AC-37's mock-agent regression guard).
 func (s *Service) attestParkedIfShellLaunch(payload *lifecycle.AgentStreamEventPayload, kind streams.BackgroundWorkKind) {
+	if !s.config.ParkedOnBackgroundWork {
+		return
+	}
 	if kind == streams.BackgroundWorkKindShell && payload.Data.Normalized.IsDetachedBackgroundLaunch() {
 		s.markObservedDetached(payload.SessionID)
 	}
@@ -1463,6 +1466,13 @@ func (s *Service) setSessionStarting(
 	// updateTaskSessionStateWithHook, so clear the interruption marker here
 	// too (no-op when absent).
 	s.clearTaskInterruptedMarker(ctx, taskID)
+	if oldState != session.State {
+		// The launch path persists STARTING directly and therefore bypasses
+		// updateTaskSessionStateWithHook. Keep the parked projection in sync
+		// with that real transition as well, so a previous turn's attestation
+		// cannot survive a relaunch.
+		s.handleParkedStateTransition(ctx, taskID, session.ID, oldState, session.State)
+	}
 
 	if publishSession != nil {
 		s.publishTaskSessionStateChanged(ctx, taskID, session.ID, oldState, session.State, session.ErrorMessage, stateUpdatedAt, publishSession)

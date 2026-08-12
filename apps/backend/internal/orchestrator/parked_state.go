@@ -86,6 +86,9 @@ func (s *Service) parkedStateFor(sessionID string) *sessionParkedState {
 // which would race a concurrent settle-hook read of the same field. Set-to-
 // true is idempotent: a repeated attestation within one turn is a no-op.
 func (s *Service) markObservedDetached(sessionID string) {
+	if !s.config.ParkedOnBackgroundWork {
+		return
+	}
 	s.parkedStatesMu.Lock()
 	defer s.parkedStatesMu.Unlock()
 	ps := s.getOrCreateParkedStateLocked(sessionID)

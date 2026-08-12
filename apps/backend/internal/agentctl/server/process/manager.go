@@ -1229,6 +1229,10 @@ func (m *Manager) buildAdapterConfig() error {
 			Headers: mcp.Headers,
 		}
 	}
+	recordTurnStart := m.RecordTurnStart
+	if !m.cfg.ParkedOnBackgroundWork {
+		recordTurnStart = nil
+	}
 	m.adapterCfg = &adapter.Config{
 		WorkDir:             m.cfg.WorkDir,
 		AutoApprove:         m.cfg.AutoApprovePermissions,
@@ -1238,7 +1242,7 @@ func (m *Manager) buildAdapterConfig() error {
 		AssumeMcpSse:        m.cfg.AssumeMcpSse,
 		AssumeMcpHttp:       m.cfg.AssumeMcpHttp,
 		RequiresProcessKill: m.cfg.RequiresProcessKill,
-		RecordTurnStart:     m.RecordTurnStart,
+		RecordTurnStart:     recordTurnStart,
 	}
 
 	// Configure one-shot mode when a continue command is provided.
@@ -1790,15 +1794,13 @@ func (m *Manager) agentPID() int {
 }
 
 // RecordTurnStart stamps the time of a prompt dispatch that reaches
-// conn.Prompt. Called from the ACP adapter's sendPrompt, unconditionally,
-// immediately after beginPromptTurn(sessionID) and before conn.Prompt (D-1)
-// — after sendPrompt's own early returns, so a dropped wakeup or an
-// uninitialised adapter stamps nothing. All three dispatch callers (Prompt,
-// PromptSteer, fireWakeup) funnel through sendPrompt, so this one call site
-// covers every non-dropped dispatch. Do not move this into
-// syncNotifQueueThen's barrier callback — that callback is skipped entirely
-// when lifetimeCtx is done, which would silently leave the stamp stale at
-// shutdown and bias the probe toward a spuriously parked card (D-1).
+// conn.Prompt. The ACP adapter calls it immediately after beginPromptTurn and
+// before conn.Prompt when the parked-board feature is enabled. All three
+// dispatch callers (Prompt, PromptSteer, fireWakeup) funnel through sendPrompt,
+// so this one call site covers every non-dropped dispatch. Do not move this
+// into syncNotifQueueThen's barrier callback — that callback is skipped when
+// lifetimeCtx is done, which would leave the stamp stale at shutdown and bias
+// the probe toward a spuriously parked card (D-1).
 func (m *Manager) RecordTurnStart(t time.Time) {
 	m.lastTurnStartMarker.Store(newTurnStartMarker(t))
 }

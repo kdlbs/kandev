@@ -65,8 +65,9 @@ type ServiceConfig struct {
 	ClaudeMidTurnSteering bool
 
 	// ParkedOnBackgroundWork gates the parked-on-background-work board
-	// projection (docs/specs/parked-board-mvp/spec.md). Read only at the
-	// settle hook (§7.5) — off by default, and off in every shipped profile.
+	// projection (docs/specs/parked-board-mvp/spec.md). The effective startup
+	// value is copied into the service and agentctl lifecycle; it is off by
+	// default and off in every shipped profile.
 	ParkedOnBackgroundWork bool
 }
 

@@ -109,10 +109,10 @@ func (s *Service) runProbe(ctx context.Context, sessionID string) (result string
 // onSessionParkedHook fires synchronously after a session transitions to
 // WAITING_FOR_INPUT. It runs the one synchronous settle-hook probe — but
 // only when the settling turn actually attested a detached launch (AC-40a) —
-// and updates the parked projection. Gate placement: the settle hook, and
-// only the settle hook (§7.5) — when the flag is off this returns before
-// capturing any snapshot and before issuing any probe, so lastSample is
-// never written and every DTO serializes false.
+// and updates the parked projection. The settle hook is the probe gate: when
+// the flag is off this returns before capturing any snapshot or issuing any
+// probe. Attestation and turn-marker plumbing are gated at their entry points,
+// so lastSample is never written and every DTO serializes false.
 func (s *Service) onSessionParkedHook(ctx context.Context, taskID, sessionID string) {
 	if !s.config.ParkedOnBackgroundWork {
 		return

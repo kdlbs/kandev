@@ -140,18 +140,15 @@ func (a *Adapter) sendPrompt(
 	}
 	a.beginPromptTurn(sessionID)
 
-	// Stamp the parked-on-background-work turn-start marker unconditionally,
-	// on every non-dropped dispatch that reaches this point — the operator
-	// path (Prompt), mid-turn steering (PromptSteer), and the synthetic
-	// wakeup path (fireWakeup) all funnel through sendPrompt and share this
-	// one call site (D-1, docs/specs/parked-board-mvp/spec.md §5). Do not
-	// move this into syncNotifQueueThen's barrier callback: that callback is
-	// skipped entirely when lifetimeCtx is done, which would silently leave
-	// the stamp stale at shutdown and bias the settle probe toward a
-	// spuriously parked card. Always plumbed and always fires, even when the
-	// parkedOnBackgroundWork flag is off (§7.5) — unobservable in that case
-	// since the settle probe never runs and nothing ever reads the stamp.
-	// May be nil in tests.
+	// Stamp the parked-on-background-work turn-start marker on every
+	// non-dropped dispatch that reaches this point when the callback is
+	// configured — the operator path (Prompt), mid-turn steering (PromptSteer),
+	// and the synthetic wakeup path (fireWakeup) all funnel through sendPrompt
+	// and share this one call site (D-1). Do not move this into
+	// syncNotifQueueThen's barrier callback: that callback is skipped entirely
+	// when lifetimeCtx is done, which would silently leave the stamp stale at
+	// shutdown and bias the settle probe toward a spuriously parked card.
+	// The lifecycle layer leaves the callback nil when the feature is off.
 	if a.cfg != nil && a.cfg.RecordTurnStart != nil {
 		a.cfg.RecordTurnStart(time.Now())
 	}

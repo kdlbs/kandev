@@ -137,6 +137,8 @@ func TestParked_FlagOff_NoProbeIssued(t *testing.T) {
 
 	require.False(t, svc.ParkedProjectionSnapshot("s1"))
 	require.Equal(t, 0, probe.callCount())
+	require.Nil(t, svc.parkedStateFor("s1"),
+		"the disabled feature must not allocate parked-session state")
 }
 
 // TestParked_NoRecogniserMatch verifies AC-37: a background tool call whose

@@ -108,11 +108,13 @@ No downstream step may reopen them without routing back to Spec.
 
 ### D-1 — Turn-stamp bypass: resolved as **(a) stamp on all dispatch paths** {#d1}
 
-The stamp MUST fire on **every** non-dropped prompt dispatch — the operator path (`Prompt`), the
-mid-turn steering path (`PromptSteer`), and the synthetic `ScheduleWakeup` path (`fireWakeup`).
-All three already funnel through `sendPrompt`, so the stamp is placed **in `sendPrompt`,
-unconditionally, immediately after `beginPromptTurn(sessionID)` and before `conn.Prompt`** — after
-both early returns, so a dropped wakeup and an uninitialised adapter stamp nothing.
+When the feature is enabled, the stamp MUST fire on **every** non-dropped prompt dispatch — the
+operator path (`Prompt`), the mid-turn steering path (`PromptSteer`), and the synthetic
+`ScheduleWakeup` path (`fireWakeup`). All three already funnel through `sendPrompt`, so the stamp
+is placed **in `sendPrompt`, immediately after `beginPromptTurn(sessionID)` and before
+`conn.Prompt`** — after both early returns, so a dropped wakeup and an uninitialised adapter stamp
+nothing. When the feature is disabled, the lifecycle layer does not provide the callback and no
+turn marker is recorded.
 
 It MUST NOT be placed inside `syncNotifQueueThen`'s callback. The monolith put it there only
 because it was fused with the `turn_started` emission, which this slice defers; that callback is
@@ -328,29 +330,15 @@ stays a bare `IconLoader` with no `data-testid` — byte-identical to today.
 | Kind / stability / risk | `KindFeature` / `StabilityExperimental` / `RiskMedium` |
 | Restart / mutability | `RestartRequired: true`, `Mutable: true` |
 
-**Gate placement: the settle hook, and only the settle hook.** When the flag is off,
-`onSessionParkedHook` returns before capturing any snapshot and before issuing any probe.
-`lastSample` is never written, so the formula's second term is never satisfiable and every DTO
-serializes `false`.
+**Gate placement.** The effective flag value is copied into the orchestrator service and the agent
+lifecycle during backend construction. A restart is required after a runtime-toggle change. When
+the flag is off, the lifecycle does not pass a turn-marker callback to agentctl, the orchestrator
+does not create detached-launch attestation state, and `onSessionParkedHook` returns before taking
+a snapshot or issuing a probe. `lastSample` is never written and every DTO serializes `false`.
 
-**How the flag is read.** The gate is a **per-call read** of `cfg.Features.ParkedOnBackgroundWork`
-at settle-hook entry, through the config handle `Service` already holds. **Nothing is gated at
-construction time:** the probe port is always injected and the agentctl turn-start stamp
-(`RecordTurnStart`) is always plumbed and always fires. Both are unobservable when the flag is off —
-the stamp stores one `time.Time` in memory on a path that already runs, and the port is never
-called. Keeping construction ungated is what allows the gate to live in exactly one place.
-
-**Two consequences of that, stated so they are not re-derived:**
-
-- The **attestation is still recorded** when the flag is off (a cheap in-memory bool on an existing
-  code path). It can never reach a rendered surface, because the probe never runs and `lastSample`
-  is therefore never `"live"`.
-- **`RestartRequired: true` is correct even though the read is per-call.** A mid-run toggle from on
-  to off stops new probes, but it cannot retroactively clear a session already holding
-  `parked = true` in process memory — that row clears only when the session next leaves
-  `WAITING_FOR_INPUT`. A restart drops the whole projection (**AC-36**), which is what makes the
-  off-state total and byte-identical to a build without this feature. Do not "simplify" this to
-  `false`.
+When the flag is on, agentctl records the turn marker, the orchestrator records attestation state,
+and the settle hook issues the bounded probe. These gates keep the disabled path free of marker,
+attestation, and probe work. A restart also drops the in-memory projection (**AC-36**).
 
 **The frontend needs no `useFeature()` gate** — it renders whatever the DTO carries, and with the
 flag off the DTO always carries `false`. The frontend defaults key is nevertheless **required**,

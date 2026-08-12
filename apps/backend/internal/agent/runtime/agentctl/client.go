@@ -51,12 +51,35 @@ type Client struct {
 	closed bool
 	mu     sync.RWMutex
 
-	// Shared write mutex for agent stream (used by StreamUpdates and sendStreamRequest)
-	streamWriteMu sync.Mutex
+	// Shared write admission for the agent stream. A channel is used instead of
+	// sync.Mutex so request writers can stop waiting when their context expires.
+	streamWriteGate     chan struct{}
+	streamWriteGateOnce sync.Once
 
 	// Pending request/response tracking for agent stream
 	pendingRequests map[string]chan *ws.Message
 	pendingMu       sync.Mutex
+}
+
+func (c *Client) writeGate() chan struct{} {
+	c.streamWriteGateOnce.Do(func() {
+		c.streamWriteGate = make(chan struct{}, 1)
+		c.streamWriteGate <- struct{}{}
+	})
+	return c.streamWriteGate
+}
+
+func (c *Client) acquireStreamWrite(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-c.writeGate():
+		return nil
+	}
+}
+
+func (c *Client) releaseStreamWrite() {
+	c.writeGate() <- struct{}{}
 }
 
 // ClientOption configures optional Client settings.

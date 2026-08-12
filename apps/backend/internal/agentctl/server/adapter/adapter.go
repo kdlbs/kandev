@@ -294,8 +294,8 @@ type Config struct {
 	RequiresProcessKill bool
 
 	// RecordTurnStart stamps process.Manager's turn-start marker for the
-	// parked-on-background-work settle probe. Always plumbed and always
-	// called (D-1). May be nil; callers must guard.
+	// parked-on-background-work settle probe. The lifecycle layer omits it
+	// when the feature is disabled. May be nil; callers must guard.
 	RecordTurnStart shared.RecordTurnStartFunc
 }
 

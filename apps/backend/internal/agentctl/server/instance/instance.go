@@ -169,6 +169,10 @@ type CreateRequest struct {
 	McpProviders []string            `json:"mcp_providers,omitempty"`
 	McpProfile   *mcpprofile.Context `json:"mcp_profile,omitempty"`
 
+	// ParkedOnBackgroundWork enables turn-start marker plumbing for the
+	// parked-board projection.
+	ParkedOnBackgroundWork bool `json:"parked_on_background_work,omitempty"`
+
 	// RequiresProcessKill forces the agent's process group to be killed on
 	// shutdown instead of relying on stdin close. Required for agents whose
 	// runtime keeps child processes alive when stdin closes (notably

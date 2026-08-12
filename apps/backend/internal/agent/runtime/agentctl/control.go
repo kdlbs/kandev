@@ -52,14 +52,15 @@ type CreateInstanceRequest struct {
 	AutoStart              bool                `json:"auto_start,omitempty"`
 	AutoApprovePermissions *bool               `json:"auto_approve_permissions,omitempty"`
 	McpServers             []McpServerConfig   `json:"mcp_servers,omitempty"`
-	SessionID              string              `json:"session_id,omitempty"`           // Task session ID for MCP tool calls
-	TaskID                 string              `json:"task_id,omitempty"`              // Task ID for MCP plan tool calls (server-side injection)
-	DisableAskQuestion     bool                `json:"disable_ask_question,omitempty"` // Disable ask_user_question MCP tool (TUI agents)
-	AssumeMcpSse           bool                `json:"assume_mcp_sse,omitempty"`       // Assume agent supports SSE MCP servers
-	AssumeMcpHttp          bool                `json:"assume_mcp_http,omitempty"`      // Assume agent supports HTTP MCP servers
-	McpMode                string              `json:"mcp_mode,omitempty"`             // MCP tool mode: "task" (default), "config", or "office"
-	McpProviders           []string            `json:"mcp_providers,omitempty"`        // Supported review-automation providers
-	McpProfile             *mcpprofile.Context `json:"mcp_profile,omitempty"`          // Backend-owned typed MCP tool profile
+	SessionID              string              `json:"session_id,omitempty"`                // Task session ID for MCP tool calls
+	TaskID                 string              `json:"task_id,omitempty"`                   // Task ID for MCP plan tool calls (server-side injection)
+	DisableAskQuestion     bool                `json:"disable_ask_question,omitempty"`      // Disable ask_user_question MCP tool (TUI agents)
+	AssumeMcpSse           bool                `json:"assume_mcp_sse,omitempty"`            // Assume agent supports SSE MCP servers
+	AssumeMcpHttp          bool                `json:"assume_mcp_http,omitempty"`           // Assume agent supports HTTP MCP servers
+	McpMode                string              `json:"mcp_mode,omitempty"`                  // MCP tool mode: "task" (default), "config", or "office"
+	McpProviders           []string            `json:"mcp_providers,omitempty"`             // Supported review-automation providers
+	McpProfile             *mcpprofile.Context `json:"mcp_profile,omitempty"`               // Backend-owned typed MCP tool profile
+	ParkedOnBackgroundWork bool                `json:"parked_on_background_work,omitempty"` // Enable parked-board turn markers
 	// RequiresProcessKill tells agentctl to skip the graceful stdin-close wait
 	// and reap the agent process group immediately. Required for agents whose
 	// runtime keeps child processes (e.g. MCP servers) alive when stdin closes

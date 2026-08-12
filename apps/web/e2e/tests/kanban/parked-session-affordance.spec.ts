@@ -1,5 +1,9 @@
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
+import {
+  injectBackgroundActivityBoardTask,
+  injectParkedBoardTask,
+} from "./parked-session-affordance-helpers";
 
 /**
  * Parked-session affordance — board card only (AC-58, AC-59;
@@ -18,104 +22,6 @@ import { KanbanPage } from "../../pages/kanban-page";
  * `state.kanbanMulti.snapshots[workflowId].tasks` (components/kanban-board.tsx)
  * — via the `__KANDEV_E2E_STORE__` bridge.
  */
-type E2EStoreState = {
-  kanban: { tasks: Array<Record<string, unknown>> };
-  kanbanMulti: { snapshots: Record<string, { tasks: Array<Record<string, unknown>> }> };
-};
-
-type E2EStoreWindow = Window & {
-  __KANDEV_E2E_STORE__?: {
-    getState: () => E2EStoreState;
-    setState: (updater: (state: E2EStoreState) => Partial<E2EStoreState> | void) => void;
-  };
-};
-
-/**
- * Immutably updates the task in state.kanbanMulti.snapshots[workflowId].tasks
- * (what the board card reads) AND its counterpart in state.kanban.tasks (the
- * "active workflow" slice). Builds fresh array and object references at
- * every level touched (rather than mutating items in place) so every Zustand
- * selector — however granular — observes the change.
- *
- * No parkedRevision sentinel (D-2): V1 ships no epoch/revision, so there is
- * no discard rule to defeat and nothing for a background refetch to race.
- */
-async function injectParkedBoardTask(
-  page: import("@playwright/test").Page,
-  workflowId: string,
-  taskId: string,
-) {
-  await page.evaluate(
-    ({ workflowId, taskId }) => {
-      const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
-      if (!store) throw new Error("E2E store bridge missing");
-      const parkTask = (t: Record<string, unknown>) =>
-        t.id === taskId ? { ...t, state: "WAITING_FOR_INPUT", parkedOnBackgroundWork: true } : t;
-      store.setState((state) => {
-        const snapshot = state.kanbanMulti.snapshots[workflowId];
-        if (!snapshot) throw new Error(`No kanbanMulti snapshot for workflow ${workflowId}`);
-        if (!snapshot.tasks.some((t) => t.id === taskId)) {
-          throw new Error(`Task ${taskId} not found in kanbanMulti snapshot`);
-        }
-        return {
-          kanban: { ...state.kanban, tasks: state.kanban.tasks.map(parkTask) },
-          kanbanMulti: {
-            ...state.kanbanMulti,
-            snapshots: {
-              ...state.kanbanMulti.snapshots,
-              [workflowId]: { ...snapshot, tasks: snapshot.tasks.map(parkTask) },
-            },
-          },
-        };
-      });
-    },
-    { workflowId, taskId },
-  );
-}
-
-/**
- * Immutably marks the task as actively background-running (NOT parked) —
- * `foregroundActivity: "background"`, `parkedOnBackgroundWork` left unset.
- * Regression coverage for AC-59: this is the pre-existing signal that must
- * render byte-identically to before the parked feature shipped — a bare
- * IconLoader with no `data-testid` — and must NOT show
- * `task-state-background-running`, which is reserved for the distinct
- * parked condition. Same store-mutation shape as injectParkedBoardTask,
- * minus the parked fields.
- */
-async function injectBackgroundActivityBoardTask(
-  page: import("@playwright/test").Page,
-  workflowId: string,
-  taskId: string,
-) {
-  await page.evaluate(
-    ({ workflowId, taskId }) => {
-      const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
-      if (!store) throw new Error("E2E store bridge missing");
-      const markBackground = (t: Record<string, unknown>) =>
-        t.id === taskId ? { ...t, foregroundActivity: "background" } : t;
-      store.setState((state) => {
-        const snapshot = state.kanbanMulti.snapshots[workflowId];
-        if (!snapshot) throw new Error(`No kanbanMulti snapshot for workflow ${workflowId}`);
-        if (!snapshot.tasks.some((t) => t.id === taskId)) {
-          throw new Error(`Task ${taskId} not found in kanbanMulti snapshot`);
-        }
-        return {
-          kanban: { ...state.kanban, tasks: state.kanban.tasks.map(markBackground) },
-          kanbanMulti: {
-            ...state.kanbanMulti,
-            snapshots: {
-              ...state.kanbanMulti.snapshots,
-              [workflowId]: { ...snapshot, tasks: snapshot.tasks.map(markBackground) },
-            },
-          },
-        };
-      });
-    },
-    { workflowId, taskId },
-  );
-}
-
 test.describe("Parked-session affordance — board card", () => {
   test("board card shows background-running icon when task is parked (AC-58)", async ({
     testPage,

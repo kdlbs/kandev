@@ -16,15 +16,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// spawnZombieDescendant starts a root shell that execs into a long-lived
-// sleep (preserving its PID) after backgrounding a quick-exiting child that
-// nothing ever wait()s for — producing a genuine ZOMBIE descendant, not a
-// reaped root, for AC-27a's exclusion guard. The exec trick means the
-// process occupying the root PID becomes `sleep`, which never reaps children
-// forked by its pre-exec shell incarnation, so the backgrounded child
-// lingers as a zombie for the test's duration. Returns the backgrounded
-// child's own PID (via `echo $!`) alongside the root's, so the caller can
-// independently verify the zombie actually exists before probing — see
+// spawnZombieDescendant starts a long-lived fixture parent after spawning a
+// child that nothing ever wait()s for. This produces a genuine ZOMBIE
+// descendant, not a reaped root, for AC-27a's exclusion guard. The fixture
+// prints the child PID only after the child has had time to exit, so the
+// caller can independently verify the zombie exists before probing — see
 // requireZombieState.
 //
 // The PID is read via cmd.StdoutPipe() + a synchronous bufio read in this
@@ -40,7 +36,7 @@ import (
 // hoping a fixed sleep was long enough.
 func spawnZombieDescendant(t *testing.T) (rootPID, zombiePID int) {
 	t.Helper()
-	cmd := exec.Command("/bin/sh", "-c", "sh -c 'true' & echo $!; exec sleep 300")
+	cmd := fixtureCmd("zombie-parent 300")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdout, err := cmd.StdoutPipe()
 	require.NoError(t, err, "create stdout pipe")
@@ -55,8 +51,6 @@ func spawnZombieDescendant(t *testing.T) (rootPID, zombiePID int) {
 	pidLine = strings.TrimSpace(pidLine)
 	zPID, err := strconv.Atoi(pidLine)
 	require.NoError(t, err, "expected a numeric PID on stdout, got %q", pidLine)
-	// Give the backgrounded child time to exit and become a zombie.
-	time.Sleep(200 * time.Millisecond)
 	return cmd.Process.Pid, zPID
 }
 

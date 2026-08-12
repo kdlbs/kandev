@@ -706,6 +706,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		McpMode:                        reqWithWorktree.McpMode,
 		McpProviders:                   reqWithWorktree.McpProviders,
 		McpProfile:                     reqWithWorktree.McpProfile,
+		ParkedOnBackgroundWork:         m.parkedOnBackgroundWork,
 		AuthToken:                      m.revealRuntimeSecret(ctx, metadata, MetadataKeyAuthTokenSecret),
 		BootstrapNonce:                 m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret),
 		OnProgress:                     onProgress,

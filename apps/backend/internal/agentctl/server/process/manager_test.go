@@ -425,6 +425,37 @@ func TestBuildAdapterConfig_StripEnvRemovesDeclaredVars(t *testing.T) {
 	}
 }
 
+func TestBuildAdapterConfig_TurnMarkerFollowsFeatureFlag(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		enabled bool
+		wantSet bool
+	}{
+		{name: "disabled", enabled: false, wantSet: false},
+		{name: "enabled", enabled: true, wantSet: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &Manager{
+				cfg: &config.InstanceConfig{
+					WorkDir:                t.TempDir(),
+					Protocol:               agent.ProtocolACP,
+					ParkedOnBackgroundWork: tt.enabled,
+				},
+				logger: newTestLogger(t),
+			}
+
+			require.NoError(t, m.buildAdapterConfig())
+			t.Cleanup(func() { _ = m.adapter.Close() })
+
+			if tt.wantSet {
+				require.NotNil(t, m.adapterCfg.RecordTurnStart)
+			} else {
+				require.Nil(t, m.adapterCfg.RecordTurnStart)
+			}
+		})
+	}
+}
+
 func TestStartOneShotPreservesConfiguredTempEnvironment(t *testing.T) {
 	log := newTestLogger(t)
 	workDir := t.TempDir()
