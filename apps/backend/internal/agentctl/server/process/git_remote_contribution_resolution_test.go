@@ -5,6 +5,7 @@ import (
 	"os"
 	osExec "os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -166,13 +167,22 @@ func TestGitOperatorUseRemoteContributionRechecksWorktreeAfterFetch(t *testing.T
 		t.Fatalf("locate git: %v", err)
 	}
 	shimDir := t.TempDir()
-	shimPath := filepath.Join(shimDir, "git")
-	if err := os.WriteFile(shimPath, []byte("#!/bin/sh\nif [ \"$1\" = \"fetch\" ]; then\n  \"$REAL_GIT\" \"$@\"\n  status=$?\n  printf 'created during fetch\\n' > \"$RACE_WORKTREE/race-after-fetch.txt\"\n  exit $status\nfi\nexec \"$REAL_GIT\" \"$@\"\n"), 0o755); err != nil {
-		t.Fatalf("write git shim: %v", err)
+	shimName := "git"
+	if runtime.GOOS == "windows" {
+		shimName += ".exe"
+	}
+	shimPath := filepath.Join(shimDir, shimName)
+	testBinary, err := os.ReadFile(os.Args[0])
+	if err != nil {
+		t.Fatalf("read test binary: %v", err)
+	}
+	if err := os.WriteFile(shimPath, testBinary, 0o755); err != nil {
+		t.Fatalf("write git fixture binary: %v", err)
 	}
 	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("REAL_GIT", realGit)
-	t.Setenv("RACE_WORKTREE", repoDir)
+	t.Setenv(kandevTestFixtureEnv, "git-fetch-race")
+	t.Setenv(gitFetchRaceRealGitEnv, realGit)
+	t.Setenv(gitFetchRaceWorktreeEnv, repoDir)
 
 	operator := NewGitOperator(repoDir, newTestLogger(t), nil)
 	operator.setRemoteContribution(binding)
