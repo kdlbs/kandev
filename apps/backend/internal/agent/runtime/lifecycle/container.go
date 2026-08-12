@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -504,7 +505,7 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 	// still bring agentctl up so the host can connect, surface the failure, and
 	// the user can debug from the Executor Settings popover.
 	//
-	prepareTimeout := constants.SetupScriptTimeout.String()
+	prepareTimeout := formatCoreutilsTimeout(constants.SetupScriptTimeout)
 	//nolint:dupword // shell branches contain repeated `fi` tokens.
 	bootstrap := []string{
 		"sh", "-c",
@@ -564,6 +565,13 @@ exec /usr/local/bin/agentctl`,
 	}
 
 	return containerCfg, nil
+}
+
+// formatCoreutilsTimeout converts a Go duration to the single-unit format
+// accepted by GNU timeout. time.Duration.String can emit compound values such
+// as "10m0s", which GNU timeout rejects as an invalid interval.
+func formatCoreutilsTimeout(timeout time.Duration) string {
+	return strconv.FormatFloat(timeout.Seconds(), 'f', -1, 64) + "s"
 }
 
 func dockerAgentctlPortBindings() []docker.PortBindingConfig {

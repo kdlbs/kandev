@@ -8,7 +8,6 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/docker"
-	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
@@ -147,7 +146,7 @@ func TestBuildContainerConfigBoundsPrepareScriptBeforeAgentctl(t *testing.T) {
 	script := got.Entrypoint[2]
 	want := fmt.Sprintf(
 		"timeout --signal=TERM --kill-after=1s %s sh -c",
-		constants.SetupScriptTimeout,
+		"600s",
 	)
 	if !strings.Contains(script, want) {
 		t.Fatalf("prepare timeout = %q, want bootstrap to contain %q", script, want)
