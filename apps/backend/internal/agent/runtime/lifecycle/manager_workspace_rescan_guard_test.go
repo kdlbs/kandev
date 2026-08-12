@@ -18,7 +18,13 @@ type recordedRescan struct {
 	SourceRoots []string `json:"workspace_source_roots"`
 }
 
-func newRescanServer(t *testing.T, status *int) (*[]recordedRescan, string) {
+// newRescanServer serves a fixed status for the lifetime of the server. The
+// status is passed by value rather than by pointer so the handler goroutine
+// cannot race a mid-run write: these tests each want one status throughout.
+// (fakeAgentctlProcessServer uses atomic.Int32 because it genuinely does flip
+// its status mid-test; matching the shape to the requirement keeps the
+// difference between the two helpers visible.)
+func newRescanServer(t *testing.T, status int) (*[]recordedRescan, string) {
 	t.Helper()
 	var mu sync.Mutex
 	recorded := &[]recordedRescan{}
@@ -28,7 +34,7 @@ func newRescanServer(t *testing.T, status *int) (*[]recordedRescan, string) {
 		mu.Lock()
 		*recorded = append(*recorded, body)
 		mu.Unlock()
-		w.WriteHeader(*status)
+		w.WriteHeader(status)
 		_, _ = w.Write([]byte(`{"success":true}`))
 	}))
 	t.Cleanup(server.Close)
@@ -40,8 +46,7 @@ func newRescanServer(t *testing.T, status *int) (*[]recordedRescan, string) {
 // updated to match — a rescan that succeeded but left the old roots on the
 // execution would send stale roots on the next call.
 func TestRescanWorkspaceForSessionForwardsWorkDirAndRoots(t *testing.T) {
-	status := http.StatusOK
-	recorded, url := newRescanServer(t, &status)
+	recorded, url := newRescanServer(t, http.StatusOK)
 	mgr := newTestManager(t)
 	execution := &AgentExecution{
 		ID: "exec-1", SessionID: "session-1",
@@ -65,8 +70,7 @@ func TestRescanWorkspaceForSessionForwardsWorkDirAndRoots(t *testing.T) {
 // failed rescan must not leave the execution claiming roots agentctl never
 // accepted.
 func TestRescanWorkspaceForSessionRollsBackRootsOnFailure(t *testing.T) {
-	status := http.StatusInternalServerError
-	_, url := newRescanServer(t, &status)
+	_, url := newRescanServer(t, http.StatusInternalServerError)
 	mgr := newTestManager(t)
 	original := []string{"/work/task-1/backend"}
 	execution := &AgentExecution{
