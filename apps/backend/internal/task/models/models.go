@@ -142,6 +142,10 @@ const (
 	// session created for a task. PrepareSession consumes it into session
 	// runtime overrides and never leaves it in session metadata.
 	MetaKeyInitialSessionRuntimeConfig = "initial_session_runtime_config"
+	// MetaKeyInitialSessionRuntimeConfigProfileID identifies the agent profile
+	// that produced the launch-only runtime seed. A seed is valid only for this
+	// profile, even if task profile selection changes before the first launch.
+	MetaKeyInitialSessionRuntimeConfigProfileID = "initial_session_runtime_config_profile_id"
 )
 
 // IsAgentTitlePending reports whether task metadata contains the durable
@@ -250,6 +254,19 @@ func LoadInitialSessionRuntimeConfig(metadata map[string]interface{}) (SessionRu
 	return loadSessionRuntimeConfig(metadata, MetaKeyInitialSessionRuntimeConfig)
 }
 
+// LoadInitialSessionRuntimeConfigProfileID returns the profile that owns the
+// launch-only runtime seed. Older tasks did not store a separate owner, so
+// their resolved task profile remains a compatibility fallback.
+func LoadInitialSessionRuntimeConfigProfileID(metadata map[string]interface{}) string {
+	if metadata == nil {
+		return ""
+	}
+	if profileID := StringFromAny(metadata[MetaKeyInitialSessionRuntimeConfigProfileID]); profileID != "" {
+		return profileID
+	}
+	return StringFromAny(metadata[MetaKeyAgentProfileID])
+}
+
 // LoadEffectiveSessionRuntimeConfig resolves the effective model, mode, and
 // dynamic options for a task session. The profile snapshot is the base, the
 // provider runtime state replaces it, the persisted session mode takes
@@ -261,6 +278,11 @@ func LoadEffectiveSessionRuntimeConfig(session *TaskSession) (SessionRuntimeConf
 	effective := runtimeConfigFromAgentProfileSnapshot(session.AgentProfileSnapshot)
 	if runtime, ok := LoadSessionRuntimeConfig(session.Metadata); ok {
 		mergeSessionRuntimeConfig(&effective, runtime)
+		if runtime.ConfigOptions != nil {
+			// Provider runtime options are a complete replacement for profile
+			// options. Explicit overrides below are the only later merge.
+			effective.ConfigOptions = maps.Clone(runtime.ConfigOptions)
+		}
 	}
 	if mode := StringFromAny(session.Metadata[SessionMetaKeySessionMode]); mode != "" {
 		effective.Mode = mode

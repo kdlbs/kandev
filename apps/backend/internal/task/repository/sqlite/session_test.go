@@ -184,13 +184,14 @@ func TestCreateTaskSessionWithInitialRuntimeSeedConsumesOnceAcrossConcurrentAndR
 		ID:    taskID,
 		Title: "Initial runtime seed race",
 		Metadata: map[string]interface{}{
-			models.MetaKeyInitialSessionRuntimeConfig: seed,
+			models.MetaKeyInitialSessionRuntimeConfig:          seed,
+			models.MetaKeyInitialSessionRuntimeConfigProfileID: "profile-1",
 		},
 	}))
 
 	sessions := []*models.TaskSession{
 		{ID: "initial-runtime-session-1", TaskID: taskID, AgentProfileID: "profile-1", State: models.TaskSessionStateCreated},
-		{ID: "initial-runtime-session-2", TaskID: taskID, AgentProfileID: "profile-2", State: models.TaskSessionStateCreated},
+		{ID: "initial-runtime-session-2", TaskID: taskID, AgentProfileID: "profile-1", State: models.TaskSessionStateCreated},
 	}
 	errs := make([]error, len(sessions))
 	var wg sync.WaitGroup
@@ -227,6 +228,9 @@ func TestCreateTaskSessionWithInitialRuntimeSeedConsumesOnceAcrossConcurrentAndR
 	if _, ok := task.Metadata[models.MetaKeyInitialSessionRuntimeConfig]; ok {
 		t.Fatalf("initial runtime seed remained in task metadata: %#v", task.Metadata)
 	}
+	if _, ok := task.Metadata[models.MetaKeyInitialSessionRuntimeConfigProfileID]; ok {
+		t.Fatalf("initial runtime seed profile remained in task metadata: %#v", task.Metadata)
+	}
 
 	require.NoError(t, repo.DeleteTaskSession(ctx, initialSessionID))
 	replacement := &models.TaskSession{
@@ -241,6 +245,46 @@ func TestCreateTaskSessionWithInitialRuntimeSeedConsumesOnceAcrossConcurrentAndR
 	if _, ok := models.LoadSessionRuntimeConfigOverrides(createdReplacement.Metadata); ok {
 		t.Fatalf("replacement session unexpectedly received initial runtime overrides: %#v", createdReplacement.Metadata)
 	}
+}
+
+func TestCreateTaskSessionWithInitialRuntimeSeedConsumesMismatchedProfile(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-initial-runtime-seed-profile-mismatch"
+	seed := models.SessionRuntimeConfig{
+		Model:         "mock-smart",
+		Mode:          "plan-mock",
+		ConfigOptions: map[string]string{"effort": "max"},
+	}
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID:    taskID,
+		Title: "Initial runtime seed profile mismatch",
+		Metadata: map[string]interface{}{
+			models.MetaKeyInitialSessionRuntimeConfig:          seed,
+			models.MetaKeyInitialSessionRuntimeConfigProfileID: "profile-owner",
+			models.MetaKeyAgentProfileID:                       "profile-selected",
+		},
+	}))
+
+	mismatched := &models.TaskSession{
+		ID:             "initial-runtime-session-mismatched-profile",
+		TaskID:         taskID,
+		AgentProfileID: "profile-selected",
+		State:          models.TaskSessionStateCreated,
+	}
+	require.NoError(t, repo.CreateTaskSessionWithInitialRuntimeSeed(ctx, mismatched))
+
+	created, err := repo.GetTaskSession(ctx, mismatched.ID)
+	require.NoError(t, err)
+	_, hasOverrides := models.LoadSessionRuntimeConfigOverrides(created.Metadata)
+	require.False(t, hasOverrides, "mismatched profile must not receive the creator runtime seed")
+
+	task, err := repo.GetTask(ctx, taskID)
+	require.NoError(t, err)
+	_, hasSeed := task.Metadata[models.MetaKeyInitialSessionRuntimeConfig]
+	require.False(t, hasSeed, "mismatched profile must consume the launch-only seed")
+	_, hasOwner := task.Metadata[models.MetaKeyInitialSessionRuntimeConfigProfileID]
+	require.False(t, hasOwner, "mismatched profile must consume the seed owner")
 }
 
 func TestPostgresCreateOfficeTaskSessionMarksOnlyTheFirstConcurrentSessionAsOrigin(t *testing.T) {

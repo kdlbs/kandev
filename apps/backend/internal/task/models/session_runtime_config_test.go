@@ -46,7 +46,6 @@ func TestLoadEffectiveSessionRuntimeConfigMergesInPrecedenceOrder(t *testing.T) 
 	require.Equal(t, "override-model", got.Model)
 	require.Equal(t, "override-mode", got.Mode)
 	require.Equal(t, map[string]string{
-		"profile_only":      "profile",
 		"provider_replaced": "override-value",
 		"provider_only":     "provider",
 		"override_only":     "override",
@@ -79,8 +78,11 @@ func TestLoadEffectiveSessionRuntimeConfigReturnsIndependentOptions(t *testing.T
 func TestLoadEffectiveSessionRuntimeConfigAcceptsJSONRehydratedMetadata(t *testing.T) {
 	got, ok := LoadEffectiveSessionRuntimeConfig(&TaskSession{
 		AgentProfileSnapshot: map[string]interface{}{
-			"model":         "profile-model",
-			"configOptions": map[string]interface{}{"effort": "medium"},
+			"model": "profile-model",
+			"configOptions": map[string]interface{}{
+				"effort":       "medium",
+				"profile_only": "stale",
+			},
 		},
 		Metadata: map[string]interface{}{
 			SessionMetaKeyRuntimeConfig: map[string]interface{}{

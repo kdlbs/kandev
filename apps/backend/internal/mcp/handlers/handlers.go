@@ -1164,6 +1164,7 @@ func (h *Handlers) resolveMCPLaunchMetadataWithSource(
 	}
 	if launchConfig.InitialRuntimeConfig != nil {
 		metadata[models.MetaKeyInitialSessionRuntimeConfig] = *launchConfig.InitialRuntimeConfig
+		metadata[models.MetaKeyInitialSessionRuntimeConfigProfileID] = launchConfig.AgentProfileID
 	}
 	return launchConfig, metadata, nil
 }

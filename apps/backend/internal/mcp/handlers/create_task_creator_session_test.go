@@ -90,6 +90,7 @@ func TestHandleCreateTask_UsesVerifiedCreatorSessionProfileAndRuntime(t *testing
 	require.Equal(t, "runtime-model", seed.Model)
 	require.Equal(t, "acceptEdits", seed.Mode)
 	require.Equal(t, map[string]string{"reasoning_effort": "low"}, seed.ConfigOptions)
+	require.Equal(t, "creator-session-profile", task.Metadata[models.MetaKeyInitialSessionRuntimeConfigProfileID])
 }
 
 func TestHandleCreateTask_RejectsCreatorSessionFromAnotherTaskBeforePersistence(t *testing.T) {
@@ -167,6 +168,7 @@ func TestHandleCreateTask_SubtaskKeepsParentExecutorWhenCreatorProfileWins(t *te
 	seed, ok := models.LoadInitialSessionRuntimeConfig(task.Metadata)
 	require.True(t, ok)
 	require.Equal(t, "creator-runtime-model", seed.Model)
+	require.Equal(t, "creator-session-profile", task.Metadata[models.MetaKeyInitialSessionRuntimeConfigProfileID])
 }
 
 func TestResolveMCPAutoStartConfig_ExplicitAndWorkspaceProfilesSuppressCreatorRuntime(t *testing.T) {

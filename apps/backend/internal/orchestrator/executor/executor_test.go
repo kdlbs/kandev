@@ -223,7 +223,8 @@ func TestPrepareSessionConsumesInitialRuntimeSeedOnlyForFirstSession(t *testing.
 		WorkspaceID: "workspace-123",
 		Title:       "Runtime seed task",
 		Metadata: map[string]interface{}{
-			"initial_session_runtime_config": seed,
+			models.MetaKeyInitialSessionRuntimeConfig:          seed,
+			models.MetaKeyInitialSessionRuntimeConfigProfileID: "profile-123",
 		},
 	}
 
@@ -244,8 +245,11 @@ func TestPrepareSessionConsumesInitialRuntimeSeedOnlyForFirstSession(t *testing.
 	if firstOverrides.ConfigOptions["reasoning_effort"] != "high" {
 		t.Fatalf("first runtime options = %#v", firstOverrides.ConfigOptions)
 	}
-	if _, exists := first.Metadata["initial_session_runtime_config"]; exists {
+	if _, exists := first.Metadata[models.MetaKeyInitialSessionRuntimeConfig]; exists {
 		t.Fatalf("launch-only seed leaked into first session metadata: %#v", first.Metadata)
+	}
+	if _, exists := first.Metadata[models.MetaKeyInitialSessionRuntimeConfigProfileID]; exists {
+		t.Fatalf("launch-only seed owner leaked into first session metadata: %#v", first.Metadata)
 	}
 
 	secondID, err := executor.PrepareSession(
@@ -261,13 +265,64 @@ func TestPrepareSessionConsumesInitialRuntimeSeedOnlyForFirstSession(t *testing.
 	if _, ok := models.LoadSessionRuntimeConfigOverrides(second.Metadata); ok {
 		t.Fatalf("second session unexpectedly received initial runtime overrides: %#v", second.Metadata)
 	}
-	if _, exists := second.Metadata["initial_session_runtime_config"]; exists {
+	if _, exists := second.Metadata[models.MetaKeyInitialSessionRuntimeConfig]; exists {
 		t.Fatalf("launch-only seed leaked into second session metadata: %#v", second.Metadata)
+	}
+	if _, exists := second.Metadata[models.MetaKeyInitialSessionRuntimeConfigProfileID]; exists {
+		t.Fatalf("launch-only seed owner leaked into second session metadata: %#v", second.Metadata)
 	}
 
 	firstOverrides.ConfigOptions["reasoning_effort"] = "low"
 	if seed.ConfigOptions["reasoning_effort"] != "high" {
 		t.Fatalf("seed options aliased prepared session: %#v", seed.ConfigOptions)
+	}
+}
+
+func TestPrepareSessionDoesNotApplyInitialRuntimeSeedAfterProfileSelectionChanges(t *testing.T) {
+	seed := models.SessionRuntimeConfig{
+		Model:         "gpt-5.6-sol",
+		Mode:          "acceptEdits",
+		ConfigOptions: map[string]string{"reasoning_effort": "high"},
+	}
+	for _, testCase := range []struct {
+		name            string
+		selectedProfile string
+	}{
+		{name: "explicit profile", selectedProfile: "explicit-profile"},
+		{name: "workflow profile", selectedProfile: "workflow-profile"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			repo := newMockRepository()
+			executor := newTestExecutor(t, &mockAgentManager{}, repo)
+			task := &v1.Task{
+				ID:          "task-runtime-seed-" + testCase.selectedProfile,
+				WorkspaceID: "workspace-123",
+				Title:       "Changed initial runtime seed profile",
+				Metadata: map[string]interface{}{
+					models.MetaKeyInitialSessionRuntimeConfig:          seed,
+					models.MetaKeyInitialSessionRuntimeConfigProfileID: "creator-profile",
+				},
+			}
+
+			sessionID, err := executor.PrepareSession(
+				context.Background(), task, testCase.selectedProfile, "executor-123", "", "",
+			)
+			if err != nil {
+				t.Fatalf("PrepareSession: %v", err)
+			}
+			created, err := repo.GetTaskSession(context.Background(), sessionID)
+			if err != nil {
+				t.Fatalf("GetTaskSession: %v", err)
+			}
+			_, hasOverrides := models.LoadSessionRuntimeConfigOverrides(created.Metadata)
+			if hasOverrides {
+				t.Fatalf("changed profile must not receive the creator runtime seed: %#v", created.Metadata)
+			}
+			_, hasOwner := created.Metadata[models.MetaKeyInitialSessionRuntimeConfigProfileID]
+			if hasOwner {
+				t.Fatalf("launch-only seed owner must not leak into the session: %#v", created.Metadata)
+			}
+		})
 	}
 }
 

@@ -52,8 +52,7 @@ function effectiveRuntimeConfig(session: SessionInfo): RuntimeConfig {
   const runtime = runtimeConfigFromMetadata(session.metadata, "runtime_config");
   const overrides = runtimeConfigFromMetadata(session.metadata, "runtime_config_overrides");
   const configOptions = {
-    ...(snapshot.config_options ?? {}),
-    ...(runtime.config_options ?? {}),
+    ...(runtime.config_options ?? snapshot.config_options ?? {}),
     ...(overrides.config_options ?? {}),
   };
   delete configOptions.model;
@@ -1026,7 +1025,11 @@ test.describe("Subtask inheritance", () => {
     const creatorProfile = await apiClient.createAgentProfile(
       agent!.id,
       "Creator Session Runtime E2E",
-      { model: "mock-fast", mode: "default", config_options: { effort: "medium" } },
+      {
+        model: "mock-fast",
+        mode: "default",
+        config_options: { effort: "medium", profile_only: "stale" },
+      },
     );
     const executor = await apiClient.createExecutor("Creator Runtime Executor E2E", "local_pc");
     const executorProfile = await apiClient.createExecutorProfile(

@@ -247,7 +247,7 @@ func (r *Repository) CreateTaskSessionWithInitialRuntimeSeed(ctx context.Context
 		return err
 	}
 
-	initialRuntimeConfig, hasInitialRuntimeConfig, hasInitialRuntimeSeedKey, err := r.loadInitialSessionRuntimeSeedTx(ctx, tx, session.TaskID)
+	initialRuntimeConfig, hasInitialRuntimeConfig, initialRuntimeConfigProfileID, hasInitialRuntimeSeedKey, err := r.loadInitialSessionRuntimeSeedTx(ctx, tx, session.TaskID)
 	if err != nil {
 		return err
 	}
@@ -263,7 +263,7 @@ func (r *Repository) CreateTaskSessionWithInitialRuntimeSeed(ctx context.Context
 			session.Metadata = make(map[string]interface{})
 		}
 		session.Metadata[models.SessionMetaKeyOrigin] = models.SessionOriginTaskInitial
-		if hasInitialRuntimeConfig {
+		if hasInitialRuntimeConfig && initialRuntimeConfigProfileID == session.AgentProfileID {
 			session.Metadata[models.SessionMetaKeyRuntimeConfigOverrides] = initialRuntimeConfig
 		}
 	} else if models.IsOriginalTaskSession(session.Metadata) {
@@ -279,6 +279,9 @@ func (r *Repository) CreateTaskSessionWithInitialRuntimeSeed(ctx context.Context
 		if _, err := r.removeTaskMetadataKeyWithExecutor(ctx, tx, session.TaskID, models.MetaKeyInitialSessionRuntimeConfig); err != nil {
 			return fmt.Errorf("consume initial runtime seed: %w", err)
 		}
+		if _, err := r.removeTaskMetadataKeyWithExecutor(ctx, tx, session.TaskID, models.MetaKeyInitialSessionRuntimeConfigProfileID); err != nil {
+			return fmt.Errorf("consume initial runtime seed profile: %w", err)
+		}
 	}
 	return tx.Commit()
 }
@@ -287,28 +290,29 @@ func (r *Repository) loadInitialSessionRuntimeSeedTx(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	taskID string,
-) (models.SessionRuntimeConfig, bool, bool, error) {
+) (models.SessionRuntimeConfig, bool, string, bool, error) {
 	var metadataJSON sql.NullString
 	err := tx.QueryRowContext(ctx, r.db.Rebind(
 		`SELECT metadata FROM tasks WHERE id = ?`,
 	), taskID).Scan(&metadataJSON)
 	if errors.Is(err, sql.ErrNoRows) {
-		return models.SessionRuntimeConfig{}, false, false, fmt.Errorf("task not found: %s", taskID)
+		return models.SessionRuntimeConfig{}, false, "", false, fmt.Errorf("task not found: %s", taskID)
 	}
 	if err != nil {
-		return models.SessionRuntimeConfig{}, false, false, fmt.Errorf("load task metadata for initial runtime seed: %w", err)
+		return models.SessionRuntimeConfig{}, false, "", false, fmt.Errorf("load task metadata for initial runtime seed: %w", err)
 	}
 
 	metadata := make(map[string]interface{})
 	raw := strings.TrimSpace(metadataJSON.String)
 	if metadataJSON.Valid && raw != "" && raw != "null" && raw != "{}" {
 		if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
-			return models.SessionRuntimeConfig{}, false, false, fmt.Errorf("decode task metadata for initial runtime seed: %w", err)
+			return models.SessionRuntimeConfig{}, false, "", false, fmt.Errorf("decode task metadata for initial runtime seed: %w", err)
 		}
 	}
 	seed, ok := models.LoadInitialSessionRuntimeConfig(metadata)
+	profileID := models.LoadInitialSessionRuntimeConfigProfileID(metadata)
 	_, hasSeedKey := metadata[models.MetaKeyInitialSessionRuntimeConfig]
-	return seed, ok, hasSeedKey, nil
+	return seed, ok, profileID, hasSeedKey, nil
 }
 
 // CreateOfficeTaskSession creates an Office session and atomically marks it as
