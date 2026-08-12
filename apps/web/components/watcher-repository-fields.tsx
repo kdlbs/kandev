@@ -84,7 +84,7 @@ export function WatcherRepositoryFields({
   const noRepositoryLabel = t("common:noRepositoryOption");
   const defaultBranchLabel = t("common:repositoryDefaultBranchOption");
   const branchPlaceholderLabels = {
-    defaultBranch: t("common:watcherDefaultBranchPlaceholder"),
+    defaultBranch: defaultBranchLabel,
     loading: t("common:watcherLoadingBranchesPlaceholder"),
     pickRepository: t("common:watcherPickRepositoryPlaceholder"),
   };
