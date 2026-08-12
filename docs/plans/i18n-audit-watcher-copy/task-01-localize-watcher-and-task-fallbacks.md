@@ -69,4 +69,6 @@ GREEN: `cd apps/web && pnpm test -- --run lib/watcher-profile-default.test.ts li
 
 PR review remediation: `cd apps/web && pnpm test -- --run components/watcher-repository-fields.test.tsx lib/watcher-profile-default.test.ts lib/watcher-repository-default.test.ts components/task/chat/messages/chat-message.test.tsx components/github/review-watch-dialog.test.tsx components/gitlab/issue-watch-dialog.test.tsx components/gitlab/review-watch-dialog.test.tsx` passed 46 tests in 7 files after proving that repository-first and loading placeholders remain visible while the branch selector is disabled.
 
+CI/review follow-up: `cd apps/web && pnpm test -- --run components/watcher-repository-fields.test.tsx components/task/chat/messages/chat-message.test.tsx && pnpm run typecheck` passed 31 tests in 2 files and the full web TypeScript check. The sender fallback test now proves an already-mounted badge changes from exact English to exact pseudo copy after a live locale switch.
+
 Sentinel values and empty-ID normalization are unchanged. Display copy resolves inside React render paths; no external side effects or security boundaries apply.

@@ -19,7 +19,7 @@ type PickItem = { id: string; label: string };
 function PickSelect(props: {
   label: string;
   description: string;
-  value: string;
+  value: string | undefined;
   onChange: (v: string) => void;
   placeholder: string;
   items: PickItem[];
