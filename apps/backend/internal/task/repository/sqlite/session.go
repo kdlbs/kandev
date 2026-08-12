@@ -15,6 +15,7 @@ import (
 
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -2036,18 +2037,32 @@ func unmarshalSessionSnapshots(
 	return unmarshalSessionJSON(repositorySnapshotJSON, &session.RepositorySnapshot, "repository snapshot")
 }
 
-// DeleteTaskSession deletes an agent session by ID
+// DeleteTaskSession deletes an agent session by ID and any pending queue rows
+// keyed to that session. Without the queue purge, orphan rows keep inflating
+// task-scoped queued_prompt_count after the session is gone.
 func (r *Repository) DeleteTaskSession(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_sessions WHERE id = ?`), id)
+	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = tx.Rollback() }()
 
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_sessions WHERE id = ?`), id)
+	if err != nil {
+		return err
+	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		return fmt.Errorf("agent session not found: %s", id)
 	}
-	return nil
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM queued_messages WHERE session_id = ?`), id); err != nil {
+		// Isolated unit tests may omit the messagequeue schema. Production
+		// always has queued_messages; treat a missing table as already-purged.
+		if !db.IsMissingTableError(err) {
+			return fmt.Errorf("purge queued messages for session %s: %w", id, err)
+		}
+	}
+	return tx.Commit()
 }
 
 // Task Session Worktree operations
