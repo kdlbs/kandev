@@ -29,7 +29,8 @@
     "i18n:ratchet": "node scripts/run-i18n-ratchet.mjs",
     "i18n:removed": "node scripts/check-removed-literals.mjs",
     "i18n:sweep": "node scripts/i18n-sweep.mjs",
-    "i18n:parity": "node scripts/i18n-parity.mjs"
+    "i18n:parity": "node scripts/i18n-parity.mjs",
+    "i18n:zh-hant": "node scripts/convert-zh-cn-to-zh-hant.mjs --locale all --write"
   },
   "dependencies": {
     "@base-ui/react": "^1.0.0",
@@ -150,6 +151,7 @@
     "eslint-plugin-sonarjs": "^3.0.7",
     "eslint-plugin-unused-imports": "^4.4.1",
     "happy-dom": "^20.8.9",
+    "opencc-js": "1.4.1",
     "tailwindcss": "^4",
     "tsx": "^4.21.0",
     "typescript": "^5",

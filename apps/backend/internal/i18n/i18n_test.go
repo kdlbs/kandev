@@ -17,6 +17,10 @@ func TestNormalize(t *testing.T) {
 		{"en", "en"},
 		{"zh-cn", "zh-cn"},
 		{"zh-CN", "zh-cn"},
+		{"zh-tw", "zh-tw"},
+		{"zh-TW", "zh-tw"},
+		{"zh-hk", "zh-hk"},
+		{"zh-HK", "zh-hk"},
 		{localePtPT, localePtPT},
 		{"pt-PT", localePtPT},
 		{"pseudo", "pseudo"},
@@ -43,6 +47,12 @@ func TestTranslatesAndFallsBack(t *testing.T) {
 	}
 	if chinese := T("zh-cn", "webapp.shellUnavailable"); chinese == en {
 		t.Fatalf("zh-cn message should differ from en, both %q", en)
+	}
+	if taiwan := T("zh-tw", "webapp.shellUnavailable"); taiwan == en {
+		t.Fatalf("zh-tw message should differ from en, both %q", en)
+	}
+	if hongKong := T("zh-hk", "webapp.shellUnavailable"); hongKong == en {
+		t.Fatalf("zh-hk message should differ from en, both %q", en)
 	}
 	if portuguese := T(localePtPT, "webapp.shellUnavailable"); portuguese == en {
 		t.Fatalf("pt-pt message should differ from en, both %q", en)
@@ -127,7 +137,7 @@ func TestCatalogsHaveMatchingKeys(t *testing.T) {
 	t.Parallel()
 	load()
 	source := catalogs[DefaultLocale]
-	for _, locale := range []string{"pseudo", "zh-cn", localePtPT} {
+	for _, locale := range []string{"pseudo", "zh-cn", "zh-tw", "zh-hk", localePtPT} {
 		translated := catalogs[locale]
 		if len(translated) != len(source) {
 			t.Fatalf("%s catalog has %d keys, want %d", locale, len(translated), len(source))
@@ -192,6 +202,34 @@ func TestFromRequest(t *testing.T) {
 		r.Header.Set("Accept-Language", "en;q=0.4, zh-CN;q=0.9")
 		if got := FromRequest(r); got != "zh-cn" {
 			t.Fatalf("got %q, want zh-cn", got)
+		}
+	})
+
+	t.Run("accept-language selects zh-TW", func(t *testing.T) {
+		t.Parallel()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set("Accept-Language", "zh-TW,zh;q=0.9,en;q=0.8")
+		if got := FromRequest(r); got != "zh-tw" {
+			t.Fatalf("got %q, want zh-tw", got)
+		}
+	})
+
+	t.Run("accept-language selects zh-HK", func(t *testing.T) {
+		t.Parallel()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set("Accept-Language", "zh-HK;q=1.0, en;q=0.5")
+		if got := FromRequest(r); got != "zh-hk" {
+			t.Fatalf("got %q, want zh-hk", got)
+		}
+	})
+
+	t.Run("zh-tw cookie wins over accept-language", func(t *testing.T) {
+		t.Parallel()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.AddCookie(&http.Cookie{Name: LocaleCookie, Value: "zh-tw"})
+		r.Header.Set("Accept-Language", "en")
+		if got := FromRequest(r); got != "zh-tw" {
+			t.Fatalf("got %q, want zh-tw", got)
 		}
 	})
 

@@ -67,6 +67,33 @@ describe("locale-aware Intl wrappers", () => {
     await activateLocale("en");
   });
 
+  it.each([
+    ["zh-tw", "TWD"],
+    ["zh-hk", "HKD"],
+  ] as const)("passes %s to number and date formatters", async (locale, currency) => {
+    await activateLocale(locale);
+    const numberOptions: Intl.NumberFormatOptions = {
+      style: "currency",
+      currency,
+      currencyDisplay: "code",
+    };
+    const dateOptions: Intl.DateTimeFormatOptions = {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      timeZone: "UTC",
+    };
+    const date = "2026-07-27T00:00:00Z";
+
+    expect(formatNumber(1234.5, numberOptions)).toBe(
+      new Intl.NumberFormat(locale, numberOptions).format(1234.5),
+    );
+    expect(formatDate(date, dateOptions)).toBe(
+      new Intl.DateTimeFormat(locale, dateOptions).format(new Date(date)),
+    );
+    await activateLocale("en");
+  });
+
   it("passes pt-pt to number and date formatters", async () => {
     await activateLocale("pt-pt");
     const dateOptions: Intl.DateTimeFormatOptions = {

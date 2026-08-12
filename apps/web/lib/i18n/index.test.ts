@@ -13,6 +13,8 @@ import {
 import { LOCALE_COOKIE, readLocaleCookie } from "./cookie";
 
 const ZH_CN_LOCALE = "zh-cn";
+const ZH_TW_LOCALE = "zh-tw";
+const ZH_HK_LOCALE = "zh-hk";
 const PT_PT_LOCALE = "pt-pt";
 const DISPLAY_LANGUAGE_KEY = "settings:displayLanguage";
 
@@ -29,6 +31,10 @@ describe("locale predicates", () => {
     expect(isSupportedLocale(ZH_CN_LOCALE)).toBe(true);
     expect(isSupportedLocale("zh-CN")).toBe(true);
     expect(isSupportedLocale("  ZH-CN  ")).toBe(true);
+    expect(isSupportedLocale(ZH_TW_LOCALE)).toBe(true);
+    expect(isSupportedLocale("zh-TW")).toBe(true);
+    expect(isSupportedLocale(ZH_HK_LOCALE)).toBe(true);
+    expect(isSupportedLocale("zh-HK")).toBe(true);
     expect(isSupportedLocale(PT_PT_LOCALE)).toBe(true);
     expect(isSupportedLocale("pt-PT")).toBe(true);
     expect(isSupportedLocale("pseudo")).toBe(true);
@@ -40,6 +46,8 @@ describe("locale predicates", () => {
     expect(normalizeLocale(ZH_CN_LOCALE)).toBe(ZH_CN_LOCALE);
     expect(normalizeLocale("zh-CN")).toBe(ZH_CN_LOCALE);
     expect(normalizeLocale("  ZH-CN  ")).toBe(ZH_CN_LOCALE);
+    expect(normalizeLocale("zh-TW")).toBe(ZH_TW_LOCALE);
+    expect(normalizeLocale("zh-HK")).toBe(ZH_HK_LOCALE);
     expect(normalizeLocale("pt-PT")).toBe(PT_PT_LOCALE);
     expect(normalizeLocale("pseudo")).toBe("pseudo");
     expect(normalizeLocale("nope")).toBe(DEFAULT_LOCALE);
@@ -48,7 +56,14 @@ describe("locale predicates", () => {
 
   it("exposes en as the default and lists every shipped locale", () => {
     expect(DEFAULT_LOCALE).toBe("en");
-    expect([...SUPPORTED_LOCALES]).toEqual(["en", "pt-pt", "zh-cn", "pseudo"]);
+    expect([...SUPPORTED_LOCALES]).toEqual([
+      "en",
+      "pt-pt",
+      "zh-cn",
+      "zh-tw",
+      "zh-hk",
+      "pseudo",
+    ]);
   });
 
   // Only the `isProd` half of the contract. `selectableLocales` also requires
@@ -56,8 +71,15 @@ describe("locale predicates", () => {
   // is fixed to `true` for the whole vitest run (config resolves in serve mode).
   // `bundling.test.ts` covers the decision that produces it, in both directions.
   it("hides the pseudo locale from production builds", () => {
-    expect(selectableLocales(false)).toEqual(["en", "pt-pt", "zh-cn", "pseudo"]);
-    expect(selectableLocales(true)).toEqual(["en", "pt-pt", "zh-cn"]);
+    expect(selectableLocales(false)).toEqual([
+      "en",
+      "pt-pt",
+      "zh-cn",
+      "zh-tw",
+      "zh-hk",
+      "pseudo",
+    ]);
+    expect(selectableLocales(true)).toEqual(["en", "pt-pt", "zh-cn", "zh-tw", "zh-hk"]);
   });
 
   /**
@@ -147,5 +169,27 @@ describe("activateLocale", () => {
       "Idioma de apresentação",
     );
     expect(i18n.t(DISPLAY_LANGUAGE_KEY)).toBe("Idioma de apresentação");
+  });
+
+  it("activates Traditional Chinese (Taiwan) and resolves its catalog", async () => {
+    const result = await activateLocale(ZH_TW_LOCALE);
+    expect(result).toBe(ZH_TW_LOCALE);
+    expect(i18n.language).toBe(ZH_TW_LOCALE);
+    expect(document.documentElement.lang).toBe(ZH_TW_LOCALE);
+    expect(readLocaleCookie()).toBe(ZH_TW_LOCALE);
+    expect(i18n.hasResourceBundle(ZH_TW_LOCALE, "settings")).toBe(true);
+    expect(i18n.getResource(ZH_TW_LOCALE, "settings", "displayLanguage")).toBe("顯示語言");
+    expect(i18n.t(DISPLAY_LANGUAGE_KEY)).toBe("顯示語言");
+  });
+
+  it("activates Traditional Chinese (Hong Kong) and resolves its catalog", async () => {
+    const result = await activateLocale("zh-HK");
+    expect(result).toBe(ZH_HK_LOCALE);
+    expect(i18n.language).toBe(ZH_HK_LOCALE);
+    expect(document.documentElement.lang).toBe(ZH_HK_LOCALE);
+    expect(readLocaleCookie()).toBe(ZH_HK_LOCALE);
+    expect(i18n.hasResourceBundle(ZH_HK_LOCALE, "settings")).toBe(true);
+    expect(i18n.getResource(ZH_HK_LOCALE, "settings", "displayLanguage")).toBe("顯示語言");
+    expect(i18n.t(DISPLAY_LANGUAGE_KEY)).toBe("顯示語言");
   });
 });

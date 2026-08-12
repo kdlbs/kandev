@@ -1,0 +1,21 @@
+{
+  "agentProfileHeading": "配置代理配置檔案",
+  "agentProfileHelp": "選擇可訪問配置工具的代理。這將成為工作區預設值。",
+  "closePanel": "關閉配置聊天",
+  "dialogDescription": "讓代理管理你的工作流程程、代理配置與 MCP 配置。",
+  "noAgentProfiles": "暫無可用的代理配置。請先在代理設定中建立一個。",
+  "openInQuickChat": "在快速聊天中開啟",
+  "profileUnavailable": "所選代理配置尚不可用。請稍後再試。",
+  "promptHeading": "你想配置什麼？",
+  "promptPlaceholder": "詢問任何與配置相關的問題…",
+  "startChat": "開始聊天",
+  "startChatAria": "開始配置聊天",
+  "startingChat": "正在開始聊天…",
+  "suggestionAddReviewStep": "為我的工作流程程添加一個“代碼審閲”步驟",
+  "suggestionCreateProfile": "建立一個啓用自動批准的新代理配置",
+  "suggestionShowWorkflow": "顯示當前工作流程程配置",
+  "suggestionUpdateMcp": "更新預設代理配置的 MCP 伺服器",
+  "tagline": "用自然語言配置 Kandev",
+  "tryAsking": "試着問",
+  "unknownError": "未知錯誤"
+}

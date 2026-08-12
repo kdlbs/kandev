@@ -98,13 +98,16 @@ describe("missing current version under a non-English locale", () => {
     installInFlight: false,
   };
 
-  it.each(["en", "pt-pt", "zh-cn", "pseudo"])("stays un-approvable in %s", async (locale) => {
-    await i18n.changeLanguage(locale);
+  it.each(["en", "pt-pt", "zh-cn", "zh-tw", "zh-hk", "pseudo"])(
+    "stays un-approvable in %s",
+    async (locale) => {
+      await i18n.changeLanguage(locale);
 
-    const pair = resolveRuntimeVersionPair(preview({ current_version: "" }));
-    expect(pair.hasCurrentVersion).toBe(false);
-    expect(canApproveAgentRuntimeUpdate(missing)).toBe(false);
-  });
+      const pair = resolveRuntimeVersionPair(preview({ current_version: "" }));
+      expect(pair.hasCurrentVersion).toBe(false);
+      expect(canApproveAgentRuntimeUpdate(missing)).toBe(false);
+    },
+  );
 
   it("still shows a localized placeholder to the user", async () => {
     await i18n.changeLanguage("pseudo");
