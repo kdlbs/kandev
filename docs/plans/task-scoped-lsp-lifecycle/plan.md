@@ -397,6 +397,11 @@ Completed 2026-08-05.
   task-specific workspace projections isolate `(task, language)` slots; runtime secrets migrate to
   stable internal identities; restart failures retain the requested generation as actionable
   evidence; and successful delayed reaping publishes Off. Each defect has a focused regression.
+- The review fixes were rebased onto `origin/main` at `723c14001`. The conflict resolution retained
+  both main's todo-panel visibility option and the branch's LSP status-language visibility setting.
+  Exact-head backend-wide tests and lint pass; the affected task-host/controller/lifecycle/executor/
+  task-service race suite passes; and 7 focused frontend files / 80 tests, web typecheck, lint,
+  i18n checks, the new-code ratchet, production Vite build, and public-doc validators pass.
 
 ---
 

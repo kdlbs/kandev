@@ -130,3 +130,9 @@ Completed 2026-08-05.
   selected first launch, multi-session environment reuse, and the complete Docker task-host LSP
   spec. All 6/6 passed in 1.7 minutes: Kotlin discovery/start before opening an editor, in-container
   server execution, two-session Monaco isolation, and edit persistence across LSP Stop/reload.
+- After the follow-up independent review and rebase onto `origin/main` at `723c14001`, `make test`
+  and `make lint` pass. `go test -race ./internal/agentctl/server/lsp ./internal/lsp
+  ./internal/agent/runtime/lifecycle ./internal/orchestrator/executor ./internal/task/service
+  -count=1` passes. The rebased settings/status surface passes 7 focused frontend files / 80 tests,
+  typecheck, lint, `i18n:check`, `i18n:ratchet`, and the production Vite build. Public docs pass
+  58/58 validator tests and 41-page validation.
