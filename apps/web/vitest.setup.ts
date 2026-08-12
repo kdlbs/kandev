@@ -15,9 +15,11 @@ import { initI18nForTests, loadAllLocalesForTests } from "./lib/i18n";
  * for as long as it went unfixed.
  *
  * `vitest.config.ts` pins `NODE_ENV=test`, which is the known cause. This guard
- * stays because it also covers the ones that pin cannot: a duplicated `react`
- * instance, or an alias resolving the shim and the components under test to
- * different copies.
+ * stays because it turns that failure into one legible line. It does not
+ * replace the `render()` case in `vitest-environment.test.tsx`: this check only
+ * sees the `react` that *this file* resolves, so a duplicated instance or an
+ * alias handing testing-library a different copy can leave `act` present here
+ * and missing where it is called. Only rendering catches that.
  *
  * A namespace import is deliberate — a named `import { act }` fails differently
  * against the CJS production build, which is the case being diagnosed.
