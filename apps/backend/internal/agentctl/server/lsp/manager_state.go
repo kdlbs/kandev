@@ -9,6 +9,21 @@ import (
 	sharedlsp "github.com/kandev/kandev/internal/lsp"
 )
 
+func (m *Manager) checkOpen() error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.closed {
+		return ErrManagerClosed
+	}
+	return nil
+}
+
+func (m *Manager) isClosed() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.closed
+}
+
 func (m *Manager) snapshotLocked(taskID, language string) Snapshot {
 	key := taskLanguageRuntimeKey(taskID, language)
 	if snapshot, ok := m.snapshots[key]; ok {

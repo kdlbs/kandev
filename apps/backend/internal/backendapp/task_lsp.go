@@ -212,23 +212,21 @@ func configureTaskLSP(
 	controller := services.TaskLSP
 	services.Task.SetTaskLSPLifecycle(controller)
 	orchestratorService.SetOnTaskStopCleanup(services.Task.StopTaskLSP)
+	addCleanup(func() error {
+		closeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		return controller.Close(closeCtx)
+	})
+	if err := controller.StartReconciler(ctx); err != nil && ctx.Err() == nil {
+		log.Warn("Task LSP startup reconciliation completed with errors", zap.Error(err))
+	}
 	orchestratorService.SetOnTaskEnvironmentReady(func(readyCtx context.Context, taskID string) {
 		if err := controller.ReconcileTask(readyCtx, taskID); err != nil && readyCtx.Err() == nil {
 			log.Warn("Task LSP environment-ready reconciliation failed",
 				zap.String("task_id", taskID), zap.Error(err))
 		}
 	})
-	addCleanup(func() error {
-		closeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		return controller.Close(closeCtx)
-	})
 	subscribeTaskLSPSettings(controller, eventBus, log, addCleanup)
-	go func() {
-		if err := controller.StartReconciler(ctx); err != nil && ctx.Err() == nil {
-			log.Warn("Task LSP startup reconciliation completed with errors", zap.Error(err))
-		}
-	}()
 }
 
 func subscribeTaskLSPSettings(

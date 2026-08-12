@@ -189,30 +189,27 @@ describe("task-scoped useLsp", () => {
 });
 
 describe("task-scoped LSP attachment recovery", () => {
-  it("reattaches after a transient browser connection loss without restarting the task server", () => {
+  it("keeps one stable hook lease while the manager recovers transport", () => {
     vi.useFakeTimers();
     current = snapshot("ready");
     const firstRelease = vi.fn();
-    const secondRelease = vi.fn();
-    mocks.connect.mockReturnValueOnce(firstRelease).mockReturnValueOnce(secondRelease);
+    mocks.connect.mockReturnValue(firstRelease);
     const view = renderHook(() => useLsp(SESSION_ID, LANGUAGE));
     expect(mocks.connect).toHaveBeenCalledOnce();
 
     mocks.getStatus.mockReturnValue({ state: "error", reason: "connection dropped" });
     act(() => mocks.listeners.forEach((listener) => listener(`${TASK_ID}:${LANGUAGE}`)));
-    act(() => vi.advanceTimersByTime(999));
+    act(() => vi.advanceTimersByTime(10_000));
     expect(mocks.connect).toHaveBeenCalledOnce();
-    act(() => vi.advanceTimersByTime(1));
-    expect(mocks.connect).toHaveBeenCalledTimes(2);
-    expect(firstRelease).toHaveBeenCalledOnce();
+    expect(firstRelease).not.toHaveBeenCalled();
     expect(mocks.start).not.toHaveBeenCalled();
     expect(mocks.restart).not.toHaveBeenCalled();
 
     view.unmount();
-    expect(secondRelease).toHaveBeenCalledOnce();
+    expect(firstRelease).toHaveBeenCalledOnce();
   });
 
-  it("keeps reattaching with capped backoff throughout a longer browser outage", () => {
+  it("does not make hook-local reconnect attempts during a longer browser outage", () => {
     vi.useFakeTimers();
     current = snapshot("ready");
     mocks.connect.mockImplementation(() => vi.fn());
@@ -222,10 +219,8 @@ describe("task-scoped LSP attachment recovery", () => {
     mocks.getStatus.mockReturnValue({ state: "error", reason: "proxy unavailable" });
     act(() => mocks.listeners.forEach((listener) => listener(`${TASK_ID}:${LANGUAGE}`)));
 
-    for (const [index, delay] of [1_000, 2_000, 5_000, 5_000].entries()) {
-      act(() => vi.advanceTimersByTime(delay));
-      expect(mocks.connect).toHaveBeenCalledTimes(index + 2);
-    }
+    act(() => vi.advanceTimersByTime(30_000));
+    expect(mocks.connect).toHaveBeenCalledOnce();
 
     expect(mocks.start).not.toHaveBeenCalled();
     expect(mocks.restart).not.toHaveBeenCalled();

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/containerd/errdefs"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -197,6 +198,16 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 	if req.OnProgress != nil {
 		defer reportCreateInstanceProgress(req, &err)()
 	}
+	if req.RequireExistingInstance {
+		if req.PreviousExecutionID == "" {
+			return nil, errTaskHostRuntimeNotFound
+		}
+		reconnected, reconnectErr := r.reconnectToContainer(ctx, dockerClient, req)
+		if reconnectErr != nil {
+			return nil, reconnectErr
+		}
+		return reconnected, nil
+	}
 
 	if reconnected, ok := r.tryReconnect(baseCtx, dockerClient, req); ok {
 		return reconnected, nil
@@ -343,7 +354,13 @@ func (r *DockerExecutor) reconnectToContainer(ctx context.Context, dockerClient 
 	if err != nil {
 		return nil, err
 	}
-	info, containerIP, err := r.ensureContainerRunning(ctx, dockerClient, containerRef)
+	var info *docker.ContainerInfo
+	var containerIP string
+	if req.RequireExistingInstance {
+		info, containerIP, err = r.inspectRunningContainer(ctx, dockerClient, containerRef)
+	} else {
+		info, containerIP, err = r.ensureContainerRunning(ctx, dockerClient, containerRef)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -394,6 +411,31 @@ func (r *DockerExecutor) reconnectToContainer(ctx context.Context, dockerClient 
 		AuthToken:        refreshedAuthToken,
 		ControlAuthToken: conn.authToken,
 	}, nil
+}
+
+// inspectRunningContainer proves physical absence without starting a stopped
+// environment. A normal ensure may resume it later when task policy demands a
+// warm server; an existing-only lookup never creates or resumes resources.
+func (r *DockerExecutor) inspectRunningContainer(
+	ctx context.Context,
+	dockerClient *docker.Client,
+	containerRef string,
+) (*docker.ContainerInfo, string, error) {
+	info, err := dockerClient.GetContainerInfo(ctx, containerRef)
+	if err != nil {
+		if errdefs.IsNotFound(err) {
+			return nil, "", errTaskHostRuntimeNotFound
+		}
+		return nil, "", fmt.Errorf("failed to inspect container %s: %w", containerRef, err)
+	}
+	if info.State != containerStateRunning {
+		return nil, "", errTaskHostRuntimeNotFound
+	}
+	containerIP, err := dockerClient.GetContainerIP(ctx, info.ID)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get IP for container %s: %w", info.ID, err)
+	}
+	return info, containerIP, nil
 }
 
 // ensureContainerRunning inspects containerRef, starts it if it's stopped,
@@ -652,6 +694,17 @@ func (r *DockerExecutor) findExistingInstance(
 	// Try to get the existing instance by its ID
 	instance, err := ctl.GetInstance(ctx, prevExecutionID)
 	if err == nil && instance != nil && instance.Port > 0 {
+		if req.RequireExistingInstance {
+			instanceHost, instancePort := resolveDockerEndpoint(
+				ctx, dockerClient, containerID, instance.Port, containerIP, r.logger,
+			)
+			client := agentctl.NewClient(instanceHost, instancePort, r.logger,
+				agentctl.WithAuthToken(authToken))
+			defer client.Close()
+			status, statusErr := client.GetStatus(ctx)
+			processRunning := statusErr == nil && status != nil && status.IsAgentRunning()
+			return instance.Port, processRunning, nil
+		}
 		if hasManagedGitHubBrokerEnv(req.Env) {
 			instanceHost, instancePort := resolveDockerEndpoint(
 				ctx, dockerClient, containerID, instance.Port, containerIP, r.logger)
@@ -676,6 +729,12 @@ func (r *DockerExecutor) findExistingInstance(
 	}
 	if err != nil && isAgentctlAuthError(err) {
 		return 0, false, err
+	}
+	if req.RequireExistingInstance && (err == nil || errors.Is(err, agentctl.ErrInstanceNotFound)) {
+		return 0, false, errTaskHostRuntimeNotFound
+	}
+	if req.RequireExistingInstance {
+		return 0, false, fmt.Errorf("inspect existing task-host instance: %w", err)
 	}
 
 	// Instance not found — create a new instance in the existing container

@@ -1039,8 +1039,8 @@ func TestGetOrEnsureTaskHostForEnvironment(t *testing.T) {
 			second = <-secondDone
 		}
 
-		if lookupErr != nil {
-			t.Fatal(lookupErr)
+		if !errors.Is(lookupErr, ErrTaskHostNotReady) {
+			t.Fatalf("lookup error = %v, want readiness uncertainty", lookupErr)
 		}
 		if exposedEarly {
 			t.Fatal("GetTaskHostForEnvironment exposed host before readiness committed")
@@ -1055,6 +1055,92 @@ func TestGetOrEnsureTaskHostForEnvironment(t *testing.T) {
 			t.Fatalf("hosts = %p/%p creates=%d, want one committed host", first.execution, second.execution, backend.createCount.Load())
 		}
 	})
+}
+
+func TestGetTaskHostForEnvironmentReattachesDetachedRuntimeWithoutCreatingReplacement(t *testing.T) {
+	mgr, backend := newEnvironmentExecutionTestManager(t, &mockWorkspaceInfoProvider{
+		envInfos: map[string]*WorkspaceInfo{
+			"env-1": {
+				TaskID: "task-1", TaskEnvironmentID: "env-1",
+				WorkspacePath: "/workspace/task-1",
+			},
+		},
+	})
+	host, err := mgr.GetOrEnsureTaskHostForEnvironment(context.Background(), "env-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.detachTaskHostForBackendShutdown(host)
+	backend.client = newReadyAgentctlClient(t, mgr.logger)
+
+	reattached, exists, err := mgr.GetTaskHostForEnvironment(context.Background(), "env-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !exists || reattached == nil || reattached.ID != host.ID {
+		t.Fatalf("reattached=%#v exists=%v, want stable detached host %q", reattached, exists, host.ID)
+	}
+	if backend.lastRequest == nil || !backend.lastRequest.RequireExistingInstance {
+		t.Fatalf("reattach request=%#v, want existing-only probe", backend.lastRequest)
+	}
+	if backend.createCount.Load() != 2 {
+		t.Fatalf("executor calls=%d, want create plus physical reattach", backend.createCount.Load())
+	}
+}
+
+func TestStopTaskHostForEnvironmentReattachesDetachedRuntimeBeforeReaping(t *testing.T) {
+	mgr, backend := newEnvironmentExecutionTestManager(t, &mockWorkspaceInfoProvider{
+		envInfos: map[string]*WorkspaceInfo{
+			"env-1": {
+				TaskID: "task-1", TaskEnvironmentID: "env-1",
+				WorkspacePath: "/workspace/task-1",
+			},
+		},
+	})
+	host, err := mgr.GetOrEnsureTaskHostForEnvironment(context.Background(), "env-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.detachTaskHostForBackendShutdown(host)
+	backend.client = newReadyAgentctlClient(t, mgr.logger)
+
+	proved, err := mgr.StopTaskHostForEnvironment(context.Background(), "env-1", "task_archived")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !proved || backend.stopCount.Load() != 1 {
+		t.Fatalf("proved=%v stops=%d, want detached runtime reaped", proved, backend.stopCount.Load())
+	}
+	if _, exists := mgr.executionStore.GetTaskHostByEnvironmentID("env-1"); exists {
+		t.Fatal("reattached task host remains tracked after stop")
+	}
+}
+
+func TestTaskHostPhysicalAbsenceIsProvenWithoutCreatingRuntime(t *testing.T) {
+	mgr, backend := newEnvironmentExecutionTestManager(t, &mockWorkspaceInfoProvider{
+		envInfos: map[string]*WorkspaceInfo{
+			"env-1": {
+				TaskID: "task-1", TaskEnvironmentID: "env-1",
+				WorkspacePath: "/workspace/task-1",
+			},
+		},
+	})
+	backend.existingOnlyAbsent = true
+
+	execution, exists, err := mgr.GetTaskHostForEnvironment(context.Background(), "env-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exists || execution != nil {
+		t.Fatalf("execution=%#v exists=%v, want proven absence", execution, exists)
+	}
+	if backend.lastRequest == nil || !backend.lastRequest.RequireExistingInstance {
+		t.Fatalf("probe request=%#v, want existing-only", backend.lastRequest)
+	}
+	proved, err := mgr.StopTaskHostForEnvironment(context.Background(), "env-1", "task_archived")
+	if err != nil || !proved {
+		t.Fatalf("absence proof=%v error=%v", proved, err)
+	}
 }
 
 func TestFailedTaskHostRollbackRetainsRuntimeOwnership(t *testing.T) {
@@ -1079,6 +1165,7 @@ func TestFailedTaskHostRollbackRetainsRuntimeOwnership(t *testing.T) {
 		backend,
 		&ExecutorInstance{InstanceID: execution.ID},
 		execution,
+		false,
 	)
 	if err == nil {
 		t.Fatal("task-host readiness failure unexpectedly succeeded")
@@ -1114,6 +1201,7 @@ func TestTaskHostCredentialPersistenceFailurePreventsReady(t *testing.T) {
 	_, err := manager.finishTaskHostExecution(
 		context.Background(), "task-1", &WorkspaceInfo{TaskEnvironmentID: "env-1"},
 		backend, &ExecutorInstance{InstanceID: execution.ID, AuthToken: "rotated-token"}, execution,
+		false,
 	)
 	if !errors.Is(err, persistFailure) {
 		t.Fatalf("task-host credential persistence error = %v", err)
@@ -1236,6 +1324,43 @@ func TestRecoverTaskHostForEnvironmentEvictsOnlyProvenDeadHost(t *testing.T) {
 	}
 	if _, exists := mgr.executionStore.Get(host.ID); exists {
 		t.Fatal("dead task host remains tracked")
+	}
+}
+
+func TestEnsureReattachesUnhealthyLiveTaskHostWithoutCreatingReplacement(t *testing.T) {
+	mgr, backend := newEnvironmentExecutionTestManager(t, &mockWorkspaceInfoProvider{
+		envInfos: map[string]*WorkspaceInfo{
+			"env-1": {
+				TaskID: "task-1", TaskEnvironmentID: "env-1",
+				WorkspacePath: "/workspace/task-1",
+			},
+		},
+	})
+	host, err := mgr.GetOrEnsureTaskHostForEnvironment(context.Background(), "env-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host.agentctl.Close()
+	host.agentctl = agentctl.NewClient("127.0.0.1", 1, mgr.logger)
+
+	recovered, err := mgr.RecoverTaskHostForEnvironment(context.Background(), "env-1")
+	if err != nil || !recovered {
+		t.Fatalf("unhealthy recovery = %v, %v", recovered, err)
+	}
+	backend.client = newReadyAgentctlClient(t, mgr.logger)
+
+	reattached, err := mgr.GetOrEnsureTaskHostForEnvironment(context.Background(), "env-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reattached.ID != host.ID {
+		t.Fatalf("reattached ID = %q, want stable physical host %q", reattached.ID, host.ID)
+	}
+	if backend.lastRequest == nil || !backend.lastRequest.RequireExistingInstance {
+		t.Fatalf("recovery request = %#v, want existing-only physical reattachment", backend.lastRequest)
+	}
+	if backend.createCount.Load() != 2 {
+		t.Fatalf("executor calls = %d, want initial create plus physical reattachment", backend.createCount.Load())
 	}
 }
 
@@ -1802,16 +1927,17 @@ func (p *notifyingWorkspaceInfoProvider) GetWorkspaceInfoForEnvironment(
 
 type createInstanceExecutor struct {
 	MockExecutor
-	client       *agentctl.Client
-	createCount  atomic.Int32
-	stopCount    atomic.Int32
-	stopErr      error
-	forceStopped atomic.Bool
-	lastRequest  *ExecutorCreateRequest
-	authToken    string
-	nonce        string
-	delay        time.Duration
-	progressStep string
+	client             *agentctl.Client
+	createCount        atomic.Int32
+	stopCount          atomic.Int32
+	stopErr            error
+	forceStopped       atomic.Bool
+	lastRequest        *ExecutorCreateRequest
+	authToken          string
+	nonce              string
+	delay              time.Duration
+	progressStep       string
+	existingOnlyAbsent bool
 	// Barrier-based deterministic synchronization for race tests.
 	// Set entered (buffered 1) to receive a signal when CreateInstance begins.
 	// Set barrier (unbuffered, closed to release) to block until the test is ready.
@@ -1847,6 +1973,9 @@ func (e *createInstanceExecutor) CreateInstance(ctx context.Context, req *Execut
 	}
 	e.lastRequest = req
 	e.createCount.Add(1)
+	if req.RequireExistingInstance && e.existingOnlyAbsent {
+		return nil, errTaskHostRuntimeNotFound
+	}
 	if progress != nil {
 		completeStepSuccess(progress)
 		reportProgress(req.OnProgress, *progress, 0, 1)

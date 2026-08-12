@@ -80,6 +80,7 @@ type TaskExecutionStopper interface {
 // Callers provide only a task resolved by the service; session and execution
 // identifiers never cross this ownership boundary.
 type TaskLSPLifecycle interface {
+	CancelTaskOperations(taskID string)
 	CleanupTask(ctx context.Context, taskID, reason string) error
 	ReconcileTask(ctx context.Context, taskID string) error
 	WorkspaceSourcesChanged(ctx context.Context, taskID string) error
@@ -311,7 +312,7 @@ type Service struct {
 	workspaceSourceLocksMu      sync.Mutex
 	workspaceSourceLocks        map[string]*sync.Mutex
 	taskLSPAdmissionMu          sync.Mutex
-	taskLSPAdmissions           map[string]*sync.RWMutex
+	taskLSPAdmissions           map[string]*taskLSPAdmissionGate
 	taskEnvLSPAdmissionMu       sync.Mutex
 	taskEnvLSPAdmissions        map[string]*sync.RWMutex
 	workspaceTaskAdmissionMu    sync.Mutex
@@ -393,20 +394,20 @@ func (s *Service) AcquireTaskLSPAdmission(
 	if err := context.Cause(ctx); err != nil {
 		return nil, err
 	}
-	lock := s.taskLSPAdmissionLock(taskID)
-	if !lock.TryRLock() {
+	gate := s.taskLSPAdmissionLock(taskID)
+	if !gate.TryRLock() {
 		return nil, ErrTaskLSPAdmissionBlocked
 	}
 	environment, err := s.GetTaskEnvironmentForTaskLSP(ctx, taskID)
 	if err != nil {
-		lock.RUnlock()
+		gate.RUnlock()
 		return nil, err
 	}
 	var environmentLock *sync.RWMutex
 	if environment != nil && environment.ID != "" {
 		environmentLock = s.taskLSPEnvironmentAdmissionLock(environment.ID)
 		if !environmentLock.TryRLock() {
-			lock.RUnlock()
+			gate.RUnlock()
 			return nil, ErrTaskLSPAdmissionBlocked
 		}
 	}
@@ -414,7 +415,7 @@ func (s *Service) AcquireTaskLSPAdmission(
 		if environmentLock != nil {
 			environmentLock.RUnlock()
 		}
-		lock.RUnlock()
+		gate.RUnlock()
 		return nil, err
 	}
 	var once sync.Once
@@ -423,29 +424,71 @@ func (s *Service) AcquireTaskLSPAdmission(
 			if environmentLock != nil {
 				environmentLock.RUnlock()
 			}
-			lock.RUnlock()
+			gate.RUnlock()
 		})
 	}, nil
 }
 
-func (s *Service) taskLSPAdmissionLock(taskID string) *sync.RWMutex {
+func (s *Service) taskLSPAdmissionLock(taskID string) *taskLSPAdmissionGate {
 	s.taskLSPAdmissionMu.Lock()
 	defer s.taskLSPAdmissionMu.Unlock()
 	if s.taskLSPAdmissions == nil {
-		s.taskLSPAdmissions = make(map[string]*sync.RWMutex)
+		s.taskLSPAdmissions = make(map[string]*taskLSPAdmissionGate)
 	}
 	lock := s.taskLSPAdmissions[taskID]
 	if lock == nil {
-		lock = &sync.RWMutex{}
+		lock = &taskLSPAdmissionGate{}
 		s.taskLSPAdmissions[taskID] = lock
 	}
 	return lock
 }
 
 func (s *Service) acquireTaskLSPMutation(taskID string) func() {
-	lock := s.taskLSPAdmissionLock(taskID)
-	lock.Lock()
-	return lock.Unlock
+	gate := s.taskLSPAdmissionLock(taskID)
+	return gate.Lock(func() {
+		if s.taskLSP != nil {
+			s.taskLSP.CancelTaskOperations(taskID)
+		}
+	})
+}
+
+// taskLSPAdmissionGate publishes writer intent before waiting for current
+// readers. That closes the gap where a terminal mutation could cancel active
+// LSP work yet lose a race to one new admission before the writer blocked it.
+type taskLSPAdmissionGate struct {
+	stateMu sync.Mutex
+	rw      sync.RWMutex
+	writers int
+}
+
+func (g *taskLSPAdmissionGate) TryRLock() bool {
+	g.stateMu.Lock()
+	defer g.stateMu.Unlock()
+	if g.writers != 0 {
+		return false
+	}
+	g.rw.RLock()
+	return true
+}
+
+func (g *taskLSPAdmissionGate) RUnlock() {
+	g.rw.RUnlock()
+}
+
+func (g *taskLSPAdmissionGate) Lock(interrupt func()) func() {
+	g.stateMu.Lock()
+	g.writers++
+	g.stateMu.Unlock()
+	if interrupt != nil {
+		interrupt()
+	}
+	g.rw.Lock()
+	return func() {
+		g.rw.Unlock()
+		g.stateMu.Lock()
+		g.writers--
+		g.stateMu.Unlock()
+	}
 }
 
 func (s *Service) acquireTaskLSPMutations(taskIDs []string) func() {

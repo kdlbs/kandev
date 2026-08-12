@@ -49,6 +49,7 @@ type ManagedLspConnectionOptions = {
   generation: number;
   ws: WebSocket;
   configuration: Record<string, unknown>;
+  sessionRefCounts: Map<string, number>;
 };
 
 export function createManagedLspConnection({
@@ -58,19 +59,19 @@ export function createManagedLspConnection({
   generation,
   ws,
   configuration,
+  sessionRefCounts,
 }: ManagedLspConnectionOptions): ManagedLspConnection {
   return {
     key,
     taskId,
     sessionId,
-    sessionRefCounts: new Map([[sessionId, 1]]),
+    sessionRefCounts,
     ownerId: `${key}:${generation}`,
     configuration,
     protocolInitialized: false,
     ws,
     rpc: null,
     initialized: false,
-    refCount: 1,
     openDocuments: new Map(),
     diagnosticsByUri: new Map(),
     progress: EMPTY_LSP_PROGRESS,

@@ -69,6 +69,7 @@ func TestDocumentWorkspacePinsRootAndUsesRootRelativeAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	access := &recordingDocumentRootAccess{
+		stat: func(string) (fs.FileInfo, error) { return directoryInfo, nil },
 		lstat: func(path string) (fs.FileInfo, error) {
 			if path == "src" {
 				return directoryInfo, nil
@@ -119,6 +120,65 @@ func TestDocumentWorkspacePinsRootAndUsesRootRelativeAccess(t *testing.T) {
 	}
 }
 
+func TestDocumentWorkspaceRejectsRootReplacementBetweenOpenAndCanonicalization(t *testing.T) {
+	if goruntime.GOOS == windowsOS {
+		t.Skip("open directory rename semantics are covered by the native Windows junction test")
+	}
+	parent := t.TempDir()
+	workspacePath := filepath.Join(parent, "workspace")
+	parkedPath := filepath.Join(parent, "parked")
+	outsidePath := t.TempDir()
+	if err := os.Mkdir(workspacePath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outsidePath, "Secret.kt"), []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resolveCalls := 0
+	workspace := newDocumentWorkspaceWithResolver(func(path string) (string, error) {
+		resolveCalls++
+		if err := os.Rename(workspacePath, parkedPath); err != nil {
+			return "", err
+		}
+		if err := os.Symlink(outsidePath, workspacePath); err != nil {
+			return "", err
+		}
+		return canonicalFilesystemPath(path)
+	})
+	t.Cleanup(workspace.Close)
+	workspace.SetConfig(Config{WorkDir: workspacePath})
+	if resolveCalls != 1 {
+		t.Fatalf("trusted root resolver calls = %d, want 1", resolveCalls)
+	}
+
+	_, err := workspace.CanonicalURI(WorkspaceFileURI(filepath.Join(workspacePath, "Secret.kt")))
+	if !errors.Is(err, errDocumentOutsideWorkspace) {
+		t.Fatalf("replaced root authorization error = %v, want fail closed", err)
+	}
+}
+
+func TestDocumentWorkspaceRejectsCanonicalIdentityMismatch(t *testing.T) {
+	if goruntime.GOOS == windowsOS {
+		t.Skip("Windows derives the canonical root directly from the pinned handle")
+	}
+	workspacePath := t.TempDir()
+	outsidePath := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outsidePath, "Secret.kt"), []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	workspace := newDocumentWorkspaceWithRootAccess(
+		func(string) (string, error) { return outsidePath, nil },
+		openDocumentRoot,
+	)
+	t.Cleanup(workspace.Close)
+	workspace.SetConfig(Config{WorkDir: workspacePath})
+
+	_, err := workspace.CanonicalURI(WorkspaceFileURI(filepath.Join(workspacePath, "Secret.kt")))
+	if !errors.Is(err, errDocumentOutsideWorkspace) {
+		t.Fatalf("mismatched canonical identity error = %v, want fail closed", err)
+	}
+}
+
 func TestDocumentWorkspaceReplacesAndClosesPinnedRoots(t *testing.T) {
 	firstPath := t.TempDir()
 	secondPath := t.TempDir()
@@ -126,7 +186,12 @@ func TestDocumentWorkspaceReplacesAndClosesPinnedRoots(t *testing.T) {
 	workspace := newDocumentWorkspaceWithRootAccess(
 		func(path string) (string, error) { return filepath.Clean(path), nil },
 		func(path string) (documentRootAccess, error) {
+			rootInfo, err := os.Stat(path)
+			if err != nil {
+				return nil, err
+			}
 			access := &recordingDocumentRootAccess{
+				stat:  func(string) (fs.FileInfo, error) { return rootInfo, nil },
 				lstat: func(string) (fs.FileInfo, error) { return nil, fs.ErrNotExist },
 			}
 			accessByPath[filepath.Clean(path)] = access
@@ -149,10 +214,15 @@ func TestDocumentWorkspaceReplacesAndClosesPinnedRoots(t *testing.T) {
 }
 
 type recordingDocumentRootAccess struct {
+	stat       func(string) (fs.FileInfo, error)
 	lstat      func(string) (fs.FileInfo, error)
 	readlink   func(string) (string, error)
 	inspected  []string
 	closeCalls int
+}
+
+func (a *recordingDocumentRootAccess) Stat(path string) (fs.FileInfo, error) {
+	return a.stat(path)
 }
 
 func (a *recordingDocumentRootAccess) Lstat(path string) (fs.FileInfo, error) {

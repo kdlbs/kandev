@@ -49,6 +49,62 @@ func TestRecoveryUsesOneFiveThirtySecondBackoffAndThenStops(t *testing.T) {
 	}
 }
 
+func TestStartupReconciliationBlocksControlsUntilCapacityIsRebuilt(t *testing.T) {
+	store := newMemoryLSPStore()
+	seedLSPState(t, store, TaskLanguageState{
+		TaskID: "task-1", Language: "kotlin", Policy: PolicyKeepWarm,
+		DetectionState: DetectionComplete, Phase: PhaseReady, Generation: 4,
+		LastInitiator: InitiatorAutomatic,
+	})
+	host := newFakeLSPHost()
+	host.snapshots["kotlin"] = RuntimeSnapshot{Language: "kotlin", Generation: 4, Phase: PhaseReady}
+	runtimes := newReconcileRuntimes()
+	runtimes.existing["env-task-1"] = host
+	runtimes.existingEntered = make(chan struct{})
+	runtimes.existingRelease = make(chan struct{})
+	runtimes.blockEnvironment = "env-task-1"
+	tasks := &fakeControllerTasks{environments: map[string]*models.TaskEnvironment{
+		"task-1": readyEnvironment("task-1", executorTypeLocalPC),
+		"other":  readyEnvironment("other", executorTypeLocalPC),
+	}}
+	controller := NewController(ControllerConfig{
+		Tasks: tasks, Store: store, Settings: &fakeLSPSettings{}, Runtimes: runtimes,
+		Capacity: NewCapacity(1), Clock: func() time.Time { return time.Unix(200, 0).UTC() },
+	})
+	reconcileDone := make(chan error, 1)
+	go func() { reconcileDone <- controller.StartReconciler(context.Background()) }()
+	<-runtimes.existingEntered
+
+	type startResult struct {
+		snapshot *LanguageSnapshot
+		err      error
+	}
+	startDone := make(chan startResult, 1)
+	go func() {
+		snapshot, err := controller.Start(context.Background(), "other", "go", Origin{
+			Initiator: InitiatorUser, Reason: "user_control",
+		})
+		startDone <- startResult{snapshot: snapshot, err: err}
+	}()
+	select {
+	case result := <-startDone:
+		t.Fatalf("control escaped startup barrier: %#v, %v", result.snapshot, result.err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(runtimes.existingRelease)
+	if err := <-reconcileDone; err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+	result := <-startDone
+	if result.err != nil || result.snapshot == nil || result.snapshot.Phase != PhaseQueued {
+		t.Fatalf("post-reconcile start = %#v, %v; want queued behind survivor", result.snapshot, result.err)
+	}
+	if controller.capacity.Active() != 1 || controller.capacity.Queued() != 1 {
+		t.Fatalf("capacity active=%d queued=%d", controller.capacity.Active(), controller.capacity.Queued())
+	}
+}
+
 func TestFailedDiscoveryRetriesWithoutAnotherSnapshot(t *testing.T) {
 	store := newMemoryLSPStore()
 	runtimes := &fakeLSPRuntimes{discoveryErr: errors.New("task host still materializing")}
@@ -298,10 +354,7 @@ func TestProcessExitReleasesCapacityAndPromotesQueuedGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	promoted, _, err := store.GetTaskLSPLanguage(context.Background(), "queued", "kotlin")
-	if err != nil {
-		t.Fatal(err)
-	}
+	promoted := waitForStoredPhase(t, store, "queued", "kotlin", PhaseReady)
 	if promoted.Phase != PhaseReady || controller.capacity.Active() != 1 || controller.capacity.Queued() != 0 {
 		t.Fatalf("promoted=%#v active=%d queued=%d", promoted, controller.capacity.Active(), controller.capacity.Queued())
 	}
@@ -347,7 +400,7 @@ func TestStaleRuntimeRevisionCannotRegressPhaseOrReacquireCapacity(t *testing.T)
 	}
 
 	crashed := storedLSPState(t, store, "crashed", "go")
-	queued := storedLSPState(t, store, "queued", "kotlin")
+	queued := waitForStoredPhase(t, store, "queued", "kotlin", PhaseReady)
 	if crashed.Phase != PhaseError || crashed.RuntimeRevision != 3 {
 		t.Fatalf("crashed state regressed to %#v", crashed)
 	}
@@ -433,7 +486,9 @@ func TestRecoveryIsCanceledByExplicitStop(t *testing.T) {
 	})
 	host := newFakeLSPHost()
 	host.startErr = errors.New("crashed")
-	host.snapshots["go"] = RuntimeSnapshot{Language: "go", Generation: 1, Phase: PhaseError}
+	host.snapshots["go"] = RuntimeSnapshot{
+		Language: "go", Generation: 1, Phase: PhaseError, ErrorCode: errorCodeProcessExited,
+	}
 	runtimes := newReconcileRuntimes()
 	runtimes.existing["env-task-1"] = host
 	runtimes.ensured["env-task-1"] = host

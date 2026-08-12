@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useTaskLsp } from "@/hooks/domains/lsp/use-task-lsp";
 import { lspClientManager, toLspLanguage, type LspStatus } from "@/lib/lsp/lsp-client-manager";
@@ -7,7 +7,6 @@ import type { TaskLspLanguageSnapshot } from "@/lib/types/http-lsp";
 import { t } from "@/lib/i18n";
 
 const DISABLED: LspStatus = { state: "disabled" };
-const ATTACHMENT_RETRY_DELAYS_MS = [1_000, 2_000, 5_000] as const;
 const PHASE_STATUS: Partial<Record<TaskLspLanguageSnapshot["phase"], LspStatus>> = {
   off: DISABLED,
   waiting_for_task: DISABLED,
@@ -115,42 +114,11 @@ export function useLsp(
   toggle: () => void;
 } {
   const lspLanguage = toLspLanguage(monacoLanguage);
-  const { status, progress, toggle, taskId, snapshot, attachmentStatus } = useLspStatus(
-    sessionId,
-    lspLanguage,
-  );
-  const [attachmentAttempt, setAttachmentAttempt] = useState(0);
-  const retryIndex = useRef(0);
-  const retryTarget = `${taskId ?? ""}:${lspLanguage ?? ""}:${snapshot?.generation ?? 0}`;
-
+  const { status, progress, toggle, taskId, snapshot } = useLspStatus(sessionId, lspLanguage);
   useEffect(() => {
     if (!taskId || !sessionId || !lspLanguage || snapshot?.phase !== "ready") return;
     return lspClientManager.connect(taskId, sessionId, lspLanguage);
-  }, [taskId, sessionId, lspLanguage, snapshot?.generation, snapshot?.phase, attachmentAttempt]);
-
-  useEffect(() => {
-    retryIndex.current = 0;
-  }, [retryTarget]);
-
-  useEffect(() => {
-    if (
-      !taskId ||
-      !sessionId ||
-      !lspLanguage ||
-      snapshot?.phase !== "ready" ||
-      attachmentStatus.state === "ready"
-    ) {
-      retryIndex.current = 0;
-      return;
-    }
-    if (attachmentStatus.state !== "error") return;
-    const delayIndex = Math.min(retryIndex.current, ATTACHMENT_RETRY_DELAYS_MS.length - 1);
-    const delay = ATTACHMENT_RETRY_DELAYS_MS[delayIndex];
-    if (delay === undefined) return;
-    retryIndex.current = Math.min(delayIndex + 1, ATTACHMENT_RETRY_DELAYS_MS.length - 1);
-    const timer = window.setTimeout(() => setAttachmentAttempt((attempt) => attempt + 1), delay);
-    return () => window.clearTimeout(timer);
-  }, [taskId, sessionId, lspLanguage, snapshot?.phase, attachmentStatus.state, attachmentAttempt]);
+  }, [taskId, sessionId, lspLanguage, snapshot?.generation, snapshot?.phase]);
 
   return { status, progress, lspLanguage, taskId, toggle };
 }

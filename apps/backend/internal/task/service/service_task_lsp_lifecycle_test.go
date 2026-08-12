@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -13,9 +14,21 @@ import (
 type recordingTaskLSPLifecycle struct {
 	mu             sync.Mutex
 	cleanupCalls   []string
+	cancelCalls    []string
 	reconcileCalls []string
 	cleanupErr     error
 	onCleanup      func(context.Context, string)
+	onCancel       func(string)
+}
+
+func (l *recordingTaskLSPLifecycle) CancelTaskOperations(taskID string) {
+	l.mu.Lock()
+	l.cancelCalls = append(l.cancelCalls, taskID)
+	onCancel := l.onCancel
+	l.mu.Unlock()
+	if onCancel != nil {
+		onCancel(taskID)
+	}
 }
 
 func (l *recordingTaskLSPLifecycle) CleanupTask(ctx context.Context, taskID, reason string) error {
@@ -59,6 +72,35 @@ func seedTaskForLSPLifecycleTest(t *testing.T, repo interface {
 		WorkflowStepID: "step-lsp", Title: "LSP", Priority: "medium",
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestServiceTerminalMutationCancelsActiveTaskLSPAdmission(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedTaskForLSPLifecycleTest(t, repo)
+	releaseAdmission, err := svc.AcquireTaskLSPAdmission(context.Background(), "task-lsp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(releaseAdmission) }
+	lifecycle := &recordingTaskLSPLifecycle{onCancel: func(string) { release() }}
+	svc.SetTaskLSPLifecycle(lifecycle)
+
+	done := make(chan error, 1)
+	go func() { done <- svc.ArchiveTask(context.Background(), "task-lsp") }()
+	select {
+	case archiveErr := <-done:
+		if archiveErr != nil {
+			t.Fatal(archiveErr)
+		}
+	case <-time.After(100 * time.Millisecond):
+		release()
+		<-done
+		t.Fatal("terminal task mutation did not cancel active LSP work before waiting for admission")
+	}
+	if len(lifecycle.cancelCalls) == 0 || lifecycle.cancelCalls[0] != "task-lsp" {
+		t.Fatalf("task LSP cancellation calls = %v", lifecycle.cancelCalls)
 	}
 }
 

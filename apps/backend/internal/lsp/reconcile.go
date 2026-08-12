@@ -18,6 +18,13 @@ type reconcileCandidate struct {
 // any missing desired server. This ordering rebuilds real capacity without a
 // backend restart creating duplicate imports.
 func (c *Controller) ReconcileAll(ctx context.Context) error {
+	if err := c.waitForStartup(ctx); err != nil {
+		return err
+	}
+	return c.reconcileAll(ctx)
+}
+
+func (c *Controller) reconcileAll(ctx context.Context) error {
 	states, err := c.store.ListAllTaskLSPLanguages(ctx)
 	if err != nil {
 		return err
@@ -52,6 +59,9 @@ func (c *Controller) ReconcileAll(ctx context.Context) error {
 // internal lifecycle hook: callers resolve the task record rather than
 // accepting an agent-selected ownership identifier.
 func (c *Controller) ReconcileTask(ctx context.Context, taskID string) error {
+	if err := c.waitForStartup(ctx); err != nil {
+		return err
+	}
 	task, err := c.tasks.GetTask(ctx, taskID)
 	if err != nil {
 		return err
@@ -283,9 +293,11 @@ func (c *Controller) reconcileLiveRuntime(
 		}
 		return &reconcileCandidate{state: state, settings: settings}, nil
 	}
-	if _, accepted, err := c.adoptRuntime(ctx, state, runtime); err != nil {
+	stored, accepted, err := c.adoptRuntime(ctx, state, runtime)
+	if err != nil {
 		return nil, err
-	} else if !accepted {
+	}
+	if !accepted && (stored == nil || stored.Generation != runtime.Generation) {
 		return nil, nil
 	}
 	key := TaskLanguageKey{TaskID: state.TaskID, Language: state.Language}
@@ -363,6 +375,10 @@ func (c *Controller) stopReconciledRuntime(
 // recovery and reaps every language before the environment cleanup backstop;
 // policy/history remain durable for archive/stop resume.
 func (c *Controller) CleanupTask(ctx context.Context, taskID, reason string) error {
+	if err := c.waitForStartup(ctx); err != nil {
+		return err
+	}
+	c.CancelTaskOperations(taskID)
 	c.cancelDiscoveryRetry(taskID)
 	states, err := c.store.ListTaskLSPLanguages(ctx, taskID)
 	if err != nil {
@@ -395,7 +411,7 @@ func (c *Controller) CleanupTask(ctx context.Context, taskID, reason string) err
 		listed := listed
 		go func() {
 			key := TaskLanguageKey{TaskID: taskID, Language: listed.Language}
-			_, commandErr := c.commands.submitExclusive(
+			_, commandErr := c.commands.submitInterruptingExclusive(
 				context.WithoutCancel(ctx), key, ActionReconcile,
 				func(workCtx context.Context) (*LanguageSnapshot, error) {
 					current, _, currentErr := c.store.GetTaskLSPLanguage(
@@ -554,6 +570,8 @@ func runtimeHasProcess(snapshot *RuntimeSnapshot) bool {
 	switch snapshot.Phase {
 	case PhaseInstalling, PhaseStarting, PhaseProcessStarted, PhaseInitializing, PhaseReady, PhaseStopping:
 		return true
+	case PhaseError:
+		return !runtimeFailureProvesNoProcess(snapshot, snapshot.Generation)
 	default:
 		return false
 	}

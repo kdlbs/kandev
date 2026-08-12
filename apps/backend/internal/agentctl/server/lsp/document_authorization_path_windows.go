@@ -3,6 +3,8 @@
 package lsp
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +19,10 @@ func canonicalExistingFilesystemPath(path string) (string, error) {
 	}
 	defer file.Close()
 
+	return canonicalFilesystemPathFromHandle(file)
+}
+
+func canonicalFilesystemPathFromHandle(file *os.File) (string, error) {
 	buffer := make([]uint16, 256)
 	for {
 		length, pathErr := windows.GetFinalPathNameByHandle(
@@ -30,6 +36,38 @@ func canonicalExistingFilesystemPath(path string) (string, error) {
 		}
 		buffer = make([]uint16, length+1)
 	}
+}
+
+type documentRootHandleAccess interface {
+	Open(string) (*os.File, error)
+}
+
+func canonicalPinnedDocumentRootPath(
+	access documentRootAccess,
+	_ string,
+	_ func(string) (string, error),
+) (string, error) {
+	handleAccess, ok := access.(documentRootHandleAccess)
+	if !ok {
+		return "", errors.New("pinned document root does not expose an identity handle")
+	}
+	file, err := handleAccess.Open(".")
+	if err != nil {
+		return "", fmt.Errorf("open pinned document root identity: %w", err)
+	}
+	defer file.Close()
+	pinnedInfo, err := access.Stat(".")
+	if err != nil {
+		return "", fmt.Errorf("stat pinned document root: %w", err)
+	}
+	handleInfo, err := file.Stat()
+	if err != nil {
+		return "", fmt.Errorf("stat pinned document root handle: %w", err)
+	}
+	if !os.SameFile(pinnedInfo, handleInfo) {
+		return "", errors.New("pinned document root identity changed during authorization")
+	}
+	return canonicalFilesystemPathFromHandle(file)
 }
 
 func normalizeWindowsFinalPath(path string) string {

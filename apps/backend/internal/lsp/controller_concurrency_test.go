@@ -2,11 +2,54 @@ package lsp
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
 
-func TestConcurrentDistinctPolicyWritesExecuteInOrder(t *testing.T) {
+func TestExplicitStopInterruptsBlockedTaskHostStart(t *testing.T) {
+	store := newMemoryLSPStore()
+	host := newFakeLSPHost()
+	host.startEntered = make(chan struct{})
+	host.startRelease = make(chan struct{})
+	controller := newTestController(
+		&fakeControllerTasks{}, store, &fakeLSPSettings{}, &fakeLSPRuntimes{host: host},
+	)
+	origin := Origin{Initiator: InitiatorUser, Reason: "user_control"}
+	startDone := make(chan error, 1)
+	go func() {
+		_, err := controller.Start(context.Background(), "task-1", "kotlin", origin)
+		startDone <- err
+	}()
+	<-host.startEntered
+
+	type stopResult struct {
+		snapshot *LanguageSnapshot
+		err      error
+	}
+	stopDone := make(chan stopResult, 1)
+	go func() {
+		snapshot, err := controller.Stop(context.Background(), "task-1", "kotlin", origin)
+		stopDone <- stopResult{snapshot: snapshot, err: err}
+	}()
+	select {
+	case result := <-stopDone:
+		if result.err != nil || result.snapshot == nil || result.snapshot.Phase != PhaseOff ||
+			result.snapshot.Policy != PolicyDisabled {
+			t.Fatalf("interrupted Stop = %#v, %v", result.snapshot, result.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("explicit Stop remained blocked behind task-host Start")
+	}
+	if err := <-startDone; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("interrupted Start error = %v", err)
+	}
+	if host.stopCalls != 1 || controller.capacity.Active() != 0 {
+		t.Fatalf("stop calls=%d active=%d", host.stopCalls, controller.capacity.Active())
+	}
+}
+
+func TestDisabledPolicyInterruptsBlockedKeepWarmPolicy(t *testing.T) {
 	store := newMemoryLSPStore()
 	host := newFakeLSPHost()
 	host.startEntered = make(chan struct{})
@@ -27,19 +70,16 @@ func TestConcurrentDistinctPolicyWritesExecuteInOrder(t *testing.T) {
 		_, err := controller.SetPolicy(context.Background(), "task-1", "go", PolicyDisabled, origin)
 		secondDone <- err
 	}()
-	key := TaskLanguageKey{TaskID: "task-1", Language: "go"}
-	if !commandQueuedWithin(controller, key, time.Second) {
-		close(host.startRelease)
-		<-firstDone
-		<-secondDone
-		t.Fatal("distinct disabled policy was coalesced with running keep-warm policy")
+	select {
+	case err := <-secondDone:
+		if err != nil {
+			t.Fatalf("disabled policy: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("disabled policy remained blocked behind keep-warm start")
 	}
-	close(host.startRelease)
-	if err := <-firstDone; err != nil {
-		t.Fatalf("first policy: %v", err)
-	}
-	if err := <-secondDone; err != nil {
-		t.Fatalf("second policy: %v", err)
+	if err := <-firstDone; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("interrupted keep-warm policy: %v", err)
 	}
 	state := storedLSPState(t, store, "task-1", "go")
 	if state.Policy != PolicyDisabled || state.Phase != PhaseOff {

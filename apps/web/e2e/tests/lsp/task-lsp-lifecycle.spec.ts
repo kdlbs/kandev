@@ -183,7 +183,7 @@ test.describe("task-scoped LSP lifecycle", () => {
       ]);
       await expect(start(firstSurface)).toBeEnabled();
       await expect(start(secondSurface)).toBeEnabled();
-      await start(firstSurface).click();
+      await Promise.all([start(firstSurface).click(), start(secondSurface).click()]);
 
       await expectFakeLspGeneration(backend, 1);
       await expectFakeLspEventCount(
@@ -268,7 +268,9 @@ test.describe("task-scoped LSP lifecycle", () => {
     await performTaskLspAction(testPage, "kotlin", "stop");
     await expectFakeLspProcessStopped(second.pid);
     await openDesktopFile(testPage, task.session, task.filePaths[0]);
-    await testPage.waitForTimeout(750);
+    // Observe beyond the first one-second recovery epoch so this proves Stop
+    // canceled reacquisition rather than merely winning a short timing window.
+    await testPage.waitForTimeout(1_500);
     expect(readFakeLspEvents(backend).filter((event) => event.event === "started")).toHaveLength(2);
     await expectKotlinState(testPage, "stopped");
   });

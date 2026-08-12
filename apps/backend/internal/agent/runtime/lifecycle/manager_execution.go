@@ -30,6 +30,11 @@ var ErrSessionWorkspaceNotReady = errors.New("session workspace not ready")
 // callers until agentctl readiness and credential persistence both commit.
 var ErrTaskHostNotReady = errors.New("task host not ready")
 
+// errTaskHostRuntimeNotFound is returned only by an existing-only physical
+// probe. It is authoritative absence: no stable task-host instance was found,
+// and the probe did not create or resume resources.
+var errTaskHostRuntimeNotFound = errors.New("task host runtime not found")
+
 const taskHostRecoveryProbeTimeout = 3 * time.Second
 
 // ErrSessionTerminal indicates the task session has reached a terminal state
@@ -217,46 +222,105 @@ func (m *Manager) GetOrEnsureTaskHostForEnvironment(
 		return execution, nil
 	}
 
-	value, err := m.doCoalescedExecution(ctx, taskHostRuntimeSessionPrefix+taskEnvironmentID,
-		func(sharedCtx context.Context) (interface{}, error) {
-			if execution, exists := m.executionStore.GetTaskHostByEnvironmentID(taskEnvironmentID); exists {
-				if execution.IsAgentctlReady() {
-					return execution, nil
-				}
-				return nil, fmt.Errorf("%w for environment %s", ErrTaskHostNotReady, taskEnvironmentID)
-			}
-			if m.workspaceInfoProvider == nil {
-				return nil, fmt.Errorf("workspace info provider not configured")
-			}
-			info, err := m.workspaceInfoProvider.GetWorkspaceInfoForEnvironment(sharedCtx, taskEnvironmentID)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get workspace info for environment %s: %w", taskEnvironmentID, err)
-			}
-			if info == nil {
-				return nil, fmt.Errorf("task environment %s not found", taskEnvironmentID)
-			}
-			if info.TaskEnvironmentID != taskEnvironmentID {
-				return nil, fmt.Errorf("workspace info resolved environment %s, want %s", info.TaskEnvironmentID, taskEnvironmentID)
-			}
-			if info.TaskID == "" {
-				return nil, fmt.Errorf("task environment %s has no task_id", taskEnvironmentID)
-			}
-			if info.WorkspacePath == "" {
-				return nil, fmt.Errorf("%w: task environment %s has no workspace path yet", ErrSessionWorkspaceNotReady, taskEnvironmentID)
-			}
-			if err := m.ensureTaskHostTaskActive(sharedCtx, info.TaskID); err != nil {
-				return nil, err
-			}
-			return m.createTaskHostExecution(sharedCtx, info.TaskID, info)
-		})
+	// A missing in-memory handle does not prove that the stable task-host
+	// process is gone. Probe and reattach to the physical instance first. Only
+	// an executor-specific not-found result authorizes creating a replacement.
+	existing, err := m.resolveTaskHostExecution(ctx, taskEnvironmentID, true)
 	if err != nil {
 		return nil, err
 	}
-	return value.(*AgentExecution), nil
+	if existing != nil && existing.exists && existing.execution != nil {
+		return existing.execution, nil
+	}
+
+	result, err := m.resolveTaskHostExecution(ctx, taskEnvironmentID, false)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil || result.execution == nil {
+		return nil, fmt.Errorf("task-host ensure returned no execution")
+	}
+	return result.execution, nil
+}
+
+type taskHostExecutionResult struct {
+	execution *AgentExecution
+	exists    bool
+}
+
+func (m *Manager) resolveTaskHostExecution(
+	ctx context.Context,
+	taskEnvironmentID string,
+	requireExisting bool,
+) (*taskHostExecutionResult, error) {
+	key := taskHostRuntimeSessionPrefix + taskEnvironmentID
+	for attempts := 0; attempts < 2; attempts++ {
+		value, err := m.doCoalescedExecution(ctx, key, func(sharedCtx context.Context) (interface{}, error) {
+			if execution, exists := m.executionStore.GetTaskHostByEnvironmentID(taskEnvironmentID); exists {
+				if execution.IsAgentctlReady() {
+					return &taskHostExecutionResult{execution: execution, exists: true}, nil
+				}
+				return nil, fmt.Errorf("%w for environment %s", ErrTaskHostNotReady, taskEnvironmentID)
+			}
+			info, infoErr := m.taskHostWorkspaceInfo(sharedCtx, taskEnvironmentID)
+			if infoErr != nil {
+				return nil, infoErr
+			}
+			if !requireExisting {
+				if activeErr := m.ensureTaskHostTaskActive(sharedCtx, info.TaskID); activeErr != nil {
+					return nil, activeErr
+				}
+			}
+			execution, createErr := m.createTaskHostExecution(sharedCtx, info.TaskID, info, requireExisting)
+			if errors.Is(createErr, errTaskHostRuntimeNotFound) {
+				return &taskHostExecutionResult{}, nil
+			}
+			if createErr != nil {
+				return nil, createErr
+			}
+			return &taskHostExecutionResult{execution: execution, exists: true}, nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		result := value.(*taskHostExecutionResult)
+		if !requireExisting && !result.exists && attempts == 0 {
+			continue
+		}
+		return result, nil
+	}
+	return nil, fmt.Errorf("task-host resolution retry exhausted")
+}
+
+func (m *Manager) taskHostWorkspaceInfo(
+	ctx context.Context,
+	taskEnvironmentID string,
+) (*WorkspaceInfo, error) {
+	if m.workspaceInfoProvider == nil {
+		return nil, fmt.Errorf("workspace info provider not configured")
+	}
+	info, err := m.workspaceInfoProvider.GetWorkspaceInfoForEnvironment(ctx, taskEnvironmentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get workspace info for environment %s: %w", taskEnvironmentID, err)
+	}
+	if info == nil {
+		return nil, fmt.Errorf("task environment %s not found", taskEnvironmentID)
+	}
+	if info.TaskEnvironmentID != taskEnvironmentID {
+		return nil, fmt.Errorf("workspace info resolved environment %s, want %s", info.TaskEnvironmentID, taskEnvironmentID)
+	}
+	if info.TaskID == "" {
+		return nil, fmt.Errorf("task environment %s has no task_id", taskEnvironmentID)
+	}
+	if info.WorkspacePath == "" {
+		return nil, fmt.Errorf("%w: task environment %s has no workspace path yet", ErrSessionWorkspaceNotReady, taskEnvironmentID)
+	}
+	return info, nil
 }
 
 // GetTaskHostForEnvironment returns only a fully committed dedicated task-host
-// execution. Authorization runs before the cache lookup.
+// execution. Authorization runs first and a cache miss performs an existing-only
+// physical reattachment; it never creates or resumes resources.
 func (m *Manager) GetTaskHostForEnvironment(
 	ctx context.Context,
 	taskEnvironmentID string,
@@ -264,11 +328,17 @@ func (m *Manager) GetTaskHostForEnvironment(
 	if err := m.authorizeTaskHostEnvironment(ctx, taskEnvironmentID); err != nil {
 		return nil, false, err
 	}
-	execution, exists := m.executionStore.GetTaskHostByEnvironmentID(taskEnvironmentID)
-	if exists && !execution.IsAgentctlReady() {
-		return nil, false, nil
+	if execution, exists := m.executionStore.GetTaskHostByEnvironmentID(taskEnvironmentID); exists {
+		if !execution.IsAgentctlReady() {
+			return nil, false, fmt.Errorf("%w for environment %s", ErrTaskHostNotReady, taskEnvironmentID)
+		}
+		return execution, true, nil
 	}
-	return execution, exists, nil
+	result, err := m.resolveTaskHostExecution(ctx, taskEnvironmentID, true)
+	if err != nil {
+		return nil, false, err
+	}
+	return result.execution, result.exists, nil
 }
 
 // StopTaskHostForEnvironment reaps the task-owned agentctl process tree without
@@ -277,12 +347,12 @@ func (m *Manager) StopTaskHostForEnvironment(
 	ctx context.Context,
 	taskEnvironmentID, reason string,
 ) (bool, error) {
-	if err := m.authorizeTaskHostEnvironment(ctx, taskEnvironmentID); err != nil {
+	execution, exists, err := m.GetTaskHostForEnvironment(ctx, taskEnvironmentID)
+	if err != nil {
 		return false, err
 	}
-	execution, exists := m.executionStore.GetTaskHostByEnvironmentID(taskEnvironmentID)
 	if !exists {
-		return false, nil
+		return true, nil
 	}
 	if err := m.StopAgentWithReason(ctx, execution.ID, reason, false); err != nil {
 		return false, err

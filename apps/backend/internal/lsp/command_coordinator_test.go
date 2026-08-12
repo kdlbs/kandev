@@ -2,8 +2,53 @@ package lsp
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 )
+
+func TestInterruptingCommandCancelsEarlierLaneWork(t *testing.T) {
+	coordinator := &commandCoordinator{}
+	key := TaskLanguageKey{TaskID: "task-1", Language: "kotlin"}
+	startEntered := make(chan struct{})
+	startDone := make(chan error, 1)
+	go func() {
+		_, err := coordinator.submit(
+			context.Background(), key, ActionStart, "",
+			func(ctx context.Context) (*LanguageSnapshot, error) {
+				close(startEntered)
+				<-ctx.Done()
+				return nil, context.Cause(ctx)
+			},
+		)
+		startDone <- err
+	}()
+	<-startEntered
+
+	stopRan := make(chan struct{})
+	stopDone := make(chan error, 1)
+	go func() {
+		_, err := coordinator.submitInterrupting(
+			context.Background(), key, ActionStop, "",
+			func(context.Context) (*LanguageSnapshot, error) {
+				close(stopRan)
+				return nil, nil
+			},
+		)
+		stopDone <- err
+	}()
+	select {
+	case <-stopRan:
+	case <-time.After(time.Second):
+		t.Fatal("interrupting Stop remained queued behind canceled Start")
+	}
+	if !errors.Is(<-startDone, context.Canceled) {
+		t.Fatal("running Start did not receive cancellation")
+	}
+	if err := <-stopDone; err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestExclusiveCommandCannotBecomeCoalescingTarget(t *testing.T) {
 	coordinator := &commandCoordinator{}

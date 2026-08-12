@@ -3,7 +3,7 @@
 package lsp
 
 import (
-	"io/fs"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -11,6 +11,10 @@ import (
 
 func TestDocumentWorkspaceCanonicalizesSelectedRootReparseBeforeBrowserAccess(t *testing.T) {
 	targetPath := t.TempDir()
+	replacementPath := t.TempDir()
+	if err := os.WriteFile(filepath.Join(targetPath, "Main.kt"), []byte("class Main"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	junctionPath := filepath.Join(t.TempDir(), "workspace-junction")
 	output, err := exec.Command("cmd", "/c", "mklink", "/J", junctionPath, targetPath).CombinedOutput()
 	if err != nil {
@@ -20,21 +24,32 @@ func TestDocumentWorkspaceCanonicalizesSelectedRootReparseBeforeBrowserAccess(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	access := &recordingDocumentRootAccess{
-		lstat: func(string) (fs.FileInfo, error) { return nil, fs.ErrNotExist },
-	}
 	var opened []string
 	workspace := newDocumentWorkspaceWithRootAccess(
 		canonicalFilesystemPath,
 		func(path string) (documentRootAccess, error) {
 			opened = append(opened, path)
+			access, openErr := openDocumentRoot(path)
+			if openErr != nil {
+				return nil, openErr
+			}
+			if removeOutput, removeErr := exec.Command("cmd", "/c", "rmdir", junctionPath).CombinedOutput(); removeErr != nil {
+				_ = access.Close()
+				t.Skipf("open junction cannot be replaced: %v: %s", removeErr, removeOutput)
+			}
+			if replaceOutput, replaceErr := exec.Command(
+				"cmd", "/c", "mklink", "/J", junctionPath, replacementPath,
+			).CombinedOutput(); replaceErr != nil {
+				_ = access.Close()
+				t.Skipf("replacement junction unavailable: %v: %s", replaceErr, replaceOutput)
+			}
 			return access, nil
 		},
 	)
 	t.Cleanup(workspace.Close)
 	workspace.SetConfig(Config{WorkDir: junctionPath})
-	if len(opened) != 1 || filepath.Clean(opened[0]) != filepath.Clean(wantRoot) {
-		t.Fatalf("opened canonical roots = %#v, want only %q", opened, wantRoot)
+	if len(opened) != 1 || filepath.Clean(opened[0]) != filepath.Clean(junctionPath) {
+		t.Fatalf("opened lexical roots = %#v, want only %q", opened, junctionPath)
 	}
 
 	wantDocument := filepath.Join(wantRoot, "Main.kt")

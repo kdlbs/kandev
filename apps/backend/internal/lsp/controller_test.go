@@ -678,7 +678,7 @@ func (f *fakeLSPHost) DiscoverLSP(context.Context) (*DiscoveryResult, error) {
 	return &result, f.discoveryErr
 }
 
-func (f *fakeLSPHost) StartTaskLSP(_ context.Context, request TaskHostStartRequest) (*RuntimeSnapshot, error) {
+func (f *fakeLSPHost) StartTaskLSP(ctx context.Context, request TaskHostStartRequest) (*RuntimeSnapshot, error) {
 	f.mu.Lock()
 	f.startCalls++
 	f.lastStart = request
@@ -693,7 +693,14 @@ func (f *fakeLSPHost) StartTaskLSP(_ context.Context, request TaskHostStartReque
 		}
 	}
 	if release != nil {
-		<-release
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return &RuntimeSnapshot{
+				Language: request.Language, Generation: request.Generation,
+				Phase: PhaseError, ErrorCode: "start_canceled", ErrorMessage: context.Cause(ctx).Error(),
+			}, context.Cause(ctx)
+		}
 	}
 	f.mu.Lock()
 	startErr := f.startErr

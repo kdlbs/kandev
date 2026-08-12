@@ -24,6 +24,9 @@ func (c *Controller) NotifySettingsChanged() {
 // ApplySettings pushes changed configuration into live generations, then
 // reconciles inherited task policies. It never creates a second ownership path.
 func (c *Controller) ApplySettings(ctx context.Context) error {
+	if err := c.waitForStartup(ctx); err != nil {
+		return err
+	}
 	c.settingsApplyMu.Lock()
 	defer c.settingsApplyMu.Unlock()
 

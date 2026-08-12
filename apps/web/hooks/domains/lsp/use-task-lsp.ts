@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import {
   getTaskLsp,
@@ -75,37 +75,23 @@ function taskControlErrorEpoch(store: ReturnType<typeof useAppStoreApi>, taskId:
   return store.getState().taskLsp.byTaskId[taskId]?.controlErrorEpoch ?? 0;
 }
 
-function useTaskLspSubscription(taskId: string | null, connectionStatus: string) {
+function useTaskLspSubscription(
+  taskId: string | null,
+  connectionStatus: string,
+  load: (signal?: AbortSignal) => Promise<void>,
+) {
   useEffect(() => {
     if (!taskId) return;
     const client = getWebSocketClient();
     if (!client) return;
-    return client.subscribe(taskId);
-  }, [connectionStatus, taskId]);
-}
-
-function useAuthoritativeSubscriptionRefresh(
-  taskId: string | null,
-  connectionStatus: string,
-  loaded: boolean,
-  load: (signal?: AbortSignal) => Promise<void>,
-) {
-  const previous = useRef<{ taskId: string | null; connectionStatus: string }>({
-    taskId: null,
-    connectionStatus: "disconnected",
-  });
-  useEffect(() => {
-    const prior = previous.current;
-    previous.current = { taskId, connectionStatus };
-    const subscriptionEstablished =
-      taskId !== null &&
-      connectionStatus === "connected" &&
-      (prior.taskId !== taskId || prior.connectionStatus !== "connected");
-    if (!subscriptionEstablished || (!loaded && prior.taskId !== taskId)) return;
     const controller = new AbortController();
-    void load(controller.signal).catch(() => undefined);
-    return () => controller.abort();
-  }, [connectionStatus, load, loaded, taskId]);
+    const subscription = client.subscribeTaskWithReady(taskId);
+    void subscription.ready.then(() => load(controller.signal)).catch(() => undefined);
+    return () => {
+      controller.abort();
+      subscription.unsubscribe();
+    };
+  }, [connectionStatus, load, taskId]);
 }
 
 function useTransientRefresh(taskId: string | null, loaded: boolean, needed: boolean) {
@@ -146,8 +132,6 @@ export function useTaskLsp(taskId: string | null) {
   const connectionStatus = useAppStore((state) => state.connection.status);
   const loaded = isLoadedTaskState(task);
 
-  useTaskLspSubscription(taskId, connectionStatus);
-
   const load = useCallback(
     async (signal?: AbortSignal) => {
       if (!taskId) throw new Error("A task is required to load language servers.");
@@ -170,14 +154,14 @@ export function useTaskLsp(taskId: string | null) {
     [store, taskId],
   );
 
+  useTaskLspSubscription(taskId, connectionStatus, load);
+
   useEffect(() => {
     if (!taskId || loaded) return;
     const controller = new AbortController();
     void load(controller.signal).catch(() => undefined);
     return () => controller.abort();
   }, [load, loaded, taskId]);
-
-  useAuthoritativeSubscriptionRefresh(taskId, connectionStatus, loaded, load);
 
   const runControl = useCallback(
     async (language: string, action: Exclude<TaskLspAction, "" | "set_policy" | "reconcile">) => {

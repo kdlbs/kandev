@@ -35,6 +35,59 @@ func TestReconcileAdoptsLiveGenerationBeforeLaunching(t *testing.T) {
 	}
 }
 
+func TestReconcileRebuildsCapacityFromEqualLiveRuntimeSnapshot(t *testing.T) {
+	store := newMemoryLSPStore()
+	startedAt := time.Unix(90, 0).UTC()
+	seedLSPState(t, store, TaskLanguageState{
+		TaskID: "task-1", Language: "kotlin", Policy: PolicyKeepWarm,
+		DetectionState: DetectionComplete, Phase: PhaseReady, Generation: 4,
+		RuntimeIncarnation: "task-host-a", RuntimeStartedAt: &startedAt, RuntimeRevision: 7,
+		LastInitiator: InitiatorAutomatic,
+	})
+	host := newFakeLSPHost()
+	host.snapshots["kotlin"] = RuntimeSnapshot{
+		Language: "kotlin", Generation: 4, Phase: PhaseReady,
+		Incarnation: "task-host-a", RuntimeStartedAt: startedAt, Revision: 7,
+	}
+	runtimes := newReconcileRuntimes()
+	runtimes.existing["env-task-1"] = host
+	controller := newReconcileController(store, runtimes, NewCapacity(1))
+
+	if err := controller.ReconcileAll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if controller.capacity.Active() != 1 || host.startCalls != 0 || store.allocations != 0 {
+		t.Fatalf("active=%d starts=%d allocations=%d, want equal live snapshot adopted",
+			controller.capacity.Active(), host.startCalls, store.allocations)
+	}
+}
+
+func TestReconcileTreatsCleanupFailureAsPossiblyLive(t *testing.T) {
+	store := newMemoryLSPStore()
+	seedLSPState(t, store, TaskLanguageState{
+		TaskID: "task-1", Language: "go", Policy: PolicyKeepWarm,
+		DetectionState: DetectionComplete, Phase: PhaseError, Generation: 3,
+		ErrorCode: "process_cleanup_failed", LastInitiator: InitiatorAutomatic,
+	})
+	host := newFakeLSPHost()
+	host.snapshots["go"] = RuntimeSnapshot{
+		Language: "go", Generation: 3, Phase: PhaseError, ErrorCode: "process_cleanup_failed",
+	}
+	runtimes := newReconcileRuntimes()
+	runtimes.existing["env-task-1"] = host
+	controller := newReconcileController(store, runtimes, NewCapacity(1))
+
+	if err := controller.ReconcileAll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	state := storedLSPState(t, store, "task-1", "go")
+	if state.Generation != 3 || host.startCalls != 0 || store.allocations != 0 ||
+		controller.capacity.Active() != 1 {
+		t.Fatalf("state=%#v starts=%d allocations=%d active=%d, want possible process retained",
+			state, host.startCalls, store.allocations, controller.capacity.Active())
+	}
+}
+
 func TestReconcileReconnectsTaskHostBeforeAllocatingReplacementGeneration(t *testing.T) {
 	store := newMemoryLSPStore()
 	seedLSPState(t, store, TaskLanguageState{
@@ -241,7 +294,7 @@ func TestCleanupPreservesPolicyAndStopsEveryTaskLanguage(t *testing.T) {
 	}
 }
 
-func TestCleanupReleasesGenerationStartedAfterInitialSnapshot(t *testing.T) {
+func TestCleanupInterruptsGenerationStartedAfterInitialSnapshot(t *testing.T) {
 	baseStore := newMemoryLSPStore()
 	seedLSPState(t, baseStore, TaskLanguageState{
 		TaskID: "task-1", Language: "go", Policy: PolicyKeepWarm,
@@ -279,20 +332,9 @@ func TestCleanupReleasesGenerationStartedAfterInitialSnapshot(t *testing.T) {
 	}()
 	<-host.startEntered
 	close(store.release)
-	key := TaskLanguageKey{TaskID: "task-1", Language: "go"}
-	if !commandQueuedWithin(controller, key, time.Second) {
-		close(host.startRelease)
-		<-startDone
-		<-cleanupDone
-		t.Fatal("cleanup did not serialize behind the running successor generation")
-	}
-	close(host.startRelease)
 	started := <-startDone
-	if started.err != nil {
-		t.Fatal(started.err)
-	}
-	if started.snapshot.Generation != 2 {
-		t.Fatalf("started=%#v", started.snapshot)
+	if started.err != nil && !errors.Is(started.err, context.Canceled) {
+		t.Fatalf("interrupted start error = %v", started.err)
 	}
 	if err := <-cleanupDone; err != nil {
 		t.Fatal(err)
@@ -520,6 +562,10 @@ type reconcileRuntimes struct {
 	cleanupProved      bool
 	recoverCalls       int
 	recoverErr         error
+	blockEnvironment   string
+	existingEntered    chan struct{}
+	existingRelease    chan struct{}
+	blockOnce          sync.Once
 }
 
 type cleanupSnapshotStore struct {
@@ -548,7 +594,15 @@ func newReconcileRuntimes() *reconcileRuntimes {
 	}
 }
 
-func (r *reconcileRuntimes) ExistingTaskHost(_ context.Context, _ string, environmentID string) (TaskHost, bool, error) {
+func (r *reconcileRuntimes) ExistingTaskHost(ctx context.Context, _ string, environmentID string) (TaskHost, bool, error) {
+	if environmentID == r.blockEnvironment && r.existingRelease != nil {
+		r.blockOnce.Do(func() { close(r.existingEntered) })
+		select {
+		case <-ctx.Done():
+			return nil, false, ctx.Err()
+		case <-r.existingRelease:
+		}
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := r.existingErrors[environmentID]; err != nil {

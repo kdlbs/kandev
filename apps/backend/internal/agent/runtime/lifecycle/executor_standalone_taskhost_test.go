@@ -33,7 +33,7 @@ func TestEnsureStandaloneTaskHostInstanceReattachesAfterBackendRestart(t *testin
 		control := &fakeTaskHostStandaloneControl{instance: &agentctl.InstanceInfo{
 			ID: request.ID, Port: 41001, WorkspacePath: request.WorkspacePath,
 		}}
-		response, reused, err := ensureStandaloneTaskHostInstance(context.Background(), control, request)
+		response, reused, err := ensureStandaloneTaskHostInstance(context.Background(), control, request, false)
 		if err != nil {
 			t.Fatalf("ensureStandaloneTaskHostInstance: %v", err)
 		}
@@ -44,7 +44,7 @@ func TestEnsureStandaloneTaskHostInstanceReattachesAfterBackendRestart(t *testin
 
 	t.Run("creates when absent", func(t *testing.T) {
 		control := &fakeTaskHostStandaloneControl{getErr: agentctl.ErrInstanceNotFound}
-		response, reused, err := ensureStandaloneTaskHostInstance(context.Background(), control, request)
+		response, reused, err := ensureStandaloneTaskHostInstance(context.Background(), control, request, false)
 		if err != nil {
 			t.Fatalf("ensureStandaloneTaskHostInstance: %v", err)
 		}
@@ -53,11 +53,22 @@ func TestEnsureStandaloneTaskHostInstanceReattachesAfterBackendRestart(t *testin
 		}
 	})
 
+	t.Run("existing-only lookup never creates when absent", func(t *testing.T) {
+		control := &fakeTaskHostStandaloneControl{getErr: agentctl.ErrInstanceNotFound}
+		_, _, err := ensureStandaloneTaskHostInstance(context.Background(), control, request, true)
+		if !errors.Is(err, errTaskHostRuntimeNotFound) {
+			t.Fatalf("existing-only error = %v, want task-host absence", err)
+		}
+		if control.createCalls != 0 {
+			t.Fatalf("existing-only lookup created %d instances", control.createCalls)
+		}
+	})
+
 	t.Run("rejects mismatched workspace", func(t *testing.T) {
 		control := &fakeTaskHostStandaloneControl{instance: &agentctl.InstanceInfo{
 			ID: request.ID, Port: 41001, WorkspacePath: "/workspace/other-task",
 		}}
-		_, _, err := ensureStandaloneTaskHostInstance(context.Background(), control, request)
+		_, _, err := ensureStandaloneTaskHostInstance(context.Background(), control, request, false)
 		if err == nil || errors.Is(err, agentctl.ErrInstanceNotFound) {
 			t.Fatalf("workspace mismatch error = %v", err)
 		}

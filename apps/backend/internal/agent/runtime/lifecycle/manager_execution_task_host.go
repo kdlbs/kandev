@@ -24,12 +24,15 @@ func (m *Manager) createTaskHostExecution(
 	ctx context.Context,
 	taskID string,
 	info *WorkspaceInfo,
+	requireExisting bool,
 ) (*AgentExecution, error) {
 	if info == nil {
 		return nil, fmt.Errorf("workspace info is required")
 	}
-	if err := m.reconcileExecutionWorkspace(ctx, taskID, info); err != nil {
-		return nil, err
+	if !requireExisting {
+		if err := m.reconcileExecutionWorkspace(ctx, taskID, info); err != nil {
+			return nil, err
+		}
 	}
 	activityLease, err := m.acquireActivity(ctx, activity.KindExecutionStarting)
 	if err != nil {
@@ -50,6 +53,7 @@ func (m *Manager) createTaskHostExecution(
 	if err := resumeRemoteInstancePreflight(ctx, rt, request); err != nil {
 		return nil, err
 	}
+	request.RequireExistingInstance = requireExisting
 	releaseCredentials := m.lockTaskEnvironmentCredentials(info.ExecutorType, info.TaskEnvironmentID)
 	defer releaseCredentials()
 	runtimeInstance, err := rt.CreateInstance(ctx, request)
@@ -68,7 +72,7 @@ func (m *Manager) createTaskHostExecution(
 		}
 		return nil, fmt.Errorf("failed to register execution: %w", addErr)
 	}
-	return m.finishTaskHostExecution(ctx, taskID, info, rt, runtimeInstance, execution)
+	return m.finishTaskHostExecution(ctx, taskID, info, rt, runtimeInstance, execution, requireExisting)
 }
 
 func (m *Manager) prepareTaskHostCreateRequest(
@@ -157,10 +161,13 @@ func (m *Manager) finishTaskHostExecution(
 	rt ExecutorBackend,
 	runtimeInstance *ExecutorInstance,
 	execution *AgentExecution,
+	requireExisting bool,
 ) (*AgentExecution, error) {
-	if err := m.ensureTaskHostTaskActive(ctx, taskID); err != nil {
-		rollbackErr := m.rollbackTaskHostExecution(rt, runtimeInstance, execution, "task cleanup won task-host registration")
-		return nil, errors.Join(err, rollbackErr)
+	if !requireExisting {
+		if err := m.ensureTaskHostTaskActive(ctx, taskID); err != nil {
+			rollbackErr := m.rollbackTaskHostExecution(rt, runtimeInstance, execution, "task cleanup won task-host registration")
+			return nil, errors.Join(err, rollbackErr)
+		}
 	}
 	if execution.agentctl == nil {
 		rollbackErr := m.rollbackTaskHostExecution(rt, runtimeInstance, execution, "task host has no control client")

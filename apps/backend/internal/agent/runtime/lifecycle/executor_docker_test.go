@@ -944,6 +944,7 @@ type recordingReconnectControl struct {
 	methods   []string
 	created   *agentctl.CreateInstanceRequest
 	deleted   string
+	getErr    error
 	deleteErr error
 }
 
@@ -952,6 +953,9 @@ func (c *recordingReconnectControl) GetInstance(
 	_ string,
 ) (*agentctl.InstanceInfo, error) {
 	c.methods = append(c.methods, "GET")
+	if c.getErr != nil {
+		return nil, c.getErr
+	}
 	return &agentctl.InstanceInfo{ID: "instance-1", Port: 41001}, nil
 }
 
@@ -1080,6 +1084,26 @@ func TestDockerExplicitTokenReconnectDoesNotReplaceInstance(t *testing.T) {
 	}
 	if got, want := strings.Join(control.methods, ","), "GET"; got != want {
 		t.Fatalf("control methods = %s, want %s", got, want)
+	}
+}
+
+func TestDockerExistingOnlyReconnectNeverCreatesMissingTaskHostInstance(t *testing.T) {
+	control := &recordingReconnectControl{getErr: agentctl.ErrInstanceNotFound}
+	req := &ExecutorCreateRequest{
+		InstanceID: "task-host-1", PreviousExecutionID: "task-host-1",
+		IsTaskHost: true, RequireExistingInstance: true,
+	}
+	dockerExec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
+
+	_, _, err := dockerExec.findExistingInstance(
+		context.Background(), stubHostPortLookup{host: "127.0.0.1", port: 1}, control,
+		req, "container-1", "172.17.0.2", "task-host-1", "",
+	)
+	if !errors.Is(err, errTaskHostRuntimeNotFound) {
+		t.Fatalf("existing-only error = %v, want task-host absence", err)
+	}
+	if control.created != nil || strings.Join(control.methods, ",") != "GET" {
+		t.Fatalf("existing-only methods=%v created=%#v", control.methods, control.created)
 	}
 }
 

@@ -15,6 +15,8 @@ type taskLanguageSlot struct {
 // runtimes and cached workspace projections remain untouched.
 func (m *Manager) PurgeTask(taskID string) error {
 	taskID = normalizeTaskID(taskID, m.cfg.OwnerID)
+	unlockWorkspace := m.lockTaskWorkspaceUpdate(taskID)
+	defer unlockWorkspace()
 	slots, err := m.beginTaskPurge(taskID)
 	if err != nil {
 		return err

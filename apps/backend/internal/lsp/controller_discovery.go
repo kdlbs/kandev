@@ -36,6 +36,9 @@ func (c *Controller) RefreshDiscovery(ctx context.Context, taskID string) error 
 	if err := c.authorize(ctx, taskID); err != nil {
 		return err
 	}
+	if err := c.waitForStartup(ctx); err != nil {
+		return err
+	}
 	task, err := c.tasks.GetTask(ctx, taskID)
 	if err != nil {
 		return err
@@ -51,6 +54,9 @@ func (c *Controller) RefreshDiscovery(ctx context.Context, taskID string) error 
 // other live language receives an explicit restart-required overlay.
 func (c *Controller) WorkspaceSourcesChanged(ctx context.Context, taskID string) error {
 	if err := c.authorize(ctx, taskID); err != nil {
+		return err
+	}
+	if err := c.waitForStartup(ctx); err != nil {
 		return err
 	}
 	releaseAdmission, err := c.tasks.AcquireTaskLSPAdmission(ctx, taskID)

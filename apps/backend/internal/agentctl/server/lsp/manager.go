@@ -59,6 +59,10 @@ type Manager struct {
 	taskConfigs  map[string]Config
 	purgingTasks map[string]struct{}
 
+	workspaceUpdateMu    sync.Mutex
+	workspaceUpdateLocks map[string]*taskWorkspaceUpdateLock
+	workspaceCommitted   func(string, Config)
+
 	lifetimeMu      sync.Mutex
 	lifetimeCtx     context.Context
 	lifetimeCancel  context.CancelFunc
@@ -69,17 +73,18 @@ type Manager struct {
 
 func NewManager(cfg Config, processes ProcessManager, installerRegistry Installer, log *logger.Logger) *Manager {
 	return &Manager{
-		cfg:          cfg,
-		processes:    processes,
-		installer:    installerRegistry,
-		logger:       log,
-		slots:        make(map[string]*languageSlot),
-		snapshots:    make(map[string]Snapshot),
-		subscribers:  make(map[string]map[uint64]chan Snapshot),
-		taskConfigs:  make(map[string]Config),
-		purgingTasks: make(map[string]struct{}),
-		incarnation:  uuid.NewString(),
-		startedAt:    time.Now().UTC(),
+		cfg:                  cfg,
+		processes:            processes,
+		installer:            installerRegistry,
+		logger:               log,
+		slots:                make(map[string]*languageSlot),
+		snapshots:            make(map[string]Snapshot),
+		subscribers:          make(map[string]map[uint64]chan Snapshot),
+		taskConfigs:          make(map[string]Config),
+		purgingTasks:         make(map[string]struct{}),
+		workspaceUpdateLocks: make(map[string]*taskWorkspaceUpdateLock),
+		incarnation:          uuid.NewString(),
+		startedAt:            time.Now().UTC(),
 	}
 }
 
@@ -298,6 +303,8 @@ func (m *Manager) UpdateWorkspaceFoldersForTask(
 ) (sharedlsp.WorkspaceUpdateResult, error) {
 	taskID = normalizeTaskID(taskID, m.cfg.OwnerID)
 	folders = normalizeWorkspaceFolders(folders)
+	unlock := m.lockTaskWorkspaceUpdate(taskID)
+	defer unlock()
 	m.mu.Lock()
 	if _, purging := m.purgingTasks[taskID]; purging {
 		m.mu.Unlock()
@@ -311,6 +318,9 @@ func (m *Manager) UpdateWorkspaceFoldersForTask(
 	taskConfig.WorkspaceFolders = append([]WorkspaceFolder(nil), folders...)
 	m.taskConfigs[taskID] = taskConfig
 	m.mu.Unlock()
+	if m.workspaceCommitted != nil {
+		m.workspaceCommitted(taskID, taskConfig)
+	}
 	return m.applyWorkspaceFoldersForTask(taskID, taskConfig)
 }
 
@@ -330,6 +340,8 @@ func (m *Manager) UpdateWorkspaceForTask(
 	if len(folders) == 0 {
 		return sharedlsp.WorkspaceUpdateResult{}, errors.New("task LSP workspace has no valid roots")
 	}
+	unlock := m.lockTaskWorkspaceUpdate(taskID)
+	defer unlock()
 	m.mu.Lock()
 	if _, purging := m.purgingTasks[taskID]; purging {
 		m.mu.Unlock()
@@ -350,6 +362,9 @@ func (m *Manager) UpdateWorkspaceForTask(
 	}
 	m.taskConfigs[taskID] = taskConfig
 	m.mu.Unlock()
+	if m.workspaceCommitted != nil {
+		m.workspaceCommitted(taskID, taskConfig)
+	}
 	return m.applyWorkspaceFoldersForTask(taskID, taskConfig)
 }
 
@@ -845,19 +860,4 @@ func (m *Manager) slotForTask(taskID, language string) (*languageSlot, error) {
 		m.slots[key] = &languageSlot{}
 	}
 	return m.slots[key], nil
-}
-
-func (m *Manager) checkOpen() error {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if m.closed {
-		return ErrManagerClosed
-	}
-	return nil
-}
-
-func (m *Manager) isClosed() bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.closed
 }

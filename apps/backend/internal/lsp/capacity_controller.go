@@ -6,8 +6,9 @@ import (
 	"fmt"
 )
 
-// releaseCapacity frees one proven server generation and starts the oldest
-// accepted queued generation in the slot reserved for it by Capacity.Release.
+// releaseCapacity frees one proven server generation and asynchronously starts
+// the oldest accepted queued generation in the slot reserved by Capacity.Release.
+// A Stop never waits for another task's installer or task-host launch.
 func (c *Controller) releaseCapacity(
 	ctx context.Context,
 	key TaskLanguageKey,
@@ -17,10 +18,50 @@ func (c *Controller) releaseCapacity(
 	if next == nil {
 		return
 	}
-	_, _ = c.commands.submit(context.WithoutCancel(ctx), next.Key, ActionReconcile, "",
-		func(workCtx context.Context) (*LanguageSnapshot, error) {
-			return c.promoteCapacityEntry(workCtx, *next)
-		})
+	c.dispatchCapacityPromotion(ctx, *next)
+}
+
+func (c *Controller) dispatchCapacityPromotion(ctx context.Context, entry QueueEntry) {
+	c.lifecycleMu.Lock()
+	workCtx := context.WithoutCancel(ctx)
+	tracked := false
+	if c.lifecycleCtx != nil {
+		if c.lifecycleCtx.Err() != nil || c.lifecycleCancel == nil {
+			c.lifecycleMu.Unlock()
+			c.drainCapacityReservations(entry)
+			return
+		}
+		workCtx = c.lifecycleCtx
+		c.lifecycleWG.Add(1)
+		tracked = true
+	}
+	c.lifecycleMu.Unlock()
+
+	go func() {
+		if tracked {
+			defer c.lifecycleWG.Done()
+		}
+		started := make(chan struct{})
+		_, _ = c.commands.submitOwnedExclusive(workCtx, entry.Key, ActionReconcile,
+			func(workCtx context.Context) (*LanguageSnapshot, error) {
+				close(started)
+				return c.promoteCapacityEntry(workCtx, entry)
+			})
+		select {
+		case <-started:
+		default:
+			// A terminal command can cancel a queued promotion before its
+			// callback runs. Return that already-reserved slot to the queue.
+			c.releaseCapacity(workCtx, entry.Key, entry.Generation)
+		}
+	}()
+}
+
+func (c *Controller) drainCapacityReservations(entry QueueEntry) {
+	next := &entry
+	for next != nil {
+		next = c.capacity.Release(next.Key, next.Generation)
+	}
 }
 
 func (c *Controller) promoteCapacityEntry(

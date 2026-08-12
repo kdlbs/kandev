@@ -38,7 +38,8 @@ and obscure the actual task-level work that is still running.
   or passing the former two-minute idle boundary never changes task policy or stops a warm server.
 - A backend or browser may reattach to an initialized task-host generation. If the task host no
   longer exists, Kandev reports recovery and starts at most one replacement generation when the
-  effective policy requires it.
+  effective policy requires it. Missing backend cache state is not absence: an existing-only
+  physical reattachment that cannot launch or resume resources precedes every replacement.
 - Supported project languages are discovered without opening a matching file. Discovery reads
   names and extensions only; it never starts or installs a language server, evaluates a manifest,
   or triggers a project import. Each scan is limited to two seconds, 10,000 filesystem entries,
@@ -105,9 +106,10 @@ and obscure the actual task-level work that is still running.
   file URI is canonicalized and must resolve inside the backend-authorized task workspace or one of
   its repository roots; sibling paths, traversal, and symlink escapes fail before upstream traffic.
   Lexical task-root and authority/volume checks happen before filesystem resolution. Trusted
-  task-host setup canonicalizes and pins one OS root handle per authorized root before any browser
-  attaches; Windows uses the selected root's opened-handle identity so junction and mount-point roots
-  cannot defer their redirect until a browser child lookup. Browser authorization uses only
+  task-host setup opens and pins one OS root handle per authorized root before any browser attaches,
+  then derives and verifies the canonical identity from that same pinned handle. It never resolves
+  one root lookup and reopens the resulting pathname as authority. Windows junction and mount-point
+  roots therefore cannot defer their redirect until a browser child lookup. Browser authorization uses only
   handle-relative inspection, including across concurrent ancestor replacement. Symlink and Windows
   reparse targets are projected into the authorized root set before target lookup, with valid
   cross-root links switching pinned handles, so neither a direct UNC URI nor an in-root redirect to an
@@ -140,7 +142,10 @@ and obscure the actual task-level work that is still running.
   browser attachments, editor leases, detected languages, or queued desired state. The default is
   eight; `KANDEV_LSP_MAX_SERVERS` overrides it. The legacy `KANDEV_LSP_MAX_CONNECTIONS` value is a
   deprecated fallback only when the new variable is unset. Desired servers wait visibly for a slot
-  without starting/resuming a task host and are reconsidered when a slot is released.
+  without starting/resuming a task host and are reconsidered when a slot is released. Slot release
+  reserves the next entry atomically and promotes it asynchronously under controller lifecycle, so
+  stopping one task never waits for another task's installer or launch. A canceled promotion returns
+  its reservation exactly once and advances the queue.
 - Binary discovery, managed installation, and execution retain existing task-host trust
   boundaries. Kandev never executes a server from a repository or relative `PATH` entry. Managed
   npm/release binaries live under the task host's `~/.kandev/lsp-servers`; `gopls` uses the task
@@ -299,10 +304,11 @@ readiness. `restart_required` is also an overlay rather than a process phase: a 
 continue serving its previous workspace scope while clearly requiring an explained restart.
 
 The controller serializes commands per `(task_id, language)`. Concurrent duplicate commands while
-one transition is active coalesce. Different commands linearize in accepted order; the last
-accepted desired policy wins. A restart first proves the old generation stopped, then admits one
-new monotonic generation. Retrying the same task-host command after a transport timeout is
-idempotent.
+one transition is active coalesce. Non-terminal different commands linearize in accepted order.
+Explicit Stop, Disabled policy, and terminal task cleanup interrupt an accepted Start/install so
+shutdown never waits indefinitely behind startup; the terminal transition is the final desired
+state and process-tree proof. A restart first proves the old generation stopped, then admits one new
+monotonic generation. Retrying the same task-host command after a transport timeout is idempotent.
 
 An unexpected process or task-host stream failure keeps the desired policy and attempts automatic
 recovery after 1, 5, and 30 seconds. A generation that remains ready for five minutes resets that
@@ -346,10 +352,13 @@ reacquire capacity or replace Off after Stop has cancelled that watch.
 - **Initialize rejection:** phase becomes `error` and preserves the server's JSON-RPC error message
   as text. A slow but live initialize remains `initializing` with increasing elapsed time.
 - **Browser/attachment disconnect:** outstanding attachment requests are cancelled or forgotten,
-  its document references are released, and the task-host server and progress remain alive.
+  its document references are released, and the task-host server and progress remain alive. Live
+  task/language/session attachment intent survives browser transport replacement, and all sessions
+  rebind to the single replacement connection.
 - **Backend watch disconnect/restart:** the task host retains the generation. Recovery adopts its
-  snapshot before considering a new start. Stale backend progress is cleared if no matching live
-  generation exists.
+  snapshot and capacity before controls or background settings/discovery can consider a new start.
+  A cache miss first probes for the existing physical task host without creating or resuming one.
+  Stale backend progress is cleared only if no matching live generation exists.
 - **Agentctl/task-host loss:** its process manager reaps descendants. The backend records the loss
   and uses bounded recovery only after the old runtime is known dead.
 - **Environment replacement ambiguity:** Kandev blocks the replacement launch until the old
@@ -362,13 +371,16 @@ reacquire capacity or replace Off after Stop has cancelled that watch.
   itself is torn down, cleanup reaps the physical task host and every descendant.
 - **Workspace roots change:** supported dynamic folder updates keep the generation; otherwise the
   task reports `restart_required` without silently discarding an expensive import. Refresh holds
-  task/environment admission through runtime and durable-state updates, so terminal cleanup either
-  follows the refresh and purges it or blocks the refresh before runtime access.
+  task/environment admission through runtime and durable-state updates, and config commit plus live
+  application is serialized per task, so an older refresh cannot restore removed roots after a newer
+  refresh. Terminal cleanup either follows the refresh and purges it or blocks the refresh before
+  runtime access.
 - **Task stop/archive/delete:** cleanup cancels starts/recovery before runtime teardown. Failure of
   graceful LSP control falls back to the task environment's full process-tree cleanup. Delete
   removes the persistent row only after cleanup ownership is registered. Direct and cascade
-  terminal mutations persist a prepared cleanup barrier before inventory reads; abandoned barriers
-  are cancelled after a bounded interval even when transition-marker persistence failed.
+  terminal mutations publish exclusive admission intent and cancel active runtime readers before
+  waiting, then persist a prepared cleanup barrier before inventory reads. Abandoned barriers are
+  cancelled after a bounded interval even when transition-marker persistence failed.
 - **Task-host startup:** the runtime registration remains internal until agentctl readiness and
   task-environment credential persistence both commit. A failed rollback keeps the cleanup handle
   private and recovery retries physical teardown before permitting replacement.
@@ -393,6 +405,11 @@ capabilities, diagnostic cache, and open-document broker across browser and ordi
 reconnects. Those are runtime facts, not durable promises: agentctl or environment teardown clears
 them. Backend recovery then increments generation and reports one replacement start if policy still
 requires a server.
+
+The browser retains task/language/session attachment leases independently of its current transport
+generation. Task event registration is acknowledged before the LSP view performs its post-subscribe
+authoritative refresh, so an event between initial HTTP hydration and subscription establishment
+cannot leave stable stale state indefinitely.
 
 A temporary task stop or archive stops runtime state but preserves task policy and historical
 evidence. Unarchive/resume waits for a supported canonical environment, reruns bounded discovery,
@@ -479,6 +496,12 @@ task-environment cleanup merely because a browser remains connected.
   reaped and `task_lsp_languages` rows cascade away.
 - **GIVEN** a backend restart while agentctl and Kotlin remain alive, **WHEN** recovery reconciles,
   **THEN** it adopts the same generation/progress and does not repeat initialize/import.
+- **GIVEN** backend memory loses the task-host handle while its process remains alive, **WHEN** a
+  read or Ensure occurs, **THEN** Kandev reattaches to that stable physical host before permitting
+  any replacement process.
+- **GIVEN** Start is blocked in install or task-host launch, **WHEN** Stop, Disabled policy, or task
+  teardown is accepted, **THEN** the blocked work is cancelled and the terminal transition proceeds
+  without waiting for startup to finish.
 - **GIVEN** agentctl died during a backend restart, **WHEN** policy still wants Kotlin, **THEN**
   recovery proves the old runtime dead and starts exactly one next generation.
 - **GIVEN** a language server crashes repeatedly, **WHEN** Keep warm remains effective, **THEN**
@@ -487,6 +510,9 @@ task-environment cleanup merely because a browser remains connected.
 - **GIVEN** the task/language server cap is full, **WHEN** another task requests Start, **THEN** it
   queues before task-host resume, counts no browser lease, and starts once when a real server slot
   is released.
+- **GIVEN** task A releases a capacity slot while queued task B has a slow installer, **WHEN** A's
+  Stop completes, **THEN** A returns after its own durable stop proof without waiting for B; B's
+  promotion remains controller-owned and cancellation cannot leak its reserved slot.
 - **GIVEN** an SSH, Sprites, Remote Docker, unknown, or missing environment, **WHEN** Start is
   requested, **THEN** status is unsupported and no capacity, execution, installer, or process is
   acquired.
@@ -502,6 +528,12 @@ task-environment cleanup merely because a browser remains connected.
 - **GIVEN** two attachments edit one open file, **WHEN** changes arrive, **THEN** upstream versions
   increase in arrival order and the latest accepted text is analyzed without overwriting either
   browser's local buffer.
+- **GIVEN** two sessions share one task/language connection and its browser transport closes,
+  **WHEN** either session establishes the replacement transport, **THEN** both live session leases
+  rebind and continue routing through one upstream generation.
+- **GIVEN** initial task-LSP HTTP hydration completes before the task WebSocket subscription ACK,
+  **WHEN** lifecycle state changes in that interval, **THEN** a post-ACK authoritative refresh
+  converges the view even if the event itself was not delivered.
 - **GIVEN** the last editor closes a document while policy is Keep warm, **WHEN** `didClose` is sent,
   **THEN** document diagnostics may clear but the language-server generation remains running.
 - **GIVEN** a successful file save races with later typing, **WHEN** persistence returns, **THEN**
@@ -538,8 +570,9 @@ task-environment cleanup merely because a browser remains connected.
   names a document beneath that redirect, **THEN** the task host rejects the target before any DNS,
   SMB, or target-filesystem lookup.
 - **GIVEN** a backend-selected Windows workspace root is itself a junction or mount point, **WHEN**
-  the task host configures the generation, **THEN** it records and pins the opened root's canonical
-  identity before browser attachment, and later document traffic cannot reopen or rebind that root.
+  the task host configures the generation, **THEN** it records the canonical identity from the same
+  root handle it pins before browser attachment, and later document traffic cannot reopen or rebind
+  that root.
 - **GIVEN** a checked document ancestor is replaced by a symlink or reparse point while authorization
   is walking the path, **WHEN** the next component is inspected, **THEN** handle-relative traversal
   fails closed without touching an outside root or untrusted network authority.

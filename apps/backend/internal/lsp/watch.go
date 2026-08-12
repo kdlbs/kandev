@@ -50,14 +50,17 @@ func (c *Controller) StartReconciler(ctx context.Context) error {
 		return errors.New("task LSP reconciler already started")
 	}
 	workerCtx, cancel := context.WithCancel(ctx)
+	startupReady := make(chan struct{})
 	c.lifecycleCtx = workerCtx
 	c.lifecycleCancel = cancel
+	c.startupReady = startupReady
 	c.lifecycleWG.Add(1)
 	c.lifecycleMu.Unlock()
+	defer close(startupReady)
+	go c.runSettingsWorker(workerCtx)
 
 	settingsErr := c.rememberCurrentTaskSettings(workerCtx)
-	go c.runSettingsWorker(workerCtx)
-	reconcileErr := c.ReconcileAll(workerCtx)
+	reconcileErr := c.reconcileAll(workerCtx)
 	states, listErr := c.store.ListAllTaskLSPLanguages(workerCtx)
 	if listErr == nil {
 		for _, state := range states {
@@ -67,6 +70,25 @@ func (c *Controller) StartReconciler(ctx context.Context) error {
 		}
 	}
 	return errors.Join(settingsErr, reconcileErr, listErr)
+}
+
+// waitForStartup prevents controls from observing an empty capacity ledger
+// while durable live generations are still being adopted. Controllers that
+// have not started their reconciler retain their lightweight unit-test and
+// embedding behavior.
+func (c *Controller) waitForStartup(ctx context.Context) error {
+	c.lifecycleMu.Lock()
+	ready := c.startupReady
+	c.lifecycleMu.Unlock()
+	if ready == nil {
+		return nil
+	}
+	select {
+	case <-ready:
+		return nil
+	case <-ctx.Done():
+		return context.Cause(ctx)
+	}
 }
 
 func (c *Controller) Close(ctx context.Context) error {

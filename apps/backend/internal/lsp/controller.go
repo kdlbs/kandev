@@ -143,6 +143,7 @@ type Controller struct {
 	lifecycleMu      sync.Mutex
 	lifecycleCtx     context.Context
 	lifecycleCancel  context.CancelFunc
+	startupReady     chan struct{}
 	lifecycleWG      sync.WaitGroup
 	watches          map[TaskLanguageKey]*taskLanguageWatch
 	recoveries       map[TaskLanguageKey]*recoveryState
@@ -178,6 +179,9 @@ func NewController(config ControllerConfig) *Controller {
 
 func (c *Controller) Snapshot(ctx context.Context, taskID string) (*TaskSnapshot, error) {
 	if err := c.authorize(ctx, taskID); err != nil {
+		return nil, err
+	}
+	if err := c.waitForStartup(ctx); err != nil {
 		return nil, err
 	}
 	task, err := c.tasks.GetTask(ctx, taskID)
@@ -276,6 +280,17 @@ func (c *Controller) SetPolicy(
 	if !validPolicy(policy) {
 		return nil, fmt.Errorf("%w: %q", ErrInvalidPolicy, policy)
 	}
+	if err := c.waitForStartup(ctx); err != nil {
+		return nil, err
+	}
+	if policy == PolicyDisabled {
+		return c.commands.submitInterrupting(
+			ctx, TaskLanguageKey{TaskID: taskID, Language: language}, ActionSetPolicy, string(policy),
+			func(workCtx context.Context) (*LanguageSnapshot, error) {
+				return c.setPolicy(workCtx, taskID, language, policy, origin)
+			},
+		)
+	}
 	return c.commands.submit(ctx, TaskLanguageKey{TaskID: taskID, Language: language}, ActionSetPolicy, string(policy),
 		func(workCtx context.Context) (*LanguageSnapshot, error) {
 			return c.setPolicy(workCtx, taskID, language, policy, origin)
@@ -291,6 +306,9 @@ func (c *Controller) Start(
 		return nil, err
 	}
 	if err := validateLanguageAndOrigin(language, origin); err != nil {
+		return nil, err
+	}
+	if err := c.waitForStartup(ctx); err != nil {
 		return nil, err
 	}
 	key := TaskLanguageKey{TaskID: taskID, Language: language}
@@ -312,11 +330,21 @@ func (c *Controller) Stop(
 	if err := validateLanguageAndOrigin(language, origin); err != nil {
 		return nil, err
 	}
+	if err := c.waitForStartup(ctx); err != nil {
+		return nil, err
+	}
 	c.cancelRecovery(TaskLanguageKey{TaskID: taskID, Language: language})
-	return c.commands.submit(ctx, TaskLanguageKey{TaskID: taskID, Language: language}, ActionStop, "",
+	return c.commands.submitInterrupting(ctx, TaskLanguageKey{TaskID: taskID, Language: language}, ActionStop, "",
 		func(workCtx context.Context) (*LanguageSnapshot, error) {
 			return c.stop(workCtx, taskID, language, origin, ActionStop)
 		})
+}
+
+// CancelTaskOperations interrupts accepted task-language commands before a
+// terminal task mutation waits for exclusive runtime admission. The terminal
+// cleanup commands remain the final process-tree proof.
+func (c *Controller) CancelTaskOperations(taskID string) {
+	c.commands.cancelTask(taskID)
 }
 
 func (c *Controller) Restart(
@@ -328,6 +356,9 @@ func (c *Controller) Restart(
 		return nil, err
 	}
 	if err := validateLanguageAndOrigin(language, origin); err != nil {
+		return nil, err
+	}
+	if err := c.waitForStartup(ctx); err != nil {
 		return nil, err
 	}
 	key := TaskLanguageKey{TaskID: taskID, Language: language}
@@ -342,11 +373,8 @@ func (c *Controller) ResolveAttachment(
 	ctx context.Context,
 	taskID, language string,
 ) (*AttachmentTarget, error) {
-	if err := c.authorize(ctx, taskID); err != nil {
+	if err := c.validateAttachmentRequest(ctx, taskID, language); err != nil {
 		return nil, err
-	}
-	if !installer.IsSupported(language) {
-		return nil, fmt.Errorf("%w: %s", ErrUnsupportedLanguage, language)
 	}
 	task, err := c.tasks.GetTask(ctx, taskID)
 	if err != nil {
@@ -380,6 +408,16 @@ func (c *Controller) ResolveAttachment(
 		return nil, ErrAttachmentNotReady
 	}
 	return &AttachmentTarget{Host: host, Language: language, Generation: state.Generation}, nil
+}
+
+func (c *Controller) validateAttachmentRequest(ctx context.Context, taskID, language string) error {
+	if err := c.authorize(ctx, taskID); err != nil {
+		return err
+	}
+	if !installer.IsSupported(language) {
+		return fmt.Errorf("%w: %s", ErrUnsupportedLanguage, language)
+	}
+	return c.waitForStartup(ctx)
 }
 
 func (c *Controller) setPolicy(

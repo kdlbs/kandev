@@ -590,6 +590,10 @@ Wave 7 — independent review and CI remediation:
 
 - [x] [Task 15: Harden shared-environment recovery](task-15-harden-shared-environment-recovery.md)
 
+Wave 8 — exact-head recovery and concurrency remediation:
+
+- [ ] [Task 16: Harden task-host reattachment and terminal preemption](task-16-harden-reattachment-and-preemption.md)
+
 After all task checks pass, follow the repository commit, push, PR, and PR-fixup workflows. The PR
 must use the repository template, include docs impact and production E2E evidence, and remain in
 the primary conversation through CI/review remediation.

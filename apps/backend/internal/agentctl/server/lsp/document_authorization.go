@@ -34,6 +34,7 @@ type documentRoot struct {
 }
 
 type documentRootAccess interface {
+	Stat(string) (fs.FileInfo, error)
 	Lstat(string) (fs.FileInfo, error)
 	Readlink(string) (string, error)
 	Close() error
@@ -86,12 +87,15 @@ func (w *documentWorkspace) set(
 		if err != nil {
 			continue
 		}
-		canonical, err := w.resolveTrustedRootPath(lexical)
+		access, err := w.openRoot(lexical)
 		if err != nil {
 			continue
 		}
-		access, err := w.openRoot(canonical)
+		canonical, err := canonicalPinnedDocumentRootPath(
+			access, lexical, w.resolveTrustedRootPath,
+		)
 		if err != nil {
+			_ = access.Close()
 			continue
 		}
 		key := lexical + "\x00" + canonical

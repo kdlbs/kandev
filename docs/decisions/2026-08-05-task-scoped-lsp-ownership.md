@@ -45,6 +45,13 @@ generation exists. Task-host `Start` and `Restart` commands carry a backend-issu
 generation and are idempotent, which closes timeout/retry races. The agentctl instance idle reaper
 must treat an active task LSP runtime as owned background work.
 
+Loss of the backend's in-memory task-host handle is not proof that the physical host is absent.
+Both read and ensure paths first perform an executor-specific, existing-only reattachment that may
+not launch, resume, or provision resources. Only an authoritative not-found result permits a new
+task host. Backend startup reconciles and adopts live runtime generations into capacity before
+controls, settings work, attachments, or discovery can launch competing work; error snapshots count
+as possibly live unless their evidence proves process absence.
+
 Browsers attach through a task-and-language route after task-owner authorization. An attachment
 receives the initialized server capabilities and then exchanges feature requests and document
 notifications through the task-host multiplexer. Request IDs are namespaced by attachment and
@@ -55,9 +62,10 @@ documents or attachments remain. Browser-originated file URIs are canonicalized 
 backend-authorized task workspace and repository roots before upstream traffic; traversal, sibling
 paths, and symlink escapes are rejected at the task-host boundary. During trusted task-host
 configuration, the task host canonicalizes each backend-authorized root, resolves the selected root's
-opened-handle identity on Windows, and pins one OS root handle until the workspace projection changes
-or the generation closes. Browser attachment and document traffic cannot open, replace, or rebind
-those roots. The task host first proves lexical root and authority/volume membership without
+canonical identity from that same pinned handle, and pins that OS root until the workspace projection
+changes or the generation closes. It never resolves one pathname identity and then reopens that name
+as the trusted root. Browser attachment and document traffic cannot open, replace, or rebind those
+roots. The task host first proves lexical root and authority/volume membership without
 filesystem access, then performs only handle-relative component inspection. Every symlink or reparse
 target is projected back into an authorized canonical root before the target is inspected; a valid
 cross-root target switches to that root's pinned handle. These rooted operations fail closed when an
@@ -98,6 +106,12 @@ creation. Local PC/Worktree and Local Docker remain supported; Remote Docker, SS
 fail closed. Language-server commands still come only from Kandev's existing registry and managed
 cache or an absolute task-host `PATH`; project-controlled binaries remain forbidden.
 
+Releasing capacity atomically reserves the next queued task/language slot, then dispatches that
+promotion as controller-lifecycle-owned work. The Stop or cleanup that freed a slot never waits for
+another task's installer or process launch. Cancellation or failure before promotion begins returns
+the reservation exactly once and considers the next queued entry; controller shutdown cancels and
+joins any promotion already running.
+
 Task stop, archive, and delete cancel recovery and stop every language namespace owned by that
 task. Cleanup of a borrowing task cannot terminate another task's host or language slots. When a
 departing task owns a physical environment that another live task still uses, ownership transfers
@@ -111,6 +125,22 @@ survives temporary task stop and archive so task resume can reconcile it; task d
 the rows. Backend shutdown drops watches without making a browser or watch stream the stop owner.
 If the task host does not survive, recovery launches at most one new generation after the old
 runtime is known dead.
+
+Explicit Stop, Disabled policy, and terminal task cleanup are interrupting task-level transitions:
+they cancel an accepted Start/install before waiting for its language lane or task admission lock.
+Terminal task mutation publishes exclusive writer intent before cancellation so no new runtime
+reader can slip between cancellation and cleanup admission. Cleanup then remains the final
+process-tree proof. Non-terminal commands retain ordered per-language serialization.
+
+Browser connection generations do not own attachment intent. The frontend manager retains a stable
+task/language/session lease registry and rebuilds a replacement transport from every live lease, so
+one session cannot disappear when another session wins reconnect. Task event subscriptions expose
+their server acknowledgement; the task LSP view performs an authoritative refresh after that ACK,
+closing the gap between initial HTTP hydration and live event registration.
+
+Workspace configuration publication and live application are one serialized per-task transition.
+No earlier refresh may apply its folders, attachment roots, or snapshot after a later desired
+configuration has committed.
 
 Terminal task mutation reserves its durable cleanup admission barrier before reading sessions,
 worktrees, executions, or environment inventory. Every runtime-producing path, including queued

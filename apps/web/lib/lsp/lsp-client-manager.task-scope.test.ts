@@ -30,6 +30,7 @@ const { createMonacoHarness } = createLspManagerHarness(lspClientManager, mocks)
 
 const TASK_ID = "task/one";
 const LANGUAGE = "typescript";
+const WORKSPACE_URI = "file:///workspace";
 
 beforeEach(() => {
   lspClientManager.disconnectAll();
@@ -62,8 +63,8 @@ describe("task-scoped LSP attachment", () => {
         status: "attached",
         language: LANGUAGE,
         generation: 4,
-        workspaceUri: "file:///workspace",
-        workspaceFolders: [{ uri: "file:///workspace/backend", name: "backend" }],
+        workspaceUri: WORKSPACE_URI,
+        workspaceFolders: [{ uri: `${WORKSPACE_URI}/backend`, name: "backend" }],
         serverCapabilities: { completionProvider: {}, textDocumentSync: 1 },
       }),
     );
@@ -102,7 +103,7 @@ describe("task-scoped LSP attachment", () => {
         status: "attached",
         language: LANGUAGE,
         generation: 4,
-        workspaceUri: "file:///workspace",
+        workspaceUri: WORKSPACE_URI,
         workspaceFolders: [],
         serverCapabilities: { textDocumentSync: 1 },
       }),
@@ -131,5 +132,122 @@ describe("task-scoped LSP attachment", () => {
     expect(count("textDocument/didClose")).toBe(0);
     lspClientManager.closeDocument("session-b", LANGUAGE, documentUri);
     expect(count("textDocument/didClose")).toBe(1);
+  });
+});
+
+describe("task-scoped LSP reconnect", () => {
+  it("preserves every session lease across a browser transport generation", async () => {
+    vi.useFakeTimers();
+    const releaseA = lspClientManager.connect(TASK_ID, "session-a", LANGUAGE);
+    const releaseB = lspClientManager.connect(TASK_ID, "session-b", LANGUAGE);
+    const first = FakeWebSocket.instances[0];
+    first.failClosed(1006, "network interrupted");
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    const second = FakeWebSocket.instances[1];
+    second.open();
+    second.emitMessage(
+      JSON.stringify({
+        status: "attached",
+        language: LANGUAGE,
+        generation: 4,
+        workspaceUri: WORKSPACE_URI,
+        workspaceFolders: [],
+        serverCapabilities: { textDocumentSync: 1 },
+      }),
+    );
+    await vi.runAllTimersAsync();
+    expect(lspClientManager.getStatus(TASK_ID, LANGUAGE)).toEqual({ state: "ready" });
+
+    lspClientManager.openDocument("session-a", LANGUAGE, {
+      uri: "file:///workspace/A.ts",
+      languageId: LANGUAGE,
+      text: "export const a = 1;",
+    });
+    lspClientManager.openDocument("session-b", LANGUAGE, {
+      uri: "file:///workspace/B.ts",
+      languageId: LANGUAGE,
+      text: "export const b = 1;",
+    });
+    expect(
+      second.sent.filter((frame) => JSON.parse(frame).method === "textDocument/didOpen"),
+    ).toHaveLength(2);
+    releaseA();
+    expect(second.readyState).toBe(FakeWebSocket.OPEN);
+    releaseB();
+    expect(second.readyState).toBe(FakeWebSocket.CLOSED);
+    vi.useRealTimers();
+  });
+
+  it("cancels manager reconnect when the final stable lease releases", async () => {
+    vi.useFakeTimers();
+    const release = lspClientManager.connect(TASK_ID, "session-a", LANGUAGE);
+    FakeWebSocket.instances[0].failClosed(1006, "network interrupted");
+    release();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    vi.useRealTimers();
+  });
+
+  it("cancels a transport retry when close proves the attachment unavailable", async () => {
+    vi.useFakeTimers();
+    lspClientManager.connect(TASK_ID, "session-a", LANGUAGE);
+    const first = FakeWebSocket.instances[0];
+    first.onerror?.(new Event("error"));
+    first.failClosed(4004, "unsupported executor");
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(lspClientManager.getStatus(TASK_ID, LANGUAGE)).toMatchObject({
+      state: "unavailable",
+      cause: "unsupported_executor",
+    });
+    vi.useRealTimers();
+  });
+});
+
+describe("task-scoped LSP activation recovery", () => {
+  it("retries a failed attachment activation without losing its stable lease", async () => {
+    vi.useFakeTimers();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.waitForMonacoInstance.mockRejectedValueOnce(new Error("Monaco unavailable"));
+    const release = lspClientManager.connect(TASK_ID, "session-a", LANGUAGE);
+    const first = FakeWebSocket.instances[0];
+    first.open();
+    first.emitMessage(
+      JSON.stringify({
+        status: "attached",
+        language: LANGUAGE,
+        generation: 4,
+        workspaceUri: WORKSPACE_URI,
+        workspaceFolders: [],
+        serverCapabilities: { textDocumentSync: 1 },
+      }),
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(lspClientManager.getStatus(TASK_ID, LANGUAGE).state).toBe("error");
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    const second = FakeWebSocket.instances[1];
+    second.open();
+    second.emitMessage(
+      JSON.stringify({
+        status: "attached",
+        language: LANGUAGE,
+        generation: 4,
+        workspaceUri: WORKSPACE_URI,
+        workspaceFolders: [],
+        serverCapabilities: { textDocumentSync: 1 },
+      }),
+    );
+    await vi.runAllTimersAsync();
+    expect(lspClientManager.getStatus(TASK_ID, LANGUAGE)).toEqual({ state: "ready" });
+    release();
+    consoleError.mockRestore();
+    vi.useRealTimers();
   });
 });
