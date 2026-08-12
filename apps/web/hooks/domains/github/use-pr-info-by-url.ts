@@ -51,6 +51,8 @@ export type UsePRInfoByURLResult = {
   ensure: (url: string) => void;
   info: (url: string) => PRInfo | undefined;
   loading: (url: string) => boolean;
+  /** True after provider/built-in inspection settled, including a definitive no-match. */
+  settled: (url: string) => boolean;
   error: (url: string) => Error | undefined;
   inspection?: (url: string) => RepositoryInspection | undefined;
   clear: (url: string) => void;
@@ -348,7 +350,14 @@ function useURLStateAccessors(state: Record<string, URLState>) {
     (rawUrl: string): RepositoryInspection | undefined => state[rawUrl.trim()]?.inspection,
     [state],
   );
-  return { info, loading, error, inspection };
+  const settled = useCallback(
+    (rawUrl: string): boolean => {
+      const current = state[rawUrl.trim()];
+      return Boolean(current && !current.loading);
+    },
+    [state],
+  );
+  return { info, loading, settled, error, inspection };
 }
 
 function useRequestCleanup(refs: Refs): void {
@@ -445,7 +454,7 @@ export function usePRInfoByURL(workspaceId: string | null): UsePRInfoByURLResult
     [registryVersion, workspaceId],
   );
 
-  const { info, loading, error, inspection } = useURLStateAccessors(state);
+  const { info, loading, settled, error, inspection } = useURLStateAccessors(state);
   const clear = useCallback((rawUrl: string) => {
     const url = rawUrl.trim();
     if (!url) return;
@@ -467,5 +476,5 @@ export function usePRInfoByURL(workspaceId: string | null): UsePRInfoByURLResult
     });
   }, []);
 
-  return { ensure, info, loading, error, inspection, clear };
+  return { ensure, info, loading, settled, error, inspection, clear };
 }

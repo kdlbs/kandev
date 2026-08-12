@@ -11,6 +11,7 @@ export function repositoryProviderMatchesURL(
   provider: RepositoryProviderRegistration,
   url: string,
 ): boolean {
+  if (!provider.matchesURL) return true;
   try {
     return provider.matchesURL(url);
   } catch {

@@ -52,6 +52,12 @@ repositoryProviderIds?: string[] }`. `repositoryProviderIds` is JSON
 host before any bundle loads. Bundles are authored with React as an **external**;
 they must use `host.React` (NOT bundle their own React) to share the host instance.
 
+The independently consumable frontend type contract is the runtime-free
+`@kandev/plugin-sdk` package in `apps/packages/plugin-sdk`. Official plugins import
+these types instead of re-declaring this document or importing `apps/web` internals.
+The host has a compile-time assignability test, and the real Bitbucket package is a
+required exact-head compatibility consumer.
+
 ## `host: PluginHostApi`
 
 ```ts
@@ -59,12 +65,17 @@ interface PluginHostApi {
   pluginId: string;
   React: typeof import("react"); // host React instance (shared)
   jsx: typeof React.createElement; // convenience alias (h)
-  store: {
-    // kandev app store (zustand StoreApi)
-    getState(): AppState;
-    setState(partial): void;
-    subscribe(listener): () => void;
+  context: {
+    // Versioned provider-neutral reads; never exposes private AppState slices.
+    getActiveWorkspaceId(): string | undefined;
+    subscribeActiveWorkspace(listener): () => void;
+    getTaskCreationContext(workspaceId: string): TaskCreationContext | null;
+    subscribeTaskCreationContext(workspaceId: string, listener): () => void;
+    resolveRepositoryId(identity: RepositoryIdentityInput): string | undefined;
   };
+  // Compatibility only for older bundles. Deliberately absent from
+  // @kandev/plugin-sdk; new/official plugins must use host.context.
+  store: Pick<StoreApi<AppState>, "getState" | "setState" | "subscribe">;
   api: {
     // Low-level request scoped to this plugin's host path. It MUST NOT target a
     // public webhook path or be used for authenticated provider commands.
@@ -88,7 +99,7 @@ interface PluginHostApi {
     // dev/desktop base URL from window internals.
     baseUrl: string;
   };
-  ui: Record<string, unknown>; // curated @kandev/ui components + app UI (see below)
+  ui: PluginUIApi; // named curated host components; no open Record index
   // The resolved light/dark theme, read live on every access. `host` is built
   // once per plugin load, so copying this into a variable that outlives a
   // render freezes it; read it during render, and pair it with onThemeChange
@@ -706,7 +717,8 @@ interface RepositoryProviderRegistration {
     limit?: number;
     signal: AbortSignal;
   }): Promise<RepositoryInspection[] | RepositoryProviderPage>;
-  matchesURL(url: string): boolean;
+  // Optional synchronous performance hint. It never establishes ownership.
+  matchesURL?(url: string): boolean;
   listBranches(context: {
     workspaceId: string;
     repository: RepositoryInspection;
@@ -938,6 +950,11 @@ interface TaskFilterRegistration {
 }
 ```
 
+The host treats `matchesURL` only as a coarse candidate filter. It runs every
+remaining provider's cancellable, workspace-scoped `inspectURL`; `null` means the
+configured provider does not own the URL. One structured result wins, more than one
+is an ambiguity error, and registration order never decides ownership.
+
 ### App-status-bar slots
 
 `app-status-bar-left` and `app-status-bar-right` are live named component slots.
@@ -960,7 +977,8 @@ interface AppStatusBarSlotProps {
 `placement` matches registration slot. `presentation` identifies the mounted host;
 the host mounts only one presentation at once. `density` is `full` on desktop and
 phone drawer, `compact` on tablet. `pathname` and active IDs are current-context
-hints, not entity payloads; read complete records from `host.store`.
+hints, not entity payloads. Use a typed `host.context` read or host-verified action;
+do not inspect private store slices from a released plugin.
 
 Before customization, registration order is render order within each default side.
 Users can Cmd-drag on macOS or Ctrl-drag elsewhere with a mouse to move any item

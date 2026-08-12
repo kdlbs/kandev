@@ -74,6 +74,10 @@ surfaces. The core stays small; the ecosystem grows independently.
   revocable generic frontend contracts. A provider plugin can participate in native
   task creation, Link menus, desktop/mobile review surfaces, and composer `#` search
   without a host-specific provider branch.
+- The independently consumable, runtime-free `@kandev/plugin-sdk` package is the
+  frontend author contract. Official plugins use its typed `host.context` reads and
+  named UI/provider contracts instead of importing or copying private Kandev store,
+  React, Zustand, or `@/` application types.
 - First-party-parity code-host dashboards use host-owned provider-neutral list,
   toolbar, scope, task-menu, and linked-task primitives exposed through `host.ui`.
   Plugins provide normalized data and callbacks; task presets open the native
@@ -345,6 +349,7 @@ message Event {
 Expected response: `EventAck{}`. A non-nil gRPC error or a timeout counts as failure.
 
 Delivery semantics (unchanged from earlier design, now carried over gRPC):
+
 - **At-least-once.** Plugins must be idempotent (dedup by `event_id`).
 - **Timeout:** 10 seconds. Up to 3 retries with exponential backoff (5s, 15s, 45s).
 - **Sequential per plugin** — no concurrent delivery to the same plugin. Plugins
@@ -357,14 +362,14 @@ Event types: any subject kandev publishes on its internal event bus
 below is a non-exhaustive sample across feature areas — the plugin system is not tied to
 any one of them.
 
-| Category | Events |
-|----------|--------|
-| Tasks | `task.created`, `task.updated`, `task.state_changed`, `task.deleted`, `task.moved` |
-| Sessions | `task_session.state_changed`, `turn.started`, `turn.completed` |
-| Agents | `agent.started`, `agent.completed`, `agent.failed`, `agent.stopped` |
+| Category                       | Events                                                                                                                                                                                                            |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tasks                          | `task.created`, `task.updated`, `task.state_changed`, `task.deleted`, `task.moved`                                                                                                                                |
+| Sessions                       | `task_session.state_changed`, `turn.started`, `turn.completed`                                                                                                                                                    |
+| Agents                         | `agent.started`, `agent.completed`, `agent.failed`, `agent.stopped`                                                                                                                                               |
 | Other feature areas (examples) | Any additional subjects emitted by feature areas such as office/agents (e.g. `office.comment.created`, `office.approval.created`) — plugins may subscribe to these, but the plugin system does not depend on them |
-| GitHub | `github.pr_state_changed`, `github.pr_feedback`, `github.new_issue` |
-| Plugin | `plugin.<plugin_id>.<name>` (cross-plugin events) |
+| GitHub                         | `github.pr_state_changed`, `github.pr_feedback`, `github.new_issue`                                                                                                                                               |
+| Plugin                         | `plugin.<plugin_id>.<name>` (cross-plugin events)                                                                                                                                                                 |
 
 Wildcard subscriptions: `task.*`, `agent.*`, `<feature>.*` (any subject prefix).
 
@@ -492,18 +497,18 @@ domain structs. See [ADR 0043](../../decisions/0043-plugin-host-data-api.md) and
 
 **Readable resources (v1).** Each is gated by an `api_read:<resource>` capability:
 
-| RPC | Capability | Returns |
-|---|---|---|
-| `ListTasks` / `GetTask` | `api_read:tasks` | Tasks (id, workspace, workflow, title, description, state, priority, timestamps, parent, identifier, repositories, metadata) |
-| `ListWorkspaces` | `api_read:workspaces` | Workspaces (id, name, owner, defaults, timestamps) |
-| `ListWorkflows` | `api_read:workflows` | Workflows for a workspace |
-| `ListWorkflowSteps` | `api_read:workflows` | Steps for a workflow (id, name, position, stage type) |
-| `ListAgentProfiles` | `api_read:agent_profiles` | Agent profiles (id, agent id, display name, model, mode) |
-| `ListExecutorProfiles` | `api_read:executor_profiles` | Executor profiles (id, display name, executor type) |
-| `ListRepositories` | `api_read:repositories` | Repositories for a workspace (id, name, default branch) |
-| `ListSessions` | `api_read:sessions` | Session identity + agent context (id, task, agent profile, resolved display name + model, `acp_session_id`, state, timestamps) |
-| `ListSessionCodeStats` | `api_read:sessions` | **Computed** per-session code metrics: committed lines added/deleted, peak pending-diff lines added/deleted |
-| `ListMessages` | `api_read:messages` | Historical conversation content (id, session, task, turn, `author_type` (user/agent), `content`, `type`, `created_at`), filterable by session ids, task ids, a `created_at` range (`since`/`until`), and types. See "Conversation content" below. |
+| RPC                     | Capability                   | Returns                                                                                                                                                                                                                                           |
+| ----------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ListTasks` / `GetTask` | `api_read:tasks`             | Tasks (id, workspace, workflow, title, description, state, priority, timestamps, parent, identifier, repositories, metadata)                                                                                                                      |
+| `ListWorkspaces`        | `api_read:workspaces`        | Workspaces (id, name, owner, defaults, timestamps)                                                                                                                                                                                                |
+| `ListWorkflows`         | `api_read:workflows`         | Workflows for a workspace                                                                                                                                                                                                                         |
+| `ListWorkflowSteps`     | `api_read:workflows`         | Steps for a workflow (id, name, position, stage type)                                                                                                                                                                                             |
+| `ListAgentProfiles`     | `api_read:agent_profiles`    | Agent profiles (id, agent id, display name, model, mode)                                                                                                                                                                                          |
+| `ListExecutorProfiles`  | `api_read:executor_profiles` | Executor profiles (id, display name, executor type)                                                                                                                                                                                               |
+| `ListRepositories`      | `api_read:repositories`      | Repositories for a workspace (id, name, default branch)                                                                                                                                                                                           |
+| `ListSessions`          | `api_read:sessions`          | Session identity + agent context (id, task, agent profile, resolved display name + model, `acp_session_id`, state, timestamps)                                                                                                                    |
+| `ListSessionCodeStats`  | `api_read:sessions`          | **Computed** per-session code metrics: committed lines added/deleted, peak pending-diff lines added/deleted                                                                                                                                       |
+| `ListMessages`          | `api_read:messages`          | Historical conversation content (id, session, task, turn, `author_type` (user/agent), `content`, `type`, `created_at`), filterable by session ids, task ids, a `created_at` range (`since`/`until`), and types. See "Conversation content" below. |
 
 `acp_session_id` on a session is the external usage-attribution join key (e.g.
 `tokscale`): kandev exposes the session identity and code stats but stays out of
@@ -544,7 +549,7 @@ missing task returns gRPC `NotFound`.
 `Host.Messages().Send` (capability `api_write:messages`) delivers a prompt to a
 task session through the orchestrator's real delivery path — the same one
 `message_task` uses — so the message reaches the agent and drives a turn (it is
-*not* an office comment). It resolves the target session (an explicit
+_not_ an office comment). It resolves the target session (an explicit
 `session_id`, verified to belong to the task, or the task's primary session),
 records a user message stamped with the plugin source, and dispatches by session
 state: a running session queues the prompt (`status: queued`); an idle/completed
@@ -599,7 +604,7 @@ refreshes the list) reconciles the registry with whatever is actually on disk:
    registered and the others are reported as skipped, not registered.
 2. **Dropped tarballs.** Every `*.tar.gz` file sitting directly in the plugins
    directory is run through the same verified install pipeline `POST
-   /api/plugins/install` uses (checksum verification, manifest validation, platform
+/api/plugins/install` uses (checksum verification, manifest validation, platform
    executable check, extraction, spawn, activate). On success the tarball file is
    deleted. On a validation failure the file is left in place (not retried
    automatically) and the failure is reported.
@@ -690,11 +695,16 @@ Mattermost-webapp model), not iframes. The full contract lives in
 - **Task change-request links:** `host.openTaskLinkDialog(...)` renders the same
   one-field dialog anatomy, inline validation, Cancel/Save footer, submitting state,
   success toast, and close behavior as Kandev's GitHub task-link flow. Code-host
-  plugins supply provider copy and an authenticated `onSubmit(reference)` callback;
+  plugins supply provider copy and an authenticated
+  `onSubmit(reference, signal)` callback; closing, unmounting, or revoking the plugin
+  aborts that signal and suppresses late feedback;
   they do not build this workflow inside `openModal`. Link submenu children name only
   the target because the parent already supplies the verb.
 - **Provider registrations:** `registry.registerRepositoryProvider(...)` contributes
-  repository listing, URL matching/inspection, and branch listing; `inspectURL` returns
+  repository listing, optional coarse URL matching, structured URL inspection, and
+  branch listing. `matchesURL` is only a synchronous performance hint; workspace-scoped
+  `inspectURL` is authoritative, returns `null` when the configured provider does not
+  own the URL, and must produce exactly one winner across active providers. `inspectURL` returns
   a complete credential-free provider/repository/pull-request descriptor with an HTTPS
   clone URL. The host
   persists that descriptor rather than parsing plugin URLs. Once persisted, native task
@@ -712,7 +722,7 @@ Mattermost-webapp model), not iframes. The full contract lives in
 - **Task panels:** `registerTaskPanel({ id, title, icon?, Component, mobileEnabled? })`
   adds a row to the task workspace's "+" (add panel) menu; selecting it opens a
   dockview panel rendering `Component` with `{ panelId, taskId, sessionId,
-  presentation }`. Every plugin panel shares one generic `"plugin-panel"` dockview
+presentation }`. Every plugin panel shares one generic `"plugin-panel"` dockview
   component (identity in `params.pluginId`/`params.panelKey`), so a saved layout
   round-trips even when the owning plugin is later uninstalled — the layout manager
   drops an unresolvable reference instead of throwing, and `Settings > Layouts`
@@ -729,12 +739,12 @@ Mattermost-webapp model), not iframes. The full contract lives in
   the layout. Decision:
   ADR-2026-08-04-plugin-contribution-lifecycle-authority.
 - **Kanban card contributions:** `registerTaskMenuAction({ id, label, icon?,
-  group: "edit", visible?, run })` adds an item to the kanban card's `Edit`
+group: "edit", visible?, run })` adds an item to the kanban card's `Edit`
   submenu (the flat `Edit` item becomes `Edit > Edit task` once any plugin
   registers one); `run(context)` receives `{ workspaceId, taskId, taskTitle,
-  workflowStepId, presentation }`, and a rejected `run` is caught and logged
+workflowStepId, presentation }`, and a rejected `run` is caught and logged
   without blocking the menu from closing. `registerComponent("task-card-indicators",
-  C)` renders `C` beside the PR status icon on every kanban card, receiving
+C)` renders `C` beside the PR status icon on every kanban card, receiving
   `{ taskId, workspaceId, workflowStepId }` as `slotProps`.
   `registerComponent("task-card-tags", C)` renders `C` in its own row on every
   kanban card (below the badges row), receiving the same
@@ -762,13 +772,13 @@ error --successful Enable/health recovery--> active
 error --Disable--> disabled
 ```
 
-| State | Meaning |
-|---|---|
-| `registered` | Package extracted and record written; go-plugin spawn/handshake pending or in flight |
-| `active` | Handshake succeeded and health (`Ping`) passes; events delivered, webhooks proxied |
-| `error` | 3 consecutive `Ping` failures (30s interval, injectable), or the subprocess crashed and restart attempts (backoff, max 5) are exhausted. Events buffered (ring buffer, 100 events, 5-minute TTL). Webhooks return 503 |
-| `disabled` | Operator explicitly disabled. Subprocess stopped. No events, no webhooks. State and config preserved |
-| `uninstalled` | Subprocess stopped, package/record/state deleted (no grace period in v1) |
+| State         | Meaning                                                                                                                                                                                                               |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `registered`  | Package extracted and record written; go-plugin spawn/handshake pending or in flight                                                                                                                                  |
+| `active`      | Handshake succeeded and health (`Ping`) passes; events delivered, webhooks proxied                                                                                                                                    |
+| `error`       | 3 consecutive `Ping` failures (30s interval, injectable), or the subprocess crashed and restart attempts (backoff, max 5) are exhausted. Events buffered (ring buffer, 100 events, 5-minute TTL). Webhooks return 503 |
+| `disabled`    | Operator explicitly disabled. Subprocess stopped. No events, no webhooks. State and config preserved                                                                                                                  |
+| `uninstalled` | Subprocess stopped, package/record/state deleted (no grace period in v1)                                                                                                                                              |
 
 Health monitoring: kandev's go-plugin client calls `Ping()` on the plugin every 30
 seconds (injectable). 3 consecutive failures -> `error` + inbox item + restart attempt
@@ -1092,10 +1102,10 @@ complete.
   in the kandev origin with full app-store access. Isolating plugin JS in a worker,
   realm, or comparable sandbox is future work; v1 relies on only loading active,
   operator-installed plugins served same-origin.
-- **In-process backend plugins.** Plugin *backends* remain out-of-process — no Go
+- **In-process backend plugins.** Plugin _backends_ remain out-of-process — no Go
   plugin loading via `plugin.Open`, no WASM, no shared-memory communication. (This is
   distinct from the frontend bundle, which does load into the SPA.)
-- **Plugin marketplace or registry.** Out of scope *for this spec*: this spec covers
+- **Plugin marketplace or registry.** Out of scope _for this spec_: this spec covers
   install-by-URL/upload as a manual, single-plugin action. The discoverable, curated
   catalog (central registry, one-click install, star ranking, third-party sources) is
   a sibling feature specified in [marketplace.md](marketplace.md) and built on top of

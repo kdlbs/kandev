@@ -29,6 +29,13 @@ function makeHostFactory(pluginId: string): PluginHostApi {
       setState: () => {},
       subscribe: () => () => {},
     },
+    context: {
+      getActiveWorkspaceId: () => undefined,
+      subscribeActiveWorkspace: () => () => {},
+      getTaskCreationContext: () => null,
+      subscribeTaskCreationContext: () => () => {},
+      resolveRepositoryId: () => undefined,
+    },
     api: {
       fetch: async () => new Response(),
       invokeAction: async <TResponse>() => undefined as TResponse,
@@ -205,6 +212,7 @@ describe("loadPlugins — timed-out subscription isolation", () => {
   it("revokes subscriptions and requests and calls destroy after initialize times out", async () => {
     const themeUnsubscribe = vi.fn();
     const storageUnsubscribe = vi.fn();
+    const contextUnsubscribe = vi.fn();
     let requestSignal: AbortSignal | undefined;
     const destroy = vi.fn();
     const importer = fakeImporterFor({
@@ -213,6 +221,7 @@ describe("loadPlugins — timed-out subscription isolation", () => {
           initialize: (_registry: PluginRegistry, host: PluginHostApi) => {
             host.onThemeChange(() => {});
             host.storage.subscribe({ scope: "instance" }, () => {});
+            host.context.subscribeActiveWorkspace(() => {});
             void host.api.fetch("/slow").catch(() => undefined);
             return new Promise<void>(() => {});
           },
@@ -239,6 +248,10 @@ describe("loadPlugins — timed-out subscription isolation", () => {
         ...makeHostFactory(pluginId).storage,
         subscribe: () => storageUnsubscribe,
       },
+      context: {
+        ...makeHostFactory(pluginId).context,
+        subscribeActiveWorkspace: () => contextUnsubscribe,
+      },
     });
 
     await loadPlugins(
@@ -252,6 +265,7 @@ describe("loadPlugins — timed-out subscription isolation", () => {
     expect(requestSignal?.aborted).toBe(true);
     expect(themeUnsubscribe).toHaveBeenCalledOnce();
     expect(storageUnsubscribe).toHaveBeenCalledOnce();
+    expect(contextUnsubscribe).toHaveBeenCalledOnce();
     expect(destroy).toHaveBeenCalledOnce();
   });
 });

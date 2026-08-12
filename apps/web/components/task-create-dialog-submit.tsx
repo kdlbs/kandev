@@ -25,21 +25,11 @@ import {
   hasPendingAttachmentUploads,
   toMessageAttachments,
 } from "@/components/task-create-dialog-helpers";
-import { pluginRegistry } from "@/lib/plugins/registry";
+import { hasRegisteredRepositoryProviderCandidate } from "@/lib/plugins/repository-provider-url-resolution";
 
 const GENERIC_ERROR_MESSAGE = "An error occurred";
 const DUPLICATE_REPO_TITLE = "Duplicate repository";
 const UNRESOLVED_REPO_TITLE = "Repository is still being verified";
-
-function matchesRegisteredProviderURL(url: string): boolean {
-  return pluginRegistry.getRepositoryProviders().some((provider) => {
-    try {
-      return provider.matchesURL(url);
-    } catch {
-      return false;
-    }
-  });
-}
 
 function notifyQueuedTask(
   response: { queued_for_step_id?: string | null },
@@ -187,7 +177,14 @@ export function useTaskSubmitHandlers({
 
   const checkRemoteResolution = useCallback((): boolean => {
     if (!useRemote) return false;
-    const unresolved = findUnresolvedProviderRemote(remoteRepos, matchesRegisteredProviderURL);
+    const unresolved = findUnresolvedProviderRemote(remoteRepos, (url) => {
+      if (!hasRegisteredRepositoryProviderCandidate(url)) return false;
+      return (
+        !prInfoByUrl.settled(url) ||
+        Boolean(prInfoByUrl.inspection?.(url)) ||
+        Boolean(prInfoByUrl.error(url))
+      );
+    });
     if (!unresolved) return false;
     const resolutionError = prInfoByUrl.error(unresolved.url);
     toast({

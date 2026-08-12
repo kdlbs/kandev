@@ -28,6 +28,7 @@ var Handshake = plugin.HandshakeConfig{
 ```
 
 Env kandev injects into the subprocess:
+
 - `KANDEV_PLUGIN_DATA_DIR` — per-plugin writable dir (`~/.kandev/plugins/<id>/data`).
 
 ## 3. Proto (`apps/backend/proto/kandev/plugin/v1/plugin.proto`)
@@ -215,17 +216,17 @@ capability gating, and cross-cutting conventions. See ADR 0043
 **Readable resources.** Each read RPC requires `api_read:<resource>` in the
 plugin's manifest:
 
-| RPC | Capability | Resource |
-|---|---|---|
-| `ListTasks` / `GetTask` | `api_read:tasks` | tasks |
-| `ListWorkspaces` | `api_read:workspaces` | workspaces |
-| `ListWorkflows` | `api_read:workflows` | workflows |
-| `ListWorkflowSteps` | `api_read:workflows` | workflows |
-| `ListAgentProfiles` | `api_read:agent_profiles` | agent_profiles |
-| `ListExecutorProfiles` | `api_read:executor_profiles` | executor_profiles |
-| `ListRepositories` | `api_read:repositories` | repositories |
-| `ListSessions` | `api_read:sessions` | sessions |
-| `ListSessionCodeStats` | `api_read:sessions` | sessions |
+| RPC                     | Capability                   | Resource          |
+| ----------------------- | ---------------------------- | ----------------- |
+| `ListTasks` / `GetTask` | `api_read:tasks`             | tasks             |
+| `ListWorkspaces`        | `api_read:workspaces`        | workspaces        |
+| `ListWorkflows`         | `api_read:workflows`         | workflows         |
+| `ListWorkflowSteps`     | `api_read:workflows`         | workflows         |
+| `ListAgentProfiles`     | `api_read:agent_profiles`    | agent_profiles    |
+| `ListExecutorProfiles`  | `api_read:executor_profiles` | executor_profiles |
+| `ListRepositories`      | `api_read:repositories`      | repositories      |
+| `ListSessions`          | `api_read:sessions`          | sessions          |
+| `ListSessionCodeStats`  | `api_read:sessions`          | sessions          |
 
 An undeclared capability returns gRPC `PermissionDenied` with message
 `capability 'api_read:tasks' not declared` (substituting the actual resource) —
@@ -385,8 +386,8 @@ an incomplete plugin-provider scope fails closed.
 `GetGitCredentialBinding` receives the same scope and returns an opaque, non-secret
 generation checked before and after redemption; missing or changed bindings fail closed.
 Disabling, failing, or uninstalling a plugin immediately revokes leases for all
-manifest-declared provider IDs. Repository path matching is case-sensitive; only an
-exact trailing `.git` is treated as equivalent.
+manifest-declared provider IDs. Repository host and path matching are exact and
+case-sensitive. The broker does not add, remove, or equate a trailing `.git`.
 
 SDK types mirror proto but use `map[string]any` for Struct fields. The SDK owns
 all go-plugin/grpc plumbing (handshake, broker for Host, conversions).
@@ -492,8 +493,8 @@ the API, never the DB.
   converts the HTTP request to WebhookRequest and relays the WebhookResponse.
 - **Health**: go-plugin client `Ping()` every 30s (injectable), 3 consecutive
   failures → status `error` (+ restart attempt with backoff), recovery → `active`
-  + delivery flush. Crash (process exit) → immediate restart with backoff
-  (max 5 attempts, then `error`).
+  - delivery flush. Crash (process exit) → immediate restart with backoff
+    (max 5 attempts, then `error`).
 - **Capability gating**: each Host RPC checks the plugin's manifest capabilities
   before doing any work — `state` for `GetState`/`SetState`/`DeleteState`/
   `ListState`, `secrets` for `RevealSecret`, `api_read:<resource>` for each Host
@@ -524,7 +525,7 @@ runtime:
     linux-amd64: server/plugin-linux-amd64
     darwin-arm64: server/plugin-darwin-arm64
     # ... any subset
-min_kandev_version: "0.78.0"     # optional
+min_kandev_version: "0.78.0" # optional
 ```
 
 Install pipeline: `POST /api/plugins/install` with JSON `{"url": "..."}` OR
@@ -547,4 +548,7 @@ multipart field `package` → verify checksums.txt covers all files & hashes mat
   provider/review registration can enforce declared ownership. Omission remains
   compatible with older payloads. Failed or timed-out initialization rolls back partial
   registrations and fences late callbacks from the expired activation attempt.
+
+```
+
 ```

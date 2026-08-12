@@ -245,6 +245,14 @@ for its declared provider; exact repository path matching remains case-sensitive
 
 ## Scenarios
 
+- **GIVEN** the independently released Bitbucket UI bundle, **WHEN** it compiles or
+  launches native task creation, **THEN** it consumes `@kandev/plugin-sdk` and typed
+  `host.context` reads without copied host interfaces or private Zustand slice parsing.
+- **GIVEN** Bitbucket is active and a user pastes a URL owned by GitHub, GitLab, or
+  another self-hosted provider, **WHEN** Kandev probes registered repository providers,
+  **THEN** Bitbucket's workspace-scoped structured inspector returns no match and does
+  not steal the URL by hostname/path heuristics or registration order.
+
 - **GIVEN** a connected Cloud or Data Center workspace, **WHEN** a user selects a
   Bitbucket repository in native task creation, **THEN** Kandev persists the complete
   plugin-inspected descriptor and exact credential-free clone URL without host-side

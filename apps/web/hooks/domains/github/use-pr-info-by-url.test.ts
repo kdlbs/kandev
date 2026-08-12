@@ -16,7 +16,7 @@ import type { RepositoryInspection } from "@/lib/plugins/types";
 
 afterEach(() => {
   cleanup();
-  pluginRegistry.unregisterPlugin("test-bitbucket-provider");
+  pluginRegistry.unregisterPlugin(BITBUCKET_PLUGIN_ID);
   pluginRegistry.unregisterPlugin("test-coarse-provider");
   pluginRegistry.unregisterPlugin("test-exact-provider");
   fetchPRInfoMock.mockReset();
@@ -29,6 +29,7 @@ const PR_URL_B = "https://github.com/acme/api/pull/7";
 const ISSUE_URL_A = "https://github.com/acme/site/issues/1456";
 const REPO_URL = "https://github.com/acme/site";
 const WORKSPACE_ID = "workspace-1";
+const BITBUCKET_PLUGIN_ID = "test-bitbucket-provider";
 
 function makePR(overrides: { number: number; title?: string; head?: string; base?: string }) {
   return {
@@ -155,6 +156,27 @@ describe("usePRInfoByURL", () => {
 });
 
 describe("usePRInfoByURL registered provider metadata", () => {
+  it("falls back to the built-in owner after a matcherless provider returns no match", async () => {
+    const inspectURL = vi.fn().mockResolvedValue(null);
+    fetchPRInfoMock.mockResolvedValue(makePR({ number: 42, head: "github-head" }));
+    pluginRegistry.forPlugin(BITBUCKET_PLUGIN_ID).registerRepositoryProvider({
+      id: "bitbucket",
+      label: "Bitbucket",
+      listRepositories: async () => [],
+      listBranches: async () => [],
+      inspectURL,
+    });
+    const { result } = renderHook(() => usePRInfoByURL(WORKSPACE_ID));
+
+    act(() => result.current.ensure(PR_URL_A));
+
+    await waitFor(() => expect(result.current.settled(PR_URL_A)).toBe(true));
+    expect(result.current.info(PR_URL_A)?.prHeadBranch).toBe("github-head");
+    expect(result.current.inspection?.(PR_URL_A)).toBeUndefined();
+    expect(inspectURL).toHaveBeenCalledOnce();
+    expect(fetchPRInfoMock).toHaveBeenCalledOnce();
+  });
+
   it("imports pull-request metadata from a registered provider inspection", async () => {
     const url =
       "https://bitbucket.example.test/bitbucket/projects/PLATFORM/repos/web/pull-requests/42";
@@ -170,7 +192,7 @@ describe("usePRInfoByURL registered provider metadata", () => {
       pullRequest: { number: 42, title: "Data Center pull request" },
     };
     const inspectURL = vi.fn().mockResolvedValue(inspection);
-    pluginRegistry.forPlugin("test-bitbucket-provider").registerRepositoryProvider({
+    pluginRegistry.forPlugin(BITBUCKET_PLUGIN_ID).registerRepositoryProvider({
       id: "bitbucket",
       label: "Bitbucket",
       listRepositories: async () => [],
@@ -214,7 +236,7 @@ describe("usePRInfoByURL registered provider metadata", () => {
       pullRequest: { number: 42, title: "Plugin ready" },
     });
     act(() => {
-      pluginRegistry.forPlugin("test-bitbucket-provider").registerRepositoryProvider({
+      pluginRegistry.forPlugin(BITBUCKET_PLUGIN_ID).registerRepositoryProvider({
         id: "bitbucket",
         label: "Bitbucket",
         listRepositories: async () => [],

@@ -12,12 +12,13 @@ const PROVIDER_A_ID = "provider-a";
 function provider(
   id: string,
   inspectURL: RepositoryProviderRegistration["inspectURL"],
+  matchesURL: RepositoryProviderRegistration["matchesURL"] | null = () => true,
 ): RepositoryProviderRegistration {
   return {
     id,
     label: id,
     listRepositories: async () => [],
-    matchesURL: () => true,
+    ...(matchesURL ? { matchesURL } : {}),
     listBranches: async () => [],
     inspectURL,
   };
@@ -39,6 +40,22 @@ afterEach(() => {
 });
 
 describe("inspectRegisteredRepositoryURL", () => {
+  it("lets structured inspection establish ownership when a provider omits a coarse matcher", async () => {
+    pluginRegistry
+      .forPlugin(PLUGINS[0]!)
+      .registerRepositoryProvider(
+        provider(PROVIDER_A_ID, async () => inspection(PROVIDER_A_ID), null),
+      );
+
+    await expect(
+      inspectRegisteredRepositoryURL({
+        workspaceId: WORKSPACE_ID,
+        url: URL,
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toMatchObject({ provider: { id: PROVIDER_A_ID } });
+  });
+
   it("rejects ambiguous structured ownership instead of using registration order", async () => {
     pluginRegistry
       .forPlugin(PLUGINS[0]!)

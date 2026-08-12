@@ -4,7 +4,7 @@ Scoped guidance for `apps/web/`. Repo-wide rules (commit format, code-quality li
 
 ## Plugin authoring
 
-For plugin UI work, begin with the [canonical plugin authoring guide](../../docs/public/plugins-authoring.md). Follow: choose recipe → edit `manifest.yaml` → implement → validate → package → smoke test. The frontend contract pair is `../../docs/plans/plugins/PLUGIN-API.md` plus `lib/plugins/types.ts`; concrete shared Host UI exports are in `lib/plugins/host-api.ts`, and registration/cleanup behavior is in `lib/plugins/registry.ts` and `lib/plugins/host.ts`. Treat that pair as the source of truth for which hooks exist, and extend it in the same change rather than shipping a signature it does not declare.
+For plugin UI work, begin with the [canonical plugin authoring guide](../../docs/public/plugins-authoring.md). Follow: choose recipe → edit `manifest.yaml` → implement → validate → package → smoke test. The independently consumable author contract is `@kandev/plugin-sdk` in `../packages/plugin-sdk`; `../../docs/plans/plugins/PLUGIN-API.md` and `lib/plugins/types.ts` document and implement host compatibility. Concrete shared Host UI exports are in `lib/plugins/host-api.ts`, and registration/cleanup behavior is in `lib/plugins/registry.ts` and `lib/plugins/host.ts`. New and official plugins use typed `host.context` reads and never copy/import private `AppState` or Zustand slice shapes. Extend the SDK, host implementation, contract docs, and exact-consumer compatibility test together.
 
 ## UI Components
 
@@ -270,10 +270,10 @@ When you hit a limit, extract a helper function, custom hook, or sub-component. 
 
 ## Plugin system
 
-The frozen frontend contract is `docs/plans/plugins/PLUGIN-API.md`; `lib/plugins/types.ts`
-is its TS mirror — the two must change together. `lib/plugins/registry.ts` is the
-reactive singleton `PluginRegistry`; every `register*` call there needs a matching
-cleanup entry in `unregisterPlugin` and `totalCount()`, or a disabled/uninstalled
+The public frontend contract is `apps/packages/plugin-sdk`; `docs/plans/plugins/PLUGIN-API.md`
+and `lib/plugins/types.ts` are its detailed host implementation — all three must change
+together. `lib/plugins/registry.ts` is the reactive singleton `PluginRegistry`; every
+`register*` call needs matching cleanup in `unregisterPlugin` and `totalCount()`, or a disabled/uninstalled
 plugin leaks a stale registration.
 
 - **Task panels** (`registerTaskPanel`): one generic dockview component, `"plugin-panel"`, shared by

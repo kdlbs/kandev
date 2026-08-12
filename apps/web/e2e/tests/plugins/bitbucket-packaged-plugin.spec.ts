@@ -344,10 +344,10 @@ test.describe("Bitbucket packaged plugin", () => {
     await expect(taskRow).toBeVisible({ timeout: 15_000 });
     const icon = taskRow.getByTestId(`registered-change-request-task-icon-${task.id}`);
     await expect(icon).toHaveAttribute("aria-label", "1 Bitbucket pull request linked");
-    expect(getDetailRequests()).toBe(0);
+    await expect.poll(getDetailRequests).toBeGreaterThan(0);
+    await expect(icon).toHaveClass(/text-green-500/);
 
     await icon.hover();
-    await expect.poll(getDetailRequests).toBeGreaterThan(0);
     const summary = testPage
       .locator(
         '[data-slot="tooltip-content"]:not([data-state="closed"]) > [data-testid="pr-task-status-summary"]',
@@ -360,6 +360,5 @@ test.describe("Bitbucket packaged plugin", () => {
     );
     await expect(summary.getByTestId("pr-task-status-review")).toContainText("Approved");
     await expect(summary.getByTestId("pr-task-status-ci")).toContainText("Passed");
-    await expect(icon).toHaveClass(/text-green-500/);
   });
 });

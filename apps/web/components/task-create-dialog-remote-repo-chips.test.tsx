@@ -107,6 +107,7 @@ function makePrInfoByUrl(ensure = vi.fn()) {
   return {
     info: () => undefined,
     loading: () => false,
+    settled: () => true,
     error: () => undefined,
     ensure,
     clear: () => undefined,

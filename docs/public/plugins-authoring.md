@@ -146,7 +146,12 @@ ifUnmodifiedSince compare-and-swap.
 The guide summarizes the contract for discovery. These files remain the source
 of truth and must be updated together when the contract changes:
 
-- Frontend contract pair: docs/plans/plugins/PLUGIN-API.md and apps/web/lib/plugins/types.ts.
+- Versioned frontend author contract: `@kandev/plugin-sdk`, sourced from
+  `apps/packages/plugin-sdk`. Import it with `import type`; the package has no
+  runtime dependency on Kandev, React, Zustand, or private `@/` modules.
+- Frontend host implementation: docs/plans/plugins/PLUGIN-API.md and
+  apps/web/lib/plugins/types.ts. These may contain compatibility-only host
+  details that are deliberately absent from the public SDK.
 - Concrete frontend Host exports: apps/web/lib/plugins/host-api.ts.
 - Backend author API: apps/backend/pkg/pluginsdk.
 - Wire contract: apps/backend/proto/kandev/plugin/v1/plugin.proto.
@@ -179,6 +184,18 @@ ready generation that no longer registers a panel closes it, while an explicit
 disable or uninstall closes every panel owned by the plugin. This lifecycle
 bookkeeping is host-internal; plugins do not call lifecycle methods.
 
+Type frontend bundles against the versioned, runtime-free SDK rather than
+copying host interfaces or importing Kandev application files:
+
+```ts
+import type { PluginHostApi, PluginRegistry } from "@kandev/plugin-sdk";
+```
+
+Official code-host plugins use `host.context` for provider-neutral workspace,
+task-creation, and exact repository-identity reads. If a required read is
+missing, extend this typed context contract; do not reverse-engineer Zustand
+slice shapes in a released plugin.
+
 ### Frontend hook/API matrix
 
 | Surface                     | Location and input                                                                                                                                                                                                                                                                                     | Manifest requirement                                                   | Cleanup/lifecycle                                                                                                                                                                                               | Small example                                                                                                       |
@@ -197,7 +214,8 @@ bookkeeping is host-internal; plugins do not call lifecycle methods.
 | registerTaskMenuAction      | { id, label, icon?, group: "edit" \| "primary", visible?(context), run(context) }; "edit" nests inside the card's Edit submenu, "primary" renders as a flat top-level item between "Move to"/"Send to workflow" and "Link"                                                                             | Active ui.bundle                                                       | Action is revoked on disable/uninstall; a throwing/rejecting run is caught and logged                                                                                                                           | registry.registerTaskMenuAction({ id: "enhance", label: "Enhance", group: "edit", run: doEnhance })                 |
 | registerTaskFilter          | { id, label, getOptions(), matches(context, selected) }; adds a client-side, multi-select filter section to the kanban board's display dropdown, alongside Workflow/Repository                                                                                                                         | Active ui.bundle                                                       | Filter is revoked on disable/uninstall; selections are ephemeral (not persisted); matches is only called for a non-empty selection, and a throw is caught, logged, and treated as non-matching                  | registry.registerTaskFilter({ id: "tags", label: "Tags", getOptions: listTagOptions, matches: taskHasSelectedTag }) |
 | host.React / host.jsx       | Shared React instance and React.createElement alias                                                                                                                                                                                                                                                    | Active ui.bundle                                                       | No cleanup; never bundle a second React/Radix runtime                                                                                                                                                           | const h = host.jsx                                                                                                  |
-| host.store                  | Curated Zustand { getState, setState, subscribe } for the live app store                                                                                                                                                                                                                               | Active ui.bundle                                                       | Unsubscribe in destroy; setState mutates the whole SPA and is not a plugin database                                                                                                                             | const stop = host.store.subscribe(render)                                                                           |
+| host.context                | Versioned provider-neutral reads/subscriptions for active workspace, native task creation, and exact provider repository identity                                                                                                                                                                      | Active ui.bundle                                                       | Subscriptions are generation-owned and revoked on unload; records are stable SDK shapes, not private app state                                                                                                  | const context = host.context.getTaskCreationContext(workspaceId)                                                    |
+| host.store (legacy)         | Compatibility-only access to Kandev's private Zustand store; intentionally absent from `@kandev/plugin-sdk`                                                                                                                                                                                            | Older ui.bundle                                                        | Do not use in new or official plugins; private slices may change without plugin-API compatibility                                                                                                               | Migrate reads to host.context                                                                                       |
 | host.api.fetch / baseUrl    | fetch(path, init?) is scoped to /api/plugins/<id>/...; baseUrl is the backend origin for split-origin deployments                                                                                                                                                                                      | Active ui.bundle; backend path must be a declared webhook when relayed | Abort/ignore requests after destroy; do not assume a webhook authenticates callers                                                                                                                              | host.api.fetch("webhooks/inbound", { method: "POST" })                                                              |
 | host.api.invokeAction       | Authenticated call to a declared action with host-verified workspace/task/session/repository selectors and bounded untrusted body                                                                                                                                                                      | Matching manifest `actions[]` key/scope                                | Browser abort cancels the bounded plugin RPC; safe domain statuses and `Retry-After` may be returned                                                                                                            | host.api.invokeAction("reviews.get", { taskId }, { signal })                                                        |
 | host.storage                | Authenticated, per-user key/value storage: get(scope, scopeId, key, options?)/set(scope, scopeId, key, value, options?)/delete(scope, scopeId, key, options?)/list(scope, scopeId, options?) plus subscribe(filter, handler); no plugin backend required                                               | capabilities.user_state: true                                          | Reads and writes accept an AbortSignal; set/delete also accept writerId (appended to the host's per-tab id, not a replacement) for echo suppression; list returns every entry under the scope pair, unpaginated | host.storage.set("task", taskId, "note", value, { writerId: panelId, signal })                                      |
@@ -692,6 +710,14 @@ Kandev overwrites `RepositoryInspection.providerId` with the owning registration
 ID for both listing and URL inspection, so result data cannot claim another
 provider's namespace.
 
+`matchesURL` is an optional, synchronous performance hint, never an ownership
+decision. Omit it when ownership depends on workspace configuration (especially
+self-hosted origins). Kandev asks every remaining candidate to run cancellable,
+workspace-scoped `inspectURL`; return `null` for a URL the configured provider
+does not own. Exactly one structured inspection may succeed. Multiple successes
+are rejected as ambiguous instead of selecting registration order, while a real
+inspection failure is surfaced when no provider establishes ownership.
+
 A code-host review provider may publish normalized task chrome on each snapshot:
 
 ```ts
@@ -927,11 +953,17 @@ interface PluginHostApi {
   pluginId: string;
   React: typeof import("react"); // shared host React instance — MUST use this, never bundle your own React
   jsx: typeof React.createElement; // convenience alias
-  store: {
-    // kandev's live app store — read access is the common
-    getState(): AppState; // case; setState is exposed but writes affect the whole SPA
-    setState(partial): void;
-    subscribe(listener): () => void;
+  context: {
+    getActiveWorkspaceId(): string | undefined;
+    subscribeActiveWorkspace(listener): () => void;
+    getTaskCreationContext(workspaceId: string): TaskCreationContext | null;
+    subscribeTaskCreationContext(workspaceId: string, listener): () => void;
+    resolveRepositoryId(identity: {
+      workspaceId: string;
+      providerId: string;
+      providerScope: string;
+      providerRepositoryId: string;
+    }): string | undefined;
   };
   api: {
     // fetch scoped to /api/plugins/{id}/...; relayed to your webhook handler.
@@ -953,7 +985,7 @@ interface PluginHostApi {
     // plugin reach first-party kandev REST endpoints directly.
     baseUrl: string;
   };
-  ui: Record<string, unknown>; // curated @kandev/ui subset — see below
+  ui: PluginUIApi; // named curated host components — see @kandev/plugin-sdk
   theme: "light" | "dark";
   // Soft SPA navigation (history push/replace), same as the app's own router.
   navigate(href: string, options?: { replace?: boolean }): void;
@@ -990,6 +1022,10 @@ interface PluginModalHandle {
   close(): void; // no-op if already closed
 }
 ```
+
+A compatibility-only `host.store` remains for older bundles, but it is absent
+from `@kandev/plugin-sdk`. New plugins must not depend on private `AppState`
+records or mutate the SPA store.
 
 A plugin bundle must render with `host.React` / `host.jsx` — bundling your
 own React copy breaks hook identity against the host tree.
@@ -1129,12 +1165,16 @@ host.openTaskLinkDialog({
   emptyError: "Enter an Acme pull request URL or key.",
   failureMessage: "Failed to link Acme pull request.",
   successMessage: "Acme pull request linked",
-  onSubmit: async (reference) => {
-    await host.api.invokeAction("pullrequests.link", {
-      workspaceId,
-      taskId,
-      body: { reference },
-    });
+  onSubmit: async (reference, signal) => {
+    await host.api.invokeAction(
+      "pullrequests.link",
+      {
+        workspaceId,
+        taskId,
+        body: { reference },
+      },
+      { signal },
+    );
   },
 });
 ```
@@ -1351,7 +1391,9 @@ type AppStatusBarSlotProps = {
 };
 ```
 
-The IDs are hints; use `host.store` for full records. Each component registration
+The IDs are opaque context hints. Use a typed `host.context` read or a
+host-verified plugin action when the public contract exposes the needed record;
+request a context API extension rather than reading private store slices. Each component registration
 is one opaque item: Kandev does not inspect or separately reorder its children.
 The slot chooses the default side. A user can Cmd-drag (macOS) or Ctrl-drag
 (other desktop platforms) with a mouse across the full bar, and Kandev preserves

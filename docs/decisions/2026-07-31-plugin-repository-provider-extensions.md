@@ -23,6 +23,19 @@ The frontend plugin registry gains revocable, manifest-owned registrations for:
 - `registerReviewProvider(...)` with normalized task-item summaries, external-store
   `getSnapshot`/`subscribe`/cancellable `refresh`, and a plugin-owned `ReviewPanel`.
 
+The frontend author boundary is the independently consumable, runtime-free
+`@kandev/plugin-sdk` package. It exposes named provider/review/UI contracts and a
+typed `host.context` read service. Private Zustand `AppState` access remains only as
+legacy runtime compatibility and is not part of the public SDK; official and new
+plugins must request provider-neutral context additions instead of copying host store
+shapes.
+
+Repository URL ownership is established by cancellable, workspace-scoped structured
+inspection. `matchesURL` is optional and only narrows candidates; `inspectURL` returns
+`null` when the configured provider does not own the URL. The host rejects multiple
+successful inspectors as ambiguous rather than selecting registration order. This is
+required for overlapping self-hosted URL shapes.
+
 Providers have unique active ownership, are removed on plugin disable/unload, and
 abort their in-flight work. Activation is transactional: a failed or timed-out
 `initialize` revokes partial registrations and fences late callbacks from restoring
@@ -50,6 +63,8 @@ Repository providers and review actions become extensible without host provider
 knowledge. Registry lifecycle and normalized item contracts are more deliberate, and
 existing built-ins require adapter work. Plugin review components must tolerate host
 selection, persistence, task switching, close, and mobile presentation changes.
+Released frontend plugins compile against a semver contract instead of the host
+application's private module graph.
 
 ## Alternatives Considered
 

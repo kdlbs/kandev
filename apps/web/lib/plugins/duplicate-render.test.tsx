@@ -31,6 +31,13 @@ function makeHostFactory(pluginId: string): PluginHostApi {
     React,
     jsx: React.createElement,
     store: { getState: () => ({}) as never, setState: () => {}, subscribe: () => () => {} },
+    context: {
+      getActiveWorkspaceId: () => undefined,
+      subscribeActiveWorkspace: () => () => {},
+      getTaskCreationContext: () => null,
+      subscribeTaskCreationContext: () => () => {},
+      resolveRepositoryId: () => undefined,
+    },
     api: {
       fetch: async () => new Response(),
       invokeAction: async <TResponse,>() => undefined as TResponse,

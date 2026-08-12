@@ -108,8 +108,33 @@ export function generationFencedHost(
   };
 
   return {
-    ...host,
+    pluginId: host.pluginId,
+    React: host.React,
+    jsx: host.jsx,
     store: { ...host.store, setState, subscribe },
+    context: {
+      getActiveWorkspaceId: () => (isCurrent() ? host.context.getActiveWorkspaceId() : undefined),
+      subscribeActiveWorkspace: (listener) => {
+        if (!isCurrent()) return () => {};
+        return resources.track(
+          host.context.subscribeActiveWorkspace((workspaceId) => {
+            if (isCurrent()) listener(workspaceId);
+          }),
+        );
+      },
+      getTaskCreationContext: (workspaceId) =>
+        isCurrent() ? host.context.getTaskCreationContext(workspaceId) : null,
+      subscribeTaskCreationContext: (workspaceId, listener) => {
+        if (!isCurrent()) return () => {};
+        return resources.track(
+          host.context.subscribeTaskCreationContext(workspaceId, (context) => {
+            if (isCurrent()) listener(context);
+          }),
+        );
+      },
+      resolveRepositoryId: (identity) =>
+        isCurrent() ? host.context.resolveRepositoryId(identity) : undefined,
+    },
     api: {
       fetch,
       invokeAction,
@@ -117,6 +142,8 @@ export function generationFencedHost(
         return host.api.baseUrl;
       },
     },
+    ui: host.ui,
+    useResponsiveBreakpoint: host.useResponsiveBreakpoint,
     get theme() {
       return host.theme;
     },
@@ -139,6 +166,7 @@ export function generationFencedHost(
       if (isCurrent()) openTaskReviewAndTrack(host, resources, options);
     },
     toast: generationFencedToast(host.toast, isCurrent, resources),
+    utils: host.utils,
     storage: generationFencedStorage(host.storage, isCurrent, resources),
   };
 }

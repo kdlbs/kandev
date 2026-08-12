@@ -8,6 +8,7 @@ import { usePluginRegistry } from "@/lib/plugins/registry";
 import type { PluginHostRepository, PluginTaskActionContext } from "@/lib/plugins/types";
 import type { PluginTaskActionRegistration } from "@/lib/plugins/registry";
 import type { Repository } from "@/lib/types/http";
+import { toPluginHostRepository } from "@/lib/plugins/host-repository";
 import { useAppStore } from "@/components/state-provider";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { usePathname } from "@/lib/routing/client-router";
@@ -131,22 +132,6 @@ export function usePluginTaskLinkActions(
   }, [beforePluginRun, context, registry]);
 }
 
-function pluginHostRepository(repository: Repository): PluginHostRepository {
-  return {
-    id: repository.id,
-    workspace_id: repository.workspace_id,
-    name: repository.name,
-    provider: repository.provider,
-    source_type: repository.source_type,
-    provider_repo_id: repository.provider_repo_id,
-    ...(repository.provider_host ? { provider_host: repository.provider_host } : {}),
-    ...(repository.provider_owner ? { provider_owner: repository.provider_owner } : {}),
-    ...(repository.provider_name ? { provider_name: repository.provider_name } : {}),
-    ...(repository.remote_url ? { remote_url: repository.remote_url } : {}),
-    ...(repository.default_branch ? { default_branch: repository.default_branch } : {}),
-  };
-}
-
 export function pluginTaskRepositories(
   workspaceRepositories: readonly Repository[],
   repositoryLinks: readonly { repository_id: string; position?: number }[],
@@ -158,7 +143,7 @@ export function pluginTaskRepositories(
     .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
     .flatMap((link) => {
       const repository = byId.get(link.repository_id);
-      return repository ? [pluginHostRepository(repository)] : [];
+      return repository ? [toPluginHostRepository(repository)] : [];
     });
 }
 

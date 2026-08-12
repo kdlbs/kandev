@@ -137,6 +137,7 @@ import { useDockviewStore } from "@/lib/state/dockview-store";
 import { pluginModalManager } from "./modal-manager";
 import { readResolvedTheme, subscribeToThemeChanges } from "./theme";
 import { composeWriterId, subscribeToUserStateChanges } from "./user-state-sync";
+import { buildPluginContextApi } from "./plugin-context-api";
 import type {
   PluginActionInput,
   PluginActionOptions,
@@ -145,6 +146,7 @@ import type {
   PluginTaskLinkDialogOptions,
   PluginTaskReviewOptions,
 } from "./types";
+import type { PluginUIApi } from "@kandev/plugin-sdk";
 import {
   PluginStorageConflictError,
   type PluginStorageApi,
@@ -188,7 +190,7 @@ function PluginChangeRequestDetail(props: ChangeRequestDetailProps) {
  * tooltips, so a bundled second copy splits that context exactly the way a
  * second Radix copy does. Pure-React libs (e.g. icon sets) bundle fine.
  */
-const PLUGIN_UI: Record<string, unknown> = {
+const PLUGIN_UI: PluginUIApi & Record<string, unknown> = {
   Accordion,
   AccordionContent,
   AccordionItem,
@@ -396,6 +398,7 @@ export function buildHostApi(pluginId: string, storeApi: StoreApi<AppState>): Pl
       setState: storeApi.setState,
       subscribe: storeApi.subscribe,
     },
+    context: buildPluginContextApi(storeApi),
     api: {
       fetch: (path, init) => fetchPluginApi(pluginId, path, init),
       invokeAction: <TResponse>(

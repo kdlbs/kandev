@@ -6,6 +6,8 @@ import type * as ReactType from "react";
 import type { StoreApi } from "zustand";
 import type { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { AppState } from "@/lib/state/store";
+import type { PluginContextApi, PluginHostRepository, PluginUIApi } from "@kandev/plugin-sdk";
+export type { PluginContextApi, PluginHostRepository, PluginUIApi } from "@kandev/plugin-sdk";
 
 /** Entry in the boot payload's `plugins` array (backend `ActivePlugin`). */
 export interface ActivePlugin {
@@ -179,22 +181,6 @@ export interface RepositoryInspection {
   };
 }
 
-/** Stable read-only subset of a repository persisted by the Kandev host. */
-export interface PluginHostRepository {
-  id: string;
-  workspace_id: string;
-  name: string;
-  provider: string;
-  source_type?: string;
-  provider_repo_id?: string;
-  provider_host?: string;
-  provider_scope?: string;
-  provider_owner?: string;
-  provider_name?: string;
-  remote_url?: string;
-  default_branch?: string;
-}
-
 /** Provider-neutral branch descriptor consumed by Kandev's branch picker. */
 export interface RepositoryProviderBranch {
   name: string;
@@ -250,7 +236,8 @@ export interface RepositoryProviderRegistration {
     limit?: number;
     signal: AbortSignal;
   }): Promise<RepositoryProviderListResult>;
-  matchesURL(url: string): boolean;
+  /** Optional coarse hint only; workspace-scoped inspectURL is the ownership authority. */
+  matchesURL?(url: string): boolean;
   listBranches(context: {
     workspaceId: string;
     repository: RepositoryInspection;
@@ -656,6 +643,8 @@ export interface PluginHostApi {
   jsx: typeof ReactType.createElement;
   /** Kandev app store (zustand `StoreApi<AppState>`), curated to these 3 methods. */
   store: Pick<StoreApi<AppState>, "getState" | "setState" | "subscribe">;
+  /** Stable provider-neutral reads. New plugins must prefer this over `store`. */
+  context: PluginContextApi;
   api: {
     /** fetch scoped to `/api/plugins/{id}/...` via the kandev reverse proxy. */
     fetch(path: string, init?: RequestInit): Promise<Response>;
@@ -678,7 +667,7 @@ export interface PluginHostApi {
    * first-party app UI (PageTopbar, TaskCreateDialog, RichTextEditor,
    * RichTextReadOnly). See `lib/plugins/host-api.ts` for the full list.
    */
-  ui: Record<string, unknown>;
+  ui: Partial<PluginUIApi> & Record<string, unknown>;
   /** Canonical responsive breakpoint hook for host-native plugin composition. */
   useResponsiveBreakpoint: typeof useResponsiveBreakpoint;
   /**

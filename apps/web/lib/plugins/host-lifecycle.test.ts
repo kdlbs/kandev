@@ -30,6 +30,13 @@ function makeHostFactory(pluginId: string): PluginHostApi {
       setState: () => {},
       subscribe: () => () => {},
     },
+    context: {
+      getActiveWorkspaceId: () => undefined,
+      subscribeActiveWorkspace: () => () => {},
+      getTaskCreationContext: () => null,
+      subscribeTaskCreationContext: () => () => {},
+      resolveRepositoryId: () => undefined,
+    },
     api: {
       fetch: async () => new Response(),
       invokeAction: async <TResponse>() => undefined as TResponse,
