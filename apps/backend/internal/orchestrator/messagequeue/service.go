@@ -104,8 +104,9 @@ func (s *Service) SetAutoMergeEnabled(enabled bool) {
 }
 
 // WithSessionAdmission runs fn under the per-session queue admission lock.
-// All queue insertion paths use the same lock. The callback must complete
-// synchronously; queue methods called with its context reuse the held lock.
+// All queue insertion and mutation paths use the same lock. The callback must
+// complete synchronously; queue methods called with its context reuse the held
+// lock.
 func (s *Service) WithSessionAdmission(ctx context.Context, sessionID string, fn func(context.Context) error) error {
 	if fn == nil {
 		return errors.New("session admission callback is nil")
@@ -457,7 +458,9 @@ func lifecycleGenerationFromMetadata(metadata map[string]interface{}) (int64, bo
 }
 
 // ReserveQueued atomically takes an ordinary head entry or reserves a durable
-// lifecycle head entry. A reserved lifecycle row survives until acknowledged.
+// lifecycle head entry. The admission lock keeps drains from observing an
+// insert before its automatic-merge finalization completes. A reserved
+// lifecycle row survives until acknowledged.
 func (s *Service) ReserveQueued(ctx context.Context, sessionID string) (*QueuedMessage, bool) {
 	var msg *QueuedMessage
 	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {

@@ -27,7 +27,15 @@ export async function restoreMessageQueueSettings(
   apiClient: ApiClient,
   baseline: MessageQueueSettingsValue,
 ): Promise<void> {
-  await requestMessageQueueSettings(apiClient, "PATCH", baseline);
+  const current = await requestMessageQueueSettings(apiClient, "GET");
+  const patch: MessageQueueSettingsPatch = {
+    merge_enabled: baseline.merge_enabled,
+    auto_merge_enabled: baseline.auto_merge_enabled,
+  };
+  if (!current.effective.locked) {
+    patch.max_per_session = baseline.max_per_session;
+  }
+  await requestMessageQueueSettings(apiClient, "PATCH", patch);
 }
 
 /**

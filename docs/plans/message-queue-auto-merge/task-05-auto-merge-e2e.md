@@ -95,3 +95,7 @@ the same conversation.
   - focused attribution, steering, and sidebar-count audit: 3 tests;
   - focused E2E ESLint: zero warnings.
 - Blockers: none.
+
+Review remediation makes shared teardown read the effective environment lock
+before restoring and omit `max_per_session` when capacity is environment-
+controlled.
