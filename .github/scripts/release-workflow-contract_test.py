@@ -175,10 +175,14 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         direct_dependencies = {
             "build-desktop": ("prepare", "build-bundles"),
             "docker-amd64": ("prepare", "build-bundles"),
-            "docker-arm64": ("prepare", "build-bundles"),
+            "docker-arm64": ("prepare", "build-bundles", "docker-amd64"),
             "docker-manifest": ("prepare", "docker-amd64", "docker-arm64"),
             "docker-universal-amd64": ("prepare", "docker-manifest"),
-            "docker-universal-arm64": ("prepare", "docker-manifest"),
+            "docker-universal-arm64": (
+                "prepare",
+                "docker-manifest",
+                "docker-universal-amd64",
+            ),
             "docker-universal-manifest": (
                 "prepare",
                 "docker-universal-amd64",
@@ -690,6 +694,50 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn("bundle_dmg.sh", DIAGNOSTICS)
         self.assertIn('cp "$bundle_root/dmg/bundle_dmg.sh"', DIAGNOSTICS)
         self.assertIn("|| true", DIAGNOSTICS)
+
+    def test_ghcr_builds_retry_transient_failures_and_publish_digests(self) -> None:
+        for name in (
+            "Build and push (amd64 staging tag)",
+            "Build and push (arm64 staging tag)",
+            "Build and push (universal amd64 staging tag)",
+            "Build and push (universal arm64 staging tag)",
+        ):
+            build = step_block(name)
+            with self.subTest(step=name):
+                self.assertIn("bash scripts/release/retry-ghcr-command.sh", build)
+                self.assertIn("docker buildx build", build)
+                self.assertIn("--metadata-file", build)
+                self.assertIn("containerimage.digest", build)
+                self.assertIn('echo "digest=$digest" >> "$GITHUB_OUTPUT"', build)
+                self.assertNotIn("docker/build-push-action@", build)
+
+    def test_ghcr_manifest_mutations_retry_and_can_load_shared_helper(self) -> None:
+        for job, step in (
+            ("docker-manifest", "Combine arch images into multi-arch tags"),
+            ("docker-universal-manifest", "Promote staging to final tags"),
+        ):
+            block = job_block(job)
+            mutation = step_block(step)
+            with self.subTest(job=job):
+                self.assertIn("actions/checkout@", block)
+                self.assertIn("ref: ${{ needs.prepare.outputs.ref }}", block)
+                self.assertIn("bash scripts/release/retry-ghcr-command.sh", mutation)
+                self.assertIn("docker buildx imagetools create", mutation)
+
+    def test_ghcr_architecture_jobs_are_serialized(self) -> None:
+        self.assertIn(
+            "needs: [prepare, build-bundles, docker-amd64]",
+            job_block("docker-arm64"),
+        )
+        self.assertIn(
+            "needs: [prepare, docker-manifest, docker-universal-amd64]",
+            job_block("docker-universal-arm64"),
+        )
+
+    def test_release_validation_runs_ghcr_retry_regression(self) -> None:
+        self.assertIn("scripts/release/retry-ghcr-command.test.sh", LINT_WORKFLOW)
+        makefile = (REPO_ROOT / "Makefile").read_text()
+        self.assertIn("bash scripts/release/retry-ghcr-command.test.sh", makefile)
 
 
 if __name__ == "__main__":
