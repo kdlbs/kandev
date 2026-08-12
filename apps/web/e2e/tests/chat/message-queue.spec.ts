@@ -5,6 +5,12 @@ import type { ApiClient } from "../../helpers/api-client";
 import { typeWhileBusy } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
 import { expectFullQueueScrolls, seedFullQueueTask } from "./message-queue-scroll-helpers";
+import {
+  registerSeparateQueueRows,
+  requestMessageQueueSettings,
+} from "../../helpers/message-queue-settings";
+
+registerSeparateQueueRows(test);
 
 // ---------------------------------------------------------------------------
 // Quick Chat queue tests
@@ -229,6 +235,42 @@ test.describe("Task session queue", () => {
     await expectFullQueueScrolls(session);
   });
 
+  test("automatic merge compacts compatible user rows and disabled mode keeps them separate", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTask(seedData.workspaceId, "Automatic queue merge", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+    const { session_id: sessionId } = await apiClient.seedTaskSession(task.id, {
+      state: "RUNNING",
+      agentProfileId: seedData.agentProfileId,
+    });
+    await requestMessageQueueSettings(apiClient, "PATCH", { auto_merge_enabled: true });
+
+    await apiClient.queueMessage(task.id, sessionId, "automatic first");
+    await apiClient.queueMessage(task.id, sessionId, "automatic second");
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await openQueuePanel(session.activeChat());
+    const panel = session.activeChat().getByTestId("queued-ghost-list");
+    const entries = panel.getByTestId("queue-entry-text");
+    await expect(entries).toHaveCount(1);
+    await expect(entries.first()).toContainText("automatic first");
+    await expect(entries.first()).toContainText("automatic second");
+
+    await requestMessageQueueSettings(apiClient, "PATCH", { auto_merge_enabled: false });
+    await apiClient.queueMessage(task.id, sessionId, "separate third");
+    await apiClient.queueMessage(task.id, sessionId, "separate fourth");
+    await expect(entries).toHaveCount(3, { timeout: 10_000 });
+    await expect(entries.nth(1)).toHaveText("separate third");
+    await expect(entries.nth(2)).toHaveText("separate fourth");
+  });
+
   test("queue message via submit button on task session page", async ({
     testPage,
     apiClient,
@@ -287,10 +329,12 @@ test.describe("Task session queue", () => {
     );
     await session.sendMessage("/slow 30s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
+    await expect(session.chat.getByText("Running slow response (30s total)...")).toBeVisible({
+      timeout: 15_000,
+    });
     const taskID = new URL(testPage.url()).pathname.split("/").pop();
     if (!taskID) throw new Error("task URL did not contain a task ID");
     const workflowStepBefore = (await apiClient.getTask(taskID)).workflow_step_id;
-    await testPage.waitForTimeout(500);
 
     const editor = testPage.locator(".tiptap.ProseMirror").first();
     await queueMessagesWhileBusy(testPage, editor, [

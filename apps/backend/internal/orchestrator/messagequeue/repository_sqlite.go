@@ -1308,6 +1308,52 @@ func (r *sqliteRepository) MergeIntoAbove(ctx context.Context, sessionID, source
 	return &merged, nil
 }
 
+// AutoMergeIntoAbove folds one exact source into its immediate compatible
+// predecessor in one transaction. Missing or incompatible candidates are
+// successful skips and leave storage unchanged.
+func (r *sqliteRepository) AutoMergeIntoAbove(ctx context.Context, sessionID, sourceID string) (*QueuedMessage, bool, error) {
+	unlock := r.withSessionLock(sessionID)
+	defer unlock()
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, false, fmt.Errorf("begin automatic merge tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	source, err := readMergeSource(ctx, r, tx, sessionID, sourceID)
+	if errors.Is(err, ErrEntryNotFound) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	target, err := readMergeTarget(ctx, r, tx, sessionID, source.Position)
+	if errors.Is(err, ErrNoMergeTarget) {
+		return source, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	values, compatible := buildAutoMergedEntry(target, source)
+	if !compatible {
+		return source, false, nil
+	}
+	if err := applyMergeWrites(ctx, r, tx, target, source, values.content, values.attachments, values.metadata, sessionID); err != nil {
+		if errors.Is(err, ErrEntryNotFound) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, false, err
+	}
+	target.Content = values.content
+	target.Attachments = values.attachments
+	target.Metadata = values.metadata
+	return target, true, nil
+}
+
 // ReorderEntries atomically rewrites the FIFO positions of the session's
 // visible pending entries to match orderedIDs. Reserved in-flight lifecycle
 // rows keep their place in the sequence; visible rows are interleaved in the

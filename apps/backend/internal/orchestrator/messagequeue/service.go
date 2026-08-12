@@ -22,12 +22,13 @@ import (
 
 // Service manages queued messages for sessions, backed by Repository.
 type Service struct {
-	repo          Repository
-	maxPerSession atomic.Int64
-	mergeEnabled  atomic.Bool
-	logger        *logger.Logger
-	admissionMu   sync.Mutex
-	admissions    map[string]*sessionAdmission
+	repo             Repository
+	maxPerSession    atomic.Int64
+	mergeEnabled     atomic.Bool
+	autoMergeEnabled atomic.Bool
+	logger           *logger.Logger
+	admissionMu      sync.Mutex
+	admissions       map[string]*sessionAdmission
 }
 
 type sessionAdmission struct {
@@ -53,6 +54,7 @@ func NewService(repo Repository, maxPerSession int, log *logger.Logger) *Service
 	}
 	service.SetMaxPerSession(maxPerSession)
 	service.mergeEnabled.Store(true)
+	service.autoMergeEnabled.Store(true)
 	return service
 }
 
@@ -89,6 +91,16 @@ func (s *Service) MergeEnabled() bool { return s.mergeEnabled.Load() }
 // already applied.
 func (s *Service) SetMergeEnabled(enabled bool) {
 	s.mergeEnabled.Store(enabled)
+}
+
+// AutoMergeEnabled reports whether ordinary newly admitted messages may be
+// folded into a compatible queue tail. It is independent from manual merge.
+func (s *Service) AutoMergeEnabled() bool { return s.autoMergeEnabled.Load() }
+
+// SetAutoMergeEnabled toggles admission-time automatic merging. Existing rows
+// are never compacted retroactively.
+func (s *Service) SetAutoMergeEnabled(enabled bool) {
+	s.autoMergeEnabled.Store(enabled)
 }
 
 // WithSessionAdmission runs fn under the per-session queue admission lock.
@@ -140,14 +152,48 @@ func (s *Service) QueueMessage(ctx context.Context, sessionID, taskID, content, 
 // is propagated to the resulting Message row when the queued message is
 // drained (e.g. sender_task_id for messages sent via message_task_kandev).
 func (s *Service) QueueMessageWithMetadata(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}) (*QueuedMessage, error) {
-	return s.queueMessageWithMetadata(
-		ctx, sessionID, taskID, content, model, userID, planMode, attachments, metadata,
-		s.MaxPerSession(),
+	return s.queueMessageWithMetadataAdmission(
+		ctx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, nil,
 	)
 }
 
-// queueMessageWithMetadata is the admission-checked core of QueueMessageWithMetadata.
-func (s *Service) queueMessageWithMetadata(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, maxPerSession int) (*QueuedMessage, error) {
+// QueueMessageWithMetadataAfterInsert admits an exact source row, runs
+// afterInsert while the per-session admission lock remains held, then attempts
+// the snapshotted automatic fold. Callers use the hook to claim staged
+// attachments before folding; if it returns an error, no fold is attempted.
+func (s *Service) QueueMessageWithMetadataAfterInsert(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, afterInsert func(context.Context, *QueuedMessage) error) (*QueuedMessage, error) {
+	return s.queueMessageWithMetadataAdmission(
+		ctx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, afterInsert,
+	)
+}
+
+// queueMessageWithMetadataAdmission snapshots policy and completes admission
+// under one per-session lock.
+func (s *Service) queueMessageWithMetadataAdmission(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, afterInsert func(context.Context, *QueuedMessage) error) (*QueuedMessage, error) {
+	var queued *QueuedMessage
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		maxPerSession := s.MaxPerSession()
+		autoMergeEnabled := s.AutoMergeEnabled()
+		source, err := s.insertQueueMessageWithMetadata(
+			admittedCtx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, maxPerSession,
+		)
+		if err != nil {
+			return err
+		}
+		if afterInsert != nil {
+			if err := afterInsert(admittedCtx, source); err != nil {
+				return err
+			}
+		}
+		queued = s.finalizeAutoMerge(admittedCtx, source, autoMergeEnabled)
+		return nil
+	})
+	return queued, err
+}
+
+// queueMessageWithMetadataSeparate is used by retry paths whose existing
+// contract must not gain admission-time automatic behavior.
+func (s *Service) queueMessageWithMetadataSeparate(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, maxPerSession int) (*QueuedMessage, error) {
 	var queued *QueuedMessage
 	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
 		var err error
@@ -157,6 +203,28 @@ func (s *Service) queueMessageWithMetadata(ctx context.Context, sessionID, taskI
 		return err
 	})
 	return queued, err
+}
+
+func (s *Service) finalizeAutoMerge(ctx context.Context, source *QueuedMessage, enabled bool) *QueuedMessage {
+	if !enabled {
+		return source
+	}
+	merged, didMerge, err := s.repo.AutoMergeIntoAbove(ctx, source.SessionID, source.ID)
+	if err != nil {
+		s.logger.Error("automatic queue merge failed; preserving separate admission",
+			zap.String("session_id", source.SessionID),
+			zap.String("source_entry_id", source.ID),
+			zap.Error(err))
+		return source
+	}
+	if !didMerge || merged == nil {
+		return source
+	}
+	s.logger.Info("automatically merged queued entry into tail",
+		zap.String("session_id", source.SessionID),
+		zap.String("source_entry_id", source.ID),
+		zap.String("surviving_entry_id", merged.ID))
+	return merged
 }
 
 // insertQueueMessageWithMetadata inserts a message with metadata under the per-session admission lock.
@@ -293,7 +361,7 @@ func (s *Service) RequeueMessage(ctx context.Context, msg *QueuedMessage, queued
 			msg.Attachments, msg.Metadata, coalesceKey, true, 0,
 		)
 	}
-	queued, err := s.queueMessageWithMetadata(
+	queued, err := s.queueMessageWithMetadataSeparate(
 		ctx, msg.SessionID, msg.TaskID, msg.Content, msg.Model, queuedBy, msg.PlanMode,
 		msg.Attachments, msg.Metadata, 0,
 	)
