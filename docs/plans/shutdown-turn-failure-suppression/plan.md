@@ -144,7 +144,7 @@ via `newTestManager`).
 
 ## Implementation Waves And Parallel Candidates
 
-```
+```text
 Wave 1:
 - [x] [task-01-shutdown-failure-guard](task-01-shutdown-failure-guard.md)
 ```

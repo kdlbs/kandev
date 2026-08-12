@@ -70,7 +70,7 @@ disconnected before response`) -> `handleErrorEvent` -> `handleCompleteEvent` ->
   `mgr.StopAllAgents(ctx)` (which sets `IsShuttingDown()` true).
 
 ## Verification
-```
+```bash
 cd apps/backend && go test ./internal/agent/runtime/lifecycle/... && \
   golangci-lint run ./internal/agent/runtime/lifecycle/... --new-from-rev="$(git merge-base HEAD origin/main)" --timeout=5m
 ```
