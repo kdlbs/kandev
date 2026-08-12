@@ -622,6 +622,17 @@ type Service struct {
 	// guard does not grow without bound in long-running backend processes.
 	completedExecutions sync.Map
 
+	// readyTurnMarks records, per (session, execution, prompt generation),
+	// the turn ID handleAgentReady confirmed and is about to close via
+	// completeTurnForSession. handleCompleteStreamEvent's non-terminal branch
+	// reads this snapshot instead of querying active-turn state live: agent.ready
+	// is published synchronously and closes the turn before the complete-stream
+	// frame for the same completion is published (see publishPromptUsage's doc
+	// comment), so a live lookup at that point already finds the turn gone.
+	// Entries are consumed on read and expire after the same grace window as
+	// completedExecutions so an unread entry cannot grow the map unbounded.
+	readyTurnMarks sync.Map
+
 	// executionTeardownClaims arbitrates detached runtime teardown by
 	// "<session_id>::<execution_id>". Coordinator stop requests graceful
 	// teardown while terminal-event cleanup requests force teardown; the first

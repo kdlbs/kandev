@@ -48,7 +48,7 @@ func (s *Service) resolveCostForUsage(ctx context.Context, data PromptUsageData)
 	if s.pricingLookup == nil || data.Model == "" {
 		return costResolution{estimated: true, source: models.CostSourceUnpriced}
 	}
-	pricing, ok := s.pricingLookup.LookupForModel(ctx, data.Model)
+	pricing, catalogVersion, ok := s.lookupPricingWithVersion(ctx, data.Model)
 	if !ok {
 		return costResolution{estimated: true, source: models.CostSourceUnpriced}
 	}
@@ -64,16 +64,39 @@ func (s *Service) resolveCostForUsage(ctx context.Context, data PromptUsageData)
 			OutputPerMillion:      pricing.OutputPerMillion,
 		},
 	)
-	resolution := costResolution{
-		costSubcents: cost,
-		estimated:    data.Usage.Estimated,
-		source:       models.CostSourceModelsDevList,
-		rates:        &pricing,
+	return costResolution{
+		costSubcents:   cost,
+		estimated:      data.Usage.Estimated,
+		source:         models.CostSourceModelsDevList,
+		rates:          &pricing,
+		catalogVersion: catalogVersion,
 	}
+}
+
+// lookupPricingWithVersion resolves pricing and its catalogue version from
+// one atomic snapshot when s.pricingLookup satisfies
+// shared.PricingLookupWithVersion, so a concurrent background refresh can
+// never pair one catalogue's rates with a different catalogue's version
+// identifier on the stored row (docs/kandev/TODOS.md P1). Falls back to two
+// separate calls — accepting that narrower race — only for a PricingLookup
+// implementation (e.g. a test double) that doesn't support the atomic form;
+// CatalogVersion is optional there too, so a non-implementer simply reports
+// no version.
+func (s *Service) lookupPricingWithVersion(
+	ctx context.Context, model string,
+) (shared.ModelPricing, string, bool) {
+	if withVersion, ok := s.pricingLookup.(shared.PricingLookupWithVersion); ok {
+		return withVersion.LookupForModelWithVersion(ctx, model)
+	}
+	pricing, ok := s.pricingLookup.LookupForModel(ctx, model)
+	if !ok {
+		return shared.ModelPricing{}, "", false
+	}
+	var version string
 	if versioner, ok := s.pricingLookup.(shared.PricingCatalogVersioner); ok {
-		resolution.catalogVersion = versioner.CatalogVersion()
+		version = versioner.CatalogVersion()
 	}
-	return resolution
+	return pricing, version, true
 }
 
 // buildCostEvent assembles the office_cost_events row for a prompt-usage

@@ -543,6 +543,13 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	// later, unrelated provider overload starts its backoff fresh at attempt 1.
 	s.resetTransientRetry(data.SessionID)
 
+	// Snapshot the turn this event is about to close for the office cost
+	// subscriber's benefit: publishPromptUsage's complete-stream frame for
+	// this same completion is published (and processed) after this handler
+	// returns, by which point completeTurnForSession below has already
+	// removed it from activeTurns. See markReadyTurn's doc comment.
+	s.markReadyTurn(data.SessionID, data.AgentExecutionID, data.PromptGeneration, turnAtEventFire)
+
 	// Complete the current turn
 	s.completeTurnForSession(ctx, data.SessionID)
 

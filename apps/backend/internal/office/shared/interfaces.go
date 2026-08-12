@@ -166,6 +166,23 @@ type PricingCatalogVersioner interface {
 	CatalogVersion() string
 }
 
+// PricingLookupWithVersion is an optional capability a PricingLookup
+// implementation may satisfy to return pricing and its catalogue version
+// from one atomic snapshot. Calling LookupForModel and CatalogVersion
+// separately takes two independent lock acquisitions; a background refresh
+// can install a new catalogue in between and pair one catalogue's rates
+// with a different catalogue's version identifier on the stored row — a
+// provenance column that lies, which is the exact failure class
+// CostEvent.CostSource exists to eliminate. Callers type-assert and prefer
+// this over the separate calls whenever both values are needed together.
+type PricingLookupWithVersion interface {
+	// LookupForModelWithVersion behaves like PricingLookup.LookupForModel
+	// but also returns the catalogue version that produced the pricing,
+	// read from the same snapshot so the two can never describe different
+	// catalogue states.
+	LookupForModelWithVersion(ctx context.Context, modelID string) (pricing ModelPricing, version string, ok bool)
+}
+
 // SessionUsageWriter increments the cumulative tokens/cost columns on
 // task_sessions when a cost event lands. Implemented by the task repo.
 type SessionUsageWriter interface {

@@ -13,11 +13,16 @@ import (
 )
 
 // ErrDuplicateUsageEvent is returned by CreateCostEvent when the row's
-// UsageEventID collides with an existing one. Redelivery of the same
-// prompt-usage bus event (at-least-once event bus, or a subscriber retry)
-// must not double-count cost; callers treat this as an idempotent no-op,
-// not a failure, but still get a distinct signal to attribute to writer
-// health rather than to "written".
+// UsageEventID collides with an existing one. The real duplicate source is
+// not bus redelivery — neither the memory nor the NATS event bus redelivers
+// (see internal/events/bus/{memory,nats}.go) — it is the SAME underlying
+// completion frame reaching the publisher twice, e.g. a reconnecting WS
+// client replaying a buffered stream event (see
+// orchestrator.usageEventIDFor's doc comment for how the id is derived to
+// collide in exactly that case). Either way this must not double-count
+// cost; callers treat this as an idempotent no-op, not a failure, but still
+// get a distinct signal to attribute to writer health rather than to
+// "written".
 var ErrDuplicateUsageEvent = errors.New("duplicate usage_event_id")
 
 // usageEventIndexName is the partial unique index enforcing at most one row

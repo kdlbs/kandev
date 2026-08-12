@@ -1293,6 +1293,202 @@ func TestCompleteStreamFromCompletedExecutionPublishesTerminalTurn(t *testing.T)
 		"late terminal complete publish must identify the completed turn")
 }
 
+func findPromptUsageEvent(t *testing.T, eb *recordingEventBus) *lifecycle.SessionPromptUsageEventPayload {
+	t.Helper()
+	for _, rec := range eb.events {
+		if rec.subject != events.BuildSessionPromptUsageSubject("s1") {
+			continue
+		}
+		payload, ok := rec.event.Data.(lifecycle.SessionPromptUsageEventPayload)
+		require.True(t, ok, "session_prompt_usage.updated event carried an unexpected payload type")
+		return &payload
+	}
+	return nil
+}
+
+// TestPublishPromptUsage_NonTerminalCompletionUsesReadyTurnSnapshot is the
+// regression test for the ordinary (non-terminal) completion path: the agent
+// stays running, so agent.ready — not agent.completed — closes the turn.
+// handleAgentReady publishes agent.ready synchronously and closes the turn via
+// completeTurnForSession before the complete-stream frame for the same
+// completion is ever processed (see markReadyTurn's and
+// handleCompleteStreamEvent's doc comments), so a live active-turn lookup at
+// that point finds nothing and would store turn_id NULL.
+func TestPublishPromptUsage_NonTerminalCompletionUsesReadyTurnSnapshot(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+	}
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "t1", v1.TaskStateInProgress)
+	agentMgr := &mockAgentManager{isAgentRunning: true}
+	agentMgr.currentPromptExecutionID = "exec-1"
+	agentMgr.currentPromptGeneration.Store(7)
+	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentMgr)
+	svc.turnService = &repoTurnService{repo: repo}
+	eb := &recordingEventBus{}
+	svc.eventBus = eb
+
+	turn, err := svc.turnService.StartTurn(ctx, "s1")
+	require.NoError(t, err)
+
+	// The ready event closes the turn synchronously — before this test (or
+	// production) ever gets to publish the complete-stream frame below.
+	svc.handleAgentReady(ctx, watcher.AgentEventData{
+		TaskID: "t1", SessionID: "s1", AgentExecutionID: "exec-1", PromptGeneration: 7,
+	})
+
+	active, err := svc.turnService.GetActiveTurn(ctx, "s1")
+	require.NoError(t, err)
+	require.Nil(t, active, "handleAgentReady must have already closed the turn")
+
+	svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:      "t1",
+		SessionID:   "s1",
+		ExecutionID: "exec-1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type:             agentEventComplete,
+			PromptGeneration: 7,
+			Usage:            &streams.PromptUsage{InputTokens: 10, OutputTokens: 5},
+		},
+	})
+
+	usageEvent := findPromptUsageEvent(t, eb)
+	require.NotNil(t, usageEvent, "expected a session_prompt_usage.updated event to be published")
+	require.Equal(t, turn.ID, usageEvent.TurnID,
+		"non-terminal completion must carry the turn id the ready event just closed, not NULL")
+}
+
+// TestPublishPromptUsage_TerminalCompletionCarriesTurnID covers the terminal
+// (agent.completed) sibling of the case above: the marker snapshot taken by
+// markExecutionCompleted must also reach the published prompt-usage event.
+func TestPublishPromptUsage_TerminalCompletionCarriesTurnID(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+	eb := &recordingEventBus{}
+	svc.eventBus = eb
+
+	turn, err := svc.turnService.StartTurn(ctx, "s1")
+	require.NoError(t, err)
+	svc.markExecutionCompleted("s1", "exec-1")
+	svc.completeTurnForSession(ctx, "s1")
+
+	svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:      "t1",
+		SessionID:   "s1",
+		ExecutionID: "exec-1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type:  agentEventComplete,
+			Usage: &streams.PromptUsage{InputTokens: 10, OutputTokens: 5},
+		},
+	})
+
+	usageEvent := findPromptUsageEvent(t, eb)
+	require.NotNil(t, usageEvent, "expected a session_prompt_usage.updated event to be published")
+	require.Equal(t, turn.ID, usageEvent.TurnID,
+		"terminal completion must carry the marker's snapshotted turn id")
+}
+
+func findAllPromptUsageEvents(t *testing.T, eb *recordingEventBus, sessionID string) []lifecycle.SessionPromptUsageEventPayload {
+	t.Helper()
+	var out []lifecycle.SessionPromptUsageEventPayload
+	for _, rec := range eb.events {
+		if rec.subject != events.BuildSessionPromptUsageSubject(sessionID) {
+			continue
+		}
+		payload, ok := rec.event.Data.(lifecycle.SessionPromptUsageEventPayload)
+		require.True(t, ok, "session_prompt_usage.updated event carried an unexpected payload type")
+		out = append(out, payload)
+	}
+	return out
+}
+
+// TestUsageEventIDFor is the unit-level regression test for F2: the id must
+// be a deterministic function of (session, execution, prompt generation),
+// not a value minted fresh per call.
+func TestUsageEventIDFor(t *testing.T) {
+	a := usageEventIDFor("s1", "exec-1", 3)
+	b := usageEventIDFor("s1", "exec-1", 3)
+	require.Equal(t, a, b, "same (session, execution, prompt generation) must derive the same id")
+	require.NotEmpty(t, a)
+
+	require.NotEqual(t, a, usageEventIDFor("s1", "exec-1", 4),
+		"a different prompt generation must derive a different id")
+	require.NotEqual(t, a, usageEventIDFor("s1", "exec-2", 3),
+		"a different execution must derive a different id")
+	require.NotEqual(t, a, usageEventIDFor("s2", "exec-1", 3),
+		"a different session must derive a different id")
+
+	// promptGeneration==0 means the completion carries no generation
+	// tracking at all (see claimPromptCompletion's early return in the
+	// lifecycle package). Deriving a fixed key there would collide across
+	// genuinely distinct turns on a generation-less transport and silently
+	// under-count cost, so it must keep falling back to a random id.
+	require.NotEqual(t, usageEventIDFor("s1", "exec-1", 0), usageEventIDFor("s1", "exec-1", 0),
+		"promptGeneration==0 must not derive a stable id")
+}
+
+// TestPublishPromptUsage_RepublishedCompletionReusesUsageEventID is the
+// integration-level regression test for F2: a random UsageEventID minted on
+// every publish can only dedup literal redelivery of the identical
+// *bus.Event, which neither event bus provides (see
+// internal/events/bus/{memory,nats}.go). The real duplicate source is the
+// SAME completion frame reaching publishPromptUsage twice — e.g. a
+// reconnecting WS client replaying a buffered stream event, mirroring the
+// "late terminal complete" scenario already covered elsewhere in this file
+// (TestCompleteStreamFromCompletedExecutionSkipsDuplicateOfficeTeardown and
+// neighbors). Both publishes must carry the SAME usage_event_id so the
+// office cost subscriber's unique index — proven separately by
+// TestPromptUsage_DuplicateUsageEventIDIsIdempotent in internal/office/service
+// — rejects the second row as a duplicate rather than double-counting cost.
+func TestPublishPromptUsage_RepublishedCompletionReusesUsageEventID(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+	eb := &recordingEventBus{}
+	svc.eventBus = eb
+
+	_, err := svc.turnService.StartTurn(ctx, "s1")
+	require.NoError(t, err)
+	svc.markExecutionCompleted("s1", "exec-1")
+	svc.completeTurnForSession(ctx, "s1")
+
+	frame := func() *lifecycle.AgentStreamEventPayload {
+		return &lifecycle.AgentStreamEventPayload{
+			TaskID:      "t1",
+			SessionID:   "s1",
+			ExecutionID: "exec-1",
+			Data: &lifecycle.AgentStreamEventData{
+				Type:             agentEventComplete,
+				PromptGeneration: 3,
+				Usage:            &streams.PromptUsage{InputTokens: 10, OutputTokens: 5},
+			},
+		}
+	}
+
+	// Simulates the same buffered stream frame being delivered twice — same
+	// session, execution, and prompt generation both times.
+	svc.handleAgentStreamEvent(ctx, frame())
+	svc.handleAgentStreamEvent(ctx, frame())
+
+	published := findAllPromptUsageEvents(t, eb, "s1")
+	require.Len(t, published, 2, "expected both republished frames to publish a prompt-usage event")
+	require.NotEmpty(t, published[0].UsageEventID)
+	require.Equal(t, published[0].UsageEventID, published[1].UsageEventID,
+		"republishing the same completion must reuse the same usage_event_id so the DB unique index catches the duplicate")
+}
+
 func TestCompleteStreamFromCompletedExecutionSkipsDuplicateOfficeTeardown(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

@@ -21,6 +21,12 @@ import (
 
 const sessionModelConfigKey = "model"
 
+// usageEventIDNamespace seeds the deterministic UUID usageEventIDFor derives
+// for a prompt-usage completion. Arbitrary but fixed — any stable value
+// works since it only needs to be consistent across process restarts, never
+// shared with another namespace.
+var usageEventIDNamespace = uuid.MustParse("2f6a6f8c-6c1b-4b8a-9e3e-7a6d2c5b9f10")
+
 // handleAgentStreamEvent handles agent stream events (tool calls, message chunks, etc.)
 func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	if payload == nil || payload.Data == nil {
@@ -1329,6 +1335,64 @@ func (s *Service) terminalExecutionMarker(sessionID, executionID string) (termin
 	return marker, true
 }
 
+type readyTurnMark struct {
+	turnID    string
+	expiresAt time.Time
+}
+
+func readyTurnKey(sessionID, executionID string, promptGeneration uint64) string {
+	return fmt.Sprintf("%s\x00%s\x00%d", sessionID, executionID, promptGeneration)
+}
+
+// markReadyTurn records the turn ID handleAgentReady confirmed for
+// (sessionID, executionID, promptGeneration), just before completeTurnForSession
+// closes it and removes it from activeTurns. promptGeneration==0 covers events
+// that never publish agent.ready synchronously via this path (see
+// finishPromptCompletion), so there is no race for takeReadyTurnMark to guard
+// against there and no-op is correct.
+func (s *Service) markReadyTurn(sessionID, executionID string, promptGeneration uint64, turnID string) {
+	if sessionID == "" || executionID == "" || promptGeneration == 0 || turnID == "" {
+		return
+	}
+	key := readyTurnKey(sessionID, executionID, promptGeneration)
+	expiresAt := time.Now().Add(completedExecutionRetention)
+	s.readyTurnMarks.Store(key, readyTurnMark{turnID: turnID, expiresAt: expiresAt})
+	time.AfterFunc(completedExecutionRetention, func() {
+		s.deleteReadyTurnMarkIfExpired(key, expiresAt)
+	})
+}
+
+// takeReadyTurnMark consumes (and removes) the turn ID markReadyTurn recorded
+// for this completion, if any. A miss is expected whenever the completion
+// never went through handleAgentReady's synchronous ready path (or the mark
+// already expired); the caller falls back to a live lookup in that case.
+func (s *Service) takeReadyTurnMark(sessionID, executionID string, promptGeneration uint64) (string, bool) {
+	if sessionID == "" || executionID == "" || promptGeneration == 0 {
+		return "", false
+	}
+	key := readyTurnKey(sessionID, executionID, promptGeneration)
+	value, ok := s.readyTurnMarks.LoadAndDelete(key)
+	if !ok {
+		return "", false
+	}
+	mark, ok := value.(readyTurnMark)
+	if !ok || time.Now().After(mark.expiresAt) {
+		return "", false
+	}
+	return mark.turnID, true
+}
+
+func (s *Service) deleteReadyTurnMarkIfExpired(key string, expiresAt time.Time) {
+	value, ok := s.readyTurnMarks.Load(key)
+	if !ok {
+		return
+	}
+	current, ok := value.(readyTurnMark)
+	if !ok || !current.expiresAt.After(expiresAt) {
+		s.readyTurnMarks.Delete(key)
+	}
+}
+
 func (s *Service) currentTurnIDForSession(ctx context.Context, sessionID string) string {
 	if sessionID == "" {
 		return ""
@@ -1872,11 +1936,21 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 	// terminalCompleteStream is true — a marker found but not yet allowed
 	// to complete-stream can carry a turn id captured for a prior mark
 	// (see markTerminalExecution), which would misattribute this usage
-	// event's cost. The live lookup mirrors that snapshot's own read path
-	// (currentTurnIDForSession) without side effects.
+	// event's cost. On the non-terminal path, handleAgentReady's synchronous
+	// agent.ready publish (and the completeTurnForSession it triggers) has
+	// already run and closed the turn by the time this complete-stream frame
+	// is processed — see markReadyTurn's doc comment — so a live lookup here
+	// finds nothing. Prefer the snapshot handleAgentReady recorded for this
+	// exact (session, execution, prompt generation) completion; fall back to
+	// the live lookup only when no such mark exists (e.g. this completion
+	// never went through handleAgentReady's synchronous path).
 	promptUsageTurnID := terminalMarker.turnID
 	if !terminalCompleteStream {
-		promptUsageTurnID = s.currentTurnIDForSession(ctx, payload.SessionID)
+		if turnID, ok := s.takeReadyTurnMark(payload.SessionID, payload.ExecutionID, payload.Data.PromptGeneration); ok {
+			promptUsageTurnID = turnID
+		} else {
+			promptUsageTurnID = s.currentTurnIDForSession(ctx, payload.SessionID)
+		}
 	}
 	s.publishPromptUsage(ctx, payload, session, promptUsageTurnID)
 
@@ -2144,6 +2218,31 @@ func (s *Service) publishAgentPlanForTurn(ctx context.Context, payload *lifecycl
 	}
 }
 
+// usageEventIDFor derives the office cost subscriber's idempotency key from
+// immutable upstream identity — session, execution, and prompt generation —
+// instead of minting a fresh random value on every call. A minted-per-call
+// key can only dedup literal redelivery of the identical *bus.Event object,
+// which neither event bus provides (see internal/events/bus/{memory,nats}.go
+// — the memory bus delivers once synchronously with no retry, and the NATS
+// bus is plain core pub/sub, not JetStream). The real duplicate source is
+// the SAME underlying completion frame reaching publishPromptUsage twice —
+// e.g. a reconnecting WS client replaying a buffered stream event.
+//
+// promptGeneration==0 means this completion carries no generation tracking
+// at all (see claimPromptCompletion's early return in the lifecycle
+// package); deriving a key from (session, execution, 0) there would collide
+// across genuinely distinct turns on a generation-less transport and
+// silently under-count cost, which is worse than the duplicate-row bug this
+// fixes. Fall back to a random id in that narrow case — unchanged from
+// prior behavior there.
+func usageEventIDFor(sessionID, executionID string, promptGeneration uint64) string {
+	if sessionID == "" || executionID == "" || promptGeneration == 0 {
+		return uuid.New().String()
+	}
+	name := fmt.Sprintf("%s\x00%s\x00%d", sessionID, executionID, promptGeneration)
+	return uuid.NewSHA1(usageEventIDNamespace, []byte(name)).String()
+}
+
 // publishPromptUsage broadcasts prompt token usage to the WebSocket for the
 // frontend and to the office cost subscriber. Model and agent type (CLI
 // engine slug) come from payload first; when absent (which is the common
@@ -2153,10 +2252,10 @@ func (s *Service) publishAgentPlanForTurn(ctx context.Context, payload *lifecycl
 //
 // turnID is resolved by the caller (handleCompleteStreamEvent), not here:
 // the terminal-execution snapshot and the live active-turn lookup are both
-// call-site concerns. usageEventID is minted here, once, at the single
-// publish site — that is what makes it a stable idempotency key across
-// event redelivery; a downstream consumer minting its own would defeat the
-// point.
+// call-site concerns. usageEventID is derived here, once, at the single
+// publish site by usageEventIDFor — that is what makes it a stable
+// idempotency key across a republished frame; a downstream consumer
+// deriving its own would defeat the point.
 func (s *Service) publishPromptUsage(
 	ctx context.Context,
 	payload *lifecycle.AgentStreamEventPayload,
@@ -2171,15 +2270,17 @@ func (s *Service) publishPromptUsage(
 	model, agentType := resolvePromptUsageLabels(payload, session)
 
 	eventPayload := lifecycle.SessionPromptUsageEventPayload{
-		TaskID:       payload.TaskID,
-		SessionID:    sessionID,
-		AgentID:      payload.AgentID,
-		AgentType:    agentType,
-		Model:        model,
-		Usage:        payload.Data.Usage,
-		Timestamp:    time.Now().UTC().Format(time.RFC3339),
-		TurnID:       turnID,
-		UsageEventID: uuid.New().String(),
+		TaskID:    payload.TaskID,
+		SessionID: sessionID,
+		AgentID:   payload.AgentID,
+		AgentType: agentType,
+		Model:     model,
+		Usage:     payload.Data.Usage,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		TurnID:    turnID,
+		UsageEventID: usageEventIDFor(
+			sessionID, payload.ExecutionID, payload.Data.PromptGeneration,
+		),
 	}
 	subject := events.BuildSessionPromptUsageSubject(sessionID)
 	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionPromptUsageUpdated, "orchestrator", eventPayload))

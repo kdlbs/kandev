@@ -157,10 +157,66 @@ func (c *Client) LookupModelInfo(ctx context.Context, modelID string) (ModelInfo
 func (c *Client) CatalogVersion() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+	return c.catalogVersionLocked()
+}
+
+// catalogVersionLocked returns CatalogVersion's value assuming c.mu is
+// already held (read or write) by the caller. Factored out so
+// LookupForModelWithVersion can read pricing and version together under one
+// lock acquisition instead of two independent ones.
+func (c *Client) catalogVersionLocked() string {
 	if c.loadedAt.IsZero() {
 		return ""
 	}
 	return c.loadedAt.UTC().Format(time.RFC3339)
+}
+
+// LookupForModelWithVersion implements shared.PricingLookupWithVersion.
+// Identical lookup behavior to LookupForModel, but reads pricing and
+// CatalogVersion from the same snapshot in every branch — including the
+// cold-cache-buffer parse path, where the buffer and its version are
+// captured together before parsing — so a background refresh landing
+// mid-call can never pair one catalogue's rates with a different
+// catalogue's version identifier (docs/kandev/TODOS.md P1).
+func (c *Client) LookupForModelWithVersion(ctx context.Context, modelID string) (shared.ModelPricing, string, bool) {
+	key, strategy := Normalize(modelID)
+	if strategy != StrategyLookup {
+		return shared.ModelPricing{}, "", false
+	}
+	c.once.Do(func() { c.warmFromDisk(ctx) })
+
+	c.mu.RLock()
+	pricing, ok := c.index[key]
+	version := c.catalogVersionLocked()
+	c.mu.RUnlock()
+	if ok {
+		c.maybeRefresh(ctx)
+		return pricing, version, true
+	}
+
+	buf, bufVersion := c.snapshotBufferAndVersion()
+	if len(buf) > 0 {
+		if pricing, ok = lookupInDataset(buf, key); ok {
+			c.mu.Lock()
+			c.index[key] = pricing
+			c.mu.Unlock()
+			c.maybeRefresh(ctx)
+			return pricing, bufVersion, true
+		}
+	}
+
+	c.maybeRefresh(ctx)
+	return shared.ModelPricing{}, "", false
+}
+
+// snapshotBufferAndVersion returns the cache buffer and its catalogue
+// version together under one lock, so a caller that parses buf afterward
+// can report the version that actually produced it rather than whatever
+// version happens to be current by the time the parse finishes.
+func (c *Client) snapshotBufferAndVersion() ([]byte, string) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.cacheBuf, c.catalogVersionLocked()
 }
 
 // warmFromDisk reads the cache file into cacheBuf so subsequent
