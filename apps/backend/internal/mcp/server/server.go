@@ -978,7 +978,7 @@ The returned agent_profile_id is the effective agent profile used by the new ses
 
 Returns {task_id, session_id, state, agent_profile_id}.`),
 			mcp.WithString("prompt", mcp.Required(), mcp.Description("The spawned session's initial prompt. This is the ONLY context the new agent receives — be specific and detailed.")),
-			mcp.WithString("agent_profile_id", mcp.Description("Agent profile for the new session. Omit to reuse your own session's agent profile.")),
+			mcp.WithString("agent_profile_id", mcp.Description("Requested agent profile for the new session. Omit to inherit your session's profile; a workflow launch profile may override it.")),
 			mcp.WithString("name", mcp.Description("Optional session name shown on the session tab (e.g. 'reviewer'). Helps the user tell concurrent sessions apart.")),
 			mcp.WithString("task_id", mcp.Description("Task to spawn the session on. Omit to use your current task.")),
 		),

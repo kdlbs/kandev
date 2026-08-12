@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/spawn-session-effective-profile/spec.md
+spec: docs/specs/spawn-session-effective-profile/spec.md
 created: 2026-08-12
 status: complete
 ---
@@ -62,10 +62,13 @@ No frontend or E2E change is required. The change affects an MCP response and it
 - Task 01 red regressions failed as expected: the launch response omitted the
   effective profile, the MCP handler returned the requested profile, and the
   tool description omitted the effective response field.
-- Task 01 exact verification passed: 5 tests across the orchestrator, MCP
+- Task 01 exact verification passed: 6 tests across the orchestrator, MCP
   handlers, and MCP server packages.
 - Affected backend package verification passed: `go test ./internal/orchestrator
   ./internal/mcp/handlers ./internal/mcp/server -count=1`.
+- Full backend verification passed: `make -C apps/backend test` ran
+  `CGO_ENABLED=1 go test -tags fts5 ./...` successfully.
+- Backend lint passed: `make -C apps/backend lint` reported no issues.
 - Task 02 public-doc verification passed: 60 validation tests and 41 published
   pages validated.
 - Formatting and whitespace checks passed: `gofmt -l` reported no files and

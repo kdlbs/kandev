@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/spawn-session-effective-profile/spec.md"
+spec: "../../specs/spawn-session-effective-profile/spec.md"
 ---
 
 # Task 01: Propagate the effective profile
@@ -49,7 +49,7 @@ Make the synchronous launch result authoritative for the profile that `spawn_ses
 ## Verification
 
 ```bash
-cd "$(git rev-parse --show-toplevel)/apps/backend" && go test ./internal/orchestrator ./internal/mcp/handlers ./internal/mcp/server -run 'TestExecutionToLaunchResponseReportsAgentProfile|TestHandleSpawnSessionReportsEffectiveAgentProfile|TestSpawnSessionToolDescribesEffectiveAgentProfile|TestResolveMCPAutoStartConfig_WorkflowDefaultOutranksExplicit(OnUnpinnedStep|WhenStepOmitted)' -count=1
+cd "$(git rev-parse --show-toplevel)/apps/backend" && go test ./internal/orchestrator ./internal/mcp/handlers ./internal/mcp/server -run 'TestExecutionToLaunchResponseReportsAgentProfile|TestHandleSpawnSessionReports(Effective|StepPinned)AgentProfile|TestSpawnSessionToolDescribesEffectiveAgentProfile|TestResolveMCPAutoStartConfig_WorkflowDefaultOutranksExplicit(OnUnpinnedStep|WhenStepOmitted)' -count=1
 ```
 
 ## Dependencies
@@ -72,6 +72,12 @@ Report the files changed, the red and green test results, blockers, and risks. U
 - Green: `go test ./internal/orchestrator ./internal/mcp/handlers
   ./internal/mcp/server -run 'TestExecutionToLaunchResponseReportsAgentProfile|TestHandleSpawnSessionReportsEffectiveAgentProfile|TestSpawnSessionToolDescribesEffectiveAgentProfile|TestResolveMCPAutoStartConfig_WorkflowDefaultOutranksExplicit(OnUnpinnedStep|WhenStepOmitted)' -count=1`
   passed 5 tests in 3 packages.
+- Fixup regression extension: the focused command with
+  `TestHandleSpawnSessionReportsStepPinnedAgentProfile` passed 6 tests in 3
+  packages.
+- Full backend gate: `make -C apps/backend test` passed
+  `CGO_ENABLED=1 go test -tags fts5 ./...`.
+- Backend lint: `make -C apps/backend lint` passed with no issues.
 - Affected package suite: `go test ./internal/orchestrator
   ./internal/mcp/handlers ./internal/mcp/server -count=1` passed.
 - Formatting and whitespace checks passed. No throwaway files or logs remain.

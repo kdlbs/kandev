@@ -57,4 +57,4 @@ The successful `spawn_session_kandev` response has this shape:
 
 ## Implementation plan
 
-See [`../../../plans/spawn-session-effective-profile/plan.md`](../../../plans/spawn-session-effective-profile/plan.md).
+See [`../../plans/spawn-session-effective-profile/plan.md`](../../plans/spawn-session-effective-profile/plan.md).
