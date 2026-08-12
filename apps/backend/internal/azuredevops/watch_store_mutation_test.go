@@ -82,8 +82,10 @@ func TestStoreUpdatePullRequestWatchPersistsEveryMutableField(t *testing.T) {
 		got.MaxInflightTasks == nil || *got.MaxInflightTasks != 4 {
 		t.Fatalf("persisted watch = %+v", got)
 	}
-	if !got.UpdatedAt.After(got.CreatedAt) && got.UpdatedAt.Before(got.CreatedAt) {
-		t.Fatalf("updated_at = %v, created_at = %v", got.UpdatedAt, got.CreatedAt)
+	// The update must stamp a fresh updated_at; equal timestamps would mean the
+	// store persisted the row without advancing it.
+	if !got.UpdatedAt.After(got.CreatedAt) {
+		t.Fatalf("updated_at = %v, want it advanced past created_at = %v", got.UpdatedAt, got.CreatedAt)
 	}
 	// The disabled watch is still listed for its workspace; only deletion hides it.
 	list, err := store.ListPullRequestWatches(t.Context(), "ws-1")
