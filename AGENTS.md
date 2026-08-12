@@ -28,6 +28,8 @@ apps/
 
 A fresh git worktree shares `.git/` but **not** `apps/node_modules/`. The missing install breaks not just the commit-msg hook (`pnpm exec commitlint` → `Command "commitlint" not found` / `ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL`) but any pnpm command — `vitest` fails with `Failed to resolve import "vitest"`, eslint similarly. Run `pnpm install --frozen-lockfile` from `apps/` once after creating the worktree, before running tests/lint/commits; subsequent pnpm commands work normally.
 
+`apps/.npmrc` sets `production=false` and that is not optional: the runtime container image exports `NODE_ENV=production` (`Dockerfile`), which otherwise makes pnpm report `devDependencies: skipped because NODE_ENV is set to production` and install no vitest, eslint, or tsc at all. The workspace is only ever installed to develop, test, or build — the published artifacts are the Go binary and the Vite output, never `apps/` itself.
+
 ---
 
 ## Scoped guidance

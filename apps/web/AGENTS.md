@@ -293,8 +293,8 @@ plugin leaks a stale registration.
 
 ## Testing notes
 
+- `vitest.config.ts` pins `process.env.NODE_ENV = "test"`, and that line is load-bearing. React exports `act()` only from its development build, so under `NODE_ENV=production` — which the runtime image sets (`Dockerfile`) and every container/agent shell inherits, while CI's image does not — `@testing-library/react` falls back to `react-dom/test-utils` and **every** `render()`/`renderHook()` throws `TypeError: React.act is not a function` before any assertion, with CI still green. `vitest-environment.test.tsx` and the `vitest.setup.ts` preflight fail by name if the pin goes; `apps/cli/vitest.config.ts` pins it for the same reason.
 - jsdom drops `secure` cookies over `http`, so `document.cookie` reads back empty. To assert a cookie write in a Vitest unit test, intercept the setter with `Object.defineProperty(document, "cookie", { set: ... })` and restore it after.
 - jsdom synthetic mouse events do not reliably open Radix Tooltip. In component tests, use
-  `TooltipProvider` and assert keyboard focus; cover pointer hover in Playwright with `locator.hover()`
-  and a visible `role="tooltip"`, keeping regressions that jsdom cannot exercise.
+  `TooltipProvider` and assert keyboard focus; cover pointer hover in Playwright with `locator.hover()` and a visible `role="tooltip"`, keeping regressions that jsdom cannot exercise.
 - In Playwright tests, avoid strict locators that assume only one `terminal-panel` or `.xterm` exists. Mobile and dockview layouts can mount multiple terminal instances; scope to the active panel or use `.first()` / `.last()` deliberately with a comment or helper. Shared E2E helpers that inspect mounted React/DOM internals must also be scoped to the active panel/container, not global selectors, because hidden or stale mounted panels can coexist in dock/mobile layouts.

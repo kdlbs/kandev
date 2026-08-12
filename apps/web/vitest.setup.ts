@@ -1,6 +1,36 @@
 import type { Window as HappyDOMWindow } from "happy-dom";
+import * as React from "react";
 
 import { initI18nForTests, loadAllLocalesForTests } from "./lib/i18n";
+
+/**
+ * Fail with the diagnosis instead of the symptom.
+ *
+ * `act` is exported only by React's development build. Without it,
+ * `@testing-library/react`'s act-compat shim quietly falls back to the
+ * deprecated `react-dom/test-utils`, whose production build calls `React.act`
+ * and throws `TypeError: React.act is not a function` from inside
+ * `node_modules` on the first `render()` — in every suite at once, naming
+ * nothing that would lead you to the cause. That read as an environment quirk
+ * for as long as it went unfixed.
+ *
+ * `vitest.config.ts` pins `NODE_ENV=test`, which is the known cause. This guard
+ * stays because it also covers the ones that pin cannot: a duplicated `react`
+ * instance, or an alias resolving the shim and the components under test to
+ * different copies.
+ *
+ * A namespace import is deliberate — a named `import { act }` fails differently
+ * against the CJS production build, which is the case being diagnosed.
+ */
+if (typeof React.act !== "function") {
+  throw new Error(
+    `React.act is unavailable, so no test can render. React only exports act() from its ` +
+      `development build, and NODE_ENV is "${process.env.NODE_ENV}" here. ` +
+      `Check the NODE_ENV pin in vitest.config.ts, then that only one copy of react is installed ` +
+      `(pnpm why react). Without it @testing-library/react falls back to react-dom/test-utils and ` +
+      `every render() throws "TypeError: React.act is not a function".`,
+  );
+}
 
 /**
  * i18n test bootstrap.
