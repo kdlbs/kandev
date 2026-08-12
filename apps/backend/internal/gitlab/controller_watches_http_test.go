@@ -307,6 +307,12 @@ func TestHTTPTriggerReviewWatchReturnsMRsAndCount(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (body %s)", recorder.Code, recorder.Body.String())
 	}
+	if len(body.MRs) != 1 {
+		t.Fatalf("mrs = %+v, want the single seeded MR to reach the client", body.MRs)
+	}
+	if body.MRs[0].IID != 1 {
+		t.Errorf("mr iid = %d, want 1", body.MRs[0].IID)
+	}
 	if body.Count != len(body.MRs) {
 		t.Errorf("count = %d but mrs = %d; the two must agree", body.Count, len(body.MRs))
 	}
@@ -506,6 +512,12 @@ func TestHTTPTriggerIssueWatchReturnsIssuesAndCount(t *testing.T) {
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (body %s)", recorder.Code, recorder.Body.String())
+	}
+	if len(body.Issues) != 1 {
+		t.Fatalf("issues = %+v, want the single seeded issue to reach the client", body.Issues)
+	}
+	if body.Issues[0].IID != 3 {
+		t.Errorf("issue iid = %d, want 3", body.Issues[0].IID)
 	}
 	if body.Count != len(body.Issues) {
 		t.Errorf("count = %d but issues = %d; the two must agree", body.Count, len(body.Issues))

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -78,12 +79,12 @@ func (c *actionRecordingClient) GetProjectMergeMethods(ctx context.Context, proj
 	return c.MockClient.GetProjectMergeMethods(ctx, project)
 }
 
-func newActionFixture(t *testing.T) (*Service, *actionRecordingClient) {
+func newActionFixture(t *testing.T) (*Service, *actionRecordingClient, *logger.Logger) {
 	t.Helper()
 	client := &actionRecordingClient{MockClient: NewMockClient(DefaultHost)}
 	client.SetUser("alice")
-	svc, _, _ := newWSFixture(t, client)
-	return svc, client
+	svc, _, log := newWSFixture(t, client)
+	return svc, client, log
 }
 
 // projectAndIIDValidationCases is shared by every handler whose guard is the
@@ -106,10 +107,10 @@ func projectAndIIDValidationCases(t *testing.T, action string, handler ws.Handle
 // --- Merge ---
 
 func TestWSMergeMRMergesAndReturnsMR(t *testing.T) {
-	svc, client := newActionFixture(t)
+	svc, client, log := newActionFixture(t)
 	iid := client.SeedMR("group/p", &MR{Title: "feat: x", State: "opened"})
 
-	resp, err := wsMergeMR(svc, nil)(context.Background(),
+	resp, err := wsMergeMR(svc, log)(context.Background(),
 		wsRequest(t, ws.ActionGitLabMRMerge, map[string]interface{}{
 			"project": "group/p", "iid": iid, "method": "merge",
 		}))
@@ -125,11 +126,11 @@ func TestWSMergeMRMergesAndReturnsMR(t *testing.T) {
 // before the merge call: the project below allows only merge commits, so a
 // fast-forward request must fail rather than silently merging some other way.
 func TestWSMergeMRSurfacesDisallowedMethod(t *testing.T) {
-	svc, client := newActionFixture(t)
+	svc, client, log := newActionFixture(t)
 	client.mergeMethods = &ProjectMergeMethods{Merge: true}
 	iid := client.SeedMR("group/p", &MR{Title: "feat: x", State: "opened"})
 
-	resp, err := wsMergeMR(svc, nil)(context.Background(),
+	resp, err := wsMergeMR(svc, log)(context.Background(),
 		wsRequest(t, ws.ActionGitLabMRMerge, map[string]interface{}{
 			"project": "group/p", "iid": iid, "method": "ff",
 		}))
@@ -148,17 +149,17 @@ func TestWSMergeMRSurfacesDisallowedMethod(t *testing.T) {
 }
 
 func TestWSMergeMRValidatesProjectAndIID(t *testing.T) {
-	svc, _ := newActionFixture(t)
-	projectAndIIDValidationCases(t, ws.ActionGitLabMRMerge, wsMergeMR(svc, nil))
+	svc, _, log := newActionFixture(t)
+	projectAndIIDValidationCases(t, ws.ActionGitLabMRMerge, wsMergeMR(svc, log))
 }
 
 // --- Approve / unapprove ---
 
 func TestWSApproveMRRecordsApproval(t *testing.T) {
-	svc, client := newActionFixture(t)
+	svc, client, log := newActionFixture(t)
 	iid := client.SeedMR("group/p", &MR{Title: "feat: x", State: "opened"})
 
-	resp, err := wsApproveMR(svc, nil)(context.Background(),
+	resp, err := wsApproveMR(svc, log)(context.Background(),
 		wsRequest(t, ws.ActionGitLabMRApprove, map[string]interface{}{"project": "group/p", "iid": iid}))
 
 	var body map[string]bool
@@ -176,25 +177,25 @@ func TestWSApproveMRRecordsApproval(t *testing.T) {
 }
 
 func TestWSApproveMRSurfacesUpstreamFailure(t *testing.T) {
-	svc, _ := newActionFixture(t)
+	svc, _, log := newActionFixture(t)
 
-	resp, err := wsApproveMR(svc, nil)(context.Background(),
+	resp, err := wsApproveMR(svc, log)(context.Background(),
 		wsRequest(t, ws.ActionGitLabMRApprove, map[string]interface{}{"project": "group/p", "iid": 404}))
 
 	wsErr(t, resp, err, ws.ActionGitLabMRApprove, ws.ErrorCodeInternalError, "")
 }
 
 func TestWSApproveMRValidatesProjectAndIID(t *testing.T) {
-	svc, _ := newActionFixture(t)
-	projectAndIIDValidationCases(t, ws.ActionGitLabMRApprove, wsApproveMR(svc, nil))
+	svc, _, log := newActionFixture(t)
+	projectAndIIDValidationCases(t, ws.ActionGitLabMRApprove, wsApproveMR(svc, log))
 }
 
 func TestWSUnapproveMRRemovesApproval(t *testing.T) {
-	svc, client := newActionFixture(t)
+	svc, client, log := newActionFixture(t)
 	iid := client.SeedMR("group/p", &MR{Title: "feat: x", State: "opened"})
 	client.SeedApprovals("group/p", iid, []MRApproval{{Username: "alice"}}, 1)
 
-	resp, err := wsUnapproveMR(svc, nil)(context.Background(),
+	resp, err := wsUnapproveMR(svc, log)(context.Background(),
 		wsRequest(t, ws.ActionGitLabMRUnapprove, map[string]interface{}{"project": "group/p", "iid": iid}))
 
 	var body map[string]bool
@@ -212,16 +213,16 @@ func TestWSUnapproveMRRemovesApproval(t *testing.T) {
 }
 
 func TestWSUnapproveMRValidatesProjectAndIID(t *testing.T) {
-	svc, _ := newActionFixture(t)
-	projectAndIIDValidationCases(t, ws.ActionGitLabMRUnapprove, wsUnapproveMR(svc, nil))
+	svc, _, log := newActionFixture(t)
+	projectAndIIDValidationCases(t, ws.ActionGitLabMRUnapprove, wsUnapproveMR(svc, log))
 }
 
 // --- Labels / assignees ---
 
 func TestWSSetMRLabelsForwardsExactLabels(t *testing.T) {
-	svc, client := newActionFixture(t)
+	svc, client, log := newActionFixture(t)
 
-	resp, err := wsSetMRLabels(svc, nil)(context.Background(),
+	resp, err := wsSetMRLabels(svc, log)(context.Background(),
 		wsRequest(t, ws.ActionGitLabMRSetLabels, map[string]interface{}{
 			"project": "group/p", "iid": 5, "labels": []string{"bug", "p1"},
 		}))
@@ -247,9 +248,9 @@ func TestWSSetMRLabelsForwardsExactLabels(t *testing.T) {
 // label" case: an empty list must still reach the client, because dropping the
 // call would silently leave the old labels in place.
 func TestWSSetMRLabelsForwardsEmptyListToClearLabels(t *testing.T) {
-	svc, client := newActionFixture(t)
+	svc, client, log := newActionFixture(t)
 
-	resp, err := wsSetMRLabels(svc, nil)(context.Background(),
+	resp, err := wsSetMRLabels(svc, log)(context.Background(),
 		wsRequest(t, ws.ActionGitLabMRSetLabels, map[string]interface{}{
 			"project": "group/p", "iid": 5, "labels": []string{},
 		}))
@@ -264,14 +265,14 @@ func TestWSSetMRLabelsForwardsEmptyListToClearLabels(t *testing.T) {
 }
 
 func TestWSSetMRLabelsValidatesProjectAndIID(t *testing.T) {
-	svc, _ := newActionFixture(t)
-	projectAndIIDValidationCases(t, ws.ActionGitLabMRSetLabels, wsSetMRLabels(svc, nil))
+	svc, _, log := newActionFixture(t)
+	projectAndIIDValidationCases(t, ws.ActionGitLabMRSetLabels, wsSetMRLabels(svc, log))
 }
 
 func TestWSSetMRAssigneesForwardsExactIDs(t *testing.T) {
-	svc, client := newActionFixture(t)
+	svc, client, log := newActionFixture(t)
 
-	resp, err := wsSetMRAssignees(svc, nil)(context.Background(),
+	resp, err := wsSetMRAssignees(svc, log)(context.Background(),
 		wsRequest(t, ws.ActionGitLabMRSetAssignees, map[string]interface{}{
 			"project": "group/p", "iid": 6, "assignee_ids": []int{7, 8},
 		}))
@@ -294,16 +295,16 @@ func TestWSSetMRAssigneesForwardsExactIDs(t *testing.T) {
 }
 
 func TestWSSetMRAssigneesValidatesProjectAndIID(t *testing.T) {
-	svc, _ := newActionFixture(t)
-	projectAndIIDValidationCases(t, ws.ActionGitLabMRSetAssignees, wsSetMRAssignees(svc, nil))
+	svc, _, log := newActionFixture(t)
+	projectAndIIDValidationCases(t, ws.ActionGitLabMRSetAssignees, wsSetMRAssignees(svc, log))
 }
 
 // --- Discussions ---
 
 func TestWSNewDiscussionNoteForwardsBody(t *testing.T) {
-	svc, client := newActionFixture(t)
+	svc, client, log := newActionFixture(t)
 
-	resp, err := wsNewDiscussionNote(svc, nil)(context.Background(),
+	resp, err := wsNewDiscussionNote(svc, log)(context.Background(),
 		wsRequest(t, ws.ActionGitLabMRDiscussionNew, map[string]interface{}{
 			"project": "group/p", "iid": 9, "discussion_id": "disc-1", "body": "looks good",
 		}))
@@ -322,8 +323,8 @@ func TestWSNewDiscussionNoteForwardsBody(t *testing.T) {
 }
 
 func TestWSNewDiscussionNoteRequiresProjectIIDAndDiscussion(t *testing.T) {
-	svc, _ := newActionFixture(t)
-	handler := wsNewDiscussionNote(svc, nil)
+	svc, _, log := newActionFixture(t)
+	handler := wsNewDiscussionNote(svc, log)
 
 	cases := map[string]interface{}{
 		"missing project":    map[string]interface{}{"iid": 1, "discussion_id": "d", "body": "b"},
@@ -343,9 +344,9 @@ func TestWSNewDiscussionNoteRequiresProjectIIDAndDiscussion(t *testing.T) {
 // a body of only spaces is rejected with its own reason and never reaches the
 // client, so no empty comment is posted upstream.
 func TestWSNewDiscussionNoteRejectsBlankBody(t *testing.T) {
-	svc, client := newActionFixture(t)
+	svc, client, log := newActionFixture(t)
 
-	resp, err := wsNewDiscussionNote(svc, nil)(context.Background(),
+	resp, err := wsNewDiscussionNote(svc, log)(context.Background(),
 		wsRequest(t, ws.ActionGitLabMRDiscussionNew, map[string]interface{}{
 			"project": "group/p", "iid": 9, "discussion_id": "disc-1", "body": "   \t\n ",
 		}))
@@ -357,9 +358,9 @@ func TestWSNewDiscussionNoteRejectsBlankBody(t *testing.T) {
 }
 
 func TestWSResolveDiscussionForwardsDiscussionID(t *testing.T) {
-	svc, client := newActionFixture(t)
+	svc, client, log := newActionFixture(t)
 
-	resp, err := wsResolveDiscussion(svc, nil)(context.Background(),
+	resp, err := wsResolveDiscussion(svc, log)(context.Background(),
 		wsRequest(t, ws.ActionGitLabMRDiscussionResolve, map[string]interface{}{
 			"project": "group/p", "iid": 9, "discussion_id": "disc-1",
 		}))
@@ -376,9 +377,9 @@ func TestWSResolveDiscussionForwardsDiscussionID(t *testing.T) {
 }
 
 func TestWSResolveDiscussionRequiresDiscussionID(t *testing.T) {
-	svc, _ := newActionFixture(t)
+	svc, _, log := newActionFixture(t)
 
-	resp, err := wsResolveDiscussion(svc, nil)(context.Background(),
+	resp, err := wsResolveDiscussion(svc, log)(context.Background(),
 		wsRequest(t, ws.ActionGitLabMRDiscussionResolve, map[string]interface{}{
 			"project": "group/p", "iid": 9,
 		}))
@@ -390,10 +391,10 @@ func TestWSResolveDiscussionRequiresDiscussionID(t *testing.T) {
 // --- Merge methods ---
 
 func TestWSGetProjectMergeMethodsReturnsAllowedMethods(t *testing.T) {
-	svc, client := newActionFixture(t)
+	svc, client, log := newActionFixture(t)
 	client.mergeMethods = &ProjectMergeMethods{Merge: true, AllowSquash: true}
 
-	resp, err := wsGetProjectMergeMethods(svc, nil)(context.Background(),
+	resp, err := wsGetProjectMergeMethods(svc, log)(context.Background(),
 		wsRequest(t, ws.ActionGitLabProjectMergeMethodsGet, map[string]string{"project": "group/p"}))
 
 	var methods ProjectMergeMethods
@@ -404,19 +405,19 @@ func TestWSGetProjectMergeMethodsReturnsAllowedMethods(t *testing.T) {
 }
 
 func TestWSGetProjectMergeMethodsRequiresProject(t *testing.T) {
-	svc, _ := newActionFixture(t)
+	svc, _, log := newActionFixture(t)
 
-	resp, err := wsGetProjectMergeMethods(svc, nil)(context.Background(),
+	resp, err := wsGetProjectMergeMethods(svc, log)(context.Background(),
 		wsRequest(t, ws.ActionGitLabProjectMergeMethodsGet, map[string]string{}))
 
 	wsErr(t, resp, err, ws.ActionGitLabProjectMergeMethodsGet, ws.ErrorCodeBadRequest, "project required")
 }
 
 func TestWSGetProjectMergeMethodsSurfacesUpstreamFailure(t *testing.T) {
-	svc, client := newActionFixture(t)
+	svc, client, log := newActionFixture(t)
 	client.mergeErr = errors.New("gitlab unreachable")
 
-	resp, err := wsGetProjectMergeMethods(svc, nil)(context.Background(),
+	resp, err := wsGetProjectMergeMethods(svc, log)(context.Background(),
 		wsRequest(t, ws.ActionGitLabProjectMergeMethodsGet, map[string]string{"project": "group/p"}))
 
 	wsErr(t, resp, err, ws.ActionGitLabProjectMergeMethodsGet, ws.ErrorCodeInternalError, "gitlab unreachable")
@@ -425,9 +426,9 @@ func TestWSGetProjectMergeMethodsSurfacesUpstreamFailure(t *testing.T) {
 // --- Projects ---
 
 func TestWSListUserProjectsReturnsProjects(t *testing.T) {
-	svc, _ := newActionFixture(t)
+	svc, _, log := newActionFixture(t)
 
-	resp, err := wsListUserProjects(svc, nil)(context.Background(),
+	resp, err := wsListUserProjects(svc, log)(context.Background(),
 		wsRequest(t, ws.ActionGitLabListUserProjects, nil))
 
 	var body struct {
@@ -440,8 +441,8 @@ func TestWSListUserProjectsReturnsProjects(t *testing.T) {
 }
 
 func TestWSSearchProjectsFiltersByQuery(t *testing.T) {
-	svc, _ := newActionFixture(t)
-	handler := wsSearchProjects(svc, nil)
+	svc, _, log := newActionFixture(t)
+	handler := wsSearchProjects(svc, log)
 
 	tests := []struct {
 		name  string
@@ -471,19 +472,19 @@ func TestWSSearchProjectsFiltersByQuery(t *testing.T) {
 }
 
 func TestWSSearchProjectsRejectsMalformedPayload(t *testing.T) {
-	svc, _ := newActionFixture(t)
+	svc, _, log := newActionFixture(t)
 
-	resp, err := wsSearchProjects(svc, nil)(context.Background(),
+	resp, err := wsSearchProjects(svc, log)(context.Background(),
 		wsRawRequest(ws.ActionGitLabSearchProjects, `{"limit":"ten"}`))
 
 	wsErr(t, resp, err, ws.ActionGitLabSearchProjects, ws.ErrorCodeBadRequest, errMsgInvalidPayload)
 }
 
 func TestWSListProjectBranchesReturnsBranches(t *testing.T) {
-	svc, client := newActionFixture(t)
+	svc, client, log := newActionFixture(t)
 	client.SeedBranches("group/p", []RepoBranch{{Name: "main"}, {Name: "dev"}})
 
-	resp, err := wsListProjectBranches(svc, nil)(context.Background(),
+	resp, err := wsListProjectBranches(svc, log)(context.Background(),
 		wsRequest(t, ws.ActionGitLabProjectBranches, map[string]string{"project": "group/p"}))
 
 	var body struct {
@@ -496,9 +497,9 @@ func TestWSListProjectBranchesReturnsBranches(t *testing.T) {
 }
 
 func TestWSListProjectBranchesRequiresProject(t *testing.T) {
-	svc, _ := newActionFixture(t)
+	svc, _, log := newActionFixture(t)
 
-	resp, err := wsListProjectBranches(svc, nil)(context.Background(),
+	resp, err := wsListProjectBranches(svc, log)(context.Background(),
 		wsRequest(t, ws.ActionGitLabProjectBranches, map[string]string{}))
 
 	wsErr(t, resp, err, ws.ActionGitLabProjectBranches, ws.ErrorCodeBadRequest, "project required")
@@ -615,6 +616,7 @@ func TestWSCleanupReviewTasksDeletesTasksForMergedMRs(t *testing.T) {
 	client := NewMockClient(DefaultHost)
 	svc, store, _ := newWSFixture(t, client)
 	ctx := context.Background()
+	seedWorkspace(t, store, "ws-1")
 	deleter := &cleanupTaskDeleter{}
 	svc.SetTaskDeleter(deleter)
 
@@ -658,6 +660,7 @@ func TestWSCleanupIssueTasksDeletesTasksForClosedIssues(t *testing.T) {
 	client := NewMockClient(DefaultHost)
 	svc, store, _ := newWSFixture(t, client)
 	ctx := context.Background()
+	seedWorkspace(t, store, "ws-1")
 	deleter := &cleanupTaskDeleter{}
 	svc.SetTaskDeleter(deleter)
 

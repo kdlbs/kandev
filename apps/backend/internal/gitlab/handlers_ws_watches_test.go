@@ -4,24 +4,25 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
 // newWatchWSFixture builds a service whose watch-dependency validators accept
 // the "ws-1" fixture identifiers, so the WS create/update handlers exercise the
 // real validation path rather than a stub that waves everything through.
-func newWatchWSFixture(t *testing.T) (*Service, *Store) {
+func newWatchWSFixture(t *testing.T) (*Service, *Store, *logger.Logger) {
 	t.Helper()
 	svc, store := newDependencyTestService(t)
 	seedWorkspace(t, store, "ws-1")
 	seedWorkspace(t, store, "ws-2")
-	return svc, store
+	return svc, store, newTestLogger(t)
 }
 
 // --- Review watches ---
 
 func TestWSListReviewWatchesScopesToWorkspaceWhenGiven(t *testing.T) {
-	svc, store := newWatchWSFixture(t)
+	svc, store, log := newWatchWSFixture(t)
 	ctx := context.Background()
 	mine := validReviewWatchRow()
 	other := validReviewWatchRow()
@@ -32,7 +33,7 @@ func TestWSListReviewWatchesScopesToWorkspaceWhenGiven(t *testing.T) {
 		}
 	}
 
-	resp, err := wsListReviewWatches(svc, nil)(ctx,
+	resp, err := wsListReviewWatches(svc, log)(ctx,
 		wsRequest(t, ws.ActionGitLabReviewWatchesList, map[string]string{"workspace_id": "ws-1"}))
 
 	var body struct {
@@ -52,7 +53,7 @@ func TestWSListReviewWatchesScopesToWorkspaceWhenGiven(t *testing.T) {
 // watches. If that ever needs to become a rejection, this test is the one to
 // change.
 func TestWSListReviewWatchesWithoutWorkspaceListsAll(t *testing.T) {
-	svc, store := newWatchWSFixture(t)
+	svc, store, log := newWatchWSFixture(t)
 	ctx := context.Background()
 	other := validReviewWatchRow()
 	other.WorkspaceID = "ws-2"
@@ -62,7 +63,7 @@ func TestWSListReviewWatchesWithoutWorkspaceListsAll(t *testing.T) {
 		}
 	}
 
-	resp, err := wsListReviewWatches(svc, nil)(ctx,
+	resp, err := wsListReviewWatches(svc, log)(ctx,
 		wsRequest(t, ws.ActionGitLabReviewWatchesList, map[string]string{}))
 
 	var body struct {
@@ -75,19 +76,19 @@ func TestWSListReviewWatchesWithoutWorkspaceListsAll(t *testing.T) {
 }
 
 func TestWSListReviewWatchesRejectsMalformedPayload(t *testing.T) {
-	svc, _ := newWatchWSFixture(t)
+	svc, _, log := newWatchWSFixture(t)
 
-	resp, err := wsListReviewWatches(svc, nil)(context.Background(),
+	resp, err := wsListReviewWatches(svc, log)(context.Background(),
 		wsRawRequest(ws.ActionGitLabReviewWatchesList, `{"workspace_id":7}`))
 
 	wsErr(t, resp, err, ws.ActionGitLabReviewWatchesList, ws.ErrorCodeBadRequest, errMsgInvalidPayload)
 }
 
 func TestWSCreateReviewWatchPersistsAndReturnsRow(t *testing.T) {
-	svc, store := newWatchWSFixture(t)
+	svc, store, log := newWatchWSFixture(t)
 	ctx := context.Background()
 
-	resp, err := wsCreateReviewWatch(svc, nil)(ctx,
+	resp, err := wsCreateReviewWatch(svc, log)(ctx,
 		wsRequest(t, ws.ActionGitLabReviewWatchCreate, validReviewWatchRequest()))
 
 	var created ReviewWatch
@@ -105,34 +106,34 @@ func TestWSCreateReviewWatchPersistsAndReturnsRow(t *testing.T) {
 }
 
 func TestWSCreateReviewWatchRejectsInvalidDependencies(t *testing.T) {
-	svc, _ := newWatchWSFixture(t)
+	svc, _, log := newWatchWSFixture(t)
 	req := validReviewWatchRequest()
 	req.RepositoryID = "repo-other" // belongs to ws-2
 
-	resp, err := wsCreateReviewWatch(svc, nil)(context.Background(),
+	resp, err := wsCreateReviewWatch(svc, log)(context.Background(),
 		wsRequest(t, ws.ActionGitLabReviewWatchCreate, req))
 
 	wsErr(t, resp, err, ws.ActionGitLabReviewWatchCreate, ws.ErrorCodeInternalError, "")
 }
 
 func TestWSCreateReviewWatchRejectsMalformedPayload(t *testing.T) {
-	svc, _ := newWatchWSFixture(t)
+	svc, _, log := newWatchWSFixture(t)
 
-	resp, err := wsCreateReviewWatch(svc, nil)(context.Background(),
+	resp, err := wsCreateReviewWatch(svc, log)(context.Background(),
 		wsRawRequest(ws.ActionGitLabReviewWatchCreate, `{"workspace_id":[]}`))
 
 	wsErr(t, resp, err, ws.ActionGitLabReviewWatchCreate, ws.ErrorCodeBadRequest, errMsgInvalidPayload)
 }
 
 func TestWSUpdateReviewWatchAppliesPatch(t *testing.T) {
-	svc, store := newWatchWSFixture(t)
+	svc, store, log := newWatchWSFixture(t)
 	ctx := context.Background()
 	watch := validReviewWatchRow()
 	if err := store.CreateReviewWatch(ctx, watch); err != nil {
 		t.Fatalf("seed review watch: %v", err)
 	}
 
-	resp, err := wsUpdateReviewWatch(svc, nil)(ctx,
+	resp, err := wsUpdateReviewWatch(svc, log)(ctx,
 		wsRequest(t, ws.ActionGitLabReviewWatchUpdate, map[string]interface{}{
 			"id":      watch.ID,
 			"enabled": false,
@@ -153,18 +154,18 @@ func TestWSUpdateReviewWatchAppliesPatch(t *testing.T) {
 }
 
 func TestWSUpdateReviewWatchRequiresID(t *testing.T) {
-	svc, _ := newWatchWSFixture(t)
+	svc, _, log := newWatchWSFixture(t)
 
-	resp, err := wsUpdateReviewWatch(svc, nil)(context.Background(),
+	resp, err := wsUpdateReviewWatch(svc, log)(context.Background(),
 		wsRequest(t, ws.ActionGitLabReviewWatchUpdate, map[string]interface{}{"enabled": false}))
 
 	wsErr(t, resp, err, ws.ActionGitLabReviewWatchUpdate, ws.ErrorCodeBadRequest, errMsgIDRequired)
 }
 
 func TestWSUpdateReviewWatchReportsUnknownIDAsInternalError(t *testing.T) {
-	svc, _ := newWatchWSFixture(t)
+	svc, _, log := newWatchWSFixture(t)
 
-	resp, err := wsUpdateReviewWatch(svc, nil)(context.Background(),
+	resp, err := wsUpdateReviewWatch(svc, log)(context.Background(),
 		wsRequest(t, ws.ActionGitLabReviewWatchUpdate, map[string]interface{}{
 			"id": "does-not-exist", "enabled": false,
 		}))
@@ -173,14 +174,14 @@ func TestWSUpdateReviewWatchReportsUnknownIDAsInternalError(t *testing.T) {
 }
 
 func TestWSDeleteReviewWatchRemovesRow(t *testing.T) {
-	svc, store := newWatchWSFixture(t)
+	svc, store, log := newWatchWSFixture(t)
 	ctx := context.Background()
 	watch := validReviewWatchRow()
 	if err := store.CreateReviewWatch(ctx, watch); err != nil {
 		t.Fatalf("seed review watch: %v", err)
 	}
 
-	resp, err := wsDeleteReviewWatch(svc, nil)(ctx,
+	resp, err := wsDeleteReviewWatch(svc, log)(ctx,
 		wsRequest(t, ws.ActionGitLabReviewWatchDelete, map[string]string{"id": watch.ID}))
 
 	var body map[string]bool
@@ -198,55 +199,69 @@ func TestWSDeleteReviewWatchRemovesRow(t *testing.T) {
 }
 
 func TestWSDeleteReviewWatchRequiresID(t *testing.T) {
-	svc, _ := newWatchWSFixture(t)
+	svc, _, log := newWatchWSFixture(t)
 
-	resp, err := wsDeleteReviewWatch(svc, nil)(context.Background(),
+	resp, err := wsDeleteReviewWatch(svc, log)(context.Background(),
 		wsRequest(t, ws.ActionGitLabReviewWatchDelete, map[string]string{}))
 
 	wsErr(t, resp, err, ws.ActionGitLabReviewWatchDelete, ws.ErrorCodeBadRequest, errMsgIDRequired)
 }
 
 func TestWSTriggerReviewWatchRequiresID(t *testing.T) {
-	svc, _ := newWatchWSFixture(t)
+	svc, _, log := newWatchWSFixture(t)
 
-	resp, err := wsTriggerReviewWatch(svc, nil)(context.Background(),
+	resp, err := wsTriggerReviewWatch(svc, log)(context.Background(),
 		wsRequest(t, ws.ActionGitLabReviewTrigger, map[string]string{}))
 
 	wsErr(t, resp, err, ws.ActionGitLabReviewTrigger, ws.ErrorCodeBadRequest, errMsgIDRequired)
 }
 
 func TestWSTriggerReviewWatchReportsUnknownWatch(t *testing.T) {
-	svc, _ := newWatchWSFixture(t)
+	svc, _, log := newWatchWSFixture(t)
 
-	resp, err := wsTriggerReviewWatch(svc, nil)(context.Background(),
+	resp, err := wsTriggerReviewWatch(svc, log)(context.Background(),
 		wsRequest(t, ws.ActionGitLabReviewTrigger, map[string]string{"id": "nope"}))
 
 	wsErr(t, resp, err, ws.ActionGitLabReviewTrigger, ws.ErrorCodeInternalError, "")
 }
 
-func TestWSTriggerAllReviewChecksReturnsCount(t *testing.T) {
-	svc, store := newWatchWSFixture(t)
+// TestWSTriggerAllReviewChecksCountsOnlyEnabledWatches seeds one enabled and
+// one disabled watch over the same MR. The count is the number of MRs found
+// across enabled watches, so a handler that ignored the enabled flag would
+// report 2 and one that always returned 0 would report 0 — only the correct
+// filter yields 1.
+func TestWSTriggerAllReviewChecksCountsOnlyEnabledWatches(t *testing.T) {
+	svc, store, log := newWatchWSFixture(t)
 	ctx := context.Background()
+	client := NewMockClient(DefaultHost)
+	client.SetUser("kandev-tester")
+	client.SeedMR("group/p", &MR{IID: 1, Title: "needs review", WebURL: "https://x/1",
+		Reviewers: []MRReviewer{{Username: "kandev-tester"}}})
+	svc.workspaceClients["ws-1"] = client
+
 	disabled := validReviewWatchRow()
 	disabled.Enabled = false
-	if err := store.CreateReviewWatch(ctx, disabled); err != nil {
-		t.Fatalf("seed review watch: %v", err)
+	for _, watch := range []*ReviewWatch{validReviewWatchRow(), disabled} {
+		if err := store.CreateReviewWatch(ctx, watch); err != nil {
+			t.Fatalf("seed review watch: %v", err)
+		}
 	}
 
-	resp, err := wsTriggerAllReviewChecks(svc, nil)(ctx,
+	resp, err := wsTriggerAllReviewChecks(svc, log)(ctx,
 		wsRequest(t, ws.ActionGitLabReviewTriggerAll, nil))
 
 	var body map[string]int
 	wsOK(t, resp, err, ws.ActionGitLabReviewTriggerAll, &body)
-	if body["count"] != 0 {
-		t.Errorf("count = %d, want 0 — a disabled watch must not be checked", body["count"])
+	if body["count"] != 1 {
+		t.Errorf("count = %d, want 1 — the enabled watch contributes its MR and "+
+			"the disabled one contributes nothing", body["count"])
 	}
 }
 
 // --- MR watches ---
 
 func TestWSListMRWatchesSelectsBranchBySessionThenTaskThenAll(t *testing.T) {
-	svc, store := newWatchWSFixture(t)
+	svc, store, log := newWatchWSFixture(t)
 	ctx := context.Background()
 	seedTask(t, store, "task-a", "ws-1")
 	seedTask(t, store, "task-b", "ws-1")
@@ -268,7 +283,7 @@ func TestWSListMRWatchesSelectsBranchBySessionThenTaskThenAll(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			resp, err := wsListMRWatches(svc, nil)(ctx,
+			resp, err := wsListMRWatches(svc, log)(ctx,
 				wsRequest(t, ws.ActionGitLabMRWatchesList, test.payload))
 
 			var body struct {
@@ -292,16 +307,16 @@ func TestWSListMRWatchesSelectsBranchBySessionThenTaskThenAll(t *testing.T) {
 }
 
 func TestWSListMRWatchesRejectsMalformedPayload(t *testing.T) {
-	svc, _ := newWatchWSFixture(t)
+	svc, _, log := newWatchWSFixture(t)
 
-	resp, err := wsListMRWatches(svc, nil)(context.Background(),
+	resp, err := wsListMRWatches(svc, log)(context.Background(),
 		wsRawRequest(ws.ActionGitLabMRWatchesList, `{"session_id":{}}`))
 
 	wsErr(t, resp, err, ws.ActionGitLabMRWatchesList, ws.ErrorCodeBadRequest, errMsgInvalidPayload)
 }
 
 func TestWSDeleteMRWatchRemovesRow(t *testing.T) {
-	svc, store := newWatchWSFixture(t)
+	svc, store, log := newWatchWSFixture(t)
 	ctx := context.Background()
 	seedTask(t, store, "task-a", "ws-1")
 	watch, err := svc.CreateMRWatch(ctx, "sess-a", "task-a", "repo-1", "group/a", 1, "feat/a")
@@ -309,7 +324,7 @@ func TestWSDeleteMRWatchRemovesRow(t *testing.T) {
 		t.Fatalf("seed watch: %v", err)
 	}
 
-	resp, err := wsDeleteMRWatch(svc, nil)(ctx,
+	resp, err := wsDeleteMRWatch(svc, log)(ctx,
 		wsRequest(t, ws.ActionGitLabMRWatchDelete, map[string]string{"id": watch.ID}))
 
 	var body map[string]bool
@@ -327,9 +342,9 @@ func TestWSDeleteMRWatchRemovesRow(t *testing.T) {
 }
 
 func TestWSDeleteMRWatchRequiresID(t *testing.T) {
-	svc, _ := newWatchWSFixture(t)
+	svc, _, log := newWatchWSFixture(t)
 
-	resp, err := wsDeleteMRWatch(svc, nil)(context.Background(),
+	resp, err := wsDeleteMRWatch(svc, log)(context.Background(),
 		wsRequest(t, ws.ActionGitLabMRWatchDelete, map[string]string{}))
 
 	wsErr(t, resp, err, ws.ActionGitLabMRWatchDelete, ws.ErrorCodeBadRequest, errMsgIDRequired)
@@ -338,7 +353,7 @@ func TestWSDeleteMRWatchRequiresID(t *testing.T) {
 // --- Issue watches ---
 
 func TestWSListIssueWatchesScopesToWorkspaceWhenGiven(t *testing.T) {
-	svc, store := newWatchWSFixture(t)
+	svc, store, log := newWatchWSFixture(t)
 	ctx := context.Background()
 	other := validIssueWatchRow()
 	other.WorkspaceID = "ws-2"
@@ -348,7 +363,7 @@ func TestWSListIssueWatchesScopesToWorkspaceWhenGiven(t *testing.T) {
 		}
 	}
 
-	resp, err := wsListIssueWatches(svc, nil)(ctx,
+	resp, err := wsListIssueWatches(svc, log)(ctx,
 		wsRequest(t, ws.ActionGitLabIssueWatchesList, map[string]string{"workspace_id": "ws-2"}))
 
 	var body struct {
@@ -361,7 +376,7 @@ func TestWSListIssueWatchesScopesToWorkspaceWhenGiven(t *testing.T) {
 }
 
 func TestWSListIssueWatchesWithoutWorkspaceListsAll(t *testing.T) {
-	svc, store := newWatchWSFixture(t)
+	svc, store, log := newWatchWSFixture(t)
 	ctx := context.Background()
 	other := validIssueWatchRow()
 	other.WorkspaceID = "ws-2"
@@ -371,7 +386,7 @@ func TestWSListIssueWatchesWithoutWorkspaceListsAll(t *testing.T) {
 		}
 	}
 
-	resp, err := wsListIssueWatches(svc, nil)(ctx,
+	resp, err := wsListIssueWatches(svc, log)(ctx,
 		wsRequest(t, ws.ActionGitLabIssueWatchesList, map[string]string{}))
 
 	var body struct {
@@ -384,19 +399,19 @@ func TestWSListIssueWatchesWithoutWorkspaceListsAll(t *testing.T) {
 }
 
 func TestWSListIssueWatchesRejectsMalformedPayload(t *testing.T) {
-	svc, _ := newWatchWSFixture(t)
+	svc, _, log := newWatchWSFixture(t)
 
-	resp, err := wsListIssueWatches(svc, nil)(context.Background(),
+	resp, err := wsListIssueWatches(svc, log)(context.Background(),
 		wsRawRequest(ws.ActionGitLabIssueWatchesList, `{"workspace_id":false}`))
 
 	wsErr(t, resp, err, ws.ActionGitLabIssueWatchesList, ws.ErrorCodeBadRequest, errMsgInvalidPayload)
 }
 
 func TestWSCreateIssueWatchPersistsAndReturnsRow(t *testing.T) {
-	svc, store := newWatchWSFixture(t)
+	svc, store, log := newWatchWSFixture(t)
 	ctx := context.Background()
 
-	resp, err := wsCreateIssueWatch(svc, nil)(ctx,
+	resp, err := wsCreateIssueWatch(svc, log)(ctx,
 		wsRequest(t, ws.ActionGitLabIssueWatchCreate, validIssueWatchRequest()))
 
 	var created IssueWatch
@@ -411,34 +426,34 @@ func TestWSCreateIssueWatchPersistsAndReturnsRow(t *testing.T) {
 }
 
 func TestWSCreateIssueWatchRejectsInvalidDependencies(t *testing.T) {
-	svc, _ := newWatchWSFixture(t)
+	svc, _, log := newWatchWSFixture(t)
 	req := validIssueWatchRequest()
 	req.AgentProfileID = "agent-missing"
 
-	resp, err := wsCreateIssueWatch(svc, nil)(context.Background(),
+	resp, err := wsCreateIssueWatch(svc, log)(context.Background(),
 		wsRequest(t, ws.ActionGitLabIssueWatchCreate, req))
 
 	wsErr(t, resp, err, ws.ActionGitLabIssueWatchCreate, ws.ErrorCodeInternalError, "")
 }
 
 func TestWSCreateIssueWatchRejectsMalformedPayload(t *testing.T) {
-	svc, _ := newWatchWSFixture(t)
+	svc, _, log := newWatchWSFixture(t)
 
-	resp, err := wsCreateIssueWatch(svc, nil)(context.Background(),
+	resp, err := wsCreateIssueWatch(svc, log)(context.Background(),
 		wsRawRequest(ws.ActionGitLabIssueWatchCreate, `"a string, not an object"`))
 
 	wsErr(t, resp, err, ws.ActionGitLabIssueWatchCreate, ws.ErrorCodeBadRequest, errMsgInvalidPayload)
 }
 
 func TestWSUpdateIssueWatchAppliesPatch(t *testing.T) {
-	svc, store := newWatchWSFixture(t)
+	svc, store, log := newWatchWSFixture(t)
 	ctx := context.Background()
 	watch := validIssueWatchRow()
 	if err := store.CreateIssueWatch(ctx, watch); err != nil {
 		t.Fatalf("seed issue watch: %v", err)
 	}
 
-	resp, err := wsUpdateIssueWatch(svc, nil)(ctx,
+	resp, err := wsUpdateIssueWatch(svc, log)(ctx,
 		wsRequest(t, ws.ActionGitLabIssueWatchUpdate, map[string]interface{}{
 			"id": watch.ID, "enabled": false,
 		}))
@@ -458,23 +473,23 @@ func TestWSUpdateIssueWatchAppliesPatch(t *testing.T) {
 }
 
 func TestWSUpdateIssueWatchRequiresID(t *testing.T) {
-	svc, _ := newWatchWSFixture(t)
+	svc, _, log := newWatchWSFixture(t)
 
-	resp, err := wsUpdateIssueWatch(svc, nil)(context.Background(),
+	resp, err := wsUpdateIssueWatch(svc, log)(context.Background(),
 		wsRequest(t, ws.ActionGitLabIssueWatchUpdate, map[string]interface{}{"enabled": true}))
 
 	wsErr(t, resp, err, ws.ActionGitLabIssueWatchUpdate, ws.ErrorCodeBadRequest, errMsgIDRequired)
 }
 
 func TestWSDeleteIssueWatchRemovesRow(t *testing.T) {
-	svc, store := newWatchWSFixture(t)
+	svc, store, log := newWatchWSFixture(t)
 	ctx := context.Background()
 	watch := validIssueWatchRow()
 	if err := store.CreateIssueWatch(ctx, watch); err != nil {
 		t.Fatalf("seed issue watch: %v", err)
 	}
 
-	resp, err := wsDeleteIssueWatch(svc, nil)(ctx,
+	resp, err := wsDeleteIssueWatch(svc, log)(ctx,
 		wsRequest(t, ws.ActionGitLabIssueWatchDelete, map[string]string{"id": watch.ID}))
 
 	var body map[string]bool
@@ -492,47 +507,57 @@ func TestWSDeleteIssueWatchRemovesRow(t *testing.T) {
 }
 
 func TestWSDeleteIssueWatchRequiresID(t *testing.T) {
-	svc, _ := newWatchWSFixture(t)
+	svc, _, log := newWatchWSFixture(t)
 
-	resp, err := wsDeleteIssueWatch(svc, nil)(context.Background(),
+	resp, err := wsDeleteIssueWatch(svc, log)(context.Background(),
 		wsRequest(t, ws.ActionGitLabIssueWatchDelete, map[string]string{}))
 
 	wsErr(t, resp, err, ws.ActionGitLabIssueWatchDelete, ws.ErrorCodeBadRequest, errMsgIDRequired)
 }
 
 func TestWSTriggerIssueWatchRequiresID(t *testing.T) {
-	svc, _ := newWatchWSFixture(t)
+	svc, _, log := newWatchWSFixture(t)
 
-	resp, err := wsTriggerIssueWatch(svc, nil)(context.Background(),
+	resp, err := wsTriggerIssueWatch(svc, log)(context.Background(),
 		wsRequest(t, ws.ActionGitLabIssueTrigger, map[string]string{}))
 
 	wsErr(t, resp, err, ws.ActionGitLabIssueTrigger, ws.ErrorCodeBadRequest, errMsgIDRequired)
 }
 
 func TestWSTriggerIssueWatchReportsUnknownWatch(t *testing.T) {
-	svc, _ := newWatchWSFixture(t)
+	svc, _, log := newWatchWSFixture(t)
 
-	resp, err := wsTriggerIssueWatch(svc, nil)(context.Background(),
+	resp, err := wsTriggerIssueWatch(svc, log)(context.Background(),
 		wsRequest(t, ws.ActionGitLabIssueTrigger, map[string]string{"id": "nope"}))
 
 	wsErr(t, resp, err, ws.ActionGitLabIssueTrigger, ws.ErrorCodeInternalError, "")
 }
 
-func TestWSTriggerAllIssueChecksReturnsCount(t *testing.T) {
-	svc, store := newWatchWSFixture(t)
+// TestWSTriggerAllIssueChecksCountsOnlyEnabledWatches is the issue mirror of
+// the review test above, and discriminates the same three outcomes.
+func TestWSTriggerAllIssueChecksCountsOnlyEnabledWatches(t *testing.T) {
+	svc, store, log := newWatchWSFixture(t)
 	ctx := context.Background()
+	client := NewMockClient(DefaultHost)
+	client.SetUser("kandev-tester")
+	client.SeedIssue("group/p", &Issue{IID: 3, Title: "bug", WebURL: "https://x/3"})
+	svc.workspaceClients["ws-1"] = client
+
 	disabled := validIssueWatchRow()
 	disabled.Enabled = false
-	if err := store.CreateIssueWatch(ctx, disabled); err != nil {
-		t.Fatalf("seed issue watch: %v", err)
+	for _, watch := range []*IssueWatch{validIssueWatchRow(), disabled} {
+		if err := store.CreateIssueWatch(ctx, watch); err != nil {
+			t.Fatalf("seed issue watch: %v", err)
+		}
 	}
 
-	resp, err := wsTriggerAllIssueChecks(svc, nil)(ctx,
+	resp, err := wsTriggerAllIssueChecks(svc, log)(ctx,
 		wsRequest(t, ws.ActionGitLabIssueTriggerAll, nil))
 
 	var body map[string]int
 	wsOK(t, resp, err, ws.ActionGitLabIssueTriggerAll, &body)
-	if body["count"] != 0 {
-		t.Errorf("count = %d, want 0 — a disabled watch must not be checked", body["count"])
+	if body["count"] != 1 {
+		t.Errorf("count = %d, want 1 — the enabled watch contributes its issue and "+
+			"the disabled one contributes nothing", body["count"])
 	}
 }
