@@ -1,7 +1,14 @@
 import { StrictMode, type ReactNode } from "react";
 import { renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { composerInsertionText, useStablePluginComposerCapability } from "./composer-capability";
+import {
+  composerIdentity,
+  composerInsertionText,
+  useStablePluginComposerCapability,
+} from "./composer-capability";
+
+/** One mounted task-chat composer, used wherever the identity is incidental. */
+const COMPOSER = "task-chat:t1:s1";
 
 function strictWrapper({ children }: { children: ReactNode }) {
   return <StrictMode>{children}</StrictMode>;
@@ -21,15 +28,38 @@ describe("composerInsertionText", () => {
   });
 });
 
+describe("composerIdentity", () => {
+  it("separates surfaces, tasks and sessions", () => {
+    const ids = [
+      composerIdentity("task-chat", "t1", "s1"),
+      composerIdentity("task-chat", "t1", "s2"),
+      composerIdentity("task-chat", "t2", "s1"),
+      composerIdentity("quick-chat", "t1", "s1"),
+      composerIdentity("task-create", null, null),
+      composerIdentity("new-session", "t1", null),
+    ];
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("is stable for the same composer", () => {
+    expect(composerIdentity("task-chat", "t1", "s1")).toBe(
+      composerIdentity("task-chat", "t1", "s1"),
+    );
+  });
+});
+
 describe("useStablePluginComposerCapability", () => {
   it("keeps one capability object across re-renders", () => {
     const { result, rerender } = renderHook(
       (submittable: boolean) =>
-        useStablePluginComposerCapability({
-          insertText: () => true,
-          focus: () => true,
-          submit: async () => submittable,
-        }),
+        useStablePluginComposerCapability(
+          {
+            insertText: () => true,
+            focus: () => true,
+            submit: async () => submittable,
+          },
+          COMPOSER,
+        ),
       { initialProps: false },
     );
 
@@ -41,11 +71,14 @@ describe("useStablePluginComposerCapability", () => {
   it("revalidates the native gate at call time rather than at handout time", async () => {
     const { result, rerender } = renderHook(
       (submittable: boolean) =>
-        useStablePluginComposerCapability({
-          insertText: () => true,
-          focus: () => true,
-          submit: async () => submittable,
-        }),
+        useStablePluginComposerCapability(
+          {
+            insertText: () => true,
+            focus: () => true,
+            submit: async () => submittable,
+          },
+          COMPOSER,
+        ),
       { initialProps: false },
     );
 
@@ -62,11 +95,14 @@ describe("useStablePluginComposerCapability", () => {
     const insertText = vi.fn(() => true);
     const { result } = renderHook(
       () =>
-        useStablePluginComposerCapability({
-          insertText,
-          focus: () => true,
-          submit: async () => true,
-        }),
+        useStablePluginComposerCapability(
+          {
+            insertText,
+            focus: () => true,
+            submit: async () => true,
+          },
+          COMPOSER,
+        ),
       { wrapper: strictWrapper },
     );
 
@@ -75,14 +111,44 @@ describe("useStablePluginComposerCapability", () => {
     expect(insertText).toHaveBeenCalledWith("hello");
   });
 
+  it("revokes the previous handle when the composer's identity changes", async () => {
+    // Task chat is not remounted on a session switch (ChatInputContainer is
+    // keyed only by clarificationKey), so without an identity key a handle
+    // captured on session A would retarget session B's editor.
+    const { result, rerender } = renderHook(
+      (identity: string) =>
+        useStablePluginComposerCapability(
+          {
+            insertText: () => true,
+            focus: () => true,
+            submit: async () => true,
+          },
+          identity,
+        ),
+      { initialProps: COMPOSER },
+    );
+
+    const capturedOnSessionA = result.current;
+    rerender("task-chat:t1:s2");
+
+    expect(result.current).not.toBe(capturedOnSessionA);
+    expect(capturedOnSessionA.insertText("late transcript")).toEqual({ status: "unavailable" });
+    await expect(capturedOnSessionA.submit()).resolves.toEqual({ status: "unavailable" });
+    // The freshly issued handle drives the new composer normally.
+    expect(result.current.insertText("hello")).toEqual({ status: "inserted" });
+  });
+
   it("fails closed once the composer unmounts", async () => {
     const insertText = vi.fn(() => true);
     const { result, unmount } = renderHook(() =>
-      useStablePluginComposerCapability({
-        insertText,
-        focus: () => true,
-        submit: async () => true,
-      }),
+      useStablePluginComposerCapability(
+        {
+          insertText,
+          focus: () => true,
+          submit: async () => true,
+        },
+        COMPOSER,
+      ),
     );
 
     const captured = result.current;

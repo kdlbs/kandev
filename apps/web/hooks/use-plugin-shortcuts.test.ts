@@ -226,6 +226,45 @@ describe("usePluginShortcuts editable-target opt-in", () => {
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
+  it("ignores the editor opt-in when a user override dropped the modifier", () => {
+    // The shortcut recorder accepts a bare key, so an override can strip the
+    // modifier the manifest validator required. Honouring allow_in_editor
+    // against that resolved combo would swallow every "e" typed into an input.
+    mockItems = [
+      makePlugin({ ui: { keybindings: [{ ...TOGGLE_KEYBINDING, allow_in_editor: true }] } }),
+    ];
+    mockOverrides = { [`plugin:${PLUGIN_ID}:toggle`]: { key: "e" } };
+    const handler = vi.fn();
+    pluginRegistry.forPlugin(PLUGIN_ID).registerKeybinding("toggle", handler);
+
+    renderHook(() => usePluginShortcuts());
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    pressKey("e", {}, input);
+    input.remove();
+
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("still honours the opt-in when the override keeps a modifier", () => {
+    mockItems = [
+      makePlugin({ ui: { keybindings: [{ ...TOGGLE_KEYBINDING, allow_in_editor: true }] } }),
+    ];
+    mockOverrides = {
+      [`plugin:${PLUGIN_ID}:toggle`]: { key: "u", modifiers: { ctrlOrCmd: true } },
+    };
+    const handler = vi.fn();
+    pluginRegistry.forPlugin(PLUGIN_ID).registerKeybinding("toggle", handler);
+
+    renderHook(() => usePluginShortcuts());
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    pressKey("u", { ctrlKey: true }, input);
+    input.remove();
+
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps skipping editables for a sibling binding that did not opt in", () => {
     mockItems = [
       makePlugin({

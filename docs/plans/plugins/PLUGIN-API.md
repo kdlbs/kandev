@@ -458,8 +458,9 @@ interface PluginRegistry {
   // textarea or contenteditable has focus. That opt-in exists for bindings
   // whose whole job is to act on the focused composer (dictation); the
   // manifest validator only accepts it on a combo carrying a
-  // ctrl/cmd/mod/alt modifier, so an opted-in binding can never swallow an
-  // ordinary keystroke. Combos are
+  // ctrl/cmd/mod/alt modifier, and the dispatcher re-checks the *resolved*
+  // combo, so a user override that drops the modifier silently falls back to
+  // skipping editables rather than swallowing ordinary keystrokes. Combos are
   // user-overridable in Settings > Keyboard Shortcuts, namespaced
   // `plugin:{pluginId}:{id}`. Binding an id the manifest didn't declare still
   // stores the handler (a console warning is logged) since the dispatcher's

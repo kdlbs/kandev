@@ -212,6 +212,50 @@ describe("TaskFormInputs plugin composer submission", () => {
   });
 });
 
+describe("TaskFormInputs plugin composer chained calls", () => {
+  it("submits a transcript inserted in the same callback, before React re-renders", async () => {
+    // The shape a dictation plugin actually has: insert the transcript and
+    // submit it without yielding. The gate must read the synchronous value,
+    // not the render snapshot, or an empty composer stays "blocked" forever.
+    const onVoiceAutoSend = vi.fn(() => true);
+    const ref = createRef<TaskFormInputsHandle>();
+    render(
+      <TaskFormInputs
+        isSessionMode={false}
+        autoFocus={false}
+        initialDescription=""
+        onDescriptionChange={() => {}}
+        onKeyDown={() => {}}
+        descriptionValueRef={ref}
+        onVoiceAutoSend={onVoiceAutoSend}
+      />,
+      { wrapper: Wrapper },
+    );
+
+    const composer = lastPluginSlotProps().composer;
+    let result: Awaited<ReturnType<typeof composer.submit>> | undefined;
+    await act(async () => {
+      composer.insertText("dictated prompt");
+      result = await composer.submit();
+    });
+
+    expect(result).toEqual({ status: "submitted" });
+    expect(onVoiceAutoSend).toHaveBeenCalledTimes(1);
+    expect(ref.current?.getValue()).toBe("dictated prompt");
+  });
+
+  it("keeps both transcripts when a plugin inserts twice in one callback", () => {
+    const { textarea } = renderTaskFormInputs("");
+
+    act(() => {
+      lastPluginSlotProps().composer.insertText("first");
+      lastPluginSlotProps().composer.insertText("second");
+    });
+
+    expect(textarea.value).toBe("first second");
+  });
+});
+
 describe("TaskFormInputs voice-input wiring — at-cursor splice", () => {
   it("splices the transcript at the caret with a leading space after a word", () => {
     const { textarea } = renderTaskFormInputs("hello world");

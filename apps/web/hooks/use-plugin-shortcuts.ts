@@ -12,7 +12,7 @@ import {
   resolveShortcutEntry,
 } from "@/lib/keyboard/plugin-shortcuts";
 import { comboKey } from "@/lib/keyboard/shortcut-conflicts";
-import { SHORTCUTS } from "@/lib/keyboard/constants";
+import { SHORTCUTS, type KeyboardShortcut } from "@/lib/keyboard/constants";
 
 /**
  * Central shortcuts that are not in `CONFIGURABLE_SHORTCUTS` (so they have no
@@ -135,6 +135,15 @@ function buildCoreComboKeySet(
 }
 
 /**
+ * A combo the user could not produce by ordinary typing. `shift` does not
+ * count: shift+a is just a capital A.
+ */
+function hasNonShiftModifier(shortcut: KeyboardShortcut): boolean {
+  const m = shortcut.modifiers;
+  return Boolean(m && (m.ctrlOrCmd || m.ctrl || m.cmd || m.alt));
+}
+
+/**
  * Collects the namespaced ids of every declared keybinding that set
  * `allow_in_editor`, so the dispatcher can let just those through while an
  * input, textarea or contenteditable holds focus.
@@ -194,6 +203,11 @@ function dispatchMatchingPluginShortcuts(
     if (targetIsEditable && !allowedInEditor.has(`plugin:${pluginId}:${id}`)) continue;
 
     const shortcut = resolveShortcutEntry(entry, overrides);
+    // The manifest validator requires a ctrl/cmd/mod/alt modifier for an
+    // editor-enabled binding, but the effective combo may be a user override
+    // and the shortcut recorder accepts a bare key. Re-check the resolved
+    // combo, or a rebind to plain "m" would eat every m the user types.
+    if (targetIsEditable && !hasNonShiftModifier(shortcut)) continue;
     if (!matchesShortcut(event, shortcut)) continue;
 
     const pluginComboKey = comboKey(shortcut, isMacPlatform);

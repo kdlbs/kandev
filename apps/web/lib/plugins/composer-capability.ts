@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import type { PluginComposerCapability } from "./types";
 
 type NativeComposerOperations = {
@@ -69,26 +69,51 @@ export function composerInsertionText(text: string, charBefore: string): string 
 }
 
 /**
+ * The key that distinguishes one mounted composer from another, for
+ * `useStablePluginComposerCapability`. Every part matters: composers are not
+ * remounted when the user switches task or session, so dropping a segment
+ * lets a handle captured on one conversation act on the next.
+ */
+export function composerIdentity(
+  surface: string,
+  taskId: string | null,
+  sessionId: string | null,
+): string {
+  return `${surface}:${taskId ?? ""}:${sessionId ?? ""}`;
+}
+
+/**
  * Builds the `PluginComposerCapability` a mounted composer hands to its
  * plugin action slot.
  *
- * The returned object is stable for the lifetime of the mount. That is the
- * whole point: a plugin action is inherently asynchronous (record, upload,
- * transcribe, then insert and maybe submit), so it holds the capability
- * across many host re-renders. Rebuilding it whenever `disabled`,
- * `submittable` or the native submit callback changed would revoke the object
- * the plugin is still holding and turn a completed transcription into
- * `unavailable`.
+ * The returned object is stable across ordinary re-renders. That is the whole
+ * point: a plugin action is inherently asynchronous (record, upload,
+ * transcribe, then insert and maybe submit), so it holds the capability across
+ * many host re-renders. Rebuilding it whenever `disabled`, `submittable` or the
+ * native submit callback changed would revoke the object the plugin is still
+ * holding and turn a completed transcription into `unavailable`.
  *
  * Liveness comes from the operations ref instead: each render republishes the
  * current closures, so `submit()` revalidates the native gate at call time
  * rather than against a snapshot taken when the plugin first got the object.
+ * The ref is published in a layout effect so a handler running after paint
+ * cannot read the previous render's gate.
+ *
+ * `identity` is what stops that stability from becoming a leak. A composer is
+ * not remounted when the user switches task or session — task chat's container
+ * is keyed only by its clarification key — so without it, a handle captured
+ * while recording on one session would happily insert into the next one, which
+ * the composer contract forbids. Pass whatever distinguishes one mounted
+ * composer from another (surface, task, session); changing it revokes the old
+ * handle and issues a new one, while ordinary disabled/submittable re-renders
+ * leave it alone.
  */
 export function useStablePluginComposerCapability(
   operations: NativeComposerOperations,
+  identity: string,
 ): PluginComposerCapability {
   const latest = useRef(operations);
-  useEffect(() => {
+  useLayoutEffect(() => {
     latest.current = operations;
   });
 
@@ -99,7 +124,7 @@ export function useStablePluginComposerCapability(
         focus: () => latest.current.focus(),
         submit: () => latest.current.submit(),
       }),
-    [],
+    [identity],
   );
   useEffect(() => handle.attach(), [handle]);
 
