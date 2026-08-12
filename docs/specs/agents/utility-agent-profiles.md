@@ -10,7 +10,11 @@ Decision: [ADR-2026-08-08-utility-agent-profile-execution](../../decisions/2026-
 
 Safety decision: [ADR-2026-08-08-utility-profile-dependency-safety](../../decisions/2026-08-08-utility-profile-dependency-safety.md)
 
+Default inheritance repair: [ADR-2026-08-12-built-in-utility-default-inheritance](../../decisions/2026-08-12-built-in-utility-default-inheritance.md)
+
 Implementation plan: [utility-agent-profiles](../../plans/utility-agent-profiles/plan.md)
+
+Repair plan: [utility-action-default-profile](../../plans/utility-action-default-profile/plan.md)
 
 ## Why
 
@@ -27,8 +31,9 @@ permission choice that its caller cannot answer.
   profile as an override.
 - Every custom utility agent selects one concrete profile. A custom utility agent cannot be created
   or saved without a profile.
-- A built-in utility action can also be **unconfigured** after an ambiguous legacy migration. It
-  cannot run until the user selects a profile or chooses to inherit the default.
+- A built-in utility action without a concrete profile override inherits the default utility
+  profile. A stale concrete override remains **unconfigured** after its profile is deleted or
+  disabled and cannot run until the user repairs it.
 - Eligible choices are enabled, non-deleted, global profiles for ACP inference-capable agents.
   CLI-passthrough profiles and workspace-scoped Office profiles are not eligible.
 - A utility invocation resolves its effective profile at the start of the call. It uses that
@@ -56,12 +61,13 @@ permission choice that its caller cannot answer.
 
 | Field              | Type   | Constraint                   | Meaning                                                                        |
 | ------------------ | ------ | ---------------------------- | ------------------------------------------------------------------------------ |
-| `agent_profile_id` | string | empty unless state is `explicit` | Concrete profile reference. |
+| `agent_profile_id` | string | empty for `inherit`, required for `explicit`, retained for stale `unconfigured` bindings | Concrete profile reference. |
 | `profile_binding_state` | enum | `inherit`, `explicit`, or `unconfigured` | Whether the row inherits the default, names a profile, or needs repair. |
 
 `inherit` is valid only for built-in rows. `explicit` requires an eligible profile. `unconfigured`
-is used for a custom row without a profile and for a built-in row whose legacy binding was ambiguous
-or unmatched. This state prevents an empty legacy value from silently becoming default inheritance.
+is used for a custom row without a profile and for a built-in row whose concrete profile binding is
+stale or unavailable. A built-in row with no concrete profile ID, including an empty, ambiguous, or
+unmatched legacy binding, is normalized to `inherit` so it uses the selected default utility profile.
 
 The legacy `agent_id` and `model` columns may remain temporarily as migration inputs, but they are
 not execution inputs after this feature ships and are not writable through the utility-agent API.
@@ -82,12 +88,11 @@ non-deleted, non-passthrough global profiles whose parent agent matches the lega
 and whose configured model matches the legacy model (including an explicit empty model). Exactly
 one match is copied to `agent_profile_id` and sets the row state to `explicit`.
 
-Zero matches or multiple matches set the row state to `unconfigured`. The backend does not pick the
-first profile, infer from a display name, or silently use a provider default. A built-in row with this
-state does not inherit the default until the user explicitly chooses inheritance. Custom utility
-agents that cannot be migrated remain stored and editable but are not executable until the user
-selects a profile. The legacy values remain available to a later retry or diagnostic report, but the
-new state is authoritative after the migration.
+Zero matches or multiple matches set a custom row to `unconfigured`. A built-in row with no concrete
+profile ID becomes `inherit`. The backend does not pick the first profile, infer from a display name,
+or silently use a provider default. Custom utility agents that cannot be migrated remain stored and
+editable but are not executable until the user selects a profile. The legacy values remain available
+to a later retry or diagnostic report, but the new state is authoritative after the migration.
 
 ## API surface
 
@@ -121,9 +126,10 @@ new state is authoritative after the migration.
 
 - With no effective profile, invocation fails before a call is dispatched and tells the user to
   select a profile in Settings > Utility Agents.
-- A missing, deleted, disabled, CLI-passthrough, workspace-scoped, or non-inference-capable profile
-  fails closed. The backend never falls back to another profile, the active task profile, a raw
-  agent/model pair, or the first available agent.
+- A missing, deleted, disabled, CLI-passthrough, workspace-scoped, or non-inference-capable
+  concrete profile binding fails closed. An inherited built-in action uses the saved global default
+  only. The backend never falls back to another profile, the active task profile, a raw agent/model
+  pair, or the first available agent.
 - A profile launch-policy error (invalid command prefix, unresolved required secret, invalid config
   option, or unavailable agent runtime) is surfaced as the utility call failure. The runner does not
   retry without that setting.
@@ -140,9 +146,11 @@ new state is authoritative after the migration.
   backend-owned settings/database storage.
 - Profile edits are not copied into utility-agent rows. Each new invocation reads the current
   profile; already-running calls keep their start-time resolution.
-- Disabling or deleting a selected profile does not rewrite the selection to another profile. The
-  stale ID remains diagnosable and invocation fails closed until the user repairs it. The warning
-  dialog is confirmation only; it does not perform reassignment.
+- Disabling or deleting a selected explicit profile does not rewrite the selection to another
+  profile. The stale ID remains diagnosable and invocation fails closed until the user repairs it.
+  The warning dialog is confirmation only; it does not perform reassignment. Built-in actions that
+  inherit the default remain inherited when the default profile is deleted, so selecting a new
+  default repairs them without editing each action.
 - Utility call history retains the effective profile ID and resolved model even if the profile is
   later edited or deleted.
 
@@ -179,10 +187,13 @@ new state is authoritative after the migration.
 - **GIVEN** a legacy agent/model selection that matches exactly one eligible profile, **WHEN** the
   backend upgrades, **THEN** that profile becomes the saved selection and utility behavior is
   preserved with the profile's launch policy.
-- **GIVEN** a legacy agent/model selection that matches zero or multiple eligible profiles, **WHEN**
-  the backend upgrades, **THEN** the row state becomes `unconfigured`, the legacy values remain
-  available for migration diagnostics, and no utility action runs until the user chooses a profile
-  or explicitly chooses default inheritance for a built-in action.
+- **GIVEN** a legacy built-in action agent/model selection that matches zero or multiple eligible
+  profiles, **WHEN** the backend upgrades, **THEN** the row state becomes `inherit` and the action
+  uses the selected default utility profile. A custom utility agent with the same migration result
+  becomes `unconfigured` and remains unavailable until the user chooses a profile.
+- **GIVEN** an inherited built-in action and a deleted default profile, **WHEN** the user selects a
+  new eligible default profile, **THEN** the action uses the new default without an action-level
+  edit.
 - **GIVEN** Settings > Utility Agents on a phone viewport, **WHEN** the user changes the default or an
   action override, **THEN** the full profile name and save state remain reachable without horizontal
   page overflow or a desktop-only interaction.

@@ -25,6 +25,14 @@ type UtilityAgent struct {
 	UpdatedAt           time.Time `json:"updated_at" db:"updated_at"`
 }
 
+// UsesDefaultProfile reports whether a built-in utility action has no
+// concrete profile override and therefore resolves through the global default.
+// It intentionally ignores profile_binding_state so legacy empty rows remain
+// usable while startup migration repairs their persisted state.
+func UsesDefaultProfile(agent *UtilityAgent) bool {
+	return agent != nil && agent.Builtin && agent.AgentProfileID == ""
+}
+
 // UtilityAgentCall represents a single invocation of a utility agent.
 type UtilityAgentCall struct {
 	ID             string     `json:"id" db:"id"`

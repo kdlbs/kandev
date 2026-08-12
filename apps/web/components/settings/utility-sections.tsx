@@ -16,7 +16,24 @@ import {
 } from "@/components/settings/utility-agent-profile-picker";
 
 export const USE_DEFAULT = "__USE_DEFAULT__";
-const UNCONFIGURED = "__UNCONFIGURED__";
+
+export type BuiltinActionProfileSelection = {
+  value: string;
+  unavailableValue?: string;
+};
+
+export function getBuiltinActionProfileSelection(
+  agent: UtilityAgent,
+): BuiltinActionProfileSelection {
+  const profileId = agent.agent_profile_id || "";
+  if (agent.profile_binding_state === "unconfigured" && profileId) {
+    return { value: profileId, unavailableValue: profileId };
+  }
+  if (agent.profile_binding_state !== "inherit" && profileId) {
+    return { value: profileId };
+  }
+  return { value: USE_DEFAULT };
+}
 
 export function DefaultModelSection({
   profiles,
@@ -85,12 +102,7 @@ export function BuiltinActionRow({
   isDirty: boolean;
 }) {
   const { t } = useTranslation();
-  let currentValue = USE_DEFAULT;
-  if (agent.profile_binding_state === "unconfigured") {
-    currentValue = UNCONFIGURED;
-  } else if (agent.profile_binding_state !== "inherit" && agent.agent_profile_id) {
-    currentValue = agent.agent_profile_id;
-  }
+  const selection = getBuiltinActionProfileSelection(agent);
   return (
     <div
       className="flex flex-col gap-2 py-2 px-2 rounded hover:bg-muted/50 md:flex-row md:items-center md:gap-4"
@@ -104,12 +116,12 @@ export function BuiltinActionRow({
       <div className="flex items-center gap-2">
         <UtilityAgentProfilePicker
           profiles={profiles}
-          value={currentValue}
+          value={selection.value}
           onValueChange={(value) => onProfileChange(agent, value)}
           fallback={{ value: USE_DEFAULT, label: defaultLabel }}
-          unavailableValue={currentValue === UNCONFIGURED ? currentValue : undefined}
+          unavailableValue={selection.unavailableValue}
           unavailableLabel={
-            currentValue === UNCONFIGURED ? t("settings:utilityProfileNeedsRepair") : undefined
+            selection.unavailableValue ? t("settings:utilityProfileNeedsRepair") : undefined
           }
           testId={`utility-profile-picker-action-${agent.id}`}
           triggerClassName="min-w-0 flex-1 md:w-[280px] md:flex-none"

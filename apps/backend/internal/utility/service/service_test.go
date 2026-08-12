@@ -3,10 +3,12 @@ package service
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 
 	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/utility/models"
+	"github.com/kandev/kandev/internal/utility/profilebinding"
 	"github.com/kandev/kandev/internal/utility/template"
 )
 
@@ -38,6 +40,94 @@ func TestMigrateLegacyBindingsUpdatesOnlyUnambiguousRows(t *testing.T) {
 	}
 	if repo.agents["inherit"].ProfileBindingState != models.ProfileBindingInherit {
 		t.Fatalf("inherit row changed: %#v", repo.agents["inherit"])
+	}
+}
+
+func TestMigrateLegacyBindingsNormalizesEmptyUnconfiguredBuiltin(t *testing.T) {
+	repo := &fakeRepository{agents: map[string]*models.UtilityAgent{
+		"builtin": {
+			ID:                  "builtin",
+			Builtin:             true,
+			ProfileBindingState: models.ProfileBindingUnconfigured,
+		},
+	}}
+	svc := NewService(repo)
+	svc.SetProfileResolver(fakeProfileResolver{})
+
+	updated, err := svc.MigrateLegacyBindings(context.Background())
+	if err != nil {
+		t.Fatalf("MigrateLegacyBindings() error = %v", err)
+	}
+	if updated != 1 {
+		t.Fatalf("MigrateLegacyBindings() updated = %d, want 1", updated)
+	}
+	if got := repo.agents["builtin"].ProfileBindingState; got != models.ProfileBindingInherit {
+		t.Fatalf("profile binding state = %q, want %q", got, models.ProfileBindingInherit)
+	}
+}
+
+func TestMigrateLegacyBindingsMakesAmbiguousBuiltinInheritButCustomUnconfigured(t *testing.T) {
+	repo := &fakeRepository{agents: map[string]*models.UtilityAgent{
+		"builtin": {
+			ID:                  "builtin",
+			AgentID:             "legacy-agent",
+			Model:               "legacy-model",
+			Builtin:             true,
+			ProfileBindingState: models.ProfileBindingExplicit,
+		},
+		"custom": {
+			ID:                  "custom",
+			AgentID:             "legacy-agent",
+			Model:               "legacy-model",
+			ProfileBindingState: models.ProfileBindingExplicit,
+		},
+	}}
+	svc := NewService(repo)
+	svc.SetProfileResolver(fakeProfileResolver{err: profilebinding.ErrLegacyBindingAmbiguous})
+
+	updated, err := svc.MigrateLegacyBindings(context.Background())
+	if err != nil {
+		t.Fatalf("MigrateLegacyBindings() error = %v", err)
+	}
+	if updated != 2 {
+		t.Fatalf("MigrateLegacyBindings() updated = %d, want 2", updated)
+	}
+	if got := repo.agents["builtin"].ProfileBindingState; got != models.ProfileBindingInherit {
+		t.Fatalf("builtin state = %q, want %q", got, models.ProfileBindingInherit)
+	}
+	if got := repo.agents["custom"].ProfileBindingState; got != models.ProfileBindingUnconfigured {
+		t.Fatalf("custom state = %q, want %q", got, models.ProfileBindingUnconfigured)
+	}
+}
+
+func TestClearAgentProfileBindingsRetainsStaleProfileID(t *testing.T) {
+	repo := &fakeRepository{agents: map[string]*models.UtilityAgent{
+		"builtin": {
+			ID:                  "builtin",
+			Builtin:             true,
+			AgentProfileID:      "deleted-profile",
+			ProfileBindingState: models.ProfileBindingExplicit,
+		},
+		"inherited": {
+			ID:                  "inherited",
+			Builtin:             true,
+			ProfileBindingState: models.ProfileBindingInherit,
+		},
+	}}
+	svc := NewService(repo)
+
+	if err := svc.ClearAgentProfileBindings(context.Background(), "deleted-profile"); err != nil {
+		t.Fatalf("ClearAgentProfileBindings() error = %v", err)
+	}
+	deleted := repo.agents["builtin"]
+	if deleted.AgentProfileID != "deleted-profile" {
+		t.Fatalf("stale profile ID = %q, want %q", deleted.AgentProfileID, "deleted-profile")
+	}
+	if deleted.ProfileBindingState != models.ProfileBindingUnconfigured {
+		t.Fatalf("deleted profile state = %q, want %q", deleted.ProfileBindingState, models.ProfileBindingUnconfigured)
+	}
+	if got := repo.agents["inherited"].ProfileBindingState; got != models.ProfileBindingInherit {
+		t.Fatalf("inherited state = %q, want %q", got, models.ProfileBindingInherit)
 	}
 }
 
@@ -232,5 +322,89 @@ func TestPreparePromptRequest_IgnoresDefaultsWhenAgentAndModelAreConfigured(t *t
 	}
 	if req.Model != "custom-model" {
 		t.Fatalf("Model = %q, want %q", req.Model, "custom-model")
+	}
+}
+
+func TestPreparePromptRequest_ResolvesEmptyUnconfiguredBuiltinFromDefaultProfile(t *testing.T) {
+	t.Parallel()
+
+	defaultProfile := &agentsettingsmodels.AgentProfile{
+		ID:      "default-profile",
+		AgentID: "codex-acp",
+		Model:   "gpt-5",
+	}
+	svc := NewService(&fakeRepository{agents: map[string]*models.UtilityAgent{
+		"builtin": {
+			ID:                  "builtin",
+			Prompt:              "Do {{UserPrompt}}",
+			Builtin:             true,
+			ProfileBindingState: models.ProfileBindingUnconfigured,
+		},
+	}})
+	svc.SetProfileResolver(fakeProfileResolver{profile: defaultProfile})
+
+	req, err := svc.PreparePromptRequest(
+		context.Background(),
+		"builtin",
+		&template.Context{UserPrompt: "fix the bug"},
+		&DefaultUtilitySettings{ProfileID: "default-profile"},
+		false,
+	)
+	if err != nil {
+		t.Fatalf("PreparePromptRequest() error = %v", err)
+	}
+	if req.AgentProfileID != "default-profile" {
+		t.Fatalf("AgentProfileID = %q, want %q", req.AgentProfileID, "default-profile")
+	}
+}
+
+func TestPreparePromptRequest_EmptyUnconfiguredBuiltinRequiresDefault(t *testing.T) {
+	t.Parallel()
+
+	svc := NewService(&fakeRepository{agents: map[string]*models.UtilityAgent{
+		"builtin": {
+			ID:                  "builtin",
+			Prompt:              "Do {{UserPrompt}}",
+			Builtin:             true,
+			ProfileBindingState: models.ProfileBindingUnconfigured,
+		},
+	}})
+	svc.SetProfileResolver(fakeProfileResolver{profile: &agentsettingsmodels.AgentProfile{ID: "unused"}})
+
+	_, err := svc.PreparePromptRequest(
+		context.Background(),
+		"builtin",
+		&template.Context{UserPrompt: "fix the bug"},
+		&DefaultUtilitySettings{},
+		false,
+	)
+	if !errors.Is(err, ErrProfileRequired) {
+		t.Fatalf("PreparePromptRequest() error = %v, want %v", err, ErrProfileRequired)
+	}
+}
+
+func TestPreparePromptRequest_ConcreteUnconfiguredBindingFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	svc := NewService(&fakeRepository{agents: map[string]*models.UtilityAgent{
+		"builtin": {
+			ID:                  "builtin",
+			Prompt:              "Do {{UserPrompt}}",
+			Builtin:             true,
+			AgentProfileID:      "deleted-profile",
+			ProfileBindingState: models.ProfileBindingUnconfigured,
+		},
+	}})
+	svc.SetProfileResolver(fakeProfileResolver{profile: &agentsettingsmodels.AgentProfile{ID: "deleted-profile"}})
+
+	_, err := svc.PreparePromptRequest(
+		context.Background(),
+		"builtin",
+		&template.Context{UserPrompt: "fix the bug"},
+		&DefaultUtilitySettings{ProfileID: "default-profile"},
+		false,
+	)
+	if !errors.Is(err, ErrProfileUnconfigured) {
+		t.Fatalf("PreparePromptRequest() error = %v, want %v", err, ErrProfileUnconfigured)
 	}
 }

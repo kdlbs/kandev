@@ -10,6 +10,73 @@ import { test, expect } from "../../fixtures/test-base";
  * interactions (open the page, inspect sections, open the create dialog).
  */
 test.describe("Utility Agents settings page", () => {
+  test("renders the default for an empty unconfigured built-in action", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { agents } = await apiClient.listAgents();
+    const profile = agents
+      .flatMap((agent) => agent.profiles ?? [])
+      .find((candidate) => candidate.id === seedData.agentProfileId);
+    if (!profile) throw new Error(`seed profile ${seedData.agentProfileId} was not found`);
+    const profileLabel = `${profile.agentDisplayName} • ${profile.name}`;
+
+    await testPage.route("**/api/v1/user/settings", (route) => {
+      if (route.request().method() !== "GET") return route.continue();
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          settings: { default_utility_agent_profile_id: seedData.agentProfileId },
+        }),
+      });
+    });
+    await testPage.route("**/api/v1/utility/agents", (route) => {
+      if (route.request().method() !== "GET") {
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ success: true }),
+        });
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          agents: [
+            {
+              id: "builtin-commit-message",
+              name: "commit-message",
+              description: "Generate a commit message.",
+              builtin: true,
+              enabled: true,
+              agent_id: "",
+              model: "",
+              agent_profile_id: "",
+              profile_binding_state: "unconfigured",
+            },
+          ],
+        }),
+      });
+    });
+
+    await testPage.goto("/settings/utility-agents");
+    await expect(
+      testPage.getByRole("heading", { name: "Utility Agents", exact: true }),
+    ).toBeVisible({ timeout: 15_000 });
+
+    const row = testPage.getByTestId("utility-action-row-builtin-commit-message");
+    await expect(
+      row.getByTestId("utility-profile-picker-action-builtin-commit-message"),
+    ).toContainText(profileLabel);
+    await expect(
+      row.getByText("This profile is unavailable. Select an enabled inference profile.", {
+        exact: true,
+      }),
+    ).toHaveCount(0);
+  });
+
   test("profile picker keeps wheel scrolling inside the menu", async ({ testPage }) => {
     const models = Array.from({ length: 36 }, (_, index) => ({
       id: `claude-model-${String(index + 1).padStart(2, "0")}`,

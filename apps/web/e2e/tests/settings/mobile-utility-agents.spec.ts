@@ -19,6 +19,16 @@ test.describe("Mobile utility agents action rows", () => {
       .find((candidate) => candidate.id === seedData.agentProfileId);
     if (!profile) throw new Error(`seed profile ${seedData.agentProfileId} was not found`);
     const profileLabel = `${profile.agentDisplayName} • ${profile.name}`;
+    await testPage.route("**/api/v1/user/settings", (route) => {
+      if (route.request().method() !== "GET") return route.continue();
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          settings: { default_utility_agent_profile_id: seedData.agentProfileId },
+        }),
+      });
+    });
     await testPage.route("**/api/v1/utility/agents/builtin-commit-message", (route) =>
       route.fulfill({
         status: 200,
@@ -32,8 +42,8 @@ test.describe("Mobile utility agents action rows", () => {
           enabled: true,
           agent_id: "",
           model: "",
-          agent_profile_id: seedData.agentProfileId,
-          profile_binding_state: "explicit",
+          agent_profile_id: "",
+          profile_binding_state: "unconfigured",
         }),
       }),
     );
@@ -59,8 +69,8 @@ test.describe("Mobile utility agents action rows", () => {
               enabled: true,
               agent_id: "",
               model: "",
-              agent_profile_id: seedData.agentProfileId,
-              profile_binding_state: "explicit",
+              agent_profile_id: "",
+              profile_binding_state: "unconfigured",
             },
           ],
         }),
@@ -100,7 +110,9 @@ test.describe("Mobile utility agents action rows", () => {
       "utility-profile-picker-action-builtin-commit-message-dropdown",
     );
     await dropdown.getByPlaceholder("Search agent profiles...").fill(profile.agentDisplayName);
-    const option = dropdown.getByRole("option", { name: profileLabel, exact: true });
+    const option = dropdown.locator(`[data-value="${profile.id}"]`);
+    await expect(option).toHaveAttribute("role", "option");
+    await expect(option).toContainText(profileLabel);
     await expect(option.getByTestId("utility-profile-agent-icon")).toBeVisible();
     await option.tap();
     await expect(select).toContainText(profileLabel);

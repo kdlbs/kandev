@@ -602,7 +602,7 @@ func (a *utilityDepsAdapter) ListUtilityAgentsByAgentProfile(ctx context.Context
 	}
 	for _, agent := range agents {
 		if agent != nil && (agent.AgentProfileID == profileID ||
-			(agent.ProfileBindingState == utilitymodels.ProfileBindingInherit && defaultProfileID == profileID)) {
+			(utilitymodels.UsesDefaultProfile(agent) && defaultProfileID == profileID)) {
 			refs = append(refs, agentsettingscontroller.UtilityAgentReference{ID: agent.ID, Name: agent.Name})
 		}
 	}
@@ -615,15 +615,6 @@ func (a *utilityDepsAdapter) ClearUtilityAgentProfileBindings(ctx context.Contex
 	}
 	if err := a.svc.ClearAgentProfileBindings(ctx, profileID); err != nil {
 		return err
-	}
-	if a.userSvc != nil {
-		defaultProfileID, err := a.userSvc.GetDefaultUtilityAgentProfileID(ctx)
-		if err != nil {
-			return err
-		}
-		if defaultProfileID == profileID {
-			return a.svc.ClearInheritedProfileBindings(ctx)
-		}
 	}
 	return nil
 }
