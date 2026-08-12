@@ -1,10 +1,26 @@
 ---
-status: shipped
+status: draft
 created: 2026-08-12
+amended: 2026-08-12
 owner: nova28
 ---
 
 # Plugin nav items in the sidebar footer icon row
+
+## Amendment log
+
+**Amendment 1 (2026-08-12), from PR #2562 review.** The first version of this spec
+exposed the host's internal `NavSection` value `"insights"` as the plugin-facing
+`NavItem.section` value, and decided against any capacity policy on the footer row.
+A maintainer review on the open PR raised both as contract defects. Both are accepted;
+this document is the amended contract, and the two decisions are recorded in
+**Plugin-facing section vocabulary** and **Capacity and overflow** with the reasoning
+that replaces the original.
+
+Status returns to `draft` because the amended contract is not implemented. The
+already-merged-into-the-branch first version is implemented; the amendment is not. The
+status returns to `shipped` when PR #2562 merges carrying this contract, and
+`docs/specs/INDEX.md` tracks the same value.
 
 ## Why
 
@@ -18,19 +34,25 @@ of their page.
 
 ## What
 
-- `NavItem.section` SHALL accept a fourth value, `"insights"`, in addition to the
-  existing `"main"`, `"integrations"`, and `"settings"`.
-- A plugin nav item with `section: "insights"` SHALL render as an icon button in the
-  desktop sidebar footer's icon row, styled and behaving exactly like the first-party
-  Stats button: icon only, tooltip and accessible name from `NavItem.label`, click
-  navigates to `NavItem.path`.
+- `NavItem.section` SHALL accept a fourth value, `"sidebar-footer"`, in addition to the
+  existing `"main"`, `"integrations"`, and `"settings"`. The four values SHALL be
+  declared as a named exported type, `PluginNavSection`. See **Plugin-facing section
+  vocabulary** for why the value is `"sidebar-footer"` and not the host's internal
+  section name.
+- A plugin nav item with `section: "sidebar-footer"` SHALL render as an icon button in
+  the desktop sidebar footer's icon row, styled and behaving exactly like the
+  first-party Stats button: icon only, tooltip and accessible name from
+  `NavItem.label`, click navigates to `NavItem.path` — subject to the inline budget in
+  **Capacity and overflow**, past which the item is reached through the footer's
+  overflow menu instead of an inline button.
 - The same item SHALL also appear as a labelled row in the phone menu's Utilities
   group, which is where the first-party Stats destination already appears below the
   `md` breakpoint. The sidebar is hidden on phones, so a footer-only placement would
-  make the item unreachable there.
-- An `"insights"` item SHALL NOT also appear in the sidebar's plugin rail or the
-  phone menu's Plugins group. Choosing `insights` moves the item; it does not add a
-  second placement.
+  make the item unreachable there. The phone group is **not** subject to the inline
+  budget; see **Capacity and overflow**.
+- A `"sidebar-footer"` item SHALL NOT also appear in the sidebar's plugin rail or the
+  phone menu's Plugins group. Choosing `sidebar-footer` moves the item; it does not
+  add a second placement.
 - `"integrations"` and `"settings"` behaviour SHALL be unchanged: `"integrations"`
   items still render alongside the first-party integration links on both surfaces,
   and `"settings"` items are still skipped entirely by navigation, which means they
@@ -42,8 +64,10 @@ of their page.
 - Any other `section` value, including omitted/`undefined` and a string outside the
   documented set, SHALL continue to render in the plugin rail / Plugins group exactly
   as `"main"` does. Plugin bundles are untyped JavaScript at runtime, so an unknown
-  value must degrade to the default placement rather than being dropped.
-- Plugin `"insights"` items SHALL NOT appear in the command palette, unchanged from
+  value must degrade to the default placement rather than being dropped. **The literal
+  string `"insights"` is one such unknown value and SHALL degrade to the plugin rail**
+  — it is deliberately not an accepted alias; see **Plugin-facing section vocabulary**.
+- Plugin footer items SHALL NOT appear in the command palette, unchanged from
   every other plugin section. This follows structurally, not from a rule this spec
   adds: `pluginDestinations()` stamps every plugin entry with `surfaces:
   SIDEBAR_AND_MENU`, and the palette's Navigation group is
@@ -54,28 +78,103 @@ of their page.
   a global capture-phase keydown listener (`hooks/use-plugin-shortcuts.ts`) — a
   keyboard binding, not a palette row. Adding a plugin→palette route is a separate
   feature (see **Out of scope**).
-- There SHALL be no numeric cap on how many plugin items the footer row accepts. See
-  **Capacity and overflow** below for the reasoning and the guarantee that replaces a
-  cap.
-- The public authoring documentation SHALL list `insights` as an accepted `section`
-  value and describe where it renders. The site is named, not left to be found: the
-  `registerNavItem` row of the Frontend hook/API matrix in
-  [`docs/public/plugins-authoring.md`](../../public/plugins-authoring.md), which today
-  reads *"section is main, integrations, or accepted-but-not-rendered settings"*. It is
+- The desktop footer SHALL render at most `MAX_INLINE_PLUGIN_FOOTER_ITEMS` plugin
+  buttons inline and reach any remainder through a single overflow menu. No item is
+  dropped. See **Capacity and overflow** for the value, the derivation, and the exact
+  rule.
+- The public authoring documentation SHALL list `sidebar-footer` as an accepted
+  `section` value and describe where it renders. The site is named, not left to be
+  found: the `registerNavItem` row of the Frontend hook/API matrix in
+  [`docs/public/plugins-authoring.md`](../../public/plugins-authoring.md). It is
   the fifth entry in **Stale prose at the edit sites** below.
+
+## Plugin-facing section vocabulary
+
+### Decision
+
+`NavItem.section` is typed by a named, exported union that is the plugin's vocabulary,
+not the host's:
+
+```ts
+export type PluginNavSection = "main" | "settings" | "integrations" | "sidebar-footer";
+```
+
+The host's internal `NavSection` (`"primary" | "plugins" | "integrations" | "insights"
+| "utilities"`, `apps/web/lib/navigation/types.ts`) stays internal. `pluginDestinations()`
+translates between the two, and remains the only place that translation happens.
+
+### Why this, and why not `"insights"`
+
+The indirection this amendment names **already existed**; it was only unnamed and
+leaking in one place. `sectionFor()` in `plugin-destinations.ts` has always been the
+translation layer, and `"main"` has always mapped to the internal section `plugins` —
+so three of the four plugin-facing values already differed from, or were independent
+of, the internal taxonomy. `"insights"` was the single member that was spelled with the
+host's internal name, which is what makes the coupling look like contract. Renaming
+that one member and naming the union closes the leak without changing any of the three
+shipped values.
+
+The value is spelled after the **placement a plugin author is asking for**, not after
+the host's grouping. The host can rename, split, or merge `NavSection` members without
+a plugin-visible break, which is exactly the freedom the reviewer asked for and which
+the previous version did not provide.
+
+One objection was considered and rejected: `"sidebar-footer"` names a desktop surface,
+while the item also renders in the phone menu's Utilities group, where there is no
+sidebar. That asymmetry is real but does not win. The phone placement is a host
+**reachability guarantee** — the sidebar does not exist below `md`, so the host puts the
+item where its first-party peer (`Stats`) already goes — and not a second thing the
+plugin declared. A plugin author asking for the footer strip gets the footer strip, plus
+whatever the host must do to keep it reachable on a phone. A deliberately neutral token
+(`"quick-access"`, `"glance"`) would be surface-independent but would tell an author
+nothing about where their icon lands without reading the docs, and would be a novel
+coined term where `"sidebar-footer"` is self-describing. The doc comment on the field
+states both placements, so nothing is hidden.
+
+### `"insights"` is not accepted, and not an alias
+
+Passing `section: "insights"` from a plugin bundle SHALL be treated as an unrecognised
+value and degrade to the plugin rail / Plugins group, exactly like `"footer"` or
+`"banana"`. It is not accepted, not aliased, and produces no warning beyond the
+existing (absent) validation.
+
+This is safe and deliberate. Nothing has shipped: PR #2562 is open and unmerged, and
+the one motivating consumer, `kandev-plugin-rill`, has not switched its `section` yet
+(it is still `"main"`). There is no plugin in the wild passing `"insights"`, so there
+is no compatibility burden to carry. Accepting both would make the internal name a
+permanent de-facto public alias, re-creating the coupling this amendment removes on the
+same day it removes it.
+
+The consequence to be explicit about: the in-tree e2e fixture bundle
+(`apps/backend/cmd/plugin-fixture/fixture-package/ui/bundle.js`) currently registers
+`{ id: "e2e-insights-tools", …, section: "insights" }`. Under this contract that item
+would silently move back to the plugin rail, so the fixture SHALL be updated to
+`section: "sidebar-footer"` in the same change. It is entry 7 in **Stale prose at the
+edit sites**.
+
+### No runtime validation is added
+
+There is still no runtime validation of `section` anywhere in the stack: the web
+registry's `registerNavItem` pushes the item verbatim, and the backend plugin manifest
+does not describe nav-item sections at all.
+`apps/backend/internal/plugins/manifest/validate.go` validates a different, unrelated
+enum (`ui.pages[].surface`, one of `settings | task-panel | main-nav`), which is not
+this field and is not in scope. Introducing a validator, a console warning, or a
+developer-mode diagnostic for an unrecognised `section` is **out of scope** — the
+degrade rule is the whole error behaviour.
 
 ## API surface
 
-The only contract that changes is the `section` field of `NavItem`. That is a statement
-about the *contract*, not about the file count: the field is declared in
-`apps/web/lib/plugins/types.ts` and mirrored in
+The only contract that changes is the `section` field of `NavItem` and the new named
+type for its values. That is a statement about the *contract*, not about the file
+count: the field is declared in `apps/web/lib/plugins/types.ts` and mirrored in
 [`docs/plans/plugins/PLUGIN-API.md`](../../plans/plugins/PLUGIN-API.md), so those two must
 change together, and it is *documented* for plugin authors in
 [`docs/public/plugins-authoring.md`](../../public/plugins-authoring.md), which the **What**
 section requires updating in the same change. Three files, one contract. Read neither this
 paragraph nor the Before/After snippet below as the exhaustive edit list — that list is
 **Stale prose at the edit sites**. `PluginNavRegistration`
-(`apps/web/lib/plugins/registry.ts`) extends `NavItem` and inherits the widening, so it
+(`apps/web/lib/plugins/registry.ts`) extends `NavItem` and inherits the change, so it
 needs no edit of its own.
 
 Before:
@@ -93,99 +192,102 @@ interface NavItem {
 After:
 
 ```ts
+export type PluginNavSection = "main" | "settings" | "integrations" | "sidebar-footer";
+
 interface NavItem {
   id: string;
   label: string;
   path: string;
   icon?: string;
-  section?: "main" | "settings" | "integrations" | "insights";
+  section?: PluginNavSection;
 }
 ```
 
-There is no runtime validation of `section` anywhere in the stack: the web registry's
-`registerNavItem` pushes the item verbatim, and the backend plugin manifest does not
-describe nav-item sections at all. `apps/backend/internal/plugins/manifest/validate.go`
-validates a different, unrelated enum (`ui.pages[].surface`, one of
-`settings | task-panel | main-nav`), which is not this field and is not in scope. The
-widening is therefore a TypeScript-and-docs change plus the section mapping; no
-validator gains a new accepted string.
+`PluginNavSection` SHALL be exported from `apps/web/lib/plugins/types.ts` so a plugin
+author writing TypeScript can name the type, and SHALL appear in
+`docs/plans/plugins/PLUGIN-API.md` in the same form. Nothing else about the plugin API
+changes: no new hook, no new registry method, no manifest field.
 
 ### Stale prose at the edit sites — correct it in the same change
 
 Every file this change touches already carries prose that contradicts the contract above.
 It sits inches from the lines being changed, so leaving it is shipping a
 self-contradictory frozen contract, and a builder who noticed but had no instruction
-would be inventing scope. The spec therefore requires all six to be corrected in the
+would be inventing scope. The spec therefore requires all seven to be corrected in the
 same change, and names them so nobody has to guess.
 
-**This list is the complete edit inventory for prose.** Together with the one mapping
-line in `pluginDestinations()`, the union widening in `types.ts`, and the new test
-coverage, it is everything this change writes.
+**This list is the complete edit inventory for prose and fixtures.** Together with the
+mapping in `pluginDestinations()`, the union in `types.ts`, the footer's overflow
+rendering, the locale key, and the new test coverage, it is everything this change
+writes.
 
 1. `docs/plans/plugins/PLUGIN-API.md`, the comment immediately above the `NavItem`
-   interface the Before/After snippet replaces, currently reads *"Hosts predating a
-   `section` value simply don't render items targeting it (additive change)."* That
-   contradicts the **What** requirement that an unrecognised value degrade to the
-   plugin rail, and it is false about the shipped host, which drops nothing. It SHALL
-   be replaced with the degrade-to-`"main"` rule. The same comment block SHALL also
-   gain a line describing where `"insights"` renders, matching the mapping table.
-2. `apps/web/lib/navigation/plugin-destinations.ts`, the `pluginDestinations` docblock,
-   currently reads *"`section: "settings"` items are skipped — those render in the
-   settings tree's `PluginSlot`, not as destinations."* The second clause is false; the
-   slot is fed only by `registerComponent("settings-nav", …)`. It SHALL be corrected to
-   say settings nav items are skipped and render on no surface.
+   interface the Before/After snippet replaces. It SHALL state the degrade-to-`"main"`
+   rule, describe where `"sidebar-footer"` renders (matching the mapping table), and
+   name `PluginNavSection`. If it still carries the older *"Hosts predating a `section`
+   value simply don't render items targeting it (additive change)"* line, that line
+   SHALL be removed: it contradicts the degrade rule and is false about the shipped
+   host, which drops nothing.
+2. `apps/web/lib/navigation/plugin-destinations.ts`, the `pluginDestinations` docblock.
+   It SHALL say `section: "settings"` items are skipped and render on **no** surface —
+   not that they render in the settings tree's `PluginSlot`, which is false; that slot
+   is fed only by `registerComponent("settings-nav", …)`.
 3. `apps/web/lib/navigation/plugin-destinations.ts`, the comment on the `surfaces:
-   SIDEBAR_AND_MENU` line, currently cites `registerShortcut` — an identifier that does
-   not exist anywhere in this repository. It SHALL be corrected to state that plugin
-   destinations never declare the `palette` surface, without naming a substitute API,
-   because there is no plugin route into the palette (see **What**).
-4. `apps/web/lib/plugins/types.ts`, the doc comment on the `section` field being
-   widened, currently documents only two of the three values it already accepts
-   (*"`"main"` (default) as a top-level sidebar entry, `"integrations"` inside the
-   sidebar's Integrations section"*) — `"settings"` is undocumented. Widening the union
-   without touching it would leave two of four values undocumented on the field's own
-   declaration. It SHALL be extended to cover all four, matching the mapping table:
-   `"insights"` renders in the sidebar footer icon row and the phone Utilities group,
-   and `"settings"` is accepted and renders nowhere.
+   SIDEBAR_AND_MENU` line. It SHALL state that plugin destinations never declare the
+   `palette` surface, without naming a substitute API, because there is no plugin route
+   into the palette (see **What**). It SHALL NOT cite `registerShortcut`, an identifier
+   that does not exist anywhere in this repository.
+4. `apps/web/lib/plugins/types.ts`, the doc comment on the `section` field. It SHALL
+   document all four values, matching the mapping table: `"main"` (default) as a
+   top-level sidebar entry, `"integrations"` inside the sidebar's Integrations section,
+   `"sidebar-footer"` as an icon button in the sidebar footer's icon row and as a
+   labelled row in the phone menu's Utilities group, and `"settings"` accepted and
+   rendered nowhere. It SHALL also state that the footer placement is subject to the
+   inline budget and that an over-budget item is reached through the footer's overflow
+   menu, so an author is not surprised by an icon that is present but not inline.
 5. `docs/public/plugins-authoring.md`, the `registerNavItem` row of the Frontend hook/API
-   matrix, currently reads *"section is main, integrations, or accepted-but-not-rendered
-   settings"*. That is the public authoring surface the **What** section's
-   documentation SHALL points at, and it is the enumeration a plugin author actually
-   reads. It SHALL list `insights` and say where it renders, matching the mapping table.
-   This is the one entry in this list that is a stated requirement rather than only a
-   correction; it is listed here so the edit inventory is in one place.
+   matrix. It SHALL list `sidebar-footer` and say where it renders, matching the mapping
+   table, and SHALL NOT mention `insights`. This is the public authoring surface the
+   **What** section's documentation SHALL points at, and it is the enumeration a plugin
+   author actually reads.
 6. `apps/web/lib/navigation/plugin-destinations.test.ts`, the title of the palette
-   exclusion test, currently reads
-   *`it("keeps plugin items off the palette, which plugins reach via shortcuts", …)`*.
-   The trailing clause is the same false claim as item 3 — there is no plugin route into
-   the palette, by `registerShortcut` or any other API — and this is the file the new
-   `insights` coverage is added to, so the builder will be editing around it. It SHALL be
-   retitled to state the exclusion without naming a substitute route. The assertion
-   itself is correct and SHALL NOT change.
+   exclusion test. If it still reads *"…which plugins reach via shortcuts"*, that
+   trailing clause is the same false claim as item 3 and SHALL be removed; the title
+   SHALL state the exclusion without naming a substitute route. The assertion itself is
+   correct and SHALL NOT change.
+7. `apps/backend/cmd/plugin-fixture/fixture-package/ui/bundle.js`, the
+   `e2e-insights-tools` registration. Its `section` SHALL change from `"insights"` to
+   `"sidebar-footer"`. Without this the e2e fixture item silently relocates to the
+   plugin rail and the desktop/phone footer e2e specs fail — a real behavioural
+   consequence of this amendment, not a cosmetic one.
 
-Items 1 to 4 and 6 are prose corrections; item 5 is a documentation requirement. None of
-the six changes behaviour, a signature, an exported symbol, or a test assertion, and
-nothing here is an implementation decision left open.
+Items 1 to 4 and 6 are prose corrections; item 5 is a documentation requirement; item 7
+is a fixture correction with behavioural effect. None of items 1 to 6 changes behaviour,
+a signature, an exported symbol, or a test assertion, and nothing here is an
+implementation decision left open.
 
 **The mapping lives in exactly one module.** `pluginDestinations()` in
 `apps/web/lib/navigation/plugin-destinations.ts` is the sole place a `NavItem.section`
 value is translated into a manifest `NavSection` — it is the only reader of that field
 anywhere in the web app. The section-to-placement table below becomes code there and
-nowhere else, which is why every other navigation module is listed under **Out of
-scope**.
+nowhere else, which is why every other navigation module except the footer component is
+listed under **Out of scope**.
 
 ### Section-to-placement mapping
 
-This table is the whole behavioural contract. `NavItem.section` value on the left,
-resulting internal navigation section and rendered surfaces on the right.
+This table is the whole placement contract. `NavItem.section` value on the left,
+resulting internal navigation section and rendered surfaces on the right. The desktop
+column reads "footer icon button" for items within the inline budget and "footer
+overflow menu item" beyond it; see **Capacity and overflow**.
 
 | `NavItem.section` | Nav section | Desktop sidebar | Phone menu | Palette |
 |---|---|---|---|---|
-| `"insights"` | `insights` | footer icon button | Utilities group row | no |
+| `"sidebar-footer"` | `insights` | footer icon button, or footer overflow menu item past the budget | Utilities group row | no |
 | `"integrations"` | `integrations` | Integrations section row | Integrations group row | no |
 | `"settings"` | *(skipped)* | no | no | no |
 | `"main"` | `plugins` | plugin rail row | Plugins group row | no |
 | omitted | `plugins` | plugin rail row | Plugins group row | no |
+| `"insights"` | `plugins` | plugin rail row | Plugins group row | no |
 | any other string | `plugins` | plugin rail row | Plugins group row | no |
 
 ### Rendered identity
@@ -198,12 +300,20 @@ The resulting attribute is therefore:
 data-testid="sidebar-plugin:<pluginId>:<itemId>-button"
 ```
 
-For example the plugin `kandev-plugin-rill` registering `{ id: "rill", section: "insights" }`
+For example the plugin `kandev-plugin-rill` registering `{ id: "rill", section: "sidebar-footer" }`
 yields `data-testid="sidebar-plugin:kandev-plugin-rill:rill-button"`. This is the
 existing derivation applied unchanged to a plugin destination — the footer is not
 special-cased — and it is stated here because it becomes public contract the moment
 the first plugin uses it. The accessible name is `NavItem.label` verbatim, untranslated,
 matching how every other plugin-supplied label is treated.
+
+**An over-budget item carries the same test id.** When an item is reached through the
+overflow menu rather than an inline button, its menu item SHALL carry the identical
+`data-testid="sidebar-plugin:<pluginId>:<itemId>-button"` and the identical accessible
+name. A conformance test therefore selects the same id either way; the only difference
+is that the menu must be opened first, because the menu's content is not in the DOM
+while closed. The overflow trigger itself carries
+`data-testid="sidebar-insights-overflow-button"`.
 
 Phone Utilities rows carry **no** `data-testid`. The shared row renderer only emits a
 plugin test id when the calling surface supplies its own prefix, and neither Utilities
@@ -229,14 +339,15 @@ non-manifest neighbours are:
 - **Desktop sidebar footer** (`app-sidebar-footer.tsx`). Before the `insights`
   destinations: the settings gear. After them: the doctor / Improve Kandev button, and
   then What's new, the Office↔Kanban switch, the theme toggle, the connection warning and
-  the user chip, each rendered conditionally.
+  the user chip, each rendered conditionally. The overflow trigger this amendment adds is
+  itself a non-manifest control and sits at a fixed position defined below.
 - **Phone menu Utilities group** (`UtilityNavSection` in `app-nav-sections.tsx`). Before
   the destination rows: the Status row, rendered only when the app status drawer is
   enabled. After them: the theme toggle, the Improve Kandev row, and the Health issues
   row, the last rendered only when there are health issues to show.
 
 None of those is a destination, none comes from `APP_DESTINATIONS` or from a plugin, and
-none is added, removed or reordered by this change.
+none except the new overflow trigger is added, removed or reordered by this change.
 
 ### The order itself
 
@@ -250,6 +361,11 @@ group, manifest destinations render in this total order:
    already orders its plugin additions.
 2. **Plugin entries**, in plugin-registry registration order, i.e. the order
    `pluginRegistry.getNavRegistrations()` returns them.
+
+The inline budget does not reorder anything. It **partitions** the plugin run at a fixed
+index: the first `MAX_INLINE_PLUGIN_FOOTER_ITEMS` plugin entries render inline in that
+order, and the remainder render in the overflow menu in that same order. Concatenating
+the inline run with the menu's contents reproduces the full order above, unchanged.
 
 Within a single `loadPlugins` pass, registration order is fully determined and needs no
 tiebreak, because it is a single append-ordered array:
@@ -272,17 +388,26 @@ predictable from the boot payload order alone. This is the same family as the
 re-enable rule below, it is pre-existing for every nav section, and no ordering control
 is introduced to fix it.
 
-Two consequences that are contract, not accident:
+Three consequences that are contract, not accident:
 
 - A plugin disabled and re-enabled at runtime has its registrations removed and then
   re-appended, so its footer icon moves to the **end** of the plugin run of the
   insights row. The row does not re-sort to restore the boot order.
 - Position is not alphabetical and is not influenced by `label`, `id`, or `path`. A
-  plugin cannot choose its slot in the row.
+  plugin cannot choose its slot in the row, and cannot choose whether it is inline or
+  in the overflow menu.
+- Because the partition is by position, a re-enable that moves a plugin to the end of
+  the run can move it **from inline into the overflow menu**, and can promote the plugin
+  that was first in the overflow menu into the inline run. The item is still present and
+  still reachable; only its affordance changed. This is the same registration-order
+  consequence as the bullet above, and no stickiness or memory is introduced to avoid
+  it.
 
 No per-surface ordering override is introduced. The footer and the phone Utilities
 group agree on the **relative order of `insights` entries**: `stats` first, then plugin
-entries in registration order, on both surfaces.
+entries in registration order, on both surfaces. They differ only in affordance — the
+phone renders every entry as a row, the footer may place a suffix of the plugin run
+behind the overflow trigger.
 
 They do **not** resolve the same list. The phone Utilities group resolves two sections in
 one pass (`MOBILE_MENU_UTILITY_SECTIONS = ["insights", "utilities"]`), and the resolver
@@ -292,7 +417,7 @@ phone group's **manifest rows**, in order and ignoring the non-manifest controls
 above, are:
 
 ```
-stats, settings, <plugin insights items in registration order>
+stats, settings, <plugin sidebar-footer items in registration order>
 ```
 
 so a plugin row lands **after** Settings on the phone, not adjacent to Stats as the
@@ -305,46 +430,122 @@ changed here.
 
 ## Capacity and overflow
 
-**Decision: no cap, no truncation, no overflow menu.** Every registered `insights`
-plugin item is rendered.
+**Decision: a bounded inline budget on the desktop footer, with a single overflow menu
+holding the remainder. Nothing is dropped, and the phone surface is uncapped.**
 
-A cap was considered and rejected: silently dropping the *N+1*th plugin's icon would
-remove a plugin's only entry point with no error surface and no way for the author to
-discover it, which is a worse failure than a crowded footer. The realistic ceiling is
-also low — this section competes with a labelled plugin rail that remains the default,
-and the motivating installation has one such plugin.
+### The rule
 
-The contract that replaces the cap is a **rendering** guarantee, not a visibility one:
+- `MAX_INLINE_PLUGIN_FOOTER_ITEMS = 3`. The constant SHALL live in
+  `apps/web/components/app-sidebar/app-sidebar-footer.tsx`, next to the code that
+  applies it.
+- The budget counts **plugin** `insights` destinations only — those with
+  `source === "plugin"` on the resolved destination, after the `section: "settings"`
+  skip. First-party `insights` entries (today, `stats`) are never counted, never
+  overflowed, and always render inline.
+- Let *P* be the number of plugin `insights` destinations resolved for the sidebar.
+  - *P* = 0: the footer renders exactly as it does today. No overflow trigger.
+  - 0 < *P* ≤ 3: all *P* render as inline icon buttons, in order. **No overflow trigger
+    is rendered** — a "more" button holding nothing is worse than no button.
+  - *P* > 3: the first 3 render as inline icon buttons, in order, followed by a single
+    overflow trigger holding the remaining *P* − 3 items as menu items, in the same
+    order.
+- The overflow trigger sits immediately after the last inline plugin button and before
+  the doctor / Improve Kandev button, so the insights block occupies at most 5 slots
+  (`stats` + 3 inline + trigger).
+- The same budget applies **collapsed and expanded**. A per-state threshold would make
+  icons jump between inline and menu when the user toggles the sidebar, which is a
+  worse surprise than a constant rule.
+- The overflow trigger renders with the footer's existing icon-button treatment
+  (`FooterIconButton`'s size, tooltip and hover behaviour) wrapped as a
+  `@kandev/ui/dropdown-menu` trigger, using `IconDots` from `@tabler/icons-react`. It
+  is named `InsightOverflowMenu`. Its label and tooltip come from a new i18n key
+  `sidebar:morePluginItems` with the English value `More plugin items`. Per this repo's
+  i18n rules the key SHALL be added to `src/locales/en/sidebar.json` and the `pseudo`
+  catalog regenerated; the real-locale catalogs (`zh-cn`, `pt-pt`) are translated out of
+  band and are **out of scope**.
+- Each overflow menu item renders the destination's resolved icon followed by its
+  `label` as visible text — the labels are the reason the menu is legible where an
+  icon-only strip is not. Clicking a menu item navigates to its `href` exactly as the
+  inline button does. Menu placement, keyboard navigation and focus behaviour are
+  whatever `@kandev/ui/dropdown-menu` already provides at its defaults; no bespoke
+  keyboard handling, side/align override, or focus management is added.
 
-- The footer SHALL render a button for every `insights` destination into the DOM. None
-  is dropped, truncated, collapsed into a "more" affordance, or hidden behind a count
-  threshold. This is what an implementation can guarantee and what a test can assert.
-- **Expanded**, the footer's container is a wrapping flex row (`flex-wrap`), so extra
-  icons flow onto a second line rather than overflowing horizontally.
-- **Collapsed**, the footer is a non-wrapping vertical column (`flex-col`). Extra icons
-  make the column taller.
+### Why a bound, when the first version rejected one
 
-What this spec deliberately does **not** promise is that every icon is visible on
-screen at any count. The footer is `shrink-0` inside
+The first version rejected a cap on the grounds that *"silently dropping the N+1th
+plugin's icon would remove a plugin's only entry point with no error surface and no way
+for the author to discover it."* That argument is sound and still stands — **against a
+cap that drops**. It does not reach an overflow menu, which drops nothing: every
+registered item is reachable, in order, one click away, and the trigger is a visible
+affordance rather than a silent truncation. Rejecting the drop-cap and then treating the
+question as closed was the gap; the reviewer found it.
+
+The defect the bound actually fixes is a **priority inversion**, not crowding. The
+footer renders third-party content *before* the host's own controls, inside a container
+that clips rather than scrolls: the footer is `shrink-0` inside
 `<div data-testid="app-sidebar-content" class="flex min-h-0 flex-1 flex-col overflow-hidden">`
-(`app-sidebar.tsx`), so a collapsed column tall enough to exceed the available sidebar
-height is clipped by that ancestor rather than scrolled. That is pre-existing layout
-behaviour shared with the footer's first-party buttons, and changing it would require
-editing the footer or the sidebar container, which **Out of scope** forbids. Stating
-the guarantee as "rendered, never dropped" keeps this section and Out of scope
-consistent, and keeps the guarantee falsifiable.
+(`app-sidebar.tsx`). Unbounded, a large enough plugin run pushes the theme toggle, the
+Office↔Kanban switch, the connection warning and the account chip past the clip, with no
+scroll to recover them. Those are host controls a user cannot reach any other way from
+the sidebar, and the plugin that displaced them is the thing they would need to reach
+Settings to disable. Bounding the plugin block at 4 occupied slots makes that outcome
+unreachable at any *P*.
 
-If a real installation ever reaches a count where clipping matters, the remedy is a
-separate change to the sidebar's layout (scroll or height policy) — not a cap here.
+An alternative was considered and rejected: **reordering** the plugin run to the end of
+the footer, after the host controls, so clipping eats plugin icons first. It is a
+smaller change and it does fix the inversion, but it splits `stats` from the plugin run
+it introduces, breaks the desktop/phone ordering agreement this spec establishes in
+**Ordering**, and still leaves the row unbounded — a tall enough run still clips, only
+now it clips the plugins with no affordance to reach them. The bound is the better
+contract.
+
+### Why 3
+
+The collapsed footer is the binding constraint: it is a non-wrapping `flex-col`, so each
+icon costs a full row, where the expanded footer is `flex-wrap` and fits roughly seven
+28px buttons per line at the sidebar's default width.
+
+Collapsed pitch is 32px (`h-7` button, `gap-1`), except the connection warning at 36px.
+Today's worst-case first-party collapsed column is eight controls — gear, `stats`,
+Improve, What's new, Office, theme, connection, user chip — at roughly 260px. A plugin
+budget of 3 inline plus 1 trigger adds four rows, roughly 130px, for a worst case near
+390px plus padding. That leaves the nav list above it non-zero on any viewport taller
+than about 600px, which is the shortest window the app is expected to be usable in.
+3 is the largest budget that keeps the worst case under 400px, which is why it is 3 and
+not 5.
+
+The number is a layout constant, not a contract with plugin authors: a future change may
+raise or lower it without renegotiating this spec, provided the rule shape (inline run,
+then a single overflow trigger, nothing dropped) holds.
+
+### The guarantee
+
+The contract that replaces "render everything inline" is a **reachability** guarantee:
+
+- Every plugin `insights` destination SHALL be reachable from the desktop footer in at
+  most one extra click: inline, or as a menu item under the overflow trigger. None is
+  dropped, hidden behind a count threshold, or made unreachable.
+- The overflow menu's content is not in the DOM while the menu is closed. A conformance
+  test for an over-budget item SHALL open the menu before asserting. This is the honest
+  version of the guarantee, and it is what a test can assert.
+- **Expanded**, the footer's container remains a wrapping flex row (`flex-wrap`), so the
+  bounded run plus the host controls flow onto a second line rather than overflowing
+  horizontally.
+- **Collapsed**, the footer remains a non-wrapping vertical column (`flex-col`), now of
+  bounded height.
+- The **phone** Utilities group renders every plugin item as a labelled row, with no
+  budget and no overflow menu. It is a scrolling sheet, not a clipped strip, so the
+  failure mode the budget exists to prevent does not occur there, and adding a menu
+  inside a menu would be strictly worse. This asymmetry is deliberate contract.
 
 ## Failure modes
 
 - **Unknown or missing `icon` name.** The curated icon map falls back to the generic
   puzzle-piece glyph, as it already does for every other plugin nav placement. The
-  button still renders and still navigates.
-- **Unknown `section` string** (an untyped bundle passing e.g. `"footer"`). Treated as
-  `"main"`: the item renders in the plugin rail / Plugins group. It is never dropped
-  and never silently promoted to the footer.
+  button still renders and still navigates. The same applies to an overflow menu item.
+- **Unknown `section` string** (an untyped bundle passing e.g. `"footer"`, or the host's
+  internal `"insights"`). Treated as `"main"`: the item renders in the plugin rail /
+  Plugins group. It is never dropped and never silently promoted to the footer.
 - **Empty `label`.** The button renders with an empty accessible name and an empty
   tooltip. This is pre-existing behaviour shared with every plugin nav surface; this
   change neither introduces nor fixes it.
@@ -352,8 +553,8 @@ separate change to the sidebar's layout (scroll or height policy) — not a cap 
   verbatim, so a plugin can *link* to a first-party page but cannot *serve* one — the
   plugin route resolver runs after every static route.
 - **Two registrations of the same `(pluginId, id)` pair.** Both append, producing two
-  footer icons sharing one destination id. Pre-existing for all sections; not changed
-  here.
+  entries sharing one destination id, and both count against the budget. Pre-existing
+  for all sections; not changed here.
 - **A plugin's bundle never loads at all** (import fails, or it does not call
   `registerKandevPlugin`). `initialize()` never runs, so no nav item is registered and
   no icon appears. The loader marks the plugin failed, moves on to the next one, and
@@ -364,10 +565,10 @@ separate change to the sidebar's layout (scroll or height policy) — not a cap 
   the loader logs and marks the plugin failed, and on a throw it logs and marks the
   plugin failed, and neither path revokes registrations (`unregisterPlugin` runs at the
   *start of the plugin's next load*, not on failure). `getNavRegistrations()` applies no
-  status filter, so a plugin that registers an `insights` item and then hangs leaves
-  that icon in the footer until it is next loaded or disabled. This is pre-existing
-  loader behaviour shared by every nav section; this change neither introduces nor
-  fixes it, and a builder must not add rollback to satisfy this spec.
+  status filter, so a plugin that registers a `sidebar-footer` item and then hangs leaves
+  that entry in the footer until it is next loaded or disabled, occupying a budget slot.
+  This is pre-existing loader behaviour shared by every nav section; this change neither
+  introduces nor fixes it, and a builder must not add rollback to satisfy this spec.
 
 ## Concurrency and idempotency
 
@@ -376,12 +577,15 @@ write and no two-writer case for the nav-item array itself: every `registerNavIt
 call completes before any other code runs. Reload generation guards prevent a stale
 load from re-adding registrations after a newer generation claimed the same plugin.
 Re-rendering the footer is a pure read of the registry; it performs no writes and is
-safe to run any number of times.
+safe to run any number of times. Applying the budget is a pure function of the resolved
+destination list, so it is likewise idempotent and introduces no state of its own — the
+inline/overflow partition is recomputed on every render and is never remembered.
 
 What is *not* claimed is a global ordering guarantee across concurrent `loadPlugins`
 invocations — see **Ordering**. Two passes can interleave, and the resulting position
-of a plugin's icon depends on that interleaving. Safety is guaranteed; boot-payload
-position is guaranteed only within one pass.
+of a plugin's icon, and therefore whether it is inline or in the overflow menu, depends
+on that interleaving. Safety is guaranteed; boot-payload position is guaranteed only
+within one pass.
 
 Idempotency of a reload is already handled by the loader and is unchanged here: a load
 revokes the plugin's prior registrations before re-running `initialize()`, so repeatedly
@@ -391,49 +595,78 @@ modes**: registrations from a failed pass persist until that next load revokes t
 
 ## Scenarios
 
-- **GIVEN** an active plugin `acme` that registers `{ id: "board", label: "Acme Board", path: "/plugins/acme", section: "insights" }`, **WHEN** the desktop sidebar footer renders, **THEN** an icon button with accessible name `Acme Board` and `data-testid="sidebar-plugin:acme:board-button"` appears in the footer row, and clicking it navigates to `/plugins/acme`.
+### Placement
+
+- **GIVEN** an active plugin `acme` that registers `{ id: "board", label: "Acme Board", path: "/plugins/acme", section: "sidebar-footer" }`, **WHEN** the desktop sidebar footer renders, **THEN** an icon button with accessible name `Acme Board` and `data-testid="sidebar-plugin:acme:board-button"` appears in the footer row, and clicking it navigates to `/plugins/acme`.
 - **GIVEN** that same plugin, **WHEN** the desktop sidebar's plugin rail renders, **THEN** no row for `board` appears in it.
-- **GIVEN** that same plugin, **WHEN** the phone menu's Plugins group (`MobilePluginNavSection`) renders, **THEN** no row for `board` appears in it. This is the mobile half of the same "moves, does not add" rule the previous scenario asserts for the desktop rail; both halves are contract, and a regression that left an `insights` item also matching the `plugins` section would show up here and nowhere else.
+- **GIVEN** that same plugin, **WHEN** the phone menu's Plugins group (`MobilePluginNavSection`) renders, **THEN** no row for `board` appears in it. This is the mobile half of the same "moves, does not add" rule the previous scenario asserts for the desktop rail; both halves are contract, and a regression that left a `sidebar-footer` item also matching the `plugins` section would show up here and nowhere else.
 - **GIVEN** that same plugin, **WHEN** the phone menu's Utilities group renders, **THEN** a row labelled `Acme Board` linking to `/plugins/acme` appears in it.
-- **GIVEN** that same plugin, **WHEN** the phone menu's Utilities group resolves, **THEN** its **manifest rows** appear in the relative order `Stats`, `Settings`, `Acme Board` — the plugin row follows the first-party `utilities` entry, not `Stats`. Per **Ordering**, this constrains those three rows only: the Status row renders before them and the theme, Improve Kandev and Health rows render after them, and a test must not fail on their presence.
-- **GIVEN** a plugin whose `initialize()` registers an `insights` item and then throws or exceeds the initialize timeout, **WHEN** the footer renders, **THEN** the already-registered icon is still present, because a failed initialize does not revoke registrations already made.
 - **GIVEN** that same plugin, **WHEN** the command palette's Navigation group renders, **THEN** no entry for `board` appears.
-- **GIVEN** the first-party `stats` destination and a plugin `insights` item, **WHEN** the insights section resolves for the sidebar, **THEN** `stats` is ordered before the plugin item.
-- **GIVEN** two active plugins `acme` then `globex`, each registering one `insights` item, and `acme` listed first in the boot payload, **WHEN** the footer renders, **THEN** `stats`, `acme`'s item and `globex`'s item appear in that **relative order among the `insights` entries**. Per **Ordering**, this constrains those three manifest buttons only and is not an assertion about the footer's full icon sequence; a conformance test must not fail because the settings gear precedes them or the doctor button follows them.
-- **GIVEN** two active plugins that both register an `insights` item with `id: "dashboard"`, **WHEN** the footer renders, **THEN** both icons render with distinct destination ids `plugin:<pluginA>:dashboard` and `plugin:<pluginB>:dashboard`.
-- **GIVEN** the boot-order footer manifest run `stats, acme, globex`, **WHEN** `acme` is disabled and re-enabled, **THEN** the `insights` entries appear in the relative order `stats`, `globex`, `acme` — same manifest-rows-only reading as the boot-order scenario above, per **Ordering**.
 - **GIVEN** a plugin item with `section: "integrations"`, **WHEN** the sidebar's Integrations section and the footer both render, **THEN** the item appears in Integrations and does not appear in the footer.
 - **GIVEN** a plugin item with `section: "settings"`, **WHEN** any navigation surface resolves, **THEN** no destination for that item exists on any surface.
 - **GIVEN** a plugin item with `section` omitted, **WHEN** the sidebar renders, **THEN** the item appears in the plugin rail and does not appear in the footer.
 - **GIVEN** a plugin item with an unrecognised `section` string, **WHEN** the sidebar renders, **THEN** the item appears in the plugin rail and does not appear in the footer.
-- **GIVEN** no active plugin registers an `insights` item, **WHEN** the footer renders, **THEN** it shows exactly the buttons it shows today, with `stats` as the only insights entry.
-- **GIVEN** a plugin `insights` item whose `icon` is a name absent from the curated icon map, **WHEN** the footer renders, **THEN** the button renders with the puzzle-piece fallback glyph and still navigates to `path`.
-- **GIVEN** eight active plugins each registering one `insights` item, **WHEN** the expanded desktop footer renders, **THEN** eight plugin footer buttons are present in the DOM, none is dropped or replaced by an overflow affordance, and the footer container carries its wrapping-row classes.
-- **GIVEN** those same eight plugins, **WHEN** the **collapsed** desktop footer renders, **THEN** all eight buttons are still present in the DOM. Whether every one is within the visible sidebar height is explicitly not asserted; see **Capacity and overflow**.
+- **GIVEN** a plugin item with `section: "insights"` — the host's internal section name — **WHEN** the sidebar renders, **THEN** the item appears in the plugin rail and does not appear in the footer, because `"insights"` is not an accepted plugin-facing value.
+- **GIVEN** no active plugin registers a `sidebar-footer` item, **WHEN** the footer renders, **THEN** it shows exactly the buttons it shows today, with `stats` as the only insights entry and no overflow trigger.
+- **GIVEN** a plugin `sidebar-footer` item whose `icon` is a name absent from the curated icon map, **WHEN** the footer renders, **THEN** the button renders with the puzzle-piece fallback glyph and still navigates to `path`.
+
+### Ordering
+
+- **GIVEN** the first-party `stats` destination and a plugin `sidebar-footer` item, **WHEN** the insights section resolves for the sidebar, **THEN** `stats` is ordered before the plugin item.
+- **GIVEN** two active plugins `acme` then `globex`, each registering one `sidebar-footer` item, and `acme` listed first in the boot payload, **WHEN** the footer renders, **THEN** `stats`, `acme`'s item and `globex`'s item appear in that **relative order among the `insights` entries**. Per **Ordering**, this constrains those three manifest buttons only and is not an assertion about the footer's full icon sequence; a conformance test must not fail because the settings gear precedes them or the doctor button follows them.
+- **GIVEN** two active plugins that both register a `sidebar-footer` item with `id: "dashboard"`, **WHEN** the footer renders, **THEN** both icons render with distinct destination ids `plugin:<pluginA>:dashboard` and `plugin:<pluginB>:dashboard`.
+- **GIVEN** the boot-order footer manifest run `stats, acme, globex`, **WHEN** `acme` is disabled and re-enabled, **THEN** the `insights` entries appear in the relative order `stats`, `globex`, `acme` — same manifest-rows-only reading as the boot-order scenario above, per **Ordering**.
+- **GIVEN** that same plugin `acme`, **WHEN** the phone menu's Utilities group resolves, **THEN** its **manifest rows** appear in the relative order `Stats`, `Settings`, `Acme Board` — the plugin row follows the first-party `utilities` entry, not `Stats`. Per **Ordering**, this constrains those three rows only: the Status row renders before them and the theme, Improve Kandev and Health rows render after them, and a test must not fail on their presence.
+
+### Capacity and overflow
+
+- **GIVEN** exactly 3 active plugins each registering one `sidebar-footer` item, **WHEN** the expanded desktop footer renders, **THEN** all 3 plugin buttons are present inline in registration order and **no** element with `data-testid="sidebar-insights-overflow-button"` exists.
+- **GIVEN** 4 active plugins `p1…p4` each registering one `sidebar-footer` item, in that registration order, **WHEN** the desktop footer renders, **THEN** inline buttons for `p1`, `p2` and `p3` are present in that order, an overflow trigger with `data-testid="sidebar-insights-overflow-button"` follows them, `p4`'s button is not inline, and opening the trigger reveals exactly one menu item, for `p4`, carrying `data-testid="sidebar-plugin:p4:<itemId>-button"` and accessible name equal to its `label`.
+- **GIVEN** those same 4 plugins, **WHEN** the overflow menu is open and `p4`'s menu item is clicked, **THEN** the app navigates to `p4`'s `path`.
+- **GIVEN** 8 active plugins each registering one `sidebar-footer` item, **WHEN** the expanded desktop footer renders, **THEN** exactly 3 inline plugin buttons and one overflow trigger are present, opening the trigger reveals the remaining 5 in registration order, none of the 8 is dropped, and the footer container carries its wrapping-row classes.
+- **GIVEN** those same 8 plugins, **WHEN** the **collapsed** desktop footer renders, **THEN** the same 3 inline buttons and one overflow trigger are present — the budget is unchanged by collapse — and the container carries its non-wrapping column classes.
+- **GIVEN** those same 8 plugins, **WHEN** the phone menu's Utilities group renders, **THEN** all 8 appear as labelled rows in registration order, with no overflow menu and no truncation.
+- **GIVEN** the first-party `stats` destination and 8 plugin `sidebar-footer` items, **WHEN** the desktop footer renders, **THEN** `stats` renders as an inline button and is not placed in the overflow menu, and the 3-item budget applies to the plugin items alone.
+- **GIVEN** 4 plugins `p1…p4` with `p1` inline and `p4` in the overflow menu, **WHEN** `p1` is disabled and re-enabled, **THEN** `p2`, `p3` and `p4` are the inline buttons and `p1` is the sole overflow menu item, per the registration-order partition in **Ordering**.
+- **GIVEN** a plugin whose `initialize()` registers a `sidebar-footer` item and then throws or exceeds the initialize timeout, **WHEN** the footer renders, **THEN** the already-registered entry is still present and still occupies a budget slot, because a failed initialize does not revoke registrations already made.
 
 ## Out of scope
 
-- **A numeric cap, truncation, or an overflow "more" menu on the footer row.** Decided
-  against above; every destination is rendered.
+- **Renaming the three shipped `NavItem.section` values** (`"main"`, `"integrations"`,
+  `"settings"`). They are already independent of the host's internal `NavSection` names
+  and are in use by shipped plugins; renaming them would be a breaking change for no
+  gain. Only the new member is named after placement intent.
+- **Accepting `"insights"` as an alias for `"sidebar-footer"`, or warning when a plugin
+  passes an unrecognised `section`.** Both are decided against in **Plugin-facing
+  section vocabulary**; the degrade rule is the whole error behaviour, and no runtime
+  validation, console warning, or developer-mode diagnostic is added.
+- **Backwards compatibility for `section: "insights"`.** Nothing has shipped that uses
+  it: PR #2562 is unmerged and `kandev-plugin-rill` has not switched.
+- **A capacity policy on the phone Utilities group.** It is a scrolling sheet of
+  labelled rows; the clipping failure the desktop budget prevents does not occur there.
+- **Capping, truncating, or overflowing first-party `insights` destinations.** The
+  budget counts plugin entries only. If `APP_DESTINATIONS` ever grows a second
+  `insights` entry, that is a first-party layout decision, not this contract.
+- **Making the inline budget configurable** — by user setting, plugin manifest field,
+  or runtime feature flag. It is a layout constant in the footer component.
 - **Making the sidebar footer scroll, or changing the `overflow-hidden` sidebar
-  container so a tall collapsed footer stays on screen.** Pre-existing layout behaviour
-  that also affects the footer's first-party buttons; see **Capacity and overflow**.
-  Changing it is a sidebar-layout decision, not part of opening a section to plugins.
+  container.** The budget removes the need; changing the container is a sidebar-layout
+  decision, not part of opening a section to plugins.
 - **Rolling back nav registrations made before a plugin's `initialize()` throws or
   times out.** Pre-existing loader behaviour across every section; see **Failure
   modes**.
 - **A per-plugin or per-surface ordering control** (`order`, `priority`, or
-  alphabetical sorting) for nav items. Registration order stands for every section,
-  including this one. Introducing one is a separate change affecting all four sections
-  and all three surfaces.
-- **Changing either surface's non-manifest controls, or how it renders them.** No change
-  to the footer component's markup or button styling, to its bespoke buttons (gear,
-  doctor, What's new, Office, theme, connection, user chip), or to the phone Utilities
-  group's bespoke rows (Status, theme, Improve Kandev, Health issues). Both sets are
-  listed under **Ordering**; this change adds manifest rows beside them and moves,
-  restyles and removes none of them.
+  alphabetical sorting) for nav items, and any stickiness that would keep a plugin
+  inline across a re-enable. Registration order stands for every section, including
+  this one.
+- **Changing the footer's or the phone group's other non-manifest controls.** The footer
+  component gains exactly one new control, the overflow trigger, at the position stated
+  in **Capacity and overflow**. No change to its bespoke buttons (gear, doctor, What's
+  new, Office, theme, connection, user chip), to their styling or order, or to the phone
+  Utilities group's bespoke rows (Status, theme, Improve Kandev, Health issues).
 - **Changing the first-party catalog** (`core-destinations.ts`) or the resolver
-  (`resolve-destinations.ts`). Neither needs to know a plugin item can be `insights`.
+  (`resolve-destinations.ts`). Neither needs to know a plugin item can be
+  `sidebar-footer`; the budget is applied in the footer component, not in the manifest.
 - **Adding a plugin `data-testid` prefix to the phone Utilities rows.** Those rows are
   test-id-less for first-party and plugin entries alike today; adding one is a
   separate surface-contract decision, and label-based selection covers this feature's
@@ -450,6 +683,11 @@ modes**: registrations from a failed pass persist until that next load revokes t
   Pre-existing behaviour across every section.
 - **The `utilities` nav section.** Only `insights` is opened to plugins; `utilities`
   holds the first-party Settings entry and stays closed.
+- **Real-locale translations** of `sidebar:morePluginItems` (`zh-cn`, `pt-pt`). Those
+  catalogs are translated out of band and only warn in CI; `en` and `pseudo` gate and
+  are in scope.
 - **Any change to `kandev-plugin-rill`**, the private plugin that motivates this. It
-  switches its own `section` from `"main"` to `"insights"` after this ships, in its
-  own repository.
+  switches its own `section` from `"main"` to `"sidebar-footer"` after this ships, in
+  its own repository.
+</content>
+</invoke>
