@@ -301,9 +301,22 @@ func (s *Service) GetTaskEnvironmentForTaskLSP(
 	if err := s.authorizeTaskID(ctx, taskID); err != nil {
 		return nil, err
 	}
+	if s.taskEnvironments == nil {
+		return nil, nil
+	}
 	owned, err := s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, taskID)
 	if err != nil || owned != nil {
 		return owned, err
+	}
+	return s.getInheritedTaskEnvironmentForLSP(ctx, taskID)
+}
+
+func (s *Service) getInheritedTaskEnvironmentForLSP(
+	ctx context.Context,
+	taskID string,
+) (*models.TaskEnvironment, error) {
+	if s.sessions == nil {
+		return nil, nil
 	}
 	sessions, err := s.sessions.ListTaskSessions(ctx, taskID)
 	if err != nil {

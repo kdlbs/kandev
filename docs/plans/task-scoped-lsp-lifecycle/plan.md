@@ -421,6 +421,13 @@ Completed 2026-08-05.
   borrowers with rollback-safe ownership transfer; and a per-language stop failure is cleared only
   by explicit process-tree cleanup proof. Affected backend packages and their race suites pass, as
   do nine focused frontend files / 55 tests, web typecheck/lint, and both i18n checks.
+- A further exact-head GPT-5.6 Sol audit found four lifecycle blockers and two major contract/state
+  defects. Optional environment wiring is nil-safe; borrower Stop cannot mutate another task's
+  physical environment; asynchronous direct and cascade teardown holds the physical writer lock;
+  partial cascades roll back only unmutated owners; authoritative HTTP responses use per-task
+  settlement order; and the ADR, spec, and public guide consistently preserve a shared host for a
+  live borrower. Full task-service race verification, the exact CI regression, focused frontend
+  tests/typecheck/lint, changed-code Go lint, and public-doc validation pass.
 
 ---
 

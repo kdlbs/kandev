@@ -36,6 +36,16 @@ spec: "../../specs/lsp-file-intelligence/spec.md"
   transfers when the durable mutation fails.
 - Per-language cleanup failures are suppressed only after the runtime proves the physical task-host
   process tree is gone; preserving a borrower's host is an explicit no-op, not cleanup success.
+- Optional task-environment repository wiring cannot panic terminal task mutations. Stopping a
+  borrower never changes another task's environment owner or readiness.
+- Physical-environment admission stays blocked through asynchronous direct and cascade teardown,
+  not only through the preceding task-row mutation.
+- Partial cascade failure keeps ownership transfers for tasks already archived/deleted and rolls
+  back transfers for the failed and not-yet-mutated tasks.
+- Concurrent authoritative HTTP refreshes settle in request order, so an older response carrying a
+  previously unseen capacity epoch cannot replace a newer response.
+- Public docs, the feature spec, and the ADR define shared-owner transfer consistently: a live
+  borrower preserves the physical host while the departing task's independent slots stop.
 
 ## Verification
 
@@ -61,6 +71,15 @@ Completed 2026-08-12.
   SQLite fixtures. No assertion failed; both affected packages passed in the focused command.
 - Canonical exact-head CI and a second independent Sol review run after the remediation push; their
   results remain PR delivery evidence rather than changing this completed implementation record.
+- The next exact-head GPT-5.6 Sol audit found four blockers and two majors. Nil-safe optional
+  environment wiring, owner-only Stop mutation, worker-held physical teardown locks, selective
+  partial-cascade rollback, authoritative request ordering, and the shared-owner contract now have
+  focused regressions or reconciled docs.
+- Post-remediation verification: `go test ./internal/task/service ./internal/mcp/handlers -count=1`
+  passed; the exact CI panic regression passed 10 repetitions; the new concurrency cases passed 10
+  race-enabled repetitions; full `go test -race ./internal/task/service -count=1` passed; changed
+  task-service lint reported zero issues. The two focused frontend files passed 20 tests, ESLint,
+  and typecheck. Public-doc validation passed 60 tests and all 41 published pages.
 
 ## Files
 

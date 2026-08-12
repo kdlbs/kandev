@@ -398,6 +398,11 @@ func (s *Service) executeTaskResourceCleanupJob(
 	job *models.TaskResourceCleanupJob,
 	snapshot taskResourceCleanupSnapshot,
 ) error {
+	releaseEnvironmentMutations := s.acquireTaskLSPEnvironmentMutationIDs(
+		taskCleanupEnvironmentIDs(snapshot.Sessions, snapshot.TaskEnvironment),
+	)
+	defer releaseEnvironmentMutations()
+
 	targets, err := s.refreshTaskRuntimeStopTargets(
 		ctx,
 		job.TaskID,

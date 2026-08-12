@@ -127,6 +127,36 @@ describe("useTaskLsp", () => {
 });
 
 describe("useTaskLsp reconnection", () => {
+  it("keeps the newest authoritative response when an older unseen epoch settles last", async () => {
+    const initial = snapshot(language(4, "initializing"));
+    initial.capacity = { active: 1, queued: 0, limit: 4, epoch: "epoch-a", revision: 4 };
+    api.get.mockResolvedValueOnce(initial);
+    const view = renderHook(() => subject("task-1"), { wrapper });
+    await waitFor(() => expect(view.result.current.lsp.capacity.epoch).toBe("epoch-a"));
+
+    let resolveOlder!: (value: TaskLspSnapshot) => void;
+    api.get.mockReturnValueOnce(
+      new Promise<TaskLspSnapshot>((resolve) => {
+        resolveOlder = resolve;
+      }),
+    );
+    const older = view.result.current.lsp.refetch();
+
+    const newest = snapshot(language(6, "ready"));
+    newest.capacity = { active: 3, queued: 0, limit: 4, epoch: "epoch-c", revision: 6 };
+    api.get.mockResolvedValueOnce(newest);
+    await act(async () => view.result.current.lsp.refetch());
+
+    const stale = snapshot(language(5, "starting"));
+    stale.capacity = { active: 2, queued: 0, limit: 4, epoch: "epoch-b", revision: 5 };
+    await act(async () => {
+      resolveOlder(stale);
+      await older;
+    });
+
+    expect(view.result.current.lsp.capacity).toEqual(newest.capacity);
+  });
+
   it("retries a failed initial load when the subscription reconnects", async () => {
     api.get.mockRejectedValueOnce(new Error("initial load failed"));
     const view = renderHook(() => subject("task-1"), { wrapper });

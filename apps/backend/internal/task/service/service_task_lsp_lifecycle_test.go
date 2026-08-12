@@ -101,6 +101,31 @@ func TestService_DeleteTaskStopsTaskLSPBeforeMutation(t *testing.T) {
 	}
 }
 
+func TestService_TerminalMutationSupportsOptionalTaskEnvironmentRepository(t *testing.T) {
+	actions := []struct {
+		name string
+		run  func(*Service) error
+	}{
+		{name: "archive", run: func(svc *Service) error {
+			return svc.ArchiveTask(context.Background(), "task-lsp")
+		}},
+		{name: "delete", run: func(svc *Service) error {
+			return svc.DeleteTask(context.Background(), "task-lsp")
+		}},
+	}
+	for _, action := range actions {
+		t.Run(action.name, func(t *testing.T) {
+			svc, _, repo := createTestService(t)
+			seedTaskForLSPLifecycleTest(t, repo)
+			svc.taskEnvironments = nil
+
+			if err := action.run(svc); err != nil {
+				t.Fatalf("%s without task environment repository: %v", action.name, err)
+			}
+		})
+	}
+}
+
 func TestService_ArchiveTaskBlocksLSPAdmissionThroughMutation(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	seedTaskForLSPLifecycleTest(t, repo)
@@ -432,6 +457,58 @@ func TestService_StopTaskLSPPreservesWarmBorrowerEnvironment(t *testing.T) {
 	}
 	if got := lifecycle.cleanupCalls; len(got) != 1 || got[0] != "parent-task:user_stop" {
 		t.Fatalf("cleanup calls = %v", got)
+	}
+}
+
+func TestService_StopTaskLSPDoesNotMutateEnvironmentOwnedByAnotherTask(t *testing.T) {
+	for _, siblingBorrower := range []bool{false, true} {
+		name := "without sibling borrower"
+		if siblingBorrower {
+			name = "with sibling borrower"
+		}
+		t.Run(name, func(t *testing.T) {
+			svc, _, repo := createTestService(t)
+			seedParentChildWorkspace(t, repo, "ws-stop-borrower", "wf-stop-borrower", "owner-task", "borrower-task")
+			if siblingBorrower {
+				if err := repo.CreateTask(context.Background(), &models.Task{
+					ID: "sibling-task", WorkspaceID: "ws-stop-borrower", WorkflowID: "wf-stop-borrower",
+					WorkflowStepID: "step-1", ParentID: "owner-task", Title: "Sibling", Priority: "medium",
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := repo.CreateTaskEnvironment(context.Background(), &models.TaskEnvironment{
+				ID: "env-stop-borrower", TaskID: "owner-task", ExecutorType: string(models.ExecutorTypeLocal),
+				Status: models.TaskEnvironmentStatusReady,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			borrowers := []string{"borrower-task"}
+			if siblingBorrower {
+				borrowers = append(borrowers, "sibling-task")
+			}
+			for _, taskID := range borrowers {
+				if err := repo.CreateTaskSession(context.Background(), &models.TaskSession{
+					ID: "session-" + taskID, TaskID: taskID, State: models.TaskSessionStateCompleted,
+					TaskEnvironmentID: "env-stop-borrower",
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			svc.SetTaskLSPLifecycle(&recordingTaskLSPLifecycle{})
+
+			if err := svc.StopTaskLSP(context.Background(), "borrower-task", "user_stop"); err != nil {
+				t.Fatal(err)
+			}
+
+			environment, err := repo.GetTaskEnvironment(context.Background(), "env-stop-borrower")
+			if err != nil || environment == nil {
+				t.Fatalf("owner environment after borrower stop = %#v, err=%v", environment, err)
+			}
+			if environment.TaskID != "owner-task" || environment.Status != models.TaskEnvironmentStatusReady {
+				t.Fatalf("borrower stop mutated owner environment: %#v", environment)
+			}
+		})
 	}
 }
 

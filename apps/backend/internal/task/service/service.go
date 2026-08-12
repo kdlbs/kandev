@@ -480,18 +480,28 @@ func (s *Service) acquireTaskLSPEnvironmentMutations(
 	ctx context.Context,
 	taskIDs []string,
 ) (func(), error) {
-	environmentIDs := make(map[string]struct{})
+	environmentIDs := make([]string, 0, len(taskIDs))
 	for _, taskID := range taskIDs {
 		environment, err := s.GetTaskEnvironmentForTaskLSP(ctx, taskID)
 		if err != nil {
 			return nil, fmt.Errorf("resolve task %s physical environment: %w", taskID, err)
 		}
 		if environment != nil && environment.ID != "" {
-			environmentIDs[environment.ID] = struct{}{}
+			environmentIDs = append(environmentIDs, environment.ID)
 		}
 	}
-	ordered := make([]string, 0, len(environmentIDs))
-	for environmentID := range environmentIDs {
+	return s.acquireTaskLSPEnvironmentMutationIDs(environmentIDs), nil
+}
+
+func (s *Service) acquireTaskLSPEnvironmentMutationIDs(environmentIDs []string) func() {
+	unique := make(map[string]struct{}, len(environmentIDs))
+	for _, environmentID := range environmentIDs {
+		if environmentID != "" {
+			unique[environmentID] = struct{}{}
+		}
+	}
+	ordered := make([]string, 0, len(unique))
+	for environmentID := range unique {
 		ordered = append(ordered, environmentID)
 	}
 	sort.Strings(ordered)
@@ -503,7 +513,7 @@ func (s *Service) acquireTaskLSPEnvironmentMutations(
 		for index := len(releases) - 1; index >= 0; index-- {
 			releases[index]()
 		}
-	}, nil
+	}
 }
 
 // SetAttachmentService wires the file-backed prompt attachment owner into the
@@ -660,22 +670,9 @@ func (s *Service) StopTaskLSP(ctx context.Context, taskID, reason string) error 
 		releaseEnvironmentMutation = s.acquireTaskLSPEnvironmentMutation(environment.ID)
 	}
 	defer releaseEnvironmentMutation()
-	shared, err := s.hasOtherLiveTasksForEnvironment(ctx, taskID, environment)
+	ownershipTransfer, err := s.prepareTaskEnvironmentForLSPStop(ctx, taskID, environment)
 	if err != nil {
-		return fmt.Errorf("check shared task environment before LSP stop: %w", err)
-	}
-	var ownershipTransfer *workspaceEnvironmentOwnershipTransfer
-	if shared {
-		ownershipTransfer, err = s.preserveTaskEnvironmentForLiveBorrower(ctx, taskID, environment)
-		if err != nil {
-			return err
-		}
-	}
-	if environment != nil && !shared && environment.Status != models.TaskEnvironmentStatusStopped {
-		environment.Status = models.TaskEnvironmentStatusStopped
-		if err := s.taskEnvironments.UpdateTaskEnvironment(ctx, environment); err != nil {
-			return fmt.Errorf("mark task environment stopped before LSP cleanup: %w", err)
-		}
+		return err
 	}
 	if s.taskLSP == nil {
 		return nil
@@ -684,6 +681,38 @@ func (s *Service) StopTaskLSP(ctx context.Context, taskID, reason string) error 
 		return s.rollbackTaskEnvironmentOwnershipAfterFailure(ctx, ownershipTransfer, err)
 	}
 	return nil
+}
+
+func (s *Service) prepareTaskEnvironmentForLSPStop(
+	ctx context.Context,
+	taskID string,
+	environment *models.TaskEnvironment,
+) (*workspaceEnvironmentOwnershipTransfer, error) {
+	if environment == nil {
+		return nil, nil
+	}
+	current, err := s.taskEnvironments.GetTaskEnvironment(ctx, environment.ID)
+	if err != nil {
+		return nil, fmt.Errorf("reload task environment before LSP stop: %w", err)
+	}
+	if current == nil || current.TaskID != taskID {
+		return nil, nil
+	}
+	shared, err := s.hasOtherLiveTasksForEnvironment(ctx, taskID, current)
+	if err != nil {
+		return nil, fmt.Errorf("check shared task environment before LSP stop: %w", err)
+	}
+	if shared {
+		return s.preserveTaskEnvironmentForLiveBorrower(ctx, taskID, current)
+	}
+	if current.Status == models.TaskEnvironmentStatusStopped {
+		return nil, nil
+	}
+	current.Status = models.TaskEnvironmentStatusStopped
+	if err := s.taskEnvironments.UpdateTaskEnvironment(ctx, current); err != nil {
+		return nil, fmt.Errorf("mark task environment stopped before LSP cleanup: %w", err)
+	}
+	return nil, nil
 }
 
 // ReconcileTaskLSP is used by task resume/cascade composition without

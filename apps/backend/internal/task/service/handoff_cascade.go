@@ -239,9 +239,11 @@ func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string, cas
 		if err != nil {
 			s.cancelCascadeResourceCleanupRange(ctx, all[:i+1], cleanupOps)
 			archiveErr := fmt.Errorf("archive %s: %w", all[i], err)
-			if len(out.ArchivedTaskIDs) == 0 {
-				archiveErr = s.rollbackWorkspaceEnvironmentOwnershipAfterFailure(ctx, ownershipTransfers, archiveErr)
-			}
+			archiveErr = s.rollbackWorkspaceEnvironmentOwnershipAfterFailure(
+				ctx,
+				ownershipTransfersForTasks(ownershipTransfers, all[:i+1]),
+				archiveErr,
+			)
 			return out, archiveErr
 		}
 		if ok {
@@ -373,9 +375,11 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string, casc
 		if err := s.tasks.DeleteTask(ctx, all[i]); err != nil {
 			s.cancelCascadeResourceCleanupRange(ctx, all[:i+1], cleanupOps)
 			deleteErr := fmt.Errorf("delete %s: %w", all[i], err)
-			if len(out.ArchivedTaskIDs) == 0 {
-				deleteErr = s.rollbackWorkspaceEnvironmentOwnershipAfterFailure(ctx, ownershipTransfers, deleteErr)
-			}
+			deleteErr = s.rollbackWorkspaceEnvironmentOwnershipAfterFailure(
+				ctx,
+				ownershipTransfersForTasks(ownershipTransfers, all[:i+1]),
+				deleteErr,
+			)
 			return out, deleteErr
 		}
 		if operationID := cleanupOps[all[i]]; operationID != "" {
@@ -571,6 +575,23 @@ func (s *HandoffService) rollbackWorkspaceEnvironmentOwnershipAfterFailure(
 		return cause
 	}
 	return errors.Join(cause, fmt.Errorf("rollback shared workspace environment ownership: %w", rollbackErr))
+}
+
+func ownershipTransfersForTasks(
+	transfers []workspaceEnvironmentOwnershipTransfer,
+	taskIDs []string,
+) []workspaceEnvironmentOwnershipTransfer {
+	owners := make(map[string]struct{}, len(taskIDs))
+	for _, taskID := range taskIDs {
+		owners[taskID] = struct{}{}
+	}
+	selected := make([]workspaceEnvironmentOwnershipTransfer, 0, len(transfers))
+	for _, transfer := range transfers {
+		if _, ok := owners[transfer.oldOwnerTaskID]; ok {
+			selected = append(selected, transfer)
+		}
+	}
+	return selected
 }
 
 func (s *HandoffService) rollbackWorkspaceEnvironmentOwnershipTransfers(

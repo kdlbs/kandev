@@ -31,6 +31,29 @@ const TRANSIENT_PHASES = new Set([
   "stopping",
 ]);
 
+type AuthoritativeRequestOrder = { next: number; settled: number };
+
+const authoritativeRequestOrders = new WeakMap<object, Map<string, AuthoritativeRequestOrder>>();
+
+function beginAuthoritativeRequest(store: object, taskId: string): number {
+  let byTask = authoritativeRequestOrders.get(store);
+  if (!byTask) {
+    byTask = new Map();
+    authoritativeRequestOrders.set(store, byTask);
+  }
+  const order = byTask.get(taskId) ?? { next: 0, settled: 0 };
+  order.next += 1;
+  byTask.set(taskId, order);
+  return order.next;
+}
+
+function settleAuthoritativeRequest(store: object, taskId: string, request: number): boolean {
+  const order = authoritativeRequestOrders.get(store)?.get(taskId);
+  if (!order || request < order.settled) return false;
+  order.settled = request;
+  return true;
+}
+
 function taskPending(
   pendingByKey: Record<string, TaskLspAction | undefined>,
   taskId: string | null,
@@ -90,9 +113,12 @@ function useTransientRefresh(taskId: string | null, loaded: boolean, needed: boo
     const refresh = async () => {
       if (inFlight) return;
       inFlight = true;
+      const request = beginAuthoritativeRequest(store, taskId);
       try {
         const snapshot = await getTaskLsp(taskId, { init: { signal: controller.signal } });
-        if (!controller.signal.aborted) store.getState().setTaskLspSnapshot(snapshot);
+        if (!controller.signal.aborted && settleAuthoritativeRequest(store, taskId, request)) {
+          store.getState().setTaskLspSnapshot(snapshot);
+        }
       } catch {
         // WebSocket notifications remain primary. Poll failures must not
         // replace actionable lifecycle evidence with a transport error.
@@ -122,11 +148,16 @@ export function useTaskLsp(taskId: string | null) {
       if (!taskId) throw new Error("A task is required to load language servers.");
       const state = store.getState();
       state.setTaskLspLoading(taskId, true);
+      const request = beginAuthoritativeRequest(store, taskId);
       try {
         const snapshot = await getTaskLsp(taskId, { init: { signal } });
-        if (!signal?.aborted) store.getState().setTaskLspSnapshot(snapshot);
+        if (!signal?.aborted && settleAuthoritativeRequest(store, taskId, request)) {
+          store.getState().setTaskLspSnapshot(snapshot);
+        }
       } catch (error) {
-        if (!signal?.aborted) store.getState().setTaskLspError(taskId, errorMessage(error));
+        if (!signal?.aborted && settleAuthoritativeRequest(store, taskId, request)) {
+          store.getState().setTaskLspError(taskId, errorMessage(error));
+        }
         if (!signal?.aborted) throw error;
       }
     },

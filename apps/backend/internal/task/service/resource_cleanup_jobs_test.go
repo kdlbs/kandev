@@ -59,6 +59,31 @@ type recordingLegacyCleanup struct {
 	calls int
 }
 
+type failingCascadeMutationRepository struct {
+	repository.TaskRepository
+	workspaceEnvironmentRepository
+	failTaskID  string
+	failArchive bool
+	failDelete  bool
+}
+
+func (r *failingCascadeMutationRepository) ArchiveTaskIfActive(
+	ctx context.Context,
+	taskID, cascadeID string,
+) (bool, error) {
+	if r.failArchive && taskID == r.failTaskID {
+		return false, errors.New("injected archive failure")
+	}
+	return r.TaskRepository.ArchiveTaskIfActive(ctx, taskID, cascadeID)
+}
+
+func (r *failingCascadeMutationRepository) DeleteTask(ctx context.Context, taskID string) error {
+	if r.failDelete && taskID == r.failTaskID {
+		return errors.New("injected delete failure")
+	}
+	return r.TaskRepository.DeleteTask(ctx, taskID)
+}
+
 func (c *recordingLegacyCleanup) OnTaskDeleted(context.Context, string) error {
 	c.calls++
 	return nil
@@ -801,6 +826,73 @@ func TestDeleteInheritedSubtaskPreservesChildMaterializedWorkspaceForParent(t *t
 	}
 	if len(destroyer.worktreeCalls) != 0 {
 		t.Fatalf("child cleanup destroyed shared worktree: %v", destroyer.worktreeCalls)
+	}
+}
+
+func TestPartialCascadeFailureRestoresOnlyUnmutatedEnvironmentOwners(t *testing.T) {
+	actions := []struct {
+		name string
+		run  func(context.Context, *HandoffService) error
+	}{
+		{name: "archive", run: func(ctx context.Context, handoff *HandoffService) error {
+			_, err := handoff.ArchiveTaskTree(ctx, "root-task", true)
+			return err
+		}},
+		{name: "delete", run: func(ctx context.Context, handoff *HandoffService) error {
+			_, err := handoff.DeleteTaskTree(ctx, "root-task", true)
+			return err
+		}},
+	}
+	for _, action := range actions {
+		t.Run(action.name, func(t *testing.T) {
+			taskSvc, repo := setupOfficeTest(t)
+			ctx := context.Background()
+			seedParentChildWorkspace(t, repo, "ws-partial-cascade", "wf-partial-cascade", "root-task", "child-task")
+			for _, taskID := range []string{"root-borrower", "child-borrower"} {
+				if err := repo.CreateTask(ctx, &models.Task{
+					ID: taskID, WorkspaceID: "ws-partial-cascade", WorkflowID: "wf-partial-cascade",
+					WorkflowStepID: "step-1", Title: taskID, Priority: "medium",
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, pair := range []struct{ environmentID, ownerTaskID, borrowerTaskID string }{
+				{environmentID: "env-root", ownerTaskID: "root-task", borrowerTaskID: "root-borrower"},
+				{environmentID: "env-child", ownerTaskID: "child-task", borrowerTaskID: "child-borrower"},
+			} {
+				if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+					ID: pair.environmentID, TaskID: pair.ownerTaskID, Status: models.TaskEnvironmentStatusReady,
+				}); err != nil {
+					t.Fatal(err)
+				}
+				if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+					ID: "session-" + pair.borrowerTaskID, TaskID: pair.borrowerTaskID,
+					State: models.TaskSessionStateCompleted, TaskEnvironmentID: pair.environmentID,
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			failingRepo := &failingCascadeMutationRepository{
+				TaskRepository: repo, workspaceEnvironmentRepository: repo,
+				failTaskID: "root-task", failArchive: action.name == "archive", failDelete: action.name == "delete",
+			}
+			handoff := NewHandoffService(failingRepo, repo, nil, nil, nil, nil)
+			handoff.SetTaskResourceCleaner(taskSvc)
+
+			if err := action.run(ctx, handoff); err == nil {
+				t.Fatalf("%s cascade unexpectedly succeeded", action.name)
+			}
+			for environmentID, ownerTaskID := range map[string]string{
+				"env-root": "root-task", "env-child": "child-borrower",
+			} {
+				environment, err := repo.GetTaskEnvironment(ctx, environmentID)
+				if err != nil || environment == nil || environment.TaskID != ownerTaskID {
+					t.Fatalf("%s owner after partial %s = %#v, err=%v, want %s",
+						environmentID, action.name, environment, err, ownerTaskID)
+				}
+			}
+		})
 	}
 }
 

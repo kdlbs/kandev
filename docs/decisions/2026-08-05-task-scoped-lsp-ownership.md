@@ -82,13 +82,15 @@ fail closed. Language-server commands still come only from Kandev's existing reg
 cache or an absolute task-host `PATH`; project-controlled binaries remain forbidden.
 
 Task stop, archive, and delete cancel recovery and stop every language namespace owned by that
-task. If the task owns the physical environment, cleanup also reaps the full task-host process
-tree; cleanup of a borrowing task cannot terminate another task's host or language slots.
-Task-environment teardown remains the final full-process-tree owner. Policy survives temporary
-task stop and archive so task resume can reconcile it; task deletion cascades the rows. Backend
-shutdown drops watches without making a browser or watch stream the stop owner. If the task host
-does not survive, recovery launches at most one new generation after the old runtime is known
-dead.
+task. Cleanup of a borrowing task cannot terminate another task's host or language slots. When a
+departing task owns a physical environment that another live task still uses, ownership transfers
+to one live borrower before the task mutation and the shared task host remains alive; only the
+departing task's slots stop. When no live borrower remains, cleanup reaps the full task-host process
+tree. Task-environment teardown remains the final unconditional full-process-tree owner. Policy
+survives temporary task stop and archive so task resume can reconcile it; task deletion cascades
+the rows. Backend shutdown drops watches without making a browser or watch stream the stop owner.
+If the task host does not survive, recovery launches at most one new generation after the old
+runtime is known dead.
 
 ## Consequences
 

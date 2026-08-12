@@ -316,6 +316,86 @@ func TestBorrowerTaskLSPAdmissionFailsWhilePhysicalEnvironmentResets(t *testing.
 	}
 }
 
+func TestTaskLSPAdmissionFailsWhileAsyncEnvironmentCleanupRuns(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-async-cleanup", TaskID: "task-123", ExecutorType: string(models.ExecutorTypeLocal),
+		ContainerID: "container-async-cleanup", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	destroyer := &stubDestroyer{
+		containerEntered: make(chan struct{}), containerRelease: make(chan struct{}),
+	}
+	svc.SetEnvironmentDestroyer(destroyer)
+	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
+
+	if err := svc.ArchiveTask(ctx, "task-123"); err != nil {
+		t.Fatalf("archive task: %v", err)
+	}
+	select {
+	case <-destroyer.containerEntered:
+	case <-time.After(time.Second):
+		t.Fatal("async environment teardown did not start")
+	}
+
+	release, err := svc.AcquireTaskLSPAdmission(ctx, "task-123")
+	if release != nil {
+		release()
+	}
+	if !errors.Is(err, ErrTaskLSPAdmissionBlocked) {
+		close(destroyer.containerRelease)
+		waitForCleanupDone(t, svc)
+		t.Fatalf("LSP admission during async environment teardown = %v, want blocked", err)
+	}
+
+	close(destroyer.containerRelease)
+	waitForCleanupDone(t, svc)
+}
+
+func TestTaskLSPAdmissionFailsWhileCascadeEnvironmentCleanupRuns(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-cascade-cleanup", TaskID: "task-123", ExecutorType: string(models.ExecutorTypeLocal),
+		ContainerID: "container-cascade-cleanup", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	destroyer := &stubDestroyer{
+		containerEntered: make(chan struct{}), containerRelease: make(chan struct{}),
+	}
+	svc.SetEnvironmentDestroyer(destroyer)
+	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
+	handoff := NewHandoffService(repo, nil, nil, nil, nil, nil)
+	handoff.SetTaskResourceCleaner(svc)
+
+	if _, err := handoff.ArchiveTaskTree(ctx, "task-123", false); err != nil {
+		t.Fatalf("archive task tree: %v", err)
+	}
+	select {
+	case <-destroyer.containerEntered:
+	case <-time.After(time.Second):
+		t.Fatal("cascade environment teardown did not start")
+	}
+
+	release, err := svc.AcquireTaskLSPAdmission(ctx, "task-123")
+	if release != nil {
+		release()
+	}
+	if !errors.Is(err, ErrTaskLSPAdmissionBlocked) {
+		close(destroyer.containerRelease)
+		waitForCleanupDone(t, svc)
+		t.Fatalf("LSP admission during cascade environment teardown = %v, want blocked", err)
+	}
+
+	close(destroyer.containerRelease)
+	waitForCleanupDone(t, svc)
+}
+
 func TestTaskResourceCleanupSnapshotPersistsLegacyRuntimeSecretReferences(t *testing.T) {
 	taskSvc, repo := setupOfficeTest(t)
 	env := &models.TaskEnvironment{
