@@ -1580,6 +1580,9 @@ export const i18nGuardFiles = [
   "components/kanban-board.tsx",
   "components/kanban-card-content.tsx",
   "components/kanban-card-menu-items.tsx",
+  // Extracted out of kanban-card-content.tsx, which is guarded: without its own
+  // entry the card title markup would silently leave whole-file guard coverage.
+  "components/kanban-card-title.tsx",
   "components/kanban-column.tsx",
   "components/kanban-display-dropdown.tsx",
   "components/kanban-with-preview.tsx",
