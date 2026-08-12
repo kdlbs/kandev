@@ -1,7 +1,11 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { useToast } from "@/components/toast-provider";
 import { useGitOperations, type GitOperationResult } from "@/hooks/use-git-operations";
+import type { RemoteContributionRelation } from "@/hooks/domains/session/remote-contribution-relation";
+import type { TaskPR } from "@/lib/types/github";
 
 export type RemoteContributionResolutionAction = "replace" | "use";
 
@@ -15,6 +19,24 @@ export type RemoteContributionResolutionTarget = {
 export type PendingRemoteContributionResolution = RemoteContributionResolutionTarget & {
   action: RemoteContributionResolutionAction;
 };
+
+export function buildRemoteContributionResolutionTarget(
+  relation: RemoteContributionRelation,
+  repositoryName: string | undefined,
+  selectedPR: TaskPR | null | undefined,
+  remoteRepositoryLabel: string,
+): RemoteContributionResolutionTarget | null {
+  const providerHead = relation.providerHead;
+  if (!providerHead || (!relation.canReplaceRemote && !relation.canUseRemote)) return null;
+  const repositoryScope = repositoryName ?? "";
+  return {
+    expectedRemoteHead: providerHead,
+    repo: repositoryScope,
+    repositoryName:
+      repositoryScope ||
+      (selectedPR ? `${selectedPR.owner}/${selectedPR.repo}` : remoteRepositoryLabel),
+  };
+}
 
 export type RemoteContributionResolutionError = "lease_mismatch" | "dirty_worktree" | "generic";
 
@@ -112,4 +134,25 @@ export function useRemoteContributionResolution(
     cancel,
     confirm,
   };
+}
+
+export function useRemoteContributionResolutionConfirmation(
+  resolution: ReturnType<typeof useRemoteContributionResolution>,
+) {
+  const { t } = useTranslation();
+  const { toast } = useToast();
+  return useCallback(async () => {
+    const action = resolution.pending?.action;
+    const result = await resolution.confirm();
+    if (!result?.success) return;
+    toast({
+      title:
+        action === "replace"
+          ? t("task:remoteContributionReplaced")
+          : t("task:remoteContributionUsed", {
+              branch: result.recovery_branch || t("task:remoteRepository"),
+            }),
+      variant: "success",
+    });
+  }, [resolution.confirm, resolution.pending?.action, t, toast]);
 }

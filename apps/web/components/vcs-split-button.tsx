@@ -15,17 +15,17 @@ import { useRemoteContributionRelation } from "@/hooks/domains/session/use-remot
 import { remoteContributionActionPolicy } from "@/hooks/domains/session/remote-contribution-relation";
 import { gitOperationLabel, useGitWithFeedback } from "@/hooks/use-git-with-feedback";
 import { useVcsDialogs } from "@/components/vcs/vcs-dialogs";
-import { useToast } from "@/components/toast-provider";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
+import type { TaskPR } from "@/lib/types/github";
 import { useRepoDisplayName } from "@/hooks/domains/session/use-repo-display-name";
 import {
+  buildRemoteContributionResolutionTarget,
   useRemoteContributionResolution,
-  type RemoteContributionResolutionTarget,
+  useRemoteContributionResolutionConfirmation,
 } from "@/components/task/use-remote-contribution-resolution";
 import { openExternalLink } from "@/lib/desktop/external-links";
 import { VcsSplitButtonContent } from "./vcs-split-button-parts";
-
-const DEFAULT_BASE_BRANCH = "origin/main";
+import { DEFAULT_BASE_BRANCH } from "./vcs-constants";
 
 export function determinePrimaryAction(
   uncommittedFileCount: number,
@@ -202,48 +202,36 @@ function useVcsContributionResolution(
   sessionId: string | null,
   relation: ReturnType<typeof useRemoteContributionRelation>["relation"],
   repositoryName: string | undefined,
+  selectedPR: TaskPR | null,
   refreshProviderEvidence: ReturnType<
     typeof useRemoteContributionRelation
   >["refreshProviderEvidence"],
 ) {
   const { t } = useTranslation();
-  const { toast } = useToast();
   const resolution = useRemoteContributionResolution(sessionId, refreshProviderEvidence);
-  const confirmResolution = useCallback(async () => {
-    const action = resolution.pending?.action;
-    const result = await resolution.confirm();
-    if (!result?.success) return;
-    toast({
-      title:
-        action === "replace"
-          ? t("task:remoteContributionReplaced")
-          : t("task:remoteContributionUsed", {
-              branch: result.recovery_branch || t("task:remoteRepository"),
-            }),
-      variant: "success",
-    });
-  }, [resolution.confirm, resolution.pending?.action, t, toast]);
-  const resolutionTarget = useMemo<RemoteContributionResolutionTarget | null>(() => {
-    if (!relation.providerHead || (!relation.canReplaceRemote && !relation.canUseRemote)) {
-      return null;
-    }
-    const repo = repositoryName ?? "";
-    return {
-      expectedRemoteHead: relation.providerHead,
-      repo,
-      repositoryName: repo || t("task:remoteRepository"),
-    };
-  }, [relation, repositoryName, t]);
+  const confirmResolution = useRemoteContributionResolutionConfirmation(resolution);
+  const remoteRepositoryLabel = t("task:remoteRepository");
+  const resolutionTarget = useMemo(
+    () =>
+      buildRemoteContributionResolutionTarget(
+        relation,
+        repositoryName,
+        selectedPR,
+        remoteRepositoryLabel,
+      ),
+    [relation, repositoryName, selectedPR, remoteRepositoryLabel],
+  );
   return { resolution, confirmResolution, resolutionTarget };
 }
 
-function useVcsContributionState(sessionId: string | null) {
+function useVcsContributionState(sessionId: string | null, selectedPR: TaskPR | null) {
   const contribution = useRemoteContributionRelation(sessionId);
   const remoteActionPolicy = remoteContributionActionPolicy(contribution.relation);
   const resolutionState = useVcsContributionResolution(
     sessionId,
     contribution.relation,
     contribution.repositoryName,
+    selectedPR,
     contribution.refreshProviderEvidence,
   );
   return { ...contribution, remoteActionPolicy, ...resolutionState };
@@ -266,7 +254,7 @@ const VcsSplitButton = memo(function VcsSplitButton({
     resolution,
     confirmResolution,
     resolutionTarget,
-  } = useVcsContributionState(sessionId);
+  } = useVcsContributionState(sessionId, activePR);
   const { handlePull, handlePush, handleRebase, handleMerge } = useGitActions(git, baseBranch);
   const repoDisplayName = useRepoDisplayName(sessionId);
 

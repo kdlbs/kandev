@@ -22,10 +22,11 @@ import { MRTopbarButton } from "@/components/gitlab/mr-topbar-button";
 import { PortForwardButton } from "@/components/task/port-forward-dialog";
 import { linkToTaskOverview } from "@/lib/links";
 import { useTranslation } from "react-i18next";
-import { useToast } from "@/components/toast-provider";
 import { openExternalLink } from "@/lib/desktop/external-links";
 import {
+  buildRemoteContributionResolutionTarget,
   useRemoteContributionResolution,
+  useRemoteContributionResolutionConfirmation,
   type RemoteContributionResolutionTarget,
 } from "../use-remote-contribution-resolution";
 import { MobileContributionResolutionDrawer } from "./mobile-contribution-resolution-drawer";
@@ -204,39 +205,27 @@ function MobileGitDialogs(props: MobileGitDialogsProps) {
 
 function useMobileContributionResolutionActions(sessionId: string | null | undefined) {
   const { t } = useTranslation();
-  const { toast } = useToast();
   const remoteActionPolicy = useMobileRemoteActionPolicy(sessionId);
   const resolution = useRemoteContributionResolution(
     sessionId,
     remoteActionPolicy.refreshProviderEvidence,
   );
-  const resolutionTarget = useMemo<RemoteContributionResolutionTarget | null>(() => {
-    const providerHead = remoteActionPolicy.relation.providerHead;
-    if (
-      !providerHead ||
-      (!remoteActionPolicy.relation.canReplaceRemote && !remoteActionPolicy.relation.canUseRemote)
-    ) {
-      return null;
-    }
-    const repositoryName = remoteActionPolicy.repositoryName ?? "";
-    const displayName =
-      repositoryName ||
-      (remoteActionPolicy.selectedPR
-        ? `${remoteActionPolicy.selectedPR.owner}/${remoteActionPolicy.selectedPR.repo}`
-        : t("task:remoteRepository"));
-    return {
-      expectedRemoteHead: providerHead,
-      repo: repositoryName,
-      repositoryName: displayName,
-    };
-  }, [
-    remoteActionPolicy.relation.providerHead,
-    remoteActionPolicy.relation.canReplaceRemote,
-    remoteActionPolicy.relation.canUseRemote,
-    remoteActionPolicy.repositoryName,
-    remoteActionPolicy.selectedPR,
-    t,
-  ]);
+  const remoteRepositoryLabel = t("task:remoteRepository");
+  const resolutionTarget = useMemo(
+    () =>
+      buildRemoteContributionResolutionTarget(
+        remoteActionPolicy.relation,
+        remoteActionPolicy.repositoryName,
+        remoteActionPolicy.selectedPR,
+        remoteRepositoryLabel,
+      ),
+    [
+      remoteActionPolicy.relation,
+      remoteActionPolicy.repositoryName,
+      remoteActionPolicy.selectedPR,
+      remoteRepositoryLabel,
+    ],
+  );
   const requestReplace = useCallback(() => {
     if (resolutionTarget) resolution.requestReplace(resolutionTarget);
   }, [resolution, resolutionTarget]);
@@ -247,24 +236,7 @@ function useMobileContributionResolutionActions(sessionId: string | null | undef
     const url = remoteActionPolicy.selectedPR?.pr_url;
     if (url) void openExternalLink(url).catch(() => undefined);
   }, [remoteActionPolicy.selectedPR?.pr_url]);
-  const confirmResolution = useCallback(async () => {
-    const action = resolution.pending?.action;
-    const result = await resolution.confirm();
-    if (!result?.success) return;
-    if (action === "replace") {
-      toast({
-        title: t("task:remoteContributionReplaced"),
-        variant: "success",
-      });
-      return;
-    }
-    toast({
-      title: t("task:remoteContributionUsed", {
-        branch: result.recovery_branch || t("task:remoteRepository"),
-      }),
-      variant: "success",
-    });
-  }, [resolution.confirm, resolution.pending?.action, t, toast]);
+  const confirmResolution = useRemoteContributionResolutionConfirmation(resolution);
 
   return {
     remoteActionPolicy,

@@ -1,7 +1,10 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GitOperationResult } from "@/hooks/use-git-operations";
+import type { RemoteContributionRelation } from "@/hooks/domains/session/remote-contribution-relation";
+import type { TaskPR } from "@/lib/types/github";
 import {
+  buildRemoteContributionResolutionTarget,
   classifyRemoteContributionError,
   useRemoteContributionResolution,
 } from "./use-remote-contribution-resolution";
@@ -31,6 +34,12 @@ const successResult: GitOperationResult = {
   output: "",
   recovery_branch: "kandev/recovery-123",
 };
+
+const relationWithProviderHead = {
+  providerHead: TARGET.expectedRemoteHead,
+  canReplaceRemote: true,
+  canUseRemote: true,
+} as RemoteContributionRelation;
 
 describe("useRemoteContributionResolution", () => {
   beforeEach(() => {
@@ -126,5 +135,33 @@ describe("classifyRemoteContributionError", () => {
   it("keeps unrelated provider errors generic", () => {
     expect(classifyRemoteContributionError("remote_unavailable")).toBe("generic");
     expect(classifyRemoteContributionError(undefined)).toBe("generic");
+  });
+});
+
+describe("buildRemoteContributionResolutionTarget", () => {
+  it("uses the selected PR identity when the repository scope is empty", () => {
+    expect(
+      buildRemoteContributionResolutionTarget(
+        relationWithProviderHead,
+        "",
+        { owner: "acme", repo: "widget" } as TaskPR,
+        "Remote repository",
+      ),
+    ).toEqual({
+      expectedRemoteHead: TARGET.expectedRemoteHead,
+      repo: "",
+      repositoryName: "acme/widget",
+    });
+  });
+
+  it("does not create a target without a resolvable contribution action", () => {
+    expect(
+      buildRemoteContributionResolutionTarget(
+        { ...relationWithProviderHead, canReplaceRemote: false, canUseRemote: false },
+        "frontend",
+        null,
+        "Remote repository",
+      ),
+    ).toBeNull();
   });
 });

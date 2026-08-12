@@ -19,10 +19,7 @@ import {
   type useRemoteContributionResolution,
 } from "@/components/task/use-remote-contribution-resolution";
 import { RemoteContributionResolutionDialog } from "@/components/task/remote-contribution-resolution-dialog";
-
-const DEFAULT_BASE_BRANCH = "origin/main";
-const AHEAD_MARK = "↑";
-const BEHIND_MARK = "↓";
+import { AHEAD_MARK, BEHIND_MARK, DEFAULT_BASE_BRANCH } from "./vcs-constants";
 
 type DivergenceTone = "ahead" | "behind";
 

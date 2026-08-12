@@ -45,7 +45,10 @@ import type { PRDiffFile, TaskPR } from "@/lib/types/github";
 import { getGitCredentialDisplay } from "./changes-git-credential-display";
 import type { RemoteContributionRelation } from "@/hooks/domains/session/remote-contribution-relation";
 import { remoteContributionActionPolicy } from "@/hooks/domains/session/remote-contribution-relation";
-import type { RemoteContributionResolutionTarget } from "./use-remote-contribution-resolution";
+import {
+  buildRemoteContributionResolutionTarget,
+  type RemoteContributionResolutionTarget,
+} from "./use-remote-contribution-resolution";
 import { useRemoteContributionResolution } from "./use-remote-contribution-resolution";
 import { useTranslation } from "react-i18next";
 
@@ -343,18 +346,17 @@ function useChangesPanelResolutionTarget(
   selectedPR: TaskPR | null | undefined,
   t: (key: string) => string,
 ) {
-  return useMemo<RemoteContributionResolutionTarget | null>(() => {
-    const providerHead = relation.providerHead;
-    if (!providerHead || (!relation.canReplaceRemote && !relation.canUseRemote)) return null;
-    const displayName =
-      repositoryName ||
-      (selectedPR ? `${selectedPR.owner}/${selectedPR.repo}` : t("task:remoteRepository"));
-    return {
-      expectedRemoteHead: providerHead,
-      repo: repositoryName ?? "",
-      repositoryName: displayName,
-    };
-  }, [relation, repositoryName, selectedPR, t]);
+  const remoteRepositoryLabel = t("task:remoteRepository");
+  return useMemo(
+    () =>
+      buildRemoteContributionResolutionTarget(
+        relation,
+        repositoryName,
+        selectedPR,
+        remoteRepositoryLabel,
+      ),
+    [relation, repositoryName, selectedPR, remoteRepositoryLabel],
+  );
 }
 
 export function useChangesPanelData() {

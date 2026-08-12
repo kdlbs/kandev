@@ -18,10 +18,7 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
 } from "@kandev/ui/dropdown-menu";
-
-const DEFAULT_BASE_BRANCH = "origin/main";
-const AHEAD_MARK = "↑";
-const BEHIND_MARK = "↓";
+import { AHEAD_MARK, BEHIND_MARK, DEFAULT_BASE_BRANCH } from "./vcs-constants";
 
 function StandardPushDropdownItems({
   disabled,
