@@ -1,21 +1,30 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, act, type RenderHookResult } from "@testing-library/react";
+import { renderHook, act, waitFor, type RenderHookResult } from "@testing-library/react";
 import { sessionId as toSessionId } from "@/lib/types/http";
 import type { Message } from "@/lib/types/http";
 import {
+  parsePermission,
   usePermissionResponseHandlers,
   type PermissionOption,
   type PermissionRequestMetadata,
 } from "./use-permission-handlers";
 
+const mocks = vi.hoisted(() => ({
+  toastError: vi.fn(),
+  toastWarning: vi.fn(),
+}));
 const requestMock = vi.fn().mockResolvedValue({});
 
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => ({ request: requestMock }),
 }));
-
+vi.mock("@/lib/toast/sonner", () => ({
+  toast: { error: mocks.toastError, warning: mocks.toastWarning },
+}));
 beforeEach(() => {
   requestMock.mockReset().mockResolvedValue({});
+  mocks.toastError.mockReset();
+  mocks.toastWarning.mockReset();
 });
 
 const ALLOW_ONCE: PermissionOption = { option_id: "allow", name: "Allow", kind: "allow_once" };
@@ -100,9 +109,13 @@ describe("handleApprove", () => {
 });
 
 describe("request identity", () => {
-  it("does not answer a cached pre-generation request", async () => {
+  it("treats a cached pre-generation request as expired and unanswerable", async () => {
     const message = makePermissionMessage();
     delete (message.metadata as PermissionRequestMetadata).request_id;
+    expect(parsePermission(message)).toMatchObject({
+      permissionStatus: "expired",
+      isPermissionPending: false,
+    });
     const result = renderHandlers(message);
 
     await act(async () => {
@@ -110,6 +123,25 @@ describe("request identity", () => {
     });
 
     expect(requestMock).not.toHaveBeenCalled();
+    expect(result.current.isUnavailable).toBe(true);
+    expect(mocks.toastWarning).toHaveBeenCalledWith(
+      "This permission request is no longer available.",
+    );
+  });
+
+  it("expires the cached card and shows feedback when the executor response is stale", async () => {
+    const message = makePermissionMessage();
+    requestMock.mockRejectedValueOnce(new Error("permission_not_found"));
+    const result = renderHandlers(message);
+
+    await act(async () => {
+      result.current.handleApprove();
+    });
+
+    await waitFor(() => expect(result.current.isUnavailable).toBe(true));
+    expect(mocks.toastWarning).toHaveBeenCalledWith(
+      "This permission request is no longer available.",
+    );
   });
 });
 

@@ -7,6 +7,7 @@ import { PermissionActionRow } from "./permission-action-row";
 import { summarizePermissionAction } from "./permission-action-summary";
 import {
   parsePermission,
+  resolvePermissionAvailability,
   usePermissionResponseHandlers,
   type PermissionRequestMetadata,
 } from "./use-permission-handlers";
@@ -47,13 +48,23 @@ type PermissionRequestMessageProps = {
 
 export function PermissionRequestMessage({ comment }: PermissionRequestMessageProps) {
   const { permissionMetadata, permissionStatus, isPermissionPending } = parsePermission(comment);
-  const { isResponding, handleApprove, handleAllowAlways, hasAllowAlways, handleReject } =
-    usePermissionResponseHandlers({
-      permissionMetadata,
-      permissionMessage: comment,
-    });
+  const {
+    isResponding,
+    isUnavailable,
+    handleApprove,
+    handleAllowAlways,
+    hasAllowAlways,
+    handleReject,
+  } = usePermissionResponseHandlers({
+    permissionMetadata,
+    permissionMessage: comment,
+  });
 
-  const statusBadge = getPermissionStatusBadge(permissionStatus);
+  const {
+    permissionStatus: effectivePermissionStatus,
+    isPermissionPending: effectivePermissionPending,
+  } = resolvePermissionAvailability(permissionStatus, isPermissionPending, isUnavailable);
+  const statusBadge = getPermissionStatusBadge(effectivePermissionStatus);
   const titleText = comment.content || t("task:permissionRequired");
   const detailSummary = summarizePermissionAction(permissionMetadata?.action_details, titleText);
 
@@ -64,7 +75,9 @@ export function PermissionRequestMessage({ comment }: PermissionRequestMessagePr
           <IconAlertTriangle
             className={cn(
               "h-4 w-4",
-              isPermissionPending ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground",
+              effectivePermissionPending
+                ? "text-amber-600 dark:text-amber-400"
+                : "text-muted-foreground",
             )}
           />
         </div>
@@ -74,7 +87,7 @@ export function PermissionRequestMessage({ comment }: PermissionRequestMessagePr
             <span
               className={cn(
                 "font-mono text-xs",
-                isPermissionPending
+                effectivePermissionPending
                   ? "text-amber-600 dark:text-amber-400"
                   : "text-muted-foreground",
               )}
@@ -93,7 +106,7 @@ export function PermissionRequestMessage({ comment }: PermissionRequestMessagePr
             </div>
           )}
 
-          {isPermissionPending && (
+          {effectivePermissionPending && (
             <div className="mt-2">
               <PermissionActionRow
                 onApprove={handleApprove}

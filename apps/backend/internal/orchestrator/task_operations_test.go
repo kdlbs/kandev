@@ -4295,6 +4295,7 @@ type mockMessageCreator struct {
 	permissionClaimFn  func(context.Context, models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
 	permissionFinishFn func(context.Context, models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error)
 	permissionAuditFn  func(context.Context, string, string, string, string) (*models.PermissionResolutionAudit, error)
+	permissionUpdateFn func(context.Context, string, string, models.PermissionStatus) error
 }
 
 type mockUserMessage struct {
@@ -4361,7 +4362,10 @@ func (m *mockMessageCreator) CreatePermissionRequestMessage(context.Context, str
 	return "", nil
 }
 
-func (m *mockMessageCreator) UpdatePermissionMessage(context.Context, string, string, models.PermissionStatus) error {
+func (m *mockMessageCreator) UpdatePermissionMessage(ctx context.Context, sessionID, pendingID string, status models.PermissionStatus) error {
+	if m.permissionUpdateFn != nil {
+		return m.permissionUpdateFn(ctx, sessionID, pendingID, status)
+	}
 	return nil
 }
 

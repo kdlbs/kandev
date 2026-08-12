@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
+	"go.uber.org/zap"
 )
 
 var (
@@ -186,51 +187,21 @@ func (s *Service) cancelAgentPermission(ctx context.Context, request ResolveAgen
 	if err != nil {
 		return err
 	}
-	found := false
-	for _, permission := range permissions {
-		if permission.PendingID != request.PendingID {
-			continue
+	if lookupErr := findPermissionForCancellation(permissions, request); lookupErr != nil {
+		if errors.Is(lookupErr, ErrPermissionStale) {
+			return lookupErr
 		}
-		if permission.RequestID != request.RequestID {
-			return ErrPermissionStale
-		}
-		found = true
-		break
-	}
-	if !found {
-		return s.permissionLookupError(ctx, request, ErrPermissionNotFound)
+		return s.permissionLookupError(ctx, request, lookupErr)
 	}
 	if s.messageCreator == nil {
 		return ErrPermissionAuditFailed
 	}
-	actorUserID, actorKind := permissionAuditActor(ctx)
-	claimID := uuid.NewString()
-	claim, err := s.claimPermissionWithRetry(ctx, models.PermissionResolutionClaimRequest{
-		TaskID:    request.TaskID,
-		SessionID: request.SessionID,
-		Audit: models.PermissionResolutionAudit{
-			ClaimID:     claimID,
-			ActorUserID: actorUserID,
-			ActorKind:   actorKind,
-			Source:      request.Source,
-			RequestID:   request.RequestID,
-			PendingID:   request.PendingID,
-			OptionID:    "cancelled",
-			OptionKind:  "cancelled",
-			SelectedAt:  time.Now().UTC(),
-		},
+	claimID, err := s.claimAgentPermission(ctx, request, &streams.PermissionChoice{
+		OptionID: "cancelled",
+		Kind:     streams.PermissionOptionKind("cancelled"),
 	})
-	if err != nil || claim == nil {
-		return ErrPermissionAuditFailed
-	}
-	switch claim.Outcome {
-	case models.PermissionClaimInProgress:
-		return ErrPermissionResolutionInProgress
-	case models.PermissionClaimAlreadyFinal:
-		return ErrPermissionAlreadyResolved
-	case models.PermissionClaimed:
-	default:
-		return ErrPermissionAuditFailed
+	if err != nil {
+		return err
 	}
 	if _, err := s.executor.CancelPermission(ctx, request.SessionID, request.RequestID, request.PendingID); err != nil {
 		return s.finalizePermissionDeliveryFailure(ctx, request, claimID, err)
@@ -249,6 +220,19 @@ func (s *Service) cancelAgentPermission(ctx context.Context, request ResolveAgen
 		return ErrPermissionAuditFailed
 	}
 	return nil
+}
+
+func findPermissionForCancellation(permissions []streams.PendingAgentPermission, request ResolveAgentPermissionRequest) error {
+	for _, permission := range permissions {
+		if permission.PendingID != request.PendingID {
+			continue
+		}
+		if permission.RequestID != request.RequestID {
+			return ErrPermissionStale
+		}
+		return nil
+	}
+	return ErrPermissionNotFound
 }
 
 func (s *Service) authorizedPermissionSessions(ctx context.Context, taskID, sessionID string) ([]*models.TaskSession, error) {
@@ -306,6 +290,12 @@ func (s *Service) permissionLookupError(ctx context.Context, request ResolveAgen
 		return ErrPermissionAuditFailed
 	}
 	if audit == nil {
+		if updateErr := s.messageCreator.UpdatePermissionMessage(ctx, request.SessionID, request.PendingID, models.PermissionStatusExpired); updateErr != nil {
+			s.logger.Warn("failed to expire stale permission message",
+				zap.String("session_id", request.SessionID),
+				zap.String("pending_id", request.PendingID),
+				zap.Error(updateErr))
+		}
 		return lookupErr
 	}
 	if audit.Result == models.PermissionResolutionDispatching {

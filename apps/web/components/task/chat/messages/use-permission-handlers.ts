@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
+import { t } from "@/lib/i18n";
+import { toast } from "@/lib/toast/sonner";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { Message } from "@/lib/types/http";
 import type { PermissionActionType, PermissionOptionKind } from "@/lib/types/permission";
@@ -43,10 +45,33 @@ export type ParsedPermission = {
 
 export function parsePermission(permissionMessage: Message | undefined): ParsedPermission {
   const permissionMetadata = permissionMessage?.metadata as PermissionRequestMetadata | undefined;
-  const permissionStatus = permissionMetadata?.status;
+  const storedStatus = permissionMetadata?.status;
+  const missingRequestIdentity =
+    !!permissionMessage &&
+    (!storedStatus || storedStatus === "pending") &&
+    !permissionMetadata?.request_id;
+  const permissionStatus = missingRequestIdentity ? "expired" : storedStatus;
   const isPermissionPending =
-    !!permissionMessage && (!permissionStatus || permissionStatus === "pending");
+    !!permissionMessage &&
+    !!permissionMetadata?.request_id &&
+    (!storedStatus || storedStatus === "pending");
   return { permissionMetadata, permissionStatus, isPermissionPending };
+}
+
+export function resolvePermissionAvailability(
+  permissionStatus: PermissionRequestMetadata["status"],
+  isPermissionPending: boolean,
+  isUnavailable: boolean,
+): Pick<ParsedPermission, "permissionStatus" | "isPermissionPending"> {
+  if (!isUnavailable) return { permissionStatus, isPermissionPending };
+  return { permissionStatus: "expired", isPermissionPending: false };
+}
+
+function isStalePermissionResponse(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return ["permission_not_found", "permission_stale", "permission_already_resolved"].some((code) =>
+    error.message.includes(code),
+  );
 }
 
 type UsePermissionHandlersParams = {
@@ -59,10 +84,16 @@ export function usePermissionResponseHandlers({
   permissionMessage,
 }: UsePermissionHandlersParams) {
   const [isResponding, setIsResponding] = useState(false);
+  const [isUnavailable, setIsUnavailable] = useState(false);
 
   const handleRespond = useCallback(
     async (optionId: string, cancelled: boolean = false, rejected: boolean = false) => {
-      if (!permissionMetadata?.request_id || !permissionMessage) return;
+      if (!permissionMessage) return;
+      if (!permissionMetadata?.request_id) {
+        setIsUnavailable(true);
+        toast.warning(t("task:permissionRequestNoLongerAvailable"));
+        return;
+      }
       const client = getWebSocketClient();
       if (!client) {
         console.error("WebSocket client not available");
@@ -81,6 +112,12 @@ export function usePermissionResponseHandlers({
         });
       } catch (error) {
         console.error("Failed to respond to permission request:", error);
+        if (isStalePermissionResponse(error)) {
+          setIsUnavailable(true);
+          toast.warning(t("task:permissionRequestNoLongerAvailable"));
+        } else {
+          toast.error(t("task:permissionResponseFailed"));
+        }
       } finally {
         setIsResponding(false);
       }
@@ -125,5 +162,12 @@ export function usePermissionResponseHandlers({
     }
   }, [permissionMetadata, handleRespond]);
 
-  return { isResponding, handleApprove, handleAllowAlways, hasAllowAlways, handleReject };
+  return {
+    isResponding,
+    isUnavailable,
+    handleApprove,
+    handleAllowAlways,
+    hasAllowAlways,
+    handleReject,
+  };
 }

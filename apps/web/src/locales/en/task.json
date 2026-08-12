@@ -883,6 +883,8 @@
   "pendingReviewCommentsHelp_one": "{{count}} pending review comment. Click to expand the list; you can edit each comment, click the file path to jump to the source, or remove a comment with the trash icon.",
   "pendingReviewCommentsHelp_other": "{{count}} pending review comments. Click to expand the list; you can edit each comment, click the file path to jump to the source, or remove a comment with the trash icon.",
   "permissionRequested": "Permission requested",
+  "permissionRequestNoLongerAvailable": "This permission request is no longer available.",
+  "permissionResponseFailed": "Could not respond to the permission request.",
   "permissionRequired": "Permission Required",
   "pickADifferentRepoLocalFolder": "Pick a different repo, local folder, or remote URL",
   "pickAStartingFolderOptional": "pick a starting folder (optional)",

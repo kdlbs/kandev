@@ -37,12 +37,20 @@ func TestPostgresPermissionClaimIgnoresEmptyMetadataRows(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateMessage(valid permission): %v", err)
 	}
+	// Simulate a legacy database from before the metadata expression indexes.
+	// Current indexes correctly reject malformed metadata before claim lookup,
+	// but the claim still needs to tolerate historical empty rows.
+	for _, index := range []string{"idx_messages_metadata_tool_call_id", "idx_messages_metadata_pending_id"} {
+		if _, err := repo.db.Exec("DROP INDEX " + index); err != nil {
+			t.Fatalf("drop metadata index %s: %v", index, err)
+		}
+	}
 	now := time.Now().UTC()
 	if _, err := repo.db.Exec(repo.db.Rebind(`
 		INSERT INTO task_session_messages
 			(id, task_session_id, task_id, turn_id, author_type, author_id, content,
 			 requests_input, type, metadata, created_at, updated_at)
-		VALUES (?, ?, ?, ?, 'agent', '', '', FALSE, 'permission_request', '', ?, ?)
+		VALUES (?, ?, ?, ?, 'agent', '', '', 0, 'permission_request', '', ?, ?)
 	`), "permission-empty-metadata-pg", sessionID, taskID, turnID, now, now); err != nil {
 		t.Fatalf("seed empty-metadata permission: %v", err)
 	}

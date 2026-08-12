@@ -883,6 +883,8 @@
   "pendingReviewCommentsHelp_one": "{{count}} comentário de revisão pendente. Clique para expandir a lista; pode editar cada comentário, clicar no caminho do ficheiro para saltar para a origem ou remover um comentário com o ícone do caixote do lixo.",
   "pendingReviewCommentsHelp_other": "{{count}} comentários de revisão pendentes. Clique para expandir a lista; pode editar cada comentário, clicar no caminho do ficheiro para saltar para a origem ou remover um comentário com o ícone do caixote do lixo.",
   "permissionRequested": "Permissão pedida",
+  "permissionRequestNoLongerAvailable": "Este pedido de permissão já não está disponível.",
+  "permissionResponseFailed": "Não foi possível responder ao pedido de permissão.",
   "permissionRequired": "Permissão necessária",
   "pickADifferentRepoLocalFolder": "Escolha outro repositório, pasta local ou URL remoto",
   "pickAStartingFolderOptional": "escolha uma pasta inicial (opcional)",

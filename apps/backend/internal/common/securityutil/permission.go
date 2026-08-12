@@ -4,6 +4,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 const maxPermissionPresentationBytes = 4096
@@ -44,6 +45,9 @@ func SanitizePermissionText(value string) (string, bool) {
 	}
 	if len(safe) > maxPermissionPresentationBytes {
 		safe = safe[:maxPermissionPresentationBytes]
+		for !utf8.ValidString(safe) {
+			safe = safe[:len(safe)-1]
+		}
 	}
 	return safe, safe != value
 }
@@ -164,12 +168,38 @@ func firstString(values map[string]any, keys ...string) string {
 }
 
 func stripURLCredentials(value string) string {
-	parsed, err := url.Parse(value)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+	schemeless := !strings.Contains(value, "://")
+	if schemeless {
+		authority := value
+		if slash := strings.IndexByte(authority, '/'); slash >= 0 {
+			authority = authority[:slash]
+		}
+		userinfo, _, hasHost := strings.Cut(authority, "@")
+		if !hasHost || !strings.Contains(userinfo, ":") {
+			schemeless = false
+		}
+	}
+	parseValue := value
+	if schemeless {
+		parseValue = "//" + value
+	}
+	parsed, err := url.Parse(parseValue)
+	if err != nil {
+		return value
+	}
+	if schemeless {
+		if parsed.Host == "" {
+			return value
+		}
+	} else if parsed.Scheme == "" || parsed.Host == "" {
 		return value
 	}
 	parsed.User = nil
 	parsed.RawQuery = ""
 	parsed.Fragment = ""
-	return parsed.String()
+	stripped := parsed.String()
+	if schemeless {
+		return strings.TrimPrefix(stripped, "//")
+	}
+	return stripped
 }

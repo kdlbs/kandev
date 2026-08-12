@@ -883,6 +883,8 @@
   "pendingReviewCommentsHelp_one": "{{count}} ƥēńďĩńĝ ŕēvĩēŵ ćōḿḿēńţ. Ćĺĩćķ ţō ēxƥàńď ţĥē ĺĩśţ; ŷōũ ćàń ēďĩţ ēàćĥ ćōḿḿēńţ, ćĺĩćķ ţĥē ƒĩĺē ƥàţĥ ţō ĵũḿƥ ţō ţĥē śōũŕćē, ōŕ ŕēḿōvē à ćōḿḿēńţ ŵĩţĥ ţĥē ţŕàśĥ ĩćōń.",
   "pendingReviewCommentsHelp_other": "{{count}} ƥēńďĩńĝ ŕēvĩēŵ ćōḿḿēńţś. Ćĺĩćķ ţō ēxƥàńď ţĥē ĺĩśţ; ŷōũ ćàń ēďĩţ ēàćĥ ćōḿḿēńţ, ćĺĩćķ ţĥē ƒĩĺē ƥàţĥ ţō ĵũḿƥ ţō ţĥē śōũŕćē, ōŕ ŕēḿōvē à ćōḿḿēńţ ŵĩţĥ ţĥē ţŕàśĥ ĩćōń.",
   "permissionRequested": "Ƥēŕḿĩśśĩōń ŕēqũēśţēď",
+  "permissionRequestNoLongerAvailable": "Ţĥĩś ƥēŕḿĩśśĩōń ŕēqũēśţ ĩś ńō ĺōńĝēŕ àvàĩĺàƀĺē.",
+  "permissionResponseFailed": "Ćōũĺď ńōţ ŕēśƥōńď ţō ţĥē ƥēŕḿĩśśĩōń ŕēqũēśţ.",
   "permissionRequired": "Ƥēŕḿĩśśĩōń Ŕēqũĩŕēď",
   "pickADifferentRepoLocalFolder": "Ƥĩćķ à ďĩƒƒēŕēńţ ŕēƥō, ĺōćàĺ ƒōĺďēŕ, ōŕ ŕēḿōţē ŨŔĹ",
   "pickAStartingFolderOptional": "ƥĩćķ à śţàŕţĩńĝ ƒōĺďēŕ (ōƥţĩōńàĺ)",

@@ -884,6 +884,8 @@
   "pendingReviewCommentsHelp_one": "{{count}} 条待发送的审阅评论。点击展开列表; 可编辑每条评论、点击文件路径跳转到源码，或用垃圾桶图标移除评论。",
   "pendingReviewCommentsHelp_other": "{{count}} 条待发送的审阅评论。点击展开列表; 可编辑每条评论、点击文件路径跳转到源码，或用垃圾桶图标移除评论。",
   "permissionRequested": "已请求权限",
+  "permissionRequestNoLongerAvailable": "此权限请求已不可用。",
+  "permissionResponseFailed": "无法响应权限请求。",
   "permissionRequired": "需要权限",
   "pickADifferentRepoLocalFolder": "选择其他仓库、本地文件夹或远程 URL",
   "pickAStartingFolderOptional": "选择起始文件夹（可选）",

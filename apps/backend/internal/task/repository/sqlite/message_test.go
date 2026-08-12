@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -126,6 +127,54 @@ func TestPermissionResolutionPostgresExpressionsUseJSONB(t *testing.T) {
 	extract := permissionJSONExtract("pgx", "metadata", "permission_resolution", "claim_id")
 	if !strings.Contains(extract, "COALESCE(NULLIF(metadata, ''), '{}')::jsonb") {
 		t.Fatalf("extract expression does not guard empty metadata: %s", extract)
+	}
+}
+
+func TestPermissionResolutionClaimIgnoresInvalidSQLiteMetadataRows(t *testing.T) {
+	for _, metadata := range []string{"", "not-json"} {
+		t.Run(fmt.Sprintf("metadata_%q", metadata), func(t *testing.T) {
+			repo := newRepoForSessionTests(t)
+			ctx := context.Background()
+			seedForMsgTest(t, repo, "task-invalid-metadata", "session-invalid-metadata", "turn-invalid-metadata")
+			if err := repo.CreateMessage(ctx, &models.Message{
+				ID: "permission-valid", TaskID: "task-invalid-metadata",
+				TaskSessionID: "session-invalid-metadata", TurnID: "turn-invalid-metadata",
+				AuthorType: models.MessageAuthorAgent, Type: models.MessageTypePermissionRequest,
+				Metadata: map[string]any{"request_id": "request-valid", "pending_id": "pending-valid"},
+			}); err != nil {
+				t.Fatalf("create valid permission: %v", err)
+			}
+			// Simulate a legacy database that predates the JSON expression indexes;
+			// current indexes reject malformed metadata before the claim path runs.
+			for _, index := range []string{"idx_messages_metadata_tool_call_id", "idx_messages_metadata_pending_id"} {
+				if _, err := repo.db.Exec("DROP INDEX " + index); err != nil {
+					t.Fatalf("drop %s: %v", index, err)
+				}
+			}
+			now := time.Now().UTC()
+			if _, err := repo.db.Exec(repo.db.Rebind(`
+				INSERT INTO task_session_messages
+					(id, task_session_id, task_id, turn_id, author_type, author_id, content,
+					 requests_input, type, metadata, created_at, updated_at)
+				VALUES (?, ?, ?, ?, 'agent', '', '', 0, 'permission_request', ?, ?, ?)
+			`), "permission-invalid", "session-invalid-metadata", "task-invalid-metadata",
+				"turn-invalid-metadata", metadata, now, now); err != nil {
+				t.Fatalf("seed invalid metadata: %v", err)
+			}
+
+			claimed, err := repo.ClaimPermissionResolution(ctx, models.PermissionResolutionClaimRequest{
+				TaskID: "task-invalid-metadata", SessionID: "session-invalid-metadata",
+				Audit: models.PermissionResolutionAudit{
+					ClaimID: "claim-valid", ActorKind: models.PermissionActorSynthetic,
+					Source: models.PermissionSourceAutomation, RequestID: "request-valid",
+					PendingID: "pending-valid", OptionID: "allow-once", OptionKind: "allow_once",
+					SelectedAt: now,
+				},
+			})
+			if err != nil || claimed == nil || claimed.Outcome != models.PermissionClaimed {
+				t.Fatalf("claim = %+v, err=%v, want valid permission claimed", claimed, err)
+			}
+		})
 	}
 }
 

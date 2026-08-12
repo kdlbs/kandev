@@ -758,7 +758,7 @@ func permissionJSONExtract(driver, column string, path ...string) string {
 	if dialect.IsPostgres(driver) {
 		return fmt.Sprintf("COALESCE(NULLIF(%s, ''), '{}')::jsonb#>>'{%s}'", column, strings.Join(path, ","))
 	}
-	return fmt.Sprintf("json_extract(%s, '$.%s')", column, strings.Join(path, "."))
+	return fmt.Sprintf("json_extract(CASE WHEN json_valid(%s) THEN %s ELSE '{}' END, '$.%s')", column, column, strings.Join(path, "."))
 }
 
 func (r *Repository) getPermissionMessageByIdentity(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.Message, error) {

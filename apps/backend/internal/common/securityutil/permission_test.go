@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestProjectPermissionActionAllowlistAndRedaction(t *testing.T) {
@@ -30,6 +31,31 @@ func TestProjectPermissionActionAllowlistAndRedaction(t *testing.T) {
 	}
 	if projection.CWD != "/workspace/project" || !projection.Redacted {
 		t.Fatalf("unexpected projection: %+v", projection)
+	}
+}
+
+func TestSanitizePermissionTextTruncatesAtUTF8Boundary(t *testing.T) {
+	value := strings.Repeat("a", maxPermissionPresentationBytes-1) + "€tail"
+	sanitized, changed := SanitizePermissionText(value)
+
+	if !changed {
+		t.Fatal("expected oversized presentation to be truncated")
+	}
+	if !utf8.ValidString(sanitized) {
+		t.Fatalf("truncated presentation is not valid UTF-8: %q", sanitized[len(sanitized)-4:])
+	}
+	if sanitized != strings.Repeat("a", maxPermissionPresentationBytes-1) {
+		t.Fatalf("unexpected UTF-8 truncation length/content: %d bytes", len(sanitized))
+	}
+}
+
+func TestProjectPermissionActionRedactsSchemelessURLCredentials(t *testing.T) {
+	projection := ProjectPermissionAction("network", "Connect", map[string]any{
+		"destination": "user:pass@example.com/private/path",
+	})
+
+	if projection.Destination != "example.com/private/path" || !projection.Redacted {
+		t.Fatalf("unexpected schemeless credential projection: %+v", projection)
 	}
 }
 

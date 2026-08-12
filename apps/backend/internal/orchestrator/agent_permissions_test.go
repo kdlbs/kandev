@@ -190,6 +190,58 @@ func TestResolveAgentPermissionRejectsInvalidOrReplayedRequestsWithoutDelivery(t
 	}
 }
 
+func TestResolveAgentPermissionExpiresPersistedCardWhenLiveRequestIsMissing(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-stale-card", "session-stale-card", "")
+	manager := &mockAgentManager{listPermissionsFunc: func(context.Context, string) ([]streams.PendingAgentPermission, error) {
+		return nil, nil
+	}}
+	expired := false
+	messages := &mockMessageCreator{
+		permissionAuditFn: func(context.Context, string, string, string, string) (*models.PermissionResolutionAudit, error) {
+			return nil, nil
+		},
+		permissionUpdateFn: func(_ context.Context, sessionID, pendingID string, status models.PermissionStatus) error {
+			expired = sessionID == "session-stale-card" && pendingID == "pending-stale-card" &&
+				status == models.PermissionStatusExpired
+			return nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), manager)
+	svc.messageCreator = messages
+
+	_, err := svc.ResolveAgentPermission(context.Background(), ResolveAgentPermissionRequest{
+		TaskID: "task-stale-card", SessionID: "session-stale-card", RequestID: "request-stale-card",
+		PendingID: "pending-stale-card", OptionID: "allow-once", Source: models.PermissionSourceWeb,
+	})
+	if !errors.Is(err, ErrPermissionNotFound) || !expired {
+		t.Fatalf("error=%v expired=%v, want not found with persisted card expired", err, expired)
+	}
+}
+
+func TestCancelAgentPermissionUsesSyntheticCancelledAuditChoice(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-cancel-audit", "session-cancel-audit", "")
+	manager := permissionResolvingManager(t, "session-cancel-audit", nil)
+	manager.cancelPermissionFunc = func(_ context.Context, _, requestID, pendingID string) (*streams.PermissionCancelResponse, error) {
+		return &streams.PermissionCancelResponse{RequestID: requestID, PendingID: pendingID, Status: "cancelled"}, nil
+	}
+	messages := &mockMessageCreator{permissionClaimFn: func(_ context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error) {
+		if request.Audit.OptionID != "cancelled" || request.Audit.OptionKind != "cancelled" {
+			t.Fatalf("cancel audit recorded provider option: %+v", request.Audit)
+		}
+		return &models.PermissionResolutionClaimResult{Outcome: models.PermissionClaimed}, nil
+	}}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), manager)
+	svc.messageCreator = messages
+
+	err := svc.RespondToPermission(context.Background(), "task-cancel-audit", "session-cancel-audit",
+		"request-1", "pending-1", "ignored-provider-option", true, true)
+	if err != nil {
+		t.Fatalf("cancel permission: %v", err)
+	}
+}
+
 func TestResolveAgentPermissionAuditFailurePreventsDelivery(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "task-audit-fail", "session-audit-fail", "")
