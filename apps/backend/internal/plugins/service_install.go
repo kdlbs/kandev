@@ -176,10 +176,9 @@ func (s *Service) rollbackFailedInstall(freshInstallPath string, oldRec *store.R
 }
 
 // InstallFromURL downloads url (capped at maxDownloadSize, bounded by
-// downloadTimeout) and installs it via Install. url is operator-provided
-// (an admin installing a plugin from a URL), so this does not attempt full
-// SSRF elimination, but validateInstallURL rejects non-http(s) schemes and
-// URLs with no host before any request is built.
+// downloadTimeout) and installs it via Install. The HTTP route is admin-only;
+// validateInstallURL also rejects non-http(s) schemes and malformed targets
+// before any request is built.
 func (s *Service) InstallFromURL(ctx context.Context, url string) (*store.Record, error) {
 	if err := validateInstallURL(url); err != nil {
 		return nil, fmt.Errorf("plugins: %w", err)
@@ -192,6 +191,8 @@ func (s *Service) InstallFromURL(ctx context.Context, url string) (*store.Record
 	if err != nil {
 		return nil, fmt.Errorf("plugins: build download request: %w", err)
 	}
+	// codeql[go/request-forgery] The only HTTP caller is guarded by RequireAdmin;
+	// this operator-level feature intentionally fetches the validated package URL.
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("plugins: download package: %w", err)

@@ -238,8 +238,9 @@ See [ADR 0050](../../decisions/0050-plugin-external-auth-capability.md).
 There is no manifest-paste registration step. A plugin is installed from a URL or an
 uploaded tarball:
 
-1. Operator calls `POST /api/plugins/install` with JSON `{"url": "..."}` (kandev
-   downloads the tarball) or a multipart `package` field (direct upload).
+1. An administrator calls `POST /api/plugins/install` with JSON `{"url": "..."}`
+   (kandev downloads the tarball) or a multipart `package` field (direct upload).
+   Auth-disabled single-user instances retain their synthetic administrator.
 2. Kandev verifies `checksums.txt` covers every other file in the tarball and every
    hash matches (integrity gate, always enforced).
 3. If `checksums.txt.sig` is present, kandev verifies the ed25519 signature; if
@@ -280,6 +281,10 @@ CREATE TABLE plugin_state (
 ## API surface
 
 ### Plugin management API (operator -> kandev, HTTP)
+
+Install is administrator-only when authentication is enabled. Auth-disabled
+single-user instances retain the synthetic administrator used by other system
+settings.
 
 ```
 POST   /api/plugins/install           # Install a plugin: JSON {"url": "..."} or multipart `package`

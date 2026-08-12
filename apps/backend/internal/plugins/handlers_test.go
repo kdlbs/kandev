@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	goruntime "runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -62,6 +63,29 @@ func newTestRouter(t *testing.T) (*gin.Engine, *Service) {
 	return router, svc
 }
 
+func newTestRouterWithIdentity(t *testing.T, identity authn.Identity) (*gin.Engine, *Service) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	svc, _, _ := newTestService(t)
+	svc.SetState(newTestStateStore(t))
+	// A vault is mandatory for plugins with secret config fields (Service
+	// fails closed without one), so wire an in-memory one, matching prod
+	// where Provide always attaches the shared vault.
+	svc.SetSecrets(newFakeSecretRevealer())
+	router := gin.New()
+	router.Use(func(ctx *gin.Context) {
+		authn.SetOnGin(ctx, identity)
+		ctx.Next()
+	})
+	RegisterRoutes(router, svc, nil, testLogger(t))
+	return router, svc
+}
+
+func newAdminTestRouter(t *testing.T) (*gin.Engine, *Service) {
+	t.Helper()
+	return newTestRouterWithIdentity(t, authn.Identity{UserID: "admin-1", Role: authn.RoleAdmin})
+}
+
 func doRequest(router *gin.Engine, method, path string, body string, headers map[string]string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	for k, v := range headers {
@@ -95,7 +119,7 @@ func doMultipartInstall(t *testing.T, router *gin.Engine, pkg *bytes.Buffer) *ht
 }
 
 func TestInstallHandlerFromURLCreatesActivePlugin(t *testing.T) {
-	router, svc := newTestRouter(t)
+	router, svc := newAdminTestRouter(t)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write(testPackage(t, "kandev-plugin-slack", "1.0.0", false).Bytes())
@@ -123,8 +147,29 @@ func TestInstallHandlerFromURLCreatesActivePlugin(t *testing.T) {
 	}
 }
 
+func TestInstallHandlerRejectsMemberBeforeURLFetch(t *testing.T) {
+	router, _ := newTestRouterWithIdentity(t, authn.Identity{
+		UserID: "member-1",
+		Role:   authn.RoleMember,
+	})
+	var fetched atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fetched.Store(true)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	rec := doRequest(router, http.MethodPost, "/api/plugins/install", fmt.Sprintf(`{"url":%q}`, srv.URL), nil)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusForbidden, rec.Body.String())
+	}
+	if fetched.Load() {
+		t.Fatal("member-controlled install URL reached the network")
+	}
+}
+
 func TestInstallHandlerMultipartUpload(t *testing.T) {
-	router, svc := newTestRouter(t)
+	router, svc := newAdminTestRouter(t)
 
 	rec := doMultipartInstall(t, router, testPackage(t, "kandev-plugin-slack", "1.0.0", false))
 	if rec.Code != http.StatusCreated {
@@ -136,7 +181,7 @@ func TestInstallHandlerMultipartUpload(t *testing.T) {
 }
 
 func TestInstallHandlerMissingURLReturns400(t *testing.T) {
-	router, _ := newTestRouter(t)
+	router, _ := newAdminTestRouter(t)
 	rec := doRequest(router, http.MethodPost, "/api/plugins/install", `{}`, nil)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
@@ -144,7 +189,7 @@ func TestInstallHandlerMissingURLReturns400(t *testing.T) {
 }
 
 func TestInstallHandlerDuplicateVersionReturns409(t *testing.T) {
-	router, _ := newTestRouter(t)
+	router, _ := newAdminTestRouter(t)
 	pkg := testPackage(t, "kandev-plugin-slack", "1.0.0", false)
 	pkgBytes := pkg.Bytes()
 

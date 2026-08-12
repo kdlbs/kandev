@@ -69,7 +69,7 @@ func RegisterRoutes(router *gin.Engine, svc *Service, _ Deliverer, log *logger.L
 	ctrl := &Controller{svc: svc, log: log, actionInvoker: svc}
 
 	api := router.Group("/api/plugins")
-	api.POST("/install", ctrl.install)
+	api.POST("/install", authn.RequireAdmin(), ctrl.install)
 	api.POST("/sync", ctrl.sync)
 	// Register the static /marketplace and /settings routes before the /:id
 	// wildcard, matching the /install and /sync ordering — some gin/httprouter
