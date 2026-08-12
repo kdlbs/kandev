@@ -468,3 +468,36 @@ func TestGetTaskMRAutomationEvaluation_UsesOnlyTheTargetMRsSwitches(t *testing.T
 		t.Fatalf("sibling MR inherited another MR's automation: %+v", sibling.Options)
 	}
 }
+
+// TestUpdateTaskMRAutomationOptions_RejectsSwitchesWithNoLinkedMRs covers the
+// zero-target case. The switches live per-MR, so with nothing linked there is
+// no row to write them to; returning success would report a write that stored
+// nothing, and the caller would only find out when the automation it believed
+// it had enabled never fired.
+func TestUpdateTaskMRAutomationOptions_RejectsSwitchesWithNoLinkedMRs(t *testing.T) {
+	svc, _ := newMRAutomationServiceFixture(t, "alice")
+
+	_, err := svc.UpdateTaskMRAutomationOptions(context.Background(), "task-1", TaskMRAutomationPatch{
+		PromptOnMerged: boolPtr(true),
+	})
+	if !errors.Is(err, ErrTaskMRNotLinked) {
+		t.Fatalf("expected ErrTaskMRNotLinked for a task with no linked MRs, got %v", err)
+	}
+}
+
+// TestUpdateTaskMRAutomationOptions_AllowsPromptOverrideWithNoLinkedMRs is the
+// other half of the same rule: the auto-fix prompt override is task-level, so
+// it stays settable before any MR is linked.
+func TestUpdateTaskMRAutomationOptions_AllowsPromptOverrideWithNoLinkedMRs(t *testing.T) {
+	svc, _ := newMRAutomationServiceFixture(t, "alice")
+
+	resp, err := svc.UpdateTaskMRAutomationOptions(context.Background(), "task-1", TaskMRAutomationPatch{
+		AutoFixPromptOverride: stringPtr("fix it please"),
+	})
+	if err != nil {
+		t.Fatalf("prompt override with no linked MRs should succeed, got %v", err)
+	}
+	if resp.AutoFixPromptOverride == nil || *resp.AutoFixPromptOverride != "fix it please" {
+		t.Errorf("override not persisted: %+v", resp.AutoFixPromptOverride)
+	}
+}

@@ -11,9 +11,10 @@ import { ApiClient } from "./helpers/api-client";
 import { seedGitLabMRData, GITLAB_HOST, GITLAB_PROJECT } from "./helpers/gitlab";
 
 const BASE_URL = process.env.KANDEV_BASE_URL || "http://localhost:18500";
+// Resolved from this file's own location so the script works in any checkout;
+// `__dirname` matches how global-setup.ts and the e2e helpers locate paths.
 const REPO_ROOT =
-  process.env.KANDEV_SEED_REPO_ROOT ||
-  "/data/tasks/scope-gitlab-mr-auto_g35bbaxa/kandev-source/apps/backend/.manual-env/repos";
+  process.env.KANDEV_SEED_REPO_ROOT || path.resolve(__dirname, "../../backend/.manual-env/repos");
 
 async function main() {
   const apiClient = new ApiClient(BASE_URL);

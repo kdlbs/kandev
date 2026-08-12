@@ -267,6 +267,15 @@ func (s *Service) UpdateTaskMRAutomationOptions(ctx context.Context, taskID stri
 	if err != nil {
 		return nil, err
 	}
+	// The switches are per-MR, so with nothing linked there is no row to write
+	// them to. Returning 200 here would report success for a write that stored
+	// nothing, and the caller would only discover it much later when the
+	// automation it thought it had enabled never fired. (Before the switches
+	// became per-MR this persisted on the task row and a later-linked MR
+	// inherited it.) The prompt override is task-level and still allowed.
+	if patch.SwitchPatch().HasAny() && len(targets) == 0 {
+		return nil, fmt.Errorf("%w: the task has no linked merge requests", ErrTaskMRNotLinked)
+	}
 	reviewerUsername, err := s.resolveReviewerUsernameForPatch(ctx, taskID, patch, targets)
 	if err != nil {
 		return nil, err
@@ -275,11 +284,11 @@ func (s *Service) UpdateTaskMRAutomationOptions(ctx context.Context, taskID stri
 	if err != nil {
 		return nil, err
 	}
+	// One transaction for every target: a partially-applied fan-out would arm
+	// auto-merge on some MRs while reporting failure to the caller.
 	if switches := patch.SwitchPatch(); switches.HasAny() {
-		for _, target := range targets {
-			if _, err := store.UpdateTaskMRAutomationOptionsForMR(ctx, taskID, target, switches); err != nil {
-				return nil, err
-			}
+		if err := store.UpdateTaskMRAutomationOptionsForMRs(ctx, taskID, targets, switches); err != nil {
+			return nil, err
 		}
 	}
 	mrOptions, err := s.taskMRAutomationOptionsList(ctx, taskID)

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/jmoiron/sqlx"
 )
 
 const createMRAutomationTablesSQL = `
@@ -373,20 +375,57 @@ func (s *Store) ListTaskMRAutomationOptions(ctx context.Context, taskID string) 
 func (s *Store) UpdateTaskMRAutomationOptionsForMR(
 	ctx context.Context, taskID string, id MRIdentity, patch TaskMRAutomationSwitchPatch,
 ) (*TaskMRAutomationOptionsForMR, error) {
+	if err := s.UpdateTaskMRAutomationOptionsForMRs(ctx, taskID, []MRIdentity{id}, patch); err != nil {
+		return nil, err
+	}
+	return s.GetTaskMRAutomationOptionsForMR(ctx, taskID, id)
+}
+
+// UpdateTaskMRAutomationOptionsForMRs applies one switch patch to every
+// identity in ids inside a SINGLE transaction. The fan-out case (a PATCH or
+// MCP call that names no MR, so the change applies to every linked MR) must
+// not be a loop of independent transactions: a failure partway through would
+// leave the switch armed on the MRs already committed while returning an
+// error to the caller, and auto-merge would then act on those MRs even though
+// the operation reported failure. All-or-nothing instead.
+func (s *Store) UpdateTaskMRAutomationOptionsForMRs(
+	ctx context.Context, taskID string, ids []MRIdentity, patch TaskMRAutomationSwitchPatch,
+) error {
+	if len(ids) == 0 {
+		return nil
+	}
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	now := time.Now().UTC()
+	fields := mrAutomationSwitchFields(patch)
+	for _, id := range ids {
+		if err := applyMRSwitchPatchTx(ctx, tx, taskID, id, now, fields); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// applyMRSwitchPatchTx upserts one MR's switch row, applies the patch, and
+// runs that MR's checkpoint resets — all against the caller's transaction, so
+// several MRs can be updated atomically. Split out of
+// UpdateTaskMRAutomationOptionsForMRs to keep it under the function-length
+// limit.
+func applyMRSwitchPatchTx(
+	ctx context.Context, tx *sqlx.Tx, taskID string, id MRIdentity,
+	now time.Time, fields mrAutomationSwitchPatchFields,
+) error {
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO gitlab_task_mr_automation_options (
 			task_id, repository_id, project_path, mr_iid, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(task_id, repository_id, project_path, mr_iid) DO NOTHING`,
 		taskID, id.RepositoryID, id.ProjectPath, id.MRIID, now, now); err != nil {
-		return nil, err
+		return err
 	}
 	var previous TaskMRAutomationOptionsForMR
 	if err := tx.GetContext(ctx, &previous, `
@@ -394,10 +433,8 @@ func (s *Store) UpdateTaskMRAutomationOptionsForMR(
 		FROM gitlab_task_mr_automation_options
 		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`,
 		taskID, id.RepositoryID, id.ProjectPath, id.MRIID); err != nil {
-		return nil, err
+		return err
 	}
-
-	fields := mrAutomationSwitchFields(patch)
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE gitlab_task_mr_automation_options SET
 			auto_fix_enabled = CASE WHEN ? THEN ? ELSE auto_fix_enabled END,
@@ -411,15 +448,9 @@ func (s *Store) UpdateTaskMRAutomationOptionsForMR(
 		fields.reviewSet, fields.reviewValue, fields.mergedSet, fields.mergedValue,
 		fields.closedSet, fields.closedValue,
 		now, taskID, id.RepositoryID, id.ProjectPath, id.MRIID); err != nil {
-		return nil, err
+		return err
 	}
-	if err := applyMRAutomationOptionResets(ctx, tx, taskID, id, now, previous, fields); err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return s.GetTaskMRAutomationOptionsForMR(ctx, taskID, id)
+	return applyMRAutomationOptionResets(ctx, tx, taskID, id, now, previous, fields)
 }
 
 // mrAutomationSwitchPatchFields flattens a switch patch into the "was this

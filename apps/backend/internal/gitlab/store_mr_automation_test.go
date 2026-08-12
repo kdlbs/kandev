@@ -772,3 +772,105 @@ func assertMRAutomationTablesExist(t *testing.T, sqlxDB *sqlx.DB) {
 		}
 	}
 }
+
+// TestStore_DeleteTaskMR_DropsPerMRAutomationOptions covers the unlink half of
+// the per-MR switch lifecycle. Leaving the switch row behind meant re-linking
+// the same MR — by hand, or through push-detection auto-link — silently
+// re-armed whatever was configured before the unlink, including auto-merge,
+// with no surface showing it (taskMRAutomationOptionsList hides rows whose MR
+// is not linked) but the evaluator still reading it.
+func TestStore_DeleteTaskMR_DropsPerMRAutomationOptions(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	seedWorkspace(t, store, "ws-1")
+	seedTask(t, store, "task-1", "ws-1")
+
+	mr := newTestMR("task-1", "", "group/a", 1)
+	if err := store.UpsertTaskMR(ctx, mr); err != nil {
+		t.Fatalf("upsert MR: %v", err)
+	}
+	id := MRIdentity{RepositoryID: "", ProjectPath: "group/a", MRIID: 1}
+	if _, err := store.UpdateTaskMRAutomationOptionsForMR(
+		ctx, "task-1", id, TaskMRAutomationSwitchPatch{AutoMergeEnabled: boolPtr(true)},
+	); err != nil {
+		t.Fatalf("enable auto-merge: %v", err)
+	}
+
+	if err := store.DeleteTaskMRForWorkspace(ctx, "ws-1", mr.ID); err != nil {
+		t.Fatalf("DeleteTaskMRForWorkspace: %v", err)
+	}
+
+	stored, err := store.ListTaskMRAutomationOptions(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("ListTaskMRAutomationOptions: %v", err)
+	}
+	if len(stored) != 0 {
+		t.Fatalf("unlink left automation rows behind: %+v", stored)
+	}
+
+	// Re-linking the same MR must start from all-off, not resurrect the
+	// pre-unlink configuration.
+	relinked := newTestMR("task-1", "", "group/a", 1)
+	if err := store.UpsertTaskMR(ctx, relinked); err != nil {
+		t.Fatalf("re-link MR: %v", err)
+	}
+	opts, err := store.GetTaskMRAutomationOptionsForMR(ctx, "task-1", id)
+	if err != nil {
+		t.Fatalf("GetTaskMRAutomationOptionsForMR: %v", err)
+	}
+	if opts.AutoMergeEnabled {
+		t.Errorf("re-linked MR silently re-armed auto-merge: %+v", opts)
+	}
+}
+
+// TestStore_UpdateTaskMRAutomationOptionsForMRs_IsAllOrNothing pins the
+// fan-out atomicity: a failure partway through must not leave the switch
+// armed on the MRs processed before it while the caller is told the operation
+// failed. A trigger supplies the deterministic mid-batch failure — the second
+// identity's UPDATE aborts, and the first identity's already-applied write
+// must roll back with it.
+func TestStore_UpdateTaskMRAutomationOptionsForMRs_IsAllOrNothing(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	seedWorkspace(t, store, "ws-1")
+	seedTask(t, store, "task-1", "ws-1")
+
+	first := MRIdentity{RepositoryID: "", ProjectPath: "group/a", MRIID: 1}
+	second := MRIdentity{RepositoryID: "", ProjectPath: "group/b", MRIID: 2}
+	if _, err := store.db.Exec(`
+		CREATE TRIGGER fail_second_mr BEFORE UPDATE ON gitlab_task_mr_automation_options
+		WHEN NEW.project_path = 'group/b'
+		BEGIN SELECT RAISE(ABORT, 'injected failure'); END`); err != nil {
+		t.Fatalf("create failure trigger: %v", err)
+	}
+
+	err := store.UpdateTaskMRAutomationOptionsForMRs(
+		ctx, "task-1", []MRIdentity{first, second},
+		TaskMRAutomationSwitchPatch{AutoMergeEnabled: boolPtr(true)},
+	)
+	if err == nil {
+		t.Fatal("expected the batch to fail on the second identity")
+	}
+
+	got, err := store.GetTaskMRAutomationOptionsForMR(ctx, "task-1", first)
+	if err != nil {
+		t.Fatalf("GetTaskMRAutomationOptionsForMR: %v", err)
+	}
+	if got.AutoMergeEnabled {
+		t.Error("first MR kept auto-merge after the batch failed — fan-out was not atomic")
+	}
+}
+
+// TestStore_UpdateTaskMRAutomationOptionsForMRs_EmptyIsNoop guards the
+// zero-target call so it cannot open an empty transaction per request.
+func TestStore_UpdateTaskMRAutomationOptionsForMRs_EmptyIsNoop(t *testing.T) {
+	store := newTestStore(t)
+	seedWorkspace(t, store, "ws-1")
+	seedTask(t, store, "task-1", "ws-1")
+	if err := store.UpdateTaskMRAutomationOptionsForMRs(
+		context.Background(), "task-1", nil,
+		TaskMRAutomationSwitchPatch{AutoMergeEnabled: boolPtr(true)},
+	); err != nil {
+		t.Fatalf("empty batch should be a no-op, got %v", err)
+	}
+}
