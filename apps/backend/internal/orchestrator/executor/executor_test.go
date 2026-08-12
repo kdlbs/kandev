@@ -210,6 +210,67 @@ func TestPrepareSessionSnapshotsProfileRuntimeConfig(t *testing.T) {
 	}
 }
 
+func TestPrepareSessionConsumesInitialRuntimeSeedOnlyForFirstSession(t *testing.T) {
+	repo := newMockRepository()
+	executor := newTestExecutor(t, &mockAgentManager{}, repo)
+	seed := models.SessionRuntimeConfig{
+		Model:         "gpt-5.6-sol",
+		Mode:          "acceptEdits",
+		ConfigOptions: map[string]string{"reasoning_effort": "high"},
+	}
+	task := &v1.Task{
+		ID:          "task-runtime-seed",
+		WorkspaceID: "workspace-123",
+		Title:       "Runtime seed task",
+		Metadata: map[string]interface{}{
+			"initial_session_runtime_config": seed,
+		},
+	}
+
+	firstID, err := executor.PrepareSession(
+		context.Background(), task, "profile-123", "executor-123", "", "",
+	)
+	if err != nil {
+		t.Fatalf("PrepareSession first: %v", err)
+	}
+	first, err := repo.GetTaskSession(context.Background(), firstID)
+	if err != nil {
+		t.Fatalf("GetTaskSession first: %v", err)
+	}
+	firstOverrides, ok := models.LoadSessionRuntimeConfigOverrides(first.Metadata)
+	if !ok || firstOverrides.Model != seed.Model || firstOverrides.Mode != seed.Mode {
+		t.Fatalf("first runtime overrides = %#v, want %#v", firstOverrides, seed)
+	}
+	if firstOverrides.ConfigOptions["reasoning_effort"] != "high" {
+		t.Fatalf("first runtime options = %#v", firstOverrides.ConfigOptions)
+	}
+	if _, exists := first.Metadata["initial_session_runtime_config"]; exists {
+		t.Fatalf("launch-only seed leaked into first session metadata: %#v", first.Metadata)
+	}
+
+	secondID, err := executor.PrepareSession(
+		context.Background(), task, "profile-123", "executor-123", "", "",
+	)
+	if err != nil {
+		t.Fatalf("PrepareSession second: %v", err)
+	}
+	second, err := repo.GetTaskSession(context.Background(), secondID)
+	if err != nil {
+		t.Fatalf("GetTaskSession second: %v", err)
+	}
+	if _, ok := models.LoadSessionRuntimeConfigOverrides(second.Metadata); ok {
+		t.Fatalf("second session unexpectedly received initial runtime overrides: %#v", second.Metadata)
+	}
+	if _, exists := second.Metadata["initial_session_runtime_config"]; exists {
+		t.Fatalf("launch-only seed leaked into second session metadata: %#v", second.Metadata)
+	}
+
+	firstOverrides.ConfigOptions["reasoning_effort"] = "low"
+	if seed.ConfigOptions["reasoning_effort"] != "high" {
+		t.Fatalf("seed options aliased prepared session: %#v", seed.ConfigOptions)
+	}
+}
+
 func TestPersistRuntimeModelMetadataStoresRuntimeConfigAndClearsContextWindow(t *testing.T) {
 	repo := newMockRepository()
 	exec := newTestExecutor(t, &mockAgentManager{}, repo)

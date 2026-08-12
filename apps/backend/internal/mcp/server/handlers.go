@@ -179,6 +179,9 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 			"source_task_id":      s.taskID,
 			"start_agent":         startAgent,
 		}
+		if s.sessionID != "" {
+			payload["source_session_id"] = s.sessionID
+		}
 		if externalID := req.GetString("external_id", ""); externalID != "" {
 			payload["external_id"] = externalID
 		}

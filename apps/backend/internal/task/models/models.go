@@ -138,6 +138,10 @@ const (
 	MetaKeyParentQuestionChildID  = "child_task_id"
 	MetaKeyParentQuestionStatus   = "parent_question_status"
 	MetaKeyParentQuestionResponse = "parent_question_response"
+	// MetaKeyInitialSessionRuntimeConfig is a launch-only seed for the first
+	// session created for a task. PrepareSession consumes it into session
+	// runtime overrides and never leaves it in session metadata.
+	MetaKeyInitialSessionRuntimeConfig = "initial_session_runtime_config"
 )
 
 // IsAgentTitlePending reports whether task metadata contains the durable
@@ -238,6 +242,80 @@ type SessionRuntimeConfig struct {
 	Model         string            `json:"model,omitempty"`
 	Mode          string            `json:"mode,omitempty"`
 	ConfigOptions map[string]string `json:"config_options,omitempty"`
+}
+
+// LoadInitialSessionRuntimeConfig decodes the task launch seed from typed or
+// JSON-rehydrated task metadata.
+func LoadInitialSessionRuntimeConfig(metadata map[string]interface{}) (SessionRuntimeConfig, bool) {
+	return loadSessionRuntimeConfig(metadata, MetaKeyInitialSessionRuntimeConfig)
+}
+
+// LoadEffectiveSessionRuntimeConfig resolves the effective model, mode, and
+// dynamic options for a task session. The profile snapshot is the base, the
+// provider runtime state replaces it, the persisted session mode takes
+// precedence over provider mode, and explicit runtime overrides win last.
+func LoadEffectiveSessionRuntimeConfig(session *TaskSession) (SessionRuntimeConfig, bool) {
+	if session == nil {
+		return SessionRuntimeConfig{}, false
+	}
+	effective := runtimeConfigFromAgentProfileSnapshot(session.AgentProfileSnapshot)
+	if runtime, ok := LoadSessionRuntimeConfig(session.Metadata); ok {
+		mergeSessionRuntimeConfig(&effective, runtime)
+	}
+	if mode := StringFromAny(session.Metadata[SessionMetaKeySessionMode]); mode != "" {
+		effective.Mode = mode
+	}
+	if overrides, ok := LoadSessionRuntimeConfigOverrides(session.Metadata); ok {
+		mergeSessionRuntimeConfig(&effective, overrides)
+	}
+	effective.ConfigOptions = cleanRuntimeConfigOptions(effective.ConfigOptions)
+	return effective, !effective.IsZero()
+}
+
+func runtimeConfigFromAgentProfileSnapshot(snapshot map[string]interface{}) SessionRuntimeConfig {
+	if snapshot == nil {
+		return SessionRuntimeConfig{}
+	}
+	config := SessionRuntimeConfig{
+		Model: StringFromAny(snapshot["model"]),
+		Mode:  StringFromAny(snapshot["mode"]),
+	}
+	config.ConfigOptions = stringMapFromAny(snapshot["config_options"])
+	if config.ConfigOptions == nil {
+		config.ConfigOptions = stringMapFromAny(snapshot["configOptions"])
+	}
+	return config
+}
+
+func mergeSessionRuntimeConfig(target *SessionRuntimeConfig, source SessionRuntimeConfig) {
+	if source.Model != "" {
+		target.Model = source.Model
+	}
+	if source.Mode != "" {
+		target.Mode = source.Mode
+	}
+	if len(source.ConfigOptions) == 0 {
+		return
+	}
+	if target.ConfigOptions == nil {
+		target.ConfigOptions = make(map[string]string, len(source.ConfigOptions))
+	}
+	for key, value := range source.ConfigOptions {
+		target.ConfigOptions[key] = value
+	}
+}
+
+func cleanRuntimeConfigOptions(options map[string]string) map[string]string {
+	if len(options) == 0 {
+		return nil
+	}
+	cleaned := maps.Clone(options)
+	delete(cleaned, "model")
+	delete(cleaned, "mode")
+	if len(cleaned) == 0 {
+		return nil
+	}
+	return cleaned
 }
 
 // SessionOriginalEffectiveConfiguration is the immutable configuration a task
@@ -432,6 +510,7 @@ func loadSessionRuntimeConfig(metadata map[string]interface{}, key string) (Sess
 	}
 	switch v := raw.(type) {
 	case SessionRuntimeConfig:
+		v.ConfigOptions = maps.Clone(v.ConfigOptions)
 		return v, !v.IsZero()
 	case map[string]string:
 		out := SessionRuntimeConfig{

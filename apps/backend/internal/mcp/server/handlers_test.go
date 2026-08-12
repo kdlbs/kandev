@@ -82,6 +82,9 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	assert.Contains(t, tool.Tool.Description, "current_task")
 	assert.Contains(t, tool.Tool.Description, "workspace_default")
 	assert.Contains(t, tool.Tool.Description, "workflow")
+	assert.Contains(t, tool.Tool.Description, "verified creating session")
+	assert.Contains(t, tool.Tool.Description, "effective model, mode, and dynamic options")
+	assert.Contains(t, tool.Tool.Description, "An explicit agent_profile_id prevents creator-session runtime inheritance")
 	assert.Contains(t, tool.Tool.Description, "workspace_mode='new_workspace'")
 	assert.NotContains(t, props, "mcp_task_agent_profile_default", "saved policy must not change the tool input schema")
 
@@ -92,6 +95,8 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	assert.Contains(t, agentProfileDesc, "outranks it")
 	assert.Contains(t, agentProfileDesc, "current_task")
 	assert.Contains(t, agentProfileDesc, "workspace_default")
+	assert.Contains(t, agentProfileDesc, "verified creating session")
+	assert.Contains(t, agentProfileDesc, "effective model, mode, and dynamic options")
 
 	workflowProp, ok := props["workflow_id"].(map[string]interface{})
 	require.True(t, ok, "workflow_id schema should be an object")
@@ -347,6 +352,45 @@ func TestCreateTask_SourceTaskID_AlwaysSet(t *testing.T) {
 	payload, ok := backend.lastPayload.(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "my-task-123", payload["source_task_id"])
+}
+
+func TestCreateTask_ForwardsBoundSourceSessionID(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{"id": "task-new"},
+	}
+	s := newTaskModeServer(t, backend, "my-task-123")
+
+	result := callTool(t, s, "create_task_kandev", map[string]interface{}{
+		"title":        "New task",
+		"workspace_id": "ws-1",
+		"workflow_id":  "wf-1",
+	})
+
+	require.False(t, result.IsError)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "my-task-123", payload["source_task_id"])
+	assert.Equal(t, "test-session", payload["source_session_id"])
+	assert.NotContains(t, toolInputProperties(t, s, "create_task_kandev"), "source_session_id")
+}
+
+func TestCreateTask_ExternalModeDoesNotInventSourceSessionID(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{"id": "task-new"},
+	}
+	s := New(backend, "", "", 10005, newTestLogger(t), "", true, ModeExternal)
+
+	result := callTool(t, s, "create_task_kandev", map[string]interface{}{
+		"title":        "External task",
+		"workspace_id": "ws-1",
+		"workflow_id":  "wf-1",
+	})
+
+	require.False(t, result.IsError)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Empty(t, payload["source_task_id"])
+	assert.NotContains(t, payload, "source_session_id")
 }
 
 func TestCreateTask_SourceTaskID_EmptyWhenNoTaskContext(t *testing.T) {

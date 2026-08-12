@@ -748,6 +748,8 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 	}
 
 	metadata := cloneMetadata(task.Metadata)
+	initialRuntimeConfig, hasInitialRuntimeConfig := models.LoadInitialSessionRuntimeConfig(task.Metadata)
+	delete(metadata, models.MetaKeyInitialSessionRuntimeConfig)
 	var repositoryID string
 	var baseBranch string
 
@@ -792,6 +794,9 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 			metadata = make(map[string]interface{})
 		}
 		metadata[models.SessionMetaKeyOrigin] = models.SessionOriginTaskInitial
+		if hasInitialRuntimeConfig {
+			metadata[models.SessionMetaKeyRuntimeConfigOverrides] = initialRuntimeConfig
+		}
 	}
 
 	// Create agent session in database. WorkspacePath is propagated from task

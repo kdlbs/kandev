@@ -1934,6 +1934,8 @@ export class ApiClient {
       id: string;
       task_id: string;
       agent_profile_id?: string;
+      executor_id?: string;
+      executor_profile_id?: string;
       state: string;
       started_at: string;
       task_environment_id?: string;
@@ -2201,6 +2203,25 @@ export class ApiClient {
       session_id: sessionId,
       content,
       attachments,
+    });
+  }
+
+  async setSessionModel(sessionId: string, modelId: string): Promise<void> {
+    await this.request("POST", `/api/v1/task-sessions/${sessionId}/set-model`, {
+      model_id: modelId,
+    });
+  }
+
+  async setSessionMode(sessionId: string, modeId: string): Promise<void> {
+    await this.request("POST", `/api/v1/task-sessions/${sessionId}/set-mode`, {
+      mode_id: modeId,
+    });
+  }
+
+  async setSessionConfigOption(sessionId: string, configId: string, value: string): Promise<void> {
+    await this.request("POST", `/api/v1/task-sessions/${sessionId}/set-config-option`, {
+      config_id: configId,
+      value,
     });
   }
 

@@ -142,6 +142,42 @@ func TestBuildTurnRuntimeConfigSnapshotFallsBackToSelectorModel(t *testing.T) {
 	}
 }
 
+func TestBuildTurnRuntimeConfigSnapshotUsesSessionModeOverRuntimeMode(t *testing.T) {
+	snapshot := buildTurnRuntimeConfigSnapshot(&models.TaskSession{
+		AgentProfileSnapshot: map[string]interface{}{
+			"model": "profile-model",
+			"mode":  "profile-mode",
+			"config_options": map[string]string{
+				"reasoning_effort": "medium",
+			},
+		},
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyRuntimeConfig: models.SessionRuntimeConfig{
+				Model: "runtime-model",
+				Mode:  "runtime-mode",
+				ConfigOptions: map[string]string{
+					"reasoning_effort":   "high",
+					"collaboration_mode": "default",
+				},
+			},
+			models.SessionMetaKeySessionMode: "acceptEdits",
+			models.SessionMetaKeyRuntimeConfigOverrides: models.SessionRuntimeConfig{
+				ConfigOptions: map[string]string{"reasoning_effort": "low"},
+			},
+		},
+	})
+
+	if snapshot.Model != "runtime-model" || snapshot.Mode != "acceptEdits" {
+		t.Fatalf("snapshot model/mode = %q/%q", snapshot.Model, snapshot.Mode)
+	}
+	options := make(map[string]string, len(snapshot.ConfigOptions))
+	for _, option := range snapshot.ConfigOptions {
+		options[option.ID] = option.Value
+	}
+	require.Equal(t, "low", options["reasoning_effort"])
+	require.Equal(t, "default", options["collaboration_mode"])
+}
+
 func (nilTaskSessionRepo) GetTaskSession(context.Context, string) (*models.TaskSession, error) {
 	return nil, nil
 }
