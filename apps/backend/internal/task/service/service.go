@@ -203,6 +203,10 @@ type StepHistoryRecorder interface {
 	CreateStepTransition(ctx context.Context, sessionID, fromStepID, toStepID string, trigger wfmodels.StepTransitionTrigger, actorID *string, metadata map[string]interface{}) error
 }
 
+type asyncStepHistoryRecorder interface {
+	EnqueueStepTransition(sessionID, fromStepID, toStepID string, trigger wfmodels.StepTransitionTrigger, actorID *string, metadata map[string]interface{})
+}
+
 var (
 	ErrActiveTaskSessions        = errors.New("active agent sessions exist")
 	ErrWIPLimitExceeded          = wfmodels.ErrWIPLimitExceeded

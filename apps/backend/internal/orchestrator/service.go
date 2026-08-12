@@ -169,6 +169,10 @@ type StepHistoryRecorder interface {
 	CreateStepTransition(ctx context.Context, sessionID, fromStepID, toStepID string, trigger wfmodels.StepTransitionTrigger, actorID *string, metadata map[string]interface{}) error
 }
 
+type asyncStepHistoryRecorder interface {
+	EnqueueStepTransition(sessionID, fromStepID, toStepID string, trigger wfmodels.StepTransitionTrigger, actorID *string, metadata map[string]interface{})
+}
+
 // AgentFamilyResolver maps a hand-written agent family reference onto the
 // canonical IDs of every agent that answers to it. Exactly one candidate
 // resolves the reference; none means it names no known agent; more than one
@@ -1184,6 +1188,9 @@ func (s *Service) SetWorkflowStepGetter(getter WorkflowStepGetter) {
 // and the deferred move_task_kandev path (applyPendingMove). Optional.
 func (s *Service) SetStepHistoryRecorder(recorder StepHistoryRecorder) {
 	s.stepHistoryRecorder = recorder
+	// The transition store is created when the workflow step getter is wired.
+	// Rebuild it so queue-promotion paths receive the same recorder.
+	s.initWorkflowEngine()
 }
 
 // SetAgentFamilyResolver sets the collaborator that maps the agent family names
@@ -1223,7 +1230,7 @@ func (s *Service) initWorkflowEngine() {
 	if s.workflowStepGetter == nil {
 		return
 	}
-	store := newWorkflowStore(s.repo, s.workflowStepGetter, s.agentManager, s.publishTaskUpdated, s.logger, s.publishTaskMoved, s.publishTaskQueuePromoted)
+	store := newWorkflowStore(s.repo, s.workflowStepGetter, s.agentManager, s.publishTaskUpdated, s.logger, s.publishTaskMoved, s.publishTaskQueuePromoted, s.stepHistoryRecorder)
 	callbacks := buildWorkflowCallbacks(s)
 	s.workflowStore = store
 	s.workflowEngine = engine.New(store, callbacks, s.engineOptions...)

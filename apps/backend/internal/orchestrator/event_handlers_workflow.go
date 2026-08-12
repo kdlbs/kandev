@@ -363,7 +363,11 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 			consumedSignal = &signal
 		}
 	}
-	s.recordAutoStepTransition(ctx, sessionID, fromStep.ID, toStepID, consumedSignal)
+	trigger := wfmodels.StepTransitionTriggerTurnStart
+	if triggerOnEnter {
+		trigger = wfmodels.StepTransitionTriggerAutoComplete
+	}
+	s.recordAutoStepTransition(ctx, sessionID, fromStep.ID, toStepID, consumedSignal, trigger)
 
 	if triggerOnEnter {
 		// ADR 0015 — clear any pending completion-signal bag for the
@@ -1357,7 +1361,11 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 	// couldn't apply inline because the calling session was still
 	// RUNNING/STARTING); the idle-session path records through
 	// task/service.MoveTaskWithOptions instead.
-	s.recordManualStepTransition(ctx, sessionID, fromStepID, move.WorkflowStepID)
+	actor := wfmodels.StepTransitionActorAgent
+	if move.Actor != "" {
+		actor = wfmodels.StepTransitionActor(move.Actor)
+	}
+	s.recordManualStepTransition(ctx, sessionID, fromStepID, move.WorkflowStepID, actor)
 
 	s.logger.Info("applying pending move",
 		zap.String("task_id", taskID),
@@ -2777,7 +2785,14 @@ func (s *Service) applyEngineTransition(
 			consumedSignal = &signal
 		}
 	}
-	s.recordAutoStepTransition(ctx, session.ID, result.FromStepID, result.ToStepID, consumedSignal)
+	historyTrigger := wfmodels.StepTransitionTriggerAutoComplete
+	switch trigger {
+	case engine.TriggerOnTurnStart:
+		historyTrigger = wfmodels.StepTransitionTriggerTurnStart
+	case engine.TriggerOnChildrenCompleted:
+		historyTrigger = wfmodels.StepTransitionTriggerChildrenCompleted
+	}
+	s.recordAutoStepTransition(ctx, session.ID, result.FromStepID, result.ToStepID, consumedSignal, historyTrigger)
 
 	// ADR 0015 — a successful on_turn_complete transition consumes any
 	// pending step-completion signal for the source step. The bag must be

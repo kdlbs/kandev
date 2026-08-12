@@ -66,6 +66,7 @@ type workflowStore struct {
 	publishTaskMoved    taskMovedPublisher
 	publishTaskPromoted taskQueuePromotedPublisher
 	logger              *logger.Logger
+	stepHistoryRecorder StepHistoryRecorder
 	appliedOps          sync.Map
 }
 
@@ -79,6 +80,7 @@ func newWorkflowStore(
 ) *workflowStore {
 	var moved taskMovedPublisher
 	var promoted taskQueuePromotedPublisher
+	var history StepHistoryRecorder
 	for _, publisher := range publishers {
 		switch value := publisher.(type) {
 		case taskMovedPublisher:
@@ -87,6 +89,10 @@ func newWorkflowStore(
 			moved = taskMovedPublisher(value)
 		case taskQueuePromotedPublisher:
 			promoted = value
+		case StepHistoryRecorder:
+			// Keep transition-history ownership in the workflow store for
+			// queue promotions, which otherwise bypass the normal move API.
+			history = value
 		case func(context.Context, *models.Task):
 			promoted = taskQueuePromotedPublisher(value)
 		}
@@ -99,6 +105,7 @@ func newWorkflowStore(
 		publishTaskMoved:    moved,
 		publishTaskPromoted: promoted,
 		logger:              log,
+		stepHistoryRecorder: history,
 	}
 }
 
@@ -379,6 +386,13 @@ func (s *workflowStore) pullOneFeederTask(
 		sessionID := ""
 		if session, err := s.repo.GetActiveTaskSessionByTaskID(ctx, candidate.ID); err == nil && session != nil {
 			sessionID = session.ID
+		}
+		if s.stepHistoryRecorder != nil && sessionID != "" {
+			if asyncRecorder, ok := s.stepHistoryRecorder.(asyncStepHistoryRecorder); ok {
+				asyncRecorder.EnqueueStepTransition(sessionID, fromStepID, vacatedStep.ID, wfmodels.StepTransitionTriggerQueuePromotion, nil, nil)
+			} else if err := s.stepHistoryRecorder.CreateStepTransition(ctx, sessionID, fromStepID, vacatedStep.ID, wfmodels.StepTransitionTriggerQueuePromotion, nil, nil); err != nil {
+				s.logger.Warn("failed to record queue promotion transition", zap.String("task_id", candidate.ID), zap.Error(err))
+			}
 		}
 		s.publishTaskMoved(ctx, candidate, fromWorkflowID, fromStepID, vacatedStep.ID, sessionID)
 		return true

@@ -1372,6 +1372,7 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	if err != nil {
 		return nil, err
 	}
+	oldWorkflowStepID := task.WorkflowStepID
 	var oldState *v1.TaskState
 	stateChanged := false
 
@@ -1426,6 +1427,16 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	// this snapshot was stale. Publish and return the row that actually won so
 	// callers never receive the provisional title or pending marker again.
 	task = s.reloadTaskAfterMutation(ctx, id, task, "update")
+	if req.WorkflowStepID != nil && oldWorkflowStepID != task.WorkflowStepID {
+		sessionID := ""
+		if session := s.resolvePrimaryOrActiveSession(ctx, id); session != nil {
+			sessionID = session.ID
+		}
+		// Generic task updates are a mutation boundary used by plugins and
+		// MCP. Record them as system-originated unless a dedicated move API
+		// supplied stronger provenance.
+		s.recordManualStepTransition(ctx, sessionID, oldWorkflowStepID, task.WorkflowStepID, wfmodels.StepTransitionTriggerTaskUpdate, wfmodels.StepTransitionActorSystem)
+	}
 
 	// Update task repositories if provided
 	if req.Repositories != nil {

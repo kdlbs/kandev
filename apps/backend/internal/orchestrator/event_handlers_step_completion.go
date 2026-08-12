@@ -66,15 +66,13 @@ func (s *Service) clearPendingStepSignalByID(ctx context.Context, sessionID stri
 // path (applyEngineTransition, covering on_turn_complete, on_turn_start,
 // and on_children_completed) and the legacy on_turn_complete/on_turn_start
 // path (executeStepTransition), so the two funnels cannot drift apart.
-// There is no dedicated trigger enum value for on_turn_start or
-// on_children_completed — the three-value trigger enum
-// (manual/auto_complete/approval) is the specification — so every
-// orchestrator-driven transition is recorded as auto_complete; only a
-// consumed step-completion signal (turn-complete only) attaches metadata.
+// The trigger is preserved so on_turn_start and on_children_completed are not
+// reported as completion events. Older rows keep auto_complete for turn
+// completion and remain readable.
 // Nil-safe: no recorder wired, or no session to record against, is a
-// no-op. Failures are logged and swallowed — the audit trail must never
-// fail the transition it is recording.
-func (s *Service) recordAutoStepTransition(ctx context.Context, sessionID, fromStepID, toStepID string, signal *models.PendingStepCompletionSignal) {
+// no-op. Runtime writes use the workflow service's bounded worker. Failures
+// are logged and swallowed because this contract is best-effort telemetry.
+func (s *Service) recordAutoStepTransition(ctx context.Context, sessionID, fromStepID, toStepID string, signal *models.PendingStepCompletionSignal, triggers ...wfmodels.StepTransitionTrigger) {
 	if s.stepHistoryRecorder == nil || sessionID == "" {
 		return
 	}
@@ -85,13 +83,20 @@ func (s *Service) recordAutoStepTransition(ctx context.Context, sessionID, fromS
 			"signal_summary": signal.Summary,
 		}
 	}
-	// The step change is already durably persisted by the time this runs.
-	// Use a detached, bounded context so a cancelled parent context cannot
-	// drop the audit row for a transition that already committed.
+	trigger := wfmodels.StepTransitionTriggerAutoComplete
+	if len(triggers) > 0 && triggers[0] != "" {
+		trigger = triggers[0]
+	}
+	if asyncRecorder, ok := s.stepHistoryRecorder.(asyncStepHistoryRecorder); ok {
+		asyncRecorder.EnqueueStepTransition(sessionID, fromStepID, toStepID, trigger, nil, metadata)
+		return
+	}
+	// Test doubles can remain synchronous. Production workflow service uses the
+	// queue branch above.
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.StepHistoryWriteTimeout)
 	defer cancel()
 	if err := s.stepHistoryRecorder.CreateStepTransition(
-		writeCtx, sessionID, fromStepID, toStepID, wfmodels.StepTransitionTriggerAutoComplete, nil, metadata,
+		writeCtx, sessionID, fromStepID, toStepID, trigger, nil, metadata,
 	); err != nil {
 		s.logger.Warn("failed to record auto step transition",
 			zap.String("session_id", sessionID),
@@ -108,15 +113,18 @@ func (s *Service) recordAutoStepTransition(ctx context.Context, sessionID, fromS
 // StepTransitionTriggerManual — the user/HTTP half is recorded by
 // task/service.MoveTaskWithOptions. Nil-safe and failure-swallowing, same as
 // recordAutoStepTransition.
-func (s *Service) recordManualStepTransition(ctx context.Context, sessionID, fromStepID, toStepID string) {
+func (s *Service) recordManualStepTransition(ctx context.Context, sessionID, fromStepID, toStepID string, actors ...wfmodels.StepTransitionActor) {
 	if s.stepHistoryRecorder == nil || sessionID == "" {
 		return
 	}
-	// The step change is already durably persisted by the time this runs.
-	// Use a detached, bounded context so a cancelled parent context cannot
-	// drop the audit row for a transition that already committed.
+	// Test doubles can remain synchronous. Production workflow service uses the
+	// queue branch below.
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.StepHistoryWriteTimeout)
 	defer cancel()
+	if asyncRecorder, ok := s.stepHistoryRecorder.(asyncStepHistoryRecorder); ok {
+		asyncRecorder.EnqueueStepTransition(sessionID, fromStepID, toStepID, wfmodels.StepTransitionTriggerManual, nil, nil)
+		return
+	}
 	if err := s.stepHistoryRecorder.CreateStepTransition(
 		writeCtx, sessionID, fromStepID, toStepID, wfmodels.StepTransitionTriggerManual, nil, nil,
 	); err != nil {

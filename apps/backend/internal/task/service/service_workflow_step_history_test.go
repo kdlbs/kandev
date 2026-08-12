@@ -82,6 +82,31 @@ func TestService_MoveTaskRecordsManualStepHistory(t *testing.T) {
 	}
 }
 
+func TestService_MoveTaskAgentDoesNotUseOwnerActor(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+	recorder := &fakeStepHistoryRecorder{}
+	svc.SetStepHistoryRecorder(recorder)
+	createMoveTask(t, ctx, repo, "task-agent-history", "wf-source", "step-source", nil)
+	createMoveSession(t, ctx, repo, "session-agent-history", "task-agent-history", models.TaskSessionStateWaitingForInput, "")
+
+	_, err := svc.MoveTaskWithOptions(ctx, "task-agent-history", "wf-source", "step-review-target", 0, MoveTaskOptions{
+		StepHistoryActor: wfmodels.StepTransitionActorAgent,
+	})
+	if err != nil {
+		t.Fatalf("MoveTaskWithOptions: %v", err)
+	}
+	calls := recorder.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 recorded transition, got %d", len(calls))
+	}
+	if calls[0].actorID != nil {
+		t.Fatalf("agent transition actorID = %v, want nil", *calls[0].actorID)
+	}
+}
+
 func TestService_MoveTaskSameStepDoesNotRecordHistory(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

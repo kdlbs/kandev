@@ -2,12 +2,28 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/workflow/models"
 )
+
+func TestListHistoryBySession_AuthorizesBeforeRead(t *testing.T) {
+	svc, _ := setupTestService(t)
+	denied := errors.New("session access denied")
+	called := false
+	svc.SetSessionAccessChecker(func(context.Context, string) error {
+		called = true
+		return denied
+	})
+
+	history, err := svc.ListHistoryBySession(context.Background(), "sess-foreign")
+	require.ErrorIs(t, err, denied)
+	require.Nil(t, history)
+	require.True(t, called)
+}
 
 func TestCreateStepTransition_PersistsMetadataAndActor(t *testing.T) {
 	svc, _ := setupTestService(t)

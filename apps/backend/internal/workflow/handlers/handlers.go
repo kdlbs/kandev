@@ -283,7 +283,9 @@ func (h *Handlers) httpListHistoryBySession(c *gin.Context) {
 	})
 	if err != nil {
 		h.logger.Error("failed to list history", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list history"})
+		// Session IDs are opaque. Return not-found for denied access so this
+		// endpoint cannot reveal whether another workspace owns the session.
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
 		return
 	}
 	c.JSON(http.StatusOK, resp)
