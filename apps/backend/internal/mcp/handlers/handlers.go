@@ -1903,7 +1903,7 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record signal", nil)
 	}
 	if !stored {
-		return h.handleDuplicateStepComplete(ctx, msg, req.TaskID, req.SessionID, task.WorkflowStepID)
+		return h.handleDuplicateStepComplete(ctx, msg, req.TaskID, req.SessionID, task.WorkflowStepID, session)
 	}
 
 	// Counted here, at the durable bag write, not after publishStepCompletionEvent
@@ -1934,18 +1934,12 @@ func (h *Handlers) handleDuplicateStepComplete(
 	ctx context.Context,
 	msg *ws.Message,
 	taskID, sessionID, stepID string,
+	session *models.TaskSession,
 ) (*ws.Message, error) {
-	// The atomic claim failed because another request already stored a signal
-	// for this step. Reload the session so a concurrent winner's payload and
-	// state are used for the retry path.
-	session, err := h.sessionRepo.GetTaskSession(ctx, sessionID)
-	if err != nil {
-		h.logger.Error("failed to reload deduplicated step-completion signal",
-			zap.String("task_id", taskID),
-			zap.String("session_id", sessionID),
-			zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to read existing signal", nil)
-	}
+	// If the initial snapshot already contained this step's signal, this is a
+	// retry after a possible publish failure and the event must be re-published
+	// while the session waits. If the initial snapshot was empty, another
+	// concurrent request won the claim and will publish the event itself.
 	existing, ok := models.LoadPendingStepSignal(session.Metadata)
 	if ok && existing.StepID == stepID && session.State == models.TaskSessionStateWaitingForInput {
 		if errMsg, err := h.publishStepCompletionEvent(ctx, msg, taskID, sessionID, stepID, existing); errMsg != nil {

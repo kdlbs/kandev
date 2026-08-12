@@ -372,7 +372,7 @@ func TestHandleStepComplete_DedupWaitingRepublishes(t *testing.T) {
 func TestHandleStepComplete_ConcurrentCallsClaimOneSignal(t *testing.T) {
 	ctx := context.Background()
 	svc, repo := newTestTaskService(t)
-	seedStepCompleteTarget(t, repo, "task-concurrent", "session-concurrent", "step-1", models.TaskSessionStateRunning)
+	seedStepCompleteTarget(t, repo, "task-concurrent", "session-concurrent", "step-1", models.TaskSessionStateWaitingForInput)
 	seedAgentProfileSnapshot(t, repo, "session-concurrent", "claude-concurrent")
 
 	ready := make(chan struct{}, 2)
