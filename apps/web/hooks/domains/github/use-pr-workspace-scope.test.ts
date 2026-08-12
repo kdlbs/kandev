@@ -143,6 +143,55 @@ describe("PR workspace request scope", () => {
 });
 
 describe("PR file refresh stability", () => {
+  it("discards a superseded timestamp response that resolves last", async () => {
+    mocks.prs = [taskPR()];
+    let resolveSecond: ((value: { files: Array<{ filename: string }> }) => void) | undefined;
+    let resolveThird: ((value: { files: Array<{ filename: string }> }) => void) | undefined;
+    mocks.request
+      .mockResolvedValueOnce({ files: [{ filename: "stable.ts" }] })
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSecond = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveThird = resolve;
+          }),
+      );
+
+    const { result, rerender } = renderHook(() => useActiveTaskPRsWithFiles());
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledTimes(1));
+
+    mocks.prs = [{ ...taskPR(), last_synced_at: "2026-07-20T00:01:00Z" }];
+    rerender();
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledTimes(2));
+
+    mocks.prs = [{ ...taskPR(), last_synced_at: "2026-07-20T00:02:00Z" }];
+    rerender();
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledTimes(3));
+
+    await act(async () => {
+      resolveThird!({ files: [{ filename: "newest.ts" }] });
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(Object.values(result.current.filesByPRKey).flat()).toEqual([
+        { filename: "newest.ts" },
+      ]),
+    );
+
+    await act(async () => {
+      resolveSecond!({ files: [{ filename: "superseded.ts" }] });
+      await Promise.resolve();
+    });
+    expect(Object.values(result.current.filesByPRKey).flat()).toEqual([{ filename: "newest.ts" }]);
+  });
+});
+
+describe("PR file refresh retention", () => {
   it("keeps resolved files visible while a sync timestamp refresh is pending", async () => {
     mocks.prs = [taskPR()];
     let resolveRefresh: ((value: { files: Array<{ filename: string }> }) => void) | undefined;

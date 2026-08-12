@@ -40,6 +40,7 @@ No new Playwright scenario is planned. This repair changes only hook-level cache
 - RED: the deferred timestamp-refresh test failed because `filesByPRKey` became empty before the replacement response resolved.
 - RED: the controlled refresh-rejection test failed because the settled error replaced retained files with an empty list.
 - `cd apps && pnpm --filter @kandev/web test hooks/domains/github/use-pr-workspace-scope.test.ts && pnpm --filter @kandev/web lint && pnpm --filter @kandev/web typecheck` passed: 5 tests, zero lint warnings, and clean TypeScript compilation.
+- Review remediation: a reverse-order T2/T3 regression failed before the desired-key guard because late T2 replaced T3, then the same test passed after superseded success/failure handlers were rejected. The focused suite now passes 6 tests with lint and typecheck clean.
 
 ## Implementation Waves And Parallel Candidates
 

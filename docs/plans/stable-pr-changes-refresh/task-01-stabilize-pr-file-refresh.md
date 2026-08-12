@@ -61,5 +61,6 @@ Report RED/GREEN evidence, the stable display identity and timestamped request i
 - GREEN: `cd apps && pnpm --filter @kandev/web test hooks/domains/github/use-pr-workspace-scope.test.ts && pnpm --filter @kandev/web lint && pnpm --filter @kandev/web typecheck` passed with 5 tests, zero lint warnings, and clean TypeScript compilation.
 - `cd apps && pnpm install --frozen-lockfile` completed successfully before testing and committing.
 - The cache now scopes resolved files by workspace and task, retains them by logical PR identity during timestamped refreshes, atomically replaces them on success, and retains them on background failure. Removed PRs and scope changes still clear incompatible files.
+- Review remediation adds current desired-key validation per logical PR. A controlled T3-before-T2 regression now proves a superseded response cannot overwrite newer files; the focused suite passes 6 tests after the fix.
 - No Playwright test or screenshot was added because the change is hook-only state normalization with no markup, responsive composition, touch behavior, scrolling, or navigation changes. Existing mobile Changes coverage remains applicable.
 - Temporary diagnostic edits: none remain. External side effects and security/trust boundary changes: none.

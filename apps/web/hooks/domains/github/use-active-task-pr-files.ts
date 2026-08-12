@@ -11,6 +11,11 @@ type ScopedPRFiles = {
   taskId: string | null;
   files: PRFilesByKey;
 };
+type RequestScope = {
+  workspaceId: string | null;
+  taskId: string | null;
+  desiredKeyByIdentity: Map<string, string>;
+};
 
 // Stable empty array so the Zustand selector returns the same reference
 // for tasks with zero PRs. A fresh `[]` per render would re-trigger the
@@ -37,11 +42,28 @@ function fetchKeyIdentity(key: string): string {
 }
 
 function isCurrentScope(
-  scope: { workspaceId: string | null; taskId: string | null },
+  scope: RequestScope,
   workspaceId: string,
   taskId: string | null,
+  key: string,
 ): boolean {
-  return scope.workspaceId === workspaceId && scope.taskId === taskId;
+  return (
+    scope.workspaceId === workspaceId &&
+    scope.taskId === taskId &&
+    scope.desiredKeyByIdentity.get(fetchKeyIdentity(key)) === key
+  );
+}
+
+function requestScope(
+  workspaceId: string | null,
+  taskId: string | null,
+  prs: TaskPR[],
+): RequestScope {
+  return {
+    workspaceId,
+    taskId,
+    desiredKeyByIdentity: new Map(prs.map((pr) => [prIdentityKey(pr), fetchKey(pr)])),
+  };
 }
 
 /**
@@ -77,8 +99,8 @@ export function useActiveTaskPRsWithFiles(scopedPRs?: TaskPR[]): {
   // counts as a brand-new fetch.
   const inFlightRef = useRef<Set<string>>(new Set());
   const fetchedRef = useRef<Set<string>>(new Set());
-  const scopeRef = useRef({ workspaceId, taskId: activeTaskId });
-  scopeRef.current = { workspaceId, taskId: activeTaskId };
+  const scopeRef = useRef(requestScope(workspaceId, activeTaskId, prs));
+  scopeRef.current = requestScope(workspaceId, activeTaskId, prs);
 
   // The set of keys we *want* to have results for. Drives the diff between
   // current state and what needs fetching, and lets us GC stale entries
@@ -132,7 +154,7 @@ export function useActiveTaskPRsWithFiles(scopedPRs?: TaskPR[]): {
         })
         .then((response) => {
           inFlightRef.current.delete(trackingKey);
-          if (!isCurrentScope(scopeRef.current, workspaceId, activeTaskId)) return;
+          if (!isCurrentScope(scopeRef.current, workspaceId, activeTaskId, key)) return;
           fetchedRef.current.add(trackingKey);
           setFileCache((prev) =>
             replacePRFiles(prev, workspaceId, activeTaskId, key, response?.files ?? []),
@@ -140,7 +162,7 @@ export function useActiveTaskPRsWithFiles(scopedPRs?: TaskPR[]): {
         })
         .catch(() => {
           inFlightRef.current.delete(trackingKey);
-          if (!isCurrentScope(scopeRef.current, workspaceId, activeTaskId)) return;
+          if (!isCurrentScope(scopeRef.current, workspaceId, activeTaskId, key)) return;
           fetchedRef.current.add(trackingKey);
           setFileCache((prev) => retainOrSetEmptyPRFiles(prev, workspaceId, activeTaskId, key));
         });
