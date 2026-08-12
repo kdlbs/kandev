@@ -42,16 +42,22 @@ export function useArchiveAndSwitchTask(opts?: { useLayoutSwitch?: boolean }) {
     async (taskId: string, opts?: { cascade?: boolean }) => {
       const { activeTaskId: wasActiveTaskId, activeSessionId: wasActiveSessionId } =
         store.getState().tasks;
+      const removalOptions = opts?.cascade ? { excludeTaskTree: true } : {};
 
       const initialSwitch = await removeTaskFromBoard(taskId, {
         wasActiveTaskId,
         wasActiveSessionId,
         switchOnly: true,
+        ...removalOptions,
       });
 
       try {
         await archiveTaskById(taskId, opts);
-        await removeTaskFromBoard(taskId, { wasActiveTaskId, wasActiveSessionId });
+        await removeTaskFromBoard(taskId, {
+          wasActiveTaskId,
+          wasActiveSessionId,
+          ...removalOptions,
+        });
       } catch (error) {
         if (
           wasActiveTaskId &&

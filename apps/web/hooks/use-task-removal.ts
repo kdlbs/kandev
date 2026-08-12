@@ -28,6 +28,8 @@ type RemoveFromBoardOptions = {
   wasActiveSessionId?: string | null;
   /** Switch away from the task without removing it from board state yet. */
   switchOnly?: boolean;
+  /** Exclude the removed task and every cached descendant from candidates. */
+  excludeTaskTree?: boolean;
 };
 
 type RemoveFromBoardResult = {
@@ -99,6 +101,45 @@ function collectRemainingTasks(store: StoreApi<AppState>): KanbanState["tasks"] 
   return allRemainingTasks;
 }
 
+function collectTaskTreeIds(
+  rootTaskId: string,
+  taskLists: Array<KanbanState["tasks"]>,
+): ReadonlySet<string> {
+  const childrenByParentId = new Map<string, string[]>();
+  for (const tasks of taskLists) {
+    for (const task of tasks) {
+      if (!task.parentTaskId) continue;
+      const children = childrenByParentId.get(task.parentTaskId) ?? [];
+      children.push(task.id);
+      childrenByParentId.set(task.parentTaskId, children);
+    }
+  }
+
+  const excludedTaskIds = new Set<string>([rootTaskId]);
+  const pendingParentIds = [rootTaskId];
+  while (pendingParentIds.length > 0) {
+    const parentId = pendingParentIds.pop();
+    if (!parentId) continue;
+    for (const childId of childrenByParentId.get(parentId) ?? []) {
+      if (excludedTaskIds.has(childId)) continue;
+      excludedTaskIds.add(childId);
+      pendingParentIds.push(childId);
+    }
+  }
+  return excludedTaskIds;
+}
+
+function collectTaskTreeIdsFromStore(
+  store: StoreApi<AppState>,
+  rootTaskId: string,
+): ReadonlySet<string> {
+  const state = store.getState();
+  return collectTaskTreeIds(rootTaskId, [
+    ...Object.values(state.kanbanMulti.snapshots).map((snapshot) => snapshot.tasks),
+    state.kanban.tasks,
+  ]);
+}
+
 /**
  * Orders next-task candidates by recent use, then board order, without trusting
  * either list as proof that a task still exists.
@@ -106,8 +147,11 @@ function collectRemainingTasks(store: StoreApi<AppState>): KanbanState["tasks"] 
 function orderedTaskCandidates(
   remainingTasks: KanbanState["tasks"],
   removedTaskId: string,
+  excludedTaskIds?: ReadonlySet<string>,
 ): KanbanState["tasks"] {
-  const candidates = remainingTasks.filter((task) => task.id !== removedTaskId);
+  const candidates = remainingTasks.filter(
+    (task) => task.id !== removedTaskId && !excludedTaskIds?.has(task.id),
+  );
   const remainingById = new Map(candidates.map((task) => [task.id, task]));
   const ordered: KanbanState["tasks"] = [];
   for (const recent of getRecentTasks()) {
@@ -139,8 +183,9 @@ export async function selectNextTaskAfterRemoval(
   remainingTasks: KanbanState["tasks"],
   removedTaskId: string,
   isLive: (taskId: string) => Promise<boolean> = taskIsLive,
+  excludedTaskIds?: ReadonlySet<string>,
 ): Promise<KanbanState["tasks"][number] | null> {
-  for (const task of orderedTaskCandidates(remainingTasks, removedTaskId)) {
+  for (const task of orderedTaskCandidates(remainingTasks, removedTaskId, excludedTaskIds)) {
     if (await isLive(task.id)) return task;
   }
   return null;
@@ -261,7 +306,15 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
       }
 
       const oldEnvId = resolveOldEnvId(store, opts);
-      const nextTask = await selectNextTaskAfterRemoval(allRemainingTasks, taskId);
+      const excludedTaskIds = opts?.excludeTaskTree
+        ? collectTaskTreeIdsFromStore(store, taskId)
+        : undefined;
+      const nextTask = await selectNextTaskAfterRemoval(
+        allRemainingTasks,
+        taskId,
+        taskIsLive,
+        excludedTaskIds,
+      );
       if (nextTask) {
         await switchToNextTask({
           store,
@@ -273,6 +326,7 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
         return { switchedTaskId: nextTask.id };
       }
 
+      if (opts?.switchOnly) return { switchedTaskId: null };
       window.location.href = linkToTaskOverview();
       return { switchedTaskId: null };
     },
