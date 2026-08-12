@@ -3,6 +3,7 @@ import { APP_DESTINATIONS } from "./core-destinations";
 import { resolveDestinations } from "./resolve-destinations";
 import { MOBILE_MENU_UTILITY_SECTIONS } from "./surface-policy";
 import type { AvailabilityMap, NavContext } from "./types";
+import type { PluginNavRegistration } from "@/lib/plugins/registry";
 
 const ALL_INTEGRATIONS: AvailabilityMap = {
   "azure-devops": true,
@@ -131,5 +132,42 @@ describe("resolveDestinations", () => {
 
     expect(ids(palette)).toContain("github");
     expect(ids(sidebar)).not.toContain("github");
+  });
+});
+
+describe("resolveDestinations with plugin items", () => {
+  const pluginItems: PluginNavRegistration[] = [
+    {
+      pluginId: "acme",
+      id: "board",
+      label: "Acme Board",
+      path: "/plugins/acme",
+      section: "insights",
+    },
+  ];
+
+  it("orders the first-party stats destination before a plugin insights item on the sidebar", () => {
+    const resolved = resolveDestinations({
+      surface: "sidebar",
+      section: "insights",
+      ctx: KANBAN,
+      pluginItems,
+    });
+
+    expect(ids(resolved)).toEqual(["stats", "plugin:acme:board"]);
+  });
+
+  it("orders the mobile utility group's manifest rows as stats, settings, then a plugin insights item", () => {
+    const resolved = resolveDestinations({
+      surface: "mobileMenu",
+      section: MOBILE_MENU_UTILITY_SECTIONS,
+      ctx: KANBAN,
+      pluginItems,
+    });
+
+    // Plugin insights items follow the first-party `utilities` entry
+    // (Settings), not `stats` — the resolver groups by catalog array order,
+    // not by section.
+    expect(ids(resolved)).toEqual(["stats", "settings", "plugin:acme:board"]);
   });
 });

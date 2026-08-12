@@ -32,9 +32,11 @@ export interface NavItem {
   /**
    * Where the item renders: "main" (default) as a top-level sidebar entry,
    * "integrations" inside the sidebar's Integrations section alongside the
-   * first-party integration links.
+   * first-party integration links, "insights" as an icon button in the
+   * sidebar footer's icon row and as a labelled row in the phone menu's
+   * Utilities group, "settings" accepted but rendered on no surface.
    */
-  section?: "main" | "settings" | "integrations";
+  section?: "main" | "settings" | "integrations" | "insights";
 }
 
 /**

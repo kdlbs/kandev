@@ -14,6 +14,7 @@ const ALL_INTEGRATIONS: AvailabilityMap = {
 };
 
 const KANBAN: NavContext = { workspaceId: "ws-1", inOffice: false };
+const ACME_BOARD_ID = "plugin:acme:board";
 
 const pluginItems: PluginNavRegistration[] = [
   { pluginId: "acme", id: "hello", label: "Hello", path: "/plugins/hello" },
@@ -38,6 +39,13 @@ const pluginItems: PluginNavRegistration[] = [
     path: "/settings/plugins/p",
     section: "settings",
   },
+  {
+    pluginId: "acme",
+    id: "board",
+    label: "Board",
+    path: "/plugins/board",
+    section: "insights",
+  },
 ];
 
 function ids(destinations: { id: string }[]): string[] {
@@ -48,6 +56,15 @@ function pluginsIn(surface: "sidebar" | "mobileMenu", items: PluginNavRegistrati
   return resolveDestinations({
     surface,
     section: "plugins",
+    ctx: NO_WORKSPACE_CONTEXT,
+    pluginItems: items,
+  });
+}
+
+function insightsIn(surface: "sidebar" | "mobileMenu", items: PluginNavRegistration[]) {
+  return resolveDestinations({
+    surface,
+    section: "insights",
     ctx: NO_WORKSPACE_CONTEXT,
     pluginItems: items,
   });
@@ -91,10 +108,42 @@ describe("plugin destinations", () => {
     expect(ids(resolved)).not.toContain("plugin:acme:prefs");
   });
 
-  it("keeps plugin items off the palette, which plugins reach via shortcuts", () => {
+  it("keeps plugin items off the palette", () => {
     const resolved = resolveDestinations({ surface: "palette", ctx: KANBAN, pluginItems });
 
     expect(ids(resolved)).not.toContain("plugin:acme:hello");
+    expect(ids(resolved)).not.toContain(ACME_BOARD_ID);
+  });
+
+  it("routes insights-section items to the insights section, on both surfaces", () => {
+    // The insights section also carries the first-party `stats` destination;
+    // it always precedes plugin entries (see resolve-destinations.test.ts for
+    // the ordering contract).
+    expect(ids(insightsIn("sidebar", pluginItems))).toEqual(["stats", ACME_BOARD_ID]);
+    expect(ids(insightsIn("mobileMenu", pluginItems))).toEqual(["stats", ACME_BOARD_ID]);
+  });
+
+  it("moves, does not add: an insights item is absent from the plugins group on both surfaces", () => {
+    expect(ids(pluginsIn("sidebar", pluginItems))).not.toContain(ACME_BOARD_ID);
+    expect(ids(pluginsIn("mobileMenu", pluginItems))).not.toContain(ACME_BOARD_ID);
+  });
+
+  it("degrades an unrecognised section string to the plugins group, never to insights", () => {
+    const unknownSection = "footer" as PluginNavRegistration["section"];
+    const items: PluginNavRegistration[] = [
+      {
+        pluginId: "acme",
+        id: "mystery",
+        label: "Mystery",
+        path: "/plugins/mystery",
+        section: unknownSection,
+      },
+    ];
+
+    expect(ids(pluginsIn("sidebar", items))).toEqual(["plugin:acme:mystery"]);
+    // Only the first-party `stats` destination remains — the mystery item
+    // never lands in the insights section.
+    expect(ids(insightsIn("sidebar", items))).toEqual(["stats"]);
   });
 });
 
@@ -138,6 +187,28 @@ describe("plugin destination identity", () => {
       "dashboard",
       "dashboard",
     ]);
+  });
+
+  it("keeps two plugins' insights items apart, in registration order", () => {
+    const resolved = insightsIn("sidebar", [
+      {
+        pluginId: "acme",
+        id: "board",
+        label: "Acme Board",
+        path: "/plugins/acme",
+        section: "insights",
+      },
+      {
+        pluginId: "globex",
+        id: "board",
+        label: "Globex Board",
+        path: "/plugins/globex",
+        section: "insights",
+      },
+    ]);
+
+    expect(ids(resolved)).toEqual(["stats", ACME_BOARD_ID, "plugin:globex:board"]);
+    expect(new Set(ids(resolved)).size).toBe(resolved.length);
   });
 
   it("encodes both segments so the separator cannot be forged", () => {
