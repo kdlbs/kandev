@@ -104,6 +104,14 @@ Completed 2026-08-12.
   credential-cleanup race set passed 10 repetitions, 3 overlapping frontend files / 35 tests passed,
   web typecheck passed, changed-code Go lint reported zero issues, all 60 public-doc validator tests
   passed, and all 41 published pages validated.
+- A subsequent independent audit found a teardown race in capacity promotion: after `Release`
+  promoted a queued entry, `promoteCapacityEntry` could reach runtime launch without reacquiring the
+  task/environment admission barrier used by ordinary Start. A regression first demonstrated the
+  queued server becoming ready despite an active teardown barrier. Promotion now reacquires task
+  admission before task/environment/runtime access; a blocked promotion releases its reservation,
+  returns to `waiting_for_task`, and schedules desired-state recovery. The focused regression passed,
+  `go test -race ./internal/lsp -count=10` passed, the three task-service admission regressions passed
+  10 race-enabled repetitions, and changed-code LSP lint reported zero issues.
 
 ## Files
 

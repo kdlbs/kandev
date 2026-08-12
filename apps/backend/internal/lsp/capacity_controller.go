@@ -3,6 +3,7 @@ package lsp
 import (
 	"context"
 	"errors"
+	"fmt"
 )
 
 // releaseCapacity frees one proven server generation and starts the oldest
@@ -42,6 +43,16 @@ func (c *Controller) promoteCapacityEntry(
 		snapshot := c.languageSnapshot(*state, settings, nil)
 		return &snapshot, nil
 	}
+	releaseAdmission, err := c.tasks.AcquireTaskLSPAdmission(ctx, entry.Key.TaskID)
+	if err != nil {
+		c.releaseCapacity(ctx, entry.Key, entry.Generation)
+		snapshot, transitionErr := c.transition(
+			ctx, *state, settings, PhaseWaitingForTask, "", "",
+		)
+		c.scheduleDesiredRecovery(entry.Key, snapshot)
+		return snapshot, errors.Join(fmt.Errorf("%w: %v", ErrTaskNotReady, err), transitionErr)
+	}
+	defer releaseAdmission()
 
 	task, err := c.tasks.GetTask(ctx, entry.Key.TaskID)
 	if err != nil {

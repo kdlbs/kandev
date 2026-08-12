@@ -74,6 +74,45 @@ func TestCapacityReleaseStartsQueuedAcceptedGeneration(t *testing.T) {
 	}
 }
 
+func TestCapacityPromotionRechecksTaskAdmissionBeforeLaunch(t *testing.T) {
+	tasks := &fakeControllerTasks{environments: map[string]*models.TaskEnvironment{
+		"first":  readyEnvironment("first", "local_docker"),
+		"queued": readyEnvironment("queued", "local_docker"),
+	}}
+	store := newMemoryLSPStore()
+	host := newFakeLSPHost()
+	controller := newTestController(tasks, store, &fakeLSPSettings{}, &fakeLSPRuntimes{host: host})
+	controller.capacity = NewCapacity(1)
+	origin := Origin{Initiator: InitiatorUser, Reason: "user_control"}
+
+	if _, err := controller.Start(context.Background(), "first", "go", origin); err != nil {
+		t.Fatal(err)
+	}
+	queued, err := controller.Start(context.Background(), "queued", "kotlin", origin)
+	if err != nil || queued.Phase != PhaseQueued {
+		t.Fatalf("queued=%#v error=%v", queued, err)
+	}
+	tasks.admissionErr = errors.New("task environment teardown in progress")
+
+	if _, err := controller.Stop(context.Background(), "first", "go", origin); err != nil {
+		t.Fatal(err)
+	}
+
+	notStarted, _, err := store.GetTaskLSPLanguage(context.Background(), "queued", "kotlin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if notStarted.Phase != PhaseWaitingForTask {
+		t.Fatalf("blocked promotion phase = %q, want %q", notStarted.Phase, PhaseWaitingForTask)
+	}
+	if host.startCalls != 1 {
+		t.Fatalf("task-host start calls = %d, want only the initial server", host.startCalls)
+	}
+	if controller.capacity.Active() != 0 {
+		t.Fatalf("active capacity after blocked promotion = %d, want 0", controller.capacity.Active())
+	}
+}
+
 func TestProvenStartFailureReleasesCapacity(t *testing.T) {
 	tasks := &fakeControllerTasks{environments: map[string]*models.TaskEnvironment{
 		"failed": readyEnvironment("failed", executorTypeLocalPC),

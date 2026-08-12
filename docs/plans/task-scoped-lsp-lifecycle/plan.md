@@ -449,6 +449,13 @@ Completed 2026-08-05.
   cleanly. Exact-base verification repeated the full task-service suite, the credential-cleanup race
   set 10 times, changed-code Go lint, 35 overlapping frontend tests, web typecheck, the 60-test
   public-doc validator, and all 41 published pages successfully.
+- A later independent audit found capacity promotion could bypass the task/environment admission
+  barrier after a queued entry became active, allowing a language server to launch while teardown
+  held the exclusive lock. Promotion now reacquires task admission before runtime access, returns the
+  language to `waiting_for_task` when blocked, releases capacity, and schedules desired-state
+  recovery. The regression failed before the fix and passed afterward; the focused LSP race suite
+  passed 10 repetitions, the task-service admission race set passed 10 repetitions, and changed-code
+  Go lint reported zero issues.
 
 ---
 
