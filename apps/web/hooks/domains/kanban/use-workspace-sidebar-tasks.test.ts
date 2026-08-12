@@ -7,7 +7,17 @@ type Snapshot = {
   workflowId: string;
   workflowName: string;
   steps: Array<{ id: string; title: string; color: string; position: number }>;
-  tasks: Array<{ id: string; workflowStepId: string; title: string; position: number }>;
+  tasks: Array<{
+    id: string;
+    workflowStepId: string;
+    title: string;
+    position: number;
+    queuedForStepId?: string;
+    wipAdmitted?: boolean;
+    priority?: string;
+    queuedAt?: string;
+    createdAt?: string;
+  }>;
 };
 
 type MockState = {
@@ -164,6 +174,66 @@ describe("useWorkspaceSidebarTasks", () => {
     const { result } = renderHook(() => useWorkspaceSidebarTasks("ws-1"));
     expect(result.current.allTasks.map((t) => t.id)).toEqual(["t-a1"]);
     expect(result.current.allTasks[0]._workflowId).toBe("wf-A");
+  });
+});
+
+describe("useWorkspaceSidebarTasks WIP queue", () => {
+  beforeEach(() => {
+    mockState = {
+      kanbanMulti: { snapshots: {}, isLoading: false },
+      workflows: { items: [] },
+      kanban: { workflowId: null, tasks: [], steps: [] },
+    };
+  });
+
+  it("derives destination queue positions for sidebar consumers", () => {
+    setMockState({
+      workflows: { items: [{ id: "wf-A", workspaceId: "ws-1", name: "Alpha" }] },
+      kanbanMulti: {
+        snapshots: {
+          "wf-A": {
+            workflowId: "wf-A",
+            workflowName: "Alpha",
+            steps: [{ id: "step-1", title: "Review", color: "bg-blue-500", position: 0 }],
+            tasks: [
+              {
+                id: "queued-later",
+                workflowStepId: "step-1",
+                queuedForStepId: "step-1",
+                wipAdmitted: false,
+                priority: "low",
+                queuedAt: "2026-08-12T00:02:00Z",
+                title: "Later",
+                position: 4,
+              },
+              {
+                id: "queued-first",
+                workflowStepId: "step-1",
+                queuedForStepId: "step-1",
+                wipAdmitted: false,
+                priority: "high",
+                queuedAt: "2026-08-12T00:01:00Z",
+                title: "First",
+                position: 3,
+              },
+            ],
+          },
+        },
+        isLoading: false,
+      },
+    });
+
+    const { result } = renderHook(() => useWorkspaceSidebarTasks("ws-1"));
+    expect(result.current.wipQueueByTaskId.get("queued-first")).toEqual({
+      position: 1,
+      total: 2,
+      destinationTitle: "Review",
+    });
+    expect(result.current.wipQueueByTaskId.get("queued-later")).toEqual({
+      position: 2,
+      total: 2,
+      destinationTitle: "Review",
+    });
   });
 });
 

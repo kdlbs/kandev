@@ -94,6 +94,14 @@ const (
 	MetaKeyExecutorID        = "executor_id"
 	MetaKeyExecutorProfileID = "executor_profile_id"
 	MetaKeyDeferredLaunch    = "deferred_launch"
+	// MetaKeyQueuedMoveExitPending is a one-shot token for the source-step
+	// on_exit side effect of a queued manual move. The task.moved event can be
+	// replayed, so the orchestrator claims this token before running on_exit.
+	MetaKeyQueuedMoveExitPending = "queued_move_exit_pending"
+	// MetaKeyQueuePromotionPending is a one-shot token for destination entry
+	// after queue promotion. It prevents duplicate task.queue_promoted events
+	// from repeating on_enter or auto-start behavior.
+	MetaKeyQueuePromotionPending = "queue_promotion_pending"
 	// MetaKeyWorkspacePath is the optional host folder for repo-less tasks
 	// (set by CreateTask, read by the orchestrator when building a session).
 	// Centralised here so the set/read sites can't drift apart.

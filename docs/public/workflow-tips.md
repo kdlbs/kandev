@@ -112,8 +112,13 @@ Workflow-level settings include the name and default agent profile. A step can o
 | Auto-archive | Archives eligible tasks after the configured number of hours. `0` disables it; the background sweep runs every five minutes and uses task `updated_at`, so timing is approximate. |
 | Wait for agent completion signal | With an `on_turn_complete` transition, waits for the agent to call `step_complete_kandev`. A halt without the signal leaves the task on the current step; retry or reconnect the agent, or move the task through the normal workflow UI. Without this setting, a normal turn end counts as completion. Default is off. |
 | Run completion actions when a turn is cancelled | Also runs the step's `on_turn_complete` actions after an explicit user cancellation settles. A pending clarification, silent interruption, parent/task stop, provider failure, crash, or runtime teardown does not qualify. If the destination has `on_enter: auto_start_agent`, another agent turn can begin immediately. Default is off for custom steps; the built-in Kanban workflow enables it on Backlog and In Progress for newly created workflows; existing workflows are not backfilled. |
-| WIP limit | Maximum admitted active, non-archived, non-ephemeral tasks in the step. `0` means unlimited; visible overflow is queued. A full target rejects manual moves. |
-| Pull from | Optional one-hop feeder step. When capacity opens, Kandev promotes queued destination work first, then feeder work. A full feeder rejects new overflow creation. |
+| WIP limit | Maximum admitted active, non-archived, non-ephemeral tasks in the step. `0` means unlimited; visible overflow is queued. A manual move into a full target is admitted and queued in that target. |
+| Pull from | Optional one-hop feeder step. When capacity opens, Kandev promotes queued destination work first, then feeder work. Direct moves and automatic transitions queue in the destination without using the feeder. A full feeder rejects new overflow creation. |
+
+The Kanban column shows the admitted count and limit, followed by a **Queued**
+section when overflow exists. The task sidebar shows each queued task's
+position in its destination queue. Queued tasks do not start destination entry
+actions or consume WIP until promotion.
 
 Pull candidates are selected by board position, then priority, queue time, creation time, and ID. A candidate that cannot be moved is skipped. Pulling runs for every limited step; a feeder is only needed for overflow created outside the destination step.
 
@@ -133,7 +138,7 @@ The standard Kanban editor exposes these events:
 
 The portable format also recognizes `set_session_mode`, `clear_decisions`, `queue_run`, and `queue_run_for_each_participant` in `on_enter`; these are advanced/runtime-dependent actions and most are not offered by the Kanban editor. Office event triggers have a broader model, but do not round-trip through Kanban import/export. See the exact boundary in [Workflow Import / Export](workflow-import-export.md).
 
-Keep one transition action per event. A “next” action on the last step or “previous” on the first has nowhere to go and leaves the task in place. WIP rejection, a missing target step, a failed agent launch, or missing credentials can also prevent the intended progression; inspect the task/session error and backend logs before changing the workflow.
+Keep one transition action per event. A “next” action on the last step or “previous” on the first has nowhere to go and leaves the task in place. A missing target step, a failed agent launch, missing credentials, or a full feeder can prevent the intended progression; inspect the task/session error and backend logs before changing the workflow. A full destination step queues the task instead of rejecting the move.
 
 Cancellation policy is deliberately narrow: it is evaluated only for the visible user **Cancel** action while a turn is working. It reuses the normal turn-complete pipeline after the runtime settles, but does not reinterpret every way a session can stop as a completion.
 

@@ -1,6 +1,7 @@
 import type { ForegroundActivity, TaskSessionState, TaskState } from "@/lib/types/http";
 import type { GroupedSidebarList } from "@/lib/sidebar/apply-view";
 import type { TaskMoveWorkflow } from "@/components/task/task-move-context-menu";
+import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 
 export type StepDef = {
   id: string;
@@ -44,6 +45,8 @@ export type TaskSwitcherItem = {
   prInfo?: { number: number; state: string; aggregateState?: string };
   /** Number of prompts currently en-queued for this task (mail badge). */
   queuedCount?: number;
+  /** Destination-resident WIP queue position, separate from queued prompts. */
+  wipQueue?: WipQueueStatus;
   isPRReview?: boolean;
   isIssueWatch?: boolean;
   issueInfo?: { url: string; number: number };

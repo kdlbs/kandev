@@ -141,6 +141,8 @@
   "promptSourceTaskDescription": "\"{{stepName}}\" has no step prompt, so re-entering it sends the task description.",
   "pullFrom": "Pull from",
   "pullFromHelp": "Optional feeder step to pull queued work from when this step has capacity.",
+  "pullFromGuidanceWithFeeder": "Optional automatic feeder intake. Destination-queued tasks are admitted first, then Kandev pulls eligible work from {{feeder}} when capacity opens. Direct moves and automatic transitions queue in the destination and do not require a feeder. New tasks targeting a full step use this feeder.",
+  "pullFromGuidanceWithoutFeeder": "No feeder is selected. Direct moves and automatic transitions queue in this destination when it is full. New tasks also stay visible in this queue until capacity opens.",
   "readOnlyManagedBySync": "Read-only; managed by workflow sync",
   "readOnlyManagedByImproveKandev": "Read-only; managed by Improve Kandev",
   "remove": "Remove",

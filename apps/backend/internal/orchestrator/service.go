@@ -1097,6 +1097,10 @@ func (s *Service) publishTaskMoved(ctx context.Context, task *models.Task, fromW
 	if s.eventBus == nil || task == nil {
 		return
 	}
+	queuePromotion := false
+	if task.Metadata != nil {
+		_, queuePromotion = task.Metadata[models.MetaKeyQueuePromotionPending]
+	}
 	data := map[string]interface{}{
 		"task_id":                   task.ID,
 		"from_workflow_id":          fromWorkflowID,
@@ -1108,6 +1112,14 @@ func (s *Service) publishTaskMoved(ctx context.Context, task *models.Task, fromW
 		"task_description":          task.Description,
 		"parent_id":                 task.ParentID,
 		"assignee_agent_profile_id": task.AssigneeAgentProfileID,
+		"wip_admitted":              task.WIPAdmitted,
+		"queued_for_step_id":        task.QueuedForStepID,
+		"queue_promotion":           queuePromotion,
+	}
+	if task.QueuedAt != nil {
+		data["queued_at"] = task.QueuedAt.Format(time.RFC3339)
+	} else {
+		data["queued_at"] = nil
 	}
 	event := bus.NewEvent(events.TaskMoved, "orchestrator", data)
 	if err := s.eventBus.Publish(ctx, events.TaskMoved, event); err != nil {

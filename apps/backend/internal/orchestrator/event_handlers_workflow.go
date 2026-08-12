@@ -313,12 +313,13 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		s.setSessionWaitingForInput(ctx, taskID, sessionID)
 		return
 	}
-	// Atomically admit the target step before exit side effects. A capacity
-	// rejection must leave both the task and its source-step session state intact.
+	// Atomically admit the target step before exit side effects. A full target
+	// is represented as a durable destination queue entry instead of a failed
+	// transition.
 	task.WorkflowStepID = toStepID
 	task.UpdatedAt = time.Now().UTC()
 	if err := s.updateTransitionTaskWithCapacity(ctx, task, targetStep); err != nil {
-		s.logger.Warn("workflow transition rejected or failed",
+		s.logger.Warn("workflow transition failed",
 			zap.String("task_id", taskID),
 			zap.String("from_step", fromStep.Name),
 			zap.String("to_step", targetStep.Name),
@@ -326,6 +327,7 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		s.setSessionWaitingForInput(ctx, taskID, sessionID)
 		return
 	}
+	queued := task.QueuedForStepID != ""
 
 	// Process on_exit only after the transition is durably admitted. Freshly
 	// load the session since the caller may not have it (legacy path).
@@ -340,7 +342,9 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	// Publish task updated event via the task service so the payload carries
 	// the full context (session counts, primary session, repositories).
 	s.publishTaskUpdated(ctx, task)
-	s.processParentChildrenCompletedForTerminalStepMove(ctx, taskID, toStepID)
+	if !queued {
+		s.processParentChildrenCompletedForTerminalStepMove(ctx, taskID, toStepID)
+	}
 
 	s.logger.Info("workflow transition completed",
 		zap.String("task_id", taskID),
@@ -351,6 +355,10 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 
 	if s.workflowStore != nil {
 		s.workflowStore.pullNextTaskOnVacate(ctx, fromStep.ID, taskID)
+	}
+	if queued {
+		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		return
 	}
 
 	if triggerOnEnter {
@@ -401,20 +409,15 @@ func (s *Service) updateTransitionTaskWithCapacity(
 	task *models.Task,
 	targetStep *wfmodels.WorkflowStep,
 ) error {
-	if targetStep == nil || targetStep.WIPLimit <= 0 {
+	if targetStep == nil {
 		return s.repo.UpdateTask(ctx, task)
 	}
-	limitedRepo, ok := s.repo.(workflowLimitedMoveRepository)
+	admissionRepo, ok := s.repo.(workflowMoveAdmissionRepository)
 	if !ok {
-		return fmt.Errorf("WIP limit cannot be checked for workflow step %s", targetStep.ID)
+		return fmt.Errorf("workflow step admission repository unavailable for step %s", targetStep.ID)
 	}
-	return limitedRepo.UpdateTaskIfWorkflowStepHasCapacity(
-		ctx,
-		task,
-		targetStep.ID,
-		task.ID,
-		targetStep.WIPLimit,
-	)
+	_, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, task, targetStep.ID, targetStep.WIPLimit)
+	return err
 }
 
 // handleTaskMoved handles manual task step changes (drag-and-drop, stepper "Move here").
@@ -432,12 +435,36 @@ func (s *Service) handleTaskMoved(ctx context.Context, data watcher.TaskMovedEve
 	if s.workflowStepGetter == nil {
 		return
 	}
+	task, err := s.repo.GetTask(ctx, data.TaskID)
+	if err != nil || task == nil {
+		return
+	}
+	queued := data.QueuedForStepID != "" && !data.WIPAdmitted
+	if queued {
+		if task.WorkflowStepID != data.ToStepID || task.QueuedForStepID != data.QueuedForStepID || task.WIPAdmitted {
+			return
+		}
+		if !s.claimTaskEventMetadata(ctx, task, models.MetaKeyQueuedMoveExitPending) {
+			return
+		}
+	} else if task.WorkflowStepID != data.ToStepID {
+		// The move event is published after the task write. A replay for a
+		// later move must not re-run the older destination lifecycle.
+		return
+	}
+	if data.QueuePromotion && !s.claimTaskEventMetadata(ctx, task, models.MetaKeyQueuePromotionPending) {
+		return
+	}
 
-	s.processParentChildrenCompletedForTerminalStepMove(ctx, data.TaskID, data.ToStepID)
+	if !queued {
+		s.processParentChildrenCompletedForTerminalStepMove(ctx, data.TaskID, data.ToStepID)
+	}
 
 	// No session yet — check if we need to create one via auto-start
 	if data.SessionID == "" {
-		s.handleTaskMovedNoSession(ctx, data)
+		if !queued {
+			s.handleTaskMovedNoSession(ctx, data)
+		}
 		return
 	}
 
@@ -457,7 +484,74 @@ func (s *Service) handleTaskQueuePromoted(ctx context.Context, data watcher.Task
 		s.logger.Warn("task.queue_promoted: failed to load task", zap.String("task_id", data.TaskID), zap.Error(err))
 		return
 	}
+	if task.QueuedForStepID != "" || !task.WIPAdmitted {
+		return
+	}
+	if !s.claimTaskEventMetadata(ctx, task, models.MetaKeyQueuePromotionPending) {
+		return
+	}
+	targetStep, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
+	if err != nil || targetStep == nil {
+		return
+	}
+	s.syncTaskStateForQueuePromotion(ctx, task, targetStep)
+	s.processParentChildrenCompletedForTerminalStepMove(ctx, task.ID, targetStep.ID)
+	if session, sessionErr := s.repo.GetActiveTaskSessionByTaskID(ctx, task.ID); sessionErr == nil && session != nil {
+		go s.finalizeStepEnter(context.WithoutCancel(ctx), task.ID, session.ID, targetStep, task.Description, targetStep.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent))
+		return
+	}
 	s.autoStartTaskForStep(ctx, task.ID, task.WorkflowStepID, "task.queue_promoted")
+}
+
+func (s *Service) claimTaskEventMetadata(ctx context.Context, task *models.Task, key string) bool {
+	if task == nil || task.Metadata == nil {
+		return false
+	}
+	if _, marked := task.Metadata[key]; !marked {
+		// Current queued lifecycle events always carry a one-shot token. Its
+		// absence means another delivery already claimed the event.
+		return false
+	}
+	remover, ok := s.repo.(interface {
+		RemoveTaskMetadataKey(context.Context, string, string) (bool, error)
+	})
+	if !ok {
+		return false
+	}
+	claimed, err := remover.RemoveTaskMetadataKey(ctx, task.ID, key)
+	if err != nil {
+		s.logger.Warn("failed to claim task lifecycle event", zap.String("task_id", task.ID), zap.String("metadata_key", key), zap.Error(err))
+		return false
+	}
+	return claimed
+}
+
+func (s *Service) syncTaskStateForQueuePromotion(ctx context.Context, task *models.Task, targetStep *wfmodels.WorkflowStep) {
+	if targetStep == nil {
+		return
+	}
+	next, err := s.workflowStepGetter.GetNextStepByPosition(ctx, targetStep.WorkflowID, targetStep.Position)
+	if err != nil {
+		return
+	}
+	oldState := task.State
+	if wfmodels.IsTerminalStep(targetStep, next) {
+		if !models.IsTerminalTaskState(task.State) {
+			task.State = v1.TaskStateCompleted
+		}
+	} else if task.State == v1.TaskStateCompleted {
+		task.State = v1.TaskStateTODO
+	}
+	if oldState == task.State {
+		return
+	}
+	task.UpdatedAt = time.Now().UTC()
+	if err := s.repo.UpdateTask(ctx, task); err != nil {
+		s.logger.Warn("failed to persist promoted task state", zap.String("task_id", task.ID), zap.Error(err))
+		return
+	}
+	s.publishTaskUpdated(ctx, task)
+	s.publishTaskStateChanged(ctx, task, oldState)
 }
 
 func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, eventName string) {
@@ -684,7 +778,21 @@ func (s *Service) handleTaskMovedWithSession(ctx context.Context, data watcher.T
 		return
 	}
 
+	if data.QueuedForStepID != "" && !data.WIPAdmitted {
+		go s.processStepExit(context.WithoutCancel(ctx), data.TaskID, session, data.FromStepID)
+		return
+	}
 	go s.processStepExitAndEnter(context.WithoutCancel(ctx), data.TaskID, session, data.FromStepID, data.ToStepID, data.TaskDescription)
+}
+
+func (s *Service) processStepExit(ctx context.Context, taskID string, session *models.TaskSession, fromStepID string) {
+	fromStep, err := s.workflowStepGetter.GetStep(ctx, fromStepID)
+	if err != nil || fromStep == nil {
+		s.logger.Warn("failed to load from-step for queued move on_exit",
+			zap.String("step_id", fromStepID), zap.Error(err))
+		return
+	}
+	s.processOnExit(ctx, taskID, session, fromStep)
 }
 
 // processStepExitAndEnter runs the on_exit → clear review → reload session → on_enter
@@ -1345,6 +1453,12 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		zap.String("session_id", sessionID),
 		zap.String("from_step_id", fromStepID),
 		zap.String("to_step_id", move.WorkflowStepID))
+	if stored, loadErr := s.repo.GetTask(ctx, taskID); loadErr == nil && stored != nil && stored.QueuedForStepID == move.WorkflowStepID && !stored.WIPAdmitted {
+		// The destination is visible and queued, but its entry lifecycle is
+		// deferred until promotion. The source exit still runs once now.
+		go s.processStepExit(context.WithoutCancel(ctx), taskID, session, fromStepID)
+		return
+	}
 
 	s.syncTaskStateForPendingMove(ctx, taskID, fromStepID, move.WorkflowStepID)
 
@@ -2761,6 +2875,14 @@ func (s *Service) applyEngineTransition(
 				zap.String("session_id", session.ID),
 				zap.Error(err))
 		}
+	}
+
+	queuedTask, queuedErr := s.repo.GetTask(ctx, taskID)
+	if queuedErr == nil && queuedTask != nil && queuedTask.QueuedForStepID == result.ToStepID && !queuedTask.WIPAdmitted {
+		// The source transition is committed, but destination state and
+		// on_enter behavior wait for the queue promotion event.
+		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+		return true
 	}
 
 	if terminalTarget {

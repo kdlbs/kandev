@@ -34,6 +34,7 @@ export type TaskLike = {
   autopilot?: boolean;
   position?: number;
   state?: TaskState;
+  priority?: string | number;
   repositories?: Array<{
     id?: string;
     repository_id: string;
@@ -141,6 +142,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     title: source.title ?? "",
     description: source.description ?? undefined,
     autopilot: source.autopilot,
+    priority: source.priority,
     position: source.position ?? 0,
     state: source.state,
     repositoryId: pickRepositoryId(source),

@@ -163,4 +163,37 @@ test.describe("Workflow settings on mobile", () => {
     );
     expect(hasDocumentOverflow).toBe(false);
   });
+
+  test("shows optional feeder guidance beside the WIP controls", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Mobile WIP Guidance");
+    await apiClient.createWorkflowStep(workflow.id, "Backlog", 0, { is_start_step: true });
+    const reviewStep = await apiClient.createWorkflowStep(workflow.id, "Review", 1);
+
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+    const card = await page.findWorkflowCard("Mobile WIP Guidance");
+    await page.selectStep(card, "Review", true);
+
+    const guidance = card.getByText(
+      "No feeder is selected. Direct moves and automatic transitions queue in this destination",
+    );
+    await expect(guidance).toBeVisible();
+    const box = await guidance.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.height).toBeGreaterThan(0);
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+
+    await card.getByTestId(`${reviewStep.id}-pull-from-step-select`).tap();
+    await testPage.getByRole("option", { name: "Backlog" }).tap();
+    await expect(card).toContainText(
+      "Optional automatic feeder intake. Destination-queued tasks are admitted first",
+    );
+    await expect(card).toContainText(
+      "Direct moves and automatic transitions queue in the destination",
+    );
+  });
 });

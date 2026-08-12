@@ -51,6 +51,7 @@ export type KanbanState = {
     title: string;
     description?: string;
     autopilot?: boolean;
+    priority?: string | number;
     position: number;
     state?: TaskStatus;
     /** Primary repository id (lowest position). Kept for backwards compat. */

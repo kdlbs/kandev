@@ -34,6 +34,7 @@ import { classifyTask } from "./task-classify";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { useTranslation } from "react-i18next";
 import { TaskAutopilotIcon } from "@/components/task/task-autopilot-icon";
+import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 
 type DiffStats = {
   additions: number;
@@ -96,6 +97,8 @@ type TaskItemProps = {
   prInfo?: { number: number; state: string; aggregateState?: string };
   /** Number of prompts currently en-queued for this task (mail badge). */
   queuedCount?: number;
+  /** Destination-resident WIP queue status, separate from queued prompts. */
+  wipQueue?: WipQueueStatus;
   issueInfo?: { url: string; number: number };
   isPinned?: boolean;
   agentErrorMessage?: string | null;
@@ -347,6 +350,7 @@ function TaskItemContent({
   updatedAt,
   prInfo,
   queuedCount,
+  wipQueue,
   issueInfo,
   agentErrorMessage,
 }: {
@@ -363,6 +367,7 @@ function TaskItemContent({
   updatedAt?: string;
   prInfo?: { number: number; state: string; aggregateState?: string };
   queuedCount?: number;
+  wipQueue?: WipQueueStatus;
   issueInfo?: { url: string; number: number };
   agentErrorMessage?: string | null;
 }) {
@@ -406,6 +411,7 @@ function TaskItemContent({
         prInfo={prInfo}
         primarySessionId={primarySessionId}
         queuedCount={queuedCount}
+        wipQueue={wipQueue}
       />
     </div>
   );
@@ -466,6 +472,7 @@ export const TaskItem = memo(function TaskItem({
   repositories,
   prInfo,
   queuedCount,
+  wipQueue,
   issueInfo,
   isPinned,
   agentErrorMessage,
@@ -514,6 +521,7 @@ export const TaskItem = memo(function TaskItem({
         updatedAt={updatedAt}
         prInfo={prInfo}
         queuedCount={queuedCount}
+        wipQueue={wipQueue}
         issueInfo={issueInfo}
         agentErrorMessage={agentErrorMessage}
       />

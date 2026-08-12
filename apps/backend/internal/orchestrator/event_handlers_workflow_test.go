@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -19,7 +18,7 @@ type mockEventBus struct {
 	events []publishedEvent
 }
 
-func TestUpdateTransitionTaskWithCapacity_RejectsFullLimitedStep(t *testing.T) {
+func TestUpdateTransitionTaskWithCapacity_QueuesFullLimitedStep(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step1")
@@ -44,19 +43,19 @@ func TestUpdateTransitionTaskWithCapacity_RejectsFullLimitedStep(t *testing.T) {
 	target := &wfmodels.WorkflowStep{ID: "step2", WorkflowID: "wf1", WIPLimit: 1}
 
 	err = svc.updateTransitionTaskWithCapacity(ctx, task, target)
-	if !errors.Is(err, wfmodels.ErrWIPLimitExceeded) {
-		t.Fatalf("error=%v, want typed WIP rejection", err)
+	if err != nil {
+		t.Fatalf("updateTransitionTaskWithCapacity: %v", err)
 	}
 	stored, err := repo.GetTask(ctx, "t1")
 	if err != nil {
 		t.Fatalf("reload task: %v", err)
 	}
-	if stored.WorkflowStepID != "step1" {
-		t.Fatalf("task moved despite full target, got %q", stored.WorkflowStepID)
+	if stored.WorkflowStepID != "step2" || stored.WIPAdmitted || stored.QueuedForStepID != "step2" {
+		t.Fatalf("queued task placement: step=%q admitted=%t queue=%q", stored.WorkflowStepID, stored.WIPAdmitted, stored.QueuedForStepID)
 	}
 }
 
-func TestExecuteStepTransition_FullTargetLeavesOnExitStateIntact(t *testing.T) {
+func TestExecuteStepTransition_FullTargetRunsExitAndDefersEntry(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step1")
@@ -93,15 +92,53 @@ func TestExecuteStepTransition_FullTargetLeavesOnExitStateIntact(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load task: %v", err)
 	}
-	if task.WorkflowStepID != "step1" {
-		t.Fatalf("task moved despite full target, got %q", task.WorkflowStepID)
+	if task.WorkflowStepID != "step2" || task.WIPAdmitted || task.QueuedForStepID != "step2" {
+		t.Fatalf("queued task placement: step=%q admitted=%t queue=%q", task.WorkflowStepID, task.WIPAdmitted, task.QueuedForStepID)
 	}
 	session, err := repo.GetTaskSession(ctx, "s1")
 	if err != nil {
 		t.Fatalf("load session: %v", err)
 	}
-	if enabled, _ := session.Metadata["plan_mode"].(bool); !enabled {
-		t.Fatal("capacity rejection must not run source step's on_exit actions")
+	if enabled, _ := session.Metadata["plan_mode"].(bool); enabled {
+		t.Fatal("queued transition must run source step's on_exit actions")
+	}
+}
+
+func TestClaimTaskEventMetadataIsOneShot(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID:             "queued-lifecycle",
+		WorkspaceID:    "ws1",
+		WorkflowID:     "wf1",
+		WorkflowStepID: "step2",
+		Title:          "Queued lifecycle",
+		State:          "TODO",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+		Metadata: map[string]interface{}{
+			models.MetaKeyQueuedMoveExitPending: true,
+		},
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	task, err := repo.GetTask(ctx, "queued-lifecycle")
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	if !svc.claimTaskEventMetadata(ctx, task, models.MetaKeyQueuedMoveExitPending) {
+		t.Fatal("first lifecycle event claim was rejected")
+	}
+
+	claimedTask, err := repo.GetTask(ctx, "queued-lifecycle")
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	if svc.claimTaskEventMetadata(ctx, claimedTask, models.MetaKeyQueuedMoveExitPending) {
+		t.Fatal("replayed lifecycle event was claimed twice")
 	}
 }
 

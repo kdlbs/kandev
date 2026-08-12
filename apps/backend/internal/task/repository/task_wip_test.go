@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -19,6 +20,10 @@ type workflowStepCapacityCreator interface {
 
 type workflowStepAdmissionCreator interface {
 	CreateTaskWithWorkflowStepAdmission(context.Context, *models.Task, string, int, string, int) error
+}
+
+type workflowStepMoveAdmissionRepository interface {
+	UpdateTaskWithWorkflowStepAdmission(context.Context, *models.Task, string, int) (bool, error)
 }
 
 type queuedTaskPromoter interface {
@@ -168,6 +173,158 @@ func TestCreateTaskWithWorkflowStepAdmission_QueuesOverflowInPlace(t *testing.T)
 	}
 	if admitted != 2 {
 		t.Fatalf("admitted tasks=%d, want 2", admitted)
+	}
+}
+
+func TestUpdateTaskWithWorkflowStepAdmission_QueuesOverflowInPlace(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+
+	mover, ok := any(repo).(workflowStepMoveAdmissionRepository)
+	if !ok {
+		t.Fatal("task repository does not implement atomic workflow-step move admission")
+	}
+	ctx := context.Background()
+	const targetStepID = "move-target"
+
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "move-occupant", WorkspaceID: "wip-workspace", WorkflowID: "wip-workflow",
+		WorkflowStepID: targetStepID, Title: "Occupant", State: v1.TaskStateCreated,
+	}); err != nil {
+		t.Fatalf("seed occupant: %v", err)
+	}
+	candidate := &models.Task{
+		ID: "move-candidate", WorkspaceID: "wip-workspace", WorkflowID: "wip-workflow",
+		WorkflowStepID: "move-source", Title: "Candidate", State: v1.TaskStateCreated,
+		WIPAdmitted: true,
+	}
+	if err := repo.CreateTask(ctx, candidate); err != nil {
+		t.Fatalf("seed candidate: %v", err)
+	}
+
+	admitted, err := mover.UpdateTaskWithWorkflowStepAdmission(ctx, candidate, targetStepID, 1)
+	if err != nil {
+		t.Fatalf("move candidate: %v", err)
+	}
+	if admitted {
+		t.Fatal("full target unexpectedly admitted candidate")
+	}
+	if candidate.WorkflowStepID != targetStepID || candidate.WIPAdmitted || candidate.QueuedForStepID != targetStepID {
+		t.Fatalf("candidate placement: step=%q admitted=%t queued=%q", candidate.WorkflowStepID, candidate.WIPAdmitted, candidate.QueuedForStepID)
+	}
+	if candidate.QueuedAt == nil {
+		t.Fatal("queued candidate has no queue timestamp")
+	}
+	stored, err := repo.GetTask(ctx, candidate.ID)
+	if err != nil {
+		t.Fatalf("reload candidate: %v", err)
+	}
+	if stored.WorkflowStepID != targetStepID || stored.WIPAdmitted || stored.QueuedForStepID != targetStepID {
+		t.Fatalf("stored candidate placement: step=%q admitted=%t queued=%q", stored.WorkflowStepID, stored.WIPAdmitted, stored.QueuedForStepID)
+	}
+}
+
+func TestUpdateTaskWithWorkflowStepAdmission_UnlimitedClearsQueue(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+
+	mover, ok := any(repo).(workflowStepMoveAdmissionRepository)
+	if !ok {
+		t.Fatal("task repository does not implement atomic workflow-step move admission")
+	}
+	ctx := context.Background()
+	queuedAt := time.Now().UTC().Add(-time.Minute)
+	candidate := &models.Task{
+		ID: "move-unlimited", WorkspaceID: "wip-workspace", WorkflowID: "wip-workflow",
+		WorkflowStepID: "move-source", Title: "Candidate", State: v1.TaskStateCreated,
+		WIPAdmitted: false, QueuedForStepID: "old-target", QueuedAt: &queuedAt,
+	}
+	if err := repo.CreateTask(ctx, candidate); err != nil {
+		t.Fatalf("seed candidate: %v", err)
+	}
+
+	admitted, err := mover.UpdateTaskWithWorkflowStepAdmission(ctx, candidate, "unlimited-target", 0)
+	if err != nil || !admitted {
+		t.Fatalf("move candidate admitted=%t err=%v, want admitted", admitted, err)
+	}
+	if candidate.WorkflowStepID != "unlimited-target" || !candidate.WIPAdmitted || candidate.QueuedForStepID != "" || candidate.QueuedAt != nil {
+		t.Fatalf("candidate placement: step=%q admitted=%t queued=%q queued_at=%v", candidate.WorkflowStepID, candidate.WIPAdmitted, candidate.QueuedForStepID, candidate.QueuedAt)
+	}
+}
+
+func TestUpdateTaskWithWorkflowStepAdmission_ConcurrentLastSlot(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+
+	mover, ok := any(repo).(workflowStepMoveAdmissionRepository)
+	if !ok {
+		t.Fatal("task repository does not implement atomic workflow-step move admission")
+	}
+	ctx := context.Background()
+	const (
+		targetStepID = "concurrent-move-target"
+		workerCount  = 8
+	)
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "concurrent-move-occupant", WorkspaceID: "wip-workspace", WorkflowID: "wip-workflow",
+		WorkflowStepID: targetStepID, Title: "Occupant", State: v1.TaskStateCreated,
+	}); err != nil {
+		t.Fatalf("seed occupant: %v", err)
+	}
+	candidates := make([]*models.Task, workerCount)
+	for i := range candidates {
+		candidates[i] = &models.Task{
+			ID: fmt.Sprintf("concurrent-move-%d", i), WorkspaceID: "wip-workspace", WorkflowID: "wip-workflow",
+			WorkflowStepID: "concurrent-move-source", Title: "Candidate", State: v1.TaskStateCreated,
+			WIPAdmitted: true,
+		}
+		if err := repo.CreateTask(ctx, candidates[i]); err != nil {
+			t.Fatalf("seed candidate %d: %v", i, err)
+		}
+	}
+
+	start := make(chan struct{})
+	results := make(chan struct {
+		admitted bool
+		err      error
+	}, workerCount)
+	var wg sync.WaitGroup
+	for _, candidate := range candidates {
+		wg.Add(1)
+		go func(task *models.Task) {
+			defer wg.Done()
+			<-start
+			admitted, err := mover.UpdateTaskWithWorkflowStepAdmission(ctx, task, targetStepID, 2)
+			results <- struct {
+				admitted bool
+				err      error
+			}{admitted: admitted, err: err}
+		}(candidate)
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+
+	admitted, queued := 0, 0
+	for result := range results {
+		if result.err != nil {
+			t.Fatalf("concurrent move: %v", result.err)
+		}
+		if result.admitted {
+			admitted++
+		} else {
+			queued++
+		}
+	}
+	if admitted != 1 || queued != workerCount-1 {
+		t.Fatalf("admitted=%d queued=%d, want admitted=1 queued=%d", admitted, queued, workerCount-1)
+	}
+	occupants, err := repo.CountAdmittedTasksByWorkflowStep(ctx, targetStepID)
+	if err != nil {
+		t.Fatalf("count admitted occupants: %v", err)
+	}
+	if occupants != 2 {
+		t.Fatalf("admitted occupants=%d, want 2", occupants)
 	}
 }
 

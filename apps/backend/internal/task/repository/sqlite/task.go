@@ -480,6 +480,14 @@ func (r *Repository) UpdateTask(ctx context.Context, task *models.Task) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if err := r.updateTaskTx(ctx, tx, task, metadata); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.Task, metadata []byte) error {
 	updateQuery := `
 		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = ?, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?
 		WHERE id = ?
@@ -501,17 +509,63 @@ func (r *Repository) UpdateTask(ctx context.Context, task *models.Task) error {
 	if err != nil {
 		return err
 	}
-
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		return fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
 	}
+	return syncRunnerInTx(ctx, tx, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID)
+}
 
-	if err := syncRunnerInTx(ctx, tx, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
-		return err
+// UpdateTaskWithWorkflowStepAdmission atomically moves a task into a workflow
+// step. A limited full target stores the task in that destination as queued;
+// it never rejects the move for WIP capacity.
+func (r *Repository) UpdateTaskWithWorkflowStepAdmission(
+	ctx context.Context,
+	task *models.Task,
+	targetStepID string,
+	limit int,
+) (bool, error) {
+	now := time.Now().UTC()
+	task.UpdatedAt = now
+	if task.Metadata == nil {
+		task.Metadata = map[string]interface{}{}
+	}
+	metadata, err := json.Marshal(task.Metadata)
+	if err != nil {
+		metadata = []byte("{}")
 	}
 
-	return tx.Commit()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := lockWorkflowStepForCapacity(ctx, tx, r.db.DriverName(), r.db.Rebind, targetStepID); err != nil {
+		return false, err
+	}
+	occupants, err := r.countAdmittedInTx(ctx, tx, targetStepID, task.ID)
+	if err != nil {
+		return false, err
+	}
+	admitted := task.IsEphemeral || limit <= 0 || occupants < limit
+	task.WorkflowStepID = targetStepID
+	if admitted {
+		task.WIPAdmitted = !task.IsEphemeral
+		task.QueuedForStepID = ""
+		task.QueuedAt = nil
+	} else {
+		task.WIPAdmitted = false
+		task.QueuedForStepID = targetStepID
+		task.QueuedAt = &now
+	}
+	if err := r.updateTaskTx(ctx, tx, task, metadata); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return admitted, nil
 }
 
 // RemoveTaskMetadataKey removes one metadata key without replacing concurrent

@@ -7,6 +7,7 @@ import { useAppStore } from "@/components/state-provider";
 import { isDebugUI } from "@/lib/config";
 import type { SessionPollMode } from "@/lib/state/slices/session-runtime/types";
 import { cn, formatRelativeTime } from "@/lib/utils";
+import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 
 /** Debug-overlay-only poll-mode legend. Labels resolve through `t()` so the
  * pseudo-locale stays complete; the row itself is gated behind `isDebugUI()`. */
@@ -32,11 +33,13 @@ export function TaskItemStatsRow({
   prInfo,
   primarySessionId,
   queuedCount,
+  wipQueue,
 }: {
   updatedAt?: string;
   prInfo?: { number: number; state: string; aggregateState?: string };
   primarySessionId?: string | null;
   queuedCount?: number;
+  wipQueue?: WipQueueStatus;
 }) {
   const { t } = useTranslation();
   const pollMode = useAppStore((s) =>
@@ -45,7 +48,7 @@ export function TaskItemStatsRow({
       : null,
   );
 
-  if (!updatedAt && !prInfo && !pollMode && !queuedCount) return null;
+  if (!updatedAt && !prInfo && !pollMode && !queuedCount && !wipQueue) return null;
 
   const modeConfig = pollMode ? POLL_MODE_CONFIG[pollMode] : null;
   const modeLabel = modeConfig ? t(modeConfig.labelKey) : "";
@@ -66,6 +69,43 @@ export function TaskItemStatsRow({
           <IconMail className="h-3 w-3" aria-hidden="true" />
           {queuedCount}
         </span>
+      ) : null}
+      {wipQueue ? (
+        <>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                data-testid="sidebar-task-wip-queue"
+                aria-label={t("sidebar:wipQueuePosition", {
+                  position: wipQueue.position,
+                  total: wipQueue.total,
+                  step: wipQueue.destinationTitle,
+                })}
+                className="hidden shrink-0 items-center text-muted-foreground/60 [@media(pointer:fine)]:inline-flex"
+              >
+                {t("sidebar:wipQueuedCompact")}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              {t("sidebar:wipQueuePosition", {
+                position: wipQueue.position,
+                total: wipQueue.total,
+                step: wipQueue.destinationTitle,
+              })}
+            </TooltipContent>
+          </Tooltip>
+          <span
+            data-testid="sidebar-task-wip-queue-coarse"
+            aria-label={t("sidebar:wipQueuePosition", {
+              position: wipQueue.position,
+              total: wipQueue.total,
+              step: wipQueue.destinationTitle,
+            })}
+            className="hidden shrink-0 items-center text-muted-foreground/60 [@media(pointer:coarse)]:inline-flex"
+          >
+            {t("sidebar:wipQueued", { position: wipQueue.position, total: wipQueue.total })}
+          </span>
+        </>
       ) : null}
       {modeConfig && (
         <Tooltip>

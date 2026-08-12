@@ -320,9 +320,16 @@ test.describe("Workflow settings", () => {
     await expect(card).toBeVisible();
     await page.stepNodeByName(card, "Review").click();
 
+    await expect(card).toContainText(
+      "No feeder is selected. Direct moves and automatic transitions queue in this destination",
+    );
+
     await card.getByTestId(`${reviewStep.id}-wip-limit-input`).fill("2");
     await card.getByTestId(`${reviewStep.id}-pull-from-step-select`).click();
     await testPage.getByRole("option", { name: "Backlog" }).click();
+    await expect(card).toContainText(
+      "Optional automatic feeder intake. Destination-queued tasks are admitted first",
+    );
 
     expect(
       (await apiClient.listWorkflowSteps(workflow.id)).steps.find(

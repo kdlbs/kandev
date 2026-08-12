@@ -102,7 +102,18 @@ export function StepWipControls({
           </SelectContent>
         </Select>
       </div>
-      <p className="text-xs text-muted-foreground sm:col-span-2">{t("workflows:wipLimitsNote")}</p>
+      <div className="space-y-1 sm:col-span-2">
+        <p className="text-xs text-muted-foreground">
+          {step.pull_from_step_id
+            ? t("workflows:pullFromGuidanceWithFeeder", {
+                feeder:
+                  otherSteps.find((candidate) => candidate.id === step.pull_from_step_id)?.name ??
+                  t("workflows:noFeederStep"),
+              })
+            : t("workflows:pullFromGuidanceWithoutFeeder")}
+        </p>
+        <p className="text-xs text-muted-foreground">{t("workflows:wipLimitsNote")}</p>
+      </div>
     </div>
   );
 }
