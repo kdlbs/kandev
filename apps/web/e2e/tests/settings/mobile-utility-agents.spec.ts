@@ -43,7 +43,7 @@ test.describe("Mobile utility agents action rows", () => {
           agent_id: "",
           model: "",
           agent_profile_id: "",
-          profile_binding_state: "unconfigured",
+          profile_binding_state: "inherit",
         }),
       }),
     );
@@ -70,7 +70,7 @@ test.describe("Mobile utility agents action rows", () => {
               agent_id: "",
               model: "",
               agent_profile_id: "",
-              profile_binding_state: "unconfigured",
+              profile_binding_state: "inherit",
             },
           ],
         }),

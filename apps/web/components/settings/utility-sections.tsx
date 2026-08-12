@@ -16,6 +16,7 @@ import {
 } from "@/components/settings/utility-agent-profile-picker";
 
 export const USE_DEFAULT = "__USE_DEFAULT__";
+const UNCONFIGURED = "__UNCONFIGURED__";
 
 export type BuiltinActionProfileSelection = {
   value: string;
@@ -26,8 +27,9 @@ export function getBuiltinActionProfileSelection(
   agent: UtilityAgent,
 ): BuiltinActionProfileSelection {
   const profileId = agent.agent_profile_id || "";
-  if (agent.profile_binding_state === "unconfigured" && profileId) {
-    return { value: profileId, unavailableValue: profileId };
+  if (agent.profile_binding_state === "unconfigured") {
+    const unavailableValue = profileId || UNCONFIGURED;
+    return { value: unavailableValue, unavailableValue };
   }
   if (agent.profile_binding_state !== "inherit" && profileId) {
     return { value: profileId };

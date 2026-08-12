@@ -12,8 +12,9 @@ spec: "../../specs/agents/utility-agent-profiles.md"
 
 Implement the amended utility-agent binding contract before changing the settings UI.
 
-- **Acceptance:** Built-in rows without a concrete profile inherit the saved default, including
-  legacy empty or ambiguous rows. Custom unmatched rows remain `unconfigured`.
+- **Acceptance:** Built-in rows in the inherited or legacy migration state without a concrete profile
+  inherit the saved default. Empty `unconfigured` rows from older releases remain fail-closed, and
+  custom unmatched rows remain `unconfigured`.
 - **Acceptance:** Deleting an explicit profile preserves its stale ID and keeps execution
   fail-closed. Deleting the global default does not convert inherited built-ins into repair state.
 - **Acceptance:** Plugin reads and utility execution use the same effective-default predicate.
@@ -39,12 +40,13 @@ Implement the amended utility-agent binding contract before changing the setting
 
 ## Results
 
-Implemented the shared empty-built-in predicate, legacy normalization, default-backed execution,
-stale explicit-ID preservation, and default-aware plugin/dependency reads. Deleting a global default
-no longer rewrites inherited built-ins into repair state.
+Implemented the shared inherited-built-in predicate, legacy migration normalization, default-backed
+execution, stale explicit-ID preservation, and default-aware plugin/dependency reads. Empty
+`unconfigured` rows remain fail-closed because older releases could erase deleted profile IDs.
+Deleting a global default no longer rewrites inherited built-ins into repair state.
 
 Verification:
 
-- `cd apps/backend && go test -run 'Test(MigrateLegacyBindings|PreparePromptRequest|ClearAgentProfileBindings)' ./internal/utility/service/...` (pass: 11 tests)
-- `cd apps/backend && go test ./internal/utility/service/... ./internal/utility/profilebinding/...` (pass: 15 tests)
+- `cd apps/backend && go test -run 'Test(MigrateLegacyBindings|PreparePromptRequest|ClearAgentProfileBindings)' ./internal/utility/service/...` (pass: 13 tests)
+- `cd apps/backend && go test ./internal/utility/service/... ./internal/utility/profilebinding/...` (pass: 17 tests)
 - `cd apps/backend && go test -run 'TestPluginsUtilityAgentAdapter' ./internal/backendapp` (pass: 3 tests)

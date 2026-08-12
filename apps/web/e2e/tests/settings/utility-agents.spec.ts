@@ -10,7 +10,7 @@ import { test, expect } from "../../fixtures/test-base";
  * interactions (open the page, inspect sections, open the create dialog).
  */
 test.describe("Utility Agents settings page", () => {
-  test("renders the default for an empty unconfigured built-in action", async ({
+  test("renders the default for an inherited built-in action", async ({
     testPage,
     apiClient,
     seedData,
@@ -54,7 +54,7 @@ test.describe("Utility Agents settings page", () => {
               agent_id: "",
               model: "",
               agent_profile_id: "",
-              profile_binding_state: "unconfigured",
+              profile_binding_state: "inherit",
             },
           ],
         }),

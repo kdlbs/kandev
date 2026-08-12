@@ -12,8 +12,9 @@ spec: "../../specs/agents/utility-agent-profiles.md"
 
 Update the Utility Agents page after the backend contract is in place.
 
-- **Acceptance:** A built-in action with no concrete profile ID renders the selected default in its
-  profile picker, including the legacy `unconfigured` response used during repair.
+- **Acceptance:** A built-in action with an `inherit` binding and no concrete profile ID renders the
+  selected default in its profile picker. Empty and concrete `unconfigured` bindings remain
+  unavailable for repair.
 - **Acceptance:** A built-in action with a concrete stale profile ID remains unavailable and keeps
   its repair state. Explicit profile selection and shared Settings save/discard behavior remain
   unchanged.
@@ -48,15 +49,15 @@ Update the Utility Agents page after the backend contract is in place.
 
 ## Results
 
-Implemented the settings picker selection helper so empty built-in bindings use the default
-sentinel, while concrete unconfigured profile IDs remain unavailable for repair. The desktop and
-mobile regression scenarios both exercise an empty `unconfigured` built-in response with the saved
-default profile; the mobile test selects the concrete profile option by ID so duplicate display
+Implemented the settings picker selection helper so inherited empty built-in bindings use the
+default sentinel, while empty and concrete unconfigured profile IDs remain unavailable for repair.
+The desktop and mobile regression scenarios exercise an inherited empty built-in response with the
+saved default profile; the mobile test selects the concrete profile option by ID so duplicate display
 labels do not make the interaction ambiguous.
 
 Verification:
 
-- `cd apps && pnpm --filter @kandev/web test -- --run components/settings/utility-sections.test.tsx components/settings/utility-agents-section.test.ts` (pass: 2 files, 5 tests)
+- `cd apps && pnpm --filter @kandev/web test -- --run components/settings/utility-sections.test.tsx components/settings/utility-agents-section.test.ts` (pass: 2 files, 6 tests)
 - `cd apps/web && pnpm run typecheck` (pass)
 - `cd apps/web && pnpm run i18n:check` (pass; existing real-locale parity warnings are advisory)
 - `cd apps/web && pnpm run i18n:ratchet` (pass)

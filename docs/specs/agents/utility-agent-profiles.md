@@ -66,8 +66,11 @@ permission choice that its caller cannot answer.
 
 `inherit` is valid only for built-in rows. `explicit` requires an eligible profile. `unconfigured`
 is used for a custom row without a profile and for a built-in row whose concrete profile binding is
-stale or unavailable. A built-in row with no concrete profile ID, including an empty, ambiguous, or
-unmatched legacy binding, is normalized to `inherit` so it uses the selected default utility profile.
+stale or unavailable. Only a built-in row whose persisted state is `inherit` uses the selected
+default. A legacy built-in row still in the migration state's `explicit` form with no concrete
+profile ID is normalized to `inherit`. An empty `unconfigured` row remains fail-closed because an
+older release could have erased the ID of a deleted explicit binding, making that row's original
+intent impossible to recover safely.
 
 The legacy `agent_id` and `model` columns may remain temporarily as migration inputs, but they are
 not execution inputs after this feature ships and are not writable through the utility-agent API.
@@ -88,11 +91,14 @@ non-deleted, non-passthrough global profiles whose parent agent matches the lega
 and whose configured model matches the legacy model (including an explicit empty model). Exactly
 one match is copied to `agent_profile_id` and sets the row state to `explicit`.
 
-Zero matches or multiple matches set a custom row to `unconfigured`. A built-in row with no concrete
-profile ID becomes `inherit`. The backend does not pick the first profile, infer from a display name,
-or silently use a provider default. Custom utility agents that cannot be migrated remain stored and
-editable but are not executable until the user selects a profile. The legacy values remain available
-to a later retry or diagnostic report, but the new state is authoritative after the migration.
+Zero matches or multiple matches set a custom row to `unconfigured`. A built-in row in the legacy
+`explicit` migration state with no concrete profile ID becomes `inherit`. Existing `unconfigured`
+rows are not remigrated: an older release could have erased the ID of a deleted explicit binding,
+so an empty `unconfigured` row remains fail-closed until the user repairs it. The backend does not
+pick the first profile, infer from a display name, or silently use a provider default. Custom utility
+agents that cannot be migrated remain stored and editable but are not executable until the user
+selects a profile. The legacy values remain available to a later retry or diagnostic report, but the
+new state is authoritative after the migration.
 
 ## API surface
 
@@ -127,9 +133,10 @@ to a later retry or diagnostic report, but the new state is authoritative after 
 - With no effective profile, invocation fails before a call is dispatched and tells the user to
   select a profile in Settings > Utility Agents.
 - A missing, deleted, disabled, CLI-passthrough, workspace-scoped, or non-inference-capable
-  concrete profile binding fails closed. An inherited built-in action uses the saved global default
-  only. The backend never falls back to another profile, the active task profile, a raw agent/model
-  pair, or the first available agent.
+  concrete profile binding fails closed. An unconfigured binding also fails closed when its profile
+  ID is empty because its origin may be an older deleted override. Only an inherited built-in action
+  uses the saved global default. The backend never falls back to another profile, the active task
+  profile, a raw agent/model pair, or the first available agent.
 - A profile launch-policy error (invalid command prefix, unresolved required secret, invalid config
   option, or unavailable agent runtime) is surfaced as the utility call failure. The runner does not
   retry without that setting.
@@ -151,6 +158,9 @@ to a later retry or diagnostic report, but the new state is authoritative after 
   The warning dialog is confirmation only; it does not perform reassignment. Built-in actions that
   inherit the default remain inherited when the default profile is deleted, so selecting a new
   default repairs them without editing each action.
+- Built-in rows left as empty `unconfigured` by an older release remain fail-closed because their
+  original explicit-versus-inherited intent cannot be reconstructed safely. Selecting the default
+  in the action picker repairs the row by persisting `inherit`.
 - Utility call history retains the effective profile ID and resolved model even if the profile is
   later edited or deleted.
 
@@ -187,10 +197,15 @@ to a later retry or diagnostic report, but the new state is authoritative after 
 - **GIVEN** a legacy agent/model selection that matches exactly one eligible profile, **WHEN** the
   backend upgrades, **THEN** that profile becomes the saved selection and utility behavior is
   preserved with the profile's launch policy.
-- **GIVEN** a legacy built-in action agent/model selection that matches zero or multiple eligible
-  profiles, **WHEN** the backend upgrades, **THEN** the row state becomes `inherit` and the action
-  uses the selected default utility profile. A custom utility agent with the same migration result
-  becomes `unconfigured` and remains unavailable until the user chooses a profile.
+- **GIVEN** a legacy built-in action still has the migration state's explicit binding with an empty
+  profile ID and its agent/model selection matches zero or multiple eligible profiles, **WHEN** the
+  backend upgrades, **THEN** the row state becomes `inherit` and the action uses the selected default
+  utility profile. A custom utility agent with the same migration result becomes `unconfigured` and
+  remains unavailable until the user chooses a profile.
+- **GIVEN** an older release left a built-in action `unconfigured` with an empty profile ID after
+  deleting or clearing a binding, **WHEN** the backend upgrades, **THEN** the row remains
+  `unconfigured` and fails closed until the user repairs the action because its original intent is
+  ambiguous.
 - **GIVEN** an inherited built-in action and a deleted default profile, **WHEN** the user selects a
   new eligible default profile, **THEN** the action uses the new default without an action-level
   edit.

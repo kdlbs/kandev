@@ -61,7 +61,7 @@ func TestPluginsUtilityAgentAdapter_ResolvesEmptyBuiltinThroughDefault(t *testin
 		svc: utilityservice.NewService(&utilityAgentRepositoryStub{agent: &utilitymodels.UtilityAgent{
 			ID:                  "builtin",
 			Builtin:             true,
-			ProfileBindingState: utilitymodels.ProfileBindingUnconfigured,
+			ProfileBindingState: utilitymodels.ProfileBindingInherit,
 		}}),
 		userSvc: userService.NewService(userRepo, bus.NewMemoryEventBus(log), log),
 	}
