@@ -416,7 +416,10 @@ type ExecutorInstance struct {
 
 // ToAgentExecution converts a ExecutorInstance to an AgentExecution.
 func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentExecution {
-	metadata := make(map[string]interface{}, len(req.Metadata)+len(ri.Metadata))
+	// Seed from one map only. Adding two attacker-influenced lengths can wrap
+	// before make evaluates the allocation size; Go grows the map safely while
+	// the runtime metadata is merged below.
+	metadata := make(map[string]interface{}, len(req.Metadata))
 	for key, value := range req.Metadata {
 		metadata[key] = value
 	}
