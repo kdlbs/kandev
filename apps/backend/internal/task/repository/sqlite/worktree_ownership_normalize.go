@@ -265,7 +265,7 @@ type envRepoTarget struct {
 	key                      string
 	repositoryID, branchSlug string
 	canonical                bool
-	canonicalEnvironmentID   string
+	canonicalEnvironmentIDs  map[string]bool
 	worktreeID               string
 	worktreePath             string
 	worktreeBranch           string
@@ -374,9 +374,6 @@ func (c *worktreeCutover) mergeFlatEnvironmentFields() {
 // empty-branch slot to a non-deleted canonical repository row. The migration
 // keeps the physical flat worktree untouched and logs it after commit.
 func (c *worktreeCutover) demoteFlatEnvironment(env *legacyEnv, winner *envRepoTarget) {
-	if c.demotedFlatEnvironments == nil {
-		c.demotedFlatEnvironments = make(map[string]bool)
-	}
 	if c.demotedFlatEnvironments[env.id] {
 		return
 	}

@@ -97,6 +97,59 @@ func TestCutover_PreservesDivergentFlatOutsideCanonicalSlot(t *testing.T) {
 	}
 }
 
+func TestCutover_DuplicateCanonicalRowsRetainSurvivingEnvironmentPrecedence(t *testing.T) {
+	for _, reverse := range []bool{false, true} {
+		name := "surviving row first"
+		if reverse {
+			name = "surviving row last"
+		}
+		t.Run(name, func(t *testing.T) {
+			db := openLegacyDB(t)
+			now := time.Now().UTC().Truncate(time.Second)
+			older := now.Add(-time.Hour)
+			seed := legacySeed{
+				envID:     "env-duplicate-survivor",
+				taskID:    "task-duplicate-canonical",
+				repoID:    "repo-duplicate-canonical",
+				sessionID: "sess-duplicate-canonical",
+			}
+			seedLegacyTask(t, db, seed, now)
+			seedLegacyFlatEnv(t, db, seed, "wt-flat-duplicate", "/tasks/flat-duplicate", "feature/flat", now)
+			seedLegacyFlatEnv(t, db, legacySeed{
+				envID:  "env-duplicate-loser",
+				taskID: seed.taskID,
+				repoID: seed.repoID,
+			}, "", "", "", older)
+
+			rows := []struct {
+				id, envID string
+			}{
+				{id: "env-repo-survivor", envID: seed.envID},
+				{id: "env-repo-loser", envID: "env-duplicate-loser"},
+			}
+			if reverse {
+				rows[0], rows[1] = rows[1], rows[0]
+			}
+			for _, row := range rows {
+				seedLegacyEnvRepo(t, db, row.id, row.envID, seed.repoID,
+					"wt-canonical-duplicate", "/tasks/canonical-duplicate", "feature/canonical", now)
+			}
+
+			repo, err := NewWithDB(db, db, nil)
+			if err != nil {
+				t.Fatalf("cutover: %v", err)
+			}
+			env, err := repo.GetTaskEnvironment(context.Background(), seed.envID)
+			if err != nil {
+				t.Fatalf("get task environment: %v", err)
+			}
+			if len(env.Repos) != 1 || env.Repos[0].WorktreeID != "wt-canonical-duplicate" {
+				t.Fatalf("normalized repos = %+v, want canonical duplicate owner", env.Repos)
+			}
+		})
+	}
+}
+
 func TestCutover_DoesNotLogRolledBackFlatDemotion(t *testing.T) {
 	db := openLegacyDB(t)
 	now := time.Now().UTC().Truncate(time.Second)

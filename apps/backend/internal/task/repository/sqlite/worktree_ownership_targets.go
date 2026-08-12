@@ -59,7 +59,10 @@ func (t *taskWorktreeTargets) targetForWorktree(worktreeID string) *envRepoTarge
 func (t *taskWorktreeTargets) mergeLegacyEnvRepo(row legacyEnvRepo) error {
 	target := t.rowForKey(row.repositoryID, row.branchSlug)
 	target.canonical = true
-	target.canonicalEnvironmentID = row.envID
+	if target.canonicalEnvironmentIDs == nil {
+		target.canonicalEnvironmentIDs = make(map[string]bool)
+	}
+	target.canonicalEnvironmentIDs[row.envID] = true
 	if err := target.claimWorktree(row.worktreeID, row.worktreePath, row.worktreeBranch, row.position, row.errorMessage, row.createdAt, row.updatedAt, row.status); err != nil {
 		return err
 	}
@@ -73,7 +76,7 @@ func (t *taskWorktreeTargets) mergeLegacyEnvRepo(row legacyEnvRepo) error {
 // worktree does not block flat data from filling that slot.
 func (t *taskWorktreeTargets) canonicalOwnerForSlot(environmentID, repositoryID, branchSlug string) *envRepoTarget {
 	target, ok := t.byKey[envRepoKey(repositoryID, branchSlug)]
-	if !ok || !target.canonical || target.canonicalEnvironmentID != environmentID || target.worktreeID == "" ||
+	if !ok || !target.canonical || !target.canonicalEnvironmentIDs[environmentID] || target.worktreeID == "" ||
 		target.status == worktreeRepoStatusDeleted || target.deletedAt != nil {
 		return nil
 	}

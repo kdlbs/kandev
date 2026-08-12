@@ -23,7 +23,7 @@ spec: "../../specs/session-delete-resource-cleanup/spec.md"
 ## Verification
 
 ```bash
-cd apps/backend && go test ./internal/task/repository/sqlite -run 'TestCutover_(CanonicalRepoSupersedesDivergentFlatOwner|PreservesDivergentFlatOutsideCanonicalSlot|DoesNotLogRolledBackFlatDemotion)|TestCutoverPostgres_CanonicalRepoSupersedesDivergentFlatOwner' -count=1
+cd apps/backend && go test ./internal/task/repository/sqlite -run 'TestCutover_(CanonicalRepoSupersedesDivergentFlatOwner|PreservesDivergentFlatOutsideCanonicalSlot|DuplicateCanonicalRowsRetainSurvivingEnvironmentPrecedence|DoesNotLogRolledBackFlatDemotion)|TestCutoverPostgres_CanonicalRepoSupersedesDivergentFlatOwner' -count=1
 cd apps/backend && go test ./internal/task/repository/sqlite -run 'TestCutover' -count=1
 cd apps/backend && go test ./internal/task/repository/sqlite -count=1
 ```
@@ -74,8 +74,8 @@ temporary-file cleanup. Update this task and `plan.md` in the same conversation.
   `worktree_ownership_targets.go`, `worktree_ownership_migration.go`,
   `worktree_ownership_flat_precedence_test.go`,
   `worktree_ownership_postgres_test.go`, and the repair spec/plan files.
-- `cd apps/backend && go test ./internal/task/repository/sqlite -run 'TestCutover_(CanonicalRepoSupersedesDivergentFlatOwner|PreservesDivergentFlatOutsideCanonicalSlot|DoesNotLogRolledBackFlatDemotion)|TestCutoverPostgres_CanonicalRepoSupersedesDivergentFlatOwner' -count=1` — 3 SQLite tests passed; the PostgreSQL test is environment-gated and skipped because `KANDEV_TEST_POSTGRES_DSN` is unset.
-- `cd apps/backend && go test ./internal/task/repository/sqlite -run 'TestCutover' -count=1` — 50 tests passed.
-- `cd apps/backend && go test ./internal/task/repository/sqlite -count=1` — 417 tests passed.
+- `cd apps/backend && go test ./internal/task/repository/sqlite -run 'TestCutover_(CanonicalRepoSupersedesDivergentFlatOwner|PreservesDivergentFlatOutsideCanonicalSlot|DuplicateCanonicalRowsRetainSurvivingEnvironmentPrecedence|DoesNotLogRolledBackFlatDemotion)|TestCutoverPostgres_CanonicalRepoSupersedesDivergentFlatOwner' -count=1` — 6 SQLite tests passed; the PostgreSQL test is environment-gated and skipped because `KANDEV_TEST_POSTGRES_DSN` is unset.
+- `cd apps/backend && go test ./internal/task/repository/sqlite -run 'TestCutover' -count=1` — 53 tests passed.
+- `cd apps/backend && go test ./internal/task/repository/sqlite -count=1` — 420 tests passed.
 - No throwaway reproduction files remain. Test databases use `t.TempDir()` and
   are cleaned up by the test framework.

@@ -77,6 +77,12 @@ The migration must not change the file system or Git state.
   **File:** the same test file.
   **How:** Give the canonical row a non-empty branch slug. Make sure that the
   normalized environment keeps both repository slots.
+- **What:** Duplicate canonical rows preserve precedence regardless of legacy
+  row order.
+  **File:** the same test file.
+  **How:** Give duplicate environments the same canonical slot and divergent
+  flat fields on the surviving environment. Run both canonical row orders and
+  make sure that the canonical worktree remains authoritative.
 - **What:** PostgreSQL uses the same precedence and transaction behavior.
   **File:**
   `apps/backend/internal/task/repository/sqlite/worktree_ownership_postgres_test.go`.
@@ -88,9 +94,9 @@ The migration must not change the file system or Git state.
 
 ## Verification Results
 
-- `cd apps/backend && go test ./internal/task/repository/sqlite -run 'TestCutover_(CanonicalRepoSupersedesDivergentFlatOwner|PreservesDivergentFlatOutsideCanonicalSlot|DoesNotLogRolledBackFlatDemotion)|TestCutoverPostgres_CanonicalRepoSupersedesDivergentFlatOwner' -count=1` — 3 SQLite tests passed; the PostgreSQL test is environment-gated and skipped because `KANDEV_TEST_POSTGRES_DSN` is unset.
-- `cd apps/backend && go test ./internal/task/repository/sqlite -run 'TestCutover' -count=1` — 50 tests passed.
-- `cd apps/backend && go test ./internal/task/repository/sqlite -count=1` — 417 tests passed.
+- `cd apps/backend && go test ./internal/task/repository/sqlite -run 'TestCutover_(CanonicalRepoSupersedesDivergentFlatOwner|PreservesDivergentFlatOutsideCanonicalSlot|DuplicateCanonicalRowsRetainSurvivingEnvironmentPrecedence|DoesNotLogRolledBackFlatDemotion)|TestCutoverPostgres_CanonicalRepoSupersedesDivergentFlatOwner' -count=1` — 6 SQLite tests passed; the PostgreSQL test is environment-gated and skipped because `KANDEV_TEST_POSTGRES_DSN` is unset.
+- `cd apps/backend && go test ./internal/task/repository/sqlite -run 'TestCutover' -count=1` — 53 tests passed.
+- `cd apps/backend && go test ./internal/task/repository/sqlite -count=1` — 420 tests passed.
 
 ## Implementation Waves And Parallel Candidates
 
