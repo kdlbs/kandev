@@ -317,6 +317,8 @@ func (s *Service) PreparePromptRequest(ctx context.Context, utilityID string, tm
 		case agent.ProfileBindingState == models.ProfileBindingUnconfigured:
 			return nil, ErrProfileUnconfigured
 		case agent.ProfileBindingState == models.ProfileBindingInherit:
+			// inherit with a non-empty profile ID is an inconsistent state that
+			// UpdateAgent prevents; fail closed rather than silently resolving it.
 			return nil, ErrProfileRequired
 		default:
 			profileID = agent.AgentProfileID
