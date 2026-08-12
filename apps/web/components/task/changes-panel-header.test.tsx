@@ -47,7 +47,7 @@ describe("PullDropdown remote safety", () => {
     expect(pullButton.parentElement?.getAttribute("tabindex")).toBe("0");
     expect(
       screen.getByText(
-        "Push, force-push, and Pull are disabled until the histories are reconciled.",
+        "Current PR history is unavailable. The checkout history is shown without assuming a rewrite.",
       ),
     ).toBeTruthy();
   });

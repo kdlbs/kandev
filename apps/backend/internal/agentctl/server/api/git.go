@@ -64,6 +64,13 @@ type GitPushPreflightRequest struct {
 	Repo string `json:"repo,omitempty"`
 }
 
+// GitContributionRequest is shared by the managed contribution replacement
+// and provider-adoption endpoints.
+type GitContributionRequest struct {
+	ExpectedRemoteHead string `json:"expected_remote_head"`
+	Repo               string `json:"repo,omitempty"`
+}
+
 // GitRebaseRequest for POST /api/v1/git/rebase
 type GitRebaseRequest struct {
 	BaseBranch string `json:"base_branch"`
@@ -237,6 +244,45 @@ func (s *Server) handleGitPushPreflight(c *gin.Context) {
 	result, err := gitOp.PushPreflight(c.Request.Context())
 	if err != nil {
 		s.handleGitError(c, "push preflight", err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (s *Server) handleGitReplaceContribution(c *gin.Context) {
+	s.handleGitContribution(c, "replace_remote_contribution", func(gitOp *process.GitOperator, expected string) (*process.GitOperationResult, error) {
+		return gitOp.ReplaceRemoteContribution(c.Request.Context(), expected)
+	})
+}
+
+func (s *Server) handleGitUseContribution(c *gin.Context) {
+	s.handleGitContribution(c, "use_remote_contribution", func(gitOp *process.GitOperator, expected string) (*process.GitOperationResult, error) {
+		return gitOp.UseRemoteContribution(c.Request.Context(), expected)
+	})
+}
+
+func (s *Server) handleGitContribution(c *gin.Context, operation string, action func(*process.GitOperator, string) (*process.GitOperationResult, error)) {
+	var req GitContributionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, process.GitOperationResult{
+			Success: false, Operation: operation, Error: "invalid request: " + err.Error(),
+		})
+		return
+	}
+	if req.ExpectedRemoteHead == "" {
+		c.JSON(http.StatusBadRequest, process.GitOperationResult{
+			Success: false, Operation: operation, Error: "expected_remote_head is required",
+		})
+		return
+	}
+
+	gitOp := s.gitOpForRepo(c, operation, req.Repo)
+	if gitOp == nil {
+		return
+	}
+	result, err := action(gitOp, req.ExpectedRemoteHead)
+	if err != nil {
+		s.handleGitError(c, operation, err)
 		return
 	}
 	c.JSON(http.StatusOK, result)

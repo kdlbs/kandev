@@ -56,8 +56,11 @@ type TimelineProps = Pick<
   | "hasCommits"
   | "hasPRFiles"
   | "relation"
+  | "resolution"
+  | "resolutionTarget"
   | "providerCommitsLoading"
   | "providerCommitsError"
+  | "providerPRNumber"
   | "pushDisabled"
   | "pullDisabled"
   | "canPush"
@@ -191,18 +194,6 @@ function CommitHistorySections({
   if (isDiverged) {
     return (
       <>
-        {separated.providerCommits.length > 0 && (
-          <CommitsSection
-            commits={separated.providerCommits}
-            label={t("task:currentPRCommits")}
-            testId="current-pr-commits-section"
-            defaultCollapsed={defaultCollapsed}
-            showActions={false}
-            onOpenCommitDetail={props.onOpenCommitDetail}
-            repoDisplayName={props.repoDisplayName}
-            perRepoStatus={props.perRepoStatus}
-          />
-        )}
         {separated.localCommits.length > 0 && (
           <CommitsSection
             commits={separated.localCommits}
@@ -219,6 +210,18 @@ function CommitHistorySections({
             repoDisplayName={props.repoDisplayName}
             perRepoStatus={props.perRepoStatus}
             prByRepo={props.prByRepo}
+          />
+        )}
+        {separated.providerCommits.length > 0 && (
+          <CommitsSection
+            commits={separated.providerCommits}
+            label={t("task:prNumberVersion", { number: props.providerPRNumber ?? "" })}
+            testId="current-pr-commits-section"
+            defaultCollapsed
+            showActions={false}
+            onOpenCommitDetail={props.onOpenCommitDetail}
+            repoDisplayName={props.repoDisplayName}
+            perRepoStatus={props.perRepoStatus}
           />
         )}
       </>
@@ -321,16 +324,6 @@ function ChangesPanelTimeline(props: TimelineProps) {
           data-testid="provider-history-error"
         >
           {t("task:providerHistoryUnavailable")}
-        </div>
-      )}
-
-      {isDiverged && (
-        <div
-          className="mx-1 mb-2 rounded-md border border-yellow-500/40 bg-yellow-500/10 px-2 py-1.5 text-xs text-yellow-700 dark:text-yellow-300"
-          data-testid="remote-contribution-drift-warning"
-          role="status"
-        >
-          {t("task:remoteContributionHistoryChanged")}
         </div>
       )}
 

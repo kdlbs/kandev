@@ -10,7 +10,9 @@ export interface GitOperationResult {
   operation: string;
   output: string;
   error?: string;
+  error_code?: string;
   conflict_files?: string[];
+  recovery_branch?: string;
 }
 
 // PRCreateResult matches the backend PR creation response
@@ -69,6 +71,11 @@ interface UseGitOperationsReturn {
     options?: { force?: boolean; setUpstream?: boolean },
     repo?: string,
   ) => Promise<GitOperationResult>;
+  replaceRemoteContribution: (
+    expectedRemoteHead: string,
+    repo?: string,
+  ) => Promise<GitOperationResult>;
+  useRemoteContribution: (expectedRemoteHead: string, repo?: string) => Promise<GitOperationResult>;
   rebase: (baseBranch: string, repo?: string) => Promise<GitOperationResult>;
   merge: (baseBranch: string, repo?: string) => Promise<GitOperationResult>;
   abort: (operation: "merge" | "rebase", repo?: string) => Promise<GitOperationResult>;
@@ -104,12 +111,28 @@ type ExecuteOperation = <T extends GitOperationResult>(
   payload: Record<string, unknown>,
 ) => Promise<T>;
 
+function buildContributionCallbacks(executeOperation: ExecuteOperation) {
+  const replaceRemoteContribution = async (expectedRemoteHead: string, repo?: string) =>
+    executeOperation<GitOperationResult>("worktree.replace_contribution", {
+      expected_remote_head: expectedRemoteHead,
+      ...repositoryScopePayload(repo),
+    });
+  const useRemoteContribution = async (expectedRemoteHead: string, repo?: string) =>
+    executeOperation<GitOperationResult>("worktree.use_contribution", {
+      expected_remote_head: expectedRemoteHead,
+      ...repositoryScopePayload(repo),
+    });
+  return { replaceRemoteContribution, useRemoteContribution };
+}
+
 /** Preserve an explicitly selected workspace-root scope (`repo === ""`). */
 export function repositoryScopePayload(repo?: string): { repo?: string } {
   return repo === undefined ? {} : { repo };
 }
 
 export function buildGitOperationCallbacks(executeOperation: ExecuteOperation) {
+  const { replaceRemoteContribution, useRemoteContribution } =
+    buildContributionCallbacks(executeOperation);
   const pull = async (rebase = false, repo?: string) =>
     executeOperation<GitOperationResult>("worktree.pull", {
       rebase,
@@ -204,6 +227,8 @@ export function buildGitOperationCallbacks(executeOperation: ExecuteOperation) {
   return {
     pull,
     push,
+    replaceRemoteContribution,
+    useRemoteContribution,
     rebase,
     merge,
     abort,
