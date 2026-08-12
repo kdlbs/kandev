@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/system/storage"
 )
@@ -33,7 +34,7 @@ func TestCleanupResultJSONUsesStorageAPISnakeCase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal CleanupResult: %v", err)
 	}
-	want := `{"path":"/cache","bytes_before":100,"bytes_after":20,"reclaimed_bytes":80,"quarantine_entry":null}`
+	want := `{"path":"/cache","skipped":false,"bytes_before":100,"bytes_after":20,"reclaimed_bytes":80,"quarantine_entry":null}`
 	if string(encoded) != want {
 		t.Fatalf("CleanupResult JSON = %s, want %s", encoded, want)
 	}
@@ -217,6 +218,69 @@ func TestCleanupRotatesOwnedCacheAboveThreshold(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(store.created.QuarantinePath, "artifact")); err != nil {
 		t.Fatalf("quarantined artifact missing: %v", err)
+	}
+}
+
+func TestCleanupDefersWhenGoCacheQuarantineIsActive(t *testing.T) {
+	home := t.TempDir()
+	settings := storage.DefaultSettings()
+	settings.GoCache.Enabled = true
+	settings.GoCache.MaxBytes = 1
+	store := &recordingStore{}
+	provider := New(Config{
+		HomeDir:  home,
+		TrashDir: filepath.Join(home, "trash"),
+		Settings: staticSettings{settings: settings},
+		Store:    store,
+	})
+	env, err := provider.ExecutionEnvironment(context.Background())
+	if err != nil {
+		t.Fatalf("ExecutionEnvironment() error = %v", err)
+	}
+	cachePath := env["GOCACHE"]
+	if err := os.WriteFile(filepath.Join(cachePath, "replacement-artifact"), []byte("live"), 0o600); err != nil {
+		t.Fatalf("seed replacement cache: %v", err)
+	}
+	retainedPath := filepath.Join(home, "trash", "go-cache", "retained")
+	if err := os.MkdirAll(retainedPath, 0o700); err != nil {
+		t.Fatalf("create retained cache: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(retainedPath, "retained-artifact"), []byte("old"), 0o600); err != nil {
+		t.Fatalf("seed retained cache: %v", err)
+	}
+	active := &storage.QuarantineEntry{
+		ID:             "retained",
+		ResourceType:   storage.ResourceTypeGoCache,
+		OriginalPath:   cachePath,
+		QuarantinePath: retainedPath,
+		SizeBytes:      3,
+		State:          storage.QuarantineStateQuarantined,
+		QuarantinedAt:  time.Now().UTC().Add(-time.Hour),
+		DeleteAfter:    time.Now().UTC().Add(time.Hour),
+		Metadata:       json.RawMessage(`{"ownership":"managed"}`),
+	}
+	if err := store.CreateQuarantineEntry(context.Background(), active); err != nil {
+		t.Fatalf("create active quarantine entry: %v", err)
+	}
+
+	result, err := provider.Cleanup(context.Background())
+	if err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	if result.BytesBefore != 4 || result.BytesAfter != 4 || result.ReclaimedBytes != 0 {
+		t.Fatalf("cleanup result = %#v, want unchanged four-byte cache and no reclamation", result)
+	}
+	if !result.Skipped || result.Reason != "active_quarantine" || result.QuarantineEntry != nil {
+		t.Fatalf("cleanup deferral fields = %#v, want active_quarantine without a new entry", result)
+	}
+	if _, err := os.Stat(filepath.Join(cachePath, "replacement-artifact")); err != nil {
+		t.Fatalf("replacement cache changed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(retainedPath, "retained-artifact")); err != nil {
+		t.Fatalf("retained cache changed: %v", err)
+	}
+	if len(store.entries) != 1 || store.entries[active.ID].State != storage.QuarantineStateQuarantined {
+		t.Fatalf("active quarantine entries = %#v, want unchanged retained entry", store.entries)
 	}
 }
 

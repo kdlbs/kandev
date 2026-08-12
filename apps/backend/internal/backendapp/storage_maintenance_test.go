@@ -693,48 +693,41 @@ func TestQuarantineControllerDoesNotTreatPopulatedReplacementAsRestoredPayload(t
 		storagepkg.QuarantineStateFailed,
 	}
 	for _, state := range states {
-		for _, operation := range []string{"restore", "delete"} {
-			t.Run(string(state)+"_"+operation, func(t *testing.T) {
-				home := t.TempDir()
-				original := filepath.Join(home, "cache", "go-build")
-				quarantined := filepath.Join(home, "trash", "go-cache", "entry-cache")
-				if err := os.MkdirAll(original, 0o700); err != nil {
-					t.Fatal(err)
-				}
-				artifact := filepath.Join(original, "replacement-artifact")
-				if err := os.WriteFile(artifact, []byte("active cache"), 0o600); err != nil {
-					t.Fatal(err)
-				}
-				settings, store := newStorageMaintenanceStores(t)
-				entry := createGoCacheQuarantineEntry(
-					t, store, original, quarantined, time.Now().UTC().Add(-time.Hour),
-				)
-				if state == storagepkg.QuarantineStateFailed {
-					markGoCacheQuarantineFailed(t, store, entry.ID)
-				}
-				controller := &workspaceQuarantineController{settings: settings, store: store, homeDir: home}
+		t.Run(string(state), func(t *testing.T) {
+			home := t.TempDir()
+			original := filepath.Join(home, "cache", "go-build")
+			quarantined := filepath.Join(home, "trash", "go-cache", "entry-cache")
+			if err := os.MkdirAll(original, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			artifact := filepath.Join(original, "replacement-artifact")
+			if err := os.WriteFile(artifact, []byte("active cache"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			settings, store := newStorageMaintenanceStores(t)
+			entry := createGoCacheQuarantineEntry(
+				t, store, original, quarantined, time.Now().UTC().Add(-time.Hour),
+			)
+			if state == storagepkg.QuarantineStateFailed {
+				markGoCacheQuarantineFailed(t, store, entry.ID)
+			}
+			controller := &workspaceQuarantineController{settings: settings, store: store, homeDir: home}
 
-				var err error
-				if operation == "delete" {
-					_, err = controller.PermanentDelete(context.Background(), entry.ID, "DELETE")
-				} else {
-					_, err = controller.Restore(context.Background(), entry.ID)
-				}
-				if !errors.Is(err, storagepkg.ErrConflict) {
-					t.Fatalf("%s error = %v, want storage ErrConflict", operation, err)
-				}
-				stored, err := store.GetQuarantineEntry(context.Background(), entry.ID)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if stored.State != state {
-					t.Fatalf("state = %q, want unchanged %q", stored.State, state)
-				}
-				if data, err := os.ReadFile(artifact); err != nil || string(data) != "active cache" {
-					t.Fatalf("replacement cache changed: data=%q err=%v", data, err)
-				}
-			})
-		}
+			_, err := controller.Restore(context.Background(), entry.ID)
+			if !errors.Is(err, storagepkg.ErrConflict) {
+				t.Fatalf("Restore error = %v, want storage ErrConflict", err)
+			}
+			stored, err := store.GetQuarantineEntry(context.Background(), entry.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored.State != state {
+				t.Fatalf("state = %q, want unchanged %q", stored.State, state)
+			}
+			if data, err := os.ReadFile(artifact); err != nil || string(data) != "active cache" {
+				t.Fatalf("replacement cache changed: data=%q err=%v", data, err)
+			}
+		})
 	}
 }
 
@@ -912,6 +905,117 @@ func TestQuarantineControllerPermanentlyDeletesGoCache(t *testing.T) {
 	}
 	if _, err := os.Stat(quarantined); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("quarantine path still exists: %v", err)
+	}
+}
+
+func TestQuarantineControllerPermanentlyDeletesMissingGoCachePayload(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		force bool
+	}{
+		{name: "eligible"},
+		{name: "forced", force: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			home := t.TempDir()
+			original := filepath.Join(home, "cache", "go-build")
+			quarantined := filepath.Join(home, "trash", "go-cache", "entry-cache")
+			if err := os.MkdirAll(original, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			artifact := filepath.Join(original, "replacement-artifact")
+			if err := os.WriteFile(artifact, []byte("active cache"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			settings, store := newStorageMaintenanceStores(t)
+			deleteAfter := time.Now().UTC().Add(-time.Hour)
+			if test.force {
+				deleteAfter = time.Now().UTC().Add(time.Hour)
+			}
+			entry := createGoCacheQuarantineEntry(t, store, original, quarantined, deleteAfter)
+			controller := &workspaceQuarantineController{settings: settings, store: store, homeDir: home}
+
+			var deleted storagepkg.QuarantineEntry
+			var err error
+			if test.force {
+				deleted, err = controller.PermanentDeleteForce(
+					context.Background(), entry.ID, storagepkg.QuarantineConfirmationForce,
+				)
+			} else {
+				deleted, err = controller.PermanentDelete(
+					context.Background(), entry.ID, storagepkg.QuarantineConfirmationDelete,
+				)
+			}
+			if err != nil {
+				t.Fatalf("delete missing payload: %v", err)
+			}
+			if deleted.State != storagepkg.QuarantineStateDeleted {
+				t.Fatalf("state = %q, want deleted", deleted.State)
+			}
+			if data, err := os.ReadFile(artifact); err != nil || string(data) != "active cache" {
+				t.Fatalf("replacement cache changed: data=%q err=%v", data, err)
+			}
+			if _, err := os.Stat(quarantined); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("missing quarantine payload became present: %v", err)
+			}
+			stored, err := store.GetQuarantineEntry(context.Background(), entry.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored.State != storagepkg.QuarantineStateDeleted {
+				t.Fatalf("stored state = %q, want deleted", stored.State)
+			}
+		})
+	}
+}
+
+func TestQuarantineControllerPurgeReportsZeroBytesForMissingGoCachePayload(t *testing.T) {
+	home := t.TempDir()
+	original := filepath.Join(home, "cache", "go-build")
+	quarantined := filepath.Join(home, "trash", "go-cache", "missing-payload")
+	if err := os.MkdirAll(original, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	artifact := filepath.Join(original, "replacement-artifact")
+	if err := os.WriteFile(artifact, []byte("active cache"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings, store := newStorageMaintenanceStores(t)
+	entry := storagepkg.QuarantineEntry{
+		ID:             "missing-payload",
+		ResourceType:   storagepkg.ResourceTypeGoCache,
+		OriginalPath:   original,
+		QuarantinePath: quarantined,
+		SizeBytes:      42,
+		State:          storagepkg.QuarantineStateQuarantined,
+		QuarantinedAt:  time.Now().UTC().Add(-2 * time.Hour),
+		DeleteAfter:    time.Now().UTC().Add(-time.Hour),
+		Metadata:       json.RawMessage(`{"ownership":"managed"}`),
+	}
+	if err := store.CreateQuarantineEntry(context.Background(), &entry); err != nil {
+		t.Fatalf("create missing-payload entry: %v", err)
+	}
+	controller := &workspaceQuarantineController{settings: settings, store: store, homeDir: home}
+
+	result, err := controller.Purge(
+		context.Background(), storagepkg.QuarantinePurgeScopeEligible,
+		storagepkg.QuarantineConfirmationEligible,
+	)
+	if err != nil {
+		t.Fatalf("Purge: %v", err)
+	}
+	if result.Deleted != 1 || result.Failed != 0 || result.DeletedBytes != 0 {
+		t.Fatalf("purge result = %#v, want one deleted entry, zero failures, zero deleted bytes", result)
+	}
+	if data, err := os.ReadFile(artifact); err != nil || string(data) != "active cache" {
+		t.Fatalf("replacement cache changed: data=%q err=%v", data, err)
+	}
+	stored, err := store.GetQuarantineEntry(context.Background(), entry.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.State != storagepkg.QuarantineStateDeleted {
+		t.Fatalf("stored state = %q, want deleted", stored.State)
 	}
 }
 

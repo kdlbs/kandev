@@ -501,6 +501,17 @@ func (c *workspaceQuarantineController) Purge(
 			result.ProtectedBytes += entry.SizeBytes
 			continue
 		}
+		payloadPresent := true
+		if entry.ResourceType == storagepkg.ResourceTypeGoCache {
+			payloadPresent, err = c.measureGoCacheQuarantinePayload(ctx, entry)
+			if err != nil {
+				result.Failed++
+				result.FailedBytes += entry.SizeBytes
+				result.Failures = append(result.Failures, storagepkg.QuarantinePurgeFailure{ID: entry.ID, Error: err.Error()})
+				purgeErrs = append(purgeErrs, fmt.Errorf("%s: %w", entry.ID, err))
+				continue
+			}
+		}
 		var deleted storagepkg.QuarantineEntry
 		if force {
 			deleted, err = c.PermanentDeleteForce(ctx, entry.ID, confirmation)
@@ -515,7 +526,9 @@ func (c *workspaceQuarantineController) Purge(
 			continue
 		}
 		result.Deleted++
-		result.DeletedBytes += deleted.SizeBytes
+		if payloadPresent {
+			result.DeletedBytes += deleted.SizeBytes
+		}
 	}
 	return result, errors.Join(purgeErrs...)
 }
@@ -753,12 +766,45 @@ func (c *workspaceQuarantineController) deleteGoCacheWithRetention(
 	if !force && time.Now().UTC().Before(entry.DeleteAfter) {
 		return storagepkg.QuarantineEntry{}, fmt.Errorf("%w: quarantine retention deadline has not elapsed", storagepkg.ErrConflict)
 	}
+	payloadPresent, err := goCacheQuarantinePayloadPresent(entry)
+	if err != nil {
+		return storagepkg.QuarantineEntry{}, err
+	}
+	if !payloadPresent {
+		return c.persistGoCacheDeletion(ctx, entry)
+	}
 	if err := c.rejectAmbiguousMissingGoCachePayload(entry); err != nil {
 		return storagepkg.QuarantineEntry{}, err
 	}
 	if err := os.RemoveAll(entry.QuarantinePath); err != nil {
 		return storagepkg.QuarantineEntry{}, fmt.Errorf("delete quarantined Go cache: %w", err)
 	}
+	return c.persistGoCacheDeletion(ctx, entry)
+}
+
+func (c *workspaceQuarantineController) measureGoCacheQuarantinePayload(
+	ctx context.Context,
+	entry storagepkg.QuarantineEntry,
+) (bool, error) {
+	if err := c.validateGoCacheEntry(ctx, entry); err != nil {
+		return false, err
+	}
+	return goCacheQuarantinePayloadPresent(entry)
+}
+
+func goCacheQuarantinePayloadPresent(entry storagepkg.QuarantineEntry) (bool, error) {
+	if _, err := os.Lstat(entry.QuarantinePath); errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	} else if err != nil {
+		return false, fmt.Errorf("inspect Go-cache quarantine payload: %w", err)
+	}
+	return true, nil
+}
+
+func (c *workspaceQuarantineController) persistGoCacheDeletion(
+	ctx context.Context,
+	entry storagepkg.QuarantineEntry,
+) (storagepkg.QuarantineEntry, error) {
 	deleted, err := c.store.TransitionQuarantineEntry(
 		context.WithoutCancel(ctx), entry.ID, storagepkg.QuarantineStateDeleted, "",
 	)
