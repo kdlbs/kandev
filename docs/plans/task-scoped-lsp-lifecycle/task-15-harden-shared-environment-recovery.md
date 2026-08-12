@@ -142,6 +142,18 @@ Completed 2026-08-12.
   the focused admission and persistence-error tests passed 20 race-enabled repetitions. A bounded
   two-second process-stop deadline also stabilized the real process-tree proof under full-package
   race-detector load without changing the process-reap assertion.
+- The final separate-workspace Sol Max review produced eight actionable findings. Synchronized
+  regressions cover barrier-first direct mutation, durable abandoned preparation, purge/start
+  exclusion, delayed-watch Stop ordering, fresh explicit-control recovery epochs, refresh/teardown
+  admission, task-host readiness publication, and Docker auth-state eviction. Broad verification
+  passed `go test -race` for `internal/lsp`, `internal/agentctl/server/lsp`,
+  `internal/agent/runtime/lifecycle`, `internal/task/service`, and
+  `internal/task/repository/sqlite`. A broader run exposed and fixed command coalescing into an
+  exclusive watch callback before all five packages passed again.
+- The 41-commit branch rebased without conflict onto `origin/main` at `ff9f0f48b`. On that exact
+  base, the five-package race suite passed (task service 103.629s), changed-code Go lint reported
+  zero issues, all 60 public-doc validator tests passed, all 41 published pages validated, and
+  `git diff --check origin/main...HEAD` passed.
 
 ## Files
 
