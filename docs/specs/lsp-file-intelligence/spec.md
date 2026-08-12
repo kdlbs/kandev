@@ -104,8 +104,9 @@ and obscure the actual task-level work that is still running.
   stop the server. Kandev does not overwrite another editor's unsaved buffer. Every browser-originated
   file URI is canonicalized and must resolve inside the backend-authorized task workspace or one of
   its repository roots; sibling paths, traversal, and symlink escapes fail before upstream traffic.
-  Lexical task-root and authority/volume checks happen before filesystem resolution so an untrusted
-  Windows UNC URI cannot trigger network access merely by being rejected.
+  Lexical task-root and authority/volume checks happen before filesystem resolution. Symlink and
+  Windows reparse targets are checked again before target lookup, so neither a direct UNC URI nor an
+  in-root redirect to an untrusted share can trigger network access merely by being rejected.
 - Successful saves first synchronize the newest live editor snapshot, then send `didSave` only
   when the server requested it. Stale persisted text is omitted if editing advanced while the save
   was in flight; failed saves send no save notification.
@@ -526,6 +527,9 @@ task-environment cleanup merely because a browser remains connected.
 - **GIVEN** an authorized attachment sends a document URI that traverses, names a sibling path, or
   resolves through a symlink outside the task's canonical roots, **WHEN** the task host handles it,
   **THEN** it rejects the message before the language server receives any request or notification.
+- **GIVEN** an in-root Windows reparse point targets an untrusted UNC share, **WHEN** an attachment
+  names a document beneath that redirect, **THEN** the task host rejects the target before any DNS,
+  SMB, or target-filesystem lookup.
 
 ## Out of scope
 

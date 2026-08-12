@@ -68,7 +68,9 @@ spec: "../../specs/lsp-file-intelligence/spec.md"
 - Browser document requests and notifications resolve only inside the canonical task workspace or
   authorized repository roots; sibling, traversal, and symlink escapes never reach the server.
   Lexical root and authority/volume membership is proven before filesystem resolution, so a rejected
-  untrusted UNC URI cannot cause network side effects.
+  untrusted UNC URI cannot cause network side effects. Each symlink or Windows reparse target is
+  re-authorized before target lookup, preventing an in-root redirect from reaching an untrusted
+  share during canonicalization.
 - A live generation never treats a physical task workspace-root change as a dynamic folder update;
   it keeps the old scope and reports restart-required until explicit Restart adopts the new root.
 - Completed Start bookkeeping is removed before its operation lock becomes available, so concurrent
@@ -228,6 +230,18 @@ Completed 2026-08-12.
   containment check first, including Windows volume/share boundaries. A red-first symlink-loop test
   proves outside paths are rejected before resolution; the focused security/lifecycle set passed 20
   race-enabled repetitions. Native UNC coverage is included in the Windows CI package allowlist.
+- A second exact-head Sol Max pass found that the first repair covered direct UNC input but an
+  authorized lexical path could still redirect `EvalSymlinks` through an in-root Windows reparse
+  point. The document resolver now walks from a trusted canonical root, re-projects every link target
+  into the authorized root set before its first lookup, and never calls the unrestricted trusted-root
+  resolver for browser paths. Red-first portable and native-Windows regressions cover the boundary;
+  the Windows CI allowlist runs both direct and redirected UNC cases.
+- Second-pass verification: the new unrestricted-resolver regression failed before implementation,
+  then the complete agentctl LSP package passed. The document containment, root-change, and
+  Start/Purge cases passed 20 race-enabled repetitions; the LSP package cross-compiled for Windows;
+  changed-code Go lint reported zero issues; Makefile shell-dispatch checks passed; all 60 public-doc
+  validator tests and all 41 published-page checks passed. Native execution remains exact-head CI
+  delivery evidence.
 
 ## Files
 

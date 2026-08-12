@@ -54,8 +54,10 @@ after the last attachment closes, and never stops the language-server process me
 documents or attachments remain. Browser-originated file URIs are canonicalized against the
 backend-authorized task workspace and repository roots before upstream traffic; traversal, sibling
 paths, and symlink escapes are rejected at the task-host boundary. The task host first proves lexical
-root and authority/volume membership without filesystem access, then resolves symlinks for canonical
-containment; an untrusted UNC authority cannot trigger DNS or SMB work during rejection.
+root and authority/volume membership without filesystem access, then resolves symlinks one component
+at a time. Every symlink or reparse target is projected back into an authorized canonical root before
+the target is inspected; an original or redirected untrusted UNC authority cannot trigger DNS or SMB
+work during rejection.
 
 `TaskEnvironment` is the sole runtime target for the task-scoped owner. Multi-repository tasks
 initialize one server from the task workspace root with the task's ordered repository roots as
