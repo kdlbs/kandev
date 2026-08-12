@@ -60,7 +60,10 @@ export async function installPluginUpload(
   const formData = new FormData();
   formData.append("package", file);
 
-  // Spread caller init *first* so method/body always win, matching the
+  // Do NOT set Content-Type: the browser picks multipart/form-data with the
+  // right boundary for a FormData body. Spread caller init *first* so
+  // method/body always win, or a caller passing a stale method or body would
+  // silently break the upload.
   const response = await fetch(`${baseUrl}${BASE}/install`, {
     ...options?.init,
     method: "POST",

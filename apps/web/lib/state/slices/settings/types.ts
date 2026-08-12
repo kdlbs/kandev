@@ -318,8 +318,6 @@ export type TaskCreateLastUsedState = {
   synced?: boolean;
 };
 
-/** Default values used by the slice init and by SSR hydration fallback. */
-
 export type SettingsSliceState = {
   executors: ExecutorsState;
   settingsAgents: SettingsAgentsState;
